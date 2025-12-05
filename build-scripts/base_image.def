@@ -1,0 +1,49 @@
+Bootstrap: docker
+From: debian:stable-slim
+
+%labels
+    Author Ziyue Cheng
+    Version 1.0
+    Description "Debian-based container with squashfs-tools (mksquashfs)"
+
+%environment
+    export PATH=/usr/sbin:/usr/bin:$PATH
+
+%post
+    # Avoid interactive prompts
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        squashfs-tools fuse \
+        sudo ca-certificates \
+        curl wget git \
+        tar pigz unzip bzip2 xz-utils zstd lz4 \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*
+    
+    # Download Micromamba to /usr/bin
+    ARCH="$(uname -m)"
+    case "$ARCH" in
+        aarch64|ppc64le|arm64) ;;  # pass
+        *) ARCH="64" ;;
+    esac
+    RELEASE_URL="https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-${ARCH}"
+    wget -qO /usr/bin/micromamba "${RELEASE_URL}"
+    chmod +x /usr/bin/micromamba
+
+    # Add helper script named mm
+    echo '#!/usr/bin/bash' > /usr/bin/mm
+    echo '/usr/bin/micromamba -r /ext3/conda "$@"' >> /usr/bin/mm
+    chmod +x /usr/bin/mm
+
+    echo '#!/usr/bin/bash' > /usr/bin/mm-create
+    echo '/usr/bin/micromamba -r /ext3/conda create -c conda-forge -c bioconda "$@"' >> /usr/bin/mm-create 
+    chmod +x /usr/bin/mm-create
+
+%runscript
+    echo "This container provides mksquashfs and micromamba inside Debian"
+    exec /bin/bash "$@"
+
+%help
+    This container provides:
+      - mksquashfs
+      - fuse
+    You can use it to convert ext3 overlay images to SquashFS inside Apptainer

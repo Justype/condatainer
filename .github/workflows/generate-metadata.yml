@@ -1,0 +1,46 @@
+name: Generate Build-Scripts Metadata
+
+on:
+  push:
+    paths:
+      - 'build-scripts/**'
+    paths-ignore:
+      - 'build-scripts/metadata.json'
+  workflow_dispatch: {}
+
+jobs:
+  generate-metadata:
+    # Skip running this job if the event actor is a bot to avoid loops
+    if: "github.actor != 'github-actions[bot]' && github.actor != 'dependabot[bot]'"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Generate metadata JSON
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          python .github/scripts/generate_metadata.py
+
+      - name: Commit and push metadata
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build-scripts/metadata.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update build-scripts metadata"
+            git push
+          fi

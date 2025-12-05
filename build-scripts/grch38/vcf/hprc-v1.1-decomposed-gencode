@@ -1,0 +1,112 @@
+#!/usr/bin/bash
+#DEP:grch38/vcf/hprc-v1.1-decomposed
+#DEP:bcftools/1.22
+#DEP:htslib/1.22
+#WHATIS:HPRC v1.1 GRCh38 Decomposed VCF with chromosome names matching GENCODE
+#URL:https://github.com/human-pangenomics/hpp_pangenome_resources
+#ENV:HPRC_GENCODE_VCF_GZ=$app_root/hprc-v1.1-mc-grch38.vcfbub.a100k.wave.gencode.vcf.gz
+
+#########################################################
+# Human Pangenome Reference Consortium (HPRC) GRCh38 VCF
+# - https://github.com/human-pangenomics/hpp_pangenome_resources
+# - VCF file with decomposed by variant Bub (bubble)
+# - We need the UCSC-style chromosome names to match GENCODE annotation
+# - https://github.com/dpryan79/ChromosomeMappings
+#########################################################
+
+install_app() {
+    # By default, $target_dir and $tmp_dir are created and we are now in $tmp_dir
+    print_stderr "Downloading mapping file for chromosome names conversion from UCSC to GENCODE style"
+    wget -Nnv 'https://raw.githubusercontent.com/dpryan79/ChromosomeMappings/refs/heads/master/GRCh38_UCSC2gencode.txt'
+
+    print_stderr "Converting HPRC v1.1 GRCh38 VCF to GENCODE-style chromosome names"
+    header=$(bcftools annotate --rename-chrs GRCh38_UCSC2gencode.txt $HPRC_VCF_GZ | head -n 1000 | grep "^#")
+    print_stderr "Sorting and compressing HPRC v1.1 GRCh38 GENCODE-style VCF"
+    bcftools annotate --rename-chrs GRCh38_UCSC2gencode.txt $HPRC_VCF_GZ | \
+        grep -v "^#" | \
+        LC_ALL=C sort -k1,1 -k2,2n | \
+        cat <(echo "$header") - | \
+        bgzip -c -@ $ncpu > hprc-v1.1-mc-grch38.vcfbub.a100k.wave.gencode.vcf.gz
+    
+    print_stderr "Indexing HPRC v1.1 GRCh38 GENCODE-style VCF"
+    tabix -p vcf -@ $ncpu hprc-v1.1-mc-grch38.vcfbub.a100k.wave.gencode.vcf.gz
+
+    print_stderr "Moving files to target directory"
+    mv hprc-v1.1-mc-grch38.vcfbub.a100k.wave.gencode.vcf.gz "$target_dir/"
+    mv hprc-v1.1-mc-grch38.vcfbub.a100k.wave.gencode.vcf.gz.tbi "$target_dir/"
+}
+
+# Available variables:
+# - ncpu: number of cores to use (default: 4) will be overwritten by SLURM_CPUS_PER_TASK
+# - app_name:         name     of the app (set by condatainer)
+# - version:          version  of the app (set by condatainer)
+# - app_name_version: name/version        (set by condatainer)
+
+# - target_dir:       opt/assembly/data_type/version (set by condatainer)
+# - tmp_dir:          tmp directory (set by condatainer)
+
+RED='\033[0;91m'    # Red      WARNING or ERROR
+BLUE='\033[0;94m'   # Blue     Dependency or Modulefile Changes
+YELLOW='\033[0;93m' # Yellow   App Name and/or Version
+NC='\033[0m'        # No Color
+ncpu=${SLURM_CPUS_PER_TASK:-4} # number of cores to use when building from source
+
+install() {
+    print_stderr "Installing the target module: ${YELLOW}${app_name_version}${NC}"
+    print_stderr "🎯 Target directory: $target_dir"
+    # if target directory exists, exit 1
+    if [ -d "$target_dir" ]; then
+        print_stderr "${RED}ERROR${NC}: Target app dir exists!"
+        print_stderr "Exit Installing"
+        exit 1
+    fi
+
+    if [[ -z "$tmp_dir" ]]; then
+        print_stderr "${RED}ERROR${NC}: tmp_dir is not set!"
+        print_stderr "Exit Installing"
+        exit 1
+    fi
+
+    if [[ -z "$target_dir" ]]; then
+        print_stderr "${RED}ERROR${NC}: target_dir is not set!"
+        print_stderr "Exit Installing"
+        exit 1
+    fi
+
+    mkdir -p "$target_dir"
+    mkdir -p "$tmp_dir"
+    cd "$tmp_dir"
+    install_app
+    print_stderr "✅ Installation completed. ${YELLOW}${app_name_version}${NC} is ready to use."
+}
+
+print_stderr() {
+    printf "[`date +"%Y-%m-%d %T"`] $1\n" 1>&2
+}
+
+pigz_or_gunzip() {
+    if command -v pigz &> /dev/null; then
+        pigz -d -p $ncpu "$1"
+    else
+        gunzip "$1"
+    fi
+}
+
+pigz_or_gunzip_pipe() {
+    if command -v pigz &> /dev/null; then
+        pigz -d -p $ncpu -c "$1"
+    else
+        gunzip -c "$1"
+    fi
+}
+
+tar_xf_pigz() {
+    if command -v pigz &> /dev/null; then
+        tar --use-compress-program="pigz -d -p $ncpu" -xf "$@"
+    else
+        tar -xzf "$1"
+    fi
+}
+#endregion
+
+install

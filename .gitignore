@@ -1,0 +1,9 @@
+# Ignore micromamba binary
+bin/micromamba
+
+# Ignore image files and temporary files
+images
+ref-images
+tmp.img
+tmp
+opt

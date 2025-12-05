@@ -1,0 +1,1236 @@
+#!/usr/bin/env python3
+import os
+import sys
+import subprocess
+import re
+import shutil
+import argparse
+import time
+from typing import Dict, List, Optional
+
+class Config:
+    VERSION = "1.0.0"
+    # Remote settings
+    GITHUB_REPO = "Justype/condatainer"
+    # Optional remote metadata URL (JSON mapping of spec -> script URL). Can be set
+    # via env var CONDATINER_REMOTE_METADATA. Example JSON: {"bcftools=1.22": "https://.../bcftools/1.22/build.sh"}
+    REMOTE_METADATA_URL = os.environ.get('CONDATINER_REMOTE_METADATA', None)
+
+    # Folder paths
+    PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
+    CONDATINER_DIR = os.path.abspath(os.path.join(PROGRAM_DIR, ".."))
+    BUILD_SCRIPTS_DIR = os.path.join(CONDATINER_DIR, "build-scripts")
+    IMAGES_DIR = os.path.join(CONDATINER_DIR, "images")
+    REF_IMAGES_DIR = os.path.join(CONDATINER_DIR, "ref-images")
+    OPT_DIR = os.path.join(CONDATINER_DIR, "opt")
+
+    # File paths
+    TMP_OVERLAY_PATH = os.path.join(CONDATINER_DIR, "tmp.img")
+    BASE_IMAGE_DEF = os.path.join(BUILD_SCRIPTS_DIR, "base_image.def")
+    BASE_IMAGE_SIF = os.path.join(IMAGES_DIR, "base_image.sif")
+    APPTAINER_PATH = shutil.which("apptainer") if shutil.which("apptainer") else shutil.which("singularity")
+    BAD_CHARS_REGEX = re.compile(r'[<>:"/\\|?*\0\s\'`$&;|!\[\]#%@=+{}(),]')
+
+    # Utils
+    NCPUS = os.environ.get("SLURM_CPUS_PER_TASK", 4)
+    ZSTD_FAST = "-comp zstd -Xcompression-level 3"
+    ZSTD_MEDIUM = "-comp zstd -Xcompression-level 8"
+    ZSTD = "-comp zstd -Xcompression-level 14"
+    ZSTD_HIGH = "-comp zstd -Xcompression-level 18"
+    LZ4 = "-comp lz4"
+    COMPRESS_ARGS = ZSTD
+
+def main():
+    parser = argparse.ArgumentParser(description="CondaTainer CLI Tool\nUse apptainer/conda/squashFS to manage tools for HPC users.")
+    parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of CondaTainer", default=argparse.SUPPRESS)
+    subparsers = parser.add_subparsers(dest="action", required=True, help="Available actions")
+    
+    CondaTainer_Create.add_parser_arguments(subparsers)
+    subparsers.add_parser("list", help="List all existing overlays")
+    subparsers.add_parser("help", help="Show help information about CondaTainer")
+    CondaTainer_Exec.add_parser_arguments(subparsers)
+    CondaTainer_Info.add_parser_arguments(subparsers)
+    CondaTainer_Check.add_parser_arguments(subparsers)
+    CondaTainer_Avail.add_parser_arguments(subparsers)
+    CondaTainer_Run.add_parser_arguments(subparsers)
+
+    args = parser.parse_args()
+    if args.action == "create":
+        CondaTainer_Create.parse_create_args(args)
+    elif args.action == "exec":
+        CondaTainer_Exec.parse_exec_args(args)
+    elif args.action == "check":
+        CondaTainer_Check.parse_check_args(args)
+    elif args.action == "run":
+        CondaTainer_Run.parse_run_args(args)
+    elif args.action == "list":
+        CondaTainer_List.list_overlays()
+    elif args.action == "info":
+        CondaTainer_Info.parse_info_args(args)
+    elif args.action == "avail":
+        CondaTainer_Avail.parse_avail_args(args)
+    elif args.action == "help":
+        parser.print_help()
+
+class Utils:
+    @staticmethod
+    def blue_text(text):
+        return f"\033[94m{text}\033[0m"
+    
+    @staticmethod
+    def red_text(text):
+        return f"\033[91m{text}\033[0m"
+
+    @staticmethod
+    def yellow_text(text):
+        return f"\033[93m{text}\033[0m"
+
+    @staticmethod
+    def green_text(text):
+        return f"\033[92m{text}\033[0m"
+
+    @staticmethod
+    def print_message(message):
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}")
+
+    @staticmethod
+    def print_warning(message):
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}][{Utils.yellow_text('WARNING')}] {message}", file=sys.stderr)
+
+    @staticmethod
+    def print_error(message):
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}][{Utils.red_text('ERROR')}] {message}", file=sys.stderr)
+
+    @staticmethod
+    def ensure_apptainer():
+        if Config.APPTAINER_PATH is None:
+            Utils.print_message("Apptainer not found in PATH.")
+            Utils.print_message("Make sure you load the Apptainer module in your HPC system.")
+            Utils.print_message("If there is no Apptainer module, please contact your system administrator.")
+            return False
+        return True
+
+    @staticmethod
+    def normalize_name_version(name_version: str) -> str:
+        """
+        Normalize package spec formats so that `name/version`, `name=version`, `name@version`
+        are treated the same. This converts slashes to equal signs and strips
+        surrounding whitespace.
+        """
+        if not isinstance(name_version, str):
+            return name_version
+        return name_version.strip().replace('/', '=').replace('@', '=')
+
+    @staticmethod
+    def fetch_remote_metadata(url: str) -> dict:
+        """
+        Fetch JSON metadata from a remote URL. Expected format: a mapping of
+        "name=version" (or other spec strings) to a URL where the build script
+        can be downloaded. Returns an empty dict on failure. If values are
+        relative paths, convert them to raw.githubusercontent links using
+        `Config.GITHUB_REPO` and the `main` branch.
+        """
+        import urllib.request
+        import json
+
+        if not url:
+            return {}
+        try:
+            with urllib.request.urlopen(url) as resp:
+                data = resp.read()
+            parsed = json.loads(data.decode('utf-8'))
+            # normalize keys so callers can use normalized spec strings
+            normalized = {}
+            for k, v in parsed.items():
+                nk = Utils.normalize_name_version(k)
+                # If the value is a simple string, treat it as the script link.
+                if isinstance(v, str):
+                    if v.startswith('http://') or v.startswith('https://'):
+                        nv = v
+                    else:
+                        rel = v.lstrip('./')
+                        if getattr(Config, 'GITHUB_REPO', None):
+                            nv = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/{rel}"
+                        else:
+                            nv = rel
+                    normalized[nk] = nv
+                elif isinstance(v, dict):
+                    # If metadata entry is an object, convert its 'link' field if relative
+                    entry = dict(v)
+                    link = entry.get('link')
+                    if isinstance(link, str) and not (link.startswith('http://') or link.startswith('https://')):
+                        rel = link.lstrip('./')
+                        if getattr(Config, 'GITHUB_REPO', None):
+                            entry['link'] = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/{rel}"
+                    normalized[nk] = entry
+                else:
+                    # unknown type, keep as-is
+                    normalized[nk] = v
+            return normalized
+        except Exception as e:
+            Utils.print_warning(f"Failed to fetch remote metadata from {url}: {e}")
+            return {}
+
+    @staticmethod
+    def download_build_script(url: str, dest_path: str) -> bool:
+        """
+        Download a remote build script to `dest_path`. Creates parent dirs and
+        marks the file executable. Returns True on success.
+        """
+        import urllib.request
+        import os
+        try:
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            with urllib.request.urlopen(url) as resp, open(dest_path, 'wb') as out_f:
+                out_f.write(resp.read())
+            # Ensure executable
+            os.chmod(dest_path, 0o755)
+            return True
+        except Exception as e:
+            Utils.print_error(f"Failed to download build script from {url}: {e}")
+            return False
+    @staticmethod
+    def ensure_base_image():
+        os.makedirs(Config.IMAGES_DIR, exist_ok=True)
+        os.makedirs(Config.REF_IMAGES_DIR, exist_ok=True)
+
+        if os.path.isfile(Config.BASE_IMAGE_SIF):
+            return True
+
+        if not Utils.ensure_apptainer():
+            return False
+        
+        Utils.print_message("Base images not found. Building base images...")
+        cmd = [
+            Config.APPTAINER_PATH, "build",
+            "--fakeroot",
+            Config.BASE_IMAGE_SIF,
+            Config.BASE_IMAGE_DEF,
+        ]
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError:
+            Utils.print_error("Building base images failed.")
+            return False
+        Utils.print_message("Base images built successfully.")
+        cmd = [ Config.APPTAINER_PATH, "cache", "clean", "--force" ]
+        subprocess.run(cmd, capture_output=True)
+        Utils.print_message("Apptainer cache cleaned.")
+        return True
+
+    @staticmethod
+    def create_tmp_overlay():
+        if os.path.isfile(Config.TMP_OVERLAY_PATH):
+            os.remove(Config.TMP_OVERLAY_PATH)
+        
+        Utils.print_message("Creating temporary SquashFS overlay...")
+        cmd = [
+            Config.APPTAINER_PATH, "overlay", "create",
+            "--sparse", "--size", "10240",  # Size in MB
+            Config.TMP_OVERLAY_PATH
+        ]
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError:
+            Utils.print_error("Creating temporary overlay failed.")
+            return False
+        Utils.print_message("Temporary overlay created successfully.")
+        return True
+
+    @staticmethod
+    def remove_tmp_overlay():
+        if os.path.isfile(Config.TMP_OVERLAY_PATH):
+            os.remove(Config.TMP_OVERLAY_PATH)
+            Utils.print_message("Temporary overlay removed.")
+        return True
+
+    @staticmethod
+    def get_installed_overlays() -> List[str]:
+        overlays = []
+        if not os.path.isdir(Config.IMAGES_DIR):
+            return overlays
+        
+        overlay_files = [f for f in os.listdir(Config.IMAGES_DIR) if f.endswith(('.sqf', '.img', '.squashfs'))]
+        for overlay in overlay_files:
+            name_version = os.path.splitext(overlay)[0]
+            name_version = name_version.replace("--", "=")
+            overlays.append(name_version)
+        
+        ref_overlay_files = [f for f in os.listdir(Config.REF_IMAGES_DIR) if f.endswith(('.sqf', '.img', '.squashfs'))]
+        for overlay in ref_overlay_files:
+            name_version = os.path.splitext(overlay)[0]
+            name_version = name_version.replace("--", "=")
+            overlays.append(name_version)
+        return overlays
+
+    @staticmethod
+    def get_dependencies_from_script(script_path: str) -> List[str]:
+        """
+        Get dependencies from a build script by parsing #DEP: lines.
+        
+        :param script_path: Description
+        :type script_path: str
+        :return: Description
+        :rtype: List[str]
+        """
+        dependencies = []
+        if not os.path.isfile(script_path):
+            Utils.print_error(f"Build script not found at {script_path}.")
+            return dependencies
+        
+        with open(script_path, 'r') as f:
+            for line in f:
+                if line.startswith("#DEP:"):
+                    dep_line = line[len("#DEP:"):].strip()
+                    dependencies.append(dep_line.replace("/", "="))
+        return dependencies
+
+    @staticmethod
+    def check_overlay_installed(name_version: str) -> bool:
+        installed_overlays = Utils.get_installed_overlays()
+        return name_version in installed_overlays
+    
+    @staticmethod
+    def check_overlays_installed(name_versions: List[str]) -> List[str]:
+        missing = []
+        installed_overlays = Utils.get_installed_overlays()
+        for nv in name_versions:
+            if nv not in installed_overlays:
+                missing.append(nv)
+        return missing
+
+class CondaTainer_Create:
+    @staticmethod
+    def add_parser_arguments(parser):
+        CondaTainer_Create.parser_create = parser.add_parser("create", help="Create a new SquashFS overlay")
+        CondaTainer_Create.parser_create.add_argument(
+            "name_versions",
+            nargs="*",
+            help="Name=Version of the overlay to create (e.g., bcftools=1.22)"
+        )
+        CondaTainer_Create.parser_create.add_argument(
+            "-n", "--name",
+            type=str,
+            help="Custom name for the overlay file (If used, all packages will be included in a single overlay)"
+        )
+        CondaTainer_Create.parser_create.add_argument(
+            "-p", "--prefix",
+            type=str,
+            help="Custom prefix for the overlay file"
+        )
+        CondaTainer_Create.parser_create.add_argument(
+            "-f", "--file",
+            type=str,
+            help="Conda environment file (YAML format) to create the overlay from"
+        )
+        CondaTainer_Create.parser_create.add_argument(
+            "--zstd-fast",
+            action="store_true",
+            help="Use zstd compression level 3" + (" (default)" if Config.COMPRESS_ARGS == Config.ZSTD_FAST else "")
+        )
+        CondaTainer_Create.parser_create.add_argument(
+            "--zstd-medium",
+            action="store_true",
+            help="Use zstd compression level 8" + (" (default)" if Config.COMPRESS_ARGS == Config.ZSTD_MEDIUM else "")
+        )
+        CondaTainer_Create.parser_create.add_argument(
+            "--zstd",
+            action="store_true",
+            help="Use zstd compression level 14" + (" (default)" if Config.COMPRESS_ARGS == Config.ZSTD else "")
+        )
+        CondaTainer_Create.parser_create.add_argument(
+            "--zstd-high",
+            action="store_true",
+            help="Use zstd compression level 19" + (" (default)" if Config.COMPRESS_ARGS == Config.ZSTD_HIGH else "")
+        )
+        CondaTainer_Create.parser_create.add_argument(
+            "--lz4",
+            action="store_true",
+            help="Use LZ4 compression" + (" (default)" if Config.COMPRESS_ARGS == Config.LZ4 else "")
+        )
+
+    @staticmethod
+    def parse_create_args(args):
+        if not args.name_versions and not args.file:
+            CondaTainer_Create.parser_create.error("At least one of --name_versions or --file must be provided.")
+        if args.name_versions and args.file:
+            CondaTainer_Create.parser_create.error("Cannot use both NAME=VERSION items and --file at the same time")
+        if args.prefix and args.name:
+            CondaTainer_Create.parser_create.error("Cannot use both --prefix and --name at the same time")
+        if args.lz4:
+            Config.COMPRESS_ARGS = Config.LZ4
+        elif args.zstd_fast:
+            Config.COMPRESS_ARGS = Config.ZSTD_FAST
+        elif args.zstd_medium:
+            Config.COMPRESS_ARGS = Config.ZSTD_MEDIUM
+        elif args.zstd:
+            Config.COMPRESS_ARGS = Config.ZSTD
+
+        if args.name_versions:
+            args.name_versions = [Utils.normalize_name_version(nv) for nv in args.name_versions]
+
+        try:
+            if os.path.isfile(Config.TMP_OVERLAY_PATH):
+                Utils.print_error("A temporary overlay already exists. Maybe another process is running CondaTainer create?")
+                Utils.print_message("If you are sure there is no other process running, please delete the temporary overlay file:")
+                Utils.print_message(f"  rm {Config.TMP_OVERLAY_PATH}")
+                exit(1)
+            
+            if args.file:
+                if args.prefix:
+                    CondaTainer_Create.create_sqf_from_file(args.file, prefix=args.prefix)
+                else:
+                    CondaTainer_Create.create_sqf_from_file(args.file, args.name)
+            else:
+                if args.name:
+                    if Config.BAD_CHARS_REGEX.search(args.name):
+                        CondaTainer_Create.parser_create.error("The custom name contains invalid characters. Avoid using spaces and special characters like <>:\"/\\|?*`$&;|![]#%@=+{}(),")
+                        exit(1)
+                    # Create a single overlay with all packages
+                    packages = args.name_versions
+                    overlay_filepath = f"{args.name}.sqf"
+                    overlay_path = os.path.join(Config.IMAGES_DIR, overlay_filepath)
+                    relative_path = args.name.replace("--", "/")
+                    if os.path.isfile(overlay_path):
+                        Utils.print_message(f"Overlay {Utils.yellow_text(overlay_filepath)} already exists at {overlay_path}. Skipping creation.")
+                        return
+                    
+                    if CondaTainer_Create.create_sqf(
+                        packages=packages,
+                        overlay_path=overlay_path,
+                        relative_path=relative_path
+                    ):
+                        config_path = os.path.join(Config.IMAGES_DIR, f"{args.name}.yaml")
+                        CondaTainer_Create.create_config_yaml(args.name, config_path, packages)
+                elif args.prefix:
+                    prefix_name = os.path.basename(args.prefix)
+                    if Config.BAD_CHARS_REGEX.search(prefix_name):
+                        CondaTainer_Create.parser_create.error("The custom prefix contains invalid characters. Avoid using spaces and special characters like <>:\"/\\|?*`$&;|![]#%@=+{}(),")
+                        exit(1)
+                    
+                    prefix_abs_path = os.path.abspath(args.prefix)
+                    os.makedirs(os.path.dirname(prefix_abs_path), exist_ok=True)
+                    
+                    # Create a single overlay with all packages, using the prefix
+                    packages = args.name_versions
+                    overlay_path = f"{prefix_abs_path}.sqf"
+                    config_path = f"{prefix_abs_path}.yaml"
+                    relative_path = prefix_name.replace("--", "/")
+                    if os.path.isfile(overlay_path):
+                        Utils.print_message(f"Overlay {Utils.yellow_text(os.path.basename(overlay_path))} already exists at {overlay_path}. Skipping creation.")
+                        return
+                    
+                    if CondaTainer_Create.create_sqf(
+                        packages=packages,
+                        overlay_path=overlay_path,
+                        relative_path=relative_path
+                    ):
+                        CondaTainer_Create.create_config_yaml(args.prefix, config_path, packages)
+
+                else:
+                    if any('=' not in nv for nv in args.name_versions) and args.name_versions:
+                        CondaTainer_Create.parser_create.error("Must specify the versions in the format NAME=VERSION")
+                    # Create individual overlays for each package
+                    for nv in args.name_versions:
+                        CondaTainer_Create.auto_create_overlay_from_str(nv)
+        except KeyboardInterrupt:
+            Utils.print_message("Process interrupted by user. Cleaning up...")
+            Utils.remove_tmp_overlay()
+            shutil.rmtree(Config.OPT_DIR, ignore_errors=True)
+            exit(1)
+
+    @staticmethod
+    def create_config_yaml(name, config_path, packages: List[str]):
+        with open(config_path, 'w') as f:
+            f.write(f"name: {name}\n")
+            f.write("channels:\n")
+            f.write("  - conda-forge\n")
+            f.write("  - bioconda\n")
+            f.write("dependencies:\n")
+            for pkg in packages:
+                f.write(f"  - {pkg}\n")
+        Utils.print_message(f"Conda environment YAML file created at {config_path}")
+
+    @staticmethod
+    def create_sqf(packages: List[str], overlay_path: str, relative_path):
+        if not Utils.ensure_base_image():
+            return False
+        
+        Utils.print_message(f"Building SquashFS overlay at {overlay_path} with packages: {Utils.yellow_text(' '.join(packages))}")
+        
+        Utils.create_tmp_overlay()
+
+        cmd_create = [
+            Config.APPTAINER_PATH, "exec",
+            "--overlay", Config.TMP_OVERLAY_PATH,
+            "--bind", Config.CONDATINER_DIR,
+            Config.BASE_IMAGE_SIF,
+            "/bin/bash", "-c",
+            f"""
+            micromamba create -r /ext3/conda -c conda-forge -c bioconda -y -p /ext3/opt/{relative_path} {' '.join(packages)}
+
+            mksquashfs /ext3/opt {os.path.abspath(overlay_path)} -processors {Config.NCPUS} -keep-as-directory {Config.COMPRESS_ARGS} -b 1M
+            """
+        ]
+
+        try:
+            subprocess.run(cmd_create, check=True)
+        except subprocess.CalledProcessError:
+            Utils.print_error(f"Creating {overlay_path} failed.")
+            Utils.print_error("Please go to https://anaconda.org and check if the package names and versions are correct.")
+            Utils.remove_tmp_overlay()
+            return False
+        
+        Utils.print_message(f"Overlay {overlay_path} created successfully. Removing temporary overlay...")
+        Utils.remove_tmp_overlay()
+        return True
+
+    @staticmethod
+    def create_sqf_from_file(file_path: str, custom_name: Optional[str] = None, prefix: Optional[str] = None):
+        if not Utils.ensure_base_image():
+            return False
+        
+        if not file_path.endswith(('.yml', '.yaml')):
+            Utils.print_error("The environment file must be in YAML format with .yml or .yaml extension.")
+            return False
+        
+        file_path = os.path.abspath(file_path)
+        file_basedir = os.path.dirname(file_path)
+
+        Utils.print_message(f"Building SquashFS overlay from environment file {file_path}")
+        if prefix:
+            prefix_abs_path = os.path.abspath(prefix)
+            os.makedirs(os.path.dirname(prefix_abs_path), exist_ok=True)
+            
+            overlay_abs_path = f"{prefix_abs_path}.sqf"
+            config_abs_path = f"{prefix_abs_path}.yaml"
+            custom_name = os.path.basename(prefix)
+            relative_path = custom_name.replace("--", "/")
+
+        else:
+            if custom_name is None:
+                name_regex = r"name:\s*(\S+)"
+                with open(file_path, 'r') as f:
+                    content = f.read()
+                    match = re.search(name_regex, content)
+                    if match:
+                        custom_name = match.group(1)
+                    else:
+                        Utils.print_error("Could not find the environment name in the YAML file. Please provide a custom name using -n/--name.")
+                        return False
+            
+            overlay_abs_path = os.path.join(Config.IMAGES_DIR, f"{custom_name}.sqf")
+            config_abs_path = os.path.join(Config.IMAGES_DIR, f"{custom_name}.yaml")
+            relative_path = custom_name.replace("--", "/")
+
+        
+        if os.path.isfile(overlay_abs_path):
+            Utils.print_message(f"Overlay {Utils.yellow_text(os.path.basename(overlay_abs_path))} already exists at {overlay_abs_path}. Skipping creation.")
+            return True
+        Utils.create_tmp_overlay()
+
+        cmd_create = [
+            Config.APPTAINER_PATH, "exec",
+            "--overlay", Config.TMP_OVERLAY_PATH,
+            "--bind", Config.CONDATINER_DIR,
+            "--bind", file_basedir,
+            Config.BASE_IMAGE_SIF,
+            "/bin/bash", "-c",
+            f"""
+            micromamba create -r /ext3/conda -c conda-forge -c bioconda -y -p /ext3/opt/{relative_path} -f {file_path}
+
+            mksquashfs /ext3/opt {os.path.abspath(overlay_abs_path)} -processors {Config.NCPUS} -keep-as-directory {Config.COMPRESS_ARGS} -b 1M
+            """
+        ]
+        try:
+            subprocess.run(cmd_create, check=True)
+            with open(config_abs_path, 'w') as dest_f, open(file_path, 'r') as src_f:
+                # replace the name in the source file with custom_name
+                for line in src_f:
+                    if line.startswith("name:"):
+                        dest_f.write(f"name: {custom_name}\n")
+                    else:
+                        dest_f.write(line)
+            Utils.print_message(f"Conda environment YAML file copied to {config_abs_path}")
+        except subprocess.CalledProcessError:
+            Utils.print_error(f"Creating {overlay_abs_path} from {file_path} failed.")
+            Utils.remove_tmp_overlay()
+            return False
+    
+        Utils.print_message(f"Overlay {os.path.basename(overlay_abs_path)} created successfully from {file_path}. Removing temporary overlay...")
+        Utils.remove_tmp_overlay()
+        return True
+
+    @staticmethod
+    def get_local_build_scripts():
+        packages = [] # name=version list
+        if not os.path.isdir(Config.BUILD_SCRIPTS_DIR):
+            # No local build-scripts directory — behave as if there are no local scripts
+            return packages
+        try:
+            script_paths = os.listdir(Config.BUILD_SCRIPTS_DIR)
+        except Exception:
+            return packages
+        script_paths = sorted(script_paths)
+        for script_name in script_paths:
+            if script_name == "0-template":
+                continue
+            script_relative_path = os.path.join(Config.BUILD_SCRIPTS_DIR, script_name)
+            if not os.path.isdir(script_relative_path):
+                continue
+
+            versions = os.listdir(script_relative_path)
+            versions = [v for v in versions if not (v.startswith("template") or v.endswith("_data"))]
+            if len(versions) == 0:
+                continue
+            
+            # Test if version is a file or directory
+            if os.path.isdir(os.path.join(script_relative_path, versions[0])):
+                for data_type in versions:
+                    # skip .sh .py scripts
+                    if data_type.endswith('.sh') or data_type.endswith('.py'):
+                        continue
+                    data_type_path = os.path.join(script_relative_path, data_type)
+                    sub_versions = os.listdir(data_type_path)
+                    for version in sub_versions:
+                        packages.append(f"{script_name}={data_type}={version}")
+            else:
+                for version in versions:
+                    # skip .sh .py scripts
+                    if version.endswith('.sh') or version.endswith('.py'):
+                        continue
+                    packages.append(f"{script_name}={version}")
+        return packages
+    
+    @staticmethod
+    def get_env_settings_from_build_script(script_path) -> Dict[str, str]:
+        env_settings = {}
+        if not os.path.isfile(script_path):
+            Utils.print_error(f"Build script not found at {script_path}.")
+            return env_settings
+        
+        with open(script_path, 'r') as f:
+            for line in f:
+                if line.startswith("#ENV:"):
+                    env_line = line[len("#ENV:"):].strip()
+                    if '=' in env_line:
+                        key, value = env_line.split('=', 1)
+                        env_settings[key.strip()] = value.strip()
+        return env_settings
+
+    @staticmethod
+    def create_app_overlay(name: str, version: str):
+        overlay_filename = f"{name}--{version}.sqf"
+        overlay_path = os.path.join(Config.IMAGES_DIR, overlay_filename)
+        relative_path = f"{name}/{version}"
+        if os.path.isfile(overlay_path):
+            Utils.print_message(f"Overlay {Utils.yellow_text(overlay_filename)} already exists at {overlay_path}. Skipping creation.")
+            return True
+        
+        local_packages = CondaTainer_Create.get_local_build_scripts()
+
+        # Fetch remote metadata entries if configured
+        remote_packages = {}
+        if Config.REMOTE_METADATA_URL:
+            remote_packages = Utils.fetch_remote_metadata(Config.REMOTE_METADATA_URL)
+        if f"{name}={version}" not in local_packages:
+            Utils.print_message(f"")
+            return CondaTainer_Create.create_sqf(
+                packages=[f"{name}={version}"],
+                overlay_path=overlay_path,
+                relative_path=relative_path
+            )
+        else:
+            return CondaTainer_Create.create_overlay_from_build_script(name, version)
+
+    @staticmethod
+    def auto_create_overlay_from_str(name_version: str):
+        # Accept both name=version and name/version formats by normalizing
+        name_version = Utils.normalize_name_version(name_version)
+        if '=' not in name_version:
+            Utils.print_error("Must specify the version in the format NAME=VERSION")
+            return False
+
+        n = name_version.count('=')
+        if n == 1:
+            name, version = name_version.split('=', 1)
+            return CondaTainer_Create.create_app_overlay(name, version)
+        elif n == 2:
+            assembly, data_type, version = name_version.split('=', 2)
+            return CondaTainer_Create.create_ref_overlay(assembly, data_type, version)
+        else:
+            Utils.print_error("Too many '=' characters in the NAME=VERSION string.")
+            return False
+
+        return False
+
+    @staticmethod
+    def create_overlay_from_build_script(name: str, version: str):
+        overlay_filename = f"{name}--{version}.sqf"
+        overlay_path = os.path.join(Config.IMAGES_DIR, overlay_filename)
+        relative_path = f"{name}/{version}"
+        if os.path.isfile(overlay_path):
+            Utils.print_message(f"Overlay {Utils.yellow_text(overlay_filename)} already exists at {overlay_path}. Skipping creation.")
+            return True
+        
+        script_path = os.path.join(Config.BUILD_SCRIPTS_DIR, name, version)
+        if not os.path.isfile(script_path):
+            # Try to fetch build script from remote metadata if configured
+            metadata = Utils.fetch_remote_metadata(Config.REMOTE_METADATA_URL)
+            key = Utils.normalize_name_version(f"{name}={version}")
+            if metadata and key in metadata:
+                Utils.print_message(f"Downloading build script for {name}={version} from remote metadata...")
+                url = metadata[key]
+                if Utils.download_build_script(url, script_path):
+                    Utils.print_message(f"Downloaded build script to {script_path}")
+                else:
+                    Utils.print_warning(f"Failed to download build script for {name}={version} from {url}. Falling back to micromamba installation.")
+                    # Fall back to creating overlay via micromamba installer
+                    return CondaTainer_Create.create_sqf(
+                        packages=[f"{name}={version}"],
+                        overlay_path=overlay_path,
+                        relative_path=relative_path
+                    )
+            else:
+                Utils.print_warning(f"Build script for {name} version {version} not found at {script_path}. Falling back to micromamba installation.")
+                return CondaTainer_Create.create_sqf(
+                    packages=[f"{name}={version}"],
+                    overlay_path=overlay_path,
+                    relative_path=relative_path
+                )
+        
+        Utils.print_message(f"Building SquashFS overlay for {name} version {version} using build script.")
+        
+        Utils.create_tmp_overlay()
+
+        cmd_create = [
+            Config.APPTAINER_PATH, "exec",
+            "--overlay", Config.TMP_OVERLAY_PATH,
+            "--bind", Config.CONDATINER_DIR,
+            "--env", "tmp_dir=/ext3/tmp",
+            "--env", f"target_dir=/ext3/opt/{relative_path}",
+            "--env", f"app_name={name}",
+            "--env", f"version={version}",
+            "--env", f"app_name_version={name}-{version}",
+            Config.BASE_IMAGE_SIF,
+            "/bin/bash", "-c",
+            f"""
+            bash {script_path}
+
+            if [ $? -ne 0 ]; then
+                echo "Build script for {name} version {version} failed."
+                exit 1
+            fi
+
+            mksquashfs /ext3/opt {os.path.abspath(overlay_path)} -processors {Config.NCPUS} -keep-as-directory {Config.COMPRESS_ARGS} -b 1M
+            """
+        ]
+
+        try:
+            subprocess.run(cmd_create, check=True)
+        except subprocess.CalledProcessError:
+            Utils.print_error(f"Creating {overlay_path} failed.")
+            Utils.remove_tmp_overlay()
+            return False
+        
+        if not os.path.isfile(overlay_path):
+            Utils.print_error(f"Overlay {overlay_path} was not created successfully.")
+            Utils.remove_tmp_overlay()
+            return False
+        
+        env_settings = CondaTainer_Create.get_env_settings_from_build_script(script_path)
+        if env_settings:
+            env_file_path = os.path.splitext(overlay_path)[0] + ".env"
+            with open(env_file_path, 'w') as f:
+                for key, value in env_settings.items():
+                    value = value.replace('$app_root', f"/opt/{name}/{version}")
+                    f.write(f"{key}={value}\n")
+            Utils.print_message(f"Environment variables file created at {env_file_path}")
+        
+        Utils.print_message(f"Overlay {overlay_path} created successfully. Removing temporary overlay...")
+        Utils.remove_tmp_overlay()
+        return True
+
+    @staticmethod
+    def create_ref_overlay(assembly: str, data_type: str, version: str):
+        overlay_filename = f"{assembly}--{data_type}--{version}.sqf"
+        overlay_path = os.path.join(Config.REF_IMAGES_DIR, overlay_filename)
+        relative_path = f"{assembly}/{data_type}/{version}"
+
+        if os.path.isfile(overlay_path):
+            Utils.print_message(f"Reference overlay {Utils.yellow_text(overlay_filename)} already exists at {overlay_path}. Skipping creation.")
+            return True
+        
+        script_path = os.path.join(Config.BUILD_SCRIPTS_DIR, assembly, data_type, version)
+        if not os.path.isfile(script_path):
+            # Try to fetch reference build script from remote metadata if configured
+            metadata = Utils.fetch_remote_metadata(Config.REMOTE_METADATA_URL)
+            key = Utils.normalize_name_version(f"{assembly}={data_type}={version}")
+            if metadata and key in metadata:
+                Utils.print_message(f"Downloading reference build script for {assembly}={data_type}={version} from remote metadata...")
+                url = metadata[key]
+                if not Utils.download_build_script(url, script_path):
+                    Utils.print_error(f"Failed to download reference build script for {assembly}={data_type}={version} from {url}.")
+                    return False
+                Utils.print_message(f"Downloaded reference build script to {script_path}")
+            else:
+                Utils.print_error(f"Build script for reference {assembly} {data_type} version {version} not found at {script_path}.")
+                return False
+        
+        deps = Utils.get_dependencies_from_script(script_path)
+        missing_deps = Utils.check_overlays_installed(deps)
+        
+        if missing_deps:
+            for md in missing_deps:
+                Utils.print_message(f"Dependency overlay {Utils.yellow_text(md)} is missing. Creating it first...")
+                if CondaTainer_Create.auto_create_overlay_from_str(md):
+                    Utils.print_message(f"Dependency overlay {Utils.yellow_text(md)} created successfully.")
+                else:
+                    Utils.print_error(f"Failed to create dependency overlay {md}. Cannot proceed with creating reference overlay.")
+                    return False
+                
+        Utils.print_message(f"Building reference SquashFS overlay for {assembly} {data_type} version {version} using build script.")
+
+        target_dir = os.path.join(Config.OPT_DIR, relative_path)
+
+        Utils.create_tmp_overlay()
+        cmd_create = [
+            Config.APPTAINER_PATH, "exec",
+            "--overlay", Config.TMP_OVERLAY_PATH,
+            "--bind", Config.CONDATINER_DIR,
+            "--env", "tmp_dir=/ext3/tmp",
+            "--env", f"target_dir={target_dir}",
+            "--env", f"app_name_version={assembly}/{data_type}/{version}",
+            "--env", "script_path=/dev/null",  # Prevent build script from downloading dependencies again
+            "--env", f"PATH={CondaTainer_Exec.get_path_env(deps)}",
+            *CondaTainer_Exec.get_overlay_mounts(deps),
+            *CondaTainer_Exec.get_overlay_env_configs(deps),
+            Config.BASE_IMAGE_SIF,
+            "/bin/bash", "-c",
+            f"""
+            bash {script_path}
+            """
+        ]
+
+        # print(cmd_create); exit()  # DEBUG
+
+        try:
+            subprocess.run(cmd_create, check=True)
+        except subprocess.CalledProcessError:
+            Utils.print_error(f"Creating reference overlay {overlay_path} failed.")
+            Utils.remove_tmp_overlay()
+            return False
+        
+        if os.listdir(target_dir) == []:
+            Utils.print_error(f"Reference overlay build script did not create any files in {target_dir}.")
+            shutil.rmtree(Config.OPT_DIR, ignore_errors=True)
+            Utils.remove_tmp_overlay()
+            return False
+
+        Utils.print_message(f"Creating SquashFS file at {overlay_path}...")
+        cmd_mksqf = [
+            Config.APPTAINER_PATH, "exec",
+            "--overlay", Config.TMP_OVERLAY_PATH,
+            "--bind", Config.CONDATINER_DIR,
+            Config.BASE_IMAGE_SIF,
+            "/bin/bash", "-c",
+            f"""
+            mksquashfs {Config.OPT_DIR} {os.path.abspath(overlay_path)} -processors {Config.NCPUS} -keep-as-directory {Config.COMPRESS_ARGS} -b 1M
+            """
+        ]
+
+        try:
+            subprocess.run(cmd_mksqf, check=True)
+        except subprocess.CalledProcessError:
+            Utils.print_error(f"Creating SquashFS file {overlay_path} failed.")
+            shutil.rmtree(Config.OPT_DIR, ignore_errors=True)
+            Utils.remove_tmp_overlay()
+            return False
+
+        env_settings = CondaTainer_Create.get_env_settings_from_build_script(script_path)
+        if env_settings:
+            env_file_path = os.path.splitext(overlay_path)[0] + ".env"
+            with open(env_file_path, 'w') as f:
+                for key, value in env_settings.items():
+                    value = value.replace('$app_root', f"/opt/{assembly}/{data_type}/{version}")
+                    f.write(f"{key}={value}\n")
+            Utils.print_message(f"Environment variables file created at {env_file_path}")
+        
+        Utils.print_message(f"Reference overlay {overlay_path} created successfully. Cleaning up...")
+        shutil.rmtree(Config.OPT_DIR, ignore_errors=True)
+        Utils.remove_tmp_overlay()
+        return True
+
+class CondaTainer_Exec:
+    @staticmethod
+    def add_parser_arguments(parser):
+        CondaTainer_Exec.parser_exec = parser.add_parser("exec", help="Execute a command using a group of overlays")
+        CondaTainer_Exec.parser_exec.add_argument(
+            "-o", "--overlay",
+            dest="overlays",
+            action="append",
+            help="Overlay package (can be used multiple times)"
+        )
+        CondaTainer_Exec.parser_exec.add_argument(
+            "command",
+            nargs=argparse.REMAINDER,
+            help="The command to run inside the container"
+        )
+    
+    @staticmethod
+    def parse_exec_args(args):
+        if not args.overlays:
+            CondaTainer_Exec.parser_exec.error("At least one overlay must be specified using -o/--overlay.")
+        if not args.command:
+            CondaTainer_Exec.parser_exec.error("A command to execute must be provided.")
+        
+        CondaTainer_Exec.exec_command(args.overlays, args.command)
+
+    @staticmethod
+    def get_overlay_abs_paths(overlay_paths: List[str]) -> List[str]:
+        overlay_abs_paths = []
+        for path in overlay_paths:
+            # If it's an actual file path (exists or looks like a file), handle that first
+            if path.endswith(".sqf") or path.endswith(".img") or path.endswith(".squashfs"):
+                if os.path.isfile(path):
+                    overlay_abs_paths.append(os.path.abspath(path))
+                    continue
+                else:
+                    CondaTainer_Exec.parser_exec.error(f"Overlay file {path} not found.")
+                    return []
+
+            # Treat non-file inputs as package specs. Accept both name=version and name/version
+            spec = Utils.normalize_name_version(path)
+            filename = os.path.basename(spec)
+            formatted_filename = filename.replace("=", "--")
+            overlay_filename = f"{formatted_filename}.sqf"
+            n = spec.count('=')
+            if n < 2:
+                overlay_path = os.path.join(Config.IMAGES_DIR, overlay_filename)
+            elif n == 2:
+                overlay_path = os.path.join(Config.REF_IMAGES_DIR, overlay_filename)
+            else:
+                CondaTainer_Exec.parser_exec.error(f"Invalid overlay format: {path}. Too many '=' characters.")
+                return []
+
+            if not os.path.isfile(overlay_path):
+                Utils.print_error(f"Overlay {overlay_filename} not found at {overlay_path}.")
+                CondaTainer_Exec.parser_exec.error(f"Overlay {overlay_filename} not found.")
+                return []
+            overlay_abs_paths.append(overlay_path)
+        return overlay_abs_paths
+
+    @staticmethod
+    def get_overlay_env_configs(overlay_paths: List[str]) -> List[str]:
+        configs = { }
+        overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(overlay_paths)
+        for op in overlay_abs_paths:
+            env_path = os.path.splitext(op)[0] + ".env"
+            if not os.path.isfile(env_path):
+                continue
+            
+            with open(env_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and '=' in line:
+                        key, value = line.split('=', 1)
+                        if key in configs:
+                            Utils.print_message(f"Environment variable {key} is defined in multiple overlays. Using the value from {os.path.basename(op)}.")
+                        configs[key] = value
+
+        params = []
+        for key, value in configs.items():
+            params.extend(["--env", f"{key}={value}"])
+        return params
+
+    @staticmethod
+    def get_path_env(overlay_paths: List[str]) -> str:
+        paths = [ "/usr/sbin", "/usr/bin" ]
+        overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(overlay_paths)
+        for path in overlay_abs_paths:
+            name = os.path.basename(path)
+            name = os.path.splitext(name)[0]  # Remove extension
+            name = name.replace("=", "/").replace("--", "/")
+            if path.endswith("img"):
+                relative_path = f"/ext3/{name}/bin"
+            elif path.endswith(".sqf") or path.endswith(".squashfs"):
+                relative_path = f"/opt/{name}/bin"
+            else:
+                Utils.print_warning(f"Unknown overlay file extension for {path}. Skipping PATH addition.")
+                continue
+            paths.insert(0, relative_path)
+        return ":".join(paths)
+
+    @staticmethod
+    def get_overlay_mounts(overlay_paths: List[str]) -> List[str]:
+        mounts = []
+        overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(overlay_paths)
+        for op in overlay_abs_paths:
+            mounts.extend(["--overlay", op + ":ro"])
+        return mounts
+
+    @staticmethod
+    def exec_command(overlay_paths: List[str], command: List[str]) -> List[str]:
+        path_env = CondaTainer_Exec.get_path_env(overlay_paths)
+
+        exec_cmd = [
+            Config.APPTAINER_PATH, "exec",
+            *CondaTainer_Exec.get_overlay_mounts(overlay_paths),
+            *CondaTainer_Exec.get_overlay_env_configs(overlay_paths),
+            "--env", f"PATH={path_env}",
+            "--env", f"PS1=CT \\w> ",
+            "--env", "IN_CONDATINER=1",
+            "--bind", Config.CONDATINER_DIR,
+            "--bind", os.path.abspath("."),
+            Config.BASE_IMAGE_SIF,
+            *command
+        ]
+
+        # print(exec_cmd); exit() # DEBUG
+
+        try:
+            subprocess.run(exec_cmd, check=True)
+        except subprocess.CalledProcessError:
+            Utils.print_error("Command execution failed inside the container.")
+            return False
+
+class CondaTainer_Avail:
+    @staticmethod
+    def add_parser_arguments(parser):
+        CondaTainer_Avail.parser_avail = parser.add_parser("avail", help="Check available local build scripts")
+        CondaTainer_Avail.parser_avail.add_argument(
+            "terms",
+            type=str,
+            nargs="*",
+            help="Search terms (AND logic applied)"
+        )
+    
+    @staticmethod
+    def parse_avail_args(args):
+        local_packages = CondaTainer_Create.get_local_build_scripts()
+
+        # Fetch remote metadata entries if configured
+        remote_packages = {}
+        if Config.REMOTE_METADATA_URL:
+            remote_packages = Utils.fetch_remote_metadata(Config.REMOTE_METADATA_URL)
+
+        all_packages = list(local_packages)
+        # add remote-only packages with a marker
+        for k in sorted(remote_packages.keys()):
+            if k not in all_packages:
+                all_packages.append(f"{k} (remote)")
+
+        if args.terms:
+            # match ONLY packages that contain *all* terms (logical AND)
+            filtered_packages = [
+                p for p in all_packages
+                if all(re.search(re.escape(term), p, re.IGNORECASE) for term in args.terms)
+            ]
+        else:
+            filtered_packages = all_packages
+        
+        if not filtered_packages:
+            Utils.print_warning("No matching local or remote build scripts found.")
+            return
+        
+        for pkg in sorted(filtered_packages):
+            if args.terms:
+                highlighted = pkg
+                for term in args.terms:
+                    highlighted = re.sub(
+                        re.escape(term),
+                        lambda m: Utils.yellow_text(m.group(0)),
+                        highlighted,
+                        flags=re.IGNORECASE
+                    )
+                print(highlighted)
+            else:
+                print(pkg)
+
+class CondaTainer_List:
+    @staticmethod
+    def list_overlays():
+        if not os.path.isdir(Config.IMAGES_DIR):
+            Utils.print_message("Overlays directory not found.")
+            return
+        
+        overlay_files = [f for f in os.listdir(Config.IMAGES_DIR) if f.endswith(('.sqf', '.img', '.squashfs'))]
+        if not overlay_files:
+            Utils.print_message("No overlays found.")
+            return
+        
+        name_versions_dict = {}
+
+        for overlay in overlay_files:
+            name_version = os.path.splitext(overlay)[0]
+            if '--' in name_version:
+                name, version = name_version.split('--', 1)
+                if name in name_versions_dict:
+                    name_versions_dict[name].append(version)
+                else:
+                    name_versions_dict[name] = [version]
+            else:
+                name_versions_dict[name_version] = [ "(tools group with .yaml configuration file)" ]
+        
+        name_col_width = max(len(name) for name in name_versions_dict.keys())
+        print("Available app overlays:")
+        for name in sorted(name_versions_dict.keys()):
+            print(f"{Utils.yellow_text(name.ljust(name_col_width))}: {', '.join(sorted(name_versions_dict[name]))}")
+
+        ref_overlay_files = [f for f in os.listdir(Config.REF_IMAGES_DIR) if f.endswith(('.sqf', '.img', '.squashfs'))]
+        if ref_overlay_files:
+            print("\nAvailable reference overlays:")
+            for overlay in sorted(ref_overlay_files):
+                name_version = os.path.splitext(overlay)[0]
+                print(name_version.replace('--', '='))
+
+class CondaTainer_Info:
+    @staticmethod
+    def add_parser_arguments(parser):
+        CondaTainer_Info.parser_info = parser.add_parser("info", help="Show information about a specific overlay")
+        CondaTainer_Info.parser_info.add_argument(
+            "overlay",
+            type=str,
+            help="Overlay package (e.g., bcftools=1.22)"
+        )
+
+    @staticmethod
+    def parse_info_args(args):
+        installed_overlays = Utils.get_installed_overlays()
+        overlay = Utils.normalize_name_version(args.overlay)
+        if overlay in installed_overlays:
+            n = overlay.count('=')
+            if n <= 1:
+                overlay_path = os.path.join(Config.IMAGES_DIR, overlay.replace('=', '--') + ".sqf")
+            elif n == 2:
+                overlay_path = os.path.join(Config.REF_IMAGES_DIR, overlay.replace('=', '--') + ".sqf")
+            else:
+                Utils.print_error("Invalid overlay format. Too many '=' characters.")
+                return
+            if not os.path.isfile(overlay_path):
+                Utils.print_error(f"Overlay file not found for {args.overlay}.")
+                return
+        else: # external overlay
+            overlay_path = os.path.abspath(args.overlay)
+            if not os.path.isfile(overlay_path):
+                Utils.print_error(f"Overlay file {overlay_path} not found.")
+                return
+            
+        print(f"Information for overlay {Utils.yellow_text(os.path.basename(overlay_path))}:")
+        # Additional info can be added here, e.g., size, creation date, etc.
+        file_size = os.path.getsize(overlay_path)
+        print(f"Size: {file_size / (1024 * 1024):.2f} MB")
+        if overlay_path.endswith(".sqf") or overlay_path.endswith(".squashfs"):
+            print(f"Potential mount path: /opt/{os.path.splitext(os.path.basename(overlay_path))[0].replace('=', '/').replace('--', '/')}")
+        elif overlay_path.endswith(".img"):
+            print(f"Potential mount path: /ext3/{os.path.splitext(os.path.basename(overlay_path))[0].replace('=', '/').replace('--', '/')}")
+
+        env_path = os.path.splitext(overlay_path)[0] + ".env"
+        if os.path.isfile(env_path):
+            print("Environment variables:")
+            with open(env_path, 'r') as f:
+                for line in f:
+                    print(f"  - {line.strip()}")
+
+        yml_path = os.path.splitext(overlay_path)[0] + ".yaml"
+        if os.path.isfile(yml_path):
+            print(f"Conda environment YAML file contents:")
+            with open(yml_path, 'r') as f:
+                for line in f:
+                    print(f"  {line.strip()}")
+
+class CondaTainer_Check:
+    @staticmethod
+    def add_parser_arguments(parser):
+        CondaTainer_Check.parser_check = parser.add_parser("check", help="Check if the dependencies of a script are installed")
+        CondaTainer_Check.parser_check.add_argument(
+            "script",
+            type=str,
+            help="Path to the script to check"
+        )
+        CondaTainer_Check.parser_check.add_argument(
+            "-a", "--auto-install",
+            action="store_true",
+            help="Automatically install missing dependencies"
+        )
+
+    @staticmethod
+    def parse_check_args(args):
+        script_path = args.script
+        if not os.path.isfile(script_path):
+            CondaTainer_Check.parser_check.error(f"Script file {script_path} not found.")
+        
+        deps = Utils.get_dependencies_from_script(script_path)
+        for d in deps:
+            Utils.print_message(f"Dependency found: {Utils.yellow_text(d)}")
+        missing_deps = Utils.check_overlays_installed(deps)
+        
+        if not missing_deps:
+            Utils.print_message("All dependencies are installed.")
+            return
+        
+        Utils.print_message("Missing dependencies:")
+        for md in missing_deps:
+            Utils.print_message(f"  - {Utils.yellow_text(md)}")
+        
+        if args.auto_install:
+            Utils.print_message("Attempting to auto-install missing dependencies...")
+            for md in missing_deps:
+                if CondaTainer_Create.auto_create_overlay_from_str(md):
+                    Utils.print_message(f"Dependency overlay {Utils.yellow_text(md)} created successfully.")
+                else:
+                    Utils.print_error(f"Failed to create dependency overlay {md}.")
+        else:
+            Utils.print_message("Run the command again with -a or --auto-install to automatically install missing dependencies.")
+
+class CondaTainer_Run:
+    @staticmethod
+    def add_parser_arguments(parser):
+        CondaTainer_Run.parser_run = parser.add_parser("run", help="Run a script and auto-solve the dependencies by #DEP tags")
+        CondaTainer_Run.parser_run.add_argument(
+            "script",
+            type=str,
+            help="Path to the script to run"
+        )
+        CondaTainer_Run.parser_run.add_argument(
+            "-a", "--auto-install",
+            action="store_true",
+            help="Automatically install missing dependencies"
+        )
+        CondaTainer_Run.parser_run.add_argument(
+            "script_args",
+            nargs=argparse.REMAINDER,
+            help="Arguments to pass to the script"
+        )
+
+    @staticmethod
+    def parse_run_args(args):
+        script_path = args.script
+        if not os.path.isfile(script_path):
+            CondaTainer_Run.parser_run.error(f"Script file {script_path} not found.")
+        
+        deps = Utils.get_dependencies_from_script(script_path)
+        missing_deps = Utils.check_overlays_installed(deps)
+        
+        if missing_deps:
+            Utils.print_message("Missing dependencies:")
+            for md in missing_deps:
+                Utils.print_message(f"  - {Utils.yellow_text(md)}")
+            
+            if args.auto_install:
+                Utils.print_message("Attempting to auto-install missing dependencies...")
+                for md in missing_deps:
+                    if CondaTainer_Create.auto_create_overlay_from_str(md):
+                        Utils.print_message(f"Dependency overlay {Utils.yellow_text(md)} created successfully.")
+                    else:
+                        Utils.print_error(f"Failed to create dependency overlay {md}. Cannot proceed with running the script.")
+                        return
+            else:
+                Utils.print_message("Run the command again with -a or --auto-install to automatically install missing dependencies.")
+                return
+        
+        Utils.print_message("All dependencies are installed. Running the script...")
+        CondaTainer_Exec.exec_command(deps, ["/bin/bash", script_path] + args.script_args)
+
+if __name__ == "__main__":
+    main()
