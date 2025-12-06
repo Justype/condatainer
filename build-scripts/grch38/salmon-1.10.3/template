@@ -1,40 +1,43 @@
 #!/usr/bin/bash
-#DEP:grch38/genome/gencode
-#DEP:grch38/gtf/gencode47
-#DEP:star/2.7.11b
-#WHATIS:STAR GRCh38 GENCODE47 index for read length 101
-#URL:https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf
-#ENV:STAR_INDEX_DIR=$app_root
+#DEP:${ASSEMBLY}/genome/gencode
+#DEP:${ASSEMBLY}/transcript-gencode/${GENCODE_VERSION}
+#DEP:salmon/1.10.3
+#WHATIS:Salmon ${ASSEMBLY} GENCODE ${GENCODE_VERSION} index for transcript quantification
+#URL:https://combine-lab.github.io/salmon/
+#ENV:SALMON_INDEX_DIR=$app_root
+#ENVNOTE:Salmon index for ${ASSEMBLY} GENCODE v${GENCODE_VERSION}
 
 #########################################################
-# If you want to build index for another annotation version,
-#   1. copy the script to a new name, e.g., gencode49-151
-#   2. change the dependencies to the new genome and transcriptome data (my script will autodetect the read length from the script name)
-#   3. change the WHATIS line accordingly
-#
-# - https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf
-# - sjdbOverhang default value is 100
+# - https://combine-lab.github.io/salmon/
+# - https://salmon.readthedocs.io/en/latest/salmon.html#preparing-transcriptome-indices-mapping-based-mode
 #########################################################
-
-# Get the sequence length from the script name
-script_name=$(basename "$0")
-seq_len=${script_name##*-} # extract everything after the last hyphen
-build_len=$((seq_len - 1))
 
 install_app() {
     # By default, $target_dir and $tmp_dir are created and we are now in $tmp_dir
-    if [ -z "$ANNOTATION_GTF" ]; then
-        pigz_or_gunzip_pipe "$ANNOTATION_GTF_GZ" > annotation.gtf
-        ANNOTATION_GTF="annotation.gtf"
+    print_stderr "Appending genome to transcriptome and generating decoys..."
+
+    cat "$TRANSCRIPT_FASTA" > gentrome.fa
+    cat "$GENOME_FASTA" >> gentrome.fa
+
+    if [ -f "${GENOME_FASTA}.fai" ]; then
+        print_stderr "Using existing ${YELLOW}${GENOME_FASTA}.fai${NC} to generate decoys"
+        cat "${GENOME_FASTA}.fai" | cut -f 1 > decoys.txt
+    else
+        print_stderr "Using fastq header lines to generate decoys"
+        cat "$GENOME_FASTA" | \
+            grep "^>" | \
+            cut -d " " -f 1 | \
+            sed 's/^>//' \
+            > decoys.txt
     fi
     
-    print_stderr "Building STAR index for ${YELLOW}${app_name_version}${NC}"
-    STAR --runThreadN $ncpu \
-        --runMode genomeGenerate \
-        --genomeDir "$target_dir" \
-        --genomeFastaFiles "$GENOME_FASTA" \
-        --sjdbGTFfile "$ANNOTATION_GTF" \
-        --sjdbOverhang $build_len
+    print_stderr "Building Salmon index for ${YELLOW}${app_name_version}${NC}"
+    salmon index \
+        -p $ncpu \
+        -t gentrome.fa \
+        -d decoys.txt \
+        -i "$target_dir" \
+        --gencode
 }
 
 # Available variables:
@@ -46,6 +49,7 @@ install_app() {
 # - target_dir:       opt/assembly/data_type/version (set by condatainer)
 # - tmp_dir:          tmp directory (set by condatainer)
 
+set -e # exit on error
 RED='\033[0;91m'    # Red      WARNING or ERROR
 BLUE='\033[0;94m'   # Blue     Dependency or Modulefile Changes
 YELLOW='\033[0;93m' # Yellow   App Name and/or Version
