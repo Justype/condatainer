@@ -1195,10 +1195,11 @@ class CondaTainer_Exec:
         n_img = 0
         last_img = None
         writable_path = None
-        for o in overlay_paths:
-            if o.endswith('.img'):
-                last_img = o
-                n_img += 1
+        if overlay_paths:
+            for o in overlay_paths:
+                if o.endswith('.img'):
+                    last_img = o
+                    n_img += 1
 
         if last_img is not None and CondaTainer_Exec.IMG_WRITABLE:
             writable_path = f"/ext3/{os.path.splitext(os.path.basename(last_img))[0].replace('=', '/').replace('--', '/')}"
