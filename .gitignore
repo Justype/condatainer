@@ -1,5 +1,7 @@
 # Ignore micromamba binary
 bin/micromamba
+# Ignore local apptainer
+apptainer
 
 # Ignore image files and temporary files
 images
@@ -8,3 +10,6 @@ tmp*
 cnt
 *.img
 *.sqf
+*.sif
+*deb
+*rpm
