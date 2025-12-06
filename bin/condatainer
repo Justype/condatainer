@@ -22,7 +22,8 @@ class Config:
     REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json"
 
     # Folder paths
-    PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
+    SCRIPT_PATH = os.path.abspath(__file__)
+    PROGRAM_DIR = os.path.dirname(SCRIPT_PATH)
     CONDATINER_DIR = os.path.abspath(os.path.join(PROGRAM_DIR, ".."))
     BUILD_SCRIPTS_DIR = os.path.join(CONDATINER_DIR, "build-scripts")
     IMAGES_DIR = os.path.join(CONDATINER_DIR, "images")
@@ -64,6 +65,7 @@ def main():
     subparsers.add_parser("list", help="List all installed overlays")
     CondaTainer_Info.add_parser_arguments(subparsers)
     CondaTainer_Apptainer.add_parser_arguments(subparsers)
+    CondaTainer_Update.add_parser_arguments(subparsers)
     subparsers.add_parser("help", help="Show help information about CondaTainer")
 
     args = parser.parse_args()
@@ -89,6 +91,8 @@ def main():
         CondaTainer_Avail.parse_avail_args(args)
     elif args.action == "apptainer":
         CondaTainer_Apptainer.parse_apptainer_args(args)
+    elif args.action == "update":
+        CondaTainer_Update.parse_update_args(args)
     elif args.action == "help":
         parser.print_help()
 
@@ -114,29 +118,28 @@ class Utils:
 
     @staticmethod
     def print_message(message):
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
 
     @staticmethod
     def print_debug(message):
         if Config.DEBUG:
-            print(f"[{Utils.yellow_text('DEBUG')}]", end=" ")
+            print(f"[{Utils.yellow_text('DEBUG')}]", end=" ", flush=True)
             print(message)
 
     @staticmethod
     def print_note(message):
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}][{Utils.blue_text('NOTE')}] {message}")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}][{Utils.blue_text('NOTE')}] {message}", flush=True)
 
     @staticmethod
     def print_warning(message):
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}][{Utils.yellow_text('WARNING')}] {message}", file=sys.stderr)
-
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}][{Utils.yellow_text('WARNING')}] {message}", file=sys.stderr, flush=True)
     @staticmethod
     def print_error(message):
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}][{Utils.red_text('ERROR')}] {message}", file=sys.stderr)
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}][{Utils.red_text('ERROR')}] {message}", file=sys.stderr, flush=True)
 
     @staticmethod
     def print_success(message):
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}][{Utils.green_text('SUCCESS')}] {message}")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}][{Utils.green_text('SUCCESS')}] {message}", flush=True)
 
     @staticmethod
     def ensure_apptainer():
@@ -1608,6 +1611,33 @@ class CondaTainer_Apptainer:
             shutil.rmtree(os.path.join(Config.CONDATINER_DIR, "micromamba_env"), ignore_errors=True)
         except subprocess.CalledProcessError:
             Utils.print_error("Failed to install Apptainer.")
+
+class CondaTainer_Update:
+    script_url = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/bin/condatainer"
+
+    @staticmethod
+    def add_parser_arguments(parser):
+        CondaTainer_Update.parser_update = parser.add_parser("update", help="Update CondaTainer to the latest version")
+        CondaTainer_Update.parser_update.add_argument(
+            "-y", "--yes",
+            action="store_true",
+            help="Automatically confirm update"
+        )
+
+    @staticmethod
+    def parse_update_args(args):
+        print("Are you sure to download and replace the current script from GitHub? [y/N]: ", end="", flush=True)
+        if not args.yes:
+            confirm = input()
+            if confirm.lower() != 'y':
+                Utils.print_message("Update cancelled by user.")
+                return
+
+        Utils.print_message("Downloading the latest CondaTainer script...")
+        Utils.download_file(CondaTainer_Update.script_url, Config.SCRIPT_PATH + ".tmp")
+        os.chmod(Config.SCRIPT_PATH + ".tmp", 0o775)
+        shutil.move(Config.SCRIPT_PATH + ".tmp", Config.SCRIPT_PATH)
+        Utils.print_success("CondaTainer updated successfully.")
 
 if __name__ == "__main__":
     main()
