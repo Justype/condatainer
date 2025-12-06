@@ -43,12 +43,12 @@ class Config:
 
     # Utils
     NCPUS = os.environ.get("SLURM_CPUS_PER_TASK", 4)
+    GZIP = "-comp gzip"
     ZSTD_FAST = "-comp zstd -Xcompression-level 3"
     ZSTD_MEDIUM = "-comp zstd -Xcompression-level 8"
     ZSTD = "-comp zstd -Xcompression-level 14"
-    ZSTD_HIGH = "-comp zstd -Xcompression-level 18"
     LZ4 = "-comp lz4"
-    COMPRESS_ARGS = ZSTD
+    COMPRESS_ARGS = LZ4
 
 def main():
     parser = argparse.ArgumentParser(description="CondaTainer CLI Tool\nUse apptainer/conda/squashFS to manage tools for HPC users.")
@@ -133,7 +133,7 @@ class Utils:
     @staticmethod
     def print_error(message):
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}][{Utils.red_text('ERROR')}] {message}", file=sys.stderr)
-    
+
     @staticmethod
     def print_success(message):
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}][{Utils.green_text('SUCCESS')}] {message}")
@@ -231,12 +231,12 @@ class Utils:
                     data_type_path = os.path.join(script_path, data_type)
                     sub_versions = os.listdir(data_type_path)
                     for version in sub_versions:
-                        packages[f"{script_name}={data_type}={version}"] = data_type_path
+                        packages[f"{script_name}={data_type}={version}"] = os.path.join(data_type_path, version)
             else:
                 for version in versions:
                     if version.startswith("template") or version.endswith('.sh') or version.endswith('.py'):
                         continue
-                    packages[f"{script_name}={version}"] = script_path
+                    packages[f"{script_name}={version}"] = os.path.join(script_path, version)
 
         Utils.local_build_scripts_paths = packages
         return packages
@@ -282,7 +282,7 @@ class Utils:
         if os.path.isfile(Config.LOCAL_APPTAINER_BIN):
             Config.APPTAINER_PATH = Config.LOCAL_APPTAINER_BIN
             Utils.print_message(f"Using local Apptainer binary at {Config.APPTAINER_PATH}")
-        
+
         if not Utils.ensure_apptainer():
             exit(1)
         if os.path.isfile(Config.BASE_IMAGE_SIF):
@@ -372,7 +372,7 @@ class Utils:
         """
         dependencies = []
         if not os.path.isfile(script_path):
-            Utils.print_error(f"Build script not found at {script_path}.")
+            Utils.print_error(f"Build script not found at {script_path}")
             return dependencies
 
         with open(script_path, 'r') as f:
@@ -401,11 +401,11 @@ class Utils:
             elif nv not in installed_overlays:
                 missing.append(nv)
         return missing
-    
+
     @staticmethod
     def is_in_interactive_shell() -> bool:
         return sys.stdin.isatty() and sys.stdout.isatty()
-    
+
     @staticmethod
     def generate_bind_args(*paths: str) -> List[str]:
         """
@@ -485,9 +485,9 @@ class CondaTainer_Create:
             help="Use zstd compression level 14" + (" (default)" if Config.COMPRESS_ARGS == Config.ZSTD else "")
         )
         CondaTainer_Create.parser_create.add_argument(
-            "--zstd-high",
+            "--gzip",
             action="store_true",
-            help="Use zstd compression level 19" + (" (default)" if Config.COMPRESS_ARGS == Config.ZSTD_HIGH else "")
+            help="Use gzip compression" + (" (default)" if Config.COMPRESS_ARGS == Config.GZIP else "")
         )
         CondaTainer_Create.parser_create.add_argument(
             "--lz4",
@@ -726,7 +726,7 @@ class CondaTainer_Create:
         if not os.path.isfile(script_path):
             Utils.print_error(f"Build script not found at {script_path}.")
             return env_settings
-        
+
         parsed_lines = []
 
         with open(script_path, 'r') as f:
@@ -1185,7 +1185,6 @@ class CondaTainer_Exec:
         path_env = CondaTainer_Exec.get_path_env(overlay_paths)
         env_params = CondaTainer_Exec.get_overlay_env_configs(overlay_paths)
 
-        
         n_img = 0
         last_img = None
         writable_path = None
@@ -1193,7 +1192,7 @@ class CondaTainer_Exec:
             if o.endswith('.img'):
                 last_img = o
                 n_img += 1
-        
+
         if last_img is not None and CondaTainer_Exec.IMG_WRITABLE:
             writable_path = f"/ext3/{os.path.splitext(os.path.basename(last_img))[0].replace('=', '/').replace('--', '/')}"
 
@@ -1366,6 +1365,16 @@ class CondaTainer_Info:
                 for line in f:
                     print(f"  - {line.strip()}")
 
+class CondaTainer_Dep:
+    @staticmethod
+    def add_parser_arguments(parser):
+        CondaTainer_Dep.parser_dep = parser.add_parser("dep", help="Get dependencies of a script")
+        CondaTainer_Dep.parser_dep.add_argument(
+            "script",
+            type=str,
+            help="Path to the script to analyze"
+        )
+
 class CondaTainer_Check:
     @staticmethod
     def add_parser_arguments(parser):
@@ -1383,9 +1392,28 @@ class CondaTainer_Check:
 
     @staticmethod
     def parse_check_args(args):
-        script_path = args.script
-        if not os.path.isfile(script_path):
-            CondaTainer_Check.parser_check.error(f"Script file {script_path} not found.")
+        script_path_or_name = args.script
+        if not os.path.isfile(script_path_or_name):
+            script_path_or_name = Utils.normalize_name_version(script_path_or_name)
+            local_build_scripts = Utils.get_local_build_scripts()
+            Utils.print_debug(f"[CHECK] Checking for build script {script_path_or_name} locally and remotely...")
+            if script_path_or_name in local_build_scripts:
+                script_path = local_build_scripts[script_path_or_name]
+                Utils.print_message(f"Found local build script {script_path}")
+            elif script_path_or_name in Utils.fetch_remote_build_scripts():
+                Utils.print_message(f"Downloading build script for {script_path_or_name} from remote metadata...")
+                url = Utils.fetch_remote_build_scripts()[script_path_or_name]
+                script_path = os.path.join(Config.CONDATINER_DIR, "tmp_build_script.sh")
+                if Utils.download_file(url, script_path):
+                    Utils.print_message(f"Downloaded build script to {script_path}")
+                else:
+                    Utils.print_error(f"Failed to download build script for {script_path_or_name} from {url}.")
+                    return
+            else:
+                Utils.print_error(f"Build script for {script_path_or_name} not found.")
+                return
+        else:
+            script_path = script_path_or_name
 
         deps = Utils.get_dependencies_from_script(script_path)
         for d in deps:
@@ -1463,7 +1491,7 @@ class CondaTainer_Run:
         args_from_script = CondaTainer_Run.parse_args_in_script(args.script)
         merged = args_from_script + sys.argv[2:]
         args = CondaTainer_Run.parser_run.parse_args(merged)
-        
+
         if Config.DEBUG and args_from_script:
             Utils.print_debug("[RUN] Additional script arguments found:")
             for sa in args_from_script:
@@ -1514,7 +1542,7 @@ class CondaTainer_Apptainer:
             action="store_true",
             help="Force re-installation even if Apptainer is already installed"
         )
-    
+
     @staticmethod
     def parse_apptainer_args(args):
         if os.path.isdir(Config.LOCAL_APPTAINER_DIR) and not args.force:
@@ -1528,12 +1556,12 @@ class CondaTainer_Apptainer:
                 return
 
         CondaTainer_Apptainer.install_apptainer(args.force)
-    
+
     @staticmethod
     def secure_local_micromamba():
         if os.path.exists(Config.LOCAL_MICROMAMBA_BIN):
             return True
-        
+
         # Detect architecture
         machine = platform.machine()
         if machine in ("aarch64", "ppc64le", "arm64"):
@@ -1555,11 +1583,11 @@ class CondaTainer_Apptainer:
         if not CondaTainer_Apptainer.secure_local_micromamba():
             Utils.print_error("Cannot proceed with Apptainer installation without Micromamba.")
             return
-        
+
         if not force and os.path.isdir(Config.LOCAL_APPTAINER_DIR):
             Utils.print_message(f"Apptainer already exists at {Config.LOCAL_APPTAINER_DIR}. Use -f or --force to re-install.")
             return
-        
+
         Utils.print_message("Installing Apptainer using Micromamba...")
         cmd_install = [
             Config.LOCAL_MICROMAMBA_BIN, 
