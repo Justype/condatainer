@@ -144,9 +144,10 @@ class Utils:
     @staticmethod
     def ensure_apptainer():
         if Config.APPTAINER_PATH is None:
-            Utils.print_message("Apptainer not found in PATH.")
-            Utils.print_message("Make sure you load the Apptainer module in your HPC system.")
-            Utils.print_message("If there is no Apptainer module, please contact your system administrator.")
+            Utils.print_error("Apptainer not found in PATH.")
+            Utils.print_note(f"Make sure you load the Apptainer module in your HPC system. Please consider running: {Utils.blue_text('ml apptainer')}")
+            Utils.print_note("If there is no Apptainer module, please contact your system administrator.")
+            Utils.print_note(f"Try {Utils.blue_text('ml av apptainer')} to see available Apptainer modules.")
             return False
         return True
 
