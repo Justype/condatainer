@@ -2,9 +2,13 @@
 #WHATIS:Cell Ranger GRCh38 2024-A index
 #URL:https://www.10xgenomics.com/support/software/cell-ranger/downloads#reference-downloads
 #ENV:CELLRANGER_REF_DIR=$app_root
+#ENVNOTE:cellranger reference dir
 #ENV:GENOME_FASTA=$app_root/fasta/genome.fa
+#ENVNOTE:genome fasta
 #ENV:ANNOTATION_GTF_GZ=$app_root/genes/genes.gtf.gz
+#ENVNOTE:10X modified gtf
 #ENV:STAR_INDEX_DIR=$app_root/star
+#ENVNOTE:STAR index dir
 
 install_app() {
     # By default, $target_dir and $tmp_dir are created and we are now in $tmp_dir
@@ -25,6 +29,7 @@ install_app() {
 # - target_dir:       opt/assembly/data_type/version (set by condatainer)
 # - tmp_dir:          tmp directory (set by condatainer)
 
+set -e # exit on error
 RED='\033[0;91m'    # Red      WARNING or ERROR
 BLUE='\033[0;94m'   # Blue     Dependency or Modulefile Changes
 YELLOW='\033[0;93m' # Yellow   App Name and/or Version

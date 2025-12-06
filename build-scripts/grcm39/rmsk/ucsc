@@ -2,6 +2,7 @@
 #WHATIS:GRCm39 RepeatMasker GTF
 #URL:https://genome.ucsc.edu/cgi-bin/hgTables
 #ENV:RMSK_GTF=$app_root/mm39_rmsk.gtf
+#ENVNOTE:GRCm39 RepeatMasker annotation GTF
 
 #########################################################
 # - https://genome.ucsc.edu/cgi-bin/hgTables?clade=mammal&org=Mouse&db=mm39&hgta_group=allTracks&hgta_track=rmsk&hgta_table=rmsk&hgta_regionType=genome&position=&hgta_outputType=gff&hgta_outFileName=mm39_rmsk.gtf&hgta_doTopSubmit=get+output
@@ -29,6 +30,7 @@ install_app() {
 # - target_dir:       opt/assembly/data_type/version (set by condatainer)
 # - tmp_dir:          tmp directory (set by condatainer)
 
+set -e # exit on error
 RED='\033[0;91m'    # Red      WARNING or ERROR
 BLUE='\033[0;94m'   # Blue     Dependency or Modulefile Changes
 YELLOW='\033[0;93m' # Yellow   App Name and/or Version

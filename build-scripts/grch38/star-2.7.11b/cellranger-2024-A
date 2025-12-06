@@ -4,6 +4,7 @@
 #WHATIS:STAR GRCh38 10X Genomics 2024-A index
 #URL:https://www.10xgenomics.com/support/software/cell-ranger/downloads/cr-ref-build-steps
 #ENV:STAR_INDEX_DIR=$app_root
+#ENVNOTE:STAR index for based on 10X modified 2024-A annotation
 
 #########################################################
 # Use STAR to build cellranger compatible genome index
@@ -33,6 +34,7 @@ install_app() {
 # - target_dir:       opt/assembly/data_type/version (set by condatainer)
 # - tmp_dir:          tmp directory (set by condatainer)
 
+set -e # exit on error
 RED='\033[0;91m'    # Red      WARNING or ERROR
 BLUE='\033[0;94m'   # Blue     Dependency or Modulefile Changes
 YELLOW='\033[0;93m' # Yellow   App Name and/or Version

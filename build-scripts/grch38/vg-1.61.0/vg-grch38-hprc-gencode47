@@ -1,17 +1,24 @@
 #!/usr/bin/bash
 #DEP:grch38/genome/gencode
-#DEP:grch38/gtf/gencode47
+#DEP:grch38/gtf-gencode/47
 #DEP:grch38/vcf/hprc-v1.1-decomposed-gencode
 #DEP:vg/1.61.0
 #WHATIS:VG graph genome with GRCh38 and GENCODE47
 #URL:https://github.com/vgteam/vg
 #ENV:VG_XG=$app_root/hprc-v1.1-mc-grch38-gencode47.spliced.xg
+#ENVNOTE:xg spliced genome index: vg mpmap, rpvg
 #ENV:VG_DIST=$app_root/hprc-v1.1-mc-grch38-gencode47.spliced.dist
+#ENVNOTE:dist index: vg mpmap
 #ENV:VG_GCSA=$app_root/hprc-v1.1-mc-grch38-gencode47.spliced.gcsa
+#ENVNOTE:gcsa2 index: vg mpmap
 #ENV:VG_GCSA_LCP=$app_root/hprc-v1.1-mc-grch38-gencode47.spliced.gcsa.lcp
+#ENVNOTE:gcsa2 lcp index: vg mpmap
 #ENV:VG_GBWT=$app_root/hprc-v1.1-mc-grch38-gencode47.haplotx.gbwt
+#ENVNOTE:gbwt haplotype paths: vg rpvg
 #ENV:VG_GBWT_RI=$app_root/hprc-v1.1-mc-grch38-gencode47.haplotx.gbwt.ri
+#ENVNOTE:gbwt index
 #ENV:VG_TXORIGIN_TSV=$app_root/hprc-v1.1-mc-grch38-gencode47.txorigin.tsv
+#ENVNOTE:transcript origin TSV: vg rpvg
 
 #########################################################
 # VG graph genome with GRCh38 and GENCODE47
@@ -28,7 +35,7 @@ install_app() {
     vg autoindex --workflow mpmap --workflow rpvg \
         --prefix hprc-v1.1-mc-grch38-gencode47 \
         --ref-fasta $GENOME_FASTA \
-        --tx-gff $ANNOTATION_GTF_GZ \
+        --tx-gff $ANNOTATION_GTF \
         --vcf $HPRC_GENCODE_VCF_GZ \
         --threads $ncpu \
         --target-mem 400G \
@@ -52,6 +59,7 @@ install_app() {
 # - target_dir:       opt/assembly/data_type/version (set by condatainer)
 # - tmp_dir:          tmp directory (set by condatainer)
 
+set -e # exit on error
 RED='\033[0;91m'    # Red      WARNING or ERROR
 BLUE='\033[0;94m'   # Blue     Dependency or Modulefile Changes
 YELLOW='\033[0;93m' # Yellow   App Name and/or Version
