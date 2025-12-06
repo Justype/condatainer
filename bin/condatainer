@@ -514,6 +514,8 @@ class CondaTainer_Create:
             Config.COMPRESS_ARGS = Config.ZSTD_MEDIUM
         elif args.zstd:
             Config.COMPRESS_ARGS = Config.ZSTD
+        elif args.gzip:
+            Config.COMPRESS_ARGS = Config.GZIP
 
         if args.name_versions:
             args.name_versions = [Utils.normalize_name_version(nv) for nv in args.name_versions]

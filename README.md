@@ -118,7 +118,7 @@ IMG naming:
   - Please do not use `conda` as the name. My `micromamba` will use /ext3/conda/ for its root prefix.
 
 > [!NOTE]
-> Do not change the name of the overlay files after creation. Otherwise, the internal paths will not match.
+> Do not change the name of the overlay files after creation. Otherwise, the internal paths will not match. e.g. R libs may use symlinks.
 
 ## How does it work?
 
@@ -185,8 +185,10 @@ sudo apt install uidmap squashfuse gocryptfs fuse-overlayfs
 
 ### Compression method for squashfs overlays
 
+- Because the old apptainer version does not support zstd compression, `lz4` is used by default for better compatibility.
 - Use `zstd` compression level 14 for best speed/size tradeoff for squashfs overlays. 
-  - (You can also use `--lz4` for faster reading speed, but much larger file size, about 2x)
+  - (Use `--lz4` for faster reading speed, but much larger file size, about 2x)
+  - `--gzip` is also supported, but not recommended.
 - zstd has better compression ratio and IO speed than gzip.
 
 I used cellranger 9.0.1 to benchmark various compression methods for squashfs.
