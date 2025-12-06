@@ -99,4 +99,9 @@ os.makedirs(os.path.dirname(OUT_FILE), exist_ok=True)
 with open(OUT_FILE, 'w') as f:
     json.dump(metadata, f, indent=2, sort_keys=True)
 
+# write metadata to gzipped version
+import gzip
+with gzip.open(OUT_FILE + '.gz', 'wt') as f:
+    json.dump(metadata, f, indent=2, sort_keys=True)
+
 print(f'Wrote metadata for {len(metadata)} entries to {OUT_FILE}')
