@@ -1,0 +1,104 @@
+#!/usr/bin/bash
+#DEP:grcm39/genome/gencode
+#DEP:grcm39/gtf-gencode/M24
+#DEP:star/2.7.11b
+#WHATIS:STAR grcm39 GENCODEM24 index for read length 101
+#URL:https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf
+#ENV:STAR_INDEX_DIR=$app_root
+#ENVNOTE:STAR index for grcm39 GENCODE vM24 with read length 101
+
+#########################################################
+# - sjdbOverhang default value is 100
+#########################################################
+
+install_app() {
+    # By default, $target_dir and $tmp_dir are created and we are now in $tmp_dir
+    if [ -z "$ANNOTATION_GTF" ]; then
+        pigz_or_gunzip_pipe "$ANNOTATION_GTF_GZ" > annotation.gtf
+        ANNOTATION_GTF="annotation.gtf"
+    fi
+    
+    print_stderr "Building STAR index for ${YELLOW}${app_name_version}${NC}"
+    STAR --runThreadN $ncpu \
+        --runMode genomeGenerate \
+        --genomeDir "$target_dir" \
+        --genomeFastaFiles "$GENOME_FASTA" \
+        --sjdbGTFfile "$ANNOTATION_GTF" \
+        --sjdbOverhang 100
+}
+
+# Available variables:
+# - ncpu: number of cores to use (default: 4) will be overwritten by SLURM_CPUS_PER_TASK
+# - app_name:         name     of the app (set by condatainer)
+# - version:          version  of the app (set by condatainer)
+# - app_name_version: name/version        (set by condatainer)
+
+# - target_dir:       opt/assembly/data_type/version (set by condatainer)
+# - tmp_dir:          tmp directory (set by condatainer)
+
+set -e # exit on error
+RED='\033[0;91m'    # Red      WARNING or ERROR
+BLUE='\033[0;94m'   # Blue     Dependency or Modulefile Changes
+YELLOW='\033[0;93m' # Yellow   App Name and/or Version
+NC='\033[0m'        # No Color
+ncpu=${SLURM_CPUS_PER_TASK:-4} # number of cores to use when building from source
+
+install() {
+    print_stderr "Installing the target module: ${YELLOW}${app_name_version}${NC}"
+    print_stderr "🎯 Target directory: $target_dir"
+    # if target directory exists, exit 1
+    if [ -d "$target_dir" ]; then
+        print_stderr "${RED}ERROR${NC}: Target app dir exists!"
+        print_stderr "Exit Installing"
+        exit 1
+    fi
+
+    if [[ -z "$tmp_dir" ]]; then
+        print_stderr "${RED}ERROR${NC}: tmp_dir is not set!"
+        print_stderr "Exit Installing"
+        exit 1
+    fi
+
+    if [[ -z "$target_dir" ]]; then
+        print_stderr "${RED}ERROR${NC}: target_dir is not set!"
+        print_stderr "Exit Installing"
+        exit 1
+    fi
+
+    mkdir -p "$target_dir"
+    mkdir -p "$tmp_dir"
+    cd "$tmp_dir"
+    install_app
+    print_stderr "✅ Installation completed. ${YELLOW}${app_name_version}${NC} is ready to use."
+}
+
+print_stderr() {
+    printf "[`date +"%Y-%m-%d %T"`] $1\n" 1>&2
+}
+
+pigz_or_gunzip() {
+    if command -v pigz &> /dev/null; then
+        pigz -d -p $ncpu "$1"
+    else
+        gunzip "$1"
+    fi
+}
+
+pigz_or_gunzip_pipe() {
+    if command -v pigz &> /dev/null; then
+        pigz -d -p $ncpu -c "$1"
+    else
+        gunzip -c "$1"
+    fi
+}
+
+tar_xf_pigz() {
+    if command -v pigz &> /dev/null; then
+        tar --use-compress-program="pigz -d -p $ncpu" -xf "$@"
+    else
+        tar -xzf "$1"
+    fi
+}
+#endregion
+
+install
