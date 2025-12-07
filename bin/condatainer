@@ -59,13 +59,13 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
     subparsers = parser.add_subparsers(dest="action", required=True, help="Available actions")
 
-    CondaTainer_Avail.add_parser_arguments(subparsers)
     CondaTainer_Create.add_parser_arguments(subparsers)
-    CondaTainer_Exec.add_parser_arguments(subparsers)
-    CondaTainer_Check.add_parser_arguments(subparsers)
-    CondaTainer_Run.add_parser_arguments(subparsers)
+    CondaTainer_Avail.add_parser_arguments(subparsers)
     CondaTainer_List.add_parser_arguments(subparsers)
     CondaTainer_Remove.add_parser_arguments(subparsers)
+    CondaTainer_Exec.add_parser_arguments(subparsers)
+    CondaTainer_Run.add_parser_arguments(subparsers)
+    CondaTainer_Check.add_parser_arguments(subparsers)
     CondaTainer_Info.add_parser_arguments(subparsers)
     CondaTainer_Apptainer.add_parser_arguments(subparsers)
     CondaTainer_Update.add_parser_arguments(subparsers)
@@ -1367,7 +1367,7 @@ class CondaTainer_Avail:
             else:
                 uninstalled_packages.append(pkg)
 
-        if args.install and args.terms and uninstalled_packages:
+        if Utils.is_in_interactive_shell() and args.install and args.terms and uninstalled_packages:
             Utils.print_message("Do you want to install the above overlays? [y/N]: ", end="")
             choice = input().strip().lower()
             if choice != 'y':
