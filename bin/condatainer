@@ -45,6 +45,7 @@ class Config:
 
     # Utils
     NCPUS = os.environ.get("SLURM_CPUS_PER_TASK", 4)
+    GZIP_FAST = "-comp gzip -Xcompression-level 3"
     GZIP = "-comp gzip"
     ZSTD_FAST = "-comp zstd -Xcompression-level 3"
     ZSTD_MEDIUM = "-comp zstd -Xcompression-level 8"
@@ -368,6 +369,8 @@ class CondaTainer:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError:
             Utils.print_error("Creating temporary overlay failed.")
+            Utils.print_note("Please contact your system admin.")
+            Utils.print_note("You can try ModGen to create Lmod modules without apptainer and overlays.")
             return False
         Utils.print_message("Temporary overlay created successfully.")
         return True
@@ -558,7 +561,7 @@ class CondaTainer_Create:
                         Utils.print_message(f"Overlay {Utils.yellow_text(overlay_filepath)} already exists at {overlay_path}. Skipping creation.")
                         return
 
-                    CondaTainer_Create.create_sqf(
+                    CondaTainer_Create.create_sqf_using_conda(
                         packages=packages,
                         overlay_path=overlay_path,
                         relative_path=relative_path
@@ -581,7 +584,7 @@ class CondaTainer_Create:
                         Utils.print_message(f"Overlay {Utils.yellow_text(os.path.basename(overlay_path))} already exists at {overlay_path}. Skipping creation.")
                         return
 
-                    CondaTainer_Create.create_sqf(
+                    CondaTainer_Create.create_sqf_using_conda(
                         packages=packages,
                         overlay_path=overlay_path,
                         relative_path=relative_path
@@ -611,7 +614,7 @@ class CondaTainer_Create:
         return content
 
     @staticmethod
-    def create_sqf(packages: List[str], overlay_path: str, relative_path) -> bool:
+    def create_sqf_using_conda(packages: List[str], overlay_path: str, relative_path) -> bool:
         Utils.print_message(f"Building SquashFS overlay at {overlay_path} with packages: {Utils.yellow_text(' '.join(packages))}")
 
         CondaTainer.create_tmp_overlay()
@@ -786,7 +789,7 @@ class CondaTainer_Create:
         remote_packages = Utils.fetch_remote_build_scripts().keys()
         avail_packages = set(local_packages).union(set(remote_packages))
         if f"{name}={version}" not in avail_packages:
-            return CondaTainer_Create.create_sqf(
+            return CondaTainer_Create.create_sqf_using_conda(
                 packages=[f"{name}={version}"],
                 overlay_path=overlay_path,
                 relative_path=relative_path
@@ -1296,7 +1299,7 @@ class CondaTainer_Avail:
         remote_packages = {}
         if Config.REMOTE_METADATA_URL:
             remote_packages = Utils.fetch_remote_build_scripts()
-        
+
         installed_overlays = CondaTainer.get_installed_overlays()
 
         added_packages = set()
