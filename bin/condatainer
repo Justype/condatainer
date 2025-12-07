@@ -5,12 +5,11 @@ import subprocess
 import re
 import shutil
 import argparse
-import time
 import json
 import urllib.request
 import platform
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 os.umask(0o002)
 
@@ -20,12 +19,15 @@ class Config:
     debug = False
     GITHUB_REPO = "Justype/condatainer"
     REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json.gz"
+    MODGEN_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/modgen"
+    CONDATAINER_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/condatainer"
 
     # Folder paths
     SCRIPT_PATH = os.path.abspath(__file__)
     SCRIPT_NAME = os.path.basename(SCRIPT_PATH)
     PROGRAM_DIR = os.path.dirname(SCRIPT_PATH)
     CONDATINER_DIR = os.path.abspath(os.path.join(PROGRAM_DIR, ".."))
+
     BUILD_SCRIPTS_DIR = os.path.join(CONDATINER_DIR, "build-scripts")
     IMAGES_DIR = os.path.join(CONDATINER_DIR, "images")
     REF_IMAGES_DIR = os.path.join(CONDATINER_DIR, "ref-images")
@@ -64,12 +66,13 @@ def main():
     CondaTainer_List.add_parser_arguments(subparsers)
     CondaTainer_Remove.add_parser_arguments(subparsers)
     CondaTainer_Exec.add_parser_arguments(subparsers)
-    CondaTainer_Run.add_parser_arguments(subparsers)
     CondaTainer_Check.add_parser_arguments(subparsers)
+    CondaTainer_Run.add_parser_arguments(subparsers)
     CondaTainer_Info.add_parser_arguments(subparsers)
     CondaTainer_Apptainer.add_parser_arguments(subparsers)
     CondaTainer_Update.add_parser_arguments(subparsers)
     subparsers.add_parser("help", help="Show help information about CondaTainer")
+    CondaTainer_ModGen.add_parser_arguments(subparsers)
 
     args = parser.parse_args()
     if args.debug:
@@ -100,6 +103,8 @@ def main():
         CondaTainer_Update.parse_update_args(args)
     elif args.action == "help":
         parser.print_help()
+    elif args.action == "modgen":
+        CondaTainer_ModGen.parse_modgen_args(args)
 
 class Utils:
     remote_build_scripts_links: Optional[Dict[str, str]] = None
@@ -152,7 +157,6 @@ class Utils:
             Utils.print_error("Apptainer not found in PATH.")
             Utils.print_note(f"Make sure you load the Apptainer module in your HPC system.")
             Utils.print_note(f"Please consider running: {Utils.blue_text('ml apptainer')}")
-            Utils.print_note(f"Try {Utils.blue_text('ml av apptainer')} to see available Apptainer modules.")
             Utils.print_note("If there is no Apptainer module, please contact your system administrator.")
             return False
         return True
@@ -258,7 +262,7 @@ class Utils:
     @staticmethod
     def download_executable(url: str, dest_path: str) -> bool:
         """
-        Download a remote script to `dest_path`. Creates parent dirs and
+        Download a remote build script to `dest_path`. Creates parent dirs and
         marks the file executable. Returns True on success.
         """
         try:
@@ -300,6 +304,8 @@ class Utils:
             Utils.print_error(f"Build script not found at {script_path}")
             return dependencies
 
+        module_load_regex = re.compile(r'^\s*(module\s+load)\s+(.+)$')
+
         with open(script_path, 'r') as f:
             for line in f:
                 if line.startswith("#DEP:"):
@@ -308,7 +314,55 @@ class Utils:
                         dependencies.append(dep_line)
                     else:
                         dependencies.append(Utils.normalize_name_version(dep_line))
+                else:
+                    line = line.strip()
+                    if module_load_regex.match(line):
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            for mod in parts[2:]:
+                                dependencies.append(Utils.normalize_name_version(mod))
+                    elif line.startswith("ml"):
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            for mod in parts[1:]:
+                                if mod in ("purge", "list", "avail", "av"):
+                                    break
+                                elif mod == "load":
+                                    continue
+                                dependencies.append(Utils.normalize_name_version(mod))
+
+        dependencies = list(dict.fromkeys(dependencies))  # Remove duplicates while preserving order
+
         return dependencies
+
+    @staticmethod
+    def share_to_ug_recursive(path: str):
+        """
+        Recursively set permissions:
+            - Files: ug+rw
+            - Folders: ug+rwx
+        """
+        for root, dirs, files in os.walk(path):
+            # Set directories
+            for d in dirs:
+                dir_path = os.path.join(root, d)
+                current_mode = os.stat(dir_path).st_mode
+                # Add read/write/execute for user & group
+                os.chmod(dir_path, current_mode | os.stat.S_IRUSR | os.stat.S_IWUSR | os.stat.S_IXUSR |
+                                            os.stat.S_IRGRP | os.stat.S_IWGRP | os.stat.S_IXGRP)
+
+            # Set files
+            for f in files:
+                file_path = os.path.join(root, f)
+                current_mode = os.stat(file_path).st_mode
+                # Add read/write for user & group
+                os.chmod(file_path, current_mode | os.stat.S_IRUSR | os.stat.S_IWUSR |
+                                            os.stat.S_IRGRP | os.stat.S_IWGRP)
+
+        # Finally, handle the top-level directory itself
+        current_mode = os.stat(path).st_mode
+        os.chmod(path, current_mode | os.stat.S_IRUSR | os.stat.S_IWUSR | os.stat.S_IXUSR |
+                                os.stat.S_IRGRP | os.stat.S_IWGRP | os.stat.S_IXGRP)
 
     @staticmethod
     def is_in_interactive_shell() -> bool:
@@ -1066,7 +1120,7 @@ class CondaTainer_Exec:
             "-o", "--overlay",
             dest="overlays",
             action="append",
-            help="Overlay package (can be used multiple times)"
+            help="Overlay (can be used multiple times)"
         )
         CondaTainer_Exec.parser_exec.add_argument(
             "-k", "--keep",
@@ -1358,14 +1412,12 @@ class CondaTainer_Avail:
             else:
                 print(pkg)
 
-        uninstalled_packages = []
+        uninstalled_packages = set()
         for pkg in filtered_packages:
             if "installed" in pkg:
                 continue
-            elif " (remote)" in pkg:
-                uninstalled_packages.append(pkg.replace(" (remote)", ""))
             else:
-                uninstalled_packages.append(pkg)
+                uninstalled_packages.add(pkg.split(' ')[0])
 
         if Utils.is_in_interactive_shell() and args.install and args.terms and uninstalled_packages:
             Utils.print_message("Do you want to install the above overlays? [y/N]: ", end="")
@@ -1373,19 +1425,18 @@ class CondaTainer_Avail:
             if choice != 'y':
                 Utils.print_message("Aborted overlay installation.")
                 return
-            
-            for pkg in filtered_packages:
-                pkg_name_version = pkg.split(' ')[0]  # Remove any (installed) markers
-                Utils.print_message(f"Installing overlay for {Utils.yellow_text(pkg_name_version)}...")
-                if CondaTainer_Create.auto_create_overlay_from_str(pkg_name_version):
-                    Utils.print_success(f"Overlay for {Utils.yellow_text(pkg_name_version)} installed successfully.")
+
+            for pkg in uninstalled_packages:
+                Utils.print_message(f"Installing overlay for {Utils.yellow_text(pkg)}...")
+                if CondaTainer_Create.auto_create_overlay_from_str(pkg):
+                    Utils.print_success(f"Overlay for {Utils.yellow_text(pkg)} installed successfully.")
                 else:
-                    Utils.print_error(f"Failed to install overlay for {Utils.yellow_text(pkg_name_version)}.")
+                    Utils.print_error(f"Failed to install overlay for {Utils.yellow_text(pkg)}.")
 
 class CondaTainer_List:
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_List.parser_list = parser.add_parser("list", help="List installed overlays based on search terms")
+        CondaTainer_List.parser_list = parser.add_parser("list", help="List installed overlays matching search terms")
         CondaTainer_List.parser_list.add_argument(
             "terms",
             type=str,
@@ -1393,19 +1444,14 @@ class CondaTainer_List:
             help="Search terms (AND logic applied)"
         )
         CondaTainer_List.parser_list.add_argument(
-            "-a", "--app",
+            "-d", "--delete",
             action="store_true",
-            help="Only list app overlays"
-        )
-        CondaTainer_List.parser_list.add_argument(
-            "-r", "--ref",
-            action="store_true",
-            help="Only list reference overlays"
+            help="Delete listed overlays after confirmation (used with terms)"
         )
 
     @staticmethod
     def parse_list_args(args):
-        if (not args.ref or args.app) and os.path.isdir(Config.IMAGES_DIR):
+        if os.path.isdir(Config.IMAGES_DIR):
             overlay_files = [f for f in os.listdir(Config.IMAGES_DIR) if f.endswith(('.sqf', '.img', '.squashfs'))]
             name_versions_dict = {}
             for overlay in overlay_files:
@@ -1431,7 +1477,7 @@ class CondaTainer_List:
                 for name in sorted(name_versions_dict.keys()):
                     print(f" {Utils.yellow_text(name.ljust(name_col_width))}: {', '.join(sorted(name_versions_dict[name]))}")
 
-        if (not args.app or args.ref) and os.path.isdir(Config.REF_IMAGES_DIR):
+        if os.path.isdir(Config.REF_IMAGES_DIR):
             ref_overlay_files = [
                 f for f in os.listdir(Config.REF_IMAGES_DIR) 
                     if f.endswith(('.sqf', '.img', '.squashfs')) and 
@@ -1453,10 +1499,14 @@ class CondaTainer_List:
                     else:
                         print(" " + name_version)
 
+        if Utils.is_in_interactive_shell() and args.delete and args.terms:
+            print("==================REMOVE==================")
+            CondaTainer_Remove.parse_remove_args(args)
+
 class CondaTainer_Remove:
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_Remove.parser_remove = parser.add_parser("remove", help="Remove installed overlays based on search terms")
+        CondaTainer_Remove.parser_remove = parser.add_parser("remove", help="Remove installed overlays matching search terms")
         CondaTainer_Remove.parser_remove.add_argument(
             "terms",
             type=str,
@@ -1495,7 +1545,7 @@ class CondaTainer_Remove:
                         flags=re.IGNORECASE
                     )
             print(f" - {highlighted}")
-        
+
         Utils.print_message("Are you sure? Cannot be undone. [y/N]: ", end="")
         choice = input().strip().lower()
         if choice != 'y':
@@ -1616,7 +1666,7 @@ class CondaTainer_Check:
                 else:
                     Utils.print_error(f"Failed to create dependency overlay {Utils.yellow_text(md)}.")
         else:
-            Utils.print_message(f"Run the command again with {Utils.blue_text('-a')} or {Utils.blue_text('--auto-install')} to automatically install missing dependencies.")
+            Utils.print_message(f"Run the command again with {Utils.blue_text('-a')} or {Utils.blue_text('--auto-install')} to install missing dependencies.")
 
 class CondaTainer_Run:
     @staticmethod
@@ -1626,11 +1676,6 @@ class CondaTainer_Run:
             "script",
             type=str,
             help="Path to the script to run"
-        )
-        CondaTainer_Run.parser_run.add_argument(
-            "-a", "--auto-install",
-            action="store_true",
-            help="Automatically install missing dependencies"
         )
         CondaTainer_Run.parser_run.add_argument(
             "-w", "--writable-img",
@@ -1682,25 +1727,12 @@ class CondaTainer_Run:
             for md in missing_deps:
                 Utils.print_message(f"  - {Utils.yellow_text(md)}")
 
-            if args.auto_install:
-                Utils.print_message("Attempting to auto-install missing dependencies...")
-                for md in missing_deps:
-                    if md.endswith(('.sqf', '.img', '.squashfs')):
-                        Utils.print_error(f"Custom overlay {Utils.yellow_text(md)} is missing. Cannot proceed with running the script.")
-                        return
-                    if CondaTainer_Create.auto_create_overlay_from_str(md):
-                        Utils.print_success(f"Dependency overlay {Utils.yellow_text(md)} created successfully.")
-                    else:
-                        Utils.print_error(f"Failed to create dependency overlay {Utils.yellow_text(md)}. Cannot proceed with running the script.")
-                        return
-            else:
-                Utils.print_message("Run the command again with -a or --auto-install to automatically install missing dependencies.")
-                return
+            Utils.print_message(f"Please run {Utils.blue_text(Config.SCRIPT_NAME + ' check -a')} to install missing dependencies.")
+            return
 
         if args.writable_img:
             CondaTainer_Exec.IMG_WRITABLE = True
 
-        Utils.print_message("All dependencies are installed. Running the script...")
         CondaTainer_Exec.exec_command(deps, ["/bin/bash", script_path] + script_args)
 
 class CondaTainer_Apptainer:
@@ -1788,8 +1820,6 @@ class CondaTainer_Apptainer:
             Utils.print_error("Failed to install Apptainer.")
 
 class CondaTainer_Update:
-    script_url = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/bin/condatainer"
-
     @staticmethod
     def add_parser_arguments(parser):
         CondaTainer_Update.parser_update = parser.add_parser("update", help="Update CondaTainer to the latest version")
@@ -1809,12 +1839,61 @@ class CondaTainer_Update:
                 return
 
         Utils.print_message("Downloading the latest CondaTainer script...")
-        if Utils.download_executable(CondaTainer_Update.script_url, Config.SCRIPT_PATH + ".tmp"):
+        if Utils.download_executable(Config.CONDATAINER_URL, Config.SCRIPT_PATH + ".tmp"):
             os.chmod(Config.SCRIPT_PATH + ".tmp", 0o775)
             shutil.move(Config.SCRIPT_PATH + ".tmp", Config.SCRIPT_PATH)
             Utils.print_success("CondaTainer updated successfully.")
         else:
             Utils.print_error("Failed to download the latest CondaTainer script.")
+
+class CondaTainer_ModGen:
+    @staticmethod
+    def add_parser_arguments(parser):
+        CondaTainer_ModGen.parser_modgen = parser.add_parser("modgen", help="Get latest modgen executable from GitHub")
+        CondaTainer_ModGen.parser_modgen.add_argument(
+            "-y", "--yes",
+            action="store_true",
+            help="Automatically confirm installation"
+        )
+        CondaTainer_ModGen.parser_modgen.add_argument(
+            "-f", "--force",
+            action="store_true",
+            help="Force overwrite if CondaTainer is already installed"
+        )
+
+    @staticmethod
+    def parse_modgen_args(args):
+        if not Utils.is_in_interactive_shell():
+            return
+
+        Utils.print_message(f"{Utils.blue_text('ModGen')}: Use conda and build scripts to create environment-modules or Lmod modules.")
+        Utils.print_message(f"Which is another way to manage software environments compared to {Utils.blue_text('CondaTainer')}.")
+        Utils.print_message(f"HPC systems often have numbers of prebuilt modules available via Lmod.")
+        Utils.print_message(f"{Utils.blue_text('ModGen')} will take the advantage of existing modules and only install missing modules via micromamba.")
+        print("", flush=True)
+
+        target_path = os.path.join(os.path.dirname(Config.SCRIPT_PATH), "modgen")
+        if os.path.isfile(target_path) and not args.force:
+            Utils.print_message(f"ModGen is already installed at {Utils.blue_text(target_path)}.")
+            Utils.print_message("Overwrite? [y/N]: ", end="", flush=True)
+            if not args.yes:
+                confirm = input()
+                if confirm.lower() != 'y':
+                    Utils.print_message("Installation cancelled by user.")
+                    return
+
+        if not args.force and not args.yes:
+            Utils.print_message("Are you sure to install ModGen? [y/N]: ", end="", flush=True)
+            confirm = input()
+            if confirm.lower() != 'y':
+                Utils.print_message("Installation cancelled by user.")
+                return
+
+        Utils.print_message("Downloading ModGen...")
+        if Utils.download_executable(Config.MODGEN_URL, target_path):
+            Utils.print_success("ModGen installed successfully.")
+        else:
+            Utils.print_error("Failed to download ModGen.")
 
 if __name__ == "__main__":
     main()

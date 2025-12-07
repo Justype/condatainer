@@ -1,5 +1,7 @@
 # Ignore micromamba binary
 bin/micromamba
+micromamba_env
+conda
 # Ignore local apptainer
 apptainer
 
@@ -13,3 +15,9 @@ cnt
 *.sif
 *deb
 *rpm
+
+# modgen (generate lmod or environment modules files)
+apps
+apps-modules
+ref
+ref-modules

@@ -1,0 +1,40 @@
+#%Module1.0
+# Author: Ziyue Cheng
+# Environment modulefile for {APP_NAME} {APP_VERSION} 
+# Almost all of them are automated, you can modify whatis, ModulesHelp as needed.
+# You can also load other modules in this modulefile.
+#   module load openjdk/17.0.12
+
+# abs path of this file, like /somewhere/modules/apps-modules/app/x.x.x
+set abs_path [file normalize [info script]]
+# full name of this module, like app/x.x.x
+set app_full_name [module-info name]
+regexp {([^/]+)/([^/]+)} $app_full_name -> app_name app_version
+
+# abs path of modules, like /somewhere/modules
+set module_root [file dirname [file dirname [file dirname $abs_path]]]
+set app_root [file join $module_root apps $app_full_name]
+set current_datetime [clock format [clock seconds] -format "%Y-%m-%d %T"]
+
+module-whatis "{WHATIS}"
+proc ModulesHelp { } {
+    puts stderr "{HELP}"
+}
+
+# if { [module-info mode] == "load" } {
+#     puts stderr "\[$current_datetime\] Loading module $app_full_name"
+# # } elseif { [module-info mode] == "unload" } {
+# }
+
+if {[file isdirectory "$app_root/bin"]} {
+    prepend-path PATH $app_root/bin
+} elseif { [module-info mode] == "load" && ![info exists ::env(SLURM_JOB_ID)] } {
+    puts stderr "WARNING: No bin directory found in $app_full_name"
+}
+
+set env_var_name "[string toupper [string map { - _ . _ / _ } $app_name]]_HOME"
+setenv $env_var_name $app_root
+
+# Handle conflicts with other versions
+conflict $app_name
+
