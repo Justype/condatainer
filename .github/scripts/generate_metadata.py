@@ -34,7 +34,6 @@ for script_name in sorted(os.listdir(BUILD_SCRIPTS)):
     if not os.path.isdir(script_relative_dir):
         continue
 
-    # gather version entries (files or directories)
     versions = [v for v in sorted(os.listdir(script_relative_dir)) if not (v.startswith('template') or v.endswith('_data'))]
     if not versions:
         continue
@@ -43,12 +42,10 @@ for script_name in sorted(os.listdir(BUILD_SCRIPTS)):
     # If the first entry is a directory, assume structure is script_name/data_type/version
     if os.path.isdir(os.path.join(script_relative_dir, first)):
         for data_type in versions:
-            if data_type.startswith("template") or data_type.endswith('.sh') or data_type.endswith('.py'):
-                continue
             data_type_path = os.path.join(script_relative_dir, data_type)
             if not os.path.isdir(data_type_path):
                 continue
-            sub_versions = sorted([sv for sv in os.listdir(data_type_path) if not sv.startswith('template')])
+            sub_versions = sorted([sv for sv in os.listdir(data_type_path) if not sv.startswith('template') and not sv.endswith(('.sh', '.py'))])
             for version in sub_versions:
                 script_path = os.path.join(data_type_path, version)
                 if not os.path.isfile(script_path):
