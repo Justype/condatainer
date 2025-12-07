@@ -39,8 +39,8 @@ jobs:
           git config user.name "dependabot[bot]"
           git config user.email "dependabot[bot]@users.noreply.github.com"
           
-          # Add the specific file(s) you generated
-          git add metadata/build-scripts.json
+          # Stage the metadata directory
+          git add metadata
           
           # Check for changes
           if git diff --staged --quiet; then
