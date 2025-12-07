@@ -1297,6 +1297,11 @@ class CondaTainer_Avail:
             nargs="*",
             help="Search terms (AND logic applied)"
         )
+        CondaTainer_Avail.parser_avail.add_argument(
+            "-i", "--install",
+            action="store_true",
+            help="Install the selected build scripts (used with terms)"
+        )
 
     @staticmethod
     def parse_avail_args(args):
@@ -1352,6 +1357,30 @@ class CondaTainer_Avail:
                 print(highlighted)
             else:
                 print(pkg)
+
+        uninstalled_packages = []
+        for pkg in filtered_packages:
+            if "installed" in pkg:
+                continue
+            elif " (remote)" in pkg:
+                uninstalled_packages.append(pkg.replace(" (remote)", ""))
+            else:
+                uninstalled_packages.append(pkg)
+
+        if args.install and args.terms and uninstalled_packages:
+            Utils.print_message("Do you want to install the above overlays? [y/N]: ", end="")
+            choice = input().strip().lower()
+            if choice != 'y':
+                Utils.print_message("Aborted overlay installation.")
+                return
+            
+            for pkg in filtered_packages:
+                pkg_name_version = pkg.split(' ')[0]  # Remove any (installed) markers
+                Utils.print_message(f"Installing overlay for {Utils.yellow_text(pkg_name_version)}...")
+                if CondaTainer_Create.auto_create_overlay_from_str(pkg_name_version):
+                    Utils.print_success(f"Overlay for {Utils.yellow_text(pkg_name_version)} installed successfully.")
+                else:
+                    Utils.print_error(f"Failed to install overlay for {Utils.yellow_text(pkg_name_version)}.")
 
 class CondaTainer_List:
     @staticmethod
@@ -1431,16 +1460,12 @@ class CondaTainer_Remove:
         CondaTainer_Remove.parser_remove.add_argument(
             "terms",
             type=str,
-            nargs="*",
+            nargs="+",
             help="Search terms (AND logic applied)"
         )
 
     @staticmethod
     def parse_remove_args(args):
-        if args.terms is None or len(args.terms) == 0:
-            Utils.print_error("Please provide at least one search term to remove overlays.")
-            return
-
         installed_overlays_dict = CondaTainer.get_installed_overlays()
         if not installed_overlays_dict:
             Utils.print_warning("No installed overlays found.")
