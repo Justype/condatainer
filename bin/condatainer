@@ -19,7 +19,7 @@ class Config:
     # Remote settings
     DEBUG = False
     GITHUB_REPO = "Justype/condatainer"
-    REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json"
+    REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json.gz"
 
     # Folder paths
     SCRIPT_PATH = os.path.abspath(__file__)
@@ -181,8 +181,14 @@ class Utils:
 
         try:
             with urllib.request.urlopen(url) as resp:
-                data = resp.read()
-                metadata = json.loads(data)
+                if url.endswith('.gz'):
+                    import gzip
+                    with gzip.GzipFile(fileobj=resp) as gz:
+                        data = gz.read()
+                    metadata = json.loads(data)
+                else:
+                    data = resp.read()
+                    metadata = json.loads(data)
 
                 for k in metadata:
                     normalized_key = Utils.normalize_name_version(k)
