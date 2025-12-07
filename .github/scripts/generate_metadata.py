@@ -50,7 +50,7 @@ for script_name in sorted(os.listdir(BUILD_SCRIPTS)):
                 script_path = os.path.join(data_type_path, version)
                 if not os.path.isfile(script_path):
                     continue
-                key = f"{script_name}={data_type}={version}"
+                key = f"{script_name}/{data_type}/{version}"
                 link = os.path.relpath(script_path, REPO)
 
                 # Extract metadata from the script file (e.g., #WHATIS, #URL)
@@ -75,7 +75,7 @@ for script_name in sorted(os.listdir(BUILD_SCRIPTS)):
             script_path = os.path.join(script_relative_dir, version)
             if not os.path.isfile(script_path):
                 continue
-            key = f"{script_name}={version}"
+            key = f"{script_name}/{version}"
             link = os.path.relpath(script_path, REPO)
 
             whatis = None

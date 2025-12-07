@@ -163,7 +163,7 @@ class Utils:
         """
         if not isinstance(name_version, str):
             return name_version
-        return name_version.strip().replace('/', '=').replace('@', '=')
+        return name_version.strip().replace('=', '/').replace('@', '/')
 
     @staticmethod
     def fetch_remote_build_scripts() -> dict:
@@ -193,10 +193,9 @@ class Utils:
                     metadata = json.loads(data)
 
                 for k in metadata:
-                    normalized_key = Utils.normalize_name_version(k)
-                    rel = normalized_key.replace('=', '/')
+                    rel = Utils.normalize_name_version(k)
                     link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{rel}"
-                    normalized[normalized_key] = link
+                    normalized[rel] = link
 
         except Exception as e:
             Utils.print_warning(f"Failed to fetch remote metadata from {url}: {e}")
@@ -243,12 +242,12 @@ class Utils:
                     for version in sub_versions:
                         if version.startswith("template") or version.endswith(('.sh', '.py')):
                             continue
-                        packages[f"{script_dir}={data_type}={version}"] = os.path.join(data_type_path, version)
+                        packages[f"{script_dir}/{data_type}/{version}"] = os.path.join(data_type_path, version)
             else: # file: apps
                 for version in versions:
                     if version.startswith("template") or version.endswith(('.sh', '.py')):
                         continue
-                    packages[f"{script_dir}={version}"] = os.path.join(script_path, version)
+                    packages[f"{script_dir}/{version}"] = os.path.join(script_path, version)
 
         Utils.local_build_scripts_paths = packages
         return packages
@@ -305,7 +304,7 @@ class Utils:
                     if dep_line.endswith((".sqf", ".img", ".squashfs")):
                         dependencies.append(dep_line)
                     else:
-                        dependencies.append(dep_line.replace("/", "="))
+                        dependencies.append(Utils.normalize_name_version(dep_line))
         return dependencies
 
     @staticmethod
@@ -394,13 +393,13 @@ class CondaTainer:
         overlay_files = [f for f in os.listdir(Config.IMAGES_DIR) if f.endswith(('.sqf', '.img', '.squashfs'))]
         for overlay in overlay_files:
             name_version = os.path.splitext(overlay)[0]
-            name_version = name_version.replace("--", "=")
+            name_version = name_version.replace("--", "/")
             overlays[name_version] = os.path.join(Config.IMAGES_DIR, overlay)
 
         ref_overlay_files = [f for f in os.listdir(Config.REF_IMAGES_DIR) if f.endswith(('.sqf', '.img', '.squashfs'))]
         for overlay in ref_overlay_files:
             name_version = os.path.splitext(overlay)[0]
-            name_version = name_version.replace("--", "=")
+            name_version = name_version.replace("--", "/")
             overlays[name_version] = os.path.join(Config.REF_IMAGES_DIR, overlay)
         return overlays
 
@@ -470,7 +469,7 @@ class CondaTainer_Create:
         CondaTainer_Create.parser_create.add_argument(
             "name_versions",
             nargs="*",
-            help="Name=Version or Name/Version or Name@Version of the overlay to create (e.g., bcftools=1.22)"
+            help="Name/Version or Name=Version or Name@Version of the overlay to create (e.g., bcftools/1.22)"
         )
         CondaTainer_Create.parser_create.add_argument(
             "-n", "--name",
@@ -552,6 +551,9 @@ class CondaTainer_Create:
                     if Config.BAD_CHARS_REGEX.search(args.name):
                         CondaTainer_Create.parser_create.error("The custom name contains invalid characters. Avoid using spaces and special characters like <>:\"/\\|?*`$&;|![]#%@=+{}(),")
                         exit(1)
+                    if "--" in args.name:
+                        CondaTainer_Create.parser_create.error("The custom name cannot contain '--' sequence.")
+                        exit(1)
                     # Create a single overlay with all packages
                     packages = args.name_versions
                     overlay_filepath = f"{args.name}.sqf"
@@ -591,10 +593,11 @@ class CondaTainer_Create:
                     )
 
                 else:
-                    if any('=' not in nv for nv in args.name_versions) and args.name_versions:
-                        CondaTainer_Create.parser_create.error("Must specify the versions in the format NAME=VERSION")
+                    normalized_name_versions = [Utils.normalize_name_version(nv) for nv in args.name_versions]
+                    if normalized_name_versions and any('/' not in nv for nv in normalized_name_versions):
+                        CondaTainer_Create.parser_create.error("Must specify the versions in the format NAME/VERSION")
                     # Create individual overlays for each package
-                    for nv in args.name_versions:
+                    for nv in normalized_name_versions:
                         CondaTainer_Create.auto_create_overlay_from_str(nv)
         except KeyboardInterrupt:
             Utils.print_message("Process interrupted by user. Cleaning up...")
@@ -788,7 +791,7 @@ class CondaTainer_Create:
         local_packages = Utils.get_local_build_scripts().keys()
         remote_packages = Utils.fetch_remote_build_scripts().keys()
         avail_packages = set(local_packages).union(set(remote_packages))
-        if f"{name}={version}" not in avail_packages:
+        if f"{name}/{version}" not in avail_packages:
             return CondaTainer_Create.create_sqf_using_conda(
                 packages=[f"{name}={version}"],
                 overlay_path=overlay_path,
@@ -801,19 +804,19 @@ class CondaTainer_Create:
     def auto_create_overlay_from_str(name_version: str):
         # Accept both name=version and name/version formats by normalizing
         name_version = Utils.normalize_name_version(name_version)
-        if '=' not in name_version:
-            Utils.print_error("Must specify the version in the format NAME=VERSION")
+        if '/' not in name_version:
+            Utils.print_error("Must specify the version in the format NAME/VERSION")
             return False
 
-        n = name_version.count('=')
+        n = name_version.count('/')
         if n == 1:
-            name, version = name_version.split('=', 1)
+            name, version = name_version.split('/', 1)
             return CondaTainer_Create.create_app_overlay(name, version)
         elif n == 2:
-            assembly, data_type, version = name_version.split('=', 2)
+            assembly, data_type, version = name_version.split('/', 2)
             return CondaTainer_Create.create_ref_overlay_from_build_script(assembly, data_type, version)
         else:
-            Utils.print_error("Too many '=' characters in the NAME=VERSION string.")
+            Utils.print_error("Too many '/' characters in the NAME/VERSION string.")
             return False
 
         return False
@@ -832,16 +835,16 @@ class CondaTainer_Create:
         if not os.path.isfile(script_path):
             # Try to fetch build script from remote metadata if configured
             metadata = Utils.fetch_remote_build_scripts()
-            key = Utils.normalize_name_version(f"{name}={version}")
+            key = Utils.normalize_name_version(f"{name}/{version}")
             if metadata and key in metadata:
                 is_remote = True
                 script_path = os.path.join(Config.CONDATINER_DIR, "tmp_build_script.sh")
-                Utils.print_message(f"Downloading build script for {name}={version} from remote metadata...")
+                Utils.print_message(f"Downloading build script for {name}/{version} from remote metadata...")
                 url = metadata[key]
                 if Utils.download_executable(url, script_path):
                     Utils.print_message(f"Downloaded build script to {script_path}")
                 else:
-                    Utils.print_error(f"Failed to download build script for {name}={version} from {url}.")
+                    Utils.print_error(f"Failed to download build script for {name}/{version} from {url}.")
                     return False
             else:
                 Utils.print_error(f"Build script for {name} version {version} not found at {script_path}.")
@@ -859,7 +862,7 @@ class CondaTainer_Create:
             "--env", f"target_dir=/cnt/{relative_path}",
             "--env", f"app_name={name}",
             "--env", f"version={version}",
-            "--env", f"app_name_version={name}-{version}",
+            "--env", f"app_name_version={name}/{version}",
             *CondaTainer.generate_gpu_args(),
             Config.BASE_IMAGE_SIF,
             "/bin/bash", "-c",
@@ -933,14 +936,14 @@ class CondaTainer_Create:
         if not os.path.isfile(script_path):
             # Try to fetch reference build script from remote metadata if configured
             metadata = Utils.fetch_remote_build_scripts()
-            key = Utils.normalize_name_version(f"{assembly}={data_type}={version}")
+            key = Utils.normalize_name_version(f"{assembly}/{data_type}/{version}")
             if metadata and key in metadata:
                 is_remote = True
                 script_path = os.path.join(Config.CONDATINER_DIR, "tmp_ref_build_script.sh")
-                Utils.print_message(f"Downloading reference build script for {assembly}={data_type}={version} from remote metadata...")
+                Utils.print_message(f"Downloading reference build script for {assembly}/{data_type}/{version} from remote metadata...")
                 url = metadata[key]
                 if not Utils.download_executable(url, script_path):
-                    Utils.print_error(f"Failed to download reference build script for {assembly}={data_type}={version} from {url}.")
+                    Utils.print_error(f"Failed to download reference build script for {assembly}/{data_type}/{version} from {url}.")
                     return False
                 Utils.print_message(f"Downloaded reference build script to {script_path}")
             else:
@@ -1093,7 +1096,7 @@ class CondaTainer_Exec:
                     if not os.path.isfile(command):
                         Utils.print_error(f"Overlay file {command} is missing. Please create or install it first.")
                         exit(1)
-                elif command in installed_overlays:
+                elif Utils.normalize_name_version(command) in installed_overlays:
                     Utils.print_warning(f"Convert command {Utils.yellow_text(command)} to overlay")
                     overlay_final.append(command)
                 else:
@@ -1106,11 +1109,11 @@ class CondaTainer_Exec:
         CondaTainer_Exec.exec_command(overlay_final, command_final if command_final else ["bash"])
 
     @staticmethod
-    def get_overlay_abs_paths(overlay_paths: List[str]) -> List[str]:
+    def get_overlay_abs_paths(paths_or_name_version: List[str]) -> List[str]:
         overlay_abs_paths = []
-        if not overlay_paths:
+        if not paths_or_name_version:
             return overlay_abs_paths
-        for path in overlay_paths:
+        for path in paths_or_name_version:
             # If it's an actual file path (exists or looks like a file), handle that first
             if path.endswith((".sqf", ".img", ".squashfs")):
                 if os.path.isfile(path):
@@ -1121,17 +1124,17 @@ class CondaTainer_Exec:
                     return []
 
             # Treat non-file inputs as package specs. Accept both name=version and name/version
-            spec = Utils.normalize_name_version(path)
-            filename = os.path.basename(spec)
-            formatted_filename = filename.replace("=", "--")
+            # map normalized separator '/' into filename-safe '--'
+            normalized_spec = Utils.normalize_name_version(path)
+            formatted_filename = normalized_spec.replace("/", "--")
             overlay_filename = f"{formatted_filename}.sqf"
-            n = spec.count('=')
+            n = normalized_spec.count('/')
             if n < 2:
                 overlay_path = os.path.join(Config.IMAGES_DIR, overlay_filename)
             elif n == 2:
                 overlay_path = os.path.join(Config.REF_IMAGES_DIR, overlay_filename)
             else:
-                CondaTainer_Exec.parser_exec.error(f"Invalid overlay format: {path}. Too many '=' characters.")
+                CondaTainer_Exec.parser_exec.error(f"Invalid overlay format: {path}. Too many '/' characters.")
                 return []
 
             if not os.path.isfile(overlay_path):
@@ -1142,9 +1145,9 @@ class CondaTainer_Exec:
         return overlay_abs_paths
 
     @staticmethod
-    def get_overlay_env_configs(overlay_paths: List[str]) -> List[str]:
+    def get_overlay_env_configs(paths_or_name_version: List[str]) -> List[str]:
         configs = { }
-        overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(overlay_paths)
+        overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
         for op in overlay_abs_paths:
             env_path = os.path.splitext(op)[0] + ".env"
             if not os.path.isfile(env_path):
@@ -1167,9 +1170,9 @@ class CondaTainer_Exec:
         return params
 
     @staticmethod
-    def get_overlay_env_notes(overlay_paths: List[str]) -> Dict[str, str]:
+    def get_overlay_env_notes(paths_or_name_version: List[str]) -> Dict[str, str]:
         notes = { }
-        overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(overlay_paths)
+        overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
         for op in overlay_abs_paths:
             env_path = os.path.splitext(op)[0] + ".env"
             if not os.path.isfile(env_path):
@@ -1185,9 +1188,9 @@ class CondaTainer_Exec:
         return notes
 
     @staticmethod
-    def get_path_env(overlay_paths: List[str]) -> str:
+    def get_path_env(paths_or_name_version: List[str]) -> str:
         paths = [ "/usr/sbin", "/usr/bin" ]
-        overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(overlay_paths)
+        overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
         for path in overlay_abs_paths:
             name = os.path.basename(path)
             name = os.path.splitext(name)[0]  # Remove extension
@@ -1203,9 +1206,9 @@ class CondaTainer_Exec:
         return ":".join(paths)
 
     @staticmethod
-    def generate_overlay_args(overlay_paths: List[str]) -> List[str]:
+    def generate_overlay_args(paths_or_name_version: List[str]) -> List[str]:
         mounts = []
-        overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(overlay_paths)
+        overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
         for op in overlay_abs_paths:
             if CondaTainer_Exec.IMG_WRITABLE and op.endswith(".img"):
                 Utils.print_debug(f"[EXEC] Making overlay {Utils.blue_text(op)} writable.")
@@ -1224,25 +1227,26 @@ class CondaTainer_Exec:
         return mounts
 
     @staticmethod
-    def exec_command(overlay_paths: List[str], command: List[str]):
-        path_env = CondaTainer_Exec.get_path_env(overlay_paths)
-        env_params = CondaTainer_Exec.get_overlay_env_configs(overlay_paths)
+    def exec_command(paths_or_name_version: List[str], command: List[str]):
+        path_env = CondaTainer_Exec.get_path_env(paths_or_name_version)
+        env_params = CondaTainer_Exec.get_overlay_env_configs(paths_or_name_version)
 
         n_img = 0
         last_img = None
         writable_path = None
-        if overlay_paths:
-            for o in overlay_paths:
+        if paths_or_name_version:
+            for o in paths_or_name_version:
                 if o.endswith('.img'):
                     last_img = o
                     n_img += 1
 
         if last_img is not None and CondaTainer_Exec.IMG_WRITABLE:
-            writable_path = f"/ext3/{os.path.splitext(os.path.basename(last_img))[0].replace('=', '/').replace('--', '/')}"
+            # Convert filename-safe separators back to normalized path
+            writable_path = f"/ext3/{os.path.splitext(os.path.basename(last_img))[0].replace('--', '/').replace('=', '/') }"
 
         exec_cmd = [
             Config.APPTAINER_PATH, "exec",
-            *CondaTainer_Exec.generate_overlay_args(overlay_paths),
+            *CondaTainer_Exec.generate_overlay_args(paths_or_name_version),
             *env_params,
             "--env", f"PATH={path_env}",
             # "--env", f"PS1=CT \\w> ",
@@ -1262,19 +1266,19 @@ class CondaTainer_Exec:
             Utils.print_warning("Multiple img provided, but only the last one will be mounted as writable.")
 
         if Utils.is_in_interactive_shell():
-            env_notes = CondaTainer_Exec.get_overlay_env_notes(overlay_paths)
+            env_notes = CondaTainer_Exec.get_overlay_env_notes(paths_or_name_version)
 
             if env_notes:
                 env_max_len = max(len(key) for key in env_notes.keys())
                 Utils.print_message("Overlay envs:")
                 for key, note in env_notes.items():
-                    Utils.print_message(f"  {Utils.yellow_text(key.ljust(env_max_len))}: {note}")
+                    print(f"  {Utils.yellow_text(key.ljust(env_max_len))}: {note}")
                 if writable_path:
-                    Utils.print_message(f"  {Utils.yellow_text('WRITABLE_PATH'.ljust(env_max_len))}: {writable_path}")
-                Utils.print_message("")
+                    print(f"  {Utils.yellow_text('WRITABLE_PATH'.ljust(env_max_len))}: {writable_path}")
+                print("")
             else:
                 if writable_path:
-                    Utils.print_message(f"Overlay env:\n  {Utils.yellow_text('WRITABLE_PATH')}: {writable_path}\n")
+                    print(f"Overlay env:\n  {Utils.yellow_text('WRITABLE_PATH')}: {writable_path}\n")
         try:
             subprocess.run(exec_cmd, check=True)
         except subprocess.CalledProcessError:
@@ -1403,7 +1407,7 @@ class CondaTainer_List:
             if ref_overlay_files:
                 print("Available reference overlays:")
                 for overlay in sorted(ref_overlay_files):
-                    name_version = os.path.splitext(overlay)[0].replace('--', '=')
+                    name_version = os.path.splitext(overlay)[0].replace('--', '/')
                     if args.terms:
                         colored_name_version = name_version
                         for term in args.terms:
@@ -1424,7 +1428,7 @@ class CondaTainer_Info:
         CondaTainer_Info.parser_info.add_argument(
             "overlay",
             type=str,
-            help="Overlay package (e.g., bcftools=1.22)"
+            help="Overlay package (e.g., bcftools/1.22)"
         )
 
     @staticmethod
@@ -1444,9 +1448,13 @@ class CondaTainer_Info:
         file_size = os.path.getsize(overlay_path)
         print(f"Size: {file_size / (1024 * 1024):.2f} MB")
         if overlay_path.endswith((".sqf", ".squashfs")):
-            print(f"Potential mount path: /cnt/{os.path.splitext(os.path.basename(overlay_path))[0].replace('=', '/').replace('--', '/')}")
+            name = os.path.splitext(os.path.basename(overlay_path))[0]
+            name = name.replace('--', '/').replace('=', '/')
+            print(f"Potential mount path: /cnt/{name}")
         elif overlay_path.endswith(".img"):
-            print(f"Potential mount path: /ext3/{os.path.splitext(os.path.basename(overlay_path))[0].replace('=', '/').replace('--', '/')}")
+            name = os.path.splitext(os.path.basename(overlay_path))[0]
+            name = name.replace('--', '/').replace('=', '/')
+            print(f"Potential mount path: /ext3/{name}")
 
         env_path = os.path.splitext(overlay_path)[0] + ".env"
         if os.path.isfile(env_path):
