@@ -54,7 +54,7 @@ class Config:
     compress_args = LZ4
 
 def main():
-    parser = argparse.ArgumentParser(description="CondaTainer CLI Tool\nUse apptainer/conda/squashFS to manage tools for HPC users.")
+    parser = argparse.ArgumentParser(description="CondaTainer: Use apptainer/conda/squashFS to manage tools for HPC users.")
     parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of CondaTainer", default=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
     subparsers = parser.add_subparsers(dest="action", required=True, help="Available actions")
@@ -65,6 +65,7 @@ def main():
     CondaTainer_Check.add_parser_arguments(subparsers)
     CondaTainer_Run.add_parser_arguments(subparsers)
     CondaTainer_List.add_parser_arguments(subparsers)
+    CondaTainer_Remove.add_parser_arguments(subparsers)
     CondaTainer_Info.add_parser_arguments(subparsers)
     CondaTainer_Apptainer.add_parser_arguments(subparsers)
     CondaTainer_Update.add_parser_arguments(subparsers)
@@ -91,6 +92,8 @@ def main():
         CondaTainer_Info.parse_info_args(args)
     elif args.action == "avail":
         CondaTainer_Avail.parse_avail_args(args)
+    elif args.action == "remove":
+        CondaTainer_Remove.parse_remove_args(args)
     elif args.action == "apptainer":
         CondaTainer_Apptainer.parse_apptainer_args(args)
     elif args.action == "update":
@@ -465,7 +468,7 @@ class CondaTainer:
 class CondaTainer_Create:
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_Create.parser_create = parser.add_parser("create", help="Create a new SquashFS overlay")
+        CondaTainer_Create.parser_create = parser.add_parser("create", help="Create a new SquashFS overlay using conda or available build scripts")
         CondaTainer_Create.parser_create.add_argument(
             "name_versions",
             nargs="*",
@@ -1287,7 +1290,7 @@ class CondaTainer_Exec:
 class CondaTainer_Avail:
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_Avail.parser_avail = parser.add_parser("avail", help="Check available local build scripts")
+        CondaTainer_Avail.parser_avail = parser.add_parser("avail", help="Check available local and remote build scripts")
         CondaTainer_Avail.parser_avail.add_argument(
             "terms",
             type=str,
@@ -1353,7 +1356,7 @@ class CondaTainer_Avail:
 class CondaTainer_List:
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_List.parser_list = parser.add_parser("list", help="List available overlays")
+        CondaTainer_List.parser_list = parser.add_parser("list", help="List installed overlays based on search terms")
         CondaTainer_List.parser_list.add_argument(
             "terms",
             type=str,
@@ -1419,7 +1422,72 @@ class CondaTainer_List:
                             )
                         print(" " + colored_name_version)
                     else:
-                        print(" " + Utils.yellow_text(name_version))
+                        print(" " + name_version)
+
+class CondaTainer_Remove:
+    @staticmethod
+    def add_parser_arguments(parser):
+        CondaTainer_Remove.parser_remove = parser.add_parser("remove", help="Remove installed overlays based on search terms")
+        CondaTainer_Remove.parser_remove.add_argument(
+            "terms",
+            type=str,
+            nargs="*",
+            help="Search terms (AND logic applied)"
+        )
+
+    @staticmethod
+    def parse_remove_args(args):
+        if args.terms is None or len(args.terms) == 0:
+            Utils.print_error("Please provide at least one search term to remove overlays.")
+            return
+
+        installed_overlays_dict = CondaTainer.get_installed_overlays()
+        if not installed_overlays_dict:
+            Utils.print_warning("No installed overlays found.")
+            return
+
+        filtered_overlays = []
+        for overlay in installed_overlays_dict.keys():
+            if args.terms:
+                if all(re.search(re.escape(term), overlay, re.IGNORECASE) for term in args.terms):
+                    filtered_overlays.append(overlay)
+            else:
+                filtered_overlays.append(overlay)
+
+        if not filtered_overlays:
+            Utils.print_warning("No matching installed overlays found.")
+            return
+
+        print("Overlays to be removed:")
+        for overlay in sorted(filtered_overlays):
+            highlighted = overlay
+            if args.terms:
+                for term in args.terms:
+                    highlighted = re.sub(
+                        re.escape(term),
+                        lambda m: Utils.yellow_text(m.group(0)),
+                        highlighted,
+                        flags=re.IGNORECASE
+                    )
+            print(f" - {highlighted}")
+        
+        Utils.print_message("Are you sure? Cannot be undone. [y/N]: ", end="")
+        choice = input().strip().lower()
+        if choice != 'y':
+            Utils.print_message("Aborted overlay removal.")
+            return
+
+        for overlay in filtered_overlays:
+            overlay_path = installed_overlays_dict[overlay]
+            try:
+                os.remove(overlay_path)
+                Utils.print_success(f"Removed overlay {Utils.yellow_text(overlay)} at {Utils.blue_text(overlay_path)}.")
+                env_path = os.path.splitext(overlay_path)[0] + ".env"
+                if os.path.isfile(env_path):
+                    os.remove(env_path)
+                    Utils.print_success(f"Also removed associated env file at {Utils.blue_text(env_path)}.")
+            except Exception as e:
+                Utils.print_error(f"Failed to remove overlay {Utils.yellow_text(overlay)}: {str(e)}")
 
 class CondaTainer_Info:
     @staticmethod
