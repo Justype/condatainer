@@ -119,14 +119,14 @@ modgen avail [search_terms...] [-i|--install]
 # Search for all resources matching 'grcm' and 'M33'
 $ modgen avail grcm M33
 grcm39/gtf-gencode/M33
-grcm39/salmon-1.10.3/gencodeM33
+grcm39/salmon-1.10.2/gencodeM33
 grcm39/star-2.7.11b/gencodeM33-101
 grcm39/star-2.7.11b/gencodeM33-151
 grcm39/transcript-gencode/M33
 
 # Search for salmon using specific reference tags
 $ modgen avail grcm M33 salmon
-grcm39/salmon-1.10.3/gencodeM33
+grcm39/salmon-1.10.2/gencodeM33
 
 # Directly install from search results (will have prompt)
 $ modgen avail grcm M33 salmon -i
