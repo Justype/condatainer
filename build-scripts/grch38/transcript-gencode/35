@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#DEP:samtools/1.22
+#DEP:samtools/1.22.1
 #WHATIS:GRCh38 GENCODE 35 transcript FASTA
 #URL:https://www.gencodegenes.org/human/
 #ENV:TRANSCRIPT_FASTA=$app_root/gencode.v35.transcripts.fa

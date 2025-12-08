@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#DEP:samtools/1.22
+#DEP:samtools/1.22.1
 #WHATIS:GRCm39 GENCODE M37 transcript FASTA
 #URL:https://www.gencodegenes.org/mouse/
 #ENV:TRANSCRIPT_FASTA=$app_root/gencode.vM37.transcripts.fa
