@@ -5,7 +5,7 @@
 #     rocm/dev-ubuntu-24.04:latest
 
 Bootstrap: docker
-From: nvidia/cuda:13.0.2-cudnn-devel-ubuntu24.04
+From: debian:sid-slim
 
 %labels
     Author Ziyue Cheng
@@ -42,14 +42,46 @@ From: nvidia/cuda:13.0.2-cudnn-devel-ubuntu24.04
     wget -qO /usr/bin/micromamba "${RELEASE_URL}"
     chmod +x /usr/bin/micromamba
 
-    # Add helper script named mm
-    echo '#!/usr/bin/bash' > /usr/bin/mm
-    echo '/usr/bin/micromamba -r /ext3/conda "$@"' >> /usr/bin/mm
-    chmod +x /usr/bin/mm
-
-    echo '#!/usr/bin/bash' > /usr/bin/mm-create
-    echo '/usr/bin/micromamba -r /ext3/conda create -c conda-forge -c bioconda "$@"' >> /usr/bin/mm-create 
+    # Add helper scripts for create/install/update/remove $CNT_WRITABLE_PATH will be set to the .img overlay path
+    cat << 'EOF' > /usr/bin/mm-create
+#!/usr/bin/bash
+if [[ -z "$CNT_WRITABLE_PATH" ]]; then
+    echo "ERROR: CNT_WRITABLE_PATH is not set!"
+    exit 1
+fi
+/usr/bin/micromamba -r /cnt_conda create -c conda-forge -c bioconda -p $CNT_WRITABLE_PATH "$@"
+EOF
     chmod +x /usr/bin/mm-create
+
+    cat << 'EOF' > /usr/bin/mm-install
+#!/usr/bin/bash
+if [[ -z "$CNT_WRITABLE_PATH" ]]; then
+    echo "ERROR: CNT_WRITABLE_PATH is not set!"
+    exit 1
+fi
+/usr/bin/micromamba -r /cnt_conda install -c conda-forge -c bioconda -p $CNT_WRITABLE_PATH "$@"
+EOF
+    chmod +x /usr/bin/mm-install
+
+    cat << 'EOF' > /usr/bin/mm-update
+#!/usr/bin/bash
+if [[ -z "$CNT_WRITABLE_PATH" ]]; then
+    echo "ERROR: CNT_WRITABLE_PATH is not set!"
+    exit 1
+fi
+/usr/bin/micromamba -r /cnt_conda update -c conda-forge -c bioconda -p $CNT_WRITABLE_PATH "$@"
+EOF
+    chmod +x /usr/bin/mm-update
+
+    cat << 'EOF' > /usr/bin/mm-remove
+#!/usr/bin/bash
+if [[ -z "$CNT_WRITABLE_PATH" ]]; then
+    echo "ERROR: CNT_WRITABLE_PATH is not set!"
+    exit 1
+fi
+/usr/bin/micromamba -r /cnt_conda remove -p $CNT_WRITABLE_PATH "$@"
+EOF
+    chmod +x /usr/bin/mm-remove
 
 %runscript
     echo "This container provides mksquashfs and micromamba inside Debian"

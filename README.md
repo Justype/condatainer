@@ -4,7 +4,7 @@
 
 A toolkit for efficient resource management on HPC systems, targeting inode limits and environment isolation.
 
-- **CondaTainer**: Wraps environments in Apptainer overlays using [Apptainer](https://apptainer.org/) and [SquashFS](https://github.com/plougher/squashfs-tools).
+- **CondaTainer**: Wraps environments in overlays using [Apptainer](https://apptainer.org/) and [SquashFS](https://github.com/plougher/squashfs-tools).
 - **ModGen**: Automates [Lmod](https://lmod.readthedocs.io/en/latest/)/[Environment Modules](https://modules.readthedocs.io/en/latest/) modules creation.
 
 Which one to choose?
@@ -94,15 +94,14 @@ ml grch38/cellranger/2024-A
 
 [Read the full ModGen Manual](assets/MG_MANUAL.md)
 
-## ⚖️ Which one should I use?
+## 📂 Naming Convention
 
-Feature | CondaTainer 📦 | ModGen 🏭
--- | -- | --
-Technology | Apptainer + SquashFS | Lmod/EnvModules
-File Count (Inodes) | Very Low (1 file per env) | High (Standard Conda install)
-Performance | High (LZ4 Compressed) | High
-Isolation | Perfect (Containerized) | Shared (Host environment)
-Best For | Saving quota | Rapid prototyping
+Both tools utilize a standardized naming schema to organize software and reerence data.
+
+- Apps: `name/version` (e.g., `bcftools/1.16`)
+- References: `assembly/datatype/version`
+  - `grcm39/genome/gencode`: mouse genome GRCm39 with Gencode style naming
+  - `grcm39/salmon-1.10.2/gencodeM33`: salmon index for mouse genome GRCm39 with Gencode M33 annotation
 
 ## 🚀 Script Runtime Automation
 
@@ -145,13 +144,6 @@ fi
 samtools --version
 ```
 
-## 📂 Naming Convention
-
-Both tools utilize a standardized naming schema to organize software and reerence data.
-
-- Apps: `name/version` (e.g., `bcftools/1.16`)
-- References: `assembly/datatype/version` (e.g., `grcm39/salmon-1.10.2/gencodeM33`)
-
 ## 🔗 Links & Resources
 
 - [Compression Method Benchmarks](https://github.com/inikep/lzbench)
@@ -164,6 +156,6 @@ This project used computational resources provided by
 
 <div>
 <a href="https://www.mcmaster.ca" target="_blank" rel="noopener noreferrer"><img src="assets/logo_mcmaster.svg" height="45" alt="McMaster University Logo"></a>
-&nbsp;&nbsp;&nbsp;&nbsp;
+&nbsp;&nbsp;&nbsp;
 <a href="https://alliancecan.ca" target="_blank" rel="noopener noreferrer"><img src="assets/logo_alliance.svg" height="40" alt="Digital Research Alliance of Canada Logo"></a>
 </div>

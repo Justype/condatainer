@@ -418,8 +418,7 @@ class CondaTainer:
             Config.TMP_OVERLAY_PATH
         ]
 
-        Utils.print_debug("[CREATE] Creating temporary overlay with command:")
-        Utils.print_debug(cmd)
+        Utils.print_debug(f"[CREATE] Creating temporary overlay with command: {cmd}")
 
         try:
             subprocess.run(cmd, check=True)
@@ -703,8 +702,7 @@ class CondaTainer_Create:
             """
         ]
 
-        Utils.print_debug("[CREATE] Creating overlay with command:")
-        Utils.print_debug(cmd_create)
+        Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_create}")
 
         try:
             subprocess.run(cmd_create, check=True)
@@ -778,8 +776,7 @@ class CondaTainer_Create:
             """
         ]
 
-        Utils.print_debug("[CREATE] Creating overlay with command:")
-        Utils.print_debug(cmd_create)
+        Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_create}")
 
         try:
             subprocess.run(cmd_create, check=True)
@@ -936,8 +933,7 @@ class CondaTainer_Create:
             """
         ]
 
-        Utils.print_debug("[CREATE] Creating overlay with command:")
-        Utils.print_debug(cmd_create)
+        Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_create}")
 
         try:
             subprocess.run(cmd_create, check=True)
@@ -1048,8 +1044,7 @@ class CondaTainer_Create:
             """
         ]
 
-        Utils.print_debug("[CREATE] Creating overlay with command:")
-        Utils.print_debug(cmd_create)
+        Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_create}")
 
         try:
             subprocess.run(cmd_create, check=True)
@@ -1079,8 +1074,7 @@ class CondaTainer_Create:
             """
         ]
 
-        Utils.print_debug("[CREATE] Creating overlay with command:")
-        Utils.print_debug(cmd_mksqf)
+        Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_mksqf}")
 
         try:
             subprocess.run(cmd_mksqf, check=True)
@@ -1146,11 +1140,10 @@ class CondaTainer_Exec:
         command_final = []
 
         if not args.keep and not args.overlays and args.commands:
+            Utils.print_debug("[EXEC] Parsing commands to separate overlays and command...")
             for command in args.commands:
                 if command.endswith(('.sqf', '.img', '.squashfs')):
-                    if not os.path.isfile(command):
-                        Utils.print_error(f"Overlay file {Utils.blue_text(command)} is missing. Please create or install it first.")
-                        exit(1)
+                    overlay_final.append(command)
                 elif Utils.normalize_name_version(command) in installed_overlays:
                     Utils.print_warning(f"Convert command {Utils.yellow_text(command)} to overlay")
                     overlay_final.append(command)
@@ -1160,8 +1153,14 @@ class CondaTainer_Exec:
             command_final = args.commands if args.commands else []
 
         overlay_final.extend(args.overlays if args.overlays else [])
+        command_final = command_final if command_final else ["bash"]
 
-        CondaTainer_Exec.exec_command(overlay_final, command_final if command_final else ["bash"])
+        for ov in overlay_final:
+            if not os.path.isfile(ov):
+                Utils.print_error(f"Overlay file {ov} not found.")
+                exit(1)
+
+        CondaTainer_Exec.exec_command(overlay_final, command_final)
 
     @staticmethod
     def get_overlay_abs_paths(paths_or_name_version: List[str]) -> List[str]:
@@ -1308,14 +1307,13 @@ class CondaTainer_Exec:
             "--env", "IN_CONDATINER=1",
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR, os.path.abspath(".")),
             # "--bind", "/etc/localtime:/etc/localtime:ro",
-            *(["--env", "WRITABLE_PATH=" + writable_path] if writable_path else []),
+            *(["--env", "CNT_WRITABLE_PATH=" + writable_path] if writable_path else []),
             *CondaTainer.generate_gpu_args(),
             Config.BASE_IMAGE_SIF,
             *command
         ]
 
-        Utils.print_debug("[EXEC] Executing command:")
-        Utils.print_debug(exec_cmd)
+        Utils.print_debug(f"[EXEC] Executing command: {exec_cmd}")
 
         if n_img > 1 and CondaTainer_Exec.IMG_WRITABLE:
             Utils.print_warning("Multiple img provided, but only the last one will be mounted as writable.")
@@ -1329,11 +1327,11 @@ class CondaTainer_Exec:
                 for key, note in env_notes.items():
                     print(f"  {Utils.yellow_text(key.ljust(env_max_len))}: {note}")
                 if writable_path:
-                    print(f"  {Utils.yellow_text('WRITABLE_PATH'.ljust(env_max_len))}: {Utils.blue_text(writable_path)}")
+                    print(f"  {Utils.yellow_text('CNT_WRITABLE_PATH'.ljust(env_max_len))}: {Utils.blue_text(writable_path)}")
                 print("")
             else:
                 if writable_path:
-                    print(f"Overlay env:\n  {Utils.yellow_text('WRITABLE_PATH')}: {Utils.blue_text(writable_path)}\n")
+                    print(f"Overlay env:\n  {Utils.yellow_text('CNT_WRITABLE_PATH')}: {Utils.blue_text(writable_path)}\n")
         try:
             subprocess.run(exec_cmd, check=True)
         except subprocess.CalledProcessError:
@@ -1713,9 +1711,7 @@ class CondaTainer_Run:
         args = CondaTainer_Run.parser_run.parse_args(merged)
 
         if Config.debug and args_from_script:
-            Utils.print_debug("[RUN] Additional script arguments found:")
-            for sa in args_from_script:
-                Utils.print_debug(f"  {sa}")
+            Utils.print_debug(f"[RUN] Additional script arguments found: {args_from_script}")
 
         deps = Utils.get_dependencies_from_script(script_path)
         missing_deps = CondaTainer.get_missing_overlays(deps)
@@ -1806,8 +1802,7 @@ class CondaTainer_Apptainer:
             "apptainer"
         ]
 
-        Utils.print_debug("[APPTAINER] Installing Apptainer with command:")
-        Utils.print_debug(cmd_install)
+        Utils.print_debug(f"[APPTAINER] Installing Apptainer with command: {cmd_install}")
 
         try:
             subprocess.run(cmd_install, check=True)

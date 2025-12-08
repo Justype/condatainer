@@ -176,7 +176,6 @@ modgen exec [OPTIONS] [COMMAND...]
 **Environment Variables:**
 
 * `IN_CONDATINER=1`: Set inside the container.
-* `WRITABLE_PATH`: Paths to the writable directory if `-w`, `--writable-img` is used.
 
 **Behavior**: ModGen performs a module purge followed by module load for the requested modules before running the command.
 
