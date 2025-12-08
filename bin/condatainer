@@ -170,7 +170,7 @@ class Utils:
         """
         if not isinstance(name_version, str):
             return name_version
-        return name_version.strip().replace('=', '/').replace('@', '/')
+        return name_version.strip().replace('=', '/').replace('@', '/').replace('--', '/')
 
     @staticmethod
     def fetch_remote_build_scripts() -> dict:
@@ -414,7 +414,7 @@ class CondaTainer:
         Utils.print_message("Creating temporary SquashFS overlay...")
         cmd = [
             Config.APPTAINER_PATH, "overlay", "create",
-            "--sparse", "--size", "10240",  # Size in MB
+            "--sparse", "--size", "15360",  # Size in MB
             Config.TMP_OVERLAY_PATH
         ]
 
@@ -858,7 +858,7 @@ class CondaTainer_Create:
             return CondaTainer_Create.create_app_overlay_from_build_script(name, version)
 
     @staticmethod
-    def auto_create_overlay_from_str(name_version: str):
+    def auto_create_overlay_from_str(name_version: str) -> bool:
         # Accept both name=version and name/version formats by normalizing
         name_version = Utils.normalize_name_version(name_version)
         if '/' not in name_version:
@@ -875,8 +875,6 @@ class CondaTainer_Create:
         else:
             Utils.print_error("Too many '/' characters in the NAME/VERSION string.")
             return False
-
-        return False
 
     @staticmethod
     def create_app_overlay_from_build_script(name: str, version: str):

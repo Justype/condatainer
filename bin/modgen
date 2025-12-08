@@ -150,7 +150,7 @@ class Utils:
         """
         if not isinstance(name_version, str):
             return name_version
-        return name_version.strip().replace('=', '/').replace('@', '/')
+        return name_version.strip().replace('=', '/').replace('@', '/').replace('--', '/')
 
     @staticmethod
     def fetch_remote_build_scripts() -> dict:
@@ -569,7 +569,7 @@ class ModGen_Create:
 
                 if env_note_lines:
                     # Only print notes on module load
-                    env_note_lines.insert(0, 'if mode() == "load" and os.getenv("PS1") ~= nil then')
+                    env_note_lines.insert(0, 'if mode() == "load" and os.getenv("SLURM_JOB_ID") == nil then')
                     env_note_lines.insert(1, '    io.stderr:write("Available environment variables:\\n")')
                     env_note_lines.append('end')
                     content += "\n" + "\n".join(env_note_lines) + "\n"
@@ -615,7 +615,7 @@ class ModGen_Create:
 
                 if env_note_lines:
                     # Only print help if in interactive shell
-                    env_note_lines.insert(0, 'if { [module-info mode] == "load" && [info exists env(PS1)] } {')
+                    env_note_lines.insert(0, 'if { [module-info mode] == "load" && ![info exists env(SLURM_JOB_ID)] } {')
                     env_note_lines.insert(1, '    puts stderr "Available environment variables:"')
                     env_note_lines.append('}')
                     content = content + "\n" + "\n".join(env_note_lines) + "\n"
@@ -1374,42 +1374,86 @@ class ModGen_Init:
             return False
 
         Utils.print_message("Lmod detected." if Config.IS_LMOD else "Environment Modules (Tcl) detected.")
-        Utils.print_debug(f"[INIT] Adding 'module use' commands to shell profile...")
+        Utils.print_debug(f"[INIT] Checking shell profile for ModGen configuration...")
 
         shell_profile = os.path.expanduser("~/.bashrc")
+        START_MARKER = "# >>> MODGEN MODULES >>>"
+        END_MARKER = "# <<< MODGEN MODULES <<<"
 
         if Config.IS_LMOD:
             detect = '[ -f "$LMOD_CMD" ]'
         else:
             detect = 'command -v tclsh >/dev/null 2>&1'
 
-        module_use_ref = f"module use {Config.REF_MODULEFILES_DIR}"
-
-        with open(shell_profile, 'r') as f:
-            content = f.read()
-            if module_use_ref in content:
-                Utils.print_message(f"'module use' commands already present in {shell_profile}. Skipping.")
-                return True
-
-        if not ModGen_Init.module_yes:
-            Utils.print_message("Are you sure to add 'module use' commands to your shell profile? [Y/n]: ", end='', flush=True)
-            response = input()
-            if response.strip().lower() not in ('y', 'yes', ''):
-                return False
-
-        insert = f"""
+        new_block_content = f"""{START_MARKER}
 # Use ModGen modulefiles (Only if 'module' command is available)
 if {detect} && [ -d "{Config.CONDATINER_DIR}" ]; then
     module use {Config.APPS_MODULEFILES_DIR}
     module use {Config.REF_MODULEFILES_DIR}
 fi
-"""
+{END_MARKER}"""
 
-        with open(shell_profile, 'a') as f:
-            f.write(insert)
+        if not os.path.exists(shell_profile):
+            content = ""
+        else:
+            with open(shell_profile, 'r') as f:
+                content = f.read()
 
-        Utils.print_success(f"'module use' commands added to {shell_profile}. Please restart your shell or source the profile.")
-        return True
+        start_idx = content.find(START_MARKER)
+        end_idx = content.find(END_MARKER)
+
+        # Check if a valid block exists (start found, end found, and end is after start)
+        block_exists = (start_idx != -1) and (end_idx != -1) and (end_idx > start_idx)
+
+        action_needed = False
+        current_block_end_idx = 0 # To store where the old block ends
+
+        if block_exists:
+            # Extract the exact current block from the file
+            current_block_end_idx = end_idx + len(END_MARKER)
+            current_block = content[start_idx:current_block_end_idx]
+
+            # Compare (ignoring surrounding whitespace for safety)
+            if current_block.strip() == new_block_content.strip():
+                Utils.print_message(f"ModGen configuration already up-to-date in {shell_profile}.")
+                return True
+            else:
+                Utils.print_message(f"Detected outdated ModGen block in {shell_profile}.")
+                action_needed = "update"
+        else:
+            Utils.print_message(f"ModGen block not found in {shell_profile}.")
+            action_needed = "append"
+
+        # 5. User Confirmation
+        if not ModGen_Init.module_yes:
+            prompt_msg = "Are you sure to update/add 'module use' commands to your shell profile? [Y/n]: "
+            response = input(prompt_msg)
+            if response.strip().lower() not in ('y', 'yes', ''):
+                return False
+
+        # 6. Execute Write
+        try:
+            if action_needed == "update":
+                # Slice the string: Keep everything before start + New Block + Everything after end
+                new_file_content = content[:start_idx] + new_block_content + content[current_block_end_idx:]
+
+                with open(shell_profile, 'w') as f:
+                    f.write(new_file_content)
+                Utils.print_success(f"Updated ModGen configuration in {shell_profile}.")
+
+            elif action_needed == "append":
+                with open(shell_profile, 'a') as f:
+                    # Ensure a newline exists before appending if the file isn't empty
+                    prefix = "\n" if content and not content.endswith("\n") else ""
+                    f.write(prefix + new_block_content + "\n")
+                Utils.print_success(f"Added ModGen configuration to {shell_profile}.")
+
+            Utils.print_message("Please restart your shell or source the profile.")
+            return True
+
+        except Exception as e:
+            Utils.print_message(f"Error writing to {shell_profile}: {e}")
+            return False
 
 class ModGen_Update:
     @staticmethod
