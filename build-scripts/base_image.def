@@ -42,46 +42,72 @@ From: debian:sid-slim
     wget -qO /usr/bin/micromamba "${RELEASE_URL}"
     chmod +x /usr/bin/micromamba
 
-    # Add helper scripts for create/install/update/remove $CNT_WRITABLE_PATH will be set to the .img overlay path
+    # Add helper scripts for create/install/update/remove $CNT_CONDA_PREFIX will be set to the .img overlay path
     cat << 'EOF' > /usr/bin/mm-create
 #!/usr/bin/bash
-if [[ -z "$CNT_WRITABLE_PATH" ]]; then
-    echo "ERROR: CNT_WRITABLE_PATH is not set!"
+if [[ -z "$CNT_CONDA_PREFIX" ]]; then
+    echo "ERROR: CNT_CONDA_PREFIX is not set!"
     exit 1
 fi
-/usr/bin/micromamba -r /cnt_conda create -c conda-forge -c bioconda -p $CNT_WRITABLE_PATH "$@"
+/usr/bin/micromamba -r /cnt_conda create -c conda-forge -c bioconda -p $CNT_CONDA_PREFIX "$@"
 EOF
     chmod +x /usr/bin/mm-create
 
     cat << 'EOF' > /usr/bin/mm-install
 #!/usr/bin/bash
-if [[ -z "$CNT_WRITABLE_PATH" ]]; then
-    echo "ERROR: CNT_WRITABLE_PATH is not set!"
+if [[ -z "$CNT_CONDA_PREFIX" ]]; then
+    echo "ERROR: CNT_CONDA_PREFIX is not set!"
     exit 1
 fi
-/usr/bin/micromamba -r /cnt_conda install -c conda-forge -c bioconda -p $CNT_WRITABLE_PATH "$@"
+/usr/bin/micromamba -r /cnt_conda install -c conda-forge -c bioconda -p $CNT_CONDA_PREFIX "$@"
 EOF
     chmod +x /usr/bin/mm-install
 
     cat << 'EOF' > /usr/bin/mm-update
 #!/usr/bin/bash
-if [[ -z "$CNT_WRITABLE_PATH" ]]; then
-    echo "ERROR: CNT_WRITABLE_PATH is not set!"
+if [[ -z "$CNT_CONDA_PREFIX" ]]; then
+    echo "ERROR: CNT_CONDA_PREFIX is not set!"
     exit 1
 fi
-/usr/bin/micromamba -r /cnt_conda update -c conda-forge -c bioconda -p $CNT_WRITABLE_PATH "$@"
+/usr/bin/micromamba -r /cnt_conda update -c conda-forge -c bioconda -p $CNT_CONDA_PREFIX "$@"
 EOF
     chmod +x /usr/bin/mm-update
 
     cat << 'EOF' > /usr/bin/mm-remove
 #!/usr/bin/bash
-if [[ -z "$CNT_WRITABLE_PATH" ]]; then
-    echo "ERROR: CNT_WRITABLE_PATH is not set!"
+if [[ -z "$CNT_CONDA_PREFIX" ]]; then
+    echo "ERROR: CNT_CONDA_PREFIX is not set!"
     exit 1
 fi
-/usr/bin/micromamba -r /cnt_conda remove -p $CNT_WRITABLE_PATH "$@"
+/usr/bin/micromamba -r /cnt_conda remove -p $CNT_CONDA_PREFIX "$@"
 EOF
     chmod +x /usr/bin/mm-remove
+
+    cat << 'EOF' > /usr/bin/mm-list
+#!/usr/bin/bash
+if [[ -z "$CNT_CONDA_PREFIX" ]]; then
+    echo "ERROR: CNT_CONDA_PREFIX is not set!"
+    exit 1
+fi
+/usr/bin/micromamba -r /cnt_conda list -p $CNT_CONDA_PREFIX "$@"
+EOF
+    chmod +x /usr/bin/mm-list
+
+    cat << 'EOF' > /usr/bin/mm-export
+#!/usr/bin/bash
+if [[ -z "$CNT_CONDA_PREFIX" ]]; then
+    echo "ERROR: CNT_CONDA_PREFIX is not set!"
+    exit 1
+fi
+/usr/bin/micromamba -r /cnt_conda env export -p $CNT_CONDA_PREFIX "$@"
+EOF
+    chmod +x /usr/bin/mm-export
+
+    cat << 'EOF' > /usr/bin/mm-clean
+#!/usr/bin/bash
+/usr/bin/micromamba -r /cnt_conda clean "$@"
+EOF
+    chmod +x /usr/bin/mm-clean
 
 %runscript
     echo "This container provides mksquashfs and micromamba inside Debian"

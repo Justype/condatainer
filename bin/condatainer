@@ -1337,7 +1337,7 @@ class CondaTainer_Exec:
             "--env", "IN_CONDATINER=1",
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR, os.path.abspath(".")),
             # "--bind", "/etc/localtime:/etc/localtime:ro",
-            *(["--env", "CNT_WRITABLE_PATH=" + writable_path] if writable_path else []),
+            *(["--env", "CNT_CONDA_PREFIX=" + writable_path] if writable_path else []),
             *CondaTainer.generate_gpu_args(),
             Config.BASE_IMAGE_SIF,
             *command
@@ -1357,11 +1357,11 @@ class CondaTainer_Exec:
                 for key, note in env_notes.items():
                     print(f"  {Utils.yellow_text(key.ljust(env_max_len))}: {note}")
                 if writable_path:
-                    print(f"  {Utils.yellow_text('CNT_WRITABLE_PATH'.ljust(env_max_len))}: {Utils.blue_text(writable_path)}")
+                    print(f"  {Utils.yellow_text('CNT_CONDA_PREFIX'.ljust(env_max_len))}: {Utils.blue_text(writable_path)}")
                 print("")
             else:
                 if writable_path:
-                    print(f"Overlay env:\n  {Utils.yellow_text('CNT_WRITABLE_PATH')}: {Utils.blue_text(writable_path)}\n")
+                    print(f"Overlay env:\n  {Utils.yellow_text('CNT_CONDA_PREFIX')}: {Utils.blue_text(writable_path)}\n")
         try:
             subprocess.run(exec_cmd, check=True)
         except subprocess.CalledProcessError:

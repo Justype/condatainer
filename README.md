@@ -30,6 +30,8 @@ The installation script is **interactive**. You will be prompted to confirm the 
 - **Hybrid Modes**: Supports read-only SquashFS (`.sqf`) for production and writable ext3 (`.img`) for development.
 - **Context-Aware**: Manages references/indexes, and displays helpful info when in interactive sessions.
 
+(Tips for writable images: see [here](assets/TIPS.md#create-writable-images))
+
 ```bash
 # 1. Create an overlay for samtools
 condatainer create samtools/1.16
