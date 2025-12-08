@@ -1,0 +1,94 @@
+# For CPU only
+#     debian:sid-slim
+# For GPU support, change base image to
+#     nvidia/cuda:13.0.2-cudnn-devel-ubuntu24.04
+#     rocm/dev-ubuntu-24.04:latest
+
+Bootstrap: docker
+From: rocm/dev-ubuntu-24.04:latest
+
+%labels
+    Author Ziyue Cheng
+    Version 1.0
+    Description "Debian-based container with squashfs-tools (mksquashfs)"
+
+%environment
+    export PATH=/usr/sbin:/usr/bin:$PATH
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export PS1='CNT \w> '
+    # May need to use --bind /etc/localtime to sync timezone
+
+%post
+    # Avoid interactive prompts
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get update && apt-get install -y \
+        squashfs-tools fuse \
+        sudo ca-certificates \
+        curl wget git \
+        tar pigz unzip bzip2 xz-utils zstd lz4 \
+        tzdata \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Download Micromamba to /usr/bin
+    ARCH="$(uname -m)"
+    case "$ARCH" in
+        aarch64|ppc64le|arm64) ;;  # pass
+        *) ARCH="64" ;;
+    esac
+    RELEASE_URL="https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-${ARCH}"
+    wget -qO /usr/bin/micromamba "${RELEASE_URL}"
+    chmod +x /usr/bin/micromamba
+
+    # Add helper scripts for create/install/update/remove $CNT_WRITABLE_PATH will be set to the .img overlay path
+    cat << 'EOF' > /usr/bin/mm-create
+#!/usr/bin/bash
+if [[ -z "$CNT_WRITABLE_PATH" ]]; then
+    echo "ERROR: CNT_WRITABLE_PATH is not set!"
+    exit 1
+fi
+/usr/bin/micromamba -r /cnt_conda create -c conda-forge -c bioconda -p $CNT_WRITABLE_PATH "$@"
+EOF
+    chmod +x /usr/bin/mm-create
+
+    cat << 'EOF' > /usr/bin/mm-install
+#!/usr/bin/bash
+if [[ -z "$CNT_WRITABLE_PATH" ]]; then
+    echo "ERROR: CNT_WRITABLE_PATH is not set!"
+    exit 1
+fi
+/usr/bin/micromamba -r /cnt_conda install -c conda-forge -c bioconda -p $CNT_WRITABLE_PATH "$@"
+EOF
+    chmod +x /usr/bin/mm-install
+
+    cat << 'EOF' > /usr/bin/mm-update
+#!/usr/bin/bash
+if [[ -z "$CNT_WRITABLE_PATH" ]]; then
+    echo "ERROR: CNT_WRITABLE_PATH is not set!"
+    exit 1
+fi
+/usr/bin/micromamba -r /cnt_conda update -c conda-forge -c bioconda -p $CNT_WRITABLE_PATH "$@"
+EOF
+    chmod +x /usr/bin/mm-update
+
+    cat << 'EOF' > /usr/bin/mm-remove
+#!/usr/bin/bash
+if [[ -z "$CNT_WRITABLE_PATH" ]]; then
+    echo "ERROR: CNT_WRITABLE_PATH is not set!"
+    exit 1
+fi
+/usr/bin/micromamba -r /cnt_conda remove -p $CNT_WRITABLE_PATH "$@"
+EOF
+    chmod +x /usr/bin/mm-remove
+
+%runscript
+    echo "This container provides mksquashfs and micromamba inside Debian"
+    exec /bin/bash "$@"
+
+%help
+    This container provides:
+      - mksquashfs
+      - fuse
+    You can use it to convert ext3 overlay images to SquashFS inside Apptainer
