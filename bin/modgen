@@ -500,7 +500,7 @@ class ModGen:
     @staticmethod
     def get_missing_modules(required_modules: List[str]) -> List[str]:
         installed_modules = ModGen.get_installed_modules()
-        missing_modules = [mod for mod in required_modules if mod not in installed_modules]
+        missing_modules = [mod for mod in required_modules if mod not in installed_modules and not ModGen.is_module_available(mod)]
         return missing_modules
 
     @staticmethod
