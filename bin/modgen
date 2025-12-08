@@ -51,7 +51,6 @@ class Config:
     IS_LMOD = os.environ.get("LMOD_DIR") is not None
 
 def main():
-    ModGen.ensure_env_modules_or_lmod()
     parser = argparse.ArgumentParser(description="ModGen: Use conda and build scripts to create environment-modules or Lmod modules.")
     parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of ModGen", default=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
@@ -70,13 +69,19 @@ def main():
     ModGen_CondaTainer.add_parser_arguments(subparsers)
 
     args = parser.parse_args()
+    ModGen.ensure_env_modules_or_lmod()
+    if not ModGen_Create.ensure_templates():
+        Utils.print_error("Failed to ensure modulefile templates are available.")
+        sys.exit(1)
+
     if args.debug:
         Config.debug = True
+        Utils.print_debug("Debug mode enabled")
+        Utils.print_debug(f"Program BIN: {Config.SCRIPT_PATH}")
+        Utils.print_debug(f"BASE DIR: {Config.CONDATINER_DIR}")
+        Utils.print_debug(f"MODULE SYSTEM: {'Lmod' if Config.IS_LMOD else 'Environment-Modules'}")
     if args.action == "create":
         ModGen.ensure_micromamba()
-        if not ModGen_Create.ensure_templates():
-            Utils.print_error("Failed to ensure modulefile templates are available.")
-            sys.exit(1)
         ModGen_Create.parse_create_args(args)
     elif args.action == "check":
         ModGen.ensure_micromamba()
