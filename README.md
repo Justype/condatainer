@@ -2,35 +2,30 @@
 
 <img src="assets/logos_gemini_generated.png" width="250" alt="CondaTainer and ModGen Logo">
 
-An (HPC) toolkit for managing softwares and genome references efficiently.
+A toolkit for efficient resource management on HPC systems, specifically targeting inode limits and environment isolation.
 
-This repository contains two complementary tools designed to simplify package management on HPC systems where users often face challenges with file quotas (inodes), complex dependency trees, and environment isolation.
+- **CondaTainer**: Wraps environments in Apptainer overlays using [Apptainer](https://apptainer.org/) and [SquashFS](https://github.com/plougher/squashfs-tools).
+- **ModGen**: Automates [Lmod](https://lmod.readthedocs.io/en/latest/)/[Environment Modules](https://modules.readthedocs.io/en/latest/) modules creation.
 
-- **CondaTainer**: Manages software using [Apptainer](https://apptainer.org/) ([Singularity](https://sylabs.io/docs/)), [Micromamba](https://mamba.readthedocs.io/en/latest/user_guide/micromamba.html) and [SquashFS](https://github.com/plougher/squashfs-tools) overlays. Ideal for saving file quota and creating isolated, reproducible containers.
-- **ModGen**: Automates the creation of [Environment Modules](https://modules.readthedocs.io/en/latest/) (Tcl) or [Lmod](https://lmod.readthedocs.io/en/latest/) (Lua) modules. Ideal for users who prefer `module load`.
+If you want to reduce inode usage, use **CondaTainer**. If you prefer `Lmod` and using system available modules, use **ModGen**.
 
 ## 🛠️ Installation
-
-By default, The script will be installed to `$SCRATCH/condatainer/` and add the installation path to your `.bashrc` or `.zshrc`.
-
-If `$SCRATCH` is not defined, it will be installed to `$HOME/condatainer/`.
 
 ```bash
 curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash
 ```
 
+The installation script is **interactive**. You will be prompted to confirm the installation path (defaulting to `$SCRATCH/condatainer/` or `$HOME/condatainer/`). The script will also edit shell config.
+
 ## 📦 CondaTainer
 
-**CondaTainer** solves the "too many files" problem inherent to Conda environments. Instead of creating thousands of small files, it packs Conda environments into single, highly compressed SquashFS files (`.sqf`) and mounts them inside an Apptainer container.
+**CondaTainer** solves the "too many files" problem inherent to Conda environments. Instead of creating thousands of small files. It packs Conda environments into single, highly compressed SquashFS files (`.sqf`) and mounts them inside an Apptainer container.
 
-**Key Features**
-
-- **Quota Saver**: Converts heavy Conda environments (1k+ files) into 1 SquashFS file.
-- **Auto-Dependency Resolution**: Detects `#DEP:` tags and `module load` or `ml` commands in scripts and auto-mounts required overlays.
-- **Writable Mode**: Supports writable ext3 images (.img) for environments that need runtime modification.
-- **Smart Environment & Info**: Supports loading genome data and defining common environments variables. Helpful descriptions are automatically displayed when loading the module in an interactive shell (TTY).
-
-**Quick Usage**
+- **Inode Efficiency**: Compresses heavy conda environments (10k+ files) into 1 file.
+- **Auto Generation**: Builds overlays from recipes or Conda environment files.
+- **Smart Dependencies**: Scans scripts to detect and install missing modules on the fly. (by `#DEP:` tags and `module load`)
+- **Hybrid Modes**: Supports read-only SquashFS (`.sqf`) for production and writable ext3 (`.img`) for development.
+- **Context-Aware**: Manages genome references/indexes, and displays helpful info when in interactive sessions (TTY).
 
 ```bash
 # 1. Create an overlay for samtools
@@ -45,8 +40,11 @@ condatainer avail
 # 4. Create a custom environment from a YAML file
 condatainer create -f environment.yml -p my_analysis
 
-# 5. Cellranger reference example
-bin/condatainer exec -o grch38--cellranger--2024-A bash
+# 5. auto install the dependencies
+condatainer check analysis.sh -a
+
+# 6. Helpful info example: Cellranger reference
+condatainer exec -o grch38--cellranger--2024-A bash
 # [CondaTainer] Overlay envs:
 #   CELLRANGER_REF_DIR: cellranger reference dir
 #   GENOME_FASTA      : genome fasta
@@ -56,32 +54,33 @@ bin/condatainer exec -o grch38--cellranger--2024-A bash
 
 [Read the full CondaTainer Manual](assets/CNT_MANUAL.md)
 
-## 🧩 ModGen
+## 🏭 ModGen
 
-**ModGen** bridges the gap between Conda and HPC module systems. It installs packages via Conda into a centralized directory and automatically generates modulefiles (Lua or Tcl), allowing users to load them via standard module load commands.
+**ModGen** streamlines HPC software management by automatically converting apps and genome references into modules. It allows users to access Conda and non-Conda software (e.g., Cell Ranger, ORAD) but also genome references via standard `module` load commands without manual configuration.
 
-**Key Features**
-
-- **Native HPC Feel**: Uses module load and module avail.
-- **Auto-Generation**: No need to write modulefiles manually; ModGen parses metadata and builds them for you.
-- **Dependency Checking**: Scans scripts for dependencies and installs missing modules on the fly.
-- **Smart Environment & Info**: Supports loading genome data and defining common environments variables. Helpful descriptions are automatically displayed when loading the module not in a SLURM job.
+- **Auto-Generation**: Installs packages and builds Lua/Tcl modulefiles automatically.
+- **Smart Dependencies**: Scans scripts to detect and install missing modules on the fly. (by `#DEP:` tags and `module load`)
+- **Native Integration**: seamless `module avail` and `module load` experience.
+- **Context-Aware**: Manages genome references/indexes, and displays helpful info when not running within a SLURM job.
 
 ```bash
 # 1. Initialize shell hooks (only needed once)
 modgen init
 
-# 2. Install bcftools and generate the modulefile
-modgen create bcftools/1.16
+# 2. Install samtools and generate the modulefile
+modgen create samtools/1.16
 
 # 3. Load the module (standard HPC way)
-module load bcftools/1.16
-bcftools --version
+module load samtools/1.16
+samtools --version
 
 # 4. Search for packages to install
 modgen avail salmon grcm M36
 
-# 5. 10X reference example
+# 5. Auto install dependencies from a script
+modgen check analysis.sh -a
+
+# 6. Helpful info example: Cellranger reference
 ml grch38/cellranger/2024-A
 # Available environment variables:
 #   CELLRANGER_REF_DIR (cellranger reference dir)
@@ -94,7 +93,7 @@ ml grch38/cellranger/2024-A
 
 ## ⚖️ Which one should I use?
 
-Feature | CondaTainer 🐳 | ModGen 🧩
+Feature | CondaTainer 📦 | ModGen 🏭
 -- | -- | --
 Technology | Apptainer + SquashFS | Conda + Lmod/EnvModules
 File Count (Inodes) | Very Low (1 file per env) | High (Standard Conda install)
@@ -110,8 +109,8 @@ Example Script (`analysis.sh`):
 
 ```bash
 #!/bin/bash
-#DEP: salmon/1.10.3
-#DEP: grcm39/salmon-1.10.3/gencodeM33
+#DEP: salmon/1.10.2
+#DEP: grcm39/salmon-1.10.2/gencodeM33
 
 salmon quant -i $SALMON_INDEX_DIR ...
 ```
@@ -148,13 +147,20 @@ samtools --version
 Both tools utilize a standardized naming schema to organize software and reference data.
 
 - Apps: `name/version` (e.g., `bcftools/1.16`)
-- References: `assembly/datatype/version` (e.g., `grcm39/salmon-1.10.3/gencodeM33` salmon index for GRCm39 using gencode M33 transcripts)
+- References: `assembly/datatype/version` (e.g., `grcm39/salmon-1.10.2/gencodeM33` salmon index for GRCm39 using gencode M33 transcripts)
 
 ## 🔗 Links & Resources
 
+- [Compression Method Benchmarks](https://github.com/inikep/lzbench)
 - [NYU HPC Using Containers on HPC](https://services.rt.nyu.edu/docs/hpc/containers/containers/)
 - [NYU HPC Singularity with Conda](https://services.rt.nyu.edu/docs/hpc/containers/singularity_with_conda/)
 - [NYU HPC SquashFS and Singularity](https://services.rt.nyu.edu/docs/hpc/containers/squash_file_system_and_singularity/)
-- [Compression Method Benchmarks](https://github.com/inikep/lzbench)
 - [AllianceCAN Multi-Instance GPU](https://docs.alliancecan.ca/wiki/Multi-Instance_GPU)
 - [AllianceCAN CPU RAM GPU ratio](https://docs.alliancecan.ca/wiki/Allocations_and_compute_scheduling#Ratios_in_bundles)
+
+## Acknowledgements
+
+This project used computational resources provided by **McMaster University** and the **Digital Research Alliance of Canada**.
+
+<img src="https://biochem.healthsci.mcmaster.ca/wp-content/themes/macsites-theme/img/logo.svg" height="50" alt="McMaster University Logo" style="vertical-align: top;">
+<img src="https://www.alliancecan.ca/assets/logo-en.svg" height="40" alt="Digital Research Alliance of Canada Logo" style="margin-left:20px; vertical-align: top;">

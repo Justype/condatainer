@@ -1416,7 +1416,15 @@ class ModGen_Init:
         Utils.print_message("Lmod detected." if Config.IS_LMOD else "Environment Modules (Tcl) detected.")
         Utils.print_debug(f"[INIT] Checking shell profile for ModGen configuration...")
 
-        shell_profile = os.path.expanduser("~/.bashrc")
+        shell_stype = os.path.basename(os.environ.get("SHELL", "bash"))
+
+        if shell_stype == "bash":
+            shell_profile = os.path.expanduser("~/.bashrc")
+        elif shell_stype == "zsh":
+            shell_profile = os.path.expanduser("~/.zshrc")
+        else:
+            Utils.print_warning(f"Unsupported shell type: {shell_stype}. Only bash and zsh are supported for automatic initialization.")
+            return False
         START_MARKER = "# >>> MODGEN MODULES >>>"
         END_MARKER = "# <<< MODGEN MODULES <<<"
 
