@@ -4,6 +4,13 @@
 
 ## Table of Contents
 
+- [Initialization](#initialization)
+- [Naming Convention](#naming-convention)
+- [Create](#create)
+- [Module Management (Avail, List, Remove)](#module-management-avail-list-remove)
+- [Exec](#exec)
+- [Runtime (Check, Run)](#runtime-check-run)
+- [Update](#update)
 
 ## Overall Command Structure
 
