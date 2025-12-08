@@ -4,8 +4,8 @@ An (HPC) toolkit for managing softwares and genome references efficiently.
 
 This repository contains two complementary tools designed to simplify package management on HPC systems where users often face challenges with file quotas (inodes), complex dependency trees, and environment isolation.
 
-- **CondaTainer**: Manages software using [Apptainer](https://apptainer.org/) ([Singularity](https://sylabs.io/docs/)) and [SquashFS](https://github.com/plougher/squashfs-tools) overlays. Ideal for saving file quota and creating isolated, reproducible containers.
-- **ModGen**: Automates the creation of [Environment Modules](https://modules.readthedocs.io/en/latest/) (Tcl) or [Lmod](https://lmod.readthedocs.io/en/latest/) (Lua). Ideal for users prefer module load.
+- **CondaTainer**: Manages software using [Apptainer](https://apptainer.org/) ([Singularity](https://sylabs.io/docs/)), [Micromamba](https://mamba.readthedocs.io/en/latest/user_guide/micromamba.html) and [SquashFS](https://github.com/plougher/squashfs-tools) overlays. Ideal for saving file quota and creating isolated, reproducible containers.
+- **ModGen**: Automates the creation of [Environment Modules](https://modules.readthedocs.io/en/latest/) (Tcl) or [Lmod](https://lmod.readthedocs.io/en/latest/) (Lua) modules. Ideal for users who prefer `module load`.
 
 ## 🛠️ Installation
 
@@ -19,7 +19,7 @@ curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/insta
 
 ## 📦 CondaTainer
 
-**CondaTainer** solves the "too many files" problem inherent to Conda environments. Instead of creating thousands of small files, it packs Conda environments into single, highly compressed SquashFS files (.sqf) and mounts them inside an Apptainer container.
+**CondaTainer** solves the "too many files" problem inherent to Conda environments. Instead of creating thousands of small files, it packs Conda environments into single, highly compressed SquashFS files (`.sqf`) and mounts them inside an Apptainer container.
 
 **Key Features**
 
@@ -131,7 +131,7 @@ Integration with SLURM:
 #SBATCH --time=2:00:00
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=1GB
-#DEP:samtools/1.22
+#DEP:samtools/1.22.1
 
 if [ -z "$IN_CONDATINER" ]; then
     condatainer run "$0" "$@"

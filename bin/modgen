@@ -1287,7 +1287,7 @@ class ModGen_Check:
 
         deps = Utils.get_dependencies_from_script(script_path, raise_when_finding_overlay=False)
         for d in deps:
-            Utils.print_message(f"Dependency: {Utils.yellow_text(d)}" + Utils.red_text(" (missing)" if not ModGen.is_module_installed(d) else ""))
+            Utils.print_message(f"Dependency: {Utils.yellow_text(d)}" + Utils.red_text(" (missing)" if not ModGen.is_module_installed(d) and not ModGen.is_module_available(d) else ""))
         missing_deps = ModGen.get_missing_modules(deps)
 
         if not missing_deps:
@@ -1504,8 +1504,8 @@ class ModGen_Update:
 
     @staticmethod
     def parse_update_args(args):
-        Utils.print_message("Are you sure to download and replace the current script from GitHub? [y/N]: ", end="", flush=True)
         if not args.yes:
+            Utils.print_message("Are you sure to download and replace the current script from GitHub? [y/N]: ", end="", flush=True)
             confirm = input()
             if confirm.lower() != 'y':
                 Utils.print_message("Update cancelled by user.")
