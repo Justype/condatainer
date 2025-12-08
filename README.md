@@ -2,7 +2,7 @@
 
 <img src="assets/logos_gemini_generated.png" width="250" alt="CondaTainer and ModGen Logo">
 
-A toolkit for efficient resource management on HPC systems, specifically targeting inode limits and environment isolation.
+A toolkit for efficient resource management on HPC systems, targeting inode limits and environment isolation.
 
 - **CondaTainer**: Wraps environments in Apptainer overlays using [Apptainer](https://apptainer.org/) and [SquashFS](https://github.com/plougher/squashfs-tools).
 - **ModGen**: Automates [Lmod](https://lmod.readthedocs.io/en/latest/)/[Environment Modules](https://modules.readthedocs.io/en/latest/) modules creation.
@@ -28,7 +28,7 @@ The installation script is **interactive**. You will be prompted to confirm the 
 - **Auto Generation**: Builds overlays from recipes or Conda environment files.
 - **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
 - **Hybrid Modes**: Supports read-only SquashFS (`.sqf`) for production and writable ext3 (`.img`) for development.
-- **Context-Aware**: Manages genome references/indexes, and displays helpful info when in interactive sessions (TTY).
+- **Context-Aware**: Manages references/indexes, and displays helpful info when in interactive sessions.
 
 ```bash
 # 1. Create an overlay for samtools
@@ -64,7 +64,7 @@ condatainer exec -o grch38--cellranger--2024-A bash
 - **Auto-Generation**: Installs packages and builds Lua/Tcl modulefiles automatically.
 - **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
 - **Native Integration**: seamless `module avail` and `module load` experience.
-- **Context-Aware**: Manages genome references/indexes, and displays helpful info when not running within a SLURM job.
+- **Context-Aware**: Manages references/indexes and displays helpful info when not in a SLURM job.
 
 ```bash
 # 1. Initialize shell hooks (only needed once)
@@ -106,7 +106,7 @@ Best For | Saving quota | Rapid prototyping
 
 ## 🚀 Script Runtime Automation
 
-Both tools support a "Headless" mode for running scripts. You can define dependencies directly in your bash scripts using metadata tags.
+Both tools support a "Headless" mode for running scripts. You can define dependencies in scripts using tags.
 
 Example Script (`analysis.sh`):
 
@@ -150,16 +150,13 @@ samtools --version
 Both tools utilize a standardized naming schema to organize software and reference data.
 
 - Apps: `name/version` (e.g., `bcftools/1.16`)
-- References: `assembly/datatype/version` (e.g., `grcm39/salmon-1.10.2/gencodeM33` salmon index for GRCm39 using gencode M33 transcripts)
+- References: `assembly/datatype/version` (e.g., `grcm39/salmon-1.10.2/gencodeM33`)
 
 ## 🔗 Links & Resources
 
 - [Compression Method Benchmarks](https://github.com/inikep/lzbench)
-- [NYU HPC Using Containers on HPC](https://services.rt.nyu.edu/docs/hpc/containers/containers/)
-- [NYU HPC Singularity with Conda](https://services.rt.nyu.edu/docs/hpc/containers/singularity_with_conda/)
-- [NYU HPC SquashFS and Singularity](https://services.rt.nyu.edu/docs/hpc/containers/squash_file_system_and_singularity/)
-- [AllianceCAN Multi-Instance GPU](https://docs.alliancecan.ca/wiki/Multi-Instance_GPU)
-- [AllianceCAN CPU RAM GPU ratio](https://docs.alliancecan.ca/wiki/Allocations_and_compute_scheduling#Ratios_in_bundles)
+- Container related: [Using Containers](https://services.rt.nyu.edu/docs/hpc/containers/containers/), [Singularity with Conda](https://services.rt.nyu.edu/docs/hpc/containers/singularity_with_conda/) and [Singularity with SquashFS](https://services.rt.nyu.edu/docs/hpc/containers/squash_file_system_and_singularity/)
+- Allocation related: [Multi-Instance GPU](https://docs.alliancecan.ca/wiki/Multi-Instance_GPU), [RAM GPU ratio](https://docs.alliancecan.ca/wiki/Allocations_and_compute_scheduling#Ratios_in_bundles)
 
 ## Acknowledgements
 
