@@ -7,7 +7,10 @@ A toolkit for efficient resource management on HPC systems, specifically targeti
 - **CondaTainer**: Wraps environments in Apptainer overlays using [Apptainer](https://apptainer.org/) and [SquashFS](https://github.com/plougher/squashfs-tools).
 - **ModGen**: Automates [Lmod](https://lmod.readthedocs.io/en/latest/)/[Environment Modules](https://modules.readthedocs.io/en/latest/) modules creation.
 
-If you want to reduce inode usage, use **CondaTainer**. If you prefer `Lmod` and using system available modules, use **ModGen**.
+Which one to choose?
+
+- If you want to reduce inode usage, use **CondaTainer**.
+- If you prefer `Lmod` and using system available modules, use **ModGen**.
 
 ## 🛠️ Installation
 
@@ -23,7 +26,7 @@ The installation script is **interactive**. You will be prompted to confirm the 
 
 - **Inode Efficiency**: Compresses heavy conda environments (10k+ files) into 1 file.
 - **Auto Generation**: Builds overlays from recipes or Conda environment files.
-- **Smart Dependencies**: Scans scripts to detect and install missing modules on the fly. (by `#DEP:` tags and `module load`)
+- **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
 - **Hybrid Modes**: Supports read-only SquashFS (`.sqf`) for production and writable ext3 (`.img`) for development.
 - **Context-Aware**: Manages genome references/indexes, and displays helpful info when in interactive sessions (TTY).
 
@@ -59,7 +62,7 @@ condatainer exec -o grch38--cellranger--2024-A bash
 **ModGen** streamlines HPC software management by automatically converting apps and genome references into modules. It allows users to access Conda and non-Conda software (e.g., Cell Ranger, ORAD) but also genome references via standard `module` load commands without manual configuration.
 
 - **Auto-Generation**: Installs packages and builds Lua/Tcl modulefiles automatically.
-- **Smart Dependencies**: Scans scripts to detect and install missing modules on the fly. (by `#DEP:` tags and `module load`)
+- **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
 - **Native Integration**: seamless `module avail` and `module load` experience.
 - **Context-Aware**: Manages genome references/indexes, and displays helpful info when not running within a SLURM job.
 
@@ -95,7 +98,7 @@ ml grch38/cellranger/2024-A
 
 Feature | CondaTainer 📦 | ModGen 🏭
 -- | -- | --
-Technology | Apptainer + SquashFS | Conda + Lmod/EnvModules
+Technology | Apptainer + SquashFS | Lmod/EnvModules
 File Count (Inodes) | Very Low (1 file per env) | High (Standard Conda install)
 Performance | High (LZ4 Compressed) | High
 Isolation | Perfect (Containerized) | Shared (Host environment)
@@ -163,6 +166,11 @@ Both tools utilize a standardized naming schema to organize software and referen
 This project used computational resources provided by **McMaster University** and the **Digital Research Alliance of Canada**.
 
 <div>
-<img src="assets/logo_mcmaster.svg" height="50" alt="McMaster University Logo" style="vertical-align: top;">
-<img src="assets/logo_alliance.svg" height="40" alt="Digital Research Alliance of Canada Logo" style="margin-left:20px; vertical-align: top;">
+<a href="https://www.mcmaster.ca" target="_blank" rel="noopener noreferrer">
+<img src="assets/logo_mcmaster.svg" height="45" alt="McMaster University Logo">
+</a>
+&nbsp;&nbsp;&nbsp;&nbsp;
+<a href="https://alliancecan.ca" target="_blank" rel="noopener noreferrer">
+<img src="assets/logo_alliance.svg" height="40" alt="Digital Research Alliance of Canada Logo">
+</a>
 </div>
