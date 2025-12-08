@@ -21,6 +21,7 @@ class Config:
     REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json.gz"
     MODGEN_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/modgen"
     CONDATAINER_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/condatainer"
+    GIT_RAW_URL_PREFIX = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
 
     # Folder paths
     SCRIPT_PATH = os.path.abspath(__file__)
@@ -73,6 +74,9 @@ def main():
         Config.debug = True
     if args.action == "create":
         ModGen.ensure_micromamba()
+        if not ModGen_Create.ensure_templates():
+            Utils.print_error("Failed to ensure modulefile templates are available.")
+            sys.exit(1)
         ModGen_Create.parse_create_args(args)
     elif args.action == "check":
         ModGen.ensure_micromamba()
@@ -240,18 +244,27 @@ class Utils:
         return packages
 
     @staticmethod
+    def download_file(url: str, dest_path: str) -> bool:
+        """
+        Download a remote file to `dest_path`. Creates parent dirs. Returns True on success.
+        """
+        try:
+            os.makedirs(os.path.dirname(dest_path), mode=0o775, exist_ok=True)
+            with urllib.request.urlopen(url) as resp, open(dest_path, 'wb') as out_f:
+                out_f.write(resp.read())
+            return True
+        except Exception as e:
+            Utils.print_error(f"Failed to download file from {url}: {e}")
+            return False
+
+    @staticmethod
     def download_executable(url: str, dest_path: str) -> bool:
         """
         Download a remote build script to `dest_path`. Creates parent dirs and
         marks the file executable. Returns True on success.
         """
         try:
-            os.makedirs(os.path.dirname(dest_path), mode=0o775, exist_ok=True)
-            with urllib.request.urlopen(url) as resp, open(dest_path, 'wb') as out_f:
-                out_f.write(resp.read())
-            # Ensure executable
-            os.chmod(dest_path, 0o775)
-            return True
+            return Utils.download_file(url, dest_path) and os.chmod(dest_path, 0o775) is None
         except Exception as e:
             Utils.print_error(f"Failed to download build script from {url}: {e}")
             return False
@@ -418,10 +431,6 @@ class ModGen:
             raise ValueError("Invalid normalized name_version format.")
 
     @staticmethod
-    def get_modulefile_template_path() -> str:
-        return Config.APPS_LMOD_TEMPLATE if Config.IS_LMOD else Config.APPS_EM_TEMPLATE
-
-    @staticmethod
     def is_module_available(normalized_name_version: str) -> bool:
         """
         Check if a module is available in the current environment.
@@ -525,6 +534,29 @@ class ModGen_Create:
             sys.exit(1)
         except KeyboardInterrupt:
             sys.exit(1)
+
+    @staticmethod
+    def ensure_templates():
+        app_temp = Config.APPS_LMOD_TEMPLATE if Config.IS_LMOD else Config.APPS_EM_TEMPLATE
+        ref_temp = Config.REF_LMOD_TEMPLATE if Config.IS_LMOD else Config.REF_EM_TEMPLATE
+
+        if os.path.isfile(app_temp) and os.path.isfile(ref_temp):
+            return True
+
+        app_temp_rel_path = os.path.relpath(app_temp, Config.CONDATINER_DIR)
+        ref_temp_rel_path = os.path.relpath(ref_temp, Config.CONDATINER_DIR)
+
+        app_temp_url = Config.GIT_RAW_URL_PREFIX + app_temp_rel_path.replace('\\', '/')
+        ref_temp_url = Config.GIT_RAW_URL_PREFIX + ref_temp_rel_path.replace('\\', '/')
+
+        Utils.print_message(f"Downloading apps and reference modulefile templates...")
+        if Utils.download_file(app_temp_url, app_temp) and \
+            Utils.download_file(ref_temp_url, ref_temp):
+            Utils.print_success("Apps modulefile template downloaded successfully.")
+            return True
+        else:
+            Utils.print_error("Failed to download modulefile templates.")
+            return False
 
     @staticmethod
     def cleanup(normalized_name_version: str, failed: bool = False):
