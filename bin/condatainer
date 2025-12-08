@@ -1894,4 +1894,8 @@ class CondaTainer_ModGen:
             Utils.print_error("Failed to download ModGen.")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        Utils.print_message("CondaTainer interrupted by user.")
+        sys.exit(1)

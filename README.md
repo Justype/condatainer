@@ -1,5 +1,7 @@
 # CondaTainer & ModGen
 
+<img src="assets/logos_gemini_generated.png" width="250" alt="CondaTainer and ModGen Logo">
+
 An (HPC) toolkit for managing softwares and genome references efficiently.
 
 This repository contains two complementary tools designed to simplify package management on HPC systems where users often face challenges with file quotas (inodes), complex dependency trees, and environment isolation.

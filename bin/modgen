@@ -1575,5 +1575,5 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        Utils.print_error("ModGen interrupted by user.")
+        Utils.print_message("ModGen interrupted by user.")
         sys.exit(1)
