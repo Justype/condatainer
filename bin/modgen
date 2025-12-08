@@ -1049,8 +1049,11 @@ class ModGen_Exec:
         Utils.print_debug(f"[EXEC] Executing command:")
         Utils.print_debug(full_command)
 
+        running_env = os.environ.copy()
+        running_env["IN_CONDATINER"] = "1"
+
         try:
-            subprocess.run(["bash", "-c", full_command], check=True)
+            subprocess.run(["bash", "-c", full_command], check=True, env=running_env)
         except subprocess.CalledProcessError as e:
             Utils.print_error(f"Command execution failed with exit code {e.returncode}.")
             sys.exit(e.returncode)
