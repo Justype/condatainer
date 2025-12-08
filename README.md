@@ -160,7 +160,7 @@ Both tools utilize a standardized naming schema to organize software and referen
 
 ## Acknowledgements
 
-This project used computational resources provided by **McMaster University** and the **Digital Research Alliance of Canada**.
+This project used resources provided by **McMaster University** and the **Digital Research Alliance of Canada**.
 
 <div>
 <a href="https://www.mcmaster.ca" target="_blank" rel="noopener noreferrer">
