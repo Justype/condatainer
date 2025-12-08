@@ -147,7 +147,7 @@ samtools --version
 
 ## 📂 Naming Convention
 
-Both tools utilize a standardized naming schema to organize software and reference data.
+Both tools utilize a standardized naming schema to organize software and reerence data.
 
 - Apps: `name/version` (e.g., `bcftools/1.16`)
 - References: `assembly/datatype/version` (e.g., `grcm39/salmon-1.10.2/gencodeM33`)
@@ -163,11 +163,7 @@ Both tools utilize a standardized naming schema to organize software and referen
 This project used resources provided by **McMaster University** and the **Digital Research Alliance of Canada**.
 
 <div>
-<a href="https://www.mcmaster.ca" target="_blank" rel="noopener noreferrer">
-<img src="assets/logo_mcmaster.svg" height="45" alt="McMaster University Logo">
-</a>
+<a href="https://www.mcmaster.ca" target="_blank" rel="noopener noreferrer"><img src="assets/logo_mcmaster.svg" height="45" alt="McMaster University Logo"></a>
 &nbsp;&nbsp;&nbsp;&nbsp;
-<a href="https://alliancecan.ca" target="_blank" rel="noopener noreferrer">
-<img src="assets/logo_alliance.svg" height="40" alt="Digital Research Alliance of Canada Logo">
-</a>
+<a href="https://alliancecan.ca" target="_blank" rel="noopener noreferrer"><img src="assets/logo_alliance.svg" height="40" alt="Digital Research Alliance of Canada Logo"></a>
 </div>
