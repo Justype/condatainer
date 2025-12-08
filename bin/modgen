@@ -79,21 +79,22 @@ def main():
         Utils.print_debug(f"Program BIN: {Config.SCRIPT_PATH}")
         Utils.print_debug(f"BASE DIR: {Config.CONDATINER_DIR}")
         Utils.print_debug(f"MODULE SYSTEM: {'Lmod' if Config.IS_LMOD else 'Environment-Modules'}")
-    if args.action == "create":
+
+    if args.action in ("create", "install"):
         ModGen.ensure_micromamba()
         ModGen_Create.parse_create_args(args)
-    elif args.action == "check":
+    elif args.action in ("check", "c"):
         ModGen.ensure_micromamba()
         ModGen_Check.parse_check_args(args)
-    elif args.action == "run":
+    elif args.action in ("run", "r"):
         ModGen_Run.parse_run_args(args)
-    elif args.action == "exec":
+    elif args.action in ("exec", "e"):
         ModGen_Exec.parse_exec_args(args)
-    elif args.action == "avail":
+    elif args.action in ("avail", "av"):
         ModGen_Avail.parse_avail_args(args)
-    elif args.action == "list":
+    elif args.action in ("list", "ls"):
         ModGen_List.parse_list_args(args)
-    elif args.action == "remove":
+    elif args.action in ("remove", "delete", "uninstall"):
         ModGen_Remove.parse_remove_args(args)
     elif args.action == "init":
         ModGen_Init.parse_init_args(args)

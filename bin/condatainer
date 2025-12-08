@@ -76,7 +76,7 @@ def main():
     args = parser.parse_args()
     if args.debug:
         Config.debug = True
-    if args.action == "create":
+    if args.action in ("create", "install"):
         CondaTainer.ensure_base_image()
         CondaTainer_Create.parse_create_args(args)
     elif args.action == "exec":
@@ -85,19 +85,19 @@ def main():
     elif args.action == "e":
         CondaTainer.ensure_base_image()
         CondaTainer_Exec.parse_e_args(args)
-    elif args.action == "check":
+    elif args.action in ("check", "c"):
         CondaTainer.ensure_base_image()
         CondaTainer_Check.parse_check_args(args)
-    elif args.action == "run":
+    elif args.action in ("run", "r"):
         CondaTainer.ensure_base_image()
         CondaTainer_Run.parse_run_args(args)
-    elif args.action == "list":
+    elif args.action in ("list", "ls"):
         CondaTainer_List.parse_list_args(args)
     elif args.action == "info":
         CondaTainer_Info.parse_info_args(args)
-    elif args.action == "avail":
+    elif args.action in ("avail", "av"):
         CondaTainer_Avail.parse_avail_args(args)
-    elif args.action == "remove":
+    elif args.action in ("remove", "delete", "uninstall"):
         CondaTainer_Remove.parse_remove_args(args)
     elif args.action == "apptainer":
         CondaTainer_Apptainer.parse_apptainer_args(args)
@@ -1880,8 +1880,8 @@ class CondaTainer_Update:
 
     @staticmethod
     def parse_update_args(args):
-        Utils.print_message("Are you sure to download and replace the current script from GitHub? [y/N]: ", end="", flush=True)
         if not args.yes:
+            Utils.print_message("Are you sure to download and replace the current script from GitHub? [y/N]: ", end="", flush=True)
             confirm = input()
             if confirm.lower() != 'y':
                 Utils.print_message("Update cancelled by user.")
