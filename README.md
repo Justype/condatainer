@@ -162,5 +162,7 @@ Both tools utilize a standardized naming schema to organize software and referen
 
 This project used computational resources provided by **McMaster University** and the **Digital Research Alliance of Canada**.
 
+<div>
 <img src="assets/logo_mcmaster.svg" height="50" alt="McMaster University Logo" style="vertical-align: top;">
 <img src="assets/logo_alliance.svg" height="40" alt="Digital Research Alliance of Canada Logo" style="margin-left:20px; vertical-align: top;">
+</div>
