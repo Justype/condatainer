@@ -71,7 +71,6 @@ def main():
     CondaTainer_Info.add_parser_arguments(subparsers)
     CondaTainer_Apptainer.add_parser_arguments(subparsers)
     CondaTainer_Update.add_parser_arguments(subparsers)
-    subparsers.add_parser("help", help="Show help information about CondaTainer")
     CondaTainer_ModGen.add_parser_arguments(subparsers)
 
     args = parser.parse_args()
@@ -83,6 +82,9 @@ def main():
     elif args.action == "exec":
         CondaTainer.ensure_base_image()
         CondaTainer_Exec.parse_exec_args(args)
+    elif args.action == "e":
+        CondaTainer.ensure_base_image()
+        CondaTainer_Exec.parse_e_args(args)
     elif args.action == "check":
         CondaTainer.ensure_base_image()
         CondaTainer_Check.parse_check_args(args)
@@ -101,8 +103,6 @@ def main():
         CondaTainer_Apptainer.parse_apptainer_args(args)
     elif args.action == "update":
         CondaTainer_Update.parse_update_args(args)
-    elif args.action == "help":
-        parser.print_help()
     elif args.action == "modgen":
         CondaTainer_ModGen.parse_modgen_args(args)
 
@@ -290,7 +290,7 @@ class Utils:
         base_def_path = Config.BASE_IMAGE_DEF
         if os.path.isfile(base_def_path):
             return True
-        
+
         Utils.print_message("Base image definition file not found.")
 
         choice = "cpu"
@@ -520,7 +520,7 @@ class CondaTainer:
         - Skip paths that are children of another path
         """
         # Resolve all paths to absolute, normalized Path objects
-        abs_paths = [Path(p).resolve() for p in paths]
+        abs_paths = [Path(p).resolve() for p in paths if p]
 
         # Remove duplicates
         unique_paths = []
@@ -551,7 +551,9 @@ class CondaTainer:
 class CondaTainer_Create:
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_Create.parser_create = parser.add_parser("create", help="Create a new SquashFS overlay using conda or available build scripts")
+        CondaTainer_Create.parser_create = parser.add_parser(
+            "create", aliases=["install"],
+            help="Create a new SquashFS overlay using conda or available build scripts")
         CondaTainer_Create.parser_create.add_argument(
             "name_versions",
             nargs="*",
@@ -570,7 +572,7 @@ class CondaTainer_Create:
         CondaTainer_Create.parser_create.add_argument(
             "-f", "--file",
             type=str,
-            help="Conda environment file (YAML format) to create the overlay from"
+            help="Conda environment yaml (use with --name or --prefix)"
         )
         CondaTainer_Create.parser_create.add_argument(
             "--zstd-fast",
@@ -606,6 +608,8 @@ class CondaTainer_Create:
             CondaTainer_Create.parser_create.error("Cannot use both NAME=VERSION items and --file at the same time")
         if args.prefix and args.name:
             CondaTainer_Create.parser_create.error("Cannot use both --prefix and --name at the same time")
+        if args.file and not (args.name or args.prefix):
+            CondaTainer_Create.parser_create.error("When using --file, either --name or --prefix must be provided")
         if args.lz4:
             Config.compress_args = Config.LZ4
         elif args.zstd_fast:
@@ -766,21 +770,12 @@ class CondaTainer_Create:
             overlay_abs_path = f"{prefix_abs_path}.sqf"
             custom_name = os.path.basename(prefix)
             relative_path = custom_name.replace("--", "/")
-
+        elif custom_name:
+            overlay_abs_path = os.path.join(Config.IMAGES_DIR, f"{custom_name}.sqf")
+            relative_path = custom_name.replace("--", "/")
         else:
-            if custom_name is None:
-                name_regex = r"name:\s*(\S+)"
-                with open(file_path, 'r') as f:
-                    content = f.read()
-                    match = re.search(name_regex, content)
-                    if match:
-                        custom_name = match.group(1)
-                    else:
-                        Utils.print_error("Could not find the environment name in the YAML file. Please provide a custom name using -n/--name.")
-                        return False
-            else:
-                overlay_abs_path = os.path.join(Config.IMAGES_DIR, f"{custom_name}.sqf")
-                relative_path = custom_name.replace("--", "/")
+            Utils.print_error("Either custom name or prefix must be provided when creating overlay from environment file.")
+            return False
 
         if os.path.isfile(overlay_abs_path):
             Utils.print_message(f"Overlay {Utils.yellow_text(os.path.basename(overlay_abs_path))} already exists at {Utils.blue_text(overlay_abs_path)}. Skipping creation.")
@@ -1137,7 +1132,7 @@ class CondaTainer_Exec:
 
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_Exec.parser_exec = parser.add_parser("exec", help="Execute a command using a group of overlays")
+        CondaTainer_Exec.parser_exec = parser.add_parser("exec", help="Execute a command using overlays")
         CondaTainer_Exec.parser_exec.add_argument(
             "-o", "--overlay",
             dest="overlays",
@@ -1158,6 +1153,12 @@ class CondaTainer_Exec:
             "commands",
             nargs=argparse.REMAINDER,
             help="The command to run inside the container (if not provided, defaults to bash shell)"
+        )
+        CondaTainer_Exec.parser_e = parser.add_parser("e", help="Run bash using writable overlays")
+        CondaTainer_Exec.parser_e.add_argument(
+            "overlays",
+            nargs="*",
+            help="Overlay files to mount (can be .sqf, .squashfs, or .img)"
         )
 
     @staticmethod
@@ -1184,6 +1185,19 @@ class CondaTainer_Exec:
 
         overlay_final.extend(args.overlays if args.overlays else [])
         command_final = command_final if command_final else ["bash"]
+
+        for ov in overlay_final:
+            if not os.path.isfile(ov):
+                Utils.print_error(f"Overlay file {ov} not found.")
+                exit(1)
+
+        CondaTainer_Exec.exec_command(overlay_final, command_final)
+
+    def parse_e_args(args):
+        CondaTainer_Exec.IMG_WRITABLE = True
+
+        overlay_final = args.overlays if args.overlays else []
+        command_final = ["bash"]
 
         for ov in overlay_final:
             if not os.path.isfile(ov):
@@ -1328,6 +1342,8 @@ class CondaTainer_Exec:
             # Convert filename-safe separators back to normalized path
             writable_path = f"/ext3/{os.path.splitext(os.path.basename(last_img))[0].replace('--', '/').replace('=', '/') }"
 
+        scratch_dir = os.environ.get("SCRATCH", None)
+
         exec_cmd = [
             Config.APPTAINER_PATH, "exec",
             *CondaTainer_Exec.generate_overlay_args(paths_or_name_version),
@@ -1335,7 +1351,7 @@ class CondaTainer_Exec:
             "--env", f"PATH={path_env}",
             # "--env", f"PS1=CT \\w> ",
             "--env", "IN_CONDATINER=1",
-            *CondaTainer.generate_bind_args(Config.CONDATINER_DIR, os.path.abspath(".")),
+            *CondaTainer.generate_bind_args(Config.CONDATINER_DIR, os.path.abspath("."), scratch_dir),
             # "--bind", "/etc/localtime:/etc/localtime:ro",
             *(["--env", "CNT_CONDA_PREFIX=" + writable_path] if writable_path else []),
             *CondaTainer.generate_gpu_args(),
@@ -1370,7 +1386,9 @@ class CondaTainer_Exec:
 class CondaTainer_Avail:
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_Avail.parser_avail = parser.add_parser("avail", help="Check available local and remote build scripts")
+        CondaTainer_Avail.parser_avail = parser.add_parser(
+            "avail", aliases=["av"],
+            help="Check available local and remote build scripts")
         CondaTainer_Avail.parser_avail.add_argument(
             "terms",
             type=str,
@@ -1462,7 +1480,9 @@ class CondaTainer_Avail:
 class CondaTainer_List:
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_List.parser_list = parser.add_parser("list", help="List installed overlays matching search terms")
+        CondaTainer_List.parser_list = parser.add_parser(
+            "list", aliases=["ls"],
+            help="List installed overlays matching search terms")
         CondaTainer_List.parser_list.add_argument(
             "terms",
             type=str,
@@ -1532,7 +1552,9 @@ class CondaTainer_List:
 class CondaTainer_Remove:
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_Remove.parser_remove = parser.add_parser("remove", help="Remove installed overlays matching search terms")
+        CondaTainer_Remove.parser_remove = parser.add_parser(
+            "remove", aliases=["delete"],
+            help="Remove installed overlays matching search terms")
         CondaTainer_Remove.parser_remove.add_argument(
             "terms",
             type=str,
@@ -1635,7 +1657,9 @@ class CondaTainer_Info:
 class CondaTainer_Check:
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_Check.parser_check = parser.add_parser("check", help="Check if the dependencies of a script are installed")
+        CondaTainer_Check.parser_check = parser.add_parser(
+            "check", aliases=["c"],
+            help="Check if the dependencies of a script are installed")
         CondaTainer_Check.parser_check.add_argument(
             "script",
             type=str,
@@ -1697,7 +1721,9 @@ class CondaTainer_Check:
 class CondaTainer_Run:
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_Run.parser_run = parser.add_parser("run", help="Run a script and auto-solve the dependencies by #DEP tags")
+        CondaTainer_Run.parser_run = parser.add_parser(
+            "run", aliases=["r"],
+            help="Run a script and auto-solve the dependencies by #DEP tags")
         CondaTainer_Run.parser_run.add_argument(
             "script",
             type=str,

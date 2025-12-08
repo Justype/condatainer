@@ -65,7 +65,6 @@ def main():
     ModGen_Check.add_parser_arguments(subparsers)
     ModGen_Run.add_parser_arguments(subparsers)
     ModGen_Update.add_parser_arguments(subparsers)
-    subparsers.add_parser("help", help="Show help information about ModGen")
     ModGen_CondaTainer.add_parser_arguments(subparsers)
 
     args = parser.parse_args()
@@ -100,8 +99,6 @@ def main():
         ModGen_Init.parse_init_args(args)
     elif args.action == "update":
         ModGen_Update.parse_update_args(args)
-    elif args.action == "help":
-        parser.print_help()
     elif args.action == "condatainer":
         ModGen_CondaTainer.parse_condatainer_args(args)
 
@@ -518,7 +515,9 @@ class ModGen:
 class ModGen_Create:
     @staticmethod
     def add_parser_arguments(parser):
-        ModGen_Create.parser_create = parser.add_parser("create", help="Create a modules using conda or available build scripts")
+        ModGen_Create.parser_create = parser.add_parser(
+            "create", aliases=["install"],
+            help="Create a modules using conda or available build scripts")
         ModGen_Create.parser_create.add_argument(
             "name_versions",
             nargs="*",
@@ -999,7 +998,9 @@ class ModGen_Create:
 class ModGen_Exec:
     @staticmethod
     def add_parser_arguments(parser):
-        ModGen_Exec.parser_exec = parser.add_parser("exec", help="Execute a command with modules loaded")
+        ModGen_Exec.parser_exec = parser.add_parser(
+            "exec", aliases=["e"], 
+            help="Execute a command with modules loaded")
         ModGen_Exec.parser_exec.add_argument(
             "-m", "--module",
             dest="modules",
@@ -1064,7 +1065,9 @@ class ModGen_Exec:
 class ModGen_Avail:
     @staticmethod
     def add_parser_arguments(parser):
-        ModGen_Avail.parser_avail = parser.add_parser("avail", help="Check available local build scripts")
+        ModGen_Avail.parser_avail = parser.add_parser(
+            "avail", aliases=["av"],
+            help="Check available local and remote build scripts")
         ModGen_Avail.parser_avail.add_argument(
             "terms",
             type=str,
@@ -1156,7 +1159,9 @@ class ModGen_Avail:
 class ModGen_List:
     @staticmethod
     def add_parser_arguments(parser):
-        ModGen_List.parser_list = parser.add_parser("list", help="List installed modules matching search terms")
+        ModGen_List.parser_list = parser.add_parser(
+            "list", aliases=["ls"],
+            help="List installed modules matching search terms")
         ModGen_List.parser_list.add_argument(
             "terms",
             type=str,
@@ -1224,7 +1229,9 @@ class ModGen_List:
 class ModGen_Remove:
     @staticmethod
     def add_parser_arguments(parser):
-        ModGen_Remove.parser_remove = parser.add_parser("remove", help="Remove installed modules matching search terms")
+        ModGen_Remove.parser_remove = parser.add_parser(
+            "remove", aliases=["delete"],
+            help="Remove installed modules matching search terms")
         ModGen_Remove.parser_remove.add_argument(
             "terms",
             type=str,
@@ -1251,7 +1258,9 @@ class ModGen_Remove:
 class ModGen_Check:
     @staticmethod
     def add_parser_arguments(parser):
-        ModGen_Check.parser_check = parser.add_parser("check", help="Check if the dependencies of a script are installed")
+        ModGen_Check.parser_check = parser.add_parser(
+            "check", aliases=["c"],
+            help="Check if the dependencies of a script are installed")
         ModGen_Check.parser_check.add_argument(
             "script",
             type=str,
@@ -1312,7 +1321,9 @@ class ModGen_Check:
 class ModGen_Run:
     @staticmethod
     def add_parser_arguments(parser):
-        ModGen_Run.parser_run = parser.add_parser("run", help="Run a script and auto-solve the dependencies by #DEP tags")
+        ModGen_Run.parser_run = parser.add_parser(
+            "run", aliases=["r"], 
+            help="Run a script and auto-solve the dependencies by #DEP tags")
         ModGen_Run.parser_run.add_argument(
             "script",
             type=str,

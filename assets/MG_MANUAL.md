@@ -15,23 +15,23 @@
 ## Overall Command Structure
 
 ```
-usage: modgen [-h] [-v] [--debug] {init,create,avail,list,remove,exec,check,run,update,help} ...
+usage: modgen [-h] [-v] [--debug] {init,create,install,avail,av,list,ls,remove,delete,exec,e,check,c,run,r,update,condatainer} ...
 
 ModGen: Use conda and build scripts to create environment-modules or Lmod modules.
 
 positional arguments:
-  {init,create,avail,list,remove,exec,check,run,update,help,condatainer}
+  {init,create,install,avail,av,list,ls,remove,delete,exec,e,check,c,run,r,update,condatainer}
                         Available actions
     init                Initialize ModGen environment
-    create              Create a modules using conda or available build scripts
-    avail               Check available local build scripts
-    list                List installed modules matching search terms
-    remove              Remove installed modules matching search terms
-    exec                Execute a command with modules loaded
-    check               Check if the dependencies of a script are installed
-    run                 Run a script and auto-solve the dependencies by #DEP tags
+    create (install)    Create a modules using conda or available build scripts
+    avail (av)          Check available local and remote build scripts
+    list (ls)           List installed modules matching search terms
+    remove (delete)     Remove installed modules matching search terms
+    exec (e)            Execute a command with modules loaded
+    check (c)           Check if the dependencies of a script are installed
+    run (r)             Run a script and auto-solve the dependencies by #DEP tags
     update              Update ModGen to the latest version
-    help                Show help information about ModGen
+    condatainer         Install CondaTainer
 
 options:
   -h, --help            show this help message and exit

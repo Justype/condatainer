@@ -17,24 +17,25 @@
 ## Overall Command Structure
 
 ```
-usage: condatainer [-h] [-v] [--debug] {create,avail,list,remove,exec,check,run,info,apptainer,update,help} ...
+usage: condatainer [-h] [-v] [--debug] {create,install,avail,av,list,ls,remove,delete,exec,e,check,c,run,r,info,apptainer,update,modgen} ...
 
 CondaTainer: Use apptainer/conda/squashFS to manage tools for HPC users.
 
 positional arguments:
-  {create,avail,list,remove,exec,check,run,info,apptainer,update,help}
+  {create,install,avail,av,list,ls,remove,delete,exec,e,check,c,run,r,info,apptainer,update,modgen}
                         Available actions
-    create              Create a new SquashFS overlay using conda or available build scripts
-    avail               Check available local and remote build scripts
-    list                List installed overlays based on search terms
-    remove              Remove installed overlays based on search terms
-    exec                Execute a command using a group of overlays
-    check               Check if the dependencies of a script are installed
-    run                 Run a script and auto-solve the dependencies by #DEP tags
+    create (install)    Create a new SquashFS overlay using conda or available build scripts
+    avail (av)          Check available local and remote build scripts
+    list (ls)           List installed overlays matching search terms
+    remove (delete)     Remove installed overlays matching search terms
+    exec                Execute a command using overlays
+    e                   Run bash using writable overlays
+    check (c)           Check if the dependencies of a script are installed
+    run (r)             Run a script and auto-solve the dependencies by #DEP tags
     info                Show information about a specific overlay
     apptainer           Get latest Apptainer executable from conda-forge
     update              Update CondaTainer to the latest version
-    help                Show help information about CondaTainer
+    modgen              Get latest modgen executable from GitHub
 
 options:
   -h, --help            show this help message and exit
@@ -133,6 +134,7 @@ condatainer create bcftools/1.22
 condatainer create grch38/gtf-gencode/47
 
 # Create from a yaml file with a custom name (Custom Env)
+# NOTE: -f must use with -n or -p
 condatainer create -f environment.yml -n my_analysis_env
 
 # Create a custom env with multiple packages
