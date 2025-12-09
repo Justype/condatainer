@@ -8,6 +8,7 @@ import argparse
 import json
 import urllib.request
 import platform
+import stat
 import shlex
 from typing import Dict, List, Optional, Tuple
 
@@ -321,11 +322,11 @@ class Utils:
         return dependencies
 
     @staticmethod
-    def share_to_ug_recursive(path: str):
+    def share_to_ugo_recursive(path: str):
         """
         Recursively set permissions:
-            - Files: ug+rw
-            - Folders: ug+rwx
+            - Files: ug+rw,o+r
+            - Folders: ug+rwx,o+rx
         """
         for root, dirs, files in os.walk(path):
             # Set directories
@@ -333,21 +334,23 @@ class Utils:
                 dir_path = os.path.join(root, d)
                 current_mode = os.stat(dir_path).st_mode
                 # Add read/write/execute for user & group
-                os.chmod(dir_path, current_mode | os.stat.S_IRUSR | os.stat.S_IWUSR | os.stat.S_IXUSR |
-                                            os.stat.S_IRGRP | os.stat.S_IWGRP | os.stat.S_IXGRP)
+                os.chmod(dir_path, current_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
+                                            stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
+                                            stat.S_IROTH | stat.S_IXOTH) 
 
             # Set files
             for f in files:
                 file_path = os.path.join(root, f)
                 current_mode = os.stat(file_path).st_mode
                 # Add read/write for user & group
-                os.chmod(file_path, current_mode | os.stat.S_IRUSR | os.stat.S_IWUSR |
-                                            os.stat.S_IRGRP | os.stat.S_IWGRP)
+                os.chmod(file_path, current_mode | stat.S_IRUSR | stat.S_IWUSR |
+                                            stat.S_IRGRP | stat.S_IWGRP| stat.S_IROTH)
 
         # Finally, handle the top-level directory itself
         current_mode = os.stat(path).st_mode
-        os.chmod(path, current_mode | os.stat.S_IRUSR | os.stat.S_IWUSR | os.stat.S_IXUSR |
-                                os.stat.S_IRGRP | os.stat.S_IWGRP | os.stat.S_IXGRP)
+        os.chmod(path, current_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
+                                stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
+                                stat.S_IROTH | stat.S_IXOTH)
 
     @staticmethod
     def is_in_interactive_shell() -> bool:
@@ -403,7 +406,7 @@ class ModGen:
             exit(1)
 
         os.chmod(Config.MICROMAMBA_BIN, 0o775)
-        Utils.print_success("micromamba successfully installed at " + Config.MICROMAMBA_BIN)
+        Utils.print_success("micromamba installed at " + Config.MICROMAMBA_BIN)
 
     @staticmethod
     def get_tmp_dir(normalized_name_version: str) -> str:
@@ -521,7 +524,7 @@ class ModGen_Create:
         ModGen_Create.parser_create.add_argument(
             "name_versions",
             nargs="*",
-            help="Name/Version or Name=Version or Name@Version of the module to create (e.g., bcftools/1.22)"
+            help="Name/Version or Name=Version or Name@Version to create (e.g., bcftools/1.22)"
         )
 
     @staticmethod
@@ -556,7 +559,7 @@ class ModGen_Create:
         Utils.print_message(f"Downloading apps and reference modulefile templates...")
         if Utils.download_file(app_temp_url, app_temp) and \
             Utils.download_file(ref_temp_url, ref_temp):
-            Utils.print_success("Apps modulefile template downloaded successfully.")
+            Utils.print_success("Apps modulefile template downloaded.")
             return True
         else:
             Utils.print_error("Failed to download modulefile templates.")
@@ -806,7 +809,7 @@ class ModGen_Create:
             return False
 
         ModGen_Create.cleanup(normalized_name_version, failed=False)
-        Utils.print_success(f"Module {Utils.yellow_text(normalized_name_version)} created successfully.")
+        Utils.print_success(f"Module {Utils.yellow_text(normalized_name_version)} created.")
         return True
 
     @staticmethod
@@ -911,7 +914,7 @@ class ModGen_Create:
             key = Utils.normalize_name_version(normalized_name_version)
             if metadata and key in metadata:
                 is_remote = True
-                script_path = os.path.join(Config.CONDATINER_DIR, "tmp_build_script.sh")
+                script_path = os.path.join(Config.CONDATINER_DIR, f"{key.replace('/', '--')}.sh")
                 Utils.print_message(f"Downloading build script for {Utils.yellow_text(normalized_name_version)} from remote metadata...")
                 url = metadata[key]
                 if not Utils.download_executable(url, script_path):
@@ -934,7 +937,7 @@ class ModGen_Create:
                         ModGen_Create.cleanup(normalized_name_version, failed=True)
                         return False
                     else:
-                        Utils.print_success(f"Dependency module {Utils.yellow_text(dep)} installed successfully.")
+                        Utils.print_success(f"Dependency module {Utils.yellow_text(dep)} installed.")
                 Utils.print_message("All dependencies are satisfied.")
         except ValueError as ve:
             Utils.print_error(f"Error parsing dependencies: {ve}")
@@ -954,8 +957,7 @@ class ModGen_Create:
         else:
             cmd_create = [ "bash", script_path ]
 
-        Utils.print_debug("[CREATE] Creating module with command:")
-        Utils.print_debug(cmd_create)
+        Utils.print_debug(f"[CREATE] with command: {cmd_create}")
 
         try:
             subprocess.run(cmd_create, check=True, env=running_env)
@@ -988,7 +990,7 @@ class ModGen_Create:
         ModGen_Create.cleanup(normalized_name_version, failed=False)
         if is_remote and os.path.isfile(script_path):
             os.remove(script_path)
-        Utils.print_success(f"Module {Utils.yellow_text(normalized_name_version)} created successfully.")
+        Utils.print_success(f"Module {Utils.yellow_text(normalized_name_version)} created.")
         return True
 
 class ModGen_Exec:
@@ -1144,13 +1146,12 @@ class ModGen_Avail:
             Utils.print_message("Do you want to install the above modules? [y/N]: ", end="")
             choice = input().strip().lower()
             if choice != 'y':
-                Utils.print_message("Aborted module installation.")
                 return
 
             for pkg in uninstalled_packages:
                 Utils.print_message(f"Installing module {Utils.yellow_text(pkg)}...")
                 if ModGen_Create.auto_create_module_from_str(pkg):
-                    Utils.print_success(f"Module {Utils.yellow_text(pkg)} installed successfully.")
+                    Utils.print_success(f"Module {Utils.yellow_text(pkg)} installed.")
                 else:
                     Utils.print_error(f"Failed to install module {Utils.yellow_text(pkg)}.")
 
@@ -1278,7 +1279,6 @@ class ModGen_Remove:
         Utils.print_message("Are you sure? Cannot be undone. [y/N]: ", end="")
         choice = input().strip().lower()
         if choice != 'y':
-            Utils.print_message("Aborted module removal.")
             return
 
         for module in filtered_modules:
@@ -1310,6 +1310,7 @@ class ModGen_Check:
     def parse_check_args(args):
         is_install = args.auto_install or args.install
         script_path_or_name = args.script
+        is_remote = False
         if not os.path.isfile(script_path_or_name):
             script_path_or_name = Utils.normalize_name_version(script_path_or_name)
             local_build_scripts = Utils.get_local_build_scripts()
@@ -1319,8 +1320,9 @@ class ModGen_Check:
                 Utils.print_message(f"Found local build script {Utils.blue_text(script_path)}")
             elif script_path_or_name in Utils.fetch_remote_build_scripts():
                 Utils.print_message(f"Downloading build script for {script_path_or_name} from remote metadata...")
+                is_remote = True
                 url = Utils.fetch_remote_build_scripts()[script_path_or_name]
-                script_path = os.path.join(Config.CONDATINER_DIR, "tmp_build_script.sh")
+                script_path = os.path.join(Config.CONDATINER_DIR, f"{script_path_or_name.replace('/', '--')}.sh")
                 if Utils.download_executable(url, script_path):
                     Utils.print_message(f"Downloaded build script to {Utils.blue_text(script_path)}")
                 else:
@@ -1339,6 +1341,8 @@ class ModGen_Check:
 
         if not missing_deps:
             Utils.print_message("All dependencies are installed.")
+            if is_remote and os.path.isfile(script_path):
+                os.remove(script_path)
             return
 
         if is_install:
@@ -1352,6 +1356,9 @@ class ModGen_Check:
                     Utils.print_error(f"Failed to create dependency module {md}.")
         else:
             Utils.print_message(f"Run the command again with {Utils.blue_text('-a')} or {Utils.blue_text('--auto-install')} to install missing dependencies.")
+        
+        if is_remote and os.path.isfile(script_path):
+            os.remove(script_path)
 
 class ModGen_Run:
     @staticmethod
@@ -1432,7 +1439,7 @@ class ModGen_Run:
             Utils.print_message("Attempting to auto-install missing dependencies...")
             for md in missing_deps:
                 if ModGen_Create.auto_create_module_from_str(md):
-                    Utils.print_success(f"Dependency module {Utils.yellow_text(md)} installed successfully.")
+                    Utils.print_success(f"Dependency module {Utils.yellow_text(md)} installed.")
                 else:
                     Utils.print_error(f"Failed to create dependency module {md}.")
                     return
@@ -1495,7 +1502,7 @@ class ModGen_Init:
         except subprocess.CalledProcessError:
             Utils.print_error("Micromamba shell initialization failed.")
             return False
-        Utils.print_success("Micromamba initialized successfully.")
+        Utils.print_success("Micromamba initialized.")
         return True
 
     @staticmethod
@@ -1616,7 +1623,7 @@ class ModGen_Update:
         if Utils.download_executable(Config.MODGEN_URL, Config.SCRIPT_PATH + ".tmp"):
             os.chmod(Config.SCRIPT_PATH + ".tmp", 0o775)
             shutil.move(Config.SCRIPT_PATH + ".tmp", Config.SCRIPT_PATH)
-            Utils.print_success("ModGen updated successfully.")
+            Utils.print_success("ModGen updated.")
         else:
             Utils.print_error("Failed to download the latest ModGen script.")
 
@@ -1665,7 +1672,7 @@ class ModGen_CondaTainer:
 
         Utils.print_message("Downloading CondaTainer...")
         if Utils.download_executable(Config.CONDATAINER_URL, target_path):
-            Utils.print_success("CondaTainer installed successfully.")
+            Utils.print_success("CondaTainer installed.")
         else:
             Utils.print_error("Failed to download CondaTainer.")
 
