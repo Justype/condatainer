@@ -7,6 +7,12 @@
 #ENV:STAR_INDEX_DIR=$app_root
 #ENVNOTE:STAR index for grcm39 GENCODE vM29 with read length 151
 
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=36G
+#SBATCH --time=12:00:00
+#SBATCH --job-name=star-index
+#SBATCH --output=star-index-%j.out
+
 #########################################################
 # - sjdbOverhang default value is 100
 #########################################################

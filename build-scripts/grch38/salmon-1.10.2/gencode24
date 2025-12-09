@@ -7,6 +7,12 @@
 #ENV:SALMON_INDEX_DIR=$app_root
 #ENVNOTE:Salmon index for grch38 GENCODE v24
 
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=24G
+#SBATCH --time=12:00:00
+#SBATCH --job-name=salmon-index
+#SBATCH --output=salmon-index-%j.out
+
 #########################################################
 # - https://combine-lab.github.io/salmon/
 # - https://salmon.readthedocs.io/en/latest/salmon.html#preparing-transcriptome-indices-mapping-based-mode
