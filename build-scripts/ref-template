@@ -13,7 +13,7 @@ regexp {([^/]+)/([^/]+)/([^/]+)} $ref_full_name -> assembly data_type version
 set module_root [file dirname [file dirname [file dirname [file dirname $abs_path]]]]
 set ref_root [file join $module_root ref $ref_full_name]
 #  Make this script compatible with app modulefiles
-set app_root ref_root
+set app_root $ref_root
 set current_datetime [clock format [clock seconds] -format "%Y-%m-%d %H:%M:%S"]
 
 module-whatis "Loads $ref_full_name"
