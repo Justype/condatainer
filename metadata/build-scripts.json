@@ -3,6 +3,7 @@
   "cellranger/9.0.1": "10X Genomics Single Cell Software Suite",
   "grch38/cellranger/2024-A": "Cell Ranger GRCh38 2024-A index",
   "grch38/genome/gencode": "GRCh38 reference genome FASTA",
+  "grch38/genome/ucsc_no_alt": "GRCh38 reference genome FASTA",
   "grch38/gtf-gencode/22": "GRCh38 reference genome GTF for GENCODE 22",
   "grch38/gtf-gencode/23": "GRCh38 reference genome GTF for GENCODE 23",
   "grch38/gtf-gencode/24": "GRCh38 reference genome GTF for GENCODE 24",
