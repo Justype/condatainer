@@ -54,7 +54,7 @@ def main():
     parser = argparse.ArgumentParser(description="ModGen: Use conda and build scripts to create environment-modules or Lmod modules.")
     parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of ModGen", default=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
-    subparsers = parser.add_subparsers(dest="action", required=True, help="Available actions")
+    subparsers = parser.add_subparsers(dest="action", metavar="COMMAND", required=True, help="Available actions")
 
     ModGen_Init.add_parser_arguments(subparsers)
     ModGen_Create.add_parser_arguments(subparsers)
@@ -76,20 +76,19 @@ def main():
     if args.debug:
         Config.debug = True
         Utils.print_debug("Debug mode enabled")
-        Utils.print_debug(f"Program BIN: {Config.SCRIPT_PATH}")
-        Utils.print_debug(f"BASE DIR: {Config.CONDATINER_DIR}")
+        Utils.print_debug(f"ModGen Version: {Config.VERSION}")
         Utils.print_debug(f"MODULE SYSTEM: {'Lmod' if Config.IS_LMOD else 'Environment-Modules'}")
 
-    if args.action in ("create", "install"):
+    if args.action in ("create", "install", "i"):
         ModGen.ensure_micromamba()
         ModGen_Create.parse_create_args(args)
+    elif args.action in ("exec", "e"):
+        ModGen_Exec.parse_exec_args(args)
     elif args.action in ("check", "c"):
         ModGen.ensure_micromamba()
         ModGen_Check.parse_check_args(args)
     elif args.action in ("run", "r"):
         ModGen_Run.parse_run_args(args)
-    elif args.action in ("exec", "e"):
-        ModGen_Exec.parse_exec_args(args)
     elif args.action in ("avail", "av"):
         ModGen_Avail.parse_avail_args(args)
     elif args.action in ("list", "ls"):
@@ -427,9 +426,9 @@ class ModGen:
         relative_path = normalized_name_version.replace('=', "/")
         n = relative_path.count('/')
         if n == 1:
-            return os.path.join(Config.APPS_MODULEFILES_DIR, f"{relative_path}" + ".lua" if Config.IS_LMOD else "")
+            return os.path.join(Config.APPS_MODULEFILES_DIR, f"{relative_path}" + ".lua" if Config.IS_LMOD else f"{relative_path}")
         elif n == 2:
-            return os.path.join(Config.REF_MODULEFILES_DIR, f"{relative_path}" + ".lua" if Config.IS_LMOD else "")
+            return os.path.join(Config.REF_MODULEFILES_DIR, f"{relative_path}" + ".lua" if Config.IS_LMOD else f"{relative_path}")
         else:
             raise ValueError("Invalid normalized name_version format.")
 
@@ -517,7 +516,7 @@ class ModGen_Create:
     @staticmethod
     def add_parser_arguments(parser):
         ModGen_Create.parser_create = parser.add_parser(
-            "create", aliases=["install"],
+            "create", aliases=["install", "i"],
             help="Create a modules using conda or available build scripts")
         ModGen_Create.parser_create.add_argument(
             "name_versions",
@@ -625,6 +624,7 @@ class ModGen_Create:
     def create_target_em_modulefile(normalized_name_version: str, whatis_url: Tuple[str, str], is_ref: bool = False, env_dict: Optional[Dict[str, Dict[str, str]]] = None) -> bool:
         template_path = Config.REF_EM_TEMPLATE if is_ref else Config.APPS_EM_TEMPLATE
         target_modulefile_path = ModGen.get_modulefile_path(normalized_name_version)
+        Utils.print_debug("[CREATE] module type: " + ("ref" if is_ref else "apps") + normalized_name_version + "|" + target_modulefile_path)
         try:
             content = open(template_path, 'r').read()
             content = content.replace("{WHATIS}", whatis_url[0])
@@ -636,14 +636,7 @@ class ModGen_Create:
                 env_max_len = max(len(env) for env in env_dict)
                 for env in env_dict:
                     if "value" in env_dict[env]:
-                        value = env_dict[env]["value"]
-                        if "$app_root/" in value:
-                            value = value.replace("$app_root/", 'pathJoin(app_root, \"') + '\")'
-                        elif "$app_root" in value:
-                            value = value.replace("$app_root", "app_root")
-                        else:
-                            value = f'"{value}"'
-                        env_setting_lines.append(f'setenv("{env}", {value})')
+                        env_setting_lines.append(f'setenv {env} {env_dict[env]["value"]}')
                     if "note" in env_dict[env]:
                         env_note_lines.append(f'    puts stderr "  {env.ljust(env_max_len)} ({env_dict[env]["note"]})"')
 
@@ -661,12 +654,14 @@ class ModGen_Create:
                 f.write(content)
 
         except Exception as e:
+            Utils.print_error(f"Error generating modulefile: {e}")
             return False
 
         return True
 
     @staticmethod
     def create_target_modulefile(normalized_name_version: str, whatis_url: Tuple[str, str], is_ref: bool = False, env_dict: Optional[Dict[str, Dict[str, str]]] = None) -> bool:
+        Utils.print_debug(f"[CREATE] Creating modulefile for {normalized_name_version} (is_ref={is_ref}) (is_lmod={Config.IS_LMOD})")
         if Config.IS_LMOD:
             return ModGen_Create.create_target_lmod_modulefile(normalized_name_version, whatis_url, is_ref, env_dict)
         else:
@@ -1026,12 +1021,9 @@ class ModGen_Exec:
 
         if not args.keep and not args.modules and args.commands:
             for command in args.commands:
-                if "/" in command or "=" in command or "@" in command:
-                    normalized_name_version = Utils.normalize_name_version(command)
-                    if ModGen.is_module_installed(normalized_name_version) or ModGen.is_module_available(normalized_name_version):
-                        modules_final.append(normalized_name_version)
-                    else:
-                        command_final.append(command)
+                normalized_name_version = Utils.normalize_name_version(command)
+                if ModGen.is_module_installed(normalized_name_version) or ModGen.is_module_available(normalized_name_version):
+                    modules_final.append(normalized_name_version)
                 else:
                     command_final.append(command)
         else:
@@ -1043,7 +1035,6 @@ class ModGen_Exec:
 
     @staticmethod
     def exec_command(modules: List[str], command: List[str]):
-        load_commands = []
         ml_commands = "module purge && module load " + " ".join(modules)
         safe_command = " ".join([shlex.quote(part) for part in command])
         full_command = f"{ml_commands} && {safe_command}"
@@ -1080,10 +1071,16 @@ class ModGen_Avail:
             action="store_true",
             help="Install the selected build scripts (used with terms)"
         )
+        ModGen_Avail.parser_avail.add_argument(
+            "-a", "--add",
+            action="store_true",
+            help="Alias for --install (used with terms)"
+        )
 
     @staticmethod
     def parse_avail_args(args):
         local_packages = Utils.get_local_build_scripts()
+        is_install = args.install or args.add
 
         # Fetch remote metadata entries if configured
         remote_packages = {}
@@ -1143,7 +1140,7 @@ class ModGen_Avail:
             else:
                 uninstalled_packages.add(pkg.split(' ')[0])
 
-        if Utils.is_in_interactive_shell() and args.install and args.terms and uninstalled_packages:
+        if Utils.is_in_interactive_shell() and is_install and args.terms and uninstalled_packages:
             Utils.print_message("Do you want to install the above modules? [y/N]: ", end="")
             choice = input().strip().lower()
             if choice != 'y':
@@ -1174,10 +1171,16 @@ class ModGen_List:
             action="store_true",
             help="Delete listed modules after confirmation (used with terms)"
         )
+        ModGen_List.parser_list.add_argument(
+            "-r", "--remove",
+            action="store_true",
+            help="Alias for --delete (used with terms)"
+        )
 
     @staticmethod
     def parse_list_args(args):
-        if (not args.ref or args.app) and os.path.isdir(Config.APPS_MODULEFILES_DIR):
+        is_delete = args.delete or args.remove
+        if os.path.isdir(Config.APPS_MODULEFILES_DIR):
             installed_modules = ModGen.get_installed_modules("apps")
             name_versions_dict = {}
             for module_name in installed_modules.keys():
@@ -1196,7 +1199,7 @@ class ModGen_List:
                 for name in sorted(name_versions_dict.keys()):
                     print(f"{Utils.yellow_text(name.ljust(name_col_width))}: {', '.join(sorted(name_versions_dict[name]))}")
 
-        if (not args.app or args.ref) and os.path.isdir(Config.REF_MODULEFILES_DIR):
+        if os.path.isdir(Config.REF_MODULEFILES_DIR):
             installed_modules = ModGen.get_installed_modules("ref")
 
             ref_modules = {}
@@ -1223,7 +1226,7 @@ class ModGen_List:
                     else:
                         print(module_name)
 
-        if Utils.is_in_interactive_shell() and args.delete and args.terms:
+        if Utils.is_in_interactive_shell() and is_delete and args.terms:
             print("==================REMOVE==================")
             ModGen_Remove.parse_remove_args(args)
 
@@ -1242,19 +1245,44 @@ class ModGen_Remove:
 
     @staticmethod
     def parse_remove_args(args):
-        try:
-            normalized_name_versions = [Utils.normalize_name_version(nv) for nv in args.name_versions]
-            for nv in normalized_name_versions:
-                if ModGen.is_module_installed(nv):
-                    ModGen.remove_module(nv)
-                    Utils.print_success(f"Module {Utils.yellow_text(nv)} removed successfully.")
-                else:
-                    Utils.print_warning(f"Module {Utils.yellow_text(nv)} is not installed. Skipping removal.")
-        except Exception as e:
-            Utils.print_error(f"Error during module removal: {e}")
-            sys.exit(1)
-        except KeyboardInterrupt:
-            sys.exit(1)
+        installed_modules_dict = ModGen.get_installed_modules()
+        if not installed_modules_dict:
+            Utils.print_warning("No installed modules found.")
+            return
+
+        filtered_modules = []
+        for module in installed_modules_dict.keys():
+            if args.terms:
+                if all(re.search(re.escape(term), module, re.IGNORECASE) for term in args.terms):
+                    filtered_modules.append(module)
+            else:
+                filtered_modules.append(module)
+
+        if not filtered_modules:
+            Utils.print_warning("No matching installed modules found.")
+            return
+
+        print("Modules to be removed:")
+        for module in sorted(filtered_modules):
+            highlighted = module
+            if args.terms:
+                for term in args.terms:
+                    highlighted = re.sub(
+                        re.escape(term),
+                        lambda m: Utils.yellow_text(m.group(0)),
+                        highlighted,
+                        flags=re.IGNORECASE
+                    )
+            print(f" - {highlighted}")
+
+        Utils.print_message("Are you sure? Cannot be undone. [y/N]: ", end="")
+        choice = input().strip().lower()
+        if choice != 'y':
+            Utils.print_message("Aborted module removal.")
+            return
+
+        for module in filtered_modules:
+            ModGen.remove_module(module)
 
 class ModGen_Check:
     @staticmethod
@@ -1272,9 +1300,15 @@ class ModGen_Check:
             action="store_true",
             help="Automatically install missing dependencies"
         )
+        ModGen_Check.parser_check.add_argument(
+            "-i", "--install",
+            action="store_true",
+            help="Alias for --auto-install"
+        )
 
     @staticmethod
     def parse_check_args(args):
+        is_install = args.auto_install or args.install
         script_path_or_name = args.script
         if not os.path.isfile(script_path_or_name):
             script_path_or_name = Utils.normalize_name_version(script_path_or_name)
@@ -1307,7 +1341,7 @@ class ModGen_Check:
             Utils.print_message("All dependencies are installed.")
             return
 
-        if args.auto_install:
+        if is_install:
             Utils.print_message("Attempting to auto-install missing dependencies...")
             for md in missing_deps:
                 if md.endswith(('.sqf', '.img', '.squashfs')):
@@ -1331,10 +1365,40 @@ class ModGen_Run:
             help="Path to the script to run"
         )
         ModGen_Run.parser_run.add_argument(
+            "-w", "--writable-img",
+            help="Placeholder for CondaTainer compatibility (no effect)",
+            action="store_true"
+        )
+        ModGen_Run.parser_run.add_argument(
+            "-a", "--auto-install",
+            help="Automatically install missing dependencies",
+            action="store_true"
+        )
+        ModGen_Run.parser_run.add_argument(
+            "-i", "--install",
+            help="Alias for --auto-install",
+            action="store_true"
+        )
+        ModGen_Run.parser_run.add_argument(
             "script_args",
             nargs=argparse.REMAINDER,
             help="Arguments to pass to the script"
         )
+
+    @staticmethod
+    def parse_args_in_script(script_path: str) -> List[str]:
+        args = []
+        if not os.path.isfile(script_path):
+            Utils.print_error(f"Script file {script_path} not found.")
+            return args
+
+        with open(script_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("#CNT"):
+                    arg_line = line[len("#CNT"):].strip()
+                    args.append(arg_line)
+        return args
 
     @staticmethod
     def parse_run_args(args):
@@ -1342,6 +1406,11 @@ class ModGen_Run:
         if not os.path.isfile(script_path):
             ModGen_Run.parser_run.error(f"Script file {script_path} not found.")
         script_args = args.script_args
+
+        args_from_script = ModGen_Run.parse_args_in_script(args.script)
+        merged = args_from_script + sys.argv[2:]
+        args = ModGen_Run.parser_run.parse_args(merged)
+        is_install = args.auto_install or args.install
 
         try:
             deps = Utils.get_dependencies_from_script(script_path, raise_when_finding_overlay=True)
@@ -1352,12 +1421,21 @@ class ModGen_Run:
         missing_deps = ModGen.get_missing_modules(deps)
 
         if missing_deps:
-            Utils.print_message("Missing dependencies:")
-            for md in missing_deps:
-                Utils.print_message(f"  - {Utils.yellow_text(md)}")
+            if not is_install:
+                Utils.print_message("Missing dependencies:")
+                for md in missing_deps:
+                    Utils.print_message(f"  - {Utils.yellow_text(md)}")
 
-            Utils.print_message(f"Please run {Utils.blue_text(Config.SCRIPT_NAME + ' check -a')} to install missing dependencies.")
-            return
+                Utils.print_message(f"Please run {Utils.blue_text(Config.SCRIPT_NAME + ' check -a')} to install missing dependencies.")
+                return
+            
+            Utils.print_message("Attempting to auto-install missing dependencies...")
+            for md in missing_deps:
+                if ModGen_Create.auto_create_module_from_str(md):
+                    Utils.print_success(f"Dependency module {Utils.yellow_text(md)} installed successfully.")
+                else:
+                    Utils.print_error(f"Failed to create dependency module {md}.")
+                    return
 
         ModGen_Exec.exec_command(deps, ["/bin/bash", script_path] + script_args)
 
@@ -1443,7 +1521,7 @@ class ModGen_Init:
         if Config.IS_LMOD:
             detect = '[ -f "$LMOD_CMD" ]'
         else:
-            detect = 'command -v tclsh >/dev/null 2>&1'
+            detect = '[ -n "$MODULESHOME" ] && [ -f "$MODULESHOME/libexec/modulecmd.tcl" ]'
 
         new_block_content = f"""{START_MARKER}
 # Use ModGen modulefiles (Only if 'module' command is available)

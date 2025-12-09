@@ -21,6 +21,7 @@ class Config:
     REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json.gz"
     MODGEN_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/modgen"
     CONDATAINER_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/condatainer"
+    GIT_RAW_URL_PREFIX = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
 
     # Folder paths
     SCRIPT_PATH = os.path.abspath(__file__)
@@ -59,7 +60,7 @@ def main():
     parser = argparse.ArgumentParser(description="CondaTainer: Use apptainer/conda/squashFS to manage tools for HPC users.")
     parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of CondaTainer", default=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
-    subparsers = parser.add_subparsers(dest="action", required=True, help="Available actions")
+    subparsers = parser.add_subparsers(dest="action", metavar="COMMAND", required=True, help="Available actions")
 
     CondaTainer_Create.add_parser_arguments(subparsers)
     CondaTainer_Avail.add_parser_arguments(subparsers)
@@ -74,9 +75,13 @@ def main():
     CondaTainer_ModGen.add_parser_arguments(subparsers)
 
     args = parser.parse_args()
+
     if args.debug:
         Config.debug = True
-    if args.action in ("create", "install"):
+        Utils.print_debug("Debug mode enabled")
+        Utils.print_debug(f"CondaTainer Version: {Config.VERSION}")
+
+    if args.action in ("create", "install", "i"):
         CondaTainer.ensure_base_image()
         CondaTainer_Create.parse_create_args(args)
     elif args.action == "exec":
@@ -91,12 +96,12 @@ def main():
     elif args.action in ("run", "r"):
         CondaTainer.ensure_base_image()
         CondaTainer_Run.parse_run_args(args)
-    elif args.action in ("list", "ls"):
-        CondaTainer_List.parse_list_args(args)
     elif args.action == "info":
         CondaTainer_Info.parse_info_args(args)
     elif args.action in ("avail", "av"):
         CondaTainer_Avail.parse_avail_args(args)
+    elif args.action in ("list", "ls"):
+        CondaTainer_List.parse_list_args(args)
     elif args.action in ("remove", "delete", "uninstall"):
         CondaTainer_Remove.parse_remove_args(args)
     elif args.action == "apptainer":
@@ -150,16 +155,6 @@ class Utils:
     @staticmethod
     def print_success(message, end="\n", flush=True):
         print(f"[CondaTainer][{Utils.green_text('SUCCESS')}] {message}", end=end, flush=flush)
-
-    @staticmethod
-    def ensure_apptainer():
-        if Config.APPTAINER_PATH is None:
-            Utils.print_error("Apptainer not found in PATH.")
-            Utils.print_note(f"Make sure you load the Apptainer module in your HPC system.")
-            Utils.print_note(f"Please consider running: {Utils.blue_text('ml apptainer')}")
-            Utils.print_note("If there is no Apptainer module, please contact your system administrator.")
-            return False
-        return True
 
     @staticmethod
     def normalize_name_version(name_version: str) -> str:
@@ -286,40 +281,6 @@ class Utils:
             return False
 
     @staticmethod
-    def ensure_base_def():
-        base_def_path = Config.BASE_IMAGE_DEF
-        if os.path.isfile(base_def_path):
-            return True
-
-        Utils.print_message("Base image definition file not found.")
-
-        choice = "cpu"
-        if Utils.is_in_interactive_shell():
-            Utils.print_message("Select base image type to download:")
-            Utils.print_message("  1) CPU-only (default)")
-            Utils.print_message("  2) NVIDIA GPU support")
-            Utils.print_message("  3) AMD GPU support")
-            user_input = input("Enter choice [1-3]: ").strip()
-            if user_input == "2":
-                choice = "nv"
-            elif user_input == "3":
-                choice = "amd"
-            else:
-                Utils.print_warning("Invalid choice. Defaulting to CPU-only base image.")
-        else:
-            Utils.print_message("Non-interactive shell detected. Defaulting to CPU-only base image.")
-
-        url_insert = ""
-        if choice != "cpu":
-            url_insert = f"_{choice}"
-
-        url = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/base_image{url_insert}.def"
-        if not Utils.download_file(url, base_def_path):
-            Utils.print_error("Failed to download base image definition file.")
-            return False
-        return True
-
-    @staticmethod
     def get_dependencies_from_script(script_path: str) -> List[str]:
         """
         Get dependencies from a build script by parsing #DEP: lines.
@@ -400,6 +361,51 @@ class Utils:
 
 class CondaTainer:
     @staticmethod
+    def ensure_apptainer():
+        if Config.APPTAINER_PATH is None:
+            Utils.print_error("Apptainer not found in PATH.")
+            Utils.print_note(f"Make sure you load the Apptainer module in your HPC system.")
+            Utils.print_note(f"Please consider running: {Utils.blue_text('ml apptainer')}")
+            Utils.print_note("If there is no Apptainer module, please contact your system administrator.")
+            return False
+        return True
+
+    @staticmethod
+    def ensure_base_def():
+        base_def_path = Config.BASE_IMAGE_DEF
+        if os.path.isfile(base_def_path):
+            return True
+
+        Utils.print_message("Base image definition file not found.")
+
+        choice = "cpu"
+        if Utils.is_in_interactive_shell():
+            Utils.print_message("Select base image type to download:")
+            Utils.print_message("  1) CPU-only (default)")
+            Utils.print_message("  2) NVIDIA GPU support")
+            Utils.print_message("  3) AMD GPU support")
+            user_input = input("Enter choice [1-3]: ").strip()
+            if user_input == "2":
+                choice = "nv"
+            elif user_input == "3":
+                choice = "amd"
+            else:
+                Utils.print_warning("Invalid choice. Defaulting to CPU-only base image.")
+        else:
+            Utils.print_message("Non-interactive shell detected. Defaulting to CPU-only base image.")
+
+        url_insert = ""
+        if choice != "cpu":
+            url_insert = f"_{choice}"
+
+        url = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/base_image{url_insert}.def"
+        if not Utils.download_file(url, base_def_path):
+            Utils.print_error("Failed to download base image definition file.")
+            return False
+        return True
+
+
+    @staticmethod
     def ensure_base_image():
         """
         Exit the program if the base image does not exist, after attempting to build it.
@@ -411,11 +417,11 @@ class CondaTainer:
             Config.APPTAINER_PATH = Config.LOCAL_APPTAINER_BIN
             Utils.print_message(f"Using local Apptainer binary at {Config.APPTAINER_PATH}")
 
-        if not Utils.ensure_apptainer():
+        if not CondaTainer.ensure_apptainer():
             exit(1)
         if os.path.isfile(Config.BASE_IMAGE_SIF):
             return
-        if not Utils.ensure_base_def():
+        if not CondaTainer.ensure_base_def():
             exit(1)
 
         Utils.print_message("Base images not found. Building base images...")
@@ -509,7 +515,7 @@ class CondaTainer:
         return missing
 
     @staticmethod
-    def generate_bind_args(*paths: str) -> List[str]:
+    def generate_bind_args(*paths: Optional[str]) -> List[str]:
         """
         Accept multiple paths and return a list of absolute paths
         with --bind parameters suitable for binding in Singularity.
@@ -552,7 +558,7 @@ class CondaTainer_Create:
     @staticmethod
     def add_parser_arguments(parser):
         CondaTainer_Create.parser_create = parser.add_parser(
-            "create", aliases=["install"],
+            "create", aliases=["install", "i"],
             help="Create a new SquashFS overlay using conda or available build scripts")
         CondaTainer_Create.parser_create.add_argument(
             "name_versions",
@@ -1193,6 +1199,7 @@ class CondaTainer_Exec:
 
         CondaTainer_Exec.exec_command(overlay_final, command_final)
 
+    @staticmethod
     def parse_e_args(args):
         CondaTainer_Exec.IMG_WRITABLE = True
 
@@ -1400,10 +1407,16 @@ class CondaTainer_Avail:
             action="store_true",
             help="Install the selected build scripts (used with terms)"
         )
+        CondaTainer_Avail.parser_avail.add_argument(
+            "-a", "--add",
+            action="store_true",
+            help="Alias for --install (used with terms)"
+        )
 
     @staticmethod
     def parse_avail_args(args):
         local_packages = Utils.get_local_build_scripts()
+        is_install = args.install or args.add
 
         # Fetch remote metadata entries if configured
         remote_packages = {}
@@ -1463,7 +1476,7 @@ class CondaTainer_Avail:
             else:
                 uninstalled_packages.add(pkg.split(' ')[0])
 
-        if Utils.is_in_interactive_shell() and args.install and args.terms and uninstalled_packages:
+        if Utils.is_in_interactive_shell() and is_install and args.terms and uninstalled_packages:
             Utils.print_message("Do you want to install the above overlays? [y/N]: ", end="")
             choice = input().strip().lower()
             if choice != 'y':
@@ -1494,9 +1507,15 @@ class CondaTainer_List:
             action="store_true",
             help="Delete listed overlays after confirmation (used with terms)"
         )
+        CondaTainer_List.parser_list.add_argument(
+            "-r", "--remove",
+            action="store_true",
+            help="Alias for --delete (used with terms)"
+        )
 
     @staticmethod
     def parse_list_args(args):
+        is_delete = args.delete or args.remove
         if os.path.isdir(Config.IMAGES_DIR):
             overlay_files = [f for f in os.listdir(Config.IMAGES_DIR) if f.endswith(('.sqf', '.img', '.squashfs'))]
             name_versions_dict = {}
@@ -1545,7 +1564,7 @@ class CondaTainer_List:
                     else:
                         print(" " + name_version)
 
-        if Utils.is_in_interactive_shell() and args.delete and args.terms:
+        if Utils.is_in_interactive_shell() and is_delete and args.terms:
             print("==================REMOVE==================")
             CondaTainer_Remove.parse_remove_args(args)
 
@@ -1670,9 +1689,15 @@ class CondaTainer_Check:
             action="store_true",
             help="Automatically install missing dependencies"
         )
+        CondaTainer_Check.parser_check.add_argument(
+            "-i", "--install",
+            action="store_true",
+            help="Alias for --auto-install"
+        )
 
     @staticmethod
     def parse_check_args(args):
+        is_install = args.auto_install or args.install
         script_path_or_name = args.script
         if not os.path.isfile(script_path_or_name):
             script_path_or_name = Utils.normalize_name_version(script_path_or_name)
@@ -1705,7 +1730,7 @@ class CondaTainer_Check:
             Utils.print_message("All dependencies are installed.")
             return
 
-        if args.auto_install:
+        if is_install:
             Utils.print_message("Attempting to auto-install missing dependencies...")
             for md in missing_deps:
                 if md.endswith(('.sqf', '.img', '.squashfs')):
@@ -1732,6 +1757,16 @@ class CondaTainer_Run:
         CondaTainer_Run.parser_run.add_argument(
             "-w", "--writable-img",
             help="Make .img overlays writable (default: read-only)",
+            action="store_true"
+        )
+        CondaTainer_Run.parser_run.add_argument(
+            "-a", "--auto-install",
+            help="Automatically install missing dependencies",
+            action="store_true"
+        )
+        CondaTainer_Run.parser_run.add_argument(
+            "-i", "--install",
+            help="Alias for --auto-install",
             action="store_true"
         )
         CondaTainer_Run.parser_run.add_argument(
@@ -1765,6 +1800,7 @@ class CondaTainer_Run:
         args_from_script = CondaTainer_Run.parse_args_in_script(args.script)
         merged = args_from_script + sys.argv[2:]
         args = CondaTainer_Run.parser_run.parse_args(merged)
+        is_install = args.auto_install or args.install
 
         if Config.debug and args_from_script:
             Utils.print_debug(f"[RUN] Additional script arguments found: {args_from_script}")
@@ -1773,12 +1809,24 @@ class CondaTainer_Run:
         missing_deps = CondaTainer.get_missing_overlays(deps)
 
         if missing_deps:
-            Utils.print_message("Missing dependencies:")
-            for md in missing_deps:
-                Utils.print_message(f"  - {Utils.yellow_text(md)}")
+            if not is_install:
+                Utils.print_message("Missing dependencies:")
+                for md in missing_deps:
+                    Utils.print_message(f"  - {Utils.yellow_text(md)}")
 
-            Utils.print_message(f"Please run {Utils.blue_text(Config.SCRIPT_NAME + ' check -a')} to install missing dependencies.")
-            return
+                Utils.print_message(f"Please run {Utils.blue_text(Config.SCRIPT_NAME + ' check -a')} to install missing dependencies.")
+                return
+            
+            Utils.print_message("Attempting to auto-install missing dependencies...")
+            for md in missing_deps:
+                if md.endswith(('.sqf', '.img', '.squashfs')):
+                    Utils.print_error(f"Custom overlay {Utils.yellow_text(md)} is missing. Cannot proceed with auto-installation.")
+                    return
+                if CondaTainer_Create.auto_create_overlay_from_str(md):
+                    Utils.print_success(f"Dependency overlay {Utils.yellow_text(md)} created successfully.")
+                else:
+                    Utils.print_error(f"Failed to create dependency overlay {Utils.yellow_text(md)}.")
+                    return
 
         if args.writable_img:
             CondaTainer_Exec.IMG_WRITABLE = True
