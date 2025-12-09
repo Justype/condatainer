@@ -1,11 +1,11 @@
 # For CPU only
-#     debian:sid-slim
+#     ubuntu:24.04
 # For GPU support, change base image to
 #     nvidia/cuda:13.0.2-cudnn-devel-ubuntu24.04
 #     rocm/dev-ubuntu-24.04:latest
 
 Bootstrap: docker
-From: debian:sid-slim
+From: ubuntu:24.04
 
 %labels
     Author Ziyue Cheng
