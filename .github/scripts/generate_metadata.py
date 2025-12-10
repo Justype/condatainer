@@ -53,20 +53,25 @@ for script_name in sorted(os.listdir(BUILD_SCRIPTS)):
                 key = f"{script_name}/{data_type}/{version}"
                 link = os.path.relpath(script_path, REPO)
 
-                # Extract metadata from the script file (e.g., #WHATIS, #URL)
-                whatis = None
+                # Extract metadata from the script file
+                script_metadata = {}
+                script_metadata['whatis'] = "Missing description"
+                script_metadata['deps'] = []
+                script_metadata['sbatch'] = False
                 try:
                     with open(script_path, 'r') as sf:
                         for line in sf:
                             if line.startswith('#WHATIS:'):
-                                whatis = line[len('#WHATIS:'):].strip()
-                            # stop early if we got both
-                            if whatis:
-                                break
+                                script_metadata['whatis'] = line[len('#WHATIS:'):].strip()
+                            if line.startswith('#DEP:'):
+                                dep = line[len('#DEP:'):].strip()
+                                script_metadata['deps'].append(dep)
+                            if line.startswith('#SBATCH'):
+                                script_metadata['sbatch'] = True
                 except Exception:
                     pass
 
-                metadata[key] = whatis if whatis else "Missing description"
+                metadata[key] = script_metadata
     else:
         # structure is script_name/version
         for version in versions:
@@ -78,19 +83,24 @@ for script_name in sorted(os.listdir(BUILD_SCRIPTS)):
             key = f"{script_name}/{version}"
             link = os.path.relpath(script_path, REPO)
 
-            whatis = None
+            script_metadata = {}
+            script_metadata['whatis'] = "Missing description"
+            script_metadata['deps'] = []
+            script_metadata['sbatch'] = False
             try:
                 with open(script_path, 'r') as sf:
                     for line in sf:
                         if line.startswith('#WHATIS:'):
-                            whatis = line[len('#WHATIS:'):].strip()
-                        if whatis:
-                            break
+                            script_metadata['whatis'] = line[len('#WHATIS:'):].strip()
+                        if line.startswith('#DEP:'):
+                            dep = line[len('#DEP:'):].strip()
+                            script_metadata['deps'].append(dep)
+                        if line.startswith('#SBATCH'):
+                            script_metadata['sbatch'] = True
             except Exception:
                 pass
 
-            metadata[key] = whatis if whatis else "Missing description"
-
+            metadata[key] = script_metadata
 # write metadata
 os.makedirs(os.path.dirname(OUT_FILE), exist_ok=True)
 with open(OUT_FILE, 'w') as f:
