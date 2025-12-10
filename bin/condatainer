@@ -84,19 +84,14 @@ def main():
         Utils.print_debug(f"CondaTainer Version: {Config.VERSION}")
 
     if args.action in ("create", "install", "i"):
-        CondaTainer.ensure_base_image()
         CondaTainer_Create.parse_create_args(args)
     elif args.action == "exec":
-        CondaTainer.ensure_base_image()
         CondaTainer_Exec.parse_exec_args(args)
     elif args.action == "e":
-        CondaTainer.ensure_base_image()
         CondaTainer_Exec.parse_e_args(args)
     elif args.action in ("check", "c"):
-        CondaTainer.ensure_base_image()
         CondaTainer_Check.parse_check_args(args)
     elif args.action in ("run", "r"):
-        CondaTainer.ensure_base_image()
         CondaTainer_Run.parse_run_args(args)
     elif args.action == "info":
         CondaTainer_Info.parse_info_args(args)
@@ -617,6 +612,7 @@ class CondaTainer_Create:
 
     @staticmethod
     def parse_create_args(args):
+        CondaTainer.ensure_base_image()
         if not args.name_versions and not args.file:
             CondaTainer_Create.parser_create.error("At least one of name_versions or --file must be provided.")
         if args.name_versions and args.file:
@@ -1270,6 +1266,7 @@ class CondaTainer_Exec:
 
     @staticmethod
     def parse_exec_args(args):
+        CondaTainer.ensure_base_image()
         CondaTainer_Exec.is_img_writable = args.writable_img
 
         installed_overlays = CondaTainer.get_installed_overlays()
@@ -1302,6 +1299,7 @@ class CondaTainer_Exec:
 
     @staticmethod
     def parse_e_args(args):
+        CondaTainer.ensure_base_image()
         CondaTainer_Exec.is_img_writable = True
 
         overlay_final = args.overlays if args.overlays else []
@@ -1580,6 +1578,11 @@ class CondaTainer_Avail:
                 uninstalled_packages.add(pkg.split(' ')[0])
 
         if Utils.is_in_interactive_shell() and is_install and args.terms and uninstalled_packages:
+            CondaTainer.ensure_base_image()
+            print("==================INSTALL==================")
+            print("The following overlays will be installed:")
+            for pkg in sorted(uninstalled_packages):
+                print(f" - {pkg}")
             Utils.print_message("Do you want to install the above overlays? [y/N]: ", end="")
             choice = input().strip().lower()
             if choice != 'y':
@@ -1836,6 +1839,7 @@ class CondaTainer_Check:
             return
 
         if is_install:
+            CondaTainer.ensure_base_image()
             Utils.print_message("Attempting to auto-install missing dependencies...")
             for md in missing_deps:
                 if md.endswith(('.sqf', '.img', '.squashfs')):
@@ -1900,6 +1904,7 @@ class CondaTainer_Run:
 
     @staticmethod
     def parse_run_args(args):
+        CondaTainer.ensure_base_image()
         script_path = args.script
         if not os.path.isfile(script_path):
             CondaTainer_Run.parser_run.error(f"Script file {script_path} not found.")
@@ -1966,6 +1971,7 @@ class CondaTainer_Overlay:
 
     @staticmethod
     def parse_overlay_args(args):
+        CondaTainer.ensure_apptainer()
         overlay_path = os.path.abspath(args.image)
         size_mib = args.size
 
@@ -1992,7 +1998,7 @@ class CondaTainer_Overlay:
         
         try:
             subprocess.run(cmd_overlay, check=True)
-            Utils.print_success(f"Overlay image created at {overlay_path}.")
+            Utils.print_success(f"Overlay image created at {Utils.blue_text(overlay_path)}.")
         except subprocess.CalledProcessError:
             Utils.print_error("Failed to create overlay image.")
             return

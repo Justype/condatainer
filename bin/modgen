@@ -81,12 +81,10 @@ def main():
         Utils.print_debug(f"MODULE SYSTEM: {'Lmod' if Config.IS_LMOD else 'Environment-Modules'}")
 
     if args.action in ("create", "install", "i"):
-        ModGen.ensure_micromamba()
         ModGen_Create.parse_create_args(args)
     elif args.action in ("exec", "e"):
         ModGen_Exec.parse_exec_args(args)
     elif args.action in ("check", "c"):
-        ModGen.ensure_micromamba()
         ModGen_Check.parse_check_args(args)
     elif args.action in ("run", "r"):
         ModGen_Run.parse_run_args(args)
@@ -370,7 +368,7 @@ class ModGen:
     @staticmethod
     def ensure_micromamba():
         if os.path.isfile(Config.MICROMAMBA_BIN):
-            return True
+            return
 
         os.makedirs(os.path.dirname(Config.MICROMAMBA_BIN), mode=0o775, exist_ok=True)
 
@@ -529,6 +527,7 @@ class ModGen_Create:
 
     @staticmethod
     def parse_create_args(args):
+        ModGen.ensure_micromamba()
         if not args.name_versions:
             ModGen_Create.parser_create.error("At least one of name_versions must be provided.")
 
@@ -1404,6 +1403,7 @@ class ModGen_Check:
             return
 
         if is_install:
+            ModGen.ensure_micromamba()
             Utils.print_message("Attempting to auto-install missing dependencies...")
             for md in missing_deps:
                 if md.endswith(('.sqf', '.img', '.squashfs')):
@@ -1494,6 +1494,7 @@ class ModGen_Run:
                 Utils.print_message(f"Please run {Utils.blue_text(Config.SCRIPT_NAME + ' check -a')} to install missing dependencies.")
                 return
             
+            ModGen.ensure_micromamba()
             Utils.print_message("Attempting to auto-install missing dependencies...")
             for md in missing_deps:
                 if ModGen_Create.auto_create_module_from_str(md):
