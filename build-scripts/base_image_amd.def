@@ -25,7 +25,7 @@ From: rocm/dev-ubuntu-24.04:latest
     apt-get update && apt-get install -y \
         squashfs-tools fuse \
         sudo ca-certificates \
-        curl wget git \
+        curl wget aria2 git \
         tar pigz unzip bzip2 xz-utils zstd lz4 \
         tzdata \
         && apt-get clean \
