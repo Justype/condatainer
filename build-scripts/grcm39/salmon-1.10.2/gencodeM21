@@ -11,7 +11,7 @@
 #SBATCH --mem=20G
 #SBATCH --time=12:00:00
 #SBATCH --job-name=salmon-index
-#SBATCH --output=salmon-index-%j.out
+#SBATCH --output=%x-%j.log
 
 #########################################################
 # - https://combine-lab.github.io/salmon/

@@ -10,7 +10,7 @@
 #SBATCH --mem=40G
 #SBATCH --time=12:00:00
 #SBATCH --job-name=star-index
-#SBATCH --output=star-index-%j.out
+#SBATCH --output=%x-%j.log
 
 #########################################################
 # Use STAR to build cellranger compatible genome index

@@ -11,7 +11,7 @@
 #SBATCH --mem=36G
 #SBATCH --time=12:00:00
 #SBATCH --job-name=star-index
-#SBATCH --output=star-index-%j.out
+#SBATCH --output=%x-%j.log
 
 #########################################################
 # - sjdbOverhang default value is 100

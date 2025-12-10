@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 os.umask(0o002)
 
 class Config:
-    VERSION = "1.0.0"
+    VERSION = "1.0.1"
     # Remote settings
     debug = False
     GITHUB_REPO = "Justype/condatainer"
@@ -685,7 +685,6 @@ class CondaTainer_Create:
                     # Create a single overlay with all packages, using the prefix
                     packages = args.name_versions
                     overlay_path = f"{prefix_abs_path}.sqf"
-                    config_path = f"{prefix_abs_path}.yaml"
                     relative_path = prefix_name.replace("--", "/")
                     if os.path.isfile(overlay_path):
                         Utils.print_message(f"Overlay {Utils.yellow_text(os.path.basename(overlay_path))} already exists at {Utils.blue_text(overlay_path)}. Skipping creation.")
@@ -704,6 +703,9 @@ class CondaTainer_Create:
                     # Create individual overlays for each package
                     for nv in normalized_name_versions:
                         CondaTainer_Create.auto_create_overlay_from_str(nv)
+        except RuntimeError as rte:
+            Utils.print_note(str(rte))
+            sys.exit()
         except KeyboardInterrupt:
             Utils.print_message("Process interrupted by user. Cleaning up...")
             CondaTainer.remove_tmp_overlay()
@@ -840,39 +842,91 @@ class CondaTainer_Create:
         return True
 
     @staticmethod
-    def get_env_settings_from_build_script(script_path) -> List[str]:
+    def get_env_dict_from_build_script(script_path) -> Dict[str, Dict[str, str]]:
         """
-        #ENV:KEY=VALUE lines in build script
-        #ENVNOTE:KEY descriptions
+        Parse #ENV:KEY=VALUE and #ENVNOTE:KEY description lines from build script.
+        Returns a dict:
+            {
+                "KEY": {"value": "VALUE", "note": "description"},
+                ...
+            }
+        Example lines in script:
+            #ENV:STAR_INDEX_DIR=$app_root/star
+            #ENVNOTE:STAR_INDEX_DIR STAR index dir
         """
-        env_settings = []
+        env_dict: Dict[str, Dict[str, str]] = {}
+
         if not os.path.isfile(script_path):
             Utils.print_error(f"Build script not found at {script_path}.")
-            return env_settings
+            return env_dict
 
-        parsed_lines = []
-
-        with open(script_path, 'r') as f:
+        with open(script_path, "r") as f:
             lines = f.readlines()
-            env_indices = [i for i, line in enumerate(lines) if line.startswith("#ENV:")]
-            for env_index in env_indices:
-                env_line = lines[env_index].strip()
-                env_content = env_line[len("#ENV:"):].strip()
-                key_value = env_content.split('=', 1)
-                if len(key_value) != 2:
-                    continue
-                parsed_lines.append(env_content) # Store KEY=VALUE for later processing
+            env_indices = [i for i, line in enumerate(lines) if line.strip().startswith("#ENV:")]
 
-                key, value = key_value
-                note = ""
-                # Check for corresponding #ENVNOTE line
+            for env_index in env_indices:
+                line = lines[env_index].strip()
+                if line.startswith("#ENV:"):
+                    # Parse KEY=VALUE
+                    content = line[len("#ENV:"):].strip()
+                    if "=" not in content:
+                        continue
+                    key, value = content.split("=", 1)
+                    env_dict[key] = {"value": value, "note": ""}
+
                 if env_index + 1 < len(lines):
                     next_line = lines[env_index + 1].strip()
                     if next_line.startswith("#ENVNOTE:"):
                         note = next_line[len("#ENVNOTE:"):].strip()
-                parsed_lines.append(f"#ENVNOTE:{key}={note}")
+                        env_dict[key]["note"] = note
 
-        return parsed_lines
+        return env_dict
+
+    @staticmethod
+    def get_sbatch_args_from_build_script(script_path) -> List[str]:
+        """
+        Parse #SBATCH: lines from build script.
+        Returns a list of sbatch arguments.
+        Example line in script:
+            #SBATCH --cpus-per-task=4
+        """
+        sbatch_args = []
+
+        if not os.path.isfile(script_path):
+            Utils.print_error(f"Build script not found at {script_path}.")
+            return sbatch_args
+
+        with open(script_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("#SBATCH"):
+                    arg = line[len("#SBATCH"):].strip()
+                    sbatch_args.append(arg)
+
+        return sbatch_args
+
+    @staticmethod
+    def submit_sbatch(normalized_name_version: str,  sbatch_args: List[str]) -> bool:
+        """
+        Generate a temporary sbatch script to run the build script with sbatch.
+        Returns the path to the temporary sbatch script.
+        """
+        tmp_sbatch_script_path = os.path.join(Config.CONDATINER_DIR, f"sbatch_build_tmp.sh") # after submission, SLURM will create its own copy
+        with open(tmp_sbatch_script_path, "w") as f:
+            f.write("#!/bin/bash\n")
+            for arg in sbatch_args:
+                f.write(f"#SBATCH {arg}\n")
+            f.write("\n")
+            f.write(f"{Config.SCRIPT_PATH} create {normalized_name_version}\n")
+
+        cmd_final = ["sbatch", tmp_sbatch_script_path]
+        Utils.print_debug(f"[CREATE] Submitting sbatch job with command: {cmd_final}")
+
+        try:
+            subprocess.run(cmd_final, check=True)
+            return True
+        except subprocess.CalledProcessError:
+            return False
 
     @staticmethod
     def create_app_overlay(name: str, version: str):
@@ -948,6 +1002,15 @@ class CondaTainer_Create:
                 Utils.print_error(f"Build script for {name} version {version} not found at {Utils.blue_text(script_path)}.")
                 return False
 
+        sbatch_args = CondaTainer_Create.get_sbatch_args_from_build_script(script_path)
+        if sbatch_args and shutil.which("sbatch") and Utils.is_in_interactive_shell():
+            Utils.print_note("This script requires SLURM sbatch to run. Submitting job...")
+            if CondaTainer_Create.submit_sbatch(Utils.normalize_name_version(f"{name}/{version}"), sbatch_args):
+                raise RuntimeError("Build script submitted successfully. Exiting current process. Please monitor the sbatch job for completion. And the log is under current directory.")
+            else:
+                Utils.print_error("Submitting sbatch job failed.")
+                return False
+
         Utils.print_message(f"Building SquashFS overlay for {name} version {version} using build script.")
 
         CondaTainer.create_tmp_overlay()
@@ -999,13 +1062,16 @@ class CondaTainer_Create:
             CondaTainer.remove_tmp_overlay()
             return False
 
-        env_settings = CondaTainer_Create.get_env_settings_from_build_script(script_path)
+        env_settings = CondaTainer_Create.get_env_dict_from_build_script(script_path)
         if env_settings:
             env_file_path = os.path.splitext(overlay_path)[0] + ".env"
             with open(env_file_path, 'w') as f:
-                for line in env_settings:
-                    line = line.replace('$app_root', f"/cnt/{name}/{version}")
-                    f.write(f"{line}\n")
+                for env in env_settings:
+                    value = env_settings[env]["value"].replace('$app_root', f"/cnt/{name}/{version}")
+                    f.write(f"{env}={value}\n")
+                    note = env_settings[env].get("note", "")
+                    if note:
+                        f.write(f"#ENVNOTE:{env}={note}\n")
             Utils.print_message(f"Environment variables file created at {Utils.blue_text(env_file_path)}")
             os.chmod(env_file_path, 0o664)
 
@@ -1068,6 +1134,15 @@ class CondaTainer_Create:
                 else:
                     Utils.print_error(f"Failed to create dependency overlay {Utils.yellow_text(md)}.")
                     return False
+
+        sbatch_args = CondaTainer_Create.get_sbatch_args_from_build_script(script_path)
+        if sbatch_args and shutil.which("sbatch") and Utils.is_in_interactive_shell():
+            Utils.print_note("This script requires SLURM sbatch to run. Submitting job...")
+            if CondaTainer_Create.submit_sbatch(Utils.normalize_name_version(f"{assembly}/{data_type}/{version}"), sbatch_args):
+                raise RuntimeError("Build script submitted successfully. Exiting current process. Please monitor the sbatch job for completion. And the log is under current directory.")
+            else:
+                Utils.print_error("Submitting sbatch job failed.")
+                return False
 
         Utils.print_message(f"Building reference SquashFS overlay for {assembly} {data_type} version {version} using build script.")
 
@@ -1139,13 +1214,16 @@ class CondaTainer_Create:
             CondaTainer_Create.ref_install_cleanup()
             return False
 
-        env_settings = CondaTainer_Create.get_env_settings_from_build_script(script_path)
+        env_settings = CondaTainer_Create.get_env_dict_from_build_script(script_path)
         if env_settings:
             env_file_path = os.path.splitext(overlay_path)[0] + ".env"
             with open(env_file_path, 'w') as f:
-                for line in env_settings:
-                    line = line.replace('$app_root', f"/cnt/{assembly}/{data_type}/{version}")
-                    f.write(f"{line}\n")
+                for env in env_settings:
+                    value = env_settings[env]["value"].replace('$app_root', f"/cnt/{assembly}/{data_type}/{version}")
+                    f.write(f"{env}={value}\n")
+                    note = env_settings[env].get("note", "")
+                    if note:
+                        f.write(f"#ENVNOTE:{env}={note}\n")
             Utils.print_message(f"ENV file created at {Utils.blue_text(env_file_path)}")
             os.chmod(env_file_path, 0o664)
 
