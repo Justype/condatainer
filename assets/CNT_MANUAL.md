@@ -7,6 +7,7 @@
 - [Naming Convention](#naming-convention)
 - [Mount Points](#mount-points)
 - [Create](#create)
+- [Overlay](#overlay)
 - [Container Management (Avail, List, Remove)](#container-management-avail-list-remove)
 - [Exec](#exec)
 - [Runtime (Check, Run)](#runtime-check-run)
@@ -23,6 +24,7 @@ CondaTainer: Use apptainer/conda/squashFS to manage tools for HPC users.
 
 positional arguments:
   COMMAND              Available actions
+    overlay (o)        Create an empty overlay img
     create (install, i)
                        Create a new SquashFS overlay using conda or available build scripts
     avail (av)         Check available local and remote build scripts
@@ -49,7 +51,7 @@ CondaTainer classifies overlays into three distinct categories based on their na
 
 ### Custom Environments (Env)
 
-Used when creating a custom environment with a user-defined name (e.g., via \-n or \-p).
+Used when creating a custom environment with a user-defined name (`create` `-n` or `-p`, or `overlay` action).
 
 * **Format:** `custom_name`
 * **Constraints:**
@@ -100,6 +102,31 @@ CondaTainer supports two types of overlay files, each with specific purposes and
 * **Mount Point:** `/ext3/[name]`
   * *Example:* `my_env.img` is mounted at `/ext3/my_env`.
 * **Writability:** These are read-only by default. To enable writing, you must use the `-w` / `--writable-img` flag during exec or run.
+
+## Overlay
+
+Create an ext3 `.img` with a conda environment inside. This is useful for creating writable conda environments.
+
+**Usage:**
+
+```
+condatainer overlay [OPTIONS] NAME
+```
+
+**Options:**
+
+* `-s`, `--size [SIZE]`: Size (MB) of the overlay image (default: 10240, 10G).
+* `-f`, `--file [FILE]`: Path to a Conda environment file (.yml or .yaml).
+* NAME: Name of the overlay image (e.g., `my_env` or `project.img`).
+
+**Examples:**
+
+```bash
+# Create a 20GB overlay img with a custom name
+condatainer overlay -s 20480 my_analysis_env
+
+condatainer o -f environment.yml project_env.img
+```
 
 ## Create
 

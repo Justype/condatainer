@@ -63,6 +63,7 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
     subparsers = parser.add_subparsers(dest="action", metavar="COMMAND", required=True, help="Available actions")
 
+    CondaTainer_Overlay.add_parser_arguments(subparsers)
     CondaTainer_Create.add_parser_arguments(subparsers)
     CondaTainer_Avail.add_parser_arguments(subparsers)
     CondaTainer_List.add_parser_arguments(subparsers)
@@ -71,7 +72,6 @@ def main():
     CondaTainer_Check.add_parser_arguments(subparsers)
     CondaTainer_Run.add_parser_arguments(subparsers)
     CondaTainer_Info.add_parser_arguments(subparsers)
-    CondaTainer_Overlay.add_parser_arguments(subparsers)
     CondaTainer_Apptainer.add_parser_arguments(subparsers)
     CondaTainer_Update.add_parser_arguments(subparsers)
     CondaTainer_ModGen.add_parser_arguments(subparsers)
@@ -532,7 +532,7 @@ class CondaTainer:
         - Skip paths that are children of another path
         """
         # Resolve all paths to absolute, normalized Path objects
-        abs_paths = [Path(p).resolve() for p in paths if p] + [Path.home()]
+        abs_paths = [Path(p).resolve() for p in paths if p] + [Path.home(), Path(".").resolve()]
 
         if os.environ.get("SCRATCH"):
             abs_paths.append(Path(os.environ["SCRATCH"]).resolve())
@@ -1372,8 +1372,6 @@ class CondaTainer_Exec:
             # Convert filename-safe separators back to normalized path
             writable_path = f"/ext3/{os.path.splitext(os.path.basename(last_img))[0].replace('--', '/').replace('=', '/') }"
 
-        scratch_dir = os.environ.get("SCRATCH", None)
-
         exec_cmd = [
             Config.APPTAINER_PATH, "exec",
             "--fakeroot",
@@ -1382,7 +1380,7 @@ class CondaTainer_Exec:
             "--env", f"PATH={path_env}",
             # "--env", f"PS1=CT \\w> ",
             "--env", "IN_CONDATINER=1",
-            *CondaTainer.generate_bind_args(Config.CONDATINER_DIR, os.path.abspath("."), scratch_dir),
+            *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
             # "--bind", "/etc/localtime:/etc/localtime:ro",
             *(["--env", "CNT_CONDA_PREFIX=" + writable_path] if writable_path else []),
             *CondaTainer.generate_gpu_args(),
@@ -1882,6 +1880,11 @@ class CondaTainer_Overlay:
             default=10240,
             help="Size of the overlay image in MiB"
         )
+        CondaTainer_Overlay.parser_overlay.add_argument(
+            "-f", "--file",
+            type=str,
+            help="Conda env YAML file"
+        )
 
     @staticmethod
     def parse_overlay_args(args):
@@ -1897,6 +1900,11 @@ class CondaTainer_Overlay:
             Utils.print_error(f"Path {overlay_path} already exists.")
             return
         
+        if args.file:
+            if not os.path.isfile(args.file):
+                Utils.print_error(f"Conda env file {args.file} not found.")
+                return
+        
         Utils.print_message(f"Creating overlay image at {Utils.blue_text(overlay_path)} with size {Utils.yellow_text(str(size_mib) + ' MiB')}...")
         cmd_overlay = [
             Config.APPTAINER_PATH, "overlay", "create",
@@ -1911,13 +1919,21 @@ class CondaTainer_Overlay:
             Utils.print_error("Failed to create overlay image.")
             return
         
-        Utils.print_message(f"Initializing conda environment inside the overlay image...")
         CondaTainer_Exec.is_img_writable = True
-        if CondaTainer_Exec.exec_command([overlay_path], ["mm-create", "zlib", "-y"], capture_output=True):
-            CondaTainer_Exec.exec_command([overlay_path], ["mm-clean", "-a", "-y"], capture_output=True)
-            Utils.print_success(f"Conda env is created inside {overlay_path}.")
+        if args.file:
+            Utils.print_message(f"Initializing conda environment using {os.path.abspath(args.file)}...")
+            if CondaTainer_Exec.exec_command([overlay_path], ["mm-create", "-f", os.path.abspath(args.file), "-y"], capture_output=True):
+                CondaTainer_Exec.exec_command([overlay_path], ["mm-clean", "-a", "-y"], capture_output=True)
+                Utils.print_success(f"Conda env is created inside {Utils.blue_text(overlay_path)}.")
+            else:
+                Utils.print_error(f"Failed to create conda env inside {Utils.blue_text(overlay_path)}.")
         else:
-            Utils.print_error(f"Failed to create conda env inside {overlay_path}.")
+            Utils.print_message("Initializing minimal conda environment with small package (zlib)...")
+            if CondaTainer_Exec.exec_command([overlay_path], ["mm-create", "zlib", "-y"], capture_output=True):
+                CondaTainer_Exec.exec_command([overlay_path], ["mm-clean", "-a", "-y"], capture_output=True)
+                Utils.print_success(f"Conda env is created inside {Utils.blue_text(overlay_path)}.")
+            else:
+                Utils.print_error(f"Failed to create conda env inside {Utils.blue_text(overlay_path)}.")
 
 class CondaTainer_Apptainer:
     @staticmethod
