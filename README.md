@@ -29,6 +29,7 @@ The installation script is **interactive**. You will be prompted to confirm the 
 - **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
 - **Hybrid Modes**: Supports read-only SquashFS (`.sqf`) for production and writable ext3 (`.img`) for development.
 - **Context-Aware**: Manages references/indexes, and displays helpful info when in interactive sessions.
+- **SLURM Integration**: Submits index generation jobs automatically when needed.
 
 (Tips for writable images: see [here](assets/TIPS.md#create-writable-images))
 
@@ -45,10 +46,13 @@ condatainer avail
 # 4. Create a custom environment from a YAML file
 condatainer create -f environment.yml -p my_analysis
 
-# 5. auto install the dependencies
+# 5. Create a writable image
+condatainer overlay -f environment.yml --size 10240 my_analysis_dev.img
+
+# 6. auto install the dependencies
 condatainer check analysis.sh -a
 
-# 6. Helpful info example: Cellranger reference
+# 7. Helpful info example: Cellranger reference
 condatainer exec -o grch38--cellranger--2024-A bash
 # [CondaTainer] Overlay envs:
 #   CELLRANGER_REF_DIR: cellranger reference dir
@@ -61,12 +65,13 @@ condatainer exec -o grch38--cellranger--2024-A bash
 
 ## 🏭 ModGen
 
-**ModGen** streamlines HPC software management by automatically converting apps and genome references into modules. It allows users to access Conda and non-Conda software (e.g., Cell Ranger, ORAD) but also genome references via standard `module` load commands without manual configuration.
+**ModGen** streamlines HPC software management by automatically converting apps and genome references into modules. It allows users to access Conda built and non-Conda software (e.g., 10X Cell Ranger, Illumina ORAD) but also genome references via standard `module load` commands without manual configuration.
 
 - **Auto-Generation**: Installs packages and builds Lua/Tcl modulefiles automatically.
 - **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
 - **Native Integration**: seamless `module avail` and `module load` experience.
 - **Context-Aware**: Manages references/indexes and displays helpful info when not in a SLURM job.
+- **SLURM Integration**: Submits index generation jobs automatically when needed.
 
 ```bash
 # 1. Initialize shell hooks (only needed once)
