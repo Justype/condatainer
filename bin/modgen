@@ -1738,6 +1738,9 @@ class ModGen_CondaTainer:
 if __name__ == "__main__":
     try:
         main()
+    except RuntimeError as rte:
+        Utils.print_note(str(rte))
+        sys.exit()
     except KeyboardInterrupt:
         Utils.print_message("ModGen interrupted by user.")
         sys.exit(1)

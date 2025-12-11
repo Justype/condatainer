@@ -699,9 +699,6 @@ class CondaTainer_Create:
                     # Create individual overlays for each package
                     for nv in normalized_name_versions:
                         CondaTainer_Create.auto_create_overlay_from_str(nv)
-        except RuntimeError as rte:
-            Utils.print_note(str(rte))
-            sys.exit()
         except KeyboardInterrupt:
             Utils.print_message("Process interrupted by user. Cleaning up...")
             CondaTainer.remove_tmp_overlay()
@@ -2181,6 +2178,9 @@ class CondaTainer_ModGen:
 if __name__ == "__main__":
     try:
         main()
+    except RuntimeError as rte:
+        Utils.print_note(str(rte))
+        sys.exit()
     except KeyboardInterrupt:
         Utils.print_message("CondaTainer interrupted by user.")
         sys.exit(1)
