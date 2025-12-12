@@ -7,19 +7,22 @@
 set abs_path [file normalize [info script]]
 # full name of module, assembly/data-type/version
 set ref_full_name [module-info name]
-regexp {([^/]+)/([^/]+)/([^/]+)} $ref_full_name -> assembly data_type version
+set depth [expr {[llength [split $ref_full_name "/"]] + 1}]
+# /somewhere/modules, go up 'depth' times from abs_path
+set module_root $abs_path
+for {set i 0} {$i < $depth} {incr i} {
+    set module_root [file dirname $module_root]
+}
 
-# abs path of modules, like /somewhere/modules
-set module_root [file dirname [file dirname [file dirname [file dirname $abs_path]]]]
 set ref_root [file join $module_root ref $ref_full_name]
 #  Make this script compatible with app modulefiles
 set app_root $ref_root
 set current_datetime [clock format [clock seconds] -format "%Y-%m-%d %H:%M:%S"]
 
-module-whatis "Loads $ref_full_name"
+module-whatis "{WHATIS}"
 proc ModulesHelp {} {
-    global assembly data_type version
-    puts stdout "Assembly: $assembly\tData type: $data_type\tVersion: $version"
+    global $ref_full_name
+    puts stderr "{HELP}"
 }
 
 # if {[module-info mode] == "load"} {

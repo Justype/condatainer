@@ -5,17 +5,20 @@
 
 local abs_path = myFileName()                   -- absolute path of module, /somewhere/modules/ref-modules/assembly/data-type/version
 local ref_full_name = myModuleFullName()        -- full name of module, assembly/data-type/version
-local assembly, data_type, version = ref_full_name:match("([^/]+)/([^/]+)/([^/]+)")
+local depth = 1
+for _ in ref_full_name:gmatch("[^/]+") do
+    depth = depth + 1
+end
 local module_root = abs_path
-for i = 1, 4 do
+for i = 1, depth do
     module_root = module_root:match("(.+)/[^/]+$")
 end    -- abs path of modules, /somewhere/modules
 local ref_root = pathJoin(module_root, "ref", ref_full_name) -- abs path of target ref
 local app_root = ref_root -- Make this script compatible with app modulefiles
 local current_datetime = os.date("%Y-%m-%d %H:%M:%S") -- Record current datetime
 
-whatis("Loads " .. ref_full_name)
-help("Assembly: " .. assembly .. "\tData type: " .. data_type .. "\tVersion: " .. version .. "")
+whatis("{WHATIS}")
+help("{HELP}")
 
 -- if (mode() == "load") then
 --     io.stderr:write("[" .. current_datetime .. "] Loading module " .. ref_full_name .. "\n")
