@@ -103,7 +103,7 @@ ml grch38/cellranger/2024-A
 
 ## 📂 Naming Convention
 
-Both tools utilize a standardized naming schema to organize software and reerence data.
+Both tools utilize a standardized naming schema to organize software and reference data.
 
 - Apps: `name/version` (e.g., `bcftools/1.16`)
 - References: `assembly/datatype/version`
