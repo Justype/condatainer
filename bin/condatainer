@@ -1287,9 +1287,11 @@ class CondaTainer_Exec:
         overlay_final.extend(args.overlays if args.overlays else [])
         command_final = command_final if command_final else ["bash"]
 
-        for ov in overlay_final:
-            if not os.path.isfile(ov):
-                Utils.print_error(f"Overlay file {ov} not found.")
+        for i in range(len(overlay_final)):
+            if not overlay_final[i].endswith(('.sqf', '.img', '.squashfs')):
+                overlay_final[i] = installed_overlays.get(Utils.normalize_name_version(overlay_final[i]), overlay_final[i])
+            if not os.path.isfile(overlay_final[i]):
+                Utils.print_error(f"Overlay file {overlay_final[i]} not found.")
                 exit(1)
 
         CondaTainer_Exec.exec_command(overlay_final, command_final)
@@ -1302,9 +1304,13 @@ class CondaTainer_Exec:
         overlay_final = args.overlays if args.overlays else []
         command_final = ["bash"]
 
-        for ov in overlay_final:
-            if not os.path.isfile(ov):
-                Utils.print_error(f"Overlay file {ov} not found.")
+        installed_overlays = CondaTainer.get_installed_overlays()
+
+        for i in range(len(overlay_final)):
+            if not overlay_final[i].endswith(('.sqf', '.img', '.squashfs')):
+                overlay_final[i] = installed_overlays.get(Utils.normalize_name_version(overlay_final[i]), overlay_final[i])
+            if not os.path.isfile(overlay_final[i]):
+                Utils.print_error(f"Overlay file {overlay_final[i]} not found.")
                 exit(1)
 
         CondaTainer_Exec.exec_command(overlay_final, command_final)
