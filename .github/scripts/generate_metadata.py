@@ -12,95 +12,68 @@ import os
 import json
 
 REPO = os.getcwd()
-BUILD_SCRIPTS = os.path.join(REPO, 'build-scripts')
+BUILD_SCRIPTS_DIR = os.path.join(REPO, 'build-scripts')
 
 github_repo = os.environ.get('GITHUB_REPOSITORY')
 github_sha = os.environ.get('GITHUB_SHA')
 OUT_DIR = os.path.join(REPO, 'metadata')
 OUT_FILE = os.path.join(OUT_DIR, 'build-scripts.json')
 
+def get_local_build_scripts():
+    """
+    Get a name-version to local script path mapping dictionary.
+    """
+    packages = {}
+    if not os.path.isdir(BUILD_SCRIPTS_DIR):
+        return packages
+
+    # os.walk mimics 'find' by visiting every subdirectory recursively
+    for root, _, files in os.walk(BUILD_SCRIPTS_DIR):
+        for filename in files:
+            # 1. skip non-build-script files
+            if filename.endswith(('.py', '.sh', ".def")):
+                continue
+
+            full_path = os.path.join(root, filename)
+
+            # 2. skip template files
+            if "template" in full_path:
+                continue
+
+            # 3. generate key (relative path like 'apps/tool/v1')
+            relative_key = os.path.relpath(full_path, BUILD_SCRIPTS_DIR)
+            
+            packages[relative_key] = full_path
+
+    return packages
+
+
+
 metadata = {}
 
-if not os.path.isdir(BUILD_SCRIPTS):
+if not os.path.isdir(BUILD_SCRIPTS_DIR):
     print('No build-scripts directory found; writing empty metadata file.')
-    with open(OUT_FILE, 'w') as f:
-        json.dump({}, f, indent=2, sort_keys=True)
-    raise SystemExit(0)
 
-for script_name in sorted(os.listdir(BUILD_SCRIPTS)):
-    if script_name == '0-template':
-        continue
-    script_relative_dir = os.path.join(BUILD_SCRIPTS, script_name)
-    if not os.path.isdir(script_relative_dir):
-        continue
+for script_name, path in get_local_build_scripts().items():
+    script_metadata = {}
+    script_metadata['whatis'] = "Missing description"
+    script_metadata['deps'] = []
+    script_metadata['sbatch'] = False
+    try:
+        with open(path, 'r') as sf:
+            for line in sf:
+                if line.startswith('#WHATIS:'):
+                    script_metadata['whatis'] = line[len('#WHATIS:'):].strip()
+                if line.startswith('#DEP:'):
+                    dep = line[len('#DEP:'):].strip()
+                    script_metadata['deps'].append(dep)
+                if line.startswith('#SBATCH'):
+                    script_metadata['sbatch'] = True
+    except Exception:
+        pass
 
-    versions = [v for v in sorted(os.listdir(script_relative_dir)) if not (v.startswith('template') or v.endswith('_data'))]
-    if not versions:
-        continue
+    metadata[script_name] = script_metadata
 
-    first = versions[0]
-    # If the first entry is a directory, assume structure is script_name/data_type/version
-    if os.path.isdir(os.path.join(script_relative_dir, first)):
-        for data_type in versions:
-            data_type_path = os.path.join(script_relative_dir, data_type)
-            if not os.path.isdir(data_type_path):
-                continue
-            sub_versions = sorted([sv for sv in os.listdir(data_type_path) if not sv.startswith('template') and not sv.endswith(('.sh', '.py'))])
-            for version in sub_versions:
-                script_path = os.path.join(data_type_path, version)
-                if not os.path.isfile(script_path):
-                    continue
-                key = f"{script_name}/{data_type}/{version}"
-                link = os.path.relpath(script_path, REPO)
-
-                # Extract metadata from the script file
-                script_metadata = {}
-                script_metadata['whatis'] = "Missing description"
-                script_metadata['deps'] = []
-                script_metadata['sbatch'] = False
-                try:
-                    with open(script_path, 'r') as sf:
-                        for line in sf:
-                            if line.startswith('#WHATIS:'):
-                                script_metadata['whatis'] = line[len('#WHATIS:'):].strip()
-                            if line.startswith('#DEP:'):
-                                dep = line[len('#DEP:'):].strip()
-                                script_metadata['deps'].append(dep)
-                            if line.startswith('#SBATCH'):
-                                script_metadata['sbatch'] = True
-                except Exception:
-                    pass
-
-                metadata[key] = script_metadata
-    else:
-        # structure is script_name/version
-        for version in versions:
-            if version.endswith('.sh') or version.endswith('.py') or version.startswith("template"):
-                continue
-            script_path = os.path.join(script_relative_dir, version)
-            if not os.path.isfile(script_path):
-                continue
-            key = f"{script_name}/{version}"
-            link = os.path.relpath(script_path, REPO)
-
-            script_metadata = {}
-            script_metadata['whatis'] = "Missing description"
-            script_metadata['deps'] = []
-            script_metadata['sbatch'] = False
-            try:
-                with open(script_path, 'r') as sf:
-                    for line in sf:
-                        if line.startswith('#WHATIS:'):
-                            script_metadata['whatis'] = line[len('#WHATIS:'):].strip()
-                        if line.startswith('#DEP:'):
-                            dep = line[len('#DEP:'):].strip()
-                            script_metadata['deps'].append(dep)
-                        if line.startswith('#SBATCH'):
-                            script_metadata['sbatch'] = True
-            except Exception:
-                pass
-
-            metadata[key] = script_metadata
 # write metadata
 os.makedirs(os.path.dirname(OUT_FILE), exist_ok=True)
 with open(OUT_FILE, 'w') as f:
