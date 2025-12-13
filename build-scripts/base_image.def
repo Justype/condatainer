@@ -10,23 +10,27 @@ From: ubuntu:24.04
 %labels
     Author Ziyue Cheng
     Version 1.0
-    Description "Debian-based container with squashfs-tools (mksquashfs)"
+    Description "Ubuntu24-based container with squashfs-tools and micromamba"
 
 %environment
     export LC_ALL=C.UTF-8
     export LANG=C.UTF-8
     export PS1='CNT \w> '
-    # May need to use --bind /etc/localtime to sync timezone
 
 %post
     # Avoid interactive prompts
     export DEBIAN_FRONTEND=noninteractive
 
+    # fakeroot squashfuse fuse2fs gocryptfs: nested mounting
+    # python3-requests python3-bs4: for some helper scripts
+    # tzdata: timezone data
     apt-get update && apt-get install -y \
         squashfs-tools fuse \
         sudo ca-certificates \
         curl wget aria2 git \
         tar pigz unzip bzip2 xz-utils zstd lz4 \
+        fakeroot squashfuse fuse2fs gocryptfs \
+        python3-requests python3-bs4 \
         tzdata \
         && apt-get clean \
         && rm -rf /var/lib/apt/lists/*
@@ -109,7 +113,7 @@ EOF
     chmod +x /usr/bin/mm-clean
 
 %runscript
-    echo "This container provides mksquashfs and micromamba inside Debian"
+    echo "This container provides mksquashfs and micromamba inside Ubuntu24"
     exec /bin/bash "$@"
 
 %help
