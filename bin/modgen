@@ -205,41 +205,28 @@ class Utils:
         """
         if Utils.local_build_scripts_paths is not None:
             return Utils.local_build_scripts_paths
+
         packages = {}
         if not os.path.isdir(Config.BUILD_SCRIPTS_DIR):
-            # No local build-scripts directory — behave as if there are no local scripts
             return packages
-        try:
-            script_paths = os.listdir(Config.BUILD_SCRIPTS_DIR)
-        except Exception:
-            return packages
-        script_paths = sorted(script_paths)
-        for script_dir in script_paths:
-            if script_dir == "0-template":
-                continue
-            script_path = os.path.join(Config.BUILD_SCRIPTS_DIR, script_dir)
-            if not os.path.isdir(script_path):
-                continue
 
-            versions = os.listdir(script_path)
-            versions = [v for v in versions if not (v.startswith("template") or v.endswith("_data"))]
-            if len(versions) == 0:
-                continue
+        # os.walk mimics 'find' by visiting every subdirectory recursively
+        for root, _, files in os.walk(Config.BUILD_SCRIPTS_DIR):
+            for filename in files:
+                # 1. skip non-build-script files
+                if filename.endswith(('.py', '.sh', ".def")):
+                    continue
 
-            # dir: ref
-            if os.path.isdir(os.path.join(script_path, versions[0])):
-                for data_type in versions:
-                    data_type_path = os.path.join(script_path, data_type)
-                    sub_versions = os.listdir(data_type_path)
-                    for version in sub_versions:
-                        if version.startswith("template") or version.endswith(('.sh', '.py')):
-                            continue
-                        packages[f"{script_dir}/{data_type}/{version}"] = os.path.join(data_type_path, version)
-            else: # file: apps
-                for version in versions:
-                    if version.startswith("template") or version.endswith(('.sh', '.py')):
-                        continue
-                    packages[f"{script_dir}/{version}"] = os.path.join(script_path, version)
+                full_path = os.path.join(root, filename)
+
+                # 2. skip template files
+                if "template" in full_path:
+                    continue
+
+                # 3. generate key (relative path like 'apps/tool/v1')
+                relative_key = os.path.relpath(full_path, Config.BUILD_SCRIPTS_DIR)
+
+                packages[relative_key] = full_path
 
         Utils.local_build_scripts_paths = packages
         return packages
@@ -415,23 +402,23 @@ class ModGen:
     def get_target_dir(normalized_name_version: str) -> str:
         relative_path = normalized_name_version.replace('=', "/")
         n = relative_path.count('/')
-        if n == 1:
+        if n == 0:
+            raise ValueError("No / found in normalized name_version.")
+        elif n == 1:
             return os.path.join(Config.APPS_DIR, relative_path)
-        elif n == 2:
-            return os.path.join(Config.REF_DIR, relative_path)
         else:
-            raise ValueError("Invalid normalized name_version format.")
+            return os.path.join(Config.REF_DIR, relative_path)
 
     @staticmethod
     def get_modulefile_path(normalized_name_version: str) -> str:
         relative_path = normalized_name_version.replace('=', "/")
         n = relative_path.count('/')
-        if n == 1:
+        if n == 0:
+            raise ValueError("No / found in normalized name_version.")
+        elif n == 1:
             return os.path.join(Config.APPS_MODULEFILES_DIR, f"{relative_path}" + ".lua" if Config.IS_LMOD else f"{relative_path}")
-        elif n == 2:
-            return os.path.join(Config.REF_MODULEFILES_DIR, f"{relative_path}" + ".lua" if Config.IS_LMOD else f"{relative_path}")
         else:
-            raise ValueError("Invalid normalized name_version format.")
+            return os.path.join(Config.REF_MODULEFILES_DIR, f"{relative_path}" + ".lua" if Config.IS_LMOD else f"{relative_path}")
 
     @staticmethod
     def is_module_available(normalized_name_version: str) -> bool:
@@ -916,7 +903,10 @@ class ModGen_Create:
             return True
 
         n = normalized_name_version.count('/')
-        if n == 1:
+        if n == 0:
+            Utils.print_error("Invalid NAME/VERSION string. Must contain at least one '/' character.")
+            return False
+        elif n == 1:
             local_packages = Utils.get_local_build_scripts().keys()
             remote_packages = Utils.fetch_remote_build_scripts().keys()
             avail_packages = set(local_packages).union(set(remote_packages))
@@ -924,21 +914,18 @@ class ModGen_Create:
                 return ModGen_Create.create_app_module_by_conda(normalized_name_version)
             else:
                 return ModGen_Create.create_module_from_build_script(normalized_name_version)
-        elif n == 2:
-            return ModGen_Create.create_module_from_build_script(normalized_name_version)
         else:
-            Utils.print_error("Too many '/' characters in the NAME/VERSION string.")
-            return False
+            return ModGen_Create.create_module_from_build_script(normalized_name_version)
 
     @staticmethod
     def create_module_from_build_script(normalized_name_version: str):
         n = normalized_name_version.count('/')
         is_ref = False
-        if n == 2:
-            is_ref = True
-        elif n != 1:
-            Utils.print_error("Too many '/' characters in the NAME/VERSION string.")
+        if n == 0:
+            Utils.print_error("Invalid NAME/VERSION string. Must contain at least one '/' character.")
             return False
+        elif n > 1:
+            is_ref = True
 
         target_path = ModGen.get_target_dir(normalized_name_version)
         target_modulefile_path = ModGen.get_modulefile_path(normalized_name_version)
@@ -1414,7 +1401,7 @@ class ModGen_Check:
                     Utils.print_error(f"Failed to create dependency module {md}.")
         else:
             Utils.print_message(f"Run the command again with {Utils.blue_text('-a')} or {Utils.blue_text('--auto-install')} to install missing dependencies.")
-        
+
         if is_remote and os.path.isfile(script_path):
             os.remove(script_path)
 
@@ -1493,7 +1480,7 @@ class ModGen_Run:
 
                 Utils.print_message(f"Please run {Utils.blue_text(Config.SCRIPT_NAME + ' check -a')} to install missing dependencies.")
                 return
-            
+
             ModGen.ensure_micromamba()
             Utils.print_message("Attempting to auto-install missing dependencies...")
             for md in missing_deps:
