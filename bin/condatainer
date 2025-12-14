@@ -33,7 +33,7 @@ class Config:
     BUILD_SCRIPTS_DIR = os.path.join(CONDATINER_DIR, "build-scripts")
     IMAGES_DIR = os.path.join(CONDATINER_DIR, "images")
     REF_IMAGES_DIR = os.path.join(CONDATINER_DIR, "ref-images")
-    CNT_DIR = os.path.join(CONDATINER_DIR, "cnt")
+    TMP_DIR = os.path.join(CONDATINER_DIR, "tmp")
 
     # Local apptainer
     LOCAL_APPTAINER_DIR = os.path.join(CONDATINER_DIR, "apptainer")
@@ -41,7 +41,6 @@ class Config:
     LOCAL_MICROMAMBA_BIN = os.path.join(CONDATINER_DIR, "bin", "micromamba")
 
     # File paths
-    TMP_OVERLAY_PATH = os.path.join(CONDATINER_DIR, "tmp.img")
     BASE_IMAGE_DEF = os.path.join(BUILD_SCRIPTS_DIR, "base_image.def")
     BASE_IMAGE_SIF = os.path.join(IMAGES_DIR, "base_image.sif")
     APPTAINER_PATH = shutil.which("apptainer") # Not compatible with singularity anymore
@@ -432,18 +431,36 @@ class CondaTainer:
 
     @staticmethod
     def get_tmp_overlay_path(normalized_name_version: str) -> str:
-        return os.path.join(Config.CONDATINER_DIR, "tmp", f"{normalized_name_version.replace('/', '--')}_tmp.img")
+        return os.path.join(Config.TMP_DIR, f"{normalized_name_version.replace('/', '--')}.img")
 
     @staticmethod
-    def create_tmp_overlay():
-        if os.path.isfile(Config.TMP_OVERLAY_PATH):
-            os.remove(Config.TMP_OVERLAY_PATH)
+    def get_cnt_dir_path(normalized_name_version: str) -> str:
+        return os.path.join(Config.TMP_DIR, normalized_name_version.replace('/', '--'), "cnt")
 
-        Utils.print_message("Creating temporary SquashFS overlay...")
+    @staticmethod
+    def create_cnt_dir(normalized_name_version: str) -> str:
+        cnt_dir = CondaTainer.get_cnt_dir_path(normalized_name_version)
+        os.makedirs(cnt_dir, mode=0o775, exist_ok=True)
+        return cnt_dir
+
+    @staticmethod
+    def create_tmp_overlay(normalized_name_version: str, force: bool = False) -> Optional[str]:
+        Utils.print_debug(f"[CREATE] Creating temporary overlay for {normalized_name_version} (force={force})")
+        tmp_overlay_path = CondaTainer.get_tmp_overlay_path(normalized_name_version)
+        if os.path.isfile(tmp_overlay_path):
+            if force:
+                Utils.print_warning(f"Temporary overlay for {Utils.yellow_text(normalized_name_version)} already exists. Removing it due to --force.")
+                os.remove(tmp_overlay_path)
+            else:
+                return None
+
+        os.makedirs(os.path.dirname(tmp_overlay_path), mode=0o775, exist_ok=True)
+
+        Utils.print_message(f"Creating temporary SquashFS overlay for {Utils.yellow_text(normalized_name_version)}...")
         cmd = [
             Config.APPTAINER_PATH, "overlay", "create",
             "--sparse", "--size", "15360", "--fakeroot", 
-            Config.TMP_OVERLAY_PATH
+            tmp_overlay_path
         ]
 
         Utils.print_debug(f"[CREATE] Creating temporary overlay with command: {cmd}")
@@ -454,14 +471,15 @@ class CondaTainer:
             Utils.print_error("Creating temporary overlay failed.")
             Utils.print_note("Please contact your system admin.")
             Utils.print_note("You can try ModGen to create Lmod modules without apptainer and overlays.")
-            return False
+            return None
         Utils.print_message("Temporary overlay created.")
-        return True
+        return tmp_overlay_path
 
     @staticmethod
-    def remove_tmp_overlay():
-        if os.path.isfile(Config.TMP_OVERLAY_PATH):
-            os.remove(Config.TMP_OVERLAY_PATH)
+    def remove_tmp_overlay(normalized_name_version: str) -> bool:
+        tmp_overlay_path = CondaTainer.get_tmp_overlay_path(normalized_name_version)
+        if os.path.isfile(tmp_overlay_path):
+            os.remove(tmp_overlay_path)
             Utils.print_message("Temporary overlay removed.")
         return True
 
@@ -627,12 +645,6 @@ class CondaTainer_Create:
             args.name_versions = [Utils.normalize_name_version(nv) for nv in args.name_versions]
 
         try:
-            if os.path.isfile(Config.TMP_OVERLAY_PATH):
-                Utils.print_error("A temporary overlay already exists. Maybe another process is running CondaTainer create?")
-                Utils.print_message("If you are sure there is no other process running, please delete the temporary overlay file:")
-                Utils.print_message(f"  rm {Config.TMP_OVERLAY_PATH}")
-                exit(1)
-
             if args.file:
                 if args.prefix:
                     CondaTainer_Create.create_sqf_from_file(args.file, prefix=args.prefix)
@@ -692,14 +704,14 @@ class CondaTainer_Create:
                         CondaTainer_Create.auto_create_overlay_from_str(nv)
         except KeyboardInterrupt:
             Utils.print_message("Process interrupted by user. Cleaning up...")
-            CondaTainer.remove_tmp_overlay()
-            shutil.rmtree(Config.CNT_DIR, ignore_errors=True)
             exit(1)
 
     @staticmethod
-    def create_cleanup():
-        shutil.rmtree(Config.CNT_DIR, ignore_errors=True)
-        CondaTainer.remove_tmp_overlay()
+    def create_cleanup(normalized_name_version: str):
+        cnt_dir = CondaTainer.get_cnt_dir_path(normalized_name_version)
+        cnt_dir = os.path.dirname(cnt_dir)
+        shutil.rmtree(cnt_dir, ignore_errors=True)
+        CondaTainer.remove_tmp_overlay(normalized_name_version)
 
     @staticmethod
     def generate_config_yaml_content(name, packages: List[str]) -> str:
@@ -716,51 +728,60 @@ class CondaTainer_Create:
     def create_sqf_using_conda(packages: List[str], overlay_path: str, relative_path) -> bool:
         Utils.print_message(f"Building SquashFS overlay at {Utils.blue_text(overlay_path)} with packages: {Utils.yellow_text(' '.join(packages))}")
 
-        CondaTainer.create_tmp_overlay()
-
-        yaml_path = os.path.join(Config.CONDATINER_DIR, "tmp_env.yaml")
-        with open(yaml_path, 'w') as f:
-            f.write(CondaTainer_Create.generate_config_yaml_content(relative_path.replace("/", "--"), packages))
-        yaml_file_cmd = f"mv {os.path.abspath(yaml_path)} /cnt/{relative_path}/env.yaml"
-
-        cmd_create = [
-            Config.APPTAINER_PATH, "exec",
-            "--fakeroot",
-            "--env", "TMPDIR=/ext3/tmp",
-            "--overlay", Config.TMP_OVERLAY_PATH,
-            *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
-            *CondaTainer.generate_gpu_args(),
-            Config.BASE_IMAGE_SIF,
-            "/bin/bash", "-c",
-            f"""
-            mkdir -p $TMPDIR
-            micromamba create -r /ext3/conda -c conda-forge -c bioconda -y -p /cnt/{relative_path} {' '.join(packages)}
-
-            {yaml_file_cmd}
-
-            # Set permissions to ensure read access
-            find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
-            find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
-            mksquashfs /cnt {os.path.abspath(overlay_path)} -processors {Config.NCPUS} -keep-as-directory {Config.compress_args} -b 1M
-            """
-        ]
-
-        Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_create}")
-
-        try:
-            subprocess.run(cmd_create, check=True)
-        except subprocess.CalledProcessError:
-            Utils.print_error(f"Creating {Utils.blue_text(overlay_path)} failed.")
-            Utils.print_note(f"If apptainer cannot recognize zstd, please run f`{Config.SCRIPT_NAME} apptainer` to get the latest version.")
-            Utils.print_note("If file/folder creation failed, please contact your system admin.")
-            Utils.print_note("If cannot find the package. Please search the package on https://anaconda.org")
-            CondaTainer.remove_tmp_overlay()
+        normalized_name_version = Utils.normalize_name_version(relative_path)
+        tmp_overlay_path = CondaTainer.create_tmp_overlay(normalized_name_version)
+        if tmp_overlay_path is None:
+            Utils.print_error(f"Temporary overlay {Utils.blue_text(tmp_overlay_path)} already exists. Please remove it first.")
             return False
 
-        Utils.print_success(f"Overlay {Utils.yellow_text(os.path.basename(overlay_path))} created at {Utils.blue_text(overlay_path)}. Removing temporary overlay...")
-        os.chmod(overlay_path, 0o664)
-        CondaTainer.remove_tmp_overlay()
-        return True
+        yaml_path = os.path.join(Config.CONDATINER_DIR, "tmp_env.yaml")
+        try:
+            with open(yaml_path, 'w') as f:
+                f.write(CondaTainer_Create.generate_config_yaml_content(relative_path.replace("/", "--"), packages))
+            yaml_file_cmd = f"mv {os.path.abspath(yaml_path)} /cnt/{relative_path}/env.yaml"
+
+            cmd_create = [
+                Config.APPTAINER_PATH, "exec",
+                "--fakeroot",
+                "--env", "TMPDIR=/ext3/tmp",
+                "--overlay", tmp_overlay_path,
+                *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
+                *CondaTainer.generate_gpu_args(),
+                Config.BASE_IMAGE_SIF,
+                "/bin/bash", "-c",
+                f"""
+                mkdir -p $TMPDIR
+                micromamba create -r /ext3/conda -c conda-forge -c bioconda -y -p /cnt/{relative_path} {' '.join(packages)}
+
+                {yaml_file_cmd}
+
+                # Set permissions to ensure read access
+                find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
+                find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
+                mksquashfs /cnt {os.path.abspath(overlay_path)} -processors {Config.NCPUS} -keep-as-directory {Config.compress_args} -b 1M
+                """
+            ]
+
+            Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_create}")
+
+            try:
+                subprocess.run(cmd_create, check=True)
+            except subprocess.CalledProcessError:
+                Utils.print_error(f"Creating {Utils.blue_text(overlay_path)} failed.")
+                Utils.print_note(f"If apptainer cannot recognize zstd, please run f`{Config.SCRIPT_NAME} apptainer` to get the latest version.")
+                Utils.print_note("If file/folder creation failed, please contact your system admin.")
+                Utils.print_note("If cannot find the package. Please search the package on https://anaconda.org")
+                CondaTainer.remove_tmp_overlay(normalized_name_version)
+                return False
+
+            Utils.print_success(f"Overlay {Utils.yellow_text(os.path.basename(overlay_path))} created at {Utils.blue_text(overlay_path)}. Removing temporary overlay...")
+            os.chmod(overlay_path, 0o664)
+            CondaTainer.remove_tmp_overlay(normalized_name_version)
+            return True
+        except KeyboardInterrupt:
+            Utils.print_message("Process interrupted by user.")
+            CondaTainer_Create.create_cleanup(normalized_name_version)
+            raise
 
     @staticmethod
     def create_sqf_from_file(file_path: str, custom_name: Optional[str] = None, prefix: Optional[str] = None):
@@ -789,46 +810,55 @@ class CondaTainer_Create:
         if os.path.isfile(overlay_abs_path):
             Utils.print_message(f"Overlay {Utils.yellow_text(os.path.basename(overlay_abs_path))} already exists at {Utils.blue_text(overlay_abs_path)}. Skipping creation.")
             return True
-        CondaTainer.create_tmp_overlay()
-
-        cmd_create = [
-            Config.APPTAINER_PATH, "exec",
-            "--fakeroot",
-            "--env", "TMPDIR=/ext3/tmp",
-            "--overlay", Config.TMP_OVERLAY_PATH,
-            *CondaTainer.generate_bind_args(Config.CONDATINER_DIR, file_basedir),
-            *CondaTainer.generate_gpu_args(),
-            Config.BASE_IMAGE_SIF,
-            "/bin/bash", "-c",
-            f"""
-            mkdir -p $TMPDIR
-            micromamba create -r /ext3/conda -c conda-forge -c bioconda -y -p /cnt/{relative_path} -f {file_path}
-
-            cp {file_path} /cnt/{relative_path}/env.yaml
-
-            # Set permissions to ensure read access
-            find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
-            find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
-            mksquashfs /cnt {os.path.abspath(overlay_abs_path)} -processors {Config.NCPUS} -keep-as-directory {Config.compress_args} -b 1M
-            """
-        ]
-
-        Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_create}")
-
-        try:
-            subprocess.run(cmd_create, check=True)
-        except subprocess.CalledProcessError:
-            Utils.print_error(f"Creating {Utils.blue_text(overlay_abs_path)} from {Utils.blue_text(file_path)} failed.")
-            Utils.print_note(f"If apptainer cannot recognize zstd, please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
-            Utils.print_note("If file/folder creation failed, please contact your system admin.")
-            Utils.print_note("If cannot resolve the environment file by libmamba, please please consider create img and manually install it with conda.")
-            CondaTainer.remove_tmp_overlay()
+        normalized_name_version = Utils.normalize_name_version(relative_path)
+        tmp_overlay_path = CondaTainer.create_tmp_overlay(normalized_name_version)
+        if tmp_overlay_path is None:
+            Utils.print_error(f"Temporary overlay {Utils.blue_text(tmp_overlay_path)} already exists. Please remove it first.")
             return False
 
-        Utils.print_success(f"Overlay {Utils.yellow_text(os.path.basename(overlay_abs_path))} created from {Utils.blue_text(file_path)}. Removing temporary overlay...")
-        os.chmod(overlay_abs_path, 0o664)
-        CondaTainer.remove_tmp_overlay()
-        return True
+        try:
+            cmd_create = [
+                Config.APPTAINER_PATH, "exec",
+                "--fakeroot",
+                "--env", "TMPDIR=/ext3/tmp",
+                "--overlay", tmp_overlay_path,
+                *CondaTainer.generate_bind_args(Config.CONDATINER_DIR, file_basedir),
+                *CondaTainer.generate_gpu_args(),
+                Config.BASE_IMAGE_SIF,
+                "/bin/bash", "-c",
+                f"""
+                mkdir -p $TMPDIR
+                micromamba create -r /ext3/conda -c conda-forge -c bioconda -y -p /cnt/{relative_path} -f {file_path}
+
+                cp {file_path} /cnt/{relative_path}/env.yaml
+
+                # Set permissions to ensure read access
+                find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
+                find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
+                mksquashfs /cnt {os.path.abspath(overlay_abs_path)} -processors {Config.NCPUS} -keep-as-directory {Config.compress_args} -b 1M
+                """
+            ]
+
+            Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_create}")
+
+            try:
+                subprocess.run(cmd_create, check=True)
+            except subprocess.CalledProcessError:
+                Utils.print_error(f"Creating {Utils.blue_text(overlay_abs_path)} from {Utils.blue_text(file_path)} failed.")
+                Utils.print_note(f"If apptainer cannot recognize zstd, please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
+                Utils.print_note("If file/folder creation failed, please contact your system admin.")
+                Utils.print_note("If cannot resolve the environment file by libmamba, please please consider create img and manually install it with conda.")
+                CondaTainer.remove_tmp_overlay(normalized_name_version)
+                return False
+
+            Utils.print_success(f"Overlay {Utils.yellow_text(os.path.basename(overlay_abs_path))} created from {Utils.blue_text(file_path)}. Removing temporary overlay...")
+            os.chmod(overlay_abs_path, 0o664)
+            CondaTainer.remove_tmp_overlay(normalized_name_version)
+            return True
+        except KeyboardInterrupt:
+            Utils.print_message("Process interrupted by user.")
+            CondaTainer_Create.create_cleanup(normalized_name_version)
+            raise
 
     @staticmethod
     def get_whatis_url_from_build_script(script_path: str, normalized_name_version: str) -> Tuple[str, str]:
@@ -1044,131 +1074,145 @@ class CondaTainer_Create:
                 Utils.print_error("Submitting sbatch job failed.")
                 return False
 
-        CondaTainer.create_tmp_overlay()
-
-        env_settings = [
-            "--env", f"app_name={normalized_name_version.split('/')[0]}",
-            "--env", f"version={normalized_name_version.split('/')[1]}",
-            "--env", f"app_name_version={normalized_name_version}",
-            "--env", f"tmp_dir=/ext3/tmp",
-            "--env", "TMPDIR=/ext3/tmp",
-        ]
-
-        if is_app:
-            env_settings.extend([
-                "--env", f"target_dir=/cnt/{normalized_name_version}",
-            ])
-        else:
-            target_dir = os.path.join(Config.CNT_DIR, normalized_name_version)
-            env_settings.extend([
-                "--env", f"target_dir={target_dir}",
-            ])
-
-        cmd_create = [
-            Config.APPTAINER_PATH, "exec",
-            "--fakeroot",
-            *env_settings,
-            "--env", "IN_CONDATINER=1",
-            "--env", f"PATH={CondaTainer_Exec.get_path_env(deps)}",
-            *CondaTainer_Exec.generate_overlay_args(deps),
-            "--overlay", Config.TMP_OVERLAY_PATH,
-            *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
-            *CondaTainer_Exec.get_overlay_env_configs(deps),
-            *CondaTainer.generate_gpu_args(),
-            Config.BASE_IMAGE_SIF,
-            "/bin/bash", "-c",
-            f"""
-            mkdir -p $TMPDIR
-            bash {script_path}
-
-            if [ $? -ne 0 ]; then
-                echo "Build script {script_path} failed."
-                exit 1
-            fi
-            """
-        ]
-
-        Utils.print_debug(f"[CREATE] with command: {cmd_create}")
-
         try:
-            subprocess.run(cmd_create, check=True)
-        except subprocess.CalledProcessError:
-            Utils.print_error(f"Creating overlay {Utils.blue_text(overlay_path)} failed.")
-            CondaTainer_Create.create_cleanup()
-            return False
+            tmp_overlay_path = CondaTainer.create_tmp_overlay(normalized_name_version)
+            if tmp_overlay_path is None:
+                Utils.print_error(f"Temporary overlay {Utils.blue_text(tmp_overlay_path)} already exists. Please remove it first.")
+                return False
 
-        if is_app:
-            Utils.print_message(f"Creating SquashFS file at {Utils.blue_text(overlay_path)}...")
-            cmd_mksqf = [
-                Config.APPTAINER_PATH, "exec", "--fakeroot",
-                "--overlay", Config.TMP_OVERLAY_PATH,
-                "--bind", Config.CONDATINER_DIR,
+            env_settings = [
+                "--env", f"app_name={normalized_name_version.split('/')[0]}",
+                "--env", f"version={normalized_name_version.split('/')[1]}",
+                "--env", f"app_name_version={normalized_name_version}",
+                "--env", f"tmp_dir=/ext3/tmp",
+                "--env", "TMPDIR=/ext3/tmp",
+            ]
+
+            if is_app:
+                env_settings.extend([
+                    "--env", f"target_dir=/cnt/{normalized_name_version}",
+                ])
+            else:
+                cnt_dir = CondaTainer.create_cnt_dir(normalized_name_version)
+                target_dir = os.path.join(cnt_dir, normalized_name_version)
+                env_settings.extend([
+                    "--env", f"target_dir={target_dir}",
+                ])
+
+            cmd_create = [
+                Config.APPTAINER_PATH, "exec",
+                "--fakeroot",
+                *env_settings,
+                "--env", "IN_CONDATINER=1",
+                "--env", f"PATH={CondaTainer_Exec.get_path_env(deps)}",
+                *CondaTainer_Exec.generate_overlay_args(deps),
+                "--overlay", tmp_overlay_path,
+                *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
+                *CondaTainer_Exec.get_overlay_env_configs(deps),
+                *CondaTainer.generate_gpu_args(),
                 Config.BASE_IMAGE_SIF,
                 "/bin/bash", "-c",
                 f"""
-                find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
-                find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
+                mkdir -p $TMPDIR
+                bash {script_path}
 
-                mksquashfs /cnt {os.path.abspath(overlay_path)} -processors {Config.NCPUS} -keep-as-directory {Config.compress_args} -b 1M
+                if [ $? -ne 0 ]; then
+                    echo "Build script {script_path} failed."
+                    exit 1
+                fi
                 """
             ]
-            Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_mksqf}")
+
+            Utils.print_debug(f"[CREATE] with command: {cmd_create}")
+
             try:
-                subprocess.run(cmd_mksqf, check=True)
+                subprocess.run(cmd_create, check=True)
             except subprocess.CalledProcessError:
-                Utils.print_error(f"Creating SquashFS file {Utils.blue_text(overlay_path)} failed.")
-                Utils.print_note(f"If apptainer cannot recognize zstd, please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
-                Utils.print_note("If file/folder creation failed, please contact your system admin.")
-                CondaTainer_Create.create_cleanup()
-                return False
-        else: # Reference overlay
-            if os.listdir(target_dir) == []:
-                Utils.print_error(f"Overlay build script did not create any files in {Utils.blue_text(target_dir)}.")
-                CondaTainer_Create.create_cleanup()
+                Utils.print_error(f"Creating overlay {Utils.blue_text(overlay_path)} failed.")
+                CondaTainer_Create.create_cleanup(normalized_name_version)
                 return False
 
-            Utils.share_to_ugo_recursive(Config.CNT_DIR) # Ensure permissions before creating SquashFSq
+            if is_app:
+                Utils.print_message(f"Creating SquashFS file at {Utils.blue_text(overlay_path)}...")
+                cmd_mksqf = [
+                    Config.APPTAINER_PATH, "exec", "--fakeroot",
+                    "--overlay", tmp_overlay_path,
+                    "--bind", Config.CONDATINER_DIR,
+                    Config.BASE_IMAGE_SIF,
+                    "/bin/bash", "-c",
+                    f"""
+                    echo "Setting permissions for files..."
+                    find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
+                    find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
 
-            Utils.print_message(f"Creating SquashFS file at {Utils.blue_text(overlay_path)}...")
-            cmd_mksqf = [
-                Config.APPTAINER_PATH, "exec", "--fakeroot",
-                "--overlay", Config.TMP_OVERLAY_PATH,
-                "--bind", Config.CONDATINER_DIR,
-                Config.BASE_IMAGE_SIF,
-                "/bin/bash", "-c",
-                f"""
-                mksquashfs {Config.CNT_DIR} {os.path.abspath(overlay_path)} -processors {Config.NCPUS} -keep-as-directory {Config.compress_args} -b 1M
-                """
-            ]
-            Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_mksqf}")
-            try:
-                subprocess.run(cmd_mksqf, check=True)
-            except subprocess.CalledProcessError:
-                Utils.print_error(f"Creating SquashFS file {Utils.blue_text(overlay_path)} failed.")
-                Utils.print_note(f"If apptainer cannot recognize zstd, please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
-                Utils.print_note("If file/folder creation failed, please contact your system admin.")
-                CondaTainer_Create.create_cleanup()
-                return False
+                    echo "Creating SquashFS file..."
+                    mksquashfs /cnt {os.path.abspath(overlay_path)} -processors {Config.NCPUS} -keep-as-directory {Config.compress_args} -b 1M
+                    """
+                ]
+                Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_mksqf}")
+                try:
+                    subprocess.run(cmd_mksqf, check=True)
+                except subprocess.CalledProcessError:
+                    Utils.print_error(f"Creating SquashFS file {Utils.blue_text(overlay_path)} failed.")
+                    Utils.print_note(f"If apptainer cannot recognize zstd, please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
+                    Utils.print_note("If file/folder creation failed, please contact your system admin.")
+                    CondaTainer_Create.create_cleanup(normalized_name_version)
+                    return False
+            else: # Reference overlay
+                if os.listdir(target_dir) == []:
+                    Utils.print_error(f"Overlay build script did not create any files in {Utils.blue_text(target_dir)}.")
+                    CondaTainer_Create.create_cleanup(normalized_name_version)
+                    return False
 
-        env_settings = CondaTainer_Create.get_env_dict_from_build_script(script_path)
-        if env_settings:
-            env_file_path = os.path.splitext(overlay_path)[0] + ".env"
-            with open(env_file_path, 'w') as f:
-                for env in env_settings:
-                    value = env_settings[env]["value"].replace('$app_root', f"/cnt/{normalized_name_version}")
-                    f.write(f"{env}={value}\n")
-                    note = env_settings[env].get("note", "")
-                    if note:
-                        f.write(f"#ENVNOTE:{env}={note}\n")
-            Utils.print_message(f"ENV file created at {Utils.blue_text(env_file_path)}")
-            os.chmod(env_file_path, 0o664)
+                cnt_dir = CondaTainer.get_cnt_dir_path(normalized_name_version)
+                Utils.share_to_ugo_recursive(cnt_dir) # Ensure permissions before creating SquashFSq
 
-        Utils.print_success(f"Overlay created at {Utils.blue_text(overlay_path)}. Cleaning up...")
-        os.chmod(overlay_path, 0o664)
-        CondaTainer_Create.create_cleanup()
-        if is_remote and os.path.isfile(script_path):
-            os.remove(script_path)
-        return True
+                Utils.print_message(f"Creating SquashFS file at {Utils.blue_text(overlay_path)}...")
+                cmd_mksqf = [
+                    Config.APPTAINER_PATH, "exec", "--fakeroot",
+                    "--overlay", tmp_overlay_path,
+                    "--bind", Config.CONDATINER_DIR,
+                    Config.BASE_IMAGE_SIF,
+                    "/bin/bash", "-c",
+                    f"""
+                    mksquashfs {cnt_dir} {os.path.abspath(overlay_path)} -processors {Config.NCPUS} -keep-as-directory {Config.compress_args} -b 1M
+                    """
+                ]
+                Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_mksqf}")
+                try:
+                    subprocess.run(cmd_mksqf, check=True)
+                except subprocess.CalledProcessError:
+                    Utils.print_error(f"Creating SquashFS file {Utils.blue_text(overlay_path)} failed.")
+                    Utils.print_note(f"If apptainer cannot recognize zstd, please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
+                    Utils.print_note("If file/folder creation failed, please contact your system admin.")
+                    CondaTainer_Create.create_cleanup(normalized_name_version)
+                    return False
+
+            env_settings = CondaTainer_Create.get_env_dict_from_build_script(script_path)
+            if env_settings:
+                env_file_path = os.path.splitext(overlay_path)[0] + ".env"
+                with open(env_file_path, 'w') as f:
+                    for env in env_settings:
+                        value = env_settings[env]["value"].replace('$app_root', f"/cnt/{normalized_name_version}")
+                        f.write(f"{env}={value}\n")
+                        note = env_settings[env].get("note", "")
+                        if note:
+                            f.write(f"#ENVNOTE:{env}={note}\n")
+                Utils.print_message(f"ENV file created at {Utils.blue_text(env_file_path)}")
+                os.chmod(env_file_path, 0o664)
+
+            Utils.print_success(f"Overlay created at {Utils.blue_text(overlay_path)}. Cleaning up...")
+            os.chmod(overlay_path, 0o664)
+            CondaTainer_Create.create_cleanup(normalized_name_version)
+            if is_remote and os.path.isfile(script_path):
+                os.remove(script_path)
+            return True
+        except KeyboardInterrupt:
+            Utils.print_message("Process interrupted by user.")
+            CondaTainer_Create.create_cleanup(normalized_name_version)
+            if is_remote and os.path.isfile(script_path):
+                os.remove(script_path)
+            raise
 
 class CondaTainer_Exec:
     is_img_writable = False

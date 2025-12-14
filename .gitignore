@@ -9,7 +9,6 @@ apptainer
 images
 ref-images
 tmp*
-cnt
 *.img
 *.sqf
 *.sif
