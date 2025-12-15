@@ -8,7 +8,7 @@
 #ENVNOTE:STAR index for grch38 GENCODE v46 with read length 101
 
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=40G
+#SBATCH --mem=42G
 #SBATCH --time=2:00:00
 #SBATCH --job-name=star-index
 #SBATCH --output=%x-%j.log
