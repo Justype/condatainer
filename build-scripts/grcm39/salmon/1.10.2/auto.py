@@ -5,13 +5,13 @@ import os
 script_path = __file__
 
 def get_assembly():
-    return os.path.basename(os.path.dirname(os.path.dirname(script_path)))
+    return os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(script_path))))
 
 def get_gencode_versions():
     """Return a sorted list of available gencode version numbers found under
-    the assembly's `gtf-gencode/` directory (e.g. ['44', '47'])."""
-    assembly_dir = os.path.dirname(os.path.dirname(script_path))
-    gtf_dir = os.path.join(assembly_dir, 'gtf-gencode')
+    the assembly's `transcript-gencode/` directory (e.g. ['44', '47'])."""
+    assembly_dir = os.path.dirname(os.path.dirname(os.path.dirname(script_path)))
+    gtf_dir = os.path.join(assembly_dir, 'transcript-gencode')
     versions = []
     if not os.path.isdir(gtf_dir):
         return versions
@@ -39,33 +39,27 @@ def main():
         print("No new GENCODE versions found. Nothing to do.")
         return
 
-    # Common read lengths to produce; adjust if you want other values
-    read_lengths = [101, 151]
-
     created = []
     for gv in gencode_versions:
         # gv might be like '44' or 'M36' — embed as-is
-        for rl in read_lengths:
-            out_name = f"gencode{gv}-{rl}"
-            out_path = os.path.join(base_dir, out_name)
-            if os.path.exists(out_path):
-                print(f"Skipping existing {out_name}")
-                continue
+        out_name = f"gencode{gv}"
+        out_path = os.path.join(base_dir, out_name)
+        if os.path.exists(out_path):
+            print(f"Skipping existing {out_name}")
+            continue
 
-            content = tpl
-            content = content.replace('${ASSEMBLY}', assembly)
-            content = content.replace('${GENCODE_VERSION}', str(gv))
-            content = content.replace('${READ_LENGTH}', str(rl))
-            content = content.replace('${READ_LENGTH_MINUS1}', str(int(rl) - 1))
+        content = tpl
+        content = content.replace('${ASSEMBLY}', assembly)
+        content = content.replace('${GENCODE_VERSION}', str(gv))
 
-            try:
-                with open(out_path, 'w') as of:
-                    of.write(content)
-                os.chmod(out_path, 0o755)
-                created.append(out_path)
-                print(f"Created {out_path}")
-            except Exception as e:
-                print(f"Failed to write {out_path}: {e}")
+        try:
+            with open(out_path, 'w') as of:
+                of.write(content)
+            os.chmod(out_path, 0o755)
+            created.append(out_path)
+            print(f"Created {out_path}")
+        except Exception as e:
+            print(f"Failed to write {out_path}: {e}")
 
     if not created:
         print("No new build-scripts were created.")
