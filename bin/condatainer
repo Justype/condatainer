@@ -1010,6 +1010,7 @@ class BuildObject:
     
     def _create_sbatch_script(self) -> bool:
         sbatch_script_path = os.path.join(Config.TMP_DIR, f"sbatch_build_{self.name_version.replace('/', '--')}.sh")
+        os.makedirs(Config.LOGS_DIR, mode=0o775, exist_ok=True)
         try:
             with open(sbatch_script_path, 'w') as f:
                 f.write("#!/bin/bash\n")
@@ -1018,7 +1019,12 @@ class BuildObject:
                         flag = "--output=" + os.path.join(Config.LOGS_DIR, f"CondaTainer_{self.name_version.replace('/', '--')}.out")
                     f.write(f"#SBATCH {flag}\n")
                 f.write("\n")
-                f.write(f"{Config.SCRIPT_PATH} create {self.name_version}\n")
+                if Config.debug:
+                    f.write(f"/usr/bin/time -v {Config.SCRIPT_PATH} create {self.name_version}\n")
+                else:
+                    f.write(f"{Config.SCRIPT_PATH} create {self.name_version}\n")
+                f.write("echo SLURM_JOB_ID $SLURM_JOB_ID\n")
+                f.write("rm -f " + sbatch_script_path + "\n") # Self-delete script after run
             os.chmod(sbatch_script_path, 0o775)
             return True
         except Exception as e:
@@ -1112,14 +1118,16 @@ class BuildGraph:
                 self.download_metadata.append(meta)
 
     def run(self) -> bool:
-        if not self._run_download_step():
+        if not self._run_local_step():
             return False
         if not self._run_sbatch_step():
             return False
         return True
 
-    def _run_download_step(self) -> bool:
+    def _run_local_step(self) -> bool:
         for metadata in self.download_metadata:
+            if CondaTainer.is_overlay_installed(metadata.name_version):
+                continue
             Utils.print_message(f"Processing overlay {Utils.yellow_text(metadata.name_version)} (no sbatch)...")
             if not metadata.build():
                 Utils.print_error(f"Failed to build overlay for {Utils.yellow_text(metadata.name_version)}.")
