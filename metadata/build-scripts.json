@@ -173,7 +173,7 @@
     "sbatch": false,
     "whatis": "GRCh38 RepeatMasker GTF"
   },
-  "grch38/salmon-1.10.2/gencode23": {
+  "grch38/salmon/1.10.2/gencode23": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/23",
@@ -182,7 +182,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 23 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode24": {
+  "grch38/salmon/1.10.2/gencode24": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/24",
@@ -191,7 +191,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 24 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode25": {
+  "grch38/salmon/1.10.2/gencode25": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/25",
@@ -200,7 +200,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 25 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode26": {
+  "grch38/salmon/1.10.2/gencode26": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/26",
@@ -209,7 +209,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 26 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode27": {
+  "grch38/salmon/1.10.2/gencode27": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/27",
@@ -218,7 +218,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 27 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode28": {
+  "grch38/salmon/1.10.2/gencode28": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/28",
@@ -227,7 +227,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 28 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode29": {
+  "grch38/salmon/1.10.2/gencode29": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/29",
@@ -236,7 +236,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 29 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode30": {
+  "grch38/salmon/1.10.2/gencode30": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/30",
@@ -245,7 +245,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 30 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode31": {
+  "grch38/salmon/1.10.2/gencode31": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/31",
@@ -254,7 +254,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 31 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode32": {
+  "grch38/salmon/1.10.2/gencode32": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/32",
@@ -263,7 +263,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 32 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode33": {
+  "grch38/salmon/1.10.2/gencode33": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/33",
@@ -272,7 +272,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 33 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode34": {
+  "grch38/salmon/1.10.2/gencode34": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/34",
@@ -281,7 +281,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 34 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode35": {
+  "grch38/salmon/1.10.2/gencode35": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/35",
@@ -290,7 +290,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 35 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode36": {
+  "grch38/salmon/1.10.2/gencode36": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/36",
@@ -299,7 +299,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 36 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode37": {
+  "grch38/salmon/1.10.2/gencode37": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/37",
@@ -308,7 +308,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 37 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode38": {
+  "grch38/salmon/1.10.2/gencode38": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/38",
@@ -317,7 +317,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 38 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode39": {
+  "grch38/salmon/1.10.2/gencode39": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/39",
@@ -326,7 +326,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 39 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode40": {
+  "grch38/salmon/1.10.2/gencode40": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/40",
@@ -335,7 +335,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 40 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode41": {
+  "grch38/salmon/1.10.2/gencode41": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/41",
@@ -344,7 +344,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 41 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode42": {
+  "grch38/salmon/1.10.2/gencode42": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/42",
@@ -353,7 +353,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 42 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode43": {
+  "grch38/salmon/1.10.2/gencode43": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/43",
@@ -362,7 +362,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 43 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode44": {
+  "grch38/salmon/1.10.2/gencode44": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/44",
@@ -371,7 +371,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 44 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode45": {
+  "grch38/salmon/1.10.2/gencode45": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/45",
@@ -380,7 +380,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 45 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode46": {
+  "grch38/salmon/1.10.2/gencode46": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/46",
@@ -389,7 +389,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 46 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode47": {
+  "grch38/salmon/1.10.2/gencode47": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/47",
@@ -398,7 +398,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 47 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode48": {
+  "grch38/salmon/1.10.2/gencode48": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/48",
@@ -407,7 +407,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 48 index for transcript quantification"
   },
-  "grch38/salmon-1.10.2/gencode49": {
+  "grch38/salmon/1.10.2/gencode49": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/transcript-gencode/49",
@@ -416,7 +416,7 @@
     "sbatch": true,
     "whatis": "Salmon grch38 GENCODE 49 index for transcript quantification"
   },
-  "grch38/star-2.7.11b/cellranger-2024-A": {
+  "grch38/star/2.7.11b/cellranger-2024-A": {
     "deps": [
       "grch38/cellranger/2024-A",
       "star/2.7.11b"
@@ -424,7 +424,7 @@
     "sbatch": true,
     "whatis": "STAR GRCh38 10X Genomics 2024-A index"
   },
-  "grch38/star-2.7.11b/gencode22-101": {
+  "grch38/star/2.7.11b/gencode22-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/22",
@@ -433,7 +433,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE22 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode22-151": {
+  "grch38/star/2.7.11b/gencode22-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/22",
@@ -442,7 +442,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE22 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode23-101": {
+  "grch38/star/2.7.11b/gencode23-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/23",
@@ -451,7 +451,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE23 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode23-151": {
+  "grch38/star/2.7.11b/gencode23-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/23",
@@ -460,7 +460,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE23 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode24-101": {
+  "grch38/star/2.7.11b/gencode24-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/24",
@@ -469,7 +469,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE24 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode24-151": {
+  "grch38/star/2.7.11b/gencode24-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/24",
@@ -478,7 +478,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE24 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode25-101": {
+  "grch38/star/2.7.11b/gencode25-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/25",
@@ -487,7 +487,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE25 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode25-151": {
+  "grch38/star/2.7.11b/gencode25-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/25",
@@ -496,7 +496,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE25 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode26-101": {
+  "grch38/star/2.7.11b/gencode26-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/26",
@@ -505,7 +505,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE26 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode26-151": {
+  "grch38/star/2.7.11b/gencode26-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/26",
@@ -514,7 +514,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE26 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode27-101": {
+  "grch38/star/2.7.11b/gencode27-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/27",
@@ -523,7 +523,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE27 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode27-151": {
+  "grch38/star/2.7.11b/gencode27-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/27",
@@ -532,7 +532,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE27 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode28-101": {
+  "grch38/star/2.7.11b/gencode28-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/28",
@@ -541,7 +541,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE28 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode28-151": {
+  "grch38/star/2.7.11b/gencode28-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/28",
@@ -550,7 +550,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE28 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode29-101": {
+  "grch38/star/2.7.11b/gencode29-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/29",
@@ -559,7 +559,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE29 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode29-151": {
+  "grch38/star/2.7.11b/gencode29-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/29",
@@ -568,7 +568,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE29 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode30-101": {
+  "grch38/star/2.7.11b/gencode30-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/30",
@@ -577,7 +577,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE30 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode30-151": {
+  "grch38/star/2.7.11b/gencode30-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/30",
@@ -586,7 +586,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE30 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode31-101": {
+  "grch38/star/2.7.11b/gencode31-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/31",
@@ -595,7 +595,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE31 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode31-151": {
+  "grch38/star/2.7.11b/gencode31-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/31",
@@ -604,7 +604,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE31 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode32-101": {
+  "grch38/star/2.7.11b/gencode32-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/32",
@@ -613,7 +613,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE32 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode32-151": {
+  "grch38/star/2.7.11b/gencode32-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/32",
@@ -622,7 +622,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE32 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode33-101": {
+  "grch38/star/2.7.11b/gencode33-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/33",
@@ -631,7 +631,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE33 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode33-151": {
+  "grch38/star/2.7.11b/gencode33-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/33",
@@ -640,7 +640,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE33 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode34-101": {
+  "grch38/star/2.7.11b/gencode34-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/34",
@@ -649,7 +649,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE34 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode34-151": {
+  "grch38/star/2.7.11b/gencode34-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/34",
@@ -658,7 +658,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE34 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode35-101": {
+  "grch38/star/2.7.11b/gencode35-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/35",
@@ -667,7 +667,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE35 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode35-151": {
+  "grch38/star/2.7.11b/gencode35-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/35",
@@ -676,7 +676,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE35 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode36-101": {
+  "grch38/star/2.7.11b/gencode36-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/36",
@@ -685,7 +685,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE36 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode36-151": {
+  "grch38/star/2.7.11b/gencode36-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/36",
@@ -694,7 +694,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE36 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode37-101": {
+  "grch38/star/2.7.11b/gencode37-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/37",
@@ -703,7 +703,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE37 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode37-151": {
+  "grch38/star/2.7.11b/gencode37-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/37",
@@ -712,7 +712,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE37 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode38-101": {
+  "grch38/star/2.7.11b/gencode38-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/38",
@@ -721,7 +721,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE38 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode38-151": {
+  "grch38/star/2.7.11b/gencode38-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/38",
@@ -730,7 +730,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE38 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode39-101": {
+  "grch38/star/2.7.11b/gencode39-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/39",
@@ -739,7 +739,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE39 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode39-151": {
+  "grch38/star/2.7.11b/gencode39-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/39",
@@ -748,7 +748,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE39 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode40-101": {
+  "grch38/star/2.7.11b/gencode40-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/40",
@@ -757,7 +757,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE40 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode40-151": {
+  "grch38/star/2.7.11b/gencode40-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/40",
@@ -766,7 +766,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE40 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode41-101": {
+  "grch38/star/2.7.11b/gencode41-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/41",
@@ -775,7 +775,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE41 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode41-151": {
+  "grch38/star/2.7.11b/gencode41-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/41",
@@ -784,7 +784,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE41 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode42-101": {
+  "grch38/star/2.7.11b/gencode42-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/42",
@@ -793,7 +793,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE42 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode42-151": {
+  "grch38/star/2.7.11b/gencode42-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/42",
@@ -802,7 +802,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE42 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode43-101": {
+  "grch38/star/2.7.11b/gencode43-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/43",
@@ -811,7 +811,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE43 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode43-151": {
+  "grch38/star/2.7.11b/gencode43-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/43",
@@ -820,7 +820,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE43 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode44-101": {
+  "grch38/star/2.7.11b/gencode44-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/44",
@@ -829,7 +829,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE44 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode44-151": {
+  "grch38/star/2.7.11b/gencode44-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/44",
@@ -838,7 +838,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE44 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode45-101": {
+  "grch38/star/2.7.11b/gencode45-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/45",
@@ -847,7 +847,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE45 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode45-151": {
+  "grch38/star/2.7.11b/gencode45-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/45",
@@ -856,7 +856,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE45 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode46-101": {
+  "grch38/star/2.7.11b/gencode46-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/46",
@@ -865,7 +865,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE46 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode46-151": {
+  "grch38/star/2.7.11b/gencode46-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/46",
@@ -874,7 +874,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE46 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode47-101": {
+  "grch38/star/2.7.11b/gencode47-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/47",
@@ -883,7 +883,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE47 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode47-151": {
+  "grch38/star/2.7.11b/gencode47-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/47",
@@ -892,7 +892,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE47 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode48-101": {
+  "grch38/star/2.7.11b/gencode48-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/48",
@@ -901,7 +901,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE48 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode48-151": {
+  "grch38/star/2.7.11b/gencode48-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/48",
@@ -910,7 +910,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE48 index for read length 151"
   },
-  "grch38/star-2.7.11b/gencode49-101": {
+  "grch38/star/2.7.11b/gencode49-101": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/49",
@@ -919,7 +919,7 @@
     "sbatch": true,
     "whatis": "STAR grch38 GENCODE49 index for read length 101"
   },
-  "grch38/star-2.7.11b/gencode49-151": {
+  "grch38/star/2.7.11b/gencode49-151": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/49",
@@ -1396,7 +1396,7 @@
     "sbatch": false,
     "whatis": "GRCm39 RepeatMasker GTF"
   },
-  "grcm39/salmon-1.10.2/gencodeM10": {
+  "grcm39/salmon/1.10.2/gencodeM10": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M10",
@@ -1405,7 +1405,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M10 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM11": {
+  "grcm39/salmon/1.10.2/gencodeM11": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M11",
@@ -1414,7 +1414,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M11 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM12": {
+  "grcm39/salmon/1.10.2/gencodeM12": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M12",
@@ -1423,7 +1423,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M12 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM13": {
+  "grcm39/salmon/1.10.2/gencodeM13": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M13",
@@ -1432,7 +1432,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M13 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM14": {
+  "grcm39/salmon/1.10.2/gencodeM14": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M14",
@@ -1441,7 +1441,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M14 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM15": {
+  "grcm39/salmon/1.10.2/gencodeM15": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M15",
@@ -1450,7 +1450,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M15 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM16": {
+  "grcm39/salmon/1.10.2/gencodeM16": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M16",
@@ -1459,7 +1459,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M16 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM17": {
+  "grcm39/salmon/1.10.2/gencodeM17": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M17",
@@ -1468,7 +1468,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M17 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM18": {
+  "grcm39/salmon/1.10.2/gencodeM18": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M18",
@@ -1477,7 +1477,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M18 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM19": {
+  "grcm39/salmon/1.10.2/gencodeM19": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M19",
@@ -1486,7 +1486,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M19 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM20": {
+  "grcm39/salmon/1.10.2/gencodeM20": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M20",
@@ -1495,7 +1495,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M20 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM21": {
+  "grcm39/salmon/1.10.2/gencodeM21": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M21",
@@ -1504,7 +1504,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M21 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM22": {
+  "grcm39/salmon/1.10.2/gencodeM22": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M22",
@@ -1513,7 +1513,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M22 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM23": {
+  "grcm39/salmon/1.10.2/gencodeM23": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M23",
@@ -1522,7 +1522,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M23 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM24": {
+  "grcm39/salmon/1.10.2/gencodeM24": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M24",
@@ -1531,7 +1531,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M24 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM25": {
+  "grcm39/salmon/1.10.2/gencodeM25": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M25",
@@ -1540,7 +1540,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M25 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM26": {
+  "grcm39/salmon/1.10.2/gencodeM26": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M26",
@@ -1549,7 +1549,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M26 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM27": {
+  "grcm39/salmon/1.10.2/gencodeM27": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M27",
@@ -1558,7 +1558,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M27 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM28": {
+  "grcm39/salmon/1.10.2/gencodeM28": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M28",
@@ -1567,7 +1567,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M28 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM29": {
+  "grcm39/salmon/1.10.2/gencodeM29": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M29",
@@ -1576,7 +1576,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M29 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM30": {
+  "grcm39/salmon/1.10.2/gencodeM30": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M30",
@@ -1585,7 +1585,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M30 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM31": {
+  "grcm39/salmon/1.10.2/gencodeM31": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M31",
@@ -1594,7 +1594,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M31 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM32": {
+  "grcm39/salmon/1.10.2/gencodeM32": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M32",
@@ -1603,7 +1603,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M32 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM33": {
+  "grcm39/salmon/1.10.2/gencodeM33": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M33",
@@ -1612,7 +1612,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M33 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM34": {
+  "grcm39/salmon/1.10.2/gencodeM34": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M34",
@@ -1621,7 +1621,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M34 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM35": {
+  "grcm39/salmon/1.10.2/gencodeM35": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M35",
@@ -1630,7 +1630,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M35 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM36": {
+  "grcm39/salmon/1.10.2/gencodeM36": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M36",
@@ -1639,7 +1639,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M36 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM37": {
+  "grcm39/salmon/1.10.2/gencodeM37": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M37",
@@ -1648,7 +1648,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M37 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM38": {
+  "grcm39/salmon/1.10.2/gencodeM38": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M38",
@@ -1657,7 +1657,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M38 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM6": {
+  "grcm39/salmon/1.10.2/gencodeM6": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M6",
@@ -1666,7 +1666,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M6 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM7": {
+  "grcm39/salmon/1.10.2/gencodeM7": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M7",
@@ -1675,7 +1675,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M7 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM8": {
+  "grcm39/salmon/1.10.2/gencodeM8": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M8",
@@ -1684,7 +1684,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M8 index for transcript quantification"
   },
-  "grcm39/salmon-1.10.2/gencodeM9": {
+  "grcm39/salmon/1.10.2/gencodeM9": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/transcript-gencode/M9",
@@ -1693,7 +1693,7 @@
     "sbatch": true,
     "whatis": "Salmon grcm39 GENCODE M9 index for transcript quantification"
   },
-  "grcm39/star-2.7.11b/cellranger-2024-A": {
+  "grcm39/star/2.7.11b/cellranger-2024-A": {
     "deps": [
       "grcm39/cellranger/2024-A",
       "star/2.7.11b"
@@ -1701,7 +1701,7 @@
     "sbatch": true,
     "whatis": "STAR GRCm39 10X Genomics 2024-A index"
   },
-  "grcm39/star-2.7.11b/gencodeM10-101": {
+  "grcm39/star/2.7.11b/gencodeM10-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M10",
@@ -1710,7 +1710,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM10 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM10-151": {
+  "grcm39/star/2.7.11b/gencodeM10-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M10",
@@ -1719,7 +1719,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM10 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM11-101": {
+  "grcm39/star/2.7.11b/gencodeM11-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M11",
@@ -1728,7 +1728,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM11 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM11-151": {
+  "grcm39/star/2.7.11b/gencodeM11-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M11",
@@ -1737,7 +1737,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM11 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM12-101": {
+  "grcm39/star/2.7.11b/gencodeM12-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M12",
@@ -1746,7 +1746,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM12 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM12-151": {
+  "grcm39/star/2.7.11b/gencodeM12-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M12",
@@ -1755,7 +1755,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM12 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM13-101": {
+  "grcm39/star/2.7.11b/gencodeM13-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M13",
@@ -1764,7 +1764,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM13 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM13-151": {
+  "grcm39/star/2.7.11b/gencodeM13-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M13",
@@ -1773,7 +1773,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM13 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM14-101": {
+  "grcm39/star/2.7.11b/gencodeM14-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M14",
@@ -1782,7 +1782,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM14 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM14-151": {
+  "grcm39/star/2.7.11b/gencodeM14-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M14",
@@ -1791,7 +1791,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM14 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM15-101": {
+  "grcm39/star/2.7.11b/gencodeM15-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M15",
@@ -1800,7 +1800,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM15 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM15-151": {
+  "grcm39/star/2.7.11b/gencodeM15-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M15",
@@ -1809,7 +1809,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM15 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM16-101": {
+  "grcm39/star/2.7.11b/gencodeM16-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M16",
@@ -1818,7 +1818,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM16 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM16-151": {
+  "grcm39/star/2.7.11b/gencodeM16-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M16",
@@ -1827,7 +1827,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM16 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM17-101": {
+  "grcm39/star/2.7.11b/gencodeM17-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M17",
@@ -1836,7 +1836,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM17 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM17-151": {
+  "grcm39/star/2.7.11b/gencodeM17-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M17",
@@ -1845,7 +1845,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM17 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM18-101": {
+  "grcm39/star/2.7.11b/gencodeM18-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M18",
@@ -1854,7 +1854,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM18 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM18-151": {
+  "grcm39/star/2.7.11b/gencodeM18-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M18",
@@ -1863,7 +1863,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM18 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM19-101": {
+  "grcm39/star/2.7.11b/gencodeM19-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M19",
@@ -1872,7 +1872,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM19 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM19-151": {
+  "grcm39/star/2.7.11b/gencodeM19-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M19",
@@ -1881,7 +1881,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM19 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM20-101": {
+  "grcm39/star/2.7.11b/gencodeM20-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M20",
@@ -1890,7 +1890,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM20 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM20-151": {
+  "grcm39/star/2.7.11b/gencodeM20-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M20",
@@ -1899,7 +1899,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM20 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM21-101": {
+  "grcm39/star/2.7.11b/gencodeM21-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M21",
@@ -1908,7 +1908,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM21 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM21-151": {
+  "grcm39/star/2.7.11b/gencodeM21-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M21",
@@ -1917,7 +1917,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM21 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM22-101": {
+  "grcm39/star/2.7.11b/gencodeM22-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M22",
@@ -1926,7 +1926,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM22 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM22-151": {
+  "grcm39/star/2.7.11b/gencodeM22-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M22",
@@ -1935,7 +1935,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM22 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM23-101": {
+  "grcm39/star/2.7.11b/gencodeM23-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M23",
@@ -1944,7 +1944,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM23 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM23-151": {
+  "grcm39/star/2.7.11b/gencodeM23-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M23",
@@ -1953,7 +1953,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM23 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM24-101": {
+  "grcm39/star/2.7.11b/gencodeM24-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M24",
@@ -1962,7 +1962,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM24 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM24-151": {
+  "grcm39/star/2.7.11b/gencodeM24-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M24",
@@ -1971,7 +1971,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM24 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM25-101": {
+  "grcm39/star/2.7.11b/gencodeM25-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M25",
@@ -1980,7 +1980,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM25 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM25-151": {
+  "grcm39/star/2.7.11b/gencodeM25-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M25",
@@ -1989,7 +1989,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM25 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM26-101": {
+  "grcm39/star/2.7.11b/gencodeM26-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M26",
@@ -1998,7 +1998,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM26 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM26-151": {
+  "grcm39/star/2.7.11b/gencodeM26-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M26",
@@ -2007,7 +2007,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM26 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM27-101": {
+  "grcm39/star/2.7.11b/gencodeM27-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M27",
@@ -2016,7 +2016,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM27 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM27-151": {
+  "grcm39/star/2.7.11b/gencodeM27-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M27",
@@ -2025,7 +2025,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM27 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM28-101": {
+  "grcm39/star/2.7.11b/gencodeM28-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M28",
@@ -2034,7 +2034,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM28 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM28-151": {
+  "grcm39/star/2.7.11b/gencodeM28-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M28",
@@ -2043,7 +2043,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM28 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM29-101": {
+  "grcm39/star/2.7.11b/gencodeM29-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M29",
@@ -2052,7 +2052,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM29 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM29-151": {
+  "grcm39/star/2.7.11b/gencodeM29-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M29",
@@ -2061,7 +2061,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM29 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM30-101": {
+  "grcm39/star/2.7.11b/gencodeM30-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M30",
@@ -2070,7 +2070,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM30 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM30-151": {
+  "grcm39/star/2.7.11b/gencodeM30-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M30",
@@ -2079,7 +2079,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM30 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM31-101": {
+  "grcm39/star/2.7.11b/gencodeM31-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M31",
@@ -2088,7 +2088,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM31 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM31-151": {
+  "grcm39/star/2.7.11b/gencodeM31-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M31",
@@ -2097,7 +2097,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM31 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM32-101": {
+  "grcm39/star/2.7.11b/gencodeM32-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M32",
@@ -2106,7 +2106,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM32 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM32-151": {
+  "grcm39/star/2.7.11b/gencodeM32-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M32",
@@ -2115,7 +2115,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM32 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM33-101": {
+  "grcm39/star/2.7.11b/gencodeM33-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M33",
@@ -2124,7 +2124,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM33 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM33-151": {
+  "grcm39/star/2.7.11b/gencodeM33-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M33",
@@ -2133,7 +2133,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM33 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM34-101": {
+  "grcm39/star/2.7.11b/gencodeM34-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M34",
@@ -2142,7 +2142,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM34 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM34-151": {
+  "grcm39/star/2.7.11b/gencodeM34-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M34",
@@ -2151,7 +2151,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM34 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM35-101": {
+  "grcm39/star/2.7.11b/gencodeM35-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M35",
@@ -2160,7 +2160,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM35 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM35-151": {
+  "grcm39/star/2.7.11b/gencodeM35-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M35",
@@ -2169,7 +2169,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM35 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM36-101": {
+  "grcm39/star/2.7.11b/gencodeM36-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M36",
@@ -2178,7 +2178,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM36 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM36-151": {
+  "grcm39/star/2.7.11b/gencodeM36-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M36",
@@ -2187,7 +2187,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM36 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM37-101": {
+  "grcm39/star/2.7.11b/gencodeM37-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M37",
@@ -2196,7 +2196,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM37 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM37-151": {
+  "grcm39/star/2.7.11b/gencodeM37-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M37",
@@ -2205,7 +2205,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM37 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM38-101": {
+  "grcm39/star/2.7.11b/gencodeM38-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M38",
@@ -2214,7 +2214,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM38 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM38-151": {
+  "grcm39/star/2.7.11b/gencodeM38-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M38",
@@ -2223,7 +2223,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM38 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM5-101": {
+  "grcm39/star/2.7.11b/gencodeM5-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M5",
@@ -2232,7 +2232,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM5 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM5-151": {
+  "grcm39/star/2.7.11b/gencodeM5-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M5",
@@ -2241,7 +2241,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM5 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM6-101": {
+  "grcm39/star/2.7.11b/gencodeM6-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M6",
@@ -2250,7 +2250,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM6 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM6-151": {
+  "grcm39/star/2.7.11b/gencodeM6-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M6",
@@ -2259,7 +2259,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM6 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM7-101": {
+  "grcm39/star/2.7.11b/gencodeM7-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M7",
@@ -2268,7 +2268,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM7 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM7-151": {
+  "grcm39/star/2.7.11b/gencodeM7-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M7",
@@ -2277,7 +2277,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM7 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM8-101": {
+  "grcm39/star/2.7.11b/gencodeM8-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M8",
@@ -2286,7 +2286,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM8 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM8-151": {
+  "grcm39/star/2.7.11b/gencodeM8-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M8",
@@ -2295,7 +2295,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM8 index for read length 151"
   },
-  "grcm39/star-2.7.11b/gencodeM9-101": {
+  "grcm39/star/2.7.11b/gencodeM9-101": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M9",
@@ -2304,7 +2304,7 @@
     "sbatch": true,
     "whatis": "STAR grcm39 GENCODEM9 index for read length 101"
   },
-  "grcm39/star-2.7.11b/gencodeM9-151": {
+  "grcm39/star/2.7.11b/gencodeM9-151": {
     "deps": [
       "grcm39/genome/gencode",
       "grcm39/gtf-gencode/M9",
