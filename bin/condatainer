@@ -774,6 +774,9 @@ class BuildObject:
         else:
             self.target_overlay_path = os.path.join(Config.IMAGES_DIR, overlay_filename)
 
+        if self.is_installed:
+            return
+
         local_scripts = Utils.get_local_build_scripts()
         remote_scripts = Utils.fetch_remote_build_scripts()
         if self.name_version in local_scripts:
@@ -824,6 +827,7 @@ class BuildObject:
     def relative_path(self) -> str:
         return self.name_version
 
+    @property
     def is_installed(self) -> bool:
         return CondaTainer.is_overlay_installed(self.name_version)
 
@@ -1120,6 +1124,8 @@ class BuildGraph:
         # Seed graph with provided metadata
         for metadata in build_metadata_list:
             self.graph[metadata.name_version] = metadata
+            if metadata.is_installed:
+                Utils.print_message(f"Overlay {Utils.yellow_text(metadata.name_version)} is already installed. Skipping.")
 
         # Topologically sort the graph and separate into download/build lists
         visiting = set()
@@ -1166,7 +1172,7 @@ class BuildGraph:
 
     def _run_local_step(self) -> bool:
         for metadata in self.download_metadata:
-            if CondaTainer.is_overlay_installed(metadata.name_version):
+            if metadata.is_installed:
                 continue
             Utils.print_message(f"Processing overlay {Utils.yellow_text(metadata.name_version)} (no sbatch)...")
             if not metadata.build():
