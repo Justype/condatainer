@@ -10,7 +10,7 @@ A toolkit for efficient resource management on HPC systems, targeting inode limi
 Which one to choose?
 
 - If you want to reduce inode usage, use **CondaTainer**.
-- If you prefer `Lmod` and using system available modules, use **ModGen**.
+- If you prefer `Lmod` and using system available modules, use [**ModGen**](MG_README.md).
 
 ## 🛠️ Installation
 
@@ -25,8 +25,8 @@ The installation script is **interactive**. You will be prompted to confirm the 
 **CondaTainer** solves the "too many files" problem inherent to Conda environments. Instead of creating thousands of small files. It packs Conda environments into single, highly compressed SquashFS files (`.sqf`) and mounts them inside an Apptainer container.
 
 - **Inode Efficiency**: Compresses heavy conda environments (10k+ files) into 1 file.
-- **Auto Generation**: Builds overlays from recipes or Conda environment files.
 - **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
+- **Module Compatibility**: Recognizes `module load` commands and loads corresponding overlays.
 - **Hybrid Modes**: Supports read-only SquashFS (`.sqf`) for production and writable ext3 (`.img`) for development.
 - **Context-Aware**: Manages references/indexes, and displays helpful info when in interactive sessions.
 - **SLURM Integration**: Submits index generation jobs automatically when needed.
@@ -63,44 +63,6 @@ condatainer exec -o grch38--cellranger--2024-A bash
 
 [Read the full CondaTainer Manual](assets/CNT_MANUAL.md)
 
-## 🏭 ModGen
-
-**ModGen** streamlines HPC software management by automatically converting apps and genome references into modules. It allows users to access Conda built and non-Conda software (e.g., 10X Cell Ranger, Illumina ORAD) but also genome references via standard `module load` commands without manual configuration.
-
-- **Auto-Generation**: Installs packages and builds Lua/Tcl modulefiles automatically.
-- **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
-- **Native Integration**: seamless `module avail` and `module load` experience.
-- **Context-Aware**: Manages references/indexes and displays helpful info when not in a SLURM job.
-- **SLURM Integration**: Submits index generation jobs automatically when needed.
-
-```bash
-# 1. Initialize shell hooks (only needed once)
-modgen init
-
-# 2. Install samtools and generate the modulefile
-modgen create samtools/1.16
-
-# 3. Load the module (standard HPC way)
-module load samtools/1.16
-samtools --version
-
-# 4. Search for packages to install
-modgen avail salmon grcm M36
-
-# 5. Auto install dependencies from a script
-modgen check analysis.sh -a
-
-# 6. Helpful info example: Cellranger reference
-ml grch38/cellranger/2024-A
-# Available environment variables:
-#   CELLRANGER_REF_DIR (cellranger reference dir)
-#   GENOME_FASTA       (genome fasta)
-#   ANNOTATION_GTF_GZ  (10X modified gtf)
-#   STAR_INDEX_DIR     (STAR index dir)
-```
-
-[Read the full ModGen Manual](assets/MG_MANUAL.md)
-
 ## 📂 Naming Convention
 
 Both tools utilize a standardized naming schema to organize software and reference data.
@@ -108,18 +70,21 @@ Both tools utilize a standardized naming schema to organize software and referen
 - Apps: `name/version` (e.g., `bcftools/1.16`)
 - References: `assembly/datatype/version`
   - `grcm39/genome/gencode`: mouse genome GRCm39 with Gencode style naming
-  - `grcm39/salmon-1.10.2/gencodeM33`: salmon index for mouse genome GRCm39 with Gencode M33 annotation
+  - `grcm39/salmon/1.10.2/gencodeM33`: salmon index for mouse genome GRCm39 with Gencode M33 annotation
+
+> [!NOTE]
+> CondaTainer uses overlay names to identify environments. So names must be unique and should not be changed after creation.
 
 ## 🚀 Script Runtime Automation
 
-Both tools support a "Headless" mode for running scripts. You can define dependencies in scripts using tags.
+CondaTainer supports a "Headless" mode. You can define dependencies in scripts using tags.
 
 Example Script (`analysis.sh`):
 
 ```bash
 #!/bin/bash
 #DEP: salmon/1.10.2
-#DEP: grcm39/salmon-1.10.2/gencodeM33
+#DEP: grcm39/salmon/1.10.2/gencodeM33
 
 salmon quant -i $SALMON_INDEX_DIR ...
 ```
