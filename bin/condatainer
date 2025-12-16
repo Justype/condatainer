@@ -481,6 +481,8 @@ class Utils:
         return (shutil.which("sbatch") is not None) and ("SLURM_JOB_ID" not in os.environ)
 
 class CondaTainer:
+    PREBUILT_BASE_IMAGE_PLATFORMS = { "x86_64" } # aarch64 is not available yet
+
     @staticmethod
     def ensure_apptainer():
         if Config.APPTAINER_PATH is None:
@@ -512,7 +514,7 @@ class CondaTainer:
             else:
                 Utils.print_warning("Invalid choice. Defaulting to CPU-only base image.")
         else:
-            Utils.print_message("Non-interactive shell detected. Defaulting to CPU-only base image.")
+            Utils.print_warning("Non-interactive shell detected. Defaulting to CPU-only base image.")
 
         url_insert = ""
         if choice != "cpu":
@@ -524,6 +526,20 @@ class CondaTainer:
             return False
         return True
 
+    @staticmethod
+    def try_download_prebuilt_base_image() -> bool:
+        arch = platform.machine()
+        if arch not in CondaTainer.PREBUILT_BASE_IMAGE_PLATFORMS:
+            Utils.print_warning(f"Pre-built base image not available for architecture: {arch}")
+            return False
+
+        url = f"https://github.com/Justype/condatainer/releases/download/v1.0.2/base_image_{arch}.sif"
+        Utils.print_message(f"Attempting to download pre-built base image for {arch}...")
+        if not Utils.download_executable(url, Config.BASE_IMAGE_SIF):
+            Utils.print_warning("Failed to download pre-built base image.")
+            return False
+        Utils.print_success("Pre-built base image downloaded successfully.")
+        return True
 
     @staticmethod
     def ensure_base_image():
@@ -560,6 +576,14 @@ class CondaTainer:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError:
             Utils.print_error("Building base images failed.")
+            if Utils.is_in_interactive_shell() and platform.machine() in CondaTainer.PREBUILT_BASE_IMAGE_PLATFORMS:
+                Utils.print_message("Do you want to try downloading pre-built base images (CPU only)? [y/N]: ", end="", flush=True)
+                choice = input().strip().lower()
+                if choice == "y":
+                    if CondaTainer.try_download_prebuilt_base_image():
+                        return
+                    else:
+                        Utils.print_error("Pre-built base image download failed.")
             exit(1)
         Utils.print_success("Base images built.")
         cmd = [ Config.APPTAINER_PATH, "cache", "clean", "--force" ]
