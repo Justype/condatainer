@@ -59,7 +59,9 @@ class Config:
     compress_args = LZ4
 
 def main():
-    parser = argparse.ArgumentParser(description="CondaTainer: Use apptainer/conda/squashFS to manage tools for HPC users.")
+    parser = argparse.ArgumentParser(
+        description="CondaTainer: Use apptainer/conda/squashFS to manage tools for HPC users.",
+        epilog=f"For full manual, see https://github.com/{Config.GITHUB_REPO}/blob/main/assets/CNT_MANUAL.md")
     parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of CondaTainer", default=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
     parser.add_argument("-n", "--no-sbatch", "--local", dest="no_sbatch", action="store_true", help="Run all operations locally without using sbatch")

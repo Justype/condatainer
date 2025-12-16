@@ -54,7 +54,9 @@ class Config:
     IS_LMOD = os.environ.get("LMOD_DIR") is not None
 
 def main():
-    parser = argparse.ArgumentParser(description="ModGen: Use conda and build scripts to create environment-modules or Lmod modules.")
+    parser = argparse.ArgumentParser(
+        description="ModGen: Use conda and build scripts to create environment-modules or Lmod modules.",
+        epilog=f"For full manual, see https://github.com/{Config.GITHUB_REPO}/blob/main/assets/MG_MANUAL.md")
     parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of ModGen", default=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
     parser.add_argument("-n", "--no-sbatch", "--local", dest="no_sbatch", action="store_true", help="Run all operations locally without using sbatch")

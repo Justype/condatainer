@@ -130,6 +130,28 @@ condatainer overlay -s 20480 my_analysis_env
 condatainer o -f environment.yml project_env.img
 ```
 
+Then you can use my `mm-<operation>` help commands to create/install/update/remove conda packages inside the writable container.
+
+```bash
+# install more packages
+mm-install numpy pandas
+
+# update packages
+mm-update
+
+# remove packages
+mm-remove pandas
+
+# list installed packages
+mm-list
+
+# clean all conda cache
+mm-clean -ay
+
+# export the env
+mm-export --no-builds > my_env.yaml
+```
+
 ## Create
 
 Initialize and build a new CondaTainer SquashFS overlay. You can build from existing recipes (local/remote) or a Conda environment file.
