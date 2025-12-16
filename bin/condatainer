@@ -841,9 +841,9 @@ class BuildObject:
             os.remove(self.build_script_path)
         if os.path.isfile(self.tmp_overlay_path):
             os.remove(self.tmp_overlay_path)
+        cnt_base_dir = os.path.dirname(self.cnt_dir_path)
+        shutil.rmtree(cnt_base_dir, ignore_errors=True)
         if failed:
-            cnt_base_dir = os.path.dirname(self.cnt_dir_path)
-            shutil.rmtree(cnt_base_dir, ignore_errors=True)
             if os.path.isfile(self.target_overlay_path):
                 os.remove(self.target_overlay_path)
 
