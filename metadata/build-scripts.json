@@ -1128,18 +1128,18 @@
       "bcftools/1.22",
       "htslib/1.22"
     ],
-    "sbatch": false,
+    "sbatch": true,
     "whatis": "HPRC v1.1 GRCh38 Decomposed VCF with chromosome names matching GENCODE"
   },
-  "grch38/vg/vg-grch38-hprc-gencode47": {
+  "grch38/vg/transcript/hprc-gencode47": {
     "deps": [
       "grch38/genome/gencode",
       "grch38/gtf-gencode/47",
       "grch38/vcf/hprc-v1.1-decomposed-gencode",
       "vg/1.61.0"
     ],
-    "sbatch": false,
-    "whatis": "VG graph genome with GRCh38 and GENCODE47"
+    "sbatch": true,
+    "whatis": "VG pan-transcriptome with GRCh38 and GENCODE47"
   },
   "grcm39/cellranger/2024-A": {
     "deps": [],
