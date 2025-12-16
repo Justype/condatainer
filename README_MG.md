@@ -72,3 +72,13 @@ modgen check analysis.sh
 # Auto install missing modules
 modgen check analysis.sh -a
 ```
+
+## Acknowledgements
+
+This project used computational resources provided by
+
+<div>
+<a href="https://www.mcmaster.ca" target="_blank" rel="noopener noreferrer"><img src="assets/logo_mcmaster.svg" height="45" alt="McMaster University Logo"></a>
+&nbsp;&nbsp;&nbsp;
+<a href="https://alliancecan.ca" target="_blank" rel="noopener noreferrer"><img src="assets/logo_alliance.svg" height="40" alt="Digital Research Alliance of Canada Logo"></a>
+</div>

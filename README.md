@@ -69,7 +69,7 @@ condatainer exec -o grch38--cellranger--2024-A bash
 
 ## 📂 Naming Convention
 
-Both tools utilize a standardized naming schema to organize software and reference data.
+CondaTainer utilizes a standardized naming schema to organize software and reference data.
 
 - Apps: `name/version` (e.g., `bcftools/1.16`)
 - References: `assembly/datatype/version`
@@ -98,9 +98,6 @@ In shell or other scripts
 ```bash
 # Run with CondaTainer
 condatainer run analysis.sh
-
-# Run with ModGen
-modgen run analysis.sh
 ```
 
 Integration with SLURM:

@@ -213,7 +213,7 @@ modgen check [SCRIPT] [-a]
 Run a script with automatic dependency resolution based on `#DEP:` tags and `module load` or `ml` commands within the script.
 
 ```
-condatainer run [SCRIPT] [SCRIPT_ARGS...]
+modgen run [SCRIPT] [SCRIPT_ARGS...]
 ```
 
 * **Dependency Injection:** Reads `#DEP:`and `module load` or `ml` commands lines in the script to determine which overlays to mount.

@@ -194,8 +194,8 @@ condatainer create -n tools.sqf samtools=1.16 bcftools=1.15
 
 **Features**:
 
-- Automatic Fetching: If a build script is not found locally, ModGen attempts to fetch it from the remote repository.
-- Conda Fallback: If no build script exists, ModGen attempts to create the module by installing the package named name with version version from conda-forge or bioconda.
+- Automatic Fetching: If a build script is not found locally, CondaTainer attempts to fetch it from the remote repository.
+- Conda Fallback: If no build script exists, CondaTainer attempts to create the module by installing the package named name with version version from conda-forge or bioconda.
 - Metadata Parsing: Parses `#ENV` and `#ENVNOTE` tags from build scripts to inject environment variables and help text into the generated modulefile.
 
 ## Container Management (Avail, List, Remove)
