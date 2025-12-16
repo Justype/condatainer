@@ -55,10 +55,29 @@ class Config:
     ZSTD_FAST = "-comp zstd -Xcompression-level 3"
     ZSTD_MEDIUM = "-comp zstd -Xcompression-level 8"
     ZSTD = "-comp zstd -Xcompression-level 14"
+    ZSTD_HIGH = "-comp zstd -Xcompression-level 18"
     LZ4 = "-comp lz4"
     compress_args = LZ4
 
+def adjust_compression_args_based_on_apptainer_version():
+    """Change to ZSTD_MEDIUM if apptainer version >= 1.4.0"""
+    if Config.APPTAINER_PATH is None:
+        return
+    try:
+        result = subprocess.run([Config.APPTAINER_PATH, "--version"], capture_output=True, text=True)
+        version_match = re.search(r"apptainer version (\d+)\.(\d+)", result.stdout)
+        if version_match:
+            major, minor = map(int, version_match.groups())
+            if (major, minor) >= (1, 4):
+                Config.compress_args = Config.ZSTD_MEDIUM
+                Utils.print_debug(f"Apptainer version {major}.{minor} detected. Using ZSTD_MEDIUM compression.")
+            else:
+                Utils.print_debug(f"Apptainer version {major}.{minor} detected. Using LZ4 compression.")
+    except Exception:
+        pass
+
 def main():
+    adjust_compression_args_based_on_apptainer_version()
     parser = argparse.ArgumentParser(
         description="CondaTainer: Use apptainer/conda/squashFS to manage tools for HPC users.",
         epilog=f"For full manual, see https://github.com/{Config.GITHUB_REPO}/blob/main/assets/MANUAL_CNT.md")
@@ -89,6 +108,7 @@ def main():
     if args.no_sbatch:
         Config.use_sbatch = False
         Utils.print_debug("No sbatch mode enabled")
+    adjust_compression_args_based_on_apptainer_version()
 
     if args.action in ("create", "install", "i"):
         CondaTainer_Create.parse_create_args(args)
@@ -828,7 +848,7 @@ class BuildObject:
 
     def print_create_error_message(self, message: str = ""):
         Utils.print_error(f"Building overlay for {Utils.yellow_text(self.name_version)} failed" + (f": {message}" if message else "."))
-        Utils.print_note(f"If apptainer cannot recognize zstd, please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
+        Utils.print_note(f"If apptainer cannot recognize zstd (unknown compression algorithm value 6), please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
         Utils.print_note("If file/folder creation failed, please chmod/chgroup or contact your system admin.")
 
     def _build_conda(self) -> bool:
@@ -1215,6 +1235,11 @@ class CondaTainer_Create:
             help="Use zstd compression level 14" + (" (default)" if Config.compress_args == Config.ZSTD else "")
         )
         CondaTainer_Create.parser_create.add_argument(
+            "--zstd-high",
+            action="store_true",
+            help="Use zstd compression level 19" + (" (default)" if Config.compress_args == Config.ZSTD_HIGH else "")
+        )
+        CondaTainer_Create.parser_create.add_argument(
             "--gzip",
             action="store_true",
             help="Use gzip compression" + (" (default)" if Config.compress_args == Config.GZIP else "")
@@ -1340,7 +1365,7 @@ class CondaTainer_Create:
                 subprocess.run(cmd_create, check=True)
             except subprocess.CalledProcessError:
                 Utils.print_error(f"Creating {Utils.blue_text(overlay_abs_path)} from {Utils.blue_text(file_path)} failed.")
-                Utils.print_note(f"If apptainer cannot recognize zstd, please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
+                Utils.print_note(f"If apptainer cannot recognize zstd (unknown compression algorithm value 6), please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
                 Utils.print_note("If file/folder creation failed, please contact your system admin.")
                 Utils.print_note("If cannot resolve the environment file by libmamba, please please consider create img and manually install it with conda.")
                 CondaTainer_Create.create_cleanup(normalized_name_version, failed=True)
