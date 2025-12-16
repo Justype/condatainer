@@ -5,9 +5,9 @@
 [![GitHub license](https://img.shields.io/github/license/Justype/condatainer.svg)](https://github.com/Justype/condatainer/blob/main/LICENSE)
 
 <div>
-<a href="#-condatainer"><img src="assets/logo_cnt.png" height="80" alt="CondaTainer Logo"></a>
+<a href="#-condatainer"><img src="assets/logo_cnt.png" height="100" alt="CondaTainer Logo"></a>
 &nbsp;&nbsp;
-<a href="./MG_README.md"><img src="assets/logo_mg.png" height="80" alt="ModGen Logo"></a>
+<a href="./MG_README.md"><img src="assets/logo_mg.png" height="100" alt="ModGen Logo"></a>
 </div>
 
 Both tools aim to automate environment management and dependency handling on HPC, but with different approaches:
