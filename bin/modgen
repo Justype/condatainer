@@ -15,9 +15,10 @@ from typing import Dict, List, Optional, Tuple
 os.umask(0o002)
 
 class Config:
-    VERSION = "1.0.1"
+    VERSION = "1.0.2"
     # Remote settings
     debug = False
+    use_sbatch = True
     GITHUB_REPO = "Justype/condatainer"
     REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json.gz"
     MODGEN_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/modgen"
@@ -36,6 +37,7 @@ class Config:
     REF_DIR = os.path.join(CONDATINER_DIR, "ref")
     REF_MODULEFILES_DIR = os.path.join(CONDATINER_DIR, "ref-modules")
     TMP_DIR = os.path.join(CONDATINER_DIR, "tmp")
+    LOGS_DIR = os.path.join(CONDATINER_DIR, "logs")
 
     # Local apptainer
     MICROMAMBA_BIN = os.path.join(CONDATINER_DIR, "bin", "micromamba")
@@ -55,6 +57,7 @@ def main():
     parser = argparse.ArgumentParser(description="ModGen: Use conda and build scripts to create environment-modules or Lmod modules.")
     parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of ModGen", default=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
+    parser.add_argument("-n", "--no-sbatch", "--local", dest="no_sbatch", action="store_true", help="Run all operations locally without using sbatch")
     subparsers = parser.add_subparsers(dest="action", metavar="COMMAND", required=True, help="Available actions")
 
     ModGen_Init.add_parser_arguments(subparsers)
@@ -79,6 +82,9 @@ def main():
         Utils.print_debug("Debug mode enabled")
         Utils.print_debug(f"ModGen Version: {Config.VERSION}")
         Utils.print_debug(f"MODULE SYSTEM: {'Lmod' if Config.IS_LMOD else 'Environment-Modules'}")
+    if args.no_sbatch:
+        Config.use_sbatch = False
+        Utils.print_debug("No sbatch mode enabled")
 
     if args.action in ("create", "install", "i"):
         ModGen_Create.parse_create_args(args)
@@ -307,6 +313,127 @@ class Utils:
         return dependencies
 
     @staticmethod
+    def get_whatis_url_from_build_script(script_path: str, normalized_name_version: str) -> Tuple[str, str]:
+        """
+        Parse #WHATIS and #URL lines from a build script.
+
+        Example lines in script:
+            #WHATIS:Cell Ranger GRCh38 2024-A index
+            #URL:https://www.10xgenomics.com/support/software/cell-ranger/downloads#reference-downloads
+
+        Returns:
+            (whatis_text, url_text)
+            If not found, empty strings are returned.
+        """
+        package_name, version = normalized_name_version.split('/', 1)
+        whatis = f"Load module {package_name} version {version}"
+        url = "Not available"
+
+        if not os.path.isfile(script_path):
+            Utils.print_error(f"Build script not found at {script_path}.")
+            return whatis, url
+
+        with open(script_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("#WHATIS:"):
+                    whatis = line[len("#WHATIS:"):].strip()
+                elif line.startswith("#URL:"):
+                    url = line[len("#URL:"):].strip()
+
+                if whatis and url:
+                    break
+
+        return whatis, url
+
+    @staticmethod
+    def get_env_dict_from_build_script(script_path) -> Dict[str, Dict[str, str]]:
+        """
+        Parse #ENV:KEY=VALUE and #ENVNOTE:KEY description lines from build script.
+        Returns a dict:
+            {
+                "KEY": {"value": "VALUE", "note": "description"},
+                ...
+            }
+        Example lines in script:
+            #ENV:STAR_INDEX_DIR=$app_root/star
+            #ENVNOTE:STAR_INDEX_DIR STAR index dir
+        """
+        env_dict: Dict[str, Dict[str, str]] = {}
+
+        if not os.path.isfile(script_path):
+            Utils.print_error(f"Build script not found at {script_path}.")
+            return env_dict
+
+        with open(script_path, "r") as f:
+            lines = f.readlines()
+            env_indices = [i for i, line in enumerate(lines) if line.strip().startswith("#ENV:")]
+
+            for env_index in env_indices:
+                line = lines[env_index].strip()
+                if line.startswith("#ENV:"):
+                    # Parse KEY=VALUE
+                    content = line[len("#ENV:"):].strip()
+                    if "=" not in content:
+                        continue
+                    key, value = content.split("=", 1)
+                    env_dict[key] = {"value": value, "note": ""}
+
+                if env_index + 1 < len(lines):
+                    next_line = lines[env_index + 1].strip()
+                    if next_line.startswith("#ENVNOTE:"):
+                        note = next_line[len("#ENVNOTE:"):].strip()
+                        env_dict[key]["note"] = note
+
+        return env_dict
+
+    @staticmethod
+    def get_sbatch_args_from_build_script(script_path) -> List[str]:
+        """
+        Parse #SBATCH: lines from build script.
+        Returns a list of sbatch arguments.
+        Example line in script:
+            #SBATCH --cpus-per-task=4
+        """
+        sbatch_args = []
+
+        if not os.path.isfile(script_path):
+            Utils.print_error(f"Build script not found at {script_path}.")
+            return sbatch_args
+
+        with open(script_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("#SBATCH"):
+                    arg = line[len("#SBATCH"):].strip()
+                    sbatch_args.append(arg)
+
+        return sbatch_args
+
+    @staticmethod
+    def get_interactive_prompts(script_path: str) -> List[str]:
+        """
+        Parse #INTERACTIVE: lines from build script.
+        Returns a list of interactive prompt descriptions.
+        Example line in script:
+            #INTERACTIVE:Please enter the license key
+        """
+        prompts = []
+
+        if not os.path.isfile(script_path):
+            Utils.print_error(f"Build script not found at {script_path}.")
+            return prompts
+
+        with open(script_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("#INTERACTIVE:"):
+                    prompt = line[len("#INTERACTIVE:"):].strip()
+                    prompts.append(prompt)
+
+        return prompts
+
+    @staticmethod
     def share_to_ugo_recursive(path: str):
         """
         Recursively set permissions:
@@ -340,6 +467,11 @@ class Utils:
     @staticmethod
     def is_in_interactive_shell() -> bool:
         return sys.stdin.isatty() and sys.stdout.isatty()
+
+    @staticmethod
+    def is_sbatch_available() -> bool:
+        """sbatch is available and we are not inside a SLURM job."""
+        return (shutil.which("sbatch") is not None) and ("SLURM_JOB_ID" not in os.environ)
 
 class ModGen:
     @staticmethod
@@ -500,6 +632,351 @@ class ModGen:
             ModGen.remove_path_and_parents(target_modulefile_path)
             Utils.print_message(f"Removed modulefile {Utils.blue_text(target_modulefile_path)}.")
 
+class BuildObject:
+    def __init__(self, name_version: str):
+        self.name_version = Utils.normalize_name_version(name_version)
+        slash_count = self.name_version.count('/')
+        if slash_count == 0:
+            raise ValueError(f"Invalid spec '{name_version}'. At least one '/' is required.")
+        self.build_script_path = ""
+        self.dependencies = []
+        self.is_conda = False
+        self.is_remote = False
+        self.sbatch = False
+        self.sbatch_flags = []
+        self.is_ref = slash_count > 1
+        self.ncpus = Config.NCPUS
+        self.interactive_inputs = []
+
+        # related paths
+        self.target_path = ModGen.get_target_dir(self.name_version)
+        self.target_modulefile_path = ModGen.get_modulefile_path(self.name_version)
+        self.tmp_dir_path = ModGen.get_tmp_dir(self.name_version)
+
+        local_scripts = Utils.get_local_build_scripts()
+        remote_scripts = Utils.fetch_remote_build_scripts()
+        if self.name_version in local_scripts:
+            self.build_script_path = local_scripts[self.name_version]
+            self.is_remote = False
+        elif self.name_version in remote_scripts:
+            self.build_script_path = os.path.join(Config.TMP_DIR, self.name_version.replace('/', '--') + ".sh")
+            link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{self.name_version}"
+            if not Utils.download_executable(link, self.build_script_path):
+                raise RuntimeError(f"Failed to download remote build script for {self.name_version}.")
+            self.is_remote = True
+        else:
+            self.is_conda = True
+
+        if not self.is_conda:
+            self.dependencies = Utils.get_dependencies_from_script(self.build_script_path)
+            self.sbatch_flags = Utils.get_sbatch_args_from_build_script(self.build_script_path)
+            interactive_prompts = Utils.get_interactive_prompts(self.build_script_path)
+            if interactive_prompts and not Utils.is_in_interactive_shell():
+                raise RuntimeError(f"Build script for {self.name_version} requires interactive input, but no TTY is available.")
+            for prompt in interactive_prompts:
+                Utils.print_note("Build script requires input: " +prompt.replace('\\n', '\n'))
+                user_input = input("Enter here: ")
+                if "\n" in user_input or "\r" in user_input:
+                    Utils.print_warning("Multiline input detected. Only the first line will be used.")
+                    user_input = user_input.splitlines()[0]
+                self.interactive_inputs.append(user_input)
+            for flag in self.sbatch_flags:
+                if flag.startswith("--cpus-per-task="):
+                    try:
+                        self.ncpus = int(flag.split("=")[1])
+                    except ValueError:
+                        pass
+            self.sbatch = len(self.sbatch_flags) > 0
+
+    def __str__(self) -> str:
+        return f"""BuildObject:
+    name_version: {self.name_version}
+    is_conda: {self.is_conda}
+    build_script_path: {self.build_script_path}
+    dependencies: {self.dependencies}
+    sbatch_flags: {self.sbatch_flags}
+    target_path: {self.target_path}
+    target_modulefile_path: {self.target_modulefile_path}
+    tmp_dir_path: {self.tmp_dir_path}"""
+
+    @property
+    def relative_path(self) -> str:
+        return self.name_version
+
+    def is_installed(self) -> bool:
+        return ModGen.is_module_installed(self.name_version)
+
+    def create_cleanup(self, failed: bool = False):
+        if self.is_remote and os.path.isfile(self.build_script_path):
+            os.remove(self.build_script_path)
+        if os.path.isdir(self.tmp_dir_path):
+            ModGen.remove_path_and_parents(self.tmp_dir_path)
+        if failed:
+            ModGen.remove_module(self.name_version)
+
+    def get_missing_dependencies(self) -> List[str]:
+        return ModGen.get_missing_modules(self.dependencies)
+
+    def _build_conda(self) -> bool:
+        if self.is_installed():
+            Utils.print_warning(f"Module {Utils.yellow_text(self.name_version)} is already installed. Skipping creation.")
+            return True
+        if os.path.exists(self.tmp_dir_path):
+            Utils.print_error(f"Temporary directory for {Utils.yellow_text(self.name_version)} already exists. Maybe a build is still running?")
+            Utils.print_note(f"If you are sure no build is running, please remove the temporary directory at {Utils.blue_text(self.tmp_dir_path)} and try again.")
+            return False
+
+        Utils.print_message(f"Building {self.name_version} with packages: {Utils.yellow_text(self.name_version)}" )
+
+        cmd_create = [
+            Config.MICROMAMBA_BIN,
+            "--root-prefix", Config.CONDA_ROOT_DIR,
+            "create", "-y",
+            "--channel", "conda-forge", "--channel", "bioconda",
+            "--prefix", self.target_path,
+            self.name_version.replace('/', '=')
+        ]
+
+        Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_create}")
+        try:
+            subprocess.run(cmd_create, check=True)
+        except subprocess.CalledProcessError:
+            Utils.print_error(f"Creating module {self.name_version} failed during conda environment creation.")
+            self.create_cleanup(failed=True)
+            return False
+
+        whatis_url = ModGen_Create.fetch_whatis_url_from_anaconda(self.name_version)
+        os.makedirs(os.path.dirname(self.target_modulefile_path), mode=0o775, exist_ok=True)
+        if not ModGen_Create.create_target_modulefile(self.name_version, whatis_url):
+            Utils.print_error(f"Failed to generate modulefile for {Utils.yellow_text(self.name_version)}.")
+            self.create_cleanup(failed=True)
+            return False
+
+        self.create_cleanup(failed=False)
+        Utils.print_success(f"Module {Utils.yellow_text(self.name_version)} created.")
+        return True
+
+    def _build_script(self, build_deps = False) -> bool:
+        if self.is_installed():
+            Utils.print_warning(f"Module {Utils.yellow_text(self.name_version)} is already installed. Skipping creation.")
+            return True
+        if os.path.exists(self.tmp_dir_path):
+            Utils.print_error(f"Temporary directory for {Utils.yellow_text(self.name_version)} already exists. Maybe a build is still running?")
+            Utils.print_note(f"If you are sure no build is running, please remove the temporary directory at {Utils.blue_text(self.tmp_dir_path)} and try again.")
+            return False
+
+        try:
+            deps = Utils.get_dependencies_from_script(self.build_script_path, raise_when_finding_overlay=True)
+            missing_deps = ModGen.get_missing_modules(deps)
+            if missing_deps:
+                if build_deps:
+                    Utils.print_message(f"Building missing dependencies for {Utils.yellow_text(self.name_version)}: {', '.join(missing_deps)}")
+                    for dep in missing_deps:
+                        dep_obj = BuildObject(dep)
+                        if not dep_obj.build():
+                            Utils.print_error(f"Failed to build dependency {Utils.yellow_text(dep)} for {Utils.yellow_text(self.name_version)}.")
+                            return False
+                    Utils.print_success(f"All dependencies for {Utils.yellow_text(self.name_version)} built successfully.")
+                else:
+                    Utils.print_error(f"Missing dependencies for {Utils.yellow_text(self.name_version)}: {', '.join(missing_deps)}. Please install them first.")
+                return False
+        except ValueError as ve:
+            Utils.print_error(f"Error parsing dependencies: {ve}")
+            return False
+
+        running_env = os.environ.copy()
+        running_env["app_name"] = self.name_version.split('/')[0]
+        running_env["version"] = self.name_version.split('/')[1]
+        running_env["app_name_version"] = self.name_version
+        running_env["target_dir"] = self.target_path
+        running_env["tmp_dir"] = self.tmp_dir_path
+        running_env["SLURM_CPUS_PER_TASK"] = str(self.ncpus)
+
+        if deps:
+            ml_commands = "module purge && module load " + " ".join(deps)
+            cmd_create = ["bash", "-c", f"{ml_commands} && bash {self.build_script_path}"]
+        else:
+            cmd_create = ["bash", self.build_script_path]
+        
+        Utils.print_debug(f"[BUILD] Running build script with command: {cmd_create}")
+
+        try:
+            subprocess.run(cmd_create, check=True, env=running_env, input=("\n".join(self.interactive_inputs)+"\n").encode())
+        except subprocess.CalledProcessError:
+            Utils.print_error(f"Building module {Utils.yellow_text(self.name_version)} failed during build script execution.")
+            Utils.print_note(f"Make sure you have run {Utils.blue_text(os.path.basename(Config.SCRIPT_PATH)+' init')} and source the shell configuration file.")
+            self.create_cleanup(failed=True)
+            return False
+        
+        whatis_url = Utils.get_whatis_url_from_build_script(self.build_script_path, self.name_version)
+        env_dict = Utils.get_env_dict_from_build_script(self.build_script_path)
+
+        Utils.print_debug(f"Creating modulefile at {self.target_modulefile_path}...")
+        os.makedirs(os.path.dirname(self.target_modulefile_path), mode=0o775, exist_ok=True)
+        if not ModGen_Create.create_target_modulefile(self.name_version, whatis_url, self.is_ref, env_dict):
+            Utils.print_error(f"Failed to generate modulefile for {Utils.yellow_text(self.name_version)}.")
+            self.create_cleanup(failed=True)
+            return False
+        
+        self.create_cleanup(failed=False)
+        Utils.print_success(f"Module {Utils.yellow_text(self.name_version)} created.")
+        return True
+
+    def build(self, build_deps = False) -> bool:
+        try:
+            if self.is_conda:
+                return self._build_conda()
+            else:
+                return self._build_script(build_deps=build_deps)
+        except KeyboardInterrupt:
+            Utils.print_message(f"Build for {Utils.yellow_text(self.name_version)} interrupted by user.")
+            self.create_cleanup(failed=True)
+            return False
+
+    def _create_sbatch_script(self) -> bool:
+        sbatch_script_path = os.path.join(Config.TMP_DIR, f"sbatch_build_{self.name_version.replace('/', '--')}.sh")
+        os.makedirs(Config.LOGS_DIR, mode=0o775, exist_ok=True)
+        try:
+            with open(sbatch_script_path, 'w') as f:
+                f.write("#!/bin/bash\n")
+                for flag in self.sbatch_flags:
+                    if flag.startswith("--output"):
+                        flag = "--output=" + os.path.join(Config.LOGS_DIR, f"CondaTainer_{self.name_version.replace('/', '--')}.out")
+                    f.write(f"#SBATCH {flag}\n")
+                f.write("\n")
+                if Config.debug:
+                    f.write(f"/usr/bin/time -v {Config.SCRIPT_PATH} create {self.name_version}\n")
+                else:
+                    f.write(f"{Config.SCRIPT_PATH} create {self.name_version}\n")
+                f.write("echo SLURM_JOB_ID $SLURM_JOB_ID\n")
+                f.write("rm -f " + sbatch_script_path + "\n") # Self-delete script after run
+            os.chmod(sbatch_script_path, 0o775)
+            return True
+        except Exception as e:
+            Utils.print_error(f"Failed to create sbatch script for {self.name_version}: {e}")
+            return False
+
+    def _submit_sbatch(self, dep_ids: List[str]) -> Optional[str]:
+        sbatch_script_path = os.path.join(Config.TMP_DIR, f"sbatch_build_{self.name_version.replace('/', '--')}.sh")
+        slurm_job_id_regex = re.compile(r'Submitted batch job (\d+)')
+        if not self._create_sbatch_script():
+            return None
+
+        cmd = ["sbatch", sbatch_script_path]
+        if dep_ids:
+            dep_str = ":".join(dep_ids)
+            cmd.insert(1, f"--dependency=afterok:{dep_str}")
+        Utils.print_debug(f"[SBATCH] Submitting sbatch job with command: {cmd}")
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            match = slurm_job_id_regex.search(result.stdout)
+            if match:
+                job_id = match.group(1)
+                if dep_ids:
+                    Utils.print_message(f"Submitted sbatch {Utils.blue_text(job_id)} for {Utils.yellow_text(self.name_version)} with dependencies on {Utils.blue_text(', '.join(dep_ids))}.")
+                else:
+                    Utils.print_message(f"Submitted sbatch {Utils.blue_text(job_id)} for {Utils.yellow_text(self.name_version)}.")
+                return job_id
+            else:
+                Utils.print_error(f"Failed to parse sbatch submission output: {result.stdout}")
+                return None
+        except subprocess.CalledProcessError as e:
+            Utils.print_error(f"Failed to submit sbatch job for {self.name_version}: {e.stderr}")
+            return None
+
+class BuildGraph:
+    """
+    BuildGraph expands given BuildMetadata items to include all transitive
+    dependencies, detects cycles, produces a topologically-sorted order
+    (dependencies before dependents) and separates items into two ordered
+    lists:
+      - download_metadata: BuildMetadata with sbatch == False
+      - build_metadata: BuildMetadata with sbatch == True
+    """
+
+    def __init__(self, build_metadata_list: List[BuildObject]):
+        # Use instance attributes (avoid shared mutable class attributes)
+        self.graph: Dict[str, BuildObject] = {}
+        self.download_metadata: List[BuildObject] = [] # No sbatch
+        self.build_metadata: List[BuildObject] = [] # With sbatch
+        self._build_job_ids: Dict[str, str] = {}
+
+        # Seed graph with provided metadata
+        for metadata in build_metadata_list:
+            self.graph[metadata.name_version] = metadata
+
+        # Topologically sort the graph and separate into download/build lists
+        visiting = set()
+        visited = set()
+        order: List[str] = []
+
+        def visit(node: str):
+            if node in visited:
+                return
+            if node in visiting:
+                raise RuntimeError(f"Circular dependency detected involving '{node}'")
+            visiting.add(node)
+            node_meta = self.graph.get(node)
+            if node_meta is None:
+                visiting.remove(node)
+                # Missing node should not normally happen because we expanded graph, but guard against it.
+                raise RuntimeError(f"Unknown dependency '{node}' encountered during graph traversal")
+            for dep in node_meta.dependencies:
+                if dep not in self.graph:
+                    # Expand on-the-fly if needed
+                    self.graph[dep] = BuildObject(dep)
+                visit(dep)
+            visiting.remove(node)
+            visited.add(node)
+            order.append(node)
+
+        for n in list(self.graph.keys()):
+            if n not in visited:
+                visit(n)
+
+        for name_version in order:
+            meta = self.graph[name_version]
+            if Config.use_sbatch and meta.sbatch and Utils.is_sbatch_available():
+                self.build_metadata.append(meta)
+            else:
+                self.download_metadata.append(meta)
+
+    def run(self) -> bool:
+        if not self._run_local_step():
+            return False
+        if not self._run_sbatch_step():
+            return False
+        return True
+
+    def _run_local_step(self) -> bool:
+        for metadata in self.download_metadata:
+            if ModGen.is_module_installed(metadata.name_version):
+                continue
+            Utils.print_message(f"Processing module {Utils.yellow_text(metadata.name_version)} (no sbatch)...")
+            if not metadata.build():
+                Utils.print_error(f"Failed to build module for {Utils.yellow_text(metadata.name_version)}.")
+                return False
+        return True
+
+    def _run_sbatch_step(self) -> bool:
+        for metadata in self.build_metadata:
+            Utils.print_message(f"Processing module {Utils.yellow_text(metadata.name_version)} (with sbatch)...")
+            dep_ids = []
+            for dep in metadata.dependencies:
+                if dep in self._build_job_ids:
+                    dep_ids.append(self._build_job_ids[dep])
+                elif ModGen.is_module_installed(dep):
+                    continue
+                else:
+                    Utils.print_error(f"Dependency {Utils.yellow_text(dep)} for {Utils.yellow_text(metadata.name_version)} is not installed and was not submitted via sbatch.")
+                    return False
+            job_id = metadata._submit_sbatch(dep_ids)
+            if job_id is None:
+                Utils.print_error(f"Failed to submit sbatch job for {Utils.yellow_text(metadata.name_version)}.")
+                return False
+            self._build_job_ids[metadata.name_version] = job_id
+        return True
+
 class ModGen_Create:
     @staticmethod
     def add_parser_arguments(parser):
@@ -514,22 +991,14 @@ class ModGen_Create:
 
     @staticmethod
     def parse_create_args(args):
-        ModGen.ensure_micromamba()
         if not args.name_versions:
             ModGen_Create.parser_create.error("At least one of name_versions must be provided.")
 
-        try:
-            normalized_name_versions = [Utils.normalize_name_version(nv) for nv in args.name_versions]
-            for nv in normalized_name_versions:
-                ModGen_Create.auto_create_module_from_str(nv)
-        except RuntimeError as rte:
-            Utils.print_note(str(rte))
-            sys.exit()
-        except Exception as e:
-            Utils.print_error(f"Error during module creation: {e}")
-            sys.exit(1)
-        except KeyboardInterrupt:
-            sys.exit(1)
+        ModGen.ensure_micromamba()
+        normalized_name_versions = [Utils.normalize_name_version(nv) for nv in args.name_versions]
+        build_objects = [BuildObject(nv) for nv in normalized_name_versions]
+        build_graph = BuildGraph(build_objects)
+        build_graph.run()
 
     @staticmethod
     def ensure_templates():
@@ -553,16 +1022,6 @@ class ModGen_Create:
         else:
             Utils.print_error("Failed to download modulefile templates.")
             return False
-
-    @staticmethod
-    def cleanup(normalized_name_version: str, failed: bool = False):
-        tmp_path = ModGen.get_tmp_dir(normalized_name_version)
-
-        if os.path.isdir(tmp_path):
-            ModGen.remove_path_and_parents(tmp_path)
-            Utils.print_message(f"Removed temporary directory {Utils.blue_text(tmp_path)}.")
-        if failed:
-            ModGen.remove_module(normalized_name_version)
 
     @staticmethod
     def create_target_lmod_modulefile(normalized_name_version: str, whatis_url: Tuple[str, str], is_ref: bool = False, env_dict: Optional[Dict[str, Dict[str, str]]] = None) -> bool:
@@ -716,327 +1175,6 @@ class ModGen_Create:
             Utils.print_warning("Cannot fetch whatis and url info. Falling back to defaults.")
             return default_whatis_url
 
-    @staticmethod
-    def get_whatis_url_from_build_script(script_path: str, normalized_name_version: str) -> Tuple[str, str]:
-        """
-        Parse #WHATIS and #URL lines from a build script.
-
-        Example lines in script:
-            #WHATIS:Cell Ranger GRCh38 2024-A index
-            #URL:https://www.10xgenomics.com/support/software/cell-ranger/downloads#reference-downloads
-
-        Returns:
-            (whatis_text, url_text)
-            If not found, empty strings are returned.
-        """
-        package_name, version = normalized_name_version.split('/', 1)
-        whatis = f"Load module {package_name} version {version}"
-        url = "Not available"
-
-        if not os.path.isfile(script_path):
-            Utils.print_error(f"Build script not found at {script_path}.")
-            return whatis, url
-
-        with open(script_path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("#WHATIS:"):
-                    whatis = line[len("#WHATIS:"):].strip()
-                elif line.startswith("#URL:"):
-                    url = line[len("#URL:"):].strip()
-
-                if whatis and url:
-                    break
-
-        return whatis, url
-
-    @staticmethod
-    def create_app_module_by_conda(normalized_name_version: str) -> bool:
-        target_path = ModGen.get_target_dir(normalized_name_version)
-        target_modulefile_path = ModGen.get_modulefile_path(normalized_name_version)
-        tmp_path = ModGen.get_tmp_dir(normalized_name_version)
-
-        if os.path.isdir(target_path) and os.path.isfile(target_modulefile_path):
-            Utils.print_message(f"Module directory {Utils.yellow_text(target_path)} already exists. Skipping creation.")
-            return True
-
-        if os.path.isdir(tmp_path):
-            Utils.print_error(f"Temporary directory {tmp_path} already exists. Maybe an installation is already in progress?")
-            Utils.print_message(f"If you are sure no other installation is in progress, please remove the temporary directory {Utils.blue_text(tmp_path)} and try again.")
-            return False
-
-        # micromamba/conda expects package spec in the form name=version
-        conda_spec = normalized_name_version.replace('/', '=')
-        cmd_create = [
-            Config.MICROMAMBA_BIN,
-            "--root-prefix", Config.CONDA_ROOT_DIR,
-            "create", "-y",
-            "--channel", "conda-forge", "--channel", "bioconda",
-            "--prefix", target_path,
-            conda_spec
-        ]
-
-        Utils.print_debug("[CREATE] Creating module with command:")
-        Utils.print_debug(cmd_create)
-
-        try:
-            subprocess.run(cmd_create, check=True)
-        except subprocess.CalledProcessError:
-            Utils.print_error(f"Creating module {normalized_name_version} failed during conda environment creation.")
-            ModGen_Create.cleanup(normalized_name_version, failed=True)
-            return False
-        except KeyboardInterrupt:
-            Utils.print_error("Creation interrupted by user.")
-            ModGen_Create.cleanup(normalized_name_version, failed=True)
-            raise
-
-        whatis_url = ModGen_Create.fetch_whatis_url_from_anaconda(normalized_name_version)
-        os.makedirs(os.path.dirname(target_modulefile_path), mode=0o775, exist_ok=True)
-        if not ModGen_Create.create_target_modulefile(normalized_name_version, whatis_url):
-            Utils.print_error(f"Creating modulefile for {normalized_name_version} failed.")
-            ModGen_Create.cleanup(normalized_name_version, failed=True)
-            return False
-
-        ModGen_Create.cleanup(normalized_name_version, failed=False)
-        Utils.print_success(f"Module {Utils.yellow_text(normalized_name_version)} created.")
-        return True
-
-    @staticmethod
-    def get_env_dict_from_build_script(script_path) -> Dict[str, Dict[str, str]]:
-        """
-        Parse #ENV:KEY=VALUE and #ENVNOTE:KEY description lines from build script.
-        Returns a dict:
-            {
-                "KEY": {"value": "VALUE", "note": "description"},
-                ...
-            }
-        Example lines in script:
-            #ENV:STAR_INDEX_DIR=$app_root/star
-            #ENVNOTE:STAR_INDEX_DIR STAR index dir
-        """
-        env_dict: Dict[str, Dict[str, str]] = {}
-
-        if not os.path.isfile(script_path):
-            Utils.print_error(f"Build script not found at {script_path}.")
-            return env_dict
-
-        with open(script_path, "r") as f:
-            lines = f.readlines()
-            env_indices = [i for i, line in enumerate(lines) if line.strip().startswith("#ENV:")]
-
-            for env_index in env_indices:
-                line = lines[env_index].strip()
-                if line.startswith("#ENV:"):
-                    # Parse KEY=VALUE
-                    content = line[len("#ENV:"):].strip()
-                    if "=" not in content:
-                        continue
-                    key, value = content.split("=", 1)
-                    env_dict[key] = {"value": value, "note": ""}
-
-                if env_index + 1 < len(lines):
-                    next_line = lines[env_index + 1].strip()
-                    if next_line.startswith("#ENVNOTE:"):
-                        note = next_line[len("#ENVNOTE:"):].strip()
-                        env_dict[key]["note"] = note
-
-        return env_dict
-
-    @staticmethod
-    def get_sbatch_args_from_build_script(script_path) -> List[str]:
-        """
-        Parse #SBATCH: lines from build script.
-        Returns a list of sbatch arguments.
-        Example line in script:
-            #SBATCH --cpus-per-task=4
-        """
-        sbatch_args = []
-
-        if not os.path.isfile(script_path):
-            Utils.print_error(f"Build script not found at {script_path}.")
-            return sbatch_args
-
-        with open(script_path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("#SBATCH"):
-                    arg = line[len("#SBATCH"):].strip()
-                    sbatch_args.append(arg)
-
-        return sbatch_args
-
-    @staticmethod
-    def submit_sbatch(normalized_name_version: str,  sbatch_args: List[str]) -> bool:
-        """
-        Generate a temporary sbatch script to run the build script with sbatch.
-        Returns the path to the temporary sbatch script.
-        """
-        tmp_sbatch_script_path = os.path.join(Config.CONDATINER_DIR, f"sbatch_build_tmp.sh") # after submission, SLURM will create its own copy
-        with open(tmp_sbatch_script_path, "w") as f:
-            f.write("#!/bin/bash\n")
-            for arg in sbatch_args:
-                f.write(f"#SBATCH {arg}\n")
-            f.write("\n")
-            f.write(f"{Config.SCRIPT_PATH} create {normalized_name_version}\n")
-
-        cmd_final = ["sbatch", tmp_sbatch_script_path]
-        Utils.print_debug(f"[CREATE] Submitting sbatch job with command: {cmd_final}")
-
-        try:
-            subprocess.run(cmd_final, check=True)
-            return True
-        except subprocess.CalledProcessError:
-            return False
-
-    @staticmethod
-    def auto_create_module_from_str(normalized_name_version: str):
-        """
-        Check if the script exists locally or remotely,
-        - if yes, use build script,
-        - if not, use micromamba installer.
-        """
-        if ModGen.is_module_available(normalized_name_version):
-            Utils.print_message(f"Module {Utils.yellow_text(normalized_name_version)} is already available in the environment. Skipping creation.")
-            return True
-        if ModGen.is_module_installed(normalized_name_version):
-            Utils.print_message(f"Module {Utils.yellow_text(normalized_name_version)} is already installed. Skipping creation.")
-            return True
-
-        n = normalized_name_version.count('/')
-        if n == 0:
-            Utils.print_error("Invalid NAME/VERSION string. Must contain at least one '/' character.")
-            return False
-        elif n == 1:
-            local_packages = Utils.get_local_build_scripts().keys()
-            remote_packages = Utils.fetch_remote_build_scripts().keys()
-            avail_packages = set(local_packages).union(set(remote_packages))
-            if normalized_name_version not in avail_packages:
-                return ModGen_Create.create_app_module_by_conda(normalized_name_version)
-            else:
-                return ModGen_Create.create_module_from_build_script(normalized_name_version)
-        else:
-            return ModGen_Create.create_module_from_build_script(normalized_name_version)
-
-    @staticmethod
-    def create_module_from_build_script(normalized_name_version: str):
-        n = normalized_name_version.count('/')
-        is_ref = False
-        if n == 0:
-            Utils.print_error("Invalid NAME/VERSION string. Must contain at least one '/' character.")
-            return False
-        elif n > 1:
-            is_ref = True
-
-        target_path = ModGen.get_target_dir(normalized_name_version)
-        target_modulefile_path = ModGen.get_modulefile_path(normalized_name_version)
-        tmp_path = ModGen.get_tmp_dir(normalized_name_version)
-
-        if os.path.isdir(target_path) and os.path.isfile(target_modulefile_path):
-            Utils.print_message(f"Module directory {Utils.blue_text(target_path)} already exists. Skipping creation.")
-            return True
-
-        if os.path.isdir(tmp_path):
-            Utils.print_error(f"Temporary directory {Utils.blue_text(tmp_path)} already exists. Maybe an installation is already in progress?")
-            Utils.print_message(f"If you are sure no other installation is in progress, please remove the temporary directory {Utils.blue_text(tmp_path)} and try again.")
-            return False
-
-        is_remote = False
-        parts = normalized_name_version.split('/')
-        script_path = os.path.join(Config.BUILD_SCRIPTS_DIR, *parts)
-        if not os.path.isfile(script_path):
-            # Try to fetch build script from remote metadata if configured
-            metadata = Utils.fetch_remote_build_scripts()
-            key = Utils.normalize_name_version(normalized_name_version)
-            if metadata and key in metadata:
-                is_remote = True
-                script_path = os.path.join(Config.CONDATINER_DIR, f"{key.replace('/', '--')}.sh")
-                Utils.print_message(f"Downloading build script for {Utils.yellow_text(normalized_name_version)} from remote metadata...")
-                url = metadata[key]
-                if not Utils.download_executable(url, script_path):
-                    Utils.print_error(f"Failed to download build script for {Utils.yellow_text(normalized_name_version)} from {url}.")
-                    return False
-            else:
-                Utils.print_error(f"Build script for {Utils.yellow_text(normalized_name_version)} not found at {script_path}.")
-                return False
-        try:
-            deps = Utils.get_dependencies_from_script(script_path)
-            if deps:
-                Utils.print_message(f"Checking dependencies for build script of {normalized_name_version}...")
-                for dep in deps:
-                    if ModGen.is_module_available(dep):
-                        Utils.print_message(f"Dependency module {Utils.yellow_text(dep)} is already available in the environment.")
-                        continue
-                    Utils.print_message(f"Dependency module {Utils.yellow_text(dep)} is not available in the environment, Trying to install the dependency...")
-                    if not ModGen_Create.auto_create_module_from_str(dep):
-                        Utils.print_error(f"Failed to install dependency module {Utils.yellow_text(dep)}. Cannot proceed with creating {normalized_name_version}.")
-                        ModGen_Create.cleanup(normalized_name_version, failed=True)
-                        return False
-                    else:
-                        Utils.print_success(f"Dependency module {Utils.yellow_text(dep)} installed.")
-                Utils.print_message("All dependencies are satisfied.")
-        except ValueError as ve:
-            Utils.print_error(f"Error parsing dependencies: {ve}")
-            ModGen_Create.cleanup(normalized_name_version, failed=True)
-            return False
-
-        sbatch_args = ModGen_Create.get_sbatch_args_from_build_script(script_path)
-        if sbatch_args and shutil.which("sbatch") is not None and Utils.is_in_interactive_shell():
-            Utils.print_note("This script requires SLURM sbatch to run. Submitting job...")
-            if ModGen_Create.submit_sbatch(normalized_name_version, sbatch_args):
-                raise RuntimeError("Build script submitted successfully. Exiting current process. Please monitor the sbatch job for completion. And the log is under current directory.")
-            else:
-                Utils.print_error("Failed to submit sbatch job for build script.")
-                return False
-
-        running_env = os.environ.copy()
-        running_env["tmp_dir"] = tmp_path
-        running_env["target_dir"] = target_path
-        running_env["app_name"] = "/".join(parts[:-1])
-        running_env["version"] = parts[-1]
-        running_env["app_name_version"] = normalized_name_version
-
-        if deps:
-            ml_commands = "module purge && module load " + " ".join(deps)
-            cmd_create = [ "bash", "-c", f"{ml_commands} && bash {script_path}" ]
-        else:
-            cmd_create = [ "bash", script_path ]
-
-        Utils.print_debug(f"[CREATE] with command: {cmd_create}")
-
-        try:
-            subprocess.run(cmd_create, check=True, env=running_env)
-        except subprocess.CalledProcessError:
-            Utils.print_error(f"Creating module for {normalized_name_version} failed during build script execution.")
-            Utils.print_note("Some build script needs an interactive shell to accept download links or licenses.")
-            ModGen_Create.cleanup(normalized_name_version, failed=True)
-            if is_remote and os.path.isfile(script_path):
-                os.remove(script_path)
-            return False
-        except KeyboardInterrupt:
-            Utils.print_error("Creation interrupted by user.")
-            ModGen_Create.cleanup(normalized_name_version, failed=True)
-            if is_remote and os.path.isfile(script_path):
-                os.remove(script_path)
-            raise
-
-        whatis_url = ModGen_Create.get_whatis_url_from_build_script(script_path, normalized_name_version)
-        env_dict = ModGen_Create.get_env_dict_from_build_script(script_path)
-
-        Utils.print_debug(f"Creating modulefile at {target_modulefile_path}...")
-        os.makedirs(os.path.dirname(target_modulefile_path), mode=0o775, exist_ok=True)
-        if not ModGen_Create.create_target_modulefile(normalized_name_version, whatis_url, is_ref=is_ref, env_dict=env_dict):
-            Utils.print_error(f"Creating modulefile for {normalized_name_version} failed.")
-            ModGen_Create.cleanup(normalized_name_version, failed=True)
-            if is_remote and os.path.isfile(script_path):
-                os.remove(script_path)
-            return False
-
-        ModGen_Create.cleanup(normalized_name_version, failed=False)
-        if is_remote and os.path.isfile(script_path):
-            os.remove(script_path)
-        Utils.print_success(f"Module {Utils.yellow_text(normalized_name_version)} created.")
-        return True
-
 class ModGen_Exec:
     @staticmethod
     def add_parser_arguments(parser):
@@ -1114,20 +1252,15 @@ class ModGen_Avail:
         )
         ModGen_Avail.parser_avail.add_argument(
             "-i", "--install",
+            "-a", "--add",
+            dest="install",
             action="store_true",
             help="Install the selected build scripts (used with terms)"
-        )
-        ModGen_Avail.parser_avail.add_argument(
-            "-a", "--add",
-            action="store_true",
-            help="Alias for --install (used with terms)"
         )
 
     @staticmethod
     def parse_avail_args(args):
         local_packages = Utils.get_local_build_scripts()
-        is_install = args.install or args.add
-
         # Fetch remote metadata entries if configured
         remote_packages = {}
         if Config.REMOTE_METADATA_URL:
@@ -1186,18 +1319,19 @@ class ModGen_Avail:
             else:
                 uninstalled_packages.add(pkg.split(' ')[0])
 
-        if Utils.is_in_interactive_shell() and is_install and args.terms and uninstalled_packages:
+        if Utils.is_in_interactive_shell() and args.install and args.terms and uninstalled_packages:
             Utils.print_message("Do you want to install the above modules? [y/N]: ", end="")
             choice = input().strip().lower()
             if choice != 'y':
                 return
 
-            for pkg in uninstalled_packages:
-                Utils.print_message(f"Installing module {Utils.yellow_text(pkg)}...")
-                if ModGen_Create.auto_create_module_from_str(pkg):
-                    Utils.print_success(f"Module {Utils.yellow_text(pkg)} installed.")
-                else:
-                    Utils.print_error(f"Failed to install module {Utils.yellow_text(pkg)}.")
+            ModGen.ensure_micromamba()
+            build_objects = [BuildObject(pkg) for pkg in uninstalled_packages]
+            build_graph = BuildGraph(build_objects)
+            if build_graph.run():
+                Utils.print_success("All selected modules installed successfully.")
+            else:
+                Utils.print_error("Some modules failed to install.")
 
 class ModGen_List:
     @staticmethod
@@ -1213,18 +1347,14 @@ class ModGen_List:
         )
         ModGen_List.parser_list.add_argument(
             "-d", "--delete",
+            "-r", "--remove",
+            dest="delete",
             action="store_true",
             help="Delete listed modules after confirmation (used with terms)"
-        )
-        ModGen_List.parser_list.add_argument(
-            "-r", "--remove",
-            action="store_true",
-            help="Alias for --delete (used with terms)"
         )
 
     @staticmethod
     def parse_list_args(args):
-        is_delete = args.delete or args.remove
         if os.path.isdir(Config.APPS_MODULEFILES_DIR):
             installed_modules = ModGen.get_installed_modules("apps")
             name_versions_dict = {}
@@ -1271,7 +1401,7 @@ class ModGen_List:
                     else:
                         print(module_name)
 
-        if Utils.is_in_interactive_shell() and is_delete and args.terms:
+        if Utils.is_in_interactive_shell() and args.delete and args.terms:
             print("==================REMOVE==================")
             ModGen_Remove.parse_remove_args(args)
 
@@ -1341,18 +1471,14 @@ class ModGen_Check:
         )
         ModGen_Check.parser_check.add_argument(
             "-a", "--auto-install",
+            "-i", "--install",
+            dest="auto_install",
             action="store_true",
             help="Automatically install missing dependencies"
-        )
-        ModGen_Check.parser_check.add_argument(
-            "-i", "--install",
-            action="store_true",
-            help="Alias for --auto-install"
         )
 
     @staticmethod
     def parse_check_args(args):
-        is_install = args.auto_install or args.install
         script_path_or_name = args.script
         is_remote = False
         if not os.path.isfile(script_path_or_name):
@@ -1389,16 +1515,19 @@ class ModGen_Check:
                 os.remove(script_path)
             return
 
-        if is_install:
-            ModGen.ensure_micromamba()
+        if args.auto_install:
             Utils.print_message("Attempting to auto-install missing dependencies...")
             for md in missing_deps:
                 if md.endswith(('.sqf', '.img', '.squashfs')):
                     Utils.print_error(f"ModGen is not compatible with overlay dependencies. Please use CondaTainer instead.")
                     continue
-                Utils.print_note(f"Installing dependency module {Utils.yellow_text(md)}...")
-                if not ModGen_Create.auto_create_module_from_str(md):
-                    Utils.print_error(f"Failed to create dependency module {md}.")
+            ModGen.ensure_micromamba()
+            build_objects = [BuildObject(md) for md in missing_deps]
+            build_graph = BuildGraph(build_objects)
+            if build_graph.run():
+                Utils.print_success("All missing dependencies installed successfully.")
+            else:
+                Utils.print_error("Some dependencies failed to install.")
         else:
             Utils.print_message(f"Run the command again with {Utils.blue_text('-a')} or {Utils.blue_text('--auto-install')} to install missing dependencies.")
 
@@ -1423,12 +1552,9 @@ class ModGen_Run:
         )
         ModGen_Run.parser_run.add_argument(
             "-a", "--auto-install",
-            help="Automatically install missing dependencies",
-            action="store_true"
-        )
-        ModGen_Run.parser_run.add_argument(
             "-i", "--install",
-            help="Alias for --auto-install",
+            dest="auto_install",
+            help="Automatically install missing dependencies",
             action="store_true"
         )
         ModGen_Run.parser_run.add_argument(
@@ -1462,7 +1588,6 @@ class ModGen_Run:
         args_from_script = ModGen_Run.parse_args_in_script(args.script)
         merged = args_from_script + sys.argv[2:]
         args = ModGen_Run.parser_run.parse_args(merged)
-        is_install = args.auto_install or args.install
 
         try:
             deps = Utils.get_dependencies_from_script(script_path, raise_when_finding_overlay=True)
@@ -1473,7 +1598,7 @@ class ModGen_Run:
         missing_deps = ModGen.get_missing_modules(deps)
 
         if missing_deps:
-            if not is_install:
+            if not args.auto_install:
                 Utils.print_message("Missing dependencies:")
                 for md in missing_deps:
                     Utils.print_message(f"  - {Utils.yellow_text(md)}")
@@ -1483,12 +1608,13 @@ class ModGen_Run:
 
             ModGen.ensure_micromamba()
             Utils.print_message("Attempting to auto-install missing dependencies...")
-            for md in missing_deps:
-                if ModGen_Create.auto_create_module_from_str(md):
-                    Utils.print_success(f"Dependency module {Utils.yellow_text(md)} installed.")
-                else:
-                    Utils.print_error(f"Failed to create dependency module {md}.")
-                    return
+            build_objects = [BuildObject(md) for md in missing_deps]
+            build_graph = BuildGraph(build_objects)
+            if build_graph.run():
+                Utils.print_success("All missing dependencies installed successfully.")
+            else:
+                Utils.print_error("Some dependencies failed to install.")
+                return
 
         ModGen_Exec.exec_command(deps, ["/bin/bash", script_path] + script_args)
 
