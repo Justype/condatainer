@@ -2338,8 +2338,5 @@ if __name__ == "__main__":
     except ValueError as e:
         Utils.print_error(str(e))
         sys.exit(1)
-    except Exception as e:
-        Utils.print_error(f"An unexpected error occurred: {str(e)}")
-        sys.exit(1)
     except KeyboardInterrupt:
         sys.exit(1)

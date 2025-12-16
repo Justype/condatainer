@@ -724,7 +724,7 @@ class BuildObject:
         return ModGen.get_missing_modules(self.dependencies)
 
     def _build_conda(self) -> bool:
-        if self.is_installed():
+        if self.is_installed:
             Utils.print_warning(f"Module {Utils.yellow_text(self.name_version)} is already installed. Skipping creation.")
             return True
         if os.path.exists(self.tmp_dir_path):
@@ -763,7 +763,7 @@ class BuildObject:
         return True
 
     def _build_script(self, build_deps = False) -> bool:
-        if self.is_installed():
+        if self.is_installed:
             Utils.print_warning(f"Module {Utils.yellow_text(self.name_version)} is already installed. Skipping creation.")
             return True
         if os.path.exists(self.tmp_dir_path):
@@ -1864,9 +1864,6 @@ if __name__ == "__main__":
         sys.exit()
     except ValueError as e:
         Utils.print_error(str(e))
-        sys.exit(1)
-    except Exception as e:
-        Utils.print_error(f"An unexpected error occurred: {str(e)}")
         sys.exit(1)
     except KeyboardInterrupt:
         Utils.print_message("ModGen interrupted by user.")
