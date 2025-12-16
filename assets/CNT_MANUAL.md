@@ -18,31 +18,33 @@
 ## Overall Command Structure
 
 ```
-usage: condatainer [-h] [-v] [--debug] COMMAND ...
+usage: condatainer [-h] [-v] [--debug] [-n] COMMAND ...
 
 CondaTainer: Use apptainer/conda/squashFS to manage tools for HPC users.
 
 positional arguments:
-  COMMAND              Available actions
-    overlay (o)        Create an empty overlay img
+  COMMAND               Available actions
+    overlay (o)         Create an empty overlay img
     create (install, i)
-                       Create a new SquashFS overlay using conda or available build scripts
-    avail (av)         Check available local and remote build scripts
-    list (ls)          List installed overlays matching search terms
-    remove (delete)    Remove installed overlays matching search terms
-    exec               Execute a command using overlays
-    e                  Run bash using writable overlays
-    check (c)          Check if the dependencies of a script are installed
-    run (r)            Run a script and auto-solve the dependencies by #DEP tags
-    info               Show information about a specific overlay
-    apptainer          Get latest Apptainer executable from conda-forge
-    update             Update CondaTainer to the latest version
-    modgen             Get latest modgen executable from GitHub
+                        Create a new SquashFS overlay using conda or available build scripts
+    avail (av)          Check available local and remote build scripts
+    list (ls)           List installed overlays matching search terms
+    remove (delete)     Remove installed overlays matching search terms
+    exec                Execute a command using overlays
+    e                   Run bash using writable overlays
+    check (c)           Check if the dependencies of a script are installed
+    run (r)             Run a script and auto-solve the dependencies by #DEP tags
+    info                Show information about a specific overlay
+    apptainer           Get latest Apptainer executable from conda-forge
+    update              Update CondaTainer to the latest version
+    modgen              Get latest modgen executable from GitHub
 
-options:
-  -h, --help           show this help message and exit
-  -v, --version        Show the version of CondaTainer
-  --debug              Enable debug mode with verbose output
+optional arguments:
+  -h, --help            show this help message and exit
+  -v, --version         Show the version of CondaTainer
+  --debug               Enable debug mode with verbose output
+  -n, --no-sbatch, --local
+                        Run all operations locally without using sbatch
 ```
 
 ## Naming Convention
@@ -296,6 +298,28 @@ condatainer run [SCRIPT] [SCRIPT_ARGS...]
 #DEP: bcftools/1.22
 #CNT --writable-img
 bcftools view input.vcf | head
+```
+
+### CondaTainer is compatible with module systems
+
+CondaTainer will scan your script for `module load` or `ml` commands and mount the corresponding overlays automatically.
+
+**Example:**
+
+```bash
+#!/bin/bash
+module load bcftools/1.22
+bcftools --version
+```
+
+You can run `check` or `run` commands to automatically handle the dependencies.
+
+```bash
+# Install missing dependencies
+condatainer check my_script.sh -a
+
+# Run the script with automatic dependency resolution
+condatainer run my_script.sh
 ```
 
 ## Info
