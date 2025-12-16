@@ -100,7 +100,7 @@ def main():
         ModGen_Avail.parse_avail_args(args)
     elif args.action in ("list", "ls"):
         ModGen_List.parse_list_args(args)
-    elif args.action in ("remove", "delete", "uninstall"):
+    elif args.action in ("remove", "delete", "uninstall", "rm", "del"):
         ModGen_Remove.parse_remove_args(args)
     elif args.action == "init":
         ModGen_Init.parse_init_args(args)
@@ -1411,7 +1411,7 @@ class ModGen_Remove:
     @staticmethod
     def add_parser_arguments(parser):
         ModGen_Remove.parser_remove = parser.add_parser(
-            "remove", aliases=["delete"],
+            "remove", aliases=["rm", "delete", "del"],
             help="Remove installed modules matching search terms")
         ModGen_Remove.parser_remove.add_argument(
             "terms",

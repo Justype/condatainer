@@ -126,7 +126,7 @@ def main():
         CondaTainer_Avail.parse_avail_args(args)
     elif args.action in ("list", "ls"):
         CondaTainer_List.parse_list_args(args)
-    elif args.action in ("remove", "delete", "uninstall"):
+    elif args.action in ("remove", "delete", "uninstall", "rm", "del"):
         CondaTainer_Remove.parse_remove_args(args)
     elif args.action in ("overlay", "o"):
         CondaTainer_Overlay.parse_overlay_args(args)
@@ -1825,7 +1825,7 @@ class CondaTainer_Remove:
     @staticmethod
     def add_parser_arguments(parser):
         CondaTainer_Remove.parser_remove = parser.add_parser(
-            "remove", aliases=["delete"],
+            "remove", aliases=["rm", "delete", "del"],
             help="Remove installed overlays matching search terms")
         CondaTainer_Remove.parser_remove.add_argument(
             "terms",
@@ -1875,11 +1875,10 @@ class CondaTainer_Remove:
             overlay_path = installed_overlays_dict[overlay]
             try:
                 os.remove(overlay_path)
-                Utils.print_success(f"Removed overlay {Utils.yellow_text(overlay)} at {Utils.blue_text(overlay_path)}.")
+                Utils.print_success(f"Overlay {Utils.yellow_text(overlay)} removed.")
                 env_path = os.path.splitext(overlay_path)[0] + ".env"
                 if os.path.isfile(env_path):
                     os.remove(env_path)
-                    Utils.print_success(f"Also removed associated env file at {Utils.blue_text(env_path)}.")
             except Exception as e:
                 Utils.print_error(f"Failed to remove overlay {Utils.yellow_text(overlay)}: {str(e)}")
 
