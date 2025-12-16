@@ -1,13 +1,9 @@
 # CondaTainer & ModGen
 
-[![GitHub release](https://img.shields.io/github/release/Justype/condatainer.svg)](https://github.com/Justype/condatainer/releases)
-[![GitHub issues](https://img.shields.io/github/issues/Justype/condatainer.svg)](https://github.com/Justype/condatainer/issues)
-[![GitHub license](https://img.shields.io/github/license/Justype/condatainer.svg)](https://github.com/Justype/condatainer/blob/main/LICENSE)
-
 <div>
 <a href="#-condatainer"><img src="assets/logo_cnt.png" height="100" alt="CondaTainer Logo"></a>
 &nbsp;&nbsp;
-<a href="./MG_README.md"><img src="assets/logo_mg.png" height="100" alt="ModGen Logo"></a>
+<a href="./README_MG.md"><img src="assets/logo_mg.png" height="100" alt="ModGen Logo"></a>
 </div>
 
 Both tools aim to automate environment management and handling on HPC, but with different approaches:
@@ -18,7 +14,7 @@ Both tools aim to automate environment management and handling on HPC, but with 
 Which one to choose?
 
 - If you care about inode usage and environment isolation, use [**CondaTainer**](#-condatainer).
-- If you prefer `Lmod` and using system available modules, use [**ModGen**](MG_README.md).
+- If you prefer `Lmod` and using system available modules, use [**ModGen**](README_MG.md).
 
 ## 🛠️ Installation
 
@@ -69,7 +65,7 @@ condatainer exec -o grch38--cellranger--2024-A bash
 #   STAR_INDEX_DIR    : STAR index dir
 ```
 
-[Read the full CondaTainer Manual](assets/CNT_MANUAL.md)
+[Read the full CondaTainer Manual](assets/MANUAL_CNT.md)
 
 ## 📂 Naming Convention
 
@@ -77,8 +73,8 @@ Both tools utilize a standardized naming schema to organize software and referen
 
 - Apps: `name/version` (e.g., `bcftools/1.16`)
 - References: `assembly/datatype/version`
-  - `grcm39/genome/gencode`: mouse genome GRCm39 with Gencode style naming
-  - `grcm39/salmon/1.10.2/gencodeM33`: salmon index for mouse genome GRCm39 with Gencode M33 annotation
+  - `grcm39/genome/gencode`: GRCm39 genome with Gencode style naming
+  - `grcm39/salmon/1.10.2/gencodeM33`: salmon index for GRCm39 Gencode M33 transcripts
 
 > [!NOTE]
 > Overlay names are used to identify environments. They should not be changed after creation.
