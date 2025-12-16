@@ -711,8 +711,8 @@ class BuildObject:
         self.interactive_inputs = []
 
         # related paths
-        self.cnt_dir_path = os.path.join(Config.TMP_DIR, self.name_version.replace('/', '--'), "cnt")
-        self.tmp_overlay_path = os.path.join(Config.TMP_DIR, f"{self.name_version.replace('/', '--')}.img")
+        self.cnt_dir_path = CondaTainer.get_cnt_dir_path(self.name_version)
+        self.tmp_overlay_path = CondaTainer.get_tmp_overlay_path(self.name_version)
         overlay_filename = f"{self.name_version.replace('/', '--')}.sqf"
         if self.is_ref:
             self.target_overlay_path = os.path.join(Config.REF_IMAGES_DIR, overlay_filename)
@@ -732,7 +732,7 @@ class BuildObject:
             self.is_remote = True
         else:
             self.is_conda = True
-        
+
         if not self.is_conda:
             self.dependencies = Utils.get_dependencies_from_script(self.build_script_path)
             self.sbatch_flags = Utils.get_sbatch_args_from_build_script(self.build_script_path)
@@ -770,26 +770,7 @@ class BuildObject:
         return self.name_version
 
     def create_tmp_overlay(self, force = False) -> bool:
-        if os.path.isfile(self.tmp_overlay_path):
-            if force:
-                Utils.print_warning(f"Temporary overlay for {Utils.yellow_text(self.name_version)} already exists. Removing it first.")
-                os.remove(self.tmp_overlay_path)
-            else:
-                return False
-
-        command_tmp_overlay = [
-            Config.APPTAINER_PATH, "overlay", "create",
-            "--sparse", "--size", "15360", "--fakeroot",
-            self.tmp_overlay_path
-        ]
-
-        Utils.print_debug(f"[BUILD] Creating temporary overlay with command: {command_tmp_overlay}")
-
-        try:
-            subprocess.run(command_tmp_overlay, check=True)
-        except subprocess.CalledProcessError:
-            Utils.print_error("Creating temporary overlay failed. Please contact your system admin or use local apptainer.")
-            Utils.print_note("You can try ModGen to create Lmod modules without apptainer and overlays.")
+        if CondaTainer.create_tmp_overlay(self.name_version, force=force) is None:
             return False
         return True
 
@@ -823,7 +804,7 @@ class BuildObject:
         if not self.create_tmp_overlay(force=False):
             Utils.print_error(f"Temporary overlay for {Utils.yellow_text(self.name_version)} already exists. Maybe a build is still running?")
             return False
-        
+
         cmd_create = [
             Config.APPTAINER_PATH, "exec", "--fakeroot",
             "--env", "TMPDIR=/ext3/tmp",
@@ -836,7 +817,7 @@ class BuildObject:
             mkdir -p $TMPDIR
             micromamba create -r /ext3/conda -c conda-forge -c bioconda -y -p /cnt/{self.relative_path} {name}={version}
 
-            # Set permissions to ensure read access
+            echo "Setting permissions..."
             find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
             find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
             mksquashfs /cnt {os.path.abspath(self.target_overlay_path)} -processors {self.ncpus} -keep-as-directory {Config.compress_args} -b 1M
@@ -925,7 +906,7 @@ class BuildObject:
             Utils.print_error(f"Build script {Utils.blue_text(self.build_script_path)} failed.")
             self.create_cleanup(failed=True)
             return False
-        
+
         if self.is_ref:
             # Reference overlay: ensure target_dir has files
             if os.listdir(target_dir) == []:
@@ -963,10 +944,9 @@ class BuildObject:
                 Config.BASE_IMAGE_SIF,
                 "/bin/bash", "-c",
                 f"""
-                echo "Setting permissions for files..."
+                echo "Setting permissions..."
                 find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
                 find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
-                echo "Creating SquashFS file..."
                 mksquashfs /cnt {os.path.abspath(self.target_overlay_path)} -processors {self.ncpus} -keep-as-directory {Config.compress_args} -b 1M
                 """
             ]
@@ -1004,10 +984,10 @@ class BuildObject:
             else:
                 return self._build_script(build_deps=build_deps)
         except KeyboardInterrupt:
-            Utils.print_error(f"Build for {Utils.yellow_text(self.name_version)} interrupted by user.")
+            Utils.print_message(f"Build for {Utils.yellow_text(self.name_version)} interrupted by user.")
             self.create_cleanup(failed=True)
             return False
-    
+
     def _create_sbatch_script(self) -> bool:
         sbatch_script_path = os.path.join(Config.TMP_DIR, f"sbatch_build_{self.name_version.replace('/', '--')}.sh")
         os.makedirs(Config.LOGS_DIR, mode=0o775, exist_ok=True)
@@ -1036,7 +1016,7 @@ class BuildObject:
         slurm_job_id_regex = re.compile(r'Submitted batch job (\d+)')
         if not self._create_sbatch_script():
             return None
-        
+
         cmd = ["sbatch", sbatch_script_path]
         if dep_ids:
             dep_str = ":".join(dep_ids)
@@ -1094,8 +1074,7 @@ class BuildGraph:
             node_meta = self.graph.get(node)
             if node_meta is None:
                 visiting.remove(node)
-                # Missing node should not normally happen because we expanded graph,
-                # but guard against it.
+                # Missing node should not normally happen because we expanded graph, but guard against it.
                 raise RuntimeError(f"Unknown dependency '{node}' encountered during graph traversal")
             for dep in node_meta.dependencies:
                 if dep not in self.graph:
@@ -1210,8 +1189,8 @@ class CondaTainer_Create:
         CondaTainer.ensure_base_image()
         if not args.name_versions and not args.file:
             CondaTainer_Create.parser_create.error("At least one of name_versions or --file must be provided.")
-        if args.name_versions and (args.name or args.prefix):
-            CondaTainer_Create.parser_create.error("--name/--prefix can only be used with --file")
+        if args.name_versions and args.prefix:
+            CondaTainer_Create.parser_create.error("name/version arguments cannot be used with --prefix")
         if args.prefix and args.name:
             CondaTainer_Create.parser_create.error("Cannot use both --prefix and --name at the same time")
         if args.file and not (args.name or args.prefix):
@@ -1229,59 +1208,66 @@ class CondaTainer_Create:
 
         if args.name_versions:
             args.name_versions = [Utils.normalize_name_version(nv) for nv in args.name_versions]
-        try:
-            if args.file:
-                if args.prefix:
-                    CondaTainer_Create.create_sqf_from_file(args.file, prefix=args.prefix)
-                else:
-                    CondaTainer_Create.create_sqf_from_file(args.file, args.name)
-            else:
-                build_objects = [BuildObject(nv) for nv in args.name_versions]
-                for bo in build_objects:
-                    Utils.print_debug(f"[CREATE] BuildObject created:\n{bo}")
-                build_graph = BuildGraph(build_objects)
-                build_graph.run()
-        except KeyboardInterrupt:
-            Utils.print_message("Process interrupted by user. Cleaning up...")
-            exit(1)
+
+        if args.prefix:
+            abs_path = os.path.abspath(args.prefix) + ".sqf"
+            if os.path.isfile(abs_path):
+                Utils.print_message(f"Overlay {Utils.yellow_text(os.path.basename(abs_path))} already exists at {Utils.blue_text(abs_path)}. Skipping creation.")
+                return
+            Utils.print_debug(f"[CREATE] Creating overlay with prefix: {args.prefix}")
+            CondaTainer_Create.create_env_sqf(abs_path, args.file, None)
+        elif args.name:
+            if "--" in args.name or "/" in args.name:
+                CondaTainer_Create.parser_create.error("--name cannot contain '/' or '--'")
+            abs_path = os.path.join(Config.IMAGES_DIR, f"{args.name}.sqf")
+            if os.path.isfile(abs_path):
+                Utils.print_message(f"Overlay {Utils.yellow_text(os.path.basename(abs_path))} already exists at {Utils.blue_text(abs_path)}. Skipping creation.")
+                return
+            Utils.print_debug(f"[CREATE] Creating overlay with name: {args.name}")
+            CondaTainer_Create.create_env_sqf(abs_path, args.file, args.name_versions)
+        else:
+            build_objects = [BuildObject(nv) for nv in args.name_versions]
+            for bo in build_objects:
+                Utils.print_debug(f"[CREATE] BuildObject created:\n{bo}")
+            build_graph = BuildGraph(build_objects)
+            build_graph.run()
 
     @staticmethod
-    def create_cleanup(normalized_name_version: str):
+    def create_cleanup(normalized_name_version: str, failed: bool = False):
         cnt_dir = CondaTainer.get_cnt_dir_path(normalized_name_version)
         cnt_dir = os.path.dirname(cnt_dir)
         shutil.rmtree(cnt_dir, ignore_errors=True)
         CondaTainer.remove_tmp_overlay(normalized_name_version)
+        if failed:
+            CondaTainer.remove_tmp_overlay(normalized_name_version)
 
     @staticmethod
-    def create_sqf_from_file(file_path: str, custom_name: Optional[str] = None, prefix: Optional[str] = None):
-        if not file_path.endswith(('.yml', '.yaml')):
-            Utils.print_error("The environment file must be in YAML format with .yml or .yaml extension.")
-            return False
+    def create_env_sqf(overlay_abs_path: str, file_path: Optional[str], name_versions: Optional[List[str]]) -> bool:
+        normalized_name_version = Utils.normalize_name_version(os.path.splitext(os.path.basename(overlay_abs_path))[0])
+        to_bind_paths = [Config.CONDATINER_DIR]
 
-        file_path = os.path.abspath(file_path)
-        file_basedir = os.path.dirname(file_path)
-
-        Utils.print_message(f"Building SquashFS overlay from environment file {Utils.blue_text(file_path)}")
-        if prefix:
-            prefix_abs_path = os.path.abspath(prefix)
-            os.makedirs(os.path.dirname(prefix_abs_path), mode=0o775, exist_ok=True)
-
-            overlay_abs_path = f"{prefix_abs_path}.sqf"
-            custom_name = os.path.basename(prefix)
-            relative_path = custom_name.replace("--", "/")
-        elif custom_name:
-            overlay_abs_path = os.path.join(Config.IMAGES_DIR, f"{custom_name}.sqf")
-            if "--" in custom_name:
-                Utils.print_error("Custom name cannot contain '--' when creating overlay from environment file.")
+        if file_path is not None:
+            if not file_path.endswith(('.yml', '.yaml')):
+                Utils.print_error("The environment file must be in YAML format with .yml or .yaml extension.")
                 return False
+            abs_file_path = os.path.abspath(file_path)
+            to_bind_paths.append(os.path.dirname(abs_file_path))
+
+            install_command = f"micromamba create -r /ext3/conda -c conda-forge -c bioconda -y -p /cnt/{normalized_name_version} -f {abs_file_path}"
+            copy_command = f"cp {abs_file_path} /cnt/{normalized_name_version}/env.yaml"
+        elif name_versions:
+            parsed_name_versions = [nv.replace('/', '=') for nv in name_versions]
+            install_command = "micromamba create -r /ext3/conda -c conda-forge -c bioconda -y -p /cnt/" + normalized_name_version + " " + " ".join(parsed_name_versions)
+            copy_command = ""
         else:
-            Utils.print_error("Either custom name or prefix must be provided when creating overlay from environment file.")
+            Utils.print_error("Either an environment file or name/version specifications must be provided.")
             return False
+
+        Utils.print_message(f"Building SquashFS overlay at {Utils.blue_text(overlay_abs_path)} from environment file {Utils.blue_text(file_path)}")
 
         if os.path.isfile(overlay_abs_path):
             Utils.print_message(f"Overlay {Utils.yellow_text(os.path.basename(overlay_abs_path))} already exists at {Utils.blue_text(overlay_abs_path)}. Skipping creation.")
             return True
-        normalized_name_version = Utils.normalize_name_version(relative_path)
         tmp_overlay_path = CondaTainer.create_tmp_overlay(normalized_name_version)
         if tmp_overlay_path is None:
             Utils.print_error(f"Temporary overlay {Utils.blue_text(tmp_overlay_path)} already exists. Please remove it first.")
@@ -1293,17 +1279,15 @@ class CondaTainer_Create:
                 "--fakeroot",
                 "--env", "TMPDIR=/ext3/tmp",
                 "--overlay", tmp_overlay_path,
-                *CondaTainer.generate_bind_args(Config.CONDATINER_DIR, file_basedir),
+                *CondaTainer.generate_bind_args(*to_bind_paths),
                 *CondaTainer.generate_gpu_args(),
                 Config.BASE_IMAGE_SIF,
                 "/bin/bash", "-c",
                 f"""
                 mkdir -p $TMPDIR
-                micromamba create -r /ext3/conda -c conda-forge -c bioconda -y -p /cnt/{relative_path} -f {file_path}
-
-                cp {file_path} /cnt/{relative_path}/env.yaml
-
-                # Set permissions to ensure read access
+                {install_command}
+                {copy_command}
+                echo "Setting permissions..."
                 find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
                 find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
                 mksquashfs /cnt {os.path.abspath(overlay_abs_path)} -processors {Config.NCPUS} -keep-as-directory {Config.compress_args} -b 1M
@@ -1319,16 +1303,19 @@ class CondaTainer_Create:
                 Utils.print_note(f"If apptainer cannot recognize zstd, please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
                 Utils.print_note("If file/folder creation failed, please contact your system admin.")
                 Utils.print_note("If cannot resolve the environment file by libmamba, please please consider create img and manually install it with conda.")
-                CondaTainer.remove_tmp_overlay(normalized_name_version)
+                CondaTainer_Create.create_cleanup(normalized_name_version, failed=True)
                 return False
 
-            Utils.print_success(f"Overlay {Utils.yellow_text(os.path.basename(overlay_abs_path))} created from {Utils.blue_text(file_path)}. Removing temporary overlay...")
+            if file_path:
+                Utils.print_success(f"Overlay {Utils.yellow_text(os.path.basename(overlay_abs_path))} created from {Utils.blue_text(file_path)}. Removing temporary overlay...")
+            elif name_versions:
+                Utils.print_success(f"Overlay {Utils.yellow_text(os.path.basename(overlay_abs_path))} created using {','.join(name_versions)}. Removing temporary overlay...")
             os.chmod(overlay_abs_path, 0o664)
-            CondaTainer.remove_tmp_overlay(normalized_name_version)
+            CondaTainer_Create.create_cleanup(normalized_name_version)
             return True
         except KeyboardInterrupt:
-            Utils.print_message("Process interrupted by user.")
-            CondaTainer_Create.create_cleanup(normalized_name_version)
+            Utils.print_message(f"Creation of overlay {Utils.yellow_text(overlay_abs_path)} interrupted by user.")
+            CondaTainer_Create.create_cleanup(normalized_name_version, failed=True)
             raise
 
 class CondaTainer_Exec:
@@ -1948,7 +1935,7 @@ class CondaTainer_Check:
         if is_install:
             CondaTainer.ensure_base_image()
             Utils.print_message("Attempting to auto-install missing dependencies...")
-            
+
             build_objects = [BuildObject(pkg) for pkg in missing_deps]
             build_graph = BuildGraph(build_objects)
             if build_graph.run():
@@ -2041,7 +2028,7 @@ class CondaTainer_Run:
                 if md.endswith(('.sqf', '.img', '.squashfs')):
                     Utils.print_error(f"Custom overlay {Utils.yellow_text(md)} is missing. Cannot proceed with auto-installation.")
                     return
-                
+
             build_objects = [BuildObject(pkg) for pkg in missing_deps]
             build_graph = BuildGraph(build_objects)
             if build_graph.run():
@@ -2294,5 +2281,4 @@ if __name__ == "__main__":
         Utils.print_note(str(rte))
         sys.exit()
     except KeyboardInterrupt:
-        Utils.print_message("CondaTainer interrupted by user.")
         sys.exit(1)
