@@ -1,15 +1,23 @@
 # CondaTainer & ModGen
 
-<img src="assets/logos_gemini_generated.png" width="250" alt="CondaTainer and ModGen Logo">
+[![GitHub release](https://img.shields.io/github/release/Justype/condatainer.svg)](https://github.com/Justype/condatainer/releases)
+[![GitHub issues](https://img.shields.io/github/issues/Justype/condatainer.svg)](https://github.com/Justype/condatainer/issues)
+[![GitHub license](https://img.shields.io/github/license/Justype/condatainer.svg)](https://github.com/Justype/condatainer/blob/main/LICENSE)
 
-A toolkit for efficient resource management on HPC systems, targeting inode limits and environment isolation.
+<div>
+<a href="#-condatainer"><img src="assets/logo_cnt.png" height="80" alt="CondaTainer Logo"></a>
+&nbsp;&nbsp;
+<a href="./MG_README.md"><img src="assets/logo_mg.png" height="80" alt="ModGen Logo"></a>
+</div>
+
+Both tools aim to automate environment management and dependency handling on HPC, but with different approaches:
 
 - **CondaTainer**: Wraps environments in overlays using [Apptainer](https://apptainer.org/) and [SquashFS](https://github.com/plougher/squashfs-tools).
 - **ModGen**: Automates [Lmod](https://lmod.readthedocs.io/en/latest/)/[Environment Modules](https://modules.readthedocs.io/en/latest/) modules creation.
 
 Which one to choose?
 
-- If you want to reduce inode usage, use **CondaTainer**.
+- If you care about inode usage and environment isolation, use [**CondaTainer**](#-condatainer).
 - If you prefer `Lmod` and using system available modules, use [**ModGen**](MG_README.md).
 
 ## 🛠️ Installation
