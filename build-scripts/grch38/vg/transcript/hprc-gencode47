@@ -3,8 +3,9 @@
 #DEP:grch38/gtf-gencode/47
 #DEP:grch38/vcf/hprc-v1.1-decomposed-gencode
 #DEP:vg/1.61.0
-#WHATIS:VG graph genome with GRCh38 and GENCODE47
+#WHATIS:VG pan-transcriptome with GRCh38 and GENCODE47
 #URL:https://github.com/vgteam/vg
+
 #ENV:VG_XG=$app_root/hprc-v1.1-mc-grch38-gencode47.spliced.xg
 #ENVNOTE:xg spliced genome index: vg mpmap, rpvg
 #ENV:VG_DIST=$app_root/hprc-v1.1-mc-grch38-gencode47.spliced.dist
@@ -20,11 +21,17 @@
 #ENV:VG_TXORIGIN_TSV=$app_root/hprc-v1.1-mc-grch38-gencode47.txorigin.tsv
 #ENVNOTE:transcript origin TSV: vg rpvg
 
+#SBATCH --cpus-per-task=40
+#SBATCH --mem=430G
+#SBATCH --time=2-00:00:00
+#SBATCH --job-name=vg-mpmap-index
+#SBATCH --output=%x-%j.log
+
 #########################################################
 # VG graph genome with GRCh38 and GENCODE47
 # Using HPRC v1.1 variants (decomposed) to build the graph
 # - VG is a graph genome toolkit
-# - The RNA-seq results can be parsed by rpvg after mapping with VG
+# - The RNA-seq results can be parsed by rpvg after mapping with VG mpmap
 #########################################################
 
 install_app() {
@@ -44,7 +51,7 @@ install_app() {
         --verbosity 2
     # 32 threads are recommended
     # You should allocate at least 400GB memory for building the graph
-    # 4TB for gcsa-size-limit (increase temporary limit when building GCSA)
+    # 4TB free disk for gcsa-size-limit (increase temporary limit when building GCSA)
 
     print_stderr "Moving VG graph index files to target directory"
     mv hprc-v1.1-mc-grch38-gencode47.* "$target_dir/"
