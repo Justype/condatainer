@@ -10,7 +10,7 @@
 <a href="./MG_README.md"><img src="assets/logo_mg.png" height="100" alt="ModGen Logo"></a>
 </div>
 
-Both tools aim to automate environment management and dependency handling on HPC, but with different approaches:
+Both tools aim to automate environment management and handling on HPC, but with different approaches:
 
 - **CondaTainer**: Wraps environments in overlays using [Apptainer](https://apptainer.org/) and [SquashFS](https://github.com/plougher/squashfs-tools).
 - **ModGen**: Automates [Lmod](https://lmod.readthedocs.io/en/latest/)/[Environment Modules](https://modules.readthedocs.io/en/latest/) modules creation.
@@ -35,7 +35,7 @@ The installation script is **interactive**. You will be prompted to confirm the 
 - **Inode Efficiency**: Compresses heavy conda environments (10k+ files) into 1 file.
 - **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
 - **Module Compatibility**: Recognizes `module load` commands and loads corresponding overlays.
-- **Hybrid Modes**: Supports read-only SquashFS (`.sqf`) for production and writable ext3 (`.img`) for development.
+- **Hybrid Modes**: Supports read-only (`.sqf`) for production and writable (`.img`) for development.
 - **Context-Aware**: Manages references/indexes, and displays helpful info when in interactive sessions.
 - **SLURM Integration**: Submits index generation jobs automatically when needed.
 
@@ -81,7 +81,7 @@ Both tools utilize a standardized naming schema to organize software and referen
   - `grcm39/salmon/1.10.2/gencodeM33`: salmon index for mouse genome GRCm39 with Gencode M33 annotation
 
 > [!NOTE]
-> CondaTainer uses overlay names to identify environments. So names must be unique and should not be changed after creation.
+> Overlay names are used to identify environments. They should not be changed after creation.
 
 ## 🚀 Script Runtime Automation
 
