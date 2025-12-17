@@ -1470,7 +1470,8 @@ class CondaTainer_Exec:
                 Utils.print_error(f"Overlay file {overlay_final[i]} not found.")
                 exit(1)
 
-        CondaTainer_Exec.exec_command(overlay_final, command_final)
+        if not CondaTainer_Exec.exec_command(overlay_final, command_final):
+            exit(1)
 
     @staticmethod
     def parse_e_args(args):
@@ -1489,7 +1490,8 @@ class CondaTainer_Exec:
                 Utils.print_error(f"Overlay file {overlay_final[i]} not found.")
                 exit(1)
 
-        CondaTainer_Exec.exec_command(overlay_final, command_final)
+        if not CondaTainer_Exec.exec_command(overlay_final, command_final):
+            exit(1)
 
     @staticmethod
     def get_overlay_abs_paths(paths_or_name_version: List[str]) -> List[str]:
@@ -2120,7 +2122,8 @@ class CondaTainer_Run:
         else:
             bash_command.append(f"bash {script_path}")
 
-        CondaTainer_Exec.exec_command(deps, [ "/bin/bash", "-c", "\n".join(bash_command)] )
+        if not CondaTainer_Exec.exec_command(deps, [ "/bin/bash", "-c", "\n".join(bash_command)] ):
+            exit(1)
 
 class CondaTainer_Overlay:
     @staticmethod
@@ -2187,6 +2190,7 @@ class CondaTainer_Overlay:
                 Utils.print_success(f"Conda env is created inside {Utils.blue_text(overlay_path)}.")
             else:
                 Utils.print_error(f"Failed to create conda env inside {Utils.blue_text(overlay_path)}.")
+                exit(1)
         else:
             Utils.print_message("Initializing minimal conda environment with small package (zlib)...")
             if CondaTainer_Exec.exec_command([overlay_path], ["mm-create", "zlib", "-y"], capture_output=True):
@@ -2194,6 +2198,7 @@ class CondaTainer_Overlay:
                 Utils.print_success(f"Conda env is created inside {Utils.blue_text(overlay_path)}.")
             else:
                 Utils.print_error(f"Failed to create conda env inside {Utils.blue_text(overlay_path)}.")
+                exit(1)
 
 class CondaTainer_Apptainer:
     @staticmethod
