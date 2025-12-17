@@ -20,6 +20,7 @@ install_app() {
 
     print_stderr "Copying reference genome FASTA to ${YELLOW}${app_name_version}${NC}"
     smart_copy_or_link "$GENOME_FASTA" "$BWA_MEM2_FASTA"
+    smart_copy_or_link "$GENOME_FASTA.fai" "$BWA_MEM2_FASTA.fai"
 
     print_stderr "Indexing ${YELLOW}${app_name_version}${NC} with bwa-mem2 index"
     bwa-mem2 index -p "$BWA_MEM2_FASTA" "$BWA_MEM2_FASTA"
