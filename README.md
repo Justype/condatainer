@@ -14,7 +14,7 @@ Both tools aim to automate environment management and handling on HPC, but with 
 Which one to choose?
 
 - If you care about inode usage and environment isolation, use [**CondaTainer**](#-condatainer).
-- If you prefer `Lmod` and using system available modules, use [**ModGen**](README_MG.md).
+- If you prefer Lmod and using system available modules, use [**ModGen**](README_MG.md).
 
 ## 🛠️ Installation
 

@@ -56,8 +56,8 @@ Used for reference datasets, genome assemblies, or indices.
 | `ncpu` | Number of CPUs to use (default: env `SLURM_CPUS_PER_TASK` or 4) |
 | `app_name` | apps: app name; ref: assembly/data-type |
 | `version` | apps: app version; ref: data version |
-| `target_dir` | Target installation directory (`apps/name/version` or `ref/assembly/data-type/version`) |
-| `tmp_dir` | Temporary working directory (`tmp/name/version`) |
+| `target_dir` | Target installation directory (managed by CondaTainer/ModGen) |
+| `tmp_dir` | Temporary working directory (managed by CondaTainer/ModGen) |
 
 | Function | Description |
 | -------- | ----------- |
@@ -111,12 +111,54 @@ When CondaTainer or ModGen processes the build script, it will ensure that all s
 
 If `sbatch` is available, CondaTainer or ModGen will submit the build job with the specified parameters.
 
+**Example:**
+
+```bash
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=42G
+#SBATCH --time=2:00:00
+#SBATCH --job-name=star-index
+#SBATCH --output=%x-%j.log
+```
+
+Must have the following parameters:
+- `--cpus-per-task`
+- `--output`
+
+My script will use `--cpus-per-task` for local builds. And `--output` must be present, my script will overwrite it when submitting the job and make it point to the condatainer logs directory.
+
 ### Environment Variables
 
 - `#ENV:` lines define environment variables to be set when the overlay is loaded.
 - `#ENVNOTE:` lines provide descriptions for the environment variables, which will be included in the modulefile help text and CondaTainer `.env` file.
   - `#ENVNOTE:` must directly follow its corresponding `#ENV:` line.
   - Only one `#ENVNOTE:` line is allowed per `#ENV:` variable.
+
+`$app_root` is a special placeholder that will be replaced with the actual installation path of the overlay when loaded.
+
+**Example:**
+
+```bash
+#ENV:CELLRANGER_REF_DIR=$app_root
+#ENVNOTE:cellranger reference dir
+#ENV:GENOME_FASTA=$app_root/fasta/genome.fa
+#ENVNOTE:genome fasta
+#ENV:ANNOTATION_GTF_GZ=$app_root/genes/genes.gtf.gz
+#ENVNOTE:10X modified gtf
+```
+
+#### ENV Naming Guidelines
+
+For common data: genome fasta, gtf, etc., use standard variable names like `GENOME_FASTA`, `ANNOTATION_GTF_GZ`.
+
+- If the file is compressed, add `_GZ` suffix. e.g. `ANNOTATION_GTF` for uncompressed gtf, `ANNOTATION_GTF_GZ` for gzipped gtf.
+
+For tool-specific references, use the tool name as a prefix.
+
+- `CELLRANGER_REF_DIR` for Cellranger references.
+- `STAR_INDEX_DIR` for STAR indexes.
+- `BOWTIE2_PREFIX` for Bowtie2 indexes.
+- `BWA_MEM2_FASTA` for BWA-MEM2 genome fasta with `bwa-mem2` indexes.
 
 ## Apps
 
