@@ -1692,6 +1692,9 @@ class CondaTainer_Avail:
 
     @staticmethod
     def parse_avail_args(args):
+        if args.terms:
+            args.terms = [Utils.normalize_name_version(term) for term in args.terms]
+
         local_packages = Utils.get_local_build_scripts()
         # Fetch remote metadata entries if configured
         remote_packages = {}
@@ -1791,6 +1794,9 @@ class CondaTainer_List:
 
     @staticmethod
     def parse_list_args(args):
+        if args.terms:
+            args.terms = [Utils.normalize_name_version(term) for term in args.terms]
+
         if os.path.isdir(Config.IMAGES_DIR):
             overlay_files = [f for f in os.listdir(Config.IMAGES_DIR) if f.endswith(('.sqf', '.img', '.squashfs'))]
             name_versions_dict = {}
@@ -1858,6 +1864,9 @@ class CondaTainer_Remove:
 
     @staticmethod
     def parse_remove_args(args):
+        if args.terms:
+            args.terms = [Utils.normalize_name_version(term) for term in args.terms]
+
         installed_overlays_dict = CondaTainer.get_installed_overlays()
         if not installed_overlays_dict:
             Utils.print_warning("No installed overlays found.")

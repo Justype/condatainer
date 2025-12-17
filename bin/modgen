@@ -1269,6 +1269,9 @@ class ModGen_Avail:
 
     @staticmethod
     def parse_avail_args(args):
+        if args.terms:
+            args.terms = [Utils.normalize_name_version(term) for term in args.terms]
+
         local_packages = Utils.get_local_build_scripts()
         # Fetch remote metadata entries if configured
         remote_packages = {}
@@ -1364,6 +1367,9 @@ class ModGen_List:
 
     @staticmethod
     def parse_list_args(args):
+        if args.terms:
+            args.terms = [Utils.normalize_name_version(term) for term in args.terms]
+
         if os.path.isdir(Config.APPS_MODULEFILES_DIR):
             installed_modules = ModGen.get_installed_modules("apps")
             name_versions_dict = {}
@@ -1429,6 +1435,9 @@ class ModGen_Remove:
 
     @staticmethod
     def parse_remove_args(args):
+        if args.terms:
+            args.terms = [Utils.normalize_name_version(term) for term in args.terms]
+
         installed_modules_dict = ModGen.get_installed_modules()
         if not installed_modules_dict:
             Utils.print_warning("No installed modules found.")
