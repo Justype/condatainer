@@ -160,6 +160,24 @@ For tool-specific references, use the tool name as a prefix.
 - `BOWTIE2_PREFIX` for Bowtie2 indexes.
 - `BWA_MEM2_FASTA` for BWA-MEM2 genome fasta with `bwa-mem2` indexes.
 
+### Interactive Tag
+
+- `#INTERACTIVE:<Prompt>` tag indicates that the build script requires input from the user during execution.
+- It is common for apps that need license agreement acceptance or custom configuration.
+- When CondaTainer or ModGen encounters this tag, it will prompt the user with the specified `<Prompt>` message before building. And they will take user input and pass it to the build script during execution.
+- You can use `\n` to add new lines in the prompt message.
+
+**Example:**
+
+```bash
+#!/usr/bin/bash
+#WHATIS:10X Genomics Single Cell Software Suite
+#URL:https://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
+#INTERACTIVE:⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.\nhttps://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
+```
+
+from [cellranger/9.0.1](../build-scripts/cellranger/9.0.1)
+
 ## Apps
 
 - Do not try to manually download apps that are already available via conda-forge or bioconda.
