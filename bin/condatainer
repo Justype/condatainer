@@ -132,7 +132,7 @@ def main():
         CondaTainer_Overlay.parse_overlay_args(args)
     elif args.action == "apptainer":
         CondaTainer_Apptainer.parse_apptainer_args(args)
-    elif args.action == "update":
+    elif args.action == "self-update":
         CondaTainer_Update.parse_update_args(args)
     elif args.action == "modgen":
         CondaTainer_ModGen.parse_modgen_args(args)
@@ -2287,7 +2287,7 @@ class CondaTainer_Apptainer:
 class CondaTainer_Update:
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_Update.parser_update = parser.add_parser("update", help="Update CondaTainer to the latest version")
+        CondaTainer_Update.parser_update = parser.add_parser("self-update", help="Update CondaTainer to the latest version")
         CondaTainer_Update.parser_update.add_argument(
             "-y", "--yes",
             action="store_true",

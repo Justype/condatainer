@@ -36,7 +36,7 @@ positional arguments:
     run (r)             Run a script and auto-solve the dependencies by #DEP tags
     info                Show information about a specific overlay
     apptainer           Get latest Apptainer executable from conda-forge
-    update              Update CondaTainer to the latest version
+    self-update         Update CondaTainer to the latest version
     modgen              Get latest modgen executable from GitHub
 
 optional arguments:

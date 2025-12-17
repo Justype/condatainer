@@ -30,7 +30,7 @@ positional arguments:
     exec (e)            Execute a command with modules loaded
     check (c)           Check if the dependencies of a script are installed
     run (r)             Run a script and auto-solve the dependencies by #DEP tags
-    update              Update ModGen to the latest version
+    self-update         Update ModGen to the latest version
     condatainer         Install CondaTainer
 
 optional arguments:

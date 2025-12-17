@@ -104,7 +104,7 @@ def main():
         ModGen_Remove.parse_remove_args(args)
     elif args.action == "init":
         ModGen_Init.parse_init_args(args)
-    elif args.action == "update":
+    elif args.action == "self-update":
         ModGen_Update.parse_update_args(args)
     elif args.action == "condatainer":
         ModGen_CondaTainer.parse_condatainer_args(args)
@@ -1794,7 +1794,7 @@ fi
 class ModGen_Update:
     @staticmethod
     def add_parser_arguments(parser):
-        ModGen_Update.parser_update = parser.add_parser("update", help="Update ModGen to the latest version")
+        ModGen_Update.parser_update = parser.add_parser("self-update", help="Update ModGen to the latest version")
         ModGen_Update.parser_update.add_argument(
             "-y", "--yes",
             action="store_true",
