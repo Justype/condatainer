@@ -27,6 +27,7 @@ install_app() {
 # - target_dir:       opt/assembly/data_type/version (set by condatainer)
 # - tmp_dir:          tmp directory (set by condatainer)
 
+# region common_functions
 set -e # exit on error
 RED='\033[0;91m'    # Red      WARNING or ERROR
 BLUE='\033[0;94m'   # Blue     Dependency or Modulefile Changes
