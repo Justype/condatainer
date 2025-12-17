@@ -737,7 +737,7 @@ class BuildObject:
         cmd_create = [
             Config.MICROMAMBA_BIN,
             "--root-prefix", Config.CONDA_ROOT_DIR,
-            "create", "-y",
+            "create", "--no-allow-softlinks", "-y",
             "--channel", "conda-forge", "--channel", "bioconda",
             "--prefix", self.target_path,
             self.name_version.replace('/', '=')
@@ -758,6 +758,7 @@ class BuildObject:
             self.create_cleanup(failed=True)
             return False
 
+        shutil.rmtree(os.path.join(self.target_path, "conda-meta"), ignore_errors=True)
         self.create_cleanup(failed=False)
         Utils.print_success(f"Module {Utils.yellow_text(self.name_version)} created.")
         return True

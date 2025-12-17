@@ -2268,8 +2268,8 @@ class CondaTainer_Apptainer:
             Config.LOCAL_MICROMAMBA_BIN, 
             "-r", os.path.join(Config.CONDATINER_DIR, "micromamba_env"),
             "create", "-c", "conda-forge",
+            "-y", "--no-allow-softlinks",
             "-p", Config.LOCAL_APPTAINER_DIR,
-            "-y",
             "apptainer"
         ]
 
@@ -2280,6 +2280,7 @@ class CondaTainer_Apptainer:
             Utils.print_success(f"Apptainer installed to {Config.APPTAINER_PATH}.")
             Utils.print_message("Cleaning up Micromamba environment...")
             shutil.rmtree(os.path.join(Config.CONDATINER_DIR, "micromamba_env"), ignore_errors=True)
+            shutil.rmtree(os.path.join(Config.LOCAL_APPTAINER_DIR, "conda-meta"), ignore_errors=True)
         except subprocess.CalledProcessError:
             Utils.print_error("Failed to install Apptainer.")
 
