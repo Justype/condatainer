@@ -803,7 +803,7 @@ class BuildObject:
             cmd_create = ["bash", "-c", f"{ml_commands} && bash {self.build_script_path}"]
         else:
             cmd_create = ["bash", self.build_script_path]
-        
+
         Utils.print_debug(f"[BUILD] Running build script with command: {cmd_create}")
 
         try:
@@ -813,7 +813,7 @@ class BuildObject:
             Utils.print_note(f"Make sure you have run {Utils.blue_text(os.path.basename(Config.SCRIPT_PATH)+' init')} and source the shell configuration file.")
             self.create_cleanup(failed=True)
             return False
-        
+
         whatis_url = Utils.get_whatis_url_from_build_script(self.build_script_path, self.name_version)
         env_dict = Utils.get_env_dict_from_build_script(self.build_script_path)
 
@@ -823,7 +823,7 @@ class BuildObject:
             Utils.print_error(f"Failed to generate modulefile for {Utils.yellow_text(self.name_version)}.")
             self.create_cleanup(failed=True)
             return False
-        
+
         self.create_cleanup(failed=False)
         Utils.print_success(f"Module {Utils.yellow_text(self.name_version)} created.")
         return True
@@ -887,7 +887,7 @@ class BuildObject:
                 Utils.print_error(f"Failed to parse sbatch submission output: {result.stdout}")
                 return None
         except subprocess.CalledProcessError as e:
-            Utils.print_error(f"Failed to submit sbatch job for {self.name_version}: {e.stderr}")
+            Utils.print_error(f"Failed to submit sbatch job for {Utils.yellow_text(self.name_version)}: {e.stderr}")
             return None
 
 class BuildGraph:
@@ -980,7 +980,6 @@ class BuildGraph:
                     return False
             job_id = metadata._submit_sbatch(dep_ids)
             if job_id is None:
-                Utils.print_error(f"Failed to submit sbatch job for {Utils.yellow_text(metadata.name_version)}.")
                 return False
             self._build_job_ids[metadata.name_version] = job_id
         return True

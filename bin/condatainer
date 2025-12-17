@@ -1117,7 +1117,7 @@ class BuildObject:
                 Utils.print_error(f"Failed to parse sbatch submission output: {result.stdout}")
                 return None
         except subprocess.CalledProcessError as e:
-            Utils.print_error(f"Failed to submit sbatch job for {self.name_version}: {e.stderr}")
+            Utils.print_error(f"Failed to submit sbatch job for {Utils.yellow_text(self.name_version)}: {e.stderr}")
             return None
 
 class BuildGraph:
@@ -1210,7 +1210,6 @@ class BuildGraph:
                     return False
             job_id = metadata._submit_sbatch(dep_ids)
             if job_id is None:
-                Utils.print_error(f"Failed to submit sbatch job for {Utils.yellow_text(metadata.name_version)}.")
                 return False
             self._build_job_ids[metadata.name_version] = job_id
         return True
