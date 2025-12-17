@@ -888,6 +888,8 @@ class BuildObject:
                 return None
         except subprocess.CalledProcessError as e:
             Utils.print_error(f"Failed to submit sbatch job for {Utils.yellow_text(self.name_version)}: {e.stderr}")
+            if os.path.isfile(sbatch_script_path):
+                os.remove(sbatch_script_path)
             return None
 
 class BuildGraph:
@@ -1336,7 +1338,7 @@ class ModGen_Avail:
             build_objects = [BuildObject(pkg) for pkg in uninstalled_packages]
             build_graph = BuildGraph(build_objects)
             if build_graph.run():
-                Utils.print_success("All selected modules installed successfully.")
+                Utils.print_success("All selected modules installed/submitted.")
             else:
                 Utils.print_error("Some modules failed to install.")
 
@@ -1532,7 +1534,7 @@ class ModGen_Check:
             build_objects = [BuildObject(md) for md in missing_deps]
             build_graph = BuildGraph(build_objects)
             if build_graph.run():
-                Utils.print_success("All missing dependencies installed successfully.")
+                Utils.print_success("All missing dependencies installed/submitted.")
             else:
                 Utils.print_error("Some dependencies failed to install.")
         else:
@@ -1618,7 +1620,7 @@ class ModGen_Run:
             build_objects = [BuildObject(md) for md in missing_deps]
             build_graph = BuildGraph(build_objects)
             if build_graph.run():
-                Utils.print_success("All missing dependencies installed successfully.")
+                Utils.print_success("All missing dependencies installed/submitted.")
             else:
                 Utils.print_error("Some dependencies failed to install.")
                 return

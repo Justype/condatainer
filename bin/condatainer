@@ -45,7 +45,7 @@ class Config:
     # File paths
     BASE_IMAGE_DEF = os.path.join(BUILD_SCRIPTS_DIR, "base_image.def")
     BASE_IMAGE_SIF = os.path.join(IMAGES_DIR, "base_image.sif")
-    APPTAINER_PATH = shutil.which("apptainer") # Not compatible with singularity anymore
+    APPTAINER_PATH = LOCAL_APPTAINER_BIN if os.path.isfile(LOCAL_APPTAINER_BIN) else shutil.which("apptainer")
     BAD_CHARS_REGEX = re.compile(r'[<>:"/\\|?*\0\s\'`$&;|!\[\]#%@=+{}(),]')
 
     # Utils
@@ -100,11 +100,11 @@ def main():
     CondaTainer_ModGen.add_parser_arguments(subparsers)
 
     args = parser.parse_args()
-
     if args.debug:
         Config.debug = True
         Utils.print_debug("Debug mode enabled")
         Utils.print_debug(f"CondaTainer Version: {Config.VERSION}")
+        Utils.print_debug(f"Apptainer Path: {Config.APPTAINER_PATH}")
     if args.no_sbatch:
         Config.use_sbatch = False
         Utils.print_debug("No sbatch mode enabled")
@@ -580,10 +580,6 @@ class CondaTainer:
         """
         os.makedirs(Config.IMAGES_DIR, mode=0o775, exist_ok=True)
         os.makedirs(Config.REF_IMAGES_DIR, mode=0o775, exist_ok=True)
-
-        if os.path.isfile(Config.LOCAL_APPTAINER_BIN):
-            Config.APPTAINER_PATH = Config.LOCAL_APPTAINER_BIN
-            Utils.print_message(f"Using local Apptainer binary at {Config.APPTAINER_PATH}")
 
         if not CondaTainer.ensure_apptainer():
             exit(1)
@@ -1118,6 +1114,8 @@ class BuildObject:
                 return None
         except subprocess.CalledProcessError as e:
             Utils.print_error(f"Failed to submit sbatch job for {Utils.yellow_text(self.name_version)}: {e.stderr}")
+            if os.path.isfile(sbatch_script_path):
+                os.remove(sbatch_script_path)
             return None
 
 class BuildGraph:
