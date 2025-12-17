@@ -9,6 +9,22 @@
     "sbatch": false,
     "whatis": "10X Genomics Single Cell Software Suite"
   },
+  "grch38/bwa-mem2/2.3/ucsc_no_alt": {
+    "deps": [
+      "bwa-mem2/2.3",
+      "grch38/genome/ucsc_no_alt"
+    ],
+    "sbatch": true,
+    "whatis": "bwa-mem2 index for GRCh38 UCSC no alt reference genome"
+  },
+  "grch38/bwa/0.7.19/ucsc_no_alt": {
+    "deps": [
+      "bwa/0.7.19",
+      "grch38/genome/ucsc_no_alt"
+    ],
+    "sbatch": true,
+    "whatis": "bwa index for GRCh38 UCSC no alt reference genome"
+  },
   "grch38/cellranger/2024-A": {
     "deps": [],
     "sbatch": false,
