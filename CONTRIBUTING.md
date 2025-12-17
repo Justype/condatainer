@@ -41,7 +41,7 @@ Where to add
   - E.g., `build-scripts/grch38/bowtie2/ucsc_no_alt`
 
 Guidelines
-- Please check the [Build Script Manual](assets/MANUAL_BUILD_SCRIPT.md) for naming conventions and available variables.
+- Please check the [Build Script Manual](docs/MANUAL_BUILD_SCRIPT.md) for naming conventions and available variables.
 
 Testing
 - Test the build script locally and on HPC if applicable.

@@ -1,8 +1,8 @@
 # Build Script Manual
  
-This document gives instructions on how to create your own build scripts for use with CondaTainer and ModGen.
+This document gives instructions on how to create your own build scripts for CondaTainer and ModGen.
 
-Table of Contents
+## Table of Contents
 
 - [Naming Conventions](#naming-conventions)
 - [Available Variables](#available-variables)
@@ -10,7 +10,8 @@ Table of Contents
   - [Whatis and Url](#whatis-and-url)
   - [Set Dependencies](#set-dependencies)
   - [SBATCH Parameters](#sbatch-parameters)
-  - [Environment Variables](#environment-variables)
+  - [Environment Variables](#environment-variables) and [ENV Naming Guidelines](#env-naming-guidelines)
+  - [Interactive Tag](#interactive-tag)
 - [Apps](#apps)
 - [References](#references)
 
@@ -155,6 +156,12 @@ For common data: genome fasta, gtf, etc., use standard variable names like `GENO
 
 For tool-specific references, use the tool name as a prefix.
 
+- If the index is a directory, use `_DIR` suffix.
+- If the index is a file prefix, use `_PREFIX` suffix.
+- If the index is a specific file, use appropriate suffix based on file type.
+
+**Examples:**
+
 - `CELLRANGER_REF_DIR` for Cellranger references.
 - `STAR_INDEX_DIR` for STAR indexes.
 - `BOWTIE2_PREFIX` for Bowtie2 indexes.
@@ -185,6 +192,8 @@ from [cellranger/9.0.1](../build-scripts/cellranger/9.0.1)
   - HPC systems often lack required build tools or dependencies unless you load specific modules.
   - To maximize compatibility (CondaTainer and ModGen), it's better to rely on pre-compiled packages.
 
+Template: [build-template-app](../assets/build-template-app)
+
 ### Tips
 
 You can use `tar_xf_pigz` and `pigz_or_gunzip` functions to speed up decompression of large files if `pigz` is available on your system.
@@ -203,6 +212,8 @@ If the app requires specific environment variables to function properly, make su
   - If indexes are version dependent, ensure then app version is included in the name. e.g. [grch38/star/2.7.11b/gencode47-101](../build-scripts/grch38/star/2.7.11b/gencode47-101)
   - If indexes require building, ensure you have the `SBATCH` parameters set appropriately to allocate sufficient resources.
 - Always add environment variables using `#ENV:` and `#ENVNOTE:` to help users locate the reference data.
+
+Template: [build-template-ref](../assets/build-template-ref)
 
 ### Tips
 

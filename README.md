@@ -35,7 +35,7 @@ The installation script is **interactive**. You will be prompted to confirm the 
 - **Context-Aware**: Manages references/indexes, and displays helpful info when in interactive sessions.
 - **SLURM Integration**: Submits index generation jobs automatically when needed.
 
-(Tips for writable images: see [here](assets/TIPS.md#create-writable-images))
+(Tips for writable images: see [here](docs/TIPS.md#create-writable-images))
 
 ```bash
 # 1. Create an overlay for samtools
@@ -65,7 +65,7 @@ condatainer exec -o grch38--cellranger--2024-A bash
 #   STAR_INDEX_DIR    : STAR index dir
 ```
 
-[Read the full CondaTainer Manual](assets/MANUAL_CNT.md)
+[Read the full CondaTainer Manual](docs/MANUAL_CNT.md)
 
 ## 📂 Naming Convention
 
