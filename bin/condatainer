@@ -500,6 +500,18 @@ class Utils:
         """sbatch is available and we are not inside a SLURM job."""
         return (shutil.which("sbatch") is not None) and ("SLURM_JOB_ID" not in os.environ)
 
+    @staticmethod
+    def get_exec_environ() -> Dict[str, str]:
+        """
+        Get environment variables for apptainer exec commands.
+        If using local apptainer binary, add local apptainer bin dir to PATH.
+        """
+        env = os.environ.copy()
+        if Config.APPTAINER_PATH == Config.LOCAL_APPTAINER_BIN:
+            local_apptainer_bin_dir = os.path.dirname(Config.LOCAL_APPTAINER_BIN)
+            env["PATH"] = f"{local_apptainer_bin_dir}:{env.get('PATH', '')}"
+        return env
+
 class CondaTainer:
     PREBUILT_BASE_IMAGE_PLATFORMS = { "x86_64" } # aarch64 is not available yet
 
@@ -641,7 +653,7 @@ class CondaTainer:
         Utils.print_message(f"Creating temporary SquashFS overlay for {Utils.yellow_text(normalized_name_version)}...")
         cmd = [
             Config.APPTAINER_PATH, "overlay", "create",
-            "--sparse", "--size", "15360", "--fakeroot", 
+            "--sparse", "--size", "15360", 
             tmp_overlay_path
         ]
 
@@ -868,8 +880,9 @@ class BuildObject:
 
         Utils.print_message(f"Building SquashFS overlay at {Utils.blue_text(self.target_overlay_path)} with packages: {Utils.yellow_text(f'{name}={version}')}" )
 
+        environ = Utils.get_exec_environ()
         cmd_create = [
-            Config.APPTAINER_PATH, "exec", "--fakeroot",
+            Config.APPTAINER_PATH, "exec",
             "--env", "TMPDIR=/ext3/tmp",
             "--overlay", self.tmp_overlay_path,
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
@@ -889,7 +902,7 @@ class BuildObject:
 
         Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_create}")
         try:
-            subprocess.run(cmd_create, check=True)
+            subprocess.run(cmd_create, check=True, env=environ)
         except subprocess.CalledProcessError:
             self.print_create_error_message()
             self.create_cleanup(failed=True)
@@ -940,8 +953,9 @@ class BuildObject:
         else:
             env_settings.extend(["--env", f"target_dir=/cnt/{self.relative_path}"])
 
+        environ = Utils.get_exec_environ()
         cmd_create = [
-            Config.APPTAINER_PATH, "exec", "--fakeroot",
+            Config.APPTAINER_PATH, "exec",
             *env_settings,
             "--env", f"SLURM_CPUS_PER_TASK={self.ncpus}",
             "--env", "IN_CONDATINER=1",
@@ -966,7 +980,7 @@ class BuildObject:
         Utils.print_debug(f"[BUILD] Running build script with command: {cmd_create}")
 
         try:
-            subprocess.run(cmd_create, check=True, input=("\n".join(self.interactive_inputs) + "\n").encode())
+            subprocess.run(cmd_create, check=True, input=("\n".join(self.interactive_inputs) + "\n").encode(), env=environ)
         except subprocess.CalledProcessError:
             Utils.print_error(f"Build script {Utils.blue_text(self.build_script_path)} failed.")
             self.create_cleanup(failed=True)
@@ -982,8 +996,9 @@ class BuildObject:
             Utils.share_to_ugo_recursive(self.cnt_dir_path)
 
             Utils.print_message(f"Creating SquashFS file at {Utils.blue_text(self.target_overlay_path)}...")
+            environ = Utils.get_exec_environ()
             cmd_mksqf = [
-                Config.APPTAINER_PATH, "exec", "--fakeroot",
+                Config.APPTAINER_PATH, "exec",
                 "--overlay", self.tmp_overlay_path,
                 "--bind", Config.CONDATINER_DIR,
                 Config.BASE_IMAGE_SIF,
@@ -994,7 +1009,7 @@ class BuildObject:
             ]
             Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_mksqf}")
             try:
-                subprocess.run(cmd_mksqf, check=True)
+                subprocess.run(cmd_mksqf, check=True, env=environ)
             except subprocess.CalledProcessError:
                 self.print_create_error_message()
                 self.create_cleanup(failed=True)
@@ -1002,8 +1017,9 @@ class BuildObject:
         else:
             # app overlay
             Utils.print_message(f"Creating SquashFS file at {Utils.blue_text(self.target_overlay_path)}...")
+            environ = Utils.get_exec_environ()
             cmd_mksqf = [
-                Config.APPTAINER_PATH, "exec", "--fakeroot",
+                Config.APPTAINER_PATH, "exec",
                 "--overlay", self.tmp_overlay_path,
                 "--bind", Config.CONDATINER_DIR,
                 Config.BASE_IMAGE_SIF,
@@ -1018,7 +1034,7 @@ class BuildObject:
 
             Utils.print_debug(f"[BUILD] Creating overlay with command: {cmd_mksqf}")
             try:
-                subprocess.run(cmd_mksqf, check=True)
+                subprocess.run(cmd_mksqf, check=True, env=environ)
             except subprocess.CalledProcessError:
                 self.print_create_error_message()
                 self.create_cleanup(failed=True)
@@ -1346,8 +1362,9 @@ class CondaTainer_Create:
             return False
 
         try:
+            environ = Utils.get_exec_environ()
             cmd_create = [
-                Config.APPTAINER_PATH, "exec", "--fakeroot",
+                Config.APPTAINER_PATH, "exec",
                 "--env", "TMPDIR=/ext3/tmp",
                 "--overlay", tmp_overlay_path,
                 *CondaTainer.generate_bind_args(*to_bind_paths),
@@ -1368,7 +1385,7 @@ class CondaTainer_Create:
             Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_create}")
 
             try:
-                subprocess.run(cmd_create, check=True)
+                subprocess.run(cmd_create, check=True, env=environ)
             except subprocess.CalledProcessError:
                 Utils.print_error(f"Creating {Utils.blue_text(overlay_abs_path)} from {Utils.blue_text(file_path)} failed.")
                 Utils.print_note(f"If apptainer cannot recognize zstd (unknown compression algorithm value 6), please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
@@ -1613,8 +1630,10 @@ class CondaTainer_Exec:
             # Convert filename-safe separators back to normalized path
             writable_path = f"/ext3/{os.path.splitext(os.path.basename(last_img))[0].replace('--', '/').replace('=', '/') }"
 
+        environ = Utils.get_exec_environ()
+
         exec_cmd = [
-            Config.APPTAINER_PATH, "exec", "--fakeroot",
+            Config.APPTAINER_PATH, "exec",
             *CondaTainer_Exec.generate_overlay_args(paths_or_name_versions),
             *env_params,
             "--env", f"PATH={path_env}",
@@ -1647,7 +1666,7 @@ class CondaTainer_Exec:
                 if writable_path:
                     print(f"Overlay env:\n  {Utils.yellow_text('CNT_CONDA_PREFIX')}: {Utils.blue_text(writable_path)}\n")
         try:
-            subprocess.run(exec_cmd, check=True, capture_output=capture_output)
+            subprocess.run(exec_cmd, check=True, capture_output=capture_output, env=environ)
         except subprocess.CalledProcessError:
             Utils.print_warning("Command execution failed inside the container.")
             return False
@@ -1749,7 +1768,7 @@ class CondaTainer_Avail:
             build_objects = [BuildObject(pkg) for pkg in uninstalled_packages]
             build_graph = BuildGraph(build_objects)
             if build_graph.run():
-                Utils.print_success("All selected overlays installed successfully.")
+                Utils.print_success("All selected overlays installed/submitted.")
             else:
                 Utils.print_error("Some overlays failed to install.")
 
@@ -1993,7 +2012,7 @@ class CondaTainer_Check:
             build_objects = [BuildObject(pkg) for pkg in missing_deps]
             build_graph = BuildGraph(build_objects)
             if build_graph.run():
-                Utils.print_success("All selected overlays installed successfully.")
+                Utils.print_success("All selected overlays installed/submitted.")
             else:
                 Utils.print_error("Some overlays failed to install.")
         else:
@@ -2077,7 +2096,7 @@ class CondaTainer_Run:
             build_objects = [BuildObject(pkg) for pkg in missing_deps]
             build_graph = BuildGraph(build_objects)
             if build_graph.run():
-                Utils.print_success("All selected overlays installed successfully.")
+                Utils.print_success("All selected overlays installed/submitted.")
             else:
                 Utils.print_error("Some overlays failed to install.")
                 return
@@ -2143,7 +2162,7 @@ class CondaTainer_Overlay:
         Utils.print_message(f"Creating overlay image at {Utils.blue_text(overlay_path)} with size {Utils.yellow_text(str(size_mib) + ' MiB')}...")
         cmd_overlay = [
             Config.APPTAINER_PATH, "overlay", "create",
-            "--size", str(size_mib), "--sparse", "--fakeroot",
+            "--size", str(size_mib), "--sparse",
             overlay_path
         ]
 
