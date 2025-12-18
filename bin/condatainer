@@ -250,7 +250,7 @@ class Utils:
         for root, _, files in os.walk(Config.BUILD_SCRIPTS_DIR):
             for filename in files:
                 # 1. skip non-build-script files
-                if filename.endswith(('.py', '.sh', ".def")):
+                if filename.endswith(('.py', '.sh')):
                     continue
 
                 full_path = os.path.join(root, filename)
@@ -261,6 +261,11 @@ class Utils:
 
                 # 3. generate key (relative path like 'apps/tool/v1')
                 relative_key = os.path.relpath(full_path, Config.BUILD_SCRIPTS_DIR)
+
+                if relative_key.endswith('.def'):
+                    if relative_key.startswith('base_image'):
+                        continue  # skip base_image scripts
+                    relative_key = relative_key[:-4]  # remove .def suffix
 
                 packages[relative_key] = full_path
 
@@ -1709,17 +1714,29 @@ class CondaTainer_Avail:
         all_packages = []
         for p in local_packages.keys():
             if p in installed_overlays:
-                all_packages.append(f"{p} (installed)")
+                if "/" in p:
+                    all_packages.append(f"{p} (installed)")
+                else:
+                    all_packages.append(f"{p} (container, installed)")
             else:
-                all_packages.append(p)
+                if "/" in p:
+                    all_packages.append(p)
+                else:
+                    all_packages.append(f"{p} (container)")
             added_packages.add(p)
         # add remote-only packages with a marker
         for k in sorted(remote_packages.keys()):
             if k not in added_packages:
                 if k in installed_overlays:
-                    all_packages.append(f"{k} (remote, installed)")
+                    if "/" in k:
+                        all_packages.append(f"{k} (remote, installed)")
+                    else:
+                        all_packages.append(f"{k} (remote, container, installed)")
                 else:
-                    all_packages.append(f"{k} (remote)")
+                    if "/" in k:
+                        all_packages.append(f"{k} (remote)")
+                    else:
+                        all_packages.append(f"{k} (remote, container)")
                 added_packages.add(k)
 
         if args.terms:

@@ -31,7 +31,7 @@ def get_local_build_scripts():
     for root, _, files in os.walk(BUILD_SCRIPTS_DIR):
         for filename in files:
             # 1. skip non-build-script files
-            if filename.endswith(('.py', '.sh', ".def")):
+            if filename.endswith(('.py', '.sh')):
                 continue
 
             full_path = os.path.join(root, filename)
@@ -42,6 +42,11 @@ def get_local_build_scripts():
 
             # 3. generate key (relative path like 'apps/tool/v1')
             relative_key = os.path.relpath(full_path, BUILD_SCRIPTS_DIR)
+
+            if relative_key.endswith('.def'):
+                if relative_key.startswith('base_image'):
+                    continue  # skip base_image scripts
+                relative_key = relative_key[:-4]  # remove .def suffix
             
             packages[relative_key] = full_path
 

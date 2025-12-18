@@ -194,6 +194,8 @@ class Utils:
 
                 for k in metadata:
                     rel = Utils.normalize_name_version(k)
+                    if "/" not in rel:
+                        continue  # skip def files like code-server
                     link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{rel}"
                     normalized[rel] = link
 
