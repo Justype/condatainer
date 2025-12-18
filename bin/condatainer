@@ -766,14 +766,14 @@ class BuildObject:
     def __init__(self, name_version: str):
         self.name_version = Utils.normalize_name_version(name_version)
         slash_count = self.name_version.count('/')
-        if slash_count == 0:
-            raise ValueError(f"Invalid spec '{name_version}'. At least one '/' is required.")
         self.build_script_path = ""
         self.dependencies = []
         self.is_conda = False
         self.is_remote = False
         self.sbatch = False
         self.sbatch_flags = []
+        self.is_def = slash_count == 0
+        self.is_shell = slash_count == 1
         self.is_ref = slash_count > 1
         self.ncpus = Config.NCPUS
         self.interactive_inputs = []
@@ -796,15 +796,21 @@ class BuildObject:
             self.build_script_path = local_scripts[self.name_version]
             self.is_remote = False
         elif self.name_version in remote_scripts:
-            self.build_script_path = os.path.join(Config.TMP_DIR, self.name_version.replace('/', '--') + ".sh")
-            link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{self.name_version}"
+            if self.is_def:
+                self.build_script_path = os.path.join(Config.BUILD_SCRIPTS_DIR, f"{self.name_version}.def")
+                link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{self.name_version}.def"
+            else:
+                self.build_script_path = os.path.join(Config.TMP_DIR, self.name_version.replace('/', '--') + ".sh")
+                link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{self.name_version}"
             if not Utils.download_executable(link, self.build_script_path):
                 raise RuntimeError(f"Failed to download remote build script for {self.name_version}.")
             self.is_remote = True
+        elif self.is_def:
+            raise RuntimeError(f"Build script for {self.name_version} not found locally or remotely.")
         else:
             self.is_conda = True
 
-        if not self.is_conda:
+        if self.is_shell:
             self.dependencies = Utils.get_dependencies_from_script(self.build_script_path)
             self.sbatch_flags = Utils.get_sbatch_args_from_build_script(self.build_script_path)
             interactive_prompts = Utils.get_interactive_prompts(self.build_script_path)
@@ -826,9 +832,18 @@ class BuildObject:
             self.sbatch = len(self.sbatch_flags) > 0
 
     def __str__(self) -> str:
+        if self.is_shell:
+            build_type = "Shell Script"
+        elif self.is_def:
+            build_type = "Apptainer Definition File"
+        elif self.is_conda:
+            build_type = "Conda Package"
+        else:
+            build_type = "Unknown"
+
         return f"""BuildObject:
     name_version: {self.name_version}
-    is_conda: {self.is_conda}
+    build_script_type: {build_type}
     build_script_path: {self.build_script_path}
     dependencies: {self.dependencies}
     sbatch_flags: {self.sbatch_flags}
@@ -901,9 +916,64 @@ class BuildObject:
             """
         ]
 
-        Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_create}")
+        Utils.print_debug(f"[BUILD] Creating overlay with command: {cmd_create}")
         try:
             subprocess.run(cmd_create, check=True, env=environ)
+        except subprocess.CalledProcessError:
+            self.print_create_error_message()
+            self.create_cleanup(failed=True)
+            return False
+
+        Utils.print_success(f"Overlay {Utils.yellow_text(os.path.basename(self.target_overlay_path))} created at {Utils.blue_text(self.target_overlay_path)}. Removing temporary overlay...")
+        os.chmod(self.target_overlay_path, 0o664)
+        self.create_cleanup(failed=False)
+        return True
+
+    def _build_def(self) -> bool:
+        if os.path.exists(self.target_overlay_path):
+            Utils.print_warning(f"Overlay {Utils.yellow_text(os.path.basename(self.target_overlay_path))} already exists at {Utils.blue_text(self.target_overlay_path)}. Skipping creation.")
+            return True
+
+        environ = Utils.get_exec_environ()
+        cmd_create = [
+            Config.APPTAINER_PATH, "build", "--fakeroot",
+            self.tmp_overlay_path, # although named as sqf, but it's actually an sif image here (will dump to sqf later)
+            self.build_script_path,
+        ]
+
+        Utils.print_debug(f"[BUILD] Building Apptainer SIF with command: {cmd_create}")
+
+        try:
+            subprocess.run(cmd_create, check=True, env=environ)
+        except subprocess.CalledProcessError:
+            self.print_create_error_message()
+            self.create_cleanup(failed=True)
+            return False
+
+        try:
+            squashfs_id = next(
+                int(line.split("|")[0])
+                for line in subprocess.check_output(
+                    ["apptainer", "sif", "list", self.tmp_overlay_path],
+                    text=True,
+                ).splitlines()
+                if "Squashfs" in line
+            )
+        except Exception as e:
+            self.print_create_error_message(f"Failed to get SquashFS ID from SIF: {e}")
+            self.create_cleanup(failed=True)
+            return False
+
+        Utils.print_message(f"Dumping to SquashFS file at {Utils.blue_text(self.target_overlay_path)}...")
+        environ = Utils.get_exec_environ()
+        cmd_mksqf = [
+            Config.APPTAINER_PATH, "sif", "dump",
+            str(squashfs_id), self.tmp_overlay_path
+        ]
+        Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_mksqf}")
+        try:
+            with open(self.target_overlay_path, 'wb') as out_f:
+                subprocess.run(cmd_mksqf, check=True, env=environ, stdout=out_f, stderr=subprocess.PIPE)
         except subprocess.CalledProcessError:
             self.print_create_error_message()
             self.create_cleanup(failed=True)
@@ -1008,7 +1078,7 @@ class BuildObject:
                 mksquashfs {self.cnt_dir_path} {os.path.abspath(self.target_overlay_path)} -processors {self.ncpus} -keep-as-directory {Config.compress_args} -b 1M
                 """
             ]
-            Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_mksqf}")
+            Utils.print_debug(f"[BUILD] Creating overlay with command: {cmd_mksqf}")
             try:
                 subprocess.run(cmd_mksqf, check=True, env=environ)
             except subprocess.CalledProcessError:
@@ -1063,6 +1133,8 @@ class BuildObject:
         try:
             if self.is_conda:
                 return self._build_conda()
+            elif self.is_def:
+                return self._build_def()
             else:
                 return self._build_script(build_deps=build_deps)
         except KeyboardInterrupt:
@@ -2381,8 +2453,8 @@ if __name__ == "__main__":
     try:
         main()
     except RuntimeError as rte:
-        Utils.print_note(str(rte))
-        sys.exit()
+        Utils.print_error(str(rte))
+        sys.exit(1)
     except ValueError as e:
         Utils.print_error(str(e))
         sys.exit(1)
