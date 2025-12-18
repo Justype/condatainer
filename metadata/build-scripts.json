@@ -1,4 +1,9 @@
 {
+  "build-essential": {
+    "deps": [],
+    "sbatch": false,
+    "whatis": "Essential build tools container"
+  },
   "cellranger/8.0.1": {
     "deps": [],
     "sbatch": false,
@@ -2565,6 +2570,16 @@
     "sbatch": false,
     "whatis": "GRCm39 GENCODE M9 transcript FASTA"
   },
+  "igv": {
+    "deps": [],
+    "sbatch": false,
+    "whatis": "IGV container"
+  },
+  "lxde": {
+    "deps": [],
+    "sbatch": false,
+    "whatis": "LXDE desktop container"
+  },
   "orad/2.7.0": {
     "deps": [],
     "sbatch": false,
@@ -2578,6 +2593,11 @@
   "rstudio-server": {
     "deps": [],
     "sbatch": false,
-    "whatis": "Missing description"
+    "whatis": "rstudio-server container"
+  },
+  "texlive": {
+    "deps": [],
+    "sbatch": false,
+    "whatis": "TeX Live container"
   }
 }
