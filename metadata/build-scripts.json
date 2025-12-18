@@ -9,6 +9,11 @@
     "sbatch": false,
     "whatis": "10X Genomics Single Cell Software Suite"
   },
+  "code-server": {
+    "deps": [],
+    "sbatch": false,
+    "whatis": "code-server container"
+  },
   "grch38/bwa-mem2/2.3/ucsc_no_alt": {
     "deps": [
       "bwa-mem2/2.3",
@@ -2569,5 +2574,10 @@
     "deps": [],
     "sbatch": false,
     "whatis": "Inferring the expression VG mpmap results for RNA-seq"
+  },
+  "rstudio-server": {
+    "deps": [],
+    "sbatch": false,
+    "whatis": "Missing description"
   }
 }
