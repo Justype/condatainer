@@ -1,3 +1,4 @@
+#WHATIS:rstudio-server container
 Bootstrap: docker
 From: ubuntu:24.04
 

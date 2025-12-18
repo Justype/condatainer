@@ -1,0 +1,49 @@
+#WHATIS:Essential build tools container
+Bootstrap: docker
+From: ubuntu:24.04
+
+%labels
+    Author Ziyue Cheng
+    Version 1.0
+    Description "Ubuntu24-based container with essential build tools"
+
+%environment
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export PS1='CNT \w> '
+
+%runscript
+    exec /bin/bash "$@"	
+
+%post
+    # Avoid interactive prompts
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt -y update && apt -y upgrade
+
+    ## C and C++
+    apt -y install \
+        build-essential pkg-config git wget curl zip \
+        g++ clang gfortran \
+        ninja-build make cmake doxygen autoconf automake
+
+    ## Python
+    apt -y install python3-pip python3-venv python-is-python3
+    # PyTorch
+    apt -y install libglib2.0-0 libsm6 libxrender1 libxext6
+
+    ## R packages
+    # libicu70
+    wget -nv -O libicu70.deb https://launchpad.net/ubuntu/+source/icu/70.1-2/+build/23145450/+files/libicu70_70.1-2_amd64.deb
+    dpkg -i libicu70.deb && rm libicu70.deb
+    apt -y install libcurl4-openssl-dev # curl
+    apt -y install libcairo2-dev        # Cario
+    apt -y install libmagick++-dev      # magick
+    apt -y install libharfbuzz-dev libfribidi-dev libfreetype6-dev # textshaping
+    apt -y install libudunits2-dev      # units
+    apt -y install libgdal-dev libgeos-dev libproj-dev libsqlite3-dev gdal-bin # sf
+    apt -y install libabsl-dev # s2
+    apt -y install libglpk-dev # scDblFinder
+    apt -y install libhdf5-dev # BPCells
+
+    apt clean
