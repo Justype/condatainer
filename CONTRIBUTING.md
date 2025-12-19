@@ -3,7 +3,7 @@
 Thank you for helping improve this project! This document explains the two main contribution types:
 
 - Editing `condatainer/modgen` (code/tooling changes)
-- Adding `build-scripts` (new data/genome build definitions)
+- Adding `build-scripts` (new app/data/genome build definitions)
 
 ## Quick start
 
@@ -34,6 +34,7 @@ What this covers
 - New `build-scripts` for building genome reference images, environment definitions, or packaging steps used by the project.
 
 Where to add
+- For system/text editor apps, add to `build-scripts/apps/<app-name>.def` (an apptainer definition file)
 - For applications, add to `build-scripts/<app-name>/<version>` (version is a script not a folder)
 - For references, add to `build-scripts/<assembly>/<data-type>/<version>` (sub-version is allowed)
   - Add the tool version if the index/data is tool-version dependent. (If you are not sure, add the tool version)

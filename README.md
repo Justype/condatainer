@@ -14,6 +14,7 @@ Both tools aim to automate environment management and handling on HPC, but with 
 Which one to choose?
 
 - If you care about inode usage and environment isolation, use [**CondaTainer**](#-condatainer).
+- If you want rstudio-server, igv, and other tools on HPC, use [**CondaTainer**](#-condatainer).
 - If you prefer Lmod and using system available modules, use [**ModGen**](README_MG.md).
 
 ## 🛠️ Installation
@@ -71,6 +72,8 @@ condatainer exec -o grch38--cellranger--2024-A bash
 
 CondaTainer utilizes a standardized naming schema to organize software and reference data.
 
+- System Apps: `name` (e.g., `rstudio-server`, created by `name` or `-n name` flag)
+- Project Env: `name` (e.g., `env`, `sci_rna`, created by `-p prefix` flag)
 - Apps: `name/version` (e.g., `bcftools/1.16`)
 - References: `assembly/datatype/version`
   - `grcm39/genome/gencode`: GRCm39 genome with Gencode style naming

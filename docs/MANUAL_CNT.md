@@ -51,15 +51,31 @@ optional arguments:
 
 CondaTainer classifies overlays into three distinct categories based on their naming structure.
 
+### System Applications (Sys)
+
+Used for system-level applications that do not follow the standard application or reference naming conventions.
+
+Like text editors, IDEs, build-essential tools, etc.
+
+* **Format:** `name`
+* **Constraints:**
+  * Must **not** contain slashes (`/`) or double-dash sequences (`--`).
+* **Example:** `rstudio-server`, `texlive`, `code-server`
+
+You can also create these system apps using `-n, --name` flag in create command.
+
 ### Custom Environments (Env)
 
-Used when creating a custom environment with a user-defined name (`create` `-n` or `-p`, or `overlay` action).
+Used when creating a custom environment with a user-defined name (`create -p`, or `overlay` action).
 
 * **Format:** `custom_name`
 * **Constraints:**
   * Must **not** contain the double-dash sequence (`--`).
   * Should **not** conflict with common application names (to avoid ambiguity with app overlays).
 * **Example:** `my_analysis_env`, `project_x_utils`
+
+> [!NOTE]
+> If you want to use `-n` only install system apps, like `nvim`. If you want to create an env sqf, use `-p` to specify a path instead.
 
 ### Application Overlays (App)
 

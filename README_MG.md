@@ -73,6 +73,10 @@ modgen check analysis.sh
 modgen check analysis.sh -a
 ```
 
+## 🤔 Differences Compared to CondaTainer
+
+ModGen only focuses on system-/group-wide module management for HPC environments, while CondaTainer is designed for both group-wide module/container management and project specific Conda environment management.
+
 ## Acknowledgements
 
 This project used computational resources provided by
