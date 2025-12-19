@@ -310,7 +310,7 @@ class Utils:
         """
         dependencies = []
         if not os.path.isfile(script_path):
-            Utils.print_error(f"Build script not found at {script_path}")
+            Utils.print_error(f"[DEP] Build script not found at {script_path}")
             return dependencies
 
         module_load_regex = re.compile(r'^\s*(module\s+load)\s+(.+)$')
@@ -362,7 +362,7 @@ class Utils:
         url = "Not available"
 
         if not os.path.isfile(script_path):
-            Utils.print_error(f"Build script not found at {script_path}.")
+            Utils.print_error(f"[WHATIS] Build script not found at {script_path}.")
             return whatis, url
 
         with open(script_path, "r") as f:
@@ -394,7 +394,7 @@ class Utils:
         env_dict: Dict[str, Dict[str, str]] = {}
 
         if not os.path.isfile(script_path):
-            Utils.print_error(f"Build script not found at {script_path}.")
+            Utils.print_error(f"[ENV] Build script not found at {script_path}.")
             return env_dict
 
         with open(script_path, "r") as f:
@@ -430,7 +430,7 @@ class Utils:
         sbatch_args = []
 
         if not os.path.isfile(script_path):
-            Utils.print_error(f"Build script not found at {script_path}.")
+            Utils.print_error(f"[SBATCH] Build script not found at {script_path}.")
             return sbatch_args
 
         with open(script_path, "r") as f:
@@ -453,7 +453,7 @@ class Utils:
         prompts = []
 
         if not os.path.isfile(script_path):
-            Utils.print_error(f"Build script not found at {script_path}.")
+            Utils.print_error(f"[INTERACTIVE] Build script not found at {script_path}.")
             return prompts
 
         with open(script_path, "r") as f:
@@ -810,7 +810,7 @@ class BuildObject:
         else:
             self.is_conda = True
 
-        if self.is_shell:
+        if not (self.is_conda or self.is_def):
             self.dependencies = Utils.get_dependencies_from_script(self.build_script_path)
             self.sbatch_flags = Utils.get_sbatch_args_from_build_script(self.build_script_path)
             interactive_prompts = Utils.get_interactive_prompts(self.build_script_path)
