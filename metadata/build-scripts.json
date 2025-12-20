@@ -19,6 +19,14 @@
     "sbatch": false,
     "whatis": "code-server container"
   },
+  "grch38/bowtie2/ucsc_no_alt": {
+    "deps": [
+      "bowtie2/2.5.4",
+      "grch38/genome/ucsc_no_alt"
+    ],
+    "sbatch": true,
+    "whatis": "bowtie2 index for GRCh38 UCSC no alt reference genome"
+  },
   "grch38/bwa-mem2/2.3/ucsc_no_alt": {
     "deps": [
       "bwa-mem2/2.3",
