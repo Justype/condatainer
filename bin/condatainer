@@ -1552,6 +1552,13 @@ class CondaTainer_Exec:
                 Utils.print_error(f"Overlay file {overlay_final[i]} not found.")
                 exit(1)
 
+        if all(not o.endswith('.img') for o in overlay_final):
+            pwd = os.getcwd()
+            local_env_path = os.path.join(pwd, "env.img")
+            if os.path.isfile(local_env_path):
+                Utils.print_message(f"Autoload env.img at {Utils.blue_text(local_env_path)}")
+                overlay_final.append(local_env_path)
+
         if not CondaTainer_Exec.exec_command(overlay_final, command_final):
             exit(1)
 
@@ -1571,6 +1578,13 @@ class CondaTainer_Exec:
             if not os.path.isfile(overlay_final[i]):
                 Utils.print_error(f"Overlay file {overlay_final[i]} not found.")
                 exit(1)
+
+        if all(not o.endswith('.img') for o in overlay_final):
+            pwd = os.getcwd()
+            local_env_path = os.path.join(pwd, "env.img")
+            if os.path.isfile(local_env_path):
+                Utils.print_message(f"Autoload env.img at {Utils.blue_text(local_env_path)}")
+                overlay_final.append(local_env_path)
 
         if not CondaTainer_Exec.exec_command(overlay_final, command_final):
             exit(1)
@@ -1911,7 +1925,7 @@ class CondaTainer_List:
                     if args.terms:
                         if not all(re.search(re.escape(term), name_version, re.IGNORECASE) for term in args.terms):
                             continue
-                    name_versions_dict[name_version] = [f"(conda env, config: {Utils.blue_text('/cnt/' + name_version.replace('--', '/') + '/env.yml')})"]
+                    name_versions_dict[name_version] = [f"(system app overlay)"]
 
             if name_versions_dict:
                 name_col_width = max(len(name) for name in name_versions_dict.keys())
@@ -2226,11 +2240,6 @@ class CondaTainer_Overlay:
             "overlay", aliases=["o"],
             help="Create an empty overlay img")
         CondaTainer_Overlay.parser_overlay.add_argument(
-            "image",
-            type=str,
-            help="Path to create the overlay image"
-        )
-        CondaTainer_Overlay.parser_overlay.add_argument(
             "-s", "--size",
             type=int,
             default=10240,
@@ -2240,6 +2249,13 @@ class CondaTainer_Overlay:
             "-f", "--file",
             type=str,
             help="Conda env YAML file"
+        )
+        CondaTainer_Overlay.parser_overlay.add_argument(
+            "image",
+            type=str,
+            nargs="?",
+            default="env.img",
+            help="Path to create the overlay image"
         )
 
     @staticmethod
