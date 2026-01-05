@@ -38,6 +38,7 @@ class Config:
     LOGS_DIR = os.path.join(CONDATINER_DIR, "logs")
 
     # Local apptainer
+    SYSTEM_APPTAINER_BIN = shutil.which("apptainer")
     LOCAL_APPTAINER_DIR = os.path.join(CONDATINER_DIR, "apptainer")
     LOCAL_APPTAINER_BIN = os.path.join(LOCAL_APPTAINER_DIR, "bin", "apptainer")
     LOCAL_MICROMAMBA_BIN = os.path.join(CONDATINER_DIR, "bin", "micromamba")
@@ -45,7 +46,7 @@ class Config:
     # File paths
     BASE_IMAGE_DEF = os.path.join(BUILD_SCRIPTS_DIR, "base_image.def")
     BASE_IMAGE_SIF = os.path.join(IMAGES_DIR, "base_image.sif")
-    APPTAINER_PATH = LOCAL_APPTAINER_BIN if os.path.isfile(LOCAL_APPTAINER_BIN) else shutil.which("apptainer")
+    APPTAINER_BIN = LOCAL_APPTAINER_BIN if os.path.isfile(LOCAL_APPTAINER_BIN) else SYSTEM_APPTAINER_BIN
     BAD_CHARS_REGEX = re.compile(r'[<>:"/\\|?*\0\s\'`$&;|!\[\]#%@=+{}(),]')
 
     # Utils
@@ -61,10 +62,10 @@ class Config:
 
 def adjust_compression_args_based_on_apptainer_version():
     """Change to ZSTD_MEDIUM if apptainer version >= 1.4.0"""
-    if Config.APPTAINER_PATH is None:
+    if Config.APPTAINER_BIN is None:
         return
     try:
-        result = subprocess.run([Config.APPTAINER_PATH, "--version"], capture_output=True, text=True)
+        result = subprocess.run([Config.APPTAINER_BIN, "--version"], capture_output=True, text=True)
         version_match = re.search(r"apptainer version (\d+)\.(\d+)", result.stdout)
         if version_match:
             major, minor = map(int, version_match.groups())
@@ -104,7 +105,7 @@ def main():
         Config.debug = True
         Utils.print_debug("Debug mode enabled")
         Utils.print_debug(f"CondaTainer Version: {Config.VERSION}")
-        Utils.print_debug(f"Apptainer Path: {Config.APPTAINER_PATH}")
+        Utils.print_debug(f"Apptainer Path: {Config.APPTAINER_BIN}")
     if args.no_sbatch:
         Config.use_sbatch = False
         Utils.print_debug("No sbatch mode enabled")
@@ -512,7 +513,7 @@ class Utils:
         If using local apptainer binary, add local apptainer bin dir to PATH.
         """
         env = os.environ.copy()
-        if Config.APPTAINER_PATH == Config.LOCAL_APPTAINER_BIN:
+        if Config.APPTAINER_BIN == Config.LOCAL_APPTAINER_BIN:
             local_apptainer_bin_dir = os.path.dirname(Config.LOCAL_APPTAINER_BIN)
             env["PATH"] = f"{local_apptainer_bin_dir}:{env.get('PATH', '')}"
         return env
@@ -522,7 +523,7 @@ class CondaTainer:
 
     @staticmethod
     def ensure_apptainer():
-        if Config.APPTAINER_PATH is None:
+        if Config.APPTAINER_BIN is None:
             Utils.print_error("Apptainer not found in PATH.")
             Utils.print_note(f"Please consider running: {Utils.blue_text('ml apptainer')}")
             Utils.print_note("If Apptainer is not available, please contact your system administrator.")
@@ -593,8 +594,7 @@ class CondaTainer:
         if not CondaTainer.ensure_base_def():
             exit(1)
 
-        system_apptainer = shutil.which("apptainer")
-        if system_apptainer is None:
+        if Config.SYSTEM_APPTAINER_BIN is None:
             Utils.print_error("System Apptainer is required to build the base image.")
             Utils.print_note(f"Please consider running: {Utils.blue_text('ml apptainer')}")
             Utils.print_note("If Apptainer is not available, please contact your system administrator.")
@@ -602,7 +602,7 @@ class CondaTainer:
 
         Utils.print_message("Base images not found. Building base images...")
         cmd = [
-            Config.APPTAINER_PATH, "build", "--fakeroot",
+            Config.SYSTEM_APPTAINER_BIN, "build", "--fakeroot",
             Config.BASE_IMAGE_SIF, Config.BASE_IMAGE_DEF,
         ]
         try:
@@ -619,7 +619,7 @@ class CondaTainer:
                         Utils.print_error("Pre-built base image download failed.")
             exit(1)
         Utils.print_success("Base images built.")
-        cmd = [ Config.APPTAINER_PATH, "cache", "clean", "--force" ]
+        cmd = [ Config.APPTAINER_BIN, "cache", "clean", "--force" ]
         subprocess.run(cmd, capture_output=True)
         os.chmod(Config.BASE_IMAGE_SIF, 0o775)
         Utils.print_message("Apptainer cache cleaned.")
@@ -653,7 +653,7 @@ class CondaTainer:
 
         Utils.print_message(f"Creating temporary SquashFS overlay for {Utils.yellow_text(normalized_name_version)}...")
         cmd = [
-            Config.APPTAINER_PATH, "overlay", "create",
+            Config.APPTAINER_BIN, "overlay", "create",
             "--sparse", "--size", "15360", 
             tmp_overlay_path
         ]
@@ -898,7 +898,7 @@ class BuildObject:
 
         environ = Utils.get_exec_environ()
         cmd_create = [
-            Config.APPTAINER_PATH, "exec",
+            Config.APPTAINER_BIN, "exec",
             "--env", "TMPDIR=/ext3/tmp",
             "--overlay", self.tmp_overlay_path,
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
@@ -933,10 +933,16 @@ class BuildObject:
         if os.path.exists(self.target_overlay_path):
             Utils.print_warning(f"Overlay {Utils.yellow_text(os.path.basename(self.target_overlay_path))} already exists at {Utils.blue_text(self.target_overlay_path)}. Skipping creation.")
             return True
+        
+        if Config.SYSTEM_APPTAINER_BIN is None:
+            Utils.print_error("System Apptainer is required to build overlays from definition files.")
+            Utils.print_note(f"Please consider running: {Utils.blue_text('ml apptainer')}")
+            Utils.print_note("If Apptainer is not available, please contact your system administrator.")
+            return False
 
         environ = Utils.get_exec_environ()
         cmd_create = [
-            Config.APPTAINER_PATH, "build", "--fakeroot",
+            Config.SYSTEM_APPTAINER_BIN, "build", "--fakeroot",
             self.tmp_overlay_path, # although named as sqf, but it's actually an sif image here (will dump to sqf later)
             self.build_script_path,
         ]
@@ -967,7 +973,7 @@ class BuildObject:
         Utils.print_message(f"Dumping to SquashFS file at {Utils.blue_text(self.target_overlay_path)}...")
         environ = Utils.get_exec_environ()
         cmd_mksqf = [
-            Config.APPTAINER_PATH, "sif", "dump",
+            Config.SYSTEM_APPTAINER_BIN, "sif", "dump",
             str(squashfs_id), self.tmp_overlay_path
         ]
         Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_mksqf}")
@@ -1026,7 +1032,7 @@ class BuildObject:
 
         environ = Utils.get_exec_environ()
         cmd_create = [
-            Config.APPTAINER_PATH, "exec",
+            Config.APPTAINER_BIN, "exec",
             *env_settings,
             "--env", f"SLURM_CPUS_PER_TASK={self.ncpus}",
             "--env", "IN_CONDATINER=1",
@@ -1069,7 +1075,7 @@ class BuildObject:
             Utils.print_message(f"Creating SquashFS file at {Utils.blue_text(self.target_overlay_path)}...")
             environ = Utils.get_exec_environ()
             cmd_mksqf = [
-                Config.APPTAINER_PATH, "exec",
+                Config.APPTAINER_BIN, "exec",
                 "--overlay", self.tmp_overlay_path,
                 "--bind", Config.CONDATINER_DIR,
                 Config.BASE_IMAGE_SIF,
@@ -1090,7 +1096,7 @@ class BuildObject:
             Utils.print_message(f"Creating SquashFS file at {Utils.blue_text(self.target_overlay_path)}...")
             environ = Utils.get_exec_environ()
             cmd_mksqf = [
-                Config.APPTAINER_PATH, "exec",
+                Config.APPTAINER_BIN, "exec",
                 "--overlay", self.tmp_overlay_path,
                 "--bind", Config.CONDATINER_DIR,
                 Config.BASE_IMAGE_SIF,
@@ -1438,7 +1444,7 @@ class CondaTainer_Create:
         try:
             environ = Utils.get_exec_environ()
             cmd_create = [
-                Config.APPTAINER_PATH, "exec",
+                Config.APPTAINER_BIN, "exec",
                 "--env", "TMPDIR=/ext3/tmp",
                 "--overlay", tmp_overlay_path,
                 *CondaTainer.generate_bind_args(*to_bind_paths),
@@ -1709,7 +1715,7 @@ class CondaTainer_Exec:
         environ = Utils.get_exec_environ()
 
         exec_cmd = [
-            Config.APPTAINER_PATH, "exec",
+            Config.APPTAINER_BIN, "exec",
             *CondaTainer_Exec.generate_overlay_args(paths_or_name_versions),
             *env_params,
             "--env", f"PATH={path_env}",
@@ -2259,7 +2265,7 @@ class CondaTainer_Overlay:
 
         Utils.print_message(f"Creating overlay image at {Utils.blue_text(overlay_path)} with size {Utils.yellow_text(str(size_mib) + ' MiB')}...")
         cmd_overlay = [
-            Config.APPTAINER_PATH, "overlay", "create",
+            Config.APPTAINER_BIN, "overlay", "create",
             "--size", str(size_mib), "--sparse",
             overlay_path
         ]
@@ -2366,7 +2372,7 @@ class CondaTainer_Apptainer:
 
         try:
             subprocess.run(cmd_install, check=True)
-            Utils.print_success(f"Apptainer installed to {Config.APPTAINER_PATH}.")
+            Utils.print_success(f"Apptainer installed to {Config.APPTAINER_BIN}.")
             Utils.print_message("Cleaning up Micromamba environment...")
             shutil.rmtree(os.path.join(Config.CONDATINER_DIR, "micromamba_env"), ignore_errors=True)
             shutil.rmtree(os.path.join(Config.LOCAL_APPTAINER_DIR, "conda-meta"), ignore_errors=True)
