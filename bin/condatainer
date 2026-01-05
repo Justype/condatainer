@@ -879,7 +879,7 @@ class BuildObject:
         return CondaTainer.get_missing_overlays(self.dependencies)
 
     def print_create_error_message(self, message: str = ""):
-        Utils.print_error(f"Building overlay for {Utils.yellow_text(self.name_version)} failed" + (f": {message}" if message else "."))
+        Utils.print_error(f"Failed to build overlay for {Utils.yellow_text(self.name_version)}" + (f": {message}" if message else "."))
         Utils.print_note(f"If apptainer cannot recognize zstd (unknown compression algorithm value 6), please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
         Utils.print_note("If file/folder creation failed, please chmod/chgroup or contact your system admin.")
 
@@ -1273,7 +1273,6 @@ class BuildGraph:
                 continue
             Utils.print_message(f"Processing overlay {Utils.yellow_text(metadata.name_version)} (no sbatch)...")
             if not metadata.build():
-                Utils.print_error(f"Failed to build overlay for {Utils.yellow_text(metadata.name_version)}.")
                 return False
         return True
 
