@@ -880,7 +880,6 @@ class BuildObject:
 
     def print_create_error_message(self, message: str = ""):
         Utils.print_error(f"Failed to build overlay for {Utils.yellow_text(self.name_version)}" + (f": {message}" if message else "."))
-        Utils.print_note(f"If apptainer cannot recognize zstd (unknown compression algorithm value 6), please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
         Utils.print_note("If file/folder creation failed, please chmod/chgroup or contact your system admin.")
 
     def _build_conda(self) -> bool:
@@ -1467,7 +1466,6 @@ class CondaTainer_Create:
                 subprocess.run(cmd_create, check=True, env=environ)
             except subprocess.CalledProcessError:
                 Utils.print_error(f"Creating {Utils.blue_text(overlay_abs_path)} from {Utils.blue_text(file_path)} failed.")
-                Utils.print_note(f"If apptainer cannot recognize zstd (unknown compression algorithm value 6), please run `{Config.SCRIPT_NAME} apptainer` to get the latest version.")
                 Utils.print_note("If file/folder creation failed, please contact your system admin.")
                 Utils.print_note("If cannot resolve the environment file by libmamba, please please consider create img and manually install it with conda.")
                 CondaTainer_Create.create_cleanup(normalized_name_version, failed=True)
@@ -1551,13 +1549,6 @@ class CondaTainer_Exec:
             if not os.path.isfile(overlay_final[i]):
                 Utils.print_error(f"Overlay file {overlay_final[i]} not found.")
                 exit(1)
-
-        if all(not o.endswith('.img') for o in overlay_final):
-            pwd = os.getcwd()
-            local_env_path = os.path.join(pwd, "env.img")
-            if os.path.isfile(local_env_path):
-                Utils.print_message(f"Autoload env.img at {Utils.blue_text(local_env_path)}")
-                overlay_final.append(local_env_path)
 
         if not CondaTainer_Exec.exec_command(overlay_final, command_final):
             exit(1)
