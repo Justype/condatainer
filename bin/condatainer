@@ -932,7 +932,7 @@ class BuildObject:
         if os.path.exists(self.target_overlay_path):
             Utils.print_warning(f"Overlay {Utils.yellow_text(os.path.basename(self.target_overlay_path))} already exists at {Utils.blue_text(self.target_overlay_path)}. Skipping creation.")
             return True
-        
+
         if Config.SYSTEM_APPTAINER_BIN is None:
             Utils.print_error("System Apptainer is required to build overlays from definition files.")
             Utils.print_note(f"Please consider running: {Utils.blue_text('ml apptainer')}")
@@ -1713,17 +1713,20 @@ class CondaTainer_Exec:
                     last_img = o
                     n_img += 1
 
-        if last_img is not None and CondaTainer_Exec.is_img_writable:
+        if last_img is not None:
             img_name = os.path.splitext(os.path.basename(last_img))[0]
             img_name = Utils.normalize_name_version(img_name)
-
             img_env.extend([
                 "--env", "MAMBA_ROOT_PREFIX=/cnt_conda",
                 "--env", f"CONDA_PREFIX=/ext3/{img_name}",
                 "--env", f"CONDA_DEFINE_ENV={img_name}",
-                "--env", f"CNT_CONDA_PREFIX=/ext3/{img_name}",
                 "--env", f"RETICULATE_PYTHON=/ext3/{img_name}/bin/python",
             ])
+
+            if CondaTainer_Exec.is_img_writable:
+                img_env.extend([
+                    "--env", f"CNT_CONDA_PREFIX=/ext3/{img_name}",
+                ])
 
         environ = Utils.get_exec_environ()
 
