@@ -107,6 +107,15 @@ fi
 EOF
     chmod +x /usr/bin/mm-export
 
+    cat << 'EOF' > /usr/bin/mm-search
+#!/usr/bin/bash
+if [[ -z "$CNT_CONDA_PREFIX" ]]; then
+    echo "ERROR: CNT_CONDA_PREFIX is not set!"
+    exit 1
+fi
+/usr/bin/micromamba -r /cnt_conda search -c conda-forge -c bioconda "$@"
+EOF
+
     cat << 'EOF' > /usr/bin/mm-clean
 #!/usr/bin/bash
 /usr/bin/micromamba -r /cnt_conda clean "$@"
