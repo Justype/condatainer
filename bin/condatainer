@@ -1512,6 +1512,12 @@ class CondaTainer_Exec:
         )
         CondaTainer_Exec.parser_e = parser.add_parser("e", help="Run bash using writable overlays")
         CondaTainer_Exec.parser_e.add_argument(
+            "-r", "--read-only",
+            dest="writable_img",
+            action="store_false",
+            help="Do not make .img overlays writable (default: writable)"
+        )
+        CondaTainer_Exec.parser_e.add_argument(
             "overlays",
             nargs="*",
             help="Overlay files to mount (can be .sqf, .squashfs, or .img)"
@@ -1556,7 +1562,7 @@ class CondaTainer_Exec:
     @staticmethod
     def parse_e_args(args):
         CondaTainer.ensure_base_image()
-        CondaTainer_Exec.is_img_writable = True
+        CondaTainer_Exec.is_img_writable = args.writable_img
 
         overlay_final = args.overlays if args.overlays else []
         command_final = ["bash"]
