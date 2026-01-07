@@ -17,6 +17,8 @@ Which one to choose?
 - If you want rstudio-server, igv, and other tools on HPC, use [**CondaTainer**](#-condatainer).
 - If you prefer Lmod and using system available modules, use [**ModGen**](README_MG.md).
 
+[CondaTainer Tutorials](./docs/tutorials/README.md) to run rstudio-server, code-server, and more on HPC.
+
 ## 🛠️ Installation
 
 ```bash
