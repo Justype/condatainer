@@ -1705,6 +1705,7 @@ class CondaTainer_Exec:
 
         n_img = 0
         last_img = None
+        img_env = []
         writable_path = None
         if paths_or_name_versions:
             for o in paths_or_name_versions:
@@ -1713,8 +1714,16 @@ class CondaTainer_Exec:
                     n_img += 1
 
         if last_img is not None and CondaTainer_Exec.is_img_writable:
-            # Convert filename-safe separators back to normalized path
-            writable_path = f"/ext3/{os.path.splitext(os.path.basename(last_img))[0].replace('--', '/').replace('=', '/') }"
+            img_name = os.path.splitext(os.path.basename(last_img))[0]
+            img_name = Utils.normalize_name_version(img_name)
+
+            img_env.extend([
+                "--env", "MAMBA_ROOT_PREFIX=/cnt_conda",
+                "--env", f"CONDA_PREFIX=/ext3/{img_name}",
+                "--env", f"CONDA_DEFINE_ENV={img_name}",
+                "--env", f"CNT_CONDA_PREFIX=/ext3/{img_name}",
+                "--env", f"RETICULATE_PYTHON=/ext3/{img_name}/bin/python",
+            ])
 
         environ = Utils.get_exec_environ()
 
@@ -1723,10 +1732,10 @@ class CondaTainer_Exec:
             *CondaTainer_Exec.generate_overlay_args(paths_or_name_versions),
             *env_params,
             "--env", f"PATH={path_env}",
-            # "--env", f"PS1=CT \\w> ",
+            "--env", "PS1=CNT \\w> ",
             "--env", "IN_CONDATINER=1",
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
-            *(["--env", "CNT_CONDA_PREFIX=" + writable_path] if writable_path else []),
+            *img_env,
             *CondaTainer.generate_gpu_args(),
             Config.BASE_IMAGE_SIF,
             *command
