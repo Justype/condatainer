@@ -2400,6 +2400,10 @@ class CondaTainer_Apptainer:
             Utils.print_message("Cleaning up Micromamba environment...")
             shutil.rmtree(os.path.join(Config.CONDATINER_DIR, "micromamba_env"), ignore_errors=True)
             shutil.rmtree(os.path.join(Config.LOCAL_APPTAINER_DIR, "conda-meta"), ignore_errors=True)
+            if not os.path.isfile(os.path.join(os.path.dirname(Config.SCRIPT_PATH), "modgen")):
+                if os.path.isfile(Config.LOCAL_MICROMAMBA_BIN):
+                    os.remove(Config.LOCAL_MICROMAMBA_BIN)
+
         except subprocess.CalledProcessError:
             Utils.print_error("Failed to install Apptainer.")
 
