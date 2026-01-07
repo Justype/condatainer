@@ -115,6 +115,7 @@ if [[ -z "$CNT_CONDA_PREFIX" ]]; then
 fi
 /usr/bin/micromamba -r /cnt_conda search -c conda-forge -c bioconda "$@"
 EOF
+    chmod +x /usr/bin/mm-search
 
     cat << 'EOF' > /usr/bin/mm-clean
 #!/usr/bin/bash
