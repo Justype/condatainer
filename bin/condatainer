@@ -1741,7 +1741,7 @@ class CondaTainer_Exec:
             *CondaTainer_Exec.generate_overlay_args(paths_or_name_versions),
             *env_params,
             "--env", f"PATH={path_env}",
-            "--env", "PS1=CNT \\w> ",
+            "--env", "PS1=CNT \\[\\e[0;34m\\]\\w\\[\\e[0m\\]> ",
             "--env", "IN_CONDATINER=1",
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
             *img_env,
@@ -1772,7 +1772,7 @@ class CondaTainer_Exec:
         try:
             subprocess.run(exec_cmd, check=True, capture_output=capture_output, env=environ)
         except subprocess.CalledProcessError:
-            Utils.print_warning("Command execution failed inside the container.")
+            Utils.print_error("Command execution failed inside the container.")
             return False
 
         return True
