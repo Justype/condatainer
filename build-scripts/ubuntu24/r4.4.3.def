@@ -1,0 +1,34 @@
+#WHATIS:r-base-dev container
+Bootstrap: docker
+From: ubuntu:24.04
+%labels
+    Author Ziyue Cheng
+    Version 1.0
+    Description "Ubuntu24-based container with R v4.4.3"
+
+%environment
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export PS1='CNT \w> '
+
+%runscript
+  exec /bin/bash "$@"
+
+%post
+    # Avoid interactive prompts
+    export DEBIAN_FRONTEND=noninteractive
+
+    # R-base
+    # install helper packages we need
+    apt -y update && apt -y install --no-install-recommends software-properties-common dirmngr wget
+    wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc
+
+    # add the R repo from CRAN
+    add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu noble-cran40/"
+    apt -y update && apt -y install \
+        r-base-dev=4.4.3-1.2404.0 \
+        r-base-core=4.4.3-1.2404.0 \
+        r-doc-html=4.4.3-1.2404.0 \
+        r-recommended=4.4.3-1.2404.0
+
+    apt clean
