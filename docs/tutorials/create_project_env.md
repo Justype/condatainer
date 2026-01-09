@@ -40,7 +40,7 @@ options:
 ```
 
 - For python projects, 10GiB is usually sufficient.
-- For R projects, you may want to increase the size to 20GiB or more especially if you are working with bioconductor packages.
+- For R projects, you may want to increase the size to 20GiB or more, especially if you are working with bioconductor packages.
 
 ## Launch a Shell with the Project Environment
 
@@ -48,6 +48,17 @@ To activate the project environment, simply run the following command under the 
 
 ```bash
 condatainer e
+```
+
+```
+usage: condatainer e [-h] [-r] [overlays ...]
+
+positional arguments:
+  overlays         Overlay files to mount (can be .sqf, .squashfs, or .img)
+
+options:
+  -h, --help       show this help message and exit
+  -r, --read-only  Do not make .img overlays writable (default: writable)
 ```
 
 This command will mount the overlay and set the `PATH` and `CONDA_PREFIX` variables accordingly.
@@ -136,19 +147,36 @@ It means the overlay image is full. You can try to:
 - run `mm-clean -a` to clean up unused packages and caches. 
 - increase the size of the overlay image by creating a new one with larger size and reinstall the packages.
 
+### The overlay is used by another process
+
+On the HPC system, you can use `sequeue -u $USER` to check if there are other jobs running under your account that may be using the overlay in writable mode.
+
+If you want to stop it immediately, you can use `scancel <job_id>` to cancel the job.
+
+On the local machine, you can use `lsof env.img` to check if there are other processes using the overlay. Then you can use `kill <pid>` to stop the process. Or use `fuser -k env.img` to kill all processes using the overlay.
+
+Make sure you run `e2fsck -p env.img` to check and fix the overlay image before mounting it again.
+
+If `-p` option does not work, you can run `e2fsck env.img` without `-p` to fix the image manually.
+
 ### There is no other process using the overlay, but still cannot mount in read-only mode
 
 You can:
 
-1. Try to fix the overlay image `e2fsck -p env.img`
+1. Try to fix the overlay image `e2fsck env.img`
 2. If that does not work, copy the overlay image to a new file and use that one.
 
 ```bash
-e2fsck -p env.img
+e2fsck env.img
 ```
 
 ```bash
 cp env.img env_copy.img
+
+# You need to create a symlink to let /ext3/env_copy point to /ext3/env inside the image
+# -o means using the overlay
+# -w means write mode
+condatainer exec -o env_copy.img -w ln -s /ext3/env /ext3/env_copy
 
 # And use env_copy.img instead
 condatainer exec -o env_copy.img <command>
