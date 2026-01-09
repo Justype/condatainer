@@ -54,6 +54,12 @@ if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     exit 1
 fi
 /usr/bin/micromamba -r $CNT_CONDA_PREFIX create -c conda-forge -c bioconda -p $CNT_CONDA_PREFIX "$@"
+cat << EOF > "$CNT_CONDA_PREFIX/.condarc"
+channels:
+  - conda-forge
+  - bioconda
+channel_priority: strict
+EOF
 EOT
     chmod +x /usr/bin/mm-create
 
@@ -126,6 +132,62 @@ fi
 /usr/bin/micromamba -r $CNT_CONDA_PREFIX clean "$@"
 EOT
     chmod +x /usr/bin/mm-clean
+
+    cat << 'EOT' > /usr/bin/mm-pin
+#!/bin/bash
+
+if [ -z "$CNT_CONDA_PREFIX" ]; then
+    echo "ERROR: CNT_CONDA_PREFIX is not set!"
+    exit 1
+fi
+
+PACKAGE_INPUT=$1
+
+# Check if input is empty
+if [ -z "$PACKAGE_INPUT" ]; then
+    echo "Usage: mm-pin <package> or mm-pin <package>=<version>"
+    exit 1
+fi
+
+PIN_FILE="$CNT_CONDA_PREFIX/conda-meta/pinned"
+mkdir -p "$(dirname "$PIN_FILE")"
+if ! [ -f "$PIN_FILE" ]; then
+    touch "$PIN_FILE"
+fi
+
+if [[ "$PACKAGE_INPUT" == *"="* ]]; then
+    # If input contains '=', treat it as package=version
+    PACKAGE_NAME=$(echo "$PACKAGE_INPUT" | cut -d'=' -f1)
+    PIN_VALUE=$(echo "$PACKAGE_INPUT" | sed 's/=/ /')
+
+    if grep -qE "^${PACKAGE_NAME} " "$PIN_FILE"; then
+        echo "Updating existing pin for package '$PACKAGE_NAME'."
+        sed -i "/^${PACKAGE_NAME} /d" "$PIN_FILE"
+    fi
+
+    echo "$PIN_VALUE" >> "$PIN_FILE"
+    echo "Pinned: $PIN_VALUE"
+else
+    # Otherwise, search for the installed version
+    echo "Searching for installed version of '$PACKAGE_INPUT'..."
+    
+    INSTALLED_VER=$(mm-list "^${PACKAGE_INPUT}$" | grep "${PACKAGE_INPUT} " | awk '{print $1 " " $2}')
+
+    if [ -z "$INSTALLED_VER" ]; then
+        echo "Error: Package '$PACKAGE_INPUT' not found in the current environment"
+        exit 1
+    fi
+
+    if grep -qE "^${PACKAGE_INPUT} " "$PIN_FILE"; then
+        echo "Updating existing pin for package '$PACKAGE_INPUT'"
+        sed -i "/^${PACKAGE_INPUT} /d" "$PIN_FILE"
+    fi
+
+    echo "$INSTALLED_VER" >> "$PIN_FILE"
+    echo "Pinned: $INSTALLED_VER"
+fi
+EOT
+    chmod +x /usr/bin/mm-pin
 
 %runscript
     echo "This container provides mksquashfs and micromamba inside Ubuntu24 with ROCm GPU support"
