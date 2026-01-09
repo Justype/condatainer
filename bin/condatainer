@@ -2304,7 +2304,7 @@ class CondaTainer_Overlay:
         CondaTainer_Overlay.parser_overlay.add_argument(
             "-s", "--size",
             type=int,
-            default=10240,
+            default=20480,
             help="Size of the overlay image in MiB"
         )
         CondaTainer_Overlay.parser_overlay.add_argument(

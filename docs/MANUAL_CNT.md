@@ -135,7 +135,7 @@ condatainer overlay [OPTIONS] [NAME]
 
 **Options:**
 
-* `-s`, `--size [SIZE]`: Size (MB) of the overlay image (default: 10240, 10G).
+* `-s`, `--size [SIZE]`: Size (MB) of the overlay image (default: 20480, 20G).
 * `-f`, `--file [FILE]`: Path to a Conda environment file (.yml or .yaml).
 * NAME: Name of the overlay image (`env.img` by default if not specified).
 
