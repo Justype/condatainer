@@ -192,12 +192,13 @@ class Utils:
                     data = resp.read()
                     metadata = json.loads(data)
 
-                for k in metadata:
-                    rel = Utils.normalize_name_version(k)
-                    if "/" not in rel:
-                        continue  # skip def files like code-server
+                for k, v in metadata.items():
+                    key = Utils.normalize_name_version(k)
+                    rel = v["relative_path"]
                     link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{rel}"
-                    normalized[rel] = link
+                    if link.endswith('.def'):
+                        continue  # skip def files
+                    normalized[key] = link
 
         except Exception as e:
             Utils.print_warning(f"Failed to fetch remote metadata from {url}: {e}")
@@ -235,6 +236,9 @@ class Utils:
 
                 # 3. generate key (relative path like 'apps/tool/v1')
                 relative_key = os.path.relpath(full_path, Config.BUILD_SCRIPTS_DIR)
+
+                if relative_key.endswith('.def'):
+                    continue  # skip def files
 
                 packages[relative_key] = full_path
 

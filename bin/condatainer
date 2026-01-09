@@ -224,12 +224,14 @@ class Utils:
                     data = resp.read()
                     metadata = json.loads(data)
 
-                for k in metadata:
-                    rel = Utils.normalize_name_version(k)
+                for k, v in metadata.items():
+                    key = Utils.normalize_name_version(k)
+                    rel = v["relative_path"]
                     link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{rel}"
-                    normalized[rel] = link
+                    normalized[key] = link
 
         except Exception as e:
+            Utils.print_error(e)
             Utils.print_warning(f"Failed to fetch remote metadata from {url}: {e}")
             return {}
 
@@ -798,13 +800,12 @@ class BuildObject:
         if self.name_version in local_scripts:
             self.build_script_path = local_scripts[self.name_version]
             self.is_remote = False
+            if local_scripts[self.name_version].endswith('.def'):
+                self.is_def = True
         elif self.name_version in remote_scripts:
-            if self.is_def:
-                self.build_script_path = os.path.join(Config.BUILD_SCRIPTS_DIR, f"{self.name_version}.def")
-                link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{self.name_version}.def"
-            else:
-                self.build_script_path = os.path.join(Config.TMP_DIR, self.name_version.replace('/', '--') + ".sh")
-                link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{self.name_version}"
+            link = remote_scripts[self.name_version]
+            if link.endswith('.def'):
+                self.is_def = True
             if not Utils.download_executable(link, self.build_script_path):
                 raise RuntimeError(f"Failed to download remote build script for {self.name_version}.")
             self.is_remote = True
@@ -1823,31 +1824,31 @@ class CondaTainer_Avail:
 
         added_packages = set()
         all_packages = []
-        for p in local_packages.keys():
-            if p in installed_overlays:
-                if "/" in p:
-                    all_packages.append(f"{p} (installed)")
+        for k, v in local_packages.items():
+            if k in installed_overlays:
+                if v.endswith(".def"):
+                    all_packages.append(f"{k} (installed, container)")
                 else:
-                    all_packages.append(f"{p} (container, installed)")
+                    all_packages.append(f"{k} (installed)")
             else:
-                if "/" in p:
-                    all_packages.append(p)
+                if v.endswith(".def"):
+                    all_packages.append(f"{k} (container)")
                 else:
-                    all_packages.append(f"{p} (container)")
-            added_packages.add(p)
+                    all_packages.append(k)
+            added_packages.add(k)
         # add remote-only packages with a marker
-        for k in sorted(remote_packages.keys()):
+        for k, v in sorted(remote_packages.items()):
             if k not in added_packages:
                 if k in installed_overlays:
-                    if "/" in k:
-                        all_packages.append(f"{k} (remote, installed)")
-                    else:
+                    if v.endswith(".def"):
                         all_packages.append(f"{k} (remote, container, installed)")
-                else:
-                    if "/" in k:
-                        all_packages.append(f"{k} (remote)")
                     else:
+                        all_packages.append(f"{k} (remote, installed)")
+                else:
+                    if v.endswith(".def"):
                         all_packages.append(f"{k} (remote, container)")
+                    else:
+                        all_packages.append(f"{k} (remote)")
                 added_packages.add(k)
 
         if args.terms:
