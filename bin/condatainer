@@ -1741,7 +1741,6 @@ class CondaTainer_Exec:
 
         last_img = None
         img_env = []
-        writable_path = None
         if paths_or_name_versions:
             for o in paths_or_name_versions:
                 if o.endswith('.img'):
@@ -1806,12 +1805,12 @@ class CondaTainer_Exec:
                 Utils.print_message("Overlay envs:")
                 for key, note in env_notes.items():
                     print(f"  {Utils.yellow_text(key.ljust(env_max_len))}: {note}")
-                if writable_path:
-                    print(f"  {Utils.yellow_text('CNT_CONDA_PREFIX'.ljust(env_max_len))}: {Utils.blue_text(writable_path)}")
+                if last_img is not None and CondaTainer_Exec.is_img_writable:
+                    print(f"  {Utils.yellow_text('CNT_CONDA_PREFIX'.ljust(env_max_len))}: {Utils.blue_text('/ext3/env')}")
                 print("")
             else:
-                if writable_path:
-                    print(f"Overlay env:\n  {Utils.yellow_text('CNT_CONDA_PREFIX')}: {Utils.blue_text(writable_path)}\n")
+                if last_img is not None and CondaTainer_Exec.is_img_writable:
+                    print(f"Overlay env:\n  {Utils.yellow_text('CNT_CONDA_PREFIX')}: {Utils.blue_text('/ext3/env')}\n")
         try:
             subprocess.run(exec_cmd, check=True, capture_output=capture_output, env=environ)
         except subprocess.CalledProcessError:
