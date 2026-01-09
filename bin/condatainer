@@ -552,7 +552,7 @@ class CondaTainer:
             user_input = input("Enter choice [1-3]: ").strip()
             if user_input == "" or user_input == "1":
                 choice = "cpu"
-            if user_input == "2":
+            elif user_input == "2":
                 choice = "nv"
             elif user_input == "3":
                 choice = "amd"
