@@ -53,7 +53,7 @@ if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
     exit 1
 fi
-/usr/bin/micromamba -r /cnt_conda create -c conda-forge -c bioconda -p $CNT_CONDA_PREFIX "$@"
+/usr/bin/micromamba -r $CNT_CONDA_PREFIX create -c conda-forge -c bioconda -p $CNT_CONDA_PREFIX "$@"
 EOT
     chmod +x /usr/bin/mm-create
 
@@ -63,7 +63,7 @@ if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
     exit 1
 fi
-/usr/bin/micromamba -r /cnt_conda install -c conda-forge -c bioconda -p $CNT_CONDA_PREFIX "$@"
+/usr/bin/micromamba -r $CNT_CONDA_PREFIX install -c conda-forge -c bioconda -p $CNT_CONDA_PREFIX "$@"
 EOT
     chmod +x /usr/bin/mm-install
 
@@ -73,7 +73,7 @@ if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
     exit 1
 fi
-/usr/bin/micromamba -r /cnt_conda update -c conda-forge -c bioconda -p $CNT_CONDA_PREFIX "$@"
+/usr/bin/micromamba -r $CNT_CONDA_PREFIX update -c conda-forge -c bioconda -p $CNT_CONDA_PREFIX "$@"
 EOT
     chmod +x /usr/bin/mm-update
 
@@ -83,7 +83,7 @@ if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
     exit 1
 fi
-/usr/bin/micromamba -r /cnt_conda remove -p $CNT_CONDA_PREFIX "$@"
+/usr/bin/micromamba -r $CNT_CONDA_PREFIX remove -p $CNT_CONDA_PREFIX "$@"
 EOT
     chmod +x /usr/bin/mm-remove
 
@@ -93,7 +93,7 @@ if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
     exit 1
 fi
-/usr/bin/micromamba -r /cnt_conda list -p $CNT_CONDA_PREFIX "$@"
+/usr/bin/micromamba -r $CNT_CONDA_PREFIX list -p $CNT_CONDA_PREFIX "$@"
 EOT
     chmod +x /usr/bin/mm-list
 
@@ -103,7 +103,7 @@ if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
     exit 1
 fi
-/usr/bin/micromamba -r /cnt_conda env export -p $CNT_CONDA_PREFIX "$@"
+/usr/bin/micromamba -r $CNT_CONDA_PREFIX env export -p $CNT_CONDA_PREFIX "$@"
 EOT
     chmod +x /usr/bin/mm-export
 
@@ -113,7 +113,7 @@ if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
     exit 1
 fi
-/usr/bin/micromamba -r /cnt_conda search -c conda-forge -c bioconda "$@"
+/usr/bin/micromamba -r $CNT_CONDA_PREFIX search -c conda-forge -c bioconda "$@"
 EOT
     chmod +x /usr/bin/mm-search
 
@@ -123,7 +123,7 @@ if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
     exit 1
 fi
-/usr/bin/micromamba -r /cnt_conda clean "$@"
+/usr/bin/micromamba -r $CNT_CONDA_PREFIX clean "$@"
 EOT
     chmod +x /usr/bin/mm-clean
 
