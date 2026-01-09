@@ -1510,6 +1510,18 @@ class CondaTainer_Exec:
             action="store_true"
         )
         CondaTainer_Exec.parser_exec.add_argument(
+            "--env",
+            dest="env_settings",
+            action="append",
+            help="Additional env settings (KEY=VALUE) (can be used multiple times)"
+        )
+        CondaTainer_Exec.parser_exec.add_argument(
+            "--bind",
+            dest="bind_paths",
+            action="append",
+            help="Additional paths to bind (can be used multiple times)"
+        )
+        CondaTainer_Exec.parser_exec.add_argument(
             "commands",
             nargs=argparse.REMAINDER,
             help="The command to run inside the container (if not provided, defaults to bash shell)"
@@ -1560,7 +1572,7 @@ class CondaTainer_Exec:
                 Utils.print_error(f"Overlay file {overlay_final[i]} not found.")
                 exit(1)
 
-        if not CondaTainer_Exec.exec_command(overlay_final, command_final):
+        if not CondaTainer_Exec.exec_command(overlay_final, command_final, args.env_settings, args.bind_paths):
             exit(1)
 
     @staticmethod
@@ -1713,7 +1725,13 @@ class CondaTainer_Exec:
         return mounts
 
     @staticmethod
-    def exec_command(paths_or_name_versions: List[str], command: List[str], capture_output: bool = False) -> bool:
+    def exec_command(
+            paths_or_name_versions: List[str], 
+            command: List[str], 
+            env_settings: Optional[List[str]] = None, 
+            bind_paths: Optional[List[str]] = None, 
+            capture_output: bool = False) -> bool:
+
         if not CondaTainer_Exec.only_allow_one_img(paths_or_name_versions):
             Utils.print_error("Only one .img overlay can be used at a time.")
             return False
@@ -1721,7 +1739,6 @@ class CondaTainer_Exec:
         path_env = CondaTainer_Exec.get_path_env(paths_or_name_versions)
         env_params = CondaTainer_Exec.get_overlay_env_configs(paths_or_name_versions)
 
-        n_img = 0
         last_img = None
         img_env = []
         writable_path = None
@@ -1729,9 +1746,11 @@ class CondaTainer_Exec:
             for o in paths_or_name_versions:
                 if o.endswith('.img'):
                     last_img = o
-                    n_img += 1
 
         if last_img is not None:
+            if "IN_CONDATINER" in os.environ:
+                Utils.print_warning("You are trying to mount an .img overlay inside an existing CondaTainer environment. This may lead to unexpected behavior.")
+
             img_name = os.path.splitext(os.path.basename(last_img))[0]
             img_name = Utils.normalize_name_version(img_name)
             img_env.extend([
@@ -1746,6 +1765,20 @@ class CondaTainer_Exec:
                     "--env", "CNT_CONDA_PREFIX=/ext3/env",
                 ])
 
+        additional_env = []
+        if env_settings:
+            for es in env_settings:
+                if '=' in es:
+                    additional_env.extend(["--env", es])
+                else:
+                    Utils.print_warning(f"Invalid env setting {es}. It should be in KEY=VALUE format. Skipping.")
+        env_params.extend(additional_env)
+        additional_binds = []
+        if bind_paths:
+            for bp in bind_paths:
+                additional_binds.append("--bind")
+                additional_binds.append(bp)
+
         environ = Utils.get_exec_environ()
 
         exec_cmd = [
@@ -1756,6 +1789,7 @@ class CondaTainer_Exec:
             "--env", "PS1=CNT \\[\\e[0;34m\\]\\w\\[\\e[0m\\]> ",
             "--env", "IN_CONDATINER=1",
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
+            *additional_binds,
             *img_env,
             *CondaTainer.generate_gpu_args(),
             Config.BASE_IMAGE_SIF,
@@ -1763,9 +1797,6 @@ class CondaTainer_Exec:
         ]
 
         Utils.print_debug(f"[EXEC] Executing command: {exec_cmd}")
-
-        if n_img > 1 and CondaTainer_Exec.is_img_writable:
-            Utils.print_warning("Multiple img provided, but only the last one will be mounted as writable.")
 
         if Utils.is_in_interactive_shell() and not capture_output:
             env_notes = CondaTainer_Exec.get_overlay_env_notes(paths_or_name_versions)

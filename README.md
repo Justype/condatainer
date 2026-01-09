@@ -13,11 +13,11 @@ Both tools aim to automate environment management and handling on HPC, but with 
 
 Which one to choose?
 
-- If you care about inode usage and environment isolation, use [**CondaTainer**](#-condatainer).
+- If you care about inode usage and project-level isolation, use [**CondaTainer**](#-condatainer).
 - If you want rstudio-server, igv, and other tools on HPC, use [**CondaTainer**](#-condatainer).
 - If you prefer Lmod and using system available modules, use [**ModGen**](README_MG.md).
 
-[CondaTainer Tutorials](./docs/tutorials/README.md) to run rstudio-server, code-server, and more on HPC.
+[CondaTainer Tutorials](./docs/tutorials/README.md) to manage project env, run rstudio-server, code-server, and more on HPC.
 
 ## 🛠️ Installation
 
@@ -37,8 +37,6 @@ The installation script is **interactive**. You will be prompted to confirm the 
 - **Hybrid Modes**: Supports read-only (`.sqf`) for production and writable (`.img`) for development.
 - **Context-Aware**: Manages references/indexes, and displays helpful info when in interactive sessions.
 - **SLURM Integration**: Submits index generation jobs automatically when needed.
-
-(Tips for writable images: see [here](docs/TIPS.md#create-writable-images))
 
 ```bash
 # 1. Create an overlay for samtools
