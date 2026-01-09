@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 os.umask(0o002)
 
 class Config:
-    VERSION = "1.0.2"
+    VERSION = "1.0.3"
     # Remote settings
     debug = False
     use_sbatch = True

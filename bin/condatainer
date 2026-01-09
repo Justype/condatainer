@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 os.umask(0o002)
 
 class Config:
-    VERSION = "1.0.2"
+    VERSION = "1.0.3"
     # Remote settings
     debug = False
     use_sbatch = True
@@ -576,7 +576,7 @@ class CondaTainer:
             Utils.print_warning(f"Pre-built base image not available for architecture: {arch}")
             return False
 
-        url = f"https://github.com/Justype/condatainer/releases/download/v1.0.2/base_image_{arch}.sif"
+        url = f"https://github.com/Justype/condatainer/releases/download/v1.0.3/base_image_{arch}.sif"
         Utils.print_message(f"Attempting to download pre-built base image for {arch}...")
         if not Utils.download_executable(url, Config.BASE_IMAGE_SIF):
             Utils.print_warning("Failed to download pre-built base image.")
@@ -1754,7 +1754,7 @@ class CondaTainer_Exec:
             img_name = os.path.splitext(os.path.basename(last_img))[0]
             img_name = Utils.normalize_name_version(img_name)
             img_env.extend([
-                "--env", "MAMBA_ROOT_PREFIX=/cnt_conda",
+                "--env", "MAMBA_ROOT_PREFIX=/ext3/env",
                 "--env", "CONDA_PREFIX=/ext3/env",
                 "--env", "CONDA_DEFINE_ENV=env",
                 "--env", "RETICULATE_PYTHON=/ext3/env/bin/python",
@@ -1788,9 +1788,9 @@ class CondaTainer_Exec:
             "--env", f"PATH={path_env}",
             "--env", "PS1=CNT \\[\\e[0;34m\\]\\w\\[\\e[0m\\]> ",
             "--env", "IN_CONDATINER=1",
+            *img_env,
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
             *additional_binds,
-            *img_env,
             *CondaTainer.generate_gpu_args(),
             Config.BASE_IMAGE_SIF,
             *command
@@ -2305,7 +2305,7 @@ class CondaTainer_Overlay:
             "-s", "--size",
             type=int,
             default=20480,
-            help="Size of the overlay image in MiB"
+            help="Size of the overlay image in MiB (default: 20480)"
         )
         CondaTainer_Overlay.parser_overlay.add_argument(
             "-f", "--file",
@@ -2322,7 +2322,7 @@ class CondaTainer_Overlay:
 
     @staticmethod
     def parse_overlay_args(args):
-        CondaTainer.ensure_apptainer()
+        CondaTainer.ensure_base_image()
         overlay_path = os.path.abspath(args.image)
         size_mib = args.size
 
