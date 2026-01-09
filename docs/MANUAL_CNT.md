@@ -14,6 +14,7 @@
 - [Info](#info)
 - [Apptainer](#apptainer)
 - [Update](#update)
+- [Completion](#completion)
 
 ## Overall Command Structure
 
@@ -29,7 +30,8 @@ positional arguments:
                         Create a new SquashFS overlay using conda or available build scripts
     avail (av)          Check available local and remote build scripts
     list (ls)           List installed overlays matching search terms
-    remove (delete)     Remove installed overlays matching search terms
+    remove (rm, delete, del)
+                        Remove installed overlays matching search terms
     exec                Execute a command using overlays
     e                   Run bash using writable overlays
     check (c)           Check if the dependencies of a script are installed
@@ -38,8 +40,9 @@ positional arguments:
     apptainer           Get latest Apptainer executable from conda-forge
     self-update         Update CondaTainer to the latest version
     modgen              Get latest modgen executable from GitHub
+    completion          Generate shell completion script 'source <(condatainer completion)'
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -v, --version         Show the version of CondaTainer
   --debug               Enable debug mode with verbose output
@@ -117,8 +120,7 @@ CondaTainer supports two types of overlay files, each with specific purposes and
 
 * **Type:** Writable (ext3 filesystem), uncompressed.
 * **Usage:** **Strictly for Conda environments** that require runtime modifications (e.g., installing new packages on the fly).
-* **Mount Point:** `/ext3/[name]`
-  * *Example:* `my_env.img` is mounted at `/ext3/my_env`.
+* **Mount Point:** `/ext3/env`
 * **Writability:** These are read-only by default. To enable writing, you must use the `-w` / `--writable-img` flag during exec or run.
 
 ## Overlay
@@ -128,14 +130,14 @@ Create an ext3 `.img` with a conda environment inside. This is useful for creati
 **Usage:**
 
 ```
-condatainer overlay [OPTIONS] NAME
+condatainer overlay [OPTIONS] [NAME]
 ```
 
 **Options:**
 
 * `-s`, `--size [SIZE]`: Size (MB) of the overlay image (default: 10240, 10G).
 * `-f`, `--file [FILE]`: Path to a Conda environment file (.yml or .yaml).
-* NAME: Name of the overlay image (e.g., `my_env` or `project.img`).
+* NAME: Name of the overlay image (`env.img` by default if not specified).
 
 **Examples:**
 
@@ -300,6 +302,17 @@ condatainer exec [OPTIONS] [COMMAND...]
 condatainer exec -o bcftools/1.22 bcftools --version
 ```
 
+### Autoload and Bash completion
+
+- **Autoload local env images:** When running `condatainer e` in a directory that contains `env.img`, CondaTainer will automatically mount it into the container and open an interactive shell.
+- **Enable Bash completion on the host:** Generate and install the completion script for your shell. Example for Bash (per-user):
+
+Add the following to your `~/.bashrc`:
+
+```bash
+source <(condatainer completion bash)
+```
+
 ## Runtime (Check, Run)
 
 Utilities for running scripts with automatic dependency handling via  `#DEP:` tags and `module load` or `ml` commands.
@@ -373,7 +386,7 @@ condatainer info [OVERLAY]
 **Output includes:**
 
 * File size.
-* Potential mount path (e.g., `/cnt/bcftools/1.22` or `/ext3/my_env`).
+* Potential mount path (e.g., `/cnt/bcftools/1.22` or `/ext3/env`).
 * Environment variables defined within the overlay's `.env` file.
 
 ## Apptainer
@@ -398,7 +411,31 @@ Updates the CondaTainer script itself to the latest version from the GitHub repo
 **Usage:**
 
 ```
-condatainer update [-y]
+condatainer self-update [-y]
 ```
 
 * `-y`, `--yes`: Automatically confirm the download and replacement of the current script.
+
+## Completion
+
+Generates shell completion scripts for CondaTainer. (Bash, Zsh)
+
+**Usage:**
+
+```
+condatainer completion [SHELL]
+```
+
+* SHELL: Specify the shell type (e.g., `bash`, `zsh`). If not provided, auto-detected.
+
+For Bash, you can enable completion by adding the following to your `~/.bashrc`:
+
+```bash
+source <(condatainer completion bash)
+```
+
+For Zsh, add the following to your `~/.zshrc`: (not tested)
+
+```zsh
+source <(condatainer completion zsh)
+```
