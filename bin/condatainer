@@ -99,6 +99,7 @@ def main():
     CondaTainer_Apptainer.add_parser_arguments(subparsers)
     CondaTainer_Update.add_parser_arguments(subparsers)
     CondaTainer_ModGen.add_parser_arguments(subparsers)
+    CondaTainer_Completion.add_parser_arguments(subparsers)
 
     args = parser.parse_args()
     if args.debug:
@@ -137,6 +138,8 @@ def main():
         CondaTainer_Update.parse_update_args(args)
     elif args.action == "modgen":
         CondaTainer_ModGen.parse_modgen_args(args)
+    elif args.action == "completion":
+        CondaTainer_Completion.parse_completion_args(args)
 
 class Utils:
     remote_build_scripts_links: Optional[Dict[str, str]] = None
@@ -1986,7 +1989,7 @@ class CondaTainer_Remove:
             "terms",
             type=str,
             nargs="+",
-            help="Search terms (AND logic applied)"
+            help="Names or Search terms (AND logic applied)"
         )
 
     @staticmethod
@@ -1995,21 +1998,31 @@ class CondaTainer_Remove:
             args.terms = [Utils.normalize_name_version(term) for term in args.terms]
 
         installed_overlays_dict = CondaTainer.get_installed_overlays()
+
         if not installed_overlays_dict:
             Utils.print_warning("No installed overlays found.")
             return
 
-        filtered_overlays = []
-        for overlay in installed_overlays_dict.keys():
-            if args.terms:
-                if all(re.search(re.escape(term), overlay, re.IGNORECASE) for term in args.terms):
+        if args.terms[0] in installed_overlays_dict:
+            # Exact match found, names mode
+            filtered_overlays = []
+            for term in args.terms:
+                if term in installed_overlays_dict:
+                    filtered_overlays.append(term)
+                else:
+                    Utils.print_warning(f"Overlay {Utils.yellow_text(term)} not found among installed overlays.")
+        else:
+            filtered_overlays = []
+            for overlay in installed_overlays_dict.keys():
+                if args.terms:
+                    if all(re.search(re.escape(term), overlay, re.IGNORECASE) for term in args.terms):
+                        filtered_overlays.append(overlay)
+                else:
                     filtered_overlays.append(overlay)
-            else:
-                filtered_overlays.append(overlay)
 
-        if not filtered_overlays:
-            Utils.print_warning("No matching installed overlays found.")
-            return
+            if not filtered_overlays:
+                Utils.print_warning("No matching installed overlays found.")
+                return
 
         print("Overlays to be removed:")
         for overlay in sorted(filtered_overlays):
@@ -2490,6 +2503,163 @@ class CondaTainer_ModGen:
             Utils.print_success("ModGen installed.")
         else:
             Utils.print_error("Failed to download ModGen.")
+
+class CondaTainer_Completion:
+    """Generates shell completion scripts for Bash and Zsh."""
+
+    # Auto-detect shell from environment
+    _detected_shell = "zsh" if "zsh" in os.environ.get("SHELL", "") else "bash"
+
+    @staticmethod
+    def add_parser_arguments(parser):
+        sub = parser.add_parser("completion", help="Generate shell completion script 'source <(condatainer completion)'")
+        sub.add_argument("shell", choices=["bash", "zsh"], default=CondaTainer_Completion._detected_shell, nargs="?", help=f"Shell type (default: {CondaTainer_Completion._detected_shell})")
+
+    @staticmethod
+    def parse_completion_args(args):
+        script_name = Config.SCRIPT_NAME
+        target_shell = args.shell
+
+        if target_shell == "bash":
+            completion_code = f"""
+_{script_name}_completion() {{
+    local cur prev opts
+    COMPREPLY=()
+    cur="${{COMP_WORDS[COMP_CWORD]}}"
+    prev="${{COMP_WORDS[COMP_CWORD-1]}}"
+
+    local subcommands="create install i avail av list ls remove rm delete del exec e check c run r info apptainer self-update modgen completion"
+
+    if [[ ${{COMP_CWORD}} -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "${{subcommands}}" -- "${{cur}}") )
+        return 0
+    fi
+
+    local subcommand="${{COMP_WORDS[1]}}"
+
+    _list_overlays() {{
+        local include_local=$1
+        local img_dir="{Config.IMAGES_DIR}"
+        local ref_dir="{Config.REF_IMAGES_DIR}"
+        local files=""
+        [ -d "$img_dir" ] && files=$(ls -1 "$img_dir" 2>/dev/null | grep -E '\\.(sqf|img|squashfs)$' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
+        [ -d "$ref_dir" ] && files="$files $(ls -1 "$ref_dir" 2>/dev/null | grep -E '\\.(sqf|img|squashfs)$' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')"
+        if [[ "$include_local" == "true" ]]; then
+            files="$files $(ls -1 *.img 2>/dev/null)"
+        fi
+        echo "$files"
+    }}
+
+    case "${{subcommand}}" in
+        exec)
+            if [[ "${{prev}}" == "-o" || "${{prev}}" == "--overlay" ]]; then
+                COMPREPLY=( $(compgen -W "$(_list_overlays true)" -- "${{cur}}") )
+            else
+                opts="-o --overlay -k --keep -w --writable-img"
+                if [[ "${{cur}}" == -* ]]; then
+                    COMPREPLY=( $(compgen -W "${{opts}}" -- "${{cur}}") )
+                else
+                    COMPREPLY=( $(compgen -f -- "${{cur}}") )
+                fi
+            fi
+            return 0
+            ;;
+        remove|rm|delete|del)
+            # Do not list local .img files for removal
+            COMPREPLY=( $(compgen -W "$(_list_overlays false)" -- "${{cur}}") )
+            return 0
+            ;;
+        e|info)
+            # List both system and local .img files
+            COMPREPLY=( $(compgen -W "$(_list_overlays true)" -- "${{cur}}") )
+            return 0
+            ;;
+        *)
+            COMPREPLY=( $(compgen -f -- "${{cur}}") )
+            return 0
+            ;;
+    esac
+}}
+complete -F _{script_name}_completion {script_name}
+"""
+        elif target_shell == "zsh":
+            completion_code = f"""
+#compdef {script_name}
+
+_{script_name}_completion() {{
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    _arguments -C \\
+        '1: :->command' \\
+        '*:: :->args'
+
+    case $state in
+        command)
+            local subcmds=(
+                'create:Create a new SquashFS overlay'
+                'install:Alias for create'
+                'i:Alias for create'
+                'avail:Check available build scripts'
+                'av:Alias for avail'
+                'list:List installed overlays'
+                'ls:Alias for list'
+                'remove:Remove installed overlays'
+                'rm:Alias for remove'
+                'exec:Execute a command using overlays'
+                'e:Run bash using writable overlays'
+                'check:Check script dependencies'
+                'run:Run a script with auto-solving deps'
+                'info:Show overlay information'
+                'apptainer:Get latest Apptainer'
+                'self-update:Update CondaTainer'
+                'modgen:Get latest modgen'
+                'completion:Generate shell completion'
+            )
+            _describe -t commands 'subcommands' subcmds
+            ;;
+        args)
+            local subcommand="${{words[1]}}"
+
+            _list_overlays() {{
+                local include_local=$1
+                local img_dir="{Config.IMAGES_DIR}"
+                local ref_dir="{Config.REF_IMAGES_DIR}"
+                local -a overlays
+                [[ -d "$img_dir" ]] && overlays+=(${{(f)"$(ls -1 "$img_dir" 2>/dev/null | grep -E '\\.(sqf|img|squashfs)$' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')"}})
+                [[ -d "$ref_dir" ]] && overlays+=(${{(f)"$(ls -1 "$ref_dir" 2>/dev/null | grep -E '\\.(sqf|img|squashfs)$' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')"}})
+                if [[ "$include_local" == "true" ]]; then
+                    local local_imgs=$(ls -1 *.img 2>/dev/null)
+                    [[ -n "$local_imgs" ]] && overlays+=(${{(f)"$local_imgs"}})
+                fi
+                _describe -t overlays 'overlays' overlays
+            }}
+
+            case $subcommand in
+                exec)
+                    _arguments \\
+                        '(-o --overlay)'{{-o,--overlay}}'[Mount overlay]:overlay:_list_overlays true' \\
+                        '(-k --keep)'{{-k,--keep}}'[Do not try to parse command to installed overlays]' \\
+                        '(-w --writable-img)'{{-w,--writable-img}}'[Make .img overlays writable]' \\
+                        '*:command:_files'
+                    ;;
+                remove|rm|delete|del)
+                    _list_overlays false
+                    ;;
+                e|info)
+                    _list_overlays true
+                    ;;
+                *)
+                    _files
+                    ;;
+            esac
+            ;;
+    esac
+}}
+
+_{script_name}_completion "$@"
+"""
+        print(completion_code.strip())
 
 if __name__ == "__main__":
     try:
