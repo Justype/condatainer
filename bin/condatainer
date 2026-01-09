@@ -1648,6 +1648,19 @@ class CondaTainer_Exec:
         return params
 
     @staticmethod
+    def only_allow_one_img(paths_or_name_version: List[str]) -> bool:
+        overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
+        n_img = len([o for o in overlay_abs_paths if o.endswith('.img')])
+        return n_img <= 1
+
+    @staticmethod
+    def put_img_to_last(paths_or_name_version: List[str]) -> List[str]:
+        overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
+        img_paths = [o for o in overlay_abs_paths if o.endswith('.img')]
+        other_paths = [o for o in overlay_abs_paths if not o.endswith('.img')]
+        return other_paths + img_paths
+
+    @staticmethod
     def get_overlay_env_notes(paths_or_name_version: List[str]) -> Dict[str, str]:
         notes = { }
         overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
@@ -1674,7 +1687,7 @@ class CondaTainer_Exec:
             name = os.path.splitext(name)[0]  # Remove extension
             name = name.replace("=", "/").replace("--", "/")
             if path.endswith(".img"):
-                relative_path = f"/ext3/{name}/bin"
+                relative_path = "/ext3/env/bin"
             elif path.endswith((".sqf", ".squashfs")):
                 relative_path = f"/cnt/{name}/bin"
             else:
@@ -1693,19 +1706,14 @@ class CondaTainer_Exec:
                 mounts.extend(["--overlay", op])
             else:
                 mounts.extend(["--overlay", op + ":ro"])
-        if CondaTainer_Exec.is_img_writable:
-            # Ensure only the last .img is writable
-            n_img = len([o for o in overlay_abs_paths if o.endswith('.img')])
-            if n_img > 1:
-                for op in overlay_abs_paths:
-                    if op.endswith('.img'):
-                        n_img -= 1
-                        if n_img >= 1:
-                            mounts[mounts.index(op)] = op + ":ro"
         return mounts
 
     @staticmethod
     def exec_command(paths_or_name_versions: List[str], command: List[str], capture_output: bool = False) -> bool:
+        if not CondaTainer_Exec.only_allow_one_img(paths_or_name_versions):
+            Utils.print_error("Only one .img overlay can be used at a time.")
+            return False
+        paths_or_name_versions = CondaTainer_Exec.put_img_to_last(paths_or_name_versions)
         path_env = CondaTainer_Exec.get_path_env(paths_or_name_versions)
         env_params = CondaTainer_Exec.get_overlay_env_configs(paths_or_name_versions)
 
@@ -1724,14 +1732,14 @@ class CondaTainer_Exec:
             img_name = Utils.normalize_name_version(img_name)
             img_env.extend([
                 "--env", "MAMBA_ROOT_PREFIX=/cnt_conda",
-                "--env", f"CONDA_PREFIX=/ext3/{img_name}",
-                "--env", f"CONDA_DEFINE_ENV={img_name}",
-                "--env", f"RETICULATE_PYTHON=/ext3/{img_name}/bin/python",
+                "--env", "CONDA_PREFIX=/ext3/env",
+                "--env", "CONDA_DEFINE_ENV=env",
+                "--env", "RETICULATE_PYTHON=/ext3/env/bin/python",
             ])
 
             if CondaTainer_Exec.is_img_writable:
                 img_env.extend([
-                    "--env", f"CNT_CONDA_PREFIX=/ext3/{img_name}",
+                    "--env", "CNT_CONDA_PREFIX=/ext3/env",
                 ])
 
         environ = Utils.get_exec_environ()
@@ -2065,7 +2073,7 @@ class CondaTainer_Info:
         elif overlay_path.endswith(".img"):
             name = os.path.splitext(os.path.basename(overlay_path))[0]
             name = name.replace('--', '/').replace('=', '/')
-            print(f"Potential mount path: {Utils.blue_text('/ext3/' + name)}")
+            print(f"Potential mount path: {Utils.blue_text('/ext3/env')}")
 
         env_path = os.path.splitext(overlay_path)[0] + ".env"
         if os.path.isfile(env_path):
