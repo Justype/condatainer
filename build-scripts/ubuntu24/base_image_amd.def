@@ -47,7 +47,7 @@ From: rocm/dev-ubuntu-24.04:latest
     chmod +x /usr/bin/micromamba
 
     # Add helper scripts for create/install/update/remove $CNT_CONDA_PREFIX will be set to the .img overlay path
-    cat << EOT > /usr/bin/mm-create
+    cat << 'EOT' > /usr/bin/mm-create
 #!/usr/bin/bash
 if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
@@ -57,7 +57,7 @@ fi
 EOT
     chmod +x /usr/bin/mm-create
 
-    cat << EOT > /usr/bin/mm-install
+    cat << 'EOT' > /usr/bin/mm-install
 #!/usr/bin/bash
 if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
@@ -67,7 +67,7 @@ fi
 EOT
     chmod +x /usr/bin/mm-install
 
-    cat << EOT > /usr/bin/mm-update
+    cat << 'EOT' > /usr/bin/mm-update
 #!/usr/bin/bash
 if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
@@ -77,7 +77,7 @@ fi
 EOT
     chmod +x /usr/bin/mm-update
 
-    cat << EOT > /usr/bin/mm-remove
+    cat << 'EOT' > /usr/bin/mm-remove
 #!/usr/bin/bash
 if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
@@ -87,7 +87,7 @@ fi
 EOT
     chmod +x /usr/bin/mm-remove
 
-    cat << EOT > /usr/bin/mm-list
+    cat << 'EOT' > /usr/bin/mm-list
 #!/usr/bin/bash
 if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
@@ -97,7 +97,7 @@ fi
 EOT
     chmod +x /usr/bin/mm-list
 
-    cat << EOT > /usr/bin/mm-export
+    cat << 'EOT' > /usr/bin/mm-export
 #!/usr/bin/bash
 if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
@@ -107,7 +107,7 @@ fi
 EOT
     chmod +x /usr/bin/mm-export
 
-    cat << EOT > /usr/bin/mm-search
+    cat << 'EOT' > /usr/bin/mm-search
 #!/usr/bin/bash
 if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
@@ -117,7 +117,7 @@ fi
 EOT
     chmod +x /usr/bin/mm-search
 
-    cat << EOT > /usr/bin/mm-clean
+    cat << 'EOT' > /usr/bin/mm-clean
 #!/usr/bin/bash
 if [[ -z "$CNT_CONDA_PREFIX" ]]; then
     echo "ERROR: CNT_CONDA_PREFIX is not set!"
