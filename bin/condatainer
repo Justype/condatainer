@@ -1513,13 +1513,13 @@ class CondaTainer_Exec:
             "--env",
             dest="env_settings",
             action="append",
-            help="Additional env settings (KEY=VALUE) (can be used multiple times)"
+            help="Additional env setting 'KEY=VALUE' (can be used multiple times)"
         )
         CondaTainer_Exec.parser_exec.add_argument(
             "--bind",
             dest="bind_paths",
             action="append",
-            help="Additional paths to bind (can be used multiple times)"
+            help="Additional paths to bind 'HOST_PATH:CONTAINER_PATH' (can be used multiple times)"
         )
         CondaTainer_Exec.parser_exec.add_argument(
             "commands",

@@ -289,6 +289,9 @@ condatainer exec [OPTIONS] [COMMAND...]
 * `-o`, `--overlay [OVERLAY]`: Specify specific overlays to mount (can be used multiple times).
 * `-w`, `--writable-img`: Mount .img overlays as writable (default is read-only). Only the last specified .img is made writable.
 * `-k`, `--keep`: Do not attempt to parse the command itself as an overlay name.
+* `--env [ENV_VAR=VALUE]`: Set additional environment variables inside the container (can be used multiple times).
+* `--bind [HOST_PATH:CONTAINER_PATH]`: Bind additional host paths into the container (can be used multiple times).
+* COMMAND: The command to execute inside the container. If not provided, opens an interactive bash shell.
 
 **Environment Variables:**
 
