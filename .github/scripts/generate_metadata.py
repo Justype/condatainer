@@ -61,6 +61,7 @@ if not os.path.isdir(BUILD_SCRIPTS_DIR):
 
 for script_name, path in get_local_build_scripts().items():
     script_metadata = {}
+    script_metadata['relative_path'] = os.path.relpath(path, BUILD_SCRIPTS_DIR)
     script_metadata['whatis'] = "Missing description"
     script_metadata['deps'] = []
     script_metadata['sbatch'] = False
