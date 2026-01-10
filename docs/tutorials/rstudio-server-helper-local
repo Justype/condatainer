@@ -1,5 +1,5 @@
 #!/bin/bash
-# This script helps run rstudio-server with CondaTainer.
+# This script helps run rstudio-server with CondaTainer env.
 
 PORT=8787
 AUTH="none"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# This script helps run code-server with CondaTainer.
+# This script helps run code-server with CondaTainer env on SLURM clusters.
 
 NCPUS=4
 MEM=16G

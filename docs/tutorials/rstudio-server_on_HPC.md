@@ -1,6 +1,4 @@
-# How to run rstudio-server on HPC with CondaTainer
-
-Before getting started, ensure you have [CondaTainer installed](../../README.md).
+# How to run rstudio-server on HPC with CondaTainer env
 
 ## Checklist
 
