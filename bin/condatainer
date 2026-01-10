@@ -1518,6 +1518,11 @@ class CondaTainer_Exec:
             help="Additional paths to bind 'HOST_PATH:CONTAINER_PATH' (can be used multiple times)"
         )
         CondaTainer_Exec.parser_exec.add_argument(
+            "--fake-root",
+            action="store_true",
+            help="Run command with fake root privileges inside the container"
+        )
+        CondaTainer_Exec.parser_exec.add_argument(
             "commands",
             nargs=argparse.REMAINDER,
             help="The command to run inside the container (if not provided, defaults to bash shell)"
@@ -1533,6 +1538,11 @@ class CondaTainer_Exec:
             "-n", "--no-autoload",
             action="store_true",
             help="Do not autoload local env.img from current directory"
+        )
+        CondaTainer_Exec.parser_e.add_argument(
+            "--fake-root",
+            action="store_true",
+            help="Run command with fake root privileges inside the container"
         )
         CondaTainer_Exec.parser_e.add_argument(
             "overlays",
@@ -1573,7 +1583,7 @@ class CondaTainer_Exec:
                 Utils.print_error(f"Overlay file {overlay_final[i]} not found.")
                 exit(1)
 
-        if not CondaTainer_Exec.exec_command(overlay_final, command_final, args.env_settings, args.bind_paths):
+        if not CondaTainer_Exec.exec_command(overlay_final, command_final, args.env_settings, args.bind_paths, args.fake_root):
             exit(1)
 
     @staticmethod
@@ -1600,7 +1610,7 @@ class CondaTainer_Exec:
                 Utils.print_message(f"Autoload env.img at {Utils.blue_text(local_env_path)}")
                 overlay_final.append(local_env_path)
 
-        if not CondaTainer_Exec.exec_command(overlay_final, command_final):
+        if not CondaTainer_Exec.exec_command(overlay_final, command_final, is_fake_root=args.fake_root):
             exit(1)
 
     @staticmethod
@@ -1731,6 +1741,7 @@ class CondaTainer_Exec:
             command: List[str], 
             env_settings: Optional[List[str]] = None, 
             bind_paths: Optional[List[str]] = None, 
+            is_fake_root: bool = False, 
             capture_output: bool = False) -> bool:
 
         if not CondaTainer_Exec.only_allow_one_img(paths_or_name_versions):
@@ -1739,6 +1750,7 @@ class CondaTainer_Exec:
         paths_or_name_versions = CondaTainer_Exec.put_img_to_last(paths_or_name_versions)
         path_env = CondaTainer_Exec.get_path_env(paths_or_name_versions)
         env_params = CondaTainer_Exec.get_overlay_env_configs(paths_or_name_versions)
+        fake_root_param = [ "--fakeroot" ] if is_fake_root else []
 
         last_img = None
         img_env = []
@@ -1791,6 +1803,7 @@ class CondaTainer_Exec:
             *img_env,
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
             *additional_binds,
+            *fake_root_param,
             *CondaTainer.generate_gpu_args(),
             Config.BASE_IMAGE_SIF,
             *command
@@ -2305,37 +2318,107 @@ class CondaTainer_Run:
 class CondaTainer_Overlay:
     @staticmethod
     def add_parser_arguments(parser):
-        CondaTainer_Overlay.parser_overlay = parser.add_parser(
-            "overlay", aliases=["o"],
-            help="Create an empty overlay img")
-        CondaTainer_Overlay.parser_overlay.add_argument(
+        parser_overlay = parser.add_parser(
+            "overlay", 
+            help="Manage overlay images (create, chown)"
+        )
+        subparsers = parser_overlay.add_subparsers(
+            dest="overlay_action",
+            metavar="ACTION",
+            required=True, 
+            help="Overlay actions"
+        )
+
+        parser_create = subparsers.add_parser(
+            "create",
+            help="Create a new empty overlay image"
+        )
+        CondaTainer_Overlay._add_create_args(parser_create)
+
+        parser_chown = subparsers.add_parser(
+            "chown", 
+            help="Change ownership (UID:GID) of files inside an overlay"
+        )
+        parser_chown.add_argument(
+            "image",
+            type=str,
+            help="Path to the overlay image"
+        )
+        parser_chown.add_argument(
+            "-u", "--uid",
+            type=int,
+            default=os.getuid(),
+            help=f"User ID to set (default: current user {os.getuid()})"
+        )
+        parser_chown.add_argument(
+            "-g", "--gid",
+            type=int,
+            default=os.getgid(),
+            help=f"Group ID to set (default: current group {os.getgid()})"
+        )
+        parser_chown.add_argument(
+            "-p", "--path",
+            type=str,
+            default="/ext3",
+            help="Path inside the overlay to change (default: /ext3)"
+        )
+
+        parser_o = parser.add_parser(
+            "o",
+            help="Shortcut for 'overlay create'"
+        )
+        CondaTainer_Overlay._add_create_args(parser_o)
+
+    @staticmethod
+    def _add_create_args(parser):
+        """Helper to add create arguments to both 'overlay create' and 'o'"""
+        parser.add_argument(
             "-s", "--size",
             type=int,
             default=20480,
             help="Size of the overlay image in MiB (default: 20480)"
         )
-        CondaTainer_Overlay.parser_overlay.add_argument(
+        parser.add_argument(
             "-f", "--file",
             type=str,
-            help="Conda env YAML file"
+            help="Conda env YAML file to initialize"
         )
-        CondaTainer_Overlay.parser_overlay.add_argument(
+        parser.add_argument(
+            "--fake-root",
+            action="store_true",
+            help="Use fakeroot during creation"
+        )
+        parser.add_argument(
             "image",
             type=str,
             nargs="?",
             default="env.img",
-            help="Path to create the overlay image"
+            help="Path to create the overlay image (default: env.img)"
         )
 
     @staticmethod
     def parse_overlay_args(args):
+        # Route logic based on whether user typed 'o' or 'overlay [subcommand]'
+        if args.action == "o":
+            CondaTainer_Overlay.run_create(args)
+        elif args.action == "overlay":
+            if args.overlay_action == "create":
+                CondaTainer_Overlay.run_create(args)
+            elif args.overlay_action == "chown":
+                CondaTainer_Overlay.run_chown(args)
+
+    @staticmethod
+    def run_create(args):
         CondaTainer.ensure_base_image()
         overlay_path = os.path.abspath(args.image)
         size_mib = args.size
+        is_fake_root = args.fake_root
+        fake_root_arg = [ "--fakeroot" ] if is_fake_root else []
 
         if not overlay_path.endswith(".img"):
             if '.' in os.path.basename(overlay_path):
-                CondaTainer_Overlay.parser_overlay.error("Overlay image must have a .img extension.")
+                Utils.print_error("Overlay image must have a .img extension.")
+                return
             overlay_path += ".img"
 
         if os.path.isfile(overlay_path) or os.path.isdir(overlay_path):
@@ -2351,6 +2434,7 @@ class CondaTainer_Overlay:
         cmd_overlay = [
             Config.APPTAINER_BIN, "overlay", "create",
             "--size", str(size_mib), "--sparse",
+            *fake_root_arg,
             overlay_path
         ]
 
@@ -2364,20 +2448,55 @@ class CondaTainer_Overlay:
         CondaTainer_Exec.is_img_writable = True
         if args.file:
             Utils.print_message(f"Initializing conda environment using {os.path.abspath(args.file)}...")
-            if CondaTainer_Exec.exec_command([overlay_path], ["mm-create", "-f", os.path.abspath(args.file), "-y"], capture_output=True):
-                CondaTainer_Exec.exec_command([overlay_path], ["mm-clean", "-a", "-y"], capture_output=True)
+            if CondaTainer_Exec.exec_command([overlay_path], ["mm-create", "-f", os.path.abspath(args.file), "-y"], is_fake_root=is_fake_root, capture_output=True):
+                CondaTainer_Exec.exec_command([overlay_path], ["mm-clean", "-a", "-y"], is_fake_root=is_fake_root, capture_output=True)
                 Utils.print_success(f"Conda env is created inside {Utils.blue_text(overlay_path)}.")
             else:
                 Utils.print_error(f"Failed to create conda env inside {Utils.blue_text(overlay_path)}.")
                 exit(1)
         else:
             Utils.print_message("Initializing minimal conda environment with small package (zlib)...")
-            if CondaTainer_Exec.exec_command([overlay_path], ["mm-create", "zlib", "-y"], capture_output=True):
-                CondaTainer_Exec.exec_command([overlay_path], ["mm-clean", "-a", "-y"], capture_output=True)
+            if CondaTainer_Exec.exec_command([overlay_path], ["mm-create", "zlib", "-y"], is_fake_root=is_fake_root, capture_output=True):
+                CondaTainer_Exec.exec_command([overlay_path], ["mm-clean", "-a", "-y"], is_fake_root=is_fake_root, capture_output=True)
                 Utils.print_success(f"Conda env is created inside {Utils.blue_text(overlay_path)}.")
             else:
                 Utils.print_error(f"Failed to create conda env inside {Utils.blue_text(overlay_path)}.")
                 exit(1)
+
+    @staticmethod
+    def run_chown(args):
+        CondaTainer.ensure_base_image()
+        overlay_path = os.path.abspath(args.image)
+        
+        if not os.path.isfile(overlay_path):
+            Utils.print_error(f"Overlay file {Utils.blue_text(overlay_path)} not found.")
+            return
+
+        target_uid = args.uid
+        target_gid = args.gid
+        target_path = args.path
+
+        Utils.print_message(f"Changing ownership of {Utils.blue_text(target_path)} inside {Utils.yellow_text(os.path.basename(overlay_path))}")
+        Utils.print_message(f"Target UID: {target_uid}, Target GID: {target_gid}")
+
+        # We must use fakeroot to have permission to change ownership inside the container
+        environ = Utils.get_exec_environ()
+        cmd_chown = [
+            Config.APPTAINER_BIN, "exec",
+            "--fakeroot", 
+            "--overlay", overlay_path,
+            Config.BASE_IMAGE_SIF,
+            "chown", "-R", f"{target_uid}:{target_gid}", target_path
+        ]
+
+        Utils.print_debug(f"[OVERLAY] Running chown: {cmd_chown}")
+
+        try:
+            subprocess.run(cmd_chown, check=True, env=environ)
+            Utils.print_success("Ownership changed successfully.")
+        except subprocess.CalledProcessError as e:
+            Utils.print_error(f"Failed to change ownership: {e}")
+            Utils.print_note("Ensure you have write permissions to the overlay file itself.")
 
 class CondaTainer_Apptainer:
     @staticmethod
@@ -2518,7 +2637,7 @@ _{script_name}_completion() {{
     cur="${{COMP_WORDS[COMP_CWORD]}}"
     prev="${{COMP_WORDS[COMP_CWORD-1]}}"
 
-    local subcommands="create install i avail av list ls remove rm delete del exec e check c run r info apptainer self-update completion"
+    local subcommands="create install i avail av list ls remove rm delete del exec e check c run r info apptainer self-update completion overlay o"
 
     if [[ ${{COMP_CWORD}} -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "${{subcommands}}" -- "${{cur}}") )
@@ -2541,11 +2660,47 @@ _{script_name}_completion() {{
     }}
 
     case "${{subcommand}}" in
+        overlay)
+            if [[ ${{COMP_CWORD}} -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "create chown" -- "${{cur}}") )
+            elif [[ "${{COMP_WORDS[2]}}" == "chown" ]]; then
+                if [[ "${{cur}}" == -* ]]; then
+                    COMPREPLY=( $(compgen -W "-u --uid -g --gid -p --path" -- "${{cur}}") )
+                else
+                    COMPREPLY=( $(compgen -W "$(_list_overlays true)" -- "${{cur}}") )
+                fi
+            elif [[ "${{COMP_WORDS[2]}}" == "create" ]]; then
+                if [[ "${{cur}}" == -* ]]; then
+                    COMPREPLY=( $(compgen -W "-s --size -f --file --fake-root" -- "${{cur}}") )
+                else
+                    COMPREPLY=( $(compgen -f -- "${{cur}}") )
+                fi
+            fi
+            return 0
+            ;;
+        o)
+             # Alias for overlay create
+             if [[ "${{cur}}" == -* ]]; then
+                 COMPREPLY=( $(compgen -W "-s --size -f --file --fake-root" -- "${{cur}}") )
+             else
+                 COMPREPLY=( $(compgen -f -- "${{cur}}") )
+             fi
+             return 0
+             ;;
+        create|install|i)
+            if [[ "${{cur}}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "-n --name -p --prefix -f --file --zstd --zstd-fast --zstd-medium --zstd-high --gzip --lz4" -- "${{cur}}") )
+            else
+                 # Generic file completion for build scripts
+                 COMPREPLY=( $(compgen -f -- "${{cur}}") )
+            fi
+            return 0
+            ;;
         exec)
             if [[ "${{prev}}" == "-o" || "${{prev}}" == "--overlay" ]]; then
                 COMPREPLY=( $(compgen -W "$(_list_overlays true)" -- "${{cur}}") )
             else
-                opts="-o --overlay -k --keep -w --writable-img"
+                opts="-o --overlay -k --keep -w --writable-img --env --bind --fake-root"
                 if [[ "${{cur}}" == -* ]]; then
                     COMPREPLY=( $(compgen -W "${{opts}}" -- "${{cur}}") )
                 else
@@ -2554,14 +2709,62 @@ _{script_name}_completion() {{
             fi
             return 0
             ;;
+        check|c)
+            if [[ "${{cur}}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "-a --auto-install -i --install" -- "${{cur}}") )
+            else
+                COMPREPLY=( $(compgen -f -- "${{cur}}") )
+            fi
+            return 0
+            ;;
+        run|r)
+            if [[ "${{cur}}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "-w --writable-img -a --auto-install -i --install" -- "${{cur}}") )
+            else
+                COMPREPLY=( $(compgen -f -- "${{cur}}") )
+            fi
+            return 0
+            ;;
+        avail|av)
+            if [[ "${{cur}}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "-i --install -a --add" -- "${{cur}}") )
+            fi
+            return 0
+            ;;
+        list|ls)
+            if [[ "${{cur}}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "-d --delete -r --remove" -- "${{cur}}") )
+            fi
+            return 0
+            ;;
+        apptainer)
+            if [[ "${{cur}}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "-y --yes -f --force" -- "${{cur}}") )
+            fi
+            return 0
+            ;;
+        self-update)
+            if [[ "${{cur}}" == -* ]]; then
+                COMPREPLY=( $(compgen -W "-y --yes" -- "${{cur}}") )
+            fi
+            return 0
+            ;;
+        completion)
+            COMPREPLY=( $(compgen -W "bash zsh" -- "${{cur}}") )
+            return 0
+            ;;
         remove|rm|delete|del)
             # Do not list local .img files for removal
             COMPREPLY=( $(compgen -W "$(_list_overlays false)" -- "${{cur}}") )
             return 0
             ;;
         e|info)
-            # List both system and local .img files
-            COMPREPLY=( $(compgen -W "$(_list_overlays true)" -- "${{cur}}") )
+            if [[ "${{subcommand}}" == "e" && "${{cur}}" == -* ]]; then
+                 COMPREPLY=( $(compgen -W "-r --read-only -n --no-autoload --fake-root" -- "${{cur}}") )
+            else
+                 # List both system and local .img files
+                 COMPREPLY=( $(compgen -W "$(_list_overlays true)" -- "${{cur}}") )
+            fi
             return 0
             ;;
         *)
@@ -2587,7 +2790,7 @@ _{script_name}_completion() {{
     case $state in
         command)
             local subcmds=(
-                'create:Create a new SquashFS overlay'
+                'create:Create a new SquashFS overlay from script/conda'
                 'install:Alias for create'
                 'i:Alias for create'
                 'avail:Check available build scripts'
@@ -2599,11 +2802,15 @@ _{script_name}_completion() {{
                 'exec:Execute a command using overlays'
                 'e:Run bash using writable overlays'
                 'check:Check script dependencies'
+                'c:Alias for check'
                 'run:Run a script with auto-solving deps'
+                'r:Alias for run'
                 'info:Show overlay information'
                 'apptainer:Get latest Apptainer'
                 'self-update:Update CondaTainer'
                 'completion:Generate shell completion'
+                'overlay:Manage overlay images (img)'
+                'o:Alias for overlay create'
             )
             _describe -t commands 'subcommands' subcmds
             ;;
@@ -2625,17 +2832,108 @@ _{script_name}_completion() {{
             }}
 
             case $subcommand in
+                overlay)
+                    local overlay_cmds=(
+                        'create:Create a new empty overlay image'
+                        'chown:Change ownership of files inside an overlay'
+                    )
+                    _arguments \\
+                        '1: :_describe -t commands "overlay commands" overlay_cmds' \\
+                        '*:: :->overlay_args'
+                    
+                    case $state in
+                        overlay_args)
+                            case ${{words[1]}} in
+                                create)
+                                    _arguments \\
+                                        '(-s --size)'{{-s,--size}}'[Size in MiB]:size' \\
+                                        '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files' \\
+                                        '--fake-root[Use fakeroot]' \\
+                                        ':image:_files'
+                                    ;;
+                                chown)
+                                    _arguments \\
+                                        '(-u --uid)'{{-u,--uid}}'[User ID]:uid' \\
+                                        '(-g --gid)'{{-g,--gid}}'[Group ID]:gid' \\
+                                        '(-p --path)'{{-p,--path}}'[Path inside overlay]:path' \\
+                                        ':overlay:_list_overlays true'
+                                    ;;
+                            esac
+                            ;;
+                    esac
+                    ;;
+                o)
+                    _arguments \\
+                        '(-s --size)'{{-s,--size}}'[Size in MiB]:size' \\
+                        '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files' \\
+                        '--fake-root[Use fakeroot]' \\
+                        ':image:_files'
+                    ;;
+                create|install|i)
+                    _arguments \\
+                        '(-n --name)'{{-n,--name}}'[Custom name for overlay]:name' \\
+                        '(-p --prefix)'{{-p,--prefix}}'[Custom prefix path]:prefix:_files' \\
+                        '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files' \\
+                        '--zstd[ZSTD compression level 14]' \\
+                        '--zstd-fast[ZSTD compression level 3]' \\
+                        '--zstd-medium[ZSTD compression level 8]' \\
+                        '--zstd-high[ZSTD compression level 19]' \\
+                        '--gzip[GZIP compression]' \\
+                        '--lz4[LZ4 compression]' \\
+                        '*:package:_files'
+                    ;;
                 exec)
                     _arguments \\
                         '(-o --overlay)'{{-o,--overlay}}'[Mount overlay]:overlay:_list_overlays true' \\
                         '(-k --keep)'{{-k,--keep}}'[Do not try to parse command to installed overlays]' \\
                         '(-w --writable-img)'{{-w,--writable-img}}'[Make .img overlays writable]' \\
+                        '--fake-root[Run with fake root privileges]' \\
                         '*:command:_files'
+                    ;;
+                e)
+                    _arguments \\
+                        '(-r --read-only)'{{-r,--read-only}}'[Mount overlays as read-only]' \\
+                        '(-n --no-autoload)'{{-n,--no-autoload}}'[Do not autoload local env.img]' \\
+                        '--fake-root[Run with fake root privileges]' \\
+                        '*:overlay:_list_overlays true'
+                    ;;
+                check|c)
+                    _arguments \\
+                        '(-a --auto-install -i --install)'{{-a,-i,--auto-install,--install}}'[Auto install missing deps]' \\
+                        ':script:_files'
+                    ;;
+                run|r)
+                    _arguments \\
+                        '(-w --writable-img)'{{-w,--writable-img}}'[Make .img overlays writable]' \\
+                        '(-a --auto-install -i --install)'{{-a,-i,--auto-install,--install}}'[Auto install missing deps]' \\
+                        ':script:_files'
+                    ;;
+                avail|av)
+                    _arguments \\
+                        '(-i --install -a --add)'{{-i,-a,--install,--add}}'[Install selected scripts]' \\
+                        '*:term'
+                    ;;
+                list|ls)
+                    _arguments \\
+                        '(-d --delete -r --remove)'{{-d,-r,--delete,--remove}}'[Delete listed overlays]' \\
+                        '*:term'
+                    ;;
+                apptainer)
+                    _arguments \\
+                        '(-y --yes)'{{-y,--yes}}'[Confirm installation]' \\
+                        '(-f --force)'{{-f,--force}}'[Force re-installation]'
+                    ;;
+                self-update)
+                    _arguments \\
+                        '(-y --yes)'{{-y,--yes}}'[Confirm update]'
+                    ;;
+                completion)
+                    _arguments ':shell:(bash zsh)'
                     ;;
                 remove|rm|delete|del)
                     _list_overlays false
                     ;;
-                e|info)
+                info)
                     _list_overlays true
                     ;;
                 *)
