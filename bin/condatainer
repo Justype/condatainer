@@ -21,7 +21,6 @@ class Config:
     use_sbatch = True
     GITHUB_REPO = "Justype/condatainer"
     REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json.gz"
-    MODGEN_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/modgen"
     CONDATAINER_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/condatainer"
     GIT_RAW_URL_PREFIX = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
 
@@ -98,7 +97,6 @@ def main():
     CondaTainer_Info.add_parser_arguments(subparsers)
     CondaTainer_Apptainer.add_parser_arguments(subparsers)
     CondaTainer_Update.add_parser_arguments(subparsers)
-    CondaTainer_ModGen.add_parser_arguments(subparsers)
     CondaTainer_Completion.add_parser_arguments(subparsers)
 
     args = parser.parse_args()
@@ -136,8 +134,6 @@ def main():
         CondaTainer_Apptainer.parse_apptainer_args(args)
     elif args.action == "self-update":
         CondaTainer_Update.parse_update_args(args)
-    elif args.action == "modgen":
-        CondaTainer_ModGen.parse_modgen_args(args)
     elif args.action == "completion":
         CondaTainer_Completion.parse_completion_args(args)
 
@@ -671,8 +667,6 @@ class CondaTainer:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError:
             Utils.print_error("Creating temporary overlay failed.")
-            Utils.print_note("Please contact your system admin.")
-            Utils.print_note("You can try ModGen to create Lmod modules without apptainer and overlays.")
             return None
         Utils.print_message("Temporary overlay created.")
         return tmp_overlay_path
@@ -2500,55 +2494,6 @@ class CondaTainer_Update:
         else:
             Utils.print_error("Failed to download the latest CondaTainer script.")
 
-class CondaTainer_ModGen:
-    @staticmethod
-    def add_parser_arguments(parser):
-        CondaTainer_ModGen.parser_modgen = parser.add_parser("modgen", help="Get latest modgen executable from GitHub")
-        CondaTainer_ModGen.parser_modgen.add_argument(
-            "-y", "--yes",
-            action="store_true",
-            help="Automatically confirm installation"
-        )
-        CondaTainer_ModGen.parser_modgen.add_argument(
-            "-f", "--force",
-            action="store_true",
-            help="Force overwrite if CondaTainer is already installed"
-        )
-
-    @staticmethod
-    def parse_modgen_args(args):
-        if not Utils.is_in_interactive_shell():
-            return
-
-        Utils.print_message(f"{Utils.blue_text('ModGen')}: Use conda and build scripts to create environment-modules or Lmod modules.")
-        Utils.print_message(f"Which is another way to manage software environments compared to {Utils.blue_text('CondaTainer')}.")
-        Utils.print_message(f"HPC systems often have numbers of prebuilt modules available via Lmod.")
-        Utils.print_message(f"{Utils.blue_text('ModGen')} will take the advantage of existing modules and only install missing modules via micromamba.")
-        print("", flush=True)
-
-        target_path = os.path.join(os.path.dirname(Config.SCRIPT_PATH), "modgen")
-        if os.path.isfile(target_path) and not args.force:
-            Utils.print_message(f"ModGen is already installed at {Utils.blue_text(target_path)}.")
-            Utils.print_message("Overwrite? [y/N]: ", end="", flush=True)
-            if not args.yes:
-                confirm = input()
-                if confirm.lower() != 'y':
-                    Utils.print_message("Installation cancelled by user.")
-                    return
-
-        if not args.force and not args.yes:
-            Utils.print_message("Are you sure to install ModGen? [y/N]: ", end="", flush=True)
-            confirm = input()
-            if confirm.lower() != 'y':
-                Utils.print_message("Installation cancelled by user.")
-                return
-
-        Utils.print_message("Downloading ModGen...")
-        if Utils.download_executable(Config.MODGEN_URL, target_path):
-            Utils.print_success("ModGen installed.")
-        else:
-            Utils.print_error("Failed to download ModGen.")
-
 class CondaTainer_Completion:
     """Generates shell completion scripts for Bash and Zsh."""
 
@@ -2573,7 +2518,7 @@ _{script_name}_completion() {{
     cur="${{COMP_WORDS[COMP_CWORD]}}"
     prev="${{COMP_WORDS[COMP_CWORD-1]}}"
 
-    local subcommands="create install i avail av list ls remove rm delete del exec e check c run r info apptainer self-update modgen completion"
+    local subcommands="create install i avail av list ls remove rm delete del exec e check c run r info apptainer self-update completion"
 
     if [[ ${{COMP_CWORD}} -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "${{subcommands}}" -- "${{cur}}") )
@@ -2658,7 +2603,6 @@ _{script_name}_completion() {{
                 'info:Show overlay information'
                 'apptainer:Get latest Apptainer'
                 'self-update:Update CondaTainer'
-                'modgen:Get latest modgen'
                 'completion:Generate shell completion'
             )
             _describe -t commands 'subcommands' subcmds

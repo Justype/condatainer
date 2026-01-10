@@ -39,7 +39,6 @@ positional arguments:
     info                Show information about a specific overlay
     apptainer           Get latest Apptainer executable from conda-forge
     self-update         Update CondaTainer to the latest version
-    modgen              Get latest modgen executable from GitHub
     completion          Generate shell completion script 'source <(condatainer completion)'
 
 options:
