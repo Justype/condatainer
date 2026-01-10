@@ -5,7 +5,7 @@
 - [ ] [SLURM job scheduler is available on your HPC system](#slurm-job-scheduler)
 - [ ] [Have CondaTainer installed](#install-condatainer)
 - [ ] [Have a writable overlay image (optional)](#create-writable-overlay)
-- [ ] [Have the `vscode-tunnel-helper` in your PATH](#code-server-helper-script)
+- [ ] [Have the `vscode-tunnel-helper` in your PATH](#vs-code-tunnel-helper-script)
 
 Then you can run:
 
@@ -136,13 +136,32 @@ vscode-tunnel-helper
 After running the script, you will see output like this:
 
 ```
-Waiting for job 1299123 to start running. Current status: PENDING.
-Job 1299123 is now running on node cm23.
-code-server at http://localhost:$PORT?folder=/scratch/your_username/current_working_directory
-If you want to stop it, run: scancel 1299123
+Waiting for job 6628611 to start running. Current status: PENDING.
+[INFO] Waiting for VS Code Tunnel to initialize...
+
+Please use the following message for authentication:
+------------------------------------------------
+To sign in, use a web browser to open the page https://microsoft.com/devicelogin and enter the code FE2G6WJQK to authenticate.
+------------------------------------------------
+Waiting for authentication...
 ```
 
-Then you can go to your local web browser and access `http://localhost:8080`. or click the link provided to open the project directly.
+Then you need to open the URL in your web browser and enter the code to authenticate. (Same as the github authentication flow.)
+
+After authentication, you will see output like this:
+
+```
+[SUCCESS] Tunnel is ready!
+To connect, you can either:
+  - Use VSCode Remote - Tunnels extension
+  - Use this link: https://vscode.dev/tunnel/username-hpc_name/scratch/username/playground
+And use your microsoft account to connect to username-hpc_name
+CWD: /scratch/username/playground
+```
+
+Then you can either use the [VSCode Remote - Tunnels extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-server) or open the link in your web browser to connect to the VS Code server running on the compute node.
+
+Personally, I prefer use local extension.
 
 ## Change the default setting
 
@@ -154,10 +173,9 @@ They are at the beginning of the script:
 #!/bin/bash
 
 NCPUS=4
-MEM=32G
+MEM=16G
 TIME=12:00:00
-PORT=8080
-AUTH="none"
+AUTH="microsoft"
 ```
 
 You can use editors like `vim` or `nano` to change these values.
@@ -165,26 +183,25 @@ You can use editors like `vim` or `nano` to change these values.
 or use `sed`
 
 ```bash
-sed -i 's/NCPUS=4/NCPUS=8/' code-server-helper
-sed -i 's/MEM=32G/MEM=64G/' code-server-helper
-sed -i 's/TIME=12:00:00/TIME=24:00:00/' code-server-helper
-sed -i 's/PORT=8080/PORT=13182/' code-server-helper
-sed -i 's/AUTH="none"/AUTH="your_password"/' code-server-helper
+sed -i 's/NCPUS=4/NCPUS=8/' vscode-tunnel-helper
+sed -i 's/MEM=16G/MEM=64G/' vscode-tunnel-helper
+sed -i 's/TIME=12:00:00/TIME=24:00:00/' vscode-tunnel-helper
+sed -i 's/AUTH="microsoft"/AUTH="github"/' vscode-tunnel-helper
 ```
 
 ## Common Issues
 
-### Too many files under `.local/share/code-server/extensions`
+### Too many files under `.vscode-server/extensions`
 
-If you have installed many extensions, the number of files under `.local/share/code-server/extensions` may exceed the quota.
+If you have installed many extensions, the number of files under `.vscode-server/extensions` may exceed the quota.
 
 To fix this, you can create a symbolic link to the writable overlay image.
 
 ```bash
 # Inside the overlay
-mkdir -p /ext3/home/.local/share/code-server
-mv $HOME/.local/share/code-server/extensions /ext3/home/.local/share/code-server/extensions
-ln -s /ext3/home/.local/share/code-server/extensions $HOME/.local/share/code-server/extensions
+mkdir -p /ext3/home/.vscode-server
+mv $HOME/.vscode-server/extensions /ext3/home/.vscode-server/extensions
+ln -s /ext3/home/.vscode-server/extensions $HOME/.vscode-server/extensions
 ```
 
 A new issue is that if you change the overlay image, you will lose all installed extensions. But at least you won't hit the quota limit.
