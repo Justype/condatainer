@@ -37,7 +37,7 @@ class Config:
     REF_DIR = os.path.join(CONDATINER_DIR, "ref")
     REF_MODULEFILES_DIR = os.path.join(CONDATINER_DIR, "ref-modules")
     TMP_DIR = os.path.join(CONDATINER_DIR, "tmp")
-    LOGS_DIR = os.path.join(CONDATINER_DIR, "logs")
+    LOGS_DIR = os.path.join(os.path.expanduser("~"), "logs")
 
     # Local apptainer
     MICROMAMBA_BIN = os.path.join(CONDATINER_DIR, "bin", "micromamba")
@@ -854,7 +854,7 @@ class BuildObject:
                 f.write("#!/bin/bash\n")
                 for flag in self.sbatch_flags:
                     if flag.startswith("--output"):
-                        flag = "--output=" + os.path.join(Config.LOGS_DIR, f"CondaTainer_{self.name_version.replace('/', '--')}.out")
+                        flag = "--output=" + os.path.join(Config.LOGS_DIR, f"ModGen_create_{self.name_version.replace('/', '--')}.out")
                     f.write(f"#SBATCH {flag}\n")
                 f.write("\n")
                 if Config.debug:
