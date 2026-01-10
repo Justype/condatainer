@@ -26,12 +26,12 @@ NC='\033[0m' # No Color
 if [ -f "$LOG_DIR/.code-server" ]; then
     IFS=$'\t' read -r PRE_JOB_ID PRE_PORT PRE_AUTH PRE_NODE PRE_CWD < "$LOG_DIR/.code-server"
     PRE_JOB_STATUS=$(squeue -j $PRE_JOB_ID -h -o "%T" 2>/dev/null)
-    if [ "$PRE_JOB_STATUS" != "RUNNING" ]; then
-        echo -e "The previous code-server job (ID: ${YELLOW}$PRE_JOB_ID${NC}) is no longer running."
-        rm "$LOG_DIR/.code-server"
-    elif [ "$PRE_JOB_STATUS" == "PENDING" ]; then
+    if [ "$PRE_JOB_STATUS" == "PENDING" ]; then
         echo -e "The previous code-server job (ID: ${YELLOW}$PRE_JOB_ID${NC}) is still pending. Please wait until it starts running."
         exit 0
+    elif [ "$PRE_JOB_STATUS" != "RUNNING" ]; then
+        echo -e "The previous code-server job (ID: ${YELLOW}$PRE_JOB_ID${NC}) is no longer running."
+        rm "$LOG_DIR/.code-server"
     else
         echo -e "Found an existing code-server job (ID: ${YELLOW}$PRE_JOB_ID${NC}) running on node ${BLUE}$PRE_NODE${NC}."
         echo -e "code-server at ${BLUE}http://localhost:$PRE_PORT?folder=$PRE_CWD${NC}"
@@ -145,7 +145,7 @@ else
     AUTH_OPTION="--auth none"
 fi
 
-SBATCH_SCRIPT_PATH="$LOG_DIR/${DATE}-code-server.sbatch"
+SBATCH_SCRIPT_PATH="$LOG_DIR/code-server-${DATE}.sbatch"
 
 cat <<EOT > $SBATCH_SCRIPT_PATH
 #!/bin/bash
@@ -153,7 +153,7 @@ cat <<EOT > $SBATCH_SCRIPT_PATH
 #SBATCH --cpus-per-task=$NCPUS
 #SBATCH --mem=$MEM
 #SBATCH --time=$TIME
-#SBATCH --output=$LOG_DIR/${DATE}-code-server-%j.log
+#SBATCH --output=$LOG_DIR/code-server-${DATE}-%j.log
 
 printf "\$SLURM_JOB_ID\t$PORT\t$AUTH\t\$(hostname)\t$CWD\n" > $LOG_DIR/.code-server
 condatainer exec \\
@@ -181,7 +181,7 @@ while true; do
     if [ "$CURRENT_STATUS" == "" ]; then
         echo ""
         echo -e "${RED}[ERROR]${NC} Job $SBATCH_JOB_ID not found in the queue. Please check the SLURM log for details."
-        echo -e "$LOG_DIR/${DATE}-code-server-$SBATCH_JOB_ID.log"
+        echo -e "  $LOG_DIR/code-server-${DATE}-$SBATCH_JOB_ID.log"
         exit 1
     fi
     printf "\rWaiting for job %s to start running. Current status: %s." "$SBATCH_JOB_ID" "$CURRENT_STATUS"
