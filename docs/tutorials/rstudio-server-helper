@@ -236,6 +236,7 @@ while true; do
         break
     fi
     if [ "$CURRENT_STATUS" == "" ]; then
+        echo ""
         echo -e "${RED}[ERROR]${NC} Job $SBATCH_JOB_ID not found in the queue. Please check the SLURM log $LOG_DIR/${DATE}-rstudio-server-$SBATCH_JOB_ID.log for details."
         exit 1
     fi
