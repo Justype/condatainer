@@ -132,10 +132,12 @@ It will do the following steps for you:
 1. Check if `rstudio-server` is running on any compute node.
 2. If yes, establish SSH port forwarding to that node.
 3. If not,
-   1. Use `sbatch` to submit a job that starts `rstudio-server` on a compute node.
-   2. Wait for the job to start and get the node name if job status is `RUNNING`.
-   3. Write down the node name and port number to a file.
-   4. Set up SSH port forwarding from login node to compute node.
+   1. Check if the port is available on the login node.
+   2. If pass, check the overlay integrity.
+   3. If pass, use `sbatch` to submit a job which starts `rstudio-server`.
+   4. Wait for the job to start and get the compute node name.
+   5. Record the job ID, node name, port numer, and working directory.
+   6. Set up SSH port forwarding from login node to compute node.
 
 ```
 Usage: rstudio-server-helper [options]
