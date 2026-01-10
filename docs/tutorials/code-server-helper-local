@@ -1,0 +1,152 @@
+#!/bin/bash
+# This script helps run code-server with CondaTainer.
+
+PORT=8080
+AUTH="none"
+
+OVERLAYS_ARG=""
+OVERLAYS=""
+OVERLAY="env.img"
+CWD=$(readlink -f .)
+
+CONDATAINER_CONFIG_DIR="$HOME/.config/condatainer"
+mkdir -p $CONDATAINER_CONFIG_DIR
+
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+print_help() {
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  -p <port>       Port for code-server (default: $PORT)"
+    echo "  -a <auth>       Password for code-server authentication (default: none)"
+    echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
+    echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
+    echo "  -y              Accept all warnings and proceed"
+    echo "  -h              Show this help message"
+}
+
+while getopts "p:a:e:o:yh" opt; do
+    case ${opt} in
+        p ) PORT=$OPTARG ;;
+        a ) AUTH=$OPTARG ;;
+        e ) OVERLAY=$OPTARG ;;
+        o ) OVERLAYS_ARG+=" -o $OPTARG"; OVERLAYS+=" $OPTARG" ;;
+        y ) AUTO_YES=true ;;
+        h ) print_help; exit 0 ;;
+        \? ) print_help; exit 1 ;;
+    esac
+done
+
+#region Sanity Checks
+if lsof -i :$PORT &> /dev/null; then
+    echo -e "${RED}[ERROR]${NC} Port ${BLUE}$PORT${NC} is already in use."
+    echo -e "Please choose a different port using the ${YELLOW}-p${NC} option."
+    exit 1
+fi
+
+ID=$(id -u)
+if [ $ID -lt 1000 ]; then
+    echo -e "${RED}[ERROR]${NC} Cannot run code-server as UID less than 1000."
+    echo -e "Please create a user with UID higher than 1000 to run it."
+    exit 1
+fi
+if [ $ID -eq 1000 ]; then
+    echo -e "${RED}[ERROR]${NC} Cannot run code-server as UID 1000. (Used by default user in Ubuntu-based containers)"
+    echo -e "Please create a user with UID other than 1000 to run it."
+    exit 1
+fi
+
+if ! command -v condatainer &> /dev/null; then
+    echo -e "${RED}[ERROR]${NC} CondaTainer is not installed or not in PATH."
+    echo -e "Please go to https://github.com/Justype/condatainer to install CondaTainer."
+    exit 1
+fi
+
+missing=""
+for pkg in code-server $OVERLAYS; do
+    if ! condatainer ls $pkg | grep -q $pkg; then
+        missing+=" $pkg"
+    fi
+done
+if [ -n "$missing" ]; then
+    echo -e "${RED}[ERROR]${NC} The following required overlays are missing:${missing}."
+    echo -e "Please run 'condatainer install$missing'"
+    if [ -z "$AUTO_YES" ]; then
+        echo -e "Do you want to install them now? [Y/n]"
+        read answer
+    else
+        answer="Y"
+    fi
+    if [[ "$answer" == "Y" || "$answer" == "y" || "$answer" == "" ]]; then
+        condatainer install $missing
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}[ERROR]${NC} Failed to install required overlays."
+            exit 1
+        fi
+    else
+        exit 1
+    fi
+fi
+
+if [ ! -f "$OVERLAY" ]; then
+    echo -e "${YELLOW}[WARNING]${NC} Overlay ${BLUE}$OVERLAY${NC} not found."
+    OVERLAY_ARG=""
+    if [ "$AUTO_YES" != true ]; then
+        read -p "Do you want to proceed without an overlay? [y/N]: " choice
+        case "$choice" in
+            y|Y ) ;;
+            * ) exit 0 ;;
+        esac
+    fi
+else
+    PID_LIST=$(lsof $OVERLAY 2>/dev/null | awk 'NR>1 {print $2}' | sort -u)
+    if [ -n "$PID_LIST" ]; then
+        echo -e "${YELLOW}[WARNING]${NC} Overlay ${BLUE}$OVERLAY${NC} is currently in use by the following processes:"
+        echo "$PID_LIST"
+        if [ "$AUTO_YES" = true ]; then
+            response="y"
+        else
+            echo -e "Do you want to kill these processes and continue? [y/N]"
+            read -r response
+        fi
+
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            echo -e "Aborting as per user request."
+            exit 1
+        else
+            for pid in $PID_LIST; do
+                kill -9 $pid
+            done
+            echo -e "${BLUE}[INFO]${NC} Killed processes using the overlay."
+        fi
+    fi
+    echo -e "Using overlay: ${BLUE}$OVERLAY${NC}"
+    OVERLAY_ARG="-o $OVERLAY"
+    ABS_OVERLAY_PATH=$(readlink -f $OVERLAY)
+    CWD=$(dirname $ABS_OVERLAY_PATH) # Set CWD to overlay directory
+    # Check and repair overlay image
+    echo -e "Checking overlay image integrity..."
+    e2fsck -p $OVERLAY > /dev/null 2>&1
+    e2fsck -p $OVERLAY > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}[ERROR]${NC} Overlay ${BLUE}$OVERLAY${NC} is corrupted and could not be repaired."
+        echo -e "Please run ${YELLOW}e2fsck $OVERLAY${NC} manually to attempt repair."
+        exit 1
+    fi
+fi
+#endregion
+
+echo -e "code-server at ${BLUE}http://localhost:${PORT}?folder=${CWD}${NC}"
+
+condatainer exec \
+    -o code-server \
+    $OVERLAYS_ARG \
+    $OVERLAY_ARG --writable-img \
+    code-server \
+        --disable-update-check \
+        --bind-addr 127.0.0.1:$PORT \
+        $AUTH_OPTION
