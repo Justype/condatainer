@@ -1536,6 +1536,11 @@ class CondaTainer_Exec:
             help="Do not make .img overlays writable (default: writable)"
         )
         CondaTainer_Exec.parser_e.add_argument(
+            "-n", "--no-autoload",
+            action="store_true",
+            help="Do not autoload local env.img from current directory"
+        )
+        CondaTainer_Exec.parser_e.add_argument(
             "overlays",
             nargs="*",
             help="Overlay files to mount (can be .sqf, .squashfs, or .img)"
@@ -1594,7 +1599,7 @@ class CondaTainer_Exec:
                 Utils.print_error(f"Overlay file {overlay_final[i]} not found.")
                 exit(1)
 
-        if all(not o.endswith('.img') for o in overlay_final):
+        if all(not o.endswith('.img') for o in overlay_final) and not args.no_autoload:
             pwd = os.getcwd()
             local_env_path = os.path.join(pwd, "env.img")
             if os.path.isfile(local_env_path):
