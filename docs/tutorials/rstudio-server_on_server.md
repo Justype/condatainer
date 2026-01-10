@@ -26,6 +26,7 @@ Please change the port number to a unique one to avoid conflicts with other user
 
 If you have preferred settings, you can modify the script directly. See [Change the default setting](#change-the-default-setting) section below.
 
+If you encounter `file name too long` error, see [File name too long ERROR](#file-name-too-long-system36-error) section below.
 
 ## SSH Port Forwarding
 
@@ -56,7 +57,7 @@ Host server
     HostName remote_server_address
     User your_username
     LocalForward 8787 localhost:8787
-    # change 8787 to a unique port number
+    # Please change 8787 to a unique port number
 ```
 
 Then you can simply run:
@@ -174,3 +175,34 @@ or use `sed`
 ```bash
 sed -i 's/PORT=8787/PORT=13182/' rstudio-server-helper
 ```
+
+## File name too long system:36 ERROR
+
+If you encounter the following error when starting `rserver`:
+
+```
+TTY detected. Printing informational message about logging configuration. Logging configuration loaded from '/etc/rstudio/logging.conf'. Logging to '/home/cic/devgab/.local/share/rstudio/log/rserver.log'.
+2024-07-31T16:26:50.011828Z [rserver] ERROR Unexpected exception: File name too long [system:36]; LOGGED FROM: int main(int, char* const*) src/cpp/server/ServerMain.cpp:975
+```
+
+See [this issue](https://github.com/rstudio/rstudio/issues/15024) for more details.
+
+This is caused by RSever trying to create runtime files with long uuid names. 
+
+For example, if your home/scratch directory is in a deep path like `/workspace/lab/long_last_name_lab/<your_username>/`, then RStudio will try to create socket files with very long paths like: `/workspace/lab/long_last_name_lab/<your_username>/.local/share/rstudio/run/other_stuff/<very_long_uuid>/rstudio-server/session-server-rpc.socket`.
+
+To fix this, you need to change the line:
+
+```
+        --server-data-dir=$SCRATCH/.local/run/rstudio-server \
+```
+
+to
+
+```
+        --server-data-dir=$SCRATCH/.r \
+```
+
+Hopefully, this can fix the issue. 
+
+If that does not work, please contact your system administrator to see if they can help.

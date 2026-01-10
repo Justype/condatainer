@@ -72,7 +72,7 @@ Host hpc
     HostName hpc_address
     User your_username
     LocalForward 8787 localhost:8787
-    # change 8787 to a unique port number
+    # Please change 8787 to a unique port number
 ```
 
 Then you can simply run:
@@ -133,7 +133,7 @@ It will do the following steps for you:
 2. If yes, establish SSH port forwarding to that node.
 3. If not,
    1. Check if the port is available on the login node.
-   2. If pass, check the overlay integrity.
+   2. If pass, check the overlay integrity and make sure R is installed.
    3. If pass, use `sbatch` to submit a job which starts `rstudio-server`.
    4. Wait for the job to start and get the compute node name.
    5. Record the job ID, node name, port numer, and working directory.

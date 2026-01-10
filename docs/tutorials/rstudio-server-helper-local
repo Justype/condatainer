@@ -2,12 +2,15 @@
 # This script helps run rstudio-server with CondaTainer.
 
 PORT=8787
-
 AUTH="none"
+
 OVERLAYS_ARG=""
 OVERLAYS=""
 OVERLAY="env.img"
 CWD=$(readlink -f .)
+
+CONDATAINER_CONFIG_DIR="$HOME/.config/condatainer"
+mkdir -p $CONDATAINER_CONFIG_DIR
 
 RED='\033[0;31m'
 BLUE='\033[0;34m'
@@ -70,7 +73,21 @@ done
 if [ -n "$missing" ]; then
     echo -e "${RED}[ERROR]${NC} The following required overlays are missing:${missing}."
     echo -e "Please run 'condatainer install$missing'"
-    exit 1
+    if [ -z "$AUTO_YES" ]; then
+        echo -e "Do you want to install them now? [Y/n]"
+        read answer
+    else
+        answer="Y"
+    fi
+    if [[ "$answer" == "Y" || "$answer" == "y" || "$answer" == "" ]]; then
+        condatainer install $missing
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}[ERROR]${NC} Failed to install required overlays."
+            exit 1
+        fi
+    else
+        exit 1
+    fi
 fi
 
 if [ ! -f "$OVERLAY" ]; then
@@ -100,12 +117,11 @@ else
     fi
     echo -e "Using overlay: ${BLUE}$OVERLAY${NC}"
     OVERLAY_ARG="-o $OVERLAY"
-    OVERLAY_NAME=$(basename $OVERLAY)
-    OVERLAY_NAME="${OVERLAY_NAME%.*}"
     ABS_OVERLAY_PATH=$(readlink -f $OVERLAY)
     CWD=$(dirname $ABS_OVERLAY_PATH) # Set CWD to overlay directory
-    if ! debugfs -R "stat upper/ext3/$OVERLAY_NAME/bin/R" $OVERLAY 2>&1 | grep -q 'Inode'; then
+    if ! debugfs -R "stat upper/ext3/env/bin/R" $OVERLAY 2>&1 | grep -q 'Inode'; then
         echo -e "${RED}[ERROR]${NC} Overlay ${BLUE}$OVERLAY${NC} does not contain R installation."
+        echo -e "Please go into the overlay shell and run 'mm-install r-base' to install R."
         exit 1
     fi
     # Check and repair overlay image
@@ -117,8 +133,8 @@ else
         echo -e "Please run ${YELLOW}e2fsck $OVERLAY${NC} manually to attempt repair."
         exit 1
     fi
-    R_BIN_PATH="/ext3/$OVERLAY_NAME/bin/R"
-    R_LIB_PATH="/ext3/$OVERLAY_NAME/lib"
+    R_BIN_PATH="/ext3/env/bin/R"
+    R_LIB_PATH="/ext3/env/lib"
 fi
 
 if [ -z "$SCRATCH" ]; then
@@ -126,9 +142,6 @@ if [ -z "$SCRATCH" ]; then
     SCRATCH="$HOME"
 fi
 #endregion
-
-CONDATAINER_CONFIG_DIR="$HOME/.config/condatainer"
-mkdir -p $CONDATAINER_CONFIG_DIR
 
 CWD_FOLDER_NAME=$(basename $CWD)
 RPROJECT_FILE="$CWD/$CWD_FOLDER_NAME.Rproj"
