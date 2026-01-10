@@ -46,7 +46,7 @@ fi
 ID=$(id -u)
 if [ $ID -lt 1000 ]; then
     echo -e "${RED}[ERROR]${NC} Cannot run rstudio-server as UID less than 1000."
-    echo -e "Please create a user with UID 1000 or higher to run it."
+    echo -e "Please create a user with UID higher than 1000 to run it."
     exit 1
 fi
 if [ $ID -eq 1000 ]; then
