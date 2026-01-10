@@ -1,14 +1,15 @@
 #!/bin/bash
 set -e
 
-# Colors (ANSI-C quoting used so 'read -p' sees actual escape codes)
+# Colors
 GREEN=$'\033[0;32m'
 BLUE=$'\033[0;34m'
 CYAN=$'\033[0;36m'
+YELLOW=$'\033[1;33m'
 RED=$'\033[0;31m'
 NC=$'\033[0m' # No Color
 
-# Hardcoded Source URLs
+# URLs
 URL_CONDATAINER="https://raw.githubusercontent.com/Justype/condatainer/main/bin/condatainer"
 URL_MODGEN="https://raw.githubusercontent.com/Justype/condatainer/main/bin/modgen"
 
@@ -18,23 +19,18 @@ DEFAULT_BASE="${SCRATCH:-$HOME}/condatainer"
 MARKER_START="# >>> CONDATAINER >>>"
 MARKER_END="# <<< CONDATAINER <<<"
 
-# Detect Shell & Config File early (Used for detection and installation)
+# Detect Shell & Config File early
 SHELL_NAME=$(basename "$SHELL")
-if [ "$SHELL_NAME" = "zsh" ]; then
-    RC_FILE="$HOME/.zshrc"
-else
-    RC_FILE="$HOME/.bashrc"
-fi
+if [ "$SHELL_NAME" = "zsh" ]; then RC_FILE="$HOME/.zshrc"; else RC_FILE="$HOME/.bashrc"; fi
 
 echo -e "========================================"
 echo -e "${BLUE}       CondaTainer Installer${NC}"
 echo -e "========================================"
 
 # ------------------------------------------------------------------
-# 1. Interactive Input Helpers
+# 1. Helpers
 # ------------------------------------------------------------------
 
-# Function to get string input (for Path)
 get_input() {
     local prompt_text="$1"
     local default_value="$2"
@@ -44,49 +40,96 @@ get_input() {
         local p_str="${CYAN}${prompt_text}${NC} [${default_value}]: "
         read -e -p "$p_str" -r user_val < /dev/tty 2> /dev/tty
     fi
-
-    if [ -z "$user_val" ]; then
-        echo "$default_value"
-    else
-        echo "${user_val%/}"
-    fi
+    echo "${user_val:-$default_value}"
 }
 
-# Function for Yes/No prompts (Default: Yes)
-confirm_action() {
+# Confirm with an explicit default ("yes" or "no"). Respects AUTO_YES.
+confirm_default() {
     local prompt_text="$1"
+    local default="$2" # "yes" or "no"
     local response=""
+
+    # Auto-Yes Logic: If default is yes, return 0. If no, return 1.
+    if [ "${AUTO_YES:-false}" = "true" ]; then
+        [ "$default" = "yes" ] && return 0 || return 1
+    fi
 
     if [ -c /dev/tty ]; then
-        printf "${CYAN}%s${NC} [Y/n]: " "$prompt_text" > /dev/tty
-        read -r response < /dev/tty
-        
-        if [[ -z "$response" || "$response" =~ ^[Yy]$ ]]; then
-            return 0 # True
+        if [ "$default" = "yes" ]; then
+            printf "${CYAN}%s${NC} [Y/n]: " "$prompt_text" > /dev/tty
         else
-            return 1 # False
+            printf "${CYAN}%s${NC} [y/N]: " "$prompt_text" > /dev/tty
         fi
+        read -r response < /dev/tty
+
+        # Empty response = default
+        if [ -z "$response" ]; then
+            [ "$default" = "yes" ] && return 0 || return 1
+        fi
+
+        [[ "$response" =~ ^[Yy]$ ]]
     else
-        return 0 # Default to yes in non-interactive
+        # Non-interactive: return default
+        [ "$default" = "yes" ]
     fi
 }
 
-# Function for Yes/No prompts (Default: No)
+# Alias for default=yes
+confirm_action() {
+    confirm_default "$1" "yes"
+}
+
+# Explicit "No" prompt that force-returns YES on AUTO_YES (destructive actions)
 confirm_action_no() {
     local prompt_text="$1"
-    local response=""
 
+    # Critical difference: AUTO_YES forces 'Yes' here, unlike confirm_default(no)
+    if [ "${AUTO_YES:-false}" = "true" ]; then return 0; fi
+
+    local response=""
     if [ -c /dev/tty ]; then
         printf "${CYAN}%s${NC} [y/N]: " "$prompt_text" > /dev/tty
         read -r response < /dev/tty
-        
-        if [[ "$response" =~ ^[Yy]$ ]]; then
-            return 0 # True
-        else
-            return 1 # False
-        fi
+        [[ "$response" =~ ^[Yy]$ ]]
     else
-        return 1 # Default to no in non-interactive
+        return 1
+    fi
+}
+
+download_file() {
+    local url="$1"
+    local dest="$2"
+    echo -e "${BLUE}[INFO]${NC} Downloading $(basename "$dest")..."
+    if command -v curl >/dev/null 2>&1; then
+        curl -sL "$url" -o "$dest"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO "$dest" "$url"
+    else
+        echo -e "${RED}[ERROR]${NC} Neither curl nor wget found."
+        exit 1
+    fi
+    chmod +x "$dest"
+}
+
+# Generic RC Block Updater
+update_config_block() {
+    local file="$1"
+    local start="$2"
+    local end="$3"
+    local content="$4"
+    local name="$5"
+    local temp="${file}.tmp"
+
+    if grep -Fq "$start" "$file"; then
+        echo -e "${BLUE}[INFO]${NC} Updating $name in $(basename "$file")..."
+        sed "/$start/,/$end/d" "$file" > "$temp"
+        echo "$content" >> "$temp"
+        mv "$temp" "$file"
+        echo -e "${GREEN}[OK]${NC} Updated $name in ${BLUE}$file${NC}"
+    else
+        echo "" >> "$file"
+        echo "$content" >> "$file"
+        echo -e "${GREEN}[OK]${NC} Added $name to ${BLUE}$file${NC}"
     fi
 }
 
@@ -98,44 +141,19 @@ EXISTING_DIR=""
 EXISTING_ROOT=""
 EXISTING_ACTION="NONE"
 
-# Check for markers in the RC file instead of using command -v
+# Check for markers in the RC file
 if [ -f "$RC_FILE" ] && grep -Fq "$MARKER_START" "$RC_FILE"; then
-    # Extract the block, find the export line, and parse the path
-    # Format expected: export PATH="/path/to/bin:$PATH"
     EXISTING_PATH_LINE=$(sed -n "/$MARKER_START/,/$MARKER_END/p" "$RC_FILE" | grep "export PATH=" | head -n 1)
-    
     if [ -n "$EXISTING_PATH_LINE" ]; then
-        # Strip everything up to the first quote
         TEMP_PATH="${EXISTING_PATH_LINE#*\"}"
-        # Strip everything from the colon onwards (:$PATH")
         EXISTING_DIR="${TEMP_PATH%%:*}"
 
         if [ -n "$EXISTING_DIR" ] && [ -d "$EXISTING_DIR" ]; then
-            # Determine the Installation Root (Parent of bin)
             if [ "$(basename "$EXISTING_DIR")" == "bin" ]; then
                 EXISTING_ROOT="$(dirname "$EXISTING_DIR")"
             else
                 EXISTING_ROOT="$EXISTING_DIR"
             fi
-
-            echo -e "\n${RED}Warning:${NC} Found existing configuration in ${BLUE}$(basename "$RC_FILE")${NC}"
-            echo -e "Installation Root: ${BLUE}$EXISTING_ROOT${NC}"
-            
-            if ! confirm_action_no "Continue installation?"; then
-                echo "Installation aborted."
-                exit 0
-            fi
-
-            if confirm_action "Move content to the new folder?"; then
-                EXISTING_ACTION="MOVE"
-            # Default to No for deletion to prevent accidents
-            elif confirm_action_no "Remove the existing folder?"; then
-                EXISTING_ACTION="REMOVE"
-            fi
-        elif [ -n "$EXISTING_DIR" ]; then
-            # Config exists but directory is missing
-            echo -e "\n${CYAN}Notice:${NC} Found configuration in $(basename "$RC_FILE") pointing to missing directory."
-            echo "Configuration will be updated automatically."
         fi
     fi
 fi
@@ -146,50 +164,140 @@ fi
 
 echo -e "\nConfiguration:"
 
-# A. Ask for Path
-INSTALL_BASE=$(get_input "Install Path" "$DEFAULT_BASE")
+# CLI options parsing
+CLI_SPECIFIED=false
+CLI_CONDATAINER=false
+CLI_MODGEN=false
+CLI_PATH=""
+CLI_YES=false
 
-# Ensure path is absolute (Critical for correct .bashrc/.zshrc exports)
-# 1. Expand tilde (~) manually if present
-INSTALL_BASE="${INSTALL_BASE/#\~/$HOME}"
-# 2. If it doesn't start with /, prepend current working directory
-if [[ "$INSTALL_BASE" != /* ]]; then
-    INSTALL_BASE="$PWD/$INSTALL_BASE"
+show_usage() {
+    cat <<'USAGE'
+Usage: install.sh [options]
+Options:
+  -c, --condatainer    Install condaTainer
+  -m, --modgen         Install modgen
+  -a, --all            Install both (default)
+  -y, --yes            Default for all prompts
+  -p, --path PATH      Install base path (non-interactive)
+  -h, --help           Show this help
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -c|--condatainer) CLI_CONDATAINER=true; CLI_SPECIFIED=true; shift ;;
+        -m|--modgen)      CLI_MODGEN=true; CLI_SPECIFIED=true; shift ;;
+        -a|--all)         CLI_CONDATAINER=true; CLI_MODGEN=true; CLI_SPECIFIED=true; shift ;;
+        -p|--path)        [ -n "$2" ] && { CLI_PATH="$2"; shift 2; } || { echo -e "${RED}[ERROR]${NC} --path requires an argument."; exit 1; } ;;
+        -y|--yes)         CLI_YES=true; CLI_SPECIFIED=true; shift ;;
+        -h|--help)        show_usage; exit 0 ;;
+        *)                echo -e "${RED}[ERROR]${NC} Unknown option: $1"; show_usage; exit 1 ;;
+    esac
+done
+
+# If auto-yes and no components specified, default to both
+if [ "${CLI_YES}" = true ] && [ "${CLI_CONDATAINER}" = false ] && [ "${CLI_MODGEN}" = false ]; then
+    CLI_CONDATAINER=true
+    CLI_MODGEN=true
+fi
+AUTO_YES=${CLI_YES}
+
+# A. Ask for Path
+TARGET_FROM_EXISTING="false"
+if [ -n "$CLI_PATH" ]; then
+    INSTALL_BASE="$CLI_PATH"
+elif [ -n "$EXISTING_ROOT" ]; then
+    echo -e "${BLUE}[INFO]${NC} No --path given — using existing: ${BLUE}$EXISTING_ROOT${NC}"
+    INSTALL_BASE="$EXISTING_ROOT"
+    TARGET_FROM_EXISTING="true"
+elif [ "${CLI_YES}" = true ]; then
+    INSTALL_BASE="$DEFAULT_BASE"
+else
+    INSTALL_BASE=$(get_input "Install Path" "$DEFAULT_BASE")
 fi
 
+INSTALL_BASE="${INSTALL_BASE/#\~/$HOME}"
+
+# Try to resolve path using realpath
+if command -v realpath >/dev/null 2>&1; then
+    if RESOLVED=$(realpath -m "$INSTALL_BASE" 2>/dev/null); then
+        INSTALL_BASE="$RESOLVED"
+    elif [ -e "$INSTALL_BASE" ] && RESOLVED=$(realpath "$INSTALL_BASE" 2>/dev/null); then
+        INSTALL_BASE="$RESOLVED"
+    fi
+fi
+if [[ "$INSTALL_BASE" != /* ]]; then INSTALL_BASE="$PWD/$INSTALL_BASE"; fi
 INSTALL_BIN="$INSTALL_BASE/bin"
 
-# B. Ask for Components
-DO_INSTALL_CONDATAINER=false
-DO_INSTALL_MODGEN=false
-
-if confirm_action "Install 'condatainer'?"; then
-    DO_INSTALL_CONDATAINER=true
+# Step 1: Target Check
+if [ "$TARGET_FROM_EXISTING" != "true" ] && [ -d "$INSTALL_BASE" ]; then
+    if [ "${CLI_YES}" = true ]; then
+        echo -e "${YELLOW}[WARNING]${NC} AUTO: --yes given; aborting because target exists."; exit 1
+    else
+        if ! confirm_action_no "Target '$INSTALL_BASE' exists. Continue installation?"; then
+            echo "Installation aborted."; exit 1
+        fi
+    fi
 fi
 
-if confirm_action "Install 'modgen'?"; then
-    DO_INSTALL_MODGEN=true
+# Step 2: Existing Install Action
+if [ -n "$EXISTING_ROOT" ]; then
+    if [ "$EXISTING_ROOT" = "$INSTALL_BASE" ]; then
+        echo -e "${BLUE}[INFO]${NC} Updating configuration only."
+        EXISTING_ACTION="NONE"
+    else
+        echo -e "${YELLOW}[WARNING]${NC} Found existing installation at ${BLUE}$EXISTING_ROOT${NC}"
+        if [ "${CLI_YES}" = true ]; then
+            EXISTING_ACTION="MOVE"
+        else
+            if confirm_default "Move content from $EXISTING_ROOT to $INSTALL_BASE?" "yes"; then
+                EXISTING_ACTION="MOVE"
+            elif confirm_action_no "Remove the existing folder?"; then
+                EXISTING_ACTION="REMOVE"
+            else
+                echo "Aborted."; exit 1
+            fi
+        fi
+    fi
+fi
+
+# Step 3: Components
+DO_INSTALL_CONDATAINER=false; DO_INSTALL_MODGEN=false
+DEFAULT_CONDA="no"; DEFAULT_MODGEN="no"
+
+if [ -n "$EXISTING_ROOT" ] && [ -d "$EXISTING_ROOT" ]; then
+    [ -f "$EXISTING_ROOT/bin/condatainer" ] && DEFAULT_CONDA="yes"
+    [ -f "$EXISTING_ROOT/bin/modgen" ] && DEFAULT_MODGEN="yes"
+else
+    # Default both to Yes for fresh installs
+    DEFAULT_CONDA="yes"; DEFAULT_MODGEN="yes"
+fi
+
+if [ "$CLI_SPECIFIED" = true ]; then
+    [ "$CLI_CONDATAINER" = true ] && DO_INSTALL_CONDATAINER=true
+    [ "$CLI_MODGEN" = true ] && DO_INSTALL_MODGEN=true
+else
+    confirm_default "Install 'condatainer'?" "$DEFAULT_CONDA" && DO_INSTALL_CONDATAINER=true
+    confirm_default "Install 'modgen'?" "$DEFAULT_MODGEN" && DO_INSTALL_MODGEN=true
 fi
 
 # ------------------------------------------------------------------
 # 4. Final Verification
 # ------------------------------------------------------------------
 
-echo -e "\n-------- Installation Summary ---------"
-echo -e "Directory:   ${BLUE}$INSTALL_BIN${NC}"
-echo -e "Condatainer: $( [ "$DO_INSTALL_CONDATAINER" = true ] && echo "${GREEN}Yes${NC}" || echo "${RED}No${NC}" )"
-echo -e "Modgen:      $( [ "$DO_INSTALL_MODGEN" = true ] && echo "${GREEN}Yes${NC}" || echo "${RED}No${NC}" )"
+echo -e "\n--------- Installation Summary ---------"
+echo -e "Directory   : ${BLUE}$INSTALL_BIN${NC}"
+echo -e "Condatainer : $( [ "$DO_INSTALL_CONDATAINER" = true ] && echo "${GREEN}Yes${NC}" || echo "${RED}No${NC}" )"
+echo -e "Modgen      : $( [ "$DO_INSTALL_MODGEN" = true ] && echo "${GREEN}Yes${NC}" || echo "${RED}No${NC}" )"
 if [ "$EXISTING_ACTION" == "MOVE" ]; then
-    echo -e "Old Install: ${CYAN}Move to new dir${NC}"
+    echo -e "Old Install : ${CYAN}Move to new location${NC}"
 elif [ "$EXISTING_ACTION" == "REMOVE" ]; then
-    echo -e "Old Install: ${RED}Remove ($EXISTING_ROOT)${NC}"
+    echo -e "Old Install : ${RED}Remove${NC}"
 fi
 echo -e "----------------------------------------"
 
-if ! confirm_action "Proceed?"; then
-    echo "Installation aborted by user."
-    exit 0
-fi
+if ! confirm_action "Proceed?"; then echo "Aborted."; exit 0; fi
 
 # ------------------------------------------------------------------
 # 5. Execution Phase
@@ -197,158 +305,69 @@ fi
 
 echo -e "\nStarting installation..."
 
-# --- ACTION: Handle Existing Installation ---
-if [ -n "$EXISTING_ROOT" ] && [ "$EXISTING_ROOT" != "$INSTALL_BASE" ]; then
-    # Safety Check: Don't remove system paths based on the bin dir check
-    if [[ "$EXISTING_DIR" == "/usr/bin" || "$EXISTING_DIR" == "/bin" || "$EXISTING_DIR" == "/usr/local/bin" ]]; then
-        echo -e "${RED}Skipping Move/Remove:${NC} Existing path is a system directory ($EXISTING_DIR). Manual cleanup recommended."
-        EXISTING_ACTION="NONE"
-    fi
-
-    if [ "$EXISTING_ACTION" == "MOVE" ]; then
-        echo "Moving content from $EXISTING_ROOT to $INSTALL_BASE..."
+# Handle Existing
+if [ -n "$EXISTING_ROOT" ] && [ "$EXISTING_ROOT" != "$INSTALL_BASE" ] && [ "$EXISTING_ACTION" != "NONE" ]; then
+    # Safety Check against system paths
+    if [[ "$EXISTING_DIR" == "/usr/bin" || "$EXISTING_DIR" == "/bin" ]]; then
+        echo -e "${YELLOW}[WARNING]${NC} Skipping Move/Remove: System directory detected."
+    elif [ "$EXISTING_ACTION" == "MOVE" ]; then
+        echo -e "${BLUE}[INFO]${NC} Moving content..."
         mkdir -p "$INSTALL_BASE"
-        # Move content of root (including bin/ and modules/) to new base
         mv "$EXISTING_ROOT"/* "$INSTALL_BASE/" 2>/dev/null || true
-        # Remove empty old directory
         rmdir "$EXISTING_ROOT" 2>/dev/null || true
-        echo "Move complete."
     elif [ "$EXISTING_ACTION" == "REMOVE" ]; then
-        echo "Removing old directory $EXISTING_ROOT..."
+        echo -e "${BLUE}[INFO]${NC} Removing old directory..."
         rm -rf "$EXISTING_ROOT"
     fi
 fi
 
-# --- CHECK: Existing Directory (Target) ---
-# Check the ROOT base, not just the bin
-if [ -d "$INSTALL_BASE" ] && [ "$EXISTING_ACTION" != "MOVE" ]; then
-    # Only warn if we haven't already dealt with it (e.g. if Old Root != New Base)
-    if [ "$INSTALL_BASE" != "$EXISTING_ROOT" ]; then
-        echo -e "${RED}Warning:${NC} Installation directory '$INSTALL_BASE' exists."
-        # Default to No for safety
-        if confirm_action_no "Remove existing folder?"; then
-            echo "Removing old directory..."
-            rm -rf "$INSTALL_BASE"
-            mkdir -p "$INSTALL_BIN"
-        else
-            echo "Keeping existing directory. Files will be overwritten/merged."
-            mkdir -p "$INSTALL_BIN"
-        fi
-    else
-        mkdir -p "$INSTALL_BIN"
+# Prepare Directory
+if [ -d "$INSTALL_BASE" ] && [ "$EXISTING_ACTION" != "MOVE" ] && [ "$INSTALL_BASE" != "$EXISTING_ROOT" ]; then
+    if [ "${CLI_YES}" = true ]; then
+         echo -e "${RED}[ERROR]${NC} AUTO: aborting on existing target."; exit 1
+    elif confirm_action_no "Remove existing folder?"; then
+         rm -rf "$INSTALL_BASE"
     fi
-else
-    mkdir -p "$INSTALL_BIN"
-    # Ensure base is created if bin was created (mkdir -p does this, but being explicit about intent)
 fi
+mkdir -p "$INSTALL_BIN"
 
-download_file() {
-    local url="$1"
-    local dest="$2"
-    
-    echo "Downloading $(basename "$dest")..."
-    if command -v curl >/dev/null 2>&1; then
-        curl -sL "$url" -o "$dest"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$dest" "$url"
-    else
-        echo "Error: Neither curl nor wget found."
-        exit 1
-    fi
-    chmod +x "$dest"
-}
-
-# Download selected components
+# Download
 if [ "$DO_INSTALL_CONDATAINER" = true ]; then
     download_file "$URL_CONDATAINER" "$INSTALL_BIN/condatainer"
 fi
 
 if [ "$DO_INSTALL_MODGEN" = true ]; then
     download_file "$URL_MODGEN" "$INSTALL_BIN/modgen"
-    
-    # Create ModGen folders
-    echo "Creating ModGen module directories..."
-    mkdir -p "$INSTALL_BASE/apps-modules"
-    mkdir -p "$INSTALL_BASE/ref-modules"
+    mkdir -p "$INSTALL_BASE/apps-modules" "$INSTALL_BASE/ref-modules"
 fi
 
-# --- CHECK: Shell Config & PATH ---
-# Note: RC_FILE is already determined at the top of the script
-
-update_shell_rc() {
-    local rc_file="$1"
-    local bin_path="$2"
-    local temp_rc="${rc_file}.tmp"
-
-    # Define the block content
-    local block_content="$MARKER_START
-export PATH=\"$bin_path:\$PATH\"
+# Update RC
+PATH_BLOCK="$MARKER_START
+if [[ \":\$PATH:\" != *\":$INSTALL_BIN:\"* ]]; then
+    export PATH=\"$INSTALL_BIN:\$PATH\"
+fi
 $MARKER_END"
 
-    # Check for markers
-    if grep -Fq "$MARKER_START" "$rc_file"; then
-        echo -e "${CYAN}Notice:${NC} Found existing CondaTainer block in $(basename "$rc_file"). Updating..."
-        
-        # 1. Delete old block (from START to END)
-        # 2. Append new block
-        # We use a temp file for portability (sed -i varies by OS)
-        sed "/$MARKER_START/,/$MARKER_END/d" "$rc_file" > "$temp_rc"
-        echo "$block_content" >> "$temp_rc"
-        mv "$temp_rc" "$rc_file"
-        
-        echo -e "Updated PATH in ${BLUE}$rc_file${NC}"
-    else
-        # Append to end
-        echo "" >> "$rc_file"
-        echo "$block_content" >> "$rc_file"
-        echo -e "Added PATH to ${BLUE}$rc_file${NC}"
-    fi
-}
-
-update_modgen_rc() {
-    local rc_file="$1"
-    local base_dir="$2"
-    local temp_rc="${rc_file}.tmp"
-    
-    local marker_start="# >>> MODGEN MODULES >>>"
-    local marker_end="# <<< MODGEN MODULES <<<"
-
-    # Detect module system for the config block condition
-    local detect_cmd='command -v tclsh >/dev/null 2>&1'
-    # If LMOD_CMD is set in the environment, assume Lmod
-    if [ -n "$LMOD_CMD" ]; then
-        detect_cmd='[ -f "$LMOD_CMD" ]'
-    fi
-
-    local block_content="$marker_start
-# Use ModGen modulefiles (Only if 'module' command is available)
-if $detect_cmd && [ -d \"$base_dir\" ]; then
-    module use \"$base_dir/apps-modules\"
-    module use \"$base_dir/ref-modules\"
-fi
-$marker_end"
-
-    if grep -Fq "$marker_start" "$rc_file"; then
-        echo -e "${CYAN}Notice:${NC} Found existing ModGen block in $(basename "$rc_file"). Updating..."
-        sed "/$marker_start/,/$marker_end/d" "$rc_file" > "$temp_rc"
-        echo "$block_content" >> "$temp_rc"
-        mv "$temp_rc" "$rc_file"
-        echo -e "Updated Module config in ${BLUE}$rc_file${NC}"
-    else
-        echo "" >> "$rc_file"
-        echo "$block_content" >> "$rc_file"
-        echo -e "Added Module config to ${BLUE}$rc_file${NC}"
-    fi
-}
-
-update_shell_rc "$RC_FILE" "$INSTALL_BIN"
+update_config_block "$RC_FILE" "$MARKER_START" "$MARKER_END" "$PATH_BLOCK" "PATH"
 
 if [ "$DO_INSTALL_MODGEN" = true ]; then
-    echo -e "\nConfiguring ModGen..."
-    update_modgen_rc "$RC_FILE" "$INSTALL_BASE"
+    MOD_START="# >>> MODGEN MODULES >>>"
+    MOD_END="# <<< MODGEN MODULES <<<"
+    DETECT_CMD='command -v tclsh >/dev/null 2>&1'
+    [ -n "$LMOD_CMD" ] && DETECT_CMD='[ -f "$LMOD_CMD" ]'
+
+    MOD_BLOCK="$MOD_START
+# Use ModGen modulefiles (Only if 'module' command is available)
+if $DETECT_CMD && [ -d \"$INSTALL_BASE\" ]; then
+    module use \"$INSTALL_BASE/apps-modules\"
+    module use \"$INSTALL_BASE/ref-modules\"
+fi
+$MOD_END"
+
+    update_config_block "$RC_FILE" "$MOD_START" "$MOD_END" "$MOD_BLOCK" "ModGen Config"
 fi
 
-echo -e "========================================"
+echo -e "----------------------------------------"
 echo -e "${GREEN}Success!${NC}"
 echo "Run this to apply changes:"
 echo -e "  source ${BLUE}$RC_FILE${NC}"
