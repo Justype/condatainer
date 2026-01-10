@@ -43,13 +43,14 @@ get_input() {
     echo "${user_val:-$default_value}"
 }
 
-# Confirm with an explicit default ("yes" or "no"). Respects AUTO_YES.
+# Generic confirmation handler
+# Usage: confirm_default "Question?" "yes/no"
 confirm_default() {
     local prompt_text="$1"
     local default="$2" # "yes" or "no"
     local response=""
 
-    # Auto-Yes Logic: If default is yes, return 0. If no, return 1.
+    # Auto-Yes Logic: If -y is set, use the default value.
     if [ "${AUTO_YES:-false}" = "true" ]; then
         [ "$default" = "yes" ] && return 0 || return 1
     fi
@@ -69,31 +70,19 @@ confirm_default() {
 
         [[ "$response" =~ ^[Yy]$ ]]
     else
-        # Non-interactive: return default
+        # Non-interactive without -y: return default
         [ "$default" = "yes" ]
     fi
 }
 
-# Alias for default=yes
+# Alias for Default=Yes (Prompt: [Y/n])
 confirm_action() {
     confirm_default "$1" "yes"
 }
 
-# Explicit "No" prompt that force-returns YES on AUTO_YES (destructive actions)
+# Alias for Default=No (Prompt: [y/N])
 confirm_action_no() {
-    local prompt_text="$1"
-
-    # Critical difference: AUTO_YES forces 'Yes' here, unlike confirm_default(no)
-    if [ "${AUTO_YES:-false}" = "true" ]; then return 0; fi
-
-    local response=""
-    if [ -c /dev/tty ]; then
-        printf "${CYAN}%s${NC} [y/N]: " "$prompt_text" > /dev/tty
-        read -r response < /dev/tty
-        [[ "$response" =~ ^[Yy]$ ]]
-    else
-        return 1
-    fi
+    confirm_default "$1" "no"
 }
 
 download_file() {
@@ -177,8 +166,8 @@ Usage: install.sh [options]
 Options:
   -c, --condatainer    Install condaTainer
   -m, --modgen         Install modgen
-  -a, --all            Install both (default)
-  -y, --yes            Default for all prompts
+  -a, --all            Install both
+  -y, --yes            Assume yes for all prompts
   -p, --path PATH      Install base path (non-interactive)
   -h, --help           Show this help
 USAGE
@@ -208,7 +197,7 @@ TARGET_FROM_EXISTING="false"
 if [ -n "$CLI_PATH" ]; then
     INSTALL_BASE="$CLI_PATH"
 elif [ -n "$EXISTING_ROOT" ]; then
-    echo -e "${BLUE}[INFO]${NC} No --path given — using existing: ${BLUE}$EXISTING_ROOT${NC}"
+    echo -e "${BLUE}[INFO]${NC} No --path given, using existing: ${BLUE}$EXISTING_ROOT${NC}"
     INSTALL_BASE="$EXISTING_ROOT"
     TARGET_FROM_EXISTING="true"
 elif [ "${CLI_YES}" = true ]; then
@@ -232,12 +221,8 @@ INSTALL_BIN="$INSTALL_BASE/bin"
 
 # Step 1: Target Check
 if [ "$TARGET_FROM_EXISTING" != "true" ] && [ -d "$INSTALL_BASE" ]; then
-    if [ "${CLI_YES}" = true ]; then
-        echo -e "${YELLOW}[WARNING]${NC} AUTO: --yes given; aborting because target exists."; exit 1
-    else
         if ! confirm_action_no "Target '$INSTALL_BASE' exists. Continue installation?"; then
             echo "Installation aborted."; exit 1
-        fi
     fi
 fi
 
@@ -248,16 +233,13 @@ if [ -n "$EXISTING_ROOT" ]; then
         EXISTING_ACTION="NONE"
     else
         echo -e "${YELLOW}[WARNING]${NC} Found existing installation at ${BLUE}$EXISTING_ROOT${NC}"
-        if [ "${CLI_YES}" = true ]; then
+        # Default is YES (Move)
+        if confirm_default "Move content from $EXISTING_ROOT to $INSTALL_BASE?" "yes"; then
             EXISTING_ACTION="MOVE"
+        elif confirm_action_no "Remove the existing folder?"; then
+            EXISTING_ACTION="REMOVE"
         else
-            if confirm_default "Move content from $EXISTING_ROOT to $INSTALL_BASE?" "yes"; then
-                EXISTING_ACTION="MOVE"
-            elif confirm_action_no "Remove the existing folder?"; then
-                EXISTING_ACTION="REMOVE"
-            else
-                echo "Aborted."; exit 1
-            fi
+            echo "Aborted."; exit 1
         fi
     fi
 fi
@@ -270,8 +252,7 @@ if [ -n "$EXISTING_ROOT" ] && [ -d "$EXISTING_ROOT" ]; then
     [ -f "$EXISTING_ROOT/bin/condatainer" ] && DEFAULT_CONDA="yes"
     [ -f "$EXISTING_ROOT/bin/modgen" ] && DEFAULT_MODGEN="yes"
 else
-    # Default both to Yes for fresh installs
-    DEFAULT_CONDA="yes"; DEFAULT_MODGEN="yes"
+    DEFAULT_CONDA="yes"; DEFAULT_MODGEN="no"
 fi
 
 if [ "$CLI_SPECIFIED" = true ]; then
@@ -323,9 +304,8 @@ fi
 
 # Prepare Directory
 if [ -d "$INSTALL_BASE" ] && [ "$EXISTING_ACTION" != "MOVE" ] && [ "$INSTALL_BASE" != "$EXISTING_ROOT" ]; then
-    if [ "${CLI_YES}" = true ]; then
-         echo -e "${RED}[ERROR]${NC} AUTO: aborting on existing target."; exit 1
-    elif confirm_action_no "Remove existing folder?"; then
+    # Default is NO (Do not remove)
+    if confirm_action_no "Remove existing folder?"; then
          rm -rf "$INSTALL_BASE"
     fi
 fi
