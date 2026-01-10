@@ -1,0 +1,284 @@
+#!/bin/bash
+# This script helps run vscode-tunnel with CondaTainer env on SLURM clusters.
+
+NCPUS=4
+MEM=16G
+TIME=12:00:00
+AUTH="microsoft"
+
+OVERLAYS_ARG=""
+OVERLAYS=""
+OVERLAY="env.img"
+CWD=$(readlink -f .)
+CODE_BIN="$HOME/.local/bin/code"
+
+LOG_DIR="$HOME/logs"
+mkdir -p $LOG_DIR
+DATE=$(date +"%Y%m%d_%H%M%S")
+CONDATAINER_CONFIG_DIR="$HOME/.config/condatainer"
+mkdir -p $CONDATAINER_CONFIG_DIR
+
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+if [ -f $CONDATAINER_CONFIG_DIR/vscode-tunnel-machine-name ]; then
+    MACHINE_NAME=$(cat $CONDATAINER_CONFIG_DIR/vscode-tunnel-machine-name)
+else
+    MACHINE_NAME=$(whoami)-$(hostname)
+    # remove . in machine name to avoid issues
+    MACHINE_NAME=${MACHINE_NAME//./-}
+    # 20 character limit for machine name in vscode tunnel
+    if [ ${#MACHINE_NAME} -gt 20 ]; then
+        MACHINE_NAME=${MACHINE_NAME:0:20}
+    fi
+    echo $MACHINE_NAME > $CONDATAINER_CONFIG_DIR/vscode-tunnel-machine-name
+fi
+
+print_auto_info() {
+    local job_id=$1
+    local auth_provider=$2
+    local cwd=$3
+    local max_wait_time=600 # 10 minutes
+    local check_interval=5
+    local elapsed_time=0
+    local auth_instruction_printed=false
+    local auth_status_file="$LOG_DIR/.vscode-tunnel-auth-status"
+
+    echo -e "${BLUE}[INFO]${NC} Waiting for VS Code Tunnel to initialize..."
+
+    while [ $elapsed_time -lt $max_wait_time ]; do
+        if [ -f "$auth_status_file" ]; then
+            local auth_status=$(cat "$auth_status_file")
+
+            # Case 1: ERROR
+            if [ "$auth_status" == "ERROR" ]; then
+                echo -e "\n${RED}[ERROR]${NC} vscode-tunnel job (ID: ${YELLOW}$job_id${NC}) encountered an error."
+                
+                local log_file=$(ls -t $LOG_DIR/vscode-tunnel-*-$job_id.log 2>/dev/null | head -n 1)
+                if [ -n "$log_file" ]; then
+                    echo -e "Please check the SLURM log file for details:"
+                    echo -e "  $log_file"
+                fi
+                echo -e "${BLUE}[INFO]${NC} If the machine name is taken, edit config at:"
+                echo -e "  ${BLUE}$CONDATAINER_CONFIG_DIR/vscode-tunnel-machine-name${NC}"
+                return 1 # Or exit 1
+            fi
+
+            # Case 2: LOGIN (Success)
+            if [ "$auth_status" == "LOGIN" ]; then
+                echo -e "\n${BLUE}[SUCCESS]${NC} Tunnel is ready!"
+                echo -e "To connect, you can either:"
+                echo -e "  - Use VSCode Remote - Tunnels extension"
+                echo -e "  - Use this link: ${BLUE}https://vscode.dev/tunnel/${MACHINE_NAME}${cwd}${NC}"
+                echo -e "And use your ${YELLOW}$auth_provider${NC} account to connect to ${BLUE}$MACHINE_NAME${NC}"
+                echo -e "CWD: ${BLUE}$cwd${NC}"
+                return 0
+            fi
+
+            # Case 3: Instructions (Not Empty, Not Error, Not Login)
+            if [ -n "$auth_status" ] && [ "$auth_instruction_printed" = false ]; then
+                echo -e "\nPlease use the following message for authentication:"
+                echo -e "${YELLOW}------------------------------------------------${NC}"
+                cat "$auth_status_file"
+                echo -e "${YELLOW}------------------------------------------------${NC}"
+                echo -e "Waiting for authentication..."
+                auth_instruction_printed=true
+            fi
+            
+            # Case 4: Empty String (Still starting) -> Loop continues naturally
+        fi
+
+        sleep $check_interval
+        elapsed_time=$((elapsed_time + check_interval))
+    done
+
+    echo -e "\n${RED}[TIMEOUT]${NC} Timed out waiting for VS Code Tunnel to start (>${max_wait_time}s)."
+    return 1
+}
+
+if [ -f "$LOG_DIR/.vscode-tunnel" ]; then
+    IFS=$'\t' read -r PRE_JOB_ID PRE_NODE PRE_AUTH PRE_CWD < "$LOG_DIR/.vscode-tunnel"
+    PRE_JOB_STATUS=$(squeue -j $PRE_JOB_ID -h -o "%T" 2>/dev/null)
+    if [ "$PRE_JOB_STATUS" == "PENDING" ]; then
+        echo -e "The previous vscode-tunnel job (ID: ${YELLOW}$PRE_JOB_ID${NC}) is still pending. Please wait until it starts running."
+        exit 0
+    elif [ "$PRE_JOB_STATUS" != "RUNNING" ]; then
+        echo -e "The previous vscode-tunnel job (ID: ${YELLOW}$PRE_JOB_ID${NC}) is no longer running."
+        rm "$LOG_DIR/.vscode-tunnel"
+    else
+        echo -e "Found an existing vscode-tunnel job (ID: ${YELLOW}$PRE_JOB_ID${NC}) running on node ${BLUE}$PRE_NODE${NC}."
+        print_auto_info "$PRE_JOB_ID" "$PRE_AUTH" "$PRE_CWD"
+        exit 0
+    fi
+fi
+
+print_help() {
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  -c <number>     Number of CPUs to allocate (default: $NCPUS)"
+    echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
+    echo "  -t <time>       Time limit for the job (default: $TIME)"
+    echo "  -a <provider>   microsoft or github for authentication (default: $AUTH)"
+    echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
+    echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
+    echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00"
+    echo "  -y              Accept all warnings and proceed"
+    echo "  -h              Show this help message"
+}
+
+while getopts "c:m:t:a:e:o:vyh" opt; do
+    case ${opt} in
+        c ) NCPUS=$OPTARG ;;
+        m ) MEM=$OPTARG ;;
+        t ) TIME=$OPTARG ;;
+        a ) AUTH=$OPTARG ;;
+        e ) OVERLAY=$OPTARG ;;
+        o ) OVERLAYS_ARG+=" -o $OPTARG"; OVERLAYS+=" $OPTARG" ;;
+        v ) NCPUS=1; MEM=4G; TIME=02:00:00; echo "View Mode: NCPUS=1, MEM=4G, TIME=02:00:00" ;;
+        y ) AUTO_YES=true ;;
+        h ) print_help; exit 0 ;;
+        \? ) print_help; exit 1 ;;
+    esac
+done
+
+#region Sanity Checks
+if [ "$AUTH" != "microsoft" ] && [ "$AUTH" != "github" ]; then
+    echo -e "${RED}[ERROR]${NC} Unsupported authentication provider: $AUTH"
+    echo -e "Supported providers are: microsoft, github"
+    exit 1
+fi
+
+if ! [ -f "$CODE_BIN" ]; then
+    echo -e "${BLUE}[INFO]${NC} VSCode CLI not found at ${BLUE}$CODE_BIN${NC}. Downloading latest VSCode CLI..."
+    ARCH=$(uname -m)
+    if [ "$ARCH" == "x86_64" ]; then
+        ARCH="linux-x64"
+    elif [ "$ARCH" == "aarch64" ]; then
+        ARCH="linux-arm64"
+    else
+        echo -e "${RED}[ERROR]${NC} Unsupported architecture: $ARCH"
+        exit 1
+    fi
+    LATEST_VSCODE_URL="https://update.code.visualstudio.com/latest/cli-$ARCH/stable"
+    wget -nv -O vscode-cli.tar.gz "$LATEST_VSCODE_URL"
+    CODE_BIN_DIR=$(dirname $CODE_BIN)
+    mkdir -p $CODE_BIN_DIR
+    tar -xzf vscode-cli.tar.gz -C $CODE_BIN_DIR code
+    rm vscode-cli.tar.gz
+    echo -e "${BLUE}[INFO]${NC} VSCode CLI downloaded to ${BLUE}$CODE_BIN${NC}."
+fi
+
+if ! command -v condatainer &> /dev/null; then
+    echo -e "${RED}[ERROR]${NC} CondaTainer is not installed or not in PATH."
+    echo -e "Please go to https://github.com/Justype/condatainer to install CondaTainer."
+    exit 1
+fi
+
+missing=""
+for pkg in $OVERLAYS; do
+    if ! condatainer ls $pkg | grep -q $pkg; then
+        missing+=" $pkg"
+    fi
+done
+if [ -n "$missing" ]; then
+    echo -e "${RED}[ERROR]${NC} The following required overlays are missing:${missing}."
+    echo -e "Please run 'condatainer install$missing'"
+    if [ -z "$AUTO_YES" ]; then
+        echo -e "Do you want to install them now? [Y/n]"
+        read answer
+    else
+        answer="Y"
+    fi
+    if [[ "$answer" == "Y" || "$answer" == "y" || "$answer" == "" ]]; then
+        condatainer install $missing
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}[ERROR]${NC} Failed to install required overlays."
+            exit 1
+        fi
+    else
+        exit 1
+    fi
+fi
+
+if [ ! -f "$OVERLAY" ]; then
+    echo -e "${YELLOW}[WARNING]${NC} Overlay ${BLUE}$OVERLAY${NC} not found."
+    OVERLAY_ARG=""
+    if [ "$AUTO_YES" != true ]; then
+        read -p "Do you want to proceed without an overlay? [y/N]: " choice
+        case "$choice" in
+            y|Y ) ;;
+            * ) exit 0 ;;
+        esac
+    fi
+else
+    echo -e "Using overlay: ${BLUE}$OVERLAY${NC}"
+    OVERLAY_ARG="-o $OVERLAY"
+    ABS_OVERLAY_PATH=$(readlink -f $OVERLAY)
+    CWD=$(dirname $ABS_OVERLAY_PATH) # Set CWD to overlay directory
+    # Check and repair overlay image
+    echo -e "Checking overlay image integrity..."
+    e2fsck -p $OVERLAY > /dev/null 2>&1
+    e2fsck -p $OVERLAY > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}[ERROR]${NC} Overlay ${BLUE}$OVERLAY${NC} is corrupted and could not be repaired."
+        echo -e "Please run ${YELLOW}e2fsck $OVERLAY${NC} manually to attempt repair."
+        exit 1
+    fi
+fi
+#endregion
+
+SBATCH_SCRIPT_PATH="$LOG_DIR/vscode-tunnel-${DATE}.sbatch"
+
+cat <<EOT > $SBATCH_SCRIPT_PATH
+#!/bin/bash
+#SBATCH --job-name=vscode-tunnel
+#SBATCH --cpus-per-task=$NCPUS
+#SBATCH --mem=$MEM
+#SBATCH --time=$TIME
+#SBATCH --output=$LOG_DIR/vscode-tunnel-${DATE}-%j.log
+
+printf "\$SLURM_JOB_ID\t\$(hostname)\t$AUTH\t$CWD\n" > $LOG_DIR/.vscode-tunnel
+
+$CODE_BIN tunnel user login --provider $AUTH > $LOG_DIR/.vscode-tunnel-auth-status 2>&1
+
+printf "LOGIN" > $LOG_DIR/.vscode-tunnel-auth-status
+
+condatainer exec \\
+    $OVERLAYS_ARG \\
+    $OVERLAY_ARG --writable-img \\
+    $CODE_BIN tunnel \\
+        --accept-server-license-terms \\
+        --name $MACHINE_NAME
+
+if [ \$? -ne 0 ]; then
+    echo "ERROR" > $LOG_DIR/.vscode-tunnel-auth-status
+fi
+
+rm $LOG_DIR/.vscode-tunnel
+EOT
+
+SBATCH_OUTPUT=$(sbatch $SBATCH_SCRIPT_PATH)
+SBATCH_JOB_ID=$(echo $SBATCH_OUTPUT | awk '{print $4}')
+
+NODE="$HOSTNAME"
+
+while true; do
+    CURRENT_STATUS=$(squeue -j $SBATCH_JOB_ID -h -o "%T" 2>/dev/null)
+    if [ "$CURRENT_STATUS" == "RUNNING" ]; then
+        break
+    fi
+    if [ "$CURRENT_STATUS" == "" ]; then
+        echo ""
+        echo -e "${RED}[ERROR]${NC} Job $SBATCH_JOB_ID not found in the queue. Please check the SLURM log for details."
+        echo -e "  $LOG_DIR/vscode-tunnel-${DATE}-$SBATCH_JOB_ID.log"
+        exit 1
+    fi
+    printf "\rWaiting for job %s to start running. Current status: %s." "$SBATCH_JOB_ID" "$CURRENT_STATUS"
+    sleep 5
+done
+
+echo ""
+print_auto_info "$SBATCH_JOB_ID" "$AUTH" "$CWD"
