@@ -233,7 +233,7 @@ condatainer create [OPTIONS] [NAME_VERSIONS...]
 
 * `-n`, `--name [NAME]`: Custom name for the overlay file. If used, all specified packages are bundled into one overlay.
 * `-p`, `--prefix [PATH]`: Custom prefix path for the overlay file.
-* `-f`, `--file [FILE]`: Path to a Conda environment file (.yml or .yaml).
+* `-f`, `--file [FILE]`: Path to a Conda environment file (.yml/.yaml/.def/.sh).
 * NAME_VERSIONS: List of packages to install (e.g., `bcftools/1.22` or `samtools=1.10` or `grch38/genome/gencode`).
 
 **Compression Options:**
@@ -242,7 +242,7 @@ condatainer create [OPTIONS] [NAME_VERSIONS...]
 * `--gzip`: Use Gzip compression.
 * `--lz4`: Use LZ4 compression.
 
-**Examples:**
+### System level Examples
 
 ```bash
 # Create from a specific recipe (App Overlay)
@@ -264,6 +264,28 @@ condatainer create -n tools.sqf samtools=1.16 bcftools=1.15
 - Automatic Fetching: If a build script is not found locally, **CondaTainer** attempts to fetch it from the remote repository.
 - Conda Fallback: If no build script exists, **CondaTainer** attempts to create the module by installing the package named name with version version from conda-forge or bioconda.
 - Metadata Parsing: Parses `#ENV` and `#ENVNOTE` tags from build scripts to inject environment variables and help text into the generated modulefile.
+
+### Project level Examples
+
+Create a read-only overlay with conda environment inside using Conda yaml file.
+
+```bash
+condatainer create -p my_project_env -f environment.yml
+```
+
+Create a read-only overlay using a custom Apptainer definition file. See [Costum Def](../advanced_usage/condatainer_custom_def.md) for more details.
+
+```bash
+condatainer create -p my_project_env -f custom_def.def
+```
+
+Create a read-only overlay using a shell script that installs packages. See [Custom Build Script](../advanced_usage/condatainer_custom_script.md) for more details.
+
+```bash
+condatainer create -p my_project_env -f install_packages.sh
+```
+
+These methods will generate `my_project_env.sqf` in the current directory.
 
 ## Container Management (Avail, List, Remove)
 

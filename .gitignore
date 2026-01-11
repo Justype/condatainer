@@ -28,3 +28,6 @@ docs/build/
 # Python cache (always good to include)
 __pycache__/
 *.pyc
+
+# VS Code settings
+.vscode/

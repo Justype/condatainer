@@ -224,14 +224,14 @@ Then in R:
 pak::pkg_sysreqs("package_from_github")
 ```
 
-If system libraries are missing, you need to update the `build-essential` def file used to create the overlay image. Or you can create your `additional-deps` overlay with the required system libraries. (ignore pandoc missing warning)
+If system libraries are missing, you can create your `additional-deps` overlay with the required system libraries. (ignore pandoc missing warning)
 
 see [Custom Apptainer Definition Files](../advanced_usage/condatainer_custom_def.md) for more details.
 
-After installing the `additional-deps` overlay, run `rstudio-server-helper` with the `-o` option:
+After getting the `additional-deps.sqf` overlay, run `rstudio-server-helper` with the `-o` option:
 
 ```bash
-rstudio-server-helper -o additional-deps
+rstudio-server-helper -o additional-deps.sqf
 ```
 
 If you want to share your overlay with others, you should also provide the `def` file used to create it.

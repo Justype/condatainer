@@ -196,14 +196,14 @@ Then in R:
 pak::pkg_sysreqs("package_from_github")
 ```
 
-If system libraries are missing, you need to update the `build-essential` def file used to create the overlay image. Or you can create your `additional-deps` overlay with the required system libraries. (ignore pandoc missing warning)
+If system libraries are missing, you can create your `additional-deps` overlay with the required system libraries. (ignore pandoc missing warning)
 
 see [Custom Apptainer Definition Files](../advanced_usage/condatainer_custom_def.md) for more details.
 
-After installing the `additional-deps` overlay, run `rstudio-server-helper` with the `-o` option:
+After getting the `additional-deps.sqf` overlay, run `rstudio-server-helper` with the `-o` option:
 
 ```bash
-rstudio-server-helper -o additional-deps
+rstudio-server-helper -o additional-deps.sqf
 ```
 
 If you want to share your overlay with others, you should also provide the `def` file used to create it.
@@ -257,7 +257,7 @@ This is caused by `rserver` trying to create runtime files with long UUID names.
 
 For example, if your home/scratch directory is in a deep path like `/workspace/lab/long_last_name_lab/<your_username>/`, then RStudio will try to create socket files with very long paths like: `/workspace/lab/long_last_name_lab/<your_username>/.local/share/rstudio/run/other_stuff/<very_long_uuid>/rstudio-server/session-server-rpc.socket`.
 
-To fix this, you need to change the line:
+To fix this, you need to change this line:
 
 ```
         --server-data-dir=$SCRATCH/.local/run/rstudio-server \

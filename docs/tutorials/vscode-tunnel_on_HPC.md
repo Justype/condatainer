@@ -163,7 +163,7 @@ Then you can either use the [VS Code Remote - Tunnels extension](https://marketp
 
 ## Change the default setting
 
-You can modify the default settings in the script, such as CPU, memory, time limit, overlay image path, port number.
+You can modify the default settings in the script, such as CPU, memory, time limit, overlay image path.
 
 They are at the beginning of the script:
 

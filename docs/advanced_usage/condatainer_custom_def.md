@@ -2,13 +2,9 @@
 
 You can extend the functionality of **Condatainer** by creating custom Apptainer (Singularity) definition files. This allows you to build specific system-level overlays that can be loaded alongside your standard environment.
 
-## File Placement Requirement
-
-Currently, **Condatainer** only supports building definition files that are located within the build-scripts directory of your **Condatainer** installation.
-
-Location: `condatainer_path/build-scripts/`
-
-You must place your `.def` file in this specific folder for the build command to recognize it.
+```bash
+condatainer create -p <prefix> -f <path_to_def_file>
+```
 
 ## Step-by-Step Guide: Additional Dependencies
 
@@ -53,32 +49,27 @@ From: ubuntu:24.04
     apt clean
 ```
 
-### 2. Place the Definition File
-
-Move the `additional-deps.def` file into the `build-scripts` directory of your **Condatainer** installation.
-
-```bash
-mv additional-deps.def $SCRATCH/condatainer/build-scripts/
-```
-
-### 3. Build the Overlay
+### 2. Build the Overlay
 
 Use the `condatainer create` command to build the overlay from your custom definition file.
 
 ```bash
-condatainer create additional-deps
+condatainer create -p additional-deps -f additional-deps.def
 ```
 
-This will generate an overlay file named `additional-deps.sqf` in your overlays directory.
+This will generate an overlay file named `additional-deps.sqf` in current directory.
 
-### 4. Use the Custom Overlay
+
+### 3. Use the Custom Overlay
 
 You can now load this custom overlay when running your analyses that require these additional system libraries.
 
 ```bash
-condatainer exec -o build-essential -o additional-deps your_command_here
+condatainer exec -o build-essential -o additional-deps.sqf your_command_here
 ```
 
-### 5. Share the Definition File
+### 4. Share the Definition File
 
-If you use the `additional-deps` overlay in your projects, consider sharing the `additional-deps.def` file with your team or including it in your project repository. This way, others can easily recreate the same environment by building the overlay from the provided definition file.
+If you use the `additional-deps.sqf` in your projects, consider sharing the `additional-deps.def` file with your team or including it in your project repository. 
+
+This way, others can easily recreate the same environment by building the overlay from the provided definition file.

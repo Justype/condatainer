@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 os.umask(0o002)
 
 class Config:
-    VERSION = "1.0.3"
+    VERSION = "1.0.4"
     # Remote settings
     debug = False
     use_sbatch = True
@@ -574,7 +574,7 @@ class CondaTainer:
             Utils.print_warning(f"Pre-built base image not available for architecture: {arch}")
             return False
 
-        url = f"https://github.com/Justype/condatainer/releases/download/v1.0.3/base_image_{arch}.sif"
+        url = f"https://github.com/Justype/condatainer/releases/download/v1.0.4/base_image_{arch}.sif"
         Utils.print_message(f"Attempting to download pre-built base image for {arch}...")
         if not Utils.download_executable(url, Config.BASE_IMAGE_SIF):
             Utils.print_warning("Failed to download pre-built base image.")
@@ -819,6 +819,9 @@ class BuildObject:
         build_obj.is_def = script_path.endswith('.def')
         build_obj.is_shell = script_path.endswith(('.sh', '.bash'))
         build_obj.target_overlay_path = target_prefix + ".sqf"
+        build_obj._check_dep_prompt_sbatch()
+
+        Utils.print_debug(f"[EXTERNAL] Created BuildObject from external path: {build_obj}")
 
         return build_obj
 
@@ -919,7 +922,7 @@ class BuildObject:
             "/bin/bash", "-c",
             f"""
             mkdir -p $TMPDIR
-            micromamba create -r /ext3/conda -c conda-forge -c bioconda -y -p /cnt/{self.relative_path} {name}={version}
+            micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/{self.relative_path} {name}={version}
 
             echo "Setting permissions..."
             find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
@@ -1027,9 +1030,17 @@ class BuildObject:
                 Utils.print_error(f"Missing dependencies for {Utils.yellow_text(self.name_version)}: {', '.join(missing_deps)}. Please install them first.")
             return False
 
+        name_version_parts = self.name_version.split('/')
+        if len(name_version_parts) < 2:
+            name = name_version_parts[0]
+            version = "env"
+        else:
+            name = name_version_parts[0]
+            version = name_version_parts[1]
+
         env_settings = [
-            "--env", f"app_name={self.name_version.split('/')[0]}",
-            "--env", f"version={self.name_version.split('/')[1]}",
+            "--env", f"app_name={name}",
+            "--env", f"version={version}",
             "--env", f"app_name_version={self.name_version}",
             "--env", f"tmp_dir=/ext3/tmp",
             "--env", "TMPDIR=/ext3/tmp",
@@ -1432,11 +1443,11 @@ class CondaTainer_Create:
             abs_file_path = os.path.abspath(file_path)
             to_bind_paths.append(os.path.dirname(abs_file_path))
 
-            install_command = f"micromamba create -r /ext3/conda -c conda-forge -c bioconda -y -p /cnt/{normalized_name_version} -f {abs_file_path}"
+            install_command = f"micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/{normalized_name_version} -f {abs_file_path}"
             copy_command = f"cp {abs_file_path} /cnt/{normalized_name_version}/env.yaml"
         elif name_versions:
             parsed_name_versions = [nv.replace('/', '=') for nv in name_versions]
-            install_command = "micromamba create -r /ext3/conda -c conda-forge -c bioconda -y -p /cnt/" + normalized_name_version + " " + " ".join(parsed_name_versions)
+            install_command = "micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/" + normalized_name_version + " " + " ".join(parsed_name_versions)
             copy_command = ""
         else:
             Utils.print_error("Either an environment file or name/version specifications must be provided.")
@@ -1512,7 +1523,8 @@ class CondaTainer_Create:
                 Utils.print_error(f"Failed to create BuildObject from {file_path}.")
                 return False
 
-            return build_obj.build()
+            build_graph = BuildGraph([build_obj])
+            return build_graph.run()
 
         else:
             Utils.print_error("The build file must be a .sh/.bash/.def script or .yml/.yaml environment file.")
