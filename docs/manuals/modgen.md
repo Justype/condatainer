@@ -238,7 +238,7 @@ Updates the **ModGen** script itself to the latest version from the GitHub repos
 **Usage:**
 
 ```
-modgen update [-y]
+modgen self-update [-y]
 ```
 
 * `-y`, `--yes`: Automatically confirm the download and replacement of the current script.

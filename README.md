@@ -27,7 +27,7 @@ Please go to [Read the Docs](https://condatainer.readthedocs.io/en/latest/) for 
 curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash
 ```
 
-The installation script is **interactive**. You will be prompted to confirm the installation path (defaulting to `$SCRATCH/condatainer/` or `$HOME/condatainer/`). The script will also edit shell config.
+You will be prompted to confirm the installation path (defaulting to `$SCRATCH/condatainer/` or `$HOME/condatainer/`). The script will also edit shell config.
 
 ## 📦 CondaTainer
 
@@ -71,7 +71,7 @@ condatainer exec -o grch38--cellranger--2024-A bash
 
 ## 🚀 Automation
 
-**CondaTainer** supports inline dependency declaration, allowing you to define requirements directly within your scripts using tags
+**CondaTainer** supports inline dependency declaration, allowing you to define requirements directly within your scripts using tags `#DEP:`.
 
 Example Script (`analysis.sh`):
 

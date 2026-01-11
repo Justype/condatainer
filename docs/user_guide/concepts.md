@@ -53,6 +53,12 @@ For example, `salmon/1.10.2` will be stored as `condatainer_path/images/salmon--
 
 So `--` should not be used in the names.
 
+#### Rename or not to Rename? (CondaTainer)
+
+TL;DR: Do not rename `sqf` files. `img` files can be renamed.
+
+See [Naming Conventions - CondaTainer Manual](../manuals/condatainer.md#naming-convention) for details.
+
 ## 🐍 Leveraging Conda Resources
 
 Thanks to `conda-forge` and `bioconda`, most bioinformatics software can be easily installed with conda. Both **ModGen** and **CondaTainer** leverage conda to create isolated environments for each app module, ensuring that dependencies are managed without conflicts.
