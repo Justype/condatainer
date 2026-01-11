@@ -56,12 +56,11 @@ ssh -L 8787:localhost:8787 your_username@hpc_address
 
 After running this command, when your local machine accesses `localhost:8787`, it will be forwarded to `localhost:8787` on the HPC login node.
 
-> [!WARNING]
-> HPC is a shared system! 
-> 
-> Please do not use `8787` port. This is a common port and may be used by other users.
-> 
-> Instead, choose a strange and unique port number like `13182`.
+```{warning}
+HPC is a shared system! Please do not use commont port like `8787`.
+
+Instead, choose a strange and unique port number like `13182`.
+```
 
 You can also edit the SSH config file (`~/.ssh/config`) to add a section for your HPC system:
 
@@ -123,7 +122,7 @@ mm-pin r-base
 
 You should always run `rstudio-server` on compute nodes rather than login nodes.
 
-You can use this script: [rstudio-server-helper](./rstudio-server-helper)
+You can use this script: [rstudio-server-helper](https://github.com/Justype/condatainer/blob/main/helpers/rstudio-server-helper)
 
 It will do the following steps for you:
 
@@ -157,7 +156,7 @@ Let's set up and run `rstudio-server` on HPC:
 # Download the helper script
 # Please make sure $HOME/bin is in your PATH
 mkdir -p $HOME/bin
-wget https://raw.githubusercontent.com/Justype/condatainer/main/docs/tutorials/rstudio-server-helper -O $HOME/bin/rstudio-server-helper
+wget https://raw.githubusercontent.com/Justype/condatainer/main/helpers/rstudio-server-helper -O $HOME/bin/rstudio-server-helper
 chmod +x $HOME/bin/rstudio-server-helper
 ```
 

@@ -85,7 +85,7 @@ mm-pin python
 
 Always run VS Code CLI on compute nodes rather than login nodes.
 
-You can use this scripts: [vscode-tunnel-helper](./vscode-tunnel-helper)
+You can use this scripts: [vscode-tunnel-helper](https://github.com/Justype/condatainer/blob/main/helpers/vscode-tunnel-helper)
 
 `vscode-tunnel-helper` will do the following steps for you:
 
@@ -123,7 +123,7 @@ Let's set up and run `code` CLI on HPC:
 # Download the helper script
 # Please make sure $HOME/bin is in your PATH
 mkdir -p $HOME/bin
-wget https://raw.githubusercontent.com/Justype/condatainer/main/docs/tutorials/vscode-tunnel-helper -O $HOME/bin/vscode-tunnel-helper
+wget https://raw.githubusercontent.com/Justype/condatainer/main/helpers/vscode-tunnel-helper -O $HOME/bin/vscode-tunnel-helper
 chmod +x $HOME/bin/vscode-tunnel-helper
 ```
 

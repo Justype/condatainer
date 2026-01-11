@@ -41,14 +41,13 @@ ssh -L 8787:localhost:8787 your_username@remote_server_address
 
 After running this command, when your local machine accesses `localhost:8787`, it will be forwarded to `localhost:8787` on the remote server.
 
-> [!WARNING]
-> Remote server is a shared system! 
-> 
-> Please do not use `8787` port. This is a common port and may be used by other users.
-> 
-> Instead, choose a strange and unique port number like `13182`.
+```{warning}
+Remote server is a shared system! Please do not use commont port like `8787`.
 
-You can also edit the SSH config file (`~/.ssh/config`) to add a section for your HPC system:
+Instead, choose a strange and unique port number like `13182`.
+```
+
+You can also edit the SSH config file (`~/.ssh/config`) to add a section for your remote server:
 
 ```
 Host server
@@ -106,7 +105,7 @@ mm-pin r-base
 
 ## RStudio Server Helper Script
 
-You can use this script: [rstudio-server-helper-local](./rstudio-server-helper-local)
+You can use this script: [rstudio-server-helper-local](https://github.com/Justype/condatainer/blob/main/helpers/rstudio-server-helper-local)
 
 It will do the following steps for you:
 
@@ -126,13 +125,13 @@ Options:
   -h              Show this help message
 ```
 
-Let's set up and run `rstudio-server` on HPC:
+Let's set up and run `rstudio-server` on remote server:
 
 ```bash
 # Download the helper script
 # Please make sure $HOME/bin is in your PATH
 mkdir -p $HOME/bin
-wget https://raw.githubusercontent.com/Justype/condatainer/main/docs/tutorials/rstudio-server-helper-local -O $HOME/bin/rstudio-server-helper-local
+wget https://raw.githubusercontent.com/Justype/condatainer/main/helpers/rstudio-server-helper-local -O $HOME/bin/rstudio-server-helper-local
 chmod +x $HOME/bin/rstudio-server-helper-local
 ```
 

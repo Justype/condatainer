@@ -10,6 +10,7 @@ AUTH="none"
 OVERLAYS_ARG=""
 OVERLAYS=""
 OVERLAY="env.img"
+FAKE_ROOT_ARG=""
 CWD=$(readlink -f .)
 
 LOG_DIR="$HOME/logs"
@@ -53,11 +54,12 @@ print_help() {
     echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
     echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00"
+    echo "  -f              Use fakeroot mode (will be root inside the container)"
     echo "  -y              Accept all warnings and proceed"
     echo "  -h              Show this help message"
 }
 
-while getopts "c:m:t:p:a:e:o:vyh" opt; do
+while getopts "c:m:t:p:a:e:o:vfyh" opt; do
     case ${opt} in
         c ) NCPUS=$OPTARG ;;
         m ) MEM=$OPTARG ;;
@@ -67,6 +69,7 @@ while getopts "c:m:t:p:a:e:o:vyh" opt; do
         e ) OVERLAY=$OPTARG ;;
         o ) OVERLAYS_ARG+=" -o $OPTARG"; OVERLAYS+=" $OPTARG" ;;
         v ) NCPUS=1; MEM=4G; TIME=02:00:00; echo "View Mode: NCPUS=1, MEM=4G, TIME=02:00:00" ;;
+        r ) FAKE_ROOT_ARG="--fakeroot"; echo "Using fake root mode" ;;
         y ) AUTO_YES=true ;;
         h ) print_help; exit 0 ;;
         \? ) print_help; exit 1 ;;
@@ -160,6 +163,7 @@ condatainer exec \\
     -o code-server \\
     $OVERLAYS_ARG \\
     $OVERLAY_ARG --writable-img \\
+    $FAKE_ROOT_ARG \\
     code-server \\
         --disable-update-check \\
         --bind-addr 127.0.0.1:$PORT \\

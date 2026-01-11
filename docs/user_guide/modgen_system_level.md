@@ -1,8 +1,8 @@
-# Use ModGen to Manage System Level Modules
+# Use ModGen to Manage System Modules
 
 🏭 **ModGen** is a tool designed to automate the creation and management of **Lmod/Environment Modules** on HPC systems. 
 
-It is the ideal choice for users who want to take full advantage of tools available on the HPC system rather. After the installation, you can use `module load` from Lmod/Environment Modules.
+It is the ideal choice for users who want to take full advantage of tools available on the HPC system. After installation, you can use `module load` with Lmod/Environment Modules.
 
 Please read [Concepts](concepts.md) before proceeding.
 
@@ -22,7 +22,7 @@ samtools --version
 # 4. Search for packages to install
 modgen avail salmon grcm M36
 
-# 5. Auto install dependencies from a script
+# 5. Automatically install dependencies from a script
 modgen check analysis.sh -a
 
 # 6. Helpful info example: Cellranger reference
@@ -49,7 +49,7 @@ ml grcm39/salmon/1.10.2/gencodeM33
 salmon quant -i $SALMON_INDEX_DIR ...
 ```
 
-Check and auto install dependencies:
+Check and automatically install dependencies:
 
 ```bash
 # Print dependencies and install status
@@ -90,7 +90,7 @@ cellranger count --id=sample1 \
 
 ### 📥 Install required modules
 
-You can check the dependencies and auto install them using:
+You can check the dependencies and automatically install them using:
 
 ```bash
 modgen check cellranger_quant.sh -a
@@ -112,7 +112,7 @@ Enter here:
 
 You need to paste the valid download link and press Enter to continue the build.
 
-Since cellranger references are prebuilt, **ModGen** will download the extract the reference files and generate the modulefile on the login node.
+Since cellranger references are prebuilt, **ModGen** will download and extract the reference files and generate the modulefile on the login node.
 
 ### 📤 Load and use modules
 

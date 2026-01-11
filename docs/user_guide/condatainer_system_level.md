@@ -1,4 +1,4 @@
-# Use CondaTainer to Manage System Level Overlays
+# Use CondaTainer to Manage System Overlays
 
 📦 **CondaTainer** is a tool designed to automate the creation and management of read-only highly-compressed module overlays using Apptainer and Conda.
 
@@ -24,7 +24,7 @@ condatainer create -f environment.yml -p my_analysis
 # 5. Create a writable image
 condatainer overlay -f environment.yml --size 10240 my_analysis_dev.img
 
-# 6. auto install the dependencies
+# 6. Automatically install the dependencies
 condatainer check analysis.sh -a
 
 # 7. Helpful info example: Cellranger reference
@@ -84,7 +84,7 @@ condatainer run analysis.sh
 
 When you request a reference or an environment that requires significant computation to prepare, **CondaTainer will automatically submit SLURM jobs** to handle the heavy lifting for you.
 
-And you can follow the example below to define SLURM parameters in your script. and submit the script to slurm as usual.
+You can follow the example below to define SLURM parameters in your script and submit it to SLURM as usual.
 
 ```bash
 #!/bin/bash
@@ -139,7 +139,7 @@ cellranger count --id=sample1 \
 
 ### 📥 Install required overlays
 
-You can check the dependencies and auto install them using:
+You can check the dependencies and automatically install them using:
 
 ```bash
 condatainer check cellranger_quant.sh -a
@@ -161,7 +161,7 @@ Enter here:
 
 You need to paste the valid download link and press Enter to continue the build.
 
-Since cellranger references are prebuilt, **CondaTainer** will download the extract the reference files and create overlays on the login node.
+Since cellranger references are prebuilt, **CondaTainer** will download and extract the reference files and create overlays on the login node.
 
 ### 📤 Load and use overlays
 
@@ -175,10 +175,11 @@ sbatch cellranger_quant.sh
 
 - [CondaTainer Installation](../installation/condatainer.md)
 - [CondaTainer Manual](../manuals/condatainer.md)
+- [CondaTainer: Writable Project-Level](../user_guide/condatainer_project_level_writable.md)
+- [CondaTainer: Read-Only Project-Level](../user_guide/condatainer_project_level_readonly.md)
 
 Tutorials using CondaTainer:
 
-- [Create Project ENV](../tutorials/create_project_env.md)
 - [RStudio Server on HPC](../tutorials/rstudio-server_on_HPC.md)
 - [code-server on HPC](../tutorials/code-server_on_HPC.md)
 - [VS Code Tunnel on HPC](../tutorials/vscode-tunnel_on_HPC.md)

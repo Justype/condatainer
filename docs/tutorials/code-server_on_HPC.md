@@ -60,12 +60,11 @@ ssh -L 8080:localhost:8080 your_username@hpc_address
 
 After running this command, when your local machine accesses `localhost:8080`, it will be forwarded to `localhost:8080` on the HPC login node.
 
-> [!WARNING]
-> HPC is a shared system! 
-> 
-> Please do not use `8080` port. This is a common port and may be used by other users.
-> 
-> Instead, choose a strange and unique port number like `13182`.
+```{warning}
+HPC is a shared system! Please do not use commont port like `8080`.
+
+Instead, choose a strange and unique port number like `13182`.
+```
 
 You can also edit the SSH config file (`~/.ssh/config`) to add a section for your HPC system:
 
@@ -128,7 +127,7 @@ mm-pin python
 
 I always recommend running `code-server` on compute nodes rather than login nodes.
 
-You can use this scripts: [code-server-helper](./code-server-helper)
+You can use this scripts: [code-server-helper](https://github.com/Justype/condatainer/blob/main/helpers/code-server-helper)
 
 `code-server-helper` will do the following steps for you:
 
@@ -164,7 +163,7 @@ Let's set up and run `code-server` on HPC:
 # Download the helper script
 # Please make sure $HOME/bin is in your PATH
 mkdir -p $HOME/bin
-wget https://raw.githubusercontent.com/Justype/condatainer/main/docs/tutorials/code-server-helper -O $HOME/bin/code-server-helper
+wget https://raw.githubusercontent.com/Justype/condatainer/main/helpers/code-server-helper -O $HOME/bin/code-server-helper
 chmod +x $HOME/bin/code-server-helper
 ```
 
