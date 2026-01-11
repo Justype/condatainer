@@ -32,6 +32,26 @@ Ref (Reference) modules provide version-specific genome indices, annotations, or
 
 **Example**: `grch38/salmon/1.10.2/gencode47`
 
+### 📂 Naming Convention
+
+Both tools utilize a standardized naming schema to organize software and reference data.
+
+- System Apps: `name` (e.g., `rstudio-server`, created by `name` or `-n name` flag) (**CondaTainer** only)
+- Project Env: `name` (e.g., `env`, `sci_rna`, created by `-p prefix` flag) (**CondaTainer** only)
+- Apps: `name/version` (e.g., `bcftools/1.16`)
+- References: `assembly/datatype/version`
+  - `grcm39/genome/gencode`: GRCm39 genome with Gencode style naming
+  - `grcm39/salmon/1.10.2/gencodeM33`: salmon index for GRCm39 Gencode M33 transcripts
+
+
+## 🐍 Leveraging Conda Resources
+
+Thanks to `conda-forge` and `bioconda`, most bioinformatics software can be easily installed with conda. Both **ModGen** and **CondaTainer** leverage conda to create isolated environments for each app module, ensuring that dependencies are managed without conflicts.
+
+If a required package is not available in conda, custom build scripts can be created to compile and install the software from source.
+
+e.g. 10X `cellranger` and Illumina `orad`
+
 ## 🔄 Workflow
 
 ### 📥 Install
@@ -73,4 +93,3 @@ module load salmon/1.10.2
 module load grch38/salmon/1.10.2/gencode47
 salmon quant -i $SALMON_INDEX_DIR ...
 ```
-
