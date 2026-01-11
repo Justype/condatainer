@@ -1518,7 +1518,7 @@ class CondaTainer_Exec:
             help="Additional paths to bind 'HOST_PATH:CONTAINER_PATH' (can be used multiple times)"
         )
         CondaTainer_Exec.parser_exec.add_argument(
-            "--fake-root",
+            "--fakeroot",
             action="store_true",
             help="Run command with fake root privileges inside the container"
         )
@@ -1540,7 +1540,7 @@ class CondaTainer_Exec:
             help="Do not autoload local env.img from current directory"
         )
         CondaTainer_Exec.parser_e.add_argument(
-            "--fake-root",
+            "--fakeroot",
             action="store_true",
             help="Run command with fake root privileges inside the container"
         )
@@ -1583,7 +1583,7 @@ class CondaTainer_Exec:
                 Utils.print_error(f"Overlay file {overlay_final[i]} not found.")
                 exit(1)
 
-        if not CondaTainer_Exec.exec_command(overlay_final, command_final, args.env_settings, args.bind_paths, args.fake_root):
+        if not CondaTainer_Exec.exec_command(overlay_final, command_final, args.env_settings, args.bind_paths, args.fakeroot):
             exit(1)
 
     @staticmethod
@@ -1610,7 +1610,7 @@ class CondaTainer_Exec:
                 Utils.print_message(f"Autoload env.img at {Utils.blue_text(local_env_path)}")
                 overlay_final.append(local_env_path)
 
-        if not CondaTainer_Exec.exec_command(overlay_final, command_final, is_fake_root=args.fake_root):
+        if not CondaTainer_Exec.exec_command(overlay_final, command_final, is_fakeroot=args.fakeroot):
             exit(1)
 
     @staticmethod
@@ -1741,7 +1741,7 @@ class CondaTainer_Exec:
             command: List[str], 
             env_settings: Optional[List[str]] = None, 
             bind_paths: Optional[List[str]] = None, 
-            is_fake_root: bool = False, 
+            is_fakeroot: bool = False, 
             capture_output: bool = False) -> bool:
 
         if not CondaTainer_Exec.only_allow_one_img(paths_or_name_versions):
@@ -1750,7 +1750,7 @@ class CondaTainer_Exec:
         paths_or_name_versions = CondaTainer_Exec.put_img_to_last(paths_or_name_versions)
         path_env = CondaTainer_Exec.get_path_env(paths_or_name_versions)
         env_params = CondaTainer_Exec.get_overlay_env_configs(paths_or_name_versions)
-        fake_root_param = [ "--fakeroot" ] if is_fake_root else []
+        fakeroot_param = [ "--fakeroot" ] if is_fakeroot else []
 
         last_img = None
         img_env = []
@@ -1803,7 +1803,7 @@ class CondaTainer_Exec:
             *img_env,
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
             *additional_binds,
-            *fake_root_param,
+            *fakeroot_param,
             *CondaTainer.generate_gpu_args(),
             Config.BASE_IMAGE_SIF,
             *command
@@ -2384,9 +2384,9 @@ class CondaTainer_Overlay:
             help="Conda env YAML file to initialize"
         )
         parser.add_argument(
-            "--fake-root",
+            "--fakeroot",
             action="store_true",
-            help="Use fakeroot during creation"
+            help="fakeroot overlay (cannot be used without --fakeroot later, not recommended)"
         )
         parser.add_argument(
             "image",
@@ -2412,8 +2412,8 @@ class CondaTainer_Overlay:
         CondaTainer.ensure_base_image()
         overlay_path = os.path.abspath(args.image)
         size_mib = args.size
-        is_fake_root = args.fake_root
-        fake_root_arg = [ "--fakeroot" ] if is_fake_root else []
+        is_fakeroot = args.fakeroot
+        fakeroot_arg = [ "--fakeroot" ] if is_fakeroot else []
 
         if not overlay_path.endswith(".img"):
             if '.' in os.path.basename(overlay_path):
@@ -2434,7 +2434,7 @@ class CondaTainer_Overlay:
         cmd_overlay = [
             Config.APPTAINER_BIN, "overlay", "create",
             "--size", str(size_mib), "--sparse",
-            *fake_root_arg,
+            *fakeroot_arg,
             overlay_path
         ]
 
@@ -2448,16 +2448,16 @@ class CondaTainer_Overlay:
         CondaTainer_Exec.is_img_writable = True
         if args.file:
             Utils.print_message(f"Initializing conda environment using {os.path.abspath(args.file)}...")
-            if CondaTainer_Exec.exec_command([overlay_path], ["mm-create", "-f", os.path.abspath(args.file), "-y"], is_fake_root=is_fake_root, capture_output=True):
-                CondaTainer_Exec.exec_command([overlay_path], ["mm-clean", "-a", "-y"], is_fake_root=is_fake_root, capture_output=True)
+            if CondaTainer_Exec.exec_command([overlay_path], ["mm-create", "-f", os.path.abspath(args.file), "-y"], is_fakeroot=is_fakeroot, capture_output=True):
+                CondaTainer_Exec.exec_command([overlay_path], ["mm-clean", "-a", "-y"], is_fakeroot=is_fakeroot, capture_output=True)
                 Utils.print_success(f"Conda env is created inside {Utils.blue_text(overlay_path)}.")
             else:
                 Utils.print_error(f"Failed to create conda env inside {Utils.blue_text(overlay_path)}.")
                 exit(1)
         else:
             Utils.print_message("Initializing minimal conda environment with small package (zlib)...")
-            if CondaTainer_Exec.exec_command([overlay_path], ["mm-create", "zlib", "-y"], is_fake_root=is_fake_root, capture_output=True):
-                CondaTainer_Exec.exec_command([overlay_path], ["mm-clean", "-a", "-y"], is_fake_root=is_fake_root, capture_output=True)
+            if CondaTainer_Exec.exec_command([overlay_path], ["mm-create", "zlib", "-y"], is_fakeroot=is_fakeroot, capture_output=True):
+                CondaTainer_Exec.exec_command([overlay_path], ["mm-clean", "-a", "-y"], is_fakeroot=is_fakeroot, capture_output=True)
                 Utils.print_success(f"Conda env is created inside {Utils.blue_text(overlay_path)}.")
             else:
                 Utils.print_error(f"Failed to create conda env inside {Utils.blue_text(overlay_path)}.")
@@ -2671,7 +2671,7 @@ _{script_name}_completion() {{
                 fi
             elif [[ "${{COMP_WORDS[2]}}" == "create" ]]; then
                 if [[ "${{cur}}" == -* ]]; then
-                    COMPREPLY=( $(compgen -W "-s --size -f --file --fake-root" -- "${{cur}}") )
+                    COMPREPLY=( $(compgen -W "-s --size -f --file --fakeroot" -- "${{cur}}") )
                 else
                     COMPREPLY=( $(compgen -f -- "${{cur}}") )
                 fi
@@ -2681,7 +2681,7 @@ _{script_name}_completion() {{
         o)
              # Alias for overlay create
              if [[ "${{cur}}" == -* ]]; then
-                 COMPREPLY=( $(compgen -W "-s --size -f --file --fake-root" -- "${{cur}}") )
+                 COMPREPLY=( $(compgen -W "-s --size -f --file --fakeroot" -- "${{cur}}") )
              else
                  COMPREPLY=( $(compgen -f -- "${{cur}}") )
              fi
@@ -2700,7 +2700,7 @@ _{script_name}_completion() {{
             if [[ "${{prev}}" == "-o" || "${{prev}}" == "--overlay" ]]; then
                 COMPREPLY=( $(compgen -W "$(_list_overlays true)" -- "${{cur}}") )
             else
-                opts="-o --overlay -k --keep -w --writable-img --env --bind --fake-root"
+                opts="-o --overlay -k --keep -w --writable-img --env --bind --fakeroot"
                 if [[ "${{cur}}" == -* ]]; then
                     COMPREPLY=( $(compgen -W "${{opts}}" -- "${{cur}}") )
                 else
@@ -2760,7 +2760,7 @@ _{script_name}_completion() {{
             ;;
         e|info)
             if [[ "${{subcommand}}" == "e" && "${{cur}}" == -* ]]; then
-                 COMPREPLY=( $(compgen -W "-r --read-only -n --no-autoload --fake-root" -- "${{cur}}") )
+                 COMPREPLY=( $(compgen -W "-r --read-only -n --no-autoload --fakeroot" -- "${{cur}}") )
             else
                  # List both system and local .img files
                  COMPREPLY=( $(compgen -W "$(_list_overlays true)" -- "${{cur}}") )
@@ -2848,7 +2848,7 @@ _{script_name}_completion() {{
                                     _arguments \\
                                         '(-s --size)'{{-s,--size}}'[Size in MiB]:size' \\
                                         '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files' \\
-                                        '--fake-root[Use fakeroot]' \\
+                                        '--fakeroot[Use fakeroot]' \\
                                         ':image:_files'
                                     ;;
                                 chown)
@@ -2866,7 +2866,7 @@ _{script_name}_completion() {{
                     _arguments \\
                         '(-s --size)'{{-s,--size}}'[Size in MiB]:size' \\
                         '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files' \\
-                        '--fake-root[Use fakeroot]' \\
+                        '--fakeroot[Use fakeroot]' \\
                         ':image:_files'
                     ;;
                 create|install|i)
@@ -2887,14 +2887,14 @@ _{script_name}_completion() {{
                         '(-o --overlay)'{{-o,--overlay}}'[Mount overlay]:overlay:_list_overlays true' \\
                         '(-k --keep)'{{-k,--keep}}'[Do not try to parse command to installed overlays]' \\
                         '(-w --writable-img)'{{-w,--writable-img}}'[Make .img overlays writable]' \\
-                        '--fake-root[Run with fake root privileges]' \\
+                        '--fakeroot[Run with fake root privileges]' \\
                         '*:command:_files'
                     ;;
                 e)
                     _arguments \\
                         '(-r --read-only)'{{-r,--read-only}}'[Mount overlays as read-only]' \\
                         '(-n --no-autoload)'{{-n,--no-autoload}}'[Do not autoload local env.img]' \\
-                        '--fake-root[Run with fake root privileges]' \\
+                        '--fakeroot[Run with fake root privileges]' \\
                         '*:overlay:_list_overlays true'
                     ;;
                 check|c)
