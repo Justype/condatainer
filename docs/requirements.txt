@@ -1,0 +1,11 @@
+# Python and packages for building the CondaTainer docs (Read the Docs uses Python 3.10)
+# .readthedocs.yml selects Python 3.10; install this file with pip
+
+sphinx>=6.2,<7.0
+sphinx-rtd-theme>=1.2.0
+myst-parser>=0.18.0
+sphinx-copybutton>=0.5.0
+# Helpful for local development
+sphinx-autobuild>=0.8.0
+# Optional: for RTD features
+readthedocs-sphinx-ext>=1.7.0

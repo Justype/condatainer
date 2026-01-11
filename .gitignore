@@ -20,3 +20,11 @@ apps
 apps-modules
 ref
 ref-modules
+
+# Sphinx documentation defaults
+docs/_build/
+docs/build/
+
+# Python cache (always good to include)
+__pycache__/
+*.pyc

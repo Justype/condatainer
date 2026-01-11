@@ -1,0 +1,26 @@
+/* Custom theme overrides for CondaTainer docs
+   Change --logo-bg to pick a different color. Prefer an accessible contrast. */
+:root{
+  --logo-bg: #947339; /* darker yellow */
+}
+
+/* RTD theme: top header and logo background */
+.wy-header,
+.wy-side-nav-search,
+.wy-side-nav .logo {
+  background-color: var(--logo-bg) !important;
+  background-image: none !important;
+}
+
+/* If logo image has transparent background, ensure padding and contrast */
+.wy-side-nav .logo img,
+.wy-header .logo img {
+  padding: 6px 8px;
+}
+
+/* Ensure title area text is readable on the new background */
+.wy-side-nav-search .project-name,
+.wy-side-nav-search .project-description,
+.wy-header .project {
+  color: #222222 !important; /* dark text for readable contrast on light background */
+}
