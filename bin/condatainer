@@ -622,10 +622,8 @@ class CondaTainer:
                         Utils.print_error("Pre-built base image download failed.")
             exit(1)
         Utils.print_success("Base images built.")
-        cmd = [ Config.APPTAINER_BIN, "cache", "clean", "--force" ]
-        subprocess.run(cmd, capture_output=True)
         os.chmod(Config.BASE_IMAGE_SIF, 0o775)
-        Utils.print_message("Apptainer cache cleaned.")
+        Utils.print_note("You can run" + Utils.blue_text('apptainer cache clean') + "to free up space used by build cache.")
 
     @staticmethod
     def get_tmp_overlay_path(normalized_name_version: str) -> str:
@@ -764,7 +762,7 @@ class CondaTainer:
         return params
 
 class BuildObject:
-    def __init__(self, name_version: str):
+    def __init__(self, name_version: str, external = False):
         self.name_version = Utils.normalize_name_version(name_version)
         slash_count = self.name_version.count('/')
         self.build_script_path = ""
@@ -788,7 +786,7 @@ class BuildObject:
         else:
             self.target_overlay_path = os.path.join(Config.IMAGES_DIR, overlay_filename)
 
-        if self.is_installed:
+        if self.is_installed or external:
             return
 
         local_scripts = Utils.get_local_build_scripts()
@@ -810,6 +808,21 @@ class BuildObject:
         else:
             self.is_conda = True
 
+        self._check_dep_prompt_sbatch()
+
+    @staticmethod
+    def from_external_path(target_prefix: str, script_path: str) -> 'BuildObject':
+        name_version = os.path.basename(target_prefix)
+        name_version = Utils.normalize_name_version(name_version)
+        build_obj = BuildObject(name_version, external=True)
+        build_obj.build_script_path = script_path
+        build_obj.is_def = script_path.endswith('.def')
+        build_obj.is_shell = script_path.endswith(('.sh', '.bash'))
+        build_obj.target_overlay_path = target_prefix + ".sqf"
+
+        return build_obj
+
+    def _check_dep_prompt_sbatch(self):
         if not (self.is_conda or self.is_def):
             self.dependencies = Utils.get_dependencies_from_script(self.build_script_path)
             self.sbatch_flags = Utils.get_sbatch_args_from_build_script(self.build_script_path)
@@ -1317,7 +1330,7 @@ class CondaTainer_Create:
         CondaTainer_Create.parser_create.add_argument(
             "-f", "--file",
             type=str,
-            help="Conda environment yaml (use with --name or --prefix)"
+            help="yaml, sh, def (must use with --prefix)"
         )
         CondaTainer_Create.parser_create.add_argument(
             "--zstd-fast",
@@ -1381,7 +1394,7 @@ class CondaTainer_Create:
                 Utils.print_message(f"Overlay {Utils.yellow_text(os.path.basename(abs_path))} already exists at {Utils.blue_text(abs_path)}. Skipping creation.")
                 return
             Utils.print_debug(f"[CREATE] Creating overlay with prefix: {args.prefix}")
-            CondaTainer_Create.create_env_sqf(abs_path, args.file, None)
+            CondaTainer_Create.create_prefix_env_sqf(args.prefix, args.file)
         elif args.name:
             if "--" in args.name or "/" in args.name:
                 CondaTainer_Create.parser_create.error("--name cannot contain '/' or '--'")
@@ -1482,6 +1495,28 @@ class CondaTainer_Create:
             Utils.print_message(f"Creation of overlay {Utils.yellow_text(overlay_abs_path)} interrupted by user.")
             CondaTainer_Create.create_cleanup(normalized_name_version, failed=True)
             raise
+
+    @staticmethod
+    def create_prefix_env_sqf(overlay_prefix: str, file_path: str) -> bool:
+        abs_path = os.path.abspath(overlay_prefix) + ".sqf"
+        if file_path.endswith(('.yml', '.yaml')):
+            return CondaTainer_Create.create_env_sqf(abs_path, file_path, None)
+
+        elif file_path.endswith(('.sh', '.bash', '.def')):
+            if not os.path.isfile(file_path):
+                Utils.print_error(f"Build script file {file_path} not found.")
+                return False
+
+            build_obj = BuildObject.from_external_path(overlay_prefix, os.path.abspath(file_path))
+            if build_obj is None:
+                Utils.print_error(f"Failed to create BuildObject from {file_path}.")
+                return False
+
+            return build_obj.build()
+
+        else:
+            Utils.print_error("The build file must be a .sh/.bash/.def script or .yml/.yaml environment file.")
+            return False
 
 class CondaTainer_Exec:
     is_img_writable = False
@@ -2486,7 +2521,7 @@ class CondaTainer_Overlay:
     def run_chown(args):
         CondaTainer.ensure_base_image()
         overlay_path = os.path.abspath(args.image)
-        
+
         if not os.path.isfile(overlay_path):
             Utils.print_error(f"Overlay file {Utils.blue_text(overlay_path)} not found.")
             return
@@ -2512,7 +2547,7 @@ class CondaTainer_Overlay:
 
             try:
                 debugfs_script = "\n".join(cmds)
-                
+
                 subprocess.run(
                     [debugfs_bin, "-w", overlay_path],
                     input=debugfs_script,
@@ -2530,7 +2565,7 @@ class CondaTainer_Overlay:
             Utils.print_warning("'debugfs' not found in PATH or /sbin. Structural fix skipped.")
 
         Utils.print_message(f"Changing recursive ownership of {Utils.blue_text(target_path)}...")
-        
+
         environ = Utils.get_exec_environ()
         cmd_chown = [
             Config.APPTAINER_BIN, "exec",
@@ -2699,10 +2734,13 @@ _{script_name}_completion() {{
         local img_dir="{Config.IMAGES_DIR}"
         local ref_dir="{Config.REF_IMAGES_DIR}"
         local files=""
+        # System images (strip extensions)
         [ -d "$img_dir" ] && files=$(ls -1 "$img_dir" 2>/dev/null | grep -E '\\.(sqf|img|squashfs)$' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
         [ -d "$ref_dir" ] && files="$files $(ls -1 "$ref_dir" 2>/dev/null | grep -E '\\.(sqf|img|squashfs)$' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')"
+        
+        # Local images (keep extensions, include .sqf)
         if [[ "$include_local" == "true" ]]; then
-            files="$files $(ls -1 *.img 2>/dev/null)"
+            files="$files $(ls -1 *.img *.sqf 2>/dev/null)"
         fi
         echo "$files"
     }}
@@ -2720,6 +2758,9 @@ _{script_name}_completion() {{
             elif [[ "${{COMP_WORDS[2]}}" == "create" ]]; then
                 if [[ "${{cur}}" == -* ]]; then
                     COMPREPLY=( $(compgen -W "-s --size -f --file --fakeroot" -- "${{cur}}") )
+                elif [[ "${{prev}}" == "-f" || "${{prev}}" == "--file" ]]; then
+                    # Filter for definition files
+                    COMPREPLY=( $(compgen -f -- "${{cur}}" | grep -E '\\.(def|sh|yaml|yml)$') )
                 else
                     COMPREPLY=( $(compgen -f -- "${{cur}}") )
                 fi
@@ -2730,6 +2771,8 @@ _{script_name}_completion() {{
              # Alias for overlay create
              if [[ "${{cur}}" == -* ]]; then
                  COMPREPLY=( $(compgen -W "-s --size -f --file --fakeroot" -- "${{cur}}") )
+             elif [[ "${{prev}}" == "-f" || "${{prev}}" == "--file" ]]; then
+                 COMPREPLY=( $(compgen -f -- "${{cur}}" | grep -E '\\.(def|sh|yaml|yml)$') )
              else
                  COMPREPLY=( $(compgen -f -- "${{cur}}") )
              fi
@@ -2738,6 +2781,9 @@ _{script_name}_completion() {{
         create|install|i)
             if [[ "${{cur}}" == -* ]]; then
                 COMPREPLY=( $(compgen -W "-n --name -p --prefix -f --file --zstd --zstd-fast --zstd-medium --zstd-high --gzip --lz4" -- "${{cur}}") )
+            elif [[ "${{prev}}" == "-f" || "${{prev}}" == "--file" ]]; then
+                 # Filter for definition files
+                 COMPREPLY=( $(compgen -f -- "${{cur}}" | grep -E '\\.(def|sh|yaml|yml)$') )
             else
                  # Generic file completion for build scripts
                  COMPREPLY=( $(compgen -f -- "${{cur}}") )
@@ -2802,7 +2848,7 @@ _{script_name}_completion() {{
             return 0
             ;;
         remove|rm|delete|del)
-            # Do not list local .img files for removal
+            # Do not list local .img/.sqf files for removal, only system ones
             COMPREPLY=( $(compgen -W "$(_list_overlays false)" -- "${{cur}}") )
             return 0
             ;;
@@ -2810,7 +2856,7 @@ _{script_name}_completion() {{
             if [[ "${{subcommand}}" == "e" && "${{cur}}" == -* ]]; then
                  COMPREPLY=( $(compgen -W "-r --read-only -n --no-autoload --fakeroot" -- "${{cur}}") )
             else
-                 # List both system and local .img files
+                 # List both system and local .img/.sqf files
                  COMPREPLY=( $(compgen -W "$(_list_overlays true)" -- "${{cur}}") )
             fi
             return 0
@@ -2870,10 +2916,13 @@ _{script_name}_completion() {{
                 local img_dir="{Config.IMAGES_DIR}"
                 local ref_dir="{Config.REF_IMAGES_DIR}"
                 local -a overlays
+                # System images
                 [[ -d "$img_dir" ]] && overlays+=(${{(f)"$(ls -1 "$img_dir" 2>/dev/null | grep -E '\\.(sqf|img|squashfs)$' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')"}})
                 [[ -d "$ref_dir" ]] && overlays+=(${{(f)"$(ls -1 "$ref_dir" 2>/dev/null | grep -E '\\.(sqf|img|squashfs)$' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')"}})
+                
+                # Local images (include .sqf)
                 if [[ "$include_local" == "true" ]]; then
-                    local local_imgs=$(ls -1 *.img 2>/dev/null)
+                    local local_imgs=$(ls -1 *.img *.sqf 2>/dev/null)
                     [[ -n "$local_imgs" ]] && overlays+=(${{(f)"$local_imgs"}})
                 fi
                 _describe -t overlays 'overlays' overlays
@@ -2888,14 +2937,14 @@ _{script_name}_completion() {{
                     _arguments \\
                         '1: :_describe -t commands "overlay commands" overlay_cmds' \\
                         '*:: :->overlay_args'
-                    
+
                     case $state in
                         overlay_args)
                             case ${{words[1]}} in
                                 create)
                                     _arguments \\
                                         '(-s --size)'{{-s,--size}}'[Size in MiB]:size' \\
-                                        '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files' \\
+                                        '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files -g "*.def *.sh *.yaml *.yml"' \\
                                         '--fakeroot[fakeroot overlay (cannot be used without --fakeroot later)]' \\
                                         ':image:_files'
                                     ;;
@@ -2913,7 +2962,7 @@ _{script_name}_completion() {{
                 o)
                     _arguments \\
                         '(-s --size)'{{-s,--size}}'[Size in MiB]:size' \\
-                        '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files' \\
+                        '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files -g "*.def *.sh *.yaml *.yml"' \\
                         '--fakeroot[fakeroot overlay (cannot be used without --fakeroot later)]' \\
                         ':image:_files'
                     ;;
@@ -2921,7 +2970,7 @@ _{script_name}_completion() {{
                     _arguments \\
                         '(-n --name)'{{-n,--name}}'[Custom name for overlay]:name' \\
                         '(-p --prefix)'{{-p,--prefix}}'[Custom prefix path]:prefix:_files' \\
-                        '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files' \\
+                        '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files -g "*.def *.sh *.yaml *.yml"' \\
                         '--zstd[ZSTD compression level 14]' \\
                         '--zstd-fast[ZSTD compression level 3]' \\
                         '--zstd-medium[ZSTD compression level 8]' \\
