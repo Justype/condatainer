@@ -79,7 +79,7 @@ def adjust_compression_args_based_on_apptainer_version():
 def main():
     adjust_compression_args_based_on_apptainer_version()
     parser = argparse.ArgumentParser(
-        description="CondaTainer: Use apptainer/conda/squashFS to manage tools for HPC users.",
+        description="CondaTainer: Use Apptainer/Conda/SquashFS to manage tools for HPC users.",
         epilog=f"For full manual, see https://github.com/{Config.GITHUB_REPO}/blob/main/docs/manuals/condatainer.md")
     parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of CondaTainer", default=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")

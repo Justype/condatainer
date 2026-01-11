@@ -42,9 +42,9 @@ ssh -L 8787:localhost:8787 your_username@remote_server_address
 After running this command, when your local machine accesses `localhost:8787`, it will be forwarded to `localhost:8787` on the remote server.
 
 ```{warning}
-Remote server is a shared system! Please do not use commont port like `8787`.
+Remote server is a shared system! Please do not use a common port like `8787`.
 
-Instead, choose a strange and unique port number like `13182`.
+Instead, choose an uncommon and unique port number like `13182`.
 ```
 
 You can also edit the SSH config file (`~/.ssh/config`) to add a section for your remote server:
@@ -90,7 +90,7 @@ condatainer install rstudio-server texlive build-essential
 Creating an ext3 overlay image with R
 
 ```bash
-# create 30G ext3 image named as env.img under current directory
+# create a 30G ext3 image named `env.img` in the current working directory
 condatainer overlay -s 30720
 
 # go into the overlay
@@ -145,13 +145,13 @@ After running the script, you will see output like this:
 
 ```
 rstudio-server at http://localhost:8787
-You can run the following command in R to open the project directly
+You can run the following command in R to open the project directly:
   rstudioapi::openProject("/scratch/your_username/current_working_directory")
 ```
 
 Then you can go to your local web browser and access `http://localhost:8787`.
 
-And run the provided R command in R console to open project directly.
+Run the provided R command in the R console to open the project directly.
 
 ## Change the default setting
 
@@ -184,7 +184,7 @@ TTY detected. Printing informational message about logging configuration. Loggin
 
 See [this issue](https://github.com/rstudio/rstudio/issues/15024) for more details.
 
-This is caused by RSever trying to create runtime files with long uuid names. 
+This is caused by `rserver` trying to create runtime files with long UUID names.
 
 For example, if your home/scratch directory is in a deep path like `/workspace/lab/long_last_name_lab/<your_username>/`, then RStudio will try to create socket files with very long paths like: `/workspace/lab/long_last_name_lab/<your_username>/.local/share/rstudio/run/other_stuff/<very_long_uuid>/rstudio-server/session-server-rpc.socket`.
 
@@ -202,4 +202,4 @@ to
 
 Hopefully, this can fix the issue. 
 
-If that does not work, please contact your system administrator to see if they can help.
+If that does not work, please contact your system administrator for assistance.

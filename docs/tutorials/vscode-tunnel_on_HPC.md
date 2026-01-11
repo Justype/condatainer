@@ -36,7 +36,7 @@ Run the following command to check if SLURM is available on your HPC system:
 sbatch --version
 ```
 
-## SSH Port Forwarding Is not Required
+## SSH port forwarding is not required
 
 VS Code CLI will directly connect to the VS Code server instead of using SSH port forwarding.
 
@@ -67,9 +67,9 @@ Creating required overlay images is not necessary.
 Creating an ext3 overlay image
 
 ```bash
-# create 20G ext3 image named as env.img under current directory
+# create a 20G ext3 image named `env.img` in the current working directory
 condatainer overlay
-# You can -s 10240 to specify the size in MB
+# You can use `-s 10240` to specify the size in MiB
 
 # go into the overlay
 condatainer e
@@ -85,7 +85,7 @@ mm-pin python
 
 Always run VS Code CLI on compute nodes rather than login nodes.
 
-You can use this scripts: [vscode-tunnel-helper](https://github.com/Justype/condatainer/blob/main/helpers/vscode-tunnel-helper)
+You can use this script: [vscode-tunnel-helper](https://github.com/Justype/condatainer/blob/main/helpers/vscode-tunnel-helper)
 
 `vscode-tunnel-helper` will do the following steps for you:
 
@@ -93,9 +93,9 @@ You can use this scripts: [vscode-tunnel-helper](https://github.com/Justype/cond
 2. Check if a VS Code tunnel is running on any compute node.
 3. If yes, print helpful information to connect to that tunnel.
 4. If not,
-   1. Check if the port is available on the login node.
-   2. If pass, check the overlay integrity.
-   3. If pass, use `sbatch` to submit a job which starts `code` CLI.
+  1. Check if the port is available on the login node.
+  2. If so, check the overlay integrity.
+  3. If so, use `sbatch` to submit a job which starts the `code` CLI.
    4. Wait for the job to start.
    5. Print the authentication URL to connect to the VS Code server.
 
@@ -146,22 +146,20 @@ To sign in, use a web browser to open the page https://microsoft.com/devicelogin
 Waiting for authentication...
 ```
 
-Then you need to open the URL in your web browser and enter the code to authenticate. (Same as the github authentication flow.)
+Then you need to open the URL in your web browser and enter the code to authenticate. (Same as the GitHub authentication flow.)
 
 After authentication, you will see output like this:
 
 ```
 [SUCCESS] Tunnel is ready!
 To connect, you can either:
-  - Use VSCode Remote - Tunnels extension
+  - Use VS Code Remote - Tunnels extension
   - Use this link: https://vscode.dev/tunnel/username-hpc_name/scratch/username/playground
-And use your microsoft account to connect to username-hpc_name
+And use your Microsoft account to connect to username-hpc_name
 CWD: /scratch/username/playground
 ```
 
-Then you can either use the [VSCode Remote - Tunnels extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-server) or open the link in your web browser to connect to the VS Code server running on the compute node.
-
-Personally, I prefer use local extension.
+Then you can either use the [VS Code Remote - Tunnels extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-server) or open the link in your web browser to connect to the VS Code server running on the compute node.
 
 ## Change the default setting
 

@@ -1,10 +1,10 @@
 # 🏭 ModGen
 
-**ModGen** streamlines HPC software management by automatically converting apps and genome references into modules. It allows users to access Conda built and non-Conda software (e.g., 10X Cell Ranger, Illumina ORAD) but also genome references via standard `module load` commands without manual configuration.
+**ModGen** streamlines HPC software management by automatically converting apps and genome references into modules. It allows users to access Conda-built and non-Conda software (e.g., 10X Cell Ranger, Illumina ORAD), as well as genome references, via standard `module load` commands without manual configuration.
 
 - **Auto-Generation**: Installs packages and builds Lua/Tcl modulefiles automatically.
 - **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
-- **Native Integration**: seamless `module avail` and `module load` experience.
+- **Native Integration**: Seamless `module avail` and `module load` experience.
 - **Context-Aware**: Manages references/indexes and displays helpful info when not in a SLURM job.
 - **SLURM Integration**: Submits index generation jobs automatically when needed.
 
@@ -41,7 +41,7 @@ ml grch38/cellranger/2024-A
 
 ## 📂 Naming Convention
 
-ModGen utilizes a standardized naming schema to organize software and reference data.
+**ModGen** utilizes a standardized naming schema to organize software and reference data.
 
 - Apps: `name/version` (e.g., `bcftools/1.16`)
 - References: `assembly/datatype/version`
@@ -50,7 +50,7 @@ ModGen utilizes a standardized naming schema to organize software and reference 
 
 ## 🚀 Dependencies Automation
 
-ModGen can recognize both `#DEP:` tags and `module load` commands to automatically install required modules.
+**ModGen** can recognize both `#DEP:` tags and `module load` commands to automatically install required modules.
 
 Example Script (`analysis.sh`):
 
@@ -63,19 +63,19 @@ ml grcm39/salmon/1.10.2/gencodeM33
 salmon quant -i $SALMON_INDEX_DIR ...
 ```
 
-Check and auto install dependencies:
+Check and automatically install dependencies:
 
 ```bash
 # Print modules and install status
 modgen check analysis.sh
 
-# Auto install missing modules
+# Automatically install missing modules
 modgen check analysis.sh -a
 ```
 
 ## 🤔 Differences Compared to CondaTainer
 
-ModGen only focuses on system-/group-wide module management for HPC environments, while CondaTainer is designed for both group-wide module/container management and project specific Conda environment management.
+**ModGen** focuses only on system- or group-wide module management for HPC environments, while **CondaTainer** is designed for both group-wide module and container management and project-specific Conda environment management.
 
 ## Acknowledgements
 

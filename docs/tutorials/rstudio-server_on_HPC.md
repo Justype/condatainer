@@ -57,9 +57,9 @@ ssh -L 8787:localhost:8787 your_username@hpc_address
 After running this command, when your local machine accesses `localhost:8787`, it will be forwarded to `localhost:8787` on the HPC login node.
 
 ```{warning}
-HPC is a shared system! Please do not use commont port like `8787`.
+HPC is a shared system! Please do not use a common port like `8787`.
 
-Instead, choose a strange and unique port number like `13182`.
+Instead, choose an uncommon and unique port number like `13182`.
 ```
 
 You can also edit the SSH config file (`~/.ssh/config`) to add a section for your HPC system:
@@ -105,7 +105,7 @@ condatainer install rstudio-server texlive build-essential
 Creating an ext3 overlay image with R
 
 ```bash
-# create 30G ext3 image named as env.img under current directory
+# create a 30G ext3 image named `env.img` in the current working directory
 condatainer overlay -s 30720
 
 # go into the overlay
@@ -130,10 +130,10 @@ It will do the following steps for you:
 2. If yes, establish SSH port forwarding to that node.
 3. If not,
    1. Check if the port is available on the login node.
-   2. If pass, check the overlay integrity and make sure R is installed.
-   3. If pass, use `sbatch` to submit a job which starts `rstudio-server`.
+   2. If so, check the overlay integrity and make sure R is installed.
+   3. If so, use `sbatch` to submit a job which starts `rstudio-server`.
    4. Wait for the job to start and get the compute node name.
-   5. Record the job ID, node name, port numer, and working directory.
+   5. Record the job ID, node name, port number, and working directory.
    6. Set up SSH port forwarding from login node to compute node.
 
 ```
@@ -173,13 +173,13 @@ Waiting for job 1299123 to start running. Current status: PENDING.
 Job 1299123 is now running on node cm23.
 rstudio-server at http://localhost:8787
 If you want to stop it, run: scancel 1299123
-You can run the following command in R to open the project directly
+You can run the following command in R to open the project directly:
   rstudioapi::openProject("/scratch/your_username/current_working_directory")
 ```
 
 Then you can go to your local web browser and access `http://localhost:8787`.
 
-And run the provided R command in R console to open project directly.
+Run the provided R command in the R console to open the project directly.
 
 ## Change the default setting
 

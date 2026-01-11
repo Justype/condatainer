@@ -6,7 +6,7 @@
 <a href="./README_MG.md"><img src="assets/logo_mg.png" height="100" alt="ModGen Logo"></a>
 </div>
 
-Both tools aim to automate environment management and handling on HPC, but with different approaches:
+Both tools aim to automate environment management on HPC, but with different approaches:
 
 - **CondaTainer**: Wraps environments in overlays using [Apptainer](https://apptainer.org/) and [SquashFS](https://github.com/plougher/squashfs-tools).
 - **ModGen**: Automates [Lmod](https://lmod.readthedocs.io/en/latest/)/[Environment Modules](https://modules.readthedocs.io/en/latest/) modules creation.
@@ -29,7 +29,7 @@ The installation script is **interactive**. You will be prompted to confirm the 
 
 ## 📦 CondaTainer
 
-**CondaTainer** solves the "too many files" problem inherent to Conda environments. Instead of creating thousands of small files. It packs Conda environments into single, highly compressed SquashFS files (`.sqf`) and mounts them inside an Apptainer container.
+**CondaTainer** solves the "too many files" problem inherent to Conda environments: instead of creating thousands of small files, it packs Conda environments into single, highly-compressed SquashFS files (`.sqf`) and mounts them inside an Apptainer container.
 
 - **Inode Efficiency**: Compresses heavy conda environments (10k+ files) into 1 file.
 - **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
@@ -52,9 +52,9 @@ condatainer avail
 condatainer create -f environment.yml -p my_analysis
 
 # 5. Create a writable image
-condatainer overlay -f environment.yml --size 10240 my_analysis_dev.img
+condatainer overlay create -f environment.yml --size 10240 my_analysis_dev.img
 
-# 6. auto install the dependencies
+# 6. Automatically install the dependencies
 condatainer check analysis.sh -a
 
 # 7. Helpful info example: Cellranger reference
@@ -70,7 +70,7 @@ condatainer exec -o grch38--cellranger--2024-A bash
 
 ## 📂 Naming Convention
 
-CondaTainer utilizes a standardized naming schema to organize software and reference data.
+**CondaTainer** utilizes a standardized naming schema to organize software and reference data.
 
 - System Apps: `name` (e.g., `rstudio-server`, created by `name` or `-n name` flag)
 - Project Env: `name` (e.g., `env`, `sci_rna`, created by `-p prefix` flag)
@@ -84,7 +84,7 @@ CondaTainer utilizes a standardized naming schema to organize software and refer
 
 ## 🚀 Script Runtime Automation
 
-CondaTainer supports a "Headless" mode. You can define dependencies in scripts using tags.
+**CondaTainer** supports a "Headless" mode. You can define dependencies in scripts using tags.
 
 Example Script (`analysis.sh`):
 

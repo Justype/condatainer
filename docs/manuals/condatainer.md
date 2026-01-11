@@ -21,11 +21,12 @@
 ```
 usage: condatainer [-h] [-v] [--debug] [-n] COMMAND ...
 
-CondaTainer: Use apptainer/conda/squashFS to manage tools for HPC users.
+CondaTainer: Use Apptainer/Conda/SquashFS to manage tools for HPC users.
 
 positional arguments:
   COMMAND               Available actions
-    overlay (o)         Create an empty overlay img
+    overlay             Manage overlay images (create, chown)
+    o                   Shortcut for 'overlay create'
     create (install, i)
                         Create a new SquashFS overlay using conda or available build scripts
     avail (av)          Check available local and remote build scripts
@@ -64,7 +65,7 @@ Like text editors, IDEs, build-essential tools, etc.
   * Must **not** contain slashes (`/`) or double-dash sequences (`--`).
 * **Example:** `rstudio-server`, `texlive`, `code-server`
 
-You can also create these system apps using `-n, --name` flag in create command.
+You can also create these system apps using the `-n, --name` flag with the `create` command.
 
 ### Custom Environments (Env)
 
@@ -77,7 +78,7 @@ Used when creating a custom environment with a user-defined name (`create -p`, o
 * **Example:** `my_analysis_env`, `project_x_utils`
 
 > [!NOTE]
-> If you want to use `-n` only install system apps, like `nvim`. If you want to create an env sqf, use `-p` to specify a path instead.
+> Use `-n` to install system apps only (e.g., `nvim`). To create an environment `.sqf`, use `-p` to specify a prefix/path.
 
 ### Application Overlays (App)
 
@@ -120,9 +121,16 @@ CondaTainer supports two types of overlay files, each with specific purposes and
 * **Type:** Writable (ext3 filesystem), uncompressed.
 * **Usage:** **Strictly for Conda environments** that require runtime modifications (e.g., installing new packages on the fly).
 * **Mount Point:** `/ext3/env`
-* **Writability:** These are read-only by default. To enable writing, you must use the `-w` / `--writable-img` flag during exec or run.
+* **Writability:** Overlays are mounted read-only by default. To enable writing, use the `-w` / `--writable-img` flag during `exec` or `run`.
 
 ## Overlay
+
+Manage overlay writable ext3 images:
+
+- create: create an image with a conda environment inside.
+- chown: change ownership of files inside the image.
+
+### Overlay Create
 
 Create an ext3 `.img` with a conda environment inside. This is useful for creating writable conda environments.
 
@@ -142,8 +150,9 @@ condatainer overlay [OPTIONS] [NAME]
 
 ```bash
 # Create a 20GB overlay img with a custom name
-condatainer overlay -s 20480 my_analysis_env
+condatainer overlay create -s 20480 my_analysis_env
 
+# o is a shortcut for 'overlay create'
 condatainer o -f environment.yml project_env.img
 ```
 
@@ -167,6 +176,33 @@ mm-clean -ay
 
 # export the env
 mm-export --no-builds > my_env.yaml
+```
+
+### Overlay Chown
+
+Change the ownership of files inside an ext3 `.img` overlay. This is useful when sharing a writable overlay with other users: the recipient can reset ownership to their UID/GID so files are writable with their account.
+
+**Usage:**
+
+```
+condatainer overlay chown [-h] [-u UID] [-g GID] [-p PATH] image
+```
+
+**Options:**
+
+* `-u`, `--uid UID`    : Set the owner UID (default: current user's UID).
+* `-g`, `--gid GID`    : Set the group GID (default: current user's GID).
+* `-p`, `--path PATH`  : Path inside the overlay to change (default: /ext3).
+* `image`              : Path to the overlay `img` file.
+
+**Examples:**
+
+```bash
+# Set ownership inside env.img to the current user
+condatainer overlay chown env.img
+
+# Explicitly set UID and GID
+condatainer overlay chown -u 1001 -g 1001 env.img
 ```
 
 ## Create

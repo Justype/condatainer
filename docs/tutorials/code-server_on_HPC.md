@@ -61,9 +61,9 @@ ssh -L 8080:localhost:8080 your_username@hpc_address
 After running this command, when your local machine accesses `localhost:8080`, it will be forwarded to `localhost:8080` on the HPC login node.
 
 ```{warning}
-HPC is a shared system! Please do not use commont port like `8080`.
+HPC is a shared system! Please do not use a common port like `8080`.
 
-Instead, choose a strange and unique port number like `13182`.
+Instead, choose an uncommon and unique port number like `13182`.
 ```
 
 You can also edit the SSH config file (`~/.ssh/config`) to add a section for your HPC system:
@@ -127,7 +127,7 @@ mm-pin python
 
 I always recommend running `code-server` on compute nodes rather than login nodes.
 
-You can use this scripts: [code-server-helper](https://github.com/Justype/condatainer/blob/main/helpers/code-server-helper)
+You can use this script: [code-server-helper](https://github.com/Justype/condatainer/blob/main/helpers/code-server-helper)
 
 `code-server-helper` will do the following steps for you:
 
@@ -138,7 +138,7 @@ You can use this scripts: [code-server-helper](https://github.com/Justype/condat
    2. If pass, check the overlay integrity.
    3. If pass, use `sbatch` to submit a job which starts `code-server`.
    4. Wait for the job to start and get the compute node name.
-   5. Record the job ID, node name, port numer, and working directory.
+  5. Record the job ID, node name, port number, and working directory.
    6. Set up SSH port forwarding from login node to compute node.
 
 ```
@@ -182,7 +182,7 @@ code-server at http://localhost:$PORT?folder=/scratch/your_username/current_work
 If you want to stop it, run: scancel 1299123
 ```
 
-Then you can go to your local web browser and access `http://localhost:8080`. or click the link provided to open the project directly.
+Then you can go to your local web browser and access `http://localhost:8080` or click the link provided to open the project directly.
 
 ## Change the default setting
 

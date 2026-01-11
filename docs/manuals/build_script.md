@@ -1,5 +1,5 @@
 # Build Script Manual
- 
+
 This document gives instructions on how to create your own build scripts for CondaTainer and ModGen.
 
 ## Table of Contents
@@ -7,7 +7,7 @@ This document gives instructions on how to create your own build scripts for Con
 - [Naming Conventions](#naming-conventions)
 - [Available Variables](#available-variables)
 - [Headers](#headers)
-  - [Whatis and Url](#whatis-and-url)
+  - [WhatIs and URL](#whatis-and-url)
   - [Set Dependencies](#set-dependencies)
   - [SBATCH Parameters](#sbatch-parameters)
   - [Environment Variables](#environment-variables) and [ENV Naming Guidelines](#env-naming-guidelines)
@@ -46,9 +46,9 @@ Used for reference datasets, genome assemblies, or indices.
 
 ### Example
 
-- [cellranger/9.0.1]   (App)
-- [grch38/cellranger/2024-A]   (Ref)
-- [grch38/star/2.7.11b/gencode47-101]   (Ref)
+- [cellranger/9.0.1](https://github.com/Justype/condatainer/blob/main/build-scripts/cellranger/9.0.1) (App)
+- [grch38/cellranger/2024-A](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/cellranger/2024-A) (Ref)
+- [grch38/star/2.7.11b/gencode47-101](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/star/2.7.11b/gencode47-101) (Ref)
 
 ## Available Variables
 
@@ -71,7 +71,7 @@ Used for reference datasets, genome assemblies, or indices.
 
 Headers are special comments at the beginning of build scripts that provide metadata and instructions for CondaTainer.
 
-**Example Header**: [star/2.7.11b/gencode47-101]  
+**Example Header**: [star/2.7.11b/gencode47-101](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/star/2.7.11b/gencode47-101)
 
 ```bash
 #!/usr/bin/bash
@@ -94,7 +94,7 @@ install() {
 }
 ```
 
-### Whatis and Url
+### WhatIs and URL
 
 `#WHATIS:` and `#URL:` lines are used to replace modulefile's `{WHATIS}` and `{HELP}` placeholders.
 
@@ -126,7 +126,7 @@ Must have the following parameters:
 - `--cpus-per-task`
 - `--output`
 
-My script will use `--cpus-per-task` for local builds. And `--output` must be present, my script will overwrite it when submitting the job and make it point to the condatainer logs directory.
+The build system uses `--cpus-per-task` for local builds. The `--output` parameter must be present; the build system will overwrite it when submitting the job to point to the CondaTainer logs directory.
 
 ### Environment Variables
 
@@ -171,7 +171,7 @@ For tool-specific references, use the tool name as a prefix.
 
 - `#INTERACTIVE:<Prompt>` tag indicates that the build script requires input from the user during execution.
 - It is common for apps that need license agreement acceptance or custom configuration.
-- When CondaTainer or ModGen encounters this tag, it will prompt the user with the specified `<Prompt>` message before building. And they will take user input and pass it to the build script during execution.
+- When CondaTainer or ModGen encounters this tag, it will prompt the user with the specified `<Prompt>` message before building. It will take the user input and pass it to the build script during execution.
 - You can use `\n` to add new lines in the prompt message.
 
 **Example:**
@@ -183,37 +183,37 @@ For tool-specific references, use the tool name as a prefix.
 #INTERACTIVE:⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.\nhttps://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
 ```
 
-from [cellranger/9.0.1]  
+Example: [cellranger/9.0.1](https://github.com/Justype/condatainer/blob/main/build-scripts/cellranger/9.0.1)
 
 ## Apps
 
 - Do not try to manually download apps that are already available via conda-forge or bioconda.
-- Also I don't recommend compiling apps from source unless absolutely necessary.
+- Also, I don't recommend compiling apps from source unless absolutely necessary.
   - HPC systems often lack required build tools or dependencies unless you load specific modules.
   - To maximize compatibility (CondaTainer and ModGen), it's better to rely on pre-compiled packages.
 
-Template: [build-template-app]  
+Template: [build-template-apps](https://github.com/Justype/condatainer/blob/main/assets/build-template-apps)
 
 ### Tips
 
 You can use `tar_xf_pigz` and `pigz_or_gunzip` functions to speed up decompression of large files if `pigz` is available on your system.
 
-If the app requires specific environment variables to function properly, make sure to add them using `#ENV:` and `#ENVNOTE:` tags. e.g. [orad/2.7.0]  
+If the app requires specific environment variables to function properly, make sure to add them using `#ENV:` and `#ENVNOTE:` tags. e.g. [orad/2.7.0](https://github.com/Justype/condatainer/blob/main/build-scripts/orad/2.7.0)
 
 ### Examples
 
-- [cellranger/9.0.1]  
-- [orad/2.7.0]  
+- [cellranger/9.0.1](https://github.com/Justype/condatainer/blob/main/build-scripts/cellranger/9.0.1)
+- [orad/2.7.0](https://github.com/Justype/condatainer/blob/main/build-scripts/orad/2.7.0)
 
 ## References
 
 - References often require downloading large files from external sources.
 - Indexes may need to be built using specific versions of software.
-  - If indexes are version dependent, ensure then app version is included in the name. e.g. [grch38/star/2.7.11b/gencode47-101]  
+  - If indexes are version dependent, ensure the app version is included in the name. e.g. [grch38/star/2.7.11b/gencode47-101](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/star/2.7.11b/gencode47-101)
   - If indexes require building, ensure you have the `SBATCH` parameters set appropriately to allocate sufficient resources.
 - Always add environment variables using `#ENV:` and `#ENVNOTE:` to help users locate the reference data.
 
-Template: [build-template-ref]  
+Template: [build-template-ref](https://github.com/Justype/condatainer/blob/main/assets/build-template-ref)
 
 ### Tips
 
@@ -221,7 +221,7 @@ You can use `tar_xf_pigz` and `pigz_or_gunzip` functions to speed up decompressi
 
 ### Examples
 
-- [grch38/genome/ucsc_no_alt]  
-- [grch38/transcript-gencode/47]  
-- [grch38/star/2.7.11b/gencode47-101]  
-- [grcm39/salmon/1.10.2/gencodeM36]  
+- [grch38/genome/ucsc_no_alt](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/genome/ucsc_no_alt)
+- [grch38/transcript-gencode/47](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/transcript-gencode/47)
+- [grch38/star/2.7.11b/gencode47-101](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/star/2.7.11b/gencode47-101)
+- [grcm39/salmon/1.10.2/gencodeM36](https://github.com/Justype/condatainer/blob/main/build-scripts/grcm39/salmon/1.10.2/gencodeM36)
