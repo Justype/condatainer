@@ -153,6 +153,75 @@ Then you can go to your local web browser and access `http://localhost:8787`.
 
 Run the provided R command in the R console to open the project directly.
 
+## Use Conda to Manage R Packages
+
+It is highly recommended to use Conda (via `mm-install`) to install R packages whenever possible. They are pre-compiled.
+
+- CRAN packages: `mm-install r-<package_name>`
+- Bioconductor packages: `mm-install bioconductor-<package_name>`
+
+e.g.
+
+```bash
+# in the overlay using condatainer e
+
+# find available R packages in conda-forge/bioconda
+# Or go to https://anaconda.org
+mm-search r-presto
+
+# Install packages
+mm-install r-base=4.4 r-ggplot2 bioconductor-deseq2
+
+# Pin the R version to avoid accidental updates
+mm-pin r-base
+```
+
+## Install R Packages from Source
+
+```{note}
+Before installing R packages from source, please make sure the package is not available from conda-forge or bioconda.
+```
+
+If a package is only available from source (e.g., GitHub), you need `remotes`, `pak` or other package managers.
+
+I recommend using `pak`, it can tell which system libraries are required.
+
+```R
+mm-install r-pak
+```
+
+Then in R:
+
+```R
+pak::pkg_sysreqs("package_from_github")
+```
+
+If system libraries are missing, you need to update the `build-essential` def file used to create the overlay image. Or you can create your `additional-deps` overlay with the required system libraries. (ignore pandoc missing warning)
+
+see [Custom Apptainer Definition Files](../advanced_usage/condatainer_custom_def.md) for more details.
+
+After installing the `additional-deps` overlay, run `rstudio-server-helper` with the `-o` option:
+
+```bash
+rstudio-server-helper -o additional-deps
+```
+
+If you want to share your overlay with others, you should also provide the `def` file used to create it.
+
+## Run without RStudio Server
+
+If you only use R packages from Conda, you can run R directly without RStudio Server:
+
+```bash
+condatainer exec -o env.img Rscript your_script.R
+```
+
+If you have R packages built from GitHub or source, you need to load `build-essential` to avoid missing libraries:
+
+```bash
+condatainer exec -o build-essential -o env.img Rscript your_script.R
+```
+
 ## Change the default setting
 
 You can modify the default settings in the script, such as port number and overlay image path.

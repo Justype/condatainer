@@ -49,6 +49,12 @@ Which one to choose?
   VS Code Tunnel on HPC <tutorials/vscode-tunnel_on_HPC>
 
 .. toctree::
+  :caption: Advanced Usage:
+  :maxdepth: 1
+  
+  CondaTainer: Custom DEF <advanced_usage/condatainer_custom_def>
+
+.. toctree::
   :caption: FAQ:
   :maxdepth: 1
   :glob:
