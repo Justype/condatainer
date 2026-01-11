@@ -326,6 +326,9 @@ PATH_BLOCK="$MARKER_START
 if [[ \":\$PATH:\" != *\":$INSTALL_BIN:\"* ]]; then
     export PATH=\"$INSTALL_BIN:\$PATH\"
 fi
+if command -v condatainer >/dev/null 2>&1; then
+    source <(condatainer completion)
+fi
 $MARKER_END"
 
 update_config_block "$RC_FILE" "$MARKER_START" "$MARKER_END" "$PATH_BLOCK" "PATH"
