@@ -1,4 +1,4 @@
-# 🧩 Concepts: Modules
+# Concepts: 🧩 Modules
 
 **Modular, Reproducible, and Self-Contained Analysis Environments.**
 
@@ -43,6 +43,15 @@ Both tools utilize a standardized naming schema to organize software and referen
   - `grcm39/genome/gencode`: GRCm39 genome with Gencode style naming
   - `grcm39/salmon/1.10.2/gencodeM33`: salmon index for GRCm39 Gencode M33 transcripts
 
+#### Version Delimiter
+
+`/`, `--`, `=`, `@` are all accepted as version delimiters.
+
+To store the overlays in a folder, **CondaTainer** will normalize the overlay names by replacing `/` with `--` when creating the overlay files.
+
+For example, `salmon/1.10.2` will be stored as `condatainer_path/images/salmon--1.10.2.sqf`.
+
+So `--` should not be used in the names.
 
 ## 🐍 Leveraging Conda Resources
 
@@ -51,6 +60,22 @@ Thanks to `conda-forge` and `bioconda`, most bioinformatics software can be easi
 If a required package is not available in conda, custom build scripts can be created to compile and install the software from source.
 
 e.g. 10X `cellranger` and Illumina `orad`
+
+## 🤔 System or Project Level
+
+Both **ModGen** and **CondaTainer** support system-level management. Only **CondaTainer** supports project-level environments.
+
+The system-level here means those modules can be used across different projects. It can be user-wide, group-wide, or even system-wide depending on the installation path and permissions.
+
+For example, you want to analyze a bulk RNA-seq dataset.
+
+For the **upstream steps** (quality control, trimming, alignment, etc.), you can use **system-level** modules since these tools and references are commonly used across projects.
+
+For the **downstream steps** (differential expression, visualization), you may want to create a **project-level** environment to install specific R packages and dependencies without affecting other users or projects.
+
+```{note}
+For the upstream steps, you can use workflow managers like **Snakemake** or **Nextflow**.
+```
 
 ## 🔄 Workflow
 
