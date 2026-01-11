@@ -1547,7 +1547,7 @@ class CondaTainer_Exec:
         CondaTainer_Exec.parser_e.add_argument(
             "overlays",
             nargs="*",
-            help="Overlay files to mount (can be .sqf, .squashfs, or .img)"
+            help="Overlay files to mount (env.img if not provided)"
         )
 
     @staticmethod
@@ -1691,7 +1691,7 @@ class CondaTainer_Exec:
     def is_img_fakeroot(img_path: str) -> bool:
         """
         Use debugfs to check if the 'upper' directory inside the ext3/4 image file 
-        is owned by root (UID 0).
+        is owned by user whose UID is not equal to current user
         """
         if not img_path.endswith('.img') and not os.path.isfile(img_path):
             return False
@@ -1699,12 +1699,13 @@ class CondaTainer_Exec:
             cmd = ["debugfs", "-R", "stat upper", img_path]
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
             match = re.search(r"User:\s+(\d+)", result.stdout)
+            current_uid = os.getuid()
             if match:
                 uid = int(match.group(1))
-                return uid == 0
+                return uid == 0 or uid != current_uid
             return False
         except subprocess.CalledProcessError:
-            Utils.print_warning(f"Failed to check fakeroot status of image {img_path}. Assuming not fakeroot.")
+            Utils.print_warning(f"Failed to check fakeroot status of image {img_path}. Assuming fakeroot.")
             return False
 
     @staticmethod
@@ -1794,7 +1795,7 @@ class CondaTainer_Exec:
 
             if CondaTainer_Exec.is_img_writable:
                 if CondaTainer_Exec.is_img_fakeroot(last_img) and not is_fakeroot:
-                    Utils.print_warning(f"{Utils.blue_text(last_img)} was created with fakeroot, adding '--fakeroot'")
+                    Utils.print_warning(f"{Utils.blue_text(os.path.basename(last_img))}'s inner UID is different. --fakeroot added automatically")
                     fakeroot_param = [ "--fakeroot" ]
                 img_env.extend([
                     "--env", "CNT_CONDA_PREFIX=/ext3/env",
@@ -2499,10 +2500,42 @@ class CondaTainer_Overlay:
         target_gid = args.gid
         target_path = args.path
 
-        Utils.print_message(f"Changing ownership of {Utils.blue_text(target_path)} inside {Utils.yellow_text(os.path.basename(overlay_path))}")
-        Utils.print_message(f"Target UID: {target_uid}, Target GID: {target_gid}")
+        # Use debugfs fix hidden path (/upper, /work, /work/work) (or maybe <2> Root)
+        debugfs_bin = shutil.which("debugfs")
+        if not debugfs_bin:
+            for fallback in ["/sbin/debugfs", "/usr/sbin/debugfs"]:
+                if os.path.exists(fallback):
+                    debugfs_bin = fallback
+                    break
 
-        # We must use fakeroot to have permission to change ownership inside the container
+        if debugfs_bin:
+            cmds = []
+            critical_paths = ["/upper", "/work", "/work/work" ]
+            for path in critical_paths:
+                cmds.append(f"sif {path} uid {target_uid}")
+                cmds.append(f"sif {path} gid {target_gid}")
+
+            try:
+                debugfs_script = "\n".join(cmds)
+                
+                subprocess.run(
+                    [debugfs_bin, "-w", overlay_path],
+                    input=debugfs_script,
+                    text=True,
+                    check=True,
+                    stderr=subprocess.PIPE,
+                    stdout=subprocess.PIPE
+                )
+                Utils.print_success("Structural permissions fixed : /upper, /work, /work/work")
+
+            except subprocess.CalledProcessError as e:
+                err_msg = e.stderr.strip()
+                Utils.print_warning(f"Debugfs warning: {err_msg}")
+        else:
+            Utils.print_warning("'debugfs' not found in PATH or /sbin. Structural fix skipped.")
+
+        Utils.print_message(f"Changing recursive ownership of {Utils.blue_text(target_path)}...")
+        
         environ = Utils.get_exec_environ()
         cmd_chown = [
             Config.APPTAINER_BIN, "exec",
@@ -2512,14 +2545,11 @@ class CondaTainer_Overlay:
             "chown", "-R", f"{target_uid}:{target_gid}", target_path
         ]
 
-        Utils.print_debug(f"[OVERLAY] Running chown: {cmd_chown}")
-
         try:
             subprocess.run(cmd_chown, check=True, env=environ)
             Utils.print_success("Ownership changed successfully.")
         except subprocess.CalledProcessError as e:
             Utils.print_error(f"Failed to change ownership: {e}")
-            Utils.print_note("Ensure you have write permissions to the overlay file itself.")
 
 class CondaTainer_Apptainer:
     @staticmethod
@@ -2871,7 +2901,7 @@ _{script_name}_completion() {{
                                     _arguments \\
                                         '(-s --size)'{{-s,--size}}'[Size in MiB]:size' \\
                                         '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files' \\
-                                        '--fakeroot[Use fakeroot]' \\
+                                        '--fakeroot[fakeroot overlay (cannot be used without --fakeroot later)]' \\
                                         ':image:_files'
                                     ;;
                                 chown)
@@ -2889,7 +2919,7 @@ _{script_name}_completion() {{
                     _arguments \\
                         '(-s --size)'{{-s,--size}}'[Size in MiB]:size' \\
                         '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files' \\
-                        '--fakeroot[Use fakeroot]' \\
+                        '--fakeroot[fakeroot overlay (cannot be used without --fakeroot later)]' \\
                         ':image:_files'
                     ;;
                 create|install|i)
