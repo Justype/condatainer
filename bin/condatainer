@@ -1688,6 +1688,26 @@ class CondaTainer_Exec:
         return other_paths + img_paths
 
     @staticmethod
+    def is_img_fakeroot(img_path: str) -> bool:
+        """
+        Use debugfs to check if the 'upper' directory inside the ext3/4 image file 
+        is owned by root (UID 0).
+        """
+        if not img_path.endswith('.img') and not os.path.isfile(img_path):
+            return False
+        try:
+            cmd = ["debugfs", "-R", "stat upper", img_path]
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            match = re.search(r"User:\s+(\d+)", result.stdout)
+            if match:
+                uid = int(match.group(1))
+                return uid == 0
+            return False
+        except subprocess.CalledProcessError:
+            Utils.print_warning(f"Failed to check fakeroot status of image {img_path}. Assuming not fakeroot.")
+            return False
+
+    @staticmethod
     def get_overlay_env_notes(paths_or_name_version: List[str]) -> Dict[str, str]:
         notes = { }
         overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
@@ -1773,6 +1793,9 @@ class CondaTainer_Exec:
             ])
 
             if CondaTainer_Exec.is_img_writable:
+                if CondaTainer_Exec.is_img_fakeroot(last_img) and not is_fakeroot:
+                    Utils.print_warning(f"{Utils.blue_text(last_img)} was created with fakeroot, adding '--fakeroot'")
+                    fakeroot_param = [ "--fakeroot" ]
                 img_env.extend([
                     "--env", "CNT_CONDA_PREFIX=/ext3/env",
                 ])
