@@ -1,11 +1,11 @@
-# How to use vs code on HPC with CondaTainer 
+# Run VS Code Tunnel on HPC
 
 ## Checklist
 
-- [ ] [SLURM job scheduler is available on your HPC system](#slurm-job-scheduler)
-- [ ] [Have CondaTainer installed](#install-condatainer)
-- [ ] [Have a writable overlay image (optional)](#create-writable-overlay)
-- [ ] [Have the `vscode-tunnel-helper` in your PATH](#vs-code-tunnel-helper-script)
+- [SLURM job scheduler is available on your HPC system](#slurm-job-scheduler)
+- [Have CondaTainer installed](#install-condatainer)
+- [Have a writable overlay image (optional)](#create-writable-overlay)
+- [Have the `vscode-tunnel-helper` in your PATH](#vs-code-tunnel-helper-script)
 
 Then you can run:
 

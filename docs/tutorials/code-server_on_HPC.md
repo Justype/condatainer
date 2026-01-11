@@ -1,13 +1,13 @@
-# How to run code-server on HPC with CondaTainer env
+# Run code-server on HPC
 
 ## Checklist
 
-- [ ] [SLURM job scheduler is available on your HPC system](#slurm-job-scheduler)
-- [ ] [Have SSH port forwarding set up to the login node](#ssh-port-forwarding)
-- [ ] [Have CondaTainer installed](#install-condatainer)
-- [ ] [Have required overlay images created](#install-required-overlays)
-- [ ] [Have a writable overlay image (optional)](#create-writable-overlay)
-- [ ] [Have the `code-server-helper` in your PATH](#code-server-helper-script)
+- [SLURM job scheduler is available on your HPC system](#slurm-job-scheduler)
+- [Have SSH port forwarding set up to the login node](#ssh-port-forwarding)
+- [Have CondaTainer installed](#install-condatainer)
+- [Have required overlay images created](#install-required-overlays)
+- [Have a writable overlay image (optional)](#create-writable-overlay)
+- [Have the `code-server-helper` in your PATH](#code-server-helper-script)
 
 Then you can run:
 

@@ -1,12 +1,12 @@
-# How to run rstudio-server on remote server with CondaTainer env
+# Run rstudio-server on server
 
 ## Checklist
 
-- [ ] [Have SSH port forwarding set up to the remote server](#ssh-port-forwarding)
-- [ ] [Have CondaTainer installed](#install-condatainer)
-- [ ] [Have required overlay images created](#install-required-overlays)
-- [ ] [Have R installed in a writable overlay image](#create-r-writable-overlay)
-- [ ] [Have the `rstudio-server-helper-local` in your PATH](#rstudio-server-helper-script)
+- [Have SSH port forwarding set up to the remote server](#ssh-port-forwarding)
+- [Have CondaTainer installed](#install-condatainer)
+- [Have required overlay images created](#install-required-overlays)
+- [Have R installed in a writable overlay image](#create-r-writable-overlay)
+- [Have the `rstudio-server-helper-local` in your PATH](#rstudio-server-helper-script)
 
 Then you can run:
 

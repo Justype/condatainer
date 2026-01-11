@@ -1,13 +1,13 @@
-# How to run rstudio-server on HPC with CondaTainer env
+# Run rstudio-server on HPC
 
 ## Checklist
 
-- [ ] [SLURM job scheduler is available on your HPC system](#slurm-job-scheduler)
-- [ ] [Have SSH port forwarding set up to the login node](#ssh-port-forwarding)
-- [ ] [Have CondaTainer installed](#install-condatainer)
-- [ ] [Have required overlay images created](#install-required-overlays)
-- [ ] [Have R installed in a writable overlay image](#create-r-writable-overlay)
-- [ ] [Have the `rstudio-server-helper` in your PATH](#rstudio-server-helper-script)
+- [SLURM job scheduler is available on your HPC system](#slurm-job-scheduler)
+- [Have SSH port forwarding set up to the login node](#ssh-port-forwarding)
+- [Have CondaTainer installed](#install-condatainer)
+- [Have required overlay images created](#install-required-overlays)
+- [Have R installed in a writable overlay image](#create-r-writable-overlay)
+- [Have the `rstudio-server-helper` in your PATH](#rstudio-server-helper-script)
 
 Then you can run:
 
