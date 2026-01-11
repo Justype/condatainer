@@ -58,7 +58,7 @@ modgen init [-m] [-c]
 
 ## Naming Convention
 
-ModGen organizes modules into two specific categories. This structure dictates where files are installed and how modulefiles are generated.
+**ModGen** organizes modules into two specific categories. This structure dictates where files are installed and how modulefiles are generated.
 
 ### Application Overlays (App)
 
@@ -83,7 +83,7 @@ Used for reference datasets, genome assemblies, or indices.
 
 ## Create
 
-Create a new module. ModGen can build modules from existing build scripts (local/remote) or directly from Conda packages. It automatically generates the corresponding modulefile (Lua or Tcl) with appropriate PATH and environment variable settings.
+Create a new module. **ModGen** can build modules from existing build scripts (local/remote) or directly from Conda packages. It automatically generates the corresponding modulefile (Lua or Tcl) with appropriate PATH and environment variable settings.
 
 **Usage:**
 
@@ -97,8 +97,8 @@ modgen create [OPTIONS] [NAME_VERSIONS...]
 
 **Features**:
 
-- Automatic Fetching: If a build script is not found locally, ModGen attempts to fetch it from the remote repository.
-- Conda Fallback: If no build script exists, ModGen attempts to create the module by installing the package named name with version version from conda-forge or bioconda.
+- Automatic Fetching: If a build script is not found locally, **ModGen** attempts to fetch it from the remote repository.
+- Conda Fallback: If no build script exists, **ModGen** attempts to create the module by installing the package named name with version version from conda-forge or bioconda.
 - Metadata Parsing: Parses `#ENV` and `#ENVNOTE` tags from build scripts to inject environment variables and help text into the generated modulefile.
 
 ## Module Management (Avail, List, Remove)
@@ -181,7 +181,7 @@ modgen exec [OPTIONS] [COMMAND...]
 
 * `IN_CONDATINER=1`: Set when running the command.
 
-**Behavior**: ModGen performs a module purge followed by module load for the requested modules before running the command.
+**Behavior**: **ModGen** performs a module purge followed by module load for the requested modules before running the command.
 
 **Example:**
 
@@ -233,7 +233,7 @@ bcftools view input.vcf | head
 
 ## Update
 
-Updates the ModGen script itself to the latest version from the GitHub repository.
+Updates the **ModGen** script itself to the latest version from the GitHub repository.
 
 **Usage:**
 

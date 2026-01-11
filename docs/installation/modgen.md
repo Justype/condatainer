@@ -43,7 +43,7 @@ modgen avail
 
 To remove **ModGen** and the associated toolkit, follow these steps:
 
-If you want to remove both **CondaTainer** and **ModGen**, follow the [CondaTainer uninstallation instructions](condatainer.md#uninstallation).
+If you want to remove both **CondaTainer** and **ModGen**, follow the [CondaTainer uninstallation instructions](condatainer.md#-uninstallation).
 
 If you just want to remove **ModGen**, open your `~/.bashrc` or `~/.zshrc` file and remove the lines related to **ModGen**. Look for and delete the following block:
 

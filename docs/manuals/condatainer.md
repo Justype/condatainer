@@ -52,7 +52,7 @@ options:
 
 ## Naming Convention
 
-CondaTainer classifies overlays into three distinct categories based on their naming structure.
+**CondaTainer** classifies overlays into three distinct categories based on their naming structure.
 
 ### System Applications (Sys)
 
@@ -82,7 +82,7 @@ Used when creating a custom environment with a user-defined name (`create -p`, o
 
 ### Application Overlays (App)
 
-Used for standard software packages and tools managed by CondaTainer build scripts.
+Used for standard software packages and tools managed by **CondaTainer** build scripts.
 
 * **Format:** `name/version`
 * **Structure:**
@@ -104,9 +104,23 @@ Used for reference datasets, genome assemblies, or indices.
 > [!NOTE]
 > `--` is reserved for separating components in overlays. For example, `bcftools/1.22` overlay will be located at `images/bcftools--1.22.sqf`.
 
+### Rename or not to Rename?
+
+TL;DR: Do not rename `sqf` files. `img` files can be renamed.
+
+**CondaTainer** relies on the overlay names to determine mount points and environment variable settings. Renaming `.sqf` files can lead to inconsistencies and runtime errors.
+
+e.g.
+
+- `bcftools/1.22` is mounted at `/cnt/bcftools/1.22`
+- `grch38/gtf-gencode/47` is mounted at `/cnt/grch38/gtf-gencode/47`
+- `my_analysis_env.sqf` is mounted at `/cnt/my_analysis_env`
+
+For `.img` files, the mount point is always `/ext3/env`, so renaming is allowed.
+
 ## Mount Points
 
-CondaTainer supports two types of overlay files, each with specific purposes and mount locations inside the container.
+**CondaTainer** supports two types of overlay files, each with specific purposes and mount locations inside the container.
 
 ### SquashFS Overlays (.sqf)
 
@@ -207,7 +221,7 @@ condatainer overlay chown -u 1001 -g 1001 env.img
 
 ## Create
 
-Initialize and build a new CondaTainer SquashFS overlay. You can build from existing recipes (local/remote) or a Conda environment file.
+Initialize and build a new **CondaTainer** SquashFS overlay. You can build from existing recipes (local/remote) or a Conda environment file.
 
 **Usage:**
 
@@ -247,8 +261,8 @@ condatainer create -n tools.sqf samtools=1.16 bcftools=1.15
 
 **Features**:
 
-- Automatic Fetching: If a build script is not found locally, CondaTainer attempts to fetch it from the remote repository.
-- Conda Fallback: If no build script exists, CondaTainer attempts to create the module by installing the package named name with version version from conda-forge or bioconda.
+- Automatic Fetching: If a build script is not found locally, **CondaTainer** attempts to fetch it from the remote repository.
+- Conda Fallback: If no build script exists, **CondaTainer** attempts to create the module by installing the package named name with version version from conda-forge or bioconda.
 - Metadata Parsing: Parses `#ENV` and `#ENVNOTE` tags from build scripts to inject environment variables and help text into the generated modulefile.
 
 ## Container Management (Avail, List, Remove)
@@ -342,7 +356,7 @@ condatainer exec -o bcftools/1.22 bcftools --version
 
 ### Autoload and Bash completion
 
-- **Autoload local env images:** When running `condatainer e` in a directory that contains `env.img`, CondaTainer will automatically mount it into the container and open an interactive shell.
+- **Autoload local env images:** When running `condatainer e` in a directory that contains `env.img`, **CondaTainer** will automatically mount it into the container and open an interactive shell.
 - **Enable Bash completion on the host:** Generate and install the completion script for your shell. Example for Bash (per-user):
 
 Add the following to your `~/.bashrc`:
@@ -368,7 +382,7 @@ condatainer check [SCRIPT] [-a]
 
 ### Run
 
-Executes a script inside the CondaTainer environment, mounting dependencies defined in the script. Autosolves dependencies based on `#DEP:` tags and `module load` or `ml` commands within the script.
+Executes a script inside the **CondaTainer** environment, mounting dependencies defined in the script. Autosolves dependencies based on `#DEP:` tags and `module load` or `ml` commands within the script.
 
 ```
 condatainer run [SCRIPT] [SCRIPT_ARGS...]
@@ -391,7 +405,7 @@ bcftools view input.vcf | head
 
 ### CondaTainer is compatible with module systems
 
-CondaTainer will scan your script for `module load` or `ml` commands and mount the corresponding overlays automatically.
+**CondaTainer** will scan your script for `module load` or `ml` commands and mount the corresponding overlays automatically.
 
 **Example:**
 
@@ -429,7 +443,7 @@ condatainer info [OVERLAY]
 
 ## Apptainer
 
-Manages the local installation of Apptainer. If Apptainer is not found on the host system, CondaTainer can install it via Micromamba into a local directory. But this is not recommended, because it cannot build singularity `sif` images.
+Manages the local installation of Apptainer. If Apptainer is not found on the host system, **CondaTainer** can install it via Micromamba into a local directory. But this is not recommended, because it cannot build singularity `sif` images.
 
 **Usage:**
 
@@ -444,7 +458,7 @@ condatainer apptainer [-y] [-f]
 
 ## Update
 
-Updates the CondaTainer script itself to the latest version from the GitHub repository.
+Updates the **CondaTainer** script itself to the latest version from the GitHub repository.
 
 **Usage:**
 
