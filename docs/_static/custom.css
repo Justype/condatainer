@@ -24,3 +24,16 @@
 .wy-header .project {
   color: #222222 !important; /* dark text for readable contrast on light background */
 }
+
+/* GitHub header icon */
+.github-header-link {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  color: #111;
+  font-size: 20px;
+  text-decoration: none;
+  z-index: 2000;
+}
+.github-header-link:hover { color: #000; }
+.github-header-link .sr-only { position: absolute; left: -9999px; }

@@ -13,4 +13,5 @@ python:
 sphinx:
   configuration: docs/conf.py
 
-formats: [html]
+# Valid formats are: htmlzip, pdf, epub
+formats: ['htmlzip']

@@ -47,6 +47,15 @@ html_theme_options = {
     'navigation_depth': 4,
 }
 
+# Add GitHub repository info so the theme can link to the project
+html_context = {
+    'display_github': True,  # Integrate 'Edit on GitHub' links
+    'github_user': 'Justype',
+    'github_repo': 'condatainer',
+    'github_version': 'main',
+    'conf_py_path': '/docs/',
+}
+
 # Custom CSS
 html_css_files = [
     'custom.css',
