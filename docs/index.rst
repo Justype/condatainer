@@ -1,7 +1,7 @@
 CondaTainer
 =========================
 
-**CondaTainer** is a tool to create and manage lightweight, portable container-like environments using Conda and overlay filesystems. It is designed for use on HPC systems where traditional container technologies may not be available.
+`CondaTainer <https://github.com/Justype/condatainer>`_ is a tool to create and manage lightweight, portable container-like environments using Conda and overlay filesystems. It is designed for use on HPC systems where traditional container technologies may not be available.
 
 By encapsulating Conda environments within **Apptainer/Singularity overlay files**, CondaTainer solves the "small file problem" common on HPC parallel file systems (Lustre/GPFS) while preserving the flexibility of a writable environment.
 
