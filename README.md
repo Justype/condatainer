@@ -1,5 +1,7 @@
 # CondaTainer & ModGen
 
+[![Read the Docs](https://readthedocs.org/projects/condatainer/badge/?version=latest)](https://condatainer.readthedocs.io/en/latest/) [![GitHub Release](https://img.shields.io/github/v/release/Justype/condatainer)](https://github.com/Justype/condatainer/releases)
+
 <div>
 <a href="#-condatainer"><img src="assets/logo_cnt.png" height="100" alt="CondaTainer Logo"></a>
 &nbsp;&nbsp;
@@ -17,7 +19,7 @@ Which one to choose?
 - If you want rstudio-server, igv, and other tools on HPC, use [**CondaTainer**](#-condatainer).
 - If you prefer Lmod and using system available modules, use [**ModGen**](README_MG.md).
 
-[CondaTainer Tutorials](./docs/tutorials/README.md) to manage project env, run rstudio-server, code-server, and more on HPC.
+Please go to [Read the Docs](https://condatainer.readthedocs.io/en/latest/) for the full documentation, including installation guides, user manuals, and tutorials.
 
 ## 🛠️ Installation
 
@@ -29,13 +31,11 @@ The installation script is **interactive**. You will be prompted to confirm the 
 
 ## 📦 CondaTainer
 
-**CondaTainer** solves the "too many files" problem inherent to Conda environments: instead of creating thousands of small files, it packs Conda environments into single, highly-compressed SquashFS files (`.sqf`) and mounts them inside an Apptainer container.
+**CondaTainer** solves the "too many files" problem inherent to Conda environments: it packs Conda environments into single, highly-compressed SquashFS files and mounts them inside an Apptainer container.
 
 - **Inode Efficiency**: Compresses heavy conda environments (10k+ files) into 1 file.
 - **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
-- **Module Compatibility**: Recognizes `module load` commands and loads corresponding overlays.
 - **Hybrid Modes**: Supports read-only (`.sqf`) for production and writable (`.img`) for development.
-- **Context-Aware**: Manages references/indexes, and displays helpful info when in interactive sessions.
 - **SLURM Integration**: Submits index generation jobs automatically when needed.
 
 ```bash
@@ -48,11 +48,11 @@ condatainer exec -o samtools/1.16 samtools --version
 # 3. List available recipes (local & remote)
 condatainer avail
 
-# 4. Create a custom environment from a YAML file
+# 4. Create a read-only environment from a YAML file
 condatainer create -f environment.yml -p my_analysis
 
-# 5. Create a writable image
-condatainer overlay create -f environment.yml --size 10240 my_analysis_dev.img
+# 5. Create a writable image for development
+condatainer overlay create -s 10240 dev.img
 
 # 6. Automatically install the dependencies
 condatainer check analysis.sh -a
@@ -66,44 +66,14 @@ condatainer exec -o grch38--cellranger--2024-A bash
 #   STAR_INDEX_DIR    : STAR index dir
 ```
 
-[Read the full CondaTainer Manual](./docs/manuals/condatainer.md)
+- 📜 [Read the full CondaTainer Manual](./docs/manuals/condatainer.md)
+- 📁 [Naming Conventions](./docs/user_guide/concepts.md#-naming-convention)
 
-## 📂 Naming Convention
+## 🚀 Automation
 
-**CondaTainer** utilizes a standardized naming schema to organize software and reference data.
-
-- System Apps: `name` (e.g., `rstudio-server`, created by `name` or `-n name` flag)
-- Project Env: `name` (e.g., `env`, `sci_rna`, created by `-p prefix` flag)
-- Apps: `name/version` (e.g., `bcftools/1.16`)
-- References: `assembly/datatype/version`
-  - `grcm39/genome/gencode`: GRCm39 genome with Gencode style naming
-  - `grcm39/salmon/1.10.2/gencodeM33`: salmon index for GRCm39 Gencode M33 transcripts
-
-> [!NOTE]
-> Overlay names are used to identify environments. They should not be changed after creation.
-
-## 🚀 Script Runtime Automation
-
-**CondaTainer** supports a "Headless" mode. You can define dependencies in scripts using tags.
+**CondaTainer** supports inline dependency declaration, allowing you to define requirements directly within your scripts using tags
 
 Example Script (`analysis.sh`):
-
-```bash
-#!/bin/bash
-#DEP: salmon/1.10.2
-#DEP: grcm39/salmon/1.10.2/gencodeM33
-
-salmon quant -i $SALMON_INDEX_DIR ...
-```
-
-In shell or other scripts
-
-```bash
-# Run with CondaTainer
-condatainer run analysis.sh
-```
-
-Integration with SLURM:
 
 ```bash
 #!/bin/bash
@@ -112,12 +82,24 @@ Integration with SLURM:
 #SBATCH --mem=1GB
 #DEP:samtools/1.22.1
 
-if [ -z "$IN_CONDATINER" ]; then
+if [ -z "$IN_CONDATINER" ] && command -v condatainer >/dev/null 2>&1; then
     condatainer run "$0" "$@"
     exit $?
 fi
 
 samtools --version
+```
+
+First check and install missing dependencies:
+
+```bash
+condatainer check analysis.sh -a
+```
+
+Then use sbatch as usual:
+
+```bash
+sbatch analysis.sh
 ```
 
 ## 🔗 Links & Resources

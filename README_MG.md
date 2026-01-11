@@ -34,19 +34,12 @@ ml grch38/cellranger/2024-A
 #   STAR_INDEX_DIR     (STAR index dir)
 ```
 
-[Read the full ModGen Manual](./docs/manuals/modgen.md)
+- 📜 [Read the full ModGen Manual](./docs/manuals/modgen.md)
+- 📁 [Naming Conventions](./docs/user_guide/concepts.md#-naming-convention)
+
 
 > [!NOTE]
 > Make sure to initialize shell by running `modgen init` once. Then source your shell configuration file (e.g., `source ~/.bashrc`).
-
-## 📂 Naming Convention
-
-**ModGen** utilizes a standardized naming schema to organize software and reference data.
-
-- Apps: `name/version` (e.g., `bcftools/1.16`)
-- References: `assembly/datatype/version`
-  - `grcm39/genome/gencode`: mouse genome GRCm39 with Gencode style naming
-  - `grcm39/salmon/1.10.2/gencodeM33`: salmon index for mouse genome GRCm39 with Gencode M33 annotation
 
 ## 🚀 Dependencies Automation
 
