@@ -2,17 +2,17 @@
 
 🏭 **ModGen** is a tool designed to automate the creation of **Lmod/Environment Modules** on HPC systems. It is ideal for users who prefer working with existing system-available modules rather than isolated containers.
 
-But you cannot run rstudio-server, code-server using ModGen. For those use cases, please use [CondaTainer](condatainer.md).
+But you cannot run rstudio-server, code-server using **ModGen**. For those use cases, please use [CondaTainer](condatainer.md).
 
 ## 🛠️ Quick Installation
 
-ModGen is installed as part of the CondaTainer toolkit. To install it, run the following interactive script in your terminal:
+**ModGen** is installed as part of the **CondaTainer** toolkit. To install it, run the following interactive script in your terminal:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash -s -- -m
 ```
 
-If you want to install both CondaTainer and ModGen, simply run the installation script with `-a`:
+If you want to install both **CondaTainer** and **ModGen**, simply run the installation script with `-a`:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash -s -- -a
@@ -41,11 +41,11 @@ modgen avail
 
 ## 🗑️ Uninstallation
 
-To remove ModGen and the associated toolkit, follow these steps:
+To remove **ModGen** and the associated toolkit, follow these steps:
 
-If you want to remove both CondaTainer and ModGen, follow the [CondaTainer uninstallation instructions](condatainer.md#uninstallation).
+If you want to remove both **CondaTainer** and **ModGen**, follow the [CondaTainer uninstallation instructions](condatainer.md#uninstallation).
 
-If you just want to remove ModGen, open your `~/.bashrc` or `~/.zshrc` file and remove the lines related to ModGen. Look for and delete the following block:
+If you just want to remove **ModGen**, open your `~/.bashrc` or `~/.zshrc` file and remove the lines related to **ModGen**. Look for and delete the following block:
 
 ```bash
 # >>> MODGEN MODULES >>>
@@ -53,7 +53,7 @@ modgen configs
 # <<< MODGEN MODULES <<<
 ```
 
-And remove the ModGen executable and the modules directory.
+And remove the **ModGen** executable and the modules directory.
 
 ```bash
 INSTALL_DIR="$SCRATCH/condatainer"  # or your custom installation path

@@ -8,7 +8,7 @@
 
 ## 🛠️ Quick Installation
 
-To install CondaTainer, run the following interactive script in your terminal:
+To install **CondaTainer**, run the following interactive script in your terminal:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash
@@ -46,10 +46,10 @@ source <(condatainer completion)
 
 ## 🗑️ Uninstallation
 
-If you need to remove CondaTainer from your system, you can do so by reversing the steps taken during the interactive installation.
+If you need to remove **CondaTainer** from your system, you can do so by reversing the steps taken during the interactive installation.
 
-1.  **Remove the Installation Directory**: Delete the folder where CondaTainer was installed. eg. `rm -r $SCRATCH/condatainer/`
-2.  **Clean Up Shell Configuration**: Open your `~/.bashrc` or `~/.zshrc` file and remove the lines related to CondaTainer. And find and remove the following lines:
+1.  **Remove the Installation Directory**: Delete the folder where **CondaTainer** was installed. eg. `rm -r $SCRATCH/condatainer/`
+2.  **Clean Up Shell Configuration**: Open your `~/.bashrc` or `~/.zshrc` file and remove the lines related to **CondaTainer**. And find and remove the following lines:
 
 ```bash
 # >>> CONDATAINER >>>
@@ -57,7 +57,7 @@ condatainer configs
 # <<< CONDATAINER <<<
 ```
 
-If you also have ModGen installed, make sure you also remove the ModGen related lines.
+If you also have **ModGen** installed, make sure you also remove the **ModGen** related lines.
 
 ```bash
 # >>> MODGEN MODULES >>>
