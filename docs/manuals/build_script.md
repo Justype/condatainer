@@ -46,9 +46,9 @@ Used for reference datasets, genome assemblies, or indices.
 
 ### Example
 
-- [cellranger/9.0.1](../build-scripts/cellranger/9.0.1) (App)
-- [grch38/cellranger/2024-A](../build-scripts/grch38/cellranger/2024-A) (Ref)
-- [grch38/star/2.7.11b/gencode47-101](../build-scripts/grch38/star/2.7.11b/gencode47-101) (Ref)
+- [cellranger/9.0.1]   (App)
+- [grch38/cellranger/2024-A]   (Ref)
+- [grch38/star/2.7.11b/gencode47-101]   (Ref)
 
 ## Available Variables
 
@@ -71,7 +71,7 @@ Used for reference datasets, genome assemblies, or indices.
 
 Headers are special comments at the beginning of build scripts that provide metadata and instructions for CondaTainer.
 
-**Example Header**: [star/2.7.11b/gencode47-101](../build-scripts/grch38/star/2.7.11b/gencode47-101)
+**Example Header**: [star/2.7.11b/gencode47-101]  
 
 ```bash
 #!/usr/bin/bash
@@ -183,7 +183,7 @@ For tool-specific references, use the tool name as a prefix.
 #INTERACTIVE:⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.\nhttps://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
 ```
 
-from [cellranger/9.0.1](../build-scripts/cellranger/9.0.1)
+from [cellranger/9.0.1]  
 
 ## Apps
 
@@ -192,28 +192,28 @@ from [cellranger/9.0.1](../build-scripts/cellranger/9.0.1)
   - HPC systems often lack required build tools or dependencies unless you load specific modules.
   - To maximize compatibility (CondaTainer and ModGen), it's better to rely on pre-compiled packages.
 
-Template: [build-template-app](../assets/build-template-app)
+Template: [build-template-app]  
 
 ### Tips
 
 You can use `tar_xf_pigz` and `pigz_or_gunzip` functions to speed up decompression of large files if `pigz` is available on your system.
 
-If the app requires specific environment variables to function properly, make sure to add them using `#ENV:` and `#ENVNOTE:` tags. e.g. [orad/2.7.0](../build-scripts/orad/2.7.0)
+If the app requires specific environment variables to function properly, make sure to add them using `#ENV:` and `#ENVNOTE:` tags. e.g. [orad/2.7.0]  
 
 ### Examples
 
-- [cellranger/9.0.1](../build-scripts/cellranger/9.0.1)
-- [orad/2.7.0](../build-scripts/orad/2.7.0)
+- [cellranger/9.0.1]  
+- [orad/2.7.0]  
 
 ## References
 
 - References often require downloading large files from external sources.
 - Indexes may need to be built using specific versions of software.
-  - If indexes are version dependent, ensure then app version is included in the name. e.g. [grch38/star/2.7.11b/gencode47-101](../build-scripts/grch38/star/2.7.11b/gencode47-101)
+  - If indexes are version dependent, ensure then app version is included in the name. e.g. [grch38/star/2.7.11b/gencode47-101]  
   - If indexes require building, ensure you have the `SBATCH` parameters set appropriately to allocate sufficient resources.
 - Always add environment variables using `#ENV:` and `#ENVNOTE:` to help users locate the reference data.
 
-Template: [build-template-ref](../assets/build-template-ref)
+Template: [build-template-ref]  
 
 ### Tips
 
@@ -221,7 +221,7 @@ You can use `tar_xf_pigz` and `pigz_or_gunzip` functions to speed up decompressi
 
 ### Examples
 
-- [grch38/genome/ucsc_no_alt](../build-scripts/grch38/genome/ucsc_no_alt)
-- [grch38/transcript-gencode/47](../build-scripts/grch38/transcript-gencode/47)
-- [grch38/star/2.7.11b/gencode47-101](../build-scripts/grch38/star/2.7.11b/gencode47-101)
-- [grcm39/salmon/1.10.2/gencodeM36](../build-scripts/grcm39/salmon/1.10.2/gencodeM36)
+- [grch38/genome/ucsc_no_alt]  
+- [grch38/transcript-gencode/47]  
+- [grch38/star/2.7.11b/gencode47-101]  
+- [grcm39/salmon/1.10.2/gencodeM36]  

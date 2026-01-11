@@ -36,7 +36,7 @@ module load grch38/cellranger/2024-A
 
 ## 🚀 Dependencies Automation
 
-ModGen can recognize both `#DEP:` tags and `module load` commands to automatically install required modules.
+**ModGen** can recognize both `#DEP:` tags and `module load` commands to automatically install required modules.
 
 Example Script (`analysis.sh`):
 
@@ -52,7 +52,7 @@ salmon quant -i $SALMON_INDEX_DIR ...
 Check and auto install dependencies:
 
 ```bash
-# Print modules and install status
+# Print dependencies and install status
 modgen check analysis.sh
 
 # Auto install missing modules
@@ -125,3 +125,4 @@ sbatch cellranger_quant.sh
 ## 🔗 Related Resources
 
 - [ModGen Installation](../installation/modgen.md)
+- [ModGen Manual](../manuals/modgen.md)

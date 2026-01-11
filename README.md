@@ -66,7 +66,7 @@ condatainer exec -o grch38--cellranger--2024-A bash
 #   STAR_INDEX_DIR    : STAR index dir
 ```
 
-[Read the full CondaTainer Manual](docs/MANUAL_CNT.md)
+[Read the full CondaTainer Manual](./docs/manuals/condatainer.md)
 
 ## 📂 Naming Convention
 

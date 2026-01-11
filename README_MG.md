@@ -34,7 +34,7 @@ ml grch38/cellranger/2024-A
 #   STAR_INDEX_DIR     (STAR index dir)
 ```
 
-[Read the full ModGen Manual](docs/MANUAL_MG.md)
+[Read the full ModGen Manual](./docs/manuals/modgen.md)
 
 > [!NOTE]
 > Make sure to initialize shell by running `modgen init` once. Then source your shell configuration file (e.g., `source ~/.bashrc`).

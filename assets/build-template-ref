@@ -7,7 +7,7 @@
 #DEP:grch38/genome/ucsc_no_alt
 
 ## In env $app_root is a placeholder for the actual installation path
-## Please check the MANUAL_BUILD_SCRIPT.md for env naming conventions
+## Please check the docs/manuals/build_script.md for env naming conventions
 #ENV:BOWTIE2_PREFIX=$app_root/GRCh38_no_alt_analysis_set
 #ENVNOTE:GRCh38 reference genome
 
