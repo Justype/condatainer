@@ -44,8 +44,8 @@ def get_local_build_scripts():
             relative_key = os.path.relpath(full_path, BUILD_SCRIPTS_DIR)
 
             if relative_key.endswith('.def'):
-                if relative_key.startswith('base_image'):
-                    continue  # skip base_image scripts
+                if relative_key.startswith(('base_image', 'base-overlay')):
+                    continue  # skip base scripts
                 relative_key = relative_key[:-4]  # remove .def suffix
             
             packages[relative_key] = full_path

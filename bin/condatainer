@@ -266,8 +266,8 @@ class Utils:
                 relative_key = os.path.relpath(full_path, Config.BUILD_SCRIPTS_DIR)
 
                 if relative_key.endswith('.def'):
-                    if relative_key.startswith('base_image'):
-                        continue  # skip base_image scripts
+                    if relative_key.startswith(('base_image', 'base-overlay')):
+                        continue  # skip base scripts
                     relative_key = relative_key[:-4]  # remove .def suffix
 
                 packages[relative_key] = full_path
@@ -1296,6 +1296,9 @@ class BuildGraph:
             return False
         if not self._run_sbatch_step():
             return False
+        # Check if any apptainer jobs
+        if any(bo.is_def for bo in self.build_metadata):
+            Utils.print_note("Apptainer is used. You can run " + Utils.blue_text('apptainer cache clean') + " to free up space.")
         return True
 
     def _run_local_step(self) -> bool:
@@ -1564,7 +1567,8 @@ class CondaTainer_Create:
             Utils.print_error(f"Failed to create BuildObject from source {source}.")
             return False
 
-        return build_obj.build()
+        build_graph = BuildGraph([build_obj])
+        return build_graph.run()
 
 class CondaTainer_Exec:
     is_img_writable = False
