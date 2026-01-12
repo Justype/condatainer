@@ -322,7 +322,7 @@ class Utils:
             for line in f:
                 if line.startswith("#DEP:"):
                     dep_line = line[len("#DEP:"):].strip()
-                    if dep_line.endswith((".sqf", ".img", ".squashfs")):
+                    if Utils.is_overlay(dep_line):
                         dependencies.append(dep_line)
                     else:
                         dependencies.append(Utils.normalize_name_version(dep_line))
@@ -509,6 +509,18 @@ class Utils:
         return (shutil.which("sbatch") is not None) and ("SLURM_JOB_ID" not in os.environ)
 
     @staticmethod
+    def is_sqf(path: str) -> bool:
+        return path.endswith((".sqf", ".sqsh", ".squashfs"))
+
+    @staticmethod
+    def is_img(path: str) -> bool:
+        return path.endswith((".img"))
+
+    @staticmethod
+    def is_overlay(path: str) -> bool:
+        return Utils.is_img(path) or Utils.is_sqf(path)
+
+    @staticmethod
     def get_exec_environ() -> Dict[str, str]:
         """
         Get environment variables for apptainer exec commands.
@@ -671,13 +683,13 @@ class CondaTainer:
         if not os.path.isdir(Config.IMAGES_DIR):
             return overlays
 
-        overlay_files = [f for f in os.listdir(Config.IMAGES_DIR) if f.endswith(('.sqf', '.img', '.squashfs'))]
+        overlay_files = [f for f in os.listdir(Config.IMAGES_DIR) if Utils.is_overlay(f)]
         for overlay in overlay_files:
             name_version = os.path.splitext(overlay)[0]
             name_version = name_version.replace("--", "/")
             overlays[name_version] = os.path.join(Config.IMAGES_DIR, overlay)
 
-        ref_overlay_files = [f for f in os.listdir(Config.REF_IMAGES_DIR) if f.endswith(('.sqf', '.img', '.squashfs'))]
+        ref_overlay_files = [f for f in os.listdir(Config.REF_IMAGES_DIR) if Utils.is_overlay(f)]
         for overlay in ref_overlay_files:
             name_version = os.path.splitext(overlay)[0]
             name_version = name_version.replace("--", "/")
@@ -686,7 +698,7 @@ class CondaTainer:
 
     @staticmethod
     def is_overlay_installed(name_version_or_path: str) -> bool:
-        if name_version_or_path.endswith(('.sqf', '.img', '.squashfs')):
+        if Utils.is_overlay(name_version_or_path):
             return os.path.isfile(name_version_or_path)
         installed_overlays = CondaTainer.get_installed_overlays().keys()
         return name_version_or_path in installed_overlays
@@ -696,7 +708,7 @@ class CondaTainer:
         missing = []
         installed_overlays = CondaTainer.get_installed_overlays().keys()
         for nv in name_versions_or_paths:
-            if nv.endswith(('.sqf', '.img', '.squashfs')):
+            if Utils.is_overlay(nv):
                 if not os.path.isfile(nv):
                     missing.append(nv)
             elif nv not in installed_overlays:
@@ -1634,7 +1646,7 @@ class CondaTainer_Exec:
         if not args.keep and not args.overlays and args.commands:
             Utils.print_debug("[EXEC] Parsing commands to separate overlays and command...")
             for command in args.commands:
-                if command.endswith(('.sqf', '.img', '.squashfs')):
+                if Utils.is_overlay(command):
                     overlay_final.append(command)
                 elif Utils.normalize_name_version(command) in installed_overlays:
                     Utils.print_warning(f"Convert command {Utils.yellow_text(command)} to overlay")
@@ -1648,7 +1660,7 @@ class CondaTainer_Exec:
         command_final = command_final if command_final else ["bash"]
 
         for i in range(len(overlay_final)):
-            if not overlay_final[i].endswith(('.sqf', '.img', '.squashfs')):
+            if not Utils.is_overlay(overlay_final[i]):
                 overlay_final[i] = installed_overlays.get(Utils.normalize_name_version(overlay_final[i]), overlay_final[i])
             if not os.path.isfile(overlay_final[i]):
                 Utils.print_error(f"Overlay file {overlay_final[i]} not found.")
@@ -1668,13 +1680,13 @@ class CondaTainer_Exec:
         installed_overlays = CondaTainer.get_installed_overlays()
 
         for i in range(len(overlay_final)):
-            if not overlay_final[i].endswith(('.sqf', '.img', '.squashfs')):
+            if not Utils.is_overlay(overlay_final[i]):
                 overlay_final[i] = installed_overlays.get(Utils.normalize_name_version(overlay_final[i]), overlay_final[i])
             if not os.path.isfile(overlay_final[i]):
                 Utils.print_error(f"Overlay file {overlay_final[i]} not found.")
                 exit(1)
 
-        if all(not o.endswith('.img') for o in overlay_final) and not args.no_autoload:
+        if all(not Utils.is_img(o) for o in overlay_final) and not args.no_autoload:
             pwd = os.getcwd()
             local_env_path = os.path.join(pwd, "env.img")
             if os.path.isfile(local_env_path):
@@ -1691,7 +1703,7 @@ class CondaTainer_Exec:
             return overlay_abs_paths
         for path in paths_or_name_version:
             # If it's an actual file path (exists or looks like a file), handle that first
-            if path.endswith((".sqf", ".img", ".squashfs")):
+            if Utils.is_overlay(path):
                 if os.path.isfile(path):
                     overlay_abs_paths.append(os.path.abspath(path))
                     continue
@@ -1748,14 +1760,14 @@ class CondaTainer_Exec:
     @staticmethod
     def only_allow_one_img(paths_or_name_version: List[str]) -> bool:
         overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
-        n_img = len([o for o in overlay_abs_paths if o.endswith('.img')])
+        n_img = len([o for o in overlay_abs_paths if Utils.is_img(o)])
         return n_img <= 1
 
     @staticmethod
     def put_img_to_last(paths_or_name_version: List[str]) -> List[str]:
         overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
-        img_paths = [o for o in overlay_abs_paths if o.endswith('.img')]
-        other_paths = [o for o in overlay_abs_paths if not o.endswith('.img')]
+        img_paths = [o for o in overlay_abs_paths if Utils.is_img(o)]
+        other_paths = [o for o in overlay_abs_paths if not Utils.is_img(o)]
         return other_paths + img_paths
 
     @staticmethod
@@ -1764,7 +1776,7 @@ class CondaTainer_Exec:
         Use debugfs to check if the 'upper' directory inside the ext3/4 image file 
         is owned by user whose UID is not equal to current user
         """
-        if not img_path.endswith('.img') and not os.path.isfile(img_path):
+        if not Utils.is_img(img_path) and not os.path.isfile(img_path):
             return False
         try:
             cmd = ["debugfs", "-R", "stat upper", img_path]
@@ -1805,9 +1817,9 @@ class CondaTainer_Exec:
             name = os.path.basename(path)
             name = os.path.splitext(name)[0]  # Remove extension
             name = name.replace("=", "/").replace("--", "/")
-            if path.endswith(".img"):
+            if Utils.is_img(path):
                 relative_path = "/ext3/env/bin"
-            elif path.endswith((".sqf", ".squashfs")):
+            elif Utils.is_sqf(path):
                 relative_path = f"/cnt/{name}/bin"
             else:
                 Utils.print_warning(f"Unknown overlay file extension for {path}. Skipping PATH addition.")
@@ -1820,7 +1832,7 @@ class CondaTainer_Exec:
         mounts = []
         overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
         for op in overlay_abs_paths:
-            if CondaTainer_Exec.is_img_writable and op.endswith(".img"):
+            if CondaTainer_Exec.is_img_writable and Utils.is_img(op):
                 Utils.print_debug(f"[EXEC] Making overlay {Utils.blue_text(op)} writable.")
                 mounts.extend(["--overlay", op])
             else:
@@ -1848,7 +1860,7 @@ class CondaTainer_Exec:
         img_env = []
         if paths_or_name_versions:
             for o in paths_or_name_versions:
-                if o.endswith('.img'):
+                if Utils.is_img(o):
                     last_img = o
 
         if last_img is not None:
@@ -2072,7 +2084,7 @@ class CondaTainer_List:
             args.terms = [Utils.normalize_name_version(term) for term in args.terms]
 
         if os.path.isdir(Config.IMAGES_DIR):
-            overlay_files = [f for f in os.listdir(Config.IMAGES_DIR) if f.endswith(('.sqf', '.img', '.squashfs'))]
+            overlay_files = [f for f in os.listdir(Config.IMAGES_DIR) if Utils.is_overlay(f)]
             name_versions_dict = {}
             for overlay in overlay_files:
                 name_version = os.path.splitext(overlay)[0]
@@ -2100,7 +2112,7 @@ class CondaTainer_List:
         if os.path.isdir(Config.REF_IMAGES_DIR):
             ref_overlay_files = [
                 f for f in os.listdir(Config.REF_IMAGES_DIR) 
-                    if f.endswith(('.sqf', '.img', '.squashfs')) and 
+                    if Utils.is_overlay(f) and 
                     all(re.search(re.escape(term), f, re.IGNORECASE) for term in args.terms)]
             if ref_overlay_files:
                 print("Available reference overlays:")
@@ -2267,7 +2279,7 @@ class CondaTainer_Info:
 
         print(f"Information for {Utils.yellow_text(os.path.basename(overlay_path))}:")
         # Additional info can be added here, e.g., size, creation date, etc.
-        print(f"Writable: {'Yes' if overlay_path.endswith('.img') else 'No'}")
+        print(f"Writable: {'Yes' if Utils.is_img(overlay_path) else 'No'}")
 
         file_size = os.path.getsize(overlay_path)
         if file_size < 1024:
@@ -2292,11 +2304,11 @@ class CondaTainer_Info:
         else:
             print("Last modified: Not available")
 
-        if overlay_path.endswith((".sqf", ".squashfs")):
+        if Utils.is_sqf(overlay_path):
             name = os.path.splitext(os.path.basename(overlay_path))[0]
             name = name.replace('--', '/').replace('=', '/')
             print(f"Potential mount path: {Utils.blue_text('/cnt/' + name)}")
-        elif overlay_path.endswith(".img"):
+        elif Utils.is_img(overlay_path):
             name = os.path.splitext(os.path.basename(overlay_path))[0]
             name = name.replace('--', '/').replace('=', '/')
             print(f"Potential mount path: {Utils.blue_text('/ext3/env')}")
@@ -2448,7 +2460,7 @@ class CondaTainer_Run:
 
             Utils.print_message("Attempting to auto-install missing dependencies...")
             for md in missing_deps:
-                if md.endswith(('.sqf', '.img', '.squashfs')):
+                if Utils.is_overlay(md):
                     Utils.print_error(f"Custom overlay {Utils.yellow_text(md)} is missing. Cannot proceed with auto-installation.")
                     return
 
@@ -2576,19 +2588,19 @@ class CondaTainer_Overlay:
         is_fakeroot = args.fakeroot
         fakeroot_arg = [ "--fakeroot" ] if is_fakeroot else []
 
-        if not overlay_path.endswith(".img"):
+        if not Utils.is_img(overlay_path):
             if '.' in os.path.basename(overlay_path):
                 Utils.print_error("Overlay image must have a .img extension.")
                 return
             overlay_path += ".img"
 
         if os.path.isfile(overlay_path) or os.path.isdir(overlay_path):
-            Utils.print_error(f"Path {overlay_path} already exists.")
+            Utils.print_error(f"Path {Utils.blue_text(overlay_path)} already exists.")
             return
 
         if args.file:
             if not os.path.isfile(args.file):
-                Utils.print_error(f"Conda env file {args.file} not found.")
+                Utils.print_error(f"Conda env file {Utils.blue_text(args.file)} not found.")
                 return
 
         Utils.print_message(f"Creating overlay image at {Utils.blue_text(overlay_path)} with size {Utils.yellow_text(str(size_mib) + ' MiB')}...")
