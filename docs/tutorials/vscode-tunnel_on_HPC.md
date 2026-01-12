@@ -181,10 +181,10 @@ You can use editors like `vim` or `nano` to change these values.
 or use `sed`
 
 ```bash
-sed -i 's/NCPUS=4/NCPUS=8/' vscode-tunnel-helper
-sed -i 's/MEM=16G/MEM=64G/' vscode-tunnel-helper
-sed -i 's/TIME=12:00:00/TIME=24:00:00/' vscode-tunnel-helper
-sed -i 's/AUTH="microsoft"/AUTH="github"/' vscode-tunnel-helper
+sed -i 's/NCPUS=4/NCPUS=8/' $HOME/bin/vscode-tunnel-helper
+sed -i 's/MEM=16G/MEM=64G/' $HOME/bin/vscode-tunnel-helper
+sed -i 's/TIME=12:00:00/TIME=24:00:00/' $HOME/bin/vscode-tunnel-helper
+sed -i 's/AUTH="microsoft"/AUTH="github"/' $HOME/bin/vscode-tunnel-helper
 ```
 
 ## Common Issues

@@ -205,11 +205,11 @@ You can use editors like `vim` or `nano` to change these values.
 or use `sed`
 
 ```bash
-sed -i 's/NCPUS=4/NCPUS=8/' code-server-helper
-sed -i 's/MEM=32G/MEM=64G/' code-server-helper
-sed -i 's/TIME=12:00:00/TIME=24:00:00/' code-server-helper
-sed -i 's/PORT=8080/PORT=13182/' code-server-helper
-sed -i 's/AUTH="none"/AUTH="your_password"/' code-server-helper
+sed -i 's/NCPUS=4/NCPUS=8/' $HOME/bin/code-server-helper
+sed -i 's/MEM=32G/MEM=64G/' $HOME/bin/code-server-helper
+sed -i 's/TIME=12:00:00/TIME=24:00:00/' $HOME/bin/code-server-helper
+sed -i 's/PORT=8080/PORT=13182/' $HOME/bin/code-server-helper
+sed -i 's/AUTH="none"/AUTH="your_password"/' $HOME/bin/code-server-helper
 ```
 
 ## Common Issues

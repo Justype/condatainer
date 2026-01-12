@@ -270,8 +270,8 @@ You can use editors like `vim` or `nano` to change these values.
 or use `sed`
 
 ```bash
-sed -i 's/NCPUS=4/NCPUS=8/' rstudio-server-helper
-sed -i 's/MEM=32G/MEM=64G/' rstudio-server-helper
-sed -i 's/TIME=12:00:00/TIME=24:00:00/' rstudio-server-helper
-sed -i 's/PORT=8787/PORT=13182/' rstudio-server-helper
+sed -i 's/NCPUS=4/NCPUS=8/' $HOME/bin/rstudio-server-helper
+sed -i 's/MEM=32G/MEM=64G/' $HOME/bin/rstudio-server-helper
+sed -i 's/TIME=12:00:00/TIME=24:00:00/' $HOME/bin/rstudio-server-helper
+sed -i 's/PORT=8787/PORT=13182/' $HOME/bin/rstudio-server-helper
 ```
