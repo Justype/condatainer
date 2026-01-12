@@ -2,10 +2,11 @@
 
 import os
 import sys
+import datetime
 
 # -- Project information -----------------------------------------------------
 project = 'CondaTainer'
-copyright = '2026, Justype'
+copyright = f"{datetime.date.today().year}, Justype"
 author = 'Justype'
 
 # -- General configuration ---------------------------------------------------

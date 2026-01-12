@@ -623,7 +623,7 @@ class CondaTainer:
             exit(1)
         Utils.print_success("Base images built.")
         os.chmod(Config.BASE_IMAGE_SIF, 0o775)
-        Utils.print_note("You can run" + Utils.blue_text('apptainer cache clean') + "to free up space used by build cache.")
+        Utils.print_note("You can run " + Utils.blue_text('apptainer cache clean') + " to free up space used by build cache.")
 
     @staticmethod
     def get_tmp_overlay_path(normalized_name_version: str) -> str:
@@ -1901,7 +1901,7 @@ class CondaTainer_Exec:
         except subprocess.CalledProcessError:
             if last_img is not None and Utils.is_in_interactive_shell() and not capture_output:
                 Utils.print_error("Command execution failed inside the container with writable image.")
-                Utils.print_note("Please go to https://github.com/${Config.GITHUB_REPO}/blob/main/docs/qa/exec.md for troubleshooting.")
+                Utils.print_note(f"Please go to https://github.com/{Config.GITHUB_REPO}/blob/main/docs/qa/exec.md for troubleshooting.")
             return False
 
         return True
