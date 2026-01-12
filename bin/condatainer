@@ -540,29 +540,7 @@ class CondaTainer:
 
         Utils.print_message("Base image definition file not found.")
 
-        choice = "cpu"
-        if Utils.is_in_interactive_shell():
-            Utils.print_message("Select base image type to download:")
-            Utils.print_message("  1) CPU-only (default)")
-            Utils.print_message("  2) NVIDIA GPU support")
-            Utils.print_message("  3) AMD GPU support")
-            user_input = input("Enter choice [1-3]: ").strip()
-            if user_input == "" or user_input == "1":
-                choice = "cpu"
-            elif user_input == "2":
-                choice = "nv"
-            elif user_input == "3":
-                choice = "amd"
-            else:
-                Utils.print_warning("Invalid choice. Defaulting to CPU-only base image.")
-        else:
-            Utils.print_warning("Non-interactive shell detected. Defaulting to CPU-only base image.")
-
-        url_insert = ""
-        if choice != "cpu":
-            url_insert = f"_{choice}"
-
-        url = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/base_image{url_insert}.def"
+        url = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/base_image.def"
         if not Utils.download_file(url, base_def_path):
             Utils.print_error("Failed to download base image definition file.")
             return False
@@ -580,7 +558,7 @@ class CondaTainer:
         if not Utils.download_executable(url, Config.BASE_IMAGE_SIF):
             Utils.print_warning("Failed to download pre-built base image.")
             return False
-        Utils.print_success("Pre-built base image downloaded successfully.")
+        Utils.print_success("Pre-built base image downloaded.")
         return True
 
     @staticmethod
@@ -595,8 +573,12 @@ class CondaTainer:
             exit(1)
         if os.path.isfile(Config.BASE_IMAGE_SIF):
             return
-        if not CondaTainer.ensure_base_def():
-            exit(1)
+
+        Utils.print_message("Base images not found. Downloading base image...")
+        if CondaTainer.try_download_prebuilt_base_image():
+            return
+
+        Utils.print_message("Trying to build base image locally...")
 
         if Config.SYSTEM_APPTAINER_BIN is None:
             Utils.print_error("System Apptainer is required to build the base image.")
@@ -604,7 +586,9 @@ class CondaTainer:
             Utils.print_note("If Apptainer is not available, please contact your system administrator.")
             exit(1)
 
-        Utils.print_message("Base images not found. Building base images...")
+        if not CondaTainer.ensure_base_def():
+            exit(1)
+
         cmd = [
             Config.SYSTEM_APPTAINER_BIN, "build", "--fakeroot",
             Config.BASE_IMAGE_SIF, Config.BASE_IMAGE_DEF,
@@ -1870,6 +1854,8 @@ class CondaTainer_Exec:
             *CondaTainer_Exec.generate_overlay_args(paths_or_name_versions),
             *env_params,
             "--env", f"PATH={path_env}",
+            "--env", "LC_ALL=C.UTF-8",
+            "--env", "LANG=C.UTF-8",
             "--env", "PS1=CNT \\[\\e[0;34m\\]\\w\\[\\e[0m\\]> ",
             "--env", "IN_CONDATINER=1",
             *img_env,
