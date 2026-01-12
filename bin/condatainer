@@ -10,6 +10,7 @@ import urllib.request
 import platform
 import stat
 from pathlib import Path
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 os.umask(0o002)
@@ -978,10 +979,10 @@ class BuildObject:
                     ["apptainer", "sif", "list", self.tmp_overlay_path],
                     text=True,
                 ).splitlines()
-                if "Squashfs" in line
+                if "Squashfs/*System" in line
             )
         except Exception as e:
-            self.print_create_error_message(f"Failed to get SquashFS ID from SIF: {e}")
+            self.print_create_error_message(f"Failed to get Squashfs/*System ID from SIF: {e}")
             self.create_cleanup(failed=True)
             return False
 
@@ -2182,6 +2183,52 @@ class CondaTainer_Info:
         )
 
     @staticmethod
+    def get_file_btime(file_path: str) -> Optional[datetime]:
+        try:
+            result = subprocess.check_output(
+                ['stat', '-c', '%W', file_path], 
+                text=True
+            ).strip()
+
+            if result in ('0', '-'):
+                return None
+
+            return datetime.fromtimestamp(int(result))
+
+        except (subprocess.CalledProcessError, ValueError):
+            return None
+
+    @staticmethod
+    def get_file_mtime(file_path: str) -> Optional[datetime]:
+        try:
+            result = subprocess.check_output(
+                ['stat', '-c', '%Y', file_path], 
+                text=True
+            ).strip()
+
+            return datetime.fromtimestamp(int(result))
+
+        except (subprocess.CalledProcessError, ValueError):
+            return None
+
+    @staticmethod
+    def get_compression_type(file_path) -> str:
+        try:
+            result = subprocess.check_output(
+                ['file', file_path], 
+                text=True
+            ).strip()
+
+            match = re.search(r',\s+(\w+)\s+compressed', result)
+            if match:
+                return match.group(1)
+            else:
+                return 'not available'
+
+        except subprocess.CalledProcessError:
+            return 'not available'
+
+    @staticmethod
     def parse_info_args(args):
         installed_overlays_dict = CondaTainer.get_installed_overlays()
         overlay = Utils.normalize_name_version(args.overlay)
@@ -2193,10 +2240,33 @@ class CondaTainer_Info:
                 Utils.print_error(f"Overlay file {Utils.blue_text(overlay_path)} not found.")
                 return
 
-        print(f"Information for overlay {Utils.yellow_text(os.path.basename(overlay_path))}:")
+        print(f"Information for {Utils.yellow_text(os.path.basename(overlay_path))}:")
         # Additional info can be added here, e.g., size, creation date, etc.
+        print(f"Writable: {'Yes' if overlay_path.endswith('.img') else 'No'}")
+
         file_size = os.path.getsize(overlay_path)
-        print(f"Size: {file_size / (1024 * 1024):.2f} MB")
+        if file_size < 1024:
+            print(f"Size: {file_size} Bytes")
+        elif file_size < 1_048_576:
+            print(f"Size: {file_size / 1024:.2f} KiB")
+        elif file_size < 1_073_741_824:
+            print(f"Size: {file_size / 1_048_576:.2f} MiB")
+        else:
+            print(f"Size: {file_size / 1_073_741_824:.2f} GiB")
+
+        print(f"Compression: {CondaTainer_Info.get_compression_type(overlay_path)}")
+
+        btime_dt = CondaTainer_Info.get_file_btime(overlay_path)
+        if btime_dt is not None:
+            print(f"Creation time: {btime_dt:%Y-%m-%d %H:%M:%S}")
+        else:
+            print("Creation time: Not available")
+        mtime_dt = CondaTainer_Info.get_file_mtime(overlay_path)
+        if mtime_dt is not None:
+            print(f"Last modified: {mtime_dt:%Y-%m-%d %H:%M:%S}")
+        else:
+            print("Last modified: Not available")
+
         if overlay_path.endswith((".sqf", ".squashfs")):
             name = os.path.splitext(os.path.basename(overlay_path))[0]
             name = name.replace('--', '/').replace('=', '/')
@@ -2749,7 +2819,7 @@ _{script_name}_completion() {{
         # System images (strip extensions)
         [ -d "$img_dir" ] && files=$(ls -1 "$img_dir" 2>/dev/null | grep -E '\\.(sqf|img|squashfs)$' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
         [ -d "$ref_dir" ] && files="$files $(ls -1 "$ref_dir" 2>/dev/null | grep -E '\\.(sqf|img|squashfs)$' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')"
-        
+
         # Local images (keep extensions, include .sqf)
         if [[ "$include_local" == "true" ]]; then
             files="$files $(ls -1 *.img *.sqf 2>/dev/null)"
@@ -2931,7 +3001,7 @@ _{script_name}_completion() {{
                 # System images
                 [[ -d "$img_dir" ]] && overlays+=(${{(f)"$(ls -1 "$img_dir" 2>/dev/null | grep -E '\\.(sqf|img|squashfs)$' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')"}})
                 [[ -d "$ref_dir" ]] && overlays+=(${{(f)"$(ls -1 "$ref_dir" 2>/dev/null | grep -E '\\.(sqf|img|squashfs)$' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')"}})
-                
+
                 # Local images (include .sqf)
                 if [[ "$include_local" == "true" ]]; then
                     local local_imgs=$(ls -1 *.img *.sqf 2>/dev/null)
