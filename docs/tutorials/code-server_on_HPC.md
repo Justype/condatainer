@@ -228,3 +228,22 @@ ln -s /ext3/home/.local/share/code-server/extensions $HOME/.local/share/code-ser
 ```
 
 A new issue is that if you change the overlay image, you will lose all installed extensions. But at least you won't hit the quota limit.
+
+### Pylance not available
+
+Pylance is owned by Microsoft and is not open source. So it is not included in the [open-vsx registry](https://open-vsx.org/), which is used by `code-server`.
+
+Solution: Use Pyright instead. see https://open-vsx.org/extension/ms-pyright/pyright
+
+### Set up GitHub Copilot
+
+Sadly, GitHub Copilot is not working with `code-server`.
+
+Available workarounds:
+
+- [sunpix/howto-install-copilot-in-code-server](https://github.com/sunpix/howto-install-copilot-in-code-server)
+- [Code Server Discussion 5063](https://github.com/coder/code-server/discussions/5063)
+
+I tried both methods, but none worked for me.
+
+You can use [VS Code Tunnel](./vscode-tunnel_on_HPC.md) instead.
