@@ -29,6 +29,7 @@ From: ubuntu:24.04
 
     ## RStudio libs
     apt -y install libssl-dev libclang-dev libsqlite3-0
+    apt -y install pandoc # for markdown rendering
 
     ## Python
     apt -y install python3-pip python3-venv python-is-python3

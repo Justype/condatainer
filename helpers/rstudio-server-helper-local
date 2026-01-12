@@ -68,7 +68,7 @@ if ! command -v condatainer &> /dev/null; then
 fi
 
 missing=""
-for pkg in rstudio-server texlive build-essential $OVERLAYS; do
+for pkg in rstudio-server build-essential $OVERLAYS; do
     if ! condatainer ls $pkg | grep -q $pkg; then
         missing+=" $pkg"
     fi
@@ -204,7 +204,6 @@ echo -e "  ${YELLOW}rstudioapi::openProject(\"$CWD\")${NC}"
 
 condatainer exec \
     -o rstudio-server \
-    -o texlive \
     -o build-essential \
     $OVERLAYS_ARG \
     $OVERLAY_ARG --writable-img \

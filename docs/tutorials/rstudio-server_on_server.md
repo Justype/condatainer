@@ -22,7 +22,7 @@ rstudio-server-helper-local \
 
 Please change the port number to a unique one to avoid conflicts with other users.
 
-If you have preferred settings, you can modify the script directly. See [Change the default setting](#change-the-default-setting) section below.
+Always [Use Conda to Manage R Packages](#use-conda-to-manage-r-packages). For packages only available from source, see [Install R Packages from Source](#install-r-packages-from-source) section.
 
 If you encounter `file name too long` error, see [File name too long ERROR](#file-name-too-long-system36-error) section below.
 
@@ -82,7 +82,7 @@ curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/insta
 Creating required overlay images:
 
 ```bash
-condatainer install rstudio-server texlive build-essential
+condatainer install rstudio-server build-essential
 ```
 
 ## Create R Writable Overlay
