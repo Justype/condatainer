@@ -26,18 +26,18 @@ print_help() {
     echo "  -a <auth>       Password for code-server authentication (default: none)"
     echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
-    echo "  -r              Use fake root mode (will be root inside the container)"
+    echo "  -f              Use fakeroot mode (will be root inside the container)"
     echo "  -y              Accept all warnings and proceed"
     echo "  -h              Show this help message"
 }
 
-while getopts "p:a:e:o:ryh" opt; do
+while getopts "p:a:e:o:fyh" opt; do
     case ${opt} in
         p ) PORT=$OPTARG ;;
         a ) AUTH=$OPTARG ;;
         e ) OVERLAY=$OPTARG ;;
         o ) OVERLAYS_ARG+=" -o $OPTARG"; OVERLAYS+=" $OPTARG" ;;
-        r ) FAKE_ROOT_ARG="--fakeroot"; echo "Using fake root mode" ;;
+        f ) FAKE_ROOT_ARG="--fakeroot"; echo "Using fake root mode" ;;
         y ) AUTO_YES=true ;;
         h ) print_help; exit 0 ;;
         \? ) print_help; exit 1 ;;
