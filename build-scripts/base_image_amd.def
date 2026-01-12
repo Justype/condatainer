@@ -133,7 +133,7 @@ fi
 EOT
     chmod +x /usr/bin/mm-clean
 
-    cat << 'EOT' > /usr/bin/mm-pin
+cat << 'EOT' > /usr/bin/mm-pin
 #!/bin/bash
 
 if [ -z "$CNT_CONDA_PREFIX" ]; then
@@ -141,24 +141,69 @@ if [ -z "$CNT_CONDA_PREFIX" ]; then
     exit 1
 fi
 
-PACKAGE_INPUT=$1
-
-# Check if input is empty
-if [ -z "$PACKAGE_INPUT" ]; then
-    echo "Usage: mm-pin <package> or mm-pin <package>=<version>"
-    exit 1
-fi
-
 PIN_FILE="$CNT_CONDA_PREFIX/conda-meta/pinned"
 mkdir -p "$(dirname "$PIN_FILE")"
-if ! [ -f "$PIN_FILE" ]; then
-    touch "$PIN_FILE"
-fi
+touch "$PIN_FILE"
 
-if [[ "$PACKAGE_INPUT" == *"="* ]]; then
-    # If input contains '=', treat it as package=version
-    PACKAGE_NAME=$(echo "$PACKAGE_INPUT" | cut -d'=' -f1)
-    PIN_VALUE=$(echo "$PACKAGE_INPUT" | sed 's/=/ /')
+# Function to show usage
+show_usage() {
+    echo "Usage: mm-pin [options] <package>"
+    echo ""
+    echo "Options:"
+    echo "  <package>           Pin a package (current version). e.g., 'numpy'"
+    echo "  <package>=<ver>     Pin a specific version. e.g., 'numpy=1.21'"
+    echo "  -u, -d, -r          Unpin/Delete/Remove a package."
+    echo "  -l, --list          List all pinned packages."
+    echo "  -h, --help          Show this help message."
+    exit 1
+}
+
+list_pins() {
+    if [ -s "$PIN_FILE" ]; then
+        echo "Currently pinned packages:"
+        echo "---------------------------"
+        cat "$PIN_FILE"
+        echo "---------------------------"
+    else
+        echo "No packages are currently pinned."
+    fi
+}
+
+unpin_package() {
+    local PACKAGE_NAME=$1
+    if [ -z "$PACKAGE_NAME" ]; then
+        echo "Error: Please specify a package to unpin."
+        exit 1
+    fi
+
+    if grep -qE "^${PACKAGE_NAME} " "$PIN_FILE"; then
+        sed -i "/^${PACKAGE_NAME} /d" "$PIN_FILE"
+        echo "Unpinned package: $PACKAGE_NAME"
+    else
+        echo "Package '$PACKAGE_NAME' is not currently pinned."
+    fi
+}
+
+pin_package() {
+    local PACKAGE_INPUT=$1
+    
+    if [[ "$PACKAGE_INPUT" == *"="* ]]; then
+        # Case: package=version provided
+        PACKAGE_NAME=$(echo "$PACKAGE_INPUT" | cut -d'=' -f1)
+        PIN_VALUE=$(echo "$PACKAGE_INPUT" | sed 's/=/ /')
+    else
+        # Case: package only (lookup installed version)
+        PACKAGE_NAME=$PACKAGE_INPUT
+        echo "Searching for installed version of '$PACKAGE_NAME'..."
+        
+        INSTALLED_VER=$(mm-list "^${PACKAGE_NAME}$" | grep "${PACKAGE_NAME} " | awk '{print $1 " " $2}')
+
+        if [ -z "$INSTALLED_VER" ]; then
+            echo "Error: Package '$PACKAGE_NAME' not found in the current environment."
+            exit 1
+        fi
+        PIN_VALUE="$INSTALLED_VER"
+    fi
 
     if grep -qE "^${PACKAGE_NAME} " "$PIN_FILE"; then
         echo "Updating existing pin for package '$PACKAGE_NAME'."
@@ -167,25 +212,30 @@ if [[ "$PACKAGE_INPUT" == *"="* ]]; then
 
     echo "$PIN_VALUE" >> "$PIN_FILE"
     echo "Pinned: $PIN_VALUE"
-else
-    # Otherwise, search for the installed version
-    echo "Searching for installed version of '$PACKAGE_INPUT'..."
-    
-    INSTALLED_VER=$(mm-list "^${PACKAGE_INPUT}$" | grep "${PACKAGE_INPUT} " | awk '{print $1 " " $2}')
+}
 
-    if [ -z "$INSTALLED_VER" ]; then
-        echo "Error: Package '$PACKAGE_INPUT' not found in the current environment"
-        exit 1
-    fi
-
-    if grep -qE "^${PACKAGE_INPUT} " "$PIN_FILE"; then
-        echo "Updating existing pin for package '$PACKAGE_INPUT'"
-        sed -i "/^${PACKAGE_INPUT} /d" "$PIN_FILE"
-    fi
-
-    echo "$INSTALLED_VER" >> "$PIN_FILE"
-    echo "Pinned: $INSTALLED_VER"
-fi
+case "$1" in
+    -l|--list)
+        list_pins
+        ;;
+    -u|--unpin|-r|--remove|-d|--delete)
+        shift
+        unpin_package "$1"
+        ;;
+    -h|--help)
+        show_usage
+        ;;
+    -*)
+        echo "Error: Unknown option '$1'"
+        show_usage
+        ;;
+    "")
+        show_usage
+        ;;
+    *)
+        pin_package "$1"
+        ;;
+esac
 EOT
     chmod +x /usr/bin/mm-pin
 
