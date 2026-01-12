@@ -2933,12 +2933,6 @@
     "sbatch": false,
     "whatis": "rstudio-server container"
   },
-  "texlive": {
-    "deps": [],
-    "relative_path": "texlive.def",
-    "sbatch": false,
-    "whatis": "TeX Live container"
-  },
   "ubuntu24/base_image": {
     "deps": [],
     "relative_path": "ubuntu24/base_image.def",
@@ -2980,11 +2974,5 @@
     "relative_path": "ubuntu24/rstudio-server.def",
     "sbatch": false,
     "whatis": "rstudio-server container"
-  },
-  "ubuntu24/texlive": {
-    "deps": [],
-    "relative_path": "ubuntu24/texlive.def",
-    "sbatch": false,
-    "whatis": "TeX Live container"
   }
 }
