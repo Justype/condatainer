@@ -1,12 +1,11 @@
 CondaTainer
 =========================
 
-`CondaTainer <https://github.com/Justype/condatainer>`_ is a tool to create and manage lightweight, portable container-like environments using Conda and overlay filesystems. It is designed for use on HPC systems where traditional container technologies may not be available.
-
-By encapsulating Conda environments within **Apptainer/Singularity overlay files**, CondaTainer solves the "small file problem" common on HPC parallel file systems (Lustre/GPFS) while preserving the flexibility of a writable environment.
+`CondaTainer <https://github.com/Justype/condatainer>`_ is an HPC-oriented wrapper tool that leverages Apptainer, SquashFS, OverlayFS, and Micromamba to enable the easy management of isolated single-environment files, software packages, reference data, and indices.
 
 .. note::
-   **CondaTainer** is designed to work without root privileges, leveraging ``fakeroot`` and ``overlayfs`` to allow users to build and manage containers entirely in user-space.
+   * **Solve the Small File Problem:** CondaTainer packs a Conda environment (30k+ inodes) into a **single, portable file**, reducing load on HPC parallel filesystems (Lustre/GPFS).
+   * **Seamless Interactive Apps:** It simplifies the deployment of web-based applications, allowing you to easily set up *RStudio Server* and *code-server* without root privileges.
 
 The Tool Suite
 --------------
@@ -59,8 +58,8 @@ Which one to choose?
   :caption: Advanced Usage:
   :maxdepth: 1
   
-  CondaTainer: Custom DEF <advanced_usage/condatainer_custom_def>
-  CondaTainer: Custom Build Script <advanced_usage/condatainer_custom_script>
+  Custom Apptainer DEF <advanced_usage/condatainer_custom_def>
+  Custom Build Script <advanced_usage/condatainer_custom_script>
 
 .. toctree::
   :caption: Manuals:

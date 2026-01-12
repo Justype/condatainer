@@ -5,7 +5,7 @@
 - **Auto-Generation**: Installs packages and builds Lua/Tcl modulefiles automatically.
 - **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
 - **Native Integration**: Seamless `module avail` and `module load` experience.
-- **Context-Aware**: Manages references/indexes and displays helpful info when not in a SLURM job.
+- **Context-Aware**: Manages references/indices and displays helpful info when not in a SLURM job.
 - **SLURM Integration**: Submits index generation jobs automatically when needed.
 
 ```bash

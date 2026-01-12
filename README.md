@@ -33,7 +33,7 @@ You will be prompted to confirm the installation path (defaulting to `$SCRATCH/c
 
 **CondaTainer** solves the "too many files" problem inherent to Conda environments: it packs Conda environments into single, highly-compressed SquashFS files and mounts them inside an Apptainer container.
 
-- **Inode Efficiency**: Compresses heavy conda environments (10k+ files) into 1 file.
+- **Inode Efficiency**: Compresses heavy conda environments (30k+ files) into 1 file.
 - **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
 - **Hybrid Modes**: Supports read-only (`.sqf`) for production and writable (`.img`) for development.
 - **SLURM Integration**: Submits index generation jobs automatically when needed.
