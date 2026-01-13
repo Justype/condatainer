@@ -797,6 +797,7 @@ class BuildObject:
             link = remote_scripts[self.name_version]
             if link.endswith('.def'):
                 self.is_def = True
+            self.build_source = os.path.join(Config.TMP_DIR, f"{self.name_version.replace('/', '--')}{'.def' if self.is_def else '.sh'}")
             if not Utils.download_executable(link, self.build_source):
                 raise RuntimeError(f"Failed to download remote build script for {self.name_version}.")
             self.is_remote = True
@@ -2781,7 +2782,7 @@ class CondaTainer_Apptainer:
 
         try:
             subprocess.run(cmd_install, check=True)
-            Utils.print_success(f"Apptainer installed to {Config.APPTAINER_BIN}.")
+            Utils.print_success(f"Apptainer installed to {Utils.blue_text(Config.LOCAL_APPTAINER_DIR)}.")
             Utils.print_message("Cleaning up Micromamba environment...")
             shutil.rmtree(os.path.join(Config.CONDATINER_DIR, "micromamba_env"), ignore_errors=True)
             shutil.rmtree(os.path.join(Config.LOCAL_APPTAINER_DIR, "conda-meta"), ignore_errors=True)
@@ -2834,7 +2835,7 @@ class CondaTainer_Completion:
     def parse_completion_args(args):
         script_name = Config.SCRIPT_NAME
         target_shell = args.shell
-        
+
         ext_regex = r"[.](sqf|sqsh|squashfs|img)$"
 
         if target_shell == "bash":
@@ -2864,14 +2865,14 @@ _{script_name}_completion() {{
         local img_dir="{Config.IMAGES_DIR}"
         local ref_dir="{Config.REF_IMAGES_DIR}"
         local files=""
-        
+
         # System images (strip extensions, replace -- with /)
         # grep -E '{ext_regex}' matches the extensions
         if [ -d "$img_dir" ]; then
             local sys_imgs=$(ls -1 "$img_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
             files="$files $sys_imgs"
         fi
-        
+
         if [ -d "$ref_dir" ]; then
             local ref_imgs=$(ls -1 "$ref_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
             files="$files $ref_imgs"
