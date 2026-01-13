@@ -7,7 +7,7 @@ AUTH="none"
 OVERLAYS_ARG=""
 OVERLAYS=""
 OVERLAY="env.img"
-FAKE_ROOT_ARG=""
+BASE_IMAGE_ARG=""
 CWD=$(readlink -f .)
 
 CONDATAINER_CONFIG_DIR="$HOME/.config/condatainer"
@@ -25,7 +25,6 @@ print_help() {
     echo "  -p <port>       Port for rstudio-server (default: $PORT)"
     echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
-    echo "  -f              Use fakeroot mode (will be root inside the container)"
     echo "  -y              Accept all warnings and proceed"
     echo "  -h              Show this help message"
 }
@@ -33,9 +32,9 @@ print_help() {
 while getopts "p:e:o:fyh" opt; do
     case ${opt} in
         p ) PORT=$OPTARG ;;
+        b ) BASE_IMAGE_ARG="-b $OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
         o ) OVERLAYS_ARG+=" -o $OPTARG"; OVERLAYS+=" $OPTARG" ;;
-        f ) FAKE_ROOT_ARG="--fakeroot"; echo "Using fakeroot mode" ;;
         y ) AUTO_YES=true ;;
         h ) print_help; exit 0 ;;
         \? ) print_help; exit 1 ;;
@@ -68,7 +67,7 @@ if ! command -v condatainer &> /dev/null; then
 fi
 
 missing=""
-for pkg in rstudio-server build-essential $OVERLAYS; do
+for pkg in rstudio-server $OVERLAYS; do
     if ! condatainer ls $pkg | grep -q $pkg; then
         missing+=" $pkg"
     fi
@@ -77,8 +76,7 @@ if [ -n "$missing" ]; then
     echo -e "${RED}[ERROR]${NC} The following required overlays are missing:${missing}."
     echo -e "Please run 'condatainer install$missing'"
     if [ -z "$AUTO_YES" ]; then
-        echo -e "Do you want to install them now? [Y/n]"
-        read answer
+        read -p "Do you want to install them now? [Y/n] " answer
     else
         answer="Y"
     fi
@@ -104,8 +102,7 @@ else
         if [ "$AUTO_YES" = true ]; then
             response="y"
         else
-            echo -e "Do you want to kill these processes and continue? [y/N]"
-            read -r response
+            read -p "Do you want to kill these processes and continue? [y/N] " response
         fi
 
         if [[ ! "$response" =~ ^[Yy]$ ]]; then
@@ -204,10 +201,9 @@ echo -e "  ${YELLOW}rstudioapi::openProject(\"$CWD\")${NC}"
 
 condatainer exec \
     -o rstudio-server \
-    -o build-essential \
+    $BASE_IMAGE_ARG \
     $OVERLAYS_ARG \
     $OVERLAY_ARG --writable-img \
-    $FAKE_ROOT_ARG \
     /usr/lib/rstudio-server/bin/rserver \
         --server-user $USER \
         --server-daemonize=0 \

@@ -10,7 +10,8 @@ AUTH="none"
 OVERLAYS_ARG=""
 OVERLAYS=""
 OVERLAY="env.img"
-FAKE_ROOT_ARG=""
+FAKEROOT_ARG=""
+BASE_IMAGE_ARG=""
 CWD=$(readlink -f .)
 
 LOG_DIR="$HOME/logs"
@@ -51,6 +52,7 @@ print_help() {
     echo "  -t <time>       Time limit for the job (default: $TIME)"
     echo "  -p <port>       Port for code-server (default: $PORT)"
     echo "  -a <auth>       Password for code-server authentication (default: none)"
+    echo "  -b <image>      Base image file"
     echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
     echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00"
@@ -59,17 +61,18 @@ print_help() {
     echo "  -h              Show this help message"
 }
 
-while getopts "c:m:t:p:a:e:o:vfyh" opt; do
+while getopts "c:m:t:p:a:b:e:o:vfyh" opt; do
     case ${opt} in
         c ) NCPUS=$OPTARG ;;
         m ) MEM=$OPTARG ;;
         t ) TIME=$OPTARG ;;
         p ) PORT=$OPTARG ;;
         a ) AUTH=$OPTARG ;;
+        b ) BASE_IMAGE_ARG="-b $OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
         o ) OVERLAYS_ARG+=" -o $OPTARG"; OVERLAYS+=" $OPTARG" ;;
         v ) NCPUS=1; MEM=4G; TIME=02:00:00; echo "View Mode: NCPUS=1, MEM=4G, TIME=02:00:00" ;;
-        r ) FAKE_ROOT_ARG="--fakeroot"; echo "Using fake root mode" ;;
+        r ) FAKEROOT_ARG="--fakeroot"; echo "Using fake root mode" ;;
         y ) AUTO_YES=true ;;
         h ) print_help; exit 0 ;;
         \? ) print_help; exit 1 ;;
@@ -99,8 +102,7 @@ if [ -n "$missing" ]; then
     echo -e "${RED}[ERROR]${NC} The following required overlays are missing:${missing}."
     echo -e "Please run 'condatainer install$missing'"
     if [ -z "$AUTO_YES" ]; then
-        echo -e "Do you want to install them now? [Y/n]"
-        read answer
+        read -p "Do you want to install them now? [Y/n] " answer
     else
         answer="Y"
     fi
@@ -161,9 +163,10 @@ cat <<EOT > $SBATCH_SCRIPT_PATH
 printf "\$SLURM_JOB_ID\t$PORT\t$AUTH\t\$(hostname)\t$CWD\n" > $LOG_DIR/.code-server
 condatainer exec \\
     -o code-server \\
+    $BASE_IMAGE_ARG \\
     $OVERLAYS_ARG \\
     $OVERLAY_ARG --writable-img \\
-    $FAKE_ROOT_ARG \\
+    $FAKEROOT_ARG \\
     code-server \\
         --disable-update-check \\
         --bind-addr 127.0.0.1:$PORT \\
