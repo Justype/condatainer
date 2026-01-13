@@ -3,7 +3,7 @@
     "deps": [],
     "relative_path": "build-essential.def",
     "sbatch": false,
-    "whatis": "Essential build tools container"
+    "whatis": "Missing description"
   },
   "cellranger/8.0.1": {
     "deps": [],
@@ -21,7 +21,7 @@
     "deps": [],
     "relative_path": "code-server.def",
     "sbatch": false,
-    "whatis": "code-server container"
+    "whatis": "Missing description"
   },
   "grch38/bowtie2/ucsc_no_alt": {
     "deps": [
@@ -2903,18 +2903,6 @@
     "sbatch": false,
     "whatis": "GRCm39 GENCODE M9 transcript FASTA"
   },
-  "igv": {
-    "deps": [],
-    "relative_path": "igv.def",
-    "sbatch": false,
-    "whatis": "IGV container"
-  },
-  "lxde": {
-    "deps": [],
-    "relative_path": "lxde.def",
-    "sbatch": false,
-    "whatis": "LXDE desktop container"
-  },
   "orad/2.7.0": {
     "deps": [],
     "relative_path": "orad/2.7.0",
@@ -2931,7 +2919,73 @@
     "deps": [],
     "relative_path": "rstudio-server.def",
     "sbatch": false,
-    "whatis": "rstudio-server container"
+    "whatis": "Missing description"
+  },
+  "ubuntu20/base_image": {
+    "deps": [],
+    "relative_path": "ubuntu20/base_image.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu20/code-server": {
+    "deps": [],
+    "relative_path": "ubuntu20/code-server.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu20/igv": {
+    "deps": [],
+    "relative_path": "ubuntu20/igv.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu20/lxde": {
+    "deps": [],
+    "relative_path": "ubuntu20/lxde.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu20/rstudio-server": {
+    "deps": [],
+    "relative_path": "ubuntu20/rstudio-server.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu22/base_image": {
+    "deps": [],
+    "relative_path": "ubuntu22/base_image.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu22/build-essential": {
+    "deps": [],
+    "relative_path": "ubuntu22/build-essential.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu22/code-server": {
+    "deps": [],
+    "relative_path": "ubuntu22/code-server.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu22/igv": {
+    "deps": [],
+    "relative_path": "ubuntu22/igv.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu22/lxde": {
+    "deps": [],
+    "relative_path": "ubuntu22/lxde.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu22/rstudio-server": {
+    "deps": [],
+    "relative_path": "ubuntu22/rstudio-server.def",
+    "sbatch": false,
+    "whatis": "Missing description"
   },
   "ubuntu24/base_image": {
     "deps": [],
@@ -2939,40 +2993,40 @@
     "sbatch": false,
     "whatis": "Missing description"
   },
-  "ubuntu24/base_image_amd": {
-    "deps": [],
-    "relative_path": "ubuntu24/base_image_amd.def",
-    "sbatch": false,
-    "whatis": "Missing description"
-  },
-  "ubuntu24/base_image_nv": {
-    "deps": [],
-    "relative_path": "ubuntu24/base_image_nv.def",
-    "sbatch": false,
-    "whatis": "Missing description"
-  },
   "ubuntu24/build-essential": {
     "deps": [],
     "relative_path": "ubuntu24/build-essential.def",
     "sbatch": false,
-    "whatis": "Essential build tools container"
+    "whatis": "Missing description"
   },
   "ubuntu24/code-server": {
     "deps": [],
     "relative_path": "ubuntu24/code-server.def",
     "sbatch": false,
-    "whatis": "code-server container"
+    "whatis": "Missing description"
+  },
+  "ubuntu24/igv": {
+    "deps": [],
+    "relative_path": "ubuntu24/igv.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu24/lxde": {
+    "deps": [],
+    "relative_path": "ubuntu24/lxde.def",
+    "sbatch": false,
+    "whatis": "Missing description"
   },
   "ubuntu24/r4.4.3": {
     "deps": [],
     "relative_path": "ubuntu24/r4.4.3.def",
     "sbatch": false,
-    "whatis": "r-base-dev container"
+    "whatis": "Missing description"
   },
   "ubuntu24/rstudio-server": {
     "deps": [],
     "relative_path": "ubuntu24/rstudio-server.def",
     "sbatch": false,
-    "whatis": "rstudio-server container"
+    "whatis": "Missing description"
   }
 }
