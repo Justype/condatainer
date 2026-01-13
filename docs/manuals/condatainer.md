@@ -12,7 +12,6 @@
 - [Exec](#exec)
 - [Runtime (Check, Run)](#runtime-check-run)
 - [Info](#info)
-- [Apptainer](#apptainer)
 - [Update](#update)
 - [Completion](#completion)
 
@@ -25,22 +24,21 @@ CondaTainer: Use Apptainer/Conda/SquashFS to manage tools for HPC users.
 
 positional arguments:
   COMMAND               Available actions
-    overlay             Manage overlay images (create, chown)
+    overlay             Manage overlay images (create, chown, resize)
     o                   Shortcut for 'overlay create'
     create (install, i)
                         Create a new SquashFS overlay using conda or available build scripts
     avail (av)          Check available local and remote build scripts
     list (ls)           List installed overlays matching search terms
-    remove (rm, delete, del)
+    remove (rm, delete)
                         Remove installed overlays matching search terms
     exec                Execute a command using overlays
     e                   Run bash using writable overlays
-    check (c)           Check if the dependencies of a script are installed
-    run (r)             Run a script and auto-solve the dependencies by #DEP tags
+    check               Check if the dependencies of a script are installed
+    run                 Run a script and auto-solve the dependencies by #DEP tags
     info                Show information about a specific overlay
-    apptainer           Get latest Apptainer executable from conda-forge
     self-update         Update CondaTainer to the latest version
-    completion          Generate shell completion script 'source <(condatainer completion)'
+    completion          Generate shell completion script
 
 options:
   -h, --help            show this help message and exit
@@ -143,6 +141,7 @@ Manage overlay writable ext3 images:
 
 - create: create an image with a conda environment inside.
 - chown: change ownership of files inside the image.
+- resize: resize the image file.
 
 ### Overlay Create
 
@@ -151,13 +150,15 @@ Create an ext3 `.img` with a conda environment inside. This is useful for creati
 **Usage:**
 
 ```
-condatainer overlay [OPTIONS] [NAME]
+condatainer overlay create [OPTIONS] [NAME]
 ```
 
 **Options:**
 
 * `-s`, `--size [SIZE]`: Size (MB) of the overlay image (default: 20480, 20G).
 * `-f`, `--file [FILE]`: Path to a Conda environment file (.yml or .yaml).
+* `--fakeroot`: Create image compatible with fakeroot (must use with `--fakeroot` later).
+* `--sparse`: Create a sparse image file.
 * NAME: Name of the overlay image (`env.img` by default if not specified).
 
 **Examples:**
@@ -170,11 +171,16 @@ condatainer overlay create -s 20480 my_analysis_env
 condatainer o -f environment.yml project_env.img
 ```
 
-Then you can use my `mm-<operation>` help commands to create/install/update/remove conda packages inside the writable container.
+Then you can use the `mm-<operation>` helper commands to create/install/update/remove conda packages inside the writable container.
 
 ```bash
 # install more packages
 mm-install numpy pandas
+
+# pin the package version
+mm-pin numpy # after installation
+mm-pin -d numpy # to unpin
+mm-pin -l # list pinned packages
 
 # update packages
 mm-update
@@ -219,6 +225,26 @@ condatainer overlay chown env.img
 condatainer overlay chown -u 1001 -g 1001 env.img
 ```
 
+### Overlay Resize
+
+Resize an ext3 `.img` overlay to a new size.
+
+```
+condatainer overlay resize [-h] -s SIZE image
+```
+
+**Options:**
+
+* `-s`, `--size SIZE`  : New size (MB) for the overlay image.
+* `image`              : Path to the overlay `img` file.
+
+**Examples:**
+
+```bash
+# Resize env.img to 30GB
+condatainer overlay resize -s 30720 env.img
+```
+
 ## Create
 
 Initialize and build a new **CondaTainer** SquashFS overlay. You can build from existing recipes (local/remote) or a Conda environment file.
@@ -252,8 +278,8 @@ condatainer create bcftools/1.22
 condatainer create grch38/gtf-gencode/47
 
 # Create from a yaml file with a custom name (Custom Env)
-# NOTE: -f must use with -n or -p
-condatainer create -f environment.yml -n my_analysis_env
+# NOTE: `-f/--file` must be used with `-p/--prefix` (the script requires `--prefix` when using `--file`).
+condatainer create -p my_analysis_env -f environment.yml
 
 # Create a custom env with multiple packages
 condatainer create -n tools.sqf samtools=1.16 bcftools=1.15
@@ -262,18 +288,18 @@ condatainer create -n tools.sqf samtools=1.16 bcftools=1.15
 **Features**:
 
 - Automatic Fetching: If a build script is not found locally, **CondaTainer** attempts to fetch it from the remote repository.
-- Conda Fallback: If no build script exists, **CondaTainer** attempts to create the module by installing the package named name with version version from conda-forge or bioconda.
+- Conda Fallback: If no build script exists, **CondaTainer** attempts to create the module by installing the package with the requested name and version from conda-forge or bioconda.
 - Metadata Parsing: Parses `#ENV` and `#ENVNOTE` tags from build scripts to inject environment variables and help text into the generated modulefile.
 
 ### Project level Examples
 
-Create a read-only overlay with conda environment inside using Conda yaml file.
+Create a read-only overlay with a Conda environment using a Conda YAML file.
 
 ```bash
 condatainer create -p my_project_env -f environment.yml
 ```
 
-Create a read-only overlay using a custom Apptainer definition file. See [Costum Def](../advanced_usage/condatainer_custom_def.md) for more details.
+Create a read-only overlay using a custom Apptainer definition file. See [Custom Def](../advanced_usage/condatainer_custom_def.md) for more details.
 
 ```bash
 condatainer create -p my_project_env -f custom_def.def
@@ -358,7 +384,7 @@ condatainer exec [OPTIONS] [COMMAND...]
 **Options:**
 
 * `-o`, `--overlay [OVERLAY]`: Specify specific overlays to mount (can be used multiple times).
-* `-w`, `--writable-img`: Mount .img overlays as writable (default is read-only). Only the last specified .img is made writable.
+* `-w`, `--writable-img`: Make a `.img` overlay writable (default: read-only). Only one `.img` overlay may be used at a time; use this flag to enable writability.
 * `-k`, `--keep`: Do not attempt to parse the command itself as an overlay name.
 * `--env [ENV_VAR=VALUE]`: Set additional environment variables inside the container (can be used multiple times).
 * `--bind [HOST_PATH:CONTAINER_PATH]`: Bind additional host paths into the container (can be used multiple times).
@@ -462,21 +488,6 @@ condatainer info [OVERLAY]
 * File size.
 * Potential mount path (e.g., `/cnt/bcftools/1.22` or `/ext3/env`).
 * Environment variables defined within the overlay's `.env` file.
-
-## Apptainer
-
-Manages the local installation of Apptainer. If Apptainer is not found on the host system, **CondaTainer** can install it via Micromamba into a local directory. But this is not recommended, because it cannot build singularity `sif` images.
-
-**Usage:**
-
-```
-condatainer apptainer [-y] [-f]
-```
-
-**Options:**
-
-* `-y`, `--yes`: Automatically confirm installation.
-* `-f`, `--force`: Force re-installation even if it already exists.
 
 ## Update
 
