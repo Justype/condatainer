@@ -1,14 +1,28 @@
 # Exec Troubleshooting
 
-If you encounter errors when trying to run or mount a CondaTainer overlay, it is usually due to one of two reasons: the image is locked by another process, or the file permissions (internal or external) are incorrect.
+Two possible reasons for errors when mounting writable overlays `.img`:
+
+- The image is locked by another process
+- File permissions (internal or external) are incorrect
+
+If you cannot write to an overlay image:
+
+- Overlay is full
+- Permission denied errors
+
+## Table of Contents
+
+- [Cannot mount overlay](#if-an-overlay-image-cannot-be-mounted)
+- [Cannot write to overlay](#if-cannot-write-to-an-overlay-image)
 
 ## If an overlay image cannot be mounted
 
 ### 1. "Device or resource busy" (Used by another process)
 
-Apptainer requires exclusive write access to mount an overlay. If another process is already using the image (even in read-only mode), you cannot mount it as writable.
+If another process is already using the image, you cannot mount it as writable.
 
 #### On a Headless Server
+
 If you are running on a standard Linux server, identifying the locking process is straightforward:
 
 ```bash
@@ -75,8 +89,26 @@ chmod u+rw /path/to/my_env.img
 condatainer overlay chown /path/to/my_env.img
 ```
 
-You can also use `--fakeroot` option when running `condatainer exec` to avoid permission issues:
+```bash
+# If you want fakeroot overlay
+condatainer overlay chown --root /path/to/my_env.img
+```
+
+## If cannot write to an overlay image
+
+### 1. Overlay is Full
+
+If often happens when installing new packages inside the overlay. Increase the size of the overlay image:
 
 ```bash
-condatainer exec --fakeroot -o /path/to/my_env.img <command>
+condatainer overlay resize -s <new_size_in_MB> /path/to/my_env.img
+```
+
+### 2. Permission Denied Errors
+
+If you encounter permission denied errors when writing to files inside the overlay, follow the steps in [Level 2: Inside the Overlay (Container)](#level-2-inside-the-overlay-container) above to change ownership of files inside the overlay.
+
+```bash
+# change inner files ownership
+condatainer overlay chown /path/to/my_env.img
 ```
