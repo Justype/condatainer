@@ -572,9 +572,12 @@ class CondaTainer:
         if os.path.isfile(Config.BASE_IMAGE_SIF):
             return
 
-        Utils.print_message("Base images not found. Downloading base image...")
-        if CondaTainer.try_download_prebuilt_base_image():
-            return
+        if not Config.debug:
+            Utils.print_message("Base images not found. Downloading base image...")
+            if CondaTainer.try_download_prebuilt_base_image():
+                return
+        else:
+            Utils.print_debug("Base image not found. Proceeding to build locally due to debug mode.")
 
         Utils.print_message("Trying to build base image locally...")
 
