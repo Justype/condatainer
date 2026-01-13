@@ -39,14 +39,8 @@ class Config:
 
     # Local apptainer
     SYSTEM_APPTAINER_BIN = shutil.which("apptainer")
-    LOCAL_APPTAINER_DIR = os.path.join(CONDATINER_DIR, "apptainer")
-    LOCAL_APPTAINER_BIN = os.path.join(LOCAL_APPTAINER_DIR, "bin", "apptainer")
-    LOCAL_MICROMAMBA_BIN = os.path.join(CONDATINER_DIR, "bin", "micromamba")
-
-    # File paths
     BASE_IMAGE_DEF = os.path.join(BUILD_SCRIPTS_DIR, "base_image.def")
     BASE_IMAGE_SIF = os.path.join(IMAGES_DIR, "base_image.sif")
-    APPTAINER_BIN = LOCAL_APPTAINER_BIN if os.path.isfile(LOCAL_APPTAINER_BIN) else SYSTEM_APPTAINER_BIN
     BAD_CHARS_REGEX = re.compile(r'[<>:"/\\|?*\0\s\'`$&;|!\[\]#%@=+{}(),]')
 
     # Utils
@@ -62,10 +56,10 @@ class Config:
 
 def adjust_compression_args_based_on_apptainer_version():
     """Change to ZSTD_MEDIUM if apptainer version >= 1.4.0"""
-    if Config.APPTAINER_BIN is None:
+    if Config.SYSTEM_APPTAINER_BIN is None:
         return
     try:
-        result = subprocess.run([Config.APPTAINER_BIN, "--version"], capture_output=True, text=True)
+        result = subprocess.run([Config.SYSTEM_APPTAINER_BIN, "--version"], capture_output=True, text=True)
         version_match = re.search(r"apptainer version (\d+)\.(\d+)", result.stdout)
         if version_match:
             major, minor = map(int, version_match.groups())
@@ -96,7 +90,6 @@ def main():
     CondaTainer_Check.add_parser_arguments(subparsers)
     CondaTainer_Run.add_parser_arguments(subparsers)
     CondaTainer_Info.add_parser_arguments(subparsers)
-    CondaTainer_Apptainer.add_parser_arguments(subparsers)
     CondaTainer_Update.add_parser_arguments(subparsers)
     CondaTainer_Completion.add_parser_arguments(subparsers)
 
@@ -105,11 +98,10 @@ def main():
         Config.debug = True
         Utils.print_debug("Debug mode enabled")
         Utils.print_debug(f"CondaTainer Version: {Config.VERSION}")
-        Utils.print_debug(f"Apptainer Path: {Config.APPTAINER_BIN}")
+        Utils.print_debug(f"Apptainer Path: {Config.SYSTEM_APPTAINER_BIN}")
     if args.no_sbatch:
         Config.use_sbatch = False
         Utils.print_debug("No sbatch mode enabled")
-    adjust_compression_args_based_on_apptainer_version()
 
     if args.action in ("create", "install", "i"):
         CondaTainer_Create.parse_create_args(args)
@@ -131,8 +123,6 @@ def main():
         CondaTainer_Remove.parse_remove_args(args)
     elif args.action in ("overlay", "o"):
         CondaTainer_Overlay.parse_overlay_args(args)
-    elif args.action == "apptainer":
-        CondaTainer_Apptainer.parse_apptainer_args(args)
     elif args.action == "self-update":
         CondaTainer_Update.parse_update_args(args)
     elif args.action == "completion":
@@ -528,24 +518,12 @@ class Utils:
     def is_apptainer_image(path: str) -> bool:
         return Utils.is_sif(path) or Utils.is_sqf(path) or Utils.is_img(path)
 
-    @staticmethod
-    def get_exec_environ() -> Dict[str, str]:
-        """
-        Get environment variables for apptainer exec commands.
-        If using local apptainer binary, add local apptainer bin dir to PATH.
-        """
-        env = os.environ.copy()
-        if Config.APPTAINER_BIN == Config.LOCAL_APPTAINER_BIN:
-            local_apptainer_bin_dir = os.path.dirname(Config.LOCAL_APPTAINER_BIN)
-            env["PATH"] = f"{local_apptainer_bin_dir}:{env.get('PATH', '')}"
-        return env
-
 class CondaTainer:
     PREBUILT_BASE_IMAGE_PLATFORMS = { "x86_64" } # aarch64 is not available yet
 
     @staticmethod
     def ensure_apptainer():
-        if Config.APPTAINER_BIN is None:
+        if Config.SYSTEM_APPTAINER_BIN is None:
             Utils.print_error("Apptainer not found in PATH.")
             Utils.print_note(f"Please consider running: {Utils.blue_text('ml apptainer')}")
             Utils.print_note("If Apptainer is not available, please contact your system administrator.")
@@ -600,12 +578,6 @@ class CondaTainer:
 
         Utils.print_message("Trying to build base image locally...")
 
-        if Config.SYSTEM_APPTAINER_BIN is None:
-            Utils.print_error("System Apptainer is required to build the base image.")
-            Utils.print_note(f"Please consider running: {Utils.blue_text('ml apptainer')}")
-            Utils.print_note("If Apptainer is not available, please contact your system administrator.")
-            exit(1)
-
         if not CondaTainer.ensure_base_def():
             exit(1)
 
@@ -659,7 +631,7 @@ class CondaTainer:
 
         Utils.print_message(f"Creating temporary SquashFS overlay for {Utils.yellow_text(normalized_name_version)}...")
         cmd = [
-            Config.APPTAINER_BIN, "overlay", "create",
+            Config.SYSTEM_APPTAINER_BIN, "overlay", "create",
             "--sparse", "--size", "15360",
             tmp_overlay_path
         ]
@@ -928,9 +900,8 @@ class BuildObject:
 
         Utils.print_message(f"Building SquashFS overlay at {Utils.blue_text(self.target_overlay_path)} with packages: {Utils.yellow_text(f'{name}={version}')}" )
 
-        environ = Utils.get_exec_environ()
         cmd_create = [
-            Config.APPTAINER_BIN, "exec",
+            Config.SYSTEM_APPTAINER_BIN, "exec",
             "--env", "TMPDIR=/ext3/tmp",
             "--overlay", self.tmp_overlay_path,
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
@@ -950,7 +921,7 @@ class BuildObject:
 
         Utils.print_debug(f"[BUILD] Creating overlay with command: {cmd_create}")
         try:
-            subprocess.run(cmd_create, check=True, env=environ)
+            subprocess.run(cmd_create, check=True)
         except subprocess.CalledProcessError:
             self.print_create_error_message()
             self.create_cleanup(failed=True)
@@ -966,13 +937,6 @@ class BuildObject:
             Utils.print_warning(f"Overlay {Utils.yellow_text(os.path.basename(self.target_overlay_path))} already exists at {Utils.blue_text(self.target_overlay_path)}. Skipping creation.")
             return True
 
-        if Config.SYSTEM_APPTAINER_BIN is None:
-            Utils.print_error("System Apptainer is required to build overlays from definition files.")
-            Utils.print_note(f"Please consider running: {Utils.blue_text('ml apptainer')}")
-            Utils.print_note("If Apptainer is not available, please contact your system administrator.")
-            return False
-
-        environ = Utils.get_exec_environ()
         cmd_create = [
             Config.SYSTEM_APPTAINER_BIN, "build", "--fakeroot",
             self.tmp_overlay_path, # although named as sqf, but it's actually an sif image here (will dump to sqf later)
@@ -982,7 +946,7 @@ class BuildObject:
         Utils.print_debug(f"[BUILD] Building Apptainer SIF with command: {cmd_create}")
 
         try:
-            subprocess.run(cmd_create, check=True, env=environ)
+            subprocess.run(cmd_create, check=True)
         except subprocess.CalledProcessError:
             self.print_create_error_message()
             self.create_cleanup(failed=True)
@@ -1003,7 +967,6 @@ class BuildObject:
             return False
 
         Utils.print_message(f"Dumping to SquashFS file at {Utils.blue_text(self.target_overlay_path)}...")
-        environ = Utils.get_exec_environ()
         cmd_mksqf = [
             Config.SYSTEM_APPTAINER_BIN, "sif", "dump",
             str(squashfs_id), self.tmp_overlay_path
@@ -1011,7 +974,7 @@ class BuildObject:
         Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_mksqf}")
         try:
             with open(self.target_overlay_path, 'wb') as out_f:
-                subprocess.run(cmd_mksqf, check=True, env=environ, stdout=out_f, stderr=subprocess.PIPE)
+                subprocess.run(cmd_mksqf, check=True, stdout=out_f, stderr=subprocess.PIPE)
         except subprocess.CalledProcessError:
             self.print_create_error_message()
             self.create_cleanup(failed=True)
@@ -1070,9 +1033,8 @@ class BuildObject:
         else:
             env_settings.extend(["--env", f"target_dir=/cnt/{self.relative_path}"])
 
-        environ = Utils.get_exec_environ()
         cmd_create = [
-            Config.APPTAINER_BIN, "exec",
+            Config.SYSTEM_APPTAINER_BIN, "exec",
             *env_settings,
             "--env", f"SLURM_CPUS_PER_TASK={self.ncpus}",
             "--env", "IN_CONDATINER=1",
@@ -1097,7 +1059,7 @@ class BuildObject:
         Utils.print_debug(f"[BUILD] Running build script with command: {cmd_create}")
 
         try:
-            subprocess.run(cmd_create, check=True, input=("\n".join(self.interactive_inputs) + "\n").encode(), env=environ)
+            subprocess.run(cmd_create, check=True, input=("\n".join(self.interactive_inputs) + "\n").encode())
         except subprocess.CalledProcessError:
             Utils.print_error(f"Build script {Utils.blue_text(self.build_source)} failed.")
             self.create_cleanup(failed=True)
@@ -1113,9 +1075,8 @@ class BuildObject:
             Utils.share_to_ugo_recursive(self.cnt_dir_path)
 
             Utils.print_message(f"Creating SquashFS file at {Utils.blue_text(self.target_overlay_path)}...")
-            environ = Utils.get_exec_environ()
             cmd_mksqf = [
-                Config.APPTAINER_BIN, "exec",
+                Config.SYSTEM_APPTAINER_BIN, "exec",
                 "--overlay", self.tmp_overlay_path,
                 "--bind", Config.CONDATINER_DIR,
                 Config.BASE_IMAGE_SIF,
@@ -1126,7 +1087,7 @@ class BuildObject:
             ]
             Utils.print_debug(f"[BUILD] Creating overlay with command: {cmd_mksqf}")
             try:
-                subprocess.run(cmd_mksqf, check=True, env=environ)
+                subprocess.run(cmd_mksqf, check=True)
             except subprocess.CalledProcessError:
                 self.print_create_error_message()
                 self.create_cleanup(failed=True)
@@ -1134,9 +1095,8 @@ class BuildObject:
         else:
             # app overlay
             Utils.print_message(f"Creating SquashFS file at {Utils.blue_text(self.target_overlay_path)}...")
-            environ = Utils.get_exec_environ()
             cmd_mksqf = [
-                Config.APPTAINER_BIN, "exec",
+                Config.SYSTEM_APPTAINER_BIN, "exec",
                 "--overlay", self.tmp_overlay_path,
                 "--bind", Config.CONDATINER_DIR,
                 Config.BASE_IMAGE_SIF,
@@ -1151,7 +1111,7 @@ class BuildObject:
 
             Utils.print_debug(f"[BUILD] Creating overlay with command: {cmd_mksqf}")
             try:
-                subprocess.run(cmd_mksqf, check=True, env=environ)
+                subprocess.run(cmd_mksqf, check=True)
             except subprocess.CalledProcessError:
                 self.print_create_error_message()
                 self.create_cleanup(failed=True)
@@ -1503,9 +1463,8 @@ class CondaTainer_Create:
             return False
 
         try:
-            environ = Utils.get_exec_environ()
             cmd_create = [
-                Config.APPTAINER_BIN, "exec",
+                Config.SYSTEM_APPTAINER_BIN, "exec",
                 "--env", "TMPDIR=/ext3/tmp",
                 "--overlay", tmp_overlay_path,
                 *CondaTainer.generate_bind_args(*to_bind_paths),
@@ -1526,7 +1485,7 @@ class CondaTainer_Create:
             Utils.print_debug(f"[CREATE] Creating overlay with command: {cmd_create}")
 
             try:
-                subprocess.run(cmd_create, check=True, env=environ)
+                subprocess.run(cmd_create, check=True)
             except subprocess.CalledProcessError:
                 Utils.print_error(f"Creating {Utils.blue_text(overlay_abs_path)} from {Utils.blue_text(file_path)} failed.")
                 Utils.print_note("If file/folder creation failed, please contact your system admin.")
@@ -1943,10 +1902,8 @@ class CondaTainer_Exec:
                 additional_binds.append("--bind")
                 additional_binds.append(bp)
 
-        environ = Utils.get_exec_environ()
-
         exec_cmd = [
-            Config.APPTAINER_BIN, "exec",
+            Config.SYSTEM_APPTAINER_BIN, "exec",
             *CondaTainer_Exec.generate_overlay_args(paths_or_name_versions),
             *env_params,
             "--env", f"PATH={path_env}",
@@ -1980,7 +1937,7 @@ class CondaTainer_Exec:
                 if last_img is not None and CondaTainer_Exec.is_img_writable:
                     print(f"Overlay env:\n  {Utils.yellow_text('CNT_CONDA_PREFIX')}: {Utils.blue_text('/ext3/env')}\n")
         try:
-            subprocess.run(exec_cmd, check=True, capture_output=capture_output, env=environ)
+            subprocess.run(exec_cmd, check=True, capture_output=capture_output)
         except subprocess.CalledProcessError:
             if last_img is not None and Utils.is_in_interactive_shell() and not capture_output:
                 Utils.print_error("Command execution failed inside the container with writable image.")
@@ -2612,7 +2569,7 @@ class CondaTainer_Overlay:
         parser.add_argument(
             "--fakeroot",
             action="store_true",
-            help="fakeroot overlay (cannot be used without --fakeroot later, not recommended)"
+            help="fakeroot overlay (must use --fakeroot later, but supports 'apt' and other root operations)"
         )
         parser.add_argument(
             "image",
@@ -2658,7 +2615,7 @@ class CondaTainer_Overlay:
 
         Utils.print_message(f"Creating overlay image at {Utils.blue_text(overlay_path)} with size {Utils.yellow_text(str(size_mib) + ' MiB')}...")
         cmd_overlay = [
-            Config.APPTAINER_BIN, "overlay", "create",
+            Config.SYSTEM_APPTAINER_BIN, "overlay", "create",
             "--size", str(size_mib), "--sparse",
             *fakeroot_arg,
             overlay_path
@@ -2738,106 +2695,19 @@ class CondaTainer_Overlay:
 
         Utils.print_message(f"Changing recursive ownership of {Utils.blue_text(target_path)}...")
 
-        environ = Utils.get_exec_environ()
         cmd_chown = [
-            Config.APPTAINER_BIN, "exec",
-            "--fakeroot", 
+            Config.SYSTEM_APPTAINER_BIN, "exec",
+            "--fakeroot",
             "--overlay", overlay_path,
             Config.BASE_IMAGE_SIF,
             "chown", "-R", f"{target_uid}:{target_gid}", target_path
         ]
 
         try:
-            subprocess.run(cmd_chown, check=True, env=environ)
+            subprocess.run(cmd_chown, check=True)
             Utils.print_success("Ownership changed successfully.")
         except subprocess.CalledProcessError as e:
             Utils.print_error(f"Failed to change ownership: {e}")
-
-class CondaTainer_Apptainer:
-    @staticmethod
-    def add_parser_arguments(parser):
-        CondaTainer_Apptainer.parser_apptainer = parser.add_parser("apptainer", help="Get latest Apptainer executable from conda-forge")
-        CondaTainer_Apptainer.parser_apptainer.add_argument(
-            "-y", "--yes",
-            action="store_true",
-            help="Automatically confirm installation"
-        )
-        CondaTainer_Apptainer.parser_apptainer.add_argument(
-            "-f", "--force",
-            action="store_true",
-            help="Force re-installation even if Apptainer is already installed"
-        )
-
-    @staticmethod
-    def parse_apptainer_args(args):
-        if os.path.isdir(Config.LOCAL_APPTAINER_DIR) and not args.force:
-            Utils.print_message(f"Apptainer executable already exists at {Config.LOCAL_APPTAINER_DIR}. Use -f or --force to re-install.")
-            return
-
-        if not args.yes:
-            Utils.print_warning("You cannot build sif images with conda-forge Apptainer.")
-            Utils.print_message("Are you sure you want to install? [y/N]: ", end="", flush=True)
-            confirm = input()
-            if confirm.lower() != 'y':
-                Utils.print_message("Installation cancelled by user.")
-                return
-
-        CondaTainer_Apptainer.install_apptainer(args.force)
-
-    @staticmethod
-    def secure_local_micromamba():
-        if os.path.exists(Config.LOCAL_MICROMAMBA_BIN):
-            return True
-
-        # Detect architecture
-        machine = platform.machine()
-        if machine in ("aarch64", "ppc64le", "arm64"):
-            ARCH = machine
-        else:
-            ARCH = "64"
-
-        release_url = f"https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-{ARCH}"
-        if Utils.download_executable(release_url, Config.LOCAL_MICROMAMBA_BIN):
-            Utils.print_success(f"Micromamba downloaded to {Config.LOCAL_MICROMAMBA_BIN}.")
-            return True
-        else:
-            Utils.print_error("Failed to download Micromamba.")
-            return False
-
-    @staticmethod
-    def install_apptainer(force: bool = False):
-        if not CondaTainer_Apptainer.secure_local_micromamba():
-            Utils.print_error("Cannot proceed with Apptainer installation without Micromamba.")
-            return
-
-        if not force and os.path.isdir(Config.LOCAL_APPTAINER_DIR):
-            Utils.print_message(f"Apptainer already exists at {Config.LOCAL_APPTAINER_DIR}. Use -f or --force to re-install.")
-            return
-
-        Utils.print_message("Installing Apptainer using Micromamba...")
-        cmd_install = [
-            Config.LOCAL_MICROMAMBA_BIN,
-            "-r", os.path.join(Config.CONDATINER_DIR, "micromamba_env"),
-            "create", "-c", "conda-forge",
-            "-y", "--no-allow-softlinks",
-            "-p", Config.LOCAL_APPTAINER_DIR,
-            "apptainer"
-        ]
-
-        Utils.print_debug(f"[APPTAINER] Installing Apptainer with command: {cmd_install}")
-
-        try:
-            subprocess.run(cmd_install, check=True)
-            Utils.print_success(f"Apptainer installed to {Utils.blue_text(Config.LOCAL_APPTAINER_DIR)}.")
-            Utils.print_message("Cleaning up Micromamba environment...")
-            shutil.rmtree(os.path.join(Config.CONDATINER_DIR, "micromamba_env"), ignore_errors=True)
-            shutil.rmtree(os.path.join(Config.LOCAL_APPTAINER_DIR, "conda-meta"), ignore_errors=True)
-            if not os.path.isfile(os.path.join(os.path.dirname(Config.SCRIPT_PATH), "modgen")):
-                if os.path.isfile(Config.LOCAL_MICROMAMBA_BIN):
-                    os.remove(Config.LOCAL_MICROMAMBA_BIN)
-
-        except subprocess.CalledProcessError:
-            Utils.print_error("Failed to install Apptainer.")
 
 class CondaTainer_Update:
     @staticmethod
@@ -2882,6 +2752,8 @@ class CondaTainer_Completion:
         script_name = Config.SCRIPT_NAME
         target_shell = args.shell
 
+        # Regex for installed system images (no extension in name)
+        # We assume installed images are stripped of extensions in the listing logic
         ext_regex = r"[.](sqf|sqsh|squashfs|img)$"
 
         if target_shell == "bash":
@@ -2892,7 +2764,7 @@ _{script_name}_completion() {{
     cur="${{COMP_WORDS[COMP_CWORD]}}"
     prev="${{COMP_WORDS[COMP_CWORD-1]}}"
 
-    local subcommands="create install i avail av list ls remove rm delete del exec e check c run r info apptainer self-update completion overlay o"
+    local subcommands="create install i avail av list ls remove rm delete del exec e check c run r info self-update completion overlay o"
     local global_opts="--debug --no-sbatch --local -v --version -h --help"
 
     if [[ ${{COMP_CWORD}} -eq 1 ]]; then
@@ -2906,30 +2778,27 @@ _{script_name}_completion() {{
 
     local subcommand="${{COMP_WORDS[1]}}"
 
+    # Usage: _list_overlays <include_app> <include_data>
+    # Returns only the installed overlay names (no local files)
     _list_overlays() {{
-        local include_local=$1
+        local include_app=$1
+        local include_data=$2
         local img_dir="{Config.IMAGES_DIR}"
         local ref_dir="{Config.REF_IMAGES_DIR}"
         local files=""
 
-        # System images (strip extensions, replace -- with /)
-        # grep -E '{ext_regex}' matches the extensions
-        if [ -d "$img_dir" ]; then
+        # App Overlays (<= 1 slash)
+        if [[ "$include_app" == "true" && -d "$img_dir" ]]; then
             local sys_imgs=$(ls -1 "$img_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
             files="$files $sys_imgs"
         fi
 
-        if [ -d "$ref_dir" ]; then
+        # Data Overlays (> 1 slash)
+        if [[ "$include_data" == "true" && -d "$ref_dir" ]]; then
             local ref_imgs=$(ls -1 "$ref_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
             files="$files $ref_imgs"
         fi
 
-        # Local images (keep extensions)
-        if [[ "$include_local" == "true" ]]; then
-            # List local files matching specific extensions
-            local local_files=$(ls -1 2>/dev/null | grep -E '{ext_regex}')
-            files="$files $local_files"
-        fi
         echo "$files"
     }}
 
@@ -2941,7 +2810,10 @@ _{script_name}_completion() {{
                 if [[ "${{cur}}" == -* ]]; then
                     COMPREPLY=( $(compgen -W "-u --uid -g --gid -p --path" -- "${{cur}}") )
                 else
-                    COMPREPLY=( $(compgen -W "$(_list_overlays true)" -- "${{cur}}") )
+                    # chown usually targets local file or app overlay
+                    local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img)$')
+                    local sys_files=$(_list_overlays true true)
+                    COMPREPLY=( $(compgen -W "$local_files $sys_files" -- "${{cur}}") )
                 fi
             elif [[ "${{COMP_WORDS[2]}}" == "create" ]]; then
                 if [[ "${{cur}}" == -* ]]; then
@@ -2977,9 +2849,19 @@ _{script_name}_completion() {{
             ;;
         exec)
             if [[ "${{prev}}" == "-o" || "${{prev}}" == "--overlay" ]]; then
-                COMPREPLY=( $(compgen -W "$(_list_overlays true)" -- "${{cur}}") )
+                # Overlay Arg: External(sqf/img) + App + Data
+                local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img)$')
+                local sys_files=$(_list_overlays true true)
+                COMPREPLY=( $(compgen -W "$local_files $sys_files" -- "${{cur}}") )
+
+            elif [[ "${{prev}}" == "-b" || "${{prev}}" == "--base-image" ]]; then
+                # Base Image: External(sqf/img/sif) + App ONLY
+                local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img|sif)$')
+                local sys_files=$(_list_overlays true false)
+                COMPREPLY=( $(compgen -W "$local_files $sys_files" -- "${{cur}}") )
+
             else
-                local opts="-o --overlay -k --keep -w --writable-img --env --bind --fakeroot"
+                local opts="-o --overlay -k --keep -w --writable-img --env --bind --fakeroot -b --base-image"
                 if [[ "${{cur}}" == -* ]]; then
                     COMPREPLY=( $(compgen -W "${{opts}}" -- "${{cur}}") )
                 else
@@ -2998,7 +2880,12 @@ _{script_name}_completion() {{
             ;;
         run|r)
             if [[ "${{cur}}" == -* ]]; then
-                COMPREPLY=( $(compgen -W "-w --writable-img -a --auto-install -i --install" -- "${{cur}}") )
+                COMPREPLY=( $(compgen -W "-w --writable-img -a --auto-install -i --install -b --base-image" -- "${{cur}}") )
+            elif [[ "${{prev}}" == "-b" || "${{prev}}" == "--base-image" ]]; then
+                # Base Image: External(sqf/img/sif) + App ONLY
+                local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img|sif)$')
+                local sys_files=$(_list_overlays true false)
+                COMPREPLY=( $(compgen -W "$local_files $sys_files" -- "${{cur}}") )
             else
                 COMPREPLY=( $(compgen -f -- "${{cur}}") )
             fi
@@ -3016,12 +2903,6 @@ _{script_name}_completion() {{
             fi
             return 0
             ;;
-        apptainer)
-            if [[ "${{cur}}" == -* ]]; then
-                COMPREPLY=( $(compgen -W "-y --yes -f --force" -- "${{cur}}") )
-            fi
-            return 0
-            ;;
         self-update)
             if [[ "${{cur}}" == -* ]]; then
                 COMPREPLY=( $(compgen -W "-y --yes" -- "${{cur}}") )
@@ -3033,16 +2914,32 @@ _{script_name}_completion() {{
             return 0
             ;;
         remove|rm|delete|del)
-            # Only system images
-            COMPREPLY=( $(compgen -W "$(_list_overlays false)" -- "${{cur}}") )
+            # Only system images (App + Data)
+            local sys_files=$(_list_overlays true true)
+            COMPREPLY=( $(compgen -W "$sys_files" -- "${{cur}}") )
             return 0
             ;;
-        e|info)
-            if [[ "${{subcommand}}" == "e" && "${{cur}}" == -* ]]; then
-                 COMPREPLY=( $(compgen -W "-r --read-only -n --no-autoload --fakeroot" -- "${{cur}}") )
+        e)
+            if [[ "${{cur}}" == -* ]]; then
+                 COMPREPLY=( $(compgen -W "-r --read-only -n --no-autoload --fakeroot -b --base-image" -- "${{cur}}") )
+            elif [[ "${{prev}}" == "-b" || "${{prev}}" == "--base-image" ]]; then
+                 # Base Image: External(sqf/img/sif) + App ONLY
+                 local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img|sif)$')
+                 local sys_files=$(_list_overlays true false)
+                 COMPREPLY=( $(compgen -W "$local_files $sys_files" -- "${{cur}}") )
             else
-                 COMPREPLY=( $(compgen -W "$(_list_overlays true)" -- "${{cur}}") )
+                 # Normal Arg: External(sqf/img) + App + Data
+                 local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img)$')
+                 local sys_files=$(_list_overlays true true)
+                 COMPREPLY=( $(compgen -W "$local_files $sys_files" -- "${{cur}}") )
             fi
+            return 0
+            ;;
+        info)
+            # Info only takes an overlay, no flags
+            local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img)$')
+            local sys_files=$(_list_overlays true true)
+            COMPREPLY=( $(compgen -W "$local_files $sys_files" -- "${{cur}}") )
             return 0
             ;;
         *)
@@ -3063,6 +2960,7 @@ _{script_name}_completion() {{
 
     _arguments -C \\
         '(-v --version)'{{-v,--version}}'[Show version]' \\
+        '(-h --help)'{{-h,--help}}'[Show help]' \\
         '--debug[Enable debug mode]' \\
         '(-n --no-sbatch --local)'{{-n,--no-sbatch,--local}}'[Run locally without sbatch]' \\
         '1: :->command' \\
@@ -3087,7 +2985,6 @@ _{script_name}_completion() {{
                 'run:Run a script with auto-solving deps'
                 'r:Alias for run'
                 'info:Show overlay information'
-                'apptainer:Get latest Apptainer'
                 'self-update:Update CondaTainer'
                 'completion:Generate shell completion'
                 'overlay:Manage overlay images (img)'
@@ -3098,27 +2995,29 @@ _{script_name}_completion() {{
         args)
             local subcommand="${{words[1]}}"
 
-            _list_overlays() {{
-                local include_local=$1
+            # Helper to list installed overlays via _describe
+            # Usage: _installed_overlays <include_app> <include_data>
+            _installed_overlays() {{
+                local include_app=$1
+                local include_data=$2
                 local img_dir="{Config.IMAGES_DIR}"
                 local ref_dir="{Config.REF_IMAGES_DIR}"
                 local -a overlays
-                # System images
-                if [[ -d "$img_dir" ]]; then
+
+                # App overlays
+                if [[ "$include_app" == "true" && -d "$img_dir" ]]; then
                      local sys_found=$(ls -1 "$img_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
                      [[ -n "$sys_found" ]] && overlays+=(${{(f)sys_found}})
                 fi
-                if [[ -d "$ref_dir" ]]; then
+                # Data overlays
+                if [[ "$include_data" == "true" && -d "$ref_dir" ]]; then
                      local ref_found=$(ls -1 "$ref_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
                      [[ -n "$ref_found" ]] && overlays+=(${{(f)ref_found}})
                 fi
-
-                # Local images (keep extensions)
-                if [[ "$include_local" == "true" ]]; then
-                    local local_imgs=$(ls -1 2>/dev/null | grep -E '{ext_regex}')
-                    [[ -n "$local_imgs" ]] && overlays+=(${{(f)"$local_imgs"}})
+                
+                if [[ ${{#overlays}} -gt 0 ]]; then
+                    _describe -t overlays 'installed overlays' overlays
                 fi
-                _describe -t overlays 'overlays' overlays
             }}
 
             case $subcommand in
@@ -3146,7 +3045,7 @@ _{script_name}_completion() {{
                                         '(-u --uid)'{{-u,--uid}}'[User ID]:uid' \\
                                         '(-g --gid)'{{-g,--gid}}'[Group ID]:gid' \\
                                         '(-p --path)'{{-p,--path}}'[Path inside overlay]:path' \\
-                                        ':overlay:_list_overlays true'
+                                        ':overlay:_alternative "files:file:_files -g \\"*.sqf *.img\\"" "overlays:installed:_installed_overlays true true"'
                                     ;;
                             esac
                             ;;
@@ -3175,10 +3074,11 @@ _{script_name}_completion() {{
                     ;;
                 exec)
                     _arguments \\
-                        '*(-o --overlay)'{{-o,--overlay}}'[Mount overlay]:overlay:_list_overlays true' \\
+                        '*(-o --overlay)'{{-o,--overlay}}'[Mount overlay]: :_alternative "files:file:_files -g \\"*.sqf *.img\\"" "overlays:installed:_installed_overlays true true"' \\
                         '(-k --keep)'{{-k,--keep}}'[Do not parse command to installed overlays]' \\
                         '(-w --writable-img)'{{-w,--writable-img}}'[Make .img overlays writable]' \\
                         '--fakeroot[Run with fake root]' \\
+                        '(-b --base-image)'{{-b,--base-image}}'[Base image]: :_alternative "files:file:_files -g \\"*.sqf *.img *.sif\\"" "overlays:installed:_installed_overlays true false"' \\
                         '*--env[Env setting KEY=VALUE]:env' \\
                         '*--bind[Bind path HOST:CONTAINER]:bind' \\
                         '*:command:_files'
@@ -3188,7 +3088,8 @@ _{script_name}_completion() {{
                         '(-r --read-only)'{{-r,--read-only}}'[Mount read-only]' \\
                         '(-n --no-autoload)'{{-n,--no-autoload}}'[No autoload env.img]' \\
                         '--fakeroot[Run with fake root]' \\
-                        '*:overlay:_list_overlays true'
+                        '(-b --base-image)'{{-b,--base-image}}'[Base image]: :_alternative "files:file:_files -g \\"*.sqf *.img *.sif\\"" "overlays:installed:_installed_overlays true false"' \\
+                        '*:overlay: :_alternative "files:file:_files -g \\"*.sqf *.img\\"" "overlays:installed:_installed_overlays true true"'
                     ;;
                 check|c)
                     _arguments \\
@@ -3199,6 +3100,7 @@ _{script_name}_completion() {{
                     _arguments \\
                         '(-w --writable-img)'{{-w,--writable-img}}'[Make .img writable]' \\
                         '(-a --auto-install -i --install)'{{-a,-i,--auto-install,--install}}'[Auto install deps]' \\
+                        '(-b --base-image)'{{-b,--base-image}}'[Base image]: :_alternative "files:file:_files -g \\"*.sqf *.img *.sif\\"" "overlays:installed:_installed_overlays true false"' \\
                         ':script:_files'
                     ;;
                 avail|av)
@@ -3211,11 +3113,6 @@ _{script_name}_completion() {{
                         '(-d --delete -r --remove)'{{-d,-r,--delete,--remove}}'[Delete listed]' \\
                         '*:term'
                     ;;
-                apptainer)
-                    _arguments \\
-                        '(-y --yes)'{{-y,--yes}}'[Confirm]' \\
-                        '(-f --force)'{{-f,--force}}'[Force re-install]'
-                    ;;
                 self-update)
                     _arguments \\
                         '(-y --yes)'{{-y,--yes}}'[Confirm]'
@@ -3224,10 +3121,13 @@ _{script_name}_completion() {{
                     _arguments ':shell:(bash zsh)'
                     ;;
                 remove|rm|delete|del)
-                    _list_overlays false
+                    # Only system images
+                    _installed_overlays true true
                     ;;
                 info)
-                    _list_overlays true
+                    # Info command only takes overlays, no flags
+                    _arguments \\
+                        ':overlay: :_alternative "files:file:_files -g \\"*.sqf *.img\\"" "overlays:installed:_installed_overlays true true"'
                     ;;
                 *)
                     _files
