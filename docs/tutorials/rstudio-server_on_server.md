@@ -82,7 +82,7 @@ curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/insta
 Creating required overlay images:
 
 ```bash
-condatainer install rstudio-server build-essential
+condatainer install rstudio-server
 ```
 
 ## Create R Writable Overlay
@@ -95,13 +95,16 @@ condatainer overlay -s 30720
 
 # go into the overlay
 condatainer e
+```
 
-# INSIDE THE OVERLAY
+In side the overlay, you can use `mm-*` commands
+
+```bash
 # install R and required packages
 mm-install r-base=4.4 r-tidyverse
-# pin the R version to avoid accidental updates
-mm-pin r-base
 ```
+
+See [Launch a Shell with the Project Environment](../user_guide/condatainer_project_level_writable.md#launch-a-shell-with-the-project-environment) for more details.
 
 ## RStudio Server Helper Script
 
@@ -216,10 +219,10 @@ If you only use R packages from Conda, you can run R directly without RStudio Se
 condatainer exec -o env.img Rscript your_script.R
 ```
 
-If you have R packages built from GitHub or source, you need to load `build-essential` to avoid missing libraries:
+If you have R packages built from GitHub or source, you need to load your additional overlay too:
 
 ```bash
-condatainer exec -o build-essential -o env.img Rscript your_script.R
+condatainer exec -o additional-deps.sqf -o env.img Rscript your_script.R
 ```
 
 ## Change the default setting
@@ -255,7 +258,11 @@ See [this issue](https://github.com/rstudio/rstudio/issues/15024) for more detai
 
 This is caused by `rserver` trying to create runtime files with long UUID names.
 
-For example, if your home/scratch directory is in a deep path like `/workspace/lab/long_last_name_lab/<your_username>/`, then RStudio will try to create socket files with very long paths like: `/workspace/lab/long_last_name_lab/<your_username>/.local/share/rstudio/run/other_stuff/<very_long_uuid>/rstudio-server/session-server-rpc.socket`.
+For example, if your home/scratch directory is in a deep path like `/workspace/lab/long_last_name_lab/<your_username>/`, then RStudio will try to create socket files with very long paths like: 
+
+```
+/workspace/lab/long_last_name_lab/<your_username>/.local/share/rstudio/run/other_stuff/<very_long_uuid>/rstudio-server/session-server-rpc.socket
+```
 
 To fix this, you need to change this line:
 

@@ -1,7 +1,7 @@
 CondaTainer
 =========================
 
-`CondaTainer <https://github.com/Justype/condatainer>`_ is an HPC-oriented wrapper tool that leverages Apptainer, SquashFS, OverlayFS, and Micromamba to enable the easy management of isolated single-environment files, software packages, reference data, and indices.
+`CondaTainer <https://github.com/Justype/condatainer>`_ is an HPC-oriented wrapper tool that leverages Apptainer, SquashFS, and Micromamba to enable the easy management of isolated single-environment files, software packages, reference data, and indices.
 
 .. note::
    * **Solve the Small File Problem:** CondaTainer packs a Conda environment (30k+ inodes) into a **single, portable file**, reducing load on HPC parallel filesystems (Lustre/GPFS).
@@ -58,7 +58,7 @@ Which one to choose?
   :caption: Advanced Usage:
   :maxdepth: 1
   
-  Custom Apptainer DEF <advanced_usage/condatainer_custom_def>
+  Custom System SQF <advanced_usage/condatainer_custom_def>
   Custom Build Script <advanced_usage/condatainer_custom_script>
 
 .. toctree::

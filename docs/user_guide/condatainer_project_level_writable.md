@@ -74,6 +74,11 @@ Then you can use `mm-*` commands to manage your project environment.
 # Install numpy package
 mm-install numpy
 
+# Pin a package version
+mm-pin numpy
+# Unpin a package
+mm-pin -d numpy
+
 # List installed packages
 mm-list
 
@@ -194,6 +199,7 @@ Remember they need to run this command instead of you.
 Or they can use `--fakeroot` when running `condatainer exec` to avoid permission issues:
 
 ```bash
+# May not work on HPC systems
 condatainer exec --fakeroot -o env.img <command>
 ```
 
@@ -204,11 +210,20 @@ condatainer exec --fakeroot -o env.img <command>
 It means the overlay image is full. You can try to:
 
 - run `mm-clean -a` to clean up unused packages and caches. 
-- increase the size of the overlay image by creating a new one with larger size and reinstall the packages.
+- increase the size of the overlay image by running:
+
+```bash
+condatainer overlay resize env.img -s <new_size_in_MiB>
+```
 
 ### Permission errors when executing commands
 
 See the [Permissions inside the overlay](#permissions-inside-the-overlay) section above.
+
+```bash
+# change UID/GID inside to your own
+condatainer overlay chown env.img
+```
 
 ### The overlay is used by another process
 

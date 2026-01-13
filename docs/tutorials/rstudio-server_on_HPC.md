@@ -99,7 +99,7 @@ curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/insta
 Creating required overlay images:
 
 ```bash
-condatainer install rstudio-server build-essential
+condatainer install rstudio-server
 ```
 
 ## Create R Writable Overlay
@@ -112,13 +112,16 @@ condatainer overlay -s 30720
 
 # go into the overlay
 condatainer e
+```
 
-# INSIDE THE OVERLAY
+In side the overlay, you can use `mm-*` commands
+
+```bash
 # install R and required packages
 mm-install r-base=4.4 r-tidyverse
-# pin the R version to avoid accidental updates
-mm-pin r-base
 ```
+
+See [Launch a Shell with the Project Environment](../user_guide/condatainer_project_level_writable.md#launch-a-shell-with-the-project-environment) for more details.
 
 ## RStudio Server Helper Script
 
@@ -147,7 +150,7 @@ Options:
   -t <time>       Time limit for the job (default: 12:00:00)
   -p <port>       Port for rstudio-server (default: 8787)
   -e <overlay>    Environment overlay image file (default: env.img)
-  -o <overlay>    Additional overlay files (can have -o options)
+  -o <overlay>    Additional overlay files (can have multiple -o options)
   -y              Accept all warnings and proceed
   -h              Show this help message
 ```
@@ -179,7 +182,7 @@ You can run the following command in R to open the project directly:
   rstudioapi::openProject("/scratch/your_username/current_working_directory")
 ```
 
-Then you can go to your local web browser and access `http://localhost:8787`.
+Then you can go to your local web browser and access [http://localhost:8787](http://localhost:8787).
 
 Run the provided R command in the R console to open the project directly.
 
@@ -223,7 +226,7 @@ mm-install r-pak
 Then in R:
 
 ```R
-pak::pkg_sysreqs("package_from_github")
+pak::pkg_sysreqs("user/repo@commit_hash") # or @tag
 ```
 
 If system libraries are missing, you can create your `additional-deps` overlay with the required system libraries. (ignore pandoc missing warning)
@@ -246,10 +249,10 @@ If you only use R packages from Conda, you can run R directly without RStudio Se
 condatainer exec -o env.img Rscript your_script.R
 ```
 
-If you have R packages built from GitHub or source, you need to load `build-essential` to avoid missing libraries:
+If you have R packages built from GitHub or source, you need to load your additional overlay too:
 
 ```bash
-condatainer exec -o build-essential -o env.img Rscript your_script.R
+condatainer exec -o additional-deps.sqf -o env.img Rscript your_script.R
 ```
 
 ## Change the default setting

@@ -13,6 +13,10 @@ So you need:
 1. Use conda to install R and other packages.
 2. Use `pak` to install `DoubletFinder` from GitHub.
 
+```{note}
+R will compile packages from source. If you need additional system libraries, check this: [Custom Definition File](condatainer_custom_def.md#step-by-step-guide-additional-dependencies).
+```
+
 ### 1. Create a Custom Build Script
 
 `doubletfinder.sh`
