@@ -1831,9 +1831,11 @@ class CondaTainer_Exec:
         paths = [ "/usr/sbin", "/usr/bin" ]
         overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
         for path in overlay_abs_paths:
-            name = os.path.basename(path)
-            name = os.path.splitext(name)[0]  # Remove extension
-            name = name.replace("=", "/").replace("--", "/")
+            name = os.path.splitext(os.path.basename(path))[0]
+            name = Utils.normalize_name_version(name)
+            n_slash = name.count('/')
+            if n_slash > 1: # skip ref
+                continue
             if Utils.is_img(path):
                 relative_path = "/ext3/env/bin"
             elif Utils.is_sqf(path):
@@ -2520,10 +2522,7 @@ class CondaTainer_Run:
 class CondaTainer_Overlay:
     @staticmethod
     def add_parser_arguments(parser):
-        parser_overlay = parser.add_parser(
-            "overlay",
-            help="Manage overlay images (create, chown)"
-        )
+        parser_overlay = parser.add_parser("overlay", help="Manage overlay images (create, chown)")
         subparsers = parser_overlay.add_subparsers(
             dest="overlay_action",
             metavar="ACTION",
@@ -2531,16 +2530,10 @@ class CondaTainer_Overlay:
             help="Overlay actions"
         )
 
-        parser_create = subparsers.add_parser(
-            "create",
-            help="Create a new empty overlay image"
-        )
+        parser_create = subparsers.add_parser("create", help="Create a new empty overlay image")
         CondaTainer_Overlay._add_create_args(parser_create)
 
-        parser_chown = subparsers.add_parser(
-            "chown",
-            help="Change ownership (UID:GID) of files inside an overlay"
-        )
+        parser_chown = subparsers.add_parser("chown", help="Change ownership (UID:GID) of files inside an overlay")
         parser_chown.add_argument(
             "image",
             type=str,
@@ -2559,16 +2552,18 @@ class CondaTainer_Overlay:
             help=f"Group ID to set (default: current group {os.getgid()})"
         )
         parser_chown.add_argument(
+            "--root",
+            action="store_true",
+            help="Set UID and GID to 0 (root); will override -u and -g options"
+        )
+        parser_chown.add_argument(
             "-p", "--path",
             type=str,
             default="/ext3",
             help="Path inside the overlay to change (default: /ext3)"
         )
 
-        parser_o = parser.add_parser(
-            "o",
-            help="Shortcut for 'overlay create'"
-        )
+        parser_o = parser.add_parser("o", help="Shortcut for 'overlay create'")
         CondaTainer_Overlay._add_create_args(parser_o)
 
     @staticmethod
@@ -2589,6 +2584,11 @@ class CondaTainer_Overlay:
             "--fakeroot",
             action="store_true",
             help="fakeroot overlay (must use --fakeroot later, but supports 'apt' and other root operations)"
+        )
+        parser.add_argument(
+            "--sparse",
+            action="store_true",
+            help="Create a sparse overlay image (default: false)"
         )
         parser.add_argument(
             "image",
@@ -2615,7 +2615,15 @@ class CondaTainer_Overlay:
         overlay_path = os.path.abspath(args.image)
         size_mib = args.size
         is_fakeroot = args.fakeroot
-        fakeroot_arg = [ "--fakeroot" ] if is_fakeroot else []
+        overlay_adj = " "
+        fakeroot_arg = []
+        if is_fakeroot:
+            overlay_adj += "fakeroot "
+            fakeroot_arg = [ "--fakeroot" ]
+        sparse_arg = []
+        if args.sparse:
+            overlay_adj += "sparse "
+            sparse_arg = [ "--sparse" ]
 
         if not Utils.is_img(overlay_path):
             if '.' in os.path.basename(overlay_path):
@@ -2632,11 +2640,11 @@ class CondaTainer_Overlay:
                 Utils.print_error(f"Conda env file {Utils.blue_text(args.file)} not found.")
                 return
 
-        Utils.print_message(f"Creating overlay image at {Utils.blue_text(overlay_path)} with size {Utils.yellow_text(str(size_mib) + ' MiB')}...")
+        Utils.print_message(f"Creating{overlay_adj}overlay at {Utils.blue_text(overlay_path)} with size {Utils.yellow_text(str(size_mib) + ' MiB')}...")
         cmd_overlay = [
             Config.SYSTEM_APPTAINER_BIN, "overlay", "create",
-            "--size", str(size_mib), "--sparse",
-            *fakeroot_arg,
+            "--size", str(size_mib),
+            *fakeroot_arg, *sparse_arg,
             overlay_path
         ]
 
@@ -2667,6 +2675,7 @@ class CondaTainer_Overlay:
 
     @staticmethod
     def run_chown(args):
+        """Use debugfs to recursively chown files inside an ext3 overlay image"""
         CondaTainer.ensure_base_image()
         overlay_path = os.path.abspath(args.image)
 
@@ -2676,57 +2685,127 @@ class CondaTainer_Overlay:
 
         target_uid = args.uid
         target_gid = args.gid
-        target_path = args.path
 
-        # Use debugfs fix hidden path (/upper, /work, /work/work) (or maybe <2> Root)
+        if args.root:
+            target_uid = 0
+            target_gid = 0
+        
+        # 1. Translate Logical Path to Internal Path
+        #    /       -> /upper
+        #    /opt    -> /upper/opt
+        user_path = args.path.strip()
+        internal_target_path = os.path.normpath(
+            os.path.join("/upper", user_path.lstrip(os.sep))
+        )
+
         debugfs_bin = shutil.which("debugfs")
         if not debugfs_bin:
             for fallback in ["/sbin/debugfs", "/usr/sbin/debugfs"]:
                 if os.path.exists(fallback):
                     debugfs_bin = fallback
                     break
+        
+        if not debugfs_bin:
+             Utils.print_error("Cannot fix permissions: 'debugfs' not found in PATH.")
+             return
 
-        if debugfs_bin:
+        Utils.print_message(f"Mapping inodes in {Utils.blue_text(os.path.basename(overlay_path))} starting at {Utils.blue_text(internal_target_path)}...")
+
+        try:
+            # --- PHASE 1: RECURSIVE INODE DISCOVERY ---
+            inodes_to_chown = set()
+            dirs_to_visit = []
+
+            # A. Get the starting inode of the target path
+            cmd_root = [debugfs_bin, "-R", f"stat {internal_target_path}", overlay_path]
+            proc_root = subprocess.run(cmd_root, capture_output=True, text=True)
+            
+            if proc_root.returncode != 0:
+                Utils.print_error(f"Path {internal_target_path} not found in image.")
+                return
+
+            match = re.search(r"Inode:\s+(\d+)", proc_root.stdout)
+            if match:
+                start_inode = match.group(1)
+                dirs_to_visit.append(start_inode)
+                inodes_to_chown.add(start_inode)
+            else:
+                Utils.print_error("Could not parse start inode.")
+                return
+
+            # B. Walk the tree
+            Utils.print_message("Scanning directory tree (this may take a moment)...")
+            
+            visited_dirs = set()
+            scanned_count = 0
+
+            while dirs_to_visit:
+                current_inode = dirs_to_visit.pop(0)
+                
+                if current_inode in visited_dirs:
+                    continue
+                visited_dirs.add(current_inode)
+
+                # List contents of this inode
+                list_cmd = [debugfs_bin, "-R", f"ls -l <{current_inode}>", overlay_path]
+                proc = subprocess.run(list_cmd, capture_output=True, text=True)
+                
+                for line in proc.stdout.splitlines():
+                    parts = line.strip().split()
+                    if not parts or not parts[0].isdigit():
+                        continue
+                    
+                    inode = parts[0]
+                    mode_octal = parts[1]
+                    name = parts[-1]
+
+                    if name in [".", ".."]:
+                        continue
+
+                    inodes_to_chown.add(inode)
+                    
+                    scanned_count += 1
+                    if scanned_count % 2000 == 0:
+                         print(f"\rScanning... Found {scanned_count} inodes so far...", end="", flush=True)
+
+                    if mode_octal.startswith("4") or mode_octal.startswith("04"):
+                        dirs_to_visit.append(inode)
+
+            print(f"\rScanning complete. Found {len(inodes_to_chown)} unique inodes.        ", flush=True)
+
+            # --- PHASE 2: BATCH UPDATE ---
+            if not inodes_to_chown:
+                 Utils.print_warning("No inodes found.")
+                 return
+
+            Utils.print_message(f"Modifying {Utils.magenta_text(len(inodes_to_chown))} inodes: UID={Utils.yellow_text(target_uid)}, GID={Utils.yellow_text(target_gid)}...")
+            
             cmds = []
-            critical_paths = ["/upper", "/work", "/work/work" ]
-            for path in critical_paths:
+            
+            # Explicitly fix overlay skeleton
+            for path in ["/upper", "/work", "/work/work"]:
                 cmds.append(f"sif {path} uid {target_uid}")
                 cmds.append(f"sif {path} gid {target_gid}")
 
-            try:
-                debugfs_script = "\n".join(cmds)
+            for inode in inodes_to_chown:
+                cmds.append(f"sif <{inode}> uid {target_uid}")
+                cmds.append(f"sif <{inode}> gid {target_gid}")
 
-                subprocess.run(
-                    [debugfs_bin, "-w", overlay_path],
-                    input=debugfs_script,
-                    text=True,
-                    check=True,
-                    stderr=subprocess.PIPE,
-                    stdout=subprocess.PIPE
-                )
-                Utils.print_success("Structural permissions fixed : /upper, /work, /work/work")
+            debugfs_script = "\n".join(cmds)
+            
+            subprocess.run(
+                [debugfs_bin, "-w", overlay_path],
+                input=debugfs_script,
+                text=True,
+                check=True,
+                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE
+            )
+            
+            Utils.print_success(f"{len(inodes_to_chown)} inodes chowned via debugfs.")
 
-            except subprocess.CalledProcessError as e:
-                err_msg = e.stderr.strip()
-                Utils.print_warning(f"Debugfs warning: {err_msg}")
-        else:
-            Utils.print_warning("'debugfs' not found in PATH or /sbin. Structural fix skipped.")
-
-        Utils.print_message(f"Changing recursive ownership of {Utils.blue_text(target_path)}...")
-
-        cmd_chown = [
-            Config.SYSTEM_APPTAINER_BIN, "exec",
-            "--fakeroot",
-            "--overlay", overlay_path,
-            Config.BASE_IMAGE_SIF,
-            "chown", "-R", f"{target_uid}:{target_gid}", target_path
-        ]
-
-        try:
-            subprocess.run(cmd_chown, check=True)
-            Utils.print_success("Ownership changed successfully.")
-        except subprocess.CalledProcessError as e:
-            Utils.print_error(f"Failed to change ownership: {e}")
+        except Exception as e:
+            Utils.print_error(f"Debugfs recursive chown failed: {e}")
 
 class CondaTainer_Update:
     @staticmethod
