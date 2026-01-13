@@ -149,6 +149,14 @@ class Utils:
         return f"\033[92m{text}\033[0m"
 
     @staticmethod
+    def cyan_text(text):
+        return f"\033[96m{text}\033[0m"
+
+    @staticmethod
+    def magenta_text(text):
+        return f"\033[95m{text}\033[0m"
+
+    @staticmethod
     def print_message(message, end="\n", flush=True):
         print(f"[CondaTainer] {message}", end=end, flush=flush)
 
@@ -2272,6 +2280,19 @@ class CondaTainer_Info:
             return None
 
     @staticmethod
+    def get_file_atime(file_path: str) -> Optional[datetime]:
+        try:
+            result = subprocess.check_output(
+                ['stat', '-c', '%X', file_path],
+                text=True
+            ).strip()
+
+            return datetime.fromtimestamp(int(result))
+
+        except (subprocess.CalledProcessError, ValueError):
+            return None
+
+    @staticmethod
     def get_compression_type(file_path) -> str:
         try:
             result = subprocess.check_output(
@@ -2314,27 +2335,39 @@ class CondaTainer_Info:
         else:
             print(f"Size: {file_size / 1_073_741_824:.2f} GiB")
 
-        print(f"Compression: {CondaTainer_Info.get_compression_type(overlay_path)}")
+        print(f"Compression:   {CondaTainer_Info.get_compression_type(overlay_path)}")
 
         btime_dt = CondaTainer_Info.get_file_btime(overlay_path)
         if btime_dt is not None:
             print(f"Creation time: {btime_dt:%Y-%m-%d %H:%M:%S}")
         else:
-            print("Creation time: Not available")
+            print("Creation time: not available")
         mtime_dt = CondaTainer_Info.get_file_mtime(overlay_path)
         if mtime_dt is not None:
             print(f"Last modified: {mtime_dt:%Y-%m-%d %H:%M:%S}")
         else:
-            print("Last modified: Not available")
+            print("Last modified: not available")
+        atime_dt = CondaTainer_Info.get_file_atime(overlay_path)
+        if atime_dt is not None:
+            print(f"Last accessed: {atime_dt:%Y-%m-%d %H:%M:%S}")
+        else:
+            print("Last accessed: not available")
 
         if Utils.is_sqf(overlay_path):
             name = os.path.splitext(os.path.basename(overlay_path))[0]
             name = name.replace('--', '/').replace('=', '/')
-            print(f"Potential mount path: {Utils.blue_text('/cnt/' + name)}")
+            print(f"Mount path:    /cnt/{name}")
         elif Utils.is_img(overlay_path):
-            name = os.path.splitext(os.path.basename(overlay_path))[0]
-            name = name.replace('--', '/').replace('=', '/')
-            print(f"Potential mount path: {Utils.blue_text('/ext3/env')}")
+            status = CondaTainer_Exec.inspect_image_uid_status(overlay_path, verboase=False)
+            if status == 0:
+                print("Files owner:   root owned (--fakeroot required)")
+            elif status == 1:
+                print("Files owner:   current UID")
+            elif status == 2:
+                print("Files owner:   different UID (chown required)")
+            else:
+                print("Files owner:   unknown")
+            print(f"Mount path:    /ext3/env")
 
         env_path = os.path.splitext(overlay_path)[0] + ".env"
         if os.path.isfile(env_path):
