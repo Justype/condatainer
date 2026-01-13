@@ -1775,13 +1775,18 @@ class CondaTainer_Exec:
         return other_paths + img_paths
 
     @staticmethod
-    def is_img_fakeroot(img_path: str) -> bool:
+    def inspect_image_uid_status(img_path: str, verboase = True) -> int:
         """
         Use debugfs to check if the 'upper' directory inside the ext3/4 image file
         is owned by user whose UID is not equal to current user
+
+        - 0 - root owned
+        - 1 - same UID
+        - 2 - different UID
+        - 9 - failed to check
         """
         if not Utils.is_img(img_path) and not os.path.isfile(img_path):
-            return False
+            return 9
         try:
             cmd = ["debugfs", "-R", "stat upper", img_path]
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
@@ -1789,11 +1794,16 @@ class CondaTainer_Exec:
             current_uid = os.getuid()
             if match:
                 uid = int(match.group(1))
-                return uid == 0 or uid != current_uid
-            return False
+                if uid == 0:
+                    return 0
+                elif uid == current_uid:
+                    return 1
+                else:
+                    return 2
+            return 9
         except subprocess.CalledProcessError:
             Utils.print_warning(f"Failed to check fakeroot status of image {img_path}. Assuming fakeroot.")
-            return False
+            return 9
 
     @staticmethod
     def get_overlay_env_notes(paths_or_name_version: List[str]) -> Dict[str, str]:
@@ -1881,9 +1891,15 @@ class CondaTainer_Exec:
             ])
 
             if CondaTainer_Exec.is_img_writable:
-                if CondaTainer_Exec.is_img_fakeroot(last_img) and not is_fakeroot:
-                    Utils.print_warning(f"{Utils.blue_text(os.path.basename(last_img))}'s inner UID is different. --fakeroot added automatically")
-                    fakeroot_param = [ "--fakeroot" ]
+                if not is_fakeroot:
+                    uid_status = CondaTainer_Exec.inspect_image_uid_status(last_img)
+                    if uid_status == 0:
+                        Utils.print_note(f"Root overlay {Utils.blue_text(os.path.basename(last_img))}. --fakeroot added automatically")
+                        fakeroot_param = [ "--fakeroot" ]
+                    elif uid_status == 2:
+                        Utils.print_warning(f"{Utils.blue_text(os.path.basename(last_img))}'s inner UID is different. --fakeroot added automatically")
+                        fakeroot_param = [ "--fakeroot" ]
+
                 img_env.extend([
                     "--env", "CNT_CONDA_PREFIX=/ext3/env",
                 ])
