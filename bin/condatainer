@@ -1372,6 +1372,11 @@ class CondaTainer_Create:
 
     @staticmethod
     def parse_create_args(args):
+        if "IN_CONDATINER" in os.environ and Utils.is_in_interactive_shell():
+            Utils.print_warning("You are running 'condatiner create' inside a CondaTainer overlay.")
+            response = input("Are you sure you want to continue? [y/N]: ")
+            if response.lower() != 'y':
+                return
         if not args.name_versions and not args.file and not args.source:
             CondaTainer_Create.parser_create.error("At least one of name_versions or --file or --source must be provided.")
         if args.name_versions and args.prefix:
@@ -1410,10 +1415,12 @@ class CondaTainer_Create:
             else:
                 return
             Utils.print_debug(f"[CREATE] Creating overlay from source: {args.source}")
-            CondaTainer_Create.create_sqf_from_source(abs_prefix, args.source)
+            if not CondaTainer_Create.create_sqf_from_source(abs_prefix, args.source):
+                exit(1)
         elif args.prefix:
             Utils.print_debug(f"[CREATE] Creating overlay with prefix: {args.prefix}")
-            CondaTainer_Create.create_prefix_env_sqf(args.prefix, args.file)
+            if not CondaTainer_Create.create_prefix_env_sqf(args.prefix, args.file):
+                exit(1)
         elif args.name:
             normalized_name = Utils.normalize_name_version(args.name)
             n_slash = normalized_name.count('/')
@@ -1424,13 +1431,15 @@ class CondaTainer_Create:
                 Utils.print_message(f"Overlay {Utils.yellow_text(os.path.basename(abs_path))} already exists at {Utils.blue_text(abs_path)}. Skipping creation.")
                 return
             Utils.print_debug(f"[CREATE] Creating overlay with name: {args.name}")
-            CondaTainer_Create.create_env_sqf(abs_path, args.file, args.name_versions)
+            if not CondaTainer_Create.create_env_sqf(abs_path, args.file, args.name_versions):
+                exit(1)
         else:
             build_objects = [BuildObject(nv) for nv in args.name_versions]
             for bo in build_objects:
                 Utils.print_debug(f"[CREATE] BuildObject created:\n{bo}")
             build_graph = BuildGraph(build_objects)
-            build_graph.run()
+            if not build_graph.run():
+                exit(1)
 
     @staticmethod
     def create_cleanup(normalized_name_version: str, failed: bool = False):
