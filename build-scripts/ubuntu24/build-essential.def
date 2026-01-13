@@ -1,11 +1,10 @@
-#WHATIS:Essential build tools container
 Bootstrap: docker
 From: ubuntu:24.04
 
 %labels
     Author Ziyue Cheng
     Version 1.0
-    Description "Ubuntu24-based container with essential build tools"
+    Description "Ubuntu24 with essential build tools"
 
 %environment
     export LC_ALL=C.UTF-8
@@ -37,7 +36,7 @@ From: ubuntu:24.04
     apt -y install libglib2.0-0 libsm6 libxrender1 libxext6
 
     ## R packages
-    # libicu70
+    # libicu70 stringr
     wget -nv -O libicu70.deb https://launchpad.net/ubuntu/+source/icu/70.1-2/+build/23145450/+files/libicu70_70.1-2_amd64.deb
     dpkg -i libicu70.deb && rm libicu70.deb
     apt -y install libcurl4-openssl-dev # curl

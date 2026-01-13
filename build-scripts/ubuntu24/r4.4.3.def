@@ -1,10 +1,10 @@
-#WHATIS:r-base-dev container
 Bootstrap: docker
 From: ubuntu:24.04
+
 %labels
     Author Ziyue Cheng
     Version 1.0
-    Description "Ubuntu24-based container with R v4.4.3"
+    Description "Ubuntu24 with R 4.4.3"
 
 %environment
     export LC_ALL=C.UTF-8

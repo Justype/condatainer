@@ -1,11 +1,10 @@
-#WHATIS:rstudio-server container
 Bootstrap: docker
 From: ubuntu:24.04
 
 %labels
     Author Ziyue Cheng
     Version 1.0
-    Description "Ubuntu24-based container with RStudio Server"
+    Description "Ubuntu24 with RStudio Server"
 
 %environment
     export LC_ALL=C.UTF-8
@@ -25,8 +24,8 @@ From: ubuntu:24.04
 
     # RStudio Server
     case "$(uname -m)" in
-        x86_64) url="https://download2.rstudio.org/server/jammy/amd64/rstudio-server-2025.09.2-418-amd64.deb" ;;
-        aarch64) url="https://s3.amazonaws.com/rstudio-ide-build/server/jammy/arm64/rstudio-server-2026.01.0-388-arm64.deb" ;;
+        x86_64) url="https://download2.rstudio.org/server/jammy/amd64/rstudio-server-2026.01.0-392-amd64.deb" ;;
+        aarch64) url="https://s3.amazonaws.com/rstudio-ide-build/server/jammy/arm64/rstudio-server-2026.01.0-392-arm64.deb" ;;
         *) echo "ERROR: Unsupported architecture: $(uname -m)"; exit 1 ;;
     esac
     wget -nv -O rstudio.deb $url

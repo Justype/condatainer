@@ -1,10 +1,10 @@
 Bootstrap: docker
-From: ubuntu:24.04
+From: ubuntu:22.04
 
 %labels
     Author Ziyue Cheng
     Version 1.0
-    Description "Ubuntu24 with code-server"
+    Description "Ubuntu22 with code-server"
 
 %environment
     export LC_ALL=C.UTF-8
