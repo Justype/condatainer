@@ -2564,7 +2564,7 @@ class CondaTainer_Run:
 class CondaTainer_Overlay:
     @staticmethod
     def add_parser_arguments(parser):
-        parser_overlay = parser.add_parser("overlay", help="Manage overlay images (create, chown)")
+        parser_overlay = parser.add_parser("overlay", help="Manage overlay images (create, chown, resize)")
         subparsers = parser_overlay.add_subparsers(
             dest="overlay_action",
             metavar="ACTION",
@@ -2608,6 +2608,10 @@ class CondaTainer_Overlay:
         parser_o = parser.add_parser("o", help="Shortcut for 'overlay create'")
         CondaTainer_Overlay._add_create_args(parser_o)
 
+        parser_resize = subparsers.add_parser("resize", help="Resize an existing overlay in-place")
+        parser_resize.add_argument("image", type=str, help="Overlay image to resize")
+        parser_resize.add_argument("-s", "--size", type=int, required=True, help="New size in MiB")
+
     @staticmethod
     def _add_create_args(parser):
         """Helper to add create arguments to both 'overlay create' and 'o'"""
@@ -2642,7 +2646,6 @@ class CondaTainer_Overlay:
 
     @staticmethod
     def parse_overlay_args(args):
-        # Route logic based on whether user typed 'o' or 'overlay [subcommand]'
         if args.action == "o":
             CondaTainer_Overlay.run_create(args)
         elif args.action == "overlay":
@@ -2650,6 +2653,8 @@ class CondaTainer_Overlay:
                 CondaTainer_Overlay.run_create(args)
             elif args.overlay_action == "chown":
                 CondaTainer_Overlay.run_chown(args)
+            elif args.overlay_action == "resize":
+                CondaTainer_Overlay.run_resize(args)
 
     @staticmethod
     def run_create(args):
@@ -2808,7 +2813,7 @@ class CondaTainer_Overlay:
                     
                     scanned_count += 1
                     if scanned_count % 2000 == 0:
-                         print(f"\rScanning... Found {scanned_count} inodes so far...", end="", flush=True)
+                        print(f"\rScanning... Found {scanned_count} inodes so far...", end="", flush=True)
 
                     if mode_octal.startswith("4") or mode_octal.startswith("04"):
                         dirs_to_visit.append(inode)
@@ -2849,6 +2854,43 @@ class CondaTainer_Overlay:
         except Exception as e:
             Utils.print_error(f"Debugfs recursive chown failed: {e}")
 
+    @staticmethod
+    def run_resize(args):
+        if not shutil.which("resize2fs") or not shutil.which("e2fsck"):
+            Utils.print_error("Requires 'resize2fs' and 'e2fsck'.")
+            return
+
+        target = os.path.abspath(args.image)
+        if not os.path.isfile(target):
+            Utils.print_error(f"Image {target} not found.")
+            return
+
+        Utils.print_message(f"Resizing {Utils.blue_text(os.path.basename(target))} to {Utils.yellow_text(str(args.size) + ' MiB')}...")
+        new_size_bytes = args.size * 1024 * 1024
+        current_size = os.path.getsize(target)
+        
+        if new_size_bytes == current_size:
+            Utils.print_message("Size unchanged.")
+            return
+        
+        Utils.print_message("Checking filesystem integrity before resizing...")
+        try:
+            subprocess.run(["e2fsck", "-p", "-f", target], check=True, stdout=subprocess.DEVNULL)
+            if new_size_bytes < current_size:
+                Utils.print_message("Shrinking overlay image...")
+                subprocess.run(["resize2fs", "-p", target, f"{args.size}M"], check=True)
+                with open(target, "a") as f:
+                    f.truncate(new_size_bytes)
+            else:
+                Utils.print_message("Expanding overlay image...")
+                with open(target, "a") as f:
+                    f.truncate(new_size_bytes)
+                subprocess.run(["resize2fs", "-p", target], check=True)
+            subprocess.run(["e2fsck", "-p", "-f", target], check=True, stdout=subprocess.DEVNULL)
+            Utils.print_success("Overlay image resized.")
+        except subprocess.CalledProcessError:
+            Utils.print_error("Failed to resize overlay image")
+
 class CondaTainer_Update:
     @staticmethod
     def add_parser_arguments(parser):
@@ -2879,20 +2921,17 @@ class CondaTainer_Update:
 class CondaTainer_Completion:
     """Generates shell completion scripts for Bash and Zsh. (Gemini generated)"""
 
-    # Auto-detect shell from environment
     _detected_shell = "zsh" if "zsh" in os.environ.get("SHELL", "") else "bash"
 
     @staticmethod
     def add_parser_arguments(parser):
-        sub = parser.add_parser("completion", help="Generate shell completion script 'source <(condatainer completion)'")
-        sub.add_argument("shell", choices=["bash", "zsh"], default=CondaTainer_Completion._detected_shell, nargs="?", help=f"Shell type (default: {CondaTainer_Completion._detected_shell})")
+        sub = parser.add_parser("completion", help="Generate shell completion script")
+        sub.add_argument("shell", choices=["bash", "zsh"], default=CondaTainer_Completion._detected_shell, nargs="?", help=f"Shell type")
 
     @staticmethod
     def parse_completion_args(args):
         script_name = Config.SCRIPT_NAME
         target_shell = args.shell
-
-        # Regex for installed system images (no extension in name)
         ext_regex = r"[.](sqf|sqsh|squashfs|img)$"
 
         if target_shell == "bash":
@@ -2903,7 +2942,6 @@ _{script_name}_completion() {{
     cur="${{COMP_WORDS[COMP_CWORD]}}"
     prev="${{COMP_WORDS[COMP_CWORD-1]}}"
 
-    # Removed aliases: c, r, del
     local subcommands="create install i avail av list ls remove rm delete exec e check run info self-update completion overlay o"
     local global_opts="--debug --no-sbatch --local -v --version -h --help"
 
@@ -2918,41 +2956,41 @@ _{script_name}_completion() {{
 
     local subcommand="${{COMP_WORDS[1]}}"
 
-    # Usage: _list_overlays <include_app> <include_data>
     _list_overlays() {{
         local include_app=$1
         local include_data=$2
         local img_dir="{Config.IMAGES_DIR}"
         local ref_dir="{Config.REF_IMAGES_DIR}"
         local files=""
-
-        # App Overlays
         if [[ "$include_app" == "true" && -d "$img_dir" ]]; then
             local sys_imgs=$(ls -1 "$img_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
             files="$files $sys_imgs"
         fi
-
-        # Data Overlays
         if [[ "$include_data" == "true" && -d "$ref_dir" ]]; then
             local ref_imgs=$(ls -1 "$ref_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
             files="$files $ref_imgs"
         fi
-
         echo "$files"
     }}
 
     case "${{subcommand}}" in
         overlay)
             if [[ ${{COMP_CWORD}} -eq 2 ]]; then
-                COMPREPLY=( $(compgen -W "create chown" -- "${{cur}}") )
+                COMPREPLY=( $(compgen -W "create chown resize" -- "${{cur}}") )
             elif [[ "${{COMP_WORDS[2]}}" == "chown" ]]; then
                 if [[ "${{cur}}" == -* ]]; then
                     COMPREPLY=( $(compgen -W "-u --uid -g --gid -p --path --root" -- "${{cur}}") )
                 else
-                    # chown targets local file or app overlay
                     local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img)$')
                     local sys_files=$(_list_overlays true true)
                     COMPREPLY=( $(compgen -W "$local_files $sys_files" -- "${{cur}}") )
+                fi
+            elif [[ "${{COMP_WORDS[2]}}" == "resize" ]]; then
+                if [[ "${{cur}}" == -* ]]; then
+                    COMPREPLY=( $(compgen -W "-s --size" -- "${{cur}}") )
+                else
+                    local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img)$')
+                    COMPREPLY=( $(compgen -W "$local_files" -- "${{cur}}") )
                 fi
             elif [[ "${{COMP_WORDS[2]}}" == "create" ]]; then
                 if [[ "${{cur}}" == -* ]]; then
@@ -2991,12 +3029,10 @@ _{script_name}_completion() {{
                 local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img)$')
                 local sys_files=$(_list_overlays true true)
                 COMPREPLY=( $(compgen -W "$local_files $sys_files" -- "${{cur}}") )
-
             elif [[ "${{prev}}" == "-b" || "${{prev}}" == "--base-image" ]]; then
                 local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img|sif)$')
                 local sys_files=$(_list_overlays true false)
                 COMPREPLY=( $(compgen -W "$local_files $sys_files" -- "${{cur}}") )
-
             else
                 local opts="-o --overlay -k --keep -w --writable-img --env --bind --fakeroot -b --base-image"
                 if [[ "${{cur}}" == -* ]]; then
@@ -3152,6 +3188,7 @@ _{script_name}_completion() {{
                     local overlay_cmds=(
                         'create:Create a new empty overlay image'
                         'chown:Change ownership of files inside an overlay'
+                        'resize:Resize an existing overlay in-place'
                     )
                     _arguments \\
                         '1: :_describe -t commands "overlay commands" overlay_cmds' \\
@@ -3175,6 +3212,11 @@ _{script_name}_completion() {{
                                         '(-p --path)'{{-p,--path}}'[Path inside overlay]:path' \\
                                         '--root[Set UID/GID to 0]' \\
                                         ':overlay:_alternative "files:file:_files -g \\"*.sqf *.img\\"" "overlays:installed:_installed_overlays true true"'
+                                    ;;
+                                resize)
+                                    _arguments \\
+                                        '(-s --size)'{{-s,--size}}'[New size in MiB]:size' \\
+                                        ':image:_files -g "*.sqf *.img"'
                                     ;;
                             esac
                             ;;
