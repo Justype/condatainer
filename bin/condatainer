@@ -483,7 +483,7 @@ class Utils:
                 # Add read/write/execute for user & group
                 os.chmod(dir_path, current_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
                                             stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
-                                            stat.S_IROTH | stat.S_IXOTH) 
+                                            stat.S_IROTH | stat.S_IXOTH)
 
             # Set files
             for f in files:
@@ -517,8 +517,16 @@ class Utils:
         return path.endswith((".img"))
 
     @staticmethod
+    def is_sif(path: str) -> bool:
+        return path.endswith((".sif"))
+
+    @staticmethod
     def is_overlay(path: str) -> bool:
         return Utils.is_img(path) or Utils.is_sqf(path)
+
+    @staticmethod
+    def is_apptainer_image(path: str) -> bool:
+        return Utils.is_sif(path) or Utils.is_sqf(path) or Utils.is_img(path)
 
     @staticmethod
     def get_exec_environ() -> Dict[str, str]:
@@ -652,7 +660,7 @@ class CondaTainer:
         Utils.print_message(f"Creating temporary SquashFS overlay for {Utils.yellow_text(normalized_name_version)}...")
         cmd = [
             Config.APPTAINER_BIN, "overlay", "create",
-            "--sparse", "--size", "15360", 
+            "--sparse", "--size", "15360",
             tmp_overlay_path
         ]
 
@@ -1573,6 +1581,7 @@ class CondaTainer_Create:
 
 class CondaTainer_Exec:
     is_img_writable = False
+    _base_image = Config.BASE_IMAGE_SIF
 
     @staticmethod
     def add_parser_arguments(parser):
@@ -1600,6 +1609,11 @@ class CondaTainer_Exec:
             help="Additional env setting 'KEY=VALUE' (can be used multiple times)"
         )
         CondaTainer_Exec.parser_exec.add_argument(
+            "-b", "--base-image",
+            dest="base_image",
+            help="Base image to use instead of default"
+        )
+        CondaTainer_Exec.parser_exec.add_argument(
             "--bind",
             dest="bind_paths",
             action="append",
@@ -1623,6 +1637,11 @@ class CondaTainer_Exec:
             help="Do not make .img overlays writable (default: writable)"
         )
         CondaTainer_Exec.parser_e.add_argument(
+            "-b", "--base-image",
+            dest="base_image",
+            help="Base image to use instead of default"
+        )
+        CondaTainer_Exec.parser_e.add_argument(
             "-n", "--no-autoload",
             action="store_true",
             help="Do not autoload local env.img from current directory"
@@ -1644,6 +1663,9 @@ class CondaTainer_Exec:
         CondaTainer_Exec.is_img_writable = args.writable_img
 
         installed_overlays = CondaTainer.get_installed_overlays()
+
+        if args.base_image:
+            CondaTainer_Exec.change_base_image(args.base_image)
 
         overlay_final = []
         command_final = []
@@ -1684,6 +1706,9 @@ class CondaTainer_Exec:
 
         installed_overlays = CondaTainer.get_installed_overlays()
 
+        if args.base_image:
+            CondaTainer_Exec.change_base_image(args.base_image)
+
         for i in range(len(overlay_final)):
             if not Utils.is_overlay(overlay_final[i]):
                 overlay_final[i] = installed_overlays.get(Utils.normalize_name_version(overlay_final[i]), overlay_final[i])
@@ -1700,6 +1725,21 @@ class CondaTainer_Exec:
 
         if not CondaTainer_Exec.exec_command(overlay_final, command_final, is_fakeroot=args.fakeroot):
             exit(1)
+
+    @staticmethod
+    def change_base_image(new_image_path: str):
+        installed_overlays = CondaTainer.get_installed_overlays()
+        if new_image_path in installed_overlays:
+            CondaTainer_Exec._base_image = installed_overlays[new_image_path]
+        else:
+            abs_new_image_path = os.path.abspath(new_image_path)
+            if not os.path.isfile(abs_new_image_path):
+                Utils.print_error(f"Base image file {Utils.blue_text(abs_new_image_path)} not found.")
+                exit(1)
+            if not Utils.is_apptainer_image(abs_new_image_path):
+                Utils.print_error(f"Base image file {Utils.blue_text(abs_new_image_path)} is not a valid Apptainer image.")
+                exit(1)
+            CondaTainer_Exec._base_image = abs_new_image_path
 
     @staticmethod
     def get_overlay_abs_paths(paths_or_name_version: List[str]) -> List[str]:
@@ -1778,7 +1818,7 @@ class CondaTainer_Exec:
     @staticmethod
     def is_img_fakeroot(img_path: str) -> bool:
         """
-        Use debugfs to check if the 'upper' directory inside the ext3/4 image file 
+        Use debugfs to check if the 'upper' directory inside the ext3/4 image file
         is owned by user whose UID is not equal to current user
         """
         if not Utils.is_img(img_path) and not os.path.isfile(img_path):
@@ -1846,11 +1886,11 @@ class CondaTainer_Exec:
 
     @staticmethod
     def exec_command(
-            paths_or_name_versions: List[str], 
-            command: List[str], 
-            env_settings: Optional[List[str]] = None, 
-            bind_paths: Optional[List[str]] = None, 
-            is_fakeroot: bool = False, 
+            paths_or_name_versions: List[str],
+            command: List[str],
+            env_settings: Optional[List[str]] = None,
+            bind_paths: Optional[List[str]] = None,
+            is_fakeroot: bool = False,
             capture_output: bool = False) -> bool:
 
         if not CondaTainer_Exec.only_allow_one_img(paths_or_name_versions):
@@ -1919,7 +1959,7 @@ class CondaTainer_Exec:
             *additional_binds,
             *fakeroot_param,
             *CondaTainer.generate_gpu_args(),
-            Config.BASE_IMAGE_SIF,
+            CondaTainer_Exec._base_image,
             *command
         ]
 
@@ -2116,8 +2156,8 @@ class CondaTainer_List:
 
         if os.path.isdir(Config.REF_IMAGES_DIR):
             ref_overlay_files = [
-                f for f in os.listdir(Config.REF_IMAGES_DIR) 
-                    if Utils.is_overlay(f) and 
+                f for f in os.listdir(Config.REF_IMAGES_DIR)
+                    if Utils.is_overlay(f) and
                     all(re.search(re.escape(term), f, re.IGNORECASE) for term in args.terms)]
             if ref_overlay_files:
                 print("Available reference overlays:")
@@ -2228,7 +2268,7 @@ class CondaTainer_Info:
     def get_file_btime(file_path: str) -> Optional[datetime]:
         try:
             result = subprocess.check_output(
-                ['stat', '-c', '%W', file_path], 
+                ['stat', '-c', '%W', file_path],
                 text=True
             ).strip()
 
@@ -2244,7 +2284,7 @@ class CondaTainer_Info:
     def get_file_mtime(file_path: str) -> Optional[datetime]:
         try:
             result = subprocess.check_output(
-                ['stat', '-c', '%Y', file_path], 
+                ['stat', '-c', '%Y', file_path],
                 text=True
             ).strip()
 
@@ -2257,7 +2297,7 @@ class CondaTainer_Info:
     def get_compression_type(file_path) -> str:
         try:
             result = subprocess.check_output(
-                ['file', file_path], 
+                ['file', file_path],
                 text=True
             ).strip()
 
@@ -2414,6 +2454,11 @@ class CondaTainer_Run:
             action="store_true"
         )
         CondaTainer_Run.parser_run.add_argument(
+            "-b", "--base-image",
+            type=str,
+            help="Base image to use instead of default"
+        )
+        CondaTainer_Run.parser_run.add_argument(
             "-a", "--auto-install",
             "-i", "--install",
             dest="auto_install",
@@ -2450,6 +2495,9 @@ class CondaTainer_Run:
 
         if Config.debug and args_from_script:
             Utils.print_debug(f"[RUN] Additional script arguments found: {args_from_script}")
+
+        if args.base_image:
+            CondaTainer_Exec.change_base_image(args.base_image)
 
         deps = Utils.get_dependencies_from_script(script_path)
         missing_deps = CondaTainer.get_missing_overlays(deps)
@@ -2497,13 +2545,13 @@ class CondaTainer_Overlay:
     @staticmethod
     def add_parser_arguments(parser):
         parser_overlay = parser.add_parser(
-            "overlay", 
+            "overlay",
             help="Manage overlay images (create, chown)"
         )
         subparsers = parser_overlay.add_subparsers(
             dest="overlay_action",
             metavar="ACTION",
-            required=True, 
+            required=True,
             help="Overlay actions"
         )
 
@@ -2514,7 +2562,7 @@ class CondaTainer_Overlay:
         CondaTainer_Overlay._add_create_args(parser_create)
 
         parser_chown = subparsers.add_parser(
-            "chown", 
+            "chown",
             help="Change ownership (UID:GID) of files inside an overlay"
         )
         parser_chown.add_argument(
@@ -2709,13 +2757,11 @@ class CondaTainer_Apptainer:
     @staticmethod
     def add_parser_arguments(parser):
         CondaTainer_Apptainer.parser_apptainer = parser.add_parser("apptainer", help="Get latest Apptainer executable from conda-forge")
-
         CondaTainer_Apptainer.parser_apptainer.add_argument(
             "-y", "--yes",
             action="store_true",
             help="Automatically confirm installation"
         )
-
         CondaTainer_Apptainer.parser_apptainer.add_argument(
             "-f", "--force",
             action="store_true",
@@ -2770,7 +2816,7 @@ class CondaTainer_Apptainer:
 
         Utils.print_message("Installing Apptainer using Micromamba...")
         cmd_install = [
-            Config.LOCAL_MICROMAMBA_BIN, 
+            Config.LOCAL_MICROMAMBA_BIN,
             "-r", os.path.join(Config.CONDATINER_DIR, "micromamba_env"),
             "create", "-c", "conda-forge",
             "-y", "--no-allow-softlinks",
