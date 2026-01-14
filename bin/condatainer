@@ -657,14 +657,6 @@ class CondaTainer:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError:
             Utils.print_error("Building base images failed.")
-            if Utils.is_in_interactive_shell() and platform.machine() in CondaTainer.PREBUILT_BASE_IMAGE_PLATFORMS:
-                Utils.print_message("Do you want to try downloading pre-built base images (CPU only)? [y/N]: ", end="", flush=True)
-                choice = input().strip().lower()
-                if choice == "y":
-                    if CondaTainer.try_download_prebuilt_base_image():
-                        return
-                    else:
-                        Utils.print_error("Pre-built base image download failed.")
             exit(1)
         Utils.print_success("Base images built.")
         os.chmod(Config.BASE_IMAGE_SIF, 0o775)
@@ -1647,6 +1639,7 @@ class CondaTainer_Helper:
                     print(os.path.abspath(local_path))
                 else:
                     Utils.print_error(f"Helper script '{args.script_name}' not found locally.")
+                    exit(1)
             else:
                 if not os.path.isdir(Config.HELPER_SCRIPTS_DIR):
                     os.makedirs(Config.HELPER_SCRIPTS_DIR, mode=0o775, exist_ok=True)
@@ -1658,7 +1651,7 @@ class CondaTainer_Helper:
             meta = Utils.fetch_remote_helper_scripts()
             if not meta:
                 Utils.print_error("No remote helper metadata found.")
-                return
+                exit(1)
 
             # Choose category based on sbatch availability for metadata lookup
             use_sbatch = Config.use_sbatch and Utils.is_sbatch_available()
@@ -1677,7 +1670,7 @@ class CondaTainer_Helper:
                     entries = {args.script_name: entries[args.script_name]}
                 else:
                     Utils.print_error(f"Helper script '{args.script_name}' not found in remote metadata for category '{category}'.")
-                    return
+                    exit(1)
             else:
                 Utils.print_message(f"Updating all helper scripts for {category}...")
 
@@ -1698,7 +1691,7 @@ class CondaTainer_Helper:
         # --- Run Mode ---
         if not args.script_name:
             Utils.print_error("No helper script name provided. Use --update to update scripts.")
-            return
+            exit(1)
 
         local_path = os.path.join(Config.HELPER_SCRIPTS_DIR, args.script_name)
 
@@ -1706,7 +1699,7 @@ class CondaTainer_Helper:
         if not os.path.isfile(local_path):
             Utils.print_error(f"Helper script '{args.script_name}' not found locally at {local_path}.")
             Utils.print_note(f"Please run {Utils.blue_text(Config.SCRIPT_NAME + ' helper --update')} to fetch available helper scripts.")
-            return
+            exit(1)
 
         # Ensure executable permission
         try:
@@ -2479,7 +2472,7 @@ class CondaTainer_Info:
             overlay_path = os.path.abspath(args.overlay)
             if not os.path.isfile(overlay_path):
                 Utils.print_error(f"Overlay file {Utils.blue_text(overlay_path)} not found.")
-                return
+                exit(1)
 
         print(f"Information for {Utils.yellow_text(os.path.basename(overlay_path))}:")
         # Additional info can be added here, e.g., size, creation date, etc.
@@ -2575,10 +2568,10 @@ class CondaTainer_Check:
                     Utils.print_message(f"Downloaded build script to {Utils.blue_text(script_path)}")
                 else:
                     Utils.print_error(f"Failed to download build script for {script_path_or_name} from {url}.")
-                    return
+                    exit(1)
             else:
                 Utils.print_error(f"Build script for {script_path_or_name} not found.")
-                return
+                exit(1)
         else:
             script_path = script_path_or_name
 
@@ -2686,7 +2679,7 @@ class CondaTainer_Run:
             for md in missing_deps:
                 if Utils.is_overlay(md):
                     Utils.print_error(f"Custom overlay {Utils.yellow_text(md)} is missing. Cannot proceed with auto-installation.")
-                    return
+                    exit(1)
 
             build_objects = [BuildObject(pkg) for pkg in missing_deps]
             build_graph = BuildGraph(build_objects)
@@ -2694,7 +2687,7 @@ class CondaTainer_Run:
                 Utils.print_success("All selected overlays installed/submitted.")
             else:
                 Utils.print_error("Some overlays failed to install.")
-                return
+                exit(1)
 
         if args.writable_img:
             CondaTainer_Exec.is_img_writable = True
@@ -2826,17 +2819,17 @@ class CondaTainer_Overlay:
         if not Utils.is_img(overlay_path):
             if '.' in os.path.basename(overlay_path):
                 Utils.print_error("Overlay image must have a .img extension.")
-                return
+                exit(1)
             overlay_path += ".img"
 
         if os.path.isfile(overlay_path) or os.path.isdir(overlay_path):
             Utils.print_error(f"Path {Utils.blue_text(overlay_path)} already exists.")
-            return
+            exit(1)
 
         if args.file:
             if not os.path.isfile(args.file):
                 Utils.print_error(f"Conda env file {Utils.blue_text(args.file)} not found.")
-                return
+                exit(1)
 
         Utils.print_message(f"Creating{overlay_adj}overlay at {Utils.blue_text(overlay_path)} with size {Utils.yellow_text(str(size_mib) + ' MiB')}...")
         cmd_overlay = [
@@ -2851,7 +2844,7 @@ class CondaTainer_Overlay:
             Utils.print_success(f"Overlay image created at {Utils.blue_text(overlay_path)}.")
         except subprocess.CalledProcessError:
             Utils.print_error("Failed to create overlay image.")
-            return
+            exit(1)
 
         CondaTainer_Exec.is_img_writable = True
         if args.file:
@@ -3009,12 +3002,12 @@ class CondaTainer_Overlay:
     def run_resize(args):
         if not shutil.which("resize2fs") or not shutil.which("e2fsck"):
             Utils.print_error("Requires 'resize2fs' and 'e2fsck'.")
-            return
+            exit(1)
 
         target = os.path.abspath(args.image)
         if not os.path.isfile(target):
             Utils.print_error(f"Image {target} not found.")
-            return
+            exit(1)
 
         Utils.print_message(f"Resizing {Utils.blue_text(os.path.basename(target))} to {Utils.yellow_text(str(args.size) + ' MiB')}...")
         new_size_bytes = args.size * 1024 * 1024
@@ -3041,6 +3034,7 @@ class CondaTainer_Overlay:
             Utils.print_success("Overlay image resized.")
         except subprocess.CalledProcessError:
             Utils.print_error("Failed to resize overlay image")
+            exit(1)
 
 class CondaTainer_Update:
     @staticmethod
@@ -3068,6 +3062,7 @@ class CondaTainer_Update:
             Utils.print_success("CondaTainer updated.")
         else:
             Utils.print_error("Failed to download the latest CondaTainer script.")
+            exit(1)
 
 class CondaTainer_Completion:
     """Generates shell completion scripts for Bash and Zsh. (Updated for v1.0.4)"""
