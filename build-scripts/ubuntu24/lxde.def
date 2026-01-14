@@ -32,7 +32,7 @@ From: ubuntu:24.04
     apt -y install x11vnc tigervnc-standalone-server \
         novnc xvfb xorg dbus-x11 xserver-xorg-video-dummy xpra
 
-    apt clean
+    apt clean && rm -rf /var/lib/apt/lists/*
 
     # xorg settings
     echo "allowed_users = anybody" >> /etc/X11/Xwrapper.config

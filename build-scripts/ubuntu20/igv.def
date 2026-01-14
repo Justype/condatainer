@@ -20,4 +20,4 @@ From: ubuntu:20.04
 
     apt -y update && apt -y install igv
 
-    apt clean
+    apt clean && rm -rf /var/lib/apt/lists/*

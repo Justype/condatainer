@@ -21,4 +21,4 @@ From: ubuntu:24.04
     apt -y update && apt -y install curl
     curl -fsSL https://code-server.dev/install.sh | sh
 
-    apt clean
+    apt clean && rm -rf /var/lib/apt/lists/*

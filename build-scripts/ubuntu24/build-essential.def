@@ -49,4 +49,4 @@ From: ubuntu:24.04
     apt -y install libglpk-dev # scDblFinder
     apt -y install libhdf5-dev # BPCells
 
-    apt clean
+    apt clean && rm -rf /var/lib/apt/lists/*
