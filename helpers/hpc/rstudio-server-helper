@@ -1,0 +1,257 @@
+#!/bin/bash
+# This script helps run rstudio-server with CondaTainer env on SLURM clusters.
+
+NCPUS=4
+MEM=32G
+TIME=12:00:00
+PORT=8787
+AUTH="none"
+
+OVERLAYS_ARG=""
+OVERLAYS=""
+OVERLAY="env.img"
+BASE_IMAGE_ARG=""
+CWD=$(readlink -f .)
+
+LOG_DIR="$HOME/logs"
+mkdir -p $LOG_DIR
+DATE=$(date +"%Y%m%d_%H%M%S")
+CONDATAINER_CONFIG_DIR="$HOME/.config/condatainer"
+mkdir -p $CONDATAINER_CONFIG_DIR
+
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+if [ -f "$LOG_DIR/.rstudio-server" ]; then
+    IFS=$'\t' read -r PRE_JOB_ID PRE_PORT PRE_AUTH PRE_NODE PRE_CWD < "$LOG_DIR/.rstudio-server"
+    PRE_JOB_STATUS=$(squeue -j $PRE_JOB_ID -h -o "%T" 2>/dev/null)
+    if [ "$PRE_JOB_STATUS" == "PENDING" ]; then
+        echo -e "The previous rstudio-server job (ID: ${YELLOW}$PRE_JOB_ID${NC}) is still pending. Please wait until it starts running."
+        exit 0
+    elif [ "$PRE_JOB_STATUS" != "RUNNING" ]; then
+        echo -e "The previous rstudio-server job (ID: ${YELLOW}$PRE_JOB_ID${NC}) is no longer running."
+        rm "$LOG_DIR/.rstudio-server"
+    else
+        echo -e "Found an existing rstudio-server job (ID: ${YELLOW}$PRE_JOB_ID${NC}) running on node ${BLUE}$PRE_NODE${NC}."
+        echo -e "rstudio-server at ${BLUE}http://localhost:$PRE_PORT${NC}"
+        echo -e "If you want to stop it, run: ${YELLOW}scancel $PRE_JOB_ID${NC}"
+        echo -e "You can run the following command in R to open the project directly:"
+        echo -e "  ${YELLOW}rstudioapi::openProject(\"$PRE_CWD\")${NC}"
+        ssh -L $PRE_PORT:localhost:$PRE_PORT $USER@$PRE_NODE
+        exit 0
+    fi
+fi
+
+print_help() {
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  -c <number>     Number of CPUs to allocate (default: $NCPUS)"
+    echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
+    echo "  -t <time>       Time limit for the job (default: $TIME)"
+    echo "  -p <port>       Port for rstudio-server (default: $PORT)"
+    echo "  -b <image>      Base image file"
+    echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
+    echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
+    echo "  -y              Accept all warnings and proceed"
+    echo "  -h              Show this help message"
+}
+
+while getopts "c:m:t:p:b:e:o:fyh" opt; do
+    case ${opt} in
+        c ) NCPUS=$OPTARG ;;
+        m ) MEM=$OPTARG ;;
+        t ) TIME=$OPTARG ;;
+        p ) PORT=$OPTARG ;;
+        b ) BASE_IMAGE_ARG="-b $OPTARG" ;;
+        e ) OVERLAY=$OPTARG ;;
+        o ) OVERLAYS_ARG+=" -o $OPTARG"; OVERLAYS+=" $OPTARG" ;;
+        y ) AUTO_YES=true ;;
+        h ) print_help; exit 0 ;;
+        \? ) print_help; exit 1 ;;
+    esac
+done
+
+#region Sanity Checks
+if lsof -i :$PORT &> /dev/null; then
+    echo -e "${RED}[ERROR]${NC} Port ${BLUE}$PORT${NC} is already in use."
+    echo -e "Please choose a different port using the ${YELLOW}-p${NC} option."
+    exit 1
+fi
+
+if ! command -v condatainer &> /dev/null; then
+    echo -e "${RED}[ERROR]${NC} CondaTainer is not installed or not in PATH."
+    echo -e "Please go to https://github.com/Justype/condatainer to install CondaTainer."
+    exit 1
+fi
+
+missing=""
+for pkg in rstudio-server $OVERLAYS; do
+    if ! condatainer ls $pkg | grep -q $pkg; then
+        missing+=" $pkg"
+    fi
+done
+if [ -n "$missing" ]; then
+    echo -e "${RED}[ERROR]${NC} The following required overlays are missing:${missing}."
+    echo -e "Please run 'condatainer install$missing'"
+    if [ -z "$AUTO_YES" ]; then
+        read -p "Do you want to install them now? [Y/n] " answer
+    else
+        answer="Y"
+    fi
+    if [[ "$answer" == "Y" || "$answer" == "y" || "$answer" == "" ]]; then
+        condatainer install $missing
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}[ERROR]${NC} Failed to install required overlays."
+            exit 1
+        fi
+    else
+        exit 1
+    fi
+fi
+
+if [ ! -f "$OVERLAY" ]; then
+    echo -e "${RED}[ERROR]${NC} Overlay ${BLUE}$OVERLAY${NC} not found."
+    exit 1
+else
+    echo -e "Using overlay: ${BLUE}$OVERLAY${NC}"
+    OVERLAY_ARG="-o $OVERLAY"
+    ABS_OVERLAY_PATH=$(readlink -f $OVERLAY)
+    CWD=$(dirname $ABS_OVERLAY_PATH) # Set CWD to overlay directory
+    if ! debugfs -R "stat upper/ext3/env/bin/R" $OVERLAY 2>&1 | grep -q 'Inode'; then
+        echo -e "${RED}[ERROR]${NC} Overlay ${BLUE}$OVERLAY${NC} does not contain R installation."
+        echo -e "Please go into the overlay shell and run 'mm-install r-base' to install R."
+        exit 1
+    fi
+    # Check and repair overlay image
+    echo -e "Checking overlay image integrity..."
+    e2fsck -p $OVERLAY > /dev/null 2>&1
+    e2fsck -p $OVERLAY > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}[ERROR]${NC} Overlay ${BLUE}$OVERLAY${NC} is corrupted and could not be repaired."
+        echo -e "Please run ${YELLOW}e2fsck $OVERLAY${NC} manually to attempt repair."
+        exit 1
+    fi
+    R_BIN_PATH="/ext3/env/bin/R"
+    R_LIB_PATH="/ext3/env/lib"
+fi
+
+if [ -z "$SCRATCH" ]; then
+    echo -e "${YELLOW}[WARNING]${NC} SCRATCH environment variable is not set. Falling back to HOME directory."
+    SCRATCH="$HOME"
+fi
+#endregion
+
+CWD_FOLDER_NAME=$(basename $CWD)
+RPROJECT_FILE="$CWD/$CWD_FOLDER_NAME.Rproj"
+if ! [ -f "$RPROJECT_FILE" ]; then
+    echo -e "${BLUE}[INFO]${NC} Creating RStudio project file at ${BLUE}$RPROJECT_FILE${NC}."
+    cat <<EOT > $RPROJECT_FILE
+Version: 1.0
+
+RestoreWorkspace: Default
+SaveWorkspace: Default
+AlwaysSaveHistory: Default
+
+EnableCodeIndexing: Yes
+UseSpacesForTab: Yes
+NumSpacesForTab: 2
+Encoding: UTF-8
+
+RnwWeave: Sweave
+LaTeX: pdfLaTeX
+EOT
+fi
+cat <<EOT > $CONDATAINER_CONFIG_DIR/rsession.sh
+#!/bin/bash
+
+USER=`whoami`
+source /etc/profile
+
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+  . /etc/bashrc
+fi
+source $HOME/.bashrc
+
+export MAMBA_ROOT_PREFIX=/ext3/env
+export CONDA_PREFIX=/ext3/env
+export CONDA_DEFAULT_ENV=env
+export CNT_CONDA_PREFIX=/ext3/env
+export RETICULATE_PYTHON=/ext3/env/bin/python
+
+/usr/lib/rstudio-server/bin/rsession "\$@"
+EOT
+chmod +x $CONDATAINER_CONFIG_DIR/rsession.sh
+cat <<EOT > $CONDATAINER_CONFIG_DIR/rsession.conf
+copilot-enabled=1
+session-default-working-dir=$CWD
+EOT
+cat <<EOT > $CONDATAINER_CONFIG_DIR/database.conf
+provider=sqlite
+directory=$SCRATCH/.local/lib/rstudio-server
+EOT
+
+SBATCH_SCRIPT_PATH="$LOG_DIR/rstudio-server-${DATE}.sbatch"
+
+cat <<EOT > $SBATCH_SCRIPT_PATH
+#!/bin/bash
+#SBATCH --job-name=rstudio-server
+#SBATCH --cpus-per-task=$NCPUS
+#SBATCH --mem=$MEM
+#SBATCH --time=$TIME
+#SBATCH --output=$LOG_DIR/rstudio-server-${DATE}-%j.log
+
+printf "\$SLURM_JOB_ID\t$PORT\t$AUTH\t\$(hostname)\t$CWD\n" > $LOG_DIR/.rstudio-server
+condatainer exec \\
+    -o rstudio-server \\
+    $BASE_IMAGE_ARG \\
+    $OVERLAYS_ARG \\
+    $OVERLAY_ARG --writable-img \\
+    /usr/lib/rstudio-server/bin/rserver \\
+        --server-user $USER \\
+        --server-daemonize=0 \\
+        --server-data-dir=$SCRATCH/.local/run/rstudio-server \\
+        --www-address=127.0.0.1 \\
+        --www-port=$PORT \\
+        --rsession-which-r=$R_BIN_PATH \\
+        --rsession-path=$CONDATAINER_CONFIG_DIR/rsession.sh \\
+        --rsession-ld-library-path=$R_LIB_PATH \\
+        --database-config-file=$CONDATAINER_CONFIG_DIR/database.conf \\
+        --rsession-config-file=$CONDATAINER_CONFIG_DIR/rsession.conf \\
+        --auth-none=1
+
+rm $LOG_DIR/.rstudio-server
+EOT
+
+SBATCH_OUTPUT=$(sbatch $SBATCH_SCRIPT_PATH)
+SBATCH_JOB_ID=$(echo $SBATCH_OUTPUT | awk '{print $4}')
+
+NODE="$HOSTNAME"
+
+while true; do
+    CURRENT_STATUS=$(squeue -j $SBATCH_JOB_ID -h -o "%T" 2>/dev/null)
+    if [ "$CURRENT_STATUS" == "RUNNING" ]; then
+        break
+    fi
+    if [ "$CURRENT_STATUS" == "" ]; then
+        echo ""
+        echo -e "${RED}[ERROR]${NC} Job $SBATCH_JOB_ID not found in the queue. Please check the SLURM log for details."
+        echo -e "  $LOG_DIR/rstudio-server-${DATE}-$SBATCH_JOB_ID.log"
+        exit 1
+    fi
+    printf "\rWaiting for job %s to start running. Current status: %s." "$SBATCH_JOB_ID" "$CURRENT_STATUS"
+    sleep 5
+done
+
+sleep 2  # Give some time for slurm initialization
+NODE=$(squeue -j $SBATCH_JOB_ID -h -o "%N")
+echo ""
+echo -e "Job ${YELLOW}$SBATCH_JOB_ID${NC} is now running on node ${BLUE}$NODE${NC}."
+echo -e "rstudio-server at ${BLUE}http://localhost:$PORT${NC}"
+echo -e "If you want to stop it, run: ${YELLOW}scancel $SBATCH_JOB_ID${NC}"
+echo -e "You can run the following command in R to open the project directly:"
+echo -e "  ${YELLOW}rstudioapi::openProject(\"$CWD\")${NC}"
+ssh -L $PORT:localhost:$PORT $USER@$NODE

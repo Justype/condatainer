@@ -1,0 +1,24 @@
+{
+  "hpc": {
+    "code-server": {
+      "path": "helpers/hpc/code-server"
+    },
+    "rstudio-server-helper": {
+      "path": "helpers/hpc/rstudio-server-helper"
+    },
+    "vscode-tunnel": {
+      "path": "helpers/hpc/vscode-tunnel"
+    }
+  },
+  "headless": {
+    "code-server": {
+      "path": "helpers/headless/code-server"
+    },
+    "rstudio-server": {
+      "path": "helpers/headless/rstudio-server"
+    },
+    "vscode-tunnel": {
+      "path": "helpers/headless/vscode-tunnel"
+    }
+  }
+}

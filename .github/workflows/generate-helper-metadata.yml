@@ -1,0 +1,49 @@
+name: Generate Helper Scripts Metadata
+
+on:
+  push:
+    paths:
+      - 'helpers/hpc/**'
+      - 'helpers/headless/**'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  generate-helper-metadata:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Generate helper metadata JSON
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          python .github/scripts/generate_helper_metadata.py
+
+      - name: Commit and push helper metadata
+        run: |
+          git config user.name "dependabot[bot]"
+          git config user.email "dependabot[bot]@users.noreply.github.com"
+
+          # Stage the JSON and gzipped JSON
+          git add metadata/helper-scripts.json || true
+          git add metadata/helper-scripts.json.gz || true
+
+          if git diff --staged --quiet; then
+            echo "No changes to helper metadata. Skipping commit."
+          else
+            git commit -m "chore: update scripts helper metadata [skip ci]"
+            git push
+          fi
