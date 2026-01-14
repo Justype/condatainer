@@ -46,6 +46,7 @@ html_theme_options = {
     'collapse_navigation': False,
     'sticky_navigation': True,
     'navigation_depth': 4,
+    'version_selector': False,
 }
 
 # Add GitHub repository info so the theme can link to the project
