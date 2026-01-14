@@ -6,13 +6,13 @@
 - [Have CondaTainer installed](#install-condatainer)
 - [Have required overlay images created](#install-required-overlays)
 - [Have R installed in a writable overlay image](#create-r-writable-overlay)
-- [Have the `rstudio-server-helper-local` in your PATH](#rstudio-server-helper-script)
+- [Check the Script Parameters](#rstudio-server-helper-script)
 
 Then you can run:
 
 ```bash
-rstudio-server-helper-local \
-  -p <port_number> \
+condatainer help \
+  rstudio-server \
   -e <overlay_image>
 
 # Default 
@@ -21,6 +21,12 @@ rstudio-server-helper-local \
 ```
 
 Please change the port number to a unique one to avoid conflicts with other users.
+
+```bash
+# You can create alias in your shell config file (~/.bashrc or ~/.zshrc):
+# Change 13182 to your preferred port number
+alias rstudio-server-start='condatainer help rstudio-server -p 13182'
+```
 
 Always [Use Conda to Manage R Packages](#use-conda-to-manage-r-packages). For packages only available from source, see [Install R Packages from Source](#install-r-packages-from-source) section.
 
@@ -77,6 +83,12 @@ Run the following command to install CondaTainer if it is not installed:
 curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash
 ```
 
+Download the helper scripts:
+
+```bash
+condatainer --no-sbatch helper --update
+```
+
 ## Install Required Overlays
 
 Creating required overlay images:
@@ -108,8 +120,6 @@ See [Launch a Shell with the Project Environment](../user_guide/condatainer_proj
 
 ## RStudio Server Helper Script
 
-You can use this script: [rstudio-server-helper-local](https://github.com/Justype/condatainer/blob/main/helpers/rstudio-server-helper-local)
-
 It will do the following steps for you:
 
 - Check if the port is available
@@ -118,30 +128,28 @@ It will do the following steps for you:
 - Start `rstudio-server` using overlay images on that port
 
 ```
-Usage: rstudio-server-helper-local [options]
+Usage: rstudio-server [options]
 
 Options:
   -p <port>       Port for rstudio-server (default: 8787)
+  -b <image>      Base image file
   -e <overlay>    Environment overlay image file (default: env.img)
   -o <overlay>    Additional overlay files (can have multiple -o options)
   -y              Accept all warnings and proceed
   -h              Show this help message
 ```
 
-Let's set up and run `rstudio-server` on remote server:
+Let's set up and run `rstudio-server` on remote headless server:
 
 ```bash
-# Download the helper script
-# Please make sure $HOME/bin is in your PATH
-mkdir -p $HOME/bin
-wget https://raw.githubusercontent.com/Justype/condatainer/main/helpers/rstudio-server-helper-local -O $HOME/bin/rstudio-server-helper-local
-chmod +x $HOME/bin/rstudio-server-helper-local
+# Download the helper scripts
+condatainer --no-sbatch helper -u
 ```
 
 Then you can run the script: 
 
 ```bash
-rstudio-server-helper-local
+condatainer help rstudio-server
 ```
 
 After running the script, you will see output like this:
@@ -196,17 +204,17 @@ mm-install r-pak
 Then in R:
 
 ```R
-pak::pkg_sysreqs("package_from_github")
+pak::pkg_sysreqs("user/repo@commit_hash") # or @tag
 ```
 
 If system libraries are missing, you can create your `additional-deps` overlay with the required system libraries. (ignore pandoc missing warning)
 
-see [Custom Apptainer Definition Files](../advanced_usage/condatainer_custom_def.md) for more details.
+see [Custom System Overlays](../advanced_usage/condatainer_custom_def.md) for more details.
 
-After getting the `additional-deps.sqf` overlay, run `rstudio-server-helper` with the `-o` option:
+After getting the `additional-deps.sqf` overlay, run `rstudio-server` with the `-o` option:
 
 ```bash
-rstudio-server-helper -o additional-deps.sqf
+condatainer help rstudio-server -o additional-deps.sqf
 ```
 
 If you want to share your overlay with others, you should also provide the `def` file used to create it.
@@ -222,27 +230,7 @@ condatainer exec -o env.img Rscript your_script.R
 If you have R packages built from GitHub or source, you need to load your additional overlay too:
 
 ```bash
-condatainer exec -o additional-deps.sqf -o env.img Rscript your_script.R
-```
-
-## Change the default setting
-
-You can modify the default settings in the script, such as port number and overlay image path.
-
-They are at the beginning of the script:
-
-```bash
-#!/bin/bash
-
-PORT=8787
-```
-
-You can use editors like `vim` or `nano` to change these values.
-
-or use `sed`
-
-```bash
-sed -i 's/PORT=8787/PORT=13182/' rstudio-server-helper
+condatainer exec -o r-deps.sqf -o env.img Rscript your_script.R
 ```
 
 ## File name too long system:36 ERROR

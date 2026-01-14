@@ -5,16 +5,17 @@
 - [SLURM job scheduler is available on your HPC system](#slurm-job-scheduler)
 - [Have CondaTainer installed](#install-condatainer)
 - [Have a writable overlay image (optional)](#create-writable-overlay)
-- [Have the `vscode-tunnel-helper` in your PATH](#vs-code-tunnel-helper-script)
+- [Check the Script Parameters](#vscode-tunnel-helper-script)
 
 Then you can run:
 
 ```bash
-vscode-tunnel-helper \
-  -a <auth_option> \
-  -c <num_cpus> \
-  -m <memory> \
-  -t <time_limit>
+condatainer help \
+  vscode-tunnel \
+    -a <auth_option> \
+    -c <num_cpus> \
+    -m <memory> \
+    -t <time_limit>
 
 # Default 
 #   auth_option="microsoft" or "github"
@@ -24,7 +25,7 @@ vscode-tunnel-helper \
 #   time_limit=12:00:00
 ```
 
-If you have preferred settings, you can modify the script directly. See [Change the default setting](#change-the-default-setting) section below.
+If you have preferred settings, you can create alias in your shell config file (`~/.bashrc` or `~/.zshrc`).
 
 If you have any issues, see [Common Issues](#common-issues) section below.
 
@@ -58,6 +59,12 @@ Run the following command to install CondaTainer if it is not installed:
 curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash
 ```
 
+Download the helper scripts:
+
+```bash
+condatainer helper --update
+```
+
 ## No required overlay images
 
 Creating required overlay images is not necessary.
@@ -83,19 +90,15 @@ mm-pin python
 
 ## VS Code Tunnel Helper Script
 
-Always run VS Code CLI on compute nodes rather than login nodes.
-
-You can use this script: [vscode-tunnel-helper](https://github.com/Justype/condatainer/blob/main/helpers/vscode-tunnel-helper)
-
-`vscode-tunnel-helper` will do the following steps for you:
+`vscode-tunnel` will do the following steps for you:
 
 1. Download the `code` CLI if not available.
 2. Check if a VS Code tunnel is running on any compute node.
 3. If yes, print helpful information to connect to that tunnel.
 4. If not,
-  1. Check if the port is available on the login node.
-  2. If so, check the overlay integrity.
-  3. If so, use `sbatch` to submit a job which starts the `code` CLI.
+   1. Check if the port is available on the login node.
+   2. If so, check the overlay integrity.
+   3. If so, use `sbatch` to submit a job which starts the `code` CLI.
    4. Wait for the job to start.
    5. Print the authentication URL to connect to the VS Code server.
 
@@ -104,33 +107,32 @@ You can either:
 - Use https://vscode.dev/ and the tunnel
 
 ```
-Usage: vscode-tunnel-helper [options]
+Usage: vscode-tunnel [options]
 
 Options:
   -c <number>     Number of CPUs to allocate (default: 4)
   -m <memory>     Amount of memory to allocate (default: 16G)
   -t <time>       Time limit for the job (default: 12:00:00)
   -a <provider>   microsoft or github for authentication (default: microsoft)
+  -b <image>      Base image file
   -e <overlay>    Environment overlay image file (default: env.img)
-  -o <overlay>    Additional overlay files (can have -o options)
+  -o <overlay>    Additional overlay files (can have multiple -o options)
+  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00
   -y              Accept all warnings and proceed
   -h              Show this help message
 ```
 
-Let's set up and run `code` CLI on HPC:
+Let's set up and run `vscode-tunnel` CLI on HPC:
 
 ```bash
-# Download the helper script
-# Please make sure $HOME/bin is in your PATH
-mkdir -p $HOME/bin
-wget https://raw.githubusercontent.com/Justype/condatainer/main/helpers/vscode-tunnel-helper -O $HOME/bin/vscode-tunnel-helper
-chmod +x $HOME/bin/vscode-tunnel-helper
+# Download the helper scripts
+condatainer helper -u
 ```
 
 Then you can run the script: 
 
 ```bash
-vscode-tunnel-helper
+condatainer help vscode-tunnel
 ```
 
 After running the script, you will see output like this:
@@ -160,32 +162,6 @@ CWD: /scratch/username/playground
 ```
 
 Then you can either use the [VS Code Remote - Tunnels extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-server) or open the link in your web browser to connect to the VS Code server running on the compute node.
-
-## Change the default setting
-
-You can modify the default settings in the script, such as CPU, memory, time limit, overlay image path.
-
-They are at the beginning of the script:
-
-```bash
-#!/bin/bash
-
-NCPUS=4
-MEM=16G
-TIME=12:00:00
-AUTH="microsoft"
-```
-
-You can use editors like `vim` or `nano` to change these values.
-
-or use `sed`
-
-```bash
-sed -i 's/NCPUS=4/NCPUS=8/' $HOME/bin/vscode-tunnel-helper
-sed -i 's/MEM=16G/MEM=64G/' $HOME/bin/vscode-tunnel-helper
-sed -i 's/TIME=12:00:00/TIME=24:00:00/' $HOME/bin/vscode-tunnel-helper
-sed -i 's/AUTH="microsoft"/AUTH="github"/' $HOME/bin/vscode-tunnel-helper
-```
 
 ## Common Issues
 

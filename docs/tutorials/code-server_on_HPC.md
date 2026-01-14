@@ -7,18 +7,19 @@
 - [Have CondaTainer installed](#install-condatainer)
 - [Have required overlay images created](#install-required-overlays)
 - [Have a writable overlay image (optional)](#create-writable-overlay)
-- [Have the `code-server-helper` in your PATH](#code-server-helper-script)
+- [Check the Script Parameters](#code-server-helper-script)
 
 Then you can run:
 
 ```bash
-code-server-helper \
-  -p <port_number> \
-  -a <auth_password> \
-  -e <overlay_image> \
-  -c <num_cpus> \
-  -m <memory> \
-  -t <time_limit>
+condatainer help \
+  code-server \
+    -p <port_number> \
+    -a <auth_password> \
+    -e <overlay_image> \
+    -c <num_cpus> \
+    -m <memory> \
+    -t <time_limit>
 
 # Default 
 #   port_number=8080
@@ -31,7 +32,11 @@ code-server-helper \
 
 Please change the port number to a unique one to avoid conflicts with other users.
 
-If you have preferred settings, you can modify the script directly. See [Change the default setting](#change-the-default-setting) section below.
+```bash
+# You can create alias in your shell config file (~/.bashrc or ~/.zshrc):
+# Change 13182 to your preferred port number
+alias code-server-start='condatainer help code-server -p 13182'
+```
 
 If you have any issues, see [Common Issues](#common-issues) section below.
 
@@ -96,6 +101,12 @@ Run the following command to install CondaTainer if it is not installed:
 curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash
 ```
 
+Download the helper scripts:
+
+```bash
+condatainer helper --update
+```
+
 ## Install Required Overlays
 
 Creating required overlay images:
@@ -109,9 +120,9 @@ condatainer install code-server
 Creating an ext3 overlay image
 
 ```bash
-# create 20G ext3 image named as env.img under current directory
+# create a 20G ext3 image named `env.img` in the current working directory
 condatainer overlay
-# You can -s 10240 to specify the size in MB
+# You can use `-s 10240` to specify the size in MiB
 
 # go into the overlay
 condatainer e
@@ -125,11 +136,7 @@ mm-pin python
 
 ## Code Server Helper Script
 
-I always recommend running `code-server` on compute nodes rather than login nodes.
-
-You can use this script: [code-server-helper](https://github.com/Justype/condatainer/blob/main/helpers/code-server-helper)
-
-`code-server-helper` will do the following steps for you:
+`code-server` will do the following steps for you:
 
 1. Check if `code-server` is running on any compute node.
 2. If yes, establish SSH port forwarding to that node.
@@ -138,11 +145,11 @@ You can use this script: [code-server-helper](https://github.com/Justype/condata
    2. If pass, check the overlay integrity.
    3. If pass, use `sbatch` to submit a job which starts `code-server`.
    4. Wait for the job to start and get the compute node name.
-  5. Record the job ID, node name, port number, and working directory.
+   5. Record the job ID, node name, port number, and working directory.
    6. Set up SSH port forwarding from login node to compute node.
 
 ```
-Usage: code-server-helper [options]
+Usage: code-server [options]
 
 Options:
   -c <number>     Number of CPUs to allocate (default: 4)
@@ -150,6 +157,7 @@ Options:
   -t <time>       Time limit for the job (default: 12:00:00)
   -p <port>       Port for code-server (default: 8080)
   -a <auth>       Password for code-server authentication (default: none)
+  -b <image>      Base image file
   -e <overlay>    Environment overlay image file (default: env.img)
   -o <overlay>    Additional overlay files (can have multiple -o options)
   -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00
@@ -160,17 +168,14 @@ Options:
 Let's set up and run `code-server` on HPC:
 
 ```bash
-# Download the helper script
-# Please make sure $HOME/bin is in your PATH
-mkdir -p $HOME/bin
-wget https://raw.githubusercontent.com/Justype/condatainer/main/helpers/code-server-helper -O $HOME/bin/code-server-helper
-chmod +x $HOME/bin/code-server-helper
+# Download the helper scripts
+condatainer helper -u
 ```
 
 Then you can run the script: 
 
 ```bash
-code-server-helper
+condatainer help code-server
 ```
 
 After running the script, you will see output like this:
@@ -183,34 +188,6 @@ If you want to stop it, run: scancel 1299123
 ```
 
 Then you can go to your local web browser and access `http://localhost:8080` or click the link provided to open the project directly.
-
-## Change the default setting
-
-You can modify the default settings in the script, such as CPU, memory, time limit, overlay image path, port number.
-
-They are at the beginning of the script:
-
-```bash
-#!/bin/bash
-
-NCPUS=4
-MEM=32G
-TIME=12:00:00
-PORT=8080
-AUTH="none"
-```
-
-You can use editors like `vim` or `nano` to change these values.
-
-or use `sed`
-
-```bash
-sed -i 's/NCPUS=4/NCPUS=8/' $HOME/bin/code-server-helper
-sed -i 's/MEM=32G/MEM=64G/' $HOME/bin/code-server-helper
-sed -i 's/TIME=12:00:00/TIME=24:00:00/' $HOME/bin/code-server-helper
-sed -i 's/PORT=8080/PORT=13182/' $HOME/bin/code-server-helper
-sed -i 's/AUTH="none"/AUTH="your_password"/' $HOME/bin/code-server-helper
-```
 
 ## Common Issues
 
