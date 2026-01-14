@@ -1,6 +1,6 @@
 # Fakeroot
 
-The `--fakeroot` (or `-f`) flag allows an unprivileged user to appear as the **root user (UID 0)** inside the container. This relies on user namespace mapping (specifically `/etc/subuid` and `/etc/subgid` mappings on the host).
+The `--fakeroot` flag allows an unprivileged user to appear as the **root user (UID 0)** inside the container. This relies on user namespace mapping (specifically `/etc/subuid` and `/etc/subgid` mappings on the host).
 
 Fakeroot is useful when you:
 

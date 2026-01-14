@@ -42,7 +42,7 @@ html_favicon = '_static/favicon.png'
 html_static_path = ['_static']
 
 html_theme_options = {
-    'logo_only': False,
+    'logo_only': True,
     'collapse_navigation': False,
     'sticky_navigation': True,
     'navigation_depth': 4,

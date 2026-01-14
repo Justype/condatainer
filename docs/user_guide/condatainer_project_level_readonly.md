@@ -27,9 +27,11 @@ CondaTainer uses the `sqf` name to locate resources inside the overlay. The over
 ```{note}
 If your environment uses packages not available in conda, like using `pip` or `remotes::install_github()`, you need to record every step in a build bash script.
 
-See [Custom Build Script](../advanced_usage/condatainer_custom_script.md) for more details.
+Check [Custom System Overlays](../advanced_usage/condatainer_custom_def.md) for more details.
 
-But you can compress the writable overlay and share it. See [share the overlay with others](./condatainer_project_level_writable.md#share-the-overlay-with-others) for details.
+If you only need a slight modification of a conda env, see [Custom Build Script](../advanced_usage/condatainer_custom_script.md).
+
+But you can [share the writable overlay with others](./condatainer_project_level_writable.md#share-the-overlay-with-others).
 ```
 
 ## Launch a Shell with the Project Environment

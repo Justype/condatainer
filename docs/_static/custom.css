@@ -1,7 +1,7 @@
 /* Custom theme overrides for CondaTainer docs
    Change --logo-bg to pick a different color. Prefer an accessible contrast. */
 :root{
-  --logo-bg: #947339; /* darker yellow */
+  --logo-bg: #f1e4cc;
 }
 
 /* RTD theme: top header and logo background */
