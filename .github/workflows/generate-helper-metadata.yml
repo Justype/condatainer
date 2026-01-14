@@ -3,8 +3,7 @@ name: Generate Helper Scripts Metadata
 on:
   push:
     paths:
-      - 'helpers/hpc/**'
-      - 'helpers/headless/**'
+      - 'helpers/**'
   workflow_dispatch: {}
 
 permissions:

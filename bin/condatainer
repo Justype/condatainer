@@ -264,7 +264,7 @@ class Utils:
     def fetch_remote_helper_scripts() -> dict:
         """
         Fetch helper scripts metadata from remote helper metadata URL.
-        Returns the parsed JSON (expected structure with top-level categories like 'hpc' and 'headless').
+        Returns the parsed JSON (expected structure with top-level categories like 'slurm' and 'headless').
         """
         url = Config.REMOTE_HELPER_METADATA
         if not url:
@@ -1655,7 +1655,7 @@ class CondaTainer_Helper:
 
             # Choose category based on sbatch availability for metadata lookup
             use_sbatch = Config.use_sbatch and Utils.is_sbatch_available()
-            category = "hpc" if use_sbatch else "headless"
+            category = "slurm" if use_sbatch else "headless"
             Utils.print_debug(f"Helper category selected: {category}")
             if use_sbatch and Utils.is_in_interactive_shell():
                 Utils.print_note("If you don't want sbatch scripts, please run " + Utils.yellow_text(Config.SCRIPT_NAME + " --no-sbatch helper -u") + " next time.")

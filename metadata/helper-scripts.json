@@ -1,15 +1,4 @@
 {
-  "hpc": {
-    "code-server": {
-      "path": "helpers/hpc/code-server"
-    },
-    "rstudio-server-helper": {
-      "path": "helpers/hpc/rstudio-server-helper"
-    },
-    "vscode-tunnel": {
-      "path": "helpers/hpc/vscode-tunnel"
-    }
-  },
   "headless": {
     "code-server": {
       "path": "helpers/headless/code-server"
@@ -19,6 +8,17 @@
     },
     "vscode-tunnel": {
       "path": "helpers/headless/vscode-tunnel"
+    }
+  },
+  "slurm": {
+    "code-server": {
+      "path": "helpers/slurm/code-server"
+    },
+    "rstudio-server": {
+      "path": "helpers/slurm/rstudio-server"
+    },
+    "vscode-tunnel": {
+      "path": "helpers/slurm/vscode-tunnel"
     }
   }
 }

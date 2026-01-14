@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Generate helper metadata for scripts under `hpc/` and `headless/`.
+"""Generate helper metadata for scripts grouped by folders under `helpers/`.
 
-Writes JSON to `metadata/scripts-helper.json` with structure:
+Scans each top-level subfolder under `helpers/` (for example
+`helpers/slurm`, `helpers/headless`, etc.) and writes JSON to
+`metadata/helper-scripts.json` with structure:
 {
-  "hpc": {
-    "script_name": { "path": "hpc/script_name" },
-    ...
-  },
-  "headless": { ... }
+    "slurm": {
+        "script_name": { "path": "helpers/slurm/script_name" },
+        ...
+    },
+    "headless": { ... }
 }
 
 Script is safe to run locally or in CI.
@@ -20,10 +22,16 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = ROOT / "metadata"
 OUT_FILE = OUT_DIR / "helper-scripts.json"
 
-FOLDERS = {
-    "hpc": ROOT / "helpers" / "hpc",
-    "headless": ROOT / "helpers" / "headless",
-}
+HELPERS_ROOT = ROOT / "helpers"
+
+# Dynamically discover all top-level folders under helpers/ and use the folder
+# name as the metadata category key. This allows adding new groups without
+# changing this script (e.g., 'slurm', 'headless', ...).
+FOLDERS = {}
+if HELPERS_ROOT.exists():
+    for p in sorted(HELPERS_ROOT.iterdir()):
+        if p.is_dir():
+            FOLDERS[p.name] = p
 
 EXT_WHITELIST = {".sh", ".py", ".bash", ".md"}
 
