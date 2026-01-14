@@ -4,6 +4,11 @@
   --logo-bg: #f1e4cc;
 }
 
+/* Hides the version/language switch menus in the sidebar */
+div.switch-menus {
+    display: none !important;
+}
+
 /* RTD theme: top header and logo background */
 .wy-header,
 .wy-side-nav-search,
