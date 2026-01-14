@@ -37,13 +37,15 @@ jobs:
           git config user.name "dependabot[bot]"
           git config user.email "dependabot[bot]@users.noreply.github.com"
 
-          # Stage the JSON and gzipped JSON
-          git add metadata/helper-scripts.json || true
-          git add metadata/helper-scripts.json.gz || true
+          # Only stage the json file
+          git add metadata/helper-scripts.json
 
           if git diff --staged --quiet; then
             echo "No changes to helper metadata. Skipping commit."
           else
+            git add metadata/helper-scripts.json.gz
+
+            # SAFEGUARD: [skip ci] prevents this push from triggering a new run
             git commit -m "chore: update scripts helper metadata [skip ci]"
             git push
           fi
