@@ -14,6 +14,7 @@
 - [Info](#info)
 - [Update](#update)
 - [Completion](#completion)
+- [Helper](#helper)
 
 ## Overall Command Structure
 
@@ -488,6 +489,38 @@ condatainer info [OVERLAY]
 * File size.
 * Potential mount path (e.g., `/cnt/bcftools/1.22` or `/ext3/env`).
 * Environment variables defined within the overlay's `.env` file.
+
+## Helper
+
+Download and manage small helper scripts stored in the `helper-scripts/` folder inside the CondaTainer repository.
+
+**Usage:**
+
+```
+condatainer helper [-u|--update] [-p|--path] [SCRIPT_NAME] [SCRIPT_ARGS...]
+```
+
+Options:
+
+* `-u`, `--update`: Update helper scripts from remote metadata.
+* `-p`, `--path`: Print the absolute path of the helper folder or a specific helper script and exit.
+* `SCRIPT_NAME`: Name of the helper script to run or update (optional).
+* `SCRIPT_ARGS...`: Remaining arguments are passed directly to the helper script when running it.
+
+**Examples**
+
+```bash
+# Print helper folder path
+condatainer helper --path
+
+# Download/Update all helper scripts (auto selects sbatch or headless based on availability)
+condatainer helper --update
+# Forcely Update headless scripts version
+condatainer --no-sbatch helper --update
+
+# Run a helper script with arguments
+condatainer helper code-server -p 18230
+```
 
 ## Update
 
