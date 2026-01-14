@@ -17,11 +17,15 @@ os.umask(0o002)
 
 class Config:
     VERSION = "1.0.4"
-    # Remote settings
+
+    # Global settings
     debug = False
     use_sbatch = True
+
+    # Remote settings
     GITHUB_REPO = "Justype/condatainer"
     REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json.gz"
+    REMOTE_HELPER_METADATA = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/helper-scripts.json.gz"
     CONDATAINER_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/condatainer"
     GIT_RAW_URL_PREFIX = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
 
@@ -35,6 +39,7 @@ class Config:
     IMAGES_DIR = os.path.join(CONDATINER_DIR, "images")
     REF_IMAGES_DIR = os.path.join(CONDATINER_DIR, "ref-images")
     TMP_DIR = os.path.join(CONDATINER_DIR, "tmp")
+    HELPER_SCRIPTS_DIR = os.path.join(CONDATINER_DIR, "helper-scripts")
     LOGS_DIR = os.path.join(os.path.expanduser("~"), "logs")
 
     # Local apptainer
@@ -99,6 +104,7 @@ def main():
 
     CondaTainer_Overlay.add_parser_arguments(subparsers)
     CondaTainer_Create.add_parser_arguments(subparsers)
+    CondaTainer_Helper.add_parser_arguments(subparsers)
     CondaTainer_Avail.add_parser_arguments(subparsers)
     CondaTainer_List.add_parser_arguments(subparsers)
     CondaTainer_Remove.add_parser_arguments(subparsers)
@@ -139,6 +145,8 @@ def main():
         CondaTainer_Remove.parse_remove_args(args)
     elif args.action in ("overlay", "o"):
         CondaTainer_Overlay.parse_overlay_args(args)
+    elif args.action in ("helper"):
+        CondaTainer_Helper.parse_helper_args(args)
     elif args.action == "self-update":
         CondaTainer_Update.parse_update_args(args)
     elif args.action == "completion":
@@ -146,6 +154,7 @@ def main():
 
 class Utils:
     remote_build_scripts_links: Optional[Dict[str, str]] = None
+    remote_helper_scripts_links: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None
     local_build_scripts_paths: Optional[Dict[str, str]] = None
 
     @staticmethod
@@ -250,6 +259,38 @@ class Utils:
             Utils.remote_build_scripts_links = normalized
 
         return normalized
+
+    @staticmethod
+    def fetch_remote_helper_scripts() -> dict:
+        """
+        Fetch helper scripts metadata from remote helper metadata URL.
+        Returns the parsed JSON (expected structure with top-level categories like 'hpc' and 'headless').
+        """
+        url = Config.REMOTE_HELPER_METADATA
+        if not url:
+            return {}
+
+        if Utils.remote_helper_scripts_links is not None:
+            return Utils.remote_helper_scripts_links
+
+        try:
+            with urllib.request.urlopen(url) as resp:
+                if url.endswith('.gz'):
+                    import gzip
+                    with gzip.GzipFile(fileobj=resp) as gz:
+                        data = gz.read()
+                else:
+                    data = resp.read()
+                metadata = json.loads(data)
+        except Exception as e:
+            Utils.print_error(e)
+            Utils.print_warning(f"Failed to fetch remote helper metadata from {url}: {e}")
+            return {}
+
+        if metadata:
+            Utils.remote_helper_scripts_links = metadata
+
+        return metadata
 
     @staticmethod
     def get_local_build_scripts():
@@ -496,8 +537,8 @@ class Utils:
                 current_mode = os.stat(dir_path).st_mode
                 # Add read/write/execute for user & group
                 os.chmod(dir_path, current_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
-                                            stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
-                                            stat.S_IROTH | stat.S_IXOTH)
+                                                stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
+                                                stat.S_IROTH | stat.S_IXOTH)
 
             # Set files
             for f in files:
@@ -505,13 +546,13 @@ class Utils:
                 current_mode = os.stat(file_path).st_mode
                 # Add read/write for user & group
                 os.chmod(file_path, current_mode | stat.S_IRUSR | stat.S_IWUSR |
-                                            stat.S_IRGRP | stat.S_IWGRP| stat.S_IROTH)
+                                                stat.S_IRGRP | stat.S_IWGRP| stat.S_IROTH)
 
         # Finally, handle the top-level directory itself
         current_mode = os.stat(path).st_mode
         os.chmod(path, current_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
-                                stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
-                                stat.S_IROTH | stat.S_IXOTH)
+                                        stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
+                                        stat.S_IROTH | stat.S_IXOTH)
 
     @staticmethod
     def is_in_interactive_shell() -> bool:
@@ -845,10 +886,10 @@ class BuildObject:
         if not (self.is_conda or self.is_def):
             self.dependencies = Utils.get_dependencies_from_script(self.build_source)
             self.sbatch_flags = Utils.get_sbatch_args_from_build_script(self.build_source)
-            interactive_prompts = Utils.get_interactive_prompts(self.build_source)
-            if interactive_prompts and not Utils.is_in_interactive_shell():
+            self.interactive_prompts = Utils.get_interactive_prompts(self.build_source)
+            if self.interactive_prompts and not Utils.is_in_interactive_shell():
                 raise RuntimeError(f"Build script for {self.name_version} requires interactive input, but no TTY is available.")
-            for prompt in interactive_prompts:
+            for prompt in self.interactive_prompts:
                 Utils.print_note("Build script requires input: " +prompt.replace('\\n', '\n'))
                 user_input = input("Enter here: ")
                 if "\n" in user_input or "\r" in user_input:
@@ -1581,6 +1622,108 @@ class CondaTainer_Create:
 
         build_graph = BuildGraph([build_obj])
         return build_graph.run()
+
+class CondaTainer_Helper:
+    @staticmethod
+    def add_parser_arguments(parser):
+        CondaTainer_Helper.parser_helper = parser.add_parser(
+            "helper", help="Run or update helper scripts from helper-scripts/")
+        CondaTainer_Helper.parser_helper.add_argument(
+            "-u", "--update", action="store_true", help="Update helper scripts from remote metadata (if no script provided, update all for chosen mode)")
+        CondaTainer_Helper.parser_helper.add_argument(
+            "-p", "--path", action="store_true", help="Print the absolute path of the helper folder or specific script")
+        CondaTainer_Helper.parser_helper.add_argument(
+            "script_name", nargs="?", help="Name of helper script to run or update")
+        CondaTainer_Helper.parser_helper.add_argument(
+            "script_args", nargs=argparse.REMAINDER, help="Arguments passed to the helper script")
+
+    @staticmethod
+    def parse_helper_args(args):
+        # --- Path Mode ---
+        if args.path:
+            if args.script_name:
+                local_path = os.path.join(Config.HELPER_SCRIPTS_DIR, args.script_name)
+                if os.path.isfile(local_path):
+                    print(os.path.abspath(local_path))
+                else:
+                    Utils.print_error(f"Helper script '{args.script_name}' not found locally.")
+            else:
+                if not os.path.isdir(Config.HELPER_SCRIPTS_DIR):
+                    os.makedirs(Config.HELPER_SCRIPTS_DIR, mode=0o775, exist_ok=True)
+                print(os.path.abspath(Config.HELPER_SCRIPTS_DIR))
+            return
+
+        # --- Update Mode ---
+        if args.update:
+            meta = Utils.fetch_remote_helper_scripts()
+            if not meta:
+                Utils.print_error("No remote helper metadata found.")
+                return
+
+            # Choose category based on sbatch availability for metadata lookup
+            use_sbatch = Config.use_sbatch and Utils.is_sbatch_available()
+            category = "hpc" if use_sbatch else "headless"
+            Utils.print_debug(f"Helper category selected: {category}")
+            if use_sbatch and Utils.is_in_interactive_shell():
+                Utils.print_note("If you don't want sbatch scripts, please run " + Utils.yellow_text(Config.SCRIPT_NAME + " --no-sbatch helper -u") + " next time.")
+                import time
+                time.sleep(1)
+
+            entries = meta.get(category, {})
+            os.makedirs(Config.HELPER_SCRIPTS_DIR, mode=0o775, exist_ok=True)
+
+            if args.script_name:
+                if args.script_name in entries:
+                    entries = {args.script_name: entries[args.script_name]}
+                else:
+                    Utils.print_error(f"Helper script '{args.script_name}' not found in remote metadata for category '{category}'.")
+                    return
+            else:
+                Utils.print_message(f"Updating all helper scripts for {category}...")
+
+            for name, v in entries.items():
+                rel = v.get("path")
+                if not rel:
+                    continue
+                raw = Config.GIT_RAW_URL_PREFIX + rel
+                dest_name = os.path.basename(rel)
+                dest = os.path.join(Config.HELPER_SCRIPTS_DIR, dest_name)
+                Utils.print_message(f"Updating {category}/{name}")
+                if not Utils.download_executable(raw, dest):
+                    Utils.print_warning(f"Failed to update {category}/{name}")
+
+            Utils.print_success("Helper update finished.")
+            return
+
+        # --- Run Mode ---
+        if not args.script_name:
+            Utils.print_error("No helper script name provided. Use --update to update scripts.")
+            return
+
+        local_path = os.path.join(Config.HELPER_SCRIPTS_DIR, args.script_name)
+
+        # Strictly check local existence
+        if not os.path.isfile(local_path):
+            Utils.print_error(f"Helper script '{args.script_name}' not found locally at {local_path}.")
+            Utils.print_note(f"Please run {Utils.blue_text(Config.SCRIPT_NAME + ' helper --update')} to fetch available helper scripts.")
+            return
+
+        # Ensure executable permission
+        try:
+            current_mode = os.stat(local_path).st_mode
+            if not (current_mode & stat.S_IXUSR):
+                os.chmod(local_path, current_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        except Exception:
+            pass
+
+        cmd = [local_path] + (args.script_args or [])
+        Utils.print_debug(f"Running helper command: {cmd}")
+
+        try:
+            # check=False allows the script's exit code to pass through without crashing python
+            subprocess.run(cmd, check=False)
+        except Exception as e:
+            Utils.print_error(f"Failed to run helper script: {e}")
 
 class CondaTainer_Exec:
     is_img_writable = False
@@ -2613,12 +2756,12 @@ class CondaTainer_Overlay:
             help="Path inside the overlay to change (default: /ext3)"
         )
 
-        parser_o = parser.add_parser("o", help="Shortcut for 'overlay create'")
-        CondaTainer_Overlay._add_create_args(parser_o)
-
         parser_resize = subparsers.add_parser("resize", help="Resize an existing overlay in-place")
         parser_resize.add_argument("image", type=str, help="Overlay image to resize")
         parser_resize.add_argument("-s", "--size", type=int, required=True, help="New size in MiB")
+
+        parser_o = parser.add_parser("o", help="Shortcut for 'overlay create'")
+        CondaTainer_Overlay._add_create_args(parser_o)
 
     @staticmethod
     def _add_create_args(parser):
@@ -2744,7 +2887,7 @@ class CondaTainer_Overlay:
         if args.root:
             target_uid = 0
             target_gid = 0
-        
+
         # 1. Translate Logical Path to Internal Path
         #    /       -> /upper
         #    /opt    -> /upper/opt
@@ -2759,7 +2902,7 @@ class CondaTainer_Overlay:
                 if os.path.exists(fallback):
                     debugfs_bin = fallback
                     break
-        
+
         if not debugfs_bin:
              Utils.print_error("Cannot fix permissions: 'debugfs' not found in PATH.")
              return
@@ -2774,7 +2917,7 @@ class CondaTainer_Overlay:
             # A. Get the starting inode of the target path
             cmd_root = [debugfs_bin, "-R", f"stat {internal_target_path}", overlay_path]
             proc_root = subprocess.run(cmd_root, capture_output=True, text=True)
-            
+
             if proc_root.returncode != 0:
                 Utils.print_error(f"Path {internal_target_path} not found in image.")
                 return
@@ -2790,13 +2933,13 @@ class CondaTainer_Overlay:
 
             # B. Walk the tree
             Utils.print_message("Scanning directory tree (this may take a moment)...")
-            
+
             visited_dirs = set()
             scanned_count = 0
 
             while dirs_to_visit:
                 current_inode = dirs_to_visit.pop(0)
-                
+
                 if current_inode in visited_dirs:
                     continue
                 visited_dirs.add(current_inode)
@@ -2804,12 +2947,12 @@ class CondaTainer_Overlay:
                 # List contents of this inode
                 list_cmd = [debugfs_bin, "-R", f"ls -l <{current_inode}>", overlay_path]
                 proc = subprocess.run(list_cmd, capture_output=True, text=True)
-                
+
                 for line in proc.stdout.splitlines():
                     parts = line.strip().split()
                     if not parts or not parts[0].isdigit():
                         continue
-                    
+
                     inode = parts[0]
                     mode_octal = parts[1]
                     name = parts[-1]
@@ -2818,10 +2961,10 @@ class CondaTainer_Overlay:
                         continue
 
                     inodes_to_chown.add(inode)
-                    
+
                     scanned_count += 1
                     if scanned_count % 2000 == 0:
-                        print(f"\rScanning... Found {scanned_count} inodes so far...", end="", flush=True)
+                      print(f"\rScanning... Found {scanned_count} inodes so far...", end="", flush=True)
 
                     if mode_octal.startswith("4") or mode_octal.startswith("04"):
                         dirs_to_visit.append(inode)
@@ -2834,9 +2977,9 @@ class CondaTainer_Overlay:
                  return
 
             Utils.print_message(f"Modifying {Utils.magenta_text(len(inodes_to_chown))} inodes: UID={Utils.yellow_text(target_uid)}, GID={Utils.yellow_text(target_gid)}...")
-            
+
             cmds = []
-            
+
             # Explicitly fix overlay skeleton
             for path in ["/upper", "/work", "/work/work"]:
                 cmds.append(f"sif {path} uid {target_uid}")
@@ -2847,7 +2990,7 @@ class CondaTainer_Overlay:
                 cmds.append(f"sif <{inode}> gid {target_gid}")
 
             debugfs_script = "\n".join(cmds)
-            
+
             subprocess.run(
                 [debugfs_bin, "-w", overlay_path],
                 input=debugfs_script,
@@ -2856,7 +2999,7 @@ class CondaTainer_Overlay:
                 stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE
             )
-            
+
             Utils.print_success(f"{len(inodes_to_chown)} inodes chowned via debugfs.")
 
         except Exception as e:
@@ -2876,11 +3019,11 @@ class CondaTainer_Overlay:
         Utils.print_message(f"Resizing {Utils.blue_text(os.path.basename(target))} to {Utils.yellow_text(str(args.size) + ' MiB')}...")
         new_size_bytes = args.size * 1024 * 1024
         current_size = os.path.getsize(target)
-        
+
         if new_size_bytes == current_size:
             Utils.print_message("Size unchanged.")
             return
-        
+
         Utils.print_message("Checking filesystem integrity before resizing...")
         try:
             subprocess.run(["e2fsck", "-p", "-f", target], check=True, stdout=subprocess.DEVNULL)
@@ -2927,19 +3070,22 @@ class CondaTainer_Update:
             Utils.print_error("Failed to download the latest CondaTainer script.")
 
 class CondaTainer_Completion:
-    """Generates shell completion scripts for Bash and Zsh. (Gemini generated)"""
+    """Generates shell completion scripts for Bash and Zsh. (Updated for v1.0.4)"""
 
+    # Auto-detect shell from environment
     _detected_shell = "zsh" if "zsh" in os.environ.get("SHELL", "") else "bash"
 
     @staticmethod
     def add_parser_arguments(parser):
-        sub = parser.add_parser("completion", help="Generate shell completion script")
-        sub.add_argument("shell", choices=["bash", "zsh"], default=CondaTainer_Completion._detected_shell, nargs="?", help=f"Shell type")
+        sub = parser.add_parser("completion", help="Generate shell completion script 'source <(" + Config.SCRIPT_NAME + " completion)'")
+        sub.add_argument("shell", choices=["bash", "zsh"], default=CondaTainer_Completion._detected_shell, nargs="?", help=f"Shell type (default: {CondaTainer_Completion._detected_shell})")
 
     @staticmethod
     def parse_completion_args(args):
         script_name = Config.SCRIPT_NAME
         target_shell = args.shell
+
+        # Regex for installed system images (no extension in name)
         ext_regex = r"[.](sqf|sqsh|squashfs|img)$"
 
         if target_shell == "bash":
@@ -2950,7 +3096,7 @@ _{script_name}_completion() {{
     cur="${{COMP_WORDS[COMP_CWORD]}}"
     prev="${{COMP_WORDS[COMP_CWORD-1]}}"
 
-    local subcommands="create install i avail av list ls remove rm delete exec e check run info self-update completion overlay o"
+    local subcommands="create install i avail av list ls remove rm delete exec e check run info helper self-update completion overlay o"
     local global_opts="--debug --no-sbatch --local -v --version -h --help"
 
     if [[ ${{COMP_CWORD}} -eq 1 ]]; then
@@ -2964,20 +3110,26 @@ _{script_name}_completion() {{
 
     local subcommand="${{COMP_WORDS[1]}}"
 
+    # Usage: _list_overlays <include_app> <include_data>
     _list_overlays() {{
         local include_app=$1
         local include_data=$2
         local img_dir="{Config.IMAGES_DIR}"
         local ref_dir="{Config.REF_IMAGES_DIR}"
         local files=""
+
+        # App Overlays
         if [[ "$include_app" == "true" && -d "$img_dir" ]]; then
             local sys_imgs=$(ls -1 "$img_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
             files="$files $sys_imgs"
         fi
+
+        # Data Overlays
         if [[ "$include_data" == "true" && -d "$ref_dir" ]]; then
             local ref_imgs=$(ls -1 "$ref_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
             files="$files $ref_imgs"
         fi
+
         echo "$files"
     }}
 
@@ -3021,6 +3173,19 @@ _{script_name}_completion() {{
              fi
              return 0
              ;;
+        helper)
+             if [[ "${{cur}}" == -* ]]; then
+                 COMPREPLY=( $(compgen -W "-u --update -p --path" -- "${{cur}}") )
+             else
+                 # List scripts in helper-scripts folder
+                 local helper_dir="{os.path.join(Config.CONDATINER_DIR, "helper-scripts")}"
+                 if [[ -d "$helper_dir" ]]; then
+                     local scripts=$(ls -1 "$helper_dir" 2>/dev/null)
+                     COMPREPLY=( $(compgen -W "$scripts" -- "${{cur}}") )
+                 fi
+             fi
+             return 0
+             ;;
         create|install|i)
             if [[ "${{cur}}" == -* ]]; then
                 local opts="-n --name -p --prefix -f --file -s --source --zstd --zstd-fast --zstd-medium --zstd-high --gzip --lz4"
@@ -3037,10 +3202,12 @@ _{script_name}_completion() {{
                 local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img)$')
                 local sys_files=$(_list_overlays true true)
                 COMPREPLY=( $(compgen -W "$local_files $sys_files" -- "${{cur}}") )
+
             elif [[ "${{prev}}" == "-b" || "${{prev}}" == "--base-image" ]]; then
                 local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img|sif)$')
                 local sys_files=$(_list_overlays true false)
                 COMPREPLY=( $(compgen -W "$local_files $sys_files" -- "${{cur}}") )
+
             else
                 local opts="-o --overlay -k --keep -w --writable-img --env --bind --fakeroot -b --base-image"
                 if [[ "${{cur}}" == -* ]]; then
@@ -3159,6 +3326,7 @@ _{script_name}_completion() {{
                 'e:Run bash using writable overlays'
                 'check:Check script dependencies'
                 'run:Run a script with auto-solving deps'
+                'helper:Run or update helper scripts'
                 'info:Show overlay information'
                 'self-update:Update CondaTainer'
                 'completion:Generate shell completion'
@@ -3185,7 +3353,7 @@ _{script_name}_completion() {{
                      local ref_found=$(ls -1 "$ref_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
                      [[ -n "$ref_found" ]] && overlays+=(${{(f)ref_found}})
                 fi
-                
+
                 if [[ ${{#overlays}} -gt 0 ]]; then
                     _describe -t overlays 'installed overlays' overlays
                 fi
@@ -3282,6 +3450,12 @@ _{script_name}_completion() {{
                         '(-a --auto-install -i --install)'{{-a,-i,--auto-install,--install}}'[Auto install deps]' \\
                         '(-b --base-image)'{{-b,--base-image}}'[Base image]: :_alternative "files:file:_files -g \\"*.sqf *.img *.sif\\"" "overlays:installed:_installed_overlays true false"' \\
                         ':script:_files'
+                    ;;
+                helper)
+                    _arguments \\
+                        '(-u --update)'{{-u,--update}}'[Update helper scripts]' \\
+                        '(-p --path)'{{-p,--path}}'[Print path]' \
+                        '*:script:_files'
                     ;;
                 avail|av)
                     _arguments \\
