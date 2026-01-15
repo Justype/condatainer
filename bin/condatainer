@@ -3420,6 +3420,8 @@ _{script_name}_completion() {{
 
 _{script_name}_completion "$@"
 """
+        else:
+            completion_code = ""
         print(completion_code.strip())
 
 if __name__ == "__main__":
