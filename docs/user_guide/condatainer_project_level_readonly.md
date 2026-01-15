@@ -1,8 +1,13 @@
 # Use CondaTainer to Manage Read-Only Env
 
-📦 **CondaTainer** allows you to create isolated read-only project environments using Apptainer and micromamba.
+📦 **CondaTainer** allows you to create isolated read-only project environments using Apptainer and micromamba. Once the development and testing phase is complete, you can pack the project environment into a highly-compressed SquashFS overlay for production use. 
 
-Once the development and testing phase is complete, you can pack the project environment into a highly-compressed SquashFS overlay for production use. 
+**CondaTainer** supports two types of overlays:
+
+- **Default Overlays**: Use `/cnt/name/version` directory to store apps or data.
+- **System Overlays**: Standalone containers featuring standard system directories (`/bin`, `/lib`, `/root`).
+
+This guide focuses on creating **Default Overlays** using Conda YAML files.
 
 ## Table of Contents
 
@@ -25,13 +30,13 @@ CondaTainer uses the `sqf` name to locate resources inside the overlay. The over
 ```
 
 ```{note}
-If your environment uses packages not available in conda, like using `pip` or `remotes::install_github()`, you need to record every step in a build bash script.
+If your environment uses packages not available in conda, like using `pip` or `remotes::install_github()`, check [Custom System Overlays](../advanced_usage/condatainer_custom_def.md) for more details.
 
-Check [Custom System Overlays](../advanced_usage/condatainer_custom_def.md) for more details.
+But you can also [share the writable overlay with others](./condatainer_project_level_writable.md#share-the-overlay-with-others).
+```
 
-If you only need a slight modification of a conda env, see [Custom Build Script](../advanced_usage/condatainer_custom_script.md).
-
-But you can [share the writable overlay with others](./condatainer_project_level_writable.md#share-the-overlay-with-others).
+```{note}
+If you only need a slight modification of a conda env, like editing Python package code, see [Custom Build Script](../advanced_usage/condatainer_custom_script.md).
 ```
 
 ## Launch a Shell with the Project Environment

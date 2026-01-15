@@ -24,16 +24,17 @@ condatainer o
 Full command with options:
 
 ```
-usage: condatainer o [-h] [-s SIZE] [-f FILE] [--fakeroot] [image]
+usage: condatainer o [-h] [-s SIZE] [-f FILE] [--fakeroot] [--sparse] [image]
 
 positional arguments:
-  image                 Path to create the overlay image (default: env.img)
+  image                 Path to the output overlay image (default: env.img)
 
 options:
   -h, --help            show this help message and exit
-  -s SIZE, --size SIZE  Size of the overlay image in MiB (default: 20480)
-  -f FILE, --file FILE  Conda env YAML file to initialize
-  --fakeroot            fakeroot overlay (cannot be used without --fakeroot later, not recommended)
+  -s SIZE, --size SIZE  Set overlay size (default: 10G). Accepts GB/MB suffixes; assumes MB if omitted
+  -f FILE, --file FILE  Initialize with Conda environment file (.yaml/.yml)
+  --fakeroot            Create a fakeroot-compatible overlay
+  --sparse              Create a sparse overlay image (default: false)
 ```
 
 - For Python projects, 10GiB is usually sufficient.
@@ -43,6 +44,20 @@ options:
 Only one overlay can be mounted at a time, regardless of writable or read-only mode.
 
 The mounting path is `/ext3/env`. So the img name does not matter.
+```
+
+### Change the Overlay Size
+
+Don't worry if you run out of space in the overlay later. You can easily resize it with the following command:
+
+```bash
+condatainer overlay resize env.img -s 30G
+```
+
+Or you can shrink it as well:
+
+```bash
+condatainer overlay resize env.img -s 5G
 ```
 
 ## Launch a Shell with the Project Environment
@@ -213,7 +228,7 @@ It means the overlay image is full. You can try to:
 - increase the size of the overlay image by running:
 
 ```bash
-condatainer overlay resize env.img -s <new_size_in_MiB>
+condatainer overlay resize env.img -s 30G
 ```
 
 ### Permission errors when executing commands
