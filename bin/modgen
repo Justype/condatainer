@@ -18,7 +18,7 @@ class Config:
     VERSION = "1.0.4"
     # Remote settings
     debug = False
-    use_sbatch = True
+    submit_job = True
     GITHUB_REPO = "Justype/condatainer"
     REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json.gz"
     MODGEN_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/modgen"
@@ -59,7 +59,7 @@ def main():
         epilog=f"For full manual, see https://github.com/{Config.GITHUB_REPO}/blob/main/docs/manuals/modgen.md")
     parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of ModGen", default=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
-    parser.add_argument("-n", "--no-sbatch", "--local", dest="no_sbatch", action="store_true", help="Run all operations locally without using sbatch")
+    parser.add_argument("--local", dest="local", action="store_true", help="Disable job submission")
     subparsers = parser.add_subparsers(dest="action", metavar="COMMAND", required=True, help="Available actions")
 
     ModGen_Init.add_parser_arguments(subparsers)
@@ -84,9 +84,9 @@ def main():
         Utils.print_debug("Debug mode enabled")
         Utils.print_debug(f"ModGen Version: {Config.VERSION}")
         Utils.print_debug(f"MODULE SYSTEM: {'Lmod' if Config.IS_LMOD else 'Environment-Modules'}")
-    if args.no_sbatch:
-        Config.use_sbatch = False
-        Utils.print_debug("No sbatch mode enabled")
+    if args.local:
+        Config.submit_job = False
+        Utils.print_debug("Local mode enabled (job submission disabled)")
 
     if args.action in ("create", "install", "i"):
         ModGen_Create.parse_create_args(args)
@@ -681,10 +681,10 @@ class BuildObject:
         if not self.is_conda:
             self.dependencies = Utils.get_dependencies_from_script(self.build_script_path)
             self.sbatch_flags = Utils.get_sbatch_args_from_build_script(self.build_script_path)
-            interactive_prompts = Utils.get_interactive_prompts(self.build_script_path)
-            if interactive_prompts and not Utils.is_in_interactive_shell():
+            self.interactive_prompts = Utils.get_interactive_prompts(self.build_script_path)
+            if self.interactive_prompts and not Utils.is_in_interactive_shell():
                 raise RuntimeError(f"Build script for {self.name_version} requires interactive input, but no TTY is available.")
-            for prompt in interactive_prompts:
+            for prompt in self.interactive_prompts:
                 Utils.print_note("Build script requires input: " +prompt.replace('\\n', '\n'))
                 user_input = input("Enter here: ")
                 if "\n" in user_input or "\r" in user_input:
@@ -953,7 +953,7 @@ class BuildGraph:
 
         for name_version in order:
             meta = self.graph[name_version]
-            if Config.use_sbatch and meta.sbatch and Utils.is_sbatch_available():
+            if Config.submit_job and meta.sbatch and Utils.is_sbatch_available():
                 self.build_metadata.append(meta)
             else:
                 self.download_metadata.append(meta)
@@ -1235,9 +1235,13 @@ class ModGen_Exec:
 
     @staticmethod
     def exec_command(modules: List[str], command: List[str]):
-        ml_commands = "module purge && module load " + " ".join(modules)
+        if not modules:
+            Utils.print_warning("No modules specified to load. Executing command without module loading.")
+            ml_commands = ""
+        else:
+            ml_commands = "module purge && module load " + " ".join(modules) + " &&"
         safe_command = " ".join([shlex.quote(part) for part in command])
-        full_command = f"{ml_commands} && {safe_command}"
+        full_command = f"{ml_commands} {safe_command}"
 
         Utils.print_debug(f"[EXEC] Executing command:")
         Utils.print_debug(full_command)
@@ -1431,7 +1435,7 @@ class ModGen_Remove:
     @staticmethod
     def add_parser_arguments(parser):
         ModGen_Remove.parser_remove = parser.add_parser(
-            "remove", aliases=["rm", "delete", "del"],
+            "remove", aliases=["rm", "delete"],
             help="Remove installed modules matching search terms")
         ModGen_Remove.parser_remove.add_argument(
             "terms",
@@ -1566,27 +1570,18 @@ class ModGen_Run:
             "run", aliases=["r"], 
             help="Run a script and auto-solve the dependencies by #DEP tags")
         ModGen_Run.parser_run.add_argument(
-            "script",
-            type=str,
-            help="Path to the script to run"
-        )
+            "script", type=str,
+            help="Path to the script to run")
         ModGen_Run.parser_run.add_argument(
-            "-w", "--writable-img",
-            help="Placeholder for CondaTainer compatibility (no effect)",
-            action="store_true"
-        )
+            "-w", "--writable-img", action="store_true",
+            help="Placeholder for CondaTainer compatibility (no effect)")
         ModGen_Run.parser_run.add_argument(
-            "-a", "--auto-install",
-            "-i", "--install",
-            dest="auto_install",
-            help="Automatically install missing dependencies",
-            action="store_true"
-        )
+            "-b", "--base-image", type=str,
+            help="Placeholder for CondaTainer compatibility (no effect)")
         ModGen_Run.parser_run.add_argument(
-            "script_args",
-            nargs=argparse.REMAINDER,
-            help="Arguments to pass to the script"
-        )
+            "-a", "--auto-install", "-i", "--install",
+            dest="auto_install", action="store_true",
+            help="Automatically install missing dependencies")
 
     @staticmethod
     def parse_args_in_script(script_path: str) -> List[str]:
@@ -1608,7 +1603,6 @@ class ModGen_Run:
         script_path = args.script
         if not os.path.isfile(script_path):
             ModGen_Run.parser_run.error(f"Script file {script_path} not found.")
-        script_args = args.script_args
 
         args_from_script = ModGen_Run.parse_args_in_script(args.script)
         merged = args_from_script + sys.argv[2:]
@@ -1641,7 +1635,12 @@ class ModGen_Run:
                 Utils.print_error("Some dependencies failed to install.")
                 return
 
-        ModGen_Exec.exec_command(deps, ["/bin/bash", script_path] + script_args)
+        execution_command_list = []
+        if os.access(script_path, os.X_OK):
+            execution_command_list.append(script_path)
+        else:
+            execution_command_list.append(f"bash {script_path}")
+        ModGen_Exec.exec_command(deps, execution_command_list)
 
 class ModGen_Init:
     module_yes = False

@@ -15,7 +15,7 @@
 ## Overall Command Structure
 
 ```
-usage: modgen [-h] [-v] [--debug] [-n] COMMAND ...
+usage: modgen [-h] [-v] [--debug] [--local] COMMAND ...
 
 ModGen: Use conda and build scripts to create environment-modules or Lmod modules.
 
@@ -26,19 +26,19 @@ positional arguments:
                         Create a modules using conda or available build scripts
     avail (av)          Check available local and remote build scripts
     list (ls)           List installed modules matching search terms
-    remove (delete)     Remove installed modules matching search terms
+    remove (rm, delete)
+                        Remove installed modules matching search terms
     exec (e)            Execute a command with modules loaded
     check (c)           Check if the dependencies of a script are installed
     run (r)             Run a script and auto-solve the dependencies by #DEP tags
     self-update         Update ModGen to the latest version
     condatainer         Install CondaTainer
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -v, --version         Show the version of ModGen
   --debug               Enable debug mode with verbose output
-  -n, --no-sbatch, --local
-                        Run all operations locally without using sbatch
+  --local               Disable job submission
 ```
 
 ## Initialization

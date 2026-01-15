@@ -2,11 +2,11 @@
 
 🏭 **ModGen** is a tool designed to automate the creation of **Lmod/Environment Modules** on HPC systems. It is ideal for users who prefer working with existing system-available modules rather than isolated containers.
 
-But you cannot run rstudio-server, code-server using **ModGen**. For those use cases, please use [CondaTainer](condatainer.md).
+But you cannot manage project environment and run rstudio-server using **ModGen**. For those use cases, please use [CondaTainer](condatainer.md).
 
 ## 🛠️ Quick Installation
 
-**ModGen** is installed as part of the **CondaTainer** toolkit. To install it, run the following interactive script in your terminal:
+**ModGen** is installed as part of the **CondaTainer** toolkit. To install it only, run the following interactive script in your terminal:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash -s -- -m
@@ -22,8 +22,8 @@ curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/insta
 
 The installation script is **interactive** and will guide you through these steps:
 
-1.  **Installation Path**: You will be prompted to confirm where the toolkit should be installed. The default locations are typically `$SCRATCH/condatainer/` or `$HOME/condatainer/`.
-2.  **Shell Configuration**: The script will automatically **edit your shell configuration** (such as `.bashrc`) so that the toolkit commands are immediately accessible in your environment.
+1.  **Installation Path**: You will be prompted to confirm or set the installation path (defaults to `$SCRATCH/condatainer/` or `$HOME/condatainer/`).
+2.  **Shell Configuration**: The script will automatically **edit your shell configuration** (such as `.bashrc`) so that the toolkit commands are accessible.
 
 ## ✅ Verify Installation
 
