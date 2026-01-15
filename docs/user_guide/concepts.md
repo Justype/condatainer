@@ -2,24 +2,25 @@
 
 **Modular, Reproducible, and Self-Contained Analysis Environments.**
 
-To make analyses reproducible, we use a **modular architecture** to manage software and reference data. This approach allows us to dynamically load tools and genomes without worrying about installation conflicts, file paths, or complex dependencies.
+To ensure reproducibility in bioinformatics analyses, it's crucial to manage both software tools and reference data effectively. Two tools, **ModGen** (using Lmod/Environment Modules) and **CondaTainer** (using Singularity with Conda), provide robust solutions for this purpose.
 
 ## 💡 The Main Idea
 
-Modules are self-contained packages. When loaded, both **Lmod** and **CondaTainer** can modify environment variables (like `PATH`, `LD_LIBRARY_PATH`, etc.) to make software and data easily accessible.
+Modules/overlays are self-contained packages. When loaded, both **Lmod** and **CondaTainer** can modify environment variables (like `PATH` etc.) to make software and data easily accessible.
 
 ## 📦 Module Types
 
-We distinguish between logic (app) and data (references) to ensure flexibility and reproducibility.
+Modules are categorized into two main types: **App** modules and **Ref** modules.
 
-By combining **App** modules with **Ref** modules, we create a complete, version-controlled environment. This guarantees that the software version matches the reference data structure, preventing common analysis errors.
+- **App Modules**: Contain the software applications, pipelines, or binaries needed for analysis.
+- **Ref Modules**: Contain version-specific genome indices, annotations, or reference files.
 
 ### 🛠️ 1. App Modules (Logic)
 
 App modules encapsulate the software application, pipeline, or binaries.
 
 - **Role**: Provides the executable tools and manages their runtime dependencies.
-- **Action**: Updates system PATH so we can run commands (e.g., cellranger) directly.
+- **Action**: Updates system PATH so you can run commands (e.g., cellranger) directly.
 
 **Example**: `salmon/1.10.2`
 
