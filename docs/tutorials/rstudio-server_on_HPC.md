@@ -12,7 +12,7 @@
 Then you can run:
 
 ```bash
-condatainer help \
+condatainer helper \
   rstudio-server \
   -p <port_number> \
   -e <overlay_image> \
@@ -33,7 +33,7 @@ Please change the port number to a unique one to avoid conflicts with other user
 ```bash
 # You can create alias in your shell config file (~/.bashrc or ~/.zshrc):
 # Change 13182 to your preferred port number
-alias rstudio-server-start='condatainer help rstudio-server -p 13182'
+alias rstudio-server-start='condatainer helper rstudio-server -p 13182'
 ```
 
 Always [Use Conda to Manage R Packages](#use-conda-to-manage-r-packages). For packages only available from source, see [Install R Packages from Source](#install-r-packages-from-source) section.
@@ -174,7 +174,7 @@ condatainer helper -u
 Then you can run the script: 
 
 ```bash
-condatainer help rstudio-server
+condatainer helper rstudio-server
 ```
 
 After running the script, you will see output like this:
@@ -242,7 +242,7 @@ see [Custom System Overlays](../advanced_usage/condatainer_custom_def.md) for mo
 After getting the `additional-deps.sqf` overlay, run `rstudio-server` with the `-o` option:
 
 ```bash
-condatainer help rstudio-server -o additional-deps.sqf
+condatainer helper rstudio-server -o additional-deps.sqf
 ```
 
 If you want to share your overlay with others, you should also provide the `def` file used to create it.

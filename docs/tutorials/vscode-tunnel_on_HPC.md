@@ -10,7 +10,7 @@
 Then you can run:
 
 ```bash
-condatainer help \
+condatainer helper \
   vscode-tunnel \
     -a <auth_option> \
     -c <num_cpus> \
@@ -132,7 +132,7 @@ condatainer helper -u
 Then you can run the script: 
 
 ```bash
-condatainer help vscode-tunnel
+condatainer helper vscode-tunnel
 ```
 
 After running the script, you will see output like this:

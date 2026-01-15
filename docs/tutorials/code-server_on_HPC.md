@@ -12,7 +12,7 @@
 Then you can run:
 
 ```bash
-condatainer help \
+condatainer helper \
   code-server \
     -p <port_number> \
     -a <auth_password> \
@@ -35,7 +35,7 @@ Please change the port number to a unique one to avoid conflicts with other user
 ```bash
 # You can create alias in your shell config file (~/.bashrc or ~/.zshrc):
 # Change 13182 to your preferred port number
-alias code-server-start='condatainer help code-server -p 13182'
+alias code-server-start='condatainer helper code-server -p 13182'
 ```
 
 If you have any issues, see [Common Issues](#common-issues) section below.
@@ -175,7 +175,7 @@ condatainer helper -u
 Then you can run the script: 
 
 ```bash
-condatainer help code-server
+condatainer helper code-server
 ```
 
 After running the script, you will see output like this:
