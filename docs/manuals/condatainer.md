@@ -156,7 +156,7 @@ condatainer overlay create [OPTIONS] [NAME]
 
 **Options:**
 
-* `-s`, `--size [SIZE]`: Size (MB) of the overlay image (default: 20480, 20G).
+* `-s`, `--size [SIZE]`: Size (MB) of the overlay image (default: 10G).
 * `-f`, `--file [FILE]`: Path to a Conda environment file (.yml or .yaml).
 * `--fakeroot`: Create image compatible with fakeroot (must use with `--fakeroot` later).
 * `--sparse`: Create a sparse image file.
@@ -166,7 +166,7 @@ condatainer overlay create [OPTIONS] [NAME]
 
 ```bash
 # Create a 20GB overlay img with a custom name
-condatainer overlay create -s 20480 my_analysis_env
+condatainer overlay create -s 20G my_analysis_env
 
 # o is a shortcut for 'overlay create'
 condatainer o -f environment.yml project_env.img
@@ -242,8 +242,8 @@ condatainer overlay resize [-h] -s SIZE image
 **Examples:**
 
 ```bash
-# Resize env.img to 30GB
-condatainer overlay resize -s 30720 env.img
+# Resize env.img to 10GB
+condatainer overlay resize -s 10G env.img
 ```
 
 ## Create

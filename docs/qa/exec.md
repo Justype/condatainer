@@ -101,7 +101,13 @@ condatainer overlay chown --root /path/to/my_env.img
 If often happens when installing new packages inside the overlay. Increase the size of the overlay image:
 
 ```bash
-condatainer overlay resize -s <new_size_in_MB> /path/to/my_env.img
+condatainer overlay resize -s <new_size> /path/to/my_env.img
+```
+
+Example:
+
+```bash
+condatainer overlay resize -s 15G /path/to/my_env.img
 ```
 
 ### 2. Permission Denied Errors

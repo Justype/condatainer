@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Tuple
 os.umask(0o002)
 
 class Config:
-    VERSION = "1.0.4"
+    VERSION = "1.0.5"
 
     # Global settings
     debug = False
@@ -160,53 +160,33 @@ class Utils:
     local_build_scripts_paths: Optional[Dict[str, str]] = None
 
     @staticmethod
-    def blue_text(text):
-        return f"\033[94m{text}\033[0m"
+    def blue_text(text): return f"\033[94m{text}\033[0m"
+    @staticmethod
+    def red_text(text): return f"\033[91m{text}\033[0m"
+    @staticmethod
+    def yellow_text(text): return f"\033[93m{text}\033[0m"
+    @staticmethod
+    def green_text(text): return f"\033[92m{text}\033[0m"
+    @staticmethod
+    def cyan_text(text): return f"\033[96m{text}\033[0m"
+    @staticmethod
+    def magenta_text(text): return f"\033[95m{text}\033[0m"
 
     @staticmethod
-    def red_text(text):
-        return f"\033[91m{text}\033[0m"
-
-    @staticmethod
-    def yellow_text(text):
-        return f"\033[93m{text}\033[0m"
-
-    @staticmethod
-    def green_text(text):
-        return f"\033[92m{text}\033[0m"
-
-    @staticmethod
-    def cyan_text(text):
-        return f"\033[96m{text}\033[0m"
-
-    @staticmethod
-    def magenta_text(text):
-        return f"\033[95m{text}\033[0m"
-
-    @staticmethod
-    def print_message(message, end="\n", flush=True):
-        print(f"[CondaTainer] {message}", end=end, flush=flush)
-
+    def print_message(message, end="\n", flush=True): print(f"[CNT] {message}", end=end, flush=flush)
     @staticmethod
     def print_debug(debug_object, end="\n", flush=True):
         if Config.debug:
-            print(f"[CondaTainer][{Utils.yellow_text('DEBUG')}]", end=" ", flush=True)
+            print(f"[CNT][{Utils.yellow_text('DEBUG')}]", end=" ", flush=True)
             print(debug_object, end=end, flush=flush)
-
     @staticmethod
-    def print_note(message, end="\n", flush=True):
-        print(f"[CondaTainer][{Utils.blue_text('NOTE')}] {message}", end=end, flush=flush)
-
+    def print_note(message, end="\n", flush=True): print(f"[CNT][{Utils.blue_text('NOTE')}] {message}", end=end, flush=flush)
     @staticmethod
-    def print_warning(message, end="\n", flush=True):
-        print(f"[CondaTainer][{Utils.yellow_text('WARNING')}] {message}", file=sys.stderr, end=end, flush=flush)
+    def print_warning(message, end="\n", flush=True): print(f"[CNT][{Utils.yellow_text('WARNING')}] {message}", file=sys.stderr, end=end, flush=flush)
     @staticmethod
-    def print_error(message, end="\n", flush=True):
-        print(f"[CondaTainer][{Utils.red_text('ERROR')}] {message}", file=sys.stderr, end=end, flush=flush)
-
+    def print_error(message, end="\n", flush=True): print(f"[CNT][{Utils.red_text('ERROR')}] {message}", file=sys.stderr, end=end, flush=flush)
     @staticmethod
-    def print_success(message, end="\n", flush=True):
-        print(f"[CondaTainer][{Utils.green_text('SUCCESS')}] {message}", end=end, flush=flush)
+    def print_success(message, end="\n", flush=True): print(f"[CNT][{Utils.green_text('SUCCESS')}] {message}", end=end, flush=flush)
 
     @staticmethod
     def normalize_name_version(name_version: str) -> str:
@@ -641,7 +621,7 @@ class CondaTainer:
             Utils.print_warning(f"Pre-built base image not available for architecture: {arch}")
             return False
 
-        url = f"https://github.com/Justype/condatainer/releases/download/v1.0.4/base_image_{arch}.sif"
+        url = f"https://github.com/Justype/condatainer/releases/download/v1.0.5/base_image_{arch}.sif"
         Utils.print_message(f"Attempting to download pre-built base image for {arch}...")
         if not Utils.download_executable(url, Config.BASE_IMAGE_SIF):
             Utils.print_warning("Failed to download pre-built base image.")

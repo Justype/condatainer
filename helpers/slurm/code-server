@@ -137,7 +137,7 @@ else
     e2fsck -p $OVERLAY > /dev/null 2>&1
     e2fsck -p $OVERLAY > /dev/null 2>&1
     if [ $? -ne 0 ]; then
-        echo -e "${RED}[ERROR]${NC} Overlay ${BLUE}$OVERLAY${NC} is corrupted and could not be repaired."
+        echo -e "${RED}[ERROR]${NC} Overlay ${BLUE}$OVERLAY${NC} is corrupted and could not be auto repaired."
         echo -e "Please run ${YELLOW}e2fsck $OVERLAY${NC} manually to attempt repair."
         exit 1
     fi

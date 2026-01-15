@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 os.umask(0o002)
 
 class Config:
-    VERSION = "1.0.4"
+    VERSION = "1.0.5"
     # Remote settings
     debug = False
     submit_job = True
@@ -114,45 +114,33 @@ class Utils:
     local_build_scripts_paths: Optional[Dict[str, str]] = None
 
     @staticmethod
-    def blue_text(text):
-        return f"\033[94m{text}\033[0m"
+    def blue_text(text): return f"\033[94m{text}\033[0m"
+    @staticmethod
+    def red_text(text): return f"\033[91m{text}\033[0m"
+    @staticmethod
+    def yellow_text(text): return f"\033[93m{text}\033[0m"
+    @staticmethod
+    def green_text(text): return f"\033[92m{text}\033[0m"
+    @staticmethod
+    def cyan_text(text): return f"\033[96m{text}\033[0m"
+    @staticmethod
+    def magenta_text(text): return f"\033[95m{text}\033[0m"
 
     @staticmethod
-    def red_text(text):
-        return f"\033[91m{text}\033[0m"
-
-    @staticmethod
-    def yellow_text(text):
-        return f"\033[93m{text}\033[0m"
-
-    @staticmethod
-    def green_text(text):
-        return f"\033[92m{text}\033[0m"
-
-    @staticmethod
-    def print_message(message, end="\n", flush=True):
-        print(f"[ModGen] {message}", end=end, flush=flush)
-
+    def print_message(message, end="\n", flush=True): print(f"[MG] {message}", end=end, flush=flush)
     @staticmethod
     def print_debug(debug_object, end="\n", flush=True):
         if Config.debug:
-            print(f"[ModGen][{Utils.yellow_text('DEBUG')}]", end=" ", flush=True)
+            print(f"[MG][{Utils.yellow_text('DEBUG')}]", end=" ", flush=True)
             print(debug_object, end=end, flush=flush)
-
     @staticmethod
-    def print_note(message, end="\n", flush=True):
-        print(f"[ModGen][{Utils.blue_text('NOTE')}] {message}", end=end, flush=flush)
-
+    def print_note(message, end="\n", flush=True): print(f"[MG][{Utils.blue_text('NOTE')}] {message}", end=end, flush=flush)
     @staticmethod
-    def print_warning(message, end="\n", flush=True):
-        print(f"[ModGen][{Utils.yellow_text('WARNING')}] {message}", file=sys.stderr, end=end, flush=flush)
+    def print_warning(message, end="\n", flush=True): print(f"[MG][{Utils.yellow_text('WARNING')}] {message}", file=sys.stderr, end=end, flush=flush)
     @staticmethod
-    def print_error(message, end="\n", flush=True):
-        print(f"[ModGen][{Utils.red_text('ERROR')}] {message}", file=sys.stderr, end=end, flush=flush)
-
+    def print_error(message, end="\n", flush=True): print(f"[MG][{Utils.red_text('ERROR')}] {message}", file=sys.stderr, end=end, flush=flush)
     @staticmethod
-    def print_success(message, end="\n", flush=True):
-        print(f"[ModGen][{Utils.green_text('SUCCESS')}] {message}", end=end, flush=flush)
+    def print_success(message, end="\n", flush=True): print(f"[MG][{Utils.green_text('SUCCESS')}] {message}", end=end, flush=flush)
 
     @staticmethod
     def normalize_name_version(name_version: str) -> str:
