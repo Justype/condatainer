@@ -20,7 +20,8 @@ class Config:
 
     # Global settings
     debug = False
-    use_sbatch = True
+    submit_job = True
+    create_tmp_size = 20480 # in MiB
 
     # Remote settings
     GITHUB_REPO = "Justype/condatainer"
@@ -75,31 +76,32 @@ class Config:
                 exit(1)
             Config._base_image = abs_new_image_path
 
-def adjust_compression_args_based_on_apptainer_version():
-    """Change to ZSTD_MEDIUM if apptainer version >= 1.4.0"""
-    if Config.SYSTEM_APPTAINER_BIN is None:
-        return
-    try:
-        result = subprocess.run([Config.SYSTEM_APPTAINER_BIN, "--version"], capture_output=True, text=True)
-        version_match = re.search(r"apptainer version (\d+)\.(\d+)", result.stdout)
-        if version_match:
-            major, minor = map(int, version_match.groups())
-            if (major, minor) >= (1, 4):
-                Config.compress_args = Config.ZSTD_MEDIUM
-                Utils.print_debug(f"Apptainer version {major}.{minor} detected. Using ZSTD_MEDIUM compression.")
-            else:
-                Utils.print_debug(f"Apptainer version {major}.{minor} detected. Using LZ4 compression.")
-    except Exception:
-        pass
+    @staticmethod
+    def adjust_compression_args_based_on_apptainer_version():
+        """Change to ZSTD_MEDIUM if apptainer version >= 1.4.0"""
+        if Config.SYSTEM_APPTAINER_BIN is None:
+            return
+        try:
+            result = subprocess.run([Config.SYSTEM_APPTAINER_BIN, "--version"], capture_output=True, text=True)
+            version_match = re.search(r"apptainer version (\d+)\.(\d+)", result.stdout)
+            if version_match:
+                major, minor = map(int, version_match.groups())
+                if (major, minor) >= (1, 4):
+                    Config.compress_args = Config.ZSTD_MEDIUM
+                    Utils.print_debug(f"Apptainer version {major}.{minor} detected. Using ZSTD_MEDIUM compression.")
+                else:
+                    Utils.print_debug(f"Apptainer version {major}.{minor} detected. Using LZ4 compression.")
+        except Exception:
+            pass
 
 def main():
-    adjust_compression_args_based_on_apptainer_version()
+    Config.adjust_compression_args_based_on_apptainer_version()
     parser = argparse.ArgumentParser(
         description="CondaTainer: Use Apptainer/Conda/SquashFS to manage tools for HPC users.",
         epilog=f"For full manual, see https://github.com/{Config.GITHUB_REPO}/blob/main/docs/manuals/condatainer.md")
-    parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of CondaTainer", default=argparse.SUPPRESS)
+    parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show program's version number and exit", default=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
-    parser.add_argument("-n", "--no-sbatch", "--local", dest="no_sbatch", action="store_true", help="Run all operations locally without using sbatch")
+    parser.add_argument("--local", dest="local", action="store_true", help="Disable job submission")
     subparsers = parser.add_subparsers(dest="action", metavar="COMMAND", required=True, help="Available actions")
 
     CondaTainer_Overlay.add_parser_arguments(subparsers)
@@ -121,9 +123,9 @@ def main():
         Utils.print_debug("Debug mode enabled")
         Utils.print_debug(f"CondaTainer Version: {Config.VERSION}")
         Utils.print_debug(f"Apptainer Path: {Config.SYSTEM_APPTAINER_BIN}")
-    if args.no_sbatch:
-        Config.use_sbatch = False
-        Utils.print_debug("No sbatch mode enabled")
+    if args.local:
+        Config.submit_job = False
+        Utils.print_debug("Local mode enabled (job submission disabled)")
 
     if args.action in ("create", "install", "i"):
         CondaTainer_Create.parse_create_args(args)
@@ -355,6 +357,29 @@ class Utils:
         except Exception as e:
             Utils.print_error(f"Failed to download build script from {url}: {e}")
             return False
+
+    @staticmethod
+    def parse_size_to_mb(size) -> int:
+        """
+        Parse a size specifier and return size in MiB as int.
+
+        Accepts integers or strings with optional units: M, G, MB, GB
+        Units are case-insensitive. If no unit is provided, M is assumed.
+        """
+        if size is None:
+            raise ValueError("Size is None")
+        if isinstance(size, int):
+            return int(size)
+        s = str(size).strip()
+        m = re.match(r'^(\d+)\s*([mMgG]|[mM][bB]|[gG][bB])?$', s)
+        if not m:
+            raise ValueError(f"Invalid size format: {size}. GB/MB; default to MB if no suffix.")
+        num = int(m.group(1))
+        unit = (m.group(2) or '').lower()
+        if unit in ('g', 'gb'):
+            return int(num * 1024)
+        # default and 'm' or 'mb'
+        return int(num)
 
     @staticmethod
     def get_dependencies_from_script(script_path: str) -> List[str]:
@@ -692,7 +717,7 @@ class CondaTainer:
         Utils.print_message(f"Creating temporary SquashFS overlay for {Utils.yellow_text(normalized_name_version)}...")
         cmd = [
             Config.SYSTEM_APPTAINER_BIN, "overlay", "create",
-            "--sparse", "--size", "15360",
+            "--sparse", "--size", str(Config.create_tmp_size),
             tmp_overlay_path
         ]
 
@@ -841,7 +866,7 @@ class BuildObject:
             if not Utils.download_executable(link, self.build_source):
                 raise RuntimeError(f"Failed to download remote build script for {self.name_version}.")
             self.is_remote = True
-        elif self.is_def:
+        elif self.is_def: # no slash and not found remotely or locally
             raise RuntimeError(f"Build script for {self.name_version} not found locally or remotely.")
         else:
             self.is_conda = True
@@ -1315,7 +1340,7 @@ class BuildGraph:
 
         for name_version in order:
             meta = self.graph[name_version]
-            if Config.use_sbatch and meta.sbatch and Utils.is_sbatch_available():
+            if Config.submit_job and meta.sbatch and Utils.is_sbatch_available():
                 self.build_metadata.append(meta)
             else:
                 self.download_metadata.append(meta)
@@ -1362,67 +1387,48 @@ class CondaTainer_Create:
     def add_parser_arguments(parser):
         CondaTainer_Create.parser_create = parser.add_parser(
             "create", aliases=["install", "i"],
-            help="Create a new SquashFS overlay using conda or available build scripts")
+            help="Create a new SquashFS overlay using available build scripts or Conda")
         CondaTainer_Create.parser_create.add_argument(
-            "name_versions",
-            nargs="*",
-            help="Name/Version or Name=Version or Name@Version to create (e.g., bcftools/1.22)"
+            "name_versions", nargs="*",
+            help="Package specifications (e.g., name/version, name=version, or name@version)")
+        CondaTainer_Create.parser_create.add_argument(
+            "-n", "--name", type=str,
+            help="Custom name for the resulting overlay file")
+        CondaTainer_Create.parser_create.add_argument(
+            "-p", "--prefix", type=str,
+            help="Custom prefix path for the overlay file")
+        CondaTainer_Create.parser_create.add_argument(
+            "-f", "--file", type=str,
+            help="Path to definition file (.yaml, .sh, .def)"
         )
         CondaTainer_Create.parser_create.add_argument(
-            "-n", "--name",
-            type=str,
-            help="Custom name for the overlay file (If used, all packages will be included in a single overlay)"
-        )
+            "-b", "--base-image", type=str,
+            help="Base image to use instead of default")
         CondaTainer_Create.parser_create.add_argument(
-            "-p", "--prefix",
-            type=str,
-            help="Custom prefix for the overlay file"
-        )
+            "-s", "--source", type=str,
+            help="Remote source URI (e.g., docker://ubuntu:22.04)")
         CondaTainer_Create.parser_create.add_argument(
-            "-f", "--file",
-            type=str,
-            help="yaml, sh, def (must use with --prefix)"
-        )
+            "--temp-size", type=str, dest="size", default=None,
+            help="Size of temporary overlay (default: 20G). Accepts GB/MB suffixes; assumes MB if omitted")
+        # Compression args
         CondaTainer_Create.parser_create.add_argument(
-            "-b", "--base-image",
-            type=str,
-            help="Base image to use instead of default"
-        )
+            "--zstd-fast", action="store_true",
+            help="Use zstd compression level 3" + (" (default)" if Config.compress_args == Config.ZSTD_FAST else ""))
         CondaTainer_Create.parser_create.add_argument(
-            "-s", "--source",
-            type=str,
-            help="Remote source e.g. docker://ubuntu:22.04 (used with --prefix or --name)"
-        )
+            "--zstd-medium", action="store_true",
+            help="Use zstd compression level 8" + (" (default)" if Config.compress_args == Config.ZSTD_MEDIUM else ""))
         CondaTainer_Create.parser_create.add_argument(
-            "--zstd-fast",
-            action="store_true",
-            help="Use zstd compression level 3" + (" (default)" if Config.compress_args == Config.ZSTD_FAST else "")
-        )
+            "--zstd", action="store_true",
+            help="Use zstd compression level 14" + (" (default)" if Config.compress_args == Config.ZSTD else ""))
         CondaTainer_Create.parser_create.add_argument(
-            "--zstd-medium",
-            action="store_true",
-            help="Use zstd compression level 8" + (" (default)" if Config.compress_args == Config.ZSTD_MEDIUM else "")
-        )
+            "--zstd-high", action="store_true",
+            help="Use zstd compression level 19" + (" (default)" if Config.compress_args == Config.ZSTD_HIGH else ""))
         CondaTainer_Create.parser_create.add_argument(
-            "--zstd",
-            action="store_true",
-            help="Use zstd compression level 14" + (" (default)" if Config.compress_args == Config.ZSTD else "")
-        )
+            "--gzip", action="store_true",
+            help="Use gzip compression" + (" (default)" if Config.compress_args == Config.GZIP else ""))
         CondaTainer_Create.parser_create.add_argument(
-            "--zstd-high",
-            action="store_true",
-            help="Use zstd compression level 19" + (" (default)" if Config.compress_args == Config.ZSTD_HIGH else "")
-        )
-        CondaTainer_Create.parser_create.add_argument(
-            "--gzip",
-            action="store_true",
-            help="Use gzip compression" + (" (default)" if Config.compress_args == Config.GZIP else "")
-        )
-        CondaTainer_Create.parser_create.add_argument(
-            "--lz4",
-            action="store_true",
-            help="Use LZ4 compression" + (" (default)" if Config.compress_args == Config.LZ4 else "")
-        )
+            "--lz4", action="store_true",
+            help="Use LZ4 compression" + (" (default)" if Config.compress_args == Config.LZ4 else ""))
 
     @staticmethod
     def parse_create_args(args):
@@ -1454,10 +1460,16 @@ class CondaTainer_Create:
 
         if args.base_image:
             Config.change_base_image(args.base_image)
+        else:
+            CondaTainer.ensure_base_image()
         if args.name_versions:
             args.name_versions = [Utils.normalize_name_version(nv) for nv in args.name_versions]
+        if args.size:
+            try:
+                Config.create_tmp_size = Utils.parse_size_to_mb(args.size)
+            except ValueError as ve:
+                CondaTainer_Create.parser_create.error(str(ve))
 
-        CondaTainer.ensure_base_image()
         if args.source:
             if args.prefix:
                 abs_prefix = os.path.abspath(args.prefix)
@@ -1621,13 +1633,17 @@ class CondaTainer_Helper:
         CondaTainer_Helper.parser_helper = parser.add_parser(
             "helper", help="Run or update helper scripts from helper-scripts/")
         CondaTainer_Helper.parser_helper.add_argument(
-            "-u", "--update", action="store_true", help="Update helper scripts from remote metadata (if no script provided, update all for chosen mode)")
+            "-u", "--update", action="store_true",
+            help="Update helper scripts from remote metadata (if no script provided, update all for chosen mode)")
         CondaTainer_Helper.parser_helper.add_argument(
-            "-p", "--path", action="store_true", help="Print the absolute path of the helper folder or specific script")
+            "-p", "--path", action="store_true",
+            help="Print the absolute path of the helper folder or specific script")
         CondaTainer_Helper.parser_helper.add_argument(
-            "script_name", nargs="?", help="Name of helper script to run or update")
+            "script_name", nargs="?",
+            help="Name of helper script to run or update")
         CondaTainer_Helper.parser_helper.add_argument(
-            "script_args", nargs=argparse.REMAINDER, help="Arguments passed to the helper script")
+            "script_args", nargs=argparse.REMAINDER,
+            help="Arguments passed to the helper script")
 
     @staticmethod
     def parse_helper_args(args):
@@ -1654,11 +1670,11 @@ class CondaTainer_Helper:
                 exit(1)
 
             # Choose category based on sbatch availability for metadata lookup
-            use_sbatch = Config.use_sbatch and Utils.is_sbatch_available()
+            use_sbatch = Config.submit_job and Utils.is_sbatch_available()
             category = "slurm" if use_sbatch else "headless"
             Utils.print_debug(f"Helper category selected: {category}")
             if use_sbatch and Utils.is_in_interactive_shell():
-                Utils.print_note("If you don't want sbatch scripts, please run " + Utils.yellow_text(Config.SCRIPT_NAME + " --no-sbatch helper -u") + " next time.")
+                Utils.print_note("If you don't want sbatch scripts, please run " + Utils.yellow_text(Config.SCRIPT_NAME + " --local helper -u") + " next time.")
                 import time
                 time.sleep(1)
 
@@ -1725,75 +1741,47 @@ class CondaTainer_Exec:
     def add_parser_arguments(parser):
         CondaTainer_Exec.parser_exec = parser.add_parser("exec", help="Execute a command using overlays")
         CondaTainer_Exec.parser_exec.add_argument(
-            "-o", "--overlay",
-            dest="overlays",
-            action="append",
-            help="Overlay (can be used multiple times)"
-        )
+            "-o", "--overlay", dest="overlays", action="append",
+            help="Overlay file to mount (can be used multiple times)")
         CondaTainer_Exec.parser_exec.add_argument(
-            "-k", "--keep",
-            action="store_true",
-            help="Do not try to parse command to installed overlays"
-        )
+            "-k", "--keep", action="store_true",
+            help="Disable automatic command parsing to installed overlays")
         CondaTainer_Exec.parser_exec.add_argument(
-            "-w", "--writable-img",
-            help="Make .img overlays writable (default: read-only)",
-            action="store_true"
-        )
+            "-w", "--writable-img", action="store_true",
+            help="Mount .img overlays as writable (default: read-only)")
         CondaTainer_Exec.parser_exec.add_argument(
-            "--env",
-            dest="env_settings",
-            action="append",
-            help="Additional env setting 'KEY=VALUE' (can be used multiple times)"
-        )
+            "--env", dest="env_settings", action="append",
+            help="Set environment variable 'KEY=VALUE' (can be used multiple times)")
         CondaTainer_Exec.parser_exec.add_argument(
-            "-b", "--base-image",
-            dest="base_image",
-            help="Base image to use instead of default"
-        )
+            "-b", "--base-image", dest="base_image",
+            help="Base image to use instead of default")
         CondaTainer_Exec.parser_exec.add_argument(
-            "--bind",
-            dest="bind_paths",
-            action="append",
-            help="Additional paths to bind 'HOST_PATH:CONTAINER_PATH' (can be used multiple times)"
-        )
+            "--bind", dest="bind_paths", action="append",
+            help="Bind path 'HOST:CONTAINER' (can be used multiple times)")
         CondaTainer_Exec.parser_exec.add_argument(
-            "--fakeroot",
-            action="store_true",
-            help="Run command with fake root privileges inside the container"
-        )
+            "--fakeroot", action="store_true",
+            help="Run container with fakeroot privileges")
         CondaTainer_Exec.parser_exec.add_argument(
-            "commands",
-            nargs=argparse.REMAINDER,
-            help="The command to run inside the container (if not provided, defaults to bash shell)"
-        )
+            "commands", nargs=argparse.REMAINDER,
+            help="Command to run inside the container (default: bash)")
+
+        # 'e' Parser (Quick Exec)
         CondaTainer_Exec.parser_e = parser.add_parser("e", help="Run bash using writable overlays")
         CondaTainer_Exec.parser_e.add_argument(
-            "-r", "--read-only",
-            dest="writable_img",
-            action="store_false",
-            help="Do not make .img overlays writable (default: writable)"
-        )
+            "-r", "--read-only", dest="writable_img", action="store_false",
+            help="Mount .img overlays as read-only (default: writable)")
         CondaTainer_Exec.parser_e.add_argument(
-            "-b", "--base-image",
-            dest="base_image",
-            help="Base image to use instead of default"
-        )
+            "-b", "--base-image", dest="base_image",
+            help="Base image to use instead of default")
         CondaTainer_Exec.parser_e.add_argument(
-            "-n", "--no-autoload",
-            action="store_true",
-            help="Do not autoload local env.img from current directory"
-        )
+            "-n", "--no-autoload", action="store_true",
+            help="Disable autoloading 'env.img' from current directory")
         CondaTainer_Exec.parser_e.add_argument(
-            "--fakeroot",
-            action="store_true",
-            help="Run command with fake root privileges inside the container"
-        )
+            "--fakeroot", action="store_true",
+            help="Run container with fakeroot privileges")
         CondaTainer_Exec.parser_e.add_argument(
-            "overlays",
-            nargs="*",
-            help="Overlay files to mount (env.img if not provided)"
-        )
+            "overlays", nargs="*",
+            help="Overlay files to mount (defaults to env.img)")
 
     @staticmethod
     def parse_exec_args(args):
@@ -2135,18 +2123,12 @@ class CondaTainer_Avail:
             "avail", aliases=["av"],
             help="Check available local and remote build scripts")
         CondaTainer_Avail.parser_avail.add_argument(
-            "terms",
-            type=str,
-            nargs="*",
-            help="Search terms (AND logic applied)"
-        )
+            "terms", type=str, nargs="*",
+            help="Search terms (AND logic applied)")
         CondaTainer_Avail.parser_avail.add_argument(
-            "-i", "--install",
-            "-a", "--add",
-            dest = "install",
-            action="store_true",
-            help="Install the selected build scripts (used with terms)"
-        )
+            "-i", "--install", "-a", "--add",
+            dest = "install", action="store_true",
+            help="Install the selected build scripts (used with terms)")
 
     @staticmethod
     def parse_avail_args(args):
@@ -2249,18 +2231,12 @@ class CondaTainer_List:
             "list", aliases=["ls"],
             help="List installed overlays matching search terms")
         CondaTainer_List.parser_list.add_argument(
-            "terms",
-            type=str,
-            nargs="*",
-            help="Search terms (AND logic applied)"
-        )
+            "terms", type=str, nargs="*",
+            help="Search terms (AND logic applied)")
         CondaTainer_List.parser_list.add_argument(
-            "-d", "--delete",
-            "-r", "--remove",
-            dest = "delete",
-            action="store_true",
-            help="Delete listed overlays after confirmation (used with terms)"
-        )
+            "-d", "--delete", "-r", "--remove",
+            dest = "delete", action="store_true",
+            help="Delete listed overlays after confirmation (used with terms)")
 
     @staticmethod
     def parse_list_args(args):
@@ -2326,11 +2302,8 @@ class CondaTainer_Remove:
             "remove", aliases=["rm", "delete"],
             help="Remove installed overlays matching search terms")
         CondaTainer_Remove.parser_remove.add_argument(
-            "terms",
-            type=str,
-            nargs="+",
-            help="Names or Search terms (AND logic applied)"
-        )
+            "terms", type=str, nargs="+",
+            help="Names or Search terms (AND logic applied)")
 
     @staticmethod
     def parse_remove_args(args):
@@ -2398,10 +2371,8 @@ class CondaTainer_Info:
     def add_parser_arguments(parser):
         CondaTainer_Info.parser_info = parser.add_parser("info", help="Show information about a specific overlay")
         CondaTainer_Info.parser_info.add_argument(
-            "overlay",
-            type=str,
-            help="Overlay package (e.g., bcftools/1.22)"
-        )
+            "overlay", type=str,
+            help="Overlay package (e.g., bcftools/1.22)")
 
     @staticmethod
     def get_file_btime(file_path: str) -> Optional[datetime]:
@@ -2536,17 +2507,12 @@ class CondaTainer_Check:
             "check",
             help="Check if the dependencies of a script are installed")
         CondaTainer_Check.parser_check.add_argument(
-            "script",
-            type=str,
-            help="Path to the script to check"
-        )
+            "script", type=str,
+            help="Path to the script to check")
         CondaTainer_Check.parser_check.add_argument(
-            "-a", "--auto-install",
-            "-i", "--install",
-            dest="auto_install",
-            action="store_true",
-            help="Automatically install missing dependencies"
-        )
+            "-a", "--auto-install", "-i", "--install",
+            dest="auto_install", action="store_true",
+            help="Automatically install missing dependencies")
 
     @staticmethod
     def parse_check_args(args):
@@ -2608,27 +2574,18 @@ class CondaTainer_Run:
             "run",
             help="Run a script and auto-solve the dependencies by #DEP tags")
         CondaTainer_Run.parser_run.add_argument(
-            "script",
-            type=str,
-            help="Path to the script to run"
-        )
+            "script", type=str,
+            help="Path to the script to run")
         CondaTainer_Run.parser_run.add_argument(
-            "-w", "--writable-img",
-            help="Make .img overlays writable (default: read-only)",
-            action="store_true"
-        )
+            "-w", "--writable-img", action="store_true",
+            help="Make .img overlays writable (default: read-only)")
         CondaTainer_Run.parser_run.add_argument(
-            "-b", "--base-image",
-            type=str,
-            help="Base image to use instead of default"
-        )
+            "-b", "--base-image", type=str,
+            help="Base image to use instead of default")
         CondaTainer_Run.parser_run.add_argument(
-            "-a", "--auto-install",
-            "-i", "--install",
-            dest="auto_install",
-            help="Automatically install missing dependencies",
-            action="store_true"
-        )
+            "-a", "--auto-install", "-i", "--install",
+            dest="auto_install", action="store_true",
+            help="Automatically install missing dependencies")
 
     @staticmethod
     def parse_args_in_script(script_path: str) -> List[str]:
@@ -2692,17 +2649,17 @@ class CondaTainer_Run:
         if args.writable_img:
             CondaTainer_Exec.is_img_writable = True
 
-        bash_command = [
+        execution_command_list = [
             "module() { :; }", # disable module command
             "ml() { :; }",
             "export -f module ml",
         ]
         if os.access(script_path, os.X_OK):
-            bash_command.append(script_path)
+            execution_command_list.append(script_path)
         else:
-            bash_command.append(f"bash {script_path}")
+            execution_command_list.append(f"bash {script_path}")
 
-        if not CondaTainer_Exec.exec_command(deps, [ "/bin/bash", "-c", "\n".join(bash_command)] ):
+        if not CondaTainer_Exec.exec_command(deps, [ "/bin/bash", "-c", "\n".join(execution_command_list)] ):
             exit(1)
 
 class CondaTainer_Overlay:
@@ -2721,37 +2678,24 @@ class CondaTainer_Overlay:
 
         parser_chown = subparsers.add_parser("chown", help="Change ownership (UID:GID) of files inside an overlay")
         parser_chown.add_argument(
-            "image",
-            type=str,
-            help="Path to the overlay image"
-        )
+            "image", type=str,
+            help="Path to the overlay image")
         parser_chown.add_argument(
-            "-u", "--uid",
-            type=int,
-            default=os.getuid(),
-            help=f"User ID to set (default: current user {os.getuid()})"
-        )
+            "-u", "--uid", type=int, default=os.getuid(),
+            help=f"User ID to set (default: current user {os.getuid()})")
         parser_chown.add_argument(
-            "-g", "--gid",
-            type=int,
-            default=os.getgid(),
-            help=f"Group ID to set (default: current group {os.getgid()})"
-        )
+            "-g", "--gid", type=int, default=os.getgid(),
+            help=f"Group ID to set (default: current group {os.getgid()})")
         parser_chown.add_argument(
-            "--root",
-            action="store_true",
-            help="Set UID and GID to 0 (root); will override -u and -g options"
-        )
+            "--root", action="store_true",
+            help="Set UID and GID to 0 (root); will override -u and -g options")
         parser_chown.add_argument(
-            "-p", "--path",
-            type=str,
-            default="/ext3",
-            help="Path inside the overlay to change (default: /ext3)"
-        )
+            "-p", "--path", type=str, default="/ext3",
+            help="Path inside the overlay to change (default: /ext3)")
 
         parser_resize = subparsers.add_parser("resize", help="Resize an existing overlay in-place")
         parser_resize.add_argument("image", type=str, help="Overlay image to resize")
-        parser_resize.add_argument("-s", "--size", type=int, required=True, help="New size in MiB")
+        parser_resize.add_argument("-s", "--size", type=str, required=True, help="New size (GB/MB; default to MB if no suffix.)")
 
         parser_o = parser.add_parser("o", help="Shortcut for 'overlay create'")
         CondaTainer_Overlay._add_create_args(parser_o)
@@ -2760,33 +2704,20 @@ class CondaTainer_Overlay:
     def _add_create_args(parser):
         """Helper to add create arguments to both 'overlay create' and 'o'"""
         parser.add_argument(
-            "-s", "--size",
-            type=int,
-            default=20480,
-            help="Size of the overlay image in MiB (default: 20480)"
-        )
+            "-s", "--size", type=str, default="10G",
+            help="Set overlay size (default: 10G). Accepts GB/MB suffixes; assumes MB if omitted")
         parser.add_argument(
-            "-f", "--file",
-            type=str,
-            help="Conda env YAML file to initialize"
-        )
+            "-f", "--file", type=str,
+            help="Initialize with Conda environment file (.yaml/.yml)")
         parser.add_argument(
-            "--fakeroot",
-            action="store_true",
-            help="fakeroot overlay (must use --fakeroot later, but supports 'apt' and other root operations)"
-        )
+            "--fakeroot", action="store_true",
+            help="Create a fakeroot-compatible overlay")
         parser.add_argument(
-            "--sparse",
-            action="store_true",
-            help="Create a sparse overlay image (default: false)"
-        )
+            "--sparse", action="store_true",
+            help="Create a sparse overlay image (default: false)")
         parser.add_argument(
-            "image",
-            type=str,
-            nargs="?",
-            default="env.img",
-            help="Path to create the overlay image (default: env.img)"
-        )
+            "image", type=str, nargs="?", default="env.img",
+            help="Path to the output overlay image (default: env.img)")
 
     @staticmethod
     def parse_overlay_args(args):
@@ -2804,7 +2735,11 @@ class CondaTainer_Overlay:
     def run_create(args):
         CondaTainer.ensure_base_image()
         overlay_path = os.path.abspath(args.image)
-        size_mib = args.size
+        try:
+            size_mib = Utils.parse_size_to_mb(args.size)
+        except ValueError as ve:
+            Utils.print_error(str(ve))
+            exit(1)
         is_fakeroot = args.fakeroot
         overlay_adj = " "
         fakeroot_arg = []
@@ -3009,8 +2944,14 @@ class CondaTainer_Overlay:
             Utils.print_error(f"Image {target} not found.")
             exit(1)
 
-        Utils.print_message(f"Resizing {Utils.blue_text(os.path.basename(target))} to {Utils.yellow_text(str(args.size) + ' MiB')}...")
-        new_size_bytes = args.size * 1024 * 1024
+        try:
+            size_mib = Utils.parse_size_to_mb(args.size)
+        except ValueError as ve:
+            Utils.print_error(str(ve))
+            exit(1)
+
+        Utils.print_message(f"Resizing {Utils.blue_text(os.path.basename(target))} to {Utils.yellow_text(str(size_mib) + ' MiB')}...")
+        new_size_bytes = size_mib * 1024 * 1024
         current_size = os.path.getsize(target)
 
         if new_size_bytes == current_size:
@@ -3022,7 +2963,7 @@ class CondaTainer_Overlay:
             subprocess.run(["e2fsck", "-p", "-f", target], check=True, stdout=subprocess.DEVNULL)
             if new_size_bytes < current_size:
                 Utils.print_message("Shrinking overlay image...")
-                subprocess.run(["resize2fs", "-p", target, f"{args.size}M"], check=True)
+                subprocess.run(["resize2fs", "-p", target, f"{size_mib}M"], check=True)
                 with open(target, "a") as f:
                     f.truncate(new_size_bytes)
             else:
@@ -3041,10 +2982,8 @@ class CondaTainer_Update:
     def add_parser_arguments(parser):
         CondaTainer_Update.parser_update = parser.add_parser("self-update", help="Update CondaTainer to the latest version")
         CondaTainer_Update.parser_update.add_argument(
-            "-y", "--yes",
-            action="store_true",
-            help="Automatically confirm update"
-        )
+            "-y", "--yes", action="store_true",
+            help="Automatically confirm update")
 
     @staticmethod
     def parse_update_args(args):
@@ -3065,14 +3004,14 @@ class CondaTainer_Update:
             exit(1)
 
 class CondaTainer_Completion:
-    """Generates shell completion scripts for Bash and Zsh. (Updated for v1.0.4)"""
+    """Generates shell completion scripts for Bash and Zsh. (Gemini Generated)"""
 
     # Auto-detect shell from environment
     _detected_shell = "zsh" if "zsh" in os.environ.get("SHELL", "") else "bash"
 
     @staticmethod
     def add_parser_arguments(parser):
-        sub = parser.add_parser("completion", help="Generate shell completion script 'source <(" + Config.SCRIPT_NAME + " completion)'")
+        sub = parser.add_parser("completion", help=f"Generate shell completion script 'source <({Config.SCRIPT_NAME} completion)'")
         sub.add_argument("shell", choices=["bash", "zsh"], default=CondaTainer_Completion._detected_shell, nargs="?", help=f"Shell type (default: {CondaTainer_Completion._detected_shell})")
 
     @staticmethod
@@ -3092,7 +3031,7 @@ _{script_name}_completion() {{
     prev="${{COMP_WORDS[COMP_CWORD-1]}}"
 
     local subcommands="create install i avail av list ls remove rm delete exec e check run info helper self-update completion overlay o"
-    local global_opts="--debug --no-sbatch --local -v --version -h --help"
+    local global_opts="--debug --local -v --version -h --help"
 
     if [[ ${{COMP_CWORD}} -eq 1 ]]; then
         if [[ "${{cur}}" == -* ]]; then
@@ -3183,7 +3122,7 @@ _{script_name}_completion() {{
              ;;
         create|install|i)
             if [[ "${{cur}}" == -* ]]; then
-                local opts="-n --name -p --prefix -f --file -s --source --zstd --zstd-fast --zstd-medium --zstd-high --gzip --lz4"
+                local opts="-n --name -p --prefix -f --file -b --base-image -s --source --temp-size --zstd --zstd-fast --zstd-medium --zstd-high --gzip --lz4"
                 COMPREPLY=( $(compgen -W "${{opts}}" -- "${{cur}}") )
             elif [[ "${{prev}}" == "-f" || "${{prev}}" == "--file" ]]; then
                  COMPREPLY=( $(compgen -f -- "${{cur}}" | grep -E '\\.(def|sh|yaml|yml)$') )
@@ -3300,7 +3239,7 @@ _{script_name}_completion() {{
         '(-v --version)'{{-v,--version}}'[Show version]' \\
         '(-h --help)'{{-h,--help}}'[Show help]' \\
         '--debug[Enable debug mode]' \\
-        '(-n --no-sbatch --local)'{{-n,--no-sbatch,--local}}'[Run locally without sbatch]' \\
+        '--local[Run operations locally (disable job submission)]' \\
         '1: :->command' \\
         '*:: :->args'
 
@@ -3372,7 +3311,7 @@ _{script_name}_completion() {{
                                     _arguments \\
                                         '(-s --size)'{{-s,--size}}'[Size in MiB]:size' \\
                                         '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files -g "*.def *.sh *.yaml *.yml"' \\
-                                        '--fakeroot[fakeroot overlay]' \\
+                                        '--fakeroot[Fakeroot overlay]' \\
                                         '--sparse[Create sparse overlay]' \\
                                         ':image:_files'
                                     ;;
@@ -3382,7 +3321,7 @@ _{script_name}_completion() {{
                                         '(-g --gid)'{{-g,--gid}}'[Group ID]:gid' \\
                                         '(-p --path)'{{-p,--path}}'[Path inside overlay]:path' \\
                                         '--root[Set UID/GID to 0]' \\
-                                        ':overlay:_alternative "files:file:_files -g \\"*.sqf *.img\\"" "overlays:installed:_installed_overlays true true"'
+                                        ':overlay:_alternative "files:file:_files -g \\"*.sqf *.img\\"" "ovs:installed:_ov 1 1"'
                                     ;;
                                 resize)
                                     _arguments \\
@@ -3397,7 +3336,7 @@ _{script_name}_completion() {{
                     _arguments \\
                         '(-s --size)'{{-s,--size}}'[Size in MiB]:size' \\
                         '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files -g "*.def *.sh *.yaml *.yml"' \\
-                        '--fakeroot[fakeroot overlay]' \\
+                        '--fakeroot[Fakeroot overlay]' \\
                         '--sparse[Create sparse overlay]' \\
                         ':image:_files'
                     ;;
@@ -3406,7 +3345,9 @@ _{script_name}_completion() {{
                         '(-n --name)'{{-n,--name}}'[Custom name for overlay]:name' \\
                         '(-p --prefix)'{{-p,--prefix}}'[Custom prefix path]:prefix:_files' \\
                         '(-f --file)'{{-f,--file}}'[Conda env file]:file:_files -g "*.def *.sh *.yaml *.yml"' \\
+                        '(-b --base-image)'{{-b,--base-image}}'[Base image]: :_alternative "files:file:_files -g \\"*.sqf *.img *.sif\\"" "overlays:installed:_installed_overlays true false"' \\
                         '(-s --source)'{{-s,--source}}'[Remote source (docker://...)]:source' \\
+                        '--temp-size[Temp overlay size]:size' \\
                         '--zstd[ZSTD level 14]' \\
                         '--zstd-fast[ZSTD level 3]' \\
                         '--zstd-medium[ZSTD level 8]' \\
@@ -3494,8 +3435,8 @@ if __name__ == "__main__":
     except RuntimeError as rte:
         Utils.print_error(str(rte))
         sys.exit(1)
-    except ValueError as e:
-        Utils.print_error(str(e))
+    except ValueError as ve:
+        Utils.print_error(str(ve))
         sys.exit(1)
     except KeyboardInterrupt:
         sys.exit(1)

@@ -86,7 +86,7 @@ curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/insta
 Download the helper scripts:
 
 ```bash
-condatainer --no-sbatch helper --update
+condatainer --local helper --update
 ```
 
 ## Install Required Overlays
@@ -143,7 +143,7 @@ Let's set up and run `rstudio-server` on remote headless server:
 
 ```bash
 # Download the helper scripts
-condatainer --no-sbatch helper -u
+condatainer --local helper -u
 ```
 
 Then you can run the script: 

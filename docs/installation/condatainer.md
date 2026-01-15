@@ -17,7 +17,7 @@ curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/insta
 ## 📝 What to Expect
 
 The installation script is **interactive** and will guide you through the following:
-- **Installation Path**: You will be asked to confirm where the tool should be stored (defaults to `$SCRATCH/condatainer/` or `$HOME/condatainer/`).
+- **Installation Path**: You will be asked to confirm or set the installation path (defaults to `$SCRATCH/condatainer/` or `$HOME/condatainer/`).
 - **Shell Configuration**: The script will automatically **edit your shell configuration** (e.g., `.bashrc`) so that the `condatainer` command is ready to use.
 
 ## ✅ Verify Installation

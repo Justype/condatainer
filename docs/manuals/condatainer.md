@@ -19,34 +19,34 @@
 ## Overall Command Structure
 
 ```
-usage: condatainer [-h] [-v] [--debug] [-n] COMMAND ...
+usage: condatainer [-h] [-v] [--debug] [--local] COMMAND ...
 
 CondaTainer: Use Apptainer/Conda/SquashFS to manage tools for HPC users.
 
 positional arguments:
-  COMMAND               Available actions
-    overlay             Manage overlay images (create, chown, resize)
-    o                   Shortcut for 'overlay create'
+  COMMAND              Available actions
+    overlay            Manage overlay images (create, chown, resize)
+    o                  Shortcut for 'overlay create'
     create (install, i)
-                        Create a new SquashFS overlay using conda or available build scripts
-    avail (av)          Check available local and remote build scripts
-    list (ls)           List installed overlays matching search terms
+                       Create a new SquashFS overlay using available build scripts or Conda
+    helper             Run or update helper scripts from helper-scripts/
+    avail (av)         Check available local and remote build scripts
+    list (ls)          List installed overlays matching search terms
     remove (rm, delete)
-                        Remove installed overlays matching search terms
-    exec                Execute a command using overlays
-    e                   Run bash using writable overlays
-    check               Check if the dependencies of a script are installed
-    run                 Run a script and auto-solve the dependencies by #DEP tags
-    info                Show information about a specific overlay
-    self-update         Update CondaTainer to the latest version
-    completion          Generate shell completion script
+                       Remove installed overlays matching search terms
+    exec               Execute a command using overlays
+    e                  Run bash using writable overlays
+    check              Check if the dependencies of a script are installed
+    run                Run a script and auto-solve the dependencies by #DEP tags
+    info               Show information about a specific overlay
+    self-update        Update CondaTainer to the latest version
+    completion         Generate shell completion script 'source <(condatainer completion)'
 
 options:
-  -h, --help            show this help message and exit
-  -v, --version         Show the version of CondaTainer
-  --debug               Enable debug mode with verbose output
-  -n, --no-sbatch, --local
-                        Run all operations locally without using sbatch
+  -h, --help           show this help message and exit
+  -v, --version        Show program's version number and exit
+  --debug              Enable debug mode with verbose output
+  --local              Disable job submission
 ```
 
 ## Naming Convention
@@ -516,7 +516,7 @@ condatainer helper --path
 # Download/Update all helper scripts (auto selects sbatch or headless based on availability)
 condatainer helper --update
 # Forcely Update headless scripts version
-condatainer --no-sbatch helper --update
+condatainer --local helper --update
 
 # Run a helper script with arguments
 condatainer helper code-server -p 18230
