@@ -535,29 +535,40 @@ class Utils:
             - Files: ug+rw,o+r
             - Folders: ug+rwx,o+rx
         """
-        for root, dirs, files in os.walk(path):
-            # Set directories
-            for d in dirs:
-                dir_path = os.path.join(root, d)
-                current_mode = os.stat(dir_path).st_mode
-                # Add read/write/execute for user & group
-                os.chmod(dir_path, current_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
-                                                stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
-                                                stat.S_IROTH | stat.S_IXOTH)
+        try:
+            if os.path.isfile(path):
+                current_mode = os.stat(path).st_mode
+                # Add read/write for user & group, read for others
+                os.chmod(path, current_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP| stat.S_IROTH)
+                return True
 
-            # Set files
-            for f in files:
-                file_path = os.path.join(root, f)
-                current_mode = os.stat(file_path).st_mode
-                # Add read/write for user & group
-                os.chmod(file_path, current_mode | stat.S_IRUSR | stat.S_IWUSR |
-                                                stat.S_IRGRP | stat.S_IWGRP| stat.S_IROTH)
+            for root, dirs, files in os.walk(path):
+                # Set directories
+                for d in dirs:
+                    dir_path = os.path.join(root, d)
+                    current_mode = os.stat(dir_path).st_mode
+                    # Add read/write/execute for user & group
+                    os.chmod(dir_path, current_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
+                                                    stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
+                                                    stat.S_IROTH | stat.S_IXOTH)
 
-        # Finally, handle the top-level directory itself
-        current_mode = os.stat(path).st_mode
-        os.chmod(path, current_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
-                                        stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
-                                        stat.S_IROTH | stat.S_IXOTH)
+                # Set files
+                for f in files:
+                    file_path = os.path.join(root, f)
+                    current_mode = os.stat(file_path).st_mode
+                    # Add read/write for user & group
+                    os.chmod(file_path, current_mode | stat.S_IRUSR | stat.S_IWUSR |
+                                                    stat.S_IRGRP | stat.S_IWGRP| stat.S_IROTH)
+
+            # Finally, handle the top-level directory itself
+            current_mode = os.stat(path).st_mode
+            os.chmod(path, current_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
+                                            stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
+                                            stat.S_IROTH | stat.S_IXOTH)
+        except PermissionError:
+            Utils.print_warning(f"Failed to set permissions for {path}")
+            return False
+        return True
 
     @staticmethod
     def is_in_interactive_shell() -> bool:
@@ -701,6 +712,7 @@ class CondaTainer:
             tmp_overlay_path
         ]
 
+        Utils.share_to_ugo_recursive(tmp_overlay_path)
         Utils.print_debug(f"[CREATE] Creating temporary overlay with command: {cmd}")
 
         try:
@@ -2756,6 +2768,7 @@ class CondaTainer_Overlay:
 
         try:
             subprocess.run(cmd_overlay, check=True)
+            Utils.share_to_ugo_recursive(overlay_path)
             Utils.print_success(f"Overlay image created at {Utils.blue_text(overlay_path)}.")
         except subprocess.CalledProcessError:
             Utils.print_error("Failed to create overlay image.")
