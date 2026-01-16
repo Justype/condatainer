@@ -474,11 +474,11 @@ class Utils:
                     key, value = content.split("=", 1)
                     env_dict[key] = {"value": value, "note": ""}
 
-                if env_index + 1 < len(lines):
-                    next_line = lines[env_index + 1].strip()
-                    if next_line.startswith("#ENVNOTE:"):
-                        note = next_line[len("#ENVNOTE:"):].strip()
-                        env_dict[key]["note"] = note
+                    if env_index + 1 < len(lines):
+                        next_line = lines[env_index + 1].strip()
+                        if next_line.startswith("#ENVNOTE:"):
+                            note = next_line[len("#ENVNOTE:"):].strip()
+                            env_dict[key]["note"] = note
 
         return env_dict
 
@@ -1103,6 +1103,7 @@ class BuildObject:
             "--env", "TMPDIR=/ext3/tmp",
         ]
 
+        target_dir = ""
         if self.is_ref:
             os.makedirs(self.cnt_dir_path, mode=0o775, exist_ok=True)
             target_dir = os.path.join(self.cnt_dir_path, self.name_version)
