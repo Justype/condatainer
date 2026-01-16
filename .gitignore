@@ -1,36 +1,70 @@
-# Ignore micromamba binary
+# --- Go ---
+# Binaries built by 'go build'
+condatainer
+main
+*.exe
+*.test
+
+# Vendor folder
+vendor/
+
+# --- Python & Micromamba ---
+# Python cache
+__pycache__/
+*.pyc
+
+# Micromamba / Conda environments
 bin/micromamba
 micromamba_env
-conda
-# Ignore local apptainer
-apptainer
+conda/**
 
-# Ignore image files and temporary files
+# --- IDEs & System ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Project Specific (Condatainer Artifacts) ---
+# Temporary build artifacts
+tmp/*
+!tmp/.gitkeep
+
+# Logs and outputs
+logs/
+*.out
+*.log
+
+# --- Heavy Artifacts ---
+# Apptainer/Singularity images
+*.sif
+*.img
+
+# SquashFS overlays
+*.sqf
+*.sqsh
+*.squashfs
+
+# Package files
+*.deb
+*.rpm
+
+# Generated Environment files
+*.env
+
+# Ignore content in image directories but keep the folder structure
 images
 ref-images
-tmp*
-*.img
-*.sqf
-*.sif
-*deb
-*rpm
 
-# modgen (generate lmod or environment modules files)
+# --- Helper & Build Scripts ---
+# Generated helper scripts (downloaded dynamically)
+helper-scripts
+
+# --- Documentation (Sphinx) ---
+docs/_build/
+docs/build/
+
+# --- Modgen (Module Generation) ---
 apps
 apps-modules
 ref
 ref-modules
-
-# Sphinx documentation defaults
-docs/_build/
-docs/build/
-
-# Python cache (always good to include)
-__pycache__/
-*.pyc
-
-# VS Code settings
-.vscode/
-
-# Generated helper scripts (downloaded by CI/condatainer)
-helper-scripts/
