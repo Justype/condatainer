@@ -1,10 +1,11 @@
 CondaTainer
 =========================
 
-`CondaTainer <https://github.com/Justype/condatainer>`_ is an HPC-oriented wrapper tool that leverages Apptainer, SquashFS, and Micromamba to enable the easy management of isolated single-environment files, software packages, reference data, and indices.
+`CondaTainer <https://github.com/Justype/condatainer>`_  is an HPC-oriented wrapper tool that leverages Apptainer, SquashFS, and Micromamba to enable the easy management of environment files, software packages, reference data, and indices.
 
 * **Inode Saver:** Packing 30k+ Conda files into a single image to satisfy inode quotas.
-* **Web-App Ready:** Out-of-the-box support for running *RStudio Server* and *code-server*.
+* **Web-App Ready:** Out-of-the-box support for running *RStudio Server* and *code-server* on HPC.
+* **Environment Isolation:** Supports read-only (`.sqf`) for production and writable (`.img`) for development.
 * **Slurm Integration:** Native compatibility with Slurm scheduler for batch job submission.
 
 .. toctree::
