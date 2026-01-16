@@ -9,21 +9,14 @@ CondaTainer
 * **Slurm Integration:** Native compatibility with Slurm scheduler for batch job submission.
 
 .. toctree::
-  :caption: Installation:
-  :maxdepth: 1
-
-  CondaTainer <installation/condatainer>
-  ModGen <installation/modgen>
-
-.. toctree::
   :caption: User Guide:
   :maxdepth: 1
 
-  Concepts: Modules <user_guide/concepts>
-  CondaTainer: System Overlays <user_guide/condatainer_system_level>
-  CondaTainer: Writable Project Env <user_guide/condatainer_project_level_writable>
-  CondaTainer: Read-Only Project Env <user_guide/condatainer_project_level_readonly>
-  ModGen: System Modules <user_guide/modgen_system_level>
+  Installation <user_guide/installation>
+  Concepts: Overlays <user_guide/concepts>
+  Module Overlays <user_guide/module_overlays>
+  Writable Workspace Overlays <user_guide/workspace_overlays>
+  Read-Only Bundle Overlays <user_guide/bundle_overlays>
 
 .. toctree::
   :caption: HPC Tutorials:
@@ -44,8 +37,8 @@ CondaTainer
   :caption: Advanced Usage:
   :maxdepth: 1
 
-  Custom System Overlays <advanced_usage/condatainer_custom_def>
-  Custom Build Script <advanced_usage/condatainer_custom_script>
+  Custom OS Overlays <advanced_usage/custom_os>
+  Custom Bundle Overlays <advanced_usage/custom_bundle>
 
 .. toctree::
   :caption: Manuals:

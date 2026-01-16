@@ -98,7 +98,7 @@ condatainer --version
 Run the following command to install CondaTainer if it is not installed:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash
+curl -fsSL https://get-condatainer.justype.net/ | bash
 ```
 
 Download the helper scripts:

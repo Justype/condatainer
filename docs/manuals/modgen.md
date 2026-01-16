@@ -1,6 +1,6 @@
 # ModGen Manual
 
-🏭 **ModGen** is a wrapper script designed to streamline the management of Environment Modules or Lmod modules backed by Conda environments.
+🏭 [ModGen](https://github.com/Justype/condatainer/tree/main/assets/modgen) is a wrapper script designed to streamline the management of Environment Modules or Lmod modules backed by Conda environments.
 
 ## Table of Contents
 

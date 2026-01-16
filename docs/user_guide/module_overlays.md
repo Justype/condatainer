@@ -1,34 +1,30 @@
-# Use CondaTainer to Manage System Overlays
+# Creating and Using Module Overlays
 
-📦 **CondaTainer** is a tool designed to automate the creation and management of read-only highly-compressed module overlays using Apptainer and Conda.
+📦 **CondaTainer** allows you to create [module overlays](./concepts.md#-overlay-types) for your project.
 
-It is the ideal choice for users who care about inode usage and want to run rstudio-server, code-server, and other web tools on HPC.
+They are stackable, read-only, and highly compressed overlays that contain pre-installed modules (apps and references), which is ideal for HPC environments where inode usage is a concern.
 
 Please read [Concepts](concepts.md) before proceeding.
 
-## ⚡ Quick Look
+## 👀 Quick Look
 
 ```bash
-# 1. Create an overlay for samtools
-condatainer create samtools/1.16
+condatainer avail # List available recipes
+condatainer list  # List installed
 
-# 2. Run a command inside the container
+# Install and Run
+condatainer create samtools/1.16
 condatainer exec -o samtools/1.16 samtools --version
 
-# 3. List available recipes (local & remote)
-condatainer avail
-
-# 4. Create a custom environment from a YAML file
+# Create a read-only project overlay from a YAML file
 condatainer create -f environment.yml -p my_analysis
+condatainer exec -o my_analysis.sqf bash
 
-# 5. Create a writable image
-condatainer overlay -f environment.yml --size 10240 my_analysis_dev.img
-
-# 6. Automatically install the dependencies
+# Automatically install the dependencies
 condatainer check analysis.sh -a
 
-# 7. Helpful info example: Cellranger reference
-condatainer exec -o grch38--cellranger--2024-A bash
+# Print helpful info when running with overlays
+condatainer exec -o grch38/cellranger/2024-A bash
 # [CondaTainer] Overlay envs:
 #   CELLRANGER_REF_DIR: cellranger reference dir
 #   GENOME_FASTA      : genome fasta
@@ -37,6 +33,28 @@ condatainer exec -o grch38--cellranger--2024-A bash
 ```
 
 ## 🚀 Dependencies Automation
+
+### 🧬 Reference Overlay Installation
+
+To Install a Salmon Index Overlay. You don't need to:
+
+- Load modules or install Salmon manually.
+- Manually download genome FASTA and transcript FASTA files.
+- Create decoy FASTA.
+- Build the Salmon index and submit SLURM jobs.
+
+**Condatainer** will handle all these steps for you automatically!
+
+```bash
+condatainer install grch38/salmon/1.10.2/gencode47
+# This command will:
+# - Install Salmon 1.10.2 via bioconda
+# - Download GRCh38 genome FASTA
+# - Download Gencode 47 transcript FASTA
+# - Build Salmon decoy index (SLURM job automatically submitted)
+```
+
+### 🏷️ Declaring Dependencies in Scripts
 
 **CondaTainer** can recognize both `#DEP:` tags and `module load` commands to automatically install required modules.
 
@@ -154,7 +172,7 @@ condatainer create cellranger/9.0.1 grch38/cellranger/2024-A
 Since the download link for cellranger is only valid for one day, you will be prompted to provide the download link during the build process.
 
 ```
-[ModGen][NOTE] Build script requires input: ⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.
+[CNT][NOTE] Build script requires input: ⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.
 https://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
 Enter here: 
 ```
@@ -173,10 +191,10 @@ sbatch cellranger_quant.sh
 
 ## 🔗 Related Resources
 
-- [CondaTainer Installation](../installation/condatainer.md)
+- [Installation](./installation.md)
 - [CondaTainer Manual](../manuals/condatainer.md)
-- [CondaTainer: Writable Project-Level](../user_guide/condatainer_project_level_writable.md)
-- [CondaTainer: Read-Only Project-Level](../user_guide/condatainer_project_level_readonly.md)
+- [Workspace Overlays: Writable Project-Level](./workspace_overlays.md)
+- [Bundle Overlays: Read-Only Project-Level](./bundle_overlays.md)
 
 Tutorials using CondaTainer:
 

@@ -119,22 +119,28 @@ For `.img` files, the mount point is always `/ext3/env`, so renaming is allowed.
 
 ## Mount Points
 
-**CondaTainer** supports two types of overlay files, each with specific purposes and mount locations inside the container.
+**CondaTainer** uses clear terminology for overlay types and purposes. Read-only overlays use the `.sqf` extension (SquashFS) and writable overlays use the `.img` extension (ext3).
 
-### SquashFS Overlays (.sqf)
+**Overlay Terminology**
 
-* **Type:** Read-only, highly compressed.
-* **Usage:** The default format for all Applications, References, and most Environments.
-* **Mount Point:** `/cnt/[name]/[version]` or `/cnt/[assembly]/[data-type]/[version]`
-  * Files are accessible at the path defined by their naming convention.
-  * *Example:* `bcftools/1.22` is mounted at `/cnt/bcftools/1.22`.
+| Term | Extension | R/W | Content Path | Purpose |
+|------|-----------|-----|--------------|---------|
+| OS | `.sqf` | R/O | `/bin`, `/lib`, `/usr` | System Foundation — minimal system root that can run standalone or serve as a base for Modules/Bundles. |
+| Module | `.sqf` | R/O | `/cnt/<name>/<version>` | Individual tool overlay (single package) mounted under `/cnt` and layered on top of an OS or Bundle. |
+| Bundle | `.sqf` | R/O | `/cnt/<env_name>` | Frozen Conda environment (prebuilt collection of packages) mounted under `/cnt` as a named environment. |
+| Workspace | `.img` | R/W | `/ext3/env` | Writable Conda environment (ext3 image) for interactive work and runtime package changes. |
 
-### Writable Images (.img)
+Read-only `.sqf` overlays are ideal for distributing immutable software and reference data. Writable `.img` overlays are for live development or when packages must be changed at runtime.
 
-* **Type:** Writable (ext3 filesystem), uncompressed.
-* **Usage:** **Strictly for Conda environments** that require runtime modifications (e.g., installing new packages on the fly).
-* **Mount Point:** `/ext3/env`
-* **Writability:** Overlays are mounted read-only by default. To enable writing, use the `-w` / `--writable-img` flag during `exec` or `run`.
+Mount points and examples
+
+- Read-only overlays (`.sqf`) are mounted under `/cnt` following their naming convention.
+  - Module example: `bcftools/1.22` → mounted at `/cnt/bcftools/1.22`.
+  - Bundle example: `my_project_env.sqf` → mounted at `/cnt/my_project_env`.
+  - OS overlays present system directories (e.g., binaries under `/bin`) inside the container filesystem exposed by the overlay.
+- Writable images (`.img`) mount at `/ext3/env` and expose a full ext3 filesystem where packages may be installed or modified.
+
+Writability: `.sqf` overlays are read-only. To enable write access for a `.img` overlay use the `-w` / `--writable-img` flag with `exec` or `run`.
 
 ## Overlay
 
@@ -300,13 +306,13 @@ Create a read-only overlay with a Conda environment using a Conda YAML file.
 condatainer create -p my_project_env -f environment.yml
 ```
 
-Create a read-only overlay using a custom Apptainer definition file. See [Custom Def](../advanced_usage/condatainer_custom_def.md) for more details.
+Create a read-only overlay using a custom Apptainer definition file. See [Custom OS Overlays](../advanced_usage/custom_os.md) for more details.
 
 ```bash
 condatainer create -p my_project_env -f custom_def.def
 ```
 
-Create a read-only overlay using a shell script that installs packages. See [Custom Build Script](../advanced_usage/condatainer_custom_script.md) for more details.
+Create a read-only overlay using a shell script that installs packages. See [Custom Build Script using Build Scripts](../advanced_usage/custom_bundle.md) for more details.
 
 ```bash
 condatainer create -p my_project_env -f install_packages.sh

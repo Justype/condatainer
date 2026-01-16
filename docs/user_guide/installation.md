@@ -11,7 +11,7 @@
 To install **CondaTainer**, run the following interactive script in your terminal:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash
+curl -fsSL https://get-condatainer.justype.net | bash
 ```
 
 ## 📝 What to Expect
@@ -55,12 +55,4 @@ If you need to remove **CondaTainer** from your system, you can do so by reversi
 # >>> CONDATAINER >>>
 condatainer configs
 # <<< CONDATAINER <<<
-```
-
-If you also have **ModGen** installed, make sure you also remove the **ModGen** related lines.
-
-```bash
-# >>> MODGEN MODULES >>>
-modgen configs
-# <<< MODGEN MODULES <<<
 ```

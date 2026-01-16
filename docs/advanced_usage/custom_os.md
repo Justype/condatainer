@@ -1,11 +1,6 @@
-# Custom System Overlays
+# Custom OS Overlays
 
-**CondaTainer** supports two types of overlays:
-
-- **Default Overlays**: Contain only the `/ext3/env` directory to store Conda environments or `/cnt/name/version` to store apps or data.
-- **System Overlays**: Standalone containers featuring standard system directories (`/bin`, `/lib`, `/root`).
-
-System Overlays can be created using Apptainer definition files or pulled from Docker Hub, allowing you to load system-level tools and libraries alongside your conda environment.
+OS Overlays can be created using Apptainer definition files or pulled from Docker Hub, allowing you to load os-level tools and libraries.
 
 ```bash
 # Directly pull from a remote Docker image
@@ -23,16 +18,16 @@ Examples:
 
 ## Change the Base Image
 
-If a system overlay has a different distro version than the base image used by other overlays, you may run into compatibility issues when loading multiple overlays together.
+If an OS overlay has a different distro version than the base image used by other overlays, you may run into compatibility issues when loading multiple overlays together.
 
 To avoid this, you can:
 
 ```bash
-# Use a new base image matching the system overlay distro
-condatainer exec -b <custom_base_image.sqf> -o <system_overlay.sqf> bash
+# Use a new base image matching the OS overlay distro
+condatainer exec -b <custom_base_image.sqf> -o <os_overlay.sqf> bash
 
-# or directly use the system overlay as the base
-condatainer exec -b <system_overlay.sqf> bash
+# or directly use the OS overlay as the base
+condatainer exec -b <os_overlay.sqf> bash
 ```
 
 ## What is Included in a Base Image?
@@ -45,13 +40,13 @@ A base image typically includes:
 For example, you have already launched the `code-server`. The base image allows you to:
 
 1. Directly manage conda env under the `/ext3/env` directory. (if in writable mode)
-2. Launch nested containers (like read reference sqf like `grch38/gtf-gencode/47`)
+2. Launch nested containers (like read module sqf like `grch38/gtf-gencode/47`)
 
-If you are not using one of the features above, you can directly use the system overlay as the base image.
+If you are not using one of the features above, you can directly use another os overlay as the base image.
 
 ## Example: Pulling PyTorch Docker Image
 
-For example, you might want to directly pull the PyTorch Docker image (it uses `ubuntu:22.04` as the base image):
+For example, you might want to directly pull the PyTorch Docker image (based on `ubuntu:22.04`):
 
 When you use that overlay directly, you may encounter missing library errors in Python.
 
@@ -68,11 +63,11 @@ In the inner shell, you can see the OS version with:
 cat /etc/os-release
 ```
 
-It is Ubuntu 22.04, which differs from the default base image (`ubuntu24`).
+It is Ubuntu 22.04, which differs from the default base image (`ubuntu:24.04`).
 
 You can either:
 - Use the PyTorch image as the base image
-- Build an Ubuntu 22 base image
+- Build an Ubuntu 22.04 base image
 
 Use the first approach:
 
@@ -80,7 +75,7 @@ Use the first approach:
 condatainer exec -b pytorch.sqf bash
 ```
 
-Or create an Ubuntu 22 base image:
+Or create an Ubuntu 22.04 base image:
 
 ```bash
 # Use available base image definition file
@@ -100,10 +95,10 @@ Available base image definition files:
 
 ## Example: R Package Dependencies
 
-Let's say when building an R package from source, you find that some system libraries are missing, e.g., `libxml2-dev`, `libcurl4-openssl-dev`, and `libssl-dev`.
+Let's say when building an R package from source, you find that some libraries are missing, e.g., `libxml2-dev`, `libcurl4-openssl-dev`, and `libssl-dev`.
 
 ```{tip}
-You can use `pak::pkg_sysreqs()` in R to check which system libraries are required for specific packages.
+You can use `pak::pkg_sysreqs()` in R to check which libraries are required for specific packages.
 ```
 
 ### 1. Create a Custom Definition File
@@ -123,9 +118,7 @@ From: ubuntu:24.04
 
     # Put your custom installation commands here
     apt -y update && apt -y install \
-        libxml2-dev \
-        libcurl4-openssl-dev \
-        libssl-dev
+        libxml2-dev libcurl4-openssl-dev libssl-dev
 
     apt clean && rm -rf /var/lib/apt/lists/*
 ```
@@ -151,14 +144,14 @@ condatainer exec -o r-deps.sqf your_command_here
 In `rstudio-server-helper`:
 
 ```bash
-rstudio-server-helper -o r-deps.sqf
+condatainer helper rstudio-server -o r-deps.sqf
 ```
 
-### 4. Share the Definition File
+### 4. Share the File
 
-If you use `r-deps.sqf` in your projects, consider sharing the `r-deps.def` file with your team or including it in your project repository. If you also use base images, you need to remember the distro version used.
+Share the `r-deps.def` file with your team or include it in your project repository. This allows others to build the same overlay and ensures consistency across different environments.
 
-This way, others can easily recreate the same environment by building the overlay from the provided definition file.
+Or you can directly share the `r-deps.sqf` overlay file for immediate use.
 
 ## Example: Read-only R Package Environment
 
@@ -202,7 +195,7 @@ apptainer exec sc-run-standalone.sif \
 ```
 
 ```bash
-# Or you can let condatainer set --nv --bind --env parameters for you
+# Or you can let condatainer set --nv --bind --env for you
 condatainer exec -b sc-run-standalone.sif \
     Rscript --vanilla -e "library(DoubletFinder); library(copykat); sessionInfo()"
 ```

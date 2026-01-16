@@ -5,7 +5,7 @@
 - [SLURM job scheduler is available on your HPC system](#slurm-job-scheduler)
 - [Have CondaTainer installed](#install-condatainer)
 - [Have a writable overlay image (optional)](#create-writable-overlay)
-- [Check the Script Parameters](#vscode-tunnel-helper-script)
+- [Check the Script Parameters](#vs-code-tunnel-helper-script)
 
 Then you can run:
 
@@ -56,7 +56,7 @@ condatainer --version
 Run the following command to install CondaTainer if it is not installed:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash
+curl -fsSL https://get-condatainer.justype.net/ | bash
 ```
 
 Download the helper scripts:

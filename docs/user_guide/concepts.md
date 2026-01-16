@@ -1,127 +1,69 @@
-# Concepts: 🧩 Modules
+# Concepts: 🧩 Overlays
 
 **Modular, Reproducible, and Self-Contained Analysis Environments.**
 
-To ensure reproducibility in bioinformatics analyses, it's crucial to manage both software tools and reference data effectively. Two tools, **ModGen** (using Lmod/Environment Modules) and **CondaTainer** (using Singularity with Conda), provide robust solutions for this purpose.
+Reproducible bioinformatics analyses require careful management of both software tools and reference data. **CondaTainer** addresses this challenge through its overlay system.
 
 ## 💡 The Main Idea
 
-Modules/overlays are self-contained packages. When loaded, both **Lmod** and **CondaTainer** can modify environment variables (like `PATH` etc.) to make software and data easily accessible.
+Overlays are self-contained files that encapsulate executables and data. When loaded, **CondaTainer** modifies environment variables (such as `PATH`) and establishes path bindings to make software and data immediately accessible.
 
-## 📦 Module Types
+## 📦 Overlay Types
 
-Modules are categorized into two main types: **App** modules and **Ref** modules.
+| Term | Ext | R/W | Content Path | Purpose |
+|------|-----------|-----|--------------|-------------|
+| OS | `.sqf` | R/O | `/bin`, `/lib` etc. | System Foundation - Run standalone. |
+| Module | `.sqf` | R/O | `/cnt/name/version` | Individual Tool - Run on top of OS. |
+| Bundle | `.sqf` | R/O | `/cnt/<env_name>` | Frozen Conda Env - Run on top of OS. |
+| Workspace | `.img` | R/W | `/ext3/env` | Writable Conda Env - Run on top of OS. |
+
+```{note}
+- `sqf` files cannot be renamed. **CondaTainer** uses the name to identify the mount path.
+- `img` files can be renamed freely.
+```
+
+```{tip}
+OS overlays are stackable when based on the same distribution version.
+
+Like `condatainer -o rstudio-server -o build-essential`
+```
+
+### 🧩 Module Overlays
+
+Module overlays are categorized into two main types: **App** modules and **Ref** modules.
 
 - **App Modules**: Contain the software applications, pipelines, or binaries needed for analysis.
 - **Ref Modules**: Contain version-specific genome indices, annotations, or reference files.
 
-### 🛠️ 1. App Modules (Logic)
-
-App modules encapsulate the software application, pipeline, or binaries.
-
-- **Role**: Provides the executable tools and manages their runtime dependencies.
-- **Action**: Updates system PATH so you can run commands (e.g., cellranger) directly.
-
-**Example**: `salmon/1.10.2`
-
-### 🧬 2. Ref Modules (Data)
-
-Ref (Reference) modules provide version-specific genome indices, annotations, or reference files.
-
-- **Role**: Ensures the analysis uses the exact reference build required by the software version.
-- **Action**: Sets specific environment variables pointing to the data or the directories, removing the need to hardcode paths.
-
-**Example**: `grch38/salmon/1.10.2/gencode47`
+Examples:
+- App Module: `salmon/1.10.2`
+- Ref Module: `grch38/salmon/1.10.2/gencode47`
 
 ### 📂 Naming Convention
 
-Both tools utilize a standardized naming schema to organize software and reference data.
-
-- System Apps: `name` (e.g., `rstudio-server`, created by `name` or `-n name` flag) (**CondaTainer** only)
-- Project Env: `name` (e.g., `env`, `sci_rna`, created by `-p prefix` flag) (**CondaTainer** only)
+- System Apps: `name` (e.g., `rstudio-server`)
+- Workspace: `name` (e.g., `env`, `sci_rna`)
 - Apps: `name/version` (e.g., `bcftools/1.16`)
 - References: `assembly/datatype/version`
   - `grcm39/genome/gencode`: GRCm39 genome with Gencode style naming
   - `grcm39/salmon/1.10.2/gencodeM33`: salmon index for GRCm39 Gencode M33 transcripts
 
-#### Version Delimiter
+#### Version Delimiters
 
-`/`, `--`, `=`, `@` are all accepted as version delimiters.
+The following delimiters are accepted for version specification: `/`, `--`, `=`, `@`
 
-To store the overlays in a folder, **CondaTainer** will normalize the overlay names by replacing `/` with `--` when creating the overlay files.
-
-For example, `salmon/1.10.2` will be stored as `condatainer_path/images/salmon--1.10.2.sqf`.
-
-So `--` should not be used in the names.
-
-#### Rename or not to Rename? (CondaTainer)
-
-TL;DR: Do not rename `sqf` files. `img` files can be renamed.
-
-See [Naming Conventions - CondaTainer Manual](../manuals/condatainer.md#naming-convention) for details.
+**Important**: Because `--` serves as a delimiter, it should not be used within overlay names themselves.
 
 ## 🐍 Leveraging Conda Resources
 
-Thanks to `conda-forge` and `bioconda`, most bioinformatics software can be easily installed with conda. Both **ModGen** and **CondaTainer** leverage conda to create isolated environments for each app module, ensuring that dependencies are managed without conflicts.
+**CondaTainer** leverages the extensive `conda-forge` and `bioconda` ecosystems, which provide most bioinformatics software as conda packages. **CondaTainer** will automatically create module overlays for these packages.
 
-If a required package is not available in conda, custom build scripts can be created to compile and install the software from source.
+For software unavailable through conda, custom build scripts can be created to download and install the software.
 
-e.g. 10X `cellranger` and Illumina `orad`
+**Examples**: 10X [cellranger/9.0.1](https://github.com/Justype/condatainer/blob/main/build-scripts/cellranger/9.0.1) and Illumina [orad/2.7.0](https://github.com/Justype/condatainer/blob/main/build-scripts/orad/2.7.0)
 
-## 🤔 System or Project Level
+## 🔄 Module Workflow
 
-Both **ModGen** and **CondaTainer** support system-level management. Only **CondaTainer** supports project-level environments.
-
-The system-level here means those modules can be used across different projects. It can be user-wide, group-wide, or even system-wide depending on the installation path and permissions.
-
-For example, you want to analyze a bulk RNA-seq dataset.
-
-For the **upstream steps** (quality control, trimming, alignment, etc.), you can use **system-level** modules since these tools and references are commonly used across projects.
-
-For the **downstream steps** (differential expression, visualization), you may want to create a **project-level** environment to install specific R packages and dependencies without affecting other users or projects.
-
-```{note}
-For the upstream steps, you can use workflow managers like **Snakemake** or **Nextflow**.
-```
-
-## 🔄 Workflow
-
-### 📥 Install
-
-Use **ModGen** or **CondaTainer** to install the desired app and reference modules.
-
-```bash
-condatainer install grch38/salmon/1.10.2/gencode47
-# It will install
-# - salmon 1.10.2
-# - grch38 genome fasta
-# - gencode47 transcript fasta
-# - Use these to build salmon index (SLURM job auto submitted)
-```
-
-Same as the **ModGen** way:
-
-```bash
-modgen install grch38/salmon/1.10.2/gencode47
-```
-
-### 🚀 Load and Use
-
-Load the required app and ref modules and run your analysis.
-
-**CondaTainer** way:
-
-```bash
-condatainer exec \
-  -o salmon/1.10.2 \
-  -o grch38/salmon/1.10.2/gencode47 \
-  salmon quant -i $SALMON_INDEX_DIR ...
-```
-
-Environment Modules (Lmod) way:
-
-```bash
-module load salmon/1.10.2
-module load grch38/salmon/1.10.2/gencode47
-salmon quant -i $SALMON_INDEX_DIR ...
-```
+- [Manage Module Overlays](./module_overlays.md)
+- [Bundle Overlays: Read-only project](./bundle_overlays.md)
+- [Workspace Overlays: Writable project](./workspace_overlays.md)

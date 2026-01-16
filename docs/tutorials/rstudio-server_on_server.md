@@ -80,7 +80,7 @@ condatainer --version
 Run the following command to install CondaTainer if it is not installed:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash
+curl -fsSL https://get-condatainer.justype.net/ | bash
 ```
 
 Download the helper scripts:
@@ -116,7 +116,7 @@ In side the overlay, you can use `mm-*` commands
 mm-install r-base=4.4 r-tidyverse
 ```
 
-See [Launch a Shell with the Project Environment](../user_guide/condatainer_project_level_writable.md#launch-a-shell-with-the-project-environment) for more details.
+See [Launch a Shell within the Workspace Overlay](../user_guide/workspace_overlays.md#launch-a-shell-within-the-workspace-overlay) for more details.
 
 ## RStudio Server Helper Script
 
@@ -209,7 +209,7 @@ pak::pkg_sysreqs("user/repo@commit_hash") # or @tag
 
 If system libraries are missing, you can create your `additional-deps` overlay with the required system libraries. (ignore pandoc missing warning)
 
-see [Custom System Overlays](../advanced_usage/condatainer_custom_def.md) for more details.
+see [Custom OS Overlays](../advanced_usage/custom_os.md) for more details.
 
 After getting the `additional-deps.sqf` overlay, run `rstudio-server` with the `-o` option:
 

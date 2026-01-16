@@ -1,6 +1,6 @@
 # Build Script Manual
 
-This document gives instructions on how to create your own build scripts for **CondaTainer** and **ModGen**.
+This document gives instructions on how to create your own build scripts for **CondaTainer**.
 
 ## Table of Contents
 
@@ -57,8 +57,8 @@ Used for reference datasets, genome assemblies, or indices.
 | `ncpu` | Number of CPUs to use (default: env `SLURM_CPUS_PER_TASK` or 4) |
 | `app_name` | apps: app name; ref: assembly/data-type |
 | `version` | apps: app version; ref: data version |
-| `target_dir` | Target installation directory (managed by **CondaTainer**/**ModGen**) |
-| `tmp_dir` | Temporary working directory (managed by **CondaTainer**/**ModGen**) |
+| `target_dir` | Target installation directory (managed by **CondaTainer**) |
+| `tmp_dir` | Temporary working directory (managed by **CondaTainer**) |
 
 | Function | Description |
 | -------- | ----------- |
@@ -98,19 +98,19 @@ install() {
 
 `#WHATIS:` and `#URL:` lines are used to replace modulefile's `{WHATIS}` and `{HELP}` placeholders.
 
-It will only be used by **ModGen** when generating modulefiles. (**CondaTainer** does not support these tags yet.)
+It will only be used by [ModGen](./modgen.md) when generating modulefiles. (**CondaTainer** does not support these tags yet.)
 
 ### Set Dependencies
 
 `#DEP:` lines specify dependencies that must be installed before building the current overlay.
 
-When **CondaTainer** or **ModGen** processes the build script, it will ensure that all specified dependencies are available and load them in the same order as listed.
+When **CondaTainer** processes the build script, it will ensure that all specified dependencies are available and load them in the same order as listed.
 
 ### SBATCH Parameters
 
 `#SBATCH` lines allow you to specify SLURM job parameters for the build process.
 
-If `sbatch` is available, **CondaTainer** or **ModGen** will submit the build job with the specified parameters.
+If `sbatch` is available, **CondaTainer** will submit the build job with the specified parameters.
 
 **Example:**
 
@@ -171,7 +171,7 @@ For tool-specific references, use the tool name as a prefix.
 
 - `#INTERACTIVE:<Prompt>` tag indicates that the build script requires input from the user during execution.
 - It is common for apps that need license agreement acceptance or custom configuration.
-- When **CondaTainer** or **ModGen** encounters this tag, it will prompt the user with the specified `<Prompt>` message before building. It will take the user input and pass it to the build script during execution.
+- When **CondaTainer** encounters this tag, it will prompt the user with the specified `<Prompt>` message before building. It will take the user input and pass it to the build script during execution.
 - You can use `\n` to add new lines in the prompt message.
 
 **Example:**
@@ -190,7 +190,7 @@ Example: [cellranger/9.0.1](https://github.com/Justype/condatainer/blob/main/bui
 - Do not try to manually download apps that are already available via conda-forge or bioconda.
 - Also, I don't recommend compiling apps from source unless absolutely necessary.
   - HPC systems often lack required build tools or dependencies unless you load specific modules.
-  - To maximize compatibility (**CondaTainer** and **ModGen**), it's better to rely on pre-compiled packages.
+  - To maximize compatibility (**CondaTainer**), it's better to rely on pre-compiled packages.
 
 Template: [build-template-apps](https://github.com/Justype/condatainer/blob/main/assets/build-template-apps)
 

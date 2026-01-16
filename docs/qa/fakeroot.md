@@ -4,8 +4,8 @@ The `--fakeroot` flag allows an unprivileged user to appear as the **root user (
 
 Fakeroot is useful when you:
 
-- [Build the image with fakeroot](#build-the-image-with-fakeroot)
-- [Run the container/overlay with fakeroot](#run-the-containeroverlay-with-fakeroot)
+- [Build the image](#build-the-image-with-fakeroot)
+- [Run the container/overlay](#run-the-containeroverlay-with-fakeroot)
 
 ## Build the image with fakeroot
 
