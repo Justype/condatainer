@@ -1,64 +1,45 @@
-# CondaTainer & ModGen
+# CondaTainer
+
+<div>
+<a href="#-condatainer"><img src="docs/_static/logo_cnt.svg" height="80" alt="CondaTainer Logo"></a>
+</div>
 
 [![Read the Docs](https://readthedocs.org/projects/condatainer/badge/?version=latest)](https://condatainer.readthedocs.io/en/latest/) [![GitHub Release](https://img.shields.io/github/v/release/Justype/condatainer)](https://github.com/Justype/condatainer/releases)
 
-<div>
-<a href="#-condatainer"><img src="assets/logo_cnt.png" height="100" alt="CondaTainer Logo"></a>
-&nbsp;&nbsp;
-<a href="./README_MG.md"><img src="assets/logo_mg.png" height="100" alt="ModGen Logo"></a>
-</div>
+**CondaTainer** is an HPC-oriented wrapper tool that leverages Apptainer, SquashFS, and Micromamba to enable the easy management of isolated single-environment files, software packages, reference data, and indices.
 
-Both tools aim to automate environment management on HPC, but with different approaches:
-
-- **CondaTainer**: Wraps environments in overlays using [Apptainer](https://apptainer.org/) and [SquashFS](https://github.com/plougher/squashfs-tools).
-- **ModGen**: Automates [Lmod](https://lmod.readthedocs.io/en/latest/)/[Environment Modules](https://modules.readthedocs.io/en/latest/) modules creation.
-
-Which one to choose?
-
-- If you care about inode usage and project-level isolation, use [**CondaTainer**](#-condatainer).
-- If you want rstudio-server, igv, and other tools on HPC, use [**CondaTainer**](#-condatainer).
-- If you prefer Lmod and using system available modules, use [**ModGen**](README_MG.md).
-
-Please go to [Read the Docs](https://condatainer.readthedocs.io/en/latest/) for the full documentation, including installation guides, user manuals, and tutorials.
+* **Inode Saver:** Packing 30k+ Conda files into a single image to satisfy inode quotas.
+* **Web-App Ready:** Out-of-the-box support for running *RStudio Server* and *code-server* on HPC.
+* **Environment Isolation:** Supports read-only (`.sqf`) for production and writable (`.img`) for development.
+* **Slurm Integration:** Native compatibility with Slurm scheduler for batch job submission.
 
 ## 🛠️ Installation
 
 ```bash
-curl -sL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.sh | bash
 ```
 
 You will be prompted to confirm the installation path (defaulting to `$SCRATCH/condatainer/` or `$HOME/condatainer/`). The script will also edit shell config.
 
-## 📦 CondaTainer
-
-**CondaTainer** solves the "too many files" problem inherent to Conda environments: it packs Conda environments into single, highly-compressed SquashFS files and mounts them inside an Apptainer container.
-
-- **Inode Efficiency**: Compresses heavy conda environments (30k+ files) into 1 file.
-- **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
-- **Hybrid Modes**: Supports read-only (`.sqf`) for production and writable (`.img`) for development.
-- **SLURM Integration**: Submits index generation jobs automatically when needed.
+## 👀 Quick Look
 
 ```bash
-# 1. Create an overlay for samtools
-condatainer create samtools/1.16
+condatainer avail # List available recipes
+condatainer list  # List installed
 
-# 2. Run a command inside the container
+# Install and Run
+condatainer create samtools/1.16
 condatainer exec -o samtools/1.16 samtools --version
 
-# 3. List available recipes (local & remote)
-condatainer avail
-
-# 4. Create a read-only environment from a YAML file
+# Create a read-only project overlay from a YAML file
 condatainer create -f environment.yml -p my_analysis
+condatainer exec -o my_analysis.sqf bash
 
-# 5. Create a writable image for development
-condatainer overlay create -s 10240 dev.img
-
-# 6. Automatically install the dependencies
+# Automatically install the dependencies
 condatainer check analysis.sh -a
 
-# 7. Helpful info example: Cellranger reference
-condatainer exec -o grch38--cellranger--2024-A bash
+# Print helpful info when running with overlays
+condatainer exec -o grch38/cellranger/2024-A bash
 # [CondaTainer] Overlay envs:
 #   CELLRANGER_REF_DIR: cellranger reference dir
 #   GENOME_FASTA      : genome fasta
@@ -69,6 +50,43 @@ condatainer exec -o grch38--cellranger--2024-A bash
 - 📜 [Read the full CondaTainer Manual](./docs/manuals/condatainer.md)
 - 📁 [Naming Conventions](./docs/user_guide/concepts.md#-naming-convention)
 
+## 📦 Writable Overlay
+
+**CondaTainer** allows users to create writable overlays for development purposes.
+
+```bash
+# Create a writable overlay of size 5G
+condatainer overlay create -s 5G env.img
+# Resize an existing overlay to 10G
+condatainer overlay resize -s 10G env.img
+# Change the file UID/GID to current user in an overlay
+# This is useful when the overlay was created by another user
+condatainer overlay chown env.img
+
+# Launch a bash shell inside the writable overlay
+condatainer exec -w -o env.img bash
+condatainer e # shortcut for above
+
+# Run in read-only mode
+condatainer exec -o env.img bash
+```
+
+**CondaTainer** will set `PATH` and other environment variables for you automatically.
+
+When in writable mode, you can install packages using `mm-*` Micromamba wrappers. (conda-forge and bioconda only)
+
+```bash
+mm-install r-base=4.4 r-tidyverse
+mm-pin r-base
+mm-pin -r r-base # unpin
+mm-list
+mm-search r-ggplot2
+mm-remove r-tidyverse
+mm-update
+mm-clean -a
+mm-export
+```
+
 ## 🚀 Automation
 
 **CondaTainer** supports inline dependency declaration, allowing you to define requirements directly within your scripts using tags `#DEP:`.
@@ -77,26 +95,31 @@ Example Script (`analysis.sh`):
 
 ```bash
 #!/bin/bash
-#SBATCH --time=2:00:00
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=1GB
-#DEP:samtools/1.22.1
+#SBATCH --time=4:00:00
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=30G
+#DEP:salmon/1.10.2
+#DEP:grch38/salmon/1.10.2/gencode47
 
 if [ -z "$IN_CONDATINER" ] && command -v condatainer >/dev/null 2>&1; then
-    condatainer run "$0" "$@"
-    exit $?
+  condatainer run "$0" "$@"
+  exit $?
 fi
 
-samtools --version
+salmon quant \
+  -i $SALMON_INDEX_DIR \
+  -p $SLURM_CPUS_PER_TASK \
+  -l A -r reads.fq -o quants/
 ```
 
 First check and install missing dependencies:
 
 ```bash
+# Auto download dependencies and use sbatch to create index
 condatainer check analysis.sh -a
 ```
 
-Then use sbatch as usual:
+Wait until all dependencies are installed. Then use sbatch as usual:
 
 ```bash
 sbatch analysis.sh
