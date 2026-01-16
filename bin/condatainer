@@ -712,11 +712,11 @@ class CondaTainer:
             tmp_overlay_path
         ]
 
-        Utils.share_to_ugo_recursive(tmp_overlay_path)
         Utils.print_debug(f"[CREATE] Creating temporary overlay with command: {cmd}")
 
         try:
             subprocess.run(cmd, check=True)
+            Utils.share_to_ugo_recursive(tmp_overlay_path)
         except subprocess.CalledProcessError:
             Utils.print_error("Creating temporary overlay failed.")
             return None
