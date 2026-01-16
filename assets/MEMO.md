@@ -1,13 +1,8 @@
-
 ## MEMO
 
-### Apptainer Requirements
+### Apptainer
 
 [Apptainer repo](https://github.com/apptainer/apptainer)
-
-```bash
-sudo apt install uidmap squashfuse gocryptfs fuse-overlayfs
-```
 
 ### Compression method for squashfs overlays
 

@@ -21,8 +21,7 @@ class Config:
     submit_job = True
     GITHUB_REPO = "Justype/condatainer"
     REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json.gz"
-    MODGEN_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/modgen"
-    CONDATAINER_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/condatainer"
+    MODGEN_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/modgen/modgen"
     GIT_RAW_URL_PREFIX = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
 
     # Folder paths
@@ -56,7 +55,7 @@ class Config:
 def main():
     parser = argparse.ArgumentParser(
         description="ModGen: Use conda and build scripts to create environment-modules or Lmod modules.",
-        epilog=f"For full manual, see https://github.com/{Config.GITHUB_REPO}/blob/main/docs/manuals/modgen.md")
+        epilog=f"For full manual, see https://github.com/{Config.GITHUB_REPO}/blob/main/assets/modgen/manual.md")
     parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of ModGen", default=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
     parser.add_argument("--local", dest="local", action="store_true", help="Disable job submission")
@@ -71,7 +70,6 @@ def main():
     ModGen_Check.add_parser_arguments(subparsers)
     ModGen_Run.add_parser_arguments(subparsers)
     ModGen_Update.add_parser_arguments(subparsers)
-    ModGen_CondaTainer.add_parser_arguments(subparsers)
 
     args = parser.parse_args()
     ModGen.ensure_env_modules_or_lmod()
@@ -106,8 +104,6 @@ def main():
         ModGen_Init.parse_init_args(args)
     elif args.action == "self-update":
         ModGen_Update.parse_update_args(args)
-    elif args.action == "condatainer":
-        ModGen_CondaTainer.parse_condatainer_args(args)
 
 class Utils:
     remote_build_scripts_links: Optional[Dict[str, str]] = None
@@ -373,13 +369,14 @@ class Utils:
                     if "=" not in content:
                         continue
                     key, value = content.split("=", 1)
+                    key = key.strip()
                     env_dict[key] = {"value": value, "note": ""}
 
-                if env_index + 1 < len(lines):
-                    next_line = lines[env_index + 1].strip()
-                    if next_line.startswith("#ENVNOTE:"):
-                        note = next_line[len("#ENVNOTE:"):].strip()
-                        env_dict[key]["note"] = note
+                    if env_index + 1 < len(lines):
+                        next_line = lines[env_index + 1].strip()
+                        if next_line.startswith("#ENVNOTE:"):
+                            note = next_line[len("#ENVNOTE:"):].strip()
+                            env_dict[key]["note"] = note
 
         return env_dict
 
@@ -1537,6 +1534,7 @@ class ModGen_Check:
             for md in missing_deps:
                 if md.endswith(('.sqf', '.img', '.squashfs')):
                     Utils.print_error(f"ModGen is not compatible with overlay dependencies. Please use CondaTainer instead.")
+                    Utils.print_note(f"Please go to https://github.com/{Config.GITHUB_REPO} for more information.")
                     continue
             ModGen.ensure_micromamba()
             build_objects = [BuildObject(md) for md in missing_deps]
@@ -1601,6 +1599,7 @@ class ModGen_Run:
         except ValueError as ve:
             Utils.print_error(ve)
             Utils.print_message("ModGen is not compatible with overlay dependencies. Please use CondaTainer instead.")
+            Utils.print_note(f"Please go to https://github.com/{Config.GITHUB_REPO} for more information.")
             return
         missing_deps = ModGen.get_missing_modules(deps)
 
@@ -1810,55 +1809,6 @@ class ModGen_Update:
             Utils.print_success("ModGen updated.")
         else:
             Utils.print_error("Failed to download the latest ModGen script.")
-
-class ModGen_CondaTainer:
-    @staticmethod
-    def add_parser_arguments(parser):
-        ModGen_CondaTainer.parser_condatainer = parser.add_parser("condatainer", help="Install CondaTainer")
-        ModGen_CondaTainer.parser_condatainer.add_argument(
-            "-y", "--yes",
-            action="store_true",
-            help="Automatically confirm installation"
-        )
-        ModGen_CondaTainer.parser_condatainer.add_argument(
-            "-f", "--force",
-            action="store_true",
-            help="Force overwrite if CondaTainer is already installed"
-        )
-
-    @staticmethod
-    def parse_condatainer_args(args):
-        if not Utils.is_in_interactive_shell():
-            return
-
-        Utils.print_message(f"{Utils.blue_text('CondaTainer')}: Use apptainer/conda/squashFS to manage tools for HPC users.")
-        Utils.print_message(f"Which is another way to manage software environments compared to {Utils.blue_text('ModGen')}.")
-        Utils.print_message(f"Conda env tends to have a lot of small files, so {Utils.blue_text('ModGen')} will quickly {Utils.yellow_text('exceed the file number quota')}.")
-        Utils.print_message(f"{Utils.blue_text('CondaTainer')} uses SquashFS overlays to reduce file number and improve performance.")
-        print("", flush=True)
-
-        target_path = os.path.join(os.path.dirname(Config.SCRIPT_PATH), "condatainer")
-        if os.path.isfile(target_path) and not args.force:
-            Utils.print_message(f"CondaTainer is already installed at {Utils.blue_text(target_path)}.")
-            Utils.print_message("Overwrite? [y/N]: ", end="", flush=True)
-            if not args.yes:
-                confirm = input()
-                if confirm.lower() != 'y':
-                    Utils.print_message("Installation cancelled by user.")
-                    return
-
-        if not args.force and not args.yes:
-            Utils.print_message("Are you sure to install CondaTainer? [y/N]: ", end="", flush=True)
-            confirm = input()
-            if confirm.lower() != 'y':
-                Utils.print_message("Installation cancelled by user.")
-                return
-
-        Utils.print_message("Downloading CondaTainer...")
-        if Utils.download_executable(Config.CONDATAINER_URL, target_path):
-            Utils.print_success("CondaTainer installed.")
-        else:
-            Utils.print_error("Failed to download CondaTainer.")
 
 if __name__ == "__main__":
     try:

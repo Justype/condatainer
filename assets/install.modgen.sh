@@ -10,20 +10,22 @@ RED=$'\033[0;31m'
 NC=$'\033[0m' # No Color
 
 # URLs
-URL_CONDATAINER="https://raw.githubusercontent.com/Justype/condatainer/main/bin/condatainer"
+URL_MODGEN="https://raw.githubusercontent.com/Justype/condatainer/main/assets/modgen/modgen"
 
 DEFAULT_BASE="${SCRATCH:-$HOME}/condatainer"
 
 # Config Markers
 MARKER_START="# >>> CONDATAINER >>>"
 MARKER_END="# <<< CONDATAINER <<<"
+MOD_START="# >>> MODGEN MODULES >>>"
+MOD_END="# <<< MODGEN MODULES <<<"
 
 # Detect Shell & Config File early
 SHELL_NAME=$(basename "$SHELL")
 if [ "$SHELL_NAME" = "zsh" ]; then RC_FILE="$HOME/.zshrc"; else RC_FILE="$HOME/.bashrc"; fi
 
 echo -e "========================================"
-echo -e "${BLUE}       CondaTainer Installer${NC}"
+echo -e "${BLUE}         ModGen Installer${NC}"
 echo -e "========================================"
 
 # ------------------------------------------------------------------
@@ -146,7 +148,7 @@ CLI_YES=false
 
 show_usage() {
     cat <<'USAGE'
-Usage: install_condatainer.sh [options]
+Usage: install_modgen.sh [options]
 Options:
   -p, --path PATH      Install base path (non-interactive)
   -y, --yes            Assume yes for all prompts
@@ -209,7 +211,7 @@ fi
 
 echo -e "\n--------- Installation Summary ---------"
 echo -e "Directory   : ${BLUE}$INSTALL_BIN${NC}"
-echo -e "Condatainer : ${GREEN}Yes${NC}"
+echo -e "ModGen      : ${GREEN}Yes${NC}"
 echo -e "----------------------------------------"
 
 if ! confirm_action "Proceed?"; then echo "Aborted."; exit 0; fi
@@ -222,11 +224,12 @@ echo -e "\nStarting installation..."
 
 # Prepare Directory
 mkdir -p "$INSTALL_BIN"
+mkdir -p "$INSTALL_BASE/apps-modules" "$INSTALL_BASE/ref-modules"
 
-# Download condatainer
-download_file "$URL_CONDATAINER" "$INSTALL_BIN/condatainer"
+# Download modgen
+download_file "$URL_MODGEN" "$INSTALL_BIN/modgen"
 
-# Update RC with CONDATAINER block
+# Update RC with CONDATAINER block (for bin PATH)
 PATH_BLOCK="$MARKER_START
 if [[ \":\$PATH:\" != *\":$INSTALL_BIN:\"* ]]; then
     export PATH=\"$INSTALL_BIN:\$PATH\"
@@ -237,6 +240,20 @@ fi
 $MARKER_END"
 
 update_config_block "$RC_FILE" "$MARKER_START" "$MARKER_END" "$PATH_BLOCK" "CONDATAINER PATH"
+
+# Add MODGEN MODULES block
+DETECT_CMD='command -v tclsh >/dev/null 2>&1'
+[ -n "$LMOD_CMD" ] && DETECT_CMD='[ -f "$LMOD_CMD" ]'
+
+MOD_BLOCK="$MOD_START
+# Use ModGen modulefiles (Only if 'module' command is available)
+if $DETECT_CMD && [ -d \"$INSTALL_BASE\" ]; then
+    module use \"$INSTALL_BASE/apps-modules\"
+    module use \"$INSTALL_BASE/ref-modules\"
+fi
+$MOD_END"
+
+update_config_block "$RC_FILE" "$MOD_START" "$MOD_END" "$MOD_BLOCK" "MODGEN MODULES"
 
 echo -e "----------------------------------------"
 echo -e "${GREEN}Success!${NC}"

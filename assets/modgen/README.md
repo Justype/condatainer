@@ -1,5 +1,7 @@
 # 🏭 ModGen
 
+<img src="./logo_mg.png" height="100" alt="ModGen Logo">
+
 **ModGen** streamlines HPC software management by automatically converting apps and genome references into modules. It allows users to access Conda-built and non-Conda software (e.g., 10X Cell Ranger, Illumina ORAD), as well as genome references, via standard `module load` commands without manual configuration.
 
 - **Auto-Generation**: Installs packages and builds Lua/Tcl modulefiles automatically.
@@ -7,6 +9,16 @@
 - **Native Integration**: Seamless `module avail` and `module load` experience.
 - **Context-Aware**: Manages references/indices and displays helpful info when not in a SLURM job.
 - **SLURM Integration**: Submits index generation jobs automatically when needed.
+
+## 🛠️ Installation
+
+Run the following command to install **ModGen**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Justype/condatainer/main/assets/install.modgen.sh | bash
+```
+
+## 👀 Quick Look
 
 ```bash
 # 1. Initialize shell hooks (only needed once)
@@ -34,8 +46,8 @@ ml grch38/cellranger/2024-A
 #   STAR_INDEX_DIR     (STAR index dir)
 ```
 
-- 📜 [Read the full ModGen Manual](./docs/manuals/modgen.md)
-- 📁 [Naming Conventions](./docs/user_guide/concepts.md#-naming-convention)
+- 📜 [Read the full ModGen Manual](./manual.md)
+- 📁 [Naming Conventions](../../docs/user_guide/concepts.md#-naming-convention)
 
 
 > [!NOTE]

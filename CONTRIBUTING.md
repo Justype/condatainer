@@ -2,7 +2,7 @@
 
 Thank you for helping improve this project! This document explains the two main contribution types:
 
-- Editing `condatainer/modgen` (code/tooling changes)
+- Editing `condatainer` (code/tooling changes)
 - Adding `build-scripts` (new app/data/genome build definitions)
 
 ## Quick start
@@ -11,15 +11,10 @@ Thank you for helping improve this project! This document explains the two main 
 2. Make changes, run a small test on both HPC and locally if applicable.
 3. Push your branch and open a Pull Request with a clear description and testing notes
 
-## 1) Editing `condatainer/modgen`
+## 1) Editing `condatainer`
 
 What this covers
-- Bug fixes, feature additions, refactors, tests, or docs related to the `condatainer/modgen` tool.
-
-Guidelines
-- Do not use external dependencies. Make the script self-contained.
-- Make sure condatainer and modgen have the same parameters and behavior where applicable.
-  - Don't forget to update both scripts if you change shared logic.
+- Bug fixes, feature additions, refactors, tests, or docs related to the `condatainer` tool.
 
 Testing
 - There is no formal test suite yet, but please test your changes on both HPC and local environments if applicable.
