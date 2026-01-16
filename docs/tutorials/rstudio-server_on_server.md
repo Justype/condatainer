@@ -15,8 +15,8 @@ condatainer helper \
   rstudio-server \
   -e <overlay_image>
 
-# Default 
-#   port_number=8787
+# Default
+#   port_number=auto-selected if omitted
 #   overlay_image=env.img
 ```
 
@@ -42,10 +42,10 @@ Your machine -----> Remote Server
 `rstudio-server` is a web-based application, so you need to access it through a port on the remote server. 
 
 ```bash
-ssh -L 8787:localhost:8787 your_username@remote_server_address
+ssh -L <local_port>:localhost:<remote_port> your_username@remote_server_address
 ```
 
-After running this command, when your local machine accesses `localhost:8787`, it will be forwarded to `localhost:8787` on the remote server.
+After running this command, when your local machine accesses `localhost:<local_port>`, it will be forwarded to `localhost:<remote_port>` on the remote server. If you omit `-p` when launching the helper, the helper will auto-select a port and print the port number and an `ssh -L` example you can copy.
 
 ```{warning}
 Remote server is a shared system! Please do not use a common port like `8787`.
@@ -59,8 +59,8 @@ You can also edit the SSH config file (`~/.ssh/config`) to add a section for you
 Host server
     HostName remote_server_address
     User your_username
-    LocalForward 8787 localhost:8787
-    # Please change 8787 to a unique port number
+    LocalForward <local_port> localhost:<remote_port>
+    # Please change <local_port> to a unique port number
 ```
 
 Then you can simply run:
@@ -131,7 +131,7 @@ It will do the following steps for you:
 Usage: rstudio-server [options]
 
 Options:
-  -p <port>       Port for rstudio-server (default: 8787)
+  -p <port>       Port for rstudio-server (if omitted, an available port will be chosen)
   -b <image>      Base image file
   -e <overlay>    Environment overlay image file (default: env.img)
   -o <overlay>    Additional overlay files (can have multiple -o options)
@@ -155,12 +155,12 @@ condatainer helper rstudio-server
 After running the script, you will see output like this:
 
 ```
-rstudio-server at http://localhost:8787
+rstudio-server at http://localhost:<port>
 You can run the following command in R to open the project directly:
   rstudioapi::openProject("/scratch/your_username/current_working_directory")
 ```
 
-Then you can go to your local web browser and access `http://localhost:8787`.
+Then you can go to your local web browser and access `http://localhost:<port>`. The helper prints the actual port it chose when started.
 
 Run the provided R command in the R console to open the project directly.
 

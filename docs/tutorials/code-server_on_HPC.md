@@ -21,8 +21,8 @@ condatainer helper \
     -m <memory> \
     -t <time_limit>
 
-# Default 
-#   port_number=8080
+# Default
+#   port_number=auto-selected if omitted
 #   auth_password="none" no authentication
 #   overlay_image=env.img
 #   num_cpus=4
@@ -60,10 +60,10 @@ Your machine -----> HPC Login Node -----> HPC Compute Node
 But you cannot directly access compute nodes from your local machine. To accomplish this, you need to set up SSH port forwarding from your local machine to the HPC login node.
 
 ```bash
-ssh -L 8080:localhost:8080 your_username@hpc_address
+ssh -L <local_port>:localhost:<remote_port> your_username@hpc_address
 ```
 
-After running this command, when your local machine accesses `localhost:8080`, it will be forwarded to `localhost:8080` on the HPC login node.
+After running this command, when your local machine accesses `localhost:<local_port>`, it will be forwarded to `localhost:<remote_port>` on the HPC login node. If you omit `-p` when launching the helper, the helper will auto-select a port and print the port number and an `ssh -L` example you can copy.
 
 ```{warning}
 HPC is a shared system! Please do not use a common port like `8080`.
@@ -77,8 +77,8 @@ You can also edit the SSH config file (`~/.ssh/config`) to add a section for you
 Host hpc
     HostName hpc_address
     User your_username
-    LocalForward 8080 localhost:8080
-    # Please change 8080 to a unique port number
+    LocalForward <local_port> localhost:<remote_port>
+    # Please change <local_port> to a unique port number
 ```
 
 Then you can simply run:
@@ -155,7 +155,7 @@ Options:
   -c <number>     Number of CPUs to allocate (default: 4)
   -m <memory>     Amount of memory to allocate (default: 16G)
   -t <time>       Time limit for the job (default: 12:00:00)
-  -p <port>       Port for code-server (default: 8080)
+  -p <port>       Port for code-server (if omitted, an available port will be chosen)
   -a <auth>       Password for code-server authentication (default: none)
   -b <image>      Base image file
   -e <overlay>    Environment overlay image file (default: env.img)
@@ -183,11 +183,11 @@ After running the script, you will see output like this:
 ```
 Waiting for job 1299123 to start running. Current status: PENDING.
 Job 1299123 is now running on node cm23.
-code-server at http://localhost:$PORT?folder=/scratch/your_username/current_working_directory
+code-server at http://localhost:<port>?folder=/scratch/your_username/current_working_directory
 If you want to stop it, run: scancel 1299123
 ```
 
-Then you can go to your local web browser and access `http://localhost:8080` or click the link provided to open the project directly.
+Then you can go to your local web browser and access `http://localhost:<port>` or click the link provided to open the project directly. The helper prints the actual port it chose when started.
 
 ## Common Issues
 

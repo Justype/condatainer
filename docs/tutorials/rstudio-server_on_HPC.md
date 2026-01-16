@@ -20,8 +20,8 @@ condatainer helper \
   -m <memory> \
   -t <time_limit>
 
-# Default 
-#   port_number=8787
+# Default
+#   port_number=auto-selected if omitted
 #   overlay_image=env.img
 #   num_cpus=4
 #   memory=32G
@@ -59,10 +59,10 @@ Your machine -----> HPC Login Node -----> HPC Compute Node
 But you cannot directly access compute nodes from your local machine. To accomplish this, you need to set up SSH port forwarding from your local machine to the HPC login node.
 
 ```bash
-ssh -L 8787:localhost:8787 your_username@hpc_address
+ssh -L <local_port>:localhost:<remote_port> your_username@hpc_address
 ```
 
-After running this command, when your local machine accesses `localhost:8787`, it will be forwarded to `localhost:8787` on the HPC login node.
+After running this command, when your local machine accesses `localhost:<local_port>`, it will be forwarded to `localhost:<remote_port>` on the HPC login node. If you omit `-p` when launching the helper, the helper will auto-select a port and print the port number and an `ssh -L` example you can copy.
 
 ```{warning}
 HPC is a shared system! Please do not use a common port like `8787`.
@@ -76,8 +76,8 @@ You can also edit the SSH config file (`~/.ssh/config`) to add a section for you
 Host hpc
     HostName hpc_address
     User your_username
-    LocalForward 8787 localhost:8787
-    # Please change 8787 to a unique port number
+    LocalForward <local_port> localhost:<remote_port>
+    # Please change <local_port> to a unique port number
 ```
 
 Then you can simply run:
@@ -156,7 +156,7 @@ Options:
   -c <number>     Number of CPUs to allocate (default: 4)
   -m <memory>     Amount of memory to allocate (default: 32G)
   -t <time>       Time limit for the job (default: 12:00:00)
-  -p <port>       Port for rstudio-server (default: 8787)
+  -p <port>       Port for rstudio-server (if omitted, an available port will be chosen)
   -b <image>      Base image file
   -e <overlay>    Environment overlay image file (default: env.img)
   -o <overlay>    Additional overlay files (can have multiple -o options)
@@ -182,13 +182,13 @@ After running the script, you will see output like this:
 ```
 Waiting for job 1299123 to start running. Current status: PENDING.
 Job 1299123 is now running on node cm23.
-rstudio-server at http://localhost:8787
+rstudio-server at http://localhost:<port>
 If you want to stop it, run: scancel 1299123
 You can run the following command in R to open the project directly:
   rstudioapi::openProject("/scratch/your_username/current_working_directory")
 ```
 
-Then you can go to your local web browser and access [http://localhost:8787](http://localhost:8787).
+Then you can go to your local web browser and access [http://localhost:<port>](http://localhost:<port>). The helper prints the actual port it chose when started.
 
 Run the provided R command in the R console to open the project directly.
 
