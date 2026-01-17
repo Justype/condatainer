@@ -987,11 +987,14 @@ class BuildObject:
             "/bin/bash", "-c",
             f"""
             mkdir -p $TMPDIR
+            echo "Creating conda environment {name}={version} in overlay..."
             micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/{self.relative_path} {name}={version}
 
             echo "Setting permissions..."
             find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
             find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
+
+            echo "Packing overlay to SquashFS..."
             mksquashfs /cnt {os.path.abspath(self.target_overlay_path)} -processors {self.ncpus} -keep-as-directory {Config.compress_args} -b 1M
             """
         ]
@@ -1555,11 +1558,15 @@ class CondaTainer_Create:
                 "/bin/bash", "-c",
                 f"""
                 mkdir -p $TMPDIR
+
+                echo "Creating conda environment in overlay..."
                 {install_command}
                 {copy_command}
                 echo "Setting permissions..."
                 find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
                 find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
+
+                echo "Packing overlay to SquashFS..."
                 mksquashfs /cnt {os.path.abspath(overlay_abs_path)} -processors {Config.NCPUS} -keep-as-directory {Config.compress_args} -b 1M
                 """
             ]
