@@ -1,5 +1,8 @@
 {
   "headless": {
+    ".Rprofile": {
+      "path": "helpers/headless/.Rprofile"
+    },
     "code-server": {
       "path": "helpers/headless/code-server"
     },
@@ -11,6 +14,9 @@
     }
   },
   "slurm": {
+    ".Rprofile": {
+      "path": "helpers/slurm/.Rprofile"
+    },
     "code-server": {
       "path": "helpers/slurm/code-server"
     },

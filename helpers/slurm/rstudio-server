@@ -216,6 +216,19 @@ Encoding: UTF-8
 RnwWeave: Sweave
 LaTeX: pdfLaTeX
 EOT
+    # If there is a bundled profile next to this script, copy it into the project
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+    # Prefer hidden .Rprofile in the helpers folder
+    SRC=""
+    if [ -f "$SCRIPT_DIR/.Rprofile" ]; then
+        SRC="$SCRIPT_DIR/.Rprofile"
+    elif [ -f "$SCRIPT_DIR/Rprofile.R" ]; then
+        SRC="$SCRIPT_DIR/Rprofile.R"
+    fi
+    if [ -n "$SRC" ]; then
+        cp -f "$SRC" "$CWD/.Rprofile" && \
+        echo -e "${BLUE}[INFO]${NC} Copied Rprofile to ${BLUE}$CWD/.Rprofile${NC} (overwritten if existed)."
+    fi
 fi
 cat <<EOT > $CONDATAINER_CONFIG_DIR/rsession.sh
 #!/bin/bash
