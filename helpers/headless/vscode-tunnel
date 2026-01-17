@@ -5,6 +5,7 @@ OVERLAYS_ARG=""
 OVERLAYS=""
 OVERLAY="env.img"
 FAKEROOT_ARG=""
+BASE_IMAGE_ARG=""
 CWD=$(readlink -f .)
 CODE_BIN="$HOME/.local/bin/code"
 
@@ -22,15 +23,17 @@ print_help() {
     echo "Options:"
     echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have -o options)"
+    echo "  -b <image>      Base image file"
     echo "  -f              Use fakeroot mode (will be root inside the container)"
     echo "  -y              Accept all warnings and proceed"
     echo "  -h              Show this help message"
 }
 
-while getopts "e:o:fyh" opt; do
+while getopts "e:o:b:fyh" opt; do
     case ${opt} in
         e ) OVERLAY=$OPTARG ;;
         o ) OVERLAYS_ARG+=" -o $OPTARG"; OVERLAYS+=" $OPTARG" ;;
+        b ) BASE_IMAGE_ARG="-b $OPTARG" ;;
         f ) FAKEROOT_ARG="--fakeroot"; echo "Using fakeroot mode" ;;
         y ) AUTO_YES=true ;;
         h ) print_help; exit 0 ;;
@@ -143,6 +146,7 @@ fi
 #endregion
 
 condatainer exec \
+    $BASE_IMAGE_ARG \
     $OVERLAYS_ARG \
     $OVERLAY_ARG --writable-img \
     $FAKEROOT_ARG \

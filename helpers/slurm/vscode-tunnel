@@ -126,13 +126,14 @@ print_help() {
     echo "  -a <provider>   microsoft or github for authentication (default: $AUTH)"
     echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
+    echo "  -b <image>      Base image file"
     echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00"
     echo "  -f              Use fakeroot mode (will be root inside the container)"
     echo "  -y              Accept all warnings and proceed"
     echo "  -h              Show this help message"
 }
 
-while getopts "c:m:t:a:e:o:vfyh" opt; do
+while getopts "c:m:t:a:b:e:o:vfyh" opt; do
     case ${opt} in
         c ) NCPUS=$OPTARG ;;
         m ) MEM=$OPTARG ;;

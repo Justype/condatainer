@@ -188,8 +188,8 @@ fi
 echo -e "code-server at ${BLUE}http://localhost:${PORT}?folder=${CWD}${NC}"
 
 condatainer exec \
-    -o code-server \
     $BASE_IMAGE_ARG \
+    -o code-server \
     $OVERLAYS_ARG \
     $OVERLAY_ARG --writable-img \
     $FAKEROOT_ARG \

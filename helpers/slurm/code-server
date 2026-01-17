@@ -218,8 +218,8 @@ cat <<EOT > $SBATCH_SCRIPT_PATH
 
 printf "\$SLURM_JOB_ID\t$PORT\t$AUTH\t\$(hostname)\t$CWD\n" > $LOG_DIR/.code-server
 condatainer exec \\
-    -o code-server \\
     $BASE_IMAGE_ARG \\
+    -o code-server \\
     $OVERLAYS_ARG \\
     $OVERLAY_ARG --writable-img \\
     $FAKEROOT_ARG \\
