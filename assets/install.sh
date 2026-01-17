@@ -134,6 +134,16 @@ if [ -f "$RC_FILE" ] && grep -Fq "$MARKER_START" "$RC_FILE"; then
     fi
 fi
 
+# If `condatainer` is already available in PATH but RC file lacks our marker,
+# warn the user and ask whether to continue (default: no).
+if command -v condatainer >/dev/null 2>&1 && { [ ! -f "$RC_FILE" ] || ! grep -Fq "$MARKER_START" "$RC_FILE"; }; then
+    echo -e "${YELLOW}[WARNING]${NC} 'condatainer' is available in your PATH but ${RC_FILE} does not contain the CONDATAINER config block."
+    echo -e "This likely means an existing installation was added to PATH outside the installer."
+    if ! confirm_action_no "Continue with the additional installation?"; then
+        echo "Installation aborted."; exit 1
+    fi
+fi
+
 # ------------------------------------------------------------------
 # 3. Configuration Phase
 # ------------------------------------------------------------------
