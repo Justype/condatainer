@@ -120,7 +120,7 @@ if ! command -v condatainer &> /dev/null; then
 fi
 
 missing=""
-for pkg in rstudio-server $OVERLAYS; do
+for pkg in rstudio-server build-essential $OVERLAYS; do
     if ! condatainer ls $pkg | grep -q $pkg; then
         missing+=" $pkg"
     fi
@@ -253,8 +253,9 @@ echo -e "You can run the following command in R to open the project directly:"
 echo -e "  ${YELLOW}rstudioapi::openProject(\"$CWD\")${NC}"
 
 condatainer exec \
-    -o rstudio-server \
     $BASE_IMAGE_ARG \
+    -o rstudio-server \
+    -o build-essential \
     $OVERLAYS_ARG \
     $OVERLAY_ARG --writable-img \
     /usr/lib/rstudio-server/bin/rserver \

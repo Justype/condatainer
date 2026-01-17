@@ -141,7 +141,7 @@ if ! command -v condatainer &> /dev/null; then
 fi
 
 missing=""
-for pkg in rstudio-server $OVERLAYS; do
+for pkg in rstudio-server build-essential $OVERLAYS; do
     if ! condatainer ls $pkg | grep -q $pkg; then
         missing+=" $pkg"
     fi
@@ -259,8 +259,9 @@ cat <<EOT > $SBATCH_SCRIPT_PATH
 
 printf "\$SLURM_JOB_ID\t$PORT\t$AUTH\t\$(hostname)\t$CWD\n" > $LOG_DIR/.rstudio-server
 condatainer exec \\
-    -o rstudio-server \\
     $BASE_IMAGE_ARG \\
+    -o rstudio-server \\
+    -o build-essential \\
     $OVERLAYS_ARG \\
     $OVERLAY_ARG --writable-img \\
     /usr/lib/rstudio-server/bin/rserver \\
