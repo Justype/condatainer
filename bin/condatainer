@@ -2093,7 +2093,14 @@ class CondaTainer_Exec:
         Utils.print_debug(f"[EXEC] Executing command: {exec_cmd}")
 
         if Utils.is_in_interactive_shell() and not capture_output:
+            env_configs = CondaTainer_Exec.get_overlay_env_configs(paths_or_name_versions)
+            env_configs = { env_configs[i+1].split('=')[0]: env_configs[i+1].split('=')[1] for i in range(0, len(env_configs), 2) }
             env_notes = CondaTainer_Exec.get_overlay_env_notes(paths_or_name_versions)
+
+            if env_configs:
+                for key in env_configs.keys():
+                    if key not in env_notes:
+                        env_notes[key] = f"{env_configs[key]}"
 
             if env_notes:
                 env_max_len = max(len(key) for key in env_notes.keys())
