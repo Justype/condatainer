@@ -1,3 +1,4 @@
+#!/usr/bin/env Rscript
 # Set CRAN repo to Posit Public Package Manager (P3M) binary repos for supported distros
 set_repository_options <- function(repo = c("bioconductor", "cran"), bioc_version = NULL, latest_cran = FALSE) {
   repo <- match.arg(repo)
@@ -80,8 +81,8 @@ set_repository_options <- function(repo = c("bioconductor", "cran"), bioc_versio
     "3.23" = "4.6"
   )
   
-  # Get current R version
-  cur_r <- paste(head(strsplit(as.character(getRversion()), "\\.")[[1]], 2), collapse = '.')
+  # Get current R version (using base R only - utils::head not available in .Rprofile)
+  cur_r <- paste(strsplit(as.character(getRversion()), "\\.")[[1]][1:2], collapse = '.')
   
   # Helper: find latest Bioconductor version for an R version
   bioc_for_r_local <- function(rver) {
