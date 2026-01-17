@@ -62,6 +62,10 @@ choose_port() {
     return 1
 }
 
+if ! command -v apptainer &> /dev/null; then
+    echo -e "${RED}[ERROR]${NC} 'apptainer' not found in PATH. Please contact your system manager to install apptainer on this headless server."
+    exit 1
+fi
 PORT_AUTO=0
 # If no port specified, pick an available one
 if [ -z "$PORT" ]; then
