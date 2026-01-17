@@ -1197,7 +1197,7 @@ class BuildObject:
 
         env_dict = Utils.get_env_dict_from_build_script(self.build_source)
         if env_dict:
-            env_file_path = os.path.splitext(self.target_overlay_path)[0] + ".env"
+            env_file_path = self.target_overlay_path + ".env"
             with open(env_file_path, 'w') as f:
                 for env in env_dict:
                     value = env_dict[env]["value"].replace('$app_root', f"/cnt/{self.relative_path}")
@@ -1886,7 +1886,7 @@ class CondaTainer_Exec:
         configs = { }
         overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
         for op in overlay_abs_paths:
-            env_path = os.path.splitext(op)[0] + ".env"
+            env_path = op + ".env"
             if not os.path.isfile(env_path):
                 continue
 
@@ -1955,7 +1955,7 @@ class CondaTainer_Exec:
         notes = { }
         overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
         for op in overlay_abs_paths:
-            env_path = os.path.splitext(op)[0] + ".env"
+            env_path = op + ".env"
             if not os.path.isfile(env_path):
                 continue
 
@@ -2353,7 +2353,7 @@ class CondaTainer_Remove:
             try:
                 os.remove(overlay_path)
                 Utils.print_success(f"Overlay {Utils.yellow_text(overlay)} removed.")
-                env_path = os.path.splitext(overlay_path)[0] + ".env"
+                env_path = overlay_path + ".env"
                 if os.path.isfile(env_path):
                     os.remove(env_path)
             except Exception as e:
@@ -2486,7 +2486,7 @@ class CondaTainer_Info:
                 print("Files owner:   unknown")
             print(f"Mount path:    /ext3/env")
 
-        env_path = os.path.splitext(overlay_path)[0] + ".env"
+        env_path = overlay_path + ".env"
         if os.path.isfile(env_path):
             print("Environment variables:")
             with open(env_path, 'r') as f:
