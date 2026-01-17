@@ -2072,6 +2072,17 @@ class CondaTainer_Exec:
                 additional_binds.append("--bind")
                 additional_binds.append(bp)
 
+        layer = 1
+        ps1_prefix = "CNT"
+        if "IN_CONDATINER" in os.environ:
+            try:
+                layer = int(os.environ["IN_CONDATINER"])
+            except ValueError:
+                layer = 1
+            
+            layer += 1
+            ps1_prefix = ps1_prefix + "_" + str(layer)
+
         exec_cmd = [
             Config.SYSTEM_APPTAINER_BIN, "exec",
             *CondaTainer_Exec.generate_overlay_args(paths_or_name_versions),
@@ -2079,8 +2090,8 @@ class CondaTainer_Exec:
             "--env", f"PATH={path_env}",
             "--env", "LC_ALL=C.UTF-8",
             "--env", "LANG=C.UTF-8",
-            "--env", "PS1=CNT \\[\\e[0;34m\\]\\w\\[\\e[0m\\]> ",
-            "--env", "IN_CONDATINER=1",
+            "--env", f"PS1={ps1_prefix} \\[\\e[0;34m\\]\\w\\[\\e[0m\\]> ",
+            "--env", f"IN_CONDATINER={layer}",
             *img_env,
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
             *additional_binds,
