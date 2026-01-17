@@ -1,42 +1,3 @@
-Bootstrap: docker
-From: ubuntu:22.04
-
-%labels
-    Author Ziyue Cheng
-    Version 1.0
-    Description "Ubuntu22 with essential build tools"
-
-%environment
-    export LC_ALL=C.UTF-8
-    export LANG=C.UTF-8
-    export PS1='CNT \w> '
-
-%runscript
-    exec /bin/bash "$@"	
-
-%post
-    # Avoid interactive prompts
-    export DEBIAN_FRONTEND=noninteractive
-
-    apt -y update && apt -y upgrade
-
-    ## C and C++
-    apt -y install \
-        build-essential pkg-config git wget curl zip \
-        g++ clang gfortran \
-        ninja-build make cmake doxygen autoconf automake
-
-    ## RStudio libs
-    apt -y install libssl-dev libclang-dev libsqlite3-0
-    apt -y install pandoc # for markdown rendering
-
-    ## Python
-    apt -y install python3-pip python3-venv python-is-python3
-    # PyTorch
-    apt -y install libglib2.0-0 libsm6 libxrender1 libxext6
-
-    ## R packages
-    apt -y install libicu70             # stringr
     # Generated using ubuntu22 by group_apt_by_rpkg.py
     apt -y install automake # surveyvoi
     apt -y install bwidget # FFD MDSGUI PBSmodelling asbio biplotbootGUI canceR cncaGUI multibiplotGUI
@@ -148,5 +109,3 @@ From: ubuntu:22.04
     apt -y install libxslt-dev # xslt
     apt -y install libzmq3-dev # clustermq pbdZMQ rzmq
     apt -y install libzstd-dev # ijtiff nanoarrow rswipl
-
-    apt clean && rm -rf /var/lib/apt/lists/*

@@ -1,43 +1,4 @@
-Bootstrap: docker
-From: ubuntu:22.04
-
-%labels
-    Author Ziyue Cheng
-    Version 1.0
-    Description "Ubuntu22 with essential build tools"
-
-%environment
-    export LC_ALL=C.UTF-8
-    export LANG=C.UTF-8
-    export PS1='CNT \w> '
-
-%runscript
-    exec /bin/bash "$@"	
-
-%post
-    # Avoid interactive prompts
-    export DEBIAN_FRONTEND=noninteractive
-
-    apt -y update && apt -y upgrade
-
-    ## C and C++
-    apt -y install \
-        build-essential pkg-config git wget curl zip \
-        g++ clang gfortran \
-        ninja-build make cmake doxygen autoconf automake
-
-    ## RStudio libs
-    apt -y install libssl-dev libclang-dev libsqlite3-0
-    apt -y install pandoc # for markdown rendering
-
-    ## Python
-    apt -y install python3-pip python3-venv python-is-python3
-    # PyTorch
-    apt -y install libglib2.0-0 libsm6 libxrender1 libxext6
-
-    ## R packages
-    apt -y install libicu70             # stringr
-    # Generated using ubuntu22 by group_apt_by_rpkg.py
+    # Generated using ubuntu24 by group_apt_by_rpkg.py
     apt -y install automake # surveyvoi
     apt -y install bwidget # FFD MDSGUI PBSmodelling asbio biplotbootGUI canceR cncaGUI multibiplotGUI
     # apt -y install chromium # RPushbullet chromote nomnoml qtkit
@@ -56,7 +17,6 @@ From: ubuntu:22.04
     # apt -y install nvidia-cuda-dev # RbowtieCuda gcbd
     # apt -y install ocl-icd-opencl-dev # GeneralizedUmatrixGPU OpenCL gpuMagic
     apt -y install pandoc # BIDistances CHRONOS DataExplorer DataPackageR DatabionicSwarm DiscoRhythm EpiSignalDetection FCPS GeneralizedUmatrix GeneralizedUmatrixGPU GerminaR NACHO OncoBayes2 PTXQC Plasmidprofiler PreKnitPostHTMLRender RAQSAPI RBesT RCAS REPLesentR RmdConcord StanHeaders TDCM TreeDist abseqR accessr anticlust apathe autoharp bayesplot biblio blandr blastula blogdown bookdown breathtestcore brinton bssm clinDataReview clinUtils coveffectsplot crandep dataMaid dataReporter dbmss divent emayili entropart exams ezknitr flexsiteboard footBayes frequency ftExtra ggExtra ggquickeda ggtrace glioblastomaEHRsData govdown goxygen grwat hoopR huito idiogramFISH igate inTextSummaryTable inlpubs inti knitr learnr lightsout loo memoiR mindr minidown nbconvertR nlrx oddsapiR officedown openPrimeR opencpu pagedown pander pandocfilters papaja paws.common pedometrics phonfieldwork pivmet pkgdown pkgnews prettydoc rapport rchallenge reportfactory reprex revise rfriend rgl rmarkdown rmdfiltr rstan rstanarm rstantools rswipl shinyInvoice shinyWGD shinyloadtest shinyscholar simplermarkdown sportyR tables texor texreg tidycwl vitae worcs workflowr yamlme
-    apt -y install pandoc-citeproc # NACHO TreeDist bayesplot footBayes goxygen hoopR loo oddsapiR pivmet rstanarm shinyWGD sportyR
     # apt -y install pari-gp # elliptic untb
     # apt -y install patch # RcppPlanc rdataretriever
     apt -y install perl # Fluidigm GetoptLong ModCon Thermimage WriteXLS exifr exiftoolr geno2proteo mosaics netboost simona ubiquity varitas webbioc
@@ -148,5 +108,3 @@ From: ubuntu:22.04
     apt -y install libxslt-dev # xslt
     apt -y install libzmq3-dev # clustermq pbdZMQ rzmq
     apt -y install libzstd-dev # ijtiff nanoarrow rswipl
-
-    apt clean && rm -rf /var/lib/apt/lists/*

@@ -111,7 +111,7 @@ condatainer helper --update
 Creating required overlay images:
 
 ```bash
-condatainer install rstudio-server
+condatainer install rstudio-server build-essential
 ```
 
 ## Create R Writable Overlay
@@ -235,6 +235,8 @@ Then in R:
 pak::pkg_sysreqs("user/repo@commit_hash") # or @tag
 ```
 
+The `build-essential` overlay created earlier contains common system libraries needed for building R packages from source.
+
 If system libraries are missing, you can create your `additional-deps` overlay with the required system libraries. (ignore pandoc missing warning)
 
 see [Custom OS Overlays](../advanced_usage/custom_os.md) for more details.
@@ -255,8 +257,12 @@ If you only use R packages from Conda, you can run R directly without RStudio Se
 condatainer exec -o env.img Rscript your_script.R
 ```
 
-If you have R packages built from GitHub or source, you need to load your additional overlay too:
+If you have R packages built from GitHub or source, you need to load additional overlay too:
 
 ```bash
-condatainer exec -o r-deps.sqf -o env.img Rscript your_script.R
+# If no additional overlay is needed, just run:
+condatainer exec -o build-essential -o env.img Rscript your_script.R
+
+# If you created additional overlay `r-deps.sqf`, run:
+condatainer exec -o build-essential -o r-deps.sqf -o env.img Rscript your_script.R
 ```
