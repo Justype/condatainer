@@ -10,6 +10,7 @@ The main advantage of **CondaTainer** is that it packs a Conda environment insid
 - [Launch a Shell within the Workspace Overlay](#launch-a-shell-within-the-workspace-overlay)
 - [Writable or Read-Only](#writable-or-read-only)
 - [Use Workspace Overlay in a Script](#use-workspace-overlay-in-a-script)
+- [Set Environment Variables for the Overlay](#set-environment-variables-for-the-overlay)
 - [Share the Overlay with Others](#share-the-overlay-with-others)
 - [Common Issues](#common-issues)
 
@@ -31,7 +32,6 @@ positional arguments:
 
 options:
   -s SIZE, --size SIZE  Set overlay size (default: 10G). Accepts GB/MB suffixes; assumes MB if omitted
-  -f FILE, --file FILE  Initialize with Conda environment file (.yaml/.yml)
   --fakeroot            Create a fakeroot-compatible overlay
   --sparse              Create a sparse overlay image (default: false)
 ```
@@ -113,6 +113,50 @@ The `exec` command:
 
 - Mounts the overlay in read-only mode by default.
 - Does not automatically mount the overlay, so you need to specify the overlay image file with the `-o` option.
+
+## Set Environment Variables for the Overlay
+
+You may need to set some environment variables when using the overlay in scripts or jobs.
+
+For example, you may need to set `GOROOT` and `GOPATH` for Go projects.
+
+Create `env.img.env` and add the following lines:
+
+```
+GOROOT=/ext3/env/go
+GOPATH=/ext3/home/go
+```
+
+Then when you run `e` or `exec`, these environment variables will be set automatically.
+
+```bash
+$ condatainer e
+[CNT] Autoload env.img at /scratch/chengz63/condatainer/env.img
+[CNT] Overlay envs:
+  GOROOT: /ext3/env/go
+  GOPATH: /ext3/home/go
+  CNT_CONDA_PREFIX: /ext3/env
+```
+
+You can add note to the `env.img.env` file as well:
+
+```
+GOROOT=/ext3/env/go
+#ENVNOTE:GOROOT=Go Installation Path
+GOPATH=/ext3/home/go
+#ENVNOTE:GOPATH=Go Workspace Path
+```
+
+Then when you run `e` or `exec`, the notes will be displayed:
+
+```bash
+$ condatainer e
+[CNT] Autoload env.img at /scratch/chengz63/condatainer/env.img
+[CNT] Overlay envs:
+  GOROOT: Go Installation Path
+  GOPATH: Go Workspace Path
+  CNT_CONDA_PREFIX: /ext3/env
+```
 
 ## Use Workspace Overlay in a Script
 

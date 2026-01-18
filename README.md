@@ -6,7 +6,7 @@
 
 [![Read the Docs](https://readthedocs.org/projects/condatainer/badge/?version=latest)](https://condatainer.readthedocs.io/en/latest/) [![GitHub Release](https://img.shields.io/github/v/release/Justype/condatainer)](https://github.com/Justype/condatainer/releases)
 
-**CondaTainer** is an HPC-oriented wrapper tool that leverages Apptainer, SquashFS, and Micromamba to enable the easy management of environment files, software packages, reference data, and indices.
+**CondaTainer** is an HPC-oriented wrapper tool that leverages Apptainer, SquashFS, OverlayFS, and Micromamba to enable the easy management of environment files, software packages, reference data, and indices.
 
 * **Inode Saver:** Packing 30k+ Conda files into a single image to satisfy inode quotas.
 * **Web-App Ready:** Out-of-the-box support for running *RStudio Server* and *code-server* on HPC.
