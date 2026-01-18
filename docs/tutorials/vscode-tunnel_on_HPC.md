@@ -1,8 +1,14 @@
 # Run VS Code Tunnel on HPC
+Run following commands to start `vscode-tunnel` on your HPC system:
+
+```bash
+condatainer helper -u
+condatainer helper vscode-tunnel
+```
 
 ## Checklist
 
-- [SLURM job scheduler is available on your HPC system](#slurm-job-scheduler)
+- [SLURM job scheduler is available on your HPC system](#slurm-job-scheduler)s
 - [Have CondaTainer installed](#install-condatainer)
 - [Have a writable overlay image (optional)](#create-writable-overlay)
 - [Check the Script Parameters](#vs-code-tunnel-helper-script)
@@ -10,22 +16,18 @@
 Then you can run:
 
 ```bash
-condatainer helper \
-  vscode-tunnel \
+condatainer helper vscode-tunnel \
     -a <auth_option> \
     -c <num_cpus> \
     -m <memory> \
     -t <time_limit>
 
 # Default 
-#   auth_option="microsoft" or "github"
-#   overlay_image=env.img
-#   num_cpus=4
-#   memory=32G
-#   time_limit=12:00:00
+#   -a auth_option="microsoft" or "github"
+#   -c num_cpus=4
+#   -m memory=16G
+#   -t time_limit=12:00:00
 ```
-
-If you have preferred settings, you can create alias in your shell config file (`~/.bashrc` or `~/.zshrc`).
 
 If you have any issues, see [Common Issues](#common-issues) section below.
 
@@ -67,8 +69,6 @@ condatainer helper --update
 
 ## No required overlay images
 
-Creating required overlay images is not necessary.
-
 ## Create Writable Overlay
 
 Creating an ext3 overlay image
@@ -96,15 +96,13 @@ mm-pin python
 2. Check if a VS Code tunnel is running on any compute node.
 3. If yes, print helpful information to connect to that tunnel.
 4. If not,
-   1. Check if the port is available on the login node.
-   2. If so, check the overlay integrity.
-   3. If so, use `sbatch` to submit a job which starts the `code` CLI.
-   4. Wait for the job to start.
-   5. Print the authentication URL to connect to the VS Code server.
+   2. Check the overlay integrity.
+   2. Submit the SLURM job to start `vscode-tunnel`.
+   3. When the job starts, record and print the authentication information.
 
-You can either:
-- Have [VS Code Remote - Tunnels extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-server) installed
-- Use https://vscode.dev/ and the tunnel
+Then you can either:
+- Use [VS Code Remote - Tunnels extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-server) to connect
+- Use https://vscode.dev/
 
 ```
 Usage: vscode-tunnel [options]
@@ -114,11 +112,7 @@ Options:
   -m <memory>     Amount of memory to allocate (default: 16G)
   -t <time>       Time limit for the job (default: 12:00:00)
   -a <provider>   microsoft or github for authentication (default: microsoft)
-  -b <image>      Base image file
-  -e <overlay>    Environment overlay image file (default: env.img)
-  -o <overlay>    Additional overlay files (can have multiple -o options)
   -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00
-  -y              Accept all warnings and proceed
   -h              Show this help message
 ```
 
@@ -161,7 +155,7 @@ And use your Microsoft account to connect to username-hpc_name
 CWD: /scratch/username/playground
 ```
 
-Then you can either use the [VS Code Remote - Tunnels extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-server) or open the link in your web browser to connect to the VS Code server running on the compute node.
+Now you can either use the [VS Code Remote - Tunnels extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-server) or open the link in your web browser to connect to the VS Code server running on the compute node.
 
 ## Common Issues
 

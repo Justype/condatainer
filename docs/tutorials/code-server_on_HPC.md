@@ -1,5 +1,12 @@
 # Run code-server on HPC
 
+Run following commands to start `code-server` on your HPC system:
+
+```bash
+condatainer helper -u
+condatainer helper code-server
+```
+
 ## Checklist
 
 - [SLURM job scheduler is available on your HPC system](#slurm-job-scheduler)
@@ -12,28 +19,18 @@
 Then you can run:
 
 ```bash
-condatainer helper \
-  code-server \
-    -p <port_number> \
-    -a <auth_password> \
-    -e <overlay_image> \
-    -c <num_cpus> \
-    -m <memory> \
-    -t <time_limit>
-
+condatainer helper code-server \
 # Default
-#   port_number=auto-selected if omitted
-#   auth_password="none" no authentication
-#   overlay_image=env.img
-#   num_cpus=4
-#   memory=32G
-#   time_limit=12:00:00
+#   -p port_number=auto-selected if omitted
+#   -a auth_password="none" or a password
+#   -c num_cpus=4
+#   -m memory=16G
+#   -t time_limit=12:00:00
 ```
 
-Please change the port number to a unique one to avoid conflicts with other users.
+You can create alias in your shell config file (`~/.bashrc` or `~/.zshrc`):
 
 ```bash
-# You can create alias in your shell config file (~/.bashrc or ~/.zshrc):
 # Change 13182 to your preferred port number
 alias code-server-start='condatainer helper code-server -p 13182'
 ```
@@ -63,7 +60,7 @@ But you cannot directly access compute nodes from your local machine. To accompl
 ssh -L <local_port>:localhost:<remote_port> your_username@hpc_address
 ```
 
-After running this command, when your local machine accesses `localhost:<local_port>`, it will be forwarded to `localhost:<remote_port>` on the HPC login node. If you omit `-p` when launching the helper, the helper will auto-select a port and print the port number and an `ssh -L` example you can copy.
+After running this command, when your local machine accesses `localhost:<local_port>`, it will be forwarded to `localhost:<remote_port>` on the HPC login node.
 
 ```{warning}
 HPC is a shared system! Please do not use a common port like `8080`.
@@ -141,12 +138,9 @@ mm-pin python
 1. Check if `code-server` is running on any compute node.
 2. If yes, establish SSH port forwarding to that node.
 3. If not,
-   1. Check if the port is available on the login node.
-   2. If pass, check the overlay integrity.
-   3. If pass, use `sbatch` to submit a job which starts `code-server`.
-   4. Wait for the job to start and get the compute node name.
-   5. Record the job ID, node name, port number, and working directory.
-   6. Set up SSH port forwarding from login node to compute node.
+   1. Check port and overlay integrity.
+   2. Submit the SLURM job to start `code-server`.
+   3. When the job starts, record and set up SSH port forwarding.
 
 ```
 Usage: code-server [options]
@@ -157,11 +151,8 @@ Options:
   -t <time>       Time limit for the job (default: 12:00:00)
   -p <port>       Port for code-server (if omitted, an available port will be chosen)
   -a <auth>       Password for code-server authentication (default: none)
-  -b <image>      Base image file
-  -e <overlay>    Environment overlay image file (default: env.img)
   -o <overlay>    Additional overlay files (can have multiple -o options)
   -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00
-  -y              Accept all warnings and proceed
   -h              Show this help message
 ```
 
@@ -187,7 +178,9 @@ code-server at http://localhost:<port>?folder=/scratch/your_username/current_wor
 If you want to stop it, run: scancel 1299123
 ```
 
-Then you can go to your local web browser and access `http://localhost:<port>` or click the link provided to open the project directly. The helper prints the actual port it chose when started.
+Now you can click the link provided to open the project.
+
+Don't forget to set up SSH port forwarding from your local machine to the HPC login node before accessing the link.
 
 ## Common Issues
 

@@ -1,5 +1,12 @@
 # Run rstudio-server on HPC
 
+Simply run the following commands to set up and run RStudio Server on your HPC system:
+
+```bash
+condatainer helper -u
+condatainer helper rstudio-server
+```
+
 ## Checklist
 
 - [SLURM job scheduler is available on your HPC system](#slurm-job-scheduler)
@@ -12,32 +19,22 @@
 Then you can run:
 
 ```bash
-condatainer helper \
-  rstudio-server \
-  -p <port_number> \
-  -e <overlay_image> \
-  -c <num_cpus> \
-  -m <memory> \
-  -t <time_limit>
-
+condatainer helper rstudio-server
 # Default
-#   port_number=auto-selected if omitted
-#   overlay_image=env.img
-#   num_cpus=4
-#   memory=32G
-#   time_limit=12:00:00
+# -p  port_number=auto-selected if omitted
+# -c  num_cpus=4
+# -m  memory=32G
+# -t  time_limit=12:00:00
 ```
 
-Please change the port number to a unique one to avoid conflicts with other users.
+You can create alias in your shell config file (`~/.bashrc` or `~/.zshrc`):
 
 ```bash
-# You can create alias in your shell config file (~/.bashrc or ~/.zshrc):
 # Change 13182 to your preferred port number
 alias rstudio-server-start='condatainer helper rstudio-server -p 13182'
 ```
 
-Always [Use Conda to Manage R Packages](#use-conda-to-manage-r-packages). For packages only available from source, see [Install R Packages from Source](#install-r-packages-from-source) section.
-
+See [Install Packages in CondaTainer RStudio Server](#install-packages-in-condatainer-rstudio-server) for more details on installing R packages.
 
 ## SLURM Job Scheduler
 
@@ -62,7 +59,7 @@ But you cannot directly access compute nodes from your local machine. To accompl
 ssh -L <local_port>:localhost:<remote_port> your_username@hpc_address
 ```
 
-After running this command, when your local machine accesses `localhost:<local_port>`, it will be forwarded to `localhost:<remote_port>` on the HPC login node. If you omit `-p` when launching the helper, the helper will auto-select a port and print the port number and an `ssh -L` example you can copy.
+After running this command, when your local machine accesses `localhost:<local_port>`, it will be forwarded to `localhost:<remote_port>` on the HPC login node.
 
 ```{warning}
 HPC is a shared system! Please do not use a common port like `8787`.
@@ -142,12 +139,9 @@ It will do the following steps for you:
 1. Check if `rstudio-server` is running on any compute node.
 2. If yes, establish SSH port forwarding to that node.
 3. If not,
-   1. Check if the port is available on the login node.
-   2. If so, check the overlay integrity and make sure R is installed.
-   3. If so, use `sbatch` to submit a job which starts `rstudio-server`.
-   4. Wait for the job to start and get the compute node name.
-   5. Record the job ID, node name, port number, and working directory.
-   6. Set up SSH port forwarding from login node to compute node.
+   1. Check port and overlay integrity.
+   2. Submit the SLURM job to start `rstudio-server`.
+   3. When the job starts, record and set up SSH port forwarding.
 
 ```
 Usage: rstudio-server [options]
@@ -157,10 +151,7 @@ Options:
   -m <memory>     Amount of memory to allocate (default: 32G)
   -t <time>       Time limit for the job (default: 12:00:00)
   -p <port>       Port for rstudio-server (if omitted, an available port will be chosen)
-  -b <image>      Base image file
-  -e <overlay>    Environment overlay image file (default: env.img)
   -o <overlay>    Additional overlay files (can have multiple -o options)
-  -y              Accept all warnings and proceed
   -h              Show this help message
 ```
 
@@ -188,22 +179,31 @@ You can run the following command in R to open the project directly:
   rstudioapi::openProject("/scratch/your_username/current_working_directory")
 ```
 
-Then you can go to your local web browser and access [http://localhost:<port>](http://localhost:<port>). The helper prints the actual port it chose when started.
+Now you can go to your local web browser and access the link. Then run the provided R command to open the project.
 
-Run the provided R command in the R console to open the project directly.
+Don't forget to set up SSH port forwarding from your local machine to the HPC login node before accessing the link.
 
-## Use Conda to Manage R Packages
+## Install Packages in CondaTainer RStudio Server
 
-It is highly recommended to use Conda (via `mm-install`) to install R packages whenever possible. They are pre-compiled.
+There are two ways to install R packages in CondaTainer RStudio Server:
 
-- CRAN packages: `mm-install r-<package_name>`
-- Bioconductor packages: `mm-install bioconductor-<package_name>`
+1. [Use Conda to manage R packages](#use-conda-to-manage-r-packages)
+2. [The normal way](#install-r-packages-without-conda): `install.packages()`, `pak::pak()`, etc. (recommended)
 
-e.g.
+```{note}
+Both methods will install packages into the writable overlay image. `/ext3/env/lib/R/library/`
+```
+
+### Use Conda to Manage R Packages
+
+If you only use R packages from CRAN/Bioconductor. Those packages are commonly available from conda-forge/bioconda channel.
+
+- CRAN packages: `r-<lowercase_name>` (e.g., `r-ggplot2`)
+- Bioconductor packages: `bioconductor-<lowercase_name>` (e.g., `bioconductor-deseq2`)
+
+e.g. (In the overlay shell)
 
 ```bash
-# in the overlay using condatainer e
-
 # find available R packages in conda-forge/bioconda
 # Or go to https://anaconda.org
 mm-search r-presto
@@ -215,31 +215,58 @@ mm-install r-base=4.4 r-ggplot2 bioconductor-deseq2
 mm-pin r-base
 ```
 
-## Install R Packages from Source
+If you only install R packages from conda-forge/bioconda, you don't need to worry about Rprofile or system dependencies. You can easily export the conda environment later for reproducibility:
 
-```{note}
-Before installing R packages from source, please make sure the package is not available from conda-forge or bioconda.
+```bash
+mm-export --no-builds > conda-env.yml
 ```
+
+And you don't need to worry about system dependencies, as conda will handle them for you.
+
+```bash
+condatainer exec -o env.img Rscript your_script.R
+```
+
+### Install R Packages without Conda
+
+The `build-essential` overlay installed earlier contains common system libraries needed for building R packages. So you can directly install R packages from CRAN/Bioconductor/GitHub/source.
+
+```R
+install.packages("tidyverse")
+BiocManager::install("DESeq2")
+pak::pak("user/repo") # Or remotes::install_github("user/repo")
+```
+
+#### Rprofile Setup
+
+If `*.Rproj` file does not exist in the current working directory, **CondaTainer** will create:
+
+- A `*.Rproj` file with default settings.
+- A `.Rprofile` file to set up Posit Public Package Manager (P3M) CRAN and Bioconductor repositories.
+
+See [Rprofile](https://github.com/Justype/condatainer/blob/main/helpers/slurm/.Rprofile) for more details. At the end, it will call `set_repository_options()` for you. So you can directly download the binary packages from P3M.
+
+If `*.Rproj` file already exists, `.Rprofile` will not be created or modified. You need to set up the repositories yourself if needed.
+
+If you only use CRAN packages, you can change the function in the `.Rprofile` to:
+
+```R
+set_repository_options(repo = "cran", latest_cran = TRUE)
+```
+
+But if you plan to use Bioconductor packages, please keep the default settings to ensure compatibility.
+
+#### Install R Packages from Source
 
 If a package is only available from source (e.g., GitHub), you need `remotes`, `pak` or other package managers.
 
-I recommend using `pak`, it can tell which system libraries are required.
-
-```R
-mm-install r-pak
-```
-
-Then in R:
+I recommend using `pak`, it can tell you which system libraries are required.
 
 ```R
 pak::pkg_sysreqs("user/repo@commit_hash") # or @tag
 ```
 
-The `build-essential` overlay created earlier contains common system libraries needed for building R packages from source.
-
-If system libraries are missing, you can create your `additional-deps` overlay with the required system libraries. (ignore pandoc missing warning)
-
-see [Custom OS Overlays](../advanced_usage/custom_os.md) for more details.
+If system libraries are missing, you can create your `additional-deps` overlay with the required system libraries. See [Custom OS Overlays](../advanced_usage/custom_os.md) for more details.
 
 After getting the `additional-deps.sqf` overlay, run `rstudio-server` with the `-o` option:
 
@@ -262,7 +289,9 @@ If you have R packages built from GitHub or source, you need to load additional 
 ```bash
 # If no additional overlay is needed, just run:
 condatainer exec -o build-essential -o env.img Rscript your_script.R
+```
 
+```bash
 # If you created additional overlay `r-deps.sqf`, run:
 condatainer exec -o build-essential -o r-deps.sqf -o env.img Rscript your_script.R
 ```
