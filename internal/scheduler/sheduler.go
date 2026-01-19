@@ -1,0 +1,279 @@
+// Package scheduler provides a unified interface for HPC job schedulers
+package scheduler
+
+import (
+	"fmt"
+	"strings"
+)
+
+// GpuSpec holds GPU requirements parsed from scheduler directives
+type GpuSpec struct {
+	Type  string // GPU type/model (e.g., "h100", "a100", "v100")
+	Count int    // Number of GPUs requested
+	Raw   string // Raw GPU specification string from scheduler
+}
+
+// GpuInfo holds information about available GPU types in the cluster
+type GpuInfo struct {
+	Type      string // GPU type/model
+	Total     int    // Total number of this GPU type
+	Available int    // Currently available
+	Partition string // Partition/queue name (optional)
+}
+
+// ResourceLimits holds scheduler resource limits
+type ResourceLimits struct {
+	MaxCpus     int    // Maximum CPUs per job
+	MaxMemMB    int64  // Maximum memory in MB per job
+	MaxTime     string // Maximum walltime (e.g., "7-00:00:00")
+	MaxGpus     int    // Maximum GPUs per job
+	MaxNodes    int    // Maximum nodes per job
+	DefaultTime string // Default walltime if not specified
+	Partition   string // Partition/queue name these limits apply to
+}
+
+// ClusterInfo holds cluster configuration information
+type ClusterInfo struct {
+	AvailableGpus []GpuInfo        // Available GPU types
+	Limits        []ResourceLimits // Resource limits per partition
+}
+
+// ScriptSpecs holds the specifications parsed from a job script
+type ScriptSpecs struct {
+	JobName      string   // Job name
+	Ncpus        int      // Number of CPUs
+	MemMB        int64    // Memory in MB
+	Time         string   // Time limit (e.g., "01:00:00")
+	Stdout       string   // Standard output file path
+	Stderr       string   // Standard error file path
+	Gpu          *GpuSpec // GPU requirements (nil if no GPU)
+	EmailOnBegin bool     // Send email when job begins (SLURM: BEGIN, PBS: b, LSF: -B)
+	EmailOnEnd   bool     // Send email when job ends (SLURM: END, PBS: e, LSF: -N)
+	EmailOnFail  bool     // Send email when job fails/aborts (SLURM: FAIL, PBS: a)
+	MailUser     string   // Username or email address for notifications (empty = submitting user)
+	RawFlags     []string // Raw scheduler-specific flags (e.g., #SBATCH, #PBS)
+}
+
+// JobSpec represents specifications for submitting a batch job
+type JobSpec struct {
+	Name      string       // Job name
+	Command   string       // Command to execute
+	Specs     *ScriptSpecs // Job specifications
+	DepJobIDs []string     // Job IDs this job depends on
+}
+
+// Scheduler defines the interface for job schedulers
+type Scheduler interface {
+	// IsAvailable checks if the scheduler is available and we're not already in a job
+	IsAvailable() bool
+
+	// ReadScriptSpecs parses scheduler-specific directives from a build script
+	// Returns ScriptSpecs with parsed scheduler directives (excludes #DEP and module directives)
+	ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error)
+
+	// CreateScriptWithSpec generates a batch script with the given specifications
+	// Returns the path to the created script
+	CreateScriptWithSpec(spec *JobSpec, outputDir string) (string, error)
+
+	// Submit submits a job script with optional dependency chain
+	// Returns the job ID assigned by the scheduler
+	Submit(scriptPath string, dependencyJobIDs []string) (string, error)
+
+	// GetClusterInfo retrieves cluster configuration (GPUs, limits)
+	// Returns nil if information is not available
+	GetClusterInfo() (*ClusterInfo, error)
+}
+
+// ValidateSpecs validates job specs against cluster limits
+func ValidateSpecs(specs *ScriptSpecs, limits *ResourceLimits) error {
+	if limits == nil {
+		return nil // No limits to validate against
+	}
+
+	if limits.MaxCpus > 0 && specs.Ncpus > limits.MaxCpus {
+		return &ValidationError{
+			Field:     "Ncpus",
+			Requested: specs.Ncpus,
+			Limit:     limits.MaxCpus,
+			Partition: limits.Partition,
+		}
+	}
+
+	if limits.MaxMemMB > 0 && specs.MemMB > limits.MaxMemMB {
+		return &ValidationError{
+			Field:     "MemMB",
+			Requested: int(specs.MemMB),
+			Limit:     int(limits.MaxMemMB),
+			Partition: limits.Partition,
+		}
+	}
+
+	if specs.Gpu != nil && limits.MaxGpus > 0 && specs.Gpu.Count > limits.MaxGpus {
+		return &ValidationError{
+			Field:     "Gpu",
+			Requested: specs.Gpu.Count,
+			Limit:     limits.MaxGpus,
+			Partition: limits.Partition,
+		}
+	}
+
+	return nil
+}
+
+// SubmitWithDependencies submits multiple jobs with dependency chain
+func SubmitWithDependencies(scheduler Scheduler, jobs []*JobSpec, outputDir string) (map[string]string, error) {
+	jobIDs := make(map[string]string)
+
+	for _, jobSpec := range jobs {
+		// Use explicit job ID dependencies only
+		depIDs := jobSpec.DepJobIDs
+
+		// Create batch script
+		scriptPath, err := scheduler.CreateScriptWithSpec(jobSpec, outputDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create script for %s: %w", jobSpec.Name, err)
+		}
+
+		// Submit job
+		jobID, err := scheduler.Submit(scriptPath, depIDs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to submit job %s: %w", jobSpec.Name, err)
+		}
+
+		// Store job ID
+		jobIDs[jobSpec.Name] = jobID
+
+		fmt.Printf("Submitted job %s with ID %s", jobSpec.Name, jobID)
+		if len(depIDs) > 0 {
+			fmt.Printf(" (depends on: %s)", strings.Join(depIDs, ", "))
+		}
+		fmt.Println()
+	}
+
+	return jobIDs, nil
+}
+
+// DetectScheduler attempts to detect and return the available scheduler
+// Returns the scheduler instance or nil if no scheduler is available
+func DetectScheduler() (Scheduler, error) {
+	// Try SLURM first (most common)
+	slurm, err := NewSlurmScheduler()
+	if err == nil && slurm.IsAvailable() {
+		return slurm, nil
+	}
+
+	// TODO: Add support for other schedulers (PBS, LSF, etc.)
+
+	return nil, ErrSchedulerNotAvailable
+}
+
+// CheckAvailability checks if a scheduler is available on the system
+// Returns true if a scheduler is available and we're not inside a job
+func CheckAvailability() bool {
+	scheduler, err := DetectScheduler()
+	if err != nil {
+		return false
+	}
+	return scheduler.IsAvailable()
+}
+
+// ReadMaxSpecs reads cluster information and returns the maximum resource limits
+// Returns the most permissive limits across all partitions
+func ReadMaxSpecs(scheduler Scheduler) (*ResourceLimits, error) {
+	info, err := scheduler.GetClusterInfo()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(info.Limits) == 0 {
+		return nil, ErrClusterInfoUnavailable
+	}
+
+	// Find the most permissive limits across all partitions
+	maxLimits := &ResourceLimits{
+		Partition: "all",
+	}
+
+	for _, limit := range info.Limits {
+		if limit.MaxCpus > maxLimits.MaxCpus {
+			maxLimits.MaxCpus = limit.MaxCpus
+		}
+		if limit.MaxMemMB > maxLimits.MaxMemMB {
+			maxLimits.MaxMemMB = limit.MaxMemMB
+		}
+		if limit.MaxGpus > maxLimits.MaxGpus {
+			maxLimits.MaxGpus = limit.MaxGpus
+		}
+		if limit.MaxNodes > maxLimits.MaxNodes {
+			maxLimits.MaxNodes = limit.MaxNodes
+		}
+		// For time limits, keep the longest one
+		if maxLimits.MaxTime == "" || limit.MaxTime == "" {
+			if limit.MaxTime != "" {
+				maxLimits.MaxTime = limit.MaxTime
+			}
+		}
+	}
+
+	return maxLimits, nil
+}
+
+// ReadScript reads and parses scheduler directives from a build script
+// This is an alias for ReadScriptSpecs for convenience
+func ReadScript(scheduler Scheduler, scriptPath string) (*ScriptSpecs, error) {
+	return scheduler.ReadScriptSpecs(scriptPath)
+}
+
+// ValidateScript validates a script's specs against cluster limits
+func ValidateScript(scheduler Scheduler, scriptPath string) error {
+	// Read script specs
+	specs, err := scheduler.ReadScriptSpecs(scriptPath)
+	if err != nil {
+		return err
+	}
+
+	// Get cluster info
+	info, err := scheduler.GetClusterInfo()
+	if err != nil {
+		// If we can't get cluster info, we can't validate
+		// This is not necessarily an error (cluster might not expose this info)
+		return nil
+	}
+
+	// Validate against all partition limits
+	// If the script doesn't specify a partition, validate against all of them
+	if len(info.Limits) == 0 {
+		return nil // No limits to validate against
+	}
+
+	// Validate against each partition's limits
+	for _, limit := range info.Limits {
+		if err := ValidateSpecs(specs, &limit); err != nil {
+			// If it exceeds limits in one partition, that's ok as long as
+			// there's another partition that can handle it
+			continue
+		}
+		// Found a partition that can handle this job
+		return nil
+	}
+
+	// If we get here, the job exceeds limits in all partitions
+	// Return validation error for the first partition
+	return ValidateSpecs(specs, &info.Limits[0])
+}
+
+// WriteScript creates a batch script with the given specifications
+// This is an alias for CreateScriptWithSpec for convenience
+func WriteScript(scheduler Scheduler, jobSpec *JobSpec, outputDir string) (string, error) {
+	return scheduler.CreateScriptWithSpec(jobSpec, outputDir)
+}
+
+// SubmitJob submits a single job and returns its job ID
+func SubmitJob(scheduler Scheduler, scriptPath string, dependencyJobIDs []string) (string, error) {
+	return scheduler.Submit(scriptPath, dependencyJobIDs)
+}
+
+// SubmitJobs submits multiple jobs with dependency chains and returns their job IDs
+func SubmitJobs(scheduler Scheduler, jobs []*JobSpec, outputDir string) (map[string]string, error) {
+	return SubmitWithDependencies(scheduler, jobs, outputDir)
+}
