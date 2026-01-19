@@ -104,6 +104,12 @@ func IsApptainerImage(path string) bool {
 	return IsSif(path) || IsImg(path) || IsSqf(path)
 }
 
+// IsOverlay checks if the path is an overlay file (.img, .sqf, .sqsh, .squashfs).
+// This is used for CondaTainer overlay detection.
+func IsOverlay(path string) bool {
+	return IsImg(path) || IsSqf(path)
+}
+
 // IsYaml checks if the path has a YAML extension (.yaml, .yml).
 // Useful for Conda environment definition files.
 func IsYaml(path string) bool {

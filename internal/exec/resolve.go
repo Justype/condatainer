@@ -10,14 +10,12 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// InstalledOverlays scans the images directories and returns a mapping
+// InstalledOverlays scans the images directory and returns a mapping
 // from normalized overlay names to their absolute file path.
+// All overlays (including ref overlays) are stored in a single ImagesDir.
 func InstalledOverlays() (map[string]string, error) {
 	overlays := map[string]string{}
 	if err := populateOverlays(config.Global.ImagesDir, overlays); err != nil {
-		return nil, err
-	}
-	if err := populateOverlays(config.Global.RefImagesDir, overlays); err != nil {
 		return nil, err
 	}
 	return overlays, nil
@@ -95,25 +93,14 @@ func ResolveOverlayPaths(inputs []string) ([]string, error) {
 }
 
 func buildOverlayPathFromSpec(normalized string) (string, error) {
-	separatorCount := strings.Count(normalized, "/")
+	// All overlays are stored in a single ImagesDir (including ref overlays)
 	overlayName := fmt.Sprintf("%s.sqf", strings.ReplaceAll(normalized, "/", "--"))
+	path := filepath.Join(config.Global.ImagesDir, overlayName)
 
-	switch {
-	case separatorCount < 2:
-		path := filepath.Join(config.Global.ImagesDir, overlayName)
-		if utils.FileExists(path) {
-			return path, nil
-		}
-		return "", fmt.Errorf("overlay %s not found at %s", normalized, path)
-	case separatorCount == 2:
-		path := filepath.Join(config.Global.RefImagesDir, overlayName)
-		if utils.FileExists(path) {
-			return path, nil
-		}
-		return "", fmt.Errorf("reference overlay %s not found at %s", normalized, path)
-	default:
-		return "", fmt.Errorf("invalid overlay specification %q: too many '/' segments", normalized)
+	if utils.FileExists(path) {
+		return path, nil
 	}
+	return "", fmt.Errorf("overlay %s not found at %s", normalized, path)
 }
 
 func ensureSingleImage(paths []string) error {

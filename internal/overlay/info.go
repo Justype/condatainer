@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -80,4 +81,57 @@ func (s *Stats) InodeUsage() (percent float64) {
 	}
 	usedInodes := s.TotalInodes - s.FreeInodes
 	return (float64(usedInodes) / float64(s.TotalInodes)) * 100.0
+}
+
+// InspectImageUIDStatus checks the ownership of the 'upper' directory inside an ext3/4 image.
+// Returns:
+//   - 0: owned by root (UID 0)
+//   - 1: owned by current user
+//   - 2: owned by a different user
+//   - 9: failed to check or not an image file
+//
+// This is used to determine if --fakeroot should be automatically enabled.
+func InspectImageUIDStatus(imgPath string) int {
+	// Check if debugfs is available
+	debugfsPath, err := exec.LookPath("debugfs")
+	if err != nil {
+		return 9 // debugfs not found
+	}
+
+	// Use debugfs to check the UID of the 'upper' directory
+	cmd := exec.Command(debugfsPath, "-R", "stat upper", imgPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Failed to execute debugfs (might not be an ext3/4 image)
+		return 9
+	}
+
+	// Parse the output to extract UID
+	// Expected format: "User:  1000   Group:  1000"
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "User:") {
+			parts := strings.Fields(line)
+			// Format is typically: "User:  <uid>  Group:  <gid>"
+			if len(parts) >= 2 {
+				uidStr := parts[1]
+				uid, err := strconv.Atoi(uidStr)
+				if err != nil {
+					return 9 // Failed to parse UID
+				}
+
+				// Compare with current user's UID
+				currentUID := os.Getuid()
+				if uid == 0 {
+					return 0 // Root-owned
+				} else if uid == currentUID {
+					return 1 // Current user owns it
+				} else {
+					return 2 // Different user owns it
+				}
+			}
+		}
+	}
+
+	return 9 // UID information not found in output
 }

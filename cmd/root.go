@@ -15,7 +15,7 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:     "condatainer",
-	Short:   "CondaTainer: Use Apptainer/Conda/SquashFS to manage tools for HPC users.",
+	Short:   "CondaTainer: Use Apptainer/Conda/Overlays/SquashFS to manage tools/data/env for HPC users.",
 	Version: config.VERSION,
 
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
@@ -30,7 +30,7 @@ var rootCmd = &cobra.Command{
 			utils.DebugMode = true
 			config.Global.Debug = true
 			utils.PrintDebug("Debug mode enabled")
-			utils.PrintDebug("CondaTainer Version: %s", utils.StyleName(config.VERSION))
+			utils.PrintDebug("CondaTainer Version: %s", utils.StyleInfo(config.VERSION))
 		}
 
 		if localMode {
@@ -47,6 +47,7 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.AddCommand(OverlayCmd)
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debug mode with verbose output")
 	rootCmd.PersistentFlags().BoolVar(&localMode, "local", false, "Disable job submission (run locally)")
 }

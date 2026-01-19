@@ -85,6 +85,9 @@ func StylePath(path string) string {
 	return blueBold(path)
 }
 
+// StyleName formats names, identifiers, or keys (Yellow).
+func StyleName(name string) string { return yellow(name) }
+
 // ---------------------------------------------------------
 // 3. Log Printers
 //    High-level functions that print entire lines with tags.
@@ -146,4 +149,18 @@ func PrintDebug(format string, a ...interface{}) {
 		tag := StyleDebug("[DEBUG]")
 		fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
 	}
+}
+
+// ---------------------------------------------------------
+// 4. Terminal Detection
+// ---------------------------------------------------------
+
+// IsInteractiveShell checks if stdout is connected to a TTY (interactive terminal).
+// Returns true if the program is running in an interactive shell, false otherwise.
+func IsInteractiveShell() bool {
+	fileInfo, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (fileInfo.Mode() & os.ModeCharDevice) != 0
 }

@@ -4,15 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
-	osexec "os/exec"
-
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -104,7 +102,7 @@ func Run(options Options) error {
 
 		if options.WritableImg {
 			if !fakeroot {
-				if status := inspectImageUIDStatus(lastImg); status == 0 {
+				if status := overlay.InspectImageUIDStatus(lastImg); status == 0 {
 					utils.PrintNote("Root overlay %s detected. --fakeroot enabled automatically.", utils.StylePath(filepath.Base(lastImg)))
 					fakeroot = true
 				} else if status == 2 {
@@ -194,34 +192,4 @@ func buildPathEnv(overlays []string) string {
 		paths = append([]string{relative}, paths...)
 	}
 	return strings.Join(paths, ":")
-}
-
-var debugfsUserRegex = regexp.MustCompile(`User:\s+(\d+)`)
-
-func inspectImageUIDStatus(imgPath string) int {
-	debugfs, err := osexec.LookPath("debugfs")
-	if err != nil {
-		return 9
-	}
-	cmd := osexec.Command(debugfs, "-R", "stat upper", imgPath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		utils.PrintWarning("Failed to check fakeroot status of image %s. Assuming fakeroot.", utils.StylePath(imgPath))
-		return 9
-	}
-	match := debugfsUserRegex.FindStringSubmatch(string(output))
-	if len(match) < 2 {
-		return 9
-	}
-	uid, err := strconv.Atoi(match[1])
-	if err != nil {
-		return 9
-	}
-	if uid == 0 {
-		return 0
-	}
-	if uid == os.Getuid() {
-		return 1
-	}
-	return 2
 }
