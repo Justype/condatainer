@@ -133,6 +133,6 @@ func Create(path string, sizeMB int, uid, gid int, profile Profile, sparse bool)
 		}
 	}
 
-	utils.PrintSuccess("Created %s overlay: %s", typeStr, utils.StylePath(path))
+	utils.PrintDebug("Created %s overlay: %s", typeStr, utils.StylePath(path))
 	return nil
 }

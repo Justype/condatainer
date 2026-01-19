@@ -30,13 +30,12 @@ func Resize(imagePath string, newSizeMB int) error {
 	newSizeBytes := int64(newSizeMB) * 1024 * 1024
 
 	if currentSizeBytes == newSizeBytes {
-		utils.PrintMessage("Size unchanged (%s).", utils.StyleNumber(fmt.Sprintf("%d MiB", newSizeMB)))
+		utils.PrintDebug("Size unchanged (%d MiB) for %s", newSizeMB, utils.StylePath(absPath))
 		return nil
 	}
 
-	utils.PrintMessage("Resizing %s to %s...",
-		utils.StylePath(filepath.Base(absPath)),
-		utils.StyleNumber(fmt.Sprintf("%d MiB", newSizeMB)))
+	utils.PrintDebug("Resizing %s to %d MiB",
+		utils.StylePath(absPath), newSizeMB)
 
 	// 2. Pre-check Integrity (Force = true is recommended before resizing)
 	if err := CheckIntegrity(absPath, true); err != nil {
@@ -46,7 +45,7 @@ func Resize(imagePath string, newSizeMB int) error {
 	// 3. Perform Resize
 	if newSizeBytes < currentSizeBytes {
 		// --- SHRINK ---
-		utils.PrintMessage("Shrinking overlay image...")
+		utils.PrintDebug("Shrinking overlay image to %d MiB", newSizeMB)
 
 		sizeArg := fmt.Sprintf("%dM", newSizeMB)
 		if err := runCommand("shrink filesystem", absPath, "resize2fs", "-p", absPath, sizeArg); err != nil {
@@ -59,7 +58,7 @@ func Resize(imagePath string, newSizeMB int) error {
 
 	} else {
 		// --- EXPAND ---
-		utils.PrintMessage("Expanding overlay image...")
+		utils.PrintDebug("Expanding overlay image to %d MiB", newSizeMB)
 
 		if err := os.Truncate(absPath, newSizeBytes); err != nil {
 			return fmt.Errorf("failed to expand file: %w", err)
@@ -76,6 +75,6 @@ func Resize(imagePath string, newSizeMB int) error {
 		return err
 	}
 
-	utils.PrintSuccess("Overlay image resized to %dMB.", newSizeMB)
+	utils.PrintDebug("Overlay image resized successfully to %d MiB: %s", newSizeMB, utils.StylePath(absPath))
 	return nil
 }

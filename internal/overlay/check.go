@@ -24,7 +24,7 @@ func CheckIntegrity(path string, force bool) error {
 
 	args = append(args, path)
 
-	utils.PrintMessage("Checking integrity of %s (Force: %v)...", utils.StylePath(path), force)
+	utils.PrintDebug("Checking integrity of %s (Force: %v)", utils.StylePath(path), force)
 
 	// 2. Run e2fsck
 	cmd := exec.Command("e2fsck", args...)
@@ -54,6 +54,6 @@ func CheckIntegrity(path string, force bool) error {
 		utils.PrintDebug("e2fsck output: %s", string(out))
 	}
 
-	utils.PrintSuccess("Filesystem is clean.")
+	utils.PrintDebug("Filesystem check completed successfully for %s", utils.StylePath(path))
 	return nil
 }

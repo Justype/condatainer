@@ -30,10 +30,9 @@ func ChownRecursively(imagePath string, uid, gid int, internalPath string) error
 	// e.g. "/" -> "/upper", "/etc" -> "/upper/etc"
 	targetPath := filepath.Join("/upper", strings.TrimPrefix(internalPath, "/"))
 
-	utils.PrintMessage("Scanning %s inside %s...",
+	utils.PrintDebug("Scanning %s inside %s",
 		utils.StylePath(targetPath),
-		utils.StylePath(filepath.Base(absPath)),
-	)
+		utils.StylePath(absPath))
 
 	// 3. Recursive Discovery
 	inodes, err := scanInodes(absPath, targetPath)
@@ -48,16 +47,13 @@ func ChownRecursively(imagePath string, uid, gid int, internalPath string) error
 	}
 
 	if len(inodes) == 0 {
-		utils.PrintWarning("No inodes found to modify at %s.", utils.StylePath(targetPath))
+		utils.PrintDebug("No inodes found to modify at %s", utils.StylePath(targetPath))
 		return nil
 	}
 
 	// 4. Batch Update
-	utils.PrintMessage("Modifying %s inodes: UID=%s GID=%s...",
-		utils.StyleNumber(len(inodes)),
-		utils.StyleNumber(uid), // Using Number style for consistency
-		utils.StyleNumber(gid),
-	)
+	utils.PrintDebug("Modifying %d inodes: UID=%d GID=%d",
+		len(inodes), uid, gid)
 
 	var cmds []string
 
@@ -92,7 +88,7 @@ func ChownRecursively(imagePath string, uid, gid int, internalPath string) error
 		}
 	}
 
-	utils.PrintSuccess("Permissions updated successfully.")
+	utils.PrintDebug("Permissions updated successfully for %s", utils.StylePath(absPath))
 	return nil
 }
 
