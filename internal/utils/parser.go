@@ -30,10 +30,21 @@ func ParseSizeToMB(sizeStr string) (int, error) {
 	case "G", "GB":
 		return val * 1024, nil
 	case "T", "TB":
-		return val * 1024 * 1024, nil
+		return val * 1048576, nil
 	case "M", "MB", "":
 		return val, nil
 	default:
 		return 0, fmt.Errorf("unsupported unit: %s", unit)
 	}
+}
+
+// NormalizeNameVersion normalizes package spec formats so that
+// "name/version", "name=version", "name@version" are treated the same.
+// Converts = and @ to /, and -- to /, then strips whitespace.
+func NormalizeNameVersion(nameVersion string) string {
+	s := strings.TrimSpace(nameVersion)
+	s = strings.ReplaceAll(s, "=", "/")
+	s = strings.ReplaceAll(s, "@", "/")
+	s = strings.ReplaceAll(s, "--", "/")
+	return s
 }
