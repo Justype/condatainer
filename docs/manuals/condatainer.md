@@ -358,7 +358,7 @@ grcm39/gtf-gencode/M33
 
 ### List
 
-List installed overlays found in the `images/` and `ref-images/` directories.
+List installed overlays stored in the `images/` directory (app and reference overlays now share that location).
 
 ```
 condatainer list [-d] [search_terms...]

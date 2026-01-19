@@ -95,7 +95,37 @@ class Config:
         except Exception:
             pass
 
+    @staticmethod
+    def migrate_ref_images():
+        """Move existing overlays from ref-images into images/ for the new layout."""
+        if not os.path.isdir(Config.REF_IMAGES_DIR):
+            return
+        os.makedirs(Config.IMAGES_DIR, mode=0o775, exist_ok=True)
+        moved_any = False
+        for entry in sorted(os.listdir(Config.REF_IMAGES_DIR)):
+            src = os.path.join(Config.REF_IMAGES_DIR, entry)
+            if os.path.isdir(src):
+                continue
+            if not (Utils.is_overlay(entry) or entry.endswith(".env")):
+                continue
+            dest = os.path.join(Config.IMAGES_DIR, entry)
+            if os.path.exists(dest):
+                Utils.print_warning(f"Skipping migration of {entry}: destination already exists.")
+                continue
+            try:
+                shutil.move(src, dest)
+                moved_any = True
+                Utils.print_message(f"Migrated {entry} into {Config.IMAGES_DIR}.")
+            except Exception as exc:
+                Utils.print_warning(f"Failed to migrate {entry}: {exc}")
+        if moved_any:
+            try:
+                os.rmdir(Config.REF_IMAGES_DIR)
+            except OSError:
+                pass
+
 def main():
+    Config.migrate_ref_images()
     Config.adjust_compression_args_based_on_apptainer_version()
     parser = argparse.ArgumentParser(
         description="CondaTainer: Use Apptainer/Conda/SquashFS to manage tools for HPC users.",
@@ -664,7 +694,6 @@ class CondaTainer:
         Exit the program if the base image does not exist, after attempting to build it.
         """
         os.makedirs(Config.IMAGES_DIR, mode=0o775, exist_ok=True)
-        os.makedirs(Config.REF_IMAGES_DIR, mode=0o775, exist_ok=True)
 
         if not CondaTainer.ensure_apptainer():
             exit(1)
@@ -774,11 +803,6 @@ class CondaTainer:
             name_version = name_version.replace("--", "/")
             overlays[name_version] = os.path.join(Config.IMAGES_DIR, overlay)
 
-        ref_overlay_files = [f for f in os.listdir(Config.REF_IMAGES_DIR) if Utils.is_overlay(f)]
-        for overlay in ref_overlay_files:
-            name_version = os.path.splitext(overlay)[0]
-            name_version = name_version.replace("--", "/")
-            overlays[name_version] = os.path.join(Config.REF_IMAGES_DIR, overlay)
         return overlays
 
     @staticmethod
@@ -863,10 +887,7 @@ class BuildObject:
         self.cnt_dir_path = CondaTainer.get_cnt_dir_path(self.name_version)
         self.tmp_overlay_path = CondaTainer.get_tmp_overlay_path(self.name_version)
         overlay_filename = f"{self.name_version.replace('/', '--')}.sqf"
-        if self.is_ref:
-            self.target_overlay_path = os.path.join(Config.REF_IMAGES_DIR, overlay_filename)
-        else:
-            self.target_overlay_path = os.path.join(Config.IMAGES_DIR, overlay_filename)
+        self.target_overlay_path = os.path.join(Config.IMAGES_DIR, overlay_filename)
 
         if self.is_installed or external:
             return
@@ -1906,13 +1927,10 @@ class CondaTainer_Exec:
             formatted_filename = normalized_spec.replace("/", "--")
             overlay_filename = f"{formatted_filename}.sqf"
             n = normalized_spec.count('/')
-            if n < 2:
-                overlay_path = os.path.join(Config.IMAGES_DIR, overlay_filename)
-            elif n == 2:
-                overlay_path = os.path.join(Config.REF_IMAGES_DIR, overlay_filename)
-            else:
+            if n > 2:
                 CondaTainer_Exec.parser_exec.error(f"Invalid overlay format: {path}. Too many '/' characters.")
                 return []
+            overlay_path = os.path.join(Config.IMAGES_DIR, overlay_filename)
 
             if not os.path.isfile(overlay_path):
                 Utils.print_error(f"Overlay {Utils.yellow_text(overlay_filename)} not found at {Utils.blue_text(overlay_path)}.")
@@ -2297,22 +2315,23 @@ class CondaTainer_List:
         if os.path.isdir(Config.IMAGES_DIR):
             overlay_files = [f for f in os.listdir(Config.IMAGES_DIR) if Utils.is_overlay(f)]
             name_versions_dict = {}
+            ref_overlays = []
             for overlay in overlay_files:
-                name_version = os.path.splitext(overlay)[0]
-                if '--' in name_version:
-                    name, version = name_version.split('--', 1)
-                    if args.terms:
-                        if not all(re.search(re.escape(term), name_version, re.IGNORECASE) for term in args.terms):
-                            continue
+                base_name = os.path.splitext(overlay)[0]
+                if args.terms and not all(re.search(re.escape(term), base_name, re.IGNORECASE) for term in args.terms):
+                    continue
+                name_version = base_name.replace('--', '/')
+                if name_version.count('/') > 1:
+                    ref_overlays.append(name_version)
+                    continue
+                if '--' in base_name:
+                    name, version = base_name.split('--', 1)
                     if name in name_versions_dict:
                         name_versions_dict[name].append(version)
                     else:
                         name_versions_dict[name] = [version]
                 else:
-                    if args.terms:
-                        if not all(re.search(re.escape(term), name_version, re.IGNORECASE) for term in args.terms):
-                            continue
-                    name_versions_dict[name_version] = [f"(system app overlay)"]
+                    name_versions_dict[base_name] = [f"(system app overlay)"]
 
             if name_versions_dict:
                 name_col_width = max(len(name) for name in name_versions_dict.keys())
@@ -2320,15 +2339,9 @@ class CondaTainer_List:
                 for name in sorted(name_versions_dict.keys()):
                     print(f" {Utils.yellow_text(name.ljust(name_col_width))}: {', '.join(sorted(name_versions_dict[name]))}")
 
-        if os.path.isdir(Config.REF_IMAGES_DIR):
-            ref_overlay_files = [
-                f for f in os.listdir(Config.REF_IMAGES_DIR)
-                    if Utils.is_overlay(f) and
-                    all(re.search(re.escape(term), f, re.IGNORECASE) for term in args.terms)]
-            if ref_overlay_files:
+            if ref_overlays:
                 print("Available reference overlays:")
-                for overlay in sorted(ref_overlay_files):
-                    name_version = os.path.splitext(overlay)[0].replace('--', '/')
+                for name_version in sorted(ref_overlays):
                     if args.terms:
                         colored_name_version = name_version
                         for term in args.terms:
@@ -3101,19 +3114,19 @@ _{script_name}_completion() {{
         local include_app=$1
         local include_data=$2
         local img_dir="{Config.IMAGES_DIR}"
-        local ref_dir="{Config.REF_IMAGES_DIR}"
         local files=""
 
         # App Overlays
-        if [[ "$include_app" == "true" && -d "$img_dir" ]]; then
-            local sys_imgs=$(ls -1 "$img_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
-            files="$files $sys_imgs"
-        fi
-
-        # Data Overlays
-        if [[ "$include_data" == "true" && -d "$ref_dir" ]]; then
-            local ref_imgs=$(ls -1 "$ref_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
-            files="$files $ref_imgs"
+        if [[ -d "$img_dir" ]]; then
+            local normalized=$(ls -1 "$img_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
+            if [[ "$include_app" == "true" ]]; then
+                local sys_imgs=$(printf "%s\n" "$normalized" | grep -E '^[^/]+(/[^/]+)?$' || true)
+                files="$files $sys_imgs"
+            fi
+            if [[ "$include_data" == "true" ]]; then
+                local ref_imgs=$(printf "%s\n" "$normalized" | grep -E '^[^/]+/[^/]+/.+' || true)
+                files="$files $ref_imgs"
+            fi
         fi
 
         echo "$files"
@@ -3328,15 +3341,18 @@ _{script_name}_completion() {{
                 local include_app=$1
                 local include_data=$2
                 local img_dir="{Config.IMAGES_DIR}"
-                local ref_dir="{Config.REF_IMAGES_DIR}"
                 local -a overlays
 
-                if [[ "$include_app" == "true" && -d "$img_dir" ]]; then
-                     local sys_found=$(ls -1 "$img_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
+                local normalized_list=""
+                if [[ -d "$img_dir" ]]; then
+                     normalized_list=$(ls -1 "$img_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
+                fi
+                if [[ "$include_app" == "true" && -n "$normalized_list" ]]; then
+                     local sys_found=$(printf "%s\n" "$normalized_list" | grep -E '^[^/]+(/[^/]+)?$' || true)
                      [[ -n "$sys_found" ]] && overlays+=(${{(f)sys_found}})
                 fi
-                if [[ "$include_data" == "true" && -d "$ref_dir" ]]; then
-                     local ref_found=$(ls -1 "$ref_dir" 2>/dev/null | grep -E '{ext_regex}' | sed 's/\\.[^.]*$//' | sed 's/--/\\//g')
+                if [[ "$include_data" == "true" && -n "$normalized_list" ]]; then
+                     local ref_found=$(printf "%s\n" "$normalized_list" | grep -E '^[^/]+/[^/]+/.+' || true)
                      [[ -n "$ref_found" ]] && overlays+=(${{(f)ref_found}})
                 fi
 
