@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 )
 
 const VERSION = "1.0.6"
@@ -25,6 +27,7 @@ type Config struct {
 
 	ApptainerBin string
 	BaseImage    string
+	NCPUs        int
 }
 
 // Global holds the singleton configuration instance
@@ -55,8 +58,21 @@ func LoadDefaults(executablePath string) {
 		LogsDir:          filepath.Join(os.Getenv("HOME"), "logs"),
 		CompressArgs:     "-comp lz4", // zstd only compatible with apptainer version > 1.4
 		TmpSizeMB:        20480,
+		NCPUs:            computeNCPUs(),
 
 		ApptainerBin: "apptainer",
 		BaseImage:    filepath.Join(baseDir, "images", "base_image.sif"),
 	}
+}
+
+func computeNCPUs() int {
+	ncpus := 4
+	if env := os.Getenv("SLURM_CPUS_PER_TASK"); env != "" {
+		if parsed, err := strconv.Atoi(env); err == nil && parsed > 0 {
+			ncpus = parsed
+		}
+	} else if runtime.NumCPU() > 0 {
+		ncpus = runtime.NumCPU()
+	}
+	return ncpus
 }

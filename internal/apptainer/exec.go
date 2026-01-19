@@ -65,7 +65,8 @@ func Exec(imagePath string, command []string, opts *ExecOptions) error {
 		args = append(args, "--pwd", opts.Pwd)
 	}
 
-	// Add additional flags
+	// Add detected GPU flags first, then any additional user flags.
+	args = append(args, DetectGPUFlags()...)
 	args = append(args, opts.Additional...)
 
 	// Add image path
