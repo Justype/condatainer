@@ -30,9 +30,8 @@ func ChownRecursively(imagePath string, uid, gid int, internalPath string) error
 	// e.g. "/" -> "/upper", "/etc" -> "/upper/etc"
 	targetPath := filepath.Join("/upper", strings.TrimPrefix(internalPath, "/"))
 
-	utils.PrintDebug("Scanning %s inside %s",
-		utils.StylePath(targetPath),
-		utils.StylePath(absPath))
+	utils.PrintMessage("Scanning %s inside %s (uid=%d gid=%d)",
+		utils.StylePath(targetPath), utils.StylePath(absPath), uid, gid)
 
 	// 3. Recursive Discovery
 	inodes, err := scanInodes(absPath, targetPath)
@@ -47,13 +46,13 @@ func ChownRecursively(imagePath string, uid, gid int, internalPath string) error
 	}
 
 	if len(inodes) == 0 {
-		utils.PrintDebug("No inodes found to modify at %s", utils.StylePath(targetPath))
+		utils.PrintNote("No inodes found to modify at %s", utils.StylePath(targetPath))
 		return nil
 	}
 
 	// 4. Batch Update
-	utils.PrintDebug("Modifying %d inodes: UID=%d GID=%d",
-		len(inodes), uid, gid)
+	utils.PrintMessage("Updating %d inodes (uid=%d gid=%d) in %s",
+		len(inodes), uid, gid, utils.StylePath(targetPath))
 
 	var cmds []string
 
@@ -88,7 +87,7 @@ func ChownRecursively(imagePath string, uid, gid int, internalPath string) error
 		}
 	}
 
-	utils.PrintDebug("Permissions updated successfully for %s", utils.StylePath(absPath))
+	utils.PrintSuccess("Permissions updated for %s", utils.StylePath(absPath))
 	return nil
 }
 
@@ -96,6 +95,7 @@ func ChownRecursively(imagePath string, uid, gid int, internalPath string) error
 func scanInodes(imgPath, startPath string) ([]string, error) {
 	// A. Get Start Inode via 'stat'
 	cmd := exec.Command("debugfs", "-R", fmt.Sprintf("stat %s", startPath), imgPath)
+	utils.PrintDebug("[chown] debugfs -R stat %s %s", startPath, imgPath)
 	out, err := cmd.Output()
 	if err != nil {
 		// This usually means the path doesn't exist in the overlay layer yet
@@ -170,6 +170,7 @@ func scanInodes(imgPath, startPath string) ([]string, error) {
 		}
 	}
 	fmt.Printf("\r%s\r", strings.Repeat(" ", 50)) // Clear line
+	utils.PrintMessage("Finished scanning %s inodes", utils.StyleNumber(len(results)))
 
 	return results, nil
 }

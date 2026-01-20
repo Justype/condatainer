@@ -134,10 +134,10 @@ find /cnt -type f -exec chmod ug+rw,o+r {} \;
 find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
 
 echo "Packing overlay to SquashFS..."
-mksquashfs /cnt %s -processors %d -keep-as-directory -comp gzip -b 1M
+mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
 `,
 		installCmd,
-		filepath.Base(c.targetOverlayPath), c.ncpus,
+		c.targetOverlayPath, c.ncpus, config.Global.CompressArgs,
 	)
 
 	// Build exec command args

@@ -14,10 +14,10 @@ import (
 //   - localBuilds: BuildObjects with sbatch == false (build locally)
 //   - sbatchBuilds: BuildObjects with sbatch == true (submit to SLURM)
 type BuildGraph struct {
-	graph        map[string]BuildObject   // All build objects by name/version
-	localBuilds  []BuildObject            // Builds to run locally (no sbatch)
-	sbatchBuilds []BuildObject            // Builds to submit via sbatch
-	jobIDs       map[string]string        // Job IDs for sbatch builds (name/version -> job ID)
+	graph        map[string]BuildObject // All build objects by name/version
+	localBuilds  []BuildObject          // Builds to run locally (no sbatch)
+	sbatchBuilds []BuildObject          // Builds to submit via sbatch
+	jobIDs       map[string]string      // Job IDs for sbatch builds (name/version -> job ID)
 
 	// Config
 	imagesDir  string
@@ -42,7 +42,7 @@ func NewBuildGraph(buildObjects []BuildObject, imagesDir, tmpDir string, submitJ
 	for _, obj := range buildObjects {
 		bg.graph[obj.NameVersion()] = obj
 		if obj.IsInstalled() {
-			utils.PrintDebug("Overlay %s is already installed. Skipping.", obj.NameVersion())
+			utils.PrintMessage("Overlay %s is already installed. Skipping.", utils.StyleName(obj.NameVersion()))
 		}
 	}
 

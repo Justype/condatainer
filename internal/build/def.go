@@ -57,12 +57,25 @@ func (d *DefBuildObject) String() string {
 //  5. Set permissions
 //  6. Cleanup
 func (d *DefBuildObject) Build(buildDeps bool) error {
+	targetOverlayPath := d.targetOverlayPath
+	if absTarget, err := filepath.Abs(targetOverlayPath); err == nil {
+		targetOverlayPath = absTarget
+	}
+
+	styledOverlay := utils.StyleName(filepath.Base(targetOverlayPath))
+
 	// Check if already exists
-	if _, err := os.Stat(d.targetOverlayPath); err == nil {
-		utils.PrintDebug("Overlay %s already exists at %s. Skipping creation.",
-			filepath.Base(d.targetOverlayPath), utils.StylePath(d.targetOverlayPath))
+	if _, err := os.Stat(targetOverlayPath); err == nil {
+		utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
+			styledOverlay, utils.StylePath(targetOverlayPath))
 		return nil
 	}
+
+	buildMode := "local"
+	if d.needsSbatch {
+		buildMode = "sbatch"
+	}
+	utils.PrintMessage("Building overlay %s (%s build) from %s", styledOverlay, utils.StyleAction(buildMode), utils.StylePath(d.buildSource))
 
 	// TODO: Check if prebuilt overlay is available and try to download it
 	// if d.nameVersion in Config.PREBUILT_OVERLAYS {
@@ -71,7 +84,7 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 	//     }
 	// }
 
-	utils.PrintDebug("Building Apptainer SIF from %s", utils.StylePath(d.buildSource))
+	utils.PrintMessage("Running apptainer build from %s", utils.StylePath(d.buildSource))
 
 	// Build SIF using apptainer build --fakeroot
 	// Note: tmpOverlayPath is actually a SIF file at this stage, not sqf yet
@@ -81,25 +94,28 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 	}
 
 	if err := apptainer.Build(d.tmpOverlayPath, d.buildSource, buildOpts); err != nil {
+		utils.PrintError("Apptainer build failed for %s: %v", styledOverlay, err)
 		d.Cleanup(true)
 		return fmt.Errorf("failed to build SIF from %s: %w", d.buildSource, err)
 	}
 
-	utils.PrintDebug("Dumping SquashFS partition to %s", utils.StylePath(d.targetOverlayPath))
+	utils.PrintMessage("Extracting SquashFS to %s", utils.StylePath(targetOverlayPath))
 
 	// Extract SquashFS from SIF
-	if err := apptainer.DumpSifToSquashfs(d.tmpOverlayPath, d.targetOverlayPath); err != nil {
+	if err := apptainer.DumpSifToSquashfs(d.tmpOverlayPath, targetOverlayPath); err != nil {
+		utils.PrintError("Failed to export SquashFS for %s: %v", styledOverlay, err)
 		d.Cleanup(true)
 		return fmt.Errorf("failed to dump SquashFS from SIF: %w", err)
 	}
 
 	// Set permissions on target overlay
-	if err := os.Chmod(d.targetOverlayPath, 0o664); err != nil {
-		utils.PrintDebug("Failed to set permissions on %s: %v", d.targetOverlayPath, err)
+	if err := os.Chmod(targetOverlayPath, 0o664); err != nil {
+		utils.PrintDebug("Failed to set permissions on %s: %v", targetOverlayPath, err)
 	}
 
+	utils.PrintMessage("Finished overlay %s", styledOverlay)
 	utils.PrintDebug("Overlay %s created at %s. Removing temporary overlay...",
-		filepath.Base(d.targetOverlayPath), utils.StylePath(d.targetOverlayPath))
+		filepath.Base(targetOverlayPath), utils.StylePath(targetOverlayPath))
 
 	// Cleanup temp files
 	d.Cleanup(false)

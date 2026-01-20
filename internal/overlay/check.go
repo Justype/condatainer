@@ -2,6 +2,7 @@ package overlay
 
 import (
 	"os/exec"
+	"strings"
 
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -24,7 +25,8 @@ func CheckIntegrity(path string, force bool) error {
 
 	args = append(args, path)
 
-	utils.PrintDebug("Checking integrity of %s (Force: %v)", utils.StylePath(path), force)
+	utils.PrintMessage("Checking integrity of %s (force=%v)", utils.StylePath(path), force)
+	utils.PrintDebug("[CHECK] e2fsck %s", strings.Join(args, " "))
 
 	// 2. Run e2fsck
 	cmd := exec.Command("e2fsck", args...)
@@ -54,6 +56,6 @@ func CheckIntegrity(path string, force bool) error {
 		utils.PrintDebug("e2fsck output: %s", string(out))
 	}
 
-	utils.PrintDebug("Filesystem check completed successfully for %s", utils.StylePath(path))
+	utils.PrintSuccess("Filesystem check completed for %s", utils.StylePath(path))
 	return nil
 }

@@ -1,6 +1,7 @@
 package build
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -65,20 +66,37 @@ func (s *ScriptBuildObject) String() string {
 //  7. Extract and save ENV variables if present
 //  8. Set permissions and cleanup
 func (s *ScriptBuildObject) Build(buildDeps bool) error {
+	// Ensure target overlay path is absolute
+	targetOverlayPath := s.targetOverlayPath
+	if absTarget, err := filepath.Abs(targetOverlayPath); err == nil {
+		targetOverlayPath = absTarget
+	}
+
+	styledOverlay := utils.StyleName(filepath.Base(targetOverlayPath))
+
 	// Check if already exists
-	if _, err := os.Stat(s.targetOverlayPath); err == nil {
-		utils.PrintDebug("Overlay %s already exists at %s. Skipping creation.",
-			filepath.Base(s.targetOverlayPath), utils.StylePath(s.targetOverlayPath))
+	if _, err := os.Stat(targetOverlayPath); err == nil {
+		utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
+			styledOverlay, utils.StylePath(targetOverlayPath))
 		return nil
 	}
 
+	buildMode := "local"
+	if s.needsSbatch {
+		buildMode = "sbatch"
+	}
+	utils.PrintMessage("Building overlay %s (%s build)", styledOverlay, utils.StyleAction(buildMode))
+
 	// Create temporary overlay
+	utils.PrintMessage("Creating temporary overlay %s", utils.StylePath(s.tmpOverlayPath))
 	if err := s.CreateTmpOverlay(false); err != nil {
-		return fmt.Errorf("temporary overlay for %s already exists. Maybe a build is still running?", s.nameVersion)
+		if errors.Is(err, ErrTmpOverlayExists) {
+			utils.PrintError("Temporary overlay %s already exists. Cancel build.", utils.StylePath(s.tmpOverlayPath))
+		}
+		return fmt.Errorf("temporary overlay for %s already exists. Maybe a build is still running? %w", s.nameVersion, err)
 	}
 
-	utils.PrintDebug("Building SquashFS overlay at %s using build source %s",
-		utils.StylePath(s.targetOverlayPath), utils.StylePath(s.buildSource))
+	utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleCommand(s.buildSource))
 
 	// Check dependencies
 	missingDeps, err := s.GetMissingDependencies()
@@ -87,16 +105,13 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 	}
 
 	if len(missingDeps) > 0 {
+		depList := strings.Join(missingDeps, ", ")
+		utils.PrintError("Missing dependencies for %s: %s", styledOverlay, utils.StyleNumber(depList))
 		if buildDeps {
-			utils.PrintDebug("Building missing dependencies for %s: %s",
-				s.nameVersion, strings.Join(missingDeps, ", "))
 			// TODO: Build dependencies recursively
-			// For now, just return error
-			return fmt.Errorf("missing dependencies: %s (recursive build not yet implemented)", strings.Join(missingDeps, ", "))
-		} else {
-			return fmt.Errorf("missing dependencies for %s: %s. Please install them first",
-				s.nameVersion, strings.Join(missingDeps, ", "))
+			return fmt.Errorf("missing dependencies: %s (recursive build not yet implemented)", depList)
 		}
+		return fmt.Errorf("missing dependencies for %s: %s. Please install them first", s.nameVersion, depList)
 	}
 
 	// Parse name and version
@@ -162,6 +177,7 @@ fi
 
 	cmd := exec.Command(apptainerBin, args...)
 	utils.PrintDebug("[BUILD] Running build script with command: %s %s", apptainerBin, strings.Join(args, " "))
+	utils.PrintMessage("Executing build script %s for overlay %s", utils.StyleCommand(s.buildSource), styledOverlay)
 
 	// Provide interactive inputs if any
 	if len(s.interactiveInputs) > 0 {
@@ -174,6 +190,7 @@ fi
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
+		utils.PrintError("Build script %s failed for overlay %s: %v", utils.StyleCommand(s.buildSource), styledOverlay, err)
 		s.Cleanup(true)
 		return fmt.Errorf("build script %s failed: %w", s.buildSource, err)
 	}
@@ -182,6 +199,7 @@ fi
 	if s.isRef {
 		// For ref overlays: check files exist, then pack from cnt_dir
 		if entries, err := os.ReadDir(targetDir); err != nil || len(entries) == 0 {
+			utils.PrintError("No files produced for overlay %s", styledOverlay)
 			s.Cleanup(true)
 			return fmt.Errorf("overlay build script did not create any files in %s", targetDir)
 		}
@@ -189,15 +207,17 @@ fi
 		// TODO: Set permissions recursively
 		// Utils.share_to_ugo_recursive(s.cntDirPath)
 
-		utils.PrintDebug("Creating SquashFS file from %s", utils.StylePath(s.cntDirPath))
-		if err := s.createSquashfs(s.cntDirPath); err != nil {
+		utils.PrintMessage("Creating SquashFS from %s for overlay %s", utils.StylePath(s.cntDirPath), styledOverlay)
+		if err := s.createSquashfs(s.cntDirPath, targetOverlayPath); err != nil {
+			utils.PrintError("Failed to create SquashFS for overlay %s: %v", styledOverlay, err)
 			s.Cleanup(true)
 			return err
 		}
 	} else {
 		// For app overlays: set permissions and pack from /cnt
-		utils.PrintDebug("Creating SquashFS file from /cnt")
-		if err := s.createSquashfs("/cnt"); err != nil {
+		utils.PrintMessage("Preparing SquashFS from /cnt for overlay %s", styledOverlay)
+		if err := s.createSquashfs("/cnt", targetOverlayPath); err != nil {
+			utils.PrintError("Failed to create SquashFS for overlay %s: %v", styledOverlay, err)
 			s.Cleanup(true)
 			return err
 		}
@@ -210,11 +230,12 @@ fi
 	// }
 
 	// Set permissions
-	if err := os.Chmod(s.targetOverlayPath, 0o664); err != nil {
-		utils.PrintDebug("Failed to set permissions on %s: %v", s.targetOverlayPath, err)
+	if err := os.Chmod(targetOverlayPath, 0o664); err != nil {
+		utils.PrintDebug("Failed to set permissions on %s: %v", targetOverlayPath, err)
 	}
 
-	utils.PrintDebug("Overlay created at %s. Cleaning up...", utils.StylePath(s.targetOverlayPath))
+	utils.PrintMessage("Finished overlay %s", styledOverlay)
+	utils.PrintDebug("Overlay created at %s. Cleaning up...", utils.StylePath(targetOverlayPath))
 
 	// Cleanup
 	s.Cleanup(false)
@@ -223,11 +244,16 @@ fi
 }
 
 // createSquashfs creates a SquashFS file from the given source directory
-func (s *ScriptBuildObject) createSquashfs(sourceDir string) error {
+func (s *ScriptBuildObject) createSquashfs(sourceDir, targetOverlayPath string) error {
 	// Get config values
 	baseImage := config.Global.BaseImage
 	apptainerBin := config.Global.ApptainerBin
 	condatainerDir := config.Global.BaseDir
+
+	targetPath := targetOverlayPath
+	if absTarget, err := filepath.Abs(targetPath); err == nil {
+		targetPath = absTarget
+	}
 
 	// Build mksquashfs command
 	bashScript := ""
@@ -237,13 +263,13 @@ func (s *ScriptBuildObject) createSquashfs(sourceDir string) error {
 echo "Setting permissions..."
 find /cnt -type f -exec chmod ug+rw,o+r {} \;
 find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
-mksquashfs /cnt %s -processors %d -keep-as-directory -comp gzip -b 1M
-`, filepath.Base(s.targetOverlayPath), s.ncpus)
+mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
+`, targetPath, s.ncpus, config.Global.CompressArgs)
 	} else {
 		// For ref overlays: just pack the directory
 		bashScript = fmt.Sprintf(`
-mksquashfs %s %s -processors %d -keep-as-directory -comp gzip -b 1M
-`, sourceDir, filepath.Base(s.targetOverlayPath), s.ncpus)
+mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M
+`, sourceDir, targetPath, s.ncpus, config.Global.CompressArgs)
 	}
 
 	args := []string{
@@ -257,6 +283,7 @@ mksquashfs %s %s -processors %d -keep-as-directory -comp gzip -b 1M
 
 	cmd := exec.Command(apptainerBin, args...)
 	utils.PrintDebug("[BUILD] Creating SquashFS with command: %s %s", apptainerBin, strings.Join(args, " "))
+	utils.PrintMessage("Packing %s into %s", utils.StylePath(sourceDir), utils.StylePath(targetPath))
 
 	// Show output in real-time
 	cmd.Stdout = os.Stdout

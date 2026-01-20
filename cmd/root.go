@@ -67,7 +67,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.AddCommand(OverlayCmd)
+	// Subcommands are attached to rootCmd in their respective init() functions
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debug mode with verbose output")
 	rootCmd.PersistentFlags().BoolVar(&localMode, "local", false, "Disable job submission (run locally)")
 }

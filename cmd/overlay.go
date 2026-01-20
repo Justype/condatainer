@@ -9,16 +9,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ---------------------------------------------------------
-// Parent Command
-// ---------------------------------------------------------
-
-var OverlayCmd = &cobra.Command{
+// overlayCmd is the parent command for overlay management
+var overlayCmd = &cobra.Command{
 	Use:   "overlay",
 	Short: "Manage persistent overlay images (create, resize, check, info)",
 	Long: `Utilities to manage ext3 overlay images for Apptainer.
-Allows creating optimized filesystems for Conda, resizing existing images,
-and verifying filesystem integrity without mounting.`,
+Allows creating images, resizing existing images,
+and verifying filesystem integrity.`,
 }
 
 // ---------------------------------------------------------
@@ -31,7 +28,7 @@ var overlayCreateCmd = &cobra.Command{
 	Long: `Creates an ext3 overlay image optimized for specific workloads.
 	
 If no image path is provided, defaults to 'env.img'.`,
-	Example: `  condatainer overlay create                   # Creates default env.img (10GB, conda type)
+	Example: `  condatainer overlay create # 10G with default inode ratio
   condatainer overlay create my_data.img -s 50G -t data
   condatainer overlay create --fakeroot --sparse`,
 
@@ -54,6 +51,7 @@ If no image path is provided, defaults to 'env.img'.`,
 		fakeroot, _ := cmd.Flags().GetBool("fakeroot")
 		sparse, _ := cmd.Flags().GetBool("sparse")
 		typeFlag, _ := cmd.Flags().GetString("type")
+		fsType, _ := cmd.Flags().GetString("fs")
 
 		sizeMB, err := utils.ParseSizeToMB(sizeStr)
 		if err != nil {
@@ -62,12 +60,10 @@ If no image path is provided, defaults to 'env.img'.`,
 		}
 
 		// 3. Create the Overlay
-		utils.PrintMessage("Creating overlay image '%s' (%d MB)...", utils.StylePath(path), sizeMB)
-
 		if fakeroot {
-			err = overlay.CreateForRoot(path, sizeMB, typeFlag, sparse)
+			err = overlay.CreateForRoot(path, sizeMB, typeFlag, sparse, fsType)
 		} else {
-			err = overlay.CreateForCurrentUser(path, sizeMB, typeFlag, sparse)
+			err = overlay.CreateForCurrentUser(path, sizeMB, typeFlag, sparse, fsType)
 		}
 
 		if err != nil {
@@ -260,20 +256,22 @@ func completeImages(cmd *cobra.Command, args []string, toComplete string) ([]str
 // ---------------------------------------------------------
 
 func init() {
-	// 1. Attach Parent to Root
+	// 1. Attach to root command
+	rootCmd.AddCommand(overlayCmd)
 
-	// 2. Attach Subcommands
-	OverlayCmd.AddCommand(overlayCreateCmd)
-	OverlayCmd.AddCommand(resizeCmd)
-	OverlayCmd.AddCommand(infoCmd)
-	OverlayCmd.AddCommand(checkCmd)
-	OverlayCmd.AddCommand(chownCmd)
+	// 2. Attach subcommands
+	overlayCmd.AddCommand(overlayCreateCmd)
+	overlayCmd.AddCommand(resizeCmd)
+	overlayCmd.AddCommand(infoCmd)
+	overlayCmd.AddCommand(checkCmd)
+	overlayCmd.AddCommand(chownCmd)
 
-	// 3. Define Flags
+	// 3. Define flags
 
 	// --- Create ---
 	overlayCreateCmd.Flags().StringP("size", "s", "10G", "Set overlay size (e.g., 500M, 10G)")
-	overlayCreateCmd.Flags().StringP("type", "t", "conda", "Overlay type: 'conda' (small files), 'data' (large files)")
+	overlayCreateCmd.Flags().StringP("type", "t", "balanced", "Overlay profile: small/balanced/large files")
+	overlayCreateCmd.Flags().String("fs", "ext3", "Filesystem type: ext3 or ext4 (some system does not support ext4)")
 	overlayCreateCmd.Flags().Bool("fakeroot", false, "Create a fakeroot-compatible overlay (owned by root)")
 	overlayCreateCmd.Flags().Bool("sparse", false, "Create a sparse overlay image")
 	// overlayCreateCmd.Flags().StringP("file", "f", "", "Initialize with Conda environment file") (TODO)

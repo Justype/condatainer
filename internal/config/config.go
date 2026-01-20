@@ -35,13 +35,26 @@ var Global Config
 
 func LoadDefaults(executablePath string) {
 	programDir := filepath.Dir(executablePath)
+	if absProgDir, err := filepath.Abs(programDir); err == nil {
+		programDir = absProgDir
+	}
 	baseDir := filepath.Dir(programDir)
+	baseDir = filepath.Clean(baseDir)
 
 	// Developer Mode Check
 	if _, err := os.Stat(filepath.Join(baseDir, "images")); os.IsNotExist(err) {
-		cwd, _ := os.Getwd()
-		baseDir = cwd
-		programDir = filepath.Join(cwd, "bin")
+		cwd, err := os.Getwd()
+		if err == nil {
+			baseDir = cwd
+			programDir = filepath.Join(cwd, "bin")
+			if absProgDir, err := filepath.Abs(programDir); err == nil {
+				programDir = absProgDir
+			}
+		}
+	}
+
+	if absBaseDir, err := filepath.Abs(baseDir); err == nil {
+		baseDir = absBaseDir
 	}
 
 	Global = Config{

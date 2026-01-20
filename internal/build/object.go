@@ -1,6 +1,7 @@
 package build
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
+
+var ErrTmpOverlayExists = errors.New("temporary overlay already exists")
 
 // BuildObject represents a build target with its metadata and dependencies
 type BuildObject interface {
@@ -96,7 +99,7 @@ func (b *BaseBuildObject) CreateTmpOverlay(force bool) error {
 	// Check if tmp overlay already exists
 	if _, err := os.Stat(b.tmpOverlayPath); err == nil {
 		if !force {
-			return fmt.Errorf("temporary overlay already exists at %s", b.tmpOverlayPath)
+			return fmt.Errorf("%w: %s", ErrTmpOverlayExists, b.tmpOverlayPath)
 		}
 		// Remove existing if force=true
 		if err := os.Remove(b.tmpOverlayPath); err != nil {
@@ -110,7 +113,7 @@ func (b *BaseBuildObject) CreateTmpOverlay(force bool) error {
 	// Use overlay package to create ext3 overlay
 	// For build overlays, we use a temporary size from config (default 20GB)
 	// Use "conda" profile for small files, sparse=true for faster creation
-	if err := overlay.CreateForCurrentUser(b.tmpOverlayPath, config.Global.TmpSizeMB, "conda", true); err != nil {
+	if err := overlay.CreateForCurrentUser(b.tmpOverlayPath, config.Global.TmpSizeMB, "default", true, "ext3"); err != nil {
 		return fmt.Errorf("failed to create temporary overlay: %w", err)
 	}
 
@@ -181,7 +184,7 @@ func getCntDirPath(nameVersion, tmpDir string) string {
 // getTmpOverlayPath returns the temporary overlay path
 // Format: <tmpDir>/<nameVersion>.sqf (with / replaced by --)
 func getTmpOverlayPath(nameVersion, tmpDir string) string {
-	filename := strings.ReplaceAll(nameVersion, "/", "--") + ".sqf"
+	filename := strings.ReplaceAll(nameVersion, "/", "--") + ".img"
 	return filepath.Join(tmpDir, filename)
 }
 

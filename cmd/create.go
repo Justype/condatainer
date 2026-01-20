@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
@@ -20,7 +21,7 @@ var (
 	createBaseImage string
 	createSource    string
 	createTempSize  string
-	
+
 	// Compression flags
 	compZstd       bool
 	compZstdFast   bool
@@ -62,7 +63,14 @@ var createCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		// 2. Handle Compression Config
+		// 2. Check if apptainer is available
+		if err := apptainer.SetBin(config.Global.ApptainerBin); err != nil {
+			utils.PrintError("Apptainer not found in PATH.")
+			utils.PrintMessage("On HPC, please load the apptainer module: %s", utils.StyleAction("ml apptainer"))
+			os.Exit(1)
+		}
+
+		// 3. Handle Compression Config
 		if compLz4 {
 			config.Global.CompressArgs = "-comp lz4"
 		} else if compZstd {
@@ -75,9 +83,17 @@ var createCmd = &cobra.Command{
 			config.Global.CompressArgs = "-comp zstd -Xcompression-level 19"
 		} else if compGzip {
 			config.Global.CompressArgs = "-comp gzip"
+		} else {
+			// Auto-detect: use zstd-medium if supported, otherwise use default (lz4)
+			if version, err := apptainer.GetVersion(); err == nil {
+				if apptainer.CheckZstdSupport(version) {
+					config.Global.CompressArgs = "-comp zstd -Xcompression-level 8"
+					utils.PrintDebug("Auto-selected zstd-medium compression (Apptainer %s supports zstd)", utils.StyleNumber(version))
+				}
+			}
 		}
 
-		// 3. Handle temp size
+		// 4. Handle temp size
 		if createTempSize != "" {
 			sizeMB, err := utils.ParseSizeToMB(createTempSize)
 			if err != nil {
@@ -87,16 +103,16 @@ var createCmd = &cobra.Command{
 			config.Global.TmpSizeMB = sizeMB
 		}
 
-		// 4. Normalize package names
+		// 5. Normalize package names
 		normalizedArgs := make([]string, len(args))
 		for i, arg := range args {
 			normalizedArgs[i] = utils.NormalizeNameVersion(arg)
 		}
 
-		// 5. Execute create based on mode
+		// 6. Execute create based on mode
 		if createSource != "" {
 			// Mode: --source (external image like docker://ubuntu)
-			runCreateFromSource(normalizedArgs)
+			runCreateFromSource()
 		} else if createPrefix != "" {
 			// Mode: --prefix (with --file for YAML/def/sh)
 			runCreateWithPrefix()
@@ -266,20 +282,50 @@ func runCreateWithPrefix() {
 	}
 }
 
-// runCreateFromSource creates a sqf from external container source (docker://, etc)
+// runCreateFromSource creates a sqf from an external source (def file or remote URI)
 // Example: condatainer create --source docker://ubuntu:22.04 -n myubuntu
-func runCreateFromSource(packages []string) {
-	_ = packages // unused for now
-
+func runCreateFromSource() {
 	if createPrefix == "" && createName == "" {
 		utils.PrintError("--source requires either --name or --prefix")
 		os.Exit(1)
 	}
 
-	utils.PrintDebug("[CREATE] Creating overlay from source: %s", createSource)
+	var targetPrefix string
+	if createPrefix != "" {
+		targetPrefix = filepath.Clean(createPrefix)
+	} else {
+		normalizedName := utils.NormalizeNameVersion(createName)
+		targetPrefix = filepath.Join(config.Global.ImagesDir, normalizedName)
+	}
 
-	// TODO: Implement external source support (docker://, etc.)
-	// This will require apptainer build functionality
-	utils.PrintError("--source support is not yet implemented")
-	os.Exit(1)
+	source := createSource
+	isRemote := strings.Contains(source, "://")
+	if !isRemote {
+		source = filepath.Clean(source)
+		if !utils.FileExists(source) {
+			utils.PrintError("Source %s not found", utils.StylePath(source))
+			os.Exit(1)
+		}
+	}
+
+	isApptainer := strings.HasSuffix(source, ".def") || isRemote
+	targetOverlayPath := targetPrefix + ".sqf"
+
+	utils.PrintMessage("Creating overlay %s from %s", filepath.Base(targetOverlayPath), utils.StylePath(source))
+
+	bo, err := build.FromExternalSource(targetPrefix, source, isApptainer, config.Global.ImagesDir)
+	if err != nil {
+		utils.PrintError("Failed to create build object from %s: %v", source, err)
+		os.Exit(1)
+	}
+
+	buildObjects := []build.BuildObject{bo}
+	graph, err := build.NewBuildGraph(buildObjects, config.Global.ImagesDir, config.Global.TmpDir, false)
+	if err != nil {
+		os.Exit(1)
+	}
+
+	if err := graph.Run(); err != nil {
+		os.Exit(1)
+	}
 }
