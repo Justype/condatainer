@@ -5,15 +5,19 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/spf13/cobra"
-
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/utils"
+	"github.com/spf13/cobra"
 )
 
+type execCommand struct {
+	cobra.Command
+}
+
+func (c *execCommand) InitDefaultHelpFlag() {}
+
 var (
-	// exec command flags
 	execOverlays    []string
 	execKeep        bool
 	execWritableImg bool
@@ -21,71 +25,43 @@ var (
 	execBaseImage   string
 	execBindPaths   []string
 	execFakeroot    bool
-
-	// e command flags
-	eReadOnly    bool
-	eBaseImage   string
-	eNoAutoload  bool
-	eFakeroot    bool
+	eReadOnly       bool
+	eNoAutoload     bool
 )
 
-// execCmd represents the exec command
-var execCmd = &cobra.Command{
-	Use:   "exec [flags] [overlays...] [--] [command...]",
-	Short: "Execute a command using overlays",
-	Long: `Execute a command inside a container with specified overlays.
+var execCmd = &execCommand{
+	Command: cobra.Command{
+		Use:          "exec [flags] [overlays...] [--] [command...]",
+		Aliases:      []string{"e"},
+		Short:        "Execute a command using overlays",
+		SilenceUsage: true,
+		Long: `Execute a command inside a container with specified overlays.
 
 The exec command can intelligently parse arguments to separate overlays from commands.
 Use -o/--overlay to explicitly specify overlays, or let the command parse them automatically.
 
 Examples:
-  # Run bash with numpy overlay
-  condatainer exec numpy/1.24
+    # Run bash with samtools overlay
+    condatainer exec samtools/1.22
 
-  # Run python script with multiple overlays
-  condatainer exec numpy/1.24 scipy/1.10 -- python script.py
+    # Explicit overlay specification for standalone tools
+    condatainer exec -o samtools/1.22 samtools
 
-  # Explicit overlay specification
-  condatainer exec -o numpy/1.24 -o scipy/1.10 -- python script.py
+    # Use writable .img overlay
+    condatainer exec -w env.img bash
 
-  # Use writable .img overlay
-  condatainer exec -w env.img bash
+    # Set environment variables
+    condatainer exec --env MYVAR=value samtools/1.22 bash
 
-  # Set environment variables
-  condatainer exec --env MYVAR=value numpy/1.24 bash`,
-	RunE: runExec,
-}
-
-// eCmd represents the quick exec (e) command
-var eCmd = &cobra.Command{
-	Use:   "e [flags] [overlays...]",
-	Short: "Run bash using writable overlays (quick exec)",
-	Long: `Quick bash execution with writable .img overlays.
-
-The 'e' command is a shortcut for interactive shell sessions with overlays.
-By default, .img overlays are mounted as writable, and 'env.img' in the current
-directory is automatically loaded if present.
-
-Examples:
-  # Run bash with writable env.img (auto-loaded from current dir)
-  condatainer e
-
-  # Run bash with specific overlays
-  condatainer e myenv.img numpy/1.24
-
-  # Disable autoloading
-  condatainer e -n numpy/1.24
-
-  # Read-only mode
-  condatainer e -r env.img`,
-	RunE: runE,
+If you omit the command, it falls back to bash. When no -o/--overlay flags are provided,
+positional arguments are treated as overlays.`,
+		RunE: runExec,
+	},
 }
 
 func init() {
-	rootCmd.AddCommand(execCmd)
-	rootCmd.AddCommand(eCmd)
+	rootCmd.AddCommand(&execCmd.Command)
 
-	// exec command flags
 	execCmd.Flags().StringSliceVarP(&execOverlays, "overlay", "o", nil, "overlay file to mount (can be used multiple times)")
 	execCmd.Flags().BoolVarP(&execKeep, "keep", "k", false, "disable automatic command parsing to installed overlays")
 	execCmd.Flags().BoolVarP(&execWritableImg, "writable-img", "w", false, "mount .img overlays as writable (default: read-only)")
@@ -93,26 +69,26 @@ func init() {
 	execCmd.Flags().StringVarP(&execBaseImage, "base-image", "b", "", "base image to use instead of default")
 	execCmd.Flags().StringSliceVar(&execBindPaths, "bind", nil, "bind path 'HOST:CONTAINER' (can be used multiple times)")
 	execCmd.Flags().BoolVar(&execFakeroot, "fakeroot", false, "run container with fakeroot privileges")
+	execCmd.Flags().BoolVarP(&eReadOnly, "read-only", "r", false, "mount .img overlays as read-only (only applies when using the 'e' shortcut)")
+	execCmd.Flags().BoolVarP(&eNoAutoload, "no-autoload", "n", false, "disable autoloading 'env.img' from current directory (only applies to the 'e' shortcut)")
 
-	// e command flags
-	eCmd.Flags().BoolVarP(&eReadOnly, "read-only", "r", false, "mount .img overlays as read-only (default: writable)")
-	eCmd.Flags().StringVarP(&eBaseImage, "base-image", "b", "", "base image to use instead of default")
-	eCmd.Flags().BoolVarP(&eNoAutoload, "no-autoload", "n", false, "disable autoloading 'env.img' from current directory")
-	eCmd.Flags().BoolVar(&eFakeroot, "fakeroot", false, "run container with fakeroot privileges")
+	// Stop flag parsing after the first positional argument so tool arguments (like --help) bypass exec.
+	execCmd.Flags().SetInterspersed(false)
 }
 
 func runExec(cmd *cobra.Command, args []string) error {
-	// Ensure base image exists
+	if execHelpRequested(args) {
+		return cmd.Help()
+	}
+
 	if err := ensureBaseImage(); err != nil {
 		return err
 	}
 
-	// Change base image if specified
 	if execBaseImage != "" {
 		config.Global.BaseImage = execBaseImage
 	}
 
-	// Get installed overlays for name resolution
 	installedOverlays, err := exec.InstalledOverlays()
 	if err != nil {
 		return err
@@ -120,103 +96,82 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	overlayFinal := []string{}
 	commandFinal := []string{}
+	isShortcut := cmd.CalledAs() == "e"
 
-	// Parse arguments to separate overlays from commands
-	// If --keep is not set and no explicit overlays, try to parse args
-	if !execKeep && len(execOverlays) == 0 && len(args) > 0 {
-		utils.PrintDebug("[EXEC] Parsing commands to separate overlays and command...")
-		for _, arg := range args {
-			if utils.IsOverlay(arg) {
-				// It's an overlay file
-				overlayFinal = append(overlayFinal, arg)
-			} else if _, ok := installedOverlays[utils.NormalizeNameVersion(arg)]; ok {
-				// It's an installed overlay name
-				utils.PrintWarning("Convert command %s to overlay", utils.StyleName(arg))
-				overlayFinal = append(overlayFinal, arg)
-			} else {
-				// It's part of the command
+	if !isShortcut {
+		if !execKeep && len(execOverlays) == 0 && len(args) > 0 {
+			utils.PrintDebug("[EXEC] Parsing commands to separate overlays and command...")
+			commandStarted := false
+			for _, arg := range args {
+				if commandStarted {
+					commandFinal = append(commandFinal, arg)
+					continue
+				}
+				if arg == "--" {
+					commandStarted = true
+					continue
+				}
+				if utils.IsOverlay(arg) {
+					overlayFinal = append(overlayFinal, arg)
+					continue
+				}
+				if _, ok := installedOverlays[utils.NormalizeNameVersion(arg)]; ok {
+					utils.PrintWarning("Convert command %s to overlay", utils.StyleName(arg))
+					overlayFinal = append(overlayFinal, arg)
+					continue
+				}
+				commandStarted = true
 				commandFinal = append(commandFinal, arg)
 			}
+		} else {
+			commandFinal = args
 		}
 	} else {
-		// Keep mode or explicit overlays: all args are command
-		commandFinal = args
+		overlayFinal = append(overlayFinal, args...)
+		commandFinal = []string{"bash"}
 	}
 
-	// Add explicit overlays
 	overlayFinal = append(overlayFinal, execOverlays...)
 
-	// Default command is bash
+	if isShortcut {
+		hasImgOverlay := false
+		for _, overlay := range overlayFinal {
+			if utils.IsImg(overlay) {
+				hasImgOverlay = true
+				break
+			}
+		}
+		if !hasImgOverlay && !eNoAutoload {
+			if pwd, err := os.Getwd(); err == nil {
+				localEnvPath := filepath.Join(pwd, "env.img")
+				if utils.FileExists(localEnvPath) {
+					utils.PrintMessage("Autoload env.img at %s", utils.StylePath(localEnvPath))
+					overlayFinal = append(overlayFinal, localEnvPath)
+				}
+			}
+		}
+	}
+
 	if len(commandFinal) == 0 {
 		commandFinal = []string{"bash"}
 	}
 
-	// Resolve overlay names to paths
 	resolvedOverlays, err := exec.ResolveOverlayPaths(overlayFinal)
 	if err != nil {
 		return err
 	}
 
-	// Run the command
-	options := exec.Options{
-		Overlays:      resolvedOverlays,
-		Command:       commandFinal,
-		WritableImg:   execWritableImg,
-		EnvSettings:   execEnvSettings,
-		BindPaths:     execBindPaths,
-		Fakeroot:      execFakeroot,
-		BaseImage:     config.Global.BaseImage,
-		ApptainerBin:  config.Global.ApptainerBin,
+	writableImg := execWritableImg
+	if isShortcut {
+		writableImg = !eReadOnly
 	}
-
-	return exec.Run(options)
-}
-
-func runE(cmd *cobra.Command, args []string) error {
-	// Ensure base image exists
-	if err := ensureBaseImage(); err != nil {
-		return err
-	}
-
-	// Change base image if specified
-	if eBaseImage != "" {
-		config.Global.BaseImage = eBaseImage
-	}
-
-	overlayFinal := args
-
-	// Autoload env.img if no .img overlay is specified
-	hasImgOverlay := false
-	for _, overlay := range overlayFinal {
-		if utils.IsImg(overlay) {
-			hasImgOverlay = true
-			break
-		}
-	}
-
-	if !hasImgOverlay && !eNoAutoload {
-		pwd, err := os.Getwd()
-		if err == nil {
-			localEnvPath := filepath.Join(pwd, "env.img")
-			if utils.FileExists(localEnvPath) {
-				utils.PrintMessage("Autoload env.img at %s", utils.StylePath(localEnvPath))
-				overlayFinal = append(overlayFinal, localEnvPath)
-			}
-		}
-	}
-
-	// Resolve overlay names to paths
-	resolvedOverlays, err := exec.ResolveOverlayPaths(overlayFinal)
-	if err != nil {
-		return err
-	}
-
-	// Run bash
 	options := exec.Options{
 		Overlays:     resolvedOverlays,
-		Command:      []string{"bash"},
-		WritableImg:  !eReadOnly, // e command defaults to writable
-		Fakeroot:     eFakeroot,
+		Command:      commandFinal,
+		WritableImg:  writableImg,
+		EnvSettings:  execEnvSettings,
+		BindPaths:    execBindPaths,
+		Fakeroot:     execFakeroot,
 		BaseImage:    config.Global.BaseImage,
 		ApptainerBin: config.Global.ApptainerBin,
 	}
@@ -224,7 +179,18 @@ func runE(cmd *cobra.Command, args []string) error {
 	return exec.Run(options)
 }
 
-// ensureBaseImage checks if the base image exists
+func execHelpRequested(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "--help", "-h":
+		return true
+	default:
+		return false
+	}
+}
+
 func ensureBaseImage() error {
 	if config.Global.BaseImage == "" {
 		return fmt.Errorf("base image not configured")

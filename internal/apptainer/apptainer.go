@@ -1,7 +1,9 @@
 package apptainer
 
 import (
+	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -103,26 +105,38 @@ func CheckZstdSupport(currentVersion string) bool {
 //
 // op: "exec", "pull", "build", "instance start", etc.
 // imagePath: optional, helpful for logging which container failed
-func runApptainer(op string, imagePath string, args ...string) error {
-	// 1. Construct the command
-	// We use the resolved binary path 'apptainerCmd'
+// capture: whether to capture stdout/stderr for storing on the error.
+func runApptainer(op string, imagePath string, capture bool, args ...string) error {
 	cmd := exec.Command(apptainerCmd, args...)
+	cmd.Stdin = os.Stdin
 
-	// 2. Capture output (CombinedOutput captures both stdout and stderr)
-	output, err := cmd.CombinedOutput()
+	var stdoutBuf, stderrBuf bytes.Buffer
+	if capture {
+		cmd.Stdout = &stdoutBuf
+		cmd.Stderr = &stderrBuf
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 
+	err := cmd.Run()
 	if err != nil {
-		// 3. Construct the unified command string for the error message
 		fullCmd := fmt.Sprintf("%s %s", apptainerCmd, strings.Join(args, " "))
-
 		return &ApptainerError{
 			Op:      op,
 			Cmd:     fullCmd,
 			Path:    imagePath,
-			Output:  string(output),
+			Output:  captureOutput(capture, &stdoutBuf, &stderrBuf),
 			BaseErr: err,
 		}
 	}
-
 	return nil
+}
+
+func captureOutput(enabled bool, stdoutBuf, stderrBuf *bytes.Buffer) string {
+	if !enabled {
+		return ""
+	}
+	combined := strings.TrimSpace(stdoutBuf.String() + stderrBuf.String())
+	return combined
 }

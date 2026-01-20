@@ -66,7 +66,7 @@ func InstanceStart(imagePath, instanceName string, opts *InstanceStartOptions) e
 		utils.StyleInfo(instanceName),
 		utils.StylePath(imagePath))
 
-	return runApptainer("instance start", imagePath, args...)
+	return runApptainer("instance start", imagePath, false, args...)
 }
 
 // InstanceStop stops a running container instance
@@ -81,7 +81,7 @@ func InstanceStop(instanceName string, force bool) error {
 
 	utils.PrintDebug("Stopping instance %s", utils.StyleInfo(instanceName))
 
-	return runApptainer("instance stop", instanceName, args...)
+	return runApptainer("instance stop", instanceName, false, args...)
 }
 
 // InstanceStopAll stops all running container instances
@@ -96,7 +96,7 @@ func InstanceStopAll(force bool) error {
 
 	utils.PrintDebug("Stopping all instances")
 
-	return runApptainer("instance stop", "all", args...)
+	return runApptainer("instance stop", "all", false, args...)
 }
 
 // InstanceList lists running container instances

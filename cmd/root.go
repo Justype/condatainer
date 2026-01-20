@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
+	"strings"
 
+	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -14,9 +17,10 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:     "condatainer",
-	Short:   "CondaTainer: Use Apptainer/Conda/Overlays/SquashFS to manage tools/data/env for HPC users.",
-	Version: config.VERSION,
+	Use:          "condatainer",
+	Short:        "CondaTainer: Use Apptainer/Conda/Overlays/SquashFS to manage tools/data/env for HPC users.",
+	Version:      config.VERSION,
+	SilenceErrors: true,
 
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		exe, err := os.Executable()
@@ -42,6 +46,17 @@ var rootCmd = &cobra.Command{
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
+		// Cobra's automatic error printing is silenced. For Apptainer errors
+		// print only the captured output (trimmed) and exit with non-zero
+		// status. For other errors, print the default error string.
+		if ae, ok := err.(*apptainer.ApptainerError); ok {
+			out := strings.TrimSpace(ae.Output)
+			if out != "" {
+				fmt.Fprintln(os.Stderr, out)
+			}
+			os.Exit(1)
+		}
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }

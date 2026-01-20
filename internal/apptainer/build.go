@@ -48,7 +48,7 @@ func Build(imagePath, defFile string, opts *BuildOptions) error {
 		utils.StylePath(imagePath),
 		utils.StyleInfo("from "+defFile))
 
-	return runApptainer("build", imagePath, args...)
+	return runApptainer("build", imagePath, false, args...)
 }
 
 // DumpSifToSquashfs extracts the SquashFS partition from a SIF image to a .sqfs file

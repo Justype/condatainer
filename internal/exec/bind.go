@@ -13,20 +13,24 @@ func BindPaths(paths ...string) []string {
 		if path == "" {
 			continue
 		}
-		if abs, err := filepath.Abs(path); err == nil {
-			absPaths = append(absPaths, abs)
+		if resolved := resolvePath(path); resolved != "" {
+			absPaths = append(absPaths, resolved)
 		}
 	}
 
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		absPaths = append(absPaths, home)
+		if resolved := resolvePath(home); resolved != "" {
+			absPaths = append(absPaths, resolved)
+		}
 	}
 	if cwd, err := os.Getwd(); err == nil && cwd != "" {
-		absPaths = append(absPaths, cwd)
+		if resolved := resolvePath(cwd); resolved != "" {
+			absPaths = append(absPaths, resolved)
+		}
 	}
 	if scratch := os.Getenv("SCRATCH"); scratch != "" {
-		if abs, err := filepath.Abs(scratch); err == nil {
-			absPaths = append(absPaths, abs)
+		if resolved := resolvePath(scratch); resolved != "" {
+			absPaths = append(absPaths, resolved)
 		}
 	}
 
@@ -66,4 +70,16 @@ func isChildPath(child, parent string) bool {
 		return false
 	}
 	return rel != "." && !strings.HasPrefix(rel, "..")
+}
+
+func resolvePath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return ""
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return abs
+	}
+	return real
 }

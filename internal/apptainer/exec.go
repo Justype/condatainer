@@ -8,16 +8,17 @@ import (
 
 // ExecOptions contains options for executing commands in a container
 type ExecOptions struct {
-	Bind       []string // Bind mounts (format: "/host/path:/container/path")
-	Overlay    []string // Overlay images to use
-	Writable   bool     // Mount image as writable (requires sandbox or overlay)
-	Fakeroot   bool     // Run with fakeroot
-	NoHome     bool     // Do not mount home directory
-	ContainAll bool     // Contain all user environments
-	CleanEnv   bool     // Clean environment before running
-	Env        []string // Environment variables to set (format: "KEY=VALUE")
-	Pwd        string   // Working directory inside container
-	Additional []string // Additional flags to pass to apptainer exec
+	Bind          []string // Bind mounts (format: "/host/path:/container/path")
+	Overlay       []string // Overlay images to use
+	Writable      bool     // Mount image as writable (requires sandbox or overlay)
+	Fakeroot      bool     // Run with fakeroot
+	NoHome        bool     // Do not mount home directory
+	ContainAll    bool     // Contain all user environments
+	CleanEnv      bool     // Clean environment before running
+	Env           []string // Environment variables to set (format: "KEY=VALUE")
+	Pwd           string   // Working directory inside container
+	CaptureOutput bool     // Capture output instead of streaming
+	Additional    []string // Additional flags to pass to apptainer exec
 }
 
 // Exec executes a command inside a container
@@ -79,5 +80,5 @@ func Exec(imagePath string, command []string, opts *ExecOptions) error {
 		utils.StylePath(imagePath),
 		utils.StyleAction(strings.Join(command, " ")))
 
-	return runApptainer("exec", imagePath, args...)
+	return runApptainer("exec", imagePath, opts.CaptureOutput, args...)
 }

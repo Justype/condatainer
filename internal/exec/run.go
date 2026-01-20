@@ -120,6 +120,19 @@ func Run(options Options) error {
 		bindPaths = append(bindPaths, options.BindPaths...)
 	}
 
+	bindPaths = ensureBindPath(bindPaths, config.Global.BaseDir)
+
+	if utils.DebugMode {
+		utils.PrintDebug("[EXEC]Exec overlays: %v", overlays)
+		utils.PrintDebug("[EXEC]Bind paths: %v", bindPaths)
+		utils.PrintDebug("[EXEC]Overlay mounts: %v", overlayArgs)
+		utils.PrintDebug("[EXEC]Env list: %v", envList)
+		utils.PrintDebug("[EXEC]Command: %s", strings.Join(options.Command, " "))
+		if len(options.EnvSettings) > 0 {
+			utils.PrintDebug("[EXEC]Env overrides: %v", options.EnvSettings)
+		}
+	}
+
 	envNotes := map[string]string{}
 	for key, value := range configs {
 		note := notes[key]
@@ -192,4 +205,20 @@ func buildPathEnv(overlays []string) string {
 		paths = append([]string{relative}, paths...)
 	}
 	return strings.Join(paths, ":")
+}
+
+func ensureBindPath(paths []string, candidate string) []string {
+	if candidate == "" {
+		return paths
+	}
+	resolved := resolvePath(candidate)
+	if resolved == "" {
+		return paths
+	}
+	for _, existing := range paths {
+		if existing == resolved {
+			return paths
+		}
+	}
+	return append(paths, resolved)
 }
