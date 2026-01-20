@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -102,9 +104,16 @@ func (b *BaseBuildObject) CreateTmpOverlay(force bool) error {
 		}
 	}
 
-	// TODO: Create actual ext3 overlay using overlay package
-	// For now, just a placeholder
+	// Create actual ext3 overlay using overlay package
 	utils.PrintDebug("Creating temporary overlay at %s", utils.StylePath(b.tmpOverlayPath))
+
+	// Use overlay package to create ext3 overlay
+	// For build overlays, we use a temporary size from config (default 20GB)
+	// Use "conda" profile for small files, sparse=true for faster creation
+	if err := overlay.CreateForCurrentUser(b.tmpOverlayPath, config.Global.TmpSizeMB, "conda", true); err != nil {
+		return fmt.Errorf("failed to create temporary overlay: %w", err)
+	}
+
 	return nil
 }
 
@@ -211,6 +220,26 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string)
 
 	// Resolve build source and determine concrete type
 	return createConcreteType(base, isDef, isRef, tmpDir)
+}
+
+// NewCondaObjectWithSource creates a CondaBuildObject with custom buildSource
+// This is used for the -n flag to create a single sqf with multiple packages or YAML
+// buildSource can be:
+//   - Path to YAML file (e.g., "/path/to/environment.yml")
+//   - Comma-separated package list (e.g., "nvim,nodejs,samtools/1.16")
+func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir string) (BuildObject, error) {
+	normalized := utils.NormalizeNameVersion(nameVersion)
+
+	base := &BaseBuildObject{
+		nameVersion:       normalized,
+		buildSource:       buildSource,
+		ncpus:             1,
+		cntDirPath:        getCntDirPath(normalized, tmpDir),
+		tmpOverlayPath:    getTmpOverlayPath(normalized, tmpDir),
+		targetOverlayPath: filepath.Join(imagesDir, strings.ReplaceAll(normalized, "/", "--")+".sqf"),
+	}
+
+	return newCondaBuildObject(base)
 }
 
 // FromExternalSource creates a BuildObject from an external build script or def file

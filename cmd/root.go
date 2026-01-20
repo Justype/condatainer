@@ -35,6 +35,11 @@ var rootCmd = &cobra.Command{
 			config.Global.Debug = true
 			utils.PrintDebug("Debug mode enabled")
 			utils.PrintDebug("CondaTainer Version: %s", utils.StyleInfo(config.VERSION))
+			utils.PrintDebug("Executable: %s", exe)
+			utils.PrintDebug("Base Directory: %s", config.Global.BaseDir)
+			utils.PrintDebug("Images Directory: %s", config.Global.ImagesDir)
+			utils.PrintDebug("Base Image: %s", config.Global.BaseImage)
+			utils.PrintDebug("Apptainer Binary: %s", config.Global.ApptainerBin)
 		}
 
 		if localMode {

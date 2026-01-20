@@ -3,9 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
-	"unicode"
 
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
@@ -58,7 +55,7 @@ If no image path is provided, defaults to 'env.img'.`,
 		sparse, _ := cmd.Flags().GetBool("sparse")
 		typeFlag, _ := cmd.Flags().GetString("type")
 
-		sizeMB, err := parseSizeToMB(sizeStr)
+		sizeMB, err := utils.ParseSizeToMB(sizeStr)
 		if err != nil {
 			utils.PrintError("Invalid size format '%s': %v", sizeStr, err)
 			os.Exit(1)
@@ -106,7 +103,7 @@ var resizeCmd = &cobra.Command{
 		}
 
 		// 2. Parse Size
-		sizeMB, err := parseSizeToMB(sizeStr)
+		sizeMB, err := utils.ParseSizeToMB(sizeStr)
 		if err != nil {
 			utils.PrintError("Invalid size format '%s': %v", sizeStr, err)
 			os.Exit(1)
@@ -247,43 +244,6 @@ Use --root to force ownership to 0:0.`,
 			os.Exit(1)
 		}
 	},
-}
-
-// ---------------------------------------------------------
-// Helper: Size Parser
-// ---------------------------------------------------------
-
-// parseSizeToMB converts strings like "10G", "500M", "1024" into Megabytes.
-func parseSizeToMB(input string) (int, error) {
-	s := strings.TrimSpace(strings.ToUpper(input))
-	if s == "" {
-		return 0, fmt.Errorf("empty size")
-	}
-
-	// Determine multiplier
-	multiplier := 1 // Default assumes MB if no suffix, or raw integer
-
-	if strings.HasSuffix(s, "G") || strings.HasSuffix(s, "GB") {
-		multiplier = 1024
-		s = strings.TrimRight(s, "GB")
-	} else if strings.HasSuffix(s, "M") || strings.HasSuffix(s, "MB") {
-		multiplier = 1
-		s = strings.TrimRight(s, "MB")
-	} else if strings.HasSuffix(s, "K") || strings.HasSuffix(s, "KB") {
-		return 0, fmt.Errorf("size too small (KB), minimum 1MB")
-	}
-
-	// Clean any remaining non-numeric chars just in case
-	s = strings.TrimFunc(s, func(r rune) bool {
-		return !unicode.IsDigit(r)
-	})
-
-	val, err := strconv.Atoi(s)
-	if err != nil {
-		return 0, fmt.Errorf("not a number")
-	}
-
-	return val * multiplier, nil
 }
 
 // ---------------------------------------------------------

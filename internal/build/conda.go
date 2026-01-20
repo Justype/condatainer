@@ -7,14 +7,19 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
 // CondaBuildObject implements BuildObject for conda packages
+// Supports three modes:
+// 1. Single package (name/version): packageName and packageVersion are set
+// 2. Multiple packages (-n flag): buildSource contains comma-separated package specs
+// 3. YAML file (-p flag): buildSource contains path to .yml/.yaml file
 type CondaBuildObject struct {
 	*BaseBuildObject
-	packageName    string
-	packageVersion string
+	packageName    string // Primary package name (for single package mode)
+	packageVersion string // Primary package version (for single package mode)
 }
 
 // newCondaBuildObject creates a CondaBuildObject from base
@@ -79,31 +84,50 @@ func (c *CondaBuildObject) Build(buildDeps bool) error {
 		return fmt.Errorf("temporary overlay for %s already exists. Maybe a build is still running?", c.nameVersion)
 	}
 
-	utils.PrintDebug("Building SquashFS overlay at %s with packages: %s=%s",
-		utils.StylePath(c.targetOverlayPath), c.packageName, c.packageVersion)
+	// Determine build mode and create appropriate micromamba command
+	var installCmd string
+	var bindPaths []string
 
-	// Build the apptainer exec command
-	// TODO: These paths and settings should come from config
-	baseImage := os.Getenv("CONDATAINER_BASE_IMAGE")
-	if baseImage == "" {
-		baseImage = "base.sif" // Default
-	}
-	apptainerBin := os.Getenv("SYSTEM_APPTAINER_BIN")
-	if apptainerBin == "" {
-		apptainerBin = "apptainer" // Default
-	}
-	condatainerDir := os.Getenv("CONDATAINER_DIR")
-	if condatainerDir == "" {
-		condatainerDir = filepath.Dir(c.targetOverlayPath)
+	if strings.HasSuffix(c.buildSource, ".yml") || strings.HasSuffix(c.buildSource, ".yaml") {
+		// Mode 3: YAML file (-p prefix -f environment.yml)
+		// The conda-meta folder will be automatically created by micromamba
+		absFilePath := filepath.Clean(c.buildSource)
+		bindPaths = append(bindPaths, filepath.Dir(absFilePath))
+		installCmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/%s -f %s", c.nameVersion, absFilePath)
+		utils.PrintDebug("Building SquashFS overlay at %s from YAML file %s",
+			utils.StylePath(c.targetOverlayPath), utils.StylePath(absFilePath))
+	} else if c.buildSource != "" {
+		// Mode 2: Multiple packages (-n name pkg1 pkg2 ...)
+		// buildSource contains comma-separated package specs like "nvim,nodejs"
+		packages := strings.Split(c.buildSource, ",")
+		// Convert slashes to equals for conda syntax (samtools/1.16 -> samtools=1.16)
+		for i, pkg := range packages {
+			packages[i] = strings.ReplaceAll(strings.TrimSpace(pkg), "/", "=")
+		}
+		installCmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/%s %s",
+			c.nameVersion, strings.Join(packages, " "))
+		utils.PrintDebug("Building SquashFS overlay at %s with packages: %s",
+			utils.StylePath(c.targetOverlayPath), strings.Join(packages, ", "))
+	} else {
+		// Mode 1: Single package (name/version)
+		installCmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/%s %s=%s",
+			c.nameVersion, c.packageName, c.packageVersion)
+		utils.PrintDebug("Building SquashFS overlay at %s with package: %s=%s",
+			utils.StylePath(c.targetOverlayPath), c.packageName, c.packageVersion)
 	}
 
-	relativePath := c.nameVersion
+	// Build the apptainer exec command using config values
+	baseImage := config.Global.BaseImage
+	apptainerBin := config.Global.ApptainerBin
+
+	utils.PrintDebug("Using base image: %s", baseImage)
+	utils.PrintDebug("Using apptainer binary: %s", apptainerBin)
 
 	// Build the bash script to run inside container
 	bashScript := fmt.Sprintf(`
 mkdir -p $TMPDIR
-echo "Creating conda environment %s=%s in overlay..."
-micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/%s %s=%s
+echo "Creating conda environment in overlay..."
+%s
 
 echo "Setting permissions..."
 find /cnt -type f -exec chmod ug+rw,o+r {} \;
@@ -112,9 +136,7 @@ find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
 echo "Packing overlay to SquashFS..."
 mksquashfs /cnt %s -processors %d -keep-as-directory -comp gzip -b 1M
 `,
-		c.packageName, c.packageVersion,
-		relativePath,
-		c.packageName, c.packageVersion,
+		installCmd,
 		filepath.Base(c.targetOverlayPath), c.ncpus,
 	)
 
@@ -123,19 +145,28 @@ mksquashfs /cnt %s -processors %d -keep-as-directory -comp gzip -b 1M
 		"exec",
 		"--env", "TMPDIR=/ext3/tmp",
 		"--overlay", c.tmpOverlayPath,
-		// TODO: Add bind and GPU args from config
+	}
+
+	// Add bind paths for YAML files
+	for _, path := range bindPaths {
+		args = append(args, "--bind", path)
+	}
+
+	// TODO: Add GPU args from config
+	args = append(args,
 		baseImage,
 		"/bin/bash", "-c",
 		bashScript,
-	}
+	)
 
 	cmd := exec.Command(apptainerBin, args...)
 	utils.PrintDebug("[BUILD] Creating overlay with command: %s %s", apptainerBin, strings.Join(args, " "))
 
-	// Run the build
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		utils.PrintDebug("Build failed with output: %s", string(output))
+	// Run the build - show output in real-time
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
 		c.Cleanup(true)
 		return fmt.Errorf("failed to build conda package %s: %w", c.nameVersion, err)
 	}

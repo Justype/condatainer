@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -144,17 +145,10 @@ if [ $? -ne 0 ]; then
 fi
 `, s.buildSource, s.buildSource)
 
-	// Build exec command args
-	// TODO: Get these from config
-	baseImage := os.Getenv("CONDATAINER_BASE_IMAGE")
-	if baseImage == "" {
-		baseImage = "base.sif"
-	}
-	apptainerBin := os.Getenv("SYSTEM_APPTAINER_BIN")
-	if apptainerBin == "" {
-		apptainerBin = "apptainer"
-	}
-	condatainerDir := os.Getenv("CONDATAINER_DIR")
+	// Build exec command args using config values
+	baseImage := config.Global.BaseImage
+	apptainerBin := config.Global.ApptainerBin
+	condatainerDir := config.Global.BaseDir
 
 	args := []string{"exec"}
 	args = append(args, envSettings...)
@@ -175,10 +169,11 @@ fi
 		cmd.Stdin = strings.NewReader(inputStr)
 	}
 
-	// Run the build script
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		utils.PrintDebug("Build script failed with output: %s", string(output))
+	// Run the build script - show output in real-time
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
 		s.Cleanup(true)
 		return fmt.Errorf("build script %s failed: %w", s.buildSource, err)
 	}
@@ -229,16 +224,10 @@ fi
 
 // createSquashfs creates a SquashFS file from the given source directory
 func (s *ScriptBuildObject) createSquashfs(sourceDir string) error {
-	// TODO: Get these from config
-	baseImage := os.Getenv("CONDATAINER_BASE_IMAGE")
-	if baseImage == "" {
-		baseImage = "base.sif"
-	}
-	apptainerBin := os.Getenv("SYSTEM_APPTAINER_BIN")
-	if apptainerBin == "" {
-		apptainerBin = "apptainer"
-	}
-	condatainerDir := os.Getenv("CONDATAINER_DIR")
+	// Get config values
+	baseImage := config.Global.BaseImage
+	apptainerBin := config.Global.ApptainerBin
+	condatainerDir := config.Global.BaseDir
 
 	// Build mksquashfs command
 	bashScript := ""
@@ -269,9 +258,11 @@ mksquashfs %s %s -processors %d -keep-as-directory -comp gzip -b 1M
 	cmd := exec.Command(apptainerBin, args...)
 	utils.PrintDebug("[BUILD] Creating SquashFS with command: %s %s", apptainerBin, strings.Join(args, " "))
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		utils.PrintDebug("mksquashfs failed with output: %s", string(output))
+	// Show output in real-time
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to create SquashFS: %w", err)
 	}
 
