@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings" // <--- ADDED: Required for string manipulation
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/exec"
@@ -71,6 +73,32 @@ func init() {
 	execCmd.Flags().BoolVar(&execFakeroot, "fakeroot", false, "run container with fakeroot privileges")
 	execCmd.Flags().BoolVarP(&eReadOnly, "read-only", "r", false, "mount .img overlays as read-only (only applies when using the 'e' shortcut)")
 	execCmd.Flags().BoolVarP(&eNoAutoload, "no-autoload", "n", false, "disable autoloading 'env.img' from current directory (only applies to the 'e' shortcut)")
+
+	// --- NEW: Dynamic Completion Logic ---
+	execCmd.RegisterFlagCompletionFunc("overlay", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		// Use InstalledOverlays so we include both images and ref-images and reuse existing normalization.
+		installed, err := exec.InstalledOverlays()
+		if err != nil {
+			// If we can't list overlays, indicate an error to the shell completion system
+			return nil, cobra.ShellCompDirectiveError
+		}
+
+		suggestions := []string{}
+		for name := range installed {
+			if strings.HasPrefix(name, toComplete) {
+				suggestions = append(suggestions, name)
+			}
+		}
+		sort.Strings(suggestions)
+		if len(suggestions) == 0 {
+			// No matches — allow shell to perform default file completion
+			return nil, cobra.ShellCompDirectiveDefault
+		}
+
+		// Return suggestions and tell Shell NOT to fall back to standard file completion
+		return suggestions, cobra.ShellCompDirectiveNoFileComp
+	})
+	// -------------------------------------
 
 	// Stop flag parsing after the first positional argument so tool arguments (like --help) bypass exec.
 	execCmd.Flags().SetInterspersed(false)

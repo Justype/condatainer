@@ -5,14 +5,29 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
 var ErrTmpOverlayExists = errors.New("temporary overlay already exists")
+
+// ScriptSpecs mirrors the scheduler module's job spec metadata.
+type ScriptSpecs = scheduler.ScriptSpecs
+
+func defaultBuildNcpus() int {
+	if config.Global.NCPUs > 0 {
+		return config.Global.NCPUs
+	}
+	if count := runtime.NumCPU(); count > 0 {
+		return count
+	}
+	return 1
+}
 
 // BuildObject represents a build target with its metadata and dependencies
 type BuildObject interface {
@@ -33,10 +48,9 @@ type BuildObject interface {
 	TargetOverlayPath() string
 	CntDirPath() string
 
-	// SLURM integration
-	NeedsSbatch() bool
-	SbatchFlags() []string
-	Ncpus() int
+	// Scheduler metadata
+	ScriptSpecs() *ScriptSpecs
+	RequiresScheduler() bool
 
 	// Build operations
 	Build(buildDeps bool) error
@@ -56,12 +70,9 @@ type BaseBuildObject struct {
 	tmpOverlayPath    string
 	targetOverlayPath string
 	cntDirPath        string
-	sbatchFlags       []string
 	ncpus             int
 	isRemote          bool // Whether build source was downloaded
-
-	// SLURM
-	needsSbatch bool
+	scriptSpecs       *scheduler.ScriptSpecs
 
 	// Interactive inputs for shell scripts
 	interactiveInputs []string
@@ -75,9 +86,13 @@ func (b *BaseBuildObject) Dependencies() []string    { return b.dependencies }
 func (b *BaseBuildObject) TmpOverlayPath() string    { return b.tmpOverlayPath }
 func (b *BaseBuildObject) TargetOverlayPath() string { return b.targetOverlayPath }
 func (b *BaseBuildObject) CntDirPath() string        { return b.cntDirPath }
-func (b *BaseBuildObject) NeedsSbatch() bool         { return b.needsSbatch }
-func (b *BaseBuildObject) SbatchFlags() []string     { return b.sbatchFlags }
-func (b *BaseBuildObject) Ncpus() int                { return b.ncpus }
+func (b *BaseBuildObject) ScriptSpecs() *ScriptSpecs { return b.scriptSpecs }
+func (b *BaseBuildObject) RequiresScheduler() bool {
+	if specs := b.scriptSpecs; specs != nil {
+		return len(specs.RawFlags) > 0
+	}
+	return false
+}
 
 func (b *BaseBuildObject) IsInstalled() bool {
 	// Check if target overlay exists
@@ -159,15 +174,29 @@ func (b *BaseBuildObject) parseScriptMetadata() error {
 		return nil
 	}
 
-	// TODO: Implement parsing of:
-	// - #DEP directives for dependencies
-	// - #SBATCH directives for scheduler flags
-	// - #PROMPT directives for interactive input
-	// For now, just set empty values
+	if !config.Global.SubmitJob {
+		return nil
+	}
+
+	sched := scheduler.ActiveScheduler()
+	if sched == nil {
+		return nil
+	}
+
 	b.dependencies = []string{}
-	b.sbatchFlags = []string{}
 	b.interactiveInputs = []string{}
-	b.needsSbatch = len(b.sbatchFlags) > 0
+
+	specs, err := sched.ReadScriptSpecs(b.buildSource)
+	if err != nil {
+		return err
+	}
+
+	if specs.Ncpus <= 0 {
+		specs.Ncpus = defaultBuildNcpus()
+	}
+
+	b.scriptSpecs = specs
+	b.ncpus = specs.Ncpus
 
 	return nil
 }
@@ -205,7 +234,7 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string)
 	// Create base object
 	base := &BaseBuildObject{
 		nameVersion:       normalized,
-		ncpus:             1, // Default, can be overridden from sbatch flags
+		ncpus:             defaultBuildNcpus(),
 		cntDirPath:        getCntDirPath(normalized, tmpDir),
 		tmpOverlayPath:    getTmpOverlayPath(normalized, tmpDir),
 		targetOverlayPath: filepath.Join(imagesDir, strings.ReplaceAll(normalized, "/", "--")+".sqf"),
@@ -236,7 +265,7 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 	base := &BaseBuildObject{
 		nameVersion:       normalized,
 		buildSource:       buildSource,
-		ncpus:             1,
+		ncpus:             defaultBuildNcpus(),
 		cntDirPath:        getCntDirPath(normalized, tmpDir),
 		tmpOverlayPath:    getTmpOverlayPath(normalized, tmpDir),
 		targetOverlayPath: filepath.Join(imagesDir, strings.ReplaceAll(normalized, "/", "--")+".sqf"),
@@ -258,6 +287,7 @@ func FromExternalSource(targetPrefix, source string, isApptainer bool, imagesDir
 	base := &BaseBuildObject{
 		nameVersion:       nameVersion,
 		buildSource:       source,
+		ncpus:             defaultBuildNcpus(),
 		targetOverlayPath: targetPrefix + ".sqf",
 	}
 
@@ -289,21 +319,11 @@ func FromExternalSource(targetPrefix, source string, isApptainer bool, imagesDir
 
 // createConcreteType creates the appropriate concrete BuildObject type
 // It determines whether to create a conda, def, or script build based on:
-// - isDef flag (from slash count == 0)
 // - isRef flag (from slash count > 1)
-// - build source resolution (conda if no build script found)
+// - build source resolution: .def -> DefBuildObject, shell script -> ScriptBuildObject, not found -> conda
 func createConcreteType(base *BaseBuildObject, isDef, isRef bool, tmpDir string) (BuildObject, error) {
-	if isDef {
-		// No slashes = def file
-		if err := resolveBuildSourceForDef(base, tmpDir); err != nil {
-			return nil, err
-		}
-		return newDefBuildObject(base)
-	}
-
-	// Has slashes = conda or shell script
-	// Resolve build source to determine if it's conda or shell
-	isConda, err := resolveBuildSourceForPackage(base, tmpDir)
+	// Resolve build source - this determines the actual type based on file extension
+	isConda, isContainer, err := resolveBuildSource(base, tmpDir)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +332,12 @@ func createConcreteType(base *BaseBuildObject, isDef, isRef bool, tmpDir string)
 		return newCondaBuildObject(base)
 	}
 
-	// It's a shell script
+	if isContainer {
+		// It's a .def file
+		return newDefBuildObject(base)
+	}
+
+	// It's a shell script (no extension or .sh/.bash)
 	// Parse script metadata
 	if err := base.parseScriptMetadata(); err != nil {
 		return nil, err
@@ -321,22 +346,41 @@ func createConcreteType(base *BaseBuildObject, isDef, isRef bool, tmpDir string)
 	return newScriptBuildObject(base, isRef)
 }
 
-// resolveBuildSourceForDef finds the build script for def files
-func resolveBuildSourceForDef(base *BaseBuildObject, tmpDir string) error {
-	// TODO: Implement local and remote script discovery
-	if base.buildSource == "" {
-		return fmt.Errorf("build script for %s not found locally or remotely", base.nameVersion)
+// resolveBuildSource finds the build script and determines the build type
+// Returns (isConda, isContainer, error):
+// - isConda=true: no build script found, use conda
+// - isContainer=true: found .def file
+// - both false: found shell script (no extension)
+// First checks local and remote build scripts, falls back to conda if not found
+func resolveBuildSource(base *BaseBuildObject, tmpDir string) (isConda bool, isContainer bool, err error) {
+	// Check if already has a build source
+	if base.buildSource != "" {
+		// Determine type from extension
+		isContainer = strings.HasSuffix(base.buildSource, ".def")
+		return false, isContainer, nil
 	}
-	return nil
-}
 
-// resolveBuildSourceForPackage determines if a package is conda or has a build script
-// Returns true if it's a conda package, false if it's a shell script
-func resolveBuildSourceForPackage(base *BaseBuildObject, tmpDir string) (bool, error) {
-	// TODO: Implement local and remote script discovery
-	// For now, if no build source found, assume conda package
-	if base.buildSource == "" {
-		return true, nil // It's a conda package
+	// Look for build script (local first, then remote)
+	info, found := FindBuildScript(base.nameVersion)
+	if !found {
+		// No build script found, use conda
+		utils.PrintDebug("No build script found for %s, using conda", utils.StyleName(base.nameVersion))
+		return true, false, nil
 	}
-	return false, nil // It has a build script, so it's a shell script
+
+	// If remote, download to tmp directory
+	if info.IsRemote {
+		localPath, err := DownloadRemoteScript(info, tmpDir)
+		if err != nil {
+			return false, false, fmt.Errorf("failed to download remote build script: %w", err)
+		}
+		base.buildSource = localPath
+		base.isRemote = true
+		utils.PrintDebug("Downloaded remote build script to %s", utils.StylePath(localPath))
+	} else {
+		base.buildSource = info.Path
+		utils.PrintDebug("Using local build script at %s", utils.StylePath(info.Path))
+	}
+
+	return false, info.IsContainer, nil
 }

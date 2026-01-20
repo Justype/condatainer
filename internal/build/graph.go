@@ -109,7 +109,7 @@ func (bg *BuildGraph) topologicalSort() error {
 	for _, nameVersion := range order {
 		meta := bg.graph[nameVersion]
 		// TODO: Check if sbatch is available
-		if bg.submitJobs && meta.NeedsSbatch() {
+		if bg.submitJobs && meta.RequiresScheduler() {
 			bg.sbatchBuilds = append(bg.sbatchBuilds, meta)
 		} else {
 			bg.localBuilds = append(bg.localBuilds, meta)

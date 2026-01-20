@@ -35,19 +35,19 @@ func (s *ScriptBuildObject) IsRef() bool   { return s.isRef }
 // String returns a string representation
 func (s *ScriptBuildObject) String() string {
 	return fmt.Sprintf(`BuildObject:
-    name_version: %s
-    build_source_type: Shell Script
-    build_source: %s
-    dependencies: %v
-    sbatch_flags: %v
-    tmp_overlay_path: %s
-    target_overlay_path: %s
-    cnt_dir_path: %s
-    is_ref: %v`,
+		name_version: %s
+		build_source_type: Shell Script
+		build_source: %s
+		dependencies: %v
+		script_specs: %v
+		tmp_overlay_path: %s
+		target_overlay_path: %s
+		cnt_dir_path: %s
+		is_ref: %v`,
 		s.nameVersion,
 		s.buildSource,
 		s.dependencies,
-		s.sbatchFlags,
+		s.scriptSpecs,
 		s.tmpOverlayPath,
 		s.targetOverlayPath,
 		s.cntDirPath,
@@ -82,7 +82,7 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 	}
 
 	buildMode := "local"
-	if s.needsSbatch {
+	if s.RequiresScheduler() {
 		buildMode = "sbatch"
 	}
 	utils.PrintMessage("Building overlay %s (%s build)", styledOverlay, utils.StyleAction(buildMode))

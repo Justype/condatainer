@@ -30,18 +30,18 @@ func (d *DefBuildObject) IsRef() bool   { return false }
 // String returns a string representation
 func (d *DefBuildObject) String() string {
 	return fmt.Sprintf(`BuildObject:
-    name_version: %s
-    build_source_type: Apptainer File
-    build_source: %s
-    dependencies: %v
-    sbatch_flags: %v
-    tmp_overlay_path: %s
-    target_overlay_path: %s
-    cnt_dir_path: %s`,
+		name_version: %s
+		build_source_type: Apptainer File
+		build_source: %s
+		dependencies: %v
+		script_specs: %v
+		tmp_overlay_path: %s
+		target_overlay_path: %s
+		cnt_dir_path: %s`,
 		d.nameVersion,
 		d.buildSource,
 		d.dependencies,
-		d.sbatchFlags,
+		d.scriptSpecs,
 		d.tmpOverlayPath,
 		d.targetOverlayPath,
 		d.cntDirPath,
@@ -72,7 +72,7 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 	}
 
 	buildMode := "local"
-	if d.needsSbatch {
+	if d.RequiresScheduler() {
 		buildMode = "sbatch"
 	}
 	utils.PrintMessage("Building overlay %s (%s build) from %s", styledOverlay, utils.StyleAction(buildMode), utils.StylePath(d.buildSource))

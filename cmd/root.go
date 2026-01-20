@@ -17,9 +17,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:          "condatainer",
-	Short:        "CondaTainer: Use Apptainer/Conda/Overlays/SquashFS to manage tools/data/env for HPC users.",
-	Version:      config.VERSION,
+	Use:           "condatainer_go",
+	Short:         "CondaTainer: Use Apptainer/Conda/Overlays/SquashFS to manage tools/data/env for HPC users.",
+	Version:       config.VERSION,
 	SilenceErrors: true,
 
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {

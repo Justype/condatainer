@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // SlurmScheduler implements the Scheduler interface for SLURM
@@ -20,18 +21,42 @@ type SlurmScheduler struct {
 	jobIDRe         *regexp.Regexp
 }
 
-// NewSlurmScheduler creates a new SLURM scheduler instance
+// NewSlurmScheduler creates a new SLURM scheduler instance using sbatch from PATH
 func NewSlurmScheduler() (*SlurmScheduler, error) {
-	sbatchBin, err := exec.LookPath("sbatch")
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrSchedulerNotFound, err)
+	return newSlurmSchedulerWithBinary("")
+}
+
+// NewSlurmSchedulerWithBinary creates a SLURM scheduler using an explicit sbatch path
+func NewSlurmSchedulerWithBinary(sbatchBin string) (*SlurmScheduler, error) {
+	return newSlurmSchedulerWithBinary(sbatchBin)
+}
+
+func newSlurmSchedulerWithBinary(sbatchBin string) (*SlurmScheduler, error) {
+	binPath := sbatchBin
+	if binPath == "" {
+		var err error
+		binPath, err = exec.LookPath("sbatch")
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrSchedulerNotFound, err)
+		}
+	} else {
+		if absPath, err := filepath.Abs(binPath); err == nil {
+			binPath = absPath
+		}
+		info, err := os.Stat(binPath)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrSchedulerNotFound, err)
+		}
+		if info.IsDir() {
+			return nil, fmt.Errorf("%w: %s is a directory", ErrSchedulerNotFound, binPath)
+		}
 	}
 
 	sinfoCmd, _ := exec.LookPath("sinfo")
 	scontrolCmd, _ := exec.LookPath("scontrol")
 
 	return &SlurmScheduler{
-		sbatchBin:       sbatchBin,
+		sbatchBin:       binPath,
 		sinfoCommand:    sinfoCmd,
 		scontrolCommand: scontrolCmd,
 		directiveRe:     regexp.MustCompile(`^\s*#SBATCH\s+(.+)$`),
@@ -127,9 +152,19 @@ func (s *SlurmScheduler) parseSbatchFlag(flag string, specs *ScriptSpecs) error 
 
 	// Time
 	if strings.HasPrefix(flag, "--time=") {
-		specs.Time = strings.TrimPrefix(flag, "--time=")
+		raw := strings.TrimPrefix(flag, "--time=")
+		dur, err := parseSlurmTimeSpec(raw)
+		if err != nil {
+			return fmt.Errorf("invalid --time value: %w", err)
+		}
+		specs.Time = dur
 	} else if strings.HasPrefix(flag, "-t ") {
-		specs.Time = strings.TrimSpace(strings.TrimPrefix(flag, "-t"))
+		raw := strings.TrimSpace(strings.TrimPrefix(flag, "-t"))
+		dur, err := parseSlurmTimeSpec(raw)
+		if err != nil {
+			return fmt.Errorf("invalid -t value: %w", err)
+		}
+		specs.Time = dur
 	}
 
 	// Output
@@ -252,6 +287,9 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 		if specs.Stderr != "" && (strings.HasPrefix(flag, "--error=") || strings.HasPrefix(flag, "-e ")) {
 			continue
 		}
+		if specs.Time > 0 && (strings.HasPrefix(flag, "--time=") || strings.HasPrefix(flag, "-t ")) {
+			continue
+		}
 		// Skip email flags - we'll generate them from the parsed boolean fields
 		if strings.HasPrefix(flag, "--mail-type=") || strings.HasPrefix(flag, "--mail-user=") {
 			continue
@@ -283,6 +321,9 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	}
 	if specs.MailUser != "" {
 		fmt.Fprintf(writer, "#SBATCH --mail-user=%s\n", specs.MailUser)
+	}
+	if specs.Time > 0 {
+		fmt.Fprintf(writer, "#SBATCH --time=%s\n", formatSlurmTimeSpec(specs.Time))
 	}
 
 	// Add blank line
@@ -498,11 +539,15 @@ func (s *SlurmScheduler) parsePartitionLine(line string) *ResourceLimits {
 			limit.Partition = value
 		case "MaxTime":
 			if value != "UNLIMITED" {
-				limit.MaxTime = value
+				if dur, err := parseSlurmTimeSpec(value); err == nil {
+					limit.MaxTime = dur
+				}
 			}
 		case "DefaultTime":
 			if value != "NONE" && value != "UNLIMITED" {
-				limit.DefaultTime = value
+				if dur, err := parseSlurmTimeSpec(value); err == nil {
+					limit.DefaultTime = dur
+				}
 			}
 		case "MaxCPUsPerNode":
 			fmt.Sscanf(value, "%d", &limit.MaxCpus)
@@ -623,4 +668,85 @@ func parseMemory(memStr string) (int64, error) {
 	default:
 		return value, nil
 	}
+}
+
+func parseSlurmTimeSpec(timeStr string) (time.Duration, error) {
+	timeStr = strings.TrimSpace(timeStr)
+	if timeStr == "" {
+		return 0, nil
+	}
+
+	var days int64
+	hms := timeStr
+	if idx := strings.Index(hms, "-"); idx >= 0 {
+		dayPart := hms[:idx]
+		if parsed, err := strconv.ParseInt(dayPart, 10, 64); err == nil {
+			days = parsed
+		} else {
+			return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
+		}
+		hms = strings.TrimSpace(hms[idx+1:])
+	}
+
+	var hours, minutes, seconds int64
+	if hms != "" {
+		parts := strings.Split(hms, ":")
+		switch len(parts) {
+		case 3:
+			h, err := strconv.ParseInt(parts[0], 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
+			}
+			hours = h
+			m, err := strconv.ParseInt(parts[1], 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
+			}
+			minutes = m
+			s, err := strconv.ParseInt(parts[2], 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
+			}
+			seconds = s
+		case 2:
+			h, err := strconv.ParseInt(parts[0], 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
+			}
+			hours = h
+			m, err := strconv.ParseInt(parts[1], 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
+			}
+			minutes = m
+		case 1:
+			m, err := strconv.ParseInt(parts[0], 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
+			}
+			minutes = m
+		default:
+			return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
+		}
+	}
+
+	totalSeconds := days*24*3600 + hours*3600 + minutes*60 + seconds
+	return time.Duration(totalSeconds) * time.Second, nil
+}
+
+func formatSlurmTimeSpec(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	total := int64(d.Seconds())
+	days := total / (24 * 3600)
+	rem := total % (24 * 3600)
+	hours := rem / 3600
+	rem %= 3600
+	minutes := rem / 60
+	seconds := rem % 60
+	if days > 0 {
+		return fmt.Sprintf("%d-%02d:%02d:%02d", days, hours, minutes, seconds)
+	}
+	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
 }

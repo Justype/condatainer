@@ -4,6 +4,7 @@ package scheduler
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // GpuSpec holds GPU requirements parsed from scheduler directives
@@ -23,13 +24,13 @@ type GpuInfo struct {
 
 // ResourceLimits holds scheduler resource limits
 type ResourceLimits struct {
-	MaxCpus     int    // Maximum CPUs per job
-	MaxMemMB    int64  // Maximum memory in MB per job
-	MaxTime     string // Maximum walltime (e.g., "7-00:00:00")
-	MaxGpus     int    // Maximum GPUs per job
-	MaxNodes    int    // Maximum nodes per job
-	DefaultTime string // Default walltime if not specified
-	Partition   string // Partition/queue name these limits apply to
+	MaxCpus     int           // Maximum CPUs per job
+	MaxMemMB    int64         // Maximum memory in MB per job
+	MaxTime     time.Duration // Maximum walltime (e.g., "7-00:00:00")
+	MaxGpus     int           // Maximum GPUs per job
+	MaxNodes    int           // Maximum nodes per job
+	DefaultTime time.Duration // Default walltime if not specified
+	Partition   string        // Partition/queue name these limits apply to
 }
 
 // ClusterInfo holds cluster configuration information
@@ -40,18 +41,18 @@ type ClusterInfo struct {
 
 // ScriptSpecs holds the specifications parsed from a job script
 type ScriptSpecs struct {
-	JobName      string   // Job name
-	Ncpus        int      // Number of CPUs
-	MemMB        int64    // Memory in MB
-	Time         string   // Time limit (e.g., "01:00:00")
-	Stdout       string   // Standard output file path
-	Stderr       string   // Standard error file path
-	Gpu          *GpuSpec // GPU requirements (nil if no GPU)
-	EmailOnBegin bool     // Send email when job begins (SLURM: BEGIN, PBS: b, LSF: -B)
-	EmailOnEnd   bool     // Send email when job ends (SLURM: END, PBS: e, LSF: -N)
-	EmailOnFail  bool     // Send email when job fails/aborts (SLURM: FAIL, PBS: a)
-	MailUser     string   // Username or email address for notifications (empty = submitting user)
-	RawFlags     []string // Raw scheduler-specific flags (e.g., #SBATCH, #PBS)
+	JobName      string        // Job name
+	Ncpus        int           // Number of CPUs
+	MemMB        int64         // Memory in MB
+	Time         time.Duration // Time limit
+	Stdout       string        // Standard output file path
+	Stderr       string        // Standard error file path
+	Gpu          *GpuSpec      // GPU requirements (nil if no GPU)
+	EmailOnBegin bool          // Send email when job begins (SLURM: BEGIN, PBS: b, LSF: -B)
+	EmailOnEnd   bool          // Send email when job ends (SLURM: END, PBS: e, LSF: -N)
+	EmailOnFail  bool          // Send email when job fails/aborts (SLURM: FAIL, PBS: a)
+	MailUser     string        // Username or email address for notifications (empty = submitting user)
+	RawFlags     []string      // Raw scheduler-specific flags (e.g., #SBATCH, #PBS)
 }
 
 // JobSpec represents specifications for submitting a batch job
@@ -156,7 +157,25 @@ func SubmitWithDependencies(scheduler Scheduler, jobs []*JobSpec, outputDir stri
 // DetectScheduler attempts to detect and return the available scheduler
 // Returns the scheduler instance or nil if no scheduler is available
 func DetectScheduler() (Scheduler, error) {
-	// Try SLURM first (most common)
+	return DetectSchedulerWithBinary("")
+}
+
+// DetectSchedulerWithBinary attempts to initialize a scheduler using a preferred binary path.
+// If preferredBin is empty, detection falls back to the default discovery path.
+func DetectSchedulerWithBinary(preferredBin string) (Scheduler, error) {
+	// Try the preferred SLURM binary first
+	if preferredBin != "" {
+		slurm, err := NewSlurmSchedulerWithBinary(preferredBin)
+		if err != nil {
+			return nil, err
+		}
+		if slurm.IsAvailable() {
+			return slurm, nil
+		}
+		return nil, ErrSchedulerNotAvailable
+	}
+
+	// Try SLURM via PATH (most common)
 	slurm, err := NewSlurmScheduler()
 	if err == nil && slurm.IsAvailable() {
 		return slurm, nil
@@ -207,11 +226,11 @@ func ReadMaxSpecs(scheduler Scheduler) (*ResourceLimits, error) {
 		if limit.MaxNodes > maxLimits.MaxNodes {
 			maxLimits.MaxNodes = limit.MaxNodes
 		}
-		// For time limits, keep the longest one
-		if maxLimits.MaxTime == "" || limit.MaxTime == "" {
-			if limit.MaxTime != "" {
-				maxLimits.MaxTime = limit.MaxTime
-			}
+		if limit.MaxTime > maxLimits.MaxTime {
+			maxLimits.MaxTime = limit.MaxTime
+		}
+		if limit.DefaultTime > maxLimits.DefaultTime {
+			maxLimits.DefaultTime = limit.DefaultTime
 		}
 	}
 

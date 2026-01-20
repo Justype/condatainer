@@ -8,6 +8,7 @@ import (
 )
 
 const VERSION = "1.0.6"
+const GitHubRepo = "Justype/condatainer"
 
 // Config holds global application settings
 type Config struct {

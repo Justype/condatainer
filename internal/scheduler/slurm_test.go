@@ -6,15 +6,16 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // newTestSlurmScheduler creates a SLURM scheduler instance for testing
 // without requiring sbatch to be installed
 func newTestSlurmScheduler() *SlurmScheduler {
 	return &SlurmScheduler{
-		sbatchBin:       "/usr/bin/sbatch",    // fake path for testing
-		sinfoCommand:    "/usr/bin/sinfo",     // fake path for testing
-		scontrolCommand: "/usr/bin/scontrol",  // fake path for testing
+		sbatchBin:       "/usr/bin/sbatch",   // fake path for testing
+		sinfoCommand:    "/usr/bin/sinfo",    // fake path for testing
+		scontrolCommand: "/usr/bin/scontrol", // fake path for testing
 		directiveRe:     regexp.MustCompile(`^#SBATCH\s+(.+)`),
 		jobIDRe:         regexp.MustCompile(`Submitted batch job (\d+)`),
 	}
@@ -232,7 +233,7 @@ func TestSlurmEmailScriptGeneration(t *testing.T) {
 					JobName:      "test_job",
 					Ncpus:        4,
 					MemMB:        8000,
-					Time:         "01:00:00",
+					Time:         time.Hour,
 					EmailOnBegin: tt.emailOnBegin,
 					EmailOnEnd:   tt.emailOnEnd,
 					EmailOnFail:  tt.emailOnFail,
@@ -317,6 +318,9 @@ echo "Running job"
 	if specs.MailUser != "roundtrip@example.com" {
 		t.Errorf("MailUser = %q; want %q", specs.MailUser, "roundtrip@example.com")
 	}
+	if specs.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Time)
+	}
 
 	// Generate a new script from the parsed specs
 	jobSpec := &JobSpec{
@@ -344,14 +348,21 @@ echo "Running job"
 	if !strings.Contains(scriptContent, "#SBATCH --mail-user=roundtrip@example.com") {
 		t.Errorf("Generated script missing mail-user directive:\n%s", scriptContent)
 	}
+	if !strings.Contains(scriptContent, "#SBATCH --time=02:00:00") {
+		t.Errorf("Generated script missing time directive:\n%s", scriptContent)
+	}
 
 	// Verify NO duplicates - count occurrences
 	mailTypeCount := strings.Count(scriptContent, "--mail-type=")
 	mailUserCount := strings.Count(scriptContent, "--mail-user=")
+	timeCount := strings.Count(scriptContent, "--time=")
 	if mailTypeCount != 1 {
 		t.Errorf("Expected exactly 1 --mail-type directive, found %d:\n%s", mailTypeCount, scriptContent)
 	}
 	if mailUserCount != 1 {
 		t.Errorf("Expected exactly 1 --mail-user directive, found %d:\n%s", mailUserCount, scriptContent)
+	}
+	if timeCount != 1 {
+		t.Errorf("Expected exactly 1 --time directive, found %d:\n%s", timeCount, scriptContent)
 	}
 }

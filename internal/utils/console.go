@@ -88,6 +88,9 @@ func StylePath(path string) string {
 // StyleName formats names, identifiers, or keys (Yellow).
 func StyleName(name string) string { return yellow(name) }
 
+// StyleHighlight formats search matches or highlighted text (Yellow Bold).
+func StyleHighlight(text string) string { return bold(yellow(text)) }
+
 // ---------------------------------------------------------
 // 3. Log Printers
 //    High-level functions that print entire lines with tags.

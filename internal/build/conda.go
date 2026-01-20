@@ -45,18 +45,18 @@ func (c *CondaBuildObject) IsRef() bool   { return false }
 // String returns a string representation
 func (c *CondaBuildObject) String() string {
 	return fmt.Sprintf(`BuildObject:
-    name_version: %s
-    build_source_type: Conda Package
-    build_source: %s
-    dependencies: %v
-    sbatch_flags: %v
-    tmp_overlay_path: %s
-    target_overlay_path: %s
-    cnt_dir_path: %s`,
+		name_version: %s
+		build_source_type: Conda Package
+		build_source: %s
+		dependencies: %v
+		script_specs: %v
+		tmp_overlay_path: %s
+		target_overlay_path: %s
+		cnt_dir_path: %s`,
 		c.nameVersion,
 		c.buildSource,
 		c.dependencies,
-		c.sbatchFlags,
+		c.scriptSpecs,
 		c.tmpOverlayPath,
 		c.targetOverlayPath,
 		c.cntDirPath,
