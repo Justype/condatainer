@@ -179,7 +179,7 @@ modgen exec [OPTIONS] [COMMAND...]
 
 **Environment Variables:**
 
-* `IN_CONDATINER=1`: Set when running the command.
+* `IN_CONDATAINER=1`: Set when running the command.
 
 **Behavior**: **ModGen** performs a module purge followed by module load for the requested modules before running the command.
 

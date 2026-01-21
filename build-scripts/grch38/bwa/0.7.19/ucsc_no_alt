@@ -113,7 +113,7 @@ smart_copy_or_link() {
     local src="$1"
     local dst="$2"
 
-    if [[ "$IN_CONDATINER" -eq 1 ]]; then
+    if [[ "$IN_CONDATAINER" -eq 1 ]]; then
         cp "$src" "$dst"
     else
         ln "$src" "$dst" || cp "$src" "$dst"

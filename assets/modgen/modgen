@@ -1232,7 +1232,7 @@ class ModGen_Exec:
         Utils.print_debug(full_command)
 
         running_env = os.environ.copy()
-        running_env["IN_CONDATINER"] = "1"
+        running_env["IN_CONDATAINER"] = "1"
 
         try:
             subprocess.run(["bash", "-c", full_command], check=True, env=running_env)

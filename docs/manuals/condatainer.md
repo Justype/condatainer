@@ -399,7 +399,7 @@ condatainer exec [OPTIONS] [COMMAND...]
 
 **Environment Variables:**
 
-* `IN_CONDATINER=1`: Set inside the container.
+* `IN_CONDATAINER=1`: Set inside the container.
 * `CNT_CONDA_PREFIX`: Paths to the `.img` default conda path, if `-w`, `--writable-img` is used.
 
 **Example:**

@@ -1172,7 +1172,7 @@ class BuildObject:
             Config.SYSTEM_APPTAINER_BIN, "exec",
             *env_settings,
             "--env", f"SLURM_CPUS_PER_TASK={self.ncpus}",
-            "--env", "IN_CONDATINER=1",
+            "--env", "IN_CONDATAINER=1",
             "--env", f"PATH={CondaTainer_Exec.get_path_env(self.dependencies)}",
             *CondaTainer_Exec.generate_overlay_args(self.dependencies),
             "--overlay", self.tmp_overlay_path,
@@ -1482,7 +1482,7 @@ class CondaTainer_Create:
 
     @staticmethod
     def parse_create_args(args):
-        if "IN_CONDATINER" in os.environ and Utils.is_in_interactive_shell():
+        if "IN_CONDATAINER" in os.environ and Utils.is_in_interactive_shell():
             Utils.print_warning("You are running 'condatiner create' inside a CondaTainer overlay.")
             response = input("Are you sure you want to continue? [y/N]: ")
             if response.lower() != 'y':
@@ -2083,7 +2083,7 @@ class CondaTainer_Exec:
                     last_img = o
 
         if last_img is not None:
-            if "IN_CONDATINER" in os.environ:
+            if "IN_CONDATAINER" in os.environ:
                 Utils.print_warning("You are trying to mount an .img overlay inside an existing CondaTainer environment. This may lead to unexpected behavior.")
 
             img_name = os.path.splitext(os.path.basename(last_img))[0]
@@ -2125,9 +2125,9 @@ class CondaTainer_Exec:
 
         layer = 1
         ps1_prefix = "CNT"
-        if "IN_CONDATINER" in os.environ:
+        if "IN_CONDATAINER" in os.environ:
             try:
-                layer = int(os.environ["IN_CONDATINER"])
+                layer = int(os.environ["IN_CONDATAINER"])
             except ValueError:
                 layer = 1
             
@@ -2142,7 +2142,7 @@ class CondaTainer_Exec:
             "--env", "LC_ALL=C.UTF-8",
             "--env", "LANG=C.UTF-8",
             "--env", f"PS1={ps1_prefix} \\[\\e[0;34m\\]\\w\\[\\e[0m\\]> ",
-            "--env", f"IN_CONDATINER={layer}",
+            "--env", f"IN_CONDATAINER={layer}",
             *img_env,
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
             *additional_binds,

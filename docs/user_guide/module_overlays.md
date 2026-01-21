@@ -111,7 +111,7 @@ You can follow the example below to define SLURM parameters in your script and s
 #SBATCH --mem=1GB
 #DEP:samtools/1.22.1
 
-if [ -z "$IN_CONDATINER" ] && command -v condatainer >/dev/null 2>&1; then
+if [ -z "$IN_CONDATAINER" ] && command -v condatainer >/dev/null 2>&1; then
     condatainer run "$0" "$@"
     exit $?
 fi
@@ -138,7 +138,7 @@ The following is an example SLURM script for running `cellranger count` using th
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64GB
 
-if [ -z "$IN_CONDATINER" ] && command -v condatainer >/dev/null 2>&1; then
+if [ -z "$IN_CONDATAINER" ] && command -v condatainer >/dev/null 2>&1; then
     condatainer run "$0" "$@"
     exit $?
 fi

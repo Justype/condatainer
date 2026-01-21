@@ -192,7 +192,7 @@ You can also write the `run_job.sh` in this way:
 ## Other SBATCH directives
 #DEP:env.img
 
-if [ -z "$IN_CONDATINER" ] && command -v condatainer >/dev/null 2>&1; then
+if [ -z "$IN_CONDATAINER" ] && command -v condatainer >/dev/null 2>&1; then
     condatainer run "$0" "$@"
     exit $?
 fi
