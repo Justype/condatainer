@@ -10,9 +10,8 @@ import (
 )
 
 var schedulerCmd = &cobra.Command{
-	Use:     "scheduler",
-	Aliases: []string{"sched"},
-	Short:   "Display scheduler information",
+	Use:   "scheduler",
+	Short: "Display scheduler information",
 	Long: `Display information about the detected job scheduler.
 
 Shows scheduler type (SLURM, PBS, etc.), binary path, version, and availability status.`,

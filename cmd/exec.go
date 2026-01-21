@@ -75,29 +75,8 @@ func init() {
 	execCmd.Flags().BoolVarP(&eNoAutoload, "no-autoload", "n", false, "disable autoloading 'env.img' from current directory (only applies to the 'e' shortcut)")
 
 	// --- NEW: Dynamic Completion Logic ---
-	execCmd.RegisterFlagCompletionFunc("overlay", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		// Use InstalledOverlays so we include both images and ref-images and reuse existing normalization.
-		installed, err := exec.InstalledOverlays()
-		if err != nil {
-			// If we can't list overlays, indicate an error to the shell completion system
-			return nil, cobra.ShellCompDirectiveError
-		}
-
-		suggestions := []string{}
-		for name := range installed {
-			if strings.HasPrefix(name, toComplete) {
-				suggestions = append(suggestions, name)
-			}
-		}
-		sort.Strings(suggestions)
-		if len(suggestions) == 0 {
-			// No matches — allow shell to perform default file completion
-			return nil, cobra.ShellCompDirectiveDefault
-		}
-
-		// Return suggestions and tell Shell NOT to fall back to standard file completion
-		return suggestions, cobra.ShellCompDirectiveNoFileComp
-	})
+	execCmd.RegisterFlagCompletionFunc("overlay", overlayFlagCompletion(true))
+	execCmd.RegisterFlagCompletionFunc("base-image", overlayFlagCompletion(false))
 	// -------------------------------------
 
 	// Stop flag parsing after the first positional argument so tool arguments (like --help) bypass exec.
@@ -221,4 +200,84 @@ func execHelpRequested(args []string) bool {
 
 func ensureBaseImage() error {
 	return apptainer.EnsureBaseImage()
+}
+
+func overlayFlagCompletion(includeData bool) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		installed, err := exec.InstalledOverlays()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+
+		choices := map[string]struct{}{}
+		for name, path := range installed {
+			if includeData || isAppOverlay(path) {
+				if toComplete == "" || strings.HasPrefix(name, toComplete) {
+					choices[name] = struct{}{}
+				}
+			}
+		}
+
+		for _, candidate := range localOverlaySuggestions(toComplete) {
+			choices[candidate] = struct{}{}
+		}
+
+		if len(choices) == 0 {
+			return nil, cobra.ShellCompDirectiveDefault
+		}
+
+		suggestions := make([]string, 0, len(choices))
+		for choice := range choices {
+			suggestions = append(suggestions, choice)
+		}
+		sort.Strings(suggestions)
+		return suggestions, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+func localOverlaySuggestions(toComplete string) []string {
+	pathDir, _ := filepath.Split(toComplete)
+	dirForRead := pathDir
+	if dirForRead == "" {
+		dirForRead = "."
+	}
+
+	entries, err := os.ReadDir(dirForRead)
+	if err != nil {
+		return nil
+	}
+
+	suggestions := []string{}
+	for _, entry := range entries {
+		if entry.IsDir() || !utils.IsOverlay(entry.Name()) {
+			continue
+		}
+		candidate := entry.Name()
+		if pathDir != "" {
+			candidate = pathDir + entry.Name()
+		}
+		if toComplete != "" && !strings.HasPrefix(candidate, toComplete) {
+			continue
+		}
+		suggestions = append(suggestions, candidate)
+	}
+	return suggestions
+}
+
+func isAppOverlay(path string) bool {
+	return pathWithinDir(path, config.Global.ImagesDir)
+}
+
+func pathWithinDir(path, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return !(rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
 }
