@@ -37,8 +37,8 @@ func Build(imagePath, defFile string, opts *BuildOptions) error {
 		args = append(args, "--no-cleanup")
 	}
 
-	// Add detected GPU flags and then user-provided extras.
-	args = append(args, DetectGPUFlags()...)
+	// Add user-provided extras.
+	// args = append(args, DetectGPUFlags()...) // Do not detect the gpu when building
 	args = append(args, opts.Additional...)
 
 	// Add image path and definition file

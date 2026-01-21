@@ -73,22 +73,22 @@ var createCmd = &cobra.Command{
 
 		// 3. Handle Compression Config
 		if compLz4 {
-			config.Global.CompressArgs = "-comp lz4"
+			config.Global.Build.CompressArgs = "-comp lz4"
 		} else if compZstd {
-			config.Global.CompressArgs = "-comp zstd -Xcompression-level 14"
+			config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 14"
 		} else if compZstdFast {
-			config.Global.CompressArgs = "-comp zstd -Xcompression-level 3"
+			config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 3"
 		} else if compZstdMedium {
-			config.Global.CompressArgs = "-comp zstd -Xcompression-level 8"
+			config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 8"
 		} else if compZstdHigh {
-			config.Global.CompressArgs = "-comp zstd -Xcompression-level 19"
+			config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 19"
 		} else if compGzip {
-			config.Global.CompressArgs = "-comp gzip"
+			config.Global.Build.CompressArgs = "-comp gzip"
 		} else {
 			// Auto-detect: use zstd-medium if supported, otherwise use default (lz4)
 			if version, err := apptainer.GetVersion(); err == nil {
 				if apptainer.CheckZstdSupport(version) {
-					config.Global.CompressArgs = "-comp zstd -Xcompression-level 8"
+					config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 8"
 					utils.PrintDebug("Auto-selected zstd-medium compression (Apptainer %s supports zstd)", utils.StyleNumber(version))
 				}
 			}
@@ -101,7 +101,7 @@ var createCmd = &cobra.Command{
 				utils.PrintError("Invalid temp size: %v", err)
 				os.Exit(1)
 			}
-			config.Global.TmpSizeMB = sizeMB
+			config.Global.Build.TmpSizeMB = sizeMB
 		}
 
 		// 5. Normalize package names

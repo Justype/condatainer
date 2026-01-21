@@ -137,7 +137,7 @@ echo "Packing overlay to SquashFS..."
 mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
 `,
 		installCmd,
-		c.targetOverlayPath, c.ncpus, config.Global.CompressArgs,
+		c.targetOverlayPath, c.ncpus, config.Global.Build.CompressArgs,
 	)
 
 	// Build exec command args

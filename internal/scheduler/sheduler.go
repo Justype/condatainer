@@ -7,6 +7,15 @@ import (
 	"time"
 )
 
+// SchedulerInfo holds information about the detected scheduler
+type SchedulerInfo struct {
+	Type     string // Scheduler type (e.g., "SLURM", "PBS", "LSF")
+	Binary   string // Path to scheduler binary (e.g., "/usr/bin/sbatch")
+	Version  string // Scheduler version (if available)
+	InJob    bool   // Whether we're currently inside a scheduled job
+	Available bool  // Whether scheduler is available for job submission
+}
+
 // GpuSpec holds GPU requirements parsed from scheduler directives
 type GpuSpec struct {
 	Type  string // GPU type/model (e.g., "h100", "a100", "v100")
@@ -83,6 +92,9 @@ type Scheduler interface {
 	// GetClusterInfo retrieves cluster configuration (GPUs, limits)
 	// Returns nil if information is not available
 	GetClusterInfo() (*ClusterInfo, error)
+
+	// GetInfo returns information about the scheduler
+	GetInfo() *SchedulerInfo
 }
 
 // ValidateSpecs validates job specs against cluster limits

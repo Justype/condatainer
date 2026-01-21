@@ -21,8 +21,8 @@ var ErrBuildCancelled = errors.New("build cancelled by user")
 type ScriptSpecs = scheduler.ScriptSpecs
 
 func defaultBuildNcpus() int {
-	if config.Global.NCPUs > 0 {
-		return config.Global.NCPUs
+	if config.Global.Build.DefaultCPUs > 0 {
+		return config.Global.Build.DefaultCPUs
 	}
 	if count := runtime.NumCPU(); count > 0 {
 		return count
@@ -129,7 +129,7 @@ func (b *BaseBuildObject) CreateTmpOverlay(force bool) error {
 	// Use overlay package to create ext3 overlay
 	// For build overlays, we use a temporary size from config (default 20GB)
 	// Use "conda" profile for small files, sparse=true for faster creation
-	if err := overlay.CreateForCurrentUser(b.tmpOverlayPath, config.Global.TmpSizeMB, "default", true, "ext3"); err != nil {
+	if err := overlay.CreateForCurrentUser(b.tmpOverlayPath, config.Global.Build.TmpSizeMB, "default", true, config.Global.Build.OverlayType); err != nil {
 		return fmt.Errorf("failed to create temporary overlay: %w", err)
 	}
 

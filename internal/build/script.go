@@ -264,12 +264,12 @@ echo "Setting permissions..."
 find /cnt -type f -exec chmod ug+rw,o+r {} \;
 find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
 mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
-`, targetPath, s.ncpus, config.Global.CompressArgs)
+`, targetPath, s.ncpus, config.Global.Build.CompressArgs)
 	} else {
 		// For ref overlays: just pack the directory
 		bashScript = fmt.Sprintf(`
 mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M
-`, sourceDir, targetPath, s.ncpus, config.Global.CompressArgs)
+`, sourceDir, targetPath, s.ncpus, config.Global.Build.CompressArgs)
 	}
 
 	args := []string{

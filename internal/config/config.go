@@ -5,16 +5,30 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"time"
 )
 
 const VERSION = "1.0.6"
 const GitHubRepo = "Justype/condatainer"
 
+// BuildConfig holds default settings for build operations
+type BuildConfig struct {
+	DefaultCPUs  int           // Default CPUs for builds (if not specified in script)
+	DefaultMemMB int64         // Default memory for builds in MB
+	DefaultTime  time.Duration // Default time limit
+	TmpSizeMB    int           // Size of temporary overlay in MB
+	CompressArgs string        // mksquashfs compression arguments
+	OverlayType  string        // Overlay filesystem type: "ext3" or "squashfs"
+}
+
 // Config holds global application settings
 type Config struct {
-	Debug            bool
-	SubmitJob        bool
-	Version          string
+	// Runtime settings
+	Debug     bool
+	SubmitJob bool
+	Version   string
+
+	// Directory paths
 	ProgramDir       string
 	BaseDir          string
 	ImagesDir        string
@@ -23,12 +37,14 @@ type Config struct {
 	HelperScriptsDir string
 	TmpDir           string
 	LogsDir          string
-	CompressArgs     string
-	TmpSizeMB        int
 
+	// Binary paths
 	ApptainerBin string
 	BaseImage    string
-	NCPUs        int
+	SchedulerBin string // Optional: path to sbatch/scheduler binary (auto-detected if empty)
+
+	// Build configuration
+	Build BuildConfig
 }
 
 // Global holds the singleton configuration instance
@@ -59,9 +75,10 @@ func LoadDefaults(executablePath string) {
 	}
 
 	Global = Config{
-		Debug:            false,
-		SubmitJob:        true,
-		Version:          VERSION,
+		Debug:     false,
+		SubmitJob: true,
+		Version:   VERSION,
+
 		ProgramDir:       programDir,
 		BaseDir:          baseDir,
 		ImagesDir:        filepath.Join(baseDir, "images"),
@@ -70,12 +87,19 @@ func LoadDefaults(executablePath string) {
 		HelperScriptsDir: filepath.Join(baseDir, "helper-scripts"),
 		TmpDir:           filepath.Join(baseDir, "tmp"),
 		LogsDir:          filepath.Join(os.Getenv("HOME"), "logs"),
-		CompressArgs:     "-comp lz4", // zstd only compatible with apptainer version > 1.4
-		TmpSizeMB:        20480,
-		NCPUs:            computeNCPUs(),
 
 		ApptainerBin: "apptainer",
 		BaseImage:    filepath.Join(baseDir, "images", "base_image.sif"),
+		SchedulerBin: "", // Auto-detect scheduler binary (empty = search PATH)
+
+		Build: BuildConfig{
+			DefaultCPUs:  computeNCPUs(),
+			DefaultMemMB: 8192,                  // 8GB default memory
+			DefaultTime:  2 * time.Hour,         // 2 hour default time limit
+			TmpSizeMB:    20480,                 // 20GB temporary overlay
+			CompressArgs: "-comp lz4",           // zstd only compatible with apptainer version > 1.4
+			OverlayType:  "ext3",                // ext3 for temporary overlays
+		},
 	}
 }
 
