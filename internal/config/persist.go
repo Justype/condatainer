@@ -65,17 +65,21 @@ func InitViper() error {
 
 // setDefaults sets default values for all config keys
 func setDefaults() {
+	// Base directory: empty means use auto-detection ($SCRATCH/condatainer or $HOME/condatainer)
+	viper.SetDefault("base_dir", "")
+
 	viper.SetDefault("apptainer_bin", "apptainer")
 	viper.SetDefault("scheduler_bin", "")
 	viper.SetDefault("scheduler_type", "")
 	viper.SetDefault("submit_job", true)
+	viper.SetDefault("logs_dir", "")
 
 	// Build config defaults
 	viper.SetDefault("build.default_cpus", 4)
 	viper.SetDefault("build.default_mem_mb", 8192)
 	viper.SetDefault("build.default_time", "2h")
 	viper.SetDefault("build.tmp_size_mb", 20480)
-	viper.SetDefault("build.compress_args", "-comp lz4")
+	viper.SetDefault("build.compress_args", "") // Empty means auto-detect based on apptainer version
 	viper.SetDefault("build.overlay_type", "ext3")
 }
 
@@ -252,8 +256,31 @@ func ForceDetectAndSave() (bool, error) {
 	return updated, nil
 }
 
+// SetCompressArgsInConfig saves the compress_args to config file
+// This is called during config init to persist the auto-detected compression
+func SetCompressArgsInConfig(compressArgs string) error {
+	viper.Set("build.compress_args", compressArgs)
+	return SaveConfig()
+}
+
 // LoadFromViper loads config from Viper into Global struct
 func LoadFromViper() {
+	// Load base_dir from config if set (overrides auto-detection)
+	if baseDir := viper.GetString("base_dir"); baseDir != "" {
+		// Expand environment variables in the path
+		baseDir = os.ExpandEnv(baseDir)
+		if absBaseDir, err := filepath.Abs(baseDir); err == nil {
+			baseDir = absBaseDir
+		}
+		// Update all derived paths
+		Global.BaseDir = baseDir
+		Global.ImagesDir = filepath.Join(baseDir, "images")
+		Global.BuildScriptsDir = filepath.Join(baseDir, "build-scripts")
+		Global.HelperScriptsDir = filepath.Join(baseDir, "helper-scripts")
+		Global.TmpDir = filepath.Join(baseDir, "tmp")
+		Global.BaseImage = filepath.Join(baseDir, "images", "base_image.sif")
+	}
+
 	// Update binary paths from Viper, with fallback to detection
 	if bin := viper.GetString("apptainer_bin"); bin != "" && ValidateBinary(bin) {
 		Global.ApptainerBin = bin
@@ -269,8 +296,27 @@ func LoadFromViper() {
 		Global.SchedulerBin = bin
 	}
 
+	// Handle submit_job: disable if scheduler is not accessible
 	if submitJob := viper.GetBool("submit_job"); !submitJob {
-		Global.SubmitJob = submitJob
+		Global.SubmitJob = false
+	} else {
+		// Auto-disable if no scheduler binary is available
+		schedulerBin := Global.SchedulerBin
+		if schedulerBin == "" {
+			schedulerBin, _ = DetectSchedulerBin()
+		}
+		if schedulerBin == "" || !ValidateBinary(schedulerBin) {
+			Global.SubmitJob = false
+		}
+	}
+
+	// Load logs_dir from config (overrides default $HOME/logs)
+	if logsDir := viper.GetString("logs_dir"); logsDir != "" {
+		logsDir = os.ExpandEnv(logsDir)
+		if absLogsDir, err := filepath.Abs(logsDir); err == nil {
+			logsDir = absLogsDir
+		}
+		Global.LogsDir = logsDir
 	}
 
 	// Load build config from Viper
@@ -293,11 +339,34 @@ func LoadFromViper() {
 		Global.Build.TmpSizeMB = tmpSizeMB
 	}
 
+	// Only override compress_args if explicitly set in config (non-empty)
+	// Empty means auto-detect based on apptainer version (handled by AutoDetectCompression)
 	if compressArgs := viper.GetString("build.compress_args"); compressArgs != "" {
 		Global.Build.CompressArgs = compressArgs
 	}
 
 	if overlayType := viper.GetString("build.overlay_type"); overlayType != "" {
 		Global.Build.OverlayType = overlayType
+	}
+}
+
+// AutoDetectCompression sets compression to zstd if supported and user hasn't explicitly set it.
+// This should be called after apptainer version is known.
+// supportsZstd: whether the current apptainer version supports zstd (>= 1.4)
+func AutoDetectCompression(supportsZstd bool) {
+	// Only auto-detect if user hasn't explicitly set compress_args in config
+	// Empty string in config means "auto-detect"
+	if viper.GetString("build.compress_args") != "" {
+		// User explicitly set compress_args, respect it
+		return
+	}
+
+	// Auto-detect: use zstd if supported, otherwise lz4
+	if supportsZstd {
+		Global.Build.CompressArgs = "-comp zstd -Xcompression-level 8"
+		utils.PrintDebug("Auto-detected zstd support, using zstd compression")
+	} else {
+		Global.Build.CompressArgs = "-comp lz4"
+		utils.PrintDebug("Using lz4 compression (zstd not supported)")
 	}
 }

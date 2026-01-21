@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -57,9 +58,18 @@ var configShowCmd = &cobra.Command{
 		fmt.Println(utils.StyleTitle("Current Configuration:"))
 		fmt.Println()
 
-		// Runtime settings
-		fmt.Println(utils.StyleTitle("Runtime:"))
-		fmt.Printf("  submit_job:     %v\n", viper.GetBool("submit_job"))
+		// Directories
+		fmt.Println(utils.StyleTitle("Directories:"))
+		baseDir := viper.GetString("base_dir")
+		if baseDir == "" {
+			baseDir = config.Global.BaseDir + " (auto-detected)"
+		}
+		fmt.Printf("  base_dir:       %s\n", baseDir)
+		logsDir := viper.GetString("logs_dir")
+		if logsDir == "" {
+			logsDir = config.Global.LogsDir + " (default)"
+		}
+		fmt.Printf("  logs_dir:       %s\n", logsDir)
 		fmt.Println()
 
 		// Binary paths
@@ -69,19 +79,39 @@ var configShowCmd = &cobra.Command{
 		fmt.Printf("  scheduler_type: %s\n", viper.GetString("scheduler_type"))
 		fmt.Println()
 
+		// Runtime settings
+		fmt.Println(utils.StyleTitle("Runtime:"))
+		submitJobConfig := viper.GetBool("submit_job")
+		submitJobActual := config.Global.SubmitJob
+		if submitJobConfig && !submitJobActual {
+			fmt.Printf("  submit_job:     %v (disabled: scheduler not accessible)\n", submitJobConfig)
+		} else {
+			fmt.Printf("  submit_job:     %v\n", submitJobActual)
+		}
+		fmt.Println()
+
 		// Build settings
 		fmt.Println(utils.StyleTitle("Build Configuration:"))
 		fmt.Printf("  default_cpus:    %d\n", viper.GetInt("build.default_cpus"))
 		fmt.Printf("  default_mem_mb:  %d\n", viper.GetInt64("build.default_mem_mb"))
 		fmt.Printf("  default_time:    %s\n", viper.GetString("build.default_time"))
 		fmt.Printf("  tmp_size_mb:     %d\n", viper.GetInt("build.tmp_size_mb"))
-		fmt.Printf("  compress_args:   %s\n", viper.GetString("build.compress_args"))
+		// Show actual compress_args (may be auto-detected based on apptainer version)
+		compressArgs := viper.GetString("build.compress_args")
+		actualCompressArgs := config.Global.Build.CompressArgs
+		if compressArgs != actualCompressArgs {
+			fmt.Printf("  compress_args:   %s (auto-detected: zstd supported)\n", actualCompressArgs)
+		} else {
+			fmt.Printf("  compress_args:   %s\n", compressArgs)
+		}
 		fmt.Printf("  overlay_type:    %s\n", viper.GetString("build.overlay_type"))
 		fmt.Println()
 
 		// Show environment variable overrides
 		fmt.Println(utils.StyleTitle("Environment Variable Overrides:"))
 		envVars := []string{
+			"CONDATAINER_BASE_DIR",
+			"CONDATAINER_LOGS_DIR",
 			"CONDATAINER_APPTAINER_BIN",
 			"CONDATAINER_SCHEDULER_BIN",
 			"CONDATAINER_SUBMIT_JOB",
@@ -145,6 +175,8 @@ Time duration format (for build.default_time):
 
 		// Validate known keys
 		knownKeys := map[string]bool{
+			"base_dir":             true,
+			"logs_dir":             true,
 			"apptainer_bin":        true,
 			"scheduler_bin":        true,
 			"scheduler_type":       true,
@@ -221,6 +253,29 @@ var configInitCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		// Check if apptainer was found
+		apptainerBin := viper.GetString("apptainer_bin")
+		if apptainerBin == "" || !config.ValidateBinary(apptainerBin) {
+			utils.PrintWarning("Cannot find apptainer. Please load apptainer module:")
+			utils.PrintHint("ml apptainer")
+		}
+
+		// Auto-detect compression based on apptainer version and save to config
+		detectedCompression := "-comp lz4" // default
+		if apptainerBin != "" && config.ValidateBinary(apptainerBin) {
+			if err := apptainer.SetBin(apptainerBin); err == nil {
+				if version, err := apptainer.GetVersion(); err == nil {
+					if apptainer.CheckZstdSupport(version) {
+						detectedCompression = "-comp zstd -Xcompression-level 8"
+					}
+				}
+			}
+		}
+		// Save detected compression to config
+		if err := config.SetCompressArgsInConfig(detectedCompression); err != nil {
+			utils.PrintWarning("Failed to save compression setting: %v", err)
+		}
+
 		if updated {
 			utils.PrintSuccess("Config file created with auto-detected settings: %s", configPath)
 		} else {
@@ -236,6 +291,7 @@ var configInitCmd = &cobra.Command{
 		} else {
 			fmt.Printf("  Scheduler: %s\n", utils.StyleWarning("not found"))
 		}
+		fmt.Printf("  Compression: %s\n", detectedCompression)
 	},
 }
 

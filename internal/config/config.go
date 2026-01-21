@@ -54,20 +54,11 @@ func LoadDefaults(executablePath string) {
 	if absProgDir, err := filepath.Abs(programDir); err == nil {
 		programDir = absProgDir
 	}
-	baseDir := filepath.Dir(programDir)
-	baseDir = filepath.Clean(baseDir)
 
-	// Developer Mode Check
-	if _, err := os.Stat(filepath.Join(baseDir, "images")); os.IsNotExist(err) {
-		cwd, err := os.Getwd()
-		if err == nil {
-			baseDir = cwd
-			programDir = filepath.Join(cwd, "bin")
-			if absProgDir, err := filepath.Abs(programDir); err == nil {
-				programDir = absProgDir
-			}
-		}
-	}
+	// Determine base directory with priority:
+	// 1. $SCRATCH/condatainer (if $SCRATCH is set)
+	// 2. $HOME/condatainer (fallback)
+	baseDir := detectBaseDir()
 
 	if absBaseDir, err := filepath.Abs(baseDir); err == nil {
 		baseDir = absBaseDir
@@ -81,7 +72,6 @@ func LoadDefaults(executablePath string) {
 		ProgramDir:       programDir,
 		BaseDir:          baseDir,
 		ImagesDir:        filepath.Join(baseDir, "images"),
-		RefImagesDir:     filepath.Join(baseDir, "ref-images"),
 		BuildScriptsDir:  filepath.Join(baseDir, "build-scripts"),
 		HelperScriptsDir: filepath.Join(baseDir, "helper-scripts"),
 		TmpDir:           filepath.Join(baseDir, "tmp"),
@@ -123,6 +113,29 @@ func IsInsideContainer() bool {
 	}
 
 	return false
+}
+
+// detectBaseDir determines the base directory for condatainer data.
+// Priority:
+//  1. $SCRATCH/condatainer (if $SCRATCH is set, common on HPC systems)
+//  2. $HOME/condatainer (fallback)
+func detectBaseDir() string {
+	// Try $SCRATCH first (common on HPC systems)
+	if scratch := os.Getenv("SCRATCH"); scratch != "" {
+		return filepath.Join(scratch, "condatainer")
+	}
+
+	// Fallback to $HOME/condatainer
+	if home := os.Getenv("HOME"); home != "" {
+		return filepath.Join(home, "condatainer")
+	}
+
+	// Last resort: use current working directory
+	if cwd, err := os.Getwd(); err == nil {
+		return filepath.Join(cwd, "condatainer")
+	}
+
+	return "condatainer"
 }
 
 // detectApptainerBin tries to find the apptainer binary, with special handling for containers

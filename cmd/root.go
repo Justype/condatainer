@@ -51,6 +51,13 @@ var rootCmd = &cobra.Command{
 		// Step 4: Load detected values from Viper into Global config
 		config.LoadFromViper()
 
+		// Warn if apptainer is still not accessible after auto-detection
+		if !config.ValidateBinary(config.Global.ApptainerBin) {
+			utils.PrintWarning("Apptainer not accessible. The module may have been unloaded or removed.")
+			utils.PrintHint("Load the apptainer module: %s", utils.StyleAction("ml apptainer"))
+			utils.PrintHint("Then run: %s", utils.StyleAction("condatainer config init"))
+		}
+
 		// Step 5: Apply command-line flags (highest priority)
 		if debugMode {
 			utils.DebugMode = true
@@ -72,7 +79,15 @@ var rootCmd = &cobra.Command{
 			utils.PrintDebug("Local mode enabled (job submission disabled)")
 		}
 
-		// Step 6: Initialize scheduler if job submission is enabled
+		// Step 6: Auto-detect compression based on apptainer version
+		if err := apptainer.SetBin(config.Global.ApptainerBin); err == nil {
+			if version, err := apptainer.GetVersion(); err == nil {
+				supportsZstd := apptainer.CheckZstdSupport(version)
+				config.AutoDetectCompression(supportsZstd)
+			}
+		}
+
+		// Step 7: Initialize scheduler if job submission is enabled
 		if config.Global.SubmitJob && config.Global.SchedulerBin != "" {
 			sched, err := scheduler.DetectSchedulerWithBinary(config.Global.SchedulerBin)
 			if err == nil && sched.IsAvailable() {
