@@ -47,6 +47,7 @@ class Config:
     SYSTEM_APPTAINER_BIN = shutil.which("apptainer")
     BASE_IMAGE_DEF = os.path.join(BUILD_SCRIPTS_DIR, "base_image.def")
     BASE_IMAGE_SIF = os.path.join(IMAGES_DIR, "base_image.sif")
+    PREBUILT_OVERLAYS = { "build-essential" }
     BAD_CHARS_REGEX = re.compile(r'[<>:"/\\|?*\0\s\'`$&;|!\[\]#%@=+{}(),]')
 
     # Utils
@@ -335,7 +336,6 @@ class Utils:
         try:
             return Utils.download_file(url, dest_path) and os.chmod(dest_path, 0o775) is None
         except Exception as e:
-            Utils.print_error(f"Failed to download build script from {url}: {e}")
             return False
 
     @staticmethod
@@ -474,11 +474,11 @@ class Utils:
                     key, value = content.split("=", 1)
                     env_dict[key] = {"value": value, "note": ""}
 
-                if env_index + 1 < len(lines):
-                    next_line = lines[env_index + 1].strip()
-                    if next_line.startswith("#ENVNOTE:"):
-                        note = next_line[len("#ENVNOTE:"):].strip()
-                        env_dict[key]["note"] = note
+                    if env_index + 1 < len(lines):
+                        next_line = lines[env_index + 1].strip()
+                        if next_line.startswith("#ENVNOTE:"):
+                            note = next_line[len("#ENVNOTE:"):].strip()
+                            env_dict[key]["note"] = note
 
         return env_dict
 
@@ -641,6 +641,24 @@ class CondaTainer:
         return True
 
     @staticmethod
+    def try_download_prebuilt_overlay(name_version: str) -> bool:
+        arch = platform.machine()
+        if arch not in CondaTainer.PREBUILT_BASE_IMAGE_PLATFORMS:
+            Utils.print_warning(f"Pre-built overlays not available for architecture: {arch}")
+            return False
+
+        normalized_name_version = Utils.normalize_name_version(name_version)
+        dest_path = os.path.join(Config.IMAGES_DIR, normalized_name_version.replace('/', '--') + ".sqf")
+        overlay_filename = normalized_name_version.replace('/', '--') + "_" + arch + ".sqf"
+        url = f"https://github.com/Justype/condatainer/releases/download/v1.0.5/{overlay_filename}"
+        Utils.print_message(f"Attempting to download pre-built overlay for {normalized_name_version}...")
+        if not Utils.download_file(url, dest_path):
+            Utils.print_warning("Failed to download pre-built overlay.")
+            return False
+        Utils.print_success(f"Pre-built {normalized_name_version} downloaded.")
+        return True
+
+    @staticmethod
     def ensure_base_image():
         """
         Exit the program if the base image does not exist, after attempting to build it.
@@ -656,6 +674,16 @@ class CondaTainer:
         if not Config.debug:
             Utils.print_message("Base images not found. Downloading base image...")
             if CondaTainer.try_download_prebuilt_base_image():
+                installed_overlays = CondaTainer.get_installed_overlays()
+                if "build-essential" in installed_overlays:
+                    return
+                if Utils.is_in_interactive_shell():
+                    Utils.print_message("Do you also want to download build-essential overlay for R and C/C++ compilation? [Y/n]: ", end="")
+                    choice = input().strip().lower()
+                    if choice not in ("", "y", "yes"):
+                        return
+
+                CondaTainer.try_download_prebuilt_overlay("build-essential")
                 return
         else:
             Utils.print_debug("Base image not found. Proceeding to build locally due to debug mode.")
@@ -987,11 +1015,14 @@ class BuildObject:
             "/bin/bash", "-c",
             f"""
             mkdir -p $TMPDIR
+            echo "Creating conda environment {name}={version} in overlay..."
             micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/{self.relative_path} {name}={version}
 
             echo "Setting permissions..."
             find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
             find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
+
+            echo "Packing overlay to SquashFS..."
             mksquashfs /cnt {os.path.abspath(self.target_overlay_path)} -processors {self.ncpus} -keep-as-directory {Config.compress_args} -b 1M
             """
         ]
@@ -1013,6 +1044,11 @@ class BuildObject:
         if os.path.exists(self.target_overlay_path):
             Utils.print_warning(f"Overlay {Utils.yellow_text(os.path.basename(self.target_overlay_path))} already exists at {Utils.blue_text(self.target_overlay_path)}. Skipping creation.")
             return True
+
+        if self.name_version in Config.PREBUILT_OVERLAYS:
+            if os.path.dirname(self.target_overlay_path) == Config.IMAGES_DIR:
+                if CondaTainer.try_download_prebuilt_overlay(self.name_version):
+                    return True
 
         cmd_create = [
             Config.SYSTEM_APPTAINER_BIN, "build", "--fakeroot",
@@ -1103,6 +1139,7 @@ class BuildObject:
             "--env", "TMPDIR=/ext3/tmp",
         ]
 
+        target_dir = ""
         if self.is_ref:
             os.makedirs(self.cnt_dir_path, mode=0o775, exist_ok=True)
             target_dir = os.path.join(self.cnt_dir_path, self.name_version)
@@ -1114,7 +1151,7 @@ class BuildObject:
             Config.SYSTEM_APPTAINER_BIN, "exec",
             *env_settings,
             "--env", f"SLURM_CPUS_PER_TASK={self.ncpus}",
-            "--env", "IN_CONDATINER=1",
+            "--env", "IN_CONDATAINER=1",
             "--env", f"PATH={CondaTainer_Exec.get_path_env(self.dependencies)}",
             *CondaTainer_Exec.generate_overlay_args(self.dependencies),
             "--overlay", self.tmp_overlay_path,
@@ -1196,7 +1233,7 @@ class BuildObject:
 
         env_dict = Utils.get_env_dict_from_build_script(self.build_source)
         if env_dict:
-            env_file_path = os.path.splitext(self.target_overlay_path)[0] + ".env"
+            env_file_path = self.target_overlay_path + ".env"
             with open(env_file_path, 'w') as f:
                 for env in env_dict:
                     value = env_dict[env]["value"].replace('$app_root', f"/cnt/{self.relative_path}")
@@ -1424,7 +1461,7 @@ class CondaTainer_Create:
 
     @staticmethod
     def parse_create_args(args):
-        if "IN_CONDATINER" in os.environ and Utils.is_in_interactive_shell():
+        if "IN_CONDATAINER" in os.environ and Utils.is_in_interactive_shell():
             Utils.print_warning("You are running 'condatiner create' inside a CondaTainer overlay.")
             response = input("Are you sure you want to continue? [y/N]: ")
             if response.lower() != 'y':
@@ -1554,11 +1591,15 @@ class CondaTainer_Create:
                 "/bin/bash", "-c",
                 f"""
                 mkdir -p $TMPDIR
+
+                echo "Creating conda environment in overlay..."
                 {install_command}
                 {copy_command}
                 echo "Setting permissions..."
                 find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
                 find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
+
+                echo "Packing overlay to SquashFS..."
                 mksquashfs /cnt {os.path.abspath(overlay_abs_path)} -processors {Config.NCPUS} -keep-as-directory {Config.compress_args} -b 1M
                 """
             ]
@@ -1885,7 +1926,7 @@ class CondaTainer_Exec:
         configs = { }
         overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
         for op in overlay_abs_paths:
-            env_path = os.path.splitext(op)[0] + ".env"
+            env_path = op + ".env"
             if not os.path.isfile(env_path):
                 continue
 
@@ -1954,7 +1995,7 @@ class CondaTainer_Exec:
         notes = { }
         overlay_abs_paths = CondaTainer_Exec.get_overlay_abs_paths(paths_or_name_version)
         for op in overlay_abs_paths:
-            env_path = os.path.splitext(op)[0] + ".env"
+            env_path = op + ".env"
             if not os.path.isfile(env_path):
                 continue
 
@@ -2024,7 +2065,7 @@ class CondaTainer_Exec:
                     last_img = o
 
         if last_img is not None:
-            if "IN_CONDATINER" in os.environ:
+            if "IN_CONDATAINER" in os.environ:
                 Utils.print_warning("You are trying to mount an .img overlay inside an existing CondaTainer environment. This may lead to unexpected behavior.")
 
             img_name = os.path.splitext(os.path.basename(last_img))[0]
@@ -2064,6 +2105,17 @@ class CondaTainer_Exec:
                 additional_binds.append("--bind")
                 additional_binds.append(bp)
 
+        layer = 1
+        ps1_prefix = "CNT"
+        if "IN_CONDATAINER" in os.environ:
+            try:
+                layer = int(os.environ["IN_CONDATAINER"])
+            except ValueError:
+                layer = 1
+            
+            layer += 1
+            ps1_prefix = ps1_prefix + "_" + str(layer)
+
         exec_cmd = [
             Config.SYSTEM_APPTAINER_BIN, "exec",
             *CondaTainer_Exec.generate_overlay_args(paths_or_name_versions),
@@ -2071,8 +2123,8 @@ class CondaTainer_Exec:
             "--env", f"PATH={path_env}",
             "--env", "LC_ALL=C.UTF-8",
             "--env", "LANG=C.UTF-8",
-            "--env", "PS1=CNT \\[\\e[0;34m\\]\\w\\[\\e[0m\\]> ",
-            "--env", "IN_CONDATINER=1",
+            "--env", f"PS1={ps1_prefix} \\[\\e[0;34m\\]\\w\\[\\e[0m\\]> ",
+            "--env", f"IN_CONDATAINER={layer}",
             *img_env,
             *CondaTainer.generate_bind_args(Config.CONDATINER_DIR),
             *additional_binds,
@@ -2085,7 +2137,14 @@ class CondaTainer_Exec:
         Utils.print_debug(f"[EXEC] Executing command: {exec_cmd}")
 
         if Utils.is_in_interactive_shell() and not capture_output:
+            env_configs = CondaTainer_Exec.get_overlay_env_configs(paths_or_name_versions)
+            env_configs = { env_configs[i+1].split('=')[0]: env_configs[i+1].split('=')[1] for i in range(0, len(env_configs), 2) }
             env_notes = CondaTainer_Exec.get_overlay_env_notes(paths_or_name_versions)
+
+            if env_configs:
+                for key in env_configs.keys():
+                    if key not in env_notes:
+                        env_notes[key] = f"{env_configs[key]}"
 
             if env_notes:
                 env_max_len = max(len(key) for key in env_notes.keys())
@@ -2352,7 +2411,7 @@ class CondaTainer_Remove:
             try:
                 os.remove(overlay_path)
                 Utils.print_success(f"Overlay {Utils.yellow_text(overlay)} removed.")
-                env_path = os.path.splitext(overlay_path)[0] + ".env"
+                env_path = overlay_path + ".env"
                 if os.path.isfile(env_path):
                     os.remove(env_path)
             except Exception as e:
@@ -2485,7 +2544,7 @@ class CondaTainer_Info:
                 print("Files owner:   unknown")
             print(f"Mount path:    /ext3/env")
 
-        env_path = os.path.splitext(overlay_path)[0] + ".env"
+        env_path = overlay_path + ".env"
         if os.path.isfile(env_path):
             print("Environment variables:")
             with open(env_path, 'r') as f:

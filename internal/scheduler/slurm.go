@@ -79,6 +79,46 @@ func (s *SlurmScheduler) IsAvailable() bool {
 	return true
 }
 
+// GetInfo returns information about the SLURM scheduler
+func (s *SlurmScheduler) GetInfo() *SchedulerInfo {
+	_, inJob := os.LookupEnv("SLURM_JOB_ID")
+	available := s.IsAvailable()
+
+	info := &SchedulerInfo{
+		Type:      "SLURM",
+		Binary:    s.sbatchBin,
+		InJob:     inJob,
+		Available: available,
+	}
+
+	// Try to get SLURM version
+	if s.sbatchBin != "" {
+		if version, err := s.getSlurmVersion(); err == nil {
+			info.Version = version
+		}
+	}
+
+	return info
+}
+
+// getSlurmVersion attempts to get the SLURM version
+func (s *SlurmScheduler) getSlurmVersion() (string, error) {
+	cmd := exec.Command(s.sbatchBin, "--version")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	// Parse version from output like "slurm 23.02.6"
+	versionStr := strings.TrimSpace(string(output))
+	parts := strings.Fields(versionStr)
+	if len(parts) >= 2 {
+		return parts[1], nil
+	}
+
+	return versionStr, nil
+}
+
 // ReadScriptSpecs parses #SBATCH directives from a build script
 func (s *SlurmScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) {
 	file, err := os.Open(scriptPath)

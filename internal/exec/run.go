@@ -54,7 +54,7 @@ func Run(options Options) error {
 	}
 
 	layer := 1
-	if raw := os.Getenv("IN_CONDATINER"); raw != "" {
+	if raw := os.Getenv("IN_CONDATAINER"); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 1 {
 			layer = parsed
 		}
@@ -71,7 +71,7 @@ func Run(options Options) error {
 		"LC_ALL=C.UTF-8",
 		"LANG=C.UTF-8",
 		fmt.Sprintf("PS1=%s \\[\\e[0;34m\\]\\w\\[\\e[0m\\]> ", ps1Prefix),
-		fmt.Sprintf("IN_CONDATINER=%d", layer),
+		fmt.Sprintf("IN_CONDATAINER=%d", layer),
 	)
 
 	for _, setting := range options.EnvSettings {
@@ -89,7 +89,7 @@ func Run(options Options) error {
 	imgEnv := []string{}
 	fakeroot := options.Fakeroot
 	if lastImg != "" {
-		if os.Getenv("IN_CONDATINER") != "" {
+		if os.Getenv("IN_CONDATAINER") != "" {
 			utils.PrintWarning("You are trying to mount an .img overlay inside an existing CondaTainer environment. This may lead to unexpected behavior.")
 		}
 

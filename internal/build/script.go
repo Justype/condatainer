@@ -130,7 +130,7 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 		"--env", "tmp_dir=/ext3/tmp",
 		"--env", "TMPDIR=/ext3/tmp",
 		"--env", fmt.Sprintf("SLURM_CPUS_PER_TASK=%d", s.ncpus),
-		"--env", "IN_CONDATINER=1",
+		"--env", "IN_CONDATAINER=1",
 	}
 
 	// Set target_dir based on ref type

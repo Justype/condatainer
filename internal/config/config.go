@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -88,7 +89,7 @@ func LoadDefaults(executablePath string) {
 		TmpDir:           filepath.Join(baseDir, "tmp"),
 		LogsDir:          filepath.Join(os.Getenv("HOME"), "logs"),
 
-		ApptainerBin: "apptainer",
+		ApptainerBin: detectApptainerBin(),
 		BaseImage:    filepath.Join(baseDir, "images", "base_image.sif"),
 		SchedulerBin: "", // Auto-detect scheduler binary (empty = search PATH)
 
@@ -113,4 +114,55 @@ func computeNCPUs() int {
 		ncpus = runtime.NumCPU()
 	}
 	return ncpus
+}
+
+// IsInsideContainer checks if we're currently running inside a container
+func IsInsideContainer() bool {
+	// Check for IN_CONDATAINER environment variable (our own containers)
+	if os.Getenv("IN_CONDATAINER") != "" {
+		return true
+	}
+
+	// Check for standard Apptainer/Singularity environment variables
+	if os.Getenv("APPTAINER_NAME") != "" || os.Getenv("SINGULARITY_NAME") != "" {
+		return true
+	}
+
+	// Check for Apptainer/Singularity filesystem markers
+	if _, err := os.Stat("/.singularity.d"); err == nil {
+		return true
+	}
+	if _, err := os.Stat("/.apptainer.d"); err == nil {
+		return true
+	}
+
+	return false
+}
+
+// detectApptainerBin tries to find the apptainer binary, with special handling for containers
+func detectApptainerBin() string {
+	// If we're inside a container, apptainer might be in a different location
+	// or might not be available at all
+	if IsInsideContainer() {
+		// Try common container paths first
+		containerPaths := []string{
+			"/usr/local/bin/apptainer",
+			"/usr/bin/apptainer",
+			"/opt/apptainer/bin/apptainer",
+		}
+
+		for _, path := range containerPaths {
+			if _, err := os.Stat(path); err == nil {
+				return path
+			}
+		}
+	}
+
+	// Fall back to PATH lookup (works both inside and outside containers)
+	if binPath, err := exec.LookPath("apptainer"); err == nil {
+		return binPath
+	}
+
+	// Default to just "apptainer" and let the user's PATH resolve it
+	return "apptainer"
 }
