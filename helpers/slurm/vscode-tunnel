@@ -241,6 +241,7 @@ fi
 #endregion
 
 SBATCH_SCRIPT_PATH="$LOG_DIR/vscode-tunnel-${DATE}.sbatch"
+printf "LOGIN" > $LOG_DIR/.vscode-tunnel-auth-status # Initialize auth status file
 
 cat <<EOT > $SBATCH_SCRIPT_PATH
 #!/bin/bash
