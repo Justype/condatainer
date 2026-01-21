@@ -2,7 +2,6 @@ package apptainer
 
 import (
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/utils"
@@ -24,9 +23,7 @@ func DetectGPUFlags() []string {
 }
 
 func hasNvidiaGPU() bool {
-	if _, err := exec.LookPath("nvidia-smi"); err == nil {
-		return true
-	}
+	// Only check if /dev/nvidia* exists
 	entries, err := os.ReadDir("/dev")
 	if err != nil {
 		return false
@@ -40,15 +37,13 @@ func hasNvidiaGPU() bool {
 }
 
 func hasRocmGPU() bool {
-	if _, err := exec.LookPath("rocm-smi"); err == nil {
-		return true
-	}
+	// Only check if /dev/kfd exists
 	entries, err := os.ReadDir("/dev")
 	if err != nil {
 		return false
 	}
 	for _, entry := range entries {
-		if strings.Contains(strings.ToLower(entry.Name()), "rocm") {
+		if strings.Contains(strings.ToLower(entry.Name()), "kfd") {
 			return true
 		}
 	}

@@ -31,28 +31,28 @@ func (e *ApptainerError) Error() string {
 
 	var msg strings.Builder
 	if e.Path != "" {
-		msg.WriteString(fmt.Sprintf("Apptainer failed to %s %s.\n",
-			e.Op, utils.StylePath(e.Path)))
+		fmt.Fprintf(&msg, "Apptainer failed to %s %s.\n",
+			e.Op, utils.StylePath(e.Path))
 	} else {
-		msg.WriteString(fmt.Sprintf("Apptainer %s failed.\n", e.Op))
+		fmt.Fprintf(&msg, "Apptainer %s failed.\n", e.Op)
 	}
 
 	if e.Output != "" && !e.HideOutput {
 		cleanOut := strings.TrimSpace(e.Output)
 		if cleanOut != "" {
-			msg.WriteString(fmt.Sprintf("\t%s: %s\n",
+			fmt.Fprintf(&msg, "\t%s: %s\n",
 				utils.StyleHint("Output"),
-				utils.StyleError(cleanOut)))
+				utils.StyleError(cleanOut))
 		}
 	}
 
 	if hint != "" {
-		msg.WriteString(fmt.Sprintf("\t%s %s\n",
-			utils.StyleHint("Hint:"), hint))
+		fmt.Fprintf(&msg, "\t%s %s\n",
+			utils.StyleHint("Hint:"), hint)
 	}
 
-	msg.WriteString(fmt.Sprintf("\t%s: %v",
-		utils.StyleHint("Error"), e.BaseErr))
+	fmt.Fprintf(&msg, "\t%s: %v",
+		utils.StyleHint("Error"), e.BaseErr)
 	return msg.String()
 }
 

@@ -7,7 +7,7 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// InstanceStartOptions contains options for starting a container instance
+// InstanceStartOptions contains options for starting a container instance (TODO)
 type InstanceStartOptions struct {
 	Bind       []string // Bind mounts (format: "/host/path:/container/path")
 	Overlay    []string // Overlay images to use

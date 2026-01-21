@@ -31,9 +31,9 @@ func SetBin(path string) error {
 
 		// Use StyleHint for the label and StyleAction for the command
 		hint := fmt.Sprintf(
-			"%s On HPC systems, you likely need to load the module:\n\t%s",
+			"%s On HPC systems, you likely need to load the module: %s",
 			utils.StyleHint("Hint:"),
-			utils.StyleAction("module load apptainer"),
+			utils.StyleAction("ml apptainer"),
 		)
 		return fmt.Errorf("%w\n%s", baseErr, hint)
 	}

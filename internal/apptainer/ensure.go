@@ -2,12 +2,9 @@ package apptainer
 
 import (
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
-	"time"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
@@ -18,9 +15,6 @@ var PrebuiltBaseImagePlatforms = map[string]bool{
 	"x86_64": true,
 	// "aarch64": false, // Not available yet
 }
-
-// PrebuiltBaseImageVersion is the version tag for prebuilt images
-const PrebuiltBaseImageVersion = "v1.0.5"
 
 // EnsureApptainer checks if apptainer binary is available and configured.
 // Returns an error if apptainer cannot be found.
@@ -58,7 +52,6 @@ func EnsureBaseImage() error {
 	if !config.Global.Debug {
 		utils.PrintMessage("Base image not found. Downloading base image...")
 		if err := tryDownloadPrebuiltBaseImage(); err == nil {
-			// Download succeeded
 			return nil
 		} else {
 			utils.PrintDebug("Failed to download prebuilt base image: %v", err)
@@ -106,12 +99,12 @@ func tryDownloadPrebuiltBaseImage() error {
 		return fmt.Errorf("pre-built base image not available for architecture: %s", arch)
 	}
 
-	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/base_image_%s.sif",
-		config.GitHubRepo, PrebuiltBaseImageVersion, arch)
+	url := fmt.Sprintf("https://github.com/%s/releases/download/v%s/base_image_%s.sif",
+		config.GitHubRepo, config.VERSION, arch)
 
 	utils.PrintMessage("Attempting to download pre-built base image for %s...", utils.StyleInfo(arch))
 
-	if err := downloadExecutable(url, config.Global.BaseImage); err != nil {
+	if err := utils.DownloadExecutable(url, config.Global.BaseImage); err != nil {
 		return err
 	}
 
@@ -136,63 +129,10 @@ func ensureBaseDef() error {
 
 	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/main/build-scripts/base_image.def", config.GitHubRepo)
 
-	if err := downloadFile(url, baseDefPath); err != nil {
+	if err := utils.DownloadFile(url, baseDefPath); err != nil {
 		return fmt.Errorf("failed to download base image definition file: %w", err)
 	}
 
 	utils.PrintSuccess("Base image definition file downloaded.")
-	return nil
-}
-
-// downloadFile downloads a file from url to destPath.
-func downloadFile(url, destPath string) error {
-	client := &http.Client{
-		Timeout: 5 * time.Minute,
-	}
-
-	resp, err := client.Get(url)
-	if err != nil {
-		return fmt.Errorf("failed to fetch %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to download: HTTP %d", resp.StatusCode)
-	}
-
-	// Create temporary file first
-	tmpPath := destPath + ".tmp"
-	file, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-
-	_, err = io.Copy(file, resp.Body)
-	file.Close()
-	if err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("failed to write file: %w", err)
-	}
-
-	// Rename temp file to final destination
-	if err := os.Rename(tmpPath, destPath); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("failed to rename file: %w", err)
-	}
-
-	return nil
-}
-
-// downloadExecutable downloads a file and sets it as executable (0755).
-func downloadExecutable(url, destPath string) error {
-	if err := downloadFile(url, destPath); err != nil {
-		return err
-	}
-
-	// Set executable permissions
-	if err := os.Chmod(destPath, 0755); err != nil {
-		return fmt.Errorf("failed to set executable permissions: %w", err)
-	}
-
 	return nil
 }
