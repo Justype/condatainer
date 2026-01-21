@@ -2,7 +2,9 @@ package apptainer
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -111,32 +113,52 @@ func runApptainer(op string, imagePath string, capture bool, args ...string) err
 	cmd.Stdin = os.Stdin
 
 	var stdoutBuf, stderrBuf bytes.Buffer
+	var stdoutWriter, stderrWriter io.Writer
 	if capture {
-		cmd.Stdout = &stdoutBuf
-		cmd.Stderr = &stderrBuf
+		stdoutWriter = &stdoutBuf
+		stderrWriter = &stderrBuf
 	} else {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		stdoutWriter = io.MultiWriter(os.Stdout, &stdoutBuf)
+		stderrWriter = io.MultiWriter(os.Stderr, &stderrBuf)
 	}
+
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
 
 	err := cmd.Run()
 	if err != nil {
 		fullCmd := fmt.Sprintf("%s %s", apptainerCmd, strings.Join(args, " "))
 		return &ApptainerError{
-			Op:      op,
-			Cmd:     fullCmd,
-			Path:    imagePath,
-			Output:  captureOutput(capture, &stdoutBuf, &stderrBuf),
-			BaseErr: err,
+			Op:         op,
+			Cmd:        fullCmd,
+			Path:       imagePath,
+			Output:     captureOutput(&stdoutBuf, &stderrBuf),
+			HideOutput: !capture,
+			BaseErr:    err,
 		}
 	}
 	return nil
 }
 
-func captureOutput(enabled bool, stdoutBuf, stderrBuf *bytes.Buffer) string {
-	if !enabled {
-		return ""
-	}
+func captureOutput(stdoutBuf, stderrBuf *bytes.Buffer) string {
 	combined := strings.TrimSpace(stdoutBuf.String() + stderrBuf.String())
 	return combined
+}
+
+// IsBuildCancelled returns true when the Apptainer error looks like the
+// user declined to continue after being asked about overwriting an existing
+// build target.
+func IsBuildCancelled(err error) bool {
+	var apErr *ApptainerError
+	if !errors.As(err, &apErr) {
+		return false
+	}
+
+	output := strings.ToLower(apErr.Output)
+	if output == "" {
+		return false
+	}
+
+	return strings.Contains(output, "build target") &&
+		strings.Contains(output, "do you want to continue")
 }

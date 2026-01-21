@@ -94,6 +94,11 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 	}
 
 	if err := apptainer.Build(d.tmpOverlayPath, d.buildSource, buildOpts); err != nil {
+		if apptainer.IsBuildCancelled(err) {
+			utils.PrintMessage("Build cancelled for %s. Overlay unchanged.", styledOverlay)
+			d.Cleanup(true)
+			return ErrBuildCancelled
+		}
 		utils.PrintError("Apptainer build failed for %s: %v", styledOverlay, err)
 		d.Cleanup(true)
 		return fmt.Errorf("failed to build SIF from %s: %w", d.buildSource, err)

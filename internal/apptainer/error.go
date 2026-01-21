@@ -18,11 +18,12 @@ func (e *ApptainerNotFoundError) Error() string {
 
 // ApptainerError represents errors from apptainer command execution
 type ApptainerError struct {
-	Op      string // Operation being performed (e.g., "build", "exec", "pull")
-	Cmd     string // Full command that was executed
-	Path    string // Container/image path (optional)
-	Output  string // Command output (stdout/stderr)
-	BaseErr error  // Underlying error
+	Op         string // Operation being performed (e.g., "build", "exec", "pull")
+	Cmd        string // Full command that was executed
+	Path       string // Container/image path (optional)
+	Output     string // Command output (stdout/stderr)
+	BaseErr    error  // Underlying error
+	HideOutput bool   // Suppress output in the formatted error
 }
 
 func (e *ApptainerError) Error() string {
@@ -36,7 +37,7 @@ func (e *ApptainerError) Error() string {
 		msg.WriteString(fmt.Sprintf("Apptainer %s failed.\n", e.Op))
 	}
 
-	if e.Output != "" {
+	if e.Output != "" && !e.HideOutput {
 		cleanOut := strings.TrimSpace(e.Output)
 		if cleanOut != "" {
 			msg.WriteString(fmt.Sprintf("\t%s: %s\n",

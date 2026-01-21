@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -168,8 +169,7 @@ func runCreatePackages(packages []string) {
 	}
 
 	if err := graph.Run(); err != nil {
-		utils.PrintError("Build failed: %v", err)
-		os.Exit(1)
+		exitOnBuildError(err)
 	}
 }
 
@@ -273,8 +273,7 @@ func runCreateWithPrefix() {
 		}
 
 		if err := graph.Run(); err != nil {
-			utils.PrintError("Build failed: %v", err)
-			os.Exit(1)
+			exitOnBuildError(err)
 		}
 	} else {
 		utils.PrintError("File must be .yml, .yaml, .sh, .bash, or .def")
@@ -326,6 +325,15 @@ func runCreateFromSource() {
 	}
 
 	if err := graph.Run(); err != nil {
-		os.Exit(1)
+		exitOnBuildError(err)
 	}
+}
+
+func exitOnBuildError(err error) {
+	if errors.Is(err, build.ErrBuildCancelled) {
+		utils.PrintMessage("Build cancelled by user.")
+	} else {
+		utils.PrintError("Build failed: %v", err)
+	}
+	os.Exit(1)
 }

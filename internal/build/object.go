@@ -15,6 +15,7 @@ import (
 )
 
 var ErrTmpOverlayExists = errors.New("temporary overlay already exists")
+var ErrBuildCancelled = errors.New("build cancelled by user")
 
 // ScriptSpecs mirrors the scheduler module's job spec metadata.
 type ScriptSpecs = scheduler.ScriptSpecs
