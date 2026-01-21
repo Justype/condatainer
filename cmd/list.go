@@ -98,6 +98,11 @@ func collectAppOverlays(filters []string) (map[string][]string, error) {
 		if !utils.IsOverlay(entry.Name()) {
 			continue
 		}
+		delimCount := strings.Count(entry.Name(), "--")
+		if delimCount > 1 {
+			// Not an app overlay
+			continue
+		}
 		nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 		normalized := strings.ToLower(utils.NormalizeNameVersion(nameVersion))
 		if !matchesFilters(normalized, filters) {
@@ -136,11 +141,11 @@ func collectAppOverlays(filters []string) (map[string][]string, error) {
 }
 
 func collectReferenceOverlays(filters []string) ([]string, error) {
-	if !utils.DirExists(config.Global.RefImagesDir) {
+	if !utils.DirExists(config.Global.ImagesDir) {
 		return nil, nil
 	}
 
-	entries, err := os.ReadDir(config.Global.RefImagesDir)
+	entries, err := os.ReadDir(config.Global.ImagesDir)
 	if err != nil {
 		return nil, fmt.Errorf("unable to list reference overlays: %w", err)
 	}
@@ -151,6 +156,11 @@ func collectReferenceOverlays(filters []string) ([]string, error) {
 			continue
 		}
 		if !utils.IsOverlay(entry.Name()) {
+			continue
+		}
+		delimCount := strings.Count(entry.Name(), "--")
+		if delimCount <= 1 {
+			// Not a reference overlay
 			continue
 		}
 		nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))

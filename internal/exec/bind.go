@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Justype/condatainer/internal/config"
 )
 
 // BindPaths returns unique absolute directories suitable for --bind flags while omitting nested duplicates.
@@ -18,11 +20,7 @@ func BindPaths(paths ...string) []string {
 		}
 	}
 
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		if resolved := resolvePath(home); resolved != "" {
-			absPaths = append(absPaths, resolved)
-		}
-	}
+	// Do not autobind the home dir (already done by apptainer; apptainer has --no-home flag)
 	if cwd, err := os.Getwd(); err == nil && cwd != "" {
 		if resolved := resolvePath(cwd); resolved != "" {
 			absPaths = append(absPaths, resolved)
@@ -30,6 +28,11 @@ func BindPaths(paths ...string) []string {
 	}
 	if scratch := os.Getenv("SCRATCH"); scratch != "" {
 		if resolved := resolvePath(scratch); resolved != "" {
+			absPaths = append(absPaths, resolved)
+		}
+	}
+	if config.Global.BaseDir != "" {
+		if resolved := resolvePath(config.Global.BaseDir); resolved != "" {
 			absPaths = append(absPaths, resolved)
 		}
 	}

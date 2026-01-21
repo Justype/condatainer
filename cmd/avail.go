@@ -60,8 +60,8 @@ func runAvail(cmd *cobra.Command, args []string) error {
 	// Default: both local and remote
 	// --local: only local
 	// --remote: only remote
-	includeLocal := !availRemote  // include local unless --remote only
-	includeRemote := !availLocal  // include remote unless --local only
+	includeLocal := !availRemote // include local unless --remote only
+	includeRemote := !availLocal // include remote unless --local only
 
 	// Get installed overlays for marking
 	installedOverlays := getInstalledOverlays()
@@ -182,24 +182,6 @@ func getInstalledOverlays() map[string]bool {
 				// Convert filename to name/version format
 				nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 				// Convert samtools--1.21 to samtools/1.21
-				normalized := strings.ReplaceAll(nameVersion, "--", "/")
-				installed[normalized] = true
-			}
-		}
-	}
-
-	// Check reference overlays
-	if utils.DirExists(config.Global.RefImagesDir) {
-		entries, err := os.ReadDir(config.Global.RefImagesDir)
-		if err == nil {
-			for _, entry := range entries {
-				if entry.IsDir() {
-					continue
-				}
-				if !utils.IsOverlay(entry.Name()) {
-					continue
-				}
-				nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 				normalized := strings.ReplaceAll(nameVersion, "--", "/")
 				installed[normalized] = true
 			}

@@ -15,7 +15,7 @@ import (
 // All overlays (including ref overlays) are stored in a single ImagesDir.
 func InstalledOverlays() (map[string]string, error) {
 	overlays := map[string]string{}
-	dirs := []string{config.Global.ImagesDir, config.Global.RefImagesDir}
+	dirs := []string{config.Global.ImagesDir}
 	for _, dir := range dirs {
 		if err := populateOverlays(dir, overlays); err != nil {
 			return nil, err

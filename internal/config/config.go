@@ -31,7 +31,6 @@ type Config struct {
 	ProgramDir       string
 	BaseDir          string
 	ImagesDir        string
-	RefImagesDir     string
 	BuildScriptsDir  string
 	HelperScriptsDir string
 	TmpDir           string
