@@ -189,13 +189,14 @@ func DetectSchedulerBin() (string, string) {
 func AutoDetectAndSave() (bool, error) {
 	updated := false
 
-	// Check and detect apptainer binary
-	apptainerBin := viper.GetString("apptainer_bin")
-	if !ValidateBinary(apptainerBin) {
-		detected := DetectApptainerBin()
-		if detected != "" {
-			viper.Set("apptainer_bin", detected)
-			updated = true
+	if !IsInsideContainer() {
+		apptainerBin := viper.GetString("apptainer_bin")
+		if !ValidateBinary(apptainerBin) {
+			detected := DetectApptainerBin()
+			if detected != "" {
+				viper.Set("apptainer_bin", detected)
+				updated = true
+			}
 		}
 	}
 
@@ -226,13 +227,15 @@ func AutoDetectAndSave() (bool, error) {
 func ForceDetectAndSave() (bool, error) {
 	updated := false
 
-	// Always re-detect apptainer binary
-	detected := DetectApptainerBin()
-	if detected != "" {
-		currentBin := viper.GetString("apptainer_bin")
-		if currentBin != detected {
-			viper.Set("apptainer_bin", detected)
-			updated = true
+	if !IsInsideContainer() {
+		// Always re-detect apptainer binary
+		detected := DetectApptainerBin()
+		if detected != "" {
+			currentBin := viper.GetString("apptainer_bin")
+			if currentBin != detected {
+				viper.Set("apptainer_bin", detected)
+				updated = true
+			}
 		}
 	}
 

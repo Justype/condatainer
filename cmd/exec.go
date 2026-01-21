@@ -77,6 +77,7 @@ func init() {
 	// --- NEW: Dynamic Completion Logic ---
 	execCmd.RegisterFlagCompletionFunc("overlay", overlayFlagCompletion(true))
 	execCmd.RegisterFlagCompletionFunc("base-image", overlayFlagCompletion(false))
+	execCmd.ValidArgsFunction = positionalOverlayCompletion(true)
 	// -------------------------------------
 
 	// Stop flag parsing after the first positional argument so tool arguments (like --help) bypass exec.
@@ -90,10 +91,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	if err := ensureBaseImage(); err != nil {
 		return err
-	}
-
-	if execBaseImage != "" {
-		config.Global.BaseImage = execBaseImage
 	}
 
 	installedOverlays, err := exec.InstalledOverlays()
@@ -134,8 +131,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 			commandFinal = args
 		}
 	} else {
-		overlayFinal = append(overlayFinal, args...)
-		commandFinal = []string{"bash"}
+		overlayFinal, commandFinal = parseShortcutArgs(args)
 	}
 
 	overlayFinal = append(overlayFinal, execOverlays...)
@@ -161,6 +157,10 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	if len(commandFinal) == 0 {
 		commandFinal = []string{"bash"}
+	}
+
+	if execBaseImage != "" {
+		config.Global.BaseImage = execBaseImage
 	}
 
 	resolvedOverlays, err := exec.ResolveOverlayPaths(overlayFinal)
@@ -204,35 +204,103 @@ func ensureBaseImage() error {
 
 func overlayFlagCompletion(includeData bool) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		installed, err := exec.InstalledOverlays()
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveError
-		}
+		return overlaySuggestions(includeData, toComplete)
+	}
+}
 
-		choices := map[string]struct{}{}
-		for name, path := range installed {
-			if includeData || isAppOverlay(path) {
-				if toComplete == "" || strings.HasPrefix(name, toComplete) {
-					choices[name] = struct{}{}
-				}
-			}
-		}
-
-		for _, candidate := range localOverlaySuggestions(toComplete) {
-			choices[candidate] = struct{}{}
-		}
-
-		if len(choices) == 0 {
+func positionalOverlayCompletion(includeData bool) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if containsDashDash(args) {
 			return nil, cobra.ShellCompDirectiveDefault
 		}
-
-		suggestions := make([]string, 0, len(choices))
-		for choice := range choices {
-			suggestions = append(suggestions, choice)
-		}
-		sort.Strings(suggestions)
-		return suggestions, cobra.ShellCompDirectiveNoFileComp
+		return overlaySuggestions(includeData, toComplete)
 	}
+}
+
+func overlaySuggestions(includeData bool, toComplete string) ([]string, cobra.ShellCompDirective) {
+	installed, err := exec.InstalledOverlays()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveError
+	}
+
+	choices := map[string]struct{}{}
+	for name, path := range installed {
+		if includeData || isAppOverlay(path) {
+			if toComplete == "" || strings.HasPrefix(name, toComplete) {
+				choices[name] = struct{}{}
+			}
+		}
+	}
+
+	for _, candidate := range localOverlaySuggestions(toComplete) {
+		choices[candidate] = struct{}{}
+	}
+
+	if len(choices) == 0 {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+
+	suggestions := make([]string, 0, len(choices))
+	for choice := range choices {
+		suggestions = append(suggestions, choice)
+	}
+	sort.Strings(suggestions)
+	return suggestions, cobra.ShellCompDirectiveNoFileComp
+}
+
+func parseShortcutArgs(args []string) ([]string, []string) {
+	overlays := []string{}
+	command := []string{}
+	commandStarted := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			commandStarted = true
+			continue
+		}
+		if commandStarted {
+			command = append(command, arg)
+			continue
+		}
+		if arg == "-r" || arg == "--read-only" {
+			eReadOnly = true
+			continue
+		}
+		if arg == "-n" || arg == "--no-autoload" {
+			eNoAutoload = true
+			continue
+		}
+		if arg == "--fakeroot" {
+			execFakeroot = true
+			continue
+		}
+		if arg == "-b" || arg == "--base-image" {
+			if i+1 < len(args) {
+				execBaseImage = args[i+1]
+				i++
+			}
+			continue
+		}
+		if strings.HasPrefix(arg, "-b=") {
+			execBaseImage = strings.TrimPrefix(arg, "-b=")
+			continue
+		}
+		if strings.HasPrefix(arg, "--base-image=") {
+			execBaseImage = strings.TrimPrefix(arg, "--base-image=")
+			continue
+		}
+		overlays = append(overlays, arg)
+	}
+	return overlays, command
+}
+
+func containsDashDash(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return true
+		}
+	}
+	return false
 }
 
 func localOverlaySuggestions(toComplete string) []string {

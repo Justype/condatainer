@@ -53,7 +53,7 @@ func Run(options Options) error {
 		envList = append(envList, fmt.Sprintf("%s=%s", key, configs[key]))
 	}
 
-	layer := 1
+	layer := 0
 	if raw := os.Getenv("IN_CONDATAINER"); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 1 {
 			layer = parsed
