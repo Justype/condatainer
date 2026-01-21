@@ -80,7 +80,7 @@ with output_path.open("w") as out:
     def write_pkg_line(pkg):
         rpkgs = " ".join(sorted(pkg_to_rpkgs[pkg]))
         comment_prefix = "# " if is_filtered(pkg) else ""
-        out.write(f"    {comment_prefix}apt -y install {pkg} # {rpkgs}\n")
+        out.write(f"    {comment_prefix}apt-get -y install {pkg} # {rpkgs}\n")
 
     for pkg in sorted(non_lib):
         write_pkg_line(pkg)
