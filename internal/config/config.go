@@ -4,8 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strconv"
 	"time"
 )
 
@@ -94,26 +92,14 @@ func LoadDefaults(executablePath string) {
 		SchedulerBin: "", // Auto-detect scheduler binary (empty = search PATH)
 
 		Build: BuildConfig{
-			DefaultCPUs:  computeNCPUs(),
-			DefaultMemMB: 8192,                  // 8GB default memory
-			DefaultTime:  2 * time.Hour,         // 2 hour default time limit
-			TmpSizeMB:    20480,                 // 20GB temporary overlay
-			CompressArgs: "-comp lz4",           // zstd only compatible with apptainer version > 1.4
-			OverlayType:  "ext3",                // ext3 for temporary overlays
+			DefaultCPUs:  4,             // 4 CPUs default
+			DefaultMemMB: 8192,          // 8GB default memory
+			DefaultTime:  2 * time.Hour, // 2 hour default time limit
+			TmpSizeMB:    20480,         // 20GB temporary overlay
+			CompressArgs: "-comp lz4",   // zstd only compatible with apptainer version > 1.4
+			OverlayType:  "ext3",        // ext3 for temporary overlays
 		},
 	}
-}
-
-func computeNCPUs() int {
-	ncpus := 4
-	if env := os.Getenv("SLURM_CPUS_PER_TASK"); env != "" {
-		if parsed, err := strconv.Atoi(env); err == nil && parsed > 0 {
-			ncpus = parsed
-		}
-	} else if runtime.NumCPU() > 0 {
-		ncpus = runtime.NumCPU()
-	}
-	return ncpus
 }
 
 // IsInsideContainer checks if we're currently running inside a container

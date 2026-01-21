@@ -5,8 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
 
+	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/viper"
 )
 
@@ -137,13 +137,13 @@ func ValidateBinary(binPath string) bool {
 }
 
 // DetectApptainerBin attempts to find apptainer binary
-// Returns the path if found, empty string otherwise
+// Returns the full absolute path if found, empty string otherwise
 func DetectApptainerBin() string {
-	// Try common names
+	// Try common names in PATH (returns full path)
 	candidates := []string{"apptainer", "singularity"}
-
 	for _, candidate := range candidates {
 		if path, err := exec.LookPath(candidate); err == nil {
+			// exec.LookPath already returns the full path
 			return path
 		}
 	}
@@ -216,11 +216,53 @@ func AutoDetectAndSave() (bool, error) {
 	return updated, nil
 }
 
+// ForceDetectAndSave always re-detects binaries from current environment and saves
+// This is useful for config init to capture the exact paths from current PATH
+// Returns true if config was updated
+func ForceDetectAndSave() (bool, error) {
+	updated := false
+
+	// Always re-detect apptainer binary
+	detected := DetectApptainerBin()
+	if detected != "" {
+		currentBin := viper.GetString("apptainer_bin")
+		if currentBin != detected {
+			viper.Set("apptainer_bin", detected)
+			updated = true
+		}
+	}
+
+	// Always re-detect scheduler binary
+	detectedBin, detectedType := DetectSchedulerBin()
+	if detectedBin != "" {
+		currentBin := viper.GetString("scheduler_bin")
+		currentType := viper.GetString("scheduler_type")
+		if currentBin != detectedBin || currentType != detectedType {
+			viper.Set("scheduler_bin", detectedBin)
+			viper.Set("scheduler_type", detectedType)
+			updated = true
+		}
+	}
+
+	// Always save (even if nothing changed, to create the file)
+	if err := SaveConfig(); err != nil {
+		return false, err
+	}
+
+	return updated, nil
+}
+
 // LoadFromViper loads config from Viper into Global struct
 func LoadFromViper() {
-	// Update binary paths from Viper
-	if bin := viper.GetString("apptainer_bin"); bin != "" {
+	// Update binary paths from Viper, with fallback to detection
+	if bin := viper.GetString("apptainer_bin"); bin != "" && ValidateBinary(bin) {
 		Global.ApptainerBin = bin
+	} else if bin == "" || !ValidateBinary(bin) {
+		// Fallback to detection if config value is empty or invalid
+		detected := detectApptainerBin()
+		if detected != "" {
+			Global.ApptainerBin = detected
+		}
 	}
 
 	if bin := viper.GetString("scheduler_bin"); bin != "" {
@@ -241,8 +283,8 @@ func LoadFromViper() {
 	}
 
 	if defaultTime := viper.GetString("build.default_time"); defaultTime != "" {
-		// Parse time duration from string (e.g., "2h", "30m", "1h30m")
-		if dur, err := time.ParseDuration(defaultTime); err == nil {
+		// Parse time duration from string (e.g., "2h", "30m", "1h30m", or "02:00:00")
+		if dur, err := utils.ParseDuration(defaultTime); err == nil {
 			Global.Build.DefaultTime = dur
 		}
 	}

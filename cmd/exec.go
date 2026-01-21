@@ -1,12 +1,12 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings" // <--- ADDED: Required for string manipulation
+	"strings"
 
+	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/utils"
@@ -220,11 +220,5 @@ func execHelpRequested(args []string) bool {
 }
 
 func ensureBaseImage() error {
-	if config.Global.BaseImage == "" {
-		return fmt.Errorf("base image not configured")
-	}
-	if !utils.FileExists(config.Global.BaseImage) {
-		return fmt.Errorf("base image not found at %s", config.Global.BaseImage)
-	}
-	return nil
+	return apptainer.EnsureBaseImage()
 }

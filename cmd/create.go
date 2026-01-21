@@ -64,10 +64,9 @@ var createCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		// 2. Check if apptainer is available
-		if err := apptainer.SetBin(config.Global.ApptainerBin); err != nil {
-			utils.PrintError("Apptainer not found in PATH.")
-			utils.PrintMessage("On HPC, please load the apptainer module: %s", utils.StyleAction("ml apptainer"))
+		// 2. Ensure base image exists (also checks for apptainer)
+		if err := apptainer.EnsureBaseImage(); err != nil {
+			utils.PrintError("%v", err)
 			os.Exit(1)
 		}
 
