@@ -28,7 +28,7 @@ From: ubuntu:20.04
         curl wget aria2 git \
         tar pigz unzip bzip2 xz-utils zstd lz4 \
         python3-requests python3-bs4 \
-        tzdata time jq tmux
+        tzdata time jq tmux bash-completion
 
     # Internal Apptainer (add nested mounting support)
     apt-get install -y \
