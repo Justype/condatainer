@@ -208,16 +208,16 @@ class Utils:
     @staticmethod
     def print_debug(debug_object, end="\n", flush=True):
         if Config.debug:
-            print(f"[CNT][{Utils.yellow_text('DEBUG')}]", end=" ", flush=True)
+            print(f"[CNT][{Utils.yellow_text('DBG')}]  ", end="", flush=True)
             print(debug_object, end=end, flush=flush)
     @staticmethod
     def print_note(message, end="\n", flush=True): print(f"[CNT][{Utils.blue_text('NOTE')}] {message}", end=end, flush=flush)
     @staticmethod
-    def print_warning(message, end="\n", flush=True): print(f"[CNT][{Utils.yellow_text('WARNING')}] {message}", file=sys.stderr, end=end, flush=flush)
+    def print_warning(message, end="\n", flush=True): print(f"[CNT][{Utils.yellow_text('WARN')}] {message}", file=sys.stderr, end=end, flush=flush)
     @staticmethod
-    def print_error(message, end="\n", flush=True): print(f"[CNT][{Utils.red_text('ERROR')}] {message}", file=sys.stderr, end=end, flush=flush)
+    def print_error(message, end="\n", flush=True): print(f"[CNT][{Utils.red_text('ERR')}]  {message}", file=sys.stderr, end=end, flush=flush)
     @staticmethod
-    def print_success(message, end="\n", flush=True): print(f"[CNT][{Utils.green_text('SUCCESS')}] {message}", end=end, flush=flush)
+    def print_success(message, end="\n", flush=True): print(f"[CNT][{Utils.green_text('PASS')}] {message}", end=end, flush=flush)
 
     @staticmethod
     def normalize_name_version(name_version: str) -> str:
