@@ -22,8 +22,8 @@ func DetectGPUFlags() []string {
 	return flags
 }
 
+// hasNvidiaGPU checks for the presence of NVIDIA GPUs on the host by /dev/nvidia*.
 func hasNvidiaGPU() bool {
-	// Only check if /dev/nvidia* exists
 	entries, err := os.ReadDir("/dev")
 	if err != nil {
 		return false
@@ -36,8 +36,8 @@ func hasNvidiaGPU() bool {
 	return false
 }
 
+// hasRocmGPU checks for the presence of ROCm GPUs on the host by /dev/kfd.
 func hasRocmGPU() bool {
-	// Only check if /dev/kfd exists
 	entries, err := os.ReadDir("/dev")
 	if err != nil {
 		return false

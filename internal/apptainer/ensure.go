@@ -48,7 +48,8 @@ func EnsureBaseImage() error {
 		return nil
 	}
 
-	// Step 4: Try to download prebuilt base image (unless in debug mode)
+	// Step 4: Try to download prebuilt base image
+	// In debug mode, always build locally
 	if !config.Global.Debug {
 		utils.PrintMessage("Base image not found. Downloading base image...")
 		if err := tryDownloadPrebuiltBaseImage(); err == nil {
@@ -87,11 +88,12 @@ func EnsureBaseImage() error {
 // tryDownloadPrebuiltBaseImage attempts to download a prebuilt base image for the current architecture.
 // Returns nil on success, error otherwise.
 func tryDownloadPrebuiltBaseImage() error {
-	arch := runtime.GOARCH
 	// Map Go arch names to the naming convention used in releases
-	if arch == "amd64" {
+	arch := runtime.GOARCH
+	switch arch {
+	case "amd64":
 		arch = "x86_64"
-	} else if arch == "arm64" {
+	case "arm64":
 		arch = "aarch64"
 	}
 
@@ -102,7 +104,7 @@ func tryDownloadPrebuiltBaseImage() error {
 	url := fmt.Sprintf("https://github.com/%s/releases/download/v%s/base_image_%s.sif",
 		config.GitHubRepo, config.VERSION, arch)
 
-	utils.PrintMessage("Attempting to download pre-built base image for %s...", utils.StyleInfo(arch))
+	utils.PrintMessage("Attempting to download pre-built base image ...")
 
 	if err := utils.DownloadExecutable(url, config.Global.BaseImage); err != nil {
 		return err

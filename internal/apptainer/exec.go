@@ -13,6 +13,7 @@ type ExecOptions struct {
 	Writable      bool     // Mount image as writable (requires sandbox or overlay)
 	Fakeroot      bool     // Run with fakeroot
 	NoHome        bool     // Do not mount home directory
+	Home          string   // Custom home directory inside container
 	ContainAll    bool     // Contain all user environments
 	CleanEnv      bool     // Clean environment before running
 	Env           []string // Environment variables to set (format: "KEY=VALUE")
@@ -49,8 +50,11 @@ func Exec(imagePath string, command []string, opts *ExecOptions) error {
 	if opts.NoHome {
 		args = append(args, "--no-home")
 	}
+	if opts.Home != "" {
+		args = append(args, "--home", opts.Home)
+	}
 	if opts.ContainAll {
-		args = append(args, "--contain")
+		args = append(args, "--containall")
 	}
 	if opts.CleanEnv {
 		args = append(args, "--cleanenv")

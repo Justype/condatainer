@@ -107,23 +107,23 @@ func PrintMessage(format string, a ...interface{}) {
 // Output: [CNT][SUCCESS] Operation complete.
 func PrintSuccess(format string, a ...interface{}) {
 	msg := fmt.Sprintf(format, a...)
-	tag := StyleSuccess("[SUCCESS]")
+	tag := StyleSuccess("[PASS]")
 	fmt.Fprintf(os.Stdout, "%s%s %s\n", projectPrefix, tag, msg)
 }
 
 // PrintError prints an error message with a Red tag to Stderr.
-// Output: [CNT][ERROR] Something failed.
+// Output: [CNT][ERR] Something failed.
 func PrintError(format string, a ...interface{}) {
 	msg := fmt.Sprintf(format, a...)
-	tag := StyleError("[ERROR]")
+	tag := StyleError("[ERR] ")
 	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
 }
 
 // PrintWarning prints a warning with a Yellow tag to Stderr.
-// Output: [CNT][WARNING] Disk is almost full.
+// Output: [CNT][WARN] Disk is almost full.
 func PrintWarning(format string, a ...interface{}) {
 	msg := fmt.Sprintf(format, a...)
-	tag := StyleWarning("[WARNING]")
+	tag := StyleWarning("[WARN]")
 	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
 }
 
@@ -133,7 +133,7 @@ func PrintHint(format string, a ...interface{}) {
 	msg := fmt.Sprintf(format, a...)
 	tag := StyleHint("[HINT]")
 	// Added extra spacing for alignment
-	fmt.Fprintf(os.Stdout, "%s%s    %s\n", projectPrefix, tag, msg)
+	fmt.Fprintf(os.Stdout, "%s%s %s\n", projectPrefix, tag, msg)
 }
 
 // PrintNote prints a note with a Magenta tag.
@@ -141,15 +141,15 @@ func PrintHint(format string, a ...interface{}) {
 func PrintNote(format string, a ...interface{}) {
 	msg := fmt.Sprintf(format, a...)
 	tag := StyleNote("[NOTE]")
-	fmt.Fprintf(os.Stdout, "%s%s    %s\n", projectPrefix, tag, msg)
+	fmt.Fprintf(os.Stdout, "%s%s %s\n", projectPrefix, tag, msg)
 }
 
 // PrintDebug prints a debug message with a Gray tag (only if DebugMode is true).
-// Output: [CNT] [DEBUG] Executing: rm -rf /tmp/foo
+// Output: [CNT] [DBG] Executing: rm -rf /tmp/foo
 func PrintDebug(format string, a ...interface{}) {
 	if DebugMode {
 		msg := fmt.Sprintf(format, a...)
-		tag := StyleDebug("[DEBUG]")
+		tag := StyleDebug("[DBG] ")
 		fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
 	}
 }
