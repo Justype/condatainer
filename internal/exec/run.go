@@ -102,10 +102,10 @@ func Run(options Options) error {
 
 		if options.WritableImg {
 			if !fakeroot {
-				if status := overlay.InspectImageUIDStatus(lastImg); status == 0 {
+				if status := overlay.InspectImageUIDStatus(lastImg); status == overlay.UIDStatusRoot {
 					utils.PrintNote("Root overlay %s detected. --fakeroot enabled automatically.", utils.StylePath(filepath.Base(lastImg)))
 					fakeroot = true
-				} else if status == 2 {
+				} else if status == overlay.UIDStatusDifferentUser {
 					utils.PrintWarning("%s's inner UID differs from current user. --fakeroot enabled automatically.", utils.StylePath(filepath.Base(lastImg)))
 					fakeroot = true
 				}

@@ -83,19 +83,45 @@ func (s *Stats) InodeUsage() (percent float64) {
 	return (float64(usedInodes) / float64(s.TotalInodes)) * 100.0
 }
 
+// UIDStatus represents the result of InspectImageUIDStatus.
+type UIDStatus int
+
+const (
+	UIDStatusUnknown UIDStatus = iota
+	// UIDStatusRoot indicates the 'upper' directory is owned by root (UID 0).
+	UIDStatusRoot
+	// UIDStatusCurrentUser indicates it's owned by the current user.
+	UIDStatusCurrentUser
+	// UIDStatusDifferentUser indicates it's owned by a different user.
+	UIDStatusDifferentUser
+)
+
+func (s UIDStatus) String() string {
+	switch s {
+	case UIDStatusRoot:
+		return "root"
+	case UIDStatusCurrentUser:
+		return "current user"
+	case UIDStatusDifferentUser:
+		return "different user"
+	default:
+		return "unknown"
+	}
+}
+
 // InspectImageUIDStatus checks the ownership of the 'upper' directory inside an ext3/4 image.
 // Returns:
-//   - 0: owned by root (UID 0)
-//   - 1: owned by current user
-//   - 2: owned by a different user
-//   - 9: failed to check or not an image file
+//   - UIDStatusRoot: owned by root (UID 0)
+//   - UIDStatusCurrentUser: owned by current user
+//   - UIDStatusDifferentUser: owned by a different user
+//   - UIDStatusUnknown: failed to check or not an image file
 //
 // This is used to determine if --fakeroot should be automatically enabled.
-func InspectImageUIDStatus(imgPath string) int {
+func InspectImageUIDStatus(imgPath string) UIDStatus {
 	// Check if debugfs is available
 	debugfsPath, err := exec.LookPath("debugfs")
 	if err != nil {
-		return 9 // debugfs not found
+		return UIDStatusUnknown // debugfs not found
 	}
 
 	// Use debugfs to check the UID of the 'upper' directory
@@ -103,7 +129,7 @@ func InspectImageUIDStatus(imgPath string) int {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Failed to execute debugfs (might not be an ext3/4 image)
-		return 9
+		return UIDStatusUnknown
 	}
 
 	// Parse the output to extract UID
@@ -117,21 +143,22 @@ func InspectImageUIDStatus(imgPath string) int {
 				uidStr := parts[1]
 				uid, err := strconv.Atoi(uidStr)
 				if err != nil {
-					return 9 // Failed to parse UID
+					return UIDStatusUnknown // Failed to parse UID
 				}
 
 				// Compare with current user's UID
 				currentUID := os.Getuid()
-				if uid == 0 {
-					return 0 // Root-owned
-				} else if uid == currentUID {
-					return 1 // Current user owns it
-				} else {
-					return 2 // Different user owns it
+				switch uid {
+				case 0:
+					return UIDStatusRoot
+				case currentUID:
+					return UIDStatusCurrentUser
+				default:
+					return UIDStatusDifferentUser
 				}
 			}
 		}
 	}
 
-	return 9 // UID information not found in output
+	return UIDStatusUnknown // UID information not found in output
 }
