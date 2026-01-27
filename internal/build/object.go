@@ -4,9 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/overlay"
@@ -16,6 +19,51 @@ import (
 
 var ErrTmpOverlayExists = errors.New("temporary overlay already exists")
 var ErrBuildCancelled = errors.New("build cancelled by user")
+
+// isCancelledByUser checks if the error is due to user cancellation (Ctrl+C)
+// Exit code 130 = 128 + SIGINT(2)
+func isCancelledByUser(err error) bool {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode() == 130
+	}
+	return false
+}
+
+// runCommandWithSignalHandling runs a command while intercepting SIGINT/SIGTERM
+// This ensures the Go process doesn't terminate before cleanup can run.
+// The child process receives the signal via its bash trap.
+func runCommandWithSignalHandling(cmd *exec.Cmd) error {
+	// Set up signal channel to intercept SIGINT/SIGTERM
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	// Wait for command in goroutine
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	// Wait for either completion or signal
+	select {
+	case err := <-done:
+		return err
+	case sig := <-sigChan:
+		// Signal received - forward to child process group
+		if cmd.Process != nil {
+			// Send signal to child; it will handle via trap
+			cmd.Process.Signal(sig)
+		}
+		// Wait for command to finish (trap should cause exit 130)
+		return <-done
+	}
+}
 
 // ScriptSpecs mirrors the scheduler module's job spec metadata.
 type ScriptSpecs = scheduler.ScriptSpecs

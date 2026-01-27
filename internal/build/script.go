@@ -152,6 +152,8 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 
 	// Build bash command to execute script
 	bashScript := fmt.Sprintf(`
+trap 'exit 130' INT TERM
+
 mkdir -p $TMPDIR
 bash %s
 if [ $? -ne 0 ]; then
@@ -189,9 +191,13 @@ fi
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if err := cmd.Run(); err != nil {
-		utils.PrintError("Build script %s failed for overlay %s: %v", utils.StyleCommand(s.buildSource), styledOverlay, err)
+	// Use signal-aware runner to ensure cleanup runs on Ctrl+C
+	if err := runCommandWithSignalHandling(cmd); err != nil {
 		s.Cleanup(true)
+		if isCancelledByUser(err) {
+			return ErrBuildCancelled
+		}
+		utils.PrintError("Build script %s failed for overlay %s: %v", utils.StyleCommand(s.buildSource), styledOverlay, err)
 		return fmt.Errorf("build script %s failed: %w", s.buildSource, err)
 	}
 
@@ -260,6 +266,7 @@ func (s *ScriptBuildObject) createSquashfs(sourceDir, targetOverlayPath string) 
 	if sourceDir == "/cnt" {
 		// For app overlays: set permissions first
 		bashScript = fmt.Sprintf(`
+trap 'exit 130' INT TERM
 echo "Setting permissions..."
 find /cnt -type f -exec chmod ug+rw,o+r {} \;
 find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
@@ -268,6 +275,7 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
 	} else {
 		// For ref overlays: just pack the directory
 		bashScript = fmt.Sprintf(`
+trap 'exit 130' INT TERM
 mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M
 `, sourceDir, targetPath, s.ncpus, config.Global.Build.CompressArgs)
 	}
@@ -289,7 +297,11 @@ mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if err := cmd.Run(); err != nil {
+	// Use signal-aware runner to ensure cleanup runs on Ctrl+C
+	if err := runCommandWithSignalHandling(cmd); err != nil {
+		if isCancelledByUser(err) {
+			return ErrBuildCancelled
+		}
 		return fmt.Errorf("failed to create SquashFS: %w", err)
 	}
 

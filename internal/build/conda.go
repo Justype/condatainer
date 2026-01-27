@@ -125,6 +125,8 @@ func (c *CondaBuildObject) Build(buildDeps bool) error {
 
 	// Build the bash script to run inside container
 	bashScript := fmt.Sprintf(`
+trap 'exit 130' INT TERM
+
 mkdir -p $TMPDIR
 echo "Creating conda environment in overlay..."
 %s
@@ -166,8 +168,12 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if err := cmd.Run(); err != nil {
+	// Use signal-aware runner to ensure cleanup runs on Ctrl+C
+	if err := runCommandWithSignalHandling(cmd); err != nil {
 		c.Cleanup(true)
+		if isCancelledByUser(err) {
+			return ErrBuildCancelled
+		}
 		return fmt.Errorf("failed to build conda package %s: %w", c.nameVersion, err)
 	}
 
