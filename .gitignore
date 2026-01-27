@@ -34,3 +34,10 @@ __pycache__/
 
 # Generated helper scripts (downloaded by CI/condatainer)
 helper-scripts/
+
+# Rust artifacts for the new crate
+target/
+.cargo/
+
+# 
+condatainer-go/
