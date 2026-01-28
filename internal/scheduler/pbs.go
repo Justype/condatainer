@@ -320,8 +320,8 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		return "", NewScriptCreationError(jobSpec.Name, logDir, err)
 	}
 
-	// Set default log path if not specified
-	if specs.Stdout == "" && jobSpec.Name != "" {
+	// Always set log path to our standardized location
+	if jobSpec.Name != "" {
 		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
 		specs.Stdout = filepath.Join("log", fmt.Sprintf("%s.log", safeName))
 	}

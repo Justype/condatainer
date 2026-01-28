@@ -2,6 +2,7 @@ package build
 
 import (
 	"errors"
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -230,6 +231,14 @@ func (b *BaseBuildObject) CreateTmpOverlay(force bool) error {
 		}
 	}
 
+	// Ensure parent directory for tmp overlay exists (mkdir -p)
+	parentDir := filepath.Dir(b.tmpOverlayPath)
+	if parentDir != "" {
+		if err := os.MkdirAll(parentDir, 0o775); err != nil {
+			return fmt.Errorf("failed to create tmp overlay parent dir %s: %w", parentDir, err)
+		}
+	}
+
 	// Create actual ext3 overlay using overlay package
 	utils.PrintDebug("Creating temporary overlay at %s", utils.StylePath(b.tmpOverlayPath))
 
@@ -288,7 +297,41 @@ func (b *BaseBuildObject) parseScriptMetadata() error {
 		return fmt.Errorf("failed to parse dependencies: %w", err)
 	}
 	b.dependencies = deps
-	b.interactiveInputs = []string{} // TODO: implement GetInteractiveInputsFromScript
+
+	// Parse interactive prompts from build script and collect user inputs if needed
+	prompts, err := utils.GetInteractivePromptsFromScript(b.buildSource)
+	if err != nil {
+		return fmt.Errorf("failed to parse interactive prompts: %w", err)
+	}
+	b.interactiveInputs = []string{}
+	if len(prompts) > 0 {
+		// If interactive prompts exist, we must be in an interactive shell
+		if !utils.IsInteractiveShell() {
+			return fmt.Errorf("build script for %s requires interactive input, but no TTY is available", b.nameVersion)
+		}
+
+		reader := bufio.NewReader(os.Stdin)
+		for _, prompt := range prompts {
+			// Replace escaped "\\n" sequences with actual newlines and print the full message lines
+			msg := strings.ReplaceAll(prompt, `\\n`, "\n")
+			// Also handle single-backslash "\\n" sequences commonly used in scripts
+			msg = strings.ReplaceAll(msg, "\\n", "\n")
+			for _, line := range strings.Split(msg, "\n") {
+				utils.PrintNote("%s", line)
+			}
+			// Prompt inline without adding a newline
+			fmt.Print("Enter here: ")
+			input, _ := reader.ReadString('\n')
+			input = strings.TrimRight(input, "\r\n")
+			if strings.ContainsAny(input, "\r\n") {
+				utils.PrintWarning("Multiline input detected. Only the first line will be used.")
+				if idx := strings.IndexAny(input, "\r\n"); idx != -1 {
+					input = input[:idx]
+				}
+			}
+			b.interactiveInputs = append(b.interactiveInputs, input)
+		}
+	}
 
 	// Only parse scheduler specs if job submission is enabled
 	if !config.Global.SubmitJob {

@@ -54,7 +54,7 @@ func (d *DefBuildObject) String() string {
 // Build implements the Apptainer .def build workflow
 // Workflow:
 //  1. Check if overlay already exists (skip if yes)
-//  2. Try downloading prebuilt overlay if available (TODO)
+//  2. Try downloading prebuilt overlay if available
 //  3. Build SIF from .def file using apptainer build --fakeroot
 //  4. Extract SquashFS partition from SIF
 //  5. Set permissions

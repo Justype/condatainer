@@ -189,3 +189,36 @@ func GetDependenciesFromScript(scriptPath string) ([]string, error) {
 
 	return dependencies, nil
 }
+
+// GetInteractivePromptsFromScript parses a build script and extracts interactive
+// prompt lines beginning with "#INTERACTIVE:". Returns a list of prompt
+// strings (without the prefix) or an error if the file cannot be read.
+func GetInteractivePromptsFromScript(scriptPath string) ([]string, error) {
+	if !FileExists(scriptPath) {
+		return nil, fmt.Errorf("build script not found at %s", scriptPath)
+	}
+
+	file, err := os.Open(scriptPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open script: %w", err)
+	}
+	defer file.Close()
+
+	prompts := []string{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#INTERACTIVE:") {
+			content := strings.TrimSpace(line[len("#INTERACTIVE:"):])
+			if content != "" {
+				prompts = append(prompts, content)
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading script: %w", err)
+	}
+
+	return prompts, nil
+}
