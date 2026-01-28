@@ -18,7 +18,7 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:           "condatainer_go",
+	Use:           "condatainer",
 	Short:         "CondaTainer: Use Apptainer/Conda/Overlays/SquashFS to manage tools/data/env for HPC users.",
 	Version:       config.VERSION,
 	SilenceErrors: true,

@@ -25,7 +25,7 @@ var updateCmd = &cobra.Command{
 	Short:   "Update condatainer to the latest version from GitHub",
 	Long: `Download and replace the current condatainer binary with the latest version from GitHub.
 
-This command downloads the latest Go binary (condatainer_go) from the GitHub repository
+This command downloads the latest binary from the GitHub repository
 and replaces the current executable. A backup of the current version is not created.`,
 	Example: `  condatainer self-update       # Update with confirmation prompt
   condatainer self-update -y    # Update without confirmation`,
@@ -104,8 +104,8 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Find matching binary for current OS/arch
-	// Expected format: condatainer_go_{os}_{arch} (e.g., condatainer_go_linux_x86_64)
-	binaryName := fmt.Sprintf("condatainer_go_%s_%s", osName, arch)
+	// Expected format: condatainer_{os}_{arch} (e.g., condatainer_linux_x86_64)
+	binaryName := fmt.Sprintf("condatainer_%s_%s", osName, arch)
 	var downloadURL string
 
 	for _, asset := range release.Assets {
