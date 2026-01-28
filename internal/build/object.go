@@ -150,12 +150,44 @@ func (b *BaseBuildObject) IsInstalled() bool {
 }
 
 func (b *BaseBuildObject) GetMissingDependencies() ([]string, error) {
-	// TODO: Implement check for which dependencies are not installed
 	missing := []string{}
-	for _, dep := range b.dependencies {
-		// For now, just return empty - needs integration with overlay checking
-		_ = dep
+
+	// Check if images directory exists
+	if !utils.DirExists(config.Global.ImagesDir) {
+		// If directory doesn't exist, all dependencies are missing
+		return b.dependencies, nil
 	}
+
+	// Get all installed overlays
+	entries, err := os.ReadDir(config.Global.ImagesDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list installed overlays: %w", err)
+	}
+
+	// Build a set of installed overlays
+	installed := make(map[string]bool)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !utils.IsOverlay(entry.Name()) {
+			continue
+		}
+
+		// Convert filename to name/version format
+		nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+		// Convert samtools--1.21.sqf to samtools/1.21
+		normalized := strings.ReplaceAll(nameVersion, "--", "/")
+		installed[normalized] = true
+	}
+
+	// Check which dependencies are missing
+	for _, dep := range b.dependencies {
+		if !installed[dep] {
+			missing = append(missing, dep)
+		}
+	}
+
 	return missing, nil
 }
 
@@ -227,17 +259,18 @@ func (b *BaseBuildObject) parseScriptMetadata() error {
 		return nil
 	}
 
-	sched := scheduler.ActiveScheduler()
-	if sched == nil {
-		return nil
-	}
-
 	b.dependencies = []string{}
 	b.interactiveInputs = []string{}
 
-	specs, err := sched.ReadScriptSpecs(b.buildSource)
+	// Use scheduler package helper to read specs
+	specs, err := scheduler.ReadScriptSpecsFromPath(b.buildSource)
 	if err != nil {
 		return err
+	}
+
+	// No scheduler active or no specs found
+	if specs == nil {
+		return nil
 	}
 
 	if specs.Ncpus <= 0 {

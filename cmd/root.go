@@ -88,17 +88,12 @@ var rootCmd = &cobra.Command{
 		}
 
 		// Step 7: Initialize scheduler if job submission is enabled
-		if config.Global.SubmitJob && config.Global.SchedulerBin != "" {
-			sched, err := scheduler.DetectSchedulerWithBinary(config.Global.SchedulerBin)
-			if err == nil && sched.IsAvailable() {
-				scheduler.SetActiveScheduler(sched)
-				utils.PrintDebug("Scheduler initialized and available")
-			} else {
-				if err != nil {
-					utils.PrintDebug("Scheduler not available: %v", err)
-				} else {
-					utils.PrintDebug("Scheduler not available (already in a job)")
-				}
+		if config.Global.SubmitJob {
+			schedType, err := scheduler.Init(config.Global.SchedulerBin)
+			if err == nil && schedType != scheduler.SchedulerUnknown {
+				utils.PrintDebug("Scheduler initialized: %s", schedType)
+			} else if err != nil {
+				utils.PrintDebug("Scheduler not available: %v", err)
 			}
 		}
 	},

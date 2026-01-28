@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -105,4 +107,85 @@ func ParseDuration(s string) (time.Duration, error) {
 		return 0, fmt.Errorf("invalid duration: %s (use '2h', '30m', '1h30m', or '02:00:00')", s)
 	}
 	return dur, nil
+}
+
+// GetDependenciesFromScript parses a build script and extracts dependencies
+// from #DEP: comments and module load commands.
+// Returns a list of normalized dependency names with duplicates removed.
+func GetDependenciesFromScript(scriptPath string) ([]string, error) {
+	if !FileExists(scriptPath) {
+		return nil, fmt.Errorf("build script not found at %s", scriptPath)
+	}
+
+	file, err := os.Open(scriptPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open script: %w", err)
+	}
+	defer file.Close()
+
+	dependencies := []string{}
+	seen := make(map[string]bool)
+
+	moduleLoadRegex := regexp.MustCompile(`^\s*(module\s+load)\s+(.+)$`)
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Check for #DEP: comments
+		if strings.HasPrefix(line, "#DEP:") {
+			depLine := strings.TrimSpace(line[5:])
+			if depLine != "" {
+				if IsOverlay(depLine) {
+					if !seen[depLine] {
+						dependencies = append(dependencies, depLine)
+						seen[depLine] = true
+					}
+				} else {
+					normalized := NormalizeNameVersion(depLine)
+					if !seen[normalized] {
+						dependencies = append(dependencies, normalized)
+						seen[normalized] = true
+					}
+				}
+			}
+			continue
+		}
+
+		// Check for module load commands
+		line = strings.TrimSpace(line)
+		if matches := moduleLoadRegex.FindStringSubmatch(line); matches != nil {
+			parts := strings.Fields(line)
+			if len(parts) >= 3 {
+				for _, mod := range parts[2:] {
+					normalized := NormalizeNameVersion(mod)
+					if !seen[normalized] {
+						dependencies = append(dependencies, normalized)
+						seen[normalized] = true
+					}
+				}
+			}
+		} else if strings.HasPrefix(line, "ml") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				for _, mod := range parts[1:] {
+					// Skip ml subcommands
+					if mod == "purge" || mod == "list" || mod == "avail" || mod == "av" || mod == "load" {
+						break
+					}
+					normalized := NormalizeNameVersion(mod)
+					if !seen[normalized] {
+						dependencies = append(dependencies, normalized)
+						seen[normalized] = true
+					}
+				}
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading script: %w", err)
+	}
+
+	return dependencies, nil
 }

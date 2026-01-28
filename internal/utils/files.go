@@ -75,6 +75,63 @@ func FixPermissions(path string, filePerm, dirPerm os.FileMode) error {
 	})
 }
 
+// ShareToUGORecursive recursively sets permissions to share files with user, group, and others.
+// Files: ug+rw,o+r (0664)
+// Directories: ug+rwx,o+rx (0775)
+// This matches the Python implementation's share_to_ugo_recursive function.
+func ShareToUGORecursive(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("could not stat path %s: %w", path, err)
+	}
+
+	// 1. Handle Single File
+	if !info.IsDir() {
+		// Files: ug+rw,o+r
+		currentMode := info.Mode()
+		newMode := currentMode | 0644 // u+rw, o+r
+		newMode = newMode | 0060      // g+rw
+		if err := os.Chmod(path, newMode); err != nil {
+			PrintWarning("Failed to set permissions for %s: %v", StylePath(path), err)
+			return err
+		}
+		return nil
+	}
+
+	// 2. Handle Directory (Recursive Walk)
+	return filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			PrintWarning("Skipping inaccessible path: %s", StylePath(p))
+			return nil // Continue walking
+		}
+
+		fileInfo, err := d.Info()
+		if err != nil {
+			PrintWarning("Could not get info for %s: %v", StylePath(p), err)
+			return nil
+		}
+
+		currentMode := fileInfo.Mode()
+		var newMode os.FileMode
+
+		if d.IsDir() {
+			// Directories: ug+rwx,o+rx
+			newMode = currentMode | 0755 // u+rwx, o+rx
+			newMode = newMode | 0070     // g+rwx
+		} else {
+			// Files: ug+rw,o+r
+			newMode = currentMode | 0644 // u+rw, o+r
+			newMode = newMode | 0060     // g+rw
+		}
+
+		if err := os.Chmod(p, newMode); err != nil {
+			PrintWarning("Could not chmod %s: %v", StylePath(p), err)
+		}
+
+		return nil
+	})
+}
+
 // --- Extension Checks (String-based) ---
 
 // IsImg checks if the path has an ext3 overlay extension (.img).

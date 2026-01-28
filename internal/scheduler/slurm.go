@@ -790,3 +790,12 @@ func formatSlurmTimeSpec(d time.Duration) string {
 	}
 	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
 }
+
+// TryParseSlurmScript attempts to parse a SLURM script without requiring SLURM binaries.
+// This is a static parser that can work in any environment.
+func TryParseSlurmScript(scriptPath string) (*ScriptSpecs, error) {
+	parser := &SlurmScheduler{
+		directiveRe: regexp.MustCompile(`^\s*#SBATCH\s+(.+)$`),
+	}
+	return parser.ReadScriptSpecs(scriptPath)
+}

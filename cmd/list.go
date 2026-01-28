@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -11,6 +12,10 @@ import (
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
+)
+
+var (
+	listDelete bool
 )
 
 var listCmd = &cobra.Command{
@@ -22,6 +27,8 @@ var listCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(listCmd)
+	listCmd.Flags().BoolVarP(&listDelete, "delete", "d", false, "Delete listed overlays after confirmation (used with search terms)")
+	listCmd.Flags().BoolP("remove", "r", false, "Alias for --delete")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -75,6 +82,78 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	if !printed {
 		utils.PrintWarning("No installed overlays match the provided search terms.")
+	}
+
+	// Handle delete if requested
+	if removeFlag, _ := cmd.Flags().GetBool("remove"); removeFlag {
+		listDelete = true
+	}
+
+	if listDelete && len(filters) > 0 && (len(appOverlays) > 0 || len(refOverlays) > 0) {
+		fmt.Println()
+		fmt.Println("==================REMOVE==================")
+
+		// Collect all matching overlays for deletion
+		allMatching := []string{}
+		for name, versions := range appOverlays {
+			for _, version := range versions {
+				if version == "(system app/env)" {
+					allMatching = append(allMatching, name)
+				} else {
+					allMatching = append(allMatching, name+"/"+version)
+				}
+			}
+		}
+		for _, ref := range refOverlays {
+			allMatching = append(allMatching, ref)
+		}
+
+		if len(allMatching) > 0 {
+			fmt.Println("Overlays to be removed:")
+			for _, name := range allMatching {
+				highlighted := name
+				for _, filter := range filters {
+					re := regexp.MustCompile("(?i)" + regexp.QuoteMeta(filter))
+					highlighted = re.ReplaceAllStringFunc(highlighted, func(match string) string {
+						return utils.StyleWarning(match)
+					})
+				}
+				fmt.Printf(" - %s\n", highlighted)
+			}
+
+			fmt.Print("\n")
+			utils.PrintMessage("Are you sure? Cannot be undone. [y/N]: ")
+			var choice string
+			fmt.Scanln(&choice)
+			choice = strings.ToLower(strings.TrimSpace(choice))
+
+			if choice == "y" || choice == "yes" {
+				// Get installed overlays map for deletion
+				installedMap, err := getInstalledOverlaysMap()
+				if err != nil {
+					return err
+				}
+
+				for _, name := range allMatching {
+					normalized := utils.NormalizeNameVersion(name)
+					if overlayPath, ok := installedMap[normalized]; ok {
+						if err := os.Remove(overlayPath); err != nil {
+							utils.PrintError("Failed to remove overlay %s: %v", utils.StyleName(name), err)
+							continue
+						}
+						utils.PrintSuccess("Overlay %s removed.", utils.StyleName(name))
+
+						// Also remove .env file if exists
+						envPath := overlayPath + ".env"
+						if utils.FileExists(envPath) {
+							os.Remove(envPath)
+						}
+					}
+				}
+			} else {
+				utils.PrintNote("Cancelled")
+			}
+		}
 	}
 
 	return nil

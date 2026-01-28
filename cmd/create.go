@@ -103,7 +103,7 @@ var createCmd = &cobra.Command{
 			config.Global.Build.TmpSizeMB = sizeMB
 		}
 
-		// 5. Normalize package names
+		// 5. Normalize package names (only for build scripts, not for conda packages with -n)
 		normalizedArgs := make([]string, len(args))
 		for i, arg := range args {
 			normalizedArgs[i] = utils.NormalizeNameVersion(arg)
@@ -118,7 +118,8 @@ var createCmd = &cobra.Command{
 			runCreateWithPrefix()
 		} else if createName != "" {
 			// Mode: --name (multiple packages or YAML into one sqf)
-			runCreateWithName(normalizedArgs)
+			// Pass original args for conda package names (not normalized)
+			runCreateWithName(args)
 		} else {
 			// Mode: Default (each package gets its own sqf via BuildObject)
 			runCreatePackages(normalizedArgs)

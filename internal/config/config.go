@@ -9,6 +9,7 @@ import (
 
 const VERSION = "1.0.6"
 const GitHubRepo = "Justype/condatainer"
+const GITHUB_REPO = GitHubRepo // Exported constant for compatibility
 
 // BuildConfig holds default settings for build operations
 type BuildConfig struct {

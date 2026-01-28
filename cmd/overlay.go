@@ -3,7 +3,11 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
+	"github.com/Justype/condatainer/internal/apptainer"
+	"github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -41,8 +45,25 @@ If no image path is provided, defaults to 'env.img'.`,
 			path = args[0]
 		}
 
-		if utils.FileExists(path) {
-			utils.PrintError("File already exists: %s", path)
+		// Auto-append .img extension if not present and path doesn't have an extension
+		if !utils.IsImg(path) {
+			if strings.Contains(filepath.Base(path), ".") {
+				utils.PrintError("Overlay image must have a .img extension.")
+				os.Exit(1)
+			}
+			path += ".img"
+		}
+
+		// Convert to absolute path
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			utils.PrintError("Failed to resolve path: %v", err)
+			os.Exit(1)
+		}
+		path = absPath
+
+		if utils.FileExists(path) || utils.DirExists(path) {
+			utils.PrintError("Path %s already exists.", utils.StylePath(path))
 			os.Exit(1)
 		}
 
@@ -52,6 +73,7 @@ If no image path is provided, defaults to 'env.img'.`,
 		sparse, _ := cmd.Flags().GetBool("sparse")
 		typeFlag, _ := cmd.Flags().GetString("type")
 		fsType, _ := cmd.Flags().GetString("fs")
+		envFile, _ := cmd.Flags().GetString("file")
 
 		sizeMB, err := utils.ParseSizeToMB(sizeStr)
 		if err != nil {
@@ -69,6 +91,20 @@ If no image path is provided, defaults to 'env.img'.`,
 		if err != nil {
 			utils.PrintError("%v", err)
 			os.Exit(1)
+		}
+
+		// 4. Initialize with Conda environment if file specified
+		if envFile != "" {
+			if err := initializeOverlayWithConda(path, envFile, fakeroot); err != nil {
+				utils.PrintError("Failed to initialize overlay with conda environment: %v", err)
+				os.Exit(1)
+			}
+		} else {
+			// Initialize with minimal conda environment (zlib)
+			if err := initializeOverlayWithConda(path, "", fakeroot); err != nil {
+				utils.PrintError("Failed to initialize overlay with conda environment: %v", err)
+				os.Exit(1)
+			}
 		}
 	},
 }
@@ -274,7 +310,7 @@ func init() {
 	overlayCreateCmd.Flags().String("fs", "ext3", "Filesystem type: ext3 or ext4 (some system does not support ext4)")
 	overlayCreateCmd.Flags().Bool("fakeroot", false, "Create a fakeroot-compatible overlay (owned by root)")
 	overlayCreateCmd.Flags().Bool("sparse", false, "Create a sparse overlay image")
-	// overlayCreateCmd.Flags().StringP("file", "f", "", "Initialize with Conda environment file") (TODO)
+	overlayCreateCmd.Flags().StringP("file", "f", "", "Initialize with Conda environment file (.yml or .yaml)")
 
 	// --- Resize ---
 	resizeCmd.Flags().StringP("size", "s", "", "New size (e.g., 20G, 2048M)")
@@ -291,4 +327,71 @@ func init() {
 	chownCmd.Flags().IntP("gid", "g", -1, "Group ID to set (default: "+gidDefault+")")
 	chownCmd.Flags().Bool("root", false, "Set UID and GID to 0 (root); will override -u and -g options")
 	chownCmd.Flags().StringP("path", "p", "/ext3", "Path inside the overlay to change")
+}
+
+// initializeOverlayWithConda installs a conda environment from a YAML file into an overlay
+// If envFile is empty, it creates a minimal environment with zlib
+func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) error {
+	// Validate environment file if provided
+	if envFile != "" {
+		if !utils.FileExists(envFile) {
+			return fmt.Errorf("environment file %s not found", envFile)
+		}
+
+		if !strings.HasSuffix(envFile, ".yml") && !strings.HasSuffix(envFile, ".yaml") {
+			return fmt.Errorf("environment file must be .yml or .yaml")
+		}
+	}
+
+	// Ensure base image exists
+	if err := apptainer.EnsureBaseImage(); err != nil {
+		return err
+	}
+
+	absOverlayPath, err := filepath.Abs(overlayPath)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path of overlay: %w", err)
+	}
+
+	var mmCreateCmd []string
+	if envFile != "" {
+		absEnvFile, err := filepath.Abs(envFile)
+		if err != nil {
+			return fmt.Errorf("failed to get absolute path of environment file: %w", err)
+		}
+		utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(absEnvFile))
+		mmCreateCmd = []string{"mm-create", "-f", absEnvFile, "-y"}
+	} else {
+		utils.PrintMessage("Initializing minimal conda environment with small package (zlib)...")
+		mmCreateCmd = []string{"mm-create", "zlib", "-y"}
+	}
+
+	// Run mm-create command
+	opts := exec.Options{
+		Overlays:    []string{absOverlayPath},
+		Command:     mmCreateCmd,
+		WritableImg: true,
+		Fakeroot:    fakeroot,
+	}
+
+	if err := exec.Run(opts); err != nil {
+		return fmt.Errorf("failed to run mm-create: %w", err)
+	}
+
+	// Clean up micromamba cache
+	utils.PrintMessage("Cleaning up micromamba cache...")
+	cleanOpts := exec.Options{
+		Overlays:    []string{absOverlayPath},
+		Command:     []string{"mm-clean", "-a", "-y"},
+		WritableImg: true,
+		Fakeroot:    fakeroot,
+	}
+
+	if err := exec.Run(cleanOpts); err != nil {
+		utils.PrintWarning("Failed to clean micromamba cache: %v", err)
+		// Not a critical error, continue
+	}
+
+	utils.PrintSuccess("Conda env is created inside %s.", utils.StylePath(overlayPath))
+	return nil
 }

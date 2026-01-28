@@ -15,8 +15,9 @@ import (
 )
 
 var (
-	availRemote bool
-	availLocal  bool
+	availRemote  bool
+	availLocal   bool
+	availInstall bool
 )
 
 var availCmd = &cobra.Command{
@@ -41,6 +42,8 @@ func init() {
 	rootCmd.AddCommand(availCmd)
 	availCmd.Flags().BoolVar(&availRemote, "remote", false, "Show only remote build scripts from GitHub")
 	availCmd.Flags().BoolVar(&availLocal, "local", false, "Show only local build scripts")
+	availCmd.Flags().BoolVarP(&availInstall, "install", "i", false, "Install the selected build scripts (used with search terms)")
+	availCmd.Flags().BoolP("add", "a", false, "Alias for --install")
 }
 
 // PackageInfo holds information about a build script
@@ -137,10 +140,61 @@ func runAvail(cmd *cobra.Command, args []string) error {
 		return filtered[i].Name < filtered[j].Name
 	})
 
+	// Check if -a flag was used (alias for -i)
+	if addFlag, _ := cmd.Flags().GetBool("add"); addFlag {
+		availInstall = true
+	}
+
 	// Print results
 	for _, pkg := range filtered {
 		line := formatPackageLine(pkg, filters)
 		fmt.Println(line)
+	}
+
+	// Handle install if requested
+	if availInstall && len(filters) > 0 {
+		// Get uninstalled packages
+		uninstalled := []string{}
+		for _, pkg := range filtered {
+			if !pkg.IsInstalled {
+				uninstalled = append(uninstalled, pkg.Name)
+			}
+		}
+
+		if len(uninstalled) > 0 {
+			fmt.Println()
+			fmt.Println("==================INSTALL==================")
+			fmt.Println("The following overlays will be installed:")
+			for _, name := range uninstalled {
+				fmt.Printf(" - %s\n", name)
+			}
+
+			// Import build package
+			buildObjects := make([]build.BuildObject, 0, len(uninstalled))
+			for _, pkg := range uninstalled {
+				bo, err := build.NewBuildObject(pkg, false, "", "")
+				if err != nil {
+					return fmt.Errorf("failed to create build object for %s: %w", pkg, err)
+				}
+				buildObjects = append(buildObjects, bo)
+			}
+
+			// Build graph and execute
+			graph, err := build.NewBuildGraph(buildObjects, "", "", false)
+			if err != nil {
+				return fmt.Errorf("failed to create build graph: %w", err)
+			}
+
+			if err := graph.Run(); err != nil {
+				utils.PrintError("Some overlays failed to install.")
+				return err
+			}
+
+			utils.PrintSuccess("All selected overlays installed/submitted.")
+		} else {
+			utils.PrintNote("All matching packages are already installed.")
+		}
+		return nil
 	}
 
 	// Print summary when showing both

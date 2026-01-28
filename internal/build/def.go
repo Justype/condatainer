@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -77,12 +80,15 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 	}
 	utils.PrintMessage("Building overlay %s (%s build) from %s", styledOverlay, utils.StyleAction(buildMode), utils.StylePath(d.buildSource))
 
-	// TODO: Check if prebuilt overlay is available and try to download it
-	// if d.nameVersion in Config.PREBUILT_OVERLAYS {
-	//     if tryDownloadPrebuiltOverlay(d.nameVersion) {
-	//         return nil
-	//     }
-	// }
+	// Check if prebuilt overlay is available and try to download it
+	prebuiltOverlays := map[string]bool{
+		"build-essential": true,
+	}
+	if prebuiltOverlays[d.nameVersion] && filepath.Dir(targetOverlayPath) == config.Global.ImagesDir {
+		if tryDownloadPrebuiltOverlay(d.nameVersion, targetOverlayPath) {
+			return nil
+		}
+	}
 
 	utils.PrintMessage("Running apptainer build from %s", utils.StylePath(d.buildSource))
 
@@ -126,4 +132,35 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 	d.Cleanup(false)
 
 	return nil
+}
+
+// tryDownloadPrebuiltOverlay attempts to download a prebuilt overlay from GitHub releases
+func tryDownloadPrebuiltOverlay(nameVersion, destPath string) bool {
+	arch := runtime.GOARCH
+
+	// Map Go arch names to the format used in releases
+	archMap := map[string]string{
+		"amd64": "x86_64",
+		"arm64": "aarch64",
+	}
+
+	archName, ok := archMap[arch]
+	if !ok {
+		utils.PrintWarning("Pre-built overlays not available for architecture: %s", arch)
+		return false
+	}
+
+	normalized := utils.NormalizeNameVersion(nameVersion)
+	overlayFilename := strings.ReplaceAll(normalized, "/", "--") + "_" + archName + ".sqf"
+	url := fmt.Sprintf("https://github.com/Justype/condatainer/releases/download/v1.0.5/%s", overlayFilename)
+
+	utils.PrintMessage("Attempting to download pre-built overlay for %s...", utils.StyleName(normalized))
+
+	if err := utils.DownloadFile(url, destPath); err != nil {
+		utils.PrintWarning("Failed to download pre-built overlay: %v", err)
+		return false
+	}
+
+	utils.PrintSuccess("Pre-built %s downloaded.", utils.StyleName(normalized))
+	return true
 }

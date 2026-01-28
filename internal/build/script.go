@@ -106,12 +106,23 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 
 	if len(missingDeps) > 0 {
 		depList := strings.Join(missingDeps, ", ")
-		utils.PrintError("Missing dependencies for %s: %s", styledOverlay, utils.StyleNumber(depList))
 		if buildDeps {
-			// TODO: Build dependencies recursively
-			return fmt.Errorf("missing dependencies: %s (recursive build not yet implemented)", depList)
+			utils.PrintMessage("Building missing dependencies for %s: %s", styledOverlay, utils.StyleNumber(depList))
+			for _, dep := range missingDeps {
+				depObj, err := NewBuildObject(dep, false, config.Global.ImagesDir, config.Global.TmpDir)
+				if err != nil {
+					return fmt.Errorf("failed to create build object for dependency %s: %w", dep, err)
+				}
+				if err := depObj.Build(false); err != nil {
+					utils.PrintError("Failed to build dependency %s for %s", utils.StyleName(dep), styledOverlay)
+					return fmt.Errorf("failed to build dependency %s: %w", dep, err)
+				}
+			}
+			utils.PrintSuccess("All dependencies for %s built successfully.", styledOverlay)
+		} else {
+			utils.PrintError("Missing dependencies for %s: %s", styledOverlay, utils.StyleNumber(depList))
+			return fmt.Errorf("missing dependencies for %s: %s. Please install them first", s.nameVersion, depList)
 		}
-		return fmt.Errorf("missing dependencies for %s: %s. Please install them first", s.nameVersion, depList)
 	}
 
 	// Parse name and version
@@ -147,8 +158,23 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 		envSettings = append(envSettings, "--env", fmt.Sprintf("target_dir=/cnt/%s", relativePath))
 	}
 
-	// TODO: Add PATH and overlay env configs from dependencies
-	// envSettings = append(envSettings, "--env", fmt.Sprintf("PATH=%s", getPathEnv(s.dependencies)))
+	// Add PATH from dependencies
+	pathEnv, err := GetPathEnvFromDependencies(s.dependencies)
+	if err != nil {
+		utils.PrintWarning("Failed to get PATH from dependencies: %v", err)
+	} else if pathEnv != "" {
+		// Prepend dependency paths to system paths
+		pathEnv = pathEnv + ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+		envSettings = append(envSettings, "--env", fmt.Sprintf("PATH=%s", pathEnv))
+	}
+
+	// Add overlay env configs from dependencies
+	envConfigs, err := GetOverlayEnvConfigsFromDependencies(s.dependencies)
+	if err != nil {
+		utils.PrintWarning("Failed to get env configs from dependencies: %v", err)
+	} else {
+		envSettings = append(envSettings, envConfigs...)
+	}
 
 	// Build bash command to execute script
 	bashScript := fmt.Sprintf(`
@@ -169,12 +195,19 @@ fi
 
 	args := []string{"exec"}
 	args = append(args, envSettings...)
-	// TODO: Add overlay args from dependencies
+
+	// Add overlay args from dependencies
+	overlayArgs, err := GetOverlayArgsFromDependencies(s.dependencies)
+	if err != nil {
+		utils.PrintWarning("Failed to get overlay args from dependencies: %v", err)
+	} else {
+		args = append(args, overlayArgs...)
+	}
+
 	args = append(args, "--overlay", s.tmpOverlayPath)
 	if condatainerDir != "" {
 		args = append(args, "--bind", condatainerDir)
 	}
-	// TODO: Add GPU args
 	args = append(args, baseImage, "/bin/bash", "-c", bashScript)
 
 	cmd := exec.Command(apptainerBin, args...)
@@ -210,8 +243,11 @@ fi
 			return fmt.Errorf("overlay build script did not create any files in %s", targetDir)
 		}
 
-		// TODO: Set permissions recursively
-		// Utils.share_to_ugo_recursive(s.cntDirPath)
+		// Set permissions recursively
+		utils.PrintMessage("Setting permissions recursively for %s", utils.StylePath(s.cntDirPath))
+		if err := utils.ShareToUGORecursive(s.cntDirPath); err != nil {
+			utils.PrintWarning("Failed to set permissions for %s: %v", utils.StylePath(s.cntDirPath), err)
+		}
 
 		utils.PrintMessage("Creating SquashFS from %s for overlay %s", utils.StylePath(s.cntDirPath), styledOverlay)
 		if err := s.createSquashfs(s.cntDirPath, targetOverlayPath); err != nil {
@@ -229,11 +265,15 @@ fi
 		}
 	}
 
-	// TODO: Extract and save ENV variables from build script
-	// envDict := getEnvDictFromBuildScript(s.buildSource)
-	// if len(envDict) > 0 {
-	//     saveEnvFile(s.targetOverlayPath + ".env", envDict, relativePath)
-	// }
+	// Extract and save ENV variables from build script
+	envDict, err := GetEnvDictFromBuildScript(s.buildSource)
+	if err != nil {
+		utils.PrintWarning("Failed to extract ENV from build script: %v", err)
+	} else if len(envDict) > 0 {
+		if err := SaveEnvFile(targetOverlayPath, envDict, relativePath); err != nil {
+			utils.PrintWarning("Failed to save ENV file: %v", err)
+		}
+	}
 
 	// Set permissions
 	if err := os.Chmod(targetOverlayPath, 0o664); err != nil {

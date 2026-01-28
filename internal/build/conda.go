@@ -25,14 +25,35 @@ type CondaBuildObject struct {
 // newCondaBuildObject creates a CondaBuildObject from base
 func newCondaBuildObject(base *BaseBuildObject) (*CondaBuildObject, error) {
 	parts := strings.Split(base.nameVersion, "/")
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("conda package must be in format name/version, got: %s", base.nameVersion)
+
+	// If buildSource is explicitly set (via -n flag), allow custom names without version
+	// Otherwise, validate that conda packages follow name/version format
+	var packageName, packageVersion string
+
+	if base.buildSource != "" {
+		// Custom buildSource provided (YAML file or comma-separated packages)
+		// Use the full nameVersion as packageName, set version to "env"
+		if len(parts) == 2 {
+			packageName = parts[0]
+			packageVersion = parts[1]
+		} else {
+			// Single name without version (e.g., "nvim_test")
+			packageName = base.nameVersion
+			packageVersion = "env"
+		}
+	} else {
+		// Standard conda package - must be in name/version format
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("conda package must be in format name/version, got: %s", base.nameVersion)
+		}
+		packageName = parts[0]
+		packageVersion = parts[1]
 	}
 
 	return &CondaBuildObject{
 		BaseBuildObject: base,
-		packageName:     parts[0],
-		packageVersion:  parts[1],
+		packageName:     packageName,
+		packageVersion:  packageVersion,
 	}, nil
 }
 
@@ -154,7 +175,6 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
 		args = append(args, "--bind", path)
 	}
 
-	// TODO: Add GPU args from config
 	args = append(args,
 		baseImage,
 		"/bin/bash", "-c",

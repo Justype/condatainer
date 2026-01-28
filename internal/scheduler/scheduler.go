@@ -3,17 +3,28 @@ package scheduler
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 )
 
+// SchedulerType represents the type of job scheduler
+type SchedulerType string
+
+const (
+	SchedulerUnknown SchedulerType = ""
+	SchedulerSLURM   SchedulerType = "SLURM"
+	SchedulerPBS     SchedulerType = "PBS" // Future support
+	SchedulerLSF     SchedulerType = "LSF" // Future support
+)
+
 // SchedulerInfo holds information about the detected scheduler
 type SchedulerInfo struct {
-	Type     string // Scheduler type (e.g., "SLURM", "PBS", "LSF")
-	Binary   string // Path to scheduler binary (e.g., "/usr/bin/sbatch")
-	Version  string // Scheduler version (if available)
-	InJob    bool   // Whether we're currently inside a scheduled job
-	Available bool  // Whether scheduler is available for job submission
+	Type      string // Scheduler type (e.g., "SLURM", "PBS", "LSF")
+	Binary    string // Path to scheduler binary (e.g., "/usr/bin/sbatch")
+	Version   string // Scheduler version (if available)
+	InJob     bool   // Whether we're currently inside a scheduled job
+	Available bool   // Whether scheduler is available for job submission
 }
 
 // GpuSpec holds GPU requirements parsed from scheduler directives
@@ -307,4 +318,150 @@ func SubmitJob(scheduler Scheduler, scriptPath string, dependencyJobIDs []string
 // SubmitJobs submits multiple jobs with dependency chains and returns their job IDs
 func SubmitJobs(scheduler Scheduler, jobs []*JobSpec, outputDir string) (map[string]string, error) {
 	return SubmitWithDependencies(scheduler, jobs, outputDir)
+}
+
+// Init auto-detects and initializes the active scheduler.
+// If preferredBin is provided, it will be used instead of auto-detection.
+// Returns the detected scheduler type and any error.
+func Init(preferredBin string) (SchedulerType, error) {
+	sched, err := DetectSchedulerWithBinary(preferredBin)
+	if err != nil {
+		ClearActiveScheduler()
+		return SchedulerUnknown, err
+	}
+
+	SetActiveScheduler(sched)
+
+	// Determine scheduler type from info
+	info := sched.GetInfo()
+	return SchedulerType(info.Type), nil
+}
+
+// InitIfAvailable attempts to initialize a scheduler if one is available.
+// Unlike Init, this does not return an error if no scheduler is found.
+// Returns the detected scheduler type (or SchedulerUnknown if none).
+func InitIfAvailable(preferredBin string) SchedulerType {
+	schedType, _ := Init(preferredBin)
+	return schedType
+}
+
+// DetectType returns the type of scheduler available on the system without initializing it.
+// This is useful for checking what scheduler is available before deciding to use it.
+func DetectType() SchedulerType {
+	// Check for SLURM (sbatch)
+	if _, err := exec.LookPath("sbatch"); err == nil {
+		return SchedulerSLURM
+	}
+
+	// Check for PBS (qsub with PBS-specific behavior)
+	if _, err := exec.LookPath("qsub"); err == nil {
+		// TODO: Distinguish PBS from other qsub implementations (SGE, etc.)
+		return SchedulerPBS
+	}
+
+	// Check for LSF (bsub)
+	if _, err := exec.LookPath("bsub"); err == nil {
+		return SchedulerLSF
+	}
+
+	return SchedulerUnknown
+}
+
+// ParsedScript contains the normalized specs and detected script type
+type ParsedScript struct {
+	Specs      *ScriptSpecs  // Normalized scheduler specifications
+	ScriptType SchedulerType // Detected scheduler type from script directives
+}
+
+// ParseScriptAny parses scheduler directives from a script using the appropriate parser.
+// It tries the current scheduler first, then falls back to other schedulers.
+// This enables cross-scheduler compatibility (e.g., PBS can run SLURM scripts).
+//
+// Returns:
+//   - ParsedScript with specs and detected type if directives found
+//   - nil ParsedScript if no scheduler directives found (not an error)
+//   - error if parsing fails
+func ParseScriptAny(scriptPath string) (*ParsedScript, error) {
+	// Determine current scheduler type
+	currentType := DetectType()
+
+	// Try current scheduler first, then others
+	tryOrder := []SchedulerType{}
+
+	// Add current scheduler first (if known)
+	if currentType != SchedulerUnknown {
+		tryOrder = append(tryOrder, currentType)
+	}
+
+	// Add other schedulers
+	allTypes := []SchedulerType{SchedulerSLURM, SchedulerPBS}
+	for _, st := range allTypes {
+		if st != currentType {
+			tryOrder = append(tryOrder, st)
+		}
+	}
+
+	// Try each scheduler parser
+	for _, schedType := range tryOrder {
+		var specs *ScriptSpecs
+		var err error
+
+		switch schedType {
+		case SchedulerSLURM:
+			specs, err = TryParseSlurmScript(scriptPath)
+		case SchedulerPBS:
+			specs, err = TryParsePbsScript(scriptPath)
+		case SchedulerLSF:
+			// LSF parsing not yet implemented
+			continue
+		default:
+			continue
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		// If we found directives, return the result
+		if specs != nil && len(specs.RawFlags) > 0 {
+			return &ParsedScript{
+				Specs:      specs,
+				ScriptType: schedType,
+			}, nil
+		}
+	}
+
+	// No scheduler directives found in any format
+	return nil, nil
+}
+
+// ReadScriptSpecsFromPath reads scheduler specs from a script file.
+// It uses cross-scheduler translation: parses any scheduler format and returns
+// normalized specs that can be used with the active scheduler.
+//
+// If the script's scheduler type differs from the host scheduler, a warning
+// message is returned (but not an error) to allow the build to proceed.
+//
+// Returns nil specs (not an error) if no scheduler directives are found.
+func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
+	// Parse script using any available parser
+	parsed, err := ParseScriptAny(scriptPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// No scheduler directives found
+	if parsed == nil {
+		return nil, nil
+	}
+
+	// Check for scheduler mismatch and log warning
+	hostType := DetectType()
+	if hostType != SchedulerUnknown && parsed.ScriptType != hostType {
+		// Log warning about mismatch (the specs will still be used)
+		fmt.Printf("[CNT WARN] Script contains %s directives but host has %s scheduler. "+
+			"Specs will be translated.\n", parsed.ScriptType, hostType)
+	}
+
+	return parsed.Specs, nil
 }
