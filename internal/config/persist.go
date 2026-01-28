@@ -20,15 +20,48 @@ const ConfigType = "yaml"
 // Priority (highest to lowest):
 // 1. Command-line flags (handled by cobra)
 // 2. Environment variables (CONDATAINER_*)
-// 3. User config file (~/.config/condatainer/config.yaml)
-// 4. System config file (/etc/condatainer/config.yaml)
-// 5. Defaults
+// 3. Portable config (parent of bin/ folder where executable lives)
+// 4. User config file (~/.config/condatainer/config.yaml)
+// 5. User config fallback (~/.condatainer/config.yaml)
+// 6. System config file (/etc/condatainer/config.yaml)
+// 7. Current directory (for development)
+// 8. Defaults
 func InitViper() error {
 	viper.SetConfigName(ConfigFilename)
 	viper.SetConfigType(ConfigType)
 
-	// Set config search paths (order matters)
-	// User config (highest priority)
+	// Set config search paths (order matters - first found wins)
+
+	// Portable config: if executable is in a "bin" folder, check parent folder
+	// e.g., /path/to/condatainer/bin/condatainer -> /path/to/condatainer/config.yaml
+	// Excludes common user bin directories ($HOME/bin, $HOME/.local/bin, /usr/bin, etc.)
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		if filepath.Base(exeDir) == "bin" {
+			parentDir := filepath.Dir(exeDir)
+			// Exclude common bin directories that aren't dedicated installations
+			home, _ := os.UserHomeDir()
+			excludedParents := []string{
+				home,                          // $HOME/bin
+				filepath.Join(home, ".local"), // $HOME/.local/bin
+				"/usr",                         // /usr/bin
+				"/usr/local",                   // /usr/local/bin
+				"/opt",                         // /opt/bin
+			}
+			isExcluded := false
+			for _, excluded := range excludedParents {
+				if parentDir == excluded {
+					isExcluded = true
+					break
+				}
+			}
+			if !isExcluded {
+				viper.AddConfigPath(parentDir)
+			}
+		}
+	}
+
+	// User config (highest priority for user-specific settings)
 	if userConfigDir, err := os.UserConfigDir(); err == nil {
 		viper.AddConfigPath(filepath.Join(userConfigDir, "condatainer"))
 	}
@@ -98,13 +131,93 @@ func GetUserConfigPath() (string, error) {
 	return filepath.Join(userConfigDir, "condatainer", ConfigFilename+"."+ConfigType), nil
 }
 
+// GetPortableConfigPath returns the portable config path if the executable is in a
+// dedicated installation (bin/ folder that's not a common user/system bin).
+// Returns empty string if not in a portable installation.
+func GetPortableConfigPath() string {
+	exePath, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+
+	exeDir := filepath.Dir(exePath)
+	if filepath.Base(exeDir) != "bin" {
+		return ""
+	}
+
+	parentDir := filepath.Dir(exeDir)
+
+	// Exclude common bin directories that aren't dedicated installations
+	home, _ := os.UserHomeDir()
+	excludedParents := []string{
+		home,                          // $HOME/bin
+		filepath.Join(home, ".local"), // $HOME/.local/bin
+		"/usr",                        // /usr/bin
+		"/usr/local",                  // /usr/local/bin
+		"/opt",                        // /opt/bin
+	}
+
+	for _, excluded := range excludedParents {
+		if parentDir == excluded {
+			return ""
+		}
+	}
+
+	return filepath.Join(parentDir, ConfigFilename+"."+ConfigType)
+}
+
+// GetDefaultConfigPath returns the recommended config path based on installation type.
+// - If in a portable installation (bin/ folder), returns the portable path
+// - Otherwise, returns the user config path (~/.config/condatainer/config.yaml)
+func GetDefaultConfigPath() (string, error) {
+	// Check for portable installation first
+	if portablePath := GetPortableConfigPath(); portablePath != "" {
+		return portablePath, nil
+	}
+
+	// Fall back to user config
+	return GetUserConfigPath()
+}
+
+// IsPortableInstallation returns true if the executable is in a portable installation
+func IsPortableInstallation() bool {
+	return GetPortableConfigPath() != ""
+}
+
+// GetSystemConfigPath returns the system-wide config path
+func GetSystemConfigPath() string {
+	return filepath.Join("/etc", "condatainer", ConfigFilename+"."+ConfigType)
+}
+
+// GetConfigPathByLocation returns the config path for the specified location type.
+// Supported locations: "user"/"u", "portable"/"p", "system"/"s"
+func GetConfigPathByLocation(location string) (string, error) {
+	switch location {
+	case "user", "u":
+		return GetUserConfigPath()
+	case "portable", "p":
+		if path := GetPortableConfigPath(); path != "" {
+			return path, nil
+		}
+		return "", fmt.Errorf("not in a portable installation (executable not in a dedicated bin/ folder)")
+	case "system", "s":
+		return GetSystemConfigPath(), nil
+	default:
+		return "", fmt.Errorf("invalid location '%s': use 'user' (u), 'portable' (p), or 'system' (s)", location)
+	}
+}
+
 // SaveConfig saves current Viper config to user config file
 func SaveConfig() error {
 	configPath, err := GetUserConfigPath()
 	if err != nil {
 		return fmt.Errorf("failed to get config path: %w", err)
 	}
+	return SaveConfigTo(configPath)
+}
 
+// SaveConfigTo saves current Viper config to the specified path
+func SaveConfigTo(configPath string) error {
 	// Create directory if it doesn't exist
 	configDir := filepath.Dir(configPath)
 	if err := os.MkdirAll(configDir, 0755); err != nil {
@@ -225,6 +338,16 @@ func AutoDetectAndSave() (bool, error) {
 // This is useful for config init to capture the exact paths from current PATH
 // Returns true if config was updated
 func ForceDetectAndSave() (bool, error) {
+	configPath, err := GetUserConfigPath()
+	if err != nil {
+		return false, err
+	}
+	return ForceDetectAndSaveTo(configPath)
+}
+
+// ForceDetectAndSaveTo always re-detects binaries and saves to the specified path
+// Returns true if config was updated
+func ForceDetectAndSaveTo(configPath string) (bool, error) {
 	updated := false
 
 	if !IsInsideContainer() {
@@ -252,7 +375,7 @@ func ForceDetectAndSave() (bool, error) {
 	}
 
 	// Always save (even if nothing changed, to create the file)
-	if err := SaveConfig(); err != nil {
+	if err := SaveConfigTo(configPath); err != nil {
 		return false, err
 	}
 
@@ -262,8 +385,17 @@ func ForceDetectAndSave() (bool, error) {
 // SetCompressArgsInConfig saves the compress_args to config file
 // This is called during config init to persist the auto-detected compression
 func SetCompressArgsInConfig(compressArgs string) error {
+	configPath, err := GetUserConfigPath()
+	if err != nil {
+		return err
+	}
+	return SetCompressArgsInConfigTo(compressArgs, configPath)
+}
+
+// SetCompressArgsInConfigTo saves the compress_args to the specified config file
+func SetCompressArgsInConfigTo(compressArgs, configPath string) error {
 	viper.Set("build.compress_args", compressArgs)
-	return SaveConfig()
+	return SaveConfigTo(configPath)
 }
 
 // LoadFromViper loads config from Viper into Global struct

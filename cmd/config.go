@@ -14,7 +14,8 @@ import (
 )
 
 var (
-	showPath bool
+	showPath     bool
+	initLocation string // user, portable, system, or a custom path
 )
 
 var configCmd = &cobra.Command{
@@ -25,9 +26,10 @@ var configCmd = &cobra.Command{
 Configuration priority (highest to lowest):
   1. Command-line flags
   2. Environment variables (CONDATAINER_*)
-  3. User config file (~/.config/condatainer/config.yaml)
-  4. System config file (/etc/condatainer/config.yaml)
-  5. Defaults`,
+  3. Portable config (<install-dir>/config.yaml, if in dedicated folder)
+  4. User config file (~/.config/condatainer/config.yaml)
+  5. System config file (/etc/condatainer/config.yaml)
+  6. Defaults`,
 }
 
 var configShowCmd = &cobra.Command{
@@ -220,12 +222,54 @@ Time duration format (for build.default_time):
 var configInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Create a config file with defaults",
-	Long:  "Create a configuration file with default values and auto-detected settings",
+	Long: `Create a configuration file with default values and auto-detected settings.
+
+Config location options (-l, --location):
+  u, user      ~/.config/condatainer/config.yaml (default for standard installations)
+  p, portable  <install-dir>/config.yaml (default if installed in a dedicated folder)
+  s, system    /etc/condatainer/config.yaml (requires appropriate permissions)
+
+By default, the location is chosen based on the installation:
+  - If the executable is in a dedicated folder (e.g., /apps/condatainer/bin/),
+    the config is created in the parent folder (portable mode).
+  - Otherwise, it uses the user's config directory.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		configPath, err := config.GetUserConfigPath()
-		if err != nil {
-			utils.PrintError("Failed to get config path: %v", err)
-			os.Exit(1)
+		var configPath string
+		var err error
+		var locationType string
+
+		// Determine config path based on --location flag or smart default
+		if initLocation != "" {
+			// User specified a location
+			configPath, err = config.GetConfigPathByLocation(initLocation)
+			if err != nil {
+				utils.PrintError("Invalid location: %v", err)
+				os.Exit(1)
+			}
+			// Normalize shortcut to full name for display
+			switch initLocation {
+			case "u":
+				locationType = "user"
+			case "p":
+				locationType = "portable"
+			case "s":
+				locationType = "system"
+			default:
+				locationType = initLocation
+			}
+		} else {
+			// Smart default: portable if in dedicated installation, otherwise user
+			if config.IsPortableInstallation() {
+				configPath = config.GetPortableConfigPath()
+				locationType = "portable"
+			} else {
+				configPath, err = config.GetUserConfigPath()
+				if err != nil {
+					utils.PrintError("Failed to get config path: %v", err)
+					os.Exit(1)
+				}
+				locationType = "user"
+			}
 		}
 
 		// Check if config already exists
@@ -246,8 +290,8 @@ var configInitCmd = &cobra.Command{
 			utils.PrintWarning("Running inside a container - config changes may not persist on the host")
 		}
 
-		// Force re-detect binaries from current environment
-		updated, err := config.ForceDetectAndSave()
+		// Force re-detect binaries from current environment and save to specified path
+		updated, err := config.ForceDetectAndSaveTo(configPath)
 		if err != nil {
 			utils.PrintError("Failed to save config: %v", err)
 			os.Exit(1)
@@ -272,15 +316,16 @@ var configInitCmd = &cobra.Command{
 			}
 		}
 		// Save detected compression to config
-		if err := config.SetCompressArgsInConfig(detectedCompression); err != nil {
+		if err := config.SetCompressArgsInConfigTo(detectedCompression, configPath); err != nil {
 			utils.PrintWarning("Failed to save compression setting: %v", err)
 		}
 
 		if updated {
-			utils.PrintSuccess("Config file created with auto-detected settings: %s", configPath)
+			utils.PrintSuccess("Config file created with auto-detected settings")
 		} else {
-			utils.PrintSuccess("Config file created: %s", configPath)
+			utils.PrintSuccess("Config file created")
 		}
+		fmt.Printf("  Location: %s (%s)\n", utils.StylePath(configPath), locationType)
 
 		// Show what was detected
 		fmt.Println()
@@ -396,6 +441,7 @@ var configValidateCmd = &cobra.Command{
 func init() {
 	// Add flags
 	configShowCmd.Flags().BoolVar(&showPath, "path", false, "Show only the config file path")
+	configInitCmd.Flags().StringVarP(&initLocation, "location", "l", "", "Config location: user (u), portable (p), or system (s)")
 
 	// Add subcommands
 	configCmd.AddCommand(configShowCmd)
