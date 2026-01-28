@@ -127,4 +127,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debug mode with verbose output")
 	rootCmd.PersistentFlags().BoolVar(&localMode, "local", false, "Disable job submission (run locally)")
 	rootCmd.PersistentFlags().BoolVarP(&quietMode, "quiet", "q", false, "Suppress verbose overlay creation messages (errors/warnings still shown)")
+
+	// Hide the help command from completions (use -h/--help instead)
+	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
 }

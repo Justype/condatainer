@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/scheduler"
@@ -37,13 +38,39 @@ Common helper scripts:
   condatainer helper --update code-server  # Update specific script
   condatainer helper --path              # Show helper scripts directory
   condatainer helper code-server 8080    # Run code-server on port 8080`,
-	RunE: runHelper,
+	RunE:              runHelper,
+	ValidArgsFunction: completeHelperScripts,
 }
 
 func init() {
 	rootCmd.AddCommand(helperCmd)
 	helperCmd.Flags().BoolVar(&helperPath, "path", false, "Show path to helper scripts directory")
 	helperCmd.Flags().BoolVarP(&helperUpdate, "update", "u", false, "Update helper scripts from remote")
+}
+
+// completeHelperScripts provides shell completion for helper script names
+func completeHelperScripts(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// Only complete the first argument (script name), then return to default file completion
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+
+	helperScriptsDir := filepath.Join(config.Global.BaseDir, "helper-scripts")
+	entries, err := os.ReadDir(helperScriptsDir)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+
+	var scripts []string
+	for _, entry := range entries {
+		name := entry.Name()
+		// Skip hidden files and directories
+		if !entry.IsDir() && !strings.HasPrefix(name, ".") {
+			scripts = append(scripts, name)
+		}
+	}
+
+	return scripts, cobra.ShellCompDirectiveNoFileComp
 }
 
 func runHelper(cmd *cobra.Command, args []string) error {

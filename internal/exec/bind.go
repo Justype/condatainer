@@ -64,6 +64,13 @@ func BindPaths(paths ...string) []string {
 		}
 	}
 
+	// also bind the condatainer executable to /usr/bin/condatainer to help with nested calls
+	execPath, err := os.Executable()
+	if err == nil && execPath != "" {
+		bindingPath := execPath + ":/usr/bin/condatainer:ro"
+		filtered = append(filtered, bindingPath)
+	}
+
 	return filtered
 }
 

@@ -15,9 +15,12 @@ import (
 )
 
 var (
-	runWritableImg bool
-	runBaseImage   string
-	runAutoInstall bool
+	runWritableImg  bool
+	runBaseImage    string
+	runAutoInstall  bool
+	runEnvSettings  []string
+	runBindPaths    []string
+	runFakeroot     bool
 )
 
 var runCmd = &cobra.Command{
@@ -29,12 +32,24 @@ The script can contain special comment tags:
   #DEP: package/version  - Declares a dependency
   #CNT args              - Additional arguments to pass to condatainer
 
+Supported #CNT arguments:
+  -w, --writable-img     Make .img overlays writable
+  -b, --base-image PATH  Use custom base image
+  --env KEY=VALUE        Set environment variable
+  --bind HOST:CONTAINER  Bind mount path
+  --fakeroot             Run with fakeroot privileges
+
 Dependencies will be automatically loaded, and missing ones can be auto-installed
 with the --auto-install flag.`,
 	Example: `  condatainer run script.sh              # Run with dependency check
   condatainer run script.sh -a           # Auto-install missing deps
   condatainer run script.sh -w           # Make .img overlays writable
-  condatainer run script.sh -b base.sif  # Use custom base image`,
+  condatainer run script.sh -b base.sif  # Use custom base image
+
+  # In script.sh, you can use #CNT to set options:
+  # #CNT -w
+  # #CNT --env MYVAR=value
+  # #CNT --bind /data:/mnt/data`,
 	Args: cobra.ExactArgs(1),
 	RunE: runScript,
 }
@@ -76,8 +91,10 @@ func runScript(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Apply #CNT arguments
 	if len(scriptArgs) > 0 {
 		utils.PrintDebug("[RUN] Additional script arguments found: %v", scriptArgs)
+		applyScriptArgs(scriptArgs)
 	}
 
 	// Apply base image if specified
@@ -191,11 +208,56 @@ export -f module ml
 		Overlays:     overlays,
 		Command:      []string{"/bin/bash", "-c", executionScript},
 		WritableImg:  runWritableImg,
+		EnvSettings:  runEnvSettings,
+		BindPaths:    runBindPaths,
+		Fakeroot:     runFakeroot,
 		BaseImage:    config.Global.BaseImage,
 		ApptainerBin: config.Global.ApptainerBin,
 	}
 
 	return execpkg.Run(options)
+}
+
+// applyScriptArgs parses #CNT arguments and applies them to run options
+func applyScriptArgs(scriptArgs []string) {
+	for _, argLine := range scriptArgs {
+		parts := strings.Fields(argLine)
+		for i := 0; i < len(parts); i++ {
+			arg := parts[i]
+			switch arg {
+			case "-w", "--writable-img":
+				runWritableImg = true
+			case "--fakeroot":
+				runFakeroot = true
+			case "-b", "--base-image":
+				if i+1 < len(parts) {
+					i++
+					runBaseImage = parts[i]
+				}
+			case "--env":
+				if i+1 < len(parts) {
+					i++
+					runEnvSettings = append(runEnvSettings, parts[i])
+				}
+			case "--bind":
+				if i+1 < len(parts) {
+					i++
+					runBindPaths = append(runBindPaths, parts[i])
+				}
+			default:
+				// Handle --env=VALUE and --bind=VALUE formats
+				if strings.HasPrefix(arg, "--env=") {
+					runEnvSettings = append(runEnvSettings, strings.TrimPrefix(arg, "--env="))
+				} else if strings.HasPrefix(arg, "--bind=") {
+					runBindPaths = append(runBindPaths, strings.TrimPrefix(arg, "--bind="))
+				} else if strings.HasPrefix(arg, "-b=") {
+					runBaseImage = strings.TrimPrefix(arg, "-b=")
+				} else if strings.HasPrefix(arg, "--base-image=") {
+					runBaseImage = strings.TrimPrefix(arg, "--base-image=")
+				}
+			}
+		}
+	}
 }
 
 // parseArgsInScript extracts arguments from #CNT comments in the script
