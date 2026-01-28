@@ -1,8 +1,8 @@
 package build
 
 import (
-	"errors"
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"

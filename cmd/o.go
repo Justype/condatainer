@@ -108,4 +108,31 @@ func init() {
 	oCmd.Flags().Bool("fakeroot", false, "Create a fakeroot-compatible overlay (owned by root)")
 	oCmd.Flags().Bool("sparse", false, "Create a sparse overlay image")
 	oCmd.Flags().StringP("file", "f", "", "Initialize with Conda environment file (.yml or .yaml)")
+
+	// Flag completions for shortcut 'o' (same as overlay create)
+	oCmd.RegisterFlagCompletionFunc("fs", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		opts := []string{"ext3", "ext4"}
+		res := make([]string, 0, len(opts))
+		for _, o := range opts {
+			if toComplete == "" || strings.HasPrefix(o, toComplete) {
+				res = append(res, o)
+			}
+		}
+		return res, cobra.ShellCompDirectiveNoFileComp
+	})
+
+	oCmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		opts := []string{"small", "balanced", "large"}
+		res := make([]string, 0, len(opts))
+		for _, o := range opts {
+			if toComplete == "" || strings.HasPrefix(o, toComplete) {
+				res = append(res, o)
+			}
+		}
+		return res, cobra.ShellCompDirectiveNoFileComp
+	})
+
+	oCmd.RegisterFlagCompletionFunc("file", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveFilterFileExt
+	})
 }

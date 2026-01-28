@@ -1,13 +1,12 @@
 package utils
 
 import (
-	"io/ioutil"
 	"os"
 	"testing"
 )
 
 func TestGetInteractivePromptsFromScript(t *testing.T) {
-	tmp, err := ioutil.TempFile("", "script-*.sh")
+	tmp, err := os.CreateTemp("", "script-*.sh")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}

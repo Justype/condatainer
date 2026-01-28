@@ -15,7 +15,6 @@ import (
 
 // Profile defines the tuning parameters for the filesystem.
 type Profile struct {
-	BlockSize    int // -b: usually 4096
 	InodeRatio   int // -i: bytes per inode
 	ReservedPerc int // -m: percentage (0-100)
 }
@@ -34,15 +33,14 @@ type CreateOptions struct {
 var (
 	// ProfileSmall is tuned for environments with many small files (Conda packages, Python/site-packages).
 	// 1 inode per 4KB keeps metadata lean so you don't hit inode exhaustion inside Conda envs.
-	ProfileSmall = Profile{BlockSize: 4096, InodeRatio: 4096, ReservedPerc: 0}
+	ProfileSmall = Profile{InodeRatio: 4096, ReservedPerc: 3}
 
 	// ProfileDefault is a general-purpose profile (Linux default 16K).
 	// 1 inode per 16KB balances metadata and data for typical workloads.
-	ProfileDefault = Profile{BlockSize: 4096, InodeRatio: 16384, ReservedPerc: 0}
-
+	ProfileDefault = Profile{InodeRatio: 16384, ReservedPerc: 3}
 	// ProfileLarge is optimized for large files (genomes, FASTA, databases).
 	// 1 inode per 1MB drastically lowers metadata pressure for huge single files.
-	ProfileLarge = Profile{BlockSize: 4096, InodeRatio: 1048576, ReservedPerc: 0}
+	ProfileLarge = Profile{InodeRatio: 1048576, ReservedPerc: 3}
 )
 
 // getProfile returns the struct based on a simple string name.
@@ -133,9 +131,9 @@ func CreateWithOptions(opts *CreateOptions) error {
 
 	utils.PrintMessage("Creating %soverlay %s",
 		styleType, stylePath)
-	utils.PrintMessage("Size %s MB | Filesystem %s | Profile Block Size %s Inode Ratio %s Reserved %s%%",
+	utils.PrintMessage("Size %s MB | Filesystem %s | Profile Inode Ratio %s Reserved %s%%",
 		utils.StyleNumber(opts.SizeMB), utils.StyleInfo(opts.FilesystemType),
-		utils.StyleNumber(opts.Profile.BlockSize), utils.StyleNumber(opts.Profile.InodeRatio),
+		utils.StyleNumber(opts.Profile.InodeRatio),
 		utils.StyleNumber(opts.Profile.ReservedPerc))
 
 	// 2. Create File (dd)
@@ -155,11 +153,8 @@ func CreateWithOptions(opts *CreateOptions) error {
 	}
 
 	// 3. Format filesystem with Profile (mke2fs)
-	utils.PrintMessage("Formatting %s as %s", utils.StylePath(opts.Path), utils.StyleInfo(opts.FilesystemType))
-
 	if err := runCommand("format", opts.Path, "mke2fs",
 		"-t", opts.FilesystemType,
-		"-b", fmt.Sprintf("%d", opts.Profile.BlockSize),
 		"-i", fmt.Sprintf("%d", opts.Profile.InodeRatio),
 		"-m", fmt.Sprintf("%d", opts.Profile.ReservedPerc),
 		"-F", opts.Path); err != nil {
@@ -176,8 +171,6 @@ func CreateWithOptions(opts *CreateOptions) error {
 	script.WriteString(fmt.Sprintf("set_inode_field work uid %d\n", opts.UID))
 	script.WriteString(fmt.Sprintf("set_inode_field work gid %d\n", opts.GID))
 	script.WriteString("quit\n")
-
-	utils.PrintMessage("Injecting overlayFS structure via debugfs for %s", utils.StylePath(opts.Path))
 
 	cmd := exec.Command("debugfs", "-w", opts.Path)
 	cmd.Stdin = strings.NewReader(script.String())

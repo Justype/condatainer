@@ -172,21 +172,62 @@ var infoCmd = &cobra.Command{
 		}
 
 		usedBytes, diskPct := stats.Usage()
+		totalBytes := stats.TotalBlocks * stats.BlockSize
+		freeBytes := stats.FreeBlocks * stats.BlockSize
+		reservedBytes := stats.ReservedBlocks * stats.BlockSize
+		usedInodes := stats.TotalInodes - stats.FreeInodes
 		inodePct := stats.InodeUsage()
 
-		fmt.Println(utils.StyleTitle("Overlay Statistics"))
-		fmt.Printf("  %-15s %s\n", "File:", utils.StylePath(path))
+		// File info
+		fmt.Println(utils.StyleTitle("File"))
+		fmt.Printf("  %-15s %s\n", "Path:", utils.StylePath(path))
+		fmt.Printf("  %-15s %s\n", "Size:", utils.FormatBytes(stats.FileSizeBytes))
+		if stats.IsSparse {
+			fmt.Printf("  %-15s %s (%s on disk)\n", "Type:", utils.StyleInfo("Sparse"), utils.FormatBytes(stats.FileBlocksUsed))
+		} else {
+			fmt.Printf("  %-15s %s\n", "Type:", utils.StyleInfo("Allocated"))
+		}
+
+		// Filesystem info
+		fmt.Println(utils.StyleTitle("Filesystem"))
+		fmt.Printf("  %-15s %s\n", "Format:", utils.StyleInfo(stats.FilesystemType))
 		fmt.Printf("  %-15s %s\n", "State:", stats.FilesystemState)
-		fmt.Printf("  %-15s %s\n", "Last Mounted:", stats.LastMounted)
-		fmt.Println(utils.StyleTitle("Usage"))
-		fmt.Printf("  %-15s %s / %s (%.1f%%)\n", "Disk Space:",
-			utils.StyleNumber(usedBytes),
-			utils.StyleNumber(stats.TotalBlocks*stats.BlockSize),
+		fmt.Printf("  %-15s %d bytes\n", "Block Size:", stats.BlockSize)
+		fmt.Printf("  %-15s %s\n", "UUID:", stats.FilesystemUUID)
+		fmt.Printf("  %-15s %s\n", "Created:", stats.CreatedTime)
+		if stats.LastMounted != "" && stats.LastMounted != "<not available>" {
+			fmt.Printf("  %-15s %s\n", "Last Mounted:", stats.LastMounted)
+		}
+
+		// Ownership
+		fmt.Println(utils.StyleTitle("Ownership"))
+		if stats.UpperUID == 0 && stats.UpperGID == 0 {
+			fmt.Printf("  %-15s %s (use with --fakeroot)\n", "Owner:", utils.StyleInfo("root"))
+		} else if stats.UpperUID >= 0 {
+			fmt.Printf("  %-15s UID=%d GID=%d\n", "Owner:", stats.UpperUID, stats.UpperGID)
+		} else {
+			fmt.Printf("  %-15s %s\n", "Owner:", "unknown")
+		}
+
+		// Disk Usage
+		fmt.Println(utils.StyleTitle("Disk Usage"))
+		fmt.Printf("  %-15s %s / %s (%.2f%%)\n", "Used:",
+			utils.FormatBytes(usedBytes),
+			utils.FormatBytes(totalBytes),
 			diskPct)
-		fmt.Printf("  %-15s %d / %d (%.1f%%)\n", "Inodes:",
-			stats.TotalInodes-stats.FreeInodes,
+		fmt.Printf("  %-15s %s\n", "Free:", utils.FormatBytes(freeBytes))
+		if stats.ReservedBlocks > 0 {
+			reservedPct := float64(stats.ReservedBlocks) / float64(stats.TotalBlocks) * 100
+			fmt.Printf("  %-15s %s (%.1f%% for root)\n", "Reserved:", utils.FormatBytes(reservedBytes), reservedPct)
+		}
+
+		// Inode Usage
+		fmt.Println(utils.StyleTitle("Inode Usage"))
+		fmt.Printf("  %-15s %d / %d (%.2f%%)\n", "Used:",
+			usedInodes,
 			stats.TotalInodes,
 			inodePct)
+		fmt.Printf("  %-15s %d\n", "Free:", stats.FreeInodes)
 	},
 }
 
@@ -312,6 +353,34 @@ func init() {
 	overlayCreateCmd.Flags().Bool("sparse", false, "Create a sparse overlay image")
 	overlayCreateCmd.Flags().StringP("file", "f", "", "Initialize with Conda environment file (.yml or .yaml)")
 
+	// --- Flag completion helpers ---
+	overlayCreateCmd.RegisterFlagCompletionFunc("fs", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		opts := []string{"ext3", "ext4"}
+		res := make([]string, 0, len(opts))
+		for _, o := range opts {
+			if toComplete == "" || strings.HasPrefix(o, toComplete) {
+				res = append(res, o)
+			}
+		}
+		return res, cobra.ShellCompDirectiveNoFileComp
+	})
+
+	overlayCreateCmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		opts := []string{"small", "balanced", "large"}
+		res := make([]string, 0, len(opts))
+		for _, o := range opts {
+			if toComplete == "" || strings.HasPrefix(o, toComplete) {
+				res = append(res, o)
+			}
+		}
+		return res, cobra.ShellCompDirectiveNoFileComp
+	})
+
+	// Let the shell complete files for --file (yaml/yml)
+	overlayCreateCmd.RegisterFlagCompletionFunc("file", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveFilterFileExt
+	})
+
 	// --- Resize ---
 	resizeCmd.Flags().StringP("size", "s", "", "New size (e.g., 20G, 2048M)")
 	_ = resizeCmd.MarkFlagRequired("size")
@@ -360,10 +429,10 @@ func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) erro
 			return fmt.Errorf("failed to get absolute path of environment file: %w", err)
 		}
 		utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(absEnvFile))
-		mmCreateCmd = []string{"mm-create", "-f", absEnvFile, "-y"}
+		mmCreateCmd = []string{"mm-create", "-f", absEnvFile, "-y", "-q"}
 	} else {
 		utils.PrintMessage("Initializing minimal conda environment with small package (zlib)...")
-		mmCreateCmd = []string{"mm-create", "zlib", "-y"}
+		mmCreateCmd = []string{"mm-create", "zlib", "-y", "-q"}
 	}
 
 	// Run mm-create command
@@ -382,7 +451,7 @@ func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) erro
 	utils.PrintMessage("Cleaning up micromamba cache...")
 	cleanOpts := exec.Options{
 		Overlays:    []string{absOverlayPath},
-		Command:     []string{"mm-clean", "-a", "-y"},
+		Command:     []string{"mm-clean", "-a", "-y", "-q"},
 		WritableImg: true,
 		Fakeroot:    fakeroot,
 	}

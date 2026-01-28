@@ -1,14 +1,13 @@
 package build
 
 import (
-	"io/ioutil"
 	"os"
 	"testing"
 )
 
 func TestParseScriptMetadata_RequiresTTY(t *testing.T) {
 	// Create a temp script with INTERACTIVE tag
-	tmp, err := ioutil.TempFile("", "script-*.sh")
+	tmp, err := os.CreateTemp("", "script-*.sh")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
@@ -21,11 +20,11 @@ func TestParseScriptMetadata_RequiresTTY(t *testing.T) {
 	tmp.Close()
 
 	base := &BaseBuildObject{
-		nameVersion:    "foo/bar",
-		buildSource:    tmp.Name(),
-		ncpus:          1,
-		cntDirPath:     "",
-		tmpOverlayPath: "",
+		nameVersion:       "foo/bar",
+		buildSource:       tmp.Name(),
+		ncpus:             1,
+		cntDirPath:        "",
+		tmpOverlayPath:    "",
 		targetOverlayPath: "",
 	}
 
@@ -37,7 +36,7 @@ func TestParseScriptMetadata_RequiresTTY(t *testing.T) {
 
 func TestParseScriptMetadata_NoInteractive(t *testing.T) {
 	// Create a temp script without INTERACTIVE tag
-	tmp, err := ioutil.TempFile("", "script-*.sh")
+	tmp, err := os.CreateTemp("", "script-*.sh")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
@@ -50,11 +49,11 @@ func TestParseScriptMetadata_NoInteractive(t *testing.T) {
 	tmp.Close()
 
 	base := &BaseBuildObject{
-		nameVersion:    "foo/bar",
-		buildSource:    tmp.Name(),
-		ncpus:          1,
-		cntDirPath:     "",
-		tmpOverlayPath: "",
+		nameVersion:       "foo/bar",
+		buildSource:       tmp.Name(),
+		ncpus:             1,
+		cntDirPath:        "",
+		tmpOverlayPath:    "",
 		targetOverlayPath: "",
 	}
 
