@@ -6,6 +6,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -123,7 +124,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build graph and execute
-	graph, err := build.NewBuildGraph(buildObjects, "", "", false)
+	graph, err := build.NewBuildGraph(buildObjects, "", "", config.Global.SubmitJob)
 	if err != nil {
 		return fmt.Errorf("failed to create build graph: %w", err)
 	}

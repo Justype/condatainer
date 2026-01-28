@@ -162,7 +162,7 @@ func runCreatePackages(packages []string) {
 		buildObjects = append(buildObjects, bo)
 	}
 
-	graph, err := build.NewBuildGraph(buildObjects, config.Global.ImagesDir, config.Global.TmpDir, false)
+	graph, err := build.NewBuildGraph(buildObjects, config.Global.ImagesDir, config.Global.TmpDir, config.Global.SubmitJob)
 	if err != nil {
 		utils.PrintError("Failed to create build graph: %v", err)
 		os.Exit(1)
@@ -266,7 +266,7 @@ func runCreateWithPrefix() {
 		}
 
 		buildObjects := []build.BuildObject{bo}
-		graph, err := build.NewBuildGraph(buildObjects, config.Global.ImagesDir, config.Global.TmpDir, false)
+		graph, err := build.NewBuildGraph(buildObjects, config.Global.ImagesDir, config.Global.TmpDir, config.Global.SubmitJob)
 		if err != nil {
 			utils.PrintError("Failed to create build graph: %v", err)
 			os.Exit(1)
@@ -319,7 +319,7 @@ func runCreateFromSource() {
 	}
 
 	buildObjects := []build.BuildObject{bo}
-	graph, err := build.NewBuildGraph(buildObjects, config.Global.ImagesDir, config.Global.TmpDir, false)
+	graph, err := build.NewBuildGraph(buildObjects, config.Global.ImagesDir, config.Global.TmpDir, config.Global.SubmitJob)
 	if err != nil {
 		os.Exit(1)
 	}

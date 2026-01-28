@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -69,13 +69,40 @@ func runCommandWithSignalHandling(cmd *exec.Cmd) error {
 type ScriptSpecs = scheduler.ScriptSpecs
 
 func defaultBuildNcpus() int {
+	// Priority 1: Check scheduler-specific environment variables for allocated CPUs
+	// SLURM sets SLURM_CPUS_PER_TASK
+	if cpusStr := os.Getenv("SLURM_CPUS_PER_TASK"); cpusStr != "" {
+		if count, err := strconv.Atoi(cpusStr); err == nil && count > 0 {
+			return count
+		}
+	}
+
+	// PBS/Torque sets PBS_NCPUS or NCPUS
+	if cpusStr := os.Getenv("PBS_NCPUS"); cpusStr != "" {
+		if count, err := strconv.Atoi(cpusStr); err == nil && count > 0 {
+			return count
+		}
+	}
+	if cpusStr := os.Getenv("NCPUS"); cpusStr != "" {
+		if count, err := strconv.Atoi(cpusStr); err == nil && count > 0 {
+			return count
+		}
+	}
+
+	// LSF sets LSB_DJOB_NUMPROC or LSB_MAX_NUM_PROCESSORS
+	if cpusStr := os.Getenv("LSB_DJOB_NUMPROC"); cpusStr != "" {
+		if count, err := strconv.Atoi(cpusStr); err == nil && count > 0 {
+			return count
+		}
+	}
+
+	// Priority 2: User-configured default CPUs
 	if config.Global.Build.DefaultCPUs > 0 {
 		return config.Global.Build.DefaultCPUs
 	}
-	if count := runtime.NumCPU(); count > 0 {
-		return count
-	}
-	return 1
+
+	// Priority 3: Conservative default for local builds (avoid overloading shared systems)
+	return 4
 }
 
 // BuildObject represents a build target with its metadata and dependencies
@@ -255,12 +282,18 @@ func (b *BaseBuildObject) parseScriptMetadata() error {
 		return nil
 	}
 
+	// Always parse dependencies (needed for dependency graph)
+	deps, err := utils.GetDependenciesFromScript(b.buildSource)
+	if err != nil {
+		return fmt.Errorf("failed to parse dependencies: %w", err)
+	}
+	b.dependencies = deps
+	b.interactiveInputs = []string{} // TODO: implement GetInteractiveInputsFromScript
+
+	// Only parse scheduler specs if job submission is enabled
 	if !config.Global.SubmitJob {
 		return nil
 	}
-
-	b.dependencies = []string{}
-	b.interactiveInputs = []string{}
 
 	// Use scheduler package helper to read specs
 	specs, err := scheduler.ReadScriptSpecsFromPath(b.buildSource)

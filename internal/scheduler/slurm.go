@@ -297,10 +297,24 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 		}
 	}
 
+	// Create log directory if it doesn't exist
+	logDir := filepath.Join(outputDir, "log")
+	if err := os.MkdirAll(logDir, 0775); err != nil {
+		return "", NewScriptCreationError(jobSpec.Name, logDir, err)
+	}
+
+	// Set default log path if not specified
+	if specs.Stdout == "" && jobSpec.Name != "" {
+		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
+		specs.Stdout = filepath.Join("log", fmt.Sprintf("%s.log", safeName))
+	}
+
 	// Generate script filename
 	scriptName := "sbatch_job.sh"
 	if jobSpec.Name != "" {
-		scriptName = fmt.Sprintf("sbatch_%s.sh", jobSpec.Name)
+		// Replace slashes with -- to avoid creating subdirectories
+		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
+		scriptName = fmt.Sprintf("sbatch_%s.sh", safeName)
 	}
 
 	scriptPath := filepath.Join(outputDir, scriptName)
@@ -324,7 +338,8 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 		if specs.Stdout != "" && (strings.HasPrefix(flag, "--output=") || strings.HasPrefix(flag, "-o ")) {
 			continue
 		}
-		if specs.Stderr != "" && (strings.HasPrefix(flag, "--error=") || strings.HasPrefix(flag, "-e ")) {
+		// Always skip stderr flags - we don't want separate error logs
+		if strings.HasPrefix(flag, "--error=") || strings.HasPrefix(flag, "-e ") {
 			continue
 		}
 		if specs.Time > 0 && (strings.HasPrefix(flag, "--time=") || strings.HasPrefix(flag, "-t ")) {
@@ -337,12 +352,9 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 		fmt.Fprintf(writer, "#SBATCH %s\n", flag)
 	}
 
-	// Add custom stdout/stderr if specified
+	// Add custom stdout if specified (stderr is not used - output goes to stdout)
 	if specs.Stdout != "" {
 		fmt.Fprintf(writer, "#SBATCH --output=%s\n", specs.Stdout)
-	}
-	if specs.Stderr != "" {
-		fmt.Fprintf(writer, "#SBATCH --error=%s\n", specs.Stderr)
 	}
 
 	// Add email notifications if specified

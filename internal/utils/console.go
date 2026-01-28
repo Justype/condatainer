@@ -10,6 +10,9 @@ import (
 // DebugMode controls whether PrintDebug output is visible.
 var DebugMode = false
 
+// QuietMode controls whether verbose messages are suppressed (errors/warnings still shown)
+var QuietMode = false
+
 // projectPrefix is the standard tag for all logs.
 const projectPrefix = "[CNT]"
 
@@ -99,6 +102,9 @@ func StyleHighlight(text string) string { return bold(yellow(text)) }
 // PrintMessage prints a standard info message.
 // Output: [CNT] Message...
 func PrintMessage(format string, a ...interface{}) {
+	if QuietMode {
+		return
+	}
 	msg := fmt.Sprintf(format, a...)
 	fmt.Fprintf(os.Stdout, "%s %s\n", projectPrefix, msg)
 }
@@ -106,6 +112,9 @@ func PrintMessage(format string, a ...interface{}) {
 // PrintSuccess prints a success message with a Green tag.
 // Output: [CNT][SUCCESS] Operation complete.
 func PrintSuccess(format string, a ...interface{}) {
+	if QuietMode {
+		return
+	}
 	msg := fmt.Sprintf(format, a...)
 	tag := StyleSuccess("[PASS]")
 	fmt.Fprintf(os.Stdout, "%s%s %s\n", projectPrefix, tag, msg)
@@ -130,6 +139,9 @@ func PrintWarning(format string, a ...interface{}) {
 // PrintHint prints a helpful hint with a Cyan tag.
 // Output: [CNT][HINT] Try running with --force.
 func PrintHint(format string, a ...interface{}) {
+	if QuietMode {
+		return
+	}
 	msg := fmt.Sprintf(format, a...)
 	tag := StyleHint("[HINT]")
 	// Added extra spacing for alignment
@@ -139,6 +151,9 @@ func PrintHint(format string, a ...interface{}) {
 // PrintNote prints a note with a Magenta tag.
 // Output: [CNT][NOTE] This might take a while.
 func PrintNote(format string, a ...interface{}) {
+	if QuietMode {
+		return
+	}
 	msg := fmt.Sprintf(format, a...)
 	tag := StyleNote("[NOTE]")
 	fmt.Fprintf(os.Stdout, "%s%s %s\n", projectPrefix, tag, msg)

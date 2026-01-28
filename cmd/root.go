@@ -15,6 +15,7 @@ import (
 var (
 	debugMode bool
 	localMode bool
+	quietMode bool
 )
 
 var rootCmd = &cobra.Command{
@@ -79,6 +80,11 @@ var rootCmd = &cobra.Command{
 			utils.PrintDebug("Local mode enabled (job submission disabled)")
 		}
 
+		if quietMode {
+			utils.QuietMode = true
+			utils.PrintDebug("Quiet mode enabled (suppressing verbose messages)")
+		}
+
 		// Step 6: Auto-detect compression based on apptainer version
 		if err := apptainer.SetBin(config.Global.ApptainerBin); err == nil {
 			if version, err := apptainer.GetVersion(); err == nil {
@@ -120,4 +126,5 @@ func init() {
 	// Subcommands are attached to rootCmd in their respective init() functions
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debug mode with verbose output")
 	rootCmd.PersistentFlags().BoolVar(&localMode, "local", false, "Disable job submission (run locally)")
+	rootCmd.PersistentFlags().BoolVarP(&quietMode, "quiet", "q", false, "Suppress verbose overlay creation messages (errors/warnings still shown)")
 }

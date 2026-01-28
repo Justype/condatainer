@@ -15,11 +15,11 @@ import (
 //   - localBuilds: BuildObjects without scheduler requirements (build locally)
 //   - schedulerBuilds: BuildObjects that require scheduler submission
 type BuildGraph struct {
-	graph           map[string]BuildObject  // All build objects by name/version
-	localBuilds     []BuildObject           // Builds to run locally (no scheduler)
-	schedulerBuilds []BuildObject           // Builds to submit via scheduler
-	jobIDs          map[string]string       // Job IDs for scheduler builds (name/version -> job ID)
-	scheduler       scheduler.Scheduler     // Active scheduler (SLURM, PBS, etc.)
+	graph           map[string]BuildObject // All build objects by name/version
+	localBuilds     []BuildObject          // Builds to run locally (no scheduler)
+	schedulerBuilds []BuildObject          // Builds to submit via scheduler
+	jobIDs          map[string]string      // Job IDs for scheduler builds (name/version -> job ID)
+	scheduler       scheduler.Scheduler    // Active scheduler (SLURM, PBS, etc.)
 
 	// Config
 	imagesDir  string
@@ -195,11 +195,17 @@ func (bg *BuildGraph) runSchedulerStep() error {
 		depIDs := []string{}
 		for _, dep := range meta.Dependencies() {
 			if jobID, exists := bg.jobIDs[dep]; exists {
+				// Dependency was submitted as a scheduler job
 				depIDs = append(depIDs, jobID)
-			} else if !meta.IsInstalled() {
-				// Dependency should either be installed or have a job ID
-				return fmt.Errorf("dependency %s for %s is not installed and was not submitted via scheduler",
-					dep, meta.NameVersion())
+			} else {
+				// Check if dependency is already installed
+				depObj, exists := bg.graph[dep]
+				if !exists || !depObj.IsInstalled() {
+					// Dependency should either be installed or have a job ID
+					return fmt.Errorf("dependency %s for %s is not installed and was not submitted via scheduler",
+						dep, meta.NameVersion())
+				}
+				// Dependency is installed, no need to add to depIDs
 			}
 		}
 

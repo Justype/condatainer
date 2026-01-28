@@ -140,7 +140,7 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 		"--env", fmt.Sprintf("app_name_version=%s", s.nameVersion),
 		"--env", "tmp_dir=/ext3/tmp",
 		"--env", "TMPDIR=/ext3/tmp",
-		"--env", fmt.Sprintf("SLURM_CPUS_PER_TASK=%d", s.ncpus),
+		"--env", fmt.Sprintf("NCPUS=%d", s.ncpus),
 		"--env", "IN_CONDATAINER=1",
 	}
 

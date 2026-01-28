@@ -180,7 +180,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 			}
 
 			// Build graph and execute
-			graph, err := build.NewBuildGraph(buildObjects, "", "", false)
+			graph, err := build.NewBuildGraph(buildObjects, "", "", config.Global.SubmitJob)
 			if err != nil {
 				return fmt.Errorf("failed to create build graph: %w", err)
 			}
