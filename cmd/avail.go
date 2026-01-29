@@ -168,11 +168,29 @@ func runAvail(cmd *cobra.Command, args []string) error {
 			for _, name := range uninstalled {
 				fmt.Printf(" - %s\n", name)
 			}
+			fmt.Println()
+
+			// Ask for confirmation
+			fmt.Print("Do you want to proceed with the installation? [y/N]: ")
+			var choice string
+			fmt.Scanln(&choice)
+			choice = strings.ToLower(strings.TrimSpace(choice))
+
+			if choice != "y" && choice != "yes" {
+				utils.PrintNote("Installation cancelled.")
+				return nil
+			}
+
+			// Get writable directories
+			imagesDir, err := config.GetWritableImagesDir()
+			if err != nil {
+				return fmt.Errorf("failed to get writable images directory: %w", err)
+			}
 
 			// Import build package
 			buildObjects := make([]build.BuildObject, 0, len(uninstalled))
 			for _, pkg := range uninstalled {
-				bo, err := build.NewBuildObject(pkg, false, "", "")
+				bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir())
 				if err != nil {
 					return fmt.Errorf("failed to create build object for %s: %w", pkg, err)
 				}
@@ -180,7 +198,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 			}
 
 			// Build graph and execute
-			graph, err := build.NewBuildGraph(buildObjects, "", "", config.Global.SubmitJob)
+			graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
 			if err != nil {
 				return fmt.Errorf("failed to create build graph: %w", err)
 			}
