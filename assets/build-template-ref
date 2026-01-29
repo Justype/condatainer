@@ -25,11 +25,11 @@ install_app() {
     BOWTIE2_PREFIX="GRCh38_no_alt_analysis_set"
 
     print_stderr "Indexing ${YELLOW}${app_name_version}${NC} with bowtie2-build"
-    bowtie2-build --threads "$ncpu" "$GENOME_FASTA" "$BOWTIE2_PREFIX"
+    bowtie2-build --threads "$NCPUS" "$GENOME_FASTA" "$BOWTIE2_PREFIX"
 }
 
 # Available variables:
-# - ncpu: number of cores to use (default: 4) will be overwritten by SLURM_CPUS_PER_TASK
+# - NCPUS: number of cores to use (default: 4; set by condatainer)
 # - app_name:         name     of the app (set by condatainer)
 # - version:          version  of the app (set by condatainer)
 # - app_name_version: name/version        (set by condatainer)
@@ -43,7 +43,7 @@ RED='\033[0;91m'    # Red      WARNING or ERROR
 BLUE='\033[0;94m'   # Blue     Dependency or Modulefile Changes
 YELLOW='\033[0;93m' # Yellow   App Name and/or Version
 NC='\033[0m'        # No Color
-ncpu=${SLURM_CPUS_PER_TASK:-4} # number of cores to use when building from source
+NCPUS=${NCPUS:-4}   # number of cores to use when building from source
 
 install() {
     print_stderr "Installing the target module: ${YELLOW}${app_name_version}${NC}"
@@ -80,7 +80,7 @@ print_stderr() {
 
 pigz_or_gunzip() {
     if command -v pigz &> /dev/null; then
-        pigz -d -p $ncpu "$1"
+        pigz -d -p $NCPUS "$1"
     else
         gunzip "$1"
     fi
@@ -88,7 +88,7 @@ pigz_or_gunzip() {
 
 pigz_or_gunzip_pipe() {
     if command -v pigz &> /dev/null; then
-        pigz -d -p $ncpu -c "$1"
+        pigz -d -p $NCPUS -c "$1"
     else
         gunzip -c "$1"
     fi
@@ -96,18 +96,9 @@ pigz_or_gunzip_pipe() {
 
 tar_xf_pigz() {
     if command -v pigz &> /dev/null; then
-        tar --no-same-owner --use-compress-program="pigz -d -p $ncpu" -xf "$@"
+        tar --no-same-owner --use-compress-program="pigz -d -p $NCPUS" -xf "$@"
     else
         tar --no-same-owner -xzf "$@"
-    fi
-}
-
-in_apptainer() {
-    if [[ -n "$APPTAINER_NAME" || -n "$SINGULARITY_NAME" || \
-          -d /.singularity.d || -d /.apptainer.d ]]; then
-        return 1
-    else
-        return 0
     fi
 }
 
@@ -115,7 +106,7 @@ smart_copy_or_link() {
     local src="$1"
     local dst="$2"
 
-    if [[ "$IN_CONDATAINER" -eq 1 ]]; then
+    if [ -n "$IN_CONDATAINER" ]; then
         cp "$src" "$dst"
     else
         ln "$src" "$dst" || cp "$src" "$dst"

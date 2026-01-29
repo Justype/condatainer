@@ -24,7 +24,7 @@ install_app() {
     fi
     
     print_stderr "Building STAR index for ${YELLOW}${app_name_version}${NC}"
-    STAR --runThreadN $ncpu \
+    STAR --runThreadN $NCPUS \
         --runMode genomeGenerate \
         --genomeDir "$target_dir" \
         --genomeFastaFiles "$GENOME_FASTA" \
@@ -32,7 +32,7 @@ install_app() {
 }
 
 # Available variables:
-# - ncpu: number of cores to use (default: 4) will be overwritten by SLURM_CPUS_PER_TASK
+# - NCPUS: number of cores to use (default: 4; set by condatainer)
 # - app_name:         name     of the app (set by condatainer)
 # - version:          version  of the app (set by condatainer)
 # - app_name_version: name/version        (set by condatainer)
@@ -46,7 +46,7 @@ RED='\033[0;91m'    # Red      WARNING or ERROR
 BLUE='\033[0;94m'   # Blue     Dependency or Modulefile Changes
 YELLOW='\033[0;93m' # Yellow   App Name and/or Version
 NC='\033[0m'        # No Color
-ncpu=${SLURM_CPUS_PER_TASK:-8} # number of cores to use when building from source
+NCPUS=${SLURM_CPUS_PER_TASK:-8} # number of cores to use when building from source
 
 install() {
     print_stderr "Installing the target module: ${YELLOW}${app_name_version}${NC}"
@@ -83,7 +83,7 @@ print_stderr() {
 
 pigz_or_gunzip() {
     if command -v pigz &> /dev/null; then
-        pigz -d -p $ncpu "$1"
+        pigz -d -p $NCPUS "$1"
     else
         gunzip "$1"
     fi
@@ -91,7 +91,7 @@ pigz_or_gunzip() {
 
 pigz_or_gunzip_pipe() {
     if command -v pigz &> /dev/null; then
-        pigz -d -p $ncpu -c "$1"
+        pigz -d -p $NCPUS -c "$1"
     else
         gunzip -c "$1"
     fi
@@ -99,7 +99,7 @@ pigz_or_gunzip_pipe() {
 
 tar_xf_pigz() {
     if command -v pigz &> /dev/null; then
-        tar --no-same-owner --use-compress-program="pigz -d -p $ncpu" -xf "$@"
+        tar --no-same-owner --use-compress-program="pigz -d -p $NCPUS" -xf "$@"
     else
         tar --no-same-owner -xzf "$@"
     fi

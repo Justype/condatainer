@@ -1,6 +1,6 @@
 # --- Go ---
 # Binaries built by 'go build'
-condatainer
+bin/
 main
 *.exe
 *.test

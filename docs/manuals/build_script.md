@@ -54,7 +54,7 @@ Used for reference datasets, genome assemblies, or indices.
 
 | Variable | Description |
 | -------- | ----------- |
-| `ncpu` | Number of CPUs to use (default: env `SLURM_CPUS_PER_TASK` or 4) |
+| `NCPUS` | Number of CPUs to use (set by **CondaTainer** or 4) |
 | `app_name` | apps: app name; ref: assembly/data-type |
 | `version` | apps: app version; ref: data version |
 | `target_dir` | Target installation directory (managed by **CondaTainer**) |

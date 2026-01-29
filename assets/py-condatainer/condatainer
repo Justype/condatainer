@@ -1142,7 +1142,7 @@ class BuildObject:
                 Utils.print_success(f"All dependencies for {Utils.yellow_text(self.name_version)} built successfully.")
             else:
                 Utils.print_error(f"Missing dependencies for {Utils.yellow_text(self.name_version)}: {', '.join(missing_deps)}. Please install them first.")
-            return False
+                return False
 
         name_version_parts = self.name_version.split('/')
         if len(name_version_parts) < 2:
@@ -1172,6 +1172,7 @@ class BuildObject:
             Config.SYSTEM_APPTAINER_BIN, "exec",
             *env_settings,
             "--env", f"SLURM_CPUS_PER_TASK={self.ncpus}",
+            "--env", f"NCPUS={self.ncpus}",
             "--env", "IN_CONDATAINER=1",
             "--env", f"PATH={CondaTainer_Exec.get_path_env(self.dependencies)}",
             *CondaTainer_Exec.generate_overlay_args(self.dependencies),

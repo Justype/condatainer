@@ -788,7 +788,7 @@ class BuildObject:
         running_env["app_name_version"] = self.name_version
         running_env["target_dir"] = self.target_path
         running_env["tmp_dir"] = self.tmp_dir_path
-        running_env["SLURM_CPUS_PER_TASK"] = str(self.ncpus)
+        running_env["NCPUS"] = str(self.ncpus)
 
         if deps:
             ml_commands = "module purge && module load " + " ".join(deps)

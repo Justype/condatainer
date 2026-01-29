@@ -10,7 +10,7 @@ RED=$'\033[0;31m'
 NC=$'\033[0m' # No Color
 
 # URLs
-URL_CONDATAINER="https://raw.githubusercontent.com/Justype/condatainer/main/bin/condatainer"
+URL_CONDATAINER="https://raw.githubusercontent.com/Justype/condatainer/main/assets/py-condatainer/condatainer"
 
 DEFAULT_BASE="${SCRATCH:-$HOME}/condatainer"
 
