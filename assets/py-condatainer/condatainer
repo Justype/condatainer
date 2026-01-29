@@ -27,7 +27,7 @@ class Config:
     GITHUB_REPO = "Justype/condatainer"
     REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json.gz"
     REMOTE_HELPER_METADATA = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/helper-scripts.json.gz"
-    CONDATAINER_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/bin/condatainer"
+    CONDATAINER_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/py-condatainer/condatainer"
     GIT_RAW_URL_PREFIX = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
 
     # Folder paths
