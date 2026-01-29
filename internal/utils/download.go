@@ -45,6 +45,21 @@ func DownloadFile(url, destPath string) error {
 	return nil
 }
 
+// URLExists checks if a URL exists (returns HTTP 200) using a HEAD request.
+func URLExists(url string) bool {
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Head(url)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK
+}
+
 // DownloadExecutable downloads a file and sets it as executable (0755).
 func DownloadExecutable(url, destPath string) error {
 	if err := DownloadFile(url, destPath); err != nil {

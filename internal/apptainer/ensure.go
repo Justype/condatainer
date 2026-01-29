@@ -106,8 +106,7 @@ func tryDownloadPrebuiltBaseImage(destPath string) error {
 		return fmt.Errorf("pre-built base image not available for architecture: %s", arch)
 	}
 
-	url := fmt.Sprintf("https://github.com/%s/releases/download/v%s/base_image_%s.sif",
-		config.GitHubRepo, config.VERSION, arch)
+	url := fmt.Sprintf("%s/base_image_%s.sif", config.PrebuiltBaseURL, arch)
 
 	utils.PrintMessage("Attempting to download pre-built base image ...")
 

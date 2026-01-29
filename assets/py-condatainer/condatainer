@@ -25,6 +25,7 @@ class Config:
 
     # Remote settings
     GITHUB_REPO = "Justype/condatainer"
+    PREBUILT_BASE_URL = "https://github.com/Justype/cnt-prebuilt/releases/download/prebuilt"
     REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json.gz"
     REMOTE_HELPER_METADATA = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/helper-scripts.json.gz"
     CONDATAINER_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/py-condatainer/condatainer"
@@ -47,7 +48,6 @@ class Config:
     SYSTEM_APPTAINER_BIN = shutil.which("apptainer")
     BASE_IMAGE_DEF = os.path.join(BUILD_SCRIPTS_DIR, "base_image.def")
     BASE_IMAGE_SIF = os.path.join(IMAGES_DIR, "base_image.sif")
-    PREBUILT_OVERLAYS = { "build-essential" }
     BAD_CHARS_REGEX = re.compile(r'[<>:"/\\|?*\0\s\'`$&;|!\[\]#%@=+{}(),]')
 
     # Utils
@@ -369,6 +369,18 @@ class Utils:
             return False
 
     @staticmethod
+    def url_exists(url: str) -> bool:
+        """
+        Check if a URL exists (returns HTTP 200) using a HEAD request.
+        """
+        try:
+            req = urllib.request.Request(url, method='HEAD')
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
+    @staticmethod
     def parse_size_to_mb(size) -> int:
         """
         Parse a size specifier and return size in MiB as int.
@@ -662,7 +674,7 @@ class CondaTainer:
             Utils.print_warning(f"Pre-built base image not available for architecture: {arch}")
             return False
 
-        url = f"https://github.com/Justype/condatainer/releases/download/v1.0.5/base_image_{arch}.sif"
+        url = f"{Config.PREBUILT_BASE_URL}/base_image_{arch}.sif"
         Utils.print_message(f"Attempting to download pre-built base image for {arch}...")
         if not Utils.download_executable(url, Config.BASE_IMAGE_SIF):
             Utils.print_warning("Failed to download pre-built base image.")
@@ -674,17 +686,23 @@ class CondaTainer:
     def try_download_prebuilt_overlay(name_version: str) -> bool:
         arch = platform.machine()
         if arch not in CondaTainer.PREBUILT_BASE_IMAGE_PLATFORMS:
-            Utils.print_warning(f"Pre-built overlays not available for architecture: {arch}")
             return False
 
         normalized_name_version = Utils.normalize_name_version(name_version)
         dest_path = os.path.join(Config.IMAGES_DIR, normalized_name_version.replace('/', '--') + ".sqf")
         overlay_filename = normalized_name_version.replace('/', '--') + "_" + arch + ".sqf"
-        url = f"https://github.com/Justype/condatainer/releases/download/v1.0.5/{overlay_filename}"
-        Utils.print_message(f"Attempting to download pre-built overlay for {normalized_name_version}...")
-        if not Utils.download_file(url, dest_path):
-            Utils.print_warning("Failed to download pre-built overlay.")
+        url = f"{Config.PREBUILT_BASE_URL}/{overlay_filename}"
+
+        # Check if prebuilt exists before attempting download
+        if not Utils.url_exists(url):
             return False
+
+        Utils.print_message(f"Found pre-built {Utils.yellow_text(normalized_name_version)}. Downloading...")
+
+        if not Utils.download_file(url, dest_path):
+            Utils.print_warning("Download failed. Falling back to local build.")
+            return False
+
         Utils.print_success(f"Pre-built {normalized_name_version} downloaded.")
         return True
 
@@ -1066,10 +1084,10 @@ class BuildObject:
             Utils.print_warning(f"Overlay {Utils.yellow_text(os.path.basename(self.target_overlay_path))} already exists at {Utils.blue_text(self.target_overlay_path)}. Skipping creation.")
             return True
 
-        if self.name_version in Config.PREBUILT_OVERLAYS:
-            if os.path.dirname(self.target_overlay_path) == Config.IMAGES_DIR:
-                if CondaTainer.try_download_prebuilt_overlay(self.name_version):
-                    return True
+        # Try to download prebuilt overlay first, fall back to building if not available
+        if os.path.dirname(self.target_overlay_path) == Config.IMAGES_DIR:
+            if CondaTainer.try_download_prebuilt_overlay(self.name_version):
+                return True
 
         cmd_create = [
             Config.SYSTEM_APPTAINER_BIN, "build", "--fakeroot",

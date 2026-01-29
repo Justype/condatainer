@@ -11,6 +11,9 @@ const VERSION = "1.0.6"
 const GitHubRepo = "Justype/condatainer"
 const GITHUB_REPO = GitHubRepo // Exported constant for compatibility
 
+// PrebuiltBaseURL is the base URL for downloading prebuilt images and overlays
+const PrebuiltBaseURL = "https://github.com/Justype/cnt-prebuilt/releases/download/prebuilt"
+
 // BuildConfig holds default settings for build operations
 type BuildConfig struct {
 	DefaultCPUs  int           // Default CPUs for builds (if not specified in script)

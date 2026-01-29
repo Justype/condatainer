@@ -82,12 +82,9 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 	}
 	utils.PrintMessage("Building overlay %s (%s build) from %s", styledOverlay, utils.StyleAction(buildMode), utils.StylePath(d.buildSource))
 
-	// Check if prebuilt overlay is available and try to download it
-	prebuiltOverlays := map[string]bool{
-		"build-essential": true,
-	}
+	// Try to download prebuilt overlay first, fall back to building if not available
 	if writableDir, err := config.GetWritableImagesDir(); err == nil {
-		if prebuiltOverlays[d.nameVersion] && filepath.Dir(targetOverlayPath) == writableDir {
+		if filepath.Dir(targetOverlayPath) == writableDir {
 			if tryDownloadPrebuiltOverlay(d.nameVersion, targetOverlayPath) {
 				// Mark as .def-built in whitelist
 				UpdateDefBuiltWhitelist(d.nameVersion)
@@ -153,18 +150,22 @@ func tryDownloadPrebuiltOverlay(nameVersion, destPath string) bool {
 
 	archName, ok := archMap[arch]
 	if !ok {
-		utils.PrintWarning("Pre-built overlays not available for architecture: %s", arch)
 		return false
 	}
 
 	normalized := utils.NormalizeNameVersion(nameVersion)
 	overlayFilename := strings.ReplaceAll(normalized, "/", "--") + "_" + archName + ".sqf"
-	url := fmt.Sprintf("https://github.com/Justype/condatainer/releases/download/v1.0.5/%s", overlayFilename)
+	url := fmt.Sprintf("%s/%s", config.PrebuiltBaseURL, overlayFilename)
 
-	utils.PrintMessage("Attempting to download pre-built overlay for %s...", utils.StyleName(normalized))
+	// Check if prebuilt exists before attempting download
+	if !utils.URLExists(url) {
+		return false
+	}
+
+	utils.PrintMessage("Found pre-built %s. Downloading...", utils.StyleName(normalized))
 
 	if err := utils.DownloadFile(url, destPath); err != nil {
-		utils.PrintWarning("Failed to download pre-built overlay: %v", err)
+		utils.PrintWarning("Download failed. Falling back to local build.")
 		return false
 	}
 
