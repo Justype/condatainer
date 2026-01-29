@@ -26,6 +26,11 @@ type ApptainerError struct {
 	HideOutput bool   // Suppress output in the formatted error
 }
 
+// Unwrap allows errors.Is/As to see the underlying BaseErr
+func (e *ApptainerError) Unwrap() error {
+	return e.BaseErr
+}
+
 func (e *ApptainerError) Error() string {
 	hint := e.analyzeError()
 

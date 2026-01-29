@@ -26,15 +26,8 @@ func SetBin(path string) error {
 
 	fullPath, err := exec.LookPath(target)
 	if err != nil {
-		baseErr := &ApptainerNotFoundError{Path: target}
-
-		// Use StyleHint for the label and StyleAction for the command
-		hint := fmt.Sprintf(
-			"%s On HPC systems, you likely need to load the module: %s",
-			utils.StyleHint("Hint:"),
-			utils.StyleAction("ml apptainer"),
-		)
-		return fmt.Errorf("%w\n%s", baseErr, hint)
+		// Return structured error without hints - let caller decide what to suggest
+		return &ApptainerNotFoundError{Path: target}
 	}
 
 	apptainerCmd = fullPath

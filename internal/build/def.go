@@ -107,7 +107,6 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 			d.Cleanup(true)
 			return ErrBuildCancelled
 		}
-		utils.PrintError("Apptainer build failed for %s: %v", styledOverlay, err)
 		d.Cleanup(true)
 		return fmt.Errorf("failed to build SIF from %s: %w", d.buildSource, err)
 	}
@@ -116,7 +115,6 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 
 	// Extract SquashFS from SIF
 	if err := apptainer.DumpSifToSquashfs(d.tmpOverlayPath, targetOverlayPath); err != nil {
-		utils.PrintError("Failed to export SquashFS for %s: %v", styledOverlay, err)
 		d.Cleanup(true)
 		return fmt.Errorf("failed to dump SquashFS from SIF: %w", err)
 	}

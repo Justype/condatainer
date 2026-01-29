@@ -125,9 +125,9 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 	utils.PrintMessage("Creating temporary overlay %s", utils.StylePath(s.tmpOverlayPath))
 	if err := s.CreateTmpOverlay(false); err != nil {
 		if errors.Is(err, ErrTmpOverlayExists) {
-			utils.PrintError("Temporary overlay %s already exists. Cancel build.", utils.StylePath(s.tmpOverlayPath))
+			return fmt.Errorf("temporary overlay for %s already exists. Maybe a build is still running? %w", s.nameVersion, err)
 		}
-		return fmt.Errorf("temporary overlay for %s already exists. Maybe a build is still running? %w", s.nameVersion, err)
+		return fmt.Errorf("failed to create temporary overlay: %w", err)
 	}
 
 	utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleCommand(s.buildSource))
@@ -154,7 +154,6 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 					return fmt.Errorf("failed to create build object for dependency %s: %w", dep, err)
 				}
 				if err := depObj.Build(false); err != nil {
-					utils.PrintError("Failed to build dependency %s for %s", utils.StyleName(dep), styledOverlay)
 					return fmt.Errorf("failed to build dependency %s: %w", dep, err)
 				}
 			}
@@ -273,7 +272,6 @@ fi
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
 		}
-		utils.PrintError("Build script %s failed for overlay %s: %v", utils.StyleCommand(s.buildSource), styledOverlay, err)
 		return fmt.Errorf("build script %s failed: %w", s.buildSource, err)
 	}
 
@@ -281,7 +279,6 @@ fi
 	if s.isRef {
 		// For ref overlays: check files exist, then pack from cnt_dir
 		if entries, err := os.ReadDir(targetDir); err != nil || len(entries) == 0 {
-			utils.PrintError("No files produced for overlay %s", styledOverlay)
 			s.Cleanup(true)
 			return fmt.Errorf("overlay build script did not create any files in %s", targetDir)
 		}
@@ -294,7 +291,6 @@ fi
 
 		utils.PrintMessage("Creating SquashFS from %s for overlay %s", utils.StylePath(s.cntDirPath), styledOverlay)
 		if err := s.createSquashfs(s.cntDirPath, targetOverlayPath); err != nil {
-			utils.PrintError("Failed to create SquashFS for overlay %s: %v", styledOverlay, err)
 			s.Cleanup(true)
 			return err
 		}
@@ -302,7 +298,6 @@ fi
 		// For app overlays: set permissions and pack from /cnt
 		utils.PrintMessage("Preparing SquashFS from /cnt for overlay %s", styledOverlay)
 		if err := s.createSquashfs("/cnt", targetOverlayPath); err != nil {
-			utils.PrintError("Failed to create SquashFS for overlay %s: %v", styledOverlay, err)
 			s.Cleanup(true)
 			return err
 		}
