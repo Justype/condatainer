@@ -55,6 +55,9 @@ logs/
 images
 ref-images
 
+# Ignore the configuration files
+config.yaml
+
 # --- Helper & Build Scripts ---
 # Generated helper scripts (downloaded dynamically)
 helper-scripts
