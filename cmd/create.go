@@ -270,7 +270,7 @@ func runCreateWithPrefix() {
 	} else if strings.HasSuffix(createFile, ".sh") || strings.HasSuffix(createFile, ".bash") || strings.HasSuffix(createFile, ".def") {
 		// Shell script or apptainer def file
 		isApptainer := strings.HasSuffix(createFile, ".def")
-		bo, err := build.FromExternalSource(absPrefix, filepath.Clean(createFile), isApptainer, imagesDir)
+		bo, err := build.FromExternalSource(absPrefix, filepath.Clean(createFile), isApptainer, imagesDir, config.GetWritableTmpDir())
 		if err != nil {
 			utils.PrintError("Failed to create build object from %s: %v", createFile, err)
 			os.Exit(1)
@@ -325,7 +325,7 @@ func runCreateFromSource() {
 
 	utils.PrintMessage("Creating overlay %s from %s", filepath.Base(targetOverlayPath), utils.StylePath(source))
 
-	bo, err := build.FromExternalSource(targetPrefix, source, isApptainer, imagesDir)
+	bo, err := build.FromExternalSource(targetPrefix, source, isApptainer, imagesDir, config.GetWritableTmpDir())
 	if err != nil {
 		utils.PrintError("Failed to create build object from %s: %v", source, err)
 		os.Exit(1)

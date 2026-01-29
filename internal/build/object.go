@@ -435,7 +435,7 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 
 // FromExternalSource creates a BuildObject from an external build script or def file
 // All overlays are stored in imagesDir regardless of type
-func FromExternalSource(targetPrefix, source string, isApptainer bool, imagesDir string) (BuildObject, error) {
+func FromExternalSource(targetPrefix, source string, isApptainer bool, imagesDir, tmpDir string) (BuildObject, error) {
 	nameVersion := filepath.Base(targetPrefix)
 	nameVersion = utils.NormalizeNameVersion(nameVersion)
 
@@ -447,6 +447,8 @@ func FromExternalSource(targetPrefix, source string, isApptainer bool, imagesDir
 		nameVersion:       nameVersion,
 		buildSource:       source,
 		ncpus:             defaultBuildNcpus(),
+		cntDirPath:        getCntDirPath(nameVersion, tmpDir),
+		tmpOverlayPath:    getTmpOverlayPath(nameVersion, tmpDir),
 		targetOverlayPath: targetPrefix + ".sqf",
 	}
 
