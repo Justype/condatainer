@@ -83,9 +83,9 @@ If no image path is provided, defaults to 'env.img'.`,
 
 		// 3. Create the Overlay
 		if fakeroot {
-			err = overlay.CreateForRoot(path, sizeMB, typeFlag, sparse, fsType)
+			err = overlay.CreateForRoot(path, sizeMB, typeFlag, sparse, fsType, false)
 		} else {
-			err = overlay.CreateForCurrentUser(path, sizeMB, typeFlag, sparse, fsType)
+			err = overlay.CreateForCurrentUser(path, sizeMB, typeFlag, sparse, fsType, false)
 		}
 
 		if err != nil {
@@ -441,6 +441,7 @@ func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) erro
 		Command:     mmCreateCmd,
 		WritableImg: true,
 		Fakeroot:    fakeroot,
+		HideOutput:  true, // Suppress mm-create verbose output
 	}
 
 	if err := exec.Run(opts); err != nil {
@@ -454,6 +455,7 @@ func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) erro
 		Command:     []string{"mm-clean", "-a", "-y", "-q"},
 		WritableImg: true,
 		Fakeroot:    fakeroot,
+		HideOutput:  true, // Suppress mm-clean verbose output
 	}
 
 	if err := exec.Run(cleanOpts); err != nil {

@@ -71,6 +71,8 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 	if _, err := os.Stat(targetOverlayPath); err == nil {
 		utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
 			styledOverlay, utils.StylePath(targetOverlayPath))
+		// Ensure it's in the whitelist (handles existing .def overlays)
+		UpdateDefBuiltWhitelist(d.nameVersion)
 		return nil
 	}
 
@@ -87,6 +89,8 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 	if writableDir, err := config.GetWritableImagesDir(); err == nil {
 		if prebuiltOverlays[d.nameVersion] && filepath.Dir(targetOverlayPath) == writableDir {
 			if tryDownloadPrebuiltOverlay(d.nameVersion, targetOverlayPath) {
+				// Mark as .def-built in whitelist
+				UpdateDefBuiltWhitelist(d.nameVersion)
 				return nil
 			}
 		}
@@ -127,6 +131,9 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 	utils.PrintMessage("Finished overlay %s", styledOverlay)
 	utils.PrintDebug("Overlay %s created at %s. Removing temporary overlay...",
 		filepath.Base(targetOverlayPath), utils.StylePath(targetOverlayPath))
+
+	// Mark this overlay as .def-built in the whitelist
+	UpdateDefBuiltWhitelist(d.nameVersion)
 
 	// Cleanup temp files
 	d.Cleanup(false)

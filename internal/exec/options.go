@@ -4,13 +4,13 @@ import "github.com/Justype/condatainer/internal/config"
 
 // Options configures how CondaTainer executes a command inside an Apptainer container.
 type Options struct {
-	Overlays      []string
-	Command       []string
-	EnvSettings   []string
-	BindPaths     []string
-	Fakeroot      bool
-	WritableImg   bool
-	CaptureOutput bool
+	Overlays    []string
+	Command     []string
+	EnvSettings []string
+	BindPaths   []string
+	Fakeroot    bool
+	WritableImg bool
+	HideOutput  bool
 
 	BaseImage    string
 	ApptainerBin string

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
+	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/utils"
@@ -75,11 +76,31 @@ func init() {
 	execCmd.Flags().BoolVarP(&eNoAutoload, "no-autoload", "n", false, "disable autoloading 'env.img' from current directory (only applies to the 'e' shortcut)")
 
 	// --- NEW: Dynamic Completion Logic ---
-	execCmd.RegisterFlagCompletionFunc("overlay", overlayFlagCompletion(true))
-	execCmd.RegisterFlagCompletionFunc("base-image", overlayFlagCompletion(false))
-	// Use default file completion for positional args - only complete overlays after -o/--overlay
+	execCmd.RegisterFlagCompletionFunc("overlay", overlayFlagCompletion(true, true))
+	execCmd.RegisterFlagCompletionFunc("base-image", baseImageFlagCompletion())
+	// Positional args completion depends on which command is used
 	execCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		// Enable normal file completion for positional args
+		// Check if called via 'e' alias
+		// During completion, os.Args contains the __complete command
+		// We need to check if 'e' appears in the args or command context
+		isShortcut := false
+
+		// Check os.Args for the actual command used
+		for i, arg := range os.Args {
+			if arg == "__complete" && i+1 < len(os.Args) && os.Args[i+1] == "e" {
+				isShortcut = true
+				break
+			}
+		}
+
+		if isShortcut {
+			// For 'e': complete overlays before '--', default after
+			if containsDashDash(args) {
+				return nil, cobra.ShellCompDirectiveDefault
+			}
+			return overlaySuggestions(true, true, toComplete)
+		}
+		// For 'exec': use default file completion for positional args
 		return nil, cobra.ShellCompDirectiveDefault
 	}
 	// -------------------------------------
@@ -164,7 +185,19 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 
 	if execBaseImage != "" {
-		config.Global.BaseImage = execBaseImage
+		// If it's an existing file path, use it directly
+		// Otherwise, try to resolve it as an overlay name
+		if utils.FileExists(execBaseImage) {
+			config.Global.BaseImage = execBaseImage
+		} else {
+			resolvedBase, err := exec.ResolveOverlayPaths([]string{execBaseImage})
+			if err == nil && len(resolvedBase) > 0 {
+				config.Global.BaseImage = resolvedBase[0]
+			} else {
+				// Keep the original value (might be an absolute path)
+				config.Global.BaseImage = execBaseImage
+			}
+		}
 	}
 
 	resolvedOverlays, err := exec.ResolveOverlayPaths(overlayFinal)
@@ -206,22 +239,91 @@ func ensureBaseImage() error {
 	return apptainer.EnsureBaseImage()
 }
 
-func overlayFlagCompletion(includeData bool) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+func overlayFlagCompletion(includeData bool, includeImg bool) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return overlaySuggestions(includeData, toComplete)
+		return overlaySuggestions(includeData, includeImg, toComplete)
 	}
 }
 
-func positionalOverlayCompletion(includeData bool) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+func baseImageFlagCompletion() func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		if containsDashDash(args) {
-			return nil, cobra.ShellCompDirectiveDefault
+		// -b shows ONLY system overlays (from whitelist) + local .sqf/.sif (no .img)
+		return systemOverlaySuggestions(toComplete)
+	}
+}
+
+// systemOverlaySuggestions returns only system overlays (def-built) and local overlay files
+func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirective) {
+	installed, err := exec.InstalledOverlays()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveError
+	}
+
+	choices := map[string]struct{}{}
+
+	// Only include overlays from the whitelist (system/def-built overlays)
+	whitelist := build.GetDefBuiltWhitelist()
+	for name := range installed {
+		normalized := utils.NormalizeNameVersion(name)
+		if whitelist[normalized] {
+			if toComplete == "" || strings.HasPrefix(name, toComplete) {
+				choices[name] = struct{}{}
+			}
 		}
-		return overlaySuggestions(includeData, toComplete)
 	}
+
+	// Add local .sqf/.sif files (not .img) - for -b flag
+	for _, candidate := range localImageSuggestions(toComplete) {
+		choices[candidate] = struct{}{}
+	}
+
+	suggestions := make([]string, 0, len(choices))
+	for choice := range choices {
+		suggestions = append(suggestions, choice)
+	}
+	sort.Strings(suggestions)
+
+	return suggestions, cobra.ShellCompDirectiveNoFileComp
 }
 
-func overlaySuggestions(includeData bool, toComplete string) ([]string, cobra.ShellCompDirective) {
+// localImageSuggestions returns local .sqf and .sif files (for -b flag)
+func localImageSuggestions(toComplete string) []string {
+	pathDir, _ := filepath.Split(toComplete)
+	dirForRead := pathDir
+	if dirForRead == "" {
+		dirForRead = "."
+	}
+
+	entries, err := os.ReadDir(dirForRead)
+	if err != nil {
+		return nil
+	}
+
+	suggestions := []string{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+
+		// Include .sqf and .sif files only (not .img)
+		if !utils.IsSqf(name) && !utils.IsSif(name) {
+			continue
+		}
+
+		candidate := name
+		if pathDir != "" {
+			candidate = pathDir + name
+		}
+		if toComplete != "" && !strings.HasPrefix(candidate, toComplete) {
+			continue
+		}
+		suggestions = append(suggestions, candidate)
+	}
+	return suggestions
+}
+
+func overlaySuggestions(includeData bool, includeImg bool, toComplete string) ([]string, cobra.ShellCompDirective) {
 	installed, err := exec.InstalledOverlays()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
@@ -236,12 +338,8 @@ func overlaySuggestions(includeData bool, toComplete string) ([]string, cobra.Sh
 		}
 	}
 
-	for _, candidate := range localOverlaySuggestions(toComplete) {
+	for _, candidate := range localOverlaySuggestions(toComplete, includeImg) {
 		choices[candidate] = struct{}{}
-	}
-
-	if len(choices) == 0 {
-		return nil, cobra.ShellCompDirectiveDefault
 	}
 
 	suggestions := make([]string, 0, len(choices))
@@ -249,6 +347,8 @@ func overlaySuggestions(includeData bool, toComplete string) ([]string, cobra.Sh
 		suggestions = append(suggestions, choice)
 	}
 	sort.Strings(suggestions)
+
+	// Always return NoFileComp to prevent default file listing
 	return suggestions, cobra.ShellCompDirectiveNoFileComp
 }
 
@@ -307,7 +407,7 @@ func containsDashDash(args []string) bool {
 	return false
 }
 
-func localOverlaySuggestions(toComplete string) []string {
+func localOverlaySuggestions(toComplete string, includeImg bool) []string {
 	pathDir, _ := filepath.Split(toComplete)
 	dirForRead := pathDir
 	if dirForRead == "" {
@@ -321,12 +421,29 @@ func localOverlaySuggestions(toComplete string) []string {
 
 	suggestions := []string{}
 	for _, entry := range entries {
-		if entry.IsDir() || !utils.IsOverlay(entry.Name()) {
+		if entry.IsDir() {
 			continue
 		}
-		candidate := entry.Name()
+		name := entry.Name()
+
+		// Filter based on file type
+		if !utils.IsOverlay(name) {
+			continue
+		}
+
+		// Filter .sif and .img based on includeImg parameter
+		if utils.IsSif(name) && includeImg {
+			// Skip .sif files when includeImg is true (for -o flag)
+			continue
+		}
+		if utils.IsImg(name) && !includeImg {
+			// Skip .img files when includeImg is false (for -b flag)
+			continue
+		}
+
+		candidate := name
 		if pathDir != "" {
-			candidate = pathDir + entry.Name()
+			candidate = pathDir + name
 		}
 		if toComplete != "" && !strings.HasPrefix(candidate, toComplete) {
 			continue
@@ -337,13 +454,36 @@ func localOverlaySuggestions(toComplete string) []string {
 }
 
 func isAppOverlay(path string) bool {
+	// Check if overlay name is in the .def-built whitelist
+	// .def-built overlays (created via 'sif dump') are considered "app" overlays
+	// regardless of their location
+	if isDefBuiltOverlay(path) {
+		return true
+	}
+
 	// Check if path is in any of the image search directories
+	// Regular overlays (created via mksquashfs) are only considered "app" if
+	// they're in the images directory
 	for _, imagesDir := range config.GetImageSearchPaths() {
 		if pathWithinDir(path, imagesDir) {
 			return true
 		}
 	}
 	return false
+}
+
+// isDefBuiltOverlay checks if an overlay was built from a .def file
+// by checking against the build-scripts metadata whitelist
+func isDefBuiltOverlay(overlayPath string) bool {
+	baseName := filepath.Base(overlayPath)
+	// Remove extension (e.g., build-essential.sqf -> build-essential)
+	nameWithoutExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
+	// Convert -- to / (e.g., build-essential -> build-essential)
+	normalized := strings.ReplaceAll(nameWithoutExt, "--", "/")
+
+	// Check whitelist from build package
+	whitelist := build.GetDefBuiltWhitelist()
+	return whitelist[normalized]
 }
 
 func pathWithinDir(path, dir string) bool {

@@ -102,18 +102,38 @@ func CheckZstdSupport(currentVersion string) bool {
 // imagePath: optional, helpful for logging which container failed
 // capture: whether to capture stdout/stderr for storing on the error.
 func runApptainer(op string, imagePath string, capture bool, args ...string) error {
+	return runApptainerWithOutput(op, imagePath, capture, false, args...)
+}
+
+// runApptainerWithOutput executes an apptainer command with control over output handling.
+//
+// op: "exec", "pull", "build", "instance start", etc.
+// imagePath: optional, helpful for logging which container failed
+// capture: whether to capture stdout/stderr for storing on the error.
+// hideOutput: whether to redirect stdout/stderr to /dev/null
+func runApptainerWithOutput(op string, imagePath string, capture bool, hideOutput bool, args ...string) error {
 	cmd := exec.Command(apptainerCmd, args...)
 	cmd.Stdin = os.Stdin
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	var stdoutWriter, stderrWriter io.Writer
 
-	// Only buffer output when explicitly requested for capture
-	// This prevents memory exhaustion on long-running builds in SLURM
-	if capture {
+	if hideOutput {
+		// Redirect to /dev/null - suppress all output
+		devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err != nil {
+			return fmt.Errorf("failed to open /dev/null: %w", err)
+		}
+		defer devNull.Close()
+		stdoutWriter = devNull
+		stderrWriter = devNull
+	} else if capture {
+		// Only buffer output when explicitly requested for capture
+		// This prevents memory exhaustion on long-running builds in SLURM
 		stdoutWriter = io.MultiWriter(os.Stdout, &stdoutBuf)
 		stderrWriter = io.MultiWriter(os.Stderr, &stderrBuf)
 	} else {
+		// Normal streaming output
 		stdoutWriter = os.Stdout
 		stderrWriter = os.Stderr
 	}

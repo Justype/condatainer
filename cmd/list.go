@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -57,7 +58,7 @@ func runList(cmd *cobra.Command, args []string) error {
 			vers := appOverlays[name]
 			colored := make([]string, 0, len(vers))
 			for _, v := range vers {
-				if v == "(system app overlay)" {
+				if v == "(system app)" || v == "(env)" {
 					colored = append(colored, v)
 				} else {
 					colored = append(colored, utils.StyleInfo(v))
@@ -97,7 +98,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		allMatching := []string{}
 		for name, versions := range appOverlays {
 			for _, version := range versions {
-				if version == "(system app/env)" {
+				if version == "(system app)" || version == "(env)" {
 					allMatching = append(allMatching, name)
 				} else {
 					allMatching = append(allMatching, name+"/"+version)
@@ -207,7 +208,12 @@ func collectAppOverlays(filters []string) (map[string][]string, error) {
 				version = parts[1]
 			} else {
 				name = nameVersion
-				version = "(system app/env)"
+				// Check whitelist: .def-built overlays are "system", others are "env"
+				if isDefBuilt(nameVersion) {
+					version = "(system app)"
+				} else {
+					version = "(env)"
+				}
 			}
 			if name == "" {
 				continue
@@ -313,4 +319,11 @@ func maxWidth(names []string) int {
 		}
 	}
 	return width
+}
+
+// isDefBuilt checks if an overlay name is .def-built
+func isDefBuilt(nameVersion string) bool {
+	normalized := utils.NormalizeNameVersion(nameVersion)
+	whitelist := build.GetDefBuiltWhitelist()
+	return whitelist[normalized]
 }

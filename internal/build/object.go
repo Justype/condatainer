@@ -246,7 +246,8 @@ func (b *BaseBuildObject) CreateTmpOverlay(force bool) error {
 	// Use overlay package to create ext3 overlay
 	// For build overlays, we use a temporary size from config (default 20GB)
 	// Use "conda" profile for small files, sparse=true for faster creation
-	if err := overlay.CreateForCurrentUser(b.tmpOverlayPath, config.Global.Build.TmpSizeMB, "default", true, config.Global.Build.OverlayType); err != nil {
+	// quiet=true suppresses detailed specs output since users don't need to see those for temp overlays
+	if err := overlay.CreateForCurrentUser(b.tmpOverlayPath, config.Global.Build.TmpSizeMB, "default", true, config.Global.Build.OverlayType, true); err != nil {
 		return fmt.Errorf("failed to create temporary overlay: %w", err)
 	}
 
@@ -384,10 +385,9 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string)
 	slashCount := strings.Count(normalized, "/")
 
 	// Determine build type based on slash count
-	// 0 slashes: def file (e.g., "ubuntu")
+	// 0 slashes: system (def is not defined here)
 	// 1 slash: conda or shell (e.g., "numpy/1.24")
 	// 2+ slashes: ref shell script (e.g., "genomes/hg38/full")
-	isDef := slashCount == 0
 	isRef := slashCount > 1
 
 	// Create base object
@@ -401,16 +401,16 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string)
 
 	if external {
 		// External builds don't need to resolve build source
-		return createConcreteType(base, isDef, isRef, tmpDir)
+		return createConcreteType(base, isRef, tmpDir)
 	}
 
 	// Check if already installed
 	if base.IsInstalled() {
-		return createConcreteType(base, isDef, isRef, tmpDir)
+		return createConcreteType(base, isRef, tmpDir)
 	}
 
 	// Resolve build source and determine concrete type
-	return createConcreteType(base, isDef, isRef, tmpDir)
+	return createConcreteType(base, isRef, tmpDir)
 }
 
 // NewCondaObjectWithSource creates a CondaBuildObject with custom buildSource
@@ -480,7 +480,7 @@ func FromExternalSource(targetPrefix, source string, isApptainer bool, imagesDir
 // It determines whether to create a conda, def, or script build based on:
 // - isRef flag (from slash count > 1)
 // - build source resolution: .def -> DefBuildObject, shell script -> ScriptBuildObject, not found -> conda
-func createConcreteType(base *BaseBuildObject, isDef, isRef bool, tmpDir string) (BuildObject, error) {
+func createConcreteType(base *BaseBuildObject, isRef bool, tmpDir string) (BuildObject, error) {
 	// Resolve build source - this determines the actual type based on file extension
 	isConda, isContainer, err := resolveBuildSource(base, tmpDir)
 	if err != nil {

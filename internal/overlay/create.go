@@ -28,6 +28,7 @@ type CreateOptions struct {
 	Profile        Profile // Filesystem tuning profile
 	Sparse         bool    // Create sparse file (vs allocated)
 	FilesystemType string  // Filesystem type: "ext3" or "ext4" (default: "ext3")
+	Quiet          bool    // Suppress detailed specs output
 }
 
 var (
@@ -60,7 +61,7 @@ func getProfile(name string) Profile {
 // ---------------------------------------------------------
 
 // CreateForCurrentUser generates an overlay owned by the current host user.
-func CreateForCurrentUser(path string, sizeMB int, profileType string, sparse bool, fsType string) error {
+func CreateForCurrentUser(path string, sizeMB int, profileType string, sparse bool, fsType string, quiet bool) error {
 	opts := &CreateOptions{
 		Path:           path,
 		SizeMB:         sizeMB,
@@ -69,12 +70,13 @@ func CreateForCurrentUser(path string, sizeMB int, profileType string, sparse bo
 		Profile:        getProfile(profileType),
 		Sparse:         sparse,
 		FilesystemType: fsType,
+		Quiet:          quiet,
 	}
 	return CreateWithOptions(opts)
 }
 
 // CreateForRoot generates an overlay owned by root (UID=0, GID=0).
-func CreateForRoot(path string, sizeMB int, profileType string, sparse bool, fsType string) error {
+func CreateForRoot(path string, sizeMB int, profileType string, sparse bool, fsType string, quiet bool) error {
 	opts := &CreateOptions{
 		Path:           path,
 		SizeMB:         sizeMB,
@@ -83,21 +85,7 @@ func CreateForRoot(path string, sizeMB int, profileType string, sparse bool, fsT
 		Profile:        getProfile(profileType),
 		Sparse:         sparse,
 		FilesystemType: fsType,
-	}
-	return CreateWithOptions(opts)
-}
-
-// Create generates an overlay image using specific tuning parameters.
-// Deprecated: Use CreateWithOptions instead.
-func Create(path string, sizeMB int, uid, gid int, profile Profile, sparse bool, fsType string) error {
-	opts := &CreateOptions{
-		Path:           path,
-		SizeMB:         sizeMB,
-		UID:            uid,
-		GID:            gid,
-		Profile:        profile,
-		Sparse:         sparse,
-		FilesystemType: fsType,
+		Quiet:          quiet,
 	}
 	return CreateWithOptions(opts)
 }
@@ -126,15 +114,17 @@ func CreateWithOptions(opts *CreateOptions) error {
 	if opts.UID == 0 && opts.GID == 0 {
 		typeStr += "Fakeroot "
 	}
-	styleType := utils.StyleInfo(typeStr)
-	stylePath := utils.StylePath(opts.Path)
+	if !opts.Quiet {
+		styleType := utils.StyleInfo(typeStr)
+		stylePath := utils.StylePath(opts.Path)
 
-	utils.PrintMessage("Creating %soverlay %s",
-		styleType, stylePath)
-	utils.PrintMessage("Size %s MB | Filesystem %s | Profile Inode Ratio %s Reserved %s%%",
-		utils.StyleNumber(opts.SizeMB), utils.StyleInfo(opts.FilesystemType),
-		utils.StyleNumber(opts.Profile.InodeRatio),
-		utils.StyleNumber(opts.Profile.ReservedPerc))
+		utils.PrintMessage("Creating %soverlay %s",
+			styleType, stylePath)
+		utils.PrintMessage("Size %s MB | Filesystem %s | Profile Inode Ratio %s Reserved %s%%",
+			utils.StyleNumber(opts.SizeMB), utils.StyleInfo(opts.FilesystemType),
+			utils.StyleNumber(opts.Profile.InodeRatio),
+			utils.StyleNumber(opts.Profile.ReservedPerc))
+	}
 
 	// 2. Create File (dd)
 	// Strategy switch based on 'sparse' flag

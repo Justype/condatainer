@@ -254,7 +254,6 @@ fi
 
 	cmd := exec.Command(apptainerBin, args...)
 	utils.PrintDebug("[BUILD] Running build script with command: %s %s", apptainerBin, strings.Join(args, " "))
-	utils.PrintMessage("Executing build script %s for overlay %s", utils.StyleCommand(s.buildSource), styledOverlay)
 
 	// Provide interactive inputs if any
 	if len(s.interactiveInputs) > 0 {

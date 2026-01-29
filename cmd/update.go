@@ -103,6 +103,22 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse release information: %w", err)
 	}
 
+	// Check if already on latest version
+	currentVersion := "v" + config.VERSION
+	latestVersion := strings.TrimSpace(release.TagName)
+
+	// Normalize versions for comparison (both with or without 'v' prefix)
+	currentNormalized := strings.TrimPrefix(currentVersion, "v")
+	latestNormalized := strings.TrimPrefix(latestVersion, "v")
+
+	if currentNormalized == latestNormalized {
+		utils.PrintSuccess("Already on the latest version %s!", utils.StyleNumber(latestVersion))
+		return nil
+	}
+
+	utils.PrintMessage("Current version: %s", utils.StyleNumber(currentVersion))
+	utils.PrintMessage("Latest version: %s", utils.StyleNumber(latestVersion))
+
 	// Find matching binary for current OS/arch
 	// Expected format: condatainer_{os}_{arch} (e.g., condatainer_linux_x86_64)
 	binaryName := fmt.Sprintf("condatainer_%s_%s", osName, arch)

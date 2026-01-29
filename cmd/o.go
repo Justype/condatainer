@@ -71,9 +71,9 @@ If no image path is provided, defaults to 'env.img'.`,
 
 		// 4. Create the Overlay
 		if fakeroot {
-			err = overlay.CreateForRoot(path, sizeMB, typeFlag, sparse, fsType)
+			err = overlay.CreateForRoot(path, sizeMB, typeFlag, sparse, fsType, false)
 		} else {
-			err = overlay.CreateForCurrentUser(path, sizeMB, typeFlag, sparse, fsType)
+			err = overlay.CreateForCurrentUser(path, sizeMB, typeFlag, sparse, fsType, false)
 		}
 
 		if err != nil {

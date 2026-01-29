@@ -169,6 +169,7 @@ func Run(options Options) error {
 		Overlay:    overlayArgs,
 		Env:        envList,
 		Fakeroot:   fakeroot,
+		HideOutput: options.HideOutput,
 		Additional: apptainer.DetectGPUFlags(),
 	}
 
