@@ -597,13 +597,17 @@ var configValidateCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		valid := true
 
-		fmt.Println(utils.StyleTitle("Validating configuration..."))
-		fmt.Println()
+		if !utils.QuietMode {
+			fmt.Println(utils.StyleTitle("Validating configuration..."))
+			fmt.Println()
+		}
 
 		// Check apptainer binary
 		apptainerBin := viper.GetString("apptainer_bin")
 		if config.ValidateBinary(apptainerBin) {
-			fmt.Printf("%s Apptainer binary: %s\n", utils.StyleSuccess("✓"), apptainerBin)
+			if !utils.QuietMode {
+				fmt.Printf("%s Apptainer binary: %s\n", utils.StyleSuccess("✓"), apptainerBin)
+			}
 		} else {
 			fmt.Printf("%s Apptainer binary not found: %s\n", utils.StyleError("✗"), apptainerBin)
 			valid = false
@@ -613,19 +617,25 @@ var configValidateCmd = &cobra.Command{
 		schedulerBin := viper.GetString("scheduler_bin")
 		if schedulerBin != "" {
 			if config.ValidateBinary(schedulerBin) {
-				fmt.Printf("%s Scheduler binary: %s\n", utils.StyleSuccess("✓"), schedulerBin)
+				if !utils.QuietMode {
+					fmt.Printf("%s Scheduler binary: %s\n", utils.StyleSuccess("✓"), schedulerBin)
+				}
 			} else {
 				fmt.Printf("%s Scheduler binary not found: %s\n", utils.StyleError("✗"), schedulerBin)
 				valid = false
 			}
 		} else {
-			fmt.Printf("%s Scheduler binary: %s\n", utils.StyleWarning("⚠"), "not configured")
+			if !utils.QuietMode {
+				fmt.Printf("%s Scheduler binary: %s\n", utils.StyleWarning("⚠"), "not configured")
+			}
 		}
 
 		// Check build config
 		defaultCPUs := viper.GetInt("build.default_cpus")
 		if defaultCPUs > 0 {
-			fmt.Printf("%s Build CPUs: %d\n", utils.StyleSuccess("✓"), defaultCPUs)
+			if !utils.QuietMode {
+				fmt.Printf("%s Build CPUs: %d\n", utils.StyleSuccess("✓"), defaultCPUs)
+			}
 		} else {
 			fmt.Printf("%s Build CPUs must be > 0: %d\n", utils.StyleError("✗"), defaultCPUs)
 			valid = false
@@ -633,15 +643,21 @@ var configValidateCmd = &cobra.Command{
 
 		defaultMemMB := viper.GetInt64("build.default_mem_mb")
 		if defaultMemMB > 0 {
-			fmt.Printf("%s Build Memory: %d MB\n", utils.StyleSuccess("✓"), defaultMemMB)
+			if !utils.QuietMode {
+				fmt.Printf("%s Build Memory: %d MB\n", utils.StyleSuccess("✓"), defaultMemMB)
+			}
 		} else {
 			fmt.Printf("%s Build Memory must be > 0: %d\n", utils.StyleError("✗"), defaultMemMB)
 			valid = false
 		}
 
-		fmt.Println()
+		if !utils.QuietMode {
+			fmt.Println()
+		}
 		if valid {
-			utils.PrintSuccess("Configuration is valid")
+			if !utils.QuietMode {
+				utils.PrintSuccess("Configuration is valid")
+			}
 		} else {
 			utils.PrintError("Configuration has errors")
 			os.Exit(1)

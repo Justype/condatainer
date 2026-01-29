@@ -77,7 +77,11 @@ func init() {
 	// --- NEW: Dynamic Completion Logic ---
 	execCmd.RegisterFlagCompletionFunc("overlay", overlayFlagCompletion(true))
 	execCmd.RegisterFlagCompletionFunc("base-image", overlayFlagCompletion(false))
-	execCmd.ValidArgsFunction = positionalOverlayCompletion(true)
+	// Use default file completion for positional args - only complete overlays after -o/--overlay
+	execCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		// Enable normal file completion for positional args
+		return nil, cobra.ShellCompDirectiveDefault
+	}
 	// -------------------------------------
 
 	// Stop flag parsing after the first positional argument so tool arguments (like --help) bypass exec.

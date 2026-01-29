@@ -10,6 +10,7 @@ import (
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var (
@@ -130,4 +131,31 @@ func init() {
 
 	// Hide the help command from completions (use -h/--help instead)
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
+
+	// Strip short flag shorthands for cleaner completions
+	// This is done at init time so __complete also sees the stripped flags
+	cobra.OnInitialize(func() {
+		stripShortFlags(rootCmd)
+	})
+}
+
+// stripShortFlags removes short flag shorthands from all commands
+// to show only long flags in shell completion
+func stripShortFlags(root *cobra.Command) {
+	var walk func(c *cobra.Command)
+	walk = func(c *cobra.Command) {
+		// Strip shorthands from local flags
+		c.LocalFlags().VisitAll(func(f *pflag.Flag) {
+			f.Shorthand = ""
+		})
+		// Strip shorthands from persistent flags
+		c.PersistentFlags().VisitAll(func(f *pflag.Flag) {
+			f.Shorthand = ""
+		})
+		// Recursively walk child commands
+		for _, child := range c.Commands() {
+			walk(child)
+		}
+	}
+	walk(root)
 }
