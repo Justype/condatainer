@@ -2903,6 +2903,18 @@
     "sbatch": false,
     "whatis": "GRCm39 GENCODE M9 transcript FASTA"
   },
+  "igv": {
+    "deps": [],
+    "relative_path": "igv.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "lxde": {
+    "deps": [],
+    "relative_path": "lxde.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
   "orad/2.7.0": {
     "deps": [],
     "relative_path": "orad/2.7.0",
