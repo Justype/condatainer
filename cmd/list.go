@@ -122,7 +122,7 @@ func runList(cmd *cobra.Command, args []string) error {
 			}
 
 			fmt.Print("\n")
-			utils.PrintMessage("Are you sure? Cannot be undone. [y/N]: ")
+			fmt.Print("Are you sure? Cannot be undone. [y/N]: ")
 			var choice string
 			fmt.Scanln(&choice)
 			choice = strings.ToLower(strings.TrimSpace(choice))
