@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/utils"
-	"golang.org/x/term"
 )
 
 // apptainerCmd holds the resolved, absolute path to the binary.
@@ -115,9 +114,10 @@ func runApptainer(op string, imagePath string, capture bool, args ...string) err
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	var stdoutWriter, stderrWriter io.Writer
-	stdoutTTY := isTerminalFile(os.Stdout)
-	stderrTTY := isTerminalFile(os.Stderr)
-	if capture || !(stdoutTTY && stderrTTY) {
+
+	// Only buffer output when explicitly requested for capture
+	// This prevents memory exhaustion on long-running builds in SLURM
+	if capture {
 		stdoutWriter = io.MultiWriter(os.Stdout, &stdoutBuf)
 		stderrWriter = io.MultiWriter(os.Stderr, &stderrBuf)
 	} else {
@@ -146,13 +146,6 @@ func runApptainer(op string, imagePath string, capture bool, args ...string) err
 func captureOutput(stdoutBuf, stderrBuf *bytes.Buffer) string {
 	combined := strings.TrimSpace(stdoutBuf.String() + stderrBuf.String())
 	return combined
-}
-
-func isTerminalFile(file *os.File) bool {
-	if file == nil {
-		return false
-	}
-	return term.IsTerminal(int(file.Fd()))
 }
 
 // IsBuildCancelled returns true when the Apptainer error looks like the
