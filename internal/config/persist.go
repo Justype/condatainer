@@ -20,19 +20,26 @@ const ConfigType = "yaml"
 // Priority (highest to lowest):
 // 1. Command-line flags (handled by cobra)
 // 2. Environment variables (CONDATAINER_*)
-// 3. Portable config (parent of bin/ folder where executable lives)
-// 4. User config file (~/.config/condatainer/config.yaml)
-// 5. User config fallback (~/.condatainer/config.yaml)
-// 6. System config file (/etc/condatainer/config.yaml)
-// 7. Current directory (for development)
-// 8. Defaults
+// 3. User config file (~/.config/condatainer/config.yaml)
+// 4. Portable config (parent of bin/ folder where executable lives)
+// 5. System config file (/etc/condatainer/config.yaml)
+// 6. Defaults
+//
+// Rationale: User config takes priority over portable/shared config,
+// allowing users to override shared defaults (e.g., API keys, queues)
+// without affecting other users of the shared installation.
 func InitViper() error {
 	viper.SetConfigName(ConfigFilename)
 	viper.SetConfigType(ConfigType)
 
 	// Set config search paths (order matters - first found wins)
 
-	// Portable config: if executable is in a "bin" folder, check parent folder
+	// 1. User config (highest priority - allows user overrides)
+	if userConfigDir, err := os.UserConfigDir(); err == nil {
+		viper.AddConfigPath(filepath.Join(userConfigDir, "condatainer"))
+	}
+
+	// 2. Portable config: if executable is in a "bin" folder, check parent folder
 	// e.g., /path/to/condatainer/bin/condatainer -> /path/to/condatainer/config.yaml
 	// Excludes common user bin directories ($HOME/bin, $HOME/.local/bin, /usr/bin, etc.)
 	if exePath, err := os.Executable(); err == nil {
@@ -44,9 +51,9 @@ func InitViper() error {
 			excludedParents := []string{
 				home,                          // $HOME/bin
 				filepath.Join(home, ".local"), // $HOME/.local/bin
-				"/usr",                         // /usr/bin
-				"/usr/local",                   // /usr/local/bin
-				"/opt",                         // /opt/bin
+				"/usr",                        // /usr/bin
+				"/usr/local",                  // /usr/local/bin
+				"/opt",                        // /opt/bin
 			}
 			isExcluded := false
 			for _, excluded := range excludedParents {
@@ -61,21 +68,8 @@ func InitViper() error {
 		}
 	}
 
-	// User config (highest priority for user-specific settings)
-	if userConfigDir, err := os.UserConfigDir(); err == nil {
-		viper.AddConfigPath(filepath.Join(userConfigDir, "condatainer"))
-	}
-
-	// Home directory fallback
-	if home, err := os.UserHomeDir(); err == nil {
-		viper.AddConfigPath(filepath.Join(home, ".condatainer"))
-	}
-
-	// System-wide config (lower priority)
+	// 3. System-wide config (lower priority)
 	viper.AddConfigPath("/etc/condatainer")
-
-	// Current directory (for development)
-	viper.AddConfigPath(".")
 
 	// Environment variables
 	viper.SetEnvPrefix("CONDATAINER")
@@ -106,6 +100,10 @@ func setDefaults() {
 	viper.SetDefault("scheduler_type", "")
 	viper.SetDefault("submit_job", true)
 	viper.SetDefault("logs_dir", "")
+
+	// Extra base directories to search (prepended to default search paths)
+	// Each directory should contain images/, build-scripts/, helper-scripts/ subdirectories
+	viper.SetDefault("extra_base_dirs", []string{})
 
 	// Build config defaults
 	viper.SetDefault("build.default_cpus", 4)
@@ -187,6 +185,56 @@ func IsPortableInstallation() bool {
 // GetSystemConfigPath returns the system-wide config path
 func GetSystemConfigPath() string {
 	return filepath.Join("/etc", "condatainer", ConfigFilename+"."+ConfigType)
+}
+
+// ConfigSearchPath represents a config file location with metadata
+type ConfigSearchPath struct {
+	Path   string // Full path to config file
+	Type   string // Type: "portable", "user", "user-legacy", "system", "cwd"
+	Exists bool   // Whether the file exists
+	InUse  bool   // Whether this is the active config file
+}
+
+// GetConfigSearchPaths returns all config search paths in priority order.
+// This matches the order used by InitViper.
+func GetConfigSearchPaths() []ConfigSearchPath {
+	var paths []ConfigSearchPath
+	activeConfig := viper.ConfigFileUsed()
+
+	// 1. User config (XDG) - highest priority
+	if userConfigDir, err := os.UserConfigDir(); err == nil {
+		userPath := filepath.Join(userConfigDir, "condatainer", ConfigFilename+"."+ConfigType)
+		_, err := os.Stat(userPath)
+		paths = append(paths, ConfigSearchPath{
+			Path:   userPath,
+			Type:   "user",
+			Exists: err == nil,
+			InUse:  userPath == activeConfig,
+		})
+	}
+
+	// 2. Portable config
+	if portablePath := GetPortableConfigPath(); portablePath != "" {
+		_, err := os.Stat(portablePath)
+		paths = append(paths, ConfigSearchPath{
+			Path:   portablePath,
+			Type:   "portable",
+			Exists: err == nil,
+			InUse:  portablePath == activeConfig,
+		})
+	}
+
+	// 3. System config
+	systemPath := GetSystemConfigPath()
+	_, err := os.Stat(systemPath)
+	paths = append(paths, ConfigSearchPath{
+		Path:   systemPath,
+		Type:   "system",
+		Exists: err == nil,
+		InUse:  systemPath == activeConfig,
+	})
+
+	return paths
 }
 
 // GetConfigPathByLocation returns the config path for the specified location type.
@@ -407,12 +455,8 @@ func LoadFromViper() {
 		if absBaseDir, err := filepath.Abs(baseDir); err == nil {
 			baseDir = absBaseDir
 		}
-		// Update all derived paths
+		// Update BaseDir (derived paths are computed via helper functions)
 		Global.BaseDir = baseDir
-		Global.ImagesDir = filepath.Join(baseDir, "images")
-		Global.BuildScriptsDir = filepath.Join(baseDir, "build-scripts")
-		Global.HelperScriptsDir = filepath.Join(baseDir, "helper-scripts")
-		Global.TmpDir = filepath.Join(baseDir, "tmp")
 		Global.BaseImage = filepath.Join(baseDir, "images", "base_image.sif")
 	}
 

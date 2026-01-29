@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
@@ -23,19 +24,32 @@ var configCmd = &cobra.Command{
 	Short: "Manage condatainer configuration",
 	Long: `Manage condatainer configuration settings.
 
-Configuration priority (highest to lowest):
+Configuration file priority (highest to lowest):
   1. Command-line flags
   2. Environment variables (CONDATAINER_*)
-  3. Portable config (<install-dir>/config.yaml, if in dedicated folder)
-  4. User config file (~/.config/condatainer/config.yaml)
+  3. User config file (~/.config/condatainer/config.yaml)
+  4. Portable config (<install-dir>/config.yaml, if in dedicated folder)
   5. System config file (/etc/condatainer/config.yaml)
-  6. Defaults`,
+  6. Defaults
+
+Data directory priority (for read/write operations):
+  1. Extra base directories (CONDATAINER_EXTRA_BASE_DIRS or config)
+  2. Portable directory (group/shared, from executable location)
+  3. Scratch directory ($SCRATCH/condatainer, HPC systems)
+  4. User directory (~/.local/share/condatainer)
+  5. Legacy base_dir (from config file)`,
 }
 
 var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show current configuration",
-	Long:  "Display all current configuration values and their sources",
+	Long: `Display current configuration values and their sources.
+
+Shows:
+  - Config file search paths and which one is in use
+  - Base directory search paths with writable status
+  - All configuration settings (directories, binaries, build config)
+  - Environment variable overrides`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if showPath {
 			configPath, err := config.GetUserConfigPath()
@@ -47,14 +61,112 @@ var configShowCmd = &cobra.Command{
 			return
 		}
 
-		// Show config file location
-		configPath, _ := config.GetUserConfigPath()
-		fmt.Printf("Config file: %s\n", utils.StylePath(configPath))
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			fmt.Printf("  %s (use 'condatainer config init' to create)\n\n", utils.StyleWarning("not found"))
-		} else {
-			fmt.Printf("  %s\n\n", utils.StyleSuccess("exists"))
+		// Show config file search paths
+		fmt.Println(utils.StyleTitle("Config File Search Paths:"))
+		searchPaths := config.GetConfigSearchPaths()
+		foundActive := false
+		for i, sp := range searchPaths {
+			status := ""
+			if sp.InUse {
+				status = " " + utils.StyleSuccess("← in use")
+				foundActive = true
+			} else if sp.Exists {
+				status = " " + utils.StyleInfo("(exists)")
+			}
+			fmt.Printf("  %d. [%s] %s%s\n", i+1, sp.Type, sp.Path, status)
 		}
+		if !foundActive {
+			fmt.Printf("  %s (use 'condatainer config init' to create)\n", utils.StyleWarning("No config file found"))
+		}
+		fmt.Println()
+
+		// Show base directory search paths
+		fmt.Println(utils.StyleTitle("Base Directory Search Paths:"))
+
+		// Helper function to check if directory is writable
+		isWritable := func(dir string) bool {
+			testFile := filepath.Join(dir, ".write-test")
+			f, err := os.Create(testFile)
+			if err != nil {
+				return false
+			}
+			f.Close()
+			os.Remove(testFile)
+			return true
+		}
+
+		pathIndex := 1
+
+		// Extra base directories
+		extraBaseDirs := config.GetExtraBaseDirs()
+		for _, dir := range extraBaseDirs {
+			status := ""
+			if _, err := os.Stat(dir); err == nil {
+				if isWritable(dir) {
+					status = " " + utils.StyleSuccess("(writable)")
+				} else {
+					status = " " + utils.StyleWarning("(read-only)")
+				}
+			}
+			fmt.Printf("  %d. [extra] %s%s\n", pathIndex, dir, status)
+			pathIndex++
+		}
+
+		// Portable directory
+		if portableDir := config.GetPortableDataDir(); portableDir != "" {
+			status := ""
+			if _, err := os.Stat(portableDir); err == nil {
+				if isWritable(portableDir) {
+					status = " " + utils.StyleSuccess("(writable)")
+				} else {
+					status = " " + utils.StyleWarning("(read-only)")
+				}
+			}
+			fmt.Printf("  %d. [portable] %s%s\n", pathIndex, portableDir, status)
+			pathIndex++
+		}
+
+		// Scratch directory
+		if scratchDir := config.GetScratchDataDir(); scratchDir != "" {
+			status := ""
+			if _, err := os.Stat(scratchDir); err == nil {
+				if isWritable(scratchDir) {
+					status = " " + utils.StyleSuccess("(writable)")
+				} else {
+					status = " " + utils.StyleWarning("(read-only)")
+				}
+			}
+			fmt.Printf("  %d. [scratch] %s%s\n", pathIndex, scratchDir, status)
+			pathIndex++
+		}
+
+		// User directory
+		if userDir := config.GetUserDataDir(); userDir != "" {
+			status := ""
+			if _, err := os.Stat(userDir); err == nil {
+				if isWritable(userDir) {
+					status = " " + utils.StyleSuccess("(writable)")
+				} else {
+					status = " " + utils.StyleWarning("(read-only)")
+				}
+			}
+			fmt.Printf("  %d. [user] %s%s\n", pathIndex, userDir, status)
+			pathIndex++
+		}
+
+		// Legacy baseDir
+		if config.Global.BaseDir != "" {
+			status := ""
+			if _, err := os.Stat(config.Global.BaseDir); err == nil {
+				if isWritable(config.Global.BaseDir) {
+					status = " " + utils.StyleSuccess("(writable)")
+				} else {
+					status = " " + utils.StyleWarning("(read-only)")
+				}
+			}
+			fmt.Printf("  %d. [legacy] %s%s\n", pathIndex, config.Global.BaseDir, status)
+		}
+		fmt.Println()
 
 		// Show all settings
 		fmt.Println(utils.StyleTitle("Current Configuration:"))
@@ -102,11 +214,24 @@ var configShowCmd = &cobra.Command{
 		compressArgs := viper.GetString("build.compress_args")
 		actualCompressArgs := config.Global.Build.CompressArgs
 		if compressArgs != actualCompressArgs {
-			fmt.Printf("  compress_args:   %s (auto-detected: zstd supported)\n", actualCompressArgs)
+			fmt.Printf("  compress_args:   %s\n", actualCompressArgs)
 		} else {
 			fmt.Printf("  compress_args:   %s\n", compressArgs)
 		}
 		fmt.Printf("  overlay_type:    %s\n", viper.GetString("build.overlay_type"))
+		fmt.Println()
+
+		// Extra base directories
+		fmt.Println(utils.StyleTitle("Extra Base Directories:"))
+		extraDirs := config.GetExtraBaseDirs()
+		if len(extraDirs) > 0 {
+			fmt.Printf("  extra_base_dirs:\n")
+			for _, dir := range extraDirs {
+				fmt.Printf("    - %s\n", dir)
+			}
+		} else {
+			fmt.Printf("  extra_base_dirs: %s\n", utils.StyleInfo("none"))
+		}
 		fmt.Println()
 
 		// Show environment variable overrides
@@ -189,6 +314,14 @@ Time duration format (for build.default_time):
 			"build.tmp_size_mb":    true,
 			"build.compress_args":  true,
 			"build.overlay_type":   true,
+			"extra_base_dirs":      true,
+		}
+
+		// Array keys that should be edited via config edit or env var
+		if key == "extra_base_dirs" {
+			utils.PrintError("'%s' is an array setting. Use 'condatainer config edit' or environment variable.", key)
+			utils.PrintHint("Config file (YAML array):\n  extra_base_dirs:\n    - /path/to/dir1\n    - /path/to/dir2\n\nEnvironment variable (colon-separated):\n  export CONDATAINER_EXTRA_BASE_DIRS=/path/to/dir1:/path/to/dir2")
+			os.Exit(1)
 		}
 
 		if !knownKeys[key] {
@@ -379,6 +512,84 @@ var configEditCmd = &cobra.Command{
 	},
 }
 
+var configPathsCmd = &cobra.Command{
+	Use:   "paths",
+	Short: "Show data search paths",
+	Long: `Show all search paths for images, build-scripts, and helper-scripts.
+
+Search paths are checked in priority order (first match wins for reads):
+  1. Extra base directories (highest priority)
+  2. Portable (group/shared directory)
+  3. Scratch (HPC large storage, $SCRATCH/condatainer)
+  4. User (personal directory, ~/.local/share/condatainer)
+  5. Legacy (base_dir from config)
+
+Write operations use the first writable directory in the same order.
+Portable is preferred for group/shared use, user is the fallback.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println(utils.StyleTitle("Data Search Paths"))
+		fmt.Println()
+
+		// Images
+		fmt.Println(utils.StyleTitle("Images:"))
+		for i, dir := range config.GetImageSearchPaths() {
+			status := ""
+			if !config.DirExists(dir) {
+				status = " " + utils.StyleWarning("(not found)")
+			}
+			fmt.Printf("  %d. %s%s\n", i+1, dir, status)
+		}
+		if writableDir, err := config.GetWritableImagesDir(); err == nil {
+			fmt.Printf("  → Writable: %s\n", utils.StyleSuccess(writableDir))
+		}
+		fmt.Println()
+
+		// Build scripts
+		fmt.Println(utils.StyleTitle("Build Scripts:"))
+		for i, dir := range config.GetBuildScriptSearchPaths() {
+			status := ""
+			if !config.DirExists(dir) {
+				status = " " + utils.StyleWarning("(not found)")
+			}
+			fmt.Printf("  %d. %s%s\n", i+1, dir, status)
+		}
+		if writableDir, err := config.GetWritableBuildScriptsDir(); err == nil {
+			fmt.Printf("  → Writable: %s\n", utils.StyleSuccess(writableDir))
+		}
+		fmt.Println()
+
+		// Helper scripts
+		fmt.Println(utils.StyleTitle("Helper Scripts:"))
+		for i, dir := range config.GetHelperScriptSearchPaths() {
+			status := ""
+			if !config.DirExists(dir) {
+				status = " " + utils.StyleWarning("(not found)")
+			}
+			fmt.Printf("  %d. %s%s\n", i+1, dir, status)
+		}
+		if writableDir, err := config.GetWritableHelperScriptsDir(); err == nil {
+			fmt.Printf("  → Writable: %s\n", utils.StyleSuccess(writableDir))
+		}
+		fmt.Println()
+
+		// Directory info
+		fmt.Println(utils.StyleTitle("Directory Locations:"))
+		if portableDir := config.GetPortableDataDir(); portableDir != "" {
+			fmt.Printf("  Portable: %s\n", portableDir)
+		} else {
+			fmt.Printf("  Portable: %s\n", utils.StyleWarning("not detected"))
+		}
+		if scratchDir := config.GetScratchDataDir(); scratchDir != "" {
+			fmt.Printf("  Scratch:  %s\n", scratchDir)
+		} else {
+			fmt.Printf("  Scratch:  %s\n", utils.StyleWarning("$SCRATCH not set"))
+		}
+		if userDir := config.GetUserDataDir(); userDir != "" {
+			fmt.Printf("  User:     %s\n", userDir)
+		}
+	},
+}
+
 var configValidateCmd = &cobra.Command{
 	Use:   "validate",
 	Short: "Validate configuration",
@@ -449,6 +660,7 @@ func init() {
 	configCmd.AddCommand(configSetCmd)
 	configCmd.AddCommand(configInitCmd)
 	configCmd.AddCommand(configEditCmd)
+	configCmd.AddCommand(configPathsCmd)
 	configCmd.AddCommand(configValidateCmd)
 
 	// Add to root command

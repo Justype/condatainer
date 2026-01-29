@@ -333,7 +333,13 @@ func localOverlaySuggestions(toComplete string) []string {
 }
 
 func isAppOverlay(path string) bool {
-	return pathWithinDir(path, config.Global.ImagesDir)
+	// Check if path is in any of the image search directories
+	for _, imagesDir := range config.GetImageSearchPaths() {
+		if pathWithinDir(path, imagesDir) {
+			return true
+		}
+	}
+	return false
 }
 
 func pathWithinDir(path, dir string) bool {

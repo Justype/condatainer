@@ -180,33 +180,34 @@ func (b *BaseBuildObject) IsInstalled() bool {
 func (b *BaseBuildObject) GetMissingDependencies() ([]string, error) {
 	missing := []string{}
 
-	// Check if images directory exists
-	if !utils.DirExists(config.Global.ImagesDir) {
-		// If directory doesn't exist, all dependencies are missing
-		return b.dependencies, nil
-	}
-
-	// Get all installed overlays
-	entries, err := os.ReadDir(config.Global.ImagesDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list installed overlays: %w", err)
-	}
-
-	// Build a set of installed overlays
+	// Build a set of installed overlays from all search paths
 	installed := make(map[string]bool)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if !utils.IsOverlay(entry.Name()) {
+
+	for _, imagesDir := range config.GetImageSearchPaths() {
+		if !utils.DirExists(imagesDir) {
 			continue
 		}
 
-		// Convert filename to name/version format
-		nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-		// Convert samtools--1.21.sqf to samtools/1.21
-		normalized := strings.ReplaceAll(nameVersion, "--", "/")
-		installed[normalized] = true
+		entries, err := os.ReadDir(imagesDir)
+		if err != nil {
+			utils.PrintWarning("Failed to read directory %s: %v", imagesDir, err)
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			if !utils.IsOverlay(entry.Name()) {
+				continue
+			}
+
+			// Convert filename to name/version format
+			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+			// Convert samtools--1.21.sqf to samtools/1.21
+			normalized := strings.ReplaceAll(nameVersion, "--", "/")
+			installed[normalized] = true
+		}
 	}
 
 	// Check which dependencies are missing

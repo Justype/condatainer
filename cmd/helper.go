@@ -55,18 +55,25 @@ func completeHelperScripts(cmd *cobra.Command, args []string, toComplete string)
 		return nil, cobra.ShellCompDirectiveDefault
 	}
 
-	helperScriptsDir := filepath.Join(config.Global.BaseDir, "helper-scripts")
-	entries, err := os.ReadDir(helperScriptsDir)
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveDefault
-	}
-
+	// Collect scripts from all search paths (user → system)
+	seen := make(map[string]bool)
 	var scripts []string
-	for _, entry := range entries {
-		name := entry.Name()
-		// Skip hidden files and directories
-		if !entry.IsDir() && !strings.HasPrefix(name, ".") {
-			scripts = append(scripts, name)
+
+	for _, dir := range config.GetHelperScriptSearchPaths() {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			name := entry.Name()
+			// Skip hidden files and directories
+			if !entry.IsDir() && !strings.HasPrefix(name, ".") {
+				if !seen[name] {
+					seen[name] = true
+					scripts = append(scripts, name)
+				}
+			}
 		}
 	}
 
@@ -74,32 +81,43 @@ func completeHelperScripts(cmd *cobra.Command, args []string, toComplete string)
 }
 
 func runHelper(cmd *cobra.Command, args []string) error {
-	helperScriptsDir := filepath.Join(config.Global.BaseDir, "helper-scripts")
-
 	// --- Path Mode ---
 	if helperPath {
 		if len(args) > 0 {
+			// Find specific script in all search paths
 			scriptName := args[0]
-			localPath := filepath.Join(helperScriptsDir, scriptName)
-			if utils.FileExists(localPath) {
-				absPath, _ := filepath.Abs(localPath)
-				fmt.Println(absPath)
-				return nil
+			scriptPath, err := config.FindHelperScript(scriptName)
+			if err != nil {
+				return fmt.Errorf("helper script '%s' not found (searched: %v)", scriptName, config.GetHelperScriptSearchPaths())
 			}
-			return fmt.Errorf("helper script '%s' not found locally", scriptName)
+			fmt.Println(scriptPath)
+			return nil
 		}
 
-		// Show directory path
-		if err := os.MkdirAll(helperScriptsDir, 0775); err != nil {
-			return fmt.Errorf("failed to create helper scripts directory: %w", err)
+		// Show all helper script search paths
+		fmt.Println("Helper script search paths (priority order):")
+		for i, dir := range config.GetHelperScriptSearchPaths() {
+			exists := ""
+			if !config.DirExists(dir) {
+				exists = " (not found)"
+			}
+			fmt.Printf("  %d. %s%s\n", i+1, dir, exists)
 		}
-		absPath, _ := filepath.Abs(helperScriptsDir)
-		fmt.Println(absPath)
+
+		// Show writable directory
+		if writableDir, err := config.GetWritableHelperScriptsDir(); err == nil {
+			fmt.Printf("\nWritable directory: %s\n", writableDir)
+		}
 		return nil
 	}
 
 	// --- Update Mode ---
 	if helperUpdate {
+		// Get writable directory for updates
+		helperScriptsDir, err := config.GetWritableHelperScriptsDir()
+		if err != nil {
+			return fmt.Errorf("failed to find writable helper scripts directory: %w", err)
+		}
 		return updateHelperScripts(args, helperScriptsDir)
 	}
 
@@ -111,19 +129,20 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	scriptName := args[0]
 	scriptArgs := args[1:]
 
-	localPath := filepath.Join(helperScriptsDir, scriptName)
-	if !utils.FileExists(localPath) {
-		return fmt.Errorf("helper script '%s' not found locally at %s\nRun '%s' to fetch available helper scripts",
-			scriptName, localPath, utils.StyleAction("condatainer helper --update"))
+	// Find script in all search paths
+	scriptPath, err := config.FindHelperScript(scriptName)
+	if err != nil {
+		return fmt.Errorf("helper script '%s' not found\nSearched: %v\nRun '%s' to fetch available helper scripts",
+			scriptName, config.GetHelperScriptSearchPaths(), utils.StyleAction("condatainer helper --update"))
 	}
 
 	// Ensure executable
-	if err := os.Chmod(localPath, 0755); err != nil {
+	if err := os.Chmod(scriptPath, 0755); err != nil {
 		utils.PrintDebug("Failed to chmod helper script: %v", err)
 	}
 
 	// Run the helper script
-	cmdArgs := append([]string{localPath}, scriptArgs...)
+	cmdArgs := append([]string{scriptPath}, scriptArgs...)
 	utils.PrintDebug("Running helper command: %v", cmdArgs)
 
 	helperCmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)

@@ -26,33 +26,38 @@ func EnsureApptainer() error {
 // This is the main entry point for base image initialization.
 //
 // The function follows this logic:
-//  1. Create images directory if it doesn't exist
-//  2. Check if apptainer is available
-//  3. If base image already exists, return immediately
-//  4. Try to download prebuilt base image (unless debug mode)
-//  5. If download fails, try to build locally from definition file
+//  1. Ensure apptainer is available
+//  2. Search all image paths for existing base image
+//  3. If not found, try to download prebuilt base image (unless debug mode)
+//  4. If download fails, try to build locally from definition file
 func EnsureBaseImage() error {
-	// Step 1: Ensure images directory exists
-	if err := os.MkdirAll(config.Global.ImagesDir, utils.PermDir); err != nil {
-		return fmt.Errorf("failed to create images directory: %w", err)
-	}
-
-	// Step 2: Ensure apptainer is available
+	// Step 1: Ensure apptainer is available
 	if err := EnsureApptainer(); err != nil {
 		return err
 	}
 
-	// Step 3: Check if base image already exists
-	if utils.FileExists(config.Global.BaseImage) {
-		utils.PrintDebug("Base image already exists at %s", utils.StylePath(config.Global.BaseImage))
+	// Step 2: Search all image paths for existing base image
+	if existingPath := config.FindBaseImage(); existingPath != "" {
+		utils.PrintDebug("Base image found at %s", utils.StylePath(existingPath))
 		return nil
 	}
 
-	// Step 4: Try to download prebuilt base image
+	// Get the path where we'll write the new base image
+	baseImagePath, err := config.GetBaseImageWritePath()
+	if err != nil {
+		return fmt.Errorf("no writable directory for base image: %w", err)
+	}
+
+	// Ensure the parent directory exists
+	if err := os.MkdirAll(filepath.Dir(baseImagePath), utils.PermDir); err != nil {
+		return fmt.Errorf("failed to create images directory: %w", err)
+	}
+
+	// Step 3: Try to download prebuilt base image
 	// In debug mode, always build locally
 	if !config.Global.Debug {
 		utils.PrintMessage("Base image not found. Downloading base image...")
-		if err := tryDownloadPrebuiltBaseImage(); err == nil {
+		if err := tryDownloadPrebuiltBaseImage(baseImagePath); err == nil {
 			return nil
 		} else {
 			utils.PrintDebug("Failed to download prebuilt base image: %v", err)
@@ -61,22 +66,22 @@ func EnsureBaseImage() error {
 		utils.PrintDebug("Base image not found. Proceeding to build locally due to debug mode.")
 	}
 
-	// Step 5: Try to build base image locally
+	// Step 4: Try to build base image locally
 	utils.PrintMessage("Trying to build base image locally...")
 
-	if err := ensureBaseDef(); err != nil {
+	baseDefPath, err := ensureBaseDef()
+	if err != nil {
 		return err
 	}
 
-	baseDefPath := filepath.Join(config.Global.BuildScriptsDir, "base_image.def")
-	if err := Build(config.Global.BaseImage, baseDefPath, nil); err != nil {
+	if err := Build(baseImagePath, baseDefPath, nil); err != nil {
 		return fmt.Errorf("building base image failed: %w", err)
 	}
 
-	utils.PrintSuccess("Base image built.")
+	utils.PrintSuccess("Base image built at %s", utils.StylePath(baseImagePath))
 
 	// Set permissions
-	if err := os.Chmod(config.Global.BaseImage, utils.PermDir); err != nil {
+	if err := os.Chmod(baseImagePath, utils.PermDir); err != nil {
 		utils.PrintWarning("Failed to set permissions on base image: %v", err)
 	}
 
@@ -86,8 +91,8 @@ func EnsureBaseImage() error {
 }
 
 // tryDownloadPrebuiltBaseImage attempts to download a prebuilt base image for the current architecture.
-// Returns nil on success, error otherwise.
-func tryDownloadPrebuiltBaseImage() error {
+// Downloads to the specified destPath. Returns nil on success, error otherwise.
+func tryDownloadPrebuiltBaseImage(destPath string) error {
 	// Map Go arch names to the naming convention used in releases
 	arch := runtime.GOARCH
 	switch arch {
@@ -106,35 +111,43 @@ func tryDownloadPrebuiltBaseImage() error {
 
 	utils.PrintMessage("Attempting to download pre-built base image ...")
 
-	if err := utils.DownloadExecutable(url, config.Global.BaseImage); err != nil {
+	if err := utils.DownloadExecutable(url, destPath); err != nil {
 		return err
 	}
 
-	utils.PrintSuccess("Pre-built base image downloaded.")
+	utils.PrintSuccess("Pre-built base image downloaded to %s", utils.StylePath(destPath))
 	return nil
 }
 
 // ensureBaseDef ensures the base image definition file exists, downloading it if necessary.
-func ensureBaseDef() error {
-	baseDefPath := filepath.Join(config.Global.BuildScriptsDir, "base_image.def")
+// Searches all build-scripts paths first, then downloads to the first writable directory.
+// Returns the path to the definition file.
+func ensureBaseDef() (string, error) {
+	// Search all build-scripts paths for existing def file
+	if existingPath := config.FindBaseImageDef(); existingPath != "" {
+		utils.PrintDebug("Base image def found at %s", utils.StylePath(existingPath))
+		return existingPath, nil
+	}
 
-	if utils.FileExists(baseDefPath) {
-		return nil
+	// Get the path where we'll write the new def file
+	baseDefPath, err := config.GetBaseImageDefWritePath()
+	if err != nil {
+		return "", fmt.Errorf("no writable directory for base image def: %w", err)
 	}
 
 	utils.PrintMessage("Base image definition file not found. Downloading...")
 
 	// Ensure build-scripts directory exists
-	if err := os.MkdirAll(config.Global.BuildScriptsDir, utils.PermDir); err != nil {
-		return fmt.Errorf("failed to create build-scripts directory: %w", err)
+	if err := os.MkdirAll(filepath.Dir(baseDefPath), utils.PermDir); err != nil {
+		return "", fmt.Errorf("failed to create build-scripts directory: %w", err)
 	}
 
 	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/main/build-scripts/base_image.def", config.GitHubRepo)
 
 	if err := utils.DownloadFile(url, baseDefPath); err != nil {
-		return fmt.Errorf("failed to download base image definition file: %w", err)
+		return "", fmt.Errorf("failed to download base image definition file: %w", err)
 	}
 
-	utils.PrintSuccess("Base image definition file downloaded.")
-	return nil
+	utils.PrintSuccess("Base image definition file downloaded to %s", utils.StylePath(baseDefPath))
+	return baseDefPath, nil
 }

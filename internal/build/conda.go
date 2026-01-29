@@ -138,7 +138,7 @@ func (c *CondaBuildObject) Build(buildDeps bool) error {
 	}
 
 	// Build the apptainer exec command using config values
-	baseImage := config.Global.BaseImage
+	baseImage := config.GetBaseImage()
 	apptainerBin := config.Global.ApptainerBin
 
 	utils.PrintDebug("Using base image: %s", baseImage)

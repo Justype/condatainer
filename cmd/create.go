@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,12 +147,24 @@ func init() {
 	f.BoolVar(&compLz4, "lz4", false, "Use LZ4 compression (default)")
 }
 
+// getWritableImagesDir returns the writable images directory or exits with an error
+func getWritableImagesDir() string {
+	dir, err := config.GetWritableImagesDir()
+	if err != nil {
+		utils.PrintError("No writable images directory found: %v", err)
+		os.Exit(1)
+	}
+	return dir
+}
+
 // runCreatePackages creates separate sqf files for each package using BuildGraph
 // Example: condatainer create samtools/1.16 bcftools/1.15
 func runCreatePackages(packages []string) {
+	imagesDir := getWritableImagesDir()
+
 	buildObjects := make([]build.BuildObject, 0, len(packages))
 	for _, pkg := range packages {
-		bo, err := build.NewBuildObject(pkg, false, config.Global.ImagesDir, config.Global.TmpDir)
+		bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir())
 		if err != nil {
 			utils.PrintError("Failed to create build object for %s: %v", pkg, err)
 			os.Exit(1)
@@ -162,7 +173,7 @@ func runCreatePackages(packages []string) {
 		buildObjects = append(buildObjects, bo)
 	}
 
-	graph, err := build.NewBuildGraph(buildObjects, config.Global.ImagesDir, config.Global.TmpDir, config.Global.SubmitJob)
+	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
 	if err != nil {
 		utils.PrintError("Failed to create build graph: %v", err)
 		os.Exit(1)
@@ -177,6 +188,8 @@ func runCreatePackages(packages []string) {
 // Example: condatainer create -n myenv nvim nodejs
 // Example: condatainer create -n myenv -f environment.yml
 func runCreateWithName(packages []string) {
+	imagesDir := getWritableImagesDir()
+
 	normalizedName := utils.NormalizeNameVersion(createName)
 	slashCount := strings.Count(normalizedName, "/")
 	if slashCount > 1 {
@@ -184,13 +197,10 @@ func runCreateWithName(packages []string) {
 		os.Exit(1)
 	}
 
-	// Build absolute path for the sqf file
-	absPath := filepath.Join(config.Global.ImagesDir, fmt.Sprintf("%s.sqf", createName))
-
-	// Check if already exists
-	if utils.FileExists(absPath) {
+	// Check if already exists (search all paths)
+	if existingPath, err := config.FindImage(createName + ".sqf"); err == nil {
 		utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
-			utils.StyleName(filepath.Base(absPath)), utils.StylePath(absPath))
+			utils.StyleName(filepath.Base(existingPath)), utils.StylePath(existingPath))
 		return
 	}
 
@@ -214,7 +224,7 @@ func runCreateWithName(packages []string) {
 	}
 
 	// Create CondaBuildObject using the new factory function
-	bo, err := build.NewCondaObjectWithSource(normalizedName, buildSource, config.Global.ImagesDir, config.Global.TmpDir)
+	bo, err := build.NewCondaObjectWithSource(normalizedName, buildSource, imagesDir, config.GetWritableTmpDir())
 	if err != nil {
 		utils.PrintError("Failed to create build object: %v", err)
 		os.Exit(1)
@@ -230,6 +240,7 @@ func runCreateWithName(packages []string) {
 // Example: condatainer create -p myprefix -f environment.yml
 // Example: condatainer create -p myprefix -f build.sh
 func runCreateWithPrefix() {
+	imagesDir := getWritableImagesDir()
 	absPrefix := filepath.Clean(createPrefix)
 
 	if createFile == "" {
@@ -247,7 +258,7 @@ func runCreateWithPrefix() {
 	// Determine file type and create appropriate BuildObject
 	if strings.HasSuffix(createFile, ".yml") || strings.HasSuffix(createFile, ".yaml") {
 		// YAML conda environment - use NewCondaObjectWithSource
-		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), filepath.Clean(createFile), config.Global.ImagesDir, config.Global.TmpDir)
+		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), filepath.Clean(createFile), imagesDir, config.GetWritableTmpDir())
 		if err != nil {
 			utils.PrintError("Failed to create build object: %v", err)
 			os.Exit(1)
@@ -259,14 +270,14 @@ func runCreateWithPrefix() {
 	} else if strings.HasSuffix(createFile, ".sh") || strings.HasSuffix(createFile, ".bash") || strings.HasSuffix(createFile, ".def") {
 		// Shell script or apptainer def file
 		isApptainer := strings.HasSuffix(createFile, ".def")
-		bo, err := build.FromExternalSource(absPrefix, filepath.Clean(createFile), isApptainer, config.Global.ImagesDir)
+		bo, err := build.FromExternalSource(absPrefix, filepath.Clean(createFile), isApptainer, imagesDir)
 		if err != nil {
 			utils.PrintError("Failed to create build object from %s: %v", createFile, err)
 			os.Exit(1)
 		}
 
 		buildObjects := []build.BuildObject{bo}
-		graph, err := build.NewBuildGraph(buildObjects, config.Global.ImagesDir, config.Global.TmpDir, config.Global.SubmitJob)
+		graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
 		if err != nil {
 			utils.PrintError("Failed to create build graph: %v", err)
 			os.Exit(1)
@@ -284,6 +295,8 @@ func runCreateWithPrefix() {
 // runCreateFromSource creates a sqf from an external source (def file or remote URI)
 // Example: condatainer create --source docker://ubuntu:22.04 -n myubuntu
 func runCreateFromSource() {
+	imagesDir := getWritableImagesDir()
+
 	if createPrefix == "" && createName == "" {
 		utils.PrintError("--source requires either --name or --prefix")
 		os.Exit(1)
@@ -294,7 +307,7 @@ func runCreateFromSource() {
 		targetPrefix = filepath.Clean(createPrefix)
 	} else {
 		normalizedName := utils.NormalizeNameVersion(createName)
-		targetPrefix = filepath.Join(config.Global.ImagesDir, normalizedName)
+		targetPrefix = filepath.Join(imagesDir, normalizedName)
 	}
 
 	source := createSource
@@ -312,14 +325,14 @@ func runCreateFromSource() {
 
 	utils.PrintMessage("Creating overlay %s from %s", filepath.Base(targetOverlayPath), utils.StylePath(source))
 
-	bo, err := build.FromExternalSource(targetPrefix, source, isApptainer, config.Global.ImagesDir)
+	bo, err := build.FromExternalSource(targetPrefix, source, isApptainer, imagesDir)
 	if err != nil {
 		utils.PrintError("Failed to create build object from %s: %v", source, err)
 		os.Exit(1)
 	}
 
 	buildObjects := []build.BuildObject{bo}
-	graph, err := build.NewBuildGraph(buildObjects, config.Global.ImagesDir, config.Global.TmpDir, config.Global.SubmitJob)
+	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
 	if err != nil {
 		os.Exit(1)
 	}

@@ -34,61 +34,73 @@ type RemoteScriptEntry struct {
 	Whatis       string   `json:"whatis"`
 }
 
-// GetLocalBuildScripts scans the build-scripts directory and returns a map of name -> ScriptInfo
+// GetLocalBuildScripts scans all build-scripts directories and returns a map of name -> ScriptInfo.
+// Searches user → scratch → legacy → system directories.
+// First match wins (user scripts shadow system ones).
 func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 	scripts := make(map[string]ScriptInfo)
 
-	buildScriptsDir := config.Global.BuildScriptsDir
-	if !utils.DirExists(buildScriptsDir) {
-		return scripts, nil
-	}
-
-	err := filepath.Walk(buildScriptsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
+	// Scan all build script directories in priority order
+	for _, buildScriptsDir := range config.GetBuildScriptSearchPaths() {
+		if !utils.DirExists(buildScriptsDir) {
+			continue
 		}
 
-		// Skip directories
-		if info.IsDir() {
-			return nil
-		}
+		err := filepath.Walk(buildScriptsDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil // Skip errors, continue with other files
+			}
 
-		// Skip .py and .sh files (helper scripts)
-		if strings.HasSuffix(info.Name(), ".py") || strings.HasSuffix(info.Name(), ".sh") {
-			return nil
-		}
-
-		// Skip template files
-		if strings.Contains(path, "template") {
-			return nil
-		}
-
-		// Generate key (relative path)
-		relPath, err := filepath.Rel(buildScriptsDir, path)
-		if err != nil {
-			return nil
-		}
-
-		// Handle .def files
-		isContainer := strings.HasSuffix(relPath, ".def")
-		if isContainer {
-			// Skip base image/overlay scripts
-			if strings.HasPrefix(relPath, "base_image") || strings.HasPrefix(relPath, "base-overlay") {
+			// Skip directories
+			if info.IsDir() {
 				return nil
 			}
-			relPath = strings.TrimSuffix(relPath, ".def")
-		}
 
-		scripts[relPath] = ScriptInfo{
-			Name:        relPath,
-			Path:        path,
-			IsContainer: isContainer,
-			IsRemote:    false,
-		}
-		return nil
-	})
+			// Skip .py and .sh files (helper scripts)
+			if strings.HasSuffix(info.Name(), ".py") || strings.HasSuffix(info.Name(), ".sh") {
+				return nil
+			}
 
-	return scripts, err
+			// Skip template files
+			if strings.Contains(path, "template") {
+				return nil
+			}
+
+			// Generate key (relative path)
+			relPath, err := filepath.Rel(buildScriptsDir, path)
+			if err != nil {
+				return nil
+			}
+
+			// Handle .def files
+			isContainer := strings.HasSuffix(relPath, ".def")
+			if isContainer {
+				// Skip base image/overlay scripts
+				if strings.HasPrefix(relPath, "base_image") || strings.HasPrefix(relPath, "base-overlay") {
+					return nil
+				}
+				relPath = strings.TrimSuffix(relPath, ".def")
+			}
+
+			// First match wins - don't overwrite if already found in higher-priority dir
+			if _, exists := scripts[relPath]; !exists {
+				scripts[relPath] = ScriptInfo{
+					Name:        relPath,
+					Path:        path,
+					IsContainer: isContainer,
+					IsRemote:    false,
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			// Log but continue with other directories
+			utils.PrintDebug("Error scanning %s: %v", buildScriptsDir, err)
+		}
+	}
+
+	return scripts, nil
 }
 
 // GetRemoteBuildScripts fetches the build scripts metadata from GitHub

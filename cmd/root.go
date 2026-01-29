@@ -67,7 +67,7 @@ var rootCmd = &cobra.Command{
 			utils.PrintDebug("CondaTainer Version: %s", utils.StyleInfo(config.VERSION))
 			utils.PrintDebug("Executable: %s", exe)
 			utils.PrintDebug("Base Directory: %s", config.Global.BaseDir)
-			utils.PrintDebug("Images Directory: %s", config.Global.ImagesDir)
+			utils.PrintDebug("Images Directory: %s", config.GetImagesDir())
 			utils.PrintDebug("Base Image: %s", config.Global.BaseImage)
 			utils.PrintDebug("Apptainer Binary: %s", config.Global.ApptainerBin)
 			if config.Global.SchedulerBin != "" {

@@ -28,6 +28,40 @@ func newScriptBuildObject(base *BaseBuildObject, isRef bool) (*ScriptBuildObject
 
 // Type check implementations
 func (s *ScriptBuildObject) IsConda() bool { return false }
+
+// getAllBaseDirs returns all configured base directories
+func getAllBaseDirs() []string {
+	var dirs []string
+
+	// Extra base dirs
+	for _, baseDir := range config.GetExtraBaseDirs() {
+		if baseDir != "" {
+			dirs = append(dirs, baseDir)
+		}
+	}
+
+	// Portable dir
+	if portableDir := config.GetPortableDataDir(); portableDir != "" {
+		dirs = append(dirs, portableDir)
+	}
+
+	// Scratch dir
+	if scratchDir := config.GetScratchDataDir(); scratchDir != "" {
+		dirs = append(dirs, scratchDir)
+	}
+
+	// User dir
+	if userDir := config.GetUserDataDir(); userDir != "" {
+		dirs = append(dirs, userDir)
+	}
+
+	// Legacy base dir
+	if config.Global.BaseDir != "" {
+		dirs = append(dirs, config.Global.BaseDir)
+	}
+
+	return dirs
+}
 func (s *ScriptBuildObject) IsDef() bool   { return false }
 func (s *ScriptBuildObject) IsShell() bool { return true }
 func (s *ScriptBuildObject) IsRef() bool   { return s.isRef }
@@ -108,8 +142,14 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 		depList := strings.Join(missingDeps, ", ")
 		if buildDeps {
 			utils.PrintMessage("Building missing dependencies for %s: %s", styledOverlay, utils.StyleNumber(depList))
+
+			writableImagesDir, err := config.GetWritableImagesDir()
+			if err != nil {
+				return fmt.Errorf("no writable images directory found: %w", err)
+			}
+
 			for _, dep := range missingDeps {
-				depObj, err := NewBuildObject(dep, false, config.Global.ImagesDir, config.Global.TmpDir)
+				depObj, err := NewBuildObject(dep, false, writableImagesDir, config.GetWritableTmpDir())
 				if err != nil {
 					return fmt.Errorf("failed to create build object for dependency %s: %w", dep, err)
 				}
@@ -189,9 +229,8 @@ fi
 `, s.buildSource, s.buildSource)
 
 	// Build exec command args using config values
-	baseImage := config.Global.BaseImage
+	baseImage := config.GetBaseImage()
 	apptainerBin := config.Global.ApptainerBin
-	condatainerDir := config.Global.BaseDir
 
 	args := []string{"exec"}
 	args = append(args, envSettings...)
@@ -205,8 +244,12 @@ fi
 	}
 
 	args = append(args, "--overlay", s.tmpOverlayPath)
-	if condatainerDir != "" {
-		args = append(args, "--bind", condatainerDir)
+
+	// Bind all base directories (for accessing overlays and build scripts)
+	for _, baseDir := range getAllBaseDirs() {
+		if baseDir != "" {
+			args = append(args, "--bind", baseDir)
+		}
 	}
 	args = append(args, baseImage, "/bin/bash", "-c", bashScript)
 
@@ -292,9 +335,8 @@ fi
 // createSquashfs creates a SquashFS file from the given source directory
 func (s *ScriptBuildObject) createSquashfs(sourceDir, targetOverlayPath string) error {
 	// Get config values
-	baseImage := config.Global.BaseImage
+	baseImage := config.GetBaseImage()
 	apptainerBin := config.Global.ApptainerBin
-	condatainerDir := config.Global.BaseDir
 
 	targetPath := targetOverlayPath
 	if absTarget, err := filepath.Abs(targetPath); err == nil {
@@ -324,9 +366,14 @@ mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M
 		"exec",
 		"--overlay", s.tmpOverlayPath,
 	}
-	if condatainerDir != "" {
-		args = append(args, "--bind", condatainerDir)
+
+	// Bind all base directories
+	for _, baseDir := range getAllBaseDirs() {
+		if baseDir != "" {
+			args = append(args, "--bind", baseDir)
+		}
 	}
+
 	args = append(args, baseImage, "/bin/bash", "-c", bashScript)
 
 	cmd := exec.Command(apptainerBin, args...)

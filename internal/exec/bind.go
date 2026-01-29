@@ -31,9 +31,61 @@ func BindPaths(paths ...string) []string {
 			absPaths = append(absPaths, resolved)
 		}
 	}
+
+	// Auto-bind all possible base directories (from search paths)
+	// Check if writable and add :ro flag if read-only
+	isWritable := func(dir string) bool {
+		testFile := filepath.Join(dir, ".write-test")
+		f, err := os.Create(testFile)
+		if err != nil {
+			return false
+		}
+		f.Close()
+		os.Remove(testFile)
+		return true
+	}
+
+	// Get all base directories from search paths
+	baseDirs := make([]string, 0)
+
+	// Extra base directories
+	for _, dir := range config.GetExtraBaseDirs() {
+		if dir != "" {
+			baseDirs = append(baseDirs, dir)
+		}
+	}
+
+	// Portable directory
+	if portableDir := config.GetPortableDataDir(); portableDir != "" {
+		baseDirs = append(baseDirs, portableDir)
+	}
+
+	// Scratch directory
+	if scratchDir := config.GetScratchDataDir(); scratchDir != "" {
+		baseDirs = append(baseDirs, scratchDir)
+	}
+
+	// User directory
+	if userDir := config.GetUserDataDir(); userDir != "" {
+		baseDirs = append(baseDirs, userDir)
+	}
+
+	// Legacy baseDir
 	if config.Global.BaseDir != "" {
-		if resolved := resolvePath(config.Global.BaseDir); resolved != "" {
-			absPaths = append(absPaths, resolved)
+		baseDirs = append(baseDirs, config.Global.BaseDir)
+	}
+
+	// Add base directories with appropriate flags
+	for _, dir := range baseDirs {
+		if resolved := resolvePath(dir); resolved != "" {
+			// Check if directory exists and is readable
+			if _, err := os.Stat(resolved); err == nil {
+				// Add with :ro flag if not writable (format: path:path:ro)
+				if !isWritable(resolved) {
+					resolved = resolved + ":" + resolved + ":ro"
+				}
+				absPaths = append(absPaths, resolved)
+			}
 		}
 	}
 
@@ -50,11 +102,15 @@ func BindPaths(paths ...string) []string {
 	filtered := make([]string, 0, len(unique))
 	for _, candidate := range unique {
 		skip := false
+		// Extract the host path (first component before any colons)
+		candidatePath := extractHostPath(candidate)
 		for _, parent := range unique {
 			if parent == candidate {
 				continue
 			}
-			if isChildPath(candidate, parent) {
+			// Extract the host path from parent too
+			parentPath := extractHostPath(parent)
+			if isChildPath(candidatePath, parentPath) {
 				skip = true
 				break
 			}
@@ -72,6 +128,18 @@ func BindPaths(paths ...string) []string {
 	}
 
 	return filtered
+}
+
+// extractHostPath extracts the host path from a bind path.
+// Handles formats: path, path:ro, path:container_path, path:container_path:ro
+func extractHostPath(bindPath string) string {
+	// Split by colons
+	parts := strings.Split(bindPath, ":")
+	if len(parts) == 0 {
+		return ""
+	}
+	// First part is always the host path
+	return parts[0]
 }
 
 func isChildPath(child, parent string) bool {

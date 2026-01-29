@@ -131,9 +131,21 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Remove overlays
+	// Remove overlays (only if writable)
+	writableDir, err := config.GetWritableImagesDir()
+	if err != nil {
+		return fmt.Errorf("no writable images directory found: %w", err)
+	}
+
 	for _, name := range filtered {
 		overlayPath := installedOverlays[name]
+
+		// Check if overlay is in writable directory
+		if !strings.HasPrefix(overlayPath, writableDir) {
+			utils.PrintWarning("Overlay %s is in a read-only directory and cannot be removed.", utils.StyleName(name))
+			continue
+		}
+
 		if err := os.Remove(overlayPath); err != nil {
 			utils.PrintError("Failed to remove overlay %s: %v", utils.StyleName(name), err)
 			continue
@@ -152,32 +164,40 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// getInstalledOverlaysMap returns a map of overlay name to path
+// getInstalledOverlaysMap returns a map of overlay name to path from all search paths
 func getInstalledOverlaysMap() (map[string]string, error) {
 	overlays := make(map[string]string)
 
-	if !utils.DirExists(config.Global.ImagesDir) {
-		return overlays, nil
-	}
-
-	entries, err := os.ReadDir(config.Global.ImagesDir)
-	if err != nil {
-		return nil, fmt.Errorf("unable to list overlays: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if !utils.IsOverlay(entry.Name()) {
+	// Search all image directories
+	for _, imagesDir := range config.GetImageSearchPaths() {
+		if !utils.DirExists(imagesDir) {
 			continue
 		}
 
-		// Convert filename to name/version format
-		nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-		// Convert samtools--1.21.sqf to samtools/1.21
-		normalized := strings.ReplaceAll(nameVersion, "--", "/")
-		overlays[normalized] = filepath.Join(config.Global.ImagesDir, entry.Name())
+		entries, err := os.ReadDir(imagesDir)
+		if err != nil {
+			utils.PrintWarning("Failed to read directory %s: %v", imagesDir, err)
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			if !utils.IsOverlay(entry.Name()) {
+				continue
+			}
+
+			// Convert filename to name/version format
+			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+			// Convert samtools--1.21.sqf to samtools/1.21
+			normalized := strings.ReplaceAll(nameVersion, "--", "/")
+
+			// Only store first occurrence (higher priority directory wins)
+			if _, exists := overlays[normalized]; !exists {
+				overlays[normalized] = filepath.Join(imagesDir, entry.Name())
+			}
+		}
 	}
 
 	return overlays, nil

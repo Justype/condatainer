@@ -160,51 +160,64 @@ func runList(cmd *cobra.Command, args []string) error {
 }
 
 func collectAppOverlays(filters []string) (map[string][]string, error) {
-	if !utils.DirExists(config.Global.ImagesDir) {
-		return nil, nil
-	}
-
-	entries, err := os.ReadDir(config.Global.ImagesDir)
-	if err != nil {
-		return nil, fmt.Errorf("unable to list app overlays: %w", err)
-	}
-
 	grouped := map[string]map[string]struct{}{}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if !utils.IsOverlay(entry.Name()) {
-			continue
-		}
-		delimCount := strings.Count(entry.Name(), "--")
-		if delimCount > 1 {
-			// Not an app overlay
-			continue
-		}
-		nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-		normalized := strings.ToLower(utils.NormalizeNameVersion(nameVersion))
-		if !matchesFilters(normalized, filters) {
+	seen := make(map[string]bool) // Track seen files to avoid duplicates
+
+	// Scan all image directories (user → scratch → system)
+	for _, imageDir := range config.GetImageSearchPaths() {
+		if !utils.DirExists(imageDir) {
 			continue
 		}
 
-		var name, version string
-		if strings.Contains(nameVersion, "--") {
-			parts := strings.SplitN(nameVersion, "--", 2)
-			name = parts[0]
-			version = parts[1]
-		} else {
-			name = nameVersion
-			version = "(system app/env)"
-		}
-		if name == "" {
+		entries, err := os.ReadDir(imageDir)
+		if err != nil {
+			utils.PrintDebug("Unable to list overlays in %s: %v", imageDir, err)
 			continue
 		}
 
-		if grouped[name] == nil {
-			grouped[name] = map[string]struct{}{}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			if !utils.IsOverlay(entry.Name()) {
+				continue
+			}
+
+			// Skip if already seen in higher-priority directory
+			if seen[entry.Name()] {
+				continue
+			}
+			seen[entry.Name()] = true
+
+			delimCount := strings.Count(entry.Name(), "--")
+			if delimCount > 1 {
+				// Not an app overlay
+				continue
+			}
+			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+			normalized := strings.ToLower(utils.NormalizeNameVersion(nameVersion))
+			if !matchesFilters(normalized, filters) {
+				continue
+			}
+
+			var name, version string
+			if strings.Contains(nameVersion, "--") {
+				parts := strings.SplitN(nameVersion, "--", 2)
+				name = parts[0]
+				version = parts[1]
+			} else {
+				name = nameVersion
+				version = "(system app/env)"
+			}
+			if name == "" {
+				continue
+			}
+
+			if grouped[name] == nil {
+				grouped[name] = map[string]struct{}{}
+			}
+			grouped[name][version] = struct{}{}
 		}
-		grouped[name][version] = struct{}{}
 	}
 
 	result := map[string][]string{}
@@ -220,36 +233,50 @@ func collectAppOverlays(filters []string) (map[string][]string, error) {
 }
 
 func collectReferenceOverlays(filters []string) ([]string, error) {
-	if !utils.DirExists(config.Global.ImagesDir) {
-		return nil, nil
+	seen := make(map[string]bool) // Track seen files to avoid duplicates
+	names := []string{}
+
+	// Scan all image directories (user → scratch → system)
+	for _, imageDir := range config.GetImageSearchPaths() {
+		if !utils.DirExists(imageDir) {
+			continue
+		}
+
+		entries, err := os.ReadDir(imageDir)
+		if err != nil {
+			utils.PrintDebug("Unable to list overlays in %s: %v", imageDir, err)
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			if !utils.IsOverlay(entry.Name()) {
+				continue
+			}
+
+			// Skip if already seen in higher-priority directory
+			if seen[entry.Name()] {
+				continue
+			}
+			seen[entry.Name()] = true
+
+			delimCount := strings.Count(entry.Name(), "--")
+			if delimCount <= 1 {
+				// Not a reference overlay
+				continue
+			}
+			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+			normalized := strings.ToLower(utils.NormalizeNameVersion(nameVersion))
+			if !matchesFilters(normalized, filters) {
+				continue
+			}
+			displayName := strings.ReplaceAll(nameVersion, "--", "/")
+			names = append(names, displayName)
+		}
 	}
 
-	entries, err := os.ReadDir(config.Global.ImagesDir)
-	if err != nil {
-		return nil, fmt.Errorf("unable to list reference overlays: %w", err)
-	}
-
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if !utils.IsOverlay(entry.Name()) {
-			continue
-		}
-		delimCount := strings.Count(entry.Name(), "--")
-		if delimCount <= 1 {
-			// Not a reference overlay
-			continue
-		}
-		nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-		normalized := strings.ToLower(utils.NormalizeNameVersion(nameVersion))
-		if !matchesFilters(normalized, filters) {
-			continue
-		}
-		displayName := strings.ReplaceAll(nameVersion, "--", "/")
-		names = append(names, displayName)
-	}
 	sort.Strings(names)
 	return names, nil
 }

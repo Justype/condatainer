@@ -84,9 +84,11 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 	prebuiltOverlays := map[string]bool{
 		"build-essential": true,
 	}
-	if prebuiltOverlays[d.nameVersion] && filepath.Dir(targetOverlayPath) == config.Global.ImagesDir {
-		if tryDownloadPrebuiltOverlay(d.nameVersion, targetOverlayPath) {
-			return nil
+	if writableDir, err := config.GetWritableImagesDir(); err == nil {
+		if prebuiltOverlays[d.nameVersion] && filepath.Dir(targetOverlayPath) == writableDir {
+			if tryDownloadPrebuiltOverlay(d.nameVersion, targetOverlayPath) {
+				return nil
+			}
 		}
 	}
 

@@ -10,12 +10,13 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// InstalledOverlays scans the images directory and returns a mapping
+// InstalledOverlays scans all image search paths and returns a mapping
 // from normalized overlay names to their absolute file path.
-// All overlays (including ref overlays) are stored in a single ImagesDir.
+// Searches user → scratch → legacy → system directories.
+// First match wins (user overlays shadow system ones).
 func InstalledOverlays() (map[string]string, error) {
 	overlays := map[string]string{}
-	dirs := []string{config.Global.ImagesDir}
+	dirs := config.GetImageSearchPaths()
 	for _, dir := range dirs {
 		if err := populateOverlays(dir, overlays); err != nil {
 			return nil, err
@@ -96,14 +97,17 @@ func ResolveOverlayPaths(inputs []string) ([]string, error) {
 }
 
 func buildOverlayPathFromSpec(normalized string) (string, error) {
-	// All overlays are stored in a single ImagesDir (including ref overlays)
+	// Search all image directories for the overlay
 	overlayName := fmt.Sprintf("%s.sqf", strings.ReplaceAll(normalized, "/", "--"))
-	path := filepath.Join(config.Global.ImagesDir, overlayName)
 
-	if utils.FileExists(path) {
-		return path, nil
+	for _, dir := range config.GetImageSearchPaths() {
+		path := filepath.Join(dir, overlayName)
+		if utils.FileExists(path) {
+			return path, nil
+		}
 	}
-	return "", fmt.Errorf("overlay %s not found at %s", normalized, path)
+
+	return "", fmt.Errorf("overlay %s not found (searched: %v)", normalized, config.GetImageSearchPaths())
 }
 
 func ensureSingleImage(paths []string) error {

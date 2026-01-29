@@ -29,13 +29,9 @@ type Config struct {
 	Version   string
 
 	// Directory paths
-	ProgramDir       string
-	BaseDir          string
-	ImagesDir        string
-	BuildScriptsDir  string
-	HelperScriptsDir string
-	TmpDir           string
-	LogsDir          string
+	ProgramDir string
+	BaseDir    string
+	LogsDir    string
 
 	// Binary paths
 	ApptainerBin string
@@ -69,13 +65,9 @@ func LoadDefaults(executablePath string) {
 		SubmitJob: true,
 		Version:   VERSION,
 
-		ProgramDir:       programDir,
-		BaseDir:          baseDir,
-		ImagesDir:        filepath.Join(baseDir, "images"),
-		BuildScriptsDir:  filepath.Join(baseDir, "build-scripts"),
-		HelperScriptsDir: filepath.Join(baseDir, "helper-scripts"),
-		TmpDir:           filepath.Join(baseDir, "tmp"),
-		LogsDir:          filepath.Join(os.Getenv("HOME"), "logs"),
+		ProgramDir: programDir,
+		BaseDir:    baseDir,
+		LogsDir:    filepath.Join(os.Getenv("HOME"), "logs"),
 
 		ApptainerBin: detectApptainerBin(),
 		BaseImage:    filepath.Join(baseDir, "images", "base_image.sif"),
@@ -164,4 +156,101 @@ func detectApptainerBin() string {
 
 	// Default to just "apptainer" and let the user's PATH resolve it
 	return "apptainer"
+}
+
+// GetImagesDir returns the images directory derived from BaseDir
+func GetImagesDir() string {
+	return filepath.Join(Global.BaseDir, "images")
+}
+
+// GetBuildScriptsDir returns the build-scripts directory derived from BaseDir
+func GetBuildScriptsDir() string {
+	return filepath.Join(Global.BaseDir, "build-scripts")
+}
+
+// GetHelperScriptsDir returns the helper-scripts directory derived from BaseDir
+func GetHelperScriptsDir() string {
+	return filepath.Join(Global.BaseDir, "helper-scripts")
+}
+
+// GetTmpDir returns the tmp directory derived from BaseDir
+func GetTmpDir() string {
+	return filepath.Join(Global.BaseDir, "tmp")
+}
+
+// GetBaseImage returns the path to base_image.sif, searching all image directories.
+// If user has explicitly set Global.BaseImage (via --base-image flag), returns that.
+// Otherwise searches all directories and returns the first found, or falls back to default path.
+func GetBaseImage() string {
+	// If explicitly set by user (e.g., via --base-image flag), use that
+	if Global.BaseImage != "" && Global.BaseImage != filepath.Join(Global.BaseDir, "images", "base_image.sif") {
+		return Global.BaseImage
+	}
+
+	// Search all image directories
+	if found := FindBaseImage(); found != "" {
+		return found
+	}
+
+	// Fall back to user's images directory (default location)
+	return filepath.Join(Global.BaseDir, "images", "base_image.sif")
+}
+
+// isWritableDir checks if a directory is writable by trying to create a test file
+func isWritableDir(dir string) bool {
+	// Try to create directory if it doesn't exist
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return false
+	}
+
+	// Test write permission
+	testFile := filepath.Join(dir, ".write-test")
+	f, err := os.Create(testFile)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	os.Remove(testFile)
+	return true
+}
+
+// GetWritableTmpDir returns the first writable tmp directory
+func GetWritableTmpDir() string {
+	// Check extra base dirs
+	for _, baseDir := range GetExtraBaseDirs() {
+		if baseDir == "" {
+			continue
+		}
+		tmpDir := filepath.Join(baseDir, "tmp")
+		if isWritableDir(tmpDir) {
+			return tmpDir
+		}
+	}
+
+	// Check portable data dir
+	if portableDir := GetPortableDataDir(); portableDir != "" {
+		tmpDir := filepath.Join(portableDir, "tmp")
+		if isWritableDir(tmpDir) {
+			return tmpDir
+		}
+	}
+
+	// Check scratch data dir
+	if scratchDir := GetScratchDataDir(); scratchDir != "" {
+		tmpDir := filepath.Join(scratchDir, "tmp")
+		if isWritableDir(tmpDir) {
+			return tmpDir
+		}
+	}
+
+	// Check user data dir
+	if userDir := GetUserDataDir(); userDir != "" {
+		tmpDir := filepath.Join(userDir, "tmp")
+		if isWritableDir(tmpDir) {
+			return tmpDir
+		}
+	}
+
+	// Fall back to base dir (should always be writable)
+	return filepath.Join(Global.BaseDir, "tmp")
 }
