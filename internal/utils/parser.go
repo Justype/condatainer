@@ -169,9 +169,13 @@ func GetDependenciesFromScript(scriptPath string) ([]string, error) {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
 				for _, mod := range parts[1:] {
-					// Skip ml subcommands
-					if mod == "purge" || mod == "list" || mod == "avail" || mod == "av" || mod == "load" {
+					// Skip ml subcommands that indicate no package names follow
+					if mod == "purge" || mod == "list" || mod == "avail" || mod == "av" {
 						break
+					}
+					// "ml load foo" may include the literal "load"; skip it and continue
+					if mod == "load" {
+						continue
 					}
 					normalized := NormalizeNameVersion(mod)
 					if !seen[normalized] {
