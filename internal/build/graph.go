@@ -190,6 +190,9 @@ func (bg *BuildGraph) runSchedulerStep() error {
 	}
 
 	for _, meta := range bg.schedulerBuilds {
+		if meta.IsInstalled() {
+			continue
+		}
 		utils.PrintDebug("Processing overlay %s (scheduler job)...", meta.NameVersion())
 
 		// Collect dependency job IDs

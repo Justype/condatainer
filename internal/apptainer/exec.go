@@ -7,6 +7,75 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
+// DeduplicateBindPaths resolves, deduplicates, and filters child paths from bind directories.
+// It handles formats: "/path", "/path:/container", "/path:/container:ro"
+func DeduplicateBindPaths(paths []string) []string {
+	// First pass: resolve all paths and deduplicate by host path
+	seen := make(map[string]bool)
+	resolved := make([]string, 0, len(paths))
+	for _, bind := range paths {
+		if bind == "" {
+			continue
+		}
+		// Parse bind format
+		parts := strings.SplitN(bind, ":", 3)
+		hostPath := parts[0]
+
+		// Resolve host path to absolute and follow symlinks
+		absHostPath, err := filepath.Abs(hostPath)
+		if err != nil {
+			absHostPath = hostPath
+		}
+		if realPath, err := filepath.EvalSymlinks(absHostPath); err == nil {
+			absHostPath = realPath
+		}
+
+		// Skip if host path already seen
+		if seen[absHostPath] {
+			continue
+		}
+		seen[absHostPath] = true
+
+		// Reconstruct the bind string with resolved host path
+		var resolvedBind string
+		switch len(parts) {
+		case 3:
+			resolvedBind = absHostPath + ":" + parts[1] + ":" + parts[2]
+		case 2:
+			resolvedBind = absHostPath + ":" + parts[1]
+		default:
+			resolvedBind = absHostPath
+		}
+		resolved = append(resolved, resolvedBind)
+	}
+
+	// Second pass: filter out child paths covered by parent paths
+	filtered := make([]string, 0, len(resolved))
+	for _, bind := range resolved {
+		parts := strings.SplitN(bind, ":", 3)
+		hostPath := parts[0]
+
+		isChild := false
+		for _, otherBind := range resolved {
+			otherParts := strings.SplitN(otherBind, ":", 3)
+			otherHostPath := otherParts[0]
+			if hostPath == otherHostPath {
+				continue
+			}
+			rel, err := filepath.Rel(otherHostPath, hostPath)
+			if err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+				isChild = true
+				break
+			}
+		}
+		if !isChild {
+			filtered = append(filtered, bind)
+		}
+	}
+
+	return filtered
+}
+
 // ExecOptions contains options for executing commands in a container
 type ExecOptions struct {
 	Bind       []string // Bind mounts (format: "/host/path:/container/path")
@@ -26,38 +95,8 @@ func Exec(imagePath string, command []string, opts *ExecOptions) error {
 	args := []string{"exec"}
 
 	// Deduplicate and resolve bind mounts
-	seen := make(map[string]bool)
-	for _, bind := range opts.Bind {
-		// Parse bind format: "/host/path", "/host/path:/container/path", or "/host/path:/container/path:ro"
-		parts := strings.SplitN(bind, ":", 3)
-		hostPath := parts[0]
-
-		// Resolve host path to absolute and follow symlinks
-		absHostPath, err := filepath.Abs(hostPath)
-		if err != nil {
-			absHostPath = hostPath
-		}
-		if realPath, err := filepath.EvalSymlinks(absHostPath); err == nil {
-			absHostPath = realPath
-		}
-
-		// Reconstruct the bind string with resolved host path
-		var resolvedBind string
-		switch len(parts) {
-		case 3:
-			resolvedBind = absHostPath + ":" + parts[1] + ":" + parts[2]
-		case 2:
-			resolvedBind = absHostPath + ":" + parts[1]
-		default:
-			resolvedBind = absHostPath
-		}
-
-		// Skip if already seen
-		if seen[resolvedBind] {
-			continue
-		}
-		seen[resolvedBind] = true
-		args = append(args, "--bind", resolvedBind)
+	for _, bind := range DeduplicateBindPaths(opts.Bind) {
+		args = append(args, "--bind", bind)
 	}
 
 	// Add overlays

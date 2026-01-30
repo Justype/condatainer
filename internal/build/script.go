@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -59,6 +60,7 @@ func getAllBaseDirs() []string {
 
 	return dirs
 }
+
 func (s *ScriptBuildObject) IsDef() bool   { return false }
 func (s *ScriptBuildObject) IsShell() bool { return true }
 func (s *ScriptBuildObject) IsRef() bool   { return s.isRef }
@@ -242,10 +244,10 @@ fi
 	args = append(args, "--overlay", s.tmpOverlayPath)
 
 	// Bind all base directories (for accessing overlays and build scripts)
-	for _, baseDir := range getAllBaseDirs() {
-		if baseDir != "" {
-			args = append(args, "--bind", baseDir)
-		}
+	// Deduplicate and filter child paths
+	bindDirs := apptainer.DeduplicateBindPaths(getAllBaseDirs())
+	for _, baseDir := range bindDirs {
+		args = append(args, "--bind", baseDir)
 	}
 	args = append(args, baseImage, "/bin/bash", "-c", bashScript)
 
@@ -342,7 +344,7 @@ trap 'exit 130' INT TERM
 echo "Setting permissions..."
 find /cnt -type f -exec chmod ug+rw,o+r {} \;
 find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
-mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
+mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
 `, targetPath, s.ncpus, config.Global.Build.CompressArgs)
 	} else {
 		// For ref overlays: fix permissions and pack the directory
@@ -351,7 +353,7 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
 		}
 		bashScript = fmt.Sprintf(`
 trap 'exit 130' INT TERM
-mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M
+mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
 `, sourceDir, targetPath, s.ncpus, config.Global.Build.CompressArgs)
 	}
 
@@ -360,11 +362,9 @@ mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M
 		"--overlay", s.tmpOverlayPath,
 	}
 
-	// Bind all base directories
-	for _, baseDir := range getAllBaseDirs() {
-		if baseDir != "" {
-			args = append(args, "--bind", baseDir)
-		}
+	// Bind all base directories (deduplicated)
+	for _, baseDir := range apptainer.DeduplicateBindPaths(getAllBaseDirs()) {
+		args = append(args, "--bind", baseDir)
 	}
 
 	args = append(args, baseImage, "/bin/bash", "-c", bashScript)

@@ -1064,7 +1064,7 @@ class BuildObject:
             find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
 
             echo "Packing overlay to SquashFS..."
-            mksquashfs /cnt {os.path.abspath(self.target_overlay_path)} -processors {self.ncpus} -keep-as-directory {Config.compress_args} -b 1M
+            mksquashfs /cnt {os.path.abspath(self.target_overlay_path)} -processors {self.ncpus} -keep-as-directory {Config.compress_args} -b 1M &> /dev/null
             """
         ]
 
@@ -1240,7 +1240,7 @@ class BuildObject:
                 Config._base_image,
                 "/bin/bash", "-c",
                 f"""
-                mksquashfs {self.cnt_dir_path} {os.path.abspath(self.target_overlay_path)} -processors {self.ncpus} -keep-as-directory {Config.compress_args} -b 1M
+                mksquashfs {self.cnt_dir_path} {os.path.abspath(self.target_overlay_path)} -processors {self.ncpus} -keep-as-directory {Config.compress_args} -b 1M &> /dev/null
                 """
             ]
             Utils.print_debug(f"[BUILD] Creating overlay with command: {cmd_mksqf}")
@@ -1263,7 +1263,7 @@ class BuildObject:
                 echo "Setting permissions..."
                 find /cnt -type f -exec chmod ug+rw,o+r {{}} \\;
                 find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
-                mksquashfs /cnt {os.path.abspath(self.target_overlay_path)} -processors {self.ncpus} -keep-as-directory {Config.compress_args} -b 1M
+                mksquashfs /cnt {os.path.abspath(self.target_overlay_path)} -processors {self.ncpus} -keep-as-directory {Config.compress_args} -b 1M &> /dev/null
                 """
             ]
 
@@ -1644,7 +1644,7 @@ class CondaTainer_Create:
                 find /cnt -type d -exec chmod ug+rwx,o+rx {{}} \\;
 
                 echo "Packing overlay to SquashFS..."
-                mksquashfs /cnt {os.path.abspath(overlay_abs_path)} -processors {Config.NCPUS} -keep-as-directory {Config.compress_args} -b 1M
+                mksquashfs /cnt {os.path.abspath(overlay_abs_path)} -processors {Config.NCPUS} -keep-as-directory {Config.compress_args} -b 1M &> /dev/null
                 """
             ]
 

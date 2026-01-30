@@ -74,6 +74,6 @@ func Resize(imagePath string, newSizeMB int) error {
 		return err
 	}
 
-	utils.PrintMessage("Overlay image resized successfully to %d MiB: %s", newSizeMB, utils.StylePath(absPath))
+	utils.PrintMessage("Overlay image resized to %d MiB: %s", newSizeMB, utils.StylePath(absPath))
 	return nil
 }

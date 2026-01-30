@@ -136,6 +136,6 @@ func DumpSifToSquashfs(sifPath, outputPath string) error {
 		return fmt.Errorf("failed to set permissions on %s: %w", outputPath, err)
 	}
 
-	utils.PrintDebug("Successfully dumped SquashFS to %s", utils.StylePath(outputPath))
+	utils.PrintDebug("Dumped SquashFS to %s", utils.StylePath(outputPath))
 	return nil
 }
