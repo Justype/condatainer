@@ -393,13 +393,19 @@ Time duration format (for build.time):
 		// Set the value
 		viper.Set(key, value)
 
+		// Get the config path that will be updated
+		configPath, err := config.GetActiveOrUserConfigPath()
+		if err != nil {
+			utils.PrintError("Failed to get config path: %v", err)
+			os.Exit(1)
+		}
+
 		// Save to config file
 		if err := config.SaveConfig(); err != nil {
 			utils.PrintError("Failed to save config: %v", err)
 			os.Exit(1)
 		}
 
-		configPath, _ := config.GetUserConfigPath()
 		utils.PrintSuccess("Set %s = %s", utils.StyleInfo(key), utils.StyleInfo(value))
 		utils.PrintNote("Config saved to: %s", configPath)
 	},
@@ -527,7 +533,7 @@ var configEditCmd = &cobra.Command{
 	Short: "Edit config file in default editor",
 	Long:  "Open the configuration file in your default text editor ($EDITOR)",
 	Run: func(cmd *cobra.Command, args []string) {
-		configPath, err := config.GetUserConfigPath()
+		configPath, err := config.GetActiveOrUserConfigPath()
 		if err != nil {
 			utils.PrintError("Failed to get config path: %v", err)
 			os.Exit(1)

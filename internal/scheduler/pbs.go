@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Justype/condatainer/internal/config"
 )
 
 // PbsScheduler implements the Scheduler interface for PBS/Torque
@@ -307,23 +309,27 @@ func (p *PbsScheduler) parseSingleResource(res string, specs *ScriptSpecs) error
 func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) (string, error) {
 	specs := jobSpec.Specs
 
-	// Create output directory if specified
+	// Create output directory if specified (scripts still live in outputDir)
 	if outputDir != "" {
 		if err := os.MkdirAll(outputDir, 0775); err != nil {
 			return "", NewScriptCreationError(jobSpec.Name, outputDir, err)
 		}
 	}
 
-	// Create log directory if it doesn't exist
-	logDir := filepath.Join(outputDir, "log")
+	// Use configured logs directory (ensure it exists) instead of creating logs under outputDir
+	logDir := config.Global.LogsDir
+	if logDir == "" {
+		// fallback to outputDir/log if config not set
+		logDir = filepath.Join(outputDir, "log")
+	}
 	if err := os.MkdirAll(logDir, 0775); err != nil {
 		return "", NewScriptCreationError(jobSpec.Name, logDir, err)
 	}
 
-	// Always set log path to our standardized location
+	// Always set log path to our standardized location (absolute path to configured logs dir)
 	if jobSpec.Name != "" {
 		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		specs.Stdout = filepath.Join("log", fmt.Sprintf("%s.log", safeName))
+		specs.Stdout = filepath.Join(logDir, fmt.Sprintf("%s.log", safeName))
 	}
 
 	// Generate script filename

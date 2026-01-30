@@ -260,9 +260,24 @@ func GetConfigPathByLocation(location string) (string, error) {
 	}
 }
 
-// SaveConfig saves current Viper config to user config file
+// GetActiveOrUserConfigPath returns the currently active config file path,
+// or the user config path if no config is currently active.
+// This ensures that 'config set' updates the in-use config rather than
+// always creating/updating the user config.
+func GetActiveOrUserConfigPath() (string, error) {
+	// Check if there's an active config file
+	if activeConfig := viper.ConfigFileUsed(); activeConfig != "" {
+		return activeConfig, nil
+	}
+
+	// No active config - return user config path as default
+	return GetUserConfigPath()
+}
+
+// SaveConfig saves current Viper config to the active config file,
+// or to user config file if no config is currently active
 func SaveConfig() error {
-	configPath, err := GetUserConfigPath()
+	configPath, err := GetActiveOrUserConfigPath()
 	if err != nil {
 		return fmt.Errorf("failed to get config path: %w", err)
 	}

@@ -1,12 +1,15 @@
 package scheduler
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Justype/condatainer/internal/config"
 )
 
 // newTestSlurmScheduler creates a SLURM scheduler instance for testing
@@ -364,5 +367,48 @@ echo "Running job"
 	}
 	if timeCount != 1 {
 		t.Errorf("Expected exactly 1 --time directive, found %d:\n%s", timeCount, scriptContent)
+	}
+}
+
+// Test that scheduler uses configured logs directory instead of outputDir/log
+func TestSlurmCreateScriptUsesConfigLogsDir(t *testing.T) {
+	tmpScriptDir := t.TempDir()
+	tmpLogsDir := t.TempDir()
+
+	// Save and restore original value
+	orig := config.Global.LogsDir
+	defer func() { config.Global.LogsDir = orig }()
+
+	config.Global.LogsDir = tmpLogsDir
+
+	slurm := newTestSlurmScheduler()
+
+	jobSpec := &JobSpec{
+		Name:    "test/job",
+		Command: "echo 'hello'",
+		Specs: &ScriptSpecs{
+			RawFlags: []string{},
+			Ncpus:    1,
+		},
+	}
+
+	scriptPath, err := slurm.CreateScriptWithSpec(jobSpec, tmpScriptDir)
+	if err != nil {
+		t.Fatalf("CreateScriptWithSpec failed: %v", err)
+	}
+
+	// Ensure the log directory was created in config.Global.LogsDir
+	if info, err := os.Stat(tmpLogsDir); err != nil || !info.IsDir() {
+		t.Fatalf("Expected logs directory %s to exist and be a directory", tmpLogsDir)
+	}
+
+	// Ensure the generated script uses the absolute path
+	logPath := filepath.Join(tmpLogsDir, "test--job.log")
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("Failed to read generated script: %v", err)
+	}
+	if !strings.Contains(string(content), fmt.Sprintf("--output=%s", logPath)) {
+		t.Errorf("Generated script does not contain expected output path %s\nScript:\n%s", logPath, string(content))
 	}
 }
