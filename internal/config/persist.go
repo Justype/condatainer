@@ -97,7 +97,6 @@ func setDefaults() {
 
 	viper.SetDefault("apptainer_bin", "apptainer")
 	viper.SetDefault("scheduler_bin", "")
-	viper.SetDefault("scheduler_type", "")
 	viper.SetDefault("submit_job", true)
 	viper.SetDefault("logs_dir", "")
 
@@ -106,9 +105,9 @@ func setDefaults() {
 	viper.SetDefault("extra_base_dirs", []string{})
 
 	// Build config defaults
-	viper.SetDefault("build.default_cpus", 4)
-	viper.SetDefault("build.default_mem_mb", 8192)
-	viper.SetDefault("build.default_time", "2h")
+	viper.SetDefault("build.ncpus", 4)
+	viper.SetDefault("build.mem_mb", 8192)
+	viper.SetDefault("build.time", "2h")
 	viper.SetDefault("build.tmp_size_mb", 20480)
 	viper.SetDefault("build.compress_args", "") // Empty means auto-detect based on apptainer version
 	viper.SetDefault("build.overlay_type", "ext3")
@@ -195,6 +194,15 @@ type ConfigSearchPath struct {
 	InUse  bool   // Whether this is the active config file
 }
 
+// fileExists checks if a path exists and is a regular file (not a directory)
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.Mode().IsRegular()
+}
+
 // GetConfigSearchPaths returns all config search paths in priority order.
 // This matches the order used by InitViper.
 func GetConfigSearchPaths() []ConfigSearchPath {
@@ -204,33 +212,30 @@ func GetConfigSearchPaths() []ConfigSearchPath {
 	// 1. User config (XDG) - highest priority
 	if userConfigDir, err := os.UserConfigDir(); err == nil {
 		userPath := filepath.Join(userConfigDir, "condatainer", ConfigFilename+"."+ConfigType)
-		_, err := os.Stat(userPath)
 		paths = append(paths, ConfigSearchPath{
 			Path:   userPath,
 			Type:   "user",
-			Exists: err == nil,
+			Exists: fileExists(userPath),
 			InUse:  userPath == activeConfig,
 		})
 	}
 
 	// 2. Portable config
 	if portablePath := GetPortableConfigPath(); portablePath != "" {
-		_, err := os.Stat(portablePath)
 		paths = append(paths, ConfigSearchPath{
 			Path:   portablePath,
 			Type:   "portable",
-			Exists: err == nil,
+			Exists: fileExists(portablePath),
 			InUse:  portablePath == activeConfig,
 		})
 	}
 
 	// 3. System config
 	systemPath := GetSystemConfigPath()
-	_, err := os.Stat(systemPath)
 	paths = append(paths, ConfigSearchPath{
 		Path:   systemPath,
 		Type:   "system",
-		Exists: err == nil,
+		Exists: fileExists(systemPath),
 		InUse:  systemPath == activeConfig,
 	})
 
@@ -317,69 +322,49 @@ func DetectApptainerBin() string {
 }
 
 // DetectSchedulerBin attempts to find scheduler binary
-// Returns (binary_path, scheduler_type) if found
-func DetectSchedulerBin() (string, string) {
+// Returns the binary path if found, empty string otherwise
+func DetectSchedulerBin() string {
 	// Try SLURM first (most common in HPC)
 	if path, err := exec.LookPath("sbatch"); err == nil {
-		return path, "SLURM"
+		return path
 	}
 
 	// Try PBS/Torque
 	if path, err := exec.LookPath("qsub"); err == nil {
-		return path, "PBS"
+		return path
 	}
 
 	// Try LSF
 	if path, err := exec.LookPath("bsub"); err == nil {
-		return path, "LSF"
+		return path
 	}
 
-	// Try SGE (Sun Grid Engine)
-	if path, err := exec.LookPath("qsub"); err == nil {
-		// SGE also uses qsub, check for SGE-specific env
-		if _, exists := os.LookupEnv("SGE_ROOT"); exists {
-			return path, "SGE"
-		}
-	}
-
-	return "", ""
+	return ""
 }
 
-// AutoDetectAndSave auto-detects binaries and saves to config if needed
-// Returns true if config was updated
-func AutoDetectAndSave() (bool, error) {
-	updated := false
-
-	if !IsInsideContainer() {
-		apptainerBin := viper.GetString("apptainer_bin")
-		if !ValidateBinary(apptainerBin) {
-			detected := DetectApptainerBin()
-			if detected != "" {
-				viper.Set("apptainer_bin", detected)
-				updated = true
-			}
-		}
+// GetSchedulerTypeFromBin derives the scheduler type from the binary path/name.
+// The type is always inferred from the binary - it cannot be set independently.
+func GetSchedulerTypeFromBin(binPath string) string {
+	if binPath == "" {
+		return ""
 	}
 
-	// Check and detect scheduler binary
-	schedulerBin := viper.GetString("scheduler_bin")
-	if !ValidateBinary(schedulerBin) {
-		detectedBin, detectedType := DetectSchedulerBin()
-		if detectedBin != "" {
-			viper.Set("scheduler_bin", detectedBin)
-			viper.Set("scheduler_type", detectedType)
-			updated = true
-		}
-	}
+	baseName := filepath.Base(binPath)
 
-	// Save if anything was updated
-	if updated {
-		if err := SaveConfig(); err != nil {
-			return false, err
+	switch baseName {
+	case "sbatch", "srun", "salloc", "scancel", "squeue":
+		return "SLURM"
+	case "qsub", "qdel", "qstat":
+		// SGE also uses qsub, check for SGE-specific env
+		if _, exists := os.LookupEnv("SGE_ROOT"); exists {
+			return "SGE"
 		}
+		return "PBS"
+	case "bsub", "bjobs", "bkill":
+		return "LSF"
+	default:
+		return ""
 	}
-
-	return updated, nil
 }
 
 // ForceDetectAndSave always re-detects binaries from current environment and saves
@@ -410,14 +395,12 @@ func ForceDetectAndSaveTo(configPath string) (bool, error) {
 		}
 	}
 
-	// Always re-detect scheduler binary
-	detectedBin, detectedType := DetectSchedulerBin()
+	// Always re-detect scheduler binary (type is derived from binary, not stored)
+	detectedBin := DetectSchedulerBin()
 	if detectedBin != "" {
 		currentBin := viper.GetString("scheduler_bin")
-		currentType := viper.GetString("scheduler_type")
-		if currentBin != detectedBin || currentType != detectedType {
+		if currentBin != detectedBin {
 			viper.Set("scheduler_bin", detectedBin)
-			viper.Set("scheduler_type", detectedType)
 			updated = true
 		}
 	}
@@ -482,7 +465,7 @@ func LoadFromViper() {
 		// Auto-disable if no scheduler binary is available
 		schedulerBin := Global.SchedulerBin
 		if schedulerBin == "" {
-			schedulerBin, _ = DetectSchedulerBin()
+			schedulerBin = DetectSchedulerBin()
 		}
 		if schedulerBin == "" || !ValidateBinary(schedulerBin) {
 			Global.SubmitJob = false
@@ -499,17 +482,17 @@ func LoadFromViper() {
 	}
 
 	// Load build config from Viper
-	if defaultCPUs := viper.GetInt("build.default_cpus"); defaultCPUs > 0 {
-		Global.Build.DefaultCPUs = defaultCPUs
+	if ncpus := viper.GetInt("build.ncpus"); ncpus > 0 {
+		Global.Build.DefaultCPUs = ncpus
 	}
 
-	if defaultMemMB := viper.GetInt64("build.default_mem_mb"); defaultMemMB > 0 {
-		Global.Build.DefaultMemMB = defaultMemMB
+	if memMB := viper.GetInt64("build.mem_mb"); memMB > 0 {
+		Global.Build.DefaultMemMB = memMB
 	}
 
-	if defaultTime := viper.GetString("build.default_time"); defaultTime != "" {
+	if buildTime := viper.GetString("build.time"); buildTime != "" {
 		// Parse time duration from string (e.g., "2h", "30m", "1h30m", or "02:00:00")
-		if dur, err := utils.ParseDuration(defaultTime); err == nil {
+		if dur, err := utils.ParseDuration(buildTime); err == nil {
 			Global.Build.DefaultTime = dur
 		}
 	}

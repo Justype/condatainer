@@ -19,6 +19,54 @@ var (
 	initLocation string // user, portable, system, or a custom path
 )
 
+// configKeys is the list of known configuration keys for shell completion
+var configKeys = []string{
+	"logs_dir",
+	"apptainer_bin",
+	"scheduler_bin",
+	"submit_job",
+	"extra_base_dirs",
+	"build.ncpus",
+	"build.mem_mb",
+	"build.time",
+	"build.tmp_size_mb",
+	"build.compress_args",
+	"build.overlay_type",
+}
+
+// configKeysCompletion returns config keys for shell completion
+func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		// First arg: complete config keys
+		return configKeys, cobra.ShellCompDirectiveNoFileComp
+	}
+	if len(args) == 1 {
+		// Second arg: complete values based on the key
+		return configValueCompletion(args[0]), cobra.ShellCompDirectiveNoFileComp
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+// configValueCompletion returns suggested values for a config key
+func configValueCompletion(key string) []string {
+	switch key {
+	case "submit_job":
+		return []string{"true", "false"}
+	case "build.ncpus":
+		return []string{"4", "8", "16", "32"}
+	case "build.mem_mb":
+		return []string{"4096", "8192", "16384", "32768"}
+	case "build.time":
+		return []string{"1h", "2h", "4h", "8h"}
+	case "build.tmp_size_mb":
+		return []string{"10240", "20480", "40960"}
+	case "build.overlay_type":
+		return []string{"ext3", "squashfs"}
+	default:
+		return nil
+	}
+}
+
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage condatainer configuration",
@@ -189,8 +237,13 @@ Shows:
 		// Binary paths
 		fmt.Println(utils.StyleTitle("Binaries:"))
 		fmt.Printf("  apptainer_bin:  %s\n", viper.GetString("apptainer_bin"))
-		fmt.Printf("  scheduler_bin:  %s\n", viper.GetString("scheduler_bin"))
-		fmt.Printf("  scheduler_type: %s\n", viper.GetString("scheduler_type"))
+		schedulerBin := viper.GetString("scheduler_bin")
+		schedulerType := config.GetSchedulerTypeFromBin(schedulerBin)
+		if schedulerBin != "" {
+			fmt.Printf("  scheduler_bin:  %s (%s)\n", schedulerBin, schedulerType)
+		} else {
+			fmt.Printf("  scheduler_bin:  %s\n", schedulerBin)
+		}
 		fmt.Println()
 
 		// Runtime settings
@@ -206,9 +259,9 @@ Shows:
 
 		// Build settings
 		fmt.Println(utils.StyleTitle("Build Configuration:"))
-		fmt.Printf("  default_cpus:    %d\n", viper.GetInt("build.default_cpus"))
-		fmt.Printf("  default_mem_mb:  %d\n", viper.GetInt64("build.default_mem_mb"))
-		fmt.Printf("  default_time:    %s\n", viper.GetString("build.default_time"))
+		fmt.Printf("  ncpus:           %d\n", viper.GetInt("build.ncpus"))
+		fmt.Printf("  mem_mb:          %d\n", viper.GetInt64("build.mem_mb"))
+		fmt.Printf("  time:            %s\n", viper.GetString("build.time"))
 		fmt.Printf("  tmp_size_mb:     %d\n", viper.GetInt("build.tmp_size_mb"))
 		// Show actual compress_args (may be auto-detected based on apptainer version)
 		compressArgs := viper.GetString("build.compress_args")
@@ -266,9 +319,10 @@ var configGetCmd = &cobra.Command{
 
 Examples:
   condatainer config get apptainer_bin
-  condatainer config get build.default_cpus
+  condatainer config get build.ncpus
   condatainer config get submit_job`,
-	Args: cobra.ExactArgs(1),
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: configKeysCompletion,
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
 		value := viper.Get(key)
@@ -287,34 +341,33 @@ var configSetCmd = &cobra.Command{
 
 Examples:
   condatainer config set apptainer_bin /usr/bin/apptainer
-  condatainer config set build.default_cpus 8
-  condatainer config set build.default_time 4h
-  condatainer config set build.default_time 02:00:00
+  condatainer config set build.ncpus 8
+  condatainer config set build.time 4h
+  condatainer config set build.time 02:00:00
   condatainer config set submit_job false
 
-Time duration format (for build.default_time):
+Time duration format (for build.time):
   Go style:  2h, 30m, 1h30m, 90s
   HPC style: 02:00:00, 2:30:00, 1:30 (HH:MM:SS or HH:MM)`,
-	Args: cobra.ExactArgs(2),
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: configKeysCompletion,
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
 		value := args[1]
 
 		// Validate known keys
 		knownKeys := map[string]bool{
-			"base_dir":             true,
-			"logs_dir":             true,
-			"apptainer_bin":        true,
-			"scheduler_bin":        true,
-			"scheduler_type":       true,
-			"submit_job":           true,
-			"build.default_cpus":   true,
-			"build.default_mem_mb": true,
-			"build.default_time":   true,
-			"build.tmp_size_mb":    true,
-			"build.compress_args":  true,
-			"build.overlay_type":   true,
-			"extra_base_dirs":      true,
+			"logs_dir":            true,
+			"apptainer_bin":       true,
+			"scheduler_bin":       true,
+			"submit_job":          true,
+			"build.ncpus":         true,
+			"build.mem_mb":        true,
+			"build.time":          true,
+			"build.tmp_size_mb":   true,
+			"build.compress_args": true,
+			"build.overlay_type":  true,
+			"extra_base_dirs":     true,
 		}
 
 		// Array keys that should be edited via config edit or env var
@@ -329,7 +382,7 @@ Time duration format (for build.default_time):
 		}
 
 		// Validate value based on key type
-		if key == "build.default_time" {
+		if key == "build.time" {
 			if _, err := utils.ParseDuration(value); err != nil {
 				utils.PrintError("Invalid duration format: %s", value)
 				utils.PrintHint("Use format like: 2h, 30m, 1h30m, or 02:00:00")
@@ -432,10 +485,6 @@ By default, the location is chosen based on the installation:
 
 		// Check if apptainer was found
 		apptainerBin := viper.GetString("apptainer_bin")
-		if apptainerBin == "" || !config.ValidateBinary(apptainerBin) {
-			utils.PrintWarning("Cannot find apptainer. Please load apptainer module:")
-			utils.PrintHint("ml apptainer")
-		}
 
 		// Auto-detect compression based on apptainer version and save to config
 		detectedCompression := "-comp lz4" // default
@@ -465,7 +514,7 @@ By default, the location is chosen based on the installation:
 		fmt.Println(utils.StyleTitle("Detected settings:"))
 		fmt.Printf("  Apptainer: %s\n", viper.GetString("apptainer_bin"))
 		if schedulerBin := viper.GetString("scheduler_bin"); schedulerBin != "" {
-			fmt.Printf("  Scheduler: %s (%s)\n", schedulerBin, viper.GetString("scheduler_type"))
+			fmt.Printf("  Scheduler: %s (%s)\n", schedulerBin, config.GetSchedulerTypeFromBin(schedulerBin))
 		} else {
 			fmt.Printf("  Scheduler: %s\n", utils.StyleWarning("not found"))
 		}
@@ -631,23 +680,23 @@ var configValidateCmd = &cobra.Command{
 		}
 
 		// Check build config
-		defaultCPUs := viper.GetInt("build.default_cpus")
-		if defaultCPUs > 0 {
+		ncpus := viper.GetInt("build.ncpus")
+		if ncpus > 0 {
 			if !utils.QuietMode {
-				fmt.Printf("%s Build CPUs: %d\n", utils.StyleSuccess("✓"), defaultCPUs)
+				fmt.Printf("%s Build CPUs: %d\n", utils.StyleSuccess("✓"), ncpus)
 			}
 		} else {
-			fmt.Printf("%s Build CPUs must be > 0: %d\n", utils.StyleError("✗"), defaultCPUs)
+			fmt.Printf("%s Build CPUs must be > 0: %d\n", utils.StyleError("✗"), ncpus)
 			valid = false
 		}
 
-		defaultMemMB := viper.GetInt64("build.default_mem_mb")
-		if defaultMemMB > 0 {
+		memMB := viper.GetInt64("build.mem_mb")
+		if memMB > 0 {
 			if !utils.QuietMode {
-				fmt.Printf("%s Build Memory: %d MB\n", utils.StyleSuccess("✓"), defaultMemMB)
+				fmt.Printf("%s Build Memory: %d MB\n", utils.StyleSuccess("✓"), memMB)
 			}
 		} else {
-			fmt.Printf("%s Build Memory must be > 0: %d\n", utils.StyleError("✗"), defaultMemMB)
+			fmt.Printf("%s Build Memory must be > 0: %d\n", utils.StyleError("✗"), memMB)
 			valid = false
 		}
 

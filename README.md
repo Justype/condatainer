@@ -6,12 +6,12 @@
 
 [![Read the Docs](https://readthedocs.org/projects/condatainer/badge/?version=latest)](https://condatainer.readthedocs.io/en/latest/) [![GitHub Release](https://img.shields.io/github/v/release/Justype/condatainer)](https://github.com/Justype/condatainer/releases)
 
-**CondaTainer** is an HPC-oriented wrapper tool that leverages Apptainer, SquashFS, OverlayFS, and Micromamba to enable the easy management of environment files, software packages, reference data, and indices.
+**CondaTainer** is an HPC-oriented CLI that streamlines environment and data management by utilizing Apptainer, SquashFS, OverlayFS, and Micromamba.
 
 * **Inode Saver:** Packing 30k+ Conda files into a single image to satisfy inode quotas.
-* **Web-App Ready:** Out-of-the-box support for running *RStudio Server* and *code-server* on HPC.
+* **Web-App Ready:** Out-of-the-box support for running *RStudio Server*, *code-server* and more on HPC.
 * **Environment Isolation:** Supports read-only (`.sqf`) for production and writable (`.img`) for development.
-* **Slurm Integration:** Native compatibility with Slurm scheduler for batch job submission.
+* **Workload Manager Integration:** Native compatibility with Slurm for batch job submission.
 
 ## 🛠️ Installation
 
@@ -20,6 +20,18 @@ curl -fsSL https://get-condatainer.justype.net | bash
 ```
 
 You will be prompted to confirm the installation path (defaulting to `$SCRATCH/condatainer/` or `$HOME/condatainer/`). The script will also edit shell config.
+
+### ⚙️ Configuration
+
+After installation, run the following command to create a default configuration file:
+
+```bash
+source ~/.bashrc # or source your shell config
+module load apptainer # if apptainer is provided as a module
+condatainer config init
+```
+
+This step will let **CondaTainer** save the apptainer path for future use.
 
 ## 👀 Quick Look
 

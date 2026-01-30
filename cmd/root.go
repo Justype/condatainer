@@ -40,17 +40,7 @@ var rootCmd = &cobra.Command{
 			utils.PrintDebug("Error reading config file: %v", err)
 		}
 
-		// Step 3: Auto-detect binaries if needed and save to config
-		updated, err := config.AutoDetectAndSave()
-		if err != nil {
-			utils.PrintDebug("Failed to save config: %v", err)
-		} else if updated {
-			if configPath, err := config.GetUserConfigPath(); err == nil {
-				utils.PrintDebug("Auto-detected binaries saved to: %s", configPath)
-			}
-		}
-
-		// Step 4: Load detected values from Viper into Global config
+		// Step 3: Load config values into Global (with runtime detection fallback)
 		config.LoadFromViper()
 
 		// Warn if apptainer is still not accessible after auto-detection

@@ -2,6 +2,7 @@ package apptainer
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/utils"
@@ -29,6 +30,14 @@ type ApptainerError struct {
 // Unwrap allows errors.Is/As to see the underlying BaseErr
 func (e *ApptainerError) Unwrap() error {
 	return e.BaseErr
+}
+
+// ExitCode returns the exit code from the underlying command, or -1 if not available
+func (e *ApptainerError) ExitCode() int {
+	if exitErr, ok := e.BaseErr.(*exec.ExitError); ok {
+		return exitErr.ExitCode()
+	}
+	return -1
 }
 
 func (e *ApptainerError) Error() string {

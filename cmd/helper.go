@@ -31,9 +31,11 @@ Helper scripts come in two categories:
   - slurm: SLURM job submission scripts (auto-selected when scheduler available)
 
 Common helper scripts:
-  - code-server: VS Code server
+  - code-server: code server
   - rstudio-server: RStudio server
-  - vscode-tunnel: VS Code tunnel`,
+  - vscode-tunnel: VS Code tunnel
+
+Note: Helper commands (update and run) are not available inside a container.`,
 	Example: `  condatainer helper --update           # Update all helper scripts
   condatainer helper --update code-server  # Update specific script
   condatainer helper --path              # Show helper scripts directory
@@ -81,6 +83,12 @@ func completeHelperScripts(cmd *cobra.Command, args []string, toComplete string)
 }
 
 func runHelper(cmd *cobra.Command, args []string) error {
+	// Prevent helper commands when inside a container (except --path)
+	if config.IsInsideContainer() && !helperPath {
+		cmd.SilenceUsage = true
+		return fmt.Errorf("helper commands are not available inside a container")
+	}
+
 	// --- Path Mode ---
 	if helperPath {
 		if len(args) > 0 {
@@ -150,7 +158,14 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	helperCmd.Stdout = os.Stdout
 	helperCmd.Stderr = os.Stderr
 
-	return helperCmd.Run()
+	if err := helperCmd.Run(); err != nil {
+		// Propagate the exit code from the helper script
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		return err
+	}
+	return nil
 }
 
 // updateHelperScripts downloads and updates helper scripts from remote metadata

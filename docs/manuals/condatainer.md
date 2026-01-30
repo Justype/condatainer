@@ -713,7 +713,7 @@ condatainer config get <key>
 
 ```bash
 condatainer config get apptainer_bin
-condatainer config get build.default_cpus
+condatainer config get build.ncpus
 condatainer config get submit_job
 ```
 
@@ -729,8 +729,8 @@ condatainer config set <key> <value>
 
 ```bash
 condatainer config set apptainer_bin /usr/bin/apptainer
-condatainer config set build.default_cpus 8
-condatainer config set build.default_time 4h
+condatainer config set build.ncpus 8
+condatainer config set build.time 4h
 condatainer config set submit_job false
 ```
 
@@ -798,19 +798,18 @@ Configuration is loaded in the following order (highest to lowest priority):
 ```yaml
 base_dir: /path/to/data
 
-# Binary paths
+# Binary paths (scheduler type is auto-detected from binary)
 apptainer_bin: /usr/bin/apptainer
-scheduler_bin: /usr/bin/srun
-scheduler_type: slurm
+scheduler_bin: /usr/bin/sbatch
 
 # Submission settings
 submit_job: true
 
 # Build configuration
 build:
-  default_cpus: 8
-  default_mem_mb: 16384
-  default_time: 4h
+  ncpus: 8
+  mem_mb: 16384
+  time: 4h
   tmp_size_mb: 20480
   compress_args: "-comp zstd -Xcompression-level 8"
   overlay_type: squashfs
@@ -830,9 +829,9 @@ extra_base_dirs:
 | `CONDATAINER_APPTAINER_BIN` | Override apptainer binary path |
 | `CONDATAINER_SCHEDULER_BIN` | Override scheduler binary path |
 | `CONDATAINER_SUBMIT_JOB` | Override job submission setting (true/false) |
-| `CONDATAINER_BUILD_DEFAULT_CPUS` | Override default CPUs for builds |
-| `CONDATAINER_BUILD_DEFAULT_MEM_MB` | Override default memory for builds |
-| `CONDATAINER_BUILD_DEFAULT_TIME` | Override default build time |
+| `CONDATAINER_BUILD_NCPUS` | Override default CPUs for builds |
+| `CONDATAINER_BUILD_MEM_MB` | Override default memory for builds |
+| `CONDATAINER_BUILD_TIME` | Override default build time |
 | `CONDATAINER_EXTRA_BASE_DIRS` | Colon-separated list of extra base directories |
 
 ## Scheduler

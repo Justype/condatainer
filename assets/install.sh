@@ -9,8 +9,36 @@ YELLOW=$'\033[1;33m'
 RED=$'\033[0;31m'
 NC=$'\033[0m' # No Color
 
-# URLs
-URL_CONDATAINER="https://raw.githubusercontent.com/Justype/condatainer/main/assets/py-condatainer/condatainer"
+# Detect OS and Architecture
+detect_platform() {
+    local os arch binary_name
+
+    os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    arch=$(uname -m)
+
+    # Map architecture names
+    case "$arch" in
+        x86_64|amd64) arch="x86_64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) arch="$arch" ;;
+    esac
+
+    # Build binary name and check support
+    os_arch="${os}_${arch}"
+    case "${os_arch}" in
+        linux_x86_64) ;;
+        *)
+            echo -e "${RED}[ERROR]${NC} Unsupported platform: ${os} ${arch}"
+            echo -e "Currently only ${BLUE}linux x86_64${NC} is supported."
+            exit 1
+            ;;
+    esac
+
+    echo "$os_arch"
+}
+
+BINARY_NAME=condatainer_$(detect_platform)
+URL_CONDATAINER="https://github.com/Justype/condatainer/releases/latest/download/${BINARY_NAME}"
 
 DEFAULT_BASE="${SCRATCH:-$HOME}/condatainer"
 
@@ -78,10 +106,10 @@ download_file() {
     local url="$1"
     local dest="$2"
     echo -e "${BLUE}[INFO]${NC} Downloading $(basename "$dest")..."
-    if command -v curl >/dev/null 2>&1; then
-        curl -sL "$url" -o "$dest"
-    elif command -v wget >/dev/null 2>&1; then
+    if command -v wget >/dev/null 2>&1; then
         wget -qO "$dest" "$url"
+    elif command -v curl >/dev/null 2>&1; then
+        curl -sL "$url" -o "$dest"
     else
         echo -e "${RED}[ERROR]${NC} Neither curl nor wget found."
         exit 1
@@ -236,17 +264,23 @@ mkdir -p "$INSTALL_BIN"
 # Download condatainer
 download_file "$URL_CONDATAINER" "$INSTALL_BIN/condatainer"
 
-# Update RC with CONDATAINER block
-PATH_BLOCK="$MARKER_START
+# Update RC with CONDATAINER block (skip if installing to common PATH directories)
+SKIP_PATH_BLOCK=false
+case "$INSTALL_BIN" in
+    "$HOME/bin"|"$HOME/.local/bin")
+        SKIP_PATH_BLOCK=true
+        echo -e "${BLUE}[INFO]${NC} Skipping PATH configuration (${INSTALL_BIN} is typically already in PATH)"
+        ;;
+esac
+
+if [ "$SKIP_PATH_BLOCK" = false ]; then
+    PATH_BLOCK="$MARKER_START
 if [[ \":\$PATH:\" != *\":$INSTALL_BIN:\"* ]]; then
     export PATH=\"$INSTALL_BIN:\$PATH\"
 fi
-if command -v condatainer >/dev/null 2>&1; then
-    source <(condatainer completion)
-fi
 $MARKER_END"
-
-update_config_block "$RC_FILE" "$MARKER_START" "$MARKER_END" "$PATH_BLOCK" "CONDATAINER PATH"
+    update_config_block "$RC_FILE" "$MARKER_START" "$MARKER_END" "$PATH_BLOCK" "CONDATAINER PATH"
+fi
 
 echo -e "----------------------------------------"
 echo -e "${GREEN}Success!${NC}"

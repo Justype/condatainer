@@ -14,8 +14,6 @@ To install **CondaTainer**, run the following interactive script in your termina
 curl -fsSL https://get-condatainer.justype.net | bash
 ```
 
-## 📝 What to Expect
-
 The installation script is **interactive** and will guide you through the following:
 - **Installation Path**: You will be asked to confirm or set the installation path (defaults to `$SCRATCH/condatainer/` or `$HOME/condatainer/`).
 - **Shell Configuration**: The script will automatically **edit your shell configuration** (e.g., `.bashrc`) so that the `condatainer` command is ready to use.
@@ -34,14 +32,46 @@ Then, you can verify it is working by listing available recipes:
 condatainer avail
 ```
 
-## ⌨️ Shell Completion
+## ⚙️ Initialize Configuration
 
-To make the tool even more user-friendly, the **shell completion** feature is automatically set up during installation.
-
-By default, the installation script adds the following line to your shell configuration file (e.g., `~/.bashrc`):
+Run the following command to create a default configuration file:
 
 ```bash
+condatainer config init
+```
+
+If your system has Apptainer modules instead of system-wide binaries, load the module first:
+
+```bash
+ml apptainer
+condatainer config init
+```
+
+Then the condatainer will save the detected apptainer path. So next time you start a new terminal, it will work without loading the module again.
+
+If apptainer version >= 1.4, zstd compression will be used by default. Otherwise, lz4 compression will be used.
+
+## ⌨️ Shell Completion
+
+CondaTainer supports shell completion for **Bash**, **Zsh**, and **Fish**. The shell is auto-detected from your `$SHELL` environment variable, so you can simply run `condatainer completion` without specifying a shell.
+
+### Quick Setup
+
+Add one of the following lines to your shell configuration file:
+
+**Bash** (`~/.bashrc`): (must have `bash-completion` installed)
+```bash
 source <(condatainer completion)
+```
+
+**Zsh** (`~/.zshrc`):
+```zsh
+source <(condatainer completion)
+```
+
+**Fish** (`~/.config/fish/config.fish`):
+```fish
+condatainer completion | source
 ```
 
 ## 🗑️ Uninstallation
@@ -53,6 +83,6 @@ If you need to remove **CondaTainer** from your system, you can do so by reversi
 
 ```bash
 # >>> CONDATAINER >>>
-condatainer configs
+condatainer settings
 # <<< CONDATAINER <<<
 ```
