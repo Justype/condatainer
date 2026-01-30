@@ -314,8 +314,7 @@ fi
 		utils.PrintDebug("Failed to set permissions on %s: %v", targetOverlayPath, err)
 	}
 
-	utils.PrintMessage("Finished overlay %s", styledOverlay)
-	utils.PrintDebug("Overlay created at %s. Cleaning up...", utils.StylePath(targetOverlayPath))
+	utils.PrintSuccess("Finished overlay %s", utils.StylePath(targetOverlayPath))
 
 	// Cleanup
 	s.Cleanup(false)
@@ -346,7 +345,10 @@ find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
 mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
 `, targetPath, s.ncpus, config.Global.Build.CompressArgs)
 	} else {
-		// For ref overlays: just pack the directory
+		// For ref overlays: fix permissions and pack the directory
+		if err := utils.FixPermissionsDefault(sourceDir); err != nil {
+			utils.PrintWarning("Failed to fix permissions on %s: %v", sourceDir, err)
+		}
 		bashScript = fmt.Sprintf(`
 trap 'exit 130' INT TERM
 mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M

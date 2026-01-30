@@ -127,9 +127,7 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 		utils.PrintDebug("Failed to set permissions on %s: %v", targetOverlayPath, err)
 	}
 
-	utils.PrintMessage("Finished overlay %s", styledOverlay)
-	utils.PrintDebug("Overlay %s created at %s. Removing temporary overlay...",
-		filepath.Base(targetOverlayPath), utils.StylePath(targetOverlayPath))
+	utils.PrintSuccess("Finished overlay %s", utils.StylePath(targetOverlayPath))
 
 	// Mark this overlay as .def-built in the whitelist
 	UpdateDefBuiltWhitelist(d.nameVersion)

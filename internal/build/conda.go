@@ -208,8 +208,7 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
 		utils.PrintDebug("Failed to set permissions on %s: %v", c.targetOverlayPath, err)
 	}
 
-	utils.PrintDebug("Overlay %s created at %s. Removing temporary overlay...",
-		filepath.Base(c.targetOverlayPath), utils.StylePath(c.targetOverlayPath))
+	utils.PrintSuccess("Finished overlay %s", utils.StylePath(c.targetOverlayPath))
 
 	// Cleanup temp files
 	c.Cleanup(false)
