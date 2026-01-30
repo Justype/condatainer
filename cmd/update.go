@@ -16,7 +16,8 @@ import (
 )
 
 var (
-	updateYes bool
+	updateYes   bool
+	updateForce bool
 )
 
 var updateCmd = &cobra.Command{
@@ -28,7 +29,8 @@ var updateCmd = &cobra.Command{
 This command downloads the latest binary from the GitHub repository
 and replaces the current executable. A backup of the current version is not created.`,
 	Example: `  condatainer self-update       # Update with confirmation prompt
-  condatainer self-update -y    # Update without confirmation`,
+  condatainer self-update -y    # Update without confirmation
+  condatainer self-update -f    # Force update even if already on latest version`,
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runUpdate,
 }
@@ -36,6 +38,7 @@ and replaces the current executable. A backup of the current version is not crea
 func init() {
 	rootCmd.AddCommand(updateCmd)
 	updateCmd.Flags().BoolVarP(&updateYes, "yes", "y", false, "Skip confirmation prompt")
+	updateCmd.Flags().BoolVarP(&updateForce, "force", "f", false, "Force update")
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
@@ -51,8 +54,8 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to resolve symlink: %w", err)
 	}
 
-	// Ask for confirmation unless --yes flag is provided
-	if !updateYes {
+	// Ask for confirmation unless --yes or --force flag is provided
+	if !updateYes && !updateForce {
 		fmt.Print("Are you sure you want to download and replace the current binary from GitHub releases? [y/N]: ")
 		var confirm string
 		fmt.Scanln(&confirm)
@@ -112,7 +115,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	currentNormalized := strings.TrimPrefix(currentVersion, "v")
 	latestNormalized := strings.TrimPrefix(latestVersion, "v")
 
-	if currentNormalized == latestNormalized {
+	if currentNormalized == latestNormalized && !updateForce {
 		utils.PrintSuccess("Already on the latest version %s!", utils.StyleNumber(latestVersion))
 		return nil
 	}
@@ -157,8 +160,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to replace executable: %w", err)
 	}
 
-	utils.PrintSuccess("condatainer updated successfully to %s!", utils.StyleNumber(release.TagName))
-	utils.PrintNote("The new version will be used on the next run.")
+	utils.PrintSuccess("condatainer updated to %s!", utils.StyleNumber(release.TagName))
 
 	return nil
 }
