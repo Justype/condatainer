@@ -335,28 +335,24 @@ func (b *BaseBuildObject) parseScriptMetadata() error {
 		}
 	}
 
-	// Only parse scheduler specs if job submission is enabled
-	if !config.Global.SubmitJob {
-		return nil
-	}
-
-	// Use scheduler package helper to read specs
+	// Always parse scheduler specs to get ncpus from script (for both local and scheduler builds)
 	specs, err := scheduler.ReadScriptSpecsFromPath(b.buildSource)
 	if err != nil {
 		return err
 	}
 
-	// No scheduler active or no specs found
-	if specs == nil {
-		return nil
+	// If specs found, use ncpus from script
+	if specs != nil && specs.Ncpus > 0 {
+		b.ncpus = specs.Ncpus
 	}
 
-	if specs.Ncpus <= 0 {
-		specs.Ncpus = defaultBuildNcpus()
+	// Only store full scriptSpecs if job submission is enabled (for generating job scripts)
+	if config.Global.SubmitJob && specs != nil {
+		if specs.Ncpus <= 0 {
+			specs.Ncpus = defaultBuildNcpus()
+		}
+		b.scriptSpecs = specs
 	}
-
-	b.scriptSpecs = specs
-	b.ncpus = specs.Ncpus
 
 	return nil
 }
