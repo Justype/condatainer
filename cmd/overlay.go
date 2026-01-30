@@ -429,7 +429,7 @@ func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) erro
 			return fmt.Errorf("failed to get absolute path of environment file: %w", err)
 		}
 		utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(absEnvFile))
-		mmCreateCmd = []string{"mm-create", "-f", absEnvFile, "-y", "-q"}
+		mmCreateCmd = []string{"/usr/bin/micromamba", "-r", "$CNT_CONDA_PREFIX", "create", "-f", absEnvFile, "-y", "-q"}
 	} else {
 		utils.PrintMessage("Initializing minimal conda environment with small package (zlib)...")
 		mmCreateCmd = []string{"mm-create", "zlib", "-y", "-q"}

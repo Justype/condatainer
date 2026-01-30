@@ -112,7 +112,10 @@ func (c *CondaBuildObject) Build(buildDeps bool) error {
 	if strings.HasSuffix(c.buildSource, ".yml") || strings.HasSuffix(c.buildSource, ".yaml") {
 		// Mode 3: YAML file (-p prefix -f environment.yml)
 		// The conda-meta folder will be automatically created by micromamba
-		absFilePath := filepath.Clean(c.buildSource)
+		absFilePath, err := filepath.Abs(c.buildSource)
+		if err != nil {
+			return fmt.Errorf("failed to get absolute path for %s: %w", c.buildSource, err)
+		}
 		bindPaths = append(bindPaths, filepath.Dir(absFilePath))
 		installCmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/%s -f %s", c.nameVersion, absFilePath)
 		utils.PrintDebug("Building SquashFS overlay at %s from YAML file %s",

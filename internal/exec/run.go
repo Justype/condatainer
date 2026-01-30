@@ -152,7 +152,7 @@ func Run(options Options) error {
 		envNotes["CNT_CONDA_PREFIX"] = "/ext3/env"
 	}
 
-	if utils.IsInteractiveShell() {
+	if utils.IsInteractiveShell() && !options.HideOutput && !options.HidePrompt {
 		if len(envNotes) > 0 {
 			utils.PrintMessage("Overlay envs:")
 			sortedNotes := make([]string, 0, len(envNotes))

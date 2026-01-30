@@ -11,6 +11,7 @@ type Options struct {
 	Fakeroot    bool
 	WritableImg bool
 	HideOutput  bool
+	HidePrompt  bool
 
 	BaseImage    string
 	ApptainerBin string

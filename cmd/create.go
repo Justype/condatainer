@@ -210,7 +210,7 @@ func runCreateWithName(packages []string) {
 			utils.PrintError("File must be .yml or .yaml for conda environments")
 			os.Exit(1)
 		}
-		buildSource = filepath.Clean(createFile)
+		buildSource, _ = filepath.Abs(createFile)
 	} else if len(packages) > 0 {
 		// Multiple packages mode - join with commas
 		buildSource = strings.Join(packages, ",")
@@ -234,7 +234,7 @@ func runCreateWithName(packages []string) {
 // Example: condatainer create -p myprefix -f build.sh
 func runCreateWithPrefix() {
 	imagesDir := getWritableImagesDir()
-	absPrefix := filepath.Clean(createPrefix)
+	absPrefix, _ := filepath.Abs(createPrefix)
 
 	if createFile == "" {
 		utils.PrintError("--prefix requires --file to be specified")
@@ -251,7 +251,8 @@ func runCreateWithPrefix() {
 	// Determine file type and create appropriate BuildObject
 	if strings.HasSuffix(createFile, ".yml") || strings.HasSuffix(createFile, ".yaml") {
 		// YAML conda environment - use NewCondaObjectWithSource
-		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), filepath.Clean(createFile), imagesDir, config.GetWritableTmpDir())
+		absFile, _ := filepath.Abs(createFile)
+		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, imagesDir, config.GetWritableTmpDir())
 		if err != nil {
 			utils.PrintError("Failed to create build object: %v", err)
 			os.Exit(1)
@@ -263,7 +264,8 @@ func runCreateWithPrefix() {
 	} else if strings.HasSuffix(createFile, ".sh") || strings.HasSuffix(createFile, ".bash") || strings.HasSuffix(createFile, ".def") {
 		// Shell script or apptainer def file
 		isApptainer := strings.HasSuffix(createFile, ".def")
-		bo, err := build.FromExternalSource(absPrefix, filepath.Clean(createFile), isApptainer, imagesDir, config.GetWritableTmpDir())
+		absFile, _ := filepath.Abs(createFile)
+		bo, err := build.FromExternalSource(absPrefix, absFile, isApptainer, imagesDir, config.GetWritableTmpDir())
 		if err != nil {
 			utils.PrintError("Failed to create build object from %s: %v", createFile, err)
 			os.Exit(1)
@@ -297,7 +299,7 @@ func runCreateFromSource() {
 
 	var targetPrefix string
 	if createPrefix != "" {
-		targetPrefix = filepath.Clean(createPrefix)
+		targetPrefix, _ = filepath.Abs(createPrefix)
 	} else {
 		normalizedName := utils.NormalizeNameVersion(createName)
 		targetPrefix = filepath.Join(imagesDir, normalizedName)
@@ -306,7 +308,7 @@ func runCreateFromSource() {
 	source := createSource
 	isRemote := strings.Contains(source, "://")
 	if !isRemote {
-		source = filepath.Clean(source)
+		source, _ = filepath.Abs(source)
 		if !utils.FileExists(source) {
 			utils.PrintError("Source %s not found", utils.StylePath(source))
 			os.Exit(1)

@@ -46,7 +46,7 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 		overlayPath = path
 	} else {
 		// Try as external file path
-		overlayPath = filepath.Clean(overlayArg)
+		overlayPath, _ = filepath.Abs(overlayArg)
 		if !utils.FileExists(overlayPath) {
 			return fmt.Errorf("overlay file %s not found", utils.StylePath(overlayPath))
 		}
