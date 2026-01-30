@@ -1,6 +1,7 @@
 package apptainer
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/utils"
@@ -24,9 +25,39 @@ func Exec(imagePath string, command []string, opts *ExecOptions) error {
 
 	args := []string{"exec"}
 
-	// Add bind mounts
+	// Deduplicate and resolve bind mounts
+	seen := make(map[string]bool)
 	for _, bind := range opts.Bind {
-		args = append(args, "--bind", bind)
+		// Parse bind format: "/host/path", "/host/path:/container/path", or "/host/path:/container/path:ro"
+		parts := strings.SplitN(bind, ":", 3)
+		hostPath := parts[0]
+
+		// Resolve host path to absolute and follow symlinks
+		absHostPath, err := filepath.Abs(hostPath)
+		if err != nil {
+			absHostPath = hostPath
+		}
+		if realPath, err := filepath.EvalSymlinks(absHostPath); err == nil {
+			absHostPath = realPath
+		}
+
+		// Reconstruct the bind string with resolved host path
+		var resolvedBind string
+		switch len(parts) {
+		case 3:
+			resolvedBind = absHostPath + ":" + parts[1] + ":" + parts[2]
+		case 2:
+			resolvedBind = absHostPath + ":" + parts[1]
+		default:
+			resolvedBind = absHostPath
+		}
+
+		// Skip if already seen
+		if seen[resolvedBind] {
+			continue
+		}
+		seen[resolvedBind] = true
+		args = append(args, "--bind", resolvedBind)
 	}
 
 	// Add overlays
