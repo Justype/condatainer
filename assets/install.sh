@@ -234,6 +234,14 @@ fi
 if [[ "$INSTALL_BASE" != /* ]]; then INSTALL_BASE="$PWD/$INSTALL_BASE"; fi
 INSTALL_BIN="$INSTALL_BASE/bin"
 
+# Determine whether to skip adding PATH block (skip when installing to common user bin dirs)
+HOME_BIN_INSTALL=false
+case "$INSTALL_BIN" in
+    "$HOME/bin"|"$HOME/.local/bin")
+        HOME_BIN_INSTALL=true
+        ;;
+esac
+
 # Target exists check
 if [ "$TARGET_FROM_EXISTING" != "true" ] && [ -d "$INSTALL_BASE" ]; then
     if ! confirm_action_no "Target '$INSTALL_BASE' exists. Continue installation?"; then
@@ -259,21 +267,17 @@ if ! confirm_action "Proceed?"; then echo "Aborted."; exit 0; fi
 echo -e "\nStarting installation..."
 
 # Prepare Directory
-mkdir -p "$INSTALL_BIN"
+if [ "$HOME_BIN_INSTALL" = true ]; then
+    mkdir -p "$INSTALL_BIN"
+else
+    mkdir -p -m 0775 "$INSTALL_BIN"
+fi
 
 # Download condatainer
 download_file "$URL_CONDATAINER" "$INSTALL_BIN/condatainer"
 
 # Update RC with CONDATAINER block (skip if installing to common PATH directories)
-SKIP_PATH_BLOCK=false
-case "$INSTALL_BIN" in
-    "$HOME/bin"|"$HOME/.local/bin")
-        SKIP_PATH_BLOCK=true
-        echo -e "${BLUE}[INFO]${NC} Skipping PATH configuration (${INSTALL_BIN} is typically already in PATH)"
-        ;;
-esac
-
-if [ "$SKIP_PATH_BLOCK" = false ]; then
+if [ "$HOME_BIN_INSTALL" = false ]; then
     PATH_BLOCK="$MARKER_START
 if [[ \":\$PATH:\" != *\":$INSTALL_BIN:\"* ]]; then
     export PATH=\"$INSTALL_BIN:\$PATH\"
