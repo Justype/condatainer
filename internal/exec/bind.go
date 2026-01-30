@@ -15,6 +15,10 @@ func BindPaths(paths ...string) []string {
 		if path == "" {
 			continue
 		}
+		// Check if path exists before adding
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
 		if resolved := resolvePath(path); resolved != "" {
 			absPaths = append(absPaths, resolved)
 		}
@@ -70,11 +74,6 @@ func BindPaths(paths ...string) []string {
 		baseDirs = append(baseDirs, userDir)
 	}
 
-	// Legacy baseDir
-	if config.Global.BaseDir != "" {
-		baseDirs = append(baseDirs, config.Global.BaseDir)
-	}
-
 	// Add base directories with appropriate flags
 	for _, dir := range baseDirs {
 		if resolved := resolvePath(dir); resolved != "" {
@@ -121,10 +120,13 @@ func BindPaths(paths ...string) []string {
 	}
 
 	// also bind the condatainer executable to /usr/bin/condatainer to help with nested calls
-	execPath, err := os.Executable()
-	if err == nil && execPath != "" {
-		bindingPath := execPath + ":/usr/bin/condatainer:ro"
-		filtered = append(filtered, bindingPath)
+	// If is portable, the bin dir is already bound via PATH modification
+	if !config.IsPortable() {
+		execPath, err := os.Executable()
+		if err == nil && execPath != "" {
+			bindingPath := execPath + ":/usr/bin/condatainer:ro"
+			filtered = append(filtered, bindingPath)
+		}
 	}
 
 	return filtered

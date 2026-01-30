@@ -184,18 +184,20 @@ func runExec(cmd *cobra.Command, args []string) error {
 		commandFinal = []string{"bash"}
 	}
 
+	// Resolve user-specified base image if provided
+	var baseImageResolved string
 	if execBaseImage != "" {
 		// If it's an existing file path, use it directly
 		// Otherwise, try to resolve it as an overlay name
 		if utils.FileExists(execBaseImage) {
-			config.Global.BaseImage = execBaseImage
+			baseImageResolved = execBaseImage
 		} else {
 			resolvedBase, err := exec.ResolveOverlayPaths([]string{execBaseImage})
 			if err == nil && len(resolvedBase) > 0 {
-				config.Global.BaseImage = resolvedBase[0]
+				baseImageResolved = resolvedBase[0]
 			} else {
 				// Keep the original value (might be an absolute path)
-				config.Global.BaseImage = execBaseImage
+				baseImageResolved = execBaseImage
 			}
 		}
 	}
@@ -216,7 +218,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		EnvSettings:  execEnvSettings,
 		BindPaths:    execBindPaths,
 		Fakeroot:     execFakeroot,
-		BaseImage:    config.Global.BaseImage,
+		BaseImage:    baseImageResolved, // Empty string triggers GetBaseImage() in ensureDefaults()
 		ApptainerBin: config.Global.ApptainerBin,
 	}
 

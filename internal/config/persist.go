@@ -47,22 +47,7 @@ func InitViper() error {
 		if filepath.Base(exeDir) == "bin" {
 			parentDir := filepath.Dir(exeDir)
 			// Exclude common bin directories that aren't dedicated installations
-			home, _ := os.UserHomeDir()
-			excludedParents := []string{
-				home,                          // $HOME/bin
-				filepath.Join(home, ".local"), // $HOME/.local/bin
-				"/usr",                        // /usr/bin
-				"/usr/local",                  // /usr/local/bin
-				"/opt",                        // /opt/bin
-			}
-			isExcluded := false
-			for _, excluded := range excludedParents {
-				if parentDir == excluded {
-					isExcluded = true
-					break
-				}
-			}
-			if !isExcluded {
+			if !isNonPortableParent(parentDir) {
 				viper.AddConfigPath(parentDir)
 			}
 		}
@@ -92,9 +77,6 @@ func InitViper() error {
 
 // setDefaults sets default values for all config keys
 func setDefaults() {
-	// Base directory: empty means use auto-detection ($SCRATCH/condatainer or $HOME/condatainer)
-	viper.SetDefault("base_dir", "")
-
 	viper.SetDefault("apptainer_bin", "apptainer")
 	viper.SetDefault("scheduler_bin", "")
 	viper.SetDefault("submit_job", true)
@@ -145,19 +127,8 @@ func GetPortableConfigPath() string {
 	parentDir := filepath.Dir(exeDir)
 
 	// Exclude common bin directories that aren't dedicated installations
-	home, _ := os.UserHomeDir()
-	excludedParents := []string{
-		home,                          // $HOME/bin
-		filepath.Join(home, ".local"), // $HOME/.local/bin
-		"/usr",                        // /usr/bin
-		"/usr/local",                  // /usr/local/bin
-		"/opt",                        // /opt/bin
-	}
-
-	for _, excluded := range excludedParents {
-		if parentDir == excluded {
-			return ""
-		}
+	if isNonPortableParent(parentDir) {
+		return ""
 	}
 
 	return filepath.Join(parentDir, ConfigFilename+"."+ConfigType)
@@ -189,7 +160,7 @@ func GetSystemConfigPath() string {
 // ConfigSearchPath represents a config file location with metadata
 type ConfigSearchPath struct {
 	Path   string // Full path to config file
-	Type   string // Type: "portable", "user", "user-legacy", "system", "cwd"
+	Type   string // Type: "portable", "user", "system", "cwd"
 	Exists bool   // Whether the file exists
 	InUse  bool   // Whether this is the active config file
 }
@@ -446,18 +417,6 @@ func SetCompressArgsInConfigTo(compressArgs, configPath string) error {
 
 // LoadFromViper loads config from Viper into Global struct
 func LoadFromViper() {
-	// Load base_dir from config if set (overrides auto-detection)
-	if baseDir := viper.GetString("base_dir"); baseDir != "" {
-		// Expand environment variables in the path
-		baseDir = os.ExpandEnv(baseDir)
-		if absBaseDir, err := filepath.Abs(baseDir); err == nil {
-			baseDir = absBaseDir
-		}
-		// Update BaseDir (derived paths are computed via helper functions)
-		Global.BaseDir = baseDir
-		Global.BaseImage = filepath.Join(baseDir, "images", "base_image.sif")
-	}
-
 	// Update binary paths from Viper, with fallback to detection
 	if bin := viper.GetString("apptainer_bin"); bin != "" && ValidateBinary(bin) {
 		Global.ApptainerBin = bin

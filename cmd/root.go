@@ -57,9 +57,10 @@ var rootCmd = &cobra.Command{
 			utils.PrintDebug("Debug mode enabled")
 			utils.PrintDebug("CondaTainer Version: %s", utils.StyleInfo(config.VERSION))
 			utils.PrintDebug("Executable: %s", exe)
-			utils.PrintDebug("Base Directory: %s", config.Global.BaseDir)
-			utils.PrintDebug("Images Directory: %s", config.GetImagesDir())
-			utils.PrintDebug("Base Image: %s", config.Global.BaseImage)
+			if writableDir, _ := config.GetWritableImagesDir(); writableDir != "" {
+				utils.PrintDebug("Writable Images Directory: %s", writableDir)
+			}
+			utils.PrintDebug("Base Image: %s", config.GetBaseImage())
 			utils.PrintDebug("Apptainer Binary: %s", config.Global.ApptainerBin)
 			if config.Global.SchedulerBin != "" {
 				utils.PrintDebug("Scheduler Binary: %s", config.Global.SchedulerBin)

@@ -57,9 +57,6 @@ func getAllBaseDirs() []string {
 	// User dir
 	addIfExists(config.GetUserDataDir())
 
-	// Legacy base dir
-	addIfExists(config.Global.BaseDir)
-
 	return dirs
 }
 func (s *ScriptBuildObject) IsDef() bool   { return false }

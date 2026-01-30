@@ -10,7 +10,7 @@ import (
 )
 
 // DataPaths holds the search paths for data directories.
-// Search order: extra → portable → scratch → user → legacy (first match wins for lookups).
+// Search order: extra → portable → scratch → user (first match wins for lookups).
 // Write operations go to the first writable path in the same order.
 type DataPaths struct {
 	ImagesDirs        []string // Search paths for images
@@ -144,6 +144,24 @@ func GetPortableDataDir() string {
 	return ""
 }
 
+// IsPortable returns true if the current installation is portable (not in standard user locations).
+// This is useful for determining if nested PATH updates should include the installation's bin directory.
+func IsPortable() bool {
+	return GetPortableDataDir() != ""
+}
+
+// GetPortableBinDir returns the bin directory of a portable installation, or empty string if not portable.
+// This is typically used to add the installation's bin directory to PATH for nested usage.
+func GetPortableBinDir() string {
+	if portableDir := GetPortableDataDir(); portableDir != "" {
+		binDir := filepath.Join(portableDir, "bin")
+		if stat, err := os.Stat(binDir); err == nil && stat.IsDir() {
+			return binDir
+		}
+	}
+	return ""
+}
+
 // isStandardUserPath checks if a path is under standard user directories
 // (home dir config/data locations that should not be treated as portable).
 func isStandardUserPath(path string) bool {
@@ -175,6 +193,27 @@ func isStandardUserPath(path string) bool {
 	return false
 }
 
+// isNonPortableParent checks if a directory is a common parent directory
+// that should not be treated as a portable installation root.
+// This includes $HOME, $HOME/.local, /usr, /usr/local, and /opt.
+func isNonPortableParent(dir string) bool {
+	home, _ := os.UserHomeDir()
+	excludedParents := []string{
+		home,                          // $HOME/bin
+		filepath.Join(home, ".local"), // $HOME/.local/bin
+		"/usr",                        // /usr/bin
+		"/usr/local",                  // /usr/local/bin
+		"/opt",                        // /opt/bin
+	}
+
+	for _, excluded := range excludedParents {
+		if dir == excluded {
+			return true
+		}
+	}
+	return false
+}
+
 // InitDataPaths initializes GlobalDataPaths based on environment and config.
 // This should be called after LoadDefaults and LoadFromViper.
 func InitDataPaths() {
@@ -186,7 +225,7 @@ func InitDataPaths() {
 }
 
 // buildImageSearchPaths builds the search paths for images.
-// Priority: extra_base_dirs → portable → scratch → user → legacy
+// Priority: extra_base_dirs → portable → scratch → user
 func buildImageSearchPaths() []string {
 	var paths []string
 	seen := make(map[string]bool)
@@ -227,16 +266,11 @@ func buildImageSearchPaths() []string {
 		addPath(filepath.Join(userDir, "images"))
 	}
 
-	// 4. Legacy baseDir from config (backward compatibility)
-	if Global.BaseDir != "" {
-		addPath(filepath.Join(Global.BaseDir, "images"))
-	}
-
 	return paths
 }
 
 // buildScriptSearchPaths builds the search paths for scripts (build-scripts or helper-scripts).
-// Priority: extra_base_dirs → portable → scratch → user → legacy
+// Priority: extra_base_dirs → portable → scratch → user
 func buildScriptSearchPaths(subdir string) []string {
 	var paths []string
 	seen := make(map[string]bool)
@@ -275,11 +309,6 @@ func buildScriptSearchPaths(subdir string) []string {
 	// 3. User directory (personal storage - fallback)
 	if userDir := GetUserDataDir(); userDir != "" {
 		addPath(filepath.Join(userDir, subdir))
-	}
-
-	// 4. Legacy baseDir from config (backward compatibility)
-	if Global.BaseDir != "" {
-		addPath(filepath.Join(Global.BaseDir, subdir))
 	}
 
 	return paths
@@ -608,11 +637,6 @@ func categorizeSource(dir string, index int) string {
 	}
 	if userDir != "" && strings.HasPrefix(dir, userDir) {
 		return "user"
-	}
-
-	// Legacy baseDir paths
-	if Global.BaseDir != "" && strings.HasPrefix(dir, Global.BaseDir) {
-		return "legacy"
 	}
 
 	// Fallback based on index (matching the search order)

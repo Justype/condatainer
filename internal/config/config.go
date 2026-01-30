@@ -33,12 +33,10 @@ type Config struct {
 
 	// Directory paths
 	ProgramDir string
-	BaseDir    string
 	LogsDir    string
 
 	// Binary paths
 	ApptainerBin string
-	BaseImage    string
 	SchedulerBin string // Optional: path to sbatch/scheduler binary (auto-detected if empty)
 
 	// Build configuration
@@ -54,26 +52,15 @@ func LoadDefaults(executablePath string) {
 		programDir = absProgDir
 	}
 
-	// Determine base directory with priority:
-	// 1. $SCRATCH/condatainer (if $SCRATCH is set)
-	// 2. $HOME/condatainer (fallback)
-	baseDir := detectBaseDir()
-
-	if absBaseDir, err := filepath.Abs(baseDir); err == nil {
-		baseDir = absBaseDir
-	}
-
 	Global = Config{
 		Debug:     false,
 		SubmitJob: true,
 		Version:   VERSION,
 
 		ProgramDir: programDir,
-		BaseDir:    baseDir,
 		LogsDir:    filepath.Join(os.Getenv("HOME"), "logs"),
 
 		ApptainerBin: detectApptainerBin(),
-		BaseImage:    filepath.Join(baseDir, "images", "base_image.sif"),
 		SchedulerBin: "", // Auto-detect scheduler binary (empty = search PATH)
 
 		Build: BuildConfig{
@@ -110,29 +97,6 @@ func IsInsideContainer() bool {
 	return false
 }
 
-// detectBaseDir determines the base directory for condatainer data.
-// Priority:
-//  1. $SCRATCH/condatainer (if $SCRATCH is set, common on HPC systems)
-//  2. $HOME/condatainer (fallback)
-func detectBaseDir() string {
-	// Try $SCRATCH first (common on HPC systems)
-	if scratch := os.Getenv("SCRATCH"); scratch != "" {
-		return filepath.Join(scratch, "condatainer")
-	}
-
-	// Fallback to $HOME/condatainer
-	if home := os.Getenv("HOME"); home != "" {
-		return filepath.Join(home, "condatainer")
-	}
-
-	// Last resort: use current working directory
-	if cwd, err := os.Getwd(); err == nil {
-		return filepath.Join(cwd, "condatainer")
-	}
-
-	return "condatainer"
-}
-
 // detectApptainerBin tries to find the apptainer binary, with special handling for containers
 func detectApptainerBin() string {
 	// If we're inside a container, apptainer might be in a different location
@@ -161,42 +125,25 @@ func detectApptainerBin() string {
 	return "apptainer"
 }
 
-// GetImagesDir returns the images directory derived from BaseDir
-func GetImagesDir() string {
-	return filepath.Join(Global.BaseDir, "images")
-}
-
-// GetBuildScriptsDir returns the build-scripts directory derived from BaseDir
-func GetBuildScriptsDir() string {
-	return filepath.Join(Global.BaseDir, "build-scripts")
-}
-
-// GetHelperScriptsDir returns the helper-scripts directory derived from BaseDir
-func GetHelperScriptsDir() string {
-	return filepath.Join(Global.BaseDir, "helper-scripts")
-}
-
-// GetTmpDir returns the tmp directory derived from BaseDir
-func GetTmpDir() string {
-	return filepath.Join(Global.BaseDir, "tmp")
-}
-
 // GetBaseImage returns the path to base_image.sif, searching all image directories.
-// If user has explicitly set Global.BaseImage (via --base-image flag), returns that.
-// Otherwise searches all directories and returns the first found, or falls back to default path.
+// Searches all directories and returns the first found, or falls back to first writable path.
 func GetBaseImage() string {
-	// If explicitly set by user (e.g., via --base-image flag), use that
-	if Global.BaseImage != "" && Global.BaseImage != filepath.Join(Global.BaseDir, "images", "base_image.sif") {
-		return Global.BaseImage
-	}
-
 	// Search all image directories
 	if found := FindBaseImage(); found != "" {
 		return found
 	}
 
-	// Fall back to user's images directory (default location)
-	return filepath.Join(Global.BaseDir, "images", "base_image.sif")
+	// Fall back to first writable path (where base image would be downloaded/created)
+	if writePath, err := GetBaseImageWritePath(); err == nil {
+		return writePath
+	}
+
+	// Last resort: use user data dir (backward compatibility)
+	if userDir := GetUserDataDir(); userDir != "" {
+		return filepath.Join(userDir, "images", "base_image.sif")
+	}
+
+	return "base_image.sif"
 }
 
 // isWritableDir checks if a directory is writable by trying to create a test file
@@ -254,6 +201,6 @@ func GetWritableTmpDir() string {
 		}
 	}
 
-	// Fall back to base dir (should always be writable)
-	return filepath.Join(Global.BaseDir, "tmp")
+	// Last resort: current directory
+	return "tmp"
 }

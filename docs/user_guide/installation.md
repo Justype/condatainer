@@ -53,9 +53,7 @@ If apptainer version >= 1.4, zstd compression will be used by default. Otherwise
 
 ## ⌨️ Shell Completion
 
-CondaTainer supports shell completion for **Bash** and **Zsh**. The shell is auto-detected from your `$SHELL`.
-
-### Quick Setup
+CondaTainer supports shell completion for **Bash** and **Zsh**.
 
 Add one of the following lines to your shell configuration file:
 

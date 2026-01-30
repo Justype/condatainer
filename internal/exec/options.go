@@ -18,11 +18,7 @@ type Options struct {
 
 func (o Options) ensureDefaults() Options {
 	if o.BaseImage == "" {
-		if config.Global.BaseImage != "" {
-			o.BaseImage = config.Global.BaseImage
-		} else {
-			o.BaseImage = config.GetBaseImage()
-		}
+		o.BaseImage = config.GetBaseImage()
 	}
 	if o.ApptainerBin == "" {
 		o.ApptainerBin = config.Global.ApptainerBin

@@ -83,9 +83,8 @@ Configuration file priority (highest to lowest):
 Data directory priority (for read/write operations):
   1. Extra base directories (CONDATAINER_EXTRA_BASE_DIRS or config)
   2. Portable directory (group/shared, from executable location)
-  3. Scratch directory ($SCRATCH/condatainer, HPC systems)
-  4. User directory (~/.local/share/condatainer)
-  5. Legacy base_dir (from config file)`,
+  3. User scratch directory ($SCRATCH/condatainer, HPC systems)
+  4. User XDG directory (~/.local/share/condatainer)`,
 }
 
 var configShowCmd = &cobra.Command{
@@ -202,18 +201,6 @@ Shows:
 			pathIndex++
 		}
 
-		// Legacy baseDir
-		if config.Global.BaseDir != "" {
-			status := ""
-			if _, err := os.Stat(config.Global.BaseDir); err == nil {
-				if isWritable(config.Global.BaseDir) {
-					status = " " + utils.StyleSuccess("(writable)")
-				} else {
-					status = " " + utils.StyleWarning("(read-only)")
-				}
-			}
-			fmt.Printf("  %d. [legacy] %s%s\n", pathIndex, config.Global.BaseDir, status)
-		}
 		fmt.Println()
 
 		// Show all settings
@@ -222,11 +209,6 @@ Shows:
 
 		// Directories
 		fmt.Println(utils.StyleTitle("Directories:"))
-		baseDir := viper.GetString("base_dir")
-		if baseDir == "" {
-			baseDir = config.Global.BaseDir + " (auto-detected)"
-		}
-		fmt.Printf("  base_dir:       %s\n", baseDir)
 		logsDir := viper.GetString("logs_dir")
 		if logsDir == "" {
 			logsDir = config.Global.LogsDir + " (default)"
@@ -290,7 +272,6 @@ Shows:
 		// Show environment variable overrides
 		fmt.Println(utils.StyleTitle("Environment Variable Overrides:"))
 		envVars := []string{
-			"CONDATAINER_BASE_DIR",
 			"CONDATAINER_LOGS_DIR",
 			"CONDATAINER_APPTAINER_BIN",
 			"CONDATAINER_SCHEDULER_BIN",
@@ -575,9 +556,8 @@ var configPathsCmd = &cobra.Command{
 Search paths are checked in priority order (first match wins for reads):
   1. Extra base directories (highest priority)
   2. Portable (group/shared directory)
-  3. Scratch (HPC large storage, $SCRATCH/condatainer)
-  4. User (personal directory, ~/.local/share/condatainer)
-  5. Legacy (base_dir from config)
+  3. Scratch (user HPC large storage, $SCRATCH/condatainer)
+  4. User XDG directory (~/.local/share/condatainer)
 
 Write operations use the first writable directory in the same order.
 Portable is preferred for group/shared use, user is the fallback.`,
@@ -640,7 +620,7 @@ Portable is preferred for group/shared use, user is the fallback.`,
 			fmt.Printf("  Scratch:  %s\n", utils.StyleWarning("$SCRATCH not set"))
 		}
 		if userDir := config.GetUserDataDir(); userDir != "" {
-			fmt.Printf("  User:     %s\n", userDir)
+			fmt.Printf("  User XDG: %s\n", userDir)
 		}
 	},
 }

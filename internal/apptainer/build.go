@@ -26,7 +26,6 @@ func Build(imagePath, defFile string, opts *BuildOptions) error {
 
 	args := []string{"build"}
 
-	// Always add fakeroot (required for non-root builds on HPC)
 	args = append(args, "--fakeroot")
 
 	// Add optional flags

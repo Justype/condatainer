@@ -15,12 +15,12 @@ import (
 )
 
 var (
-	runWritableImg  bool
-	runBaseImage    string
-	runAutoInstall  bool
-	runEnvSettings  []string
-	runBindPaths    []string
-	runFakeroot     bool
+	runWritableImg bool
+	runBaseImage   string
+	runAutoInstall bool
+	runEnvSettings []string
+	runBindPaths   []string
+	runFakeroot    bool
 )
 
 var runCmd = &cobra.Command{
@@ -96,11 +96,6 @@ func runScript(cmd *cobra.Command, args []string) error {
 	if len(scriptArgs) > 0 {
 		utils.PrintDebug("[RUN] Additional script arguments found: %v", scriptArgs)
 		applyScriptArgs(scriptArgs)
-	}
-
-	// Apply base image if specified
-	if runBaseImage != "" {
-		config.Global.BaseImage = runBaseImage
 	}
 
 	// Get dependencies from script
@@ -212,7 +207,7 @@ export -f module ml
 		EnvSettings:  runEnvSettings,
 		BindPaths:    runBindPaths,
 		Fakeroot:     runFakeroot,
-		BaseImage:    config.Global.BaseImage,
+		BaseImage:    runBaseImage, // Empty string triggers GetBaseImage() in ensureDefaults()
 		ApptainerBin: config.Global.ApptainerBin,
 	}
 

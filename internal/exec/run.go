@@ -14,7 +14,7 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// Run executes a command inside a configured Apptainer container, mirroring the legacy CondaTainer logic.
+// Run executes a command inside a configured Apptainer container.
 func Run(options Options) error {
 	options = options.ensureDefaults()
 
@@ -66,6 +66,15 @@ func Run(options Options) error {
 	}
 
 	pathEnv := buildPathEnv(overlays)
+
+	// For nested usage: if this is a portable installation, prepend its bin directory to PATH
+	// This allows nested condatainer calls to find the same installation
+	if config.IsPortable() {
+		if portableBin := config.GetPortableBinDir(); portableBin != "" {
+			pathEnv = portableBin + ":" + pathEnv
+		}
+	}
+
 	envList = append(envList,
 		fmt.Sprintf("PATH=%s", pathEnv),
 		"LC_ALL=C.UTF-8",
@@ -115,12 +124,10 @@ func Run(options Options) error {
 	}
 	envList = append(envList, imgEnv...)
 
-	bindPaths := BindPaths(config.Global.BaseDir)
+	bindPaths := BindPaths() // BindPaths already collects all base directories internally
 	if len(options.BindPaths) > 0 {
 		bindPaths = append(bindPaths, options.BindPaths...)
 	}
-
-	bindPaths = ensureBindPath(bindPaths, config.Global.BaseDir)
 
 	if utils.DebugMode {
 		utils.PrintDebug("[EXEC]Exec overlays: %v", overlays)
@@ -170,7 +177,7 @@ func Run(options Options) error {
 		Env:        envList,
 		Fakeroot:   fakeroot,
 		HideOutput: options.HideOutput,
-		Additional: apptainer.DetectGPUFlags(),
+		Additional: []string{},
 	}
 
 	if err := apptainer.Exec(options.BaseImage, options.Command, opts); err != nil {
@@ -194,6 +201,7 @@ func formatOverlayMount(path string, writable bool) string {
 
 func buildPathEnv(overlays []string) string {
 	paths := []string{"/usr/sbin", "/usr/bin"}
+
 	for _, overlay := range overlays {
 		name := strings.TrimSuffix(filepath.Base(overlay), filepath.Ext(overlay))
 		normalized := utils.NormalizeNameVersion(name)
@@ -214,21 +222,6 @@ func buildPathEnv(overlays []string) string {
 		}
 		paths = append([]string{relative}, paths...)
 	}
-	return strings.Join(paths, ":")
-}
 
-func ensureBindPath(paths []string, candidate string) []string {
-	if candidate == "" {
-		return paths
-	}
-	resolved := resolvePath(candidate)
-	if resolved == "" {
-		return paths
-	}
-	for _, existing := range paths {
-		if existing == resolved {
-			return paths
-		}
-	}
-	return append(paths, resolved)
+	return strings.Join(paths, ":")
 }
