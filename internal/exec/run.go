@@ -181,12 +181,6 @@ func Run(options Options) error {
 	}
 
 	if err := apptainer.Exec(options.BaseImage, options.Command, opts); err != nil {
-		// Propagate the exit code from the container command
-		if appErr, ok := err.(*apptainer.ApptainerError); ok {
-			if code := appErr.ExitCode(); code >= 0 {
-				os.Exit(code)
-			}
-		}
 		return err
 	}
 	return nil

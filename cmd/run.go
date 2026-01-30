@@ -211,7 +211,16 @@ export -f module ml
 		ApptainerBin: config.Global.ApptainerBin,
 	}
 
-	return execpkg.Run(options)
+	if err := execpkg.Run(options); err != nil {
+		// Propagate exit code from container command
+		if appErr, ok := err.(*apptainer.ApptainerError); ok {
+			if code := appErr.ExitCode(); code >= 0 {
+				os.Exit(code)
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 // applyScriptArgs parses #CNT arguments and applies them to run options

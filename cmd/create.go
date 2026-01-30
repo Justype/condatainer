@@ -233,8 +233,9 @@ func runCreateWithName(packages []string) {
 // Example: condatainer create -p myprefix -f environment.yml
 // Example: condatainer create -p myprefix -f build.sh
 func runCreateWithPrefix() {
-	imagesDir := getWritableImagesDir()
 	absPrefix, _ := filepath.Abs(createPrefix)
+	// Use the directory from prefix path as output directory
+	outputDir := filepath.Dir(absPrefix)
 
 	if createFile == "" {
 		utils.PrintError("--prefix requires --file to be specified")
@@ -252,7 +253,7 @@ func runCreateWithPrefix() {
 	if strings.HasSuffix(createFile, ".yml") || strings.HasSuffix(createFile, ".yaml") {
 		// YAML conda environment - use NewCondaObjectWithSource
 		absFile, _ := filepath.Abs(createFile)
-		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, imagesDir, config.GetWritableTmpDir())
+		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, config.GetWritableTmpDir())
 		if err != nil {
 			utils.PrintError("Failed to create build object: %v", err)
 			os.Exit(1)
@@ -265,14 +266,14 @@ func runCreateWithPrefix() {
 		// Shell script or apptainer def file
 		isApptainer := strings.HasSuffix(createFile, ".def")
 		absFile, _ := filepath.Abs(createFile)
-		bo, err := build.FromExternalSource(absPrefix, absFile, isApptainer, imagesDir, config.GetWritableTmpDir())
+		bo, err := build.FromExternalSource(absPrefix, absFile, isApptainer, outputDir, config.GetWritableTmpDir())
 		if err != nil {
 			utils.PrintError("Failed to create build object from %s: %v", createFile, err)
 			os.Exit(1)
 		}
 
 		buildObjects := []build.BuildObject{bo}
-		graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
+		graph, err := build.NewBuildGraph(buildObjects, outputDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
 		if err != nil {
 			utils.PrintError("Failed to create build graph: %v", err)
 			os.Exit(1)

@@ -2877,7 +2877,7 @@ class CondaTainer_Overlay:
         CondaTainer_Exec.is_img_writable = True
         if args.file:
             Utils.print_message(f"Initializing conda environment using {os.path.abspath(args.file)}...")
-            if CondaTainer_Exec.exec_command([overlay_path], ["/usr/bin/micromamba", "-r", "$CNT_CONDA_PREFIX", "create", "-f", os.path.abspath(args.file), "-y"], is_fakeroot=is_fakeroot, capture_output=True):
+            if CondaTainer_Exec.exec_command([overlay_path], ["/usr/bin/micromamba", "-r", "/ext3/env", "create", "-n", "base", "-f", os.path.abspath(args.file), "-y"], is_fakeroot=is_fakeroot, capture_output=True):
                 CondaTainer_Exec.exec_command([overlay_path], ["mm-clean", "-a", "-y"], is_fakeroot=is_fakeroot, capture_output=True)
                 Utils.print_success(f"Conda env is created inside {Utils.blue_text(overlay_path)}.")
             else:

@@ -403,6 +403,12 @@ func init() {
 func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) error {
 	// Validate environment file if provided
 	if envFile != "" {
+		absEnvFile, err := filepath.Abs(envFile)
+		if err != nil {
+			return fmt.Errorf("failed to get absolute path of environment file: %w", err)
+		}
+		envFile = absEnvFile
+
 		if !utils.FileExists(envFile) {
 			return fmt.Errorf("environment file %s not found", envFile)
 		}
@@ -424,12 +430,8 @@ func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) erro
 
 	var mmCreateCmd []string
 	if envFile != "" {
-		absEnvFile, err := filepath.Abs(envFile)
-		if err != nil {
-			return fmt.Errorf("failed to get absolute path of environment file: %w", err)
-		}
-		utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(absEnvFile))
-		mmCreateCmd = []string{"/usr/bin/micromamba", "-r", "$CNT_CONDA_PREFIX", "create", "-f", absEnvFile, "-y", "-q"}
+		utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(envFile))
+		mmCreateCmd = []string{"/usr/bin/micromamba", "-r", "/ext3/env", "create", "-n", "base", "-f", envFile, "-y", "-q"}
 	} else {
 		utils.PrintMessage("Initializing minimal conda environment with small package (zlib)...")
 		mmCreateCmd = []string{"mm-create", "zlib", "-y", "-q"}
@@ -445,6 +447,7 @@ func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) erro
 	}
 
 	if err := exec.Run(opts); err != nil {
+		os.Remove(absOverlayPath)
 		return fmt.Errorf("failed to run mm-create: %w", err)
 	}
 

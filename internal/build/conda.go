@@ -173,7 +173,10 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
 		"--overlay", c.tmpOverlayPath,
 	}
 
-	// Add bind paths for YAML files
+	// Always bind the target overlay directory so mksquashfs can write there
+	bindPaths = append(bindPaths, filepath.Dir(c.targetOverlayPath))
+
+	// Add bind paths
 	for _, path := range bindPaths {
 		args = append(args, "--bind", path)
 	}

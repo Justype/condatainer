@@ -222,7 +222,16 @@ func runExec(cmd *cobra.Command, args []string) error {
 		ApptainerBin: config.Global.ApptainerBin,
 	}
 
-	return exec.Run(options)
+	if err := exec.Run(options); err != nil {
+		// Propagate exit code from container command
+		if appErr, ok := err.(*apptainer.ApptainerError); ok {
+			if code := appErr.ExitCode(); code >= 0 {
+				os.Exit(code)
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func execHelpRequested(args []string) bool {
