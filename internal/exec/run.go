@@ -180,6 +180,15 @@ func Run(options Options) error {
 		Additional: []string{},
 	}
 
+	// Pass through stdin if requested (for interactive build scripts)
+	if options.PassThruStdin {
+		if options.Stdin != nil {
+			opts.Stdin = options.Stdin
+		} else {
+			opts.Stdin = os.Stdin
+		}
+	}
+
 	if err := apptainer.Exec(options.BaseImage, options.Command, opts); err != nil {
 		return err
 	}

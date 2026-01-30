@@ -1,6 +1,10 @@
 package exec
 
-import "github.com/Justype/condatainer/internal/config"
+import (
+	"io"
+
+	"github.com/Justype/condatainer/internal/config"
+)
 
 // Options configures how CondaTainer executes a command inside an Apptainer container.
 type Options struct {
@@ -15,6 +19,13 @@ type Options struct {
 
 	BaseImage    string
 	ApptainerBin string
+
+	// PassThruStdin allows the container command to read from stdin
+	// This is needed for build scripts that require interactive input (download links, passwords, etc.)
+	PassThruStdin bool
+
+	// Stdin specifies a custom input reader (optional, defaults to os.Stdin if PassThruStdin=true)
+	Stdin io.Reader
 }
 
 func (o Options) ensureDefaults() Options {

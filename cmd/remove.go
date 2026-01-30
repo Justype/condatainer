@@ -120,16 +120,18 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		fmt.Printf(" - %s\n", highlighted)
 	}
 
-	// Ask for confirmation
+	// Ask for confirmation (skip if --yes flag is set)
 	fmt.Print("\n")
-	fmt.Print("Are you sure? Cannot be undone. [y/N]: ")
-	var choice string
-	fmt.Scanln(&choice)
-	choice = strings.ToLower(strings.TrimSpace(choice))
+	if !utils.ShouldAnswerYes() {
+		fmt.Print("Are you sure? Cannot be undone. [y/N]: ")
+		var choice string
+		fmt.Scanln(&choice)
+		choice = strings.ToLower(strings.TrimSpace(choice))
 
-	if choice != "y" && choice != "yes" {
-		utils.PrintNote("Cancelled")
-		return nil
+		if choice != "y" && choice != "yes" {
+			utils.PrintNote("Cancelled")
+			return nil
+		}
 	}
 
 	// Remove overlays (only if writable)

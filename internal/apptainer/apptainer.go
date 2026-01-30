@@ -119,7 +119,7 @@ func CheckZstdSupport(currentVersion string) bool {
 // imagePath: optional, helpful for logging which container failed
 // capture: whether to capture stdout/stderr for storing on the error.
 func runApptainer(op string, imagePath string, capture bool, args ...string) error {
-	return runApptainerWithOutput(op, imagePath, capture, false, args...)
+	return runApptainerWithOutput(op, imagePath, capture, false, nil, args...)
 }
 
 // runApptainerWithOutput executes an apptainer command with control over output handling.
@@ -128,9 +128,15 @@ func runApptainer(op string, imagePath string, capture bool, args ...string) err
 // imagePath: optional, helpful for logging which container failed
 // capture: whether to capture stdout/stderr for storing on the error.
 // hideOutput: whether to redirect stdout/stderr to /dev/null
-func runApptainerWithOutput(op string, imagePath string, capture bool, hideOutput bool, args ...string) error {
+func runApptainerWithOutput(op string, imagePath string, capture bool, hideOutput bool, stdin io.Reader, args ...string) error {
 	cmd := exec.Command(apptainerCmd, args...)
-	cmd.Stdin = os.Stdin
+
+	// Set stdin - use provided stdin or default to os.Stdin
+	if stdin != nil {
+		cmd.Stdin = stdin
+	} else {
+		cmd.Stdin = os.Stdin
+	}
 
 	// For build operations, unset SINGULARITY_BIND and APPTAINER_BIND to prevent
 	// mount conflicts during container build (e.g., when %post tries to access bound paths)

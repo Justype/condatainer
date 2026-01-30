@@ -3,11 +3,11 @@ package build
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -93,12 +93,26 @@ func (c *CondaBuildObject) String() string {
 //  5. Pack to SquashFS
 //  6. Cleanup
 func (c *CondaBuildObject) Build(buildDeps bool) error {
+	// Ensure target overlay path is absolute
+	targetOverlayPath := c.targetOverlayPath
+	if absTarget, err := filepath.Abs(targetOverlayPath); err == nil {
+		targetOverlayPath = absTarget
+	}
+
+	styledOverlay := utils.StyleName(filepath.Base(targetOverlayPath))
+
 	// Check if already exists
-	if _, err := os.Stat(c.targetOverlayPath); err == nil {
-		utils.PrintDebug("Overlay %s already exists at %s. Skipping creation.",
-			filepath.Base(c.targetOverlayPath), utils.StylePath(c.targetOverlayPath))
+	if _, err := os.Stat(targetOverlayPath); err == nil {
+		utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
+			styledOverlay, utils.StylePath(targetOverlayPath))
 		return nil
 	}
+
+	buildMode := "local"
+	if c.RequiresScheduler() {
+		buildMode = "sbatch"
+	}
+	utils.PrintMessage("Building overlay %s (%s build)", styledOverlay, utils.StyleAction(buildMode))
 
 	// Create temporary overlay
 	if err := c.CreateTmpOverlay(false); err != nil {
@@ -118,8 +132,7 @@ func (c *CondaBuildObject) Build(buildDeps bool) error {
 		}
 		bindPaths = append(bindPaths, filepath.Dir(absFilePath))
 		installCmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/%s -f %s", c.nameVersion, absFilePath)
-		utils.PrintDebug("Building SquashFS overlay at %s from YAML file %s",
-			utils.StylePath(c.targetOverlayPath), utils.StylePath(absFilePath))
+		utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleCommand("environment.yml"))
 	} else if c.buildSource != "" {
 		// Mode 2: Multiple packages (-n name pkg1 pkg2 ...)
 		// buildSource contains comma-separated package specs like "nvim,nodejs"
@@ -130,22 +143,13 @@ func (c *CondaBuildObject) Build(buildDeps bool) error {
 		}
 		installCmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/%s %s",
 			c.nameVersion, strings.Join(packages, " "))
-		utils.PrintDebug("Building SquashFS overlay at %s with packages: %s",
-			utils.StylePath(c.targetOverlayPath), strings.Join(packages, ", "))
+		utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleCommand(fmt.Sprintf("micromamba (%s)", strings.Join(packages, ", "))))
 	} else {
 		// Mode 1: Single package (name/version)
 		installCmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/%s %s=%s",
 			c.nameVersion, c.packageName, c.packageVersion)
-		utils.PrintDebug("Building SquashFS overlay at %s with package: %s=%s",
-			utils.StylePath(c.targetOverlayPath), c.packageName, c.packageVersion)
+		utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleCommand(fmt.Sprintf("micromamba (%s=%s)", c.packageName, c.packageVersion)))
 	}
-
-	// Build the apptainer exec command using config values
-	baseImage := config.GetBaseImage()
-	apptainerBin := config.Global.ApptainerBin
-
-	utils.PrintDebug("Using base image: %s", baseImage)
-	utils.PrintDebug("Using apptainer binary: %s", apptainerBin)
 
 	// Build the bash script to run inside container
 	bashScript := fmt.Sprintf(`
@@ -166,36 +170,27 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
 		c.targetOverlayPath, c.ncpus, config.Global.Build.CompressArgs,
 	)
 
-	// Build exec command args
-	args := []string{
-		"exec",
-		"--env", "TMPDIR=/ext3/tmp",
-		"--overlay", c.tmpOverlayPath,
-	}
-
 	// Always bind the target overlay directory so mksquashfs can write there
 	bindPaths = append(bindPaths, filepath.Dir(c.targetOverlayPath))
 
-	// Add bind paths
-	for _, path := range bindPaths {
-		args = append(args, "--bind", path)
+	// Create exec options for building the conda package
+	opts := exec.Options{
+		BaseImage:     config.GetBaseImage(),
+		ApptainerBin:  config.Global.ApptainerBin,
+		Overlays:      []string{c.tmpOverlayPath},
+		BindPaths:     bindPaths,
+		EnvSettings:   []string{"TMPDIR=/ext3/tmp"},
+		Command:       []string{"/bin/bash", "-c", bashScript},
+		HidePrompt:    true,
+		WritableImg:   true,
+		PassThruStdin: true,
 	}
 
-	args = append(args,
-		baseImage,
-		"/bin/bash", "-c",
-		bashScript,
-	)
+	utils.PrintDebug("[BUILD] Creating overlay for %s with options: overlays=%v, bindPaths=%v",
+		c.nameVersion, opts.Overlays, opts.BindPaths)
 
-	cmd := exec.Command(apptainerBin, args...)
-	utils.PrintDebug("[BUILD] Creating overlay with command: %s %s", apptainerBin, strings.Join(args, " "))
-
-	// Run the build - show output in real-time
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	// Use signal-aware runner to ensure cleanup runs on Ctrl+C
-	if err := runCommandWithSignalHandling(cmd); err != nil {
+	// Run the build using exec.Run
+	if err := exec.Run(opts); err != nil {
 		c.Cleanup(true)
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled

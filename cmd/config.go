@@ -448,11 +448,17 @@ By default, the location is chosen based on the installation:
 		// Check if config already exists
 		if _, err := os.Stat(configPath); err == nil {
 			utils.PrintWarning("Config file already exists: %s", configPath)
-			fmt.Print("Overwrite? [y/N]: ")
-			var response string
-			fmt.Scanln(&response)
-			response = strings.ToLower(strings.TrimSpace(response))
-			if response != "y" && response != "yes" {
+			shouldOverwrite := false
+			if utils.ShouldAnswerYes() {
+				shouldOverwrite = true
+			} else {
+				fmt.Print("Overwrite? [y/N]: ")
+				var response string
+				fmt.Scanln(&response)
+				response = strings.ToLower(strings.TrimSpace(response))
+				shouldOverwrite = (response == "y" || response == "yes")
+			}
+			if !shouldOverwrite {
 				utils.PrintNote("Cancelled")
 				return
 			}

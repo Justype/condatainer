@@ -78,12 +78,15 @@ func runScript(cmd *cobra.Command, args []string) error {
 
 	// Validate script exists
 	if !utils.FileExists(scriptPath) {
-		return fmt.Errorf("script file %s not found", utils.StylePath(scriptPath))
+		utils.PrintError("Script file %s not found", utils.StylePath(scriptPath))
+		return nil
 	}
 
+	originScriptPath := scriptPath
 	scriptPath, err := filepath.Abs(scriptPath)
 	if err != nil {
-		return fmt.Errorf("failed to get absolute path: %w", err)
+		utils.PrintError("Failed to get absolute path: %v", err)
+		return nil
 	}
 
 	// Parse additional arguments from script (#CNT tags)
@@ -101,7 +104,8 @@ func runScript(cmd *cobra.Command, args []string) error {
 	// Get dependencies from script
 	deps, err := utils.GetDependenciesFromScript(scriptPath)
 	if err != nil {
-		return fmt.Errorf("failed to parse dependencies: %w", err)
+		utils.PrintError("Failed to parse dependencies: %v", err)
+		return nil
 	}
 
 	// Check for missing dependencies
@@ -112,52 +116,80 @@ func runScript(cmd *cobra.Command, args []string) error {
 
 	missingDeps := []string{}
 	for _, dep := range deps {
-		normalized := utils.NormalizeNameVersion(dep)
-		if _, ok := installedOverlays[normalized]; !ok {
-			missingDeps = append(missingDeps, dep)
+		// Check if it's an external overlay file by extension
+		isExternalOverlay := utils.IsOverlay(dep)
+
+		if isExternalOverlay {
+			// External overlay file - check if file exists
+			if !utils.FileExists(dep) {
+				missingDeps = append(missingDeps, dep)
+			}
+		} else {
+			// Package name - check if installed
+			normalized := utils.NormalizeNameVersion(dep)
+			if _, ok := installedOverlays[normalized]; !ok {
+				missingDeps = append(missingDeps, dep)
+			}
 		}
 	}
 
 	// Handle missing dependencies
 	if len(missingDeps) > 0 {
+		// Always show missing dependencies first
+		utils.PrintMessage("Missing dependencies:")
+		for _, md := range missingDeps {
+			utils.PrintMessage("  - %s", utils.StyleWarning(md))
+		}
+
 		if !runAutoInstall {
-			utils.PrintMessage("Missing dependencies:")
-			for _, md := range missingDeps {
-				utils.PrintMessage("  - %s", utils.StyleWarning(md))
-			}
-			utils.PrintMessage("Please run %s to install missing dependencies.",
-				utils.StyleAction("condatainer check -a "+scriptPath))
+			utils.PrintHint("Please run %s to install missing dependencies.",
+				utils.StyleAction("condatainer check -a "+originScriptPath))
 			return nil
 		}
 
 		// Auto-install missing dependencies
 		utils.PrintMessage("Attempting to auto-install missing dependencies...")
 
-		// Check for custom overlays
+		// Check for external sqf/overlay files - these can't be auto-installed
+		externalFiles := []string{}
 		for _, md := range missingDeps {
 			if utils.IsOverlay(md) {
-				return fmt.Errorf("custom overlay %s is missing - cannot proceed with auto-installation", utils.StyleName(md))
+				externalFiles = append(externalFiles, md)
 			}
 		}
 
+		if len(externalFiles) > 0 {
+			fileList := strings.Join(externalFiles, ", ")
+			utils.PrintError("External overlay(s) %s not found - cannot proceed with auto-installation", utils.StyleName(fileList))
+			return nil
+		}
+
 		// Create build objects
+		imagesDir, err := config.GetWritableImagesDir()
+		if err != nil {
+			utils.PrintError("No writable images directory found: %v", err)
+			return nil
+		}
 		buildObjects := make([]build.BuildObject, 0, len(missingDeps))
 		for _, pkg := range missingDeps {
-			bo, err := build.NewBuildObject(pkg, false, "", "")
+			bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir())
 			if err != nil {
-				return fmt.Errorf("failed to create build object for %s: %w", pkg, err)
+				utils.PrintError("Failed to create build object for %s: %v", utils.StyleName(pkg), err)
+				return nil
 			}
 			buildObjects = append(buildObjects, bo)
 		}
 
 		// Build graph and execute
-		graph, err := build.NewBuildGraph(buildObjects, "", "", config.Global.SubmitJob)
+		graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
 		if err != nil {
-			return fmt.Errorf("failed to create build graph: %w", err)
+			utils.PrintError("Failed to create build graph: %v", err)
+			return nil
 		}
 
 		if err := graph.Run(); err != nil {
-			return fmt.Errorf("some overlays failed to install: %w", err)
+			utils.PrintError("Some overlays failed to install: %v", err)
+			return nil
 		}
 
 		utils.PrintSuccess("All selected overlays installed/submitted.")
@@ -188,7 +220,8 @@ export -f module ml
 	// Check if script is executable
 	fileInfo, err := os.Stat(scriptPath)
 	if err != nil {
-		return fmt.Errorf("failed to stat script: %w", err)
+		utils.PrintError("Failed to stat script: %v", err)
+		return nil
 	}
 
 	if fileInfo.Mode()&0111 != 0 {

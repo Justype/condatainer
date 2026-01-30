@@ -171,15 +171,17 @@ func runAvail(cmd *cobra.Command, args []string) error {
 			}
 			fmt.Println()
 
-			// Ask for confirmation
-			fmt.Print("Do you want to proceed with the installation? [y/N]: ")
-			var choice string
-			fmt.Scanln(&choice)
-			choice = strings.ToLower(strings.TrimSpace(choice))
+			// Ask for confirmation (skip if --yes flag is set)
+			if !utils.ShouldAnswerYes() {
+				fmt.Print("Do you want to proceed with the installation? [y/N]: ")
+				var choice string
+				fmt.Scanln(&choice)
+				choice = strings.ToLower(strings.TrimSpace(choice))
 
-			if choice != "y" && choice != "yes" {
-				utils.PrintNote("Installation cancelled.")
-				return nil
+				if choice != "y" && choice != "yes" {
+					utils.PrintNote("Installation cancelled.")
+					return nil
+				}
 			}
 
 			// Get writable directories

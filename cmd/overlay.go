@@ -431,7 +431,7 @@ func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) erro
 	var mmCreateCmd []string
 	if envFile != "" {
 		utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(envFile))
-		mmCreateCmd = []string{"/usr/bin/micromamba", "-r", "/ext3/env", "create", "-n", "base", "-f", envFile, "-y", "-q"}
+		mmCreateCmd = []string{"mm-create", "-f", envFile, "-y", "-q"}
 	} else {
 		utils.PrintMessage("Initializing minimal conda environment with small package (zlib)...")
 		mmCreateCmd = []string{"mm-create", "zlib", "-y", "-q"}

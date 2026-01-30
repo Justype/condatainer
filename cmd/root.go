@@ -17,6 +17,7 @@ var (
 	debugMode bool
 	localMode bool
 	quietMode bool
+	yesMode   bool
 )
 
 var rootCmd = &cobra.Command{
@@ -77,6 +78,11 @@ var rootCmd = &cobra.Command{
 			utils.PrintDebug("Quiet mode enabled (suppressing verbose messages)")
 		}
 
+		if yesMode {
+			utils.YesMode = true
+			utils.PrintDebug("Yes mode enabled (automatically answering yes to prompts)")
+		}
+
 		// Step 6: Auto-detect compression based on apptainer version
 		if err := apptainer.SetBin(config.Global.ApptainerBin); err == nil {
 			if version, err := apptainer.GetVersion(); err == nil {
@@ -109,7 +115,7 @@ func Execute() {
 			}
 			os.Exit(1)
 		}
-		fmt.Fprintln(os.Stderr, err)
+		utils.PrintError("%v", err)
 		os.Exit(1)
 	}
 }
@@ -119,6 +125,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debug mode with verbose output")
 	rootCmd.PersistentFlags().BoolVar(&localMode, "local", false, "Disable job submission (run locally)")
 	rootCmd.PersistentFlags().BoolVarP(&quietMode, "quiet", "q", false, "Suppress verbose overlay creation messages (errors/warnings still shown)")
+	rootCmd.PersistentFlags().BoolVarP(&yesMode, "yes", "y", false, "Automatically answer yes to all prompts")
 
 	// Hide the help command from completions (use -h/--help instead)
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})

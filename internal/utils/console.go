@@ -13,6 +13,9 @@ var DebugMode = false
 // QuietMode controls whether verbose messages are suppressed (errors/warnings still shown)
 var QuietMode = false
 
+// YesMode controls whether to automatically answer yes to all prompts
+var YesMode = false
+
 // projectPrefix is the standard tag for all logs.
 const projectPrefix = "[CNT]"
 
@@ -147,7 +150,7 @@ func PrintSuccess(format string, a ...interface{}) {
 // Output: [CNT][ERR] Something failed.
 func PrintError(format string, a ...interface{}) {
 	msg := fmt.Sprintf(format, a...)
-	tag := StyleError("[ERR] ")
+	tag := StyleError("[ERR]")
 	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
 }
 
@@ -187,7 +190,7 @@ func PrintNote(format string, a ...interface{}) {
 func PrintDebug(format string, a ...interface{}) {
 	if DebugMode {
 		msg := fmt.Sprintf(format, a...)
-		tag := StyleDebug("[DBG] ")
+		tag := StyleDebug("[DBG]")
 		fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
 	}
 }
@@ -204,4 +207,10 @@ func IsInteractiveShell() bool {
 		return false
 	}
 	return (fileInfo.Mode() & os.ModeCharDevice) != 0
+}
+
+// ShouldAnswerYes checks if we should automatically answer yes to prompts
+// Returns true if --yes flag is set, false otherwise
+func ShouldAnswerYes() bool {
+	return YesMode
 }

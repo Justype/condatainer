@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/overlay"
@@ -29,41 +27,6 @@ func isCancelledByUser(err error) bool {
 		return exitErr.ExitCode() == 130
 	}
 	return false
-}
-
-// runCommandWithSignalHandling runs a command while intercepting SIGINT/SIGTERM
-// This ensures the Go process doesn't terminate before cleanup can run.
-// The child process receives the signal via its bash trap.
-func runCommandWithSignalHandling(cmd *exec.Cmd) error {
-	// Set up signal channel to intercept SIGINT/SIGTERM
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	// Wait for command in goroutine
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	// Wait for either completion or signal
-	select {
-	case err := <-done:
-		return err
-	case sig := <-sigChan:
-		// Signal received - forward to child process group
-		if cmd.Process != nil {
-			// Send signal to child; it will handle via trap
-			cmd.Process.Signal(sig)
-		}
-		// Wait for command to finish (trap should cause exit 130)
-		return <-done
-	}
 }
 
 // ScriptSpecs mirrors the scheduler module's job spec metadata.
@@ -307,31 +270,39 @@ func (b *BaseBuildObject) parseScriptMetadata() error {
 	}
 	b.interactiveInputs = []string{}
 	if len(prompts) > 0 {
-		// If interactive prompts exist, we must be in an interactive shell
-		if !utils.IsInteractiveShell() {
-			return fmt.Errorf("build script for %s requires interactive input, but no TTY is available", b.nameVersion)
-		}
+		// If --yes flag is set, automatically provide empty responses
+		if utils.ShouldAnswerYes() {
+			// Provide empty responses for all prompts with --yes
+			for range prompts {
+				b.interactiveInputs = append(b.interactiveInputs, "")
+			}
+		} else {
+			// If interactive prompts exist, we must be in an interactive shell
+			if !utils.IsInteractiveShell() {
+				return fmt.Errorf("build script for %s requires interactive input, but no TTY is available", b.nameVersion)
+			}
 
-		reader := bufio.NewReader(os.Stdin)
-		for _, prompt := range prompts {
-			// Replace escaped "\\n" sequences with actual newlines and print the full message lines
-			msg := strings.ReplaceAll(prompt, `\\n`, "\n")
-			// Also handle single-backslash "\\n" sequences commonly used in scripts
-			msg = strings.ReplaceAll(msg, "\\n", "\n")
-			for _, line := range strings.Split(msg, "\n") {
-				utils.PrintNote("%s", line)
-			}
-			// Prompt inline without adding a newline
-			fmt.Print("Enter here: ")
-			input, _ := reader.ReadString('\n')
-			input = strings.TrimRight(input, "\r\n")
-			if strings.ContainsAny(input, "\r\n") {
-				utils.PrintWarning("Multiline input detected. Only the first line will be used.")
-				if idx := strings.IndexAny(input, "\r\n"); idx != -1 {
-					input = input[:idx]
+			reader := bufio.NewReader(os.Stdin)
+			for _, prompt := range prompts {
+				// Replace escaped "\\n" sequences with actual newlines and print the full message lines
+				msg := strings.ReplaceAll(prompt, `\\n`, "\n")
+				// Also handle single-backslash "\\n" sequences commonly used in scripts
+				msg = strings.ReplaceAll(msg, "\\n", "\n")
+				for _, line := range strings.Split(msg, "\n") {
+					utils.PrintNote("%s", line)
 				}
+				// Prompt inline without adding a newline
+				fmt.Print("Enter here: ")
+				input, _ := reader.ReadString('\n')
+				input = strings.TrimRight(input, "\r\n")
+				if strings.ContainsAny(input, "\r\n") {
+					utils.PrintWarning("Multiline input detected. Only the first line will be used.")
+					if idx := strings.IndexAny(input, "\r\n"); idx != -1 {
+						input = input[:idx]
+					}
+				}
+				b.interactiveInputs = append(b.interactiveInputs, input)
 			}
-			b.interactiveInputs = append(b.interactiveInputs, input)
 		}
 	}
 
@@ -386,13 +357,31 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string)
 	// 2+ slashes: ref shell script (e.g., "genomes/hg38/full")
 	isRef := slashCount > 1
 
-	// Create base object
+	// Make tmpDir absolute
+	if absDir, err := filepath.Abs(tmpDir); err == nil {
+		tmpDir = absDir
+	}
+
+	// Create base object with resolved absolute path (including symlinks)
+	targetOverlay := filepath.Join(imagesDir, strings.ReplaceAll(normalized, "/", "--")+".sqf")
+	if abs, err := filepath.Abs(targetOverlay); err == nil {
+		targetOverlay = abs
+	}
+	if real, err := filepath.EvalSymlinks(filepath.Dir(targetOverlay)); err == nil {
+		targetOverlay = filepath.Join(real, filepath.Base(targetOverlay))
+	}
+
+	cntDirPath := getCntDirPath(normalized, tmpDir)
+	tmpOverlayPath := getTmpOverlayPath(normalized, tmpDir)
+
+	utils.PrintDebug("[BUILD OBJECT] Creating %s: nameVersion=%s, targetOverlay=%s, tmpOverlay=%s, cntDir=%s", nameVersion, normalized, targetOverlay, tmpOverlayPath, cntDirPath)
+
 	base := &BaseBuildObject{
 		nameVersion:       normalized,
 		ncpus:             defaultBuildNcpus(),
-		cntDirPath:        getCntDirPath(normalized, tmpDir),
-		tmpOverlayPath:    getTmpOverlayPath(normalized, tmpDir),
-		targetOverlayPath: filepath.Join(imagesDir, strings.ReplaceAll(normalized, "/", "--")+".sqf"),
+		cntDirPath:        cntDirPath,
+		tmpOverlayPath:    tmpOverlayPath,
+		targetOverlayPath: targetOverlay,
 	}
 
 	if external {
@@ -417,13 +406,28 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string)
 func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir string) (BuildObject, error) {
 	normalized := utils.NormalizeNameVersion(nameVersion)
 
+	// Make tmpDir absolute
+	if absDir, err := filepath.Abs(tmpDir); err == nil {
+		tmpDir = absDir
+	}
+
+	targetOverlay := filepath.Join(imagesDir, strings.ReplaceAll(normalized, "/", "--")+".sqf")
+	if abs, err := filepath.Abs(targetOverlay); err == nil {
+		targetOverlay = abs
+	}
+
+	cntDirPath := getCntDirPath(normalized, tmpDir)
+	tmpOverlayPath := getTmpOverlayPath(normalized, tmpDir)
+
+	utils.PrintDebug("[BUILD OBJECT] Creating conda %s: buildSource=%s, targetOverlay=%s, tmpOverlay=%s, cntDir=%s", nameVersion, buildSource, targetOverlay, tmpOverlayPath, cntDirPath)
+
 	base := &BaseBuildObject{
 		nameVersion:       normalized,
 		buildSource:       buildSource,
 		ncpus:             defaultBuildNcpus(),
-		cntDirPath:        getCntDirPath(normalized, tmpDir),
-		tmpOverlayPath:    getTmpOverlayPath(normalized, tmpDir),
-		targetOverlayPath: filepath.Join(imagesDir, strings.ReplaceAll(normalized, "/", "--")+".sqf"),
+		cntDirPath:        cntDirPath,
+		tmpOverlayPath:    tmpOverlayPath,
+		targetOverlayPath: targetOverlay,
 	}
 
 	return newCondaBuildObject(base)
@@ -435,16 +439,26 @@ func FromExternalSource(targetPrefix, source string, isApptainer bool, imagesDir
 	nameVersion := filepath.Base(targetPrefix)
 	nameVersion = utils.NormalizeNameVersion(nameVersion)
 
+	// Make tmpDir absolute
+	if absDir, err := filepath.Abs(tmpDir); err == nil {
+		tmpDir = absDir
+	}
+
 	// Determine build type from source file extension
 	isDef := isApptainer || strings.HasSuffix(source, ".def")
 	isShell := strings.HasSuffix(source, ".sh") || strings.HasSuffix(source, ".bash")
+
+	cntDirPath := getCntDirPath(nameVersion, tmpDir)
+	tmpOverlayPath := getTmpOverlayPath(nameVersion, tmpDir)
+
+	utils.PrintDebug("[BUILD OBJECT] Creating external %s: source=%s, targetPrefix=%s, tmpOverlay=%s, cntDir=%s", nameVersion, source, targetPrefix, tmpOverlayPath, cntDirPath)
 
 	base := &BaseBuildObject{
 		nameVersion:       nameVersion,
 		buildSource:       source,
 		ncpus:             defaultBuildNcpus(),
-		cntDirPath:        getCntDirPath(nameVersion, tmpDir),
-		tmpOverlayPath:    getTmpOverlayPath(nameVersion, tmpDir),
+		cntDirPath:        cntDirPath,
+		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetPrefix + ".sqf",
 	}
 

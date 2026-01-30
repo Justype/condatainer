@@ -1,6 +1,7 @@
 package apptainer
 
 import (
+	"io"
 	"path/filepath"
 	"strings"
 
@@ -78,12 +79,13 @@ func DeduplicateBindPaths(paths []string) []string {
 
 // ExecOptions contains options for executing commands in a container
 type ExecOptions struct {
-	Bind       []string // Bind mounts (format: "/host/path:/container/path")
-	Overlay    []string // Overlay images to use
-	Fakeroot   bool     // Run with fakeroot
-	Env        []string // Environment variables to set (format: "KEY=VALUE")
-	HideOutput bool     // Hide output by redirecting to /dev/null
-	Additional []string // Additional flags to pass to apptainer exec
+	Bind       []string  // Bind mounts (format: "/host/path:/container/path")
+	Overlay    []string  // Overlay images to use
+	Fakeroot   bool      // Run with fakeroot
+	Env        []string  // Environment variables to set (format: "KEY=VALUE")
+	HideOutput bool      // Hide output by redirecting to /dev/null
+	Additional []string  // Additional flags to pass to apptainer exec
+	Stdin      io.Reader // Custom stdin reader (optional, defaults to os.Stdin)
 }
 
 // Exec executes a command inside a container
@@ -128,5 +130,5 @@ func Exec(imagePath string, command []string, opts *ExecOptions) error {
 		utils.StylePath(imagePath),
 		utils.StyleAction(strings.Join(command, " ")))
 
-	return runApptainerWithOutput("exec", imagePath, false, opts.HideOutput, args...)
+	return runApptainerWithOutput("exec", imagePath, false, opts.HideOutput, opts.Stdin, args...)
 }

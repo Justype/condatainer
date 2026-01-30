@@ -4,12 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
+	execpkg "github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -203,10 +203,10 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 	} else if pathEnv != "" {
 		// Prepend dependency paths to system paths
 		pathEnv = pathEnv + ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-		envSettings = append(envSettings, "--env", fmt.Sprintf("PATH=%s", pathEnv))
+		envSettings = append(envSettings, fmt.Sprintf("PATH=%s", pathEnv))
 	}
 
-	// Add overlay env configs from dependencies
+	// Add overlay env configs from dependencies (already in KEY=VALUE format)
 	envConfigs, err := GetOverlayEnvConfigsFromDependencies(s.dependencies)
 	if err != nil {
 		utils.PrintWarning("Failed to get env configs from dependencies: %v", err)
@@ -226,46 +226,52 @@ if [ $? -ne 0 ]; then
 fi
 `, s.buildSource, s.buildSource)
 
-	// Build exec command args using config values
-	baseImage := config.GetBaseImage()
-	apptainerBin := config.Global.ApptainerBin
-
-	args := []string{"exec"}
-	args = append(args, envSettings...)
-
-	// Add overlay args from dependencies
+	// Collect overlay dependencies
 	overlayArgs, err := GetOverlayArgsFromDependencies(s.dependencies)
 	if err != nil {
 		utils.PrintWarning("Failed to get overlay args from dependencies: %v", err)
-	} else {
-		args = append(args, overlayArgs...)
 	}
 
-	args = append(args, "--overlay", s.tmpOverlayPath)
+	// Convert overlay args to overlay paths
+	overlays := []string{s.tmpOverlayPath}
+	for i := 0; i < len(overlayArgs); i += 2 {
+		if overlayArgs[i] == "--overlay" && i+1 < len(overlayArgs) {
+			overlays = append(overlays, overlayArgs[i+1])
+		}
+	}
 
-	// Bind all base directories (for accessing overlays and build scripts)
-	// Deduplicate and filter child paths
+	// Collect bind directories (for accessing overlays and build scripts)
 	bindDirs := apptainer.DeduplicateBindPaths(getAllBaseDirs())
-	for _, baseDir := range bindDirs {
-		args = append(args, "--bind", baseDir)
+
+	// Create exec options for running build script
+	opts := execpkg.Options{
+		BaseImage:    config.GetBaseImage(),
+		ApptainerBin: config.Global.ApptainerBin,
+		Overlays:     overlays,
+		BindPaths:    bindDirs,
+		EnvSettings:  envSettings,
+		Command:      []string{"/bin/bash", "-c", bashScript},
+		HidePrompt:   true,
+		WritableImg:  true,
 	}
-	args = append(args, baseImage, "/bin/bash", "-c", bashScript)
 
-	cmd := exec.Command(apptainerBin, args...)
-	utils.PrintDebug("[BUILD] Running build script with command: %s %s", apptainerBin, strings.Join(args, " "))
-
-	// Provide interactive inputs if any
+	// Enable stdin pass-through if there are interactive inputs
+	// This allows build scripts to read from stdin for user input (download links, etc.)
 	if len(s.interactiveInputs) > 0 {
+		// Pre-collected inputs: provide them as stdin
 		inputStr := strings.Join(s.interactiveInputs, "\n") + "\n"
-		cmd.Stdin = strings.NewReader(inputStr)
+		opts.PassThruStdin = true
+		opts.Stdin = strings.NewReader(inputStr)
+	} else {
+		// Allow container to read from user's stdin for real-time interaction
+		opts.PassThruStdin = true
 	}
 
-	// Run the build script - show output in real-time
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	utils.PrintDebug("[BUILD] Running build script for %s with options: overlays=%v, bindPaths=%v, passThruStdin=%v",
+		s.nameVersion, opts.Overlays, opts.BindPaths, opts.PassThruStdin)
 
-	// Use signal-aware runner to ensure cleanup runs on Ctrl+C
-	if err := runCommandWithSignalHandling(cmd); err != nil {
+	// Run the build using exec.Run
+	if err := execpkg.Run(opts); err != nil {
 		s.Cleanup(true)
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
@@ -326,10 +332,6 @@ fi
 
 // createSquashfs creates a SquashFS file from the given source directory
 func (s *ScriptBuildObject) createSquashfs(sourceDir, targetOverlayPath string) error {
-	// Get config values
-	baseImage := config.GetBaseImage()
-	apptainerBin := config.Global.ApptainerBin
-
 	targetPath := targetOverlayPath
 	if absTarget, err := filepath.Abs(targetPath); err == nil {
 		targetPath = absTarget
@@ -344,6 +346,8 @@ trap 'exit 130' INT TERM
 echo "Setting permissions..."
 find /cnt -type f -exec chmod ug+rw,o+r {} \;
 find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
+
+echo "Packing overlay to SquashFS..."
 mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
 `, targetPath, s.ncpus, config.Global.Build.CompressArgs)
 	} else {
@@ -353,32 +357,31 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
 		}
 		bashScript = fmt.Sprintf(`
 trap 'exit 130' INT TERM
+echo "Packing overlay to SquashFS..."
 mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
 `, sourceDir, targetPath, s.ncpus, config.Global.Build.CompressArgs)
 	}
 
-	args := []string{
-		"exec",
-		"--overlay", s.tmpOverlayPath,
+	// Collect bind directories (deduplicated)
+	bindDirs := apptainer.DeduplicateBindPaths(getAllBaseDirs())
+
+	// Create exec options for creating SquashFS
+	opts := execpkg.Options{
+		BaseImage:    config.GetBaseImage(),
+		ApptainerBin: config.Global.ApptainerBin,
+		Overlays:     []string{s.tmpOverlayPath},
+		BindPaths:    bindDirs,
+		Command:      []string{"/bin/bash", "-c", bashScript},
+		HidePrompt:   true,
+		WritableImg:  true,
 	}
 
-	// Bind all base directories (deduplicated)
-	for _, baseDir := range apptainer.DeduplicateBindPaths(getAllBaseDirs()) {
-		args = append(args, "--bind", baseDir)
-	}
-
-	args = append(args, baseImage, "/bin/bash", "-c", bashScript)
-
-	cmd := exec.Command(apptainerBin, args...)
-	utils.PrintDebug("[BUILD] Creating SquashFS with command: %s %s", apptainerBin, strings.Join(args, " "))
+	utils.PrintDebug("[BUILD] Creating SquashFS for %s with options: overlays=%v, bindPaths=%v",
+		s.nameVersion, opts.Overlays, opts.BindPaths)
 	utils.PrintMessage("Packing %s into %s", utils.StylePath(sourceDir), utils.StylePath(targetPath))
 
-	// Show output in real-time
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	// Use signal-aware runner to ensure cleanup runs on Ctrl+C
-	if err := runCommandWithSignalHandling(cmd); err != nil {
+	// Run the SquashFS creation using exec.Run
+	if err := execpkg.Run(opts); err != nil {
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
 		}

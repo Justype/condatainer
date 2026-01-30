@@ -16,7 +16,6 @@ import (
 )
 
 var (
-	updateYes   bool
 	updateForce bool
 )
 
@@ -29,7 +28,7 @@ var updateCmd = &cobra.Command{
 This command downloads the latest binary from the GitHub repository
 and replaces the current executable. A backup of the current version is not created.`,
 	Example: `  condatainer self-update       # Update with confirmation prompt
-  condatainer self-update -y    # Update without confirmation
+  condatainer self-update --yes # Update without confirmation
   condatainer self-update -f    # Force update even if already on latest version`,
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runUpdate,
@@ -37,7 +36,6 @@ and replaces the current executable. A backup of the current version is not crea
 
 func init() {
 	rootCmd.AddCommand(updateCmd)
-	updateCmd.Flags().BoolVarP(&updateYes, "yes", "y", false, "Skip confirmation prompt")
 	updateCmd.Flags().BoolVarP(&updateForce, "force", "f", false, "Force update")
 }
 
@@ -54,8 +52,8 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to resolve symlink: %w", err)
 	}
 
-	// Ask for confirmation unless --yes or --force flag is provided
-	if !updateYes && !updateForce {
+	// Ask for confirmation unless global --yes flag or --force flag is provided
+	if !utils.ShouldAnswerYes() && !updateForce {
 		fmt.Print("Are you sure you want to download and replace the current binary from GitHub releases? [y/N]: ")
 		var confirm string
 		fmt.Scanln(&confirm)

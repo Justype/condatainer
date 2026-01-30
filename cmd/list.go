@@ -124,12 +124,18 @@ func runList(cmd *cobra.Command, args []string) error {
 			}
 
 			fmt.Print("\n")
-			fmt.Print("Are you sure? Cannot be undone. [y/N]: ")
-			var choice string
-			fmt.Scanln(&choice)
-			choice = strings.ToLower(strings.TrimSpace(choice))
+			shouldDelete := false
+			if utils.ShouldAnswerYes() {
+				shouldDelete = true
+			} else {
+				fmt.Print("Are you sure? Cannot be undone. [y/N]: ")
+				var choice string
+				fmt.Scanln(&choice)
+				choice = strings.ToLower(strings.TrimSpace(choice))
+				shouldDelete = (choice == "y" || choice == "yes")
+			}
 
-			if choice == "y" || choice == "yes" {
+			if shouldDelete {
 				// Get installed overlays map for deletion
 				installedMap, err := getInstalledOverlaysMap()
 				if err != nil {

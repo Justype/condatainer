@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
@@ -78,12 +79,26 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	missingDeps := []string{}
 	for _, dep := range deps {
-		normalized := utils.NormalizeNameVersion(dep)
-		if _, ok := installedOverlays[normalized]; ok {
-			utils.PrintMessage("Dependency: %s", utils.StyleName(dep))
+		// Check if it's an external overlay file by extension
+		isExternalOverlay := utils.IsOverlay(dep)
+
+		if isExternalOverlay {
+			// External overlay file - check if file exists
+			if utils.FileExists(dep) {
+				utils.PrintMessage("Dependency: %s", utils.StyleName(dep))
+			} else {
+				utils.PrintMessage("Dependency: %s %s", utils.StyleName(dep), utils.StyleError("(missing local file)"))
+				missingDeps = append(missingDeps, dep)
+			}
 		} else {
-			utils.PrintMessage("Dependency: %s %s", utils.StyleName(dep), utils.StyleError("(missing)"))
-			missingDeps = append(missingDeps, dep)
+			// Package name - check if installed
+			normalized := utils.NormalizeNameVersion(dep)
+			if _, ok := installedOverlays[normalized]; ok {
+				utils.PrintMessage("Dependency: %s", utils.StyleName(dep))
+			} else {
+				utils.PrintMessage("Dependency: %s %s", utils.StyleName(dep), utils.StyleError("(missing)"))
+				missingDeps = append(missingDeps, dep)
+			}
 		}
 	}
 
@@ -108,16 +123,40 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check for custom overlays (files) that can't be auto-installed
+	externalFiles := []string{}
 	for _, dep := range missingDeps {
 		if utils.IsOverlay(dep) {
-			return fmt.Errorf("custom overlay %s is missing - cannot proceed with auto-installation", utils.StyleName(dep))
+			externalFiles = append(externalFiles, dep)
+		}
+	}
+
+	if len(externalFiles) > 0 {
+		fileList := strings.Join(externalFiles, ", ")
+		utils.PrintWarning("External overlay(s) %s not found - cannot be auto-installed", utils.StyleName(fileList))
+		// Remove external files from the install list
+		nonExternalDeps := []string{}
+		for _, dep := range missingDeps {
+			if !utils.IsOverlay(dep) {
+				nonExternalDeps = append(nonExternalDeps, dep)
+			}
+		}
+		missingDeps = nonExternalDeps
+	}
+
+	if len(missingDeps) == 0 {
+		if len(externalFiles) > 0 {
+			return nil
 		}
 	}
 
 	// Create build objects
+	imagesDir, err := config.GetWritableImagesDir()
+	if err != nil {
+		return fmt.Errorf("no writable images directory found: %w", err)
+	}
 	buildObjects := make([]build.BuildObject, 0, len(missingDeps))
 	for _, pkg := range missingDeps {
-		bo, err := build.NewBuildObject(pkg, false, "", "")
+		bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir())
 		if err != nil {
 			return fmt.Errorf("failed to create build object for %s: %w", pkg, err)
 		}
@@ -125,7 +164,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build graph and execute
-	graph, err := build.NewBuildGraph(buildObjects, "", "", config.Global.SubmitJob)
+	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
 	if err != nil {
 		return fmt.Errorf("failed to create build graph: %w", err)
 	}

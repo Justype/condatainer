@@ -262,10 +262,10 @@ func GetOverlayEnvConfigsFromDependencies(dependencies []string) ([]string, erro
 		file.Close()
 	}
 
-	// Convert to --env arguments
+	// Convert to KEY=VALUE format (not --env prefixed, exec.Options.EnvSettings expects raw KEY=VALUE)
 	args := []string{}
 	for key, value := range configs {
-		args = append(args, "--env", fmt.Sprintf("%s=%s", key, value))
+		args = append(args, fmt.Sprintf("%s=%s", key, value))
 	}
 
 	return args, nil
