@@ -42,11 +42,6 @@ while getopts "e:o:b:fyh" opt; do
 done
 
 #region Sanity Checks
-if ! command -v apptainer &> /dev/null; then
-    echo -e "${RED}[ERROR]${NC} 'apptainer' not found in PATH. Please load apptainer module: ${YELLOW}ml apptainer${NC}"
-    exit 1
-fi
-
 if ! [ -f "$CODE_BIN" ]; then
     echo -e "${BLUE}[INFO]${NC} VSCode CLI not found at ${BLUE}$CODE_BIN${NC}. Downloading latest VSCode CLI..."
     ARCH=$(uname -m)

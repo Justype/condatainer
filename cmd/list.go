@@ -20,10 +20,11 @@ var (
 )
 
 var listCmd = &cobra.Command{
-	Use:     "list [terms...]",
-	Aliases: []string{"ls"},
-	Short:   "List installed overlays matching search terms",
-	RunE:    runList,
+	Use:          "list [terms...]",
+	Aliases:      []string{"ls"},
+	Short:        "List installed overlays matching search terms",
+	SilenceUsage: true, // Runtime errors should not show usage
+	RunE:         runList,
 }
 
 func init() {

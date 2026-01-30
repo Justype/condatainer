@@ -151,11 +151,6 @@ while getopts "c:m:t:a:b:e:o:vfyh" opt; do
 done
 
 #region Sanity Checks
-if ! command -v apptainer &> /dev/null; then
-    echo -e "${RED}[ERROR]${NC} 'apptainer' not found in PATH. Please load apptainer module: ${YELLOW}ml apptainer${NC}"
-    exit 1
-fi
-
 if [ "$AUTH" != "microsoft" ] && [ "$AUTH" != "github" ]; then
     echo -e "${RED}[ERROR]${NC} Unsupported authentication provider: $AUTH"
     echo -e "Supported providers are: microsoft, github"

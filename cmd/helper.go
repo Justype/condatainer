@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
@@ -86,7 +87,8 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	// Prevent helper commands when inside a container (except --path)
 	if config.IsInsideContainer() && !helperPath {
 		cmd.SilenceUsage = true
-		return fmt.Errorf("helper commands are not available inside a container")
+		utils.PrintError("helper commands are not available inside a container")
+		os.Exit(1)
 	}
 
 	// --- Path Mode ---
@@ -96,7 +98,9 @@ func runHelper(cmd *cobra.Command, args []string) error {
 			scriptName := args[0]
 			scriptPath, err := config.FindHelperScript(scriptName)
 			if err != nil {
-				return fmt.Errorf("helper script '%s' not found (searched: %v)", scriptName, config.GetHelperScriptSearchPaths())
+				cmd.SilenceUsage = true
+				utils.PrintError("helper script '%s' not found (searched: %v)", scriptName, config.GetHelperScriptSearchPaths())
+				os.Exit(1)
 			}
 			fmt.Println(scriptPath)
 			return nil
@@ -124,13 +128,21 @@ func runHelper(cmd *cobra.Command, args []string) error {
 		// Get writable directory for updates
 		helperScriptsDir, err := config.GetWritableHelperScriptsDir()
 		if err != nil {
-			return fmt.Errorf("failed to find writable helper scripts directory: %w", err)
+			cmd.SilenceUsage = true
+			utils.PrintError("failed to find writable helper scripts directory: %v", err)
+			os.Exit(1)
 		}
-		return updateHelperScripts(args, helperScriptsDir)
+		if err := updateHelperScripts(args, helperScriptsDir); err != nil {
+			cmd.SilenceUsage = true
+			utils.PrintError("%v", err)
+			os.Exit(1)
+		}
+		return nil
 	}
 
 	// --- Run Mode ---
 	if len(args) == 0 {
+		// Parameter error - show usage
 		return fmt.Errorf("no helper script name provided - use --update to update scripts")
 	}
 
@@ -140,13 +152,22 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	// Find script in all search paths
 	scriptPath, err := config.FindHelperScript(scriptName)
 	if err != nil {
-		return fmt.Errorf("helper script '%s' not found\nSearched: %v\nRun '%s' to fetch available helper scripts",
+		cmd.SilenceUsage = true
+		utils.PrintError("helper script '%s' not found\nSearched: %v\nRun '%s' to fetch available helper scripts",
 			scriptName, config.GetHelperScriptSearchPaths(), utils.StyleAction("condatainer helper --update"))
+		os.Exit(1)
 	}
 
 	// Ensure executable
 	if err := os.Chmod(scriptPath, 0755); err != nil {
 		utils.PrintDebug("Failed to chmod helper script: %v", err)
+	}
+
+	// Check apptainer is available before running helper script
+	if err := apptainer.EnsureApptainer(); err != nil {
+		cmd.SilenceUsage = true
+		utils.PrintError("apptainer is required to run helper scripts: %v", err)
+		os.Exit(1)
 	}
 
 	// Run the helper script

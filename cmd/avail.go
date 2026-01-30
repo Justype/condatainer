@@ -35,7 +35,8 @@ Use search terms to filter results (AND logic applied).`,
   condatainer avail --remote     # Only remote build scripts
   condatainer avail samtools     # Search for samtools
   condatainer avail sam 1.21     # Search with multiple terms (AND logic)`,
-	RunE: runAvail,
+	SilenceUsage: true, // Runtime errors should not show usage
+	RunE:         runAvail,
 }
 
 func init() {

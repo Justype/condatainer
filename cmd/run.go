@@ -50,8 +50,9 @@ with the --auto-install flag.`,
   # #CNT -w
   # #CNT --env MYVAR=value
   # #CNT --bind /data:/mnt/data`,
-	Args: cobra.ExactArgs(1),
-	RunE: runScript,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true, // Runtime errors should not show usage
+	RunE:         runScript,
 }
 
 func init() {

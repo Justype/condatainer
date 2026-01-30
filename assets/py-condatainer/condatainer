@@ -1798,6 +1798,11 @@ class CondaTainer_Helper:
         except Exception:
             pass
 
+        # Check apptainer is available before running helper script
+        if not Config.SYSTEM_APPTAINER_BIN:
+            Utils.print_error("apptainer is required to run helper scripts but was not found in PATH.")
+            exit(1)
+
         cmd = [local_path] + (args.script_args or [])
         Utils.print_debug(f"Running helper command: {cmd}")
 

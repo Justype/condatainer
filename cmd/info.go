@@ -22,8 +22,9 @@ var infoOverlayCmd = &cobra.Command{
 Shows file size, compression type, timestamps, mount path, and environment variables.`,
 	Example: `  condatainer info samtools/1.22    # Show info for installed overlay
   condatainer info env.img          # Show info for local overlay file`,
-	Args: cobra.ExactArgs(1),
-	RunE: runInfoOverlay,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true, // Runtime errors should not show usage
+	RunE:         runInfoOverlay,
 }
 
 func init() {

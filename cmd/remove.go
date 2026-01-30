@@ -24,8 +24,9 @@ The command will ask for confirmation before removing overlays.`,
 	Example: `  condatainer remove samtools/1.22      # Remove exact overlay
   condatainer remove samtools           # Remove all samtools versions
   condatainer rm sam 1.22               # Search with multiple terms (AND logic)`,
-	Args: cobra.MinimumNArgs(1),
-	RunE: runRemove,
+	Args:         cobra.MinimumNArgs(1),
+	SilenceUsage: true, // Runtime errors should not show usage
+	RunE:         runRemove,
 }
 
 func init() {

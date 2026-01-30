@@ -89,10 +89,6 @@ choose_port() {
     return 1
 }
 
-if ! command -v apptainer &> /dev/null; then
-    echo -e "${RED}[ERROR]${NC} 'apptainer' not found in PATH. Please load apptainer module: ${YELLOW}ml apptainer${NC}"
-    exit 1
-fi
 PORT_AUTO=0
 # If no port specified, pick an available one
 if [ -z "$PORT" ]; then

@@ -29,7 +29,8 @@ This command downloads the latest binary from the GitHub repository
 and replaces the current executable. A backup of the current version is not created.`,
 	Example: `  condatainer self-update       # Update with confirmation prompt
   condatainer self-update -y    # Update without confirmation`,
-	RunE: runUpdate,
+	SilenceUsage: true, // Runtime errors should not show usage
+	RunE:         runUpdate,
 }
 
 func init() {

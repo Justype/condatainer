@@ -29,8 +29,9 @@ Dependencies are declared in scripts using comments like:
 	Example: `  condatainer check script.sh           # Check local script
   condatainer check samtools/1.22       # Check build script by name
   condatainer check script.sh -a        # Check and auto-install missing deps`,
-	Args: cobra.ExactArgs(1),
-	RunE: runCheck,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true, // Runtime errors should not show usage
+	RunE:         runCheck,
 }
 
 func init() {
