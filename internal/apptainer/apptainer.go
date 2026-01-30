@@ -17,7 +17,11 @@ import (
 // apptainerCmd holds the resolved, absolute path to the binary.
 var apptainerCmd string
 
+// cachedVersion holds the cached apptainer version to avoid repeated calls
+var cachedVersion string
+
 // SetBin configures and validates the Apptainer binary path.
+// If already set to the same path, this is a no-op.
 func SetBin(path string) error {
 	target := path
 	if target == "" {
@@ -30,7 +34,13 @@ func SetBin(path string) error {
 		return &ApptainerNotFoundError{Path: target}
 	}
 
+	// Skip if already set to the same path
+	if apptainerCmd == fullPath {
+		return nil
+	}
+
 	apptainerCmd = fullPath
+	cachedVersion = "" // Clear cached version when binary changes
 	utils.PrintDebug("Apptainer binary resolved to: %s", utils.StylePath(apptainerCmd))
 	return nil
 }
@@ -41,7 +51,13 @@ func Which() string {
 }
 
 // GetVersion returns the version of the currently loaded Apptainer binary.
+// Results are cached to avoid repeated calls.
 func GetVersion() (string, error) {
+	// Return cached version if available
+	if cachedVersion != "" {
+		return cachedVersion, nil
+	}
+
 	// We use exec.Command directly here because we need the output string
 	// and runApptainer (below) is designed for void/error returns.
 	cmd := exec.Command(apptainerCmd, "--version")
@@ -65,6 +81,7 @@ func GetVersion() (string, error) {
 		return "", fmt.Errorf("could not parse version from output: %s", outStr)
 	}
 
+	cachedVersion = match
 	utils.PrintDebug("Detected Apptainer Version: %s", utils.StyleNumber(match))
 	return match, nil
 }

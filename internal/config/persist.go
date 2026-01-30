@@ -273,7 +273,7 @@ func SaveConfig() error {
 func SaveConfigTo(configPath string) error {
 	// Create directory if it doesn't exist
 	configDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0775); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 

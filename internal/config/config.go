@@ -202,7 +202,7 @@ func GetBaseImage() string {
 // isWritableDir checks if a directory is writable by trying to create a test file
 func isWritableDir(dir string) bool {
 	// Try to create directory if it doesn't exist
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0775); err != nil {
 		return false
 	}
 

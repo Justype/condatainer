@@ -82,15 +82,8 @@ var createCmd = &cobra.Command{
 			config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 19"
 		} else if compGzip {
 			config.Global.Build.CompressArgs = "-comp gzip"
-		} else {
-			// Auto-detect: use zstd-medium if supported, otherwise use default (lz4)
-			if version, err := apptainer.GetVersion(); err == nil {
-				if apptainer.CheckZstdSupport(version) {
-					config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 8"
-					utils.PrintDebug("Auto-selected zstd-medium compression (Apptainer %s supports zstd)", utils.StyleNumber(version))
-				}
-			}
 		}
+		// If no compression flag provided, use config default (auto-detected in root.go)
 
 		// 4. Handle temp size
 		if createTempSize != "" {

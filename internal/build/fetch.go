@@ -222,10 +222,8 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 	}
 
 	// Build the raw GitHub URL
+	// info.Path already contains the correct extension (.def for containers)
 	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/main/build-scripts/%s", config.GitHubRepo, info.Path)
-	if info.IsContainer {
-		rawURL += ".def"
-	}
 
 	// Create HTTP client with timeout
 	client := &http.Client{
@@ -235,23 +233,27 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 	// Fetch the script
 	resp, err := client.Get(rawURL)
 	if err != nil {
-		return "", fmt.Errorf("failed to download script: %w", err)
+		return "", fmt.Errorf("failed to download script from %s: %w", rawURL, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download script: HTTP %d", resp.StatusCode)
+		return "", fmt.Errorf("failed to download script: HTTP %d from %s", resp.StatusCode, rawURL)
 	}
 
-	// Create local path
-	localPath := filepath.Join(tmpDir, "remote_scripts", info.Name)
+	// Create local path with normalized name (replace / with --)
+	// Format: tmp/remote--name--version.def or tmp/remote--name--version.sh
+	normalizedName := strings.ReplaceAll(info.Name, "/", "--")
+	localPath := filepath.Join(tmpDir, "remote--"+normalizedName)
 	if info.IsContainer {
 		localPath += ".def"
+	} else {
+		localPath += ".sh"
 	}
 
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
-		return "", fmt.Errorf("failed to create directory: %w", err)
+	// Ensure tmp directory exists
+	if err := os.MkdirAll(tmpDir, 0775); err != nil {
+		return "", fmt.Errorf("failed to create tmp directory: %w", err)
 	}
 
 	// Write to file
@@ -263,6 +265,11 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 
 	if _, err := io.Copy(file, resp.Body); err != nil {
 		return "", fmt.Errorf("failed to write script: %w", err)
+	}
+
+	// Set permissions for downloaded script (664 for group-writable)
+	if err := os.Chmod(localPath, 0o664); err != nil {
+		utils.PrintDebug("Failed to set permissions on %s: %v", localPath, err)
 	}
 
 	return localPath, nil

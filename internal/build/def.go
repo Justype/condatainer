@@ -88,6 +88,8 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 			if tryDownloadPrebuiltOverlay(d.nameVersion, targetOverlayPath) {
 				// Mark as .def-built in whitelist
 				UpdateDefBuiltWhitelist(d.nameVersion)
+				// Cleanup downloaded remote build script (if any)
+				d.Cleanup(false)
 				return nil
 			}
 		}

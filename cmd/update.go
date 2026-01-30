@@ -176,7 +176,7 @@ func downloadFile(url, destPath string) error {
 	}
 
 	// Create parent directory
-	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0775); err != nil {
 		return err
 	}
 

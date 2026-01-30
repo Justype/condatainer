@@ -29,36 +29,36 @@ func newScriptBuildObject(base *BaseBuildObject, isRef bool) (*ScriptBuildObject
 // Type check implementations
 func (s *ScriptBuildObject) IsConda() bool { return false }
 
-// getAllBaseDirs returns all configured base directories
+// getAllBaseDirs returns all configured base directories that actually exist
 func getAllBaseDirs() []string {
 	var dirs []string
 
-	// Extra base dirs
-	for _, baseDir := range config.GetExtraBaseDirs() {
-		if baseDir != "" {
-			dirs = append(dirs, baseDir)
+	// Helper to add directory if it exists
+	addIfExists := func(dir string) {
+		if dir == "" {
+			return
+		}
+		if _, err := os.Stat(dir); err == nil {
+			dirs = append(dirs, dir)
 		}
 	}
 
-	// Portable dir
-	if portableDir := config.GetPortableDataDir(); portableDir != "" {
-		dirs = append(dirs, portableDir)
+	// Extra base dirs
+	for _, baseDir := range config.GetExtraBaseDirs() {
+		addIfExists(baseDir)
 	}
+
+	// Portable dir
+	addIfExists(config.GetPortableDataDir())
 
 	// Scratch dir
-	if scratchDir := config.GetScratchDataDir(); scratchDir != "" {
-		dirs = append(dirs, scratchDir)
-	}
+	addIfExists(config.GetScratchDataDir())
 
 	// User dir
-	if userDir := config.GetUserDataDir(); userDir != "" {
-		dirs = append(dirs, userDir)
-	}
+	addIfExists(config.GetUserDataDir())
 
 	// Legacy base dir
-	if config.Global.BaseDir != "" {
-		dirs = append(dirs, config.Global.BaseDir)
-	}
+	addIfExists(config.Global.BaseDir)
 
 	return dirs
 }

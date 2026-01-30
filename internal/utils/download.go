@@ -42,6 +42,11 @@ func DownloadFile(url, destPath string) error {
 		return fmt.Errorf("failed to rename file: %w", err)
 	}
 
+	// Set permissions for downloaded file (664 for group-writable)
+	if err := os.Chmod(destPath, 0664); err != nil {
+		return fmt.Errorf("failed to set file permissions: %w", err)
+	}
+
 	return nil
 }
 
@@ -60,13 +65,13 @@ func URLExists(url string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// DownloadExecutable downloads a file and sets it as executable (0755).
+// DownloadExecutable downloads a file and sets it as executable (0775).
 func DownloadExecutable(url, destPath string) error {
 	if err := DownloadFile(url, destPath); err != nil {
 		return err
 	}
 
-	if err := os.Chmod(destPath, 0755); err != nil {
+	if err := os.Chmod(destPath, 0775); err != nil {
 		return fmt.Errorf("failed to set executable permissions: %w", err)
 	}
 
