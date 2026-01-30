@@ -33,6 +33,15 @@ condatainer config init
 
 This step will let **CondaTainer** save the apptainer path for future use.
 
+### ⌨️ Shell Completion
+
+**CondaTainer** supports shell completion for **Bash** and **Zsh**.
+
+```bash
+# must have bash-completion installed for Bash
+source <(condatainer completion)
+```
+
 ## 👀 Quick Look
 
 ```bash

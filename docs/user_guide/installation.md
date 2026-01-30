@@ -53,25 +53,17 @@ If apptainer version >= 1.4, zstd compression will be used by default. Otherwise
 
 ## ⌨️ Shell Completion
 
-CondaTainer supports shell completion for **Bash**, **Zsh**, and **Fish**. The shell is auto-detected from your `$SHELL` environment variable, so you can simply run `condatainer completion` without specifying a shell.
+CondaTainer supports shell completion for **Bash** and **Zsh**. The shell is auto-detected from your `$SHELL`.
 
 ### Quick Setup
 
 Add one of the following lines to your shell configuration file:
 
-**Bash** (`~/.bashrc`): (must have `bash-completion` installed)
+- **Bash** (`~/.bashrc`): (must have `bash-completion` installed)
+- **Zsh** (`~/.zshrc`):
+
 ```bash
 source <(condatainer completion)
-```
-
-**Zsh** (`~/.zshrc`):
-```zsh
-source <(condatainer completion)
-```
-
-**Fish** (`~/.config/fish/config.fish`):
-```fish
-condatainer completion | source
 ```
 
 ## 🗑️ Uninstallation
