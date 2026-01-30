@@ -744,8 +744,10 @@ class CondaTainer:
             Config.SYSTEM_APPTAINER_BIN, "build", "--fakeroot",
             Config.BASE_IMAGE_SIF, Config.BASE_IMAGE_DEF,
         ]
+        # Unset SINGULARITY_BIND and APPTAINER_BIND to prevent mount conflicts during build
+        build_env = {k: v for k, v in os.environ.items() if k not in ('SINGULARITY_BIND', 'APPTAINER_BIND')}
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, env=build_env)
         except subprocess.CalledProcessError:
             Utils.print_error("Building base images failed.")
             exit(1)
@@ -1097,8 +1099,10 @@ class BuildObject:
 
         Utils.print_debug(f"[BUILD] Building Apptainer SIF with command: {cmd_create}")
 
+        # Unset SINGULARITY_BIND and APPTAINER_BIND to prevent mount conflicts during build
+        build_env = {k: v for k, v in os.environ.items() if k not in ('SINGULARITY_BIND', 'APPTAINER_BIND')}
         try:
-            subprocess.run(cmd_create, check=True)
+            subprocess.run(cmd_create, check=True, env=build_env)
         except subprocess.CalledProcessError:
             self.print_create_error_message()
             self.create_cleanup(failed=True)

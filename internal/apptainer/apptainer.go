@@ -132,6 +132,19 @@ func runApptainerWithOutput(op string, imagePath string, capture bool, hideOutpu
 	cmd := exec.Command(apptainerCmd, args...)
 	cmd.Stdin = os.Stdin
 
+	// For build operations, unset SINGULARITY_BIND and APPTAINER_BIND to prevent
+	// mount conflicts during container build (e.g., when %post tries to access bound paths)
+	if op == "build" {
+		env := os.Environ()
+		filteredEnv := make([]string, 0, len(env))
+		for _, e := range env {
+			if !strings.HasPrefix(e, "SINGULARITY_BIND=") && !strings.HasPrefix(e, "APPTAINER_BIND=") {
+				filteredEnv = append(filteredEnv, e)
+			}
+		}
+		cmd.Env = filteredEnv
+	}
+
 	var stdoutBuf, stderrBuf bytes.Buffer
 	var stdoutWriter, stderrWriter io.Writer
 
