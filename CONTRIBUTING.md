@@ -16,8 +16,14 @@ Thank you for helping improve this project! This document explains the two main 
 What this covers
 - Bug fixes, feature additions, refactors, tests, or docs related to the `condatainer` tool.
 
+Development
+- Run `make build` to build the binary
+- Run `make test` or `go test ./...` to run unit tests
+
 Testing
-- There is no formal test suite yet, but please test your changes on both HPC and local environments if applicable.
+- Run existing tests before submitting changes
+- Add tests for new functionality when applicable
+- Test your changes on both HPC and local environments if applicable
 
 Commit and PR notes
 - Use clear commit messages describing the change.
