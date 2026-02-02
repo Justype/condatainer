@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -74,7 +76,7 @@ func runScript(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ensure base image exists
-	if err := apptainer.EnsureBaseImage(); err != nil {
+	if err := apptainer.EnsureBaseImage(cmd.Context()); err != nil {
 		return err
 	}
 
@@ -189,7 +191,14 @@ func runScript(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		if err := graph.Run(); err != nil {
+		if err := graph.Run(cmd.Context()); err != nil {
+			if errors.Is(err, build.ErrBuildCancelled) ||
+				errors.Is(cmd.Context().Err(), context.Canceled) ||
+				strings.Contains(err.Error(), "signal: killed") ||
+				strings.Contains(err.Error(), "context canceled") {
+				utils.PrintWarning("Auto-installation cancelled.")
+				return nil
+			}
 			utils.PrintError("Some overlays failed to install: %v", err)
 			return nil
 		}
@@ -276,7 +285,7 @@ export -f module ml
 		ApptainerBin: config.Global.ApptainerBin,
 	}
 
-	if err := execpkg.Run(options); err != nil {
+	if err := execpkg.Run(cmd.Context(), options); err != nil {
 		// Propagate exit code from container command
 		if appErr, ok := err.(*apptainer.ApptainerError); ok {
 			if code := appErr.ExitCode(); code >= 0 {

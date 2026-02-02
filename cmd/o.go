@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,25 +73,37 @@ If no image path is provided, defaults to 'env.img'.`,
 
 		// 4. Create the Overlay
 		if fakeroot {
-			err = overlay.CreateForRoot(path, sizeMB, typeFlag, sparse, fsType, false)
+			err = overlay.CreateForRoot(cmd.Context(), path, sizeMB, typeFlag, sparse, fsType, false)
 		} else {
-			err = overlay.CreateForCurrentUser(path, sizeMB, typeFlag, sparse, fsType, false)
+			err = overlay.CreateForCurrentUser(cmd.Context(), path, sizeMB, typeFlag, sparse, fsType, false)
 		}
 
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+				utils.PrintWarning("Overlay creation cancelled.")
+				return
+			}
 			utils.PrintError("%v", err)
 			os.Exit(1)
 		}
 
 		// 5. Initialize with Conda environment if file specified
 		if envFile != "" {
-			if err := initializeOverlayWithConda(path, envFile, fakeroot); err != nil {
+			if err := initializeOverlayWithConda(cmd.Context(), path, envFile, fakeroot); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+					utils.PrintWarning("Overlay initialization cancelled.")
+					return
+				}
 				utils.PrintError("Failed to initialize overlay with conda environment: %v", err)
 				os.Exit(1)
 			}
 		} else {
 			// Initialize with minimal conda environment (zlib)
-			if err := initializeOverlayWithConda(path, "", fakeroot); err != nil {
+			if err := initializeOverlayWithConda(cmd.Context(), path, "", fakeroot); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+					utils.PrintWarning("Overlay initialization cancelled.")
+					return
+				}
 				utils.PrintError("Failed to initialize overlay with conda environment: %v", err)
 				os.Exit(1)
 			}

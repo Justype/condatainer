@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"os/exec"
 	"strings"
 
@@ -9,7 +10,7 @@ import (
 
 // CheckIntegrity runs a filesystem check (e2fsck) on the overlay image.
 // force: If true, adds '-f' to force the check even if the filesystem appears clean.
-func CheckIntegrity(path string, force bool) error {
+func CheckIntegrity(ctx context.Context, path string, force bool) error {
 	// 0. Check Dependencies
 	if err := checkDependencies([]string{"e2fsck"}); err != nil {
 		return err
@@ -29,7 +30,7 @@ func CheckIntegrity(path string, force bool) error {
 	utils.PrintDebug("[CHECK] e2fsck %s", strings.Join(args, " "))
 
 	// 2. Run e2fsck
-	cmd := exec.Command("e2fsck", args...)
+	cmd := exec.CommandContext(ctx, "e2fsck", args...)
 	out, err := cmd.CombinedOutput()
 
 	// 3. Handle Exit Codes

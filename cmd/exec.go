@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -114,7 +116,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	}
 
-	if err := ensureBaseImage(); err != nil {
+	if err := ensureBaseImage(cmd.Context()); err != nil {
 		return err
 	}
 
@@ -222,7 +224,10 @@ func runExec(cmd *cobra.Command, args []string) error {
 		ApptainerBin: config.Global.ApptainerBin,
 	}
 
-	if err := exec.Run(options); err != nil {
+	if err := exec.Run(cmd.Context(), options); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+			return nil
+		}
 		// Propagate exit code from container command
 		if appErr, ok := err.(*apptainer.ApptainerError); ok {
 			if code := appErr.ExitCode(); code >= 0 {
@@ -246,8 +251,8 @@ func execHelpRequested(args []string) bool {
 	}
 }
 
-func ensureBaseImage() error {
-	return apptainer.EnsureBaseImage()
+func ensureBaseImage(ctx context.Context) error {
+	return apptainer.EnsureBaseImage(ctx)
 }
 
 func overlayFlagCompletion(includeData bool, includeImg bool) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {

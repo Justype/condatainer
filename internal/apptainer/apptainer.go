@@ -2,6 +2,7 @@ package apptainer
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -118,8 +121,8 @@ func CheckZstdSupport(currentVersion string) bool {
 // op: "exec", "pull", "build", "instance start", etc.
 // imagePath: optional, helpful for logging which container failed
 // capture: whether to capture stdout/stderr for storing on the error.
-func runApptainer(op string, imagePath string, capture bool, args ...string) error {
-	return runApptainerWithOutput(op, imagePath, capture, false, nil, args...)
+func runApptainer(ctx context.Context, op string, imagePath string, capture bool, args ...string) error {
+	return runApptainerWithOutput(ctx, op, imagePath, capture, false, nil, args...)
 }
 
 // runApptainerWithOutput executes an apptainer command with control over output handling.
@@ -128,8 +131,8 @@ func runApptainer(op string, imagePath string, capture bool, args ...string) err
 // imagePath: optional, helpful for logging which container failed
 // capture: whether to capture stdout/stderr for storing on the error.
 // hideOutput: whether to redirect stdout/stderr to /dev/null
-func runApptainerWithOutput(op string, imagePath string, capture bool, hideOutput bool, stdin io.Reader, args ...string) error {
-	cmd := exec.Command(apptainerCmd, args...)
+func runApptainerWithOutput(ctx context.Context, op string, imagePath string, capture bool, hideOutput bool, stdin io.Reader, args ...string) error {
+	cmd := exec.CommandContext(ctx, apptainerCmd, args...)
 
 	// Set stdin - use provided stdin or default to os.Stdin
 	if stdin != nil {
@@ -176,6 +179,11 @@ func runApptainerWithOutput(op string, imagePath string, capture bool, hideOutpu
 
 	cmd.Stdout = stdoutWriter
 	cmd.Stderr = stderrWriter
+
+	cmd.WaitDelay = 5 * time.Second
+	cmd.Cancel = func() error {
+		return cmd.Process.Signal(syscall.SIGINT)
+	}
 
 	err := cmd.Run()
 	if err != nil {

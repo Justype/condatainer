@@ -2,7 +2,9 @@ package build
 
 import (
 	"bufio"
+	"context"
 	"errors"
+
 	"fmt"
 	"os"
 	"os/exec"
@@ -54,11 +56,18 @@ func (bt BuildType) String() string {
 }
 
 // isCancelledByUser checks if the error is due to user cancellation (Ctrl+C)
-// Exit code 130 = 128 + SIGINT(2)
+// Exit code 130 = 128 + SIGINT(2), checks for "signal: killed" or context errors
 func isCancelledByUser(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if strings.Contains(err.Error(), "signal: killed") {
+		return true
+	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode() == 130
+		// 130 (SIGINT) or -1 (signal killed)
+		return exitErr.ExitCode() == 130 || exitErr.ExitCode() == -1
 	}
 	return false
 }
@@ -124,9 +133,9 @@ type BuildObject interface {
 	RequiresScheduler() bool
 
 	// Build operations
-	Build(buildDeps bool) error
+	Build(ctx context.Context, buildDeps bool) error
 	GetMissingDependencies() ([]string, error)
-	CreateTmpOverlay(force bool) error
+	CreateTmpOverlay(ctx context.Context, force bool) error
 	Cleanup(failed bool) error
 
 	// String representation
@@ -214,7 +223,7 @@ func (b *BaseBuildObject) GetMissingDependencies() ([]string, error) {
 	return missing, nil
 }
 
-func (b *BaseBuildObject) CreateTmpOverlay(force bool) error {
+func (b *BaseBuildObject) CreateTmpOverlay(ctx context.Context, force bool) error {
 	// Check if tmp overlay already exists
 	if _, err := os.Stat(b.tmpOverlayPath); err == nil {
 		if !force {
@@ -241,7 +250,7 @@ func (b *BaseBuildObject) CreateTmpOverlay(force bool) error {
 	// For build overlays, we use a temporary size from config (default 20GB)
 	// Use "conda" profile for small files, sparse=true for faster creation
 	// quiet=true suppresses detailed specs output since users don't need to see those for temp overlays
-	if err := overlay.CreateForCurrentUser(b.tmpOverlayPath, config.Global.Build.TmpSizeMB, "default", true, config.Global.Build.OverlayType, true); err != nil {
+	if err := overlay.CreateForCurrentUser(ctx, b.tmpOverlayPath, config.Global.Build.TmpSizeMB, "default", true, config.Global.Build.OverlayType, true); err != nil {
 		return fmt.Errorf("failed to create temporary overlay: %w", err)
 	}
 

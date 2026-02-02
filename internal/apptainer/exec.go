@@ -1,6 +1,7 @@
 package apptainer
 
 import (
+	"context"
 	"io"
 	"path/filepath"
 	"strings"
@@ -89,7 +90,7 @@ type ExecOptions struct {
 }
 
 // Exec executes a command inside a container
-func Exec(imagePath string, command []string, opts *ExecOptions) error {
+func Exec(ctx context.Context, imagePath string, command []string, opts *ExecOptions) error {
 	if opts == nil {
 		opts = &ExecOptions{}
 	}
@@ -130,5 +131,5 @@ func Exec(imagePath string, command []string, opts *ExecOptions) error {
 		utils.StylePath(imagePath),
 		utils.StyleAction(strings.Join(command, " ")))
 
-	return runApptainerWithOutput("exec", imagePath, false, opts.HideOutput, opts.Stdin, args...)
+	return runApptainerWithOutput(ctx, "exec", imagePath, false, opts.HideOutput, opts.Stdin, args...)
 }

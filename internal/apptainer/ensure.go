@@ -1,6 +1,7 @@
 package apptainer
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,7 +31,7 @@ func EnsureApptainer() error {
 //  2. Search all image paths for existing base image
 //  3. If not found, try to download prebuilt base image (unless debug mode)
 //  4. If download fails, try to build locally from definition file
-func EnsureBaseImage() error {
+func EnsureBaseImage(ctx context.Context) error {
 	// Step 1: Ensure apptainer is available
 	if err := EnsureApptainer(); err != nil {
 		return err
@@ -74,7 +75,7 @@ func EnsureBaseImage() error {
 		return err
 	}
 
-	if err := Build(baseImagePath, baseDefPath, nil); err != nil {
+	if err := Build(ctx, baseImagePath, baseDefPath, nil); err != nil {
 		return fmt.Errorf("building base image failed: %w", err)
 	}
 

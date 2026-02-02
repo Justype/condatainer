@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -118,7 +120,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	utils.PrintMessage("Attempting to auto-install missing dependencies...")
 
 	// Ensure base image exists
-	if err := apptainer.EnsureBaseImage(); err != nil {
+	if err := apptainer.EnsureBaseImage(cmd.Context()); err != nil {
 		return err
 	}
 
@@ -169,7 +171,14 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create build graph: %w", err)
 	}
 
-	if err := graph.Run(); err != nil {
+	if err := graph.Run(cmd.Context()); err != nil {
+		if errors.Is(err, build.ErrBuildCancelled) ||
+			errors.Is(cmd.Context().Err(), context.Canceled) ||
+			strings.Contains(err.Error(), "signal: killed") ||
+			strings.Contains(err.Error(), "context canceled") {
+			utils.PrintWarning("Installation cancelled.")
+			return nil
+		}
 		return fmt.Errorf("some overlays failed to install: %w", err)
 	}
 

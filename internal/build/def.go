@@ -1,14 +1,13 @@
 package build
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
@@ -59,7 +58,7 @@ func (d *DefBuildObject) String() string {
 //  4. Extract SquashFS partition from SIF
 //  5. Set permissions
 //  6. Cleanup
-func (d *DefBuildObject) Build(buildDeps bool) error {
+func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	targetOverlayPath := d.targetOverlayPath
 	if absTarget, err := filepath.Abs(targetOverlayPath); err == nil {
 		targetOverlayPath = absTarget
@@ -82,9 +81,6 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 	}
 	utils.PrintMessage("Building overlay %s (%s build) from %s", styledOverlay, utils.StyleAction(buildMode), utils.StylePath(d.buildSource))
 
-	// Setup signal handling for graceful cleanup on Ctrl+C
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	done := make(chan struct{})
 
 	// Ensure cleanup on function exit
@@ -99,13 +95,13 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 		})
 	}
 
-	// Monitor for interrupt signals in background
+	// Monitor for context cancellation
 	go func() {
 		select {
-		case sig := <-sigChan:
-			utils.PrintMessage("Received signal %v, cleaning up...", sig)
-			cleanupFunc()
-			os.Exit(130)
+		case <-ctx.Done():
+			utils.PrintWarning("Build cancelled. Interrupting build...")
+			// Do not call cleanupFunc() here to avoid race condition with process termination
+			// cleanupFunc() will be called after apptainer.Build returns
 		case <-done:
 			return
 		}
@@ -133,21 +129,20 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 		NoCleanup: false,
 	}
 
-	if err := apptainer.Build(d.tmpOverlayPath, d.buildSource, buildOpts); err != nil {
+	if err := apptainer.Build(ctx, d.tmpOverlayPath, d.buildSource, buildOpts); err != nil {
+		cleanupFunc()
 		if apptainer.IsBuildCancelled(err) {
 			utils.PrintMessage("Build cancelled for %s. Overlay unchanged.", styledOverlay)
-			d.Cleanup(true)
 			return ErrBuildCancelled
 		}
-		d.Cleanup(true)
 		return fmt.Errorf("failed to build SIF from %s: %w", d.buildSource, err)
 	}
 
 	utils.PrintMessage("Extracting SquashFS to %s", utils.StylePath(targetOverlayPath))
 
 	// Extract SquashFS from SIF
-	if err := apptainer.DumpSifToSquashfs(d.tmpOverlayPath, targetOverlayPath); err != nil {
-		d.Cleanup(true)
+	if err := apptainer.DumpSifToSquashfs(ctx, d.tmpOverlayPath, targetOverlayPath); err != nil {
+		cleanupFunc()
 		return fmt.Errorf("failed to dump SquashFS from SIF: %w", err)
 	}
 

@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -83,25 +85,37 @@ If no image path is provided, defaults to 'env.img'.`,
 
 		// 3. Create the Overlay
 		if fakeroot {
-			err = overlay.CreateForRoot(path, sizeMB, typeFlag, sparse, fsType, false)
+			err = overlay.CreateForRoot(cmd.Context(), path, sizeMB, typeFlag, sparse, fsType, false)
 		} else {
-			err = overlay.CreateForCurrentUser(path, sizeMB, typeFlag, sparse, fsType, false)
+			err = overlay.CreateForCurrentUser(cmd.Context(), path, sizeMB, typeFlag, sparse, fsType, false)
 		}
 
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+				utils.PrintWarning("Overlay creation cancelled.")
+				return
+			}
 			utils.PrintError("%v", err)
 			os.Exit(1)
 		}
 
 		// 4. Initialize with Conda environment if file specified
 		if envFile != "" {
-			if err := initializeOverlayWithConda(path, envFile, fakeroot); err != nil {
+			if err := initializeOverlayWithConda(cmd.Context(), path, envFile, fakeroot); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+					utils.PrintWarning("Overlay initialization cancelled.")
+					return
+				}
 				utils.PrintError("Failed to initialize overlay with conda environment: %v", err)
 				os.Exit(1)
 			}
 		} else {
 			// Initialize with minimal conda environment (zlib)
-			if err := initializeOverlayWithConda(path, "", fakeroot); err != nil {
+			if err := initializeOverlayWithConda(cmd.Context(), path, "", fakeroot); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+					utils.PrintWarning("Overlay initialization cancelled.")
+					return
+				}
 				utils.PrintError("Failed to initialize overlay with conda environment: %v", err)
 				os.Exit(1)
 			}
@@ -142,7 +156,7 @@ var resizeCmd = &cobra.Command{
 		}
 
 		// 3. Execute
-		err = overlay.Resize(path, sizeMB)
+		err = overlay.Resize(cmd.Context(), path, sizeMB)
 		if err != nil {
 			utils.PrintError("%v", err)
 			os.Exit(1)
@@ -247,7 +261,7 @@ var checkCmd = &cobra.Command{
 		path := args[0]
 		force, _ := cmd.Flags().GetBool("force")
 
-		err := overlay.CheckIntegrity(path, force)
+		err := overlay.CheckIntegrity(cmd.Context(), path, force)
 		if err != nil {
 			utils.PrintError("%v", err)
 			os.Exit(1)
@@ -311,8 +325,12 @@ Use --root to force ownership to 0:0.`,
 		utils.PrintDebug("New Owner:    UID=%d GID=%d", targetUID, targetGID)
 
 		// Perform the recursive chown
-		err := overlay.ChownRecursively(path, targetUID, targetGID, internalPath)
+		err := overlay.ChownRecursively(cmd.Context(), path, targetUID, targetGID, internalPath)
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+				utils.PrintWarning("Operation cancelled.")
+				return
+			}
 			utils.PrintError("%v", err)
 			os.Exit(1)
 		}
@@ -400,7 +418,7 @@ func init() {
 
 // initializeOverlayWithConda installs a conda environment from a YAML file into an overlay
 // If envFile is empty, it creates a minimal environment with zlib
-func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) error {
+func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string, fakeroot bool) error {
 	// Validate environment file if provided
 	if envFile != "" {
 		absEnvFile, err := filepath.Abs(envFile)
@@ -419,7 +437,7 @@ func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) erro
 	}
 
 	// Ensure base image exists
-	if err := apptainer.EnsureBaseImage(); err != nil {
+	if err := apptainer.EnsureBaseImage(ctx); err != nil {
 		return err
 	}
 
@@ -446,7 +464,7 @@ func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) erro
 		HideOutput:  true, // Suppress mm-create verbose output
 	}
 
-	if err := exec.Run(opts); err != nil {
+	if err := exec.Run(ctx, opts); err != nil {
 		os.Remove(absOverlayPath)
 		return fmt.Errorf("failed to run mm-create: %w", err)
 	}
@@ -461,7 +479,7 @@ func initializeOverlayWithConda(overlayPath, envFile string, fakeroot bool) erro
 		HideOutput:  true, // Suppress mm-clean verbose output
 	}
 
-	if err := exec.Run(cleanOpts); err != nil {
+	if err := exec.Run(ctx, cleanOpts); err != nil {
 		utils.PrintWarning("Failed to clean micromamba cache: %v", err)
 		// Not a critical error, continue
 	}

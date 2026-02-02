@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,7 +25,7 @@ func TestCreateTmpOverlay_CreatesParentDir(t *testing.T) {
 		_ = os.RemoveAll(parent)
 	}
 
-	err := base.CreateTmpOverlay(false)
+	err := base.CreateTmpOverlay(context.Background(), false)
 	// We expect an error from overlay creation in CI environments where dd/mke2fs/debugfs might be missing
 	if err == nil {
 		// If overlay creation succeeded unexpectedly, cleanup the file and return success

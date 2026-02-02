@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -206,7 +208,14 @@ func runAvail(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("failed to create build graph: %w", err)
 			}
 
-			if err := graph.Run(); err != nil {
+			if err := graph.Run(cmd.Context()); err != nil {
+				if errors.Is(err, build.ErrBuildCancelled) ||
+					errors.Is(cmd.Context().Err(), context.Canceled) ||
+					strings.Contains(err.Error(), "signal: killed") ||
+					strings.Contains(err.Error(), "context canceled") {
+					utils.PrintWarning("Installation cancelled.")
+					return nil
+				}
 				utils.PrintError("Some overlays failed to install.")
 				return err
 			}

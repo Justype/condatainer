@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -160,8 +161,8 @@ func (bg *BuildGraph) topologicalSort() error {
 
 // Run executes the build graph
 // First runs local builds, then submits scheduler jobs
-func (bg *BuildGraph) Run() error {
-	if err := bg.runLocalStep(); err != nil {
+func (bg *BuildGraph) Run(ctx context.Context) error {
+	if err := bg.runLocalStep(ctx); err != nil {
 		return err
 	}
 	if err := bg.runSchedulerStep(); err != nil {
@@ -193,13 +194,13 @@ func (bg *BuildGraph) Run() error {
 }
 
 // runLocalStep executes builds that don't require scheduler
-func (bg *BuildGraph) runLocalStep() error {
+func (bg *BuildGraph) runLocalStep(ctx context.Context) error {
 	for _, meta := range bg.localBuilds {
 		if meta.IsInstalled() {
 			continue
 		}
 		utils.PrintDebug("Processing overlay %s (local build)...", meta.NameVersion())
-		if err := meta.Build(false); err != nil {
+		if err := meta.Build(ctx, false); err != nil {
 			return fmt.Errorf("failed to build %s: %w", meta.NameVersion(), err)
 		}
 	}

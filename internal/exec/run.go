@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,7 +16,7 @@ import (
 )
 
 // Run executes a command inside a configured Apptainer container.
-func Run(options Options) error {
+func Run(ctx context.Context, options Options) error {
 	options = options.ensureDefaults()
 
 	if err := apptainer.SetBin(options.ApptainerBin); err != nil {
@@ -189,7 +190,7 @@ func Run(options Options) error {
 		}
 	}
 
-	if err := apptainer.Exec(options.BaseImage, options.Command, opts); err != nil {
+	if err := apptainer.Exec(ctx, options.BaseImage, options.Command, opts); err != nil {
 		return err
 	}
 	return nil

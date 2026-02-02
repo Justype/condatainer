@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -28,8 +29,8 @@ func checkDependencies(tools []string) error {
 }
 
 // runCommand executes a shell command and wraps failures in overlay.Error.
-func runCommand(op, path, tool string, args ...string) error {
-	cmd := exec.Command(tool, args...)
+func runCommand(ctx context.Context, op, path, tool string, args ...string) error {
+	cmd := exec.CommandContext(ctx, tool, args...)
 	utils.PrintDebug("[%s] Running %s %s", op, tool, strings.Join(args, " "))
 	output, err := cmd.CombinedOutput()
 

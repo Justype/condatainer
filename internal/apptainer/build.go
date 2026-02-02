@@ -1,6 +1,7 @@
 package apptainer
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,7 +20,7 @@ type BuildOptions struct {
 
 // Build builds a container image from a definition file
 // Always uses --fakeroot (required for non-root users on HPC systems)
-func Build(imagePath, defFile string, opts *BuildOptions) error {
+func Build(ctx context.Context, imagePath, defFile string, opts *BuildOptions) error {
 	if opts == nil {
 		opts = &BuildOptions{}
 	}
@@ -47,7 +48,7 @@ func Build(imagePath, defFile string, opts *BuildOptions) error {
 		utils.StylePath(imagePath),
 		utils.StyleInfo("from "+defFile))
 
-	return runApptainer("build", imagePath, false, args...)
+	return runApptainer(ctx, "build", imagePath, false, args...)
 }
 
 // DumpSifToSquashfs extracts the SquashFS partition from a SIF image to a .sqfs file
@@ -56,9 +57,9 @@ func Build(imagePath, defFile string, opts *BuildOptions) error {
 // Workflow:
 //  1. apptainer sif list <sifPath> - Find the Squashfs/*System partition ID
 //  2. apptainer sif dump <id> <sifPath> > <outputPath> - Dump to .sqfs file
-func DumpSifToSquashfs(sifPath, outputPath string) error {
+func DumpSifToSquashfs(ctx context.Context, sifPath, outputPath string) error {
 	// Step 1: List SIF partitions to find SquashFS ID
-	cmd := exec.Command(apptainerCmd, "sif", "list", sifPath)
+	cmd := exec.CommandContext(ctx, apptainerCmd, "sif", "list", sifPath)
 	output, err := cmd.Output()
 	if err != nil {
 		return &ApptainerError{
@@ -114,7 +115,7 @@ func DumpSifToSquashfs(sifPath, outputPath string) error {
 	defer outFile.Close()
 
 	// Run: apptainer sif dump <id> <sifPath>
-	dumpCmd := exec.Command(apptainerCmd, "sif", "dump", strconv.Itoa(squashfsID), sifPath)
+	dumpCmd := exec.CommandContext(ctx, apptainerCmd, "sif", "dump", strconv.Itoa(squashfsID), sifPath)
 	dumpCmd.Stdout = outFile
 	dumpCmd.Stderr = os.Stderr
 

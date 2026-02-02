@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +10,7 @@ import (
 )
 
 // Resize adjusts the size of an existing ext3 overlay image.
-func Resize(imagePath string, newSizeMB int) error {
+func Resize(ctx context.Context, imagePath string, newSizeMB int) error {
 	// 0. Check Dependencies (resize2fs needs to be checked here, e2fsck is checked in CheckIntegrity)
 	if err := checkDependencies([]string{"resize2fs"}); err != nil {
 		return err
@@ -37,7 +38,7 @@ func Resize(imagePath string, newSizeMB int) error {
 	utils.PrintMessage("Resizing %s to %d MiB", utils.StylePath(absPath), newSizeMB)
 
 	// 2. Pre-check Integrity (Force = true is recommended before resizing)
-	if err := CheckIntegrity(absPath, true); err != nil {
+	if err := CheckIntegrity(ctx, absPath, true); err != nil {
 		return err
 	}
 
@@ -47,7 +48,7 @@ func Resize(imagePath string, newSizeMB int) error {
 		utils.PrintMessage("Shrinking overlay image to %d MiB", newSizeMB)
 
 		sizeArg := fmt.Sprintf("%dM", newSizeMB)
-		if err := runCommand("shrink filesystem", absPath, "resize2fs", "-p", absPath, sizeArg); err != nil {
+		if err := runCommand(ctx, "shrink filesystem", absPath, "resize2fs", "-p", absPath, sizeArg); err != nil {
 			return err
 		}
 
@@ -63,14 +64,14 @@ func Resize(imagePath string, newSizeMB int) error {
 			return fmt.Errorf("failed to expand file: %w", err)
 		}
 
-		if err := runCommand("expand filesystem", absPath, "resize2fs", "-p", absPath); err != nil {
+		if err := runCommand(ctx, "expand filesystem", absPath, "resize2fs", "-p", absPath); err != nil {
 			return err
 		}
 	}
 
 	// 4. Final Verification
 	// We run it again to ensure the resize didn't corrupt anything.
-	if err := CheckIntegrity(absPath, true); err != nil {
+	if err := CheckIntegrity(ctx, absPath, true); err != nil {
 		return err
 	}
 

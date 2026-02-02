@@ -1,14 +1,13 @@
 package build
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
@@ -102,7 +101,7 @@ func (s *ScriptBuildObject) String() string {
 //  6. For app overlays: set permissions, create SquashFS from /cnt
 //  7. Extract and save ENV variables if present
 //  8. Set permissions and cleanup
-func (s *ScriptBuildObject) Build(buildDeps bool) error {
+func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	// Ensure target overlay path is absolute
 	targetOverlayPath := s.targetOverlayPath
 	if absTarget, err := filepath.Abs(targetOverlayPath); err == nil {
@@ -126,7 +125,7 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 
 	// Create temporary overlay
 	utils.PrintMessage("Creating temporary overlay %s", utils.StylePath(s.tmpOverlayPath))
-	if err := s.CreateTmpOverlay(false); err != nil {
+	if err := s.CreateTmpOverlay(ctx, false); err != nil {
 		if errors.Is(err, ErrTmpOverlayExists) {
 			return fmt.Errorf("temporary overlay for %s already exists. Maybe a build is still running? %w", s.nameVersion, err)
 		}
@@ -156,7 +155,7 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 				if err != nil {
 					return fmt.Errorf("failed to create build object for dependency %s: %w", dep, err)
 				}
-				if err := depObj.Build(false); err != nil {
+				if err := depObj.Build(ctx, false); err != nil {
 					return fmt.Errorf("failed to build dependency %s: %w", dep, err)
 				}
 			}
@@ -283,35 +282,23 @@ fi
 		})
 	}
 
-	// Catch Ctrl+C and other termination signals during build script
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-	// Use sync.Once to safely stop signal handling (prevents double-close)
-	var stopSignalOnce sync.Once
 	done := make(chan struct{})
-	stopSignalHandler := func() {
-		stopSignalOnce.Do(func() {
-			signal.Stop(sigChan)
-			close(done)
-		})
-	}
-	defer stopSignalHandler()
+	defer close(done)
 
 	// Monitor signals in background during build script execution
 	go func() {
 		select {
-		case sig := <-sigChan:
-			utils.PrintWarning("Received signal %v. Interrupting build...", sig)
-			cleanupFunc()
-			os.Exit(130) // Standard exit code for SIGINT
+		case <-ctx.Done():
+			utils.PrintWarning("Build cancelled. Interrupting build...")
+			// Do not call cleanupFunc() here to avoid race condition with process termination
+			// cleanupFunc() will be called after execpkg.Run returns
 		case <-done:
 			return
 		}
 	}()
 
 	// Run build script
-	if err := execpkg.Run(opts); err != nil {
+	if err := execpkg.Run(ctx, opts); err != nil {
 		cleanupFunc()
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
@@ -322,7 +309,6 @@ fi
 	// Build succeeded - stop the signal handler before createSquashfs
 	// This prevents the cleanup goroutine from removing tmpOverlayPath
 	// while createSquashfs has it mounted, which would cause a Bus error
-	stopSignalHandler()
 
 	// Create SquashFS
 	if s.isRef {
@@ -339,14 +325,14 @@ fi
 		}
 
 		utils.PrintMessage("Creating SquashFS from %s for overlay %s", utils.StylePath(s.cntDirPath), styledOverlay)
-		if err := s.createSquashfs(s.cntDirPath, targetOverlayPath); err != nil {
+		if err := s.createSquashfs(ctx, s.cntDirPath, targetOverlayPath); err != nil {
 			s.Cleanup(true)
 			return err
 		}
 	} else {
 		// For app overlays: set permissions and pack from /cnt
 		utils.PrintMessage("Preparing SquashFS from /cnt for overlay %s", styledOverlay)
-		if err := s.createSquashfs("/cnt", targetOverlayPath); err != nil {
+		if err := s.createSquashfs(ctx, "/cnt", targetOverlayPath); err != nil {
 			s.Cleanup(true)
 			return err
 		}
@@ -376,11 +362,39 @@ fi
 }
 
 // createSquashfs creates a SquashFS file from the given source directory
-func (s *ScriptBuildObject) createSquashfs(sourceDir, targetOverlayPath string) error {
+func (s *ScriptBuildObject) createSquashfs(ctx context.Context, sourceDir, targetOverlayPath string) error {
 	targetPath := targetOverlayPath
 	if absTarget, err := filepath.Abs(targetPath); err == nil {
 		targetPath = absTarget
 	}
+
+	// Set up signal handling for SquashFS creation phase
+	var cleanupOnce sync.Once
+	cleanupFunc := func() {
+		cleanupOnce.Do(func() {
+			utils.PrintMessage("Cleaning up temporary files for %s...", utils.StyleName(s.nameVersion))
+			s.Cleanup(true)
+			// Remove partial SquashFS file if it exists
+			if _, err := os.Stat(targetPath); err == nil {
+				os.Remove(targetPath)
+			}
+		})
+	}
+
+	done := make(chan struct{})
+	defer close(done)
+
+	// Monitor signals in background during SquashFS creation
+	go func() {
+		select {
+		case <-ctx.Done():
+			utils.PrintWarning("Build cancelled during SquashFS creation. Cleaning up...")
+			// Do not call cleanupFunc() here to avoid race condition with process termination
+			// cleanupFunc() will be called after execpkg.Run returns
+		case <-done:
+			return
+		}
+	}()
 
 	// Build mksquashfs command
 	bashScript := ""
@@ -425,56 +439,14 @@ mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
 		s.nameVersion, opts.Overlays, opts.BindPaths)
 	utils.PrintMessage("Packing %s into %s", utils.StylePath(sourceDir), utils.StylePath(targetPath))
 
-	// Set up signal handling for SquashFS creation phase
-	var cleanupOnce sync.Once
-	cleanupFunc := func() {
-		cleanupOnce.Do(func() {
-			utils.PrintMessage("Cleaning up temporary files for %s...", utils.StyleName(s.nameVersion))
-			s.Cleanup(true)
-			// Remove partial SquashFS file if it exists
-			if _, err := os.Stat(targetPath); err == nil {
-				os.Remove(targetPath)
-			}
-		})
-	}
-
-	// Catch Ctrl+C and other termination signals during SquashFS creation
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-	var stopSignalOnce sync.Once
-	done := make(chan struct{})
-	stopSignalHandler := func() {
-		stopSignalOnce.Do(func() {
-			signal.Stop(sigChan)
-			close(done)
-		})
-	}
-	defer stopSignalHandler()
-
-	// Monitor signals in background during SquashFS creation
-	go func() {
-		select {
-		case sig := <-sigChan:
-			utils.PrintWarning("Received signal %v during SquashFS creation. Cleaning up...", sig)
-			cleanupFunc()
-			os.Exit(130)
-		case <-done:
-			return
-		}
-	}()
-
 	// Run the SquashFS creation using exec.Run
-	if err := execpkg.Run(opts); err != nil {
+	if err := execpkg.Run(ctx, opts); err != nil {
 		cleanupFunc()
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
 		}
 		return fmt.Errorf("failed to create SquashFS: %w", err)
 	}
-
-	// SquashFS creation succeeded - stop signal handler
-	stopSignalHandler()
 
 	return nil
 }

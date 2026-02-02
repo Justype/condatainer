@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -61,7 +62,7 @@ func getProfile(name string) Profile {
 // ---------------------------------------------------------
 
 // CreateForCurrentUser generates an overlay owned by the current host user.
-func CreateForCurrentUser(path string, sizeMB int, profileType string, sparse bool, fsType string, quiet bool) error {
+func CreateForCurrentUser(ctx context.Context, path string, sizeMB int, profileType string, sparse bool, fsType string, quiet bool) error {
 	opts := &CreateOptions{
 		Path:           path,
 		SizeMB:         sizeMB,
@@ -72,11 +73,11 @@ func CreateForCurrentUser(path string, sizeMB int, profileType string, sparse bo
 		FilesystemType: fsType,
 		Quiet:          quiet,
 	}
-	return CreateWithOptions(opts)
+	return CreateWithOptions(ctx, opts)
 }
 
 // CreateForRoot generates an overlay owned by root (UID=0, GID=0).
-func CreateForRoot(path string, sizeMB int, profileType string, sparse bool, fsType string, quiet bool) error {
+func CreateForRoot(ctx context.Context, path string, sizeMB int, profileType string, sparse bool, fsType string, quiet bool) error {
 	opts := &CreateOptions{
 		Path:           path,
 		SizeMB:         sizeMB,
@@ -87,12 +88,12 @@ func CreateForRoot(path string, sizeMB int, profileType string, sparse bool, fsT
 		FilesystemType: fsType,
 		Quiet:          quiet,
 	}
-	return CreateWithOptions(opts)
+	return CreateWithOptions(ctx, opts)
 }
 
 // CreateWithOptions generates an overlay image using the provided options.
 // Supports ext3 and ext4 filesystem types.
-func CreateWithOptions(opts *CreateOptions) error {
+func CreateWithOptions(ctx context.Context, opts *CreateOptions) error {
 	// 0. Validate and normalize filesystem type
 	if opts.FilesystemType == "" {
 		opts.FilesystemType = "ext3" // Default to ext3 for compatibility
@@ -138,12 +139,14 @@ func CreateWithOptions(opts *CreateOptions) error {
 		ddArgs = append(ddArgs, fmt.Sprintf("count=%d", opts.SizeMB), "status=progress")
 	}
 
-	if err := runCommand("create_file", opts.Path, "dd", ddArgs...); err != nil {
+	if err := runCommand(ctx, "create_file", opts.Path, "dd", ddArgs...); err != nil {
+		// Cleanup the file if dd was interrupted or failed (especially for non-sparse)
+		_ = os.Remove(opts.Path)
 		return err
 	}
 
 	// 3. Format filesystem with Profile (mke2fs)
-	if err := runCommand("format", opts.Path, "mke2fs",
+	if err := runCommand(ctx, "format", opts.Path, "mke2fs",
 		"-t", opts.FilesystemType,
 		"-i", fmt.Sprintf("%d", opts.Profile.InodeRatio),
 		"-m", fmt.Sprintf("%d", opts.Profile.ReservedPerc),
@@ -162,11 +165,14 @@ func CreateWithOptions(opts *CreateOptions) error {
 	script.WriteString(fmt.Sprintf("set_inode_field work gid %d\n", opts.GID))
 	script.WriteString("quit\n")
 
-	cmd := exec.Command("debugfs", "-w", opts.Path)
+	cmd := exec.CommandContext(ctx, "debugfs", "-w", opts.Path)
 	cmd.Stdin = strings.NewReader(script.String())
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		// If structure injection fails (e.g. cancelled), the image is corrupt/incomplete.
+		_ = os.Remove(opts.Path)
+
 		return &Error{
 			Op:      "inject structure",
 			Path:    opts.Path,

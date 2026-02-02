@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -37,6 +38,7 @@ var createCmd = &cobra.Command{
 	Short:   "Create a new SquashFS overlay",
 	Long:    `Create a new SquashFS overlay using available build scripts or Conda packages.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx := cmd.Context()
 		// 1. Validation Logic
 		if len(args) == 0 && createFile == "" && createSource == "" {
 			utils.PrintError("At least one of [packages], --file, or --source must be provided.")
@@ -64,7 +66,7 @@ var createCmd = &cobra.Command{
 		}
 
 		// 2. Ensure base image exists (also checks for apptainer)
-		if err := apptainer.EnsureBaseImage(); err != nil {
+		if err := apptainer.EnsureBaseImage(ctx); err != nil {
 			utils.PrintError("%v", err)
 			os.Exit(1)
 		}
@@ -104,17 +106,17 @@ var createCmd = &cobra.Command{
 		// 6. Execute create based on mode
 		if createSource != "" {
 			// Mode: --source (external image like docker://ubuntu)
-			runCreateFromSource()
+			runCreateFromSource(ctx)
 		} else if createPrefix != "" {
 			// Mode: --prefix (with --file for YAML/def/sh)
-			runCreateWithPrefix()
+			runCreateWithPrefix(ctx)
 		} else if createName != "" {
 			// Mode: --name (multiple packages or YAML into one sqf)
 			// Pass original args for conda package names (not normalized)
-			runCreateWithName(args)
+			runCreateWithName(ctx, args)
 		} else {
 			// Mode: Default (each package gets its own sqf via BuildObject)
-			runCreatePackages(normalizedArgs)
+			runCreatePackages(ctx, normalizedArgs)
 		}
 	},
 }
@@ -152,7 +154,7 @@ func getWritableImagesDir() string {
 
 // runCreatePackages creates separate sqf files for each package using BuildGraph
 // Example: condatainer create samtools/1.16 bcftools/1.15
-func runCreatePackages(packages []string) {
+func runCreatePackages(ctx context.Context, packages []string) {
 	imagesDir := getWritableImagesDir()
 
 	buildObjects := make([]build.BuildObject, 0, len(packages))
@@ -172,7 +174,7 @@ func runCreatePackages(packages []string) {
 		os.Exit(1)
 	}
 
-	if err := graph.Run(); err != nil {
+	if err := graph.Run(ctx); err != nil {
 		exitOnBuildError(err)
 	}
 }
@@ -180,7 +182,7 @@ func runCreatePackages(packages []string) {
 // runCreateWithName creates a single sqf with multiple packages or from YAML
 // Example: condatainer create -n myenv nvim nodejs
 // Example: condatainer create -n myenv -f environment.yml
-func runCreateWithName(packages []string) {
+func runCreateWithName(ctx context.Context, packages []string) {
 	imagesDir := getWritableImagesDir()
 
 	normalizedName := utils.NormalizeNameVersion(createName)
@@ -223,7 +225,7 @@ func runCreateWithName(packages []string) {
 		os.Exit(1)
 	}
 
-	if err := bo.Build(false); err != nil {
+	if err := bo.Build(ctx, false); err != nil {
 		utils.PrintError("Build failed: %v", err)
 		os.Exit(1)
 	}
@@ -232,7 +234,7 @@ func runCreateWithName(packages []string) {
 // runCreateWithPrefix creates a sqf from external source file (.sh, .def, .yml)
 // Example: condatainer create -p myprefix -f environment.yml
 // Example: condatainer create -p myprefix -f build.sh
-func runCreateWithPrefix() {
+func runCreateWithPrefix(ctx context.Context) {
 	absPrefix, _ := filepath.Abs(createPrefix)
 	// Use the directory from prefix path as output directory
 	outputDir := filepath.Dir(absPrefix)
@@ -258,7 +260,7 @@ func runCreateWithPrefix() {
 			utils.PrintError("Failed to create build object: %v", err)
 			os.Exit(1)
 		}
-		if err := bo.Build(false); err != nil {
+		if err := bo.Build(ctx, false); err != nil {
 			utils.PrintError("Build failed: %v", err)
 			os.Exit(1)
 		}
@@ -279,7 +281,7 @@ func runCreateWithPrefix() {
 			os.Exit(1)
 		}
 
-		if err := graph.Run(); err != nil {
+		if err := graph.Run(ctx); err != nil {
 			exitOnBuildError(err)
 		}
 	} else {
@@ -290,7 +292,7 @@ func runCreateWithPrefix() {
 
 // runCreateFromSource creates a sqf from an external source (def file or remote URI)
 // Example: condatainer create --source docker://ubuntu:22.04 -n myubuntu
-func runCreateFromSource() {
+func runCreateFromSource(ctx context.Context) {
 	imagesDir := getWritableImagesDir()
 
 	if createPrefix == "" && createName == "" {
@@ -333,14 +335,16 @@ func runCreateFromSource() {
 		os.Exit(1)
 	}
 
-	if err := graph.Run(); err != nil {
+	if err := graph.Run(ctx); err != nil {
 		exitOnBuildError(err)
 	}
 }
 
 func exitOnBuildError(err error) {
-	if errors.Is(err, build.ErrBuildCancelled) {
-		utils.PrintMessage("Build cancelled by user.")
+	if errors.Is(err, build.ErrBuildCancelled) ||
+		strings.Contains(err.Error(), "signal: killed") ||
+		strings.Contains(err.Error(), "context canceled") {
+		// Suppress output as inner layers handle the "cancelled" messaging
 	} else {
 		utils.PrintError("Build failed: %v", err)
 	}

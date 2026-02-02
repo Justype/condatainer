@@ -1,6 +1,7 @@
 package apptainer
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 
@@ -23,7 +24,7 @@ type InstanceStartOptions struct {
 }
 
 // InstanceStart starts a named container instance
-func InstanceStart(imagePath, instanceName string, opts *InstanceStartOptions) error {
+func InstanceStart(ctx context.Context, imagePath, instanceName string, opts *InstanceStartOptions) error {
 	if opts == nil {
 		opts = &InstanceStartOptions{}
 	}
@@ -72,11 +73,11 @@ func InstanceStart(imagePath, instanceName string, opts *InstanceStartOptions) e
 		utils.StyleInfo(instanceName),
 		utils.StylePath(imagePath))
 
-	return runApptainer("instance start", imagePath, false, args...)
+	return runApptainer(ctx, "instance start", imagePath, false, args...)
 }
 
 // InstanceStop stops a running container instance
-func InstanceStop(instanceName string, force bool) error {
+func InstanceStop(ctx context.Context, instanceName string, force bool) error {
 	args := []string{"instance", "stop"}
 
 	if force {
@@ -87,11 +88,11 @@ func InstanceStop(instanceName string, force bool) error {
 
 	utils.PrintDebug("Stopping instance %s", utils.StyleInfo(instanceName))
 
-	return runApptainer("instance stop", instanceName, false, args...)
+	return runApptainer(ctx, "instance stop", instanceName, false, args...)
 }
 
 // InstanceStopAll stops all running container instances
-func InstanceStopAll(force bool) error {
+func InstanceStopAll(ctx context.Context, force bool) error {
 	args := []string{"instance", "stop"}
 
 	if force {
@@ -102,13 +103,13 @@ func InstanceStopAll(force bool) error {
 
 	utils.PrintDebug("Stopping all instances")
 
-	return runApptainer("instance stop", "all", false, args...)
+	return runApptainer(ctx, "instance stop", "all", false, args...)
 }
 
 // InstanceList lists running container instances
 // Returns the output from apptainer instance list
-func InstanceList() (string, error) {
-	cmd := exec.Command(apptainerCmd, "instance", "list")
+func InstanceList(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, apptainerCmd, "instance", "list")
 	output, err := cmd.Output()
 
 	if err != nil {

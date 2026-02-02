@@ -1,13 +1,12 @@
 package build
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/exec"
@@ -92,7 +91,7 @@ func (c *CondaBuildObject) String() string {
 //  4. Set permissions
 //  5. Pack to SquashFS
 //  6. Cleanup
-func (c *CondaBuildObject) Build(buildDeps bool) error {
+func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	// Ensure target overlay path is absolute
 	targetOverlayPath := c.targetOverlayPath
 	if absTarget, err := filepath.Abs(targetOverlayPath); err == nil {
@@ -115,13 +114,10 @@ func (c *CondaBuildObject) Build(buildDeps bool) error {
 	utils.PrintMessage("Building overlay %s (%s build)", styledOverlay, utils.StyleAction(buildMode))
 
 	// Create temporary overlay
-	if err := c.CreateTmpOverlay(false); err != nil {
+	if err := c.CreateTmpOverlay(ctx, false); err != nil {
 		return fmt.Errorf("temporary overlay for %s already exists. Maybe a build is still running?", c.nameVersion)
 	}
 
-	// Setup signal handling for graceful cleanup on Ctrl+C
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	done := make(chan struct{})
 
 	// Ensure cleanup on function exit
@@ -136,13 +132,13 @@ func (c *CondaBuildObject) Build(buildDeps bool) error {
 		})
 	}
 
-	// Monitor for interrupt signals in background
+	// Monitor for context cancellation
 	go func() {
 		select {
-		case sig := <-sigChan:
-			utils.PrintMessage("Received signal %v, cleaning up...", sig)
-			cleanupFunc()
-			os.Exit(130)
+		case <-ctx.Done():
+			utils.PrintWarning("Build cancelled. Interrupting build...")
+			// Do not call cleanupFunc() here to avoid race condition with process termination
+			// cleanupFunc() will be called after exec.Run returns
 		case <-done:
 			return
 		}
@@ -219,8 +215,8 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
 		c.nameVersion, opts.Overlays, opts.BindPaths)
 
 	// Run the build using exec.Run
-	if err := exec.Run(opts); err != nil {
-		c.Cleanup(true)
+	if err := exec.Run(ctx, opts); err != nil {
+		cleanupFunc()
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
 		}

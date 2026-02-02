@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
@@ -104,7 +107,10 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		// Cobra's automatic error printing is silenced. For Apptainer errors
 		// print only the captured output (trimmed) and exit with non-zero
 		// status. For other errors, print the default error string.
