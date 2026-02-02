@@ -124,7 +124,7 @@ func init() {
 	// Subcommands are attached to rootCmd in their respective init() functions
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debug mode with verbose output")
 	rootCmd.PersistentFlags().BoolVar(&localMode, "local", false, "Disable job submission (run locally)")
-	rootCmd.PersistentFlags().BoolVarP(&quietMode, "quiet", "q", false, "Suppress verbose overlay creation messages (errors/warnings still shown)")
+	rootCmd.PersistentFlags().BoolVarP(&quietMode, "quiet", "q", false, "Suppress messages (warnings/errors are still shown)")
 	rootCmd.PersistentFlags().BoolVarP(&yesMode, "yes", "y", false, "Automatically answer yes to all prompts")
 
 	// Hide the help command from completions (use -h/--help instead)

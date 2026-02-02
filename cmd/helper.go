@@ -23,24 +23,19 @@ var (
 )
 
 var helperCmd = &cobra.Command{
-	Use:   "helper [script-name] [args...]",
+	Use:   "helper [flags] [script-name] [script-args...]",
 	Short: "Manage and run helper scripts",
 	Long: `Manage helper scripts for running services like code-server, rstudio-server, etc.
 
-Helper scripts come in two categories:
-  - headless: Direct execution scripts
-  - slurm: SLURM job submission scripts (auto-selected when scheduler available)
-
-Common helper scripts:
+Available helper scripts:
   - code-server: code server
   - rstudio-server: RStudio server
   - vscode-tunnel: VS Code tunnel
 
-Note: Helper commands (update and run) are not available inside a container.`,
-	Example: `  condatainer helper --update           # Update all helper scripts
-  condatainer helper --update code-server  # Update specific script
-  condatainer helper --path              # Show helper scripts directory
-  condatainer helper code-server 8080    # Run code-server on port 8080`,
+Note: Helper is not available inside a container.`,
+	Example: `  condatainer helper --update                # Update all helper scripts
+  condatainer helper --path                  # Show helper scripts directory
+  condatainer helper code-server -p 11908    # Run code-server and forward flags`,
 	RunE:              runHelper,
 	ValidArgsFunction: completeHelperScripts,
 }

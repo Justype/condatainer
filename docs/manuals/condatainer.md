@@ -47,8 +47,9 @@ Flags:
       --debug     Enable debug mode with verbose output
   -h, --help      help for condatainer
       --local     Disable job submission (run locally)
-  -q, --quiet     Suppress verbose overlay creation messages (errors/warnings still shown)
+  -q, --quiet     Suppress messages (warnings/errors are still shown)
   -v, --version   version for condatainer
+  -y, --yes       Automatically answer yes to all prompts
 
 Use "condatainer [command] --help" for more information about a command.
 ```
