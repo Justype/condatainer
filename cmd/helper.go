@@ -49,6 +49,10 @@ func init() {
 	rootCmd.AddCommand(helperCmd)
 	helperCmd.Flags().BoolVar(&helperPath, "path", false, "Show path to helper scripts directory")
 	helperCmd.Flags().BoolVarP(&helperUpdate, "update", "u", false, "Update helper scripts from remote")
+
+	// Stop flag parsing after the first positional argument so script flags (like -p or -v)
+	// are passed through to the helper script rather than being interpreted by cobra.
+	helperCmd.Flags().SetInterspersed(false)
 }
 
 // completeHelperScripts provides shell completion for helper script names
