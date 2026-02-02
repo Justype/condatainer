@@ -27,8 +27,13 @@ func newScriptBuildObject(base *BaseBuildObject, isRef bool) (*ScriptBuildObject
 	}, nil
 }
 
-// Type check implementations
-func (s *ScriptBuildObject) IsConda() bool { return false }
+// Type returns the build type
+func (s *ScriptBuildObject) Type() BuildType {
+	if s.isRef {
+		return BuildTypeRef
+	}
+	return BuildTypeShell
+}
 
 // getAllBaseDirs returns all configured base directories that actually exist
 func getAllBaseDirs() []string {
@@ -60,10 +65,6 @@ func getAllBaseDirs() []string {
 
 	return dirs
 }
-
-func (s *ScriptBuildObject) IsDef() bool   { return false }
-func (s *ScriptBuildObject) IsShell() bool { return true }
-func (s *ScriptBuildObject) IsRef() bool   { return s.isRef }
 
 // String returns a string representation
 func (s *ScriptBuildObject) String() string {

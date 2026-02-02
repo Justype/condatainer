@@ -148,14 +148,14 @@ func (bg *BuildGraph) Run() error {
 	// Check if any apptainer jobs were run
 	hasDefBuilds := false
 	for _, obj := range bg.schedulerBuilds {
-		if obj.IsDef() {
+		if obj.Type().IsDef {
 			hasDefBuilds = true
 			break
 		}
 	}
 	if !hasDefBuilds {
 		for _, obj := range bg.localBuilds {
-			if obj.IsDef() {
+			if obj.Type().IsDef {
 				hasDefBuilds = true
 				break
 			}

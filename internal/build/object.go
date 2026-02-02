@@ -19,6 +19,22 @@ import (
 var ErrTmpOverlayExists = errors.New("temporary overlay already exists")
 var ErrBuildCancelled = errors.New("build cancelled by user")
 
+// BuildType represents the type of build target
+type BuildType struct {
+	IsConda bool
+	IsDef   bool
+	IsShell bool
+	IsRef   bool
+}
+
+// Predefined build types
+var (
+	BuildTypeConda = BuildType{IsConda: true}
+	BuildTypeDef   = BuildType{IsDef: true}
+	BuildTypeShell = BuildType{IsShell: true}
+	BuildTypeRef   = BuildType{IsShell: true, IsRef: true}
+)
+
 // isCancelledByUser checks if the error is due to user cancellation (Ctrl+C)
 // Exit code 130 = 128 + SIGINT(2)
 func isCancelledByUser(err error) bool {
@@ -77,11 +93,8 @@ type BuildObject interface {
 	Dependencies() []string
 	IsInstalled() bool
 
-	// Type checks (implemented by concrete types)
-	IsConda() bool
-	IsDef() bool
-	IsShell() bool
-	IsRef() bool
+	// Type information
+	Type() BuildType
 
 	// Path management
 	TmpOverlayPath() string

@@ -57,11 +57,8 @@ func newCondaBuildObject(base *BaseBuildObject) (*CondaBuildObject, error) {
 	}, nil
 }
 
-// Type check implementations
-func (c *CondaBuildObject) IsConda() bool { return true }
-func (c *CondaBuildObject) IsDef() bool   { return false }
-func (c *CondaBuildObject) IsShell() bool { return false }
-func (c *CondaBuildObject) IsRef() bool   { return false }
+// Type returns the build type
+func (c *CondaBuildObject) Type() BuildType { return BuildTypeConda }
 
 // String returns a string representation
 func (c *CondaBuildObject) String() string {

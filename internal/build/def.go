@@ -24,11 +24,8 @@ func newDefBuildObject(base *BaseBuildObject) (*DefBuildObject, error) {
 	}, nil
 }
 
-// Type check implementations
-func (d *DefBuildObject) IsConda() bool { return false }
-func (d *DefBuildObject) IsDef() bool   { return true }
-func (d *DefBuildObject) IsShell() bool { return false }
-func (d *DefBuildObject) IsRef() bool   { return false }
+// Type returns the build type
+func (d *DefBuildObject) Type() BuildType { return BuildTypeDef }
 
 // String returns a string representation
 func (d *DefBuildObject) String() string {
