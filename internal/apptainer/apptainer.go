@@ -182,7 +182,8 @@ func runApptainerWithOutput(ctx context.Context, op string, imagePath string, ca
 
 	cmd.WaitDelay = 5 * time.Second
 	cmd.Cancel = func() error {
-		return cmd.Process.Signal(syscall.SIGINT)
+		// Use SIGTERM first for graceful shutdown
+		return cmd.Process.Signal(syscall.SIGTERM)
 	}
 
 	err := cmd.Run()
