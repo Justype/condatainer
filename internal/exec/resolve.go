@@ -17,11 +17,13 @@ import (
 func InstalledOverlays() (map[string]string, error) {
 	overlays := map[string]string{}
 	dirs := config.GetImageSearchPaths()
+	utils.PrintDebug("[RESOLVE] Scanning for installed overlays in: %v", dirs)
 	for _, dir := range dirs {
 		if err := populateOverlays(dir, overlays); err != nil {
 			return nil, err
 		}
 	}
+	utils.PrintDebug("[RESOLVE] Found %d installed overlays", len(overlays))
 	return overlays, nil
 }
 
@@ -65,32 +67,48 @@ func ResolveOverlayPaths(inputs []string) ([]string, error) {
 		if entry == "" {
 			continue
 		}
-		if utils.IsOverlay(entry) {
-			absPath, err := filepath.Abs(entry)
+
+		// Check for :ro or :rw suffix and strip it temporarily for path resolution
+		var suffix string
+		pathToResolve := entry
+		if strings.HasSuffix(entry, ":ro") {
+			suffix = ":ro"
+			pathToResolve = strings.TrimSuffix(entry, ":ro")
+		} else if strings.HasSuffix(entry, ":rw") {
+			suffix = ":rw"
+			pathToResolve = strings.TrimSuffix(entry, ":rw")
+		}
+
+		if utils.IsOverlay(pathToResolve) {
+			absPath, err := filepath.Abs(pathToResolve)
 			if err != nil {
-				return nil, fmt.Errorf("failed to normalize overlay path %s: %w", entry, err)
+				return nil, fmt.Errorf("failed to normalize overlay path %s: %w", pathToResolve, err)
 			}
 			if !utils.FileExists(absPath) {
 				return nil, fmt.Errorf("overlay file %s not found", absPath)
 			}
-			resolved = append(resolved, absPath)
+			resolved = append(resolved, absPath+suffix)
 			continue
 		}
 
-		normalized := utils.NormalizeNameVersion(entry)
+		normalized := utils.NormalizeNameVersion(pathToResolve)
 		if normalized == "" {
 			return nil, fmt.Errorf("invalid overlay specification %q", entry)
 		}
+
+		utils.PrintDebug("[RESOLVE] Looking up overlay %s in installed map", normalized)
 		if mapped, ok := installed[normalized]; ok {
-			resolved = append(resolved, mapped)
+			utils.PrintDebug("[RESOLVE] Found overlay %s -> %s", normalized, mapped)
+			resolved = append(resolved, mapped+suffix)
 			continue
 		}
 
+		utils.PrintDebug("[RESOLVE] Overlay %s not in installed map, trying buildOverlayPathFromSpec", normalized)
 		pathFromSpec, err := buildOverlayPathFromSpec(normalized)
 		if err != nil {
 			return nil, err
 		}
-		resolved = append(resolved, pathFromSpec)
+		resolved = append(resolved, pathFromSpec+suffix)
 	}
 
 	return resolved, nil

@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
@@ -172,15 +175,15 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 		version = nameVersionParts[1]
 	}
 
-	// Build environment settings
+	// Build environment settings (KEY=VALUE format for exec.Options.EnvSettings)
 	envSettings := []string{
-		"--env", fmt.Sprintf("app_name=%s", name),
-		"--env", fmt.Sprintf("version=%s", version),
-		"--env", fmt.Sprintf("app_name_version=%s", s.nameVersion),
-		"--env", "tmp_dir=/ext3/tmp",
-		"--env", "TMPDIR=/ext3/tmp",
-		"--env", fmt.Sprintf("NCPUS=%d", s.ncpus),
-		"--env", "IN_CONDATAINER=1",
+		fmt.Sprintf("app_name=%s", name),
+		fmt.Sprintf("version=%s", version),
+		fmt.Sprintf("app_name_version=%s", s.nameVersion),
+		"tmp_dir=/ext3/tmp",
+		"TMPDIR=/ext3/tmp",
+		fmt.Sprintf("NCPUS=%d", s.ncpus),
+		"IN_CONDATAINER=1",
 	}
 
 	// Set target_dir based on ref type
@@ -192,9 +195,9 @@ func (s *ScriptBuildObject) Build(buildDeps bool) error {
 			return fmt.Errorf("failed to create cnt_dir %s: %w", s.cntDirPath, err)
 		}
 		targetDir = filepath.Join(s.cntDirPath, s.nameVersion)
-		envSettings = append(envSettings, "--env", fmt.Sprintf("target_dir=%s", targetDir))
+		envSettings = append(envSettings, fmt.Sprintf("target_dir=%s", targetDir))
 	} else {
-		envSettings = append(envSettings, "--env", fmt.Sprintf("target_dir=/cnt/%s", relativePath))
+		envSettings = append(envSettings, fmt.Sprintf("target_dir=/cnt/%s", relativePath))
 	}
 
 	// Add PATH from dependencies
@@ -271,14 +274,44 @@ fi
 	utils.PrintDebug("[BUILD] Running build script for %s with options: overlays=%v, bindPaths=%v, passThruStdin=%v",
 		s.nameVersion, opts.Overlays, opts.BindPaths, opts.PassThruStdin)
 
-	// Run the build using exec.Run
+	// Set up signal handling and cleanup for entire build process
+	var cleanupOnce sync.Once
+	cleanupFunc := func() {
+		cleanupOnce.Do(func() {
+			utils.PrintMessage("Cleaning up temporary files for %s...", utils.StyleName(s.nameVersion))
+			s.Cleanup(true)
+		})
+	}
+
+	// Catch Ctrl+C and other termination signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+
+	// Monitor signals in background throughout entire build
+	done := make(chan bool)
+	defer close(done)
+	go func() {
+		select {
+		case sig := <-sigChan:
+			utils.PrintWarning("Received signal %v. Interrupting build...", sig)
+			cleanupFunc()
+			os.Exit(130) // Standard exit code for SIGINT
+		case <-done:
+			return
+		}
+	}()
+
+	// Run build script
 	if err := execpkg.Run(opts); err != nil {
-		s.Cleanup(true)
+		cleanupFunc()
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
 		}
 		return fmt.Errorf("build script %s failed: %w", s.buildSource, err)
 	}
+
+	// Build succeeded - continue to create SquashFS
 
 	// Create SquashFS
 	if s.isRef {

@@ -234,14 +234,18 @@ func (b *BaseBuildObject) Cleanup(failed bool) error {
 	// Remove remote build source if downloaded
 	if b.isRemote && b.buildSource != "" {
 		if err := os.Remove(b.buildSource); err != nil && !os.IsNotExist(err) {
-			utils.PrintDebug("Failed to remove remote build source %s: %v", b.buildSource, err)
+			utils.PrintWarning("Failed to remove remote build source %s: %v", b.buildSource, err)
+		} else {
+			utils.PrintDebug("Removed remote build source %s", b.buildSource)
 		}
 	}
 
 	// Remove tmp overlay
 	if b.tmpOverlayPath != "" {
 		if err := os.Remove(b.tmpOverlayPath); err != nil && !os.IsNotExist(err) {
-			utils.PrintDebug("Failed to remove tmp overlay %s: %v", b.tmpOverlayPath, err)
+			utils.PrintWarning("Failed to remove tmp overlay %s: %v", b.tmpOverlayPath, err)
+		} else if utils.FileExists(b.tmpOverlayPath) {
+			utils.PrintDebug("Removed tmp overlay %s", b.tmpOverlayPath)
 		}
 	}
 
@@ -249,14 +253,18 @@ func (b *BaseBuildObject) Cleanup(failed bool) error {
 	if b.cntDirPath != "" {
 		cntBaseDir := filepath.Dir(b.cntDirPath)
 		if err := os.RemoveAll(cntBaseDir); err != nil && !os.IsNotExist(err) {
-			utils.PrintDebug("Failed to remove cnt dir %s: %v", cntBaseDir, err)
+			utils.PrintWarning("Failed to remove cnt dir %s: %v", cntBaseDir, err)
+		} else if utils.FileExists(cntBaseDir) {
+			utils.PrintDebug("Removed cnt dir %s", cntBaseDir)
 		}
 	}
 
 	// If failed, also remove target overlay
 	if failed && b.targetOverlayPath != "" {
 		if err := os.Remove(b.targetOverlayPath); err != nil && !os.IsNotExist(err) {
-			utils.PrintDebug("Failed to remove target overlay %s: %v", b.targetOverlayPath, err)
+			utils.PrintWarning("Failed to remove target overlay %s: %v", b.targetOverlayPath, err)
+		} else if utils.FileExists(b.targetOverlayPath) {
+			utils.PrintDebug("Removed target overlay %s", b.targetOverlayPath)
 		}
 	}
 

@@ -3,9 +3,12 @@ package build
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"syscall"
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
@@ -78,6 +81,35 @@ func (d *DefBuildObject) Build(buildDeps bool) error {
 		buildMode = "sbatch"
 	}
 	utils.PrintMessage("Building overlay %s (%s build) from %s", styledOverlay, utils.StyleAction(buildMode), utils.StylePath(d.buildSource))
+
+	// Setup signal handling for graceful cleanup on Ctrl+C
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+
+	// Ensure cleanup on function exit
+	defer close(done)
+
+	// Setup cleanup function with sync.Once to prevent double cleanup
+	var cleanupOnce sync.Once
+	cleanupFunc := func() {
+		cleanupOnce.Do(func() {
+			utils.PrintMessage("Cleaning up temporary files for %s...", styledOverlay)
+			d.Cleanup(true)
+		})
+	}
+
+	// Monitor for interrupt signals in background
+	go func() {
+		select {
+		case sig := <-sigChan:
+			utils.PrintMessage("Received signal %v, cleaning up...", sig)
+			cleanupFunc()
+			os.Exit(130)
+		case <-done:
+			return
+		}
+	}()
 
 	// Try to download prebuilt overlay first, fall back to building if not available
 	if writableDir, err := config.GetWritableImagesDir(); err == nil {

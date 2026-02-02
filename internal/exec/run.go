@@ -196,6 +196,11 @@ func Run(options Options) error {
 }
 
 func formatOverlayMount(path string, writable bool) string {
+	// Check if path already has :ro or :rw suffix
+	if strings.HasSuffix(path, ":ro") || strings.HasSuffix(path, ":rw") {
+		return path
+	}
+
 	if utils.IsImg(path) && writable {
 		return path
 	}
@@ -206,7 +211,9 @@ func buildPathEnv(overlays []string) string {
 	paths := []string{"/usr/sbin", "/usr/bin"}
 
 	for _, overlay := range overlays {
-		name := strings.TrimSuffix(filepath.Base(overlay), filepath.Ext(overlay))
+		// Strip :ro or :rw suffix for path checking
+		cleanOverlay := strings.TrimSuffix(strings.TrimSuffix(overlay, ":ro"), ":rw")
+		name := strings.TrimSuffix(filepath.Base(cleanOverlay), filepath.Ext(cleanOverlay))
 		normalized := utils.NormalizeNameVersion(name)
 		if normalized == "" {
 			continue
@@ -215,9 +222,9 @@ func buildPathEnv(overlays []string) string {
 			continue
 		}
 		var relative string
-		if utils.IsImg(overlay) {
+		if utils.IsImg(cleanOverlay) {
 			relative = "/ext3/env/bin"
-		} else if utils.IsSqf(overlay) {
+		} else if utils.IsSqf(cleanOverlay) {
 			relative = fmt.Sprintf("/cnt/%s/bin", normalized)
 		} else {
 			utils.PrintWarning("Unknown overlay file extension for %s. Skipping PATH addition.", utils.StylePath(overlay))

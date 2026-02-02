@@ -151,7 +151,9 @@ func GetPathEnvFromDependencies(dependencies []string) (string, error) {
 	// Build PATH components
 	paths := []string{}
 	for _, depPath := range depPaths {
-		name := strings.TrimSuffix(filepath.Base(depPath), filepath.Ext(depPath))
+		// Strip :ro or :rw suffix for path checking
+		cleanPath := strings.TrimSuffix(strings.TrimSuffix(depPath, ":ro"), ":rw")
+		name := strings.TrimSuffix(filepath.Base(cleanPath), filepath.Ext(cleanPath))
 		normalized := utils.NormalizeNameVersion(name)
 		if normalized == "" {
 			continue
@@ -162,9 +164,9 @@ func GetPathEnvFromDependencies(dependencies []string) (string, error) {
 		}
 
 		var binPath string
-		if utils.IsImg(depPath) {
+		if utils.IsImg(cleanPath) {
 			binPath = "/ext3/env/bin"
-		} else if utils.IsSqf(depPath) {
+		} else if utils.IsSqf(cleanPath) {
 			binPath = fmt.Sprintf("/cnt/%s/bin", normalized)
 		} else {
 			utils.PrintWarning("Unknown overlay file extension for %s. Skipping PATH addition.", utils.StylePath(depPath))
@@ -220,7 +222,9 @@ func GetOverlayEnvConfigsFromDependencies(dependencies []string) ([]string, erro
 
 	// Read .env files from each dependency
 	for _, depPath := range depPaths {
-		envPath := depPath + ".env"
+		// Strip :ro or :rw suffix for file path
+		cleanPath := strings.TrimSuffix(strings.TrimSuffix(depPath, ":ro"), ":rw")
+		envPath := cleanPath + ".env"
 		if !utils.FileExists(envPath) {
 			continue
 		}

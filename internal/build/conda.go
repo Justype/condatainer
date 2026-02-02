@@ -3,8 +3,11 @@ package build
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/exec"
@@ -115,6 +118,35 @@ func (c *CondaBuildObject) Build(buildDeps bool) error {
 	if err := c.CreateTmpOverlay(false); err != nil {
 		return fmt.Errorf("temporary overlay for %s already exists. Maybe a build is still running?", c.nameVersion)
 	}
+
+	// Setup signal handling for graceful cleanup on Ctrl+C
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+
+	// Ensure cleanup on function exit
+	defer close(done)
+
+	// Setup cleanup function with sync.Once to prevent double cleanup
+	var cleanupOnce sync.Once
+	cleanupFunc := func() {
+		cleanupOnce.Do(func() {
+			utils.PrintMessage("Cleaning up temporary files for %s...", styledOverlay)
+			c.Cleanup(true)
+		})
+	}
+
+	// Monitor for interrupt signals in background
+	go func() {
+		select {
+		case sig := <-sigChan:
+			utils.PrintMessage("Received signal %v, cleaning up...", sig)
+			cleanupFunc()
+			os.Exit(130)
+		case <-done:
+			return
+		}
+	}()
 
 	// Determine build mode and create appropriate micromamba command
 	var installCmd string
