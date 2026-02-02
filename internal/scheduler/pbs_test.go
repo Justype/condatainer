@@ -7,8 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/Justype/condatainer/internal/config"
 )
 
 func newTestPbsScheduler() *PbsScheduler {
@@ -19,15 +17,9 @@ func newTestPbsScheduler() *PbsScheduler {
 	}
 }
 
-func TestPbsCreateScriptUsesConfigLogsDir(t *testing.T) {
-	tmpScriptDir := t.TempDir()
-	tmpLogsDir := t.TempDir()
-
-	// Save and restore original value
-	orig := config.Global.LogsDir
-	defer func() { config.Global.LogsDir = orig }()
-
-	config.Global.LogsDir = tmpLogsDir
+// Test that scheduler uses outputDir for log files
+func TestPbsCreateScriptUsesOutputDir(t *testing.T) {
+	tmpOutputDir := t.TempDir()
 
 	pbs := newTestPbsScheduler()
 
@@ -40,18 +32,13 @@ func TestPbsCreateScriptUsesConfigLogsDir(t *testing.T) {
 		},
 	}
 
-	scriptPath, err := pbs.CreateScriptWithSpec(jobSpec, tmpScriptDir)
+	scriptPath, err := pbs.CreateScriptWithSpec(jobSpec, tmpOutputDir)
 	if err != nil {
 		t.Fatalf("CreateScriptWithSpec failed: %v", err)
 	}
 
-	// Ensure the log directory was created in config.Global.LogsDir
-	if info, err := os.Stat(tmpLogsDir); err != nil || !info.IsDir() {
-		t.Fatalf("Expected logs directory %s to exist and be a directory", tmpLogsDir)
-	}
-
-	// Ensure the generated script uses the absolute path
-	logPath := filepath.Join(tmpLogsDir, "pbstest--job.log")
+	// Ensure the generated script uses outputDir for logs
+	logPath := filepath.Join(tmpOutputDir, "pbstest--job.log")
 	content, err := os.ReadFile(scriptPath)
 	if err != nil {
 		t.Fatalf("Failed to read generated script: %v", err)

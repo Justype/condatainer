@@ -33,15 +33,6 @@ condatainer config init
 
 This step will let **CondaTainer** save the apptainer path for future use.
 
-### ⌨️ Shell Completion
-
-**CondaTainer** supports shell completion for **Bash** and **Zsh**.
-
-```bash
-# must have bash-completion installed for Bash
-source <(condatainer completion)
-```
-
 ## 👀 Quick Look
 
 ```bash
@@ -110,7 +101,7 @@ mm-export
 
 ## 🚀 Automation
 
-**CondaTainer** supports inline dependency declaration, allowing you to define requirements directly within your scripts using tags `#DEP:`.
+**CondaTainer** supports inline dependency declaration and automatic job submission. Define requirements with `#DEP:` tags and scheduler directives with `#SBATCH` or `#PBS`.
 
 Example Script (`analysis.sh`):
 
@@ -122,29 +113,19 @@ Example Script (`analysis.sh`):
 #DEP:salmon/1.10.2
 #DEP:grch38/salmon/1.10.2/gencode47
 
-if [ -z "$IN_CONDATAINER" ] && command -v condatainer >/dev/null 2>&1; then
-  condatainer run "$0" "$@"
-  exit $?
-fi
-
 salmon quant \
   -i $SALMON_INDEX_DIR \
   -p $SLURM_CPUS_PER_TASK \
   -l A -r reads.fq -o quants/
 ```
 
-First check and install missing dependencies:
+Auto install dependencies and submit the job with:
 
 ```bash
-# Auto download dependencies and use sbatch to create index
-condatainer check analysis.sh -a
+condatainer run analysis.sh -a
 ```
 
-Wait until all dependencies are installed. Then use sbatch as usual:
-
-```bash
-sbatch analysis.sh
-```
+If no scheduler directives are found or job submission is disabled, the script will run immediately in the current shell.
 
 ## 🔗 Links & Resources
 

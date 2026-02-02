@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/Justype/condatainer/internal/config"
 )
 
 // SlurmScheduler implements the Scheduler interface for SLURM
@@ -299,28 +297,18 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 		}
 	}
 
-	// Use configured logs directory (ensure it exists) instead of creating logs under outputDir
-	logDir := config.Global.LogsDir
-	if logDir == "" {
-		// fallback to outputDir/log if config not set
-		logDir = filepath.Join(outputDir, "log")
-	}
-	if err := os.MkdirAll(logDir, 0775); err != nil {
-		return "", NewScriptCreationError(jobSpec.Name, logDir, err)
-	}
-
-	// Always set log path to our standardized location (absolute path to configured logs dir)
+	// Set log path based on job name (logs go to outputDir, which caller controls)
 	if jobSpec.Name != "" {
 		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		specs.Stdout = filepath.Join(logDir, fmt.Sprintf("%s.log", safeName))
+		specs.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeName))
 	}
 
 	// Generate script filename
-	scriptName := "sbatch_job.sh"
+	scriptName := "job.sbatch"
 	if jobSpec.Name != "" {
 		// Replace slashes with -- to avoid creating subdirectories
 		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		scriptName = fmt.Sprintf("sbatch_%s.sh", safeName)
+		scriptName = fmt.Sprintf("%s.sbatch", safeName)
 	}
 
 	scriptPath := filepath.Join(outputDir, scriptName)
@@ -355,7 +343,16 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 		if strings.HasPrefix(flag, "--mail-type=") || strings.HasPrefix(flag, "--mail-user=") {
 			continue
 		}
+		// Skip job-name flags - we'll use specs.JobName if set
+		if specs.JobName != "" && (strings.HasPrefix(flag, "--job-name=") || strings.HasPrefix(flag, "-J ")) {
+			continue
+		}
 		fmt.Fprintf(writer, "#SBATCH %s\n", flag)
+	}
+
+	// Add job name if specified
+	if specs.JobName != "" {
+		fmt.Fprintf(writer, "#SBATCH --job-name=%s\n", specs.JobName)
 	}
 
 	// Add custom stdout if specified (stderr is not used - output goes to stdout)
@@ -387,13 +384,56 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	// Add blank line
 	fmt.Fprintln(writer, "")
 
+	// Print job information at start
+	fmt.Fprintln(writer, "# Print job information")
+	fmt.Fprintln(writer, "_START_TIME=$SECONDS")
+	fmt.Fprintln(writer, "_format_time() { local s=$1; printf '%02d:%02d:%02d' $((s/3600)) $((s%3600/60)) $((s%60)); }")
+	fmt.Fprintln(writer, "echo \"========================================\"")
+	fmt.Fprintln(writer, "echo \"Job ID:    $SLURM_JOB_ID\"")
+	fmt.Fprintf(writer, "echo \"Job Name:  %s\"\n", specs.JobName)
+	if specs.Ncpus > 0 {
+		fmt.Fprintf(writer, "echo \"CPUs:      %d\"\n", specs.Ncpus)
+	}
+	if specs.MemMB > 0 {
+		fmt.Fprintf(writer, "echo \"Memory:    %d MB\"\n", specs.MemMB)
+	}
+	if specs.Time > 0 {
+		fmt.Fprintf(writer, "echo \"Time:      %s\"\n", formatSlurmTimeSpec(specs.Time))
+	}
+	fmt.Fprintln(writer, "echo \"PWD:       $(pwd)\"")
+	// Print additional metadata if available
+	if len(jobSpec.Metadata) > 0 {
+		// Find max key length for alignment
+		maxLen := 0
+		for key := range jobSpec.Metadata {
+			if len(key) > maxLen {
+				maxLen = len(key)
+			}
+		}
+		// Print each metadata field with proper alignment
+		for key, value := range jobSpec.Metadata {
+			if value != "" {
+				padding := maxLen - len(key)
+				fmt.Fprintf(writer, "echo \"%s:%s %s\"\n", key, strings.Repeat(" ", padding+3), value)
+			}
+		}
+	}
+	fmt.Fprintf(writer, "%s\n", "echo \"Started:   $(date '+%Y-%m-%d %T')\"")
+	fmt.Fprintln(writer, "echo \"========================================\"")
+	fmt.Fprintln(writer, "")
+
 	// Write the command
 	fmt.Fprintln(writer, jobSpec.Command)
 
-	// Add job ID echo for tracking
-	fmt.Fprintln(writer, "echo SLURM_JOB_ID $SLURM_JOB_ID")
+	// Print completion info
+	fmt.Fprintln(writer, "")
+	fmt.Fprintln(writer, "echo \"========================================\"")
+	fmt.Fprintln(writer, "echo \"Job ID:    $SLURM_JOB_ID\"")
+	fmt.Fprintln(writer, "echo \"Elapsed:   $(_format_time $(($SECONDS - $_START_TIME)))\"")
+	fmt.Fprintf(writer, "%s\n", "echo \"Completed: $(date '+%Y-%m-%d %T')\"")
+	fmt.Fprintln(writer, "echo \"========================================\"")
 
-	// Self-delete the script after execution
+	// Self-dispose: remove this script file
 	fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
 
 	// Make executable

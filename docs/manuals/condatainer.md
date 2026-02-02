@@ -587,6 +587,8 @@ Scripts can use special comment tags to declare dependencies and configure the c
 |-----|-------------|
 | `#DEP: package/version` | Declare a dependency overlay |
 | `#CNT [args]` | Additional arguments passed to condatainer |
+| `#SBATCH [args]` | SLURM scheduler directives (auto-submit as job) |
+| `#PBS [args]` | PBS scheduler directives (auto-submit as job) |
 
 **Available `#CNT` arguments:**
 
@@ -604,6 +606,56 @@ Scripts can use special comment tags to declare dependencies and configure the c
 #CNT --writable-img
 #CNT --env MYVAR=value
 bcftools view input.vcf | head
+```
+
+### Scheduler Integration
+
+If your script contains scheduler directives (`#SBATCH` or `#PBS`), `condatainer run` will automatically submit it as a scheduler job instead of running it locally.
+
+**Behavior:**
+
+1. **Script has scheduler specs + scheduler available**: Submits the script as a job
+2. **Script has scheduler specs + already inside a job**: Runs locally (avoids nested job submission)
+3. **Script has scheduler specs + `--local` flag**: Runs locally
+4. **Script without scheduler specs**: Runs locally (as before)
+
+**Scheduler Script Example:**
+
+```bash
+#!/bin/bash
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+#SBATCH --time=2:00:00
+#DEP: samtools/1.22
+#DEP: bcftools/1.22
+
+samtools view -@ 4 input.bam | bcftools call -mv -o output.vcf
+```
+
+When you run this script:
+
+```bash
+# Shows missing deps, then submits as SLURM job
+condatainer run analysis.sh
+
+# Auto-install missing deps first, then submit as job
+condatainer run analysis.sh -a
+```
+
+**Log Files:**
+
+* If `#SBATCH --output=...` is specified in the script, logs go to that path
+* Otherwise, logs are written to the global logs directory (`~/logs` by default)
+* Job scripts (`.sbatch`) are created alongside the log files
+
+**Disabling Job Submission:**
+
+```bash
+# Run locally even with scheduler specs
+condatainer --local run analysis.sh
+
+# Or set in config
+condatainer config set submit_job false
 ```
 
 ### CondaTainer is compatible with module systems

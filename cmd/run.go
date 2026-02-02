@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	execpkg "github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -193,6 +195,36 @@ func runScript(cmd *cobra.Command, args []string) error {
 		}
 
 		utils.PrintSuccess("All selected overlays installed/submitted.")
+
+		// Re-fetch installed overlays after installation
+		installedOverlays, err = getInstalledOverlaysMap()
+		if err != nil {
+			return err
+		}
+	}
+
+	// Check if script has scheduler specs and scheduler is available
+	scriptSpecs, err := scheduler.ReadScriptSpecsFromPath(scriptPath)
+	if err != nil {
+		utils.PrintWarning("Failed to parse scheduler specs: %v", err)
+	}
+
+	// If script has scheduler specs, try to submit as a job
+	if scriptSpecs != nil && len(scriptSpecs.RawFlags) > 0 {
+		// Check if job submission is enabled in config
+		if !config.Global.SubmitJob {
+			utils.PrintNote("Job submission is disabled. Running locally.")
+		} else if scheduler.IsInsideJob() {
+			// Already inside a scheduler job, run locally (silently)
+		} else {
+			// Try to detect and use scheduler
+			sched, err := scheduler.DetectScheduler()
+			if err == nil && sched.IsAvailable() {
+				return submitRunJob(sched, scriptPath, originScriptPath, scriptSpecs)
+			}
+			// Scheduler not available, fall through to local execution
+			utils.PrintNote("Script has scheduler specs but no scheduler available. Running locally.")
+		}
 	}
 
 	// Resolve overlay paths
@@ -319,4 +351,84 @@ func parseArgsInScript(scriptPath string) ([]string, error) {
 	}
 
 	return args, nil
+}
+
+// submitRunJob creates and submits a scheduler job to run the script
+func submitRunJob(sched scheduler.Scheduler, scriptPath, originScriptPath string, specs *scheduler.ScriptSpecs) error {
+	info := sched.GetInfo()
+	utils.PrintMessage("Submitting %s job to run %s", info.Type, utils.StylePath(originScriptPath))
+
+	// Determine log directory - use spec's Stdout path if set, otherwise global log path
+	var logsDir string
+	if specs.Stdout != "" {
+		// Ensure absolute path
+		logPath := specs.Stdout
+		if !filepath.IsAbs(logPath) {
+			if abs, err := filepath.Abs(logPath); err == nil {
+				logPath = abs
+			}
+		}
+		logsDir = filepath.Dir(logPath)
+	} else {
+		// Use global log path
+		logsDir = config.Global.LogsDir
+		if logsDir == "" {
+			logsDir = filepath.Join(os.Getenv("HOME"), "logs")
+		}
+	}
+
+	// Ensure logs directory exists
+	if err := os.MkdirAll(logsDir, 0775); err != nil {
+		return fmt.Errorf("failed to create logs directory %s: %w", logsDir, err)
+	}
+
+	// Build the condatainer run command (without -a to avoid re-installing in job)
+	runCommand := fmt.Sprintf("condatainer run %s", scriptPath)
+
+	// Generate names: short name for job, timestamped name for files
+	baseName := filepath.Base(originScriptPath)
+	ext := filepath.Ext(baseName)
+	nameWithoutExt := strings.TrimSuffix(baseName, ext)
+	timestamp := time.Now().Format("20060102_150405")
+	fileBaseName := fmt.Sprintf("%s_%s", nameWithoutExt, timestamp)
+
+	// Set job name if not already set in script (short name for squeue)
+	if specs.JobName == "" {
+		specs.JobName = nameWithoutExt
+	}
+
+	// Create job specification (Name used for file naming)
+	absScriptPath, err := filepath.Abs(originScriptPath)
+	if err != nil {
+		absScriptPath = originScriptPath
+	}
+	jobSpec := &scheduler.JobSpec{
+		Name:    fileBaseName,
+		Command: runCommand,
+		Specs:   specs,
+		Metadata: map[string]string{
+			"Script": absScriptPath,
+		},
+	}
+
+	// Create the job script in the same directory as logs
+	jobScriptPath, err := sched.CreateScriptWithSpec(jobSpec, logsDir)
+	if err != nil {
+		return fmt.Errorf("failed to create job script: %w", err)
+	}
+
+	// Submit the job
+	jobID, err := sched.Submit(jobScriptPath, nil)
+	if err != nil {
+		return fmt.Errorf("failed to submit job: %w", err)
+	}
+
+	utils.PrintSuccess("Submitted %s job %s for %s", info.Type, utils.StyleNumber(jobID), utils.StylePath(originScriptPath))
+
+	// Show script and log file locations
+	// utils.PrintHint("Job script: %s", utils.StylePath(jobScriptPath))
+	logFile := filepath.Join(logsDir, fmt.Sprintf("%s.log", fileBaseName))
+	utils.PrintHint("Log file: %s", utils.StylePath(logFile))
+
+	return nil
 }

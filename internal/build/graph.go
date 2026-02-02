@@ -236,6 +236,9 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 		Command:   fmt.Sprintf("condatainer create %s", meta.NameVersion()),
 		Specs:     meta.ScriptSpecs(),
 		DepJobIDs: depIDs,
+		Metadata: map[string]string{
+			"NameVersion": meta.NameVersion(),
+		},
 	}
 
 	// Create batch script

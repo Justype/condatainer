@@ -3,6 +3,7 @@ package scheduler
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -77,10 +78,11 @@ type ScriptSpecs struct {
 
 // JobSpec represents specifications for submitting a batch job
 type JobSpec struct {
-	Name      string       // Job name
-	Command   string       // Command to execute
-	Specs     *ScriptSpecs // Job specifications
-	DepJobIDs []string     // Job IDs this job depends on
+	Name      string            // Job name
+	Command   string            // Command to execute
+	Specs     *ScriptSpecs      // Job specifications
+	DepJobIDs []string          // Job IDs this job depends on
+	Metadata  map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
 }
 
 // Scheduler defines the interface for job schedulers
@@ -365,6 +367,24 @@ func DetectType() SchedulerType {
 	}
 
 	return SchedulerUnknown
+}
+
+// IsInsideJob checks if we're currently running inside a scheduler job.
+// This is useful to avoid nested job submission.
+func IsInsideJob() bool {
+	// Check SLURM
+	if _, ok := os.LookupEnv("SLURM_JOB_ID"); ok {
+		return true
+	}
+	// Check PBS/Torque
+	if _, ok := os.LookupEnv("PBS_JOBID"); ok {
+		return true
+	}
+	// Check LSF
+	if _, ok := os.LookupEnv("LSB_JOBID"); ok {
+		return true
+	}
+	return false
 }
 
 // ParsedScript contains the normalized specs and detected script type

@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/Justype/condatainer/internal/config"
 )
 
 // PbsScheduler implements the Scheduler interface for PBS/Torque
@@ -316,28 +314,18 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		}
 	}
 
-	// Use configured logs directory (ensure it exists) instead of creating logs under outputDir
-	logDir := config.Global.LogsDir
-	if logDir == "" {
-		// fallback to outputDir/log if config not set
-		logDir = filepath.Join(outputDir, "log")
-	}
-	if err := os.MkdirAll(logDir, 0775); err != nil {
-		return "", NewScriptCreationError(jobSpec.Name, logDir, err)
-	}
-
-	// Always set log path to our standardized location (absolute path to configured logs dir)
+	// Set log path based on job name (logs go to outputDir, which caller controls)
 	if jobSpec.Name != "" {
 		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		specs.Stdout = filepath.Join(logDir, fmt.Sprintf("%s.log", safeName))
+		specs.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeName))
 	}
 
 	// Generate script filename
-	scriptName := "pbs_job.sh"
+	scriptName := "job.pbs"
 	if jobSpec.Name != "" {
 		// Replace slashes with -- to avoid creating subdirectories
 		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		scriptName = fmt.Sprintf("pbs_%s.sh", safeName)
+		scriptName = fmt.Sprintf("%s.pbs", safeName)
 	}
 
 	scriptPath := filepath.Join(outputDir, scriptName)
@@ -365,7 +353,16 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		if strings.HasPrefix(flag, "-e ") {
 			continue
 		}
+		// Skip job-name flags - we'll use specs.JobName if set
+		if specs.JobName != "" && strings.HasPrefix(flag, "-N ") {
+			continue
+		}
 		fmt.Fprintf(writer, "#PBS %s\n", flag)
+	}
+
+	// Add job name if specified
+	if specs.JobName != "" {
+		fmt.Fprintf(writer, "#PBS -N %s\n", specs.JobName)
 	}
 
 	// Add custom stdout if specified (stderr is not used - output goes to stdout)
@@ -394,11 +391,57 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	// Add blank line
 	fmt.Fprintln(writer, "")
 
+	// Print job information at start
+	fmt.Fprintln(writer, "# Print job information")
+	fmt.Fprintln(writer, "_START_TIME=$SECONDS")
+	fmt.Fprintln(writer, "_format_time() { local s=$1; printf '%02d:%02d:%02d' $((s/3600)) $((s%3600/60)) $((s%60)); }")
+	fmt.Fprintln(writer, "echo \"========================================\"")
+	fmt.Fprintln(writer, "echo \"Job ID:    $PBS_JOBID\"")
+	fmt.Fprintf(writer, "echo \"Job Name:  %s\"\n", specs.JobName)
+	if specs.Ncpus > 0 {
+		fmt.Fprintf(writer, "echo \"CPUs:      %d\"\n", specs.Ncpus)
+	}
+	if specs.MemMB > 0 {
+		fmt.Fprintf(writer, "echo \"Memory:    %d MB\"\n", specs.MemMB)
+	}
+	if specs.Time > 0 {
+		hours := int(specs.Time.Hours())
+		mins := int(specs.Time.Minutes()) % 60
+		secs := int(specs.Time.Seconds()) % 60
+		fmt.Fprintf(writer, "echo \"Time:      %02d:%02d:%02d\"\n", hours, mins, secs)
+	}
+	fmt.Fprintln(writer, "echo \"PWD:       $(pwd)\"")
+	// Print additional metadata if available
+	if len(jobSpec.Metadata) > 0 {
+		// Find max key length for alignment
+		maxLen := 0
+		for key := range jobSpec.Metadata {
+			if len(key) > maxLen {
+				maxLen = len(key)
+			}
+		}
+		// Print each metadata field with proper alignment
+		for key, value := range jobSpec.Metadata {
+			if value != "" {
+				padding := maxLen - len(key)
+				fmt.Fprintf(writer, "echo \"%s:%s %s\"\n", key, strings.Repeat(" ", padding+3), value)
+			}
+		}
+	}
+	fmt.Fprintf(writer, "%s\n", "echo \"Started:   $(date '+%Y-%m-%d %T')\"")
+	fmt.Fprintln(writer, "echo \"========================================\"")
+	fmt.Fprintln(writer, "")
+
 	// Write the command
 	fmt.Fprintln(writer, jobSpec.Command)
 
-	// Add job ID echo for tracking
-	fmt.Fprintln(writer, "echo PBS_JOBID $PBS_JOBID")
+	// Print completion info
+	fmt.Fprintln(writer, "")
+	fmt.Fprintln(writer, "echo \"========================================\"")
+	fmt.Fprintln(writer, "echo \"Job ID:    $PBS_JOBID\"")
+	fmt.Fprintln(writer, "echo \"Elapsed:   $(_format_time $(($SECONDS - $_START_TIME)))\"")
+	fmt.Fprintf(writer, "%s\n", "echo \"Completed: $(date '+%Y-%m-%d %T')\"")
+	fmt.Fprintln(writer, "echo \"========================================\"")
 
 	// Self-delete the script after execution
 	fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
