@@ -105,11 +105,14 @@ confirm_action_no() { confirm_default "$1" "no"; }
 download_file() {
     local url="$1"
     local dest="$2"
+    local dest_tmp="${dest}.tmp"
     echo -e "${BLUE}[INFO]${NC} Downloading $(basename "$dest")..."
     if command -v wget >/dev/null 2>&1; then
-        wget -qO "$dest" "$url"
+        wget -qO "$dest_tmp" "$url"
+        mv "$dest_tmp" "$dest"
     elif command -v curl >/dev/null 2>&1; then
-        curl -sL "$url" -o "$dest"
+        curl -sL "$url" -o "$dest_tmp"
+        mv "$dest_tmp" "$dest"
     else
         echo -e "${RED}[ERROR]${NC} Neither curl nor wget found."
         exit 1
@@ -281,6 +284,15 @@ if [ "$HOME_BIN_INSTALL" = false ]; then
     PATH_BLOCK="$MARKER_START
 if [[ \":\$PATH:\" != *\":$INSTALL_BIN:\"* ]]; then
     export PATH=\"$INSTALL_BIN:\$PATH\"
+fi
+if command -v condatainer &> /dev/null; then
+    if [ -n \"\$ZSH_VERSION\" ]; then
+        source <(condatainer completion zsh)
+    elif [ -n \"\$BASH_VERSION\" ]; then
+        if type _init_completion &> /dev/null; then
+            source <(condatainer completion bash)
+        fi
+    fi
 fi
 $MARKER_END"
     update_config_block "$RC_FILE" "$MARKER_START" "$MARKER_END" "$PATH_BLOCK" "CONDATAINER PATH"
