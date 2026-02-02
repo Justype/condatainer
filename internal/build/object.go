@@ -35,6 +35,24 @@ var (
 	BuildTypeRef   = BuildType{IsShell: true, IsRef: true}
 )
 
+// String implements fmt.Stringer for BuildType.
+// IsRef is checked before IsShell so ref overlays are reported as "ref".
+func (bt BuildType) String() string {
+	if bt.IsRef {
+		return "ref"
+	}
+	if bt.IsConda {
+		return "conda"
+	}
+	if bt.IsDef {
+		return "def"
+	}
+	if bt.IsShell {
+		return "shell"
+	}
+	return "unknown"
+}
+
 // isCancelledByUser checks if the error is due to user cancellation (Ctrl+C)
 // Exit code 130 = 128 + SIGINT(2)
 func isCancelledByUser(err error) bool {

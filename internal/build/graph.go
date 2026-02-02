@@ -237,7 +237,8 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 		Specs:     meta.ScriptSpecs(),
 		DepJobIDs: depIDs,
 		Metadata: map[string]string{
-			"NameVersion": meta.NameVersion(),
+			"Target": meta.NameVersion(),
+			"Type":   meta.Type().String(),
 		},
 	}
 
