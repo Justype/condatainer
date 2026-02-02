@@ -29,14 +29,19 @@ func runScheduler(cmd *cobra.Command, args []string) {
 	sched, err := scheduler.DetectSchedulerWithBinary(config.Global.SchedulerBin)
 
 	if err != nil {
+		// If we're inside a scheduled job, show a concise message and exit
+		if scheduler.IsInsideJob() {
+			utils.PrintMessage("Scheduler Status: %s", utils.StyleWarning("Unavailable (inside job)"))
+			utils.PrintMessage("")
+			utils.PrintMessage("You are currently inside a scheduled job; job submission is disabled to prevent nested submissions.")
+			return
+		}
+
 		// No scheduler found
 		utils.PrintMessage("Scheduler Status: %s", utils.StyleError("Not Found"))
 		utils.PrintMessage("")
 		utils.PrintMessage("No job scheduler detected on this system.")
 		utils.PrintMessage("Supported schedulers: SLURM (more coming soon)")
-		utils.PrintMessage("")
-		utils.PrintMessage("If you're on an HPC cluster, you may need to load the scheduler module:")
-		utils.PrintMessage("  %s", utils.StyleAction("module load slurm"))
 		return
 	}
 
@@ -57,6 +62,8 @@ func runScheduler(cmd *cobra.Command, args []string) {
 		fmt.Println()
 		fmt.Println("You are currently inside a scheduled job (detected via environment).")
 		fmt.Println("Job submission is disabled to prevent nested job submissions.")
+		// Do not query or print cluster information when inside a job
+		return
 	} else if info.Available {
 		fmt.Printf("  Status:    %s\n", utils.StyleSuccess("Available"))
 		fmt.Println()

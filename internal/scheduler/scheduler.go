@@ -179,36 +179,42 @@ func SubmitWithDependencies(scheduler Scheduler, jobs []*JobSpec, outputDir stri
 	return jobIDs, nil
 }
 
-// DetectScheduler attempts to detect and return the available scheduler
-// Returns the scheduler instance or nil if no scheduler is available
+// DetectScheduler attempts to detect and return an available scheduler.
+// Returns the scheduler instance if available, otherwise returns ErrSchedulerNotAvailable or ErrSchedulerNotFound.
 func DetectScheduler() (Scheduler, error) {
-	return DetectSchedulerWithBinary("")
+	sched, err := DetectSchedulerWithBinary("")
+	if err != nil {
+		return nil, err
+	}
+	if !sched.IsAvailable() {
+		return nil, ErrSchedulerNotAvailable
+	}
+	return sched, nil
 }
 
 // DetectSchedulerWithBinary attempts to initialize a scheduler using a preferred binary path.
 // If preferredBin is empty, detection falls back to the default discovery path.
+// This function returns a Scheduler instance if the scheduler binary is present, regardless of availability.
+// Use DetectScheduler to require availability (not inside a job and submission enabled).
 func DetectSchedulerWithBinary(preferredBin string) (Scheduler, error) {
-	// Try the preferred SLURM binary first
+	// Try the preferred SLURM binary first (return scheduler if binary present)
 	if preferredBin != "" {
 		slurm, err := NewSlurmSchedulerWithBinary(preferredBin)
 		if err != nil {
 			return nil, err
 		}
-		if slurm.IsAvailable() {
-			return slurm, nil
-		}
-		return nil, ErrSchedulerNotAvailable
+		return slurm, nil
 	}
 
 	// Try SLURM via PATH (most common)
 	slurm, err := NewSlurmScheduler()
-	if err == nil && slurm.IsAvailable() {
+	if err == nil {
 		return slurm, nil
 	}
 
 	// TODO: Add support for other schedulers (PBS, LSF, etc.)
 
-	return nil, ErrSchedulerNotAvailable
+	return nil, ErrSchedulerNotFound
 }
 
 // CheckAvailability checks if a scheduler is available on the system
