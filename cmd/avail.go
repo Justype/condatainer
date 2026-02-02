@@ -300,7 +300,31 @@ func filterPackages(packages []PackageInfo, filters []string) []PackageInfo {
 func formatPackageLine(pkg PackageInfo, filters []string) string {
 	line := pkg.Name
 
-	// Build suffix
+	// Highlight search terms in the name only (before adding suffixes)
+	// Use a single-pass approach to avoid ANSI code interference
+	if len(filters) > 0 {
+		// Build a combined regex pattern for all search terms
+		// Sort by length (longest first) to prefer longer matches
+		sortedFilters := make([]string, len(filters))
+		copy(sortedFilters, filters)
+		sort.Slice(sortedFilters, func(i, j int) bool {
+			return len(sortedFilters[i]) > len(sortedFilters[j])
+		})
+
+		// Combine all terms into one regex with alternation
+		patterns := make([]string, len(sortedFilters))
+		for i, term := range sortedFilters {
+			patterns[i] = regexp.QuoteMeta(term)
+		}
+		combinedPattern := "(?i)(" + strings.Join(patterns, "|") + ")"
+		re := regexp.MustCompile(combinedPattern)
+
+		line = re.ReplaceAllStringFunc(line, func(match string) string {
+			return utils.StyleHighlight(match)
+		})
+	}
+
+	// Build suffix (after highlighting to avoid highlighting text in suffixes)
 	var suffixes []string
 	if pkg.IsInstalled {
 		suffixes = append(suffixes, utils.StyleSuccess("installed"))
@@ -314,17 +338,6 @@ func formatPackageLine(pkg PackageInfo, filters []string) string {
 
 	if len(suffixes) > 0 {
 		line = fmt.Sprintf("%s (%s)", line, strings.Join(suffixes, ", "))
-	}
-
-	// Highlight search terms if present
-	if len(filters) > 0 {
-		for _, term := range filters {
-			// Case-insensitive replacement with highlighting
-			re := regexp.MustCompile("(?i)" + regexp.QuoteMeta(term))
-			line = re.ReplaceAllStringFunc(line, func(match string) string {
-				return utils.StyleHighlight(match)
-			})
-		}
 	}
 
 	return line

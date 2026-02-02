@@ -110,13 +110,29 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	fmt.Println("Overlays to be removed:")
 	for _, name := range filtered {
 		highlighted := name
-		for _, term := range terms {
-			// Highlight matching terms (case-insensitive)
-			re := regexp.MustCompile("(?i)" + regexp.QuoteMeta(term))
+
+		// Use single-pass highlighting to avoid ANSI code interference
+		if len(terms) > 0 {
+			// Sort terms by length (longest first) to prefer longer matches
+			sortedTerms := make([]string, len(terms))
+			copy(sortedTerms, terms)
+			sort.Slice(sortedTerms, func(i, j int) bool {
+				return len(sortedTerms[i]) > len(sortedTerms[j])
+			})
+
+			// Combine all terms into one regex with alternation
+			patterns := make([]string, len(sortedTerms))
+			for i, term := range sortedTerms {
+				patterns[i] = regexp.QuoteMeta(term)
+			}
+			combinedPattern := "(?i)(" + strings.Join(patterns, "|") + ")"
+			re := regexp.MustCompile(combinedPattern)
+
 			highlighted = re.ReplaceAllStringFunc(highlighted, func(match string) string {
 				return utils.StyleWarning(match)
 			})
 		}
+
 		fmt.Printf(" - %s\n", highlighted)
 	}
 
