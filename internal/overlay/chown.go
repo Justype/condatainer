@@ -46,28 +46,33 @@ func ChownRecursively(ctx context.Context, imagePath string, uid, gid int, inter
 		}
 	}
 
-	if len(inodes) == 0 {
-		utils.PrintNote("No inodes found to modify at %s", utils.StylePath(targetPath))
-		return nil
+	// 4. Batch Update
+	// We always attempt to chown the skeleton structure (/upper, /work, /work/work) if they exist.
+	// This ensures the overlay is usable by the target user even if the target path is empty.
+	skeletonInodes := []string{"/upper", "/work", "/work/work"}
+
+	uniqueInodes := make(map[string]bool)
+	for _, inode := range inodes {
+		uniqueInodes[inode] = true
 	}
 
-	// 4. Batch Update
+	if len(uniqueInodes) == 0 {
+		utils.PrintDebug("No inodes found to modify at %s", targetPath)
+	}
+
 	utils.PrintMessage("Updating %d inodes (uid=%d gid=%d) in %s",
-		len(inodes), uid, gid, utils.StylePath(targetPath))
+		len(uniqueInodes), uid, gid, utils.StylePath(absPath))
 
 	var cmds []string
 
-	// A. Ensure skeleton paths are accessible (if we are chowning root)
-	if internalPath == "/" || internalPath == "" {
-		skeletonPaths := []string{"/upper", "/work", "/work/work"}
-		for _, p := range skeletonPaths {
-			cmds = append(cmds, fmt.Sprintf("sif %s uid %d", p, uid))
-			cmds = append(cmds, fmt.Sprintf("sif %s gid %d", p, gid))
-		}
+	// A. Ensure skeleton paths are accessible
+	for _, p := range skeletonInodes {
+		cmds = append(cmds, fmt.Sprintf("sif %s uid %d", p, uid))
+		cmds = append(cmds, fmt.Sprintf("sif %s gid %d", p, gid))
 	}
 
 	// B. Fix discovered inodes
-	for _, inode := range inodes {
+	for inode := range uniqueInodes {
 		cmds = append(cmds, fmt.Sprintf("sif <%s> uid %d", inode, uid))
 		cmds = append(cmds, fmt.Sprintf("sif <%s> gid %d", inode, gid))
 	}
@@ -100,8 +105,9 @@ func scanInodes(ctx context.Context, imgPath, startPath string) ([]string, error
 	out, err := cmd.Output()
 	if err != nil {
 		// This usually means the path doesn't exist in the overlay layer yet
-		// (e.g. user hasn't written to it), so we return empty without error.
-		return nil, fmt.Errorf("path %s not found in overlay layer (it may only exist in base image)", startPath)
+		// (e.g. user hasn't written to it).
+		utils.PrintDebug("Path %s not found in overlay layer: %v", startPath, err)
+		return nil, nil // Return empty without error
 	}
 
 	reInode := regexp.MustCompile(`Inode:\s+(\d+)`)
@@ -114,7 +120,8 @@ func scanInodes(ctx context.Context, imgPath, startPath string) ([]string, error
 	// B. Walk the Tree
 	visited := make(map[string]bool)
 	toVisit := []string{startInode}
-	results := []string{startInode}
+	results := make(map[string]bool)
+	results[startInode] = true
 
 	count := 0
 
@@ -160,13 +167,14 @@ func scanInodes(ctx context.Context, imgPath, startPath string) ([]string, error
 				continue
 			}
 
-			results = append(results, inode)
+			results[inode] = true
 
 			// Check if directory (Mode starts with 4 or 04)
-			// 40755 -> Directory
-			// 100644 -> File
+			// 40755 -> Directory (octal)
 			if strings.HasPrefix(mode, "4") || strings.HasPrefix(mode, "04") {
-				toVisit = append(toVisit, inode)
+				if !visited[inode] {
+					toVisit = append(toVisit, inode)
+				}
 			}
 
 			count++
@@ -176,7 +184,13 @@ func scanInodes(ctx context.Context, imgPath, startPath string) ([]string, error
 		}
 	}
 	fmt.Printf("\r%s\r", strings.Repeat(" ", 50)) // Clear line
-	utils.PrintMessage("Finished scanning %s inodes", utils.StyleNumber(len(results)))
 
-	return results, nil
+	inodeList := make([]string, 0, len(results))
+	for inode := range results {
+		inodeList = append(inodeList, inode)
+	}
+
+	utils.PrintMessage("Finished scanning %s inodes", utils.StyleNumber(len(inodeList)))
+
+	return inodeList, nil
 }
