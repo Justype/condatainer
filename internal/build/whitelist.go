@@ -99,22 +99,20 @@ func GetDefBuiltWhitelist() map[string]bool {
 		return defBuiltWhitelist
 	}
 
-	// Try to get from metadata first
+	// Always load persistent file first (contains entries from -s/-n builds)
+	defBuiltWhitelist = loadDefBuiltWhitelist()
+
+	// Merge in entries from build script metadata
 	scripts, err := GetAllBuildScripts(true)
 	if err == nil && len(scripts) > 0 {
-		defBuiltWhitelist = make(map[string]bool)
-		// Build whitelist from scripts with IsContainer == true
 		for name, info := range scripts {
 			if info.IsContainer {
 				defBuiltWhitelist[name] = true
 			}
 		}
-		// Save to persistent file for future use
+		// Save merged result to persistent file
 		saveDefBuiltWhitelist(defBuiltWhitelist)
-		return defBuiltWhitelist
 	}
 
-	// Fallback: load from persistent whitelist file
-	defBuiltWhitelist = loadDefBuiltWhitelist()
 	return defBuiltWhitelist
 }

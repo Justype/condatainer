@@ -32,7 +32,7 @@ Available helper scripts:
   - rstudio-server: RStudio server
   - vscode-tunnel: VS Code tunnel
 
-Note: Helper is not available inside a container.`,
+Note: Helper is not available inside a container or a scheduler job.`,
 	Example: `  condatainer helper --update                # Update all helper scripts
   condatainer helper --path                  # Show helper scripts directory
   condatainer helper code-server -p 11908    # Run code-server and forward flags`,
@@ -83,10 +83,15 @@ func completeHelperScripts(cmd *cobra.Command, args []string, toComplete string)
 }
 
 func runHelper(cmd *cobra.Command, args []string) error {
-	// Prevent helper commands when inside a container (except --path)
+	// Prevent helper commands when inside a container or scheduler job (except --path)
 	if config.IsInsideContainer() && !helperPath {
 		cmd.SilenceUsage = true
 		utils.PrintError("helper commands are not available inside a container")
+		os.Exit(1)
+	}
+	if scheduler.IsInsideJob() && !helperPath {
+		cmd.SilenceUsage = true
+		utils.PrintError("helper commands are not available inside a scheduler job")
 		os.Exit(1)
 	}
 
