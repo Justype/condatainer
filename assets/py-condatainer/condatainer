@@ -2334,6 +2334,10 @@ class CondaTainer_List:
             "-d", "--delete", "-r", "--remove",
             dest = "delete", action="store_true",
             help="Delete listed overlays after confirmation (used with terms)")
+        CondaTainer_List.parser_list.add_argument(
+            "-e", "--exact",
+            action="store_true",
+            help="Require exact match instead of substring match")
 
     @staticmethod
     def parse_list_args(args):
@@ -2346,8 +2350,14 @@ class CondaTainer_List:
             ref_overlays = []
             for overlay in overlay_files:
                 base_name = os.path.splitext(overlay)[0]
-                if args.terms and not all(re.search(re.escape(term), base_name, re.IGNORECASE) for term in args.terms):
-                    continue
+                if args.terms:
+                    normalized_base = Utils.normalize_name_version(base_name).lower()
+                    if args.exact:
+                        if not any(term.lower() == normalized_base for term in args.terms):
+                            continue
+                    else:
+                        if not all(re.search(re.escape(term), base_name, re.IGNORECASE) for term in args.terms):
+                            continue
                 name_version = base_name.replace('--', '/')
                 if name_version.count('/') > 1:
                     ref_overlays.append(name_version)
@@ -2382,6 +2392,10 @@ class CondaTainer_List:
                         print(" " + colored_name_version)
                     else:
                         print(" " + name_version)
+
+            if not name_versions_dict and not ref_overlays:
+                Utils.print_warning("No installed overlays match the provided search terms.")
+                sys.exit(1)
 
         if Utils.is_in_interactive_shell() and args.delete and args.terms:
             print("==================REMOVE==================")

@@ -17,6 +17,7 @@ import (
 
 var (
 	listDelete bool
+	listExact  bool
 )
 
 var listCmd = &cobra.Command{
@@ -31,35 +32,72 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.Flags().BoolVarP(&listDelete, "delete", "d", false, "Delete listed overlays after confirmation (used with search terms)")
 	listCmd.Flags().BoolP("remove", "r", false, "Alias for --delete")
+	listCmd.Flags().BoolVarP(&listExact, "exact", "e", false, "Require exact match instead of substring match")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
 	filters := normalizeFilters(args)
 
-	appOverlays, err := collectAppOverlays(filters)
+	appOverlays, err := collectAppOverlays(filters, listExact)
 	if err != nil {
 		return err
 	}
-	refOverlays, err := collectReferenceOverlays(filters)
+	refOverlays, err := collectReferenceOverlays(filters, listExact)
 	if err != nil {
 		return err
 	}
 
+	// Separate OS overlays (def-built) from app/env overlays
+	osOverlays := map[string][]string{}
+	moduleOverlays := map[string][]string{}
+	for name, versions := range appOverlays {
+		var osVers, modVers []string
+		for _, v := range versions {
+			if v == "(system app)" {
+				osVers = append(osVers, v)
+			} else {
+				modVers = append(modVers, v)
+			}
+		}
+		if len(osVers) > 0 {
+			osOverlays[name] = osVers
+		}
+		if len(modVers) > 0 {
+			moduleOverlays[name] = modVers
+		}
+	}
+
 	printed := false
-	if len(appOverlays) > 0 {
+	if len(osOverlays) > 0 {
+		printed = true
+		fmt.Println("Available OS overlays:")
+		names := make([]string, 0, len(osOverlays))
+		for name := range osOverlays {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Printf(" %s\n", utils.StyleName(name))
+		}
+	}
+
+	if len(moduleOverlays) > 0 {
+		if printed {
+			fmt.Println()
+		}
 		printed = true
 		fmt.Println("Available app overlays:")
-		names := make([]string, 0, len(appOverlays))
-		for name := range appOverlays {
+		names := make([]string, 0, len(moduleOverlays))
+		for name := range moduleOverlays {
 			names = append(names, name)
 		}
 		sort.Strings(names)
 		nameWidth := maxWidth(names)
 		for _, name := range names {
-			vers := appOverlays[name]
+			vers := moduleOverlays[name]
 			colored := make([]string, 0, len(vers))
 			for _, v := range vers {
-				if v == "(system app)" || v == "(env)" {
+				if v == "(env)" {
 					colored = append(colored, v)
 				} else {
 					colored = append(colored, utils.StyleInfo(v))
@@ -84,6 +122,7 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	if !printed {
 		utils.PrintWarning("No installed overlays match the provided search terms.")
+		os.Exit(1)
 	}
 
 	// Handle delete if requested
@@ -184,7 +223,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func collectAppOverlays(filters []string) (map[string][]string, error) {
+func collectAppOverlays(filters []string, exactMatch bool) (map[string][]string, error) {
 	grouped := map[string]map[string]struct{}{}
 	seen := make(map[string]bool) // Track seen files to avoid duplicates
 
@@ -214,28 +253,29 @@ func collectAppOverlays(filters []string) (map[string][]string, error) {
 			}
 			seen[entry.Name()] = true
 
-			delimCount := strings.Count(entry.Name(), "--")
-			if delimCount > 1 {
-				// Not an app overlay
-				continue
-			}
 			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 			normalized := strings.ToLower(utils.NormalizeNameVersion(nameVersion))
-			if !matchesFilters(normalized, filters) {
+			if !matchesFilters(normalized, filters, exactMatch) {
 				continue
 			}
 
 			var name, version string
-			if strings.Contains(nameVersion, "--") {
-				parts := strings.SplitN(nameVersion, "--", 2)
-				name = parts[0]
-				version = parts[1]
+			if isDefBuilt(nameVersion) {
+				// Def-built overlays are OS overlays regardless of delimiter count
+				name = strings.ReplaceAll(nameVersion, "--", "/")
+				version = "(system app)"
 			} else {
-				name = nameVersion
-				// Check whitelist: .def-built overlays are "system", others are "env"
-				if isDefBuilt(nameVersion) {
-					version = "(system app)"
+				delimCount := strings.Count(entry.Name(), "--")
+				if delimCount > 1 {
+					// Not an app overlay
+					continue
+				}
+				if strings.Contains(nameVersion, "--") {
+					parts := strings.SplitN(nameVersion, "--", 2)
+					name = parts[0]
+					version = parts[1]
 				} else {
+					name = nameVersion
 					version = "(env)"
 				}
 			}
@@ -262,7 +302,7 @@ func collectAppOverlays(filters []string) (map[string][]string, error) {
 	return result, nil
 }
 
-func collectReferenceOverlays(filters []string) ([]string, error) {
+func collectReferenceOverlays(filters []string, exactMatch bool) ([]string, error) {
 	seen := make(map[string]bool) // Track seen files to avoid duplicates
 	names := []string{}
 
@@ -299,7 +339,7 @@ func collectReferenceOverlays(filters []string) ([]string, error) {
 			}
 			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 			normalized := strings.ToLower(utils.NormalizeNameVersion(nameVersion))
-			if !matchesFilters(normalized, filters) {
+			if !matchesFilters(normalized, filters, exactMatch) {
 				continue
 			}
 			displayName := strings.ReplaceAll(nameVersion, "--", "/")
@@ -323,10 +363,20 @@ func normalizeFilters(filters []string) []string {
 	return normalized
 }
 
-func matchesFilters(name string, filters []string) bool {
+func matchesFilters(name string, filters []string, exactMatch bool) bool {
 	if len(filters) == 0 {
 		return true
 	}
+	if exactMatch {
+		// For exact match, the name must equal one of the filters
+		for _, filter := range filters {
+			if name == filter {
+				return true
+			}
+		}
+		return false
+	}
+	// For substring match, all filters must be present in the name
 	for _, filter := range filters {
 		if !strings.Contains(name, filter) {
 			return false

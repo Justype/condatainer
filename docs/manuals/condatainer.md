@@ -463,13 +463,15 @@ condatainer list [search_terms...] [flags]
 
 * `-d`, `--delete`: Prompt to delete listed overlays after displaying them.
 * `-r`, `--remove`: Alias for `--delete`.
+* `-e`, `--exact`: Require exact match instead of substring match.
 
 **Features:**
 
 * Lists both app overlays (with versions) and reference overlays.
 * Searches across all image directories.
 * Marks system apps and env overlays.
-* Uses AND logic for multiple search terms.
+* Uses AND logic for multiple search terms (substring mode).
+* Exits with code 1 if no overlays match the search terms.
 
 ### Remove
 

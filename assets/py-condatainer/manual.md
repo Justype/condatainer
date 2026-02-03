@@ -361,11 +361,14 @@ grcm39/gtf-gencode/M33
 List installed overlays stored in the `images/` directory (app and reference overlays now share that location).
 
 ```
-condatainer list [-d] [search_terms...]
+condatainer list [-d] [-e] [search_terms...]
 ```
 
 * `-d`, `--delete`: Prompt to delete listed overlays after displaying them.
 * `-r`, `--remove`: Alias for `--delete`.
+* `-e`, `--exact`: Require exact match instead of substring match.
+
+Exits with code 1 if no overlays match the search terms.
 
 ### Remove
 
