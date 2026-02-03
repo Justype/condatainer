@@ -60,9 +60,25 @@ go test -v ./internal/scheduler/...
 
 ### Configuration
 
-- Config file: `~/.condatainer/config.yaml` (created via `condatainer config init`)
-- Key settings: `apptainer_bin`, `scheduler_bin`, `submit_job`, `build.*`
-- Image search paths: program dir, `$SCRATCH/condatainer`, `$HOME/condatainer`
+Configuration uses a multi-level priority system (highest to lowest):
+1. Command-line flags
+2. Environment variables (`CONDATAINER_*` prefix)
+3. User config: `~/.config/condatainer/config.yaml`
+4. Portable config: `<install-dir>/config.yaml` (auto-detected when binary lives in `<dir>/bin/`)
+5. System config: `/etc/condatainer/config.yaml`
+6. Hardcoded defaults
+
+Key settings: `apptainer_bin`, `scheduler_bin`, `submit_job`, `extra_base_dirs`, `build.*` (ncpus, mem_mb, time, tmp_size_mb, compress_args, overlay_type)
+
+### Data Directory Search
+
+Images, build scripts, and helper scripts are searched in this order:
+1. Extra base dirs: user-specified via `CONDATAINER_EXTRA_BASE_DIRS` (colon-separated) or config `extra_base_dirs`
+2. Portable dir: `<install-dir>/` (auto-detected from executable location)
+3. Scratch dir: `$SCRATCH/condatainer/` (HPC systems with `$SCRATCH` set)
+4. User XDG dir: `~/.local/share/condatainer/`
+
+Each base dir contains subdirectories: `images/`, `build-scripts/`, `helper-scripts/`. Write operations use the first writable directory in search order.
 
 ### Scheduler Integration
 
