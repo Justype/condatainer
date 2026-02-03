@@ -450,7 +450,8 @@ func (s *SlurmScheduler) Submit(scriptPath string, dependencyJobIDs []string) (s
 
 	// Add dependency if provided
 	if len(dependencyJobIDs) > 0 {
-		depStr := strings.Join(dependencyJobIDs, ":")
+		// Use comma-separated job IDs, see: https://bioinformaticsworkbook.org/Appendix/HPC/SLURM/submitting-dependency-jobs-using-slurm.html
+		depStr := strings.Join(dependencyJobIDs, ",")
 		depArg := fmt.Sprintf("--dependency=afterok:%s", depStr)
 		args = append([]string{depArg}, args...)
 	}

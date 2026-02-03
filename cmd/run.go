@@ -112,6 +112,9 @@ func runScript(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Collect build job IDs from auto-install step (populated later if auto-install runs)
+	var buildJobIDs []string
+
 	// Check for missing dependencies
 	installedOverlays, err := getInstalledOverlaysMap()
 	if err != nil {
@@ -146,8 +149,20 @@ func runScript(cmd *cobra.Command, args []string) error {
 		}
 
 		if !runAutoInstall {
-			utils.PrintHint("Please run %s to install missing dependencies.",
-				utils.StyleAction("condatainer check -a "+originScriptPath))
+			externalFiles := []string{}
+			for _, md := range missingDeps {
+				if utils.IsOverlay(md) {
+					externalFiles = append(externalFiles, md)
+				}
+			}
+
+			if len(externalFiles) > 0 {
+				fileList := strings.Join(externalFiles, ", ")
+				utils.PrintError("External overlay(s) %s not found. Cannot use -a to install.", utils.StyleName(fileList))
+				return nil
+			}
+
+			utils.PrintHint("Please run %s to install missing dependencies.", utils.StyleAction("condatainer check -a "+originScriptPath))
 			return nil
 		}
 
@@ -205,6 +220,14 @@ func runScript(cmd *cobra.Command, args []string) error {
 
 		utils.PrintSuccess("All selected overlays installed/submitted.")
 
+		// Collect scheduler build job IDs (if any) so run job can depend on them
+		for _, id := range graph.GetJobIDs() {
+			buildJobIDs = append(buildJobIDs, id)
+		}
+		if len(buildJobIDs) > 0 {
+			utils.PrintMessage("Build job(s) submitted: %s", strings.Join(buildJobIDs, ", "))
+		}
+
 		// Re-fetch installed overlays after installation
 		installedOverlays, err = getInstalledOverlaysMap()
 		if err != nil {
@@ -229,7 +252,7 @@ func runScript(cmd *cobra.Command, args []string) error {
 			// Try to detect and use scheduler
 			sched, err := scheduler.DetectScheduler()
 			if err == nil && sched.IsAvailable() {
-				return submitRunJob(sched, scriptPath, originScriptPath, scriptSpecs)
+				return submitRunJob(sched, scriptPath, originScriptPath, scriptSpecs, buildJobIDs)
 			}
 			// Scheduler not available, fall through to local execution
 			utils.PrintNote("Script has scheduler specs but no scheduler available. Running locally.")
@@ -363,9 +386,13 @@ func parseArgsInScript(scriptPath string) ([]string, error) {
 }
 
 // submitRunJob creates and submits a scheduler job to run the script
-func submitRunJob(sched scheduler.Scheduler, scriptPath, originScriptPath string, specs *scheduler.ScriptSpecs) error {
+func submitRunJob(sched scheduler.Scheduler, scriptPath, originScriptPath string, specs *scheduler.ScriptSpecs, depIDs []string) error {
 	info := sched.GetInfo()
-	utils.PrintMessage("Submitting %s job to run %s", info.Type, utils.StylePath(originScriptPath))
+	if len(depIDs) > 0 {
+		utils.PrintMessage("Submitting %s job to run %s (will wait for build job(s): %s)", info.Type, utils.StylePath(originScriptPath), strings.Join(depIDs, ", "))
+	} else {
+		utils.PrintMessage("Submitting %s job to run %s", info.Type, utils.StylePath(originScriptPath))
+	}
 
 	// Determine log directory - use spec's Stdout path if set, otherwise global log path
 	var logsDir string
@@ -412,9 +439,10 @@ func submitRunJob(sched scheduler.Scheduler, scriptPath, originScriptPath string
 		absScriptPath = originScriptPath
 	}
 	jobSpec := &scheduler.JobSpec{
-		Name:    fileBaseName,
-		Command: runCommand,
-		Specs:   specs,
+		Name:      fileBaseName,
+		Command:   runCommand,
+		Specs:     specs,
+		DepJobIDs: depIDs,
 		Metadata: map[string]string{
 			"Script": absScriptPath,
 		},
@@ -426,8 +454,8 @@ func submitRunJob(sched scheduler.Scheduler, scriptPath, originScriptPath string
 		return fmt.Errorf("failed to create job script: %w", err)
 	}
 
-	// Submit the job
-	jobID, err := sched.Submit(jobScriptPath, nil)
+	// Submit the job (attach dependency job IDs so run waits for builds)
+	jobID, err := sched.Submit(jobScriptPath, depIDs)
 	if err != nil {
 		return fmt.Errorf("failed to submit job: %w", err)
 	}
