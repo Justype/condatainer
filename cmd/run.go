@@ -38,7 +38,7 @@ The script can contain special comment tags:
   #CNT args              - Additional arguments to pass to condatainer
 
 Supported #CNT arguments:
-  -w, --writable     Make .img overlays writable
+  -w, --writable         Make .img overlays writable
   -b, --base-image PATH  Use custom base image
   --env KEY=VALUE        Set environment variable
   --bind HOST:CONTAINER  Bind mount path
@@ -63,6 +63,7 @@ with the --auto-install flag.`,
 func init() {
 	rootCmd.AddCommand(runCmd)
 	runCmd.Flags().BoolVarP(&runWritableImg, "writable", "w", false, "Make .img overlays writable (default: read-only)")
+	runCmd.Flags().BoolVar(&runWritableImg, "writable-img", false, "Alias for --writable")
 	runCmd.Flags().StringVarP(&runBaseImage, "base-image", "b", "", "Base image to use instead of default")
 	runCmd.Flags().BoolVarP(&runAutoInstall, "auto-install", "a", false, "Automatically install missing dependencies")
 	runCmd.Flags().BoolP("install", "i", false, "Alias for --auto-install")
@@ -339,7 +340,7 @@ func applyScriptArgs(scriptArgs []string) {
 		for i := 0; i < len(parts); i++ {
 			arg := parts[i]
 			switch arg {
-			case "-w", "--writable":
+			case "-w", "--writable", "--writable-img":
 				runWritableImg = true
 			case "--fakeroot":
 				runFakeroot = true

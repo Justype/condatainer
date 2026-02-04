@@ -1829,7 +1829,7 @@ class CondaTainer_Exec:
             "-k", "--keep", action="store_true",
             help="Disable automatic command parsing to installed overlays")
         CondaTainer_Exec.parser_exec.add_argument(
-            "-w", "--writable", action="store_true",
+            "-w", "--writable", "--writable-img", action="store_true",
             help="Mount .img overlays as writable (default: read-only)")
         CondaTainer_Exec.parser_exec.add_argument(
             "--env", dest="env_settings", action="append",
@@ -2683,7 +2683,7 @@ class CondaTainer_Run:
             "script", type=str,
             help="Path to the script to run")
         CondaTainer_Run.parser_run.add_argument(
-            "-w", "--writable", action="store_true",
+            "-w", "--writable", "--writable-img", action="store_true",
             help="Make .img overlays writable (default: read-only)")
         CondaTainer_Run.parser_run.add_argument(
             "-b", "--base-image", type=str,
@@ -3250,7 +3250,7 @@ _{script_name}_completion() {{
                 COMPREPLY=( $(compgen -W "$local_files $sys_files" -- "${{cur}}") )
 
             else
-                local opts="-o --overlay -k --keep -w --writable --env --bind --fakeroot -b --base-image"
+                local opts="-o --overlay -k --keep -w --writable --writable-img --env --bind --fakeroot -b --base-image"
                 if [[ "${{cur}}" == -* ]]; then
                     COMPREPLY=( $(compgen -W "${{opts}}" -- "${{cur}}") )
                 else
@@ -3269,7 +3269,7 @@ _{script_name}_completion() {{
             ;;
         run)
             if [[ "${{cur}}" == -* ]]; then
-                COMPREPLY=( $(compgen -W "-w --writable -a --auto-install -i --install -b --base-image" -- "${{cur}}") )
+                COMPREPLY=( $(compgen -W "-w --writable --writable-img -a --auto-install -i --install -b --base-image" -- "${{cur}}") )
             elif [[ "${{prev}}" == "-b" || "${{prev}}" == "--base-image" ]]; then
                 local local_files=$(compgen -f -- "${{cur}}" | grep -E '\\.(sqf|img|sif)$')
                 local sys_files=$(_list_overlays true false)
@@ -3470,7 +3470,7 @@ _{script_name}_completion() {{
                     _arguments \\
                         '*(-o --overlay)'{{-o,--overlay}}'[Mount overlay]: :_alternative "files:file:_files -g \\"*.sqf *.img\\"" "overlays:installed:_installed_overlays true true"' \\
                         '(-k --keep)'{{-k,--keep}}'[Do not parse command to installed overlays]' \\
-                        '(-w --writable)'{{-w,--writable}}'[Make .img overlays writable]' \\
+                        '(-w --writable --writable-img)'{{-w,--writable,--writable-img}}'[Make .img overlays writable]' \\
                         '--fakeroot[Run with fake root]' \\
                         '(-b --base-image)'{{-b,--base-image}}'[Base image]: :_alternative "files:file:_files -g \\"*.sqf *.img *.sif\\"" "overlays:installed:_installed_overlays true false"' \\
                         '*--env[Env setting KEY=VALUE]:env' \\
@@ -3492,7 +3492,7 @@ _{script_name}_completion() {{
                     ;;
                 run)
                     _arguments \\
-                        '(-w --writable)'{{-w,--writable}}'[Make .img writable]' \\
+                        '(-w --writable --writable-img)'{{-w,--writable,--writable-img}}'[Make .img writable]' \\
                         '(-a --auto-install -i --install)'{{-a,-i,--auto-install,--install}}'[Auto install deps]' \\
                         '(-b --base-image)'{{-b,--base-image}}'[Base image]: :_alternative "files:file:_files -g \\"*.sqf *.img *.sif\\"" "overlays:installed:_installed_overlays true false"' \\
                         ':script:_files'

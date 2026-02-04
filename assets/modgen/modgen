@@ -1559,7 +1559,7 @@ class ModGen_Run:
             "script", type=str,
             help="Path to the script to run")
         ModGen_Run.parser_run.add_argument(
-            "-w", "--writable", action="store_true",
+            "-w", "--writable", "--writable-img", action="store_true",
             help="Placeholder for CondaTainer compatibility (no effect)")
         ModGen_Run.parser_run.add_argument(
             "-b", "--base-image", type=str,
