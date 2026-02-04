@@ -140,7 +140,7 @@ Mount points and examples
   - OS overlays present system directories (e.g., binaries under `/bin`) inside the container filesystem exposed by the overlay.
 - Writable images (`.img`) mount at `/ext3/env` and expose a full ext3 filesystem where packages may be installed or modified.
 
-Writability: `.sqf` overlays are read-only. To enable write access for a `.img` overlay use the `-w` / `--writable-img` flag with `exec` or `run`.
+Writability: `.sqf` overlays are read-only. To enable write access for a `.img` overlay use the `-w` / `--writable` flag with `exec` or `run`.
 
 ## Overlay
 
@@ -394,7 +394,7 @@ condatainer exec [OPTIONS] [COMMAND...]
 **Options:**
 
 * `-o`, `--overlay [OVERLAY]`: Specify specific overlays to mount (can be used multiple times).
-* `-w`, `--writable-img`: Make a `.img` overlay writable (default: read-only). Only one `.img` overlay may be used at a time; use this flag to enable writability.
+* `-w`, `--writable`: Make a `.img` overlay writable (default: read-only). Only one `.img` overlay may be used at a time; use this flag to enable writability.
 * `-k`, `--keep`: Do not attempt to parse the command itself as an overlay name.
 * `--env [ENV_VAR=VALUE]`: Set additional environment variables inside the container (can be used multiple times).
 * `--bind [HOST_PATH:CONTAINER_PATH]`: Bind additional host paths into the container (can be used multiple times).
@@ -403,7 +403,7 @@ condatainer exec [OPTIONS] [COMMAND...]
 **Environment Variables:**
 
 * `IN_CONDATAINER=1`: Set inside the container.
-* `CNT_CONDA_PREFIX`: Paths to the `.img` default conda path, if `-w`, `--writable-img` is used.
+* `CNT_CONDA_PREFIX`: Paths to the `.img` default conda path, if `-w`, `--writable` is used.
 
 **Example:**
 
@@ -448,7 +448,7 @@ condatainer run [SCRIPT] [SCRIPT_ARGS...]
 
 * **Dependency Injection:** Reads `#DEP:`and `module load` or `ml` commands lines in the script to determine which overlays to mount.
 * **Argument Injection:** Reads `#CNT` lines in the script to inject arguments into the condatainer command itself.
-* `-w`, `--writable-img`: Enable writable mounting for .img overlays.
+* `-w`, `--writable`: Enable writable mounting for .img overlays.
 * `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies found in the script.
 * `-i`, `--install`: Alias for `--auto-install`.
 
@@ -457,7 +457,7 @@ condatainer run [SCRIPT] [SCRIPT_ARGS...]
 ```bash
 #!/bin/bash
 #DEP: bcftools/1.22
-#CNT --writable-img
+#CNT --writable
 bcftools view input.vcf | head
 ```
 

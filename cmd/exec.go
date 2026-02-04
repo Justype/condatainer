@@ -69,7 +69,7 @@ func init() {
 
 	execCmd.Flags().StringSliceVarP(&execOverlays, "overlay", "o", nil, "overlay file to mount (can be used multiple times)")
 	execCmd.Flags().BoolVarP(&execKeep, "keep", "k", false, "disable automatic command parsing to installed overlays")
-	execCmd.Flags().BoolVarP(&execWritableImg, "writable-img", "w", false, "mount .img overlays as writable (default: read-only)")
+	execCmd.Flags().BoolVarP(&execWritableImg, "writable", "w", false, "mount .img overlays as writable (default: read-only)")
 	execCmd.Flags().StringSliceVar(&execEnvSettings, "env", nil, "set environment variable 'KEY=VALUE' (can be used multiple times)")
 	execCmd.Flags().StringVarP(&execBaseImage, "base-image", "b", "", "base image to use instead of default")
 	execCmd.Flags().StringSliceVar(&execBindPaths, "bind", nil, "bind path 'HOST:CONTAINER' (can be used multiple times)")

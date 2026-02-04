@@ -35,11 +35,25 @@ func Run(ctx context.Context, options Options) error {
 
 	overlayArgs := make([]string, 0, len(overlays))
 	var lastImg string
-	for _, overlay := range overlays {
-		if utils.IsImg(overlay) {
-			lastImg = overlay
+	for _, ol := range overlays {
+		isImg := utils.IsImg(ol)
+		if isImg {
+			lastImg = ol
+
+			// Only lock .img files as requested
+			if utils.FileExists(ol) && !utils.DirExists(ol) {
+				// If it's the principal image and writableImg is true, we need an exclusive lock.
+				// In putImgToLast, the principal image is always the last one.
+				isPrincipalImg := (ol == overlays[len(overlays)-1])
+				writeLock := isPrincipalImg && options.WritableImg
+
+				if err := overlay.CheckAvailable(ol, writeLock); err != nil {
+					return err
+				}
+			}
 		}
-		overlayArgs = append(overlayArgs, formatOverlayMount(overlay, options.WritableImg))
+
+		overlayArgs = append(overlayArgs, formatOverlayMount(ol, options.WritableImg))
 	}
 
 	configs, notes := collectOverlayEnv(overlays)

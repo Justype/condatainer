@@ -218,7 +218,7 @@ modgen run [SCRIPT] [SCRIPT_ARGS...]
 
 * **Dependency Injection:** Reads `#DEP:`and `module load` or `ml` commands lines in the script to determine which overlays to mount.
 * **Argument Injection:** Reads `#CNT` lines in the script to inject arguments into the condatainer command itself.
-* `-w`, `--writable-img`: Placeholder for CondaTainer compatibility (no effect).
+* `-w`, `--writable`: Placeholder for CondaTainer compatibility (no effect).
 * `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies found in the script.
 * `-i`, `--install`: Alias for `--auto-install`.
 

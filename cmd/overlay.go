@@ -156,6 +156,14 @@ var resizeCmd = &cobra.Command{
 		}
 
 		// 3. Execute
+		absPath, _ := filepath.Abs(path)
+		lock, err := overlay.AcquireLock(absPath, true)
+		if err != nil {
+			utils.PrintError("%v", err)
+			os.Exit(1)
+		}
+		defer lock.Close()
+
 		err = overlay.Resize(cmd.Context(), path, sizeMB)
 		if err != nil {
 			utils.PrintError("%v", err)
@@ -178,6 +186,14 @@ var infoCmd = &cobra.Command{
 
 	Run: func(cmd *cobra.Command, args []string) {
 		path := args[0]
+
+		absPath, _ := filepath.Abs(path)
+		lock, err := overlay.AcquireLock(absPath, false)
+		if err != nil {
+			utils.PrintError("%v", err)
+			os.Exit(1)
+		}
+		defer lock.Close()
 
 		stats, err := overlay.GetStats(path)
 		if err != nil {
@@ -261,7 +277,15 @@ var checkCmd = &cobra.Command{
 		path := args[0]
 		force, _ := cmd.Flags().GetBool("force")
 
-		err := overlay.CheckIntegrity(cmd.Context(), path, force)
+		absPath, _ := filepath.Abs(path)
+		lock, err := overlay.AcquireLock(absPath, true)
+		if err != nil {
+			utils.PrintError("%v", err)
+			os.Exit(1)
+		}
+		defer lock.Close()
+
+		err = overlay.CheckIntegrity(cmd.Context(), path, force)
 		if err != nil {
 			utils.PrintError("%v", err)
 			os.Exit(1)
@@ -324,8 +348,16 @@ Use --root to force ownership to 0:0.`,
 		utils.PrintDebug("Chown Target: %s inside %s", internalPath, path)
 		utils.PrintDebug("New Owner:    UID=%d GID=%d", targetUID, targetGID)
 
+		absPath, _ := filepath.Abs(path)
+		lock, err := overlay.AcquireLock(absPath, true)
+		if err != nil {
+			utils.PrintError("%v", err)
+			os.Exit(1)
+		}
+		defer lock.Close()
+
 		// Perform the recursive chown
-		err := overlay.ChownRecursively(cmd.Context(), path, targetUID, targetGID, internalPath)
+		err = overlay.ChownRecursively(cmd.Context(), path, targetUID, targetGID, internalPath)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 				utils.PrintWarning("Operation cancelled.")

@@ -145,7 +145,7 @@ Mount points and examples
   - OS overlays present system directories (e.g., binaries under `/bin`) inside the container filesystem exposed by the overlay.
 - Writable images (`.img`) mount at `/ext3/env` and expose a full ext3 filesystem where packages may be installed or modified.
 
-Writability: `.sqf` overlays are read-only. To enable write access for a `.img` overlay use the `-w` / `--writable-img` flag with `exec` or `run`.
+Writability: `.sqf` overlays are read-only. To enable write access for a `.img` overlay use the `-w` / `--writable` flag with `exec` or `run`.
 
 ## Overlay
 
@@ -505,7 +505,7 @@ condatainer exec [flags] [overlays...] [--] [command...]
 **Options:**
 
 * `-o`, `--overlay [OVERLAY]`: Overlay file to mount (can be used multiple times).
-* `-w`, `--writable-img`: Mount `.img` overlays as writable (default: read-only).
+* `-w`, `--writable`: Mount `.img` overlays as writable (default: read-only).
 * `-r`, `--read-only`: Mount `.img` overlays as read-only (only for `e` shortcut).
 * `-k`, `--keep`: Disable automatic command parsing (don't convert commands to overlay names).
 * `-n`, `--no-autoload`: Disable autoloading `env.img` from current directory (only for `e` shortcut).
@@ -523,7 +523,7 @@ condatainer exec [flags] [overlays...] [--] [command...]
 **Environment Variables (inside container):**
 
 * `IN_CONDATAINER=1`: Set inside the container.
-* `CNT_CONDA_PREFIX`: Path to the `.img` default conda path, if `-w`, `--writable-img` is used.
+* `CNT_CONDA_PREFIX`: Path to the `.img` default conda path, if `-w`, `--writable` is used.
 
 **Examples:**
 
@@ -577,7 +577,7 @@ condatainer run [SCRIPT] [SCRIPT_ARGS...]
 
 **Options:**
 
-* `-w`, `--writable-img`: Make `.img` overlays writable (default: read-only).
+* `-w`, `--writable`: Make `.img` overlays writable (default: read-only).
 * `-b`, `--base-image [PATH]`: Use custom base image.
 * `-a`, `--auto-install`: Automatically install missing dependencies.
 * `-i`, `--install`: Alias for `--auto-install`.
@@ -595,7 +595,7 @@ Scripts can use special comment tags to declare dependencies and configure the c
 
 **Available `#CNT` arguments:**
 
-* `-w`, `--writable-img`: Make `.img` overlays writable.
+* `-w`, `--writable`: Make `.img` overlays writable.
 * `-b`, `--base-image PATH`: Use custom base image.
 * `--env KEY=VALUE`: Set environment variable.
 * `--bind HOST:CONTAINER`: Bind mount path.
@@ -606,7 +606,7 @@ Scripts can use special comment tags to declare dependencies and configure the c
 ```bash
 #!/bin/bash
 #DEP: bcftools/1.22
-#CNT --writable-img
+#CNT --writable
 #CNT --env MYVAR=value
 bcftools view input.vcf | head
 ```

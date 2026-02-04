@@ -92,32 +92,32 @@ func runScheduler(cmd *cobra.Command, args []string) {
 			}
 		}
 
-		// Display resource limits if available
-		if len(clusterInfo.Limits) > 0 {
-			fmt.Println()
-			fmt.Println("Resource Limits:")
-			for _, limit := range clusterInfo.Limits {
-				partition := limit.Partition
-				if partition == "" {
-					partition = "default"
-				}
-				fmt.Printf("  Partition: %s\n", utils.StyleName(partition))
-				if limit.MaxCpus > 0 {
-					fmt.Printf("    Max CPUs:   %s\n", utils.StyleNumber(fmt.Sprintf("%d", limit.MaxCpus)))
-				}
-				if limit.MaxMemMB > 0 {
-					fmt.Printf("    Max Memory: %s\n", utils.StyleNumber(fmt.Sprintf("%d MB", limit.MaxMemMB)))
-				}
-				if limit.MaxGpus > 0 {
-					fmt.Printf("    Max GPUs:   %s\n", utils.StyleNumber(fmt.Sprintf("%d", limit.MaxGpus)))
-				}
-				if limit.MaxTime > 0 {
-					fmt.Printf("    Max Time:   %s\n", utils.StyleNumber(limit.MaxTime.String()))
-				}
-				if limit.DefaultTime > 0 {
-					fmt.Printf("    Default Time: %s\n", utils.StyleNumber(limit.DefaultTime.String()))
-				}
-			}
-		}
+		// // Display resource limits if available
+		// if len(clusterInfo.Limits) > 0 {
+		// 	fmt.Println()
+		// 	fmt.Println("Resource Limits:")
+		// 	for _, limit := range clusterInfo.Limits {
+		// 		partition := limit.Partition
+		// 		if partition == "" {
+		// 			partition = "default"
+		// 		}
+		// 		fmt.Printf("  Partition: %s\n", utils.StyleName(partition))
+		// 		if limit.MaxCpus > 0 {
+		// 			fmt.Printf("    Max CPUs:   %s\n", utils.StyleNumber(fmt.Sprintf("%d", limit.MaxCpus)))
+		// 		}
+		// 		if limit.MaxMemMB > 0 {
+		// 			fmt.Printf("    Max Memory: %s\n", utils.StyleNumber(fmt.Sprintf("%d MB", limit.MaxMemMB)))
+		// 		}
+		// 		if limit.MaxGpus > 0 {
+		// 			fmt.Printf("    Max GPUs:   %s\n", utils.StyleNumber(fmt.Sprintf("%d", limit.MaxGpus)))
+		// 		}
+		// 		if limit.MaxTime > 0 {
+		// 			fmt.Printf("    Max Time:   %s\n", utils.StyleNumber(limit.MaxTime.String()))
+		// 		}
+		// 		if limit.DefaultTime > 0 {
+		// 			fmt.Printf("    Default Time: %s\n", utils.StyleNumber(limit.DefaultTime.String()))
+		// 		}
+		// 	}
+		// }
 	}
 }

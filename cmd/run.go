@@ -13,6 +13,7 @@ import (
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	execpkg "github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -37,7 +38,7 @@ The script can contain special comment tags:
   #CNT args              - Additional arguments to pass to condatainer
 
 Supported #CNT arguments:
-  -w, --writable-img     Make .img overlays writable
+  -w, --writable     Make .img overlays writable
   -b, --base-image PATH  Use custom base image
   --env KEY=VALUE        Set environment variable
   --bind HOST:CONTAINER  Bind mount path
@@ -61,7 +62,7 @@ with the --auto-install flag.`,
 
 func init() {
 	rootCmd.AddCommand(runCmd)
-	runCmd.Flags().BoolVarP(&runWritableImg, "writable-img", "w", false, "Make .img overlays writable (default: read-only)")
+	runCmd.Flags().BoolVarP(&runWritableImg, "writable", "w", false, "Make .img overlays writable (default: read-only)")
 	runCmd.Flags().StringVarP(&runBaseImage, "base-image", "b", "", "Base image to use instead of default")
 	runCmd.Flags().BoolVarP(&runAutoInstall, "auto-install", "a", false, "Automatically install missing dependencies")
 	runCmd.Flags().BoolP("install", "i", false, "Alias for --auto-install")
@@ -235,6 +236,32 @@ func runScript(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Resolve overlay paths and check availability early
+	overlays := make([]string, len(deps))
+	for i, dep := range deps {
+		if utils.IsOverlay(dep) {
+			overlays[i] = dep
+		} else {
+			normalized := utils.NormalizeNameVersion(dep)
+			if path, ok := installedOverlays[normalized]; ok {
+				overlays[i] = path
+			} else {
+				overlays[i] = dep
+			}
+		}
+	}
+
+	// Before submitting or running locally, check if .img overlays are available.
+	// This prevents submitting jobs that will immediately fail due to locked images.
+	for _, ol := range overlays {
+		if utils.IsImg(ol) && utils.FileExists(ol) {
+			// If writable requested, check for exclusive lock availability.
+			if err := overlay.CheckAvailable(ol, runWritableImg); err != nil {
+				return err
+			}
+		}
+	}
+
 	// Check if script has scheduler specs and scheduler is available
 	scriptSpecs, err := scheduler.ReadScriptSpecsFromPath(scriptPath)
 	if err != nil {
@@ -256,21 +283,6 @@ func runScript(cmd *cobra.Command, args []string) error {
 			}
 			// Scheduler not available, fall through to local execution
 			utils.PrintNote("Script has scheduler specs but no scheduler available. Running locally.")
-		}
-	}
-
-	// Resolve overlay paths
-	overlays := make([]string, len(deps))
-	for i, dep := range deps {
-		if utils.IsOverlay(dep) {
-			overlays[i] = dep
-		} else {
-			normalized := utils.NormalizeNameVersion(dep)
-			if path, ok := installedOverlays[normalized]; ok {
-				overlays[i] = path
-			} else {
-				overlays[i] = dep
-			}
 		}
 	}
 
@@ -327,7 +339,7 @@ func applyScriptArgs(scriptArgs []string) {
 		for i := 0; i < len(parts); i++ {
 			arg := parts[i]
 			switch arg {
-			case "-w", "--writable-img":
+			case "-w", "--writable":
 				runWritableImg = true
 			case "--fakeroot":
 				runFakeroot = true
