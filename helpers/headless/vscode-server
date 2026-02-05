@@ -1,14 +1,9 @@
 #!/bin/bash
-# This script helps run vscode-tunnel on current machine.
+# This script helps run vscode-server on current machine.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/.common.sh"
-HELPER_NAME=vscode-tunnel
-
-# Default machine name logic
-DEFAULT_MACHINE_NAME=$(whoami)-$(hostname)
-DEFAULT_MACHINE_NAME=${DEFAULT_MACHINE_NAME//./-}
-if [ ${#DEFAULT_MACHINE_NAME} -gt 20 ]; then DEFAULT_MACHINE_NAME=${DEFAULT_MACHINE_NAME:0:20}; fi
+HELPER_NAME=vscode-server
 
 # Save defaults on first run
 config_init $HELPER_NAME \
@@ -16,20 +11,21 @@ config_init $HELPER_NAME \
     MEM=16G \
     TIME=12:00:00 \
     GPU= \
-    AUTH=github \
-    MACHINE_NAME="$DEFAULT_MACHINE_NAME" \
+    PORT= \
+    TOKEN= \
     BASE_IMAGE= \
     OVERLAY=env.img
 
 # Load saved defaults
 config_load $HELPER_NAME
-config_require $HELPER_NAME OVERLAY AUTH MACHINE_NAME
+config_require $HELPER_NAME OVERLAY
 
 print_help() {
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
-    echo "  -n <name>       Machine name for the tunnel (default: $MACHINE_NAME)"
+    echo "  -p <port>       Port for $HELPER_NAME (default: ${PORT:-randomly picked}). Valid range: 1024-65535."
+    echo "  -a <token>      Connection token for the web UI (if not provided, one is generated)"
     echo "  -b <image>      Base image file"
     echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
@@ -49,9 +45,10 @@ esac
 # Track if -o flag is used to clear overlays on first use
 _OVERLAYS_CLEARED=false
 
-while getopts "n:b:e:o:" opt; do
+while getopts "p:a:b:e:o:" opt; do
     case ${opt} in
-        n ) MACHINE_NAME=$OPTARG ;;
+        p ) PORT=$OPTARG ;;
+        a ) TOKEN=$OPTARG ;;
         b ) BASE_IMAGE="$OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
         o ) # First -o clears previous overlays, then builds fresh list
@@ -62,10 +59,26 @@ while getopts "n:b:e:o:" opt; do
     esac
 done
 
+# If no port specified, pick an available one
+if [ -z "$PORT" ]; then
+    PORT=$(choose_port) || {
+        print_error "Failed to find an available port. Please specify one with -p."
+        exit 1
+    }
+    print_info "Available port :${BLUE}$PORT${NC} auto-selected."
+    print_info "Remember to set up port forwarding: ${CYAN}ssh -L $PORT:localhost:$PORT $USER@$HOSTNAME${NC}"
+    if ! confirm_default_yes "Proceed with this port?"; then
+        echo "Aborted by user."; exit 1
+    fi
+else
+    validate_port "$PORT"
+fi
+
 #region Sanity Checks
+check_port_available "$PORT"
 check_condatainer
 
-# Ensure VSCode CLI
+# Ensure the VSCode CLI is present
 CODE_BIN="$HOME/.local/bin/code"
 if ! [ -f "$CODE_BIN" ]; then
     print_info "VSCode CLI not found. Downloading..."
@@ -100,12 +113,22 @@ setup_scratch
 [ -n "$OVERLAY" ] && [ -f "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
 
-print_info "Starting VS Code Tunnel as machine: ${BLUE}$MACHINE_NAME${NC}"
+# Determine connection token
+if [ -z "$TOKEN" ]; then
+    if [ -n "$VSCODE_CONNECTION_TOKEN" ]; then
+        TOKEN="$VSCODE_CONNECTION_TOKEN"
+    else
+        TOKEN=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
+    fi
+fi
+
+print_info "Starting $HELPER_NAME at ${BLUE}http://localhost:$PORT?tkn=$TOKEN&folder=$CWD${NC}"
 
 condatainer exec \
     $BASE_IMAGE_ARG \
     $OVERLAYS_ARG \
     $OVERLAY_ARG --writable \
-    $CODE_BIN tunnel \
+    $CODE_BIN serve-web \
+        --port $PORT \
         --accept-server-license-terms \
-        --name $MACHINE_NAME
+        --connection-token $TOKEN

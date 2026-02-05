@@ -1,15 +1,13 @@
-# Run Code Server on HPC
+# Run VS Code Server on HPC
 
-Run following commands to start `code-server` on your HPC system:
+Run following commands to start VS Code Server on your HPC system:
 
 ```bash
 condatainer helper -u
-condatainer helper code-server
+condatainer helper vscode-server
 ```
 
-```{note}
-You cannot use Microsoft extensions like Pylance and Copilot with `code-server`. Use [VS Code Server](./vscode-server_on_HPC.md) instead for full VS Code experience.
-```
+VS Code Server provides the **full VS Code experience** including all extensions (Pylance, Copilot, etc.) in your browser.
 
 ## Checklist
 
@@ -17,15 +15,14 @@ You cannot use Microsoft extensions like Pylance and Copilot with `code-server`.
 - [Have SSH port forwarding set up to the login node](#ssh-port-forwarding)
 - [Have CondaTainer installed](#install-condatainer)
 - [Have a writable overlay image (optional)](#create-writable-overlay)
-- [Check the Script Parameters](#code-server-helper-script)
+- [Check the Script Parameters](#vscode-server-helper-script)
 
 Then you can run:
 
 ```bash
-condatainer helper code-server
+condatainer helper vscode-server
 # Default
 #   -p port_number=auto-selected if omitted
-#   -a auth_password="none" or a password
 #   -c num_cpus=4
 #   -m memory=16G
 #   -t time_limit=12:00:00
@@ -35,7 +32,7 @@ You can create an alias in your shell config file (`~/.bashrc` or `~/.zshrc`):
 
 ```bash
 # Change 13182 to your preferred port number
-alias code-server-start='condatainer helper code-server -p 13182'
+alias vscode-start='condatainer helper vscode-server -p 13182'
 ```
 
 If you have any issues, see [Common Issues](#common-issues) section below.
@@ -57,7 +54,7 @@ Your machine -----> HPC Login Node -----> HPC Compute Node
         (port forwarding)     (port forwarding)
 ```
 
-`code-server` is a web-based application, so you need to access it through a port on the HPC system.
+VS Code Server is a web-based application, so you need to access it through a port on the HPC system.
 
 But you cannot directly access compute nodes from your local machine. To accomplish this, you need to set up SSH port forwarding from your local machine to the HPC login node.
 
@@ -119,17 +116,18 @@ See [Launch a Shell within the Workspace Overlay](../user_guide/workspace_overla
 
 ## VS Code Server Helper Script
 
-`code-server` will do the following steps for you:
+The script will do the following steps for you:
 
-1. Check if `code-server` is running on any compute node.
-2. If yes, establish SSH port forwarding to that node.
-3. If not,
+1. Download the VS Code CLI if not available.
+2. Check if VS Code Server is running on any compute node.
+3. If yes, establish SSH port forwarding to that node.
+4. If not,
    1. Check port and overlay integrity.
-   2. Submit the SLURM job to start `code-server`.
+   2. Submit the SLURM job to start VS Code Server.
    3. When the job starts, record and set up SSH port forwarding.
 
 ```
-Usage: code-server [options]
+Usage: vscode-server [options]
 
 Options:
   -c <number>     Number of CPUs to allocate (default: 4)
@@ -139,7 +137,7 @@ Options:
   -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00
 
   -p <port>       Port for vscode-server (default: randomly picked). Valid range: 1024-65535.
-  -a <auth>       Password for code-server authentication (default: none)
+  -a <token>      Connection token for the web UI (if not provided, one is generated)
   -b <image>      Base image file
   -e <overlay>    Environment overlay image file (default: env.img)
   -o <overlay>    Additional overlay files (can have multiple -o options)
@@ -149,17 +147,17 @@ Options:
 
 ## Configuration
 
-The script saves its defaults to `~/.config/condatainer/helper/defaults/code-server` on first run. Subsequent runs load from this file.
+The script saves its defaults to `~/.config/condatainer/helper/defaults/vscode-server` on first run. Subsequent runs load from this file.
 
 ```bash
 # View current config
-condatainer helper code-server config
+condatainer helper vscode-server config
 
 # Reset to defaults (delete config file, next run recreates it)
-rm ~/.config/condatainer/helper/defaults/code-server
+rm ~/.config/condatainer/helper/defaults/vscode-server
 ```
 
-## Running `code-server`
+## Running VS Code Server
 
 Let's set up and run VS Code Server on HPC:
 
@@ -168,10 +166,10 @@ Let's set up and run VS Code Server on HPC:
 condatainer helper -u
 ```
 
-Then you can run the script: 
+Then you can run the script:
 
 ```bash
-condatainer helper code-server
+condatainer helper vscode-server
 ```
 
 After running the script, you will see output like this:
@@ -179,7 +177,7 @@ After running the script, you will see output like this:
 ```
 Waiting for job 1299123 to start running. Current status: PENDING.
 Job 1299123 is now running on node cm23.
-code-server at http://localhost:<port>?folder=/scratch/your_username/current_working_directory
+vscode-server at http://localhost:<port>?tkn=<token>&folder=/scratch/your_username/current_working_directory
 If you want to stop it, run: scancel 1299123
 ```
 
@@ -189,39 +187,24 @@ Don't forget to set up SSH port forwarding from your local machine to the HPC lo
 
 ## Common Issues
 
-### Too many files under `.local/share/code-server/extensions`
+### Too many files under `.vscode-server/extensions`
 
-If you have installed many extensions, the number of files under `.local/share/code-server/extensions` may exceed the quota.
+If you have installed many extensions, the number of files under `.vscode-server/extensions` may exceed the quota.
 
 To fix this, you can create a symbolic link to the writable overlay image.
 
 ```bash
 # Inside the overlay
-mkdir -p /ext3/home/.local/share/code-server
-mv $HOME/.local/share/code-server/extensions /ext3/home/.local/share/code-server/extensions
-ln -s /ext3/home/.local/share/code-server/extensions $HOME/.local/share/code-server/extensions
+mkdir -p /ext3/home/.vscode-server
+mv $HOME/.vscode-server/extensions /ext3/home/.vscode-server/extensions
+ln -s /ext3/home/.vscode-server/extensions $HOME/.vscode-server/extensions
 ```
 
 A new issue is that if you change the overlay image, you will lose all installed extensions. But at least you won't hit the quota limit.
 
-### Pylance not available
+### Connection token issues
 
-Pylance is owned by Microsoft and is not open source. So it is not included in the [open-vsx registry](https://open-vsx.org/), which is used by `code-server`.
-
-Solution: Use Pyright instead. see https://open-vsx.org/extension/ms-pyright/pyright
-
-### Set up GitHub Copilot
-
-Sadly, GitHub Copilot is not working with `code-server`.
-
-Available workarounds:
-
-- [sunpix/howto-install-copilot-in-code-server](https://github.com/sunpix/howto-install-copilot-in-code-server)
-- [Code Server Discussion 5063](https://github.com/coder/code-server/discussions/5063)
-
-I tried both methods, but none worked for me.
-
-You can use [VS Code Tunnel](./vscode-tunnel_on_HPC.md) or [VS Code Server](./vscode-server_on_HPC.md) instead.
+If you're having trouble connecting, ensure you're using the correct token from the output. The token is included in the URL query parameter `tkn=<token>`.
 
 ### Port already in use
 

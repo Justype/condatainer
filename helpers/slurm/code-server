@@ -1,48 +1,24 @@
 #!/bin/bash
-# This script helps run code-server with CondaTainer env on SLURM clusters.
+# This script helps run code-server on SLURM clusters.
 
-NCPUS=4
-MEM=16G
-TIME=12:00:00
-PORT=
-AUTH="none"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "$SCRIPT_DIR/.common.sh"
+HELPER_NAME=code-server
 
-OVERLAYS_ARG=""
-OVERLAYS=""
-OVERLAY="env.img"
-FAKEROOT_ARG=""
-BASE_IMAGE_ARG=""
-CWD=$(readlink -f .)
+# Save defaults on first run
+config_init $HELPER_NAME \
+    NCPUS=4 \
+    MEM=16G \
+    TIME=12:00:00 \
+    GPU= \
+    PORT= \
+    AUTH=none \
+    BASE_IMAGE= \
+    OVERLAY=env.img
 
-LOG_DIR="$HOME/logs"
-mkdir -p $LOG_DIR
-DATE=$(date +"%Y%m%d_%H%M%S")
-CONDATAINER_CONFIG_DIR="$HOME/.config/condatainer"
-mkdir -p $CONDATAINER_CONFIG_DIR
-
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-
-if [ -f "$LOG_DIR/.code-server" ]; then
-    IFS=$'\t' read -r PRE_JOB_ID PRE_PORT PRE_AUTH PRE_NODE PRE_CWD < "$LOG_DIR/.code-server"
-    PRE_JOB_STATUS=$(squeue -j $PRE_JOB_ID -h -o "%T" 2>/dev/null)
-    if [ "$PRE_JOB_STATUS" == "PENDING" ]; then
-        echo -e "The previous code-server job (ID: ${YELLOW}$PRE_JOB_ID${NC}) is still pending. Please wait until it starts running."
-        exit 0
-    elif [ "$PRE_JOB_STATUS" != "RUNNING" ]; then
-        echo -e "The previous code-server job (ID: ${YELLOW}$PRE_JOB_ID${NC}) is no longer running."
-        rm "$LOG_DIR/.code-server"
-    else
-        echo -e "Found an existing code-server job (ID: ${YELLOW}$PRE_JOB_ID${NC}) running on node ${BLUE}$PRE_NODE${NC}."
-        echo -e "code-server at ${BLUE}http://localhost:$PRE_PORT?folder=$PRE_CWD${NC}"
-        echo -e "If you want to stop it, run: ${YELLOW}scancel $PRE_JOB_ID${NC}"
-        ssh -L $PRE_PORT:localhost:$PRE_PORT $USER@$PRE_NODE
-        exit 0
-    fi
-fi
+# Load saved defaults
+config_load $HELPER_NAME
+config_require $HELPER_NAME NCPUS MEM TIME OVERLAY AUTH
 
 print_help() {
     echo "Usage: $0 [options]"
@@ -51,206 +27,198 @@ print_help() {
     echo "  -c <number>     Number of CPUs to allocate (default: $NCPUS)"
     echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
     echo "  -t <time>       Time limit for the job (default: $TIME)"
-    echo "  -p <port>       Port for code-server (if not provided, an available port will be chosen). Valid range: 1024-65535."
-    echo "  -a <auth>       Password for code-server authentication (default: none)"
+    echo "  -g <gpu>        GPU resources (e.g., 1, a100:2). Empty means no GPU."
+    echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00"
+    echo ""
+    echo "  -p <port>       Port for $HELPER_NAME (default: ${PORT:-randomly picked}). Valid range: 1024-65535."
+    echo "  -a <auth>       Password for $HELPER_NAME authentication (default: $AUTH)"
     echo "  -b <image>      Base image file"
     echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
-    echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00"
-    echo "  -f              Use fakeroot mode (will be root inside the container)"
-    echo "  -y              Accept all warnings and proceed"
-    echo "  -h              Show this help message"
+    echo ""
+    echo "  config           Show config file path and contents"
+    echo ""
+    echo "Config file: $(config_path $HELPER_NAME)"
+    echo "Delete this file to reset to defaults."
 }
 
-while getopts "c:m:t:p:a:b:e:o:vfyh" opt; do
+case $1 in
+    config)         config_show $HELPER_NAME ;;
+    --help|-h|help) print_help; exit 0 ;;
+    *)              ;;
+esac
+
+show_and_connect() {
+    local job_id="$1"
+    print_info "$HELPER_NAME at ${BLUE}http://localhost:$PORT?folder=$CWD${NC}"
+    if [ "$AUTH" != "none" ]; then
+        print_info "  Password: ${YELLOW}$AUTH${NC}"
+    fi
+    print_info "If you want to stop it, run: ${YELLOW}scancel $job_id${NC}"
+    exec ssh ${SSH_OPTS} -o ControlMaster=no -L "$PORT:localhost:$PORT" "$USER@$NODE"
+    exit 0
+}
+
+print_specs() {
+    print_msg "  CPUs: ${BLUE}$NCPUS${NC} MEM: ${BLUE}$MEM${NC} TIME: ${BLUE}$TIME${NC}"
+    [ -n "$GPU" ] && print_msg "  GPU: ${BLUE}$GPU${NC}"
+    print_msg "  Port: ${BLUE}$PORT${NC} Password: ${BLUE}$AUTH${NC}"
+    print_msg "  Working Dir: ${BLUE}$CWD${NC}"
+    [ -n "$BASE_IMAGE" ] && print_msg "  Base Image: ${BLUE}$BASE_IMAGE${NC}"
+    print_msg "  Overlay: ${BLUE}$OVERLAY${NC}"
+    [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
+}
+
+STATE_FILE="$HELPER_STATE_DIR/$HELPER_NAME"
+read_job_state "$STATE_FILE"
+case $? in
+    1) # PENDING
+        print_info "Found a pending $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC})."
+        wait_for_job "$JOB_ID"
+        show_and_connect "$JOB_ID"
+        ;;
+    2) # RUNNING
+        print_info "Found an existing $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC}) running on node ${BLUE}$NODE${NC}."
+        show_and_connect "$JOB_ID"
+        ;;
+    3) # Not running - ask about reusing previous overlay settings
+        print_info "The previous $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC}) is no longer running."
+        if [ -n "$OVERLAY" ]; then
+            print_msg "Previous run used:"
+            print_specs
+            if confirm_default_yes "Reuse these settings and go to the previous working directory?"; then
+                cd "$CWD"
+            else
+                PRE_PORT="$PORT"
+                config_load $HELPER_NAME silent
+                OVERLAYS="" # Reset overlays since we are loading fresh config
+                if [ -z "$PORT" -a -n "$PRE_PORT" ]; then
+                    PORT="$PRE_PORT"
+                    print_info "Using default settings with previously selected port: ${BLUE}$PORT${NC}"
+                else
+                    print_info "Using default settings."
+                fi
+                print_specs
+                rm "$STATE_FILE"
+                sleep 3
+            fi
+        else
+            config_load $HELPER_NAME silent
+        fi
+        ;;
+esac
+
+# Track if -o flag is used to clear overlays on first use
+_OVERLAYS_CLEARED=false
+# Record original values for saving in state file (in case of -v option)
+_NCPUS=$NCPUS
+_MEM=$MEM
+_TIME=$TIME
+_GPU=$GPU
+
+while getopts "c:m:t:g:p:a:b:e:o:v" opt; do
     case ${opt} in
-        c ) NCPUS=$OPTARG ;;
-        m ) MEM=$OPTARG ;;
-        t ) TIME=$OPTARG ;;
+        c ) NCPUS=$OPTARG; _NCPUS=$OPTARG ;;
+        m ) MEM=$OPTARG; _MEM=$OPTARG ;;
+        t ) TIME=$OPTARG; _TIME=$OPTARG ;;
+        g ) GPU=$OPTARG; _GPU=$OPTARG ;;
+        v ) NCPUS=1; MEM=4G; TIME=02:00:00; echo "[MSG] View Mode: NCPUS=1, MEM=4G, TIME=02:00:00" ;;
         p ) PORT=$OPTARG ;;
         a ) AUTH=$OPTARG ;;
-        b ) BASE_IMAGE_ARG="-b $OPTARG" ;;
+        b ) BASE_IMAGE="$OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
-        o ) OVERLAYS_ARG+=" -o $OPTARG"; OVERLAYS+=" $OPTARG" ;;
-        v ) NCPUS=1; MEM=4G; TIME=02:00:00; echo "View Mode: NCPUS=1, MEM=4G, TIME=02:00:00" ;;
-        r ) FAKEROOT_ARG="--fakeroot"; echo "Using fake root mode" ;;
-        y ) AUTO_YES=true ;;
-        h ) print_help; exit 0 ;;
+        o ) # First -o clears previous overlays, then builds fresh list
+            if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
+            OVERLAYS="${OVERLAYS:+$OVERLAYS:}$OPTARG"
+            ;;
         \? ) print_help; exit 1 ;;
     esac
 done
 
-# Function: choose a random free port in range 20000-65000
-choose_port() {
-    local try=0
-    while [ $try -lt 50 ]; do
-        candidate=$(shuf -i 20000-65000 -n 1)
-        if ! lsof -i :$candidate &> /dev/null; then
-            echo $candidate
-            return 0
-        fi
-        try=$((try+1))
-    done
-    return 1
-}
-
-PORT_AUTO=0
 # If no port specified, pick an available one
 if [ -z "$PORT" ]; then
     PORT=$(choose_port) || {
-        echo -e "${RED}[ERROR]${NC} Failed to find an available port. Please specify one with -p.";
+        print_error "Failed to find an available port. Please specify one with -p."
         exit 1
     }
-    PORT_AUTO=1
-elif [ -n "$PORT" ]; then
-    if ! printf '%s' "$PORT" | grep -qE '^[0-9]+$'; then
-        echo -e "${RED}[ERROR]${NC} Port must be a number."
-        exit 1
-    fi
-    if [ "$PORT" -lt 1024 ] || [ "$PORT" -gt 65535 ]; then
-        echo -e "${RED}[ERROR]${NC} Port $PORT is out of allowed range (1024-65535)."
-        exit 1
+    print_info "Available port :${BLUE}$PORT${NC} auto-selected."
+    print_info "Remember to set up port forwarding: ${CYAN}ssh -L $PORT:localhost:$PORT $USER@login-node${NC}"
+    if ! confirm_default_yes "Proceed with this port?"; then
+        echo "Aborted by user."; exit 1
     fi
 else
-    echo -e "${RED}[ERROR]${NC} Invalid port specified."
-    exit 1
-fi
-
-# If the port was auto-chosen, ask the user to confirm before proceeding
-if [ "$PORT_AUTO" -eq 1 ]; then
-    echo -e "Available port :${BLUE}$PORT${NC} auto-selected."
-    echo -e "Remember to set up port forwarding: ${CYAN}ssh -L $PORT:localhost:$PORT user@login-node${NC}"
-    if [ -z "$AUTO_YES" ]; then
-        read -p "Proceed with this port? [Y/n] " resp
-        case "$resp" in
-            ""|[Yy]*) ;;
-            *) echo "Aborted by user."; exit 1 ;;
-        esac
-    else
-        echo "Auto-confirm enabled; proceeding with port $PORT."
-    fi
+    validate_port "$PORT"
 fi
 
 #region Sanity Checks
-if lsof -i :$PORT &> /dev/null; then
-    echo -e "${RED}[ERROR]${NC} Port ${BLUE}$PORT${NC} is already in use."
-    echo -e "Please choose a different port using the ${YELLOW}-p${NC} option."
-    exit 1
-fi
+check_port_available "$PORT"
+check_condatainer
 
-if ! command -v condatainer &> /dev/null; then
-    echo -e "${RED}[ERROR]${NC} CondaTainer is not installed or not in PATH."
-    echo -e "Please go to https://github.com/Justype/condatainer to install CondaTainer."
-    exit 1
-fi
-
-missing=""
-for pkg in code-server $OVERLAYS; do
-    if ! condatainer ls $pkg | grep -q $pkg; then
-        missing+=" $pkg"
-    fi
-done
-if [ -n "$missing" ]; then
-    echo -e "${RED}[ERROR]${NC} The following required overlays are missing:${missing}."
-    echo -e "Please run 'condatainer install$missing'"
-    if [ -z "$AUTO_YES" ]; then
-        read -p "Do you want to install them now? [Y/n] " answer
-    else
-        answer="Y"
-    fi
-    if [[ "$answer" == "Y" || "$answer" == "y" || "$answer" == "" ]]; then
-        condatainer install $missing
-        if [ $? -ne 0 ]; then
-            echo -e "${RED}[ERROR]${NC} Failed to install required overlays."
-            exit 1
-        fi
-    else
-        exit 1
-    fi
-fi
+check_and_install_overlays code-server $OVERLAYS
 
 if [ ! -f "$OVERLAY" ]; then
-    echo -e "${YELLOW}[WARNING]${NC} Overlay ${BLUE}$OVERLAY${NC} not found."
-    OVERLAY_ARG=""
-    if [ "$AUTO_YES" != true ]; then
-        read -p "Do you want to proceed without an overlay? [y/N]: " choice
-        case "$choice" in
-            y|Y ) ;;
-            * ) exit 0 ;;
-        esac
-    fi
+    print_warn "Overlay ${BLUE}$OVERLAY${NC} not found. Continuing without it."
+    sleep 3
 else
-    echo -e "Using overlay: ${BLUE}$OVERLAY${NC}"
-    OVERLAY_ARG="-o $OVERLAY"
-    ABS_OVERLAY_PATH=$(readlink -f $OVERLAY)
-    CWD=$(dirname $ABS_OVERLAY_PATH) # Set CWD to overlay directory
-    # Check and repair overlay image
-    echo -e "Checking overlay image integrity..."
-    e2fsck -p $OVERLAY > /dev/null 2>&1
-    e2fsck -p $OVERLAY > /dev/null 2>&1
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}[ERROR]${NC} Overlay ${BLUE}$OVERLAY${NC} is corrupted and could not be auto repaired."
-        echo -e "Please run ${YELLOW}e2fsck $OVERLAY${NC} manually to attempt repair."
-        exit 1
-    fi
+    check_overlay_integrity "$OVERLAY"
 fi
+
+setup_scratch
 #endregion
 
+# Construct arguments for CondaTainer exec
+[ -n "$BASE_IMAGE" ] && BASE_IMAGE_ARG="-b $BASE_IMAGE"
+[ -n "$OVERLAY" ] && [ -f "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
+[ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
+[ -n "$GPU" ] && GPU_SBATCH="#SBATCH --gres=gpu:$GPU"
 if [ "$AUTH" != "none" ]; then
     AUTH_OPTION="--auth password --password $AUTH"
 else
     AUTH_OPTION="--auth none"
 fi
 
-SBATCH_SCRIPT_PATH="$LOG_DIR/code-server-${DATE}.sbatch"
+SBATCH_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.sbatch"
 
 cat <<EOT > $SBATCH_SCRIPT_PATH
 #!/bin/bash
-#SBATCH --job-name=code-server
+#SBATCH --job-name=$HELPER_NAME
 #SBATCH --cpus-per-task=$NCPUS
 #SBATCH --mem=$MEM
 #SBATCH --time=$TIME
-#SBATCH --output=$LOG_DIR/code-server-${DATE}-%j.log
+${GPU_SBATCH:+$GPU_SBATCH}
+#SBATCH --output=$LOG_DIR/$HELPER_NAME-%j.log
 
-printf "\$SLURM_JOB_ID\t$PORT\t$AUTH\t\$(hostname)\t$CWD\n" > $LOG_DIR/.code-server
+# Remove the sbatch script after job submission
+rm $SBATCH_SCRIPT_PATH
+
+cat > $STATE_FILE <<RUNSTATE
+JOB_ID=\$SLURM_JOB_ID
+NODE=\$(hostname)
+NCPUS=$_NCPUS
+MEM=$_MEM
+TIME=$_TIME
+GPU=$_GPU
+PORT=$PORT
+CWD=$CWD
+AUTH=$AUTH
+BASE_IMAGE="$BASE_IMAGE"
+OVERLAY="$OVERLAY"
+OVERLAYS="$OVERLAYS"
+RUNSTATE
+
 condatainer exec \\
     $BASE_IMAGE_ARG \\
     -o code-server \\
     $OVERLAYS_ARG \\
-    $OVERLAY_ARG --writable-img \\
-    $FAKEROOT_ARG \\
+    $OVERLAY_ARG --writable \\
     code-server \\
         --disable-update-check \\
         --bind-addr 127.0.0.1:$PORT \\
         $AUTH_OPTION
-
-rm $LOG_DIR/.code-server
 EOT
 
 SBATCH_OUTPUT=$(sbatch $SBATCH_SCRIPT_PATH)
 SBATCH_JOB_ID=$(echo $SBATCH_OUTPUT | awk '{print $4}')
 
-NODE="$HOSTNAME"
-
-while true; do
-    CURRENT_STATUS=$(squeue -j $SBATCH_JOB_ID -h -o "%T" 2>/dev/null)
-    if [ "$CURRENT_STATUS" == "RUNNING" ]; then
-        break
-    fi
-    if [ "$CURRENT_STATUS" == "" ]; then
-        echo ""
-        echo -e "${RED}[ERROR]${NC} Job $SBATCH_JOB_ID not found in the queue. Please check the SLURM log for details."
-        echo -e "  $LOG_DIR/code-server-${DATE}-$SBATCH_JOB_ID.log"
-        exit 1
-    fi
-    printf "\rWaiting for job %s to start running. Current status: %s." "$SBATCH_JOB_ID" "$CURRENT_STATUS"
-    sleep 5
-done
-
-sleep 2  # Give some time for slurm initialization
-NODE=$(squeue -j $SBATCH_JOB_ID -h -o "%N")
-echo ""
-echo -e "Job ${YELLOW}$SBATCH_JOB_ID${NC} is now running on node ${BLUE}$NODE${NC}."
-echo -e "code-server at ${BLUE}http://localhost:$PORT?folder=$CWD${NC}"
-echo -e "If you want to stop it, run: ${YELLOW}scancel $SBATCH_JOB_ID${NC}"
-ssh -L $PORT:localhost:$PORT $USER@$NODE
+wait_for_job "$SBATCH_JOB_ID"
+show_and_connect "$SBATCH_JOB_ID"

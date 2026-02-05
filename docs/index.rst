@@ -22,9 +22,10 @@ CondaTainer
   :caption: HPC Tutorials:
   :maxdepth: 1
 
-  RStudio Server on HPC <tutorials/rstudio-server_on_HPC>
-  code-server on HPC <tutorials/code-server_on_HPC>
-  VS Code Tunnel on HPC <tutorials/vscode-tunnel_on_HPC>
+  RStudio Server <tutorials/rstudio-server_on_HPC>
+  RStudio Server with Conda <tutorials/rstudio-server_with_conda>
+  VS Code Server <tutorials/vscode-server_on_HPC>
+  VS Code Tunnel <tutorials/vscode-tunnel_on_HPC>
 
 .. toctree::
   :caption: FAQ:
@@ -48,8 +49,9 @@ CondaTainer
   manuals/*
 
 .. toctree::
-  :caption: Headless Server Tutorials:
+  :caption: Other Tutorials:
   :hidden:
 
+  code-server on HPC <tutorials/code-server_on_HPC>
   RStudio Server on Headless <tutorials/rstudio-server_on_server>
 

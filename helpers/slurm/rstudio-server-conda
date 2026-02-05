@@ -1,20 +1,9 @@
 #!/bin/bash
-# This script helps run rstudio-server with r image on SLURM clusters.
-
-# Use Posit r-base docker image https://hub.docker.com/r/posit/r-base
-AVAIL_R_VERSIONS='
-    4.0.0 4.0.1 4.0.2 4.0.3 4.0.4 4.0.5
-    4.1.0 4.1.1 4.1.2 4.1.3
-    4.2.0 4.2.1 4.2.2 4.2.3
-    4.3.0 4.3.1 4.3.2 4.3.3
-    4.4.0 4.4.1 4.4.2 4.4.3
-    4.5.0 4.5.1 4.5.2
-'
-BASE_IMAGE_DISTRO="noble"
+# This script helps run rstudio-server with conda overlay on SLURM clusters.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/.common.sh"
-HELPER_NAME=rstudio-server
+HELPER_NAME=rstudio-server-conda
 
 # Save defaults on first run
 config_init $HELPER_NAME \
@@ -23,7 +12,6 @@ config_init $HELPER_NAME \
     TIME=12:00:00 \
     GPU= \
     PORT= \
-    R_VERSION= \
     OVERLAY=env.img
 
 # Load saved defaults
@@ -34,7 +22,6 @@ print_help() {
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
-    echo "  -r <r_version>  R version to use (e.g., 4.4.3)"
     echo "  -c <number>     Number of CPUs to allocate (default: $NCPUS)"
     echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
     echo "  -t <time>       Time limit for the job (default: $TIME)"
@@ -73,7 +60,6 @@ print_specs() {
     print_msg "  CPUs: ${BLUE}$NCPUS${NC} MEM: ${BLUE}$MEM${NC} TIME: ${BLUE}$TIME${NC}"
     [ -n "$GPU" ] && print_msg "  GPU: ${BLUE}$GPU${NC}"
     print_msg "  Port: ${BLUE}$PORT${NC}"
-    print_msg "  R Version: ${BLUE}$R_VERSION${NC}"
     print_msg "  Working Dir: ${BLUE}$CWD${NC}"
     print_msg "  Overlay: ${BLUE}$OVERLAY${NC}"
     [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
@@ -118,34 +104,6 @@ case $? in
         ;;
 esac
 
-get_latest_r() {
-    local search=$1
-
-    if [[ -z "$search" ]]; then
-        echo "$AVAIL_R_VERSIONS" | xargs -n1 | tail -1
-        return
-    fi
-
-    # Accept either exact version matches (e.g. 4.4.3) or prefix matches (e.g. 4.4 -> 4.4.x)
-    local match=$(echo "$AVAIL_R_VERSIONS" | xargs -n1 | grep -E "^${search}($|\\.)" | tail -1)
-
-    if [[ -n "$match" ]]; then
-        echo "$match"
-    else
-        return 1
-    fi
-}
-get_posit_docker_name() {
-    local r_version=$1
-    local arch=$(uname -m)
-    case "$arch" in
-        x86_64) arch="amd64" ;;
-        aarch64) arch="arm64" ;;
-        *) print_error "Unsupported architecture: $arch"; exit 1 ;;
-    esac
-    echo "docker://posit/r-base:${r_version}-${BASE_IMAGE_DISTRO}-${arch}"
-}
-
 # Track if -o flag is used to clear overlays on first use
 _OVERLAYS_CLEARED=false
 # Record original values for saving in state file (in case of -v option)
@@ -154,9 +112,8 @@ _MEM=$MEM
 _TIME=$TIME
 _GPU=$GPU
 
-while getopts "r:c:m:t:g:p:e:o:v" opt; do
+while getopts "c:m:t:g:p:e:o:v" opt; do
     case ${opt} in
-        r ) R_VERSION=$OPTARG ;;
         c ) NCPUS=$OPTARG; _NCPUS=$OPTARG ;;
         m ) MEM=$OPTARG; _MEM=$OPTARG ;;
         t ) TIME=$OPTARG; _TIME=$OPTARG ;;
@@ -171,25 +128,6 @@ while getopts "r:c:m:t:g:p:e:o:v" opt; do
         \? ) print_help; exit 1 ;;
     esac
 done
-
-# R Version check
-if [ -z "$R_VERSION" ]; then
-    R_VERSION=$(get_latest_r) || {
-        print_error "Failed to get the latest R version."
-        exit 1
-    }
-    print_warn "R version not specified. Use the latest available version: ${YELLOW}$R_VERSION${NC}"
-    if ! confirm_default_yes "Proceed with this version?"; then
-        echo "Aborted by user."; exit 1
-    fi
-else
-    LATEST_MATCH=$(get_latest_r "$R_VERSION") || {
-        print_error "Specified R version prefix '${YELLOW}$R_VERSION${NC}' is not available."
-        exit 1
-    }
-    R_VERSION=$LATEST_MATCH
-    print_info "Using specified R version: ${BLUE}$R_VERSION${NC}"
-fi
 
 # If no port specified, pick an available one
 if [ -z "$PORT" ]; then
@@ -210,22 +148,21 @@ fi
 check_port_available "$PORT"
 check_condatainer
 
-if ! condatainer list -e r${R_VERSION} | grep -q "r${R_VERSION}"; then
-    print_info "Installing R ${R_VERSION} overlay."
-    condatainer create -n r${R_VERSION} -s $(get_posit_docker_name $R_VERSION)
-    if [ $? -ne 0 ]; then
-        print_error "Failed to install R version overlay 'r${R_VERSION}'."
-        exit 1
-    fi
-fi
-
 check_and_install_overlays rstudio-server build-essential $OVERLAYS
 
 if [ ! -f "$OVERLAY" ]; then
     print_error "Overlay ${BLUE}$OVERLAY${NC} not found."
     exit 1
 else
+    if ! debugfs -R "stat upper/ext3/env/bin/R" $OVERLAY 2>&1 | grep -q 'Inode'; then
+        ABS_OVERLAY_PATH=$(readlink -f "$OVERLAY")
+        print_error "Overlay ${BLUE}$ABS_OVERLAY_PATH${NC} does not contain R installation."
+        print_info "Please go into the overlay shell and run 'mm-install r-base' to install R."
+        exit 1
+    fi
     check_overlay_integrity "$OVERLAY"
+    R_BIN_PATH="/ext3/env/bin/R"
+    R_LIB_PATH="/ext3/env/lib"
 fi
 
 setup_scratch
@@ -266,7 +203,7 @@ EOT
         print_info "Copied Rprofile to ${BLUE}$CWD/.Rprofile${NC} (overwritten if existed)."
     fi
 fi
-cat <<EOT > $HELPER_STATE_DIR/rsession.sh
+cat <<EOT > $HELPER_STATE_DIR/rsession-conda.sh
 #!/bin/bash
 
 USER=`whoami`
@@ -286,12 +223,12 @@ export RETICULATE_PYTHON=/ext3/env/bin/python
 
 /usr/lib/rstudio-server/bin/rsession "\$@"
 EOT
-chmod +x $HELPER_STATE_DIR/rsession.sh
-cat <<EOT > $HELPER_STATE_DIR/rsession.conf
+chmod +x $HELPER_STATE_DIR/rsession-conda.sh
+cat <<EOT > $HELPER_STATE_DIR/rsession-conda.conf
 copilot-enabled=1
 session-default-working-dir=$CWD
 EOT
-cat <<EOT > $HELPER_STATE_DIR/database.conf
+cat <<EOT > $HELPER_STATE_DIR/database-conda.conf
 provider=sqlite
 directory=$SCRATCH/.local/lib/rstudio-server
 EOT
@@ -319,13 +256,11 @@ TIME=$_TIME
 GPU=$_GPU
 PORT=$PORT
 CWD=$CWD
-R_VERSION="$R_VERSION"
 OVERLAY="$OVERLAY"
 OVERLAYS="$OVERLAYS"
 RUNSTATE
 
 condatainer exec \\
-    -o r${R_VERSION} \\
     -o rstudio-server \\
     -o build-essential \\
     $OVERLAYS_ARG \\
@@ -336,10 +271,11 @@ condatainer exec \\
         --server-data-dir=$SCRATCH/.local/run/rstudio-server \\
         --www-address=127.0.0.1 \\
         --www-port=$PORT \\
-        --rsession-which-r=/usr/bin/R \\
-        --rsession-path=$HELPER_STATE_DIR/rsession.sh \\
-        --database-config-file=$HELPER_STATE_DIR/database.conf \\
-        --rsession-config-file=$HELPER_STATE_DIR/rsession.conf \\
+        --rsession-which-r=$R_BIN_PATH \\
+        --rsession-path=$HELPER_STATE_DIR/rsession-conda.sh \\
+        --rsession-ld-library-path=$R_LIB_PATH \\
+        --database-config-file=$HELPER_STATE_DIR/database-conda.conf \\
+        --rsession-config-file=$HELPER_STATE_DIR/rsession-conda.conf \\
         --auth-none=1
 EOT
 

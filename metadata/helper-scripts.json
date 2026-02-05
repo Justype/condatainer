@@ -3,11 +3,20 @@
     ".Rprofile": {
       "path": "helpers/headless/.Rprofile"
     },
+    ".common": {
+      "path": "helpers/headless/.common.sh"
+    },
     "code-server": {
       "path": "helpers/headless/code-server"
     },
     "rstudio-server": {
       "path": "helpers/headless/rstudio-server"
+    },
+    "rstudio-server-conda": {
+      "path": "helpers/headless/rstudio-server-conda"
+    },
+    "vscode-server": {
+      "path": "helpers/headless/vscode-server"
     },
     "vscode-tunnel": {
       "path": "helpers/headless/vscode-tunnel"
@@ -17,11 +26,20 @@
     ".Rprofile": {
       "path": "helpers/slurm/.Rprofile"
     },
+    ".common": {
+      "path": "helpers/slurm/.common.sh"
+    },
     "code-server": {
       "path": "helpers/slurm/code-server"
     },
     "rstudio-server": {
       "path": "helpers/slurm/rstudio-server"
+    },
+    "rstudio-server-conda": {
+      "path": "helpers/slurm/rstudio-server-conda"
+    },
+    "vscode-server": {
+      "path": "helpers/slurm/vscode-server"
     },
     "vscode-tunnel": {
       "path": "helpers/slurm/vscode-tunnel"
