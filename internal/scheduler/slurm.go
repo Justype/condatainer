@@ -486,6 +486,13 @@ func (s *SlurmScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		if err == nil {
 			info.AvailableGpus = gpus
 		}
+
+		// Get max node resources (CPUs and memory)
+		maxCpus, maxMem, err := s.getMaxNodeResources()
+		if err == nil {
+			info.MaxCpusPerNode = maxCpus
+			info.MaxMemMBPerNode = maxMem
+		}
 	}
 
 	// Get partition limits
@@ -617,6 +624,41 @@ func (s *SlurmScheduler) getPartitionLimits() ([]ResourceLimits, error) {
 	}
 
 	return limits, nil
+}
+
+// getMaxNodeResources queries SLURM for maximum CPU and memory available per node
+func (s *SlurmScheduler) getMaxNodeResources() (int, int64, error) {
+	// Query sinfo for CPUs and memory per node: %c = CPUs, %m = memory in MB
+	cmd := exec.Command(s.sinfoCommand, "-o", "%c|%m", "--noheader")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, 0, NewClusterError("SLURM", "query node resources", err)
+	}
+
+	var maxCpus int
+	var maxMemMB int64
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		parts := strings.Split(line, "|")
+		if len(parts) < 2 {
+			continue
+		}
+
+		var cpus int
+		var memMB int64
+		fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &cpus)
+		memMB, _ = parseMemory(strings.TrimSpace(parts[1]))
+
+		if cpus > maxCpus {
+			maxCpus = cpus
+		}
+		if memMB > maxMemMB {
+			maxMemMB = memMB
+		}
+	}
+
+	return maxCpus, maxMemMB, nil
 }
 
 // parsePartitionLine parses a single partition line from scontrol output

@@ -2,12 +2,35 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
+
+// formatDuration formats a duration with days for readability
+func formatDuration(d time.Duration) string {
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+
+	if days > 0 {
+		if hours > 0 {
+			return fmt.Sprintf("%dd %dh", days, hours)
+		}
+		return fmt.Sprintf("%dd", days)
+	}
+	if hours > 0 {
+		if minutes > 0 {
+			return fmt.Sprintf("%dh %dm", hours, minutes)
+		}
+		return fmt.Sprintf("%dh", hours)
+	}
+	return fmt.Sprintf("%dm", minutes)
+}
 
 var schedulerCmd = &cobra.Command{
 	Use:   "scheduler",
@@ -77,47 +100,81 @@ func runScheduler(cmd *cobra.Command, args []string) {
 	// Try to get cluster info
 	clusterInfo, err := sched.GetClusterInfo()
 	if err == nil && clusterInfo != nil {
-		// Display GPU information if available
-		if len(clusterInfo.AvailableGpus) > 0 {
-			fmt.Println()
-			fmt.Println("Available GPUs:")
-			for _, gpu := range clusterInfo.AvailableGpus {
-				if gpu.Partition != "" {
-					fmt.Printf("  %s: %d total, %d available (partition: %s)\n",
-						utils.StyleName(gpu.Type), gpu.Total, gpu.Available, gpu.Partition)
-				} else {
-					fmt.Printf("  %s: %d total, %d available\n",
-						utils.StyleName(gpu.Type), gpu.Total, gpu.Available)
-				}
+		// Display max resource limits
+		maxLimits, _ := scheduler.ReadMaxSpecs(sched)
+
+		// Determine max CPUs and memory (use partition limits if set, otherwise node info)
+		maxCpus := 0
+		var maxMemMB int64 = 0
+		var maxTime = ""
+
+		if maxLimits != nil {
+			maxCpus = maxLimits.MaxCpus
+			maxMemMB = maxLimits.MaxMemMB
+			if maxLimits.MaxTime > 0 {
+				maxTime = formatDuration(maxLimits.MaxTime)
 			}
 		}
 
-		// // Display resource limits if available
-		// if len(clusterInfo.Limits) > 0 {
-		// 	fmt.Println()
-		// 	fmt.Println("Resource Limits:")
-		// 	for _, limit := range clusterInfo.Limits {
-		// 		partition := limit.Partition
-		// 		if partition == "" {
-		// 			partition = "default"
-		// 		}
-		// 		fmt.Printf("  Partition: %s\n", utils.StyleName(partition))
-		// 		if limit.MaxCpus > 0 {
-		// 			fmt.Printf("    Max CPUs:   %s\n", utils.StyleNumber(fmt.Sprintf("%d", limit.MaxCpus)))
-		// 		}
-		// 		if limit.MaxMemMB > 0 {
-		// 			fmt.Printf("    Max Memory: %s\n", utils.StyleNumber(fmt.Sprintf("%d MB", limit.MaxMemMB)))
-		// 		}
-		// 		if limit.MaxGpus > 0 {
-		// 			fmt.Printf("    Max GPUs:   %s\n", utils.StyleNumber(fmt.Sprintf("%d", limit.MaxGpus)))
-		// 		}
-		// 		if limit.MaxTime > 0 {
-		// 			fmt.Printf("    Max Time:   %s\n", utils.StyleNumber(limit.MaxTime.String()))
-		// 		}
-		// 		if limit.DefaultTime > 0 {
-		// 			fmt.Printf("    Default Time: %s\n", utils.StyleNumber(limit.DefaultTime.String()))
-		// 		}
-		// 	}
-		// }
+		// Fall back to node resources if partition limits don't specify max
+		if maxCpus == 0 && clusterInfo.MaxCpusPerNode > 0 {
+			maxCpus = clusterInfo.MaxCpusPerNode
+		}
+		if maxMemMB == 0 && clusterInfo.MaxMemMBPerNode > 0 {
+			maxMemMB = clusterInfo.MaxMemMBPerNode
+		}
+
+		if maxCpus > 0 || maxMemMB > 0 || maxTime != "" {
+			fmt.Println()
+			fmt.Println("Max Resource Limits:")
+			if maxCpus > 0 {
+				fmt.Printf("  Max CPUs:   %s\n", utils.StyleNumber(fmt.Sprintf("%d", maxCpus)))
+			}
+			if maxMemMB > 0 {
+				var memStr string
+				if maxMemMB >= 1024 {
+					memStr = fmt.Sprintf("%d MB (%.0f GB)", maxMemMB, float64(maxMemMB)/1024)
+				} else {
+					memStr = fmt.Sprintf("%d MB", maxMemMB)
+				}
+				fmt.Printf("  Max Memory: %s\n", utils.StyleNumber(memStr))
+			}
+			if maxTime != "" {
+				fmt.Printf("  Max Time:   %s\n", utils.StyleNumber(maxTime))
+			}
+		}
+
+		// Display GPU information if available (merged by type)
+		if len(clusterInfo.AvailableGpus) > 0 {
+			// Merge GPUs with the same type name
+			gpuMap := make(map[string]*scheduler.GpuInfo)
+			for _, gpu := range clusterInfo.AvailableGpus {
+				if existing, ok := gpuMap[gpu.Type]; ok {
+					existing.Total += gpu.Total
+					existing.Available += gpu.Available
+				} else {
+					gpuMap[gpu.Type] = &scheduler.GpuInfo{
+						Type:      gpu.Type,
+						Total:     gpu.Total,
+						Available: gpu.Available,
+					}
+				}
+			}
+
+			// Sort GPU names
+			gpuNames := make([]string, 0, len(gpuMap))
+			for name := range gpuMap {
+				gpuNames = append(gpuNames, name)
+			}
+			sort.Strings(gpuNames)
+
+			fmt.Println()
+			fmt.Println("Available GPUs:")
+			for _, name := range gpuNames {
+				gpu := gpuMap[name]
+				fmt.Printf("  %s: %d total, %d available\n",
+					utils.StyleName(gpu.Type), gpu.Total, gpu.Available)
+			}
+		}
 	}
 }

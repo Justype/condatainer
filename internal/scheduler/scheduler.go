@@ -56,8 +56,10 @@ type ResourceLimits struct {
 
 // ClusterInfo holds cluster configuration information
 type ClusterInfo struct {
-	AvailableGpus []GpuInfo        // Available GPU types
-	Limits        []ResourceLimits // Resource limits per partition
+	AvailableGpus   []GpuInfo        // Available GPU types
+	Limits          []ResourceLimits // Resource limits per partition
+	MaxCpusPerNode  int              // Maximum CPUs available per node (from node info)
+	MaxMemMBPerNode int64            // Maximum memory available per node in MB (from node info)
 }
 
 // ScriptSpecs holds the specifications parsed from a job script
