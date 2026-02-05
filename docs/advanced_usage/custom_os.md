@@ -6,13 +6,24 @@ OS Overlays can be created using Apptainer definition files or pulled from Docke
 # Directly pull from a remote Docker image
 condatainer create -p <prefix> -s docker://<docker_image>
 
+# Create system wide overlay
+condatainer create -n <name> -s docker://<docker_image>
+
 # Build from a custom definition file
 condatainer create -p <prefix> -f <path_to_def_file>
+# -f cannot be used with -n
+```
+
+After creating the OS overlay, you may need to clean the Apptainer cache to save disk space:
+
+```bash
+apptainer cache clean
 ```
 
 Examples:
 
 - [Pulling PyTorch Docker Image](#example-pulling-pytorch-docker-image)
+- [Pulling Posit R Docker Image](#example-pulling-posit-r-docker-image)
 - [R Package Dependencies](#example-r-package-dependencies) (use with `env.img` for development)
 - [Read-only R Package Environment](#example-read-only-r-package-environment) (for production)
 
@@ -91,6 +102,30 @@ Available base image definition files:
 - [ubuntu20/base_image](https://github.com/Justype/condatainer/tree/main/build-scripts/ubuntu20/base_image.def)
 - [ubuntu22/base_image](https://github.com/Justype/condatainer/tree/main/build-scripts/ubuntu22/base_image.def)
 - [ubuntu24/base_image](https://github.com/Justype/condatainer/tree/main/build-scripts/ubuntu24/base_image.def)
+```
+
+## Example: Pulling Posit R Docker Image
+
+[Posit R Docker Hub](https://hub.docker.com/r/posit/r-base) has various R base images with different base OS versions.
+
+Currently, the **CondaTainer** base image is `ubuntu:24.04` (noble). So you have to pull the matching Posit R image:
+
+```bash
+# System wide
+condatainer create -n r4.4.3 -s docker://posit/r-base:4.4.3-noble-amd64
+
+# Or for a specific project (current directory)
+condatainer create -p r4.4.3 -s docker://posit/r-base:4.4.3-noble-amd64
+```
+
+Then you can use the R overlay together with the base image:
+
+```bash
+# System wide
+condatainer exec -o r4.4.3
+
+# Project wide (the sqf must be in the current directory)
+condatainer exec -o r4.4.3.sqf
 ```
 
 ## Example: R Package Dependencies
