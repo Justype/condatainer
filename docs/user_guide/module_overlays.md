@@ -102,7 +102,7 @@ condatainer run analysis.sh
 
 When you request a reference or an environment that requires significant computation to prepare, **CondaTainer will automatically submit SLURM jobs** to handle the heavy lifting for you.
 
-You can follow the example below to define SLURM parameters in your script and submit it to SLURM as usual.
+Example Script (`analysis.sh`):
 
 ```bash
 #!/bin/bash
@@ -111,19 +111,18 @@ You can follow the example below to define SLURM parameters in your script and s
 #SBATCH --mem=1GB
 #DEP:samtools/1.22.1
 
-if [ -z "$IN_CONDATAINER" ] && command -v condatainer >/dev/null 2>&1; then
-    condatainer run "$0" "$@"
-    exit $?
 fi
 
 samtools --version
 ```
 
-Then you can
+Auto install dependencies and submit the job with:
 
 ```bash
-sbatch analysis.sh
+condatainer run analysis.sh -a
 ```
+
+If no scheduler directives are found or job submission is disabled, the script will run immediately in the current shell.
 
 ## 🧫 Case Study: Cellranger Count
 
@@ -137,11 +136,6 @@ The following is an example SLURM script for running `cellranger count` using th
 #SBATCH --time=6:00:00
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64GB
-
-if [ -z "$IN_CONDATAINER" ] && command -v condatainer >/dev/null 2>&1; then
-    condatainer run "$0" "$@"
-    exit $?
-fi
 
 module purge
 module load cellranger/9.0.1
@@ -183,10 +177,10 @@ Since cellranger references are prebuilt, **CondaTainer** will download and extr
 
 ### 📤 Load and use overlays
 
-Then you can submit the script as usual.
+Then you can submit the script using **CondaTainer**.
 
 ```bash
-sbatch cellranger_quant.sh
+condatainer run cellranger_quant.sh
 ```
 
 ## 🔗 Related Resources

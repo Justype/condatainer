@@ -39,7 +39,7 @@ If you only need a slight modification of a conda env, like editing Python packa
 To activate the bundle overlay, run the following command:
 
 ```bash
-condatainer exec -o prefix_name.sqf bash
+condatainer exec -o prefix_name.sqf
 ```
 
 Then you can use the applications installed in the overlay.
@@ -49,8 +49,7 @@ Bundle overlays are read-only and stackable. You can mount multiple overlays tog
 ```bash
 condatainer exec -o \
   grch38/salmon/1.10.2/gencode47 \
-  prefix_name.sqf \
-  bash
+  prefix_name.sqf
 ```
 
 ```{note}
@@ -65,7 +64,7 @@ For example, you have the following project structure:
 
 ```
 project/
-├── env.sqf
+├── custom.sqf
 └── src/
     ├── run_job.sh
     └── test.py
@@ -79,7 +78,7 @@ project/
 ## Other SBATCH directives
 
 condatainer exec \
-    -o env.sqf \
+    -o custom.sqf \
     python src/test.py
 ```
 
@@ -89,12 +88,7 @@ You can also write the `run_job.sh` in this way:
 #!/bin/bash
 #SBATCH --job-name=test_env
 ## Other SBATCH directives
-#DEP:env.sqf
-
-if [ -z "$IN_CONDATAINER" ] && command -v condatainer >/dev/null 2>&1; then
-    condatainer run "$0" "$@"
-    exit $?
-fi
+#DEP:custom.sqf
 
 python src/test.py
 ```
@@ -102,5 +96,5 @@ python src/test.py
 You should run this from the project directory:
 
 ```bash
-sbatch src/run_job.sh
+condatainer run src/run_job.sh
 ```

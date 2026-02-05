@@ -23,7 +23,7 @@ CondaTainer
   :maxdepth: 1
 
   RStudio Server <tutorials/rstudio-server_on_HPC>
-  RStudio Server with Conda <tutorials/rstudio-server_with_conda>
+  RStudio Server with Conda <tutorials/rstudio-server-conda_on_HPC>
   VS Code Server <tutorials/vscode-server_on_HPC>
   VS Code Tunnel <tutorials/vscode-tunnel_on_HPC>
 

@@ -199,6 +199,8 @@ See [Rprofile](https://github.com/Justype/condatainer/blob/main/helpers/slurm/.R
 
 If `*.Rproj` file already exists, `.Rprofile` will not be created or modified. You need to set up the repositories yourself if needed.
 
+So if you do not want to use Posit repositories, you can remove or edit the `.Rprofile` file accordingly.
+
 If you only use CRAN packages, you can change the function in the `.Rprofile` to:
 
 ```R
@@ -209,7 +211,7 @@ But if you plan to use Bioconductor packages, please keep the default settings t
 
 ### Install R Packages from Source
 
-If a package is only available from source (e.g., GitHub), you need `remotes`, `pak` or other package managers.
+If a package is only available from source (e.g., GitHub), you need `remotes`, `pak` or other package managers. (Common system dependencies are included in `build-essential` overlay.)
 
 I recommend using `pak`, it can tell you which system libraries are required.
 

@@ -25,15 +25,20 @@ condatainer o
 Full command with options:
 
 ```
-usage: condatainer o [-h] [-s SIZE] [-f FILE] [--fakeroot] [--sparse] [image]
+  condatainer o [image_path] [flags]
 
-positional arguments:
-  image                 Path to the output overlay image (default: env.img)
+Examples:
+  condatainer o # 10G with default inode ratio
+  condatainer o my_data.img -s 50G -t data
+  condatainer o --fakeroot --sparse
+  condatainer o -f environment.yml # Initialize with conda env file
 
-options:
-  -s SIZE, --size SIZE  Set overlay size (default: 10G). Accepts GB/MB suffixes; assumes MB if omitted
-  --fakeroot            Create a fakeroot-compatible overlay
-  --sparse              Create a sparse overlay image (default: false)
+Flags:
+      --fakeroot      Create a fakeroot-compatible overlay (owned by root)
+  -f, --file string   Initialize with Conda environment file (.yml or .yaml)
+  -s, --size string   Set overlay size (e.g., 500M, 10G) (default "10G")
+      --sparse        Create a sparse overlay image
+  -t, --type string   Overlay profile: small/balanced/large files (default "balanced")
 ```
 
 - For Python projects, 10GiB is usually sufficient.
@@ -68,15 +73,15 @@ condatainer e
 ```
 
 ```
-usage: condatainer e [-h] [-r] [-n] [--fakeroot] [overlays ...]
+Usage:
+  condatainer e [flags] [overlays...] [--] [command...]
 
-positional arguments:
-  overlays           Overlay files to mount (env.img if not provided)
-
-options:
-  -r, --read-only    Do not make .img overlays writable (default: writable)
-  -n, --no-autoload  Do not autoload local env.img from current directory
-  --fakeroot         Run command with fake root privileges inside the container
+Flags:
+  -b, --base-image string   base image to use instead of default
+      --bind strings        bind path 'HOST:CONTAINER' (can be used multiple times)
+      --env strings         set environment variable 'KEY=VALUE' (can be used multiple times)
+  -n, --no-autoload         disable autoloading 'env.img' from current directory
+  -r, --read-only           mount .img overlays as read-only (only applies when using the 'e' shortcut)
 ```
 
 This command will mount the overlay and set the `PATH` and `CONDA_PREFIX` variables accordingly.
@@ -192,18 +197,14 @@ You can also write the `run_job.sh` in this way:
 ## Other SBATCH directives
 #DEP:env.img
 
-if [ -z "$IN_CONDATAINER" ] && command -v condatainer >/dev/null 2>&1; then
-    condatainer run "$0" "$@"
-    exit $?
-fi
-
 python src/test.py
 ```
 
 You should run this from the project directory:
 
 ```bash
-sbatch src/run_job.sh
+# under project/ directory
+condatainer run src/run_job.sh
 ```
 
 And make sure when you run the script, the `env.img` is not mounted in writable mode by another process. You can also make a copy of `env.img` and use that one instead.
