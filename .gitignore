@@ -71,3 +71,6 @@ apps
 apps-modules
 ref
 ref-modules
+
+# --- NFS Temp Files ---
+.nfs*

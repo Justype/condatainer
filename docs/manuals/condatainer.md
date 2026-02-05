@@ -279,14 +279,14 @@ condatainer overlay chown [OPTIONS] [image]
 
 * `-u`, `--uid UID`    : Set the owner UID (default: current user's UID).
 * `-g`, `--gid GID`    : Set the group GID (default: current user's GID).
-* `--root`             : Set UID/GID to 0 (root).
-* `-p`, `--path PATH`  : Path inside the overlay to change (default: /ext3).
+* `--root`             : Set UID/GID to 0 (root); overrides `-u` and `-g`.
+* `-p`, `--path PATH`  : Path inside the overlay to change (can specify multiple, default: `/ext3` and `/opt`).
 * `image`              : Path to the overlay `img` file.
 
 **Examples:**
 
 ```bash
-# Set ownership inside env.img to the current user
+# Set ownership inside env.img to the current user (default paths /ext3 and /opt)
 condatainer overlay chown env.img
 
 # Explicitly set UID and GID
@@ -294,6 +294,15 @@ condatainer overlay chown -u 1001 -g 1001 env.img
 
 # Set ownership to root
 condatainer overlay chown --root env.img
+
+# Set entire image to root
+condatainer overlay chown --root -p / env.img
+
+# Chown only /ext3 path
+condatainer overlay chown -p /ext3 env.img
+
+# Chown multiple specific paths
+condatainer overlay chown -p /ext3 -p /data env.img
 ```
 
 ### Overlay Resize
