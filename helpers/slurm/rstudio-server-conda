@@ -11,7 +11,10 @@ config_init $HELPER_NAME \
     MEM=32G \
     TIME=12:00:00 \
     GPU= \
+    BASE_IMAGE= \
+    BASE_IMAGE_DISTRO=noble \
     PORT= \
+    AUTH=none \
     OVERLAY=env.img
 
 # Load saved defaults

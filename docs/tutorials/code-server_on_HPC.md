@@ -94,7 +94,7 @@ ssh hpc
 Run the following command to install CondaTainer if it is not installed:
 
 ```bash
-curl -fsSL https://get-condatainer.justype.net/ | bash
+curl -fsSL https://get-condatainer.justype.net | bash
 ```
 
 ## Create Writable Overlay

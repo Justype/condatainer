@@ -16,9 +16,10 @@ config_init $HELPER_NAME \
     MEM=16G \
     TIME=12:00:00 \
     GPU= \
+    BASE_IMAGE= \
+    BASE_IMAGE_DISTRO=noble \
     AUTH=github \
     MACHINE_NAME="$DEFAULT_MACHINE_NAME" \
-    BASE_IMAGE= \
     OVERLAY=env.img
 
 # Load saved defaults

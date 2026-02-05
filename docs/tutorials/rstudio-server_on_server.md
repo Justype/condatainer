@@ -78,7 +78,7 @@ ssh server
 Run the following command to install CondaTainer if it is not installed:
 
 ```bash
-curl -fsSL https://get-condatainer.justype.net/ | bash
+curl -fsSL https://get-condatainer.justype.net | bash
 ```
 
 ## Create Writable Overlay
@@ -242,6 +242,8 @@ condatainer exec -o r4.4.3 -o build-essential -o env.img Rscript your_script.R
 # If you created additional overlay `r-deps.sqf`:
 condatainer exec -o r4.4.3 -o build-essential -o r-deps.sqf -o env.img Rscript your_script.R
 ```
+
+[How to pull Posit R Docker Images](../advanced_usage/custom_os.md#example-pulling-posit-r-docker-image)
 
 ## File name too long system:36 ERROR
 
