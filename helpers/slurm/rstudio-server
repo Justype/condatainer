@@ -37,7 +37,7 @@ print_help() {
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
-    echo "  -r <r_version>  R version to use (e.g., 4.4.3)"
+    echo "  -r <r_version>  R version to use (e.g., 4.4.3) Use latest available if omitted."
     echo "  -c <number>     Number of CPUs to allocate (default: $NCPUS)"
     echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
     echo "  -t <time>       Time limit for the job (default: $TIME)"
@@ -213,7 +213,7 @@ fi
 check_port_available "$PORT"
 check_condatainer
 
-if ! condatainer list -e r${R_VERSION} | grep -q "r${R_VERSION}"; then
+if ! condatainer list -e r${R_VERSION} > /dev/null 2>&1; then
     print_info "Installing R ${R_VERSION} overlay."
     condatainer create -n r${R_VERSION} -s $(get_posit_docker_name $R_VERSION)
     if [ $? -ne 0 ]; then

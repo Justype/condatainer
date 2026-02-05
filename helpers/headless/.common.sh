@@ -308,6 +308,7 @@ check_overlay_in_use() {
 #   Checks if required overlays exist and installs missing ones.
 #   Each argument can be a single overlay name or a colon-separated list.
 check_and_install_overlays() {
+    print_info "Checking required overlays..."
     local missing=""
     for arg in "$@"; do
         # Split on colon to handle colon-separated overlay lists
@@ -321,7 +322,7 @@ check_and_install_overlays() {
                     exit 1
                 fi
             else
-                if ! condatainer list -e "$pkg" | grep -q "$pkg"; then
+                if ! condatainer list -e "$pkg" > /dev/null 2>&1; then
                     missing+=" $pkg"
                 fi
             fi
