@@ -302,11 +302,15 @@ var chownCmd = &cobra.Command{
 	Short: "Recursively set internal files to specific UID/GID",
 	Long: `Walks the overlay filesystem (without mounting) and updates the UID/GID.
 
-Defaults to the current user and the '/ext3' directory inside the image.
-Use --root to force ownership to 0:0.`,
-	Example: `  condatainer overlay chown env.img                  # Set /ext3 to current user
-  condatainer overlay chown env.img --root -p /      # Set entire image to root
-  condatainer overlay chown env.img -u 1001 -g 1001  # Set to specific ID`,
+Defaults to the current user and paths '/ext3' and '/opt' inside the image.
+Use --root to force ownership to 0:0.
+
+Multiple paths can be specified using multiple -p flags.`,
+	Example: `  condatainer overlay chown env.img                    # Set /ext3 and /opt to current user
+  condatainer overlay chown env.img --root -p /        # Set entire image to root
+  condatainer overlay chown env.img -u 1001 -g 1001    # Set to specific ID
+  condatainer overlay chown env.img -p /ext3           # Only chown /ext3
+  condatainer overlay chown env.img -p /ext3 -p /data  # Chown multiple paths`,
 	Args: cobra.ExactArgs(1),
 
 	// Enable Smart Tab Completion for .img files
@@ -317,36 +321,20 @@ Use --root to force ownership to 0:0.`,
 
 		// Parse Flags
 		isRoot, _ := cmd.Flags().GetBool("root")
-		uidFlag, _ := cmd.Flags().GetInt("uid")
-		gidFlag, _ := cmd.Flags().GetInt("gid")
-		internalPath, _ := cmd.Flags().GetString("path")
+		targetUID, _ := cmd.Flags().GetInt("uid")
+		targetGID, _ := cmd.Flags().GetInt("gid")
+		internalPaths, _ := cmd.Flags().GetStringArray("path")
 
-		var targetUID, targetGID int
-		currentUser := os.Getuid()
-		currentGroup := os.Getgid()
-
-		// Logic: Root Flag > Specific Flag > Current User (Default)
+		// Root flag overrides uid/gid
 		if isRoot {
 			targetUID = 0
 			targetGID = 0
 			utils.PrintDebug("Mode: Root (0:0)")
-		} else {
-			if uidFlag == -1 {
-				targetUID = currentUser
-			} else {
-				targetUID = uidFlag
-			}
-
-			if gidFlag == -1 {
-				targetGID = currentGroup
-			} else {
-				targetGID = gidFlag
-			}
 		}
 
 		// Feedback to user
-		utils.PrintDebug("Chown Target: %s inside %s", internalPath, path)
-		utils.PrintDebug("New Owner:    UID=%d GID=%d", targetUID, targetGID)
+		utils.PrintDebug("Chown Targets: %v inside %s", internalPaths, path)
+		utils.PrintDebug("New Owner:     UID=%d GID=%d", targetUID, targetGID)
 
 		absPath, _ := filepath.Abs(path)
 		lock, err := overlay.AcquireLock(absPath, true)
@@ -356,15 +344,17 @@ Use --root to force ownership to 0:0.`,
 		}
 		defer lock.Close()
 
-		// Perform the recursive chown
-		err = overlay.ChownRecursively(cmd.Context(), path, targetUID, targetGID, internalPath)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
-				utils.PrintWarning("Operation cancelled.")
-				return
+		// Perform the recursive chown for each path
+		for _, internalPath := range internalPaths {
+			err = overlay.ChownRecursively(cmd.Context(), path, targetUID, targetGID, internalPath)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+					utils.PrintWarning("Operation cancelled.")
+					return
+				}
+				utils.PrintError("%v", err)
+				os.Exit(1)
 			}
-			utils.PrintError("%v", err)
-			os.Exit(1)
 		}
 	},
 }
@@ -439,13 +429,10 @@ func init() {
 	checkCmd.Flags().BoolP("force", "f", false, "Force check even if filesystem appears clean")
 
 	// --- Chown ---
-	uidDefault := fmt.Sprintf("current user %d", os.Getuid())
-	gidDefault := fmt.Sprintf("current group %d", os.Getgid())
-
-	chownCmd.Flags().IntP("uid", "u", -1, "User ID to set (default: "+uidDefault+")")
-	chownCmd.Flags().IntP("gid", "g", -1, "Group ID to set (default: "+gidDefault+")")
-	chownCmd.Flags().Bool("root", false, "Set UID and GID to 0 (root); will override -u and -g options")
-	chownCmd.Flags().StringP("path", "p", "/ext3", "Path inside the overlay to change")
+	chownCmd.Flags().IntP("uid", "u", os.Getuid(), "User ID to set")
+	chownCmd.Flags().IntP("gid", "g", os.Getgid(), "Group ID to set")
+	chownCmd.Flags().Bool("root", false, "Set UID and GID to 0 (root); overrides -u and -g")
+	chownCmd.Flags().StringArrayP("path", "p", []string{"/ext3", "/opt"}, "Path inside the overlay (can specify multiple)")
 }
 
 // initializeOverlayWithConda installs a conda environment from a YAML file into an overlay

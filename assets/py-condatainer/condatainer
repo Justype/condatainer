@@ -2796,8 +2796,8 @@ class CondaTainer_Overlay:
             "--root", action="store_true",
             help="Set UID and GID to 0 (root); will override -u and -g options")
         parser_chown.add_argument(
-            "-p", "--path", type=str, default="/ext3",
-            help="Path inside the overlay to change (default: /ext3)")
+            "-p", "--path", type=str, action="append", default=None,
+            help="Path inside the overlay to change (can specify multiple, default: /ext3 /opt)")
 
         parser_resize = subparsers.add_parser("resize", help="Resize an existing overlay in-place")
         parser_resize.add_argument("image", type=str, help="Overlay image to resize")
@@ -2923,13 +2923,8 @@ class CondaTainer_Overlay:
             target_uid = 0
             target_gid = 0
 
-        # 1. Translate Logical Path to Internal Path
-        #    /       -> /upper
-        #    /opt    -> /upper/opt
-        user_path = args.path.strip()
-        internal_target_path = os.path.normpath(
-            os.path.join("/upper", user_path.lstrip(os.sep))
-        )
+        # Get paths to chown (default to /ext3 and /opt)
+        user_paths = args.path if args.path else ["/ext3", "/opt"]
 
         debugfs_bin = shutil.which("debugfs")
         if not debugfs_bin:
@@ -2942,8 +2937,22 @@ class CondaTainer_Overlay:
              Utils.print_error("Cannot fix permissions: 'debugfs' not found in PATH.")
              return
 
-        Utils.print_message(f"Mapping inodes in {Utils.blue_text(os.path.basename(overlay_path))} starting at {Utils.blue_text(internal_target_path)}...")
+        # Process each path
+        for user_path in user_paths:
+            # Translate Logical Path to Internal Path
+            #    /       -> /upper
+            #    /opt    -> /upper/opt
+            user_path = user_path.strip()
+            internal_target_path = os.path.normpath(
+                os.path.join("/upper", user_path.lstrip(os.sep))
+            )
 
+            Utils.print_message(f"Mapping inodes in {Utils.blue_text(os.path.basename(overlay_path))} starting at {Utils.blue_text(internal_target_path)}...")
+            CondaTainer_Overlay._chown_path(debugfs_bin, overlay_path, internal_target_path, target_uid, target_gid)
+
+    @staticmethod
+    def _chown_path(debugfs_bin, overlay_path, internal_target_path, target_uid, target_gid):
+        """Helper to chown a single path inside the overlay"""
         try:
             # --- PHASE 1: RECURSIVE INODE DISCOVERY ---
             inodes_to_chown = set()
@@ -2954,7 +2963,8 @@ class CondaTainer_Overlay:
             proc_root = subprocess.run(cmd_root, capture_output=True, text=True)
 
             if proc_root.returncode != 0:
-                Utils.print_error(f"Path {internal_target_path} not found in image.")
+                # Path doesn't exist in overlay layer yet - skip silently
+                Utils.print_debug(f"Path {internal_target_path} not found in image, skipping.")
                 return
 
             match = re.search(r"Inode:\s+(\d+)", proc_root.stdout)
@@ -2963,7 +2973,7 @@ class CondaTainer_Overlay:
                 dirs_to_visit.append(start_inode)
                 inodes_to_chown.add(start_inode)
             else:
-                Utils.print_error("Could not parse start inode.")
+                Utils.print_debug(f"Could not parse start inode for {internal_target_path}, skipping.")
                 return
 
             # B. Walk the tree
@@ -3008,7 +3018,7 @@ class CondaTainer_Overlay:
 
             # --- PHASE 2: BATCH UPDATE ---
             if not inodes_to_chown:
-                 Utils.print_warning("No inodes found.")
+                 Utils.print_debug("No inodes found.")
                  return
 
             Utils.print_message(f"Modifying {Utils.magenta_text(len(inodes_to_chown))} inodes: UID={Utils.yellow_text(target_uid)}, GID={Utils.yellow_text(target_gid)}...")
