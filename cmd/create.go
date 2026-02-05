@@ -193,7 +193,8 @@ func runCreateWithName(ctx context.Context, packages []string) {
 	}
 
 	// Check if already exists (search all paths)
-	if existingPath, err := config.FindImage(createName + ".sqf"); err == nil {
+	searchName := strings.ReplaceAll(normalizedName, "/", "--") + ".sqf"
+	if existingPath, err := config.FindImage(searchName); err == nil {
 		utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
 			utils.StyleName(filepath.Base(existingPath)), utils.StylePath(existingPath))
 		return
@@ -305,7 +306,12 @@ func runCreateFromSource(ctx context.Context) {
 		targetPrefix, _ = filepath.Abs(createPrefix)
 	} else {
 		normalizedName := utils.NormalizeNameVersion(createName)
-		targetPrefix = filepath.Join(imagesDir, normalizedName)
+		if strings.Count(normalizedName, "/") > 1 {
+			utils.PrintError("--name cannot contain more than one '/'")
+			os.Exit(1)
+		}
+		fileName := strings.ReplaceAll(normalizedName, "/", "--")
+		targetPrefix = filepath.Join(imagesDir, fileName)
 	}
 
 	source := createSource
