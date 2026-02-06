@@ -69,8 +69,8 @@ func init() {
 	eCmd.Flags().StringSliceVar(&eEnvSettings, "env", nil, "Set environment variable 'KEY=VALUE' (can be used multiple times)")
 	eCmd.Flags().StringSliceVar(&eBindPaths, "bind", nil, "Bind path 'HOST:CONTAINER' (can be used multiple times)")
 
-	// Stop flag parsing after first positional arg
-	eCmd.Flags().SetInterspersed(false)
+	// Allow flags to be interspersed with overlays
+	eCmd.Flags().SetInterspersed(true)
 
 	// Allow unknown flags to pass through (for apptainer)
 	eCmd.FParseErrWhitelist.UnknownFlags = true

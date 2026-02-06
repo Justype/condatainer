@@ -77,13 +77,21 @@ Fish:
 			if err := cmd.Root().GenBashCompletionV2(&buf, true); err != nil {
 				_ = cmd.Root().GenBashCompletion(&buf)
 			}
-			// Post-process to handle -- for file completion
+			// Post-process to handle -- and add overlay fzf support
 			script := postProcessBashCompletion(buf.String())
 			os.Stdout.WriteString(script)
 		case "zsh":
-			cmd.Root().GenZshCompletion(os.Stdout)
+			// Generate to buffer so we can post-process
+			var buf bytes.Buffer
+			cmd.Root().GenZshCompletion(&buf)
+			script := postProcessZshCompletion(buf.String())
+			os.Stdout.WriteString(script)
 		case "fish":
-			cmd.Root().GenFishCompletion(os.Stdout, true)
+			// Generate to buffer so we can post-process
+			var buf bytes.Buffer
+			cmd.Root().GenFishCompletion(&buf, true)
+			script := postProcessFishCompletion(buf.String())
+			os.Stdout.WriteString(script)
 		}
 	},
 }
@@ -93,15 +101,12 @@ func init() {
 }
 
 // postProcessBashCompletion modifies the generated bash completion script
-// to handle -- properly (use file completion after --)
 func postProcessBashCompletion(script string) string {
-	// Find the __condatainer_get_completion_results function and add -- handling
-	// We inject code to check if -- is in the words array, and if so, use default file completion
+	// 1. Handle -- properly (use file completion after --)
 	oldCode := `args=("${words[@]:1}")
     requestComp="${words[0]} __complete ${args[*]}"`
 
 	newCode := `args=("${words[@]:1}")
-    # Check if -- is in the command line; if so, use default file completion
     for word in "${words[@]}"; do
         if [[ "$word" == "--" ]]; then
             return
@@ -109,5 +114,112 @@ func postProcessBashCompletion(script string) string {
     done
     requestComp="${words[0]} __complete ${args[*]}"`
 
-	return strings.Replace(script, oldCode, newCode, 1)
+	script = strings.Replace(script, oldCode, newCode, 1)
+
+	// 2. Add fzf support if available for 'e' and 'exec'
+	fzfInject := `    __condatainer_debug "The completions are: ${out}"
+
+    # Use fzf if available and we're completing for 'e' or 'exec'
+    if command -v fzf >/dev/null 2>&1 && [[ -n "$out" ]]; then
+        local is_overlay_cmd=false
+        for word in "${words[@]}"; do
+            if [[ "$word" == "e" || "$word" == "exec" ]]; then
+                is_overlay_cmd=true
+                break
+            fi
+        done
+
+        if [[ "$cur" == -* ]]; then
+            is_overlay_cmd=false
+        fi
+
+        if [[ "$is_overlay_cmd" == "true" ]]; then
+            if [[ $(echo "$out" | wc -l) -gt 1 ]]; then
+                 local selection
+                 selection=$(echo "$out" | fzf --reverse --header="Select overlay" --query="$cur" --select-1 --exit-0)
+                 if [[ -n "$selection" ]]; then
+                     out="$selection"
+                 fi
+            fi
+        fi
+    fi`
+
+	script = strings.Replace(script, `__condatainer_debug "The completions are: ${out}"`, fzfInject, 1)
+
+	return script
+}
+
+// postProcessZshCompletion modifies the generated zsh completion script
+// EXPERIMENTAL: zsh completion is not tested and may have edge cases. Feedback welcome.
+func postProcessZshCompletion(script string) string {
+	// Add fzf support if available for 'e' and 'exec'
+	fzfInject := `    __condatainer_debug "completions: ${out}"
+
+    # Use fzf if available and we're completing for 'e' or 'exec'
+    if command -v fzf >/dev/null 2>&1 && [[ -n "$out" ]]; then
+        local is_overlay_cmd=false
+        for word in "${words[@]}"; do
+            if [[ "$word" == "e" || "$word" == "exec" ]]; then
+                is_overlay_cmd=true
+                break
+            fi
+        done
+
+        if [[ "${words[$CURRENT]}" == -* ]]; then
+            is_overlay_cmd=false
+        fi
+
+        if [[ "$is_overlay_cmd" == "true" ]]; then
+             local -a lines
+             lines=("${(@f)out}")
+             if [[ ${#lines} -gt 1 ]]; then
+                 zle -I
+                 local selection
+                 selection=$(echo "$out" | fzf --height 40% --reverse --header="Select overlay" --query="$lastParam" --select-1 --exit-0)
+                 if [[ -n "$selection" ]]; then
+                     out="$selection"
+                 fi
+             fi
+        fi
+    fi`
+
+	script = strings.Replace(script, `__condatainer_debug "completions: ${out}"`, fzfInject, 1)
+
+	return script
+}
+
+// postProcessFishCompletion modifies the generated fish completion script
+// EXPERIMENTAL: fish completion is not tested and may have edge cases. Feedback welcome.
+func postProcessFishCompletion(script string) string {
+	// Add fzf support if available for 'e' and 'exec'
+	// Note: We try to match the line where results are captured.
+	// Cobra sometimes generates 'eval' and sometimes not depending on version.
+	// We handle the standard pattern found in recent versions.
+	target := `set -l results ($requestComp 2> /dev/null)`
+	// Fallback if the generator uses eval
+	if !strings.Contains(script, target) {
+		target = `set -l results (eval $requestComp 2> /dev/null)`
+	}
+
+	fzfInject := target + `
+
+    # Use fzf if available and we're completing for 'e' or 'exec'
+    if type -q fzf
+        if contains "e" $words; or contains "exec" $words
+            if not string match -q -- "-*" (commandline -t)
+                # Check if -- is in the command line; if so, skip fzf and use default results
+                if not contains -- "--" $words
+                    set -l candidates $results[1..-2]
+                    if test (count $candidates) -gt 1
+                        set -l selection (string join \n $candidates | fzf --height 40% --reverse --select-1 --exit-0 --query (commandline -t) < /dev/tty)
+                        if test -n "$selection"
+                            set results $selection $results[-1]
+                        end
+                    end
+                end
+            end
+        end
+    end`
+
+	return strings.Replace(script, target, fzfInject, 1)
 }
