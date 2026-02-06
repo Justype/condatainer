@@ -20,16 +20,17 @@ print_error(){ echo -e "[${RED}ERR${NC}] $*" >&2; }
 print_pass(){ echo -e "[${GREEN}PASS${NC}] $*"; }
 trap 'echo; exit 130' INT # Add a newline on Ctrl+C and exit with code 130
 # ============= Directories =============
-CONDATAINER_CONFIG_DIR="$HOME/.config/condatainer"
-HELPER_DEFAULTS_DIR="$CONDATAINER_CONFIG_DIR/helper/defaults"
-HELPER_STATE_DIR="$CONDATAINER_CONFIG_DIR/helper/state"
+# Follow XDG Base Directory spec for config and state locations
+CONDATAINER_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/condatainer"
+HELPER_DEFAULTS_DIR="$CONDATAINER_CONFIG_DIR/helper"
+HELPER_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/condatainer/helper"
 LOG_DIR="$HOME/logs"
 mkdir -p "$CONDATAINER_CONFIG_DIR" "$HELPER_DEFAULTS_DIR" "$HELPER_STATE_DIR" "$LOG_DIR"
 
 # ============= Config Functions =============
 
 # config_load <helper-name>
-#   Sources ~/.config/condatainer/helper-defaults/<name> if it exists.
+#   Sources XDG config: $XDG_CONFIG_HOME/condatainer/helper/<name> (defaults to ~/.config/condatainer/helper/<name>) if it exists.
 #   Updates the current shell environment with saved variables and set CWD to pwd.
 #   Returns 0 if loaded, 1 if no saved config.
 config_load() {
@@ -106,6 +107,12 @@ config_show() {
 #   Prints the path to the defaults file.
 config_path() {
     echo "$HELPER_DEFAULTS_DIR/$1"
+}
+
+# state_path <helper-name>
+#   Prints the path to the state file.
+state_path() {
+    echo "$HELPER_STATE_DIR/$1"
 }
 
 # resolve_overlay_list <colon-separated-overlays>

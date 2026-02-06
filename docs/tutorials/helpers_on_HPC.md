@@ -197,17 +197,17 @@ Available GPUs:
 
 ## Configuration and Defaults
 
-Helper scripts save your preferences to `~/.config/condatainer/helper/defaults/<app-name>`:
+Helper scripts save your preferences to `$XDG_CONFIG_HOME/condatainer/helper/<app-name>` (defaults to `~/.config/condatainer/helper/<app-name>`):
 
 ```bash
 # View current config
 condatainer helper vscode-server config
 
 # Edit config file directly
-nano ~/.config/condatainer/helper/defaults/vscode-server
+nano ~/.config/condatainer/helper/vscode-server
 
 # Reset to defaults
-rm ~/.config/condatainer/helper/defaults/vscode-server
+rm ~/.config/condatainer/helper/vscode-server
 ```
 
 Example config:
@@ -232,7 +232,7 @@ The `REUSE_MODE` setting controls this behavior:
 
 ```bash
 # Edit config file
-nano ~/.config/condatainer/helper/defaults/vscode-server
+nano ~/.config/condatainer/helper/vscode-server
 
 # Set to auto-reuse previous settings:
 REUSE_MODE="never"

@@ -119,14 +119,14 @@ Options:
 
 ## Configuration
 
-The script saves its defaults to `~/.config/condatainer/helper/defaults/vscode-tunnel` on first run. Subsequent runs load from this file.
+The script saves its defaults to `$XDG_CONFIG_HOME/condatainer/helper/vscode-tunnel` (defaults to `~/.config/condatainer/helper/vscode-tunnel`) on first run. Subsequent runs load from this file.
 
 ```bash
 # View current config
 condatainer helper vscode-tunnel config
 
 # Reset to defaults (delete config file, next run recreates it)
-rm ~/.config/condatainer/helper/defaults/vscode-tunnel
+rm ~/.config/condatainer/helper/vscode-tunnel
 ```
 
 Config files use simple `KEY="VALUE"` format and can be edited directly:

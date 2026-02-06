@@ -146,14 +146,14 @@ Options:
 
 ## Configuration
 
-The script saves its defaults to `~/.config/condatainer/helper/defaults/vscode-server` on first run. Subsequent runs load from this file.
+The script saves its defaults to `$XDG_CONFIG_HOME/condatainer/helper/vscode-server` (defaults to `~/.config/condatainer/helper/vscode-server`) on first run. Subsequent runs load from this file.
 
 ```bash
 # View current config
 condatainer helper vscode-server config
 
 # Reset to defaults (delete config file, next run recreates it)
-rm ~/.config/condatainer/helper/defaults/vscode-server
+rm ~/.config/condatainer/helper/vscode-server
 ```
 
 ## Running VS Code Server

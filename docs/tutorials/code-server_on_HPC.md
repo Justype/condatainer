@@ -148,14 +148,14 @@ Options:
 
 ## Configuration
 
-The script saves its defaults to `~/.config/condatainer/helper/defaults/code-server` on first run. Subsequent runs load from this file.
+The script saves its defaults to `$XDG_CONFIG_HOME/condatainer/helper/code-server` (defaults to `~/.config/condatainer/helper/code-server`) on first run. Subsequent runs load from this file.
 
 ```bash
 # View current config
 condatainer helper code-server config
 
 # Reset to defaults (delete config file, next run recreates it)
-rm ~/.config/condatainer/helper/defaults/code-server
+rm ~/.config/condatainer/helper/code-server
 ```
 
 ## Running `code-server`

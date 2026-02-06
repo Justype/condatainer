@@ -170,14 +170,14 @@ Options:
 
 ## Configuration
 
-The script saves its defaults to `~/.config/condatainer/helper/defaults/rstudio-server-conda` on first run. Subsequent runs load from this file.
+The script saves its defaults to `$XDG_CONFIG_HOME/condatainer/helper/rstudio-server-conda` (defaults to `~/.config/condatainer/helper/rstudio-server-conda`) on first run. Subsequent runs load from this file.
 
 ```bash
 # View current config
 condatainer helper rstudio-server-conda config
 
 # Reset to defaults (delete config file, next run recreates it)
-rm ~/.config/condatainer/helper/defaults/rstudio-server-conda
+rm ~/.config/condatainer/helper/rstudio-server-conda
 ```
 
 ## Running RStudio Server

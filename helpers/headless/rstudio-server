@@ -46,8 +46,8 @@ print_help() {
     echo ""
     echo "  config           Show config file path and contents"
     echo ""
+    echo "State  file: $(state_path $HELPER_NAME)"
     echo "Config file: $(config_path $HELPER_NAME)"
-    echo "Delete this file to reset to defaults."
 }
 
 case $1 in

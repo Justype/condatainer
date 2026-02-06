@@ -153,14 +153,14 @@ You can specify partial versions (e.g., `-r 4.4` will use the latest 4.4.x).
 
 ## Configuration
 
-The script saves its defaults to `~/.config/condatainer/helper/defaults/rstudio-server` on first run. Subsequent runs load from this file.
+The script saves its defaults to `$XDG_CONFIG_HOME/condatainer/helper/rstudio-server` (defaults to `~/.config/condatainer/helper/rstudio-server`) on first run. Subsequent runs load from this file.
 
 ```bash
 # View current config
 condatainer helper rstudio-server config
 
 # Reset to defaults (delete config file, next run recreates it)
-rm ~/.config/condatainer/helper/defaults/rstudio-server
+rm ~/.config/condatainer/helper/rstudio-server
 ```
 
 ## Running RStudio Server

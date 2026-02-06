@@ -55,14 +55,14 @@ SLURM scripts also accept:
 
 ## Configuration
 
-Each script saves its defaults to `~/.config/condatainer/helper-defaults/<script-name>` on first run. Subsequent runs load from this file.
+Each script saves its defaults to `$XDG_CONFIG_HOME/condatainer/helper/<script-name>` (defaults to `~/.config/condatainer/helper/<script-name>`) on first run. Subsequent runs load from this file.
 
 ```bash
 # View current config
 ./helpers/slurm/rstudio-server config
 
 # Reset to defaults (delete config file, next run recreates it)
-rm ~/.config/condatainer/helper-defaults/rstudio-server
+rm ~/.config/condatainer/helper/rstudio-server
 ```
 
 Config files use simple `KEY="VALUE"` format and can be edited directly:
