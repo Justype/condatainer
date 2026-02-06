@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,23 +25,24 @@ var (
 
 // eCmd is a quick shortcut for executing commands with overlays
 var eCmd = &cobra.Command{
-	Use:   "e [overlays...] -- [command...]",
+	Use:   "e [overlays...] [-- command...]",
 	Short: "Quick shortcut for executing with overlays",
 	Long: `Quick shortcut for executing commands with overlays.
 
-Overlays and flags go before --, commands after --.
+Overlays and flags go before --, commands go after --.
+If no -- is provided, all positional arguments are treated as overlays.
 - Writable by default (use -r for read-only)
-- Auto-loads env.img unless -n is specified
+- Auto-loads env.img (unless -n is specified)
 - Defaults to bash if no command specified
 
 Examples:
     # Auto-load env.img if present, run bash
     condatainer e
 
-    # Multiple overlays
+    # Multiple overlays, run bash
     condatainer e samtools/1.22 bcftools/1.20
 
-    # Run specific command
+    # Run specific command (requires --)
     condatainer e samtools/1.22 -- samtools view file.bam
 
     # Read-only .img overlay
@@ -52,7 +52,7 @@ Examples:
     condatainer e -n samtools/1.22
 
     # Pass apptainer flags (use --flag=value format)
-    condatainer e --home=/custom samtools/1.22
+	condatainer e --home=/custom samtools/1.22
 
 Note: Apptainer flags must use --flag=value format (no space).`,
 	SilenceUsage: true,
@@ -177,31 +177,12 @@ func runE(cmd *cobra.Command, args []string) error {
 
 func parseEArgs(args []string) (overlays, commands, apptainerFlags []string, err error) {
 	// Parse os.Args directly to catch unknown flags that Cobra filtered out
-	// Find where "e" appears in os.Args
 	eIdx := -1
 	for i, arg := range os.Args {
 		if arg == "e" {
 			eIdx = i
 			break
 		}
-	}
-
-	if eIdx == -1 {
-		// Fallback: no os.Args parsing, just return error if no --
-		hasDashDash := false
-		for _, arg := range args {
-			if arg == "--" {
-				hasDashDash = true
-				break
-			}
-		}
-		if !hasDashDash && len(args) > 0 {
-			return nil, nil, nil, fmt.Errorf(
-				"the 'e' command requires '--' separator between overlays and command\n  Example: condatainer e %s -- bash\n  Hint: Everything before -- is overlay/flags, everything after is command",
-				args[0],
-			)
-		}
-		return overlays, commands, apptainerFlags, nil
 	}
 
 	knownFlags := map[string]bool{
@@ -217,14 +198,28 @@ func parseEArgs(args []string) (overlays, commands, apptainerFlags []string, err
 		"--yes": true, "-y": true,
 	}
 
-	hasDashDash := false
 	commandStarted := false
+
+	if eIdx == -1 {
+		// Fallback: no os.Args parsing, just return cobra's positional args as overlays
+		for _, arg := range args {
+			if arg == "--" {
+				commandStarted = true
+				continue
+			}
+			if commandStarted {
+				commands = append(commands, arg)
+				continue
+			}
+			overlays = append(overlays, arg)
+		}
+		return overlays, commands, apptainerFlags, nil
+	}
 
 	for i := eIdx + 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
 
 		if arg == "--" {
-			hasDashDash = true
 			commandStarted = true
 			continue
 		}
@@ -260,14 +255,6 @@ func parseEArgs(args []string) (overlays, commands, apptainerFlags []string, err
 
 		// Not a flag, before -- → overlay
 		overlays = append(overlays, arg)
-	}
-
-	// HELPFUL MIGRATION ERROR: Check if user forgot --
-	if !hasDashDash && len(overlays) > 0 && len(commands) == 0 && len(apptainerFlags) == 0 {
-		return nil, nil, nil, fmt.Errorf(
-			"the 'e' command requires '--' separator between overlays and command\n  Example: condatainer e %s --\n  Hint: Everything before -- is overlay/flags, everything after is command (defaults to bash)",
-			overlays[0],
-		)
 	}
 
 	return overlays, commands, apptainerFlags, nil
