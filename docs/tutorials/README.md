@@ -5,6 +5,7 @@ This directory contains tutorials on how to use CondaTainer for various applicat
 ## Getting Started
 
 - [Create a Workspace Environment](../user_guide/workspace_overlays.md)
+- [Helper Scripts on HPC](./helpers_on_HPC.md) - How helper scripts work with overlays and SSH port forwarding
 
 ## IDE & Editor Tutorials
 

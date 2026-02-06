@@ -22,6 +22,7 @@ CondaTainer
   :caption: HPC Tutorials:
   :maxdepth: 1
 
+  Helper Scripts Overview <tutorials/helpers_on_HPC>
   RStudio Server <tutorials/rstudio-server_on_HPC>
   RStudio Server with Conda <tutorials/rstudio-server-conda_on_HPC>
   VS Code Server <tutorials/vscode-server_on_HPC>

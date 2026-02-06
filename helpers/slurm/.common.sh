@@ -18,6 +18,7 @@ print_info() { echo -e "[${CYAN}INFO${NC}] $*"; }
 print_warn() { echo -e "[${YELLOW}WARN${NC}] $*"; }
 print_error(){ echo -e "[${RED}ERR${NC}] $*" >&2; }
 print_pass(){ echo -e "[${GREEN}PASS${NC}] $*"; }
+trap 'echo; exit 130' INT # Add a newline on Ctrl+C and exit with code 130
 # ============= Directories =============
 CONDATAINER_CONFIG_DIR="$HOME/.config/condatainer"
 HELPER_DEFAULTS_DIR="$CONDATAINER_CONFIG_DIR/helper/defaults"
@@ -27,17 +28,15 @@ mkdir -p "$CONDATAINER_CONFIG_DIR" "$HELPER_DEFAULTS_DIR" "$HELPER_STATE_DIR" "$
 
 # ============= Config Functions =============
 
-# config_load <helper-name> [silent]
+# config_load <helper-name>
 #   Sources ~/.config/condatainer/helper-defaults/<name> if it exists.
 #   Updates the current shell environment with saved variables and set CWD to pwd.
-#   Pass "silent" as second arg to suppress the info message.
 #   Returns 0 if loaded, 1 if no saved config.
 config_load() {
     local f="$HELPER_DEFAULTS_DIR/$1"
     if [ -f "$f" ]; then
         source "$f"
         CWD=$(readlink -f .)
-        [ "$2" != "silent" ] && print_info "Loaded saved defaults from ${BLUE}$f${NC}"
         return 0
     fi
     return 1
@@ -45,15 +44,15 @@ config_load() {
 
 # config_init <helper-name> KEY=VALUE ...
 #   Creates the defaults file on first run with the given key=value pairs.
-#   Does nothing if the file already exists (won't overwrite user edits).
+#   If the file already exists, appends any missing keys without overwriting existing ones.
 config_init() {
     local name="$1"; shift
     local f="$HELPER_DEFAULTS_DIR/$name"
-    [ -f "$f" ] && return 0
+    touch "$f"
     for pair in "$@"; do
         local key="${pair%%=*}"
         local val="${pair#*=}"
-        printf '%s="%s"\n' "$key" "$val" >> "$f"
+        grep -q "^${key}=" "$f" || printf '%s="%s"\n' "$key" "$val" >> "$f"
     done
 }
 
@@ -330,6 +329,91 @@ setup_scratch() {
 
 # ============= SLURM Functions =============
 
+# print_specs
+#   Prints the current job settings. Override this in your helper script for custom output.
+print_specs() {
+    print_msg "  CPUs: ${BLUE}$NCPUS${NC} MEM: ${BLUE}$MEM${NC} TIME: ${BLUE}$TIME${NC}"
+    [ -n "$GPU" ] && print_msg "  GPU: ${BLUE}$GPU${NC}"
+    print_msg "  Working Dir: ${BLUE}$CWD${NC}"
+    print_msg "  Overlay: ${BLUE}$OVERLAY${NC}"
+    [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
+}
+
+# handle_reuse_mode <helper_name>
+#   Handles the REUSE_MODE logic when a previous job is not running (case 3).
+#   Checks REUSE_MODE and either reuses settings or loads fresh config.
+#   Sets global REUSE_PREVIOUS_CWD=true if reusing, false otherwise.
+#   For scripts with PORT variable, preserves port when loading fresh config.
+handle_reuse_mode() {
+    local helper_name="$1"
+
+    if [ -z "$OVERLAY" ]; then
+        config_load "$helper_name"
+        return
+    fi
+
+    # Check REUSE_MODE config
+    case "${REUSE_MODE,,}" in  # Convert to lowercase
+        always)
+            print_info "Auto-reusing previous settings (REUSE_MODE=always)."
+            print_msg "Previous run used:"
+            print_specs
+            REUSE_PREVIOUS_CWD=true
+            ;;
+        ask)
+            print_msg "Previous run used:"
+            print_specs
+            if confirm_default_yes "Reuse these settings and go to the previous working directory?"; then
+                REUSE_PREVIOUS_CWD=true
+            else
+                # Preserve port if it exists
+                local PRE_PORT="${PORT:-}"
+                config_load "$helper_name"
+                OVERLAYS="" # Reset overlays since we are loading fresh config
+                if [ -n "$PRE_PORT" ] && [ -z "$PORT" ]; then
+                    PORT="$PRE_PORT"
+                    print_info "Using default settings with previously selected port: ${BLUE}$PORT${NC}"
+                else
+                    print_info "Using default settings."
+                fi
+            fi
+            ;;
+        never)
+            print_info "Not reusing previous settings (REUSE_MODE=never)."
+            # Preserve port if it exists
+            local PRE_PORT="${PORT:-}"
+            config_load "$helper_name"
+            OVERLAYS="" # Reset overlays since we are loading fresh config
+            if [ -n "$PRE_PORT" ] && [ -z "$PORT" ]; then
+                PORT="$PRE_PORT"
+                print_info "Using default settings with previously selected port: ${BLUE}$PORT${NC}"
+            else
+                print_info "Using default settings."
+            fi
+            rm "$STATE_FILE"
+            ;;
+        *)
+            print_warn "Invalid REUSE_MODE='$REUSE_MODE'. Defaulting to 'ask'."
+            print_msg "Previous run used:"
+            print_specs
+            if confirm_default_yes "Reuse these settings and go to the previous working directory?"; then
+                REUSE_PREVIOUS_CWD=true
+            else
+                # Preserve port if it exists
+                local PRE_PORT="${PORT:-}"
+                config_load "$helper_name"
+                OVERLAYS="" # Reset overlays since we are loading fresh config
+                if [ -n "$PRE_PORT" ] && [ -z "$PORT" ]; then
+                    PORT="$PRE_PORT"
+                    print_info "Using default settings with previously selected port: ${BLUE}$PORT${NC}"
+                else
+                    print_info "Using default settings."
+                fi
+            fi
+            ;;
+    esac
+}
+
 # read_job_state <state_file>
 #   Sources state file and checks SLURM job status.
 #   Returns: 0 = no state file, 1 = PENDING, 2 = RUNNING, 3 = not running
@@ -344,7 +428,9 @@ read_job_state() {
 
     case "$status" in
         PENDING) return 1 ;;
-        RUNNING) return 2 ;;
+        RUNNING)
+            [ -z "$NODE" ] && NODE=$(squeue -j $JOB_ID -h -o "%N" 2>/dev/null)
+            return 2 ;;
     esac
 
     return 3

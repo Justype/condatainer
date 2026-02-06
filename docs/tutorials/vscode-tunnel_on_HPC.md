@@ -32,6 +32,8 @@ condatainer helper vscode-tunnel
 #   -t time_limit=12:00:00
 ```
 
+You can set [Config](./helpers_on_HPC.md#configuration-and-defaults) and helpers also support [Reusing previous settings](./helpers_on_HPC.md#reuse-mode).
+
 If you have any issues, see [Common Issues](#common-issues) section below.
 
 ## Scheduler / Workload Manager
@@ -235,29 +237,4 @@ You can use the following command to check available GPU types on your HPC syste
 
 ```
 condatainer scheduler
-```
-
-Example output:
-
-```
-Scheduler Information:
-  Type:      SLURM
-  Binary:    /opt/software/slurm/current/bin/sbatch
-  Version:   24.11.7
-  Status:    Available
-
-The scheduler is available and ready for job submission.
-
-Max Resource Limits:
-  Max CPUs:   44
-  Max Memory: 184000 MB (180 GB)
-  Max Time:   7d
-
-Available GPUs:
-  h100: 2144 total, 416 available
-  mi300a: 4 total, 0 available
-  nvidia_h100_80gb_hbm3_1g.10gb: 2264 total, 728 available
-  nvidia_h100_80gb_hbm3_2g.20gb: 768 total, 0 available
-  nvidia_h100_80gb_hbm3_3g.40gb: 768 total, 0 available
-  t4: 28 total, 0 available
 ```

@@ -96,7 +96,7 @@ SLURM job logs are written to `~/logs/`:
 | Function | Description |
 |---|---|
 | `config_init` | Create defaults file on first run with KEY=VALUE pairs. |
-| `config_load` | Source saved defaults and set CWD; accepts optional `silent` arg. |
+| `config_load` | Source saved defaults and set `CWD` to current working directory. |
 | `config_update` | Update specific keys in defaults without rewriting the file. |
 | `config_require` | Validate required variables are set (exits on failure). |
 | `config_show` | Print config file path and contents, then exit. |

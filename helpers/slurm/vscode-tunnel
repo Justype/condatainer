@@ -21,6 +21,7 @@ config_init $HELPER_NAME \
     BASE_IMAGE_DISTRO=noble \
     AUTH=github \
     MACHINE_NAME="$DEFAULT_MACHINE_NAME" \
+    REUSE_MODE=ask \
     OVERLAY=env.img
 
 # Load saved defaults
@@ -34,19 +35,21 @@ print_help() {
     echo "  -c <number>     Number of CPUs to allocate (default: $NCPUS)"
     echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
     echo "  -t <time>       Time limit for the job (default: $TIME)"
-    echo "  -g <gpu>        GPU resources (e.g., 1, a100:2). Empty means no GPU."
+    echo "  -g <gpu>        GPU resources (e.g., 1, a100:2). Use -g '' to clear."
     echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00"
     echo ""
+    echo "  -w              Use current directory as working directory (clears additional overlays)"
     echo "  -a <provider>   github or microsoft for authentication (default: $AUTH)"
     echo "  -n <name>       Machine name for the tunnel (default: $MACHINE_NAME)"
+    echo ""
     echo "  -b <image>      Base image file"
-    echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
+    echo "  -e <.img>       Writable overlay (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
     echo ""
     echo "  config           Show config file path and contents"
     echo ""
     echo "Config file: $(config_path $HELPER_NAME)"
-    echo "Delete this file to reset to defaults."
+    echo "REUSE_MODE: 'always' (auto-reuse), 'ask' (prompt, default), 'never' (always use config)."
 }
 
 case $1 in
@@ -106,6 +109,7 @@ print_tunnel_info() {
     return 1
 }
 
+# Override print_specs to add script-specific fields
 print_specs() {
     print_msg "  CPUs: ${BLUE}$NCPUS${NC} MEM: ${BLUE}$MEM${NC} TIME: ${BLUE}$TIME${NC}"
     [ -n "$GPU" ] && print_msg "  GPU: ${BLUE}$GPU${NC}"
@@ -115,6 +119,9 @@ print_specs() {
     print_msg "  Overlay: ${BLUE}$OVERLAY${NC}"
     [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
 }
+
+# Track if we should reuse previous working directory
+REUSE_PREVIOUS_CWD=false
 
 STATE_FILE="$HELPER_STATE_DIR/$HELPER_NAME"
 read_job_state "$STATE_FILE"
@@ -130,22 +137,7 @@ case $? in
         exit 0 ;;
     3) # Not running - ask about reusing previous overlay settings
         print_info "The previous $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC}) is no longer running."
-        if [ -n "$OVERLAY" ]; then
-            print_msg "Previous run used:"
-            print_specs
-            if confirm_default_yes "Reuse these settings and go to the previous working directory?"; then
-                cd "$CWD"
-            else
-                config_load $HELPER_NAME silent
-                OVERLAYS="" # Reset overlays since we are loading fresh config
-                print_info "Using default settings."
-                print_specs
-                rm "$STATE_FILE"
-                sleep 3
-            fi
-        else
-            config_load $HELPER_NAME silent
-        fi
+        handle_reuse_mode "$HELPER_NAME"
         ;;
 esac
 
@@ -156,14 +148,20 @@ _NCPUS=$NCPUS
 _MEM=$MEM
 _TIME=$TIME
 _GPU=$GPU
+# Track if user wants to change working directory
+NEW_CWD=""
 
-while getopts "c:m:t:g:a:n:b:e:o:v" opt; do
+while getopts "c:m:t:g:wa:n:b:e:o:v" opt; do
     case ${opt} in
         c ) NCPUS=$OPTARG; _NCPUS=$OPTARG ;;
         m ) MEM=$OPTARG; _MEM=$OPTARG ;;
         t ) TIME=$OPTARG; _TIME=$OPTARG ;;
         g ) GPU=$OPTARG; _GPU=$OPTARG ;;
         v ) NCPUS=1; MEM=4G; TIME=02:00:00; echo "[MSG] View Mode: NCPUS=1, MEM=4G, TIME=02:00:00" ;;
+        w )
+            NEW_CWD="$(readlink -f .)"
+            if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
+            ;;
         a ) AUTH=$OPTARG ;;
         n ) MACHINE_NAME=$OPTARG ;;
         b ) BASE_IMAGE="$OPTARG" ;;
@@ -175,6 +173,19 @@ while getopts "c:m:t:g:a:n:b:e:o:v" opt; do
         \? ) print_help; exit 1 ;;
     esac
 done
+
+# Handle working directory changes
+if [ -n "$NEW_CWD" ]; then
+    CWD="$NEW_CWD"
+elif [ "$REUSE_PREVIOUS_CWD" = true ]; then
+    # Reusing previous settings, change to previous working directory
+    cd "$CWD"
+fi
+
+# Show final settings before job submission
+print_msg "Using settings:"
+print_specs
+sleep 3
 
 #region Sanity Checks
 check_condatainer
@@ -235,20 +246,7 @@ ${GPU_SBATCH:+$GPU_SBATCH}
 # Remove the sbatch script after job submission
 rm $SBATCH_SCRIPT_PATH
 
-cat > $STATE_FILE <<RUNSTATE
-JOB_ID=\$SLURM_JOB_ID
-NODE=\$(hostname)
-NCPUS=$_NCPUS
-MEM=$_MEM
-TIME=$_TIME
-GPU=$_GPU
-CWD=$CWD
-AUTH=$AUTH
-MACHINE_NAME=$MACHINE_NAME
-BASE_IMAGE="$BASE_IMAGE"
-OVERLAY="$OVERLAY"
-OVERLAYS="$OVERLAYS"
-RUNSTATE
+echo "NODE=\$(hostname)" >> $STATE_FILE
 
 $CODE_BIN tunnel logout
 $CODE_BIN tunnel user login --provider $AUTH 2>&1 | tee "$AUTH_STATUS_FILE"
@@ -267,6 +265,20 @@ EOT
 
 SBATCH_OUTPUT=$(sbatch $SBATCH_SCRIPT_PATH)
 SBATCH_JOB_ID=$(echo $SBATCH_OUTPUT | awk '{print $4}')
+
+cat > $STATE_FILE <<RUNSTATE
+JOB_ID=$SBATCH_JOB_ID
+NCPUS=$_NCPUS
+MEM=$_MEM
+TIME=$_TIME
+GPU=$_GPU
+CWD=$CWD
+AUTH=$AUTH
+MACHINE_NAME=$MACHINE_NAME
+BASE_IMAGE="$BASE_IMAGE"
+OVERLAY="$OVERLAY"
+OVERLAYS="$OVERLAYS"
+RUNSTATE
 
 wait_for_job "$SBATCH_JOB_ID"
 print_tunnel_info "$SBATCH_JOB_ID" "$AUTH" "$CWD"

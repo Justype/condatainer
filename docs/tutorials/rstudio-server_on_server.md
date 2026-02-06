@@ -29,14 +29,7 @@ condatainer helper rstudio-server
 #   -p port_number=auto-selected if omitted
 ```
 
-You can create an alias in your shell config file (`~/.bashrc` or `~/.zshrc`):
-
-```bash
-# Change 13182 to your preferred port number
-alias rstudio-start='condatainer helper rstudio-server -p 13182 -r 4.4'
-```
-
-See [Install Packages in CondaTainer RStudio Server](#install-packages-in-condatainer-rstudio-server) for more details on installing R packages.
+You can set [Config](./helpers_on_HPC.md#configuration-and-defaults) and helpers also support [Reusing previous settings](./helpers_on_HPC.md#reuse-mode).
 
 If you encounter `file name too long` error, see [File name too long ERROR](#file-name-too-long-system36-error) section below.
 

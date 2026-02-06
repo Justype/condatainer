@@ -27,6 +27,7 @@ config_init $HELPER_NAME \
     PORT= \
     AUTH=none \
     R_VERSION= \
+    REUSE_MODE=ask \
     OVERLAY=env.img
 
 # Load saved defaults
@@ -41,17 +42,19 @@ print_help() {
     echo "  -c <number>     Number of CPUs to allocate (default: $NCPUS)"
     echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
     echo "  -t <time>       Time limit for the job (default: $TIME)"
-    echo "  -g <gpu>        GPU resources (e.g., 1, a100:2). Empty means no GPU."
+    echo "  -g <gpu>        GPU resources (e.g., 1, a100:2). Use -g '' to clear."
     echo "  -v              View Mode NCPUS:1 MEM:8G TIME:02:00:00"
     echo ""
+    echo "  -w              Use current directory as working directory (clears additional overlays)"
     echo "  -p <port>       Port for $HELPER_NAME (default: ${PORT:-randomly picked}). Valid range: 1024-65535."
-    echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
+    echo ""
+    echo "  -e <.img>       Writable overlay (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
     echo ""
     echo "  config           Show config file path and contents"
     echo ""
     echo "Config file: $(config_path $HELPER_NAME)"
-    echo "Delete this file to reset to defaults."
+    echo "REUSE_MODE: 'always' (auto-reuse), 'ask' (prompt, default), 'never' (always use config)."
 }
 
 case $1 in
@@ -72,6 +75,7 @@ show_and_connect() {
     exit 0
 }
 
+# Override print_specs to add script-specific fields
 print_specs() {
     print_msg "  CPUs: ${BLUE}$NCPUS${NC} MEM: ${BLUE}$MEM${NC} TIME: ${BLUE}$TIME${NC}"
     [ -n "$GPU" ] && print_msg "  GPU: ${BLUE}$GPU${NC}"
@@ -81,6 +85,9 @@ print_specs() {
     print_msg "  Overlay: ${BLUE}$OVERLAY${NC}"
     [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
 }
+
+# Track if we should reuse previous working directory
+REUSE_PREVIOUS_CWD=false
 
 STATE_FILE="$HELPER_STATE_DIR/$HELPER_NAME"
 read_job_state "$STATE_FILE"
@@ -96,28 +103,7 @@ case $? in
         ;;
     3) # Not running - ask about reusing previous overlay settings
         print_info "The previous $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC}) is no longer running."
-        if [ -n "$OVERLAY" ]; then
-            print_msg "Previous run used:"
-            print_specs
-            if confirm_default_yes "Reuse these settings and go to the previous working directory?"; then
-                cd "$CWD"
-            else
-                PRE_PORT="$PORT"
-                config_load $HELPER_NAME silent
-                OVERLAYS="" # Reset overlays since we are loading fresh config
-                if [ -z "$PORT" -a -n "$PRE_PORT" ]; then
-                    PORT="$PRE_PORT"
-                    print_info "Using default settings with previously selected port: ${BLUE}$PORT${NC}"
-                else
-                    print_info "Using default settings."
-                fi
-                print_specs
-                rm "$STATE_FILE"
-                sleep 3
-            fi
-        else
-            config_load $HELPER_NAME silent
-        fi
+        handle_reuse_mode "$HELPER_NAME"
         ;;
 esac
 
@@ -156,8 +142,10 @@ _NCPUS=$NCPUS
 _MEM=$MEM
 _TIME=$TIME
 _GPU=$GPU
+# Track if user wants to change working directory
+NEW_CWD=""
 
-while getopts "r:c:m:t:g:p:e:o:v" opt; do
+while getopts "r:c:m:t:g:wp:e:o:v" opt; do
     case ${opt} in
         r ) R_VERSION=$OPTARG ;;
         c ) NCPUS=$OPTARG; _NCPUS=$OPTARG ;;
@@ -165,6 +153,10 @@ while getopts "r:c:m:t:g:p:e:o:v" opt; do
         t ) TIME=$OPTARG; _TIME=$OPTARG ;;
         g ) GPU=$OPTARG; _GPU=$OPTARG ;;
         v ) NCPUS=1; MEM=8G; TIME=02:00:00; echo "[MSG] View Mode: NCPUS=1, MEM=8G, TIME=02:00:00" ;;
+        w )
+            NEW_CWD="$(readlink -f .)"
+            if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
+            ;;
         p ) PORT=$OPTARG ;;
         e ) OVERLAY=$OPTARG ;;
         o ) # First -o clears previous overlays, then builds fresh list
@@ -174,6 +166,19 @@ while getopts "r:c:m:t:g:p:e:o:v" opt; do
         \? ) print_help; exit 1 ;;
     esac
 done
+
+# Handle working directory changes
+if [ -n "$NEW_CWD" ]; then
+    CWD="$NEW_CWD"
+elif [ "$REUSE_PREVIOUS_CWD" = true ]; then
+    # Reusing previous settings, change to previous working directory
+    cd "$CWD"
+fi
+
+# Show final settings before job submission
+print_msg "Using settings:"
+print_specs
+sleep 3
 
 # R Version check
 if [ -z "$R_VERSION" ]; then
@@ -286,6 +291,7 @@ export CONDA_PREFIX=/ext3/env
 export CONDA_DEFAULT_ENV=env
 export CNT_CONDA_PREFIX=/ext3/env
 export RETICULATE_PYTHON=/ext3/env/bin/python
+export NCPUS=$NCPUS
 
 /usr/lib/rstudio-server/bin/rsession "\$@"
 EOT
@@ -313,19 +319,7 @@ ${GPU_SBATCH:+$GPU_SBATCH}
 # Remove the sbatch script after job submission
 rm $SBATCH_SCRIPT_PATH
 
-cat > $STATE_FILE <<RUNSTATE
-JOB_ID=\$SLURM_JOB_ID
-NODE=\$(hostname)
-NCPUS=$_NCPUS
-MEM=$_MEM
-TIME=$_TIME
-GPU=$_GPU
-PORT=$PORT
-CWD=$CWD
-R_VERSION="$R_VERSION"
-OVERLAY="$OVERLAY"
-OVERLAYS="$OVERLAYS"
-RUNSTATE
+echo "NODE=\$(hostname)" >> $STATE_FILE
 
 condatainer exec \\
     -o r${R_VERSION} \\
@@ -348,6 +342,19 @@ EOT
 
 SBATCH_OUTPUT=$(sbatch $SBATCH_SCRIPT_PATH)
 SBATCH_JOB_ID=$(echo $SBATCH_OUTPUT | awk '{print $4}')
+
+cat > $STATE_FILE <<RUNSTATE
+JOB_ID=$SBATCH_JOB_ID
+NCPUS=$_NCPUS
+MEM=$_MEM
+TIME=$_TIME
+GPU=$_GPU
+PORT=$PORT
+CWD=$CWD
+R_VERSION="$R_VERSION"
+OVERLAY="$OVERLAY"
+OVERLAYS="$OVERLAYS"
+RUNSTATE
 
 wait_for_job "$SBATCH_JOB_ID"
 show_and_connect "$SBATCH_JOB_ID"

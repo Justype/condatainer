@@ -27,6 +27,7 @@ config_init $HELPER_NAME \
     PORT= \
     AUTH=none \
     R_VERSION= \
+    REUSE_MODE=ask \
     OVERLAY=env.img
 
 # Load saved defaults
@@ -39,7 +40,8 @@ print_help() {
     echo "Options:"
     echo "  -r <r_version>  R version to use (e.g., 4.4.3) Use latest available if omitted."
     echo "  -p <port>       Port for $HELPER_NAME (default: ${PORT:-randomly picked}). Valid range: 1024-65535."
-    echo "  -e <overlay>    Environment overlay image file (default: $OVERLAY)"
+    echo ""
+    echo "  -e <.img>       Writable overlay (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
     echo ""
     echo "  config           Show config file path and contents"
