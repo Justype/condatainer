@@ -319,6 +319,7 @@ export -f module ml
 		Fakeroot:     runFakeroot,
 		BaseImage:    runBaseImage, // Empty string triggers GetBaseImage() in ensureDefaults()
 		ApptainerBin: config.Global.ApptainerBin,
+		HidePrompt:   true,
 	}
 
 	if err := execpkg.Run(cmd.Context(), options); err != nil {

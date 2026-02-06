@@ -104,8 +104,12 @@ func runExec(cmd *cobra.Command, args []string) error {
 	// Use overlays from -o flag
 	overlayFinal := execOverlays
 
+	hidePrompt := true
 	if len(commandFinal) == 0 {
 		commandFinal = []string{"bash"}
+		hidePrompt = false
+	} else if len(commandFinal) == 1 {
+		hidePrompt = false
 	}
 
 	// Resolve user-specified base image if provided
@@ -138,6 +142,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		Fakeroot:       execFakeroot,
 		BaseImage:      baseImageResolved,
 		ApptainerBin:   config.Global.ApptainerBin,
+		HidePrompt:     hidePrompt,
 	}
 
 	if err := exec.Run(cmd.Context(), options); err != nil {

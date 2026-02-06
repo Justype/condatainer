@@ -115,15 +115,19 @@ func runE(cmd *cobra.Command, args []string) error {
 			if pwd, err := os.Getwd(); err == nil {
 				localEnvPath := filepath.Join(pwd, "env.img")
 				if utils.FileExists(localEnvPath) {
-					utils.PrintMessage("Autoload env.img at %s", utils.StylePath(localEnvPath))
+					utils.PrintNote("Autoload env.img at %s", utils.StylePath(localEnvPath))
 					overlays = append(overlays, localEnvPath)
 				}
 			}
 		}
 	}
 
+	hidePrompt := true
 	if len(commands) == 0 {
 		commands = []string{"bash"}
+		hidePrompt = false
+	} else if len(commands) == 1 {
+		hidePrompt = false
 	}
 
 	// Resolve base image if provided
@@ -158,6 +162,7 @@ func runE(cmd *cobra.Command, args []string) error {
 		Fakeroot:       eFakeroot,
 		BaseImage:      baseImageResolved,
 		ApptainerBin:   config.Global.ApptainerBin,
+		HidePrompt:     hidePrompt,
 	}
 
 	if err := exec.Run(cmd.Context(), options); err != nil {
