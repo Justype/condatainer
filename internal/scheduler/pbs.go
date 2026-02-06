@@ -13,12 +13,13 @@ import (
 )
 
 // PbsScheduler implements the Scheduler interface for PBS/Torque
+// EXPERIMENTAL: PBS is not tested on real clusters and may have edge cases. Feedback welcome.
 type PbsScheduler struct {
-	qsubBin      string
-	qstatBin     string
-	pbsnodesBin  string
-	directiveRe  *regexp.Regexp
-	jobIDRe      *regexp.Regexp
+	qsubBin     string
+	qstatBin    string
+	pbsnodesBin string
+	directiveRe *regexp.Regexp
+	jobIDRe     *regexp.Regexp
 }
 
 // NewPbsScheduler creates a new PBS scheduler instance using qsub from PATH
@@ -56,11 +57,11 @@ func newPbsSchedulerWithBinary(qsubBin string) (*PbsScheduler, error) {
 	pbsnodesCmd, _ := exec.LookPath("pbsnodes")
 
 	return &PbsScheduler{
-		qsubBin:      binPath,
-		qstatBin:     qstatCmd,
-		pbsnodesBin:  pbsnodesCmd,
-		directiveRe:  regexp.MustCompile(`^\s*#PBS\s+(.+)$`),
-		jobIDRe:      regexp.MustCompile(`^(\d+\..*|^\d+)$`),
+		qsubBin:     binPath,
+		qstatBin:    qstatCmd,
+		pbsnodesBin: pbsnodesCmd,
+		directiveRe: regexp.MustCompile(`^\s*#PBS\s+(.+)$`),
+		jobIDRe:     regexp.MustCompile(`^(\d+\..*|^\d+)$`),
 	}, nil
 }
 

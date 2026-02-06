@@ -13,6 +13,7 @@ import (
 )
 
 // LsfScheduler implements the Scheduler interface for IBM Spectrum LSF
+// EXPERIMENTAL: LSF is not tested on real clusters and may have edge cases. Feedback welcome.
 type LsfScheduler struct {
 	bsubBin     string
 	bjobsBin    string
