@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -15,7 +16,7 @@ type SchedulerType string
 const (
 	SchedulerUnknown SchedulerType = ""
 	SchedulerSLURM   SchedulerType = "SLURM"
-	SchedulerPBS     SchedulerType = "PBS" // Future support
+	SchedulerPBS     SchedulerType = "PBS"
 	SchedulerLSF     SchedulerType = "LSF" // Future support
 )
 
@@ -199,13 +200,16 @@ func DetectScheduler() (Scheduler, error) {
 // This function returns a Scheduler instance if the scheduler binary is present, regardless of availability.
 // Use DetectScheduler to require availability (not inside a job and submission enabled).
 func DetectSchedulerWithBinary(preferredBin string) (Scheduler, error) {
-	// Try the preferred SLURM binary first (return scheduler if binary present)
+	// If a preferred binary is specified, infer scheduler type from the binary name
 	if preferredBin != "" {
-		slurm, err := NewSlurmSchedulerWithBinary(preferredBin)
-		if err != nil {
-			return nil, err
+		baseName := filepath.Base(preferredBin)
+		switch baseName {
+		case "qsub", "qdel", "qstat":
+			return NewPbsSchedulerWithBinary(preferredBin)
+		default:
+			// Default to SLURM for sbatch and any other binary
+			return NewSlurmSchedulerWithBinary(preferredBin)
 		}
-		return slurm, nil
 	}
 
 	// Try SLURM via PATH (most common)
@@ -214,7 +218,11 @@ func DetectSchedulerWithBinary(preferredBin string) (Scheduler, error) {
 		return slurm, nil
 	}
 
-	// TODO: Add support for other schedulers (PBS, LSF, etc.)
+	// Try PBS via PATH
+	pbs, pbsErr := NewPbsScheduler()
+	if pbsErr == nil {
+		return pbs, nil
+	}
 
 	return nil, ErrSchedulerNotFound
 }

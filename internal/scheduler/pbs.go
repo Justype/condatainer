@@ -360,6 +360,10 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		if specs.JobName != "" && strings.HasPrefix(flag, "-N ") {
 			continue
 		}
+		// Skip email flags - they'll be regenerated from specs
+		if strings.HasPrefix(flag, "-m ") || strings.HasPrefix(flag, "-M ") {
+			continue
+		}
 		fmt.Fprintf(writer, "#PBS %s\n", flag)
 	}
 
