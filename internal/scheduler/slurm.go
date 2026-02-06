@@ -222,7 +222,7 @@ func (s *SlurmScheduler) parseSbatchFlag(flag string, specs *ScriptSpecs) error 
 	}
 
 	// GPU
-	if strings.HasPrefix(flag, "--gres=") {
+	if strings.HasPrefix(flag, "--gres=gpu:") {
 		gpu, err := parseSlurmGpu(strings.TrimPrefix(flag, "--gres="))
 		if err != nil {
 			return err
