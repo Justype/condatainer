@@ -13,12 +13,17 @@ On HPC systems, you don't have root privileges. Using `--fakeroot` allows you to
 
 By default, CondaTainer uses `--fakeroot` when creating overlays using `.def` files or pulling from remote sources.
 
+Also, when running `exec`, `e`, `run`, if the uid of `upper` inside the overlay is `0` (root), CondaTainer will automatically add the `--fakeroot` flag.
+
 ## Run the container/overlay with fakeroot
 
-When executing commands inside the container, you can use the `--fakeroot` flag to gain root-like privileges inside the container.
+When executing commands inside the container, you can use the `-f` or `--fakeroot` flag to gain root-like privileges inside the container.
 
 ```bash
 condatainer exec --fakeroot -o /path/to/my_env.img <command>
+
+# Using the 'e' shortcut
+condatainer e -f my_env.img
 ```
 
 Then you can run commands that require root privileges, such as installing packages or changing file ownership inside the overlay.

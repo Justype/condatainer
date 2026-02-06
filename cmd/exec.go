@@ -24,42 +24,41 @@ func (c *execCommand) InitDefaultHelpFlag() {}
 
 var (
 	execOverlays    []string
-	execKeep        bool
 	execWritableImg bool
 	execEnvSettings []string
 	execBaseImage   string
 	execBindPaths   []string
 	execFakeroot    bool
-	eReadOnly       bool
-	eNoAutoload     bool
 )
 
 var execCmd = &execCommand{
 	Command: cobra.Command{
-		Use:          "exec [flags] [overlays...] [--] [command...]",
-		Aliases:      []string{"e"},
+		Use:          "exec [flags] [overlays...] [command...]",
 		Short:        "Execute a command using overlays",
 		SilenceUsage: true,
 		Long: `Execute a command inside a container with specified overlays.
 
-The exec command can intelligently parse arguments to separate overlays from commands.
-Use -o/--overlay to explicitly specify overlays, or let the command parse them automatically.
+Use -o/--overlay to explicitly specify overlays. All positional arguments are treated as commands.
 
 Examples:
     # Run bash with samtools overlay
-    condatainer exec samtools/1.22
+    condatainer exec -o samtools/1.22
 
-    # Explicit overlay specification for standalone tools
-    condatainer exec -o samtools/1.22 samtools
+    # Run samtools command with overlay
+    condatainer exec -o samtools/1.22 samtools view file.bam
 
     # Use writable .img overlay
-    condatainer exec -w env.img bash
+    condatainer exec -w -o env.img bash
 
     # Set environment variables
-    condatainer exec --env MYVAR=value samtools/1.22 bash
+    condatainer exec --env MYVAR=value -o samtools/1.22 bash
 
-If you omit the command, it falls back to bash. When no -o/--overlay flags are provided,
-positional arguments are treated as overlays.`,
+    # Pass apptainer flags (use --flag=value format)
+    condatainer exec --nv --home=/custom -o samtools/1.22 python gpu_script.py
+
+If you omit the command, it falls back to bash.
+
+Note: Unknown flags must use --flag=value format (no space) for unambiguous parsing.`,
 		RunE: runExec,
 	},
 }
@@ -68,48 +67,26 @@ func init() {
 	rootCmd.AddCommand(&execCmd.Command)
 
 	execCmd.Flags().StringSliceVarP(&execOverlays, "overlay", "o", nil, "overlay file to mount (can be used multiple times)")
-	execCmd.Flags().BoolVarP(&execKeep, "keep", "k", false, "disable automatic command parsing to installed overlays")
 	execCmd.Flags().BoolVarP(&execWritableImg, "writable", "w", false, "mount .img overlays as writable (default: read-only)")
 	execCmd.Flags().BoolVar(&execWritableImg, "writable-img", false, "Alias for --writable")
 	execCmd.Flags().StringSliceVar(&execEnvSettings, "env", nil, "set environment variable 'KEY=VALUE' (can be used multiple times)")
 	execCmd.Flags().StringVarP(&execBaseImage, "base-image", "b", "", "base image to use instead of default")
 	execCmd.Flags().StringSliceVar(&execBindPaths, "bind", nil, "bind path 'HOST:CONTAINER' (can be used multiple times)")
-	execCmd.Flags().BoolVar(&execFakeroot, "fakeroot", false, "run container with fakeroot privileges")
-	execCmd.Flags().BoolVarP(&eReadOnly, "read-only", "r", false, "mount .img overlays as read-only (only applies when using the 'e' shortcut)")
-	execCmd.Flags().BoolVarP(&eNoAutoload, "no-autoload", "n", false, "disable autoloading 'env.img' from current directory (only applies to the 'e' shortcut)")
+	execCmd.Flags().BoolVarP(&execFakeroot, "fakeroot", "f", false, "run container with fakeroot privileges")
 
-	// --- NEW: Dynamic Completion Logic ---
+	// Completion
 	execCmd.RegisterFlagCompletionFunc("overlay", overlayFlagCompletion(true, true))
 	execCmd.RegisterFlagCompletionFunc("base-image", baseImageFlagCompletion())
-	// Positional args completion depends on which command is used
+	// For 'exec': use default file completion for positional args
 	execCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		// Check if called via 'e' alias
-		// During completion, os.Args contains the __complete command
-		// We need to check if 'e' appears in the args or command context
-		isShortcut := false
-
-		// Check os.Args for the actual command used
-		for i, arg := range os.Args {
-			if arg == "__complete" && i+1 < len(os.Args) && os.Args[i+1] == "e" {
-				isShortcut = true
-				break
-			}
-		}
-
-		if isShortcut {
-			// For 'e': complete overlays before '--', default after
-			if containsDashDash(args) {
-				return nil, cobra.ShellCompDirectiveDefault
-			}
-			return overlaySuggestions(true, true, toComplete)
-		}
-		// For 'exec': use default file completion for positional args
 		return nil, cobra.ShellCompDirectiveDefault
 	}
-	// -------------------------------------
 
 	// Stop flag parsing after the first positional argument so tool arguments (like --help) bypass exec.
 	execCmd.Flags().SetInterspersed(false)
+
+	// Allow unknown flags to pass through (for apptainer)
+	execCmd.FParseErrWhitelist.UnknownFlags = true
 }
 
 func runExec(cmd *cobra.Command, args []string) error {
@@ -121,67 +98,11 @@ func runExec(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	installedOverlays, err := exec.InstalledOverlays()
-	if err != nil {
-		return err
-	}
+	// Parse arguments - treat all positional args as commands
+	commandFinal, apptainerFlags := parseExecArgs(args)
 
-	overlayFinal := []string{}
-	commandFinal := []string{}
-	isShortcut := cmd.CalledAs() == "e"
-
-	if !isShortcut {
-		if !execKeep && len(execOverlays) == 0 && len(args) > 0 {
-			utils.PrintDebug("[EXEC] Parsing commands to separate overlays and command...")
-			commandStarted := false
-			for _, arg := range args {
-				if commandStarted {
-					commandFinal = append(commandFinal, arg)
-					continue
-				}
-				if arg == "--" {
-					commandStarted = true
-					continue
-				}
-				if utils.IsOverlay(arg) {
-					overlayFinal = append(overlayFinal, arg)
-					continue
-				}
-				if _, ok := installedOverlays[utils.NormalizeNameVersion(arg)]; ok {
-					utils.PrintWarning("Convert command %s to overlay", utils.StyleName(arg))
-					overlayFinal = append(overlayFinal, arg)
-					continue
-				}
-				commandStarted = true
-				commandFinal = append(commandFinal, arg)
-			}
-		} else {
-			commandFinal = args
-		}
-	} else {
-		overlayFinal, commandFinal = parseShortcutArgs(args)
-	}
-
-	overlayFinal = append(overlayFinal, execOverlays...)
-
-	if isShortcut {
-		hasImgOverlay := false
-		for _, overlay := range overlayFinal {
-			if utils.IsImg(overlay) {
-				hasImgOverlay = true
-				break
-			}
-		}
-		if !hasImgOverlay && !eNoAutoload {
-			if pwd, err := os.Getwd(); err == nil {
-				localEnvPath := filepath.Join(pwd, "env.img")
-				if utils.FileExists(localEnvPath) {
-					utils.PrintMessage("Autoload env.img at %s", utils.StylePath(localEnvPath))
-					overlayFinal = append(overlayFinal, localEnvPath)
-				}
-			}
-		}
-	}
+	// Use overlays from -o flag
+	overlayFinal := execOverlays
 
 	if len(commandFinal) == 0 {
 		commandFinal = []string{"bash"}
@@ -190,8 +111,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 	// Resolve user-specified base image if provided
 	var baseImageResolved string
 	if execBaseImage != "" {
-		// If it's an existing file path, use it directly
-		// Otherwise, try to resolve it as an overlay name
 		if utils.FileExists(execBaseImage) {
 			baseImageResolved = execBaseImage
 		} else {
@@ -199,7 +118,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 			if err == nil && len(resolvedBase) > 0 {
 				baseImageResolved = resolvedBase[0]
 			} else {
-				// Keep the original value (might be an absolute path)
 				baseImageResolved = execBaseImage
 			}
 		}
@@ -210,19 +128,16 @@ func runExec(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	writableImg := execWritableImg
-	if isShortcut {
-		writableImg = !eReadOnly
-	}
 	options := exec.Options{
-		Overlays:     resolvedOverlays,
-		Command:      commandFinal,
-		WritableImg:  writableImg,
-		EnvSettings:  execEnvSettings,
-		BindPaths:    execBindPaths,
-		Fakeroot:     execFakeroot,
-		BaseImage:    baseImageResolved, // Empty string triggers GetBaseImage() in ensureDefaults()
-		ApptainerBin: config.Global.ApptainerBin,
+		Overlays:       resolvedOverlays,
+		Command:        commandFinal,
+		WritableImg:    execWritableImg, // Default false, unless -w specified
+		EnvSettings:    execEnvSettings,
+		BindPaths:      execBindPaths,
+		ApptainerFlags: apptainerFlags, // Pass through unknown flags
+		Fakeroot:       execFakeroot,
+		BaseImage:      baseImageResolved,
+		ApptainerBin:   config.Global.ApptainerBin,
 	}
 
 	if err := exec.Run(cmd.Context(), options); err != nil {
@@ -369,59 +284,93 @@ func overlaySuggestions(includeData bool, includeImg bool, toComplete string) ([
 	return suggestions, cobra.ShellCompDirectiveNoFileComp
 }
 
-func parseShortcutArgs(args []string) ([]string, []string) {
-	overlays := []string{}
-	command := []string{}
+func parseExecArgs(args []string) (commands, apptainerFlags []string) {
+	// Parse os.Args directly to catch unknown flags that Cobra filtered out
+	// Find where "exec" appears in os.Args to know where our args start
+	execIdx := -1
+	for i, arg := range os.Args {
+		if arg == "exec" {
+			execIdx = i
+			break
+		}
+	}
+
+	if execIdx == -1 {
+		// Fallback to using args from cobra
+		commands = args
+		return commands, apptainerFlags
+	}
+
+	// Known condatainer flags (handled by cobra)
+	knownFlags := map[string]bool{
+		"--overlay": true, "-o": true,
+		"--writable": true, "--writable-img": true, "-w": true,
+		"--env":        true,
+		"--bind":       true,
+		"--base-image": true, "-b": true,
+		"--fakeroot": true, "-f": true,
+		"--debug": true,
+		"--local": true,
+		"--quiet": true, "-q": true,
+		"--yes": true, "-y": true,
+	}
+
+	// Parse from after "exec" in os.Args
 	commandStarted := false
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			commandStarted = true
-			continue
-		}
+	for i := execIdx + 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
+
+		// Once we hit the command, everything after is part of the command
 		if commandStarted {
-			command = append(command, arg)
+			commands = append(commands, arg)
 			continue
 		}
-		if arg == "-r" || arg == "--read-only" {
-			eReadOnly = true
-			continue
-		}
-		if arg == "-n" || arg == "--no-autoload" {
-			eNoAutoload = true
-			continue
-		}
-		if arg == "--fakeroot" {
-			execFakeroot = true
-			continue
-		}
-		if arg == "-b" || arg == "--base-image" {
-			if i+1 < len(args) {
-				execBaseImage = args[i+1]
-				i++
+
+		// Skip known flags (already handled by cobra)
+		if knownFlags[arg] || isKnownFlagWithEquals(knownFlags, arg) {
+			// Value flags (space-separated)
+			if knownFlags[arg] && needsValue(arg) && i+1 < len(os.Args) {
+				i++ // Skip value
 			}
 			continue
 		}
-		if strings.HasPrefix(arg, "-b=") {
-			execBaseImage = strings.TrimPrefix(arg, "-b=")
+
+		// Unknown flag → must use --flag=value format for apptainer pass-through
+		if strings.HasPrefix(arg, "-") {
+			if strings.Contains(arg, "=") {
+				// Has value: --home=/path
+				apptainerFlags = append(apptainerFlags, arg)
+			} else {
+				// No value: boolean flag like --nv
+				apptainerFlags = append(apptainerFlags, arg)
+			}
 			continue
 		}
-		if strings.HasPrefix(arg, "--base-image=") {
-			execBaseImage = strings.TrimPrefix(arg, "--base-image=")
-			continue
-		}
-		overlays = append(overlays, arg)
+
+		// First non-flag argument starts the command
+		commandStarted = true
+		commands = append(commands, arg)
 	}
-	return overlays, command
+
+	return commands, apptainerFlags
 }
 
-func containsDashDash(args []string) bool {
-	for _, arg := range args {
-		if arg == "--" {
-			return true
-		}
+func isKnownFlagWithEquals(knownFlags map[string]bool, arg string) bool {
+	if !strings.Contains(arg, "=") {
+		return false
 	}
-	return false
+	// Check if prefix matches a known flag
+	parts := strings.SplitN(arg, "=", 2)
+	return knownFlags[parts[0]]
+}
+
+func needsValue(flag string) bool {
+	valueFlags := map[string]bool{
+		"-o": true, "--overlay": true,
+		"--env": true, "--bind": true,
+		"-b": true, "--base-image": true,
+	}
+	return valueFlags[flag]
 }
 
 func localOverlaySuggestions(toComplete string, includeImg bool) []string {

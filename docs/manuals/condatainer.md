@@ -10,6 +10,7 @@
 - [Overlay](#overlay)
 - [Container Management (Avail, List, Remove)](#container-management-avail-list-remove)
 - [Exec](#exec)
+- [E (Quick Exec)](#e-quick-exec)
 - [Runtime (Check, Run)](#runtime-check-run)
 - [Info](#info)
 - [Helper](#helper)
@@ -32,7 +33,8 @@ Available Commands:
   completion  Generate shell completion script
   config      Manage condatainer configuration
   create      Create a new SquashFS overlay
-  exec        Execute a command using overlays
+  e           Quick shortcut for executing commands with overlays
+  exec        Execute a command using overlays (explicit -o flag)
   helper      Manage and run helper scripts
   info        Show information about a specific overlay
   list        List installed overlays matching search terms
@@ -501,59 +503,124 @@ condatainer remove [search_terms...]
 
 ## Exec
 
-Execute a command inside a containerized environment composed of one or more overlays.
+Execute a command inside a containerized environment using explicit overlay specifications.
 
 **Usage:**
 
 ```
-condatainer exec [flags] [overlays...] [--] [command...]
+condatainer exec [flags] [command...]
 ```
-
-**Aliases:** `e`
 
 **Options:**
 
 * `-o`, `--overlay [OVERLAY]`: Overlay file to mount (can be used multiple times).
 * `-w`, `--writable`: Mount `.img` overlays as writable (default: read-only).
-* `-r`, `--read-only`: Mount `.img` overlays as read-only (only for `e` shortcut).
-* `-k`, `--keep`: Disable automatic command parsing (don't convert commands to overlay names).
-* `-n`, `--no-autoload`: Disable autoloading `env.img` from current directory (only for `e` shortcut).
 * `-b`, `--base-image [PATH]`: Base image to use instead of default.
+* `-f`, `--fakeroot`: Run container with fakeroot privileges.
 * `--env [KEY=VALUE]`: Set environment variable inside the container (can be used multiple times).
 * `--bind [HOST:CONTAINER]`: Bind mount path into the container (can be used multiple times).
-* `--fakeroot`: Run container with fakeroot privileges.
-* COMMAND: The command to execute inside the container. If not provided, opens an interactive bash shell.
 
-**Special Features:**
+**Features:**
 
-* **Auto-detection:** Overlay names are automatically converted from command names (e.g., `samtools` → `samtools/1.22` if installed).
-* **Shortcut `e`:** The `e` alias provides intelligent parsing with automatic `env.img` loading from the current directory.
+* Use `-o/--overlay` to explicitly specify overlays.
+* All positional arguments are treated as commands.
+* Read-only by default for `.img` overlays (use `-w` for writable).
+* Defaults to bash if no command specified.
 
 **Environment Variables (inside container):**
 
 * `IN_CONDATAINER=1`: Set inside the container.
-* `CNT_CONDA_PREFIX`: Path to the `.img` default conda path, if `-w`, `--writable` is used.
+* `CNT_CONDA_PREFIX`: Path to the `.img` default conda path, if `-w/--writable` is used.
 
 **Examples:**
 
 ```bash
-# Run a command using a specific overlay
-condatainer exec -o bcftools/1.22 bcftools --version
+# Run bash with samtools overlay
+condatainer exec -o samtools/1.22
 
-# Run with overlay specified as positional argument
-condatainer exec samtools/1.22
+# Run samtools command with overlay
+condatainer exec -o samtools/1.22 samtools view file.bam
 
-# Run with writable overlay and custom environment variable
-condatainer exec -w env.img --env MYVAR=value bash
+# Use writable .img overlay
+condatainer exec -w -o env.img bash
 
-# Use the 'e' shortcut (auto-loads env.img if present)
-e samtools/1.22
+# Multiple overlays
+condatainer exec -o samtools/1.22 -o bcftools/1.20 bash
 
-# Disable autoload of env.img
-e --no-autoload samtools/1.22 bash
+# Set environment variables
+condatainer exec --env MYVAR=value -o samtools/1.22 bash
 
-# Run with fakeroot privileges
-condatainer exec --fakeroot env.img bash
+# Bind mount directories
+condatainer exec --bind /data:/mnt -o env.img bash
+
+# Run with fakeroot privileges (short flag)
+condatainer exec -f -o env.img bash
+
+# Pass apptainer flags (use --flag=value format)
+condatainer exec --nv --home=/custom -o samtools/1.22 python gpu_script.py
+```
+
+## E (Quick Exec)
+
+Quick shortcut for executing commands with overlays using simplified syntax.
+
+**Usage:**
+
+```
+condatainer e [flags] [overlays...] [--] [command...]
+```
+
+**Options:**
+
+* `-r`, `--read-only`: Mount `.img` overlays as read-only (default: writable).
+* `-n`, `--no-autoload`: Disable autoloading `env.img` from current directory.
+* `-b`, `--base-image [PATH]`: Base image to use instead of default.
+* `-f`, `--fakeroot`: Run container with fakeroot privileges.
+* `--env [KEY=VALUE]`: Set environment variable inside the container (can be used multiple times).
+* `--bind [HOST:CONTAINER]`: Bind mount path into the container (can be used multiple times).
+
+**Key Differences from `exec`:**
+
+* Overlays are positional arguments before `--`.
+* Commands go after `--`.
+* Writable by default (use `-r` for read-only).
+* Auto-loads `env.img` unless `-n` is specified.
+* Defaults to bash if no command specified.
+
+**Environment Variables (inside container):**
+
+* `IN_CONDATAINER=1`: Set inside the container.
+* `CNT_CONDA_PREFIX`: Path to the `.img` default conda path (writable by default).
+
+**Examples:**
+
+```bash
+# Auto-load env.img if present, run bash
+condatainer e
+
+# Multiple overlays
+condatainer e samtools/1.22 bcftools/1.20
+
+# Run specific command
+condatainer e samtools/1.22 -- samtools view file.bam
+
+# Read-only .img overlay
+condatainer e -r env.img
+
+# Disable env.img auto-loading
+condatainer e -n samtools/1.22
+
+# Set environment variables
+condatainer e --env MYVAR=value samtools/1.22
+
+# Bind mount directories
+condatainer e --bind /data:/mnt env.img
+
+# Run with fakeroot privileges (short flag)
+condatainer e -f env.img
+
+# Pass apptainer flags (use --flag=value format)
+condatainer e --home=/custom samtools/1.22
 ```
 
 ### Autoload and Shell Completion
@@ -608,7 +675,7 @@ Scripts can use special comment tags to declare dependencies and configure the c
 * `-b`, `--base-image PATH`: Use custom base image.
 * `--env KEY=VALUE`: Set environment variable.
 * `--bind HOST:CONTAINER`: Bind mount path.
-* `--fakeroot`: Run with fakeroot privileges.
+* `-f`, `--fakeroot`: Run with fakeroot privileges.
 
 **Script Example:**
 
@@ -617,6 +684,7 @@ Scripts can use special comment tags to declare dependencies and configure the c
 #DEP: bcftools/1.22
 #CNT --writable
 #CNT --env MYVAR=value
+#CNT -f
 bcftools view input.vcf | head
 ```
 

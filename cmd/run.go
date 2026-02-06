@@ -42,7 +42,7 @@ Supported #CNT arguments:
   -b, --base-image PATH  Use custom base image
   --env KEY=VALUE        Set environment variable
   --bind HOST:CONTAINER  Bind mount path
-  --fakeroot             Run with fakeroot privileges
+  -f, --fakeroot         Run with fakeroot privileges
 
 Dependencies will be automatically loaded, and missing ones can be auto-installed
 with the --auto-install flag.`,
@@ -342,7 +342,7 @@ func applyScriptArgs(scriptArgs []string) {
 			switch arg {
 			case "-w", "--writable", "--writable-img":
 				runWritableImg = true
-			case "--fakeroot":
+			case "-f", "--fakeroot":
 				runFakeroot = true
 			case "-b", "--base-image":
 				if i+1 < len(parts) {

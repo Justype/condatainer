@@ -8,14 +8,15 @@ import (
 
 // Options configures how CondaTainer executes a command inside an Apptainer container.
 type Options struct {
-	Overlays    []string
-	Command     []string
-	EnvSettings []string
-	BindPaths   []string
-	Fakeroot    bool
-	WritableImg bool
-	HideOutput  bool
-	HidePrompt  bool
+	Overlays       []string
+	Command        []string
+	EnvSettings    []string
+	BindPaths      []string
+	ApptainerFlags []string // Flags to pass directly to apptainer (e.g., --home=/path, --nv)
+	Fakeroot       bool
+	WritableImg    bool
+	HideOutput     bool
+	HidePrompt     bool
 
 	BaseImage    string
 	ApptainerBin string

@@ -192,7 +192,7 @@ func Run(ctx context.Context, options Options) error {
 		Env:        envList,
 		Fakeroot:   fakeroot,
 		HideOutput: options.HideOutput,
-		Additional: []string{},
+		Additional: options.ApptainerFlags, // Pass through user-provided apptainer flags
 	}
 
 	// Pass through stdin if requested (for interactive build scripts)

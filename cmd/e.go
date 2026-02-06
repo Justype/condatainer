@@ -1,0 +1,282 @@
+package cmd
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/Justype/condatainer/internal/apptainer"
+	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/utils"
+	"github.com/spf13/cobra"
+)
+
+var (
+	eReadOnly    bool
+	eNoAutoload  bool
+	eBaseImage   string
+	eFakeroot    bool
+	eEnvSettings []string
+	eBindPaths   []string
+)
+
+// eCmd is a quick shortcut for executing commands with overlays
+var eCmd = &cobra.Command{
+	Use:   "e [overlays...] -- [command...]",
+	Short: "Quick shortcut for executing with overlays",
+	Long: `Quick shortcut for executing commands with overlays.
+
+Overlays and flags go before --, commands after --.
+- Writable by default (use -r for read-only)
+- Auto-loads env.img unless -n is specified
+- Defaults to bash if no command specified
+
+Examples:
+    # Auto-load env.img if present, run bash
+    condatainer e
+
+    # Multiple overlays
+    condatainer e samtools/1.22 bcftools/1.20
+
+    # Run specific command
+    condatainer e samtools/1.22 -- samtools view file.bam
+
+    # Read-only .img overlay
+    condatainer e -r env.img
+
+    # Disable env.img auto-loading
+    condatainer e -n samtools/1.22
+
+    # Pass apptainer flags (use --flag=value format)
+    condatainer e --home=/custom samtools/1.22
+
+Note: Apptainer flags must use --flag=value format (no space).`,
+	SilenceUsage: true,
+	RunE:         runE,
+}
+
+func init() {
+	rootCmd.AddCommand(eCmd)
+
+	eCmd.Flags().BoolVarP(&eReadOnly, "read-only", "r", false, "Mount .img overlays as read-only (default: writable)")
+	eCmd.Flags().BoolVarP(&eNoAutoload, "no-autoload", "n", false, "Disable auto-loading env.img from current directory")
+	eCmd.Flags().StringVarP(&eBaseImage, "base-image", "b", "", "Base image to use instead of default")
+	eCmd.Flags().BoolVarP(&eFakeroot, "fakeroot", "f", false, "Run container with fakeroot privileges")
+	eCmd.Flags().StringSliceVar(&eEnvSettings, "env", nil, "Set environment variable 'KEY=VALUE' (can be used multiple times)")
+	eCmd.Flags().StringSliceVar(&eBindPaths, "bind", nil, "Bind path 'HOST:CONTAINER' (can be used multiple times)")
+
+	// Stop flag parsing after first positional arg
+	eCmd.Flags().SetInterspersed(false)
+
+	// Allow unknown flags to pass through (for apptainer)
+	eCmd.FParseErrWhitelist.UnknownFlags = true
+
+	// Completion
+	eCmd.RegisterFlagCompletionFunc("base-image", baseImageFlagCompletion())
+	eCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		// During completion, check if -- appears in os.Args
+		// This is more reliable than checking the processed args array
+		for _, arg := range os.Args {
+			if arg == "--" {
+				// After --, use default file completion
+				return nil, cobra.ShellCompDirectiveDefault
+			}
+		}
+		// Before --, complete overlays
+		return overlaySuggestions(true, true, toComplete)
+	}
+}
+
+func runE(cmd *cobra.Command, args []string) error {
+	if err := ensureBaseImage(cmd.Context()); err != nil {
+		return err
+	}
+
+	// STRICT parsing: everything before -- is overlay/flag, after is command
+	overlays, commands, apptainerFlags, err := parseEArgs(args)
+	if err != nil {
+		return err
+	}
+
+	// Auto-load env.img if not disabled and no .img in overlays
+	if !eNoAutoload {
+		hasImgOverlay := false
+		for _, overlay := range overlays {
+			if utils.IsImg(overlay) {
+				hasImgOverlay = true
+				break
+			}
+		}
+		if !hasImgOverlay {
+			if pwd, err := os.Getwd(); err == nil {
+				localEnvPath := filepath.Join(pwd, "env.img")
+				if utils.FileExists(localEnvPath) {
+					utils.PrintMessage("Autoload env.img at %s", utils.StylePath(localEnvPath))
+					overlays = append(overlays, localEnvPath)
+				}
+			}
+		}
+	}
+
+	if len(commands) == 0 {
+		commands = []string{"bash"}
+	}
+
+	// Resolve base image if provided
+	var baseImageResolved string
+	if eBaseImage != "" {
+		if utils.FileExists(eBaseImage) {
+			baseImageResolved = eBaseImage
+		} else {
+			resolvedBase, err := exec.ResolveOverlayPaths([]string{eBaseImage})
+			if err == nil && len(resolvedBase) > 0 {
+				baseImageResolved = resolvedBase[0]
+			} else {
+				baseImageResolved = eBaseImage
+			}
+		}
+	}
+
+	// Resolve overlays
+	resolvedOverlays, err := exec.ResolveOverlayPaths(overlays)
+	if err != nil {
+		return err
+	}
+
+	// Build options
+	options := exec.Options{
+		Overlays:       resolvedOverlays,
+		Command:        commands,
+		WritableImg:    !eReadOnly, // Default writable unless -r specified
+		EnvSettings:    eEnvSettings,
+		BindPaths:      eBindPaths,
+		ApptainerFlags: apptainerFlags,
+		Fakeroot:       eFakeroot,
+		BaseImage:      baseImageResolved,
+		ApptainerBin:   config.Global.ApptainerBin,
+	}
+
+	if err := exec.Run(cmd.Context(), options); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+			return nil
+		}
+		// Propagate exit code from container command
+		if appErr, ok := err.(*apptainer.ApptainerError); ok {
+			if code := appErr.ExitCode(); code >= 0 {
+				os.Exit(code)
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+func parseEArgs(args []string) (overlays, commands, apptainerFlags []string, err error) {
+	// Parse os.Args directly to catch unknown flags that Cobra filtered out
+	// Find where "e" appears in os.Args
+	eIdx := -1
+	for i, arg := range os.Args {
+		if arg == "e" {
+			eIdx = i
+			break
+		}
+	}
+
+	if eIdx == -1 {
+		// Fallback: no os.Args parsing, just return error if no --
+		hasDashDash := false
+		for _, arg := range args {
+			if arg == "--" {
+				hasDashDash = true
+				break
+			}
+		}
+		if !hasDashDash && len(args) > 0 {
+			return nil, nil, nil, fmt.Errorf(
+				"the 'e' command requires '--' separator between overlays and command\n  Example: condatainer e %s -- bash\n  Hint: Everything before -- is overlay/flags, everything after is command",
+				args[0],
+			)
+		}
+		return overlays, commands, apptainerFlags, nil
+	}
+
+	knownFlags := map[string]bool{
+		"--read-only": true, "-r": true,
+		"--no-autoload": true, "-n": true,
+		"--env":        true,
+		"--bind":       true,
+		"--base-image": true, "-b": true,
+		"--fakeroot": true, "-f": true,
+		"--debug": true,
+		"--local": true,
+		"--quiet": true, "-q": true,
+		"--yes": true, "-y": true,
+	}
+
+	hasDashDash := false
+	commandStarted := false
+
+	for i := eIdx + 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
+
+		if arg == "--" {
+			hasDashDash = true
+			commandStarted = true
+			continue
+		}
+
+		if commandStarted {
+			// Everything after -- is command
+			commands = append(commands, arg)
+			continue
+		}
+
+		// Before -- (overlay/flag section)
+
+		// Skip known flags (already handled by cobra)
+		if knownFlags[arg] || isKnownFlagWithEqualsE(knownFlags, arg) {
+			// Check if flag needs value
+			if (arg == "-b" || arg == "--base-image" || arg == "--env" || arg == "--bind") && i+1 < len(os.Args) {
+				i++ // Skip value
+			}
+			continue
+		}
+
+		// Unknown flag → must use --flag=value format
+		if strings.HasPrefix(arg, "-") {
+			if strings.Contains(arg, "=") {
+				// Has value: --home=/path
+				apptainerFlags = append(apptainerFlags, arg)
+			} else {
+				// No value: boolean flag like --nv
+				apptainerFlags = append(apptainerFlags, arg)
+			}
+			continue
+		}
+
+		// Not a flag, before -- → overlay
+		overlays = append(overlays, arg)
+	}
+
+	// HELPFUL MIGRATION ERROR: Check if user forgot --
+	if !hasDashDash && len(overlays) > 0 && len(commands) == 0 && len(apptainerFlags) == 0 {
+		return nil, nil, nil, fmt.Errorf(
+			"the 'e' command requires '--' separator between overlays and command\n  Example: condatainer e %s --\n  Hint: Everything before -- is overlay/flags, everything after is command (defaults to bash)",
+			overlays[0],
+		)
+	}
+
+	return overlays, commands, apptainerFlags, nil
+}
+
+func isKnownFlagWithEqualsE(knownFlags map[string]bool, arg string) bool {
+	if !strings.Contains(arg, "=") {
+		return false
+	}
+	parts := strings.SplitN(arg, "=", 2)
+	return knownFlags[parts[0]]
+}
