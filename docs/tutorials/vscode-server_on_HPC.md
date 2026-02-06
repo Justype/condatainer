@@ -3,7 +3,11 @@
 Run following commands to start VS Code Server on your HPC system:
 
 ```bash
+# download/update helper scripts
 condatainer helper -u
+# create a 20G writable overlay (optional but recommended)
+condatainer o -s 20g
+# start vscode-server
 condatainer helper vscode-server
 ```
 

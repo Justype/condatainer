@@ -3,7 +3,11 @@
 Simply run the following commands to set up and run RStudio Server on your remote server (without a job scheduler):
 
 ```bash
+# download/update helper scripts
 condatainer --local helper -u
+# create a 30G overlay to store R packages and conda env
+condatainer o -s 30g
+# start RStudio Server
 condatainer helper rstudio-server
 ```
 
@@ -195,7 +199,7 @@ If `*.Rproj` file does not exist in the current working directory, **CondaTainer
 - A `*.Rproj` file with default settings.
 - A `.Rprofile` file to set up Posit Public Package Manager (P3M) CRAN and Bioconductor repositories.
 
-See [Rprofile](https://github.com/Justype/condatainer/blob/main/helpers/slurm/.Rprofile) for more details. At the end, it will call `set_repository_options()` for you. So you can directly download binary packages from P3M.
+See [Rprofile](https://github.com/Justype/condatainer/blob/main/helpers/slurm/.Rprofile) for more details. At the end, it will call `.set_repository_options()` for you. So you can directly download binary packages from P3M.
 
 If `*.Rproj` file already exists, `.Rprofile` will not be created or modified. You need to set up the repositories yourself if needed.
 
@@ -204,7 +208,7 @@ So if you do not want to use Posit repositories, you can remove or edit the `.Rp
 If you only use CRAN packages, you can change the function in the `.Rprofile` to:
 
 ```R
-set_repository_options(repo = "cran", latest_cran = TRUE)
+.set_repository_options(repo = "cran", latest_cran = TRUE)
 ```
 
 But if you plan to use Bioconductor packages, please keep the default settings to ensure compatibility.

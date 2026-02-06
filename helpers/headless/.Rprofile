@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Set CRAN repo to Posit Public Package Manager (P3M) binary repos for supported distros
-set_repository_options <- function(repo = c("bioconductor", "cran"), bioc_version = NULL, latest_cran = FALSE) {
+.set_repository_options <- function(repo = c("bioconductor", "cran"), bioc_version = NULL, latest_cran = FALSE) {
   repo <- match.arg(repo)
   
   # Get OS information
@@ -171,4 +171,4 @@ set_repository_options <- function(repo = c("bioconductor", "cran"), bioc_versio
   invisible(repo_url)
 }
 
-set_repository_options()
+.set_repository_options()

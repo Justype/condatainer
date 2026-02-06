@@ -3,7 +3,11 @@
 Run following commands to start `code-server` on your HPC system:
 
 ```bash
+# download/update helper scripts
 condatainer helper -u
+# create a 20G writable overlay (optional but recommended)
+condatainer o -s 20g
+# start code-server
 condatainer helper code-server
 ```
 

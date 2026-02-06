@@ -3,7 +3,15 @@
 Simply run the following commands to set up and run RStudio Server with Conda-managed R on your HPC system:
 
 ```bash
+# download/update helper scripts
 condatainer helper -u
+# create a 30G overlay to store conda env
+condatainer o -s 30g
+# install R in the conda env
+condatainer e -- mm-install r-base=4.4 r-tidyverse -y
+# pin R version to avoid accidental updates
+condatainer e -- mm-pin r-base
+# start RStudio Server
 condatainer helper rstudio-server-conda
 ```
 
