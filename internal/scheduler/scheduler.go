@@ -17,7 +17,7 @@ const (
 	SchedulerUnknown SchedulerType = ""
 	SchedulerSLURM   SchedulerType = "SLURM"
 	SchedulerPBS     SchedulerType = "PBS"
-	SchedulerLSF     SchedulerType = "LSF" // Future support
+	SchedulerLSF     SchedulerType = "LSF"
 )
 
 // SchedulerInfo holds information about the detected scheduler
@@ -206,6 +206,8 @@ func DetectSchedulerWithBinary(preferredBin string) (Scheduler, error) {
 		switch baseName {
 		case "qsub", "qdel", "qstat":
 			return NewPbsSchedulerWithBinary(preferredBin)
+		case "bsub", "bjobs", "bkill":
+			return NewLsfSchedulerWithBinary(preferredBin)
 		default:
 			// Default to SLURM for sbatch and any other binary
 			return NewSlurmSchedulerWithBinary(preferredBin)
@@ -222,6 +224,12 @@ func DetectSchedulerWithBinary(preferredBin string) (Scheduler, error) {
 	pbs, pbsErr := NewPbsScheduler()
 	if pbsErr == nil {
 		return pbs, nil
+	}
+
+	// Try LSF via PATH
+	lsf, lsfErr := NewLsfScheduler()
+	if lsfErr == nil {
+		return lsf, nil
 	}
 
 	return nil, ErrSchedulerNotFound
@@ -430,7 +438,7 @@ func ParseScriptAny(scriptPath string) (*ParsedScript, error) {
 	}
 
 	// Add other schedulers
-	allTypes := []SchedulerType{SchedulerSLURM, SchedulerPBS}
+	allTypes := []SchedulerType{SchedulerSLURM, SchedulerPBS, SchedulerLSF}
 	for _, st := range allTypes {
 		if st != currentType {
 			tryOrder = append(tryOrder, st)
@@ -448,8 +456,7 @@ func ParseScriptAny(scriptPath string) (*ParsedScript, error) {
 		case SchedulerPBS:
 			specs, err = TryParsePbsScript(scriptPath)
 		case SchedulerLSF:
-			// LSF parsing not yet implemented
-			continue
+			specs, err = TryParseLsfScript(scriptPath)
 		default:
 			continue
 		}
