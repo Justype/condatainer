@@ -9,13 +9,18 @@
 
 install_app() {
     # By default, $target_dir and $tmp_dir are created and we are now in $tmp_dir
-    print_stderr "Downloading ${YELLOW}${app_name_version}${NC} binaries"
+
+    # TYPE 1: tar.gz app
+    # If the app is distributed as a tar.gz file, use this
+    print_stderr "Downloading ${YELLOW}${app_name_version}${NC}"
     url=""
     wget -nv -O "${app_name}_${version}.tar.gz" "$url"
 
     print_stderr "Extracting ${YELLOW}${app_name_version}${NC}"
     tar_xf_pigz "${app_name}_${version}.tar.gz" -C "$target_dir" --strip-components=1
 
+
+    # TYPE 2: single binary app
     # If the app is only a single binary, use this
     mkdir -p "$target_dir/bin" # modules/apps/name/version/bin
     print_stderr "Downloading ${YELLOW}${app_name_version}${NC} binaries"
