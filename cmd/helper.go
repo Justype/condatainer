@@ -22,6 +22,12 @@ var (
 	helperUpdate bool
 )
 
+// supportedSchedulerTypes lists scheduler types supported for helper scripts.
+// Add new supported scheduler types to this slice to enable additional helper categories.
+var supportedSchedulerTypes = []scheduler.SchedulerType{
+	scheduler.SchedulerSLURM,
+}
+
 var helperCmd = &cobra.Command{
 	Use:   "helper [flags] [script-name] [script-args...]",
 	Short: "Manage and run helper scripts",
@@ -204,19 +210,37 @@ func updateHelperScripts(args []string, helperScriptsDir string) error {
 	// Choose category based on scheduler availability
 	category := "headless"
 	if config.Global.SubmitJob {
-		if sched, err := scheduler.DetectSchedulerWithBinary(config.Global.SchedulerBin); err == nil {
-			info := sched.GetInfo()
-			if info.Available && !info.InJob {
-				category = "slurm"
+		// If user requested submission, ensure a supported scheduler is available
+		sched, err := scheduler.DetectSchedulerWithBinary(config.Global.SchedulerBin)
+		if err != nil {
+			return fmt.Errorf("submit requested but no scheduler found: %v", err)
+		}
+
+		info := sched.GetInfo()
+		if !info.Available || info.InJob {
+			return fmt.Errorf("scheduler is not available for submission (available=%v, in_job=%v)", info.Available, info.InJob)
+		}
+
+		matched := false
+		for _, st := range supportedSchedulerTypes {
+			if info.Type == string(st) {
+				category = strings.ToLower(string(st))
+				matched = true
+				break
 			}
+		}
+
+		if !matched {
+			return fmt.Errorf("unsupported scheduler type '%s'", info.Type)
 		}
 	}
 
-	utils.PrintDebug("Helper category selected: %s", category)
+	category_styled := utils.StyleName(category)
+	utils.PrintDebug("Helper category selected: %s", category_styled)
 
 	entries, ok := metadata[category]
 	if !ok {
-		return fmt.Errorf("no helper scripts found for category '%s'", category)
+		return fmt.Errorf("no helper scripts found for category '%s'", category_styled)
 	}
 
 	// Create helper scripts directory
@@ -230,10 +254,10 @@ func updateHelperScripts(args []string, helperScriptsDir string) error {
 		if entry, ok := entries[scriptName]; ok {
 			entries = map[string]HelperScriptEntry{scriptName: entry}
 		} else {
-			return fmt.Errorf("helper script '%s' not found in remote metadata for category '%s'", scriptName, category)
+			return fmt.Errorf("helper script '%s' not found in remote metadata for category '%s'", scriptName, category_styled)
 		}
 	} else {
-		utils.PrintMessage("Updating all helper scripts for %s...", category)
+		utils.PrintMessage("Updating all helper scripts for %s...", category_styled)
 	}
 
 	// Download each helper script
