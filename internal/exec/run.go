@@ -94,6 +94,7 @@ func Run(ctx context.Context, options Options) error {
 		fmt.Sprintf("PATH=%s", pathEnv),
 		"LC_ALL=C.UTF-8",
 		"LANG=C.UTF-8",
+		"CURL_CA_BUNDLE=", // Unset CA bundle to avoid host ENV interference
 		fmt.Sprintf("PS1=%s \\[\\e[0;34m\\]\\w\\[\\e[0m\\]> ", ps1Prefix),
 		fmt.Sprintf("IN_CONDATAINER=%d", layer),
 	)
