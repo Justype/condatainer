@@ -32,35 +32,27 @@ var completionCmd = &cobra.Command{
 		detected := detectShell()
 		return `Generate shell completion script for condatainer.
 
-If no shell is specified, ` + detected + ` will be used (auto-detected from $SHELL).
+If no shell is specified, ` + detected + ` will be used (auto-detected from $SHELL).`
+	}(),
+	Example: `  Bash:
+  # Current session
+  source <(condatainer completion bash)
+  # All sessions (install once)
+  condatainer completion bash > /etc/bash_completion.d/condatainer
 
-To load completions:
-
-Bash:
-  # Current session:
-  $ source <(condatainer completion bash)
-
-  # All sessions (install once):
-  $ condatainer completion bash > /etc/bash_completion.d/condatainer
-
-Zsh:
-  # Current session:
-  $ source <(condatainer completion zsh)
-
-  # All sessions (install once):
-  $ condatainer completion zsh > "${fpath[1]}/_condatainer"
-  
+  Zsh:
+  # Current session
+  source <(condatainer completion zsh)
+  # All sessions (install once)
+  condatainer completion zsh > "${fpath[1]}/_condatainer"
   # Note: If compinit is not enabled, add to ~/.zshrc:
   # autoload -U compinit; compinit
 
-Fish:
-  # Current session:
-  $ condatainer completion fish | source
-
-  # All sessions (install once):
-  $ condatainer completion fish > ~/.config/fish/completions/condatainer.fish
-`
-	}(),
+  Fish:
+  # Current session
+  condatainer completion fish | source
+  # All sessions (install once)
+  condatainer completion fish > ~/.config/fish/completions/condatainer.fish`,
 	DisableFlagsInUseLine: true,
 	ValidArgs:             []string{"bash", "zsh", "fish"},
 	Args:                  cobra.MatchAll(cobra.MaximumNArgs(1), cobra.OnlyValidArgs),

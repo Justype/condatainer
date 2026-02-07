@@ -50,21 +50,17 @@ var instanceStartCmd = &cobra.Command{
 	Long: `Start a named instance with specified overlays.
 
 The instance runs in the background and can be accessed later via 'instance exec'.
-
 Use -o/--overlay to explicitly specify overlays.
 
-Examples:
-    # Start with multiple overlays
-    condatainer instance start -o samtools/1.22 -o bcftools/1.22 myinstance
+Note: Additional Apptainer flags must use --flag=value format (no space)`,
+	Example: `  # Start with multiple overlays
+  condatainer instance start -o samtools/1.22 -o bcftools/1.22 myinstance
 
-    # Start with writable .img overlay
-    condatainer instance start -w -o env.img myinstance
+  # Start with writable .img overlay
+  condatainer instance start -w -o env.img myinstance
 
-    # Pass apptainer flags
-    condatainer instance start --home=/ext3/home -o samtools/1.22 myinstance
-
-Note: 
-- Unknown flags must use --flag=value format (no space) for unambiguous parsing`,
+  # Pass apptainer flags
+  condatainer instance start --home=/ext3/home -o samtools/1.22 myinstance`,
 	SilenceUsage: true,
 	RunE:         runInstanceStart,
 }
@@ -79,22 +75,20 @@ var instanceStopTimeout int
 var instanceStopCmd = &cobra.Command{
 	Use:   "stop [flags] [name]",
 	Short: "Stop a named instance of a given container image",
-	Long: `Stop a running instance.
+	Long:  `Stop a running instance.`,
+	Example: `  # Stop a specific instance
+  condatainer instance stop myinstance
+  condatainer instance stop mysql*
+  condatainer instance stop --all
 
-Examples:
-    # Stop a specific instance
-    condatainer instance stop myinstance
-    condatainer instance stop mysql*
-    condatainer instance stop --all
+  # Force stop
+  condatainer instance stop --force myinstance
 
-    # Force stop
-    condatainer instance stop --force myinstance
+  # Send SIGTERM (SIGTERM, TERM, and 15 are all valid)
+  condatainer instance stop --signal TERM myinstance
 
-    # Send SIGTERM (SIGTERM, TERM, and 15 are all valid)
-    condatainer instance stop --signal TERM myinstance
-
-    # Custom timeout
-    condatainer instance stop --timeout 30 myinstance`,
+  # Custom timeout
+  condatainer instance stop --timeout 30 myinstance`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Validate arguments
@@ -163,17 +157,15 @@ var instanceExecCmd = &cobra.Command{
 
 The instance must be already running (started with 'instance start').
 
-Examples:
-    # Run a command in an instance
-    condatainer instance exec myinstance samtools view file.bam
+Note: Additional Apptainer flags must use --flag=value format (no space)`,
+	Example: `  # Run a command in an instance
+  condatainer instance exec myinstance samtools view file.bam
 
-    # Set additional environment variables
-    condatainer instance exec --env VAR1=val1 --env VAR2=val2 myinstance bash
+  # Set additional environment variables
+  condatainer instance exec --env VAR1=val1 --env VAR2=val2 myinstance bash
 
-    # Pass apptainer flags (use --flag=value format)
-    condatainer instance exec --home=/custom myinstance bash
-
-Note: Unknown flags must use --flag=value format (no space) for unambiguous parsing.`,
+  # Pass apptainer flags
+  condatainer instance exec --home=/custom myinstance bash`,
 	SilenceUsage: true,
 	RunE:         runInstanceExec,
 }

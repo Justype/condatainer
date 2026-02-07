@@ -28,22 +28,15 @@ func Exec(ctx context.Context, imagePath string, command []string, opts *ExecOpt
 
 	args := []string{"exec"}
 
-	// Add bind mounts (caller should have already deduplicated)
 	for _, bind := range opts.Bind {
 		args = append(args, "--bind", bind)
 	}
-
-	// Add overlays
 	for _, overlay := range opts.Overlay {
 		args = append(args, "--overlay", overlay)
 	}
-
-	// Add fakeroot flag
 	if opts.Fakeroot {
 		args = append(args, "--fakeroot")
 	}
-
-	// Add environment variables
 	for _, env := range opts.Env {
 		args = append(args, "--env", env)
 	}
@@ -51,10 +44,7 @@ func Exec(ctx context.Context, imagePath string, command []string, opts *ExecOpt
 	// Add additional flags (caller should have already included GPU flags if needed)
 	args = append(args, opts.Additional...)
 
-	// Add image path
 	args = append(args, imagePath)
-
-	// Add command
 	args = append(args, command...)
 
 	utils.PrintDebug("Executing in container %s: %s",

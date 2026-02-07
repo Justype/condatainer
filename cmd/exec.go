@@ -32,27 +32,20 @@ var execCmd = &execCommand{
 		SilenceUsage: true,
 		Long: `Execute a command inside a container with specified overlays.
 
-Use -o/--overlay to explicitly specify overlays. All positional arguments are treated as commands.
+- Use -o/--overlay to explicitly specify overlays. All positional arguments are treated as commands.
+- If command is omitted, it defaults to bash.
+- Additional Apptainer flags can be passed using --flag=value format (no space)`,
+		Example: `  # Run samtools command with overlay
+  condatainer exec -o samtools/1.22 samtools view file.bam
 
-Examples:
-    # Run bash with samtools overlay
-    condatainer exec -o samtools/1.22
+  # Use writable .img overlay
+  condatainer exec -w -o env.img
 
-    # Run samtools command with overlay
-    condatainer exec -o samtools/1.22 samtools view file.bam
+  # Set environment variables
+  condatainer exec --env MYVAR=value -o samtools/1.22 bash
 
-    # Use writable .img overlay
-    condatainer exec -w -o env.img bash
-
-    # Set environment variables
-    condatainer exec --env MYVAR=value -o samtools/1.22 bash
-
-    # Pass apptainer flags (use --flag=value format)
-    condatainer exec --nv --home=/custom -o samtools/1.22 python gpu_script.py
-
-If you omit the command, it falls back to bash.
-
-Note: Unknown flags must use --flag=value format (no space) for unambiguous parsing.`,
+  # Pass apptainer flags (use --flag=value format)
+  condatainer exec --nv --home=/custom -o samtools/1.22 python gpu_script.py`,
 		RunE: runExec,
 	},
 }

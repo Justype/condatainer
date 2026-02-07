@@ -296,10 +296,8 @@ Shows:
 var configGetCmd = &cobra.Command{
 	Use:   "get <key>",
 	Short: "Get a configuration value",
-	Long: `Get a specific configuration value.
-
-Examples:
-  condatainer config get apptainer_bin
+	Long:  `Get a specific configuration value.`,
+	Example: `  condatainer config get apptainer_bin
   condatainer config get build.ncpus
   condatainer config get submit_job`,
 	Args:              cobra.ExactArgs(1),
@@ -320,16 +318,14 @@ var configSetCmd = &cobra.Command{
 	Short: "Set a configuration value",
 	Long: `Set a configuration value and save to config file.
 
-Examples:
-  condatainer config set apptainer_bin /usr/bin/apptainer
-  condatainer config set build.ncpus 8
-  condatainer config set build.time 4h
-  condatainer config set build.time 02:00:00
-  condatainer config set submit_job false
-
 Time duration format (for build.time):
   Go style:  2h, 30m, 1h30m, 90s
   HPC style: 02:00:00, 2:30:00, 1:30 (HH:MM:SS or HH:MM)`,
+	Example: `  condatainer config set apptainer_bin /usr/bin/apptainer
+  condatainer config set build.ncpus 8
+  condatainer config set build.time 4h
+  condatainer config set build.time 02:00:00
+  condatainer config set submit_job false`,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: configKeysCompletion,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -406,6 +402,9 @@ By default, the location is chosen based on the installation:
   - If the executable is in a dedicated folder (e.g., /apps/condatainer/bin/),
     the config is created in the parent folder (portable mode).
   - Otherwise, it uses the user's config directory.`,
+	Example: `  condatainer config init              # Create config with smart default location
+  condatainer config init -l user      # Force user config location
+  condatainer config init -l portable  # Force portable config location`,
 	Run: func(cmd *cobra.Command, args []string) {
 		var configPath string
 		var err error

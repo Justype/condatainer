@@ -21,9 +21,14 @@ var (
 )
 
 var listCmd = &cobra.Command{
-	Use:          "list [terms...]",
-	Aliases:      []string{"ls"},
-	Short:        "List installed overlays matching search terms",
+	Use:     "list [terms...]",
+	Aliases: []string{"ls"},
+	Short:   "List installed overlays matching search terms",
+	Long:    `List installed overlays with optional search filtering.`,
+	Example: `  condatainer list              # List all installed overlays
+  condatainer list samtools     # Search for samtools
+  condatainer list sam 1.22     # Search with multiple terms (AND logic)
+  condatainer list -e python    # Exact match only`,
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runList,
 }

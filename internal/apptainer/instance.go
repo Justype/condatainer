@@ -22,17 +22,12 @@ func InstanceStart(ctx context.Context, baseImage string, instanceName string, o
 
 	args := []string{"instance", "start"}
 
-	// Add fakeroot flag
 	if opts.Fakeroot {
 		args = append(args, "--fakeroot")
 	}
-
-	// Add bind mounts
 	for _, bind := range opts.Bind {
 		args = append(args, "--bind", bind)
 	}
-
-	// Add overlays
 	for _, overlay := range opts.Overlay {
 		args = append(args, "--overlay", overlay)
 	}

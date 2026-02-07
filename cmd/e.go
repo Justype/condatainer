@@ -33,29 +33,21 @@ var eCmd = &cobra.Command{
 Overlays and flags go before --, commands go after --.
 If no -- is provided, all positional arguments are treated as overlays.
 - Writable by default (use -r for read-only)
-- Auto-loads env.img (unless -n is specified)
+- Auto-loads env.img (unless a different .img is provided or -n is specified)
 - Defaults to bash if no command specified
 
-Examples:
-    # Auto-load env.img if present, run bash
-    condatainer e
+Note: Additional Apptainer flags must use --flag=value format (no space)`,
+	Example: `  condatainer e               # Auto-load env.img if present, run bash
+  condatainer e testing.img   # Use a specific writable overlay
 
-    # Multiple overlays, run bash
-    condatainer e samtools/1.22 bcftools/1.20
+  # Multiple overlays, run bash (auto loads env.img)
+  condatainer e samtools/1.22 bcftools/1.20
 
-    # Run specific command (requires --)
-    condatainer e samtools/1.22 -- samtools view file.bam
+  # Run specific command (requires --)
+  condatainer e samtools/1.22 -- samtools view file.bam
 
-    # Read-only .img overlay
-    condatainer e -r env.img
-
-    # Disable env.img auto-loading
-    condatainer e -n samtools/1.22
-
-    # Pass apptainer flags (use --flag=value format)
-	condatainer e --home=/custom samtools/1.22
-
-Note: Apptainer flags must use --flag=value format (no space).`,
+  # Pass apptainer flags
+  condatainer e --home=/custom samtools/1.22`,
 	SilenceUsage: true,
 	RunE:         runE,
 }

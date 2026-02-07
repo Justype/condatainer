@@ -12,6 +12,7 @@
 - [Exec](#exec)
 - [E (Quick Exec)](#e-quick-exec)
 - [Runtime (Check, Run)](#runtime-check-run)
+- [Instance](#instance)
 - [Info](#info)
 - [Helper](#helper)
 - [Config](#config)
@@ -37,6 +38,7 @@ Available Commands:
   exec        Execute a command using overlays (explicit -o flag)
   helper      Manage and run helper scripts
   info        Show information about a specific overlay
+  instance    Manage Apptainer instances
   list        List installed overlays matching search terms
   o           Shortcut for 'overlay create'
   overlay     Manage persistent overlay images (create, resize, check, info)
@@ -627,6 +629,194 @@ condatainer e --home=/custom samtools/1.22
 
 - **Autoload local env images:** When running `condatainer e` in a directory that contains `env.img`, **CondaTainer** will automatically mount it into the container and open an interactive shell. Use `-n` / `--no-autoload` to disable this behavior.
 - **Enable shell completion:** Generate and install the completion script for your shell. See the [Completion](#completion) section for details.
+
+## Instance
+
+Manage persistent Apptainer instances that run in the background. Instances are useful for long-running services or when you need to execute multiple commands in the same containerized environment without restarting the container each time.
+
+**Key Features:**
+
+* Persistent background containers
+* State preservation (environment variables, overlays, bind paths)
+* Multiple instances with unique names
+* Pattern-based operations (wildcards supported)
+
+### Instance Start
+
+Start a named instance with specified overlays.
+
+**Usage:**
+
+```
+condatainer instance start [flags] <name>
+```
+
+**Options:**
+
+* `-o`, `--overlay [OVERLAY]`: Overlay file to mount (can be used multiple times)
+* `-w`, `--writable`: Mount `.img` overlays as writable (default: read-only)
+* `-b`, `--base-image [PATH]`: Base image to use instead of default
+* `-f`, `--fakeroot`: Run instance with fakeroot privileges
+* `--env [KEY=VALUE]`: Set environment variable (can be used multiple times)
+* `--bind [HOST:CONTAINER]`: Bind mount path (can be used multiple times)
+
+**Examples:**
+
+```bash
+# Start instance with multiple overlays
+condatainer instance start -o samtools/1.22 -o bcftools/1.22 myinstance
+
+# Start with writable .img overlay
+condatainer instance start -w -o env.img data_analysis
+
+# Pass apptainer flags
+condatainer instance start --home=/custom -o samtools/1.22 pipeline1
+```
+
+**State Preservation:**
+
+When you start an instance, CondaTainer saves the instance configuration (overlays, environment variables, bind paths) to a state file. This allows `instance exec` to automatically apply the same environment when executing commands in the instance.
+
+### Instance Stop
+
+Stop one or more running instances.
+
+**Usage:**
+
+```
+condatainer instance stop [flags] [name]
+```
+
+**Options:**
+
+* `-a`, `--all`: Stop all user's instances
+* `-F`, `--force`: Force kill instance (may corrupt data)
+* `-s`, `--signal [SIGNAL]`: Signal to send to instance (e.g., SIGTERM, TERM, 15)
+* `-t`, `--timeout [SECONDS]`: Timeout before force kill (default: 10)
+
+**Examples:**
+
+```bash
+# Stop a specific instance
+condatainer instance stop myinstance
+
+# Stop all instances matching pattern
+condatainer instance stop mysql*
+
+# Stop all instances
+condatainer instance stop --all
+
+# Force stop with custom signal
+condatainer instance stop --force --signal TERM myinstance
+
+# Custom timeout before force kill
+condatainer instance stop --timeout 30 myinstance
+```
+
+**Wildcard Support:**
+
+You can use shell wildcards (`*`, `?`, `[]`) to stop multiple instances at once. State files are automatically cleaned up for stopped instances.
+
+### Instance List
+
+List all running instances.
+
+**Usage:**
+
+```
+condatainer instance list
+```
+
+Shows all active instances with their names and process information.
+
+### Instance Stats
+
+Display resource usage statistics for a running instance.
+
+**Usage:**
+
+```
+condatainer instance stats <name>
+```
+
+**Example:**
+
+```bash
+condatainer instance stats myinstance
+```
+
+Shows CPU, memory, and I/O statistics for the specified instance.
+
+### Instance Exec
+
+Execute a command in a running instance.
+
+**Usage:**
+
+```
+condatainer instance exec [flags] <name> <command> [args...]
+```
+
+**Options:**
+
+* `--env [KEY=VALUE]`: Set additional environment variables (can be used multiple times)
+
+**Features:**
+
+* Commands run in the same environment as when the instance was started
+* Automatically applies saved environment variables from instance state
+* Overlays and bind paths from instance start are preserved
+* Defaults to bash if no command specified
+* Unknown apptainer flags can be passed using `--flag=value` format
+
+**Examples:**
+
+```bash
+# Run a command in an instance
+condatainer instance exec myinstance samtools view file.bam
+
+# Open interactive shell (default)
+condatainer instance exec myinstance
+
+# Set additional environment variables
+condatainer instance exec --env VAR1=val1 --env VAR2=val2 myinstance bash
+
+# Pass apptainer flags
+condatainer instance exec --home=/custom myinstance bash
+```
+
+**State Restoration:**
+
+When you use `instance exec`, CondaTainer automatically loads the saved state from when the instance was started. This includes:
+
+* Environment variables (`#ENV` tags from overlays)
+* Overlay mount points
+* Bind paths
+* Base image configuration
+
+Environment variables set during `instance exec` are added on top of the saved state, allowing you to override or add variables as needed.
+
+**Note:** Apptainer's native `apptainer exec instance://name` does not preserve environment variables from instance start. CondaTainer solves this by storing instance state and reapplying it during exec.
+
+### Instance Workflow Example
+
+Here's a complete workflow showing how to use instances:
+
+```bash
+# 1. Start an instance with your desired overlays and writable env
+condatainer instance start -o lxde -o igv -o env.img -w desktop
+
+# 2. Run multiple commands in the same instance
+condatainer instance exec desktop websockify --web /usr/share/novnc ...
+condatainer instance exec desktop vncserver :1 -geometry 1920x1080 -depth 24 ...
+condatainer instance exec desktop igv 
+
+# 3. Check instance status
+condatainer instance stats desktop
+
+# 4. Stop the instance when done
+condatainer instance stop desktop
+```
 
 ## Runtime (Check, Run)
 

@@ -37,6 +37,10 @@ var createCmd = &cobra.Command{
 	Aliases: []string{"install", "i"},
 	Short:   "Create a new SquashFS overlay",
 	Long:    `Create a new SquashFS overlay using available build scripts or Conda packages.`,
+	Example: `  condatainer create samtools/1.22                # Create from build script
+  condatainer create python=3.11 numpy -n myenv  # Create conda environment
+  condatainer create -f environment.yml -p myenv  # Create from conda file
+  condatainer create --source /data -p dataset    # Convert directory to overlay`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
 		// 1. Validation Logic
