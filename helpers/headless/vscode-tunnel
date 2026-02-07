@@ -37,7 +37,7 @@ print_help() {
     echo "  -e <.img>       Writable overlay (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
     echo ""
-    echo "  config           Show config file path and contents"
+    echo "  config          Show config file path and contents"
     echo ""
     echo "State  file: $(state_path $HELPER_NAME)"
     echo "Config file: $(config_path $HELPER_NAME)"
