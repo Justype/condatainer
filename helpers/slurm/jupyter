@@ -198,9 +198,9 @@ setup_scratch
 
 # Decide jupyter command
 if [ "$JUPYTER_MODE" = "notebook" ]; then
-    JUPYTER_CMD="jupyter notebook"
+    JUPYTER_CMD="jupyter-notebook"
 else
-    JUPYTER_CMD="jupyter lab"
+    JUPYTER_CMD="jupyter-lab"
 fi
 
 # Determine connection token
