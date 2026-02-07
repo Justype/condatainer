@@ -437,9 +437,11 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string)
 		return createConcreteType(base, isRef, tmpDir)
 	}
 
-	// Check if already installed
-	if base.IsInstalled() {
-		return createConcreteType(base, isRef, tmpDir)
+	// Check if already installed or temporary overlay exists
+	// The downstream will handle the case where tmp overlay exists but is not from this build
+	// Avoid parsing interactive tags in both cases.
+	if base.IsInstalled() || utils.FileExists(base.tmpOverlayPath) {
+		return newScriptBuildObject(base, isRef)
 	}
 
 	// Resolve build source and determine concrete type

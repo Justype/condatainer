@@ -2,7 +2,12 @@ package build
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/utils"
 )
 
 func TestParseScriptMetadata_RequiresTTY(t *testing.T) {
@@ -129,3 +134,93 @@ func TestParseScriptMetadata_NcpusFromPBS(t *testing.T) {
 		t.Fatalf("expected ncpus=16 from PBS directive, got %d", base.ncpus)
 	}
 }
+
+func TestNewBuildObject_DoesNotParseInteractiveWhenInstalled(t *testing.T) {
+	imagesDir := t.TempDir()
+	tmpDir := t.TempDir()
+
+	// Create a temporary base dir and add it to extra base dirs so it is searched first
+	baseDir := t.TempDir()
+	defer os.RemoveAll(baseDir)
+	if err := os.Setenv("CONDATAINER_EXTRA_BASE_DIRS", baseDir); err != nil {
+		t.Fatalf("failed to set env: %v", err)
+	}
+	defer os.Unsetenv("CONDATAINER_EXTRA_BASE_DIRS")
+
+	// Create a build-scripts entry with an INTERACTIVE prompt to trigger parsing if it were called
+	scriptsDir := filepath.Join(baseDir, "build-scripts")
+	if err := os.MkdirAll(filepath.Join(scriptsDir, "cellranger"), 0o775); err != nil {
+		t.Fatalf("failed to create scripts dir: %v", err)
+	}
+	scriptPath := filepath.Join(scriptsDir, "cellranger", "8.0.1")
+	scriptContent := "#!/bin/bash\n#INTERACTIVE:Please enter the license key\n"
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o664); err != nil {
+		t.Fatalf("failed to write script: %v", err)
+	}
+
+	// Create an overlay file in imagesDir to simulate already-installed overlay
+	nameVersion := "cellranger/8.0.1"
+	fileName := strings.ReplaceAll(utils.NormalizeNameVersion(nameVersion), "/", "--") + ".sqf"
+	overlayPath := filepath.Join(imagesDir, fileName)
+	if err := os.WriteFile(overlayPath, []byte{}, 0o664); err != nil {
+		t.Fatalf("failed to create overlay file: %v", err)
+	}
+
+	// Re-init data paths so the test's extra base dir is picked up
+	config.InitDataPaths()
+
+	// Call NewBuildObject: should return without attempting to parse the interactive script
+	bo, err := NewBuildObject(nameVersion, false, imagesDir, tmpDir)
+	if err != nil {
+		t.Fatalf("NewBuildObject returned error: %v", err)
+	}
+	if bo == nil {
+		t.Fatalf("expected non-nil BuildObject")
+	}
+}
+
+func TestNewBuildObject_DoesNotParseInteractiveWhenTmpOverlayExists(t *testing.T) {
+	imagesDir := t.TempDir()
+	tmpDir := t.TempDir()
+
+	// Create a temporary base dir and add it to extra base dirs so it is searched first
+	baseDir := t.TempDir()
+	defer os.RemoveAll(baseDir)
+	if err := os.Setenv("CONDATAINER_EXTRA_BASE_DIRS", baseDir); err != nil {
+		t.Fatalf("failed to set env: %v", err)
+	}
+	defer os.Unsetenv("CONDATAINER_EXTRA_BASE_DIRS")
+
+	// Create a build-scripts entry with an INTERACTIVE prompt to trigger parsing if it were called
+	scriptsDir := filepath.Join(baseDir, "build-scripts")
+	if err := os.MkdirAll(filepath.Join(scriptsDir, "cellranger"), 0o775); err != nil {
+		t.Fatalf("failed to create scripts dir: %v", err)
+	}
+	scriptPath := filepath.Join(scriptsDir, "cellranger", "8.0.1")
+	scriptContent := "#!/bin/bash\n#INTERACTIVE:Please enter the license key\n"
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o664); err != nil {
+		t.Fatalf("failed to write script: %v", err)
+	}
+
+	// Create a tmp overlay file in tmpDir to simulate a build in progress
+	nameVersion := "cellranger/8.0.1"
+	// tmp overlay filename uses -- for / and .img suffix (see getTmpOverlayPath)
+	tmpFileName := strings.ReplaceAll(utils.NormalizeNameVersion(nameVersion), "/", "--") + ".img"
+	tmpOverlayPath := filepath.Join(tmpDir, tmpFileName)
+	if err := os.WriteFile(tmpOverlayPath, []byte{}, 0o664); err != nil {
+		t.Fatalf("failed to create tmp overlay file: %v", err)
+	}
+
+	// Re-init data paths so the test's extra base dir is picked up
+	config.InitDataPaths()
+
+	// Call NewBuildObject: should return without attempting to parse the interactive script
+	bo, err := NewBuildObject(nameVersion, false, imagesDir, tmpDir)
+	if err != nil {
+		t.Fatalf("NewBuildObject returned error: %v", err)
+	}
+	if bo == nil {
+		t.Fatalf("expected non-nil BuildObject")
+	}
+}
+
