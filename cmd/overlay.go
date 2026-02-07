@@ -352,8 +352,7 @@ Multiple paths can be specified using multiple -p flags.`,
 					utils.PrintWarning("Operation cancelled.")
 					return
 				}
-				utils.PrintError("%v", err)
-				os.Exit(1)
+				utils.PrintDebug("Failed to chown path %s: %v", internalPath, err)
 			}
 		}
 	},
