@@ -9,6 +9,9 @@
     "code-server": {
       "path": "helpers/headless/code-server"
     },
+    "jupyter": {
+      "path": "helpers/headless/jupyter"
+    },
     "rstudio-server": {
       "path": "helpers/headless/rstudio-server"
     },
@@ -31,6 +34,9 @@
     },
     "code-server": {
       "path": "helpers/slurm/code-server"
+    },
+    "jupyter": {
+      "path": "helpers/slurm/jupyter"
     },
     "rstudio-server": {
       "path": "helpers/slurm/rstudio-server"
