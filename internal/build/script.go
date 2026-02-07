@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/container"
 	execpkg "github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -244,7 +244,7 @@ fi
 	}
 
 	// Collect bind directories (for accessing overlays and build scripts)
-	bindDirs := apptainer.DeduplicateBindPaths(getAllBaseDirs())
+	bindDirs := container.DeduplicateBindPaths(getAllBaseDirs())
 
 	// Create exec options for running build script
 	opts := execpkg.Options{
@@ -422,7 +422,7 @@ mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
 	}
 
 	// Collect bind directories (deduplicated)
-	bindDirs := apptainer.DeduplicateBindPaths(getAllBaseDirs())
+	bindDirs := container.DeduplicateBindPaths(getAllBaseDirs())
 
 	// Create exec options for creating SquashFS
 	opts := execpkg.Options{

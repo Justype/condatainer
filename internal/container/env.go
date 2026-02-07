@@ -1,4 +1,4 @@
-package exec
+package container
 
 import (
 	"bufio"
@@ -21,7 +21,8 @@ func splitKeyNote(content string) (string, string) {
 	return content, ""
 }
 
-func collectOverlayEnv(paths []string) (map[string]string, map[string]string) {
+// CollectOverlayEnv reads .env files from overlay paths and returns environment configs and notes
+func CollectOverlayEnv(paths []string) (map[string]string, map[string]string) {
 	configs := map[string]string{}
 	notes := map[string]string{}
 

@@ -11,6 +11,7 @@ import (
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/container"
 	"github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -22,14 +23,7 @@ type execCommand struct {
 
 func (c *execCommand) InitDefaultHelpFlag() {}
 
-var (
-	execOverlays    []string
-	execWritableImg bool
-	execEnvSettings []string
-	execBaseImage   string
-	execBindPaths   []string
-	execFakeroot    bool
-)
+var execFlags CommonFlags
 
 var execCmd = &execCommand{
 	Command: cobra.Command{
@@ -66,27 +60,13 @@ Note: Unknown flags must use --flag=value format (no space) for unambiguous pars
 func init() {
 	rootCmd.AddCommand(&execCmd.Command)
 
-	execCmd.Flags().StringSliceVarP(&execOverlays, "overlay", "o", nil, "overlay file to mount (can be used multiple times)")
-	execCmd.Flags().BoolVarP(&execWritableImg, "writable", "w", false, "mount .img overlays as writable (default: read-only)")
-	execCmd.Flags().BoolVar(&execWritableImg, "writable-img", false, "Alias for --writable")
-	execCmd.Flags().StringSliceVar(&execEnvSettings, "env", nil, "set environment variable 'KEY=VALUE' (can be used multiple times)")
-	execCmd.Flags().StringVarP(&execBaseImage, "base-image", "b", "", "base image to use instead of default")
-	execCmd.Flags().StringSliceVar(&execBindPaths, "bind", nil, "bind path 'HOST:CONTAINER' (can be used multiple times)")
-	execCmd.Flags().BoolVarP(&execFakeroot, "fakeroot", "f", false, "run container with fakeroot privileges")
+	// Register common flags
+	RegisterCommonFlags(&execCmd.Command, &execFlags)
 
-	// Completion
-	execCmd.RegisterFlagCompletionFunc("overlay", overlayFlagCompletion(true, true))
-	execCmd.RegisterFlagCompletionFunc("base-image", baseImageFlagCompletion())
 	// For 'exec': use default file completion for positional args
 	execCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return nil, cobra.ShellCompDirectiveDefault
 	}
-
-	// Stop flag parsing after the first positional argument so tool arguments (like --help) bypass exec.
-	execCmd.Flags().SetInterspersed(false)
-
-	// Allow unknown flags to pass through (for apptainer)
-	execCmd.FParseErrWhitelist.UnknownFlags = true
 }
 
 func runExec(cmd *cobra.Command, args []string) error {
@@ -99,10 +79,10 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse arguments - treat all positional args as commands
-	commandFinal, apptainerFlags := parseExecArgs(args)
+	commandFinal, apptainerFlags := ParseCommandArgs("exec")
 
 	// Use overlays from -o flag
-	overlayFinal := execOverlays
+	overlayFinal := execFlags.Overlays
 
 	hidePrompt := true
 	if len(commandFinal) == 0 {
@@ -114,20 +94,20 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	// Resolve user-specified base image if provided
 	var baseImageResolved string
-	if execBaseImage != "" {
-		if utils.FileExists(execBaseImage) {
-			baseImageResolved = execBaseImage
+	if execFlags.BaseImage != "" {
+		if utils.FileExists(execFlags.BaseImage) {
+			baseImageResolved = execFlags.BaseImage
 		} else {
-			resolvedBase, err := exec.ResolveOverlayPaths([]string{execBaseImage})
+			resolvedBase, err := container.ResolveOverlayPaths([]string{execFlags.BaseImage})
 			if err == nil && len(resolvedBase) > 0 {
 				baseImageResolved = resolvedBase[0]
 			} else {
-				baseImageResolved = execBaseImage
+				baseImageResolved = execFlags.BaseImage
 			}
 		}
 	}
 
-	resolvedOverlays, err := exec.ResolveOverlayPaths(overlayFinal)
+	resolvedOverlays, err := container.ResolveOverlayPaths(overlayFinal)
 	if err != nil {
 		return err
 	}
@@ -135,11 +115,11 @@ func runExec(cmd *cobra.Command, args []string) error {
 	options := exec.Options{
 		Overlays:       resolvedOverlays,
 		Command:        commandFinal,
-		WritableImg:    execWritableImg, // Default false, unless -w specified
-		EnvSettings:    execEnvSettings,
-		BindPaths:      execBindPaths,
+		WritableImg:    execFlags.WritableImg, // Default false, unless -w specified
+		EnvSettings:    execFlags.EnvSettings,
+		BindPaths:      execFlags.BindPaths,
 		ApptainerFlags: apptainerFlags, // Pass through unknown flags
-		Fakeroot:       execFakeroot,
+		Fakeroot:       execFlags.Fakeroot,
 		BaseImage:      baseImageResolved,
 		ApptainerBin:   config.Global.ApptainerBin,
 		HidePrompt:     hidePrompt,
@@ -191,7 +171,7 @@ func baseImageFlagCompletion() func(*cobra.Command, []string, string) ([]string,
 
 // systemOverlaySuggestions returns only system overlays (def-built) and local overlay files
 func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirective) {
-	installed, err := exec.InstalledOverlays()
+	installed, err := container.InstalledOverlays()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
@@ -261,7 +241,7 @@ func localImageSuggestions(toComplete string) []string {
 }
 
 func overlaySuggestions(includeData bool, includeImg bool, toComplete string) ([]string, cobra.ShellCompDirective) {
-	installed, err := exec.InstalledOverlays()
+	installed, err := container.InstalledOverlays()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
@@ -287,77 +267,6 @@ func overlaySuggestions(includeData bool, includeImg bool, toComplete string) ([
 
 	// Always return NoFileComp to prevent default file listing
 	return suggestions, cobra.ShellCompDirectiveNoFileComp
-}
-
-func parseExecArgs(args []string) (commands, apptainerFlags []string) {
-	// Parse os.Args directly to catch unknown flags that Cobra filtered out
-	// Find where "exec" appears in os.Args to know where our args start
-	execIdx := -1
-	for i, arg := range os.Args {
-		if arg == "exec" {
-			execIdx = i
-			break
-		}
-	}
-
-	if execIdx == -1 {
-		// Fallback to using args from cobra
-		commands = args
-		return commands, apptainerFlags
-	}
-
-	// Known condatainer flags (handled by cobra)
-	knownFlags := map[string]bool{
-		"--overlay": true, "-o": true,
-		"--writable": true, "--writable-img": true, "-w": true,
-		"--env":        true,
-		"--bind":       true,
-		"--base-image": true, "-b": true,
-		"--fakeroot": true, "-f": true,
-		"--debug": true,
-		"--local": true,
-		"--quiet": true, "-q": true,
-		"--yes": true, "-y": true,
-	}
-
-	// Parse from after "exec" in os.Args
-	commandStarted := false
-	for i := execIdx + 1; i < len(os.Args); i++ {
-		arg := os.Args[i]
-
-		// Once we hit the command, everything after is part of the command
-		if commandStarted {
-			commands = append(commands, arg)
-			continue
-		}
-
-		// Skip known flags (already handled by cobra)
-		if knownFlags[arg] || isKnownFlagWithEquals(knownFlags, arg) {
-			// Value flags (space-separated)
-			if knownFlags[arg] && needsValue(arg) && i+1 < len(os.Args) {
-				i++ // Skip value
-			}
-			continue
-		}
-
-		// Unknown flag → must use --flag=value format for apptainer pass-through
-		if strings.HasPrefix(arg, "-") {
-			if strings.Contains(arg, "=") {
-				// Has value: --home=/path
-				apptainerFlags = append(apptainerFlags, arg)
-			} else {
-				// No value: boolean flag like --nv
-				apptainerFlags = append(apptainerFlags, arg)
-			}
-			continue
-		}
-
-		// First non-flag argument starts the command
-		commandStarted = true
-		commands = append(commands, arg)
-	}
-
-	return commands, apptainerFlags
 }
 
 func isKnownFlagWithEquals(knownFlags map[string]bool, arg string) bool {

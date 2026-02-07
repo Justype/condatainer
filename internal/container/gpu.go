@@ -1,4 +1,4 @@
-package apptainer
+package container
 
 import (
 	"os"

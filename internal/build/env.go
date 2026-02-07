@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/container"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -143,7 +143,7 @@ func GetPathEnvFromDependencies(dependencies []string) (string, error) {
 	}
 
 	// Resolve dependency paths
-	depPaths, err := exec.ResolveOverlayPaths(dependencies)
+	depPaths, err := container.ResolveOverlayPaths(dependencies)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve dependency paths: %w", err)
 	}
@@ -191,7 +191,7 @@ func GetOverlayArgsFromDependencies(dependencies []string) ([]string, error) {
 	}
 
 	// Resolve dependency paths
-	depPaths, err := exec.ResolveOverlayPaths(dependencies)
+	depPaths, err := container.ResolveOverlayPaths(dependencies)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve dependency paths: %w", err)
 	}
@@ -213,7 +213,7 @@ func GetOverlayEnvConfigsFromDependencies(dependencies []string) ([]string, erro
 	}
 
 	// Resolve dependency paths
-	depPaths, err := exec.ResolveOverlayPaths(dependencies)
+	depPaths, err := container.ResolveOverlayPaths(dependencies)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve dependency paths: %w", err)
 	}

@@ -1,4 +1,4 @@
-package exec
+package container
 
 import (
 	"fmt"
@@ -126,32 +126,4 @@ func buildOverlayPathFromSpec(normalized string) (string, error) {
 	}
 
 	return "", fmt.Errorf("overlay %s not found (searched: %v)", normalized, config.GetImageSearchPaths())
-}
-
-func ensureSingleImage(paths []string) error {
-	count := 0
-	for _, path := range paths {
-		if utils.IsImg(path) {
-			count++
-		}
-	}
-	if count > 1 {
-		return fmt.Errorf("only one .img overlay can be used at a time")
-	}
-	return nil
-}
-
-func putImgToLast(paths []string) []string {
-	var imgPaths []string
-	var other []string
-
-	for _, path := range paths {
-		if utils.IsImg(path) {
-			imgPaths = append(imgPaths, path)
-			continue
-		}
-		other = append(other, path)
-	}
-
-	return append(other, imgPaths...)
 }

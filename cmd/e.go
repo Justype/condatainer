@@ -9,6 +9,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/container"
 	"github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -136,7 +137,7 @@ func runE(cmd *cobra.Command, args []string) error {
 		if utils.FileExists(eBaseImage) {
 			baseImageResolved = eBaseImage
 		} else {
-			resolvedBase, err := exec.ResolveOverlayPaths([]string{eBaseImage})
+			resolvedBase, err := container.ResolveOverlayPaths([]string{eBaseImage})
 			if err == nil && len(resolvedBase) > 0 {
 				baseImageResolved = resolvedBase[0]
 			} else {
@@ -146,7 +147,7 @@ func runE(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve overlays
-	resolvedOverlays, err := exec.ResolveOverlayPaths(overlays)
+	resolvedOverlays, err := container.ResolveOverlayPaths(overlays)
 	if err != nil {
 		return err
 	}

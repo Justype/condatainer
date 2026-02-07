@@ -90,6 +90,22 @@ func GetUserDataDir() string {
 	return ""
 }
 
+// GetUserStateDir returns the user's state directory following XDG spec.
+// Returns $XDG_STATE_HOME/condatainer or ~/.local/state/condatainer
+func GetUserStateDir() string {
+	// XDG_STATE_HOME takes priority
+	if stateHome := os.Getenv("XDG_STATE_HOME"); stateHome != "" {
+		return filepath.Join(stateHome, "condatainer")
+	}
+
+	// Default to ~/.local/state/condatainer
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".local", "state", "condatainer")
+	}
+
+	return ""
+}
+
 // GetScratchDataDir returns the scratch data directory for HPC systems.
 // Returns $SCRATCH/condatainer if SCRATCH is set.
 func GetScratchDataDir() string {
