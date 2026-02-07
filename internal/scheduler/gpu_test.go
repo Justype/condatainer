@@ -90,7 +90,7 @@ func TestFindCompatibleGpu(t *testing.T) {
 	tests := []struct {
 		name         string
 		requestedGpu *GpuSpec
-		wantMinOpts  int // Minimum number of options expected
+		wantMinOpts  int    // Minimum number of options expected
 		wantFirst    string // Expected first (best) option
 		wantUpgrade  bool
 	}{
@@ -212,12 +212,12 @@ func TestConvertGpuSpec(t *testing.T) {
 // TestCrossGpuTypeConversion tests conversion between different GPU types
 func TestCrossGpuTypeConversion(t *testing.T) {
 	tests := []struct {
-		name          string
-		clusterInfo   *ClusterInfo
-		requestedGpu  *GpuSpec
-		wantType      string
-		wantError     bool
-		wantMinOpts   int
+		name         string
+		clusterInfo  *ClusterInfo
+		requestedGpu *GpuSpec
+		wantType     string
+		wantError    bool
+		wantMinOpts  int
 	}{
 		{
 			name: "Request a100 but only h100 available - should upgrade",

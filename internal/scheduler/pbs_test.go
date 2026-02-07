@@ -505,10 +505,10 @@ func TestPbsResourceParsing(t *testing.T) {
 
 func TestPbsTimeParsing(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantDur  time.Duration
-		wantErr  bool
+		name    string
+		input   string
+		wantDur time.Duration
+		wantErr bool
 	}{
 		{
 			name:    "HH:MM:SS",

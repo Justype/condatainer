@@ -380,7 +380,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#BSUB -W 01:30",
 			},
 			wantNcpus: 4,
-			wantMemMB: 8,   // 8192 KB = 8 MB
+			wantMemMB: 8, // 8192 KB = 8 MB
 			wantTime:  time.Hour + 30*time.Minute,
 		},
 		{
@@ -453,7 +453,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				`#BSUB -gpu "num=4:type=v100"`,
 			},
 			wantNcpus: 32,
-			wantMemMB: 64,  // 65536 KB = 64 MB
+			wantMemMB: 64, // 65536 KB = 64 MB
 			wantTime:  12 * time.Hour,
 			wantGpu:   &GpuSpec{Type: "v100", Count: 4},
 		},
@@ -578,13 +578,13 @@ func TestLsfMemoryParsing(t *testing.T) {
 		input  string
 		wantMB int64
 	}{
-		{"8192", 8},           // 8192 KB = 8 MB
-		{"1048576", 1024},     // 1048576 KB = 1024 MB
-		{"4096MB", 4096},      // 4096 MB
-		{"8GB", 8 * 1024},     // 8 GB
-		{"1TB", 1024 * 1024},  // 1 TB
-		{"512", 0},            // 512 KB = 0 MB (integer division)
-		{"1024", 1},           // 1024 KB = 1 MB
+		{"8192", 8},          // 8192 KB = 8 MB
+		{"1048576", 1024},    // 1048576 KB = 1024 MB
+		{"4096MB", 4096},     // 4096 MB
+		{"8GB", 8 * 1024},    // 8 GB
+		{"1TB", 1024 * 1024}, // 1 TB
+		{"512", 0},           // 512 KB = 0 MB (integer division)
+		{"1024", 1},          // 1024 KB = 1 MB
 	}
 
 	for _, tt := range tests {

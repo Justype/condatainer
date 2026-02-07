@@ -11,28 +11,28 @@ import (
 // Stats holds metadata about the overlay filesystem.
 type Stats struct {
 	// Filesystem metadata
-	FilesystemType   string // "ext3", "ext4"
-	BlockSize        int64
-	TotalBlocks      int64
-	FreeBlocks       int64
-	ReservedBlocks   int64
-	TotalInodes      int64
-	FreeInodes       int64
-	FilesystemState  string // "clean", "dirty", etc.
-	LastMounted      string
-	CreatedTime      string
-	FilesystemUUID   string
-	JournalSize      int64  // in blocks
-	InodeSize        int64
+	FilesystemType  string // "ext3", "ext4"
+	BlockSize       int64
+	TotalBlocks     int64
+	FreeBlocks      int64
+	ReservedBlocks  int64
+	TotalInodes     int64
+	FreeInodes      int64
+	FilesystemState string // "clean", "dirty", etc.
+	LastMounted     string
+	CreatedTime     string
+	FilesystemUUID  string
+	JournalSize     int64 // in blocks
+	InodeSize       int64
 
 	// File metadata
-	FileSizeBytes    int64  // Apparent size of the file
-	FileBlocksUsed   int64  // Actual blocks allocated on disk (for sparse detection)
-	IsSparse         bool   // True if file is sparse
+	FileSizeBytes  int64 // Apparent size of the file
+	FileBlocksUsed int64 // Actual blocks allocated on disk (for sparse detection)
+	IsSparse       bool  // True if file is sparse
 
 	// Overlay ownership
-	UpperUID         int
-	UpperGID         int
+	UpperUID int
+	UpperGID int
 }
 
 // GetStats reads the filesystem superblock to calculate usage without mounting.

@@ -18,10 +18,10 @@ const (
 
 // GpuCompatibility defines GPU compatibility rules and performance tiers
 type GpuCompatibility struct {
-	Type        string  // GPU type (e.g., "h100", "a100")
-	Tier        GpuTier // Performance tier
-	Compute     float64 // Compute capability (e.g., 8.0, 9.0)
-	MemoryGB    int     // Typical memory in GB
+	Type        string   // GPU type (e.g., "h100", "a100")
+	Tier        GpuTier  // Performance tier
+	Compute     float64  // Compute capability (e.g., 8.0, 9.0)
+	MemoryGB    int      // Typical memory in GB
 	Aliases     []string // Alternative names for this GPU
 	UpgradeTo   []string // Better GPUs that can substitute this one
 	DowngradeTo []string // Fallback GPUs if this is unavailable
@@ -561,9 +561,10 @@ func EnsureMigProfileInDatabase(migType string) {
 
 // ExtractMemoryFromMigProfile extracts memory size in GB from a MIG profile name
 // Examples:
-//   nvidia_h100_80gb_hbm3_1g.10gb -> 10
-//   a100_2g.10gb -> 10
-//   nvidia_a100_40gb_1g.5gb -> 5
+//
+//	nvidia_h100_80gb_hbm3_1g.10gb -> 10
+//	a100_2g.10gb -> 10
+//	nvidia_a100_40gb_1g.5gb -> 5
 func ExtractMemoryFromMigProfile(migType string) int {
 	// Look for pattern like "1g.10gb" or "2g.20gb"
 	parts := strings.Split(migType, ".")
@@ -582,9 +583,10 @@ func ExtractMemoryFromMigProfile(migType string) int {
 
 // ExtractBaseGpuFromMigProfile extracts the base GPU type from a MIG profile
 // Examples:
-//   nvidia_h100_80gb_hbm3_1g.10gb -> h100
-//   a100_1g.5gb -> a100
-//   nvidia_a30_24gb_4g.24gb -> a30
+//
+//	nvidia_h100_80gb_hbm3_1g.10gb -> h100
+//	a100_1g.5gb -> a100
+//	nvidia_a30_24gb_4g.24gb -> a30
 func ExtractBaseGpuFromMigProfile(migType string) string {
 	lower := strings.ToLower(migType)
 

@@ -279,12 +279,18 @@ func runScript(cmd *cobra.Command, args []string) error {
 		} else {
 			// Try to detect and use scheduler
 			sched, err := scheduler.DetectScheduler()
-			if err == nil && sched.IsAvailable() {
+			if err != nil {
+				utils.PrintNote("Script has scheduler specs but scheduler detection failed: %v. Running locally.", err)
+			} else if !sched.IsAvailable() {
+				utils.PrintNote("Script has scheduler specs but no scheduler is available. Running locally.")
+			} else {
+				// Scheduler available - submit job
 				return submitRunJob(sched, scriptPath, originScriptPath, scriptSpecs, buildJobIDs)
 			}
-			// Scheduler not available, fall through to local execution
-			utils.PrintNote("Script has scheduler specs but no scheduler available. Running locally.")
 		}
+	} else {
+		// No scheduler specs found - explicitly note local execution
+		utils.PrintNote("No scheduler specs found in script. Running locally.")
 	}
 
 	// Prepare execution command

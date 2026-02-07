@@ -223,4 +223,3 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenTmpOverlayExists(t *testing.T
 		t.Fatalf("expected non-nil BuildObject")
 	}
 }
-
