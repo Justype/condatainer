@@ -108,14 +108,18 @@ func postProcessBashCompletion(script string) string {
 
 	script = strings.Replace(script, oldCode, newCode, 1)
 
-	// 2. Add fzf support if available for 'e' and 'exec'
+	// 2. Add fzf support if available for 'e/exec/instance start'
 	fzfInject := `    __condatainer_debug "The completions are: ${out}"
 
-    # Use fzf if available and we're completing for 'e' or 'exec'
+    # Use fzf if available and we're completing for 'e/exec/instance start'
     if command -v fzf >/dev/null 2>&1 && [[ -n "$out" ]]; then
         local is_overlay_cmd=false
-        for word in "${words[@]}"; do
+        for i in "${!words[@]}"; do
+            word="${words[$i]}"
             if [[ "$word" == "e" || "$word" == "exec" ]]; then
+                is_overlay_cmd=true
+                break
+            elif [[ "$word" == "instance" && "${words[$((i+1))]}" == "start" ]]; then
                 is_overlay_cmd=true
                 break
             fi
@@ -144,14 +148,18 @@ func postProcessBashCompletion(script string) string {
 // postProcessZshCompletion modifies the generated zsh completion script
 // EXPERIMENTAL: zsh completion is not tested and may have edge cases. Feedback welcome.
 func postProcessZshCompletion(script string) string {
-	// Add fzf support if available for 'e' and 'exec'
+	// Add fzf support if available for 'e/exec/instance start'
 	fzfInject := `    __condatainer_debug "completions: ${out}"
 
-    # Use fzf if available and we're completing for 'e' or 'exec'
+    # Use fzf if available and we're completing for 'e/exec/instance start'
     if command -v fzf >/dev/null 2>&1 && [[ -n "$out" ]]; then
         local is_overlay_cmd=false
-        for word in "${words[@]}"; do
+        for i in "${!words[@]}"; do
+            word="${words[$i]}"
             if [[ "$word" == "e" || "$word" == "exec" ]]; then
+                is_overlay_cmd=true
+                break
+            elif [[ "$word" == "instance" && "${words[$((i+1))]}" == "start" ]]; then
                 is_overlay_cmd=true
                 break
             fi
@@ -183,27 +191,26 @@ func postProcessZshCompletion(script string) string {
 // postProcessFishCompletion modifies the generated fish completion script
 // EXPERIMENTAL: fish completion is not tested and may have edge cases. Feedback welcome.
 func postProcessFishCompletion(script string) string {
-	// Add fzf support if available for 'e' and 'exec'
+	// Add fzf support if available for 'e/exec/instance start'
 	// Note: We try to match the line where results are captured.
 	// Cobra sometimes generates 'eval' and sometimes not depending on version.
 	// We handle the standard pattern found in recent versions.
 	target := `set -l results ($requestComp 2> /dev/null)`
-	// Fallback if the generator uses eval
 	if !strings.Contains(script, target) {
-		target = `set -l results (eval $requestComp 2> /dev/null)`
+		target = `set -l results (eval $requestComp 2> /dev/tty 2> /dev/null)`
 	}
 
 	fzfInject := target + `
 
-    # Use fzf if available and we're completing for 'e' or 'exec'
+    # Use fzf if available and we're completing for 'e/exec/instance start'
     if type -q fzf
-        if contains "e" $words; or contains "exec" $words
+        if contains "e" $words; or contains "exec" $words; or (contains "instance" $words; and contains "start" $words)
             if not string match -q -- "-*" (commandline -t)
                 # Check if -- is in the command line; if so, skip fzf and use default results
                 if not contains -- "--" $words
                     set -l candidates $results[1..-2]
                     if test (count $candidates) -gt 1
-                        set -l selection (string join \n $candidates | fzf --height 40% --reverse --select-1 --exit-0 --query (commandline -t) < /dev/tty)
+                        set -l selection (string join \n $candidates | fzf --height 40% --reverse --select-1 --exit-0 --query (commandline -t) --header "Select overlay" < /dev/tty)
                         if test -n "$selection"
                             set results $selection $results[-1]
                         end
