@@ -32,8 +32,7 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		exe, err := os.Executable()
 		if err != nil {
-			utils.PrintError("Failed to determine executable path: %v", err)
-			os.Exit(1)
+			ExitWithError("Failed to determine executable path: %v", err)
 		}
 
 		// Step 1: Load defaults (paths, directories, etc.)
@@ -119,10 +118,9 @@ func Execute() {
 			if out != "" {
 				fmt.Fprintln(os.Stderr, out)
 			}
-			os.Exit(1)
+			os.Exit(ExitCodeError)
 		}
-		utils.PrintError("%v", err)
-		os.Exit(1)
+		ExitWithError("%v", err)
 	}
 }
 

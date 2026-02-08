@@ -4,6 +4,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/build"
+	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -52,6 +55,30 @@ func KnownFlags() map[string]bool {
 		"--quiet": true, "-q": true,
 		"--yes": true, "-y": true,
 	}
+}
+
+// Exit codes used by various commands
+const (
+	// Generic error code
+	ExitCodeError = 1
+	// Returned when jobs were submitted to a scheduler (overlays will be created asynchronously)
+	ExitCodeJobsSubmitted = 2
+)
+
+// ExitIfJobsSubmitted exits the process with ExitCodeJobsSubmitted if a scheduler
+// submission was requested and the graph shows job IDs were created.
+func ExitIfJobsSubmitted(graph *build.BuildGraph) {
+	if config.Global.SubmitJob && graph != nil && len(graph.GetJobIDs()) > 0 {
+		utils.PrintMessage("%d scheduler job(s) submitted. exiting with code %d",
+			len(graph.GetJobIDs()), ExitCodeJobsSubmitted)
+		os.Exit(ExitCodeJobsSubmitted)
+	}
+}
+
+// ExitWithError prints an error and exits with ExitCodeError
+func ExitWithError(format string, a ...interface{}) {
+	utils.PrintError(format, a...)
+	os.Exit(ExitCodeError)
 }
 
 // ParseCommandArgs parses arguments from os.Args after a given subcommand

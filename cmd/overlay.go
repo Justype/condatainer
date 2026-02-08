@@ -50,8 +50,7 @@ If no image path is provided, defaults to 'env.img'.`,
 		// Auto-append .img extension if not present and path doesn't have an extension
 		if !utils.IsImg(path) {
 			if strings.Contains(filepath.Base(path), ".") {
-				utils.PrintError("Overlay image must have a .img extension.")
-				os.Exit(1)
+				ExitWithError("Overlay image must have a .img extension.")
 			}
 			path += ".img"
 		}
@@ -59,14 +58,12 @@ If no image path is provided, defaults to 'env.img'.`,
 		// Convert to absolute path
 		absPath, err := filepath.Abs(path)
 		if err != nil {
-			utils.PrintError("Failed to resolve path: %v", err)
-			os.Exit(1)
+			ExitWithError("Failed to resolve path: %v", err)
 		}
 		path = absPath
 
 		if utils.FileExists(path) || utils.DirExists(path) {
-			utils.PrintError("Path %s already exists.", utils.StylePath(path))
-			os.Exit(1)
+			ExitWithError("Path %s already exists.", utils.StylePath(path))
 		}
 
 		// 2. Parse Flags
@@ -79,8 +76,7 @@ If no image path is provided, defaults to 'env.img'.`,
 
 		sizeMB, err := utils.ParseSizeToMB(sizeStr)
 		if err != nil {
-			utils.PrintError("Invalid size format '%s': %v", sizeStr, err)
-			os.Exit(1)
+			ExitWithError("Invalid size format '%s': %v", sizeStr, err)
 		}
 
 		// 3. Create the Overlay
@@ -95,8 +91,7 @@ If no image path is provided, defaults to 'env.img'.`,
 				utils.PrintWarning("Overlay creation cancelled.")
 				return
 			}
-			utils.PrintError("%v", err)
-			os.Exit(1)
+			ExitWithError("%v", err)
 		}
 
 		// 4. Initialize with Conda environment if file specified
@@ -106,8 +101,7 @@ If no image path is provided, defaults to 'env.img'.`,
 					utils.PrintWarning("Overlay initialization cancelled.")
 					return
 				}
-				utils.PrintError("Failed to initialize overlay with conda environment: %v", err)
-				os.Exit(1)
+				ExitWithError("Failed to initialize overlay with conda environment: %v", err)
 			}
 		} else {
 			// Initialize with minimal conda environment (zlib)
@@ -116,8 +110,7 @@ If no image path is provided, defaults to 'env.img'.`,
 					utils.PrintWarning("Overlay initialization cancelled.")
 					return
 				}
-				utils.PrintError("Failed to initialize overlay with conda environment: %v", err)
-				os.Exit(1)
+				ExitWithError("Failed to initialize overlay with conda environment: %v", err)
 			}
 		}
 	},
@@ -145,29 +138,26 @@ var resizeCmd = &cobra.Command{
 		if sizeStr == "" {
 			utils.PrintError("Size flag is required (e.g., -s 20G)")
 			_ = cmd.Usage()
-			os.Exit(1)
+			os.Exit(ExitCodeError)
 		}
 
 		// 2. Parse Size
 		sizeMB, err := utils.ParseSizeToMB(sizeStr)
 		if err != nil {
-			utils.PrintError("Invalid size format '%s': %v", sizeStr, err)
-			os.Exit(1)
+			ExitWithError("Invalid size format '%s': %v", sizeStr, err)
 		}
 
 		// 3. Execute
 		absPath, _ := filepath.Abs(path)
 		lock, err := overlay.AcquireLock(absPath, true)
 		if err != nil {
-			utils.PrintError("%v", err)
-			os.Exit(1)
+			ExitWithError("%v", err)
 		}
 		defer lock.Close()
 
 		err = overlay.Resize(cmd.Context(), path, sizeMB)
 		if err != nil {
-			utils.PrintError("%v", err)
-			os.Exit(1)
+			ExitWithError("%v", err)
 		}
 	},
 }
@@ -190,15 +180,13 @@ var infoCmd = &cobra.Command{
 		absPath, _ := filepath.Abs(path)
 		lock, err := overlay.AcquireLock(absPath, false)
 		if err != nil {
-			utils.PrintError("%v", err)
-			os.Exit(1)
+			ExitWithError("%v", err)
 		}
 		defer lock.Close()
 
 		stats, err := overlay.GetStats(path)
 		if err != nil {
-			utils.PrintError("%v", err)
-			os.Exit(1)
+			ExitWithError("%v", err)
 		}
 
 		usedBytes, diskPct := stats.Usage()
@@ -280,15 +268,13 @@ var checkCmd = &cobra.Command{
 		absPath, _ := filepath.Abs(path)
 		lock, err := overlay.AcquireLock(absPath, true)
 		if err != nil {
-			utils.PrintError("%v", err)
-			os.Exit(1)
+			ExitWithError("%v", err)
 		}
 		defer lock.Close()
 
 		err = overlay.CheckIntegrity(cmd.Context(), path, force)
 		if err != nil {
-			utils.PrintError("%v", err)
-			os.Exit(1)
+			ExitWithError("%v", err)
 		}
 	},
 }
@@ -339,8 +325,7 @@ Multiple paths can be specified using multiple -p flags.`,
 		absPath, _ := filepath.Abs(path)
 		lock, err := overlay.AcquireLock(absPath, true)
 		if err != nil {
-			utils.PrintError("%v", err)
-			os.Exit(1)
+			ExitWithError("%v", err)
 		}
 		defer lock.Close()
 

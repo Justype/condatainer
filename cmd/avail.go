@@ -31,7 +31,9 @@ var availCmd = &cobra.Command{
 By default, shows both local and remote build scripts.
 Use --local to show only local scripts.
 Use --remote to show only remote scripts.
-Use search terms to filter results (AND logic applied).`,
+Use search terms to filter results (AND logic applied).
+
+Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
 	Example: `  condatainer avail              # List all build scripts (local + remote)
   condatainer avail --local      # Only local build scripts
   condatainer avail --remote     # Only remote build scripts
@@ -220,7 +222,10 @@ func runAvail(cmd *cobra.Command, args []string) error {
 				return err
 			}
 
-			utils.PrintSuccess("All selected overlays installed/submitted.")
+			// If jobs were submitted to the scheduler, exit with the same distinct code
+			// so downstream tooling can detect overlays will be created asynchronously.
+			ExitIfJobsSubmitted(graph)
+			utils.PrintSuccess("All selected overlays installed.")
 		} else {
 			utils.PrintNote("All matching packages are already installed.")
 		}

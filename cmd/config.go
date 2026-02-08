@@ -101,8 +101,7 @@ Shows:
 		if showPath {
 			configPath, err := config.GetUserConfigPath()
 			if err != nil {
-				utils.PrintError("Failed to get config path: %v", err)
-				os.Exit(1)
+				ExitWithError("Failed to get config path: %v", err)
 			}
 			fmt.Println(configPath)
 			return
@@ -306,8 +305,7 @@ var configGetCmd = &cobra.Command{
 		key := args[0]
 		value := viper.Get(key)
 		if value == nil {
-			utils.PrintError("Unknown config key: %s", key)
-			os.Exit(1)
+			ExitWithError("Unknown config key: %s", key)
 		}
 		fmt.Println(value)
 	},
@@ -351,7 +349,7 @@ Time duration format (for build.time):
 		if key == "extra_base_dirs" {
 			utils.PrintError("'%s' is an array setting. Use 'condatainer config edit' or environment variable.", key)
 			utils.PrintHint("Config file (YAML array):\n  extra_base_dirs:\n    - /path/to/dir1\n    - /path/to/dir2\n\nEnvironment variable (colon-separated):\n  export CONDATAINER_EXTRA_BASE_DIRS=/path/to/dir1:/path/to/dir2")
-			os.Exit(1)
+			os.Exit(ExitCodeError)
 		}
 
 		if !knownKeys[key] {
@@ -363,7 +361,7 @@ Time duration format (for build.time):
 			if _, err := utils.ParseDuration(value); err != nil {
 				utils.PrintError("Invalid duration format: %s", value)
 				utils.PrintHint("Use format like: 2h, 30m, 1h30m, or 02:00:00")
-				os.Exit(1)
+				os.Exit(ExitCodeError)
 			}
 		}
 
@@ -373,14 +371,12 @@ Time duration format (for build.time):
 		// Get the config path that will be updated
 		configPath, err := config.GetActiveOrUserConfigPath()
 		if err != nil {
-			utils.PrintError("Failed to get config path: %v", err)
-			os.Exit(1)
+			ExitWithError("Failed to get config path: %v", err)
 		}
 
 		// Save to config file
 		if err := config.SaveConfig(); err != nil {
-			utils.PrintError("Failed to save config: %v", err)
-			os.Exit(1)
+			ExitWithError("Failed to save config: %v", err)
 		}
 
 		utils.PrintSuccess("Set %s = %s", utils.StyleInfo(key), utils.StyleInfo(value))
@@ -415,8 +411,7 @@ By default, the location is chosen based on the installation:
 			// User specified a location
 			configPath, err = config.GetConfigPathByLocation(initLocation)
 			if err != nil {
-				utils.PrintError("Invalid location: %v", err)
-				os.Exit(1)
+				ExitWithError("Invalid location: %v", err)
 			}
 			// Normalize shortcut to full name for display
 			switch initLocation {
@@ -437,8 +432,7 @@ By default, the location is chosen based on the installation:
 			} else {
 				configPath, err = config.GetUserConfigPath()
 				if err != nil {
-					utils.PrintError("Failed to get config path: %v", err)
-					os.Exit(1)
+					ExitWithError("Failed to get config path: %v", err)
 				}
 				locationType = "user"
 			}
@@ -471,8 +465,7 @@ By default, the location is chosen based on the installation:
 		// Force re-detect binaries from current environment and save to specified path
 		updated, err := config.ForceDetectAndSaveTo(configPath)
 		if err != nil {
-			utils.PrintError("Failed to save config: %v", err)
-			os.Exit(1)
+			ExitWithError("Failed to save config: %v", err)
 		}
 
 		// Check if apptainer was found
@@ -521,16 +514,14 @@ var configEditCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		configPath, err := config.GetActiveOrUserConfigPath()
 		if err != nil {
-			utils.PrintError("Failed to get config path: %v", err)
-			os.Exit(1)
+			ExitWithError("Failed to get config path: %v", err)
 		}
 
 		// Create config if it doesn't exist
 		if _, err := os.Stat(configPath); os.IsNotExist(err) {
 			utils.PrintNote("Config file doesn't exist, creating it first...")
 			if err := config.SaveConfig(); err != nil {
-				utils.PrintError("Failed to create config: %v", err)
-				os.Exit(1)
+				ExitWithError("Failed to create config: %v", err)
 			}
 		}
 
@@ -547,8 +538,7 @@ var configEditCmd = &cobra.Command{
 		editorCmd.Stderr = os.Stderr
 
 		if err := editorCmd.Run(); err != nil {
-			utils.PrintError("Failed to open editor: %v", err)
-			os.Exit(1)
+			ExitWithError("Failed to open editor: %v", err)
 		}
 	},
 }
@@ -699,8 +689,7 @@ var configValidateCmd = &cobra.Command{
 				utils.PrintSuccess("Configuration is valid")
 			}
 		} else {
-			utils.PrintError("Configuration has errors")
-			os.Exit(1)
+			ExitWithError("Configuration has errors")
 		}
 	},
 }

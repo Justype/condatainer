@@ -918,6 +918,32 @@ condatainer run analysis.sh -a
 * Otherwise, logs are written to the global logs directory (`~/logs` by default)
 * Job scripts (`.sbatch`) are created alongside the log files
 
+### Exit Codes (script and job-submission behavior) ⚠️
+
+CondaTainer uses specific exit codes so automation and downstream tooling can detect special states:
+
+- `0` — Success (all requested builds completed locally or nothing to do)
+- `1` — Generic error (invalid arguments, build failures, or other fatal errors)
+- `2` — **Jobs submitted to scheduler** — overlays will be created asynchronously by scheduler jobs
+
+Commands that may return exit code `2` when scheduler jobs were submitted include:
+
+- `condatainer create ...`
+- `condatainer check -a ...` (auto-install missing deps)
+- `condatainer avail -i ...` (install from search results)
+
+Quick example for shell scripts that detect the job-submitted state:
+
+```bash
+condatainer create samtools/1.22
+if [ $? -eq 2 ]; then
+  echo "Jobs submitted to scheduler — overlays will be created asynchronously"
+  # Optionally: exit 0 or wait/monitor jobs here
+fi
+```
+
+Note: When exit code `2` is returned, CondaTainer prints a message showing the number of jobs submitted (and can be extended to emit JSON or write job metadata for automation).
+
 **Disabling Job Submission:**
 
 ```bash

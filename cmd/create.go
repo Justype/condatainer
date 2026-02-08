@@ -36,7 +36,9 @@ var createCmd = &cobra.Command{
 	Use:     "create [packages...]",
 	Aliases: []string{"install", "i"},
 	Short:   "Create a new SquashFS overlay",
-	Long:    `Create a new SquashFS overlay using available build scripts or Conda packages.`,
+	Long: `Create a new SquashFS overlay using available build scripts or Conda packages.
+
+Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
 	Example: `  condatainer create samtools/1.22                # Create from build script
   condatainer create python=3.11 numpy -n myenv  # Create conda environment
   condatainer create -f environment.yml -p myenv  # Create from conda file
@@ -45,34 +47,24 @@ var createCmd = &cobra.Command{
 		ctx := cmd.Context()
 		// 1. Validation Logic
 		if len(args) == 0 && createFile == "" && createSource == "" {
-			utils.PrintError("At least one of [packages], --file, or --source must be provided.")
-			os.Exit(1)
+			ExitWithError("At least one of [packages], --file, or --source must be provided.")
 		}
-
 		if len(args) > 0 && createPrefix != "" {
-			utils.PrintError("Packages cannot be used with --prefix.")
-			os.Exit(1)
+			ExitWithError("Packages cannot be used with --prefix.")
 		}
-
 		if createPrefix != "" && createName != "" {
-			utils.PrintError("Cannot use both --prefix and --name at the same time.")
-			os.Exit(1)
+			ExitWithError("Cannot use both --prefix and --name at the same time.")
 		}
-
 		if createSource != "" && createName == "" && createPrefix == "" {
-			utils.PrintError("When using --source, either --name or --prefix must be provided.")
-			os.Exit(1)
+			ExitWithError("When using --source, either --name or --prefix must be provided.")
 		}
-
 		if createFile != "" && createPrefix == "" {
-			utils.PrintError("When using --file, --prefix must be provided.")
-			os.Exit(1)
+			ExitWithError("When using --file, --prefix must be provided.")
 		}
 
 		// 2. Ensure base image exists (also checks for apptainer)
 		if err := apptainer.EnsureBaseImage(ctx); err != nil {
-			utils.PrintError("%v", err)
-			os.Exit(1)
+			ExitWithError("%v", err)
 		}
 
 		// 3. Handle Compression Config
@@ -95,8 +87,7 @@ var createCmd = &cobra.Command{
 		if createTempSize != "" {
 			sizeMB, err := utils.ParseSizeToMB(createTempSize)
 			if err != nil {
-				utils.PrintError("Invalid temp size: %v", err)
-				os.Exit(1)
+				ExitWithError("Invalid temp size: %v", err)
 			}
 			config.Global.Build.TmpSizeMB = sizeMB
 		}
@@ -150,8 +141,7 @@ func init() {
 func getWritableImagesDir() string {
 	dir, err := config.GetWritableImagesDir()
 	if err != nil {
-		utils.PrintError("No writable images directory found: %v", err)
-		os.Exit(1)
+		ExitWithError("No writable images directory found: %v", err)
 	}
 	return dir
 }
@@ -165,8 +155,7 @@ func runCreatePackages(ctx context.Context, packages []string) {
 	for _, pkg := range packages {
 		bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir())
 		if err != nil {
-			utils.PrintError("Failed to create build object for %s: %v", pkg, err)
-			os.Exit(1)
+			ExitWithError("Failed to create build object for %s: %v", pkg, err)
 		}
 		utils.PrintDebug("[CREATE] BuildObject created:\n%s", bo)
 		buildObjects = append(buildObjects, bo)
@@ -174,13 +163,15 @@ func runCreatePackages(ctx context.Context, packages []string) {
 
 	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
 	if err != nil {
-		utils.PrintError("Failed to create build graph: %v", err)
-		os.Exit(1)
+		ExitWithError("Failed to create build graph: %v", err)
 	}
 
 	if err := graph.Run(ctx); err != nil {
 		exitOnBuildError(err)
 	}
+	// If jobs were submitted to the scheduler, exit with a distinct code so downstream tooling
+	// can detect that overlays will be created asynchronously by scheduler jobs.
+	ExitIfJobsSubmitted(graph)
 }
 
 // runCreateWithName creates a single sqf with multiple packages or from YAML
@@ -192,8 +183,7 @@ func runCreateWithName(ctx context.Context, packages []string) {
 	normalizedName := utils.NormalizeNameVersion(createName)
 	slashCount := strings.Count(normalizedName, "/")
 	if slashCount > 1 {
-		utils.PrintError("--name cannot contain more than one '/'")
-		os.Exit(1)
+		ExitWithError("--name cannot contain more than one '/'")
 	}
 
 	// Check if already exists (search all paths)
@@ -214,8 +204,7 @@ func runCreateWithName(ctx context.Context, packages []string) {
 	if createFile != "" {
 		// YAML file mode
 		if !strings.HasSuffix(createFile, ".yml") && !strings.HasSuffix(createFile, ".yaml") {
-			utils.PrintError("File must be .yml or .yaml for conda environments")
-			os.Exit(1)
+			ExitWithError("File must be .yml or .yaml for conda environments")
 		}
 		buildSource, _ = filepath.Abs(createFile)
 	} else if len(packages) > 0 {
@@ -226,13 +215,11 @@ func runCreateWithName(ctx context.Context, packages []string) {
 	// Create CondaBuildObject using the new factory function
 	bo, err := build.NewCondaObjectWithSource(normalizedName, buildSource, imagesDir, config.GetWritableTmpDir())
 	if err != nil {
-		utils.PrintError("Failed to create build object: %v", err)
-		os.Exit(1)
+		ExitWithError("Failed to create build object: %v", err)
 	}
 
 	if err := bo.Build(ctx, false); err != nil {
-		utils.PrintError("Build failed: %v", err)
-		os.Exit(1)
+		ExitWithError("Build failed: %v", err)
 	}
 }
 
@@ -245,13 +232,11 @@ func runCreateWithPrefix(ctx context.Context) {
 	outputDir := filepath.Dir(absPrefix)
 
 	if createFile == "" {
-		utils.PrintError("--prefix requires --file to be specified")
-		os.Exit(1)
+		ExitWithError("--prefix requires --file to be specified")
 	}
 
 	if !utils.FileExists(createFile) {
-		utils.PrintError("File %s not found", utils.StylePath(createFile))
-		os.Exit(1)
+		ExitWithError("File %s not found", utils.StylePath(createFile))
 	}
 
 	utils.PrintDebug("[CREATE] Creating overlay with prefix: %s", createPrefix)
@@ -262,12 +247,10 @@ func runCreateWithPrefix(ctx context.Context) {
 		absFile, _ := filepath.Abs(createFile)
 		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, config.GetWritableTmpDir())
 		if err != nil {
-			utils.PrintError("Failed to create build object: %v", err)
-			os.Exit(1)
+			ExitWithError("Failed to create build object: %v", err)
 		}
 		if err := bo.Build(ctx, false); err != nil {
-			utils.PrintError("Build failed: %v", err)
-			os.Exit(1)
+			ExitWithError("Build failed: %v", err)
 		}
 	} else if strings.HasSuffix(createFile, ".sh") || strings.HasSuffix(createFile, ".bash") || strings.HasSuffix(createFile, ".def") {
 		// Shell script or apptainer def file
@@ -275,23 +258,23 @@ func runCreateWithPrefix(ctx context.Context) {
 		absFile, _ := filepath.Abs(createFile)
 		bo, err := build.FromExternalSource(absPrefix, absFile, isApptainer, outputDir, config.GetWritableTmpDir())
 		if err != nil {
-			utils.PrintError("Failed to create build object from %s: %v", createFile, err)
-			os.Exit(1)
+			ExitWithError("Failed to create build object from %s: %v", createFile, err)
 		}
 
 		buildObjects := []build.BuildObject{bo}
 		graph, err := build.NewBuildGraph(buildObjects, outputDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
 		if err != nil {
-			utils.PrintError("Failed to create build graph: %v", err)
-			os.Exit(1)
+			ExitWithError("Failed to create build graph: %v", err)
 		}
 
 		if err := graph.Run(ctx); err != nil {
 			exitOnBuildError(err)
 		}
+		// If jobs were submitted to the scheduler, exit with a distinct code so downstream tooling
+		// can detect that overlays will be created asynchronously by scheduler jobs.
+		ExitIfJobsSubmitted(graph)
 	} else {
-		utils.PrintError("File must be .yml, .yaml, .sh, .bash, or .def")
-		os.Exit(1)
+		ExitWithError("File must be .yml, .yaml, .sh, .bash, or .def")
 	}
 }
 
@@ -301,8 +284,7 @@ func runCreateFromSource(ctx context.Context) {
 	imagesDir := getWritableImagesDir()
 
 	if createPrefix == "" && createName == "" {
-		utils.PrintError("--source requires either --name or --prefix")
-		os.Exit(1)
+		ExitWithError("--source requires either --name or --prefix")
 	}
 
 	var targetPrefix string
@@ -311,8 +293,7 @@ func runCreateFromSource(ctx context.Context) {
 	} else {
 		normalizedName := utils.NormalizeNameVersion(createName)
 		if strings.Count(normalizedName, "/") > 1 {
-			utils.PrintError("--name cannot contain more than one '/'")
-			os.Exit(1)
+			ExitWithError("--name cannot contain more than one '/'")
 		}
 		fileName := strings.ReplaceAll(normalizedName, "/", "--")
 		targetPrefix = filepath.Join(imagesDir, fileName)
@@ -323,8 +304,7 @@ func runCreateFromSource(ctx context.Context) {
 	if !isRemote {
 		source, _ = filepath.Abs(source)
 		if !utils.FileExists(source) {
-			utils.PrintError("Source %s not found", utils.StylePath(source))
-			os.Exit(1)
+			ExitWithError("Source %s not found", utils.StylePath(source))
 		}
 	}
 
@@ -335,19 +315,21 @@ func runCreateFromSource(ctx context.Context) {
 
 	bo, err := build.FromExternalSource(targetPrefix, source, isApptainer, imagesDir, config.GetWritableTmpDir())
 	if err != nil {
-		utils.PrintError("Failed to create build object from %s: %v", source, err)
-		os.Exit(1)
+		ExitWithError("Failed to create build object from %s: %v", source, err)
 	}
 
 	buildObjects := []build.BuildObject{bo}
 	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
 	if err != nil {
-		os.Exit(1)
+		ExitWithError("Failed to create build graph: %v", err)
 	}
 
 	if err := graph.Run(ctx); err != nil {
 		exitOnBuildError(err)
 	}
+	// If jobs were submitted to the scheduler, exit with a distinct code so downstream tooling
+	// can detect that overlays will be created asynchronously by scheduler jobs.
+	ExitIfJobsSubmitted(graph)
 }
 
 func exitOnBuildError(err error) {
@@ -358,5 +340,5 @@ func exitOnBuildError(err error) {
 	} else {
 		utils.PrintError("Build failed: %v", err)
 	}
-	os.Exit(1)
+	os.Exit(ExitCodeError)
 }

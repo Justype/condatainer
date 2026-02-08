@@ -28,7 +28,9 @@ If the script is not found locally, it will be downloaded from remote metadata.
 
 Dependencies are declared in scripts using comments like:
   #DEP: package/version
-  #DEP: another-package/1.0`,
+  #DEP: another-package/1.0
+
+Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
 	Example: `  condatainer check script.sh           # Check local script
   condatainer check samtools/1.22       # Check build script by name
   condatainer check script.sh -a        # Check and auto-install missing deps`,
@@ -182,7 +184,11 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("some overlays failed to install: %w", err)
 	}
 
-	utils.PrintSuccess("All selected overlays installed/submitted.")
+	// If jobs were submitted to the scheduler, exit with the same distinct code
+	// so downstream tooling can detect overlays will be created asynchronously.
+	ExitIfJobsSubmitted(graph)
+
+	utils.PrintSuccess("All selected overlays installed.")
 	return nil
 }
 
