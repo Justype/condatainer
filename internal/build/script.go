@@ -398,6 +398,7 @@ func (s *ScriptBuildObject) createSquashfs(ctx context.Context, sourceDir, targe
 
 	// Build mksquashfs command
 	bashScript := ""
+	packOverlays := []string{s.tmpOverlayPath}
 	if sourceDir == "/cnt" {
 		// For app overlays: set permissions first
 		bashScript = fmt.Sprintf(`
@@ -407,7 +408,7 @@ find /cnt -type f -exec chmod ug+rw,o+r {} \;
 find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
 
 echo "Packing overlay to SquashFS..."
-mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
+mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
 `, targetPath, s.ncpus, config.Global.Build.CompressArgs)
 	} else {
 		// For ref overlays: fix permissions and pack the directory
@@ -417,8 +418,9 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
 		bashScript = fmt.Sprintf(`
 trap 'exit 130' INT TERM
 echo "Packing overlay to SquashFS..."
-mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
+mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M
 `, sourceDir, targetPath, s.ncpus, config.Global.Build.CompressArgs)
+		packOverlays = []string{} // No need to pack with tmpOverlay for ref overlays since sourceDir is already prepared
 	}
 
 	// Collect bind directories (deduplicated)
@@ -428,7 +430,7 @@ mksquashfs %s %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
 	opts := execpkg.Options{
 		BaseImage:    config.GetBaseImage(),
 		ApptainerBin: config.Global.ApptainerBin,
-		Overlays:     []string{s.tmpOverlayPath},
+		Overlays:     packOverlays,
 		BindPaths:    bindDirs,
 		Command:      []string{"/bin/bash", "-c", bashScript},
 		HidePrompt:   true,

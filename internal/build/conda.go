@@ -189,7 +189,7 @@ find /cnt -type f -exec chmod ug+rw,o+r {} \;
 find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
 
 echo "Packing overlay to SquashFS..."
-mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M &> /dev/null
+mksquashfs /cnt %s -processors %d -keep-as-directory %s -b 1M
 `,
 		installCmd,
 		c.targetOverlayPath, c.ncpus, config.Global.Build.CompressArgs,
