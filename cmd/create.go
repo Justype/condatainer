@@ -134,7 +134,7 @@ func init() {
 	f.BoolVar(&compZstd, "zstd", false, "Use zstd compression level 14")
 	f.BoolVar(&compZstdHigh, "zstd-high", false, "Use zstd compression level 19")
 	f.BoolVar(&compGzip, "gzip", false, "Use gzip compression")
-	f.BoolVar(&compLz4, "lz4", false, "Use LZ4 compression (default)")
+	f.BoolVar(&compLz4, "lz4", false, "Use LZ4 compression")
 }
 
 // getWritableImagesDir returns the writable images directory or exits with an error
