@@ -9,7 +9,7 @@
 **CondaTainer** is an HPC-oriented CLI that streamlines environment and data management by utilizing Apptainer, SquashFS, OverlayFS, and Micromamba.
 
 * **Inode Saver:** Packing 30k+ Conda files into a single image to satisfy inode quotas.
-* **Web-App Ready:** Out-of-the-box support for running *RStudio Server*, *code-server* and more on HPC.
+* **Web-App Ready:** Out-of-the-box support for running *RStudio*, *VS Code*, *Jupyter* and more on HPC.
 * **Environment Isolation:** Supports read-only (`.sqf`) for production and writable (`.img`) for development.
 * **Workload Manager Integration:** Native compatibility with Slurm for batch job submission.
 
@@ -64,7 +64,7 @@ condatainer exec -o grch38/cellranger/2024-A bash
 
 ## 📦 Writable Overlay
 
-**CondaTainer** allows users to create writable overlays for development purposes.
+**CondaTainer** allows users to create writable workspace overlays for development purposes.
 
 ```bash
 # Create a writable overlay of size 5G

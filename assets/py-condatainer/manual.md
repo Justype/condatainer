@@ -1,4 +1,4 @@
-# CondaTainer Manual
+# CondaTainer (Python) Manual
 
 📦 **CondaTainer** is a wrapper script designed to streamline the management of Apptainer (Singularity) containers backed by Conda environments and SquashFS overlays.
 

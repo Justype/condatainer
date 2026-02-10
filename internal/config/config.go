@@ -9,7 +9,7 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-const VERSION = "1.1.0"
+const VERSION = "1.1.1"
 const GitHubRepo = "Justype/condatainer"
 const GITHUB_REPO = GitHubRepo // Exported constant for compatibility
 

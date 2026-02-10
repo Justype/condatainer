@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Tuple
 os.umask(0o002)
 
 class Config:
-    VERSION = "1.1.0"
+    VERSION = "1.1.1"
 
     # Global settings
     debug = False
