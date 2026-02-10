@@ -15,6 +15,9 @@ const PermFile os.FileMode = 0664
 // Dir:  u=rwx, g=rwx, o=rx (Requires +x to traverse)
 const PermDir os.FileMode = 0775
 
+// Exec: u=rwx, g=rwx, o=rx (Executable files with group write access)
+const PermExec os.FileMode = 0775
+
 // FixPermissionsDefault is a helper that applies standard permissions (0664/0775).
 // It is a shorthand for FixPermissions(path, PermFile, PermDir).
 func FixPermissionsDefault(path string) error {
@@ -199,5 +202,5 @@ func EnsureDir(path string) error {
 	if DirExists(path) {
 		return nil
 	}
-	return os.MkdirAll(path, 0775)
+	return os.MkdirAll(path, PermDir)
 }

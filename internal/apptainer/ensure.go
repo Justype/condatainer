@@ -54,7 +54,7 @@ func EnsureBaseImage(ctx context.Context, update bool, downloadOnly bool) error 
 		newPath := baseImagePath + ".new"
 
 		// Ensure the parent directory exists
-		if err := os.MkdirAll(filepath.Dir(newPath), 0775); err != nil {
+		if err := os.MkdirAll(filepath.Dir(newPath), utils.PermDir); err != nil {
 			return fmt.Errorf("failed to create images directory: %w", err)
 		}
 
@@ -91,7 +91,7 @@ func EnsureBaseImage(ctx context.Context, update bool, downloadOnly bool) error 
 		}
 
 		// Set permissions
-		if err := os.Chmod(baseImagePath, 0664); err != nil {
+		if err := os.Chmod(baseImagePath, utils.PermFile); err != nil {
 			utils.PrintWarning("Failed to set permissions on base image: %v", err)
 		}
 
@@ -105,7 +105,7 @@ func EnsureBaseImage(ctx context.Context, update bool, downloadOnly bool) error 
 	}
 
 	// Ensure the parent directory exists
-	if err := os.MkdirAll(filepath.Dir(baseImagePath), 0775); err != nil {
+	if err := os.MkdirAll(filepath.Dir(baseImagePath), utils.PermDir); err != nil {
 		return fmt.Errorf("failed to create images directory: %w", err)
 	}
 
@@ -145,7 +145,7 @@ func EnsureBaseImage(ctx context.Context, update bool, downloadOnly bool) error 
 	utils.PrintSuccess("Base image built at %s", utils.StylePath(baseImagePath))
 
 	// Set permissions
-	if err := os.Chmod(baseImagePath, 0664); err != nil {
+	if err := os.Chmod(baseImagePath, utils.PermFile); err != nil {
 		utils.PrintWarning("Failed to set permissions on base image: %v", err)
 	}
 

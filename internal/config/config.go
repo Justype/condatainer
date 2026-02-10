@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/Justype/condatainer/internal/utils"
 )
 
 const VERSION = "1.1.0"
@@ -149,7 +151,7 @@ func GetBaseImage() string {
 // isWritableDir checks if a directory is writable by trying to create a test file
 func isWritableDir(dir string) bool {
 	// Try to create directory if it doesn't exist
-	if err := os.MkdirAll(dir, 0775); err != nil {
+	if err := os.MkdirAll(dir, utils.PermDir); err != nil {
 		return false
 	}
 

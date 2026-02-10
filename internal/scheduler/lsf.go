@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Justype/condatainer/internal/utils"
 )
 
 // LsfScheduler implements the Scheduler interface for IBM Spectrum LSF
@@ -335,7 +337,7 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	// Create output directory if specified
 	if outputDir != "" {
-		if err := os.MkdirAll(outputDir, 0775); err != nil {
+		if err := os.MkdirAll(outputDir, utils.PermDir); err != nil {
 			return "", NewScriptCreationError(jobSpec.Name, outputDir, err)
 		}
 	}
@@ -475,7 +477,7 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
 
 	// Make executable
-	if err := os.Chmod(scriptPath, 0775); err != nil {
+	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {
 		return "", NewScriptCreationError(jobSpec.Name, scriptPath, err)
 	}
 

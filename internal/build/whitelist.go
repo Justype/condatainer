@@ -49,7 +49,7 @@ func loadDefListFromPath(listPath string) map[string]bool {
 func saveDefListToPath(listPath string, entries []string) error {
 	// Ensure directory exists
 	dir := filepath.Dir(listPath)
-	if err := os.MkdirAll(dir, 0775); err != nil {
+	if err := os.MkdirAll(dir, utils.PermDir); err != nil {
 		return err
 	}
 
@@ -63,7 +63,7 @@ func saveDefListToPath(listPath string, entries []string) error {
 		content += "\n"
 	}
 
-	return os.WriteFile(listPath, []byte(content), 0664)
+	return os.WriteFile(listPath, []byte(content), utils.PermFile)
 }
 
 // loadAllDefLists loads the def list from all image directories

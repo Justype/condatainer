@@ -159,7 +159,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Make executable
-	if err := os.Chmod(tempPath, 0755); err != nil {
+	if err := os.Chmod(tempPath, utils.PermExec); err != nil {
 		os.Remove(tempPath)
 		return fmt.Errorf("failed to set executable permissions: %w", err)
 	}
@@ -347,7 +347,7 @@ func downloadFile(url, destPath string) error {
 	}
 
 	// Create parent directory
-	if err := os.MkdirAll(filepath.Dir(destPath), 0775); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), utils.PermDir); err != nil {
 		return err
 	}
 

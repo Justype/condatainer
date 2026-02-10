@@ -48,7 +48,7 @@ func saveState(state *State) error {
 	}
 
 	// Create state directory if it doesn't exist
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := os.MkdirAll(stateDir, utils.PermDir); err != nil {
 		return fmt.Errorf("failed to create state directory: %w", err)
 	}
 
@@ -62,7 +62,7 @@ func saveState(state *State) error {
 		return fmt.Errorf("failed to marshal state: %w", err)
 	}
 
-	if err := os.WriteFile(statePath, data, 0644); err != nil {
+	if err := os.WriteFile(statePath, data, utils.PermFile); err != nil {
 		return fmt.Errorf("failed to write state file: %w", err)
 	}
 

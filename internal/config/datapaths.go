@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/viper"
 )
 
@@ -421,7 +422,7 @@ func FindHelperScript(name string) (string, error) {
 func GetWritableImagesDir() (string, error) {
 	for _, dir := range GetImageSearchPaths() {
 		// Try to create directory if it doesn't exist
-		if err := os.MkdirAll(dir, 0775); err != nil {
+		if err := os.MkdirAll(dir, utils.PermDir); err != nil {
 			continue
 		}
 
@@ -442,7 +443,7 @@ func GetWritableImagesDir() (string, error) {
 // GetWritableBuildScriptsDir returns the first writable build scripts directory.
 func GetWritableBuildScriptsDir() (string, error) {
 	for _, dir := range GetBuildScriptSearchPaths() {
-		if err := os.MkdirAll(dir, 0775); err != nil {
+		if err := os.MkdirAll(dir, utils.PermDir); err != nil {
 			continue
 		}
 
@@ -462,7 +463,7 @@ func GetWritableBuildScriptsDir() (string, error) {
 // GetWritableHelperScriptsDir returns the first writable helper scripts directory.
 func GetWritableHelperScriptsDir() (string, error) {
 	for _, dir := range GetHelperScriptSearchPaths() {
-		if err := os.MkdirAll(dir, 0775); err != nil {
+		if err := os.MkdirAll(dir, utils.PermDir); err != nil {
 			continue
 		}
 

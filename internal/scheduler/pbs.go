@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Justype/condatainer/internal/utils"
 )
 
 // PbsScheduler implements the Scheduler interface for PBS/Torque
@@ -313,7 +315,7 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	// Create output directory if specified (scripts still live in outputDir)
 	if outputDir != "" {
-		if err := os.MkdirAll(outputDir, 0775); err != nil {
+		if err := os.MkdirAll(outputDir, utils.PermDir); err != nil {
 			return "", NewScriptCreationError(jobSpec.Name, outputDir, err)
 		}
 	}
@@ -455,7 +457,7 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
 
 	// Make executable
-	if err := os.Chmod(scriptPath, 0775); err != nil {
+	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {
 		return "", NewScriptCreationError(jobSpec.Name, scriptPath, err)
 	}
 

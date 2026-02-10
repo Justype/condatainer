@@ -252,7 +252,7 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 	}
 
 	// Ensure tmp directory exists
-	if err := os.MkdirAll(tmpDir, 0775); err != nil {
+	if err := os.MkdirAll(tmpDir, utils.PermDir); err != nil {
 		return "", fmt.Errorf("failed to create tmp directory: %w", err)
 	}
 

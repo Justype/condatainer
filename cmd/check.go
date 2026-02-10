@@ -229,7 +229,7 @@ func resolveScriptPath(scriptPathOrName string) (string, bool, error) {
 		}
 
 		// Make executable
-		if err := os.Chmod(tempPath, 0755); err != nil {
+		if err := os.Chmod(tempPath, utils.PermExec); err != nil {
 			os.Remove(tempPath)
 			return "", false, fmt.Errorf("failed to make script executable: %w", err)
 		}

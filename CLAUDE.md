@@ -101,4 +101,4 @@ Shell scripts must define an `install()` function. Available variables: `$NCPUS`
 - Error types: `ApptainerError`, `ValidationError` with structured fields
 - Console output: Use `utils.Print*` functions (PrintMessage, PrintWarning, PrintError, PrintDebug)
 - Path handling: Always use absolute paths; `config.Get*Dir()` functions for standard locations
-- File permissions: Use `0775` for directories and `0664` for files to support group access on HPC systems
+- File permissions: Use `utils.PermFile` (0664), `utils.PermDir` (0775), and `utils.PermExec` (0775) constants for consistent group access on HPC systems

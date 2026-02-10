@@ -434,7 +434,7 @@ func submitRunJob(sched scheduler.Scheduler, scriptPath, originScriptPath string
 	}
 
 	// Ensure logs directory exists
-	if err := os.MkdirAll(logsDir, 0775); err != nil {
+	if err := os.MkdirAll(logsDir, utils.PermDir); err != nil {
 		return fmt.Errorf("failed to create logs directory %s: %w", logsDir, err)
 	}
 

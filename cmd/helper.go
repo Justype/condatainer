@@ -163,7 +163,7 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ensure executable
-	if err := os.Chmod(scriptPath, 0755); err != nil {
+	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {
 		utils.PrintDebug("Failed to chmod helper script: %v", err)
 	}
 
@@ -237,7 +237,7 @@ func updateHelperScripts(args []string, helperScriptsDir string) error {
 	}
 
 	// Create helper scripts directory
-	if err := os.MkdirAll(helperScriptsDir, 0775); err != nil {
+	if err := os.MkdirAll(helperScriptsDir, utils.PermDir); err != nil {
 		return fmt.Errorf("failed to create helper scripts directory: %w", err)
 	}
 
@@ -321,7 +321,7 @@ func downloadExecutable(url, destPath string) error {
 	}
 
 	// Create parent directory
-	if err := os.MkdirAll(filepath.Dir(destPath), 0775); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), utils.PermDir); err != nil {
 		return err
 	}
 
@@ -337,5 +337,5 @@ func downloadExecutable(url, destPath string) error {
 	}
 
 	// Make executable
-	return os.Chmod(destPath, 0755)
+	return os.Chmod(destPath, utils.PermExec)
 }

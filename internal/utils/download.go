@@ -43,7 +43,7 @@ func DownloadFile(url, destPath string) error {
 	}
 
 	// Set permissions for downloaded file (664 for group-writable)
-	if err := os.Chmod(destPath, 0664); err != nil {
+	if err := os.Chmod(destPath, PermFile); err != nil {
 		return fmt.Errorf("failed to set file permissions: %w", err)
 	}
 
@@ -65,13 +65,13 @@ func URLExists(url string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// DownloadExecutable downloads a file and sets it as executable (0775).
+// DownloadExecutable downloads a file and sets it as executable (PermExec).
 func DownloadExecutable(url, destPath string) error {
 	if err := DownloadFile(url, destPath); err != nil {
 		return err
 	}
 
-	if err := os.Chmod(destPath, 0775); err != nil {
+	if err := os.Chmod(destPath, PermExec); err != nil {
 		return fmt.Errorf("failed to set executable permissions: %w", err)
 	}
 
