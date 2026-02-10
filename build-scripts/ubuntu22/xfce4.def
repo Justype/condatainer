@@ -1,0 +1,52 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%labels
+    Author Ziyue Cheng
+    Version 1.0
+    Description "Ubuntu22 with XFCE4 desktop"
+
+%environment
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export PS1='CNT \w> '
+
+%runscript
+    exec /bin/bash "$@"	
+
+%post
+    # Avoid interactive prompts
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get -y update
+
+    # Desktop
+    # XFCE4 and some useful tools
+    # xfce4-terminal: terminal emulator
+    # mousepad: text editor
+    # xfce4-screenshooter: screenshot tool
+    # ristretto: image viewer
+    # xfce4-whiskermenu-plugin: start menu
+    # vlc: media player
+    # audacious: music player
+    # diodon: clipboard manager
+    # drawing: simple drawing tool
+    apt-get -y install dbus-x11 pulseaudio ffmpeg xfce4 \
+        xfce4-terminal mousepad xfce4-screenshooter \
+        ristretto xfce4-whiskermenu-plugin \
+        vlc audacious diodon drawing
+
+    # FireFox
+    apt-get -y install software-properties-common
+    add-apt-repository -y ppa:mozillateam/ppa
+    apt-get -y install firefox-esr
+
+    # vnc
+    apt-get -y install tigervnc-standalone-server novnc
+    # xpra (supports clipboard and audio forwarding)
+    apt-get -y install xpra
+
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+    # xorg settings
+    echo "allowed_users = anybody" >> /etc/X11/Xwrapper.config
