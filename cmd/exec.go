@@ -146,7 +146,7 @@ func execHelpRequested(args []string) bool {
 }
 
 func ensureBaseImage(ctx context.Context) error {
-	return apptainer.EnsureBaseImage(ctx)
+	return apptainer.EnsureBaseImage(ctx, false, false)
 }
 
 func overlayFlagCompletion(includeData bool, includeImg bool) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {

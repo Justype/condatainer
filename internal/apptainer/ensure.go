@@ -26,21 +26,21 @@ func EnsureApptainer() error {
 // EnsureBaseImage ensures the base image exists, downloading or building it if necessary.
 // This is the main entry point for base image initialization.
 //
+// Parameters:
+//   - ctx: Context for cancellation
+//   - update: If true, download to .new and replace old if successful
+//   - downloadOnly: If true, only try download (don't build locally on failure)
+//
 // The function follows this logic:
 //  1. Ensure apptainer is available
-//  2. Search all image paths for existing base image
-//  3. If not found, try to download prebuilt base image (unless debug mode)
-//  4. If download fails, try to build locally from definition file
-func EnsureBaseImage(ctx context.Context) error {
+//  2. If update mode: download to .new, then replace old if successful
+//  3. Otherwise: Search all image paths for existing base image
+//  4. If not found, try to download prebuilt base image (unless debug mode)
+//  5. If download fails and !downloadOnly, try to build locally from definition file
+func EnsureBaseImage(ctx context.Context, update bool, downloadOnly bool) error {
 	// Step 1: Ensure apptainer is available
 	if err := EnsureApptainer(); err != nil {
 		return err
-	}
-
-	// Step 2: Search all image paths for existing base image
-	if existingPath := config.FindBaseImage(); existingPath != "" {
-		utils.PrintDebug("Base image found at %s", utils.StylePath(existingPath))
-		return nil
 	}
 
 	// Get the path where we'll write the new base image
@@ -49,12 +49,67 @@ func EnsureBaseImage(ctx context.Context) error {
 		return fmt.Errorf("no writable directory for base image: %w", err)
 	}
 
+	// Step 2: Handle update mode - download to .new then replace
+	if update {
+		newPath := baseImagePath + ".new"
+
+		// Ensure the parent directory exists
+		if err := os.MkdirAll(filepath.Dir(newPath), 0775); err != nil {
+			return fmt.Errorf("failed to create images directory: %w", err)
+		}
+
+		// Try to download prebuilt base image to .new
+		downloadErr := tryDownloadPrebuiltBaseImage(newPath)
+
+		if downloadErr != nil {
+			// Download failed
+			os.Remove(newPath) // Clean up .new file
+
+			if downloadOnly {
+				// downloadOnly mode - don't try to build locally
+				return fmt.Errorf("failed to download base image: %w", downloadErr)
+			}
+
+			// Try to build locally to .new
+			utils.PrintMessage("Download failed. Trying to build base image locally...")
+			baseDefPath, err := ensureBaseDef()
+			if err != nil {
+				return err
+			}
+
+			if err := Build(ctx, newPath, baseDefPath, nil); err != nil {
+				return fmt.Errorf("building base image failed: %w", err)
+			}
+
+			utils.PrintSuccess("Base image built")
+		}
+
+		// Download or build succeeded - replace old with new
+		os.Remove(baseImagePath) // Remove old (ignore error if doesn't exist)
+		if err := os.Rename(newPath, baseImagePath); err != nil {
+			return fmt.Errorf("failed to replace base image: %w", err)
+		}
+
+		// Set permissions
+		if err := os.Chmod(baseImagePath, 0664); err != nil {
+			utils.PrintWarning("Failed to set permissions on base image: %v", err)
+		}
+
+		return nil
+	}
+
+	// Step 3: Normal mode - Search all image paths for existing base image
+	if existingPath := config.FindBaseImage(); existingPath != "" {
+		utils.PrintDebug("Base image found at %s", utils.StylePath(existingPath))
+		return nil
+	}
+
 	// Ensure the parent directory exists
-	if err := os.MkdirAll(filepath.Dir(baseImagePath), utils.PermDir); err != nil {
+	if err := os.MkdirAll(filepath.Dir(baseImagePath), 0775); err != nil {
 		return fmt.Errorf("failed to create images directory: %w", err)
 	}
 
-	// Step 3: Try to download prebuilt base image
+	// Step 4: Try to download prebuilt base image
 	// In debug mode, always build locally
 	if !config.Global.Debug {
 		utils.PrintMessage("Base image not found. Downloading base image...")
@@ -62,12 +117,20 @@ func EnsureBaseImage(ctx context.Context) error {
 			return nil
 		} else {
 			utils.PrintDebug("Failed to download prebuilt base image: %v", err)
+
+			if downloadOnly {
+				return fmt.Errorf("failed to download base image: %w", err)
+			}
 		}
 	} else {
 		utils.PrintDebug("Base image not found. Proceeding to build locally due to debug mode.")
 	}
 
-	// Step 4: Try to build base image locally
+	// Step 5: Try to build base image locally (unless downloadOnly)
+	if downloadOnly {
+		return fmt.Errorf("download-only mode: base image not found and cannot build locally")
+	}
+
 	utils.PrintMessage("Trying to build base image locally...")
 
 	baseDefPath, err := ensureBaseDef()
@@ -82,7 +145,7 @@ func EnsureBaseImage(ctx context.Context) error {
 	utils.PrintSuccess("Base image built at %s", utils.StylePath(baseImagePath))
 
 	// Set permissions
-	if err := os.Chmod(baseImagePath, utils.PermDir); err != nil {
+	if err := os.Chmod(baseImagePath, 0664); err != nil {
 		utils.PrintWarning("Failed to set permissions on base image: %v", err)
 	}
 

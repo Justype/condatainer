@@ -78,7 +78,7 @@ func runScript(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ensure base image exists
-	if err := apptainer.EnsureBaseImage(cmd.Context()); err != nil {
+	if err := apptainer.EnsureBaseImage(cmd.Context(), false, false); err != nil {
 		return err
 	}
 

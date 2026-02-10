@@ -63,7 +63,7 @@ Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
 		}
 
 		// 2. Ensure base image exists (also checks for apptainer)
-		if err := apptainer.EnsureBaseImage(ctx); err != nil {
+		if err := apptainer.EnsureBaseImage(ctx, false, false); err != nil {
 			ExitWithError("%v", err)
 		}
 

@@ -1231,7 +1231,8 @@ condatainer self-update [-y]
 * Downloads latest binary from GitHub releases.
 * Detects current OS and architecture.
 * Compares versions before updating.
-* Creates temporary backup before replacing.
+* Updates base image when minor or major version changes (not for patch updates).
+* Warns about major version upgrades and suggests rebuilding def-built containers.
 * Supports symlink resolution.
 
 ## Completion

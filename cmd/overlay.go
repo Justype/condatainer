@@ -440,7 +440,7 @@ func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string
 	}
 
 	// Ensure base image exists
-	if err := apptainer.EnsureBaseImage(ctx); err != nil {
+	if err := apptainer.EnsureBaseImage(ctx, false, false); err != nil {
 		return err
 	}
 

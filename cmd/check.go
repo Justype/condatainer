@@ -122,7 +122,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	utils.PrintMessage("Attempting to auto-install missing dependencies...")
 
 	// Ensure base image exists
-	if err := apptainer.EnsureBaseImage(cmd.Context()); err != nil {
+	if err := apptainer.EnsureBaseImage(cmd.Context(), false, false); err != nil {
 		return err
 	}
 
