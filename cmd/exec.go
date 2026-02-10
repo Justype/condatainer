@@ -171,11 +171,11 @@ func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirec
 
 	choices := map[string]struct{}{}
 
-	// Only include overlays from the whitelist (system/def-built overlays)
-	whitelist := build.GetDefBuiltWhitelist()
+	// Only include overlays from the def list (system/def-built overlays)
+	defList := build.GetDefBuiltList()
 	for name := range installed {
 		normalized := utils.NormalizeNameVersion(name)
-		if whitelist[normalized] {
+		if defList[normalized] {
 			if toComplete == "" || strings.HasPrefix(name, toComplete) {
 				choices[name] = struct{}{}
 			}
@@ -354,9 +354,9 @@ func isDefBuiltOverlay(overlayPath string) bool {
 	// Convert -- to / (e.g., build-essential -> build-essential)
 	normalized := strings.ReplaceAll(nameWithoutExt, "--", "/")
 
-	// Check whitelist from build package
-	whitelist := build.GetDefBuiltWhitelist()
-	return whitelist[normalized]
+	// Check def list from build package
+	defList := build.GetDefBuiltList()
+	return defList[normalized]
 }
 
 func pathWithinDir(path, dir string) bool {

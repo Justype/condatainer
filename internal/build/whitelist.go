@@ -6,113 +6,185 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
 var (
-	defBuiltWhitelist     map[string]bool
-	defBuiltWhitelistPath string
+	defBuiltList map[string]bool
 )
 
-// getDefBuiltWhitelistPath returns the path to the persistent whitelist file
-func getDefBuiltWhitelistPath() string {
-	if defBuiltWhitelistPath != "" {
-		return defBuiltWhitelistPath
-	}
-
-	// Try user config directory first
-	userConfigDir, err := os.UserConfigDir()
-	if err == nil {
-		defBuiltWhitelistPath = filepath.Join(userConfigDir, "condatainer", ".def_built_overlays")
-		return defBuiltWhitelistPath
-	}
-
-	// Fallback to temp directory
-	defBuiltWhitelistPath = filepath.Join(os.TempDir(), ".condatainer_def_built_overlays")
-	return defBuiltWhitelistPath
+// getDefListPathForOverlay derives the .def_list path from an overlay's path
+// Returns the .def_list file in the same directory as the overlay
+func getDefListPathForOverlay(overlayPath string) string {
+	imagesDir := filepath.Dir(overlayPath)
+	return filepath.Join(imagesDir, ".def_list")
 }
 
-// loadDefBuiltWhitelist loads the whitelist from persistent file
-func loadDefBuiltWhitelist() map[string]bool {
-	whitelist := make(map[string]bool)
-	whitelistPath := getDefBuiltWhitelistPath()
-	data, err := os.ReadFile(whitelistPath)
+// loadDefListFromPath loads entries from a single .def_list file
+// Returns a map of normalized names, or empty map if file doesn't exist
+func loadDefListFromPath(listPath string) map[string]bool {
+	defList := make(map[string]bool)
+
+	data, err := os.ReadFile(listPath)
 	if err != nil {
-		return whitelist
+		// File doesn't exist or can't be read - return empty map
+		return defList
 	}
 
-	// Each line is a normalized overlay name
+	// Parse entries
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line != "" && !strings.HasPrefix(line, "#") {
-			whitelist[line] = true
+			defList[line] = true
 		}
 	}
 
-	return whitelist
+	return defList
 }
 
-// saveDefBuiltWhitelist saves the whitelist to persistent file
-func saveDefBuiltWhitelist(whitelist map[string]bool) {
-	whitelistPath := getDefBuiltWhitelistPath()
-
+// saveDefListToPath saves entries to a specific .def_list file
+// Creates parent directory if needed
+func saveDefListToPath(listPath string, entries []string) error {
 	// Ensure directory exists
-	dir := filepath.Dir(whitelistPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return
+	dir := filepath.Dir(listPath)
+	if err := os.MkdirAll(dir, 0775); err != nil {
+		return err
 	}
 
-	// Create sorted list of names
-	names := make([]string, 0, len(whitelist))
-	for name := range whitelist {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	// Sort entries for consistent output
+	sort.Strings(entries)
 
 	// Write to file
-	content := "# .def-built overlays (auto-generated)\n"
-	content += strings.Join(names, "\n") + "\n"
-	os.WriteFile(whitelistPath, []byte(content), 0644)
+	content := "# def-built overlays list (auto-generated)\n"
+	content += strings.Join(entries, "\n")
+	if len(entries) > 0 {
+		content += "\n"
+	}
+
+	return os.WriteFile(listPath, []byte(content), 0664)
 }
 
-// UpdateDefBuiltWhitelist adds an overlay name to the whitelist and saves it
+// loadAllDefLists loads the def list from all image directories
+// Searches all image directories (extra → portable → scratch → user)
+// and merges all .def_list files found. Higher-priority directories are processed first.
+func loadAllDefLists() map[string]bool {
+	defList := make(map[string]bool)
+
+	// Search all image directories for .def_list files
+	// Directories are returned in priority order (extra → portable → scratch → user)
+	for _, imagesDir := range config.GetImageSearchPaths() {
+		listPath := filepath.Join(imagesDir, ".def_list")
+		data, err := os.ReadFile(listPath)
+		if err != nil {
+			// File doesn't exist in this directory, continue to next
+			continue
+		}
+
+		// Parse and merge entries from this .def_list
+		// Since we process higher-priority directories first, their entries
+		// are added first (though for boolean map, order doesn't affect the result)
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				defList[line] = true
+			}
+		}
+	}
+
+	return defList
+}
+
+
+// UpdateDefBuiltList adds an overlay name to the def list in the same directory as the overlay
 // This should be called after building a .def overlay
-func UpdateDefBuiltWhitelist(nameVersion string) {
+func UpdateDefBuiltList(nameVersion, overlayPath string) {
 	normalized := utils.NormalizeNameVersion(nameVersion)
 
-	// Load current whitelist
-	if defBuiltWhitelist == nil {
-		defBuiltWhitelist = loadDefBuiltWhitelist()
+	// Get the .def_list path in the same directory as the overlay
+	listPath := getDefListPathForOverlay(overlayPath)
+
+	// Load existing entries from that specific .def_list file
+	entries := loadDefListFromPath(listPath)
+
+	// Add the new entry
+	entries[normalized] = true
+
+	// Convert map to sorted slice
+	entrySlice := make([]string, 0, len(entries))
+	for name := range entries {
+		entrySlice = append(entrySlice, name)
 	}
 
-	// Add new entry
-	defBuiltWhitelist[normalized] = true
+	// Save back to the same .def_list file
+	if err := saveDefListToPath(listPath, entrySlice); err != nil {
+		utils.PrintDebug("Failed to update .def_list at %s: %v", listPath, err)
+	}
 
-	// Save to file
-	saveDefBuiltWhitelist(defBuiltWhitelist)
+	// Clear global cache to force reload on next GetDefBuiltList() call
+	defBuiltList = nil
 }
 
-// GetDefBuiltWhitelist returns the whitelist, loading from file if needed
-func GetDefBuiltWhitelist() map[string]bool {
-	if defBuiltWhitelist != nil {
-		return defBuiltWhitelist
+// GetDefBuiltList returns the def list, loading from all directories if needed
+// Reads .def_list from ALL image directories (extra → portable → scratch → user) and merges them.
+// Writes only happen to the first writable directory when UpdateDefBuiltList() or RemoveFromDefBuiltList() is called.
+func GetDefBuiltList() map[string]bool {
+	if defBuiltList != nil {
+		return defBuiltList
 	}
 
-	// Always load persistent file first (contains entries from -s/-n builds)
-	defBuiltWhitelist = loadDefBuiltWhitelist()
+	// Load from all image directories following priority order (extra → portable → scratch → user)
+	defBuiltList = loadAllDefLists()
 
-	// Merge in entries from build script metadata
+	// Merge in entries from build script metadata (e.g., .def files in build-scripts/)
+	// Note: We don't auto-save here to avoid persisting entries from read-only directories
+	// into the writable directory. Entries are only saved to the first writable directory
+	// (following the same priority order) when explicitly added via UpdateDefBuiltList()
+	// or removed via RemoveFromDefBuiltList()
 	scripts, err := GetAllBuildScripts(true)
 	if err == nil && len(scripts) > 0 {
 		for name, info := range scripts {
 			if info.IsContainer {
-				defBuiltWhitelist[name] = true
+				defBuiltList[name] = true
 			}
 		}
-		// Save merged result to persistent file
-		saveDefBuiltWhitelist(defBuiltWhitelist)
 	}
 
-	return defBuiltWhitelist
+	return defBuiltList
+}
+
+// RemoveFromDefBuiltList removes an overlay name from the def list in the same directory as the overlay
+// This should be called after removing a .def overlay
+func RemoveFromDefBuiltList(nameVersion, overlayPath string) {
+	normalized := utils.NormalizeNameVersion(nameVersion)
+
+	// Get the .def_list path in the same directory as the overlay
+	listPath := getDefListPathForOverlay(overlayPath)
+
+	// Load existing entries from that specific .def_list file
+	entries := loadDefListFromPath(listPath)
+
+	// Remove the entry if it exists
+	if _, exists := entries[normalized]; !exists {
+		// Entry not in this .def_list file, nothing to do
+		return
+	}
+
+	delete(entries, normalized)
+
+	// Convert map to sorted slice
+	entrySlice := make([]string, 0, len(entries))
+	for name := range entries {
+		entrySlice = append(entrySlice, name)
+	}
+
+	// Save back to the same .def_list file
+	if err := saveDefListToPath(listPath, entrySlice); err != nil {
+		utils.PrintDebug("Failed to update .def_list at %s: %v", listPath, err)
+	}
+
+	// Clear global cache to force reload on next GetDefBuiltList() call
+	defBuiltList = nil
 }

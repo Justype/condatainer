@@ -403,6 +403,6 @@ func maxWidth(names []string) int {
 // isDefBuilt checks if an overlay name is .def-built
 func isDefBuilt(nameVersion string) bool {
 	normalized := utils.NormalizeNameVersion(nameVersion)
-	whitelist := build.GetDefBuiltWhitelist()
-	return whitelist[normalized]
+	defList := build.GetDefBuiltList()
+	return defList[normalized]
 }
