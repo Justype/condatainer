@@ -208,8 +208,28 @@ func captureOutput(stdoutBuf, stderrBuf *bytes.Buffer) string {
 
 // IsBuildCancelled returns true when the Apptainer error looks like the
 // user declined to continue after being asked about overwriting an existing
-// build target.
+// build target, or when the build was interrupted by the user (Ctrl+C).
 func IsBuildCancelled(err error) bool {
+	// Check for context cancellation (Ctrl+C)
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+
+	// Check for signal interrupts in error message
+	errMsg := err.Error()
+	if strings.Contains(errMsg, "signal: interrupt") || strings.Contains(errMsg, "signal: killed") {
+		return true
+	}
+
+	// Check for SIGINT exit code (130 = 128 + 2)
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if exitErr.ExitCode() == 130 || exitErr.ExitCode() == -1 {
+			return true
+		}
+	}
+
+	// Check for interactive cancellation (user declining to overwrite)
 	var apErr *ApptainerError
 	if !errors.As(err, &apErr) {
 		return false

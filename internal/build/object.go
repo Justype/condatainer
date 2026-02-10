@@ -56,12 +56,13 @@ func (bt BuildType) String() string {
 }
 
 // isCancelledByUser checks if the error is due to user cancellation (Ctrl+C)
-// Exit code 130 = 128 + SIGINT(2), checks for "signal: killed" or context errors
+// Exit code 130 = 128 + SIGINT(2), checks for "signal: killed/interrupt" or context errors
 func isCancelledByUser(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
-	if strings.Contains(err.Error(), "signal: killed") {
+	errMsg := err.Error()
+	if strings.Contains(errMsg, "signal: killed") || strings.Contains(errMsg, "signal: interrupt") {
 		return true
 	}
 	var exitErr *exec.ExitError

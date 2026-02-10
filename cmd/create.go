@@ -335,6 +335,7 @@ func runCreateFromSource(ctx context.Context) {
 func exitOnBuildError(err error) {
 	if errors.Is(err, build.ErrBuildCancelled) ||
 		strings.Contains(err.Error(), "signal: killed") ||
+		strings.Contains(err.Error(), "signal: interrupt") ||
 		strings.Contains(err.Error(), "context canceled") {
 		// Suppress output as inner layers handle the "cancelled" messaging
 	} else {

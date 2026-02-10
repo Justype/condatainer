@@ -143,6 +143,10 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	// Extract SquashFS from SIF
 	if err := apptainer.DumpSifToSquashfs(ctx, d.tmpOverlayPath, targetOverlayPath); err != nil {
 		cleanupFunc()
+		if apptainer.IsBuildCancelled(err) {
+			utils.PrintMessage("Build cancelled for %s. Overlay unchanged.", styledOverlay)
+			return ErrBuildCancelled
+		}
 		return fmt.Errorf("failed to dump SquashFS from SIF: %w", err)
 	}
 
