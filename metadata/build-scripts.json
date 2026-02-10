@@ -2909,12 +2909,6 @@
     "sbatch": false,
     "whatis": "Missing description"
   },
-  "lxde": {
-    "deps": [],
-    "relative_path": "lxde.def",
-    "sbatch": false,
-    "whatis": "Missing description"
-  },
   "orad/2.7.0": {
     "deps": [],
     "relative_path": "orad/2.7.0",
@@ -2951,15 +2945,15 @@
     "sbatch": false,
     "whatis": "Missing description"
   },
-  "ubuntu20/lxde": {
-    "deps": [],
-    "relative_path": "ubuntu20/lxde.def",
-    "sbatch": false,
-    "whatis": "Missing description"
-  },
   "ubuntu20/rstudio-server": {
     "deps": [],
     "relative_path": "ubuntu20/rstudio-server.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu20/xfce4": {
+    "deps": [],
+    "relative_path": "ubuntu20/xfce4.def",
     "sbatch": false,
     "whatis": "Missing description"
   },
@@ -2987,15 +2981,15 @@
     "sbatch": false,
     "whatis": "Missing description"
   },
-  "ubuntu22/lxde": {
-    "deps": [],
-    "relative_path": "ubuntu22/lxde.def",
-    "sbatch": false,
-    "whatis": "Missing description"
-  },
   "ubuntu22/rstudio-server": {
     "deps": [],
     "relative_path": "ubuntu22/rstudio-server.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu22/xfce4": {
+    "deps": [],
+    "relative_path": "ubuntu22/xfce4.def",
     "sbatch": false,
     "whatis": "Missing description"
   },
@@ -3023,12 +3017,6 @@
     "sbatch": false,
     "whatis": "Missing description"
   },
-  "ubuntu24/lxde": {
-    "deps": [],
-    "relative_path": "ubuntu24/lxde.def",
-    "sbatch": false,
-    "whatis": "Missing description"
-  },
   "ubuntu24/r4.4.3": {
     "deps": [],
     "relative_path": "ubuntu24/r4.4.3.def",
@@ -3038,6 +3026,18 @@
   "ubuntu24/rstudio-server": {
     "deps": [],
     "relative_path": "ubuntu24/rstudio-server.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "ubuntu24/xfce4": {
+    "deps": [],
+    "relative_path": "ubuntu24/xfce4.def",
+    "sbatch": false,
+    "whatis": "Missing description"
+  },
+  "xfce4": {
+    "deps": [],
+    "relative_path": "xfce4.def",
     "sbatch": false,
     "whatis": "Missing description"
   }
