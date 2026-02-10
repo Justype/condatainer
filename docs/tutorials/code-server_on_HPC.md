@@ -167,7 +167,7 @@ Let's set up and run VS Code Server on HPC:
 condatainer helper -u
 ```
 
-Then you can run the script: 
+Then you can run the script:
 
 ```bash
 condatainer helper code-server

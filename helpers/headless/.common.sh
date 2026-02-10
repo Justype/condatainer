@@ -241,7 +241,7 @@ check_condatainer() {
 #   Runs e2fsck to check and repair overlay. Exits on failure.
 check_overlay_integrity() {
     local overlay="$1"
-    
+
     # Check if in use before running e2fsck
     check_overlay_in_use "$overlay"
 
@@ -302,7 +302,7 @@ require_writable() {
 #   Checks if overlay is available for writing using flock.
 check_overlay_in_use() {
     local overlay="$1"
-    
+
     # Only .img files support locking
     [[ "$overlay" != *".img" ]] && return 0
     [ ! -f "$overlay" ] && return 0

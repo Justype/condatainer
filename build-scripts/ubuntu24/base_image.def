@@ -206,7 +206,7 @@ unpin_package() {
 
 pin_package() {
     local PACKAGE_INPUT=$1
-    
+
     if [[ "$PACKAGE_INPUT" == *"="* ]]; then
         # Case: package=version provided
         PACKAGE_NAME=$(echo "$PACKAGE_INPUT" | cut -d'=' -f1)
@@ -215,7 +215,7 @@ pin_package() {
         # Case: package only (lookup installed version)
         PACKAGE_NAME=$PACKAGE_INPUT
         echo "Searching for installed version of '$PACKAGE_NAME'..."
-        
+
         INSTALLED_VER=$(mm-list "^${PACKAGE_NAME}$" | grep "${PACKAGE_NAME} " | awk '{print $1 " " $2}')
 
         if [ -z "$INSTALLED_VER" ]; then

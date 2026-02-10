@@ -809,7 +809,7 @@ condatainer instance start -o lxde -o igv -o env.img -w desktop
 # 2. Run multiple commands in the same instance
 condatainer instance exec desktop websockify --web /usr/share/novnc ...
 condatainer instance exec desktop vncserver :1 -geometry 1920x1080 -depth 24 ...
-condatainer instance exec desktop igv 
+condatainer instance exec desktop igv
 
 # 3. Check instance status
 condatainer instance stats desktop

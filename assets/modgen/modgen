@@ -441,7 +441,7 @@ class Utils:
                 # Add read/write/execute for user & group
                 os.chmod(dir_path, current_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
                                             stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP |
-                                            stat.S_IROTH | stat.S_IXOTH) 
+                                            stat.S_IROTH | stat.S_IXOTH)
 
             # Set files
             for f in files:
@@ -1180,7 +1180,7 @@ class ModGen_Exec:
     @staticmethod
     def add_parser_arguments(parser):
         ModGen_Exec.parser_exec = parser.add_parser(
-            "exec", aliases=["e"], 
+            "exec", aliases=["e"],
             help="Execute a command with modules loaded")
         ModGen_Exec.parser_exec.add_argument(
             "-m", "--module",
@@ -1553,7 +1553,7 @@ class ModGen_Run:
     @staticmethod
     def add_parser_arguments(parser):
         ModGen_Run.parser_run = parser.add_parser(
-            "run", aliases=["r"], 
+            "run", aliases=["r"],
             help="Run a script and auto-solve the dependencies by #DEP tags")
         ModGen_Run.parser_run.add_argument(
             "script", type=str,

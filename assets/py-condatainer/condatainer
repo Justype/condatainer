@@ -2158,7 +2158,7 @@ class CondaTainer_Exec:
                 layer = int(os.environ["IN_CONDATAINER"])
             except ValueError:
                 layer = 1
-            
+
             layer += 1
             ps1_prefix = ps1_prefix + "_" + str(layer)
 

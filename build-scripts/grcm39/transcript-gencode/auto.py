@@ -65,7 +65,7 @@ def main():
     if not gencode_versions:
         print("No new GENCODE versions found. Nothing to do.")
         return
-    
+
     created = []
     for gv in gencode_versions:
         # gv might be like '44' or 'M36' — embed as-is

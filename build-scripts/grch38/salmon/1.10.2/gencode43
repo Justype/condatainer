@@ -36,7 +36,7 @@ install_app() {
             sed 's/^>//' \
             > decoys.txt
     fi
-    
+
     print_stderr "Building Salmon index for ${YELLOW}${app_name_version}${NC}"
     salmon index \
         -p $NCPUS \

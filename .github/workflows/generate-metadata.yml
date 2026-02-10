@@ -38,16 +38,16 @@ jobs:
           # Configure the bot user
           git config user.name "dependabot[bot]"
           git config user.email "dependabot[bot]@users.noreply.github.com"
-          
+
           # Only stage the json file
           git add metadata/build-scripts.json
-          
+
           if git diff --staged --quiet; then
             echo "No changes to metadata. Skipping commit."
           else
             # If there are changes, also add the gzipped version
             git add metadata/build-scripts.json.gz
-            
+
             # SAFEGUARD: [skip ci] prevents this push from triggering a new run
             git commit -m "chore: update build-scripts metadata [skip ci]"
             git push

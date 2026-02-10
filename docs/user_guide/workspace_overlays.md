@@ -252,7 +252,7 @@ condatainer exec --fakeroot -o env.img <command>
 
 It means the overlay image is full. You can try to:
 
-- run `mm-clean -a` to clean up unused packages and caches. 
+- run `mm-clean -a` to clean up unused packages and caches.
 - increase the size of the overlay image by running:
 
 ```bash

@@ -37,7 +37,7 @@
 install_app() {
     # By default, $target_dir and $tmp_dir are created and we are now in $tmp_dir
     mkdir -p vg-tmp
-    
+
     print_stderr "Building VG graph index for ${YELLOW}${app_name_version}${NC}"
     vg autoindex --workflow mpmap --workflow rpvg \
         --prefix hprc-v1.1-mc-grch38-gencode47 \

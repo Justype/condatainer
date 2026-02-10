@@ -1,6 +1,6 @@
 # Use ModGen to Manage System Modules
 
-🏭 **ModGen** is a tool designed to automate the creation and management of **Lmod/Environment Modules** on HPC systems. 
+🏭 **ModGen** is a tool designed to automate the creation and management of **Lmod/Environment Modules** on HPC systems.
 
 It is the ideal choice for users who want to take full advantage of tools available on the HPC system. After installation, you can use `module load` with Lmod/Environment Modules.
 
@@ -107,7 +107,7 @@ Since the download link for cellranger is only valid for one day, you will be pr
 ```
 [ModGen][NOTE] Build script requires input: ⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.
 https://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
-Enter here: 
+Enter here:
 ```
 
 You need to paste the valid download link and press Enter to continue the build.

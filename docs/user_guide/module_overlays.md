@@ -168,7 +168,7 @@ Since the download link for cellranger is only valid for one day, you will be pr
 ```
 [CNT][NOTE] Build script requires input: ⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.
 https://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
-Enter here: 
+Enter here:
 ```
 
 You need to paste the valid download link and press Enter to continue the build.

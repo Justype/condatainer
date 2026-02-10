@@ -34,7 +34,7 @@ install_app() {
         LC_ALL=C sort -k1,1 -k2,2n | \
         cat <(echo "$header") - | \
         bgzip -c -@ $NCPUS > hprc-v1.1-mc-grch38.vcfbub.a100k.wave.gencode.vcf.gz
-    
+
     print_stderr "Indexing HPRC v1.1 GRCh38 GENCODE-style VCF"
     tabix -p vcf -@ $NCPUS hprc-v1.1-mc-grch38.vcfbub.a100k.wave.gencode.vcf.gz
 

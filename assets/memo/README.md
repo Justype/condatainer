@@ -7,7 +7,7 @@
 ### Compression method for squashfs overlays
 
 - Because the old apptainer version does not support zstd compression, `lz4` is used by default for better compatibility.
-- Use `zstd` compression level 14 for best speed/size tradeoff for squashfs overlays. 
+- Use `zstd` compression level 14 for best speed/size tradeoff for squashfs overlays.
   - (Use `--lz4` for faster reading speed, but much larger file size, about 2x)
   - `--gzip` is also supported, but not recommended.
 - zstd has better compression ratio and IO speed than gzip.

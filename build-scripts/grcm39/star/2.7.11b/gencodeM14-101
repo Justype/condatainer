@@ -23,7 +23,7 @@ install_app() {
         pigz_or_gunzip_pipe "$ANNOTATION_GTF_GZ" > annotation.gtf
         ANNOTATION_GTF="annotation.gtf"
     fi
-    
+
     print_stderr "Building STAR index for ${YELLOW}${app_name_version}${NC}"
     STAR --runThreadN $NCPUS \
         --runMode genomeGenerate \

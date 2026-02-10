@@ -22,7 +22,7 @@ The installation script is **interactive** and will guide you through the follow
 
 ## ✅ Verify Installation
 
-Once the installation is complete, restart your terminal or run `source ~/.bashrc`. 
+Once the installation is complete, restart your terminal or run `source ~/.bashrc`.
 
 ```bash
 source ~/.bashrc

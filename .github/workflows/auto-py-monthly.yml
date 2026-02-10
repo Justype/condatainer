@@ -2,7 +2,7 @@ name: Run all auto.py monthly
 
 on:
   schedule:
-    - cron: '0 0 1 * *' 
+    - cron: '0 0 1 * *'
   workflow_dispatch:
 
 permissions:
@@ -32,7 +32,7 @@ jobs:
 
           # Add any changes under build-scripts (any file type)
           git add build-scripts
-          
+
           # Check if there are changes to commit
           if ! git diff --cached --quiet; then
             git commit -m "Update build scripts using auto.py via monthly workflow"

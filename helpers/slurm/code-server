@@ -121,7 +121,7 @@ while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
         a ) AUTH=$OPTARG ;;
         b ) BASE_IMAGE="$OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
-        o ) 
+        o )
             # First -o clears previous overlays, then builds fresh list
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
             OVERLAYS="${OVERLAYS:+$OVERLAYS:}$OPTARG"
