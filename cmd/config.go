@@ -25,6 +25,7 @@ var configKeys = []string{
 	"apptainer_bin",
 	"scheduler_bin",
 	"submit_job",
+	"branch",
 	"extra_base_dirs",
 	"build.ncpus",
 	"build.mem_mb",
@@ -52,6 +53,8 @@ func configValueCompletion(key string) []string {
 	switch key {
 	case "submit_job":
 		return []string{"true", "false"}
+	case "branch":
+		return []string{"main", "dev"}
 	case "build.ncpus":
 		return []string{"4", "8", "16", "32"}
 	case "build.mem_mb":
@@ -236,6 +239,7 @@ Shows:
 		} else {
 			fmt.Printf("  submit_job:     %v\n", submitJobActual)
 		}
+		fmt.Printf("  branch:         %s\n", viper.GetString("branch"))
 		fmt.Println()
 
 		// Build settings
@@ -336,6 +340,7 @@ Time duration format (for build.time):
 			"apptainer_bin":       true,
 			"scheduler_bin":       true,
 			"submit_job":          true,
+			"branch":              true,
 			"build.ncpus":         true,
 			"build.mem_mb":        true,
 			"build.time":          true,
@@ -362,6 +367,16 @@ Time duration format (for build.time):
 				utils.PrintError("Invalid duration format: %s", value)
 				utils.PrintHint("Use format like: 2h, 30m, 1h30m, or 02:00:00")
 				os.Exit(ExitCodeError)
+			}
+		}
+
+		if key == "branch" {
+			lower := strings.ToLower(value)
+			if lower != "main" && lower != "dev" {
+				utils.PrintWarning("Unknown branch '%s', falling back to 'main'", value)
+				value = "main"
+			} else {
+				value = lower
 			}
 		}
 

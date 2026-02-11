@@ -205,7 +205,7 @@ func ensureBaseDef() (string, error) {
 		return "", fmt.Errorf("failed to create build-scripts directory: %w", err)
 	}
 
-	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/main/build-scripts/base_image.def", config.GitHubRepo)
+	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/build-scripts/base_image.def", config.GitHubRepo, config.Global.Branch)
 
 	if err := utils.DownloadFile(url, baseDefPath); err != nil {
 		return "", fmt.Errorf("failed to download base image definition file: %w", err)

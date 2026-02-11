@@ -22,6 +22,7 @@ import (
 
 var (
 	updateForce bool
+	updateDev   bool
 )
 
 var updateCmd = &cobra.Command{
@@ -32,16 +33,18 @@ var updateCmd = &cobra.Command{
 
 This command downloads the latest binary from the GitHub repository
 and replaces the current executable. A backup of the current version is not created.`,
-	Example: `  condatainer self-update       # Update with confirmation prompt
+	Example: `  condatainer self-update       # Update to latest stable version
   condatainer self-update --yes # Update without confirmation
-  condatainer self-update -f    # Force update even if already on latest version`,
+  condatainer self-update -f    # Force update even if already on latest version
+  condatainer self-update --dev # Include pre-release versions`,
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runUpdate,
 }
 
 func init() {
 	rootCmd.AddCommand(updateCmd)
-	updateCmd.Flags().BoolVarP(&updateForce, "force", "f", false, "Force update")
+	updateCmd.Flags().BoolVarP(&updateForce, "force", "f", false, "Force update even if already on latest version")
+	updateCmd.Flags().BoolVar(&updateDev, "dev", false, "Include pre-release versions (also enabled if config branch is 'dev')")
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
@@ -74,10 +77,25 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		arch = mappedArch
 	}
 
+	// Check if dev mode is enabled (via flag or config branch)
+	devMode := updateDev || config.Global.Branch == "dev"
+
+	if devMode {
+		utils.PrintNote("Dev mode enabled, including pre-release versions")
+	}
+
 	utils.PrintMessage("Fetching latest release information...")
 
-	// Get latest release from GitHub API
-	releaseURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", config.GITHUB_REPO)
+	// Get release from GitHub API
+	var releaseURL string
+	if devMode {
+		// Fetch all releases to find the latest (including pre-releases)
+		releaseURL = fmt.Sprintf("https://api.github.com/repos/%s/releases", config.GITHUB_REPO)
+	} else {
+		// Fetch only the latest stable release
+		releaseURL = fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", config.GITHUB_REPO)
+	}
+
 	resp, err := http.Get(releaseURL)
 	if err != nil {
 		return fmt.Errorf("failed to fetch release information: %w", err)
@@ -88,16 +106,38 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to fetch release: HTTP %d", resp.StatusCode)
 	}
 
-	var release struct {
-		TagName string `json:"tag_name"`
-		Assets  []struct {
-			Name               string `json:"name"`
-			BrowserDownloadURL string `json:"browser_download_url"`
-		} `json:"assets"`
+	type releaseAsset struct {
+		Name               string `json:"name"`
+		BrowserDownloadURL string `json:"browser_download_url"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return fmt.Errorf("failed to parse release information: %w", err)
+	type releaseInfo struct {
+		TagName    string         `json:"tag_name"`
+		Prerelease bool           `json:"prerelease"`
+		Assets     []releaseAsset `json:"assets"`
+	}
+
+	var release releaseInfo
+
+	if devMode {
+		// Parse array of releases and find the latest
+		var releases []releaseInfo
+		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+			return fmt.Errorf("failed to parse release information: %w", err)
+		}
+
+		if len(releases) == 0 {
+			return fmt.Errorf("no releases found")
+		}
+
+		// The releases are already sorted by creation date (newest first)
+		// Take the first one (latest release, stable or pre-release)
+		release = releases[0]
+	} else {
+		// Parse single latest stable release
+		if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+			return fmt.Errorf("failed to parse release information: %w", err)
+		}
 	}
 
 	// Check if already on latest version
@@ -119,7 +159,11 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	utils.PrintMessage("Current version: %s", utils.StyleNumber(currentVersion))
-	utils.PrintMessage("Latest version: %s", utils.StyleNumber(latestVersion))
+	if release.Prerelease {
+		utils.PrintMessage("Latest pre-release: %s", utils.StyleNumber(latestVersion))
+	} else {
+		utils.PrintMessage("Latest version: %s", utils.StyleNumber(latestVersion))
+	}
 
 	// Ask for confirmation unless global --yes flag or --force flag is provided
 	if !utils.ShouldAnswerYes() && !updateForce {

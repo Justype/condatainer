@@ -41,6 +41,9 @@ type Config struct {
 	ApptainerBin string
 	SchedulerBin string // Optional: path to sbatch/scheduler binary (auto-detected if empty)
 
+	// Remote repository settings
+	Branch string // Git branch for fetching remote build scripts and metadata (default: "main")
+
 	// Build configuration
 	Build BuildConfig
 }
@@ -64,6 +67,8 @@ func LoadDefaults(executablePath string) {
 
 		ApptainerBin: detectApptainerBin(),
 		SchedulerBin: "", // Auto-detect scheduler binary (empty = search PATH)
+
+		Branch: "main", // Default branch for remote build scripts
 
 		Build: BuildConfig{
 			DefaultCPUs:  4,             // 4 CPUs default

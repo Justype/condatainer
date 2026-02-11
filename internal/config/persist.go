@@ -81,6 +81,7 @@ func setDefaults() {
 	viper.SetDefault("scheduler_bin", "")
 	viper.SetDefault("submit_job", true)
 	viper.SetDefault("logs_dir", "")
+	viper.SetDefault("branch", "main")
 
 	// Extra base directories to search (prepended to default search paths)
 	// Each directory should contain images/, build-scripts/, helper-scripts/ subdirectories
@@ -453,6 +454,18 @@ func LoadFromViper() {
 			logsDir = absLogsDir
 		}
 		Global.LogsDir = logsDir
+	}
+
+	// Load branch from config (for remote build scripts)
+	if branch := viper.GetString("branch"); branch != "" {
+		switch branch {
+		case "main", "dev":
+			Global.Branch = branch
+		default:
+			utils.PrintWarning("Unknown branch '%s' in config; falling back to 'main'", branch)
+			viper.Set("branch", "main")
+			Global.Branch = "main"
+		}
 	}
 
 	// Load build config from Viper

@@ -259,8 +259,8 @@ func updateHelperScripts(args []string, helperScriptsDir string) error {
 			continue
 		}
 
-		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/main/%s",
-			config.GITHUB_REPO, entry.Path)
+		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
+			config.GITHUB_REPO, config.Global.Branch, entry.Path)
 		destName := filepath.Base(entry.Path)
 		dest := filepath.Join(helperScriptsDir, destName)
 
@@ -282,8 +282,8 @@ type HelperScriptEntry struct {
 
 // fetchRemoteHelperMetadata fetches the helper scripts metadata from GitHub
 func fetchRemoteHelperMetadata() (map[string]map[string]HelperScriptEntry, error) {
-	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/main/metadata/helper-scripts.json",
-		config.GITHUB_REPO)
+	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/metadata/helper-scripts.json",
+		config.GITHUB_REPO, config.Global.Branch)
 
 	resp, err := http.Get(url)
 	if err != nil {

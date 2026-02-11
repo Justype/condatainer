@@ -15,8 +15,12 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// RemoteMetadataURL is the URL for the remote build scripts metadata
-var RemoteMetadataURL = fmt.Sprintf("https://raw.githubusercontent.com/%s/main/metadata/build-scripts.json.gz", config.GitHubRepo)
+// GetRemoteMetadataURL returns the URL for the remote build scripts metadata
+// using the configured branch
+func GetRemoteMetadataURL() string {
+	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/metadata/build-scripts.json.gz",
+		config.GitHubRepo, config.Global.Branch)
+}
 
 // ScriptInfo holds information about a build script
 type ScriptInfo struct {
@@ -114,7 +118,7 @@ func GetRemoteBuildScripts() (map[string]ScriptInfo, error) {
 	}
 
 	// Fetch the gzipped metadata
-	resp, err := client.Get(RemoteMetadataURL)
+	resp, err := client.Get(GetRemoteMetadataURL())
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch remote metadata: %w", err)
 	}
@@ -223,7 +227,7 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 
 	// Build the raw GitHub URL
 	// info.Path already contains the correct extension (.def for containers)
-	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/main/build-scripts/%s", config.GitHubRepo, info.Path)
+	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/build-scripts/%s", config.GitHubRepo, config.Global.Branch, info.Path)
 
 	// Create HTTP client with timeout
 	client := &http.Client{
