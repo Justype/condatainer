@@ -226,19 +226,7 @@ func runInstanceStart(cmd *cobra.Command, args []string) error {
 	overlayFinal := instanceFlags.Overlays
 
 	// Resolve user-specified base image if provided
-	var baseImageResolved string
-	if instanceFlags.BaseImage != "" {
-		if utils.FileExists(instanceFlags.BaseImage) {
-			baseImageResolved = instanceFlags.BaseImage
-		} else {
-			resolvedBase, err := container.ResolveOverlayPaths([]string{instanceFlags.BaseImage})
-			if err == nil && len(resolvedBase) > 0 {
-				baseImageResolved = resolvedBase[0]
-			} else {
-				baseImageResolved = instanceFlags.BaseImage
-			}
-		}
-	}
+	baseImageResolved := ResolveBaseImage(instanceFlags.BaseImage)
 
 	resolvedOverlays, err := container.ResolveOverlayPaths(overlayFinal)
 	if err != nil {

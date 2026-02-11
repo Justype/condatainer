@@ -115,28 +115,11 @@ func runE(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	hidePrompt := true
-	if len(commands) == 0 {
-		commands = []string{"bash"}
-		hidePrompt = false
-	} else if len(commands) == 1 {
-		hidePrompt = false
-	}
+	// Prepare command and determine if prompt should be hidden
+	commands, hidePrompt := PrepareCommandAndHidePrompt(commands)
 
 	// Resolve base image if provided
-	var baseImageResolved string
-	if eBaseImage != "" {
-		if utils.FileExists(eBaseImage) {
-			baseImageResolved = eBaseImage
-		} else {
-			resolvedBase, err := container.ResolveOverlayPaths([]string{eBaseImage})
-			if err == nil && len(resolvedBase) > 0 {
-				baseImageResolved = resolvedBase[0]
-			} else {
-				baseImageResolved = eBaseImage
-			}
-		}
-	}
+	baseImageResolved := ResolveBaseImage(eBaseImage)
 
 	// Resolve overlays
 	resolvedOverlays, err := container.ResolveOverlayPaths(overlays)
@@ -231,7 +214,7 @@ func parseEArgs(args []string) (overlays, commands, apptainerFlags []string, err
 		// Before -- (overlay/flag section)
 
 		// Skip known flags (already handled by cobra)
-		if knownFlags[arg] || isKnownFlagWithEqualsE(knownFlags, arg) {
+		if knownFlags[arg] || isKnownFlagWithEquals(knownFlags, arg) {
 			// Check if flag needs value
 			if (arg == "-b" || arg == "--base-image" || arg == "--env" || arg == "--bind") && i+1 < len(os.Args) {
 				i++ // Skip value
@@ -256,12 +239,4 @@ func parseEArgs(args []string) (overlays, commands, apptainerFlags []string, err
 	}
 
 	return overlays, commands, apptainerFlags, nil
-}
-
-func isKnownFlagWithEqualsE(knownFlags map[string]bool, arg string) bool {
-	if !strings.Contains(arg, "=") {
-		return false
-	}
-	parts := strings.SplitN(arg, "=", 2)
-	return knownFlags[parts[0]]
 }
