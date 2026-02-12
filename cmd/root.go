@@ -30,6 +30,20 @@ var rootCmd = &cobra.Command{
 	SilenceErrors: true,
 
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Skip initialization entirely for completion script generation
+		// (no config needed, and any stdout output corrupts the script)
+		cmdName := cmd.Name()
+		if cmdName == "completion" {
+			return
+		}
+
+		// For __complete requests (tab-completion), suppress stdout messages
+		// so they don't corrupt completion results
+		isCompleteRequest := cmdName == "__complete" || cmdName == "__completeNoDesc"
+		if isCompleteRequest {
+			utils.QuietMode = true
+		}
+
 		exe, err := os.Executable()
 		if err != nil {
 			ExitWithError("Failed to determine executable path: %v", err)
@@ -47,7 +61,8 @@ var rootCmd = &cobra.Command{
 		config.LoadFromViper()
 
 		// Warn if apptainer is still not accessible after auto-detection
-		if !config.ValidateBinary(config.Global.ApptainerBin) {
+		// (skip during completion requests to avoid polluting output)
+		if !isCompleteRequest && !config.ValidateBinary(config.Global.ApptainerBin) {
 			utils.PrintWarning("Apptainer not accessible. The module may have been unloaded or removed.")
 			utils.PrintHint("Load the apptainer module: %s", utils.StyleAction("ml apptainer"))
 			utils.PrintHint("Then run: %s", utils.StyleAction("condatainer config init"))
