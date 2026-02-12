@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -88,6 +89,14 @@ type JobSpec struct {
 	Metadata  map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
 }
 
+// JobResources holds resource allocations for the currently running scheduler job.
+// A nil pointer field means the scheduler did not expose that resource via environment variables.
+type JobResources struct {
+	Ncpus *int   // Number of allocated CPUs
+	MemMB *int64 // Allocated memory in MB
+	Ngpus *int   // Number of allocated GPUs
+}
+
 // Scheduler defines the interface for job schedulers
 type Scheduler interface {
 	// IsAvailable checks if the scheduler is available and we're not already in a job
@@ -111,6 +120,10 @@ type Scheduler interface {
 
 	// GetInfo returns information about the scheduler
 	GetInfo() *SchedulerInfo
+
+	// GetJobResources reads allocated resources from scheduler environment variables.
+	// Returns nil if not running inside a job of this scheduler type.
+	GetJobResources() *JobResources
 }
 
 // ValidateSpecs validates job specs against cluster limits
@@ -476,6 +489,49 @@ func ParseScriptAny(scriptPath string) (*ParsedScript, error) {
 
 	// No scheduler directives found in any format
 	return nil, nil
+}
+
+// getEnvInt reads an environment variable and parses it as a positive int.
+// Returns nil if unset, empty, or not a valid positive integer.
+func getEnvInt(key string) *int {
+	val := os.Getenv(key)
+	if val == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n <= 0 {
+		return nil
+	}
+	return &n
+}
+
+// getEnvInt64 reads an environment variable and parses it as a positive int64.
+// Returns nil if unset, empty, or not a valid positive integer.
+func getEnvInt64(key string) *int64 {
+	val := os.Getenv(key)
+	if val == "" {
+		return nil
+	}
+	n, err := strconv.ParseInt(val, 10, 64)
+	if err != nil || n <= 0 {
+		return nil
+	}
+	return &n
+}
+
+// getCudaDeviceCount parses CUDA_VISIBLE_DEVICES and returns the number of devices.
+// Returns nil if the variable is unset or empty.
+func getCudaDeviceCount() *int {
+	val := os.Getenv("CUDA_VISIBLE_DEVICES")
+	if val == "" {
+		return nil
+	}
+	// Count comma-separated items (e.g., "0,1,2" → 3)
+	count := len(strings.Split(val, ","))
+	if count <= 0 {
+		return nil
+	}
+	return &count
 }
 
 // ReadScriptSpecsFromPath reads scheduler specs from a script file.

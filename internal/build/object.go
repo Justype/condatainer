@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
@@ -77,30 +76,10 @@ func isCancelledByUser(err error) bool {
 type ScriptSpecs = scheduler.ScriptSpecs
 
 func defaultBuildNcpus() int {
-	// Priority 1: Check scheduler-specific environment variables for allocated CPUs
-	// SLURM sets SLURM_CPUS_PER_TASK
-	if cpusStr := os.Getenv("SLURM_CPUS_PER_TASK"); cpusStr != "" {
-		if count, err := strconv.Atoi(cpusStr); err == nil && count > 0 {
-			return count
-		}
-	}
-
-	// PBS/Torque sets PBS_NCPUS or NCPUS
-	if cpusStr := os.Getenv("PBS_NCPUS"); cpusStr != "" {
-		if count, err := strconv.Atoi(cpusStr); err == nil && count > 0 {
-			return count
-		}
-	}
-	if cpusStr := os.Getenv("NCPUS"); cpusStr != "" {
-		if count, err := strconv.Atoi(cpusStr); err == nil && count > 0 {
-			return count
-		}
-	}
-
-	// LSF sets LSB_DJOB_NUMPROC or LSB_MAX_NUM_PROCESSORS
-	if cpusStr := os.Getenv("LSB_DJOB_NUMPROC"); cpusStr != "" {
-		if count, err := strconv.Atoi(cpusStr); err == nil && count > 0 {
-			return count
+	// Priority 1: Scheduler-allocated CPUs from the runtime environment
+	if sched := scheduler.ActiveScheduler(); sched != nil {
+		if res := sched.GetJobResources(); res != nil && res.Ncpus != nil {
+			return *res.Ncpus
 		}
 	}
 

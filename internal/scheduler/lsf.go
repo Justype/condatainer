@@ -651,6 +651,27 @@ func parseLsfMemory(memStr string) (int64, error) {
 	}
 }
 
+// GetJobResources reads allocated resources from LSF environment variables.
+func (s *LsfScheduler) GetJobResources() *JobResources {
+	if _, ok := os.LookupEnv("LSB_JOBID"); !ok {
+		return nil
+	}
+	res := &JobResources{}
+	res.Ncpus = getEnvInt("LSB_DJOB_NUMPROC")
+	if res.Ncpus == nil {
+		res.Ncpus = getEnvInt("LSB_MAX_NUM_PROCESSORS")
+	}
+	// LSB_MAX_MEM_RUSAGE is in KB
+	if memKB := getEnvInt64("LSB_MAX_MEM_RUSAGE"); memKB != nil {
+		mb := *memKB / 1024
+		if mb > 0 {
+			res.MemMB = &mb
+		}
+	}
+	res.Ngpus = getCudaDeviceCount()
+	return res
+}
+
 // TryParseLsfScript attempts to parse an LSF script without requiring LSF binaries.
 // This is a static parser that can work in any environment.
 func TryParseLsfScript(scriptPath string) (*ScriptSpecs, error) {

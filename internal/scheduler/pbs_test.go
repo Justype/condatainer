@@ -691,3 +691,60 @@ func TestPbsGpuParsing(t *testing.T) {
 		}
 	})
 }
+
+func TestPbsGetJobResources(t *testing.T) {
+	sched := &PbsScheduler{}
+
+	t.Run("not in job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		if res := sched.GetJobResources(); res != nil {
+			t.Fatalf("expected nil, got %+v", res)
+		}
+	})
+
+	t.Run("cpus and gpus", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("PBS_JOBID", "67890.pbs-server")
+		t.Setenv("PBS_NCPUS", "8")
+		t.Setenv("CUDA_VISIBLE_DEVICES", "0,1,2")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Ncpus == nil || *res.Ncpus != 8 {
+			t.Errorf("Ncpus = %v; want 8", res.Ncpus)
+		}
+		if res.Ngpus == nil || *res.Ngpus != 3 {
+			t.Errorf("Ngpus = %v; want 3", res.Ngpus)
+		}
+	})
+
+	t.Run("NCPUS fallback", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("PBS_JOBID", "67890")
+		t.Setenv("NCPUS", "12")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Ncpus == nil || *res.Ncpus != 12 {
+			t.Errorf("Ncpus = %v; want 12", res.Ncpus)
+		}
+	})
+
+	t.Run("memory from PBS_VMEM", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("PBS_JOBID", "67890")
+		t.Setenv("PBS_VMEM", "8589934592") // 8 GB in bytes
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.MemMB == nil || *res.MemMB != 8192 {
+			t.Errorf("MemMB = %v; want 8192", res.MemMB)
+		}
+	})
+}
