@@ -894,6 +894,19 @@ func formatSlurmTimeSpec(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
 }
 
+// GetJobResources reads allocated resources from SLURM environment variables.
+func (s *SlurmScheduler) GetJobResources() *JobResources {
+	if _, ok := os.LookupEnv("SLURM_JOB_ID"); !ok {
+		return nil
+	}
+	res := &JobResources{}
+	res.Ncpus = getEnvInt("SLURM_CPUS_PER_TASK")
+	// SLURM_MEM_PER_NODE is already in MB
+	res.MemMB = getEnvInt64("SLURM_MEM_PER_NODE")
+	res.Ngpus = getCudaDeviceCount()
+	return res
+}
+
 // TryParseSlurmScript attempts to parse a SLURM script without requiring SLURM binaries.
 // This is a static parser that can work in any environment.
 func TryParseSlurmScript(scriptPath string) (*ScriptSpecs, error) {

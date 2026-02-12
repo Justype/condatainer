@@ -398,3 +398,90 @@ func TestSlurmCreateScriptUsesOutputDir(t *testing.T) {
 		t.Errorf("Generated script does not contain expected output path %s\nScript:\n%s", logPath, string(content))
 	}
 }
+
+// clearJobEnvVars ensures no scheduler job env vars are set for test isolation.
+// Shared across all scheduler test files (same package).
+func clearJobEnvVars(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"SLURM_JOB_ID", "SLURM_CPUS_PER_TASK", "SLURM_MEM_PER_NODE",
+		"PBS_JOBID", "PBS_NCPUS", "NCPUS", "PBS_VMEM",
+		"LSB_JOBID", "LSB_DJOB_NUMPROC", "LSB_MAX_NUM_PROCESSORS", "LSB_MAX_MEM_RUSAGE",
+		"CUDA_VISIBLE_DEVICES",
+	} {
+		os.Unsetenv(key)
+		t.Setenv(key, "")
+		os.Unsetenv(key)
+	}
+}
+
+func TestSlurmGetJobResources(t *testing.T) {
+	sched := &SlurmScheduler{}
+
+	t.Run("not in job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		if res := sched.GetJobResources(); res != nil {
+			t.Fatalf("expected nil, got %+v", res)
+		}
+	})
+
+	t.Run("full resources", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("SLURM_JOB_ID", "12345")
+		t.Setenv("SLURM_CPUS_PER_TASK", "16")
+		t.Setenv("SLURM_MEM_PER_NODE", "8192")
+		t.Setenv("CUDA_VISIBLE_DEVICES", "0,1")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Ncpus == nil || *res.Ncpus != 16 {
+			t.Errorf("Ncpus = %v; want 16", res.Ncpus)
+		}
+		if res.MemMB == nil || *res.MemMB != 8192 {
+			t.Errorf("MemMB = %v; want 8192", res.MemMB)
+		}
+		if res.Ngpus == nil || *res.Ngpus != 2 {
+			t.Errorf("Ngpus = %v; want 2", res.Ngpus)
+		}
+	})
+
+	t.Run("partial data", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("SLURM_JOB_ID", "12345")
+		t.Setenv("SLURM_CPUS_PER_TASK", "4")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Ncpus == nil || *res.Ncpus != 4 {
+			t.Errorf("Ncpus = %v; want 4", res.Ncpus)
+		}
+		if res.MemMB != nil {
+			t.Errorf("MemMB should be nil, got %d", *res.MemMB)
+		}
+		if res.Ngpus != nil {
+			t.Errorf("Ngpus should be nil, got %d", *res.Ngpus)
+		}
+	})
+
+	t.Run("invalid values", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("SLURM_JOB_ID", "12345")
+		t.Setenv("SLURM_CPUS_PER_TASK", "not-a-number")
+		t.Setenv("SLURM_MEM_PER_NODE", "-100")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Ncpus != nil {
+			t.Errorf("Ncpus should be nil for invalid value, got %d", *res.Ncpus)
+		}
+		if res.MemMB != nil {
+			t.Errorf("MemMB should be nil for negative value, got %d", *res.MemMB)
+		}
+	})
+}

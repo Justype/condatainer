@@ -769,6 +769,27 @@ func parseGpuString(gpuStr string) (*GpuSpec, error) {
 	return spec, nil
 }
 
+// GetJobResources reads allocated resources from PBS environment variables.
+func (s *PbsScheduler) GetJobResources() *JobResources {
+	if _, ok := os.LookupEnv("PBS_JOBID"); !ok {
+		return nil
+	}
+	res := &JobResources{}
+	res.Ncpus = getEnvInt("PBS_NCPUS")
+	if res.Ncpus == nil {
+		res.Ncpus = getEnvInt("NCPUS")
+	}
+	// PBS_VMEM is in bytes
+	if vmem := getEnvInt64("PBS_VMEM"); vmem != nil {
+		mb := *vmem / (1024 * 1024)
+		if mb > 0 {
+			res.MemMB = &mb
+		}
+	}
+	res.Ngpus = getCudaDeviceCount()
+	return res
+}
+
 // TryParsePbsScript attempts to parse a PBS script without requiring PBS binaries.
 // This is a static parser that can work in any environment.
 func TryParsePbsScript(scriptPath string) (*ScriptSpecs, error) {

@@ -764,3 +764,50 @@ func TestLsfRusageParsing(t *testing.T) {
 		})
 	}
 }
+
+func TestLsfGetJobResources(t *testing.T) {
+	sched := &LsfScheduler{}
+
+	t.Run("not in job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		if res := sched.GetJobResources(); res != nil {
+			t.Fatalf("expected nil, got %+v", res)
+		}
+	})
+
+	t.Run("full resources", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("LSB_JOBID", "99999")
+		t.Setenv("LSB_DJOB_NUMPROC", "32")
+		t.Setenv("LSB_MAX_MEM_RUSAGE", "8388608") // 8 GB in KB
+		t.Setenv("CUDA_VISIBLE_DEVICES", "0")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Ncpus == nil || *res.Ncpus != 32 {
+			t.Errorf("Ncpus = %v; want 32", res.Ncpus)
+		}
+		if res.MemMB == nil || *res.MemMB != 8192 {
+			t.Errorf("MemMB = %v; want 8192", res.MemMB)
+		}
+		if res.Ngpus == nil || *res.Ngpus != 1 {
+			t.Errorf("Ngpus = %v; want 1", res.Ngpus)
+		}
+	})
+
+	t.Run("LSB_MAX_NUM_PROCESSORS fallback", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("LSB_JOBID", "99999")
+		t.Setenv("LSB_MAX_NUM_PROCESSORS", "64")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Ncpus == nil || *res.Ncpus != 64 {
+			t.Errorf("Ncpus = %v; want 64", res.Ncpus)
+		}
+	})
+}
