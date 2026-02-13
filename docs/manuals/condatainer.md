@@ -351,6 +351,7 @@ condatainer create [OPTIONS] [packages...]
 * `-b`, `--base-image [PATH]`: Base image to use instead of default.
 * `-s`, `--source [URI]`: Remote source URI (e.g., `docker://ubuntu:22.04`).
 * `--temp-size [SIZE]`: Size of temporary overlay (default: 20G).
+* `--remote`: Remote build scripts take precedence over local.
 * `packages`: List of packages to install (e.g., `bcftools/1.22` or `samtools=1.10` or `grch38/genome/gencode`).
 
 **Compression Options:**
@@ -436,8 +437,7 @@ condatainer avail [search_terms...] [flags]
 
 **Options:**
 
-* `--local`: Show only local build scripts.
-* `--remote`: Show only remote build scripts from GitHub.
+* `--remote`: Remote build scripts take precedence over local (on duplicates).
 * `-i`, `--install`: Install any found packages that are not currently installed.
 * `-a`, `--add`: Alias for `--install`.
 

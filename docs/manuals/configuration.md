@@ -79,6 +79,8 @@ condatainer config init -l system
 | Key | Default | Description |
 |-----|---------|-------------|
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
+| `branch` | `main` | Git branch for fetching remote build scripts (`main` or `dev`) |
+| `prefer_remote` | `false` | Remote build scripts take precedence over local |
 
 Or if your system scheduler is not workable, you can disable job submission.
 
@@ -153,6 +155,7 @@ Configuration keys can be overridden via environment variables with the `CONDATA
 | `CONDATAINER_APPTAINER_BIN` | `apptainer_bin` |
 | `CONDATAINER_SCHEDULER_BIN` | `scheduler_bin` |
 | `CONDATAINER_SUBMIT_JOB` | `submit_job` |
+| `CONDATAINER_PREFER_REMOTE` | `prefer_remote` |
 | `CONDATAINER_BUILD_NCPUS` | `build.ncpus` |
 | `CONDATAINER_BUILD_MEM_MB` | `build.mem_mb` |
 | `CONDATAINER_BUILD_TIME` | `build.time` |
@@ -213,6 +216,9 @@ scheduler_bin: /usr/bin/sbatch
 
 # Submit builds as scheduler jobs
 submit_job: true
+
+# Remote build scripts take precedence over local
+prefer_remote: false
 
 # Additional search directories
 extra_base_dirs:
