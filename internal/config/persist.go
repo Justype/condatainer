@@ -82,6 +82,7 @@ func setDefaults() {
 	viper.SetDefault("submit_job", true)
 	viper.SetDefault("logs_dir", "")
 	viper.SetDefault("branch", "main")
+	viper.SetDefault("prefer_remote", false)
 
 	// Extra base directories to search (prepended to default search paths)
 	// Each directory should contain images/, build-scripts/, helper-scripts/ subdirectories
@@ -466,6 +467,11 @@ func LoadFromViper() {
 			viper.Set("branch", "main")
 			Global.Branch = "main"
 		}
+	}
+
+	// Load prefer_remote from config
+	if viper.GetBool("prefer_remote") {
+		Global.PreferRemote = true
 	}
 
 	// Load build config from Viper

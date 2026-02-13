@@ -42,7 +42,8 @@ type Config struct {
 	SchedulerBin string // Optional: path to sbatch/scheduler binary (auto-detected if empty)
 
 	// Remote repository settings
-	Branch string // Git branch for fetching remote build scripts and metadata (default: "main")
+	Branch       string // Git branch for fetching remote build scripts and metadata (default: "main")
+	PreferRemote bool   // Remote build scripts take precedence over local
 
 	// Build configuration
 	Build BuildConfig

@@ -15,6 +15,12 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
+// PreferRemote controls the precedence of build script resolution.
+// When true, remote scripts take precedence over local scripts.
+// When false (default), local scripts take precedence over remote scripts.
+// Set by CLI commands (--remote flag) or config (prefer_remote: true).
+var PreferRemote bool
+
 // GetRemoteMetadataURL returns the URL for the remote build scripts metadata
 // using the configured branch
 func GetRemoteMetadataURL() string {
@@ -193,25 +199,42 @@ func GetAllBuildScripts(includeRemote bool) (map[string]ScriptInfo, error) {
 	return scripts, nil
 }
 
-// FindBuildScript looks for a build script by name/version
-// First checks local, then remote if not found locally
-// Returns the ScriptInfo and a boolean indicating if it was found
+// FindBuildScript looks for a build script by name/version.
+// By default, local scripts take precedence over remote.
+// When PreferRemote is true, remote scripts take precedence over local.
+// Returns the ScriptInfo and a boolean indicating if it was found.
 func FindBuildScript(nameVersion string) (ScriptInfo, bool) {
 	normalized := utils.NormalizeNameVersion(nameVersion)
 
-	// Check local first
-	localScripts, err := GetLocalBuildScripts()
-	if err == nil {
-		if info, found := localScripts[normalized]; found {
-			return info, true
+	if PreferRemote {
+		// Remote first: remote scripts take precedence over local
+		remoteScripts, err := GetRemoteBuildScripts()
+		if err == nil {
+			if info, found := remoteScripts[normalized]; found {
+				return info, true
+			}
 		}
-	}
 
-	// Check remote
-	remoteScripts, err := GetRemoteBuildScripts()
-	if err == nil {
-		if info, found := remoteScripts[normalized]; found {
-			return info, true
+		localScripts, err := GetLocalBuildScripts()
+		if err == nil {
+			if info, found := localScripts[normalized]; found {
+				return info, true
+			}
+		}
+	} else {
+		// Default: local scripts take precedence over remote
+		localScripts, err := GetLocalBuildScripts()
+		if err == nil {
+			if info, found := localScripts[normalized]; found {
+				return info, true
+			}
+		}
+
+		remoteScripts, err := GetRemoteBuildScripts()
+		if err == nil {
+			if info, found := remoteScripts[normalized]; found {
+				return info, true
+			}
 		}
 	}
 

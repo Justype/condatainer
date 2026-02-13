@@ -22,6 +22,7 @@ var (
 	createBaseImage string
 	createSource    string
 	createTempSize  string
+	createRemote    bool
 
 	// Compression flags
 	compZstd       bool
@@ -98,7 +99,10 @@ Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
 			normalizedArgs[i] = utils.NormalizeNameVersion(arg)
 		}
 
-		// 6. Execute create based on mode
+		// 6. Handle --remote flag (CLI flag or config)
+		build.PreferRemote = createRemote || config.Global.PreferRemote
+
+		// 7. Execute create based on mode
 		if createSource != "" {
 			// Mode: --source (external image like docker://ubuntu)
 			runCreateFromSource(ctx)
@@ -127,6 +131,7 @@ func init() {
 	f.StringVarP(&createBaseImage, "base-image", "b", "", "Base image to use instead of default")
 	f.StringVarP(&createSource, "source", "s", "", "Remote source URI (e.g., docker://ubuntu:22.04)")
 	f.StringVar(&createTempSize, "temp-size", "20G", "Size of temporary overlay")
+	f.BoolVar(&createRemote, "remote", false, "Remote build scripts take precedence over local")
 
 	// Compression Flags
 	f.BoolVar(&compZstdFast, "zstd-fast", false, "Use zstd compression level 3")
