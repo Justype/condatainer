@@ -108,14 +108,17 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	}()
 
 	// Try to download prebuilt overlay first, fall back to building if not available
-	if writableDir, err := config.GetWritableImagesDir(); err == nil {
-		if filepath.Dir(targetOverlayPath) == writableDir {
-			if tryDownloadPrebuiltOverlay(d.nameVersion, targetOverlayPath) {
-				// Downloaded prebuilt overlays don't have persistent build scripts, so add to .def_list
-				UpdateDefBuiltList(d.nameVersion, targetOverlayPath)
-				// Cleanup downloaded remote build script (if any)
-				d.Cleanup(false)
-				return nil
+	// Only attempt download if the build script source is remote
+	if d.isRemote {
+		if writableDir, err := config.GetWritableImagesDir(); err == nil {
+			if filepath.Dir(targetOverlayPath) == writableDir {
+				if tryDownloadPrebuiltOverlay(d.nameVersion, targetOverlayPath) {
+					// Downloaded prebuilt overlays don't have persistent build scripts, so add to .def_list
+					UpdateDefBuiltList(d.nameVersion, targetOverlayPath)
+					// Cleanup downloaded remote build script (if any)
+					d.Cleanup(false)
+					return nil
+				}
 			}
 		}
 	}
