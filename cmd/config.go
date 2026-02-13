@@ -26,6 +26,7 @@ var configKeys = []string{
 	"scheduler_bin",
 	"submit_job",
 	"branch",
+	"prefer_remote",
 	"extra_base_dirs",
 	"build.ncpus",
 	"build.mem_mb",
@@ -52,6 +53,8 @@ func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) 
 func configValueCompletion(key string) []string {
 	switch key {
 	case "submit_job":
+		return []string{"true", "false"}
+	case "prefer_remote":
 		return []string{"true", "false"}
 	case "branch":
 		return []string{"main", "dev"}
@@ -240,6 +243,7 @@ Shows:
 			fmt.Printf("  submit_job:     %v\n", submitJobActual)
 		}
 		fmt.Printf("  branch:         %s\n", viper.GetString("branch"))
+		fmt.Printf("  prefer_remote:    %v\n", config.Global.PreferRemote)
 		fmt.Println()
 
 		// Build settings
@@ -341,6 +345,7 @@ Time duration format (for build.time):
 			"scheduler_bin":       true,
 			"submit_job":          true,
 			"branch":              true,
+			"prefer_remote":       true,
 			"build.ncpus":         true,
 			"build.mem_mb":        true,
 			"build.time":          true,

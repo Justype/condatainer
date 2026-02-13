@@ -257,7 +257,7 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 	// Create job specification
 	jobSpec := &scheduler.JobSpec{
 		Name:      meta.NameVersion(),
-		Command:   fmt.Sprintf("condatainer create %s", meta.NameVersion()),
+		Command:   buildSchedulerCreateCommand(meta.NameVersion()),
 		Specs:     meta.ScriptSpecs(),
 		DepJobIDs: depIDs,
 		Metadata: map[string]string{
@@ -280,6 +280,15 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 
 	utils.PrintMessage("Submitted %s job %s for %s", info.Type, jobID, meta.NameVersion())
 	return jobID, nil
+}
+
+// buildSchedulerCreateCommand returns the condatainer create command for scheduler jobs,
+// propagating the --remote flag if active.
+func buildSchedulerCreateCommand(nameVersion string) string {
+	if PreferRemote {
+		return fmt.Sprintf("condatainer create --remote %s", nameVersion)
+	}
+	return fmt.Sprintf("condatainer create %s", nameVersion)
 }
 
 // GetLocalBuilds returns the list of builds to run locally
