@@ -267,7 +267,7 @@ trap cleanup SIGINT SIGTERM
 # Update user dirs (Desktop, Documents, etc.) to point to the new location
 xdg-user-dirs-update
 
-echo \"Starting websockify for noVNC...\"
+echo \"Starting websockify for noVNC on port $PORT...\"
 websockify --web /usr/share/novnc localhost:$PORT localhost:\$VNC_PORT &
 
 echo \"Starting XFCE desktop environment on display \$DISPLAY (port \$VNC_PORT)...\"

@@ -222,14 +222,14 @@ rm $SBATCH_SCRIPT_PATH
 
 echo "NODE=\$(hostname)" >> $STATE_FILE
 
-condatainer exec \\
-    $BASE_IMAGE_ARG \\
-    $OVERLAYS_ARG \\
-    $OVERLAY_ARG --writable \\
-    $JUPYTER_CMD \\
-        --ip 127.0.0.1 \\
-        --port $PORT \\
-        --no-browser \\
+condatainer exec \
+    $BASE_IMAGE_ARG \
+    $OVERLAYS_ARG \
+    $OVERLAY_ARG --writable \
+    $JUPYTER_CMD \
+        --ip 127.0.0.1 \
+        --port $PORT \
+        --no-browser \
         --IdentityProvider.token $TOKEN
 EOT
 

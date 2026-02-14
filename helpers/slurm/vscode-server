@@ -215,13 +215,13 @@ rm $SBATCH_SCRIPT_PATH
 
 echo "NODE=\$(hostname)" >> $STATE_FILE
 
-condatainer exec \\
-    $BASE_IMAGE_ARG \\
-    $OVERLAYS_ARG \\
-    $OVERLAY_ARG --writable \\
-    $CODE_BIN serve-web \\
-        --port $PORT \\
-        --accept-server-license-terms \\
+condatainer exec \
+    $BASE_IMAGE_ARG \
+    $OVERLAYS_ARG \
+    $OVERLAY_ARG --writable \
+    $CODE_BIN serve-web \
+        --port $PORT \
+        --accept-server-license-terms \
         --connection-token $TOKEN
 EOT
 

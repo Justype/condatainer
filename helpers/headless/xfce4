@@ -170,10 +170,12 @@ condatainer instance start \
     $OVERLAY_ARG --writable \
     xfce4-instance
 
+print_info "Starting websockify for noVNC on port ${MAGENTA}$PORT${NC}..."
 condatainer instance exec \
     xfce4-instance \
     websockify --web /usr/share/novnc localhost:$PORT localhost:$VNC_PORT &
 
+print_info "Starting XFCE desktop environment on display ${MAGENTA}$DISPLAY${NC} (VNC port ${MAGENTA}$VNC_PORT${NC})..."
 condatainer instance exec \
     xfce4-instance \
     vncserver $DISPLAY \

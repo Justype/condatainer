@@ -320,22 +320,22 @@ rm $SBATCH_SCRIPT_PATH
 
 echo "NODE=\$(hostname)" >> $STATE_FILE
 
-condatainer exec \\
-    -o r${R_VERSION} \\
-    -o rstudio-server \\
-    -o build-essential \\
-    $OVERLAYS_ARG \\
-    $OVERLAY_ARG --writable \\
-    /usr/lib/rstudio-server/bin/rserver \\
-        --server-user $USER \\
-        --server-daemonize=0 \\
-        --server-data-dir=$SCRATCH/.local/run/rstudio-server \\
-        --www-address=127.0.0.1 \\
-        --www-port=$PORT \\
-        --rsession-which-r=/usr/bin/R \\
-        --rsession-path=$HELPER_STATE_DIR/rsession.sh \\
-        --database-config-file=$HELPER_STATE_DIR/database.conf \\
-        --rsession-config-file=$HELPER_STATE_DIR/rsession.conf \\
+condatainer exec \
+    -o r${R_VERSION} \
+    -o rstudio-server \
+    -o build-essential \
+    $OVERLAYS_ARG \
+    $OVERLAY_ARG --writable \
+    /usr/lib/rstudio-server/bin/rserver \
+        --server-user $USER \
+        --server-daemonize=0 \
+        --server-data-dir=$SCRATCH/.local/run/rstudio-server \
+        --www-address=127.0.0.1 \
+        --www-port=$PORT \
+        --rsession-which-r=/usr/bin/R \
+        --rsession-path=$HELPER_STATE_DIR/rsession.sh \
+        --database-config-file=$HELPER_STATE_DIR/database.conf \
+        --rsession-config-file=$HELPER_STATE_DIR/rsession.conf \
         --auth-none=1
 EOT
 
