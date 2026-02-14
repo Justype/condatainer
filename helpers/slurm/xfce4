@@ -15,7 +15,7 @@ config_init $HELPER_NAME \
     BASE_IMAGE_DISTRO=noble \
     PORT= \
     VNC_PASSWD= \
-    DESKTOP_HOME="${SCRATCH:-$HOME}/desktop-home" \
+    DESKTOP_HOME="$SCRATCH/desktop-home" \
     REUSE_MODE=ask \
     OVERLAY=env.img
 
@@ -169,8 +169,6 @@ if [ ! -f "$OVERLAY" ]; then
 else
     check_overlay_integrity "$OVERLAY"
 fi
-
-setup_scratch
 #endregion
 
 # Construct arguments for CondaTainer exec

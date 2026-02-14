@@ -108,8 +108,6 @@ else
     fi
     check_overlay_integrity "$OVERLAY"
 fi
-
-setup_scratch
 #endregion
 
 # Construct arguments for CondaTainer exec

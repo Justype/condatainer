@@ -106,8 +106,6 @@ else
     R_BIN_PATH="/ext3/env/bin/R"
     R_LIB_PATH="/ext3/env/lib"
 fi
-
-setup_scratch
 #endregion
 
 # Construct arguments for CondaTainer exec

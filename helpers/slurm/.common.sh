@@ -26,6 +26,11 @@ HELPER_DEFAULTS_DIR="$CONDATAINER_CONFIG_DIR/helper"
 HELPER_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/condatainer/helper"
 LOG_DIR="$HOME/logs"
 mkdir -p "$CONDATAINER_CONFIG_DIR" "$HELPER_DEFAULTS_DIR" "$HELPER_STATE_DIR" "$LOG_DIR"
+# Ensure SCRATCH is set up
+if [ -z "$SCRATCH" ]; then
+    print_info "SCRATCH environment variable is not set. Falling back to HOME directory."
+    SCRATCH="$HOME"
+fi
 
 # ============= Config Functions =============
 
@@ -320,17 +325,6 @@ check_and_install_overlays() {
             print_error "Failed to install required overlays."
             exit 1
         fi
-    fi
-}
-
-# ============= Environment =============
-
-# setup_scratch
-#   Falls back SCRATCH to HOME if not set.
-setup_scratch() {
-    if [ -z "$SCRATCH" ]; then
-        print_warn "SCRATCH environment variable is not set. Falling back to HOME directory."
-        SCRATCH="$HOME"
     fi
 }
 
