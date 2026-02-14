@@ -27,7 +27,7 @@ print_help() {
     echo ""
     echo "Options:"
     echo "  -p <port>       Port for $HELPER_NAME (default: ${PORT:-randomly picked}). Valid range: 1024-65535"
-    echo "  -a <token>      Connection token for the web UI (if not provided, one is generated)"
+    echo "  -a <token>      Connection token for the web UI (if empty, one is generated)"
     echo ""
     echo "  -b <image>      Base image file"
     echo "  -e <.img>       Writable overlay (default: $OVERLAY)"
@@ -118,11 +118,7 @@ setup_scratch
 
 # Determine connection token
 if [ -z "$TOKEN" ]; then
-    if [ -n "$VSCODE_CONNECTION_TOKEN" ]; then
-        TOKEN="$VSCODE_CONNECTION_TOKEN"
-    else
-        TOKEN=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
-    fi
+    TOKEN=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
 fi
 
 print_info "Starting $HELPER_NAME at ${BLUE}http://localhost:$PORT?tkn=$TOKEN&folder=$CWD${NC}"

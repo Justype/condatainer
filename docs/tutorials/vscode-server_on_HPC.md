@@ -136,7 +136,7 @@ Options:
   -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00
 
   -p <port>       Port for vscode-server (default: randomly picked). Valid range: 1024-65535.
-  -a <token>      Connection token for the web UI (if not provided, one is generated)
+  -a <token>      Connection token for the web UI (if empty, one is generated)
   -b <image>      Base image file
   -e <overlay>    Environment overlay image file (default: env.img)
   -o <overlay>    Additional overlay files (can have multiple -o options)
