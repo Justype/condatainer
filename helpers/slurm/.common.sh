@@ -335,7 +335,9 @@ check_and_install_overlays() {
 print_specs() {
     print_msg "  CPUs: ${BLUE}$NCPUS${NC} MEM: ${BLUE}$MEM${NC} TIME: ${BLUE}$TIME${NC}"
     [ -n "$GPU" ] && print_msg "  GPU: ${BLUE}$GPU${NC}"
+    [ -n "$PORT" ] && print_msg "  Port: ${BLUE}$PORT${NC}"
     print_msg "  Working Dir: ${BLUE}$CWD${NC}"
+    [ -n "$BASE_IMAGE" ] && print_msg "  Base Image: ${BLUE}$BASE_IMAGE${NC}"
     print_msg "  Overlay: ${BLUE}$OVERLAY${NC}"
     [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
 }

@@ -22,6 +22,8 @@ config_init $HELPER_NAME \
 # Load saved defaults
 config_load $HELPER_NAME
 config_require $HELPER_NAME OVERLAY DESKTOP_HOME
+# Track whether a password was set in config
+if [ -z "${VNC_PASSWD:-}" ]; then AUTH_CONFIG_SET=false; else AUTH_CONFIG_SET=true; fi
 
 print_help() {
     echo "Usage: $0 [options]"
@@ -48,11 +50,13 @@ esac
 
 # Track if -o flag is used to clear overlays on first use
 _OVERLAYS_CLEARED=false
+# track whether -a supplied a password
+VNC_PASSWD_FLAG_SET=false
 
 while getopts "p:a:b:e:o:" opt; do
     case ${opt} in
         p ) PORT=$OPTARG ;;
-        a ) VNC_PASSWD=$OPTARG ;;
+        a ) VNC_PASSWD=$OPTARG; VNC_PASSWD_FLAG_SET=true ;;
         b ) BASE_IMAGE="$OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
         o ) # First -o clears previous overlays, then builds fresh list
@@ -97,10 +101,12 @@ fi
 [ -n "$OVERLAY" ] && [ -f "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
 
-# Generate a random password if not provided
-if [ -z "$VNC_PASSWD" ]; then
+# Generate a random password if not provided by config or -a
+if [ "${VNC_PASSWD_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
+    print_info "No VNC password provided. Generating a random one..."
     VNC_PASSWD=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
 fi
+
 condatainer exec \
     $BASE_IMAGE_ARG \
     -o xfce4 \

@@ -22,6 +22,8 @@ config_init $HELPER_NAME \
 # Load saved defaults
 config_load $HELPER_NAME
 config_require $HELPER_NAME NCPUS MEM TIME OVERLAY DESKTOP_HOME
+# Track whether a password was set in config
+if [ -z "${VNC_PASSWD:-}" ]; then AUTH_CONFIG_SET=false; else AUTH_CONFIG_SET=true; fi
 
 print_help() {
     echo "Usage: $0 [options]"
@@ -64,17 +66,6 @@ show_and_connect() {
     exit 0
 }
 
-# Override print_specs to add script-specific fields
-print_specs() {
-    print_msg "  CPUs: ${BLUE}$NCPUS${NC} MEM: ${BLUE}$MEM${NC} TIME: ${BLUE}$TIME${NC}"
-    [ -n "$GPU" ] && print_msg "  GPU: ${BLUE}$GPU${NC}"
-    print_msg "  Port: ${BLUE}$PORT${NC} VNC Password: ${BLUE}${VNC_PASSWD}${NC}"
-    print_msg "  Working Dir: ${BLUE}$CWD${NC}"
-    [ -n "$BASE_IMAGE" ] && print_msg "  Base Image: ${BLUE}$BASE_IMAGE${NC}"
-    print_msg "  Overlay: ${BLUE}$OVERLAY${NC}"
-    [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
-}
-
 # Track if we should reuse previous working directory
 REUSE_PREVIOUS_CWD=false
 
@@ -105,6 +96,8 @@ _TIME=$TIME
 _GPU=$GPU
 # Track if user wants to change working directory
 NEW_CWD=""
+# track whether -a supplied a password
+VNC_PASSWD_FLAG_SET=false
 
 while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
     case ${opt} in
@@ -118,7 +111,7 @@ while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
             ;;
         p ) PORT=$OPTARG ;;
-        a ) VNC_PASSWD=$OPTARG ;;
+        a ) VNC_PASSWD=$OPTARG; VNC_PASSWD_FLAG_SET=true ;;
         b ) BASE_IMAGE="$OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
         o ) # First -o clears previous overlays, then builds fresh list
@@ -177,10 +170,12 @@ fi
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
 [ -n "$GPU" ] && GPU_SBATCH="#SBATCH --gres=gpu:$GPU"
 
-# Generate a random password if not provided
-if [ -z "$VNC_PASSWD" ]; then
+# Generate a random password if not provided by config or -a
+if [ "${VNC_PASSWD_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
+    print_info "No VNC password provided. Generating a random one..."
     VNC_PASSWD=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
 fi
+
 condatainer exec \
     $BASE_IMAGE_ARG \
     -o xfce4 \
