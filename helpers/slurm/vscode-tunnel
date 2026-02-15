@@ -222,8 +222,6 @@ if [ ! -f "$OVERLAY" ]; then
 else
     check_overlay_integrity "$OVERLAY"
 fi
-
-setup_scratch
 #endregion
 
 # Construct arguments for CondaTainer exec
@@ -253,12 +251,12 @@ $CODE_BIN tunnel logout
 $CODE_BIN tunnel user login --provider $AUTH 2>&1 | tee "$AUTH_STATUS_FILE"
 printf "LOGIN" > "$AUTH_STATUS_FILE"
 
-condatainer exec \\
-    $BASE_IMAGE_ARG \\
-    $OVERLAYS_ARG \\
-    $OVERLAY_ARG --writable \\
-    $CODE_BIN tunnel \\
-        --accept-server-license-terms \\
+condatainer exec \
+    $BASE_IMAGE_ARG \
+    $OVERLAYS_ARG \
+    $OVERLAY_ARG --writable \
+    $CODE_BIN tunnel \
+        --accept-server-license-terms \
         --name $MACHINE_NAME
 
 [ \$? -ne 0 ] && echo "ERROR" > "$AUTH_STATUS_FILE"

@@ -1,35 +1,36 @@
 #!/bin/bash
-# This script helps run vscode-server on SLURM clusters.
+# This script helps run an XFCE desktop with IGV launched (noVNC) on SLURM clusters.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/.common.sh"
-HELPER_NAME=vscode-server
+HELPER_NAME=igv
 
 # Save defaults on first run
 config_init $HELPER_NAME \
-    NCPUS=4 \
-    MEM=16G \
+    NCPUS=3 \
+    MEM=12G \
     TIME=12:00:00 \
     GPU= \
     BASE_IMAGE= \
     BASE_IMAGE_DISTRO=noble \
     PORT= \
-    TOKEN= \
+    VNC_PASSWD= \
+    DESKTOP_HOME="$SCRATCH/desktop-home" \
     REUSE_MODE=ask \
     OVERLAY=env.img
 
 # Load saved defaults
 config_load $HELPER_NAME
-config_require $HELPER_NAME NCPUS MEM TIME OVERLAY
-# Track whether a token was set in config
-if [ -z "${TOKEN:-}" ]; then AUTH_CONFIG_SET=false; else AUTH_CONFIG_SET=true; fi
+config_require $HELPER_NAME NCPUS MEM TIME OVERLAY DESKTOP_HOME
+# Track whether a password was set in config
+if [ -z "${VNC_PASSWD:-}" ]; then AUTH_CONFIG_SET=false; else AUTH_CONFIG_SET=true; fi
 
 print_help() {
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
-    echo "  -p <port>       Port for $HELPER_NAME (default: ${PORT:-randomly picked}). Valid range: 1024-65535"
-    echo "  -a <token>      Connection token for the web UI (if empty, one is generated)"
+    echo "  -p <port>       Port for noVNC (default: ${PORT:-randomly picked}). Valid range: 1024-65535"
+    echo "  -a <passwd>     VNC password (if empty, one is generated)"
     echo ""
     echo "  -c <number>     Number of CPUs to allocate (default: $NCPUS)"
     echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
@@ -59,7 +60,7 @@ esac
 #   Prints connection info and opens SSH tunnel with port forwarding.
 show_and_connect() {
     local job_id="$1"
-    print_info "$HELPER_NAME at ${BLUE}http://localhost:$PORT?tkn=$TOKEN&folder=$CWD${NC}"
+    print_info "noVNC at ${BLUE}http://localhost:$PORT/vnc.html?autoconnect=1&resize=remote#password=${VNC_PASSWD}${NC}"
     print_info "If you want to stop it, run: ${YELLOW}scancel $job_id${NC}"
     exec ssh ${SSH_OPTS} -o ControlMaster=no -L "$PORT:localhost:$PORT" "$USER@$NODE"
     exit 0
@@ -95,7 +96,7 @@ _TIME=$TIME
 _GPU=$GPU
 # Track if user wants to change working directory
 NEW_CWD=""
-# track whether -a supplied a token
+# track whether -a supplied a password
 AUTH_FLAG_SET=false
 
 while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
@@ -104,13 +105,13 @@ while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
         m ) MEM=$OPTARG; _MEM=$OPTARG ;;
         t ) TIME=$OPTARG; _TIME=$OPTARG ;;
         g ) GPU=$OPTARG; _GPU=$OPTARG ;;
-        v ) NCPUS=1; MEM=4G; TIME=02:00:00; echo "[MSG] View Mode: NCPUS=1, MEM=4G, TIME=02:00:00" ;;
+        v ) NCPUS=2; MEM=8G; TIME=02:00:00; echo "[MSG] View Mode: NCPUS=2, MEM=8G, TIME=02:00:00" ;;
         w )
             NEW_CWD="$(readlink -f .)"
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
             ;;
         p ) PORT=$OPTARG ;;
-        a ) TOKEN=$OPTARG; AUTH_FLAG_SET=true ;;
+        a ) VNC_PASSWD=$OPTARG; AUTH_FLAG_SET=true ;;
         b ) BASE_IMAGE="$OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
         o ) # First -o clears previous overlays, then builds fresh list
@@ -153,28 +154,10 @@ fi
 check_port_available "$PORT"
 check_condatainer
 
-# Ensure the VSCode CLI is present
-CODE_BIN="$HOME/.local/bin/code"
-if ! [ -f "$CODE_BIN" ]; then
-    print_info "VSCode CLI not found. Downloading..."
-    ARCH=$(uname -m)
-    if [ "$ARCH" == "x86_64" ]; then ARCH="linux-x64"; elif [ "$ARCH" == "aarch64" ]; then ARCH="linux-arm64"; else
-        print_error "Unsupported architecture: $ARCH"
-        exit 1
-    fi
-    wget -nv -O vscode-cli.tar.gz "https://update.code.visualstudio.com/latest/cli-$ARCH/stable"
-    mkdir -p "$(dirname "$CODE_BIN")"
-    tar -xzf vscode-cli.tar.gz -C "$(dirname "$CODE_BIN")" code && rm vscode-cli.tar.gz
-    chmod +x "$CODE_BIN"
-else
-    print_info "Updating VSCode CLI..."
-    [ -x "$CODE_BIN" ] && "$CODE_BIN" update >/dev/null 2>&1
-fi
-
-check_and_install_overlays $OVERLAYS
+check_and_install_overlays xfce4 igv $OVERLAYS
 
 if [ ! -f "$OVERLAY" ]; then
-    print_warn "Overlay ${BLUE}$OVERLAY${NC} not found. Continuing without it."
+    print_info "Overlay ${BLUE}$OVERLAY${NC} not found. Continuing without it."
     sleep 3
 else
     check_overlay_integrity "$OVERLAY"
@@ -187,10 +170,43 @@ fi
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
 [ -n "$GPU" ] && GPU_SBATCH="#SBATCH --gres=gpu:$GPU"
 
-# Generate a random token if not provided by config or -a
+# Generate a random password if not provided by config or -a
 if [ "${AUTH_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
-    print_info "No connection token provided. Generating a random one..."
-    TOKEN=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
+    print_info "No VNC password provided. Generating a random one..."
+    VNC_PASSWD=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
+fi
+
+condatainer exec \
+    $BASE_IMAGE_ARG \
+    -o xfce4 \
+    bash -c "echo '$VNC_PASSWD' | vncpasswd -f > $HOME/.vnc/passwd-igv && chmod 600 $HOME/.vnc/passwd-igv"
+
+# Create VNC xstartup script
+mkdir -p $HOME/.vnc
+cat > "$HOME/.vnc/xstartup" <<'EOF'
+#!/bin/sh
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+exec dbus-launch --exit-with-session startxfce4
+EOF
+chmod +x $HOME/.vnc/xstartup
+
+# Change XDG_* dirs to point under "$DESKTOP_HOME" (do not modify $HOME itself)
+# So it will not mess the $HOME dir up
+if [ ! -f "$HOME/.config/user-dirs.dirs" ] || [ ! -d "$DESKTOP_HOME" ]; then
+    mkdir -p "$HOME/.config"
+    cat > "$HOME/.config/user-dirs.dirs" <<EOT
+XDG_DESKTOP_DIR="$DESKTOP_HOME/Desktop"
+XDG_DOCUMENTS_DIR="$DESKTOP_HOME/Documents"
+XDG_DOWNLOAD_DIR="$DESKTOP_HOME/Downloads"
+XDG_MUSIC_DIR="$DESKTOP_HOME/Music"
+XDG_PICTURES_DIR="$DESKTOP_HOME/Pictures"
+XDG_PUBLICSHARE_DIR="$DESKTOP_HOME/Public"
+XDG_TEMPLATES_DIR="$DESKTOP_HOME/Templates"
+XDG_VIDEOS_DIR="$DESKTOP_HOME/Videos"
+EOT
+    mkdir -p "$DESKTOP_HOME"
+    mkdir -p "$DESKTOP_HOME"/{Desktop,Documents,Downloads,Music,Pictures,Public,Templates,Videos}
 fi
 
 SBATCH_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.sbatch"
@@ -209,14 +225,60 @@ rm $SBATCH_SCRIPT_PATH
 
 echo "NODE=\$(hostname)" >> $STATE_FILE
 
+DISPLAY_NUM=""
+for i in \$(seq 10 99); do
+    if [ ! -f /tmp/.X\${i}-lock ]; then
+        DISPLAY_NUM=\$i
+        break
+    fi
+done
+if [ -z "\$DISPLAY_NUM" ]; then
+    echo "[ERR] No available display number found on compute node." >&2
+    exit 1
+fi
+export DISPLAY=:\$DISPLAY_NUM
+VNC_PORT=\$((5900 + DISPLAY_NUM))
+
+export XDG_RUNTIME_DIR=$SCRATCH/.xdg_runtime
+mkdir -p \$XDG_RUNTIME_DIR
+
 condatainer exec \
     $BASE_IMAGE_ARG \
+    --env DISPLAY=\$DISPLAY \
+    --bind \$XDG_RUNTIME_DIR \
+    --bind $DESKTOP_HOME \
+    -o xfce4 \
+    -o igv \
     $OVERLAYS_ARG \
     $OVERLAY_ARG --writable \
-    $CODE_BIN serve-web \
-        --port $PORT \
-        --accept-server-license-terms \
-        --connection-token $TOKEN
+    bash -c "
+cleanup() {
+    vncserver -kill \$DISPLAY
+    rm -f /tmp/.X\${DISPLAY_NUM}-lock
+    rm -f /tmp/.X11-unix/X\${DISPLAY_NUM}
+    exit 0
+}
+trap cleanup SIGINT SIGTERM
+
+# Update user dirs (Desktop, Documents, etc.) to point to the new location
+xdg-user-dirs-update
+
+echo \"Starting websockify for noVNC on port $PORT...\"
+websockify --web /usr/share/novnc localhost:$PORT localhost:\$VNC_PORT &
+
+echo \"Starting XFCE desktop environment on display \$DISPLAY (port \$VNC_PORT)...\"
+vncserver \$DISPLAY \
+    -geometry 1600x900 -depth 24 \
+    -rfbport \$VNC_PORT \
+    -rfbauth $HOME/.vnc/passwd-igv \
+    -xstartup $HOME/.vnc/xstartup
+
+echo \"Starting IGV...\"
+igv
+
+echo \"Setup complete. VNC server running on display \$DISPLAY (port \$VNC_PORT).\"
+sleep infinity
+"
 EOT
 
 SBATCH_OUTPUT=$(sbatch $SBATCH_SCRIPT_PATH)
@@ -230,7 +292,7 @@ TIME=$_TIME
 GPU=$_GPU
 PORT=$PORT
 CWD=$CWD
-TOKEN=$TOKEN
+VNC_PASSWD="$VNC_PASSWD"
 BASE_IMAGE="$BASE_IMAGE"
 OVERLAY="$OVERLAY"
 OVERLAYS="$OVERLAYS"

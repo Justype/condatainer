@@ -21,13 +21,15 @@ config_init $HELPER_NAME \
 # Load saved defaults
 config_load $HELPER_NAME
 config_require $HELPER_NAME OVERLAY
+# Track whether a token was set in config
+if [ -z "${TOKEN:-}" ]; then AUTH_CONFIG_SET=false; else AUTH_CONFIG_SET=true; fi
 
 print_help() {
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
     echo "  -p <port>       Port for $HELPER_NAME (default: ${PORT:-randomly picked}). Valid range: 1024-65535"
-    echo "  -a <token>      Connection token for the web UI (if not provided, one is generated)"
+    echo "  -a <token>      Connection token for the web UI (if empty, one is generated)"
     echo ""
     echo "  -b <image>      Base image file"
     echo "  -e <.img>       Writable overlay (default: $OVERLAY)"
@@ -47,11 +49,13 @@ esac
 
 # Track if -o flag is used to clear overlays on first use
 _OVERLAYS_CLEARED=false
+# track whether -a supplied a token
+AUTH_FLAG_SET=false
 
 while getopts "p:a:b:e:o:" opt; do
     case ${opt} in
         p ) PORT=$OPTARG ;;
-        a ) TOKEN=$OPTARG ;;
+        a ) TOKEN=$OPTARG; AUTH_FLAG_SET=true ;;
         b ) BASE_IMAGE="$OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
         o ) # First -o clears previous overlays, then builds fresh list
@@ -107,8 +111,6 @@ if [ ! -f "$OVERLAY" ]; then
 else
     check_overlay_integrity "$OVERLAY"
 fi
-
-setup_scratch
 #endregion
 
 # Construct arguments for CondaTainer exec
@@ -116,13 +118,10 @@ setup_scratch
 [ -n "$OVERLAY" ] && [ -f "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
 
-# Determine connection token
-if [ -z "$TOKEN" ]; then
-    if [ -n "$VSCODE_CONNECTION_TOKEN" ]; then
-        TOKEN="$VSCODE_CONNECTION_TOKEN"
-    else
-        TOKEN=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
-    fi
+# Generate a random token if not provided by config or -a
+if [ "${AUTH_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
+    print_info "No connection token provided. Generating a random one..."
+    TOKEN=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
 fi
 
 print_info "Starting $HELPER_NAME at ${BLUE}http://localhost:$PORT?tkn=$TOKEN&folder=$CWD${NC}"

@@ -9,6 +9,9 @@
     "code-server": {
       "path": "helpers/headless/code-server"
     },
+    "igv": {
+      "path": "helpers/headless/igv"
+    },
     "jupyter": {
       "path": "helpers/headless/jupyter"
     },
@@ -23,6 +26,9 @@
     },
     "vscode-tunnel": {
       "path": "helpers/headless/vscode-tunnel"
+    },
+    "xfce4": {
+      "path": "helpers/headless/xfce4"
     }
   },
   "slurm": {
@@ -34,6 +40,9 @@
     },
     "code-server": {
       "path": "helpers/slurm/code-server"
+    },
+    "igv": {
+      "path": "helpers/slurm/igv"
     },
     "jupyter": {
       "path": "helpers/slurm/jupyter"
@@ -49,6 +58,9 @@
     },
     "vscode-tunnel": {
       "path": "helpers/slurm/vscode-tunnel"
+    },
+    "xfce4": {
+      "path": "helpers/slurm/xfce4"
     }
   }
 }

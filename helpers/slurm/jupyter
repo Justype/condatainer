@@ -22,6 +22,8 @@ config_init $HELPER_NAME \
 # Load saved defaults
 config_load $HELPER_NAME
 config_require $HELPER_NAME NCPUS MEM TIME OVERLAY JUPYTER_MODE
+# Track whether a token was set in config
+if [ -z "${TOKEN:-}" ]; then AUTH_CONFIG_SET=false; else AUTH_CONFIG_SET=true; fi
 
 print_help() {
     echo "Usage: $0 [options]"
@@ -55,6 +57,8 @@ case $1 in
     *)              ;;
 esac
 
+# show_and_connect <job_id>
+#   Prints connection info and opens SSH tunnel with port forwarding.
 show_and_connect() {
     local job_id="$1"
     print_info "$HELPER_NAME at ${BLUE}http://localhost:$PORT?token=$TOKEN${NC}"
@@ -68,7 +72,7 @@ print_specs() {
     print_msg "  CPUs: ${BLUE}$NCPUS${NC} MEM: ${BLUE}$MEM${NC} TIME: ${BLUE}$TIME${NC}"
     [ -n "$GPU" ] && print_msg "  GPU: ${BLUE}$GPU${NC}"
     print_msg "  Mode: Jupyter ${BLUE}$JUPYTER_MODE${NC}"
-    print_msg "  Port: ${BLUE}$PORT${NC} Token: ${BLUE}$TOKEN${NC}"
+    print_msg "  Port: ${BLUE}$PORT${NC}"
     print_msg "  Working Dir: ${BLUE}$CWD${NC}"
     [ -n "$BASE_IMAGE" ] && print_msg "  Base Image: ${BLUE}$BASE_IMAGE${NC}"
     print_msg "  Overlay: ${BLUE}$OVERLAY${NC}"
@@ -105,6 +109,8 @@ _TIME=$TIME
 _GPU=$GPU
 # Track if user wants to change working directory
 NEW_CWD=""
+# track whether -a supplied a token
+AUTH_FLAG_SET=false
 
 while getopts "j:c:m:t:g:wp:a:b:e:o:v" opt; do
     case ${opt} in
@@ -119,7 +125,7 @@ while getopts "j:c:m:t:g:wp:a:b:e:o:v" opt; do
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
             ;;
         p ) PORT=$OPTARG ;;
-        a ) TOKEN=$OPTARG ;;
+        a ) TOKEN=$OPTARG; AUTH_FLAG_SET=true ;;
         b ) BASE_IMAGE="$OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
         o ) # First -o clears previous overlays, then builds fresh list
@@ -186,8 +192,6 @@ else
     fi
     check_overlay_integrity "$OVERLAY"
 fi
-
-setup_scratch
 #endregion
 
 # Construct arguments for CondaTainer exec
@@ -203,8 +207,9 @@ else
     JUPYTER_CMD="jupyter-lab"
 fi
 
-# Determine connection token
-if [ -z "$TOKEN" ]; then
+# Generate a random token if not provided by config or -a
+if [ "${AUTH_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
+    print_info "No connection token provided. Generating a random one..."
     TOKEN=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
 fi
 
@@ -224,14 +229,14 @@ rm $SBATCH_SCRIPT_PATH
 
 echo "NODE=\$(hostname)" >> $STATE_FILE
 
-condatainer exec \\
-    $BASE_IMAGE_ARG \\
-    $OVERLAYS_ARG \\
-    $OVERLAY_ARG --writable \\
-    $JUPYTER_CMD \\
-        --ip 127.0.0.1 \\
-        --port $PORT \\
-        --no-browser \\
+condatainer exec \
+    $BASE_IMAGE_ARG \
+    $OVERLAYS_ARG \
+    $OVERLAY_ARG --writable \
+    $JUPYTER_CMD \
+        --ip 127.0.0.1 \
+        --port $PORT \
+        --no-browser \
         --IdentityProvider.token $TOKEN
 EOT
 

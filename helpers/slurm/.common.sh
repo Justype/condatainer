@@ -26,6 +26,11 @@ HELPER_DEFAULTS_DIR="$CONDATAINER_CONFIG_DIR/helper"
 HELPER_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/condatainer/helper"
 LOG_DIR="$HOME/logs"
 mkdir -p "$CONDATAINER_CONFIG_DIR" "$HELPER_DEFAULTS_DIR" "$HELPER_STATE_DIR" "$LOG_DIR"
+# Ensure SCRATCH is set up
+if [ -z "$SCRATCH" ]; then
+    print_info "SCRATCH environment variable is not set. Falling back to HOME directory."
+    SCRATCH="$HOME"
+fi
 
 # ============= Config Functions =============
 
@@ -323,17 +328,6 @@ check_and_install_overlays() {
     fi
 }
 
-# ============= Environment =============
-
-# setup_scratch
-#   Falls back SCRATCH to HOME if not set.
-setup_scratch() {
-    if [ -z "$SCRATCH" ]; then
-        print_warn "SCRATCH environment variable is not set. Falling back to HOME directory."
-        SCRATCH="$HOME"
-    fi
-}
-
 # ============= SLURM Functions =============
 
 # print_specs
@@ -341,7 +335,9 @@ setup_scratch() {
 print_specs() {
     print_msg "  CPUs: ${BLUE}$NCPUS${NC} MEM: ${BLUE}$MEM${NC} TIME: ${BLUE}$TIME${NC}"
     [ -n "$GPU" ] && print_msg "  GPU: ${BLUE}$GPU${NC}"
+    [ -n "$PORT" ] && print_msg "  Port: ${BLUE}$PORT${NC}"
     print_msg "  Working Dir: ${BLUE}$CWD${NC}"
+    [ -n "$BASE_IMAGE" ] && print_msg "  Base Image: ${BLUE}$BASE_IMAGE${NC}"
     print_msg "  Overlay: ${BLUE}$OVERLAY${NC}"
     [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
 }

@@ -170,8 +170,6 @@ if [ ! -f "$OVERLAY" ]; then
 else
     check_overlay_integrity "$OVERLAY"
 fi
-
-setup_scratch
 #endregion
 
 # Construct arguments for CondaTainer exec
@@ -201,14 +199,14 @@ rm $SBATCH_SCRIPT_PATH
 
 echo "NODE=\$(hostname)" >> $STATE_FILE
 
-condatainer exec \\
-    $BASE_IMAGE_ARG \\
-    -o code-server \\
-    $OVERLAYS_ARG \\
-    $OVERLAY_ARG --writable \\
-    code-server \\
-        --disable-update-check \\
-        --bind-addr 127.0.0.1:$PORT \\
+condatainer exec \
+    $BASE_IMAGE_ARG \
+    -o code-server \
+    $OVERLAYS_ARG \
+    $OVERLAY_ARG --writable \
+    code-server \
+        --disable-update-check \
+        --bind-addr 127.0.0.1:$PORT \
         $AUTH_OPTION
 EOT
 
