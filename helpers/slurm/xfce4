@@ -97,7 +97,7 @@ _GPU=$GPU
 # Track if user wants to change working directory
 NEW_CWD=""
 # track whether -a supplied a password
-VNC_PASSWD_FLAG_SET=false
+AUTH_FLAG_SET=false
 
 while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
     case ${opt} in
@@ -111,7 +111,7 @@ while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
             ;;
         p ) PORT=$OPTARG ;;
-        a ) VNC_PASSWD=$OPTARG; VNC_PASSWD_FLAG_SET=true ;;
+        a ) VNC_PASSWD=$OPTARG; AUTH_FLAG_SET=true ;;
         b ) BASE_IMAGE="$OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
         o ) # First -o clears previous overlays, then builds fresh list
@@ -171,7 +171,7 @@ fi
 [ -n "$GPU" ] && GPU_SBATCH="#SBATCH --gres=gpu:$GPU"
 
 # Generate a random password if not provided by config or -a
-if [ "${VNC_PASSWD_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
+if [ "${AUTH_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
     print_info "No VNC password provided. Generating a random one..."
     VNC_PASSWD=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
 fi

@@ -22,6 +22,8 @@ config_init $HELPER_NAME \
 # Load saved defaults
 config_load $HELPER_NAME
 config_require $HELPER_NAME NCPUS MEM TIME OVERLAY JUPYTER_MODE
+# Track whether a token was set in config
+if [ -z "${TOKEN:-}" ]; then AUTH_CONFIG_SET=false; else AUTH_CONFIG_SET=true; fi
 
 print_help() {
     echo "Usage: $0 [options]"
@@ -49,12 +51,14 @@ esac
 
 # Track if -o flag is used to clear overlays on first use
 _OVERLAYS_CLEARED=false
+# track whether -a supplied a token
+AUTH_FLAG_SET=false
 
 while getopts "j:p:a:b:e:o:" opt; do
     case ${opt} in
-        j ) JUPYTER_MODE=$OPTARG ;;
+        j ) JUPYTER_MODE="${OPTARG,,}" ;;
         p ) PORT=$OPTARG ;;
-        a ) TOKEN=$OPTARG ;;
+        a ) TOKEN=$OPTARG; AUTH_FLAG_SET=true ;;
         b ) BASE_IMAGE="$OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
         o ) # First -o clears previous overlays, then builds fresh list
@@ -122,8 +126,9 @@ else
     JUPYTER_CMD="jupyter-lab"
 fi
 
-# Determine connection token
-if [ -z "$TOKEN" ]; then
+# Generate a random token if not provided by config or -a
+if [ "${AUTH_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
+    print_info "No connection token provided. Generating a random one..."
     TOKEN=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
 fi
 

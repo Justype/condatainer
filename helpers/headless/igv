@@ -51,12 +51,12 @@ esac
 # Track if -o flag is used to clear overlays on first use
 _OVERLAYS_CLEARED=false
 # track whether -a supplied a password
-VNC_PASSWD_FLAG_SET=false
+AUTH_FLAG_SET=false
 
 while getopts "p:a:b:e:o:" opt; do
     case ${opt} in
         p ) PORT=$OPTARG ;;
-        a ) VNC_PASSWD=$OPTARG; VNC_PASSWD_FLAG_SET=true ;;
+        a ) VNC_PASSWD=$OPTARG; AUTH_FLAG_SET=true ;;
         b ) BASE_IMAGE="$OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
         o ) # First -o clears previous overlays, then builds fresh list
@@ -102,7 +102,7 @@ fi
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
 
 # Generate a random password if not provided by config or -a
-if [ "${VNC_PASSWD_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
+if [ "${AUTH_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
     print_info "No VNC password provided. Generating a random one..."
     VNC_PASSWD=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
 fi

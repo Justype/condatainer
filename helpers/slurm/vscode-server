@@ -21,6 +21,8 @@ config_init $HELPER_NAME \
 # Load saved defaults
 config_load $HELPER_NAME
 config_require $HELPER_NAME NCPUS MEM TIME OVERLAY
+# Track whether a token was set in config
+if [ -z "${TOKEN:-}" ]; then AUTH_CONFIG_SET=false; else AUTH_CONFIG_SET=true; fi
 
 print_help() {
     echo "Usage: $0 [options]"
@@ -63,17 +65,6 @@ show_and_connect() {
     exit 0
 }
 
-# Override print_specs to add script-specific fields
-print_specs() {
-    print_msg "  CPUs: ${BLUE}$NCPUS${NC} MEM: ${BLUE}$MEM${NC} TIME: ${BLUE}$TIME${NC}"
-    [ -n "$GPU" ] && print_msg "  GPU: ${BLUE}$GPU${NC}"
-    print_msg "  Port: ${BLUE}$PORT${NC} Token: ${BLUE}$TOKEN${NC}"
-    print_msg "  Working Dir: ${BLUE}$CWD${NC}"
-    [ -n "$BASE_IMAGE" ] && print_msg "  Base Image: ${BLUE}$BASE_IMAGE${NC}"
-    print_msg "  Overlay: ${BLUE}$OVERLAY${NC}"
-    [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
-}
-
 # Track if we should reuse previous working directory
 REUSE_PREVIOUS_CWD=false
 
@@ -104,6 +95,8 @@ _TIME=$TIME
 _GPU=$GPU
 # Track if user wants to change working directory
 NEW_CWD=""
+# track whether -a supplied a token
+AUTH_FLAG_SET=false
 
 while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
     case ${opt} in
@@ -117,7 +110,7 @@ while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
             ;;
         p ) PORT=$OPTARG ;;
-        a ) TOKEN=$OPTARG ;;
+        a ) TOKEN=$OPTARG; AUTH_FLAG_SET=true ;;
         b ) BASE_IMAGE="$OPTARG" ;;
         e ) OVERLAY=$OPTARG ;;
         o ) # First -o clears previous overlays, then builds fresh list
@@ -194,8 +187,9 @@ fi
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
 [ -n "$GPU" ] && GPU_SBATCH="#SBATCH --gres=gpu:$GPU"
 
-# Determine connection token
-if [ -z "$TOKEN" ]; then
+# Generate a random token if not provided by config or -a
+if [ "${AUTH_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
+    print_info "No connection token provided. Generating a random one..."
     TOKEN=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
 fi
 
