@@ -26,8 +26,9 @@ From: ubuntu:20.04
         squashfs-tools fuse \
         sudo ca-certificates \
         curl wget aria2 git \
+        bash zsh fish tree \
         tar pigz unzip bzip2 xz-utils zstd lz4 \
-        python3-requests python3-bs4 \
+        python3-requests python3-bs4 python-is-python3 \
         tzdata time jq tmux bash-completion
 
     # Internal Apptainer (add nested mounting support)
