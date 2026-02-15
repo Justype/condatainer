@@ -259,6 +259,12 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM
 
+# Copy the schemas to a writable location and compile them (just in case if other overlays have glib-based apps that need it)
+mkdir -p $SCRATCH/.local/share/glib-2.0/schemas
+cp -r /usr/share/glib-2.0/schemas/* $SCRATCH/.local/share/glib-2.0/schemas/ 2>/dev/null || true
+glib-compile-schemas $SCRATCH/.local/share/glib-2.0/schemas/
+export XDG_DATA_DIRS="$SCRATCH/.local/share:/usr/local/share:/usr/share"
+
 # Update user dirs (Desktop, Documents, etc.) to point to the new location
 xdg-user-dirs-update
 
