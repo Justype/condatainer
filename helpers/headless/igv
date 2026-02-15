@@ -169,12 +169,23 @@ trap cleanup SIGINT SIGTERM
 condatainer instance start \
     $BASE_IMAGE_ARG \
     --env DISPLAY=$DISPLAY \
+    --env XDG_DATA_DIRS="$SCRATCH/.local/share:/usr/local/share:/usr/share" \
     --bind $XDG_RUNTIME_DIR \
     --bind $DESKTOP_HOME \
+    -o igv \
     -o xfce4 \
     $OVERLAYS_ARG \
     $OVERLAY_ARG --writable \
     xfce4-instance
+
+# Copy the schemas to a writable location and compile them
+condatainer instance exec \
+    xfce4-instance \
+    bash -c "
+        mkdir -p $SCRATCH/.local/share/glib-2.0/schemas
+        cp -r /usr/share/glib-2.0/schemas/* $SCRATCH/.local/share/glib-2.0/schemas/ 2>/dev/null
+        glib-compile-schemas $SCRATCH/.local/share/glib-2.0/schemas/
+    "
 
 print_info "Starting websockify for noVNC on port ${MAGENTA}$PORT${NC}..."
 condatainer instance exec \
