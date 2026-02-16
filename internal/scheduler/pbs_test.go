@@ -394,7 +394,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l walltime=02:30:00",
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 			wantTime:  2*time.Hour + 30*time.Minute,
 		},
 		{
@@ -839,7 +839,7 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 			},
 			wantNodes:  1,
 			wantNtasks: 1,
-			wantNcpus:  4, // default
+			wantNcpus:  2, // default
 		},
 		{
 			name: "select with mpiprocs and ngpus",

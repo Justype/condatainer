@@ -128,10 +128,13 @@ func (l *LsfScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) 
 	}
 	defer file.Close()
 
+	defaults := GetSpecDefaults()
 	specs := &ScriptSpecs{
-		Ncpus:    4, // default CPUs per task
-		Ntasks:   1, // default: single task
-		Nodes:    1, // default: single node
+		Ncpus:    defaults.Ncpus,
+		Ntasks:   defaults.Ntasks,
+		Nodes:    defaults.Nodes,
+		MemMB:    defaults.MemMB,
+		Time:     defaults.Time,
 		RawFlags: make([]string, 0),
 	}
 

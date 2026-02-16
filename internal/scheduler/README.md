@@ -52,6 +52,28 @@ type Scheduler interface {
 **JobResources** - Runtime-allocated resources (from env vars, pointer fields):
 - `Ncpus`, `Ntasks`, `Nodes`, `MemMB`, `Ngpus`
 
+## Configurable Defaults
+
+`ReadScriptSpecs` applies configurable defaults when a script omits resource directives. Defaults are set via config (`scheduler.*` keys) and wired through `SetSpecDefaults()` at CLI init.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `scheduler.ncpus` | 2 | CPUs per task |
+| `scheduler.mem_mb` | 8192 | Memory in MB |
+| `scheduler.time` | `4h` | Time limit |
+| `scheduler.nodes` | 1 | Node count |
+| `scheduler.ntasks` | 1 | Task count |
+
+```yaml
+# ~/.config/condatainer/config.yaml
+scheduler:
+  ncpus: 8
+  mem_mb: 16384
+  time: "8h"
+```
+
+These are independent from build defaults (`build.default_cpus`), which control `$NCPUS` during image builds.
+
 ## Usage
 
 ### Detection and Initialization

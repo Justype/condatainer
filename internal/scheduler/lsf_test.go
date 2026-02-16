@@ -401,7 +401,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#BSUB -W 04:00",
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 			wantTime:  4 * time.Hour,
 		},
 		{
@@ -420,7 +420,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				`#BSUB -gpu "num=4"`,
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 			wantGpu:   &GpuSpec{Type: "gpu", Count: 4},
 		},
 		{
@@ -467,7 +467,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#BSUB -M 4096MB",
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 			wantMemMB: 4096,
 		},
 		{
@@ -476,7 +476,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#BSUB -M 8GB",
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 			wantMemMB: 8 * 1024,
 		},
 	}

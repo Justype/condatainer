@@ -108,7 +108,16 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
-		// Step 7: Initialize scheduler if job submission is enabled
+		// Step 7: Apply scheduler spec defaults from config
+		scheduler.SetSpecDefaults(scheduler.SpecDefaults{
+			Ncpus:  config.Global.Scheduler.Ncpus,
+			MemMB:  config.Global.Scheduler.MemMB,
+			Time:   config.Global.Scheduler.Time,
+			Nodes:  config.Global.Scheduler.Nodes,
+			Ntasks: config.Global.Scheduler.Ntasks,
+		})
+
+		// Step 8: Initialize scheduler if job submission is enabled
 		if config.Global.SubmitJob {
 			schedType, err := scheduler.Init(config.Global.SchedulerBin)
 			if err == nil && schedType != scheduler.SchedulerUnknown {

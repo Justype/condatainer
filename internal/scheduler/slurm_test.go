@@ -438,7 +438,7 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --mem=4096M",
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 			wantMemMB: 4096,
 		},
 		{
@@ -457,7 +457,7 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --gpus=v100:4",
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 			wantGpu:   &GpuSpec{Type: "v100", Count: 4},
 		},
 		{
@@ -466,7 +466,7 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --gpus-per-node=2",
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 			wantGpu:   &GpuSpec{Type: "gpu", Count: 2},
 		},
 		{
@@ -475,7 +475,7 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --time=1-12:00:00",
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 			wantTime:  36 * time.Hour,
 		},
 		{
@@ -501,7 +501,7 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"echo hello",
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 		},
 	}
 
@@ -846,7 +846,7 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 				"#SBATCH --ntasks=10",
 				"#SBATCH --ntasks-per-node=8",
 			},
-			wantNodes: 2, wantNtasks: 10, wantNcpus: 4,
+			wantNodes: 2, wantNtasks: 10, wantNcpus: 2,
 		},
 		{
 			name: "ntasks only",
@@ -854,7 +854,7 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --ntasks=8",
 			},
-			wantNodes: 1, wantNtasks: 8, wantNcpus: 4,
+			wantNodes: 1, wantNtasks: 8, wantNcpus: 2,
 		},
 		{
 			name: "defaults when no node/task flags",
@@ -862,7 +862,7 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --mem=8G",
 			},
-			wantNodes: 1, wantNtasks: 1, wantNcpus: 4,
+			wantNodes: 1, wantNtasks: 1, wantNcpus: 2,
 		},
 	}
 

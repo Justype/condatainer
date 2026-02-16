@@ -88,6 +88,13 @@ func setDefaults() {
 	// Each directory should contain images/, build-scripts/, helper-scripts/ subdirectories
 	viper.SetDefault("extra_base_dirs", []string{})
 
+	// Scheduler default specs (used when parsing scripts without explicit resource directives)
+	viper.SetDefault("scheduler.ncpus", 2)
+	viper.SetDefault("scheduler.mem_mb", 8192)
+	viper.SetDefault("scheduler.time", "4h")
+	viper.SetDefault("scheduler.nodes", 1)
+	viper.SetDefault("scheduler.ntasks", 1)
+
 	// Build config defaults
 	viper.SetDefault("build.ncpus", 4)
 	viper.SetDefault("build.mem_mb", 8192)
@@ -472,6 +479,25 @@ func LoadFromViper() {
 	// Load prefer_remote from config
 	if viper.GetBool("prefer_remote") {
 		Global.PreferRemote = true
+	}
+
+	// Load scheduler default specs from Viper
+	if ncpus := viper.GetInt("scheduler.ncpus"); ncpus > 0 {
+		Global.Scheduler.Ncpus = ncpus
+	}
+	if memMB := viper.GetInt64("scheduler.mem_mb"); memMB > 0 {
+		Global.Scheduler.MemMB = memMB
+	}
+	if schedTime := viper.GetString("scheduler.time"); schedTime != "" {
+		if dur, err := utils.ParseDuration(schedTime); err == nil {
+			Global.Scheduler.Time = dur
+		}
+	}
+	if nodes := viper.GetInt("scheduler.nodes"); nodes > 0 {
+		Global.Scheduler.Nodes = nodes
+	}
+	if ntasks := viper.GetInt("scheduler.ntasks"); ntasks > 0 {
+		Global.Scheduler.Ntasks = ntasks
 	}
 
 	// Load build config from Viper

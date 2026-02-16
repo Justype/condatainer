@@ -16,6 +16,15 @@ const GITHUB_REPO = GitHubRepo // Exported constant for compatibility
 // PrebuiltBaseURL is the base URL for downloading prebuilt images and overlays
 const PrebuiltBaseURL = "https://github.com/Justype/cnt-prebuilt/releases/download/prebuilt"
 
+// SchedulerConfig holds default resource specs for scheduler script parsing
+type SchedulerConfig struct {
+	Ncpus  int           // Default CPUs per task (default: 4)
+	MemMB  int64         // Default memory in MB (default: 0 = unset)
+	Time   time.Duration // Default time limit (default: 0 = unset)
+	Nodes  int           // Default number of nodes (default: 1)
+	Ntasks int           // Default number of tasks (default: 1)
+}
+
 // BuildConfig holds default settings for build operations
 type BuildConfig struct {
 	DefaultCPUs  int           // Default CPUs for builds (if not specified in script)
@@ -45,6 +54,9 @@ type Config struct {
 	Branch       string // Git branch for fetching remote build scripts and metadata (default: "main")
 	PreferRemote bool   // Remote build scripts take precedence over local
 
+	// Scheduler default specs
+	Scheduler SchedulerConfig
+
 	// Build configuration
 	Build BuildConfig
 }
@@ -70,6 +82,14 @@ func LoadDefaults(executablePath string) {
 		SchedulerBin: "", // Auto-detect scheduler binary (empty = search PATH)
 
 		Branch: "main", // Default branch for remote build scripts
+
+		Scheduler: SchedulerConfig{
+			Ncpus:  2,
+			MemMB:  8192,          // 8GB
+			Time:   4 * time.Hour, // 4 hours
+			Nodes:  1,
+			Ntasks: 1,
+		},
 
 		Build: BuildConfig{
 			DefaultCPUs:  4,             // 4 CPUs default

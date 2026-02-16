@@ -83,6 +83,36 @@ type ScriptSpecs struct {
 	RawFlags     []string      // Raw scheduler-specific flags (e.g., #SBATCH, #PBS)
 }
 
+// SpecDefaults holds configurable default values for ScriptSpecs.
+// These are used by ReadScriptSpecs when a script does not specify a resource.
+// Set via SetSpecDefaults() during CLI initialization from config.
+type SpecDefaults struct {
+	Ncpus  int
+	MemMB  int64
+	Time   time.Duration
+	Nodes  int
+	Ntasks int
+}
+
+// specDefaults is the package-level defaults used by all schedulers.
+var specDefaults = SpecDefaults{
+	Ncpus:  2,
+	MemMB:  8192,
+	Time:   4 * time.Hour,
+	Nodes:  1,
+	Ntasks: 1,
+}
+
+// SetSpecDefaults overrides the default values used by ReadScriptSpecs.
+func SetSpecDefaults(d SpecDefaults) {
+	specDefaults = d
+}
+
+// GetSpecDefaults returns the current default values for ScriptSpecs.
+func GetSpecDefaults() SpecDefaults {
+	return specDefaults
+}
+
 // JobSpec represents specifications for submitting a batch job
 type JobSpec struct {
 	Name      string            // Job name
