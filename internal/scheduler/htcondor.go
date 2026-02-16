@@ -15,12 +15,13 @@ import (
 )
 
 // HTCondorScheduler implements the Scheduler interface for HTCondor
+// EXPERIMENTAL: HTCondor is not tested on real clusters and may have edge cases. Feedback welcome.
 type HTCondorScheduler struct {
-	condorSubmitBin  string
-	condorQBin       string
-	condorStatusBin  string
-	directiveRe      *regexp.Regexp
-	jobIDRe          *regexp.Regexp
+	condorSubmitBin string
+	condorQBin      string
+	condorStatusBin string
+	directiveRe     *regexp.Regexp
+	jobIDRe         *regexp.Regexp
 }
 
 // NewHTCondorScheduler creates a new HTCondor scheduler instance using condor_submit from PATH
@@ -58,11 +59,11 @@ func newHTCondorSchedulerWithBinary(condorSubmitBin string) (*HTCondorScheduler,
 	condorStatusBin, _ := exec.LookPath("condor_status")
 
 	return &HTCondorScheduler{
-		condorSubmitBin:  binPath,
-		condorQBin:       condorQBin,
-		condorStatusBin:  condorStatusBin,
-		directiveRe:      regexp.MustCompile(`^\s*#CONDOR\s+(.+)$`),
-		jobIDRe:          regexp.MustCompile(`submitted to cluster (\d+)`),
+		condorSubmitBin: binPath,
+		condorQBin:      condorQBin,
+		condorStatusBin: condorStatusBin,
+		directiveRe:     regexp.MustCompile(`^\s*#CONDOR\s+(.+)$`),
+		jobIDRe:         regexp.MustCompile(`submitted to cluster (\d+)`),
 	}, nil
 }
 

@@ -72,7 +72,7 @@ condatainer config init -l system
 | Key | Default | Description |
 |-----|---------|-------------|
 | `apptainer_bin` | Auto-detected | Path to apptainer binary |
-| `scheduler_bin` | Auto-detected | Path to job scheduler binary (sbatch, qsub, etc.). The scheduler type is automatically inferred from the binary name. |
+| `scheduler_bin` | Auto-detected | Path to job scheduler binary (sbatch, qsub, bsub, condor_submit, etc.). The scheduler type is automatically inferred from the binary name. |
 
 ### Runtime Settings
 
@@ -298,7 +298,7 @@ condatainer config init
 If your HPC uses a non-standard scheduler path, set the binary and the type will be auto-detected:
 
 ```bash
-condatainer config set scheduler_bin /custom/path/sbatch
+condatainer config set scheduler_bin /custom/path/sbatch  # or qsub, bsub, condor_submit
 ```
 
 ### Disable job submission

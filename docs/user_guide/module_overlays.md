@@ -41,7 +41,7 @@ To Install a Salmon Index Overlay. You don't need to:
 - Load modules or install Salmon manually.
 - Manually download genome FASTA and transcript FASTA files.
 - Create decoy FASTA.
-- Build the Salmon index and submit SLURM jobs.
+- Build the Salmon index and submit scheduler jobs.
 
 **Condatainer** will handle all these steps for you automatically!
 
@@ -51,7 +51,7 @@ condatainer install grch38/salmon/1.10.2/gencode47
 # - Install Salmon 1.10.2 via bioconda
 # - Download GRCh38 genome FASTA
 # - Download Gencode 47 transcript FASTA
-# - Build Salmon decoy index (SLURM job automatically submitted)
+# - Build Salmon decoy index (scheduler job automatically submitted)
 ```
 
 ### 🏷️ Declaring Dependencies in Scripts
@@ -98,9 +98,9 @@ Execute the script with CondaTainer:
 condatainer run analysis.sh
 ```
 
-## 🤖 SLURM Automation
+## 🤖 Scheduler Automation
 
-When you request a reference or an environment that requires significant computation to prepare, **CondaTainer will automatically submit SLURM jobs** to handle the heavy lifting for you.
+When you request a reference or an environment that requires significant computation to prepare, **CondaTainer will automatically submit scheduler jobs** (SLURM, PBS, LSF, or HTCondor) to handle the heavy lifting for you.
 
 Example Script (`analysis.sh`):
 
@@ -128,7 +128,7 @@ If no scheduler directives are found or job submission is disabled, the script w
 
 ### 📜 Count Script
 
-The following is an example SLURM script for running `cellranger count` using the cellranger overlays.
+The following is an example scheduler script (SLURM) for running `cellranger count` using the cellranger overlays.
 
 ```bash
 #!/bin/bash

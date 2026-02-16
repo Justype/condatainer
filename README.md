@@ -11,7 +11,10 @@
 * **Inode Saver:** Packing 30k+ Conda files into a single image to satisfy inode quotas.
 * **Web-App Ready:** Out-of-the-box support for running *RStudio*, *VS Code*, *Jupyter* and more on HPC.
 * **Environment Isolation:** Supports read-only (`.sqf`) for production and writable (`.img`) for development.
-* **Workload Manager Integration:** Native compatibility with Slurm for batch job submission.
+* **Scheduler Integration:** Native compatibility with Slurm, PBS, LSF, and HTCondor for batch job submission.
+
+> [!NOTE]
+> Slurm is the primary scheduler supported and tested. Others are experimental, please report any issues you encounter.
 
 ## 🛠️ Installation
 
@@ -101,7 +104,7 @@ mm-export
 
 ## 🚀 Automation
 
-**CondaTainer** supports inline dependency declaration and automatic job submission. Define requirements with `#DEP:` tags and scheduler directives with `#SBATCH`.
+**CondaTainer** supports inline dependency declaration and automatic job submission. Define requirements with `#DEP:` tags and scheduler directives (`#SBATCH`, `#PBS`, `#BSUB`, or `#CONDOR`).
 
 Example Script (`analysis.sh`):
 

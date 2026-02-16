@@ -26,7 +26,7 @@ go test -v ./internal/scheduler/...                       # Package tests
 - `exec/` - Ephemeral container execution
 - `instance/` - Persistent instance management (start/exec/stop) with state persistence
 - `overlay/` - Overlay image CRUD (ext3/SquashFS), resize, chown, locking
-- `scheduler/` - HPC scheduler abstraction (SLURM, PBS, LSF); auto-detection, directive parsing, cross-scheduler translation
+- `scheduler/` - HPC scheduler abstraction (SLURM, PBS, LSF, HTCondor); auto-detection, directive parsing, cross-scheduler translation
 - `utils/` - Console output (`Print*`), file ops, downloads, script parsing
 
 ## Build Scripts
@@ -37,7 +37,7 @@ Located in `build-scripts/` with naming:
 
 Must define an `install()` function. Available vars: `$NCPUS`, `$target_dir`, `$tmp_dir`, `$app_name`, `$version`.
 
-Metadata headers: `#DEP:name/version` (deps), `#SBATCH` (job params), `#ENV:VAR=$app_root` (env vars), `#INTERACTIVE:prompt` (user input).
+Metadata headers: `#DEP:name/version` (deps), `#SBATCH`/`#PBS`/`#BSUB`/`#CONDOR` (scheduler job params), `#ENV:VAR=$app_root` (env vars), `#INTERACTIVE:prompt` (user input).
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 

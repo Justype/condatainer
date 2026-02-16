@@ -9,7 +9,7 @@ This document gives instructions on how to create your own build scripts for **C
 - [Headers](#headers)
   - [WhatIs and URL](#whatis-and-url)
   - [Set Dependencies](#set-dependencies)
-  - [SBATCH Parameters](#sbatch-parameters)
+  - [Scheduler Parameters](#scheduler-parameters)
   - [Environment Variables](#environment-variables) and [ENV Naming Guidelines](#env-naming-guidelines)
   - [Interactive Tag](#interactive-tag)
 - [Apps](#apps)
@@ -106,11 +106,11 @@ It will only be used by [ModGen](./modgen.md) when generating modulefiles. (**Co
 
 When **CondaTainer** processes the build script, it will ensure that all specified dependencies are available and load them in the same order as listed.
 
-### SBATCH Parameters
+### Scheduler Parameters
 
-`#SBATCH` lines allow you to specify SLURM job parameters for the build process.
+Scheduler directive lines (`#SBATCH`, `#PBS`, `#BSUB`, or `#CONDOR`) allow you to specify job parameters for the build process.
 
-If `sbatch` is available, **CondaTainer** will submit the build job with the specified parameters.
+If a supported scheduler is available, **CondaTainer** will submit the build job with the specified parameters.
 
 **Example:**
 
