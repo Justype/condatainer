@@ -15,11 +15,11 @@ import (
 type SchedulerType string
 
 const (
-	SchedulerUnknown   SchedulerType = ""
-	SchedulerSLURM     SchedulerType = "SLURM"
-	SchedulerPBS       SchedulerType = "PBS"
-	SchedulerLSF       SchedulerType = "LSF"
-	SchedulerHTCondor  SchedulerType = "HTCondor"
+	SchedulerUnknown  SchedulerType = ""
+	SchedulerSLURM    SchedulerType = "SLURM"
+	SchedulerPBS      SchedulerType = "PBS"
+	SchedulerLSF      SchedulerType = "LSF"
+	SchedulerHTCondor SchedulerType = "HTCondor"
 )
 
 // SchedulerInfo holds information about the detected scheduler

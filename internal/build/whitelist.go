@@ -97,7 +97,6 @@ func loadAllDefLists() map[string]bool {
 	return defList
 }
 
-
 // UpdateDefBuiltList adds an overlay name to the def list in the same directory as the overlay
 // This should be called after building a .def overlay
 func UpdateDefBuiltList(nameVersion, overlayPath string) {

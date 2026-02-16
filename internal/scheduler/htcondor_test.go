@@ -14,11 +14,11 @@ import (
 // without requiring condor_submit to be installed
 func newTestHTCondorScheduler() *HTCondorScheduler {
 	return &HTCondorScheduler{
-		condorSubmitBin:  "/usr/bin/condor_submit",  // fake path for testing
-		condorQBin:       "/usr/bin/condor_q",       // fake path for testing
-		condorStatusBin:  "/usr/bin/condor_status",  // fake path for testing
-		directiveRe:      regexp.MustCompile(`^\s*#CONDOR\s+(.+)$`),
-		jobIDRe:          regexp.MustCompile(`submitted to cluster (\d+)`),
+		condorSubmitBin: "/usr/bin/condor_submit", // fake path for testing
+		condorQBin:      "/usr/bin/condor_q",      // fake path for testing
+		condorStatusBin: "/usr/bin/condor_status", // fake path for testing
+		directiveRe:     regexp.MustCompile(`^\s*#CONDOR\s+(.+)$`),
+		jobIDRe:         regexp.MustCompile(`submitted to cluster (\d+)`),
 	}
 }
 
@@ -393,7 +393,7 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#CONDOR request_memory = 4096MB",
 			},
-			wantCpus:  2,    // default
+			wantCpus:  2, // default
 			wantMemMB: 4096,
 			wantGpus:  0,
 			wantTime:  4 * time.Hour, // default
@@ -404,7 +404,7 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#CONDOR request_memory = 2048",
 			},
-			wantCpus:  2,    // default
+			wantCpus:  2, // default
 			wantMemMB: 2048,
 			wantGpus:  0,
 			wantTime:  4 * time.Hour, // default
@@ -448,8 +448,8 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"echo hello",
 			},
-			wantCpus:  2,             // default
-			wantMemMB: 8192,          // default
+			wantCpus:  2,    // default
+			wantMemMB: 8192, // default
 			wantGpus:  0,
 			wantTime:  4 * time.Hour, // default
 		},
@@ -574,10 +574,10 @@ func TestHTCondorSubmitFileFormat(t *testing.T) {
 		Name:    "format_test",
 		Command: "echo 'hello world'",
 		Specs: &ScriptSpecs{
-			JobName:  "format_test",
-			Ncpus:    8,
-			MemMB:    16384,
-			Time:     2 * time.Hour,
+			JobName: "format_test",
+			Ncpus:   8,
+			MemMB:   16384,
+			Time:    2 * time.Hour,
 			RawFlags: []string{
 				"request_cpus = 8",
 				"request_memory = 16384",
