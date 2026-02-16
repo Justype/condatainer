@@ -692,6 +692,97 @@ func TestPbsGpuParsing(t *testing.T) {
 	})
 }
 
+func TestPbsIsAvailable(t *testing.T) {
+	t.Run("not in job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		pbs := newTestPbsScheduler()
+		if !pbs.IsAvailable() {
+			t.Error("Expected IsAvailable to return true when not in a job")
+		}
+	})
+
+	t.Run("inside job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("PBS_JOBID", "67890.pbs-server")
+		pbs := newTestPbsScheduler()
+		if pbs.IsAvailable() {
+			t.Error("Expected IsAvailable to return false when inside a job")
+		}
+	})
+
+	t.Run("no binary", func(t *testing.T) {
+		clearJobEnvVars(t)
+		pbs := &PbsScheduler{}
+		if pbs.IsAvailable() {
+			t.Error("Expected IsAvailable to return false when no binary is set")
+		}
+	})
+}
+
+func TestPbsGetInfo(t *testing.T) {
+	clearJobEnvVars(t)
+	pbs := newTestPbsScheduler()
+
+	info := pbs.GetInfo()
+	if info.Type != "PBS" {
+		t.Errorf("Type = %q; want %q", info.Type, "PBS")
+	}
+	if info.Binary != "/usr/bin/qsub" {
+		t.Errorf("Binary = %q; want %q", info.Binary, "/usr/bin/qsub")
+	}
+	if info.InJob {
+		t.Error("InJob should be false")
+	}
+	if !info.Available {
+		t.Error("Available should be true")
+	}
+}
+
+func TestTryParsePbsScript(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	script := `#!/bin/bash
+#PBS -N testjob
+#PBS -l select=1:ncpus=4:mem=8gb:ngpus=1
+#PBS -l walltime=02:00:00
+#PBS -m e
+#PBS -M user@example.com
+
+echo "Running job"
+`
+	scriptPath := filepath.Join(tmpDir, "test.sh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+		t.Fatalf("Failed to create test script: %v", err)
+	}
+
+	specs, err := TryParsePbsScript(scriptPath)
+	if err != nil {
+		t.Fatalf("TryParsePbsScript failed: %v", err)
+	}
+
+	if specs.Ncpus != 4 {
+		t.Errorf("Ncpus = %d; want 4", specs.Ncpus)
+	}
+	if specs.MemMB != 8*1024 {
+		t.Errorf("MemMB = %d; want %d", specs.MemMB, 8*1024)
+	}
+	if specs.Gpu == nil || specs.Gpu.Count != 1 {
+		t.Errorf("Gpu = %+v; want count 1", specs.Gpu)
+	}
+	if specs.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Time)
+	}
+	if !specs.EmailOnEnd {
+		t.Error("EmailOnEnd should be true")
+	}
+	if specs.MailUser != "user@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.MailUser, "user@example.com")
+	}
+	if len(specs.RawFlags) != 5 {
+		t.Errorf("RawFlags count = %d; want 5", len(specs.RawFlags))
+	}
+}
+
 func TestPbsGetJobResources(t *testing.T) {
 	sched := &PbsScheduler{}
 
@@ -745,6 +836,44 @@ func TestPbsGetJobResources(t *testing.T) {
 		}
 		if res.MemMB == nil || *res.MemMB != 8192 {
 			t.Errorf("MemMB = %v; want 8192", res.MemMB)
+		}
+	})
+
+	t.Run("partial data", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("PBS_JOBID", "67890")
+		t.Setenv("PBS_NCPUS", "4")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Ncpus == nil || *res.Ncpus != 4 {
+			t.Errorf("Ncpus = %v; want 4", res.Ncpus)
+		}
+		if res.MemMB != nil {
+			t.Errorf("MemMB should be nil, got %d", *res.MemMB)
+		}
+		if res.Ngpus != nil {
+			t.Errorf("Ngpus should be nil, got %d", *res.Ngpus)
+		}
+	})
+
+	t.Run("invalid values", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("PBS_JOBID", "67890")
+		t.Setenv("PBS_NCPUS", "not-a-number")
+		t.Setenv("PBS_VMEM", "-100")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Ncpus != nil {
+			t.Errorf("Ncpus should be nil for invalid value, got %d", *res.Ncpus)
+		}
+		if res.MemMB != nil {
+			t.Errorf("MemMB should be nil for negative value, got %d", *res.MemMB)
 		}
 	})
 }

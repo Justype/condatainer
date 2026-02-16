@@ -765,6 +765,99 @@ func TestLsfRusageParsing(t *testing.T) {
 	}
 }
 
+func TestLsfIsAvailable(t *testing.T) {
+	t.Run("not in job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		lsf := newTestLsfScheduler()
+		if !lsf.IsAvailable() {
+			t.Error("Expected IsAvailable to return true when not in a job")
+		}
+	})
+
+	t.Run("inside job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("LSB_JOBID", "99999")
+		lsf := newTestLsfScheduler()
+		if lsf.IsAvailable() {
+			t.Error("Expected IsAvailable to return false when inside a job")
+		}
+	})
+
+	t.Run("no binary", func(t *testing.T) {
+		clearJobEnvVars(t)
+		lsf := &LsfScheduler{}
+		if lsf.IsAvailable() {
+			t.Error("Expected IsAvailable to return false when no binary is set")
+		}
+	})
+}
+
+func TestLsfGetInfo(t *testing.T) {
+	clearJobEnvVars(t)
+	lsf := newTestLsfScheduler()
+
+	info := lsf.GetInfo()
+	if info.Type != "LSF" {
+		t.Errorf("Type = %q; want %q", info.Type, "LSF")
+	}
+	if info.Binary != "/usr/bin/bsub" {
+		t.Errorf("Binary = %q; want %q", info.Binary, "/usr/bin/bsub")
+	}
+	if info.InJob {
+		t.Error("InJob should be false")
+	}
+	if !info.Available {
+		t.Error("Available should be true")
+	}
+}
+
+func TestTryParseLsfScript(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	script := `#!/bin/bash
+#BSUB -J testjob
+#BSUB -n 4
+#BSUB -M 8GB
+#BSUB -W 02:00
+#BSUB -B
+#BSUB -N
+#BSUB -u user@example.com
+
+echo "Running job"
+`
+	scriptPath := filepath.Join(tmpDir, "test.sh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+		t.Fatalf("Failed to create test script: %v", err)
+	}
+
+	specs, err := TryParseLsfScript(scriptPath)
+	if err != nil {
+		t.Fatalf("TryParseLsfScript failed: %v", err)
+	}
+
+	if specs.Ncpus != 4 {
+		t.Errorf("Ncpus = %d; want 4", specs.Ncpus)
+	}
+	if specs.MemMB != 8*1024 {
+		t.Errorf("MemMB = %d; want %d", specs.MemMB, 8*1024)
+	}
+	if specs.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Time)
+	}
+	if !specs.EmailOnBegin {
+		t.Error("EmailOnBegin should be true")
+	}
+	if !specs.EmailOnEnd {
+		t.Error("EmailOnEnd should be true")
+	}
+	if specs.MailUser != "user@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.MailUser, "user@example.com")
+	}
+	if len(specs.RawFlags) != 7 {
+		t.Errorf("RawFlags count = %d; want 7", len(specs.RawFlags))
+	}
+}
+
 func TestLsfGetJobResources(t *testing.T) {
 	sched := &LsfScheduler{}
 
@@ -808,6 +901,44 @@ func TestLsfGetJobResources(t *testing.T) {
 		}
 		if res.Ncpus == nil || *res.Ncpus != 64 {
 			t.Errorf("Ncpus = %v; want 64", res.Ncpus)
+		}
+	})
+
+	t.Run("partial data", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("LSB_JOBID", "99999")
+		t.Setenv("LSB_DJOB_NUMPROC", "4")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Ncpus == nil || *res.Ncpus != 4 {
+			t.Errorf("Ncpus = %v; want 4", res.Ncpus)
+		}
+		if res.MemMB != nil {
+			t.Errorf("MemMB should be nil, got %d", *res.MemMB)
+		}
+		if res.Ngpus != nil {
+			t.Errorf("Ngpus should be nil, got %d", *res.Ngpus)
+		}
+	})
+
+	t.Run("invalid values", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("LSB_JOBID", "99999")
+		t.Setenv("LSB_DJOB_NUMPROC", "not-a-number")
+		t.Setenv("LSB_MAX_MEM_RUSAGE", "-100")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Ncpus != nil {
+			t.Errorf("Ncpus should be nil for invalid value, got %d", *res.Ncpus)
+		}
+		if res.MemMB != nil {
+			t.Errorf("MemMB should be nil for negative value, got %d", *res.MemMB)
 		}
 	})
 }

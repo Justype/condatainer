@@ -399,6 +399,307 @@ func TestSlurmCreateScriptUsesOutputDir(t *testing.T) {
 	}
 }
 
+func TestSlurmResourceParsing(t *testing.T) {
+	tests := []struct {
+		name      string
+		lines     []string
+		wantNcpus int
+		wantMemMB int64
+		wantTime  time.Duration
+		wantGpu   *GpuSpec
+	}{
+		{
+			name: "basic resources",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --job-name=testjob",
+				"#SBATCH --cpus-per-task=8",
+				"#SBATCH --mem=16G",
+				"#SBATCH --time=02:00:00",
+			},
+			wantNcpus: 8,
+			wantMemMB: 16 * 1024,
+			wantTime:  2 * time.Hour,
+		},
+		{
+			name: "short flags",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH -J testjob",
+				"#SBATCH -c 4",
+				"#SBATCH -t 01:30:00",
+			},
+			wantNcpus: 4,
+			wantTime:  time.Hour + 30*time.Minute,
+		},
+		{
+			name: "memory in MB",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --mem=4096M",
+			},
+			wantNcpus: 4, // default
+			wantMemMB: 4096,
+		},
+		{
+			name: "GPU gres",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --cpus-per-task=8",
+				"#SBATCH --gres=gpu:a100:2",
+			},
+			wantNcpus: 8,
+			wantGpu:   &GpuSpec{Type: "a100", Count: 2},
+		},
+		{
+			name: "GPU gpus flag",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --gpus=v100:4",
+			},
+			wantNcpus: 4, // default
+			wantGpu:   &GpuSpec{Type: "v100", Count: 4},
+		},
+		{
+			name: "GPU gpus-per-node",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --gpus-per-node=2",
+			},
+			wantNcpus: 4, // default
+			wantGpu:   &GpuSpec{Type: "gpu", Count: 2},
+		},
+		{
+			name: "time with days",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --time=1-12:00:00",
+			},
+			wantNcpus: 4, // default
+			wantTime:  36 * time.Hour,
+		},
+		{
+			name: "full job script",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --job-name=myjob",
+				"#SBATCH --cpus-per-task=16",
+				"#SBATCH --mem=64G",
+				"#SBATCH --time=12:00:00",
+				"#SBATCH --gres=gpu:h100:4",
+				"#SBATCH --mail-type=ALL",
+				"#SBATCH --mail-user=user@example.com",
+			},
+			wantNcpus: 16,
+			wantMemMB: 64 * 1024,
+			wantTime:  12 * time.Hour,
+			wantGpu:   &GpuSpec{Type: "h100", Count: 4},
+		},
+		{
+			name: "no resource directives (defaults)",
+			lines: []string{
+				"#!/bin/bash",
+				"echo hello",
+			},
+			wantNcpus: 4, // default
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			scriptPath := filepath.Join(tmpDir, "test.sh")
+			content := strings.Join(tt.lines, "\n")
+			if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
+				t.Fatalf("Failed to create test script: %v", err)
+			}
+
+			slurm := newTestSlurmScheduler()
+			specs, err := slurm.ReadScriptSpecs(scriptPath)
+			if err != nil {
+				t.Fatalf("Failed to parse script: %v", err)
+			}
+
+			if specs.Ncpus != tt.wantNcpus {
+				t.Errorf("Ncpus = %d; want %d", specs.Ncpus, tt.wantNcpus)
+			}
+			if tt.wantMemMB > 0 && specs.MemMB != tt.wantMemMB {
+				t.Errorf("MemMB = %d; want %d", specs.MemMB, tt.wantMemMB)
+			}
+			if tt.wantTime > 0 && specs.Time != tt.wantTime {
+				t.Errorf("Time = %v; want %v", specs.Time, tt.wantTime)
+			}
+			if tt.wantGpu != nil {
+				if specs.Gpu == nil {
+					t.Fatal("Gpu is nil; want non-nil")
+				}
+				if specs.Gpu.Type != tt.wantGpu.Type {
+					t.Errorf("Gpu.Type = %q; want %q", specs.Gpu.Type, tt.wantGpu.Type)
+				}
+				if specs.Gpu.Count != tt.wantGpu.Count {
+					t.Errorf("Gpu.Count = %d; want %d", specs.Gpu.Count, tt.wantGpu.Count)
+				}
+			} else if specs.Gpu != nil {
+				t.Errorf("Gpu = %+v; want nil", specs.Gpu)
+			}
+		})
+	}
+}
+
+func TestSlurmTimeParsing(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantDur time.Duration
+		wantErr bool
+	}{
+		{"HH:MM:SS", "02:30:00", 2*time.Hour + 30*time.Minute, false},
+		{"HH:MM", "10:30", 10*time.Hour + 30*time.Minute, false},
+		{"minutes only", "90", 90 * time.Minute, false},
+		{"with days", "1-12:00:00", 36 * time.Hour, false},
+		{"with seconds", "01:00:30", time.Hour + 30*time.Second, false},
+		{"empty string", "", 0, false},
+		{"large walltime", "7-00:00:00", 168 * time.Hour, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dur, err := parseSlurmTimeSpec(tt.input)
+			if tt.wantErr && err == nil {
+				t.Error("Expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+			if dur != tt.wantDur {
+				t.Errorf("parseSlurmTimeSpec(%q) = %v; want %v", tt.input, dur, tt.wantDur)
+			}
+		})
+	}
+}
+
+func TestSlurmMemoryParsing(t *testing.T) {
+	tests := []struct {
+		input  string
+		wantMB int64
+	}{
+		{"8G", 8 * 1024},
+		{"8GB", 8 * 1024},
+		{"1024M", 1024},
+		{"1024MB", 1024},
+		{"4096K", 4},
+		{"4096KB", 4},
+		{"1T", 1024 * 1024},
+		{"1TB", 1024 * 1024},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			mb, err := parseMemory(tt.input)
+			if err != nil {
+				t.Errorf("parseMemory(%q) error: %v", tt.input, err)
+				return
+			}
+			if mb != tt.wantMB {
+				t.Errorf("parseMemory(%q) = %d MB; want %d MB", tt.input, mb, tt.wantMB)
+			}
+		})
+	}
+}
+
+func TestSlurmIsAvailable(t *testing.T) {
+	t.Run("not in job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		slurm := newTestSlurmScheduler()
+		if !slurm.IsAvailable() {
+			t.Error("Expected IsAvailable to return true when not in a job")
+		}
+	})
+
+	t.Run("inside job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("SLURM_JOB_ID", "12345")
+		slurm := newTestSlurmScheduler()
+		if slurm.IsAvailable() {
+			t.Error("Expected IsAvailable to return false when inside a job")
+		}
+	})
+
+	t.Run("no binary", func(t *testing.T) {
+		clearJobEnvVars(t)
+		slurm := &SlurmScheduler{}
+		if slurm.IsAvailable() {
+			t.Error("Expected IsAvailable to return false when no binary is set")
+		}
+	})
+}
+
+func TestSlurmGetInfo(t *testing.T) {
+	clearJobEnvVars(t)
+	slurm := newTestSlurmScheduler()
+
+	info := slurm.GetInfo()
+	if info.Type != "SLURM" {
+		t.Errorf("Type = %q; want %q", info.Type, "SLURM")
+	}
+	if info.Binary != "/usr/bin/sbatch" {
+		t.Errorf("Binary = %q; want %q", info.Binary, "/usr/bin/sbatch")
+	}
+	if info.InJob {
+		t.Error("InJob should be false")
+	}
+	if !info.Available {
+		t.Error("Available should be true")
+	}
+}
+
+func TestTryParseSlurmScript(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	script := `#!/bin/bash
+#SBATCH --job-name=testjob
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+#SBATCH --time=02:00:00
+#SBATCH --gres=gpu:a100:1
+#SBATCH --mail-type=END
+#SBATCH --mail-user=user@example.com
+
+echo "Running job"
+`
+	scriptPath := filepath.Join(tmpDir, "test.sh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+		t.Fatalf("Failed to create test script: %v", err)
+	}
+
+	specs, err := TryParseSlurmScript(scriptPath)
+	if err != nil {
+		t.Fatalf("TryParseSlurmScript failed: %v", err)
+	}
+
+	if specs.Ncpus != 4 {
+		t.Errorf("Ncpus = %d; want 4", specs.Ncpus)
+	}
+	if specs.MemMB != 8*1024 {
+		t.Errorf("MemMB = %d; want %d", specs.MemMB, 8*1024)
+	}
+	if specs.Gpu == nil || specs.Gpu.Count != 1 || specs.Gpu.Type != "a100" {
+		t.Errorf("Gpu = %+v; want a100 x 1", specs.Gpu)
+	}
+	if specs.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Time)
+	}
+	if !specs.EmailOnEnd {
+		t.Error("EmailOnEnd should be true")
+	}
+	if specs.MailUser != "user@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.MailUser, "user@example.com")
+	}
+	if len(specs.RawFlags) != 7 {
+		t.Errorf("RawFlags count = %d; want 7", len(specs.RawFlags))
+	}
+}
+
 // clearJobEnvVars ensures no scheduler job env vars are set for test isolation.
 // Shared across all scheduler test files (same package).
 func clearJobEnvVars(t *testing.T) {
