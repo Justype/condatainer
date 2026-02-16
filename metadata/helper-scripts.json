@@ -31,6 +31,38 @@
       "path": "helpers/headless/xfce4"
     }
   },
+  "pbs": {
+    ".Rprofile": {
+      "path": "helpers/pbs/.Rprofile"
+    },
+    ".common": {
+      "path": "helpers/pbs/.common.sh"
+    },
+    "code-server": {
+      "path": "helpers/pbs/code-server"
+    },
+    "igv": {
+      "path": "helpers/pbs/igv"
+    },
+    "jupyter": {
+      "path": "helpers/pbs/jupyter"
+    },
+    "rstudio-server": {
+      "path": "helpers/pbs/rstudio-server"
+    },
+    "rstudio-server-conda": {
+      "path": "helpers/pbs/rstudio-server-conda"
+    },
+    "vscode-server": {
+      "path": "helpers/pbs/vscode-server"
+    },
+    "vscode-tunnel": {
+      "path": "helpers/pbs/vscode-tunnel"
+    },
+    "xfce4": {
+      "path": "helpers/pbs/xfce4"
+    }
+  },
   "slurm": {
     ".Rprofile": {
       "path": "helpers/slurm/.Rprofile"
