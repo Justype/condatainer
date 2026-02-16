@@ -1,44 +1,40 @@
 #!/bin/bash
-# This script helps run vscode-server on PBS clusters.
+# This script helps run rstudio-server with conda overlay on LSF clusters.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/.common.sh"
-HELPER_NAME=vscode-server
+HELPER_NAME=rstudio-server-conda
 
 # Save defaults on first run
 config_init $HELPER_NAME \
     NCPUS=4 \
-    MEM=16G \
-    TIME=12:00:00 \
+    MEM=32G \
+    TIME=12:00 \
     GPU= \
     BASE_IMAGE= \
     BASE_IMAGE_DISTRO=noble \
     PORT= \
-    TOKEN= \
+    AUTH=none \
     REUSE_MODE=ask \
     OVERLAY=env.img
 
 # Load saved defaults
 config_load $HELPER_NAME
 config_require $HELPER_NAME NCPUS MEM TIME OVERLAY
-# Track whether a token was set in config
-if [ -z "${TOKEN:-}" ]; then AUTH_CONFIG_SET=false; else AUTH_CONFIG_SET=true; fi
 
 print_help() {
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
     echo "  -p <port>       Port for $HELPER_NAME (default: ${PORT:-randomly picked}). Valid range: 1024-65535"
-    echo "  -a <token>      Connection token for the web UI (if empty, one is generated)"
     echo ""
     echo "  -c <number>     Number of CPUs to allocate (default: $NCPUS)"
     echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
     echo "  -t <time>       Time limit for the job (default: $TIME)"
     echo "  -g <gpu>        GPU resources (e.g., 1, a100:2). Use -g '' to clear"
-    echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00"
+    echo "  -v              View Mode NCPUS:1 MEM:8G TIME:02:00"
     echo "  -w              Use current directory as working directory (clears additional overlays)"
     echo ""
-    echo "  -b <image>      Base image file"
     echo "  -e <.img>       Writable overlay (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
     echo ""
@@ -59,10 +55,27 @@ esac
 #   Prints connection info and opens SSH tunnel with port forwarding.
 show_and_connect() {
     local job_id="$1"
-    print_info "$HELPER_NAME at ${BLUE}http://localhost:$PORT?tkn=$TOKEN&folder=$CWD${NC}"
-    print_info "If you want to stop it, run: ${YELLOW}qdel $job_id${NC}"
+    print_info "$HELPER_NAME at ${BLUE}http://localhost:$PORT${NC}"
+    print_info "You can run the following command in R to open the project directly:"
+    print_info "  ${YELLOW}rstudioapi::openProject(\"$CWD\")${NC}"
+    print_info "If you want to stop it, run: ${YELLOW}bkill $job_id${NC}"
     exec ssh ${SSH_OPTS} -o ControlMaster=no -L "$PORT:localhost:$PORT" "$USER@$NODE"
     exit 0
+}
+
+# Override print_specs to add script-specific fields
+print_specs() {
+    spec_line "CPUs" NCPUS
+    spec_line "MEM" MEM
+    spec_line "TIME" TIME
+    spec_line "GPU" GPU
+    spec_line "Port" PORT
+    local cwd_hint=""
+    local current_dir=$(readlink -f .)
+    [ "$CWD" != "$current_dir" ] && cwd_hint=" (use -w for current dir)"
+    print_msg "  Working Dir: ${BLUE}$CWD${NC}${cwd_hint}"
+    spec_line "Overlay" OVERLAY
+    [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
 }
 
 REUSE_PREVIOUS_CWD=false
@@ -97,24 +110,20 @@ _TIME=$TIME
 _GPU=$GPU
 # Track if user wants to change working directory
 NEW_CWD=""
-# track whether -a supplied a token
-AUTH_FLAG_SET=false
 
-while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
+while getopts "c:m:t:g:wp:e:o:v" opt; do
     case ${opt} in
         c ) NCPUS=$OPTARG; _NCPUS=$OPTARG; _ARG_NCPUS=1 ;;
         m ) MEM=$OPTARG; _MEM=$OPTARG; _ARG_MEM=1 ;;
         t ) TIME=$OPTARG; _TIME=$OPTARG; _ARG_TIME=1 ;;
         g ) GPU=$OPTARG; _GPU=$OPTARG; _ARG_GPU=1 ;;
-        v ) NCPUS=1; MEM=4G; TIME=02:00:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
-            echo "[MSG] View Mode: NCPUS=1, MEM=4G, TIME=02:00:00" ;;
+        v ) NCPUS=1; MEM=8G; TIME=02:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
+            echo "[MSG] View Mode: NCPUS=1, MEM=8G, TIME=02:00" ;;
         w )
             NEW_CWD="$(readlink -f .)"
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
             ;;
         p ) PORT=$OPTARG; _ARG_PORT=1 ;;
-        a ) TOKEN=$OPTARG; AUTH_FLAG_SET=true ;;
-        b ) BASE_IMAGE="$OPTARG"; _ARG_BASE_IMAGE=1 ;;
         e ) OVERLAY=$OPTARG; _ARG_OVERLAY=1 ;;
         o ) # First -o clears previous overlays, then builds fresh list
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
@@ -171,61 +180,136 @@ fi
 check_port_available "$PORT"
 check_condatainer
 
-# Ensure the VSCode CLI is present
-CODE_BIN="$HOME/.local/bin/code"
-if ! [ -f "$CODE_BIN" ]; then
-    print_info "VSCode CLI not found. Downloading..."
-    ARCH=$(uname -m)
-    if [ "$ARCH" == "x86_64" ]; then ARCH="linux-x64"; elif [ "$ARCH" == "aarch64" ]; then ARCH="linux-arm64"; else
-        print_error "Unsupported architecture: $ARCH"
-        exit 1
-    fi
-    wget -nv -O vscode-cli.tar.gz "https://update.code.visualstudio.com/latest/cli-$ARCH/stable"
-    mkdir -p "$(dirname "$CODE_BIN")"
-    tar -xzf vscode-cli.tar.gz -C "$(dirname "$CODE_BIN")" code && rm vscode-cli.tar.gz
-    chmod +x "$CODE_BIN"
-else
-    print_info "Updating VSCode CLI..."
-    [ -x "$CODE_BIN" ] && "$CODE_BIN" update >/dev/null 2>&1
-fi
-
-check_and_install_overlays $OVERLAYS
+check_and_install_overlays rstudio-server build-essential $OVERLAYS
 
 if [ ! -f "$OVERLAY" ]; then
-    print_warn "Overlay ${BLUE}$OVERLAY${NC} not found. Continuing without it."
-    countdown 3
+    print_error "Overlay ${BLUE}$OVERLAY${NC} not found."
+    exit 1
 else
+    if ! debugfs -R "stat upper/ext3/env/bin/R" $OVERLAY 2>&1 | grep -q 'Inode'; then
+        ABS_OVERLAY_PATH=$(readlink -f "$OVERLAY")
+        print_error "Overlay ${BLUE}$ABS_OVERLAY_PATH${NC} does not contain R installation."
+        print_info "Please go into the overlay shell and run 'mm-install r-base' to install R."
+        exit 1
+    fi
     check_overlay_integrity "$OVERLAY"
+    R_BIN_PATH="/ext3/env/bin/R"
+    R_LIB_PATH="/ext3/env/lib"
 fi
 #endregion
 
 # Construct arguments for CondaTainer exec
-[ -n "$BASE_IMAGE" ] && BASE_IMAGE_ARG="-b $BASE_IMAGE"
-[ -n "$OVERLAY" ] && [ -f "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
+[ -n "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
-PBS_RESOURCES="select=1:ncpus=$NCPUS:mem=$MEM"
-if [ -n "$GPU" ]; then
-    PBS_RESOURCES="${PBS_RESOURCES}:ngpus=${GPU}"
+
+CWD_FOLDER_NAME=$(basename $CWD)
+RPROJECT_FILE="$CWD/$CWD_FOLDER_NAME.Rproj"
+if ! [ -f "$RPROJECT_FILE" ]; then
+    print_info "Creating RStudio project file at ${BLUE}$RPROJECT_FILE${NC}."
+    cat <<EOT > "$RPROJECT_FILE"
+Version: 1.0
+
+RestoreWorkspace: Default
+SaveWorkspace: Default
+AlwaysSaveHistory: Default
+
+EnableCodeIndexing: Yes
+UseSpacesForTab: Yes
+NumSpacesForTab: 2
+Encoding: UTF-8
+
+RnwWeave: Sweave
+LaTeX: pdfLaTeX
+EOT
+    # If there is a bundled profile next to this script, copy it into the project
+    # Prefer hidden .Rprofile in the helpers folder
+    SRC=""
+    if [ -f "$SCRIPT_DIR/.Rprofile" ]; then
+        SRC="$SCRIPT_DIR/.Rprofile"
+    fi
+    if [ -n "$SRC" ]; then
+        cp -f "$SRC" "$CWD/.Rprofile" && \
+        print_info "Copied Rprofile to ${BLUE}$CWD/.Rprofile${NC} (overwritten if existed)."
+    fi
 fi
-
-# Generate a random token if not provided by config or -a
-if [ "${AUTH_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
-    print_info "No connection token provided. Generating a random one..."
-    TOKEN=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
-fi
-
-PBS_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.qsub"
-
-cat <<EOT > "$PBS_SCRIPT_PATH"
+cat <<EOT > "$HELPER_STATE_DIR/rsession-conda.sh"
 #!/bin/bash
-#PBS -N $HELPER_NAME
-#PBS -l $PBS_RESOURCES
-#PBS -l walltime=$TIME
-#PBS -j oe
-#PBS -o /dev/null
-#PBS -d $CWD
 
-CLEAN_ID=\$(echo \$PBS_JOBID | cut -d'.' -f1)
+USER=`whoami`
+source /etc/profile
+
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+  . /etc/bashrc
+fi
+source $HOME/.bashrc
+
+export MAMBA_ROOT_PREFIX=/ext3/env
+export CONDA_PREFIX=/ext3/env
+export CONDA_DEFAULT_ENV=env
+export CNT_CONDA_PREFIX=/ext3/env
+export RETICULATE_PYTHON=/ext3/env/bin/python
+export NCPUS=$NCPUS
+
+/usr/lib/rstudio-server/bin/rsession "\$@"
+EOT
+chmod +x $HELPER_STATE_DIR/rsession-conda.sh
+cat <<EOT > "$HELPER_STATE_DIR/rsession-conda.conf"
+copilot-enabled=1
+session-default-working-dir=$CWD
+EOT
+cat <<EOT > "$HELPER_STATE_DIR/database-conda.conf"
+provider=sqlite
+directory=$SCRATCH/.local/lib/rstudio-server
+EOT
+
+LSF_RUSAGE="rusage[mem=${MEM}]"
+if [ -n "$GPU" ]; then
+    if [[ "$GPU" == *":"* ]]; then
+        PART1="${GPU%:*}"
+        PART2="${GPU#*:}"
+        if [[ "$PART1" =~ ^[0-9]+$ ]]; then
+            GPU_NUM="$PART1"
+            GPU_MODEL="$PART2"
+        else
+            GPU_NUM="$PART2"
+            GPU_MODEL="$PART1"
+        fi
+    else
+        GPU_NUM="$GPU"
+        GPU_MODEL=""
+    fi
+
+    if [ -n "$GPU_MODEL" ]; then
+        LSF_GPU="#BSUB -gpu \"num=${GPU_NUM}:gmodel=${GPU_MODEL}:mode=exclusive_process\""
+    else
+        LSF_GPU="#BSUB -gpu \"num=${GPU_NUM}:mode=exclusive_process\""
+    fi
+else
+    LSF_GPU=""
+fi
+
+# Normalize TIME for LSF (LSF accepts HH:MM or minutes; strip seconds if present)
+LSF_TIME="$TIME"
+if [[ "$LSF_TIME" == *:*:* ]]; then
+    ORIG_TIME="$LSF_TIME"
+    LSF_TIME="${LSF_TIME%:*}"
+    print_info "Converting TIME '${ORIG_TIME}' → '${LSF_TIME}' (HH:MM only)."
+fi
+
+LSF_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.lsf"
+
+cat <<EOT > "$LSF_SCRIPT_PATH"
+#!/bin/bash
+#BSUB -J $HELPER_NAME
+#BSUB -n $NCPUS
+#BSUB -R "$LSF_RUSAGE"
+#BSUB -R "span[hosts=1]"
+#BSUB -W $LSF_TIME
+#BSUB -o $LOG_DIR/$HELPER_NAME-%J.log
+${LSF_GPU:+$LSF_GPU}
+
+CLEAN_ID=\$(echo \$LSB_JOBID | cut -d'.' -f1)
 CUSTOM_LOG="$LOG_DIR/${HELPER_NAME}-\${CLEAN_ID}.log"
 exec &> "\$CUSTOM_LOG"
 
@@ -233,32 +317,40 @@ while ! grep -q "^JOB_ID=" "$STATE_FILE" 2>/dev/null; do sleep 1; done
 echo "NODE=\$(hostname)" >> "$STATE_FILE"
 
 condatainer exec \
-    $BASE_IMAGE_ARG \
+    -o rstudio-server \
+    -o build-essential \
     $OVERLAYS_ARG \
     $OVERLAY_ARG --writable \
-    $CODE_BIN serve-web \
-        --port $PORT \
-        --accept-server-license-terms \
-        --connection-token $TOKEN
+    /usr/lib/rstudio-server/bin/rserver \
+        --server-user $USER \
+        --server-daemonize=0 \
+        --server-data-dir=$SCRATCH/.local/run/rstudio-server \
+        --www-address=127.0.0.1 \
+        --www-port=$PORT \
+        --rsession-which-r=$R_BIN_PATH \
+        --rsession-path=$HELPER_STATE_DIR/rsession-conda.sh \
+        --rsession-ld-library-path=$R_LIB_PATH \
+        --database-config-file=$HELPER_STATE_DIR/database-conda.conf \
+        --rsession-config-file=$HELPER_STATE_DIR/rsession-conda.conf \
+        --auth-none=1
 EOT
 
 rm -f "$STATE_FILE"
-PBS_JOB_ID=$(qsub "$PBS_SCRIPT_PATH")
+LSF_OUTPUT=$(bsub < "$LSF_SCRIPT_PATH" 2>&1)
+LSF_JOB_ID=$(printf '%s' "$LSF_OUTPUT" | awk -F'[<>]' '/Job/ {print $2; exit}')
 
 cat > "$STATE_FILE" <<RUNSTATE
-JOB_ID=$PBS_JOB_ID
+JOB_ID=$LSF_JOB_ID
 NCPUS=$_NCPUS
 MEM=$_MEM
 TIME=$_TIME
 GPU=$_GPU
 PORT=$PORT
 CWD=$CWD
-TOKEN=$TOKEN
-BASE_IMAGE="$BASE_IMAGE"
 OVERLAY="$OVERLAY"
 OVERLAYS="$OVERLAYS"
 RUNSTATE
 
-wait_for_job "$PBS_JOB_ID"
-rm "$PBS_SCRIPT_PATH" # Clean up when success
-show_and_connect "$PBS_JOB_ID"
+wait_for_job "$LSF_JOB_ID"
+rm "$LSF_SCRIPT_PATH" # Clean up when success
+show_and_connect "$LSF_JOB_ID"

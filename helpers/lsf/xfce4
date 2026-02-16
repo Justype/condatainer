@@ -1,15 +1,15 @@
 #!/bin/bash
-# This script helps run an XFCE desktop with IGV launched (noVNC) on SLURM clusters.
+# This script helps run an XFCE desktop (VNC / noVNC) on LSF clusters.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/.common.sh"
-HELPER_NAME=igv
+HELPER_NAME=xfce4
 
 # Save defaults on first run
 config_init $HELPER_NAME \
     NCPUS=3 \
     MEM=12G \
-    TIME=12:00:00 \
+    TIME=12:00 \
     GPU= \
     BASE_IMAGE= \
     BASE_IMAGE_DISTRO=noble \
@@ -36,7 +36,7 @@ print_help() {
     echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
     echo "  -t <time>       Time limit for the job (default: $TIME)"
     echo "  -g <gpu>        GPU resources (e.g., 1, a100:2). Use -g '' to clear"
-    echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00"
+    echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00"
     echo "  -w              Use current directory as working directory (clears additional overlays)"
     echo ""
     echo "  -b <image>      Base image file"
@@ -61,7 +61,7 @@ esac
 show_and_connect() {
     local job_id="$1"
     print_info "noVNC at ${BLUE}http://localhost:$PORT/vnc.html?autoconnect=1&resize=remote#password=${VNC_PASSWD}${NC}"
-    print_info "If you want to stop it, run: ${YELLOW}scancel $job_id${NC}"
+    print_info "If you want to stop it, run: ${YELLOW}bkill $job_id${NC}"
     exec ssh ${SSH_OPTS} -o ControlMaster=no -L "$PORT:localhost:$PORT" "$USER@$NODE"
     exit 0
 }
@@ -107,8 +107,8 @@ while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
         m ) MEM=$OPTARG; _MEM=$OPTARG; _ARG_MEM=1 ;;
         t ) TIME=$OPTARG; _TIME=$OPTARG; _ARG_TIME=1 ;;
         g ) GPU=$OPTARG; _GPU=$OPTARG; _ARG_GPU=1 ;;
-        v ) NCPUS=2; MEM=8G; TIME=02:00:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
-            echo "[MSG] View Mode: NCPUS=2, MEM=8G, TIME=02:00:00" ;;
+        v ) NCPUS=2; MEM=8G; TIME=02:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
+            echo "[MSG] View Mode: NCPUS=2, MEM=8G, TIME=02:00" ;;
         w )
             NEW_CWD="$(readlink -f .)"
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
@@ -172,7 +172,7 @@ fi
 check_port_available "$PORT"
 check_condatainer
 
-check_and_install_overlays xfce4 igv $OVERLAYS
+check_and_install_overlays xfce4 $OVERLAYS
 
 if [ ! -f "$OVERLAY" ]; then
     print_info "Overlay ${BLUE}$OVERLAY${NC} not found. Continuing without it."
@@ -186,7 +186,6 @@ fi
 [ -n "$BASE_IMAGE" ] && BASE_IMAGE_ARG="-b $BASE_IMAGE"
 [ -n "$OVERLAY" ] && [ -f "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
-[ -n "$GPU" ] && GPU_SBATCH="#SBATCH --gres=gpu:$GPU"
 
 # Generate a random password if not provided by config or -a
 if [ "${AUTH_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
@@ -197,7 +196,7 @@ fi
 condatainer exec \
     $BASE_IMAGE_ARG \
     -o xfce4 \
-    bash -c "echo '$VNC_PASSWD' | vncpasswd -f > $HOME/.vnc/passwd-igv && chmod 600 $HOME/.vnc/passwd-igv"
+    bash -c "echo '$VNC_PASSWD' | vncpasswd -f > $HOME/.vnc/passwd && chmod 600 $HOME/.vnc/passwd"
 
 # Create VNC xstartup script
 mkdir -p $HOME/.vnc
@@ -227,16 +226,55 @@ EOT
     mkdir -p "$DESKTOP_HOME"/{Desktop,Documents,Downloads,Music,Pictures,Public,Templates,Videos}
 fi
 
-SBATCH_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.sbatch"
+LSF_RUSAGE="rusage[mem=${MEM}]"
+if [ -n "$GPU" ]; then
+    if [[ "$GPU" == *":"* ]]; then
+        PART1="${GPU%:*}"
+        PART2="${GPU#*:}"
+        if [[ "$PART1" =~ ^[0-9]+$ ]]; then
+            GPU_NUM="$PART1"
+            GPU_MODEL="$PART2"
+        else
+            GPU_NUM="$PART2"
+            GPU_MODEL="$PART1"
+        fi
+    else
+        GPU_NUM="$GPU"
+        GPU_MODEL=""
+    fi
 
-cat <<EOT > "$SBATCH_SCRIPT_PATH"
+    if [ -n "$GPU_MODEL" ]; then
+        LSF_GPU="#BSUB -gpu \"num=${GPU_NUM}:gmodel=${GPU_MODEL}:mode=exclusive_process\""
+    else
+        LSF_GPU="#BSUB -gpu \"num=${GPU_NUM}:mode=exclusive_process\""
+    fi
+else
+    LSF_GPU=""
+fi
+
+# Normalize TIME for LSF (LSF accepts HH:MM or minutes; strip seconds if present)
+LSF_TIME="$TIME"
+if [[ "$LSF_TIME" == *:*:* ]]; then
+    ORIG_TIME="$LSF_TIME"
+    LSF_TIME="${LSF_TIME%:*}"
+    print_info "Converting TIME '${ORIG_TIME}' → '${LSF_TIME}' (HH:MM only)."
+fi
+
+LSF_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.lsf"
+
+cat <<EOT > "$LSF_SCRIPT_PATH"
 #!/bin/bash
-#SBATCH --job-name=$HELPER_NAME
-#SBATCH --cpus-per-task=$NCPUS
-#SBATCH --mem=$MEM
-#SBATCH --time=$TIME
-${GPU_SBATCH:+$GPU_SBATCH}
-#SBATCH --output=$LOG_DIR/$HELPER_NAME-%j.log
+#BSUB -J $HELPER_NAME
+#BSUB -n $NCPUS
+#BSUB -R "$LSF_RUSAGE"
+#BSUB -R "span[hosts=1]"
+#BSUB -W $LSF_TIME
+#BSUB -o $LOG_DIR/$HELPER_NAME-%J.log
+${LSF_GPU:+$LSF_GPU}
+
+CLEAN_ID=\$(echo \$LSB_JOBID | cut -d'.' -f1)
+CUSTOM_LOG="$LOG_DIR/${HELPER_NAME}-\${CLEAN_ID}.log"
+exec &> "\$CUSTOM_LOG"
 
 while ! grep -q "^JOB_ID=" "$STATE_FILE" 2>/dev/null; do sleep 1; done
 echo "NODE=\$(hostname)" >> "$STATE_FILE"
@@ -263,7 +301,6 @@ condatainer exec \
     --env DISPLAY=\$DISPLAY \
     --bind \$XDG_RUNTIME_DIR \
     --bind $DESKTOP_HOME \
-    -o igv \
     -o xfce4 \
     $OVERLAYS_ARG \
     $OVERLAY_ARG --writable \
@@ -276,7 +313,7 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM
 
-# Copy the schemas to a writable location and compile them
+# Copy the schemas to a writable location and compile them (just in case if other overlays have glib-based apps that need it)
 mkdir -p $SCRATCH/.local/share/glib-2.0/schemas
 cp -r /usr/share/glib-2.0/schemas/* $SCRATCH/.local/share/glib-2.0/schemas/ 2>/dev/null || true
 glib-compile-schemas $SCRATCH/.local/share/glib-2.0/schemas/
@@ -292,11 +329,8 @@ echo \"Starting XFCE desktop environment on display \$DISPLAY (port \$VNC_PORT).
 vncserver \$DISPLAY \
     -geometry 1600x900 -depth 24 \
     -rfbport \$VNC_PORT \
-    -rfbauth $HOME/.vnc/passwd-igv \
+    -rfbauth $HOME/.vnc/passwd \
     -xstartup $HOME/.vnc/xstartup
-
-echo \"Starting IGV...\"
-igv
 
 echo \"Setup complete. VNC server running on display \$DISPLAY (port \$VNC_PORT).\"
 sleep infinity
@@ -304,11 +338,11 @@ sleep infinity
 EOT
 
 rm -f "$STATE_FILE"
-SBATCH_OUTPUT=$(sbatch "$SBATCH_SCRIPT_PATH")
-SBATCH_JOB_ID=$(echo $SBATCH_OUTPUT | awk '{print $4}')
+LSF_OUTPUT=$(bsub < "$LSF_SCRIPT_PATH" 2>&1)
+LSF_JOB_ID=$(printf '%s' "$LSF_OUTPUT" | awk -F'[<>]' '/Job/ {print $2; exit}')
 
 cat > "$STATE_FILE" <<RUNSTATE
-JOB_ID=$SBATCH_JOB_ID
+JOB_ID=$LSF_JOB_ID
 NCPUS=$_NCPUS
 MEM=$_MEM
 TIME=$_TIME
@@ -321,6 +355,6 @@ OVERLAY="$OVERLAY"
 OVERLAYS="$OVERLAYS"
 RUNSTATE
 
-wait_for_job "$SBATCH_JOB_ID"
-rm "$SBATCH_SCRIPT_PATH" # Clean up when success
-show_and_connect "$SBATCH_JOB_ID"
+wait_for_job "$LSF_JOB_ID"
+rm "$LSF_SCRIPT_PATH" # Clean up when success
+show_and_connect "$LSF_JOB_ID"

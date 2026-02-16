@@ -7,7 +7,9 @@ Helper scripts for launching interactive services (RStudio Server, VS Code, etc.
 ```
 helpers/
 ├── headless/ # Run directly on the current machine
-└── slurm/    # Submit as SLURM batch jobs
+├── slurm/    # Submit as SLURM batch jobs
+├── pbs/      # Submit as PBS batch jobs
+└── lsf/      # Submit as LSF batch jobs
 ```
 
 ## Quick Start
@@ -26,6 +28,8 @@ If your system has a scheduler, you should not use the headless scripts.
 
 - **headless/** -- Runs the service directly on the current server. Use on headless server which does not have a job scheduler. The script blocks while the service is running.
 - **slurm/** -- Submits a SLURM batch job, waits for it to start, then opens an SSH tunnel with port forwarding. Re-running the script while a job is active will reconnect to the existing session.
+- **pbs/** -- Same behavior as `slurm/` but submits via PBS (`qsub`/`qstat`/`qdel`).
+- **lsf/** -- Same behavior as `slurm/` but submits via LSF (`bsub`/`bjobs`/`bkill`). Interactive helpers in `helpers/lsf/` force single-node placement using `#BSUB -R "span[hosts=1]"` so the service and port-forwarding run on one compute node.
 
 ## Desktop / GUI Apps
 
@@ -48,7 +52,7 @@ If your system has a scheduler, you should not use the headless scripts.
 | `-h` | Show help |
 | `config` | Show config file path and contents |
 
-SLURM scripts also accept:
+Scheduler scripts also accept:
 
 | Option | Description |
 |--------|-------------|
@@ -85,11 +89,11 @@ OVERLAYS=""
 
 ## Port Forwarding
 
-SLURM scripts handle this automatically by SSH-ing to the compute node after the job starts.
+Scheduler scripts handle this automatically by SSH-ing to the compute node after the job starts.
 
 ## Logs
 
-SLURM job logs are written to `~/logs/`:
+Scheduler job logs are written to `~/logs/`: 
 
 ```
 ~/logs/<service>-<jobid>.log
@@ -120,7 +124,7 @@ SLURM job logs are written to `~/logs/`:
 |---|---|
 | `check_writable` | Probe that file is writable and not exclusively locked (`flock`). |
 | `check_readable` | Probe that file is readable and not locked for writing (`flock`). |
-| `require_writable` | Enforce writable availability; **headless** prompts to kill local PIDs, **slurm** suggests `squeue -u $USER`. |
+| `require_writable` | Enforce writable availability; **headless** prompts to kill local PIDs, **scheduler** helpers suggest the cluster job query command (e.g. `squeue`/`qstat`/`bjobs`). |
 | `check_overlay_in_use` | Convenience wrapper ensuring `.img` overlays are available for writing. |
 | `check_overlay_integrity` | Runs `check_overlay_in_use` then `e2fsck -p` to validate/repair overlay (exit on unfixable errors). |
 | `check_and_install_overlays` | Install missing named overlays using `condatainer create`. |
@@ -147,7 +151,7 @@ SLURM job logs are written to `~/logs/`:
 |---|---|
 | `check_condatainer` | Exit if `condatainer` is not in PATH. |
 
-## SLURM-only helpers (`helpers/slurm/.common.sh`)
+## Scheduler helpers (`helpers/*/.common.sh`)
 
 ### Display & reuse
 | Function | Description |

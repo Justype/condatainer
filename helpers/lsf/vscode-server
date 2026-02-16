@@ -1,5 +1,5 @@
 #!/bin/bash
-# This script helps run vscode-server on PBS clusters.
+# This script helps run vscode-server on LSF clusters.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/.common.sh"
@@ -9,7 +9,7 @@ HELPER_NAME=vscode-server
 config_init $HELPER_NAME \
     NCPUS=4 \
     MEM=16G \
-    TIME=12:00:00 \
+    TIME=12:00 \
     GPU= \
     BASE_IMAGE= \
     BASE_IMAGE_DISTRO=noble \
@@ -35,7 +35,7 @@ print_help() {
     echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
     echo "  -t <time>       Time limit for the job (default: $TIME)"
     echo "  -g <gpu>        GPU resources (e.g., 1, a100:2). Use -g '' to clear"
-    echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00"
+    echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00"
     echo "  -w              Use current directory as working directory (clears additional overlays)"
     echo ""
     echo "  -b <image>      Base image file"
@@ -60,7 +60,7 @@ esac
 show_and_connect() {
     local job_id="$1"
     print_info "$HELPER_NAME at ${BLUE}http://localhost:$PORT?tkn=$TOKEN&folder=$CWD${NC}"
-    print_info "If you want to stop it, run: ${YELLOW}qdel $job_id${NC}"
+    print_info "If you want to stop it, run: ${YELLOW}bkill $job_id${NC}"
     exec ssh ${SSH_OPTS} -o ControlMaster=no -L "$PORT:localhost:$PORT" "$USER@$NODE"
     exit 0
 }
@@ -106,8 +106,8 @@ while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
         m ) MEM=$OPTARG; _MEM=$OPTARG; _ARG_MEM=1 ;;
         t ) TIME=$OPTARG; _TIME=$OPTARG; _ARG_TIME=1 ;;
         g ) GPU=$OPTARG; _GPU=$OPTARG; _ARG_GPU=1 ;;
-        v ) NCPUS=1; MEM=4G; TIME=02:00:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
-            echo "[MSG] View Mode: NCPUS=1, MEM=4G, TIME=02:00:00" ;;
+        v ) NCPUS=1; MEM=4G; TIME=02:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
+            echo "[MSG] View Mode: NCPUS=1, MEM=4G, TIME=02:00" ;;
         w )
             NEW_CWD="$(readlink -f .)"
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
@@ -203,10 +203,6 @@ fi
 [ -n "$BASE_IMAGE" ] && BASE_IMAGE_ARG="-b $BASE_IMAGE"
 [ -n "$OVERLAY" ] && [ -f "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
-PBS_RESOURCES="select=1:ncpus=$NCPUS:mem=$MEM"
-if [ -n "$GPU" ]; then
-    PBS_RESOURCES="${PBS_RESOURCES}:ngpus=${GPU}"
-fi
 
 # Generate a random token if not provided by config or -a
 if [ "${AUTH_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
@@ -214,18 +210,53 @@ if [ "${AUTH_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "f
     TOKEN=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
 fi
 
-PBS_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.qsub"
+LSF_RUSAGE="rusage[mem=${MEM}]"
+if [ -n "$GPU" ]; then
+    if [[ "$GPU" == *":"* ]]; then
+        PART1="${GPU%:*}"
+        PART2="${GPU#*:}"
+        if [[ "$PART1" =~ ^[0-9]+$ ]]; then
+            GPU_NUM="$PART1"
+            GPU_MODEL="$PART2"
+        else
+            GPU_NUM="$PART2"
+            GPU_MODEL="$PART1"
+        fi
+    else
+        GPU_NUM="$GPU"
+        GPU_MODEL=""
+    fi
 
-cat <<EOT > "$PBS_SCRIPT_PATH"
+    if [ -n "$GPU_MODEL" ]; then
+        LSF_GPU="#BSUB -gpu \"num=${GPU_NUM}:gmodel=${GPU_MODEL}:mode=exclusive_process\""
+    else
+        LSF_GPU="#BSUB -gpu \"num=${GPU_NUM}:mode=exclusive_process\""
+    fi
+else
+    LSF_GPU=""
+fi
+
+# Normalize TIME for LSF (LSF accepts HH:MM or minutes; strip seconds if present)
+LSF_TIME="$TIME"
+if [[ "$LSF_TIME" == *:*:* ]]; then
+    ORIG_TIME="$LSF_TIME"
+    LSF_TIME="${LSF_TIME%:*}"
+    print_info "Converting TIME '${ORIG_TIME}' → '${LSF_TIME}' (HH:MM only)."
+fi
+
+LSF_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.lsf"
+
+cat <<EOT > "$LSF_SCRIPT_PATH"
 #!/bin/bash
-#PBS -N $HELPER_NAME
-#PBS -l $PBS_RESOURCES
-#PBS -l walltime=$TIME
-#PBS -j oe
-#PBS -o /dev/null
-#PBS -d $CWD
+#BSUB -J $HELPER_NAME
+#BSUB -n $NCPUS
+#BSUB -R "$LSF_RUSAGE"
+#BSUB -R "span[hosts=1]"
+#BSUB -W $LSF_TIME
+#BSUB -o $LOG_DIR/$HELPER_NAME-%J.log
+${LSF_GPU:+$LSF_GPU}
 
-CLEAN_ID=\$(echo \$PBS_JOBID | cut -d'.' -f1)
+CLEAN_ID=\$(echo \$LSB_JOBID | cut -d'.' -f1)
 CUSTOM_LOG="$LOG_DIR/${HELPER_NAME}-\${CLEAN_ID}.log"
 exec &> "\$CUSTOM_LOG"
 
@@ -243,10 +274,11 @@ condatainer exec \
 EOT
 
 rm -f "$STATE_FILE"
-PBS_JOB_ID=$(qsub "$PBS_SCRIPT_PATH")
+LSF_OUTPUT=$(bsub < "$LSF_SCRIPT_PATH" 2>&1)
+LSF_JOB_ID=$(printf '%s' "$LSF_OUTPUT" | awk -F'[<>]' '/Job/ {print $2; exit}')
 
 cat > "$STATE_FILE" <<RUNSTATE
-JOB_ID=$PBS_JOB_ID
+JOB_ID=$LSF_JOB_ID
 NCPUS=$_NCPUS
 MEM=$_MEM
 TIME=$_TIME
@@ -259,6 +291,6 @@ OVERLAY="$OVERLAY"
 OVERLAYS="$OVERLAYS"
 RUNSTATE
 
-wait_for_job "$PBS_JOB_ID"
-rm "$PBS_SCRIPT_PATH" # Clean up when success
-show_and_connect "$PBS_JOB_ID"
+wait_for_job "$LSF_JOB_ID"
+rm "$LSF_SCRIPT_PATH" # Clean up when success
+show_and_connect "$LSF_JOB_ID"

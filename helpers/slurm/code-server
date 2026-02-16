@@ -218,9 +218,7 @@ cat <<EOT > "$SBATCH_SCRIPT_PATH"
 ${GPU_SBATCH:+$GPU_SBATCH}
 #SBATCH --output=$LOG_DIR/$HELPER_NAME-%j.log
 
-# Remove the script after job submission
-rm "$SBATCH_SCRIPT_PATH"
-
+while ! grep -q "^JOB_ID=" "$STATE_FILE" 2>/dev/null; do sleep 1; done
 echo "NODE=\$(hostname)" >> "$STATE_FILE"
 
 condatainer exec \
@@ -234,6 +232,7 @@ condatainer exec \
         $AUTH_OPTION
 EOT
 
+rm -f "$STATE_FILE"
 SBATCH_OUTPUT=$(sbatch "$SBATCH_SCRIPT_PATH")
 SBATCH_JOB_ID=$(echo $SBATCH_OUTPUT | awk '{print $4}')
 
@@ -252,4 +251,5 @@ OVERLAYS="$OVERLAYS"
 RUNSTATE
 
 wait_for_job "$SBATCH_JOB_ID"
+rm "$SBATCH_SCRIPT_PATH" # Clean up when success
 show_and_connect "$SBATCH_JOB_ID"
