@@ -6,7 +6,7 @@ CondaTainer
 * **Inode Saver:** Packing 30k+ Conda files into a single image to satisfy inode quotas.
 * **Web-App Ready:** Out-of-the-box support for running *RStudio Server*, *code-server* and more on HPC.
 * **Environment Isolation:** Supports read-only (`.sqf`) for production and writable (`.img`) for development.
-* **Workload Manager Integration:** Native compatibility with Slurm scheduler for batch job submission.
+* **Scheduler Integration:** Native compatibility with Slurm, PBS, LSF, and HTCondor for batch job submission.
 
 .. toctree::
   :caption: User Guide:

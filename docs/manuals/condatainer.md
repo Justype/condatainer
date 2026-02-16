@@ -858,6 +858,8 @@ Scripts can use special comment tags to declare dependencies and configure the c
 | `#CNT [args]` | Additional arguments passed to condatainer |
 | `#SBATCH [args]` | SLURM scheduler directives (auto-submit as job) |
 | `#PBS [args]` | PBS scheduler directives (auto-submit as job) |
+| `#BSUB [args]` | LSF scheduler directives (auto-submit as job) |
+| `#CONDOR [args]` | HTCondor scheduler directives (auto-submit as job) |
 
 **Available `#CNT` arguments:**
 
@@ -880,7 +882,7 @@ bcftools view input.vcf | head
 
 ### Scheduler Integration
 
-If your script contains scheduler directives (`#SBATCH` or `#PBS`), `condatainer run` will automatically submit it as a scheduler job instead of running it locally.
+If your script contains scheduler directives (`#SBATCH`, `#PBS`, `#BSUB`, or `#CONDOR`), `condatainer run` will automatically submit it as a scheduler job instead of running it locally.
 
 **Behavior:**
 
@@ -914,9 +916,9 @@ condatainer run analysis.sh -a
 
 **Log Files:**
 
-* If `#SBATCH --output=...` is specified in the script, logs go to that path
+* If a log output path is specified in the script (e.g., `#SBATCH --output=...`), logs go to that path
 * Otherwise, logs are written to the global logs directory (`~/logs` by default)
-* Job scripts (`.sbatch`) are created alongside the log files
+* Job scripts are created alongside the log files
 
 ### Exit Codes (script and job-submission behavior) ⚠️
 
@@ -1194,7 +1196,7 @@ condatainer scheduler
 
 **Output includes:**
 
-* Scheduler type (SLURM, PBS, etc.)
+* Scheduler type (SLURM, PBS, LSF, HTCondor)
 * Binary path
 * Version
 * Availability status

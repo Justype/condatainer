@@ -15,10 +15,11 @@ import (
 type SchedulerType string
 
 const (
-	SchedulerUnknown SchedulerType = ""
-	SchedulerSLURM   SchedulerType = "SLURM"
-	SchedulerPBS     SchedulerType = "PBS"
-	SchedulerLSF     SchedulerType = "LSF"
+	SchedulerUnknown   SchedulerType = ""
+	SchedulerSLURM     SchedulerType = "SLURM"
+	SchedulerPBS       SchedulerType = "PBS"
+	SchedulerLSF       SchedulerType = "LSF"
+	SchedulerHTCondor  SchedulerType = "HTCondor"
 )
 
 // SchedulerInfo holds information about the detected scheduler
@@ -221,6 +222,8 @@ func DetectSchedulerWithBinary(preferredBin string) (Scheduler, error) {
 			return NewPbsSchedulerWithBinary(preferredBin)
 		case "bsub", "bjobs", "bkill":
 			return NewLsfSchedulerWithBinary(preferredBin)
+		case "condor_submit", "condor_q", "condor_status":
+			return NewHTCondorSchedulerWithBinary(preferredBin)
 		default:
 			// Default to SLURM for sbatch and any other binary
 			return NewSlurmSchedulerWithBinary(preferredBin)
@@ -243,6 +246,12 @@ func DetectSchedulerWithBinary(preferredBin string) (Scheduler, error) {
 	lsf, lsfErr := NewLsfScheduler()
 	if lsfErr == nil {
 		return lsf, nil
+	}
+
+	// Try HTCondor via PATH
+	htcondor, htcondorErr := NewHTCondorScheduler()
+	if htcondorErr == nil {
+		return htcondor, nil
 	}
 
 	return nil, ErrSchedulerNotFound
@@ -403,6 +412,11 @@ func DetectType() SchedulerType {
 		return SchedulerLSF
 	}
 
+	// Check for HTCondor (condor_submit)
+	if _, err := exec.LookPath("condor_submit"); err == nil {
+		return SchedulerHTCondor
+	}
+
 	return SchedulerUnknown
 }
 
@@ -419,6 +433,10 @@ func IsInsideJob() bool {
 	}
 	// Check LSF
 	if _, ok := os.LookupEnv("LSB_JOBID"); ok {
+		return true
+	}
+	// Check HTCondor
+	if _, ok := os.LookupEnv("_CONDOR_JOB_AD"); ok {
 		return true
 	}
 	return false
@@ -451,7 +469,7 @@ func ParseScriptAny(scriptPath string) (*ParsedScript, error) {
 	}
 
 	// Add other schedulers
-	allTypes := []SchedulerType{SchedulerSLURM, SchedulerPBS, SchedulerLSF}
+	allTypes := []SchedulerType{SchedulerSLURM, SchedulerPBS, SchedulerLSF, SchedulerHTCondor}
 	for _, st := range allTypes {
 		if st != currentType {
 			tryOrder = append(tryOrder, st)
@@ -470,6 +488,8 @@ func ParseScriptAny(scriptPath string) (*ParsedScript, error) {
 			specs, err = TryParsePbsScript(scriptPath)
 		case SchedulerLSF:
 			specs, err = TryParseLsfScript(scriptPath)
+		case SchedulerHTCondor:
+			specs, err = TryParseHTCondorScript(scriptPath)
 		default:
 			continue
 		}
