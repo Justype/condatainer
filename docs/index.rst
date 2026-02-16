@@ -27,6 +27,7 @@ CondaTainer
   RStudio Server with Conda <tutorials/rstudio-server-conda_on_HPC>
   VS Code Server <tutorials/vscode-server_on_HPC>
   VS Code Tunnel <tutorials/vscode-tunnel_on_HPC>
+  XFCE4 Desktop <tutorials/xfce4_on_HPC>
 
 .. toctree::
   :caption: FAQ:

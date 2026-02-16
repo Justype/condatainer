@@ -252,9 +252,7 @@ condatainer helper vscode-server -w
 ```
 
 ```{note}
-You will be still prompted to reuse even you enter `-w` or `-g ''`, since these flags modify the reused settings.
-
-To skip the prompt entirely, set `REUSE_MODE="always"` in your config.
+When you pass any CLI flags (e.g., `-w`, `-g ''`, `-c 8`), the script automatically reuses previous settings with your CLI overrides applied — no prompt needed.
 ```
 
 ## Common Issues
@@ -298,3 +296,12 @@ e2fsck -f env.img
 
 - [RStudio Server](./rstudio-server_on_HPC.md) - Using Posit R docker images
 - [RStudio Server (Conda)](./rstudio-server-conda_on_HPC.md) - Using Conda R
+
+### Jupyter
+
+- Jupyter Lab (default) or Notebook (`-j notebook`)
+
+### Desktop / GUI
+
+- [xfce4](./xfce4_on_HPC.md) - XFCE desktop via VNC / noVNC
+- [igv](./xfce4_on_HPC.md) - XFCE desktop with IGV via noVNC

@@ -66,8 +66,9 @@ show_and_connect() {
     exit 0
 }
 
-# Track if we should reuse previous working directory
 REUSE_PREVIOUS_CWD=false
+_HAS_PREVIOUS_STATE=false
+_STATE_PORT=""
 
 STATE_FILE="$HELPER_STATE_DIR/$HELPER_NAME"
 read_job_state "$STATE_FILE"
@@ -81,9 +82,10 @@ case $? in
         print_info "Found an existing $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC}) running on node ${BLUE}$NODE${NC}."
         show_and_connect "$JOB_ID"
         ;;
-    3) # Not running - ask about reusing previous overlay settings
+    3) # Not running - handle reuse after arg parse
+        _HAS_PREVIOUS_STATE=true
+        _STATE_PORT="${PORT:-}"
         print_info "The previous $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC}) is no longer running."
-        handle_reuse_mode "$HELPER_NAME"
         ;;
 esac
 
@@ -101,19 +103,20 @@ AUTH_FLAG_SET=false
 
 while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
     case ${opt} in
-        c ) NCPUS=$OPTARG; _NCPUS=$OPTARG ;;
-        m ) MEM=$OPTARG; _MEM=$OPTARG ;;
-        t ) TIME=$OPTARG; _TIME=$OPTARG ;;
-        g ) GPU=$OPTARG; _GPU=$OPTARG ;;
-        v ) NCPUS=2; MEM=8G; TIME=02:00:00; echo "[MSG] View Mode: NCPUS=2, MEM=8G, TIME=02:00:00" ;;
+        c ) NCPUS=$OPTARG; _NCPUS=$OPTARG; _ARG_NCPUS=1 ;;
+        m ) MEM=$OPTARG; _MEM=$OPTARG; _ARG_MEM=1 ;;
+        t ) TIME=$OPTARG; _TIME=$OPTARG; _ARG_TIME=1 ;;
+        g ) GPU=$OPTARG; _GPU=$OPTARG; _ARG_GPU=1 ;;
+        v ) NCPUS=2; MEM=8G; TIME=02:00:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
+            echo "[MSG] View Mode: NCPUS=2, MEM=8G, TIME=02:00:00" ;;
         w )
             NEW_CWD="$(readlink -f .)"
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
             ;;
-        p ) PORT=$OPTARG ;;
+        p ) PORT=$OPTARG; _ARG_PORT=1 ;;
         a ) VNC_PASSWD=$OPTARG; AUTH_FLAG_SET=true ;;
-        b ) BASE_IMAGE="$OPTARG" ;;
-        e ) OVERLAY=$OPTARG ;;
+        b ) BASE_IMAGE="$OPTARG"; _ARG_BASE_IMAGE=1 ;;
+        e ) OVERLAY=$OPTARG; _ARG_OVERLAY=1 ;;
         o ) # First -o clears previous overlays, then builds fresh list
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
             OVERLAYS="${OVERLAYS:+$OVERLAYS:}$OPTARG"
@@ -122,18 +125,33 @@ while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
     esac
 done
 
+# Handle reuse mode (after arg parse)
+if [ "$_HAS_PREVIOUS_STATE" = true ]; then
+    handle_reuse_mode "$HELPER_NAME"
+fi
+
 # Handle working directory changes
 if [ -n "$NEW_CWD" ]; then
     CWD="$NEW_CWD"
 elif [ "$REUSE_PREVIOUS_CWD" = true ]; then
-    # Reusing previous settings, change to previous working directory
     cd "$CWD"
 fi
 
-# Show final settings before job submission
-print_msg "Using settings:"
-print_specs
-sleep 3
+# Resolve port: CLI > state (reuse) > config > state
+if [ -z "${_ARG_PORT:-}" ] && [ "$REUSE_PREVIOUS_CWD" != true ]; then
+    if [ -n "${_CONFIG_PORT:-}" ]; then
+        PORT="$_CONFIG_PORT"
+    elif [ -n "$_STATE_PORT" ]; then
+        PORT="$_STATE_PORT"
+    fi
+fi
+
+# Show settings before job submission (once)
+if [ "$_SPECS_SHOWN" != true ]; then
+    print_msg "Using settings:"
+    print_specs
+    countdown 3
+fi
 
 # If no port specified, pick an available one
 if [ -z "$PORT" ]; then
@@ -158,7 +176,7 @@ check_and_install_overlays xfce4 $OVERLAYS
 
 if [ ! -f "$OVERLAY" ]; then
     print_info "Overlay ${BLUE}$OVERLAY${NC} not found. Continuing without it."
-    sleep 3
+    countdown 3
 else
     check_overlay_integrity "$OVERLAY"
 fi
