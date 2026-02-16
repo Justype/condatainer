@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -589,6 +590,14 @@ func (p *PbsScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		}
 	}
 
+	// Get queue limits
+	if p.qstatBin != "" {
+		limits, err := p.getQueueLimits(info.AvailableGpus)
+		if err == nil {
+			info.Limits = limits
+		}
+	}
+
 	if info.MaxCpusPerNode == 0 && info.MaxMemMBPerNode == 0 && len(info.AvailableGpus) == 0 {
 		return nil, ErrClusterInfoUnavailable
 	}
@@ -699,6 +708,105 @@ func (p *PbsScheduler) getNodeResources() (int, int64, []GpuInfo, error) {
 	}
 
 	return maxCpus, maxMemMB, gpus, nil
+}
+
+// getQueueLimits queries PBS for queue resource limits using qstat -Qf
+func (p *PbsScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, error) {
+	cmd := exec.Command(p.qstatBin, "-Qf")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, NewClusterError("PBS", "query queues", err)
+	}
+
+	queueLimits := make(map[string]*ResourceLimits)
+	var currentQueue string
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		// Queue name line starts with "Queue: "
+		if strings.HasPrefix(line, "Queue: ") {
+			currentQueue = strings.TrimSpace(strings.TrimPrefix(line, "Queue:"))
+			if currentQueue != "" {
+				queueLimits[currentQueue] = &ResourceLimits{
+					Partition: currentQueue,
+				}
+			}
+			continue
+		}
+
+		// Skip if no current queue
+		if currentQueue == "" {
+			continue
+		}
+
+		// Parse key = value pairs (indented lines)
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "=") {
+			continue
+		}
+
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		limit := queueLimits[currentQueue]
+
+		switch key {
+		case "resources_max.walltime", "max_walltime":
+			if duration, err := parsePbsTime(value); err == nil && duration > 0 {
+				limit.MaxTime = duration
+			}
+		case "resources_max.mem", "max_mem":
+			if memKB, err := parsePbsMemory(value); err == nil && memKB > 0 {
+				memMB := memKB / 1024
+				limit.MaxMemMB = memMB
+			}
+		case "resources_max.ncpus", "max_ncpus":
+			var cpus int
+			if _, err := fmt.Sscanf(value, "%d", &cpus); err == nil && cpus > 0 {
+				limit.MaxCpus = cpus
+			}
+		case "resources_available.nodect", "total_nodes":
+			var nodes int
+			if _, err := fmt.Sscanf(value, "%d", &nodes); err == nil && nodes > 0 {
+				limit.MaxNodes = nodes
+			}
+		case "enabled":
+			// Skip disabled queues
+			if value == "False" {
+				delete(queueLimits, currentQueue)
+			}
+		}
+	}
+
+	// Convert map to slice
+	limits := make([]ResourceLimits, 0, len(queueLimits))
+
+	// Calculate total GPU count across all nodes
+	// Note: PBS typically uses a global GPU pool rather than per-queue allocation
+	totalGpus := 0
+	for _, gpu := range gpuInfo {
+		totalGpus += gpu.Total
+	}
+
+	for _, limit := range queueLimits {
+		// Assign total GPU count to each queue
+		// This is a simplification - actual per-queue GPU limits may differ
+		if totalGpus > 0 {
+			limit.MaxGpus = totalGpus
+		}
+		limits = append(limits, *limit)
+	}
+
+	// Sort by queue name for consistent output
+	sort.Slice(limits, func(i, j int) bool {
+		return limits[i].Partition < limits[j].Partition
+	})
+
+	return limits, nil
 }
 
 // parsePbsMemory parses PBS memory format (e.g., "8gb", "1024mb", "1048576kb")
