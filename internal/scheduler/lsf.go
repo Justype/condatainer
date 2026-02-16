@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ type LsfScheduler struct {
 	bsubBin     string
 	bjobsBin    string
 	bhostsBin   string
+	bqueuesBin  string
 	directiveRe *regexp.Regexp
 	jobIDRe     *regexp.Regexp
 }
@@ -57,11 +59,13 @@ func newLsfSchedulerWithBinary(bsubBin string) (*LsfScheduler, error) {
 
 	bjobsCmd, _ := exec.LookPath("bjobs")
 	bhostsCmd, _ := exec.LookPath("bhosts")
+	bqueuesCmd, _ := exec.LookPath("bqueues")
 
 	return &LsfScheduler{
 		bsubBin:     binPath,
 		bjobsBin:    bjobsCmd,
 		bhostsBin:   bhostsCmd,
+		bqueuesBin:  bqueuesCmd,
 		directiveRe: regexp.MustCompile(`^\s*#BSUB\s+(.+)$`),
 		jobIDRe:     regexp.MustCompile(`Job <(\d+)> is submitted`),
 	}, nil
@@ -622,6 +626,20 @@ func (l *LsfScheduler) GetClusterInfo() (*ClusterInfo, error) {
 			info.MaxCpusPerNode = maxCpus
 			info.MaxMemMBPerNode = maxMem
 		}
+
+		// Get GPU info
+		gpus, err := l.getGpuInfo()
+		if err == nil {
+			info.AvailableGpus = gpus
+		}
+	}
+
+	// Get queue limits
+	if l.bqueuesBin != "" {
+		limits, err := l.getQueueLimits(info.AvailableGpus)
+		if err == nil {
+			info.Limits = limits
+		}
 	}
 
 	if info.MaxCpusPerNode == 0 && info.MaxMemMBPerNode == 0 && len(info.AvailableGpus) == 0 {
@@ -631,8 +649,9 @@ func (l *LsfScheduler) GetClusterInfo() (*ClusterInfo, error) {
 	return info, nil
 }
 
-// getHostResources queries LSF for host resources using bhosts
+// getHostResources queries LSF for host resources using bhosts and lshosts
 func (l *LsfScheduler) getHostResources() (int, int64, error) {
+	// First get CPU info from bhosts
 	cmd := exec.Command(l.bhostsBin, "-w")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -640,7 +659,6 @@ func (l *LsfScheduler) getHostResources() (int, int64, error) {
 	}
 
 	var maxCpus int
-	var maxMemMB int64
 
 	lines := strings.Split(string(output), "\n")
 	for i, line := range lines {
@@ -659,7 +677,456 @@ func (l *LsfScheduler) getHostResources() (int, int64, error) {
 		}
 	}
 
+	// Get memory info from lshosts
+	var maxMemMB int64
+	lshostsCmd, err := exec.LookPath("lshosts")
+	if err == nil {
+		cmd := exec.Command(lshostsCmd, "-w")
+		output, err := cmd.CombinedOutput()
+		if err == nil {
+			lines := strings.Split(string(output), "\n")
+			for i, line := range lines {
+				if i == 0 {
+					continue // Skip header line
+				}
+
+				fields := strings.Fields(line)
+				// lshosts output: HOST_NAME type model cpuf ncpus maxmem maxswp server RESOURCES
+				// maxmem is typically in format like "32G" or "65536M"
+				if len(fields) >= 6 {
+					memStr := fields[5]
+					if memMB, err := parseLsfMemoryToMB(memStr); err == nil && memMB > maxMemMB {
+						maxMemMB = memMB
+					}
+				}
+			}
+		}
+	}
+
 	return maxCpus, maxMemMB, nil
+}
+
+// getQueueLimits queries LSF for queue resource limits using bqueues
+func (l *LsfScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, error) {
+	cmd := exec.Command(l.bqueuesBin, "-l")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, NewClusterError("LSF", "query queues", err)
+	}
+
+	queueLimits := make(map[string]*ResourceLimits)
+	var currentQueue string
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Queue name line starts with "QUEUE: "
+		if strings.HasPrefix(line, "QUEUE: ") {
+			currentQueue = strings.TrimSpace(strings.TrimPrefix(line, "QUEUE:"))
+			if currentQueue != "" {
+				queueLimits[currentQueue] = &ResourceLimits{
+					Partition: currentQueue,
+				}
+			}
+			continue
+		}
+
+		// Skip if no current queue
+		if currentQueue == "" {
+			continue
+		}
+
+		limit := queueLimits[currentQueue]
+
+		// Parse RUNLIMIT (walltime)
+		if strings.Contains(line, "RUNLIMIT") {
+			// Format: "RUNLIMIT  600.0 min"
+			fields := strings.Fields(line)
+			for i, field := range fields {
+				if field == "RUNLIMIT" && i+1 < len(fields) {
+					// Parse value and unit
+					var minutes float64
+					if _, err := fmt.Sscanf(fields[i+1], "%f", &minutes); err == nil {
+						limit.MaxTime = time.Duration(minutes * 60 * float64(time.Second))
+					}
+					break
+				}
+			}
+		}
+
+		// Parse MEMLIMIT (per-process memory limit)
+		if strings.Contains(line, "MEMLIMIT") {
+			fields := strings.Fields(line)
+			for i, field := range fields {
+				if field == "MEMLIMIT" && i+1 < len(fields) {
+					// Parse memory value (in MB)
+					var memMB int64
+					if _, err := fmt.Sscanf(fields[i+1], "%d", &memMB); err == nil && memMB > 0 {
+						limit.MaxMemMB = memMB
+					}
+					break
+				}
+			}
+		}
+
+		// Parse CPULIMIT or PROCLIMIT
+		if strings.Contains(line, "PROCLIMIT") {
+			fields := strings.Fields(line)
+			for i, field := range fields {
+				if field == "PROCLIMIT" && i+1 < len(fields) {
+					var procs int
+					if _, err := fmt.Sscanf(fields[i+1], "%d", &procs); err == nil && procs > 0 {
+						limit.MaxCpus = procs
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// Get available resources per queue from actual hosts
+	if l.bhostsBin != "" {
+		availRes, err := l.getAvailableResourcesByQueue()
+		if err == nil {
+			// Merge available resources into queue limits
+			for queueName, limit := range queueLimits {
+				if avail, ok := availRes[queueName]; ok {
+					// Use available resources as limits if they're set and larger than config
+					if avail.MaxCpus > 0 {
+						limit.MaxCpus = avail.MaxCpus
+					}
+					if avail.MaxMemMB > 0 {
+						limit.MaxMemMB = avail.MaxMemMB
+					}
+				}
+			}
+		}
+	}
+
+	// Convert map to slice
+	limits := make([]ResourceLimits, 0, len(queueLimits))
+
+	// Calculate GPU count per queue from GPU info
+	gpusByQueue := make(map[string]int)
+	for _, gpu := range gpuInfo {
+		queue := gpu.Partition
+		if queue == "" {
+			// If no queue assigned, add to all queues
+			for qName := range queueLimits {
+				gpusByQueue[qName] += gpu.Total
+			}
+		} else {
+			gpusByQueue[queue] += gpu.Total
+		}
+	}
+
+	for queueName, limit := range queueLimits {
+		// Assign GPU count for this queue
+		if maxGpus, ok := gpusByQueue[queueName]; ok {
+			limit.MaxGpus = maxGpus
+		}
+		limits = append(limits, *limit)
+	}
+
+	// Sort by queue name for consistent output
+	sort.Slice(limits, func(i, j int) bool {
+		return limits[i].Partition < limits[j].Partition
+	})
+
+	return limits, nil
+}
+
+// getAvailableResourcesByQueue queries available CPUs and memory per queue
+func (l *LsfScheduler) getAvailableResourcesByQueue() (map[string]ResourceLimits, error) {
+	// LSF doesn't directly expose queue-to-host mapping in simple commands
+	// We'll use bhosts to get host info and try to match to queues via bqueues
+	// This is a best-effort implementation
+
+	cmd := exec.Command(l.bhostsBin, "-w")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, NewClusterError("LSF", "query available resources by queue", err)
+	}
+
+	// Track resources per queue
+	resources := make(map[string]ResourceLimits)
+
+	// Parse bhosts output to get host capabilities
+	type hostInfo struct {
+		cpus   int
+		memMB  int64
+		status string
+	}
+	hosts := make(map[string]hostInfo)
+
+	lines := strings.Split(string(output), "\n")
+	for i, line := range lines {
+		if i == 0 {
+			continue // Skip header line
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+
+		// bhosts -w output: HOST_NAME STATUS JL/U MAX NJOBS RUN SSUSP USUSP RSV
+		hostName := fields[0]
+		status := fields[1]
+		var cpus int
+		fmt.Sscanf(fields[3], "%d", &cpus)
+
+		hosts[hostName] = hostInfo{
+			cpus:   cpus,
+			status: status,
+		}
+	}
+
+	// Get memory info from lshosts
+	lshostsCmd, err := exec.LookPath("lshosts")
+	if err == nil {
+		cmd := exec.Command(lshostsCmd, "-w")
+		output, err := cmd.CombinedOutput()
+		if err == nil {
+			lines := strings.Split(string(output), "\n")
+			for i, line := range lines {
+				if i == 0 {
+					continue // Skip header
+				}
+
+				fields := strings.Fields(line)
+				if len(fields) >= 6 {
+					hostName := fields[0]
+					if host, ok := hosts[hostName]; ok {
+						memStr := fields[5]
+						if memMB, err := parseLsfMemoryToMB(memStr); err == nil {
+							host.memMB = memMB
+							hosts[hostName] = host
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Query bqueues to get queue-to-host mapping
+	// Note: This is simplified - LSF queue-host mapping can be complex
+	// For a more accurate implementation, we'd need to parse bqueues -l output
+	// or use LSF API if available
+	cmd = exec.Command(l.bqueuesBin)
+	output, err = cmd.CombinedOutput()
+	if err == nil {
+		// For now, aggregate all host resources under each queue
+		// This is a simplification - in reality, queues may have specific host groups
+		lines := strings.Split(string(output), "\n")
+		for i, line := range lines {
+			if i == 0 {
+				continue // Skip header
+			}
+
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+
+			queueName := fields[0]
+
+			// Aggregate all ok/closed hosts for this queue
+			// In a real implementation, we'd filter by queue's host groups
+			var maxCpus int
+			var maxMemMB int64
+
+			for _, host := range hosts {
+				if host.status == "ok" || host.status == "closed" {
+					if host.cpus > maxCpus {
+						maxCpus = host.cpus
+					}
+					if host.memMB > maxMemMB {
+						maxMemMB = host.memMB
+					}
+				}
+			}
+
+			if maxCpus > 0 || maxMemMB > 0 {
+				resources[queueName] = ResourceLimits{
+					Partition: queueName,
+					MaxCpus:   maxCpus,
+					MaxMemMB:  maxMemMB,
+				}
+			}
+		}
+	}
+
+	return resources, nil
+}
+
+// getGpuInfo queries LSF for GPU information using bhosts
+func (l *LsfScheduler) getGpuInfo() ([]GpuInfo, error) {
+	// Try bhosts -gpu first (LSF 10.1+)
+	cmd := exec.Command(l.bhostsBin, "-gpu")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// If -gpu flag not supported, try parsing bhosts -l output
+		return l.getGpuInfoFromHostDetails()
+	}
+
+	gpuMap := make(map[string]*GpuInfo)
+	lines := strings.Split(string(output), "\n")
+
+	for i, line := range lines {
+		if i == 0 {
+			continue // Skip header line
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		// bhosts -gpu output format (varies by LSF version):
+		// HOST_NAME ngpus gputype ...
+		// or HOST_NAME gpu_shared_avg_mut gpu_shared_avg_ut ngpus_physical ...
+
+		var gpuCount int
+		var gpuType string
+
+		// Try to find ngpus field (usually contains number of GPUs)
+		for _, field := range fields[1:] {
+			if count, err := strconv.Atoi(field); err == nil && count > 0 {
+				gpuCount = count
+				break
+			}
+		}
+
+		if gpuCount == 0 {
+			continue
+		}
+
+		// Look for GPU type in the output (often contains "nvidia", "tesla", etc.)
+		gpuType = "gpu" // default
+		for _, field := range fields {
+			lower := strings.ToLower(field)
+			if strings.Contains(lower, "nvidia") || strings.Contains(lower, "tesla") ||
+				strings.Contains(lower, "a100") || strings.Contains(lower, "v100") ||
+				strings.Contains(lower, "h100") || strings.Contains(lower, "gpu") {
+				gpuType = field
+				break
+			}
+		}
+
+		// Aggregate by GPU type
+		if existing, ok := gpuMap[gpuType]; ok {
+			existing.Total += gpuCount
+			existing.Available += gpuCount // LSF doesn't easily expose available vs used
+		} else {
+			gpuMap[gpuType] = &GpuInfo{
+				Type:      gpuType,
+				Total:     gpuCount,
+				Available: gpuCount,
+			}
+		}
+	}
+
+	gpus := make([]GpuInfo, 0, len(gpuMap))
+	for _, info := range gpuMap {
+		gpus = append(gpus, *info)
+	}
+
+	return gpus, nil
+}
+
+// getGpuInfoFromHostDetails attempts to extract GPU info from detailed host info
+func (l *LsfScheduler) getGpuInfoFromHostDetails() ([]GpuInfo, error) {
+	// This is a fallback for older LSF versions
+	// Query bhosts for list of hosts, then bhosts -l for each
+	cmd := exec.Command(l.bhostsBin)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, NewClusterError("LSF", "query GPU info", err)
+	}
+
+	gpuMap := make(map[string]*GpuInfo)
+	lines := strings.Split(string(output), "\n")
+
+	// Parse bhosts output to find hosts, then query detailed info
+	for i, line := range lines {
+		if i == 0 {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		hostName := fields[0]
+
+		// Query detailed host info
+		detailCmd := exec.Command(l.bhostsBin, "-l", hostName)
+		detailOutput, err := detailCmd.CombinedOutput()
+		if err != nil {
+			continue
+		}
+
+		// Parse for GPU-related resources
+		// LSF stores GPU info in resources like "ngpus_physical", "gpu", etc.
+		detailStr := string(detailOutput)
+		if strings.Contains(detailStr, "ngpus") || strings.Contains(detailStr, "gpu") {
+			// Found GPU info - parse it
+			// This is simplified - real parsing would be more sophisticated
+			gpuType := "gpu"
+			gpuCount := 1 // Conservative estimate
+
+			if existing, ok := gpuMap[gpuType]; ok {
+				existing.Total += gpuCount
+				existing.Available += gpuCount
+			} else {
+				gpuMap[gpuType] = &GpuInfo{
+					Type:      gpuType,
+					Total:     gpuCount,
+					Available: gpuCount,
+				}
+			}
+		}
+	}
+
+	gpus := make([]GpuInfo, 0, len(gpuMap))
+	for _, info := range gpuMap {
+		gpus = append(gpus, *info)
+	}
+
+	return gpus, nil
+}
+
+// parseLsfMemoryToMB parses LSF memory format from lshosts (e.g., "32G", "65536M") to MB
+func parseLsfMemoryToMB(memStr string) (int64, error) {
+	memStr = strings.TrimSpace(memStr)
+	if memStr == "" || memStr == "-" {
+		return 0, fmt.Errorf("no memory info")
+	}
+
+	// Check for unit suffix
+	memUpper := strings.ToUpper(memStr)
+	var value int64
+	var unit string
+
+	// Try to parse with unit
+	n, err := fmt.Sscanf(memUpper, "%d%s", &value, &unit)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%w: %s", ErrInvalidMemoryFormat, memStr)
+	}
+
+	switch unit {
+	case "T", "TB":
+		return value * 1024 * 1024, nil
+	case "G", "GB":
+		return value * 1024, nil
+	case "M", "MB", "":
+		return value, nil
+	case "K", "KB":
+		return value / 1024, nil
+	default:
+		return value, nil
+	}
 }
 
 // parseLsfTime parses LSF walltime format

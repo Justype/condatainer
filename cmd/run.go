@@ -269,6 +269,14 @@ func runScript(cmd *cobra.Command, args []string) error {
 		utils.PrintWarning("Failed to parse scheduler specs: %v", err)
 	}
 
+	// Validate and convert specs if scheduler submission will occur
+	if scriptSpecs != nil && len(scriptSpecs.RawFlags) > 0 && config.Global.SubmitJob && !scheduler.IsInsideJob() {
+		if err := validateAndConvertSpecs(scriptSpecs); err != nil {
+			// Validation failed - don't submit job
+			return nil
+		}
+	}
+
 	// If script has scheduler specs, try to submit as a job
 	if scriptSpecs != nil && len(scriptSpecs.RawFlags) > 0 {
 		// Check if job submission is enabled in config
@@ -403,6 +411,36 @@ func parseArgsInScript(scriptPath string) ([]string, error) {
 	}
 
 	return args, nil
+}
+
+// validateAndConvertSpecs validates job specs and converts GPU/CPU if needed using the scheduler package.
+func validateAndConvertSpecs(specs *scheduler.ScriptSpecs) error {
+	validationErr, cpuAdjusted, cpuMsg, gpuConverted, gpuMsg := scheduler.ValidateAndConvertSpecs(specs)
+
+	if validationErr != nil {
+		// Validation failed
+		utils.PrintError("Job specs validation failed: %v", validationErr)
+
+		// If it's a GPU validation error with suggestions, print them
+		if gpuErr, ok := validationErr.(*scheduler.GpuValidationError); ok && len(gpuErr.Suggestions) > 0 {
+			utils.PrintMessage("Available GPU options:")
+			for _, suggestion := range gpuErr.Suggestions {
+				utils.PrintMessage("  - %s", suggestion)
+			}
+		}
+
+		return validationErr
+	}
+
+	if cpuAdjusted {
+		utils.PrintWarning("%s", cpuMsg)
+	}
+
+	if gpuConverted {
+		utils.PrintWarning("%s", gpuMsg)
+	}
+
+	return nil
 }
 
 // submitRunJob creates and submits a scheduler job to run the script

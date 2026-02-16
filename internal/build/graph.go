@@ -254,11 +254,29 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 	utils.PrintDebug("Submitting %s job for %s with dependencies: %s",
 		info.Type, meta.NameVersion(), strings.Join(depIDs, ", "))
 
+	// Get script specs
+	specs := meta.ScriptSpecs()
+
+	// Validate and convert specs if present
+	if specs != nil {
+		validationErr, cpuAdjusted, cpuMsg, gpuConverted, gpuMsg := scheduler.ValidateAndConvertSpecs(specs)
+		if validationErr != nil {
+			// Validation failed
+			return "", fmt.Errorf("job specs validation failed for %s: %w", meta.NameVersion(), validationErr)
+		}
+		if cpuAdjusted {
+			utils.PrintWarning("[%s] %s", meta.NameVersion(), cpuMsg)
+		}
+		if gpuConverted {
+			utils.PrintWarning("[%s] %s", meta.NameVersion(), gpuMsg)
+		}
+	}
+
 	// Create job specification
 	jobSpec := &scheduler.JobSpec{
 		Name:      meta.NameVersion(),
 		Command:   buildSchedulerCreateCommand(meta.NameVersion()),
-		Specs:     meta.ScriptSpecs(),
+		Specs:     specs,
 		DepJobIDs: depIDs,
 		Metadata: map[string]string{
 			"Target": meta.NameVersion(),

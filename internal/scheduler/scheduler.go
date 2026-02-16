@@ -185,6 +185,15 @@ func ValidateSpecs(specs *ScriptSpecs, limits *ResourceLimits) error {
 		}
 	}
 
+	if limits.MaxTime > 0 && specs.Time > limits.MaxTime {
+		return &ValidationError{
+			Field:     "Time",
+			Requested: int(specs.Time.Hours()),
+			Limit:     int(limits.MaxTime.Hours()),
+			Partition: limits.Partition,
+		}
+	}
+
 	if specs.Gpu != nil && limits.MaxGpus > 0 && specs.Gpu.Count > limits.MaxGpus {
 		return &ValidationError{
 			Field:     "Gpu",
@@ -195,6 +204,174 @@ func ValidateSpecs(specs *ScriptSpecs, limits *ResourceLimits) error {
 	}
 
 	return nil
+}
+
+// ValidateAndConvertSpecs validates job specs against cluster limits and attempts conversions if needed.
+// - CPUs: Automatically reduced to fit within limits (prints warning)
+//   - Time is scaled proportionally based on CPU reduction
+//   - Fails if scaled time exceeds cluster time limit
+//
+// - Memory: Critical - fails if exceeded
+// - Time: Critical - fails if exceeded
+// - GPUs: Attempts conversion to compatible type
+//   - Upgrades: Allowed with warning
+//   - Downgrades: Blocked if time limit specified (runtime unpredictable)
+//   - No time limit: Downgrades allowed with warning
+//
+// Modifies specs in-place if conversions succeed.
+// Returns validation errors and conversion details.
+// If cluster info is unavailable, returns nil error (validation skipped).
+func ValidateAndConvertSpecs(specs *ScriptSpecs) (validationErr error, cpuAdjusted bool, cpuMsg string, gpuConverted bool, gpuMsg string) {
+	// Detect scheduler
+	sched, err := DetectScheduler()
+	if err != nil {
+		// No scheduler available - skip validation
+		return nil, false, "", false, ""
+	}
+
+	// Get cluster info
+	clusterInfo, err := sched.GetClusterInfo()
+	if err != nil {
+		// Can't get cluster info - skip validation
+		return nil, false, "", false, ""
+	}
+
+	// Auto-adjust CPU if it exceeds limits in all partitions
+	// When reducing CPUs, also adjust time estimate proportionally
+	if len(clusterInfo.Limits) > 0 && specs.Ncpus > 0 {
+		maxAllowedCpu := 0
+		maxAllowedTime := time.Duration(0)
+
+		for _, limit := range clusterInfo.Limits {
+			if limit.MaxCpus > maxAllowedCpu {
+				maxAllowedCpu = limit.MaxCpus
+			}
+			if limit.MaxTime > maxAllowedTime {
+				maxAllowedTime = limit.MaxTime
+			}
+		}
+
+		if maxAllowedCpu > 0 && specs.Ncpus > maxAllowedCpu {
+			originalCpu := specs.Ncpus
+			originalTime := specs.Time
+
+			// Reduce CPUs to fit limit
+			specs.Ncpus = maxAllowedCpu
+
+			// Adjust time proportionally (assuming linear scaling)
+			// If we reduce CPUs by half, job might take twice as long
+			if originalTime > 0 {
+				cpuReductionRatio := float64(originalCpu) / float64(maxAllowedCpu)
+				adjustedTime := time.Duration(float64(originalTime) * cpuReductionRatio)
+
+				// Check if adjusted time exceeds cluster limit
+				if maxAllowedTime > 0 && adjustedTime > maxAllowedTime {
+					// Cannot reduce CPUs because it would make the job exceed time limit
+					specs.Ncpus = originalCpu // Restore original value
+					return &ValidationError{
+						Field:     "Ncpus/Time",
+						Requested: originalCpu,
+						Limit:     maxAllowedCpu,
+						Partition: fmt.Sprintf("reducing CPUs to %d would require %s, exceeding time limit %s",
+							maxAllowedCpu, adjustedTime.Round(time.Minute), maxAllowedTime.Round(time.Minute)),
+					}, false, "", false, ""
+				}
+
+				// Update time estimate
+				specs.Time = adjustedTime
+				cpuAdjusted = true
+				cpuMsg = fmt.Sprintf("CPUs: %d → %d (reduced to fit limit); Time: %s → %s (adjusted proportionally)",
+					originalCpu, maxAllowedCpu,
+					originalTime.Round(time.Minute), adjustedTime.Round(time.Minute))
+			} else {
+				// No time specified, just reduce CPUs
+				cpuAdjusted = true
+				cpuMsg = fmt.Sprintf("CPUs: %d → %d (reduced to fit cluster limit)", originalCpu, maxAllowedCpu)
+			}
+		}
+	}
+
+	// Validate resource limits (memory and other critical resources) against all partitions
+	if len(clusterInfo.Limits) > 0 {
+		validForSomePartition := false
+		var firstValidationErr error
+
+		for _, limit := range clusterInfo.Limits {
+			if err := ValidateSpecs(specs, &limit); err == nil {
+				validForSomePartition = true
+				break
+			} else if firstValidationErr == nil {
+				firstValidationErr = err
+			}
+		}
+
+		if !validForSomePartition {
+			// Job exceeds limits in all partitions (likely memory or GPU count)
+			return firstValidationErr, cpuAdjusted, cpuMsg, false, ""
+		}
+	}
+
+	// Validate and convert GPU specs if needed
+	if specs.Gpu != nil && len(clusterInfo.AvailableGpus) > 0 {
+		originalGpuType := specs.Gpu.Type
+		originalGpuCount := specs.Gpu.Count
+
+		// Check if requested GPU is available
+		err := ValidateGpuAvailability(specs.Gpu, clusterInfo)
+		if err != nil {
+			// GPU not available - attempt conversion
+			convertedSpec, convErr := ConvertGpuSpec(specs.Gpu, clusterInfo)
+			if convErr != nil {
+				// Conversion failed - return the validation error
+				return err, cpuAdjusted, cpuMsg, false, ""
+			}
+
+			// Conversion succeeded - update specs and build message
+			specs.Gpu = convertedSpec
+
+			// Determine if upgrade or downgrade
+			conversionType := "alternative"
+			isDowngrade := false
+			options, _ := FindCompatibleGpu(specs.Gpu, clusterInfo)
+			if len(options) > 0 && options[0].SuggestedSpec.Type == convertedSpec.Type {
+				if options[0].IsUpgrade {
+					conversionType = "upgrade"
+				} else if options[0].IsDowngrade {
+					conversionType = "downgrade"
+					isDowngrade = true
+				}
+			}
+
+			// GPU downgrades are risky when time limits exist because we can't estimate
+			// how much longer the job will take on a slower GPU (performance varies by workload)
+			if isDowngrade && specs.Time > 0 {
+				// Restore original GPU spec
+				specs.Gpu = &GpuSpec{Type: originalGpuType, Count: originalGpuCount}
+
+				// Return error with explanation
+				return &ValidationError{
+					Field:     "Gpu",
+					Requested: 0, // Not a count issue
+					Limit:     0,
+					Partition: fmt.Sprintf("GPU downgrade %s → %s not allowed with time limit %s (runtime unpredictable; consider removing time limit or requesting available GPU)",
+						originalGpuType, convertedSpec.Type, specs.Time.Round(time.Minute)),
+				}, cpuAdjusted, cpuMsg, false, ""
+			}
+
+			// Build conversion message
+			if originalGpuCount > 1 {
+				gpuMsg = fmt.Sprintf("GPUs: %dx %s → %dx %s (%s)",
+					originalGpuCount, originalGpuType, convertedSpec.Count, convertedSpec.Type, conversionType)
+			} else {
+				gpuMsg = fmt.Sprintf("GPU: %s → %s (%s)",
+					originalGpuType, convertedSpec.Type, conversionType)
+			}
+
+			return nil, cpuAdjusted, cpuMsg, true, gpuMsg
+		}
+	}
+
+	return nil, cpuAdjusted, cpuMsg, false, ""
 }
 
 // SubmitWithDependencies submits multiple jobs with dependency chain

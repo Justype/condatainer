@@ -578,9 +578,9 @@ func (s *SlurmScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		}
 	}
 
-	// Get partition limits
+	// Get partition limits (passing GPU info for max GPU calculation)
 	if s.scontrolCommand != "" {
-		limits, err := s.getPartitionLimits()
+		limits, err := s.getPartitionLimits(info.AvailableGpus)
 		if err == nil {
 			info.Limits = limits
 		}
@@ -689,7 +689,8 @@ func (s *SlurmScheduler) getGpuInfo() ([]GpuInfo, error) {
 }
 
 // getPartitionLimits queries SLURM for partition resource limits
-func (s *SlurmScheduler) getPartitionLimits() ([]ResourceLimits, error) {
+func (s *SlurmScheduler) getPartitionLimits(gpuInfo []GpuInfo) ([]ResourceLimits, error) {
+	// First, get partition config limits
 	cmd := exec.Command(s.scontrolCommand, "show", "partition", "-o")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -706,7 +707,89 @@ func (s *SlurmScheduler) getPartitionLimits() ([]ResourceLimits, error) {
 		}
 	}
 
+	// Get available resources per partition from actual nodes
+	if s.sinfoCommand != "" {
+		availRes, err := s.getAvailableResourcesByPartition()
+		if err == nil {
+			// Merge available resources into limits
+			for i := range limits {
+				if avail, ok := availRes[limits[i].Partition]; ok {
+					// Use available resources as limits if they're set
+					if avail.MaxCpus > 0 {
+						limits[i].MaxCpus = avail.MaxCpus
+					}
+					if avail.MaxMemMB > 0 {
+						limits[i].MaxMemMB = avail.MaxMemMB
+					}
+				}
+			}
+		}
+	}
+
+	// Calculate max GPUs per partition from GPU info
+	gpusByPartition := make(map[string]int)
+	for _, gpu := range gpuInfo {
+		partition := gpu.Partition
+		if partition == "" {
+			partition = "default"
+		}
+		gpusByPartition[partition] += gpu.Total
+	}
+
+	// Add max GPUs to limits
+	for i := range limits {
+		if maxGpus, ok := gpusByPartition[limits[i].Partition]; ok {
+			limits[i].MaxGpus = maxGpus
+		}
+	}
+
 	return limits, nil
+}
+
+// getAvailableResourcesByPartition queries available CPUs and memory per partition
+func (s *SlurmScheduler) getAvailableResourcesByPartition() (map[string]ResourceLimits, error) {
+	// Query sinfo for partition, CPUs, and memory: %R = partition, %c = CPUs, %m = memory (MB)
+	cmd := exec.Command(s.sinfoCommand, "-o", "%R|%c|%m", "--noheader")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, NewClusterError("SLURM", "query available resources", err)
+	}
+
+	// Track max resources per partition
+	resources := make(map[string]ResourceLimits)
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		parts := strings.Split(line, "|")
+		if len(parts) < 3 {
+			continue
+		}
+
+		partition := strings.TrimSpace(strings.TrimSuffix(parts[0], "*"))
+		var cpus int
+		var memMB int64
+		fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &cpus)
+		memMB, _ = parseMemory(strings.TrimSpace(parts[2]))
+
+		// Update max for this partition
+		if existing, ok := resources[partition]; ok {
+			if cpus > existing.MaxCpus {
+				existing.MaxCpus = cpus
+			}
+			if memMB > existing.MaxMemMB {
+				existing.MaxMemMB = memMB
+			}
+			resources[partition] = existing
+		} else {
+			resources[partition] = ResourceLimits{
+				Partition: partition,
+				MaxCpus:   cpus,
+				MaxMemMB:  memMB,
+			}
+		}
+	}
+
+	return resources, nil
 }
 
 // getMaxNodeResources queries SLURM for maximum CPU and memory available per node
