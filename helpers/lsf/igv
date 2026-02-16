@@ -1,0 +1,364 @@
+#!/bin/bash
+# This script helps run an XFCE desktop with IGV launched (noVNC) on LSF clusters.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "$SCRIPT_DIR/.common.sh"
+HELPER_NAME=igv
+
+# Save defaults on first run
+config_init $HELPER_NAME \
+    NCPUS=3 \
+    MEM=12G \
+    TIME=12:00 \
+    GPU= \
+    BASE_IMAGE= \
+    BASE_IMAGE_DISTRO=noble \
+    PORT= \
+    VNC_PASSWD= \
+    DESKTOP_HOME="$SCRATCH/desktop-home" \
+    REUSE_MODE=ask \
+    OVERLAY=env.img
+
+# Load saved defaults
+config_load $HELPER_NAME
+config_require $HELPER_NAME NCPUS MEM TIME OVERLAY DESKTOP_HOME
+# Track whether a password was set in config
+if [ -z "${VNC_PASSWD:-}" ]; then AUTH_CONFIG_SET=false; else AUTH_CONFIG_SET=true; fi
+
+print_help() {
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  -p <port>       Port for noVNC (default: ${PORT:-randomly picked}). Valid range: 1024-65535"
+    echo "  -a <passwd>     VNC password (if empty, one is generated)"
+    echo ""
+    echo "  -c <number>     Number of CPUs to allocate (default: $NCPUS)"
+    echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
+    echo "  -t <time>       Time limit for the job (default: $TIME)"
+    echo "  -g <gpu>        GPU resources (e.g., 1, a100:2). Use -g '' to clear"
+    echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00"
+    echo "  -w              Use current directory as working directory (clears additional overlays)"
+    echo ""
+    echo "  -b <image>      Base image file"
+    echo "  -e <.img>       Writable overlay (default: $OVERLAY)"
+    echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
+    echo ""
+    echo "  config          Show config file path and contents"
+    echo ""
+    echo "State  file: $(state_path $HELPER_NAME)"
+    echo "Config file: $(config_path $HELPER_NAME)"
+    echo "REUSE_MODE: 'always' (auto-reuse), 'ask' (prompt, default), 'never' (always use config)"
+}
+
+case $1 in
+    config)         config_show $HELPER_NAME ;;
+    --help|-h|help) print_help; exit 0 ;;
+    *)              ;;
+esac
+
+# show_and_connect <job_id>
+#   Prints connection info and opens SSH tunnel with port forwarding.
+show_and_connect() {
+    local job_id="$1"
+    print_info "noVNC at ${BLUE}http://localhost:$PORT/vnc.html?autoconnect=1&resize=remote#password=${VNC_PASSWD}${NC}"
+    print_info "If you want to stop it, run: ${YELLOW}bkill $job_id${NC}"
+    exec ssh ${SSH_OPTS} -o ControlMaster=no -L "$PORT:localhost:$PORT" "$USER@$NODE"
+    exit 0
+}
+
+REUSE_PREVIOUS_CWD=false
+_HAS_PREVIOUS_STATE=false
+_STATE_PORT=""
+
+STATE_FILE="$HELPER_STATE_DIR/$HELPER_NAME"
+read_job_state "$STATE_FILE"
+case $? in
+    1) # PENDING
+        print_info "Found a pending $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC})."
+        wait_for_job "$JOB_ID"
+        show_and_connect "$JOB_ID"
+        ;;
+    2) # RUNNING
+        print_info "Found an existing $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC}) running on node ${BLUE}$NODE${NC}."
+        show_and_connect "$JOB_ID"
+        ;;
+    3) # Not running - handle reuse after arg parse
+        _HAS_PREVIOUS_STATE=true
+        _STATE_PORT="${PORT:-}"
+        print_info "The previous $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC}) is no longer running."
+        ;;
+esac
+
+# Track if -o flag is used to clear overlays on first use
+_OVERLAYS_CLEARED=false
+# Record original values for saving in state file (in case of -v option)
+_NCPUS=$NCPUS
+_MEM=$MEM
+_TIME=$TIME
+_GPU=$GPU
+# Track if user wants to change working directory
+NEW_CWD=""
+# track whether -a supplied a password
+AUTH_FLAG_SET=false
+
+while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
+    case ${opt} in
+        c ) NCPUS=$OPTARG; _NCPUS=$OPTARG; _ARG_NCPUS=1 ;;
+        m ) MEM=$OPTARG; _MEM=$OPTARG; _ARG_MEM=1 ;;
+        t ) TIME=$OPTARG; _TIME=$OPTARG; _ARG_TIME=1 ;;
+        g ) GPU=$OPTARG; _GPU=$OPTARG; _ARG_GPU=1 ;;
+        v ) NCPUS=2; MEM=8G; TIME=02:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
+            echo "[MSG] View Mode: NCPUS=2, MEM=8G, TIME=02:00" ;;
+        w )
+            NEW_CWD="$(readlink -f .)"
+            if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
+            ;;
+        p ) PORT=$OPTARG; _ARG_PORT=1 ;;
+        a ) VNC_PASSWD=$OPTARG; AUTH_FLAG_SET=true ;;
+        b ) BASE_IMAGE="$OPTARG"; _ARG_BASE_IMAGE=1 ;;
+        e ) OVERLAY=$OPTARG; _ARG_OVERLAY=1 ;;
+        o ) # First -o clears previous overlays, then builds fresh list
+            if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
+            OVERLAYS="${OVERLAYS:+$OVERLAYS:}$OPTARG"
+            ;;
+        \? ) print_help; exit 1 ;;
+    esac
+done
+
+# Handle reuse mode (after arg parse)
+if [ "$_HAS_PREVIOUS_STATE" = true ]; then
+    handle_reuse_mode "$HELPER_NAME"
+fi
+
+# Handle working directory changes
+if [ -n "$NEW_CWD" ]; then
+    CWD="$NEW_CWD"
+elif [ "$REUSE_PREVIOUS_CWD" = true ]; then
+    cd "$CWD"
+fi
+
+# Resolve port: CLI > state (reuse) > config > state
+if [ -z "${_ARG_PORT:-}" ] && [ "$REUSE_PREVIOUS_CWD" != true ]; then
+    if [ -n "${_CONFIG_PORT:-}" ]; then
+        PORT="$_CONFIG_PORT"
+    elif [ -n "$_STATE_PORT" ]; then
+        PORT="$_STATE_PORT"
+    fi
+fi
+
+# Show settings before job submission (once)
+if [ "$_SPECS_SHOWN" != true ]; then
+    print_msg "Using settings:"
+    print_specs
+    countdown 3
+fi
+
+# If no port specified, pick an available one
+if [ -z "$PORT" ]; then
+    PORT=$(choose_port) || {
+        print_error "Failed to find an available port. Please specify one with -p."
+        exit 1
+    }
+    print_info "Available port :${BLUE}$PORT${NC} auto-selected."
+    print_info "Remember to set up port forwarding: ${CYAN}ssh -L $PORT:localhost:$PORT $USER@login-node${NC}"
+    if ! confirm_default_yes "Proceed with this port?"; then
+        echo "Aborted by user."; exit 1
+    fi
+else
+    validate_port "$PORT"
+fi
+
+#region Sanity Checks
+check_port_available "$PORT"
+check_condatainer
+
+check_and_install_overlays xfce4 igv $OVERLAYS
+
+if [ ! -f "$OVERLAY" ]; then
+    print_info "Overlay ${BLUE}$OVERLAY${NC} not found. Continuing without it."
+    countdown 3
+else
+    check_overlay_integrity "$OVERLAY"
+fi
+#endregion
+
+# Construct arguments for CondaTainer exec
+[ -n "$BASE_IMAGE" ] && BASE_IMAGE_ARG="-b $BASE_IMAGE"
+[ -n "$OVERLAY" ] && [ -f "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
+[ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
+
+# Generate a random password if not provided by config or -a
+if [ "${AUTH_FLAG_SET:-false}" = "false" ] && [ "${AUTH_CONFIG_SET:-false}" = "false" ]; then
+    print_info "No VNC password provided. Generating a random one..."
+    VNC_PASSWD=$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 16 || echo "$(date +%s)-$RANDOM")
+fi
+
+condatainer exec \
+    $BASE_IMAGE_ARG \
+    -o xfce4 \
+    bash -c "echo '$VNC_PASSWD' | vncpasswd -f > $HOME/.vnc/passwd-igv && chmod 600 $HOME/.vnc/passwd-igv"
+
+# Create VNC xstartup script
+mkdir -p $HOME/.vnc
+cat > "$HOME/.vnc/xstartup" <<'EOF'
+#!/bin/sh
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+exec dbus-launch --exit-with-session startxfce4
+EOF
+chmod +x $HOME/.vnc/xstartup
+
+# Change XDG_* dirs to point under "$DESKTOP_HOME" (do not modify $HOME itself)
+# So it will not mess the $HOME dir up
+if [ ! -f "$HOME/.config/user-dirs.dirs" ] || [ ! -d "$DESKTOP_HOME" ]; then
+    mkdir -p "$HOME/.config"
+    cat > "$HOME/.config/user-dirs.dirs" <<EOT
+XDG_DESKTOP_DIR="$DESKTOP_HOME/Desktop"
+XDG_DOCUMENTS_DIR="$DESKTOP_HOME/Documents"
+XDG_DOWNLOAD_DIR="$DESKTOP_HOME/Downloads"
+XDG_MUSIC_DIR="$DESKTOP_HOME/Music"
+XDG_PICTURES_DIR="$DESKTOP_HOME/Pictures"
+XDG_PUBLICSHARE_DIR="$DESKTOP_HOME/Public"
+XDG_TEMPLATES_DIR="$DESKTOP_HOME/Templates"
+XDG_VIDEOS_DIR="$DESKTOP_HOME/Videos"
+EOT
+    mkdir -p "$DESKTOP_HOME"
+    mkdir -p "$DESKTOP_HOME"/{Desktop,Documents,Downloads,Music,Pictures,Public,Templates,Videos}
+fi
+
+LSF_RUSAGE="rusage[mem=${MEM}]"
+if [ -n "$GPU" ]; then
+    if [[ "$GPU" == *":"* ]]; then
+        PART1="${GPU%:*}"
+        PART2="${GPU#*:}"
+        if [[ "$PART1" =~ ^[0-9]+$ ]]; then
+            GPU_NUM="$PART1"
+            GPU_MODEL="$PART2"
+        else
+            GPU_NUM="$PART2"
+            GPU_MODEL="$PART1"
+        fi
+    else
+        GPU_NUM="$GPU"
+        GPU_MODEL=""
+    fi
+
+    if [ -n "$GPU_MODEL" ]; then
+        LSF_GPU="#BSUB -gpu \"num=${GPU_NUM}:gmodel=${GPU_MODEL}:mode=exclusive_process\""
+    else
+        LSF_GPU="#BSUB -gpu \"num=${GPU_NUM}:mode=exclusive_process\""
+    fi
+else
+    LSF_GPU=""
+fi
+
+# Normalize TIME for LSF (LSF accepts HH:MM or minutes; strip seconds if present)
+LSF_TIME="$TIME"
+if [[ "$LSF_TIME" == *:*:* ]]; then
+    ORIG_TIME="$LSF_TIME"
+    LSF_TIME="${LSF_TIME%:*}"
+    print_info "Converting TIME '${ORIG_TIME}' → '${LSF_TIME}' (HH:MM only)."
+fi
+
+LSF_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.lsf"
+
+cat <<EOT > "$LSF_SCRIPT_PATH"
+#!/bin/bash
+#BSUB -J $HELPER_NAME
+#BSUB -n $NCPUS
+#BSUB -R "$LSF_RUSAGE"
+#BSUB -R "span[hosts=1]"
+#BSUB -W $LSF_TIME
+#BSUB -o $LOG_DIR/$HELPER_NAME-%J.log
+${LSF_GPU:+$LSF_GPU}
+
+CLEAN_ID=\$(echo \$LSB_JOBID | cut -d'.' -f1)
+CUSTOM_LOG="$LOG_DIR/${HELPER_NAME}-\${CLEAN_ID}.log"
+exec &> "\$CUSTOM_LOG"
+
+while ! grep -q "^JOB_ID=" "$STATE_FILE" 2>/dev/null; do sleep 1; done
+echo "NODE=\$(hostname)" >> "$STATE_FILE"
+
+DISPLAY_NUM=""
+for i in \$(seq 10 99); do
+    if [ ! -f /tmp/.X\${i}-lock ]; then
+        DISPLAY_NUM=\$i
+        break
+    fi
+done
+if [ -z "\$DISPLAY_NUM" ]; then
+    echo "[ERR] No available display number found on compute node." >&2
+    exit 1
+fi
+export DISPLAY=:\$DISPLAY_NUM
+VNC_PORT=\$((5900 + DISPLAY_NUM))
+
+export XDG_RUNTIME_DIR=$SCRATCH/.xdg_runtime
+mkdir -p \$XDG_RUNTIME_DIR
+
+condatainer exec \
+    $BASE_IMAGE_ARG \
+    --env DISPLAY=\$DISPLAY \
+    --bind \$XDG_RUNTIME_DIR \
+    --bind $DESKTOP_HOME \
+    -o igv \
+    -o xfce4 \
+    $OVERLAYS_ARG \
+    $OVERLAY_ARG --writable \
+    bash -c "
+cleanup() {
+    vncserver -kill \$DISPLAY
+    rm -f /tmp/.X\${DISPLAY_NUM}-lock
+    rm -f /tmp/.X11-unix/X\${DISPLAY_NUM}
+    exit 0
+}
+trap cleanup SIGINT SIGTERM
+
+# Copy the schemas to a writable location and compile them
+mkdir -p $SCRATCH/.local/share/glib-2.0/schemas
+cp -r /usr/share/glib-2.0/schemas/* $SCRATCH/.local/share/glib-2.0/schemas/ 2>/dev/null || true
+glib-compile-schemas $SCRATCH/.local/share/glib-2.0/schemas/
+export XDG_DATA_DIRS="$SCRATCH/.local/share:/usr/local/share:/usr/share"
+
+# Update user dirs (Desktop, Documents, etc.) to point to the new location
+xdg-user-dirs-update
+
+echo \"Starting websockify for noVNC on port $PORT...\"
+websockify --web /usr/share/novnc localhost:$PORT localhost:\$VNC_PORT &
+
+echo \"Starting XFCE desktop environment on display \$DISPLAY (port \$VNC_PORT)...\"
+vncserver \$DISPLAY \
+    -geometry 1600x900 -depth 24 \
+    -rfbport \$VNC_PORT \
+    -rfbauth $HOME/.vnc/passwd-igv \
+    -xstartup $HOME/.vnc/xstartup
+
+echo \"Starting IGV...\"
+igv
+
+echo \"Setup complete. VNC server running on display \$DISPLAY (port \$VNC_PORT).\"
+sleep infinity
+"
+EOT
+
+rm -f "$STATE_FILE"
+LSF_OUTPUT=$(bsub < "$LSF_SCRIPT_PATH" 2>&1)
+LSF_JOB_ID=$(printf '%s' "$LSF_OUTPUT" | awk -F'[<>]' '/Job/ {print $2; exit}')
+
+cat > "$STATE_FILE" <<RUNSTATE
+JOB_ID=$LSF_JOB_ID
+NCPUS=$_NCPUS
+MEM=$_MEM
+TIME=$_TIME
+GPU=$_GPU
+PORT=$PORT
+CWD=$CWD
+VNC_PASSWD="$VNC_PASSWD"
+BASE_IMAGE="$BASE_IMAGE"
+OVERLAY="$OVERLAY"
+OVERLAYS="$OVERLAYS"
+RUNSTATE
+
+wait_for_job "$LSF_JOB_ID"
+rm "$LSF_SCRIPT_PATH" # Clean up when success
+show_and_connect "$LSF_JOB_ID"
