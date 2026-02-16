@@ -36,6 +36,7 @@ func formatDuration(d time.Duration) string {
 }
 
 var schedulerShowPartitions bool
+var schedulerShowQueues bool
 var schedulerShowCpuOnly bool
 var schedulerShowGpuOnly bool
 
@@ -48,7 +49,7 @@ Shows scheduler type (SLURM, PBS, etc.), binary path, version, and availability 
 Use -p to show per-partition resource limits.
 Use --cpu or --gpu to filter by node type.`,
 	Example: `  condatainer scheduler           # Show scheduler information
-  condatainer scheduler -p        # Show per-partition limits
+  condatainer scheduler -p        # Show per-partition limits (or use -q for queues)
   condatainer scheduler --gpu     # Show only GPU partitions
   condatainer scheduler -p --cpu  # Show per-partition limits for CPU-only partitions`,
 	Run: runScheduler,
@@ -57,13 +58,14 @@ Use --cpu or --gpu to filter by node type.`,
 func init() {
 	rootCmd.AddCommand(schedulerCmd)
 	schedulerCmd.Flags().BoolVarP(&schedulerShowPartitions, "partitions", "p", false, "Show per-partition resource limits")
+	schedulerCmd.Flags().BoolVarP(&schedulerShowQueues, "queue", "q", false, "Show per-queue resource limits (alias for -p)")
 	schedulerCmd.Flags().BoolVar(&schedulerShowCpuOnly, "cpu", false, "Show only CPU-only partitions (no GPUs)")
 	schedulerCmd.Flags().BoolVar(&schedulerShowGpuOnly, "gpu", false, "Show only GPU partitions")
 }
 
 func runScheduler(cmd *cobra.Command, args []string) {
-	// Auto-enable -p if --cpu or --gpu is set
-	if schedulerShowCpuOnly || schedulerShowGpuOnly {
+	// Auto-enable -p if --cpu or --gpu is set, or if -q is used
+	if schedulerShowCpuOnly || schedulerShowGpuOnly || schedulerShowQueues {
 		schedulerShowPartitions = true
 	}
 
