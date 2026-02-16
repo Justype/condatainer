@@ -168,7 +168,7 @@ build_overlays_arg() {
 
 # ============= Prompt Functions =============
 
-# confirm_default_yes <prompt>
+# confirm_default_yes <prompt> <prompt_hint>
 #   Prompts the user with [Y/n]. Returns 0 if yes (default), 1 if no.
 confirm_default_yes() {
     local prompt="$1"
@@ -181,12 +181,13 @@ confirm_default_yes() {
     esac
 }
 
-# confirm_default_no <prompt>
+# confirm_default_no <prompt> <prompt_hint>
 #   Prompts the user with [y/N]. Returns 0 if yes, 1 if no (default).
 confirm_default_no() {
     local prompt="$1"
+    local prompt_hint="${2:-y/N}"
     local resp
-    read -p "[MSG] $prompt [y/N] " resp
+    read -p "[MSG] $prompt [$prompt_hint] " resp
     case "$resp" in
         [Yy]*) return 0 ;;
         *) return 1 ;;

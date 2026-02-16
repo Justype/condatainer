@@ -43,6 +43,12 @@ config_load() {
     if [ -f "$f" ]; then
         source "$f"
         CWD=$(readlink -f .)
+        # Auto-save config defaults with _CONFIG_ prefix for comparison in print_specs
+        local key
+        while IFS='=' read -r key _; do
+            [[ -z "$key" || "$key" =~ ^# ]] && continue
+            printf -v "_CONFIG_${key}" '%s' "${!key}"
+        done < "$f"
         return 0
     fi
     return 1
@@ -162,24 +168,26 @@ build_overlays_arg() {
 
 # ============= Prompt Functions =============
 
-# confirm_default_yes <prompt>
+# confirm_default_yes <prompt> <prompt_hint>
 #   Prompts the user with [Y/n]. Returns 0 if yes (default), 1 if no.
 confirm_default_yes() {
     local prompt="$1"
+    local prompt_hint="${2:-Y/n}"
     local resp
-    read -p "[MSG] $prompt [Y/n] " resp
+    read -p "[MSG] $prompt [$prompt_hint] " resp
     case "$resp" in
         ""|[Yy]*) return 0 ;;
         *) return 1 ;;
     esac
 }
 
-# confirm_default_no <prompt>
+# confirm_default_no <prompt> <prompt_hint>
 #   Prompts the user with [y/N]. Returns 0 if yes, 1 if no (default).
 confirm_default_no() {
     local prompt="$1"
+    local prompt_hint="${2:-y/N}"
     local resp
-    read -p "[MSG] $prompt [y/N] " resp
+    read -p "[MSG] $prompt [$prompt_hint] " resp
     case "$resp" in
         [Yy]*) return 0 ;;
         *) return 1 ;;
