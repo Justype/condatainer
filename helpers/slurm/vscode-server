@@ -225,7 +225,7 @@ ${GPU_SBATCH:+$GPU_SBATCH}
 # Remove the sbatch script after job submission
 rm $SBATCH_SCRIPT_PATH
 
-echo "NODE=\$(hostname)" >> $STATE_FILE
+echo "NODE=\$(hostname)" >> "$STATE_FILE"
 
 condatainer exec \
     $BASE_IMAGE_ARG \
