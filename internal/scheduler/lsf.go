@@ -129,7 +129,9 @@ func (l *LsfScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) 
 	defer file.Close()
 
 	specs := &ScriptSpecs{
-		Ncpus:    4, // default
+		Ncpus:    4, // default CPUs per task
+		Ntasks:   1, // default: single task
+		Nodes:    1, // default: single node
 		RawFlags: make([]string, 0),
 	}
 
@@ -246,8 +248,33 @@ func (l *LsfScheduler) parseBsubFlag(flag string, specs *ScriptSpecs) error {
 }
 
 // parseLsfResource parses LSF -R resource requirement strings
-// Supports: rusage[mem=N], rusage[ngpus_physical=N], span[hosts=1], etc.
+// Supports: rusage[mem=N], rusage[ngpus_physical=N], span[hosts=N], etc.
 func (l *LsfScheduler) parseLsfResource(resStr string, specs *ScriptSpecs) {
+	// Look for span[hosts=N] block
+	spanIdx := strings.Index(resStr, "span[")
+	if spanIdx >= 0 {
+		start := spanIdx + len("span[")
+		end := strings.Index(resStr[start:], "]")
+		if end >= 0 {
+			spanContent := resStr[start : start+end]
+			pairs := strings.FieldsFunc(spanContent, func(r rune) bool {
+				return r == ':' || r == ','
+			})
+			for _, pair := range pairs {
+				kv := strings.SplitN(pair, "=", 2)
+				if len(kv) == 2 {
+					key := strings.TrimSpace(kv[0])
+					value := strings.TrimSpace(kv[1])
+					if key == "hosts" {
+						if n, err := strconv.Atoi(value); err == nil {
+							specs.Nodes = n
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Look for rusage[...] block
 	rusageIdx := strings.Index(resStr, "rusage[")
 	if rusageIdx < 0 {
@@ -331,9 +358,31 @@ func parseLsfGpuDirective(gpuStr string) *GpuSpec {
 	return spec
 }
 
+// stripSpanBlock removes span[...] from an LSF resource string,
+// preserving any other resource requirements (e.g., rusage[...]).
+func stripSpanBlock(s string) string {
+	idx := strings.Index(s, "span[")
+	if idx < 0 {
+		return s
+	}
+	end := strings.Index(s[idx:], "]")
+	if end < 0 {
+		return s
+	}
+	return strings.TrimSpace(s[:idx] + s[idx+end+1:])
+}
+
 // CreateScriptWithSpec generates an LSF batch script
 func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) (string, error) {
 	specs := jobSpec.Specs
+
+	// Normalize node/task defaults
+	if specs.Nodes <= 0 {
+		specs.Nodes = 1
+	}
+	if specs.Ntasks <= 0 {
+		specs.Ntasks = 1
+	}
 
 	// Create output directory if specified
 	if outputDir != "" {
@@ -392,6 +441,24 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		if specs.Time > 0 && strings.HasPrefix(flag, "-W ") {
 			continue
 		}
+		// Skip -n flags - we'll regenerate from specs.Ncpus
+		if strings.HasPrefix(flag, "-n ") {
+			continue
+		}
+		// Handle -R flags: strip span[...] portion, keep rusage/other parts
+		if strings.HasPrefix(flag, "-R ") {
+			resStr := strings.TrimSpace(strings.TrimPrefix(flag, "-R"))
+			resStr = strings.Trim(resStr, "\"'")
+			if strings.Contains(resStr, "span[") {
+				cleaned := stripSpanBlock(resStr)
+				cleaned = strings.TrimSpace(cleaned)
+				if cleaned == "" {
+					continue // nothing left after stripping span
+				}
+				fmt.Fprintf(writer, "#BSUB -R \"%s\"\n", cleaned)
+				continue
+			}
+		}
 		fmt.Fprintf(writer, "#BSUB %s\n", flag)
 	}
 
@@ -416,6 +483,14 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		fmt.Fprintf(writer, "#BSUB -u %s\n", specs.MailUser)
 	}
 
+	// Generate CPU count
+	if specs.Ncpus > 0 {
+		fmt.Fprintf(writer, "#BSUB -n %d\n", specs.Ncpus)
+	}
+
+	// Force node allocation via span
+	fmt.Fprintf(writer, "#BSUB -R \"span[hosts=%d]\"\n", specs.Nodes)
+
 	// Add walltime if specified
 	if specs.Time > 0 {
 		fmt.Fprintf(writer, "#BSUB -W %s\n", formatLsfTime(specs.Time))
@@ -431,8 +506,18 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	fmt.Fprintln(writer, "echo \"========================================\"")
 	fmt.Fprintln(writer, "echo \"Job ID:    $LSB_JOBID\"")
 	fmt.Fprintf(writer, "echo \"Job Name:  %s\"\n", specs.JobName)
+	if specs.Nodes > 1 {
+		fmt.Fprintf(writer, "echo \"Nodes:     %d\"\n", specs.Nodes)
+	}
+	if specs.Ntasks > 1 {
+		fmt.Fprintf(writer, "echo \"Tasks:     %d\"\n", specs.Ntasks)
+	}
 	if specs.Ncpus > 0 {
-		fmt.Fprintf(writer, "echo \"CPUs:      %d\"\n", specs.Ncpus)
+		if specs.Ntasks > 1 || specs.Nodes > 1 {
+			fmt.Fprintf(writer, "echo \"CPUs/Task: %d\"\n", specs.Ncpus)
+		} else {
+			fmt.Fprintf(writer, "echo \"CPUs:      %d\"\n", specs.Ncpus)
+		}
 	}
 	if specs.MemMB > 0 {
 		fmt.Fprintf(writer, "echo \"Memory:    %d MB\"\n", specs.MemMB)

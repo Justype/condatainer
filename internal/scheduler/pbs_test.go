@@ -783,6 +783,104 @@ echo "Running job"
 	}
 }
 
+func TestPbsNodeTaskParsing(t *testing.T) {
+	tests := []struct {
+		name       string
+		lines      []string
+		wantNodes  int
+		wantNtasks int
+		wantNcpus  int
+	}{
+		{
+			name: "select with mpiprocs",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l select=4:ncpus=8:mpiprocs=2:mem=8gb",
+			},
+			wantNodes:  4,
+			wantNtasks: 8, // 4 nodes * 2 mpiprocs
+			wantNcpus:  8,
+		},
+		{
+			name: "select without mpiprocs",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l select=2:ncpus=4",
+			},
+			wantNodes:  2,
+			wantNtasks: 1, // default, no mpiprocs
+			wantNcpus:  4,
+		},
+		{
+			name: "nodes format",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l nodes=3:ppn=8",
+			},
+			wantNodes:  3,
+			wantNtasks: 1, // default, nodes= doesn't set ntasks
+			wantNcpus:  8,
+		},
+		{
+			name: "select=1 single node",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l select=1:ncpus=4:mem=16gb",
+			},
+			wantNodes:  1,
+			wantNtasks: 1,
+			wantNcpus:  4,
+		},
+		{
+			name: "defaults no resource directives",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -N testjob",
+			},
+			wantNodes:  1,
+			wantNtasks: 1,
+			wantNcpus:  4, // default
+		},
+		{
+			name: "select with mpiprocs and ngpus",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l select=2:ncpus=16:mpiprocs=4:mem=32gb:ngpus=1",
+			},
+			wantNodes:  2,
+			wantNtasks: 8, // 2 nodes * 4 mpiprocs
+			wantNcpus:  16,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			scriptPath := filepath.Join(tmpDir, "test.sh")
+			content := strings.Join(tt.lines, "\n")
+			if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
+				t.Fatalf("Failed to create test script: %v", err)
+			}
+
+			pbs := newTestPbsScheduler()
+			specs, err := pbs.ReadScriptSpecs(scriptPath)
+			if err != nil {
+				t.Fatalf("Failed to parse script: %v", err)
+			}
+
+			if specs.Nodes != tt.wantNodes {
+				t.Errorf("Nodes = %d; want %d", specs.Nodes, tt.wantNodes)
+			}
+			if specs.Ntasks != tt.wantNtasks {
+				t.Errorf("Ntasks = %d; want %d", specs.Ntasks, tt.wantNtasks)
+			}
+			if specs.Ncpus != tt.wantNcpus {
+				t.Errorf("Ncpus = %d; want %d", specs.Ncpus, tt.wantNcpus)
+			}
+		})
+	}
+}
+
 func TestPbsGetJobResources(t *testing.T) {
 	sched := &PbsScheduler{}
 
@@ -808,6 +906,39 @@ func TestPbsGetJobResources(t *testing.T) {
 		}
 		if res.Ngpus == nil || *res.Ngpus != 3 {
 			t.Errorf("Ngpus = %v; want 3", res.Ngpus)
+		}
+	})
+
+	t.Run("nodes and tasks", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("PBS_JOBID", "67890.pbs-server")
+		t.Setenv("PBS_NCPUS", "8")
+		t.Setenv("PBS_NUM_NODES", "4")
+		t.Setenv("PBS_NP", "16")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Nodes == nil || *res.Nodes != 4 {
+			t.Errorf("Nodes = %v; want 4", res.Nodes)
+		}
+		if res.Ntasks == nil || *res.Ntasks != 16 {
+			t.Errorf("Ntasks = %v; want 16", res.Ntasks)
+		}
+	})
+
+	t.Run("PBS_TASKNUM fallback", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("PBS_JOBID", "67890")
+		t.Setenv("PBS_TASKNUM", "8")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Ntasks == nil || *res.Ntasks != 8 {
+			t.Errorf("Ntasks = %v; want 8", res.Ntasks)
 		}
 	})
 

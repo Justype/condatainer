@@ -698,6 +698,64 @@ func TestHTCondorTimeParsing(t *testing.T) {
 	}
 }
 
+func TestHTCondorDefaultNodesTasks(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+	}{
+		{
+			name: "with resources",
+			lines: []string{
+				"#!/bin/bash",
+				"#CONDOR request_cpus = 8",
+				"#CONDOR request_memory = 16384",
+			},
+		},
+		{
+			name: "no directives",
+			lines: []string{
+				"#!/bin/bash",
+				"echo hello",
+			},
+		},
+		{
+			name: "full job",
+			lines: []string{
+				"#!/bin/bash",
+				"#CONDOR request_cpus = 16",
+				"#CONDOR request_memory = 32768",
+				"#CONDOR request_gpus = 2",
+				"#CONDOR +MaxRuntime = 3600",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			scriptPath := filepath.Join(tmpDir, "test.sh")
+			content := strings.Join(tt.lines, "\n")
+			if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
+				t.Fatalf("Failed to create test script: %v", err)
+			}
+
+			htcondor := newTestHTCondorScheduler()
+			specs, err := htcondor.ReadScriptSpecs(scriptPath)
+			if err != nil {
+				t.Fatalf("Failed to parse script: %v", err)
+			}
+
+			// HTCondor is inherently single-node, so Nodes and Ntasks should always be 1
+			if specs.Nodes != 1 {
+				t.Errorf("Nodes = %d; want 1", specs.Nodes)
+			}
+			if specs.Ntasks != 1 {
+				t.Errorf("Ntasks = %d; want 1", specs.Ntasks)
+			}
+		})
+	}
+}
+
 func TestHTCondorIsAvailable(t *testing.T) {
 	t.Run("not in job", func(t *testing.T) {
 		clearJobEnvVars(t)

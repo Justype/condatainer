@@ -51,6 +51,10 @@ func TestLsfCreateScriptUsesOutputDir(t *testing.T) {
 	if !strings.Contains(string(content), fmt.Sprintf("-o %s", logPath)) {
 		t.Errorf("Generated script does not contain expected output path %s\nScript:\n%s", logPath, string(content))
 	}
+	// Verify single-node enforcement via span
+	if !strings.Contains(string(content), `span[hosts=1]`) {
+		t.Errorf("Generated script does not contain span[hosts=1]\nScript:\n%s", string(content))
+	}
 }
 
 func TestLsfEmailParsing(t *testing.T) {
@@ -762,6 +766,279 @@ func TestLsfRusageParsing(t *testing.T) {
 				t.Errorf("Gpu = %+v; want nil", specs.Gpu)
 			}
 		})
+	}
+}
+
+func TestLsfSpanHostsParsing(t *testing.T) {
+	tests := []struct {
+		name      string
+		lines     []string
+		wantNodes int
+	}{
+		{
+			name: "span hosts=2 with rusage",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 8",
+				`#BSUB -R "span[hosts=2] rusage[mem=8192]"`,
+			},
+			wantNodes: 2,
+		},
+		{
+			name: "span hosts=1",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 4",
+				`#BSUB -R "span[hosts=1]"`,
+			},
+			wantNodes: 1,
+		},
+		{
+			name: "no span directive",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 16",
+				`#BSUB -R "rusage[mem=4096]"`,
+			},
+			wantNodes: 1, // default
+		},
+		{
+			name: "span hosts=4 on separate line",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 32",
+				`#BSUB -R "span[hosts=4]"`,
+				`#BSUB -R "rusage[mem=16384]"`,
+			},
+			wantNodes: 4,
+		},
+		{
+			name: "no resource directives at all",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -J testjob",
+			},
+			wantNodes: 1, // default
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			scriptPath := filepath.Join(tmpDir, "test.sh")
+			content := strings.Join(tt.lines, "\n")
+			if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
+				t.Fatalf("Failed to create test script: %v", err)
+			}
+
+			lsf := newTestLsfScheduler()
+			specs, err := lsf.ReadScriptSpecs(scriptPath)
+			if err != nil {
+				t.Fatalf("Failed to parse script: %v", err)
+			}
+
+			if specs.Nodes != tt.wantNodes {
+				t.Errorf("Nodes = %d; want %d", specs.Nodes, tt.wantNodes)
+			}
+			// Ntasks should always be 1 (default) for LSF
+			if specs.Ntasks != 1 {
+				t.Errorf("Ntasks = %d; want 1", specs.Ntasks)
+			}
+		})
+	}
+}
+
+func TestLsfScriptGenerationNodesCpus(t *testing.T) {
+	tests := []struct {
+		name         string
+		specs        *ScriptSpecs
+		wantSpanHost string // expected span[hosts=N]
+		wantNcpus    string // expected -n N
+	}{
+		{
+			name: "default single node",
+			specs: &ScriptSpecs{
+				Ncpus:    4,
+				RawFlags: []string{},
+			},
+			wantSpanHost: `span[hosts=1]`,
+			wantNcpus:    "#BSUB -n 4",
+		},
+		{
+			name: "multi-node",
+			specs: &ScriptSpecs{
+				Ncpus:    8,
+				Nodes:    2,
+				RawFlags: []string{},
+			},
+			wantSpanHost: `span[hosts=2]`,
+			wantNcpus:    "#BSUB -n 8",
+		},
+		{
+			name: "raw span stripped and regenerated",
+			specs: &ScriptSpecs{
+				Ncpus:    16,
+				Nodes:    3,
+				RawFlags: []string{`-R "span[hosts=3] rusage[mem=4096]"`},
+			},
+			wantSpanHost: `span[hosts=3]`,
+			wantNcpus:    "#BSUB -n 16",
+		},
+		{
+			name: "raw -n stripped and regenerated",
+			specs: &ScriptSpecs{
+				Ncpus:    8,
+				Nodes:    1,
+				RawFlags: []string{"-n 8"},
+			},
+			wantSpanHost: `span[hosts=1]`,
+			wantNcpus:    "#BSUB -n 8",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			lsf := newTestLsfScheduler()
+
+			jobSpec := &JobSpec{
+				Name:    "test_job",
+				Command: "echo 'test'",
+				Specs:   tt.specs,
+			}
+
+			scriptPath, err := lsf.CreateScriptWithSpec(jobSpec, tmpDir)
+			if err != nil {
+				t.Fatalf("Failed to create script: %v", err)
+			}
+
+			content, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatalf("Failed to read generated script: %v", err)
+			}
+			scriptContent := string(content)
+
+			// Check span directive
+			if !strings.Contains(scriptContent, tt.wantSpanHost) {
+				t.Errorf("Script missing expected span: %q\nScript:\n%s", tt.wantSpanHost, scriptContent)
+			}
+
+			// Check -n directive
+			if !strings.Contains(scriptContent, tt.wantNcpus) {
+				t.Errorf("Script missing expected -n: %q\nScript:\n%s", tt.wantNcpus, scriptContent)
+			}
+
+			// Verify no duplicate span directives
+			spanCount := strings.Count(scriptContent, "span[hosts=")
+			if spanCount != 1 {
+				t.Errorf("span[hosts=] appears %d times; want 1\nScript:\n%s", spanCount, scriptContent)
+			}
+
+			// Verify no duplicate -n directives
+			nCount := strings.Count(scriptContent, "#BSUB -n ")
+			if nCount != 1 {
+				t.Errorf("#BSUB -n appears %d times; want 1\nScript:\n%s", nCount, scriptContent)
+			}
+		})
+	}
+}
+
+func TestLsfScriptPreservesRusageWithSpan(t *testing.T) {
+	tmpDir := t.TempDir()
+	lsf := newTestLsfScheduler()
+
+	jobSpec := &JobSpec{
+		Name:    "test_job",
+		Command: "echo 'test'",
+		Specs: &ScriptSpecs{
+			Ncpus:    8,
+			Nodes:    2,
+			MemMB:    4, // 4096 KB = 4 MB parsed from rusage
+			RawFlags: []string{`-R "span[hosts=2] rusage[mem=4096]"`},
+		},
+	}
+
+	scriptPath, err := lsf.CreateScriptWithSpec(jobSpec, tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to create script: %v", err)
+	}
+
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("Failed to read script: %v", err)
+	}
+	scriptContent := string(content)
+
+	// Rusage should be preserved (span stripped, rusage kept)
+	if !strings.Contains(scriptContent, "rusage[mem=4096]") {
+		t.Errorf("Script should preserve rusage after stripping span\nScript:\n%s", scriptContent)
+	}
+
+	// Span should be regenerated
+	if !strings.Contains(scriptContent, `span[hosts=2]`) {
+		t.Errorf("Script should contain regenerated span[hosts=2]\nScript:\n%s", scriptContent)
+	}
+}
+
+func TestLsfNodeTaskRoundTrip(t *testing.T) {
+	lsf := newTestLsfScheduler()
+
+	// Create a script with span and -n directives
+	lines := []string{
+		"#!/bin/bash",
+		"#BSUB -J roundtrip_test",
+		"#BSUB -n 8",
+		`#BSUB -R "span[hosts=2]"`,
+		"#BSUB -W 02:00",
+		"echo hello",
+	}
+	tmpFile := filepath.Join(t.TempDir(), "input.sh")
+	os.WriteFile(tmpFile, []byte(strings.Join(lines, "\n")), 0644)
+
+	// Parse
+	specs, err := lsf.ReadScriptSpecs(tmpFile)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if specs.Nodes != 2 {
+		t.Fatalf("parse Nodes = %d; want 2", specs.Nodes)
+	}
+	if specs.Ncpus != 8 {
+		t.Fatalf("parse Ncpus = %d; want 8", specs.Ncpus)
+	}
+
+	// Generate
+	outputDir := t.TempDir()
+	jobSpec := &JobSpec{
+		Name:    "roundtrip_test",
+		Command: "echo hello",
+		Specs:   specs,
+	}
+	scriptPath, err := lsf.CreateScriptWithSpec(jobSpec, outputDir)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	// Re-parse generated script
+	specs2, err := lsf.ReadScriptSpecs(scriptPath)
+	if err != nil {
+		t.Fatalf("re-parse failed: %v", err)
+	}
+	if specs2.Nodes != 2 {
+		t.Errorf("round-trip Nodes = %d; want 2", specs2.Nodes)
+	}
+	if specs2.Ncpus != 8 {
+		t.Errorf("round-trip Ncpus = %d; want 8", specs2.Ncpus)
+	}
+
+	// Check no duplicates in generated script
+	content, _ := os.ReadFile(scriptPath)
+	script := string(content)
+	if strings.Count(script, "span[hosts=") != 1 {
+		t.Error("span[hosts=] should appear exactly once")
+	}
+	if strings.Count(script, "#BSUB -n ") != 1 {
+		t.Error("#BSUB -n should appear exactly once")
 	}
 }
 

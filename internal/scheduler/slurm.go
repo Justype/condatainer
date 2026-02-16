@@ -133,9 +133,14 @@ func (s *SlurmScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error
 	defer file.Close()
 
 	specs := &ScriptSpecs{
-		Ncpus:    4, // default
+		Ncpus:    4, // default CPUs per task
+		Ntasks:   1, // default: single task
+		Nodes:    1, // default: single node
 		RawFlags: make([]string, 0),
 	}
+
+	var ntasksPerNode int
+	var hasExplicitNtasks bool
 
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
@@ -148,6 +153,18 @@ func (s *SlurmScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error
 			flag := strings.TrimSpace(matches[1])
 			specs.RawFlags = append(specs.RawFlags, flag)
 
+			// Track --ntasks-per-node separately (needs post-processing with Nodes)
+			if strings.HasPrefix(flag, "--ntasks-per-node=") {
+				if _, err := fmt.Sscanf(flag, "--ntasks-per-node=%d", &ntasksPerNode); err != nil {
+					return nil, NewParseError("SLURM", lineNum, line, "invalid --ntasks-per-node value")
+				}
+			}
+
+			// Track explicit --ntasks to avoid overwriting with ntasks-per-node
+			if strings.HasPrefix(flag, "--ntasks=") || strings.HasPrefix(flag, "-n ") {
+				hasExplicitNtasks = true
+			}
+
 			// Parse common SBATCH options
 			if err := s.parseSbatchFlag(flag, specs); err != nil {
 				return nil, NewParseError("SLURM", lineNum, line, err.Error())
@@ -157,6 +174,11 @@ func (s *SlurmScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error
 
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("error reading script: %w", err)
+	}
+
+	// Post-process: compute Ntasks from ntasks-per-node if --ntasks was not explicitly set
+	if ntasksPerNode > 0 && !hasExplicitNtasks {
+		specs.Ntasks = specs.Nodes * ntasksPerNode
 	}
 
 	return specs, nil
@@ -171,7 +193,7 @@ func (s *SlurmScheduler) parseSbatchFlag(flag string, specs *ScriptSpecs) error 
 		specs.JobName = strings.TrimSpace(strings.TrimPrefix(flag, "-J"))
 	}
 
-	// CPUs
+	// CPUs per task
 	if strings.HasPrefix(flag, "--cpus-per-task=") {
 		if _, err := fmt.Sscanf(flag, "--cpus-per-task=%d", &specs.Ncpus); err != nil {
 			return fmt.Errorf("invalid cpus-per-task value: %w", err)
@@ -179,6 +201,28 @@ func (s *SlurmScheduler) parseSbatchFlag(flag string, specs *ScriptSpecs) error 
 	} else if strings.HasPrefix(flag, "-c ") {
 		if _, err := fmt.Sscanf(flag, "-c %d", &specs.Ncpus); err != nil {
 			return fmt.Errorf("invalid -c value: %w", err)
+		}
+	}
+
+	// Nodes
+	if strings.HasPrefix(flag, "--nodes=") {
+		if _, err := fmt.Sscanf(flag, "--nodes=%d", &specs.Nodes); err != nil {
+			return fmt.Errorf("invalid --nodes value: %w", err)
+		}
+	} else if strings.HasPrefix(flag, "-N ") {
+		if _, err := fmt.Sscanf(flag, "-N %d", &specs.Nodes); err != nil {
+			return fmt.Errorf("invalid -N value: %w", err)
+		}
+	}
+
+	// Ntasks
+	if strings.HasPrefix(flag, "--ntasks=") {
+		if _, err := fmt.Sscanf(flag, "--ntasks=%d", &specs.Ntasks); err != nil {
+			return fmt.Errorf("invalid --ntasks value: %w", err)
+		}
+	} else if strings.HasPrefix(flag, "-n ") {
+		if _, err := fmt.Sscanf(flag, "-n %d", &specs.Ntasks); err != nil {
+			return fmt.Errorf("invalid -n value: %w", err)
 		}
 	}
 
@@ -328,6 +372,14 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	// Write shebang
 	fmt.Fprintln(writer, "#!/bin/bash")
 
+	// Normalize node/task defaults
+	if specs.Nodes <= 0 {
+		specs.Nodes = 1
+	}
+	if specs.Ntasks <= 0 {
+		specs.Ntasks = 1
+	}
+
 	// Write parsed SBATCH directives with overrides
 	for _, flag := range specs.RawFlags {
 		// Skip output/error flags if we're overriding them
@@ -349,6 +401,19 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 		if specs.JobName != "" && (strings.HasPrefix(flag, "--job-name=") || strings.HasPrefix(flag, "-J ")) {
 			continue
 		}
+		// Skip node/task/cpu flags - we'll regenerate them
+		if strings.HasPrefix(flag, "--nodes=") || strings.HasPrefix(flag, "-N ") {
+			continue
+		}
+		if strings.HasPrefix(flag, "--ntasks=") || strings.HasPrefix(flag, "-n ") {
+			continue
+		}
+		if strings.HasPrefix(flag, "--ntasks-per-node=") {
+			continue
+		}
+		if strings.HasPrefix(flag, "--cpus-per-task=") || strings.HasPrefix(flag, "-c ") {
+			continue
+		}
 		fmt.Fprintf(writer, "#SBATCH %s\n", flag)
 	}
 
@@ -360,6 +425,13 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	// Add custom stdout if specified (stderr is not used - output goes to stdout)
 	if specs.Stdout != "" {
 		fmt.Fprintf(writer, "#SBATCH --output=%s\n", specs.Stdout)
+	}
+
+	// Add node/task/cpu directives
+	fmt.Fprintf(writer, "#SBATCH --nodes=%d\n", specs.Nodes)
+	fmt.Fprintf(writer, "#SBATCH --ntasks=%d\n", specs.Ntasks)
+	if specs.Ncpus > 0 {
+		fmt.Fprintf(writer, "#SBATCH --cpus-per-task=%d\n", specs.Ncpus)
 	}
 
 	// Add email notifications if specified
@@ -393,8 +465,14 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	fmt.Fprintln(writer, "echo \"========================================\"")
 	fmt.Fprintln(writer, "echo \"Job ID:    $SLURM_JOB_ID\"")
 	fmt.Fprintf(writer, "echo \"Job Name:  %s\"\n", specs.JobName)
+	if specs.Nodes > 1 {
+		fmt.Fprintf(writer, "echo \"Nodes:     %d\"\n", specs.Nodes)
+	}
+	if specs.Ntasks > 1 {
+		fmt.Fprintf(writer, "echo \"Tasks:     %d\"\n", specs.Ntasks)
+	}
 	if specs.Ncpus > 0 {
-		fmt.Fprintf(writer, "echo \"CPUs:      %d\"\n", specs.Ncpus)
+		fmt.Fprintf(writer, "echo \"CPUs/Task: %d\"\n", specs.Ncpus)
 	}
 	if specs.MemMB > 0 {
 		fmt.Fprintf(writer, "echo \"Memory:    %d MB\"\n", specs.MemMB)
@@ -901,6 +979,8 @@ func (s *SlurmScheduler) GetJobResources() *JobResources {
 	}
 	res := &JobResources{}
 	res.Ncpus = getEnvInt("SLURM_CPUS_PER_TASK")
+	res.Ntasks = getEnvInt("SLURM_NTASKS")
+	res.Nodes = getEnvInt("SLURM_JOB_NUM_NODES")
 	// SLURM_MEM_PER_NODE is already in MB
 	res.MemMB = getEnvInt64("SLURM_MEM_PER_NODE")
 	res.Ngpus = getCudaDeviceCount()

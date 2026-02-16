@@ -68,7 +68,9 @@ type ClusterInfo struct {
 // ScriptSpecs holds the specifications parsed from a job script
 type ScriptSpecs struct {
 	JobName      string        // Job name
-	Ncpus        int           // Number of CPUs
+	Ncpus        int           // Number of CPUs per task
+	Ntasks       int           // Number of tasks (default 1)
+	Nodes        int           // Number of nodes (default 1)
 	MemMB        int64         // Memory in MB
 	Time         time.Duration // Time limit
 	Stdout       string        // Standard output file path
@@ -93,9 +95,11 @@ type JobSpec struct {
 // JobResources holds resource allocations for the currently running scheduler job.
 // A nil pointer field means the scheduler did not expose that resource via environment variables.
 type JobResources struct {
-	Ncpus *int   // Number of allocated CPUs
-	MemMB *int64 // Allocated memory in MB
-	Ngpus *int   // Number of allocated GPUs
+	Ncpus  *int   // Number of allocated CPUs per task
+	Ntasks *int   // Number of allocated tasks
+	Nodes  *int   // Number of allocated nodes
+	MemMB  *int64 // Allocated memory in MB
+	Ngpus  *int   // Number of allocated GPUs
 }
 
 // Scheduler defines the interface for job schedulers

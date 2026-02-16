@@ -706,7 +706,9 @@ func clearJobEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"SLURM_JOB_ID", "SLURM_CPUS_PER_TASK", "SLURM_MEM_PER_NODE",
+		"SLURM_NTASKS", "SLURM_JOB_NUM_NODES",
 		"PBS_JOBID", "PBS_NCPUS", "NCPUS", "PBS_VMEM",
+		"PBS_NUM_NODES", "PBS_NP", "PBS_TASKNUM",
 		"LSB_JOBID", "LSB_DJOB_NUMPROC", "LSB_MAX_NUM_PROCESSORS", "LSB_MAX_MEM_RUSAGE",
 		"_CONDOR_JOB_AD", "_CONDOR_REQUEST_CPUS", "_CONDOR_REQUEST_MEMORY",
 		"CUDA_VISIBLE_DEVICES",
@@ -731,6 +733,8 @@ func TestSlurmGetJobResources(t *testing.T) {
 		clearJobEnvVars(t)
 		t.Setenv("SLURM_JOB_ID", "12345")
 		t.Setenv("SLURM_CPUS_PER_TASK", "16")
+		t.Setenv("SLURM_NTASKS", "4")
+		t.Setenv("SLURM_JOB_NUM_NODES", "2")
 		t.Setenv("SLURM_MEM_PER_NODE", "8192")
 		t.Setenv("CUDA_VISIBLE_DEVICES", "0,1")
 
@@ -740,6 +744,12 @@ func TestSlurmGetJobResources(t *testing.T) {
 		}
 		if res.Ncpus == nil || *res.Ncpus != 16 {
 			t.Errorf("Ncpus = %v; want 16", res.Ncpus)
+		}
+		if res.Ntasks == nil || *res.Ntasks != 4 {
+			t.Errorf("Ntasks = %v; want 4", res.Ntasks)
+		}
+		if res.Nodes == nil || *res.Nodes != 2 {
+			t.Errorf("Nodes = %v; want 2", res.Nodes)
 		}
 		if res.MemMB == nil || *res.MemMB != 8192 {
 			t.Errorf("MemMB = %v; want 8192", res.MemMB)
@@ -786,4 +796,205 @@ func TestSlurmGetJobResources(t *testing.T) {
 			t.Errorf("MemMB should be nil for negative value, got %d", *res.MemMB)
 		}
 	})
+}
+
+func TestSlurmNodeTaskParsing(t *testing.T) {
+	sched := newTestSlurmScheduler()
+
+	tests := []struct {
+		name       string
+		lines      []string
+		wantNodes  int
+		wantNtasks int
+		wantNcpus  int
+	}{
+		{
+			name: "all specified",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --nodes=4",
+				"#SBATCH --ntasks=16",
+				"#SBATCH --cpus-per-task=4",
+			},
+			wantNodes: 4, wantNtasks: 16, wantNcpus: 4,
+		},
+		{
+			name: "short flags",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH -N 3",
+				"#SBATCH -n 12",
+				"#SBATCH -c 2",
+			},
+			wantNodes: 3, wantNtasks: 12, wantNcpus: 2,
+		},
+		{
+			name: "ntasks-per-node",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --nodes=2",
+				"#SBATCH --ntasks-per-node=8",
+				"#SBATCH --cpus-per-task=4",
+			},
+			wantNodes: 2, wantNtasks: 16, wantNcpus: 4,
+		},
+		{
+			name: "ntasks overrides ntasks-per-node",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --nodes=2",
+				"#SBATCH --ntasks=10",
+				"#SBATCH --ntasks-per-node=8",
+			},
+			wantNodes: 2, wantNtasks: 10, wantNcpus: 4,
+		},
+		{
+			name: "ntasks only",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --ntasks=8",
+			},
+			wantNodes: 1, wantNtasks: 8, wantNcpus: 4,
+		},
+		{
+			name: "defaults when no node/task flags",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --mem=8G",
+			},
+			wantNodes: 1, wantNtasks: 1, wantNcpus: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpFile := filepath.Join(t.TempDir(), "test.sh")
+			os.WriteFile(tmpFile, []byte(strings.Join(tt.lines, "\n")), 0644)
+			specs, err := sched.ReadScriptSpecs(tmpFile)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if specs.Nodes != tt.wantNodes {
+				t.Errorf("Nodes = %d; want %d", specs.Nodes, tt.wantNodes)
+			}
+			if specs.Ntasks != tt.wantNtasks {
+				t.Errorf("Ntasks = %d; want %d", specs.Ntasks, tt.wantNtasks)
+			}
+			if specs.Ncpus != tt.wantNcpus {
+				t.Errorf("Ncpus = %d; want %d", specs.Ncpus, tt.wantNcpus)
+			}
+		})
+	}
+}
+
+func TestSlurmNodeTaskScriptGeneration(t *testing.T) {
+	sched := newTestSlurmScheduler()
+	outputDir := t.TempDir()
+
+	jobSpec := &JobSpec{
+		Name:    "test-job",
+		Command: "echo hello",
+		Specs: &ScriptSpecs{
+			JobName: "test-job",
+			Ncpus:   4,
+			Ntasks:  16,
+			Nodes:   4,
+			MemMB:   8192,
+			Time:    2 * time.Hour,
+		},
+		Metadata: map[string]string{},
+	}
+
+	scriptPath, err := sched.CreateScriptWithSpec(jobSpec, outputDir)
+	if err != nil {
+		t.Fatalf("CreateScriptWithSpec failed: %v", err)
+	}
+
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("failed to read script: %v", err)
+	}
+
+	script := string(content)
+	if !strings.Contains(script, "#SBATCH --nodes=4") {
+		t.Error("script should contain --nodes=4")
+	}
+	if !strings.Contains(script, "#SBATCH --ntasks=16") {
+		t.Error("script should contain --ntasks=16")
+	}
+	if !strings.Contains(script, "#SBATCH --cpus-per-task=4") {
+		t.Error("script should contain --cpus-per-task=4")
+	}
+	// Should not contain original raw flags duplicated
+	count := strings.Count(script, "--nodes=")
+	if count != 1 {
+		t.Errorf("--nodes= appears %d times; want 1", count)
+	}
+}
+
+func TestSlurmNodeTaskRoundTrip(t *testing.T) {
+	sched := newTestSlurmScheduler()
+
+	// Create a script with node/task directives
+	lines := []string{
+		"#!/bin/bash",
+		"#SBATCH --nodes=4",
+		"#SBATCH --ntasks=16",
+		"#SBATCH --cpus-per-task=4",
+		"#SBATCH --mem=8G",
+		"#SBATCH --time=2:00:00",
+		"echo hello",
+	}
+	tmpFile := filepath.Join(t.TempDir(), "input.sh")
+	os.WriteFile(tmpFile, []byte(strings.Join(lines, "\n")), 0644)
+
+	// Parse
+	specs, err := sched.ReadScriptSpecs(tmpFile)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if specs.Nodes != 4 || specs.Ntasks != 16 || specs.Ncpus != 4 {
+		t.Fatalf("parse mismatch: Nodes=%d Ntasks=%d Ncpus=%d", specs.Nodes, specs.Ntasks, specs.Ncpus)
+	}
+
+	// Generate
+	outputDir := t.TempDir()
+	jobSpec := &JobSpec{
+		Name:     "roundtrip",
+		Command:  "echo hello",
+		Specs:    specs,
+		Metadata: map[string]string{},
+	}
+	scriptPath, err := sched.CreateScriptWithSpec(jobSpec, outputDir)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	// Re-parse generated script
+	specs2, err := sched.ReadScriptSpecs(scriptPath)
+	if err != nil {
+		t.Fatalf("re-parse failed: %v", err)
+	}
+	if specs2.Nodes != 4 {
+		t.Errorf("round-trip Nodes = %d; want 4", specs2.Nodes)
+	}
+	if specs2.Ntasks != 16 {
+		t.Errorf("round-trip Ntasks = %d; want 16", specs2.Ntasks)
+	}
+	if specs2.Ncpus != 4 {
+		t.Errorf("round-trip Ncpus = %d; want 4", specs2.Ncpus)
+	}
+
+	// Check no duplicates
+	content, _ := os.ReadFile(scriptPath)
+	script := string(content)
+	if strings.Count(script, "--nodes=") != 1 {
+		t.Error("--nodes= should appear exactly once")
+	}
+	if strings.Count(script, "--ntasks=") != 1 {
+		t.Error("--ntasks= should appear exactly once")
+	}
+	if strings.Count(script, "--cpus-per-task=") != 1 {
+		t.Error("--cpus-per-task= should appear exactly once")
+	}
 }
