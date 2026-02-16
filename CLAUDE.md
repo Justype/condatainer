@@ -50,6 +50,14 @@ Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 
 Each contains `images/`, `build-scripts/`, `helper-scripts/`. Writes go to first writable dir.
 
+## Helper Scripts
+
+Bash scripts in `helpers/` launch interactive services inside CondaTainer on HPC. Modes: `headless/` (direct) and `<scheduler>/` (submit + SSH tunnel). See `helpers/README.md` for details.
+
+Shared library `.common.sh` provides: config management (`config_init/load/require`), port helpers (`choose_port`, `validate_port`), overlay checks (`check_overlay_integrity`, `check_and_install_overlays`), job state (`read_job_state`, `wait_for_job`), reuse mode (`handle_reuse_mode`), and display (`spec_line`, `print_specs`, `countdown`).
+
+Scheduler script flow: config_init → config_load → read_job_state → getopts (sets `_ARG_*` flags) → handle_reuse_mode → port resolution → print_specs → sanity checks → submit → wait_for_job → connect.
+
 ## Key Patterns
 
 - Global config singleton: `config.Global`

@@ -27,6 +27,11 @@ If your system has a scheduler, you should not use the headless scripts.
 - **headless/** -- Runs the service directly on the current server. Use on headless server which does not have a job scheduler. The script blocks while the service is running.
 - **slurm/** -- Submits a SLURM batch job, waits for it to start, then opens an SSH tunnel with port forwarding. Re-running the script while a job is active will reconnect to the existing session.
 
+## Desktop / GUI Apps
+
+- **xfce4** -- Launches an XFCE desktop session via VNC / noVNC, accessible through a browser.
+- **igv** -- Launches an XFCE desktop with IGV (Integrative Genomics Viewer) via noVNC.
+
 ## RStudio Server Variants
 
 - **rstudio-server** -- Uses Posit's R image overlays (`r4.4.3`, `r4.5.2`, etc.). Specify R version with `-r`. If omitted, detects R in the overlay or falls back to the latest available R overlay.
@@ -39,7 +44,7 @@ If your system has a scheduler, you should not use the headless scripts.
 | `-e <overlay>` | Environment overlay image file (default: `env.img`) |
 | `-o <overlay>` | Additional overlay files (repeatable) |
 | `-p <port>` | Port number (auto-selected if omitted) |
-| `-y` | Accept all prompts automatically |
+| `-w` | Use current directory as working directory |
 | `-h` | Show help |
 | `config` | Show config file path and contents |
 
@@ -96,11 +101,12 @@ SLURM job logs are written to `~/logs/`:
 | Function | Description |
 |---|---|
 | `config_init` | Create defaults file on first run with KEY=VALUE pairs. |
-| `config_load` | Source saved defaults and set `CWD` to current working directory. |
+| `config_load` | Source saved defaults, set `CWD` to pwd, and auto-save `_CONFIG_*` copies for change detection. |
 | `config_update` | Update specific keys in defaults without rewriting the file. |
 | `config_require` | Validate required variables are set (exits on failure). |
 | `config_show` | Print config file path and contents, then exit. |
 | `config_path` | Return the config file path for a helper. |
+| `state_path` | Return the state file path for a helper. |
 
 ### Port helpers
 | Function | Description |
@@ -121,6 +127,12 @@ SLURM job logs are written to `~/logs/`:
 | `resolve_overlay_list` | Convert colon-separated overlay lists to absolute file paths. |
 | `build_overlays_arg` | Build `-o` arguments from a colon-separated overlay list. |
 
+### Prompt helpers
+| Function | Description |
+|---|---|
+| `confirm_default_yes` | Prompt with `[Y/n]`. Returns 0 on yes (default). |
+| `confirm_default_no` | Prompt with `[y/N]`. Returns 0 on yes. |
+
 ### Message helpers
 | Function | Description |
 |---|---|
@@ -135,10 +147,18 @@ SLURM job logs are written to `~/logs/`:
 |---|---|
 | `check_condatainer` | Exit if `condatainer` is not in PATH. |
 
-## SLURM-only helpers
-These live only in `helpers/slurm/.common.sh` and are useful for job lifecycle management.
+## SLURM-only helpers (`helpers/slurm/.common.sh`)
 
+### Display & reuse
 | Function | Description |
 |---|---|
-| `read_job_state` | Source state file and detect PENDING/RUNNING job state (returns codes for PENDING/RUNNING/NOT RUNNING). |
-| `wait_for_job` | Poll `squeue` until job transitions to RUNNING; sets global `NODE` and attempts to locate log files. |
+| `spec_line` | Print one spec line with column alignment. Shows `(default)` or `(default: X)` by comparing `_ARG_*` and `_CONFIG_*` prefixes. |
+| `print_specs` | Print all current job settings. Override in helper scripts for custom fields. |
+| `countdown` | Print a countdown with Ctrl+C hint, overwriting the same line each tick. |
+| `handle_reuse_mode` | Handle `REUSE_MODE` (always/ask/never) when a previous job is not running. Shows specs, prompts user, sets `REUSE_PREVIOUS_CWD`. |
+
+### Job lifecycle
+| Function | Description |
+|---|---|
+| `read_job_state` | Source state file and detect PENDING/RUNNING job state (returns codes 0-3). |
+| `wait_for_job` | Poll `squeue` until job transitions to RUNNING; sets global `NODE` and `JOB_LOG`. |
