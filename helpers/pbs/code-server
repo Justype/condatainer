@@ -1,53 +1,42 @@
 #!/bin/bash
-# This script helps run rstudio-server with r image on SLURM clusters.
-
-# Use Posit r-base docker image https://hub.docker.com/r/posit/r-base
-AVAIL_R_VERSIONS='
-    4.0.0 4.0.1 4.0.2 4.0.3 4.0.4 4.0.5
-    4.1.0 4.1.1 4.1.2 4.1.3
-    4.2.0 4.2.1 4.2.2 4.2.3
-    4.3.0 4.3.1 4.3.2 4.3.3
-    4.4.0 4.4.1 4.4.2 4.4.3
-    4.5.0 4.5.1 4.5.2
-'
-BASE_IMAGE_DISTRO="noble"
+# This script helps run code-server on PBS clusters.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/.common.sh"
-HELPER_NAME=rstudio-server
+HELPER_NAME=code-server
 
 # Save defaults on first run
 config_init $HELPER_NAME \
     NCPUS=4 \
-    MEM=32G \
+    MEM=16G \
     TIME=12:00:00 \
     GPU= \
     BASE_IMAGE= \
     BASE_IMAGE_DISTRO=noble \
     PORT= \
     AUTH=none \
-    R_VERSION= \
     REUSE_MODE=ask \
     OVERLAY=env.img
 
 # Load saved defaults
 config_load $HELPER_NAME
-config_require $HELPER_NAME NCPUS MEM TIME OVERLAY
+config_require $HELPER_NAME NCPUS MEM TIME OVERLAY AUTH
 
 print_help() {
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
-    echo "  -r <r_version>  R version to use (e.g., 4.4.3) Use latest available if omitted."
     echo "  -p <port>       Port for $HELPER_NAME (default: ${PORT:-randomly picked}). Valid range: 1024-65535"
+    echo "  -a <auth>       Password for $HELPER_NAME authentication (default: $AUTH)"
     echo ""
     echo "  -c <number>     Number of CPUs to allocate (default: $NCPUS)"
     echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
     echo "  -t <time>       Time limit for the job (default: $TIME)"
     echo "  -g <gpu>        GPU resources (e.g., 1, a100:2). Use -g '' to clear"
-    echo "  -v              View Mode NCPUS:1 MEM:8G TIME:02:00:00"
+    echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00"
     echo "  -w              Use current directory as working directory (clears additional overlays)"
     echo ""
+    echo "  -b <image>      Base image file"
     echo "  -e <.img>       Writable overlay (default: $OVERLAY)"
     echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
     echo ""
@@ -64,14 +53,13 @@ case $1 in
     *)              ;;
 esac
 
-# show_and_connect <job_id>
-#   Prints connection info and opens SSH tunnel with port forwarding.
 show_and_connect() {
     local job_id="$1"
-    print_info "$HELPER_NAME at ${BLUE}http://localhost:$PORT${NC}"
-    print_info "You can run the following command in R to open the project directly:"
-    print_info "  ${YELLOW}rstudioapi::openProject(\"$CWD\")${NC}"
-    print_info "If you want to stop it, run: ${YELLOW}scancel $job_id${NC}"
+    print_info "$HELPER_NAME at ${BLUE}http://localhost:$PORT?folder=$CWD${NC}"
+    if [ "$AUTH" != "none" ]; then
+        print_info "  Password: ${YELLOW}$AUTH${NC}"
+    fi
+    print_info "If you want to stop it, run: ${YELLOW}qdel $job_id${NC}"
     exec ssh ${SSH_OPTS} -o ControlMaster=no -L "$PORT:localhost:$PORT" "$USER@$NODE"
     exit 0
 }
@@ -83,11 +71,12 @@ print_specs() {
     spec_line "TIME" TIME
     spec_line "GPU" GPU
     spec_line "Port" PORT
-    spec_line "R Version" R_VERSION
+    spec_line "Password" AUTH
     local cwd_hint=""
     local current_dir=$(readlink -f .)
     [ "$CWD" != "$current_dir" ] && cwd_hint=" (use -w for current dir)"
     print_msg "  Working Dir: ${BLUE}$CWD${NC}${cwd_hint}"
+    spec_line "Base Image" BASE_IMAGE
     spec_line "Overlay" OVERLAY
     [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
 }
@@ -115,34 +104,6 @@ case $? in
         ;;
 esac
 
-get_latest_r() {
-    local search=$1
-
-    if [[ -z "$search" ]]; then
-        echo "$AVAIL_R_VERSIONS" | xargs -n1 | tail -1
-        return
-    fi
-
-    # Accept either exact version matches (e.g. 4.4.3) or prefix matches (e.g. 4.4 -> 4.4.x)
-    local match=$(echo "$AVAIL_R_VERSIONS" | xargs -n1 | grep -E "^${search}($|\\.)" | tail -1)
-
-    if [[ -n "$match" ]]; then
-        echo "$match"
-    else
-        return 1
-    fi
-}
-get_posit_docker_name() {
-    local r_version=$1
-    local arch=$(uname -m)
-    case "$arch" in
-        x86_64) arch="amd64" ;;
-        aarch64) arch="arm64" ;;
-        *) print_error "Unsupported architecture: $arch"; exit 1 ;;
-    esac
-    echo "docker://posit/r-base:${r_version}-${BASE_IMAGE_DISTRO}-${arch}"
-}
-
 # Track if -o flag is used to clear overlays on first use
 _OVERLAYS_CLEARED=false
 # Record original values for saving in state file (in case of -v option)
@@ -153,20 +114,21 @@ _GPU=$GPU
 # Track if user wants to change working directory
 NEW_CWD=""
 
-while getopts "r:c:m:t:g:wp:e:o:v" opt; do
+while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
     case ${opt} in
-        r ) R_VERSION=$OPTARG; _ARG_R_VERSION=1 ;;
         c ) NCPUS=$OPTARG; _NCPUS=$OPTARG; _ARG_NCPUS=1 ;;
         m ) MEM=$OPTARG; _MEM=$OPTARG; _ARG_MEM=1 ;;
         t ) TIME=$OPTARG; _TIME=$OPTARG; _ARG_TIME=1 ;;
         g ) GPU=$OPTARG; _GPU=$OPTARG; _ARG_GPU=1 ;;
-        v ) NCPUS=1; MEM=8G; TIME=02:00:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
-            echo "[MSG] View Mode: NCPUS=1, MEM=8G, TIME=02:00:00" ;;
+        v ) NCPUS=1; MEM=4G; TIME=02:00:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
+            echo "[MSG] View Mode: NCPUS=1, MEM=4G, TIME=02:00:00" ;;
         w )
             NEW_CWD="$(readlink -f .)"
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
             ;;
         p ) PORT=$OPTARG; _ARG_PORT=1 ;;
+        a ) AUTH=$OPTARG; _ARG_AUTH=1 ;;
+        b ) BASE_IMAGE="$OPTARG"; _ARG_BASE_IMAGE=1 ;;
         e ) OVERLAY=$OPTARG; _ARG_OVERLAY=1 ;;
         o ) # First -o clears previous overlays, then builds fresh list
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
@@ -204,25 +166,6 @@ if [ "$_SPECS_SHOWN" != true ]; then
     countdown 3
 fi
 
-# R Version check
-if [ -z "$R_VERSION" ]; then
-    R_VERSION=$(get_latest_r) || {
-        print_error "Failed to get the latest R version."
-        exit 1
-    }
-    print_warn "R version not specified. Use the latest available version: ${YELLOW}$R_VERSION${NC}"
-    if ! confirm_default_yes "Proceed with this version?"; then
-        echo "Aborted by user."; exit 1
-    fi
-else
-    LATEST_MATCH=$(get_latest_r "$R_VERSION") || {
-        print_error "Specified R version prefix '${YELLOW}$R_VERSION${NC}' is not available."
-        exit 1
-    }
-    R_VERSION=$LATEST_MATCH
-    print_info "Using specified R version: ${BLUE}$R_VERSION${NC}"
-fi
-
 # If no port specified, pick an available one
 if [ -z "$PORT" ]; then
     PORT=$(choose_port) || {
@@ -242,141 +185,78 @@ fi
 check_port_available "$PORT"
 check_condatainer
 
-if ! condatainer list -e r${R_VERSION} > /dev/null 2>&1; then
-    print_info "Installing R ${R_VERSION} overlay."
-    condatainer create -n r${R_VERSION} -s $(get_posit_docker_name $R_VERSION)
-    if [ $? -ne 0 ]; then
-        print_error "Failed to install R version overlay 'r${R_VERSION}'."
-        exit 1
-    fi
-fi
-
-check_and_install_overlays rstudio-server build-essential $OVERLAYS
+check_and_install_overlays code-server $OVERLAYS
 
 if [ ! -f "$OVERLAY" ]; then
-    print_error "Overlay ${BLUE}$OVERLAY${NC} not found."
-    exit 1
+    print_warn "Overlay ${BLUE}$OVERLAY${NC} not found. Continuing without it."
+    countdown 3
 else
     check_overlay_integrity "$OVERLAY"
 fi
 #endregion
 
 # Construct arguments for CondaTainer exec
-[ -n "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
+[ -n "$BASE_IMAGE" ] && BASE_IMAGE_ARG="-b $BASE_IMAGE"
+[ -n "$OVERLAY" ] && [ -f "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
-[ -n "$GPU" ] && GPU_SBATCH="#SBATCH --gres=gpu:$GPU"
-
-CWD_FOLDER_NAME=$(basename $CWD)
-RPROJECT_FILE="$CWD/$CWD_FOLDER_NAME.Rproj"
-if ! [ -f "$RPROJECT_FILE" ]; then
-    print_info "Creating RStudio project file at ${BLUE}$RPROJECT_FILE${NC}."
-    cat <<EOT > $RPROJECT_FILE
-Version: 1.0
-
-RestoreWorkspace: Default
-SaveWorkspace: Default
-AlwaysSaveHistory: Default
-
-EnableCodeIndexing: Yes
-UseSpacesForTab: Yes
-NumSpacesForTab: 2
-Encoding: UTF-8
-
-RnwWeave: Sweave
-LaTeX: pdfLaTeX
-EOT
-    # If there is a bundled profile next to this script, copy it into the project
-    # Prefer hidden .Rprofile in the helpers folder
-    SRC=""
-    if [ -f "$SCRIPT_DIR/.Rprofile" ]; then
-        SRC="$SCRIPT_DIR/.Rprofile"
-    fi
-    if [ -n "$SRC" ]; then
-        cp -f "$SRC" "$CWD/.Rprofile" && \
-        print_info "Copied Rprofile to ${BLUE}$CWD/.Rprofile${NC} (overwritten if existed)."
-    fi
+PBS_RESOURCES="select=1:ncpus=$NCPUS:mem=$MEM"
+if [ -n "$GPU" ]; then
+    PBS_RESOURCES="${PBS_RESOURCES}:ngpus=${GPU}"
 fi
-cat <<EOT > $HELPER_STATE_DIR/rsession.sh
-#!/bin/bash
 
-USER=`whoami`
-source /etc/profile
-
-# Source global definitions
-if [ -f /etc/bashrc ]; then
-  . /etc/bashrc
+if [ "$AUTH" != "none" ]; then
+    AUTH_OPTION="--auth password --password $AUTH"
+else
+    AUTH_OPTION="--auth none"
 fi
-source $HOME/.bashrc
 
-export MAMBA_ROOT_PREFIX=/ext3/env
-export CONDA_PREFIX=/ext3/env
-export CONDA_DEFAULT_ENV=env
-export CNT_CONDA_PREFIX=/ext3/env
-export RETICULATE_PYTHON=/ext3/env/bin/python
-export NCPUS=$NCPUS
+PBS_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.qsub"
 
-/usr/lib/rstudio-server/bin/rsession "\$@"
-EOT
-chmod +x $HELPER_STATE_DIR/rsession.sh
-cat <<EOT > $HELPER_STATE_DIR/rsession.conf
-copilot-enabled=1
-session-default-working-dir=$CWD
-EOT
-cat <<EOT > $HELPER_STATE_DIR/database.conf
-provider=sqlite
-directory=$SCRATCH/.local/lib/rstudio-server
-EOT
-
-SBATCH_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.sbatch"
-
-cat <<EOT > $SBATCH_SCRIPT_PATH
+# Generate the PBS script
+cat <<EOT > "$PBS_SCRIPT_PATH"
 #!/bin/bash
-#SBATCH --job-name=$HELPER_NAME
-#SBATCH --cpus-per-task=$NCPUS
-#SBATCH --mem=$MEM
-#SBATCH --time=$TIME
-${GPU_SBATCH:+$GPU_SBATCH}
-#SBATCH --output=$LOG_DIR/$HELPER_NAME-%j.log
+#PBS -N $HELPER_NAME
+#PBS -l $PBS_RESOURCES
+#PBS -l walltime=$TIME
+#PBS -j oe
+#PBS -o /dev/null
+#PBS -d $CWD
+
+CLEAN_ID=\$(echo \$PBS_JOBID | cut -d'.' -f1)
+CUSTOM_LOG="$LOG_DIR/${HELPER_NAME}-\${CLEAN_ID}.log"
+exec &> "\$CUSTOM_LOG"
 
 # Remove the script after job submission
-rm $SBATCH_SCRIPT_PATH
+rm $PBS_SCRIPT_PATH
 
 echo "NODE=\$(hostname)" >> "$STATE_FILE"
 
 condatainer exec \
-    -o r${R_VERSION} \
-    -o rstudio-server \
-    -o build-essential \
+    $BASE_IMAGE_ARG \
+    -o code-server \
     $OVERLAYS_ARG \
     $OVERLAY_ARG --writable \
-    /usr/lib/rstudio-server/bin/rserver \
-        --server-user $USER \
-        --server-daemonize=0 \
-        --server-data-dir=$SCRATCH/.local/run/rstudio-server \
-        --www-address=127.0.0.1 \
-        --www-port=$PORT \
-        --rsession-which-r=/usr/bin/R \
-        --rsession-path=$HELPER_STATE_DIR/rsession.sh \
-        --database-config-file=$HELPER_STATE_DIR/database.conf \
-        --rsession-config-file=$HELPER_STATE_DIR/rsession.conf \
-        --auth-none=1
+    code-server \
+        --disable-update-check \
+        --bind-addr 127.0.0.1:$PORT \
+        $AUTH_OPTION
 EOT
 
-SBATCH_OUTPUT=$(sbatch $SBATCH_SCRIPT_PATH)
-SBATCH_JOB_ID=$(echo $SBATCH_OUTPUT | awk '{print $4}')
+PBS_JOB_ID=$(qsub $PBS_SCRIPT_PATH)
 
 cat > $STATE_FILE <<RUNSTATE
-JOB_ID=$SBATCH_JOB_ID
+JOB_ID=$PBS_JOB_ID
 NCPUS=$_NCPUS
 MEM=$_MEM
 TIME=$_TIME
 GPU=$_GPU
 PORT=$PORT
 CWD=$CWD
-R_VERSION="$R_VERSION"
+AUTH=$AUTH
+BASE_IMAGE="$BASE_IMAGE"
 OVERLAY="$OVERLAY"
 OVERLAYS="$OVERLAYS"
 RUNSTATE
 
-wait_for_job "$SBATCH_JOB_ID"
-show_and_connect "$SBATCH_JOB_ID"
+wait_for_job "$PBS_JOB_ID"
+show_and_connect "$PBS_JOB_ID"

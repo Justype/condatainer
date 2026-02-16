@@ -275,7 +275,7 @@ cat <<EOT > $SBATCH_SCRIPT_PATH
 ${GPU_SBATCH:+$GPU_SBATCH}
 #SBATCH --output=$LOG_DIR/$HELPER_NAME-%j.log
 
-# Remove the sbatch script after job submission
+# Remove the script after job submission
 rm $SBATCH_SCRIPT_PATH
 
 echo "NODE=\$(hostname)" >> "$STATE_FILE"
