@@ -298,5 +298,5 @@ OVERLAYS="$OVERLAYS"
 RUNSTATE
 
 wait_for_job "$PBS_JOB_ID"
-rm "$PBS_SCRIPT_PATH" # Clean up when success
+rm -f "$PBS_SCRIPT_PATH" # Clean up on success
 print_tunnel_info "$PBS_JOB_ID" "$AUTH" "$CWD"

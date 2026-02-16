@@ -254,5 +254,5 @@ OVERLAYS="$OVERLAYS"
 RUNSTATE
 
 wait_for_job "$SBATCH_JOB_ID"
-rm "$SBATCH_SCRIPT_PATH" # Clean up when success
+rm -f "$SBATCH_SCRIPT_PATH" # Clean up on success
 show_and_connect "$SBATCH_JOB_ID"

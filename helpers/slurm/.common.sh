@@ -365,7 +365,6 @@ spec_line() {
         spaces=$(printf '%*s' "$diff" "")
     fi
 
-    # 3. Print with the padding between value and note
     print_msg "  ${label}: ${BLUE}${val}${NC}${spaces}${note}"
 }
 
@@ -428,7 +427,7 @@ handle_reuse_mode() {
             print_info "Not reusing previous settings (REUSE_MODE=never)."
             config_load "$helper_name"
             OVERLAYS=""
-            rm "$STATE_FILE"
+            rm -f "$STATE_FILE"
             ;;
         *)
             if [ "${REUSE_MODE,,}" != "ask" ]; then
@@ -467,9 +466,8 @@ read_job_state() {
         RUNNING)
             [ -z "$NODE" ] && NODE=$(squeue -j $JOB_ID -h -o "%N" 2>/dev/null)
             return 2 ;;
+        *) return 3 ;;
     esac
-
-    return 3
 }
 
 # wait_for_job <job_id>
@@ -485,7 +483,6 @@ wait_for_job() {
         exit 1
     fi
 
-    # Clear global JOB_LOG
     JOB_LOG=""
 
     while true; do
@@ -493,7 +490,7 @@ wait_for_job() {
         if [ "$status" == "RUNNING" ]; then
             break
         fi
-        if [ "$status" == "" ]; then
+        if [ -z "$status" ]; then
             echo ""
             print_error "Job $job_id not found in the queue."
             # If job vanished, silently set JOB_LOG if a matching log exists
@@ -503,8 +500,7 @@ wait_for_job() {
             done < <(find "$LOG_DIR" -maxdepth 1 -type f -name "*${job_id}*" -print0 2>/dev/null)
 
             if [ ${#matches[@]} -gt 0 ]; then
-                local chosen="${matches[0]}"
-                JOB_LOG="$chosen"
+                JOB_LOG="${matches[0]}"
                 print_info "Please check the log: ${BLUE}$JOB_LOG${NC}"
             fi
             exit 1
@@ -513,7 +509,7 @@ wait_for_job() {
         sleep 5
     done
 
-    sleep 2 # Give some time for slurm initialization
+    sleep 2 # Give some time for job initialization
     NODE=$(squeue -j $job_id -h -o "%N")
     if [ -z "$NODE" ]; then
         echo ""
@@ -523,8 +519,7 @@ wait_for_job() {
             matches+=("$f")
         done < <(find "$LOG_DIR" -maxdepth 1 -type f -name "*${job_id}*" -print0 2>/dev/null)
         if [ ${#matches[@]} -gt 0 ]; then
-            local chosen="${matches[0]}"
-            JOB_LOG="$chosen"
+            JOB_LOG="${matches[0]}"
             print_info "Please check the log: ${BLUE}$JOB_LOG${NC}"
         fi
         exit 1

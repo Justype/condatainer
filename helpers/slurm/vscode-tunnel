@@ -292,5 +292,5 @@ OVERLAYS="$OVERLAYS"
 RUNSTATE
 
 wait_for_job "$SBATCH_JOB_ID"
-rm "$SBATCH_SCRIPT_PATH" # Clean up when success
+rm -f "$SBATCH_SCRIPT_PATH" # Clean up on success
 print_tunnel_info "$SBATCH_JOB_ID" "$AUTH" "$CWD"

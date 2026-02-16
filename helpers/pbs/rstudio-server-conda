@@ -320,5 +320,5 @@ OVERLAYS="$OVERLAYS"
 RUNSTATE
 
 wait_for_job "$PBS_JOB_ID"
-rm "$PBS_SCRIPT_PATH" # Clean up when success
+rm -f "$PBS_SCRIPT_PATH" # Clean up on success
 show_and_connect "$PBS_JOB_ID"

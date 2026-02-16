@@ -365,7 +365,6 @@ spec_line() {
         spaces=$(printf '%*s' "$diff" "")
     fi
 
-    # 3. Print with the padding between value and note
     print_msg "  ${label}: ${BLUE}${val}${NC}${spaces}${note}"
 }
 
@@ -396,6 +395,58 @@ countdown() {
         secs=$((secs - 1))
     done
     printf "\r\033[K"
+}
+
+# Flag: set to true when print_specs already displayed specs
+_SPECS_SHOWN=false
+
+# handle_reuse_mode <helper_name>
+#   Handles the REUSE_MODE logic when a previous job is not running (case 3).
+#   with CLI overrides. Otherwise checks REUSE_MODE to decide.
+#   Sets global REUSE_PREVIOUS_CWD=true if reusing, false otherwise.
+handle_reuse_mode() {
+    local helper_name="$1"
+
+    if [ -z "$OVERLAY" ]; then
+        config_load "$helper_name"
+        return
+    fi
+
+    # CLI args given - keep state values with CLI overrides, no prompt
+    if [ "${OPTIND:-1}" -gt 1 ]; then
+        REUSE_PREVIOUS_CWD=true
+        return
+    fi
+
+    case "${REUSE_MODE,,}" in  # Convert to lowercase
+        always)
+            print_info "Auto-reusing previous settings (REUSE_MODE=always)."
+            REUSE_PREVIOUS_CWD=true
+            ;;
+        never)
+            print_info "Not reusing previous settings (REUSE_MODE=never)."
+            config_load "$helper_name"
+            OVERLAYS=""
+            rm -f "$STATE_FILE"
+            ;;
+        *)
+            if [ "${REUSE_MODE,,}" != "ask" ]; then
+                print_warn "Invalid REUSE_MODE='$REUSE_MODE'. Defaulting to 'ask'."
+            fi
+            print_msg "Previous settings:"
+            print_specs
+            if confirm_default_yes "Reuse?" "Y: accept / n: defaults / Ctrl+C: cancel"; then
+                REUSE_PREVIOUS_CWD=true
+                _SPECS_SHOWN=true
+            else
+                config_load "$helper_name"
+                OVERLAYS=""
+                print_msg "Using default settings:"
+                print_specs
+                _SPECS_SHOWN=true
+            fi
+            ;;
+    esac
 }
 
 # read_job_state <state_file>
@@ -436,7 +487,6 @@ wait_for_job() {
         exit 1
     fi
 
-    # Clear global JOB_LOG
     JOB_LOG=""
 
     while true; do
@@ -454,8 +504,7 @@ wait_for_job() {
             done < <(find "$LOG_DIR" -maxdepth 1 -type f -name "*${job_id}*" -print0 2>/dev/null)
 
             if [ ${#matches[@]} -gt 0 ]; then
-                local chosen="${matches[0]}"
-                JOB_LOG="$chosen"
+                JOB_LOG="${matches[0]}"
                 print_info "Please check the log: ${BLUE}$JOB_LOG${NC}"
             fi
             exit 1
@@ -464,7 +513,7 @@ wait_for_job() {
         sleep 5
     done
 
-    sleep 2 # Give some time for LSF initialization
+    sleep 2 # Give some time for job initialization
     NODE=$(bjobs -noheader -o exec_host "$job_id" 2>/dev/null | awk '{print $1}' | cut -d'/' -f1)
     if [ -z "$NODE" ]; then
         echo ""
@@ -474,8 +523,7 @@ wait_for_job() {
             matches+=("$f")
         done < <(find "$LOG_DIR" -maxdepth 1 -type f -name "*${job_id}*" -print0 2>/dev/null)
         if [ ${#matches[@]} -gt 0 ]; then
-            local chosen="${matches[0]}"
-            JOB_LOG="$chosen"
+            JOB_LOG="${matches[0]}"
             print_info "Please check the log: ${BLUE}$JOB_LOG${NC}"
         fi
         exit 1
@@ -483,55 +531,3 @@ wait_for_job() {
     echo ""
     print_info "Job ${YELLOW}$job_id${NC} is now running on node ${BLUE}$NODE${NC}."
 }
-
-# Flag: set to true when print_specs already displayed specs
-_SPECS_SHOWN=false
-
-# handle_reuse_mode <helper_name>
-#   Handles the REUSE_MODE logic when a previous job is not running (case 3).
-#   with CLI overrides. Otherwise checks REUSE_MODE to decide.
-#   Sets global REUSE_PREVIOUS_CWD=true if reusing, false otherwise.
-handle_reuse_mode() {
-    local helper_name="$1"
-
-    if [ -z "$OVERLAY" ]; then
-        config_load "$helper_name"
-        return
-    fi
-
-    # CLI args given - keep state values with CLI overrides, no prompt
-    if [ "${OPTIND:-1}" -gt 1 ]; then
-        REUSE_PREVIOUS_CWD=true
-        return
-    fi
-
-    case "${REUSE_MODE,,}" in  # Convert to lowercase
-        always)
-            print_info "Auto-reusing previous settings (REUSE_MODE=always)."
-            REUSE_PREVIOUS_CWD=true
-            ;;
-        never)
-            print_info "Not reusing previous settings (REUSE_MODE=never)."
-            config_load "$helper_name"
-            OVERLAYS=""
-            rm "$STATE_FILE"
-            ;;
-        *)
-            if [ "${REUSE_MODE,,}" != "ask" ]; then
-                print_warn "Invalid REUSE_MODE='$REUSE_MODE'. Defaulting to 'ask'."
-            fi
-            print_msg "Previous settings:"
-            print_specs
-            if confirm_default_yes "Reuse?" "Y: accept / n: defaults / Ctrl+C: cancel"; then
-                REUSE_PREVIOUS_CWD=true
-                _SPECS_SHOWN=true
-            else
-                config_load "$helper_name"
-                OVERLAYS=""
-                print_msg "Using default settings:"
-                print_specs
-                _SPECS_SHOWN=true
-            fi
-            ;;
-    esac
-# Duplicate scheduler-specific read_job_state/wait_for_job removed — LSF implementations are above.

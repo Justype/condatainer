@@ -352,5 +352,5 @@ OVERLAYS="$OVERLAYS"
 RUNSTATE
 
 wait_for_job "$LSF_JOB_ID"
-rm "$LSF_SCRIPT_PATH" # Clean up when success
+rm "$LSF_SCRIPT_PATH" # Clean up on success
 show_and_connect "$LSF_JOB_ID"
