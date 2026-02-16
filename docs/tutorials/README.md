@@ -26,3 +26,18 @@ Now [code-server](./code-server_on_HPC.md) is replaced by VS Code Server. (Pylan
 | [RStudio Server (Conda)](./rstudio-server-conda_on_HPC.md) | Conda (`mm-install r-base`) | Conda-managed R with packages |
 
 For non-HPC remote servers, see [RStudio Server on Headless Server](./rstudio-server_on_server.md).
+
+### Jupyter
+
+Run Jupyter Lab or Notebook on HPC. Use `-j notebook` for classic Notebook mode.
+
+```bash
+condatainer helper jupyter
+```
+
+### Desktop / GUI Apps
+
+| Tool | Description |
+|------|-------------|
+| [xfce4](./xfce4_on_HPC.md) | XFCE desktop session via VNC / noVNC, accessible through a browser |
+| [igv](./xfce4_on_HPC.md) | XFCE desktop with IGV (Integrative Genomics Viewer) via noVNC |
