@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ type LsfScheduler struct {
 	bsubBin     string
 	bjobsBin    string
 	bhostsBin   string
+	bqueuesBin  string
 	directiveRe *regexp.Regexp
 	jobIDRe     *regexp.Regexp
 }
@@ -57,11 +59,13 @@ func newLsfSchedulerWithBinary(bsubBin string) (*LsfScheduler, error) {
 
 	bjobsCmd, _ := exec.LookPath("bjobs")
 	bhostsCmd, _ := exec.LookPath("bhosts")
+	bqueuesCmd, _ := exec.LookPath("bqueues")
 
 	return &LsfScheduler{
 		bsubBin:     binPath,
 		bjobsBin:    bjobsCmd,
 		bhostsBin:   bhostsCmd,
+		bqueuesBin:  bqueuesCmd,
 		directiveRe: regexp.MustCompile(`^\s*#BSUB\s+(.+)$`),
 		jobIDRe:     regexp.MustCompile(`Job <(\d+)> is submitted`),
 	}, nil
@@ -624,6 +628,14 @@ func (l *LsfScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		}
 	}
 
+	// Get queue limits
+	if l.bqueuesBin != "" {
+		limits, err := l.getQueueLimits(info.AvailableGpus)
+		if err == nil {
+			info.Limits = limits
+		}
+	}
+
 	if info.MaxCpusPerNode == 0 && info.MaxMemMBPerNode == 0 && len(info.AvailableGpus) == 0 {
 		return nil, ErrClusterInfoUnavailable
 	}
@@ -660,6 +672,112 @@ func (l *LsfScheduler) getHostResources() (int, int64, error) {
 	}
 
 	return maxCpus, maxMemMB, nil
+}
+
+// getQueueLimits queries LSF for queue resource limits using bqueues
+func (l *LsfScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, error) {
+	cmd := exec.Command(l.bqueuesBin, "-l")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, NewClusterError("LSF", "query queues", err)
+	}
+
+	queueLimits := make(map[string]*ResourceLimits)
+	var currentQueue string
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Queue name line starts with "QUEUE: "
+		if strings.HasPrefix(line, "QUEUE: ") {
+			currentQueue = strings.TrimSpace(strings.TrimPrefix(line, "QUEUE:"))
+			if currentQueue != "" {
+				queueLimits[currentQueue] = &ResourceLimits{
+					Partition: currentQueue,
+				}
+			}
+			continue
+		}
+
+		// Skip if no current queue
+		if currentQueue == "" {
+			continue
+		}
+
+		limit := queueLimits[currentQueue]
+
+		// Parse RUNLIMIT (walltime)
+		if strings.Contains(line, "RUNLIMIT") {
+			// Format: "RUNLIMIT  600.0 min"
+			fields := strings.Fields(line)
+			for i, field := range fields {
+				if field == "RUNLIMIT" && i+1 < len(fields) {
+					// Parse value and unit
+					var minutes float64
+					if _, err := fmt.Sscanf(fields[i+1], "%f", &minutes); err == nil {
+						limit.MaxTime = time.Duration(minutes * 60 * float64(time.Second))
+					}
+					break
+				}
+			}
+		}
+
+		// Parse MEMLIMIT (per-process memory limit)
+		if strings.Contains(line, "MEMLIMIT") {
+			fields := strings.Fields(line)
+			for i, field := range fields {
+				if field == "MEMLIMIT" && i+1 < len(fields) {
+					// Parse memory value (in MB)
+					var memMB int64
+					if _, err := fmt.Sscanf(fields[i+1], "%d", &memMB); err == nil && memMB > 0 {
+						limit.MaxMemMB = memMB
+					}
+					break
+				}
+			}
+		}
+
+		// Parse CPULIMIT or PROCLIMIT
+		if strings.Contains(line, "PROCLIMIT") {
+			fields := strings.Fields(line)
+			for i, field := range fields {
+				if field == "PROCLIMIT" && i+1 < len(fields) {
+					var procs int
+					if _, err := fmt.Sscanf(fields[i+1], "%d", &procs); err == nil && procs > 0 {
+						limit.MaxCpus = procs
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// Convert map to slice
+	limits := make([]ResourceLimits, 0, len(queueLimits))
+
+	// Calculate total GPU count across all nodes
+	// Note: LSF typically uses a global GPU pool rather than per-queue allocation
+	totalGpus := 0
+	for _, gpu := range gpuInfo {
+		totalGpus += gpu.Total
+	}
+
+	for _, limit := range queueLimits {
+		// Assign total GPU count to each queue
+		// This is a simplification - actual per-queue GPU limits may differ
+		if totalGpus > 0 {
+			limit.MaxGpus = totalGpus
+		}
+		limits = append(limits, *limit)
+	}
+
+	// Sort by queue name for consistent output
+	sort.Slice(limits, func(i, j int) bool {
+		return limits[i].Partition < limits[j].Partition
+	})
+
+	return limits, nil
 }
 
 // parseLsfTime parses LSF walltime format
