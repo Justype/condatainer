@@ -385,7 +385,7 @@ func TestHTCondorResourceParsing(t *testing.T) {
 			wantCpus:  4,
 			wantMemMB: 8192,
 			wantGpus:  0,
-			wantTime:  0,
+			wantTime:  4 * time.Hour, // default
 		},
 		{
 			name: "Memory with MB suffix",
@@ -393,10 +393,10 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#CONDOR request_memory = 4096MB",
 			},
-			wantCpus:  4, // default
+			wantCpus:  2,    // default
 			wantMemMB: 4096,
 			wantGpus:  0,
-			wantTime:  0,
+			wantTime:  4 * time.Hour, // default
 		},
 		{
 			name: "Plain memory (default MB)",
@@ -404,10 +404,10 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#CONDOR request_memory = 2048",
 			},
-			wantCpus:  4, // default
+			wantCpus:  2,    // default
 			wantMemMB: 2048,
 			wantGpus:  0,
-			wantTime:  0,
+			wantTime:  4 * time.Hour, // default
 		},
 		{
 			name: "Only CPUs",
@@ -416,9 +416,9 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"#CONDOR request_cpus = 16",
 			},
 			wantCpus:  16,
-			wantMemMB: 0,
+			wantMemMB: 8192, // default
 			wantGpus:  0,
-			wantTime:  0,
+			wantTime:  4 * time.Hour, // default
 		},
 		{
 			name: "Only GPUs",
@@ -426,10 +426,10 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#CONDOR request_gpus = 4",
 			},
-			wantCpus:  4, // default
-			wantMemMB: 0,
+			wantCpus:  2,    // default
+			wantMemMB: 8192, // default
 			wantGpus:  4,
-			wantTime:  0,
+			wantTime:  4 * time.Hour, // default
 		},
 		{
 			name: "Time in seconds",
@@ -437,8 +437,8 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#CONDOR +MaxRuntime = 86400",
 			},
-			wantCpus:  4, // default
-			wantMemMB: 0,
+			wantCpus:  2,    // default
+			wantMemMB: 8192, // default
 			wantGpus:  0,
 			wantTime:  24 * time.Hour,
 		},
@@ -448,10 +448,10 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"echo hello",
 			},
-			wantCpus:  4, // default
-			wantMemMB: 0,
+			wantCpus:  2,             // default
+			wantMemMB: 8192,          // default
 			wantGpus:  0,
-			wantTime:  0,
+			wantTime:  4 * time.Hour, // default
 		},
 	}
 
@@ -693,6 +693,64 @@ func TestHTCondorTimeParsing(t *testing.T) {
 			}
 			if specs.Time != tt.wantTime {
 				t.Errorf("Time = %v; want %v", specs.Time, tt.wantTime)
+			}
+		})
+	}
+}
+
+func TestHTCondorDefaultNodesTasks(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+	}{
+		{
+			name: "with resources",
+			lines: []string{
+				"#!/bin/bash",
+				"#CONDOR request_cpus = 8",
+				"#CONDOR request_memory = 16384",
+			},
+		},
+		{
+			name: "no directives",
+			lines: []string{
+				"#!/bin/bash",
+				"echo hello",
+			},
+		},
+		{
+			name: "full job",
+			lines: []string{
+				"#!/bin/bash",
+				"#CONDOR request_cpus = 16",
+				"#CONDOR request_memory = 32768",
+				"#CONDOR request_gpus = 2",
+				"#CONDOR +MaxRuntime = 3600",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			scriptPath := filepath.Join(tmpDir, "test.sh")
+			content := strings.Join(tt.lines, "\n")
+			if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
+				t.Fatalf("Failed to create test script: %v", err)
+			}
+
+			htcondor := newTestHTCondorScheduler()
+			specs, err := htcondor.ReadScriptSpecs(scriptPath)
+			if err != nil {
+				t.Fatalf("Failed to parse script: %v", err)
+			}
+
+			// HTCondor is inherently single-node, so Nodes and Ntasks should always be 1
+			if specs.Nodes != 1 {
+				t.Errorf("Nodes = %d; want 1", specs.Nodes)
+			}
+			if specs.Ntasks != 1 {
+				t.Errorf("Ntasks = %d; want 1", specs.Ntasks)
 			}
 		})
 	}

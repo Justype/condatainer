@@ -143,8 +143,13 @@ func (h *HTCondorScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, er
 	}
 	defer file.Close()
 
+	defaults := GetSpecDefaults()
 	specs := &ScriptSpecs{
-		Ncpus:    4, // default
+		Ncpus:    defaults.Ncpus,
+		Ntasks:   defaults.Ntasks,
+		Nodes:    defaults.Nodes,
+		MemMB:    defaults.MemMB,
+		Time:     defaults.Time,
 		RawFlags: make([]string, 0),
 	}
 
@@ -250,6 +255,14 @@ func (h *HTCondorScheduler) parseCondorDirective(flag string, specs *ScriptSpecs
 // CreateScriptWithSpec generates an HTCondor submit description file and wrapper script
 func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) (string, error) {
 	specs := jobSpec.Specs
+
+	// Normalize node/task defaults (HTCondor is inherently single-node)
+	if specs.Nodes <= 0 {
+		specs.Nodes = 1
+	}
+	if specs.Ntasks <= 0 {
+		specs.Ntasks = 1
+	}
 
 	// Create output directory if specified
 	if outputDir != "" {

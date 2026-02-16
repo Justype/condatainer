@@ -68,7 +68,9 @@ type ClusterInfo struct {
 // ScriptSpecs holds the specifications parsed from a job script
 type ScriptSpecs struct {
 	JobName      string        // Job name
-	Ncpus        int           // Number of CPUs
+	Ncpus        int           // Number of CPUs per task
+	Ntasks       int           // Number of tasks (default 1)
+	Nodes        int           // Number of nodes (default 1)
 	MemMB        int64         // Memory in MB
 	Time         time.Duration // Time limit
 	Stdout       string        // Standard output file path
@@ -79,6 +81,36 @@ type ScriptSpecs struct {
 	EmailOnFail  bool          // Send email when job fails/aborts (SLURM: FAIL, PBS: a)
 	MailUser     string        // Username or email address for notifications (empty = submitting user)
 	RawFlags     []string      // Raw scheduler-specific flags (e.g., #SBATCH, #PBS)
+}
+
+// SpecDefaults holds configurable default values for ScriptSpecs.
+// These are used by ReadScriptSpecs when a script does not specify a resource.
+// Set via SetSpecDefaults() during CLI initialization from config.
+type SpecDefaults struct {
+	Ncpus  int
+	MemMB  int64
+	Time   time.Duration
+	Nodes  int
+	Ntasks int
+}
+
+// specDefaults is the package-level defaults used by all schedulers.
+var specDefaults = SpecDefaults{
+	Ncpus:  2,
+	MemMB:  8192,
+	Time:   4 * time.Hour,
+	Nodes:  1,
+	Ntasks: 1,
+}
+
+// SetSpecDefaults overrides the default values used by ReadScriptSpecs.
+func SetSpecDefaults(d SpecDefaults) {
+	specDefaults = d
+}
+
+// GetSpecDefaults returns the current default values for ScriptSpecs.
+func GetSpecDefaults() SpecDefaults {
+	return specDefaults
 }
 
 // JobSpec represents specifications for submitting a batch job
@@ -93,9 +125,11 @@ type JobSpec struct {
 // JobResources holds resource allocations for the currently running scheduler job.
 // A nil pointer field means the scheduler did not expose that resource via environment variables.
 type JobResources struct {
-	Ncpus *int   // Number of allocated CPUs
-	MemMB *int64 // Allocated memory in MB
-	Ngpus *int   // Number of allocated GPUs
+	Ncpus  *int   // Number of allocated CPUs per task
+	Ntasks *int   // Number of allocated tasks
+	Nodes  *int   // Number of allocated nodes
+	MemMB  *int64 // Allocated memory in MB
+	Ngpus  *int   // Number of allocated GPUs
 }
 
 // Scheduler defines the interface for job schedulers

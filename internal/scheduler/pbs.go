@@ -127,8 +127,13 @@ func (p *PbsScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) 
 	}
 	defer file.Close()
 
+	defaults := GetSpecDefaults()
 	specs := &ScriptSpecs{
-		Ncpus:    4, // default
+		Ncpus:    defaults.Ncpus,
+		Ntasks:   defaults.Ntasks,
+		Nodes:    defaults.Nodes,
+		MemMB:    defaults.MemMB,
+		Time:     defaults.Time,
 		RawFlags: make([]string, 0),
 	}
 
@@ -231,13 +236,32 @@ func (p *PbsScheduler) parseResourceList(resourceStr string, specs *ScriptSpecs)
 			continue
 		}
 
-		// Handle select= which contains colon-separated resources
+		// Handle select=N:ncpus=M:mpiprocs=P:mem=X format
 		if strings.HasPrefix(res, "select=") {
 			selectParts := strings.Split(res, ":")
+			var mpiprocs int
 			for _, part := range selectParts {
-				if err := p.parseSingleResource(part, specs); err != nil {
-					return err
+				// Extract chunk count (node count) from select=N
+				if strings.HasPrefix(part, "select=") {
+					selectVal := strings.TrimPrefix(part, "select=")
+					if n, err := strconv.Atoi(selectVal); err == nil {
+						specs.Nodes = n
+					}
+				} else if strings.HasPrefix(part, "mpiprocs=") {
+					// mpiprocs is tasks per chunk (per node)
+					mpStr := strings.TrimPrefix(part, "mpiprocs=")
+					if mp, err := strconv.Atoi(mpStr); err == nil {
+						mpiprocs = mp
+					}
+				} else {
+					if err := p.parseSingleResource(part, specs); err != nil {
+						return err
+					}
 				}
+			}
+			// Compute total tasks from nodes * mpiprocs
+			if mpiprocs > 0 {
+				specs.Ntasks = specs.Nodes * mpiprocs
 			}
 			continue
 		}
@@ -246,7 +270,12 @@ func (p *PbsScheduler) parseResourceList(resourceStr string, specs *ScriptSpecs)
 		if strings.HasPrefix(res, "nodes=") {
 			nodeParts := strings.Split(res, ":")
 			for _, part := range nodeParts {
-				if strings.HasPrefix(part, "ppn=") {
+				if strings.HasPrefix(part, "nodes=") {
+					nodesStr := strings.TrimPrefix(part, "nodes=")
+					if n, err := strconv.Atoi(nodesStr); err == nil {
+						specs.Nodes = n
+					}
+				} else if strings.HasPrefix(part, "ppn=") {
 					ppnStr := strings.TrimPrefix(part, "ppn=")
 					if ppn, err := strconv.Atoi(ppnStr); err == nil {
 						specs.Ncpus = ppn
@@ -349,6 +378,14 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	// Write shebang
 	fmt.Fprintln(writer, "#!/bin/bash")
 
+	// Normalize node/task defaults
+	if specs.Nodes <= 0 {
+		specs.Nodes = 1
+	}
+	if specs.Ntasks <= 0 {
+		specs.Ntasks = 1
+	}
+
 	// Write parsed PBS directives with overrides
 	for _, flag := range specs.RawFlags {
 		// Skip output/error flags if we're overriding them
@@ -367,6 +404,16 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		if strings.HasPrefix(flag, "-m ") || strings.HasPrefix(flag, "-M ") {
 			continue
 		}
+		// Skip resource flags that we'll regenerate (select=, nodes=, walltime=)
+		if strings.HasPrefix(flag, "-l ") {
+			resourceStr := strings.TrimSpace(strings.TrimPrefix(flag, "-l"))
+			if strings.HasPrefix(resourceStr, "select=") || strings.HasPrefix(resourceStr, "nodes=") {
+				continue
+			}
+			if strings.HasPrefix(resourceStr, "walltime=") && specs.Time > 0 {
+				continue
+			}
+		}
 		fmt.Fprintf(writer, "#PBS %s\n", flag)
 	}
 
@@ -378,6 +425,33 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	// Add custom stdout if specified (stderr is not used - output goes to stdout)
 	if specs.Stdout != "" {
 		fmt.Fprintf(writer, "#PBS -o %s\n", specs.Stdout)
+	}
+
+	// Generate resource specification: select=N:ncpus=M[:mpiprocs=P][:mem=Xmb][:ngpus=G]
+	selectParts := []string{fmt.Sprintf("select=%d", specs.Nodes)}
+	if specs.Ncpus > 0 {
+		selectParts = append(selectParts, fmt.Sprintf("ncpus=%d", specs.Ncpus))
+	}
+	if specs.Ntasks > 1 && specs.Nodes > 0 {
+		mpiprocs := specs.Ntasks / specs.Nodes
+		if mpiprocs > 1 {
+			selectParts = append(selectParts, fmt.Sprintf("mpiprocs=%d", mpiprocs))
+		}
+	}
+	if specs.MemMB > 0 {
+		selectParts = append(selectParts, fmt.Sprintf("mem=%dmb", specs.MemMB))
+	}
+	if specs.Gpu != nil && specs.Gpu.Count > 0 {
+		selectParts = append(selectParts, fmt.Sprintf("ngpus=%d", specs.Gpu.Count))
+	}
+	fmt.Fprintf(writer, "#PBS -l %s\n", strings.Join(selectParts, ":"))
+
+	// Generate walltime
+	if specs.Time > 0 {
+		hours := int(specs.Time.Hours())
+		mins := int(specs.Time.Minutes()) % 60
+		secs := int(specs.Time.Seconds()) % 60
+		fmt.Fprintf(writer, "#PBS -l walltime=%02d:%02d:%02d\n", hours, mins, secs)
 	}
 
 	// Add email notifications if specified
@@ -408,8 +482,14 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	fmt.Fprintln(writer, "echo \"========================================\"")
 	fmt.Fprintln(writer, "echo \"Job ID:    $PBS_JOBID\"")
 	fmt.Fprintf(writer, "echo \"Job Name:  %s\"\n", specs.JobName)
+	if specs.Nodes > 1 {
+		fmt.Fprintf(writer, "echo \"Nodes:     %d\"\n", specs.Nodes)
+	}
+	if specs.Ntasks > 1 {
+		fmt.Fprintf(writer, "echo \"Tasks:     %d\"\n", specs.Ntasks)
+	}
 	if specs.Ncpus > 0 {
-		fmt.Fprintf(writer, "echo \"CPUs:      %d\"\n", specs.Ncpus)
+		fmt.Fprintf(writer, "echo \"CPUs/Task: %d\"\n", specs.Ncpus)
 	}
 	if specs.MemMB > 0 {
 		fmt.Fprintf(writer, "echo \"Memory:    %d MB\"\n", specs.MemMB)
@@ -778,6 +858,11 @@ func (s *PbsScheduler) GetJobResources() *JobResources {
 	res.Ncpus = getEnvInt("PBS_NCPUS")
 	if res.Ncpus == nil {
 		res.Ncpus = getEnvInt("NCPUS")
+	}
+	res.Nodes = getEnvInt("PBS_NUM_NODES")
+	res.Ntasks = getEnvInt("PBS_NP")
+	if res.Ntasks == nil {
+		res.Ntasks = getEnvInt("PBS_TASKNUM")
 	}
 	// PBS_VMEM is in bytes
 	if vmem := getEnvInt64("PBS_VMEM"); vmem != nil {
