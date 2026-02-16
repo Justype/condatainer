@@ -252,7 +252,7 @@ Shows:
 			fmt.Printf("  submit_job:     %v\n", submitJobActual)
 		}
 		fmt.Printf("  branch:         %s\n", viper.GetString("branch"))
-		fmt.Printf("  prefer_remote:    %v\n", config.Global.PreferRemote)
+		fmt.Printf("  prefer_remote:  %v\n", config.Global.PreferRemote)
 		fmt.Println()
 
 		// Scheduler default specs
