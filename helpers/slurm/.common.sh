@@ -43,6 +43,12 @@ config_load() {
     if [ -f "$f" ]; then
         source "$f"
         CWD=$(readlink -f .)
+        # Auto-save config defaults with _CONFIG_ prefix for comparison in print_specs
+        local key
+        while IFS='=' read -r key _; do
+            [[ -z "$key" || "$key" =~ ^# ]] && continue
+            printf -v "_CONFIG_${key}" '%s' "${!key}"
+        done < "$f"
         return 0
     fi
     return 1
@@ -166,8 +172,9 @@ build_overlays_arg() {
 #   Prompts the user with [Y/n]. Returns 0 if yes (default), 1 if no.
 confirm_default_yes() {
     local prompt="$1"
+    local prompt_hint="${2:-Y/n}"
     local resp
-    read -p "[MSG] $prompt [Y/n] " resp
+    read -p "[MSG] $prompt [$prompt_hint] " resp
     case "$resp" in
         ""|[Yy]*) return 0 ;;
         *) return 1 ;;
@@ -330,23 +337,73 @@ check_and_install_overlays() {
 
 # ============= SLURM Functions =============
 
+# spec_line <label> <VAR_NAME>
+#   Prints one spec line. Shows "(default: X)" if value differs from
+#   config default and was not set via CLI (_ARG_ prefix).
+spec_line() {
+    local label="$1" var="$2"
+    local val="${!var}"
+    [ -z "$val" ] && return
+
+    local arg_var="_ARG_${var}"
+    local config_var="_CONFIG_${var}"
+    local note=""
+
+    if [ -z "${!arg_var:-}" ] && [ -n "${!config_var:-}" ] && [ "$val" != "${!config_var}" ]; then
+        note=" (default: ${!config_var})"
+    elif [ -n "${!config_var:-}" ]; then
+        note=" (default)"
+    fi
+
+    local current_len=$(( ${#label} + ${#val} + 4 )) # 4 for beginning space and ": "
+    local pad_width=22
+    local spaces=""
+
+    if [ "$current_len" -lt "$pad_width" ]; then
+        local diff=$(( pad_width - current_len ))
+        spaces=$(printf '%*s' "$diff" "")
+    fi
+
+    # 3. Print with the padding between value and note
+    print_msg "  ${label}: ${BLUE}${val}${NC}${spaces}${note}"
+}
+
 # print_specs
-#   Prints the current job settings. Override this in your helper script for custom output.
+#   Prints all current job settings. Override in helper scripts for custom fields.
 print_specs() {
-    print_msg "  CPUs: ${BLUE}$NCPUS${NC} MEM: ${BLUE}$MEM${NC} TIME: ${BLUE}$TIME${NC}"
-    [ -n "$GPU" ] && print_msg "  GPU: ${BLUE}$GPU${NC}"
-    [ -n "$PORT" ] && print_msg "  Port: ${BLUE}$PORT${NC}"
-    print_msg "  Working Dir: ${BLUE}$CWD${NC}"
-    [ -n "$BASE_IMAGE" ] && print_msg "  Base Image: ${BLUE}$BASE_IMAGE${NC}"
-    print_msg "  Overlay: ${BLUE}$OVERLAY${NC}"
+    spec_line "CPUs" NCPUS
+    spec_line "MEM" MEM
+    spec_line "TIME" TIME
+    spec_line "GPU" GPU
+    spec_line "Port" PORT
+    local cwd_hint=""
+    local current_dir=$(readlink -f .)
+    [ "$CWD" != "$current_dir" ] && cwd_hint=" (use -w for current dir)"
+    print_msg "  Working Dir: ${BLUE}$CWD${NC}${cwd_hint}"
+    spec_line "Base Image" BASE_IMAGE
+    spec_line "Overlay" OVERLAY
     [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
 }
 
+# countdown [seconds]
+#   Prints a countdown with Ctrl+C hint, overwriting the same line each tick.
+countdown() {
+    local secs="${1:-3}"
+    while [ "$secs" -gt 0 ]; do
+        printf "\r[MSG] Press Ctrl+C to cancel %d " "$secs"
+        sleep 1
+        secs=$((secs - 1))
+    done
+    printf "\r\033[K"
+}
+
+# Flag: set to true when print_specs already displayed specs
+_SPECS_SHOWN=false
+
 # handle_reuse_mode <helper_name>
 #   Handles the REUSE_MODE logic when a previous job is not running (case 3).
-#   Checks REUSE_MODE and either reuses settings or loads fresh config.
+#   with CLI overrides. Otherwise checks REUSE_MODE to decide.
 #   Sets global REUSE_PREVIOUS_CWD=true if reusing, false otherwise.
-#   For scripts with PORT variable, preserves port when loading fresh config.
 handle_reuse_mode() {
     local helper_name="$1"
 
@@ -355,63 +412,38 @@ handle_reuse_mode() {
         return
     fi
 
-    # Check REUSE_MODE config
+    # CLI args given - keep state values with CLI overrides, no prompt
+    if [ "${OPTIND:-1}" -gt 1 ]; then
+        REUSE_PREVIOUS_CWD=true
+        return
+    fi
+
     case "${REUSE_MODE,,}" in  # Convert to lowercase
         always)
             print_info "Auto-reusing previous settings (REUSE_MODE=always)."
-            print_msg "Previous run used:"
-            print_specs
             REUSE_PREVIOUS_CWD=true
-            ;;
-        ask)
-            print_msg "Previous run used:"
-            print_specs
-            if confirm_default_yes "Reuse these settings and go to the previous working directory?"; then
-                REUSE_PREVIOUS_CWD=true
-            else
-                # Preserve port if it exists
-                local PRE_PORT="${PORT:-}"
-                config_load "$helper_name"
-                OVERLAYS="" # Reset overlays since we are loading fresh config
-                if [ -n "$PRE_PORT" ] && [ -z "$PORT" ]; then
-                    PORT="$PRE_PORT"
-                    print_info "Using default settings with previously selected port: ${BLUE}$PORT${NC}"
-                else
-                    print_info "Using default settings."
-                fi
-            fi
             ;;
         never)
             print_info "Not reusing previous settings (REUSE_MODE=never)."
-            # Preserve port if it exists
-            local PRE_PORT="${PORT:-}"
             config_load "$helper_name"
-            OVERLAYS="" # Reset overlays since we are loading fresh config
-            if [ -n "$PRE_PORT" ] && [ -z "$PORT" ]; then
-                PORT="$PRE_PORT"
-                print_info "Using default settings with previously selected port: ${BLUE}$PORT${NC}"
-            else
-                print_info "Using default settings."
-            fi
+            OVERLAYS=""
             rm "$STATE_FILE"
             ;;
         *)
-            print_warn "Invalid REUSE_MODE='$REUSE_MODE'. Defaulting to 'ask'."
-            print_msg "Previous run used:"
+            if [ "${REUSE_MODE,,}" != "ask" ]; then
+                print_warn "Invalid REUSE_MODE='$REUSE_MODE'. Defaulting to 'ask'."
+            fi
+            print_msg "Previous settings:"
             print_specs
-            if confirm_default_yes "Reuse these settings and go to the previous working directory?"; then
+            if confirm_default_yes "Reuse?" "Y: accept / n: defaults / Ctrl+C: cancel"; then
                 REUSE_PREVIOUS_CWD=true
+                _SPECS_SHOWN=true
             else
-                # Preserve port if it exists
-                local PRE_PORT="${PORT:-}"
                 config_load "$helper_name"
-                OVERLAYS="" # Reset overlays since we are loading fresh config
-                if [ -n "$PRE_PORT" ] && [ -z "$PORT" ]; then
-                    PORT="$PRE_PORT"
-                    print_info "Using default settings with previously selected port: ${BLUE}$PORT${NC}"
-                else
-                    print_info "Using default settings."
-                fi
+                OVERLAYS=""
+                print_msg "Using default settings:"
+                print_specs
+                _SPECS_SHOWN=true
             fi
             ;;
     esac
