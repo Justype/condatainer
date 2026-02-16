@@ -16,8 +16,6 @@ type execCommand struct {
 	cobra.Command
 }
 
-func (c *execCommand) InitDefaultHelpFlag() {}
-
 var execFlags CommonFlags
 
 var execCmd = &execCommand{
