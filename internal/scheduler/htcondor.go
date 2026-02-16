@@ -17,11 +17,12 @@ import (
 // HTCondorScheduler implements the Scheduler interface for HTCondor
 // EXPERIMENTAL: HTCondor is not tested on real clusters and may have edge cases. Feedback welcome.
 type HTCondorScheduler struct {
-	condorSubmitBin string
-	condorQBin      string
-	condorStatusBin string
-	directiveRe     *regexp.Regexp
-	jobIDRe         *regexp.Regexp
+	condorSubmitBin    string
+	condorQBin         string
+	condorStatusBin    string
+	condorConfigValBin string
+	directiveRe        *regexp.Regexp
+	jobIDRe            *regexp.Regexp
 }
 
 // NewHTCondorScheduler creates a new HTCondor scheduler instance using condor_submit from PATH
@@ -57,13 +58,15 @@ func newHTCondorSchedulerWithBinary(condorSubmitBin string) (*HTCondorScheduler,
 
 	condorQBin, _ := exec.LookPath("condor_q")
 	condorStatusBin, _ := exec.LookPath("condor_status")
+	condorConfigValBin, _ := exec.LookPath("condor_config_val")
 
 	return &HTCondorScheduler{
-		condorSubmitBin: binPath,
-		condorQBin:      condorQBin,
-		condorStatusBin: condorStatusBin,
-		directiveRe:     regexp.MustCompile(`^\s*#CONDOR\s+(.+)$`),
-		jobIDRe:         regexp.MustCompile(`submitted to cluster (\d+)`),
+		condorSubmitBin:    binPath,
+		condorQBin:         condorQBin,
+		condorStatusBin:    condorStatusBin,
+		condorConfigValBin: condorConfigValBin,
+		directiveRe:        regexp.MustCompile(`^\s*#CONDOR\s+(.+)$`),
+		jobIDRe:            regexp.MustCompile(`submitted to cluster (\d+)`),
 	}, nil
 }
 
@@ -489,6 +492,14 @@ func (h *HTCondorScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		info.AvailableGpus = gpus
 	}
 
+	// Get cluster limits (HTCondor uses global/accounting group limits rather than queues)
+	if h.condorConfigValBin != "" || h.condorStatusBin != "" {
+		limits, err := h.getClusterLimits(info.AvailableGpus, maxCpus, maxMem)
+		if err == nil {
+			info.Limits = limits
+		}
+	}
+
 	return info, nil
 }
 
@@ -573,6 +584,64 @@ func (h *HTCondorScheduler) getGpuInfo() ([]GpuInfo, error) {
 	}
 
 	return gpus, nil
+}
+
+// getClusterLimits queries HTCondor for cluster-wide resource limits
+// HTCondor doesn't have partitions/queues like other schedulers, but uses accounting groups
+// and global limits. This function creates a "default" limit representing cluster resources.
+func (h *HTCondorScheduler) getClusterLimits(gpuInfo []GpuInfo, maxCpus int, maxMemMB int64) ([]ResourceLimits, error) {
+	limit := &ResourceLimits{
+		Partition: "default",
+	}
+
+	// Use the max node resources as baseline
+	if maxCpus > 0 {
+		limit.MaxCpus = maxCpus
+	}
+	if maxMemMB > 0 {
+		limit.MaxMemMB = maxMemMB
+	}
+
+	// Try to get max walltime from config if condor_config_val is available
+	if h.condorConfigValBin != "" {
+		if maxTime, err := h.getConfigValue("MAX_JOB_RUNTIME"); err == nil && maxTime != "" {
+			// MAX_JOB_RUNTIME is in seconds
+			if seconds, err := strconv.ParseInt(maxTime, 10, 64); err == nil && seconds > 0 {
+				limit.MaxTime = time.Duration(seconds) * time.Second
+			}
+		}
+	}
+
+	// Calculate total GPU count
+	totalGpus := 0
+	for _, gpu := range gpuInfo {
+		totalGpus += gpu.Total
+	}
+	if totalGpus > 0 {
+		limit.MaxGpus = totalGpus
+	}
+
+	// If we have any limits set, return them
+	if limit.MaxCpus > 0 || limit.MaxMemMB > 0 || limit.MaxTime > 0 || limit.MaxGpus > 0 {
+		return []ResourceLimits{*limit}, nil
+	}
+
+	return []ResourceLimits{}, nil
+}
+
+// getConfigValue queries HTCondor configuration for a specific parameter
+func (h *HTCondorScheduler) getConfigValue(param string) (string, error) {
+	if h.condorConfigValBin == "" {
+		return "", fmt.Errorf("condor_config_val not available")
+	}
+
+	cmd := exec.Command(h.condorConfigValBin, param)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(string(output)), nil
 }
 
 // GetJobResources reads allocated resources from HTCondor environment variables.
