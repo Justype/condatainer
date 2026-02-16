@@ -282,9 +282,7 @@ CLEAN_ID=\$(echo \$PBS_JOBID | cut -d'.' -f1)
 CUSTOM_LOG="$LOG_DIR/${HELPER_NAME}-\${CLEAN_ID}.log"
 exec &> "\$CUSTOM_LOG"
 
-# Remove the script after job submission
-rm "$PBS_SCRIPT_PATH"
-
+while ! grep -q "^JOB_ID=" "$STATE_FILE" 2>/dev/null; do sleep 1; done
 echo "NODE=\$(hostname)" >> "$STATE_FILE"
 
 condatainer exec \
@@ -306,6 +304,7 @@ condatainer exec \
         --auth-none=1
 EOT
 
+rm -f "$STATE_FILE"
 PBS_JOB_ID=$(qsub "$PBS_SCRIPT_PATH")
 
 cat > "$STATE_FILE" <<RUNSTATE
@@ -321,4 +320,5 @@ OVERLAYS="$OVERLAYS"
 RUNSTATE
 
 wait_for_job "$PBS_JOB_ID"
+rm "$PBS_SCRIPT_PATH" # Clean up when success
 show_and_connect "$PBS_JOB_ID"
