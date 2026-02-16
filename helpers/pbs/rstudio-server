@@ -273,7 +273,7 @@ CWD_FOLDER_NAME=$(basename $CWD)
 RPROJECT_FILE="$CWD/$CWD_FOLDER_NAME.Rproj"
 if ! [ -f "$RPROJECT_FILE" ]; then
     print_info "Creating RStudio project file at ${BLUE}$RPROJECT_FILE${NC}."
-    cat <<EOT > $RPROJECT_FILE
+    cat <<EOT > "$RPROJECT_FILE"
 Version: 1.0
 
 RestoreWorkspace: Default
@@ -299,7 +299,7 @@ EOT
         print_info "Copied Rprofile to ${BLUE}$CWD/.Rprofile${NC} (overwritten if existed)."
     fi
 fi
-cat <<EOT > $HELPER_STATE_DIR/rsession.sh
+cat <<EOT > "$HELPER_STATE_DIR/rsession.sh"
 #!/bin/bash
 
 USER=`whoami`
@@ -321,18 +321,18 @@ export NCPUS=$NCPUS
 /usr/lib/rstudio-server/bin/rsession "\$@"
 EOT
 chmod +x $HELPER_STATE_DIR/rsession.sh
-cat <<EOT > $HELPER_STATE_DIR/rsession.conf
+cat <<EOT > "$HELPER_STATE_DIR/rsession.conf"
 copilot-enabled=1
 session-default-working-dir=$CWD
 EOT
-cat <<EOT > $HELPER_STATE_DIR/database.conf
+cat <<EOT > "$HELPER_STATE_DIR/database.conf"
 provider=sqlite
 directory=$SCRATCH/.local/lib/rstudio-server
 EOT
 
 PBS_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.qsub"
 
-cat <<EOT > $PBS_SCRIPT_PATH
+cat <<EOT > "$PBS_SCRIPT_PATH"
 #!/bin/bash
 #PBS -N $HELPER_NAME
 #PBS -l $PBS_RESOURCES
@@ -346,7 +346,7 @@ CUSTOM_LOG="$LOG_DIR/${HELPER_NAME}-\${CLEAN_ID}.log"
 exec &> "\$CUSTOM_LOG"
 
 # Remove the script after job submission
-rm $PBS_SCRIPT_PATH
+rm "$PBS_SCRIPT_PATH"
 
 echo "NODE=\$(hostname)" >> "$STATE_FILE"
 
@@ -369,9 +369,9 @@ condatainer exec \
         --auth-none=1
 EOT
 
-PBS_JOB_ID=$(qsub $PBS_SCRIPT_PATH)
+PBS_JOB_ID=$(qsub "$PBS_SCRIPT_PATH")
 
-cat > $STATE_FILE <<RUNSTATE
+cat > "$STATE_FILE" <<RUNSTATE
 JOB_ID=$PBS_JOB_ID
 NCPUS=$_NCPUS
 MEM=$_MEM

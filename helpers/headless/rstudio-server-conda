@@ -116,7 +116,7 @@ CWD_FOLDER_NAME=$(basename $CWD)
 RPROJECT_FILE="$CWD/$CWD_FOLDER_NAME.Rproj"
 if ! [ -f "$RPROJECT_FILE" ]; then
     print_info "Creating RStudio project file at ${BLUE}$RPROJECT_FILE${NC}."
-    cat <<EOT > $RPROJECT_FILE
+    cat <<EOT > "$RPROJECT_FILE"
 Version: 1.0
 
 RestoreWorkspace: Default
@@ -142,7 +142,7 @@ EOT
         print_info "Copied Rprofile to ${BLUE}$CWD/.Rprofile${NC} (overwritten if existed)."
     fi
 fi
-cat <<EOT > $HELPER_STATE_DIR/rsession-conda.sh
+cat <<EOT > "$HELPER_STATE_DIR/rsession-conda.sh"
 #!/bin/bash
 
 USER=`whoami`
@@ -162,12 +162,12 @@ export RETICULATE_PYTHON=/ext3/env/bin/python
 
 /usr/lib/rstudio-server/bin/rsession "\$@"
 EOT
-chmod +x $HELPER_STATE_DIR/rsession-conda.sh
-cat <<EOT > $HELPER_STATE_DIR/rsession-conda.conf
+chmod +x "$HELPER_STATE_DIR/rsession-conda.sh"
+cat <<EOT > "$HELPER_STATE_DIR/rsession-conda.conf"
 copilot-enabled=1
 session-default-working-dir=$CWD
 EOT
-cat <<EOT > $HELPER_STATE_DIR/database-conda.conf
+cat <<EOT > "$HELPER_STATE_DIR/database-conda.conf"
 provider=sqlite
 directory=$SCRATCH/.local/lib/rstudio-server
 EOT

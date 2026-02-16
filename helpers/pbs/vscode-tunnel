@@ -249,7 +249,7 @@ fi
 PBS_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.qsub"
 printf "" > "$AUTH_STATUS_FILE"
 
-cat <<EOT > $PBS_SCRIPT_PATH
+cat <<EOT > "$PBS_SCRIPT_PATH"
 #!/bin/bash
 #PBS -N $HELPER_NAME
 #PBS -l $PBS_RESOURCES
@@ -263,7 +263,7 @@ CUSTOM_LOG="$LOG_DIR/${HELPER_NAME}-\${CLEAN_ID}.log"
 exec &> "\$CUSTOM_LOG"
 
 # Remove the script after job submission
-rm $PBS_SCRIPT_PATH
+rm "$PBS_SCRIPT_PATH"
 
 echo "NODE=\$(hostname)" >> "$STATE_FILE"
 
@@ -282,9 +282,9 @@ condatainer exec \
 [ \$? -ne 0 ] && echo "ERROR" > "$AUTH_STATUS_FILE"
 EOT
 
-PBS_JOB_ID=$(qsub $PBS_SCRIPT_PATH)
+PBS_JOB_ID=$(qsub "$PBS_SCRIPT_PATH")
 
-cat > $STATE_FILE <<RUNSTATE
+cat > "$STATE_FILE" <<RUNSTATE
 JOB_ID=$PBS_JOB_ID
 NCPUS=$_NCPUS
 MEM=$_MEM

@@ -110,17 +110,17 @@ fi
 condatainer exec \
     $BASE_IMAGE_ARG \
     -o xfce4 \
-    bash -c "echo '$VNC_PASSWD' | vncpasswd -f > $HOME/.vnc/passwd && chmod 600 $HOME/.vnc/passwd"
+    bash -c "echo '$VNC_PASSWD' | vncpasswd -f > \"$HOME/.vnc/passwd\" && chmod 600 \"$HOME/.vnc/passwd\""
 
 # Create VNC xstartup script
-mkdir -p $HOME/.vnc
+mkdir -p "$HOME/.vnc"
 cat > "$HOME/.vnc/xstartup" <<'EOF'
 #!/bin/sh
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 exec dbus-launch --exit-with-session startxfce4
 EOF
-chmod +x $HOME/.vnc/xstartup
+chmod +x "$HOME/.vnc/xstartup"
 
 # Change XDG_* dirs to point under "$DESKTOP_HOME" (do not modify $HOME itself)
 # So it will not mess the $HOME dir up

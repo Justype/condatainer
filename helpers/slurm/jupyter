@@ -238,7 +238,7 @@ fi
 
 SBATCH_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.sbatch"
 
-cat <<EOT > $SBATCH_SCRIPT_PATH
+cat <<EOT > "$SBATCH_SCRIPT_PATH"
 #!/bin/bash
 #SBATCH --job-name=$HELPER_NAME
 #SBATCH --cpus-per-task=$NCPUS
@@ -248,7 +248,7 @@ ${GPU_SBATCH:+$GPU_SBATCH}
 #SBATCH --output=$LOG_DIR/$HELPER_NAME-%j.log
 
 # Remove the script after job submission
-rm $SBATCH_SCRIPT_PATH
+rm "$SBATCH_SCRIPT_PATH"
 
 echo "NODE=\$(hostname)" >> "$STATE_FILE"
 
@@ -263,10 +263,10 @@ condatainer exec \
         --IdentityProvider.token $TOKEN
 EOT
 
-SBATCH_OUTPUT=$(sbatch $SBATCH_SCRIPT_PATH)
+SBATCH_OUTPUT=$(sbatch "$SBATCH_SCRIPT_PATH")
 SBATCH_JOB_ID=$(echo $SBATCH_OUTPUT | awk '{print $4}')
 
-cat > $STATE_FILE <<RUNSTATE
+cat > "$STATE_FILE" <<RUNSTATE
 JOB_ID=$SBATCH_JOB_ID
 NCPUS=$_NCPUS
 MEM=$_MEM
