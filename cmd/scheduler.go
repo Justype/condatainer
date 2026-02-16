@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"sort"
+	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/Justype/condatainer/internal/config"
@@ -32,22 +35,38 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm", minutes)
 }
 
+var schedulerShowPartitions bool
+var schedulerShowCpuOnly bool
+var schedulerShowGpuOnly bool
+
 var schedulerCmd = &cobra.Command{
 	Use:   "scheduler",
 	Short: "Display scheduler information",
 	Long: `Display information about the detected job scheduler.
 
-Shows scheduler type (SLURM, PBS, etc.), binary path, version, and availability status.`,
+Shows scheduler type (SLURM, PBS, etc.), binary path, version, and availability status.
+Use -p to show per-partition resource limits.
+Use --cpu or --gpu to filter by node type.`,
 	Example: `  condatainer scheduler           # Show scheduler information
-  condatainer sched              # Short alias`,
+  condatainer scheduler -p        # Show per-partition limits
+  condatainer scheduler --gpu     # Show only GPU partitions
+  condatainer scheduler -p --cpu  # Show per-partition limits for CPU-only partitions`,
 	Run: runScheduler,
 }
 
 func init() {
 	rootCmd.AddCommand(schedulerCmd)
+	schedulerCmd.Flags().BoolVarP(&schedulerShowPartitions, "partitions", "p", false, "Show per-partition resource limits")
+	schedulerCmd.Flags().BoolVar(&schedulerShowCpuOnly, "cpu", false, "Show only CPU-only partitions (no GPUs)")
+	schedulerCmd.Flags().BoolVar(&schedulerShowGpuOnly, "gpu", false, "Show only GPU partitions")
 }
 
 func runScheduler(cmd *cobra.Command, args []string) {
+	// Auto-enable -p if --cpu or --gpu is set
+	if schedulerShowCpuOnly || schedulerShowGpuOnly {
+		schedulerShowPartitions = true
+	}
+
 	// Try to detect scheduler
 	sched, err := scheduler.DetectSchedulerWithBinary(config.Global.SchedulerBin)
 
@@ -100,33 +119,169 @@ func runScheduler(cmd *cobra.Command, args []string) {
 	// Try to get cluster info
 	clusterInfo, err := sched.GetClusterInfo()
 	if err == nil && clusterInfo != nil {
-		// Display max resource limits
-		maxLimits, _ := scheduler.ReadMaxSpecs(sched)
+		// Build GPU map by partition
+		gpusByPartition := make(map[string][]scheduler.GpuInfo)
+		for _, gpu := range clusterInfo.AvailableGpus {
+			partition := gpu.Partition
+			if partition == "" {
+				partition = "default"
+			}
+			gpusByPartition[partition] = append(gpusByPartition[partition], gpu)
+		}
 
-		// Determine max CPUs and memory (use partition limits if set, otherwise node info)
+		// Display per-partition limits if requested
+		if schedulerShowPartitions {
+			// Filter limits based on --cpu or --gpu flags (only for per-partition display)
+			filteredLimits := make([]scheduler.ResourceLimits, 0)
+			for _, limit := range clusterInfo.Limits {
+				partitionName := limit.Partition
+				if partitionName == "" {
+					partitionName = "default"
+				}
+
+				hasGpu := len(gpusByPartition[partitionName]) > 0
+
+				// Apply filters only if --cpu or --gpu is set
+				if schedulerShowCpuOnly && hasGpu {
+					continue // Skip GPU partitions when --cpu is set
+				}
+				if schedulerShowGpuOnly && !hasGpu {
+					continue // Skip CPU-only partitions when --gpu is set
+				}
+
+				filteredLimits = append(filteredLimits, limit)
+			}
+
+			if len(filteredLimits) > 0 {
+				fmt.Println()
+				if schedulerShowCpuOnly {
+					fmt.Println("Partition Resource Limits (CPU-only):")
+				} else if schedulerShowGpuOnly {
+					fmt.Println("Partition Resource Limits (GPU):")
+				} else {
+					fmt.Println("Partition Resource Limits:")
+				}
+				fmt.Println()
+
+				// Create table writer
+				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+				fmt.Fprintln(w, "PARTITION\tCPUs\tMEMORY\tTIME\tNODES\tGPU TYPES")
+				fmt.Fprintln(w, "---------\t----\t------\t----\t-----\t---------")
+				for _, limit := range filteredLimits {
+					partitionName := limit.Partition
+					if partitionName == "" {
+						partitionName = "default"
+					}
+
+					// Format values
+					cpuStr := "-"
+					if limit.MaxCpus > 0 {
+						cpuStr = fmt.Sprintf("%d", limit.MaxCpus)
+					}
+
+					memStr := "-"
+					if limit.MaxMemMB > 0 {
+						if limit.MaxMemMB >= 1024 {
+							memStr = fmt.Sprintf("%.0f GB", float64(limit.MaxMemMB)/1024)
+						} else {
+							memStr = fmt.Sprintf("%d MB", limit.MaxMemMB)
+						}
+					}
+
+					timeStr := "-"
+					if limit.MaxTime > 0 {
+						timeStr = formatDuration(limit.MaxTime)
+					}
+
+					nodesStr := "-"
+					if limit.MaxNodes > 0 {
+						nodesStr = fmt.Sprintf("%d", limit.MaxNodes)
+					}
+
+					// Collect GPU types for this partition
+					gpuTypesStr := "-"
+					if gpus, ok := gpusByPartition[partitionName]; ok && len(gpus) > 0 {
+						// Merge same GPU types
+						gpuMap := make(map[string]*scheduler.GpuInfo)
+						for _, gpu := range gpus {
+							if existing, ok := gpuMap[gpu.Type]; ok {
+								existing.Total += gpu.Total
+								existing.Available += gpu.Available
+							} else {
+								gpuCopy := gpu
+								gpuMap[gpu.Type] = &gpuCopy
+							}
+						}
+
+						// Sort GPU names
+						gpuNames := make([]string, 0, len(gpuMap))
+						for name := range gpuMap {
+							gpuNames = append(gpuNames, name)
+						}
+						sort.Strings(gpuNames)
+
+						// Format GPU types
+						gpuLines := make([]string, 0)
+						for _, gpuType := range gpuNames {
+							gpu := gpuMap[gpuType]
+							gpuLines = append(gpuLines, fmt.Sprintf("%s (%d/%d)", gpu.Type, gpu.Available, gpu.Total))
+						}
+						gpuTypesStr = strings.Join(gpuLines, "\n")
+					}
+
+					// Print row (handle multi-line GPU types)
+					if strings.Contains(gpuTypesStr, "\n") {
+						// Multiple GPU types - print first line with all data
+						gpuTypeLines := strings.Split(gpuTypesStr, "\n")
+						fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+							partitionName, cpuStr, memStr, timeStr, nodesStr, gpuTypeLines[0])
+						// Print remaining GPU types on separate rows
+						for i := 1; i < len(gpuTypeLines); i++ {
+							fmt.Fprintf(w, "\t\t\t\t\t%s\n", gpuTypeLines[i])
+						}
+					} else {
+						// Single or no GPU type - print normally
+						fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+							partitionName, cpuStr, memStr, timeStr, nodesStr, gpuTypesStr)
+					}
+				}
+
+				w.Flush()
+
+				return
+			}
+
+			// No partitions match the filter
+			fmt.Println()
+			if schedulerShowGpuOnly {
+				utils.PrintWarning("No GPU partitions available")
+			} else if schedulerShowCpuOnly {
+				utils.PrintWarning("No CPU-only partitions available")
+			}
+			return
+		}
+
+		// Display max resource limits (aggregated from all partitions)
 		maxCpus := 0
 		var maxMemMB int64 = 0
-		var maxTime = ""
+		var maxTime time.Duration = 0
 
-		if maxLimits != nil {
-			maxCpus = maxLimits.MaxCpus
-			maxMemMB = maxLimits.MaxMemMB
-			if maxLimits.MaxTime > 0 {
-				maxTime = formatDuration(maxLimits.MaxTime)
+		// Find max values across all partitions (not filtered)
+		for _, limit := range clusterInfo.Limits {
+			if limit.MaxCpus > maxCpus {
+				maxCpus = limit.MaxCpus
+			}
+			if limit.MaxMemMB > maxMemMB {
+				maxMemMB = limit.MaxMemMB
+			}
+			if limit.MaxTime > maxTime {
+				maxTime = limit.MaxTime
 			}
 		}
 
-		// Fall back to node resources if partition limits don't specify max
-		if maxCpus == 0 && clusterInfo.MaxCpusPerNode > 0 {
-			maxCpus = clusterInfo.MaxCpusPerNode
-		}
-		if maxMemMB == 0 && clusterInfo.MaxMemMBPerNode > 0 {
-			maxMemMB = clusterInfo.MaxMemMBPerNode
-		}
-
-		if maxCpus > 0 || maxMemMB > 0 || maxTime != "" {
+		if maxCpus > 0 || maxMemMB > 0 || maxTime > 0 {
 			fmt.Println()
-			fmt.Println("Max Resource Limits:")
+			fmt.Println("Max Resource Limits (across all partitions):")
 			if maxCpus > 0 {
 				fmt.Printf("  Max CPUs:   %s\n", utils.StyleNumber(fmt.Sprintf("%d", maxCpus)))
 			}
@@ -139,8 +294,8 @@ func runScheduler(cmd *cobra.Command, args []string) {
 				}
 				fmt.Printf("  Max Memory: %s\n", utils.StyleNumber(memStr))
 			}
-			if maxTime != "" {
-				fmt.Printf("  Max Time:   %s\n", utils.StyleNumber(maxTime))
+			if maxTime > 0 {
+				fmt.Printf("  Max Time:   %s\n", utils.StyleNumber(formatDuration(maxTime)))
 			}
 		}
 
