@@ -14,7 +14,8 @@ HPC scheduler abstraction layer providing a unified interface for job submission
 ## Architecture
 
 ```
-scheduler.go      Core interface, types, detection, cross-scheduler parsing
+scheduler.go      Core interface, types, detection, cross-scheduler parsing,
+                  ValidateAndConvertSpecs (resource auto-adjustment)
 registry.go       Thread-safe global active scheduler singleton
 error.go          Structured error types (validation, parse, submission, etc.)
 gpu.go            GPU compatibility database, tier matching, MIG profiles
@@ -51,6 +52,26 @@ type Scheduler interface {
 
 **JobResources** - Runtime-allocated resources (from env vars, pointer fields):
 - `Ncpus`, `Ntasks`, `Nodes`, `MemMB`, `Ngpus`
+
+## Key Functions
+
+**Resource Validation & Adjustment:**
+- `ValidateAndConvertSpecs(specs) → (err, cpuAdjusted, cpuMsg, gpuConverted, gpuMsg)` - Auto-adjusts CPUs/time, converts GPUs
+- `ValidateSpecs(specs, limits) → error` - Validates specs against single partition limits
+- `ValidateGpuAvailability(gpuSpec, clusterInfo) → error` - Checks GPU availability
+
+**GPU Conversion:**
+- `ConvertGpuSpec(requestedSpec, clusterInfo) → (*GpuSpec, error)` - Finds best compatible GPU
+- `FindCompatibleGpu(requestedSpec, clusterInfo) → ([]*GpuConversionOption, error)` - Returns all compatible options
+
+**Script Parsing:**
+- `ReadScriptSpecsFromPath(path) → (*ScriptSpecs, error)` - Parses with active scheduler
+- `ParseScriptAny(path) → (*ParsedScript, error)` - Cross-scheduler parsing
+
+**Convenience Wrappers:**
+- `SubmitJob(scheduler, scriptPath, deps) → (jobID, error)` - Single job submission
+- `SubmitJobs(scheduler, jobs, outputDir) → (jobIDs, error)` - Multi-job with dependencies
+- `ReadScript(scheduler, path)`, `ValidateScript(scheduler, path)`, `WriteScript(...)` - Helper aliases
 
 ## Configurable Defaults
 
@@ -129,6 +150,32 @@ jobs := []*scheduler.JobSpec{job1, job2, job3}
 jobIDs, err := scheduler.SubmitJobs(sched, jobs, outputDir)
 ```
 
+### Validation and Resource Auto-Adjustment
+
+`ValidateAndConvertSpecs` validates job specs against cluster limits and auto-adjusts resources when possible. Called automatically by `condatainer run` and build submissions.
+
+| Resource | Auto-Adjust | Notes |
+|----------|-------------|-------|
+| **CPUs** | ✓ Reduced | Time scaled proportionally; fails if adjusted time > limit |
+| **Memory** | ✗ Critical | Always fails if exceeded |
+| **Time** | ✗ Critical | Always fails if exceeded |
+| **GPUs** | ✓ Converted | Upgrades allowed; downgrades blocked if time limit set |
+
+```go
+// Auto-adjusts specs in-place
+validationErr, cpuAdjusted, cpuMsg, gpuConverted, gpuMsg := scheduler.ValidateAndConvertSpecs(specs)
+
+// Example warnings:
+// "CPUs: 32 → 16 (reduced to fit limit); Time: 4h → 8h (adjusted proportionally)"
+// "GPU: v100 → a100 (upgrade)"
+```
+
+**Key behaviors:**
+- CPU reduction: Assumes linear scaling, adjusts time proportionally
+- GPU upgrades: Always safe (faster = better runtime)
+- GPU downgrades: Blocked when time limit exists (unpredictable performance)
+- Validation skipped if cluster info unavailable
+
 ## Single-Node Enforcement
 
 By default, all schedulers generate scripts that run on a **single node** (`Nodes=1`, `Ntasks=1`). `CreateScriptWithSpec` normalizes these defaults and regenerates resource directives explicitly, skipping any raw flags that would conflict:
@@ -178,15 +225,20 @@ Multi-node is supported by setting `Nodes > 1` in `ScriptSpecs`.
 
 ## Error Types
 
-- `ValidationError` - Resource limits exceeded
+- `ValidationError` - Resource limits exceeded (CPU, memory, time, GPU count)
+  - Returned by `ValidateSpecs()` and `ValidateAndConvertSpecs()`
+  - Contains `Field`, `Requested`, `Limit`, `Partition` details
+  - Examples: Memory 128GB > limit 64GB, Time 48h > limit 24h
+- `GpuValidationError` - GPU type unavailable or incompatible
+  - Returned by `ValidateGpuAvailability()` when no conversion possible
+  - Includes `Suggestions` list with available GPU options
 - `ParseError` - Directive parsing failure
 - `SubmissionError` - Job submission failure
 - `ClusterError` - Cluster info query failure
 - `DependencyError` - Missing job dependencies
 - `ScriptCreationError` - Script file creation failure
-- `GpuValidationError` - GPU unavailable (includes suggestions)
 
-Check errors with: `scheduler.IsValidationError(err)`, `scheduler.IsParseError(err)`, etc.
+Check errors with: `scheduler.IsValidationError(err)`, `scheduler.IsGpuValidationError(err)`, etc.
 
 ## Environment Variables
 
