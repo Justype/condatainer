@@ -234,6 +234,7 @@ SBATCH_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.sbatch"
 cat <<EOT > "$SBATCH_SCRIPT_PATH"
 #!/bin/bash
 #SBATCH --job-name=$HELPER_NAME
+#SBATCH --nodes=1
 #SBATCH --cpus-per-task=$NCPUS
 #SBATCH --mem=$MEM
 #SBATCH --time=$TIME
