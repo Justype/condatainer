@@ -1,9 +1,10 @@
 # Contributing
 
-Thank you for helping improve this project! This document explains the two main contribution types:
+Thank you for helping improve this project! This document explains the main contribution types:
 
 - Editing `condatainer` (code/tooling changes)
 - Adding `build-scripts` (new app/data/genome build definitions)
+- Adding or updating `helper-scripts` (interactive service helpers)
 
 ## Quick start
 
@@ -57,7 +58,28 @@ PR notes
 - Please include the sbatch running log or terminal output showing successful build and test.
 - Open Pull Requests to the `dev` branch (base = `dev`). Do NOT target `main` unless requested by a maintainer.
 
-## PR checklist (apply to both types)
+## 3) Adding or updating `helper-scripts`
+
+What this covers
+- New interactive service helpers (e.g., a new web-based app to run on HPC compute nodes)
+- Bug fixes or updates to existing helpers
+
+Where to add
+- Scripts live in `helpers/<scheduler>/` — one directory per scheduler: `headless/`, `slurm/`, `pbs/`, `lsf/`, `htcondor/`
+- **A new helper must be added to all scheduler directories.** Use an existing script (e.g., `helpers/slurm/code-server`) as a template.
+- **A scheduler-specific fix** only needs to update the affected scheduler's script.
+- See [helpers/README.md](./helpers/README.md) for the shared-library API and script structure.
+
+Testing
+- SLURM is the primary tested scheduler. Test on a SLURM cluster when possible.
+- For other schedulers, include any available test output or note which cluster was used.
+
+PR notes
+- Specify which schedulers were tested in the PR description.
+- Include terminal output or job logs showing successful submission and connection.
+- Open Pull Requests to the `dev` branch (base = `dev`). Do NOT target `main` unless requested by a maintainer.
+
+## PR checklist (apply to all types)
 
 - Title and description explaining change and how to test
 - Small, focused commits with clear messages
