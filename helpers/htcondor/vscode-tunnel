@@ -106,7 +106,7 @@ print_tunnel_info() {
         elapsed_time=$((elapsed_time + check_interval))
     done
     echo -e "\n${RED}[TIMEOUT]${NC} Timed out waiting for tunnel start. Cancelling job ${YELLOW}$job_id${NC}."
-    scancel "$job_id"
+    condor_rm "$job_id"
     return 1
 }
 

@@ -71,7 +71,7 @@ show_and_connect() {
     print_info "$HELPER_NAME at ${BLUE}http://localhost:$PORT${NC}"
     print_info "You can run the following command in R to open the project directly:"
     print_info "  ${YELLOW}rstudioapi::openProject(\"$CWD\")${NC}"
-    print_info "If you want to stop it, run: ${YELLOW}scancel $job_id${NC}"
+    print_info "If you want to stop it, run: ${YELLOW}condor_rm $job_id${NC}"
     local local_host_long=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "")
     local local_host_short=$(hostname -s 2>/dev/null || echo "")
     if [ "$local_host_long" != "$NODE" ] && [ "$local_host_short" != "$NODE" ]; then

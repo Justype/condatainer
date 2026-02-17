@@ -285,7 +285,7 @@ check_readable() {
 require_writable() {
     check_writable "$1" || {
         print_error "Can't open ${BLUE}$1${NC} for writing, currently in use."
-        print_info "Please run ${YELLOW}squeue -u $USER${NC} to find jobs that might be using this image."
+        print_info "Please run ${YELLOW}condor_q -submitter $USER${NC} to find jobs that might be using this image."
         exit 1
     }
 }
