@@ -209,7 +209,24 @@ fi
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
 PBS_RESOURCES="select=1:ncpus=$NCPUS:mem=$MEM"
 if [ -n "$GPU" ]; then
-    PBS_RESOURCES="${PBS_RESOURCES}:ngpus=${GPU}"
+    # Parse GPU input (supports '1', 'h100:2', '2:h100')
+    if [[ "$GPU" == *":"* ]]; then
+        PART1="${GPU%:*}"
+        PART2="${GPU#*:}"
+        if [[ "$PART1" =~ ^[0-9]+$ ]]; then
+            GPU_NUM="$PART1"
+            GPU_MODEL="$PART2"
+        else
+            GPU_NUM="$PART2"
+            GPU_MODEL="$PART1"
+        fi
+    else
+        GPU_NUM="$GPU"
+        GPU_MODEL=""
+    fi
+
+    PBS_RESOURCES="${PBS_RESOURCES}:ngpus=${GPU_NUM}"
+    [ -n "$GPU_MODEL" ] && PBS_RESOURCES="${PBS_RESOURCES}:gpu_model=${GPU_MODEL}"
 fi
 
 # Generate a random token if not provided by config or -a
