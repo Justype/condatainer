@@ -1,0 +1,341 @@
+#!/bin/bash
+# This script helps run vscode-tunnel on HTCondor clusters.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "$SCRIPT_DIR/.common.sh"
+HELPER_NAME=vscode-tunnel
+
+# Default machine name logic
+DEFAULT_MACHINE_NAME=$(whoami)-$(hostname)
+DEFAULT_MACHINE_NAME=${DEFAULT_MACHINE_NAME//./-}
+if [ ${#DEFAULT_MACHINE_NAME} -gt 20 ]; then DEFAULT_MACHINE_NAME=${DEFAULT_MACHINE_NAME:0:20}; fi
+AUTH_STATUS_FILE="$HELPER_STATE_DIR/vscode-tunnel-auth-status"
+
+# Save defaults on first run
+config_init $HELPER_NAME \
+    NCPUS=4 \
+    MEM=16G \
+    TIME=12:00:00 \
+    GPU= \
+    BASE_IMAGE= \
+    BASE_IMAGE_DISTRO=noble \
+    AUTH=github \
+    MACHINE_NAME="$DEFAULT_MACHINE_NAME" \
+    REUSE_MODE=ask \
+    OVERLAY=env.img
+
+# Load saved defaults
+config_load $HELPER_NAME
+config_require $HELPER_NAME NCPUS MEM TIME OVERLAY AUTH MACHINE_NAME
+
+print_help() {
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  -a <provider>   github or microsoft for authentication (default: $AUTH)"
+    echo "  -n <name>       Machine name for the tunnel (default: $MACHINE_NAME)"
+    echo ""
+    echo "  -c <number>     Number of CPUs to allocate (default: $NCPUS)"
+    echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
+    echo "  -t <time>       Time limit for the job (default: $TIME)"
+    echo "  -g <gpu>        GPU resources (e.g., 1, a100:2). Use -g '' to clear"
+    echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00"
+    echo "  -w              Use current directory as working directory (clears additional overlays)"
+    echo ""
+    echo "  -b <image>      Base image file"
+    echo "  -e <.img>       Writable overlay (default: $OVERLAY)"
+    echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
+    echo ""
+    echo "  config          Show config file path and contents"
+    echo ""
+    echo "State  file: $(state_path $HELPER_NAME)"
+    echo "Config file: $(config_path $HELPER_NAME)"
+    echo "REUSE_MODE: 'always' (auto-reuse), 'ask' (prompt, default), 'never' (always use config)"
+}
+
+case $1 in
+    config)         config_show $HELPER_NAME ;;
+    --help|-h|help) print_help; exit 0 ;;
+    *)              ;;
+esac
+
+# print_tunnel_info <job_id> <auth_provider> <cwd>
+print_tunnel_info() {
+    local job_id="$1"
+    local auth_provider="$2"
+    local cwd="$3"
+    local max_wait_time=600 # 10 minutes
+    local check_interval=5
+    local elapsed_time=0
+    local auth_instruction_printed=false
+
+    print_info "Waiting for VS Code Tunnel to initialize..."
+
+    while [ $elapsed_time -lt $max_wait_time ]; do
+        if [ -f "$AUTH_STATUS_FILE" ]; then
+            local auth_status=$(cat "$AUTH_STATUS_FILE")
+
+            if [ "$auth_status" == "ERROR" ]; then
+                print_error "$HELPER_NAME job (ID: ${YELLOW}$job_id${NC}) encountered an error."
+                local log_file=$(ls -t $LOG_DIR/$HELPER_NAME-$job_id.log 2>/dev/null | head -n 1)
+                [ -n "$log_file" ] && print_info "Please check the SLURM log file: $log_file"
+                print_info "If the machine name is taken, edit config at: $(config_path $HELPER_NAME)"
+                return 1
+            fi
+
+            if [ "$auth_status" == "LOGIN" ]; then
+                print_pass "Tunnel is ready!"
+                print_info "To connect, you can either:"
+                print_info "  - Use VSCode Remote - Tunnels extension"
+                print_info "  - Use this link: ${BLUE}https://vscode.dev/tunnel/${MACHINE_NAME}${cwd}${NC}"
+                print_info "And use your ${YELLOW}$auth_provider${NC} account to connect to ${BLUE}$MACHINE_NAME${NC}"
+                print_info "CWD: ${BLUE}$cwd${NC}"
+                return 0
+            fi
+
+            if [ -n "$auth_status" ] && [ "$auth_instruction_printed" = false ]; then
+                echo -e "\n[MSG] Please use the following message for authentication:"
+                echo -e "${YELLOW}------------------------------------------------${NC}"
+                cat "$AUTH_STATUS_FILE"
+                echo -e "${YELLOW}------------------------------------------------${NC}"
+                print_info "Waiting for authentication..."
+                auth_instruction_printed=true
+            fi
+        fi
+        sleep $check_interval
+        elapsed_time=$((elapsed_time + check_interval))
+    done
+    echo -e "\n${RED}[TIMEOUT]${NC} Timed out waiting for tunnel start. Cancelling job ${YELLOW}$job_id${NC}."
+    scancel "$job_id"
+    return 1
+}
+
+# Override print_specs to add script-specific fields
+print_specs() {
+    spec_line "CPUs" NCPUS
+    spec_line "MEM" MEM
+    spec_line "TIME" TIME
+    spec_line "GPU" GPU
+    spec_line "Auth" AUTH
+    spec_line "Machine Name" MACHINE_NAME
+    local cwd_hint=""
+    local current_dir=$(readlink -f .)
+    [ "$CWD" != "$current_dir" ] && cwd_hint=" (use -w for current dir)"
+    print_msg "  Working Dir: ${BLUE}$CWD${NC}${cwd_hint}"
+    spec_line "Base Image" BASE_IMAGE
+    spec_line "Overlay" OVERLAY
+    [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
+}
+
+REUSE_PREVIOUS_CWD=false
+_HAS_PREVIOUS_STATE=false
+
+STATE_FILE="$HELPER_STATE_DIR/$HELPER_NAME"
+read_job_state "$STATE_FILE"
+case $? in
+    1) # PENDING
+        print_info "Found a pending $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC})."
+        wait_for_job "$JOB_ID"
+        print_tunnel_info "$JOB_ID" "$AUTH" "$CWD"
+        exit 0 ;;
+    2) # RUNNING
+        print_info "Found an existing $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC}) running on node ${BLUE}$NODE${NC}."
+        print_tunnel_info "$JOB_ID" "$AUTH" "$CWD"
+        exit 0 ;;
+    3) # Not running - handle reuse after arg parse
+        _HAS_PREVIOUS_STATE=true
+        print_info "The previous $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC}) is no longer running."
+        ;;
+esac
+
+# Track if -o flag is used to clear overlays on first use
+_OVERLAYS_CLEARED=false
+# Record original values for saving in state file (in case of -v option)
+_NCPUS=$NCPUS
+_MEM=$MEM
+_TIME=$TIME
+_GPU=$GPU
+# Track if user wants to change working directory
+NEW_CWD=""
+
+while getopts "c:m:t:g:wa:n:b:e:o:v" opt; do
+    case ${opt} in
+        c ) NCPUS=$OPTARG; _NCPUS=$OPTARG; _ARG_NCPUS=1 ;;
+        m ) MEM=$OPTARG; _MEM=$OPTARG; _ARG_MEM=1 ;;
+        t ) TIME=$OPTARG; _TIME=$OPTARG; _ARG_TIME=1 ;;
+        g ) GPU=$OPTARG; _GPU=$OPTARG; _ARG_GPU=1 ;;
+        v ) NCPUS=1; MEM=4G; TIME=02:00:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
+            echo "[MSG] View Mode: NCPUS=1, MEM=4G, TIME=02:00:00" ;;
+        w )
+            NEW_CWD="$(readlink -f .)"
+            if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
+            ;;
+        a ) AUTH=$OPTARG; _ARG_AUTH=1 ;;
+        n ) MACHINE_NAME=$OPTARG; _ARG_MACHINE_NAME=1 ;;
+        b ) BASE_IMAGE="$OPTARG"; _ARG_BASE_IMAGE=1 ;;
+        e ) OVERLAY=$OPTARG; _ARG_OVERLAY=1 ;;
+        o ) # First -o clears previous overlays, then builds fresh list
+            if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
+            OVERLAYS="${OVERLAYS:+$OVERLAYS:}$OPTARG"
+            ;;
+        \? ) print_help; exit 1 ;;
+    esac
+done
+
+# Handle reuse mode (after arg parse)
+if [ "$_HAS_PREVIOUS_STATE" = true ]; then
+    handle_reuse_mode "$HELPER_NAME"
+fi
+
+# Handle working directory changes
+if [ -n "$NEW_CWD" ]; then
+    CWD="$NEW_CWD"
+elif [ "$REUSE_PREVIOUS_CWD" = true ]; then
+    cd "$CWD"
+fi
+
+# Show settings before job submission (once)
+if [ "$_SPECS_SHOWN" != true ]; then
+    print_msg "Using settings:"
+    print_specs
+    countdown 3
+fi
+
+#region Sanity Checks
+check_condatainer
+
+if [ "$AUTH" != "microsoft" ] && [ "$AUTH" != "github" ]; then
+    print_error "Unsupported authentication provider: $AUTH. Use 'microsoft' or 'github'."
+    exit 1
+fi
+
+# Ensure VSCode CLI
+CODE_BIN="$HOME/.local/bin/code"
+if ! [ -f "$CODE_BIN" ]; then
+    print_info "VSCode CLI not found. Downloading..."
+    ARCH=$(uname -m)
+    if [ "$ARCH" == "x86_64" ]; then ARCH="linux-x64"; elif [ "$ARCH" == "aarch64" ]; then ARCH="linux-arm64"; else
+        print_error "Unsupported architecture: $ARCH"
+        exit 1
+    fi
+    wget -nv -O vscode-cli.tar.gz "https://update.code.visualstudio.com/latest/cli-$ARCH/stable"
+    mkdir -p "$(dirname "$CODE_BIN")"
+    tar -xzf vscode-cli.tar.gz -C "$(dirname "$CODE_BIN")" code && rm vscode-cli.tar.gz
+    chmod +x "$CODE_BIN"
+else
+    print_info "Updating VSCode CLI..."
+    [ -x "$CODE_BIN" ] && "$CODE_BIN" update >/dev/null 2>&1
+fi
+
+check_and_install_overlays $OVERLAYS
+
+if [ ! -f "$OVERLAY" ]; then
+    print_warn "Overlay ${BLUE}$OVERLAY${NC} not found. Continuing without it."
+    countdown 3
+else
+    check_overlay_integrity "$OVERLAY"
+fi
+#endregion
+
+# Construct arguments for CondaTainer exec
+[ -n "$BASE_IMAGE" ] && BASE_IMAGE_ARG="-b $BASE_IMAGE"
+[ -n "$OVERLAY" ] && [ -f "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
+[ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
+[ -n "$GPU" ] && GPU_SBATCH="#SBATCH --gres=gpu:$GPU"
+
+# Parse GPU input (supports '1', 'h100:2', '2:h100') — HTCondor will only use the count
+if [ -n "$GPU" ]; then
+    if [[ "$GPU" == *":"* ]]; then
+        PART1="${GPU%:*}"
+        PART2="${GPU#*:}"
+        if [[ "$PART1" =~ ^[0-9]+$ ]]; then
+            GPU_NUM="$PART1"
+            GPU_MODEL="$PART2"
+        else
+            GPU_NUM="$PART2"
+            GPU_MODEL="$PART1"
+        fi
+    else
+        GPU_NUM="$GPU"
+        GPU_MODEL=""
+    fi
+    CONDOR_REQUEST_GPUS="$GPU_NUM"
+else
+    CONDOR_REQUEST_GPUS=""
+fi
+
+JOB_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.job.sh"
+SUBMIT_PATH="$LOG_DIR/$HELPER_NAME.sub"
+printf "" > "$AUTH_STATUS_FILE"
+
+cat > "$JOB_SCRIPT_PATH" <<JOBEOF
+#!/bin/bash
+while ! grep -q "^JOB_ID=" "$STATE_FILE" 2>/dev/null; do sleep 1; done
+echo "NODE=\$(hostname)" >> "$STATE_FILE"
+
+$CODE_BIN tunnel logout
+$CODE_BIN tunnel user login --provider $AUTH 2>&1 | tee "$AUTH_STATUS_FILE"
+printf "LOGIN" > "$AUTH_STATUS_FILE"
+
+condatainer exec \
+    $BASE_IMAGE_ARG \
+    $OVERLAYS_ARG \
+    $OVERLAY_ARG --writable \
+    $CODE_BIN tunnel \
+        --accept-server-license-terms \
+        --name $MACHINE_NAME
+
+[ \$? -ne 0 ] && echo "ERROR" > "$AUTH_STATUS_FILE"
+JOBEOF
+chmod +x "$JOB_SCRIPT_PATH"
+
+# Build Condor submit description
+MEM_MB=$(parse_htcondor_memory "$MEM")
+MAX_SECS=$(time_to_seconds "$TIME")
+cat > "$SUBMIT_PATH" <<SUBEOF
+universe = vanilla
+executable = $JOB_SCRIPT_PATH
+
+# Shared Filesystem Configuration
+should_transfer_files = NO
+initialdir = $CWD
+
+output = $LOG_DIR/$HELPER_NAME-\$(Cluster).log
+error  = $LOG_DIR/$HELPER_NAME-\$(Cluster).log
+log    = $LOG_DIR/$HELPER_NAME.condor.log
+
+request_cpus = $NCPUS
+request_memory = $MEM_MB
++MaxRuntime = $MAX_SECS
+SUBEOF
+
+if [ -n "$CONDOR_REQUEST_GPUS" ]; then
+    printf 'request_gpus = %s\n' "$CONDOR_REQUEST_GPUS" >> "$SUBMIT_PATH"
+    if [ -n "$GPU_MODEL" ]; then
+        printf 'requirements = regexp("%s", Target.GPUs_DeviceName, "i")\n' "$GPU_MODEL" >> "$SUBMIT_PATH"
+    fi
+fi
+
+printf 'queue\n' >> "$SUBMIT_PATH"
+
+rm -f "$STATE_FILE"
+CONDOR_OUTPUT=$(condor_submit "$SUBMIT_PATH" 2>&1)
+CONDOR_CLUSTER_ID=$(printf '%s' "$CONDOR_OUTPUT" | awk '/submitted to cluster/ {gsub(/\.$/, "", $NF); print $NF; exit}')
+
+cat > "$STATE_FILE" <<RUNSTATE
+JOB_ID=$CONDOR_CLUSTER_ID
+NCPUS=$_NCPUS
+MEM=$_MEM
+TIME=$_TIME
+GPU=$_GPU
+CWD=$CWD
+AUTH=$AUTH
+MACHINE_NAME=$MACHINE_NAME
+BASE_IMAGE="$BASE_IMAGE"
+OVERLAY="$OVERLAY"
+OVERLAYS="$OVERLAYS"
+RUNSTATE
+
+wait_for_job "$CONDOR_CLUSTER_ID"
+rm -f "$JOB_SCRIPT_PATH" "$SUBMIT_PATH" # Clean up on success
+print_tunnel_info "$CONDOR_CLUSTER_ID" "$AUTH" "$CWD"

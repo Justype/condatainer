@@ -1,0 +1,364 @@
+#!/bin/bash
+# This script helps run rstudio-server with conda overlay on HTCondor clusters.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "$SCRIPT_DIR/.common.sh"
+HELPER_NAME=rstudio-server-conda
+
+# Save defaults on first run
+config_init $HELPER_NAME \
+    NCPUS=4 \
+    MEM=32G \
+    TIME=12:00:00 \
+    GPU= \
+    BASE_IMAGE= \
+    BASE_IMAGE_DISTRO=noble \
+    PORT= \
+    AUTH=none \
+    REUSE_MODE=ask \
+    OVERLAY=env.img
+
+# Load saved defaults
+config_load $HELPER_NAME
+config_require $HELPER_NAME NCPUS MEM TIME OVERLAY
+
+print_help() {
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  -p <port>       Port for $HELPER_NAME (default: ${PORT:-randomly picked}). Valid range: 1024-65535"
+    echo ""
+    echo "  -c <number>     Number of CPUs to allocate (default: $NCPUS)"
+    echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
+    echo "  -t <time>       Time limit for the job (default: $TIME)"
+    echo "  -g <gpu>        GPU resources (e.g., 1, a100:2). Use -g '' to clear"
+    echo "  -v              View Mode NCPUS:1 MEM:8G TIME:02:00:00"
+    echo "  -w              Use current directory as working directory (clears additional overlays)"
+    echo ""
+    echo "  -e <.img>       Writable overlay (default: $OVERLAY)"
+    echo "  -o <overlay>    Additional overlay files (can have multiple -o options)"
+    echo ""
+    echo "  config          Show config file path and contents"
+    echo ""
+    echo "State  file: $(state_path $HELPER_NAME)"
+    echo "Config file: $(config_path $HELPER_NAME)"
+    echo "REUSE_MODE: 'always' (auto-reuse), 'ask' (prompt, default), 'never' (always use config)"
+}
+
+case $1 in
+    config)         config_show $HELPER_NAME ;;
+    --help|-h|help) print_help; exit 0 ;;
+    *)              ;;
+esac
+
+# show_and_connect <job_id>
+#   Prints connection info and opens SSH tunnel with port forwarding.
+show_and_connect() {
+    local job_id="$1"
+    print_info "$HELPER_NAME at ${BLUE}http://localhost:$PORT${NC}"
+    print_info "You can run the following command in R to open the project directly:"
+    print_info "  ${YELLOW}rstudioapi::openProject(\"$CWD\")${NC}"
+    print_info "If you want to stop it, run: ${YELLOW}scancel $job_id${NC}"
+    exec ssh ${SSH_OPTS} -o ControlMaster=no -L "$PORT:localhost:$PORT" "$USER@$NODE"
+    exit 0
+}
+
+# Override print_specs to add script-specific fields
+print_specs() {
+    spec_line "CPUs" NCPUS
+    spec_line "MEM" MEM
+    spec_line "TIME" TIME
+    spec_line "GPU" GPU
+    spec_line "Port" PORT
+    local cwd_hint=""
+    local current_dir=$(readlink -f .)
+    [ "$CWD" != "$current_dir" ] && cwd_hint=" (use -w for current dir)"
+    print_msg "  Working Dir: ${BLUE}$CWD${NC}${cwd_hint}"
+    spec_line "Overlay" OVERLAY
+    [ -n "$OVERLAYS" ] && print_msg "  Additional overlays: ${BLUE}$OVERLAYS${NC}"
+}
+
+REUSE_PREVIOUS_CWD=false
+_HAS_PREVIOUS_STATE=false
+_STATE_PORT=""
+
+STATE_FILE="$HELPER_STATE_DIR/$HELPER_NAME"
+read_job_state "$STATE_FILE"
+case $? in
+    1) # PENDING
+        print_info "Found a pending $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC})."
+        wait_for_job "$JOB_ID"
+        show_and_connect "$JOB_ID"
+        ;;
+    2) # RUNNING
+        print_info "Found an existing $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC}) running on node ${BLUE}$NODE${NC}."
+        show_and_connect "$JOB_ID"
+        ;;
+    3) # Not running - handle reuse after arg parse
+        _HAS_PREVIOUS_STATE=true
+        _STATE_PORT="${PORT:-}"
+        print_info "The previous $HELPER_NAME job (ID: ${YELLOW}$JOB_ID${NC}) is no longer running."
+        ;;
+esac
+
+# Track if -o flag is used to clear overlays on first use
+_OVERLAYS_CLEARED=false
+# Record original values for saving in state file (in case of -v option)
+_NCPUS=$NCPUS
+_MEM=$MEM
+_TIME=$TIME
+_GPU=$GPU
+# Track if user wants to change working directory
+NEW_CWD=""
+
+while getopts "c:m:t:g:wp:e:o:v" opt; do
+    case ${opt} in
+        c ) NCPUS=$OPTARG; _NCPUS=$OPTARG; _ARG_NCPUS=1 ;;
+        m ) MEM=$OPTARG; _MEM=$OPTARG; _ARG_MEM=1 ;;
+        t ) TIME=$OPTARG; _TIME=$OPTARG; _ARG_TIME=1 ;;
+        g ) GPU=$OPTARG; _GPU=$OPTARG; _ARG_GPU=1 ;;
+        v ) NCPUS=1; MEM=8G; TIME=02:00:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
+            echo "[MSG] View Mode: NCPUS=1, MEM=8G, TIME=02:00:00" ;;
+        w )
+            NEW_CWD="$(readlink -f .)"
+            if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
+            ;;
+        p ) PORT=$OPTARG; _ARG_PORT=1 ;;
+        e ) OVERLAY=$OPTARG; _ARG_OVERLAY=1 ;;
+        o ) # First -o clears previous overlays, then builds fresh list
+            if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
+            OVERLAYS="${OVERLAYS:+$OVERLAYS:}$OPTARG"
+            ;;
+        \? ) print_help; exit 1 ;;
+    esac
+done
+
+# Handle reuse mode (after arg parse)
+if [ "$_HAS_PREVIOUS_STATE" = true ]; then
+    handle_reuse_mode "$HELPER_NAME"
+fi
+
+# Handle working directory changes
+if [ -n "$NEW_CWD" ]; then
+    CWD="$NEW_CWD"
+elif [ "$REUSE_PREVIOUS_CWD" = true ]; then
+    cd "$CWD"
+fi
+
+# Resolve port: CLI > state (reuse) > config > state
+if [ -z "${_ARG_PORT:-}" ] && [ "$REUSE_PREVIOUS_CWD" != true ]; then
+    if [ -n "${_CONFIG_PORT:-}" ]; then
+        PORT="$_CONFIG_PORT"
+    elif [ -n "$_STATE_PORT" ]; then
+        PORT="$_STATE_PORT"
+    fi
+fi
+
+# Show settings before job submission (once)
+if [ "$_SPECS_SHOWN" != true ]; then
+    print_msg "Using settings:"
+    print_specs
+    countdown 3
+fi
+
+# If no port specified, pick an available one
+if [ -z "$PORT" ]; then
+    PORT=$(choose_port) || {
+        print_error "Failed to find an available port. Please specify one with -p."
+        exit 1
+    }
+    print_info "Available port :${BLUE}$PORT${NC} auto-selected."
+    print_info "Remember to set up port forwarding: ${CYAN}ssh -L $PORT:localhost:$PORT $USER@login-node${NC}"
+    if ! confirm_default_yes "Proceed with this port?"; then
+        echo "Aborted by user."; exit 1
+    fi
+else
+    validate_port "$PORT"
+fi
+
+#region Sanity Checks
+check_port_available "$PORT"
+check_condatainer
+
+check_and_install_overlays rstudio-server build-essential $OVERLAYS
+
+if [ ! -f "$OVERLAY" ]; then
+    print_error "Overlay ${BLUE}$OVERLAY${NC} not found."
+    exit 1
+else
+    if ! debugfs -R "stat upper/ext3/env/bin/R" $OVERLAY 2>&1 | grep -q 'Inode'; then
+        ABS_OVERLAY_PATH=$(readlink -f "$OVERLAY")
+        print_error "Overlay ${BLUE}$ABS_OVERLAY_PATH${NC} does not contain R installation."
+        print_info "Please go into the overlay shell and run 'mm-install r-base' to install R."
+        exit 1
+    fi
+    check_overlay_integrity "$OVERLAY"
+    R_BIN_PATH="/ext3/env/bin/R"
+    R_LIB_PATH="/ext3/env/lib"
+fi
+#endregion
+
+# Construct arguments for CondaTainer exec
+[ -n "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
+[ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
+[ -n "$GPU" ] && GPU_SBATCH="#SBATCH --gres=gpu:$GPU"
+
+# Parse GPU input (supports '1', 'h100:2', '2:h100') — HTCondor will only use the count
+if [ -n "$GPU" ]; then
+    if [[ "$GPU" == *":"* ]]; then
+        PART1="${GPU%:*}"
+        PART2="${GPU#*:}"
+        if [[ "$PART1" =~ ^[0-9]+$ ]]; then
+            GPU_NUM="$PART1"
+            GPU_MODEL="$PART2"
+        else
+            GPU_NUM="$PART2"
+            GPU_MODEL="$PART1"
+        fi
+    else
+        GPU_NUM="$GPU"
+        GPU_MODEL=""
+    fi
+    CONDOR_REQUEST_GPUS="$GPU_NUM"
+else
+    CONDOR_REQUEST_GPUS=""
+fi
+
+CWD_FOLDER_NAME=$(basename $CWD)
+RPROJECT_FILE="$CWD/$CWD_FOLDER_NAME.Rproj"
+if ! [ -f "$RPROJECT_FILE" ]; then
+    print_info "Creating RStudio project file at ${BLUE}$RPROJECT_FILE${NC}."
+    cat <<EOT > "$RPROJECT_FILE"
+Version: 1.0
+
+RestoreWorkspace: Default
+SaveWorkspace: Default
+AlwaysSaveHistory: Default
+
+EnableCodeIndexing: Yes
+UseSpacesForTab: Yes
+NumSpacesForTab: 2
+Encoding: UTF-8
+
+RnwWeave: Sweave
+LaTeX: pdfLaTeX
+EOT
+    # If there is a bundled profile next to this script, copy it into the project
+    # Prefer hidden .Rprofile in the helpers folder
+    SRC=""
+    if [ -f "$SCRIPT_DIR/.Rprofile" ]; then
+        SRC="$SCRIPT_DIR/.Rprofile"
+    fi
+    if [ -n "$SRC" ]; then
+        cp -f "$SRC" "$CWD/.Rprofile" && \
+        print_info "Copied Rprofile to ${BLUE}$CWD/.Rprofile${NC} (overwritten if existed)."
+    fi
+fi
+cat <<EOT > "$HELPER_STATE_DIR/rsession-conda.sh"
+#!/bin/bash
+
+USER=`whoami`
+source /etc/profile
+
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+  . /etc/bashrc
+fi
+source $HOME/.bashrc
+
+export MAMBA_ROOT_PREFIX=/ext3/env
+export CONDA_PREFIX=/ext3/env
+export CONDA_DEFAULT_ENV=env
+export CNT_CONDA_PREFIX=/ext3/env
+export RETICULATE_PYTHON=/ext3/env/bin/python
+export NCPUS=$NCPUS
+
+/usr/lib/rstudio-server/bin/rsession "\$@"
+EOT
+chmod +x $HELPER_STATE_DIR/rsession-conda.sh
+cat <<EOT > "$HELPER_STATE_DIR/rsession-conda.conf"
+copilot-enabled=1
+session-default-working-dir=$CWD
+EOT
+cat <<EOT > "$HELPER_STATE_DIR/database-conda.conf"
+provider=sqlite
+directory=$SCRATCH/.local/lib/rstudio-server
+EOT
+
+JOB_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.job.sh"
+SUBMIT_PATH="$LOG_DIR/$HELPER_NAME.sub"
+
+cat > "$JOB_SCRIPT_PATH" <<JOBEOF
+#!/bin/bash
+while ! grep -q "^JOB_ID=" "$STATE_FILE" 2>/dev/null; do sleep 1; done
+echo "NODE=\$(hostname)" >> "$STATE_FILE"
+
+condatainer exec \
+    -o rstudio-server \
+    -o build-essential \
+    $OVERLAYS_ARG \
+    $OVERLAY_ARG --writable \
+    /usr/lib/rstudio-server/bin/rserver \
+        --server-user $USER \
+        --server-daemonize=0 \
+        --server-data-dir=$SCRATCH/.local/run/rstudio-server \
+        --www-address=127.0.0.1 \
+        --www-port=$PORT \
+        --rsession-which-r=$R_BIN_PATH \
+        --rsession-path=$HELPER_STATE_DIR/rsession-conda.sh \
+        --rsession-ld-library-path=$R_LIB_PATH \
+        --database-config-file=$HELPER_STATE_DIR/database-conda.conf \
+        --rsession-config-file=$HELPER_STATE_DIR/rsession-conda.conf \
+        --auth-none=1
+JOBEOF
+
+chmod +x "$JOB_SCRIPT_PATH"
+
+# Build Condor submit description
+MEM_MB=$(parse_htcondor_memory "$MEM")
+MAX_SECS=$(time_to_seconds "$TIME")
+cat > "$SUBMIT_PATH" <<SUBEOF
+universe = vanilla
+executable = $JOB_SCRIPT_PATH
+
+# Shared Filesystem Configuration
+should_transfer_files = NO
+initialdir = $CWD
+
+output = $LOG_DIR/$HELPER_NAME-\$(Cluster).log
+error  = $LOG_DIR/$HELPER_NAME-\$(Cluster).log
+log    = $LOG_DIR/$HELPER_NAME.condor.log
+
+request_cpus = $NCPUS
+request_memory = $MEM_MB
++MaxRuntime = $MAX_SECS
+SUBEOF
+
+if [ -n "$CONDOR_REQUEST_GPUS" ]; then
+    printf 'request_gpus = %s\n' "$CONDOR_REQUEST_GPUS" >> "$SUBMIT_PATH"
+    if [ -n "$GPU_MODEL" ]; then
+        printf 'requirements = regexp("%s", Target.GPUs_DeviceName, "i")\n' "$GPU_MODEL" >> "$SUBMIT_PATH"
+    fi
+fi
+
+printf 'queue\n' >> "$SUBMIT_PATH"
+
+rm -f "$STATE_FILE"
+CONDOR_OUTPUT=$(condor_submit "$SUBMIT_PATH" 2>&1)
+CONDOR_CLUSTER_ID=$(printf '%s' "$CONDOR_OUTPUT" | awk '/submitted to cluster/ {gsub(/\.$/, "", $NF); print $NF; exit}')
+
+cat > "$STATE_FILE" <<RUNSTATE
+JOB_ID=$CONDOR_CLUSTER_ID
+NCPUS=$_NCPUS
+MEM=$_MEM
+TIME=$_TIME
+GPU=$_GPU
+PORT=$PORT
+CWD=$CWD
+OVERLAY="$OVERLAY"
+OVERLAYS="$OVERLAYS"
+RUNSTATE
+
+wait_for_job "$CONDOR_CLUSTER_ID"
+rm -f "$JOB_SCRIPT_PATH" "$SUBMIT_PATH" # Clean up on success
+show_and_connect "$CONDOR_CLUSTER_ID"
