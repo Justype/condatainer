@@ -241,7 +241,23 @@ fi
 [ -n "$BASE_IMAGE" ] && BASE_IMAGE_ARG="-b $BASE_IMAGE"
 [ -n "$OVERLAY" ] && [ -f "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
-[ -n "$GPU" ] && GPU_SBATCH="#SBATCH --gres=gpu:$GPU"
+# Parse GPU input (supports '1', 'h100:2', '2:h100') for SLURM --gres=gpu format
+if [ -n "$GPU" ]; then
+    if [[ "$GPU" == *":"* ]]; then
+        PART1="${GPU%:*}"
+        PART2="${GPU#*:}"
+        if [[ "$PART1" =~ ^[0-9]+$ ]]; then
+            # Format: 2:h100 → h100:2
+            GPU_SBATCH="#SBATCH --gres=gpu:${PART2}:${PART1}"
+        else
+            # Format: h100:2 → h100:2
+            GPU_SBATCH="#SBATCH --gres=gpu:${PART1}:${PART2}"
+        fi
+    else
+        # Format: 2 → 2
+        GPU_SBATCH="#SBATCH --gres=gpu:$GPU"
+    fi
+fi
 
 SBATCH_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.sbatch"
 printf "" > "$AUTH_STATUS_FILE"
