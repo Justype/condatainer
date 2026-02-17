@@ -207,7 +207,7 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 		case flagMatches(flag, "-R"):
 			resStr, _ := flagValue(flag, "-R")
 			resStr = strings.Trim(resStr, "\"'")
-			l.parseLsfResourceIntoSpec(resStr, rs)
+			parseErr = l.parseLsfResourceIntoSpec(resStr, rs)
 		case flag == "-x":
 			rs.Exclusive = true
 		default:
@@ -227,7 +227,8 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 
 // parseLsfResourceIntoSpec parses LSF -R resource requirement strings into a ResourceSpec.
 // Supports: rusage[mem=N], rusage[ngpus_physical=N], span[hosts=N], etc.
-func (l *LsfScheduler) parseLsfResourceIntoSpec(resStr string, rs *ResourceSpec) {
+// Returns an error if a known key has an invalid value.
+func (l *LsfScheduler) parseLsfResourceIntoSpec(resStr string, rs *ResourceSpec) error {
 	// Look for span[hosts=N] block
 	spanIdx := strings.Index(resStr, "span[")
 	if spanIdx >= 0 {
@@ -244,9 +245,11 @@ func (l *LsfScheduler) parseLsfResourceIntoSpec(resStr string, rs *ResourceSpec)
 					key := strings.TrimSpace(kv[0])
 					value := strings.TrimSpace(kv[1])
 					if key == "hosts" {
-						if n, err := strconv.Atoi(value); err == nil {
-							rs.Nodes = n
+						n, err := strconv.Atoi(value)
+						if err != nil {
+							return fmt.Errorf("invalid span[hosts=] value %q: %w", value, err)
 						}
+						rs.Nodes = n
 					}
 				}
 			}
@@ -256,14 +259,14 @@ func (l *LsfScheduler) parseLsfResourceIntoSpec(resStr string, rs *ResourceSpec)
 	// Look for rusage[...] block
 	rusageIdx := strings.Index(resStr, "rusage[")
 	if rusageIdx < 0 {
-		return
+		return nil
 	}
 
 	// Extract content between brackets
 	start := rusageIdx + len("rusage[")
 	end := strings.Index(resStr[start:], "]")
 	if end < 0 {
-		return
+		return nil
 	}
 
 	rusageContent := resStr[start : start+end]
@@ -284,19 +287,24 @@ func (l *LsfScheduler) parseLsfResourceIntoSpec(resStr string, rs *ResourceSpec)
 
 		switch key {
 		case "mem":
-			if mem, err := parseLsfMemory(value); err == nil {
-				rs.MemPerNodeMB = mem
+			mem, err := parseLsfMemory(value)
+			if err != nil {
+				return fmt.Errorf("invalid rusage[mem=] value %q: %w", value, err)
 			}
+			rs.MemPerNodeMB = mem
 		case "ngpus_physical", "ngpus":
-			if count, err := strconv.Atoi(value); err == nil {
-				rs.Gpu = &GpuSpec{
-					Type:  "gpu",
-					Count: count,
-					Raw:   fmt.Sprintf("%s=%s", key, value),
-				}
+			count, err := strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("invalid rusage[%s=] value %q: %w", key, value, err)
+			}
+			rs.Gpu = &GpuSpec{
+				Type:  "gpu",
+				Count: count,
+				Raw:   fmt.Sprintf("%s=%s", key, value),
 			}
 		}
 	}
+	return nil
 }
 
 // parseLsfGpuDirective parses LSF -gpu directive content

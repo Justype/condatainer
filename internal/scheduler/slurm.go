@@ -15,6 +15,18 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
+// slurmBlacklistedFlags lists SLURM directives that describe CPU topology / task
+// distribution that cannot be reliably translated. Any match forces passthrough mode.
+var slurmBlacklistedFlags = []string{
+	"--gpus-per-socket",
+	"--sockets-per-node",
+	"--cores-per-socket",
+	"--threads-per-core",
+	"--ntasks-per-socket",
+	"--ntasks-per-core",
+	"--distribution",
+}
+
 // SlurmScheduler implements the Scheduler interface for SLURM
 type SlurmScheduler struct {
 	sbatchBin       string
@@ -196,54 +208,95 @@ func (s *SlurmScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig,
 
 // parseResourceSpec consumes compute resource directives from the directive list.
 // Returns a populated ResourceSpec and any unconsumed directives.
-// Returns nil ResourceSpec if a critical resource field fails to parse.
+// Returns nil ResourceSpec on blacklisted flags or any unresolvable interdependency.
+//
+// Two-phase design:
+//
+//	Phase 1: scan all directives into typed temp vars (no writes to ResourceSpec yet).
+//	Phase 2: resolve in dependency order — Nodes/Tasks → GPU → CPU → Memory → Time.
 func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []string) {
 	defaults := GetSpecDefaults()
-	rs := &ResourceSpec{
-		CpusPerTask:  defaults.CpusPerTask,
-		TasksPerNode: defaults.TasksPerNode,
-		Nodes:        defaults.Nodes,
-		MemPerNodeMB: defaults.MemPerNodeMB,
-		Time:         defaults.Time,
-	}
+
+	// ── Phase 1: Scan ────────────────────────────────────────────────────────
+	var (
+		nodes            int = defaults.Nodes
+		ntasksPerNode    int
+		totalNtasks      int
+		hasNtasksPerNode bool
+		hasTotalNtasks   bool
+
+		cpusPerTask    int = defaults.CpusPerTask
+		hasCpusPerTask bool
+		cpusPerGpu     int
+		hasCpusPerGpu  bool
+
+		// GPU: at most one form expected; last one seen wins in Phase 1.
+		// Resolution priority in Phase 2: gres > per-node > total > per-task.
+		gpuGresStr    string // --gres=gpu:... (per-node by SLURM definition)
+		gpuPerNodeStr string // --gpus-per-node=...
+		gpuTotalStr   string // --gpus=... (total across all nodes)
+		gpuPerTaskStr string // --gpus-per-task=...
+
+		memStr       string // --mem
+		memPerCpuStr string // --mem-per-cpu (resolved after CPU)
+		memPerGpuStr string // --mem-per-gpu (resolved after GPU)
+		timeStr      string
+
+		exclusive bool
+	)
 
 	var unconsumed []string
-	var ntasksPerNode int
-	var totalNtasks int
-	var hasExplicitTasksPerNode bool
-	var hasExplicitTotalNtasks bool
 
 	for _, flag := range directives {
+		// Blacklist: topology flags we cannot translate → passthrough immediately.
+		for _, bl := range slurmBlacklistedFlags {
+			if flag == bl || flagMatches(flag, bl) {
+				utils.PrintWarning("SLURM: unsupported topology directive %q; using passthrough mode", flag)
+				return nil, directives
+			}
+		}
+
 		consumed := true
 		var parseErr error
 
 		switch {
-		case flagMatches(flag, "--cpus-per-task", "-c"):
-			_, parseErr = flagScanInt(flag, &rs.CpusPerTask, "--cpus-per-task", "-c")
 		case flagMatches(flag, "--nodes", "-N"):
-			_, parseErr = flagScanInt(flag, &rs.Nodes, "--nodes", "-N")
+			_, parseErr = flagScanInt(flag, &nodes, "--nodes", "-N")
 		case flagMatches(flag, "--ntasks-per-node"):
 			_, parseErr = flagScanInt(flag, &ntasksPerNode, "--ntasks-per-node")
-			hasExplicitTasksPerNode = true
+			hasNtasksPerNode = true
 		case flagMatches(flag, "--ntasks", "-n"):
 			_, parseErr = flagScanInt(flag, &totalNtasks, "--ntasks", "-n")
-			hasExplicitTotalNtasks = true
-		case flagMatches(flag, "--mem"):
-			_, parseErr = flagScan(flag, &rs.MemPerNodeMB, parseMemory, "--mem")
-		case flagMatches(flag, "--time", "-t"):
-			_, parseErr = flagScan(flag, &rs.Time, parseSlurmTimeSpec, "--time", "-t")
+			hasTotalNtasks = true
+		case flagMatches(flag, "--cpus-per-task", "-c"):
+			_, parseErr = flagScanInt(flag, &cpusPerTask, "--cpus-per-task", "-c")
+			hasCpusPerTask = true
+		case flagMatches(flag, "--cpus-per-gpu"):
+			_, parseErr = flagScanInt(flag, &cpusPerGpu, "--cpus-per-gpu")
+			hasCpusPerGpu = true
 		case strings.HasPrefix(flag, "--gres=gpu:"):
-			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimPrefix(flag, "--gres="))
-		case flagMatches(flag, "--gpus", "--gpus-per-node", "--gpus-per-task"):
-			_, parseErr = flagScan(flag, &rs.Gpu, parseSlurmGpu, "--gpus", "--gpus-per-node", "--gpus-per-task")
+			gpuGresStr = strings.TrimPrefix(flag, "--gres=")
+		case flagMatches(flag, "--gpus"):
+			gpuTotalStr, _ = flagValue(flag, "--gpus")
+		case flagMatches(flag, "--gpus-per-node"):
+			gpuPerNodeStr, _ = flagValue(flag, "--gpus-per-node")
+		case flagMatches(flag, "--gpus-per-task"):
+			gpuPerTaskStr, _ = flagValue(flag, "--gpus-per-task")
+		case flagMatches(flag, "--mem"):
+			memStr, _ = flagValue(flag, "--mem")
+		case flagMatches(flag, "--mem-per-cpu"):
+			memPerCpuStr, _ = flagValue(flag, "--mem-per-cpu")
+		case flagMatches(flag, "--mem-per-gpu"):
+			memPerGpuStr, _ = flagValue(flag, "--mem-per-gpu")
+		case flagMatches(flag, "--time", "-t"):
+			timeStr, _ = flagValue(flag, "--time", "-t")
 		case flag == "--exclusive", strings.HasPrefix(flag, "--exclusive="):
-			rs.Exclusive = true
+			exclusive = true
 		default:
 			consumed = false
 		}
 
 		if parseErr != nil {
-			// Resource parse failure → passthrough mode
 			utils.PrintWarning("SLURM: failed to parse directive %q: %v", flag, parseErr)
 			return nil, directives
 		}
@@ -252,16 +305,136 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		}
 	}
 
-	// Resolve TasksPerNode:
-	// Priority: --ntasks (total) > --ntasks-per-node
-	// When --ntasks is given, derive per-node count from total / nodes.
-	if hasExplicitTotalNtasks && rs.Nodes > 0 {
-		rs.TasksPerNode = totalNtasks / rs.Nodes
+	// ── Phase 2: Resolve in dependency order ─────────────────────────────────
+	rs := &ResourceSpec{
+		CpusPerTask:  defaults.CpusPerTask,
+		TasksPerNode: defaults.TasksPerNode,
+		Nodes:        defaults.Nodes,
+		MemPerNodeMB: defaults.MemPerNodeMB,
+		Time:         defaults.Time,
+		Exclusive:    exclusive,
+	}
+
+	// Step 1: Nodes & Tasks
+	rs.Nodes = nodes
+	if hasTotalNtasks {
+		if rs.Nodes > 0 && totalNtasks%rs.Nodes != 0 {
+			utils.PrintWarning("SLURM: --ntasks=%d not divisible by --nodes=%d; using passthrough mode",
+				totalNtasks, rs.Nodes)
+			return nil, directives
+		}
+		if rs.Nodes > 0 {
+			rs.TasksPerNode = totalNtasks / rs.Nodes
+		} else {
+			rs.TasksPerNode = totalNtasks
+		}
 		if rs.TasksPerNode < 1 {
 			rs.TasksPerNode = 1
 		}
-	} else if hasExplicitTasksPerNode {
+	} else if hasNtasksPerNode {
 		rs.TasksPerNode = ntasksPerNode
+	}
+
+	// Step 2: GPU (depends on Nodes and TasksPerNode)
+	switch {
+	case gpuGresStr != "":
+		// --gres=gpu:TYPE:N is per-node by SLURM definition.
+		gpu, err := parseSlurmGpu(gpuGresStr)
+		if err != nil {
+			utils.PrintWarning("SLURM: failed to parse --gres value %q: %v; using passthrough mode", gpuGresStr, err)
+			return nil, directives
+		}
+		rs.Gpu = gpu
+	case gpuPerNodeStr != "":
+		// --gpus-per-node=TYPE:N is directly per-node.
+		gpu, err := parseSlurmGpu(gpuPerNodeStr)
+		if err != nil {
+			utils.PrintWarning("SLURM: failed to parse --gpus-per-node value %q: %v; using passthrough mode", gpuPerNodeStr, err)
+			return nil, directives
+		}
+		rs.Gpu = gpu
+	case gpuTotalStr != "":
+		// --gpus=N is total; must divide evenly by nodes.
+		gpu, err := parseSlurmGpu(gpuTotalStr)
+		if err != nil {
+			utils.PrintWarning("SLURM: failed to parse --gpus value %q: %v; using passthrough mode", gpuTotalStr, err)
+			return nil, directives
+		}
+		if rs.Nodes > 1 {
+			if gpu.Count%rs.Nodes != 0 {
+				utils.PrintWarning("SLURM: --gpus=%d not divisible by --nodes=%d; using passthrough mode",
+					gpu.Count, rs.Nodes)
+				return nil, directives
+			}
+			gpu.Count /= rs.Nodes
+		}
+		rs.Gpu = gpu
+	case gpuPerTaskStr != "":
+		// --gpus-per-task=N; multiply by tasks/node to get per-node count.
+		gpu, err := parseSlurmGpu(gpuPerTaskStr)
+		if err != nil {
+			utils.PrintWarning("SLURM: failed to parse --gpus-per-task value %q: %v; using passthrough mode", gpuPerTaskStr, err)
+			return nil, directives
+		}
+		gpu.Count *= rs.TasksPerNode
+		rs.Gpu = gpu
+	}
+
+	// Step 3: CPU (depends on GPU when --cpus-per-gpu is used)
+	if hasCpusPerTask {
+		rs.CpusPerTask = cpusPerTask
+	} else if hasCpusPerGpu {
+		if rs.Gpu == nil {
+			utils.PrintWarning("SLURM: --cpus-per-gpu requires a GPU spec; using passthrough mode")
+			return nil, directives
+		}
+		rs.CpusPerTask = cpusPerGpu * rs.Gpu.Count
+	}
+
+	// Step 4: Memory — three forms, resolved after CPU and GPU.
+	switch {
+	case memStr != "":
+		// --mem=N: direct per-node total.
+		mem, err := parseMemory(memStr)
+		if err != nil {
+			utils.PrintWarning("SLURM: invalid --mem value %q: %v; using passthrough mode", memStr, err)
+			return nil, directives
+		}
+		rs.MemPerNodeMB = mem
+	case memPerCpuStr != "":
+		// --mem-per-cpu=N: multiply by effective CPUs per node.
+		memPerCpu, err := parseMemory(memPerCpuStr)
+		if err != nil {
+			utils.PrintWarning("SLURM: invalid --mem-per-cpu value %q: %v; using passthrough mode", memPerCpuStr, err)
+			return nil, directives
+		}
+		cpusPerNode := rs.CpusPerTask * rs.TasksPerNode
+		if cpusPerNode < 1 {
+			cpusPerNode = 1
+		}
+		rs.MemPerNodeMB = memPerCpu * int64(cpusPerNode)
+	case memPerGpuStr != "":
+		// --mem-per-gpu=N: multiply by GPUs per node.
+		if rs.Gpu == nil {
+			utils.PrintWarning("SLURM: --mem-per-gpu requires a GPU spec; using passthrough mode")
+			return nil, directives
+		}
+		memPerGpu, err := parseMemory(memPerGpuStr)
+		if err != nil {
+			utils.PrintWarning("SLURM: invalid --mem-per-gpu value %q: %v; using passthrough mode", memPerGpuStr, err)
+			return nil, directives
+		}
+		rs.MemPerNodeMB = memPerGpu * int64(rs.Gpu.Count)
+	}
+
+	// Step 5: Time (independent).
+	if timeStr != "" {
+		t, err := parseSlurmTimeSpec(timeStr)
+		if err != nil {
+			utils.PrintWarning("SLURM: invalid --time value %q: %v; using passthrough mode", timeStr, err)
+			return nil, directives
+		}
+		rs.Time = t
 	}
 
 	return rs, unconsumed

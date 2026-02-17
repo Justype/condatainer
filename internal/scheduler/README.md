@@ -61,7 +61,12 @@ type Scheduler interface {
 Parsing uses a two-stage pipeline:
 
 1. **Stage 1 (critical):** `parseRuntimeConfig` — extracts job control settings (name, I/O, email). Failures stop parsing.
-2. **Stage 2 (best-effort):** `parseResourceSpec` — extracts compute geometry (CPU, memory, GPU, time). Returns nil on failure → passthrough mode.
+2. **Stage 2 (best-effort):** `parseResourceSpec` — extracts compute geometry (CPU, memory, GPU, time). Returns nil on any parse failure → **passthrough mode** (the script is forwarded to the scheduler unchanged).
+
+**Passthrough mode** is triggered when:
+- A known directive has an invalid value (e.g., non-integer CPU count)
+- A directive value cannot be safely resolved (e.g., `--ntasks` not evenly divisible by `--nodes`)
+- A blacklisted topology flag is encountered (SLURM only — see below)
 
 `RawFlags` is an immutable audit log of ALL directives. `RemainingFlags` contains only directives not absorbed by either stage. This ensures that when generating scripts for a different scheduler, standard resources are regenerated using the target scheduler's native syntax.
 
@@ -216,13 +221,22 @@ Multi-node is supported by setting `Nodes > 1` in `ScriptSpecs`.
 ## Scheduler-Specific Notes
 
 ### SLURM
-- Parses `--nodes`, `--ntasks`, `--ntasks-per-node`, `--cpus-per-task`
-- GPU via `--gres=gpu:type:count` or `--gpus=type:count`; supports MIG profiles
+- Parses `--nodes`, `--ntasks`, `--ntasks-per-node`, `--cpus-per-task`, `--cpus-per-gpu`
+- GPU via `--gres=gpu:type:count`, `--gpus-per-node`, `--gpus` (total), or `--gpus-per-task`; supports MIG profiles
+  - Resolution priority: `--gres=gpu:` > `--gpus-per-node` > `--gpus` (÷ nodes) > `--gpus-per-task` (× tasks/node)
+  - `--gpus` total must divide evenly by `--nodes`; otherwise triggers passthrough
+- Memory via `--mem` (per-node), `--mem-per-cpu` (× CpusPerTask × TasksPerNode), or `--mem-per-gpu` (× Gpu.Count)
+- Resource spec uses a **two-phase approach**: Phase 1 scans all directives into temp vars; Phase 2 resolves in dependency order (Nodes/Tasks → GPU → CPU → Memory → Time), ensuring derived values are computed correctly
+- `--ntasks` must divide evenly by `--nodes`; otherwise triggers passthrough
+- **Blacklisted topology flags** (immediately trigger passthrough — cannot be reliably translated):
+  `--gpus-per-socket`, `--sockets-per-node`, `--cores-per-socket`, `--threads-per-core`,
+  `--ntasks-per-socket`, `--ntasks-per-core`, `--distribution`
 - Cluster info from `sinfo` and `scontrol`
 
 ### PBS
 - Resource formats: `select=N:ncpus=M:mpiprocs=P:mem=Xgb:ngpus=G` or `nodes=N:ppn=M`
 - `Ntasks` derived from `nodes * mpiprocs`
+- Invalid values for `ncpus`, `mem`, `walltime`, `ngpus`, `gpus`, `select`, `nodes`, `ppn`, `mpiprocs` trigger passthrough
 - Cluster info from `pbsnodes -a`
 
 ### LSF

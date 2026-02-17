@@ -249,15 +249,19 @@ func (p *PbsScheduler) parseResourceList(resourceStr string, rs *ResourceSpec) e
 				// Extract chunk count (node count) from select=N
 				if strings.HasPrefix(part, "select=") {
 					selectVal := strings.TrimPrefix(part, "select=")
-					if n, err := strconv.Atoi(selectVal); err == nil {
-						rs.Nodes = n
+					n, err := strconv.Atoi(selectVal)
+					if err != nil {
+						return fmt.Errorf("invalid select value %q: %w", selectVal, err)
 					}
+					rs.Nodes = n
 				} else if strings.HasPrefix(part, "mpiprocs=") {
 					// mpiprocs is tasks per chunk (per node)
 					mpStr := strings.TrimPrefix(part, "mpiprocs=")
-					if mp, err := strconv.Atoi(mpStr); err == nil {
-						mpiprocs = mp
+					mp, err := strconv.Atoi(mpStr)
+					if err != nil {
+						return fmt.Errorf("invalid mpiprocs value %q: %w", mpStr, err)
 					}
+					mpiprocs = mp
 				} else {
 					if err := p.parseSingleResource(part, rs); err != nil {
 						return err
@@ -277,14 +281,18 @@ func (p *PbsScheduler) parseResourceList(resourceStr string, rs *ResourceSpec) e
 			for _, part := range nodeParts {
 				if strings.HasPrefix(part, "nodes=") {
 					nodesStr := strings.TrimPrefix(part, "nodes=")
-					if n, err := strconv.Atoi(nodesStr); err == nil {
-						rs.Nodes = n
+					n, err := strconv.Atoi(nodesStr)
+					if err != nil {
+						return fmt.Errorf("invalid nodes value %q: %w", nodesStr, err)
 					}
+					rs.Nodes = n
 				} else if strings.HasPrefix(part, "ppn=") {
 					ppnStr := strings.TrimPrefix(part, "ppn=")
-					if ppn, err := strconv.Atoi(ppnStr); err == nil {
-						rs.CpusPerTask = ppn
+					ppn, err := strconv.Atoi(ppnStr)
+					if err != nil {
+						return fmt.Errorf("invalid ppn value %q: %w", ppnStr, err)
 					}
+					rs.CpusPerTask = ppn
 				}
 			}
 			continue
@@ -310,34 +318,43 @@ func (p *PbsScheduler) parseSingleResource(res string, rs *ResourceSpec) error {
 
 	switch key {
 	case "ncpus":
-		if ncpus, err := strconv.Atoi(value); err == nil {
-			rs.CpusPerTask = ncpus
+		ncpus, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid ncpus value %q: %w", value, err)
 		}
+		rs.CpusPerTask = ncpus
 
 	case "mem":
-		if mem, err := parseMemoryString(value); err == nil {
-			rs.MemPerNodeMB = mem
+		mem, err := parseMemoryString(value)
+		if err != nil {
+			return fmt.Errorf("invalid mem value %q: %w", value, err)
 		}
+		rs.MemPerNodeMB = mem
 
 	case "walltime":
-		if dur, err := parsePbsTime(value); err == nil {
-			rs.Time = dur
+		dur, err := parsePbsTime(value)
+		if err != nil {
+			return fmt.Errorf("invalid walltime value %q: %w", value, err)
 		}
+		rs.Time = dur
 
 	case "ngpus":
-		if count, err := strconv.Atoi(value); err == nil {
-			rs.Gpu = &GpuSpec{
-				Type:  "gpu",
-				Count: count,
-				Raw:   res,
-			}
+		count, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid ngpus value %q: %w", value, err)
+		}
+		rs.Gpu = &GpuSpec{
+			Type:  "gpu",
+			Count: count,
+			Raw:   res,
 		}
 
 	case "gpus":
 		gpu, err := parseGpuString(value)
-		if err == nil {
-			rs.Gpu = gpu
+		if err != nil {
+			return fmt.Errorf("invalid gpus value %q: %w", value, err)
 		}
+		rs.Gpu = gpu
 
 	case "place":
 		// place=excl (or place=excl:...) requests exclusive node access
