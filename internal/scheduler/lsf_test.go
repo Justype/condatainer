@@ -875,21 +875,21 @@ func TestLsfScriptGenerationNodesCpus(t *testing.T) {
 			wantNcpus:    "#BSUB -n 8",
 		},
 		{
-			name: "raw span stripped and regenerated",
+			name: "raw span no longer in RawFlags - only rusage preserved",
 			specs: &ScriptSpecs{
 				Ncpus:    16,
 				Nodes:    3,
-				RawFlags: []string{`-R "span[hosts=3] rusage[mem=4096]"`},
+				RawFlags: []string{`-R "rusage[mem=4096]"`}, // span parsed out, only rusage remains
 			},
 			wantSpanHost: `span[hosts=3]`,
 			wantNcpus:    "#BSUB -n 16",
 		},
 		{
-			name: "raw -n stripped and regenerated",
+			name: "raw -n no longer in RawFlags - comes from Ncpus field",
 			specs: &ScriptSpecs{
 				Ncpus:    8,
 				Nodes:    1,
-				RawFlags: []string{"-n 8"},
+				RawFlags: []string{}, // -n not in RawFlags, comes from Ncpus
 			},
 			wantSpanHost: `span[hosts=1]`,
 			wantNcpus:    "#BSUB -n 8",
@@ -1130,8 +1130,9 @@ echo "Running job"
 	if specs.MailUser != "user@example.com" {
 		t.Errorf("MailUser = %q; want %q", specs.MailUser, "user@example.com")
 	}
-	if len(specs.RawFlags) != 7 {
-		t.Errorf("RawFlags count = %d; want 7", len(specs.RawFlags))
+	// RawFlags should be empty - all flags above are recognized and parsed into typed fields
+	if len(specs.RawFlags) != 0 {
+		t.Errorf("RawFlags count = %d; want 0 (all flags were recognized)", len(specs.RawFlags))
 	}
 }
 

@@ -147,12 +147,18 @@ func (p *PbsScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) 
 
 		// Parse #PBS directives only
 		if matches := p.directiveRe.FindStringSubmatch(line); matches != nil {
+			specs.HasDirectives = true
 			flag := utils.StripInlineComment(matches[1])
-			specs.RawFlags = append(specs.RawFlags, flag)
 
-			// Parse PBS options
-			if err := p.parsePbsFlag(flag, specs); err != nil {
+			// Parse PBS options - returns true if recognized
+			recognized, err := p.parsePbsFlag(flag, specs)
+			if err != nil {
 				return nil, NewParseError("PBS", lineNum, line, err.Error())
+			}
+
+			// Only keep unrecognized flags in RawFlags
+			if !recognized {
+				specs.RawFlags = append(specs.RawFlags, flag)
 			}
 		}
 	}
@@ -166,29 +172,30 @@ func (p *PbsScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) 
 
 // parsePbsFlag parses individual PBS flags and updates specs
 // PBS uses -l for resources, -N for name, -o/-e for output/error, -m for mail
-func (p *PbsScheduler) parsePbsFlag(flag string, specs *ScriptSpecs) error {
+// Returns true if the flag was recognized and parsed, false otherwise
+func (p *PbsScheduler) parsePbsFlag(flag string, specs *ScriptSpecs) (bool, error) {
 	// Job name: -N jobname
 	if strings.HasPrefix(flag, "-N ") {
 		specs.JobName = strings.TrimSpace(strings.TrimPrefix(flag, "-N"))
-		return nil
+		return true, nil
 	}
 
 	// Output file: -o path
 	if strings.HasPrefix(flag, "-o ") {
 		specs.Stdout = strings.TrimSpace(strings.TrimPrefix(flag, "-o"))
-		return nil
+		return true, nil
 	}
 
 	// Error file: -e path
 	if strings.HasPrefix(flag, "-e ") {
 		specs.Stderr = strings.TrimSpace(strings.TrimPrefix(flag, "-e"))
-		return nil
+		return true, nil
 	}
 
 	// Mail user: -M email
 	if strings.HasPrefix(flag, "-M ") {
 		specs.MailUser = strings.TrimSpace(strings.TrimPrefix(flag, "-M"))
-		return nil
+		return true, nil
 	}
 
 	// Mail options: -m [a|b|e|n] (abort, begin, end, none)
@@ -210,16 +217,18 @@ func (p *PbsScheduler) parsePbsFlag(flag string, specs *ScriptSpecs) error {
 				}
 			}
 		}
-		return nil
+		return true, nil
 	}
 
 	// Resource list: -l resource=value[,resource=value,...]
 	if strings.HasPrefix(flag, "-l ") {
 		resourceStr := strings.TrimSpace(strings.TrimPrefix(flag, "-l"))
-		return p.parseResourceList(resourceStr, specs)
+		err := p.parseResourceList(resourceStr, specs)
+		return true, err
 	}
 
-	return nil
+	// Flag not recognized
+	return false, nil
 }
 
 // parseResourceList parses PBS -l resource specifications
@@ -388,34 +397,8 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		specs.Ntasks = 1
 	}
 
-	// Write parsed PBS directives with overrides
+	// Write unrecognized flags (RawFlags only contains flags not parsed into typed fields)
 	for _, flag := range specs.RawFlags {
-		// Skip output/error flags if we're overriding them
-		if specs.Stdout != "" && strings.HasPrefix(flag, "-o ") {
-			continue
-		}
-		// Always skip stderr flags - we don't want separate error logs
-		if strings.HasPrefix(flag, "-e ") {
-			continue
-		}
-		// Skip job-name flags - we'll use specs.JobName if set
-		if specs.JobName != "" && strings.HasPrefix(flag, "-N ") {
-			continue
-		}
-		// Skip email flags - they'll be regenerated from specs
-		if strings.HasPrefix(flag, "-m ") || strings.HasPrefix(flag, "-M ") {
-			continue
-		}
-		// Skip resource flags that we'll regenerate (select=, nodes=, walltime=)
-		if strings.HasPrefix(flag, "-l ") {
-			resourceStr := strings.TrimSpace(strings.TrimPrefix(flag, "-l"))
-			if strings.HasPrefix(resourceStr, "select=") || strings.HasPrefix(resourceStr, "nodes=") {
-				continue
-			}
-			if strings.HasPrefix(resourceStr, "walltime=") && specs.Time > 0 {
-				continue
-			}
-		}
 		fmt.Fprintf(writer, "#PBS %s\n", flag)
 	}
 

@@ -69,20 +69,21 @@ type ClusterInfo struct {
 
 // ScriptSpecs holds the specifications parsed from a job script
 type ScriptSpecs struct {
-	JobName      string        // Job name
-	Ncpus        int           // Number of CPUs per task
-	Ntasks       int           // Number of tasks (default 1)
-	Nodes        int           // Number of nodes (default 1)
-	MemMB        int64         // Memory in MB
-	Time         time.Duration // Time limit
-	Stdout       string        // Standard output file path
-	Stderr       string        // Standard error file path
-	Gpu          *GpuSpec      // GPU requirements (nil if no GPU)
-	EmailOnBegin bool          // Send email when job begins (SLURM: BEGIN, PBS: b, LSF: -B)
-	EmailOnEnd   bool          // Send email when job ends (SLURM: END, PBS: e, LSF: -N)
-	EmailOnFail  bool          // Send email when job fails/aborts (SLURM: FAIL, PBS: a)
-	MailUser     string        // Username or email address for notifications (empty = submitting user)
-	RawFlags     []string      // Raw scheduler-specific flags (e.g., #SBATCH, #PBS)
+	JobName       string        // Job name
+	Ncpus         int           // Number of CPUs per task
+	Ntasks        int           // Number of tasks (default 1)
+	Nodes         int           // Number of nodes (default 1)
+	MemMB         int64         // Memory in MB
+	Time          time.Duration // Time limit
+	Stdout        string        // Standard output file path
+	Stderr        string        // Standard error file path
+	Gpu           *GpuSpec      // GPU requirements (nil if no GPU)
+	EmailOnBegin  bool          // Send email when job begins (SLURM: BEGIN, PBS: b, LSF: -B)
+	EmailOnEnd    bool          // Send email when job ends (SLURM: END, PBS: e, LSF: -N)
+	EmailOnFail   bool          // Send email when job fails/aborts (SLURM: FAIL, PBS: a)
+	MailUser      string        // Username or email address for notifications (empty = submitting user)
+	HasDirectives bool          // True if any scheduler directive was found during parsing
+	RawFlags      []string      // Raw scheduler-specific flags (unrecognized only)
 }
 
 // HasSchedulerSpecs returns true if ScriptSpecs contains meaningful scheduler directives.
@@ -92,14 +93,8 @@ func HasSchedulerSpecs(specs *ScriptSpecs) bool {
 	if specs == nil {
 		return false
 	}
-	// Check if any scheduler-specific field is set (beyond defaults)
-	return specs.JobName != "" ||
-		specs.Time > 0 ||
-		specs.EmailOnBegin ||
-		specs.EmailOnEnd ||
-		specs.EmailOnFail ||
-		specs.MailUser != "" ||
-		len(specs.RawFlags) > 0
+	// Check if any scheduler directive was found during parsing
+	return specs.HasDirectives
 }
 
 // SpecDefaults holds configurable default values for ScriptSpecs.
@@ -729,7 +724,7 @@ func ParseScriptAny(scriptPath string) (*ParsedScript, error) {
 		}
 
 		// If we found directives, return the result
-		if specs != nil && len(specs.RawFlags) > 0 {
+		if specs != nil && HasSchedulerSpecs(specs) {
 			return &ParsedScript{
 				Specs:      specs,
 				ScriptType: schedType,

@@ -151,12 +151,18 @@ func (l *LsfScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) 
 
 		// Parse #BSUB directives only
 		if matches := l.directiveRe.FindStringSubmatch(line); matches != nil {
+			specs.HasDirectives = true
 			flag := utils.StripInlineComment(matches[1])
-			specs.RawFlags = append(specs.RawFlags, flag)
 
-			// Parse LSF options
-			if err := l.parseBsubFlag(flag, specs); err != nil {
+			// Parse LSF options - returns true if recognized
+			recognized, err := l.parseBsubFlag(flag, specs)
+			if err != nil {
 				return nil, NewParseError("LSF", lineNum, line, err.Error())
+			}
+
+			// Only keep unrecognized flags in RawFlags
+			if !recognized {
+				specs.RawFlags = append(specs.RawFlags, flag)
 			}
 		}
 	}
@@ -169,11 +175,12 @@ func (l *LsfScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) 
 }
 
 // parseBsubFlag parses individual BSUB flags and updates specs
-func (l *LsfScheduler) parseBsubFlag(flag string, specs *ScriptSpecs) error {
+// Returns true if the flag was recognized and parsed, false otherwise
+func (l *LsfScheduler) parseBsubFlag(flag string, specs *ScriptSpecs) (bool, error) {
 	// Job name: -J jobname
 	if strings.HasPrefix(flag, "-J ") {
 		specs.JobName = strings.TrimSpace(strings.TrimPrefix(flag, "-J"))
-		return nil
+		return true, nil
 	}
 
 	// Number of cores: -n cores
@@ -182,7 +189,7 @@ func (l *LsfScheduler) parseBsubFlag(flag string, specs *ScriptSpecs) error {
 		if ncpus, err := strconv.Atoi(ncpuStr); err == nil {
 			specs.Ncpus = ncpus
 		}
-		return nil
+		return true, nil
 	}
 
 	// Memory limit: -M memKB (LSF default is KB per process)
@@ -191,7 +198,7 @@ func (l *LsfScheduler) parseBsubFlag(flag string, specs *ScriptSpecs) error {
 		if mem, err := parseLsfMemory(memStr); err == nil {
 			specs.MemMB = mem
 		}
-		return nil
+		return true, nil
 	}
 
 	// Walltime: -W [HH:]MM or HH:MM:SS
@@ -200,37 +207,37 @@ func (l *LsfScheduler) parseBsubFlag(flag string, specs *ScriptSpecs) error {
 		if dur, err := parseLsfTime(timeStr); err == nil {
 			specs.Time = dur
 		}
-		return nil
+		return true, nil
 	}
 
 	// Output file: -o path
 	if strings.HasPrefix(flag, "-o ") {
 		specs.Stdout = strings.TrimSpace(strings.TrimPrefix(flag, "-o"))
-		return nil
+		return true, nil
 	}
 
 	// Error file: -e path
 	if strings.HasPrefix(flag, "-e ") {
 		specs.Stderr = strings.TrimSpace(strings.TrimPrefix(flag, "-e"))
-		return nil
+		return true, nil
 	}
 
 	// Email on begin: -B (standalone flag)
 	if flag == "-B" {
 		specs.EmailOnBegin = true
-		return nil
+		return true, nil
 	}
 
 	// Email on end: -N (standalone flag)
 	if flag == "-N" {
 		specs.EmailOnEnd = true
-		return nil
+		return true, nil
 	}
 
 	// Mail user: -u email
 	if strings.HasPrefix(flag, "-u ") {
 		specs.MailUser = strings.TrimSpace(strings.TrimPrefix(flag, "-u"))
-		return nil
+		return true, nil
 	}
 
 	// GPU specification: -gpu "num=N[:type=T]"
@@ -241,7 +248,7 @@ func (l *LsfScheduler) parseBsubFlag(flag string, specs *ScriptSpecs) error {
 		if gpu != nil {
 			specs.Gpu = gpu
 		}
-		return nil
+		return true, nil
 	}
 
 	// Resource requirement: -R "rusage[...]"
@@ -249,10 +256,11 @@ func (l *LsfScheduler) parseBsubFlag(flag string, specs *ScriptSpecs) error {
 		resStr := strings.TrimSpace(strings.TrimPrefix(flag, "-R"))
 		resStr = strings.Trim(resStr, "\"'")
 		l.parseLsfResource(resStr, specs)
-		return nil
+		return true, nil
 	}
 
-	return nil
+	// Flag not recognized
+	return false, nil
 }
 
 // parseLsfResource parses LSF -R resource requirement strings
@@ -366,20 +374,6 @@ func parseLsfGpuDirective(gpuStr string) *GpuSpec {
 	return spec
 }
 
-// stripSpanBlock removes span[...] from an LSF resource string,
-// preserving any other resource requirements (e.g., rusage[...]).
-func stripSpanBlock(s string) string {
-	idx := strings.Index(s, "span[")
-	if idx < 0 {
-		return s
-	}
-	end := strings.Index(s[idx:], "]")
-	if end < 0 {
-		return s
-	}
-	return strings.TrimSpace(s[:idx] + s[idx+end+1:])
-}
-
 // CreateScriptWithSpec generates an LSF batch script
 func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) (string, error) {
 	specs := jobSpec.Specs
@@ -427,46 +421,8 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	// Write shebang
 	fmt.Fprintln(writer, "#!/bin/bash")
 
-	// Write parsed BSUB directives with overrides
+	// Write unrecognized flags (RawFlags only contains flags not parsed into typed fields)
 	for _, flag := range specs.RawFlags {
-		// Skip output/error flags if we're overriding them
-		if specs.Stdout != "" && strings.HasPrefix(flag, "-o ") {
-			continue
-		}
-		// Always skip stderr flags - we don't want separate error logs
-		if strings.HasPrefix(flag, "-e ") {
-			continue
-		}
-		// Skip job-name flags - we'll use specs.JobName if set
-		if specs.JobName != "" && strings.HasPrefix(flag, "-J ") {
-			continue
-		}
-		// Skip email flags - they'll be regenerated from specs
-		if flag == "-B" || flag == "-N" || strings.HasPrefix(flag, "-u ") {
-			continue
-		}
-		// Skip walltime flags if we have a parsed time
-		if specs.Time > 0 && strings.HasPrefix(flag, "-W ") {
-			continue
-		}
-		// Skip -n flags - we'll regenerate from specs.Ncpus
-		if strings.HasPrefix(flag, "-n ") {
-			continue
-		}
-		// Handle -R flags: strip span[...] portion, keep rusage/other parts
-		if strings.HasPrefix(flag, "-R ") {
-			resStr := strings.TrimSpace(strings.TrimPrefix(flag, "-R"))
-			resStr = strings.Trim(resStr, "\"'")
-			if strings.Contains(resStr, "span[") {
-				cleaned := stripSpanBlock(resStr)
-				cleaned = strings.TrimSpace(cleaned)
-				if cleaned == "" {
-					continue // nothing left after stripping span
-				}
-				fmt.Fprintf(writer, "#BSUB -R \"%s\"\n", cleaned)
-				continue
-			}
-		}
 		fmt.Fprintf(writer, "#BSUB %s\n", flag)
 	}
 

@@ -154,8 +154,8 @@ func (s *SlurmScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error
 
 		// Parse #SBATCH directives only
 		if matches := s.directiveRe.FindStringSubmatch(line); matches != nil {
+			specs.HasDirectives = true
 			flag := utils.StripInlineComment(matches[1])
-			specs.RawFlags = append(specs.RawFlags, flag)
 
 			// Track --ntasks-per-node separately (needs post-processing with Nodes)
 			if strings.HasPrefix(flag, "--ntasks-per-node=") {
@@ -169,9 +169,15 @@ func (s *SlurmScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error
 				hasExplicitNtasks = true
 			}
 
-			// Parse common SBATCH options
-			if err := s.parseSbatchFlag(flag, specs); err != nil {
+			// Parse common SBATCH options - returns true if recognized
+			recognized, err := s.parseSbatchFlag(flag, specs)
+			if err != nil {
 				return nil, NewParseError("SLURM", lineNum, line, err.Error())
+			}
+
+			// Only keep unrecognized flags in RawFlags
+			if !recognized {
+				specs.RawFlags = append(specs.RawFlags, flag)
 			}
 		}
 	}
@@ -189,45 +195,59 @@ func (s *SlurmScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error
 }
 
 // parseSbatchFlag parses individual SBATCH flags and updates specs
-func (s *SlurmScheduler) parseSbatchFlag(flag string, specs *ScriptSpecs) error {
+// Returns true if the flag was recognized and parsed, false otherwise
+func (s *SlurmScheduler) parseSbatchFlag(flag string, specs *ScriptSpecs) (bool, error) {
 	// Job name
 	if strings.HasPrefix(flag, "--job-name=") {
 		specs.JobName = strings.TrimPrefix(flag, "--job-name=")
+		return true, nil
 	} else if strings.HasPrefix(flag, "-J ") {
 		specs.JobName = strings.TrimSpace(strings.TrimPrefix(flag, "-J"))
+		return true, nil
 	}
 
 	// CPUs per task
 	if strings.HasPrefix(flag, "--cpus-per-task=") {
 		if _, err := fmt.Sscanf(flag, "--cpus-per-task=%d", &specs.Ncpus); err != nil {
-			return fmt.Errorf("invalid cpus-per-task value: %w", err)
+			return false, fmt.Errorf("invalid cpus-per-task value: %w", err)
 		}
+		return true, nil
 	} else if strings.HasPrefix(flag, "-c ") {
 		if _, err := fmt.Sscanf(flag, "-c %d", &specs.Ncpus); err != nil {
-			return fmt.Errorf("invalid -c value: %w", err)
+			return false, fmt.Errorf("invalid -c value: %w", err)
 		}
+		return true, nil
 	}
 
 	// Nodes
 	if strings.HasPrefix(flag, "--nodes=") {
 		if _, err := fmt.Sscanf(flag, "--nodes=%d", &specs.Nodes); err != nil {
-			return fmt.Errorf("invalid --nodes value: %w", err)
+			return false, fmt.Errorf("invalid --nodes value: %w", err)
 		}
+		return true, nil
 	} else if strings.HasPrefix(flag, "-N ") {
 		if _, err := fmt.Sscanf(flag, "-N %d", &specs.Nodes); err != nil {
-			return fmt.Errorf("invalid -N value: %w", err)
+			return false, fmt.Errorf("invalid -N value: %w", err)
 		}
+		return true, nil
 	}
 
 	// Ntasks
 	if strings.HasPrefix(flag, "--ntasks=") {
 		if _, err := fmt.Sscanf(flag, "--ntasks=%d", &specs.Ntasks); err != nil {
-			return fmt.Errorf("invalid --ntasks value: %w", err)
+			return false, fmt.Errorf("invalid --ntasks value: %w", err)
 		}
+		return true, nil
 	} else if strings.HasPrefix(flag, "-n ") {
 		if _, err := fmt.Sscanf(flag, "-n %d", &specs.Ntasks); err != nil {
-			return fmt.Errorf("invalid -n value: %w", err)
+			return false, fmt.Errorf("invalid -n value: %w", err)
 		}
+		return true, nil
+	}
+
+	// Ntasks per node (also recognized)
+	if strings.HasPrefix(flag, "--ntasks-per-node=") {
+		return true, nil
 	}
 
 	// Memory
@@ -235,9 +255,10 @@ func (s *SlurmScheduler) parseSbatchFlag(flag string, specs *ScriptSpecs) error 
 		memStr := strings.TrimPrefix(flag, "--mem=")
 		mem, err := parseMemory(memStr)
 		if err != nil {
-			return err
+			return false, err
 		}
 		specs.MemMB = mem
+		return true, nil
 	}
 
 	// Time
@@ -245,57 +266,67 @@ func (s *SlurmScheduler) parseSbatchFlag(flag string, specs *ScriptSpecs) error 
 		raw := strings.TrimPrefix(flag, "--time=")
 		dur, err := parseSlurmTimeSpec(raw)
 		if err != nil {
-			return fmt.Errorf("invalid --time value: %w", err)
+			return false, fmt.Errorf("invalid --time value: %w", err)
 		}
 		specs.Time = dur
+		return true, nil
 	} else if strings.HasPrefix(flag, "-t ") {
 		raw := strings.TrimSpace(strings.TrimPrefix(flag, "-t"))
 		dur, err := parseSlurmTimeSpec(raw)
 		if err != nil {
-			return fmt.Errorf("invalid -t value: %w", err)
+			return false, fmt.Errorf("invalid -t value: %w", err)
 		}
 		specs.Time = dur
+		return true, nil
 	}
 
 	// Output
 	if strings.HasPrefix(flag, "--output=") {
 		specs.Stdout = strings.TrimPrefix(flag, "--output=")
+		return true, nil
 	} else if strings.HasPrefix(flag, "-o ") {
 		specs.Stdout = strings.TrimSpace(strings.TrimPrefix(flag, "-o"))
+		return true, nil
 	}
 
 	// Error
 	if strings.HasPrefix(flag, "--error=") {
 		specs.Stderr = strings.TrimPrefix(flag, "--error=")
+		return true, nil
 	} else if strings.HasPrefix(flag, "-e ") {
 		specs.Stderr = strings.TrimSpace(strings.TrimPrefix(flag, "-e"))
+		return true, nil
 	}
 
 	// GPU
 	if strings.HasPrefix(flag, "--gres=gpu:") {
 		gpu, err := parseSlurmGpu(strings.TrimPrefix(flag, "--gres="))
 		if err != nil {
-			return err
+			return false, err
 		}
 		specs.Gpu = gpu
+		return true, nil
 	} else if strings.HasPrefix(flag, "--gpus=") {
 		gpu, err := parseSlurmGpu(strings.TrimPrefix(flag, "--gpus="))
 		if err != nil {
-			return err
+			return false, err
 		}
 		specs.Gpu = gpu
+		return true, nil
 	} else if strings.HasPrefix(flag, "--gpus-per-node=") {
 		gpu, err := parseSlurmGpu(strings.TrimPrefix(flag, "--gpus-per-node="))
 		if err != nil {
-			return err
+			return false, err
 		}
 		specs.Gpu = gpu
+		return true, nil
 	} else if strings.HasPrefix(flag, "--gpus-per-task=") {
 		gpu, err := parseSlurmGpu(strings.TrimPrefix(flag, "--gpus-per-task="))
 		if err != nil {
-			return err
+			return false, err
 		}
 		specs.Gpu = gpu
+		return true, nil
 	}
 
 	// Email notifications
@@ -327,13 +358,16 @@ func (s *SlurmScheduler) parseSbatchFlag(flag string, specs *ScriptSpecs) error 
 				}
 			}
 		}
+		return true, nil
 	}
 
 	if strings.HasPrefix(flag, "--mail-user=") {
 		specs.MailUser = strings.TrimPrefix(flag, "--mail-user=")
+		return true, nil
 	}
 
-	return nil
+	// Flag not recognized
+	return false, nil
 }
 
 // CreateScriptWithSpec generates a SLURM batch script
@@ -384,40 +418,8 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 		specs.Ntasks = 1
 	}
 
-	// Write parsed SBATCH directives with overrides
+	// Write unrecognized flags (RawFlags only contains flags not parsed into typed fields)
 	for _, flag := range specs.RawFlags {
-		// Skip output/error flags if we're overriding them
-		if specs.Stdout != "" && (strings.HasPrefix(flag, "--output=") || strings.HasPrefix(flag, "-o ")) {
-			continue
-		}
-		// Always skip stderr flags - we don't want separate error logs
-		if strings.HasPrefix(flag, "--error=") || strings.HasPrefix(flag, "-e ") {
-			continue
-		}
-		if specs.Time > 0 && (strings.HasPrefix(flag, "--time=") || strings.HasPrefix(flag, "-t ")) {
-			continue
-		}
-		// Skip email flags - we'll generate them from the parsed boolean fields
-		if strings.HasPrefix(flag, "--mail-type=") || strings.HasPrefix(flag, "--mail-user=") {
-			continue
-		}
-		// Skip job-name flags - we'll use specs.JobName if set
-		if specs.JobName != "" && (strings.HasPrefix(flag, "--job-name=") || strings.HasPrefix(flag, "-J ")) {
-			continue
-		}
-		// Skip node/task/cpu flags - we'll regenerate them
-		if strings.HasPrefix(flag, "--nodes=") || strings.HasPrefix(flag, "-N ") {
-			continue
-		}
-		if strings.HasPrefix(flag, "--ntasks=") || strings.HasPrefix(flag, "-n ") {
-			continue
-		}
-		if strings.HasPrefix(flag, "--ntasks-per-node=") {
-			continue
-		}
-		if strings.HasPrefix(flag, "--cpus-per-task=") || strings.HasPrefix(flag, "-c ") {
-			continue
-		}
 		fmt.Fprintf(writer, "#SBATCH %s\n", flag)
 	}
 

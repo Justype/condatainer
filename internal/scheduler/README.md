@@ -53,6 +53,16 @@ type Scheduler interface {
 **JobResources** - Runtime-allocated resources (from env vars, pointer fields):
 - `Ncpus`, `Ntasks`, `Nodes`, `MemMB`, `Ngpus`
 
+## Script Parsing Behavior
+
+When parsing scheduler directives from build scripts, each scheduler's parser function returns `(bool, error)`:
+- `true` if the flag was **recognized and parsed** (e.g., CPU, memory, GPU, time, email settings)
+- `false` if the flag was **not recognized** (custom/unknown directive)
+
+Only **unrecognized flags** are stored in `ScriptSpecs.RawFlags`.
+
+This approach ensures that when generating scripts for a different scheduler, only the custom flags need special handling, while standard resources (CPU/mem/GPU/time) are regenerated using the target scheduler's native syntax.
+
 ## Key Functions
 
 **Resource Validation & Adjustment:**
@@ -212,8 +222,10 @@ Multi-node is supported by setting `Nodes > 1` in `ScriptSpecs`.
 
 ### LSF
 - CPU count via `-n`, memory via `-M` (KB), node count via `-R "span[hosts=N]"`
-- GPU via `-gpu "num=N:type=T"`
-- Mixed `-R` flags (e.g., `span[...] rusage[...]`) are split: span is regenerated, rusage is preserved
+- GPU via `-gpu "num=N:type=T"` or `-R "rusage[ngpus_physical=N]"`
+- `-R` resource flags are parsed: `span[hosts=N]` sets `Nodes`, `rusage[mem=X]` sets `MemMB`, `rusage[ngpus*=N]` sets GPU count
+- Script generation always regenerates `-R "span[hosts=N]"` from `specs.Nodes`
+- **Note**: Custom rusage parameters in `-R` flags (beyond mem/ngpus) are currently lost during parsing; use separate flags for custom resources
 - Cluster info from `bhosts -w`
 
 ### HTCondor
@@ -242,7 +254,24 @@ Check errors with: `scheduler.IsValidationError(err)`, `scheduler.IsGpuValidatio
 
 ## Environment Variables
 
-Each scheduler reads runtime resources from environment variables set by the scheduler when inside a job:
+### Normalized Variables (Exported by CondaTainer)
+
+All generated job scripts export **normalized environment variables** for use in build scripts, regardless of scheduler:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `NNODES` | Number of nodes | `1` |
+| `NTASKS` | Total number of tasks | `1` |
+| `NCPUS` | CPUs per task | `8` |
+| `MEM` | Memory in MB | `16384` |
+| `MEM_MB` | Memory in MB (alias) | `16384` |
+| `MEM_GB` | Memory in GB | `16` |
+
+These variables are set by CondaTainer's script generation and are available inside all build scripts for resource-aware compilation (e.g., `make -j $NCPUS`).
+
+### Scheduler-Native Variables (Read-Only)
+
+Each scheduler also sets its own runtime environment variables when inside a job:
 
 | Variable | SLURM | PBS | LSF | HTCondor |
 |----------|-------|-----|-----|----------|

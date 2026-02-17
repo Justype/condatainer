@@ -165,12 +165,18 @@ func (h *HTCondorScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, er
 
 		// Parse #CONDOR directives only
 		if matches := h.directiveRe.FindStringSubmatch(line); matches != nil {
+			specs.HasDirectives = true
 			flag := utils.StripInlineComment(matches[1])
-			specs.RawFlags = append(specs.RawFlags, flag)
 
-			// Parse individual HTCondor directives
-			if err := h.parseCondorDirective(flag, specs); err != nil {
+			// Parse individual HTCondor directives - returns true if recognized
+			recognized, err := h.parseCondorDirective(flag, specs)
+			if err != nil {
 				return nil, NewParseError("HTCondor", lineNum, line, err.Error())
+			}
+
+			// Only keep unrecognized flags in RawFlags
+			if !recognized {
+				specs.RawFlags = append(specs.RawFlags, flag)
 			}
 		}
 	}
@@ -183,12 +189,13 @@ func (h *HTCondorScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, er
 }
 
 // parseCondorDirective parses individual HTCondor directives and updates specs
-func (h *HTCondorScheduler) parseCondorDirective(flag string, specs *ScriptSpecs) error {
+// Returns true if the flag was recognized and parsed, false otherwise
+func (h *HTCondorScheduler) parseCondorDirective(flag string, specs *ScriptSpecs) (bool, error) {
 	// Split on first '=' to get key and value
 	parts := strings.SplitN(flag, "=", 2)
 	if len(parts) != 2 {
-		// Not a key=value directive, store as raw flag
-		return nil
+		// Not a key=value directive
+		return false, nil
 	}
 
 	key := strings.TrimSpace(strings.ToLower(parts[0]))
@@ -198,43 +205,50 @@ func (h *HTCondorScheduler) parseCondorDirective(flag string, specs *ScriptSpecs
 	case "request_cpus":
 		n, err := strconv.Atoi(value)
 		if err != nil {
-			return fmt.Errorf("invalid request_cpus value: %w", err)
+			return false, fmt.Errorf("invalid request_cpus value: %w", err)
 		}
 		specs.Ncpus = n
+		return true, nil
 
 	case "request_memory":
 		mem, err := parseHTCondorMemory(value)
 		if err != nil {
-			return err
+			return false, err
 		}
 		specs.MemMB = mem
+		return true, nil
 
 	case "request_gpus":
 		n, err := strconv.Atoi(value)
 		if err != nil {
-			return fmt.Errorf("invalid request_gpus value: %w", err)
+			return false, fmt.Errorf("invalid request_gpus value: %w", err)
 		}
 		specs.Gpu = &GpuSpec{
 			Type:  "gpu",
 			Count: n,
 			Raw:   value,
 		}
+		return true, nil
 
 	case "+maxruntime":
 		secs, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			return fmt.Errorf("invalid +MaxRuntime value: %w", err)
+			return false, fmt.Errorf("invalid +MaxRuntime value: %w", err)
 		}
 		specs.Time = time.Duration(secs) * time.Second
+		return true, nil
 
 	case "output":
 		specs.Stdout = value
+		return true, nil
 
 	case "error":
 		specs.Stderr = value
+		return true, nil
 
 	case "notify_user":
 		specs.MailUser = value
+		return true, nil
 
 	case "notification":
 		switch strings.ToLower(value) {
@@ -251,9 +265,11 @@ func (h *HTCondorScheduler) parseCondorDirective(flag string, specs *ScriptSpecs
 			specs.EmailOnEnd = false
 			specs.EmailOnFail = false
 		}
+		return true, nil
 	}
 
-	return nil
+	// Flag not recognized
+	return false, nil
 }
 
 // CreateScriptWithSpec generates an HTCondor submit description file and wrapper script
@@ -384,25 +400,8 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	fmt.Fprintln(subWriter, "transfer_executable = false")
 	fmt.Fprintln(subWriter, "")
 
-	// Write raw flags (excluding ones we'll regenerate)
+	// Write unrecognized flags (RawFlags only contains flags not parsed into typed fields)
 	for _, flag := range specs.RawFlags {
-		parts := strings.SplitN(flag, "=", 2)
-		if len(parts) != 2 {
-			fmt.Fprintf(subWriter, "# %s\n", flag)
-			continue
-		}
-		key := strings.TrimSpace(strings.ToLower(parts[0]))
-
-		// Skip flags that will be regenerated
-		switch key {
-		case "output", "error", "notification", "notify_user", "+maxruntime":
-			continue
-		}
-		// Skip job-name flags if we have a name
-		if specs.JobName != "" && key == "job_name" {
-			continue
-		}
-
 		fmt.Fprintf(subWriter, "%s\n", flag)
 	}
 

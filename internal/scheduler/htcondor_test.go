@@ -843,7 +843,8 @@ echo "Running job"
 	if specs.MailUser != "user@example.com" {
 		t.Errorf("MailUser = %q; want %q", specs.MailUser, "user@example.com")
 	}
-	if len(specs.RawFlags) != 6 {
-		t.Errorf("RawFlags count = %d; want 6", len(specs.RawFlags))
+	// RawFlags should be empty - all flags above are recognized and parsed into typed fields
+	if len(specs.RawFlags) != 0 {
+		t.Errorf("RawFlags count = %d; want 0 (all flags were recognized)", len(specs.RawFlags))
 	}
 }
