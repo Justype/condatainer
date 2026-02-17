@@ -151,41 +151,18 @@ func (s *SlurmScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig,
 	for _, flag := range directives {
 		consumed := true
 		switch {
-		case strings.HasPrefix(flag, "--job-name="):
-			rc.JobName = strings.TrimPrefix(flag, "--job-name=")
-		case strings.HasPrefix(flag, "--job-name "):
-			rc.JobName = strings.TrimSpace(strings.TrimPrefix(flag, "--job-name"))
-		case strings.HasPrefix(flag, "-J "):
-			rc.JobName = strings.TrimSpace(strings.TrimPrefix(flag, "-J"))
-		case strings.HasPrefix(flag, "--output="):
-			rc.Stdout = strings.TrimPrefix(flag, "--output=")
-		case strings.HasPrefix(flag, "--output "):
-			rc.Stdout = strings.TrimSpace(strings.TrimPrefix(flag, "--output"))
-		case strings.HasPrefix(flag, "-o "):
-			rc.Stdout = strings.TrimSpace(strings.TrimPrefix(flag, "-o"))
-		case strings.HasPrefix(flag, "--error="):
-			rc.Stderr = strings.TrimPrefix(flag, "--error=")
-		case strings.HasPrefix(flag, "--error "):
-			rc.Stderr = strings.TrimSpace(strings.TrimPrefix(flag, "--error"))
-		case strings.HasPrefix(flag, "-e "):
-			rc.Stderr = strings.TrimSpace(strings.TrimPrefix(flag, "-e"))
-		case strings.HasPrefix(flag, "--partition="):
-			rc.Partition = strings.TrimPrefix(flag, "--partition=")
-		case strings.HasPrefix(flag, "--partition "):
-			rc.Partition = strings.TrimSpace(strings.TrimPrefix(flag, "--partition"))
-		case strings.HasPrefix(flag, "-p "):
-			rc.Partition = strings.TrimSpace(strings.TrimPrefix(flag, "-p"))
-		case strings.HasPrefix(flag, "--mail-user="):
-			rc.MailUser = strings.TrimPrefix(flag, "--mail-user=")
-		case strings.HasPrefix(flag, "--mail-user "):
-			rc.MailUser = strings.TrimSpace(strings.TrimPrefix(flag, "--mail-user"))
-		case strings.HasPrefix(flag, "--mail-type="), strings.HasPrefix(flag, "--mail-type "):
-			rawMailType := flag
-			if strings.HasPrefix(rawMailType, "--mail-type=") {
-				rawMailType = strings.TrimPrefix(rawMailType, "--mail-type=")
-			} else {
-				rawMailType = strings.TrimSpace(strings.TrimPrefix(rawMailType, "--mail-type"))
-			}
+		case flagMatches(flag, "--job-name", "-J"):
+			rc.JobName, _ = flagValue(flag, "--job-name", "-J")
+		case flagMatches(flag, "--output", "-o"):
+			rc.Stdout, _ = flagValue(flag, "--output", "-o")
+		case flagMatches(flag, "--error", "-e"):
+			rc.Stderr, _ = flagValue(flag, "--error", "-e")
+		case flagMatches(flag, "--partition", "-p"):
+			rc.Partition, _ = flagValue(flag, "--partition", "-p")
+		case flagMatches(flag, "--mail-user"):
+			rc.MailUser, _ = flagValue(flag, "--mail-user")
+		case flagMatches(flag, "--mail-type"):
+			rawMailType, _ := flagValue(flag, "--mail-type")
 			mailType := strings.ToUpper(rawMailType)
 			if mailType == "NONE" {
 				rc.EmailOnBegin = false
@@ -241,57 +218,24 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		var parseErr error
 
 		switch {
-		case strings.HasPrefix(flag, "--cpus-per-task="):
-			_, parseErr = fmt.Sscanf(flag, "--cpus-per-task=%d", &rs.CpusPerTask)
-		case strings.HasPrefix(flag, "--cpus-per-task "):
-			_, parseErr = fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(flag, "--cpus-per-task")), "%d", &rs.CpusPerTask)
-		case strings.HasPrefix(flag, "-c "):
-			_, parseErr = fmt.Sscanf(flag, "-c %d", &rs.CpusPerTask)
-		case strings.HasPrefix(flag, "--nodes="):
-			_, parseErr = fmt.Sscanf(flag, "--nodes=%d", &rs.Nodes)
-		case strings.HasPrefix(flag, "--nodes "):
-			_, parseErr = fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(flag, "--nodes")), "%d", &rs.Nodes)
-		case strings.HasPrefix(flag, "-N "):
-			_, parseErr = fmt.Sscanf(flag, "-N %d", &rs.Nodes)
-		case strings.HasPrefix(flag, "--ntasks-per-node="):
-			_, parseErr = fmt.Sscanf(flag, "--ntasks-per-node=%d", &ntasksPerNode)
+		case flagMatches(flag, "--cpus-per-task", "-c"):
+			_, parseErr = flagScanInt(flag, &rs.CpusPerTask, "--cpus-per-task", "-c")
+		case flagMatches(flag, "--nodes", "-N"):
+			_, parseErr = flagScanInt(flag, &rs.Nodes, "--nodes", "-N")
+		case flagMatches(flag, "--ntasks-per-node"):
+			_, parseErr = flagScanInt(flag, &ntasksPerNode, "--ntasks-per-node")
 			hasExplicitTasksPerNode = true
-		case strings.HasPrefix(flag, "--ntasks-per-node "):
-			_, parseErr = fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(flag, "--ntasks-per-node")), "%d", &ntasksPerNode)
-			hasExplicitTasksPerNode = true
-		case strings.HasPrefix(flag, "--ntasks="):
-			_, parseErr = fmt.Sscanf(flag, "--ntasks=%d", &totalNtasks)
+		case flagMatches(flag, "--ntasks", "-n"):
+			_, parseErr = flagScanInt(flag, &totalNtasks, "--ntasks", "-n")
 			hasExplicitTotalNtasks = true
-		case strings.HasPrefix(flag, "--ntasks "):
-			_, parseErr = fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(flag, "--ntasks")), "%d", &totalNtasks)
-			hasExplicitTotalNtasks = true
-		case strings.HasPrefix(flag, "-n "):
-			_, parseErr = fmt.Sscanf(flag, "-n %d", &totalNtasks)
-			hasExplicitTotalNtasks = true
-		case strings.HasPrefix(flag, "--mem="):
-			rs.MemPerNodeMB, parseErr = parseMemory(strings.TrimPrefix(flag, "--mem="))
-		case strings.HasPrefix(flag, "--mem "):
-			rs.MemPerNodeMB, parseErr = parseMemory(strings.TrimSpace(strings.TrimPrefix(flag, "--mem")))
-		case strings.HasPrefix(flag, "--time="):
-			rs.Time, parseErr = parseSlurmTimeSpec(strings.TrimPrefix(flag, "--time="))
-		case strings.HasPrefix(flag, "--time "):
-			rs.Time, parseErr = parseSlurmTimeSpec(strings.TrimSpace(strings.TrimPrefix(flag, "--time")))
-		case strings.HasPrefix(flag, "-t "):
-			rs.Time, parseErr = parseSlurmTimeSpec(strings.TrimSpace(strings.TrimPrefix(flag, "-t")))
+		case flagMatches(flag, "--mem"):
+			_, parseErr = flagScan(flag, &rs.MemPerNodeMB, parseMemory, "--mem")
+		case flagMatches(flag, "--time", "-t"):
+			_, parseErr = flagScan(flag, &rs.Time, parseSlurmTimeSpec, "--time", "-t")
 		case strings.HasPrefix(flag, "--gres=gpu:"):
 			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimPrefix(flag, "--gres="))
-		case strings.HasPrefix(flag, "--gpus="):
-			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimPrefix(flag, "--gpus="))
-		case strings.HasPrefix(flag, "--gpus "):
-			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimSpace(strings.TrimPrefix(flag, "--gpus")))
-		case strings.HasPrefix(flag, "--gpus-per-node="):
-			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimPrefix(flag, "--gpus-per-node="))
-		case strings.HasPrefix(flag, "--gpus-per-node "):
-			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimSpace(strings.TrimPrefix(flag, "--gpus-per-node")))
-		case strings.HasPrefix(flag, "--gpus-per-task="):
-			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimPrefix(flag, "--gpus-per-task="))
-		case strings.HasPrefix(flag, "--gpus-per-task "):
-			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimSpace(strings.TrimPrefix(flag, "--gpus-per-task")))
+		case flagMatches(flag, "--gpus", "--gpus-per-node", "--gpus-per-task"):
+			_, parseErr = flagScan(flag, &rs.Gpu, parseSlurmGpu, "--gpus", "--gpus-per-node", "--gpus-per-task")
 		case flag == "--exclusive", strings.HasPrefix(flag, "--exclusive="):
 			rs.Exclusive = true
 		default:

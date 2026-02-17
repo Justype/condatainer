@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -67,4 +69,46 @@ func parseScript(
 		RawFlags:       directives,
 		RemainingFlags: remaining,
 	}, nil
+}
+
+// flagValue extracts the value from a CLI flag, trying each prefix in order.
+// Handles "prefix=value" and "prefix value" (space-separated) forms.
+// Returns ("", false) if no prefix matches.
+func flagValue(flag string, prefixes ...string) (string, bool) {
+	for _, prefix := range prefixes {
+		if v, ok := strings.CutPrefix(flag, prefix+"="); ok {
+			return v, true
+		}
+		if v, ok := strings.CutPrefix(flag, prefix+" "); ok {
+			return strings.TrimSpace(v), true
+		}
+	}
+	return "", false
+}
+
+// flagMatches reports whether flag matches any prefix in "prefix=…" or "prefix …" form.
+// Intended for use in switch case expressions.
+func flagMatches(flag string, prefixes ...string) bool {
+	_, ok := flagValue(flag, prefixes...)
+	return ok
+}
+
+// flagScan extracts a value from a CLI flag and writes it into *dest using the provided parser.
+// Generic base — works for any type (int, int64, time.Duration, *GpuSpec, …).
+// Returns (false, nil) when no prefix matches; (true, err) on parse failure.
+func flagScan[T any](flag string, dest *T, parser func(string) (T, error), prefixes ...string) (bool, error) {
+	v, ok := flagValue(flag, prefixes...)
+	if !ok {
+		return false, nil
+	}
+	result, err := parser(v)
+	if err == nil {
+		*dest = result
+	}
+	return true, err
+}
+
+// flagScanInt is a convenience wrapper for flagScan using strconv.Atoi.
+func flagScanInt(flag string, dest *int, prefixes ...string) (bool, error) {
+	return flagScan(flag, dest, strconv.Atoi, prefixes...)
 }

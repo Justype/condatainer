@@ -148,29 +148,18 @@ func (p *PbsScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 	for _, flag := range directives {
 		consumed := true
 		switch {
-		// Job name: -N jobname
-		case strings.HasPrefix(flag, "-N "):
-			rc.JobName = strings.TrimSpace(strings.TrimPrefix(flag, "-N"))
-
-		// Output file: -o path
-		case strings.HasPrefix(flag, "-o "):
-			rc.Stdout = strings.TrimSpace(strings.TrimPrefix(flag, "-o"))
-
-		// Error file: -e path
-		case strings.HasPrefix(flag, "-e "):
-			rc.Stderr = strings.TrimSpace(strings.TrimPrefix(flag, "-e"))
-
-		// Queue/partition: -q queuename
-		case strings.HasPrefix(flag, "-q "):
-			rc.Partition = strings.TrimSpace(strings.TrimPrefix(flag, "-q"))
-
-		// Mail user: -M email
-		case strings.HasPrefix(flag, "-M "):
-			rc.MailUser = strings.TrimSpace(strings.TrimPrefix(flag, "-M"))
-
-		// Mail options: -m [a|b|e|n] (abort/fail, begin, end, none)
-		case strings.HasPrefix(flag, "-m "):
-			mailOpts := strings.TrimSpace(strings.TrimPrefix(flag, "-m"))
+		case flagMatches(flag, "-N"):
+			rc.JobName, _ = flagValue(flag, "-N")
+		case flagMatches(flag, "-o"):
+			rc.Stdout, _ = flagValue(flag, "-o")
+		case flagMatches(flag, "-e"):
+			rc.Stderr, _ = flagValue(flag, "-e")
+		case flagMatches(flag, "-q"):
+			rc.Partition, _ = flagValue(flag, "-q")
+		case flagMatches(flag, "-M"):
+			rc.MailUser, _ = flagValue(flag, "-M")
+		case flagMatches(flag, "-m"):
+			mailOpts, _ := flagValue(flag, "-m")
 			if mailOpts == "n" {
 				rc.EmailOnBegin = false
 				rc.EmailOnEnd = false
@@ -187,7 +176,6 @@ func (p *PbsScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 					}
 				}
 			}
-
 		default:
 			consumed = false
 		}

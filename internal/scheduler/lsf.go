@@ -151,20 +151,20 @@ func (l *LsfScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 	for _, flag := range directives {
 		recognized := true
 		switch {
-		case strings.HasPrefix(flag, "-J "):
-			rc.JobName = strings.TrimSpace(strings.TrimPrefix(flag, "-J"))
-		case strings.HasPrefix(flag, "-o "):
-			rc.Stdout = strings.TrimSpace(strings.TrimPrefix(flag, "-o"))
-		case strings.HasPrefix(flag, "-e "):
-			rc.Stderr = strings.TrimSpace(strings.TrimPrefix(flag, "-e"))
+		case flagMatches(flag, "-J"):
+			rc.JobName, _ = flagValue(flag, "-J")
+		case flagMatches(flag, "-o"):
+			rc.Stdout, _ = flagValue(flag, "-o")
+		case flagMatches(flag, "-e"):
+			rc.Stderr, _ = flagValue(flag, "-e")
 		case flag == "-B":
 			rc.EmailOnBegin = true
 		case flag == "-N":
 			rc.EmailOnEnd = true
-		case strings.HasPrefix(flag, "-u "):
-			rc.MailUser = strings.TrimSpace(strings.TrimPrefix(flag, "-u"))
-		case strings.HasPrefix(flag, "-q "):
-			rc.Partition = strings.TrimSpace(strings.TrimPrefix(flag, "-q"))
+		case flagMatches(flag, "-u"):
+			rc.MailUser, _ = flagValue(flag, "-u")
+		case flagMatches(flag, "-q"):
+			rc.Partition, _ = flagValue(flag, "-q")
 		default:
 			recognized = false
 		}
@@ -189,45 +189,34 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 	remaining := make([]string, 0)
 	for _, flag := range directives {
 		recognized := true
+		var parseErr error
+
 		switch {
-		case strings.HasPrefix(flag, "-n "):
-			ncpuStr := strings.TrimSpace(strings.TrimPrefix(flag, "-n"))
-			if ncpus, err := strconv.Atoi(ncpuStr); err == nil {
-				rs.CpusPerTask = ncpus
-			} else {
-				utils.PrintWarning("LSF: invalid -n value %q: %v", ncpuStr, err)
-				return nil, directives
-			}
-		case strings.HasPrefix(flag, "-M "):
-			memStr := strings.TrimSpace(strings.TrimPrefix(flag, "-M"))
-			if mem, err := parseLsfMemory(memStr); err == nil {
-				rs.MemPerNodeMB = mem
-			} else {
-				utils.PrintWarning("LSF: invalid -M value %q: %v", memStr, err)
-				return nil, directives
-			}
-		case strings.HasPrefix(flag, "-W "):
-			timeStr := strings.TrimSpace(strings.TrimPrefix(flag, "-W"))
-			if dur, err := parseLsfTime(timeStr); err == nil {
-				rs.Time = dur
-			} else {
-				utils.PrintWarning("LSF: invalid -W value %q: %v", timeStr, err)
-				return nil, directives
-			}
-		case strings.HasPrefix(flag, "-gpu "):
-			gpuStr := strings.TrimSpace(strings.TrimPrefix(flag, "-gpu"))
+		case flagMatches(flag, "-n"):
+			_, parseErr = flagScanInt(flag, &rs.CpusPerTask, "-n")
+		case flagMatches(flag, "-M"):
+			_, parseErr = flagScan(flag, &rs.MemPerNodeMB, parseLsfMemory, "-M")
+		case flagMatches(flag, "-W"):
+			_, parseErr = flagScan(flag, &rs.Time, parseLsfTime, "-W")
+		case flagMatches(flag, "-gpu"):
+			gpuStr, _ := flagValue(flag, "-gpu")
 			gpuStr = strings.Trim(gpuStr, "\"'")
 			if gpu := parseLsfGpuDirective(gpuStr); gpu != nil {
 				rs.Gpu = gpu
 			}
-		case strings.HasPrefix(flag, "-R "):
-			resStr := strings.TrimSpace(strings.TrimPrefix(flag, "-R"))
+		case flagMatches(flag, "-R"):
+			resStr, _ := flagValue(flag, "-R")
 			resStr = strings.Trim(resStr, "\"'")
 			l.parseLsfResourceIntoSpec(resStr, rs)
 		case flag == "-x":
 			rs.Exclusive = true
 		default:
 			recognized = false
+		}
+
+		if parseErr != nil {
+			utils.PrintWarning("LSF: failed to parse directive %q: %v", flag, parseErr)
+			return nil, directives
 		}
 		if !recognized {
 			remaining = append(remaining, flag)
