@@ -9,7 +9,7 @@ HELPER_NAME=vscode-server
 config_init $HELPER_NAME \
     NCPUS=4 \
     MEM=16G \
-    TIME=12:00 \
+    TIME=12:00:00 \
     GPU= \
     BASE_IMAGE= \
     BASE_IMAGE_DISTRO=noble \
@@ -35,7 +35,7 @@ print_help() {
     echo "  -m <memory>     Amount of memory to allocate (default: $MEM)"
     echo "  -t <time>       Time limit for the job (default: $TIME)"
     echo "  -g <gpu>        GPU resources (e.g., 1, a100:2). Use -g '' to clear"
-    echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00"
+    echo "  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00"
     echo "  -w              Use current directory as working directory (clears additional overlays)"
     echo ""
     echo "  -b <image>      Base image file"
@@ -110,8 +110,8 @@ while getopts "c:m:t:g:wp:a:b:e:o:v" opt; do
         m ) MEM=$OPTARG; _MEM=$OPTARG; _ARG_MEM=1 ;;
         t ) TIME=$OPTARG; _TIME=$OPTARG; _ARG_TIME=1 ;;
         g ) GPU=$OPTARG; _GPU=$OPTARG; _ARG_GPU=1 ;;
-        v ) NCPUS=1; MEM=4G; TIME=02:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
-            echo "[MSG] View Mode: NCPUS=1, MEM=4G, TIME=02:00" ;;
+        v ) NCPUS=1; MEM=4G; TIME=02:00:00; _ARG_NCPUS=1; _ARG_MEM=1; _ARG_TIME=1;
+            echo "[MSG] View Mode: NCPUS=1, MEM=4G, TIME=02:00:00" ;;
         w )
             NEW_CWD="$(readlink -f .)"
             if [ "$_OVERLAYS_CLEARED" = false ]; then OVERLAYS=""; _OVERLAYS_CLEARED=true; fi
@@ -245,7 +245,7 @@ LSF_TIME="$TIME"
 if [[ "$LSF_TIME" == *:*:* ]]; then
     ORIG_TIME="$LSF_TIME"
     LSF_TIME="${LSF_TIME%:*}"
-    print_info "Converting TIME '${ORIG_TIME}' → '${LSF_TIME}' (HH:MM only)."
+    print_info "Converting TIME '${ORIG_TIME}' → '${LSF_TIME}' (HH:MM for LSF)."
 fi
 
 LSF_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.lsf"
