@@ -22,7 +22,6 @@ type HTCondorScheduler struct {
 	condorQBin         string
 	condorStatusBin    string
 	condorConfigValBin string
-	directiveRe        *regexp.Regexp
 	jobIDRe            *regexp.Regexp
 }
 
@@ -66,7 +65,6 @@ func newHTCondorSchedulerWithBinary(condorSubmitBin string) (*HTCondorScheduler,
 		condorQBin:         condorQBin,
 		condorStatusBin:    condorStatusBin,
 		condorConfigValBin: condorConfigValBin,
-		directiveRe:        regexp.MustCompile(`^\s*#CONDOR\s+(.+)$`),
 		jobIDRe:            regexp.MustCompile(`submitted to cluster (\d+)`),
 	}, nil
 }
@@ -137,24 +135,64 @@ func (h *HTCondorScheduler) getHTCondorVersion() (string, error) {
 }
 
 
-// ReadScriptSpecs parses #CONDOR directives from a build script
+// ReadScriptSpecs parses an HTCondor submit file (.sub) in native key=value format.
+// The executable line is extracted as the ScriptPath.
 func (h *HTCondorScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) {
 	lines, err := readFileLines(scriptPath)
 	if err != nil {
 		return nil, err
 	}
-	return parseScript(lines, h.extractDirectives, h.parseRuntimeConfig, h.parseResourceSpec)
+	executable := extractHTCondorExecutable(lines)
+	return parseScript(executable, lines, h.extractDirectives, h.parseRuntimeConfig, h.parseResourceSpec)
 }
 
-// extractDirectives extracts raw directive strings from script lines (strips the #CONDOR prefix).
+// htcondorStructuralKeys are submit file keywords that are not resource/control directives.
+var htcondorStructuralKeys = map[string]bool{
+	"universe":            true,
+	"executable":          true,
+	"transfer_executable": true,
+	"queue":               true,
+	"arguments":           true,
+}
+
+// extractDirectives parses native HTCondor submit file lines.
+// Comments (#), empty lines, and structural keywords are skipped.
+// Returns key=value directive strings for parsing by parseRuntimeConfig and parseResourceSpec.
 func (h *HTCondorScheduler) extractDirectives(lines []string) []string {
 	var out []string
 	for _, line := range lines {
-		if m := h.directiveRe.FindStringSubmatch(line); m != nil {
-			out = append(out, utils.StripInlineComment(m[1]))
+		trimmed := strings.TrimSpace(line)
+		// Skip comments, empty lines
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
 		}
+		// Parse key from key=value or bare keyword
+		key := trimmed
+		if idx := strings.IndexByte(trimmed, '='); idx >= 0 {
+			key = strings.TrimSpace(trimmed[:idx])
+		}
+		// Skip structural keywords
+		if htcondorStructuralKeys[strings.ToLower(key)] {
+			continue
+		}
+		out = append(out, trimmed)
 	}
 	return out
+}
+
+// extractHTCondorExecutable finds the executable path from HTCondor submit file lines.
+func extractHTCondorExecutable(lines []string) string {
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") || trimmed == "" {
+			continue
+		}
+		parts := strings.SplitN(trimmed, "=", 2)
+		if len(parts) == 2 && strings.TrimSpace(strings.ToLower(parts[0])) == "executable" {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+	return ""
 }
 
 // parseRuntimeConfig consumes job control directives (name, I/O, email) from the directive list.
@@ -719,11 +757,9 @@ func formatHTCondorTime(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
 }
 
-// TryParseHTCondorScript attempts to parse an HTCondor script without requiring HTCondor binaries.
+// TryParseHTCondorScript attempts to parse an HTCondor submit file without requiring HTCondor binaries.
 // This is a static parser that can work in any environment.
 func TryParseHTCondorScript(scriptPath string) (*ScriptSpecs, error) {
-	parser := &HTCondorScheduler{
-		directiveRe: regexp.MustCompile(`^\s*#CONDOR\s+(.+)$`),
-	}
+	parser := &HTCondorScheduler{}
 	return parser.ReadScriptSpecs(scriptPath)
 }

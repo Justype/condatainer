@@ -45,6 +45,7 @@ func readFileLines(path string) ([]string, error) {
 //
 // RawFlags is the immutable audit log of ALL directives in the script.
 func parseScript(
+	scriptPath string,
 	lines []string,
 	extractor func([]string) []string,
 	rcParser func([]string) (RuntimeConfig, []string, error),
@@ -63,6 +64,7 @@ func parseScript(
 	}
 
 	return &ScriptSpecs{
+		ScriptPath:     scriptPath,
 		Spec:           rs,
 		Control:        rc,
 		HasDirectives:  len(directives) > 0,

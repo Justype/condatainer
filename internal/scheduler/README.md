@@ -9,7 +9,7 @@ HPC scheduler abstraction layer providing a unified interface for job submission
 | SLURM | `sbatch` | `#SBATCH` | Stable |
 | PBS/Torque | `qsub` | `#PBS` | Experimental |
 | LSF | `bsub` | `#BSUB` | Experimental |
-| HTCondor | `condor_submit` | `#CONDOR` | Experimental |
+| HTCondor | `condor_submit` | Native `.sub` format | Experimental |
 
 ## Architecture
 
@@ -44,8 +44,11 @@ type Scheduler interface {
 ## Key Types
 
 **ScriptSpecs** - Parsed job specifications (scheduler-agnostic):
-- `JobName`, `Ncpus`, `Ntasks`, `Nodes`, `MemMB`, `Time`
-- `Gpu *GpuSpec`, email settings, `RawFlags []string`
+- `ScriptPath` - Absolute path of the parsed script (for HTCondor: the `executable` from `.sub` file)
+- `Spec *ResourceSpec` - Compute geometry: `Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`, `Gpu`, `Exclusive`
+- `Control RuntimeConfig` - Job control: `JobName`, `Stdout`, `Stderr`, email settings, `Partition`
+- `RawFlags []string` - Immutable audit log of all directives
+- `RemainingFlags []string` - Directives not absorbed by Spec or Control
 
 **JobSpec** - Job submission input:
 - `Name`, `Command`, `Specs *ScriptSpecs`, `DepJobIDs`, `Metadata`
@@ -55,13 +58,12 @@ type Scheduler interface {
 
 ## Script Parsing Behavior
 
-When parsing scheduler directives from build scripts, each scheduler's parser function returns `(bool, error)`:
-- `true` if the flag was **recognized and parsed** (e.g., CPU, memory, GPU, time, email settings)
-- `false` if the flag was **not recognized** (custom/unknown directive)
+Parsing uses a two-stage pipeline:
 
-Only **unrecognized flags** are stored in `ScriptSpecs.RawFlags`.
+1. **Stage 1 (critical):** `parseRuntimeConfig` — extracts job control settings (name, I/O, email). Failures stop parsing.
+2. **Stage 2 (best-effort):** `parseResourceSpec` — extracts compute geometry (CPU, memory, GPU, time). Returns nil on failure → passthrough mode.
 
-This approach ensures that when generating scripts for a different scheduler, only the custom flags need special handling, while standard resources (CPU/mem/GPU/time) are regenerated using the target scheduler's native syntax.
+`RawFlags` is an immutable audit log of ALL directives. `RemainingFlags` contains only directives not absorbed by either stage. This ensures that when generating scripts for a different scheduler, standard resources are regenerated using the target scheduler's native syntax.
 
 ## Key Functions
 
@@ -140,10 +142,13 @@ jobSpec := &scheduler.JobSpec{
     Name:    "my_job",
     Command: "python train.py",
     Specs: &scheduler.ScriptSpecs{
-        Ncpus: 8,
-        MemMB: 16384,
-        Time:  3600,
-        Gpu:   &scheduler.GpuSpec{Count: 1, Type: "a100"},
+        Spec: &scheduler.ResourceSpec{
+            CpusPerTask:  8,
+            MemPerNodeMB: 16384,
+            Time:         time.Hour,
+            Gpu:          &scheduler.GpuSpec{Count: 1, Type: "a100"},
+        },
+        Control: scheduler.RuntimeConfig{JobName: "my_job"},
     },
 }
 scriptPath, err := sched.CreateScriptWithSpec(jobSpec, "/output/dir")
@@ -229,9 +234,11 @@ Multi-node is supported by setting `Nodes > 1` in `ScriptSpecs`.
 - Cluster info from `bhosts -w`
 
 ### HTCondor
-- Uses `key = value` directive format (e.g., `request_cpus = 8`)
+- Parses native `.sub` submit files directly
+- `executable = script.sh` in the `.sub` file is extracted as `ScriptSpecs.ScriptPath`
+- Comments (`#`), empty lines, and structural keywords (`universe`, `executable`, `transfer_executable`, `queue`, `arguments`) are skipped during parsing
+- Resource keys: `request_cpus`, `request_memory`, `request_gpus`, `+MaxRuntime` (seconds)
 - Generates two files: `.sub` (submit description) + `.sh` (wrapper script)
-- Time via `+MaxRuntime` (seconds)
 - Always single-node (vanilla universe)
 - No native job dependency support
 

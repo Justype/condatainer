@@ -95,6 +95,7 @@ type ClusterInfo struct {
 
 // ScriptSpecs holds the full result of parsing a scheduler script.
 type ScriptSpecs struct {
+	ScriptPath     string        // Absolute path of the parsed script (for HTCondor .sub: the executable)
 	Spec           *ResourceSpec // Compute geometry (nil = resource parse failed → passthrough mode)
 	Control        RuntimeConfig // Job control settings
 	HasDirectives  bool          // True if any scheduler directive (#SBATCH, #PBS, etc.) was found

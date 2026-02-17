@@ -128,7 +128,7 @@ func (s *SlurmScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error
 	if err != nil {
 		return nil, err
 	}
-	return parseScript(lines, s.extractDirectives, s.parseRuntimeConfig, s.parseResourceSpec)
+	return parseScript(scriptPath, lines, s.extractDirectives, s.parseRuntimeConfig, s.parseResourceSpec)
 }
 
 // extractDirectives extracts raw directive strings from script lines (strips the #SBATCH prefix).

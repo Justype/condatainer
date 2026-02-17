@@ -128,7 +128,7 @@ func (l *LsfScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) 
 	if err != nil {
 		return nil, err
 	}
-	return parseScript(lines, l.extractDirectives, l.parseRuntimeConfig, l.parseResourceSpec)
+	return parseScript(scriptPath, lines, l.extractDirectives, l.parseRuntimeConfig, l.parseResourceSpec)
 }
 
 // extractDirectives extracts #BSUB directive strings from script lines.

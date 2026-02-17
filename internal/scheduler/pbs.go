@@ -124,7 +124,7 @@ func (p *PbsScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) 
 	if err != nil {
 		return nil, err
 	}
-	return parseScript(lines, p.extractDirectives, p.parseRuntimeConfig, p.parseResourceSpec)
+	return parseScript(scriptPath, lines, p.extractDirectives, p.parseRuntimeConfig, p.parseResourceSpec)
 }
 
 // extractDirectives extracts raw directive strings from script lines (strips the #PBS prefix).
