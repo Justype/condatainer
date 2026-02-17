@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+// StripInlineComment removes everything after the first '#' character (inline comment).
+// Returns the trimmed string without the comment.
+func StripInlineComment(s string) string {
+	if idx := strings.Index(s, "#"); idx >= 0 {
+		s = s[:idx]
+	}
+	return strings.TrimSpace(s)
+}
+
 // ParseSizeToMB converts strings like "10G", "500M", "1024" into Megabytes (int).
 // Default unit is MB if no suffix is provided.
 func ParseSizeToMB(sizeStr string) (int, error) {
@@ -134,7 +143,7 @@ func GetDependenciesFromScript(scriptPath string) ([]string, error) {
 
 		// Check for #DEP: comments
 		if strings.HasPrefix(line, "#DEP:") {
-			depLine := strings.TrimSpace(line[5:])
+			depLine := StripInlineComment(line[5:])
 			if depLine != "" {
 				if IsOverlay(depLine) {
 					if !seen[depLine] {

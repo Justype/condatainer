@@ -60,8 +60,8 @@ func GetEnvDictFromBuildScript(scriptPath string) (map[string]EnvEntry, error) {
 			continue
 		}
 
-		// Parse KEY=VALUE
-		content := strings.TrimSpace(line[len("#ENV:"):])
+		// Parse KEY=VALUE (strip inline comments)
+		content := utils.StripInlineComment(line[len("#ENV:"):])
 		if !strings.Contains(content, "=") {
 			continue
 		}

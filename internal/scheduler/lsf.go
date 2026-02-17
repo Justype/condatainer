@@ -150,7 +150,7 @@ func (l *LsfScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) 
 
 		// Parse #BSUB directives only
 		if matches := l.directiveRe.FindStringSubmatch(line); matches != nil {
-			flag := strings.TrimSpace(matches[1])
+			flag := utils.StripInlineComment(matches[1])
 			specs.RawFlags = append(specs.RawFlags, flag)
 
 			// Parse LSF options

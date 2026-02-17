@@ -74,6 +74,70 @@ echo "Build script"
 	}
 }
 
+func TestGetEnvDictFromBuildScript_WithComments(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "test_comments.sh")
+
+	scriptContent := `#!/bin/bash
+#ENV:STAR_INDEX_DIR=$app_root/star  # STAR index directory
+#ENV:GENOME_FASTA=$app_root/fasta/genome.fa # genome fasta file
+#ENV:NO_COMMENT=$app_root/data
+#ENV:HASH_NO_SPACE=$app_root/test#comment without space
+echo "Build script"
+`
+
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o644); err != nil {
+		t.Fatalf("Failed to create test script: %v", err)
+	}
+
+	envDict, err := GetEnvDictFromBuildScript(scriptPath)
+	if err != nil {
+		t.Fatalf("GetEnvDictFromBuildScript failed: %v", err)
+	}
+
+	// Verify results - comments should be stripped
+	expectedCount := 4
+	if len(envDict) != expectedCount {
+		t.Errorf("Expected %d env entries, got %d", expectedCount, len(envDict))
+	}
+
+	// Check STAR_INDEX_DIR - comment should be stripped
+	if entry, ok := envDict["STAR_INDEX_DIR"]; !ok {
+		t.Error("STAR_INDEX_DIR not found in envDict")
+	} else {
+		if entry.Value != "$app_root/star" {
+			t.Errorf("STAR_INDEX_DIR value = %q, want %q (comment should be stripped)", entry.Value, "$app_root/star")
+		}
+	}
+
+	// Check GENOME_FASTA - comment should be stripped
+	if entry, ok := envDict["GENOME_FASTA"]; !ok {
+		t.Error("GENOME_FASTA not found in envDict")
+	} else {
+		if entry.Value != "$app_root/fasta/genome.fa" {
+			t.Errorf("GENOME_FASTA value = %q, want %q (comment should be stripped)", entry.Value, "$app_root/fasta/genome.fa")
+		}
+	}
+
+	// Check NO_COMMENT - should work as before
+	if entry, ok := envDict["NO_COMMENT"]; !ok {
+		t.Error("NO_COMMENT not found in envDict")
+	} else {
+		if entry.Value != "$app_root/data" {
+			t.Errorf("NO_COMMENT value = %q, want %q", entry.Value, "$app_root/data")
+		}
+	}
+
+	// Check HASH_NO_SPACE - comment should be stripped even without space
+	if entry, ok := envDict["HASH_NO_SPACE"]; !ok {
+		t.Error("HASH_NO_SPACE not found in envDict")
+	} else {
+		if entry.Value != "$app_root/test" {
+			t.Errorf("HASH_NO_SPACE value = %q, want %q (comment should be stripped)", entry.Value, "$app_root/test")
+		}
+	}
+}
+
 func TestSaveEnvFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	overlayPath := filepath.Join(tmpDir, "test.sqf")

@@ -998,3 +998,44 @@ func TestSlurmNodeTaskRoundTrip(t *testing.T) {
 		t.Error("--cpus-per-task= should appear exactly once")
 	}
 }
+
+func TestSlurmDirectivesWithComments(t *testing.T) {
+	sched := newTestSlurmScheduler()
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "test.sh")
+
+	script := `#!/bin/bash
+#SBATCH --job-name=test_job  # This is a comment
+#SBATCH --cpus-per-task=8 # Number of CPUs
+#SBATCH --mem=16G#No space before comment
+#SBATCH --time=02:00:00   #   Time limit with spaces
+#SBATCH --output=out.log # Output file
+
+echo "hello"
+`
+	if err := os.WriteFile(tmpFile, []byte(script), 0644); err != nil {
+		t.Fatalf("failed to create test script: %v", err)
+	}
+
+	specs, err := sched.ReadScriptSpecs(tmpFile)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	// Verify that comments were stripped and values parsed correctly
+	if specs.JobName != "test_job" {
+		t.Errorf("JobName = %q; want %q", specs.JobName, "test_job")
+	}
+	if specs.Ncpus != 8 {
+		t.Errorf("Ncpus = %d; want 8", specs.Ncpus)
+	}
+	if specs.MemMB != 16*1024 {
+		t.Errorf("MemMB = %d; want %d", specs.MemMB, 16*1024)
+	}
+	if specs.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want %v", specs.Time, 2*time.Hour)
+	}
+	if specs.Stdout != "out.log" {
+		t.Errorf("Stdout = %q; want %q", specs.Stdout, "out.log")
+	}
+}

@@ -164,7 +164,7 @@ func (h *HTCondorScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, er
 
 		// Parse #CONDOR directives only
 		if matches := h.directiveRe.FindStringSubmatch(line); matches != nil {
-			flag := strings.TrimSpace(matches[1])
+			flag := utils.StripInlineComment(matches[1])
 			specs.RawFlags = append(specs.RawFlags, flag)
 
 			// Parse individual HTCondor directives
