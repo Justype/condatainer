@@ -150,17 +150,17 @@ func TestSlurmEmailParsing(t *testing.T) {
 			}
 
 			// Verify results
-			if specs.EmailOnBegin != tt.wantBegin {
-				t.Errorf("EmailOnBegin = %v; want %v", specs.EmailOnBegin, tt.wantBegin)
+			if specs.Control.EmailOnBegin != tt.wantBegin {
+				t.Errorf("EmailOnBegin = %v; want %v", specs.Control.EmailOnBegin, tt.wantBegin)
 			}
-			if specs.EmailOnEnd != tt.wantEnd {
-				t.Errorf("EmailOnEnd = %v; want %v", specs.EmailOnEnd, tt.wantEnd)
+			if specs.Control.EmailOnEnd != tt.wantEnd {
+				t.Errorf("EmailOnEnd = %v; want %v", specs.Control.EmailOnEnd, tt.wantEnd)
 			}
-			if specs.EmailOnFail != tt.wantFail {
-				t.Errorf("EmailOnFail = %v; want %v", specs.EmailOnFail, tt.wantFail)
+			if specs.Control.EmailOnFail != tt.wantFail {
+				t.Errorf("EmailOnFail = %v; want %v", specs.Control.EmailOnFail, tt.wantFail)
 			}
-			if specs.MailUser != tt.wantMailUser {
-				t.Errorf("MailUser = %q; want %q", specs.MailUser, tt.wantMailUser)
+			if specs.Control.MailUser != tt.wantMailUser {
+				t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, tt.wantMailUser)
 			}
 		})
 	}
@@ -231,14 +231,18 @@ func TestSlurmEmailScriptGeneration(t *testing.T) {
 				Name:    "test_job",
 				Command: "echo 'test'",
 				Specs: &ScriptSpecs{
-					JobName:      "test_job",
-					Ncpus:        4,
-					MemMB:        8000,
-					Time:         time.Hour,
-					EmailOnBegin: tt.emailOnBegin,
-					EmailOnEnd:   tt.emailOnEnd,
-					EmailOnFail:  tt.emailOnFail,
-					MailUser:     tt.mailUser,
+					Spec: &ResourceSpec{
+						CpusPerTask:  4,
+						MemPerNodeMB: 8000,
+						Time:         time.Hour,
+					},
+					Control: RuntimeConfig{
+						JobName:      "test_job",
+						EmailOnBegin: tt.emailOnBegin,
+						EmailOnEnd:   tt.emailOnEnd,
+						EmailOnFail:  tt.emailOnFail,
+						MailUser:     tt.mailUser,
+					},
 				},
 			}
 
@@ -312,15 +316,18 @@ echo "Running job"
 	}
 
 	// Verify parsing
-	if !specs.EmailOnBegin || !specs.EmailOnEnd || !specs.EmailOnFail {
+	if !specs.Control.EmailOnBegin || !specs.Control.EmailOnEnd || !specs.Control.EmailOnFail {
 		t.Errorf("Parsing failed: EmailOnBegin=%v, EmailOnEnd=%v, EmailOnFail=%v",
-			specs.EmailOnBegin, specs.EmailOnEnd, specs.EmailOnFail)
+			specs.Control.EmailOnBegin, specs.Control.EmailOnEnd, specs.Control.EmailOnFail)
 	}
-	if specs.MailUser != "roundtrip@example.com" {
-		t.Errorf("MailUser = %q; want %q", specs.MailUser, "roundtrip@example.com")
+	if specs.Control.MailUser != "roundtrip@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, "roundtrip@example.com")
 	}
-	if specs.Time != 2*time.Hour {
-		t.Errorf("Time = %v; want 2h", specs.Time)
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil; want non-nil")
+	}
+	if specs.Spec.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
 	}
 
 	// Generate a new script from the parsed specs
@@ -378,8 +385,10 @@ func TestSlurmCreateScriptUsesOutputDir(t *testing.T) {
 		Name:    "test/job",
 		Command: "echo 'hello'",
 		Specs: &ScriptSpecs{
-			RawFlags: []string{},
-			Ncpus:    1,
+			RemainingFlags: []string{},
+			Spec: &ResourceSpec{
+				CpusPerTask: 1,
+			},
 		},
 	}
 
@@ -401,12 +410,12 @@ func TestSlurmCreateScriptUsesOutputDir(t *testing.T) {
 
 func TestSlurmResourceParsing(t *testing.T) {
 	tests := []struct {
-		name      string
-		lines     []string
-		wantNcpus int
-		wantMemMB int64
-		wantTime  time.Duration
-		wantGpu   *GpuSpec
+		name          string
+		lines         []string
+		wantCpus      int
+		wantMemMB     int64
+		wantTime      time.Duration
+		wantGpu       *GpuSpec
 	}{
 		{
 			name: "basic resources",
@@ -417,7 +426,7 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#SBATCH --mem=16G",
 				"#SBATCH --time=02:00:00",
 			},
-			wantNcpus: 8,
+			wantCpus:  8,
 			wantMemMB: 16 * 1024,
 			wantTime:  2 * time.Hour,
 		},
@@ -429,8 +438,8 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#SBATCH -c 4",
 				"#SBATCH -t 01:30:00",
 			},
-			wantNcpus: 4,
-			wantTime:  time.Hour + 30*time.Minute,
+			wantCpus: 4,
+			wantTime: time.Hour + 30*time.Minute,
 		},
 		{
 			name: "memory in MB",
@@ -438,7 +447,7 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --mem=4096M",
 			},
-			wantNcpus: 2, // default
+			wantCpus:  2, // default
 			wantMemMB: 4096,
 		},
 		{
@@ -448,8 +457,8 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#SBATCH --cpus-per-task=8",
 				"#SBATCH --gres=gpu:a100:2",
 			},
-			wantNcpus: 8,
-			wantGpu:   &GpuSpec{Type: "a100", Count: 2},
+			wantCpus: 8,
+			wantGpu:  &GpuSpec{Type: "a100", Count: 2},
 		},
 		{
 			name: "GPU gpus flag",
@@ -457,8 +466,8 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --gpus=v100:4",
 			},
-			wantNcpus: 2, // default
-			wantGpu:   &GpuSpec{Type: "v100", Count: 4},
+			wantCpus: 2, // default
+			wantGpu:  &GpuSpec{Type: "v100", Count: 4},
 		},
 		{
 			name: "GPU gpus-per-node",
@@ -466,8 +475,8 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --gpus-per-node=2",
 			},
-			wantNcpus: 2, // default
-			wantGpu:   &GpuSpec{Type: "gpu", Count: 2},
+			wantCpus: 2, // default
+			wantGpu:  &GpuSpec{Type: "gpu", Count: 2},
 		},
 		{
 			name: "time with days",
@@ -475,8 +484,8 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --time=1-12:00:00",
 			},
-			wantNcpus: 2, // default
-			wantTime:  36 * time.Hour,
+			wantCpus: 2, // default
+			wantTime: 36 * time.Hour,
 		},
 		{
 			name: "full job script",
@@ -490,7 +499,7 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#SBATCH --mail-type=ALL",
 				"#SBATCH --mail-user=user@example.com",
 			},
-			wantNcpus: 16,
+			wantCpus:  16,
 			wantMemMB: 64 * 1024,
 			wantTime:  12 * time.Hour,
 			wantGpu:   &GpuSpec{Type: "h100", Count: 4},
@@ -501,7 +510,7 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"echo hello",
 			},
-			wantNcpus: 2, // default
+			wantCpus: 2, // default
 		},
 	}
 
@@ -520,27 +529,31 @@ func TestSlurmResourceParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
-			if specs.Ncpus != tt.wantNcpus {
-				t.Errorf("Ncpus = %d; want %d", specs.Ncpus, tt.wantNcpus)
+			if specs.Spec == nil {
+				t.Fatal("Spec is nil; want non-nil")
 			}
-			if tt.wantMemMB > 0 && specs.MemMB != tt.wantMemMB {
-				t.Errorf("MemMB = %d; want %d", specs.MemMB, tt.wantMemMB)
+
+			if specs.Spec.CpusPerTask != tt.wantCpus {
+				t.Errorf("CpusPerTask = %d; want %d", specs.Spec.CpusPerTask, tt.wantCpus)
 			}
-			if tt.wantTime > 0 && specs.Time != tt.wantTime {
-				t.Errorf("Time = %v; want %v", specs.Time, tt.wantTime)
+			if tt.wantMemMB > 0 && specs.Spec.MemPerNodeMB != tt.wantMemMB {
+				t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, tt.wantMemMB)
+			}
+			if tt.wantTime > 0 && specs.Spec.Time != tt.wantTime {
+				t.Errorf("Time = %v; want %v", specs.Spec.Time, tt.wantTime)
 			}
 			if tt.wantGpu != nil {
-				if specs.Gpu == nil {
+				if specs.Spec.Gpu == nil {
 					t.Fatal("Gpu is nil; want non-nil")
 				}
-				if specs.Gpu.Type != tt.wantGpu.Type {
-					t.Errorf("Gpu.Type = %q; want %q", specs.Gpu.Type, tt.wantGpu.Type)
+				if specs.Spec.Gpu.Type != tt.wantGpu.Type {
+					t.Errorf("Gpu.Type = %q; want %q", specs.Spec.Gpu.Type, tt.wantGpu.Type)
 				}
-				if specs.Gpu.Count != tt.wantGpu.Count {
-					t.Errorf("Gpu.Count = %d; want %d", specs.Gpu.Count, tt.wantGpu.Count)
+				if specs.Spec.Gpu.Count != tt.wantGpu.Count {
+					t.Errorf("Gpu.Count = %d; want %d", specs.Spec.Gpu.Count, tt.wantGpu.Count)
 				}
-			} else if specs.Gpu != nil {
-				t.Errorf("Gpu = %+v; want nil", specs.Gpu)
+			} else if specs.Spec.Gpu != nil {
+				t.Errorf("Gpu = %+v; want nil", specs.Spec.Gpu)
 			}
 		})
 	}
@@ -677,27 +690,30 @@ echo "Running job"
 		t.Fatalf("TryParseSlurmScript failed: %v", err)
 	}
 
-	if specs.Ncpus != 4 {
-		t.Errorf("Ncpus = %d; want 4", specs.Ncpus)
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil; want non-nil")
 	}
-	if specs.MemMB != 8*1024 {
-		t.Errorf("MemMB = %d; want %d", specs.MemMB, 8*1024)
+	if specs.Spec.CpusPerTask != 4 {
+		t.Errorf("CpusPerTask = %d; want 4", specs.Spec.CpusPerTask)
 	}
-	if specs.Gpu == nil || specs.Gpu.Count != 1 || specs.Gpu.Type != "a100" {
-		t.Errorf("Gpu = %+v; want a100 x 1", specs.Gpu)
+	if specs.Spec.MemPerNodeMB != 8*1024 {
+		t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, 8*1024)
 	}
-	if specs.Time != 2*time.Hour {
-		t.Errorf("Time = %v; want 2h", specs.Time)
+	if specs.Spec.Gpu == nil || specs.Spec.Gpu.Count != 1 || specs.Spec.Gpu.Type != "a100" {
+		t.Errorf("Gpu = %+v; want a100 x 1", specs.Spec.Gpu)
 	}
-	if !specs.EmailOnEnd {
+	if specs.Spec.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
+	}
+	if !specs.Control.EmailOnEnd {
 		t.Error("EmailOnEnd should be true")
 	}
-	if specs.MailUser != "user@example.com" {
-		t.Errorf("MailUser = %q; want %q", specs.MailUser, "user@example.com")
+	if specs.Control.MailUser != "user@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, "user@example.com")
 	}
-	// RawFlags should be empty - all flags above are recognized and parsed into typed fields
-	if len(specs.RawFlags) != 0 {
-		t.Errorf("RawFlags count = %d; want 0 (all flags were recognized)", len(specs.RawFlags))
+	// RemainingFlags should be empty - all flags above are recognized and parsed into typed fields
+	if len(specs.RemainingFlags) != 0 {
+		t.Errorf("RemainingFlags count = %d; want 0 (all flags were recognized)", len(specs.RemainingFlags))
 	}
 }
 
@@ -803,11 +819,11 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 	sched := newTestSlurmScheduler()
 
 	tests := []struct {
-		name       string
-		lines      []string
-		wantNodes  int
-		wantNtasks int
-		wantNcpus  int
+		name             string
+		lines            []string
+		wantNodes        int
+		wantTasksPerNode int
+		wantCpus         int
 	}{
 		{
 			name: "all specified",
@@ -817,7 +833,8 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 				"#SBATCH --ntasks=16",
 				"#SBATCH --cpus-per-task=4",
 			},
-			wantNodes: 4, wantNtasks: 16, wantNcpus: 4,
+			// ntasks=16, nodes=4 => TasksPerNode = 16/4 = 4
+			wantNodes: 4, wantTasksPerNode: 4, wantCpus: 4,
 		},
 		{
 			name: "short flags",
@@ -827,7 +844,8 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 				"#SBATCH -n 12",
 				"#SBATCH -c 2",
 			},
-			wantNodes: 3, wantNtasks: 12, wantNcpus: 2,
+			// ntasks=12, nodes=3 => TasksPerNode = 12/3 = 4
+			wantNodes: 3, wantTasksPerNode: 4, wantCpus: 2,
 		},
 		{
 			name: "ntasks-per-node",
@@ -837,7 +855,8 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 				"#SBATCH --ntasks-per-node=8",
 				"#SBATCH --cpus-per-task=4",
 			},
-			wantNodes: 2, wantNtasks: 16, wantNcpus: 4,
+			// ntasks-per-node=8 => TasksPerNode = 8
+			wantNodes: 2, wantTasksPerNode: 8, wantCpus: 4,
 		},
 		{
 			name: "ntasks overrides ntasks-per-node",
@@ -847,7 +866,8 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 				"#SBATCH --ntasks=10",
 				"#SBATCH --ntasks-per-node=8",
 			},
-			wantNodes: 2, wantNtasks: 10, wantNcpus: 2,
+			// ntasks=10 overrides, nodes=2 => TasksPerNode = 10/2 = 5
+			wantNodes: 2, wantTasksPerNode: 5, wantCpus: 2,
 		},
 		{
 			name: "ntasks only",
@@ -855,7 +875,8 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --ntasks=8",
 			},
-			wantNodes: 1, wantNtasks: 8, wantNcpus: 2,
+			// ntasks=8, nodes defaults to 1 => TasksPerNode = 8/1 = 8
+			wantNodes: 1, wantTasksPerNode: 8, wantCpus: 2,
 		},
 		{
 			name: "defaults when no node/task flags",
@@ -863,7 +884,8 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --mem=8G",
 			},
-			wantNodes: 1, wantNtasks: 1, wantNcpus: 2,
+			// defaults: nodes=1, tasks=1 => TasksPerNode = 1
+			wantNodes: 1, wantTasksPerNode: 1, wantCpus: 2,
 		},
 	}
 
@@ -875,14 +897,17 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if specs.Nodes != tt.wantNodes {
-				t.Errorf("Nodes = %d; want %d", specs.Nodes, tt.wantNodes)
+			if specs.Spec == nil {
+				t.Fatal("Spec is nil; want non-nil")
 			}
-			if specs.Ntasks != tt.wantNtasks {
-				t.Errorf("Ntasks = %d; want %d", specs.Ntasks, tt.wantNtasks)
+			if specs.Spec.Nodes != tt.wantNodes {
+				t.Errorf("Nodes = %d; want %d", specs.Spec.Nodes, tt.wantNodes)
 			}
-			if specs.Ncpus != tt.wantNcpus {
-				t.Errorf("Ncpus = %d; want %d", specs.Ncpus, tt.wantNcpus)
+			if specs.Spec.TasksPerNode != tt.wantTasksPerNode {
+				t.Errorf("TasksPerNode = %d; want %d", specs.Spec.TasksPerNode, tt.wantTasksPerNode)
+			}
+			if specs.Spec.CpusPerTask != tt.wantCpus {
+				t.Errorf("CpusPerTask = %d; want %d", specs.Spec.CpusPerTask, tt.wantCpus)
 			}
 		})
 	}
@@ -896,12 +921,16 @@ func TestSlurmNodeTaskScriptGeneration(t *testing.T) {
 		Name:    "test-job",
 		Command: "echo hello",
 		Specs: &ScriptSpecs{
-			JobName: "test-job",
-			Ncpus:   4,
-			Ntasks:  16,
-			Nodes:   4,
-			MemMB:   8192,
-			Time:    2 * time.Hour,
+			Spec: &ResourceSpec{
+				CpusPerTask:  4,
+				TasksPerNode: 4, // 16 total tasks / 4 nodes = 4 tasks per node
+				Nodes:        4,
+				MemPerNodeMB: 8192,
+				Time:         2 * time.Hour,
+			},
+			Control: RuntimeConfig{
+				JobName: "test-job",
+			},
 		},
 		Metadata: map[string]string{},
 	}
@@ -920,9 +949,6 @@ func TestSlurmNodeTaskScriptGeneration(t *testing.T) {
 	if !strings.Contains(script, "#SBATCH --nodes=4") {
 		t.Error("script should contain --nodes=4")
 	}
-	if !strings.Contains(script, "#SBATCH --ntasks=16") {
-		t.Error("script should contain --ntasks=16")
-	}
 	if !strings.Contains(script, "#SBATCH --cpus-per-task=4") {
 		t.Error("script should contain --cpus-per-task=4")
 	}
@@ -937,6 +963,7 @@ func TestSlurmNodeTaskRoundTrip(t *testing.T) {
 	sched := newTestSlurmScheduler()
 
 	// Create a script with node/task directives
+	// nodes=4, ntasks=16 => TasksPerNode = 16/4 = 4
 	lines := []string{
 		"#!/bin/bash",
 		"#SBATCH --nodes=4",
@@ -954,8 +981,12 @@ func TestSlurmNodeTaskRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse failed: %v", err)
 	}
-	if specs.Nodes != 4 || specs.Ntasks != 16 || specs.Ncpus != 4 {
-		t.Fatalf("parse mismatch: Nodes=%d Ntasks=%d Ncpus=%d", specs.Nodes, specs.Ntasks, specs.Ncpus)
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil; want non-nil")
+	}
+	if specs.Spec.Nodes != 4 || specs.Spec.TasksPerNode != 4 || specs.Spec.CpusPerTask != 4 {
+		t.Fatalf("parse mismatch: Nodes=%d TasksPerNode=%d CpusPerTask=%d",
+			specs.Spec.Nodes, specs.Spec.TasksPerNode, specs.Spec.CpusPerTask)
 	}
 
 	// Generate
@@ -976,14 +1007,17 @@ func TestSlurmNodeTaskRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-parse failed: %v", err)
 	}
-	if specs2.Nodes != 4 {
-		t.Errorf("round-trip Nodes = %d; want 4", specs2.Nodes)
+	if specs2.Spec == nil {
+		t.Fatal("re-parsed Spec is nil; want non-nil")
 	}
-	if specs2.Ntasks != 16 {
-		t.Errorf("round-trip Ntasks = %d; want 16", specs2.Ntasks)
+	if specs2.Spec.Nodes != 4 {
+		t.Errorf("round-trip Nodes = %d; want 4", specs2.Spec.Nodes)
 	}
-	if specs2.Ncpus != 4 {
-		t.Errorf("round-trip Ncpus = %d; want 4", specs2.Ncpus)
+	if specs2.Spec.TasksPerNode != 4 {
+		t.Errorf("round-trip TasksPerNode = %d; want 4", specs2.Spec.TasksPerNode)
+	}
+	if specs2.Spec.CpusPerTask != 4 {
+		t.Errorf("round-trip CpusPerTask = %d; want 4", specs2.Spec.CpusPerTask)
 	}
 
 	// Check no duplicates
@@ -991,9 +1025,6 @@ func TestSlurmNodeTaskRoundTrip(t *testing.T) {
 	script := string(content)
 	if strings.Count(script, "--nodes=") != 1 {
 		t.Error("--nodes= should appear exactly once")
-	}
-	if strings.Count(script, "--ntasks=") != 1 {
-		t.Error("--ntasks= should appear exactly once")
 	}
 	if strings.Count(script, "--cpus-per-task=") != 1 {
 		t.Error("--cpus-per-task= should appear exactly once")
@@ -1024,19 +1055,22 @@ echo "hello"
 	}
 
 	// Verify that comments were stripped and values parsed correctly
-	if specs.JobName != "test_job" {
-		t.Errorf("JobName = %q; want %q", specs.JobName, "test_job")
+	if specs.Control.JobName != "test_job" {
+		t.Errorf("JobName = %q; want %q", specs.Control.JobName, "test_job")
 	}
-	if specs.Ncpus != 8 {
-		t.Errorf("Ncpus = %d; want 8", specs.Ncpus)
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil; want non-nil")
 	}
-	if specs.MemMB != 16*1024 {
-		t.Errorf("MemMB = %d; want %d", specs.MemMB, 16*1024)
+	if specs.Spec.CpusPerTask != 8 {
+		t.Errorf("CpusPerTask = %d; want 8", specs.Spec.CpusPerTask)
 	}
-	if specs.Time != 2*time.Hour {
-		t.Errorf("Time = %v; want %v", specs.Time, 2*time.Hour)
+	if specs.Spec.MemPerNodeMB != 16*1024 {
+		t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, 16*1024)
 	}
-	if specs.Stdout != "out.log" {
-		t.Errorf("Stdout = %q; want %q", specs.Stdout, "out.log")
+	if specs.Spec.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want %v", specs.Spec.Time, 2*time.Hour)
+	}
+	if specs.Control.Stdout != "out.log" {
+		t.Errorf("Stdout = %q; want %q", specs.Control.Stdout, "out.log")
 	}
 }

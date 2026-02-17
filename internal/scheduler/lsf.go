@@ -122,150 +122,119 @@ func (l *LsfScheduler) getLsfVersion() (string, error) {
 	return versionStr, nil
 }
 
-// ReadScriptSpecs parses #BSUB directives from a build script
+// ReadScriptSpecs parses #BSUB directives from a build script using the shared pipeline.
 func (l *LsfScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) {
-	file, err := os.Open(scriptPath)
+	lines, err := readFileLines(scriptPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%w: %s", ErrScriptNotFound, scriptPath)
-		}
 		return nil, err
 	}
-	defer file.Close()
+	return parseScript(lines, l.extractDirectives, l.parseRuntimeConfig, l.parseResourceSpec)
+}
 
-	defaults := GetSpecDefaults()
-	specs := &ScriptSpecs{
-		Ncpus:    defaults.Ncpus,
-		Ntasks:   defaults.Ntasks,
-		Nodes:    defaults.Nodes,
-		MemMB:    defaults.MemMB,
-		Time:     defaults.Time,
-		RawFlags: make([]string, 0),
-	}
-
-	scanner := bufio.NewScanner(file)
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
-
-		// Parse #BSUB directives only
+// extractDirectives extracts #BSUB directive strings from script lines.
+func (l *LsfScheduler) extractDirectives(lines []string) []string {
+	directives := make([]string, 0)
+	for _, line := range lines {
 		if matches := l.directiveRe.FindStringSubmatch(line); matches != nil {
-			specs.HasDirectives = true
 			flag := utils.StripInlineComment(matches[1])
-
-			// Parse LSF options - returns true if recognized
-			recognized, err := l.parseBsubFlag(flag, specs)
-			if err != nil {
-				return nil, NewParseError("LSF", lineNum, line, err.Error())
-			}
-
-			// Only keep unrecognized flags in RawFlags
-			if !recognized {
-				specs.RawFlags = append(specs.RawFlags, flag)
-			}
+			directives = append(directives, flag)
 		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading script: %w", err)
-	}
-
-	return specs, nil
+	return directives
 }
 
-// parseBsubFlag parses individual BSUB flags and updates specs
-// Returns true if the flag was recognized and parsed, false otherwise
-func (l *LsfScheduler) parseBsubFlag(flag string, specs *ScriptSpecs) (bool, error) {
-	// Job name: -J jobname
-	if strings.HasPrefix(flag, "-J ") {
-		specs.JobName = strings.TrimSpace(strings.TrimPrefix(flag, "-J"))
-		return true, nil
-	}
-
-	// Number of cores: -n cores
-	if strings.HasPrefix(flag, "-n ") {
-		ncpuStr := strings.TrimSpace(strings.TrimPrefix(flag, "-n"))
-		if ncpus, err := strconv.Atoi(ncpuStr); err == nil {
-			specs.Ncpus = ncpus
+// parseRuntimeConfig consumes job control fields from the directive list.
+// Returns unconsumed directives for parseResourceSpec.
+func (l *LsfScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, []string, error) {
+	rc := RuntimeConfig{}
+	remaining := make([]string, 0)
+	for _, flag := range directives {
+		recognized := true
+		switch {
+		case strings.HasPrefix(flag, "-J "):
+			rc.JobName = strings.TrimSpace(strings.TrimPrefix(flag, "-J"))
+		case strings.HasPrefix(flag, "-o "):
+			rc.Stdout = strings.TrimSpace(strings.TrimPrefix(flag, "-o"))
+		case strings.HasPrefix(flag, "-e "):
+			rc.Stderr = strings.TrimSpace(strings.TrimPrefix(flag, "-e"))
+		case flag == "-B":
+			rc.EmailOnBegin = true
+		case flag == "-N":
+			rc.EmailOnEnd = true
+		case strings.HasPrefix(flag, "-u "):
+			rc.MailUser = strings.TrimSpace(strings.TrimPrefix(flag, "-u"))
+		default:
+			recognized = false
 		}
-		return true, nil
-	}
-
-	// Memory limit: -M memKB (LSF default is KB per process)
-	if strings.HasPrefix(flag, "-M ") {
-		memStr := strings.TrimSpace(strings.TrimPrefix(flag, "-M"))
-		if mem, err := parseLsfMemory(memStr); err == nil {
-			specs.MemMB = mem
+		if !recognized {
+			remaining = append(remaining, flag)
 		}
-		return true, nil
 	}
-
-	// Walltime: -W [HH:]MM or HH:MM:SS
-	if strings.HasPrefix(flag, "-W ") {
-		timeStr := strings.TrimSpace(strings.TrimPrefix(flag, "-W"))
-		if dur, err := parseLsfTime(timeStr); err == nil {
-			specs.Time = dur
-		}
-		return true, nil
-	}
-
-	// Output file: -o path
-	if strings.HasPrefix(flag, "-o ") {
-		specs.Stdout = strings.TrimSpace(strings.TrimPrefix(flag, "-o"))
-		return true, nil
-	}
-
-	// Error file: -e path
-	if strings.HasPrefix(flag, "-e ") {
-		specs.Stderr = strings.TrimSpace(strings.TrimPrefix(flag, "-e"))
-		return true, nil
-	}
-
-	// Email on begin: -B (standalone flag)
-	if flag == "-B" {
-		specs.EmailOnBegin = true
-		return true, nil
-	}
-
-	// Email on end: -N (standalone flag)
-	if flag == "-N" {
-		specs.EmailOnEnd = true
-		return true, nil
-	}
-
-	// Mail user: -u email
-	if strings.HasPrefix(flag, "-u ") {
-		specs.MailUser = strings.TrimSpace(strings.TrimPrefix(flag, "-u"))
-		return true, nil
-	}
-
-	// GPU specification: -gpu "num=N[:type=T]"
-	if strings.HasPrefix(flag, "-gpu ") {
-		gpuStr := strings.TrimSpace(strings.TrimPrefix(flag, "-gpu"))
-		gpuStr = strings.Trim(gpuStr, "\"'")
-		gpu := parseLsfGpuDirective(gpuStr)
-		if gpu != nil {
-			specs.Gpu = gpu
-		}
-		return true, nil
-	}
-
-	// Resource requirement: -R "rusage[...]"
-	if strings.HasPrefix(flag, "-R ") {
-		resStr := strings.TrimSpace(strings.TrimPrefix(flag, "-R"))
-		resStr = strings.Trim(resStr, "\"'")
-		l.parseLsfResource(resStr, specs)
-		return true, nil
-	}
-
-	// Flag not recognized
-	return false, nil
+	return rc, remaining, nil
 }
 
-// parseLsfResource parses LSF -R resource requirement strings
+// parseResourceSpec consumes resource fields from the directive list.
+// Returns nil + all directives on any parse failure (passthrough mode).
+func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []string) {
+	defaults := GetSpecDefaults()
+	rs := &ResourceSpec{
+		CpusPerTask:  defaults.CpusPerTask,
+		TasksPerNode: defaults.TasksPerNode,
+		Nodes:        defaults.Nodes,
+		MemPerNodeMB: defaults.MemPerNodeMB,
+		Time:         defaults.Time,
+	}
+	remaining := make([]string, 0)
+	for _, flag := range directives {
+		recognized := true
+		switch {
+		case strings.HasPrefix(flag, "-n "):
+			ncpuStr := strings.TrimSpace(strings.TrimPrefix(flag, "-n"))
+			if ncpus, err := strconv.Atoi(ncpuStr); err == nil {
+				rs.CpusPerTask = ncpus
+			} else {
+				utils.PrintWarning("LSF: invalid -n value %q: %v", ncpuStr, err)
+				return nil, directives
+			}
+		case strings.HasPrefix(flag, "-M "):
+			memStr := strings.TrimSpace(strings.TrimPrefix(flag, "-M"))
+			if mem, err := parseLsfMemory(memStr); err == nil {
+				rs.MemPerNodeMB = mem
+			} else {
+				utils.PrintWarning("LSF: invalid -M value %q: %v", memStr, err)
+				return nil, directives
+			}
+		case strings.HasPrefix(flag, "-W "):
+			timeStr := strings.TrimSpace(strings.TrimPrefix(flag, "-W"))
+			if dur, err := parseLsfTime(timeStr); err == nil {
+				rs.Time = dur
+			} else {
+				utils.PrintWarning("LSF: invalid -W value %q: %v", timeStr, err)
+				return nil, directives
+			}
+		case strings.HasPrefix(flag, "-gpu "):
+			gpuStr := strings.TrimSpace(strings.TrimPrefix(flag, "-gpu"))
+			gpuStr = strings.Trim(gpuStr, "\"'")
+			if gpu := parseLsfGpuDirective(gpuStr); gpu != nil {
+				rs.Gpu = gpu
+			}
+		case strings.HasPrefix(flag, "-R "):
+			resStr := strings.TrimSpace(strings.TrimPrefix(flag, "-R"))
+			resStr = strings.Trim(resStr, "\"'")
+			l.parseLsfResourceIntoSpec(resStr, rs)
+		default:
+			recognized = false
+		}
+		if !recognized {
+			remaining = append(remaining, flag)
+		}
+	}
+	return rs, remaining
+}
+
+// parseLsfResourceIntoSpec parses LSF -R resource requirement strings into a ResourceSpec.
 // Supports: rusage[mem=N], rusage[ngpus_physical=N], span[hosts=N], etc.
-func (l *LsfScheduler) parseLsfResource(resStr string, specs *ScriptSpecs) {
+func (l *LsfScheduler) parseLsfResourceIntoSpec(resStr string, rs *ResourceSpec) {
 	// Look for span[hosts=N] block
 	spanIdx := strings.Index(resStr, "span[")
 	if spanIdx >= 0 {
@@ -283,7 +252,7 @@ func (l *LsfScheduler) parseLsfResource(resStr string, specs *ScriptSpecs) {
 					value := strings.TrimSpace(kv[1])
 					if key == "hosts" {
 						if n, err := strconv.Atoi(value); err == nil {
-							specs.Nodes = n
+							rs.Nodes = n
 						}
 					}
 				}
@@ -323,11 +292,11 @@ func (l *LsfScheduler) parseLsfResource(resStr string, specs *ScriptSpecs) {
 		switch key {
 		case "mem":
 			if mem, err := parseLsfMemory(value); err == nil {
-				specs.MemMB = mem
+				rs.MemPerNodeMB = mem
 			}
 		case "ngpus_physical", "ngpus":
 			if count, err := strconv.Atoi(value); err == nil {
-				specs.Gpu = &GpuSpec{
+				rs.Gpu = &GpuSpec{
 					Type:  "gpu",
 					Count: count,
 					Raw:   fmt.Sprintf("%s=%s", key, value),
@@ -378,12 +347,14 @@ func parseLsfGpuDirective(gpuStr string) *GpuSpec {
 func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) (string, error) {
 	specs := jobSpec.Specs
 
-	// Normalize node/task defaults
-	if specs.Nodes <= 0 {
-		specs.Nodes = 1
-	}
-	if specs.Ntasks <= 0 {
-		specs.Ntasks = 1
+	// Normalize node/task defaults when spec is available
+	if specs.Spec != nil {
+		if specs.Spec.Nodes <= 0 {
+			specs.Spec.Nodes = 1
+		}
+		if specs.Spec.TasksPerNode <= 0 {
+			specs.Spec.TasksPerNode = 1
+		}
 	}
 
 	// Create output directory if specified
@@ -396,7 +367,7 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	// Set log path based on job name
 	if jobSpec.Name != "" {
 		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		specs.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeName))
+		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeName))
 	}
 
 	// Generate script filename
@@ -421,60 +392,69 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	// Write shebang
 	fmt.Fprintln(writer, "#!/bin/bash")
 
-	// Write unrecognized flags (RawFlags only contains flags not parsed into typed fields)
-	for _, flag := range specs.RawFlags {
+	// Write unrecognized flags (RemainingFlags only contains flags not parsed into typed fields)
+	for _, flag := range specs.RemainingFlags {
 		fmt.Fprintf(writer, "#BSUB %s\n", flag)
 	}
 
 	// Add job name if specified
-	if specs.JobName != "" {
-		fmt.Fprintf(writer, "#BSUB -J %s\n", specs.JobName)
+	if specs.Control.JobName != "" {
+		fmt.Fprintf(writer, "#BSUB -J %s\n", specs.Control.JobName)
 	}
 
 	// Add custom stdout if specified
-	if specs.Stdout != "" {
-		fmt.Fprintf(writer, "#BSUB -o %s\n", specs.Stdout)
+	if specs.Control.Stdout != "" {
+		fmt.Fprintf(writer, "#BSUB -o %s\n", specs.Control.Stdout)
 	}
 
 	// Add email notifications if specified
-	if specs.EmailOnBegin {
+	if specs.Control.EmailOnBegin {
 		fmt.Fprintln(writer, "#BSUB -B")
 	}
-	if specs.EmailOnEnd {
+	if specs.Control.EmailOnEnd {
 		fmt.Fprintln(writer, "#BSUB -N")
 	}
-	if specs.MailUser != "" {
-		fmt.Fprintf(writer, "#BSUB -u %s\n", specs.MailUser)
+	if specs.Control.MailUser != "" {
+		fmt.Fprintf(writer, "#BSUB -u %s\n", specs.Control.MailUser)
 	}
 
-	// Generate CPU count
-	if specs.Ncpus > 0 {
-		fmt.Fprintf(writer, "#BSUB -n %d\n", specs.Ncpus)
-	}
+	// Resource directives — only when Spec is available
+	if specs.Spec != nil {
+		// Generate CPU count
+		if specs.Spec.CpusPerTask > 0 {
+			fmt.Fprintf(writer, "#BSUB -n %d\n", specs.Spec.CpusPerTask)
+		}
 
-	// Force node allocation via span
-	fmt.Fprintf(writer, "#BSUB -R \"span[hosts=%d]\"\n", specs.Nodes)
+		// Force node allocation via span
+		fmt.Fprintf(writer, "#BSUB -R \"span[hosts=%d]\"\n", specs.Spec.Nodes)
 
-	// Add walltime if specified
-	if specs.Time > 0 {
-		fmt.Fprintf(writer, "#BSUB -W %s\n", formatLsfTime(specs.Time))
+		// Add walltime if specified
+		if specs.Spec.Time > 0 {
+			fmt.Fprintf(writer, "#BSUB -W %s\n", formatLsfTime(specs.Spec.Time))
+		}
 	}
 
 	// Add blank line
 	fmt.Fprintln(writer, "")
 
 	// Export resource variables for use in build scripts
-	fmt.Fprintf(writer, "export NNODES=%d\n", specs.Nodes)
-	fmt.Fprintf(writer, "export NTASKS=%d\n", specs.Ntasks)
-	if specs.Ncpus > 0 {
-		fmt.Fprintf(writer, "export NCPUS=%d\n", specs.Ncpus)
+	if specs.Spec != nil {
+		fmt.Fprintf(writer, "export NNODES=%d\n", specs.Spec.Nodes)
+		fmt.Fprintf(writer, "export NTASKS=%d\n", specs.Spec.TasksPerNode)
+		if specs.Spec.CpusPerTask > 0 {
+			fmt.Fprintf(writer, "export NCPUS=%d\n", specs.Spec.CpusPerTask)
+		} else {
+			fmt.Fprintln(writer, "export NCPUS=1")
+		}
+		if specs.Spec.MemPerNodeMB > 0 {
+			fmt.Fprintf(writer, "export MEM=%d\n", specs.Spec.MemPerNodeMB)
+			fmt.Fprintf(writer, "export MEM_MB=%d\n", specs.Spec.MemPerNodeMB)
+			fmt.Fprintf(writer, "export MEM_GB=%d\n", specs.Spec.MemPerNodeMB/1024)
+		}
 	} else {
+		fmt.Fprintln(writer, "export NNODES=1")
+		fmt.Fprintln(writer, "export NTASKS=1")
 		fmt.Fprintln(writer, "export NCPUS=1")
-	}
-	if specs.MemMB > 0 {
-		fmt.Fprintf(writer, "export MEM=%d\n", specs.MemMB)
-		fmt.Fprintf(writer, "export MEM_MB=%d\n", specs.MemMB)
-		fmt.Fprintf(writer, "export MEM_GB=%d\n", specs.MemMB/1024)
 	}
 	fmt.Fprintln(writer, "")
 
@@ -484,25 +464,27 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	fmt.Fprintln(writer, "_format_time() { local s=$1; printf '%02d:%02d:%02d' $((s/3600)) $((s%3600/60)) $((s%60)); }")
 	fmt.Fprintln(writer, "echo \"========================================\"")
 	fmt.Fprintln(writer, "echo \"Job ID:    $LSB_JOBID\"")
-	fmt.Fprintf(writer, "echo \"Job Name:  %s\"\n", specs.JobName)
-	if specs.Nodes > 1 {
-		fmt.Fprintf(writer, "echo \"Nodes:     %d\"\n", specs.Nodes)
-	}
-	if specs.Ntasks > 1 {
-		fmt.Fprintf(writer, "echo \"Tasks:     %d\"\n", specs.Ntasks)
-	}
-	if specs.Ncpus > 0 {
-		if specs.Ntasks > 1 || specs.Nodes > 1 {
-			fmt.Fprintf(writer, "echo \"CPUs/Task: %d\"\n", specs.Ncpus)
-		} else {
-			fmt.Fprintf(writer, "echo \"CPUs:      %d\"\n", specs.Ncpus)
+	fmt.Fprintf(writer, "echo \"Job Name:  %s\"\n", specs.Control.JobName)
+	if specs.Spec != nil {
+		if specs.Spec.Nodes > 1 {
+			fmt.Fprintf(writer, "echo \"Nodes:     %d\"\n", specs.Spec.Nodes)
 		}
-	}
-	if specs.MemMB > 0 {
-		fmt.Fprintf(writer, "echo \"Memory:    %d MB\"\n", specs.MemMB)
-	}
-	if specs.Time > 0 {
-		fmt.Fprintf(writer, "echo \"Time:      %s\"\n", formatLsfTime(specs.Time))
+		if specs.Spec.TasksPerNode > 1 {
+			fmt.Fprintf(writer, "echo \"Tasks:     %d\"\n", specs.Spec.TasksPerNode)
+		}
+		if specs.Spec.CpusPerTask > 0 {
+			if specs.Spec.TasksPerNode > 1 || specs.Spec.Nodes > 1 {
+				fmt.Fprintf(writer, "echo \"CPUs/Task: %d\"\n", specs.Spec.CpusPerTask)
+			} else {
+				fmt.Fprintf(writer, "echo \"CPUs:      %d\"\n", specs.Spec.CpusPerTask)
+			}
+		}
+		if specs.Spec.MemPerNodeMB > 0 {
+			fmt.Fprintf(writer, "echo \"Memory:    %d MB\"\n", specs.Spec.MemPerNodeMB)
+		}
+		if specs.Spec.Time > 0 {
+			fmt.Fprintf(writer, "echo \"Time:      %s\"\n", formatLsfTime(specs.Spec.Time))
+		}
 	}
 	fmt.Fprintln(writer, "echo \"PWD:       $(pwd)\"")
 	// Print additional metadata if available
@@ -737,7 +719,7 @@ func (l *LsfScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, erro
 					// Parse memory value (in MB)
 					var memMB int64
 					if _, err := fmt.Sscanf(fields[i+1], "%d", &memMB); err == nil && memMB > 0 {
-						limit.MaxMemMB = memMB
+						limit.MaxMemMBPerNode = memMB
 					}
 					break
 				}
@@ -751,7 +733,7 @@ func (l *LsfScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, erro
 				if field == "PROCLIMIT" && i+1 < len(fields) {
 					var procs int
 					if _, err := fmt.Sscanf(fields[i+1], "%d", &procs); err == nil && procs > 0 {
-						limit.MaxCpus = procs
+						limit.MaxCpusPerNode = procs
 					}
 					break
 				}
@@ -767,11 +749,11 @@ func (l *LsfScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, erro
 			for queueName, limit := range queueLimits {
 				if avail, ok := availRes[queueName]; ok {
 					// Use available resources as limits if they're set and larger than config
-					if avail.MaxCpus > 0 {
-						limit.MaxCpus = avail.MaxCpus
+					if avail.MaxCpusPerNode > 0 {
+						limit.MaxCpusPerNode = avail.MaxCpusPerNode
 					}
-					if avail.MaxMemMB > 0 {
-						limit.MaxMemMB = avail.MaxMemMB
+					if avail.MaxMemMBPerNode > 0 {
+						limit.MaxMemMBPerNode = avail.MaxMemMBPerNode
 					}
 				}
 			}
@@ -925,8 +907,8 @@ func (l *LsfScheduler) getAvailableResourcesByQueue() (map[string]ResourceLimits
 			if maxCpus > 0 || maxMemMB > 0 {
 				resources[queueName] = ResourceLimits{
 					Partition: queueName,
-					MaxCpus:   maxCpus,
-					MaxMemMB:  maxMemMB,
+					MaxCpusPerNode:  maxCpus,
+					MaxMemMBPerNode: maxMemMB,
 				}
 			}
 		}

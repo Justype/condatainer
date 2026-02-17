@@ -110,11 +110,11 @@ var rootCmd = &cobra.Command{
 
 		// Step 7: Apply scheduler spec defaults from config
 		scheduler.SetSpecDefaults(scheduler.SpecDefaults{
-			Ncpus:  config.Global.Scheduler.Ncpus,
-			MemMB:  config.Global.Scheduler.MemMB,
-			Time:   config.Global.Scheduler.Time,
-			Nodes:  config.Global.Scheduler.Nodes,
-			Ntasks: config.Global.Scheduler.Ntasks,
+			CpusPerTask:  config.Global.Scheduler.Ncpus,
+			MemPerNodeMB: config.Global.Scheduler.MemMB,
+			Time:         config.Global.Scheduler.Time,
+			Nodes:        config.Global.Scheduler.Nodes,
+			TasksPerNode: config.Global.Scheduler.Ntasks,
 		})
 
 		// Step 8: Initialize scheduler if job submission is enabled

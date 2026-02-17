@@ -449,9 +449,9 @@ func submitRunJob(sched scheduler.Scheduler, scriptPath, originScriptPath string
 
 	// Determine log directory - use spec's Stdout path if set, otherwise global log path
 	var logsDir string
-	if specs.Stdout != "" {
+	if specs.Control.Stdout != "" {
 		// Ensure absolute path
-		logPath := specs.Stdout
+		logPath := specs.Control.Stdout
 		if !filepath.IsAbs(logPath) {
 			if abs, err := filepath.Abs(logPath); err == nil {
 				logPath = abs
@@ -482,8 +482,8 @@ func submitRunJob(sched scheduler.Scheduler, scriptPath, originScriptPath string
 	fileBaseName := fmt.Sprintf("%s_%s", nameWithoutExt, timestamp)
 
 	// Set job name if not already set in script (short name for squeue)
-	if specs.JobName == "" {
-		specs.JobName = nameWithoutExt
+	if specs.Control.JobName == "" {
+		specs.Control.JobName = nameWithoutExt
 	}
 
 	// Create job specification (Name used for file naming)

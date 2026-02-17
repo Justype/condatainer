@@ -28,8 +28,10 @@ func TestPbsCreateScriptUsesOutputDir(t *testing.T) {
 		Name:    "pbstest/job",
 		Command: "echo 'hello'",
 		Specs: &ScriptSpecs{
-			RawFlags: []string{},
-			Ncpus:    1,
+			RemainingFlags: []string{},
+			Spec: &ResourceSpec{
+				CpusPerTask: 1,
+			},
 		},
 	}
 
@@ -160,17 +162,17 @@ func TestPbsEmailParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
-			if specs.EmailOnBegin != tt.wantBegin {
-				t.Errorf("EmailOnBegin = %v; want %v", specs.EmailOnBegin, tt.wantBegin)
+			if specs.Control.EmailOnBegin != tt.wantBegin {
+				t.Errorf("EmailOnBegin = %v; want %v", specs.Control.EmailOnBegin, tt.wantBegin)
 			}
-			if specs.EmailOnEnd != tt.wantEnd {
-				t.Errorf("EmailOnEnd = %v; want %v", specs.EmailOnEnd, tt.wantEnd)
+			if specs.Control.EmailOnEnd != tt.wantEnd {
+				t.Errorf("EmailOnEnd = %v; want %v", specs.Control.EmailOnEnd, tt.wantEnd)
 			}
-			if specs.EmailOnFail != tt.wantFail {
-				t.Errorf("EmailOnFail = %v; want %v", specs.EmailOnFail, tt.wantFail)
+			if specs.Control.EmailOnFail != tt.wantFail {
+				t.Errorf("EmailOnFail = %v; want %v", specs.Control.EmailOnFail, tt.wantFail)
 			}
-			if specs.MailUser != tt.wantMailUser {
-				t.Errorf("MailUser = %q; want %q", specs.MailUser, tt.wantMailUser)
+			if specs.Control.MailUser != tt.wantMailUser {
+				t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, tt.wantMailUser)
 			}
 		})
 	}
@@ -240,15 +242,19 @@ func TestPbsEmailScriptGeneration(t *testing.T) {
 				Name:    "test_job",
 				Command: "echo 'test'",
 				Specs: &ScriptSpecs{
-					JobName:      "test_job",
-					Ncpus:        4,
-					MemMB:        8000,
-					Time:         time.Hour,
-					EmailOnBegin: tt.emailOnBegin,
-					EmailOnEnd:   tt.emailOnEnd,
-					EmailOnFail:  tt.emailOnFail,
-					MailUser:     tt.mailUser,
-					RawFlags:     []string{},
+					Control: RuntimeConfig{
+						JobName:      "test_job",
+						EmailOnBegin: tt.emailOnBegin,
+						EmailOnEnd:   tt.emailOnEnd,
+						EmailOnFail:  tt.emailOnFail,
+						MailUser:     tt.mailUser,
+					},
+					Spec: &ResourceSpec{
+						CpusPerTask:  4,
+						MemPerNodeMB: 8000,
+						Time:         time.Hour,
+					},
+					RemainingFlags: []string{},
 				},
 			}
 
@@ -316,21 +322,24 @@ echo "Running job"
 	}
 
 	// Verify parsing
-	if !specs.EmailOnBegin || !specs.EmailOnEnd || !specs.EmailOnFail {
+	if !specs.Control.EmailOnBegin || !specs.Control.EmailOnEnd || !specs.Control.EmailOnFail {
 		t.Errorf("Parsing failed: EmailOnBegin=%v, EmailOnEnd=%v, EmailOnFail=%v",
-			specs.EmailOnBegin, specs.EmailOnEnd, specs.EmailOnFail)
+			specs.Control.EmailOnBegin, specs.Control.EmailOnEnd, specs.Control.EmailOnFail)
 	}
-	if specs.MailUser != "roundtrip@example.com" {
-		t.Errorf("MailUser = %q; want %q", specs.MailUser, "roundtrip@example.com")
+	if specs.Control.MailUser != "roundtrip@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, "roundtrip@example.com")
 	}
-	if specs.Time != 2*time.Hour {
-		t.Errorf("Time = %v; want 2h", specs.Time)
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil; want non-nil")
 	}
-	if specs.Ncpus != 8 {
-		t.Errorf("Ncpus = %d; want 8", specs.Ncpus)
+	if specs.Spec.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
 	}
-	if specs.MemMB != 16*1024 {
-		t.Errorf("MemMB = %d; want %d", specs.MemMB, 16*1024)
+	if specs.Spec.CpusPerTask != 8 {
+		t.Errorf("CpusPerTask = %d; want 8", specs.Spec.CpusPerTask)
+	}
+	if specs.Spec.MemPerNodeMB != 16*1024 {
+		t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, 16*1024)
 	}
 
 	// Generate a new script from the parsed specs
@@ -372,12 +381,12 @@ echo "Running job"
 
 func TestPbsResourceParsing(t *testing.T) {
 	tests := []struct {
-		name      string
-		lines     []string
-		wantNcpus int
-		wantMemMB int64
-		wantTime  time.Duration
-		wantGpu   *GpuSpec
+		name          string
+		lines         []string
+		wantCpusPerTask int
+		wantMemMB     int64
+		wantTime      time.Duration
+		wantGpu       *GpuSpec
 	}{
 		{
 			name: "select format with ncpus, mem",
@@ -385,7 +394,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l select=1:ncpus=4:mem=8gb",
 			},
-			wantNcpus: 4,
+			wantCpusPerTask: 4,
 			wantMemMB: 8 * 1024,
 		},
 		{
@@ -394,7 +403,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l walltime=02:30:00",
 			},
-			wantNcpus: 2, // default
+			wantCpusPerTask: 2, // default
 			wantTime:  2*time.Hour + 30*time.Minute,
 		},
 		{
@@ -403,7 +412,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l nodes=1:ppn=8",
 			},
-			wantNcpus: 8,
+			wantCpusPerTask: 8,
 		},
 		{
 			name: "ngpus resource",
@@ -411,7 +420,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l select=1:ncpus=4:mem=16gb:ngpus=2",
 			},
-			wantNcpus: 4,
+			wantCpusPerTask: 4,
 			wantMemMB: 16 * 1024,
 			wantGpu:   &GpuSpec{Type: "gpu", Count: 2, Raw: "ngpus=2"},
 		},
@@ -422,7 +431,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#PBS -l select=1:ncpus=4",
 				"#PBS -l gpus=a100:2",
 			},
-			wantNcpus: 4,
+			wantCpusPerTask: 4,
 			wantGpu:   &GpuSpec{Type: "a100", Count: 2, Raw: "a100:2"},
 		},
 		{
@@ -432,7 +441,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#PBS -l select=1:ncpus=16:mem=32gb",
 				"#PBS -l walltime=04:00:00",
 			},
-			wantNcpus: 16,
+			wantCpusPerTask: 16,
 			wantMemMB: 32 * 1024,
 			wantTime:  4 * time.Hour,
 		},
@@ -446,7 +455,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#PBS -m abe",
 				"#PBS -M user@example.com",
 			},
-			wantNcpus: 8,
+			wantCpusPerTask: 8,
 			wantMemMB: 64 * 1024,
 			wantTime:  12 * time.Hour,
 			wantGpu:   &GpuSpec{Type: "gpu", Count: 4, Raw: "ngpus=4"},
@@ -457,7 +466,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l select=1:ncpus=2:mem=4096mb",
 			},
-			wantNcpus: 2,
+			wantCpusPerTask: 2,
 			wantMemMB: 4096,
 		},
 	}
@@ -477,27 +486,31 @@ func TestPbsResourceParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
-			if specs.Ncpus != tt.wantNcpus {
-				t.Errorf("Ncpus = %d; want %d", specs.Ncpus, tt.wantNcpus)
+			if specs.Spec == nil {
+				t.Fatal("Spec is nil; want non-nil")
 			}
-			if tt.wantMemMB > 0 && specs.MemMB != tt.wantMemMB {
-				t.Errorf("MemMB = %d; want %d", specs.MemMB, tt.wantMemMB)
+
+			if specs.Spec.CpusPerTask != tt.wantCpusPerTask {
+				t.Errorf("CpusPerTask = %d; want %d", specs.Spec.CpusPerTask, tt.wantCpusPerTask)
 			}
-			if tt.wantTime > 0 && specs.Time != tt.wantTime {
-				t.Errorf("Time = %v; want %v", specs.Time, tt.wantTime)
+			if tt.wantMemMB > 0 && specs.Spec.MemPerNodeMB != tt.wantMemMB {
+				t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, tt.wantMemMB)
+			}
+			if tt.wantTime > 0 && specs.Spec.Time != tt.wantTime {
+				t.Errorf("Time = %v; want %v", specs.Spec.Time, tt.wantTime)
 			}
 			if tt.wantGpu != nil {
-				if specs.Gpu == nil {
+				if specs.Spec.Gpu == nil {
 					t.Fatal("Gpu is nil; want non-nil")
 				}
-				if specs.Gpu.Type != tt.wantGpu.Type {
-					t.Errorf("Gpu.Type = %q; want %q", specs.Gpu.Type, tt.wantGpu.Type)
+				if specs.Spec.Gpu.Type != tt.wantGpu.Type {
+					t.Errorf("Gpu.Type = %q; want %q", specs.Spec.Gpu.Type, tt.wantGpu.Type)
 				}
-				if specs.Gpu.Count != tt.wantGpu.Count {
-					t.Errorf("Gpu.Count = %d; want %d", specs.Gpu.Count, tt.wantGpu.Count)
+				if specs.Spec.Gpu.Count != tt.wantGpu.Count {
+					t.Errorf("Gpu.Count = %d; want %d", specs.Spec.Gpu.Count, tt.wantGpu.Count)
 				}
-			} else if specs.Gpu != nil {
-				t.Errorf("Gpu = %+v; want nil", specs.Gpu)
+			} else if specs.Spec.Gpu != nil {
+				t.Errorf("Gpu = %+v; want nil", specs.Spec.Gpu)
 			}
 		})
 	}
@@ -760,37 +773,40 @@ echo "Running job"
 		t.Fatalf("TryParsePbsScript failed: %v", err)
 	}
 
-	if specs.Ncpus != 4 {
-		t.Errorf("Ncpus = %d; want 4", specs.Ncpus)
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil; want non-nil")
 	}
-	if specs.MemMB != 8*1024 {
-		t.Errorf("MemMB = %d; want %d", specs.MemMB, 8*1024)
+	if specs.Spec.CpusPerTask != 4 {
+		t.Errorf("CpusPerTask = %d; want 4", specs.Spec.CpusPerTask)
 	}
-	if specs.Gpu == nil || specs.Gpu.Count != 1 {
-		t.Errorf("Gpu = %+v; want count 1", specs.Gpu)
+	if specs.Spec.MemPerNodeMB != 8*1024 {
+		t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, 8*1024)
 	}
-	if specs.Time != 2*time.Hour {
-		t.Errorf("Time = %v; want 2h", specs.Time)
+	if specs.Spec.Gpu == nil || specs.Spec.Gpu.Count != 1 {
+		t.Errorf("Gpu = %+v; want count 1", specs.Spec.Gpu)
 	}
-	if !specs.EmailOnEnd {
+	if specs.Spec.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
+	}
+	if !specs.Control.EmailOnEnd {
 		t.Error("EmailOnEnd should be true")
 	}
-	if specs.MailUser != "user@example.com" {
-		t.Errorf("MailUser = %q; want %q", specs.MailUser, "user@example.com")
+	if specs.Control.MailUser != "user@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, "user@example.com")
 	}
-	// RawFlags should be empty - all flags above are recognized and parsed into typed fields
-	if len(specs.RawFlags) != 0 {
-		t.Errorf("RawFlags count = %d; want 0 (all flags were recognized)", len(specs.RawFlags))
+	// RemainingFlags should be empty - all flags above are recognized and parsed into typed fields
+	if len(specs.RemainingFlags) != 0 {
+		t.Errorf("RemainingFlags count = %d; want 0 (all flags were recognized)", len(specs.RemainingFlags))
 	}
 }
 
 func TestPbsNodeTaskParsing(t *testing.T) {
 	tests := []struct {
-		name       string
-		lines      []string
-		wantNodes  int
-		wantNtasks int
-		wantNcpus  int
+		name             string
+		lines            []string
+		wantNodes        int
+		wantTasksPerNode int
+		wantCpusPerTask  int
 	}{
 		{
 			name: "select with mpiprocs",
@@ -798,9 +814,9 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l select=4:ncpus=8:mpiprocs=2:mem=8gb",
 			},
-			wantNodes:  4,
-			wantNtasks: 8, // 4 nodes * 2 mpiprocs
-			wantNcpus:  8,
+			wantNodes:        4,
+			wantTasksPerNode: 2,
+			wantCpusPerTask:  8,
 		},
 		{
 			name: "select without mpiprocs",
@@ -808,9 +824,9 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l select=2:ncpus=4",
 			},
-			wantNodes:  2,
-			wantNtasks: 1, // default, no mpiprocs
-			wantNcpus:  4,
+			wantNodes:        2,
+			wantTasksPerNode: 1, // default, no mpiprocs
+			wantCpusPerTask:  4,
 		},
 		{
 			name: "nodes format",
@@ -818,9 +834,9 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l nodes=3:ppn=8",
 			},
-			wantNodes:  3,
-			wantNtasks: 1, // default, nodes= doesn't set ntasks
-			wantNcpus:  8,
+			wantNodes:        3,
+			wantTasksPerNode: 1, // default, nodes= doesn't set tasksPerNode
+			wantCpusPerTask:  8,
 		},
 		{
 			name: "select=1 single node",
@@ -828,9 +844,9 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l select=1:ncpus=4:mem=16gb",
 			},
-			wantNodes:  1,
-			wantNtasks: 1,
-			wantNcpus:  4,
+			wantNodes:        1,
+			wantTasksPerNode: 1,
+			wantCpusPerTask:  4,
 		},
 		{
 			name: "defaults no resource directives",
@@ -838,9 +854,9 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -N testjob",
 			},
-			wantNodes:  1,
-			wantNtasks: 1,
-			wantNcpus:  2, // default
+			wantNodes:        1,
+			wantTasksPerNode: 1,
+			wantCpusPerTask:  2, // default
 		},
 		{
 			name: "select with mpiprocs and ngpus",
@@ -848,9 +864,9 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l select=2:ncpus=16:mpiprocs=4:mem=32gb:ngpus=1",
 			},
-			wantNodes:  2,
-			wantNtasks: 8, // 2 nodes * 4 mpiprocs
-			wantNcpus:  16,
+			wantNodes:        2,
+			wantTasksPerNode: 4,
+			wantCpusPerTask:  16,
 		},
 	}
 
@@ -869,14 +885,18 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
-			if specs.Nodes != tt.wantNodes {
-				t.Errorf("Nodes = %d; want %d", specs.Nodes, tt.wantNodes)
+			if specs.Spec == nil {
+				t.Fatal("Spec is nil; want non-nil")
 			}
-			if specs.Ntasks != tt.wantNtasks {
-				t.Errorf("Ntasks = %d; want %d", specs.Ntasks, tt.wantNtasks)
+
+			if specs.Spec.Nodes != tt.wantNodes {
+				t.Errorf("Nodes = %d; want %d", specs.Spec.Nodes, tt.wantNodes)
 			}
-			if specs.Ncpus != tt.wantNcpus {
-				t.Errorf("Ncpus = %d; want %d", specs.Ncpus, tt.wantNcpus)
+			if specs.Spec.TasksPerNode != tt.wantTasksPerNode {
+				t.Errorf("TasksPerNode = %d; want %d", specs.Spec.TasksPerNode, tt.wantTasksPerNode)
+			}
+			if specs.Spec.CpusPerTask != tt.wantCpusPerTask {
+				t.Errorf("CpusPerTask = %d; want %d", specs.Spec.CpusPerTask, tt.wantCpusPerTask)
 			}
 		})
 	}

@@ -115,17 +115,17 @@ func TestHTCondorEmailParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
-			if specs.EmailOnBegin != tt.wantBegin {
-				t.Errorf("EmailOnBegin = %v; want %v", specs.EmailOnBegin, tt.wantBegin)
+			if specs.Control.EmailOnBegin != tt.wantBegin {
+				t.Errorf("EmailOnBegin = %v; want %v", specs.Control.EmailOnBegin, tt.wantBegin)
 			}
-			if specs.EmailOnEnd != tt.wantEnd {
-				t.Errorf("EmailOnEnd = %v; want %v", specs.EmailOnEnd, tt.wantEnd)
+			if specs.Control.EmailOnEnd != tt.wantEnd {
+				t.Errorf("EmailOnEnd = %v; want %v", specs.Control.EmailOnEnd, tt.wantEnd)
 			}
-			if specs.EmailOnFail != tt.wantFail {
-				t.Errorf("EmailOnFail = %v; want %v", specs.EmailOnFail, tt.wantFail)
+			if specs.Control.EmailOnFail != tt.wantFail {
+				t.Errorf("EmailOnFail = %v; want %v", specs.Control.EmailOnFail, tt.wantFail)
 			}
-			if specs.MailUser != tt.wantMailUser {
-				t.Errorf("MailUser = %q; want %q", specs.MailUser, tt.wantMailUser)
+			if specs.Control.MailUser != tt.wantMailUser {
+				t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, tt.wantMailUser)
 			}
 		})
 	}
@@ -188,15 +188,21 @@ func TestHTCondorEmailScriptGeneration(t *testing.T) {
 				Name:    "test_job",
 				Command: "echo 'test'",
 				Specs: &ScriptSpecs{
-					JobName:      "test_job",
-					Ncpus:        4,
-					MemMB:        8000,
-					Time:         time.Hour,
-					EmailOnBegin: tt.emailOnBegin,
-					EmailOnEnd:   tt.emailOnEnd,
-					EmailOnFail:  tt.emailOnFail,
-					MailUser:     tt.mailUser,
-					RawFlags:     []string{},
+					Spec: &ResourceSpec{
+						Nodes:        1,
+						TasksPerNode: 1,
+						CpusPerTask:  4,
+						MemPerNodeMB: 8000,
+						Time:         time.Hour,
+					},
+					Control: RuntimeConfig{
+						JobName:      "test_job",
+						EmailOnBegin: tt.emailOnBegin,
+						EmailOnEnd:   tt.emailOnEnd,
+						EmailOnFail:  tt.emailOnFail,
+						MailUser:     tt.mailUser,
+					},
+					RemainingFlags: []string{},
 				},
 			}
 
@@ -260,15 +266,15 @@ echo "Running job"
 	}
 
 	// Verify parsing
-	if !specs.EmailOnBegin || !specs.EmailOnEnd || !specs.EmailOnFail {
+	if !specs.Control.EmailOnBegin || !specs.Control.EmailOnEnd || !specs.Control.EmailOnFail {
 		t.Errorf("Parsing failed: EmailOnBegin=%v, EmailOnEnd=%v, EmailOnFail=%v",
-			specs.EmailOnBegin, specs.EmailOnEnd, specs.EmailOnFail)
+			specs.Control.EmailOnBegin, specs.Control.EmailOnEnd, specs.Control.EmailOnFail)
 	}
-	if specs.MailUser != "roundtrip@example.com" {
-		t.Errorf("MailUser = %q; want %q", specs.MailUser, "roundtrip@example.com")
+	if specs.Control.MailUser != "roundtrip@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, "roundtrip@example.com")
 	}
-	if specs.Time != 2*time.Hour {
-		t.Errorf("Time = %v; want 2h", specs.Time)
+	if specs.Spec.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
 	}
 
 	// Generate a new submit file from parsed specs
@@ -325,8 +331,11 @@ func TestHTCondorCreateScriptUsesOutputDir(t *testing.T) {
 		Name:    "test/job",
 		Command: "echo 'hello'",
 		Specs: &ScriptSpecs{
-			RawFlags: []string{},
-			Ncpus:    1,
+			Spec: &ResourceSpec{
+				Nodes:       1,
+				CpusPerTask: 1,
+			},
+			RemainingFlags: []string{},
 		},
 	}
 
@@ -470,25 +479,25 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
-			if specs.Ncpus != tt.wantCpus {
-				t.Errorf("Ncpus = %d; want %d", specs.Ncpus, tt.wantCpus)
+			if specs.Spec.CpusPerTask != tt.wantCpus {
+				t.Errorf("Ncpus = %d; want %d", specs.Spec.CpusPerTask, tt.wantCpus)
 			}
-			if specs.MemMB != tt.wantMemMB {
-				t.Errorf("MemMB = %d; want %d", specs.MemMB, tt.wantMemMB)
+			if specs.Spec.MemPerNodeMB != tt.wantMemMB {
+				t.Errorf("MemMB = %d; want %d", specs.Spec.MemPerNodeMB, tt.wantMemMB)
 			}
 			if tt.wantGpus > 0 {
-				if specs.Gpu == nil {
+				if specs.Spec.Gpu == nil {
 					t.Errorf("Gpu is nil; want count %d", tt.wantGpus)
-				} else if specs.Gpu.Count != tt.wantGpus {
-					t.Errorf("Gpu.Count = %d; want %d", specs.Gpu.Count, tt.wantGpus)
+				} else if specs.Spec.Gpu.Count != tt.wantGpus {
+					t.Errorf("Gpu.Count = %d; want %d", specs.Spec.Gpu.Count, tt.wantGpus)
 				}
 			} else {
-				if specs.Gpu != nil {
-					t.Errorf("Gpu = %+v; want nil", specs.Gpu)
+				if specs.Spec.Gpu != nil {
+					t.Errorf("Gpu = %+v; want nil", specs.Spec.Gpu)
 				}
 			}
-			if specs.Time != tt.wantTime {
-				t.Errorf("Time = %v; want %v", specs.Time, tt.wantTime)
+			if specs.Spec.Time != tt.wantTime {
+				t.Errorf("Time = %v; want %v", specs.Spec.Time, tt.wantTime)
 			}
 		})
 	}
@@ -574,11 +583,17 @@ func TestHTCondorSubmitFileFormat(t *testing.T) {
 		Name:    "format_test",
 		Command: "echo 'hello world'",
 		Specs: &ScriptSpecs{
-			JobName: "format_test",
-			Ncpus:   8,
-			MemMB:   16384,
-			Time:    2 * time.Hour,
-			RawFlags: []string{
+			Spec: &ResourceSpec{
+				Nodes:        1,
+				TasksPerNode: 1,
+				CpusPerTask:  8,
+				MemPerNodeMB: 16384,
+				Time:         2 * time.Hour,
+			},
+			Control: RuntimeConfig{
+				JobName: "format_test",
+			},
+			RemainingFlags: []string{
 				"request_cpus = 8",
 				"request_memory = 16384",
 			},
@@ -691,8 +706,8 @@ func TestHTCondorTimeParsing(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
-			if specs.Time != tt.wantTime {
-				t.Errorf("Time = %v; want %v", specs.Time, tt.wantTime)
+			if specs.Spec.Time != tt.wantTime {
+				t.Errorf("Time = %v; want %v", specs.Spec.Time, tt.wantTime)
 			}
 		})
 	}
@@ -746,11 +761,11 @@ func TestHTCondorDefaultNodesTasks(t *testing.T) {
 			}
 
 			// HTCondor is inherently single-node, so Nodes and Ntasks should always be 1
-			if specs.Nodes != 1 {
-				t.Errorf("Nodes = %d; want 1", specs.Nodes)
+			if specs.Spec.Nodes != 1 {
+				t.Errorf("Nodes = %d; want 1", specs.Spec.Nodes)
 			}
-			if specs.Ntasks != 1 {
-				t.Errorf("Ntasks = %d; want 1", specs.Ntasks)
+			if specs.Spec.TasksPerNode != 1 {
+				t.Errorf("Ntasks = %d; want 1", specs.Spec.TasksPerNode)
 			}
 		})
 	}
@@ -825,26 +840,26 @@ echo "Running job"
 		t.Fatalf("TryParseHTCondorScript failed: %v", err)
 	}
 
-	if specs.Ncpus != 4 {
-		t.Errorf("Ncpus = %d; want 4", specs.Ncpus)
+	if specs.Spec.CpusPerTask != 4 {
+		t.Errorf("Ncpus = %d; want 4", specs.Spec.CpusPerTask)
 	}
-	if specs.MemMB != 8192 {
-		t.Errorf("MemMB = %d; want 8192", specs.MemMB)
+	if specs.Spec.MemPerNodeMB != 8192 {
+		t.Errorf("MemMB = %d; want 8192", specs.Spec.MemPerNodeMB)
 	}
-	if specs.Gpu == nil || specs.Gpu.Count != 1 {
-		t.Errorf("Gpu = %+v; want count 1", specs.Gpu)
+	if specs.Spec.Gpu == nil || specs.Spec.Gpu.Count != 1 {
+		t.Errorf("Gpu = %+v; want count 1", specs.Spec.Gpu)
 	}
-	if specs.Time != 2*time.Hour {
-		t.Errorf("Time = %v; want 2h", specs.Time)
+	if specs.Spec.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
 	}
-	if !specs.EmailOnEnd {
+	if !specs.Control.EmailOnEnd {
 		t.Error("EmailOnEnd should be true for Complete notification")
 	}
-	if specs.MailUser != "user@example.com" {
-		t.Errorf("MailUser = %q; want %q", specs.MailUser, "user@example.com")
+	if specs.Control.MailUser != "user@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, "user@example.com")
 	}
 	// RawFlags should be empty - all flags above are recognized and parsed into typed fields
-	if len(specs.RawFlags) != 0 {
-		t.Errorf("RawFlags count = %d; want 0 (all flags were recognized)", len(specs.RawFlags))
+	if len(specs.RemainingFlags) != 0 {
+		t.Errorf("RawFlags count = %d; want 0 (all flags were recognized)", len(specs.RemainingFlags))
 	}
 }
