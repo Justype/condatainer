@@ -9,7 +9,8 @@ helpers/
 ├── headless/ # Run directly on the current machine
 ├── slurm/    # Submit as SLURM batch jobs
 ├── pbs/      # Submit as PBS batch jobs
-└── lsf/      # Submit as LSF batch jobs
+├── lsf/      # Submit as LSF batch jobs
+└── htcondor/ # Submit as HTCondor jobs
 ```
 
 ## Quick Start
@@ -29,7 +30,15 @@ If your system has a scheduler, you should not use the headless scripts.
 - **headless/** -- Runs the service directly on the current server. Use on headless server which does not have a job scheduler. The script blocks while the service is running.
 - **slurm/** -- Submits a SLURM batch job, waits for it to start, then opens an SSH tunnel with port forwarding. Re-running the script while a job is active will reconnect to the existing session.
 - **pbs/** -- Same behavior as `slurm/` but submits via PBS (`qsub`/`qstat`/`qdel`).
-- **lsf/** -- Same behavior as `slurm/` but submits via LSF (`bsub`/`bjobs`/`bkill`). Interactive helpers in `helpers/lsf/` force single-node placement using `#BSUB -R "span[hosts=1]"` so the service and port-forwarding run on one compute node.
+- **lsf/** -- Same behavior as `slurm/` but submits via LSF (`bsub`/`bjobs`/`bkill`).
+- **htcondor/** -- Same behavior as `slurm/` but submits via HTCondor (`condor_submit`/`condor_q`/`condor_rm`).
+
+> [!NOTE]
+> All scheduler helpers enforce single-node job placement to ensure interactive services and port-forwarding run on a single compute node:
+> - SLURM: `#SBATCH --nodes=1`
+> - PBS: `select=1:ncpus=...`
+> - LSF: `#BSUB -R "span[hosts=1]"`
+> - HTCondor: `universe = vanilla`
 
 ## Desktop / GUI Apps
 

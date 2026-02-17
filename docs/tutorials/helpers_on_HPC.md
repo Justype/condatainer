@@ -37,7 +37,7 @@ Helper scripts automate the multi-step process of running web applications on HP
 
 1. Check dependencies and overlay integrity
 2. Auto-install required module overlays if missing
-3. Submit jobs to the scheduler (SLURM, etc.) and set up port forwarding
+3. Submit jobs to the scheduler (SLURM, PBS, LSF, or HTCondor) and set up port forwarding
 4. Reconnect to existing sessions automatically
 
 ```bash
