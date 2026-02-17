@@ -55,5 +55,5 @@ CondaTainer
   :hidden:
 
   code-server on HPC <tutorials/code-server_on_HPC>
+  Helper Scripts on Headless <tutorials/helpers_on_server>
   RStudio Server on Headless <tutorials/rstudio-server_on_server>
-

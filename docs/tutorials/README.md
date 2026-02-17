@@ -6,6 +6,7 @@ This directory contains tutorials on how to use CondaTainer for various applicat
 
 - [Create a Workspace Environment](../user_guide/workspace_overlays.md)
 - [Helper Scripts on HPC](./helpers_on_HPC.md) - How helper scripts work with overlays and SSH port forwarding
+- [Helper Scripts on Headless Servers](./helpers_on_server.md) - How to use helpers on servers without HPC schedulers
 
 ## IDE & Editor Tutorials
 
@@ -17,6 +18,8 @@ This directory contains tutorials on how to use CondaTainer for various applicat
 | [VS Code Tunnel](./vscode-tunnel_on_HPC.md) | Not required | Full VS Code via Microsoft/GitHub relay | When port forwarding is difficult |
 
 Now [code-server](./code-server_on_HPC.md) is replaced by VS Code Server. (Pylance, Copilot, and other Microsoft extensions are supported only on VS Code.)
+
+For non-HPC headless servers, see [Helper Scripts on Headless Servers](./helpers_on_server.md).
 
 ### RStudio Server
 
@@ -35,9 +38,13 @@ Run Jupyter Lab or Notebook on HPC. Use `-j notebook` for classic Notebook mode.
 condatainer helper jupyter
 ```
 
+For non-HPC headless servers, see [Helper Scripts on Headless Servers](./helpers_on_server.md).
+
 ### Desktop / GUI Apps
 
 | Tool | Description |
 |------|-------------|
 | [xfce4](./xfce4_on_HPC.md) | XFCE desktop session via VNC / noVNC, accessible through a browser |
 | [igv](./xfce4_on_HPC.md) | XFCE desktop with IGV (Integrative Genomics Viewer) via noVNC |
+
+For non-HPC headless servers, see [Helper Scripts on Headless Servers](./helpers_on_server.md).
