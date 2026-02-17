@@ -160,6 +160,10 @@ func (p *PbsScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 		case strings.HasPrefix(flag, "-e "):
 			rc.Stderr = strings.TrimSpace(strings.TrimPrefix(flag, "-e"))
 
+		// Queue/partition: -q queuename
+		case strings.HasPrefix(flag, "-q "):
+			rc.Partition = strings.TrimSpace(strings.TrimPrefix(flag, "-q"))
+
 		// Mail user: -M email
 		case strings.HasPrefix(flag, "-M "):
 			rc.MailUser = strings.TrimSpace(strings.TrimPrefix(flag, "-M"))
@@ -212,6 +216,11 @@ func (p *PbsScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 	var unconsumed []string
 
 	for _, flag := range directives {
+		// Exclusive node access: -x
+		if flag == "-x" {
+			rs.Exclusive = true
+			continue
+		}
 		// Only -l flags carry resource specifications
 		if !strings.HasPrefix(flag, "-l ") {
 			unconsumed = append(unconsumed, flag)
@@ -341,6 +350,12 @@ func (p *PbsScheduler) parseSingleResource(res string, rs *ResourceSpec) error {
 		if err == nil {
 			rs.Gpu = gpu
 		}
+
+	case "place":
+		// place=excl (or place=excl:...) requests exclusive node access
+		if strings.Contains(value, "excl") {
+			rs.Exclusive = true
+		}
 	}
 
 	return nil
@@ -399,6 +414,9 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	if ctrl.Stdout != "" {
 		fmt.Fprintf(writer, "#PBS -o %s\n", ctrl.Stdout)
 	}
+	if ctrl.Partition != "" {
+		fmt.Fprintf(writer, "#PBS -q %s\n", ctrl.Partition)
+	}
 
 	// Write ResourceSpec directives (only if not in passthrough mode)
 	nodes := 1
@@ -443,6 +461,9 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 			mins := int(jobTime.Minutes()) % 60
 			secs := int(jobTime.Seconds()) % 60
 			fmt.Fprintf(writer, "#PBS -l walltime=%02d:%02d:%02d\n", hours, mins, secs)
+		}
+		if rs.Exclusive {
+			fmt.Fprintln(writer, "#PBS -l place=excl")
 		}
 	}
 

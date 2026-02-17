@@ -181,6 +181,8 @@ func (h *HTCondorScheduler) parseRuntimeConfig(directives []string) (RuntimeConf
 			rc.Stderr = value
 		case "notify_user":
 			rc.MailUser = value
+		case "accounting_group":
+			rc.Partition = value
 		case "notification":
 			switch strings.ToLower(value) {
 			case "always":
@@ -417,6 +419,9 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	// Write resource specifications
 	if specs.Control.JobName != "" {
 		fmt.Fprintf(subWriter, "+JobName = \"%s\"\n", specs.Control.JobName)
+	}
+	if specs.Control.Partition != "" {
+		fmt.Fprintf(subWriter, "accounting_group = %s\n", specs.Control.Partition)
 	}
 
 	// Output/error/log

@@ -153,20 +153,40 @@ func (s *SlurmScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig,
 		switch {
 		case strings.HasPrefix(flag, "--job-name="):
 			rc.JobName = strings.TrimPrefix(flag, "--job-name=")
+		case strings.HasPrefix(flag, "--job-name "):
+			rc.JobName = strings.TrimSpace(strings.TrimPrefix(flag, "--job-name"))
 		case strings.HasPrefix(flag, "-J "):
 			rc.JobName = strings.TrimSpace(strings.TrimPrefix(flag, "-J"))
 		case strings.HasPrefix(flag, "--output="):
 			rc.Stdout = strings.TrimPrefix(flag, "--output=")
+		case strings.HasPrefix(flag, "--output "):
+			rc.Stdout = strings.TrimSpace(strings.TrimPrefix(flag, "--output"))
 		case strings.HasPrefix(flag, "-o "):
 			rc.Stdout = strings.TrimSpace(strings.TrimPrefix(flag, "-o"))
 		case strings.HasPrefix(flag, "--error="):
 			rc.Stderr = strings.TrimPrefix(flag, "--error=")
+		case strings.HasPrefix(flag, "--error "):
+			rc.Stderr = strings.TrimSpace(strings.TrimPrefix(flag, "--error"))
 		case strings.HasPrefix(flag, "-e "):
 			rc.Stderr = strings.TrimSpace(strings.TrimPrefix(flag, "-e"))
+		case strings.HasPrefix(flag, "--partition="):
+			rc.Partition = strings.TrimPrefix(flag, "--partition=")
+		case strings.HasPrefix(flag, "--partition "):
+			rc.Partition = strings.TrimSpace(strings.TrimPrefix(flag, "--partition"))
+		case strings.HasPrefix(flag, "-p "):
+			rc.Partition = strings.TrimSpace(strings.TrimPrefix(flag, "-p"))
 		case strings.HasPrefix(flag, "--mail-user="):
 			rc.MailUser = strings.TrimPrefix(flag, "--mail-user=")
-		case strings.HasPrefix(flag, "--mail-type="):
-			mailType := strings.ToUpper(strings.TrimPrefix(flag, "--mail-type="))
+		case strings.HasPrefix(flag, "--mail-user "):
+			rc.MailUser = strings.TrimSpace(strings.TrimPrefix(flag, "--mail-user"))
+		case strings.HasPrefix(flag, "--mail-type="), strings.HasPrefix(flag, "--mail-type "):
+			rawMailType := flag
+			if strings.HasPrefix(rawMailType, "--mail-type=") {
+				rawMailType = strings.TrimPrefix(rawMailType, "--mail-type=")
+			} else {
+				rawMailType = strings.TrimSpace(strings.TrimPrefix(rawMailType, "--mail-type"))
+			}
+			mailType := strings.ToUpper(rawMailType)
 			if mailType == "NONE" {
 				rc.EmailOnBegin = false
 				rc.EmailOnEnd = false
@@ -223,35 +243,57 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		switch {
 		case strings.HasPrefix(flag, "--cpus-per-task="):
 			_, parseErr = fmt.Sscanf(flag, "--cpus-per-task=%d", &rs.CpusPerTask)
+		case strings.HasPrefix(flag, "--cpus-per-task "):
+			_, parseErr = fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(flag, "--cpus-per-task")), "%d", &rs.CpusPerTask)
 		case strings.HasPrefix(flag, "-c "):
 			_, parseErr = fmt.Sscanf(flag, "-c %d", &rs.CpusPerTask)
 		case strings.HasPrefix(flag, "--nodes="):
 			_, parseErr = fmt.Sscanf(flag, "--nodes=%d", &rs.Nodes)
+		case strings.HasPrefix(flag, "--nodes "):
+			_, parseErr = fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(flag, "--nodes")), "%d", &rs.Nodes)
 		case strings.HasPrefix(flag, "-N "):
 			_, parseErr = fmt.Sscanf(flag, "-N %d", &rs.Nodes)
 		case strings.HasPrefix(flag, "--ntasks-per-node="):
 			_, parseErr = fmt.Sscanf(flag, "--ntasks-per-node=%d", &ntasksPerNode)
 			hasExplicitTasksPerNode = true
+		case strings.HasPrefix(flag, "--ntasks-per-node "):
+			_, parseErr = fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(flag, "--ntasks-per-node")), "%d", &ntasksPerNode)
+			hasExplicitTasksPerNode = true
 		case strings.HasPrefix(flag, "--ntasks="):
 			_, parseErr = fmt.Sscanf(flag, "--ntasks=%d", &totalNtasks)
+			hasExplicitTotalNtasks = true
+		case strings.HasPrefix(flag, "--ntasks "):
+			_, parseErr = fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(flag, "--ntasks")), "%d", &totalNtasks)
 			hasExplicitTotalNtasks = true
 		case strings.HasPrefix(flag, "-n "):
 			_, parseErr = fmt.Sscanf(flag, "-n %d", &totalNtasks)
 			hasExplicitTotalNtasks = true
 		case strings.HasPrefix(flag, "--mem="):
 			rs.MemPerNodeMB, parseErr = parseMemory(strings.TrimPrefix(flag, "--mem="))
+		case strings.HasPrefix(flag, "--mem "):
+			rs.MemPerNodeMB, parseErr = parseMemory(strings.TrimSpace(strings.TrimPrefix(flag, "--mem")))
 		case strings.HasPrefix(flag, "--time="):
 			rs.Time, parseErr = parseSlurmTimeSpec(strings.TrimPrefix(flag, "--time="))
+		case strings.HasPrefix(flag, "--time "):
+			rs.Time, parseErr = parseSlurmTimeSpec(strings.TrimSpace(strings.TrimPrefix(flag, "--time")))
 		case strings.HasPrefix(flag, "-t "):
 			rs.Time, parseErr = parseSlurmTimeSpec(strings.TrimSpace(strings.TrimPrefix(flag, "-t")))
 		case strings.HasPrefix(flag, "--gres=gpu:"):
 			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimPrefix(flag, "--gres="))
 		case strings.HasPrefix(flag, "--gpus="):
 			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimPrefix(flag, "--gpus="))
+		case strings.HasPrefix(flag, "--gpus "):
+			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimSpace(strings.TrimPrefix(flag, "--gpus")))
 		case strings.HasPrefix(flag, "--gpus-per-node="):
 			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimPrefix(flag, "--gpus-per-node="))
+		case strings.HasPrefix(flag, "--gpus-per-node "):
+			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimSpace(strings.TrimPrefix(flag, "--gpus-per-node")))
 		case strings.HasPrefix(flag, "--gpus-per-task="):
 			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimPrefix(flag, "--gpus-per-task="))
+		case strings.HasPrefix(flag, "--gpus-per-task "):
+			rs.Gpu, parseErr = parseSlurmGpu(strings.TrimSpace(strings.TrimPrefix(flag, "--gpus-per-task")))
+		case flag == "--exclusive", strings.HasPrefix(flag, "--exclusive="):
+			rs.Exclusive = true
 		default:
 			consumed = false
 		}
@@ -352,6 +394,9 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	if ctrl.MailUser != "" {
 		fmt.Fprintf(writer, "#SBATCH --mail-user=%s\n", ctrl.MailUser)
 	}
+	if ctrl.Partition != "" {
+		fmt.Fprintf(writer, "#SBATCH --partition=%s\n", ctrl.Partition)
+	}
 
 	// Write ResourceSpec directives (only if not in passthrough mode)
 	nodes := 1
@@ -392,6 +437,9 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 			} else {
 				fmt.Fprintf(writer, "#SBATCH --gres=gpu:%d\n", rs.Gpu.Count)
 			}
+		}
+		if rs.Exclusive {
+			fmt.Fprintln(writer, "#SBATCH --exclusive")
 		}
 	}
 
@@ -734,7 +782,7 @@ func (s *SlurmScheduler) getAvailableResourcesByPartition() (map[string]Resource
 			resources[partition] = existing
 		} else {
 			resources[partition] = ResourceLimits{
-				Partition: partition,
+				Partition:       partition,
 				MaxCpusPerNode:  cpus,
 				MaxMemMBPerNode: memMB,
 			}

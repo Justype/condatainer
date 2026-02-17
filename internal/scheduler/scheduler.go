@@ -70,6 +70,7 @@ type ResourceSpec struct {
 	MemPerNodeMB int64         // Total RAM per node in MB
 	Gpu          *GpuSpec      // GPU requirements (nil = no GPU; Count = per node)
 	Time         time.Duration // Job walltime limit
+	Exclusive    bool          // Request exclusive node access (no other jobs on the same node)
 }
 
 // RuntimeConfig holds job-level control settings (name, I/O paths, notifications).
@@ -81,6 +82,7 @@ type RuntimeConfig struct {
 	EmailOnEnd   bool   // Notification on job end
 	EmailOnFail  bool   // Notification on job failure/abort
 	MailUser     string // Target email/user for notifications (empty = submitting user)
+	Partition    string // Partition/queue to submit to (cleared on cross-scheduler translation)
 }
 
 // ClusterInfo holds cluster configuration information
@@ -281,13 +283,31 @@ func ValidateAndConvertSpecs(specs *ScriptSpecs) (validationErr error, cpuAdjust
 	}
 	s := specs.Spec
 
+	// Filter limits to the requested partition when specified.
+	// When Control.Partition is set, only validate against that partition's limits.
+	activeLimits := clusterInfo.Limits
+	if specs.Control.Partition != "" {
+		filtered := make([]ResourceLimits, 0, 1)
+		for _, limit := range clusterInfo.Limits {
+			if limit.Partition == specs.Control.Partition {
+				filtered = append(filtered, limit)
+				break
+			}
+		}
+		if len(filtered) > 0 {
+			activeLimits = filtered
+		}
+		// If the requested partition is not in clusterInfo (e.g. not exposed by scheduler),
+		// fall back to all limits to avoid silently skipping validation.
+	}
+
 	// Auto-adjust CpusPerTask if the effective CPUs per node exceed limits in all partitions.
 	// When reducing CPUs, also adjust time estimate proportionally.
-	if len(clusterInfo.Limits) > 0 && s.CpusPerTask > 0 {
+	if len(activeLimits) > 0 && s.CpusPerTask > 0 {
 		maxAllowedCpu := 0
 		maxAllowedTime := time.Duration(0)
 
-		for _, limit := range clusterInfo.Limits {
+		for _, limit := range activeLimits {
 			if limit.MaxCpusPerNode > maxAllowedCpu {
 				maxAllowedCpu = limit.MaxCpusPerNode
 			}
@@ -344,12 +364,12 @@ func ValidateAndConvertSpecs(specs *ScriptSpecs) (validationErr error, cpuAdjust
 		}
 	}
 
-	// Validate resource limits (memory and other critical resources) against all partitions
-	if len(clusterInfo.Limits) > 0 {
+	// Validate resource limits (memory and other critical resources) against active partitions
+	if len(activeLimits) > 0 {
 		validForSomePartition := false
 		var firstValidationErr error
 
-		for _, limit := range clusterInfo.Limits {
+		for _, limit := range activeLimits {
 			if err := ValidateSpecs(specs, &limit); err == nil {
 				validForSomePartition = true
 				break
@@ -592,26 +612,30 @@ func ValidateScript(scheduler Scheduler, scriptPath string) error {
 		return nil
 	}
 
-	// Validate against all partition limits
-	// If the script doesn't specify a partition, validate against all of them
+	// Validate against the requested partition (or all if none specified)
 	if len(info.Limits) == 0 {
 		return nil // No limits to validate against
 	}
 
-	// Validate against each partition's limits
-	for _, limit := range info.Limits {
+	limits := info.Limits
+	if specs != nil && specs.Control.Partition != "" {
+		for _, limit := range info.Limits {
+			if limit.Partition == specs.Control.Partition {
+				return ValidateSpecs(specs, &limit)
+			}
+		}
+		// Requested partition not found — fall through to all-partition check
+	}
+
+	// Validate against each partition's limits; pass if any accepts the job
+	for _, limit := range limits {
 		if err := ValidateSpecs(specs, &limit); err != nil {
-			// If it exceeds limits in one partition, that's ok as long as
-			// there's another partition that can handle it
 			continue
 		}
-		// Found a partition that can handle this job
 		return nil
 	}
 
-	// If we get here, the job exceeds limits in all partitions
-	// Return validation error for the first partition
-	return ValidateSpecs(specs, &info.Limits[0])
+	return ValidateSpecs(specs, &limits[0])
 }
 
 // WriteScript creates a batch script with the given specifications
@@ -847,6 +871,9 @@ func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 		// scheduler-specific unrecognized flags cannot be translated.
 		// RawFlags is the immutable audit log — never cleared.
 		parsed.Specs.RemainingFlags = nil
+		// Clear Partition: the original partition name is scheduler-specific
+		// and cannot be translated to the host scheduler's partition names.
+		parsed.Specs.Control.Partition = ""
 	}
 
 	return parsed.Specs, nil

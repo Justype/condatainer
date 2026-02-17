@@ -163,6 +163,8 @@ func (l *LsfScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 			rc.EmailOnEnd = true
 		case strings.HasPrefix(flag, "-u "):
 			rc.MailUser = strings.TrimSpace(strings.TrimPrefix(flag, "-u"))
+		case strings.HasPrefix(flag, "-q "):
+			rc.Partition = strings.TrimSpace(strings.TrimPrefix(flag, "-q"))
 		default:
 			recognized = false
 		}
@@ -222,6 +224,8 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 			resStr := strings.TrimSpace(strings.TrimPrefix(flag, "-R"))
 			resStr = strings.Trim(resStr, "\"'")
 			l.parseLsfResourceIntoSpec(resStr, rs)
+		case flag == "-x":
+			rs.Exclusive = true
 		default:
 			recognized = false
 		}
@@ -417,6 +421,9 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	if specs.Control.MailUser != "" {
 		fmt.Fprintf(writer, "#BSUB -u %s\n", specs.Control.MailUser)
 	}
+	if specs.Control.Partition != "" {
+		fmt.Fprintf(writer, "#BSUB -q %s\n", specs.Control.Partition)
+	}
 
 	// Resource directives — only when Spec is available
 	if specs.Spec != nil {
@@ -431,6 +438,9 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		// Add walltime if specified
 		if specs.Spec.Time > 0 {
 			fmt.Fprintf(writer, "#BSUB -W %s\n", formatLsfTime(specs.Spec.Time))
+		}
+		if specs.Spec.Exclusive {
+			fmt.Fprintln(writer, "#BSUB -x")
 		}
 	}
 
