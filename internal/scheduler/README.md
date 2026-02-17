@@ -96,17 +96,19 @@ Parsing uses a two-stage pipeline:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `scheduler.ncpus` | 2 | CPUs per task |
-| `scheduler.mem_mb` | 8192 | Memory in MB |
-| `scheduler.time` | `4h` | Time limit |
 | `scheduler.nodes` | 1 | Node count |
-| `scheduler.ntasks` | 1 | Task count |
+| `scheduler.tasks_per_node` | 1 | Tasks per node |
+| `scheduler.ncpus_per_task` | 2 | CPUs per task |
+| `scheduler.mem_mb_per_node` | 8192 | Memory per node in MB |
+| `scheduler.time` | `4h` | Time limit |
 
 ```yaml
 # ~/.config/condatainer/config.yaml
 scheduler:
-  ncpus: 8
-  mem_mb: 16384
+  nodes: 1
+  tasks_per_node: 1
+  ncpus_per_task: 8
+  mem_mb_per_node: 16384
   time: "8h"
 ```
 

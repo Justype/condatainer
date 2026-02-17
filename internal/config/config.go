@@ -18,11 +18,11 @@ const PrebuiltBaseURL = "https://github.com/Justype/cnt-prebuilt/releases/downlo
 
 // SchedulerConfig holds default resource specs for scheduler script parsing
 type SchedulerConfig struct {
-	Ncpus  int           // Default CPUs per task (default: 4)
-	MemMB  int64         // Default memory in MB (default: 0 = unset)
-	Time   time.Duration // Default time limit (default: 0 = unset)
-	Nodes  int           // Default number of nodes (default: 1)
-	Ntasks int           // Default number of tasks (default: 1)
+	Nodes        int           // Default number of nodes (default: 1)
+	TasksPerNode int           // Default number of tasks per node (default: 1)
+	NcpusPerTask int           // Default CPUs per task (default: 2)
+	MemMBPerNode int64         // Default memory per node in MB (default: 8192)
+	Time         time.Duration // Default time limit (default: 4h)
 }
 
 // BuildConfig holds default settings for build operations
@@ -84,11 +84,11 @@ func LoadDefaults(executablePath string) {
 		Branch: "main", // Default branch for remote build scripts
 
 		Scheduler: SchedulerConfig{
-			Ncpus:  2,
-			MemMB:  8192,          // 8GB
-			Time:   4 * time.Hour, // 4 hours
-			Nodes:  1,
-			Ntasks: 1,
+			Nodes:        1,
+			TasksPerNode: 1,
+			NcpusPerTask: 2,
+			MemMBPerNode: 8192,          // 8GB
+			Time:         4 * time.Hour, // 4 hours
 		},
 
 		Build: BuildConfig{

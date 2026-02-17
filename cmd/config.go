@@ -28,11 +28,11 @@ var configKeys = []string{
 	"branch",
 	"prefer_remote",
 	"extra_base_dirs",
-	"scheduler.ncpus",
-	"scheduler.mem_mb",
-	"scheduler.time",
 	"scheduler.nodes",
-	"scheduler.ntasks",
+	"scheduler.tasks_per_node",
+	"scheduler.ncpus_per_task",
+	"scheduler.mem_mb_per_node",
+	"scheduler.time",
 	"build.ncpus",
 	"build.mem_mb",
 	"build.time",
@@ -63,16 +63,16 @@ func configValueCompletion(key string) []string {
 		return []string{"true", "false"}
 	case "branch":
 		return []string{"main", "dev"}
-	case "scheduler.ncpus", "build.ncpus":
+	case "scheduler.nodes":
+		return []string{"1", "2", "4", "8"}
+	case "scheduler.tasks_per_node":
+		return []string{"1", "2", "4", "8"}
+	case "scheduler.ncpus_per_task", "build.ncpus":
 		return []string{"4", "8", "16", "32"}
-	case "scheduler.mem_mb", "build.mem_mb":
+	case "scheduler.mem_mb_per_node", "build.mem_mb":
 		return []string{"4096", "8192", "16384", "32768"}
 	case "scheduler.time", "build.time":
 		return []string{"1h", "2h", "4h", "8h"}
-	case "scheduler.nodes":
-		return []string{"1", "2", "4", "8"}
-	case "scheduler.ntasks":
-		return []string{"1", "2", "4", "8"}
 	case "build.tmp_size_mb":
 		return []string{"10240", "20480", "40960"}
 	case "build.overlay_type":
@@ -257,12 +257,14 @@ Shows:
 
 		// Scheduler default specs
 		fmt.Println(utils.StyleTitle("Scheduler Default Specs:"))
-		fmt.Printf("  ncpus:           %d\n", viper.GetInt("scheduler.ncpus"))
-		schedMemMB := viper.GetInt64("scheduler.mem_mb")
+		fmt.Printf("  nodes:           %d\n", viper.GetInt("scheduler.nodes"))
+		fmt.Printf("  tasks_per_node:  %d\n", viper.GetInt("scheduler.tasks_per_node"))
+		fmt.Printf("  ncpus_per_task:  %d\n", viper.GetInt("scheduler.ncpus_per_task"))
+		schedMemMB := viper.GetInt64("scheduler.mem_mb_per_node")
 		if schedMemMB > 0 {
-			fmt.Printf("  mem_mb:          %d\n", schedMemMB)
+			fmt.Printf("  mem_mb_per_node: %d\n", schedMemMB)
 		} else {
-			fmt.Printf("  mem_mb:          %s\n", utils.StyleInfo("not set"))
+			fmt.Printf("  mem_mb_per_node: %s\n", utils.StyleInfo("not set"))
 		}
 		schedTime := viper.GetString("scheduler.time")
 		if schedTime != "" {
@@ -270,8 +272,6 @@ Shows:
 		} else {
 			fmt.Printf("  time:            %s\n", utils.StyleInfo("not set"))
 		}
-		fmt.Printf("  nodes:           %d\n", viper.GetInt("scheduler.nodes"))
-		fmt.Printf("  ntasks:          %d\n", viper.GetInt("scheduler.ntasks"))
 		fmt.Println()
 
 		// Build settings
@@ -311,11 +311,11 @@ Shows:
 			"CONDATAINER_APPTAINER_BIN",
 			"CONDATAINER_SCHEDULER_BIN",
 			"CONDATAINER_SUBMIT_JOB",
-			"CONDATAINER_SCHEDULER_NCPUS",
-			"CONDATAINER_SCHEDULER_MEM_MB",
-			"CONDATAINER_SCHEDULER_TIME",
 			"CONDATAINER_SCHEDULER_NODES",
-			"CONDATAINER_SCHEDULER_NTASKS",
+			"CONDATAINER_SCHEDULER_TASKS_PER_NODE",
+			"CONDATAINER_SCHEDULER_NCPUS_PER_TASK",
+			"CONDATAINER_SCHEDULER_MEM_MB_PER_NODE",
+			"CONDATAINER_SCHEDULER_TIME",
 			"CONDATAINER_BUILD_NCPUS",
 			"CONDATAINER_BUILD_MEM_MB",
 			"CONDATAINER_BUILD_TIME",
@@ -338,7 +338,7 @@ var configGetCmd = &cobra.Command{
 	Short: "Get a configuration value",
 	Long:  `Get a specific configuration value.`,
 	Example: `  condatainer config get apptainer_bin
-  condatainer config get scheduler.ncpus
+  condatainer config get scheduler.ncpus_per_task
   condatainer config get build.ncpus
   condatainer config get submit_job`,
 	Args:              cobra.ExactArgs(1),
@@ -362,7 +362,7 @@ Time duration format (for build.time):
   Go style:  2h, 30m, 1h30m, 90s
   HPC style: 02:00:00, 2:30:00, 1:30 (HH:MM:SS or HH:MM)`,
 	Example: `  condatainer config set apptainer_bin /usr/bin/apptainer
-  condatainer config set scheduler.ncpus 8
+  condatainer config set scheduler.ncpus_per_task 8
   condatainer config set scheduler.time 4h
   condatainer config set build.ncpus 8
   condatainer config set build.time 02:00:00
@@ -381,11 +381,11 @@ Time duration format (for build.time):
 			"submit_job":          true,
 			"branch":              true,
 			"prefer_remote":       true,
-			"scheduler.ncpus":     true,
-			"scheduler.mem_mb":    true,
-			"scheduler.time":      true,
-			"scheduler.nodes":     true,
-			"scheduler.ntasks":    true,
+			"scheduler.nodes":          true,
+			"scheduler.tasks_per_node": true,
+			"scheduler.ncpus_per_task": true,
+			"scheduler.mem_mb_per_node": true,
+			"scheduler.time":           true,
 			"build.ncpus":         true,
 			"build.mem_mb":        true,
 			"build.time":          true,
