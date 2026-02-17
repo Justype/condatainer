@@ -62,7 +62,11 @@ show_and_connect() {
         print_info "  Password: ${YELLOW}$AUTH${NC}"
     fi
     print_info "If you want to stop it, run: ${YELLOW}bkill $job_id${NC}"
-    exec ssh ${SSH_OPTS} -o ControlMaster=no -L "$PORT:localhost:$PORT" "$USER@$NODE"
+    local local_host_long=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "")
+    local local_host_short=$(hostname -s 2>/dev/null || echo "")
+    if [ "$local_host_long" != "$NODE" ] && [ "$local_host_short" != "$NODE" ]; then
+        exec ssh ${SSH_OPTS} -o ControlMaster=no -L "$PORT:localhost:$PORT" "$USER@$NODE"
+    fi
     exit 0
 }
 
