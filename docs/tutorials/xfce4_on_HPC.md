@@ -58,7 +58,9 @@ Run the following command to check if a supported scheduler is available:
 condatainer scheduler
 ```
 
-Supported schedulers: **SLURM**, **PBS**, **LSF**, and **HTCondor**.
+```{note}
+Slurm is fully tested. Other schedulers are experimentally supported. Please report any issues you encounter.
+```
 
 ## SSH Port Forwarding
 
