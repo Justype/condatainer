@@ -49,7 +49,7 @@ Shows scheduler type (SLURM, PBS, etc.), binary path, version, and availability 
 Use -p to show per-partition resource limits.
 Use --cpu or --gpu to filter by node type.`,
 	Example: `  condatainer scheduler           # Show scheduler information
-  condatainer scheduler -p        # Show per-partition limits (or use -q for queues)
+  condatainer scheduler -p        # Show per-partition/queue limits
   condatainer scheduler --gpu     # Show only GPU partitions
   condatainer scheduler -p --cpu  # Show per-partition limits for CPU-only partitions`,
 	Run: runScheduler,
@@ -58,7 +58,7 @@ Use --cpu or --gpu to filter by node type.`,
 func init() {
 	rootCmd.AddCommand(schedulerCmd)
 	schedulerCmd.Flags().BoolVarP(&schedulerShowPartitions, "partitions", "p", false, "Show per-partition resource limits")
-	schedulerCmd.Flags().BoolVarP(&schedulerShowQueues, "queue", "q", false, "Show per-queue resource limits (alias for -p)")
+	schedulerCmd.Flags().BoolVarP(&schedulerShowQueues, "queue", "Q", false, "Show per-queue resource limits (alias for -p)")
 	schedulerCmd.Flags().BoolVar(&schedulerShowCpuOnly, "cpu", false, "Show only CPU-only partitions (no GPUs)")
 	schedulerCmd.Flags().BoolVar(&schedulerShowGpuOnly, "gpu", false, "Show only GPU partitions")
 }
