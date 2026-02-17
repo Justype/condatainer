@@ -97,9 +97,48 @@ func loadAllDefLists() map[string]bool {
 	return defList
 }
 
+// overlayPathInImageSearchPaths reports whether overlayPath is located under any configured image search path.
+func overlayPathInImageSearchPaths(overlayPath string) bool {
+	if overlayPath == "" {
+		return false
+	}
+
+	absOverlay, err := filepath.Abs(overlayPath)
+	if err != nil {
+		absOverlay = filepath.Clean(overlayPath)
+	}
+
+	for _, imagesDir := range config.GetImageSearchPaths() {
+		if imagesDir == "" {
+			continue
+		}
+		absDir, err := filepath.Abs(imagesDir)
+		if err != nil {
+			absDir = imagesDir
+		}
+
+		rel, err := filepath.Rel(absDir, absOverlay)
+		if err != nil {
+			continue
+		}
+		// rel == "." means same dir; otherwise ensure overlay is a descendant (not starting with "..")
+		if rel == "." || !strings.HasPrefix(rel, "..") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // UpdateDefBuiltList adds an overlay name to the def list in the same directory as the overlay
 // This should be called after building a .def overlay
 func UpdateDefBuiltList(nameVersion, overlayPath string) {
+	// Only update .def_list when the overlay is inside one of the configured image search paths
+	if !overlayPathInImageSearchPaths(overlayPath) {
+		utils.PrintDebug(".def_list not updated for %s — path %s is not in image search paths", nameVersion, overlayPath)
+		return
+	}
+
 	normalized := utils.NormalizeNameVersion(nameVersion)
 
 	// Get the .def_list path in the same directory as the overlay
@@ -157,6 +196,12 @@ func GetDefBuiltList() map[string]bool {
 // RemoveFromDefBuiltList removes an overlay name from the def list in the same directory as the overlay
 // This should be called after removing a .def overlay
 func RemoveFromDefBuiltList(nameVersion, overlayPath string) {
+	// Only modify .def_list when the overlay is inside one of the configured image search paths
+	if !overlayPathInImageSearchPaths(overlayPath) {
+		utils.PrintDebug(".def_list not modified for %s — path %s is not in image search paths", nameVersion, overlayPath)
+		return
+	}
+
 	normalized := utils.NormalizeNameVersion(nameVersion)
 
 	// Get the .def_list path in the same directory as the overlay
