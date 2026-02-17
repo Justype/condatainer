@@ -53,6 +53,8 @@ case $1 in
     *)              ;;
 esac
 
+# show_and_connect <job_id>
+#   Prints connection info and opens SSH tunnel with port forwarding.
 show_and_connect() {
     local job_id="$1"
     print_info "$HELPER_NAME at ${BLUE}http://localhost:$PORT?folder=$CWD${NC}"

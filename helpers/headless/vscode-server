@@ -85,7 +85,7 @@ fi
 check_port_available "$PORT"
 check_condatainer
 
-# Ensure the VSCode CLI is present
+# Ensure VSCode CLI
 CODE_BIN="$HOME/.local/bin/code"
 if ! [ -f "$CODE_BIN" ]; then
     print_info "VSCode CLI not found. Downloading..."
