@@ -859,7 +859,6 @@ Scripts can use special comment tags to declare dependencies and configure the c
 | `#SBATCH [args]` | SLURM scheduler directives (auto-submit as job) |
 | `#PBS [args]` | PBS scheduler directives (auto-submit as job) |
 | `#BSUB [args]` | LSF scheduler directives (auto-submit as job) |
-| `#CONDOR [args]` | HTCondor scheduler directives (auto-submit as job) |
 
 **Available `#CNT` arguments:**
 
@@ -882,7 +881,7 @@ bcftools view input.vcf | head
 
 ### Scheduler Integration
 
-If your script contains scheduler directives (`#SBATCH`, `#PBS`, `#BSUB`, or `#CONDOR`), `condatainer run` will automatically submit it as a scheduler job instead of running it locally.
+If your script contains scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`), `condatainer run` will automatically submit it as a scheduler job instead of running it locally. HTCondor uses native `.sub` submit files instead of in-script directives.
 
 **Behavior:**
 

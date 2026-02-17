@@ -37,7 +37,7 @@ Located in `build-scripts/` with naming:
 
 Must define an `install()` function. Available vars: `$NCPUS`, `$target_dir`, `$tmp_dir`, `$app_name`, `$version`.
 
-Metadata headers: `#DEP:name/version` (deps), `#SBATCH`/`#PBS`/`#BSUB`/`#CONDOR` (scheduler job params), `#ENV:VAR=$app_root` (env vars), `#INTERACTIVE:prompt` (user input).
+Metadata headers: `#DEP:name/version` (deps), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params), `#ENV:VAR=$app_root` (env vars), `#INTERACTIVE:prompt` (user input). HTCondor uses native `.sub` submit files instead of in-script directives.
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 

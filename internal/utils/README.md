@@ -62,5 +62,5 @@ prompts, err := utils.GetInteractivePromptsFromScript(scriptPath)
 **Scheduler Specs** (from `internal/scheduler`):
 ```go
 specs, err := scheduler.ReadScriptSpecsFromPath(scriptPath)
-// Extracts #SBATCH/#PBS/#BSUB/#CONDOR directives and resource requirements
+// Extracts #SBATCH/#PBS/#BSUB directives and resource requirements (HTCondor uses native .sub files)
 ```
