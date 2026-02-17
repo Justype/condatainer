@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -332,6 +333,21 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	fmt.Fprintln(shWriter, "echo \"========================================\"")
 	fmt.Fprintln(shWriter, "")
 
+	// Export resource variables for use in build scripts
+	fmt.Fprintln(shWriter, "export NNODES=1")
+	fmt.Fprintln(shWriter, "export NTASKS=1")
+	if specs.Ncpus > 0 {
+		fmt.Fprintf(shWriter, "export NCPUS=%d\n", specs.Ncpus)
+	} else {
+		fmt.Fprintln(shWriter, "export NCPUS=1")
+	}
+	if specs.MemMB > 0 {
+		fmt.Fprintf(shWriter, "export MEM=%d\n", specs.MemMB)
+		fmt.Fprintf(shWriter, "export MEM_MB=%d\n", specs.MemMB)
+		fmt.Fprintf(shWriter, "export MEM_GB=%d\n", specs.MemMB/1024)
+	}
+	fmt.Fprintln(shWriter, "")
+
 	// Write the command
 	fmt.Fprintln(shWriter, jobSpec.Command)
 
@@ -430,12 +446,13 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	fmt.Fprintln(subWriter, "")
 	fmt.Fprintln(subWriter, "queue")
 
-	// Self-dispose: the wrapper script removes itself
-	// Re-open the sh file to append self-cleanup
-	shAppend, err := os.OpenFile(shPath, os.O_APPEND|os.O_WRONLY, utils.PermExec)
-	if err == nil {
-		fmt.Fprintf(shAppend, "\n# Self-dispose\nrm -f %s %s\n", shPath, subPath)
-		shAppend.Close()
+	// Self-dispose: the wrapper script removes itself (unless in debug mode)
+	if !config.Global.Debug {
+		shAppend, err := os.OpenFile(shPath, os.O_APPEND|os.O_WRONLY, utils.PermExec)
+		if err == nil {
+			fmt.Fprintf(shAppend, "\n# Self-dispose\nrm -f %s %s\n", shPath, subPath)
+			shAppend.Close()
+		}
 	}
 
 	return subPath, nil
@@ -446,8 +463,8 @@ func (h *HTCondorScheduler) Submit(scriptPath string, dependencyJobIDs []string)
 	// HTCondor does not support simple dependency flags like SLURM/PBS/LSF.
 	// Job dependencies require DAGMan, which is out of scope here.
 	if len(dependencyJobIDs) > 0 {
-		fmt.Printf("[CNT WARN] HTCondor does not support simple job dependencies. " +
-			"Use DAGMan for dependency workflows. Dependencies will be ignored.\n")
+		utils.PrintWarning("HTCondor does not support simple job dependencies. " +
+			"Use DAGMan for dependency workflows. Dependencies will be ignored.")
 	}
 
 	// Execute condor_submit

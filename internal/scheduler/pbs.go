@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -476,6 +477,21 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	// Add blank line
 	fmt.Fprintln(writer, "")
 
+	// Export resource variables for use in build scripts
+	fmt.Fprintf(writer, "export NNODES=%d\n", specs.Nodes)
+	fmt.Fprintf(writer, "export NTASKS=%d\n", specs.Ntasks)
+	if specs.Ncpus > 0 {
+		fmt.Fprintf(writer, "export NCPUS=%d\n", specs.Ncpus)
+	} else {
+		fmt.Fprintln(writer, "export NCPUS=1")
+	}
+	if specs.MemMB > 0 {
+		fmt.Fprintf(writer, "export MEM=%d\n", specs.MemMB)
+		fmt.Fprintf(writer, "export MEM_MB=%d\n", specs.MemMB)
+		fmt.Fprintf(writer, "export MEM_GB=%d\n", specs.MemMB/1024)
+	}
+	fmt.Fprintln(writer, "")
+
 	// Print job information at start
 	fmt.Fprintln(writer, "# Print job information")
 	fmt.Fprintln(writer, "_START_TIME=$SECONDS")
@@ -534,8 +550,10 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	fmt.Fprintf(writer, "%s\n", "echo \"Completed: $(date '+%Y-%m-%d %T')\"")
 	fmt.Fprintln(writer, "echo \"========================================\"")
 
-	// Self-delete the script after execution
-	fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
+	// Self-delete the script after execution (unless in debug mode)
+	if !config.Global.Debug {
+		fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
+	}
 
 	// Make executable
 	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {

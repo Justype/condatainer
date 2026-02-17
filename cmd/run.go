@@ -263,28 +263,23 @@ func runScript(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Check if script has scheduler specs and scheduler is available
-	scriptSpecs, err := scheduler.ReadScriptSpecsFromPath(scriptPath)
-	if err != nil {
-		utils.PrintWarning("Failed to parse scheduler specs: %v", err)
-	}
-
-	// Validate and convert specs if scheduler submission will occur
-	if scriptSpecs != nil && len(scriptSpecs.RawFlags) > 0 && config.Global.SubmitJob && !scheduler.IsInsideJob() {
-		if err := validateAndConvertSpecs(scriptSpecs); err != nil {
-			// Validation failed - don't submit job
-			return nil
+	// Skip scheduler spec parsing if already inside a job or submission is disabled
+	// No point parsing specs if we won't be submitting
+	if !scheduler.IsInsideJob() && config.Global.SubmitJob {
+		// Check if script has scheduler specs and scheduler is available
+		scriptSpecs, err := scheduler.ReadScriptSpecsFromPath(scriptPath)
+		if err != nil {
+			utils.PrintWarning("Failed to parse scheduler specs: %v", err)
 		}
-	}
 
-	// If script has scheduler specs, try to submit as a job
-	if scriptSpecs != nil && len(scriptSpecs.RawFlags) > 0 {
-		// Check if job submission is enabled in config
-		if !config.Global.SubmitJob {
-			utils.PrintNote("Job submission is disabled. Running locally.")
-		} else if scheduler.IsInsideJob() {
-			// Already inside a scheduler job, run locally (silently)
-		} else {
+		// If script has scheduler specs, validate and potentially submit
+		if scheduler.HasSchedulerSpecs(scriptSpecs) {
+			// Validate and convert specs before submission
+			if err := validateAndConvertSpecs(scriptSpecs); err != nil {
+				// Validation failed - don't submit job
+				return nil
+			}
+
 			// Try to detect and use scheduler
 			sched, err := scheduler.DetectScheduler()
 			if err != nil {
@@ -295,10 +290,10 @@ func runScript(cmd *cobra.Command, args []string) error {
 				// Scheduler available - submit job
 				return submitRunJob(sched, scriptPath, originScriptPath, scriptSpecs, buildJobIDs)
 			}
+		} else {
+			// No scheduler specs found - note local execution
+			utils.PrintNote("No scheduler specs found in script. Running locally.")
 		}
-	} else {
-		// No scheduler specs found - explicitly note local execution
-		utils.PrintNote("No scheduler specs found in script. Running locally.")
 	}
 
 	// Prepare execution command

@@ -148,10 +148,7 @@ func (b *BaseBuildObject) TargetOverlayPath() string { return b.targetOverlayPat
 func (b *BaseBuildObject) CntDirPath() string        { return b.cntDirPath }
 func (b *BaseBuildObject) ScriptSpecs() *ScriptSpecs { return b.scriptSpecs }
 func (b *BaseBuildObject) RequiresScheduler() bool {
-	if specs := b.scriptSpecs; specs != nil {
-		return len(specs.RawFlags) > 0
-	}
-	return false
+	return scheduler.HasSchedulerSpecs(b.scriptSpecs)
 }
 
 func (b *BaseBuildObject) IsInstalled() bool {

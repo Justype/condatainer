@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Justype/condatainer/internal/utils"
 )
 
 // SchedulerType represents the type of job scheduler
@@ -81,6 +83,23 @@ type ScriptSpecs struct {
 	EmailOnFail  bool          // Send email when job fails/aborts (SLURM: FAIL, PBS: a)
 	MailUser     string        // Username or email address for notifications (empty = submitting user)
 	RawFlags     []string      // Raw scheduler-specific flags (e.g., #SBATCH, #PBS)
+}
+
+// HasSchedulerSpecs returns true if ScriptSpecs contains meaningful scheduler directives.
+// This is used to determine if a script should be submitted to a scheduler,
+// rather than relying on RawFlags which may be cleared during cross-scheduler translation.
+func HasSchedulerSpecs(specs *ScriptSpecs) bool {
+	if specs == nil {
+		return false
+	}
+	// Check if any scheduler-specific field is set (beyond defaults)
+	return specs.JobName != "" ||
+		specs.Time > 0 ||
+		specs.EmailOnBegin ||
+		specs.EmailOnEnd ||
+		specs.EmailOnFail ||
+		specs.MailUser != "" ||
+		len(specs.RawFlags) > 0
 }
 
 // SpecDefaults holds configurable default values for ScriptSpecs.
@@ -789,8 +808,13 @@ func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 	hostType := DetectType()
 	if hostType != SchedulerUnknown && parsed.ScriptType != hostType {
 		// Log warning about mismatch (the specs will still be used)
-		fmt.Printf("[CNT WARN] Script contains %s directives but host has %s scheduler. "+
-			"Specs will be translated.\n", parsed.ScriptType, hostType)
+		utils.PrintWarning("Script contains %s directives but host has %s scheduler. Specs will be translated.",
+			parsed.ScriptType, hostType)
+
+		// Clear RawFlags when doing cross-scheduler translation
+		// RawFlags contain scheduler-specific syntax that won't work on different schedulers
+		// All necessary info is preserved in the parsed ScriptSpecs fields
+		parsed.Specs.RawFlags = nil
 	}
 
 	return parsed.Specs, nil
