@@ -31,6 +31,38 @@
       "path": "helpers/headless/xfce4"
     }
   },
+  "htcondor": {
+    ".Rprofile": {
+      "path": "helpers/htcondor/.Rprofile"
+    },
+    ".common": {
+      "path": "helpers/htcondor/.common.sh"
+    },
+    "code-server": {
+      "path": "helpers/htcondor/code-server"
+    },
+    "igv": {
+      "path": "helpers/htcondor/igv"
+    },
+    "jupyter": {
+      "path": "helpers/htcondor/jupyter"
+    },
+    "rstudio-server": {
+      "path": "helpers/htcondor/rstudio-server"
+    },
+    "rstudio-server-conda": {
+      "path": "helpers/htcondor/rstudio-server-conda"
+    },
+    "vscode-server": {
+      "path": "helpers/htcondor/vscode-server"
+    },
+    "vscode-tunnel": {
+      "path": "helpers/htcondor/vscode-tunnel"
+    },
+    "xfce4": {
+      "path": "helpers/htcondor/xfce4"
+    }
+  },
   "lsf": {
     ".Rprofile": {
       "path": "helpers/lsf/.Rprofile"
