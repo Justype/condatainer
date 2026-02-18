@@ -514,19 +514,12 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 		specs.Control.JobName = nameWithoutExt
 	}
 
-	// Create job specification (Name used for file naming)
-	absScriptPath, err := filepath.Abs(originScriptPath)
-	if err != nil {
-		absScriptPath = originScriptPath
-	}
 	jobSpec := &scheduler.JobSpec{
 		Name:      fileBaseName,
 		Command:   runCommand,
 		Specs:     specs,
 		DepJobIDs: depIDs,
-		Metadata: map[string]string{
-			"Script": absScriptPath,
-		},
+		Metadata:  map[string]string{},
 	}
 
 	// Create the job script in the same directory as logs
@@ -543,10 +536,16 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 
 	utils.PrintSuccess("Submitted %s job %s for %s", info.Type, utils.StyleNumber(jobID), utils.StylePath(originScriptPath))
 
-	// Show script and log file locations
-	// utils.PrintHint("Job script: %s", utils.StylePath(jobScriptPath))
-	logFile := filepath.Join(logsDir, fmt.Sprintf("%s.log", fileBaseName))
-	utils.PrintHint("Log file: %s", utils.StylePath(logFile))
+	stdoutPath := jobSpec.Specs.Control.Stdout
+	stderrPath := jobSpec.Specs.Control.Stderr
+	if stdoutPath != "" {
+		if stderrPath == "" || stdoutPath == stderrPath {
+			utils.PrintHint("Stdout & Stderr => %s", utils.StylePath(stdoutPath))
+		} else {
+			utils.PrintHint("Stdout => %s", utils.StylePath(stdoutPath))
+			utils.PrintHint("Stderr => %s", utils.StylePath(stderrPath))
+		}
+	}
 
 	return nil
 }

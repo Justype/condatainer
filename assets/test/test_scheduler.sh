@@ -4,7 +4,10 @@ condatainer scheduler | head -7
 
 # Slurm test
 condatainer create grcm39/salmon/1.10.2/gencodeM6
-condatainer run src/run_chain_dep.sh --auto-install # chain dep submit (Slurm)
+# Test
+# 1. chain dep submit (Slurm)
+# 2. output path (current dir)
+condatainer run src/run_chain_dep.sh --auto-install
 condatainer run src/run_chain_external.sh --auto-install # should fail (external img cannot auto-install)
 
 # LSF test (Cross-scheduler test)
