@@ -1,4 +1,5 @@
 #!/bin/bash
+#WHATIS: VS Code server (browser-based)
 # This script helps run vscode-server on current machine.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"

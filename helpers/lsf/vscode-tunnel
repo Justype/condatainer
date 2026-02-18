@@ -1,4 +1,5 @@
 #!/bin/bash
+#WHATIS: VS Code tunnel (no port forwarding needed)
 # This script helps run vscode-tunnel on LSF clusters.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"

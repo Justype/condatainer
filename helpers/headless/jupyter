@@ -1,4 +1,5 @@
 #!/bin/bash
+#WHATIS: Jupyter Notebook / Lab
 # This script helps run Jupyter (Lab or Notebook) on current machine.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"

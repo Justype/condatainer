@@ -1,4 +1,5 @@
 #!/bin/bash
+#WHATIS: RStudio Server with conda overlay
 # This script helps run rstudio-server with conda overlay on LSF clusters.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
