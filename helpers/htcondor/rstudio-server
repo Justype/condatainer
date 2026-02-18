@@ -1,4 +1,5 @@
 #!/bin/bash
+#WHATIS: RStudio Server with R base image
 # This script helps run rstudio-server with r image on HTCondor clusters.
 
 # Use Posit r-base docker image https://hub.docker.com/r/posit/r-base

@@ -1,4 +1,5 @@
 #!/bin/bash
+#WHATIS: open source VS Code (cannot use MS extensions)
 # This script helps run code-server on current machine.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"

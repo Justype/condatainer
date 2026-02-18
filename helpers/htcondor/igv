@@ -1,4 +1,5 @@
 #!/bin/bash
+#WHATIS: Integrative Genomics Viewer (VNC / noVNC)
 # This script helps run an XFCE desktop with IGV launched (noVNC) on HTCondor clusters.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"

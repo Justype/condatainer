@@ -118,6 +118,25 @@ func ParseDuration(s string) (time.Duration, error) {
 	return dur, nil
 }
 
+// GetWhatIsFromScript reads a script and extracts the first #WHATIS: line.
+// Returns the trimmed description string, or empty string if not found.
+func GetWhatIsFromScript(scriptPath string) string {
+	file, err := os.Open(scriptPath)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#WHATIS:") {
+			return strings.TrimSpace(line[len("#WHATIS:"):])
+		}
+	}
+	return ""
+}
+
 // GetDependenciesFromScript parses a build script and extracts dependencies
 // from #DEP: comments and module load commands.
 // Returns a list of normalized dependency names with duplicates removed.

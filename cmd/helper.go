@@ -19,6 +19,7 @@ import (
 
 var (
 	helperPath   bool
+	helperList   bool
 	helperUpdate bool
 )
 
@@ -49,6 +50,7 @@ Note: Helper is not available inside a container or a scheduler job.`,
 func init() {
 	rootCmd.AddCommand(helperCmd)
 	helperCmd.Flags().BoolVar(&helperPath, "path", false, "Show path to helper scripts directory")
+	helperCmd.Flags().BoolVarP(&helperList, "list", "l", false, "List available helper scripts")
 	helperCmd.Flags().BoolVarP(&helperUpdate, "update", "u", false, "Update helper scripts from remote")
 
 	// Stop flag parsing after the first positional argument so script flags (like -p or -v)
@@ -89,12 +91,12 @@ func completeHelperScripts(cmd *cobra.Command, args []string, toComplete string)
 }
 
 func runHelper(cmd *cobra.Command, args []string) error {
-	// Prevent helper commands when inside a container or scheduler job (except --path)
-	if config.IsInsideContainer() && !helperPath {
+	// Prevent helper commands when inside a container or scheduler job (except --path / --list)
+	if config.IsInsideContainer() && !helperPath && !helperList {
 		cmd.SilenceUsage = true
 		ExitWithError("helper commands are not available inside a container")
 	}
-	if scheduler.IsInsideJob() && !helperPath {
+	if scheduler.IsInsideJob() && !helperPath && !helperList {
 		cmd.SilenceUsage = true
 		ExitWithError("helper commands are not available inside a scheduler job")
 	}
@@ -126,6 +128,44 @@ func runHelper(cmd *cobra.Command, args []string) error {
 		// Show writable directory
 		if writableDir, err := config.GetWritableHelperScriptsDir(); err == nil {
 			fmt.Printf("\nWritable directory: %s\n", writableDir)
+		}
+		return nil
+	}
+
+	// --- List Mode ---
+	if helperList {
+		type scriptInfo struct {
+			name   string
+			whatis string
+		}
+		seen := make(map[string]bool)
+		var scripts []scriptInfo
+		maxNameLen := 0
+
+		for _, dir := range config.GetHelperScriptSearchPaths() {
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				continue
+			}
+			for _, entry := range entries {
+				name := entry.Name()
+				if !entry.IsDir() && !strings.HasPrefix(name, ".") && !seen[name] {
+					seen[name] = true
+					whatis := utils.GetWhatIsFromScript(filepath.Join(dir, name))
+					scripts = append(scripts, scriptInfo{name, whatis})
+					if len(name) > maxNameLen {
+						maxNameLen = len(name)
+					}
+				}
+			}
+		}
+
+		for _, s := range scripts {
+			if s.whatis != "" {
+				fmt.Printf("  %-*s  %s\n", maxNameLen, s.name, s.whatis)
+			} else {
+				fmt.Printf("  %s\n", s.name)
+			}
 		}
 		return nil
 	}
