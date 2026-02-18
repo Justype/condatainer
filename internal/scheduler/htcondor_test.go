@@ -883,3 +883,45 @@ queue
 		t.Errorf("RemainingFlags count = %d; want 0 (all flags were recognized)", len(specs.RemainingFlags))
 	}
 }
+
+// TestHTCondorFalsePositiveBashScript verifies that a plain bash build script containing
+// bash variable assignments (e.g. "gencode_version=M6") is NOT misidentified as an
+// HTCondor submit file. HasDirectives must be false so ParseScriptAny does not return
+// the script as HTCondor type.
+func TestHTCondorFalsePositiveBashScript(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Simulate a typical CondaTainer build script with bash key=value assignments
+	// but no valid HTCondor directives.
+	script := `#!/usr/bin/bash
+#DEP:samtools/1.22.1
+#WHATIS:GRCm39 GENCODE M6 transcript FASTA
+#ENV:TRANSCRIPT_FASTA=$app_root/gencode.vM6.transcripts.fa
+
+gencode_version=M6
+reference_index=/opt/references/index
+
+install_app() {
+    cd "$target_dir"
+    wget -nv -O "gencode.v${gencode_version}.transcripts.fa.gz" "https://example.com"
+}
+`
+	// Write with a non-.sub extension (as build scripts always are)
+	scriptPath := filepath.Join(tmpDir, "transcript-gencode-M6")
+	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+		t.Fatalf("Failed to create test script: %v", err)
+	}
+
+	sched := newTestHTCondorScheduler()
+	specs, err := sched.ReadScriptSpecs(scriptPath)
+	if err != nil {
+		t.Fatalf("ReadScriptSpecs failed: %v", err)
+	}
+
+	if specs.HasDirectives {
+		t.Errorf("HasDirectives = true for plain bash script; bash variable assignments must not be treated as HTCondor directives (RawFlags: %v)", specs.RawFlags)
+	}
+	if len(specs.RawFlags) != 0 {
+		t.Errorf("RawFlags = %v; want empty for plain bash script", specs.RawFlags)
+	}
+}

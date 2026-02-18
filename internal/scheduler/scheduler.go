@@ -776,7 +776,10 @@ func ParseScriptAny(scriptPath string) (*ParsedScript, error) {
 		case SchedulerLSF:
 			specs, err = TryParseLsfScript(scriptPath)
 		case SchedulerHTCondor:
-			specs, err = TryParseHTCondorScript(scriptPath)
+			// Only parse as HTCondor if the file has the native .sub extension.
+			if strings.HasSuffix(scriptPath, ".sub") {
+				specs, err = TryParseHTCondorScript(scriptPath)
+			}
 		default:
 			continue
 		}

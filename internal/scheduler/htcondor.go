@@ -134,7 +134,6 @@ func (h *HTCondorScheduler) getHTCondorVersion() (string, error) {
 	return versionStr, nil
 }
 
-
 // ReadScriptSpecs parses an HTCondor submit file (.sub) in native key=value format.
 // The executable line is extracted as the ScriptPath.
 func (h *HTCondorScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) {
@@ -146,7 +145,8 @@ func (h *HTCondorScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, er
 	return parseScript(executable, lines, h.extractDirectives, h.parseRuntimeConfig, h.parseResourceSpec)
 }
 
-// htcondorStructuralKeys are submit file keywords that are not resource/control directives.
+// htcondorStructuralKeys are submit file keywords used by extractHTCondorExecutable
+// to locate the executable line. Not used for directive extraction.
 var htcondorStructuralKeys = map[string]bool{
 	"universe":            true,
 	"executable":          true,
@@ -155,8 +155,22 @@ var htcondorStructuralKeys = map[string]bool{
 	"arguments":           true,
 }
 
+// htcondorKnownKeys is the whitelist of recognized HTCondor submit-file directive keys
+// that carry resource or control information. Structural keys (universe, executable,
+// queue, etc.) are intentionally excluded: they are handled separately by
+// extractHTCondorExecutable and must not appear in the directive list consumed by
+// parseRuntimeConfig / parseResourceSpec.
+var htcondorKnownKeys = map[string]bool{
+	// Runtime config (parseRuntimeConfig)
+	"output": true, "log": true, "error": true,
+	"notify_user": true, "accounting_group": true, "notification": true,
+	// Resource spec (parseResourceSpec)
+	"request_cpus": true, "request_memory": true, "request_gpus": true,
+	"+maxruntime": true,
+}
+
 // extractDirectives parses native HTCondor submit file lines.
-// Comments (#), empty lines, and structural keywords are skipped.
+// Comments (#), empty lines, and lines whose key is not in htcondorKnownKeys are skipped.
 // Returns key=value directive strings for parsing by parseRuntimeConfig and parseResourceSpec.
 func (h *HTCondorScheduler) extractDirectives(lines []string) []string {
 	var out []string
@@ -171,8 +185,8 @@ func (h *HTCondorScheduler) extractDirectives(lines []string) []string {
 		if idx := strings.IndexByte(trimmed, '='); idx >= 0 {
 			key = strings.TrimSpace(trimmed[:idx])
 		}
-		// Skip structural keywords
-		if htcondorStructuralKeys[strings.ToLower(key)] {
+		// Only collect lines with a recognized HTCondor key.
+		if !htcondorKnownKeys[strings.ToLower(key)] {
 			continue
 		}
 		out = append(out, trimmed)
