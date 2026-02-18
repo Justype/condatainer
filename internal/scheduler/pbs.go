@@ -483,7 +483,7 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	}
 
 	// Print job information at start
-	writeJobHeader(writer, "$PBS_JOBID", ctrl.JobName, specs.Spec, formatPbsTime, jobSpec.Metadata)
+	writeJobHeader(writer, "$PBS_JOBID", specs, formatPbsTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
 	// Write the command

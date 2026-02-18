@@ -381,12 +381,12 @@ echo "Running job"
 
 func TestPbsResourceParsing(t *testing.T) {
 	tests := []struct {
-		name          string
-		lines         []string
+		name            string
+		lines           []string
 		wantCpusPerTask int
-		wantMemMB     int64
-		wantTime      time.Duration
-		wantGpu       *GpuSpec
+		wantMemMB       int64
+		wantTime        time.Duration
+		wantGpu         *GpuSpec
 	}{
 		{
 			name: "select format with ncpus, mem",
@@ -395,7 +395,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#PBS -l select=1:ncpus=4:mem=8gb",
 			},
 			wantCpusPerTask: 4,
-			wantMemMB: 8 * 1024,
+			wantMemMB:       8 * 1024,
 		},
 		{
 			name: "walltime only",
@@ -404,7 +404,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#PBS -l walltime=02:30:00",
 			},
 			wantCpusPerTask: 2, // default
-			wantTime:  2*time.Hour + 30*time.Minute,
+			wantTime:        2*time.Hour + 30*time.Minute,
 		},
 		{
 			name: "nodes/ppn format",
@@ -421,8 +421,8 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#PBS -l select=1:ncpus=4:mem=16gb:ngpus=2",
 			},
 			wantCpusPerTask: 4,
-			wantMemMB: 16 * 1024,
-			wantGpu:   &GpuSpec{Type: "gpu", Count: 2, Raw: "ngpus=2"},
+			wantMemMB:       16 * 1024,
+			wantGpu:         &GpuSpec{Type: "gpu", Count: 2, Raw: "ngpus=2"},
 		},
 		{
 			name: "gpus with type on separate line",
@@ -432,7 +432,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#PBS -l gpus=a100:2",
 			},
 			wantCpusPerTask: 4,
-			wantGpu:   &GpuSpec{Type: "a100", Count: 2, Raw: "a100:2"},
+			wantGpu:         &GpuSpec{Type: "a100", Count: 2, Raw: "a100:2"},
 		},
 		{
 			name: "multiple resource lines",
@@ -442,8 +442,8 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#PBS -l walltime=04:00:00",
 			},
 			wantCpusPerTask: 16,
-			wantMemMB: 32 * 1024,
-			wantTime:  4 * time.Hour,
+			wantMemMB:       32 * 1024,
+			wantTime:        4 * time.Hour,
 		},
 		{
 			name: "select with all resources",
@@ -456,9 +456,9 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#PBS -M user@example.com",
 			},
 			wantCpusPerTask: 8,
-			wantMemMB: 64 * 1024,
-			wantTime:  12 * time.Hour,
-			wantGpu:   &GpuSpec{Type: "gpu", Count: 4, Raw: "ngpus=4"},
+			wantMemMB:       64 * 1024,
+			wantTime:        12 * time.Hour,
+			wantGpu:         &GpuSpec{Type: "gpu", Count: 4, Raw: "ngpus=4"},
 		},
 		{
 			name: "memory in mb",
@@ -467,7 +467,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#PBS -l select=1:ncpus=2:mem=4096mb",
 			},
 			wantCpusPerTask: 2,
-			wantMemMB: 4096,
+			wantMemMB:       4096,
 		},
 	}
 

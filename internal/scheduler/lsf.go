@@ -443,7 +443,7 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	}
 
 	// Print job information at start
-	writeJobHeader(writer, "$LSB_JOBID", specs.Control.JobName, specs.Spec, formatLsfTime, jobSpec.Metadata)
+	writeJobHeader(writer, "$LSB_JOBID", specs, formatLsfTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
 	// Write the command
@@ -840,7 +840,7 @@ func (l *LsfScheduler) getAvailableResourcesByQueue() (map[string]ResourceLimits
 
 			if maxCpus > 0 || maxMemMB > 0 {
 				resources[queueName] = ResourceLimits{
-					Partition: queueName,
+					Partition:       queueName,
 					MaxCpusPerNode:  maxCpus,
 					MaxMemMBPerNode: maxMemMB,
 				}

@@ -153,16 +153,29 @@ func writeEnvVars(w io.Writer, rs *ResourceSpec) {
 
 // writeJobHeader writes the job info header echo block to w.
 //
-// jobIDVar is the shell expression for the job ID (e.g. "$SLURM_JOB_ID").
-// Resource lines (Nodes, Tasks, CPUs/Task, Memory, Time) are only written when rs != nil.
-// formatTime formats rs.Time for display; pass nil to skip the Time line.
-func writeJobHeader(w io.Writer, jobIDVar, jobName string, rs *ResourceSpec, formatTime func(time.Duration) string, metadata map[string]string) {
+// - jobIDVar is the shell expression for the job ID (e.g. "$SLURM_JOB_ID").
+//
+// - *ScriptSpecs; resource lines (Nodes, Tasks, CPUs/Task, Memory, Time)
+// are printed only when specs != nil && specs.Spec != nil.
+// specs.ScriptPath is printed when available.
+//
+// - formatTime formats rs.Time for display; pass nil to skip the Time line.
+func writeJobHeader(w io.Writer, jobIDVar string, specs *ScriptSpecs, formatTime func(time.Duration) string, metadata map[string]string) {
 	fmt.Fprintln(w, "# Print job information")
 	fmt.Fprintln(w, "_START_TIME=$SECONDS")
 	fmt.Fprintln(w, "_format_time() { local s=$1; printf '%02d:%02d:%02d' $((s/3600)) $((s%3600/60)) $((s%60)); }")
 	fmt.Fprintln(w, "echo \"========================================\"")
 	fmt.Fprintf(w, "echo \"Job ID:    %s\"\n", jobIDVar)
-	fmt.Fprintf(w, "echo \"Job Name:  %s\"\n", jobName)
+	fmt.Fprintf(w, "echo \"Job Name:  %s\"\n", specs.Control.JobName)
+	if specs != nil && specs.ScriptPath != "" {
+		fmt.Fprintf(w, "echo \"Script:    %s\"\n", specs.ScriptPath)
+	}
+
+	// Extract ResourceSpec (may be nil → passthrough mode)
+	rs := (*ResourceSpec)(nil)
+	if specs != nil {
+		rs = specs.Spec
+	}
 	if rs != nil {
 		nodes := rs.Nodes
 		if nodes <= 0 {

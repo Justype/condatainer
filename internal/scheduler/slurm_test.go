@@ -410,12 +410,12 @@ func TestSlurmCreateScriptUsesOutputDir(t *testing.T) {
 
 func TestSlurmResourceParsing(t *testing.T) {
 	tests := []struct {
-		name          string
-		lines         []string
-		wantCpus      int
-		wantMemMB     int64
-		wantTime      time.Duration
-		wantGpu       *GpuSpec
+		name      string
+		lines     []string
+		wantCpus  int
+		wantMemMB int64
+		wantTime  time.Duration
+		wantGpu   *GpuSpec
 	}{
 		{
 			name: "basic resources",

@@ -441,6 +441,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 }
 
 // CreateScriptWithSpec generates a SLURM batch script
+// Returns the script path or any critical error.
 func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) (string, error) {
 	specs := jobSpec.Specs
 
@@ -556,7 +557,7 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	}
 
 	// Print job information at start
-	writeJobHeader(writer, "$SLURM_JOB_ID", ctrl.JobName, specs.Spec, formatSlurmTimeSpec, jobSpec.Metadata)
+	writeJobHeader(writer, "$SLURM_JOB_ID", specs, formatSlurmTimeSpec, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
 	// Write the command

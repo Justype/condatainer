@@ -146,7 +146,7 @@ func GetSpecDefaults() SpecDefaults {
 
 // JobSpec represents specifications for submitting a batch job
 type JobSpec struct {
-	Name      string            // Job name
+	Name      string            // Job name (for temp and log file naming)
 	Command   string            // Command to execute
 	Specs     *ScriptSpecs      // Job specifications
 	DepJobIDs []string          // Job IDs this job depends on

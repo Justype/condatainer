@@ -383,7 +383,7 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	fmt.Fprintln(shWriter, "")
 
 	// Print job information at start
-	writeJobHeader(shWriter, "$_CONDOR_CLUSTER_ID.$_CONDOR_PROC_ID", specs.Control.JobName, specs.Spec, formatHTCondorTime, jobSpec.Metadata)
+	writeJobHeader(shWriter, "$_CONDOR_CLUSTER_ID.$_CONDOR_PROC_ID", specs, formatHTCondorTime, jobSpec.Metadata)
 	fmt.Fprintln(shWriter, "")
 
 	// Write the command
