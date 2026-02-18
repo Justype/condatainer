@@ -367,15 +367,13 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	// Set log path based on job name
 	if jobSpec.Name != "" {
-		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeName))
+		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeJobName(jobSpec.Name)))
 	}
 
 	// Generate script filename
 	scriptName := "job.lsf"
 	if jobSpec.Name != "" {
-		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		scriptName = fmt.Sprintf("%s.lsf", safeName)
+		scriptName = fmt.Sprintf("%s.lsf", safeJobName(jobSpec.Name))
 	}
 
 	scriptPath := filepath.Join(outputDir, scriptName)
@@ -424,15 +422,10 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	// Resource directives — only when Spec is available
 	if specs.Spec != nil {
-		// Generate CPU count
 		if specs.Spec.CpusPerTask > 0 {
 			fmt.Fprintf(writer, "#BSUB -n %d\n", specs.Spec.CpusPerTask)
 		}
-
-		// Force node allocation via span
 		fmt.Fprintf(writer, "#BSUB -R \"span[hosts=%d]\"\n", specs.Spec.Nodes)
-
-		// Add walltime if specified
 		if specs.Spec.Time > 0 {
 			fmt.Fprintf(writer, "#BSUB -W %s\n", formatLsfTime(specs.Spec.Time))
 		}
@@ -441,78 +434,16 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		}
 	}
 
-	// Add blank line
 	fmt.Fprintln(writer, "")
 
-	// Export resource variables for use in build scripts
+	// Export resource variables for use in build scripts (skipped in passthrough mode)
 	if specs.Spec != nil {
-		fmt.Fprintf(writer, "export NNODES=%d\n", specs.Spec.Nodes)
-		fmt.Fprintf(writer, "export NTASKS=%d\n", specs.Spec.TasksPerNode)
-		if specs.Spec.CpusPerTask > 0 {
-			fmt.Fprintf(writer, "export NCPUS=%d\n", specs.Spec.CpusPerTask)
-		} else {
-			fmt.Fprintln(writer, "export NCPUS=1")
-		}
-		if specs.Spec.MemPerNodeMB > 0 {
-			fmt.Fprintf(writer, "export MEM=%d\n", specs.Spec.MemPerNodeMB)
-			fmt.Fprintf(writer, "export MEM_MB=%d\n", specs.Spec.MemPerNodeMB)
-			fmt.Fprintf(writer, "export MEM_GB=%d\n", specs.Spec.MemPerNodeMB/1024)
-		}
-	} else {
-		fmt.Fprintln(writer, "export NNODES=1")
-		fmt.Fprintln(writer, "export NTASKS=1")
-		fmt.Fprintln(writer, "export NCPUS=1")
+		writeEnvVars(writer, specs.Spec)
+		fmt.Fprintln(writer, "")
 	}
-	fmt.Fprintln(writer, "")
 
 	// Print job information at start
-	fmt.Fprintln(writer, "# Print job information")
-	fmt.Fprintln(writer, "_START_TIME=$SECONDS")
-	fmt.Fprintln(writer, "_format_time() { local s=$1; printf '%02d:%02d:%02d' $((s/3600)) $((s%3600/60)) $((s%60)); }")
-	fmt.Fprintln(writer, "echo \"========================================\"")
-	fmt.Fprintln(writer, "echo \"Job ID:    $LSB_JOBID\"")
-	fmt.Fprintf(writer, "echo \"Job Name:  %s\"\n", specs.Control.JobName)
-	if specs.Spec != nil {
-		if specs.Spec.Nodes > 1 {
-			fmt.Fprintf(writer, "echo \"Nodes:     %d\"\n", specs.Spec.Nodes)
-		}
-		if specs.Spec.TasksPerNode > 1 {
-			fmt.Fprintf(writer, "echo \"Tasks:     %d\"\n", specs.Spec.TasksPerNode)
-		}
-		if specs.Spec.CpusPerTask > 0 {
-			if specs.Spec.TasksPerNode > 1 || specs.Spec.Nodes > 1 {
-				fmt.Fprintf(writer, "echo \"CPUs/Task: %d\"\n", specs.Spec.CpusPerTask)
-			} else {
-				fmt.Fprintf(writer, "echo \"CPUs:      %d\"\n", specs.Spec.CpusPerTask)
-			}
-		}
-		if specs.Spec.MemPerNodeMB > 0 {
-			fmt.Fprintf(writer, "echo \"Memory:    %d MB\"\n", specs.Spec.MemPerNodeMB)
-		}
-		if specs.Spec.Time > 0 {
-			fmt.Fprintf(writer, "echo \"Time:      %s\"\n", formatLsfTime(specs.Spec.Time))
-		}
-	}
-	fmt.Fprintln(writer, "echo \"PWD:       $(pwd)\"")
-	// Print additional metadata if available
-	if len(jobSpec.Metadata) > 0 {
-		// Find max key length for alignment
-		maxLen := 0
-		for key := range jobSpec.Metadata {
-			if len(key) > maxLen {
-				maxLen = len(key)
-			}
-		}
-		// Print each metadata field with proper alignment
-		for key, value := range jobSpec.Metadata {
-			if value != "" {
-				padding := maxLen - len(key)
-				fmt.Fprintf(writer, "echo \"%s:%s %s\"\n", key, strings.Repeat(" ", padding+3), value)
-			}
-		}
-	}
-	fmt.Fprintf(writer, "%s\n", "echo \"Started:   $(date '+%Y-%m-%d %T')\"")
-	fmt.Fprintln(writer, "echo \"========================================\"")
+	writeJobHeader(writer, "$LSB_JOBID", specs.Control.JobName, specs.Spec, formatLsfTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
 	// Write the command
@@ -520,11 +451,7 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	// Print completion info
 	fmt.Fprintln(writer, "")
-	fmt.Fprintln(writer, "echo \"========================================\"")
-	fmt.Fprintln(writer, "echo \"Job ID:    $LSB_JOBID\"")
-	fmt.Fprintln(writer, "echo \"Elapsed:   $(_format_time $(($SECONDS - $_START_TIME)))\"")
-	fmt.Fprintf(writer, "%s\n", "echo \"Completed: $(date '+%Y-%m-%d %T')\"")
-	fmt.Fprintln(writer, "echo \"========================================\"")
+	writeJobFooter(writer, "$LSB_JOBID")
 
 	// Self-delete the script after execution (unless in debug mode)
 	if !config.Global.Debug {

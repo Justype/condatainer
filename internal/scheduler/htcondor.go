@@ -335,18 +335,18 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	}
 
 	// Generate safe name for files
-	safeName := "job"
+	name := "job"
 	if jobSpec.Name != "" {
-		safeName = strings.ReplaceAll(jobSpec.Name, "/", "--")
+		name = safeJobName(jobSpec.Name)
 	}
 
 	// Set log path based on job name
 	if jobSpec.Name != "" {
-		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeName))
+		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", name))
 	}
 
 	// === Create wrapper bash script ===
-	shPath := filepath.Join(outputDir, fmt.Sprintf("%s.sh", safeName))
+	shPath := filepath.Join(outputDir, fmt.Sprintf("%s.sh", name))
 	shFile, err := os.Create(shPath)
 	if err != nil {
 		return "", NewScriptCreationError(jobSpec.Name, shPath, err)
@@ -356,61 +356,20 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	fmt.Fprintln(shWriter, "#!/bin/bash")
 	fmt.Fprintln(shWriter, "")
 
-	// Print job information at start
-	fmt.Fprintln(shWriter, "# Print job information")
-	fmt.Fprintln(shWriter, "_START_TIME=$SECONDS")
-	fmt.Fprintln(shWriter, "_format_time() { local s=$1; printf '%02d:%02d:%02d' $((s/3600)) $((s%3600/60)) $((s%60)); }")
-	fmt.Fprintln(shWriter, "echo \"========================================\"")
-	fmt.Fprintln(shWriter, "echo \"Job ID:    $_CONDOR_CLUSTER_ID.$_CONDOR_PROC_ID\"")
-	fmt.Fprintf(shWriter, "echo \"Job Name:  %s\"\n", specs.Control.JobName)
+	// HTCondor is always single-node; synthesize a ResourceSpec with Nodes=1,
+	// TasksPerNode=1, and copy CpusPerTask/MemPerNodeMB from the actual spec if available.
+	htcRS := &ResourceSpec{Nodes: 1, TasksPerNode: 1}
 	if specs.Spec != nil {
-		if specs.Spec.CpusPerTask > 0 {
-			fmt.Fprintf(shWriter, "echo \"CPUs:      %d\"\n", specs.Spec.CpusPerTask)
-		}
-		if specs.Spec.MemPerNodeMB > 0 {
-			fmt.Fprintf(shWriter, "echo \"Memory:    %d MB\"\n", specs.Spec.MemPerNodeMB)
-		}
-		if specs.Spec.Time > 0 {
-			fmt.Fprintf(shWriter, "echo \"Time:      %s\"\n", formatHTCondorTime(specs.Spec.Time))
-		}
+		htcRS.CpusPerTask = specs.Spec.CpusPerTask
+		htcRS.MemPerNodeMB = specs.Spec.MemPerNodeMB
 	}
-	fmt.Fprintln(shWriter, "echo \"PWD:       $(pwd)\"")
-	// Print additional metadata if available
-	if len(jobSpec.Metadata) > 0 {
-		maxLen := 0
-		for key := range jobSpec.Metadata {
-			if len(key) > maxLen {
-				maxLen = len(key)
-			}
-		}
-		for key, value := range jobSpec.Metadata {
-			if value != "" {
-				padding := maxLen - len(key)
-				fmt.Fprintf(shWriter, "echo \"%s:%s %s\"\n", key, strings.Repeat(" ", padding+3), value)
-			}
-		}
-	}
-	fmt.Fprintf(shWriter, "%s\n", "echo \"Started:   $(date '+%Y-%m-%d %T')\"")
-	fmt.Fprintln(shWriter, "echo \"========================================\"")
-	fmt.Fprintln(shWriter, "")
 
 	// Export resource variables for use in build scripts
-	fmt.Fprintln(shWriter, "export NNODES=1")
-	fmt.Fprintln(shWriter, "export NTASKS=1")
-	if specs.Spec != nil {
-		if specs.Spec.CpusPerTask > 0 {
-			fmt.Fprintf(shWriter, "export NCPUS=%d\n", specs.Spec.CpusPerTask)
-		} else {
-			fmt.Fprintln(shWriter, "export NCPUS=1")
-		}
-		if specs.Spec.MemPerNodeMB > 0 {
-			fmt.Fprintf(shWriter, "export MEM=%d\n", specs.Spec.MemPerNodeMB)
-			fmt.Fprintf(shWriter, "export MEM_MB=%d\n", specs.Spec.MemPerNodeMB)
-			fmt.Fprintf(shWriter, "export MEM_GB=%d\n", specs.Spec.MemPerNodeMB/1024)
-		}
-	} else {
-		fmt.Fprintln(shWriter, "export NCPUS=1")
-	}
+	writeEnvVars(shWriter, htcRS)
+	fmt.Fprintln(shWriter, "")
+
+	// Print job information at start
+	writeJobHeader(shWriter, "$_CONDOR_CLUSTER_ID.$_CONDOR_PROC_ID", specs.Control.JobName, specs.Spec, formatHTCondorTime, jobSpec.Metadata)
 	fmt.Fprintln(shWriter, "")
 
 	// Write the command
@@ -418,11 +377,7 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 
 	// Print completion info
 	fmt.Fprintln(shWriter, "")
-	fmt.Fprintln(shWriter, "echo \"========================================\"")
-	fmt.Fprintln(shWriter, "echo \"Job ID:    $_CONDOR_CLUSTER_ID.$_CONDOR_PROC_ID\"")
-	fmt.Fprintln(shWriter, "echo \"Elapsed:   $(_format_time $(($SECONDS - $_START_TIME)))\"")
-	fmt.Fprintf(shWriter, "%s\n", "echo \"Completed: $(date '+%Y-%m-%d %T')\"")
-	fmt.Fprintln(shWriter, "echo \"========================================\"")
+	writeJobFooter(shWriter, "$_CONDOR_CLUSTER_ID.$_CONDOR_PROC_ID")
 
 	shWriter.Flush()
 	shFile.Close()
@@ -432,7 +387,7 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	}
 
 	// === Create HTCondor submit file ===
-	subPath := filepath.Join(outputDir, fmt.Sprintf("%s.sub", safeName))
+	subPath := filepath.Join(outputDir, fmt.Sprintf("%s.sub", name))
 	subFile, err := os.Create(subPath)
 	if err != nil {
 		return "", NewScriptCreationError(jobSpec.Name, subPath, err)
@@ -466,9 +421,9 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	if specs.Control.Stdout != "" {
 		fmt.Fprintf(subWriter, "output = %s\n", specs.Control.Stdout)
 	}
-	errPath := filepath.Join(outputDir, fmt.Sprintf("%s.err", safeName))
+	errPath := filepath.Join(outputDir, fmt.Sprintf("%s.err", name))
 	fmt.Fprintf(subWriter, "error = %s\n", errPath)
-	condorLogPath := filepath.Join(outputDir, fmt.Sprintf("%s.condor.log", safeName))
+	condorLogPath := filepath.Join(outputDir, fmt.Sprintf("%s.condor.log", name))
 	fmt.Fprintf(subWriter, "log = %s\n", condorLogPath)
 
 	// Resource directives -- only when Spec is available

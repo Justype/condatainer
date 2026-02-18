@@ -379,16 +379,13 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	// Set log path based on job name (logs go to outputDir, which caller controls)
 	if jobSpec.Name != "" {
-		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeName))
+		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeJobName(jobSpec.Name)))
 	}
 
 	// Generate script filename
 	scriptName := "job.pbs"
 	if jobSpec.Name != "" {
-		// Replace slashes with -- to avoid creating subdirectories
-		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		scriptName = fmt.Sprintf("%s.pbs", safeName)
+		scriptName = fmt.Sprintf("%s.pbs", safeJobName(jobSpec.Name))
 	}
 
 	scriptPath := filepath.Join(outputDir, scriptName)
@@ -424,48 +421,35 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	}
 
 	// Write ResourceSpec directives (only if not in passthrough mode)
-	nodes := 1
-	tasksPerNode := 1
-	cpusPerTask := 0
-	var memPerNodeMB int64
-	var jobTime time.Duration
-
 	if specs.Spec != nil {
 		rs := specs.Spec
-		nodes = rs.Nodes
+		nodes := rs.Nodes
 		if nodes <= 0 {
 			nodes = 1
 		}
-		tasksPerNode = rs.TasksPerNode
+		tasksPerNode := rs.TasksPerNode
 		if tasksPerNode <= 0 {
 			tasksPerNode = 1
 		}
-		cpusPerTask = rs.CpusPerTask
-		memPerNodeMB = rs.MemPerNodeMB
-		jobTime = rs.Time
 
 		// Generate resource specification: select=N:ncpus=M[:mpiprocs=P][:mem=Xmb][:ngpus=G]
 		selectParts := []string{fmt.Sprintf("select=%d", nodes)}
-		if cpusPerTask > 0 {
-			selectParts = append(selectParts, fmt.Sprintf("ncpus=%d", cpusPerTask))
+		if rs.CpusPerTask > 0 {
+			selectParts = append(selectParts, fmt.Sprintf("ncpus=%d", rs.CpusPerTask))
 		}
 		if tasksPerNode > 1 {
 			selectParts = append(selectParts, fmt.Sprintf("mpiprocs=%d", tasksPerNode))
 		}
-		if memPerNodeMB > 0 {
-			selectParts = append(selectParts, fmt.Sprintf("mem=%dmb", memPerNodeMB))
+		if rs.MemPerNodeMB > 0 {
+			selectParts = append(selectParts, fmt.Sprintf("mem=%dmb", rs.MemPerNodeMB))
 		}
 		if rs.Gpu != nil && rs.Gpu.Count > 0 {
 			selectParts = append(selectParts, fmt.Sprintf("ngpus=%d", rs.Gpu.Count))
 		}
 		fmt.Fprintf(writer, "#PBS -l %s\n", strings.Join(selectParts, ":"))
 
-		// Generate walltime
-		if jobTime > 0 {
-			hours := int(jobTime.Hours())
-			mins := int(jobTime.Minutes()) % 60
-			secs := int(jobTime.Seconds()) % 60
-			fmt.Fprintf(writer, "#PBS -l walltime=%02d:%02d:%02d\n", hours, mins, secs)
+		if rs.Time > 0 {
+			fmt.Fprintf(writer, "#PBS -l walltime=%s\n", formatPbsTime(rs.Time))
 		}
 		if rs.Exclusive {
 			fmt.Fprintln(writer, "#PBS -l place=excl")
@@ -490,70 +474,16 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		fmt.Fprintf(writer, "#PBS -M %s\n", ctrl.MailUser)
 	}
 
-	// Add blank line
 	fmt.Fprintln(writer, "")
 
-	// Export resource variables for use in build scripts
-	totalNtasks := tasksPerNode * nodes
-	fmt.Fprintf(writer, "export NNODES=%d\n", nodes)
-	fmt.Fprintf(writer, "export NTASKS=%d\n", totalNtasks)
-	if cpusPerTask > 0 {
-		fmt.Fprintf(writer, "export NCPUS=%d\n", cpusPerTask)
-	} else {
-		fmt.Fprintln(writer, "export NCPUS=1")
+	// Export resource variables for use in build scripts (skipped in passthrough mode)
+	if specs.Spec != nil {
+		writeEnvVars(writer, specs.Spec)
+		fmt.Fprintln(writer, "")
 	}
-	if memPerNodeMB > 0 {
-		fmt.Fprintf(writer, "export MEM=%d\n", memPerNodeMB)
-		fmt.Fprintf(writer, "export MEM_MB=%d\n", memPerNodeMB)
-		fmt.Fprintf(writer, "export MEM_GB=%d\n", memPerNodeMB/1024)
-	}
-	fmt.Fprintln(writer, "")
 
 	// Print job information at start
-	fmt.Fprintln(writer, "# Print job information")
-	fmt.Fprintln(writer, "_START_TIME=$SECONDS")
-	fmt.Fprintln(writer, "_format_time() { local s=$1; printf '%02d:%02d:%02d' $((s/3600)) $((s%3600/60)) $((s%60)); }")
-	fmt.Fprintln(writer, "echo \"========================================\"")
-	fmt.Fprintln(writer, "echo \"Job ID:    $PBS_JOBID\"")
-	fmt.Fprintf(writer, "echo \"Job Name:  %s\"\n", ctrl.JobName)
-	if nodes > 1 {
-		fmt.Fprintf(writer, "echo \"Nodes:     %d\"\n", nodes)
-	}
-	if totalNtasks > 1 {
-		fmt.Fprintf(writer, "echo \"Tasks:     %d\"\n", totalNtasks)
-	}
-	if cpusPerTask > 0 {
-		fmt.Fprintf(writer, "echo \"CPUs/Task: %d\"\n", cpusPerTask)
-	}
-	if memPerNodeMB > 0 {
-		fmt.Fprintf(writer, "echo \"Memory:    %d MB\"\n", memPerNodeMB)
-	}
-	if jobTime > 0 {
-		hours := int(jobTime.Hours())
-		mins := int(jobTime.Minutes()) % 60
-		secs := int(jobTime.Seconds()) % 60
-		fmt.Fprintf(writer, "echo \"Time:      %02d:%02d:%02d\"\n", hours, mins, secs)
-	}
-	fmt.Fprintln(writer, "echo \"PWD:       $(pwd)\"")
-	// Print additional metadata if available
-	if len(jobSpec.Metadata) > 0 {
-		// Find max key length for alignment
-		maxLen := 0
-		for key := range jobSpec.Metadata {
-			if len(key) > maxLen {
-				maxLen = len(key)
-			}
-		}
-		// Print each metadata field with proper alignment
-		for key, value := range jobSpec.Metadata {
-			if value != "" {
-				padding := maxLen - len(key)
-				fmt.Fprintf(writer, "echo \"%s:%s %s\"\n", key, strings.Repeat(" ", padding+3), value)
-			}
-		}
-	}
-	fmt.Fprintf(writer, "%s\n", "echo \"Started:   $(date '+%Y-%m-%d %T')\"")
-	fmt.Fprintln(writer, "echo \"========================================\"")
+	writeJobHeader(writer, "$PBS_JOBID", ctrl.JobName, specs.Spec, formatPbsTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
 	// Write the command
@@ -561,11 +491,7 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	// Print completion info
 	fmt.Fprintln(writer, "")
-	fmt.Fprintln(writer, "echo \"========================================\"")
-	fmt.Fprintln(writer, "echo \"Job ID:    $PBS_JOBID\"")
-	fmt.Fprintln(writer, "echo \"Elapsed:   $(_format_time $(($SECONDS - $_START_TIME)))\"")
-	fmt.Fprintf(writer, "%s\n", "echo \"Completed: $(date '+%Y-%m-%d %T')\"")
-	fmt.Fprintln(writer, "echo \"========================================\"")
+	writeJobFooter(writer, "$PBS_JOBID")
 
 	// Self-delete the script after execution (unless in debug mode)
 	if !config.Global.Debug {
@@ -1125,6 +1051,15 @@ func parsePbsTime(timeStr string) (time.Duration, error) {
 
 	totalSeconds := hours*3600 + minutes*60 + seconds
 	return time.Duration(totalSeconds) * time.Second, nil
+}
+
+// formatPbsTime formats a Duration as "HH:MM:SS" for PBS walltime directives and display.
+func formatPbsTime(d time.Duration) string {
+	total := int64(d.Seconds())
+	hours := total / 3600
+	mins := (total % 3600) / 60
+	secs := total % 60
+	return fmt.Sprintf("%02d:%02d:%02d", hours, mins, secs)
 }
 
 // parseGpuString parses GPU specifications from various formats

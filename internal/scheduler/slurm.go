@@ -453,15 +453,13 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 
 	// Set log path based on job name (logs go to outputDir, which caller controls)
 	if jobSpec.Name != "" {
-		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeName))
+		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeJobName(jobSpec.Name)))
 	}
 
 	// Generate script filename
 	scriptName := "job.sbatch"
 	if jobSpec.Name != "" {
-		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		scriptName = fmt.Sprintf("%s.sbatch", safeName)
+		scriptName = fmt.Sprintf("%s.sbatch", safeJobName(jobSpec.Name))
 	}
 
 	scriptPath := filepath.Join(outputDir, scriptName)
@@ -516,37 +514,26 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	}
 
 	// Write ResourceSpec directives (only if not in passthrough mode)
-	nodes := 1
-	tasksPerNode := 1
-	cpusPerTask := 0
-	var memPerNodeMB int64
-	var jobTime time.Duration
-
 	if specs.Spec != nil {
 		rs := specs.Spec
-		nodes = rs.Nodes
+		nodes := rs.Nodes
 		if nodes <= 0 {
 			nodes = 1
 		}
-		tasksPerNode = rs.TasksPerNode
+		tasksPerNode := rs.TasksPerNode
 		if tasksPerNode <= 0 {
 			tasksPerNode = 1
 		}
-		cpusPerTask = rs.CpusPerTask
-		memPerNodeMB = rs.MemPerNodeMB
-		jobTime = rs.Time
-
-		totalNtasks := tasksPerNode * nodes
 		fmt.Fprintf(writer, "#SBATCH --nodes=%d\n", nodes)
-		fmt.Fprintf(writer, "#SBATCH --ntasks=%d\n", totalNtasks)
-		if cpusPerTask > 0 {
-			fmt.Fprintf(writer, "#SBATCH --cpus-per-task=%d\n", cpusPerTask)
+		fmt.Fprintf(writer, "#SBATCH --ntasks=%d\n", nodes*tasksPerNode)
+		if rs.CpusPerTask > 0 {
+			fmt.Fprintf(writer, "#SBATCH --cpus-per-task=%d\n", rs.CpusPerTask)
 		}
-		if memPerNodeMB > 0 {
-			fmt.Fprintf(writer, "#SBATCH --mem=%dmb\n", memPerNodeMB)
+		if rs.MemPerNodeMB > 0 {
+			fmt.Fprintf(writer, "#SBATCH --mem=%dmb\n", rs.MemPerNodeMB)
 		}
-		if jobTime > 0 {
-			fmt.Fprintf(writer, "#SBATCH --time=%s\n", formatSlurmTimeSpec(jobTime))
+		if rs.Time > 0 {
+			fmt.Fprintf(writer, "#SBATCH --time=%s\n", formatSlurmTimeSpec(rs.Time))
 		}
 		if rs.Gpu != nil && rs.Gpu.Count > 0 {
 			if rs.Gpu.Type != "" && rs.Gpu.Type != "gpu" {
@@ -560,64 +547,16 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 		}
 	}
 
-	// Add blank line
 	fmt.Fprintln(writer, "")
 
-	// Export resource variables for use in build scripts
-	fmt.Fprintf(writer, "export NNODES=%d\n", nodes)
-	fmt.Fprintf(writer, "export NTASKS=%d\n", tasksPerNode*nodes)
-	if cpusPerTask > 0 {
-		fmt.Fprintf(writer, "export NCPUS=%d\n", cpusPerTask)
-	} else {
-		fmt.Fprintln(writer, "export NCPUS=1")
+	// Export resource variables for use in build scripts (skipped in passthrough mode)
+	if specs.Spec != nil {
+		writeEnvVars(writer, specs.Spec)
+		fmt.Fprintln(writer, "")
 	}
-	if memPerNodeMB > 0 {
-		fmt.Fprintf(writer, "export MEM=%d\n", memPerNodeMB)
-		fmt.Fprintf(writer, "export MEM_MB=%d\n", memPerNodeMB)
-		fmt.Fprintf(writer, "export MEM_GB=%d\n", memPerNodeMB/1024)
-	}
-	fmt.Fprintln(writer, "")
 
 	// Print job information at start
-	fmt.Fprintln(writer, "# Print job information")
-	fmt.Fprintln(writer, "_START_TIME=$SECONDS")
-	fmt.Fprintln(writer, "_format_time() { local s=$1; printf '%02d:%02d:%02d' $((s/3600)) $((s%3600/60)) $((s%60)); }")
-	fmt.Fprintln(writer, "echo \"========================================\"")
-	fmt.Fprintln(writer, "echo \"Job ID:    $SLURM_JOB_ID\"")
-	fmt.Fprintf(writer, "echo \"Job Name:  %s\"\n", ctrl.JobName)
-	if nodes > 1 {
-		fmt.Fprintf(writer, "echo \"Nodes:     %d\"\n", nodes)
-	}
-	if tasksPerNode*nodes > 1 {
-		fmt.Fprintf(writer, "echo \"Tasks:     %d\"\n", tasksPerNode*nodes)
-	}
-	if cpusPerTask > 0 {
-		fmt.Fprintf(writer, "echo \"CPUs/Task: %d\"\n", cpusPerTask)
-	}
-	if memPerNodeMB > 0 {
-		fmt.Fprintf(writer, "echo \"Memory:    %d MB\"\n", memPerNodeMB)
-	}
-	if jobTime > 0 {
-		fmt.Fprintf(writer, "echo \"Time:      %s\"\n", formatSlurmTimeSpec(jobTime))
-	}
-	fmt.Fprintln(writer, "echo \"PWD:       $(pwd)\"")
-	// Print additional metadata if available
-	if len(jobSpec.Metadata) > 0 {
-		maxLen := 0
-		for key := range jobSpec.Metadata {
-			if len(key) > maxLen {
-				maxLen = len(key)
-			}
-		}
-		for key, value := range jobSpec.Metadata {
-			if value != "" {
-				padding := maxLen - len(key)
-				fmt.Fprintf(writer, "echo \"%s:%s %s\"\n", key, strings.Repeat(" ", padding+3), value)
-			}
-		}
-	}
-	fmt.Fprintf(writer, "%s\n", "echo \"Started:   $(date '+%Y-%m-%d %T')\"")
-	fmt.Fprintln(writer, "echo \"========================================\"")
+	writeJobHeader(writer, "$SLURM_JOB_ID", ctrl.JobName, specs.Spec, formatSlurmTimeSpec, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
 	// Write the command
@@ -625,11 +564,7 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 
 	// Print completion info
 	fmt.Fprintln(writer, "")
-	fmt.Fprintln(writer, "echo \"========================================\"")
-	fmt.Fprintln(writer, "echo \"Job ID:    $SLURM_JOB_ID\"")
-	fmt.Fprintln(writer, "echo \"Elapsed:   $(_format_time $(($SECONDS - $_START_TIME)))\"")
-	fmt.Fprintf(writer, "%s\n", "echo \"Completed: $(date '+%Y-%m-%d %T')\"")
-	fmt.Fprintln(writer, "echo \"========================================\"")
+	writeJobFooter(writer, "$SLURM_JOB_ID")
 
 	// Self-dispose: remove this script file (unless in debug mode)
 	if !config.Global.Debug {
