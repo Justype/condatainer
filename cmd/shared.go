@@ -67,7 +67,7 @@ const (
 	// Generic error code
 	ExitCodeError = 1
 	// Returned when jobs were submitted to a scheduler (overlays will be created asynchronously)
-	ExitCodeJobsSubmitted = 2
+	ExitCodeJobsSubmitted = 3
 )
 
 // ExitIfJobsSubmitted exits the process with ExitCodeJobsSubmitted if a scheduler

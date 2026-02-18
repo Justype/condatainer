@@ -925,9 +925,9 @@ CondaTainer uses specific exit codes so automation and downstream tooling can de
 
 - `0` — Success (all requested builds completed locally or nothing to do)
 - `1` — Generic error (invalid arguments, build failures, or other fatal errors)
-- `2` — **Jobs submitted to scheduler** — overlays will be created asynchronously by scheduler jobs
+- `3` — **Jobs submitted to scheduler** — overlays will be created asynchronously by scheduler jobs
 
-Commands that may return exit code `2` when scheduler jobs were submitted include:
+Commands that may return exit code `3` when scheduler jobs were submitted include:
 
 - `condatainer create ...`
 - `condatainer check -a ...` (auto-install missing deps)
@@ -937,13 +937,13 @@ Quick example for shell scripts that detect the job-submitted state:
 
 ```bash
 condatainer create samtools/1.22
-if [ $? -eq 2 ]; then
+if [ $? -eq 3 ]; then
   echo "Jobs submitted to scheduler — overlays will be created asynchronously"
   # Optionally: exit 0 or wait/monitor jobs here
 fi
 ```
 
-Note: When exit code `2` is returned, CondaTainer prints a message showing the number of jobs submitted (and can be extended to emit JSON or write job metadata for automation).
+Note: When exit code `3` is returned, CondaTainer prints a message showing the number of jobs submitted (and can be extended to emit JSON or write job metadata for automation).
 
 **Disabling Job Submission:**
 
