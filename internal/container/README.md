@@ -131,9 +131,18 @@ Loaded automatically and merged into final environment list.
 - `LC_ALL=C.UTF-8`, `LANG=C.UTF-8`
 - `CURL_CA_BUNDLE=`, `SSL_CERT_FILE=` (unset to avoid host interference)
 
-## Bind Path Deduplication
+## Automatic Bind Paths
 
-Removes conflicting bind paths:
+`BindPaths()` in `bind.go` collects bind mounts automatically before the user-specified paths are appended:
+
+| Source | Condition |
+|--------|-----------|
+| Current working directory | Always |
+| `$SCRATCH` | When env var is set |
+| Base data directories | From config; added `:ro` if not writable |
+| `condatainer` executable | For nested calls (non-portable installs only) |
+
+After collection, `DeduplicateBindPaths()` removes conflicting bind paths:
 - Keeps longest/most specific paths
 - Removes parent paths when child is bound
 - Example: `/home/user/data` removes `/home/user`

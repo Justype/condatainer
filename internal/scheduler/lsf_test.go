@@ -32,8 +32,8 @@ func TestLsfCreateScriptUsesOutputDir(t *testing.T) {
 		Name:    "lsftest/job",
 		Command: "echo 'hello'",
 		Specs: &ScriptSpecs{
-			RawFlags: []string{},
-			Ncpus:    1,
+			RemainingFlags: []string{},
+			Spec:           &ResourceSpec{CpusPerTask: 1},
 		},
 	}
 
@@ -149,17 +149,17 @@ func TestLsfEmailParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
-			if specs.EmailOnBegin != tt.wantBegin {
-				t.Errorf("EmailOnBegin = %v; want %v", specs.EmailOnBegin, tt.wantBegin)
+			if specs.Control.EmailOnBegin != tt.wantBegin {
+				t.Errorf("EmailOnBegin = %v; want %v", specs.Control.EmailOnBegin, tt.wantBegin)
 			}
-			if specs.EmailOnEnd != tt.wantEnd {
-				t.Errorf("EmailOnEnd = %v; want %v", specs.EmailOnEnd, tt.wantEnd)
+			if specs.Control.EmailOnEnd != tt.wantEnd {
+				t.Errorf("EmailOnEnd = %v; want %v", specs.Control.EmailOnEnd, tt.wantEnd)
 			}
-			if specs.EmailOnFail != tt.wantFail {
-				t.Errorf("EmailOnFail = %v; want %v", specs.EmailOnFail, tt.wantFail)
+			if specs.Control.EmailOnFail != tt.wantFail {
+				t.Errorf("EmailOnFail = %v; want %v", specs.Control.EmailOnFail, tt.wantFail)
 			}
-			if specs.MailUser != tt.wantMailUser {
-				t.Errorf("MailUser = %q; want %q", specs.MailUser, tt.wantMailUser)
+			if specs.Control.MailUser != tt.wantMailUser {
+				t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, tt.wantMailUser)
 			}
 		})
 	}
@@ -220,14 +220,18 @@ func TestLsfEmailScriptGeneration(t *testing.T) {
 				Name:    "test_job",
 				Command: "echo 'test'",
 				Specs: &ScriptSpecs{
-					JobName:      "test_job",
-					Ncpus:        4,
-					MemMB:        8000,
-					Time:         time.Hour,
-					EmailOnBegin: tt.emailOnBegin,
-					EmailOnEnd:   tt.emailOnEnd,
-					MailUser:     tt.mailUser,
-					RawFlags:     []string{},
+					Control: RuntimeConfig{
+						JobName:      "test_job",
+						EmailOnBegin: tt.emailOnBegin,
+						EmailOnEnd:   tt.emailOnEnd,
+						MailUser:     tt.mailUser,
+					},
+					Spec: &ResourceSpec{
+						CpusPerTask:  4,
+						MemPerNodeMB: 8000,
+						Time:         time.Hour,
+					},
+					RemainingFlags: []string{},
 				},
 			}
 
@@ -307,18 +311,21 @@ echo "Running job"
 	}
 
 	// Verify parsing
-	if !specs.EmailOnBegin || !specs.EmailOnEnd {
+	if !specs.Control.EmailOnBegin || !specs.Control.EmailOnEnd {
 		t.Errorf("Parsing failed: EmailOnBegin=%v, EmailOnEnd=%v",
-			specs.EmailOnBegin, specs.EmailOnEnd)
+			specs.Control.EmailOnBegin, specs.Control.EmailOnEnd)
 	}
-	if specs.MailUser != "roundtrip@example.com" {
-		t.Errorf("MailUser = %q; want %q", specs.MailUser, "roundtrip@example.com")
+	if specs.Control.MailUser != "roundtrip@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, "roundtrip@example.com")
 	}
-	if specs.Time != 2*time.Hour {
-		t.Errorf("Time = %v; want 2h", specs.Time)
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil; want non-nil")
 	}
-	if specs.Ncpus != 8 {
-		t.Errorf("Ncpus = %d; want 8", specs.Ncpus)
+	if specs.Spec.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
+	}
+	if specs.Spec.CpusPerTask != 8 {
+		t.Errorf("CpusPerTask = %d; want 8", specs.Spec.CpusPerTask)
 	}
 
 	// Generate a new script from the parsed specs
@@ -496,27 +503,30 @@ func TestLsfResourceParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
-			if specs.Ncpus != tt.wantNcpus {
-				t.Errorf("Ncpus = %d; want %d", specs.Ncpus, tt.wantNcpus)
+			if specs.Spec == nil {
+				t.Fatal("Spec is nil; want non-nil")
 			}
-			if tt.wantMemMB > 0 && specs.MemMB != tt.wantMemMB {
-				t.Errorf("MemMB = %d; want %d", specs.MemMB, tt.wantMemMB)
+			if specs.Spec.CpusPerTask != tt.wantNcpus {
+				t.Errorf("CpusPerTask = %d; want %d", specs.Spec.CpusPerTask, tt.wantNcpus)
 			}
-			if tt.wantTime > 0 && specs.Time != tt.wantTime {
-				t.Errorf("Time = %v; want %v", specs.Time, tt.wantTime)
+			if tt.wantMemMB > 0 && specs.Spec.MemPerNodeMB != tt.wantMemMB {
+				t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, tt.wantMemMB)
+			}
+			if tt.wantTime > 0 && specs.Spec.Time != tt.wantTime {
+				t.Errorf("Time = %v; want %v", specs.Spec.Time, tt.wantTime)
 			}
 			if tt.wantGpu != nil {
-				if specs.Gpu == nil {
+				if specs.Spec.Gpu == nil {
 					t.Fatal("Gpu is nil; want non-nil")
 				}
-				if specs.Gpu.Type != tt.wantGpu.Type {
-					t.Errorf("Gpu.Type = %q; want %q", specs.Gpu.Type, tt.wantGpu.Type)
+				if specs.Spec.Gpu.Type != tt.wantGpu.Type {
+					t.Errorf("Gpu.Type = %q; want %q", specs.Spec.Gpu.Type, tt.wantGpu.Type)
 				}
-				if specs.Gpu.Count != tt.wantGpu.Count {
-					t.Errorf("Gpu.Count = %d; want %d", specs.Gpu.Count, tt.wantGpu.Count)
+				if specs.Spec.Gpu.Count != tt.wantGpu.Count {
+					t.Errorf("Gpu.Count = %d; want %d", specs.Spec.Gpu.Count, tt.wantGpu.Count)
 				}
-			} else if specs.Gpu != nil {
-				t.Errorf("Gpu = %+v; want nil", specs.Gpu)
+			} else if specs.Spec.Gpu != nil {
+				t.Errorf("Gpu = %+v; want nil", specs.Spec.Gpu)
 			}
 		})
 	}
@@ -749,21 +759,24 @@ func TestLsfRusageParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
-			if tt.wantMemMB > 0 && specs.MemMB != tt.wantMemMB {
-				t.Errorf("MemMB = %d; want %d", specs.MemMB, tt.wantMemMB)
+			if specs.Spec == nil {
+				t.Fatal("Spec is nil; want non-nil")
+			}
+			if tt.wantMemMB > 0 && specs.Spec.MemPerNodeMB != tt.wantMemMB {
+				t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, tt.wantMemMB)
 			}
 			if tt.wantGpu != nil {
-				if specs.Gpu == nil {
+				if specs.Spec.Gpu == nil {
 					t.Fatal("Gpu is nil; want non-nil")
 				}
-				if specs.Gpu.Type != tt.wantGpu.Type {
-					t.Errorf("Gpu.Type = %q; want %q", specs.Gpu.Type, tt.wantGpu.Type)
+				if specs.Spec.Gpu.Type != tt.wantGpu.Type {
+					t.Errorf("Gpu.Type = %q; want %q", specs.Spec.Gpu.Type, tt.wantGpu.Type)
 				}
-				if specs.Gpu.Count != tt.wantGpu.Count {
-					t.Errorf("Gpu.Count = %d; want %d", specs.Gpu.Count, tt.wantGpu.Count)
+				if specs.Spec.Gpu.Count != tt.wantGpu.Count {
+					t.Errorf("Gpu.Count = %d; want %d", specs.Spec.Gpu.Count, tt.wantGpu.Count)
 				}
-			} else if specs.Gpu != nil {
-				t.Errorf("Gpu = %+v; want nil", specs.Gpu)
+			} else if specs.Spec.Gpu != nil {
+				t.Errorf("Gpu = %+v; want nil", specs.Spec.Gpu)
 			}
 		})
 	}
@@ -837,12 +850,15 @@ func TestLsfSpanHostsParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
-			if specs.Nodes != tt.wantNodes {
-				t.Errorf("Nodes = %d; want %d", specs.Nodes, tt.wantNodes)
+			if specs.Spec == nil {
+				t.Fatal("Spec is nil; want non-nil")
 			}
-			// Ntasks should always be 1 (default) for LSF
-			if specs.Ntasks != 1 {
-				t.Errorf("Ntasks = %d; want 1", specs.Ntasks)
+			if specs.Spec.Nodes != tt.wantNodes {
+				t.Errorf("Nodes = %d; want %d", specs.Spec.Nodes, tt.wantNodes)
+			}
+			// TasksPerNode should always be 1 (default) for LSF
+			if specs.Spec.TasksPerNode != 1 {
+				t.Errorf("TasksPerNode = %d; want 1", specs.Spec.TasksPerNode)
 			}
 		})
 	}
@@ -858,8 +874,8 @@ func TestLsfScriptGenerationNodesCpus(t *testing.T) {
 		{
 			name: "default single node",
 			specs: &ScriptSpecs{
-				Ncpus:    4,
-				RawFlags: []string{},
+				Spec:           &ResourceSpec{CpusPerTask: 4},
+				RemainingFlags: []string{},
 			},
 			wantSpanHost: `span[hosts=1]`,
 			wantNcpus:    "#BSUB -n 4",
@@ -867,9 +883,8 @@ func TestLsfScriptGenerationNodesCpus(t *testing.T) {
 		{
 			name: "multi-node",
 			specs: &ScriptSpecs{
-				Ncpus:    8,
-				Nodes:    2,
-				RawFlags: []string{},
+				Spec:           &ResourceSpec{CpusPerTask: 8, Nodes: 2},
+				RemainingFlags: []string{},
 			},
 			wantSpanHost: `span[hosts=2]`,
 			wantNcpus:    "#BSUB -n 8",
@@ -877,9 +892,8 @@ func TestLsfScriptGenerationNodesCpus(t *testing.T) {
 		{
 			name: "raw span no longer in RawFlags - only rusage preserved",
 			specs: &ScriptSpecs{
-				Ncpus:    16,
-				Nodes:    3,
-				RawFlags: []string{`-R "rusage[mem=4096]"`}, // span parsed out, only rusage remains
+				Spec:           &ResourceSpec{CpusPerTask: 16, Nodes: 3},
+				RemainingFlags: []string{`-R "rusage[mem=4096]"`}, // span parsed out, only rusage remains
 			},
 			wantSpanHost: `span[hosts=3]`,
 			wantNcpus:    "#BSUB -n 16",
@@ -887,9 +901,8 @@ func TestLsfScriptGenerationNodesCpus(t *testing.T) {
 		{
 			name: "raw -n no longer in RawFlags - comes from Ncpus field",
 			specs: &ScriptSpecs{
-				Ncpus:    8,
-				Nodes:    1,
-				RawFlags: []string{}, // -n not in RawFlags, comes from Ncpus
+				Spec:           &ResourceSpec{CpusPerTask: 8, Nodes: 1},
+				RemainingFlags: []string{}, // -n not in RawFlags, comes from Ncpus
 			},
 			wantSpanHost: `span[hosts=1]`,
 			wantNcpus:    "#BSUB -n 8",
@@ -951,10 +964,8 @@ func TestLsfScriptPreservesRusageWithSpan(t *testing.T) {
 		Name:    "test_job",
 		Command: "echo 'test'",
 		Specs: &ScriptSpecs{
-			Ncpus:    8,
-			Nodes:    2,
-			MemMB:    4, // 4096 KB = 4 MB parsed from rusage
-			RawFlags: []string{`-R "span[hosts=2] rusage[mem=4096]"`},
+			Spec:           &ResourceSpec{CpusPerTask: 8, Nodes: 2, MemPerNodeMB: 4},
+			RemainingFlags: []string{`-R "span[hosts=2] rusage[mem=4096]"`},
 		},
 	}
 
@@ -1000,11 +1011,14 @@ func TestLsfNodeTaskRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse failed: %v", err)
 	}
-	if specs.Nodes != 2 {
-		t.Fatalf("parse Nodes = %d; want 2", specs.Nodes)
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil; want non-nil")
 	}
-	if specs.Ncpus != 8 {
-		t.Fatalf("parse Ncpus = %d; want 8", specs.Ncpus)
+	if specs.Spec.Nodes != 2 {
+		t.Fatalf("parse Nodes = %d; want 2", specs.Spec.Nodes)
+	}
+	if specs.Spec.CpusPerTask != 8 {
+		t.Fatalf("parse CpusPerTask = %d; want 8", specs.Spec.CpusPerTask)
 	}
 
 	// Generate
@@ -1024,11 +1038,14 @@ func TestLsfNodeTaskRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-parse failed: %v", err)
 	}
-	if specs2.Nodes != 2 {
-		t.Errorf("round-trip Nodes = %d; want 2", specs2.Nodes)
+	if specs2.Spec == nil {
+		t.Fatal("specs2.Spec is nil; want non-nil")
 	}
-	if specs2.Ncpus != 8 {
-		t.Errorf("round-trip Ncpus = %d; want 8", specs2.Ncpus)
+	if specs2.Spec.Nodes != 2 {
+		t.Errorf("round-trip Nodes = %d; want 2", specs2.Spec.Nodes)
+	}
+	if specs2.Spec.CpusPerTask != 8 {
+		t.Errorf("round-trip CpusPerTask = %d; want 8", specs2.Spec.CpusPerTask)
 	}
 
 	// Check no duplicates in generated script
@@ -1112,27 +1129,30 @@ echo "Running job"
 		t.Fatalf("TryParseLsfScript failed: %v", err)
 	}
 
-	if specs.Ncpus != 4 {
-		t.Errorf("Ncpus = %d; want 4", specs.Ncpus)
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil; want non-nil")
 	}
-	if specs.MemMB != 8*1024 {
-		t.Errorf("MemMB = %d; want %d", specs.MemMB, 8*1024)
+	if specs.Spec.CpusPerTask != 4 {
+		t.Errorf("CpusPerTask = %d; want 4", specs.Spec.CpusPerTask)
 	}
-	if specs.Time != 2*time.Hour {
-		t.Errorf("Time = %v; want 2h", specs.Time)
+	if specs.Spec.MemPerNodeMB != 8*1024 {
+		t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, 8*1024)
 	}
-	if !specs.EmailOnBegin {
+	if specs.Spec.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
+	}
+	if !specs.Control.EmailOnBegin {
 		t.Error("EmailOnBegin should be true")
 	}
-	if !specs.EmailOnEnd {
+	if !specs.Control.EmailOnEnd {
 		t.Error("EmailOnEnd should be true")
 	}
-	if specs.MailUser != "user@example.com" {
-		t.Errorf("MailUser = %q; want %q", specs.MailUser, "user@example.com")
+	if specs.Control.MailUser != "user@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, "user@example.com")
 	}
-	// RawFlags should be empty - all flags above are recognized and parsed into typed fields
-	if len(specs.RawFlags) != 0 {
-		t.Errorf("RawFlags count = %d; want 0 (all flags were recognized)", len(specs.RawFlags))
+	// RemainingFlags should be empty - all flags above are recognized and parsed into typed fields
+	if len(specs.RemainingFlags) != 0 {
+		t.Errorf("RemainingFlags count = %d; want 0 (all flags were recognized)", len(specs.RemainingFlags))
 	}
 }
 

@@ -17,7 +17,6 @@ func newTestHTCondorScheduler() *HTCondorScheduler {
 		condorSubmitBin: "/usr/bin/condor_submit", // fake path for testing
 		condorQBin:      "/usr/bin/condor_q",      // fake path for testing
 		condorStatusBin: "/usr/bin/condor_status", // fake path for testing
-		directiveRe:     regexp.MustCompile(`^\s*#CONDOR\s+(.+)$`),
 		jobIDRe:         regexp.MustCompile(`submitted to cluster (\d+)`),
 	}
 }
@@ -34,9 +33,10 @@ func TestHTCondorEmailParsing(t *testing.T) {
 		{
 			name: "Always notification",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"#CONDOR notification = Always",
-				"#CONDOR notify_user = test@example.com",
+				"# HTCondor Submit File",
+				"notification = Always",
+				"notify_user = test@example.com",
+				"queue",
 			},
 			wantBegin:    true,
 			wantEnd:      true,
@@ -46,9 +46,10 @@ func TestHTCondorEmailParsing(t *testing.T) {
 		{
 			name: "Complete notification",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"#CONDOR notification = Complete",
-				"#CONDOR notify_user = user@domain.org",
+				"# HTCondor Submit File",
+				"notification = Complete",
+				"notify_user = user@domain.org",
+				"queue",
 			},
 			wantBegin:    false,
 			wantEnd:      true,
@@ -58,8 +59,9 @@ func TestHTCondorEmailParsing(t *testing.T) {
 		{
 			name: "Error notification",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"#CONDOR notification = Error",
+				"# HTCondor Submit File",
+				"notification = Error",
+				"queue",
 			},
 			wantBegin:    false,
 			wantEnd:      false,
@@ -69,8 +71,9 @@ func TestHTCondorEmailParsing(t *testing.T) {
 		{
 			name: "Never notification",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"#CONDOR notification = Never",
+				"# HTCondor Submit File",
+				"notification = Never",
+				"queue",
 			},
 			wantBegin: false,
 			wantEnd:   false,
@@ -79,9 +82,10 @@ func TestHTCondorEmailParsing(t *testing.T) {
 		{
 			name: "Case insensitive notification",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"#CONDOR notification = always",
-				"#CONDOR notify_user = Test@Example.COM",
+				"# HTCondor Submit File",
+				"notification = always",
+				"notify_user = Test@Example.COM",
+				"queue",
 			},
 			wantBegin:    true,
 			wantEnd:      true,
@@ -91,8 +95,9 @@ func TestHTCondorEmailParsing(t *testing.T) {
 		{
 			name: "No notification directives",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"#CONDOR request_cpus = 4",
+				"# HTCondor Submit File",
+				"request_cpus = 4",
+				"queue",
 			},
 			wantBegin: false,
 			wantEnd:   false,
@@ -103,29 +108,29 @@ func TestHTCondorEmailParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			scriptPath := filepath.Join(tmpDir, "test.sh")
+			scriptPath := filepath.Join(tmpDir, "test.sub")
 			content := strings.Join(tt.scriptLines, "\n")
 			if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
-				t.Fatalf("Failed to create test script: %v", err)
+				t.Fatalf("Failed to create test submit file: %v", err)
 			}
 
 			htcondor := newTestHTCondorScheduler()
 			specs, err := htcondor.ReadScriptSpecs(scriptPath)
 			if err != nil {
-				t.Fatalf("Failed to parse script: %v", err)
+				t.Fatalf("Failed to parse submit file: %v", err)
 			}
 
-			if specs.EmailOnBegin != tt.wantBegin {
-				t.Errorf("EmailOnBegin = %v; want %v", specs.EmailOnBegin, tt.wantBegin)
+			if specs.Control.EmailOnBegin != tt.wantBegin {
+				t.Errorf("EmailOnBegin = %v; want %v", specs.Control.EmailOnBegin, tt.wantBegin)
 			}
-			if specs.EmailOnEnd != tt.wantEnd {
-				t.Errorf("EmailOnEnd = %v; want %v", specs.EmailOnEnd, tt.wantEnd)
+			if specs.Control.EmailOnEnd != tt.wantEnd {
+				t.Errorf("EmailOnEnd = %v; want %v", specs.Control.EmailOnEnd, tt.wantEnd)
 			}
-			if specs.EmailOnFail != tt.wantFail {
-				t.Errorf("EmailOnFail = %v; want %v", specs.EmailOnFail, tt.wantFail)
+			if specs.Control.EmailOnFail != tt.wantFail {
+				t.Errorf("EmailOnFail = %v; want %v", specs.Control.EmailOnFail, tt.wantFail)
 			}
-			if specs.MailUser != tt.wantMailUser {
-				t.Errorf("MailUser = %q; want %q", specs.MailUser, tt.wantMailUser)
+			if specs.Control.MailUser != tt.wantMailUser {
+				t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, tt.wantMailUser)
 			}
 		})
 	}
@@ -188,15 +193,21 @@ func TestHTCondorEmailScriptGeneration(t *testing.T) {
 				Name:    "test_job",
 				Command: "echo 'test'",
 				Specs: &ScriptSpecs{
-					JobName:      "test_job",
-					Ncpus:        4,
-					MemMB:        8000,
-					Time:         time.Hour,
-					EmailOnBegin: tt.emailOnBegin,
-					EmailOnEnd:   tt.emailOnEnd,
-					EmailOnFail:  tt.emailOnFail,
-					MailUser:     tt.mailUser,
-					RawFlags:     []string{},
+					Spec: &ResourceSpec{
+						Nodes:        1,
+						TasksPerNode: 1,
+						CpusPerTask:  4,
+						MemPerNodeMB: 8000,
+						Time:         time.Hour,
+					},
+					Control: RuntimeConfig{
+						JobName:      "test_job",
+						EmailOnBegin: tt.emailOnBegin,
+						EmailOnEnd:   tt.emailOnEnd,
+						EmailOnFail:  tt.emailOnFail,
+						MailUser:     tt.mailUser,
+					},
+					RemainingFlags: []string{},
 				},
 			}
 
@@ -236,17 +247,18 @@ func TestHTCondorEmailScriptGeneration(t *testing.T) {
 func TestHTCondorEmailRoundTrip(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create a script with notification directives
-	originalScript := `#!/bin/bash
-#CONDOR request_cpus = 8
-#CONDOR request_memory = 16384
-#CONDOR +MaxRuntime = 7200
-#CONDOR notification = Always
-#CONDOR notify_user = roundtrip@example.com
-
-echo "Running job"
+	// Create a submit file with notification directives
+	originalScript := `# HTCondor Submit File
+universe = vanilla
+executable = job.sh
+request_cpus = 8
+request_memory = 16384
++MaxRuntime = 7200
+notification = Always
+notify_user = roundtrip@example.com
+queue
 `
-	scriptPath := filepath.Join(tmpDir, "original.sh")
+	scriptPath := filepath.Join(tmpDir, "original.sub")
 	if err := os.WriteFile(scriptPath, []byte(originalScript), 0644); err != nil {
 		t.Fatalf("Failed to create test script: %v", err)
 	}
@@ -260,15 +272,15 @@ echo "Running job"
 	}
 
 	// Verify parsing
-	if !specs.EmailOnBegin || !specs.EmailOnEnd || !specs.EmailOnFail {
+	if !specs.Control.EmailOnBegin || !specs.Control.EmailOnEnd || !specs.Control.EmailOnFail {
 		t.Errorf("Parsing failed: EmailOnBegin=%v, EmailOnEnd=%v, EmailOnFail=%v",
-			specs.EmailOnBegin, specs.EmailOnEnd, specs.EmailOnFail)
+			specs.Control.EmailOnBegin, specs.Control.EmailOnEnd, specs.Control.EmailOnFail)
 	}
-	if specs.MailUser != "roundtrip@example.com" {
-		t.Errorf("MailUser = %q; want %q", specs.MailUser, "roundtrip@example.com")
+	if specs.Control.MailUser != "roundtrip@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, "roundtrip@example.com")
 	}
-	if specs.Time != 2*time.Hour {
-		t.Errorf("Time = %v; want 2h", specs.Time)
+	if specs.Spec.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
 	}
 
 	// Generate a new submit file from parsed specs
@@ -325,8 +337,11 @@ func TestHTCondorCreateScriptUsesOutputDir(t *testing.T) {
 		Name:    "test/job",
 		Command: "echo 'hello'",
 		Specs: &ScriptSpecs{
-			RawFlags: []string{},
-			Ncpus:    1,
+			Spec: &ResourceSpec{
+				Nodes:       1,
+				CpusPerTask: 1,
+			},
+			RemainingFlags: []string{},
 		},
 	}
 
@@ -364,11 +379,13 @@ func TestHTCondorResourceParsing(t *testing.T) {
 		{
 			name: "All resources",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"#CONDOR request_cpus = 8",
-				"#CONDOR request_memory = 16384",
-				"#CONDOR request_gpus = 2",
-				"#CONDOR +MaxRuntime = 3600",
+				"# HTCondor Submit File",
+				"executable = job.sh",
+				"request_cpus = 8",
+				"request_memory = 16384",
+				"request_gpus = 2",
+				"+MaxRuntime = 3600",
+				"queue",
 			},
 			wantCpus:  8,
 			wantMemMB: 16384,
@@ -378,9 +395,10 @@ func TestHTCondorResourceParsing(t *testing.T) {
 		{
 			name: "Memory with GB suffix",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"#CONDOR request_cpus = 4",
-				"#CONDOR request_memory = 8GB",
+				"# HTCondor Submit File",
+				"request_cpus = 4",
+				"request_memory = 8GB",
+				"queue",
 			},
 			wantCpus:  4,
 			wantMemMB: 8192,
@@ -390,8 +408,9 @@ func TestHTCondorResourceParsing(t *testing.T) {
 		{
 			name: "Memory with MB suffix",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"#CONDOR request_memory = 4096MB",
+				"# HTCondor Submit File",
+				"request_memory = 4096MB",
+				"queue",
 			},
 			wantCpus:  2, // default
 			wantMemMB: 4096,
@@ -401,8 +420,9 @@ func TestHTCondorResourceParsing(t *testing.T) {
 		{
 			name: "Plain memory (default MB)",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"#CONDOR request_memory = 2048",
+				"# HTCondor Submit File",
+				"request_memory = 2048",
+				"queue",
 			},
 			wantCpus:  2, // default
 			wantMemMB: 2048,
@@ -412,8 +432,9 @@ func TestHTCondorResourceParsing(t *testing.T) {
 		{
 			name: "Only CPUs",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"#CONDOR request_cpus = 16",
+				"# HTCondor Submit File",
+				"request_cpus = 16",
+				"queue",
 			},
 			wantCpus:  16,
 			wantMemMB: 8192, // default
@@ -423,8 +444,9 @@ func TestHTCondorResourceParsing(t *testing.T) {
 		{
 			name: "Only GPUs",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"#CONDOR request_gpus = 4",
+				"# HTCondor Submit File",
+				"request_gpus = 4",
+				"queue",
 			},
 			wantCpus:  2,    // default
 			wantMemMB: 8192, // default
@@ -434,8 +456,9 @@ func TestHTCondorResourceParsing(t *testing.T) {
 		{
 			name: "Time in seconds",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"#CONDOR +MaxRuntime = 86400",
+				"# HTCondor Submit File",
+				"+MaxRuntime = 86400",
+				"queue",
 			},
 			wantCpus:  2,    // default
 			wantMemMB: 8192, // default
@@ -445,8 +468,8 @@ func TestHTCondorResourceParsing(t *testing.T) {
 		{
 			name: "No resource directives (defaults)",
 			scriptLines: []string{
-				"#!/bin/bash",
-				"echo hello",
+				"# HTCondor Submit File",
+				"# Just a comment",
 			},
 			wantCpus:  2,    // default
 			wantMemMB: 8192, // default
@@ -458,37 +481,37 @@ func TestHTCondorResourceParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			scriptPath := filepath.Join(tmpDir, "test.sh")
+			scriptPath := filepath.Join(tmpDir, "test.sub")
 			content := strings.Join(tt.scriptLines, "\n")
 			if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
-				t.Fatalf("Failed to create test script: %v", err)
+				t.Fatalf("Failed to create test submit file: %v", err)
 			}
 
 			htcondor := newTestHTCondorScheduler()
 			specs, err := htcondor.ReadScriptSpecs(scriptPath)
 			if err != nil {
-				t.Fatalf("Failed to parse script: %v", err)
+				t.Fatalf("Failed to parse submit file: %v", err)
 			}
 
-			if specs.Ncpus != tt.wantCpus {
-				t.Errorf("Ncpus = %d; want %d", specs.Ncpus, tt.wantCpus)
+			if specs.Spec.CpusPerTask != tt.wantCpus {
+				t.Errorf("Ncpus = %d; want %d", specs.Spec.CpusPerTask, tt.wantCpus)
 			}
-			if specs.MemMB != tt.wantMemMB {
-				t.Errorf("MemMB = %d; want %d", specs.MemMB, tt.wantMemMB)
+			if specs.Spec.MemPerNodeMB != tt.wantMemMB {
+				t.Errorf("MemMB = %d; want %d", specs.Spec.MemPerNodeMB, tt.wantMemMB)
 			}
 			if tt.wantGpus > 0 {
-				if specs.Gpu == nil {
+				if specs.Spec.Gpu == nil {
 					t.Errorf("Gpu is nil; want count %d", tt.wantGpus)
-				} else if specs.Gpu.Count != tt.wantGpus {
-					t.Errorf("Gpu.Count = %d; want %d", specs.Gpu.Count, tt.wantGpus)
+				} else if specs.Spec.Gpu.Count != tt.wantGpus {
+					t.Errorf("Gpu.Count = %d; want %d", specs.Spec.Gpu.Count, tt.wantGpus)
 				}
 			} else {
-				if specs.Gpu != nil {
-					t.Errorf("Gpu = %+v; want nil", specs.Gpu)
+				if specs.Spec.Gpu != nil {
+					t.Errorf("Gpu = %+v; want nil", specs.Spec.Gpu)
 				}
 			}
-			if specs.Time != tt.wantTime {
-				t.Errorf("Time = %v; want %v", specs.Time, tt.wantTime)
+			if specs.Spec.Time != tt.wantTime {
+				t.Errorf("Time = %v; want %v", specs.Spec.Time, tt.wantTime)
 			}
 		})
 	}
@@ -574,11 +597,17 @@ func TestHTCondorSubmitFileFormat(t *testing.T) {
 		Name:    "format_test",
 		Command: "echo 'hello world'",
 		Specs: &ScriptSpecs{
-			JobName: "format_test",
-			Ncpus:   8,
-			MemMB:   16384,
-			Time:    2 * time.Hour,
-			RawFlags: []string{
+			Spec: &ResourceSpec{
+				Nodes:        1,
+				TasksPerNode: 1,
+				CpusPerTask:  8,
+				MemPerNodeMB: 16384,
+				Time:         2 * time.Hour,
+			},
+			Control: RuntimeConfig{
+				JobName: "format_test",
+			},
+			RemainingFlags: []string{
 				"request_cpus = 8",
 				"request_memory = 16384",
 			},
@@ -680,19 +709,19 @@ func TestHTCondorTimeParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			scriptPath := filepath.Join(tmpDir, "test.sh")
-			content := fmt.Sprintf("#!/bin/bash\n#CONDOR +MaxRuntime = %s\n", tt.seconds)
+			scriptPath := filepath.Join(tmpDir, "test.sub")
+			content := fmt.Sprintf("# HTCondor Submit File\n+MaxRuntime = %s\nqueue\n", tt.seconds)
 			if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
-				t.Fatalf("Failed to create test script: %v", err)
+				t.Fatalf("Failed to create test submit file: %v", err)
 			}
 
 			htcondor := newTestHTCondorScheduler()
 			specs, err := htcondor.ReadScriptSpecs(scriptPath)
 			if err != nil {
-				t.Fatalf("Failed to parse script: %v", err)
+				t.Fatalf("Failed to parse submit file: %v", err)
 			}
-			if specs.Time != tt.wantTime {
-				t.Errorf("Time = %v; want %v", specs.Time, tt.wantTime)
+			if specs.Spec.Time != tt.wantTime {
+				t.Errorf("Time = %v; want %v", specs.Spec.Time, tt.wantTime)
 			}
 		})
 	}
@@ -706,26 +735,28 @@ func TestHTCondorDefaultNodesTasks(t *testing.T) {
 		{
 			name: "with resources",
 			lines: []string{
-				"#!/bin/bash",
-				"#CONDOR request_cpus = 8",
-				"#CONDOR request_memory = 16384",
+				"# HTCondor Submit File",
+				"request_cpus = 8",
+				"request_memory = 16384",
+				"queue",
 			},
 		},
 		{
 			name: "no directives",
 			lines: []string{
-				"#!/bin/bash",
-				"echo hello",
+				"# Empty submit file",
 			},
 		},
 		{
 			name: "full job",
 			lines: []string{
-				"#!/bin/bash",
-				"#CONDOR request_cpus = 16",
-				"#CONDOR request_memory = 32768",
-				"#CONDOR request_gpus = 2",
-				"#CONDOR +MaxRuntime = 3600",
+				"# HTCondor Submit File",
+				"executable = job.sh",
+				"request_cpus = 16",
+				"request_memory = 32768",
+				"request_gpus = 2",
+				"+MaxRuntime = 3600",
+				"queue",
 			},
 		},
 	}
@@ -733,24 +764,24 @@ func TestHTCondorDefaultNodesTasks(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			scriptPath := filepath.Join(tmpDir, "test.sh")
+			scriptPath := filepath.Join(tmpDir, "test.sub")
 			content := strings.Join(tt.lines, "\n")
 			if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
-				t.Fatalf("Failed to create test script: %v", err)
+				t.Fatalf("Failed to create test submit file: %v", err)
 			}
 
 			htcondor := newTestHTCondorScheduler()
 			specs, err := htcondor.ReadScriptSpecs(scriptPath)
 			if err != nil {
-				t.Fatalf("Failed to parse script: %v", err)
+				t.Fatalf("Failed to parse submit file: %v", err)
 			}
 
 			// HTCondor is inherently single-node, so Nodes and Ntasks should always be 1
-			if specs.Nodes != 1 {
-				t.Errorf("Nodes = %d; want 1", specs.Nodes)
+			if specs.Spec.Nodes != 1 {
+				t.Errorf("Nodes = %d; want 1", specs.Spec.Nodes)
 			}
-			if specs.Ntasks != 1 {
-				t.Errorf("Ntasks = %d; want 1", specs.Ntasks)
+			if specs.Spec.TasksPerNode != 1 {
+				t.Errorf("Ntasks = %d; want 1", specs.Spec.TasksPerNode)
 			}
 		})
 	}
@@ -805,19 +836,20 @@ func TestHTCondorGetInfo(t *testing.T) {
 func TestTryParseHTCondorScript(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	script := `#!/bin/bash
-#CONDOR request_cpus = 4
-#CONDOR request_memory = 8192
-#CONDOR request_gpus = 1
-#CONDOR +MaxRuntime = 7200
-#CONDOR notification = Complete
-#CONDOR notify_user = user@example.com
-
-echo "Running job"
+	script := `# HTCondor Submit File
+universe = vanilla
+executable = job.sh
+request_cpus = 4
+request_memory = 8192
+request_gpus = 1
++MaxRuntime = 7200
+notification = Complete
+notify_user = user@example.com
+queue
 `
-	scriptPath := filepath.Join(tmpDir, "test.sh")
+	scriptPath := filepath.Join(tmpDir, "test.sub")
 	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
-		t.Fatalf("Failed to create test script: %v", err)
+		t.Fatalf("Failed to create test submit file: %v", err)
 	}
 
 	specs, err := TryParseHTCondorScript(scriptPath)
@@ -825,26 +857,71 @@ echo "Running job"
 		t.Fatalf("TryParseHTCondorScript failed: %v", err)
 	}
 
-	if specs.Ncpus != 4 {
-		t.Errorf("Ncpus = %d; want 4", specs.Ncpus)
+	if specs.ScriptPath != "job.sh" {
+		t.Errorf("ScriptPath = %q; want %q", specs.ScriptPath, "job.sh")
 	}
-	if specs.MemMB != 8192 {
-		t.Errorf("MemMB = %d; want 8192", specs.MemMB)
+	if specs.Spec.CpusPerTask != 4 {
+		t.Errorf("Ncpus = %d; want 4", specs.Spec.CpusPerTask)
 	}
-	if specs.Gpu == nil || specs.Gpu.Count != 1 {
-		t.Errorf("Gpu = %+v; want count 1", specs.Gpu)
+	if specs.Spec.MemPerNodeMB != 8192 {
+		t.Errorf("MemMB = %d; want 8192", specs.Spec.MemPerNodeMB)
 	}
-	if specs.Time != 2*time.Hour {
-		t.Errorf("Time = %v; want 2h", specs.Time)
+	if specs.Spec.Gpu == nil || specs.Spec.Gpu.Count != 1 {
+		t.Errorf("Gpu = %+v; want count 1", specs.Spec.Gpu)
 	}
-	if !specs.EmailOnEnd {
+	if specs.Spec.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
+	}
+	if !specs.Control.EmailOnEnd {
 		t.Error("EmailOnEnd should be true for Complete notification")
 	}
-	if specs.MailUser != "user@example.com" {
-		t.Errorf("MailUser = %q; want %q", specs.MailUser, "user@example.com")
+	if specs.Control.MailUser != "user@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, "user@example.com")
 	}
-	// RawFlags should be empty - all flags above are recognized and parsed into typed fields
+	// RemainingFlags should be empty - all flags above are recognized and parsed into typed fields
+	if len(specs.RemainingFlags) != 0 {
+		t.Errorf("RemainingFlags count = %d; want 0 (all flags were recognized)", len(specs.RemainingFlags))
+	}
+}
+
+// TestHTCondorFalsePositiveBashScript verifies that a plain bash build script containing
+// bash variable assignments (e.g. "gencode_version=M6") is NOT misidentified as an
+// HTCondor submit file. HasDirectives must be false so ParseScriptAny does not return
+// the script as HTCondor type.
+func TestHTCondorFalsePositiveBashScript(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Simulate a typical CondaTainer build script with bash key=value assignments
+	// but no valid HTCondor directives.
+	script := `#!/usr/bin/bash
+#DEP:samtools/1.22.1
+#WHATIS:GRCm39 GENCODE M6 transcript FASTA
+#ENV:TRANSCRIPT_FASTA=$app_root/gencode.vM6.transcripts.fa
+
+gencode_version=M6
+reference_index=/opt/references/index
+
+install_app() {
+    cd "$target_dir"
+    wget -nv -O "gencode.v${gencode_version}.transcripts.fa.gz" "https://example.com"
+}
+`
+	// Write with a non-.sub extension (as build scripts always are)
+	scriptPath := filepath.Join(tmpDir, "transcript-gencode-M6")
+	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+		t.Fatalf("Failed to create test script: %v", err)
+	}
+
+	sched := newTestHTCondorScheduler()
+	specs, err := sched.ReadScriptSpecs(scriptPath)
+	if err != nil {
+		t.Fatalf("ReadScriptSpecs failed: %v", err)
+	}
+
+	if specs.HasDirectives {
+		t.Errorf("HasDirectives = true for plain bash script; bash variable assignments must not be treated as HTCondor directives (RawFlags: %v)", specs.RawFlags)
+	}
 	if len(specs.RawFlags) != 0 {
-		t.Errorf("RawFlags count = %d; want 0 (all flags were recognized)", len(specs.RawFlags))
+		t.Errorf("RawFlags = %v; want empty for plain bash script", specs.RawFlags)
 	}
 }

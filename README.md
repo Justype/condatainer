@@ -104,7 +104,7 @@ mm-export
 
 ## 🚀 Automation
 
-**CondaTainer** supports inline dependency declaration and automatic job submission. Define requirements with `#DEP:` tags and scheduler directives (`#SBATCH`, `#PBS`, `#BSUB`, or `#CONDOR`).
+**CondaTainer** supports inline dependency declaration and automatic job submission. Define requirements with `#DEP:` tags and scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`). HTCondor uses native `.sub` submit files.
 
 Example Script (`analysis.sh`):
 

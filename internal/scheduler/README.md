@@ -9,7 +9,7 @@ HPC scheduler abstraction layer providing a unified interface for job submission
 | SLURM | `sbatch` | `#SBATCH` | Stable |
 | PBS/Torque | `qsub` | `#PBS` | Experimental |
 | LSF | `bsub` | `#BSUB` | Experimental |
-| HTCondor | `condor_submit` | `#CONDOR` | Experimental |
+| HTCondor | `condor_submit` | Native `.sub` format | Experimental |
 
 ## Architecture
 
@@ -44,8 +44,11 @@ type Scheduler interface {
 ## Key Types
 
 **ScriptSpecs** - Parsed job specifications (scheduler-agnostic):
-- `JobName`, `Ncpus`, `Ntasks`, `Nodes`, `MemMB`, `Time`
-- `Gpu *GpuSpec`, email settings, `RawFlags []string`
+- `ScriptPath` - Absolute path of the parsed script (for HTCondor: the `executable` from `.sub` file)
+- `Spec *ResourceSpec` - Compute geometry: `Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`, `Gpu`, `Exclusive`
+- `Control RuntimeConfig` - Job control: `JobName`, `Stdout`, `Stderr`, email settings, `Partition`
+- `RawFlags []string` - Immutable audit log of all directives
+- `RemainingFlags []string` - Directives not absorbed by Spec or Control
 
 **JobSpec** - Job submission input:
 - `Name`, `Command`, `Specs *ScriptSpecs`, `DepJobIDs`, `Metadata`
@@ -55,13 +58,17 @@ type Scheduler interface {
 
 ## Script Parsing Behavior
 
-When parsing scheduler directives from build scripts, each scheduler's parser function returns `(bool, error)`:
-- `true` if the flag was **recognized and parsed** (e.g., CPU, memory, GPU, time, email settings)
-- `false` if the flag was **not recognized** (custom/unknown directive)
+Parsing uses a two-stage pipeline:
 
-Only **unrecognized flags** are stored in `ScriptSpecs.RawFlags`.
+1. **Stage 1 (critical):** `parseRuntimeConfig` — extracts job control settings (name, I/O, email). Failures stop parsing.
+2. **Stage 2 (best-effort):** `parseResourceSpec` — extracts compute geometry (CPU, memory, GPU, time). Returns nil on any parse failure → **passthrough mode** (the script is forwarded to the scheduler unchanged).
 
-This approach ensures that when generating scripts for a different scheduler, only the custom flags need special handling, while standard resources (CPU/mem/GPU/time) are regenerated using the target scheduler's native syntax.
+**Passthrough mode** is triggered when:
+- A known directive has an invalid value (e.g., non-integer CPU count)
+- A directive value cannot be safely resolved (e.g., `--ntasks` not evenly divisible by `--nodes`)
+- A blacklisted topology flag is encountered (SLURM only — see below)
+
+`RawFlags` is an immutable audit log of ALL directives. `RemainingFlags` contains only directives not absorbed by either stage. This ensures that when generating scripts for a different scheduler, standard resources are regenerated using the target scheduler's native syntax.
 
 ## Key Functions
 
@@ -89,17 +96,19 @@ This approach ensures that when generating scripts for a different scheduler, on
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `scheduler.ncpus` | 2 | CPUs per task |
-| `scheduler.mem_mb` | 8192 | Memory in MB |
-| `scheduler.time` | `4h` | Time limit |
 | `scheduler.nodes` | 1 | Node count |
-| `scheduler.ntasks` | 1 | Task count |
+| `scheduler.tasks_per_node` | 1 | Tasks per node |
+| `scheduler.ncpus_per_task` | 2 | CPUs per task |
+| `scheduler.mem_mb_per_node` | 8192 | Memory per node in MB |
+| `scheduler.time` | `4h` | Time limit |
 
 ```yaml
 # ~/.config/condatainer/config.yaml
 scheduler:
-  ncpus: 8
-  mem_mb: 16384
+  nodes: 1
+  tasks_per_node: 1
+  ncpus_per_task: 8
+  mem_mb_per_node: 16384
   time: "8h"
 ```
 
@@ -140,10 +149,13 @@ jobSpec := &scheduler.JobSpec{
     Name:    "my_job",
     Command: "python train.py",
     Specs: &scheduler.ScriptSpecs{
-        Ncpus: 8,
-        MemMB: 16384,
-        Time:  3600,
-        Gpu:   &scheduler.GpuSpec{Count: 1, Type: "a100"},
+        Spec: &scheduler.ResourceSpec{
+            CpusPerTask:  8,
+            MemPerNodeMB: 16384,
+            Time:         time.Hour,
+            Gpu:          &scheduler.GpuSpec{Count: 1, Type: "a100"},
+        },
+        Control: scheduler.RuntimeConfig{JobName: "my_job"},
     },
 }
 scriptPath, err := sched.CreateScriptWithSpec(jobSpec, "/output/dir")
@@ -211,13 +223,22 @@ Multi-node is supported by setting `Nodes > 1` in `ScriptSpecs`.
 ## Scheduler-Specific Notes
 
 ### SLURM
-- Parses `--nodes`, `--ntasks`, `--ntasks-per-node`, `--cpus-per-task`
-- GPU via `--gres=gpu:type:count` or `--gpus=type:count`; supports MIG profiles
+- Parses `--nodes`, `--ntasks`, `--ntasks-per-node`, `--cpus-per-task`, `--cpus-per-gpu`
+- GPU via `--gres=gpu:type:count`, `--gpus-per-node`, `--gpus` (total), or `--gpus-per-task`; supports MIG profiles
+  - Resolution priority: `--gres=gpu:` > `--gpus-per-node` > `--gpus` (÷ nodes) > `--gpus-per-task` (× tasks/node)
+  - `--gpus` total must divide evenly by `--nodes`; otherwise triggers passthrough
+- Memory via `--mem` (per-node), `--mem-per-cpu` (× CpusPerTask × TasksPerNode), or `--mem-per-gpu` (× Gpu.Count)
+- Resource spec uses a **two-phase approach**: Phase 1 scans all directives into temp vars; Phase 2 resolves in dependency order (Nodes/Tasks → GPU → CPU → Memory → Time), ensuring derived values are computed correctly
+- `--ntasks` must divide evenly by `--nodes`; otherwise triggers passthrough
+- **Blacklisted topology flags** (immediately trigger passthrough — cannot be reliably translated):
+  `--gpus-per-socket`, `--sockets-per-node`, `--cores-per-socket`, `--threads-per-core`,
+  `--ntasks-per-socket`, `--ntasks-per-core`, `--distribution`
 - Cluster info from `sinfo` and `scontrol`
 
 ### PBS
 - Resource formats: `select=N:ncpus=M:mpiprocs=P:mem=Xgb:ngpus=G` or `nodes=N:ppn=M`
 - `Ntasks` derived from `nodes * mpiprocs`
+- Invalid values for `ncpus`, `mem`, `walltime`, `ngpus`, `gpus`, `select`, `nodes`, `ppn`, `mpiprocs` trigger passthrough
 - Cluster info from `pbsnodes -a`
 
 ### LSF
@@ -229,9 +250,11 @@ Multi-node is supported by setting `Nodes > 1` in `ScriptSpecs`.
 - Cluster info from `bhosts -w`
 
 ### HTCondor
-- Uses `key = value` directive format (e.g., `request_cpus = 8`)
+- Parses native `.sub` submit files directly
+- `executable = script.sh` in the `.sub` file is extracted as `ScriptSpecs.ScriptPath`
+- Comments (`#`), empty lines, and structural keywords (`universe`, `executable`, `transfer_executable`, `queue`, `arguments`) are skipped during parsing
+- Resource keys: `request_cpus`, `request_memory`, `request_gpus`, `+MaxRuntime` (seconds)
 - Generates two files: `.sub` (submit description) + `.sh` (wrapper script)
-- Time via `+MaxRuntime` (seconds)
 - Always single-node (vanilla universe)
 - No native job dependency support
 

@@ -859,7 +859,6 @@ Scripts can use special comment tags to declare dependencies and configure the c
 | `#SBATCH [args]` | SLURM scheduler directives (auto-submit as job) |
 | `#PBS [args]` | PBS scheduler directives (auto-submit as job) |
 | `#BSUB [args]` | LSF scheduler directives (auto-submit as job) |
-| `#CONDOR [args]` | HTCondor scheduler directives (auto-submit as job) |
 
 **Available `#CNT` arguments:**
 
@@ -882,7 +881,7 @@ bcftools view input.vcf | head
 
 ### Scheduler Integration
 
-If your script contains scheduler directives (`#SBATCH`, `#PBS`, `#BSUB`, or `#CONDOR`), `condatainer run` will automatically submit it as a scheduler job instead of running it locally.
+If your script contains scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`), `condatainer run` will automatically submit it as a scheduler job instead of running it locally. HTCondor uses native `.sub` submit files instead of in-script directives.
 
 **Behavior:**
 
@@ -926,9 +925,9 @@ CondaTainer uses specific exit codes so automation and downstream tooling can de
 
 - `0` — Success (all requested builds completed locally or nothing to do)
 - `1` — Generic error (invalid arguments, build failures, or other fatal errors)
-- `2` — **Jobs submitted to scheduler** — overlays will be created asynchronously by scheduler jobs
+- `3` — **Jobs submitted to scheduler** — overlays will be created asynchronously by scheduler jobs
 
-Commands that may return exit code `2` when scheduler jobs were submitted include:
+Commands that may return exit code `3` when scheduler jobs were submitted include:
 
 - `condatainer create ...`
 - `condatainer check -a ...` (auto-install missing deps)
@@ -938,13 +937,13 @@ Quick example for shell scripts that detect the job-submitted state:
 
 ```bash
 condatainer create samtools/1.22
-if [ $? -eq 2 ]; then
+if [ $? -eq 3 ]; then
   echo "Jobs submitted to scheduler — overlays will be created asynchronously"
   # Optionally: exit 0 or wait/monitor jobs here
 fi
 ```
 
-Note: When exit code `2` is returned, CondaTainer prints a message showing the number of jobs submitted (and can be extended to emit JSON or write job metadata for automation).
+Note: When exit code `3` is returned, CondaTainer prints a message showing the number of jobs submitted (and can be extended to emit JSON or write job metadata for automation).
 
 **Disabling Job Submission:**
 
@@ -955,6 +954,64 @@ condatainer --local run analysis.sh
 # Or set in config
 condatainer config set submit_job false
 ```
+
+### MPI Auto-Detection
+
+When a scheduler script requests more than one task (`--ntasks-per-node`, `--ntasks`, or PBS/LSF equivalents), `condatainer run` automatically detects the host MPI and wraps the job command with `mpiexec`:
+
+**Detection order:**
+
+1. `mpiexec` already in `PATH` → use it directly
+2. `module avail -t openmpi` → pick the highest available version, load it with `module purge && module load`
+3. Neither found → warn and run without MPI wrapper
+
+**Generated job command:**
+
+```bash
+# Via direct PATH:
+mpiexec condatainer run script.sh
+
+# Via module system:
+module purge && module load openmpi/4.1.5 && mpiexec condatainer run script.sh
+```
+
+**MPI Script Example:**
+
+```bash
+#!/bin/bash
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=3
+#SBATCH --mem=1G
+#SBATCH --time=00:30:00
+
+#DEP: mpi.img
+
+python my_mpi_script.py
+```
+
+Run with:
+
+```bash
+condatainer run mpi_job.sh
+```
+
+CondaTainer detects `ntasks = 6`, finds `mpiexec`, and submits:
+
+```bash
+mpiexec condatainer run mpi_job.sh
+```
+
+Each MPI rank launches its own container, all sharing the same MPI communicator via SLURM's process management interface.
+
+````{important}
+You need to have the same major and minor version of OpenMPI installed inside the container as on the host.
+
+```bash
+ml av openmpi
+# openmpi/4.1.5
+condatainer e mpi.img -- mm-install mpi4py openmpi=4.1 -y
+```
+````
 
 ### CondaTainer is compatible with module systems
 

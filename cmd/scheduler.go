@@ -177,16 +177,16 @@ func runScheduler(cmd *cobra.Command, args []string) {
 
 					// Format values
 					cpuStr := "-"
-					if limit.MaxCpus > 0 {
-						cpuStr = fmt.Sprintf("%d", limit.MaxCpus)
+					if limit.MaxCpusPerNode > 0 {
+						cpuStr = fmt.Sprintf("%d", limit.MaxCpusPerNode)
 					}
 
 					memStr := "-"
-					if limit.MaxMemMB > 0 {
-						if limit.MaxMemMB >= 1024 {
-							memStr = fmt.Sprintf("%.0f GB", float64(limit.MaxMemMB)/1024)
+					if limit.MaxMemMBPerNode > 0 {
+						if limit.MaxMemMBPerNode >= 1024 {
+							memStr = fmt.Sprintf("%.0f GB", float64(limit.MaxMemMBPerNode)/1024)
 						} else {
-							memStr = fmt.Sprintf("%d MB", limit.MaxMemMB)
+							memStr = fmt.Sprintf("%d MB", limit.MaxMemMBPerNode)
 						}
 					}
 
@@ -270,11 +270,11 @@ func runScheduler(cmd *cobra.Command, args []string) {
 
 		// Find max values across all partitions (not filtered)
 		for _, limit := range clusterInfo.Limits {
-			if limit.MaxCpus > maxCpus {
-				maxCpus = limit.MaxCpus
+			if limit.MaxCpusPerNode > maxCpus {
+				maxCpus = limit.MaxCpusPerNode
 			}
-			if limit.MaxMemMB > maxMemMB {
-				maxMemMB = limit.MaxMemMB
+			if limit.MaxMemMBPerNode > maxMemMB {
+				maxMemMB = limit.MaxMemMBPerNode
 			}
 			if limit.MaxTime > maxTime {
 				maxTime = limit.MaxTime

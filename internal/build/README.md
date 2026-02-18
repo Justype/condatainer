@@ -75,7 +75,7 @@ if err := graph.Run(ctx); err != nil {
 
 Shell scripts support metadata headers:
 - `#DEP:name/version` - Dependencies
-- `#SBATCH` / `#PBS` / `#BSUB` / `#CONDOR` - Scheduler directives
+- `#SBATCH` / `#PBS` / `#BSUB` - Scheduler directives (HTCondor uses native `.sub` files)
 - `#ENV:VAR=$app_root` - Environment variables to export
 - `#INTERACTIVE:prompt` - User input prompts
 

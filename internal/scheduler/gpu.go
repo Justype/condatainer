@@ -215,8 +215,11 @@ func FindAvailableGpuTypes(info *ClusterInfo) []GpuInfo {
 	return available
 }
 
-// FindCompatibleGpu finds compatible GPU alternatives when requested type is unavailable
-func FindCompatibleGpu(requestedSpec *GpuSpec, info *ClusterInfo) ([]*GpuConversionOption, error) {
+// FindCompatibleGpu finds compatible GPU alternatives when requested type is unavailable.
+// nodes is the number of nodes in the job; requestedSpec.Count is per-node.
+// Availability checks compare against Count * nodes (total GPUs needed).
+// SuggestedSpec.Count is also per-node (same as requested).
+func FindCompatibleGpu(requestedSpec *GpuSpec, nodes int, info *ClusterInfo) ([]*GpuConversionOption, error) {
 	if requestedSpec == nil {
 		return nil, nil
 	}
@@ -225,6 +228,11 @@ func FindCompatibleGpu(requestedSpec *GpuSpec, info *ClusterInfo) ([]*GpuConvers
 		return nil, ErrClusterInfoUnavailable
 	}
 
+	if nodes <= 0 {
+		nodes = 1
+	}
+	totalNeeded := requestedSpec.Count * nodes
+
 	options := make([]*GpuConversionOption, 0)
 	requestedType := NormalizeGpuType(requestedSpec.Type)
 	requestedCompat, knownType := gpuDatabase[requestedType]
@@ -232,12 +240,12 @@ func FindCompatibleGpu(requestedSpec *GpuSpec, info *ClusterInfo) ([]*GpuConvers
 	// First, check if the exact requested type is available
 	for _, gpu := range info.AvailableGpus {
 		normalizedClusterType := NormalizeGpuType(gpu.Type)
-		if normalizedClusterType == requestedType && gpu.Available >= requestedSpec.Count {
+		if normalizedClusterType == requestedType && gpu.Available >= totalNeeded {
 			options = append(options, &GpuConversionOption{
 				OriginalSpec: requestedSpec,
 				SuggestedSpec: &GpuSpec{
 					Type:  gpu.Type,
-					Count: requestedSpec.Count,
+					Count: requestedSpec.Count, // per-node
 					Raw:   fmt.Sprintf("%s:%d", gpu.Type, requestedSpec.Count),
 				},
 				Available:   gpu.Available,
@@ -258,12 +266,12 @@ func FindCompatibleGpu(requestedSpec *GpuSpec, info *ClusterInfo) ([]*GpuConvers
 	// If requested type is unknown, try to find any available GPU
 	if !knownType {
 		for _, gpu := range info.AvailableGpus {
-			if gpu.Available >= requestedSpec.Count {
+			if gpu.Available >= totalNeeded {
 				options = append(options, &GpuConversionOption{
 					OriginalSpec: requestedSpec,
 					SuggestedSpec: &GpuSpec{
 						Type:  gpu.Type,
-						Count: requestedSpec.Count,
+						Count: requestedSpec.Count, // per-node
 						Raw:   fmt.Sprintf("%s:%d", gpu.Type, requestedSpec.Count),
 					},
 					Available:   gpu.Available,
@@ -282,13 +290,13 @@ func FindCompatibleGpu(requestedSpec *GpuSpec, info *ClusterInfo) ([]*GpuConvers
 	for _, upgradeType := range requestedCompat.UpgradeTo {
 		for _, gpu := range info.AvailableGpus {
 			normalizedClusterType := NormalizeGpuType(gpu.Type)
-			if normalizedClusterType == upgradeType && gpu.Available >= requestedSpec.Count {
+			if normalizedClusterType == upgradeType && gpu.Available >= totalNeeded {
 				upgradeCompat := gpuDatabase[upgradeType]
 				options = append(options, &GpuConversionOption{
 					OriginalSpec: requestedSpec,
 					SuggestedSpec: &GpuSpec{
 						Type:  gpu.Type,
-						Count: requestedSpec.Count,
+						Count: requestedSpec.Count, // per-node
 						Raw:   fmt.Sprintf("%s:%d", gpu.Type, requestedSpec.Count),
 					},
 					Available:   gpu.Available,
@@ -307,13 +315,13 @@ func FindCompatibleGpu(requestedSpec *GpuSpec, info *ClusterInfo) ([]*GpuConvers
 	for _, downgradeType := range requestedCompat.DowngradeTo {
 		for _, gpu := range info.AvailableGpus {
 			normalizedClusterType := NormalizeGpuType(gpu.Type)
-			if normalizedClusterType == downgradeType && gpu.Available >= requestedSpec.Count {
+			if normalizedClusterType == downgradeType && gpu.Available >= totalNeeded {
 				downgradeCompat := gpuDatabase[downgradeType]
 				options = append(options, &GpuConversionOption{
 					OriginalSpec: requestedSpec,
 					SuggestedSpec: &GpuSpec{
 						Type:  gpu.Type,
-						Count: requestedSpec.Count,
+						Count: requestedSpec.Count, // per-node
 						Raw:   fmt.Sprintf("%s:%d", gpu.Type, requestedSpec.Count),
 					},
 					Available:   gpu.Available,
@@ -330,19 +338,19 @@ func FindCompatibleGpu(requestedSpec *GpuSpec, info *ClusterInfo) ([]*GpuConvers
 
 	// For MIG profiles or when no matches found, try memory-based matching
 	if len(options) == 0 && knownType && requestedCompat.MemoryGB > 0 {
-		memoryOptions := findGpusByMemory(requestedCompat.MemoryGB, requestedSpec.Count, info)
+		memoryOptions := findGpusByMemory(requestedCompat.MemoryGB, requestedSpec.Count, nodes, info)
 		options = append(options, memoryOptions...)
 	}
 
 	// If no compatible options found, suggest any available GPU
 	if len(options) == 0 {
 		for _, gpu := range info.AvailableGpus {
-			if gpu.Available >= requestedSpec.Count {
+			if gpu.Available >= totalNeeded {
 				options = append(options, &GpuConversionOption{
 					OriginalSpec: requestedSpec,
 					SuggestedSpec: &GpuSpec{
 						Type:  gpu.Type,
-						Count: requestedSpec.Count,
+						Count: requestedSpec.Count, // per-node
 						Raw:   fmt.Sprintf("%s:%d", gpu.Type, requestedSpec.Count),
 					},
 					Available:   gpu.Available,
@@ -381,13 +389,18 @@ func FindCompatibleGpu(requestedSpec *GpuSpec, info *ClusterInfo) ([]*GpuConvers
 	return options, nil
 }
 
-// findGpusByMemory finds GPUs that have sufficient memory (primarily for MIG profiles)
+// findGpusByMemory finds GPUs that have sufficient memory (primarily for MIG profiles).
+// count is per-node; nodes is the number of nodes. Availability checks against count*nodes.
 // Returns options sorted by memory size (smallest sufficient memory first)
-func findGpusByMemory(requestedMemoryGB int, count int, info *ClusterInfo) []*GpuConversionOption {
+func findGpusByMemory(requestedMemoryGB int, count int, nodes int, info *ClusterInfo) []*GpuConversionOption {
 	options := make([]*GpuConversionOption, 0)
+	if nodes <= 0 {
+		nodes = 1
+	}
+	totalNeeded := count * nodes
 
 	for _, gpu := range info.AvailableGpus {
-		if gpu.Available < count {
+		if gpu.Available < totalNeeded {
 			continue
 		}
 
@@ -436,10 +449,11 @@ func findGpusByMemory(requestedMemoryGB int, count int, info *ClusterInfo) []*Gp
 	return options
 }
 
-// ConvertGpuSpec converts a GPU spec to use an available GPU type
-// Returns the best available option or an error if no GPUs are available
-func ConvertGpuSpec(requestedSpec *GpuSpec, info *ClusterInfo) (*GpuSpec, error) {
-	options, err := FindCompatibleGpu(requestedSpec, info)
+// ConvertGpuSpec converts a GPU spec to use an available GPU type.
+// nodes is the number of nodes; requestedSpec.Count is per-node.
+// Returns the best available option or an error if no GPUs are available.
+func ConvertGpuSpec(requestedSpec *GpuSpec, nodes int, info *ClusterInfo) (*GpuSpec, error) {
+	options, err := FindCompatibleGpu(requestedSpec, nodes, info)
 	if err != nil {
 		return nil, err
 	}
@@ -453,14 +467,15 @@ func ConvertGpuSpec(requestedSpec *GpuSpec, info *ClusterInfo) (*GpuSpec, error)
 	return options[0].SuggestedSpec, nil
 }
 
-// ValidateGpuAvailability checks if the requested GPU is available
-// Returns nil if available, or an error with suggestions if not
-func ValidateGpuAvailability(requestedSpec *GpuSpec, info *ClusterInfo) error {
+// ValidateGpuAvailability checks if the requested GPU is available.
+// nodes is the number of nodes; requestedSpec.Count is per-node.
+// Returns nil if available, or an error with suggestions if not.
+func ValidateGpuAvailability(requestedSpec *GpuSpec, nodes int, info *ClusterInfo) error {
 	if requestedSpec == nil {
 		return nil
 	}
 
-	options, err := FindCompatibleGpu(requestedSpec, info)
+	options, err := FindCompatibleGpu(requestedSpec, nodes, info)
 	if err != nil {
 		return err
 	}

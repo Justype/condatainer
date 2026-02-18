@@ -338,14 +338,16 @@ func (b *BaseBuildObject) parseScriptMetadata() error {
 	}
 
 	// If specs found, use ncpus from script
-	if specs != nil && specs.Ncpus > 0 {
-		b.ncpus = specs.Ncpus
+	if specs != nil && specs.Spec != nil && specs.Spec.CpusPerTask > 0 {
+		b.ncpus = specs.Spec.CpusPerTask
 	}
 
 	// Only store full scriptSpecs if job submission is enabled (for generating job scripts)
 	if config.Global.SubmitJob && specs != nil {
-		if specs.Ncpus <= 0 {
-			specs.Ncpus = defaultBuildNcpus()
+		if specs.Spec != nil && specs.Spec.CpusPerTask <= 0 {
+			specs.Spec.CpusPerTask = defaultBuildNcpus()
+		} else if specs.Spec == nil {
+			b.ncpus = defaultBuildNcpus()
 		}
 		b.scriptSpecs = specs
 	}

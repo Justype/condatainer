@@ -108,7 +108,7 @@ When **CondaTainer** processes the build script, it will ensure that all specifi
 
 ### Scheduler Parameters
 
-Scheduler directive lines (`#SBATCH`, `#PBS`, `#BSUB`, or `#CONDOR`) allow you to specify job parameters for the build process.
+Scheduler directive lines (`#SBATCH`, `#PBS`, or `#BSUB`) allow you to specify job parameters for the build process. HTCondor uses native `.sub` submit files instead of in-script directives.
 
 If a supported scheduler is available, **CondaTainer** will submit the build job with the specified parameters.
 

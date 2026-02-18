@@ -33,10 +33,11 @@ type SchedulerInfo struct {
 	Available bool   // Whether scheduler is available for job submission
 }
 
-// GpuSpec holds GPU requirements parsed from scheduler directives
+// GpuSpec holds GPU requirements parsed from scheduler directives.
+// Count is per node (not total). Total GPUs = Count * ResourceSpec.Nodes.
 type GpuSpec struct {
 	Type  string // GPU type/model (e.g., "h100", "a100", "v100")
-	Count int    // Number of GPUs requested
+	Count int    // Number of GPUs per node
 	Raw   string // Raw GPU specification string from scheduler
 }
 
@@ -48,15 +49,40 @@ type GpuInfo struct {
 	Partition string // Partition/queue name (optional)
 }
 
-// ResourceLimits holds scheduler resource limits
+// ResourceLimits holds scheduler resource limits per partition/queue.
+// CPU and memory limits are per-node (matching how schedulers report them).
 type ResourceLimits struct {
-	MaxCpus     int           // Maximum CPUs per job
-	MaxMemMB    int64         // Maximum memory in MB per job
-	MaxTime     time.Duration // Maximum walltime (e.g., "7-00:00:00")
-	MaxGpus     int           // Maximum GPUs per job
-	MaxNodes    int           // Maximum nodes per job
-	DefaultTime time.Duration // Default walltime if not specified
-	Partition   string        // Partition/queue name these limits apply to
+	MaxCpusPerNode  int           // Maximum CPUs per node in this partition
+	MaxMemMBPerNode int64         // Maximum memory per node in MB
+	MaxTime         time.Duration // Maximum walltime (e.g., "7-00:00:00")
+	MaxGpus         int           // Maximum GPUs per job (total across all nodes)
+	MaxNodes        int           // Maximum nodes per job
+	DefaultTime     time.Duration // Default walltime if not specified
+	Partition       string        // Partition/queue name these limits apply to
+}
+
+// ResourceSpec holds compute geometry for a job.
+// A nil pointer means resource parsing failed — the job runs in passthrough mode.
+type ResourceSpec struct {
+	Nodes        int           // Number of nodes
+	TasksPerNode int           // MPI ranks / tasks per node
+	CpusPerTask  int           // CPU threads per task
+	MemPerNodeMB int64         // Total RAM per node in MB
+	Gpu          *GpuSpec      // GPU requirements (nil = no GPU; Count = per node)
+	Time         time.Duration // Job walltime limit
+	Exclusive    bool          // Request exclusive node access (no other jobs on the same node)
+}
+
+// RuntimeConfig holds job-level control settings (name, I/O paths, notifications).
+type RuntimeConfig struct {
+	JobName      string // Identifier for the job
+	Stdout       string // Standard output file path
+	Stderr       string // Standard error file path
+	EmailOnBegin bool   // Notification on job start
+	EmailOnEnd   bool   // Notification on job end
+	EmailOnFail  bool   // Notification on job failure/abort
+	MailUser     string // Target email/user for notifications (empty = submitting user)
+	Partition    string // Partition/queue to submit to (cleared on cross-scheduler translation)
 }
 
 // ClusterInfo holds cluster configuration information
@@ -67,23 +93,14 @@ type ClusterInfo struct {
 	MaxMemMBPerNode int64            // Maximum memory available per node in MB (from node info)
 }
 
-// ScriptSpecs holds the specifications parsed from a job script
+// ScriptSpecs holds the full result of parsing a scheduler script.
 type ScriptSpecs struct {
-	JobName       string        // Job name
-	Ncpus         int           // Number of CPUs per task
-	Ntasks        int           // Number of tasks (default 1)
-	Nodes         int           // Number of nodes (default 1)
-	MemMB         int64         // Memory in MB
-	Time          time.Duration // Time limit
-	Stdout        string        // Standard output file path
-	Stderr        string        // Standard error file path
-	Gpu           *GpuSpec      // GPU requirements (nil if no GPU)
-	EmailOnBegin  bool          // Send email when job begins (SLURM: BEGIN, PBS: b, LSF: -B)
-	EmailOnEnd    bool          // Send email when job ends (SLURM: END, PBS: e, LSF: -N)
-	EmailOnFail   bool          // Send email when job fails/aborts (SLURM: FAIL, PBS: a)
-	MailUser      string        // Username or email address for notifications (empty = submitting user)
-	HasDirectives bool          // True if any scheduler directive was found during parsing
-	RawFlags      []string      // Raw scheduler-specific flags (unrecognized only)
+	ScriptPath     string        // Absolute path of the parsed script (for HTCondor .sub: the executable)
+	Spec           *ResourceSpec // Compute geometry (nil = resource parse failed → passthrough mode)
+	Control        RuntimeConfig // Job control settings
+	HasDirectives  bool          // True if any scheduler directive (#SBATCH, #PBS, etc.) was found
+	RawFlags       []string      // ALL original directives — immutable audit log
+	RemainingFlags []string      // Directives not absorbed by Spec or Control
 }
 
 // HasSchedulerSpecs returns true if ScriptSpecs contains meaningful scheduler directives.
@@ -97,24 +114,24 @@ func HasSchedulerSpecs(specs *ScriptSpecs) bool {
 	return specs.HasDirectives
 }
 
-// SpecDefaults holds configurable default values for ScriptSpecs.
-// These are used by ReadScriptSpecs when a script does not specify a resource.
+// SpecDefaults holds configurable default values for ResourceSpec.
+// These are used by parseResourceSpec when a script does not specify a resource.
 // Set via SetSpecDefaults() during CLI initialization from config.
 type SpecDefaults struct {
-	Ncpus  int
-	MemMB  int64
-	Time   time.Duration
-	Nodes  int
-	Ntasks int
+	CpusPerTask  int
+	MemPerNodeMB int64
+	Time         time.Duration
+	Nodes        int
+	TasksPerNode int
 }
 
 // specDefaults is the package-level defaults used by all schedulers.
 var specDefaults = SpecDefaults{
-	Ncpus:  2,
-	MemMB:  8192,
-	Time:   4 * time.Hour,
-	Nodes:  1,
-	Ntasks: 1,
+	CpusPerTask:  2,
+	MemPerNodeMB: 8192,
+	Time:         4 * time.Hour,
+	Nodes:        1,
+	TasksPerNode: 1,
 }
 
 // SetSpecDefaults overrides the default values used by ReadScriptSpecs.
@@ -129,11 +146,12 @@ func GetSpecDefaults() SpecDefaults {
 
 // JobSpec represents specifications for submitting a batch job
 type JobSpec struct {
-	Name      string            // Job name
-	Command   string            // Command to execute
-	Specs     *ScriptSpecs      // Job specifications
-	DepJobIDs []string          // Job IDs this job depends on
-	Metadata  map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
+	Name           string            // Job name (for temp and log file naming)
+	Command        string            // Command to execute
+	Specs          *ScriptSpecs      // Job specifications
+	DepJobIDs      []string          // Job IDs this job depends on
+	Metadata       map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
+	OverrideOutput bool              // If true, always set Stdout/Stderr from Name (ignores script directives)
 }
 
 // JobResources holds resource allocations for the currently running scheduler job.
@@ -175,45 +193,56 @@ type Scheduler interface {
 	GetJobResources() *JobResources
 }
 
-// ValidateSpecs validates job specs against cluster limits
+// ValidateSpecs validates job specs against cluster limits.
+// Skips validation when specs.Spec is nil (passthrough mode).
 func ValidateSpecs(specs *ScriptSpecs, limits *ResourceLimits) error {
-	if limits == nil {
-		return nil // No limits to validate against
+	if limits == nil || specs == nil || specs.Spec == nil {
+		return nil // No limits or passthrough mode — skip validation
 	}
+	s := specs.Spec
 
-	if limits.MaxCpus > 0 && specs.Ncpus > limits.MaxCpus {
+	// CPUs per node = CpusPerTask * TasksPerNode
+	cpusPerNode := s.CpusPerTask * s.TasksPerNode
+	if cpusPerNode <= 0 {
+		cpusPerNode = s.CpusPerTask
+	}
+	if limits.MaxCpusPerNode > 0 && cpusPerNode > limits.MaxCpusPerNode {
 		return &ValidationError{
-			Field:     "Ncpus",
-			Requested: specs.Ncpus,
-			Limit:     limits.MaxCpus,
+			Field:     "CpusPerNode",
+			Requested: cpusPerNode,
+			Limit:     limits.MaxCpusPerNode,
 			Partition: limits.Partition,
 		}
 	}
 
-	if limits.MaxMemMB > 0 && specs.MemMB > limits.MaxMemMB {
+	if limits.MaxMemMBPerNode > 0 && s.MemPerNodeMB > limits.MaxMemMBPerNode {
 		return &ValidationError{
-			Field:     "MemMB",
-			Requested: int(specs.MemMB),
-			Limit:     int(limits.MaxMemMB),
+			Field:     "MemPerNodeMB",
+			Requested: int(s.MemPerNodeMB),
+			Limit:     int(limits.MaxMemMBPerNode),
 			Partition: limits.Partition,
 		}
 	}
 
-	if limits.MaxTime > 0 && specs.Time > limits.MaxTime {
+	if limits.MaxTime > 0 && s.Time > limits.MaxTime {
 		return &ValidationError{
 			Field:     "Time",
-			Requested: int(specs.Time.Hours()),
+			Requested: int(s.Time.Hours()),
 			Limit:     int(limits.MaxTime.Hours()),
 			Partition: limits.Partition,
 		}
 	}
 
-	if specs.Gpu != nil && limits.MaxGpus > 0 && specs.Gpu.Count > limits.MaxGpus {
-		return &ValidationError{
-			Field:     "Gpu",
-			Requested: specs.Gpu.Count,
-			Limit:     limits.MaxGpus,
-			Partition: limits.Partition,
+	// GPU count validation: Gpu.Count is per-node; compare total against MaxGpus
+	if s.Gpu != nil && limits.MaxGpus > 0 {
+		totalGpus := s.Gpu.Count * s.Nodes
+		if totalGpus > limits.MaxGpus {
+			return &ValidationError{
+				Field:     "Gpu",
+				Requested: totalGpus,
+				Limit:     limits.MaxGpus,
+				Partition: limits.Partition,
+			}
 		}
 	}
 
@@ -250,40 +279,74 @@ func ValidateAndConvertSpecs(specs *ScriptSpecs) (validationErr error, cpuAdjust
 		return nil, false, "", false, ""
 	}
 
-	// Auto-adjust CPU if it exceeds limits in all partitions
-	// When reducing CPUs, also adjust time estimate proportionally
-	if len(clusterInfo.Limits) > 0 && specs.Ncpus > 0 {
+	// Skip all resource validation in passthrough mode
+	if specs.Spec == nil {
+		return nil, false, "", false, ""
+	}
+	s := specs.Spec
+
+	// Filter limits to the requested partition when specified.
+	// When Control.Partition is set, only validate against that partition's limits.
+	activeLimits := clusterInfo.Limits
+	if specs.Control.Partition != "" {
+		filtered := make([]ResourceLimits, 0, 1)
+		for _, limit := range clusterInfo.Limits {
+			if limit.Partition == specs.Control.Partition {
+				filtered = append(filtered, limit)
+				break
+			}
+		}
+		if len(filtered) > 0 {
+			activeLimits = filtered
+		}
+		// If the requested partition is not in clusterInfo (e.g. not exposed by scheduler),
+		// fall back to all limits to avoid silently skipping validation.
+	}
+
+	// Auto-adjust CpusPerTask if the effective CPUs per node exceed limits in all partitions.
+	// When reducing CPUs, also adjust time estimate proportionally.
+	if len(activeLimits) > 0 && s.CpusPerTask > 0 {
 		maxAllowedCpu := 0
 		maxAllowedTime := time.Duration(0)
 
-		for _, limit := range clusterInfo.Limits {
-			if limit.MaxCpus > maxAllowedCpu {
-				maxAllowedCpu = limit.MaxCpus
+		for _, limit := range activeLimits {
+			if limit.MaxCpusPerNode > maxAllowedCpu {
+				maxAllowedCpu = limit.MaxCpusPerNode
 			}
 			if limit.MaxTime > maxAllowedTime {
 				maxAllowedTime = limit.MaxTime
 			}
 		}
 
-		if maxAllowedCpu > 0 && specs.Ncpus > maxAllowedCpu {
-			originalCpu := specs.Ncpus
-			originalTime := specs.Time
+		// Effective CPUs per node = CpusPerTask * TasksPerNode
+		effectiveCpusPerNode := s.CpusPerTask * s.TasksPerNode
+		if s.TasksPerNode <= 0 {
+			effectiveCpusPerNode = s.CpusPerTask
+		}
+		if maxAllowedCpu > 0 && effectiveCpusPerNode > maxAllowedCpu {
+			originalCpu := s.CpusPerTask
+			originalTime := s.Time
 
-			// Reduce CPUs to fit limit
-			specs.Ncpus = maxAllowedCpu
+			// Reduce CpusPerTask to fit limit (keep TasksPerNode unchanged)
+			tasksPerNode := s.TasksPerNode
+			if tasksPerNode <= 0 {
+				tasksPerNode = 1
+			}
+			s.CpusPerTask = maxAllowedCpu / tasksPerNode
+			if s.CpusPerTask < 1 {
+				s.CpusPerTask = 1
+			}
 
 			// Adjust time proportionally (assuming linear scaling)
-			// If we reduce CPUs by half, job might take twice as long
 			if originalTime > 0 {
-				cpuReductionRatio := float64(originalCpu) / float64(maxAllowedCpu)
+				cpuReductionRatio := float64(originalCpu) / float64(s.CpusPerTask)
 				adjustedTime := time.Duration(float64(originalTime) * cpuReductionRatio)
 
 				// Check if adjusted time exceeds cluster limit
 				if maxAllowedTime > 0 && adjustedTime > maxAllowedTime {
-					// Cannot reduce CPUs because it would make the job exceed time limit
-					specs.Ncpus = originalCpu // Restore original value
+					s.CpusPerTask = originalCpu // Restore original value
 					return &ValidationError{
-						Field:     "Ncpus/Time",
+						Field:     "CpusPerTask/Time",
 						Requested: originalCpu,
 						Limit:     maxAllowedCpu,
 						Partition: fmt.Sprintf("reducing CPUs to %d would require %s, exceeding time limit %s",
@@ -291,26 +354,24 @@ func ValidateAndConvertSpecs(specs *ScriptSpecs) (validationErr error, cpuAdjust
 					}, false, "", false, ""
 				}
 
-				// Update time estimate
-				specs.Time = adjustedTime
+				s.Time = adjustedTime
 				cpuAdjusted = true
-				cpuMsg = fmt.Sprintf("CPUs: %d → %d (reduced to fit limit); Time: %s → %s (adjusted proportionally)",
-					originalCpu, maxAllowedCpu,
+				cpuMsg = fmt.Sprintf("CPUs/task: %d → %d (reduced to fit limit); Time: %s → %s (adjusted proportionally)",
+					originalCpu, s.CpusPerTask,
 					originalTime.Round(time.Minute), adjustedTime.Round(time.Minute))
 			} else {
-				// No time specified, just reduce CPUs
 				cpuAdjusted = true
-				cpuMsg = fmt.Sprintf("CPUs: %d → %d (reduced to fit cluster limit)", originalCpu, maxAllowedCpu)
+				cpuMsg = fmt.Sprintf("CPUs/task: %d → %d (reduced to fit cluster limit)", originalCpu, s.CpusPerTask)
 			}
 		}
 	}
 
-	// Validate resource limits (memory and other critical resources) against all partitions
-	if len(clusterInfo.Limits) > 0 {
+	// Validate resource limits (memory and other critical resources) against active partitions
+	if len(activeLimits) > 0 {
 		validForSomePartition := false
 		var firstValidationErr error
 
-		for _, limit := range clusterInfo.Limits {
+		for _, limit := range activeLimits {
 			if err := ValidateSpecs(specs, &limit); err == nil {
 				validForSomePartition = true
 				break
@@ -320,33 +381,35 @@ func ValidateAndConvertSpecs(specs *ScriptSpecs) (validationErr error, cpuAdjust
 		}
 
 		if !validForSomePartition {
-			// Job exceeds limits in all partitions (likely memory or GPU count)
 			return firstValidationErr, cpuAdjusted, cpuMsg, false, ""
 		}
 	}
 
 	// Validate and convert GPU specs if needed
-	if specs.Gpu != nil && len(clusterInfo.AvailableGpus) > 0 {
-		originalGpuType := specs.Gpu.Type
-		originalGpuCount := specs.Gpu.Count
+	nodes := s.Nodes
+	if nodes <= 0 {
+		nodes = 1
+	}
+	if s.Gpu != nil && len(clusterInfo.AvailableGpus) > 0 {
+		originalGpuType := s.Gpu.Type
+		originalGpuCount := s.Gpu.Count
 
 		// Check if requested GPU is available
-		err := ValidateGpuAvailability(specs.Gpu, clusterInfo)
+		err := ValidateGpuAvailability(s.Gpu, nodes, clusterInfo)
 		if err != nil {
 			// GPU not available - attempt conversion
-			convertedSpec, convErr := ConvertGpuSpec(specs.Gpu, clusterInfo)
+			convertedSpec, convErr := ConvertGpuSpec(s.Gpu, nodes, clusterInfo)
 			if convErr != nil {
-				// Conversion failed - return the validation error
 				return err, cpuAdjusted, cpuMsg, false, ""
 			}
 
-			// Conversion succeeded - update specs and build message
-			specs.Gpu = convertedSpec
+			// Conversion succeeded - update specs
+			s.Gpu = convertedSpec
 
 			// Determine if upgrade or downgrade
 			conversionType := "alternative"
 			isDowngrade := false
-			options, _ := FindCompatibleGpu(specs.Gpu, clusterInfo)
+			options, _ := FindCompatibleGpu(s.Gpu, nodes, clusterInfo)
 			if len(options) > 0 && options[0].SuggestedSpec.Type == convertedSpec.Type {
 				if options[0].IsUpgrade {
 					conversionType = "upgrade"
@@ -356,19 +419,15 @@ func ValidateAndConvertSpecs(specs *ScriptSpecs) (validationErr error, cpuAdjust
 				}
 			}
 
-			// GPU downgrades are risky when time limits exist because we can't estimate
-			// how much longer the job will take on a slower GPU (performance varies by workload)
-			if isDowngrade && specs.Time > 0 {
-				// Restore original GPU spec
-				specs.Gpu = &GpuSpec{Type: originalGpuType, Count: originalGpuCount}
-
-				// Return error with explanation
+			// GPU downgrades are risky when time limits exist
+			if isDowngrade && s.Time > 0 {
+				s.Gpu = &GpuSpec{Type: originalGpuType, Count: originalGpuCount}
 				return &ValidationError{
 					Field:     "Gpu",
-					Requested: 0, // Not a count issue
+					Requested: 0,
 					Limit:     0,
 					Partition: fmt.Sprintf("GPU downgrade %s → %s not allowed with time limit %s (runtime unpredictable; consider removing time limit or requesting available GPU)",
-						originalGpuType, convertedSpec.Type, specs.Time.Round(time.Minute)),
+						originalGpuType, convertedSpec.Type, s.Time.Round(time.Minute)),
 				}, cpuAdjusted, cpuMsg, false, ""
 			}
 
@@ -510,11 +569,11 @@ func ReadMaxSpecs(scheduler Scheduler) (*ResourceLimits, error) {
 	}
 
 	for _, limit := range info.Limits {
-		if limit.MaxCpus > maxLimits.MaxCpus {
-			maxLimits.MaxCpus = limit.MaxCpus
+		if limit.MaxCpusPerNode > maxLimits.MaxCpusPerNode {
+			maxLimits.MaxCpusPerNode = limit.MaxCpusPerNode
 		}
-		if limit.MaxMemMB > maxLimits.MaxMemMB {
-			maxLimits.MaxMemMB = limit.MaxMemMB
+		if limit.MaxMemMBPerNode > maxLimits.MaxMemMBPerNode {
+			maxLimits.MaxMemMBPerNode = limit.MaxMemMBPerNode
 		}
 		if limit.MaxGpus > maxLimits.MaxGpus {
 			maxLimits.MaxGpus = limit.MaxGpus
@@ -555,26 +614,30 @@ func ValidateScript(scheduler Scheduler, scriptPath string) error {
 		return nil
 	}
 
-	// Validate against all partition limits
-	// If the script doesn't specify a partition, validate against all of them
+	// Validate against the requested partition (or all if none specified)
 	if len(info.Limits) == 0 {
 		return nil // No limits to validate against
 	}
 
-	// Validate against each partition's limits
-	for _, limit := range info.Limits {
+	limits := info.Limits
+	if specs != nil && specs.Control.Partition != "" {
+		for _, limit := range info.Limits {
+			if limit.Partition == specs.Control.Partition {
+				return ValidateSpecs(specs, &limit)
+			}
+		}
+		// Requested partition not found — fall through to all-partition check
+	}
+
+	// Validate against each partition's limits; pass if any accepts the job
+	for _, limit := range limits {
 		if err := ValidateSpecs(specs, &limit); err != nil {
-			// If it exceeds limits in one partition, that's ok as long as
-			// there's another partition that can handle it
 			continue
 		}
-		// Found a partition that can handle this job
 		return nil
 	}
 
-	// If we get here, the job exceeds limits in all partitions
-	// Return validation error for the first partition
-	return ValidateSpecs(specs, &info.Limits[0])
+	return ValidateSpecs(specs, &limits[0])
 }
 
 // WriteScript creates a batch script with the given specifications
@@ -714,7 +777,10 @@ func ParseScriptAny(scriptPath string) (*ParsedScript, error) {
 		case SchedulerLSF:
 			specs, err = TryParseLsfScript(scriptPath)
 		case SchedulerHTCondor:
-			specs, err = TryParseHTCondorScript(scriptPath)
+			// Only parse as HTCondor if the file has the native .sub extension.
+			if strings.HasSuffix(scriptPath, ".sub") {
+				specs, err = TryParseHTCondorScript(scriptPath)
+			}
 		default:
 			continue
 		}
@@ -806,10 +872,13 @@ func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 		utils.PrintWarning("Script contains %s directives but host has %s scheduler. Specs will be translated.",
 			parsed.ScriptType, hostType)
 
-		// Clear RawFlags when doing cross-scheduler translation
-		// RawFlags contain scheduler-specific syntax that won't work on different schedulers
-		// All necessary info is preserved in the parsed ScriptSpecs fields
-		parsed.Specs.RawFlags = nil
+		// Clear RemainingFlags on cross-scheduler translation:
+		// scheduler-specific unrecognized flags cannot be translated.
+		// RawFlags is the immutable audit log — never cleared.
+		parsed.Specs.RemainingFlags = nil
+		// Clear Partition: the original partition name is scheduler-specific
+		// and cannot be translated to the host scheduler's partition names.
+		parsed.Specs.Control.Partition = ""
 	}
 
 	return parsed.Specs, nil

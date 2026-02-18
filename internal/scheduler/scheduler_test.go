@@ -8,17 +8,17 @@ import (
 
 func TestSpecDefaultsInitialValues(t *testing.T) {
 	defaults := GetSpecDefaults()
-	if defaults.Ncpus != 2 {
-		t.Errorf("Ncpus = %d; want 2", defaults.Ncpus)
+	if defaults.CpusPerTask != 2 {
+		t.Errorf("CpusPerTask = %d; want 2", defaults.CpusPerTask)
 	}
 	if defaults.Nodes != 1 {
 		t.Errorf("Nodes = %d; want 1", defaults.Nodes)
 	}
-	if defaults.Ntasks != 1 {
-		t.Errorf("Ntasks = %d; want 1", defaults.Ntasks)
+	if defaults.TasksPerNode != 1 {
+		t.Errorf("TasksPerNode = %d; want 1", defaults.TasksPerNode)
 	}
-	if defaults.MemMB != 8192 {
-		t.Errorf("MemMB = %d; want 8192", defaults.MemMB)
+	if defaults.MemPerNodeMB != 8192 {
+		t.Errorf("MemPerNodeMB = %d; want 8192", defaults.MemPerNodeMB)
 	}
 	if defaults.Time != 4*time.Hour {
 		t.Errorf("Time = %v; want 4h", defaults.Time)
@@ -31,20 +31,20 @@ func TestSpecDefaultsSetAndGet(t *testing.T) {
 	defer SetSpecDefaults(original)
 
 	custom := SpecDefaults{
-		Ncpus:  8,
-		MemMB:  16384,
-		Time:   4 * time.Hour,
-		Nodes:  2,
-		Ntasks: 4,
+		CpusPerTask:  8,
+		MemPerNodeMB: 16384,
+		Time:         4 * time.Hour,
+		Nodes:        2,
+		TasksPerNode: 4,
 	}
 	SetSpecDefaults(custom)
 
 	got := GetSpecDefaults()
-	if got.Ncpus != 8 {
-		t.Errorf("Ncpus = %d; want 8", got.Ncpus)
+	if got.CpusPerTask != 8 {
+		t.Errorf("CpusPerTask = %d; want 8", got.CpusPerTask)
 	}
-	if got.MemMB != 16384 {
-		t.Errorf("MemMB = %d; want 16384", got.MemMB)
+	if got.MemPerNodeMB != 16384 {
+		t.Errorf("MemPerNodeMB = %d; want 16384", got.MemPerNodeMB)
 	}
 	if got.Time != 4*time.Hour {
 		t.Errorf("Time = %v; want 4h", got.Time)
@@ -52,8 +52,8 @@ func TestSpecDefaultsSetAndGet(t *testing.T) {
 	if got.Nodes != 2 {
 		t.Errorf("Nodes = %d; want 2", got.Nodes)
 	}
-	if got.Ntasks != 4 {
-		t.Errorf("Ntasks = %d; want 4", got.Ntasks)
+	if got.TasksPerNode != 4 {
+		t.Errorf("TasksPerNode = %d; want 4", got.TasksPerNode)
 	}
 }
 
@@ -63,11 +63,11 @@ func TestSpecDefaultsAffectsReadScriptSpecs(t *testing.T) {
 	defer SetSpecDefaults(original)
 
 	SetSpecDefaults(SpecDefaults{
-		Ncpus:  16,
-		MemMB:  32768,
-		Time:   8 * time.Hour,
-		Nodes:  1,
-		Ntasks: 1,
+		CpusPerTask:  16,
+		MemPerNodeMB: 32768,
+		Time:         8 * time.Hour,
+		Nodes:        1,
+		TasksPerNode: 1,
 	})
 
 	// Parse a script with no resource directives — should pick up custom defaults
@@ -83,14 +83,17 @@ func TestSpecDefaultsAffectsReadScriptSpecs(t *testing.T) {
 		t.Fatalf("ReadScriptSpecs failed: %v", err)
 	}
 
-	if specs.Ncpus != 16 {
-		t.Errorf("Ncpus = %d; want 16 (from custom defaults)", specs.Ncpus)
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil; expected non-nil ResourceSpec")
 	}
-	if specs.MemMB != 32768 {
-		t.Errorf("MemMB = %d; want 32768 (from custom defaults)", specs.MemMB)
+	if specs.Spec.CpusPerTask != 16 {
+		t.Errorf("CpusPerTask = %d; want 16 (from custom defaults)", specs.Spec.CpusPerTask)
 	}
-	if specs.Time != 8*time.Hour {
-		t.Errorf("Time = %v; want 8h (from custom defaults)", specs.Time)
+	if specs.Spec.MemPerNodeMB != 32768 {
+		t.Errorf("MemPerNodeMB = %d; want 32768 (from custom defaults)", specs.Spec.MemPerNodeMB)
+	}
+	if specs.Spec.Time != 8*time.Hour {
+		t.Errorf("Time = %v; want 8h (from custom defaults)", specs.Spec.Time)
 	}
 }
 
