@@ -18,3 +18,19 @@ condatainer run --debug src/run_chain_pbs.sh
 # GPU jobs test
 condatainer create -p src/pytorch -f src/pytorch.def
 condatainer run src/gpu_test_slurm.sh
+
+# MPI jobs test
+condatainer overlay create --sparse mpi.img
+ml av openmpi # openmpi/4.1.5
+# Make sure install the same major.minor version of openmpi
+condatainer e mpi.img -- mm-install mpi4py openmpi=4.1 -y
+condatainer run --debug src/mpi_test_slurm.sh
+cat src/output.txt
+rm src/output.txt
+
+# Pure slurm test
+# salloc --ntasks=4 --time=00:30:00
+# ml purge
+# ml openmpi mpi4py
+# mpiexec python src/mpi_file_handler.py
+# condatainer run src/mpi_test_slurm.sh

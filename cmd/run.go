@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,8 +39,9 @@ var runCmd = &cobra.Command{
 	Long: `Execute a script with automatic dependency resolution.
 
 The script can contain special comment tags:
-  #DEP: package/version  - Declares a dependency
-  #CNT args              - Additional arguments to pass to condatainer
+  #DEP: package/version   - Declares a dependency
+  #DEP: /path/overlay.img - Declares an overlay dependency (.sqf and .img)
+  #CNT args               - Additional arguments to pass to condatainer
 
 Supported #CNT arguments:
   -w, --writable         Make .img overlays writable
@@ -54,10 +57,12 @@ with the --auto-install flag.`,
   condatainer run script.sh -w           # Make .img overlays writable
   condatainer run script.sh -b base.sif  # Use custom base image
 
-  # In script.sh, you can use #CNT to set options:
-  # #CNT -w
-  # #CNT --env MYVAR=value
-  # #CNT --bind /data:/mnt/data`,
+  In script.sh, you can use #CNT and #DEP to set options:
+  #DEP: /path/bundle.sqf
+  #DEP: /path/overlay.img
+  #CNT -w
+  #CNT --env MYVAR=value
+  #CNT --bind /data:/mnt/data`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runScript,
@@ -462,6 +467,93 @@ func validateAndConvertSpecs(specs *scheduler.ScriptSpecs) error {
 	return nil
 }
 
+// getNtasks returns the total number of MPI tasks from the resource spec.
+func getNtasks(specs *scheduler.ScriptSpecs) int {
+	if specs == nil || specs.Spec == nil {
+		return 1
+	}
+	nodes := specs.Spec.Nodes
+	if nodes <= 0 {
+		nodes = 1
+	}
+	tpn := specs.Spec.TasksPerNode
+	if tpn <= 0 {
+		tpn = 1
+	}
+	return nodes * tpn
+}
+
+// detectMpi probes the current environment for mpiexec, first directly and then
+// via the module system.  Returns (available, moduleName, mpiexecPath): moduleName is
+// non-empty when a module must be loaded; mpiexecPath is the full path to mpiexec used
+// to derive the MPI installation root for bind-mounting into the container.
+func detectMpi() (bool, string, string) {
+	// Step 1: mpiexec already in PATH?
+	if path, err := osexec.LookPath("mpiexec"); err == nil {
+		return true, "", path
+	}
+
+	// Step 2: query the module system for an openmpi module.
+	availCmd := osexec.Command("bash", "-lc", "module avail -t openmpi 2>&1")
+	availOut, err := availCmd.Output()
+	if err != nil || len(availOut) == 0 {
+		return false, "", ""
+	}
+
+	var candidates []string
+	for _, line := range strings.Split(string(availOut), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(strings.ToLower(line), "openmpi") {
+			continue
+		}
+		// Strip attribute markers like (default), (L), etc.
+		if idx := strings.Index(line, "("); idx != -1 {
+			line = strings.TrimSpace(line[:idx])
+		}
+		if line != "" {
+			candidates = append(candidates, line)
+		}
+	}
+	if len(candidates) == 0 {
+		return false, "", ""
+	}
+
+	// Pick the highest version (lexicographic sort is sufficient for openmpi/X.Y.Z).
+	sort.Strings(candidates)
+	mod := candidates[len(candidates)-1]
+
+	// Step 3: load the module and capture the mpiexec path.
+	pathCmd := osexec.Command("bash", "-lc",
+		fmt.Sprintf("module purge && module load %s && which mpiexec", mod))
+	pathOut, err := pathCmd.Output()
+	if err != nil || len(pathOut) == 0 {
+		return false, "", ""
+	}
+	return true, mod, strings.TrimSpace(string(pathOut))
+}
+
+// buildMpiRunCommand returns the shell command to embed in the job script.
+// When ntasks > 1 it attempts to detect mpiexec (directly or via a module) and
+// wraps the condatainer run invocation with mpiexec.
+// The user is responsible for installing the same MPI version inside the container.
+func buildMpiRunCommand(contentScript string, specs *scheduler.ScriptSpecs) string {
+	if getNtasks(specs) <= 1 {
+		return fmt.Sprintf("condatainer run %s", contentScript)
+	}
+	ok, mod, mpiexecPath := detectMpi()
+	if !ok {
+		utils.PrintWarning("mpiexec not found; running %s without MPI wrapper", utils.StylePath(contentScript))
+		return fmt.Sprintf("condatainer run %s", contentScript)
+	}
+	if mod != "" {
+		utils.PrintNote("Detected MPI module: %s", utils.StyleName(mod))
+		return fmt.Sprintf("module purge && module load %s && mpiexec condatainer run %s",
+			mod, contentScript)
+	}
+	utils.PrintNote("Detected mpiexec: %s", utils.StylePath(mpiexecPath))
+	return fmt.Sprintf("mpiexec condatainer run %s", contentScript)
+}
+
 // submitRunJob creates and submits a scheduler job to run the script.
 // contentScript is the bash script containing #DEP/#CNT directives — for HTCondor this is the
 // executable referenced in the .sub file, for other schedulers it equals scriptPath.
@@ -500,7 +592,7 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 	// Build the condatainer run command pointing at the bash script.
 	// When the user provided a .sub file, contentScript is the executable .sh — the submitted
 	// job must re-invoke condatainer run on the bash script, not the submit file.
-	runCommand := fmt.Sprintf("condatainer run %s", contentScript)
+	runCommand := buildMpiRunCommand(contentScript, specs)
 
 	// Generate names: short name for job, timestamped name for files
 	baseName := filepath.Base(originScriptPath)

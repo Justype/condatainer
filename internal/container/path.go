@@ -29,9 +29,12 @@ func FormatOverlayMount(path string, writable bool) string {
 	return path
 }
 
-// BuildPathEnv constructs the PATH environment variable based on overlays
+// BuildPathEnv constructs the PATH environment variable based on overlays.
+// When MPI_DIR is set (exported by condatainer when ntasks > 1), its bin/ is
+// prepended so MPI tools are accessible inside the container.
 func BuildPathEnv(overlays []string) string {
-	paths := []string{"/usr/sbin", "/usr/bin"}
+	// paths := []string{"/usr/sbin", "/usr/bin"}
+	paths := []string{"$PATH"} // $PATH here is the PATH from the base image
 
 	for _, overlay := range overlays {
 		// Strip :ro or :rw suffix for path checking

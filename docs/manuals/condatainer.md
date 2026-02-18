@@ -955,6 +955,64 @@ condatainer --local run analysis.sh
 condatainer config set submit_job false
 ```
 
+### MPI Auto-Detection
+
+When a scheduler script requests more than one task (`--ntasks-per-node`, `--ntasks`, or PBS/LSF equivalents), `condatainer run` automatically detects the host MPI and wraps the job command with `mpiexec`:
+
+**Detection order:**
+
+1. `mpiexec` already in `PATH` → use it directly
+2. `module avail -t openmpi` → pick the highest available version, load it with `module purge && module load`
+3. Neither found → warn and run without MPI wrapper
+
+**Generated job command:**
+
+```bash
+# Via direct PATH:
+mpiexec condatainer run script.sh
+
+# Via module system:
+module purge && module load openmpi/4.1.5 && mpiexec condatainer run script.sh
+```
+
+**MPI Script Example:**
+
+```bash
+#!/bin/bash
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=3
+#SBATCH --mem=1G
+#SBATCH --time=00:30:00
+
+#DEP: mpi.img
+
+python my_mpi_script.py
+```
+
+Run with:
+
+```bash
+condatainer run mpi_job.sh
+```
+
+CondaTainer detects `ntasks = 6`, finds `mpiexec`, and submits:
+
+```bash
+mpiexec condatainer run mpi_job.sh
+```
+
+Each MPI rank launches its own container, all sharing the same MPI communicator via SLURM's process management interface.
+
+````{important}
+You need to have the same major and minor version of OpenMPI installed inside the container as on the host.
+
+```bash
+ml av openmpi
+# openmpi/4.1.5
+condatainer e mpi.img -- mm-install mpi4py openmpi=4.1 -y
+```
+````
+
 ### CondaTainer is compatible with module systems
 
 **CondaTainer** will scan your script for `module load` or `ml` commands and mount the corresponding overlays automatically.
