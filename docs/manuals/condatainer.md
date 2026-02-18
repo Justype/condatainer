@@ -284,7 +284,7 @@ condatainer overlay chown [OPTIONS] [image]
 * `-u`, `--uid UID`    : Set the owner UID (default: current user's UID).
 * `-g`, `--gid GID`    : Set the group GID (default: current user's GID).
 * `--root`             : Set UID/GID to 0 (root); overrides `-u` and `-g`.
-* `-p`, `--path PATH`  : Path inside the overlay to change (can specify multiple, default: `/ext3` and `/opt`).
+* `-p`, `--path PATH`  : Path inside the overlay to change (can specify multiple, default: `/ext3:/opt`).
 * `image`              : Path to the overlay `img` file.
 
 **Examples:**

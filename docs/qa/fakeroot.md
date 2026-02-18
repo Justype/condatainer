@@ -34,8 +34,18 @@ apt update
 apt install -y build-essential
 ```
 
-```{note}
-It works on personal machine. But on some HPC systems, this may not work due to apptainer or system configuration. In that case, just stick to normal user mode and use `condatainer overlay chown` to fix permission issues inside the overlay.
+## Changing Overlay Ownership
 
-Also, RStudio Sever may not work with UID less than 1000.
+You can use `overlay chown` to change the `upper` and `work` ownership inside the overlayFS.
+
+```bash
+condatainer overlay chown --root /path/to/my_env.img
 ```
+
+You can also change the ownership to back to you:
+
+```bash
+condatainer overlay chown /path/to/my_env.img
+```
+
+See [condatainer manuals](../manuals/condatainer.md#overlay-chown) for more details.

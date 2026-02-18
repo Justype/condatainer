@@ -1,4 +1,4 @@
-# Scheduler Resources: Nodes, Tasks, and CPUs
+# Scheduler Resources
 
 Understanding the difference between **nodes**, **tasks**, and **CPUs** helps you allocate resources correctly and avoid common mistakes on HPC clusters.
 
@@ -60,7 +60,7 @@ Inside the container, thread-parallel libraries will use all 8 CPUs.
 
 This starts 8 separate Python processes, each running `train_model.py` from scratch wasting 7× the resources.
 
-## MPI Jobs: When to Use Multiple Tasks
+## MPI Jobs
 
 Use multiple tasks **only** when your program uses MPI for inter-process communication.
 
