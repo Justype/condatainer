@@ -154,9 +154,11 @@ func (l *LsfScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 		case flagMatches(flag, "-J"):
 			rc.JobName, _ = flagValue(flag, "-J")
 		case flagMatches(flag, "-o"):
-			rc.Stdout, _ = flagValue(flag, "-o")
+			v, _ := flagValue(flag, "-o")
+			rc.Stdout = absPath(v)
 		case flagMatches(flag, "-e"):
-			rc.Stderr, _ = flagValue(flag, "-e")
+			v, _ := flagValue(flag, "-e")
+			rc.Stderr = absPath(v)
 		case flag == "-B":
 			rc.EmailOnBegin = true
 		case flag == "-N":
@@ -365,9 +367,12 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		}
 	}
 
-	// Set log path based on job name
-	if jobSpec.Name != "" {
+	// Set log path based on job name; only override if caller requests it or script has no output set
+	if jobSpec.Name != "" && (jobSpec.OverrideOutput || specs.Control.Stdout == "") {
 		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeJobName(jobSpec.Name)))
+	}
+	if specs.Control.Stderr == "" && specs.Control.Stdout != "" {
+		specs.Control.Stderr = specs.Control.Stdout
 	}
 
 	// Generate script filename
@@ -404,6 +409,9 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	// Add custom stdout if specified
 	if specs.Control.Stdout != "" {
 		fmt.Fprintf(writer, "#BSUB -o %s\n", specs.Control.Stdout)
+	}
+	if specs.Control.Stderr != "" {
+		fmt.Fprintf(writer, "#BSUB -e %s\n", specs.Control.Stderr)
 	}
 
 	// Add email notifications if specified

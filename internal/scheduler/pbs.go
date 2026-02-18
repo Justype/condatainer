@@ -151,9 +151,11 @@ func (p *PbsScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 		case flagMatches(flag, "-N"):
 			rc.JobName, _ = flagValue(flag, "-N")
 		case flagMatches(flag, "-o"):
-			rc.Stdout, _ = flagValue(flag, "-o")
+			v, _ := flagValue(flag, "-o")
+			rc.Stdout = absPath(v)
 		case flagMatches(flag, "-e"):
-			rc.Stderr, _ = flagValue(flag, "-e")
+			v, _ := flagValue(flag, "-e")
+			rc.Stderr = absPath(v)
 		case flagMatches(flag, "-q"):
 			rc.Partition, _ = flagValue(flag, "-q")
 		case flagMatches(flag, "-M"):
@@ -377,9 +379,12 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		}
 	}
 
-	// Set log path based on job name (logs go to outputDir, which caller controls)
-	if jobSpec.Name != "" {
+	// Set log path based on job name; only override if caller requests it or script has no output set
+	if jobSpec.Name != "" && (jobSpec.OverrideOutput || specs.Control.Stdout == "") {
 		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeJobName(jobSpec.Name)))
+	}
+	if specs.Control.Stderr == "" && specs.Control.Stdout != "" {
+		specs.Control.Stderr = specs.Control.Stdout
 	}
 
 	// Generate script filename
@@ -415,6 +420,9 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	}
 	if ctrl.Stdout != "" {
 		fmt.Fprintf(writer, "#PBS -o %s\n", ctrl.Stdout)
+	}
+	if ctrl.Stderr != "" {
+		fmt.Fprintf(writer, "#PBS -e %s\n", ctrl.Stderr)
 	}
 	if ctrl.Partition != "" {
 		fmt.Fprintf(writer, "#PBS -q %s\n", ctrl.Partition)

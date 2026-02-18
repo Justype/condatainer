@@ -146,11 +146,12 @@ func GetSpecDefaults() SpecDefaults {
 
 // JobSpec represents specifications for submitting a batch job
 type JobSpec struct {
-	Name      string            // Job name (for temp and log file naming)
-	Command   string            // Command to execute
-	Specs     *ScriptSpecs      // Job specifications
-	DepJobIDs []string          // Job IDs this job depends on
-	Metadata  map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
+	Name           string            // Job name (for temp and log file naming)
+	Command        string            // Command to execute
+	Specs          *ScriptSpecs      // Job specifications
+	DepJobIDs      []string          // Job IDs this job depends on
+	Metadata       map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
+	OverrideOutput bool              // If true, always set Stdout/Stderr from Name (ignores script directives)
 }
 
 // JobResources holds resource allocations for the currently running scheduler job.

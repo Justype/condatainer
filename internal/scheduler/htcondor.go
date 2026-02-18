@@ -228,9 +228,9 @@ func (h *HTCondorScheduler) parseRuntimeConfig(directives []string) (RuntimeConf
 
 		switch key {
 		case "output", "log":
-			rc.Stdout = value
+			rc.Stdout = absPath(value)
 		case "error":
-			rc.Stderr = value
+			rc.Stderr = absPath(value)
 		case "notify_user":
 			rc.MailUser = value
 		case "accounting_group":
@@ -354,9 +354,12 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 		name = safeJobName(jobSpec.Name)
 	}
 
-	// Set log path based on job name
-	if jobSpec.Name != "" {
+	// Set log path based on job name; only override if caller requests it or script has no output set
+	if jobSpec.Name != "" && (jobSpec.OverrideOutput || specs.Control.Stdout == "") {
 		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", name))
+	}
+	if specs.Control.Stderr == "" && specs.Control.Stdout != "" {
+		specs.Control.Stderr = specs.Control.Stdout
 	}
 
 	// === Create wrapper bash script ===
@@ -435,8 +438,9 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	if specs.Control.Stdout != "" {
 		fmt.Fprintf(subWriter, "output = %s\n", specs.Control.Stdout)
 	}
-	errPath := filepath.Join(outputDir, fmt.Sprintf("%s.err", name))
-	fmt.Fprintf(subWriter, "error = %s\n", errPath)
+	if specs.Control.Stderr != "" {
+		fmt.Fprintf(subWriter, "error = %s\n", specs.Control.Stderr)
+	}
 	condorLogPath := filepath.Join(outputDir, fmt.Sprintf("%s.condor.log", name))
 	fmt.Fprintf(subWriter, "log = %s\n", condorLogPath)
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -120,6 +121,18 @@ func flagScanInt(flag string, dest *int, prefixes ...string) (bool, error) {
 // safeJobName converts a job name to a filesystem-safe string by replacing "/" with "--".
 func safeJobName(name string) string {
 	return strings.ReplaceAll(name, "/", "--")
+}
+
+// absPath returns the absolute form of path. If path is already absolute or
+// filepath.Abs fails, it returns path unchanged.
+func absPath(path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }
 
 // writeEnvVars writes resource environment variable exports to w.

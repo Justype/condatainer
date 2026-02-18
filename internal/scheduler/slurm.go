@@ -166,9 +166,11 @@ func (s *SlurmScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig,
 		case flagMatches(flag, "--job-name", "-J"):
 			rc.JobName, _ = flagValue(flag, "--job-name", "-J")
 		case flagMatches(flag, "--output", "-o"):
-			rc.Stdout, _ = flagValue(flag, "--output", "-o")
+			v, _ := flagValue(flag, "--output", "-o")
+			rc.Stdout = absPath(v)
 		case flagMatches(flag, "--error", "-e"):
-			rc.Stderr, _ = flagValue(flag, "--error", "-e")
+			v, _ := flagValue(flag, "--error", "-e")
+			rc.Stderr = absPath(v)
 		case flagMatches(flag, "--partition", "-p"):
 			rc.Partition, _ = flagValue(flag, "--partition", "-p")
 		case flagMatches(flag, "--mail-user"):
@@ -452,9 +454,12 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 		}
 	}
 
-	// Set log path based on job name (logs go to outputDir, which caller controls)
-	if jobSpec.Name != "" {
+	// Set log path based on job name; only override if caller requests it or script has no output set
+	if jobSpec.Name != "" && (jobSpec.OverrideOutput || specs.Control.Stdout == "") {
 		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeJobName(jobSpec.Name)))
+	}
+	if specs.Control.Stderr == "" && specs.Control.Stdout != "" {
+		specs.Control.Stderr = specs.Control.Stdout
 	}
 
 	// Generate script filename

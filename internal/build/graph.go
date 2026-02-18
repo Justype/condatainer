@@ -274,10 +274,11 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 
 	// Create job specification
 	jobSpec := &scheduler.JobSpec{
-		Name:      meta.NameVersion(),
-		Command:   buildSchedulerCreateCommand(meta.NameVersion()),
-		Specs:     specs,
-		DepJobIDs: depIDs,
+		Name:           meta.NameVersion(),
+		Command:        buildSchedulerCreateCommand(meta.NameVersion()),
+		Specs:          specs,
+		DepJobIDs:      depIDs,
+		OverrideOutput: true,
 		Metadata: map[string]string{
 			"Target": meta.NameVersion(),
 			"Type":   meta.Type().String(),

@@ -1070,7 +1070,8 @@ echo "hello"
 	if specs.Spec.Time != 2*time.Hour {
 		t.Errorf("Time = %v; want %v", specs.Spec.Time, 2*time.Hour)
 	}
-	if specs.Control.Stdout != "out.log" {
-		t.Errorf("Stdout = %q; want %q", specs.Control.Stdout, "out.log")
+	wantStdout := absPath("out.log")
+	if specs.Control.Stdout != wantStdout {
+		t.Errorf("Stdout = %q; want %q", specs.Control.Stdout, wantStdout)
 	}
 }
