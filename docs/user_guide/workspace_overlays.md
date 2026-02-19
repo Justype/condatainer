@@ -136,7 +136,7 @@ Then when you run `e` or `exec`, these environment variables will be set automat
 
 ```bash
 $ condatainer e
-[CNT] Autoload env.img at /scratch/chengz63/condatainer/env.img
+[CNT][NOTE] Autoload env.img at /scratch/chengz63/condatainer/env.img
 [CNT] Overlay envs:
   GOROOT: /ext3/env/go
   GOPATH: /ext3/home/go
@@ -156,7 +156,7 @@ Then when you run `e` or `exec`, the notes will be displayed:
 
 ```bash
 $ condatainer e
-[CNT] Autoload env.img at /scratch/chengz63/condatainer/env.img
+[CNT][NOTE] Autoload env.img at /scratch/chengz63/condatainer/env.img
 [CNT] Overlay envs:
   GOROOT: Go Installation Path
   GOPATH: Go Workspace Path

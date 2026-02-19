@@ -25,7 +25,7 @@ condatainer check analysis.sh -a
 
 # Print helpful info when running with overlays
 condatainer exec -o grch38/cellranger/2024-A bash
-# [CondaTainer] Overlay envs:
+# [CNT] Overlay envs:
 #   CELLRANGER_REF_DIR: cellranger reference dir
 #   GENOME_FASTA      : genome fasta
 #   ANNOTATION_GTF_GZ : 10X modified gtf
@@ -46,7 +46,7 @@ To Install a Salmon Index Overlay. You don't need to:
 **Condatainer** will handle all these steps for you automatically!
 
 ```bash
-condatainer install grch38/salmon/1.10.2/gencode47
+condatainer create grch38/salmon/1.10.2/gencode47
 # This command will:
 # - Install Salmon 1.10.2 via bioconda
 # - Download GRCh38 genome FASTA
@@ -97,8 +97,6 @@ Example Script (`analysis.sh`):
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=1GB
 #DEP:samtools/1.22.1
-
-fi
 
 samtools --version
 ```
