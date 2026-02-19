@@ -32,7 +32,6 @@ positional arguments:
     check (c)           Check if the dependencies of a script are installed
     run (r)             Run a script and auto-solve the dependencies by #DEP tags
     self-update         Update ModGen to the latest version
-    condatainer         Install CondaTainer
 
 options:
   -h, --help            show this help message and exit
@@ -199,7 +198,7 @@ Utilities for running scripts with automatic dependency handling via  `#DEP:` ta
 
 ### Check
 
-Parses a script for `#DEP:` tags and `module load` or `ml` commands and checks if the required overlays are installed.
+Parses a script for `#DEP:` tags and `module load` or `ml` commands and checks if the required modules are installed.
 
 ```
 modgen check [SCRIPT] [-a]
@@ -224,12 +223,27 @@ modgen run [SCRIPT] [SCRIPT_ARGS...]
 
 **Execution behavior:**
 
-1. If in a SLURM job, run locally without submission.
-2. If `#SBATCH` are found and SLURM is available, submit a job that re-invokes `modgen run <script>`. (unless `--local` is set)
-3. Otherwise, run the script directly with the appropriate modules loaded.
+1. If already inside a SLURM job, run locally immediately.
+2. If `#SBATCH` is found and SLURM is available, submit a job that re-invokes `modgen run <script>`. (unless `--local` is set)
+3. Otherwise, run the script directly with modules pre-loaded. `module` and `ml` are stubbed as no-ops to prevent accidental `module purge`.
+
+| Variable | Description |
+|---|---|
+| `NCPUS` | CPUs per task (`--cpus-per-task`, default: `1`) |
+| `MEM` | Memory in MB (`--mem`, e.g. `32G` → `32768`) |
+| `MEM_MB` | Same as `MEM` |
+| `MEM_GB` | Memory in GB |
 
 > [!NOTE]
 > Overlay file dependencies (`.sqf`, `.img`) in `#DEP:` tags are not supported. Use CondaTainer instead.
+
+**Script Example (local run):**
+
+```bash
+#!/bin/bash
+#DEP: bcftools/1.22
+bcftools view input.vcf | head
+```
 
 **Script Example (SLURM submission):**
 
@@ -241,8 +255,6 @@ modgen run [SCRIPT] [SCRIPT_ARGS...]
 #DEP: bcftools/1.22
 bcftools view input.vcf | head
 ```
-
-If no `#SBATCH` directives are present, the script runs directly without job submission.
 
 ## Update
 
