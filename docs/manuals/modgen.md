@@ -216,20 +216,33 @@ Run a script with automatic dependency resolution based on `#DEP:` tags and `mod
 modgen run [SCRIPT] [SCRIPT_ARGS...]
 ```
 
-* **Dependency Injection:** Reads `#DEP:`and `module load` or `ml` commands lines in the script to determine which overlays to mount.
-* **Argument Injection:** Reads `#CNT` lines in the script to inject arguments into the condatainer command itself.
+* **Dependency Injection:** Reads `#DEP:` tags and `module load`/`ml` lines in the script to determine which modules to load before execution.
+* **Argument Injection:** Reads `#CNT` lines in the script to inject arguments into the modgen command itself.
 * `-w`, `--writable`: Placeholder for CondaTainer compatibility (no effect).
 * `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies found in the script.
 * `-i`, `--install`: Alias for `--auto-install`.
 
-**Script Example:**
+**Execution behavior:**
+
+1. If in a SLURM job, run locally without submission.
+2. If `#SBATCH` are found and SLURM is available, submit a job that re-invokes `modgen run <script>`. (unless `--local` is set)
+3. Otherwise, run the script directly with the appropriate modules loaded.
+
+> [!NOTE]
+> Overlay file dependencies (`.sqf`, `.img`) in `#DEP:` tags are not supported. Use CondaTainer instead.
+
+**Script Example (SLURM submission):**
 
 ```bash
 #!/bin/bash
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --time=02:00:00
 #DEP: bcftools/1.22
-#DEP: samtools/1.16
 bcftools view input.vcf | head
 ```
+
+If no `#SBATCH` directives are present, the script runs directly without job submission.
 
 ## Update
 
