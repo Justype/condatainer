@@ -112,7 +112,7 @@ Scheduler directive lines (`#SBATCH`, `#PBS`, or `#BSUB`) allow you to specify j
 
 If a supported scheduler is available, **CondaTainer** will submit the build job with the specified parameters.
 
-**Example:**
+**Slurm Example:**
 
 ```bash
 #SBATCH --cpus-per-task=16
@@ -122,11 +122,28 @@ If a supported scheduler is available, **CondaTainer** will submit the build job
 #SBATCH --output=%x-%j.log
 ```
 
-Must have the following parameters:
-- `--cpus-per-task`
-- `--output`
+- `--cpus-per-task`, `--mem`, and `--time` should be set according to the expected resource requirements.
+- `--nodes`, `--ntasks`: should not be set (build jobs do not support MPI).
+- `--output`: will always be overwritten to point to the `logs` directory.
 
-The build system uses `--cpus-per-task` for local builds. The `--output` parameter must be present; the build system will overwrite it when submitting the job to point to the **CondaTainer** logs directory.
+**PBS Example:**
+
+```bash
+#PBS -l select=1:ncpus=16:mem=42gb
+#PBS -l walltime=2:00:00
+#PBS -N star-index
+```
+
+**LSF Example:**
+
+```bash
+#BSUB -n 16
+#BSUB -M 43008
+#BSUB -W 2:00
+#BSUB -J star-index
+```
+
+For LSF, **CondaTainer** will add `-R "span[hosts=1]"` to ensure all CPUs are allocated on the same node.
 
 ### Environment Variables
 
