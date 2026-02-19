@@ -81,8 +81,21 @@ condatainer config init -l system
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
 | `branch` | `main` | Git branch for fetching remote build scripts (`main` or `dev`) |
 | `prefer_remote` | `false` | Remote build scripts take precedence over local |
+| `parse_module_load` | `false` | Parse `module load` / `ml` lines as dependencies in `check` and `run` |
 
 Or if your system scheduler is not workable, you can disable job submission.
+
+### Scheduler Default Specs
+
+These values are used as defaults when a script does not include explicit resource directives (e.g., `#SBATCH` lines).
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `scheduler.nodes` | `1` | Default number of nodes |
+| `scheduler.tasks_per_node` | `1` | Default tasks per node |
+| `scheduler.ncpus_per_task` | `2` | Default CPUs per task |
+| `scheduler.mem_mb_per_node` | `8192` | Default memory per node (MB) |
+| `scheduler.time` | `4h` | Default wall-clock time limit |
 
 ### Build Configuration
 
@@ -127,6 +140,11 @@ condatainer config set build.mem_mb 16384
 condatainer config set build.time 4h
 condatainer config set build.time 02:00:00
 
+# Set default scheduler specs
+condatainer config set scheduler.ncpus_per_task 8
+condatainer config set scheduler.mem_mb_per_node 32768
+condatainer config set scheduler.time 8h
+
 # Disable job submission (run builds locally)
 condatainer config set submit_job false
 ```
@@ -156,6 +174,12 @@ Configuration keys can be overridden via environment variables with the `CONDATA
 | `CONDATAINER_SCHEDULER_BIN` | `scheduler_bin` |
 | `CONDATAINER_SUBMIT_JOB` | `submit_job` |
 | `CONDATAINER_PREFER_REMOTE` | `prefer_remote` |
+| `CONDATAINER_PARSE_MODULE_LOAD` | `parse_module_load` |
+| `CONDATAINER_SCHEDULER_NODES` | `scheduler.nodes` |
+| `CONDATAINER_SCHEDULER_TASKS_PER_NODE` | `scheduler.tasks_per_node` |
+| `CONDATAINER_SCHEDULER_NCPUS_PER_TASK` | `scheduler.ncpus_per_task` |
+| `CONDATAINER_SCHEDULER_MEM_MB_PER_NODE` | `scheduler.mem_mb_per_node` |
+| `CONDATAINER_SCHEDULER_TIME` | `scheduler.time` |
 | `CONDATAINER_BUILD_NCPUS` | `build.ncpus` |
 | `CONDATAINER_BUILD_MEM_MB` | `build.mem_mb` |
 | `CONDATAINER_BUILD_TIME` | `build.time` |
@@ -220,10 +244,21 @@ submit_job: true
 # Remote build scripts take precedence over local
 prefer_remote: false
 
+# Parse "module load" / "ml" lines as dependencies in 'check' and 'run' (default: false)
+parse_module_load: false
+
 # Additional search directories
 extra_base_dirs:
   - /project/shared/condatainer
   - /apps/bioinformatics/condatainer
+
+# Default scheduler specs (used when scripts lack explicit directives)
+scheduler:
+  nodes: 1
+  tasks_per_node: 1
+  ncpus_per_task: 2
+  mem_mb_per_node: 8192
+  time: 4h
 
 # Build configuration
 build:
