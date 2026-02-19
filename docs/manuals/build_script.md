@@ -210,7 +210,7 @@ If the app requires specific environment variables to function properly, make su
 - References often require downloading large files from external sources.
 - indices may need to be built using specific versions of software.
   - If indices are version dependent, ensure the app version is included in the name. e.g. [grch38/star/2.7.11b/gencode47-101](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/star/2.7.11b/gencode47-101)
-  - If indices require building, ensure you have the `SBATCH` parameters set appropriately to allocate sufficient resources.
+  - If indices require building, ensure you have the scheduler parameters (`#SBATCH`, `#PBS`, or `#BSUB`) set appropriately to allocate sufficient resources.
 - Always add environment variables using `#ENV:` and `#ENVNOTE:` to help users locate the reference data.
 
 Template: [build-template-ref](https://github.com/Justype/condatainer/blob/main/assets/build-template-ref)

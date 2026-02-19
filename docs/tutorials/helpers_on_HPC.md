@@ -270,7 +270,7 @@ condatainer helper vscode-server -p 13183
 ### Cannot Connect
 
 **Checklist:**
-1. Job is running: `squeue -u $USER`
+1. Job is running: `squeue -u $USER` (SLURM) / `qstat -u $USER` (PBS) / `bjobs` (LSF) / `condor_q $USER` (HTCondor)
 2. SSH port forwarding is active: `ssh -L 13182:localhost:13182 user@hpc`
 3. Correct URL in browser: `http://localhost:13182`
 4. Check job logs: `cat ~/logs/<helper-name>-<job_id>.log`

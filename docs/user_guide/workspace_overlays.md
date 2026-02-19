@@ -270,9 +270,25 @@ condatainer overlay chown env.img
 
 ### The overlay is used by another process
 
-On the HPC system, you can use `squeue -u $USER` to check if there are other jobs running under your account that may be using the overlay in writable mode.
+On the HPC system, check your running jobs and cancel the one using the overlay:
 
-If you want to stop it immediately, you can use `scancel <job_id>` to cancel the job.
+```bash
+# SLURM
+squeue -u $USER
+scancel <job_id>
+
+# PBS/Torque
+qstat -u $USER
+qdel <job_id>
+
+# LSF
+bjobs
+bkill <job_id>
+
+# HTCondor
+condor_q $USER
+condor_rm <job_id>
+```
 
 On the local machine, you can use `lsof env.img` to check if there are other processes using the overlay. Then you can use `kill <pid>` to stop the process. Or use `fuser -k env.img` to kill all processes using the overlay.
 
