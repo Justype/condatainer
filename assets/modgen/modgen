@@ -1219,12 +1219,12 @@ class ModGen_Exec:
         ModGen_Exec.exec_command(modules_final, command_final if command_final else ["bash"])
 
     @staticmethod
-    def exec_command(modules: List[str], command: List[str]):
+    def exec_command(modules: List[str], command: List[str], extra_env: Optional[Dict] = None):
         if not modules:
             Utils.print_warning("No modules specified to load. Executing command without module loading.")
             ml_commands = ""
         else:
-            ml_commands = "module purge && module load " + " ".join(modules) + " &&"
+            ml_commands = "module purge && module load " + " ".join(modules) + " && module() { :; } && ml() { :; } && export -f module ml &&"
         safe_command = " ".join([shlex.quote(part) for part in command])
         full_command = f"{ml_commands} {safe_command}"
 
@@ -1233,6 +1233,8 @@ class ModGen_Exec:
 
         running_env = os.environ.copy()
         running_env["IN_CONDATAINER"] = "1"
+        if extra_env:
+            running_env.update(extra_env)
 
         try:
             subprocess.run(["bash", "-c", full_command], check=True, env=running_env)
@@ -1585,12 +1587,133 @@ class ModGen_Run:
         return args
 
     @staticmethod
+    def _parse_mem_mb(mem_str: str) -> int:
+        """Parse SLURM memory string (e.g. '32G', '32GB', '1024M', '1024MB', '2T', '2TB') to MB."""
+        s = mem_str.strip().upper()
+        try:
+            if s.endswith('TB'):
+                return int(s[:-2]) * 1024 * 1024
+            if s.endswith('T'):
+                return int(s[:-1]) * 1024 * 1024
+            if s.endswith('GB'):
+                return int(s[:-2]) * 1024
+            if s.endswith('G'):
+                return int(s[:-1]) * 1024
+            if s.endswith('MB'):
+                return int(s[:-2])
+            if s.endswith('M'):
+                return int(s[:-1])
+            return int(s)  # bare number → assume MB
+        except ValueError:
+            return 0
+
+    @staticmethod
+    def _parse_resource_env(sbatch_flags: List[str]) -> dict:
+        """Parse NCPUS, MEM, MEM_MB, MEM_GB from a list of #SBATCH flag strings."""
+        cpus = 1
+        mem_mb = 0
+        for flag in sbatch_flags:
+            flag = flag.strip()
+            if flag.startswith('--cpus-per-task='):
+                try:
+                    cpus = int(flag.split('=', 1)[1])
+                except ValueError:
+                    pass
+            elif flag.startswith('-c '):
+                try:
+                    cpus = int(flag[3:].strip())
+                except ValueError:
+                    pass
+            elif flag.startswith('--mem='):
+                mem_mb = ModGen_Run._parse_mem_mb(flag.split('=', 1)[1])
+        env = {'NCPUS': str(cpus)}
+        if mem_mb > 0:
+            env['MEM'] = str(mem_mb)
+            env['MEM_MB'] = str(mem_mb)
+            env['MEM_GB'] = str(mem_mb // 1024)
+        return env
+
+    @staticmethod
+    def _get_slurm_resource_env() -> dict:
+        """Derive NCPUS, MEM, MEM_MB, MEM_GB from SLURM environment variables."""
+        env = {}
+        cpus_str = os.environ.get("SLURM_CPUS_PER_TASK", "")
+        if cpus_str:
+            env['NCPUS'] = cpus_str
+        mem_str = os.environ.get("SLURM_MEM_PER_NODE", "")
+        if mem_str:
+            try:
+                mem_mb = int(mem_str)
+                env['MEM'] = str(mem_mb)
+                env['MEM_MB'] = str(mem_mb)
+                env['MEM_GB'] = str(mem_mb // 1024)
+            except ValueError:
+                pass
+        return env
+
+    @staticmethod
+    def _create_run_sbatch_script(script_path: str, sbatch_flags: List[str], dep_ids: List[str]) -> Optional[str]:
+        script_name = os.path.splitext(os.path.basename(script_path))[0]
+        sbatch_script_path = os.path.join(Config.TMP_DIR, f"sbatch_run_{script_name}.sh")
+        log_path = os.path.join(Config.LOGS_DIR, f"ModGen_run_{script_name}.out")
+
+        os.makedirs(Config.LOGS_DIR, mode=0o775, exist_ok=True)
+        os.makedirs(Config.TMP_DIR, mode=0o775, exist_ok=True)
+        try:
+            resource_env = ModGen_Run._parse_resource_env(sbatch_flags)
+            with open(sbatch_script_path, 'w') as f:
+                f.write("#!/bin/bash\n")
+                for flag in sbatch_flags:
+                    if flag.startswith("--output") or flag.startswith("--error"):
+                        continue  # Override below
+                    f.write(f"#SBATCH {flag}\n")
+                f.write(f"#SBATCH --output={log_path}\n")
+                f.write("\n")
+                for k, v in resource_env.items():
+                    f.write(f"export {k}={v}\n")
+                f.write("\n")
+                f.write(f"{Config.SCRIPT_PATH} run {script_path}\n")
+                f.write(f"rm -f {sbatch_script_path}\n")
+            os.chmod(sbatch_script_path, 0o775)
+            return sbatch_script_path
+        except Exception as e:
+            Utils.print_error(f"Failed to create sbatch run script: {e}")
+            return None
+
+    @staticmethod
+    def _submit_run_sbatch(script_path: str, sbatch_flags: List[str], dep_ids: List[str]) -> Optional[str]:
+        sbatch_script_path = ModGen_Run._create_run_sbatch_script(script_path, sbatch_flags, dep_ids)
+        if not sbatch_script_path:
+            return None
+        slurm_job_id_regex = re.compile(r'Submitted batch job (\d+)')
+        cmd = ["sbatch"]
+        if dep_ids:
+            dep_str = ":".join(dep_ids)
+            cmd.append(f"--dependency=afterok:{dep_str}")
+        cmd.append(sbatch_script_path)
+        Utils.print_debug(f"[SBATCH] Submitting run job with command: {cmd}")
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            match = slurm_job_id_regex.search(result.stdout)
+            if match:
+                return match.group(1)
+            else:
+                Utils.print_error(f"Failed to parse sbatch submission output: {result.stdout}")
+                return None
+        except subprocess.CalledProcessError as e:
+            Utils.print_error(f"Failed to submit run job: {e.stderr}")
+            if os.path.isfile(sbatch_script_path):
+                os.remove(sbatch_script_path)
+            return None
+
+    @staticmethod
     def parse_run_args(args):
         script_path = args.script
         if not os.path.isfile(script_path):
             ModGen_Run.parser_run.error(f"Script file {script_path} not found.")
 
-        args_from_script = ModGen_Run.parse_args_in_script(args.script)
+        script_path = os.path.abspath(script_path)
+        args_from_script = ModGen_Run.parse_args_in_script(script_path)
         merged = args_from_script + sys.argv[2:]
         args = ModGen_Run.parser_run.parse_args(merged)
 
@@ -1601,14 +1724,24 @@ class ModGen_Run:
             Utils.print_message("ModGen is not compatible with overlay dependencies. Please use CondaTainer instead.")
             Utils.print_note(f"Please go to https://github.com/{Config.GITHUB_REPO} for more information.")
             return
+
+        # Fast path: already inside a scheduler job — skip submission, run locally
+        if "SLURM_JOB_ID" in os.environ:
+            execution_command_list = [script_path] if os.access(script_path, os.X_OK) else [f"bash {script_path}"]
+            ModGen_Exec.exec_command(deps, execution_command_list, extra_env=ModGen_Run._get_slurm_resource_env())
+            return
+
+        # Parse #SBATCH directives from the script
+        sbatch_flags = Utils.get_sbatch_args_from_build_script(script_path)
+
         missing_deps = ModGen.get_missing_modules(deps)
+        build_job_ids = []
 
         if missing_deps:
             if not args.auto_install:
                 Utils.print_message("Missing dependencies:")
                 for md in missing_deps:
                     Utils.print_message(f"  - {Utils.yellow_text(md)}")
-
                 Utils.print_message(f"Please run {Utils.blue_text(Config.SCRIPT_NAME + ' check -a')} to install missing dependencies.")
                 return
 
@@ -1617,17 +1750,28 @@ class ModGen_Run:
             build_objects = [BuildObject(md) for md in missing_deps]
             build_graph = BuildGraph(build_objects)
             if build_graph.run():
+                build_job_ids = list(build_graph._build_job_ids.values())
                 Utils.print_success("All missing dependencies installed/submitted.")
             else:
                 Utils.print_error("Some dependencies failed to install.")
                 return
 
-        execution_command_list = []
-        if os.access(script_path, os.X_OK):
-            execution_command_list.append(script_path)
+        # Submit or run locally
+        if Config.submit_job and sbatch_flags and Utils.is_sbatch_available():
+            job_id = ModGen_Run._submit_run_sbatch(script_path, sbatch_flags, build_job_ids)
+            if job_id:
+                if build_job_ids:
+                    Utils.print_success(f"Submitted run job {Utils.blue_text(job_id)} (depends on build job(s): {Utils.blue_text(', '.join(build_job_ids))}).")
+                else:
+                    Utils.print_success(f"Submitted run job {Utils.blue_text(job_id)} for {Utils.yellow_text(os.path.basename(script_path))}.")
         else:
-            execution_command_list.append(f"bash {script_path}")
-        ModGen_Exec.exec_command(deps, execution_command_list)
+            if sbatch_flags and not Config.submit_job:
+                Utils.print_note("Script has #SBATCH specs but --local mode is enabled. Running locally.")
+            elif sbatch_flags and not Utils.is_sbatch_available():
+                Utils.print_note("Script has #SBATCH specs but no SLURM scheduler is available. Running locally.")
+            execution_command_list = [script_path] if os.access(script_path, os.X_OK) else [f"bash {script_path}"]
+            resource_env = ModGen_Run._parse_resource_env(sbatch_flags) if sbatch_flags else {}
+            ModGen_Exec.exec_command(deps, execution_command_list, extra_env=resource_env)
 
 class ModGen_Init:
     module_yes = False

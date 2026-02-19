@@ -32,7 +32,6 @@ positional arguments:
     check (c)           Check if the dependencies of a script are installed
     run (r)             Run a script and auto-solve the dependencies by #DEP tags
     self-update         Update ModGen to the latest version
-    condatainer         Install CondaTainer
 
 options:
   -h, --help            show this help message and exit
@@ -199,7 +198,7 @@ Utilities for running scripts with automatic dependency handling via  `#DEP:` ta
 
 ### Check
 
-Parses a script for `#DEP:` tags and `module load` or `ml` commands and checks if the required overlays are installed.
+Parses a script for `#DEP:` tags and `module load` or `ml` commands and checks if the required modules are installed.
 
 ```
 modgen check [SCRIPT] [-a]
@@ -216,18 +215,44 @@ Run a script with automatic dependency resolution based on `#DEP:` tags and `mod
 modgen run [SCRIPT] [SCRIPT_ARGS...]
 ```
 
-* **Dependency Injection:** Reads `#DEP:`and `module load` or `ml` commands lines in the script to determine which overlays to mount.
-* **Argument Injection:** Reads `#CNT` lines in the script to inject arguments into the condatainer command itself.
+* **Dependency Injection:** Reads `#DEP:` tags and `module load`/`ml` lines in the script to determine which modules to load before execution.
+* **Argument Injection:** Reads `#CNT` lines in the script to inject arguments into the modgen command itself.
 * `-w`, `--writable`: Placeholder for CondaTainer compatibility (no effect).
 * `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies found in the script.
 * `-i`, `--install`: Alias for `--auto-install`.
 
-**Script Example:**
+**Execution behavior:**
+
+1. If already inside a SLURM job, run locally immediately.
+2. If `#SBATCH` is found and SLURM is available, submit a job that re-invokes `modgen run <script>`. (unless `--local` is set)
+3. Otherwise, run the script directly with modules pre-loaded. `module` and `ml` are stubbed as no-ops to prevent accidental `module purge`.
+
+| Variable | Description |
+|---|---|
+| `NCPUS` | CPUs per task (`--cpus-per-task`, default: `1`) |
+| `MEM` | Memory in MB (`--mem`, e.g. `32G` → `32768`) |
+| `MEM_MB` | Same as `MEM` |
+| `MEM_GB` | Memory in GB |
+
+> [!NOTE]
+> Overlay file dependencies (`.sqf`, `.img`) in `#DEP:` tags are not supported. Use CondaTainer instead.
+
+**Script Example (local run):**
 
 ```bash
 #!/bin/bash
 #DEP: bcftools/1.22
-#DEP: samtools/1.16
+bcftools view input.vcf | head
+```
+
+**Script Example (SLURM submission):**
+
+```bash
+#!/bin/bash
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --time=02:00:00
+#DEP: bcftools/1.22
 bcftools view input.vcf | head
 ```
 
