@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=python_mpi_file
+#SBATCH --job-name=mpi_test
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=1

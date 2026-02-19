@@ -26,8 +26,13 @@ ml av openmpi # openmpi/4.1.5
 # Make sure install the same major.minor version of openmpi
 condatainer e mpi.img -- mm-install mpi4py openmpi=4.1 -y
 condatainer run --debug src/mpi_test_slurm.sh
-cat src/output.txt
-rm src/output.txt
+cat src/logs/output.txt
+rm src/logs/output.txt
+
+# Test Passthrough workaround
+sbatch src/mpi_test_slurm_passthrough.sh
+cat src/logs/output.txt
+rm src/logs/output.txt
 
 # Pure slurm test
 # salloc --ntasks=4 --time=00:30:00
