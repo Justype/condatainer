@@ -52,7 +52,7 @@ all_results = comm.gather(my_results, root=0)
 # ---------------------------------------------------------
 if rank == 0:
     print("Rank 0 is writing the results to output.txt...")
-    with open("src/output.txt", "w") as f:
+    with open("src/logs/output.txt", "w") as f:
         for worker_result in all_results:
             for line in worker_result:
                 f.write(line + "\n")

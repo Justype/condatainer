@@ -93,7 +93,7 @@ The script will do the following steps for you:
 3. If yes, print helpful information to connect to that tunnel.
 4. If not,
    1. Check the overlay integrity.
-   2. Submit the SLURM job to start `vscode-tunnel`.
+   2. Submit the scheduler job to start `vscode-tunnel`.
    3. When the job starts, display authentication information.
 
 Then you can either:

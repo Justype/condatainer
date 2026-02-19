@@ -126,7 +126,7 @@ The script will do the following steps for you:
 3. If not,
    1. Check port and overlay integrity.
    2. Install R version overlay if needed.
-   3. Submit the SLURM job to start `rstudio-server`.
+   3. Submit the scheduler job to start `rstudio-server`.
    4. When the job starts, record and set up SSH port forwarding.
 
 ```

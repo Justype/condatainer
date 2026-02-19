@@ -32,7 +32,7 @@ var overlayCreateCmd = &cobra.Command{
 	Use:   "create [image_path]",
 	Short: "Create a new sparse overlay image",
 	Long: `Creates an ext3 overlay image optimized for specific workloads.
-	
+
 If no image path is provided, defaults to 'env.img'.`,
 	Example: `  condatainer overlay create # 10G with default inode ratio
   condatainer overlay create my_data.img -s 50G -t data

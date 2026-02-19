@@ -54,6 +54,9 @@ type Config struct {
 	Branch       string // Git branch for fetching remote build scripts and metadata (default: "main")
 	PreferRemote bool   // Remote build scripts take precedence over local
 
+	// Dependency parsing
+	ParseModuleLoad bool // Parse "module load" / "ml" lines as dependencies (default: false)
+
 	// Scheduler default specs
 	Scheduler SchedulerConfig
 

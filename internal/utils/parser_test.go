@@ -89,7 +89,7 @@ ml foo/5.0
 	}
 	tmp.Close()
 
-	deps, err := GetDependenciesFromScript(tmp.Name())
+	deps, err := GetDependenciesFromScript(tmp.Name(), true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -123,7 +123,7 @@ module load alpha/1.0 beta/2.0
 	}
 	tmp.Close()
 
-	deps, err := GetDependenciesFromScript(tmp.Name())
+	deps, err := GetDependenciesFromScript(tmp.Name(), true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

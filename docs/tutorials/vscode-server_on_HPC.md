@@ -124,7 +124,7 @@ The script will do the following steps for you:
 3. If yes, establish SSH port forwarding to that node.
 4. If not,
    1. Check port and overlay integrity.
-   2. Submit the SLURM job to start VS Code Server.
+   2. Submit the scheduler job to start VS Code Server.
    3. When the job starts, record and set up SSH port forwarding.
 
 ```

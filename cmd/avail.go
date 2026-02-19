@@ -32,11 +32,9 @@ When duplicates exist, local scripts take precedence.
 Use --remote to make remote scripts take precedence over local.
 Use search terms to filter results (AND logic applied).
 
-Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
+Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 	Example: `  condatainer avail              # List all (local takes precedence on duplicates)
   condatainer avail --remote     # List all (remote takes precedence on duplicates)
-  condatainer avail --remote -i  # Install with remote scripts taking precedence
-  condatainer avail samtools     # Search for samtools
   condatainer avail sam 1.21     # Search with multiple terms (AND logic)`,
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runAvail,

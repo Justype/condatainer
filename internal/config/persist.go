@@ -102,6 +102,8 @@ func setDefaults() {
 	viper.SetDefault("build.tmp_size_mb", 20480)
 	viper.SetDefault("build.compress_args", "") // Empty means auto-detect based on apptainer version
 	viper.SetDefault("build.overlay_type", "ext3")
+
+	viper.SetDefault("parse_module_load", false)
 }
 
 // GetUserConfigPath returns the path to the user config file
@@ -529,6 +531,8 @@ func LoadFromViper() {
 	if overlayType := viper.GetString("build.overlay_type"); overlayType != "" {
 		Global.Build.OverlayType = overlayType
 	}
+
+	Global.ParseModuleLoad = viper.GetBool("parse_module_load")
 }
 
 // AutoDetectCompression sets compression to zstd if supported and user hasn't explicitly set it.

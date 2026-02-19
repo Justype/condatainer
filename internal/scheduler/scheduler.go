@@ -869,7 +869,7 @@ func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 	hostType := DetectType()
 	if hostType != SchedulerUnknown && parsed.ScriptType != hostType {
 		// Log warning about mismatch (the specs will still be used)
-		utils.PrintWarning("Script contains %s directives but host has %s scheduler. Specs will be translated.",
+		utils.PrintNote("Script contains %s directives but host has %s scheduler. Specs will be translated.",
 			parsed.ScriptType, hostType)
 
 		// Clear RemainingFlags on cross-scheduler translation:

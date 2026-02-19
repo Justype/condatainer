@@ -32,12 +32,10 @@ var supportedSchedulerTypes = []scheduler.SchedulerType{
 var helperCmd = &cobra.Command{
 	Use:   "helper [flags] [script-name] [script-args...]",
 	Short: "Manage and run helper scripts",
-	Long: `Manage helper scripts for running services like code-server, rstudio-server, etc.
+	Long: `Manage helper scripts for running services inside CondaTainer on HPC.
 
-Available helper scripts:
-  - code-server: code server
-  - rstudio-server: RStudio server
-  - vscode-tunnel: VS Code tunnel
+Use --list to see available helper scripts.
+Use --update to download or refresh helper scripts from remote.
 
 Note: Helper is not available inside a container or a scheduler job.`,
 	Example: `  condatainer helper --update                # Update all helper scripts

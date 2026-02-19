@@ -282,7 +282,7 @@ func (b *BaseBuildObject) parseScriptMetadata() error {
 	}
 
 	// Always parse dependencies (needed for dependency graph)
-	deps, err := utils.GetDependenciesFromScript(b.buildSource)
+	deps, err := utils.GetDependenciesFromScript(b.buildSource, config.Global.ParseModuleLoad)
 	if err != nil {
 		return fmt.Errorf("failed to parse dependencies: %w", err)
 	}

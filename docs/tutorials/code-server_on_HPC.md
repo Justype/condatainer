@@ -126,7 +126,7 @@ See [Launch a Shell within the Workspace Overlay](../user_guide/workspace_overla
 2. If yes, establish SSH port forwarding to that node.
 3. If not,
    1. Check port and overlay integrity.
-   2. Submit the SLURM job to start `code-server`.
+   2. Submit the scheduler job to start `code-server`.
    3. When the job starts, record and set up SSH port forwarding.
 
 ```

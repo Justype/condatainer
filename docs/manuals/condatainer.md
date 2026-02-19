@@ -820,22 +820,23 @@ condatainer instance stop desktop
 
 ## Runtime (Check, Run)
 
-Utilities for running scripts with automatic dependency handling via  `#DEP:` tags and `module load` or `ml` commands.
+Utilities for running scripts with automatic dependency handling via `#DEP:` tags. Parsing of `module load` / `ml` lines is disabled by default and can be enabled with `--module` or `parse_module_load: true` in config.
 
 ### Check
 
-Parses a script for `#DEP:` tags and `module load` or `ml` commands and checks if the required overlays are installed.
+Parses a script for `#DEP:` tags and checks if the required overlays are installed.
 
 ```
-condatainer check [SCRIPT] [-a]
+condatainer check [SCRIPT] [-a] [--module]
 ```
 
 * `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies found in the script.
 * `-i`, `--install`: Alias for `--auto-install`.
+* `--module`: Also parse `module load` / `ml` lines as dependencies.
 
 ### Run
 
-Executes a script inside the **CondaTainer** environment, mounting dependencies defined in the script. Autosolves dependencies based on `#DEP:` tags and `module load` or `ml` commands within the script.
+Executes a script inside the **CondaTainer** environment, mounting dependencies defined in the script. Autosolves dependencies based on `#DEP:` tags within the script.
 
 ```
 condatainer run [SCRIPT] [SCRIPT_ARGS...]
@@ -847,6 +848,7 @@ condatainer run [SCRIPT] [SCRIPT_ARGS...]
 * `-b`, `--base-image [PATH]`: Use custom base image.
 * `-a`, `--auto-install`: Automatically install missing dependencies.
 * `-i`, `--install`: Alias for `--auto-install`.
+* `--module`: Also parse `module load` / `ml` lines as dependencies.
 
 **Script Tags:**
 
@@ -855,6 +857,7 @@ Scripts can use special comment tags to declare dependencies and configure the c
 | Tag | Description |
 |-----|-------------|
 | `#DEP: package/version` | Declare a dependency overlay |
+| `#DEP: path.img` | Declare a external overlay (.sqf and .img) |
 | `#CNT [args]` | Additional arguments passed to condatainer |
 | `#SBATCH [args]` | SLURM scheduler directives (auto-submit as job) |
 | `#PBS [args]` | PBS scheduler directives (auto-submit as job) |
@@ -1015,7 +1018,7 @@ condatainer e mpi.img -- mm-install mpi4py openmpi=4.1 -y
 
 ### CondaTainer is compatible with module systems
 
-**CondaTainer** will scan your script for `module load` or `ml` commands and mount the corresponding overlays automatically.
+**CondaTainer** can scan your script for `module load` or `ml` commands and mount the corresponding overlays automatically. This is disabled by default; enable it with `--module` or by setting `parse_module_load: true` in your config.
 
 **Example:**
 
@@ -1025,14 +1028,20 @@ module load bcftools/1.22
 bcftools --version
 ```
 
-You can run `check` or `run` commands to automatically handle the dependencies.
+Use `--module` with `check` or `run` to handle these dependencies:
 
 ```bash
-# Install missing dependencies
-condatainer check my_script.sh -a
+# Install missing dependencies (including module load lines)
+condatainer check my_script.sh --module -a
 
 # Run the script with automatic dependency resolution
-condatainer run my_script.sh
+condatainer run my_script.sh --module
+```
+
+To enable it permanently:
+
+```bash
+condatainer config set parse_module_load true
 ```
 
 ## Info
@@ -1066,28 +1075,39 @@ condatainer info env.img
 
 Download and manage small helper scripts stored in the `helper-scripts/` folder inside the CondaTainer repository.
 
+```{note}
+Helper commands are not available inside a container or a scheduler job (except `--path` and `--list`).
+```
+
 **Usage:**
 
 ```
-condatainer helper [-u|--update] [-p|--path] [SCRIPT_NAME] [SCRIPT_ARGS...]
+condatainer helper [FLAGS] [SCRIPT_NAME] [SCRIPT_ARGS...]
 ```
 
 Options:
 
 * `-u`, `--update`: Update helper scripts from remote metadata.
-* `-p`, `--path`: Print the absolute path of the helper folder or a specific helper script and exit.
-* `SCRIPT_NAME`: Name of the helper script to run or update (optional).
+* `-p`, `--path`: Show all helper script search paths and the writable directory. If a `SCRIPT_NAME` is given, print the absolute path of that specific helper script and exit.
+* `-l`, `--list`: List available helper scripts with their descriptions (from `#WHATIS` tags).
+* `SCRIPT_NAME`: Name of the helper script to run (optional).
 * `SCRIPT_ARGS...`: Remaining arguments are passed directly to the helper script when running it.
 
 **Examples**
 
 ```bash
-# Print helper folder path
+# List all available helper scripts with descriptions
+condatainer helper --list
+
+# Print helper script search paths
 condatainer helper --path
+
+# Print path to a specific helper script
+condatainer helper --path code-server
 
 # Download/Update all helper scripts (auto selects sbatch or headless based on availability)
 condatainer helper --update
-# Forcely Update headless scripts version
+# Force update headless scripts version
 condatainer --local helper --update
 
 # Run a helper script with arguments
@@ -1121,12 +1141,13 @@ condatainer config get <key>
 ```bash
 condatainer config get apptainer_bin
 condatainer config get build.ncpus
+condatainer config get scheduler.ncpus_per_task
 condatainer config get submit_job
 ```
 
 ### Config Set
 
-Set a configuration value.
+Set a configuration value and save to the active config file. For a full list of supported keys, see the [Configuration manual](configuration.md).
 
 ```
 condatainer config set <key> <value>
@@ -1136,9 +1157,10 @@ condatainer config set <key> <value>
 
 ```bash
 condatainer config set apptainer_bin /usr/bin/apptainer
+condatainer config set submit_job false
+condatainer config set scheduler.ncpus_per_task 8
 condatainer config set build.ncpus 8
 condatainer config set build.time 4h
-condatainer config set submit_job false
 ```
 
 **Time formats:** `2h`, `30m`, `1h30m`, `90s`, `02:00:00`, `HH:MM:SS`
@@ -1202,15 +1224,21 @@ Configuration is loaded in the following order (highest to lowest priority):
 
 ### Configuration File Example
 
-```yaml
-base_dir: /path/to/data
+See the [Configuration manual](configuration.md) for a full reference of all available keys.
 
+```yaml
 # Binary paths (scheduler type is auto-detected from binary)
 apptainer_bin: /usr/bin/apptainer
 scheduler_bin: /usr/bin/sbatch
 
 # Submission settings
 submit_job: true
+
+# Default scheduler specs (used when scripts lack explicit directives)
+scheduler:
+  ncpus_per_task: 4
+  mem_mb_per_node: 8192
+  time: 4h
 
 # Build configuration
 build:
@@ -1219,27 +1247,13 @@ build:
   time: 4h
   tmp_size_mb: 20480
   compress_args: "-comp zstd -Xcompression-level 8"
-  overlay_type: squashfs
+  overlay_type: ext3
 
 # Additional data directories
 extra_base_dirs:
   - /path/to/shared/data
   - /path/to/other/location
 ```
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `CONDATAINER_BASE_DIR` | Override base directory |
-| `CONDATAINER_LOGS_DIR` | Override logs directory |
-| `CONDATAINER_APPTAINER_BIN` | Override apptainer binary path |
-| `CONDATAINER_SCHEDULER_BIN` | Override scheduler binary path |
-| `CONDATAINER_SUBMIT_JOB` | Override job submission setting (true/false) |
-| `CONDATAINER_BUILD_NCPUS` | Override default CPUs for builds |
-| `CONDATAINER_BUILD_MEM_MB` | Override default memory for builds |
-| `CONDATAINER_BUILD_TIME` | Override default build time |
-| `CONDATAINER_EXTRA_BASE_DIRS` | Colon-separated list of extra base directories |
 
 ## Scheduler
 
@@ -1248,8 +1262,15 @@ Display information about the configured job scheduler.
 **Usage:**
 
 ```
-condatainer scheduler
+condatainer scheduler [FLAGS]
 ```
+
+**Options:**
+
+* `-p`, `--partitions`: Show per-partition resource limits.
+* `-Q`, `--queue`: Show per-queue resource limits (alias for `-p`).
+* `--cpu`: Show only CPU-only partitions (no GPUs); automatically enables `-p`.
+* `--gpu`: Show only GPU partitions; automatically enables `-p`.
 
 **Output includes:**
 
@@ -1257,18 +1278,23 @@ condatainer scheduler
 * Binary path
 * Version
 * Availability status
-* Available GPUs (if any)
-* Resource limits (CPUs, memory, GPUs, time)
+* Max resource limits across all partitions (CPUs, memory, time)
+* Available GPUs (type, total, available)
 
-**Example:**
+**Examples:**
 
 ```bash
-$ condatainer scheduler
-Scheduler: SLURM
-Binary: /usr/bin/srun
-Version: 23.02.4
-Status: Available
-GPUs: nvidia_a100 (4), nvidia_v100 (8)
+# Show scheduler information
+condatainer scheduler
+
+# Show per-partition/queue resource limits
+condatainer scheduler -p
+
+# Show only GPU partitions
+condatainer scheduler --gpu
+
+# Show per-partition limits for CPU-only partitions
+condatainer scheduler -p --cpu
 ```
 
 ## Update
@@ -1280,10 +1306,14 @@ Updates the **CondaTainer** binary to the latest version from GitHub releases.
 **Usage:**
 
 ```
-condatainer self-update [-y]
+condatainer self-update [FLAGS]
 ```
 
+**Options:**
+
 * `-y`, `--yes`: Skip confirmation prompt and auto-update.
+* `-f`, `--force`: Force update even if already on the latest version.
+* `--dev`: Include pre-release versions (also enabled automatically when the config `branch` is set to `dev`).
 
 **Features:**
 
@@ -1293,6 +1323,22 @@ condatainer self-update [-y]
 * Updates base image when minor or major version changes (not for patch updates).
 * Warns about major version upgrades and suggests rebuilding def-built containers.
 * Supports symlink resolution.
+
+**Examples:**
+
+```bash
+# Update to latest stable version
+condatainer self-update
+
+# Update without confirmation
+condatainer self-update --yes
+
+# Force update even if already on latest version
+condatainer self-update -f
+
+# Include pre-release versions
+condatainer self-update --dev
+```
 
 ## Completion
 

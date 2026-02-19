@@ -33,6 +33,7 @@ var configKeys = []string{
 	"scheduler.ncpus_per_task",
 	"scheduler.mem_mb_per_node",
 	"scheduler.time",
+	"parse_module_load",
 	"build.ncpus",
 	"build.mem_mb",
 	"build.time",
@@ -59,7 +60,7 @@ func configValueCompletion(key string) []string {
 	switch key {
 	case "submit_job":
 		return []string{"true", "false"}
-	case "prefer_remote":
+	case "prefer_remote", "parse_module_load":
 		return []string{"true", "false"}
 	case "branch":
 		return []string{"main", "dev"}
@@ -247,12 +248,13 @@ Shows:
 		submitJobConfig := viper.GetBool("submit_job")
 		submitJobActual := config.Global.SubmitJob
 		if submitJobConfig && !submitJobActual {
-			fmt.Printf("  submit_job:     %v (disabled: scheduler not accessible)\n", submitJobConfig)
+			fmt.Printf("  submit_job:        %v (disabled: scheduler not accessible)\n", submitJobConfig)
 		} else {
-			fmt.Printf("  submit_job:     %v\n", submitJobActual)
+			fmt.Printf("  submit_job:        %v\n", submitJobActual)
 		}
-		fmt.Printf("  branch:         %s\n", viper.GetString("branch"))
-		fmt.Printf("  prefer_remote:  %v\n", config.Global.PreferRemote)
+		fmt.Printf("  branch:            %s\n", viper.GetString("branch"))
+		fmt.Printf("  prefer_remote:     %v\n", config.Global.PreferRemote)
+		fmt.Printf("  parse_module_load: %v\n", config.Global.ParseModuleLoad)
 		fmt.Println()
 
 		// Scheduler default specs
@@ -311,6 +313,7 @@ Shows:
 			"CONDATAINER_APPTAINER_BIN",
 			"CONDATAINER_SCHEDULER_BIN",
 			"CONDATAINER_SUBMIT_JOB",
+			"CONDATAINER_PARSE_MODULE_LOAD",
 			"CONDATAINER_SCHEDULER_NODES",
 			"CONDATAINER_SCHEDULER_TASKS_PER_NODE",
 			"CONDATAINER_SCHEDULER_NCPUS_PER_TASK",
@@ -381,6 +384,7 @@ Time duration format (for build.time):
 			"submit_job":                true,
 			"branch":                    true,
 			"prefer_remote":             true,
+			"parse_module_load":         true,
 			"scheduler.nodes":           true,
 			"scheduler.tasks_per_node":  true,
 			"scheduler.ncpus_per_task":  true,

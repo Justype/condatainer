@@ -119,7 +119,7 @@ The script will do the following steps for you:
    1. Check port and overlay integrity.
    2. Install `xfce4` overlay (and `igv` overlay for the igv helper) if missing.
    3. Set up VNC password and xstartup.
-   4. Submit the SLURM job to start the desktop.
+   4. Submit the scheduler job to start the desktop.
    5. When the job starts, set up SSH port forwarding.
 
 ```
