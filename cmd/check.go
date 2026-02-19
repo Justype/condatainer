@@ -15,7 +15,8 @@ import (
 )
 
 var (
-	checkAutoInstall bool
+	checkAutoInstall    bool
+	checkParseModuleLoad bool
 )
 
 var scriptCheckCmd = &cobra.Command{
@@ -30,7 +31,7 @@ Dependencies are declared in scripts using comments like:
   #DEP: package/version
   #DEP: another-package/1.0
 
-Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
+Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 	Example: `  condatainer check script.sh           # Check local script
   condatainer check samtools/1.22       # Check build script by name
   condatainer check script.sh -a        # Check and auto-install missing deps`,
@@ -43,6 +44,7 @@ func init() {
 	rootCmd.AddCommand(scriptCheckCmd)
 	scriptCheckCmd.Flags().BoolVarP(&checkAutoInstall, "auto-install", "a", false, "Automatically install missing dependencies")
 	scriptCheckCmd.Flags().BoolP("install", "i", false, "Alias for --auto-install")
+	scriptCheckCmd.Flags().BoolVar(&checkParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
@@ -65,7 +67,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get dependencies from script
-	deps, err := utils.GetDependenciesFromScript(scriptPath)
+	deps, err := utils.GetDependenciesFromScript(scriptPath, config.Global.ParseModuleLoad || checkParseModuleLoad)
 	if err != nil {
 		return fmt.Errorf("failed to parse dependencies: %w", err)
 	}

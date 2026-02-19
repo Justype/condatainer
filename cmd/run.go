@@ -22,12 +22,13 @@ import (
 )
 
 var (
-	runWritableImg bool
-	runBaseImage   string
-	runAutoInstall bool
-	runEnvSettings []string
-	runBindPaths   []string
-	runFakeroot    bool
+	runWritableImg     bool
+	runBaseImage       string
+	runAutoInstall     bool
+	runEnvSettings     []string
+	runBindPaths       []string
+	runFakeroot        bool
+	runParseModuleLoad bool
 )
 
 // errRunAborted signals a handled stop (message already printed); caller returns nil.
@@ -55,14 +56,7 @@ with the --auto-install flag.`,
 	Example: `  condatainer run script.sh              # Run with dependency check
   condatainer run script.sh -a           # Auto-install missing deps
   condatainer run script.sh -w           # Make .img overlays writable
-  condatainer run script.sh -b base.sif  # Use custom base image
-
-  In script.sh, you can use #CNT and #DEP to set options:
-  #DEP: /path/bundle.sqf
-  #DEP: /path/overlay.img
-  #CNT -w
-  #CNT --env MYVAR=value
-  #CNT --bind /data:/mnt/data`,
+  condatainer run script.sh -b base.sif  # Use custom base image`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runScript,
@@ -75,6 +69,7 @@ func init() {
 	runCmd.Flags().StringVarP(&runBaseImage, "base-image", "b", "", "Base image to use instead of default")
 	runCmd.Flags().BoolVarP(&runAutoInstall, "auto-install", "a", false, "Automatically install missing dependencies")
 	runCmd.Flags().BoolP("install", "i", false, "Alias for --auto-install")
+	runCmd.Flags().BoolVar(&runParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
 }
 
 func runScript(cmd *cobra.Command, args []string) error {
@@ -191,7 +186,7 @@ func processEmbeddedArgs(scriptPath string) error {
 // auto-installs missing ones. Returns overlay paths and build job IDs.
 // Returns errRunAborted (message already printed) for handled stop conditions.
 func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPath string) (overlays []string, buildJobIDs []string, err error) {
-	deps, err := utils.GetDependenciesFromScript(contentScript)
+	deps, err := utils.GetDependenciesFromScript(contentScript, config.Global.ParseModuleLoad || runParseModuleLoad)
 	if err != nil {
 		utils.PrintError("Failed to parse dependencies: %v", err)
 		return nil, nil, errRunAborted
@@ -348,12 +343,17 @@ export -f module ml
 		executionScript += "bash " + contentScript
 	}
 
+	// Auto-bind the script's directory so it's accessible inside the container.
+	// (Scheduler will copy the script to a temp location)
+	scriptDir := filepath.Dir(contentScript)
+	bindPaths := append([]string{scriptDir}, runBindPaths...)
+
 	options := execpkg.Options{
 		Overlays:     overlays,
 		Command:      []string{"/bin/bash", "-c", executionScript},
 		WritableImg:  runWritableImg,
 		EnvSettings:  runEnvSettings,
-		BindPaths:    runBindPaths,
+		BindPaths:    bindPaths,
 		Fakeroot:     runFakeroot,
 		BaseImage:    runBaseImage, // Empty string triggers GetBaseImage() in ensureDefaults()
 		ApptainerBin: config.Global.ApptainerBin,
