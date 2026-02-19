@@ -39,7 +39,7 @@ var createCmd = &cobra.Command{
 	Short:   "Create a new SquashFS overlay",
 	Long: `Create a new SquashFS overlay using available build scripts or Conda packages.
 
-Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
+Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 	Example: `  condatainer create samtools/1.22                # Create from build script
   condatainer create python=3.11 numpy -n myenv  # Create conda environment
   condatainer create -f environment.yml -p myenv  # Create from conda file
