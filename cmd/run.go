@@ -120,6 +120,10 @@ func runScript(cmd *cobra.Command, args []string) error {
 	if err := processEmbeddedArgs(contentScript); err != nil {
 		return err
 	}
+	if runWritableImg && getNtasks(scriptSpecs) > 1 {
+		utils.PrintError("--writable cannot be used with multi-task jobs (ntasks=%d)", getNtasks(scriptSpecs))
+		return nil
+	}
 	overlays, buildJobIDs, err := checkDepsAndAutoInstall(cmd.Context(), contentScript, originScriptPath)
 	if err != nil {
 		if errors.Is(err, errRunAborted) {
