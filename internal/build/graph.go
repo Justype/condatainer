@@ -272,6 +272,18 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 		}
 	}
 
+	// Derive job name from name/version if not set in script (10 chars max)
+	if specs != nil && specs.Control.JobName == "" {
+		name := meta.NameVersion()
+		if idx := strings.Index(name, "/"); idx != -1 {
+			name = name[:idx]
+		}
+		if len(name) > 10 {
+			name = name[:10]
+		}
+		specs.Control.JobName = name
+	}
+
 	// Create job specification
 	jobSpec := &scheduler.JobSpec{
 		Name:           meta.NameVersion(),
