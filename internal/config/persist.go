@@ -92,7 +92,7 @@ func setDefaults() {
 	viper.SetDefault("scheduler.nodes", 1)
 	viper.SetDefault("scheduler.tasks_per_node", 1)
 	viper.SetDefault("scheduler.ncpus_per_task", 2)
-	viper.SetDefault("scheduler.mem_mb_per_node", 8192)
+	viper.SetDefault("scheduler.mem_per_node_mb", 8192)
 	viper.SetDefault("scheduler.time", "4h")
 
 	// Build config defaults
@@ -493,7 +493,7 @@ func LoadFromViper() {
 	if ncpusPerTask := viper.GetInt("scheduler.ncpus_per_task"); ncpusPerTask > 0 {
 		Global.Scheduler.CpusPerTask = ncpusPerTask
 	}
-	if memMBPerNode := viper.GetInt64("scheduler.mem_mb_per_node"); memMBPerNode > 0 {
+	if memMBPerNode := viper.GetInt64("scheduler.mem_per_node_mb"); memMBPerNode > 0 {
 		Global.Scheduler.MemPerNodeMB = memMBPerNode
 	}
 	if schedTime := viper.GetString("scheduler.time"); schedTime != "" {
