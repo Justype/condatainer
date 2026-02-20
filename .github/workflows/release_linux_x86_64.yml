@@ -26,6 +26,14 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+      - name: Update version constant in config.go
+        run: |
+          # strip leading 'v' if present
+          version="${{ steps.get_version.outputs.VERSION }}"
+          version="${version#v}"
+          echo "Setting config VERSION to $version"
+          sed -i "s/^const VERSION = .*/const VERSION = \"${version}\"/" internal/config/config.go
+
       - name: Build binary
         run: |
           make build
