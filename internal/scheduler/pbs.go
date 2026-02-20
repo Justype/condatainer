@@ -484,12 +484,6 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	fmt.Fprintln(writer, "")
 
-	// Export resource variables for use in build scripts (skipped in passthrough mode)
-	if specs.Spec != nil {
-		writeEnvVars(writer, specs.Spec)
-		fmt.Fprintln(writer, "")
-	}
-
 	// Print job information at start
 	writeJobHeader(writer, "$PBS_JOBID", specs, formatPbsTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")

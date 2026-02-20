@@ -45,7 +45,8 @@ type Scheduler interface {
 
 **ScriptSpecs** - Parsed job specifications (scheduler-agnostic):
 - `ScriptPath` - Absolute path of the parsed script (for HTCondor: the `executable` from `.sub` file)
-- `Spec *ResourceSpec` - Compute geometry: `Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`, `Gpu`, `Exclusive`
+- `HasDirectives bool` - Whether any scheduler directives were found (`false` = no `#SBATCH`/`#PBS`/`#BSUB` lines)
+- `Spec *ResourceSpec` - Compute geometry: `Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`, `Gpu`, `Exclusive`; `nil` in passthrough mode
 - `Control RuntimeConfig` - Job control: `JobName`, `Stdout`, `Stderr`, email settings, `Partition`
 - `RawFlags []string` - Immutable audit log of all directives
 - `RemainingFlags []string` - Directives not absorbed by Spec or Control
@@ -61,14 +62,20 @@ type Scheduler interface {
 Parsing uses a two-stage pipeline:
 
 1. **Stage 1 (critical):** `parseRuntimeConfig` — extracts job control settings (name, I/O, email). Failures stop parsing.
-2. **Stage 2 (best-effort):** `parseResourceSpec` — extracts compute geometry (CPU, memory, GPU, time). Returns nil on any parse failure → **passthrough mode** (the script is forwarded to the scheduler unchanged).
+2. **Stage 2 (best-effort):** `parseResourceSpec` — extracts compute geometry (CPU, memory, GPU, time). Returns `nil` on any parse failure → **passthrough mode**.
+
+`ReadScriptSpecsFromPath` always returns a non-nil `*ScriptSpecs`. The three possible states are:
+
+| State | `HasDirectives` | `Spec` | Meaning |
+|---|---|---|---|
+| No directives | `false` | non-nil (scheduler defaults) | No `#SBATCH`/`#PBS`/`#BSUB` lines found |
+| Normal | `true` | non-nil (parsed values) | Directives parsed successfully |
+| Passthrough | `true` | `nil` | Directives found but resource parsing failed |
 
 **Passthrough mode** is triggered when:
 - A known directive has an invalid value (e.g., non-integer CPU count)
 - A directive value cannot be safely resolved (e.g., `--ntasks` not evenly divisible by `--nodes`)
 - A blacklisted topology flag is encountered (SLURM only — see below)
-
-`RawFlags` is an immutable audit log of ALL directives. `RemainingFlags` contains only directives not absorbed by either stage. This ensures that when generating scripts for a different scheduler, standard resources are regenerated using the target scheduler's native syntax.
 
 ## Key Functions
 
@@ -82,8 +89,10 @@ Parsing uses a two-stage pipeline:
 - `FindCompatibleGpu(requestedSpec, clusterInfo) → ([]*GpuConversionOption, error)` - Returns all compatible options
 
 **Script Parsing:**
-- `ReadScriptSpecsFromPath(path) → (*ScriptSpecs, error)` - Parses with active scheduler
+- `ReadScriptSpecsFromPath(path) → (*ScriptSpecs, error)` - Parses with active scheduler; always returns non-nil
 - `ParseScriptAny(path) → (*ParsedScript, error)` - Cross-scheduler parsing
+- `HasSchedulerSpecs(specs) → bool` - Reports whether specs contain scheduler directives (`HasDirectives=true`)
+- `IsPassthrough(specs) → bool` - Reports whether specs are in passthrough mode (`HasDirectives=true, Spec=nil`)
 
 **Convenience Wrappers:**
 - `SubmitJob(scheduler, scriptPath, deps) → (jobID, error)` - Single job submission

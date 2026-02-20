@@ -135,33 +135,43 @@ func absPath(path string) string {
 	return path
 }
 
-// writeEnvVars writes resource environment variable exports to w.
-// Must only be called when rs != nil.
+// ResourceEnvVars returns KEY=VALUE strings for resource-related environment
+// variables derived from rs. All counts default to 1 when rs is nil or unset.
 //
-// Always exports: NNODES, NTASKS, NTASKS_PER_NODE, NCPUS (defaults to 1 when CpusPerTask == 0)
-// Conditionally: MEM, MEM_MB, MEM_GB (only when MemPerNodeMB > 0)
-func writeEnvVars(w io.Writer, rs *ResourceSpec) {
-	nodes := rs.Nodes
-	if nodes <= 0 {
-		nodes = 1
+//   - NNODES          — number of nodes
+//   - NTASKS_PER_NODE — tasks (MPI ranks) per node
+//   - NTASKS          — total tasks (NNODES × NTASKS_PER_NODE)
+//   - NCPUS           — CPUs per node (CpusPerTask × TasksPerNode, PBS-style)
+//   - NCPUS_PER_TASK  — CPUs per task (SLURM-style --cpus-per-task)
+//   - MEM / MEM_MB / MEM_GB — included only when MemPerNodeMB > 0
+func ResourceEnvVars(rs *ResourceSpec) []string {
+	nodes, tasksPerNode, cpusPerTask := 1, 1, 1
+	if rs != nil {
+		if rs.Nodes > 0 {
+			nodes = rs.Nodes
+		}
+		if rs.TasksPerNode > 0 {
+			tasksPerNode = rs.TasksPerNode
+		}
+		if rs.CpusPerTask > 0 {
+			cpusPerTask = rs.CpusPerTask
+		}
 	}
-	tasksPerNode := rs.TasksPerNode
-	if tasksPerNode <= 0 {
-		tasksPerNode = 1
+	env := []string{
+		fmt.Sprintf("NNODES=%d", nodes),
+		fmt.Sprintf("NTASKS_PER_NODE=%d", tasksPerNode),
+		fmt.Sprintf("NTASKS=%d", nodes*tasksPerNode),
+		fmt.Sprintf("NCPUS=%d", cpusPerTask*tasksPerNode), // CPUs per node (PBS-style)
+		fmt.Sprintf("NCPUS_PER_TASK=%d", cpusPerTask),
 	}
-	fmt.Fprintf(w, "export NNODES=%d\n", nodes)
-	fmt.Fprintf(w, "export NTASKS=%d\n", nodes*tasksPerNode)
-	fmt.Fprintf(w, "export NTASKS_PER_NODE=%d\n", tasksPerNode)
-	if rs.CpusPerTask > 0 {
-		fmt.Fprintf(w, "export NCPUS=%d\n", rs.CpusPerTask)
-	} else {
-		fmt.Fprintln(w, "export NCPUS=1")
+	if rs != nil && rs.MemPerNodeMB > 0 {
+		env = append(env,
+			fmt.Sprintf("MEM=%d", rs.MemPerNodeMB),
+			fmt.Sprintf("MEM_MB=%d", rs.MemPerNodeMB),
+			fmt.Sprintf("MEM_GB=%d", rs.MemPerNodeMB/1024),
+		)
 	}
-	if rs.MemPerNodeMB > 0 {
-		fmt.Fprintf(w, "export MEM=%d\n", rs.MemPerNodeMB)
-		fmt.Fprintf(w, "export MEM_MB=%d\n", rs.MemPerNodeMB)
-		fmt.Fprintf(w, "export MEM_GB=%d\n", rs.MemPerNodeMB/1024)
-	}
+	return env
 }
 
 // writeJobHeader writes the job info header echo block to w.

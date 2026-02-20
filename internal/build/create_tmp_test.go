@@ -12,7 +12,6 @@ import (
 func TestCreateTmpOverlay_CreatesParentDir(t *testing.T) {
 	base := &BaseBuildObject{
 		nameVersion:       "foo/bar",
-		ncpus:             1,
 		tmpOverlayPath:    filepath.Join(t.TempDir(), "nonexistent", "foo.img"),
 		targetOverlayPath: "",
 		cntDirPath:        "",

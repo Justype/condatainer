@@ -444,12 +444,6 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	fmt.Fprintln(writer, "")
 
-	// Export resource variables for use in build scripts (skipped in passthrough mode)
-	if specs.Spec != nil {
-		writeEnvVars(writer, specs.Spec)
-		fmt.Fprintln(writer, "")
-	}
-
 	// Print job information at start
 	writeJobHeader(writer, "$LSB_JOBID", specs, formatLsfTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")

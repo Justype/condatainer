@@ -98,25 +98,10 @@ func runScript(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// 1. Fast path: already inside a scheduler job — skip spec reading, run locally
-	if scheduler.IsInsideJob() {
-		if err := processEmbeddedArgs(scriptPath); err != nil {
-			return err
-		}
-		overlays, _, err := checkDepsAndAutoInstall(cmd.Context(), scriptPath, originScriptPath)
-		if err != nil {
-			if errors.Is(err, errRunAborted) {
-				return nil
-			}
-			return err
-		}
-		return runLocally(cmd.Context(), scriptPath, overlays)
-	}
-
-	// 2. Read specs → resolve the bash script to use for #CNT/#DEP
+	// 1. Read specs → resolve the content script (HTCondor: .sub → .sh; others: identity)
 	contentScript, scriptSpecs := resolveScriptAndSpecs(scriptPath)
 
-	// 3. Embedded args + dependency check/install
+	// 2. Embedded #CNT args + dependency check/install
 	if err := processEmbeddedArgs(contentScript); err != nil {
 		return err
 	}
@@ -132,7 +117,12 @@ func runScript(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 4. Submit or run locally
+	// 3. In-job or in-container: always run locally (no nested submission)
+	if scheduler.IsInsideJob() || config.IsInsideContainer() {
+		return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs)
+	}
+
+	// 4. Submit if scheduler specs present and scheduler available
 	if config.Global.SubmitJob && scheduler.HasSchedulerSpecs(scriptSpecs) {
 		if err := validateAndConvertSpecs(scriptSpecs); err != nil {
 			return nil
@@ -148,7 +138,7 @@ func runScript(cmd *cobra.Command, args []string) error {
 	} else if !scheduler.HasSchedulerSpecs(scriptSpecs) {
 		utils.PrintNote("No scheduler specs found in script. Running locally.")
 	}
-	return runLocally(cmd.Context(), contentScript, overlays)
+	return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs)
 }
 
 // resolveScriptAndSpecs tries to read scheduler specs and resolves the content script path.
@@ -326,8 +316,19 @@ func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPat
 	return overlays, buildJobIDs, nil
 }
 
+// resourceEnvSettings derives NCPUS, MEM, MEM_MB, MEM_GB from scheduler specs
+// and returns them as KEY=VALUE strings suitable for EnvSettings.
+// Returns nil only when Spec is nil (passthrough mode or parse error).
+// No-directives scripts use scheduler defaults (GetSpecDefaults()) via a non-nil Spec.
+func resourceEnvSettings(specs *scheduler.ScriptSpecs) []string {
+	if specs == nil || specs.Spec == nil {
+		return nil
+	}
+	return scheduler.ResourceEnvVars(specs.Spec)
+}
+
 // runLocally executes the script directly via apptainer with the given overlays.
-func runLocally(ctx context.Context, contentScript string, overlays []string) error {
+func runLocally(ctx context.Context, contentScript string, overlays []string, specs *scheduler.ScriptSpecs) error {
 	// Disable module commands and run the script
 	executionScript := `module() { :; }
 ml() { :; }
@@ -356,7 +357,7 @@ export -f module ml
 		Overlays:     overlays,
 		Command:      []string{"/bin/bash", "-c", executionScript},
 		WritableImg:  runWritableImg,
-		EnvSettings:  runEnvSettings,
+		EnvSettings:  append(resourceEnvSettings(specs), runEnvSettings...),
 		BindPaths:    bindPaths,
 		Fakeroot:     runFakeroot,
 		BaseImage:    runBaseImage, // Empty string triggers GetBaseImage() in ensureDefaults()

@@ -555,12 +555,6 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 
 	fmt.Fprintln(writer, "")
 
-	// Export resource variables for use in build scripts (skipped in passthrough mode)
-	if specs.Spec != nil {
-		writeEnvVars(writer, specs.Spec)
-		fmt.Fprintln(writer, "")
-	}
-
 	// Print job information at start
 	writeJobHeader(writer, "$SLURM_JOB_ID", specs, formatSlurmTimeSpec, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")

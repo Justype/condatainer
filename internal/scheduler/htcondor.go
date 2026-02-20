@@ -381,8 +381,11 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 		htcRS.MemPerNodeMB = specs.Spec.MemPerNodeMB
 	}
 
-	// Export resource variables for use in build scripts
-	writeEnvVars(shWriter, htcRS)
+	// Export resource env vars: the nested "condatainer run <bash_script>" cannot
+	// re-read HTCondor specs (they live in the .sub file, not the bash script).
+	for _, kv := range ResourceEnvVars(htcRS) {
+		fmt.Fprintf(shWriter, "export %s\n", kv)
+	}
 	fmt.Fprintln(shWriter, "")
 
 	// Print job information at start

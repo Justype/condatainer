@@ -141,12 +141,19 @@ Overlays can export environment variables via `#ENV:` directives:
 
 Extracted to `.env` file alongside overlay, loaded at runtime.
 
-## Default Resource Allocation
+## Resource Allocation for Builds
 
-Build CPUs are allocated based on priority:
-1. Scheduler-allocated CPUs (inside job)
-2. `config.Global.Build.DefaultCPUs`
-3. Fallback: 2
+CPU and memory are derived from `scriptSpecs` via `effectiveNcpus()` / `effectiveMemMB()`:
+
+| State | `HasDirectives` | `Spec` | CPU source | Memory source |
+|---|---|---|---|---|
+| No directives | false | non-nil | `Build.DefaultCPUs` | `Build.DefaultMemMB` |
+| Has directives | true | non-nil | `CpusPerTask × TasksPerNode` | `MemPerNodeMB` |
+| Passthrough | true | nil | build fails with error | — |
+
+**Passthrough mode** (unsupported scheduler flags).
+
+Build defaults are configured via `build.*` keys in `config.yaml`. See [Config README](../config/README.md) for details.
 
 ## Build Script Search
 

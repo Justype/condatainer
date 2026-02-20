@@ -114,6 +114,11 @@ func HasSchedulerSpecs(specs *ScriptSpecs) bool {
 	return specs.HasDirectives
 }
 
+// IsPassthrough reports having directives but no valid resource spec.
+func IsPassthrough(specs *ScriptSpecs) bool {
+	return specs != nil && specs.HasDirectives && specs.Spec == nil
+}
+
 // SpecDefaults holds configurable default values for ResourceSpec.
 // These are used by parseResourceSpec when a script does not specify a resource.
 // Set via SetSpecDefaults() during CLI initialization from config.
@@ -852,7 +857,9 @@ func getCudaDeviceCount() *int {
 // If the script's scheduler type differs from the host scheduler, a warning
 // message is returned (but not an error) to allow the build to proceed.
 //
-// Returns nil specs (not an error) if no scheduler directives are found.
+// Always returns a non-nil *ScriptSpecs. When no directives are found,
+// HasDirectives is false and Spec is filled with GetSpecDefaults() values (Nodes=1).
+// Use HasDirectives and IsPassthrough to distinguish the three states.
 func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 	// Parse script using any available parser
 	parsed, err := ParseScriptAny(scriptPath)
@@ -860,9 +867,21 @@ func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 		return nil, err
 	}
 
-	// No scheduler directives found
+	// No scheduler directives found — return a default spec with HasDirectives=false.
+	// Callers must check HasDirectives (not nil) to distinguish from normal/passthrough mode.
 	if parsed == nil {
-		return nil, nil
+		d := GetSpecDefaults()
+		return &ScriptSpecs{
+			ScriptPath:    scriptPath,
+			HasDirectives: false,
+			Spec: &ResourceSpec{
+				Nodes:        1, // single-node default
+				TasksPerNode: d.TasksPerNode,
+				CpusPerTask:  d.CpusPerTask,
+				MemPerNodeMB: d.MemPerNodeMB,
+				Time:         d.Time,
+			},
+		}, nil
 	}
 
 	// Check for scheduler mismatch and log warning

@@ -130,7 +130,7 @@ type BaseBuildObject struct {
 	tmpOverlayPath    string
 	targetOverlayPath string
 	cntDirPath        string
-	ncpus             int
+	submitJob         bool // Whether to submit to scheduler (from config at construction time)
 	isRemote          bool // Whether build source was downloaded
 	scriptSpecs       *scheduler.ScriptSpecs
 
@@ -148,7 +148,27 @@ func (b *BaseBuildObject) TargetOverlayPath() string { return b.targetOverlayPat
 func (b *BaseBuildObject) CntDirPath() string        { return b.cntDirPath }
 func (b *BaseBuildObject) ScriptSpecs() *ScriptSpecs { return b.scriptSpecs }
 func (b *BaseBuildObject) RequiresScheduler() bool {
-	return scheduler.HasSchedulerSpecs(b.scriptSpecs)
+	return b.submitJob && scheduler.HasSchedulerSpecs(b.scriptSpecs)
+}
+
+// effectiveNcpus returns the CPU count per node or default.
+func (b *BaseBuildObject) effectiveNcpus() int {
+	if b.scriptSpecs == nil || !b.scriptSpecs.HasDirectives || b.scriptSpecs.Spec == nil {
+		return defaultBuildNcpus()
+	}
+	cpus := b.scriptSpecs.Spec.CpusPerTask
+	if b.scriptSpecs.Spec.TasksPerNode > 1 {
+		cpus *= b.scriptSpecs.Spec.TasksPerNode
+	}
+	return cpus
+}
+
+// effectiveMemMB returns the memory limit per node in MB or default.
+func (b *BaseBuildObject) effectiveMemMB() int64 {
+	if b.scriptSpecs == nil || !b.scriptSpecs.HasDirectives || b.scriptSpecs.Spec == nil {
+		return config.Global.Build.DefaultMemMB
+	}
+	return b.scriptSpecs.Spec.MemPerNodeMB
 }
 
 func (b *BaseBuildObject) IsInstalled() bool {
@@ -337,19 +357,38 @@ func (b *BaseBuildObject) parseScriptMetadata() error {
 		return err
 	}
 
-	// If specs found, use ncpus from script
-	if specs != nil && specs.Spec != nil && specs.Spec.CpusPerTask > 0 {
-		b.ncpus = specs.Spec.CpusPerTask
+	// Always store scriptSpecs — effectiveNcpus()/effectiveMemMB() derive values from it.
+	b.scriptSpecs = specs
+
+	// Passthrough mode: scheduler directives found but resource parsing failed (unsupported flags).
+	// Build cannot proceed without a normalized resource spec.
+	if scheduler.IsPassthrough(specs) {
+		return fmt.Errorf("build script %s contains unsupported scheduler directives (passthrough mode); remove or fix the unsupported directives", b.buildSource)
 	}
 
-	// Only store full scriptSpecs if job submission is enabled (for generating job scripts)
-	if config.Global.SubmitJob && specs != nil {
-		if specs.Spec != nil && specs.Spec.CpusPerTask <= 0 {
-			specs.Spec.CpusPerTask = defaultBuildNcpus()
-		} else if specs.Spec == nil {
-			b.ncpus = defaultBuildNcpus()
+	// No scheduler directives: replace Spec with build-specific defaults.
+	// (ReadScriptSpecsFromPath fills Spec from Scheduler config defaults, not Build.* defaults.)
+	if !specs.HasDirectives {
+		specs.Spec = &scheduler.ResourceSpec{
+			Nodes:        1,
+			TasksPerNode: 1,
+			CpusPerTask:  defaultBuildNcpus(),
+			MemPerNodeMB: config.Global.Build.DefaultMemMB,
+			Time:         config.Global.Build.DefaultTime,
 		}
-		b.scriptSpecs = specs
+	}
+
+	// When submitting with parseable directives, fill in missing resource fields for the header.
+	if b.submitJob && specs.HasDirectives && specs.Spec != nil {
+		if specs.Spec.CpusPerTask <= 0 {
+			specs.Spec.CpusPerTask = defaultBuildNcpus()
+		}
+		if specs.Spec.MemPerNodeMB <= 0 {
+			specs.Spec.MemPerNodeMB = config.Global.Build.DefaultMemMB
+		}
+		if specs.Spec.Time <= 0 {
+			specs.Spec.Time = config.Global.Build.DefaultTime
+		}
 	}
 
 	return nil
@@ -405,7 +444,7 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string)
 
 	base := &BaseBuildObject{
 		nameVersion:       normalized,
-		ncpus:             defaultBuildNcpus(),
+		submitJob:         config.Global.SubmitJob,
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetOverlay,
@@ -453,7 +492,7 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 	base := &BaseBuildObject{
 		nameVersion:       normalized,
 		buildSource:       buildSource,
-		ncpus:             defaultBuildNcpus(),
+		submitJob:         config.Global.SubmitJob,
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetOverlay,
@@ -485,7 +524,7 @@ func FromExternalSource(targetPrefix, source string, isApptainer bool, imagesDir
 	base := &BaseBuildObject{
 		nameVersion:       nameVersion,
 		buildSource:       source,
-		ncpus:             defaultBuildNcpus(),
+		submitJob:         config.Global.SubmitJob,
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetPrefix + ".sqf",
