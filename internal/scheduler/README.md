@@ -1,6 +1,6 @@
 # scheduler
 
-HPC scheduler abstraction layer providing a unified interface for job submission, script parsing, and resource management across SLURM, PBS/Torque, LSF, and HTCondor.
+HPC scheduler abstraction layer for job submission, script parsing, and resource management across SLURM, PBS/Torque, LSF, and HTCondor.
 
 ## Supported Schedulers
 
@@ -14,10 +14,9 @@ HPC scheduler abstraction layer providing a unified interface for job submission
 ## Architecture
 
 ```
-scheduler.go      Core interface, types, detection, cross-scheduler parsing,
-                  ValidateAndConvertSpecs (resource auto-adjustment)
-registry.go       Thread-safe global active scheduler singleton
-error.go          Structured error types (validation, parse, submission, etc.)
+scheduler.go      Core interface, types, resource resolution, validation
+registry.go       Thread-safe active scheduler singleton + debugMode
+error.go          Structured error types
 gpu.go            GPU compatibility database, tier matching, MIG profiles
 slurm.go          SLURM implementation
 pbs.go            PBS/Torque implementation
@@ -27,8 +26,6 @@ htcondor.go       HTCondor implementation
 
 ## Interface
 
-All schedulers implement the `Scheduler` interface:
-
 ```go
 type Scheduler interface {
     IsAvailable() bool
@@ -37,269 +34,128 @@ type Scheduler interface {
     Submit(scriptPath string, dependencyJobIDs []string) (string, error)
     GetClusterInfo() (*ClusterInfo, error)
     GetInfo() *SchedulerInfo
-    GetJobResources() *JobResources
+    GetJobResources() *ResourceSpec // from scheduler env vars; zero fields = not set
 }
+```
+
+## Resource Spec Priority Chain
+
+Resources are resolved in three layers (lowest → highest priority):
+
+```
+defaults  →  script directives (HasDirectives=true only)  →  job resources (non-zero fields)
+```
+
+- **defaults**: caller-supplied baseline (`GetSpecDefaults()` for run; `buildDefaults` for build)
+- **script directives**: parsed `#SBATCH`/`#PBS`/`#BSUB` values — only applied when `HasDirectives=true`
+- **job resources**: live allocation from scheduler env vars (read by `GetJobResources()`) — only non-zero fields override
+
+### Why `HasDirectives`, not `Spec != nil`
+
+When a script has no directives, the parser fills `Spec` with `GetSpecDefaults()`. Checking only `Spec != nil` would silently replace the caller's baseline with scheduler defaults. Checking `HasDirectives` ensures no-directive scripts fall back to the caller's baseline correctly.
+
+### Functions
+
+```go
+// Run system: uses GetSpecDefaults() as baseline
+ResolveResourceSpec(jobResources, scriptSpecs) *ResourceSpec
+
+// Build system (or any caller with custom baseline)
+ResolveResourceSpecFrom(defaults, jobResources, scriptSpecs) *ResourceSpec
+
+// In-place merge: overwrites rs fields with non-zero/non-nil fields from other
+(*ResourceSpec).Override(other *ResourceSpec)
+
+// Scheduler env vars → *ResourceSpec; starts from zero (no defaults)
+sched.GetJobResources() *ResourceSpec
 ```
 
 ## Key Types
 
-**ScriptSpecs** - Parsed job specifications (scheduler-agnostic):
-- `ScriptPath` - Absolute path of the parsed script (for HTCondor: the `executable` from `.sub` file)
-- `HasDirectives bool` - Whether any scheduler directives were found (`false` = no `#SBATCH`/`#PBS`/`#BSUB` lines)
-- `Spec *ResourceSpec` - Compute geometry: `Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`, `Gpu`, `Exclusive`; `nil` in passthrough mode
-- `Control RuntimeConfig` - Job control: `JobName`, `Stdout`, `Stderr`, email settings, `Partition`
-- `RawFlags []string` - Immutable audit log of all directives
-- `RemainingFlags []string` - Directives not absorbed by Spec or Control
+**`ScriptSpecs`** — parsed job specification:
+- `HasDirectives bool` — `false` when no `#SBATCH`/`#PBS`/`#BSUB` lines exist
+- `Spec *ResourceSpec` — resource geometry; `nil` in passthrough mode
+- `Control RuntimeConfig` — job name, stdout/stderr, email, partition
+- `RawFlags []string` — all directives verbatim
+- `RemainingFlags []string` — directives not consumed by Spec or Control
 
-**JobSpec** - Job submission input:
-- `Name`, `Command`, `Specs *ScriptSpecs`, `DepJobIDs`, `Metadata`
+**`ResourceSpec`** — compute geometry: `Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`, `Gpu`, `Exclusive`
 
-**JobResources** - Runtime-allocated resources (from env vars, pointer fields):
-- `Ncpus`, `Ntasks`, `Nodes`, `MemMB`, `Ngpus`
+**`JobSpec`** — submission input: `Name`, `Command`, `Specs`, `DepJobIDs`, `Metadata`, `OverrideOutput`
 
-## Script Parsing Behavior
+## Script Parsing
 
-Parsing uses a two-stage pipeline:
+Two-stage pipeline:
+1. **Stage 1 (critical):** `parseRuntimeConfig` — job control (name, I/O, email). Failure stops parsing.
+2. **Stage 2 (best-effort):** `parseResourceSpec` — compute geometry. Failure → **passthrough mode** (`Spec=nil`).
 
-1. **Stage 1 (critical):** `parseRuntimeConfig` — extracts job control settings (name, I/O, email). Failures stop parsing.
-2. **Stage 2 (best-effort):** `parseResourceSpec` — extracts compute geometry (CPU, memory, GPU, time). Returns `nil` on any parse failure → **passthrough mode**.
-
-`ReadScriptSpecsFromPath` always returns a non-nil `*ScriptSpecs`. The three possible states are:
+`ReadScriptSpecsFromPath` always returns non-nil `*ScriptSpecs`:
 
 | State | `HasDirectives` | `Spec` | Meaning |
 |---|---|---|---|
-| No directives | `false` | non-nil (scheduler defaults) | No `#SBATCH`/`#PBS`/`#BSUB` lines found |
-| Normal | `true` | non-nil (parsed values) | Directives parsed successfully |
-| Passthrough | `true` | `nil` | Directives found but resource parsing failed |
+| No directives | `false` | non-nil (caller defaults) | No scheduler lines found |
+| Normal | `true` | non-nil (parsed values) | Parsed successfully |
+| Passthrough | `true` | `nil` | Directives found, resource parse failed |
 
-**Passthrough mode** is triggered when:
-- A known directive has an invalid value (e.g., non-integer CPU count)
-- A directive value cannot be safely resolved (e.g., `--ntasks` not evenly divisible by `--nodes`)
-- A blacklisted topology flag is encountered (SLURM only — see below)
+Passthrough is triggered by: invalid directive values, unresolvable relationships (e.g. `--ntasks` not divisible by `--nodes`), or blacklisted topology flags (SLURM only).
 
-## Key Functions
+## Configurable Scheduler Defaults
 
-**Resource Validation:**
-- `ValidateAndConvertSpecs(specs) → error` - Validates specs against cluster limits; fails with descriptive error (no auto-adjustment)
-- `ValidateSpecs(specs, limits) → error` - Validates specs against single partition limits
-- `ValidateGpuAvailability(gpuSpec, clusterInfo) → error` - Checks GPU availability; returns `GpuValidationError` with suggestions
-
-**GPU Compatibility:**
-- `ConvertGpuSpec(requestedSpec, clusterInfo) → (*GpuSpec, error)` - Finds best compatible GPU
-- `FindCompatibleGpu(requestedSpec, clusterInfo) → ([]*GpuConversionOption, error)` - Returns all compatible options
-
-**Script Parsing:**
-- `ReadScriptSpecsFromPath(path) → (*ScriptSpecs, error)` - Parses with active scheduler; always returns non-nil
-- `ParseScriptAny(path) → (*ParsedScript, error)` - Cross-scheduler parsing
-- `HasSchedulerSpecs(specs) → bool` - Reports whether specs contain scheduler directives (`HasDirectives=true`)
-- `IsPassthrough(specs) → bool` - Reports whether specs are in passthrough mode (`HasDirectives=true, Spec=nil`)
-
-**Convenience Wrappers:**
-- `SubmitJob(scheduler, scriptPath, deps) → (jobID, error)` - Single job submission
-- `SubmitJobs(scheduler, jobs, outputDir) → (jobIDs, error)` - Multi-job with dependencies
-- `ReadScript(scheduler, path)`, `ValidateScript(scheduler, path)`, `WriteScript(...)` - Helper aliases
-
-## Configurable Defaults
-
-`ReadScriptSpecs` applies configurable defaults when a script omits resource directives. Defaults are set via config (`scheduler.*` keys) and wired through `SetSpecDefaults()` at CLI init.
+Applied when a script omits resource directives. Set via `SetSpecDefaults()` at CLI init (wired from `config.Global.Scheduler`).
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `scheduler.nodes` | 1 | Node count |
 | `scheduler.tasks_per_node` | 1 | Tasks per node |
 | `scheduler.ncpus_per_task` | 2 | CPUs per task |
-| `scheduler.mem_mb_per_node` | 8192 | Memory per node in MB |
+| `scheduler.mem_mb_per_node` | 8192 | Memory per node (MB) |
 | `scheduler.time` | `4h` | Time limit |
 
 ```yaml
 # ~/.config/condatainer/config.yaml
 scheduler:
-  nodes: 1
-  tasks_per_node: 1
   ncpus_per_task: 8
   mem_mb_per_node: 16384
   time: "8h"
 ```
 
-These are independent from build defaults (`build.default_cpus`), which control `$NCPUS` during image builds.
-
-## Usage
-
-### Detection and Initialization
+## Convenience Functions
 
 ```go
-// Auto-detect and set active scheduler
-schedType, err := scheduler.Init("")
+// Detection
+scheduler.Init("")                  // auto-detect and set active scheduler
+scheduler.InitIfAvailable("")       // non-failing
+scheduler.ActiveScheduler()         // get current scheduler
 
-// Or detect with a preferred binary
-schedType, err := scheduler.Init("/usr/bin/sbatch")
+// Script helpers
+ReadScriptSpecsFromPath(path)       // always non-nil
+ParseScriptAny(path)                // cross-scheduler parsing
+HasSchedulerSpecs(specs)            // HasDirectives=true
+IsPassthrough(specs)                // HasDirectives=true && Spec=nil
 
-// Non-failing detection
-schedType := scheduler.InitIfAvailable("")
+// Submission
+SubmitJob(sched, scriptPath, deps)  // single job
+SubmitJobs(sched, jobs, outputDir)  // multi-job with dependencies
 
-// Access the active scheduler
-sched := scheduler.ActiveScheduler()
+// Validation
+ValidateAndConvertSpecs(specs)      // validates against cluster limits (no auto-adjust)
+ValidateSpecs(specs, limits)        // validate against single partition
+ValidateGpuAvailability(gpu, info)  // returns GpuValidationError with suggestions
 ```
 
-### Parsing Scripts
+## Normalized Environment Variables
 
-```go
-// Parse using detected scheduler
-specs, err := sched.ReadScriptSpecs("job.sh")
+Generated job scripts export these variables regardless of scheduler:
 
-// Cross-scheduler parsing (tries all parsers)
-parsed := scheduler.ParseScriptAny("job.sh")
-```
-
-### Generating Scripts
-
-```go
-jobSpec := &scheduler.JobSpec{
-    Name:    "my_job",
-    Command: "python train.py",
-    Specs: &scheduler.ScriptSpecs{
-        Spec: &scheduler.ResourceSpec{
-            CpusPerTask:  8,
-            MemPerNodeMB: 16384,
-            Time:         time.Hour,
-            Gpu:          &scheduler.GpuSpec{Count: 1, Type: "a100"},
-        },
-        Control: scheduler.RuntimeConfig{JobName: "my_job"},
-    },
-}
-scriptPath, err := sched.CreateScriptWithSpec(jobSpec, "/output/dir")
-```
-
-### Job Submission
-
-```go
-// Single job
-jobID, err := scheduler.SubmitJob(sched, scriptPath, nil)
-
-// Multiple jobs with dependencies
-jobs := []*scheduler.JobSpec{job1, job2, job3}
-jobIDs, err := scheduler.SubmitJobs(sched, jobs, outputDir)
-```
-
-### Validation and Resource Auto-Adjustment
-
-`ValidateAndConvertSpecs` validates job specs against cluster limits and auto-adjusts resources when possible. Called automatically by `condatainer run` and build submissions.
-
-| Resource | Auto-Adjust | Notes |
-|----------|-------------|-------|
-| **CPUs** | ✓ Reduced | Time scaled proportionally; fails if adjusted time > limit |
-| **Memory** | ✗ Critical | Always fails if exceeded |
-| **Time** | ✗ Critical | Always fails if exceeded |
-| **GPUs** | ✓ Converted | Upgrades allowed; downgrades blocked if time limit set |
-
-```go
-// Auto-adjusts specs in-place
-validationErr, cpuAdjusted, cpuMsg, gpuConverted, gpuMsg := scheduler.ValidateAndConvertSpecs(specs)
-
-// Example warnings:
-// "CPUs: 32 → 16 (reduced to fit limit); Time: 4h → 8h (adjusted proportionally)"
-// "GPU: v100 → a100 (upgrade)"
-```
-
-**Key behaviors:**
-- CPU reduction: Assumes linear scaling, adjusts time proportionally
-- GPU upgrades: Always safe (faster = better runtime)
-- GPU downgrades: Blocked when time limit exists (unpredictable performance)
-- Validation skipped if cluster info unavailable
-
-## Single-Node Enforcement
-
-By default, all schedulers generate scripts that run on a **single node** (`Nodes=1`, `Ntasks=1`). `CreateScriptWithSpec` normalizes these defaults and regenerates resource directives explicitly, skipping any raw flags that would conflict:
-
-| Scheduler | Mechanism |
-|-----------|-----------|
-| SLURM | `--nodes=1 --ntasks=1` |
-| PBS | `select=1:ncpus=N` |
-| LSF | `span[hosts=1]` + `-n N` |
-| HTCondor | Inherently single-node (vanilla universe) |
-
-Multi-node is supported by setting `Nodes > 1` in `ScriptSpecs`.
-
-## Dependency Formats
-
-| Scheduler | Format |
-|-----------|--------|
-| SLURM | `--dependency=afterok:ID1,ID2` |
-| PBS | `-W depend=afterok:ID1:ID2` |
-| LSF | `-w "done(ID1) && done(ID2)"` |
-| HTCondor | Not supported (requires DAGMan) |
-
-## Scheduler-Specific Notes
-
-### SLURM
-- Parses `--nodes`, `--ntasks`, `--ntasks-per-node`, `--cpus-per-task`, `--cpus-per-gpu`
-- GPU via `--gres=gpu:type:count`, `--gpus-per-node`, `--gpus` (total), or `--gpus-per-task`; supports MIG profiles
-  - Resolution priority: `--gres=gpu:` > `--gpus-per-node` > `--gpus` (÷ nodes) > `--gpus-per-task` (× tasks/node)
-  - `--gpus` total must divide evenly by `--nodes`; otherwise triggers passthrough
-- Memory via `--mem` (per-node), `--mem-per-cpu` (× CpusPerTask × TasksPerNode), or `--mem-per-gpu` (× Gpu.Count)
-- Resource spec uses a **two-phase approach**: Phase 1 scans all directives into temp vars; Phase 2 resolves in dependency order (Nodes/Tasks → GPU → CPU → Memory → Time), ensuring derived values are computed correctly
-- `--ntasks` must divide evenly by `--nodes`; otherwise triggers passthrough
-- **Blacklisted topology flags** (immediately trigger passthrough — cannot be reliably translated):
-  `--gpus-per-socket`, `--sockets-per-node`, `--cores-per-socket`, `--threads-per-core`,
-  `--ntasks-per-socket`, `--ntasks-per-core`, `--distribution`
-- Cluster info from `sinfo` and `scontrol`
-
-### PBS
-- Resource formats: `select=N:ncpus=M:mpiprocs=P:mem=Xgb:ngpus=G` or `nodes=N:ppn=M`
-- `Ntasks` derived from `nodes * mpiprocs`
-- Invalid values for `ncpus`, `mem`, `walltime`, `ngpus`, `gpus`, `select`, `nodes`, `ppn`, `mpiprocs` trigger passthrough
-- Cluster info from `pbsnodes -a`
-
-### LSF
-- CPU count via `-n`, memory via `-M` (KB), node count via `-R "span[hosts=N]"`
-- GPU via `-gpu "num=N:type=T"` or `-R "rusage[ngpus_physical=N]"`
-- `-R` resource flags are parsed: `span[hosts=N]` sets `Nodes`, `rusage[mem=X]` sets `MemMB`, `rusage[ngpus*=N]` sets GPU count
-- Script generation always regenerates `-R "span[hosts=N]"` from `specs.Nodes`
-- **Note**: Custom rusage parameters in `-R` flags (beyond mem/ngpus) are currently lost during parsing; use separate flags for custom resources
-- Cluster info from `bhosts -w`
-
-### HTCondor
-- Parses native `.sub` submit files directly
-- `executable = script.sh` in the `.sub` file is extracted as `ScriptSpecs.ScriptPath`
-- Comments (`#`), empty lines, and structural keywords (`universe`, `executable`, `transfer_executable`, `queue`, `arguments`) are skipped during parsing
-- Resource keys: `request_cpus`, `request_memory`, `request_gpus`, `+MaxRuntime` (seconds)
-- Generates two files: `.sub` (submit description) + `.sh` (wrapper script)
-- Always single-node (vanilla universe)
-- No native job dependency support
-
-## Error Types
-
-- `ValidationError` - Resource limits exceeded (CPU, memory, time, GPU count)
-  - Returned by `ValidateSpecs()` and `ValidateAndConvertSpecs()`
-  - Contains `Field`, `Requested`, `Limit`, `Partition` details
-  - Examples: Memory 128GB > limit 64GB, Time 48h > limit 24h
-- `GpuValidationError` - GPU type unavailable or incompatible
-  - Returned by `ValidateGpuAvailability()` when no conversion possible
-  - Includes `Suggestions` list with available GPU options
-- `ParseError` - Directive parsing failure
-- `SubmissionError` - Job submission failure
-- `ClusterError` - Cluster info query failure
-- `DependencyError` - Missing job dependencies
-- `ScriptCreationError` - Script file creation failure
-
-Check errors with: `scheduler.IsValidationError(err)`, `scheduler.IsGpuValidationError(err)`, etc.
-
-## Environment Variables
-
-### Normalized Variables (Exported by CondaTainer)
-
-All generated job scripts export **normalized environment variables** for use in build scripts, regardless of scheduler:
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `NNODES` | Number of nodes | `1` |
-| `NTASKS` | Total number of tasks | `1` |
-| `NCPUS` | CPUs per task | `8` |
-| `MEM` | Memory in MB | `16384` |
-| `MEM_MB` | Memory in MB (alias) | `16384` |
-| `MEM_GB` | Memory in GB | `16` |
-
-These variables are set by CondaTainer's script generation and are available inside all build scripts for resource-aware compilation (e.g., `make -j $NCPUS`).
+| Variable | Description |
+|----------|-------------|
+| `NNODES` | Number of nodes |
+| `NTASKS` | Total tasks |
+| `NTASKS_PER_NODE` | Tasks per node |
+| `NCPUS` | CPUs per node (`CpusPerTask × TasksPerNode`) |
+| `NCPUS_PER_TASK` | CPUs per task |
+| `MEM` / `MEM_MB` | Memory in MB |
+| `MEM_GB` | Memory in GB |
 
 ### Scheduler-Native Variables (Read-Only)
 
@@ -308,8 +164,65 @@ Each scheduler also sets its own runtime environment variables when inside a job
 | Variable | SLURM | PBS | LSF | HTCondor |
 |----------|-------|-----|-----|----------|
 | Job ID | `SLURM_JOB_ID` | `PBS_JOBID` | `LSB_JOBID` | `_CONDOR_JOB_AD` |
-| CPUs | `SLURM_CPUS_PER_TASK` | `PBS_NCPUS` | `LSB_DJOB_NUMPROC` | `_CONDOR_REQUEST_CPUS` |
+| CPUs/Task | `SLURM_CPUS_PER_TASK` | `PBS_NCPUS` | `LSB_DJOB_NUMPROC` | `_CONDOR_REQUEST_CPUS` |
 | Memory | `SLURM_MEM_PER_NODE` | `PBS_VMEM` | `LSB_MAX_MEM_RUSAGE` | `_CONDOR_REQUEST_MEMORY` |
-| GPUs | `CUDA_VISIBLE_DEVICES` | `PBS_NGPUS` | `CUDA_VISIBLE_DEVICES` | `CUDA_VISIBLE_DEVICES` |
-| Nodes | `SLURM_JOB_NUM_NODES` | `PBS_NUM_NODES` | `LSB_HOSTS` | N/A |
-| Tasks | `SLURM_NTASKS` | `PBS_NP` | N/A | N/A |
+| GPUs | `CUDA_VISIBLE_DEVICES` | `CUDA_VISIBLE_DEVICES` | `CUDA_VISIBLE_DEVICES` | `CUDA_VISIBLE_DEVICES` |
+| Nodes | `SLURM_JOB_NUM_NODES` | `PBS_NUM_NODES` | N/A | N/A |
+| Tasks/Node | `SLURM_NTASKS_PER_NODE` | `PBS_NP` ÷ nodes | N/A | N/A |
+
+## Error Types
+
+| Type | Returned by | Key fields |
+|------|-------------|------------|
+| `ValidationError` | `ValidateSpecs`, `ValidateAndConvertSpecs` | `Field`, `Requested`, `Limit`, `Partition` |
+| `GpuValidationError` | `ValidateGpuAvailability` | `Suggestions` |
+| `ParseError` | script parsing | — |
+| `SubmissionError` | `Submit` | — |
+| `ClusterError` | `GetClusterInfo` | — |
+
+Check with: `scheduler.IsValidationError(err)`, `scheduler.IsGpuValidationError(err)`, etc.
+
+## Scheduler-Specific Notes
+
+### SLURM
+- GPU: `--gres=gpu:type:count` > `--gpus-per-node` > `--gpus`÷nodes > `--gpus-per-task`×tasks
+- Memory: `--mem` (per-node), `--mem-per-cpu` (×cpus), `--mem-per-gpu` (×gpu count)
+- Blacklisted flags (trigger passthrough): `--gpus-per-socket`, `--sockets-per-node`, `--cores-per-socket`, `--threads-per-core`, `--ntasks-per-socket`, `--ntasks-per-core`, `--distribution`
+- Cluster info from `sinfo` + `scontrol`
+
+### PBS
+- Resources: `select=N:ncpus=M:mpiprocs=P:mem=Xgb:ngpus=G` or `nodes=N:ppn=M`
+- Cluster info from `pbsnodes -a`
+
+### LSF
+- CPU: `-n`, memory: `-M` (KB), nodes: `-R "span[hosts=N]"`
+- GPU: `-gpu "num=N:type=T"` or `-R "rusage[ngpus_physical=N]"`
+- Custom rusage params beyond mem/ngpus are lost during parsing
+- Cluster info from `bhosts -w`
+
+### HTCondor
+- Parses native `.sub` files; `executable` field → `ScriptSpecs.ScriptPath`
+- Resource keys: `request_cpus`, `request_memory`, `request_gpus`, `+MaxRuntime` (seconds)
+- Generates `.sub` + `.sh` wrapper; always single-node; no dependency support
+
+## Single-Node Enforcement
+
+`CreateScriptWithSpec` normalizes to single-node by default:
+
+| Scheduler | Mechanism |
+|-----------|-----------|
+| SLURM | `--nodes=1 --ntasks=1` |
+| PBS | `select=1:ncpus=N` |
+| LSF | `span[hosts=1]` + `-n N` |
+| HTCondor | inherently single-node |
+
+Multi-node: set `Nodes > 1` in `ScriptSpecs`.
+
+## Dependency Formats
+
+| Scheduler | Format |
+|-----------|--------|
+| SLURM | `--dependency=afterok:ID1,ID2` |
+| PBS | `-W depend=afterok:ID1:ID2` |
+| LSF | `-w "done(ID1) && done(ID2)"` |
+| HTCondor | not supported (requires DAGMan) |

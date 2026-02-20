@@ -52,12 +52,12 @@ type GpuInfo struct {
 // ResourceLimits holds scheduler resource limits per partition/queue.
 // CPU and memory limits are per-node (matching how schedulers report them).
 type ResourceLimits struct {
+	MaxNodes        int           // Maximum nodes per job
 	MaxCpusPerNode  int           // Maximum CPUs per node in this partition
 	MaxMemMBPerNode int64         // Maximum memory per node in MB
-	MaxTime         time.Duration // Maximum walltime (e.g., "7-00:00:00")
 	MaxGpus         int           // Maximum GPUs per job (total across all nodes)
-	MaxNodes        int           // Maximum nodes per job
 	DefaultTime     time.Duration // Default walltime if not specified
+	MaxTime         time.Duration // Maximum walltime (e.g., "7-00:00:00")
 	Partition       string        // Partition/queue name these limits apply to
 }
 
@@ -119,19 +119,8 @@ func IsPassthrough(specs *ScriptSpecs) bool {
 	return specs != nil && specs.HasDirectives && specs.Spec == nil
 }
 
-// SpecDefaults holds configurable default values for ResourceSpec.
-// These are used by parseResourceSpec when a script does not specify a resource.
-// Set via SetSpecDefaults() during CLI initialization from config.
-type SpecDefaults struct {
-	CpusPerTask  int
-	MemPerNodeMB int64
-	Time         time.Duration
-	Nodes        int
-	TasksPerNode int
-}
-
 // specDefaults is the package-level defaults used by all schedulers.
-var specDefaults = SpecDefaults{
+var specDefaults = ResourceSpec{
 	CpusPerTask:  2,
 	MemPerNodeMB: 8192,
 	Time:         4 * time.Hour,
@@ -140,13 +129,43 @@ var specDefaults = SpecDefaults{
 }
 
 // SetSpecDefaults overrides the default values used by ReadScriptSpecs.
-func SetSpecDefaults(d SpecDefaults) {
+func SetSpecDefaults(d ResourceSpec) {
 	specDefaults = d
 }
 
 // GetSpecDefaults returns the current default values for ScriptSpecs.
-func GetSpecDefaults() SpecDefaults {
+func GetSpecDefaults() ResourceSpec {
 	return specDefaults
+}
+
+// Override updates rs in-place with non-zero/non-nil fields from other.
+// Fields in other that are zero/nil are skipped (rs retains its value).
+// Safe to call with a nil other.
+func (rs *ResourceSpec) Override(other *ResourceSpec) {
+	if other == nil {
+		return
+	}
+	if other.Nodes > 0 {
+		rs.Nodes = other.Nodes
+	}
+	if other.TasksPerNode > 0 {
+		rs.TasksPerNode = other.TasksPerNode
+	}
+	if other.CpusPerTask > 0 {
+		rs.CpusPerTask = other.CpusPerTask
+	}
+	if other.MemPerNodeMB > 0 {
+		rs.MemPerNodeMB = other.MemPerNodeMB
+	}
+	if other.Gpu != nil {
+		rs.Gpu = other.Gpu
+	}
+	if other.Time > 0 {
+		rs.Time = other.Time
+	}
+	if other.Exclusive {
+		rs.Exclusive = other.Exclusive
+	}
 }
 
 // JobSpec represents specifications for submitting a batch job
@@ -157,16 +176,6 @@ type JobSpec struct {
 	DepJobIDs      []string          // Job IDs this job depends on
 	Metadata       map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
 	OverrideOutput bool              // If true, always set Stdout/Stderr from Name (ignores script directives)
-}
-
-// JobResources holds resource allocations for the currently running scheduler job.
-// A nil pointer field means the scheduler did not expose that resource via environment variables.
-type JobResources struct {
-	Ncpus  *int   // Number of allocated CPUs per task
-	Ntasks *int   // Number of allocated tasks
-	Nodes  *int   // Number of allocated nodes
-	MemMB  *int64 // Allocated memory in MB
-	Ngpus  *int   // Number of allocated GPUs
 }
 
 // Scheduler defines the interface for job schedulers
@@ -194,8 +203,35 @@ type Scheduler interface {
 	GetInfo() *SchedulerInfo
 
 	// GetJobResources reads allocated resources from scheduler environment variables.
+	// Fields with value 0 were not exposed by the scheduler.
 	// Returns nil if not running inside a job of this scheduler type.
-	GetJobResources() *JobResources
+	GetJobResources() *ResourceSpec
+}
+
+// ResolveResourceSpecFrom merges resources using the priority chain:
+//
+//	defaults → scriptSpecs.Spec (when HasDirectives=true) → jobResources (non-zero fields)
+//
+// Checks HasDirectives rather than Spec != nil: when a script has no directives,
+// the parser fills Spec with GetSpecDefaults(), so checking only Spec != nil would
+// silently replace the caller's defaults with scheduler defaults.
+// Always returns a non-nil *ResourceSpec.
+func ResolveResourceSpecFrom(defaults ResourceSpec, jobResources *ResourceSpec, scriptSpecs *ScriptSpecs) *ResourceSpec {
+	base := defaults
+	if scriptSpecs != nil && scriptSpecs.HasDirectives && scriptSpecs.Spec != nil {
+		base = *scriptSpecs.Spec
+	}
+	base.Override(jobResources)
+	return &base
+}
+
+// ResolveResourceSpec merges resources using the priority chain:
+//
+//	GetSpecDefaults() → scriptSpecs.Spec (when HasDirectives=true) → jobResources
+//
+// Always returns a non-nil *ResourceSpec.
+func ResolveResourceSpec(jobResources *ResourceSpec, scriptSpecs *ScriptSpecs) *ResourceSpec {
+	return ResolveResourceSpecFrom(GetSpecDefaults(), jobResources, scriptSpecs)
 }
 
 // ValidateSpecs validates job specs against cluster limits.
@@ -742,25 +778,22 @@ func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 	// Callers must check HasDirectives (not nil) to distinguish from normal/passthrough mode.
 	if parsed == nil {
 		d := GetSpecDefaults()
+		d.Nodes = 1 // single-node default for local scripts
 		return &ScriptSpecs{
 			ScriptPath:    scriptPath,
 			HasDirectives: false,
-			Spec: &ResourceSpec{
-				Nodes:        1, // single-node default
-				TasksPerNode: d.TasksPerNode,
-				CpusPerTask:  d.CpusPerTask,
-				MemPerNodeMB: d.MemPerNodeMB,
-				Time:         d.Time,
-			},
+			Spec:          &d,
 		}, nil
 	}
 
 	// Check for scheduler mismatch and log warning
 	hostType := DetectType()
 	if hostType != SchedulerUnknown && parsed.ScriptType != hostType {
-		// Log warning about mismatch (the specs will still be used)
-		utils.PrintNote("Script contains %s directives but host has %s scheduler. Specs will be translated.",
-			parsed.ScriptType, hostType)
+		// Skip translation note when inside a job — allocation is already done.
+		if !IsInsideJob() {
+			utils.PrintNote("Script contains %s directives but host has %s scheduler. Specs will be translated.",
+				parsed.ScriptType, hostType)
+		}
 
 		// Clear RemainingFlags on cross-scheduler translation:
 		// scheduler-specific unrecognized flags cannot be translated.

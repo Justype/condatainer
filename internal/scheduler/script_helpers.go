@@ -13,6 +13,13 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
+// logParseWarning prints a parser diagnostic warning, except in a job.
+func logParseWarning(format string, args ...any) {
+	if !IsInsideJob() {
+		utils.PrintWarning(format, args...)
+	}
+}
+
 // readFileLines opens a file and returns all its lines.
 // Shared helper used by all scheduler ReadScriptSpecs implementations.
 func readFileLines(path string) ([]string, error) {
@@ -63,7 +70,8 @@ func parseScript(
 
 	rs, remaining := rsParser(unconsumed)
 	if rs == nil && len(unconsumed) > 0 {
-		utils.PrintWarning("Could not parse resource directives; using passthrough mode")
+		// Duplicate warning, already printed by the scheduler-specific parser; no need to print again here.
+		// utils.PrintWarning("Could not parse resource directives; using passthrough mode")
 	}
 
 	return &ScriptSpecs{

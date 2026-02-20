@@ -30,7 +30,7 @@ func TestSpecDefaultsSetAndGet(t *testing.T) {
 	original := GetSpecDefaults()
 	defer SetSpecDefaults(original)
 
-	custom := SpecDefaults{
+	custom := ResourceSpec{
 		CpusPerTask:  8,
 		MemPerNodeMB: 16384,
 		Time:         4 * time.Hour,
@@ -62,7 +62,7 @@ func TestSpecDefaultsAffectsReadScriptSpecs(t *testing.T) {
 	original := GetSpecDefaults()
 	defer SetSpecDefaults(original)
 
-	SetSpecDefaults(SpecDefaults{
+	SetSpecDefaults(ResourceSpec{
 		CpusPerTask:  16,
 		MemPerNodeMB: 32768,
 		Time:         8 * time.Hour,

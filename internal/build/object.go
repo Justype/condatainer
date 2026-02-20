@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/overlay"
@@ -75,21 +76,31 @@ func isCancelledByUser(err error) bool {
 // ScriptSpecs mirrors the scheduler module's job spec metadata.
 type ScriptSpecs = scheduler.ScriptSpecs
 
-func defaultBuildNcpus() int {
-	// Priority 1: Scheduler-allocated CPUs from the runtime environment
+// buildDefaults holds resource defaults for build operations.
+// Set from config at CLI startup via SetBuildDefaults.
+var buildDefaults = scheduler.ResourceSpec{
+	Nodes:        1,
+	TasksPerNode: 1,
+	CpusPerTask:  4, // conservative default for local builds
+	MemPerNodeMB: 8192,
+	Time:         2 * time.Hour,
+}
+
+// SetBuildDefaults sets the resource defaults used for build job submissions.
+func SetBuildDefaults(d scheduler.ResourceSpec) { buildDefaults = d }
+
+// GetBuildDefaults returns the current build resource defaults.
+func GetBuildDefaults() scheduler.ResourceSpec { return buildDefaults }
+
+// buildEffectiveResourceSpec resolves resources for build using the priority chain:
+//
+//	buildDefaults → scriptSpecs.Spec (when HasDirectives=true) → scheduler job resources
+func buildEffectiveResourceSpec(specs *scheduler.ScriptSpecs) *scheduler.ResourceSpec {
+	var jobRes *scheduler.ResourceSpec
 	if sched := scheduler.ActiveScheduler(); sched != nil {
-		if res := sched.GetJobResources(); res != nil && res.Ncpus != nil {
-			return *res.Ncpus
-		}
+		jobRes = sched.GetJobResources()
 	}
-
-	// Priority 2: User-configured default CPUs
-	if config.Global.Build.DefaultCPUs > 0 {
-		return config.Global.Build.DefaultCPUs
-	}
-
-	// Priority 3: Conservative default for local builds (avoid overloading shared systems)
-	return 4
+	return scheduler.ResolveResourceSpecFrom(buildDefaults, jobRes, specs)
 }
 
 // BuildObject represents a build target with its metadata and dependencies
@@ -151,24 +162,19 @@ func (b *BaseBuildObject) RequiresScheduler() bool {
 	return b.submitJob && scheduler.HasSchedulerSpecs(b.scriptSpecs)
 }
 
-// effectiveNcpus returns the CPU count per node or default.
+// effectiveNcpus returns the effective total CPUs (CpusPerTask × TasksPerNode) for this build.
 func (b *BaseBuildObject) effectiveNcpus() int {
-	if b.scriptSpecs == nil || !b.scriptSpecs.HasDirectives || b.scriptSpecs.Spec == nil {
-		return defaultBuildNcpus()
-	}
-	cpus := b.scriptSpecs.Spec.CpusPerTask
-	if b.scriptSpecs.Spec.TasksPerNode > 1 {
-		cpus *= b.scriptSpecs.Spec.TasksPerNode
+	rs := buildEffectiveResourceSpec(b.scriptSpecs)
+	cpus := rs.CpusPerTask
+	if rs.TasksPerNode > 1 {
+		cpus *= rs.TasksPerNode
 	}
 	return cpus
 }
 
-// effectiveMemMB returns the memory limit per node in MB or default.
+// effectiveMemMB returns the effective memory per node in MB for this build.
 func (b *BaseBuildObject) effectiveMemMB() int64 {
-	if b.scriptSpecs == nil || !b.scriptSpecs.HasDirectives || b.scriptSpecs.Spec == nil {
-		return config.Global.Build.DefaultMemMB
-	}
-	return b.scriptSpecs.Spec.MemPerNodeMB
+	return buildEffectiveResourceSpec(b.scriptSpecs).MemPerNodeMB
 }
 
 func (b *BaseBuildObject) IsInstalled() bool {
@@ -366,31 +372,8 @@ func (b *BaseBuildObject) parseScriptMetadata() error {
 		return fmt.Errorf("build script %s contains unsupported scheduler directives (passthrough mode); remove or fix the unsupported directives", b.buildSource)
 	}
 
-	// No scheduler directives: replace Spec with build-specific defaults.
-	// (ReadScriptSpecsFromPath fills Spec from Scheduler config defaults, not Build.* defaults.)
-	if !specs.HasDirectives {
-		specs.Spec = &scheduler.ResourceSpec{
-			Nodes:        1,
-			TasksPerNode: 1,
-			CpusPerTask:  defaultBuildNcpus(),
-			MemPerNodeMB: config.Global.Build.DefaultMemMB,
-			Time:         config.Global.Build.DefaultTime,
-		}
-	}
-
-	// When submitting with parseable directives, fill in missing resource fields for the header.
-	if b.submitJob && specs.HasDirectives && specs.Spec != nil {
-		if specs.Spec.CpusPerTask <= 0 {
-			specs.Spec.CpusPerTask = defaultBuildNcpus()
-		}
-		if specs.Spec.MemPerNodeMB <= 0 {
-			specs.Spec.MemPerNodeMB = config.Global.Build.DefaultMemMB
-		}
-		if specs.Spec.Time <= 0 {
-			specs.Spec.Time = config.Global.Build.DefaultTime
-		}
-	}
-
+	// Resolve using the priority chain: buildDefaults → script → job resources.
+	specs.Spec = buildEffectiveResourceSpec(specs)
 	return nil
 }
 

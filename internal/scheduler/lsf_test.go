@@ -1177,14 +1177,14 @@ func TestLsfGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ncpus == nil || *res.Ncpus != 32 {
-			t.Errorf("Ncpus = %v; want 32", res.Ncpus)
+		if res.CpusPerTask != 32 {
+			t.Errorf("CpusPerTask = %d; want 32", res.CpusPerTask)
 		}
-		if res.MemMB == nil || *res.MemMB != 8192 {
-			t.Errorf("MemMB = %v; want 8192", res.MemMB)
+		if res.MemPerNodeMB != 8192 {
+			t.Errorf("MemPerNodeMB = %d; want 8192", res.MemPerNodeMB)
 		}
-		if res.Ngpus == nil || *res.Ngpus != 1 {
-			t.Errorf("Ngpus = %v; want 1", res.Ngpus)
+		if res.Gpu == nil || res.Gpu.Count != 1 {
+			t.Errorf("Gpu.Count = %v; want 1", res.Gpu)
 		}
 	})
 
@@ -1197,8 +1197,8 @@ func TestLsfGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ncpus == nil || *res.Ncpus != 64 {
-			t.Errorf("Ncpus = %v; want 64", res.Ncpus)
+		if res.CpusPerTask != 64 {
+			t.Errorf("CpusPerTask = %d; want 64", res.CpusPerTask)
 		}
 	})
 
@@ -1211,14 +1211,14 @@ func TestLsfGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ncpus == nil || *res.Ncpus != 4 {
-			t.Errorf("Ncpus = %v; want 4", res.Ncpus)
+		if res.CpusPerTask != 4 {
+			t.Errorf("CpusPerTask = %d; want 4", res.CpusPerTask)
 		}
-		if res.MemMB != nil {
-			t.Errorf("MemMB should be nil, got %d", *res.MemMB)
+		if res.MemPerNodeMB != 0 {
+			t.Errorf("MemPerNodeMB should be 0 (not set), got %d", res.MemPerNodeMB)
 		}
-		if res.Ngpus != nil {
-			t.Errorf("Ngpus should be nil, got %d", *res.Ngpus)
+		if res.Gpu != nil {
+			t.Errorf("Gpu should be nil, got %+v", res.Gpu)
 		}
 	})
 
@@ -1232,11 +1232,11 @@ func TestLsfGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ncpus != nil {
-			t.Errorf("Ncpus should be nil for invalid value, got %d", *res.Ncpus)
+		if res.CpusPerTask != 0 {
+			t.Errorf("CpusPerTask should be 0 for invalid value, got %d", res.CpusPerTask)
 		}
-		if res.MemMB != nil {
-			t.Errorf("MemMB should be nil for negative value, got %d", *res.MemMB)
+		if res.MemPerNodeMB != 0 {
+			t.Errorf("MemPerNodeMB should be 0 for negative value, got %d", res.MemPerNodeMB)
 		}
 	})
 }

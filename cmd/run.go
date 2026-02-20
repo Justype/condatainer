@@ -316,15 +316,26 @@ func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPat
 	return overlays, buildJobIDs, nil
 }
 
+// effectiveResourceSpec resolves the resource spec using the priority chain:
+//
+//	JobResources (scheduler env, actual allocation) > specs.Spec (directives) > defaults
+func effectiveResourceSpec(specs *scheduler.ScriptSpecs) *scheduler.ResourceSpec {
+	var jobRes *scheduler.ResourceSpec
+	if sched := scheduler.ActiveScheduler(); sched != nil {
+		jobRes = sched.GetJobResources()
+	}
+	return scheduler.ResolveResourceSpec(jobRes, specs)
+}
+
 // resourceEnvSettings derives NCPUS, MEM, MEM_MB, MEM_GB from scheduler specs
 // and returns them as KEY=VALUE strings suitable for EnvSettings.
-// Returns nil only when Spec is nil (passthrough mode or parse error).
-// No-directives scripts use scheduler defaults (GetSpecDefaults()) via a non-nil Spec.
+// Returns nil only when Spec is nil (passthrough mode).
+// Applies priority chain: JobResources > ScriptSpec > Defaults.
 func resourceEnvSettings(specs *scheduler.ScriptSpecs) []string {
 	if specs == nil || specs.Spec == nil {
 		return nil
 	}
-	return scheduler.ResourceEnvVars(specs.Spec)
+	return scheduler.ResourceEnvVars(effectiveResourceSpec(specs))
 }
 
 // runLocally executes the script directly via apptainer with the given overlays.
@@ -463,16 +474,18 @@ func validateAndConvertSpecs(specs *scheduler.ScriptSpecs) error {
 	return nil
 }
 
-// getNtasks returns the total number of MPI tasks from the resource spec.
+// getNtasks returns the total number of MPI tasks using the priority chain:
+// JobResources > ScriptSpec > Defaults. (Skip in passthrough mode)
 func getNtasks(specs *scheduler.ScriptSpecs) int {
 	if specs == nil || specs.Spec == nil {
 		return 1
 	}
-	nodes := specs.Spec.Nodes
+	rs := effectiveResourceSpec(specs)
+	nodes := rs.Nodes
 	if nodes <= 0 {
 		nodes = 1
 	}
-	tpn := specs.Spec.TasksPerNode
+	tpn := rs.TasksPerNode
 	if tpn <= 0 {
 		tpn = 1
 	}

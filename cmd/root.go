@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/Justype/condatainer/internal/apptainer"
+	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
@@ -108,14 +109,10 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
-		// Step 7: Apply scheduler spec defaults from config
-		scheduler.SetSpecDefaults(scheduler.SpecDefaults{
-			Nodes:        config.Global.Scheduler.Nodes,
-			TasksPerNode: config.Global.Scheduler.TasksPerNode,
-			CpusPerTask:  config.Global.Scheduler.NcpusPerTask,
-			MemPerNodeMB: config.Global.Scheduler.MemMBPerNode,
-			Time:         config.Global.Scheduler.Time,
-		})
+		// Step 7: Apply debug mode and resource defaults from config
+		scheduler.SetDebugMode(config.Global.Debug)
+		scheduler.SetSpecDefaults(config.Global.Scheduler)
+		build.SetBuildDefaults(config.Global.Build.Defaults)
 
 		// Step 8: Initialize scheduler if job submission is enabled
 		if config.Global.SubmitJob {
