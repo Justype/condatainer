@@ -329,13 +329,31 @@ func effectiveResourceSpec(specs *scheduler.ScriptSpecs) *scheduler.ResourceSpec
 
 // resourceEnvSettings derives NCPUS, MEM, MEM_MB, MEM_GB from scheduler specs
 // and returns them as KEY=VALUE strings suitable for EnvSettings.
-// Returns nil only when Spec is nil (passthrough mode).
+// In passthrough mode (Spec == nil) it falls back to live job resources.
 // Applies priority chain: JobResources > ScriptSpec > Defaults.
 func resourceEnvSettings(specs *scheduler.ScriptSpecs) []string {
 	if specs == nil || specs.Spec == nil {
-		return nil
+		return liveJobResourceEnvSettings()
 	}
 	return scheduler.ResourceEnvVars(effectiveResourceSpec(specs))
+}
+
+// liveJobResourceEnvSettings returns resource env vars from the active scheduler.
+// Returns nil when not in a job or cannot retrieve resources.
+func liveJobResourceEnvSettings() []string {
+	sched := scheduler.ActiveScheduler()
+	if sched == nil {
+		return nil
+	}
+	jobRes := sched.GetJobResources()
+	if jobRes == nil {
+		return nil
+	}
+	// Only expose when the scheduler actually provided at least one resource value.
+	if jobRes.Nodes == 0 && jobRes.TasksPerNode == 0 && jobRes.CpusPerTask == 0 && jobRes.MemPerNodeMB == 0 {
+		return nil
+	}
+	return scheduler.ResourceEnvVars(jobRes)
 }
 
 // runLocally executes the script directly via apptainer with the given overlays.
