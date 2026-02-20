@@ -257,18 +257,10 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 	// Get script specs
 	specs := meta.ScriptSpecs()
 
-	// Validate and convert specs if present
+	// Validate specs against cluster limits before submission
 	if specs != nil {
-		validationErr, cpuAdjusted, cpuMsg, gpuConverted, gpuMsg := scheduler.ValidateAndConvertSpecs(specs)
-		if validationErr != nil {
-			// Validation failed
-			return "", fmt.Errorf("job specs validation failed for %s: %w", meta.NameVersion(), validationErr)
-		}
-		if cpuAdjusted {
-			utils.PrintWarning("[%s] %s", meta.NameVersion(), cpuMsg)
-		}
-		if gpuConverted {
-			utils.PrintWarning("[%s] %s", meta.NameVersion(), gpuMsg)
+		if err := scheduler.ValidateAndConvertSpecs(specs); err != nil {
+			return "", fmt.Errorf("job specs validation failed for %s: %w", meta.NameVersion(), err)
 		}
 	}
 

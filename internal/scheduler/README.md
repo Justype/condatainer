@@ -79,12 +79,12 @@ Parsing uses a two-stage pipeline:
 
 ## Key Functions
 
-**Resource Validation & Adjustment:**
-- `ValidateAndConvertSpecs(specs) → (err, cpuAdjusted, cpuMsg, gpuConverted, gpuMsg)` - Auto-adjusts CPUs/time, converts GPUs
+**Resource Validation:**
+- `ValidateAndConvertSpecs(specs) → error` - Validates specs against cluster limits; fails with descriptive error (no auto-adjustment)
 - `ValidateSpecs(specs, limits) → error` - Validates specs against single partition limits
-- `ValidateGpuAvailability(gpuSpec, clusterInfo) → error` - Checks GPU availability
+- `ValidateGpuAvailability(gpuSpec, clusterInfo) → error` - Checks GPU availability; returns `GpuValidationError` with suggestions
 
-**GPU Conversion:**
+**GPU Compatibility:**
 - `ConvertGpuSpec(requestedSpec, clusterInfo) → (*GpuSpec, error)` - Finds best compatible GPU
 - `FindCompatibleGpu(requestedSpec, clusterInfo) → ([]*GpuConversionOption, error)` - Returns all compatible options
 

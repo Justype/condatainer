@@ -442,31 +442,22 @@ func parseArgsInScript(scriptPath string) ([]string, error) {
 	return args, nil
 }
 
-// validateAndConvertSpecs validates job specs and converts GPU/CPU if needed using the scheduler package.
+// validateAndConvertSpecs validates job specs against cluster limits.
+// Prints a descriptive error if any resource exceeds the partition limit.
+// For GPU errors, available alternatives are printed as suggestions.
 func validateAndConvertSpecs(specs *scheduler.ScriptSpecs) error {
-	validationErr, cpuAdjusted, cpuMsg, gpuConverted, gpuMsg := scheduler.ValidateAndConvertSpecs(specs)
-
-	if validationErr != nil {
-		// Validation failed
-		utils.PrintError("Job specs validation failed: %v", validationErr)
+	if err := scheduler.ValidateAndConvertSpecs(specs); err != nil {
+		utils.PrintError("Job specs validation failed: %v", err)
 
 		// If it's a GPU validation error with suggestions, print them
-		if gpuErr, ok := validationErr.(*scheduler.GpuValidationError); ok && len(gpuErr.Suggestions) > 0 {
+		if gpuErr, ok := err.(*scheduler.GpuValidationError); ok && len(gpuErr.Suggestions) > 0 {
 			utils.PrintMessage("Available GPU options:")
 			for _, suggestion := range gpuErr.Suggestions {
 				utils.PrintMessage("  - %s", suggestion)
 			}
 		}
 
-		return validationErr
-	}
-
-	if cpuAdjusted {
-		utils.PrintWarning("%s", cpuMsg)
-	}
-
-	if gpuConverted {
-		utils.PrintWarning("%s", gpuMsg)
+		return err
 	}
 
 	return nil
