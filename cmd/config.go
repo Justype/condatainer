@@ -78,6 +78,8 @@ func configValueCompletion(key string) []string {
 		return []string{"10240", "20480", "40960"}
 	case "build.overlay_type":
 		return []string{"ext3", "squashfs"}
+	case "build.compress_args":
+		return config.CompressNames()
 	default:
 		return nil
 	}
@@ -429,6 +431,9 @@ Time duration format (for build.time):
 			}
 		}
 
+		if key == "build.compress_args" {
+			value = config.NormalizeCompressArgs(value)
+		}
 		// Set the value
 		viper.Set(key, value)
 

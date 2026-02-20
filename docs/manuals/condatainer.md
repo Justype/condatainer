@@ -1246,6 +1246,8 @@ build:
   mem_mb: 16384
   time: 4h
   tmp_size_mb: 20480
+  # compress_args options (gzip, lz4, zstd, zstd-fast, zstd-medium, zstd-high)
+  # Or explicitly set mksquashfs arguments:
   compress_args: "-comp zstd -Xcompression-level 8"
   overlay_type: ext3
 
