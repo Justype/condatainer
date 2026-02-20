@@ -276,6 +276,7 @@ export CONDA_DEFAULT_ENV=env
 export CNT_CONDA_PREFIX=/ext3/env
 export RETICULATE_PYTHON=/ext3/env/bin/python
 export NCPUS=$NCPUS
+export IN_CONDATAINER=1
 
 /usr/lib/rstudio-server/bin/rsession "\$@"
 EOT
