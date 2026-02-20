@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -16,23 +17,12 @@ const GITHUB_REPO = GitHubRepo // Exported constant for compatibility
 // PrebuiltBaseURL is the base URL for downloading prebuilt images and overlays
 const PrebuiltBaseURL = "https://github.com/Justype/cnt-prebuilt/releases/download/prebuilt"
 
-// SchedulerConfig holds default resource specs for scheduler script parsing
-type SchedulerConfig struct {
-	Nodes        int           // Default number of nodes (default: 1)
-	TasksPerNode int           // Default number of tasks per node (default: 1)
-	NcpusPerTask int           // Default CPUs per task (default: 2)
-	MemMBPerNode int64         // Default memory per node in MB (default: 8192)
-	Time         time.Duration // Default time limit (default: 4h)
-}
-
 // BuildConfig holds default settings for build operations
 type BuildConfig struct {
-	DefaultCPUs  int           // Default CPUs for builds (if not specified in script)
-	DefaultMemMB int64         // Default memory for builds in MB
-	DefaultTime  time.Duration // Default time limit
-	TmpSizeMB    int           // Size of temporary overlay in MB
-	CompressArgs string        // mksquashfs compression arguments
-	OverlayType  string        // Overlay filesystem type: "ext3" or "squashfs"
+	Defaults     scheduler.ResourceSpec // Default resource spec for build job submissions
+	TmpSizeMB    int                    // Size of temporary overlay in MB
+	CompressArgs string                 // mksquashfs compression arguments
+	OverlayType  string                 // Overlay filesystem type: "ext3" or "squashfs"
 }
 
 // Config holds global application settings
@@ -58,7 +48,7 @@ type Config struct {
 	ParseModuleLoad bool // Parse "module load" / "ml" lines as dependencies (default: false)
 
 	// Scheduler default specs
-	Scheduler SchedulerConfig
+	Scheduler scheduler.ResourceSpec
 
 	// Build configuration
 	Build BuildConfig
@@ -86,21 +76,23 @@ func LoadDefaults(executablePath string) {
 
 		Branch: "main", // Default branch for remote build scripts
 
-		Scheduler: SchedulerConfig{
+		Scheduler: scheduler.ResourceSpec{
 			Nodes:        1,
 			TasksPerNode: 1,
-			NcpusPerTask: 2,
-			MemMBPerNode: 8192,          // 8GB
+			CpusPerTask:  2,
+			MemPerNodeMB: 8192,          // 8GB
 			Time:         4 * time.Hour, // 4 hours
 		},
 
 		Build: BuildConfig{
-			DefaultCPUs:  4,             // 4 CPUs default
-			DefaultMemMB: 8192,          // 8GB default memory
-			DefaultTime:  2 * time.Hour, // 2 hour default time limit
-			TmpSizeMB:    20480,         // 20GB temporary overlay
-			CompressArgs: "-comp lz4",   // zstd only compatible with apptainer version > 1.4
-			OverlayType:  "ext3",        // ext3 for temporary overlays
+			Defaults: scheduler.ResourceSpec{
+				CpusPerTask:  4,             // 4 CPUs default
+				MemPerNodeMB: 8192,          // 8GB default memory
+				Time:         2 * time.Hour, // 2 hour default time limit
+			},
+			TmpSizeMB:    20480,       // 20GB temporary overlay
+			CompressArgs: "-comp lz4", // zstd only compatible with apptainer version > 1.4
+			OverlayType:  "ext3",      // ext3 for temporary overlays
 		},
 	}
 }

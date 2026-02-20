@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -219,7 +218,7 @@ func (p *PbsScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 
 		resourceStr := strings.TrimSpace(strings.TrimPrefix(flag, "-l"))
 		if err := p.parseResourceList(resourceStr, rs); err != nil {
-			utils.PrintWarning("PBS: failed to parse resource directive %q: %v", flag, err)
+			logParseWarning("PBS: failed to parse resource directive %q: %v", flag, err)
 			return nil, directives
 		}
 	}
@@ -484,12 +483,6 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	fmt.Fprintln(writer, "")
 
-	// Export resource variables for use in build scripts (skipped in passthrough mode)
-	if specs.Spec != nil {
-		writeEnvVars(writer, specs.Spec)
-		fmt.Fprintln(writer, "")
-	}
-
 	// Print job information at start
 	writeJobHeader(writer, "$PBS_JOBID", specs, formatPbsTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
@@ -502,7 +495,7 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	writeJobFooter(writer, "$PBS_JOBID")
 
 	// Self-delete the script after execution (unless in debug mode)
-	if !config.Global.Debug {
+	if !debugMode {
 		fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
 	}
 
@@ -1137,28 +1130,39 @@ func parseGpuString(gpuStr string) (*GpuSpec, error) {
 }
 
 // GetJobResources reads allocated resources from PBS environment variables.
-func (s *PbsScheduler) GetJobResources() *JobResources {
+// GetJobResources reads allocated resources from PBS environment variables.
+// Fields with value 0 were not exposed by PBS.
+func (s *PbsScheduler) GetJobResources() *ResourceSpec {
 	if _, ok := os.LookupEnv("PBS_JOBID"); !ok {
 		return nil
 	}
-	res := &JobResources{}
-	res.Ncpus = getEnvInt("PBS_NCPUS")
-	if res.Ncpus == nil {
-		res.Ncpus = getEnvInt("NCPUS")
+	res := &ResourceSpec{}
+	if v := getEnvInt("PBS_NUM_NODES"); v != nil {
+		res.Nodes = *v
 	}
-	res.Nodes = getEnvInt("PBS_NUM_NODES")
-	res.Ntasks = getEnvInt("PBS_NP")
-	if res.Ntasks == nil {
-		res.Ntasks = getEnvInt("PBS_TASKNUM")
+	// PBS_NCPUS: total CPUs per node (some PBS variants)
+	if v := getEnvInt("PBS_NCPUS"); v != nil {
+		res.CpusPerTask = *v
+	} else if v := getEnvInt("NCPUS"); v != nil {
+		res.CpusPerTask = *v
+	}
+	// Derive TasksPerNode from total tasks / nodes
+	ntasks := getEnvInt("PBS_NP")
+	if ntasks == nil {
+		ntasks = getEnvInt("PBS_TASKNUM")
+	}
+	if ntasks != nil && res.Nodes > 0 {
+		res.TasksPerNode = *ntasks / res.Nodes
 	}
 	// PBS_VMEM is in bytes
 	if vmem := getEnvInt64("PBS_VMEM"); vmem != nil {
-		mb := *vmem / (1024 * 1024)
-		if mb > 0 {
-			res.MemMB = &mb
+		if mb := *vmem / (1024 * 1024); mb > 0 {
+			res.MemPerNodeMB = mb
 		}
 	}
-	res.Ngpus = getCudaDeviceCount()
+	if n := getCudaDeviceCount(); n != nil && *n > 0 {
+		res.Gpu = &GpuSpec{Count: *n}
+	}
 	return res
 }
 

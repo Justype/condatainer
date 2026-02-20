@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/overlay"
@@ -75,21 +76,31 @@ func isCancelledByUser(err error) bool {
 // ScriptSpecs mirrors the scheduler module's job spec metadata.
 type ScriptSpecs = scheduler.ScriptSpecs
 
-func defaultBuildNcpus() int {
-	// Priority 1: Scheduler-allocated CPUs from the runtime environment
+// buildDefaults holds resource defaults for build operations.
+// Set from config at CLI startup via SetBuildDefaults.
+var buildDefaults = scheduler.ResourceSpec{
+	Nodes:        1,
+	TasksPerNode: 1,
+	CpusPerTask:  4, // conservative default for local builds
+	MemPerNodeMB: 8192,
+	Time:         2 * time.Hour,
+}
+
+// SetBuildDefaults sets the resource defaults used for build job submissions.
+func SetBuildDefaults(d scheduler.ResourceSpec) { buildDefaults = d }
+
+// GetBuildDefaults returns the current build resource defaults.
+func GetBuildDefaults() scheduler.ResourceSpec { return buildDefaults }
+
+// buildEffectiveResourceSpec resolves resources for build using the priority chain:
+//
+//	buildDefaults → scriptSpecs.Spec (when HasDirectives=true) → scheduler job resources
+func buildEffectiveResourceSpec(specs *scheduler.ScriptSpecs) *scheduler.ResourceSpec {
+	var jobRes *scheduler.ResourceSpec
 	if sched := scheduler.ActiveScheduler(); sched != nil {
-		if res := sched.GetJobResources(); res != nil && res.Ncpus != nil {
-			return *res.Ncpus
-		}
+		jobRes = sched.GetJobResources()
 	}
-
-	// Priority 2: User-configured default CPUs
-	if config.Global.Build.DefaultCPUs > 0 {
-		return config.Global.Build.DefaultCPUs
-	}
-
-	// Priority 3: Conservative default for local builds (avoid overloading shared systems)
-	return 4
+	return scheduler.ResolveResourceSpecFrom(buildDefaults, jobRes, specs)
 }
 
 // BuildObject represents a build target with its metadata and dependencies
@@ -130,7 +141,7 @@ type BaseBuildObject struct {
 	tmpOverlayPath    string
 	targetOverlayPath string
 	cntDirPath        string
-	ncpus             int
+	submitJob         bool // Whether to submit to scheduler (from config at construction time)
 	isRemote          bool // Whether build source was downloaded
 	scriptSpecs       *scheduler.ScriptSpecs
 
@@ -148,7 +159,22 @@ func (b *BaseBuildObject) TargetOverlayPath() string { return b.targetOverlayPat
 func (b *BaseBuildObject) CntDirPath() string        { return b.cntDirPath }
 func (b *BaseBuildObject) ScriptSpecs() *ScriptSpecs { return b.scriptSpecs }
 func (b *BaseBuildObject) RequiresScheduler() bool {
-	return scheduler.HasSchedulerSpecs(b.scriptSpecs)
+	return b.submitJob && scheduler.HasSchedulerSpecs(b.scriptSpecs)
+}
+
+// effectiveNcpus returns the effective total CPUs (CpusPerTask × TasksPerNode) for this build.
+func (b *BaseBuildObject) effectiveNcpus() int {
+	rs := buildEffectiveResourceSpec(b.scriptSpecs)
+	cpus := rs.CpusPerTask
+	if rs.TasksPerNode > 1 {
+		cpus *= rs.TasksPerNode
+	}
+	return cpus
+}
+
+// effectiveMemMB returns the effective memory per node in MB for this build.
+func (b *BaseBuildObject) effectiveMemMB() int64 {
+	return buildEffectiveResourceSpec(b.scriptSpecs).MemPerNodeMB
 }
 
 func (b *BaseBuildObject) IsInstalled() bool {
@@ -337,21 +363,17 @@ func (b *BaseBuildObject) parseScriptMetadata() error {
 		return err
 	}
 
-	// If specs found, use ncpus from script
-	if specs != nil && specs.Spec != nil && specs.Spec.CpusPerTask > 0 {
-		b.ncpus = specs.Spec.CpusPerTask
+	// Always store scriptSpecs — effectiveNcpus()/effectiveMemMB() derive values from it.
+	b.scriptSpecs = specs
+
+	// Passthrough mode: scheduler directives found but resource parsing failed (unsupported flags).
+	// Build cannot proceed without a normalized resource spec.
+	if scheduler.IsPassthrough(specs) {
+		return fmt.Errorf("build script %s contains unsupported scheduler directives (passthrough mode); remove or fix the unsupported directives", b.buildSource)
 	}
 
-	// Only store full scriptSpecs if job submission is enabled (for generating job scripts)
-	if config.Global.SubmitJob && specs != nil {
-		if specs.Spec != nil && specs.Spec.CpusPerTask <= 0 {
-			specs.Spec.CpusPerTask = defaultBuildNcpus()
-		} else if specs.Spec == nil {
-			b.ncpus = defaultBuildNcpus()
-		}
-		b.scriptSpecs = specs
-	}
-
+	// Resolve using the priority chain: buildDefaults → script → job resources.
+	specs.Spec = buildEffectiveResourceSpec(specs)
 	return nil
 }
 
@@ -405,7 +427,7 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string)
 
 	base := &BaseBuildObject{
 		nameVersion:       normalized,
-		ncpus:             defaultBuildNcpus(),
+		submitJob:         config.Global.SubmitJob,
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetOverlay,
@@ -453,7 +475,7 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 	base := &BaseBuildObject{
 		nameVersion:       normalized,
 		buildSource:       buildSource,
-		ncpus:             defaultBuildNcpus(),
+		submitJob:         config.Global.SubmitJob,
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetOverlay,
@@ -485,7 +507,7 @@ func FromExternalSource(targetPrefix, source string, isApptainer bool, imagesDir
 	base := &BaseBuildObject{
 		nameVersion:       nameVersion,
 		buildSource:       source,
-		ncpus:             defaultBuildNcpus(),
+		submitJob:         config.Global.SubmitJob,
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetPrefix + ".sqf",

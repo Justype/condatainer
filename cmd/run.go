@@ -98,25 +98,10 @@ func runScript(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// 1. Fast path: already inside a scheduler job — skip spec reading, run locally
-	if scheduler.IsInsideJob() {
-		if err := processEmbeddedArgs(scriptPath); err != nil {
-			return err
-		}
-		overlays, _, err := checkDepsAndAutoInstall(cmd.Context(), scriptPath, originScriptPath)
-		if err != nil {
-			if errors.Is(err, errRunAborted) {
-				return nil
-			}
-			return err
-		}
-		return runLocally(cmd.Context(), scriptPath, overlays)
-	}
-
-	// 2. Read specs → resolve the bash script to use for #CNT/#DEP
+	// 1. Read specs → resolve the content script (HTCondor: .sub → .sh; others: identity)
 	contentScript, scriptSpecs := resolveScriptAndSpecs(scriptPath)
 
-	// 3. Embedded args + dependency check/install
+	// 2. Embedded #CNT args + dependency check/install
 	if err := processEmbeddedArgs(contentScript); err != nil {
 		return err
 	}
@@ -132,7 +117,12 @@ func runScript(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 4. Submit or run locally
+	// 3. In-job or in-container: always run locally (no nested submission)
+	if scheduler.IsInsideJob() || config.IsInsideContainer() {
+		return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs)
+	}
+
+	// 4. Submit if scheduler specs present and scheduler available
 	if config.Global.SubmitJob && scheduler.HasSchedulerSpecs(scriptSpecs) {
 		if err := validateAndConvertSpecs(scriptSpecs); err != nil {
 			return nil
@@ -148,7 +138,7 @@ func runScript(cmd *cobra.Command, args []string) error {
 	} else if !scheduler.HasSchedulerSpecs(scriptSpecs) {
 		utils.PrintNote("No scheduler specs found in script. Running locally.")
 	}
-	return runLocally(cmd.Context(), contentScript, overlays)
+	return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs)
 }
 
 // resolveScriptAndSpecs tries to read scheduler specs and resolves the content script path.
@@ -326,8 +316,48 @@ func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPat
 	return overlays, buildJobIDs, nil
 }
 
+// effectiveResourceSpec resolves the resource spec using the priority chain:
+//
+//	JobResources (scheduler env, actual allocation) > specs.Spec (directives) > defaults
+func effectiveResourceSpec(specs *scheduler.ScriptSpecs) *scheduler.ResourceSpec {
+	var jobRes *scheduler.ResourceSpec
+	if sched := scheduler.ActiveScheduler(); sched != nil {
+		jobRes = sched.GetJobResources()
+	}
+	return scheduler.ResolveResourceSpec(jobRes, specs)
+}
+
+// resourceEnvSettings derives NCPUS, MEM, MEM_MB, MEM_GB from scheduler specs
+// and returns them as KEY=VALUE strings suitable for EnvSettings.
+// In passthrough mode (Spec == nil) it falls back to live job resources.
+// Applies priority chain: JobResources > ScriptSpec > Defaults.
+func resourceEnvSettings(specs *scheduler.ScriptSpecs) []string {
+	if specs == nil || specs.Spec == nil {
+		return liveJobResourceEnvSettings()
+	}
+	return scheduler.ResourceEnvVars(effectiveResourceSpec(specs))
+}
+
+// liveJobResourceEnvSettings returns resource env vars from the active scheduler.
+// Returns nil when not in a job or cannot retrieve resources.
+func liveJobResourceEnvSettings() []string {
+	sched := scheduler.ActiveScheduler()
+	if sched == nil {
+		return nil
+	}
+	jobRes := sched.GetJobResources()
+	if jobRes == nil {
+		return nil
+	}
+	// Only expose when the scheduler actually provided at least one resource value.
+	if jobRes.Nodes == 0 && jobRes.TasksPerNode == 0 && jobRes.CpusPerTask == 0 && jobRes.MemPerNodeMB == 0 {
+		return nil
+	}
+	return scheduler.ResourceEnvVars(jobRes)
+}
+
 // runLocally executes the script directly via apptainer with the given overlays.
-func runLocally(ctx context.Context, contentScript string, overlays []string) error {
+func runLocally(ctx context.Context, contentScript string, overlays []string, specs *scheduler.ScriptSpecs) error {
 	// Disable module commands and run the script
 	executionScript := `module() { :; }
 ml() { :; }
@@ -356,7 +386,7 @@ export -f module ml
 		Overlays:     overlays,
 		Command:      []string{"/bin/bash", "-c", executionScript},
 		WritableImg:  runWritableImg,
-		EnvSettings:  runEnvSettings,
+		EnvSettings:  append(resourceEnvSettings(specs), runEnvSettings...),
 		BindPaths:    bindPaths,
 		Fakeroot:     runFakeroot,
 		BaseImage:    runBaseImage, // Empty string triggers GetBaseImage() in ensureDefaults()
@@ -441,46 +471,39 @@ func parseArgsInScript(scriptPath string) ([]string, error) {
 	return args, nil
 }
 
-// validateAndConvertSpecs validates job specs and converts GPU/CPU if needed using the scheduler package.
+// validateAndConvertSpecs validates job specs against cluster limits.
+// Prints a descriptive error if any resource exceeds the partition limit.
+// For GPU errors, available alternatives are printed as suggestions.
 func validateAndConvertSpecs(specs *scheduler.ScriptSpecs) error {
-	validationErr, cpuAdjusted, cpuMsg, gpuConverted, gpuMsg := scheduler.ValidateAndConvertSpecs(specs)
-
-	if validationErr != nil {
-		// Validation failed
-		utils.PrintError("Job specs validation failed: %v", validationErr)
+	if err := scheduler.ValidateAndConvertSpecs(specs); err != nil {
+		utils.PrintError("Job specs validation failed: %v", err)
 
 		// If it's a GPU validation error with suggestions, print them
-		if gpuErr, ok := validationErr.(*scheduler.GpuValidationError); ok && len(gpuErr.Suggestions) > 0 {
+		if gpuErr, ok := err.(*scheduler.GpuValidationError); ok && len(gpuErr.Suggestions) > 0 {
 			utils.PrintMessage("Available GPU options:")
 			for _, suggestion := range gpuErr.Suggestions {
 				utils.PrintMessage("  - %s", suggestion)
 			}
 		}
 
-		return validationErr
-	}
-
-	if cpuAdjusted {
-		utils.PrintWarning("%s", cpuMsg)
-	}
-
-	if gpuConverted {
-		utils.PrintWarning("%s", gpuMsg)
+		return err
 	}
 
 	return nil
 }
 
-// getNtasks returns the total number of MPI tasks from the resource spec.
+// getNtasks returns the total number of MPI tasks using the priority chain:
+// JobResources > ScriptSpec > Defaults. (Skip in passthrough mode)
 func getNtasks(specs *scheduler.ScriptSpecs) int {
 	if specs == nil || specs.Spec == nil {
 		return 1
 	}
-	nodes := specs.Spec.Nodes
+	rs := effectiveResourceSpec(specs)
+	nodes := rs.Nodes
 	if nodes <= 0 {
 		nodes = 1
 	}
-	tpn := specs.Spec.TasksPerNode
+	tpn := rs.TasksPerNode
 	if tpn <= 0 {
 		tpn = 1
 	}

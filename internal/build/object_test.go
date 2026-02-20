@@ -27,7 +27,6 @@ func TestParseScriptMetadata_RequiresTTY(t *testing.T) {
 	base := &BaseBuildObject{
 		nameVersion:       "foo/bar",
 		buildSource:       tmp.Name(),
-		ncpus:             1,
 		cntDirPath:        "",
 		tmpOverlayPath:    "",
 		targetOverlayPath: "",
@@ -56,7 +55,6 @@ func TestParseScriptMetadata_NoInteractive(t *testing.T) {
 	base := &BaseBuildObject{
 		nameVersion:       "foo/bar",
 		buildSource:       tmp.Name(),
-		ncpus:             1,
 		cntDirPath:        "",
 		tmpOverlayPath:    "",
 		targetOverlayPath: "",
@@ -88,7 +86,6 @@ func TestParseScriptMetadata_NcpusFromSlurm(t *testing.T) {
 	base := &BaseBuildObject{
 		nameVersion:       "foo/bar",
 		buildSource:       tmp.Name(),
-		ncpus:             1, // default value
 		cntDirPath:        "",
 		tmpOverlayPath:    "",
 		targetOverlayPath: "",
@@ -98,8 +95,8 @@ func TestParseScriptMetadata_NcpusFromSlurm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if base.ncpus != 8 {
-		t.Fatalf("expected ncpus=8 from SLURM directive, got %d", base.ncpus)
+	if base.effectiveNcpus() != 8 {
+		t.Fatalf("expected effectiveNcpus=8 from SLURM directive, got %d", base.effectiveNcpus())
 	}
 }
 
@@ -120,7 +117,6 @@ func TestParseScriptMetadata_NcpusFromPBS(t *testing.T) {
 	base := &BaseBuildObject{
 		nameVersion:       "foo/bar",
 		buildSource:       tmp.Name(),
-		ncpus:             1, // default value
 		cntDirPath:        "",
 		tmpOverlayPath:    "",
 		targetOverlayPath: "",
@@ -130,8 +126,8 @@ func TestParseScriptMetadata_NcpusFromPBS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if base.ncpus != 16 {
-		t.Fatalf("expected ncpus=16 from PBS directive, got %d", base.ncpus)
+	if base.effectiveNcpus() != 16 {
+		t.Fatalf("expected effectiveNcpus=16 from PBS directive, got %d", base.effectiveNcpus())
 	}
 }
 

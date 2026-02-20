@@ -52,12 +52,12 @@ type GpuInfo struct {
 // ResourceLimits holds scheduler resource limits per partition/queue.
 // CPU and memory limits are per-node (matching how schedulers report them).
 type ResourceLimits struct {
+	MaxNodes        int           // Maximum nodes per job
 	MaxCpusPerNode  int           // Maximum CPUs per node in this partition
 	MaxMemMBPerNode int64         // Maximum memory per node in MB
-	MaxTime         time.Duration // Maximum walltime (e.g., "7-00:00:00")
 	MaxGpus         int           // Maximum GPUs per job (total across all nodes)
-	MaxNodes        int           // Maximum nodes per job
 	DefaultTime     time.Duration // Default walltime if not specified
+	MaxTime         time.Duration // Maximum walltime (e.g., "7-00:00:00")
 	Partition       string        // Partition/queue name these limits apply to
 }
 
@@ -114,19 +114,13 @@ func HasSchedulerSpecs(specs *ScriptSpecs) bool {
 	return specs.HasDirectives
 }
 
-// SpecDefaults holds configurable default values for ResourceSpec.
-// These are used by parseResourceSpec when a script does not specify a resource.
-// Set via SetSpecDefaults() during CLI initialization from config.
-type SpecDefaults struct {
-	CpusPerTask  int
-	MemPerNodeMB int64
-	Time         time.Duration
-	Nodes        int
-	TasksPerNode int
+// IsPassthrough reports having directives but no valid resource spec.
+func IsPassthrough(specs *ScriptSpecs) bool {
+	return specs != nil && specs.HasDirectives && specs.Spec == nil
 }
 
 // specDefaults is the package-level defaults used by all schedulers.
-var specDefaults = SpecDefaults{
+var specDefaults = ResourceSpec{
 	CpusPerTask:  2,
 	MemPerNodeMB: 8192,
 	Time:         4 * time.Hour,
@@ -135,13 +129,43 @@ var specDefaults = SpecDefaults{
 }
 
 // SetSpecDefaults overrides the default values used by ReadScriptSpecs.
-func SetSpecDefaults(d SpecDefaults) {
+func SetSpecDefaults(d ResourceSpec) {
 	specDefaults = d
 }
 
 // GetSpecDefaults returns the current default values for ScriptSpecs.
-func GetSpecDefaults() SpecDefaults {
+func GetSpecDefaults() ResourceSpec {
 	return specDefaults
+}
+
+// Override updates rs in-place with non-zero/non-nil fields from other.
+// Fields in other that are zero/nil are skipped (rs retains its value).
+// Safe to call with a nil other.
+func (rs *ResourceSpec) Override(other *ResourceSpec) {
+	if other == nil {
+		return
+	}
+	if other.Nodes > 0 {
+		rs.Nodes = other.Nodes
+	}
+	if other.TasksPerNode > 0 {
+		rs.TasksPerNode = other.TasksPerNode
+	}
+	if other.CpusPerTask > 0 {
+		rs.CpusPerTask = other.CpusPerTask
+	}
+	if other.MemPerNodeMB > 0 {
+		rs.MemPerNodeMB = other.MemPerNodeMB
+	}
+	if other.Gpu != nil {
+		rs.Gpu = other.Gpu
+	}
+	if other.Time > 0 {
+		rs.Time = other.Time
+	}
+	if other.Exclusive {
+		rs.Exclusive = other.Exclusive
+	}
 }
 
 // JobSpec represents specifications for submitting a batch job
@@ -152,16 +176,6 @@ type JobSpec struct {
 	DepJobIDs      []string          // Job IDs this job depends on
 	Metadata       map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
 	OverrideOutput bool              // If true, always set Stdout/Stderr from Name (ignores script directives)
-}
-
-// JobResources holds resource allocations for the currently running scheduler job.
-// A nil pointer field means the scheduler did not expose that resource via environment variables.
-type JobResources struct {
-	Ncpus  *int   // Number of allocated CPUs per task
-	Ntasks *int   // Number of allocated tasks
-	Nodes  *int   // Number of allocated nodes
-	MemMB  *int64 // Allocated memory in MB
-	Ngpus  *int   // Number of allocated GPUs
 }
 
 // Scheduler defines the interface for job schedulers
@@ -189,8 +203,35 @@ type Scheduler interface {
 	GetInfo() *SchedulerInfo
 
 	// GetJobResources reads allocated resources from scheduler environment variables.
+	// Fields with value 0 were not exposed by the scheduler.
 	// Returns nil if not running inside a job of this scheduler type.
-	GetJobResources() *JobResources
+	GetJobResources() *ResourceSpec
+}
+
+// ResolveResourceSpecFrom merges resources using the priority chain:
+//
+//	defaults → scriptSpecs.Spec (when HasDirectives=true) → jobResources (non-zero fields)
+//
+// Checks HasDirectives rather than Spec != nil: when a script has no directives,
+// the parser fills Spec with GetSpecDefaults(), so checking only Spec != nil would
+// silently replace the caller's defaults with scheduler defaults.
+// Always returns a non-nil *ResourceSpec.
+func ResolveResourceSpecFrom(defaults ResourceSpec, jobResources *ResourceSpec, scriptSpecs *ScriptSpecs) *ResourceSpec {
+	base := defaults
+	if scriptSpecs != nil && scriptSpecs.HasDirectives && scriptSpecs.Spec != nil {
+		base = *scriptSpecs.Spec
+	}
+	base.Override(jobResources)
+	return &base
+}
+
+// ResolveResourceSpec merges resources using the priority chain:
+//
+//	GetSpecDefaults() → scriptSpecs.Spec (when HasDirectives=true) → jobResources
+//
+// Always returns a non-nil *ResourceSpec.
+func ResolveResourceSpec(jobResources *ResourceSpec, scriptSpecs *ScriptSpecs) *ResourceSpec {
+	return ResolveResourceSpecFrom(GetSpecDefaults(), jobResources, scriptSpecs)
 }
 
 // ValidateSpecs validates job specs against cluster limits.
@@ -249,44 +290,27 @@ func ValidateSpecs(specs *ScriptSpecs, limits *ResourceLimits) error {
 	return nil
 }
 
-// ValidateAndConvertSpecs validates job specs against cluster limits and attempts conversions if needed.
-// - CPUs: Automatically reduced to fit within limits (prints warning)
-//   - Time is scaled proportionally based on CPU reduction
-//   - Fails if scaled time exceeds cluster time limit
-//
-// - Memory: Critical - fails if exceeded
-// - Time: Critical - fails if exceeded
-// - GPUs: Attempts conversion to compatible type
-//   - Upgrades: Allowed with warning
-//   - Downgrades: Blocked if time limit specified (runtime unpredictable)
-//   - No time limit: Downgrades allowed with warning
-//
-// Modifies specs in-place if conversions succeed.
-// Returns validation errors and conversion details.
-// If cluster info is unavailable, returns nil error (validation skipped).
-func ValidateAndConvertSpecs(specs *ScriptSpecs) (validationErr error, cpuAdjusted bool, cpuMsg string, gpuConverted bool, gpuMsg string) {
-	// Detect scheduler
+// ValidateAndConvertSpecs validates job specs against cluster limits.
+// Returns a descriptive error if any resource exceeds the partition limit.
+// Never modifies specs in-place.
+// Returns nil if cluster info is unavailable (validation skipped).
+func ValidateAndConvertSpecs(specs *ScriptSpecs) error {
 	sched, err := DetectScheduler()
 	if err != nil {
-		// No scheduler available - skip validation
-		return nil, false, "", false, ""
+		return nil
 	}
-
-	// Get cluster info
 	clusterInfo, err := sched.GetClusterInfo()
 	if err != nil {
-		// Can't get cluster info - skip validation
-		return nil, false, "", false, ""
+		return nil
 	}
-
 	// Skip all resource validation in passthrough mode
 	if specs.Spec == nil {
-		return nil, false, "", false, ""
+		return nil
 	}
-	s := specs.Spec
 
 	// Filter limits to the requested partition when specified.
 	// When Control.Partition is set, only validate against that partition's limits.
+	// Falls back to all limits if the requested partition is not found.
 	activeLimits := clusterInfo.Limits
 	if specs.Control.Partition != "" {
 		filtered := make([]ResourceLimits, 0, 1)
@@ -299,74 +323,10 @@ func ValidateAndConvertSpecs(specs *ScriptSpecs) (validationErr error, cpuAdjust
 		if len(filtered) > 0 {
 			activeLimits = filtered
 		}
-		// If the requested partition is not in clusterInfo (e.g. not exposed by scheduler),
-		// fall back to all limits to avoid silently skipping validation.
 	}
 
-	// Auto-adjust CpusPerTask if the effective CPUs per node exceed limits in all partitions.
-	// When reducing CPUs, also adjust time estimate proportionally.
-	if len(activeLimits) > 0 && s.CpusPerTask > 0 {
-		maxAllowedCpu := 0
-		maxAllowedTime := time.Duration(0)
-
-		for _, limit := range activeLimits {
-			if limit.MaxCpusPerNode > maxAllowedCpu {
-				maxAllowedCpu = limit.MaxCpusPerNode
-			}
-			if limit.MaxTime > maxAllowedTime {
-				maxAllowedTime = limit.MaxTime
-			}
-		}
-
-		// Effective CPUs per node = CpusPerTask * TasksPerNode
-		effectiveCpusPerNode := s.CpusPerTask * s.TasksPerNode
-		if s.TasksPerNode <= 0 {
-			effectiveCpusPerNode = s.CpusPerTask
-		}
-		if maxAllowedCpu > 0 && effectiveCpusPerNode > maxAllowedCpu {
-			originalCpu := s.CpusPerTask
-			originalTime := s.Time
-
-			// Reduce CpusPerTask to fit limit (keep TasksPerNode unchanged)
-			tasksPerNode := s.TasksPerNode
-			if tasksPerNode <= 0 {
-				tasksPerNode = 1
-			}
-			s.CpusPerTask = maxAllowedCpu / tasksPerNode
-			if s.CpusPerTask < 1 {
-				s.CpusPerTask = 1
-			}
-
-			// Adjust time proportionally (assuming linear scaling)
-			if originalTime > 0 {
-				cpuReductionRatio := float64(originalCpu) / float64(s.CpusPerTask)
-				adjustedTime := time.Duration(float64(originalTime) * cpuReductionRatio)
-
-				// Check if adjusted time exceeds cluster limit
-				if maxAllowedTime > 0 && adjustedTime > maxAllowedTime {
-					s.CpusPerTask = originalCpu // Restore original value
-					return &ValidationError{
-						Field:     "CpusPerTask/Time",
-						Requested: originalCpu,
-						Limit:     maxAllowedCpu,
-						Partition: fmt.Sprintf("reducing CPUs to %d would require %s, exceeding time limit %s",
-							maxAllowedCpu, adjustedTime.Round(time.Minute), maxAllowedTime.Round(time.Minute)),
-					}, false, "", false, ""
-				}
-
-				s.Time = adjustedTime
-				cpuAdjusted = true
-				cpuMsg = fmt.Sprintf("CPUs/task: %d → %d (reduced to fit limit); Time: %s → %s (adjusted proportionally)",
-					originalCpu, s.CpusPerTask,
-					originalTime.Round(time.Minute), adjustedTime.Round(time.Minute))
-			} else {
-				cpuAdjusted = true
-				cpuMsg = fmt.Sprintf("CPUs/task: %d → %d (reduced to fit cluster limit)", originalCpu, s.CpusPerTask)
-			}
-		}
-	}
-
-	// Validate resource limits (memory and other critical resources) against active partitions
+	// Validate all resources (CPU, memory, time, GPU count) against active partition limits.
+	// Specs are valid if they fit at least one partition.
 	if len(activeLimits) > 0 {
 		validForSomePartition := false
 		var firstValidationErr error
@@ -381,70 +341,22 @@ func ValidateAndConvertSpecs(specs *ScriptSpecs) (validationErr error, cpuAdjust
 		}
 
 		if !validForSomePartition {
-			return firstValidationErr, cpuAdjusted, cpuMsg, false, ""
+			return firstValidationErr
 		}
 	}
 
-	// Validate and convert GPU specs if needed
-	nodes := s.Nodes
+	// Validate GPU availability — no conversion, just report error with suggestions.
+	nodes := specs.Spec.Nodes
 	if nodes <= 0 {
 		nodes = 1
 	}
-	if s.Gpu != nil && len(clusterInfo.AvailableGpus) > 0 {
-		originalGpuType := s.Gpu.Type
-		originalGpuCount := s.Gpu.Count
-
-		// Check if requested GPU is available
-		err := ValidateGpuAvailability(s.Gpu, nodes, clusterInfo)
-		if err != nil {
-			// GPU not available - attempt conversion
-			convertedSpec, convErr := ConvertGpuSpec(s.Gpu, nodes, clusterInfo)
-			if convErr != nil {
-				return err, cpuAdjusted, cpuMsg, false, ""
-			}
-
-			// Conversion succeeded - update specs
-			s.Gpu = convertedSpec
-
-			// Determine if upgrade or downgrade
-			conversionType := "alternative"
-			isDowngrade := false
-			options, _ := FindCompatibleGpu(s.Gpu, nodes, clusterInfo)
-			if len(options) > 0 && options[0].SuggestedSpec.Type == convertedSpec.Type {
-				if options[0].IsUpgrade {
-					conversionType = "upgrade"
-				} else if options[0].IsDowngrade {
-					conversionType = "downgrade"
-					isDowngrade = true
-				}
-			}
-
-			// GPU downgrades are risky when time limits exist
-			if isDowngrade && s.Time > 0 {
-				s.Gpu = &GpuSpec{Type: originalGpuType, Count: originalGpuCount}
-				return &ValidationError{
-					Field:     "Gpu",
-					Requested: 0,
-					Limit:     0,
-					Partition: fmt.Sprintf("GPU downgrade %s → %s not allowed with time limit %s (runtime unpredictable; consider removing time limit or requesting available GPU)",
-						originalGpuType, convertedSpec.Type, s.Time.Round(time.Minute)),
-				}, cpuAdjusted, cpuMsg, false, ""
-			}
-
-			// Build conversion message
-			if originalGpuCount > 1 {
-				gpuMsg = fmt.Sprintf("GPUs: %dx %s → %dx %s (%s)",
-					originalGpuCount, originalGpuType, convertedSpec.Count, convertedSpec.Type, conversionType)
-			} else {
-				gpuMsg = fmt.Sprintf("GPU: %s → %s (%s)",
-					originalGpuType, convertedSpec.Type, conversionType)
-			}
-
-			return nil, cpuAdjusted, cpuMsg, true, gpuMsg
+	if specs.Spec.Gpu != nil && len(clusterInfo.AvailableGpus) > 0 {
+		if err := ValidateGpuAvailability(specs.Spec.Gpu, nodes, clusterInfo); err != nil {
+			return err // GpuValidationError includes list of available alternatives
 		}
 	}
 
-	return nil, cpuAdjusted, cpuMsg, false, ""
+	return nil
 }
 
 // SubmitWithDependencies submits multiple jobs with dependency chain
@@ -852,7 +764,9 @@ func getCudaDeviceCount() *int {
 // If the script's scheduler type differs from the host scheduler, a warning
 // message is returned (but not an error) to allow the build to proceed.
 //
-// Returns nil specs (not an error) if no scheduler directives are found.
+// Always returns a non-nil *ScriptSpecs. When no directives are found,
+// HasDirectives is false and Spec is filled with GetSpecDefaults() values (Nodes=1).
+// Use HasDirectives and IsPassthrough to distinguish the three states.
 func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 	// Parse script using any available parser
 	parsed, err := ParseScriptAny(scriptPath)
@@ -860,17 +774,26 @@ func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 		return nil, err
 	}
 
-	// No scheduler directives found
+	// No scheduler directives found — return a default spec with HasDirectives=false.
+	// Callers must check HasDirectives (not nil) to distinguish from normal/passthrough mode.
 	if parsed == nil {
-		return nil, nil
+		d := GetSpecDefaults()
+		d.Nodes = 1 // single-node default for local scripts
+		return &ScriptSpecs{
+			ScriptPath:    scriptPath,
+			HasDirectives: false,
+			Spec:          &d,
+		}, nil
 	}
 
 	// Check for scheduler mismatch and log warning
 	hostType := DetectType()
 	if hostType != SchedulerUnknown && parsed.ScriptType != hostType {
-		// Log warning about mismatch (the specs will still be used)
-		utils.PrintNote("Script contains %s directives but host has %s scheduler. Specs will be translated.",
-			parsed.ScriptType, hostType)
+		// Skip translation note when inside a job — allocation is already done.
+		if !IsInsideJob() {
+			utils.PrintNote("Script contains %s directives but host has %s scheduler. Specs will be translated.",
+				parsed.ScriptType, hostType)
+		}
 
 		// Clear RemainingFlags on cross-scheduler translation:
 		// scheduler-specific unrecognized flags cannot be translated.

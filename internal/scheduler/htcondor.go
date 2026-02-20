@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -147,13 +146,13 @@ func (h *HTCondorScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, er
 
 // htcondorStructuralKeys are submit file keywords used by extractHTCondorExecutable
 // to locate the executable line. Not used for directive extraction.
-var htcondorStructuralKeys = map[string]bool{
-	"universe":            true,
-	"executable":          true,
-	"transfer_executable": true,
-	"queue":               true,
-	"arguments":           true,
-}
+// var htcondorStructuralKeys = map[string]bool{
+// 	"universe":            true,
+// 	"executable":          true,
+// 	"transfer_executable": true,
+// 	"queue":               true,
+// 	"arguments":           true,
+// }
 
 // htcondorKnownKeys is the whitelist of recognized HTCondor submit-file directive keys
 // that carry resource or control information. Structural keys (universe, executable,
@@ -292,7 +291,7 @@ func (h *HTCondorScheduler) parseResourceSpec(directives []string) (*ResourceSpe
 		case "request_cpus":
 			n, err := strconv.Atoi(value)
 			if err != nil {
-				utils.PrintWarning("HTCondor: invalid request_cpus value %q: %v", value, err)
+				logParseWarning("HTCondor: invalid request_cpus value %q: %v", value, err)
 				return nil, directives
 			}
 			rs.CpusPerTask = n
@@ -300,7 +299,7 @@ func (h *HTCondorScheduler) parseResourceSpec(directives []string) (*ResourceSpe
 		case "request_memory":
 			mem, err := parseHTCondorMemory(value)
 			if err != nil {
-				utils.PrintWarning("HTCondor: invalid request_memory value %q: %v", value, err)
+				logParseWarning("HTCondor: invalid request_memory value %q: %v", value, err)
 				return nil, directives
 			}
 			rs.MemPerNodeMB = mem
@@ -308,7 +307,7 @@ func (h *HTCondorScheduler) parseResourceSpec(directives []string) (*ResourceSpe
 		case "request_gpus":
 			n, err := strconv.Atoi(value)
 			if err != nil {
-				utils.PrintWarning("HTCondor: invalid request_gpus value %q: %v", value, err)
+				logParseWarning("HTCondor: invalid request_gpus value %q: %v", value, err)
 				return nil, directives
 			}
 			rs.Gpu = &GpuSpec{
@@ -320,7 +319,7 @@ func (h *HTCondorScheduler) parseResourceSpec(directives []string) (*ResourceSpe
 		case "+maxruntime":
 			secs, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
-				utils.PrintWarning("HTCondor: invalid +MaxRuntime value %q: %v", value, err)
+				logParseWarning("HTCondor: invalid +MaxRuntime value %q: %v", value, err)
 				return nil, directives
 			}
 			rs.Time = time.Duration(secs) * time.Second
@@ -381,8 +380,11 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 		htcRS.MemPerNodeMB = specs.Spec.MemPerNodeMB
 	}
 
-	// Export resource variables for use in build scripts
-	writeEnvVars(shWriter, htcRS)
+	// Export resource env vars: the nested "condatainer run <bash_script>" cannot
+	// re-read HTCondor specs (they live in the .sub file, not the bash script).
+	for _, kv := range ResourceEnvVars(htcRS) {
+		fmt.Fprintf(shWriter, "export %s\n", kv)
+	}
 	fmt.Fprintln(shWriter, "")
 
 	// Print job information at start
@@ -474,7 +476,7 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	fmt.Fprintln(subWriter, "queue")
 
 	// Self-dispose: the wrapper script removes itself (unless in debug mode)
-	if !config.Global.Debug {
+	if !debugMode {
 		shAppend, err := os.OpenFile(shPath, os.O_APPEND|os.O_WRONLY, utils.PermExec)
 		if err == nil {
 			fmt.Fprintf(shAppend, "\n# Self-dispose\nrm -f %s %s\n", shPath, subPath)
@@ -693,15 +695,22 @@ func (h *HTCondorScheduler) getConfigValue(param string) (string, error) {
 }
 
 // GetJobResources reads allocated resources from HTCondor environment variables.
-func (h *HTCondorScheduler) GetJobResources() *JobResources {
+// HTCondor is always single-node; Nodes and TasksPerNode are not set.
+func (h *HTCondorScheduler) GetJobResources() *ResourceSpec {
 	if _, ok := os.LookupEnv("_CONDOR_JOB_AD"); !ok {
 		return nil
 	}
-	res := &JobResources{}
-	res.Ncpus = getEnvInt("_CONDOR_REQUEST_CPUS")
+	res := &ResourceSpec{}
+	if v := getEnvInt("_CONDOR_REQUEST_CPUS"); v != nil {
+		res.CpusPerTask = *v
+	}
 	// _CONDOR_REQUEST_MEMORY is in MB
-	res.MemMB = getEnvInt64("_CONDOR_REQUEST_MEMORY")
-	res.Ngpus = getCudaDeviceCount()
+	if v := getEnvInt64("_CONDOR_REQUEST_MEMORY"); v != nil {
+		res.MemPerNodeMB = *v
+	}
+	if n := getCudaDeviceCount(); n != nil && *n > 0 {
+		res.Gpu = &GpuSpec{Count: *n}
+	}
 	return res
 }
 

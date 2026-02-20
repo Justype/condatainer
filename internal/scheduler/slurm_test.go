@@ -750,7 +750,7 @@ func TestSlurmGetJobResources(t *testing.T) {
 		clearJobEnvVars(t)
 		t.Setenv("SLURM_JOB_ID", "12345")
 		t.Setenv("SLURM_CPUS_PER_TASK", "16")
-		t.Setenv("SLURM_NTASKS", "4")
+		t.Setenv("SLURM_NTASKS_PER_NODE", "2")
 		t.Setenv("SLURM_JOB_NUM_NODES", "2")
 		t.Setenv("SLURM_MEM_PER_NODE", "8192")
 		t.Setenv("CUDA_VISIBLE_DEVICES", "0,1")
@@ -759,20 +759,20 @@ func TestSlurmGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ncpus == nil || *res.Ncpus != 16 {
-			t.Errorf("Ncpus = %v; want 16", res.Ncpus)
+		if res.CpusPerTask != 16 {
+			t.Errorf("CpusPerTask = %d; want 16", res.CpusPerTask)
 		}
-		if res.Ntasks == nil || *res.Ntasks != 4 {
-			t.Errorf("Ntasks = %v; want 4", res.Ntasks)
+		if res.TasksPerNode != 2 {
+			t.Errorf("TasksPerNode = %d; want 2", res.TasksPerNode)
 		}
-		if res.Nodes == nil || *res.Nodes != 2 {
-			t.Errorf("Nodes = %v; want 2", res.Nodes)
+		if res.Nodes != 2 {
+			t.Errorf("Nodes = %d; want 2", res.Nodes)
 		}
-		if res.MemMB == nil || *res.MemMB != 8192 {
-			t.Errorf("MemMB = %v; want 8192", res.MemMB)
+		if res.MemPerNodeMB != 8192 {
+			t.Errorf("MemPerNodeMB = %d; want 8192", res.MemPerNodeMB)
 		}
-		if res.Ngpus == nil || *res.Ngpus != 2 {
-			t.Errorf("Ngpus = %v; want 2", res.Ngpus)
+		if res.Gpu == nil || res.Gpu.Count != 2 {
+			t.Errorf("Gpu.Count = %v; want 2", res.Gpu)
 		}
 	})
 
@@ -785,14 +785,14 @@ func TestSlurmGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ncpus == nil || *res.Ncpus != 4 {
-			t.Errorf("Ncpus = %v; want 4", res.Ncpus)
+		if res.CpusPerTask != 4 {
+			t.Errorf("CpusPerTask = %d; want 4", res.CpusPerTask)
 		}
-		if res.MemMB != nil {
-			t.Errorf("MemMB should be nil, got %d", *res.MemMB)
+		if res.MemPerNodeMB != 0 {
+			t.Errorf("MemPerNodeMB should be 0 (not set), got %d", res.MemPerNodeMB)
 		}
-		if res.Ngpus != nil {
-			t.Errorf("Ngpus should be nil, got %d", *res.Ngpus)
+		if res.Gpu != nil {
+			t.Errorf("Gpu should be nil, got %+v", res.Gpu)
 		}
 	})
 
@@ -806,11 +806,11 @@ func TestSlurmGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ncpus != nil {
-			t.Errorf("Ncpus should be nil for invalid value, got %d", *res.Ncpus)
+		if res.CpusPerTask != 0 {
+			t.Errorf("CpusPerTask should be 0 for invalid value, got %d", res.CpusPerTask)
 		}
-		if res.MemMB != nil {
-			t.Errorf("MemMB should be nil for negative value, got %d", *res.MemMB)
+		if res.MemPerNodeMB != 0 {
+			t.Errorf("MemPerNodeMB should be 0 for negative value, got %d", res.MemPerNodeMB)
 		}
 	})
 }

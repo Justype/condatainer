@@ -491,10 +491,10 @@ func LoadFromViper() {
 		Global.Scheduler.TasksPerNode = tasksPerNode
 	}
 	if ncpusPerTask := viper.GetInt("scheduler.ncpus_per_task"); ncpusPerTask > 0 {
-		Global.Scheduler.NcpusPerTask = ncpusPerTask
+		Global.Scheduler.CpusPerTask = ncpusPerTask
 	}
 	if memMBPerNode := viper.GetInt64("scheduler.mem_mb_per_node"); memMBPerNode > 0 {
-		Global.Scheduler.MemMBPerNode = memMBPerNode
+		Global.Scheduler.MemPerNodeMB = memMBPerNode
 	}
 	if schedTime := viper.GetString("scheduler.time"); schedTime != "" {
 		if dur, err := utils.ParseDuration(schedTime); err == nil {
@@ -504,17 +504,16 @@ func LoadFromViper() {
 
 	// Load build config from Viper
 	if ncpus := viper.GetInt("build.ncpus"); ncpus > 0 {
-		Global.Build.DefaultCPUs = ncpus
+		Global.Build.Defaults.CpusPerTask = ncpus
 	}
 
 	if memMB := viper.GetInt64("build.mem_mb"); memMB > 0 {
-		Global.Build.DefaultMemMB = memMB
+		Global.Build.Defaults.MemPerNodeMB = memMB
 	}
 
 	if buildTime := viper.GetString("build.time"); buildTime != "" {
-		// Parse time duration from string (e.g., "2h", "30m", "1h30m", or "02:00:00")
 		if dur, err := utils.ParseDuration(buildTime); err == nil {
-			Global.Build.DefaultTime = dur
+			Global.Build.Defaults.Time = dur
 		}
 	}
 

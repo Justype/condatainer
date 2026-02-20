@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -253,7 +252,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		// Blacklist: topology flags we cannot translate → passthrough immediately.
 		for _, bl := range slurmBlacklistedFlags {
 			if flag == bl || flagMatches(flag, bl) {
-				utils.PrintWarning("SLURM: unsupported topology directive %q; using passthrough mode", flag)
+				logParseWarning("SLURM: unsupported topology directive %q; using passthrough mode", flag)
 				return nil, directives
 			}
 		}
@@ -299,7 +298,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		}
 
 		if parseErr != nil {
-			utils.PrintWarning("SLURM: failed to parse directive %q: %v", flag, parseErr)
+			logParseWarning("SLURM: failed to parse directive %q: %v", flag, parseErr)
 			return nil, directives
 		}
 		if !consumed {
@@ -321,7 +320,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 	rs.Nodes = nodes
 	if hasTotalNtasks {
 		if rs.Nodes > 0 && totalNtasks%rs.Nodes != 0 {
-			utils.PrintWarning("SLURM: --ntasks=%d not divisible by --nodes=%d; using passthrough mode",
+			logParseWarning("SLURM: --ntasks=%d not divisible by --nodes=%d; using passthrough mode",
 				totalNtasks, rs.Nodes)
 			return nil, directives
 		}
@@ -343,7 +342,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		// --gres=gpu:TYPE:N is per-node by SLURM definition.
 		gpu, err := parseSlurmGpu(gpuGresStr)
 		if err != nil {
-			utils.PrintWarning("SLURM: failed to parse --gres value %q: %v; using passthrough mode", gpuGresStr, err)
+			logParseWarning("SLURM: failed to parse --gres value %q: %v; using passthrough mode", gpuGresStr, err)
 			return nil, directives
 		}
 		rs.Gpu = gpu
@@ -351,7 +350,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		// --gpus-per-node=TYPE:N is directly per-node.
 		gpu, err := parseSlurmGpu(gpuPerNodeStr)
 		if err != nil {
-			utils.PrintWarning("SLURM: failed to parse --gpus-per-node value %q: %v; using passthrough mode", gpuPerNodeStr, err)
+			logParseWarning("SLURM: failed to parse --gpus-per-node value %q: %v; using passthrough mode", gpuPerNodeStr, err)
 			return nil, directives
 		}
 		rs.Gpu = gpu
@@ -359,12 +358,12 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		// --gpus=N is total; must divide evenly by nodes.
 		gpu, err := parseSlurmGpu(gpuTotalStr)
 		if err != nil {
-			utils.PrintWarning("SLURM: failed to parse --gpus value %q: %v; using passthrough mode", gpuTotalStr, err)
+			logParseWarning("SLURM: failed to parse --gpus value %q: %v; using passthrough mode", gpuTotalStr, err)
 			return nil, directives
 		}
 		if rs.Nodes > 1 {
 			if gpu.Count%rs.Nodes != 0 {
-				utils.PrintWarning("SLURM: --gpus=%d not divisible by --nodes=%d; using passthrough mode",
+				logParseWarning("SLURM: --gpus=%d not divisible by --nodes=%d; using passthrough mode",
 					gpu.Count, rs.Nodes)
 				return nil, directives
 			}
@@ -375,7 +374,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		// --gpus-per-task=N; multiply by tasks/node to get per-node count.
 		gpu, err := parseSlurmGpu(gpuPerTaskStr)
 		if err != nil {
-			utils.PrintWarning("SLURM: failed to parse --gpus-per-task value %q: %v; using passthrough mode", gpuPerTaskStr, err)
+			logParseWarning("SLURM: failed to parse --gpus-per-task value %q: %v; using passthrough mode", gpuPerTaskStr, err)
 			return nil, directives
 		}
 		gpu.Count *= rs.TasksPerNode
@@ -387,7 +386,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		rs.CpusPerTask = cpusPerTask
 	} else if hasCpusPerGpu {
 		if rs.Gpu == nil {
-			utils.PrintWarning("SLURM: --cpus-per-gpu requires a GPU spec; using passthrough mode")
+			logParseWarning("SLURM: --cpus-per-gpu requires a GPU spec; using passthrough mode")
 			return nil, directives
 		}
 		rs.CpusPerTask = cpusPerGpu * rs.Gpu.Count
@@ -399,7 +398,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		// --mem=N: direct per-node total.
 		mem, err := parseMemory(memStr)
 		if err != nil {
-			utils.PrintWarning("SLURM: invalid --mem value %q: %v; using passthrough mode", memStr, err)
+			logParseWarning("SLURM: invalid --mem value %q: %v; using passthrough mode", memStr, err)
 			return nil, directives
 		}
 		rs.MemPerNodeMB = mem
@@ -407,7 +406,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		// --mem-per-cpu=N: multiply by effective CPUs per node.
 		memPerCpu, err := parseMemory(memPerCpuStr)
 		if err != nil {
-			utils.PrintWarning("SLURM: invalid --mem-per-cpu value %q: %v; using passthrough mode", memPerCpuStr, err)
+			logParseWarning("SLURM: invalid --mem-per-cpu value %q: %v; using passthrough mode", memPerCpuStr, err)
 			return nil, directives
 		}
 		cpusPerNode := rs.CpusPerTask * rs.TasksPerNode
@@ -418,12 +417,12 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 	case memPerGpuStr != "":
 		// --mem-per-gpu=N: multiply by GPUs per node.
 		if rs.Gpu == nil {
-			utils.PrintWarning("SLURM: --mem-per-gpu requires a GPU spec; using passthrough mode")
+			logParseWarning("SLURM: --mem-per-gpu requires a GPU spec; using passthrough mode")
 			return nil, directives
 		}
 		memPerGpu, err := parseMemory(memPerGpuStr)
 		if err != nil {
-			utils.PrintWarning("SLURM: invalid --mem-per-gpu value %q: %v; using passthrough mode", memPerGpuStr, err)
+			logParseWarning("SLURM: invalid --mem-per-gpu value %q: %v; using passthrough mode", memPerGpuStr, err)
 			return nil, directives
 		}
 		rs.MemPerNodeMB = memPerGpu * int64(rs.Gpu.Count)
@@ -433,7 +432,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 	if timeStr != "" {
 		t, err := parseSlurmTimeSpec(timeStr)
 		if err != nil {
-			utils.PrintWarning("SLURM: invalid --time value %q: %v; using passthrough mode", timeStr, err)
+			logParseWarning("SLURM: invalid --time value %q: %v; using passthrough mode", timeStr, err)
 			return nil, directives
 		}
 		rs.Time = t
@@ -555,12 +554,6 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 
 	fmt.Fprintln(writer, "")
 
-	// Export resource variables for use in build scripts (skipped in passthrough mode)
-	if specs.Spec != nil {
-		writeEnvVars(writer, specs.Spec)
-		fmt.Fprintln(writer, "")
-	}
-
 	// Print job information at start
 	writeJobHeader(writer, "$SLURM_JOB_ID", specs, formatSlurmTimeSpec, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
@@ -573,7 +566,7 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	writeJobFooter(writer, "$SLURM_JOB_ID")
 
 	// Self-dispose: remove this script file (unless in debug mode)
-	if !config.Global.Debug {
+	if !debugMode {
 		fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
 	}
 
@@ -887,6 +880,7 @@ func (s *SlurmScheduler) getMaxNodeResources() (int, int64, error) {
 
 // parsePartitionLine parses a single partition line from scontrol output
 func (s *SlurmScheduler) parsePartitionLine(line string) *ResourceLimits {
+	// https://slurm.schedmd.com/slurm.conf.html#SECTION_PARTITION-CONFIGURATION
 	limit := &ResourceLimits{}
 
 	fields := strings.Fields(line)
@@ -1117,17 +1111,28 @@ func formatSlurmTimeSpec(d time.Duration) string {
 }
 
 // GetJobResources reads allocated resources from SLURM environment variables.
-func (s *SlurmScheduler) GetJobResources() *JobResources {
+// Fields with value 0 were not exposed by SLURM.
+func (s *SlurmScheduler) GetJobResources() *ResourceSpec {
 	if _, ok := os.LookupEnv("SLURM_JOB_ID"); !ok {
 		return nil
 	}
-	res := &JobResources{}
-	res.Ncpus = getEnvInt("SLURM_CPUS_PER_TASK")
-	res.Ntasks = getEnvInt("SLURM_NTASKS")
-	res.Nodes = getEnvInt("SLURM_JOB_NUM_NODES")
+	res := &ResourceSpec{}
+	if v := getEnvInt("SLURM_JOB_NUM_NODES"); v != nil {
+		res.Nodes = *v
+	}
+	if v := getEnvInt("SLURM_NTASKS_PER_NODE"); v != nil {
+		res.TasksPerNode = *v
+	}
+	if v := getEnvInt("SLURM_CPUS_PER_TASK"); v != nil {
+		res.CpusPerTask = *v
+	}
 	// SLURM_MEM_PER_NODE is already in MB
-	res.MemMB = getEnvInt64("SLURM_MEM_PER_NODE")
-	res.Ngpus = getCudaDeviceCount()
+	if v := getEnvInt64("SLURM_MEM_PER_NODE"); v != nil {
+		res.MemPerNodeMB = *v
+	}
+	if n := getCudaDeviceCount(); n != nil && *n > 0 {
+		res.Gpu = &GpuSpec{Count: *n}
+	}
 	return res
 }
 

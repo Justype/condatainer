@@ -74,7 +74,7 @@ const (
 // submission was requested and the graph shows job IDs were created.
 func ExitIfJobsSubmitted(graph *build.BuildGraph) {
 	if config.Global.SubmitJob && graph != nil && len(graph.GetJobIDs()) > 0 {
-		utils.PrintMessage("%d scheduler job(s) submitted. exiting with code %d",
+		utils.PrintNote("%d scheduler job(s) submitted. exiting with code %d",
 			len(graph.GetJobIDs()), ExitCodeJobsSubmitted)
 		os.Exit(ExitCodeJobsSubmitted)
 	}

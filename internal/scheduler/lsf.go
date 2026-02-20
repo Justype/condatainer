@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -217,7 +216,7 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 		}
 
 		if parseErr != nil {
-			utils.PrintWarning("LSF: failed to parse directive %q: %v", flag, parseErr)
+			logParseWarning("LSF: failed to parse directive %q: %v", flag, parseErr)
 			return nil, directives
 		}
 		if !recognized {
@@ -444,12 +443,6 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	fmt.Fprintln(writer, "")
 
-	// Export resource variables for use in build scripts (skipped in passthrough mode)
-	if specs.Spec != nil {
-		writeEnvVars(writer, specs.Spec)
-		fmt.Fprintln(writer, "")
-	}
-
 	// Print job information at start
 	writeJobHeader(writer, "$LSB_JOBID", specs, formatLsfTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
@@ -462,7 +455,7 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	writeJobFooter(writer, "$LSB_JOBID")
 
 	// Self-delete the script after execution (unless in debug mode)
-	if !config.Global.Debug {
+	if !debugMode {
 		fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
 	}
 
@@ -1105,23 +1098,27 @@ func parseLsfMemory(memStr string) (int64, error) {
 }
 
 // GetJobResources reads allocated resources from LSF environment variables.
-func (s *LsfScheduler) GetJobResources() *JobResources {
+// Fields with value 0 were not exposed by LSF. Nodes and TasksPerNode are not
+// available from LSF env vars.
+func (s *LsfScheduler) GetJobResources() *ResourceSpec {
 	if _, ok := os.LookupEnv("LSB_JOBID"); !ok {
 		return nil
 	}
-	res := &JobResources{}
-	res.Ncpus = getEnvInt("LSB_DJOB_NUMPROC")
-	if res.Ncpus == nil {
-		res.Ncpus = getEnvInt("LSB_MAX_NUM_PROCESSORS")
+	res := &ResourceSpec{}
+	if v := getEnvInt("LSB_DJOB_NUMPROC"); v != nil {
+		res.CpusPerTask = *v
+	} else if v := getEnvInt("LSB_MAX_NUM_PROCESSORS"); v != nil {
+		res.CpusPerTask = *v
 	}
 	// LSB_MAX_MEM_RUSAGE is in KB
 	if memKB := getEnvInt64("LSB_MAX_MEM_RUSAGE"); memKB != nil {
-		mb := *memKB / 1024
-		if mb > 0 {
-			res.MemMB = &mb
+		if mb := *memKB / 1024; mb > 0 {
+			res.MemPerNodeMB = mb
 		}
 	}
-	res.Ngpus = getCudaDeviceCount()
+	if n := getCudaDeviceCount(); n != nil && *n > 0 {
+		res.Gpu = &GpuSpec{Count: *n}
+	}
 	return res
 }
 

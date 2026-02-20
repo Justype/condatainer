@@ -922,11 +922,11 @@ func TestPbsGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ncpus == nil || *res.Ncpus != 8 {
-			t.Errorf("Ncpus = %v; want 8", res.Ncpus)
+		if res.CpusPerTask != 8 {
+			t.Errorf("CpusPerTask = %d; want 8", res.CpusPerTask)
 		}
-		if res.Ngpus == nil || *res.Ngpus != 3 {
-			t.Errorf("Ngpus = %v; want 3", res.Ngpus)
+		if res.Gpu == nil || res.Gpu.Count != 3 {
+			t.Errorf("Gpu.Count = %v; want 3", res.Gpu)
 		}
 	})
 
@@ -941,25 +941,28 @@ func TestPbsGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Nodes == nil || *res.Nodes != 4 {
-			t.Errorf("Nodes = %v; want 4", res.Nodes)
+		if res.Nodes != 4 {
+			t.Errorf("Nodes = %d; want 4", res.Nodes)
 		}
-		if res.Ntasks == nil || *res.Ntasks != 16 {
-			t.Errorf("Ntasks = %v; want 16", res.Ntasks)
+		// TasksPerNode = PBS_NP / PBS_NUM_NODES = 16 / 4 = 4
+		if res.TasksPerNode != 4 {
+			t.Errorf("TasksPerNode = %d; want 4 (derived from PBS_NP/PBS_NUM_NODES)", res.TasksPerNode)
 		}
 	})
 
 	t.Run("PBS_TASKNUM fallback", func(t *testing.T) {
 		clearJobEnvVars(t)
 		t.Setenv("PBS_JOBID", "67890")
+		t.Setenv("PBS_NUM_NODES", "2")
 		t.Setenv("PBS_TASKNUM", "8")
 
 		res := sched.GetJobResources()
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ntasks == nil || *res.Ntasks != 8 {
-			t.Errorf("Ntasks = %v; want 8", res.Ntasks)
+		// TasksPerNode = PBS_TASKNUM / PBS_NUM_NODES = 8 / 2 = 4
+		if res.TasksPerNode != 4 {
+			t.Errorf("TasksPerNode = %d; want 4 (derived from PBS_TASKNUM/PBS_NUM_NODES)", res.TasksPerNode)
 		}
 	})
 
@@ -972,8 +975,8 @@ func TestPbsGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ncpus == nil || *res.Ncpus != 12 {
-			t.Errorf("Ncpus = %v; want 12", res.Ncpus)
+		if res.CpusPerTask != 12 {
+			t.Errorf("CpusPerTask = %d; want 12", res.CpusPerTask)
 		}
 	})
 
@@ -986,8 +989,8 @@ func TestPbsGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.MemMB == nil || *res.MemMB != 8192 {
-			t.Errorf("MemMB = %v; want 8192", res.MemMB)
+		if res.MemPerNodeMB != 8192 {
+			t.Errorf("MemPerNodeMB = %d; want 8192", res.MemPerNodeMB)
 		}
 	})
 
@@ -1000,14 +1003,14 @@ func TestPbsGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ncpus == nil || *res.Ncpus != 4 {
-			t.Errorf("Ncpus = %v; want 4", res.Ncpus)
+		if res.CpusPerTask != 4 {
+			t.Errorf("CpusPerTask = %d; want 4", res.CpusPerTask)
 		}
-		if res.MemMB != nil {
-			t.Errorf("MemMB should be nil, got %d", *res.MemMB)
+		if res.MemPerNodeMB != 0 {
+			t.Errorf("MemPerNodeMB should be 0 (not set), got %d", res.MemPerNodeMB)
 		}
-		if res.Ngpus != nil {
-			t.Errorf("Ngpus should be nil, got %d", *res.Ngpus)
+		if res.Gpu != nil {
+			t.Errorf("Gpu should be nil, got %+v", res.Gpu)
 		}
 	})
 
@@ -1021,11 +1024,11 @@ func TestPbsGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ncpus != nil {
-			t.Errorf("Ncpus should be nil for invalid value, got %d", *res.Ncpus)
+		if res.CpusPerTask != 0 {
+			t.Errorf("CpusPerTask should be 0 for invalid value, got %d", res.CpusPerTask)
 		}
-		if res.MemMB != nil {
-			t.Errorf("MemMB should be nil for negative value, got %d", *res.MemMB)
+		if res.MemPerNodeMB != 0 {
+			t.Errorf("MemPerNodeMB should be 0 for negative value, got %d", res.MemPerNodeMB)
 		}
 	})
 }

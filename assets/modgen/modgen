@@ -676,12 +676,20 @@ class BuildObject:
                     Utils.print_warning("Multiline input detected. Only the first line will be used.")
                     user_input = user_input.splitlines()[0]
                 self.interactive_inputs.append(user_input)
+            # Resolve ncpus: default(4) < script #SBATCH --cpus-per-task < live scheduler env
+            self.ncpus = 4
             for flag in self.sbatch_flags:
                 if flag.startswith("--cpus-per-task="):
                     try:
                         self.ncpus = int(flag.split("=")[1])
                     except ValueError:
                         pass
+            _live_cpus = os.environ.get("SLURM_CPUS_PER_TASK", "")
+            if _live_cpus:
+                try:
+                    self.ncpus = int(_live_cpus)
+                except ValueError:
+                    pass
             self.sbatch = len(self.sbatch_flags) > 0
 
     def __str__(self) -> str:
@@ -1652,6 +1660,15 @@ class ModGen_Run:
         return env
 
     @staticmethod
+    def _resolve_resource_env(sbatch_flags: List[str]) -> dict:
+        """Resolve resource env using priority chain: default(NCPUS=4) < script #SBATCH < live scheduler env."""
+        env = {'NCPUS': '4'}
+        if sbatch_flags:
+            env.update(ModGen_Run._parse_resource_env(sbatch_flags))
+        env.update(ModGen_Run._get_slurm_resource_env())
+        return env
+
+    @staticmethod
     def _create_run_sbatch_script(script_path: str, sbatch_flags: List[str], dep_ids: List[str]) -> Optional[str]:
         script_name = os.path.splitext(os.path.basename(script_path))[0]
         sbatch_script_path = os.path.join(Config.TMP_DIR, f"sbatch_run_{script_name}.sh")
@@ -1725,14 +1742,14 @@ class ModGen_Run:
             Utils.print_note(f"Please go to https://github.com/{Config.GITHUB_REPO} for more information.")
             return
 
+        # Parse #SBATCH directives from the script (needed for resource priority chain)
+        sbatch_flags = Utils.get_sbatch_args_from_build_script(script_path)
+
         # Fast path: already inside a scheduler job — skip submission, run locally
         if "SLURM_JOB_ID" in os.environ:
             execution_command_list = [script_path] if os.access(script_path, os.X_OK) else [f"bash {script_path}"]
-            ModGen_Exec.exec_command(deps, execution_command_list, extra_env=ModGen_Run._get_slurm_resource_env())
+            ModGen_Exec.exec_command(deps, execution_command_list, extra_env=ModGen_Run._resolve_resource_env(sbatch_flags))
             return
-
-        # Parse #SBATCH directives from the script
-        sbatch_flags = Utils.get_sbatch_args_from_build_script(script_path)
 
         missing_deps = ModGen.get_missing_modules(deps)
         build_job_ids = []
@@ -1770,7 +1787,7 @@ class ModGen_Run:
             elif sbatch_flags and not Utils.is_sbatch_available():
                 Utils.print_note("Script has #SBATCH specs but no SLURM scheduler is available. Running locally.")
             execution_command_list = [script_path] if os.access(script_path, os.X_OK) else [f"bash {script_path}"]
-            resource_env = ModGen_Run._parse_resource_env(sbatch_flags) if sbatch_flags else {}
+            resource_env = ModGen_Run._resolve_resource_env(sbatch_flags)
             ModGen_Exec.exec_command(deps, execution_command_list, extra_env=resource_env)
 
 class ModGen_Init:

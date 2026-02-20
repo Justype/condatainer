@@ -12,6 +12,7 @@ import (
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
 	execpkg "github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -174,16 +175,25 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		version = nameVersionParts[1]
 	}
 
+	// Build resource spec: builds are always single-node/single-task.
+	// effectiveNcpus() derives CPU count from scriptSpecs (folds TasksPerNode) or defaults.
+	buildRS := &scheduler.ResourceSpec{
+		Nodes:        1,
+		TasksPerNode: 1,
+		CpusPerTask:  s.effectiveNcpus(),
+		MemPerNodeMB: s.effectiveMemMB(),
+	}
+
 	// Build environment settings (KEY=VALUE format for exec.Options.EnvSettings)
-	envSettings := []string{
+	envSettings := append(
+		scheduler.ResourceEnvVars(buildRS),
 		fmt.Sprintf("app_name=%s", name),
 		fmt.Sprintf("version=%s", version),
 		fmt.Sprintf("app_name_version=%s", s.nameVersion),
 		"tmp_dir=/ext3/tmp",
 		"TMPDIR=/ext3/tmp",
-		fmt.Sprintf("NCPUS=%d", s.ncpus),
 		"IN_CONDATAINER=1",
-	}
+	)
 
 	// Set target_dir based on ref type
 	targetDir := ""
@@ -409,7 +419,7 @@ find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
 
 echo "Packing overlay to SquashFS..."
 mksquashfs /cnt %s -processors %d -keep-as-directory %s
-`, targetPath, s.ncpus, config.Global.Build.CompressArgs)
+`, targetPath, s.effectiveNcpus(), config.Global.Build.CompressArgs)
 	} else {
 		// For ref overlays: fix permissions and pack the directory
 		if err := utils.FixPermissionsDefault(sourceDir); err != nil {
@@ -419,7 +429,7 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s
 trap 'exit 130' INT TERM
 echo "Packing overlay to SquashFS..."
 mksquashfs %s %s -processors %d -keep-as-directory %s
-`, sourceDir, targetPath, s.ncpus, config.Global.Build.CompressArgs)
+`, sourceDir, targetPath, s.effectiveNcpus(), config.Global.Build.CompressArgs)
 		packOverlays = []string{} // No need to pack with tmpOverlay for ref overlays since sourceDir is already prepared
 	}
 

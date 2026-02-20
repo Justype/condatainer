@@ -84,8 +84,8 @@ func runExec(cmd *cobra.Command, args []string) error {
 	options := exec.Options{
 		Overlays:       resolvedOverlays,
 		Command:        commandFinal,
-		WritableImg:    execFlags.WritableImg, // Default false, unless -w specified
-		EnvSettings:    execFlags.EnvSettings,
+		WritableImg:    execFlags.WritableImg,                                          // Default false, unless -w specified
+		EnvSettings:    append(liveJobResourceEnvSettings(), execFlags.EnvSettings...), // Inject live job resources, then user env vars
 		BindPaths:      execFlags.BindPaths,
 		ApptainerFlags: apptainerFlags, // Pass through unknown flags
 		Fakeroot:       execFlags.Fakeroot,

@@ -54,7 +54,7 @@ Used for reference datasets, genome assemblies, or indices.
 
 | Variable | Description |
 | -------- | ----------- |
-| `NCPUS` | Number of CPUs to use (set by **CondaTainer** or 4) |
+| `NCPUS` | Number of CPUs (from script directives, or `Build.DefaultCPUs`) |
 | `app_name` | apps: app name; ref: assembly/data-type |
 | `version` | apps: app version; ref: data version |
 | `target_dir` | Target installation directory (managed by **CondaTainer**) |
@@ -144,6 +144,8 @@ If a supported scheduler is available, **CondaTainer** will submit the build job
 ```
 
 For LSF, **CondaTainer** will add `-R "span[hosts=1]"` to ensure all CPUs are allocated on the same node.
+
+> **Note**: Certain SLURM flags are not supported and will cause the build to fail: `--topology-plugin`, `--switches`, `--gpus-per-socket`, `--sockets-per-node`, `--cores-per-socket`, `--threads-per-core`, `--ntasks-per-socket`, `--ntasks-per-core`, `--distribution`. Remove these from your build script.
 
 ### Environment Variables
 

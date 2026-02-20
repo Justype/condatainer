@@ -192,7 +192,7 @@ echo "Packing overlay to SquashFS..."
 mksquashfs /cnt %s -processors %d -keep-as-directory %s
 `,
 		installCmd,
-		c.targetOverlayPath, c.ncpus, config.Global.Build.CompressArgs,
+		c.targetOverlayPath, c.effectiveNcpus(), config.Global.Build.CompressArgs,
 	)
 
 	// Always bind the target overlay directory so mksquashfs can write there

@@ -227,9 +227,15 @@ modgen run [SCRIPT] [SCRIPT_ARGS...]
 2. If `#SBATCH` is found and SLURM is available, submit a job that re-invokes `modgen run <script>`. (unless `--local` is set)
 3. Otherwise, run the script directly with modules pre-loaded. `module` and `ml` are stubbed as no-ops to prevent accidental `module purge`.
 
+Resource environment variables are set using the following priority chain (lowest → highest):
+
+1. **Default** — `NCPUS=4` when nothing else is available
+2. **Script `#SBATCH` directives** — `--cpus-per-task` / `--mem`
+3. **Live scheduler environment** — `SLURM_CPUS_PER_TASK` / `SLURM_MEM_PER_NODE` (actual job allocation, highest priority)
+
 | Variable | Description |
 |---|---|
-| `NCPUS` | CPUs per task (`--cpus-per-task`, default: `1`) |
+| `NCPUS` | CPUs per task (default: `4`) |
 | `MEM` | Memory in MB (`--mem`, e.g. `32G` → `32768`) |
 | `MEM_MB` | Same as `MEM` |
 | `MEM_GB` | Memory in GB |
