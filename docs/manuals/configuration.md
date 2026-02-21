@@ -108,6 +108,8 @@ These values are used as defaults when a script does not include explicit resour
 | `build.compress_args` | Auto-detected | mksquashfs compression arguments |
 | `build.overlay_type` | `ext3` | Overlay filesystem type: `ext3` or `squashfs` |
 
+> `build.compress_args` also accepts shortcuts: `gzip`, `lz4`, `zstd`, `zstd-fast`, `zstd-medium`, `zstd-high`
+
 ## Managing Configuration
 
 ### View Configuration
@@ -310,7 +312,12 @@ CondaTainer auto-detects the best compression based on your Apptainer version:
 To override:
 
 ```bash
+# explicit mksquashfs options
 condatainer config set build.compress_args "-comp gzip -Xcompression-level 9"
+
+# shorthand names (completion will offer these)
+condatainer config set build.compress_args gzip
+condatainer config set build.compress_args zstd-fast
 ```
 
 ## Troubleshooting

@@ -92,7 +92,7 @@ func setDefaults() {
 	viper.SetDefault("scheduler.nodes", 1)
 	viper.SetDefault("scheduler.tasks_per_node", 1)
 	viper.SetDefault("scheduler.ncpus_per_task", 2)
-	viper.SetDefault("scheduler.mem_mb_per_node", 8192)
+	viper.SetDefault("scheduler.mem_per_node_mb", 8192)
 	viper.SetDefault("scheduler.time", "4h")
 
 	// Build config defaults
@@ -493,7 +493,7 @@ func LoadFromViper() {
 	if ncpusPerTask := viper.GetInt("scheduler.ncpus_per_task"); ncpusPerTask > 0 {
 		Global.Scheduler.CpusPerTask = ncpusPerTask
 	}
-	if memMBPerNode := viper.GetInt64("scheduler.mem_mb_per_node"); memMBPerNode > 0 {
+	if memMBPerNode := viper.GetInt64("scheduler.mem_per_node_mb"); memMBPerNode > 0 {
 		Global.Scheduler.MemPerNodeMB = memMBPerNode
 	}
 	if schedTime := viper.GetString("scheduler.time"); schedTime != "" {
@@ -524,7 +524,7 @@ func LoadFromViper() {
 	// Only override compress_args if explicitly set in config (non-empty)
 	// Empty means auto-detect based on apptainer version (handled by AutoDetectCompression)
 	if compressArgs := viper.GetString("build.compress_args"); compressArgs != "" {
-		Global.Build.CompressArgs = compressArgs
+		Global.Build.CompressArgs = NormalizeCompressArgs(compressArgs)
 	}
 
 	if overlayType := viper.GetString("build.overlay_type"); overlayType != "" {
@@ -532,6 +532,12 @@ func LoadFromViper() {
 	}
 
 	Global.ParseModuleLoad = viper.GetBool("parse_module_load")
+}
+
+// NormalizeCompressArgs is a thin wrapper around ArgsForCompress and exists
+// for historical compatibility with earlier versions of the code.
+func NormalizeCompressArgs(val string) string {
+	return ArgsForCompress(val)
 }
 
 // AutoDetectCompression sets compression to zstd if supported and user hasn't explicitly set it.

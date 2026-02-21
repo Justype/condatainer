@@ -31,7 +31,7 @@ var configKeys = []string{
 	"scheduler.nodes",
 	"scheduler.tasks_per_node",
 	"scheduler.ncpus_per_task",
-	"scheduler.mem_mb_per_node",
+	"scheduler.mem_per_node_mb",
 	"scheduler.time",
 	"parse_module_load",
 	"build.ncpus",
@@ -70,7 +70,7 @@ func configValueCompletion(key string) []string {
 		return []string{"1", "2", "4", "8"}
 	case "scheduler.ncpus_per_task", "build.ncpus":
 		return []string{"4", "8", "16", "32"}
-	case "scheduler.mem_mb_per_node", "build.mem_mb":
+	case "scheduler.mem_per_node_mb", "build.mem_mb":
 		return []string{"4096", "8192", "16384", "32768"}
 	case "scheduler.time", "build.time":
 		return []string{"1h", "2h", "4h", "8h"}
@@ -78,6 +78,8 @@ func configValueCompletion(key string) []string {
 		return []string{"10240", "20480", "40960"}
 	case "build.overlay_type":
 		return []string{"ext3", "squashfs"}
+	case "build.compress_args":
+		return config.CompressNames()
 	default:
 		return nil
 	}
@@ -262,11 +264,11 @@ Shows:
 		fmt.Printf("  nodes:           %d\n", viper.GetInt("scheduler.nodes"))
 		fmt.Printf("  tasks_per_node:  %d\n", viper.GetInt("scheduler.tasks_per_node"))
 		fmt.Printf("  ncpus_per_task:  %d\n", viper.GetInt("scheduler.ncpus_per_task"))
-		schedMemMB := viper.GetInt64("scheduler.mem_mb_per_node")
+		schedMemMB := viper.GetInt64("scheduler.mem_per_node_mb")
 		if schedMemMB > 0 {
-			fmt.Printf("  mem_mb_per_node: %d\n", schedMemMB)
+			fmt.Printf("  mem_per_node_mb: %d\n", schedMemMB)
 		} else {
-			fmt.Printf("  mem_mb_per_node: %s\n", utils.StyleInfo("not set"))
+			fmt.Printf("  mem_per_node_mb: %s\n", utils.StyleInfo("not set"))
 		}
 		schedTime := viper.GetString("scheduler.time")
 		if schedTime != "" {
@@ -317,7 +319,7 @@ Shows:
 			"CONDATAINER_SCHEDULER_NODES",
 			"CONDATAINER_SCHEDULER_TASKS_PER_NODE",
 			"CONDATAINER_SCHEDULER_NCPUS_PER_TASK",
-			"CONDATAINER_SCHEDULER_MEM_MB_PER_NODE",
+			"CONDATAINER_SCHEDULER_MEM_PER_NODE_MB",
 			"CONDATAINER_SCHEDULER_TIME",
 			"CONDATAINER_BUILD_NCPUS",
 			"CONDATAINER_BUILD_MEM_MB",
@@ -388,7 +390,7 @@ Time duration format (for build.time):
 			"scheduler.nodes":           true,
 			"scheduler.tasks_per_node":  true,
 			"scheduler.ncpus_per_task":  true,
-			"scheduler.mem_mb_per_node": true,
+			"scheduler.mem_per_node_mb": true,
 			"scheduler.time":            true,
 			"build.ncpus":               true,
 			"build.mem_mb":              true,
@@ -429,6 +431,9 @@ Time duration format (for build.time):
 			}
 		}
 
+		if key == "build.compress_args" {
+			value = config.NormalizeCompressArgs(value)
+		}
 		// Set the value
 		viper.Set(key, value)
 

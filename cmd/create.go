@@ -24,14 +24,28 @@ var (
 	createTempSize  string
 	createRemote    bool
 
-	// Compression flags
-	compZstd       bool
-	compZstdFast   bool
-	compZstdMedium bool
-	compZstdHigh   bool
-	compGzip       bool
-	compLz4        bool
+	// compression flags are generated dynamically from config.CompressOptions
+	compFlags map[string]*bool
 )
+
+// compressArgsFromFlags inspects the map of boolean pointers produced by
+// flag registration and returns the corresponding mksquashfs arguments.
+// If more than one compression flag is set, it returns an error.
+func compressArgsFromFlags(flags map[string]*bool) (string, error) {
+	selected := ""
+	for name, ptr := range flags {
+		if ptr != nil && *ptr {
+			if selected != "" {
+				return "", errors.New("multiple compression options specified")
+			}
+			selected = name
+		}
+	}
+	if selected == "" {
+		return "", nil
+	}
+	return config.ArgsForCompress(selected), nil
+}
 
 var createCmd = &cobra.Command{
 	Use:     "create [packages...]",
@@ -68,19 +82,12 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 			ExitWithError("%v", err)
 		}
 
-		// 3. Handle Compression Config
-		if compLz4 {
-			config.Global.Build.CompressArgs = "-comp lz4"
-		} else if compZstd {
-			config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 14"
-		} else if compZstdFast {
-			config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 3"
-		} else if compZstdMedium {
-			config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 8"
-		} else if compZstdHigh {
-			config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 19"
-		} else if compGzip {
-			config.Global.Build.CompressArgs = "-comp gzip"
+		// 3. Handle Compression Config – consult helper that respects available
+		// options and rejects multiple selections.
+		if args, err := compressArgsFromFlags(compFlags); err != nil {
+			ExitWithError("%v", err)
+		} else if args != "" {
+			config.Global.Build.CompressArgs = args
 		}
 		// If no compression flag provided, use config default (auto-detected in root.go)
 
@@ -133,13 +140,11 @@ func init() {
 	f.StringVar(&createTempSize, "temp-size", "20G", "Size of temporary overlay")
 	f.BoolVar(&createRemote, "remote", false, "Remote build scripts take precedence over local")
 
-	// Compression Flags
-	f.BoolVar(&compZstdFast, "zstd-fast", false, "Use zstd compression level 3")
-	f.BoolVar(&compZstdMedium, "zstd-medium", false, "Use zstd compression level 8")
-	f.BoolVar(&compZstd, "zstd", false, "Use zstd compression level 14")
-	f.BoolVar(&compZstdHigh, "zstd-high", false, "Use zstd compression level 19")
-	f.BoolVar(&compGzip, "gzip", false, "Use gzip compression")
-	f.BoolVar(&compLz4, "lz4", false, "Use LZ4 compression")
+	// Compression flags: create a bool flag for each known option
+	compFlags = make(map[string]*bool)
+	for _, opt := range config.CompressOptions {
+		compFlags[opt.Name] = f.Bool(opt.Name, false, opt.Description)
+	}
 }
 
 // getWritableImagesDir returns the writable images directory or exits with an error
