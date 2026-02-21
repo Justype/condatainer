@@ -268,7 +268,7 @@ func baseImageFlagCompletion() func(*cobra.Command, []string, string) ([]string,
 	}
 }
 
-// systemOverlaySuggestions returns only system overlays (def-built) and local overlay files
+// systemOverlaySuggestions returns only OS overlays and local OS overlay files
 func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirective) {
 	installed, err := container.InstalledOverlays()
 	if err != nil {
@@ -277,20 +277,25 @@ func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirec
 
 	choices := map[string]struct{}{}
 
-	// Only include overlays from the def list (system/def-built overlays)
-	defList := build.GetDefBuiltList()
-	for name := range installed {
-		normalized := utils.NormalizeNameVersion(name)
-		if defList[normalized] {
+	// Only include installed overlays that are OS overlays (contain .singularity.d)
+	for name, path := range installed {
+		if isOSOverlay(path) {
 			if toComplete == "" || strings.HasPrefix(name, toComplete) {
 				choices[name] = struct{}{}
 			}
 		}
 	}
 
-	// Add local .sqf/.sif files (not .img) - for -b flag
+	// Add local .sif files and local .sqf files that are OS overlays - for -b flag
 	for _, candidate := range localImageSuggestions(toComplete) {
-		choices[candidate] = struct{}{}
+		if utils.IsSif(candidate) {
+			choices[candidate] = struct{}{}
+			continue
+		}
+		absPath, err := filepath.Abs(candidate)
+		if err == nil && isOSOverlay(absPath) {
+			choices[candidate] = struct{}{}
+		}
 	}
 
 	suggestions := make([]string, 0, len(choices))
