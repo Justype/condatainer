@@ -70,8 +70,6 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	if _, err := os.Stat(targetOverlayPath); err == nil {
 		utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
 			styledOverlay, utils.StylePath(targetOverlayPath))
-		// Ensure it's in the .def_list (in case it was manually copied or built before tracking)
-		UpdateDefBuiltList(d.nameVersion, targetOverlayPath)
 		return nil
 	}
 
@@ -113,8 +111,6 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		if writableDir, err := config.GetWritableImagesDir(); err == nil {
 			if filepath.Dir(targetOverlayPath) == writableDir {
 				if tryDownloadPrebuiltOverlay(d.nameVersion, targetOverlayPath) {
-					// Downloaded prebuilt overlays don't have persistent build scripts, so add to .def_list
-					UpdateDefBuiltList(d.nameVersion, targetOverlayPath)
 					// Cleanup downloaded remote build script (if any)
 					d.Cleanup(false)
 					return nil
@@ -159,9 +155,6 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	}
 
 	utils.PrintSuccess("Finished overlay %s", utils.StylePath(targetOverlayPath))
-
-	// Add to .def_list (tracks actually built overlays, not just metadata)
-	UpdateDefBuiltList(d.nameVersion, targetOverlayPath)
 
 	// Cleanup temp files
 	d.Cleanup(false)
