@@ -234,7 +234,7 @@ func displaySqfInfo(overlayPath string) error {
 	name := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
 	name = strings.ReplaceAll(name, "--", "/")
 	name = strings.ReplaceAll(name, "=", "/")
-	if overlayType == "Module Overlay" {
+	if overlayType == "Module Overlay" || overlayType == "Bundle Overlay" {
 		fmt.Println(utils.StyleTitle("Mount"))
 		fmt.Printf("  %-14s /cnt/%s\n", "Path:", name)
 	}

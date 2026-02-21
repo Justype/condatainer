@@ -23,7 +23,7 @@ The file path must follow the naming convention below to be recognized by CondaT
 
 Where `<name_conversion>` is defined as:
 
-### Application Overlays (App)
+### Application Overlays (Module)
 
 Used for standard software packages and tools managed by **CondaTainer** build scripts.
 
@@ -33,7 +33,7 @@ Used for standard software packages and tools managed by **CondaTainer** build s
   * **version**: The specific version of the software (e.g., `1.22`).
 * **Example:** `cellranger/9.0.1`
 
-### Reference Overlays (Ref)
+### Reference Overlays (Module)
 
 Used for reference datasets, genome assemblies, or indices.
 

@@ -59,7 +59,7 @@ modgen init [-m] [-c]
 
 **ModGen** organizes modules into two specific categories. This structure dictates where files are installed and how modulefiles are generated.
 
-### Application Overlays (App)
+### Application Modules (App)
 
 Used for standard software packages and tools managed by CondaTainer build scripts.
 
@@ -69,7 +69,7 @@ Used for standard software packages and tools managed by CondaTainer build scrip
   * **version**: The specific version of the software (e.g., `1.22`).
 * **Example:** `cellranger/9.0.1`
 
-### Reference Overlays (Ref)
+### Reference Modules (Ref)
 
 Used for reference datasets, genome assemblies, or indices.
 
