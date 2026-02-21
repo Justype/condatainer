@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -265,8 +264,9 @@ func collectAppOverlays(filters []string, exactMatch bool) (map[string][]string,
 			}
 
 			var name, version string
-			if isDefBuilt(nameVersion) {
-				// Def-built overlays are OS overlays regardless of delimiter count
+			overlayPath := filepath.Join(imageDir, entry.Name())
+			if isOSOverlay(overlayPath) {
+				// OS overlays are classified regardless of delimiter count
 				name = strings.ReplaceAll(nameVersion, "--", "/")
 				version = "(system app)"
 			} else {
@@ -400,9 +400,3 @@ func maxWidth(names []string) int {
 	return width
 }
 
-// isDefBuilt checks if an overlay name is .def-built
-func isDefBuilt(nameVersion string) bool {
-	normalized := utils.NormalizeNameVersion(nameVersion)
-	defList := build.GetDefBuiltList()
-	return defList[normalized]
-}

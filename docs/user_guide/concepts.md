@@ -41,10 +41,10 @@ Examples:
 
 ### 📂 Naming Convention
 
-- System Apps: `name` (e.g., `rstudio-server`)
-- Workspace: `name` (e.g., `env`, `sci_rna`)
-- Apps: `name/version` (e.g., `bcftools/1.16`)
-- References: `assembly/datatype/version`
+- OS: `name` (e.g., `rstudio-server`)
+- Bundle/Workspace: `name` (e.g., `env`, `sci_rna`)
+- Module(Apps): `name/version` (e.g., `bcftools/1.16`)
+- Module(References): `assembly/datatype/version`
   - `grcm39/genome/gencode`: GRCm39 genome with Gencode style naming
   - `grcm39/salmon/1.10.2/gencodeM33`: salmon index for GRCm39 Gencode M33 transcripts
 

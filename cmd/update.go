@@ -16,7 +16,6 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/Justype/condatainer/internal/apptainer"
-	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -247,9 +246,9 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 			}
 		}
 		fmt.Println()
-		containers := getDefBuiltContainers()
+		containers := getInstalledOSOverlays()
 		if len(containers) > 0 {
-			fmt.Println("The following def-built containers may need to be rebuilt:")
+			fmt.Println("The following OS overlays may need to be rebuilt:")
 			for _, name := range containers {
 				fmt.Printf("  - %s\n", utils.StyleName(name))
 			}
@@ -336,17 +335,20 @@ func compareVersions(v1, v2 string) int {
 	return 0
 }
 
-// getDefBuiltContainers returns list of def-built containers (no "/" in name)
-func getDefBuiltContainers() []string {
-	defList := build.GetDefBuiltList()
-	containers := []string{}
-	for name := range defList {
-		if !strings.Contains(name, "/") {
-			containers = append(containers, name)
+// getInstalledOSOverlays returns names of all installed OS overlays (SquashFS containing .singularity.d)
+func getInstalledOSOverlays() []string {
+	installed, err := getInstalledOverlaysMap()
+	if err != nil {
+		return nil
+	}
+	names := []string{}
+	for name, path := range installed {
+		if isOSOverlay(path) {
+			names = append(names, name)
 		}
 	}
-	sort.Strings(containers)
-	return containers
+	sort.Strings(names)
+	return names
 }
 
 // downloadFile downloads a file from a URL to a local path

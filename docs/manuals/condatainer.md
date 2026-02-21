@@ -62,7 +62,7 @@ Use "condatainer [command] --help" for more information about a command.
 
 **CondaTainer** classifies overlays into three distinct categories based on their naming structure.
 
-### System Applications (Sys)
+### System Applications (OS)
 
 Used for system-level applications that do not follow the standard application or reference naming conventions.
 
@@ -71,11 +71,12 @@ Like text editors, IDEs, build-essential tools, etc.
 * **Format:** `name`
 * **Constraints:**
   * Must **not** contain slashes (`/`) or double-dash sequences (`--`).
+  * Unless `<distro>/<application>`
 * **Example:** `rstudio-server`, `texlive`, `code-server`
 
 You can also create these system apps using the `-n, --name` flag with the `create` command.
 
-### Custom Environments (Env)
+### Custom Environments (Bundle/Workspace)
 
 Used when creating a custom environment with a user-defined name (`create -p`, or `overlay` action).
 
@@ -88,7 +89,7 @@ Used when creating a custom environment with a user-defined name (`create -p`, o
 > [!NOTE]
 > Use `-n` to install system apps only (e.g., `nvim`). To create an environment `.sqf`, use `-p` to specify a prefix/path.
 
-### Application Overlays (App)
+### Application Overlays (Module)
 
 Used for standard software packages and tools managed by **CondaTainer** build scripts.
 
@@ -98,7 +99,7 @@ Used for standard software packages and tools managed by **CondaTainer** build s
   * **version**: The specific version of the software (e.g., `1.22`).
 * **Example:** `cellranger/9.0.1`
 
-### Reference Overlays (Ref)
+### Reference Overlays (Module)
 
 Used for reference datasets, genome assemblies, or indices.
 
@@ -226,26 +227,16 @@ mm-export --no-builds > my_env.yaml
 
 ### Overlay Info
 
-Display disk usage and filesystem statistics for an ext3 `.img` overlay.
-
-**Usage:**
+Alias for [`condatainer info`](#info) scoped to ext3 `.img` overlays. Produces identical output.
 
 ```
 condatainer overlay info [image_path]
 ```
 
-**Output includes:**
-
-* File info (path, size, type)
-* Filesystem info (format, state, UUID, creation time)
-* Ownership (root or current UID)
-* Disk usage
-* Inode usage
-
-**Example:**
-
 ```bash
 condatainer overlay info env.img
+# same as:
+condatainer info env.img
 ```
 
 ### Overlay Check
@@ -1046,7 +1037,7 @@ condatainer config set parse_module_load true
 
 ## Info
 
-Displays metadata regarding a specific overlay.
+Display detailed metadata about an installed overlay or an external overlay file. Accepts an installed overlay name (`name/version`) or a direct file path (`.sqf` / `.img`).
 
 **Usage:**
 
@@ -1054,22 +1045,34 @@ Displays metadata regarding a specific overlay.
 condatainer info [OVERLAY]
 ```
 
-**Output includes:**
-
-* Writable status.
-* File size.
-* Compression type (for `.sqf` files).
-* Timestamps (status change, modification, access).
-* Mount path (e.g., `/cnt/bcftools/1.22` or `/ext3/env`).
-* File ownership (for `.img` files).
-* Environment variables defined within the overlay's `.env` file.
-
 **Examples:**
 
 ```bash
 condatainer info samtools/1.22
 condatainer info env.img
+condatainer info ./ubuntu--22.04.sqf
 ```
+
+### SquashFS (`.sqf`) output
+
+| Section | Fields |
+|---------|--------|
+| **File** | Name, Path, file Size, Type (`OS Overlay` / `Module Overlay` / `Bundle Overlay`, Read-Only), Created timestamp |
+| **SquashFS** | Compression algorithm (with level if set), Block Size, Inode count, Fragment count, Deduplication flag |
+| **Mount** | `/cnt/<name>/<version>` — shown for Module and Bundle Overlays |
+| **Environment** | Variables from the `.env` sidecar file, with inline `#ENVNOTE` annotations |
+
+### ext3 (`.img`) output
+
+| Section | Fields |
+|---------|--------|
+| **File** | Name, Path, file Size, Type (`Workspace Overlay`, Writable; sparse images also show actual on-disk size) |
+| **Filesystem** | Format, State, Block Size, Created, Modified, Last Mounted |
+| **Ownership** | Inner UID/GID of files inside the image (or `root` for fakeroot-compatible images) |
+| **Disk Usage** | Used / Total (%), Reserved blocks, Free |
+| **Inode Usage** | Used / Total (%), Free |
+| **Mount** | `/ext3/env` |
+| **Environment** | Variables from the `.env` sidecar file, with inline `#ENVNOTE` annotations |
 
 ## Helper
 
@@ -1323,7 +1326,7 @@ condatainer self-update [FLAGS]
 * Detects current OS and architecture.
 * Compares versions before updating.
 * Updates base image when minor or major version changes (not for patch updates).
-* Warns about major version upgrades and suggests rebuilding def-built containers.
+* Warns about major version upgrades and lists installed OS overlays that may need to be rebuilt.
 * Supports symlink resolution.
 
 **Examples:**

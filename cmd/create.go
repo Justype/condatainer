@@ -70,6 +70,12 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 		if createPrefix != "" && createName != "" {
 			ExitWithError("Cannot use both --prefix and --name at the same time.")
 		}
+		if createPrefix != "" {
+			baseName := strings.TrimSuffix(filepath.Base(createPrefix), ".sqf")
+			if strings.Contains(baseName, "--") {
+				ExitWithError("--prefix name cannot contain '--' (reserved name/version separator)")
+			}
+		}
 		if createSource != "" && createName == "" && createPrefix == "" {
 			ExitWithError("When using --source, either --name or --prefix must be provided.")
 		}

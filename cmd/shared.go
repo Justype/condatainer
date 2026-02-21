@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -267,7 +268,7 @@ func baseImageFlagCompletion() func(*cobra.Command, []string, string) ([]string,
 	}
 }
 
-// systemOverlaySuggestions returns only system overlays (def-built) and local overlay files
+// systemOverlaySuggestions returns only OS overlays and local OS overlay files
 func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirective) {
 	installed, err := container.InstalledOverlays()
 	if err != nil {
@@ -276,20 +277,25 @@ func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirec
 
 	choices := map[string]struct{}{}
 
-	// Only include overlays from the def list (system/def-built overlays)
-	defList := build.GetDefBuiltList()
-	for name := range installed {
-		normalized := utils.NormalizeNameVersion(name)
-		if defList[normalized] {
+	// Only include installed overlays that are OS overlays (contain .singularity.d)
+	for name, path := range installed {
+		if isOSOverlay(path) {
 			if toComplete == "" || strings.HasPrefix(name, toComplete) {
 				choices[name] = struct{}{}
 			}
 		}
 	}
 
-	// Add local .sqf/.sif files (not .img) - for -b flag
+	// Add local .sif files and local .sqf files that are OS overlays - for -b flag
 	for _, candidate := range localImageSuggestions(toComplete) {
-		choices[candidate] = struct{}{}
+		if utils.IsSif(candidate) {
+			choices[candidate] = struct{}{}
+			continue
+		}
+		absPath, err := filepath.Abs(candidate)
+		if err == nil && isOSOverlay(absPath) {
+			choices[candidate] = struct{}{}
+		}
 	}
 
 	suggestions := make([]string, 0, len(choices))
@@ -415,12 +421,54 @@ func localOverlaySuggestions(toComplete string, includeImg bool) []string {
 	})
 }
 
+// sqfPathExists returns true if the given entry exists at the top level of the
+// SquashFS archive. unsquashfs always exits 0, but prints only "squashfs-root"
+// when the entry is absent. If it exists, a second line appears — so line count > 1 means found.
+func sqfPathExists(sqfPath, entry string) bool {
+	cmd := exec.Command("unsquashfs", "-l", sqfPath, entry)
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	pipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return false
+	}
+	if err := cmd.Start(); err != nil {
+		return false
+	}
+	defer cmd.Process.Kill() //nolint:errcheck
+
+	buf := make([]byte, 4096)
+	count := 0
+	found := false
+	for {
+		n, err := pipe.Read(buf)
+		for _, b := range buf[:n] {
+			if b == '\n' {
+				count++
+				if count >= 2 {
+					found = true
+					goto done
+				}
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+done:
+	return found
+}
+
+// isOSOverlay reports whether a SquashFS overlay is an OS overlay by checking
+// for the presence of .singularity.d in the archive root.
+func isOSOverlay(overlayPath string) bool {
+	return strings.HasSuffix(overlayPath, ".sqf") && sqfPathExists(overlayPath, ".singularity.d")
+}
+
 // isAppOverlay checks if an overlay path is considered an "app" overlay
 func isAppOverlay(path string) bool {
-	// Check if overlay name is in the .def-built whitelist
-	// .def-built overlays (created via 'sif dump') are considered "app" overlays
-	// regardless of their location
-	if isDefBuiltOverlay(path) {
+	// OS overlays (Apptainer-built SquashFS containing .singularity.d) are
+	// considered "app" overlays regardless of their location
+	if isOSOverlay(path) {
 		return true
 	}
 
@@ -433,20 +481,6 @@ func isAppOverlay(path string) bool {
 		}
 	}
 	return false
-}
-
-// isDefBuiltOverlay checks if an overlay was built from a .def file
-// by checking against the build-scripts metadata whitelist
-func isDefBuiltOverlay(overlayPath string) bool {
-	baseName := filepath.Base(overlayPath)
-	// Remove extension (e.g., build-essential.sqf -> build-essential)
-	nameWithoutExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
-	// Convert -- to / (e.g., build-essential -> build-essential)
-	normalized := strings.ReplaceAll(nameWithoutExt, "--", "/")
-
-	// Check def list from build package
-	defList := build.GetDefBuiltList()
-	return defList[normalized]
 }
 
 // pathWithinDir checks if a path is within a directory
