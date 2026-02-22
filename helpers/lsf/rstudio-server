@@ -11,7 +11,6 @@ AVAIL_R_VERSIONS='
     4.4.0 4.4.1 4.4.2 4.4.3
     4.5.0 4.5.1 4.5.2
 '
-BASE_IMAGE_DISTRO="noble"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/.common.sh"
@@ -137,16 +136,6 @@ get_latest_r() {
         return 1
     fi
 }
-get_posit_docker_name() {
-    local r_version=$1
-    local arch=$(uname -m)
-    case "$arch" in
-        x86_64) arch="amd64" ;;
-        aarch64) arch="arm64" ;;
-        *) print_error "Unsupported architecture: $arch"; exit 1 ;;
-    esac
-    echo "docker://posit/r-base:${r_version}-${BASE_IMAGE_DISTRO}-${arch}"
-}
 
 # Track if -o flag is used to clear overlays on first use
 _OVERLAYS_CLEARED=false
@@ -249,7 +238,7 @@ check_condatainer
 
 if ! condatainer list -e r${R_VERSION} > /dev/null 2>&1; then
     print_info "Installing R ${R_VERSION} overlay."
-    condatainer create -n r${R_VERSION} -s $(get_posit_docker_name $R_VERSION)
+    condatainer create r${R_VERSION}
     if [ $? -ne 0 ]; then
         print_error "Failed to install R version overlay 'r${R_VERSION}'."
         exit 1
@@ -269,6 +258,39 @@ fi
 # Construct arguments for CondaTainer exec
 [ -n "$OVERLAY" ] && OVERLAY_ARG="-o $OVERLAY"
 [ -n "$OVERLAYS" ] && OVERLAYS_ARG=$(build_overlays_arg "$OVERLAYS")
+LSF_RUSAGE="rusage[mem=${MEM}]"
+if [ -n "$GPU" ]; then
+    if [[ "$GPU" == *":"* ]]; then
+        PART1="${GPU%:*}"
+        PART2="${GPU#*:}"
+        if [[ "$PART1" =~ ^[0-9]+$ ]]; then
+            GPU_NUM="$PART1"
+            GPU_MODEL="$PART2"
+        else
+            GPU_NUM="$PART2"
+            GPU_MODEL="$PART1"
+        fi
+    else
+        GPU_NUM="$GPU"
+        GPU_MODEL=""
+    fi
+
+    if [ -n "$GPU_MODEL" ]; then
+        LSF_GPU="#BSUB -gpu \"num=${GPU_NUM}:gmodel=${GPU_MODEL}:mode=exclusive_process\""
+    else
+        LSF_GPU="#BSUB -gpu \"num=${GPU_NUM}:mode=exclusive_process\""
+    fi
+else
+    LSF_GPU=""
+fi
+
+# Normalize TIME for LSF (LSF accepts HH:MM or minutes; strip seconds if present)
+LSF_TIME="$TIME"
+if [[ "$LSF_TIME" == *:*:* ]]; then
+    ORIG_TIME="$LSF_TIME"
+    LSF_TIME="${LSF_TIME%:*}"
+    print_info "Converting TIME '${ORIG_TIME}' → '${LSF_TIME}' (HH:MM for LSF)."
+fi
 
 CWD_FOLDER_NAME=$(basename $CWD)
 RPROJECT_FILE="$CWD/$CWD_FOLDER_NAME.Rproj"
@@ -332,40 +354,6 @@ provider=sqlite
 directory=$SCRATCH/.local/lib/rstudio-server
 EOT
 
-LSF_RUSAGE="rusage[mem=${MEM}]"
-if [ -n "$GPU" ]; then
-    if [[ "$GPU" == *":"* ]]; then
-        PART1="${GPU%:*}"
-        PART2="${GPU#*:}"
-        if [[ "$PART1" =~ ^[0-9]+$ ]]; then
-            GPU_NUM="$PART1"
-            GPU_MODEL="$PART2"
-        else
-            GPU_NUM="$PART2"
-            GPU_MODEL="$PART1"
-        fi
-    else
-        GPU_NUM="$GPU"
-        GPU_MODEL=""
-    fi
-
-    if [ -n "$GPU_MODEL" ]; then
-        LSF_GPU="#BSUB -gpu \"num=${GPU_NUM}:gmodel=${GPU_MODEL}:mode=exclusive_process\""
-    else
-        LSF_GPU="#BSUB -gpu \"num=${GPU_NUM}:mode=exclusive_process\""
-    fi
-else
-    LSF_GPU=""
-fi
-
-# Normalize TIME for LSF (LSF accepts HH:MM or minutes; strip seconds if present)
-LSF_TIME="$TIME"
-if [[ "$LSF_TIME" == *:*:* ]]; then
-    ORIG_TIME="$LSF_TIME"
-    LSF_TIME="${LSF_TIME%:*}"
-    print_info "Converting TIME '${ORIG_TIME}' → '${LSF_TIME}' (HH:MM for LSF)."
-fi
-
 LSF_SCRIPT_PATH="$LOG_DIR/$HELPER_NAME.lsf"
 
 cat <<EOT > "$LSF_SCRIPT_PATH"
@@ -377,10 +365,6 @@ cat <<EOT > "$LSF_SCRIPT_PATH"
 #BSUB -W $LSF_TIME
 #BSUB -o $LOG_DIR/$HELPER_NAME-%J.log
 ${LSF_GPU:+$LSF_GPU}
-
-CLEAN_ID=\$(echo \$LSB_JOBID | cut -d'.' -f1)
-CUSTOM_LOG="$LOG_DIR/${HELPER_NAME}-\${CLEAN_ID}.log"
-exec &> "\$CUSTOM_LOG"
 
 while ! grep -q "^JOB_ID=" "$STATE_FILE" 2>/dev/null; do sleep 1; done
 echo "NODE=\$(hostname)" >> "$STATE_FILE"
