@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -49,9 +48,6 @@ func init() {
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
-	// Capture old version before updating
-	oldVersion := config.VERSION
-
 	// Get current executable path
 	exePath, err := os.Executable()
 	if err != nil {
@@ -237,24 +233,6 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		utils.PrintDebug("Base image update skipped (patch version change only)")
 	}
 
-	// Check for major version upgrade and warn if so
-	if isMajorChange(oldVersion, release.TagName) {
-		fmt.Println()
-		if m1, err1 := getMajorNumber(oldVersion); err1 == nil {
-			if m2, err2 := getMajorNumber(latestVersion); err2 == nil {
-				utils.PrintWarning("Major version upgrade detected: %d.x → %d.x", m1, m2)
-			}
-		}
-		fmt.Println()
-		containers := getInstalledOSOverlays()
-		if len(containers) > 0 {
-			fmt.Println("The following OS overlays may need to be rebuilt:")
-			for _, name := range containers {
-				fmt.Printf("  - %s\n", utils.StyleName(name))
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -333,22 +311,6 @@ func compareVersions(v1, v2 string) int {
 		return 1
 	}
 	return 0
-}
-
-// getInstalledOSOverlays returns names of all installed OS overlays (SquashFS containing .singularity.d)
-func getInstalledOSOverlays() []string {
-	installed, err := getInstalledOverlaysMap()
-	if err != nil {
-		return nil
-	}
-	names := []string{}
-	for name, path := range installed {
-		if isOSOverlay(path) {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
 }
 
 // downloadFile downloads a file from a URL to a local path
