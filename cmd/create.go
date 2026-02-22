@@ -109,7 +109,15 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 		// 5. Normalize package names (only for build scripts, not for conda packages with -n)
 		normalizedArgs := make([]string, len(args))
 		for i, arg := range args {
-			normalizedArgs[i] = utils.NormalizeNameVersion(arg)
+			normalized := utils.NormalizeNameVersion(arg)
+			// Bare name (no slash) → expand to <default_distro>/<name>
+			// e.g. "igv" → "ubuntu24/igv"  →  ubuntu24--igv.sqf
+			if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
+				expanded := config.Global.DefaultDistro + "/" + normalized
+				utils.PrintNote("Expanding '%s' to '%s'", normalized, expanded)
+				normalized = expanded
+			}
+			normalizedArgs[i] = normalized
 		}
 
 		// 6. Handle --remote flag (CLI flag or config)
