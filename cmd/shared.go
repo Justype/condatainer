@@ -286,6 +286,8 @@ func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirec
 		}
 	}
 
+	addDistroAliasChoices(installed, choices, toComplete)
+
 	// Add local .sif files and local .sqf files that are OS overlays - for -b flag
 	for _, candidate := range localImageSuggestions(toComplete) {
 		if utils.IsSif(candidate) {
@@ -322,6 +324,8 @@ func overlaySuggestions(includeData bool, includeImg bool, toComplete string) ([
 			}
 		}
 	}
+
+	addDistroAliasChoices(installed, choices, toComplete)
 
 	for _, candidate := range localOverlaySuggestions(toComplete, includeImg) {
 		choices[candidate] = struct{}{}
@@ -419,6 +423,25 @@ func localOverlaySuggestions(toComplete string, includeImg bool) []string {
 
 		return true
 	})
+}
+
+// addDistroAliasChoices adds shorthand aliases for OS overlays matching the default distro.
+// For each installed OS overlay named "<distro>/<name>", also suggests "<name>".
+func addDistroAliasChoices(installed map[string]string, choices map[string]struct{}, toComplete string) {
+	distro := config.Global.DefaultDistro
+	if distro == "" {
+		return
+	}
+	prefix := distro + "/"
+	for name, path := range installed {
+		if !strings.HasPrefix(name, prefix) || !isOSOverlay(path) {
+			continue
+		}
+		alias := strings.TrimPrefix(name, prefix)
+		if toComplete == "" || strings.HasPrefix(alias, toComplete) {
+			choices[alias] = struct{}{}
+		}
+	}
 }
 
 // isOSOverlay reports whether a SquashFS overlay is an OS overlay.

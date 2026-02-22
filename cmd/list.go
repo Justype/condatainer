@@ -80,8 +80,16 @@ func runList(cmd *cobra.Command, args []string) error {
 			names = append(names, name)
 		}
 		sort.Strings(names)
+		nameWidth := maxWidth(names)
 		for _, name := range names {
-			fmt.Printf(" %s\n", utils.StyleName(name))
+			nameField := fmt.Sprintf("%-*s", nameWidth, name)
+			line := fmt.Sprintf(" %s", utils.StyleName(nameField))
+			if distro := config.Global.DefaultDistro; distro != "" {
+				if alias, ok := strings.CutPrefix(name, distro+"/"); ok {
+					line += "  " + utils.StyleInfo("["+alias+"]")
+				}
+			}
+			fmt.Println(line)
 		}
 	}
 
@@ -260,7 +268,13 @@ func collectAppOverlays(filters []string, exactMatch bool) (map[string][]string,
 			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 			normalized := strings.ToLower(utils.NormalizeNameVersion(nameVersion))
 			if !matchesFilters(normalized, filters, exactMatch) {
-				continue
+				// Also try the shorthand alias: strip default_distro prefix and recheck.
+				// e.g. "ubuntu24/r4.4.3" → alias "r4.4.3", so `-e r4.4.3` finds it.
+				distroPrefix := strings.ToLower(config.Global.DefaultDistro) + "/"
+				alias := strings.TrimPrefix(normalized, distroPrefix)
+				if alias == normalized || !matchesFilters(alias, filters, exactMatch) {
+					continue
+				}
 			}
 
 			var name, version string
@@ -399,4 +413,3 @@ func maxWidth(names []string) int {
 	}
 	return width
 }
-
