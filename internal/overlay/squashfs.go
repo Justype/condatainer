@@ -332,11 +332,11 @@ func (o *OSInfo) SameFamily(other *OSInfo) bool {
 	return false
 }
 
-// SameMajorVersion returns true if both OSInfo values share the same major version number.
-func (o *OSInfo) SameMajorVersion(other *OSInfo) bool {
+// SameIDMajorVersion returns true if both OSInfo values share the same id and major version.
+func (o *OSInfo) SameIDMajorVersion(other *OSInfo) bool {
 	if o == nil || other == nil {
 		return false
 	}
 	mv := o.MajorVersion()
-	return mv != "" && mv == other.MajorVersion()
+	return mv != "" && o.ID == other.ID && mv == other.MajorVersion()
 }
