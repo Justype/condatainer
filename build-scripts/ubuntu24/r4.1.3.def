@@ -1,6 +1,6 @@
-#WHATIS: Ubuntu noble R 4.4.3
+#WHATIS: Ubuntu noble R 4.1.3
 Bootstrap: docker
-From: posit/r-base:4.4.3-noble
+From: posit/r-base:4.1.3-noble
 
 %environment
     export LC_ALL=C.UTF-8

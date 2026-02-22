@@ -1,6 +1,6 @@
-#WHATIS: Ubuntu noble R 4.4.3
+#WHATIS: Ubuntu jammy R 4.0.5
 Bootstrap: docker
-From: posit/r-base:4.4.3-noble
+From: posit/r-base:4.0.5-jammy
 
 %environment
     export LC_ALL=C.UTF-8
