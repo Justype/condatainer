@@ -1123,7 +1123,7 @@ Manage **CondaTainer** configuration settings.
 
 ### Config Show
 
-Display current configuration including file paths, settings, and environment variable overrides.
+Display current configuration including file paths, settings, and environment variable overrides. (including available distros)
 
 ```
 condatainer config show [--path]
@@ -1213,6 +1213,7 @@ condatainer config validate
 * Apptainer binary accessibility
 * Scheduler binary accessibility
 * Build configuration (CPUs > 0, Memory > 0)
+* `default_distro` is one of the supported distro names
 
 ### Configuration Priority
 

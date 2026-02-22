@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/Justype/condatainer/internal/scheduler"
@@ -21,6 +22,11 @@ func GetAvailableDistros() []string {
 		"ubuntu22",
 		"ubuntu24",
 	}
+}
+
+// IsValidDistro returns true if the provided name matches one of the known distro slugs.
+func IsValidDistro(distro string) bool {
+	return slices.Contains(GetAvailableDistros(), distro)
 }
 
 // PrebuiltBaseURL is the base URL for downloading prebuilt images and overlays

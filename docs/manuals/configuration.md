@@ -165,6 +165,8 @@ This opens the config file in your default editor (`$EDITOR`).
 condatainer config validate
 ```
 
+This command checks that key binaries are accessible, build settings are sane, and the `default_distro` value is one of the supported distro names.
+
 ## Environment Variables
 
 Configuration keys can be overridden via environment variables with the `CONDATAINER_` prefix:

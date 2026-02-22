@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
@@ -249,11 +248,16 @@ Shows:
 		}
 		fmt.Println()
 
+		// Distros and default
+		fmt.Println(utils.StyleTitle("Distros:"))
+		fmt.Printf("  Available:      %s\n", strings.Join(config.GetAvailableDistros(), ", "))
+		fmt.Printf("  default_distro: %s\n", config.Global.DefaultDistro)
+		fmt.Println()
+
 		// Runtime settings
 		fmt.Println(utils.StyleTitle("Runtime:"))
 		submitJobConfig := viper.GetBool("submit_job")
 		submitJobActual := config.Global.SubmitJob
-		fmt.Printf("  default_distro:    %s\n", config.Global.DefaultDistro)
 		if submitJobConfig && !submitJobActual {
 			fmt.Printf("  submit_job:        %v (disabled: scheduler not accessible)\n", submitJobConfig)
 		} else {
@@ -410,7 +414,7 @@ Time duration format (for build.time):
 
 		// Validate default_distro against known distros
 		if key == "default_distro" {
-			if !slices.Contains(config.GetAvailableDistros(), value) {
+			if !config.IsValidDistro(value) {
 				utils.PrintError("Unknown distro '%s'. Available: %s", value, strings.Join(config.GetAvailableDistros(), ", "))
 				os.Exit(ExitCodeError)
 			}
@@ -763,6 +767,17 @@ var configValidateCmd = &cobra.Command{
 		} else {
 			fmt.Printf("%s Build Memory must be > 0: %d\n", utils.StyleError("✗"), memMB)
 			valid = false
+		}
+
+		// Check default distro validity
+		distro := config.Global.DefaultDistro
+		if !config.IsValidDistro(distro) {
+			fmt.Printf("%s Default distro invalid: %s\n", utils.StyleError("✗"), distro)
+			valid = false
+		} else {
+			if !utils.QuietMode {
+				fmt.Printf("%s Default distro: %s\n", utils.StyleSuccess("✓"), distro)
+			}
 		}
 
 		if !utils.QuietMode {
