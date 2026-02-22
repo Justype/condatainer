@@ -3,9 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -71,79 +69,6 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 	return fmt.Errorf("unsupported file type: %s", filepath.Ext(overlayPath))
 }
 
-// SquashFSStats holds metadata parsed from `unsquashfs -stat`.
-type SquashFSStats struct {
-	CreatedTime         string
-	FilesystemSizeBytes int64
-	Compression         string
-	CompressionLevel    int // 0 means not specified by the file
-	BlockSize           int64
-	NumFragments        int64
-	NumInodes           int64
-	NumIDs              int64
-	DuplicatesRemoved   bool
-	ExportableNFS       bool
-}
-
-// getSquashFSStats runs `unsquashfs -stat` on the given path and parses its output.
-func getSquashFSStats(path string) (*SquashFSStats, error) {
-	cmd := exec.Command("unsquashfs", "-stat", path)
-	cmd.Env = append(os.Environ(), "LC_ALL=C", "LC_TIME=C")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("unsquashfs -stat failed: %w", err)
-	}
-
-	stats := &SquashFSStats{}
-	lines := strings.Split(string(out), "\n")
-
-	for i, raw := range lines {
-		line := strings.TrimSpace(raw)
-		switch {
-		case strings.HasPrefix(line, "Creation or last append time "):
-			stats.CreatedTime = strings.TrimPrefix(line, "Creation or last append time ")
-
-		case strings.HasPrefix(line, "Filesystem size "):
-			// "Filesystem size 24511225 bytes (23936.74 Kbytes / 23.38 Mbytes)"
-			parts := strings.Fields(line)
-			if len(parts) >= 3 {
-				stats.FilesystemSizeBytes, _ = strconv.ParseInt(parts[2], 10, 64)
-			}
-
-		case strings.HasPrefix(line, "Compression "):
-			stats.Compression = strings.TrimPrefix(line, "Compression ")
-			// Next line may be indented "compression-level N"
-			if i+1 < len(lines) {
-				next := strings.TrimSpace(lines[i+1])
-				if strings.HasPrefix(next, "compression-level ") {
-					lvl, _ := strconv.Atoi(strings.TrimPrefix(next, "compression-level "))
-					stats.CompressionLevel = lvl
-				}
-			}
-
-		case strings.HasPrefix(line, "Block size "):
-			stats.BlockSize, _ = strconv.ParseInt(strings.TrimPrefix(line, "Block size "), 10, 64)
-
-		case strings.HasPrefix(line, "Number of fragments "):
-			stats.NumFragments, _ = strconv.ParseInt(strings.TrimPrefix(line, "Number of fragments "), 10, 64)
-
-		case strings.HasPrefix(line, "Number of inodes "):
-			stats.NumInodes, _ = strconv.ParseInt(strings.TrimPrefix(line, "Number of inodes "), 10, 64)
-
-		case strings.HasPrefix(line, "Number of ids "):
-			stats.NumIDs, _ = strconv.ParseInt(strings.TrimPrefix(line, "Number of ids "), 10, 64)
-
-		case strings.Contains(line, "Duplicates are removed"):
-			stats.DuplicatesRemoved = true
-
-		case strings.HasPrefix(line, "Filesystem is exportable via NFS"):
-			stats.ExportableNFS = true
-		}
-	}
-
-	return stats, nil
-}
-
 // normalizeTime parses ctime()-style timestamps produced by tune2fs and unsquashfs
 // (both run with LC_ALL=C) and reformats them as "2006-01-02 15:04:05".
 // Falls back to the original string if parsing fails.
@@ -169,25 +94,6 @@ func normalizeTime(s string) string {
 	return s
 }
 
-// getSqfOverlayType classifies a SquashFS overlay based on its top-level directory
-// entries and filename:
-//   - OS Overlay     : contains .singularity.d
-//   - Module Overlay : contains cnt and filename uses -- separators (name--version)
-//   - Bundle Overlay : contains cnt but filename has no --
-func getSqfOverlayType(overlayPath string) string {
-	if sqfPathExists(overlayPath, ".singularity.d") {
-		return "OS Overlay"
-	}
-	if sqfPathExists(overlayPath, "cnt") {
-		base := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
-		if strings.Contains(base, "--") {
-			return "Module Overlay"
-		}
-		return "Bundle Overlay"
-	}
-	return ""
-}
-
 // displaySqfInfo prints rich info for a SquashFS overlay.
 func displaySqfInfo(overlayPath string) error {
 	fileInfo, err := os.Stat(overlayPath)
@@ -195,8 +101,8 @@ func displaySqfInfo(overlayPath string) error {
 		return fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	sqStats, unsquashfsErr := getSquashFSStats(overlayPath)
-	overlayType := getSqfOverlayType(overlayPath)
+	sqStats, unsquashfsErr := overlay.GetSquashFSStats(overlayPath)
+	overlayType := overlay.GetOverlayType(overlayPath)
 
 	// File section
 	fmt.Println(utils.StyleTitle("File"))
@@ -205,6 +111,11 @@ func displaySqfInfo(overlayPath string) error {
 	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatBytes(fileInfo.Size()))
 	if overlayType != "" {
 		fmt.Printf("  %-14s %s (Read-Only)\n", "Type:", utils.StyleInfo(overlayType))
+	}
+	if overlayType == "OS Overlay" {
+		if osInfo := overlay.GetOSInfo(overlayPath); osInfo != nil {
+			fmt.Printf("  %-14s %s\n", "Distro:", osInfo.String())
+		}
 	}
 	if sqStats != nil && sqStats.CreatedTime != "" {
 		fmt.Printf("  %-14s %s\n", "Created:", normalizeTime(sqStats.CreatedTime))
