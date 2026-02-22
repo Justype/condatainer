@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/viper"
@@ -481,6 +482,16 @@ func LoadFromViper() {
 	// Load prefer_remote from config
 	if viper.GetBool("prefer_remote") {
 		Global.PreferRemote = true
+	}
+
+	// Load default_distro from config (overrides built-in default "ubuntu24")
+	if distro := viper.GetString("default_distro"); distro != "" {
+		if !slices.Contains(GetAvailableDistros(), distro) {
+			utils.PrintWarning("Config distro '%s' not available; falling back to '%s'", distro, DEFAULT_DISTRO)
+			viper.Set("default_distro", DEFAULT_DISTRO)
+			Global.DefaultDistro = DEFAULT_DISTRO
+		}
+		Global.DefaultDistro = distro
 	}
 
 	// Load scheduler default specs from Viper

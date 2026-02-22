@@ -713,18 +713,16 @@ func GetExistingHelperScriptPaths() []string {
 	return existing
 }
 
-// BaseImageName is the filename for the base container image.
-const BaseImageName = "base_image.sif"
-
 // BaseImageDefName is the filename for the base image definition file.
 const BaseImageDefName = "base_image.def"
 
 // FindBaseImage searches all image paths for the base image.
 // Returns the full path if found, empty string otherwise.
+// slug-named .sqf (e.g. "ubuntu24--base_image.sqf")
 func FindBaseImage() string {
+	sqfName := BaseImageSqfName()
 	for _, dir := range GetImageSearchPaths() {
-		candidate := filepath.Join(dir, BaseImageName)
-		if _, err := os.Stat(candidate); err == nil {
+		if candidate := filepath.Join(dir, sqfName); fileExists(candidate) {
 			return candidate
 		}
 	}
@@ -732,21 +730,26 @@ func FindBaseImage() string {
 }
 
 // GetBaseImageWritePath returns the path where a new base image should be written.
-// This is the first writable images directory + base_image.sif
+// Returns the first writable images directory + slug-based .sqf name (e.g. ubuntu24--base_image.sqf).
 func GetBaseImageWritePath() (string, error) {
 	dir, err := GetWritableImagesDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, BaseImageName), nil
+	return filepath.Join(dir, BaseImageSqfName()), nil
 }
 
 // FindBaseImageDef searches all build-scripts paths for the base image definition file.
+// Prefers <slug>/base_image.def (e.g. ubuntu24/base_image.def), falls back to base_image.def.
 // Returns the full path if found, empty string otherwise.
 func FindBaseImageDef() string {
+	slug := Global.DefaultDistro
+	if slug == "" {
+		return ""
+	}
 	for _, dir := range GetBuildScriptSearchPaths() {
-		candidate := filepath.Join(dir, BaseImageDefName)
-		if _, err := os.Stat(candidate); err == nil {
+		// slug subdirectory: ubuntu24/base_image.def
+		if candidate := filepath.Join(dir, slug, BaseImageDefName); fileExists(candidate) {
 			return candidate
 		}
 	}

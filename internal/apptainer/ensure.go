@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
@@ -70,15 +71,22 @@ func EnsureBaseImage(ctx context.Context, update bool, downloadOnly bool) error 
 				return fmt.Errorf("failed to download base image: %w", downloadErr)
 			}
 
-			// Try to build locally to .new
+			// Try to build locally to .new (via tmp SIF → extract SQF)
 			utils.PrintMessage("Download failed. Trying to build base image locally...")
 			baseDefPath, err := ensureBaseDef()
 			if err != nil {
 				return err
 			}
 
-			if err := Build(ctx, newPath, baseDefPath, nil); err != nil {
+			tmpSifPath := strings.TrimSuffix(baseImagePath, ".sqf") + ".sif.tmp"
+			defer os.Remove(tmpSifPath) //nolint:errcheck
+
+			if err := Build(ctx, tmpSifPath, baseDefPath, nil); err != nil {
 				return fmt.Errorf("building base image failed: %w", err)
+			}
+
+			if err := DumpSifToSquashfs(ctx, tmpSifPath, newPath); err != nil {
+				return fmt.Errorf("extracting squashfs from base image SIF failed: %w", err)
 			}
 
 			utils.PrintSuccess("Base image built")
@@ -138,8 +146,17 @@ func EnsureBaseImage(ctx context.Context, update bool, downloadOnly bool) error 
 		return err
 	}
 
-	if err := Build(ctx, baseImagePath, baseDefPath, nil); err != nil {
+	// Build SIF to a temporary path, then extract SquashFS from it.
+	// No existing base image is required — the .def bootstraps directly from docker.
+	tmpSifPath := strings.TrimSuffix(baseImagePath, ".sqf") + ".sif.tmp"
+	defer os.Remove(tmpSifPath) //nolint:errcheck
+
+	if err := Build(ctx, tmpSifPath, baseDefPath, nil); err != nil {
 		return fmt.Errorf("building base image failed: %w", err)
+	}
+
+	if err := DumpSifToSquashfs(ctx, tmpSifPath, baseImagePath); err != nil {
+		return fmt.Errorf("extracting squashfs from base image SIF failed: %w", err)
 	}
 
 	utils.PrintSuccess("Base image built at %s", utils.StylePath(baseImagePath))
@@ -170,7 +187,8 @@ func tryDownloadPrebuiltBaseImage(destPath string) error {
 		return fmt.Errorf("pre-built base image not available for architecture: %s", arch)
 	}
 
-	url := fmt.Sprintf("%s/base_image_%s.sif", config.PrebuiltBaseURL, arch)
+	sqfBase := strings.TrimSuffix(filepath.Base(destPath), ".sqf") // e.g. "ubuntu24--base_image"
+	url := fmt.Sprintf("%s/%s_%s.sqf", config.PrebuiltBaseURL, sqfBase, arch)
 
 	utils.PrintMessage("Attempting to download pre-built base image ...")
 
@@ -205,7 +223,7 @@ func ensureBaseDef() (string, error) {
 		return "", fmt.Errorf("failed to create build-scripts directory: %w", err)
 	}
 
-	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/build-scripts/base_image.def", config.GitHubRepo, config.Global.Branch)
+	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/build-scripts/%s/base_image.def", config.GitHubRepo, config.Global.Branch, config.Global.DefaultDistro)
 
 	if err := utils.DownloadFile(url, baseDefPath); err != nil {
 		return "", fmt.Errorf("failed to download base image definition file: %w", err)

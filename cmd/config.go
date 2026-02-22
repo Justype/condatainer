@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
@@ -24,6 +25,7 @@ var configKeys = []string{
 	"logs_dir",
 	"apptainer_bin",
 	"scheduler_bin",
+	"default_distro",
 	"submit_job",
 	"branch",
 	"prefer_remote",
@@ -62,6 +64,8 @@ func configValueCompletion(key string) []string {
 		return []string{"true", "false"}
 	case "prefer_remote", "parse_module_load":
 		return []string{"true", "false"}
+	case "default_distro":
+		return config.GetAvailableDistros()
 	case "branch":
 		return []string{"main", "dev"}
 	case "scheduler.nodes":
@@ -249,6 +253,7 @@ Shows:
 		fmt.Println(utils.StyleTitle("Runtime:"))
 		submitJobConfig := viper.GetBool("submit_job")
 		submitJobActual := config.Global.SubmitJob
+		fmt.Printf("  default_distro:    %s\n", config.Global.DefaultDistro)
 		if submitJobConfig && !submitJobActual {
 			fmt.Printf("  submit_job:        %v (disabled: scheduler not accessible)\n", submitJobConfig)
 		} else {
@@ -314,6 +319,7 @@ Shows:
 			"CONDATAINER_LOGS_DIR",
 			"CONDATAINER_APPTAINER_BIN",
 			"CONDATAINER_SCHEDULER_BIN",
+			"CONDATAINER_DEFAULT_DISTRO",
 			"CONDATAINER_SUBMIT_JOB",
 			"CONDATAINER_PARSE_MODULE_LOAD",
 			"CONDATAINER_SCHEDULER_NODES",
@@ -383,6 +389,7 @@ Time duration format (for build.time):
 			"logs_dir":                  true,
 			"apptainer_bin":             true,
 			"scheduler_bin":             true,
+			"default_distro":            true,
 			"submit_job":                true,
 			"branch":                    true,
 			"prefer_remote":             true,
@@ -399,6 +406,14 @@ Time duration format (for build.time):
 			"build.compress_args":       true,
 			"build.overlay_type":        true,
 			"extra_base_dirs":           true,
+		}
+
+		// Validate default_distro against known distros
+		if key == "default_distro" {
+			if !slices.Contains(config.GetAvailableDistros(), value) {
+				utils.PrintError("Unknown distro '%s'. Available: %s", value, strings.Join(config.GetAvailableDistros(), ", "))
+				os.Exit(ExitCodeError)
+			}
 		}
 
 		// Array keys that should be edited via config edit or env var

@@ -85,10 +85,6 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 			// Handle .def files
 			isContainer := strings.HasSuffix(relPath, ".def")
 			if isContainer {
-				// Skip base image/overlay scripts
-				if strings.HasPrefix(relPath, "base_image") || strings.HasPrefix(relPath, "base-overlay") {
-					return nil
-				}
 				relPath = strings.TrimSuffix(relPath, ".def")
 			}
 
