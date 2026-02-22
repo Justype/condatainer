@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -36,9 +37,9 @@ func BuildPathEnv(overlays []string) string {
 	// paths := []string{"/usr/sbin", "/usr/bin"}
 	paths := []string{"$PATH"} // $PATH here is the PATH from the base image
 
-	for _, overlay := range overlays {
+	for _, ov := range overlays {
 		// Strip :ro or :rw suffix for path checking
-		cleanOverlay := strings.TrimSuffix(strings.TrimSuffix(overlay, ":ro"), ":rw")
+		cleanOverlay := strings.TrimSuffix(strings.TrimSuffix(ov, ":ro"), ":rw")
 		name := strings.TrimSuffix(filepath.Base(cleanOverlay), filepath.Ext(cleanOverlay))
 		normalized := utils.NormalizeNameVersion(name)
 		if normalized == "" {
@@ -51,9 +52,12 @@ func BuildPathEnv(overlays []string) string {
 		if utils.IsImg(cleanOverlay) {
 			relative = "/ext3/env/bin"
 		} else if utils.IsSqf(cleanOverlay) {
+			if !overlay.HasCntBin(cleanOverlay, normalized) {
+				continue
+			}
 			relative = fmt.Sprintf("/cnt/%s/bin", normalized)
 		} else {
-			utils.PrintWarning("Unknown overlay file extension for %s. Skipping PATH addition.", utils.StylePath(overlay))
+			utils.PrintWarning("Unknown overlay file extension for %s. Skipping PATH addition.", utils.StylePath(ov))
 			continue
 		}
 		paths = append([]string{relative}, paths...)

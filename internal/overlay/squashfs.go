@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/Justype/condatainer/internal/utils"
 )
 
 // ============================================================================
@@ -72,7 +74,7 @@ func IsOSType(sqfPath string) bool {
 // cnt/<name>/<version>/bin. nameVersion accepts both slash form ("samtools/1.22")
 // and the normalized double-dash form ("samtools--1.22").
 func HasCntBin(sqfPath, nameVersion string) bool {
-	nv := strings.ReplaceAll(nameVersion, "--", "/")
+	nv := utils.NormalizeNameVersion(nameVersion)
 	return PathExists(sqfPath, "cnt/"+nv+"/bin")
 }
 
