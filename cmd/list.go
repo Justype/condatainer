@@ -197,10 +197,8 @@ func runList(cmd *cobra.Command, args []string) error {
 				shouldDelete = true
 			} else {
 				fmt.Print("Are you sure? Cannot be undone. [y/N]: ")
-				var choice string
-				fmt.Scanln(&choice)
-				choice = strings.ToLower(strings.TrimSpace(choice))
-				shouldDelete = (choice == "y" || choice == "yes")
+				choice, choiceErr := utils.ReadLineContext(cmd.Context())
+				shouldDelete = choiceErr == nil && (choice == "y" || choice == "yes")
 			}
 
 			if shouldDelete {

@@ -186,7 +186,7 @@ func runCreatePackages(ctx context.Context, packages []string) {
 
 	buildObjects := make([]build.BuildObject, 0, len(packages))
 	for _, pkg := range packages {
-		bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir(), createUpdate)
+		bo, err := build.NewBuildObject(ctx, pkg, false, imagesDir, config.GetWritableTmpDir(), createUpdate)
 		if err != nil {
 			ExitWithError("Failed to create build object for %s: %v", pkg, err)
 		}
@@ -194,7 +194,7 @@ func runCreatePackages(ctx context.Context, packages []string) {
 		buildObjects = append(buildObjects, bo)
 	}
 
-	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
+	graph, err := build.NewBuildGraph(ctx, buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build graph: %v", err)
 	}
@@ -291,13 +291,13 @@ func runCreateWithPrefix(ctx context.Context) {
 		// Shell script or apptainer def file
 		isApptainer := strings.HasSuffix(createFile, ".def")
 		absFile, _ := filepath.Abs(createFile)
-		bo, err := build.FromExternalSource(absPrefix, absFile, isApptainer, outputDir, config.GetWritableTmpDir())
+		bo, err := build.FromExternalSource(ctx, absPrefix, absFile, isApptainer, outputDir, config.GetWritableTmpDir())
 		if err != nil {
 			ExitWithError("Failed to create build object from %s: %v", createFile, err)
 		}
 
 		buildObjects := []build.BuildObject{bo}
-		graph, err := build.NewBuildGraph(buildObjects, outputDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
+		graph, err := build.NewBuildGraph(ctx, buildObjects, outputDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
 		if err != nil {
 			ExitWithError("Failed to create build graph: %v", err)
 		}
@@ -348,13 +348,13 @@ func runCreateFromSource(ctx context.Context) {
 
 	utils.PrintMessage("Creating overlay %s from %s", filepath.Base(targetOverlayPath), utils.StylePath(source))
 
-	bo, err := build.FromExternalSource(targetPrefix, source, isApptainer, imagesDir, config.GetWritableTmpDir())
+	bo, err := build.FromExternalSource(ctx, targetPrefix, source, isApptainer, imagesDir, config.GetWritableTmpDir())
 	if err != nil {
 		ExitWithError("Failed to create build object from %s: %v", source, err)
 	}
 
 	buildObjects := []build.BuildObject{bo}
-	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
+	graph, err := build.NewBuildGraph(ctx, buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build graph: %v", err)
 	}

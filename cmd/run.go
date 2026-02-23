@@ -249,7 +249,7 @@ func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPat
 		}
 		buildObjects := make([]build.BuildObject, 0, len(missingDeps))
 		for _, pkg := range missingDeps {
-			bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir(), false)
+			bo, err := build.NewBuildObject(ctx, pkg, false, imagesDir, config.GetWritableTmpDir(), false)
 			if err != nil {
 				utils.PrintError("Failed to create build object for %s: %v", utils.StyleName(pkg), err)
 				return nil, nil, errRunAborted
@@ -257,7 +257,7 @@ func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPat
 			buildObjects = append(buildObjects, bo)
 		}
 
-		graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, false)
+		graph, err := build.NewBuildGraph(ctx, buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, false)
 		if err != nil {
 			utils.PrintError("Failed to create build graph: %v", err)
 			return nil, nil, errRunAborted

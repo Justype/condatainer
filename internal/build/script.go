@@ -159,7 +159,7 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 			}
 
 			for _, dep := range missingDeps {
-				depObj, err := NewBuildObject(dep, false, writableImagesDir, config.GetWritableTmpDir(), false)
+				depObj, err := NewBuildObject(ctx, dep, false, writableImagesDir, config.GetWritableTmpDir(), false)
 				if err != nil {
 					return fmt.Errorf("failed to create build object for dependency %s: %w", dep, err)
 				}

@@ -25,6 +25,7 @@ type BuildGraph struct {
 	scheduler       scheduler.Scheduler    // Active scheduler (SLURM, PBS, etc.)
 
 	// Config
+	ctx        context.Context
 	imagesDir  string
 	tmpDir     string
 	submitJobs bool // Whether to actually submit scheduler jobs
@@ -33,12 +34,13 @@ type BuildGraph struct {
 
 // NewBuildGraph creates a BuildGraph from a list of BuildObjects
 // All overlays are stored in imagesDir regardless of type
-func NewBuildGraph(buildObjects []BuildObject, imagesDir, tmpDir string, submitJobs bool, update bool) (*BuildGraph, error) {
+func NewBuildGraph(ctx context.Context, buildObjects []BuildObject, imagesDir, tmpDir string, submitJobs bool, update bool) (*BuildGraph, error) {
 	bg := &BuildGraph{
 		graph:           make(map[string]BuildObject),
 		localBuilds:     []BuildObject{},
 		schedulerBuilds: []BuildObject{},
 		jobIDs:          make(map[string]string),
+		ctx:             ctx,
 		imagesDir:       imagesDir,
 		tmpDir:          tmpDir,
 		submitJobs:      submitJobs,
@@ -117,7 +119,7 @@ func (bg *BuildGraph) topologicalSort() error {
 		nodeMeta, exists := bg.graph[node]
 		if !exists {
 			// Expand on-the-fly if needed
-			newObj, err := NewBuildObject(node, false, bg.imagesDir, bg.tmpDir, bg.update)
+			newObj, err := NewBuildObject(bg.ctx, node, false, bg.imagesDir, bg.tmpDir, bg.update)
 			if err != nil {
 				delete(visiting, node)
 				return fmt.Errorf("failed to create BuildObject for dependency '%s': %w", node, err)
