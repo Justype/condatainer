@@ -205,10 +205,10 @@ func detectApptainerBin() string {
 	return "apptainer"
 }
 
-// BaseImageSqfName returns the expected .sqf filename for the configured DefaultDistro.
-// e.g. "ubuntu24" → "ubuntu24--base_image.sqf"
-func BaseImageSqfName() string {
-	return Global.DefaultDistro + "--base_image.sqf"
+// BaseImageSifName returns the expected .sif filename for the configured DefaultDistro.
+// e.g. "ubuntu24" → "ubuntu24--base_image.sif"
+func BaseImageSifName() string {
+	return Global.DefaultDistro + "--base_image.sif"
 }
 
 // GetBaseImage returns the path to base_image.sif, searching all image directories.
