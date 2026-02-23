@@ -1227,7 +1227,7 @@ condatainer config validate
 Configuration is loaded in the following order (highest to lowest priority):
 
 1. Command-line flags
-2. Environment variables (`CONDATAINER_*`)
+2. Environment variables (`CNT_*`)
 3. User config file (`~/.config/condatainer/config.yaml`)
 4. Portable config (`<install-dir>/config.yaml`)
 5. System config (`/etc/condatainer/config.yaml`)

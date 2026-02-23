@@ -39,7 +39,7 @@ config.Global  // Singleton instance
 Follows XDG + HPC conventions with multiple search paths:
 
 **Search Order:**
-1. `CONDATAINER_EXTRA_BASE_DIRS` / `extra_base_dirs` config
+1. `CNT_EXTRA_BASE_DIRS` / `extra_base_dirs` config
 2. Portable dir (auto-detected from install location)
 3. Scratch dir (`$SCRATCH/condatainer/`)
 4. User dir (`$XDG_DATA_HOME/condatainer/` or `~/.local/share/condatainer/`)
@@ -99,7 +99,7 @@ config.GetUserStateDir()  // For instance state
 
 ## Environment Variables
 
-- `CONDATAINER_EXTRA_BASE_DIRS` - Colon-separated extra data dirs
+- `CNT_EXTRA_BASE_DIRS` - Colon-separated extra data dirs
 - `XDG_DATA_HOME` - User data directory
 - `XDG_CONFIG_HOME` - User config directory
 - `XDG_STATE_HOME` - User state directory

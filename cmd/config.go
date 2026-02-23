@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
@@ -41,6 +42,22 @@ var configKeys = []string{
 	"build.tmp_size_mb",
 	"build.compress_args",
 	"build.overlay_type",
+}
+
+// getConfigEnvVars returns a list of environment variables corresponding to
+// the supported configuration keys.  We base the list on the known config
+// keys (configKeys) so that the envelope is automatically updated when new
+// settings are added.  The variable names are simply the uppercased key with
+// dots replaced by underscores and a CNT_ prefix.
+func getConfigEnvVars() []string {
+	vars := make([]string, 0, len(configKeys))
+	for _, key := range configKeys {
+		env := "CNT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+		vars = append(vars, env)
+	}
+	// sort for deterministic output
+	sort.Strings(vars)
+	return vars
 }
 
 // configKeysCompletion returns config keys for shell completion
@@ -95,14 +112,14 @@ var configCmd = &cobra.Command{
 
 Configuration file priority (highest to lowest):
   1. Command-line flags
-  2. Environment variables (CONDATAINER_*)
+  2. Environment variables (CNT_*)
   3. User config file (~/.config/condatainer/config.yaml)
   4. Portable config (<install-dir>/config.yaml, if in dedicated folder)
   5. System config file (/etc/condatainer/config.yaml)
   6. Defaults
 
 Data directory priority (for read/write operations):
-  1. Extra base directories (CONDATAINER_EXTRA_BASE_DIRS or config)
+  1. Extra base directories (CNT_EXTRA_BASE_DIRS or config)
   2. Portable directory (group/shared, from executable location)
   3. User scratch directory ($SCRATCH/condatainer, HPC systems)
   4. User XDG directory (~/.local/share/condatainer)`,
@@ -269,7 +286,7 @@ Shows:
 		fmt.Println()
 
 		// Scheduler default specs
-		fmt.Println(utils.StyleTitle("Scheduler Default Specs:"))
+		fmt.Printf("%s %s\n", utils.StyleTitle("Scheduler Default Specs:"), "scheduler.*")
 		fmt.Printf("  nodes:           %d\n", viper.GetInt("scheduler.nodes"))
 		fmt.Printf("  tasks_per_node:  %d\n", viper.GetInt("scheduler.tasks_per_node"))
 		fmt.Printf("  ncpus_per_task:  %d\n", viper.GetInt("scheduler.ncpus_per_task"))
@@ -288,7 +305,7 @@ Shows:
 		fmt.Println()
 
 		// Build settings
-		fmt.Println(utils.StyleTitle("Build Configuration:"))
+		fmt.Printf("%s %s\n", utils.StyleTitle("Build Configuration:"), "build.*")
 		fmt.Printf("  ncpus:           %d\n", viper.GetInt("build.ncpus"))
 		fmt.Printf("  mem_mb:          %d\n", viper.GetInt64("build.mem_mb"))
 		fmt.Printf("  time:            %s\n", viper.GetString("build.time"))
@@ -319,22 +336,7 @@ Shows:
 
 		// Show environment variable overrides
 		fmt.Println(utils.StyleTitle("Environment Variable Overrides:"))
-		envVars := []string{
-			"CONDATAINER_LOGS_DIR",
-			"CONDATAINER_APPTAINER_BIN",
-			"CONDATAINER_SCHEDULER_BIN",
-			"CONDATAINER_DEFAULT_DISTRO",
-			"CONDATAINER_SUBMIT_JOB",
-			"CONDATAINER_PARSE_MODULE_LOAD",
-			"CONDATAINER_SCHEDULER_NODES",
-			"CONDATAINER_SCHEDULER_TASKS_PER_NODE",
-			"CONDATAINER_SCHEDULER_NCPUS_PER_TASK",
-			"CONDATAINER_SCHEDULER_MEM_PER_NODE_MB",
-			"CONDATAINER_SCHEDULER_TIME",
-			"CONDATAINER_BUILD_NCPUS",
-			"CONDATAINER_BUILD_MEM_MB",
-			"CONDATAINER_BUILD_TIME",
-		}
+		envVars := getConfigEnvVars()
 		hasEnvOverrides := false
 		for _, envVar := range envVars {
 			if val := os.Getenv(envVar); val != "" {
@@ -423,7 +425,7 @@ Time duration format (for build.time):
 		// Array keys that should be edited via config edit or env var
 		if key == "extra_base_dirs" {
 			utils.PrintError("'%s' is an array setting. Use 'condatainer config edit' or environment variable.", key)
-			utils.PrintHint("Config file (YAML array):\n  extra_base_dirs:\n    - /path/to/dir1\n    - /path/to/dir2\n\nEnvironment variable (colon-separated):\n  export CONDATAINER_EXTRA_BASE_DIRS=/path/to/dir1:/path/to/dir2")
+			utils.PrintHint("Config file (YAML array):\n  extra_base_dirs:\n    - /path/to/dir1\n    - /path/to/dir2\n\nEnvironment variable (colon-separated):\n  export CNT_EXTRA_BASE_DIRS=/path/to/dir1:/path/to/dir2")
 			os.Exit(ExitCodeError)
 		}
 

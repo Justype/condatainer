@@ -8,7 +8,7 @@
 ## Configuration Priority
 
 1. **Command-line flags** (highest priority)
-2. **Environment variables** (`CONDATAINER_*`)
+2. **Environment variables** (`CNT_*`)
 3. **User config file** (`~/.config/condatainer/config.yaml`)
 4. **Portable config** (`<install-dir>/config.yaml`)
 5. **System config file** (`/etc/condatainer/config.yaml`)
@@ -170,31 +170,35 @@ This command checks that key binaries are accessible, build settings are sane, a
 
 ## Environment Variables
 
-Configuration keys can be overridden via environment variables with the `CONDATAINER_` prefix:
+Most configuration settings may be overridden by environment variables.
+The name is derived automatically from the Viper key by
+upper‑casing, replacing `.` with `_`, and prefixing with
+`CNT_`.  For example:
 
-| Environment Variable | Config Key |
-|---------------------|------------|
-| `CONDATAINER_LOGS_DIR` | `logs_dir` |
-| `CONDATAINER_APPTAINER_BIN` | `apptainer_bin` |
-| `CONDATAINER_SCHEDULER_BIN` | `scheduler_bin` |
-| `CONDATAINER_SUBMIT_JOB` | `submit_job` |
-| `CONDATAINER_PREFER_REMOTE` | `prefer_remote` |
-| `CONDATAINER_PARSE_MODULE_LOAD` | `parse_module_load` |
-| `CONDATAINER_SCHEDULER_NODES` | `scheduler.nodes` |
-| `CONDATAINER_SCHEDULER_TASKS_PER_NODE` | `scheduler.tasks_per_node` |
-| `CONDATAINER_SCHEDULER_NCPUS_PER_TASK` | `scheduler.ncpus_per_task` |
-| `CONDATAINER_SCHEDULER_MEM_MB_PER_NODE` | `scheduler.mem_mb_per_node` |
-| `CONDATAINER_SCHEDULER_TIME` | `scheduler.time` |
-| `CONDATAINER_BUILD_NCPUS` | `build.ncpus` |
-| `CONDATAINER_BUILD_MEM_MB` | `build.mem_mb` |
-| `CONDATAINER_BUILD_TIME` | `build.time` |
-| `CONDATAINER_EXTRA_BASE_DIRS` | `extra_base_dirs` (colon-separated) |
+* `logs_dir` → `CNT_LOGS_DIR`
+* `scheduler.time` → `CNT_SCHEDULER_TIME`
+* `build.tmp_size_mb` → `CNT_BUILD_TMP_SIZE_MB`
+
+You can list the supported variables with
+`condatainer config show` (it prints any that are currently set).
+
+A few common overrides are shown below for clarity, but the
+mapping is consistent for every key handled by the CLI:
+
+| Environment Variable               | Config Key             |
+|-----------------------------------|------------------------|
+| `CNT_APPTAINER_BIN`        | `apptainer_bin`        |
+| `CNT_SUBMIT_JOB`           | `submit_job`           |
+| `CNT_PREFER_REMOTE`        | `prefer_remote`        |
+| `CNT_SCHEDULER_NODES`      | `scheduler.nodes`      |
+| `CNT_BUILD_MEM_MB`         | `build.mem_mb`         |
+| `CNT_EXTRA_BASE_DIRS`      | `extra_base_dirs` (colon-separated) |
 
 Example:
 
 ```bash
 # Add extra search directories (highest priority)
-export CONDATAINER_EXTRA_BASE_DIRS=/shared/tools:/project/common
+export CNT_EXTRA_BASE_DIRS=/shared/tools:/project/common
 ```
 
 ## Data Directory Search Paths
@@ -203,7 +207,7 @@ export CONDATAINER_EXTRA_BASE_DIRS=/shared/tools:/project/common
 
 ### Search Priority
 
-1. **Extra base directories** (from `extra_base_dirs` config or `CONDATAINER_EXTRA_BASE_DIRS`)
+1. **Extra base directories** (from `extra_base_dirs` config or `CNT_EXTRA_BASE_DIRS`)
 2. **Portable** (group/shared directory next to the executable; if not under `$HOME`)
 3. **Scratch** (`$SCRATCH/condatainer` on HPC systems)
 4. **User** (`~/.local/share/condatainer`)
