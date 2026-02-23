@@ -222,8 +222,12 @@ func tryDownloadPrebuiltSif(nameVersion, destPath string) bool {
 	}
 
 	normalized := utils.NormalizeNameVersion(nameVersion)
-	sifFilename := strings.ReplaceAll(normalized, "/", "--") + "_" + archName + ".sif"
-	url := fmt.Sprintf("%s/%s", config.PrebuiltBaseURL, sifFilename)
+	parts := strings.SplitN(normalized, "/", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	sifFilename := parts[1] + "_" + archName + ".sif"
+	url := fmt.Sprintf("%s/%s/%s", config.PrebuiltBaseURL, parts[0], sifFilename)
 
 	if !utils.URLExists(url) {
 		return false

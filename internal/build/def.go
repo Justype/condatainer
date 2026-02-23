@@ -211,8 +211,12 @@ func tryDownloadPrebuiltOverlay(nameVersion, destPath string) bool {
 	}
 
 	normalized := utils.NormalizeNameVersion(nameVersion)
-	overlayFilename := strings.ReplaceAll(normalized, "/", "--") + "_" + archName + ".sqf"
-	url := fmt.Sprintf("%s/%s", config.PrebuiltBaseURL, overlayFilename)
+	parts := strings.SplitN(normalized, "/", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	overlayFilename := parts[1] + "_" + archName + ".sqf"
+	url := fmt.Sprintf("%s/%s/%s", config.PrebuiltBaseURL, parts[0], overlayFilename)
 
 	// Check if prebuilt exists before attempting download
 	if !utils.URLExists(url) {
