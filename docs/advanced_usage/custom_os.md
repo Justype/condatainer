@@ -27,34 +27,70 @@ Examples:
 - [R Package Dependencies](#example-r-package-dependencies) (use with `env.img` for development)
 - [Read-only R Package Environment](#example-read-only-r-package-environment) (for production)
 
-## Change the Base Image
+## OS Overlay Compatibility
 
-The base image is determined by the `default_distro` config setting (default: `ubuntu24`). When you run `condatainer create`, it automatically downloads or builds `<distro>--base_image.sqf` (e.g. `ubuntu24--base_image.sqf`) if it does not exist.
+When loading multiple OS overlays together, all should share the same OS distro version. Mixing overlays built on different versions (e.g., Ubuntu 22.04 vs 24.04) can cause missing library errors or unexpected behavior.
 
-If an OS overlay has a different distro version than the base image used by other overlays, you may run into compatibility issues when loading multiple overlays together.
-
-To avoid this, you can:
+To check an overlay's distro version, run:
 
 ```bash
-# Use a new base image matching the OS overlay distro
-condatainer exec -b <custom_base_image.sqf> -o <os_overlay.sqf> bash
-
-# or directly use the OS overlay as the base
-condatainer exec -b <os_overlay.sqf> bash
+condatainer info <overlay_file.sqf>
 ```
 
-To permanently switch the default distro (e.g. to Ubuntu 22):
+Example output:
+
+```
+File
+  Name:          ubuntu22--igv.sqf
+  Path:          path/images/ubuntu22--igv.sqf
+  Size:          271.91 MB
+  Type:          OS Overlay (Read-Only)
+  Distro:        Ubuntu 22.04 (Jammy)
+...
+```
+
+To get the base image distro version:
+
+```bash
+condatainer config get default_distro   # e.g. ubuntu24  →  24.04
+# or
+condatainer info base_image
+```
+
+The output is `ubuntu24`, which is different from the overlay's distro version `ubuntu22`. This means you cannot load this overlay together with other overlays built on `ubuntu24` base image.
+
+## Change the Base Image
+
+### Change the config (permanent)
+
+If you want to permanently switch the default distro (e.g. to Ubuntu 22), run:
 
 ```bash
 condatainer config set default_distro ubuntu22
-# The next `condatainer create` will auto-build ubuntu22--base_image.sqf
 ```
 
-Or use ENV variable:
+This often happens when:
+
+- The base image is end of life and you want to switch to a newer one.
+- Most of your overlays target a different distro, so you want to switch the default to avoid compatibility issues.
+
+### Use ENV variable (temporary)
+
+Use `CONDATAINER_DEFAULT_DISTRO` to temporarily override the default distro for a single command without changing your global config:
 
 ```bash
-CONDATAINER_DEFAULT_DISTRO=ubuntu22 condatainer exec ...
+CONDATAINER_DEFAULT_DISTRO=ubuntu22 condatainer exec -o myoverlay.sqf bash
 ```
+
+### Use a different base image (temporary)
+
+You can also directly specify a different base image that matches the overlay's distro:
+
+```bash
+condatainer exec -b ubuntu22/base_image.sqf -o myoverlay.sqf bash
+```
+
+You need to create it first. But with env, it will be auto-created if it does not exist.
 
 ## What is Included in a Base Image?
 
@@ -93,7 +129,7 @@ It is Ubuntu 22.04, which differs from the default base image (Ubuntu 24.04 when
 
 You can either:
 - Use the PyTorch image as the base image
-- Build an Ubuntu 22.04 base image (and set `default_distro: ubuntu22`)
+- Use the `ubuntu22--base_image.sqf` as the base image alongside the PyTorch overlay
 
 Use the first approach:
 
@@ -101,22 +137,13 @@ Use the first approach:
 condatainer exec -b pytorch.sqf bash
 ```
 
-Or create an Ubuntu 22.04 base image:
+Second approach use Ubuntu 22 base image:
 
 ```bash
-# Use available base image definition file
-condatainer create ubuntu22/base_image
+CONDATAINER_DEFAULT_DISTRO=ubuntu22 condatainer exec -o pytorch.sqf bash
 
-# Then load both the base image and the PyTorch overlay:
-condatainer exec -b ubuntu22/base_image -o pytorch.sqf bash
-```
-
-```{note}
-Available base image definition files:
-
-- [ubuntu20/base_image](https://github.com/Justype/condatainer/tree/main/build-scripts/ubuntu20/base_image.def)
-- [ubuntu22/base_image](https://github.com/Justype/condatainer/tree/main/build-scripts/ubuntu22/base_image.def)
-- [ubuntu24/base_image](https://github.com/Justype/condatainer/tree/main/build-scripts/ubuntu24/base_image.def)
+# or explicitly specify the base image
+condatainer exec -b ubuntu22/base_image.sqf -o pytorch.sqf bash
 ```
 
 ## Example: R Package Dependencies
@@ -147,6 +174,10 @@ From: ubuntu:24.04
         libxml2-dev libcurl4-openssl-dev libssl-dev
 
     apt clean && rm -rf /var/lib/apt/lists/*
+```
+
+```{note}
+For the `From` line, make sure to specify the same distro version as your base image (e.g., `ubuntu:24.04` if your `default_distro` is `ubuntu24`). Otherwise, you may encounter compatibility issues when loading the overlay.
 ```
 
 ### 2. Build the Overlay

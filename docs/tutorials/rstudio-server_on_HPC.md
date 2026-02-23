@@ -260,8 +260,6 @@ condatainer exec -o r4.4.3 -o build-essential -o env.img Rscript your_script.R
 condatainer exec -o r4.4.3 -o build-essential -o r-deps.sqf -o env.img Rscript your_script.R
 ```
 
-[How to pull Posit R Docker Images](../advanced_usage/custom_os.md#example-pulling-posit-r-docker-image)
-
 ## Using GPU
 
 For GPU-accelerated R packages, specify GPU resources:
