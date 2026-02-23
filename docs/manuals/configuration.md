@@ -82,6 +82,7 @@ condatainer config init -l system
 | `branch` | `main` | Git branch for fetching remote build scripts (`main` or `dev`) |
 | `prefer_remote` | `false` | Remote build scripts take precedence over local |
 | `parse_module_load` | `false` | Parse `module load` / `ml` lines as dependencies in `check` and `run` |
+| `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filename (e.g. `ubuntu24--base_image.sqf`) and the distro prefix added to bare package names (e.g. `igv` → `ubuntu24/igv`). |
 
 Or if your system scheduler is not workable, you can disable job submission.
 
@@ -250,6 +251,10 @@ prefer_remote: false
 
 # Parse "module load" / "ml" lines as dependencies in 'check' and 'run' (default: false)
 parse_module_load: false
+
+# Base OS distro: ubuntu20, ubuntu22, or ubuntu24 (default: ubuntu24)
+# Sets the base image (e.g. ubuntu24--base_image.sqf) and prefix for bare package names
+default_distro: ubuntu24
 
 # Additional search directories
 extra_base_dirs:

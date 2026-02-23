@@ -29,6 +29,8 @@ Examples:
 
 ## Change the Base Image
 
+The base image is determined by the `default_distro` config setting (default: `ubuntu24`). When you run `condatainer create`, it automatically downloads or builds `<distro>--base_image.sqf` (e.g. `ubuntu24--base_image.sqf`) if it does not exist.
+
 If an OS overlay has a different distro version than the base image used by other overlays, you may run into compatibility issues when loading multiple overlays together.
 
 To avoid this, you can:
@@ -39,6 +41,19 @@ condatainer exec -b <custom_base_image.sqf> -o <os_overlay.sqf> bash
 
 # or directly use the OS overlay as the base
 condatainer exec -b <os_overlay.sqf> bash
+```
+
+To permanently switch the default distro (e.g. to Ubuntu 22):
+
+```bash
+condatainer config set default_distro ubuntu22
+# The next `condatainer create` will auto-build ubuntu22--base_image.sqf
+```
+
+Or use ENV variable:
+
+```bash
+CONDATAINER_DEFAULT_DISTRO=ubuntu22 condatainer exec ...
 ```
 
 ## What is Included in a Base Image?
@@ -74,11 +89,11 @@ In the inner shell, you can see the OS version with:
 cat /etc/os-release
 ```
 
-It is Ubuntu 22.04, which differs from the default base image (`ubuntu:24.04`).
+It is Ubuntu 22.04, which differs from the default base image (Ubuntu 24.04 when `default_distro: ubuntu24`).
 
 You can either:
 - Use the PyTorch image as the base image
-- Build an Ubuntu 22.04 base image
+- Build an Ubuntu 22.04 base image (and set `default_distro: ubuntu22`)
 
 Use the first approach:
 
@@ -102,30 +117,6 @@ Available base image definition files:
 - [ubuntu20/base_image](https://github.com/Justype/condatainer/tree/main/build-scripts/ubuntu20/base_image.def)
 - [ubuntu22/base_image](https://github.com/Justype/condatainer/tree/main/build-scripts/ubuntu22/base_image.def)
 - [ubuntu24/base_image](https://github.com/Justype/condatainer/tree/main/build-scripts/ubuntu24/base_image.def)
-```
-
-## Example: Pulling Posit R Docker Image
-
-[Posit R Docker Hub](https://hub.docker.com/r/posit/r-base) has various R base images with different base OS versions.
-
-Currently, the **CondaTainer** base image is `ubuntu:24.04` (noble). So you have to pull the matching Posit R image:
-
-```bash
-# System wide
-condatainer create -n r4.4.3 -s docker://posit/r-base:4.4.3-noble-amd64
-
-# Or for a specific project (current directory)
-condatainer create -p r4.4.3 -s docker://posit/r-base:4.4.3-noble-amd64
-```
-
-Then you can use the R overlay together with the base image:
-
-```bash
-# System wide
-condatainer exec -o r4.4.3
-
-# Project wide (the sqf must be in the current directory)
-condatainer exec -o r4.4.3.sqf
 ```
 
 ## Example: R Package Dependencies

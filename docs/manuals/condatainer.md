@@ -342,6 +342,7 @@ condatainer create [OPTIONS] [packages...]
 * `-b`, `--base-image [PATH]`: Base image to use instead of default.
 * `-s`, `--source [URI]`: Remote source URI (e.g., `docker://ubuntu:22.04`).
 * `--temp-size [SIZE]`: Size of temporary overlay (default: 20G).
+* `-u`, `--update`: Rebuild overlays even if they already exist (atomic `.new` swap). Useful for refreshing a package to the latest version.
 * `--remote`: Remote build scripts take precedence over local.
 * `packages`: List of packages to install (e.g., `bcftools/1.22` or `samtools=1.10` or `grch38/genome/gencode`).
 
@@ -367,6 +368,9 @@ condatainer create [OPTIONS] [packages...]
 # Create from a specific recipe (App Overlay)
 condatainer create bcftools/1.22
 
+# Bare package name is expanded using default_distro (e.g. ubuntu24/igv)
+condatainer create igv
+
 # Create multiple overlays at once
 condatainer create samtools/1.16 bcftools/1.15
 
@@ -382,6 +386,9 @@ condatainer create -n tools samtools=1.16 bcftools=1.15
 
 # Create from a remote container source
 condatainer create --source docker://ubuntu:22.04 -n myubuntu
+
+# Rebuild an existing conda overlay (force update)
+condatainer create -n nvim nvim nodejs -u
 ```
 
 **Features**:
@@ -1238,6 +1245,9 @@ scheduler_bin: /usr/bin/sbatch
 # Submission settings
 submit_job: true
 
+# Base OS distro: ubuntu20, ubuntu22, or ubuntu24 (default: ubuntu24)
+default_distro: ubuntu24
+
 # Default scheduler specs (used when scripts lack explicit directives)
 scheduler:
   ncpus_per_task: 4
@@ -1326,8 +1336,7 @@ condatainer self-update [FLAGS]
 * Downloads latest binary from GitHub releases.
 * Detects current OS and architecture.
 * Compares versions before updating.
-* Updates base image when minor or major version changes (not for patch updates).
-* Warns about major version upgrades and lists installed OS overlays that may need to be rebuilt.
+* Updates the base image (for the configured `default_distro`) when the minor or major version changes.
 * Supports symlink resolution.
 
 **Examples:**
