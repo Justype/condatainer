@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -52,7 +53,14 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 	var overlayPath string
 	if path, ok := installedOverlays[normalized]; ok {
 		overlayPath = path
-	} else {
+	} else if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
+		// Bare name not found: try <default_distro>/<name> (e.g. "igv" → "ubuntu24/igv", "base_image" → "ubuntu24/base_image")
+		if path, ok := installedOverlays[config.Global.DefaultDistro+"/"+normalized]; ok {
+			overlayPath = path
+		}
+	}
+
+	if overlayPath == "" {
 		// Try as external file path
 		overlayPath, _ = filepath.Abs(overlayArg)
 		if !utils.FileExists(overlayPath) {

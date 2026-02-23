@@ -323,6 +323,14 @@ func filterPackages(packages []PackageInfo, filters []string) []PackageInfo {
 func formatPackageLine(pkg PackageInfo, filters []string) string {
 	line := pkg.Name
 
+	// Compute alias before highlighting (e.g. "ubuntu24/igv" → "[igv]")
+	var alias string
+	if distro := config.Global.DefaultDistro; distro != "" {
+		if a, ok := strings.CutPrefix(pkg.Name, distro+"/"); ok {
+			alias = a
+		}
+	}
+
 	// Highlight search terms in the name only (before adding suffixes)
 	// Use a single-pass approach to avoid ANSI code interference
 	if len(filters) > 0 {
@@ -361,6 +369,10 @@ func formatPackageLine(pkg PackageInfo, filters []string) string {
 
 	if len(suffixes) > 0 {
 		line = fmt.Sprintf("%s (%s)", line, strings.Join(suffixes, ", "))
+	}
+
+	if alias != "" {
+		line += "  " + utils.StyleInfo("["+alias+"]")
 	}
 
 	return line
