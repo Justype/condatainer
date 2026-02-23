@@ -68,6 +68,10 @@ func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) 
 	}
 	if len(args) == 1 {
 		// Second arg: complete values based on the key
+		//  extra_base_dirs should only complete directories
+		if args[0] == "extra_base_dirs" {
+			return nil, cobra.ShellCompDirectiveFilterDirs
+		}
 		return configValueCompletion(args[0]), cobra.ShellCompDirectiveNoFileComp
 	}
 	return nil, cobra.ShellCompDirectiveNoFileComp
