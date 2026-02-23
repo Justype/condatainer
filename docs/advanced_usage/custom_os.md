@@ -82,16 +82,6 @@ Use `CNT_DEFAULT_DISTRO` to temporarily override the default distro for a single
 CNT_DEFAULT_DISTRO=ubuntu22 condatainer exec -o myoverlay.sqf bash
 ```
 
-### Use a different base image (temporary)
-
-You can also directly specify a different base image that matches the overlay's distro:
-
-```bash
-condatainer exec -b ubuntu22/base_image.sqf -o myoverlay.sqf bash
-```
-
-You need to create it first. But with env, it will be auto-created if it does not exist.
-
 ## What is Included in a Base Image?
 
 A base image typically includes:
@@ -129,7 +119,7 @@ It is Ubuntu 22.04, which differs from the default base image (Ubuntu 24.04 when
 
 You can either:
 - Use the PyTorch image as the base image
-- Use the `ubuntu22--base_image.sqf` as the base image alongside the PyTorch overlay
+- Use the `ubuntu22--base_image.sif` as the base image alongside the PyTorch overlay
 
 Use the first approach:
 
@@ -141,9 +131,6 @@ Second approach use Ubuntu 22 base image:
 
 ```bash
 CNT_DEFAULT_DISTRO=ubuntu22 condatainer exec -o pytorch.sqf bash
-
-# or explicitly specify the base image
-condatainer exec -b ubuntu22/base_image.sqf -o pytorch.sqf bash
 ```
 
 ## Example: R Package Dependencies

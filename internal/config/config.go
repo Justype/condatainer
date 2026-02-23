@@ -56,7 +56,7 @@ type Config struct {
 	SchedulerBin string // Optional: path to sbatch/scheduler binary (auto-detected if empty)
 
 	// Base OS overlay slug (e.g. "ubuntu24"). Determines the base image filename:
-	// "ubuntu24" → "ubuntu24--base_image.sqf". Defaults to "ubuntu24".
+	// "ubuntu24" → "ubuntu24--base_image.sif". Defaults to "ubuntu24".
 	DefaultDistro string
 
 	// Remote repository settings
