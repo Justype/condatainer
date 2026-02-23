@@ -320,25 +320,7 @@ func buildSchedulerCreateCommand(nameVersion string, update bool) string {
 	return cmd + " " + nameVersion
 }
 
-// GetLocalBuilds returns the list of builds to run locally
-func (bg *BuildGraph) GetLocalBuilds() []BuildObject {
-	return bg.localBuilds
-}
-
-// GetSchedulerBuilds returns the list of builds to submit via scheduler
-func (bg *BuildGraph) GetSchedulerBuilds() []BuildObject {
-	return bg.schedulerBuilds
-}
-
 // GetJobIDs returns the map of job IDs for scheduler builds
 func (bg *BuildGraph) GetJobIDs() map[string]string {
 	return bg.jobIDs
-}
-
-// GetAllBuilds returns all builds in topologically sorted order
-func (bg *BuildGraph) GetAllBuilds() []BuildObject {
-	all := make([]BuildObject, 0, len(bg.localBuilds)+len(bg.schedulerBuilds))
-	all = append(all, bg.localBuilds...)
-	all = append(all, bg.schedulerBuilds...)
-	return all
 }

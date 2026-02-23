@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -234,20 +233,6 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// getMajorNumber returns the major version as an integer. The input may
-// include or omit a leading 'v'. If parsing fails the error is returned.
-func getMajorNumber(version string) (int, error) {
-	if !strings.HasPrefix(version, "v") {
-		version = "v" + version
-	}
-	c := semver.Canonical(version)
-	if c == "" {
-		return 0, fmt.Errorf("invalid version %q", version)
-	}
-	maj := strings.TrimPrefix(semver.Major(c), "v")
-	return strconv.Atoi(maj)
-}
-
 // getMajorMinor returns the "vMAJOR.MINOR" string for a version, ignoring
 // patch and any suffixes. Returns empty string on failure.
 func getMajorMinor(version string) string {
@@ -259,18 +244,6 @@ func getMajorMinor(version string) string {
 		return ""
 	}
 	return semver.MajorMinor(c)
-}
-
-func isMinorChange(oldVersion, newVersion string) bool {
-	return getMajorMinor(oldVersion) != getMajorMinor(newVersion)
-}
-
-// isMajorChange reports whether the major version component has changed.
-// It returns false if either version cannot be parsed.
-func isMajorChange(oldVersion, newVersion string) bool {
-	m1, err1 := getMajorNumber(oldVersion)
-	m2, err2 := getMajorNumber(newVersion)
-	return err1 == nil && err2 == nil && m1 != m2
 }
 
 // compareVersions compares two semantic versions. It returns:

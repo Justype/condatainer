@@ -201,20 +201,6 @@ func GetOSInfo(sqfPath string) *OSInfo {
 	return newOSInfo(m)
 }
 
-// HostOSInfo reads /etc/os-release from the running host.
-// Returns nil if the file cannot be read.
-func HostOSInfo() *OSInfo {
-	data, err := os.ReadFile("/etc/os-release")
-	if err != nil {
-		return nil
-	}
-	m := parseOSRelease(string(data))
-	if len(m) == 0 {
-		return nil
-	}
-	return newOSInfo(m)
-}
-
 // newOSInfo constructs an OSInfo from a parsed os-release key-value map.
 func newOSInfo(m map[string]string) *OSInfo {
 	o := &OSInfo{
