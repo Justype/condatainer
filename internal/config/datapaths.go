@@ -519,11 +519,11 @@ const BaseImageDefName = "base_image.def"
 
 // FindBaseImage searches all image paths for the base image.
 // Returns the full path if found, empty string otherwise.
-// slug-named .sqf (e.g. "ubuntu24--base_image.sqf")
+// slug-named .sif (e.g. "ubuntu24--base_image.sif")
 func FindBaseImage() string {
-	sqfName := BaseImageSqfName()
+	sifName := BaseImageSifName()
 	for _, dir := range GetImageSearchPaths() {
-		if candidate := filepath.Join(dir, sqfName); fileExists(candidate) {
+		if candidate := filepath.Join(dir, sifName); fileExists(candidate) {
 			return candidate
 		}
 	}
@@ -531,11 +531,11 @@ func FindBaseImage() string {
 }
 
 // GetBaseImageWritePath returns the path where a new base image should be written.
-// Returns the first writable images directory + slug-based .sqf name (e.g. ubuntu24--base_image.sqf).
+// Returns the first writable images directory + slug-based .sif name (e.g. ubuntu24--base_image.sif).
 func GetBaseImageWritePath() (string, error) {
 	dir, err := GetWritableImagesDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, BaseImageSqfName()), nil
+	return filepath.Join(dir, BaseImageSifName()), nil
 }

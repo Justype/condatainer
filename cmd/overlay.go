@@ -222,14 +222,13 @@ var chownCmd = &cobra.Command{
 	Short: "Recursively set internal files to specific UID/GID",
 	Long: `Walks the overlay filesystem (without mounting) and updates the UID/GID.
 
-Defaults to the current user and paths '/ext3' and '/opt' inside the image.
+Defaults to the current user and paths '/' inside the image.
 Use --root to force ownership to 0:0.
 
 Multiple paths can be specified using multiple -p flags.`,
-	Example: `  condatainer overlay chown env.img                    # Set /ext3 and /opt to current user
+	Example: `  condatainer overlay chown env.img                    # Set entire image to current user
   condatainer overlay chown env.img --root -p /        # Set entire image to root
   condatainer overlay chown env.img -u 1001 -g 1001    # Set to specific ID
-  condatainer overlay chown env.img -p /ext3           # Only chown /ext3
   condatainer overlay chown env.img -p /ext3 -p /data  # Chown multiple paths`,
 	Args: cobra.ExactArgs(1),
 
@@ -355,7 +354,7 @@ func init() {
 	chownCmd.Flags().IntP("uid", "u", os.Getuid(), "User ID to set")
 	chownCmd.Flags().IntP("gid", "g", os.Getgid(), "Group ID to set")
 	chownCmd.Flags().Bool("root", false, "Set UID and GID to 0 (root); overrides -u and -g")
-	chownCmd.Flags().StringArrayP("path", "p", []string{"/ext3", "/opt"}, "Path inside the overlay (can specify multiple)")
+	chownCmd.Flags().StringArrayP("path", "p", []string{"/"}, "Path inside the overlay (can specify multiple)")
 }
 
 // initializeOverlayWithConda installs a conda environment from a YAML file into an overlay

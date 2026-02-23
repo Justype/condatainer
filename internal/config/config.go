@@ -56,7 +56,7 @@ type Config struct {
 	SchedulerBin string // Optional: path to sbatch/scheduler binary (auto-detected if empty)
 
 	// Base OS overlay slug (e.g. "ubuntu24"). Determines the base image filename:
-	// "ubuntu24" → "ubuntu24--base_image.sqf". Defaults to "ubuntu24".
+	// "ubuntu24" → "ubuntu24--base_image.sif". Defaults to "ubuntu24".
 	DefaultDistro string
 
 	// Remote repository settings
@@ -205,10 +205,10 @@ func detectApptainerBin() string {
 	return "apptainer"
 }
 
-// BaseImageSqfName returns the expected .sqf filename for the configured DefaultDistro.
-// e.g. "ubuntu24" → "ubuntu24--base_image.sqf"
-func BaseImageSqfName() string {
-	return Global.DefaultDistro + "--base_image.sqf"
+// BaseImageSifName returns the expected .sif filename for the configured DefaultDistro.
+// e.g. "ubuntu24" → "ubuntu24--base_image.sif"
+func BaseImageSifName() string {
+	return Global.DefaultDistro + "--base_image.sif"
 }
 
 // GetBaseImage returns the path to base_image.sif, searching all image directories.
