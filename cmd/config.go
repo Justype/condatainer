@@ -549,7 +549,12 @@ By default, the location is chosen based on the installation:
 
 		// Warn if inside container
 		if config.IsInsideContainer() {
-			utils.PrintWarning("Running inside a container - config changes may not persist on the host")
+			ExitWithError("Cannot initialize config inside a container. Please run this command on the host system.")
+		}
+
+		// If apptainer is not in the path, exit with an error since it's required for condatainer
+		if !config.ValidateBinary("apptainer") {
+			ExitWithError("'apptainer' binary is not in PATH or not executable.")
 		}
 
 		// Force re-detect binaries from current environment and save to specified path
@@ -558,11 +563,9 @@ By default, the location is chosen based on the installation:
 			ExitWithError("Failed to save config: %v", err)
 		}
 
-		// Check if apptainer was found
-		apptainerBin := viper.GetString("apptainer_bin")
-
 		// Auto-detect compression based on apptainer version and save to config
 		detectedCompression := "-comp lz4" // default
+		apptainerBin := viper.GetString("apptainer_bin")
 		if apptainerBin != "" && config.ValidateBinary(apptainerBin) {
 			if err := apptainer.SetBin(apptainerBin); err == nil {
 				if version, err := apptainer.GetVersion(); err == nil {
