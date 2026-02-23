@@ -540,10 +540,8 @@ By default, the location is chosen based on the installation:
 				shouldOverwrite = true
 			} else {
 				fmt.Print("Overwrite? [y/N]: ")
-				var response string
-				fmt.Scanln(&response)
-				response = strings.ToLower(strings.TrimSpace(response))
-				shouldOverwrite = (response == "y" || response == "yes")
+				response, readErr := utils.ReadLineContext(cmd.Context())
+				shouldOverwrite = readErr == nil && (response == "y" || response == "yes")
 			}
 			if !shouldOverwrite {
 				utils.PrintNote("Cancelled")

@@ -134,7 +134,7 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 		return fmt.Errorf("failed to move SIF to %s: %w", finalPath, err)
 	}
 
-	if err := os.Chmod(finalPath, 0o664); err != nil {
+	if err := os.Chmod(finalPath, utils.PermExec); err != nil {
 		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
 	}
 
@@ -222,8 +222,12 @@ func tryDownloadPrebuiltSif(nameVersion, destPath string) bool {
 	}
 
 	normalized := utils.NormalizeNameVersion(nameVersion)
-	sifFilename := strings.ReplaceAll(normalized, "/", "--") + "_" + archName + ".sif"
-	url := fmt.Sprintf("%s/%s", config.PrebuiltBaseURL, sifFilename)
+	parts := strings.SplitN(normalized, "/", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	sifFilename := parts[1] + "_" + archName + ".sif"
+	url := fmt.Sprintf("%s/%s/%s", config.PrebuiltBaseURL, parts[0], sifFilename)
 
 	if !utils.URLExists(url) {
 		return false
@@ -231,7 +235,7 @@ func tryDownloadPrebuiltSif(nameVersion, destPath string) bool {
 
 	utils.PrintMessage("Found pre-built base image %s. Downloading...", utils.StyleName(normalized))
 
-	if err := utils.DownloadFile(url, destPath); err != nil {
+	if err := utils.DownloadExecutable(url, destPath); err != nil {
 		utils.PrintWarning("Download failed. Falling back to local build.")
 		return false
 	}

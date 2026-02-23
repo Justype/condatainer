@@ -165,11 +165,8 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	// Ask for confirmation unless global --yes flag or --force flag is provided
 	if !utils.ShouldAnswerYes() && !updateForce {
 		fmt.Print("Are you sure you want to download and replace the current binary from GitHub releases? [y/N]: ")
-		var confirm string
-		fmt.Scanln(&confirm)
-		confirm = strings.ToLower(strings.TrimSpace(confirm))
-
-		if confirm != "y" && confirm != "yes" {
+		confirm, err := utils.ReadLineContext(cmd.Context())
+		if err != nil || (confirm != "y" && confirm != "yes") {
 			utils.PrintNote("Update cancelled by user.")
 			return nil
 		}

@@ -1,7 +1,6 @@
 package build
 
 import (
-	"bufio"
 	"context"
 	"errors"
 
@@ -307,7 +306,7 @@ func (b *BaseBuildObject) Cleanup(failed bool) error {
 }
 
 // parseScriptMetadata extracts dependencies, sbatch flags, and interactive prompts from shell scripts
-func (b *BaseBuildObject) parseScriptMetadata() error {
+func (b *BaseBuildObject) parseScriptMetadata(ctx context.Context) error {
 	if b.buildSource == "" {
 		return nil
 	}
@@ -338,24 +337,16 @@ func (b *BaseBuildObject) parseScriptMetadata() error {
 				return fmt.Errorf("build script for %s requires interactive input, but no TTY is available", b.nameVersion)
 			}
 
-			reader := bufio.NewReader(os.Stdin)
 			for _, prompt := range prompts {
-				// Replace escaped "\\n" sequences with actual newlines and print the full message lines
 				msg := strings.ReplaceAll(prompt, `\\n`, "\n")
-				// Also handle single-backslash "\\n" sequences commonly used in scripts
 				msg = strings.ReplaceAll(msg, "\\n", "\n")
 				for _, line := range strings.Split(msg, "\n") {
 					utils.PrintNote("%s", line)
 				}
-				// Prompt inline without adding a newline
 				fmt.Print("Enter here: ")
-				input, _ := reader.ReadString('\n')
-				input = strings.TrimRight(input, "\r\n")
-				if strings.ContainsAny(input, "\r\n") {
-					utils.PrintWarning("Multiline input detected. Only the first line will be used.")
-					if idx := strings.IndexAny(input, "\r\n"); idx != -1 {
-						input = input[:idx]
-					}
+				input, err := utils.ReadLineContext(ctx)
+				if err != nil {
+					return err
 				}
 				b.interactiveInputs = append(b.interactiveInputs, input)
 			}
@@ -401,7 +392,7 @@ func getTmpOverlayPath(nameVersion, tmpDir string) string {
 // NewBuildObject creates a BuildObject from a name/version string
 // Format: "name/version" for conda/shell, "name" for def, "prefix/name/version" for ref
 // All overlays are stored in imagesDir regardless of type
-func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string, update bool) (BuildObject, error) {
+func NewBuildObject(ctx context.Context, nameVersion string, external bool, imagesDir, tmpDir string, update bool) (BuildObject, error) {
 	normalized := utils.NormalizeNameVersion(nameVersion)
 	slashCount := strings.Count(normalized, "/")
 
@@ -441,7 +432,7 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string,
 
 	if external {
 		// External builds don't need to resolve build source
-		return createConcreteType(base, isRef, tmpDir)
+		return createConcreteType(ctx, base, isRef, tmpDir)
 	}
 
 	// Check if already installed or temporary overlay exists.
@@ -452,7 +443,7 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string,
 	}
 
 	// Resolve build source and determine concrete type
-	return createConcreteType(base, isRef, tmpDir)
+	return createConcreteType(ctx, base, isRef, tmpDir)
 }
 
 // NewCondaObjectWithSource creates a CondaBuildObject with custom buildSource
@@ -493,7 +484,7 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 
 // FromExternalSource creates a BuildObject from an external build script or def file
 // All overlays are stored in imagesDir regardless of type
-func FromExternalSource(targetPrefix, source string, isApptainer bool, imagesDir, tmpDir string) (BuildObject, error) {
+func FromExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, imagesDir, tmpDir string) (BuildObject, error) {
 	nameVersion := filepath.Base(targetPrefix)
 	nameVersion = utils.NormalizeNameVersion(nameVersion)
 
@@ -522,7 +513,7 @@ func FromExternalSource(targetPrefix, source string, isApptainer bool, imagesDir
 
 	// Parse script metadata if it's a shell script
 	if isShell {
-		if err := base.parseScriptMetadata(); err != nil {
+		if err := base.parseScriptMetadata(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -550,7 +541,7 @@ func FromExternalSource(targetPrefix, source string, isApptainer bool, imagesDir
 // It determines whether to create a conda, def, or script build based on:
 // - isRef flag (from slash count > 1)
 // - build source resolution: .def -> DefBuildObject, shell script -> ScriptBuildObject, not found -> conda
-func createConcreteType(base *BaseBuildObject, isRef bool, tmpDir string) (BuildObject, error) {
+func createConcreteType(ctx context.Context, base *BaseBuildObject, isRef bool, tmpDir string) (BuildObject, error) {
 	// Resolve build source - this determines the actual type based on file extension
 	isConda, isContainer, err := resolveBuildSource(base, tmpDir)
 	if err != nil {
@@ -568,7 +559,7 @@ func createConcreteType(base *BaseBuildObject, isRef bool, tmpDir string) (Build
 
 	// It's a shell script (no extension or .sh/.bash)
 	// Parse script metadata
-	if err := base.parseScriptMetadata(); err != nil {
+	if err := base.parseScriptMetadata(ctx); err != nil {
 		return nil, err
 	}
 

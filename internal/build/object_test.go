@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,7 @@ func TestParseScriptMetadata_RequiresTTY(t *testing.T) {
 		targetOverlayPath: "",
 	}
 
-	err = base.parseScriptMetadata()
+	err = base.parseScriptMetadata(context.Background())
 	if err == nil {
 		t.Fatalf("expected error when interactive prompts are present but no TTY is available")
 	}
@@ -60,7 +61,7 @@ func TestParseScriptMetadata_NoInteractive(t *testing.T) {
 		targetOverlayPath: "",
 	}
 
-	err = base.parseScriptMetadata()
+	err = base.parseScriptMetadata(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,7 +92,7 @@ func TestParseScriptMetadata_NcpusFromSlurm(t *testing.T) {
 		targetOverlayPath: "",
 	}
 
-	err = base.parseScriptMetadata()
+	err = base.parseScriptMetadata(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -122,7 +123,7 @@ func TestParseScriptMetadata_NcpusFromPBS(t *testing.T) {
 		targetOverlayPath: "",
 	}
 
-	err = base.parseScriptMetadata()
+	err = base.parseScriptMetadata(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -166,7 +167,7 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenInstalled(t *testing.T) {
 	config.InitDataPaths()
 
 	// Call NewBuildObject: should return without attempting to parse the interactive script
-	bo, err := NewBuildObject(nameVersion, false, imagesDir, tmpDir, false)
+	bo, err := NewBuildObject(context.Background(), nameVersion, false, imagesDir, tmpDir, false)
 	if err != nil {
 		t.Fatalf("NewBuildObject returned error: %v", err)
 	}
@@ -211,7 +212,7 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenTmpOverlayExists(t *testing.T
 	config.InitDataPaths()
 
 	// Call NewBuildObject: should return without attempting to parse the interactive script
-	bo, err := NewBuildObject(nameVersion, false, imagesDir, tmpDir, false)
+	bo, err := NewBuildObject(context.Background(), nameVersion, false, imagesDir, tmpDir, false)
 	if err != nil {
 		t.Fatalf("NewBuildObject returned error: %v", err)
 	}

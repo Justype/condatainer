@@ -1,8 +1,10 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/fatih/color"
 	"golang.org/x/term"
@@ -210,4 +212,21 @@ func IsInteractiveShell() bool {
 // Returns true if --yes flag is set, false otherwise
 func ShouldAnswerYes() bool {
 	return YesMode
+}
+
+// ReadLineContext reads a whitespace-trimmed line from stdin.
+// Returns context.Canceled if ctx is done before input arrives.
+func ReadLineContext(ctx context.Context) (string, error) {
+	ch := make(chan string, 1)
+	go func() {
+		var s string
+		fmt.Scanln(&s)
+		ch <- s
+	}()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case s := <-ch:
+		return strings.ToLower(strings.TrimSpace(s)), nil
+	}
 }

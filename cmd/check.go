@@ -161,7 +161,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 	buildObjects := make([]build.BuildObject, 0, len(missingDeps))
 	for _, pkg := range missingDeps {
-		bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir(), false)
+		bo, err := build.NewBuildObject(cmd.Context(), pkg, false, imagesDir, config.GetWritableTmpDir(), false)
 		if err != nil {
 			return fmt.Errorf("failed to create build object for %s: %w", pkg, err)
 		}
@@ -169,7 +169,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build graph and execute
-	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, false)
+	graph, err := build.NewBuildGraph(cmd.Context(), buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, false)
 	if err != nil {
 		return fmt.Errorf("failed to create build graph: %w", err)
 	}

@@ -130,6 +130,17 @@ func Execute() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	// Print a newline on interrupt so cleanup output starts on a fresh line
+	// instead of appearing on the same line as the "^C" echo.
+	interruptCh := make(chan os.Signal, 1)
+	signal.Notify(interruptCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(interruptCh)
+	go func() {
+		if _, ok := <-interruptCh; ok {
+			fmt.Fprintln(os.Stderr)
+		}
+	}()
+
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		// Cobra's automatic error printing is silenced. For Apptainer errors
 		// print only the captured output (trimmed) and exit with non-zero
