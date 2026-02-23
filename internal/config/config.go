@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/Justype/condatainer/internal/scheduler"
@@ -13,6 +14,20 @@ import (
 const VERSION = "1.1.1"
 const GitHubRepo = "Justype/condatainer"
 const GITHUB_REPO = GitHubRepo // Exported constant for compatibility
+const DEFAULT_DISTRO = "ubuntu24"
+
+func GetAvailableDistros() []string {
+	return []string{
+		"ubuntu20",
+		"ubuntu22",
+		"ubuntu24",
+	}
+}
+
+// IsValidDistro returns true if the provided name matches one of the known distro slugs.
+func IsValidDistro(distro string) bool {
+	return slices.Contains(GetAvailableDistros(), distro)
+}
 
 // PrebuiltBaseURL is the base URL for downloading prebuilt images and overlays
 const PrebuiltBaseURL = "https://github.com/Justype/cnt-prebuilt/releases/download/prebuilt"
@@ -39,6 +54,10 @@ type Config struct {
 	// Binary paths
 	ApptainerBin string
 	SchedulerBin string // Optional: path to sbatch/scheduler binary (auto-detected if empty)
+
+	// Base OS overlay slug (e.g. "ubuntu24"). Determines the base image filename:
+	// "ubuntu24" → "ubuntu24--base_image.sqf". Defaults to "ubuntu24".
+	DefaultDistro string
 
 	// Remote repository settings
 	Branch       string // Git branch for fetching remote build scripts and metadata (default: "main")
@@ -108,8 +127,9 @@ func LoadDefaults(executablePath string) {
 		ProgramDir: programDir,
 		LogsDir:    filepath.Join(os.Getenv("HOME"), "logs"),
 
-		ApptainerBin: detectApptainerBin(),
-		SchedulerBin: "", // Auto-detect scheduler binary (empty = search PATH)
+		ApptainerBin:  detectApptainerBin(),
+		SchedulerBin:  "", // Auto-detect scheduler binary (empty = search PATH)
+		DefaultDistro: DEFAULT_DISTRO,
 
 		Branch: "main", // Default branch for remote build scripts
 
@@ -183,6 +203,12 @@ func detectApptainerBin() string {
 
 	// Default to just "apptainer" and let the user's PATH resolve it
 	return "apptainer"
+}
+
+// BaseImageSqfName returns the expected .sqf filename for the configured DefaultDistro.
+// e.g. "ubuntu24" → "ubuntu24--base_image.sqf"
+func BaseImageSqfName() string {
+	return Global.DefaultDistro + "--base_image.sqf"
 }
 
 // GetBaseImage returns the path to base_image.sif, searching all image directories.

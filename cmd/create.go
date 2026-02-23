@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
@@ -23,6 +22,7 @@ var (
 	createSource    string
 	createTempSize  string
 	createRemote    bool
+	createUpdate    bool
 
 	// compression flags are generated dynamically from config.CompressOptions
 	compFlags map[string]*bool
@@ -84,8 +84,8 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 		}
 
 		// 2. Ensure base image exists (also checks for apptainer)
-		if err := apptainer.EnsureBaseImage(ctx, false, false); err != nil {
-			ExitWithError("%v", err)
+		if err := build.EnsureBaseImage(ctx, false); err != nil {
+			ExitWithError("Failed to ensure base image: %v", err)
 		}
 
 		// 3. Handle Compression Config – consult helper that respects available
@@ -106,16 +106,32 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 			config.Global.Build.TmpSizeMB = sizeMB
 		}
 
-		// 5. Normalize package names (only for build scripts, not for conda packages with -n)
-		normalizedArgs := make([]string, len(args))
-		for i, arg := range args {
-			normalizedArgs[i] = utils.NormalizeNameVersion(arg)
+		// 5. Normalize package names (only for build-script mode, not for conda/prefix/source modes)
+		normalizedArgs := args
+		if createName == "" && createPrefix == "" && createSource == "" {
+			normalizedArgs = make([]string, len(args))
+			for i, arg := range args {
+				normalized := utils.NormalizeNameVersion(arg)
+				// Bare name (no slash) → expand to <default_distro>/<name>
+				// e.g. "igv" → "ubuntu24/igv"  →  ubuntu24--igv.sqf
+				if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
+					expanded := config.Global.DefaultDistro + "/" + normalized
+					utils.PrintNote("Expanding '%s' to '%s'", normalized, expanded)
+					normalized = expanded
+				}
+				normalizedArgs[i] = normalized
+			}
 		}
 
 		// 6. Handle --remote flag (CLI flag or config)
 		build.PreferRemote = createRemote || config.Global.PreferRemote
 
-		// 7. Execute create based on mode
+		// 7. Announce update mode
+		if createUpdate {
+			utils.PrintNote("Update mode: existing overlays will be rebuilt.")
+		}
+
+		// 8. Execute create based on mode
 		if createSource != "" {
 			// Mode: --source (external image like docker://ubuntu)
 			runCreateFromSource(ctx)
@@ -145,6 +161,7 @@ func init() {
 	f.StringVarP(&createSource, "source", "s", "", "Remote source URI (e.g., docker://ubuntu:22.04)")
 	f.StringVar(&createTempSize, "temp-size", "20G", "Size of temporary overlay")
 	f.BoolVar(&createRemote, "remote", false, "Remote build scripts take precedence over local")
+	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist (atomic .new swap)")
 
 	// Compression flags: create a bool flag for each known option
 	compFlags = make(map[string]*bool)
@@ -169,7 +186,7 @@ func runCreatePackages(ctx context.Context, packages []string) {
 
 	buildObjects := make([]build.BuildObject, 0, len(packages))
 	for _, pkg := range packages {
-		bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir())
+		bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir(), createUpdate)
 		if err != nil {
 			ExitWithError("Failed to create build object for %s: %v", pkg, err)
 		}
@@ -177,7 +194,7 @@ func runCreatePackages(ctx context.Context, packages []string) {
 		buildObjects = append(buildObjects, bo)
 	}
 
-	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
+	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build graph: %v", err)
 	}
@@ -202,12 +219,14 @@ func runCreateWithName(ctx context.Context, packages []string) {
 		ExitWithError("--name cannot contain more than one '/'")
 	}
 
-	// Check if already exists (search all paths)
-	searchName := strings.ReplaceAll(normalizedName, "/", "--") + ".sqf"
-	if existingPath, err := config.FindImage(searchName); err == nil {
-		utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
-			utils.StyleName(filepath.Base(existingPath)), utils.StylePath(existingPath))
-		return
+	// Check if already exists (search all paths), skip only when not updating
+	if !createUpdate {
+		searchName := strings.ReplaceAll(normalizedName, "/", "--") + ".sqf"
+		if existingPath, err := config.FindImage(searchName); err == nil {
+			utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
+				utils.StyleName(filepath.Base(existingPath)), utils.StylePath(existingPath))
+			return
+		}
 	}
 
 	utils.PrintDebug("[CREATE] Creating overlay with name: %s", createName)
@@ -229,7 +248,7 @@ func runCreateWithName(ctx context.Context, packages []string) {
 	}
 
 	// Create CondaBuildObject using the new factory function
-	bo, err := build.NewCondaObjectWithSource(normalizedName, buildSource, imagesDir, config.GetWritableTmpDir())
+	bo, err := build.NewCondaObjectWithSource(normalizedName, buildSource, imagesDir, config.GetWritableTmpDir(), createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build object: %v", err)
 	}
@@ -261,7 +280,7 @@ func runCreateWithPrefix(ctx context.Context) {
 	if strings.HasSuffix(createFile, ".yml") || strings.HasSuffix(createFile, ".yaml") {
 		// YAML conda environment - use NewCondaObjectWithSource
 		absFile, _ := filepath.Abs(createFile)
-		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, config.GetWritableTmpDir())
+		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, config.GetWritableTmpDir(), createUpdate)
 		if err != nil {
 			ExitWithError("Failed to create build object: %v", err)
 		}
@@ -278,7 +297,7 @@ func runCreateWithPrefix(ctx context.Context) {
 		}
 
 		buildObjects := []build.BuildObject{bo}
-		graph, err := build.NewBuildGraph(buildObjects, outputDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
+		graph, err := build.NewBuildGraph(buildObjects, outputDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
 		if err != nil {
 			ExitWithError("Failed to create build graph: %v", err)
 		}
@@ -335,7 +354,7 @@ func runCreateFromSource(ctx context.Context) {
 	}
 
 	buildObjects := []build.BuildObject{bo}
-	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
+	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build graph: %v", err)
 	}

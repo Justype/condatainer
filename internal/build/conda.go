@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -100,11 +101,13 @@ func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 
 	styledOverlay := utils.StyleName(filepath.Base(targetOverlayPath))
 
-	// Check if already exists
-	if _, err := os.Stat(targetOverlayPath); err == nil {
-		utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
-			styledOverlay, utils.StylePath(targetOverlayPath))
-		return nil
+	// Check if already exists (skip only when not in update mode)
+	if !c.update {
+		if _, err := os.Stat(targetOverlayPath); err == nil {
+			utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
+				styledOverlay, utils.StylePath(targetOverlayPath))
+			return nil
+		}
 	}
 
 	buildMode := "local"
@@ -115,7 +118,15 @@ func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 
 	// Create temporary overlay
 	if err := c.CreateTmpOverlay(ctx, false); err != nil {
-		return fmt.Errorf("temporary overlay for %s already exists. Maybe a build is still running?", c.nameVersion)
+		if errors.Is(err, ErrTmpOverlayExists) {
+			utils.PrintWarning("Stale temporary overlay found for %s. Cleaning up...", c.nameVersion)
+			c.Cleanup(true)
+			if err := c.CreateTmpOverlay(ctx, false); err != nil {
+				return fmt.Errorf("failed to create temporary overlay: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to create temporary overlay: %w", err)
+		}
 	}
 
 	done := make(chan struct{})
@@ -176,6 +187,12 @@ func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleCommand(fmt.Sprintf("micromamba (%s=%s)", c.packageName, c.packageVersion)))
 	}
 
+	// Determine final output path: write to .new when updating for atomic replacement
+	finalPath := c.targetOverlayPath
+	if c.update {
+		finalPath = c.targetOverlayPath + ".new"
+	}
+
 	// Build the bash script to run inside container
 	bashScript := fmt.Sprintf(`
 trap 'exit 130' INT TERM
@@ -192,7 +209,7 @@ echo "Packing overlay to SquashFS..."
 mksquashfs /cnt %s -processors %d -keep-as-directory %s
 `,
 		installCmd,
-		c.targetOverlayPath, c.effectiveNcpus(), config.Global.Build.CompressArgs,
+		finalPath, c.effectiveNcpus(), config.Global.Build.CompressArgs,
 	)
 
 	// Always bind the target overlay directory so mksquashfs can write there
@@ -223,9 +240,18 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s
 		return fmt.Errorf("failed to build conda package %s: %w", c.nameVersion, err)
 	}
 
-	// Set permissions on target overlay
-	if err := os.Chmod(c.targetOverlayPath, 0o664); err != nil {
-		utils.PrintDebug("Failed to set permissions on %s: %v", c.targetOverlayPath, err)
+	// Set permissions on output file
+	if err := os.Chmod(finalPath, 0o664); err != nil {
+		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
+	}
+
+	// Atomic replacement: remove old and rename .new → target
+	if c.update {
+		os.Remove(c.targetOverlayPath) //nolint:errcheck
+		if err := os.Rename(finalPath, c.targetOverlayPath); err != nil {
+			os.Remove(finalPath) //nolint:errcheck
+			return fmt.Errorf("failed to replace overlay %s: %w", c.targetOverlayPath, err)
+		}
 	}
 
 	utils.PrintSuccess("Finished overlay %s", utils.StylePath(c.targetOverlayPath))

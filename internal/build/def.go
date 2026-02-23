@@ -66,11 +66,13 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 
 	styledOverlay := utils.StyleName(filepath.Base(targetOverlayPath))
 
-	// Check if already exists
-	if _, err := os.Stat(targetOverlayPath); err == nil {
-		utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
-			styledOverlay, utils.StylePath(targetOverlayPath))
-		return nil
+	// Check if already exists (skip only when not in update mode)
+	if !d.update {
+		if _, err := os.Stat(targetOverlayPath); err == nil {
+			utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
+				styledOverlay, utils.StylePath(targetOverlayPath))
+			return nil
+		}
 	}
 
 	buildMode := "local"
@@ -110,10 +112,25 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	if d.isRemote {
 		if writableDir, err := config.GetWritableImagesDir(); err == nil {
 			if filepath.Dir(targetOverlayPath) == writableDir {
-				if tryDownloadPrebuiltOverlay(d.nameVersion, targetOverlayPath) {
+				// In update mode write to .new so the existing overlay is intact until success
+				downloadPath := targetOverlayPath
+				if d.update {
+					downloadPath = targetOverlayPath + ".new"
+				}
+				if tryDownloadPrebuiltOverlay(d.nameVersion, downloadPath) {
+					if d.update {
+						os.Remove(targetOverlayPath) //nolint:errcheck
+						if err := os.Rename(downloadPath, targetOverlayPath); err != nil {
+							os.Remove(downloadPath) //nolint:errcheck
+							return fmt.Errorf("failed to replace overlay %s: %w", targetOverlayPath, err)
+						}
+					}
 					// Cleanup downloaded remote build script (if any)
 					d.Cleanup(false)
 					return nil
+				}
+				if d.update {
+					os.Remove(downloadPath) //nolint:errcheck // clean up partial download
 				}
 			}
 		}
@@ -137,10 +154,17 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		return fmt.Errorf("failed to build SIF from %s: %w", d.buildSource, err)
 	}
 
-	utils.PrintMessage("Extracting SquashFS to %s", utils.StylePath(targetOverlayPath))
+	// Determine final output path: write to .new when updating for atomic replacement
+	finalPath := targetOverlayPath
+	if d.update {
+		finalPath = targetOverlayPath + ".new"
+	}
+
+	utils.PrintMessage("Extracting SquashFS to %s", utils.StylePath(finalPath))
 
 	// Extract SquashFS from SIF
-	if err := apptainer.DumpSifToSquashfs(ctx, d.tmpOverlayPath, targetOverlayPath); err != nil {
+	if err := apptainer.DumpSifToSquashfs(ctx, d.tmpOverlayPath, finalPath); err != nil {
+		os.Remove(finalPath) //nolint:errcheck
 		cleanupFunc()
 		if apptainer.IsBuildCancelled(err) {
 			utils.PrintMessage("Build cancelled for %s. Overlay unchanged.", styledOverlay)
@@ -149,9 +173,18 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		return fmt.Errorf("failed to dump SquashFS from SIF: %w", err)
 	}
 
-	// Set permissions on target overlay
-	if err := os.Chmod(targetOverlayPath, 0o664); err != nil {
-		utils.PrintDebug("Failed to set permissions on %s: %v", targetOverlayPath, err)
+	// Set permissions on output file
+	if err := os.Chmod(finalPath, 0o664); err != nil {
+		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
+	}
+
+	// Atomic replacement: remove old and rename .new → target
+	if d.update {
+		os.Remove(targetOverlayPath) //nolint:errcheck
+		if err := os.Rename(finalPath, targetOverlayPath); err != nil {
+			os.Remove(finalPath) //nolint:errcheck
+			return fmt.Errorf("failed to replace overlay %s: %w", targetOverlayPath, err)
+		}
 	}
 
 	utils.PrintSuccess("Finished overlay %s", utils.StylePath(targetOverlayPath))

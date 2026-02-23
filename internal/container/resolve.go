@@ -125,5 +125,17 @@ func buildOverlayPathFromSpec(normalized string) (string, error) {
 		}
 	}
 
+	// Fallback: bare name (no "/") → try <default_distro>--<name>.sqf
+	if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
+		prefixed := config.Global.DefaultDistro + "--" + normalized + ".sqf"
+		for _, dir := range config.GetImageSearchPaths() {
+			path := filepath.Join(dir, prefixed)
+			if utils.FileExists(path) {
+				utils.PrintDebug("[RESOLVE] Found overlay via OS-prefix fallback: %s", path)
+				return path, nil
+			}
+		}
+	}
+
 	return "", fmt.Errorf("overlay %s not found (searched: %v)", normalized, config.GetImageSearchPaths())
 }

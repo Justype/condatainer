@@ -22,20 +22,32 @@ func TestNormalizeCompressArgs(t *testing.T) {
 		}
 	}
 }
-func TestArgsForCompressAndNames(t *testing.T) {
-    names := CompressNames()
-    if len(names) == 0 {
-        t.Fatalf("no compress names returned")
-    }
 
-    for _, name := range names {
-        args := ArgsForCompress(name)
-        if args == name {
-            t.Errorf("ArgsForCompress(%q) returned input unchanged", name)
-        }
-    }
-    // unknown name should be returned unchanged
-    if got := ArgsForCompress("foo"); got != "foo" {
-        t.Errorf("ArgsForCompress of unknown name changed value: %q", got)
-    }
+func TestIsValidDistro(t *testing.T) {
+	for _, d := range GetAvailableDistros() {
+		if !IsValidDistro(d) {
+			t.Errorf("expected distro %q to be valid", d)
+		}
+	}
+	if IsValidDistro("not-a-distro") {
+		t.Errorf("unexpectedly accepted invalid distro")
+	}
+}
+
+func TestArgsForCompressAndNames(t *testing.T) {
+	names := CompressNames()
+	if len(names) == 0 {
+		t.Fatalf("no compress names returned")
+	}
+
+	for _, name := range names {
+		args := ArgsForCompress(name)
+		if args == name {
+			t.Errorf("ArgsForCompress(%q) returned input unchanged", name)
+		}
+	}
+	// unknown name should be returned unchanged
+	if got := ArgsForCompress("foo"); got != "foo" {
+		t.Errorf("ArgsForCompress of unknown name changed value: %q", got)
+	}
 }

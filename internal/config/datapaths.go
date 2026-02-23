@@ -384,26 +384,6 @@ func FindImage(name string) (string, error) {
 	return "", fmt.Errorf("image not found: %s (searched: %v)", name, GetImageSearchPaths())
 }
 
-// FindBuildScriptFile searches all build script paths for a script by name.
-// Returns the full path to the script if found.
-func FindBuildScriptFile(name string) (string, error) {
-	for _, dir := range GetBuildScriptSearchPaths() {
-		// Try exact name
-		candidate := filepath.Join(dir, name)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-
-		// Try with .def extension
-		candidate = filepath.Join(dir, name+".def")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-
-	return "", fmt.Errorf("build script not found: %s", name)
-}
-
 // FindHelperScript searches all helper script paths for a script by name.
 // Returns the full path to the script if found.
 func FindHelperScript(name string) (string, error) {
@@ -487,51 +467,6 @@ type ImageInfo struct {
 	Source string // Source directory type: "extra", "portable", "scratch", "user", or "legacy"
 }
 
-// ListAllImages returns all images from all search paths.
-// Images in higher-priority directories shadow those in lower-priority ones.
-func ListAllImages() ([]ImageInfo, error) {
-	seen := make(map[string]bool)
-	var results []ImageInfo
-
-	for i, dir := range GetImageSearchPaths() {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			// Log but continue with other directories
-			continue
-		}
-
-		source := categorizeSource(dir, i)
-
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-
-			name := e.Name()
-			// Skip non-image files
-			if !strings.HasSuffix(name, ".sif") && !strings.HasSuffix(name, ".sqf") {
-				continue
-			}
-
-			if seen[name] {
-				continue // Already found in higher-priority dir
-			}
-			seen[name] = true
-
-			results = append(results, ImageInfo{
-				Name:   name,
-				Path:   filepath.Join(dir, name),
-				Source: source,
-			})
-		}
-	}
-
-	return results, nil
-}
-
 // ScriptFileInfo holds information about a script found during enumeration.
 type ScriptFileInfo struct {
 	Name   string // Filename
@@ -539,137 +474,36 @@ type ScriptFileInfo struct {
 	Source string // Source directory type
 }
 
-// ListAllBuildScripts returns all build scripts from all search paths.
-func ListAllBuildScripts() ([]ScriptFileInfo, error) {
-	seen := make(map[string]bool)
-	var results []ScriptFileInfo
+// // categorizeSource determines the source type of a directory based on its index and path.
+// func categorizeSource(dir string, index int) string {
+// 	portableDir := GetPortableDataDir()
+// 	scratchDir := GetScratchDataDir()
+// 	userDir := GetUserDataDir()
 
-	for i, dir := range GetBuildScriptSearchPaths() {
-		source := categorizeSource(dir, i)
+// 	if portableDir != "" && strings.HasPrefix(dir, portableDir) {
+// 		return "portable"
+// 	}
+// 	if scratchDir != "" && strings.HasPrefix(dir, scratchDir) {
+// 		return "scratch"
+// 	}
+// 	if userDir != "" && strings.HasPrefix(dir, userDir) {
+// 		return "user"
+// 	}
 
-		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				if os.IsNotExist(err) {
-					return nil
-				}
-				return nil // Continue with other files
-			}
-
-			if info.IsDir() {
-				return nil
-			}
-
-			name := info.Name()
-
-			// Skip helper scripts (.py and .sh files) and templates
-			if strings.HasSuffix(name, ".py") || strings.HasSuffix(name, ".sh") {
-				return nil
-			}
-			if strings.Contains(path, "template") {
-				return nil
-			}
-
-			// Use relative path from dir as the key
-			relPath, _ := filepath.Rel(dir, path)
-			if relPath == "" {
-				relPath = name
-			}
-
-			if seen[relPath] {
-				return nil // Already found in higher-priority dir
-			}
-			seen[relPath] = true
-
-			results = append(results, ScriptFileInfo{
-				Name:   relPath,
-				Path:   path,
-				Source: source,
-			})
-
-			return nil
-		})
-
-		if err != nil && !os.IsNotExist(err) {
-			continue
-		}
-	}
-
-	return results, nil
-}
-
-// ListAllHelperScripts returns all helper scripts from all search paths.
-func ListAllHelperScripts() ([]ScriptFileInfo, error) {
-	seen := make(map[string]bool)
-	var results []ScriptFileInfo
-
-	for i, dir := range GetHelperScriptSearchPaths() {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			continue
-		}
-
-		source := categorizeSource(dir, i)
-
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-
-			name := e.Name()
-			// Skip hidden files
-			if strings.HasPrefix(name, ".") {
-				continue
-			}
-
-			if seen[name] {
-				continue
-			}
-			seen[name] = true
-
-			results = append(results, ScriptFileInfo{
-				Name:   name,
-				Path:   filepath.Join(dir, name),
-				Source: source,
-			})
-		}
-	}
-
-	return results, nil
-}
-
-// categorizeSource determines the source type of a directory based on its index and path.
-func categorizeSource(dir string, index int) string {
-	portableDir := GetPortableDataDir()
-	scratchDir := GetScratchDataDir()
-	userDir := GetUserDataDir()
-
-	if portableDir != "" && strings.HasPrefix(dir, portableDir) {
-		return "portable"
-	}
-	if scratchDir != "" && strings.HasPrefix(dir, scratchDir) {
-		return "scratch"
-	}
-	if userDir != "" && strings.HasPrefix(dir, userDir) {
-		return "user"
-	}
-
-	// Fallback based on index (matching the search order)
-	switch index {
-	case 0:
-		return "extra"
-	case 1:
-		return "portable"
-	case 2:
-		return "scratch"
-	case 3:
-		return "user"
-	default:
-		return "legacy"
-	}
-}
+// 	// Fallback based on index (matching the search order)
+// 	switch index {
+// 	case 0:
+// 		return "extra"
+// 	case 1:
+// 		return "portable"
+// 	case 2:
+// 		return "scratch"
+// 	case 3:
+// 		return "user"
+// 	default:
+// 		return "legacy"
+// 	}
+// }
 
 // DirExists checks if a directory exists and is a directory.
 func DirExists(path string) bool {
@@ -680,51 +514,16 @@ func DirExists(path string) bool {
 	return info.IsDir()
 }
 
-// GetExistingImagePaths returns only the image search paths that actually exist.
-func GetExistingImagePaths() []string {
-	var existing []string
-	for _, dir := range GetImageSearchPaths() {
-		if DirExists(dir) {
-			existing = append(existing, dir)
-		}
-	}
-	return existing
-}
-
-// GetExistingBuildScriptPaths returns only the build script search paths that actually exist.
-func GetExistingBuildScriptPaths() []string {
-	var existing []string
-	for _, dir := range GetBuildScriptSearchPaths() {
-		if DirExists(dir) {
-			existing = append(existing, dir)
-		}
-	}
-	return existing
-}
-
-// GetExistingHelperScriptPaths returns only the helper script search paths that actually exist.
-func GetExistingHelperScriptPaths() []string {
-	var existing []string
-	for _, dir := range GetHelperScriptSearchPaths() {
-		if DirExists(dir) {
-			existing = append(existing, dir)
-		}
-	}
-	return existing
-}
-
-// BaseImageName is the filename for the base container image.
-const BaseImageName = "base_image.sif"
-
 // BaseImageDefName is the filename for the base image definition file.
 const BaseImageDefName = "base_image.def"
 
 // FindBaseImage searches all image paths for the base image.
 // Returns the full path if found, empty string otherwise.
+// slug-named .sqf (e.g. "ubuntu24--base_image.sqf")
 func FindBaseImage() string {
+	sqfName := BaseImageSqfName()
 	for _, dir := range GetImageSearchPaths() {
-		candidate := filepath.Join(dir, BaseImageName)
-		if _, err := os.Stat(candidate); err == nil {
+		if candidate := filepath.Join(dir, sqfName); fileExists(candidate) {
 			return candidate
 		}
 	}
@@ -732,33 +531,11 @@ func FindBaseImage() string {
 }
 
 // GetBaseImageWritePath returns the path where a new base image should be written.
-// This is the first writable images directory + base_image.sif
+// Returns the first writable images directory + slug-based .sqf name (e.g. ubuntu24--base_image.sqf).
 func GetBaseImageWritePath() (string, error) {
 	dir, err := GetWritableImagesDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, BaseImageName), nil
-}
-
-// FindBaseImageDef searches all build-scripts paths for the base image definition file.
-// Returns the full path if found, empty string otherwise.
-func FindBaseImageDef() string {
-	for _, dir := range GetBuildScriptSearchPaths() {
-		candidate := filepath.Join(dir, BaseImageDefName)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-	}
-	return ""
-}
-
-// GetBaseImageDefWritePath returns the path where a new base image def should be written.
-// This is the first writable build-scripts directory + base_image.def
-func GetBaseImageDefWritePath() (string, error) {
-	dir, err := GetWritableBuildScriptsDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, BaseImageDefName), nil
+	return filepath.Join(dir, BaseImageSqfName()), nil
 }

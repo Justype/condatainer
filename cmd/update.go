@@ -9,13 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
-	"strconv"
 	"strings"
 
 	"golang.org/x/mod/semver"
 
-	"github.com/Justype/condatainer/internal/apptainer"
+	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -49,9 +47,6 @@ func init() {
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
-	// Capture old version before updating
-	oldVersion := config.VERSION
-
 	// Get current executable path
 	exePath, err := os.Executable()
 	if err != nil {
@@ -224,12 +219,10 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		utils.PrintMessage("Downloading base image for version %s...", release.TagName)
 
-		// Download new base image (update=true, downloadOnly=true)
-		// This downloads to .new and replaces old if successful
-		if err := apptainer.EnsureBaseImage(context.Background(), true, true); err != nil {
+		// Update the base image. Errors are non-fatal — warn and let the user rebuild manually.
+		if err := build.EnsureBaseImage(context.Background(), true); err != nil {
 			utils.PrintWarning("Failed to update base image: %v", err)
 			utils.PrintWarning("You may need to manually rebuild the base image.")
-			// Don't fail - continue with version check
 		} else {
 			utils.PrintSuccess("Base image updated successfully")
 		}
@@ -237,39 +230,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		utils.PrintDebug("Base image update skipped (patch version change only)")
 	}
 
-	// Check for major version upgrade and warn if so
-	if isMajorChange(oldVersion, release.TagName) {
-		fmt.Println()
-		if m1, err1 := getMajorNumber(oldVersion); err1 == nil {
-			if m2, err2 := getMajorNumber(latestVersion); err2 == nil {
-				utils.PrintWarning("Major version upgrade detected: %d.x → %d.x", m1, m2)
-			}
-		}
-		fmt.Println()
-		containers := getInstalledOSOverlays()
-		if len(containers) > 0 {
-			fmt.Println("The following OS overlays may need to be rebuilt:")
-			for _, name := range containers {
-				fmt.Printf("  - %s\n", utils.StyleName(name))
-			}
-		}
-	}
-
 	return nil
-}
-
-// getMajorNumber returns the major version as an integer. The input may
-// include or omit a leading 'v'. If parsing fails the error is returned.
-func getMajorNumber(version string) (int, error) {
-	if !strings.HasPrefix(version, "v") {
-		version = "v" + version
-	}
-	c := semver.Canonical(version)
-	if c == "" {
-		return 0, fmt.Errorf("invalid version %q", version)
-	}
-	maj := strings.TrimPrefix(semver.Major(c), "v")
-	return strconv.Atoi(maj)
 }
 
 // getMajorMinor returns the "vMAJOR.MINOR" string for a version, ignoring
@@ -283,18 +244,6 @@ func getMajorMinor(version string) string {
 		return ""
 	}
 	return semver.MajorMinor(c)
-}
-
-func isMinorChange(oldVersion, newVersion string) bool {
-	return getMajorMinor(oldVersion) != getMajorMinor(newVersion)
-}
-
-// isMajorChange reports whether the major version component has changed.
-// It returns false if either version cannot be parsed.
-func isMajorChange(oldVersion, newVersion string) bool {
-	m1, err1 := getMajorNumber(oldVersion)
-	m2, err2 := getMajorNumber(newVersion)
-	return err1 == nil && err2 == nil && m1 != m2
 }
 
 // compareVersions compares two semantic versions. It returns:
@@ -333,22 +282,6 @@ func compareVersions(v1, v2 string) int {
 		return 1
 	}
 	return 0
-}
-
-// getInstalledOSOverlays returns names of all installed OS overlays (SquashFS containing .singularity.d)
-func getInstalledOSOverlays() []string {
-	installed, err := getInstalledOverlaysMap()
-	if err != nil {
-		return nil
-	}
-	names := []string{}
-	for name, path := range installed {
-		if isOSOverlay(path) {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
 }
 
 // downloadFile downloads a file from a URL to a local path

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
@@ -380,7 +379,7 @@ func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string
 	}
 
 	// Ensure base image exists
-	if err := apptainer.EnsureBaseImage(ctx, false, false); err != nil {
+	if err := ensureBaseImage(ctx); err != nil {
 		return err
 	}
 

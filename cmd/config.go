@@ -24,6 +24,7 @@ var configKeys = []string{
 	"logs_dir",
 	"apptainer_bin",
 	"scheduler_bin",
+	"default_distro",
 	"submit_job",
 	"branch",
 	"prefer_remote",
@@ -62,6 +63,8 @@ func configValueCompletion(key string) []string {
 		return []string{"true", "false"}
 	case "prefer_remote", "parse_module_load":
 		return []string{"true", "false"}
+	case "default_distro":
+		return config.GetAvailableDistros()
 	case "branch":
 		return []string{"main", "dev"}
 	case "scheduler.nodes":
@@ -245,6 +248,12 @@ Shows:
 		}
 		fmt.Println()
 
+		// Distros and default
+		fmt.Println(utils.StyleTitle("Distros:"))
+		fmt.Printf("  Available:      %s\n", strings.Join(config.GetAvailableDistros(), ", "))
+		fmt.Printf("  default_distro: %s\n", config.Global.DefaultDistro)
+		fmt.Println()
+
 		// Runtime settings
 		fmt.Println(utils.StyleTitle("Runtime:"))
 		submitJobConfig := viper.GetBool("submit_job")
@@ -314,6 +323,7 @@ Shows:
 			"CONDATAINER_LOGS_DIR",
 			"CONDATAINER_APPTAINER_BIN",
 			"CONDATAINER_SCHEDULER_BIN",
+			"CONDATAINER_DEFAULT_DISTRO",
 			"CONDATAINER_SUBMIT_JOB",
 			"CONDATAINER_PARSE_MODULE_LOAD",
 			"CONDATAINER_SCHEDULER_NODES",
@@ -383,6 +393,7 @@ Time duration format (for build.time):
 			"logs_dir":                  true,
 			"apptainer_bin":             true,
 			"scheduler_bin":             true,
+			"default_distro":            true,
 			"submit_job":                true,
 			"branch":                    true,
 			"prefer_remote":             true,
@@ -399,6 +410,14 @@ Time duration format (for build.time):
 			"build.compress_args":       true,
 			"build.overlay_type":        true,
 			"extra_base_dirs":           true,
+		}
+
+		// Validate default_distro against known distros
+		if key == "default_distro" {
+			if !config.IsValidDistro(value) {
+				utils.PrintError("Unknown distro '%s'. Available: %s", value, strings.Join(config.GetAvailableDistros(), ", "))
+				os.Exit(ExitCodeError)
+			}
 		}
 
 		// Array keys that should be edited via config edit or env var
@@ -748,6 +767,17 @@ var configValidateCmd = &cobra.Command{
 		} else {
 			fmt.Printf("%s Build Memory must be > 0: %d\n", utils.StyleError("✗"), memMB)
 			valid = false
+		}
+
+		// Check default distro validity
+		distro := config.Global.DefaultDistro
+		if !config.IsValidDistro(distro) {
+			fmt.Printf("%s Default distro invalid: %s\n", utils.StyleError("✗"), distro)
+			valid = false
+		} else {
+			if !utils.QuietMode {
+				fmt.Printf("%s Default distro: %s\n", utils.StyleSuccess("✓"), distro)
+			}
 		}
 
 		if !utils.QuietMode {

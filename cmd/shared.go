@@ -3,15 +3,14 @@ package cmd
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -213,7 +212,7 @@ func needsValue(flag string) bool {
 
 // ensureBaseImage ensures the base image exists
 func ensureBaseImage(ctx context.Context) error {
-	return apptainer.EnsureBaseImage(ctx, false, false)
+	return build.EnsureBaseImage(ctx, false)
 }
 
 // ResolveBaseImage resolves a base image path to an absolute path
@@ -286,6 +285,8 @@ func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirec
 		}
 	}
 
+	addDistroAliasChoices(installed, choices, toComplete)
+
 	// Add local .sif files and local .sqf files that are OS overlays - for -b flag
 	for _, candidate := range localImageSuggestions(toComplete) {
 		if utils.IsSif(candidate) {
@@ -322,6 +323,8 @@ func overlaySuggestions(includeData bool, includeImg bool, toComplete string) ([
 			}
 		}
 	}
+
+	addDistroAliasChoices(installed, choices, toComplete)
 
 	for _, candidate := range localOverlaySuggestions(toComplete, includeImg) {
 		choices[candidate] = struct{}{}
@@ -421,47 +424,29 @@ func localOverlaySuggestions(toComplete string, includeImg bool) []string {
 	})
 }
 
-// sqfPathExists returns true if the given entry exists at the top level of the
-// SquashFS archive. unsquashfs always exits 0, but prints only "squashfs-root"
-// when the entry is absent. If it exists, a second line appears — so line count > 1 means found.
-func sqfPathExists(sqfPath, entry string) bool {
-	cmd := exec.Command("unsquashfs", "-l", sqfPath, entry)
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	pipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return false
+// addDistroAliasChoices adds shorthand aliases for OS overlays matching the default distro.
+// For each installed OS overlay named "<distro>/<name>", also suggests "<name>".
+func addDistroAliasChoices(installed map[string]string, choices map[string]struct{}, toComplete string) {
+	distro := config.Global.DefaultDistro
+	if distro == "" {
+		return
 	}
-	if err := cmd.Start(); err != nil {
-		return false
-	}
-	defer cmd.Process.Kill() //nolint:errcheck
-
-	buf := make([]byte, 4096)
-	count := 0
-	found := false
-	for {
-		n, err := pipe.Read(buf)
-		for _, b := range buf[:n] {
-			if b == '\n' {
-				count++
-				if count >= 2 {
-					found = true
-					goto done
-				}
-			}
+	prefix := distro + "/"
+	for name, path := range installed {
+		if !strings.HasPrefix(name, prefix) || !isOSOverlay(path) {
+			continue
 		}
-		if err != nil {
-			break
+		alias := strings.TrimPrefix(name, prefix)
+		if toComplete == "" || strings.HasPrefix(alias, toComplete) {
+			choices[alias] = struct{}{}
 		}
 	}
-done:
-	return found
 }
 
-// isOSOverlay reports whether a SquashFS overlay is an OS overlay by checking
-// for the presence of .singularity.d in the archive root.
+// isOSOverlay reports whether a SquashFS overlay is an OS overlay.
+// Delegates to overlay.IsOSType which checks for .singularity.d in the archive.
 func isOSOverlay(overlayPath string) bool {
-	return strings.HasSuffix(overlayPath, ".sqf") && sqfPathExists(overlayPath, ".singularity.d")
+	return overlay.IsOSType(overlayPath)
 }
 
 // isAppOverlay checks if an overlay path is considered an "app" overlay

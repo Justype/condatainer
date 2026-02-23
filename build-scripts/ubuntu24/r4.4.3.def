@@ -1,10 +1,6 @@
+#WHATIS: Ubuntu noble R 4.4.3
 Bootstrap: docker
-From: ubuntu:24.04
-
-%labels
-    Author Ziyue Cheng
-    Version 1.0
-    Description "Ubuntu24 with R 4.4.3"
+From: posit/r-base:4.4.3-noble
 
 %environment
     export LC_ALL=C.UTF-8
@@ -12,23 +8,5 @@ From: ubuntu:24.04
     export PS1='CNT \w> '
 
 %runscript
-  exec /bin/bash "$@"
+  exec /usr/bin/R "$@"
 
-%post
-    # Avoid interactive prompts
-    export DEBIAN_FRONTEND=noninteractive
-
-    # R-base
-    # install helper packages we need
-    apt-get -y update && apt-get -y install --no-install-recommends software-properties-common dirmngr wget
-    wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc
-
-    # add the R repo from CRAN
-    add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu noble-cran40/"
-    apt-get -y update && apt-get -y install \
-        r-base-dev=4.4.3-1.2404.0 \
-        r-base-core=4.4.3-1.2404.0 \
-        r-doc-html=4.4.3-1.2404.0 \
-        r-recommended=4.4.3-1.2404.0
-
-    apt-get clean && rm -rf /var/lib/apt/lists/*

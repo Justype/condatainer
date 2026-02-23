@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
@@ -15,7 +14,7 @@ import (
 )
 
 var (
-	checkAutoInstall    bool
+	checkAutoInstall     bool
 	checkParseModuleLoad bool
 )
 
@@ -124,7 +123,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	utils.PrintMessage("Attempting to auto-install missing dependencies...")
 
 	// Ensure base image exists
-	if err := apptainer.EnsureBaseImage(cmd.Context(), false, false); err != nil {
+	if err := ensureBaseImage(cmd.Context()); err != nil {
 		return err
 	}
 
@@ -162,7 +161,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 	buildObjects := make([]build.BuildObject, 0, len(missingDeps))
 	for _, pkg := range missingDeps {
-		bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir())
+		bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir(), false)
 		if err != nil {
 			return fmt.Errorf("failed to create build object for %s: %w", pkg, err)
 		}
@@ -170,7 +169,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build graph and execute
-	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
+	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, false)
 	if err != nil {
 		return fmt.Errorf("failed to create build graph: %w", err)
 	}

@@ -2945,11 +2945,209 @@
     "sbatch": false,
     "whatis": "Missing description"
   },
-  "ubuntu20/rstudio-server": {
+  "ubuntu20/r3.1.3": {
     "deps": [],
-    "relative_path": "ubuntu20/rstudio-server.def",
+    "relative_path": "ubuntu20/r3.1.3.def",
     "sbatch": false,
-    "whatis": "Missing description"
+    "whatis": "Ubuntu focal R 3.1.3"
+  },
+  "ubuntu20/r3.2.5": {
+    "deps": [],
+    "relative_path": "ubuntu20/r3.2.5.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 3.2.5"
+  },
+  "ubuntu20/r3.3.3": {
+    "deps": [],
+    "relative_path": "ubuntu20/r3.3.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 3.3.3"
+  },
+  "ubuntu20/r3.4.4": {
+    "deps": [],
+    "relative_path": "ubuntu20/r3.4.4.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 3.4.4"
+  },
+  "ubuntu20/r3.5.3": {
+    "deps": [],
+    "relative_path": "ubuntu20/r3.5.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 3.5.3"
+  },
+  "ubuntu20/r3.6.0": {
+    "deps": [],
+    "relative_path": "ubuntu20/r3.6.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 3.6.0"
+  },
+  "ubuntu20/r3.6.1": {
+    "deps": [],
+    "relative_path": "ubuntu20/r3.6.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 3.6.1"
+  },
+  "ubuntu20/r3.6.2": {
+    "deps": [],
+    "relative_path": "ubuntu20/r3.6.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 3.6.2"
+  },
+  "ubuntu20/r3.6.3": {
+    "deps": [],
+    "relative_path": "ubuntu20/r3.6.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 3.6.3"
+  },
+  "ubuntu20/r4.0.0": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.0.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.0.0"
+  },
+  "ubuntu20/r4.0.1": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.0.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.0.1"
+  },
+  "ubuntu20/r4.0.2": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.0.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.0.2"
+  },
+  "ubuntu20/r4.0.3": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.0.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.0.3"
+  },
+  "ubuntu20/r4.0.4": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.0.4.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.0.4"
+  },
+  "ubuntu20/r4.0.5": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.0.5.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.0.5"
+  },
+  "ubuntu20/r4.1.0": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.1.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.1.0"
+  },
+  "ubuntu20/r4.1.1": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.1.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.1.1"
+  },
+  "ubuntu20/r4.1.2": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.1.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.1.2"
+  },
+  "ubuntu20/r4.1.3": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.1.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.1.3"
+  },
+  "ubuntu20/r4.2.0": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.2.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.2.0"
+  },
+  "ubuntu20/r4.2.1": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.2.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.2.1"
+  },
+  "ubuntu20/r4.2.2": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.2.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.2.2"
+  },
+  "ubuntu20/r4.2.3": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.2.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.2.3"
+  },
+  "ubuntu20/r4.3.0": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.3.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.3.0"
+  },
+  "ubuntu20/r4.3.1": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.3.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.3.1"
+  },
+  "ubuntu20/r4.3.2": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.3.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.3.2"
+  },
+  "ubuntu20/r4.3.3": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.3.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.3.3"
+  },
+  "ubuntu20/r4.4.0": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.4.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.4.0"
+  },
+  "ubuntu20/r4.4.1": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.4.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.4.1"
+  },
+  "ubuntu20/r4.4.2": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.4.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.4.2"
+  },
+  "ubuntu20/r4.4.3": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.4.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.4.3"
+  },
+  "ubuntu20/r4.5.0": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.5.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.5.0"
+  },
+  "ubuntu20/r4.5.1": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.5.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.5.1"
+  },
+  "ubuntu20/r4.5.2": {
+    "deps": [],
+    "relative_path": "ubuntu20/r4.5.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu focal R 4.5.2"
   },
   "ubuntu20/xfce4": {
     "deps": [],
@@ -2981,11 +3179,209 @@
     "sbatch": false,
     "whatis": "Missing description"
   },
-  "ubuntu22/rstudio-server": {
+  "ubuntu22/r3.1.3": {
     "deps": [],
-    "relative_path": "ubuntu22/rstudio-server.def",
+    "relative_path": "ubuntu22/r3.1.3.def",
     "sbatch": false,
-    "whatis": "Missing description"
+    "whatis": "Ubuntu jammy R 3.1.3"
+  },
+  "ubuntu22/r3.2.5": {
+    "deps": [],
+    "relative_path": "ubuntu22/r3.2.5.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 3.2.5"
+  },
+  "ubuntu22/r3.3.3": {
+    "deps": [],
+    "relative_path": "ubuntu22/r3.3.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 3.3.3"
+  },
+  "ubuntu22/r3.4.4": {
+    "deps": [],
+    "relative_path": "ubuntu22/r3.4.4.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 3.4.4"
+  },
+  "ubuntu22/r3.5.3": {
+    "deps": [],
+    "relative_path": "ubuntu22/r3.5.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 3.5.3"
+  },
+  "ubuntu22/r3.6.0": {
+    "deps": [],
+    "relative_path": "ubuntu22/r3.6.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 3.6.0"
+  },
+  "ubuntu22/r3.6.1": {
+    "deps": [],
+    "relative_path": "ubuntu22/r3.6.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 3.6.1"
+  },
+  "ubuntu22/r3.6.2": {
+    "deps": [],
+    "relative_path": "ubuntu22/r3.6.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 3.6.2"
+  },
+  "ubuntu22/r3.6.3": {
+    "deps": [],
+    "relative_path": "ubuntu22/r3.6.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 3.6.3"
+  },
+  "ubuntu22/r4.0.0": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.0.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.0.0"
+  },
+  "ubuntu22/r4.0.1": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.0.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.0.1"
+  },
+  "ubuntu22/r4.0.2": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.0.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.0.2"
+  },
+  "ubuntu22/r4.0.3": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.0.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.0.3"
+  },
+  "ubuntu22/r4.0.4": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.0.4.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.0.4"
+  },
+  "ubuntu22/r4.0.5": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.0.5.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.0.5"
+  },
+  "ubuntu22/r4.1.0": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.1.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.1.0"
+  },
+  "ubuntu22/r4.1.1": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.1.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.1.1"
+  },
+  "ubuntu22/r4.1.2": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.1.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.1.2"
+  },
+  "ubuntu22/r4.1.3": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.1.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.1.3"
+  },
+  "ubuntu22/r4.2.0": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.2.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.2.0"
+  },
+  "ubuntu22/r4.2.1": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.2.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.2.1"
+  },
+  "ubuntu22/r4.2.2": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.2.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.2.2"
+  },
+  "ubuntu22/r4.2.3": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.2.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.2.3"
+  },
+  "ubuntu22/r4.3.0": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.3.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.3.0"
+  },
+  "ubuntu22/r4.3.1": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.3.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.3.1"
+  },
+  "ubuntu22/r4.3.2": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.3.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.3.2"
+  },
+  "ubuntu22/r4.3.3": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.3.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.3.3"
+  },
+  "ubuntu22/r4.4.0": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.4.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.4.0"
+  },
+  "ubuntu22/r4.4.1": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.4.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.4.1"
+  },
+  "ubuntu22/r4.4.2": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.4.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.4.2"
+  },
+  "ubuntu22/r4.4.3": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.4.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.4.3"
+  },
+  "ubuntu22/r4.5.0": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.5.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.5.0"
+  },
+  "ubuntu22/r4.5.1": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.5.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.5.1"
+  },
+  "ubuntu22/r4.5.2": {
+    "deps": [],
+    "relative_path": "ubuntu22/r4.5.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu jammy R 4.5.2"
   },
   "ubuntu22/xfce4": {
     "deps": [],
@@ -3017,11 +3413,209 @@
     "sbatch": false,
     "whatis": "Missing description"
   },
+  "ubuntu24/r3.1.3": {
+    "deps": [],
+    "relative_path": "ubuntu24/r3.1.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 3.1.3"
+  },
+  "ubuntu24/r3.2.5": {
+    "deps": [],
+    "relative_path": "ubuntu24/r3.2.5.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 3.2.5"
+  },
+  "ubuntu24/r3.3.3": {
+    "deps": [],
+    "relative_path": "ubuntu24/r3.3.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 3.3.3"
+  },
+  "ubuntu24/r3.4.4": {
+    "deps": [],
+    "relative_path": "ubuntu24/r3.4.4.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 3.4.4"
+  },
+  "ubuntu24/r3.5.3": {
+    "deps": [],
+    "relative_path": "ubuntu24/r3.5.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 3.5.3"
+  },
+  "ubuntu24/r3.6.0": {
+    "deps": [],
+    "relative_path": "ubuntu24/r3.6.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 3.6.0"
+  },
+  "ubuntu24/r3.6.1": {
+    "deps": [],
+    "relative_path": "ubuntu24/r3.6.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 3.6.1"
+  },
+  "ubuntu24/r3.6.2": {
+    "deps": [],
+    "relative_path": "ubuntu24/r3.6.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 3.6.2"
+  },
+  "ubuntu24/r3.6.3": {
+    "deps": [],
+    "relative_path": "ubuntu24/r3.6.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 3.6.3"
+  },
+  "ubuntu24/r4.0.0": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.0.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.0.0"
+  },
+  "ubuntu24/r4.0.1": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.0.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.0.1"
+  },
+  "ubuntu24/r4.0.2": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.0.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.0.2"
+  },
+  "ubuntu24/r4.0.3": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.0.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.0.3"
+  },
+  "ubuntu24/r4.0.4": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.0.4.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.0.4"
+  },
+  "ubuntu24/r4.0.5": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.0.5.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.0.5"
+  },
+  "ubuntu24/r4.1.0": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.1.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.1.0"
+  },
+  "ubuntu24/r4.1.1": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.1.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.1.1"
+  },
+  "ubuntu24/r4.1.2": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.1.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.1.2"
+  },
+  "ubuntu24/r4.1.3": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.1.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.1.3"
+  },
+  "ubuntu24/r4.2.0": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.2.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.2.0"
+  },
+  "ubuntu24/r4.2.1": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.2.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.2.1"
+  },
+  "ubuntu24/r4.2.2": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.2.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.2.2"
+  },
+  "ubuntu24/r4.2.3": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.2.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.2.3"
+  },
+  "ubuntu24/r4.3.0": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.3.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.3.0"
+  },
+  "ubuntu24/r4.3.1": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.3.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.3.1"
+  },
+  "ubuntu24/r4.3.2": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.3.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.3.2"
+  },
+  "ubuntu24/r4.3.3": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.3.3.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.3.3"
+  },
+  "ubuntu24/r4.4.0": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.4.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.4.0"
+  },
+  "ubuntu24/r4.4.1": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.4.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.4.1"
+  },
+  "ubuntu24/r4.4.2": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.4.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.4.2"
+  },
   "ubuntu24/r4.4.3": {
     "deps": [],
     "relative_path": "ubuntu24/r4.4.3.def",
     "sbatch": false,
-    "whatis": "Missing description"
+    "whatis": "Ubuntu noble R 4.4.3"
+  },
+  "ubuntu24/r4.5.0": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.5.0.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.5.0"
+  },
+  "ubuntu24/r4.5.1": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.5.1.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.5.1"
+  },
+  "ubuntu24/r4.5.2": {
+    "deps": [],
+    "relative_path": "ubuntu24/r4.5.2.def",
+    "sbatch": false,
+    "whatis": "Ubuntu noble R 4.5.2"
   },
   "ubuntu24/rstudio-server": {
     "deps": [],
