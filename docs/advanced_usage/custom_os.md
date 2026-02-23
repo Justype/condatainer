@@ -76,10 +76,10 @@ This often happens when:
 
 ### Use ENV variable (temporary)
 
-Use `CONDATAINER_DEFAULT_DISTRO` to temporarily override the default distro for a single command without changing your global config:
+Use `CNT_DEFAULT_DISTRO` to temporarily override the default distro for a single command without changing your global config:
 
 ```bash
-CONDATAINER_DEFAULT_DISTRO=ubuntu22 condatainer exec -o myoverlay.sqf bash
+CNT_DEFAULT_DISTRO=ubuntu22 condatainer exec -o myoverlay.sqf bash
 ```
 
 ### Use a different base image (temporary)
@@ -140,7 +140,7 @@ condatainer exec -b pytorch.sqf bash
 Second approach use Ubuntu 22 base image:
 
 ```bash
-CONDATAINER_DEFAULT_DISTRO=ubuntu22 condatainer exec -o pytorch.sqf bash
+CNT_DEFAULT_DISTRO=ubuntu22 condatainer exec -o pytorch.sqf bash
 
 # or explicitly specify the base image
 condatainer exec -b ubuntu22/base_image.sqf -o pytorch.sqf bash

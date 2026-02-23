@@ -20,7 +20,7 @@ const ConfigType = "yaml"
 // InitViper initializes Viper with proper search paths and defaults
 // Priority (highest to lowest):
 // 1. Command-line flags (handled by cobra)
-// 2. Environment variables (CONDATAINER_*)
+// 2. Environment variables (CNT_*)
 // 3. User config file (~/.config/condatainer/config.yaml)
 // 4. Portable config (parent of bin/ folder where executable lives)
 // 5. System config file (/etc/condatainer/config.yaml)
@@ -58,7 +58,7 @@ func InitViper() error {
 	viper.AddConfigPath("/etc/condatainer")
 
 	// Environment variables
-	viper.SetEnvPrefix("CONDATAINER")
+	viper.SetEnvPrefix("CNT")
 	viper.AutomaticEnv()
 
 	// Set defaults (lowest priority)

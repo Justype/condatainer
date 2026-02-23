@@ -43,7 +43,7 @@ Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 
 ## Data Directory Search Order
 
-1. `CONDATAINER_EXTRA_BASE_DIRS` / config `extra_base_dirs`
+1. `CNT_EXTRA_BASE_DIRS` / config `extra_base_dirs`
 2. `<install-dir>/` (portable, auto-detected)
 3. `$SCRATCH/condatainer/`
 4. `~/.local/share/condatainer/`

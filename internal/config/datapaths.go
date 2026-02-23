@@ -23,11 +23,11 @@ type DataPaths struct {
 var GlobalDataPaths DataPaths
 
 // GetExtraBaseDirs returns extra base directories from config or environment.
-// Environment variable CONDATAINER_EXTRA_BASE_DIRS uses colon-separated paths (Unix convention).
+// Environment variable CNT_EXTRA_BASE_DIRS uses colon-separated paths (Unix convention).
 // Config file uses YAML array format.
 func GetExtraBaseDirs() []string {
 	// Check environment variable first (colon-separated, like PATH)
-	if envDirs := os.Getenv("CONDATAINER_EXTRA_BASE_DIRS"); envDirs != "" {
+	if envDirs := os.Getenv("CNT_EXTRA_BASE_DIRS"); envDirs != "" {
 		var dirs []string
 		for _, dir := range strings.Split(envDirs, ":") {
 			dir = strings.TrimSpace(dir)

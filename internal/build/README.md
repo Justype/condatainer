@@ -159,7 +159,7 @@ Build defaults are configured via `build.*` keys in `config.yaml`. See [Config R
 
 Searches in order:
 1. Local absolute path
-2. `CONDATAINER_EXTRA_BASE_DIRS`
+2. `CNT_EXTRA_BASE_DIRS`
 3. Portable dir (`<install>/build-scripts/`)
 4. Scratch dir (`$SCRATCH/condatainer/build-scripts/`)
 5. User dir (`~/.local/share/condatainer/build-scripts/`)

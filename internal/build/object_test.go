@@ -138,10 +138,10 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenInstalled(t *testing.T) {
 	// Create a temporary base dir and add it to extra base dirs so it is searched first
 	baseDir := t.TempDir()
 	defer os.RemoveAll(baseDir)
-	if err := os.Setenv("CONDATAINER_EXTRA_BASE_DIRS", baseDir); err != nil {
+	if err := os.Setenv("CNT_EXTRA_BASE_DIRS", baseDir); err != nil {
 		t.Fatalf("failed to set env: %v", err)
 	}
-	defer os.Unsetenv("CONDATAINER_EXTRA_BASE_DIRS")
+	defer os.Unsetenv("CNT_EXTRA_BASE_DIRS")
 
 	// Create a build-scripts entry with an INTERACTIVE prompt to trigger parsing if it were called
 	scriptsDir := filepath.Join(baseDir, "build-scripts")
@@ -182,10 +182,10 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenTmpOverlayExists(t *testing.T
 	// Create a temporary base dir and add it to extra base dirs so it is searched first
 	baseDir := t.TempDir()
 	defer os.RemoveAll(baseDir)
-	if err := os.Setenv("CONDATAINER_EXTRA_BASE_DIRS", baseDir); err != nil {
+	if err := os.Setenv("CNT_EXTRA_BASE_DIRS", baseDir); err != nil {
 		t.Fatalf("failed to set env: %v", err)
 	}
-	defer os.Unsetenv("CONDATAINER_EXTRA_BASE_DIRS")
+	defer os.Unsetenv("CNT_EXTRA_BASE_DIRS")
 
 	// Create a build-scripts entry with an INTERACTIVE prompt to trigger parsing if it were called
 	scriptsDir := filepath.Join(baseDir, "build-scripts")
