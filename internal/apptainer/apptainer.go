@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -46,6 +47,12 @@ func SetBin(path string) error {
 	cachedVersion = "" // Clear cached version when binary changes
 	utils.PrintDebug("Apptainer binary resolved to: %s", utils.StylePath(apptainerCmd))
 	return nil
+}
+
+// EnsureApptainer checks if apptainer binary is available and configured.
+// Returns an error if apptainer cannot be found.
+func EnsureApptainer() error {
+	return SetBin(config.Global.ApptainerBin)
 }
 
 // Which returns the currently configured Apptainer executable path.

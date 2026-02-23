@@ -166,7 +166,7 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenInstalled(t *testing.T) {
 	config.InitDataPaths()
 
 	// Call NewBuildObject: should return without attempting to parse the interactive script
-	bo, err := NewBuildObject(nameVersion, false, imagesDir, tmpDir)
+	bo, err := NewBuildObject(nameVersion, false, imagesDir, tmpDir, false)
 	if err != nil {
 		t.Fatalf("NewBuildObject returned error: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenTmpOverlayExists(t *testing.T
 	config.InitDataPaths()
 
 	// Call NewBuildObject: should return without attempting to parse the interactive script
-	bo, err := NewBuildObject(nameVersion, false, imagesDir, tmpDir)
+	bo, err := NewBuildObject(nameVersion, false, imagesDir, tmpDir, false)
 	if err != nil {
 		t.Fatalf("NewBuildObject returned error: %v", err)
 	}

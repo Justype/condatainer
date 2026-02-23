@@ -81,7 +81,7 @@ func runScript(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ensure base image exists
-	if err := apptainer.EnsureBaseImage(cmd.Context(), false, false); err != nil {
+	if err := ensureBaseImage(cmd.Context()); err != nil {
 		return err
 	}
 
@@ -249,7 +249,7 @@ func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPat
 		}
 		buildObjects := make([]build.BuildObject, 0, len(missingDeps))
 		for _, pkg := range missingDeps {
-			bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir())
+			bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir(), false)
 			if err != nil {
 				utils.PrintError("Failed to create build object for %s: %v", utils.StyleName(pkg), err)
 				return nil, nil, errRunAborted
@@ -257,7 +257,7 @@ func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPat
 			buildObjects = append(buildObjects, bo)
 		}
 
-		graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
+		graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, false)
 		if err != nil {
 			utils.PrintError("Failed to create build graph: %v", err)
 			return nil, nil, errRunAborted

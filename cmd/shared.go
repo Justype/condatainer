@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
@@ -213,7 +212,7 @@ func needsValue(flag string) bool {
 
 // ensureBaseImage ensures the base image exists
 func ensureBaseImage(ctx context.Context) error {
-	return apptainer.EnsureBaseImage(ctx, false, false)
+	return build.EnsureBaseImage(ctx, false)
 }
 
 // ResolveBaseImage resolves a base image path to an absolute path

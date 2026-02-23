@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	"github.com/Justype/condatainer/internal/apptainer"
+	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -220,12 +220,10 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		utils.PrintMessage("Downloading base image for version %s...", release.TagName)
 
-		// Download new base image (update=true, downloadOnly=true)
-		// This downloads to .new and replaces old if successful
-		if err := apptainer.EnsureBaseImage(context.Background(), true, true); err != nil {
+		// Update the base image. Errors are non-fatal — warn and let the user rebuild manually.
+		if err := build.EnsureBaseImage(context.Background(), true); err != nil {
 			utils.PrintWarning("Failed to update base image: %v", err)
 			utils.PrintWarning("You may need to manually rebuild the base image.")
-			// Don't fail - continue with version check
 		} else {
 			utils.PrintSuccess("Base image updated successfully")
 		}

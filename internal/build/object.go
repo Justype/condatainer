@@ -129,6 +129,9 @@ type BuildObject interface {
 	CreateTmpOverlay(ctx context.Context, force bool) error
 	Cleanup(failed bool) error
 
+	// Update mode
+	Update() bool
+
 	// String representation
 	String() string
 }
@@ -143,6 +146,7 @@ type BaseBuildObject struct {
 	cntDirPath        string
 	submitJob         bool // Whether to submit to scheduler (from config at construction time)
 	isRemote          bool // Whether build source was downloaded
+	update            bool // If true, rebuild even if overlay already exists (atomic .new swap)
 	scriptSpecs       *scheduler.ScriptSpecs
 
 	// Interactive inputs for shell scripts
@@ -158,6 +162,7 @@ func (b *BaseBuildObject) TmpOverlayPath() string    { return b.tmpOverlayPath }
 func (b *BaseBuildObject) TargetOverlayPath() string { return b.targetOverlayPath }
 func (b *BaseBuildObject) CntDirPath() string        { return b.cntDirPath }
 func (b *BaseBuildObject) ScriptSpecs() *ScriptSpecs { return b.scriptSpecs }
+func (b *BaseBuildObject) Update() bool              { return b.update }
 func (b *BaseBuildObject) RequiresScheduler() bool {
 	return b.submitJob && scheduler.HasSchedulerSpecs(b.scriptSpecs)
 }
@@ -396,7 +401,7 @@ func getTmpOverlayPath(nameVersion, tmpDir string) string {
 // NewBuildObject creates a BuildObject from a name/version string
 // Format: "name/version" for conda/shell, "name" for def, "prefix/name/version" for ref
 // All overlays are stored in imagesDir regardless of type
-func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string) (BuildObject, error) {
+func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string, update bool) (BuildObject, error) {
 	normalized := utils.NormalizeNameVersion(nameVersion)
 	slashCount := strings.Count(normalized, "/")
 
@@ -431,6 +436,7 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string)
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetOverlay,
+		update:            update,
 	}
 
 	if external {
@@ -438,10 +444,10 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string)
 		return createConcreteType(base, isRef, tmpDir)
 	}
 
-	// Check if already installed or temporary overlay exists
-	// The downstream will handle the case where tmp overlay exists but is not from this build
-	// Avoid parsing interactive tags in both cases.
-	if base.IsInstalled() || utils.FileExists(base.tmpOverlayPath) {
+	// Check if already installed or temporary overlay exists.
+	// Skip this optimisation in update mode so the correct concrete type is resolved
+	// (the build will proceed regardless of install status).
+	if !update && (base.IsInstalled() || utils.FileExists(base.tmpOverlayPath)) {
 		return newScriptBuildObject(base, isRef)
 	}
 
@@ -454,7 +460,7 @@ func NewBuildObject(nameVersion string, external bool, imagesDir, tmpDir string)
 // buildSource can be:
 //   - Path to YAML file (e.g., "/path/to/environment.yml")
 //   - Comma-separated package list (e.g., "nvim,nodejs,samtools/1.16")
-func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir string) (BuildObject, error) {
+func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir string, update bool) (BuildObject, error) {
 	normalized := utils.NormalizeNameVersion(nameVersion)
 
 	// Make tmpDir absolute
@@ -479,6 +485,7 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetOverlay,
+		update:            update,
 	}
 
 	return newCondaBuildObject(base)
