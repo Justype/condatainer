@@ -54,7 +54,7 @@ Used for reference datasets, genome assemblies, or indices.
 
 | Variable | Description |
 | -------- | ----------- |
-| `NCPUS` | Number of CPUs (from script directives, or `Build.DefaultCPUs`) |
+| `NCPUS` | Number of CPUs (from script directives, or `build.ncpus` config setting) |
 | `app_name` | apps: app name; ref: assembly/data-type |
 | `version` | apps: app version; ref: data version |
 | `target_dir` | Target installation directory (managed by **CondaTainer**) |

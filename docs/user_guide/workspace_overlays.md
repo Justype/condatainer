@@ -80,6 +80,7 @@ Flags:
   -b, --base-image string   base image to use instead of default
       --bind strings        bind path 'HOST:CONTAINER' (can be used multiple times)
       --env strings         set environment variable 'KEY=VALUE' (can be used multiple times)
+  -f, --fakeroot            run container with fakeroot privileges
   -n, --no-autoload         disable autoloading 'env.img' from current directory
   -r, --read-only           mount .img overlays as read-only (only applies when using the 'e' shortcut)
 ```

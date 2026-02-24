@@ -6,8 +6,8 @@
 
 - [Naming Convention](#naming-convention)
 - [Mount Points](#mount-points)
-- [Create](#create)
 - [Overlay](#overlay)
+- [Create](#create)
 - [Container Management (Avail, List, Remove)](#container-management-avail-list-remove)
 - [Exec](#exec)
 - [E (Quick Exec)](#e-quick-exec)
@@ -275,13 +275,13 @@ condatainer overlay chown [OPTIONS] [image]
 * `-u`, `--uid UID`    : Set the owner UID (default: current user's UID).
 * `-g`, `--gid GID`    : Set the group GID (default: current user's GID).
 * `--root`             : Set UID/GID to 0 (root); overrides `-u` and `-g`.
-* `-p`, `--path PATH`  : Path inside the overlay to change (can specify multiple, default: `/ext3:/opt`).
+* `-p`, `--path PATH`  : Path inside the overlay to change (can specify multiple, default: `/`).
 * `image`              : Path to the overlay `img` file.
 
 **Examples:**
 
 ```bash
-# Set ownership inside env.img to the current user (default paths /ext3 and /opt)
+# Set ownership inside env.img to the current user (entire overlay by default)
 condatainer overlay chown env.img
 
 # Explicitly set UID and GID
@@ -690,7 +690,7 @@ condatainer instance stop [flags] [name]
 * `-a`, `--all`: Stop all user's instances
 * `-F`, `--force`: Force kill instance (may corrupt data)
 * `-s`, `--signal [SIGNAL]`: Signal to send to instance (e.g., SIGTERM, TERM, 15)
-* `-t`, `--timeout [SECONDS]`: Timeout before force kill (default: 10)
+* `-t`, `--timeout [SECONDS]`: Timeout before force kill (seconds; 0 = use apptainer default)
 
 **Examples:**
 
@@ -1251,7 +1251,7 @@ default_distro: ubuntu24
 # Default scheduler specs (used when scripts lack explicit directives)
 scheduler:
   ncpus_per_task: 4
-  mem_mb_per_node: 8192
+  mem_per_node_mb: 8192
   time: 4h
 
 # Build configuration

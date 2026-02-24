@@ -95,7 +95,7 @@ These values are used as defaults when a script does not include explicit resour
 | `scheduler.nodes` | `1` | Default number of nodes |
 | `scheduler.tasks_per_node` | `1` | Default tasks per node |
 | `scheduler.ncpus_per_task` | `2` | Default CPUs per task |
-| `scheduler.mem_mb_per_node` | `8192` | Default memory per node (MB) |
+| `scheduler.mem_per_node_mb` | `8192` | Default memory per node (MB) |
 | `scheduler.time` | `4h` | Default wall-clock time limit |
 
 ### Build Configuration
@@ -145,7 +145,7 @@ condatainer config set build.time 02:00:00
 
 # Set default scheduler specs
 condatainer config set scheduler.ncpus_per_task 8
-condatainer config set scheduler.mem_mb_per_node 32768
+condatainer config set scheduler.mem_per_node_mb 32768
 condatainer config set scheduler.time 8h
 
 # Disable job submission (run builds locally)
@@ -270,7 +270,7 @@ scheduler:
   nodes: 1
   tasks_per_node: 1
   ncpus_per_task: 2
-  mem_mb_per_node: 8192
+  mem_per_node_mb: 8192
   time: 4h
 
 # Build configuration
