@@ -60,7 +60,7 @@ type Config struct {
 	DefaultDistro string
 
 	// Remote repository settings
-	Branch       string // Git branch for fetching remote build scripts and metadata (default: "main")
+	ScriptsLink  string // Base URL for remote build scripts and helpers (default: cnt-scripts/main)
 	PreferRemote bool   // Remote build scripts take precedence over local
 
 	// Dependency parsing
@@ -131,7 +131,7 @@ func LoadDefaults(executablePath string) {
 		SchedulerBin:  "", // Auto-detect scheduler binary (empty = search PATH)
 		DefaultDistro: DEFAULT_DISTRO,
 
-		Branch: "main", // Default branch for remote build scripts
+		ScriptsLink: "https://raw.githubusercontent.com/Justype/cnt-scripts/main",
 
 		Scheduler: scheduler.ResourceSpec{
 			Nodes:        1,

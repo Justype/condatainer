@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -297,8 +298,7 @@ func updateHelperScripts(args []string, helperScriptsDir string) error {
 			continue
 		}
 
-		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
-			config.GITHUB_REPO, config.Global.Branch, entry.Path)
+		url := fmt.Sprintf("%s/%s", config.Global.ScriptsLink, entry.Path)
 		destName := filepath.Base(entry.Path)
 		dest := filepath.Join(helperScriptsDir, destName)
 
@@ -318,10 +318,9 @@ type HelperScriptEntry struct {
 	Path string `json:"path"`
 }
 
-// fetchRemoteHelperMetadata fetches the helper scripts metadata from GitHub
+// fetchRemoteHelperMetadata fetches the helper scripts metadata from the configured scripts_link
 func fetchRemoteHelperMetadata() (map[string]map[string]HelperScriptEntry, error) {
-	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/metadata/helper-scripts.json",
-		config.GITHUB_REPO, config.Global.Branch)
+	url := config.Global.ScriptsLink + "/metadata/helper-scripts.json.gz"
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -333,7 +332,13 @@ func fetchRemoteHelperMetadata() (map[string]map[string]HelperScriptEntry, error
 		return nil, fmt.Errorf("failed to fetch metadata: HTTP %d", resp.StatusCode)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	gzReader, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decompress metadata: %w", err)
+	}
+	defer gzReader.Close()
+
+	data, err := io.ReadAll(gzReader)
 	if err != nil {
 		return nil, err
 	}

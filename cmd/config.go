@@ -27,7 +27,7 @@ var configKeys = []string{
 	"scheduler_bin",
 	"default_distro",
 	"submit_job",
-	"branch",
+	"scripts_link",
 	"prefer_remote",
 	"extra_base_dirs",
 	"scheduler.nodes",
@@ -86,8 +86,6 @@ func configValueCompletion(key string) []string {
 		return []string{"true", "false"}
 	case "default_distro":
 		return config.GetAvailableDistros()
-	case "branch":
-		return []string{"main", "dev"}
 	case "scheduler.nodes":
 		return []string{"1", "2", "4", "8"}
 	case "scheduler.tasks_per_node":
@@ -284,7 +282,7 @@ Shows:
 		} else {
 			fmt.Printf("  submit_job:        %v\n", submitJobActual)
 		}
-		fmt.Printf("  branch:            %s\n", viper.GetString("branch"))
+		fmt.Printf("  scripts_link:      %s\n", config.Global.ScriptsLink)
 		fmt.Printf("  prefer_remote:     %v\n", config.Global.PreferRemote)
 		fmt.Printf("  parse_module_load: %v\n", config.Global.ParseModuleLoad)
 		fmt.Println()
@@ -401,7 +399,7 @@ Time duration format (for build.time):
 			"scheduler_bin":             true,
 			"default_distro":            true,
 			"submit_job":                true,
-			"branch":                    true,
+			"scripts_link":              true,
 			"prefer_remote":             true,
 			"parse_module_load":         true,
 			"scheduler.nodes":           true,
@@ -443,16 +441,6 @@ Time duration format (for build.time):
 				utils.PrintError("Invalid duration format: %s", value)
 				utils.PrintHint("Use format like: 2h, 30m, 1h30m, or 02:00:00")
 				os.Exit(ExitCodeError)
-			}
-		}
-
-		if key == "branch" {
-			lower := strings.ToLower(value)
-			if lower != "main" && lower != "dev" {
-				utils.PrintWarning("Unknown branch '%s', falling back to 'main'", value)
-				value = "main"
-			} else {
-				value = lower
 			}
 		}
 

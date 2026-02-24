@@ -82,7 +82,7 @@ func setDefaults() {
 	viper.SetDefault("scheduler_bin", "")
 	viper.SetDefault("submit_job", true)
 	viper.SetDefault("logs_dir", "")
-	viper.SetDefault("branch", "main")
+	viper.SetDefault("scripts_link", "https://raw.githubusercontent.com/Justype/cnt-scripts/main")
 	viper.SetDefault("prefer_remote", false)
 
 	// Extra base directories to search (prepended to default search paths)
@@ -467,16 +467,9 @@ func LoadFromViper() {
 		Global.LogsDir = logsDir
 	}
 
-	// Load branch from config (for remote build scripts)
-	if branch := viper.GetString("branch"); branch != "" {
-		switch branch {
-		case "main", "dev":
-			Global.Branch = branch
-		default:
-			utils.PrintWarning("Unknown branch '%s' in config; falling back to 'main'", branch)
-			viper.Set("branch", "main")
-			Global.Branch = "main"
-		}
+	// Load scripts_link from config (base URL for remote build scripts and helpers)
+	if link := viper.GetString("scripts_link"); link != "" {
+		Global.ScriptsLink = link
 	}
 
 	// Load prefer_remote from config

@@ -79,7 +79,7 @@ condatainer config init -l system
 | Key | Default | Description |
 |-----|---------|-------------|
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
-| `branch` | `main` | Git branch for fetching remote build scripts (`main` or `dev`) |
+| `scripts_link` | `https://raw.githubusercontent.com/Justype/cnt-scripts/main` | Base URL for remote build scripts and helper scripts. |
 | `prefer_remote` | `false` | Remote build scripts take precedence over local |
 | `parse_module_load` | `false` | Parse `module load` / `ml` lines as dependencies in `check` and `run` |
 | `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filename (e.g. `ubuntu24--base_image.sif`) and the distro prefix added to bare package names (e.g. `igv` → `ubuntu24/igv`). |
@@ -189,6 +189,7 @@ mapping is consistent for every key handled by the CLI:
 |-----------------------------------|------------------------|
 | `CNT_APPTAINER_BIN`        | `apptainer_bin`        |
 | `CNT_SUBMIT_JOB`           | `submit_job`           |
+| `CNT_SCRIPTS_LINK`         | `scripts_link`         |
 | `CNT_PREFER_REMOTE`        | `prefer_remote`        |
 | `CNT_SCHEDULER_NODES`      | `scheduler.nodes`      |
 | `CNT_BUILD_MEM_MB`         | `build.mem_mb`         |
@@ -249,6 +250,10 @@ scheduler_bin: /usr/bin/sbatch
 
 # Submit builds as scheduler jobs
 submit_job: true
+
+# Base URL for remote build scripts and helper scripts (includes branch)
+# Change to use a private or institutional scripts repo
+scripts_link: https://raw.githubusercontent.com/Justype/cnt-scripts/main
 
 # Remote build scripts take precedence over local
 prefer_remote: false

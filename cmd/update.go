@@ -43,7 +43,7 @@ and replaces the current executable. A backup of the current version is not crea
 func init() {
 	rootCmd.AddCommand(updateCmd)
 	updateCmd.Flags().BoolVarP(&updateForce, "force", "f", false, "Force update even if already on latest version")
-	updateCmd.Flags().BoolVar(&updateDev, "dev", false, "Include pre-release versions (also enabled if config branch is 'dev')")
+	updateCmd.Flags().BoolVar(&updateDev, "dev", false, "Include pre-release versions")
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
@@ -73,10 +73,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		arch = mappedArch
 	}
 
-	// Check if dev mode is enabled (via flag or config branch)
-	devMode := updateDev || config.Global.Branch == "dev"
-
-	if devMode {
+	if updateDev {
 		utils.PrintNote("Dev mode enabled, including pre-release versions")
 	}
 
@@ -84,7 +81,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	// Get release from GitHub API
 	var releaseURL string
-	if devMode {
+	if updateDev {
 		// Fetch all releases to find the latest (including pre-releases)
 		releaseURL = fmt.Sprintf("https://api.github.com/repos/%s/releases", config.GITHUB_REPO)
 	} else {
@@ -115,7 +112,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	var release releaseInfo
 
-	if devMode {
+	if updateDev {
 		// Parse array of releases and find the latest
 		var releases []releaseInfo
 		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {

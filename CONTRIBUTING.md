@@ -6,9 +6,19 @@ Thank you for helping improve this project! This document explains the main cont
 - Adding `build-scripts` (new app/data/genome build definitions)
 - Adding or updating `helper-scripts` (interactive service helpers)
 
+## Repositories
+
+| Repo | Contents |
+|------|----------|
+| [`condatainer`](https://github.com/Justype/condatainer) | CLI binary (Go code, docs) |
+| [`cnt-scripts`](https://github.com/Justype/cnt-scripts) | Build scripts and helper scripts |
+
+PRs for **build scripts** and **helper scripts** go to `cnt-scripts`.
+PRs for **CLI code and docs** go to `condatainer`.
+
 ## Quick start
 
-1. Fork the repository from the `dev` branch and create a feature branch off `dev`.
+1. Fork the relevant repository from the `dev` branch and create a feature branch off `dev`.
 2. Make changes, run tests, and verify on HPC and/or locally if applicable.
 3. Push your branch to your fork and open a Pull Request. Set the PR base/target to `dev` (do NOT open PRs against `main`).
 4. In your PR description include testing steps, relevant logs, and any backward-compatibility notes.
@@ -36,6 +46,8 @@ Commit and PR notes
 
 ## 2) Adding `build-scripts`
 
+**Target repo:** [`cnt-scripts`](https://github.com/Justype/cnt-scripts)
+
 What this covers
 - New `build-scripts` for building genome reference images, environment definitions, or packaging steps used by the project.
 
@@ -56,9 +68,11 @@ Testing
 
 PR notes
 - Please include the sbatch running log or terminal output showing successful build and test.
-- Open Pull Requests to the `dev` branch (base = `dev`). Do NOT target `main` unless requested by a maintainer.
+- Open Pull Requests to the `dev` branch of `cnt-scripts` (base = `dev`). Do NOT target `main` unless requested by a maintainer.
 
 ## 3) Adding or updating `helper-scripts`
+
+**Target repo:** [`cnt-scripts`](https://github.com/Justype/cnt-scripts)
 
 What this covers
 - New interactive service helpers (e.g., a new web-based app to run on HPC compute nodes)
@@ -68,7 +82,7 @@ Where to add
 - Scripts live in `helpers/<scheduler>/` — one directory per scheduler: `headless/`, `slurm/`, `pbs/`, `lsf/`, `htcondor/`
 - **A new helper must be added to all scheduler directories.** Use an existing script (e.g., `helpers/slurm/code-server`) as a template.
 - **A scheduler-specific fix** only needs to update the affected scheduler's script.
-- See [helpers/README.md](./helpers/README.md) for the shared-library API and script structure.
+- See `helpers/README.md` in `cnt-scripts` for the shared-library API and script structure.
 
 Testing
 - SLURM is the primary tested scheduler. Test on a SLURM cluster when possible.
@@ -77,7 +91,7 @@ Testing
 PR notes
 - Specify which schedulers were tested in the PR description.
 - Include terminal output or job logs showing successful submission and connection.
-- Open Pull Requests to the `dev` branch (base = `dev`). Do NOT target `main` unless requested by a maintainer.
+- Open Pull Requests to the `dev` branch of `cnt-scripts` (base = `dev`). Do NOT target `main` unless requested by a maintainer.
 
 ## PR checklist (apply to all types)
 
