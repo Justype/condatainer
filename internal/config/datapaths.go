@@ -316,6 +316,12 @@ func buildScriptSearchPaths(subdir string) []string {
 	// 1. Portable directory (for group/shared use - preferred)
 	if portableDir := GetPortableDataDir(); portableDir != "" {
 		addPath(filepath.Join(portableDir, subdir))
+
+		// Auto-detect cnt-scripts subdir (split-repo layout):
+		// clone cnt-scripts next to the binary and it is found automatically
+		if DirExists(filepath.Join(portableDir, "cnt-scripts")) {
+			addPath(filepath.Join(portableDir, "cnt-scripts", subdir))
+		}
 	}
 
 	// 2. Scratch directory (HPC systems)
