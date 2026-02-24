@@ -30,13 +30,13 @@ config.Global  // Singleton instance
 - `Debug`, `SubmitJob`, `Version`
 - `ProgramDir`, `LogsDir`
 - `ApptainerBin`, `SchedulerBin`
+- `DefaultDistro` - Base OS slug (e.g. `"ubuntu24"`)
 - `Branch`, `PreferRemote` (remote script fetching)
-- `Scheduler` - Default resource specs (`Ncpus`, `MemMB`, `Time`, `Nodes`, `Ntasks`)
-- `Build` - Build settings (`DefaultCPUs`, `DefaultMemMB`, `TmpSizeMB`, `CompressArgs`, `OverlayType`)
+- `ParseModuleLoad` - Treat `module load` lines as `#DEP` dependencies
+- `Scheduler scheduler.ResourceSpec` - Default scheduler specs (`Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`)
+- `Build BuildConfig` - Build settings (`Defaults scheduler.ResourceSpec`, `TmpSizeMB`, `CompressArgs`, `OverlayType`)
 
 ## Data Directory Search
-
-Follows XDG + HPC conventions with multiple search paths:
 
 **Search Order:**
 1. `CNT_EXTRA_BASE_DIRS` / `extra_base_dirs` config
@@ -50,60 +50,24 @@ Each contains: `images/`, `build-scripts/`, `helper-scripts/`
 
 ## Usage
 
-### Initialization
-
 ```go
-// Load defaults
-config.LoadDefaults("/path/to/condatainer")
+config.LoadDefaults("/path/to/condatainer")  // load defaults
+config.InitViper()                           // load config files
 
-// Load config files (Viper)
-config.InitConfig()
-```
+config.GetBaseImage()                        // base image path (search all)
+config.GetWritableImagesDir()                // writable images directory
+config.FindImage("cellranger--9.0.1.sqf")   // search all image paths
+config.FindHelperScript("jupyter")           // search helper script paths
 
-### Directory Resolution
-
-```go
-// Get base image path (search all paths)
-baseImage := config.GetBaseImage()
-findPath := config.FindBaseImage()
-
-// Get writable path for new images
-writePath, err := config.GetWritableImagesDir()
-baseImagePath, err := config.GetBaseImageWritePath()
-
-// Build scripts
-scriptPath, err := config.FindBuildScriptFile("cellranger/9.0.1")
-
-// Helper scripts
-helperPath := config.FindHelperScript("jupyter")
-```
-
-### Data Paths
-
-```go
-config.InitDataPaths()  // Initialize GlobalDataPaths
-
-// Search paths (ordered)
-config.GlobalDataPaths.ImagesDirs
-config.GlobalDataPaths.BuildScriptsDirs
-config.GlobalDataPaths.HelperScriptsDirs
-
-// Individual directories
-config.GetExtraBaseDirs()
-config.GetPortableDataDir()
-config.GetScratchDataDir()
-config.GetUserDataDir()
-config.GetSystemDataDir()
-config.GetUserStateDir()  // For instance state
+config.GlobalDataPaths.ImagesDirs           // ordered image search paths
+config.GlobalDataPaths.BuildScriptsDirs     // ordered script search paths
+config.GetUserStateDir()                    // instance state directory
 ```
 
 ## Environment Variables
 
 - `CNT_EXTRA_BASE_DIRS` - Colon-separated extra data dirs
-- `XDG_DATA_HOME` - User data directory
-- `XDG_CONFIG_HOME` - User config directory
-- `XDG_STATE_HOME` - User state directory
-- `XDG_DATA_DIRS` - System data directories
+- `XDG_DATA_HOME` / `XDG_CONFIG_HOME` / `XDG_STATE_HOME` - XDG dirs
 - `SCRATCH` - HPC scratch directory
 
 ## Configuration File
@@ -116,32 +80,27 @@ submit_job: true
 apptainer_bin: "apptainer"
 branch: "main"
 prefer_remote: false
+default_distro: "ubuntu24"
+parse_module_load: false
 
 extra_base_dirs:
   - "/custom/path/condatainer"
 
 scheduler:
-  ncpus: 4
-  mem_mb: 16384
-  time: "4h"
   nodes: 1
-  ntasks: 1
+  tasks_per_node: 1
+  ncpus_per_task: 2
+  mem_per_node_mb: 8192
+  time: "4h"
 
 build:
-  default_cpus: 4
-  default_mem_mb: 16384
-  default_time: "4h"
-  tmp_size_mb: 3000
-  compress_args: "-comp zstd -Xcompression-level 3"
-  overlay_type: "squashfs"
+  ncpus: 4
+  mem_mb: 8192
+  time: "2h"
+  tmp_size_mb: 20480
+  compress_args: ""   # empty = auto-detect based on apptainer version
+  overlay_type: "ext3"
 ```
-
-## Portable Installation
-
-When CondaTainer is installed in a portable location:
-- Auto-detects `<install>/` as portable data dir
-- Searches `<install>/images/`, `<install>/build-scripts/`, etc.
-- Allows self-contained deployments without user home directory
 
 ## Constants
 

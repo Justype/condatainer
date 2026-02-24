@@ -18,60 +18,54 @@ object.go       BuildObject interface, base implementation
 conda.go        Conda package builds via micromamba
 script.go       Shell script builds (apps and ref data)
 def.go          Apptainer definition file builds
+base_image.go   Base image provisioning (download/build)
 graph.go        Dependency graph, topological sort, parallel execution
 fetch.go        Remote build script downloading
 env.go          Environment variable extraction from overlays
-whitelist.go    Package name validation
 ```
 
 ## Key Types
 
 **BuildObject** - Interface for all build types:
-- `Type()`, `NameVersion()`, `Build(ctx, buildDeps)`, `CreateTmpOverlay()`
-- `GetMissingDependencies()`, `RequiresScheduler()`, `IsInstalled()`
+- `NameVersion()`, `BuildSource()`, `Dependencies()`, `Type()`
+- `IsInstalled()`, `RequiresScheduler()`, `Update()`
+- `ScriptSpecs()` - Parsed scheduler directives
+- `Build(ctx, buildDeps bool)`, `GetMissingDependencies()`
+- `CreateTmpOverlay(ctx, force bool)`, `Cleanup(failed bool)`
 
 **BuildType** - `IsConda`, `IsDef`, `IsShell`, `IsRef`
 
-**BuildGraph** - Manages dependency resolution:
-- Expands transitive dependencies
-- Detects cycles
-- Topological sort (dependencies → dependents)
-- Separates local vs scheduler builds
-- Parallel execution with job dependencies
+**BuildGraph** - Dependency graph with topological sort, cycle detection, and parallel execution (local worker pool + scheduler job submission).
 
 **ScriptSpecs** - Build resource requirements (alias to `scheduler.ScriptSpecs`)
 
 ## Usage
 
-### Creating BuildObjects
-
 ```go
 // Auto-resolve from name/version
-obj, err := build.NewBuildObject("cellranger/9.0.1", external=false, imagesDir, tmpDir)
+obj, err := build.NewBuildObject(ctx, "cellranger/9.0.1", false, imagesDir, tmpDir, false)
 
 // Conda with custom source (YAML or package list)
-obj, err := build.NewCondaObjectWithSource("myenv/1.0", "/path/env.yml", imagesDir, tmpDir)
+obj, err := build.NewCondaObjectWithSource("myenv/1.0", "/path/env.yml", imagesDir, tmpDir, false)
 
 // From external file (script or def)
-obj, err := build.FromExternalSource("myapp/1.0", "/path/script.sh", isApptainer=false, imagesDir, tmpDir)
-```
+obj, err := build.FromExternalSource(ctx, "myapp/1.0", "/path/script.sh", false, imagesDir, tmpDir)
 
-### Building
-
-```go
 // Single build
-if err := obj.Build(ctx, buildDeps=true); err != nil {
-    // Handle build errors
-}
+obj.Build(ctx, true)
 
 // Build with dependency graph
-graph, err := build.NewBuildGraph(objects, imagesDir, tmpDir, submitJobs=true)
-if err := graph.Run(ctx); err != nil {
-    // Handle errors
-}
+graph, err := build.NewBuildGraph(ctx, objects, imagesDir, tmpDir, true, false)
+graph.Run(ctx)
+
+// Base image
+build.EnsureBaseImage(ctx, false) // download prebuilt or build from def
+
+// Script lookup
+info, found := build.FindBuildScript("cellranger/9.0.1")
 ```
 
-### Build Scripts
+## Build Scripts
 
 Shell scripts support metadata headers:
 - `#DEP:name/version` - Dependencies
@@ -79,8 +73,7 @@ Shell scripts support metadata headers:
 - `#ENV:VAR=$app_root` - Environment variables to export
 - `#INTERACTIVE:prompt` - User input prompts
 
-Available variables in scripts: `$NCPUS`, `$target_dir`, `$tmp_dir`, `$app_name`, `$version`
-
+Available variables: `$NCPUS`, `$target_dir`, `$tmp_dir`, `$app_name`, `$version`
 Required function: `install()`
 
 ### Dependency Resolution
@@ -143,30 +136,17 @@ Extracted to `.env` file alongside overlay, loaded at runtime.
 
 ## Resource Allocation for Builds
 
-CPU and memory are derived from `scriptSpecs` via `effectiveNcpus()` / `effectiveMemMB()`:
+CPU and memory derived from `scriptSpecs`:
 
 | State | `HasDirectives` | `Spec` | CPU source | Memory source |
 |---|---|---|---|---|
-| No directives | false | non-nil | `Build.DefaultCPUs` | `Build.DefaultMemMB` |
+| No directives | false | non-nil | `Build.Defaults.CpusPerTask` | `Build.Defaults.MemPerNodeMB` |
 | Has directives | true | non-nil | `CpusPerTask × TasksPerNode` | `MemPerNodeMB` |
 | Passthrough | true | nil | build fails with error | — |
 
-**Passthrough mode** (unsupported scheduler flags).
-
-Build defaults are configured via `build.*` keys in `config.yaml`. See [Config README](../config/README.md) for details.
-
-## Build Script Search
-
-Searches in order:
-1. Local absolute path
-2. `CNT_EXTRA_BASE_DIRS`
-3. Portable dir (`<install>/build-scripts/`)
-4. Scratch dir (`$SCRATCH/condatainer/build-scripts/`)
-5. User dir (`~/.local/share/condatainer/build-scripts/`)
-6. Remote fetch from GitHub (if `PreferRemote` or not found locally)
+Build defaults are configured via `build.*` keys in `config.yaml`. See [Config README](../config/README.md).
 
 ## Error Handling
 
 - `ErrTmpOverlayExists` - Temporary overlay already exists (build in progress)
 - `ErrBuildCancelled` - User interrupted build (Ctrl+C)
-- Uses `isCancelledByUser()` to detect interrupts gracefully

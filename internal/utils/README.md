@@ -13,54 +13,41 @@ parser.go    Build script metadata parsing
 
 ## Console Output
 
-**Print Functions:** `PrintMessage`, `PrintSuccess`, `PrintWarning`, `PrintError`, `PrintNote`, `PrintDebug`
+**Print:** `PrintMessage`, `PrintSuccess`, `PrintWarning`, `PrintError`, `PrintHint`, `PrintNote`, `PrintDebug`
 
-**Style Functions:** `StyleError` (red), `StyleSuccess` (green), `StyleWarning` (yellow), `StyleHint` (cyan), `StyleInfo` (magenta), `StylePath`, `StyleName`, `StyleNumber`, `StyleAction`, `StyleCommand`
+**Style:** `StyleName` (yellow), `StylePath`, `StyleAction`, `StyleCommand`, `StyleHint` (cyan), `StyleError` (red), `StyleSuccess` (green), `StyleWarning` (yellow)
 
 **Modes:** `DebugMode`, `QuietMode`, `YesMode`
 
 ```go
 utils.PrintMessage("Installing %s", utils.StyleName("package"))
 utils.PrintSuccess("Build completed")
-utils.PrintDebug("Path: %s", utils.StylePath(path))
-yes, err := utils.AskYesNo("Continue?", defaultYes=true)
+utils.ShouldAnswerYes()                      // true when YesMode or non-interactive
+utils.ReadLineContext(ctx context.Context)    // read line with cancellation
 ```
 
 ## File Operations
 
-**Checks:** `FileExists`, `DirExists`, `IsImg`, `IsSqf`, `IsOverlay`  
-**Operations:** `EnsureDir`, `CopyFile`, `MoveFile`, `DeleteFile`  
+**Checks:** `FileExists`, `DirExists`, `IsImg`, `IsSqf`, `IsSif`, `IsOverlay`
+**Operations:** `EnsureDir`
 **Permissions:** `PermFile` (0664), `PermDir` (0775), `PermExec` (0775)
-
-```go
-utils.FileExists("/path/file")
-utils.IsImg("env.img")
-utils.EnsureDir("/path/dir")
-```
+**Permission Fixers:** `FixPermissionsDefault(path)`, `ShareToUGORecursive(path)`
 
 ## Downloads
 
 ```go
-utils.DownloadFile(url, destPath)           // With progress bar
-utils.DownloadExecutable(url, destPath)     // Sets exec permissions
+utils.DownloadFile(url, destPath)       // with progress bar
+utils.DownloadExecutable(url, destPath) // sets exec permissions
 ```
 
 ## Script Parsing
 
-**Dependencies:**
 ```go
-deps, err := utils.GetDependenciesFromScript(scriptPath)
-// Extracts #DEP:name/version and module load commands
-```
+// parseModuleLoad: also extract "module load" / "ml" lines as deps
+deps, err := utils.GetDependenciesFromScript(scriptPath, parseModuleLoad)
 
-**Interactive Prompts:**
-```go
 prompts, err := utils.GetInteractivePromptsFromScript(scriptPath)
-// Extracts #INTERACTIVE:prompt directives
-```
 
-**Scheduler Specs** (from `internal/scheduler`):
-```go
+// extract scheduler directives and apply defaults (scheduler package)
 specs, err := scheduler.ReadScriptSpecsFromPath(scriptPath)
-// Extracts #SBATCH/#PBS/#BSUB directives and resource requirements (HTCondor uses native .sub files)
 ```
