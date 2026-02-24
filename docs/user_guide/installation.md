@@ -74,3 +74,9 @@ If you need to remove **CondaTainer** from your system, you can do so by reversi
 condatainer settings
 # <<< CONDATAINER <<<
 ```
+
+## Next Steps
+
+- [Concepts: Overlays](./concepts.md) — Understand the overlay model before proceeding
+- [Helpers on HPC](../tutorials/helpers_on_HPC.md) — Running Applications (e.g. VS Code, RStudio, IGV) with CondaTainer on HPC
+- [Helpers on headless servers](../tutorials/helpers_on_headless.md) — Running Applications without a scheduler

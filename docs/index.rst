@@ -45,7 +45,7 @@ CondaTainer
 
 .. toctree::
   :caption: Manuals:
-  :hidden:
+  :maxdepth: 1
   :glob:
 
   manuals/*
