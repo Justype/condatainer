@@ -13,9 +13,10 @@ state.go    State file persistence (JSON)
 
 ## Key Types
 
-**Options** - `Name`, `Overlays`, `WritableImg`, `EnvSettings`, `BindPaths`, `Fakeroot`, `BaseImage`  
-**ExecOptions** - `InstanceName`, `Command`, `ApptainerBin`  
-**StateFile** - Persisted config: `Name`, `BaseImage`, `Overlays`, `StartTime`, `PID`
+**Options** - `Name`, `Overlays`, `WritableImg`, `EnvSettings`, `BindPaths`, `Fakeroot`, `BaseImage`
+**ExecOptions** - `InstanceName`, `Command`, `ApptainerBin`
+**StopOptions** - `InstanceName`, `DeleteAll`, `Pattern`
+**State** - Persisted config: `Name`, `BaseImage`, `Overlays`, `StartTime`, `PID`
 
 ## Usage
 
@@ -35,14 +36,14 @@ instance.Exec(ctx, instance.ExecOptions{
 })
 
 // Stop instance
-instance.Stop(ctx, "myinstance")
+instance.Stop(ctx, instance.StopOptions{InstanceName: "myinstance"})
 ```
 
 ## State Persistence
 
 State files: `$XDG_STATE_HOME/condatainer/instances/<name>.json`
 
-Stores instance configuration for recovery and tracking. Auto-cleaned on normal stop.
+Stores instance configuration (`State` struct) for recovery and tracking. Auto-cleaned on normal stop.
 
 ## Lifecycle
 

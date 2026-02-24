@@ -25,7 +25,7 @@ Overlays are self-contained files that encapsulate executables and data. When lo
 ```{tip}
 OS overlays are stackable when based on the same distribution version.
 
-Like `condatainer -o rstudio-server -o build-essential`
+Like `condatainer e rstudio-server build-essential`
 ```
 
 ### 🧩 Module Overlays

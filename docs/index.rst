@@ -1,12 +1,12 @@
 CondaTainer
 =========================
 
-`CondaTainer <https://github.com/Justype/condatainer>`_  is an HPC-oriented CLI that streamlines environment and data management by utilizing Apptainer, SquashFS, OverlayFS, and Micromamba.
+`CondaTainer <https://github.com/Justype/condatainer>`_  is a rootless CLI designed to manage tools, data, and project environments, and seamlessly launch interactive apps on HPC clusters.
 
-* **Inode Saver:** Packing 30k+ Conda files into a single image to satisfy inode quotas.
-* **Web-App Ready:** Out-of-the-box support for running *RStudio Server*, *code-server* and more on HPC.
-* **Environment Isolation:** Supports read-only (`.sqf`) for production and writable (`.img`) for development.
-* **Scheduler Integration:** Native compatibility with Slurm, PBS, LSF, and HTCondor for batch job submission.
+* **Web-App Ready:** Launch *RStudio*, *VS Code*, *Jupyter* and more with one command.
+* **Unified Management:** Easily organize group-level tools/data and isolate project environments.
+* **Inode Saver:** Packing 30k+ Conda files into a single portable image to bypass quota limits.
+* **Scheduler Native:** Out-of-the-box integration with *Slurm*, *PBS*, *LSF*, and *HTCondor*.
 
 .. toctree::
   :caption: User Guide:
@@ -45,7 +45,7 @@ CondaTainer
 
 .. toctree::
   :caption: Manuals:
-  :hidden:
+  :maxdepth: 1
   :glob:
 
   manuals/*

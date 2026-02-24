@@ -80,6 +80,7 @@ Flags:
   -b, --base-image string   base image to use instead of default
       --bind strings        bind path 'HOST:CONTAINER' (can be used multiple times)
       --env strings         set environment variable 'KEY=VALUE' (can be used multiple times)
+  -f, --fakeroot            run container with fakeroot privileges
   -n, --no-autoload         disable autoloading 'env.img' from current directory
   -r, --read-only           mount .img overlays as read-only (only applies when using the 'e' shortcut)
 ```
@@ -102,22 +103,26 @@ mm-export > environment.yaml
 
 ## Writable or Read-Only
 
-`condatainer e` mounts the overlay in writable mode by default.
+Two commands can enter a container with a workspace overlay, and they have different defaults:
 
-The limitations of writable mode are:
-- Only one writable overlay can be mounted at a time.
-- If an overlay is mounted in writable mode, other processes cannot mount it.
+| Command | Default mode | Auto-loads `env.img` | Best for |
+|---------|-------------|----------------------|----------|
+| `condatainer e` | **Writable** | Yes | Interactive development |
+| `condatainer exec -o env.img` | **Read-only** | No (must specify `-o`) | Scripts and parallel jobs |
 
-So, if you need to use it to run parallel jobs, you can mount it in read-only mode:
+**Writable mode** (`condatainer e`) lets you install Conda packages and modify files inside the overlay, but it exclusively locks the image — only one process can mount it writable at a time.
+
+**Read-only mode** allows multiple processes to mount the same overlay simultaneously, which is required for parallel job execution. Use `condatainer exec` with an explicit overlay path:
 
 ```bash
 condatainer exec -o env.img <command>
 ```
 
-The `exec` command:
+To make `.img` overlays writable with `exec`, add `-w`:
 
-- Mounts the overlay in read-only mode by default.
-- Does not automatically mount the overlay, so you need to specify the overlay image file with the `-o` option.
+```bash
+condatainer exec -w -o env.img bash
+```
 
 ## Set Environment Variables for the Overlay
 
@@ -242,9 +247,10 @@ condatainer overlay chown env.img
 Or they can use `--fakeroot` when running `condatainer exec` to avoid permission issues:
 
 ```bash
-# May not work on HPC systems
 condatainer exec --fakeroot -o env.img <command>
 ```
+
+See [Fakeroot](../qa/fakeroot.md) for details on when and how fakeroot works.
 
 ## Common Issues
 
@@ -261,7 +267,7 @@ condatainer overlay resize env.img -s 30G
 
 ### Permission errors when executing commands
 
-See the [Permissions inside the overlay](#permissions-inside-the-overlay) section above.
+See the [Permissions inside the overlay](#permissions-inside-the-overlay) section above, or the [Exec Troubleshooting](../qa/exec.md) FAQ for detailed steps.
 
 ```bash
 # change UID/GID inside to your own
@@ -270,36 +276,10 @@ condatainer overlay chown env.img
 
 ### The overlay is used by another process
 
-On the HPC system, check your running jobs and cancel the one using the overlay:
-
-```bash
-# SLURM
-squeue -u $USER
-scancel <job_id>
-
-# PBS/Torque
-qstat -u $USER
-qdel <job_id>
-
-# LSF
-bjobs
-bkill <job_id>
-
-# HTCondor
-condor_q $USER
-condor_rm <job_id>
-```
-
-On the local machine, you can use `lsof env.img` to check if there are other processes using the overlay. Then you can use `kill <pid>` to stop the process. Or use `fuser -k env.img` to kill all processes using the overlay.
-
-Make sure you run `e2fsck -p env.img` to check and fix the overlay image before mounting it again.
+Cancel the job holding the lock (check `squeue`, `qstat`, `bjobs`, or `condor_q` depending on your scheduler), then run a filesystem check before remounting:
 
 ```bash
 e2fsck -p env.img
 ```
 
-If `-p` option does not work, you can run `e2fsck env.img` without `-p` to fix the image manually.
-
-```bash
-e2fsck env.img
-```
+See [Exec Troubleshooting](../qa/exec.md) for full instructions including per-scheduler commands and local server steps.

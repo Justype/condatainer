@@ -38,88 +38,40 @@ type Scheduler interface {
 }
 ```
 
-## Resource Spec Priority Chain
-
-Resources are resolved in three layers (lowest → highest priority):
-
-```
-defaults  →  script directives (HasDirectives=true only)  →  job resources (non-zero fields)
-```
-
-- **defaults**: caller-supplied baseline (`GetSpecDefaults()` for run; `buildDefaults` for build)
-- **script directives**: parsed `#SBATCH`/`#PBS`/`#BSUB` values — only applied when `HasDirectives=true`
-- **job resources**: live allocation from scheduler env vars (read by `GetJobResources()`) — only non-zero fields override
-
-### Why `HasDirectives`, not `Spec != nil`
-
-When a script has no directives, the parser fills `Spec` with `GetSpecDefaults()`. Checking only `Spec != nil` would silently replace the caller's baseline with scheduler defaults. Checking `HasDirectives` ensures no-directive scripts fall back to the caller's baseline correctly.
-
-### Functions
-
-```go
-// Run system: uses GetSpecDefaults() as baseline
-ResolveResourceSpec(jobResources, scriptSpecs) *ResourceSpec
-
-// Build system (or any caller with custom baseline)
-ResolveResourceSpecFrom(defaults, jobResources, scriptSpecs) *ResourceSpec
-
-// In-place merge: overwrites rs fields with non-zero/non-nil fields from other
-(*ResourceSpec).Override(other *ResourceSpec)
-
-// Scheduler env vars → *ResourceSpec; starts from zero (no defaults)
-sched.GetJobResources() *ResourceSpec
-```
-
 ## Key Types
 
 **`ScriptSpecs`** — parsed job specification:
 - `HasDirectives bool` — `false` when no `#SBATCH`/`#PBS`/`#BSUB` lines exist
 - `Spec *ResourceSpec` — resource geometry; `nil` in passthrough mode
 - `Control RuntimeConfig` — job name, stdout/stderr, email, partition
-- `RawFlags []string` — all directives verbatim
-- `RemainingFlags []string` — directives not consumed by Spec or Control
 
 **`ResourceSpec`** — compute geometry: `Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`, `Gpu`, `Exclusive`
 
-**`JobSpec`** — submission input: `Name`, `Command`, `Specs`, `DepJobIDs`, `Metadata`, `OverrideOutput`
+**`JobSpec`** — submission input: `Name`, `Command`, `Specs`, `DepJobIDs`, `Metadata`
+
+## Resource Spec Priority Chain
+
+```
+defaults  →  script directives (HasDirectives=true only)  →  job resources (non-zero fields)
+```
+
+```go
+ResolveResourceSpec(jobResources, scriptSpecs)              // uses GetSpecDefaults() as baseline
+ResolveResourceSpecFrom(defaults, jobResources, scriptSpecs) // custom baseline
+(*ResourceSpec).Override(other *ResourceSpec)               // in-place merge
+```
 
 ## Script Parsing
-
-Two-stage pipeline:
-1. **Stage 1 (critical):** `parseRuntimeConfig` — job control (name, I/O, email). Failure stops parsing.
-2. **Stage 2 (best-effort):** `parseResourceSpec` — compute geometry. Failure → **passthrough mode** (`Spec=nil`).
 
 `ReadScriptSpecsFromPath` always returns non-nil `*ScriptSpecs`:
 
 | State | `HasDirectives` | `Spec` | Meaning |
 |---|---|---|---|
-| No directives | `false` | non-nil (caller defaults) | No scheduler lines found |
-| Normal | `true` | non-nil (parsed values) | Parsed successfully |
+| No directives | `false` | non-nil | No scheduler lines found |
+| Normal | `true` | non-nil | Parsed successfully |
 | Passthrough | `true` | `nil` | Directives found, resource parse failed |
 
-Passthrough is triggered by: invalid directive values, unresolvable relationships (e.g. `--ntasks` not divisible by `--nodes`), or blacklisted topology flags (SLURM only).
-
-## Configurable Scheduler Defaults
-
-Applied when a script omits resource directives. Set via `SetSpecDefaults()` at CLI init (wired from `config.Global.Scheduler`).
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `scheduler.nodes` | 1 | Node count |
-| `scheduler.tasks_per_node` | 1 | Tasks per node |
-| `scheduler.ncpus_per_task` | 2 | CPUs per task |
-| `scheduler.mem_mb_per_node` | 8192 | Memory per node (MB) |
-| `scheduler.time` | `4h` | Time limit |
-
-```yaml
-# ~/.config/condatainer/config.yaml
-scheduler:
-  ncpus_per_task: 8
-  mem_mb_per_node: 16384
-  time: "8h"
-```
-
-## Convenience Functions
+## Key Functions
 
 ```go
 // Detection
@@ -127,9 +79,8 @@ scheduler.Init("")                  // auto-detect and set active scheduler
 scheduler.InitIfAvailable("")       // non-failing
 scheduler.ActiveScheduler()         // get current scheduler
 
-// Script helpers
+// Script parsing
 ReadScriptSpecsFromPath(path)       // always non-nil
-ParseScriptAny(path)                // cross-scheduler parsing
 HasSchedulerSpecs(specs)            // HasDirectives=true
 IsPassthrough(specs)                // HasDirectives=true && Spec=nil
 
@@ -138,49 +89,34 @@ SubmitJob(sched, scriptPath, deps)  // single job
 SubmitJobs(sched, jobs, outputDir)  // multi-job with dependencies
 
 // Validation
-ValidateAndConvertSpecs(specs)      // validates against cluster limits (no auto-adjust)
-ValidateSpecs(specs, limits)        // validate against single partition
-ValidateGpuAvailability(gpu, info)  // returns GpuValidationError with suggestions
+ValidateAndConvertSpecs(specs)      // validates against cluster limits
+ValidateGpuAvailability(gpu, nodes, info) // returns GpuValidationError with suggestions
+```
+
+## Configurable Scheduler Defaults
+
+Applied when a script omits resource directives. Set via `SetSpecDefaults()` at CLI init.
+
+```yaml
+# ~/.config/condatainer/config.yaml
+scheduler:
+  nodes: 1
+  tasks_per_node: 1
+  ncpus_per_task: 2
+  mem_per_node_mb: 8192
+  time: "4h"
 ```
 
 ## Normalized Environment Variables
 
-Generated job scripts export these variables regardless of scheduler:
-
-| Variable | Description |
-|----------|-------------|
-| `NNODES` | Number of nodes |
-| `NTASKS` | Total tasks |
-| `NTASKS_PER_NODE` | Tasks per node |
-| `NCPUS` | CPUs per node (`CpusPerTask × TasksPerNode`) |
-| `NCPUS_PER_TASK` | CPUs per task |
-| `MEM` / `MEM_MB` | Memory in MB |
-| `MEM_GB` | Memory in GB |
-
-### Scheduler-Native Variables (Read-Only)
-
-Each scheduler also sets its own runtime environment variables when inside a job:
-
-| Variable | SLURM | PBS | LSF | HTCondor |
-|----------|-------|-----|-----|----------|
-| Job ID | `SLURM_JOB_ID` | `PBS_JOBID` | `LSB_JOBID` | `_CONDOR_JOB_AD` |
-| CPUs/Task | `SLURM_CPUS_PER_TASK` | `PBS_NCPUS` | `LSB_DJOB_NUMPROC` | `_CONDOR_REQUEST_CPUS` |
-| Memory | `SLURM_MEM_PER_NODE` | `PBS_VMEM` | `LSB_MAX_MEM_RUSAGE` | `_CONDOR_REQUEST_MEMORY` |
-| GPUs | `CUDA_VISIBLE_DEVICES` | `CUDA_VISIBLE_DEVICES` | `CUDA_VISIBLE_DEVICES` | `CUDA_VISIBLE_DEVICES` |
-| Nodes | `SLURM_JOB_NUM_NODES` | `PBS_NUM_NODES` | N/A | N/A |
-| Tasks/Node | `SLURM_NTASKS_PER_NODE` | `PBS_NP` ÷ nodes | N/A | N/A |
+Generated job scripts export these regardless of scheduler:
+`NNODES`, `NTASKS`, `NTASKS_PER_NODE`, `NCPUS`, `NCPUS_PER_TASK`, `MEM_MB`, `MEM_GB`
 
 ## Error Types
 
-| Type | Returned by | Key fields |
-|------|-------------|------------|
-| `ValidationError` | `ValidateSpecs`, `ValidateAndConvertSpecs` | `Field`, `Requested`, `Limit`, `Partition` |
-| `GpuValidationError` | `ValidateGpuAvailability` | `Suggestions` |
-| `ParseError` | script parsing | — |
-| `SubmissionError` | `Submit` | — |
-| `ClusterError` | `GetClusterInfo` | — |
-
-Check with: `scheduler.IsValidationError(err)`, `scheduler.IsGpuValidationError(err)`, etc.
+- `ValidationError` - `IsValidationError(err)` — fields: `Field`, `Requested`, `Limit`, `Partition`
+- `GpuValidationError` - `IsGpuValidationError(err)` — has `Suggestions`
+- `ParseError`, `SubmissionError`, `ClusterError` — checked with `Is*` helpers
 
 ## Scheduler-Specific Notes
 
