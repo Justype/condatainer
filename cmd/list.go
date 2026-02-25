@@ -46,7 +46,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	refOverlays, err := collectReferenceOverlays(filters, listExact)
+	dataOverlays, err := collectDataOverlays(filters, listExact)
 	if err != nil {
 		return err
 	}
@@ -121,13 +121,13 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if len(refOverlays) > 0 {
+	if len(dataOverlays) > 0 {
 		if printed {
 			fmt.Println()
 		}
-		fmt.Println("Available reference overlays:")
-		for _, ref := range refOverlays {
-			fmt.Printf(" %s\n", utils.StyleName(ref))
+		fmt.Println("Available data overlays:")
+		for _, data := range dataOverlays {
+			fmt.Printf(" %s\n", utils.StyleName(data))
 		}
 		printed = true
 	}
@@ -142,7 +142,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		listDelete = true
 	}
 
-	if listDelete && len(filters) > 0 && (len(appOverlays) > 0 || len(refOverlays) > 0) {
+	if listDelete && len(filters) > 0 && (len(appOverlays) > 0 || len(dataOverlays) > 0) {
 		fmt.Println()
 		fmt.Println("==================REMOVE==================")
 
@@ -157,8 +157,8 @@ func runList(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
-		for _, ref := range refOverlays {
-			allMatching = append(allMatching, ref)
+		for _, data := range dataOverlays {
+			allMatching = append(allMatching, data)
 		}
 
 		if len(allMatching) > 0 {
@@ -319,7 +319,7 @@ func collectAppOverlays(filters []string, exactMatch bool) (map[string][]string,
 	return result, nil
 }
 
-func collectReferenceOverlays(filters []string, exactMatch bool) ([]string, error) {
+func collectDataOverlays(filters []string, exactMatch bool) ([]string, error) {
 	seen := make(map[string]bool) // Track seen files to avoid duplicates
 	names := []string{}
 
@@ -351,7 +351,7 @@ func collectReferenceOverlays(filters []string, exactMatch bool) ([]string, erro
 
 			delimCount := strings.Count(entry.Name(), "--")
 			if delimCount <= 1 {
-				// Not a reference overlay
+				// Not a data overlay
 				continue
 			}
 			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))

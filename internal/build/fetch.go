@@ -39,7 +39,6 @@ type ScriptInfo struct {
 type RemoteScriptEntry struct {
 	RelativePath string   `json:"relative_path"`
 	Deps         []string `json:"deps"`
-	Sbatch       bool     `json:"sbatch"`
 	Whatis       string   `json:"whatis"`
 }
 

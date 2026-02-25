@@ -30,7 +30,7 @@ func IsValidDistro(distro string) bool {
 }
 
 // PrebuiltBaseURL is the base URL for downloading prebuilt images and overlays
-const PrebuiltBaseURL = "https://github.com/Justype/cnt-prebuilt/releases/download"
+const PrebuiltBaseURL = "https://github.com/Justype/cnt-scripts/releases/download"
 
 // BuildConfig holds default settings for build operations
 type BuildConfig struct {
