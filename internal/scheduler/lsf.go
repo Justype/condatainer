@@ -198,7 +198,7 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 		case flagMatches(flag, "-M"):
 			_, parseErr = flagScan(flag, &rs.MemPerNodeMB, parseLsfMemory, "-M")
 		case flagMatches(flag, "-W"):
-			_, parseErr = flagScan(flag, &rs.Time, parseLsfTime, "-W")
+			_, parseErr = flagScan(flag, &rs.Time, parseHMSTime, "-W")
 		case flagMatches(flag, "-gpu"):
 			gpuStr, _ := flagValue(flag, "-gpu")
 			gpuStr = strings.Trim(gpuStr, "\"'")
@@ -994,59 +994,7 @@ func parseLsfMemoryToMB(memStr string) (int64, error) {
 	if memStr == "" || memStr == "-" {
 		return 0, fmt.Errorf("no memory info")
 	}
-
-	// Check for unit suffix
-	memUpper := strings.ToUpper(memStr)
-	var value int64
-	var unit string
-
-	// Try to parse with unit
-	n, err := fmt.Sscanf(memUpper, "%d%s", &value, &unit)
-	if err != nil || n < 1 {
-		return 0, fmt.Errorf("%w: %s", ErrInvalidMemoryFormat, memStr)
-	}
-
-	switch unit {
-	case "T", "TB":
-		return value * 1024 * 1024, nil
-	case "G", "GB":
-		return value * 1024, nil
-	case "M", "MB", "":
-		return value, nil
-	case "K", "KB":
-		return value / 1024, nil
-	default:
-		return value, nil
-	}
-}
-
-// parseLsfTime parses LSF walltime format
-// Supports: HH:MM, MM, HH:MM:SS, or just minutes as integer
-func parseLsfTime(timeStr string) (time.Duration, error) {
-	timeStr = strings.TrimSpace(timeStr)
-	if timeStr == "" {
-		return 0, nil
-	}
-
-	parts := strings.Split(timeStr, ":")
-	var hours, minutes, seconds int64
-
-	switch len(parts) {
-	case 3:
-		hours, _ = strconv.ParseInt(parts[0], 10, 64)
-		minutes, _ = strconv.ParseInt(parts[1], 10, 64)
-		seconds, _ = strconv.ParseInt(parts[2], 10, 64)
-	case 2:
-		hours, _ = strconv.ParseInt(parts[0], 10, 64)
-		minutes, _ = strconv.ParseInt(parts[1], 10, 64)
-	case 1:
-		minutes, _ = strconv.ParseInt(parts[0], 10, 64)
-	default:
-		return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
-	}
-
-	totalSeconds := hours*3600 + minutes*60 + seconds
-	return time.Duration(totalSeconds) * time.Second, nil
+	return parseMemoryMB(memStr)
 }
 
 // formatLsfTime formats a duration as LSF walltime (HH:MM)

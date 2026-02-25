@@ -14,14 +14,15 @@ HPC scheduler abstraction layer for job submission, script parsing, and resource
 ## Architecture
 
 ```
-scheduler.go      Core interface, types, resource resolution, validation
-registry.go       Thread-safe active scheduler singleton + debugMode
-error.go          Structured error types
-gpu.go            GPU compatibility database, tier matching, MIG profiles
-slurm.go          SLURM implementation
-pbs.go            PBS/Torque implementation
-lsf.go            LSF implementation
-htcondor.go       HTCondor implementation
+scheduler.go        Core interface, types, resource resolution, validation
+registry.go         Thread-safe active scheduler singleton + debugMode
+error.go            Structured error types
+gpu.go              GPU compatibility database, tier matching, MIG profiles
+script_helpers.go   Shared parsing/formatting helpers (memory, time, flags, job header/footer)
+slurm.go            SLURM implementation
+pbs.go              PBS/Torque implementation
+lsf.go              LSF implementation
+htcondor.go         HTCondor implementation
 ```
 
 ## Interface

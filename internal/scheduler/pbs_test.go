@@ -516,61 +516,6 @@ func TestPbsResourceParsing(t *testing.T) {
 	}
 }
 
-func TestPbsTimeParsing(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		wantDur time.Duration
-		wantErr bool
-	}{
-		{
-			name:    "HH:MM:SS",
-			input:   "02:30:00",
-			wantDur: 2*time.Hour + 30*time.Minute,
-		},
-		{
-			name:    "HH:MM",
-			input:   "10:30",
-			wantDur: 10*time.Hour + 30*time.Minute,
-		},
-		{
-			name:    "minutes only",
-			input:   "90",
-			wantDur: 90 * time.Minute,
-		},
-		{
-			name:    "with seconds",
-			input:   "01:00:30",
-			wantDur: time.Hour + 30*time.Second,
-		},
-		{
-			name:    "empty string",
-			input:   "",
-			wantDur: 0,
-		},
-		{
-			name:    "large walltime",
-			input:   "168:00:00",
-			wantDur: 168 * time.Hour,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dur, err := parsePbsTime(tt.input)
-			if tt.wantErr && err == nil {
-				t.Error("Expected error, got nil")
-			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-			if dur != tt.wantDur {
-				t.Errorf("parsePbsTime(%q) = %v; want %v", tt.input, dur, tt.wantDur)
-			}
-		})
-	}
-}
-
 func TestPbsMemoryParsing(t *testing.T) {
 	t.Run("parsePbsMemory (returns KB)", func(t *testing.T) {
 		tests := []struct {
@@ -596,32 +541,6 @@ func TestPbsMemoryParsing(t *testing.T) {
 		}
 	})
 
-	t.Run("parseMemoryString (returns MB)", func(t *testing.T) {
-		tests := []struct {
-			input  string
-			wantMB int64
-		}{
-			{"8G", 8 * 1024},
-			{"8GB", 8 * 1024},
-			{"1024M", 1024},
-			{"1024MB", 1024},
-			{"4096K", 4},
-			{"4096KB", 4},
-			{"1T", 1024 * 1024},
-			{"1TB", 1024 * 1024},
-		}
-
-		for _, tt := range tests {
-			mb, err := parseMemoryString(tt.input)
-			if err != nil {
-				t.Errorf("parseMemoryString(%q) error: %v", tt.input, err)
-				continue
-			}
-			if mb != tt.wantMB {
-				t.Errorf("parseMemoryString(%q) = %d MB; want %d MB", tt.input, mb, tt.wantMB)
-			}
-		}
-	})
 }
 
 func TestPbsGpuParsing(t *testing.T) {

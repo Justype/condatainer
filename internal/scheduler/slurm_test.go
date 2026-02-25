@@ -591,35 +591,6 @@ func TestSlurmTimeParsing(t *testing.T) {
 	}
 }
 
-func TestSlurmMemoryParsing(t *testing.T) {
-	tests := []struct {
-		input  string
-		wantMB int64
-	}{
-		{"8G", 8 * 1024},
-		{"8GB", 8 * 1024},
-		{"1024M", 1024},
-		{"1024MB", 1024},
-		{"4096K", 4},
-		{"4096KB", 4},
-		{"1T", 1024 * 1024},
-		{"1TB", 1024 * 1024},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			mb, err := parseMemory(tt.input)
-			if err != nil {
-				t.Errorf("parseMemory(%q) error: %v", tt.input, err)
-				return
-			}
-			if mb != tt.wantMB {
-				t.Errorf("parseMemory(%q) = %d MB; want %d MB", tt.input, mb, tt.wantMB)
-			}
-		})
-	}
-}
-
 func TestSlurmIsAvailable(t *testing.T) {
 	t.Run("not in job", func(t *testing.T) {
 		clearJobEnvVars(t)

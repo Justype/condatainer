@@ -388,7 +388,7 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	fmt.Fprintln(shWriter, "")
 
 	// Print job information at start
-	writeJobHeader(shWriter, "$_CONDOR_CLUSTER_ID.$_CONDOR_PROC_ID", specs, formatHTCondorTime, jobSpec.Metadata)
+	writeJobHeader(shWriter, "$_CONDOR_CLUSTER_ID.$_CONDOR_PROC_ID", specs, formatHMSTime, jobSpec.Metadata)
 	fmt.Fprintln(shWriter, "")
 
 	// Write the command
@@ -728,19 +728,7 @@ func parseHTCondorMemory(memStr string) (int64, error) {
 	}
 
 	// Try with unit suffix
-	return parseMemory(memStr)
-}
-
-// formatHTCondorTime formats a duration for display (HH:MM:SS)
-func formatHTCondorTime(d time.Duration) string {
-	if d <= 0 {
-		return ""
-	}
-	total := int64(d.Seconds())
-	hours := total / 3600
-	minutes := (total % 3600) / 60
-	seconds := total % 60
-	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+	return parseMemoryMB(memStr)
 }
 
 // TryParseHTCondorScript attempts to parse an HTCondor submit file without requiring HTCondor binaries.

@@ -260,3 +260,68 @@ func writeJobFooter(w io.Writer, jobIDVar string) {
 	fmt.Fprintf(w, "%s\n", "echo \"Completed: $(date '+%Y-%m-%d %T')\"")
 	fmt.Fprintln(w, "echo \"========================================\"")
 }
+
+// parseMemoryMB converts memory strings like "8G", "1024M", "512K" to MB.
+// Canonical implementation shared by all schedulers.
+func parseMemoryMB(memStr string) (int64, error) {
+	memStr = strings.ToUpper(strings.TrimSpace(memStr))
+
+	var value int64
+	var unit string
+
+	n, err := fmt.Sscanf(memStr, "%d%s", &value, &unit)
+	if err != nil && n == 0 {
+		return 0, fmt.Errorf("%w: %s", ErrInvalidMemoryFormat, memStr)
+	}
+
+	switch unit {
+	case "G", "GB":
+		return value * 1024, nil
+	case "M", "MB", "":
+		return value, nil
+	case "K", "KB":
+		return value / 1024, nil
+	case "T", "TB":
+		return value * 1024 * 1024, nil
+	default:
+		return value, nil
+	}
+}
+
+// parseHMSTime parses colon-separated walltime "HH:MM:SS", "HH:MM", or "MM".
+// Used by PBS, LSF, and SLURM (after stripping the optional "D-" day prefix).
+func parseHMSTime(timeStr string) (time.Duration, error) {
+	timeStr = strings.TrimSpace(timeStr)
+	if timeStr == "" {
+		return 0, nil
+	}
+
+	parts := strings.Split(timeStr, ":")
+	var hours, minutes, seconds int64
+
+	switch len(parts) {
+	case 3:
+		hours, _ = strconv.ParseInt(parts[0], 10, 64)
+		minutes, _ = strconv.ParseInt(parts[1], 10, 64)
+		seconds, _ = strconv.ParseInt(parts[2], 10, 64)
+	case 2:
+		hours, _ = strconv.ParseInt(parts[0], 10, 64)
+		minutes, _ = strconv.ParseInt(parts[1], 10, 64)
+	case 1:
+		minutes, _ = strconv.ParseInt(parts[0], 10, 64)
+	default:
+		return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
+	}
+
+	totalSeconds := hours*3600 + minutes*60 + seconds
+	return time.Duration(totalSeconds) * time.Second, nil
+}
+
+// formatHMSTime formats a duration as "HH:MM:SS" (PBS / HTCondor walltime format).
+func formatHMSTime(d time.Duration) string {
+	total := int64(d.Seconds())
+	hours := total / 3600
+	mins := (total % 3600) / 60
+	secs := total % 60
+	return fmt.Sprintf("%02d:%02d:%02d", hours, mins, secs)
+}

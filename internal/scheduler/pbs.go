@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -326,14 +325,14 @@ func (p *PbsScheduler) parseSingleResource(res string, rs *ResourceSpec) error {
 		rs.CpusPerTask = ncpus
 
 	case "mem":
-		mem, err := parseMemoryString(value)
+		mem, err := parseMemoryMB(value)
 		if err != nil {
 			return fmt.Errorf("invalid mem value %q: %w", value, err)
 		}
 		rs.MemPerNodeMB = mem
 
 	case "walltime":
-		dur, err := parsePbsTime(value)
+		dur, err := parseHMSTime(value)
 		if err != nil {
 			return fmt.Errorf("invalid walltime value %q: %w", value, err)
 		}
@@ -456,7 +455,7 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		fmt.Fprintf(writer, "#PBS -l %s\n", strings.Join(selectParts, ":"))
 
 		if rs.Time > 0 {
-			fmt.Fprintf(writer, "#PBS -l walltime=%s\n", formatPbsTime(rs.Time))
+			fmt.Fprintf(writer, "#PBS -l walltime=%s\n", formatHMSTime(rs.Time))
 		}
 		if rs.Exclusive {
 			fmt.Fprintln(writer, "#PBS -l place=excl")
@@ -484,7 +483,7 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	fmt.Fprintln(writer, "")
 
 	// Print job information at start
-	writeJobHeader(writer, "$PBS_JOBID", specs, formatPbsTime, jobSpec.Metadata)
+	writeJobHeader(writer, "$PBS_JOBID", specs, formatHMSTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
 	// Write the command
@@ -789,7 +788,7 @@ func (p *PbsScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, erro
 
 		switch key {
 		case "resources_max.walltime", "max_walltime":
-			if duration, err := parsePbsTime(value); err == nil && duration > 0 {
+			if duration, err := parseHMSTime(value); err == nil && duration > 0 {
 				limit.MaxTime = duration
 			}
 		case "resources_max.mem", "max_mem":
@@ -998,69 +997,6 @@ func parsePbsMemory(memStr string) (int64, error) {
 	default:
 		return value, nil
 	}
-}
-
-// parseMemoryString converts memory strings like "8G", "1024M", "8gb" to MB
-func parseMemoryString(memStr string) (int64, error) {
-	memStr = strings.ToUpper(strings.TrimSpace(memStr))
-
-	var value int64
-	var unit string
-
-	n, err := fmt.Sscanf(memStr, "%d%s", &value, &unit)
-	if err != nil && n == 0 {
-		return 0, fmt.Errorf("%w: %s", ErrInvalidMemoryFormat, memStr)
-	}
-
-	switch unit {
-	case "G", "GB":
-		return value * 1024, nil
-	case "M", "MB", "":
-		return value, nil
-	case "K", "KB":
-		return value / 1024, nil
-	case "T", "TB":
-		return value * 1024 * 1024, nil
-	default:
-		return value, nil
-	}
-}
-
-// parsePbsTime parses PBS walltime format: HH:MM:SS
-func parsePbsTime(timeStr string) (time.Duration, error) {
-	timeStr = strings.TrimSpace(timeStr)
-	if timeStr == "" {
-		return 0, nil
-	}
-
-	parts := strings.Split(timeStr, ":")
-	var hours, minutes, seconds int64
-
-	switch len(parts) {
-	case 3:
-		hours, _ = strconv.ParseInt(parts[0], 10, 64)
-		minutes, _ = strconv.ParseInt(parts[1], 10, 64)
-		seconds, _ = strconv.ParseInt(parts[2], 10, 64)
-	case 2:
-		hours, _ = strconv.ParseInt(parts[0], 10, 64)
-		minutes, _ = strconv.ParseInt(parts[1], 10, 64)
-	case 1:
-		minutes, _ = strconv.ParseInt(parts[0], 10, 64)
-	default:
-		return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
-	}
-
-	totalSeconds := hours*3600 + minutes*60 + seconds
-	return time.Duration(totalSeconds) * time.Second, nil
-}
-
-// formatPbsTime formats a Duration as "HH:MM:SS" for PBS walltime directives and display.
-func formatPbsTime(d time.Duration) string {
-	total := int64(d.Seconds())
-	hours := total / 3600
-	mins := (total % 3600) / 60
-	secs := total % 60
-	return fmt.Sprintf("%02d:%02d:%02d", hours, mins, secs)
 }
 
 // parseGpuString parses GPU specifications from various formats

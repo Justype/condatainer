@@ -396,7 +396,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 	switch {
 	case memStr != "":
 		// --mem=N: direct per-node total.
-		mem, err := parseMemory(memStr)
+		mem, err := parseMemoryMB(memStr)
 		if err != nil {
 			logParseWarning("SLURM: invalid --mem value %q: %v; using passthrough mode", memStr, err)
 			return nil, directives
@@ -404,7 +404,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		rs.MemPerNodeMB = mem
 	case memPerCpuStr != "":
 		// --mem-per-cpu=N: multiply by effective CPUs per node.
-		memPerCpu, err := parseMemory(memPerCpuStr)
+		memPerCpu, err := parseMemoryMB(memPerCpuStr)
 		if err != nil {
 			logParseWarning("SLURM: invalid --mem-per-cpu value %q: %v; using passthrough mode", memPerCpuStr, err)
 			return nil, directives
@@ -420,7 +420,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 			logParseWarning("SLURM: --mem-per-gpu requires a GPU spec; using passthrough mode")
 			return nil, directives
 		}
-		memPerGpu, err := parseMemory(memPerGpuStr)
+		memPerGpu, err := parseMemoryMB(memPerGpuStr)
 		if err != nil {
 			logParseWarning("SLURM: invalid --mem-per-gpu value %q: %v; using passthrough mode", memPerGpuStr, err)
 			return nil, directives
@@ -820,7 +820,7 @@ func (s *SlurmScheduler) getAvailableResourcesByPartition() (map[string]Resource
 		var cpus int
 		var memMB int64
 		fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &cpus)
-		memMB, _ = parseMemory(strings.TrimSpace(parts[2]))
+		memMB, _ = parseMemoryMB(strings.TrimSpace(parts[2]))
 
 		// Update max for this partition
 		if existing, ok := resources[partition]; ok {
@@ -865,7 +865,7 @@ func (s *SlurmScheduler) getMaxNodeResources() (int, int64, error) {
 		var cpus int
 		var memMB int64
 		fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &cpus)
-		memMB, _ = parseMemory(strings.TrimSpace(parts[1]))
+		memMB, _ = parseMemoryMB(strings.TrimSpace(parts[1]))
 
 		if cpus > maxCpus {
 			maxCpus = cpus
@@ -912,7 +912,7 @@ func (s *SlurmScheduler) parsePartitionLine(line string) *ResourceLimits {
 			fmt.Sscanf(value, "%d", &limit.MaxCpusPerNode)
 		case "MaxMemPerNode":
 			if value != "UNLIMITED" {
-				limit.MaxMemMBPerNode, _ = parseMemory(value)
+				limit.MaxMemMBPerNode, _ = parseMemoryMB(value)
 			}
 		case "MaxNodes":
 			if value != "UNLIMITED" {
@@ -1003,32 +1003,6 @@ func parseSlurmGpu(gpuStr string) (*GpuSpec, error) {
 	return spec, nil
 }
 
-// parseMemory converts memory strings like "8G", "1024M" to MB
-func parseMemory(memStr string) (int64, error) {
-	memStr = strings.ToUpper(strings.TrimSpace(memStr))
-
-	var value int64
-	var unit string
-
-	n, err := fmt.Sscanf(memStr, "%d%s", &value, &unit)
-	if err != nil && n == 0 {
-		return 0, fmt.Errorf("%w: %s", ErrInvalidMemoryFormat, memStr)
-	}
-
-	switch unit {
-	case "G", "GB":
-		return value * 1024, nil
-	case "M", "MB", "":
-		return value, nil
-	case "K", "KB":
-		return value / 1024, nil
-	case "T", "TB":
-		return value * 1024 * 1024, nil
-	default:
-		return value, nil
-	}
-}
-
 func parseSlurmTimeSpec(timeStr string) (time.Duration, error) {
 	timeStr = strings.TrimSpace(timeStr)
 	if timeStr == "" {
@@ -1047,67 +1021,23 @@ func parseSlurmTimeSpec(timeStr string) (time.Duration, error) {
 		hms = strings.TrimSpace(hms[idx+1:])
 	}
 
-	var hours, minutes, seconds int64
-	if hms != "" {
-		parts := strings.Split(hms, ":")
-		switch len(parts) {
-		case 3:
-			h, err := strconv.ParseInt(parts[0], 10, 64)
-			if err != nil {
-				return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
-			}
-			hours = h
-			m, err := strconv.ParseInt(parts[1], 10, 64)
-			if err != nil {
-				return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
-			}
-			minutes = m
-			s, err := strconv.ParseInt(parts[2], 10, 64)
-			if err != nil {
-				return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
-			}
-			seconds = s
-		case 2:
-			h, err := strconv.ParseInt(parts[0], 10, 64)
-			if err != nil {
-				return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
-			}
-			hours = h
-			m, err := strconv.ParseInt(parts[1], 10, 64)
-			if err != nil {
-				return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
-			}
-			minutes = m
-		case 1:
-			m, err := strconv.ParseInt(parts[0], 10, 64)
-			if err != nil {
-				return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
-			}
-			minutes = m
-		default:
-			return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
-		}
+	hmsDur, err := parseHMSTime(hms)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
 	}
-
-	totalSeconds := days*24*3600 + hours*3600 + minutes*60 + seconds
-	return time.Duration(totalSeconds) * time.Second, nil
+	return time.Duration(days*24)*time.Hour + hmsDur, nil
 }
 
 func formatSlurmTimeSpec(d time.Duration) string {
 	if d <= 0 {
 		return ""
 	}
-	total := int64(d.Seconds())
-	days := total / (24 * 3600)
-	rem := total % (24 * 3600)
-	hours := rem / 3600
-	rem %= 3600
-	minutes := rem / 60
-	seconds := rem % 60
+	days := int64(d.Hours()) / 24
 	if days > 0 {
-		return fmt.Sprintf("%d-%02d:%02d:%02d", days, hours, minutes, seconds)
+		rem := d - time.Duration(days*24)*time.Hour
+		return fmt.Sprintf("%d-%s", days, formatHMSTime(rem))
 	}
-	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+	return formatHMSTime(d)
 }
 
 // GetJobResources reads allocated resources from SLURM environment variables.

@@ -532,61 +532,6 @@ func TestLsfResourceParsing(t *testing.T) {
 	}
 }
 
-func TestLsfTimeParsing(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		wantDur time.Duration
-		wantErr bool
-	}{
-		{
-			name:    "HH:MM",
-			input:   "02:30",
-			wantDur: 2*time.Hour + 30*time.Minute,
-		},
-		{
-			name:    "minutes only",
-			input:   "90",
-			wantDur: 90 * time.Minute,
-		},
-		{
-			name:    "HH:MM:SS",
-			input:   "01:30:45",
-			wantDur: time.Hour + 30*time.Minute + 45*time.Second,
-		},
-		{
-			name:    "empty string",
-			input:   "",
-			wantDur: 0,
-		},
-		{
-			name:    "large walltime",
-			input:   "168:00",
-			wantDur: 168 * time.Hour,
-		},
-		{
-			name:    "zero",
-			input:   "00:00",
-			wantDur: 0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dur, err := parseLsfTime(tt.input)
-			if tt.wantErr && err == nil {
-				t.Error("Expected error, got nil")
-			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-			if dur != tt.wantDur {
-				t.Errorf("parseLsfTime(%q) = %v; want %v", tt.input, dur, tt.wantDur)
-			}
-		})
-	}
-}
-
 func TestLsfMemoryParsing(t *testing.T) {
 	tests := []struct {
 		input  string
