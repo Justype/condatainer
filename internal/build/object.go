@@ -293,12 +293,19 @@ func (b *BaseBuildObject) Cleanup(failed bool) error {
 		}
 	}
 
-	// If failed, also remove target overlay
+	// If failed, remove target overlay (or its .new counterpart in update mode).
 	if failed && b.targetOverlayPath != "" {
-		if err := os.Remove(b.targetOverlayPath); err != nil && !os.IsNotExist(err) {
-			utils.PrintWarning("Failed to remove target overlay %s: %v", b.targetOverlayPath, err)
-		} else if utils.FileExists(b.targetOverlayPath) {
-			utils.PrintDebug("Removed target overlay %s", b.targetOverlayPath)
+		if b.update {
+			// In update mode the build writes to targetOverlayPath+".new"; preserve the
+			// existing target so a failed update doesn't destroy the installed overlay.
+			newPath := b.targetOverlayPath + ".new"
+			if err := os.Remove(newPath); err != nil && !os.IsNotExist(err) {
+				utils.PrintWarning("Failed to remove partial new overlay %s: %v", newPath, err)
+			}
+		} else {
+			if err := os.Remove(b.targetOverlayPath); err != nil && !os.IsNotExist(err) {
+				utils.PrintWarning("Failed to remove target overlay %s: %v", b.targetOverlayPath, err)
+			}
 		}
 	}
 
