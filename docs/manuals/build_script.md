@@ -134,7 +134,7 @@ If a supported scheduler is available, **CondaTainer** will submit the build job
 ```
 
 - `--cpus-per-task`, `--mem`, and `--time` should be set according to the expected resource requirements.
-- `--nodes`, `--ntasks`: should not be set (build jobs do not support MPI).
+- `--nodes`, `--ntasks`: **must not be set** (always single-task). Writable overlay (`.img`) can only be mounted by one process at a time.
 - `--output`: will always be overwritten to point to the `logs` directory.
 
 **PBS Example:**
