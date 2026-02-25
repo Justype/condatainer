@@ -227,7 +227,7 @@ func tryDownloadPrebuiltSif(nameVersion, destPath string) bool {
 		return false
 	}
 	sifFilename := parts[1] + "_" + archName + ".sif"
-	url := fmt.Sprintf("%s/%s/%s", config.PrebuiltBaseURL, parts[0], sifFilename)
+	url := fmt.Sprintf("%s/%s/%s", config.Global.PrebuiltLink, parts[0], sifFilename)
 
 	if !utils.URLExists(url) {
 		return false

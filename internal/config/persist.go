@@ -82,7 +82,8 @@ func setDefaults() {
 	viper.SetDefault("scheduler_bin", "")
 	viper.SetDefault("submit_job", true)
 	viper.SetDefault("logs_dir", "")
-	viper.SetDefault("scripts_link", "https://raw.githubusercontent.com/Justype/cnt-scripts/main")
+	viper.SetDefault("scripts_link", DefaultScriptsLink)
+	viper.SetDefault("prebuilt_link", DefaultPrebuiltLink)
 	viper.SetDefault("prefer_remote", false)
 
 	// Extra base directories to search (prepended to default search paths)
@@ -470,6 +471,11 @@ func LoadFromViper() {
 	// Load scripts_link from config (base URL for remote build scripts and helpers)
 	if link := viper.GetString("scripts_link"); link != "" {
 		Global.ScriptsLink = link
+	}
+
+	// Load prebuilt_link from config (base URL for downloading prebuilt images and overlays)
+	if link := viper.GetString("prebuilt_link"); link != "" {
+		Global.PrebuiltLink = link
 	}
 
 	// Load prefer_remote from config
