@@ -162,6 +162,11 @@ condatainer run salmon_quant.sh -a
 
 ## 🔗 Links & Resources
 
+- [CondaTainer ReadTheDocs](https://condatainer.readthedocs.io/en/latest/)
+- [cnt-scripts Repository](https://github.com/Justype/cnt-scripts)
+
+Related tools and resources:
+
 - [Compression Method Benchmarks](https://github.com/inikep/lzbench)
 - Apptainer [repo](https://github.com/apptainer/apptainer) and [docs](https://apptainer.org/docs/); Micromamba [repo](https://github.com/mamba-org/micromamba-releases); squashfs-tools [repo](https://github.com/plougher/squashfs-tools)
 - Container related: [Using Containers](https://services.rt.nyu.edu/docs/hpc/containers/containers/), [Singularity with Conda](https://services.rt.nyu.edu/docs/hpc/containers/singularity_with_conda/) and [Singularity with SquashFS](https://services.rt.nyu.edu/docs/hpc/containers/squash_file_system_and_singularity/)
