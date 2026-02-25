@@ -13,12 +13,10 @@ Thank you for helping improve this project! This document covers contributions t
 
 ## Quick start
 
-1. Fork this repository from the `dev` branch and create a feature branch off `dev`.
+1. Fork this repository and create a branch named `feat/<short-description>` or `fix/<short-description>`.
 2. Make changes, run tests, and verify on HPC and/or locally if applicable.
-3. Push your branch to your fork and open a Pull Request. Set the PR base/target to `dev` (do NOT open PRs against `main`).
+3. Push your branch to your fork and open a Pull Request targeting `main`.
 4. In your PR description include testing steps, relevant logs, and any backward-compatibility notes.
-
-> Branching model — `dev` = unstable/testing (for active development); `main` = stable/release-only (maintainer-managed).
 
 ## Editing `condatainer`
 
@@ -37,14 +35,13 @@ Testing
 PR notes
 - Use clear commit messages describing the change.
 - In your PR description, explain the change, why it's needed, and how to test it.
-- Set the PR base/target to `dev` (unstable/testing). Do NOT open PRs against `main` unless a maintainer explicitly requests it.
 
 ## PR checklist
 
 - Title and description explaining change and how to test
 - Small, focused commits with clear messages
 - Updated or added tests where applicable
-- PR base/target: `dev` (unstable/testing). `main` is reserved for stable releases and maintainer merges.
+- PR base/target: `main`
 
 ## Contacts / Maintainers
 
