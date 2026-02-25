@@ -71,7 +71,7 @@ condatainer config init -l system
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `apptainer_bin` | Auto-detected | Path to apptainer binary |
+| `apptainer_bin` | Auto-detected | Path to apptainer or singularity binary |
 | `scheduler_bin` | Auto-detected | Path to job scheduler binary (sbatch, qsub, bsub, condor_submit, etc.). |
 
 ### Remote Sources
@@ -110,7 +110,7 @@ These values are used as defaults when a script does not include explicit resour
 | `build.mem_mb` | `8192` | Memory in MB (8GB) |
 | `build.time` | `2h` | Time limit for builds |
 | `build.tmp_size_mb` | `20480` | Temporary overlay size in MB (20GB) |
-| `build.compress_args` | Auto-detected | mksquashfs compression arguments |
+| `build.compress_args` | Auto-detected | mksquashfs compression arguments (gzip for singularity; zstd-medium for apptainer≥1.4; lz4 otherwise) |
 | `build.overlay_type` | `ext3` | Overlay filesystem type: `ext3` or `squashfs` |
 
 > `build.compress_args` also accepts shortcuts: `gzip`, `lz4`, `zstd`, `zstd-fast`, `zstd-medium`, `zstd-high`
@@ -328,8 +328,9 @@ Users can still have personal configs (`~/.config/condatainer/config.yaml`) that
 
 ## Compression Settings
 
-CondaTainer auto-detects the best compression based on your Apptainer version:
+CondaTainer auto-detects the best compression based on your runtime:
 
+- **Singularity**: Uses gzip compression (`-comp gzip`) — Singularity's native default
 - **Apptainer >= 1.4**: Uses zstd compression (`-comp zstd -Xcompression-level 8`)
 - **Apptainer < 1.4**: Uses lz4 compression (`-comp lz4`)
 
@@ -350,12 +351,12 @@ condatainer config set build.compress_args zstd-fast
 
 Run `condatainer config init` to create a config file with auto-detected settings.
 
-### Apptainer not found
+### Apptainer/Singularity not found
 
-Load the apptainer module first, then reinitialize:
+Load the apptainer (or singularity) module first, then reinitialize:
 
 ```bash
-module load apptainer
+module load apptainer   # or: module load singularity
 condatainer config init
 ```
 

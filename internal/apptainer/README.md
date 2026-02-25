@@ -27,8 +27,9 @@ build.go        Image building and SIF-to-SquashFS conversion
 
 ```go
 // Binary setup
-apptainer.SetBin("")        // detect from PATH
+apptainer.SetBin("")        // detect from PATH (tries apptainer, then singularity)
 apptainer.EnsureApptainer() // error if not found
+apptainer.IsSingularity()   // true when binary is singularity (use gzip compression)
 
 // Ephemeral execution
 apptainer.Exec(ctx, "image.sif", []string{"cmd"}, &apptainer.ExecOptions{

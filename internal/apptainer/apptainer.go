@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,16 +27,28 @@ var cachedVersion string
 
 // SetBin configures and validates the Apptainer binary path.
 // If already set to the same path, this is a no-op.
+// When path is empty, tries "apptainer" then "singularity" in PATH order.
 func SetBin(path string) error {
-	target := path
-	if target == "" {
-		target = "apptainer"
+	if path == "" {
+		// Try apptainer first, then singularity as fallback
+		for _, name := range []string{"apptainer", "singularity"} {
+			if fullPath, err := exec.LookPath(name); err == nil {
+				if apptainerCmd == fullPath {
+					return nil
+				}
+				apptainerCmd = fullPath
+				cachedVersion = ""
+				utils.PrintDebug("Apptainer binary resolved to: %s", utils.StylePath(apptainerCmd))
+				return nil
+			}
+		}
+		return &ApptainerNotFoundError{Path: "apptainer/singularity"}
 	}
 
-	fullPath, err := exec.LookPath(target)
+	fullPath, err := exec.LookPath(path)
 	if err != nil {
 		// Return structured error without hints - let caller decide what to suggest
-		return &ApptainerNotFoundError{Path: target}
+		return &ApptainerNotFoundError{Path: path}
 	}
 
 	// Skip if already set to the same path
@@ -58,6 +71,12 @@ func EnsureApptainer() error {
 // Which returns the currently configured Apptainer executable path.
 func Which() string {
 	return apptainerCmd
+}
+
+// IsSingularity returns true if the configured binary is Singularity (not Apptainer).
+// Singularity defaults to gzip compression for SquashFS images.
+func IsSingularity() bool {
+	return strings.Contains(strings.ToLower(filepath.Base(apptainerCmd)), "singularity")
 }
 
 // GetVersion returns the version of the currently loaded Apptainer binary.

@@ -40,16 +40,19 @@ Run the following command to create a default configuration file:
 condatainer config init
 ```
 
-If your system has Apptainer modules instead of system-wide binaries, load the module first:
+If your system has Apptainer or Singularity modules instead of system-wide binaries, load the module first:
 
 ```bash
-ml apptainer
+ml apptainer   # or: ml singularity
 condatainer config init
 ```
 
-Then the condatainer will save the detected apptainer path. So next time you start a new terminal, it will work without loading the module again.
+Then CondaTainer saves the detected binary path, so future sessions work without reloading the module.
 
-If apptainer version >= 1.4, zstd compression will be used by default. Otherwise, lz4 compression will be used.
+Compression is chosen automatically based on the runtime:
+- **Singularity**: gzip (native default)
+- **Apptainer >= 1.4**: zstd
+- **Apptainer < 1.4**: lz4
 
 ## ⌨️ Shell Completion
 
@@ -79,4 +82,4 @@ condatainer settings
 
 - [Concepts: Overlays](./concepts.md) — Understand the overlay model before proceeding
 - [Helpers on HPC](../tutorials/helpers_on_HPC.md) — Running Applications (e.g. VS Code, RStudio, IGV) with CondaTainer on HPC
-- [Helpers on headless servers](../tutorials/helpers_on_headless.md) — Running Applications without a scheduler
+- [Helpers on headless servers](../tutorials/helpers_on_server.md) — Running Applications without a scheduler

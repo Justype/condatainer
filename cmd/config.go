@@ -549,9 +549,9 @@ By default, the location is chosen based on the installation:
 			ExitWithError("Cannot initialize config inside a container. Please run this command on the host system.")
 		}
 
-		// If apptainer is not in the path, exit with an error since it's required for condatainer
-		if !config.ValidateBinary("apptainer") {
-			ExitWithError("'apptainer' binary is not in PATH or not executable.")
+		// If neither apptainer nor singularity is in PATH, exit with an error
+		if config.DetectApptainerBin() == "" {
+			ExitWithError("Neither 'apptainer' nor 'singularity' binary found in PATH.")
 		}
 
 		// Force re-detect binaries from current environment and save to specified path
@@ -560,15 +560,16 @@ By default, the location is chosen based on the installation:
 			ExitWithError("Failed to save config: %v", err)
 		}
 
-		// Auto-detect compression based on apptainer version and save to config
-		detectedCompression := "-comp lz4" // default
+		// Auto-detect compression based on binary type and version, then save to config.
+		// Clear any previously set viper value so AutoDetectCompression always runs during init.
+		detectedCompression := config.Global.Build.CompressArgs // fallback to runtime default
 		apptainerBin := viper.GetString("apptainer_bin")
 		if apptainerBin != "" && config.ValidateBinary(apptainerBin) {
 			if err := apptainer.SetBin(apptainerBin); err == nil {
 				if version, err := apptainer.GetVersion(); err == nil {
-					if apptainer.CheckZstdSupport(version) {
-						detectedCompression = "-comp zstd -Xcompression-level 8"
-					}
+					viper.Set("build.compress_args", "")
+					config.AutoDetectCompression(apptainer.CheckZstdSupport(version), apptainer.IsSingularity())
+					detectedCompression = config.Global.Build.CompressArgs
 				}
 			}
 		}
