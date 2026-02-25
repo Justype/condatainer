@@ -7,9 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -118,101 +118,111 @@ func (p *PbsScheduler) getPbsVersion() (string, error) {
 
 // ReadScriptSpecs parses #PBS directives from a build script
 func (p *PbsScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) {
-	file, err := os.Open(scriptPath)
+	lines, err := readFileLines(scriptPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%w: %s", ErrScriptNotFound, scriptPath)
-		}
 		return nil, err
 	}
-	defer file.Close()
-
-	specs := &ScriptSpecs{
-		Ncpus:    4, // default
-		RawFlags: make([]string, 0),
-	}
-
-	scanner := bufio.NewScanner(file)
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
-
-		// Parse #PBS directives only
-		if matches := p.directiveRe.FindStringSubmatch(line); matches != nil {
-			flag := strings.TrimSpace(matches[1])
-			specs.RawFlags = append(specs.RawFlags, flag)
-
-			// Parse PBS options
-			if err := p.parsePbsFlag(flag, specs); err != nil {
-				return nil, NewParseError("PBS", lineNum, line, err.Error())
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading script: %w", err)
-	}
-
-	return specs, nil
+	return parseScript(scriptPath, lines, p.extractDirectives, p.parseRuntimeConfig, p.parseResourceSpec)
 }
 
-// parsePbsFlag parses individual PBS flags and updates specs
-// PBS uses -l for resources, -N for name, -o/-e for output/error, -m for mail
-func (p *PbsScheduler) parsePbsFlag(flag string, specs *ScriptSpecs) error {
-	// Job name: -N jobname
-	if strings.HasPrefix(flag, "-N ") {
-		specs.JobName = strings.TrimSpace(strings.TrimPrefix(flag, "-N"))
-		return nil
+// extractDirectives extracts raw directive strings from script lines (strips the #PBS prefix).
+func (p *PbsScheduler) extractDirectives(lines []string) []string {
+	var out []string
+	for _, line := range lines {
+		if m := p.directiveRe.FindStringSubmatch(line); m != nil {
+			out = append(out, utils.StripInlineComment(m[1]))
+		}
 	}
+	return out
+}
 
-	// Output file: -o path
-	if strings.HasPrefix(flag, "-o ") {
-		specs.Stdout = strings.TrimSpace(strings.TrimPrefix(flag, "-o"))
-		return nil
-	}
+// parseRuntimeConfig consumes PBS job control directives (name, I/O, email) from the directive list.
+// Returns the populated RuntimeConfig, unconsumed directives, and any critical error.
+// PBS control fields never hard-fail — unknown or malformed control flags are passed through.
+func (p *PbsScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, []string, error) {
+	var rc RuntimeConfig
+	var unconsumed []string
 
-	// Error file: -e path
-	if strings.HasPrefix(flag, "-e ") {
-		specs.Stderr = strings.TrimSpace(strings.TrimPrefix(flag, "-e"))
-		return nil
-	}
-
-	// Mail user: -M email
-	if strings.HasPrefix(flag, "-M ") {
-		specs.MailUser = strings.TrimSpace(strings.TrimPrefix(flag, "-M"))
-		return nil
-	}
-
-	// Mail options: -m [a|b|e|n] (abort, begin, end, none)
-	if strings.HasPrefix(flag, "-m ") {
-		mailOpts := strings.TrimSpace(strings.TrimPrefix(flag, "-m"))
-		if mailOpts == "n" {
-			specs.EmailOnBegin = false
-			specs.EmailOnEnd = false
-			specs.EmailOnFail = false
-		} else {
-			for _, c := range mailOpts {
-				switch c {
-				case 'a': // abort/fail
-					specs.EmailOnFail = true
-				case 'b': // begin
-					specs.EmailOnBegin = true
-				case 'e': // end
-					specs.EmailOnEnd = true
+	for _, flag := range directives {
+		consumed := true
+		switch {
+		case flagMatches(flag, "-N"):
+			rc.JobName, _ = flagValue(flag, "-N")
+		case flagMatches(flag, "-o"):
+			v, _ := flagValue(flag, "-o")
+			rc.Stdout = absPath(v)
+		case flagMatches(flag, "-e"):
+			v, _ := flagValue(flag, "-e")
+			rc.Stderr = absPath(v)
+		case flagMatches(flag, "-q"):
+			rc.Partition, _ = flagValue(flag, "-q")
+		case flagMatches(flag, "-M"):
+			rc.MailUser, _ = flagValue(flag, "-M")
+		case flagMatches(flag, "-m"):
+			mailOpts, _ := flagValue(flag, "-m")
+			if mailOpts == "n" {
+				rc.EmailOnBegin = false
+				rc.EmailOnEnd = false
+				rc.EmailOnFail = false
+			} else {
+				for _, c := range mailOpts {
+					switch c {
+					case 'a': // abort/fail
+						rc.EmailOnFail = true
+					case 'b': // begin
+						rc.EmailOnBegin = true
+					case 'e': // end
+						rc.EmailOnEnd = true
+					}
 				}
 			}
+		default:
+			consumed = false
 		}
-		return nil
+
+		if !consumed {
+			unconsumed = append(unconsumed, flag)
+		}
 	}
 
-	// Resource list: -l resource=value[,resource=value,...]
-	if strings.HasPrefix(flag, "-l ") {
+	return rc, unconsumed, nil
+}
+
+// parseResourceSpec consumes PBS resource directives from the directive list.
+// Returns a populated ResourceSpec and any unconsumed directives.
+// Returns nil ResourceSpec on any parse error (passthrough mode).
+func (p *PbsScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []string) {
+	defaults := GetSpecDefaults()
+	rs := &ResourceSpec{
+		CpusPerTask:  defaults.CpusPerTask,
+		TasksPerNode: defaults.TasksPerNode,
+		Nodes:        defaults.Nodes,
+		MemPerNodeMB: defaults.MemPerNodeMB,
+		Time:         defaults.Time,
+	}
+
+	var unconsumed []string
+
+	for _, flag := range directives {
+		// Exclusive node access: -x
+		if flag == "-x" {
+			rs.Exclusive = true
+			continue
+		}
+		// Only -l flags carry resource specifications
+		if !strings.HasPrefix(flag, "-l ") {
+			unconsumed = append(unconsumed, flag)
+			continue
+		}
+
 		resourceStr := strings.TrimSpace(strings.TrimPrefix(flag, "-l"))
-		return p.parseResourceList(resourceStr, specs)
+		if err := p.parseResourceList(resourceStr, rs); err != nil {
+			logParseWarning("PBS: failed to parse resource directive %q: %v", flag, err)
+			return nil, directives
+		}
 	}
 
-	return nil
+	return rs, unconsumed
 }
 
 // parseResourceList parses PBS -l resource specifications
@@ -221,7 +231,7 @@ func (p *PbsScheduler) parsePbsFlag(flag string, specs *ScriptSpecs) error {
 //   - walltime=01:00:00
 //   - ngpus=1
 //   - nodes=1:ppn=4
-func (p *PbsScheduler) parseResourceList(resourceStr string, specs *ScriptSpecs) error {
+func (p *PbsScheduler) parseResourceList(resourceStr string, rs *ResourceSpec) error {
 	// Split by comma, but be careful with select= which can have colons
 	resources := strings.Split(resourceStr, ",")
 
@@ -231,13 +241,36 @@ func (p *PbsScheduler) parseResourceList(resourceStr string, specs *ScriptSpecs)
 			continue
 		}
 
-		// Handle select= which contains colon-separated resources
+		// Handle select=N:ncpus=M:mpiprocs=P:mem=X format
 		if strings.HasPrefix(res, "select=") {
 			selectParts := strings.Split(res, ":")
+			var mpiprocs int
 			for _, part := range selectParts {
-				if err := p.parseSingleResource(part, specs); err != nil {
-					return err
+				// Extract chunk count (node count) from select=N
+				if strings.HasPrefix(part, "select=") {
+					selectVal := strings.TrimPrefix(part, "select=")
+					n, err := strconv.Atoi(selectVal)
+					if err != nil {
+						return fmt.Errorf("invalid select value %q: %w", selectVal, err)
+					}
+					rs.Nodes = n
+				} else if strings.HasPrefix(part, "mpiprocs=") {
+					// mpiprocs is tasks per chunk (per node)
+					mpStr := strings.TrimPrefix(part, "mpiprocs=")
+					mp, err := strconv.Atoi(mpStr)
+					if err != nil {
+						return fmt.Errorf("invalid mpiprocs value %q: %w", mpStr, err)
+					}
+					mpiprocs = mp
+				} else {
+					if err := p.parseSingleResource(part, rs); err != nil {
+						return err
+					}
 				}
+			}
+			// mpiprocs maps to TasksPerNode
+			if mpiprocs > 0 {
+				rs.TasksPerNode = mpiprocs
 			}
 			continue
 		}
@@ -246,17 +279,26 @@ func (p *PbsScheduler) parseResourceList(resourceStr string, specs *ScriptSpecs)
 		if strings.HasPrefix(res, "nodes=") {
 			nodeParts := strings.Split(res, ":")
 			for _, part := range nodeParts {
-				if strings.HasPrefix(part, "ppn=") {
-					ppnStr := strings.TrimPrefix(part, "ppn=")
-					if ppn, err := strconv.Atoi(ppnStr); err == nil {
-						specs.Ncpus = ppn
+				if strings.HasPrefix(part, "nodes=") {
+					nodesStr := strings.TrimPrefix(part, "nodes=")
+					n, err := strconv.Atoi(nodesStr)
+					if err != nil {
+						return fmt.Errorf("invalid nodes value %q: %w", nodesStr, err)
 					}
+					rs.Nodes = n
+				} else if strings.HasPrefix(part, "ppn=") {
+					ppnStr := strings.TrimPrefix(part, "ppn=")
+					ppn, err := strconv.Atoi(ppnStr)
+					if err != nil {
+						return fmt.Errorf("invalid ppn value %q: %w", ppnStr, err)
+					}
+					rs.CpusPerTask = ppn
 				}
 			}
 			continue
 		}
 
-		if err := p.parseSingleResource(res, specs); err != nil {
+		if err := p.parseSingleResource(res, rs); err != nil {
 			return err
 		}
 	}
@@ -265,7 +307,7 @@ func (p *PbsScheduler) parseResourceList(resourceStr string, specs *ScriptSpecs)
 }
 
 // parseSingleResource parses a single resource=value specification
-func (p *PbsScheduler) parseSingleResource(res string, specs *ScriptSpecs) error {
+func (p *PbsScheduler) parseSingleResource(res string, rs *ResourceSpec) error {
 	parts := strings.SplitN(res, "=", 2)
 	if len(parts) != 2 {
 		return nil // Not a key=value, skip
@@ -276,33 +318,48 @@ func (p *PbsScheduler) parseSingleResource(res string, specs *ScriptSpecs) error
 
 	switch key {
 	case "ncpus":
-		if ncpus, err := strconv.Atoi(value); err == nil {
-			specs.Ncpus = ncpus
+		ncpus, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid ncpus value %q: %w", value, err)
 		}
+		rs.CpusPerTask = ncpus
 
 	case "mem":
-		if mem, err := parseMemoryString(value); err == nil {
-			specs.MemMB = mem
+		mem, err := parseMemoryMB(value)
+		if err != nil {
+			return fmt.Errorf("invalid mem value %q: %w", value, err)
 		}
+		rs.MemPerNodeMB = mem
 
 	case "walltime":
-		if dur, err := parsePbsTime(value); err == nil {
-			specs.Time = dur
+		dur, err := parseHMSTime(value)
+		if err != nil {
+			return fmt.Errorf("invalid walltime value %q: %w", value, err)
 		}
+		rs.Time = dur
 
 	case "ngpus":
-		if count, err := strconv.Atoi(value); err == nil {
-			specs.Gpu = &GpuSpec{
-				Type:  "gpu",
-				Count: count,
-				Raw:   res,
-			}
+		count, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid ngpus value %q: %w", value, err)
+		}
+		rs.Gpu = &GpuSpec{
+			Type:  "gpu",
+			Count: count,
+			Raw:   res,
 		}
 
 	case "gpus":
 		gpu, err := parseGpuString(value)
-		if err == nil {
-			specs.Gpu = gpu
+		if err != nil {
+			return fmt.Errorf("invalid gpus value %q: %w", value, err)
+		}
+		rs.Gpu = gpu
+
+	case "place":
+		// place=excl (or place=excl:...) requests exclusive node access
+		if strings.Contains(value, "excl") {
+			rs.Exclusive = true
 		}
 	}
 
@@ -320,18 +377,18 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		}
 	}
 
-	// Set log path based on job name (logs go to outputDir, which caller controls)
-	if jobSpec.Name != "" {
-		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		specs.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeName))
+	// Set log path based on job name; only override if caller requests it or script has no output set
+	if jobSpec.Name != "" && (jobSpec.OverrideOutput || specs.Control.Stdout == "") {
+		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeJobName(jobSpec.Name)))
+	}
+	if specs.Control.Stderr == "" && specs.Control.Stdout != "" {
+		specs.Control.Stderr = specs.Control.Stdout
 	}
 
 	// Generate script filename
 	scriptName := "job.pbs"
 	if jobSpec.Name != "" {
-		// Replace slashes with -- to avoid creating subdirectories
-		safeName := strings.ReplaceAll(jobSpec.Name, "/", "--")
-		scriptName = fmt.Sprintf("%s.pbs", safeName)
+		scriptName = fmt.Sprintf("%s.pbs", safeJobName(jobSpec.Name))
 	}
 
 	scriptPath := filepath.Join(outputDir, scriptName)
@@ -349,97 +406,84 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	// Write shebang
 	fmt.Fprintln(writer, "#!/bin/bash")
 
-	// Write parsed PBS directives with overrides
-	for _, flag := range specs.RawFlags {
-		// Skip output/error flags if we're overriding them
-		if specs.Stdout != "" && strings.HasPrefix(flag, "-o ") {
-			continue
-		}
-		// Always skip stderr flags - we don't want separate error logs
-		if strings.HasPrefix(flag, "-e ") {
-			continue
-		}
-		// Skip job-name flags - we'll use specs.JobName if set
-		if specs.JobName != "" && strings.HasPrefix(flag, "-N ") {
-			continue
-		}
-		// Skip email flags - they'll be regenerated from specs
-		if strings.HasPrefix(flag, "-m ") || strings.HasPrefix(flag, "-M ") {
-			continue
-		}
+	// Write passthrough flags (directives not consumed by Spec or Control)
+	for _, flag := range specs.RemainingFlags {
 		fmt.Fprintf(writer, "#PBS %s\n", flag)
 	}
 
-	// Add job name if specified
-	if specs.JobName != "" {
-		fmt.Fprintf(writer, "#PBS -N %s\n", specs.JobName)
+	// Write RuntimeConfig directives
+	ctrl := specs.Control
+	if ctrl.JobName != "" {
+		fmt.Fprintf(writer, "#PBS -N %s\n", ctrl.JobName)
+	}
+	if ctrl.Stdout != "" {
+		fmt.Fprintf(writer, "#PBS -o %s\n", ctrl.Stdout)
+	}
+	if ctrl.Stderr != "" {
+		fmt.Fprintf(writer, "#PBS -e %s\n", ctrl.Stderr)
+	}
+	if ctrl.Partition != "" {
+		fmt.Fprintf(writer, "#PBS -q %s\n", ctrl.Partition)
 	}
 
-	// Add custom stdout if specified (stderr is not used - output goes to stdout)
-	if specs.Stdout != "" {
-		fmt.Fprintf(writer, "#PBS -o %s\n", specs.Stdout)
+	// Write ResourceSpec directives (only if not in passthrough mode)
+	if specs.Spec != nil {
+		rs := specs.Spec
+		nodes := rs.Nodes
+		if nodes <= 0 {
+			nodes = 1
+		}
+		tasksPerNode := rs.TasksPerNode
+		if tasksPerNode <= 0 {
+			tasksPerNode = 1
+		}
+
+		// Generate resource specification: select=N:ncpus=M[:mpiprocs=P][:mem=Xmb][:ngpus=G]
+		selectParts := []string{fmt.Sprintf("select=%d", nodes)}
+		if rs.CpusPerTask > 0 {
+			selectParts = append(selectParts, fmt.Sprintf("ncpus=%d", rs.CpusPerTask))
+		}
+		if tasksPerNode > 1 {
+			selectParts = append(selectParts, fmt.Sprintf("mpiprocs=%d", tasksPerNode))
+		}
+		if rs.MemPerNodeMB > 0 {
+			selectParts = append(selectParts, fmt.Sprintf("mem=%dmb", rs.MemPerNodeMB))
+		}
+		if rs.Gpu != nil && rs.Gpu.Count > 0 {
+			selectParts = append(selectParts, fmt.Sprintf("ngpus=%d", rs.Gpu.Count))
+		}
+		fmt.Fprintf(writer, "#PBS -l %s\n", strings.Join(selectParts, ":"))
+
+		if rs.Time > 0 {
+			fmt.Fprintf(writer, "#PBS -l walltime=%s\n", formatHMSTime(rs.Time))
+		}
+		if rs.Exclusive {
+			fmt.Fprintln(writer, "#PBS -l place=excl")
+		}
 	}
 
 	// Add email notifications if specified
-	if specs.EmailOnBegin || specs.EmailOnEnd || specs.EmailOnFail {
+	if ctrl.EmailOnBegin || ctrl.EmailOnEnd || ctrl.EmailOnFail {
 		var mailOpts string
-		if specs.EmailOnBegin {
+		if ctrl.EmailOnBegin {
 			mailOpts += "b"
 		}
-		if specs.EmailOnEnd {
+		if ctrl.EmailOnEnd {
 			mailOpts += "e"
 		}
-		if specs.EmailOnFail {
+		if ctrl.EmailOnFail {
 			mailOpts += "a"
 		}
 		fmt.Fprintf(writer, "#PBS -m %s\n", mailOpts)
 	}
-	if specs.MailUser != "" {
-		fmt.Fprintf(writer, "#PBS -M %s\n", specs.MailUser)
+	if ctrl.MailUser != "" {
+		fmt.Fprintf(writer, "#PBS -M %s\n", ctrl.MailUser)
 	}
 
-	// Add blank line
 	fmt.Fprintln(writer, "")
 
 	// Print job information at start
-	fmt.Fprintln(writer, "# Print job information")
-	fmt.Fprintln(writer, "_START_TIME=$SECONDS")
-	fmt.Fprintln(writer, "_format_time() { local s=$1; printf '%02d:%02d:%02d' $((s/3600)) $((s%3600/60)) $((s%60)); }")
-	fmt.Fprintln(writer, "echo \"========================================\"")
-	fmt.Fprintln(writer, "echo \"Job ID:    $PBS_JOBID\"")
-	fmt.Fprintf(writer, "echo \"Job Name:  %s\"\n", specs.JobName)
-	if specs.Ncpus > 0 {
-		fmt.Fprintf(writer, "echo \"CPUs:      %d\"\n", specs.Ncpus)
-	}
-	if specs.MemMB > 0 {
-		fmt.Fprintf(writer, "echo \"Memory:    %d MB\"\n", specs.MemMB)
-	}
-	if specs.Time > 0 {
-		hours := int(specs.Time.Hours())
-		mins := int(specs.Time.Minutes()) % 60
-		secs := int(specs.Time.Seconds()) % 60
-		fmt.Fprintf(writer, "echo \"Time:      %02d:%02d:%02d\"\n", hours, mins, secs)
-	}
-	fmt.Fprintln(writer, "echo \"PWD:       $(pwd)\"")
-	// Print additional metadata if available
-	if len(jobSpec.Metadata) > 0 {
-		// Find max key length for alignment
-		maxLen := 0
-		for key := range jobSpec.Metadata {
-			if len(key) > maxLen {
-				maxLen = len(key)
-			}
-		}
-		// Print each metadata field with proper alignment
-		for key, value := range jobSpec.Metadata {
-			if value != "" {
-				padding := maxLen - len(key)
-				fmt.Fprintf(writer, "echo \"%s:%s %s\"\n", key, strings.Repeat(" ", padding+3), value)
-			}
-		}
-	}
-	fmt.Fprintf(writer, "%s\n", "echo \"Started:   $(date '+%Y-%m-%d %T')\"")
-	fmt.Fprintln(writer, "echo \"========================================\"")
+	writeJobHeader(writer, "$PBS_JOBID", specs, formatHMSTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
 	// Write the command
@@ -447,14 +491,12 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	// Print completion info
 	fmt.Fprintln(writer, "")
-	fmt.Fprintln(writer, "echo \"========================================\"")
-	fmt.Fprintln(writer, "echo \"Job ID:    $PBS_JOBID\"")
-	fmt.Fprintln(writer, "echo \"Elapsed:   $(_format_time $(($SECONDS - $_START_TIME)))\"")
-	fmt.Fprintf(writer, "%s\n", "echo \"Completed: $(date '+%Y-%m-%d %T')\"")
-	fmt.Fprintln(writer, "echo \"========================================\"")
+	writeJobFooter(writer, "$PBS_JOBID")
 
-	// Self-delete the script after execution
-	fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
+	// Self-delete the script after execution (unless in debug mode)
+	if !debugMode {
+		fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
+	}
 
 	// Make executable
 	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {
@@ -501,11 +543,24 @@ func (p *PbsScheduler) GetClusterInfo() (*ClusterInfo, error) {
 
 	// Get node resources using pbsnodes
 	if p.pbsnodesBin != "" {
-		maxCpus, maxMem, gpus, err := p.getNodeResources()
+		maxCpus, maxMem, err := p.getNodeResources()
 		if err == nil {
 			info.MaxCpusPerNode = maxCpus
 			info.MaxMemMBPerNode = maxMem
+		}
+
+		// Get GPU info separately
+		gpus, err := p.getGpuInfo()
+		if err == nil {
 			info.AvailableGpus = gpus
+		}
+	}
+
+	// Get queue limits
+	if p.qstatBin != "" {
+		limits, err := p.getQueueLimits(info.AvailableGpus)
+		if err == nil {
+			info.Limits = limits
 		}
 	}
 
@@ -517,16 +572,15 @@ func (p *PbsScheduler) GetClusterInfo() (*ClusterInfo, error) {
 }
 
 // getNodeResources queries PBS for node resources using pbsnodes
-func (p *PbsScheduler) getNodeResources() (int, int64, []GpuInfo, error) {
+func (p *PbsScheduler) getNodeResources() (int, int64, error) {
 	cmd := exec.Command(p.pbsnodesBin, "-a")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return 0, 0, nil, NewClusterError("PBS", "query nodes", err)
+		return 0, 0, NewClusterError("PBS", "query nodes", err)
 	}
 
 	var maxCpus int
 	var maxMemMB int64
-	gpuMap := make(map[string]*GpuInfo)
 
 	// Parse pbsnodes output
 	// Format is key = value pairs, with node names as headers
@@ -577,27 +631,6 @@ func (p *PbsScheduler) getNodeResources() (int, int64, []GpuInfo, error) {
 			case "resources_available.mem":
 				// Memory can be in kb, mb, gb format
 				nodeMemKB, _ = parsePbsMemory(value)
-			case "resources_available.ngpus":
-				var gpuCount int
-				fmt.Sscanf(value, "%d", &gpuCount)
-				if gpuCount > 0 {
-					if existing, ok := gpuMap["gpu"]; ok {
-						existing.Total += gpuCount
-						if nodeState == "free" {
-							existing.Available += gpuCount
-						}
-					} else {
-						available := 0
-						if nodeState == "free" {
-							available = gpuCount
-						}
-						gpuMap["gpu"] = &GpuInfo{
-							Type:      "gpu",
-							Total:     gpuCount,
-							Available: available,
-						}
-					}
-				}
 			}
 		}
 	}
@@ -613,12 +646,329 @@ func (p *PbsScheduler) getNodeResources() (int, int64, []GpuInfo, error) {
 		}
 	}
 
+	return maxCpus, maxMemMB, nil
+}
+
+// getGpuInfo queries PBS for GPU information using pbsnodes
+func (p *PbsScheduler) getGpuInfo() ([]GpuInfo, error) {
+	cmd := exec.Command(p.pbsnodesBin, "-a")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, NewClusterError("PBS", "query GPU info", err)
+	}
+
+	gpuMap := make(map[string]*GpuInfo)
+
+	// Parse pbsnodes output for GPU information
+	lines := strings.Split(string(output), "\n")
+	var currentNode string
+	var nodeState string
+	var nodeQueue string // Try to detect queue assignment if available
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Node name line
+		if line != "" && !strings.Contains(line, "=") {
+			currentNode = line
+			nodeState = ""
+			nodeQueue = "" // Reset queue for new node
+			continue
+		}
+
+		if currentNode == "" {
+			continue
+		}
+
+		// Parse key = value pairs
+		if strings.Contains(line, "=") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			key := strings.TrimSpace(parts[0])
+			value := strings.TrimSpace(parts[1])
+
+			switch key {
+			case "state":
+				nodeState = value
+			case "queue":
+				// Some PBS installations show queue assignment
+				nodeQueue = value
+			case "resources_available.ngpus":
+				var gpuCount int
+				fmt.Sscanf(value, "%d", &gpuCount)
+				if gpuCount > 0 {
+					// Try to get GPU type from other fields
+					gpuType := "gpu" // default
+
+					// Build key with queue if available
+					key := gpuType
+					if nodeQueue != "" {
+						key = fmt.Sprintf("%s:%s", nodeQueue, gpuType)
+					}
+
+					if existing, ok := gpuMap[key]; ok {
+						existing.Total += gpuCount
+						if nodeState == "free" {
+							existing.Available += gpuCount
+						}
+					} else {
+						available := 0
+						if nodeState == "free" {
+							available = gpuCount
+						}
+						gpuMap[key] = &GpuInfo{
+							Type:      gpuType,
+							Total:     gpuCount,
+							Available: available,
+							Partition: nodeQueue, // May be empty
+						}
+					}
+				}
+			case "resources_available.gpu_model", "gpu_type":
+				// Some PBS installations expose GPU model/type
+				// This would be used to set gpuType above
+				// For now, we keep it simple with "gpu" as the type
+			}
+		}
+	}
+
 	gpus := make([]GpuInfo, 0, len(gpuMap))
 	for _, info := range gpuMap {
 		gpus = append(gpus, *info)
 	}
 
-	return maxCpus, maxMemMB, gpus, nil
+	return gpus, nil
+}
+
+// getQueueLimits queries PBS for queue resource limits using qstat -Qf
+func (p *PbsScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, error) {
+	cmd := exec.Command(p.qstatBin, "-Qf")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, NewClusterError("PBS", "query queues", err)
+	}
+
+	queueLimits := make(map[string]*ResourceLimits)
+	var currentQueue string
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		// Queue name line starts with "Queue: "
+		if strings.HasPrefix(line, "Queue: ") {
+			currentQueue = strings.TrimSpace(strings.TrimPrefix(line, "Queue:"))
+			if currentQueue != "" {
+				queueLimits[currentQueue] = &ResourceLimits{
+					Partition: currentQueue,
+				}
+			}
+			continue
+		}
+
+		// Skip if no current queue
+		if currentQueue == "" {
+			continue
+		}
+
+		// Parse key = value pairs (indented lines)
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "=") {
+			continue
+		}
+
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		limit := queueLimits[currentQueue]
+
+		switch key {
+		case "resources_max.walltime", "max_walltime":
+			if duration, err := parseHMSTime(value); err == nil && duration > 0 {
+				limit.MaxTime = duration
+			}
+		case "resources_max.mem", "max_mem":
+			if memKB, err := parsePbsMemory(value); err == nil && memKB > 0 {
+				memMB := memKB / 1024
+				limit.MaxMemMBPerNode = memMB
+			}
+		case "resources_max.ncpus", "max_ncpus":
+			var cpus int
+			if _, err := fmt.Sscanf(value, "%d", &cpus); err == nil && cpus > 0 {
+				limit.MaxCpusPerNode = cpus
+			}
+		case "resources_available.nodect", "total_nodes":
+			var nodes int
+			if _, err := fmt.Sscanf(value, "%d", &nodes); err == nil && nodes > 0 {
+				limit.MaxNodes = nodes
+			}
+		case "enabled":
+			// Skip disabled queues
+			if value == "False" {
+				delete(queueLimits, currentQueue)
+			}
+		}
+	}
+
+	// Get available resources per queue from actual nodes
+	if p.pbsnodesBin != "" {
+		availRes, err := p.getAvailableResourcesByQueue()
+		if err == nil {
+			// Merge available resources into queue limits
+			for queueName, limit := range queueLimits {
+				if avail, ok := availRes[queueName]; ok {
+					// Use available resources as limits if they're set and larger than config
+					if avail.MaxCpusPerNode > 0 {
+						limit.MaxCpusPerNode = avail.MaxCpusPerNode
+					}
+					if avail.MaxMemMBPerNode > 0 {
+						limit.MaxMemMBPerNode = avail.MaxMemMBPerNode
+					}
+				}
+			}
+		}
+	}
+
+	// Convert map to slice
+	limits := make([]ResourceLimits, 0, len(queueLimits))
+
+	// Calculate GPU count per queue from GPU info
+	gpusByQueue := make(map[string]int)
+	for _, gpu := range gpuInfo {
+		queue := gpu.Partition
+		if queue == "" {
+			// If no queue assigned, add to all queues
+			for qName := range queueLimits {
+				gpusByQueue[qName] += gpu.Total
+			}
+		} else {
+			gpusByQueue[queue] += gpu.Total
+		}
+	}
+
+	for queueName, limit := range queueLimits {
+		// Assign GPU count for this queue
+		if maxGpus, ok := gpusByQueue[queueName]; ok {
+			limit.MaxGpus = maxGpus
+		}
+		limits = append(limits, *limit)
+	}
+
+	// Sort by queue name for consistent output
+	sort.Slice(limits, func(i, j int) bool {
+		return limits[i].Partition < limits[j].Partition
+	})
+
+	return limits, nil
+}
+
+// getAvailableResourcesByQueue queries available CPUs and memory per queue
+func (p *PbsScheduler) getAvailableResourcesByQueue() (map[string]ResourceLimits, error) {
+	cmd := exec.Command(p.pbsnodesBin, "-a")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, NewClusterError("PBS", "query available resources by queue", err)
+	}
+
+	// Track resources per queue
+	resources := make(map[string]ResourceLimits)
+
+	// Parse pbsnodes output
+	lines := strings.Split(string(output), "\n")
+	var currentNode string
+	var nodeCpus int
+	var nodeMemKB int64
+	var nodeState string
+	var nodeQueue string
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Node name line
+		if line != "" && !strings.Contains(line, "=") {
+			// Save previous node's data
+			if currentNode != "" && nodeQueue != "" && (nodeState == "free" || nodeState == "job-exclusive" || strings.Contains(nodeState, "busy")) {
+				nodeMB := nodeMemKB / 1024
+
+				// Update max for this queue
+				if existing, ok := resources[nodeQueue]; ok {
+					if nodeCpus > existing.MaxCpusPerNode {
+						existing.MaxCpusPerNode = nodeCpus
+					}
+					if nodeMB > existing.MaxMemMBPerNode {
+						existing.MaxMemMBPerNode = nodeMB
+					}
+					resources[nodeQueue] = existing
+				} else {
+					resources[nodeQueue] = ResourceLimits{
+						Partition:       nodeQueue,
+						MaxCpusPerNode:  nodeCpus,
+						MaxMemMBPerNode: nodeMB,
+					}
+				}
+			}
+			currentNode = line
+			nodeCpus = 0
+			nodeMemKB = 0
+			nodeState = ""
+			nodeQueue = ""
+			continue
+		}
+
+		if currentNode == "" {
+			continue
+		}
+
+		// Parse key = value pairs
+		if strings.Contains(line, "=") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			key := strings.TrimSpace(parts[0])
+			value := strings.TrimSpace(parts[1])
+
+			switch key {
+			case "state":
+				nodeState = value
+			case "queue":
+				nodeQueue = value
+			case "np", "pcpus":
+				fmt.Sscanf(value, "%d", &nodeCpus)
+			case "resources_available.ncpus":
+				fmt.Sscanf(value, "%d", &nodeCpus)
+			case "resources_available.mem":
+				nodeMemKB, _ = parsePbsMemory(value)
+			}
+		}
+	}
+
+	// Don't forget the last node
+	if currentNode != "" && nodeQueue != "" && (nodeState == "free" || nodeState == "job-exclusive" || strings.Contains(nodeState, "busy")) {
+		nodeMB := nodeMemKB / 1024
+
+		if existing, ok := resources[nodeQueue]; ok {
+			if nodeCpus > existing.MaxCpusPerNode {
+				existing.MaxCpusPerNode = nodeCpus
+			}
+			if nodeMB > existing.MaxMemMBPerNode {
+				existing.MaxMemMBPerNode = nodeMB
+			}
+			resources[nodeQueue] = existing
+		} else {
+			resources[nodeQueue] = ResourceLimits{
+				Partition:       nodeQueue,
+				MaxCpusPerNode:  nodeCpus,
+				MaxMemMBPerNode: nodeMB,
+			}
+		}
+	}
+
+	return resources, nil
 }
 
 // parsePbsMemory parses PBS memory format (e.g., "8gb", "1024mb", "1048576kb")
@@ -647,60 +997,6 @@ func parsePbsMemory(memStr string) (int64, error) {
 	default:
 		return value, nil
 	}
-}
-
-// parseMemoryString converts memory strings like "8G", "1024M", "8gb" to MB
-func parseMemoryString(memStr string) (int64, error) {
-	memStr = strings.ToUpper(strings.TrimSpace(memStr))
-
-	var value int64
-	var unit string
-
-	n, err := fmt.Sscanf(memStr, "%d%s", &value, &unit)
-	if err != nil && n == 0 {
-		return 0, fmt.Errorf("%w: %s", ErrInvalidMemoryFormat, memStr)
-	}
-
-	switch unit {
-	case "G", "GB":
-		return value * 1024, nil
-	case "M", "MB", "":
-		return value, nil
-	case "K", "KB":
-		return value / 1024, nil
-	case "T", "TB":
-		return value * 1024 * 1024, nil
-	default:
-		return value, nil
-	}
-}
-
-// parsePbsTime parses PBS walltime format: HH:MM:SS
-func parsePbsTime(timeStr string) (time.Duration, error) {
-	timeStr = strings.TrimSpace(timeStr)
-	if timeStr == "" {
-		return 0, nil
-	}
-
-	parts := strings.Split(timeStr, ":")
-	var hours, minutes, seconds int64
-
-	switch len(parts) {
-	case 3:
-		hours, _ = strconv.ParseInt(parts[0], 10, 64)
-		minutes, _ = strconv.ParseInt(parts[1], 10, 64)
-		seconds, _ = strconv.ParseInt(parts[2], 10, 64)
-	case 2:
-		hours, _ = strconv.ParseInt(parts[0], 10, 64)
-		minutes, _ = strconv.ParseInt(parts[1], 10, 64)
-	case 1:
-		minutes, _ = strconv.ParseInt(parts[0], 10, 64)
-	default:
-		return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
-	}
-
-	totalSeconds := hours*3600 + minutes*60 + seconds
-	return time.Duration(totalSeconds) * time.Second, nil
 }
 
 // parseGpuString parses GPU specifications from various formats
@@ -770,23 +1066,39 @@ func parseGpuString(gpuStr string) (*GpuSpec, error) {
 }
 
 // GetJobResources reads allocated resources from PBS environment variables.
-func (s *PbsScheduler) GetJobResources() *JobResources {
+// GetJobResources reads allocated resources from PBS environment variables.
+// Fields with value 0 were not exposed by PBS.
+func (s *PbsScheduler) GetJobResources() *ResourceSpec {
 	if _, ok := os.LookupEnv("PBS_JOBID"); !ok {
 		return nil
 	}
-	res := &JobResources{}
-	res.Ncpus = getEnvInt("PBS_NCPUS")
-	if res.Ncpus == nil {
-		res.Ncpus = getEnvInt("NCPUS")
+	res := &ResourceSpec{}
+	if v := getEnvInt("PBS_NUM_NODES"); v != nil {
+		res.Nodes = *v
+	}
+	// PBS_NCPUS: total CPUs per node (some PBS variants)
+	if v := getEnvInt("PBS_NCPUS"); v != nil {
+		res.CpusPerTask = *v
+	} else if v := getEnvInt("NCPUS"); v != nil {
+		res.CpusPerTask = *v
+	}
+	// Derive TasksPerNode from total tasks / nodes
+	ntasks := getEnvInt("PBS_NP")
+	if ntasks == nil {
+		ntasks = getEnvInt("PBS_TASKNUM")
+	}
+	if ntasks != nil && res.Nodes > 0 {
+		res.TasksPerNode = *ntasks / res.Nodes
 	}
 	// PBS_VMEM is in bytes
 	if vmem := getEnvInt64("PBS_VMEM"); vmem != nil {
-		mb := *vmem / (1024 * 1024)
-		if mb > 0 {
-			res.MemMB = &mb
+		if mb := *vmem / (1024 * 1024); mb > 0 {
+			res.MemPerNodeMB = mb
 		}
 	}
-	res.Ngpus = getCudaDeviceCount()
+	if n := getCudaDeviceCount(); n != nil && *n > 0 {
+		res.Gpu = &GpuSpec{Count: *n}
+	}
 	return res
 }
 

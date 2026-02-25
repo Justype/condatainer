@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
@@ -22,15 +21,31 @@ var (
 	createBaseImage string
 	createSource    string
 	createTempSize  string
+	createRemote    bool
+	createUpdate    bool
 
-	// Compression flags
-	compZstd       bool
-	compZstdFast   bool
-	compZstdMedium bool
-	compZstdHigh   bool
-	compGzip       bool
-	compLz4        bool
+	// compression flags are generated dynamically from config.CompressOptions
+	compFlags map[string]*bool
 )
+
+// compressArgsFromFlags inspects the map of boolean pointers produced by
+// flag registration and returns the corresponding mksquashfs arguments.
+// If more than one compression flag is set, it returns an error.
+func compressArgsFromFlags(flags map[string]*bool) (string, error) {
+	selected := ""
+	for name, ptr := range flags {
+		if ptr != nil && *ptr {
+			if selected != "" {
+				return "", errors.New("multiple compression options specified")
+			}
+			selected = name
+		}
+	}
+	if selected == "" {
+		return "", nil
+	}
+	return config.ArgsForCompress(selected), nil
+}
 
 var createCmd = &cobra.Command{
 	Use:     "create [packages...]",
@@ -38,7 +53,7 @@ var createCmd = &cobra.Command{
 	Short:   "Create a new SquashFS overlay",
 	Long: `Create a new SquashFS overlay using available build scripts or Conda packages.
 
-Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
+Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 	Example: `  condatainer create samtools/1.22                # Create from build script
   condatainer create python=3.11 numpy -n myenv  # Create conda environment
   condatainer create -f environment.yml -p myenv  # Create from conda file
@@ -55,6 +70,12 @@ Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
 		if createPrefix != "" && createName != "" {
 			ExitWithError("Cannot use both --prefix and --name at the same time.")
 		}
+		if createPrefix != "" {
+			baseName := strings.TrimSuffix(filepath.Base(createPrefix), ".sqf")
+			if strings.Contains(baseName, "--") {
+				ExitWithError("--prefix name cannot contain '--' (reserved name/version separator)")
+			}
+		}
 		if createSource != "" && createName == "" && createPrefix == "" {
 			ExitWithError("When using --source, either --name or --prefix must be provided.")
 		}
@@ -63,23 +84,16 @@ Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
 		}
 
 		// 2. Ensure base image exists (also checks for apptainer)
-		if err := apptainer.EnsureBaseImage(ctx, false, false); err != nil {
-			ExitWithError("%v", err)
+		if err := build.EnsureBaseImage(ctx, false); err != nil {
+			ExitWithError("Failed to ensure base image: %v", err)
 		}
 
-		// 3. Handle Compression Config
-		if compLz4 {
-			config.Global.Build.CompressArgs = "-comp lz4"
-		} else if compZstd {
-			config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 14"
-		} else if compZstdFast {
-			config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 3"
-		} else if compZstdMedium {
-			config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 8"
-		} else if compZstdHigh {
-			config.Global.Build.CompressArgs = "-comp zstd -Xcompression-level 19"
-		} else if compGzip {
-			config.Global.Build.CompressArgs = "-comp gzip"
+		// 3. Handle Compression Config – consult helper that respects available
+		// options and rejects multiple selections.
+		if args, err := compressArgsFromFlags(compFlags); err != nil {
+			ExitWithError("%v", err)
+		} else if args != "" {
+			config.Global.Build.CompressArgs = args
 		}
 		// If no compression flag provided, use config default (auto-detected in root.go)
 
@@ -92,13 +106,32 @@ Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
 			config.Global.Build.TmpSizeMB = sizeMB
 		}
 
-		// 5. Normalize package names (only for build scripts, not for conda packages with -n)
-		normalizedArgs := make([]string, len(args))
-		for i, arg := range args {
-			normalizedArgs[i] = utils.NormalizeNameVersion(arg)
+		// 5. Normalize package names (only for build-script mode, not for conda/prefix/source modes)
+		normalizedArgs := args
+		if createName == "" && createPrefix == "" && createSource == "" {
+			normalizedArgs = make([]string, len(args))
+			for i, arg := range args {
+				normalized := utils.NormalizeNameVersion(arg)
+				// Bare name (no slash) → expand to <default_distro>/<name>
+				// e.g. "igv" → "ubuntu24/igv"  →  ubuntu24--igv.sqf
+				if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
+					expanded := config.Global.DefaultDistro + "/" + normalized
+					utils.PrintNote("Expanding '%s' to '%s'", normalized, expanded)
+					normalized = expanded
+				}
+				normalizedArgs[i] = normalized
+			}
 		}
 
-		// 6. Execute create based on mode
+		// 6. Handle --remote flag (CLI flag or config)
+		build.PreferRemote = createRemote || config.Global.PreferRemote
+
+		// 7. Announce update mode
+		if createUpdate {
+			utils.PrintNote("Update mode: existing overlays will be rebuilt.")
+		}
+
+		// 8. Execute create based on mode
 		if createSource != "" {
 			// Mode: --source (external image like docker://ubuntu)
 			runCreateFromSource(ctx)
@@ -127,14 +160,14 @@ func init() {
 	f.StringVarP(&createBaseImage, "base-image", "b", "", "Base image to use instead of default")
 	f.StringVarP(&createSource, "source", "s", "", "Remote source URI (e.g., docker://ubuntu:22.04)")
 	f.StringVar(&createTempSize, "temp-size", "20G", "Size of temporary overlay")
+	f.BoolVar(&createRemote, "remote", false, "Remote build scripts take precedence over local")
+	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist (atomic .new swap)")
 
-	// Compression Flags
-	f.BoolVar(&compZstdFast, "zstd-fast", false, "Use zstd compression level 3")
-	f.BoolVar(&compZstdMedium, "zstd-medium", false, "Use zstd compression level 8")
-	f.BoolVar(&compZstd, "zstd", false, "Use zstd compression level 14")
-	f.BoolVar(&compZstdHigh, "zstd-high", false, "Use zstd compression level 19")
-	f.BoolVar(&compGzip, "gzip", false, "Use gzip compression")
-	f.BoolVar(&compLz4, "lz4", false, "Use LZ4 compression")
+	// Compression flags: create a bool flag for each known option
+	compFlags = make(map[string]*bool)
+	for _, opt := range config.CompressOptions {
+		compFlags[opt.Name] = f.Bool(opt.Name, false, opt.Description)
+	}
 }
 
 // getWritableImagesDir returns the writable images directory or exits with an error
@@ -153,7 +186,7 @@ func runCreatePackages(ctx context.Context, packages []string) {
 
 	buildObjects := make([]build.BuildObject, 0, len(packages))
 	for _, pkg := range packages {
-		bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir())
+		bo, err := build.NewBuildObject(ctx, pkg, false, imagesDir, config.GetWritableTmpDir(), createUpdate)
 		if err != nil {
 			ExitWithError("Failed to create build object for %s: %v", pkg, err)
 		}
@@ -161,7 +194,7 @@ func runCreatePackages(ctx context.Context, packages []string) {
 		buildObjects = append(buildObjects, bo)
 	}
 
-	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
+	graph, err := build.NewBuildGraph(ctx, buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build graph: %v", err)
 	}
@@ -186,12 +219,14 @@ func runCreateWithName(ctx context.Context, packages []string) {
 		ExitWithError("--name cannot contain more than one '/'")
 	}
 
-	// Check if already exists (search all paths)
-	searchName := strings.ReplaceAll(normalizedName, "/", "--") + ".sqf"
-	if existingPath, err := config.FindImage(searchName); err == nil {
-		utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
-			utils.StyleName(filepath.Base(existingPath)), utils.StylePath(existingPath))
-		return
+	// Check if already exists (search all paths), skip only when not updating
+	if !createUpdate {
+		searchName := strings.ReplaceAll(normalizedName, "/", "--") + ".sqf"
+		if existingPath, err := config.FindImage(searchName); err == nil {
+			utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
+				utils.StyleName(filepath.Base(existingPath)), utils.StylePath(existingPath))
+			return
+		}
 	}
 
 	utils.PrintDebug("[CREATE] Creating overlay with name: %s", createName)
@@ -213,7 +248,7 @@ func runCreateWithName(ctx context.Context, packages []string) {
 	}
 
 	// Create CondaBuildObject using the new factory function
-	bo, err := build.NewCondaObjectWithSource(normalizedName, buildSource, imagesDir, config.GetWritableTmpDir())
+	bo, err := build.NewCondaObjectWithSource(normalizedName, buildSource, imagesDir, config.GetWritableTmpDir(), createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build object: %v", err)
 	}
@@ -245,7 +280,7 @@ func runCreateWithPrefix(ctx context.Context) {
 	if strings.HasSuffix(createFile, ".yml") || strings.HasSuffix(createFile, ".yaml") {
 		// YAML conda environment - use NewCondaObjectWithSource
 		absFile, _ := filepath.Abs(createFile)
-		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, config.GetWritableTmpDir())
+		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, config.GetWritableTmpDir(), createUpdate)
 		if err != nil {
 			ExitWithError("Failed to create build object: %v", err)
 		}
@@ -256,13 +291,13 @@ func runCreateWithPrefix(ctx context.Context) {
 		// Shell script or apptainer def file
 		isApptainer := strings.HasSuffix(createFile, ".def")
 		absFile, _ := filepath.Abs(createFile)
-		bo, err := build.FromExternalSource(absPrefix, absFile, isApptainer, outputDir, config.GetWritableTmpDir())
+		bo, err := build.FromExternalSource(ctx, absPrefix, absFile, isApptainer, outputDir, config.GetWritableTmpDir())
 		if err != nil {
 			ExitWithError("Failed to create build object from %s: %v", createFile, err)
 		}
 
 		buildObjects := []build.BuildObject{bo}
-		graph, err := build.NewBuildGraph(buildObjects, outputDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
+		graph, err := build.NewBuildGraph(ctx, buildObjects, outputDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
 		if err != nil {
 			ExitWithError("Failed to create build graph: %v", err)
 		}
@@ -313,13 +348,13 @@ func runCreateFromSource(ctx context.Context) {
 
 	utils.PrintMessage("Creating overlay %s from %s", filepath.Base(targetOverlayPath), utils.StylePath(source))
 
-	bo, err := build.FromExternalSource(targetPrefix, source, isApptainer, imagesDir, config.GetWritableTmpDir())
+	bo, err := build.FromExternalSource(ctx, targetPrefix, source, isApptainer, imagesDir, config.GetWritableTmpDir())
 	if err != nil {
 		ExitWithError("Failed to create build object from %s: %v", source, err)
 	}
 
 	buildObjects := []build.BuildObject{bo}
-	graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
+	graph, err := build.NewBuildGraph(ctx, buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build graph: %v", err)
 	}

@@ -18,7 +18,6 @@ import (
 
 var (
 	availRemote  bool
-	availLocal   bool
 	availInstall bool
 )
 
@@ -26,18 +25,16 @@ var availCmd = &cobra.Command{
 	Use:     "avail [terms...]",
 	Aliases: []string{"av"},
 	Short:   "Check available build scripts (local and remote)",
-	Long: `List available build scripts that can be used to create overlays.
+	Long: `List available build scripts (local and remote).
 
 By default, shows both local and remote build scripts.
-Use --local to show only local scripts.
-Use --remote to show only remote scripts.
+When duplicates exist, local scripts take precedence.
+Use --remote to make remote scripts take precedence over local.
 Use search terms to filter results (AND logic applied).
 
-Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
-	Example: `  condatainer avail              # List all build scripts (local + remote)
-  condatainer avail --local      # Only local build scripts
-  condatainer avail --remote     # Only remote build scripts
-  condatainer avail samtools     # Search for samtools
+Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
+	Example: `  condatainer avail              # List all (local takes precedence on duplicates)
+  condatainer avail --remote     # List all (remote takes precedence on duplicates)
   condatainer avail sam 1.21     # Search with multiple terms (AND logic)`,
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runAvail,
@@ -45,8 +42,7 @@ Note: If creation jobs are submitted to a scheduler, the command will exit 2.`,
 
 func init() {
 	rootCmd.AddCommand(availCmd)
-	availCmd.Flags().BoolVar(&availRemote, "remote", false, "Show only remote build scripts from GitHub")
-	availCmd.Flags().BoolVar(&availLocal, "local", false, "Show only local build scripts")
+	availCmd.Flags().BoolVar(&availRemote, "remote", false, "Remote build scripts take precedence over local")
 	availCmd.Flags().BoolVarP(&availInstall, "install", "i", false, "Install the selected build scripts (used with search terms)")
 	availCmd.Flags().BoolP("add", "a", false, "Alias for --install")
 }
@@ -64,21 +60,51 @@ func runAvail(cmd *cobra.Command, args []string) error {
 	// Normalize search terms
 	filters := normalizeFilters(args)
 
-	// Determine which sources to include
-	// Default: both local and remote
-	// --local: only local
-	// --remote: only remote
-	includeLocal := !availRemote // include local unless --remote only
-	includeRemote := !availLocal // include remote unless --local only
-
 	// Get installed overlays for marking
 	installedOverlays := getInstalledOverlays()
 
 	// Build package info list
+	// When --remote: add remote first, then local (remote wins on duplicates)
+	// Default: add local first, then remote (local wins on duplicates)
 	packages := make([]PackageInfo, 0)
+	seen := make(map[string]bool)
 
-	// Get local scripts
-	if includeLocal {
+	if availRemote {
+		// Remote first: remote scripts take precedence
+		remoteScripts, err := build.GetRemoteBuildScripts()
+		if err != nil {
+			utils.PrintDebug("Failed to fetch remote scripts: %v", err)
+		} else {
+			for name, info := range remoteScripts {
+				packages = append(packages, PackageInfo{
+					Name:        name,
+					Path:        info.Path,
+					IsContainer: info.IsContainer,
+					IsInstalled: installedOverlays[name],
+					IsRemote:    true,
+				})
+				seen[name] = true
+			}
+		}
+
+		localScripts, err := build.GetLocalBuildScripts()
+		if err != nil {
+			return err
+		}
+		for name, info := range localScripts {
+			if seen[name] {
+				continue
+			}
+			packages = append(packages, PackageInfo{
+				Name:        name,
+				Path:        info.Path,
+				IsContainer: info.IsContainer,
+				IsInstalled: installedOverlays[name],
+				IsRemote:    false,
+			})
+		}
+	} else {
+		// Default: local scripts take precedence
 		localScripts, err := build.GetLocalBuildScripts()
 		if err != nil {
 			return err
@@ -91,29 +117,16 @@ func runAvail(cmd *cobra.Command, args []string) error {
 				IsInstalled: installedOverlays[name],
 				IsRemote:    false,
 			})
+			seen[name] = true
 		}
-	}
 
-	// Get remote scripts
-	if includeRemote {
 		remoteScripts, err := build.GetRemoteBuildScripts()
 		if err != nil {
-			// Log warning but don't fail - remote is optional
 			utils.PrintDebug("Failed to fetch remote scripts: %v", err)
 		} else {
 			for name, info := range remoteScripts {
-				// Skip if already have local version (local takes precedence)
-				if includeLocal {
-					skip := false
-					for _, pkg := range packages {
-						if pkg.Name == name {
-							skip = true
-							break
-						}
-					}
-					if skip {
-						continue
-					}
+				if seen[name] {
+					continue
 				}
 				packages = append(packages, PackageInfo{
 					Name:        name,
@@ -130,13 +143,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 	filtered := filterPackages(packages, filters)
 
 	if len(filtered) == 0 {
-		if availLocal {
-			utils.PrintWarning("No matching local build scripts found.")
-		} else if availRemote {
-			utils.PrintWarning("No matching remote build scripts found.")
-		} else {
-			utils.PrintWarning("No matching build scripts found.")
-		}
+		utils.PrintWarning("No matching build scripts found.")
 		return nil
 	}
 
@@ -194,10 +201,12 @@ func runAvail(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("failed to get writable images directory: %w", err)
 			}
 
-			// Import build package
+			// If --remote flag or config is set, ensure build resolution only uses remote scripts
+			build.PreferRemote = availRemote || config.Global.PreferRemote
+
 			buildObjects := make([]build.BuildObject, 0, len(uninstalled))
 			for _, pkg := range uninstalled {
-				bo, err := build.NewBuildObject(pkg, false, imagesDir, config.GetWritableTmpDir())
+				bo, err := build.NewBuildObject(cmd.Context(), pkg, false, imagesDir, config.GetWritableTmpDir(), false)
 				if err != nil {
 					return fmt.Errorf("failed to create build object for %s: %w", pkg, err)
 				}
@@ -205,7 +214,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 			}
 
 			// Build graph and execute
-			graph, err := build.NewBuildGraph(buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob)
+			graph, err := build.NewBuildGraph(cmd.Context(), buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, false)
 			if err != nil {
 				return fmt.Errorf("failed to create build graph: %w", err)
 			}
@@ -233,7 +242,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 	}
 
 	// Print summary when showing both
-	if !availLocal && !availRemote {
+	if !availRemote {
 		localCount := 0
 		remoteCount := 0
 		for _, pkg := range filtered {
@@ -314,6 +323,14 @@ func filterPackages(packages []PackageInfo, filters []string) []PackageInfo {
 func formatPackageLine(pkg PackageInfo, filters []string) string {
 	line := pkg.Name
 
+	// Compute alias before highlighting (e.g. "ubuntu24/igv" → "[igv]")
+	var alias string
+	if distro := config.Global.DefaultDistro; distro != "" {
+		if a, ok := strings.CutPrefix(pkg.Name, distro+"/"); ok {
+			alias = a
+		}
+	}
+
 	// Highlight search terms in the name only (before adding suffixes)
 	// Use a single-pass approach to avoid ANSI code interference
 	if len(filters) > 0 {
@@ -352,6 +369,10 @@ func formatPackageLine(pkg PackageInfo, filters []string) string {
 
 	if len(suffixes) > 0 {
 		line = fmt.Sprintf("%s (%s)", line, strings.Join(suffixes, ", "))
+	}
+
+	if alias != "" {
+		line += "  " + utils.StyleInfo("["+alias+"]")
 	}
 
 	return line

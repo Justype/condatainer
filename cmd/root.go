@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/Justype/condatainer/internal/apptainer"
+	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
@@ -100,15 +101,20 @@ var rootCmd = &cobra.Command{
 			utils.PrintDebug("Yes mode enabled (automatically answering yes to prompts)")
 		}
 
-		// Step 6: Auto-detect compression based on apptainer version
+		// Step 6: Auto-detect compression based on apptainer/singularity version
 		if err := apptainer.SetBin(config.Global.ApptainerBin); err == nil {
 			if version, err := apptainer.GetVersion(); err == nil {
 				supportsZstd := apptainer.CheckZstdSupport(version)
-				config.AutoDetectCompression(supportsZstd)
+				config.AutoDetectCompression(supportsZstd, apptainer.IsSingularity())
 			}
 		}
 
-		// Step 7: Initialize scheduler if job submission is enabled
+		// Step 7: Apply debug mode and resource defaults from config
+		scheduler.SetDebugMode(config.Global.Debug)
+		scheduler.SetSpecDefaults(config.Global.Scheduler)
+		build.SetBuildDefaults(config.Global.Build.Defaults)
+
+		// Step 8: Initialize scheduler if job submission is enabled
 		if config.Global.SubmitJob {
 			schedType, err := scheduler.Init(config.Global.SchedulerBin)
 			if err == nil && schedType != scheduler.SchedulerUnknown {
@@ -123,6 +129,17 @@ var rootCmd = &cobra.Command{
 func Execute() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// Print a newline on interrupt so cleanup output starts on a fresh line
+	// instead of appearing on the same line as the "^C" echo.
+	interruptCh := make(chan os.Signal, 1)
+	signal.Notify(interruptCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(interruptCh)
+	go func() {
+		if _, ok := <-interruptCh; ok {
+			fmt.Fprintln(os.Stderr)
+		}
+	}()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		// Cobra's automatic error printing is silenced. For Apptainer errors

@@ -27,7 +27,7 @@ var (
 // eCmd is a quick shortcut for executing commands with overlays
 var eCmd = &cobra.Command{
 	Use:   "e [overlays...] [-- command...]",
-	Short: "Quick shortcut for executing with overlays",
+	Short: "Shortcut for exec with overlays, writable by default",
 	Long: `Quick shortcut for executing commands with overlays.
 
 Overlays and flags go before --, commands go after --.
@@ -131,8 +131,8 @@ func runE(cmd *cobra.Command, args []string) error {
 	options := exec.Options{
 		Overlays:       resolvedOverlays,
 		Command:        commands,
-		WritableImg:    !eReadOnly, // Default writable unless -r specified
-		EnvSettings:    eEnvSettings,
+		WritableImg:    !eReadOnly,                                            // Default writable unless -r specified
+		EnvSettings:    append(liveJobResourceEnvSettings(), eEnvSettings...), // Inject live job resources, then user env vars
 		BindPaths:      eBindPaths,
 		ApptainerFlags: apptainerFlags,
 		Fakeroot:       eFakeroot,

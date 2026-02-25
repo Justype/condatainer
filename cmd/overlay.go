@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
@@ -32,7 +31,7 @@ var overlayCreateCmd = &cobra.Command{
 	Use:   "create [image_path]",
 	Short: "Create a new sparse overlay image",
 	Long: `Creates an ext3 overlay image optimized for specific workloads.
-	
+
 If no image path is provided, defaults to 'env.img'.`,
 	Example: `  condatainer overlay create # 10G with default inode ratio
   condatainer overlay create my_data.img -s 50G -t data
@@ -168,85 +167,20 @@ var resizeCmd = &cobra.Command{
 
 var infoCmd = &cobra.Command{
 	Use:   "info [path]",
-	Short: "Display disk usage and filesystem stats",
-	Args:  cobra.ExactArgs(1),
+	Short: "Display overlay info (disk/inode usage for .img, compression/inode stats for .sqf)",
+	Long: `Display detailed information about an overlay file.
 
-	// Enable Smart Tab Completion for .img files
-	ValidArgsFunction: completeImages,
+For ext3 (.img) overlays: shows filesystem stats, disk/inode usage, block size, and ownership.
+For SquashFS (.sqf) overlays: shows compression method, level, inode count, block size, and mount path.
 
-	Run: func(cmd *cobra.Command, args []string) {
-		path := args[0]
+Delegates to the top-level 'condatainer info' command, so both commands produce identical output.`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
 
-		absPath, _ := filepath.Abs(path)
-		lock, err := overlay.AcquireLock(absPath, false)
-		if err != nil {
-			ExitWithError("%v", err)
-		}
-		defer lock.Close()
+	// Enable Smart Tab Completion for both .img and .sqf files
+	ValidArgsFunction: completeOverlayAndSqfFiles,
 
-		stats, err := overlay.GetStats(path)
-		if err != nil {
-			ExitWithError("%v", err)
-		}
-
-		usedBytes, diskPct := stats.Usage()
-		totalBytes := stats.TotalBlocks * stats.BlockSize
-		freeBytes := stats.FreeBlocks * stats.BlockSize
-		reservedBytes := stats.ReservedBlocks * stats.BlockSize
-		usedInodes := stats.TotalInodes - stats.FreeInodes
-		inodePct := stats.InodeUsage()
-
-		// File info
-		fmt.Println(utils.StyleTitle("File"))
-		fmt.Printf("  %-15s %s\n", "Path:", utils.StylePath(path))
-		fmt.Printf("  %-15s %s\n", "Size:", utils.FormatBytes(stats.FileSizeBytes))
-		if stats.IsSparse {
-			fmt.Printf("  %-15s %s (%s on disk)\n", "Type:", utils.StyleInfo("Sparse"), utils.FormatBytes(stats.FileBlocksUsed))
-		} else {
-			fmt.Printf("  %-15s %s\n", "Type:", utils.StyleInfo("Allocated"))
-		}
-
-		// Filesystem info
-		fmt.Println(utils.StyleTitle("Filesystem"))
-		fmt.Printf("  %-15s %s\n", "Format:", utils.StyleInfo(stats.FilesystemType))
-		fmt.Printf("  %-15s %s\n", "State:", stats.FilesystemState)
-		fmt.Printf("  %-15s %d bytes\n", "Block Size:", stats.BlockSize)
-		fmt.Printf("  %-15s %s\n", "UUID:", stats.FilesystemUUID)
-		fmt.Printf("  %-15s %s\n", "Created:", stats.CreatedTime)
-		if stats.LastMounted != "" && stats.LastMounted != "<not available>" {
-			fmt.Printf("  %-15s %s\n", "Last Mounted:", stats.LastMounted)
-		}
-
-		// Ownership
-		fmt.Println(utils.StyleTitle("Ownership"))
-		if stats.UpperUID == 0 && stats.UpperGID == 0 {
-			fmt.Printf("  %-15s %s (use with --fakeroot)\n", "Owner:", utils.StyleInfo("root"))
-		} else if stats.UpperUID >= 0 {
-			fmt.Printf("  %-15s UID=%d GID=%d\n", "Owner:", stats.UpperUID, stats.UpperGID)
-		} else {
-			fmt.Printf("  %-15s %s\n", "Owner:", "unknown")
-		}
-
-		// Disk Usage
-		fmt.Println(utils.StyleTitle("Disk Usage"))
-		fmt.Printf("  %-15s %s / %s (%.2f%%)\n", "Used:",
-			utils.FormatBytes(usedBytes),
-			utils.FormatBytes(totalBytes),
-			diskPct)
-		fmt.Printf("  %-15s %s\n", "Free:", utils.FormatBytes(freeBytes))
-		if stats.ReservedBlocks > 0 {
-			reservedPct := float64(stats.ReservedBlocks) / float64(stats.TotalBlocks) * 100
-			fmt.Printf("  %-15s %s (%.1f%% for root)\n", "Reserved:", utils.FormatBytes(reservedBytes), reservedPct)
-		}
-
-		// Inode Usage
-		fmt.Println(utils.StyleTitle("Inode Usage"))
-		fmt.Printf("  %-15s %d / %d (%.2f%%)\n", "Used:",
-			usedInodes,
-			stats.TotalInodes,
-			inodePct)
-		fmt.Printf("  %-15s %d\n", "Free:", stats.FreeInodes)
-	},
+	RunE: runInfoOverlay,
 }
 
 // ---------------------------------------------------------
@@ -288,14 +222,13 @@ var chownCmd = &cobra.Command{
 	Short: "Recursively set internal files to specific UID/GID",
 	Long: `Walks the overlay filesystem (without mounting) and updates the UID/GID.
 
-Defaults to the current user and paths '/ext3' and '/opt' inside the image.
+Defaults to the current user and paths '/' inside the image.
 Use --root to force ownership to 0:0.
 
 Multiple paths can be specified using multiple -p flags.`,
-	Example: `  condatainer overlay chown env.img                    # Set /ext3 and /opt to current user
+	Example: `  condatainer overlay chown env.img                    # Set entire image to current user
   condatainer overlay chown env.img --root -p /        # Set entire image to root
   condatainer overlay chown env.img -u 1001 -g 1001    # Set to specific ID
-  condatainer overlay chown env.img -p /ext3           # Only chown /ext3
   condatainer overlay chown env.img -p /ext3 -p /data  # Chown multiple paths`,
 	Args: cobra.ExactArgs(1),
 
@@ -350,6 +283,11 @@ Multiple paths can be specified using multiple -p flags.`,
 // completeImages tells the shell to only suggest file extensions ending in "img".
 func completeImages(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	return []string{"img"}, cobra.ShellCompDirectiveFilterFileExt
+}
+
+// completeOverlayAndSqfFiles tells the shell to suggest both .img and .sqf files.
+func completeOverlayAndSqfFiles(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return []string{"img", "sqf"}, cobra.ShellCompDirectiveFilterFileExt
 }
 
 // ---------------------------------------------------------
@@ -416,7 +354,7 @@ func init() {
 	chownCmd.Flags().IntP("uid", "u", os.Getuid(), "User ID to set")
 	chownCmd.Flags().IntP("gid", "g", os.Getgid(), "Group ID to set")
 	chownCmd.Flags().Bool("root", false, "Set UID and GID to 0 (root); overrides -u and -g")
-	chownCmd.Flags().StringArrayP("path", "p", []string{"/ext3", "/opt"}, "Path inside the overlay (can specify multiple)")
+	chownCmd.Flags().StringArrayP("path", "p", []string{"/"}, "Path inside the overlay (can specify multiple)")
 }
 
 // initializeOverlayWithConda installs a conda environment from a YAML file into an overlay
@@ -440,7 +378,7 @@ func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string
 	}
 
 	// Ensure base image exists
-	if err := apptainer.EnsureBaseImage(ctx, false, false); err != nil {
+	if err := ensureBaseImage(ctx); err != nil {
 		return err
 	}
 

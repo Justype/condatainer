@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -141,11 +140,8 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	fmt.Print("\n")
 	if !utils.ShouldAnswerYes() {
 		fmt.Print("Are you sure? Cannot be undone. [y/N]: ")
-		var choice string
-		fmt.Scanln(&choice)
-		choice = strings.ToLower(strings.TrimSpace(choice))
-
-		if choice != "y" && choice != "yes" {
+		choice, err := utils.ReadLineContext(cmd.Context())
+		if err != nil || (choice != "y" && choice != "yes") {
 			utils.PrintNote("Cancelled")
 			return nil
 		}
@@ -156,9 +152,6 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("no writable images directory found: %w", err)
 	}
-
-	// Get def list to check which overlays are def-built
-	defList := build.GetDefBuiltList()
 
 	for _, name := range filtered {
 		overlayPath := installedOverlays[name]
@@ -174,12 +167,6 @@ func runRemove(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		utils.PrintSuccess("Overlay %s removed.", utils.StyleName(name))
-
-		// Remove from def list if it's a def-built overlay
-		normalized := utils.NormalizeNameVersion(name)
-		if defList[normalized] {
-			build.RemoveFromDefBuiltList(name, overlayPath)
-		}
 
 		// Also remove .env file if exists
 		envPath := overlayPath + ".env"

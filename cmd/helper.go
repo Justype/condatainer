@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 
 var (
 	helperPath   bool
+	helperList   bool
 	helperUpdate bool
 )
 
@@ -31,12 +33,10 @@ var supportedSchedulerTypes = []scheduler.SchedulerType{
 var helperCmd = &cobra.Command{
 	Use:   "helper [flags] [script-name] [script-args...]",
 	Short: "Manage and run helper scripts",
-	Long: `Manage helper scripts for running services like code-server, rstudio-server, etc.
+	Long: `Manage helper scripts for running services inside CondaTainer on HPC.
 
-Available helper scripts:
-  - code-server: code server
-  - rstudio-server: RStudio server
-  - vscode-tunnel: VS Code tunnel
+Use --list to see available helper scripts.
+Use --update to download or refresh helper scripts from remote.
 
 Note: Helper is not available inside a container or a scheduler job.`,
 	Example: `  condatainer helper --update                # Update all helper scripts
@@ -49,6 +49,7 @@ Note: Helper is not available inside a container or a scheduler job.`,
 func init() {
 	rootCmd.AddCommand(helperCmd)
 	helperCmd.Flags().BoolVar(&helperPath, "path", false, "Show path to helper scripts directory")
+	helperCmd.Flags().BoolVarP(&helperList, "list", "l", false, "List available helper scripts")
 	helperCmd.Flags().BoolVarP(&helperUpdate, "update", "u", false, "Update helper scripts from remote")
 
 	// Stop flag parsing after the first positional argument so script flags (like -p or -v)
@@ -89,12 +90,12 @@ func completeHelperScripts(cmd *cobra.Command, args []string, toComplete string)
 }
 
 func runHelper(cmd *cobra.Command, args []string) error {
-	// Prevent helper commands when inside a container or scheduler job (except --path)
-	if config.IsInsideContainer() && !helperPath {
+	// Prevent helper commands when inside a container or scheduler job (except --path / --list)
+	if config.IsInsideContainer() && !helperPath && !helperList {
 		cmd.SilenceUsage = true
 		ExitWithError("helper commands are not available inside a container")
 	}
-	if scheduler.IsInsideJob() && !helperPath {
+	if scheduler.IsInsideJob() && !helperPath && !helperList {
 		cmd.SilenceUsage = true
 		ExitWithError("helper commands are not available inside a scheduler job")
 	}
@@ -126,6 +127,44 @@ func runHelper(cmd *cobra.Command, args []string) error {
 		// Show writable directory
 		if writableDir, err := config.GetWritableHelperScriptsDir(); err == nil {
 			fmt.Printf("\nWritable directory: %s\n", writableDir)
+		}
+		return nil
+	}
+
+	// --- List Mode ---
+	if helperList {
+		type scriptInfo struct {
+			name   string
+			whatis string
+		}
+		seen := make(map[string]bool)
+		var scripts []scriptInfo
+		maxNameLen := 0
+
+		for _, dir := range config.GetHelperScriptSearchPaths() {
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				continue
+			}
+			for _, entry := range entries {
+				name := entry.Name()
+				if !entry.IsDir() && !strings.HasPrefix(name, ".") && !seen[name] {
+					seen[name] = true
+					whatis := utils.GetWhatIsFromScript(filepath.Join(dir, name))
+					scripts = append(scripts, scriptInfo{name, whatis})
+					if len(name) > maxNameLen {
+						maxNameLen = len(name)
+					}
+				}
+			}
+		}
+
+		for _, s := range scripts {
+			if s.whatis != "" {
+				fmt.Printf("  %-*s  %s\n", maxNameLen, s.name, s.whatis)
+			} else {
+				fmt.Printf("  %s\n", s.name)
+			}
 		}
 		return nil
 	}
@@ -259,8 +298,7 @@ func updateHelperScripts(args []string, helperScriptsDir string) error {
 			continue
 		}
 
-		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
-			config.GITHUB_REPO, config.Global.Branch, entry.Path)
+		url := fmt.Sprintf("%s/%s", config.Global.ScriptsLink, entry.Path)
 		destName := filepath.Base(entry.Path)
 		dest := filepath.Join(helperScriptsDir, destName)
 
@@ -280,10 +318,9 @@ type HelperScriptEntry struct {
 	Path string `json:"path"`
 }
 
-// fetchRemoteHelperMetadata fetches the helper scripts metadata from GitHub
+// fetchRemoteHelperMetadata fetches the helper scripts metadata from the configured scripts_link
 func fetchRemoteHelperMetadata() (map[string]map[string]HelperScriptEntry, error) {
-	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/metadata/helper-scripts.json",
-		config.GITHUB_REPO, config.Global.Branch)
+	url := config.Global.ScriptsLink + "/metadata/helper-scripts.json.gz"
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -295,7 +332,13 @@ func fetchRemoteHelperMetadata() (map[string]map[string]HelperScriptEntry, error
 		return nil, fmt.Errorf("failed to fetch metadata: HTTP %d", resp.StatusCode)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	gzReader, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decompress metadata: %w", err)
+	}
+	defer gzReader.Close()
+
+	data, err := io.ReadAll(gzReader)
 	if err != nil {
 		return nil, err
 	}

@@ -1,12 +1,12 @@
 CondaTainer
 =========================
 
-`CondaTainer <https://github.com/Justype/condatainer>`_  is an HPC-oriented CLI that streamlines environment and data management by utilizing Apptainer, SquashFS, OverlayFS, and Micromamba.
+`CondaTainer <https://github.com/Justype/condatainer>`_  is a rootless CLI designed to manage tools, data, and project environments, and seamlessly launch interactive apps on HPC clusters — perfect for individuals and small teams using institutional or regional compute.
 
-* **Inode Saver:** Packing 30k+ Conda files into a single image to satisfy inode quotas.
-* **Web-App Ready:** Out-of-the-box support for running *RStudio Server*, *code-server* and more on HPC.
-* **Environment Isolation:** Supports read-only (`.sqf`) for production and writable (`.img`) for development.
-* **Workload Manager Integration:** Native compatibility with Slurm scheduler for batch job submission.
+* **Web-App Ready:** Launch *RStudio*, *VS Code*, *Jupyter* and more with one command.
+* **Unified Management:** Easily organize group-level tools/data and isolate project environments.
+* **Inode Saver:** Packing 30k+ Conda files into a single portable image to bypass quota limits.
+* **Scheduler Native:** Out-of-the-box integration with *Slurm*, *PBS*, *LSF*, and *HTCondor*.
 
 .. toctree::
   :caption: User Guide:
@@ -27,6 +27,7 @@ CondaTainer
   RStudio Server with Conda <tutorials/rstudio-server-conda_on_HPC>
   VS Code Server <tutorials/vscode-server_on_HPC>
   VS Code Tunnel <tutorials/vscode-tunnel_on_HPC>
+  XFCE4 Desktop <tutorials/xfce4_on_HPC>
 
 .. toctree::
   :caption: FAQ:
@@ -44,7 +45,7 @@ CondaTainer
 
 .. toctree::
   :caption: Manuals:
-  :hidden:
+  :maxdepth: 1
   :glob:
 
   manuals/*
@@ -54,5 +55,5 @@ CondaTainer
   :hidden:
 
   code-server on HPC <tutorials/code-server_on_HPC>
+  Helper Scripts on Headless <tutorials/helpers_on_server>
   RStudio Server on Headless <tutorials/rstudio-server_on_server>
-

@@ -37,7 +37,7 @@ Helper scripts automate the multi-step process of running web applications on HP
 
 1. Check dependencies and overlay integrity
 2. Auto-install required module overlays if missing
-3. Submit jobs to the scheduler (SLURM, etc.) and set up port forwarding
+3. Submit jobs to the scheduler (SLURM, PBS, LSF, or HTCondor) and set up port forwarding
 4. Reconnect to existing sessions automatically
 
 ```bash
@@ -226,9 +226,12 @@ When a previous job has ended, the helper can reuse its settings (CPUs, memory, 
 
 The `REUSE_MODE` setting controls this behavior:
 
-- **`ask`** (default): Shows previous settings and prompts to reuse
+- **`ask`** (default): Shows previous settings and prompts:
+  - `Y` — reuse all previous settings (CPUs, memory, time, GPU, port, working directory, overlays)
+  - `n` — discard previous settings, use config defaults and **current directory** as working directory
+  - `Ctrl+C` — cancel
 - **`always`**: Automatically reuses without prompting
-- **`never`**: Always uses defaults from config
+- **`never`**: Always uses config defaults and current directory as working directory
 
 ```bash
 # Edit config file
@@ -252,9 +255,7 @@ condatainer helper vscode-server -w
 ```
 
 ```{note}
-You will be still prompted to reuse even you enter `-w` or `-g ''`, since these flags modify the reused settings.
-
-To skip the prompt entirely, set `REUSE_MODE="always"` in your config.
+When you pass any CLI flags (e.g., `-w`, `-g ''`, `-c 8`), the script automatically reuses previous settings with your CLI overrides applied — no prompt needed.
 ```
 
 ## Common Issues
@@ -272,7 +273,7 @@ condatainer helper vscode-server -p 13183
 ### Cannot Connect
 
 **Checklist:**
-1. Job is running: `squeue -u $USER`
+1. Job is running: `squeue -u $USER` (SLURM) / `qstat -u $USER` (PBS) / `bjobs` (LSF) / `condor_q $USER` (HTCondor)
 2. SSH port forwarding is active: `ssh -L 13182:localhost:13182 user@hpc`
 3. Correct URL in browser: `http://localhost:13182`
 4. Check job logs: `cat ~/logs/<helper-name>-<job_id>.log`
@@ -298,3 +299,12 @@ e2fsck -f env.img
 
 - [RStudio Server](./rstudio-server_on_HPC.md) - Using Posit R docker images
 - [RStudio Server (Conda)](./rstudio-server-conda_on_HPC.md) - Using Conda R
+
+### Jupyter
+
+- Jupyter Lab (default) or Notebook (`-j notebook`)
+
+### Desktop / GUI
+
+- [xfce4](./xfce4_on_HPC.md) - XFCE desktop via VNC / noVNC
+- [igv](./xfce4_on_HPC.md) - XFCE desktop with IGV via noVNC

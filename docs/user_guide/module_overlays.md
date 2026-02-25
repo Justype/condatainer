@@ -25,7 +25,7 @@ condatainer check analysis.sh -a
 
 # Print helpful info when running with overlays
 condatainer exec -o grch38/cellranger/2024-A bash
-# [CondaTainer] Overlay envs:
+# [CNT] Overlay envs:
 #   CELLRANGER_REF_DIR: cellranger reference dir
 #   GENOME_FASTA      : genome fasta
 #   ANNOTATION_GTF_GZ : 10X modified gtf
@@ -41,24 +41,22 @@ To Install a Salmon Index Overlay. You don't need to:
 - Load modules or install Salmon manually.
 - Manually download genome FASTA and transcript FASTA files.
 - Create decoy FASTA.
-- Build the Salmon index and submit SLURM jobs.
+- Build the Salmon index and submit scheduler jobs.
 
 **Condatainer** will handle all these steps for you automatically!
 
 ```bash
-condatainer install grch38/salmon/1.10.2/gencode47
+condatainer create grch38/salmon/1.10.2/gencode47
 # This command will:
 # - Install Salmon 1.10.2 via bioconda
 # - Download GRCh38 genome FASTA
 # - Download Gencode 47 transcript FASTA
-# - Build Salmon decoy index (SLURM job automatically submitted)
+# - Build Salmon decoy index (scheduler job automatically submitted)
 ```
 
 ### 🏷️ Declaring Dependencies in Scripts
 
-**CondaTainer** can recognize both `#DEP:` tags and `module load` commands to automatically install required modules.
-
-Yes, it can read `module load` and `ml` commands inside bash scripts!
+Declare dependencies with `#DEP:` tags at the top of your script.
 
 Example Script (`analysis.sh`):
 
@@ -66,17 +64,6 @@ Example Script (`analysis.sh`):
 #!/bin/bash
 #DEP: salmon/1.10.2
 #DEP: grcm39/salmon/1.10.2/gencodeM33
-
-salmon quant -i $SALMON_INDEX_DIR ...
-```
-
-It is also compatible with `module load` and `ml` commands:
-
-```bash
-#!/bin/bash
-module purge
-module load salmon/1.10.2
-ml grcm39/salmon/1.10.2/gencodeM33
 
 salmon quant -i $SALMON_INDEX_DIR ...
 ```
@@ -98,9 +85,9 @@ Execute the script with CondaTainer:
 condatainer run analysis.sh
 ```
 
-## 🤖 SLURM Automation
+## 🤖 Scheduler Automation
 
-When you request a reference or an environment that requires significant computation to prepare, **CondaTainer will automatically submit SLURM jobs** to handle the heavy lifting for you.
+When you request a reference or an environment that requires significant computation to prepare, **CondaTainer will automatically submit scheduler jobs** (SLURM, PBS, LSF, or HTCondor) to handle the heavy lifting for you.
 
 Example Script (`analysis.sh`):
 
@@ -110,8 +97,6 @@ Example Script (`analysis.sh`):
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=1GB
 #DEP:samtools/1.22.1
-
-fi
 
 samtools --version
 ```
@@ -128,7 +113,7 @@ If no scheduler directives are found or job submission is disabled, the script w
 
 ### 📜 Count Script
 
-The following is an example SLURM script for running `cellranger count` using the cellranger overlays.
+The following is an example scheduler script (SLURM) for running `cellranger count` using the cellranger overlays.
 
 ```bash
 #!/bin/bash
@@ -136,10 +121,8 @@ The following is an example SLURM script for running `cellranger count` using th
 #SBATCH --time=6:00:00
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64GB
-
-module purge
-module load cellranger/9.0.1
-module load grch38/cellranger/2024-A
+#DEP: cellranger/9.0.1
+#DEP: grch38/cellranger/2024-A
 
 cellranger count --id=sample1 \
   --transcriptome=$CELLRANGER_REF_DIR \

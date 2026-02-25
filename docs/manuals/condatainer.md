@@ -6,8 +6,8 @@
 
 - [Naming Convention](#naming-convention)
 - [Mount Points](#mount-points)
-- [Create](#create)
 - [Overlay](#overlay)
+- [Create](#create)
 - [Container Management (Avail, List, Remove)](#container-management-avail-list-remove)
 - [Exec](#exec)
 - [E (Quick Exec)](#e-quick-exec)
@@ -62,7 +62,7 @@ Use "condatainer [command] --help" for more information about a command.
 
 **CondaTainer** classifies overlays into three distinct categories based on their naming structure.
 
-### System Applications (Sys)
+### System Applications (OS)
 
 Used for system-level applications that do not follow the standard application or reference naming conventions.
 
@@ -71,11 +71,12 @@ Like text editors, IDEs, build-essential tools, etc.
 * **Format:** `name`
 * **Constraints:**
   * Must **not** contain slashes (`/`) or double-dash sequences (`--`).
+  * Unless `<distro>/<application>`
 * **Example:** `rstudio-server`, `texlive`, `code-server`
 
 You can also create these system apps using the `-n, --name` flag with the `create` command.
 
-### Custom Environments (Env)
+### Custom Environments (Bundle/Workspace)
 
 Used when creating a custom environment with a user-defined name (`create -p`, or `overlay` action).
 
@@ -88,7 +89,7 @@ Used when creating a custom environment with a user-defined name (`create -p`, o
 > [!NOTE]
 > Use `-n` to install system apps only (e.g., `nvim`). To create an environment `.sqf`, use `-p` to specify a prefix/path.
 
-### Application Overlays (App)
+### Application Overlays (Module)
 
 Used for standard software packages and tools managed by **CondaTainer** build scripts.
 
@@ -98,7 +99,7 @@ Used for standard software packages and tools managed by **CondaTainer** build s
   * **version**: The specific version of the software (e.g., `1.22`).
 * **Example:** `cellranger/9.0.1`
 
-### Reference Overlays (Ref)
+### Reference Overlays (Module)
 
 Used for reference datasets, genome assemblies, or indices.
 
@@ -226,26 +227,16 @@ mm-export --no-builds > my_env.yaml
 
 ### Overlay Info
 
-Display disk usage and filesystem statistics for an ext3 `.img` overlay.
-
-**Usage:**
+Alias for [`condatainer info`](#info) scoped to ext3 `.img` overlays. Produces identical output.
 
 ```
 condatainer overlay info [image_path]
 ```
 
-**Output includes:**
-
-* File info (path, size, type)
-* Filesystem info (format, state, UUID, creation time)
-* Ownership (root or current UID)
-* Disk usage
-* Inode usage
-
-**Example:**
-
 ```bash
 condatainer overlay info env.img
+# same as:
+condatainer info env.img
 ```
 
 ### Overlay Check
@@ -284,13 +275,13 @@ condatainer overlay chown [OPTIONS] [image]
 * `-u`, `--uid UID`    : Set the owner UID (default: current user's UID).
 * `-g`, `--gid GID`    : Set the group GID (default: current user's GID).
 * `--root`             : Set UID/GID to 0 (root); overrides `-u` and `-g`.
-* `-p`, `--path PATH`  : Path inside the overlay to change (can specify multiple, default: `/ext3` and `/opt`).
+* `-p`, `--path PATH`  : Path inside the overlay to change (can specify multiple, default: `/`).
 * `image`              : Path to the overlay `img` file.
 
 **Examples:**
 
 ```bash
-# Set ownership inside env.img to the current user (default paths /ext3 and /opt)
+# Set ownership inside env.img to the current user (entire overlay by default)
 condatainer overlay chown env.img
 
 # Explicitly set UID and GID
@@ -351,6 +342,8 @@ condatainer create [OPTIONS] [packages...]
 * `-b`, `--base-image [PATH]`: Base image to use instead of default.
 * `-s`, `--source [URI]`: Remote source URI (e.g., `docker://ubuntu:22.04`).
 * `--temp-size [SIZE]`: Size of temporary overlay (default: 20G).
+* `-u`, `--update`: Rebuild overlays even if they already exist (atomic `.new` swap). Useful for refreshing a package to the latest version.
+* `--remote`: Remote build scripts take precedence over local.
 * `packages`: List of packages to install (e.g., `bcftools/1.22` or `samtools=1.10` or `grch38/genome/gencode`).
 
 **Compression Options:**
@@ -375,6 +368,9 @@ condatainer create [OPTIONS] [packages...]
 # Create from a specific recipe (App Overlay)
 condatainer create bcftools/1.22
 
+# Bare package name is expanded using default_distro (e.g. ubuntu24/igv)
+condatainer create igv
+
 # Create multiple overlays at once
 condatainer create samtools/1.16 bcftools/1.15
 
@@ -390,6 +386,9 @@ condatainer create -n tools samtools=1.16 bcftools=1.15
 
 # Create from a remote container source
 condatainer create --source docker://ubuntu:22.04 -n myubuntu
+
+# Rebuild an existing conda overlay (force update)
+condatainer create -n nvim nvim nodejs -u
 ```
 
 **Features**:
@@ -420,6 +419,42 @@ condatainer create -p my_project_env -f install_packages.sh
 
 These methods will generate `my_project_env.sqf` in the current directory.
 
+### Exit Codes (script and job-submission behavior) ⚠️
+
+CondaTainer uses specific exit codes so automation and downstream tooling can detect special states:
+
+- `0` — Success (all requested builds completed locally or nothing to do)
+- `1` — Generic error (invalid arguments, build failures, or other fatal errors)
+- `3` — **Jobs submitted to scheduler** — overlays will be created asynchronously by scheduler jobs
+
+Commands that may return exit code `3` when scheduler jobs were submitted include:
+
+- `condatainer create ...`
+- `condatainer check -a ...` (auto-install missing deps)
+- `condatainer avail -i ...` (install from search results)
+
+Quick example for shell scripts that detect the job-submitted state:
+
+```bash
+condatainer create samtools/1.22
+if [ $? -eq 3 ]; then
+  echo "Jobs submitted to scheduler — overlays will be created asynchronously"
+  # Optionally: exit 0 or wait/monitor jobs here
+fi
+```
+
+Note: When exit code `3` is returned, CondaTainer prints a message showing the number of jobs submitted (and can be extended to emit JSON or write job metadata for automation).
+
+**Disabling Job Submission:**
+
+```bash
+# Run locally even with scheduler specs
+condatainer --local run analysis.sh
+
+# Or set in config
+condatainer config set submit_job false
+```
+
 ## Container Management (Avail, List, Remove)
 
 Manage your local library of built containers and available recipes.
@@ -436,8 +471,7 @@ condatainer avail [search_terms...] [flags]
 
 **Options:**
 
-* `--local`: Show only local build scripts.
-* `--remote`: Show only remote build scripts from GitHub.
+* `--remote`: Remote build scripts take precedence over local (on duplicates).
 * `-i`, `--install`: Install any found packages that are not currently installed.
 * `-a`, `--add`: Alias for `--install`.
 
@@ -692,7 +726,7 @@ condatainer instance stop [flags] [name]
 * `-a`, `--all`: Stop all user's instances
 * `-F`, `--force`: Force kill instance (may corrupt data)
 * `-s`, `--signal [SIGNAL]`: Signal to send to instance (e.g., SIGTERM, TERM, 15)
-* `-t`, `--timeout [SECONDS]`: Timeout before force kill (default: 10)
+* `-t`, `--timeout [SECONDS]`: Timeout before force kill (seconds; 0 = use apptainer default)
 
 **Examples:**
 
@@ -820,22 +854,23 @@ condatainer instance stop desktop
 
 ## Runtime (Check, Run)
 
-Utilities for running scripts with automatic dependency handling via  `#DEP:` tags and `module load` or `ml` commands.
+Utilities for running scripts with automatic dependency handling via `#DEP:` tags. Parsing of `module load` / `ml` lines is disabled by default and can be enabled with `--module` or `parse_module_load: true` in config.
 
 ### Check
 
-Parses a script for `#DEP:` tags and `module load` or `ml` commands and checks if the required overlays are installed.
+Parses a script for `#DEP:` tags and checks if the required overlays are installed.
 
 ```
-condatainer check [SCRIPT] [-a]
+condatainer check [SCRIPT] [-a] [--module]
 ```
 
 * `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies found in the script.
 * `-i`, `--install`: Alias for `--auto-install`.
+* `--module`: Also parse `module load` / `ml` lines as dependencies.
 
 ### Run
 
-Executes a script inside the **CondaTainer** environment, mounting dependencies defined in the script. Autosolves dependencies based on `#DEP:` tags and `module load` or `ml` commands within the script.
+Executes a script inside the **CondaTainer** environment, mounting dependencies defined in the script. Autosolves dependencies based on `#DEP:` tags within the script.
 
 ```
 condatainer run [SCRIPT] [SCRIPT_ARGS...]
@@ -847,6 +882,7 @@ condatainer run [SCRIPT] [SCRIPT_ARGS...]
 * `-b`, `--base-image [PATH]`: Use custom base image.
 * `-a`, `--auto-install`: Automatically install missing dependencies.
 * `-i`, `--install`: Alias for `--auto-install`.
+* `--module`: Also parse `module load` / `ml` lines as dependencies.
 
 **Script Tags:**
 
@@ -855,9 +891,11 @@ Scripts can use special comment tags to declare dependencies and configure the c
 | Tag | Description |
 |-----|-------------|
 | `#DEP: package/version` | Declare a dependency overlay |
+| `#DEP: path.img` | Declare a external overlay (.sqf and .img) |
 | `#CNT [args]` | Additional arguments passed to condatainer |
 | `#SBATCH [args]` | SLURM scheduler directives (auto-submit as job) |
 | `#PBS [args]` | PBS scheduler directives (auto-submit as job) |
+| `#BSUB [args]` | LSF scheduler directives (auto-submit as job) |
 
 **Available `#CNT` arguments:**
 
@@ -880,7 +918,7 @@ bcftools view input.vcf | head
 
 ### Scheduler Integration
 
-If your script contains scheduler directives (`#SBATCH` or `#PBS`), `condatainer run` will automatically submit it as a scheduler job instead of running it locally.
+If your script contains scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`), `condatainer run` will automatically submit it as a scheduler job instead of running it locally. HTCondor uses native `.sub` submit files instead of in-script directives.
 
 **Behavior:**
 
@@ -914,49 +952,94 @@ condatainer run analysis.sh -a
 
 **Log Files:**
 
-* If `#SBATCH --output=...` is specified in the script, logs go to that path
+* If a log output path is specified in the script (e.g., `#SBATCH --output=...`), logs go to that path
 * Otherwise, logs are written to the global logs directory (`~/logs` by default)
-* Job scripts (`.sbatch`) are created alongside the log files
+* Job scripts are created alongside the log files
 
-### Exit Codes (script and job-submission behavior) ⚠️
+### Usable ENV
 
-CondaTainer uses specific exit codes so automation and downstream tooling can detect special states:
+When running scripts with scheduler directives, the following environment variables are automatically available inside the container:
 
-- `0` — Success (all requested builds completed locally or nothing to do)
-- `1` — Generic error (invalid arguments, build failures, or other fatal errors)
-- `2` — **Jobs submitted to scheduler** — overlays will be created asynchronously by scheduler jobs
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `NNODES` | Number of compute nodes | `2` |
+| `NTASKS_PER_NODE` | Number of MPI tasks per node | `4` |
+| `NTASKS` | Total number of MPI tasks | `8` |
+| `NCPUS` | CPUs per node | `16` |
+| `NCPUS_PER_TASK` | CPUs per task | `4` |
+| `MEM` | Memory per node in MB | `8192` |
+| `MEM_MB` | Memory per node in MB | `8192` |
+| `MEM_GB` | Memory per node in GB | `8` |
 
-Commands that may return exit code `2` when scheduler jobs were submitted include:
+**Priority Order (Scheduler ENV > Script > Default):**
 
-- `condatainer create ...`
-- `condatainer check -a ...` (auto-install missing deps)
-- `condatainer avail -i ...` (install from search results)
+Environment variables are resolved with the following priority:
 
-Quick example for shell scripts that detect the job-submitted state:
+1. **Scheduler ENV** (highest priority) — Environment variables from the scheduler (e.g., `$SLURM_CPUS_PER_TASK`)
+2. **Script** — Scheduler directives in the script (`#SBATCH`, `#PBS`, `#BSUB`)
+3. **Default** (lowest priority) — Built-in default values in config (`scheduler.*`)
+
+### MPI Auto-Detection
+
+When a scheduler script requests more than one task (`--ntasks-per-node`, `--ntasks`, or PBS/LSF equivalents), `condatainer run` automatically detects the host MPI and wraps the job command with `mpiexec`:
+
+**Detection order:**
+
+1. `mpiexec` already in `PATH` → use it directly
+2. `module avail -t openmpi` → pick the highest available version, load it with `module purge && module load`
+3. Neither found → warn and run without MPI wrapper
+
+**Generated job command:**
 
 ```bash
-condatainer create samtools/1.22
-if [ $? -eq 2 ]; then
-  echo "Jobs submitted to scheduler — overlays will be created asynchronously"
-  # Optionally: exit 0 or wait/monitor jobs here
-fi
+# Via direct PATH:
+mpiexec condatainer run script.sh
+
+# Via module system:
+module purge && module load openmpi/4.1.5 && mpiexec condatainer run script.sh
 ```
 
-Note: When exit code `2` is returned, CondaTainer prints a message showing the number of jobs submitted (and can be extended to emit JSON or write job metadata for automation).
-
-**Disabling Job Submission:**
+**MPI Script Example:**
 
 ```bash
-# Run locally even with scheduler specs
-condatainer --local run analysis.sh
+#!/bin/bash
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=3
+#SBATCH --mem=1G
+#SBATCH --time=00:30:00
 
-# Or set in config
-condatainer config set submit_job false
+#DEP: mpi.img
+
+python my_mpi_script.py
 ```
+
+Run with:
+
+```bash
+condatainer run mpi_job.sh
+```
+
+CondaTainer detects `ntasks = 6`, finds `mpiexec`, and submits:
+
+```bash
+mpiexec condatainer run mpi_job.sh
+```
+
+Each MPI rank launches its own container, all sharing the same MPI communicator via SLURM's process management interface.
+
+````{important}
+You need to have the same major and minor version of OpenMPI installed inside the container as on the host.
+
+```bash
+ml av openmpi
+# openmpi/4.1.5
+condatainer e mpi.img -- mm-install mpi4py openmpi=4.1 -y
+```
+````
 
 ### CondaTainer is compatible with module systems
 
-**CondaTainer** will scan your script for `module load` or `ml` commands and mount the corresponding overlays automatically.
+**CondaTainer** can scan your script for `module load` or `ml` commands and mount the corresponding overlays automatically. This is disabled by default; enable it with `--module` or by setting `parse_module_load: true` in your config.
 
 **Example:**
 
@@ -966,19 +1049,25 @@ module load bcftools/1.22
 bcftools --version
 ```
 
-You can run `check` or `run` commands to automatically handle the dependencies.
+Use `--module` with `check` or `run` to handle these dependencies:
 
 ```bash
-# Install missing dependencies
-condatainer check my_script.sh -a
+# Install missing dependencies (including module load lines)
+condatainer check my_script.sh --module -a
 
 # Run the script with automatic dependency resolution
-condatainer run my_script.sh
+condatainer run my_script.sh --module
+```
+
+To enable it permanently:
+
+```bash
+condatainer config set parse_module_load true
 ```
 
 ## Info
 
-Displays metadata regarding a specific overlay.
+Display detailed metadata about an installed overlay or an external overlay file. Accepts an installed overlay name (`name/version`) or a direct file path (`.sqf` / `.img`).
 
 **Usage:**
 
@@ -986,49 +1075,72 @@ Displays metadata regarding a specific overlay.
 condatainer info [OVERLAY]
 ```
 
-**Output includes:**
-
-* Writable status.
-* File size.
-* Compression type (for `.sqf` files).
-* Timestamps (status change, modification, access).
-* Mount path (e.g., `/cnt/bcftools/1.22` or `/ext3/env`).
-* File ownership (for `.img` files).
-* Environment variables defined within the overlay's `.env` file.
-
 **Examples:**
 
 ```bash
 condatainer info samtools/1.22
 condatainer info env.img
+condatainer info ./ubuntu--22.04.sqf
 ```
+
+### SquashFS (`.sqf`) output
+
+| Section | Fields |
+|---------|--------|
+| **File** | Name, Path, file Size, Type (`OS Overlay` / `Module Overlay` / `Bundle Overlay`, Read-Only), Created timestamp |
+| **SquashFS** | Compression algorithm (with level if set), Block Size, Inode count, Fragment count, Deduplication flag |
+| **Mount** | `/cnt/<name>/<version>` — shown for Module and Bundle Overlays |
+| **Environment** | Variables from the `.env` sidecar file, with inline `#ENVNOTE` annotations |
+
+### ext3 (`.img`) output
+
+| Section | Fields |
+|---------|--------|
+| **File** | Name, Path, file Size, Type (`Workspace Overlay`, Writable; sparse images also show actual on-disk size) |
+| **Filesystem** | Format, State, Block Size, Created, Modified, Last Mounted |
+| **Ownership** | Inner UID/GID of files inside the image (or `root` for fakeroot-compatible images) |
+| **Disk Usage** | Used / Total (%), Reserved blocks, Free |
+| **Inode Usage** | Used / Total (%), Free |
+| **Mount** | `/ext3/env` |
+| **Environment** | Variables from the `.env` sidecar file, with inline `#ENVNOTE` annotations |
 
 ## Helper
 
 Download and manage small helper scripts stored in the `helper-scripts/` folder inside the CondaTainer repository.
 
+```{note}
+Helper commands are not available inside a container or a scheduler job (except `--path` and `--list`).
+```
+
 **Usage:**
 
 ```
-condatainer helper [-u|--update] [-p|--path] [SCRIPT_NAME] [SCRIPT_ARGS...]
+condatainer helper [FLAGS] [SCRIPT_NAME] [SCRIPT_ARGS...]
 ```
 
 Options:
 
 * `-u`, `--update`: Update helper scripts from remote metadata.
-* `-p`, `--path`: Print the absolute path of the helper folder or a specific helper script and exit.
-* `SCRIPT_NAME`: Name of the helper script to run or update (optional).
+* `-p`, `--path`: Show all helper script search paths and the writable directory. If a `SCRIPT_NAME` is given, print the absolute path of that specific helper script and exit.
+* `-l`, `--list`: List available helper scripts with their descriptions (from `#WHATIS` tags).
+* `SCRIPT_NAME`: Name of the helper script to run (optional).
 * `SCRIPT_ARGS...`: Remaining arguments are passed directly to the helper script when running it.
 
 **Examples**
 
 ```bash
-# Print helper folder path
+# List all available helper scripts with descriptions
+condatainer helper --list
+
+# Print helper script search paths
 condatainer helper --path
+
+# Print path to a specific helper script
+condatainer helper --path code-server
 
 # Download/Update all helper scripts (auto selects sbatch or headless based on availability)
 condatainer helper --update
-# Forcely Update headless scripts version
+# Force update headless scripts version
 condatainer --local helper --update
 
 # Run a helper script with arguments
@@ -1041,7 +1153,7 @@ Manage **CondaTainer** configuration settings.
 
 ### Config Show
 
-Display current configuration including file paths, settings, and environment variable overrides.
+Display current configuration including file paths, settings, and environment variable overrides. (including available distros)
 
 ```
 condatainer config show [--path]
@@ -1062,12 +1174,13 @@ condatainer config get <key>
 ```bash
 condatainer config get apptainer_bin
 condatainer config get build.ncpus
+condatainer config get scheduler.ncpus_per_task
 condatainer config get submit_job
 ```
 
 ### Config Set
 
-Set a configuration value.
+Set a configuration value and save to the active config file. For a full list of supported keys, see the [Configuration manual](configuration.md).
 
 ```
 condatainer config set <key> <value>
@@ -1077,9 +1190,10 @@ condatainer config set <key> <value>
 
 ```bash
 condatainer config set apptainer_bin /usr/bin/apptainer
+condatainer config set submit_job false
+condatainer config set scheduler.ncpus_per_task 8
 condatainer config set build.ncpus 8
 condatainer config set build.time 4h
-condatainer config set submit_job false
 ```
 
 **Time formats:** `2h`, `30m`, `1h30m`, `90s`, `02:00:00`, `HH:MM:SS`
@@ -1129,13 +1243,14 @@ condatainer config validate
 * Apptainer binary accessibility
 * Scheduler binary accessibility
 * Build configuration (CPUs > 0, Memory > 0)
+* `default_distro` is one of the supported distro names
 
 ### Configuration Priority
 
 Configuration is loaded in the following order (highest to lowest priority):
 
 1. Command-line flags
-2. Environment variables (`CONDATAINER_*`)
+2. Environment variables (`CNT_*`)
 3. User config file (`~/.config/condatainer/config.yaml`)
 4. Portable config (`<install-dir>/config.yaml`)
 5. System config (`/etc/condatainer/config.yaml`)
@@ -1143,9 +1258,9 @@ Configuration is loaded in the following order (highest to lowest priority):
 
 ### Configuration File Example
 
-```yaml
-base_dir: /path/to/data
+See the [Configuration manual](configuration.md) for a full reference of all available keys.
 
+```yaml
 # Binary paths (scheduler type is auto-detected from binary)
 apptainer_bin: /usr/bin/apptainer
 scheduler_bin: /usr/bin/sbatch
@@ -1153,34 +1268,31 @@ scheduler_bin: /usr/bin/sbatch
 # Submission settings
 submit_job: true
 
+# Base OS distro: ubuntu20, ubuntu22, or ubuntu24 (default: ubuntu24)
+default_distro: ubuntu24
+
+# Default scheduler specs (used when scripts lack explicit directives)
+scheduler:
+  ncpus_per_task: 4
+  mem_per_node_mb: 8192
+  time: 4h
+
 # Build configuration
 build:
   ncpus: 8
   mem_mb: 16384
   time: 4h
   tmp_size_mb: 20480
+  # compress_args options (gzip, lz4, zstd, zstd-fast, zstd-medium, zstd-high)
+  # Or explicitly set mksquashfs arguments:
   compress_args: "-comp zstd -Xcompression-level 8"
-  overlay_type: squashfs
+  overlay_type: ext3
 
 # Additional data directories
 extra_base_dirs:
   - /path/to/shared/data
   - /path/to/other/location
 ```
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `CONDATAINER_BASE_DIR` | Override base directory |
-| `CONDATAINER_LOGS_DIR` | Override logs directory |
-| `CONDATAINER_APPTAINER_BIN` | Override apptainer binary path |
-| `CONDATAINER_SCHEDULER_BIN` | Override scheduler binary path |
-| `CONDATAINER_SUBMIT_JOB` | Override job submission setting (true/false) |
-| `CONDATAINER_BUILD_NCPUS` | Override default CPUs for builds |
-| `CONDATAINER_BUILD_MEM_MB` | Override default memory for builds |
-| `CONDATAINER_BUILD_TIME` | Override default build time |
-| `CONDATAINER_EXTRA_BASE_DIRS` | Colon-separated list of extra base directories |
 
 ## Scheduler
 
@@ -1189,27 +1301,39 @@ Display information about the configured job scheduler.
 **Usage:**
 
 ```
-condatainer scheduler
+condatainer scheduler [FLAGS]
 ```
+
+**Options:**
+
+* `-p`, `--partitions`: Show per-partition resource limits.
+* `-Q`, `--queue`: Show per-queue resource limits (alias for `-p`).
+* `--cpu`: Show only CPU-only partitions (no GPUs); automatically enables `-p`.
+* `--gpu`: Show only GPU partitions; automatically enables `-p`.
 
 **Output includes:**
 
-* Scheduler type (SLURM, PBS, etc.)
+* Scheduler type (SLURM, PBS, LSF, HTCondor)
 * Binary path
 * Version
 * Availability status
-* Available GPUs (if any)
-* Resource limits (CPUs, memory, GPUs, time)
+* Max resource limits across all partitions (CPUs, memory, time)
+* Available GPUs (type, total, available)
 
-**Example:**
+**Examples:**
 
 ```bash
-$ condatainer scheduler
-Scheduler: SLURM
-Binary: /usr/bin/srun
-Version: 23.02.4
-Status: Available
-GPUs: nvidia_a100 (4), nvidia_v100 (8)
+# Show scheduler information
+condatainer scheduler
+
+# Show per-partition/queue resource limits
+condatainer scheduler -p
+
+# Show only GPU partitions
+condatainer scheduler --gpu
+
+# Show per-partition limits for CPU-only partitions
+condatainer scheduler -p --cpu
 ```
 
 ## Update
@@ -1221,19 +1345,38 @@ Updates the **CondaTainer** binary to the latest version from GitHub releases.
 **Usage:**
 
 ```
-condatainer self-update [-y]
+condatainer self-update [FLAGS]
 ```
 
+**Options:**
+
 * `-y`, `--yes`: Skip confirmation prompt and auto-update.
+* `-f`, `--force`: Force update even if already on the latest version.
+* `--dev`: Include pre-release versions (also enabled automatically when the config `branch` is set to `dev`).
 
 **Features:**
 
 * Downloads latest binary from GitHub releases.
 * Detects current OS and architecture.
 * Compares versions before updating.
-* Updates base image when minor or major version changes (not for patch updates).
-* Warns about major version upgrades and suggests rebuilding def-built containers.
+* Updates the base image (for the configured `default_distro`) when the minor or major version changes.
 * Supports symlink resolution.
+
+**Examples:**
+
+```bash
+# Update to latest stable version
+condatainer self-update
+
+# Update without confirmation
+condatainer self-update --yes
+
+# Force update even if already on latest version
+condatainer self-update -f
+
+# Include pre-release versions
+condatainer self-update --dev
+```
 
 ## Completion
 

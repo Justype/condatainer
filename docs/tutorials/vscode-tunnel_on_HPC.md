@@ -44,7 +44,9 @@ Run the following command to check if a supported scheduler is available:
 condatainer scheduler
 ```
 
-Currently only **SLURM** is supported. PBS support is planned for future releases.
+```{note}
+Slurm is fully tested. Other schedulers are experimentally supported. Please report any issues you encounter.
+```
 
 ## SSH Port Forwarding is Not Required
 
@@ -91,7 +93,7 @@ The script will do the following steps for you:
 3. If yes, print helpful information to connect to that tunnel.
 4. If not,
    1. Check the overlay integrity.
-   2. Submit the SLURM job to start `vscode-tunnel`.
+   2. Submit the scheduler job to start `vscode-tunnel`.
    3. When the job starts, display authentication information.
 
 Then you can either:

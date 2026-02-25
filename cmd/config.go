@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
@@ -24,15 +25,40 @@ var configKeys = []string{
 	"logs_dir",
 	"apptainer_bin",
 	"scheduler_bin",
+	"default_distro",
 	"submit_job",
-	"branch",
+	"scripts_link",
+	"prebuilt_link",
+	"prefer_remote",
 	"extra_base_dirs",
+	"scheduler.nodes",
+	"scheduler.tasks_per_node",
+	"scheduler.ncpus_per_task",
+	"scheduler.mem_per_node_mb",
+	"scheduler.time",
+	"parse_module_load",
 	"build.ncpus",
 	"build.mem_mb",
 	"build.time",
 	"build.tmp_size_mb",
 	"build.compress_args",
 	"build.overlay_type",
+}
+
+// getConfigEnvVars returns a list of environment variables corresponding to
+// the supported configuration keys.  We base the list on the known config
+// keys (configKeys) so that the envelope is automatically updated when new
+// settings are added.  The variable names are simply the uppercased key with
+// dots replaced by underscores and a CNT_ prefix.
+func getConfigEnvVars() []string {
+	vars := make([]string, 0, len(configKeys))
+	for _, key := range configKeys {
+		env := "CNT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+		vars = append(vars, env)
+	}
+	// sort for deterministic output
+	sort.Strings(vars)
+	return vars
 }
 
 // configKeysCompletion returns config keys for shell completion
@@ -43,6 +69,10 @@ func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) 
 	}
 	if len(args) == 1 {
 		// Second arg: complete values based on the key
+		//  extra_base_dirs should only complete directories
+		if args[0] == "extra_base_dirs" {
+			return nil, cobra.ShellCompDirectiveFilterDirs
+		}
 		return configValueCompletion(args[0]), cobra.ShellCompDirectiveNoFileComp
 	}
 	return nil, cobra.ShellCompDirectiveNoFileComp
@@ -53,18 +83,26 @@ func configValueCompletion(key string) []string {
 	switch key {
 	case "submit_job":
 		return []string{"true", "false"}
-	case "branch":
-		return []string{"main", "dev"}
-	case "build.ncpus":
+	case "prefer_remote", "parse_module_load":
+		return []string{"true", "false"}
+	case "default_distro":
+		return config.GetAvailableDistros()
+	case "scheduler.nodes":
+		return []string{"1", "2", "4", "8"}
+	case "scheduler.tasks_per_node":
+		return []string{"1", "2", "4", "8"}
+	case "scheduler.ncpus_per_task", "build.ncpus":
 		return []string{"4", "8", "16", "32"}
-	case "build.mem_mb":
+	case "scheduler.mem_per_node_mb", "build.mem_mb":
 		return []string{"4096", "8192", "16384", "32768"}
-	case "build.time":
+	case "scheduler.time", "build.time":
 		return []string{"1h", "2h", "4h", "8h"}
 	case "build.tmp_size_mb":
 		return []string{"10240", "20480", "40960"}
 	case "build.overlay_type":
 		return []string{"ext3", "squashfs"}
+	case "build.compress_args":
+		return config.CompressNames()
 	default:
 		return nil
 	}
@@ -77,14 +115,14 @@ var configCmd = &cobra.Command{
 
 Configuration file priority (highest to lowest):
   1. Command-line flags
-  2. Environment variables (CONDATAINER_*)
+  2. Environment variables (CNT_*)
   3. User config file (~/.config/condatainer/config.yaml)
   4. Portable config (<install-dir>/config.yaml, if in dedicated folder)
   5. System config file (/etc/condatainer/config.yaml)
   6. Defaults
 
 Data directory priority (for read/write operations):
-  1. Extra base directories (CONDATAINER_EXTRA_BASE_DIRS or config)
+  1. Extra base directories (CNT_EXTRA_BASE_DIRS or config)
   2. Portable directory (group/shared, from executable location)
   3. User scratch directory ($SCRATCH/condatainer, HPC systems)
   4. User XDG directory (~/.local/share/condatainer)`,
@@ -230,20 +268,52 @@ Shows:
 		}
 		fmt.Println()
 
-		// Runtime settings
-		fmt.Println(utils.StyleTitle("Runtime:"))
+		// Distros and default
+		fmt.Println(utils.StyleTitle("Distros:"))
+		fmt.Printf("  Available:      %s\n", strings.Join(config.GetAvailableDistros(), ", "))
+		fmt.Printf("  default_distro: %s\n", config.Global.DefaultDistro)
+		fmt.Println()
+
+		// Remote sources
+		fmt.Println(utils.StyleTitle("Remote Sources:"))
+		fmt.Printf("  scripts_link:  %s\n", config.Global.ScriptsLink)
+		fmt.Printf("  prebuilt_link: %s\n", config.Global.PrebuiltLink)
+		fmt.Printf("  prefer_remote: %v\n", config.Global.PreferRemote)
+		fmt.Println()
+
+		// Options
+		fmt.Println(utils.StyleTitle("Options:"))
 		submitJobConfig := viper.GetBool("submit_job")
 		submitJobActual := config.Global.SubmitJob
 		if submitJobConfig && !submitJobActual {
-			fmt.Printf("  submit_job:     %v (disabled: scheduler not accessible)\n", submitJobConfig)
+			fmt.Printf("  submit_job:        %v (disabled: scheduler not accessible)\n", submitJobConfig)
 		} else {
-			fmt.Printf("  submit_job:     %v\n", submitJobActual)
+			fmt.Printf("  submit_job:        %v\n", submitJobActual)
 		}
-		fmt.Printf("  branch:         %s\n", viper.GetString("branch"))
+		fmt.Printf("  parse_module_load: %v\n", config.Global.ParseModuleLoad)
+		fmt.Println()
+
+		// Scheduler default specs
+		fmt.Printf("%s %s\n", utils.StyleTitle("Scheduler Default Specs:"), "scheduler.*")
+		fmt.Printf("  nodes:           %d\n", viper.GetInt("scheduler.nodes"))
+		fmt.Printf("  tasks_per_node:  %d\n", viper.GetInt("scheduler.tasks_per_node"))
+		fmt.Printf("  ncpus_per_task:  %d\n", viper.GetInt("scheduler.ncpus_per_task"))
+		schedMemMB := viper.GetInt64("scheduler.mem_per_node_mb")
+		if schedMemMB > 0 {
+			fmt.Printf("  mem_per_node_mb: %d\n", schedMemMB)
+		} else {
+			fmt.Printf("  mem_per_node_mb: %s\n", utils.StyleInfo("not set"))
+		}
+		schedTime := viper.GetString("scheduler.time")
+		if schedTime != "" {
+			fmt.Printf("  time:            %s\n", schedTime)
+		} else {
+			fmt.Printf("  time:            %s\n", utils.StyleInfo("not set"))
+		}
 		fmt.Println()
 
 		// Build settings
-		fmt.Println(utils.StyleTitle("Build Configuration:"))
+		fmt.Printf("%s %s\n", utils.StyleTitle("Build Configuration:"), "build.*")
 		fmt.Printf("  ncpus:           %d\n", viper.GetInt("build.ncpus"))
 		fmt.Printf("  mem_mb:          %d\n", viper.GetInt64("build.mem_mb"))
 		fmt.Printf("  time:            %s\n", viper.GetString("build.time"))
@@ -274,15 +344,7 @@ Shows:
 
 		// Show environment variable overrides
 		fmt.Println(utils.StyleTitle("Environment Variable Overrides:"))
-		envVars := []string{
-			"CONDATAINER_LOGS_DIR",
-			"CONDATAINER_APPTAINER_BIN",
-			"CONDATAINER_SCHEDULER_BIN",
-			"CONDATAINER_SUBMIT_JOB",
-			"CONDATAINER_BUILD_DEFAULT_CPUS",
-			"CONDATAINER_BUILD_DEFAULT_MEM_MB",
-			"CONDATAINER_BUILD_DEFAULT_TIME",
-		}
+		envVars := getConfigEnvVars()
 		hasEnvOverrides := false
 		for _, envVar := range envVars {
 			if val := os.Getenv(envVar); val != "" {
@@ -301,6 +363,7 @@ var configGetCmd = &cobra.Command{
 	Short: "Get a configuration value",
 	Long:  `Get a specific configuration value.`,
 	Example: `  condatainer config get apptainer_bin
+  condatainer config get scheduler.ncpus_per_task
   condatainer config get build.ncpus
   condatainer config get submit_job`,
 	Args:              cobra.ExactArgs(1),
@@ -324,8 +387,9 @@ Time duration format (for build.time):
   Go style:  2h, 30m, 1h30m, 90s
   HPC style: 02:00:00, 2:30:00, 1:30 (HH:MM:SS or HH:MM)`,
 	Example: `  condatainer config set apptainer_bin /usr/bin/apptainer
+  condatainer config set scheduler.ncpus_per_task 8
+  condatainer config set scheduler.time 4h
   condatainer config set build.ncpus 8
-  condatainer config set build.time 4h
   condatainer config set build.time 02:00:00
   condatainer config set submit_job false`,
 	Args:              cobra.ExactArgs(2),
@@ -336,24 +400,41 @@ Time duration format (for build.time):
 
 		// Validate known keys
 		knownKeys := map[string]bool{
-			"logs_dir":            true,
-			"apptainer_bin":       true,
-			"scheduler_bin":       true,
-			"submit_job":          true,
-			"branch":              true,
-			"build.ncpus":         true,
-			"build.mem_mb":        true,
-			"build.time":          true,
-			"build.tmp_size_mb":   true,
-			"build.compress_args": true,
-			"build.overlay_type":  true,
-			"extra_base_dirs":     true,
+			"logs_dir":                  true,
+			"apptainer_bin":             true,
+			"scheduler_bin":             true,
+			"default_distro":            true,
+			"submit_job":                true,
+			"scripts_link":              true,
+			"prebuilt_link":             true,
+			"prefer_remote":             true,
+			"parse_module_load":         true,
+			"scheduler.nodes":           true,
+			"scheduler.tasks_per_node":  true,
+			"scheduler.ncpus_per_task":  true,
+			"scheduler.mem_per_node_mb": true,
+			"scheduler.time":            true,
+			"build.ncpus":               true,
+			"build.mem_mb":              true,
+			"build.time":                true,
+			"build.tmp_size_mb":         true,
+			"build.compress_args":       true,
+			"build.overlay_type":        true,
+			"extra_base_dirs":           true,
+		}
+
+		// Validate default_distro against known distros
+		if key == "default_distro" {
+			if !config.IsValidDistro(value) {
+				utils.PrintError("Unknown distro '%s'. Available: %s", value, strings.Join(config.GetAvailableDistros(), ", "))
+				os.Exit(ExitCodeError)
+			}
 		}
 
 		// Array keys that should be edited via config edit or env var
 		if key == "extra_base_dirs" {
 			utils.PrintError("'%s' is an array setting. Use 'condatainer config edit' or environment variable.", key)
-			utils.PrintHint("Config file (YAML array):\n  extra_base_dirs:\n    - /path/to/dir1\n    - /path/to/dir2\n\nEnvironment variable (colon-separated):\n  export CONDATAINER_EXTRA_BASE_DIRS=/path/to/dir1:/path/to/dir2")
+			utils.PrintHint("Config file (YAML array):\n  extra_base_dirs:\n    - /path/to/dir1\n    - /path/to/dir2\n\nEnvironment variable (colon-separated):\n  export CNT_EXTRA_BASE_DIRS=/path/to/dir1:/path/to/dir2")
 			os.Exit(ExitCodeError)
 		}
 
@@ -362,7 +443,7 @@ Time duration format (for build.time):
 		}
 
 		// Validate value based on key type
-		if key == "build.time" {
+		if key == "scheduler.time" || key == "build.time" {
 			if _, err := utils.ParseDuration(value); err != nil {
 				utils.PrintError("Invalid duration format: %s", value)
 				utils.PrintHint("Use format like: 2h, 30m, 1h30m, or 02:00:00")
@@ -370,16 +451,9 @@ Time duration format (for build.time):
 			}
 		}
 
-		if key == "branch" {
-			lower := strings.ToLower(value)
-			if lower != "main" && lower != "dev" {
-				utils.PrintWarning("Unknown branch '%s', falling back to 'main'", value)
-				value = "main"
-			} else {
-				value = lower
-			}
+		if key == "build.compress_args" {
+			value = config.NormalizeCompressArgs(value)
 		}
-
 		// Set the value
 		viper.Set(key, value)
 
@@ -461,10 +535,8 @@ By default, the location is chosen based on the installation:
 				shouldOverwrite = true
 			} else {
 				fmt.Print("Overwrite? [y/N]: ")
-				var response string
-				fmt.Scanln(&response)
-				response = strings.ToLower(strings.TrimSpace(response))
-				shouldOverwrite = (response == "y" || response == "yes")
+				response, readErr := utils.ReadLineContext(cmd.Context())
+				shouldOverwrite = readErr == nil && (response == "y" || response == "yes")
 			}
 			if !shouldOverwrite {
 				utils.PrintNote("Cancelled")
@@ -474,7 +546,12 @@ By default, the location is chosen based on the installation:
 
 		// Warn if inside container
 		if config.IsInsideContainer() {
-			utils.PrintWarning("Running inside a container - config changes may not persist on the host")
+			ExitWithError("Cannot initialize config inside a container. Please run this command on the host system.")
+		}
+
+		// If neither apptainer nor singularity is in PATH, exit with an error
+		if config.DetectApptainerBin() == "" {
+			ExitWithError("Neither 'apptainer' nor 'singularity' binary found in PATH.")
 		}
 
 		// Force re-detect binaries from current environment and save to specified path
@@ -483,17 +560,16 @@ By default, the location is chosen based on the installation:
 			ExitWithError("Failed to save config: %v", err)
 		}
 
-		// Check if apptainer was found
+		// Auto-detect compression based on binary type and version, then save to config.
+		// Clear any previously set viper value so AutoDetectCompression always runs during init.
+		detectedCompression := config.Global.Build.CompressArgs // fallback to runtime default
 		apptainerBin := viper.GetString("apptainer_bin")
-
-		// Auto-detect compression based on apptainer version and save to config
-		detectedCompression := "-comp lz4" // default
 		if apptainerBin != "" && config.ValidateBinary(apptainerBin) {
 			if err := apptainer.SetBin(apptainerBin); err == nil {
 				if version, err := apptainer.GetVersion(); err == nil {
-					if apptainer.CheckZstdSupport(version) {
-						detectedCompression = "-comp zstd -Xcompression-level 8"
-					}
+					viper.Set("build.compress_args", "")
+					config.AutoDetectCompression(apptainer.CheckZstdSupport(version), apptainer.IsSingularity())
+					detectedCompression = config.Global.Build.CompressArgs
 				}
 			}
 		}
@@ -694,6 +770,17 @@ var configValidateCmd = &cobra.Command{
 		} else {
 			fmt.Printf("%s Build Memory must be > 0: %d\n", utils.StyleError("✗"), memMB)
 			valid = false
+		}
+
+		// Check default distro validity
+		distro := config.Global.DefaultDistro
+		if !config.IsValidDistro(distro) {
+			fmt.Printf("%s Default distro invalid: %s\n", utils.StyleError("✗"), distro)
+			valid = false
+		} else {
+			if !utils.QuietMode {
+				fmt.Printf("%s Default distro: %s\n", utils.StyleSuccess("✓"), distro)
+			}
 		}
 
 		if !utils.QuietMode {

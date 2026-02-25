@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -47,7 +46,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	refOverlays, err := collectReferenceOverlays(filters, listExact)
+	dataOverlays, err := collectDataOverlays(filters, listExact)
 	if err != nil {
 		return err
 	}
@@ -81,8 +80,16 @@ func runList(cmd *cobra.Command, args []string) error {
 			names = append(names, name)
 		}
 		sort.Strings(names)
+		nameWidth := maxWidth(names)
 		for _, name := range names {
-			fmt.Printf(" %s\n", utils.StyleName(name))
+			nameField := fmt.Sprintf("%-*s", nameWidth, name)
+			line := fmt.Sprintf(" %s", utils.StyleName(nameField))
+			if distro := config.Global.DefaultDistro; distro != "" {
+				if alias, ok := strings.CutPrefix(name, distro+"/"); ok {
+					line += "  " + utils.StyleInfo("["+alias+"]")
+				}
+			}
+			fmt.Println(line)
 		}
 	}
 
@@ -114,13 +121,13 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if len(refOverlays) > 0 {
+	if len(dataOverlays) > 0 {
 		if printed {
 			fmt.Println()
 		}
-		fmt.Println("Available reference overlays:")
-		for _, ref := range refOverlays {
-			fmt.Printf(" %s\n", utils.StyleName(ref))
+		fmt.Println("Available data overlays:")
+		for _, data := range dataOverlays {
+			fmt.Printf(" %s\n", utils.StyleName(data))
 		}
 		printed = true
 	}
@@ -135,7 +142,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		listDelete = true
 	}
 
-	if listDelete && len(filters) > 0 && (len(appOverlays) > 0 || len(refOverlays) > 0) {
+	if listDelete && len(filters) > 0 && (len(appOverlays) > 0 || len(dataOverlays) > 0) {
 		fmt.Println()
 		fmt.Println("==================REMOVE==================")
 
@@ -150,8 +157,8 @@ func runList(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
-		for _, ref := range refOverlays {
-			allMatching = append(allMatching, ref)
+		for _, data := range dataOverlays {
+			allMatching = append(allMatching, data)
 		}
 
 		if len(allMatching) > 0 {
@@ -190,10 +197,8 @@ func runList(cmd *cobra.Command, args []string) error {
 				shouldDelete = true
 			} else {
 				fmt.Print("Are you sure? Cannot be undone. [y/N]: ")
-				var choice string
-				fmt.Scanln(&choice)
-				choice = strings.ToLower(strings.TrimSpace(choice))
-				shouldDelete = (choice == "y" || choice == "yes")
+				choice, choiceErr := utils.ReadLineContext(cmd.Context())
+				shouldDelete = choiceErr == nil && (choice == "y" || choice == "yes")
 			}
 
 			if shouldDelete {
@@ -261,12 +266,19 @@ func collectAppOverlays(filters []string, exactMatch bool) (map[string][]string,
 			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 			normalized := strings.ToLower(utils.NormalizeNameVersion(nameVersion))
 			if !matchesFilters(normalized, filters, exactMatch) {
-				continue
+				// Also try the shorthand alias: strip default_distro prefix and recheck.
+				// e.g. "ubuntu24/r4.4.3" → alias "r4.4.3", so `-e r4.4.3` finds it.
+				distroPrefix := strings.ToLower(config.Global.DefaultDistro) + "/"
+				alias := strings.TrimPrefix(normalized, distroPrefix)
+				if alias == normalized || !matchesFilters(alias, filters, exactMatch) {
+					continue
+				}
 			}
 
 			var name, version string
-			if isDefBuilt(nameVersion) {
-				// Def-built overlays are OS overlays regardless of delimiter count
+			overlayPath := filepath.Join(imageDir, entry.Name())
+			if isOSOverlay(overlayPath) {
+				// OS overlays are classified regardless of delimiter count
 				name = strings.ReplaceAll(nameVersion, "--", "/")
 				version = "(system app)"
 			} else {
@@ -307,7 +319,7 @@ func collectAppOverlays(filters []string, exactMatch bool) (map[string][]string,
 	return result, nil
 }
 
-func collectReferenceOverlays(filters []string, exactMatch bool) ([]string, error) {
+func collectDataOverlays(filters []string, exactMatch bool) ([]string, error) {
 	seen := make(map[string]bool) // Track seen files to avoid duplicates
 	names := []string{}
 
@@ -339,7 +351,7 @@ func collectReferenceOverlays(filters []string, exactMatch bool) ([]string, erro
 
 			delimCount := strings.Count(entry.Name(), "--")
 			if delimCount <= 1 {
-				// Not a reference overlay
+				// Not a data overlay
 				continue
 			}
 			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
@@ -398,11 +410,4 @@ func maxWidth(names []string) int {
 		}
 	}
 	return width
-}
-
-// isDefBuilt checks if an overlay name is .def-built
-func isDefBuilt(nameVersion string) bool {
-	normalized := utils.NormalizeNameVersion(nameVersion)
-	defList := build.GetDefBuiltList()
-	return defList[normalized]
 }

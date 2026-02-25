@@ -6,12 +6,20 @@
 
 [![Read the Docs](https://readthedocs.org/projects/condatainer/badge/?version=latest)](https://condatainer.readthedocs.io/en/latest/) [![Go Reference](https://pkg.go.dev/badge/github.com/Justype/condatainer.svg)](https://pkg.go.dev/github.com/Justype/condatainer) [![GitHub Release](https://img.shields.io/github/v/release/Justype/condatainer)](https://github.com/Justype/condatainer/releases)
 
-**CondaTainer** is an HPC-oriented CLI that streamlines environment and data management by utilizing Apptainer, SquashFS, OverlayFS, and Micromamba.
+**CondaTainer** is a rootless CLI designed to manage tools, data, and project environments, and seamlessly launch interactive apps on HPC clusters — perfect for individuals and small teams using institutional or regional compute.
 
-* **Inode Saver:** Packing 30k+ Conda files into a single image to satisfy inode quotas.
-* **Web-App Ready:** Out-of-the-box support for running *RStudio*, *VS Code*, *Jupyter* and more on HPC.
-* **Environment Isolation:** Supports read-only (`.sqf`) for production and writable (`.img`) for development.
-* **Workload Manager Integration:** Native compatibility with Slurm for batch job submission.
+* **Web-App Ready:** Launch *RStudio*, *VS Code*, *Jupyter* and more with one command.
+* **Unified Management:** Easily organize group-level tools/data and isolate project environments.
+* **Inode Saver:** Packing 30k+ Conda files into a single portable image to bypass quota limits.
+* **Scheduler Native:** Out-of-the-box integration with *Slurm*, *PBS*, *LSF*, and *HTCondor*.
+
+> [!NOTE]
+> Slurm is the primary, tested scheduler. Others are experimental, bug reports are welcome!
+
+## 📋 Prerequisites
+
+- **Linux (x86_64 only)**: AArch64 is not supported yet.
+- **Apptainer**: Required for all core container operations.
 
 ## 🛠️ Installation
 
@@ -19,11 +27,11 @@
 curl -fsSL https://get-condatainer.justype.net | bash
 ```
 
-You will be prompted to confirm the installation path (defaulting to `$SCRATCH/condatainer/` or `$HOME/condatainer/`). The script will also edit shell config.
+You will be prompted to confirm the installation path (defaults to `$SCRATCH/condatainer/` or `$HOME/condatainer/`). The script will also update shell config.
 
 ### ⚙️ Configuration
 
-After installation, run the following command to create a default configuration file:
+After installation, reload your shell and initialize the default configuration:
 
 ```bash
 source ~/.bashrc # or source your shell config
@@ -31,79 +39,103 @@ module load apptainer # if apptainer is provided as a module
 condatainer config init
 ```
 
-This step will let **CondaTainer** save the apptainer path for future use.
+This step ensures **CondaTainer** locates and saves Apptainer path for future use.
 
-## 👀 Quick Look
+## 🧰 Tools/Data Management
 
 ```bash
 condatainer avail # List available recipes
-condatainer list  # List installed
+condatainer list  # List installed tools/data
 
-# Install and Run
+# Create and run a specific tool
 condatainer create samtools/1.16
 condatainer exec -o samtools/1.16 samtools --version
 
-# Create a read-only project overlay from a YAML file
-condatainer create -f environment.yml -p my_analysis
-condatainer exec -o my_analysis.sqf bash
-
-# Automatically install the dependencies
-condatainer check analysis.sh -a
+# Automatically install missing tools/data
+condatainer check alignment.sh -a
 
 # Print helpful info when running with overlays
 condatainer exec -o grch38/cellranger/2024-A bash
-# [CondaTainer] Overlay envs:
+# [CNT] Overlay envs:
 #   CELLRANGER_REF_DIR: cellranger reference dir
 #   GENOME_FASTA      : genome fasta
 #   ANNOTATION_GTF_GZ : 10X modified gtf
 #   STAR_INDEX_DIR    : STAR index dir
 ```
 
+**CondaTainer** will set `PATH` and other environment variables for you.
+
 - 📜 [Read the full CondaTainer Manual](./docs/manuals/condatainer.md)
 - 📁 [Naming Conventions](./docs/user_guide/concepts.md#-naming-convention)
 
-## 📦 Writable Overlay
+## 📦 Project Environment Management
 
-**CondaTainer** allows users to create writable workspace overlays for development purposes.
+**CondaTainer** supports both read-only (`.sqf`) and writable (`.img`) overlays, ensuring production stability alongside development flexibility.
 
-```bash
-# Create a writable overlay of size 5G
-condatainer overlay create -s 5G env.img
-# Resize an existing overlay to 10G
-condatainer overlay resize -s 10G env.img
-# Change the file UID/GID to current user in an overlay
-# This is useful when the overlay was created by another user
-condatainer overlay chown env.img
+### Read-Only Environments (Production)
 
-# Launch a bash shell inside the writable overlay
-condatainer exec -w -o env.img bash
-condatainer e # shortcut for above
-
-# Run in read-only mode
-condatainer exec -o env.img bash
-```
-
-**CondaTainer** will set `PATH` and other environment variables for you automatically.
-
-When in writable mode, you can install packages using `mm-*` Micromamba wrappers. (conda-forge and bioconda only)
+Create an immutable bundle overlay directly from a Conda YAML file:
 
 ```bash
-mm-install r-base=4.4 r-tidyverse
-mm-pin r-base
-mm-pin -r r-base # unpin
-mm-list
-mm-search r-ggplot2
-mm-remove r-tidyverse
-mm-update
-mm-clean -a
-mm-export
+condatainer create -f environment.yml -p my_analysis
+condatainer exec -o my_analysis.sqf bash
 ```
+
+### Writable Environments (Development)
+
+Manage a writable workspace overlay for development and testing:
+
+```bash
+condatainer overlay create -s 5G env.img   # Create a 5G overlay
+condatainer overlay resize -s 10G env.img  # Resize an existing overlay to 10G
+condatainer overlay chown env.img          # Fix UID/GID for overlays created by others
+condatainer overlay chown --root env.img   # Make compatible with apptainer --fakeroot
+
+condatainer exec -w -o env.img bash  # Launch a shell in writable mode
+condatainer e                        # Quick shortcut for the above command
+condatainer exec -o env.img bash     # Launch the same overlay in read-only mode
+```
+
+Inside a writable mode, use `mm-*` Micromamba wrappers to manage packages
+
+```bash
+mm-install r-base=4.4 r-tidyverse  # Install packages
+mm-pin r-base           # Pin a package version
+mm-pin -r r-base        # Unpin a package
+mm-list                 # List installed packages
+mm-search r-ggplot2     # Search for a package
+mm-remove r-tidyverse   # Remove a package
+mm-update               # Update packages
+mm-clean -a             # Clean the cache and unused
+mm-export               # Export environment to YAML
+```
+
+## 🐕‍🦺 Web Apps & GUI Helpers
+
+**CondaTainer** includes built-in helper scripts to launch apps (like RStudio, VS Code, and XFCE4 noVNC) directly on HPC compute nodes.
+
+These scripts automatically handle the heavy lifting:
+
+1. Fetching or building the required overlays.
+2. Submitting the job to cluster's scheduler.
+3. Setting up port forwarding for browser access.
+
+```bash
+condatainer helper --update       # Fetch the latest helper scripts
+condatainer helper --list         # View all available apps and tools
+
+condatainer helper vscode-tunnel  # Start a VS Code tunnel
+condatainer helper rstudio-server # Launch RStudio Server
+condatainer helper igv            # Start IGV via XFCE4 noVNC
+```
+
+Please check out [Helper README](https://github.com/Justype/cnt-scripts/blob/main/helpers/README.md) or [ReadTheDocs - Helper Scripts](https://condatainer.readthedocs.io/en/dev/tutorials/helpers_on_HPC.html) for more details and examples.
 
 ## 🚀 Automation
 
-**CondaTainer** supports inline dependency declaration and automatic job submission. Define requirements with `#DEP:` tags and scheduler directives with `#SBATCH`.
+**CondaTainer** can parse scripts to resolve dependencies and submit jobs. Just declare your requirements with `#DEP:` tags and use standard scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`). HTCondor uses native `.sub` submit files.
 
-Example Script (`analysis.sh`):
+Example Script (`salmon_quant.sh`):
 
 ```bash
 #!/bin/bash
@@ -122,14 +154,16 @@ salmon quant \
 Auto install dependencies and submit the job with:
 
 ```bash
-condatainer run analysis.sh -a
+condatainer run salmon_quant.sh -a
 ```
 
-If no scheduler directives are found or job submission is disabled, the script will run immediately in the current shell.
+- **Local Fallback**: If no scheduler directives are found or job submission is disabled, the script will run immediately in the current shell.
+- **Cross-Scheduler Translation**: Write your scripts once using Slurm (`#SBATCH`). If cluster uses PBS, LSF, or HTCondor, **CondaTainer** will translate the directives. (*NOTE: MPI jobs must be evenly distributed across nodes for translation to work.*)
 
 ## 🔗 Links & Resources
 
 - [Compression Method Benchmarks](https://github.com/inikep/lzbench)
+- Apptainer [repo](https://github.com/apptainer/apptainer) and [docs](https://apptainer.org/docs/); Micromamba [repo](https://github.com/mamba-org/micromamba-releases); squashfs-tools [repo](https://github.com/plougher/squashfs-tools)
 - Container related: [Using Containers](https://services.rt.nyu.edu/docs/hpc/containers/containers/), [Singularity with Conda](https://services.rt.nyu.edu/docs/hpc/containers/singularity_with_conda/) and [Singularity with SquashFS](https://services.rt.nyu.edu/docs/hpc/containers/squash_file_system_and_singularity/)
 - Allocation related: [Multi-Instance GPU](https://docs.alliancecan.ca/wiki/Multi-Instance_GPU), [RAM GPU ratio](https://docs.alliancecan.ca/wiki/Allocations_and_compute_scheduling#Ratios_in_bundles)
 

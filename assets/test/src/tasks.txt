@@ -1,0 +1,8 @@
+Analyze dataset Alpha
+Analyze dataset Bravo
+Analyze dataset Charlie
+Analyze dataset Delta
+Analyze dataset Echo
+Analyze dataset Foxtrot
+Analyze dataset Golf
+Analyze dataset Hotel

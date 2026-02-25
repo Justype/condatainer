@@ -59,7 +59,9 @@ Run the following command to check if a supported scheduler is available:
 condatainer scheduler
 ```
 
-Currently only **SLURM** is supported. PBS support is planned for future releases.
+```{note}
+Slurm is fully tested. Other schedulers are experimentally supported. Please report any issues you encounter.
+```
 
 ## SSH Port Forwarding
 
@@ -148,7 +150,7 @@ It will do the following steps for you:
 3. If not,
    1. Check port and overlay integrity.
    2. Verify R is installed in the overlay.
-   3. Submit the SLURM job to start `rstudio-server-conda`.
+   3. Submit the scheduler job to start `rstudio-server-conda`.
    4. When the job starts, record and set up SSH port forwarding.
 
 ```

@@ -7,6 +7,10 @@ Fakeroot is useful when you:
 - [Build the image](#build-the-image-with-fakeroot)
 - [Run the container/overlay](#run-the-containeroverlay-with-fakeroot)
 
+```{warning}
+Fakeroot makes you appear as root, but it **cannot make read-only filesystems writable**. See [SIF vs SQF](#sif-vs-sqf).
+```
+
 ## Build the image with fakeroot
 
 On HPC systems, you don't have root privileges. Using `--fakeroot` allows you to create an overlay image that behaves like root inside the container.
@@ -26,16 +30,76 @@ condatainer exec --fakeroot -o /path/to/my_env.img <command>
 condatainer e -f my_env.img
 ```
 
-Then you can run commands that require root privileges, such as installing packages or changing file ownership inside the overlay.
+This is useful when you need modification on existing images/overlays (like installing missing system libraries using `apt`)
+
+## SIF vs SQF
+
+**Fakeroot makes you appear as root, but it cannot make read-only filesystems writable.**
+
+In CondaTainer, the container filesystem is assembled in layers:
+
+| Layer | Format | Writable? | Paths |
+|-------|--------|-----------|-------|
+| Apptainer image | `.sif` (SIF) | No (SquashFS inside) | `/usr`, `/bin`, `/lib`, `/var`, … |
+| Module/Bundle overlays | `.sqf` (SquashFS) | No | `/cnt/<name>/<version>` |
+| Workspace overlay | `.img` (ext3) | Yes (when `-w`) | `/ext3/env` |
+
+`apt` will modify `/usr/var` directories, but `sqf` overlays are read-only, so you cannot modify them even with `--fakeroot`.
+
+The common ways to install missing system libraries:
+
+- [Custom OS Overlays](../advanced_usage/custom_os.md) to create a new `.sqf` with missing libraries.
+- Only mount the workspace overlay with `fakeroot` and install missing libraries.
+
+In the example below, we try the second approach:
 
 ```bash
-# In side the container with fakeroot
-apt update
-apt install -y build-essential
+condatainer o  # create a workspace overlay named `env.img`
+condatainer e r4.4.3 build-essential -- R
 ```
 
-```{note}
-It works on personal machine. But on some HPC systems, this may not work due to apptainer or system configuration. In that case, just stick to normal user mode and use `condatainer overlay chown` to fix permission issues inside the overlay.
+We created an overlay first, but found out that `tesseract-ocr-eng` is missing (which is not part of the `build-essential.sqf`). We can chown to root and install it:
 
-Also, RStudio Sever may not work with UID less than 1000.
+```bash
+condatainer overlay chown --root env.img
+condatainer e # load env.img with fakeroot (no other overlays)
 ```
+
+Within the container, run `apt` to install missing libraries:
+
+```bash
+apt update && apt install -y tesseract-ocr-eng
+```
+
+Then you need to chown back to you.
+
+```bash
+condatainer overlay chown env.img # chown back to you
+condatainer e r4.4.3 build-essential -- R
+```
+
+Now, you can install R packages that require the package:
+
+```r
+install.packages("orderanalyzer") # required tesseract-ocr-eng
+```
+
+```{warning}
+I don't recommend this path. IO performance of workspace overlays is bad. Try [custom OS overlays](../advanced_usage/custom_os.md) instead.
+```
+
+## Changing Overlay Ownership
+
+You can use `overlay chown` to change the `upper` and `work` ownership inside the overlayFS.
+
+```bash
+condatainer overlay chown --root /path/to/my_env.img
+```
+
+You can also change the ownership to back to you:
+
+```bash
+condatainer overlay chown /path/to/my_env.img
+```
+
+See [condatainer manuals](../manuals/condatainer.md#overlay-chown) for more details.

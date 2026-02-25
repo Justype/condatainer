@@ -44,7 +44,9 @@ Run the following command to check if a supported scheduler is available:
 condatainer scheduler
 ```
 
-Currently only **SLURM** is supported. PBS support is planned for future releases.
+```{note}
+Slurm is fully tested. Other schedulers are experimentally supported. Please report any issues you encounter.
+```
 
 ## SSH Port Forwarding
 
@@ -122,7 +124,7 @@ The script will do the following steps for you:
 3. If yes, establish SSH port forwarding to that node.
 4. If not,
    1. Check port and overlay integrity.
-   2. Submit the SLURM job to start VS Code Server.
+   2. Submit the scheduler job to start VS Code Server.
    3. When the job starts, record and set up SSH port forwarding.
 
 ```
@@ -136,7 +138,7 @@ Options:
   -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00
 
   -p <port>       Port for vscode-server (default: randomly picked). Valid range: 1024-65535.
-  -a <token>      Connection token for the web UI (if not provided, one is generated)
+  -a <token>      Connection token for the web UI (if empty, one is generated)
   -b <image>      Base image file
   -e <overlay>    Environment overlay image file (default: env.img)
   -o <overlay>    Additional overlay files (can have multiple -o options)

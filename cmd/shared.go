@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -67,14 +67,14 @@ const (
 	// Generic error code
 	ExitCodeError = 1
 	// Returned when jobs were submitted to a scheduler (overlays will be created asynchronously)
-	ExitCodeJobsSubmitted = 2
+	ExitCodeJobsSubmitted = 3
 )
 
 // ExitIfJobsSubmitted exits the process with ExitCodeJobsSubmitted if a scheduler
 // submission was requested and the graph shows job IDs were created.
 func ExitIfJobsSubmitted(graph *build.BuildGraph) {
 	if config.Global.SubmitJob && graph != nil && len(graph.GetJobIDs()) > 0 {
-		utils.PrintMessage("%d scheduler job(s) submitted. exiting with code %d",
+		utils.PrintNote("%d scheduler job(s) submitted. exiting with code %d",
 			len(graph.GetJobIDs()), ExitCodeJobsSubmitted)
 		os.Exit(ExitCodeJobsSubmitted)
 	}
@@ -192,93 +192,6 @@ func ParseInstanceArgs(subcommand string) (string, []string) {
 	return instanceName, apptainerFlags
 }
 
-// ParseInstanceExecArgs parses arguments for instance exec command
-// Returns: instanceName, command, envSettings, apptainerFlags
-func ParseInstanceExecArgs() (string, []string, []string, []string) {
-	var instanceName string
-	var command []string
-	var envSettings []string
-	var apptainerFlags []string
-
-	// Parse os.Args directly - find where "instance exec" appears
-	execIdx := -1
-	for i := 0; i < len(os.Args)-1; i++ {
-		if os.Args[i] == "instance" && os.Args[i+1] == "exec" {
-			execIdx = i + 1 // Point to "exec"
-			break
-		}
-	}
-
-	if execIdx == -1 || execIdx+1 >= len(os.Args) {
-		// Fallback: no args found
-		return instanceName, command, envSettings, apptainerFlags
-	}
-
-	// Known condatainer flags
-	knownFlags := map[string]bool{
-		"--debug": true,
-		"--local": true,
-		"--quiet": true, "-q": true,
-		"--yes": true, "-y": true,
-		"--env": true,
-	}
-
-	// Parse from after "exec" in os.Args
-	foundInstanceName := false
-	commandStarted := false
-	for i := execIdx + 1; i < len(os.Args); i++ {
-		arg := os.Args[i]
-
-		// Once command started, everything else is part of the command
-		if commandStarted {
-			command = append(command, arg)
-			continue
-		}
-
-		// Handle --env flag
-		if arg == "--env" && i+1 < len(os.Args) {
-			i++
-			envSettings = append(envSettings, os.Args[i])
-			continue
-		}
-
-		// Handle --env=VALUE format
-		if strings.HasPrefix(arg, "--env=") {
-			envValue := strings.TrimPrefix(arg, "--env=")
-			envSettings = append(envSettings, envValue)
-			continue
-		}
-
-		// Skip other known global flags before instance name
-		if knownFlags[arg] {
-			continue
-		}
-
-		// Handle unknown flags (apptainer pass-through)
-		if strings.HasPrefix(arg, "-") && !foundInstanceName {
-			// Unknown flag before instance name - pass to apptainer
-			apptainerFlags = append(apptainerFlags, arg)
-			continue
-		}
-
-		// Once we have the instance name, next non-flag starts the command
-		if foundInstanceName {
-			// This is the first command argument
-			commandStarted = true
-			command = append(command, arg)
-			continue
-		}
-
-		// First non-flag argument is the instance name
-		if !strings.HasPrefix(arg, "-") {
-			instanceName = arg
-			foundInstanceName = true
-		}
-	}
-
-	return instanceName, command, envSettings, apptainerFlags
-}
-
 func isKnownFlagWithEquals(knownFlags map[string]bool, arg string) bool {
 	if !strings.Contains(arg, "=") {
 		return false
@@ -299,7 +212,7 @@ func needsValue(flag string) bool {
 
 // ensureBaseImage ensures the base image exists
 func ensureBaseImage(ctx context.Context) error {
-	return apptainer.EnsureBaseImage(ctx, false, false)
+	return build.EnsureBaseImage(ctx, false)
 }
 
 // ResolveBaseImage resolves a base image path to an absolute path
@@ -354,7 +267,7 @@ func baseImageFlagCompletion() func(*cobra.Command, []string, string) ([]string,
 	}
 }
 
-// systemOverlaySuggestions returns only system overlays (def-built) and local overlay files
+// systemOverlaySuggestions returns only OS overlays and local OS overlay files
 func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirective) {
 	installed, err := container.InstalledOverlays()
 	if err != nil {
@@ -363,20 +276,27 @@ func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirec
 
 	choices := map[string]struct{}{}
 
-	// Only include overlays from the def list (system/def-built overlays)
-	defList := build.GetDefBuiltList()
-	for name := range installed {
-		normalized := utils.NormalizeNameVersion(name)
-		if defList[normalized] {
+	// Only include installed overlays that are OS overlays (contain .singularity.d)
+	for name, path := range installed {
+		if isOSOverlay(path) {
 			if toComplete == "" || strings.HasPrefix(name, toComplete) {
 				choices[name] = struct{}{}
 			}
 		}
 	}
 
-	// Add local .sqf/.sif files (not .img) - for -b flag
+	addDistroAliasChoices(installed, choices, toComplete)
+
+	// Add local .sif files and local .sqf files that are OS overlays - for -b flag
 	for _, candidate := range localImageSuggestions(toComplete) {
-		choices[candidate] = struct{}{}
+		if utils.IsSif(candidate) {
+			choices[candidate] = struct{}{}
+			continue
+		}
+		absPath, err := filepath.Abs(candidate)
+		if err == nil && isOSOverlay(absPath) {
+			choices[candidate] = struct{}{}
+		}
 	}
 
 	suggestions := make([]string, 0, len(choices))
@@ -403,6 +323,8 @@ func overlaySuggestions(includeData bool, includeImg bool, toComplete string) ([
 			}
 		}
 	}
+
+	addDistroAliasChoices(installed, choices, toComplete)
 
 	for _, candidate := range localOverlaySuggestions(toComplete, includeImg) {
 		choices[candidate] = struct{}{}
@@ -502,12 +424,36 @@ func localOverlaySuggestions(toComplete string, includeImg bool) []string {
 	})
 }
 
+// addDistroAliasChoices adds shorthand aliases for OS overlays matching the default distro.
+// For each installed OS overlay named "<distro>/<name>", also suggests "<name>".
+func addDistroAliasChoices(installed map[string]string, choices map[string]struct{}, toComplete string) {
+	distro := config.Global.DefaultDistro
+	if distro == "" {
+		return
+	}
+	prefix := distro + "/"
+	for name, path := range installed {
+		if !strings.HasPrefix(name, prefix) || !isOSOverlay(path) {
+			continue
+		}
+		alias := strings.TrimPrefix(name, prefix)
+		if toComplete == "" || strings.HasPrefix(alias, toComplete) {
+			choices[alias] = struct{}{}
+		}
+	}
+}
+
+// isOSOverlay reports whether a SquashFS overlay is an OS overlay.
+// Delegates to overlay.IsOSType which checks for .singularity.d in the archive.
+func isOSOverlay(overlayPath string) bool {
+	return overlay.IsOSType(overlayPath)
+}
+
 // isAppOverlay checks if an overlay path is considered an "app" overlay
 func isAppOverlay(path string) bool {
-	// Check if overlay name is in the .def-built whitelist
-	// .def-built overlays (created via 'sif dump') are considered "app" overlays
-	// regardless of their location
-	if isDefBuiltOverlay(path) {
+	// OS overlays (Apptainer-built SquashFS containing .singularity.d) are
+	// considered "app" overlays regardless of their location
+	if isOSOverlay(path) {
 		return true
 	}
 
@@ -520,20 +466,6 @@ func isAppOverlay(path string) bool {
 		}
 	}
 	return false
-}
-
-// isDefBuiltOverlay checks if an overlay was built from a .def file
-// by checking against the build-scripts metadata whitelist
-func isDefBuiltOverlay(overlayPath string) bool {
-	baseName := filepath.Base(overlayPath)
-	// Remove extension (e.g., build-essential.sqf -> build-essential)
-	nameWithoutExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
-	// Convert -- to / (e.g., build-essential -> build-essential)
-	normalized := strings.ReplaceAll(nameWithoutExt, "--", "/")
-
-	// Check def list from build package
-	defList := build.GetDefBuiltList()
-	return defList[normalized]
 }
 
 // pathWithinDir checks if a path is within a directory

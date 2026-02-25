@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/viper"
@@ -19,7 +20,7 @@ const ConfigType = "yaml"
 // InitViper initializes Viper with proper search paths and defaults
 // Priority (highest to lowest):
 // 1. Command-line flags (handled by cobra)
-// 2. Environment variables (CONDATAINER_*)
+// 2. Environment variables (CNT_*)
 // 3. User config file (~/.config/condatainer/config.yaml)
 // 4. Portable config (parent of bin/ folder where executable lives)
 // 5. System config file (/etc/condatainer/config.yaml)
@@ -57,7 +58,7 @@ func InitViper() error {
 	viper.AddConfigPath("/etc/condatainer")
 
 	// Environment variables
-	viper.SetEnvPrefix("CONDATAINER")
+	viper.SetEnvPrefix("CNT")
 	viper.AutomaticEnv()
 
 	// Set defaults (lowest priority)
@@ -81,11 +82,20 @@ func setDefaults() {
 	viper.SetDefault("scheduler_bin", "")
 	viper.SetDefault("submit_job", true)
 	viper.SetDefault("logs_dir", "")
-	viper.SetDefault("branch", "main")
+	viper.SetDefault("scripts_link", DefaultScriptsLink)
+	viper.SetDefault("prebuilt_link", DefaultPrebuiltLink)
+	viper.SetDefault("prefer_remote", false)
 
 	// Extra base directories to search (prepended to default search paths)
 	// Each directory should contain images/, build-scripts/, helper-scripts/ subdirectories
 	viper.SetDefault("extra_base_dirs", []string{})
+
+	// Scheduler default specs (used when parsing scripts without explicit resource directives)
+	viper.SetDefault("scheduler.nodes", 1)
+	viper.SetDefault("scheduler.tasks_per_node", 1)
+	viper.SetDefault("scheduler.ncpus_per_task", 2)
+	viper.SetDefault("scheduler.mem_per_node_mb", 8192)
+	viper.SetDefault("scheduler.time", "4h")
 
 	// Build config defaults
 	viper.SetDefault("build.ncpus", 4)
@@ -94,6 +104,8 @@ func setDefaults() {
 	viper.SetDefault("build.tmp_size_mb", 20480)
 	viper.SetDefault("build.compress_args", "") // Empty means auto-detect based on apptainer version
 	viper.SetDefault("build.overlay_type", "ext3")
+
+	viper.SetDefault("parse_module_load", false)
 }
 
 // GetUserConfigPath returns the path to the user config file
@@ -456,31 +468,62 @@ func LoadFromViper() {
 		Global.LogsDir = logsDir
 	}
 
-	// Load branch from config (for remote build scripts)
-	if branch := viper.GetString("branch"); branch != "" {
-		switch branch {
-		case "main", "dev":
-			Global.Branch = branch
-		default:
-			utils.PrintWarning("Unknown branch '%s' in config; falling back to 'main'", branch)
-			viper.Set("branch", "main")
-			Global.Branch = "main"
+	// Load scripts_link from config (base URL for remote build scripts and helpers)
+	if link := viper.GetString("scripts_link"); link != "" {
+		Global.ScriptsLink = link
+	}
+
+	// Load prebuilt_link from config (base URL for downloading prebuilt images and overlays)
+	if link := viper.GetString("prebuilt_link"); link != "" {
+		Global.PrebuiltLink = link
+	}
+
+	// Load prefer_remote from config
+	if viper.GetBool("prefer_remote") {
+		Global.PreferRemote = true
+	}
+
+	// Load default_distro from config (overrides built-in default "ubuntu24")
+	if distro := viper.GetString("default_distro"); distro != "" {
+		if !slices.Contains(GetAvailableDistros(), distro) {
+			utils.PrintWarning("Config distro '%s' not available; falling back to '%s'", distro, DEFAULT_DISTRO)
+			viper.Set("default_distro", DEFAULT_DISTRO)
+			Global.DefaultDistro = DEFAULT_DISTRO
+		}
+		Global.DefaultDistro = distro
+	}
+
+	// Load scheduler default specs from Viper
+	if nodes := viper.GetInt("scheduler.nodes"); nodes > 0 {
+		Global.Scheduler.Nodes = nodes
+	}
+	if tasksPerNode := viper.GetInt("scheduler.tasks_per_node"); tasksPerNode > 0 {
+		Global.Scheduler.TasksPerNode = tasksPerNode
+	}
+	if ncpusPerTask := viper.GetInt("scheduler.ncpus_per_task"); ncpusPerTask > 0 {
+		Global.Scheduler.CpusPerTask = ncpusPerTask
+	}
+	if memMBPerNode := viper.GetInt64("scheduler.mem_per_node_mb"); memMBPerNode > 0 {
+		Global.Scheduler.MemPerNodeMB = memMBPerNode
+	}
+	if schedTime := viper.GetString("scheduler.time"); schedTime != "" {
+		if dur, err := utils.ParseDuration(schedTime); err == nil {
+			Global.Scheduler.Time = dur
 		}
 	}
 
 	// Load build config from Viper
 	if ncpus := viper.GetInt("build.ncpus"); ncpus > 0 {
-		Global.Build.DefaultCPUs = ncpus
+		Global.Build.Defaults.CpusPerTask = ncpus
 	}
 
 	if memMB := viper.GetInt64("build.mem_mb"); memMB > 0 {
-		Global.Build.DefaultMemMB = memMB
+		Global.Build.Defaults.MemPerNodeMB = memMB
 	}
 
 	if buildTime := viper.GetString("build.time"); buildTime != "" {
-		// Parse time duration from string (e.g., "2h", "30m", "1h30m", or "02:00:00")
 		if dur, err := utils.ParseDuration(buildTime); err == nil {
-			Global.Build.DefaultTime = dur
+			Global.Build.Defaults.Time = dur
 		}
 	}
 
@@ -491,18 +534,27 @@ func LoadFromViper() {
 	// Only override compress_args if explicitly set in config (non-empty)
 	// Empty means auto-detect based on apptainer version (handled by AutoDetectCompression)
 	if compressArgs := viper.GetString("build.compress_args"); compressArgs != "" {
-		Global.Build.CompressArgs = compressArgs
+		Global.Build.CompressArgs = NormalizeCompressArgs(compressArgs)
 	}
 
 	if overlayType := viper.GetString("build.overlay_type"); overlayType != "" {
 		Global.Build.OverlayType = overlayType
 	}
+
+	Global.ParseModuleLoad = viper.GetBool("parse_module_load")
 }
 
-// AutoDetectCompression sets compression to zstd if supported and user hasn't explicitly set it.
+// NormalizeCompressArgs is a thin wrapper around ArgsForCompress and exists
+// for historical compatibility with earlier versions of the code.
+func NormalizeCompressArgs(val string) string {
+	return ArgsForCompress(val)
+}
+
+// AutoDetectCompression sets compression based on the runtime binary and its version.
 // This should be called after apptainer version is known.
 // supportsZstd: whether the current apptainer version supports zstd (>= 1.4)
-func AutoDetectCompression(supportsZstd bool) {
+// isSingularity: whether the binary is Singularity (uses gzip by default)
+func AutoDetectCompression(supportsZstd bool, isSingularity bool) {
 	// Only auto-detect if user hasn't explicitly set compress_args in config
 	// Empty string in config means "auto-detect"
 	if viper.GetString("build.compress_args") != "" {
@@ -510,8 +562,10 @@ func AutoDetectCompression(supportsZstd bool) {
 		return
 	}
 
-	// Auto-detect: use zstd if supported, otherwise lz4
-	if supportsZstd {
+	if isSingularity {
+		Global.Build.CompressArgs = "-comp gzip"
+		utils.PrintDebug("Using gzip compression (Singularity detected)")
+	} else if supportsZstd {
 		Global.Build.CompressArgs = "-comp zstd -Xcompression-level 8"
 		utils.PrintDebug("Auto-detected zstd support, using zstd compression")
 	} else {

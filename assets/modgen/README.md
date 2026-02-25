@@ -6,9 +6,7 @@
 
 - **Auto-Generation**: Installs packages and builds Lua/Tcl modulefiles automatically.
 - **Smart Dependencies**: Scans scripts to detect and install missing modules. (`#DEP:` and `module load`)
-- **Native Integration**: Seamless `module avail` and `module load` experience.
-- **Context-Aware**: Manages references/indices and displays helpful info when not in a SLURM job.
-- **SLURM Integration**: Submits index generation jobs automatically when needed.
+- **SLURM Integration**: Submit jobs automatically when needed.
 
 ## 🛠️ Installation
 
@@ -21,23 +19,16 @@ curl -fsSL https://raw.githubusercontent.com/Justype/condatainer/main/assets/ins
 ## 👀 Quick Look
 
 ```bash
-# 1. Initialize shell hooks (only needed once)
-modgen init
+modgen init # Initialize shell hooks (run once)
 
-# 2. Install samtools and generate the modulefile
-modgen create samtools/1.16
-
-# 3. Load the module (standard HPC way)
-module load samtools/1.16
+modgen create samtools/1.16 # create module from Conda package
+module load samtools/1.16 # load the module
 samtools --version
 
-# 4. Search for packages to install
-modgen avail salmon grcm M36
+modgen avail salmon grcm M36 # list available modules
+modgen check analysis.sh -a # Auto-install missing dependencies in script
 
-# 5. Auto install dependencies from a script
-modgen check analysis.sh -a
-
-# 6. Helpful info example: Cellranger reference
+# Helpful info example: Cellranger reference
 ml grch38/cellranger/2024-A
 # Available environment variables:
 #   CELLRANGER_REF_DIR (cellranger reference dir)
@@ -49,18 +40,21 @@ ml grch38/cellranger/2024-A
 - 📜 [Read the full ModGen Manual](./manual.md)
 - 📁 [Naming Conventions](../../docs/user_guide/concepts.md#-naming-convention)
 
-
 > [!NOTE]
 > Make sure to initialize shell by running `modgen init` once. Then source your shell configuration file (e.g., `source ~/.bashrc`).
 
-## 🚀 Dependencies Automation
+## 🚀 Automation
 
-**ModGen** can recognize both `#DEP:` tags and `module load` commands to automatically install required modules.
+**ModGen** can recognize both `#DEP:` tags and `module load` commands to automatically install required modules. If `#SBATCH` are present, submit to Slurm automatically.
 
 Example Script (`analysis.sh`):
 
 ```bash
 #!/bin/bash
+#SBATCH --job-name=analysis
+#SBATCH --output=analysis.out
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=30G
 module purge
 module load salmon/1.10.2
 ml grcm39/salmon/1.10.2/gencodeM33
@@ -68,19 +62,29 @@ ml grcm39/salmon/1.10.2/gencodeM33
 salmon quant -i $SALMON_INDEX_DIR ...
 ```
 
-Check and automatically install dependencies:
+Check and automatically and Run with auto-install:
 
 ```bash
-# Print modules and install status
-modgen check analysis.sh
-
-# Automatically install missing modules
-modgen check analysis.sh -a
+modgen run analysis.sh -a
 ```
 
-## 🤔 Differences Compared to CondaTainer
+## 🗑️ Uninstallation
 
-**ModGen** focuses only on system- or group-wide module management for HPC environments, while **CondaTainer** is designed for both group-wide module and container management and project-specific Conda environment management.
+If you just want to remove **ModGen**, open your `~/.bashrc` or `~/.zshrc` file and remove the lines related to **ModGen**. Look for and delete the following block:
+
+```bash
+# >>> MODGEN MODULES >>>
+modgen configs
+# <<< MODGEN MODULES <<<
+```
+
+And remove the **ModGen** executable and the modules directory.
+
+```bash
+INSTALL_DIR="$SCRATCH/condatainer"  # or your custom installation path
+rm -rf "$INSTALL_DIR/bin/modgen"
+rm -rf "$INSTALL_DIR/{apps,apps-modules,ref,ref-modules}"
+```
 
 ## Acknowledgements
 

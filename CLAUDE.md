@@ -26,29 +26,39 @@ go test -v ./internal/scheduler/...                       # Package tests
 - `exec/` - Ephemeral container execution
 - `instance/` - Persistent instance management (start/exec/stop) with state persistence
 - `overlay/` - Overlay image CRUD (ext3/SquashFS), resize, chown, locking
-- `scheduler/` - HPC scheduler abstraction (SLURM, PBS, LSF); auto-detection, directive parsing, cross-scheduler translation
+- `scheduler/` - HPC scheduler abstraction (SLURM, PBS, LSF, HTCondor); auto-detection, directive parsing, cross-scheduler translation
 - `utils/` - Console output (`Print*`), file ops, downloads, script parsing
 
 ## Build Scripts
 
-Located in `build-scripts/` with naming:
-- Apps: `name/version` (e.g., `cellranger/9.0.1`)
-- References: `assembly/data-type/version` (e.g., `grch38/star/2.7.11b/gencode47-101`)
+Build scripts live in the [`cnt-scripts`](https://github.com/Justype/cnt-scripts) repo (fetched remotely via `scripts_link` config, or auto-detected from a local `cnt-scripts/` clone next to the binary). Three categories:
+
+- **OS**: `<distro>/<name>` (e.g., `ubuntu24/igv`) — Apptainer definition files for distro system tools
+- **Apps**: `<name>/<version>` (e.g., `cellranger/9.0.1`) — Apps that not available as conda packages, or specific versions not in conda
+- **Data**: `<assembly|project>/<datatype>/<version>` (e.g., `grch38/star/2.7.11b/gencode47-101`) — any data, including genome reference indexes
 
 Must define an `install()` function. Available vars: `$NCPUS`, `$target_dir`, `$tmp_dir`, `$app_name`, `$version`.
 
-Metadata headers: `#DEP:name/version` (deps), `#SBATCH` (job params), `#ENV:VAR=$app_root` (env vars), `#INTERACTIVE:prompt` (user input).
+Metadata headers: `#DEP:name/version` (deps), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params), `#ENV:VAR=$app_root` (env vars), `#INTERACTIVE:prompt` (user input).
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 
 ## Data Directory Search Order
 
-1. `CONDATAINER_EXTRA_BASE_DIRS` / config `extra_base_dirs`
+1. `CNT_EXTRA_BASE_DIRS` / config `extra_base_dirs`
 2. `<install-dir>/` (portable, auto-detected)
 3. `$SCRATCH/condatainer/`
 4. `~/.local/share/condatainer/`
 
 Each contains `images/`, `build-scripts/`, `helper-scripts/`. Writes go to first writable dir.
+
+## Helper Scripts
+
+Bash scripts in [`cnt-scripts/helpers/`](https://github.com/Justype/cnt-scripts) launch interactive services inside CondaTainer on HPC. Modes: `headless/` (direct) and `<scheduler>/` (submit + SSH tunnel). See `helpers/README.md` for details.
+
+Shared library `.common.sh` provides: config management (`config_init/load/require`), port helpers (`choose_port`, `validate_port`), overlay checks (`check_overlay_integrity`, `check_and_install_overlays`), job state (`read_job_state`, `wait_for_job`), reuse mode (`handle_reuse_mode`), and display (`spec_line`, `print_specs`, `countdown`).
+
+Scheduler script flow: config_init → config_load → read_job_state → getopts (sets `_ARG_*` flags) → handle_reuse_mode → port resolution → print_specs → sanity checks → submit → wait_for_job → connect.
 
 ## Key Patterns
 

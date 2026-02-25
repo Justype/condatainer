@@ -47,7 +47,9 @@ Run the following command to check if a supported scheduler is available:
 condatainer scheduler
 ```
 
-Currently only **SLURM** is supported. PBS support is planned for future releases.
+```{note}
+Slurm is fully tested. Other schedulers are experimentally supported. Please report any issues you encounter.
+```
 
 ## SSH Port Forwarding
 
@@ -124,7 +126,7 @@ See [Launch a Shell within the Workspace Overlay](../user_guide/workspace_overla
 2. If yes, establish SSH port forwarding to that node.
 3. If not,
    1. Check port and overlay integrity.
-   2. Submit the SLURM job to start `code-server`.
+   2. Submit the scheduler job to start `code-server`.
    3. When the job starts, record and set up SSH port forwarding.
 
 ```

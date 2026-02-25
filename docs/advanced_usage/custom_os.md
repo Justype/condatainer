@@ -27,18 +27,59 @@ Examples:
 - [R Package Dependencies](#example-r-package-dependencies) (use with `env.img` for development)
 - [Read-only R Package Environment](#example-read-only-r-package-environment) (for production)
 
-## Change the Base Image
+## OS Overlay Compatibility
 
-If an OS overlay has a different distro version than the base image used by other overlays, you may run into compatibility issues when loading multiple overlays together.
+When loading multiple OS overlays together, all should share the same OS distro version. Mixing overlays built on different versions (e.g., Ubuntu 22.04 vs 24.04) can cause missing library errors or unexpected behavior.
 
-To avoid this, you can:
+To check an overlay's distro version, run:
 
 ```bash
-# Use a new base image matching the OS overlay distro
-condatainer exec -b <custom_base_image.sqf> -o <os_overlay.sqf> bash
+condatainer info <overlay_file.sqf>
+```
 
-# or directly use the OS overlay as the base
-condatainer exec -b <os_overlay.sqf> bash
+Example output:
+
+```
+File
+  Name:          ubuntu22--igv.sqf
+  Path:          path/images/ubuntu22--igv.sqf
+  Size:          271.91 MB
+  Type:          OS Overlay (Read-Only)
+  Distro:        Ubuntu 22.04 (Jammy)
+...
+```
+
+To get the base image distro version:
+
+```bash
+condatainer config get default_distro   # e.g. ubuntu24  →  24.04
+# or
+condatainer info base_image
+```
+
+The output is `ubuntu24`, which is different from the overlay's distro version `ubuntu22`. This means you cannot load this overlay together with other overlays built on `ubuntu24` base image.
+
+## Change the Base Image
+
+### Change the config (permanent)
+
+If you want to permanently switch the default distro (e.g. to Ubuntu 22), run:
+
+```bash
+condatainer config set default_distro ubuntu22
+```
+
+This often happens when:
+
+- The base image is end of life and you want to switch to a newer one.
+- Most of your overlays target a different distro, so you want to switch the default to avoid compatibility issues.
+
+### Use ENV variable (temporary)
+
+Use `CNT_DEFAULT_DISTRO` to temporarily override the default distro for a single command without changing your global config:
+
+```bash
+CNT_DEFAULT_DISTRO=ubuntu22 condatainer exec -o myoverlay.sqf bash
 ```
 
 ## What is Included in a Base Image?
@@ -74,11 +115,11 @@ In the inner shell, you can see the OS version with:
 cat /etc/os-release
 ```
 
-It is Ubuntu 22.04, which differs from the default base image (`ubuntu:24.04`).
+It is Ubuntu 22.04, which differs from the default base image (Ubuntu 24.04 when `default_distro: ubuntu24`).
 
 You can either:
 - Use the PyTorch image as the base image
-- Build an Ubuntu 22.04 base image
+- Use the `ubuntu22--base_image.sif` as the base image alongside the PyTorch overlay
 
 Use the first approach:
 
@@ -86,46 +127,10 @@ Use the first approach:
 condatainer exec -b pytorch.sqf bash
 ```
 
-Or create an Ubuntu 22.04 base image:
+Second approach use Ubuntu 22 base image:
 
 ```bash
-# Use available base image definition file
-condatainer create ubuntu22/base_image
-
-# Then load both the base image and the PyTorch overlay:
-condatainer exec -b ubuntu22/base_image -o pytorch.sqf bash
-```
-
-```{note}
-Available base image definition files:
-
-- [ubuntu20/base_image](https://github.com/Justype/condatainer/tree/main/build-scripts/ubuntu20/base_image.def)
-- [ubuntu22/base_image](https://github.com/Justype/condatainer/tree/main/build-scripts/ubuntu22/base_image.def)
-- [ubuntu24/base_image](https://github.com/Justype/condatainer/tree/main/build-scripts/ubuntu24/base_image.def)
-```
-
-## Example: Pulling Posit R Docker Image
-
-[Posit R Docker Hub](https://hub.docker.com/r/posit/r-base) has various R base images with different base OS versions.
-
-Currently, the **CondaTainer** base image is `ubuntu:24.04` (noble). So you have to pull the matching Posit R image:
-
-```bash
-# System wide
-condatainer create -n r4.4.3 -s docker://posit/r-base:4.4.3-noble-amd64
-
-# Or for a specific project (current directory)
-condatainer create -p r4.4.3 -s docker://posit/r-base:4.4.3-noble-amd64
-```
-
-Then you can use the R overlay together with the base image:
-
-```bash
-# System wide
-condatainer exec -o r4.4.3
-
-# Project wide (the sqf must be in the current directory)
-condatainer exec -o r4.4.3.sqf
+CNT_DEFAULT_DISTRO=ubuntu22 condatainer exec -o pytorch.sqf bash
 ```
 
 ## Example: R Package Dependencies
@@ -156,6 +161,10 @@ From: ubuntu:24.04
         libxml2-dev libcurl4-openssl-dev libssl-dev
 
     apt clean && rm -rf /var/lib/apt/lists/*
+```
+
+```{note}
+For the `From` line, make sure to specify the same distro version as your base image (e.g., `ubuntu:24.04` if your `default_distro` is `ubuntu24`). Otherwise, you may encounter compatibility issues when loading the overlay.
 ```
 
 ### 2. Build the Overlay

@@ -9,16 +9,19 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Justype/condatainer/internal/utils"
 )
 
 // SchedulerType represents the type of job scheduler
 type SchedulerType string
 
 const (
-	SchedulerUnknown SchedulerType = ""
-	SchedulerSLURM   SchedulerType = "SLURM"
-	SchedulerPBS     SchedulerType = "PBS"
-	SchedulerLSF     SchedulerType = "LSF"
+	SchedulerUnknown  SchedulerType = ""
+	SchedulerSLURM    SchedulerType = "SLURM"
+	SchedulerPBS      SchedulerType = "PBS"
+	SchedulerLSF      SchedulerType = "LSF"
+	SchedulerHTCondor SchedulerType = "HTCondor"
 )
 
 // SchedulerInfo holds information about the detected scheduler
@@ -30,10 +33,11 @@ type SchedulerInfo struct {
 	Available bool   // Whether scheduler is available for job submission
 }
 
-// GpuSpec holds GPU requirements parsed from scheduler directives
+// GpuSpec holds GPU requirements parsed from scheduler directives.
+// Count is per node (not total). Total GPUs = Count * ResourceSpec.Nodes.
 type GpuSpec struct {
 	Type  string // GPU type/model (e.g., "h100", "a100", "v100")
-	Count int    // Number of GPUs requested
+	Count int    // Number of GPUs per node
 	Raw   string // Raw GPU specification string from scheduler
 }
 
@@ -45,15 +49,40 @@ type GpuInfo struct {
 	Partition string // Partition/queue name (optional)
 }
 
-// ResourceLimits holds scheduler resource limits
+// ResourceLimits holds scheduler resource limits per partition/queue.
+// CPU and memory limits are per-node (matching how schedulers report them).
 type ResourceLimits struct {
-	MaxCpus     int           // Maximum CPUs per job
-	MaxMemMB    int64         // Maximum memory in MB per job
-	MaxTime     time.Duration // Maximum walltime (e.g., "7-00:00:00")
-	MaxGpus     int           // Maximum GPUs per job
-	MaxNodes    int           // Maximum nodes per job
-	DefaultTime time.Duration // Default walltime if not specified
-	Partition   string        // Partition/queue name these limits apply to
+	MaxNodes        int           // Maximum nodes per job
+	MaxCpusPerNode  int           // Maximum CPUs per node in this partition
+	MaxMemMBPerNode int64         // Maximum memory per node in MB
+	MaxGpus         int           // Maximum GPUs per job (total across all nodes)
+	DefaultTime     time.Duration // Default walltime if not specified
+	MaxTime         time.Duration // Maximum walltime (e.g., "7-00:00:00")
+	Partition       string        // Partition/queue name these limits apply to
+}
+
+// ResourceSpec holds compute geometry for a job.
+// A nil pointer means resource parsing failed — the job runs in passthrough mode.
+type ResourceSpec struct {
+	Nodes        int           // Number of nodes
+	TasksPerNode int           // MPI ranks / tasks per node
+	CpusPerTask  int           // CPU threads per task
+	MemPerNodeMB int64         // Total RAM per node in MB
+	Gpu          *GpuSpec      // GPU requirements (nil = no GPU; Count = per node)
+	Time         time.Duration // Job walltime limit
+	Exclusive    bool          // Request exclusive node access (no other jobs on the same node)
+}
+
+// RuntimeConfig holds job-level control settings (name, I/O paths, notifications).
+type RuntimeConfig struct {
+	JobName      string // Identifier for the job
+	Stdout       string // Standard output file path
+	Stderr       string // Standard error file path
+	EmailOnBegin bool   // Notification on job start
+	EmailOnEnd   bool   // Notification on job end
+	EmailOnFail  bool   // Notification on job failure/abort
+	MailUser     string // Target email/user for notifications (empty = submitting user)
+	Partition    string // Partition/queue to submit to (cleared on cross-scheduler translation)
 }
 
 // ClusterInfo holds cluster configuration information
@@ -64,37 +93,89 @@ type ClusterInfo struct {
 	MaxMemMBPerNode int64            // Maximum memory available per node in MB (from node info)
 }
 
-// ScriptSpecs holds the specifications parsed from a job script
+// ScriptSpecs holds the full result of parsing a scheduler script.
 type ScriptSpecs struct {
-	JobName      string        // Job name
-	Ncpus        int           // Number of CPUs
-	MemMB        int64         // Memory in MB
-	Time         time.Duration // Time limit
-	Stdout       string        // Standard output file path
-	Stderr       string        // Standard error file path
-	Gpu          *GpuSpec      // GPU requirements (nil if no GPU)
-	EmailOnBegin bool          // Send email when job begins (SLURM: BEGIN, PBS: b, LSF: -B)
-	EmailOnEnd   bool          // Send email when job ends (SLURM: END, PBS: e, LSF: -N)
-	EmailOnFail  bool          // Send email when job fails/aborts (SLURM: FAIL, PBS: a)
-	MailUser     string        // Username or email address for notifications (empty = submitting user)
-	RawFlags     []string      // Raw scheduler-specific flags (e.g., #SBATCH, #PBS)
+	ScriptPath     string        // Absolute path of the parsed script (for HTCondor .sub: the executable)
+	Spec           *ResourceSpec // Compute geometry (nil = resource parse failed → passthrough mode)
+	Control        RuntimeConfig // Job control settings
+	HasDirectives  bool          // True if any scheduler directive (#SBATCH, #PBS, etc.) was found
+	RawFlags       []string      // ALL original directives — immutable audit log
+	RemainingFlags []string      // Directives not absorbed by Spec or Control
+}
+
+// HasSchedulerSpecs returns true if ScriptSpecs contains meaningful scheduler directives.
+// This is used to determine if a script should be submitted to a scheduler,
+// rather than relying on RawFlags which may be cleared during cross-scheduler translation.
+func HasSchedulerSpecs(specs *ScriptSpecs) bool {
+	if specs == nil {
+		return false
+	}
+	// Check if any scheduler directive was found during parsing
+	return specs.HasDirectives
+}
+
+// IsPassthrough reports having directives but no valid resource spec.
+func IsPassthrough(specs *ScriptSpecs) bool {
+	return specs != nil && specs.HasDirectives && specs.Spec == nil
+}
+
+// specDefaults is the package-level defaults used by all schedulers.
+var specDefaults = ResourceSpec{
+	CpusPerTask:  2,
+	MemPerNodeMB: 8192,
+	Time:         4 * time.Hour,
+	Nodes:        1,
+	TasksPerNode: 1,
+}
+
+// SetSpecDefaults overrides the default values used by ReadScriptSpecs.
+func SetSpecDefaults(d ResourceSpec) {
+	specDefaults = d
+}
+
+// GetSpecDefaults returns the current default values for ScriptSpecs.
+func GetSpecDefaults() ResourceSpec {
+	return specDefaults
+}
+
+// Override updates rs in-place with non-zero/non-nil fields from other.
+// Fields in other that are zero/nil are skipped (rs retains its value).
+// Safe to call with a nil other.
+func (rs *ResourceSpec) Override(other *ResourceSpec) {
+	if other == nil {
+		return
+	}
+	if other.Nodes > 0 {
+		rs.Nodes = other.Nodes
+	}
+	if other.TasksPerNode > 0 {
+		rs.TasksPerNode = other.TasksPerNode
+	}
+	if other.CpusPerTask > 0 {
+		rs.CpusPerTask = other.CpusPerTask
+	}
+	if other.MemPerNodeMB > 0 {
+		rs.MemPerNodeMB = other.MemPerNodeMB
+	}
+	if other.Gpu != nil {
+		rs.Gpu = other.Gpu
+	}
+	if other.Time > 0 {
+		rs.Time = other.Time
+	}
+	if other.Exclusive {
+		rs.Exclusive = other.Exclusive
+	}
 }
 
 // JobSpec represents specifications for submitting a batch job
 type JobSpec struct {
-	Name      string            // Job name
-	Command   string            // Command to execute
-	Specs     *ScriptSpecs      // Job specifications
-	DepJobIDs []string          // Job IDs this job depends on
-	Metadata  map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
-}
-
-// JobResources holds resource allocations for the currently running scheduler job.
-// A nil pointer field means the scheduler did not expose that resource via environment variables.
-type JobResources struct {
-	Ncpus *int   // Number of allocated CPUs
-	MemMB *int64 // Allocated memory in MB
-	Ngpus *int   // Number of allocated GPUs
+	Name           string            // Job name (for temp and log file naming)
+	Command        string            // Command to execute
+	Specs          *ScriptSpecs      // Job specifications
+	DepJobIDs      []string          // Job IDs this job depends on
+	Metadata       map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
+	OverrideOutput bool              // If true, always set Stdout/Stderr from Name (ignores script directives)
 }
 
 // Scheduler defines the interface for job schedulers
@@ -122,40 +203,156 @@ type Scheduler interface {
 	GetInfo() *SchedulerInfo
 
 	// GetJobResources reads allocated resources from scheduler environment variables.
+	// Fields with value 0 were not exposed by the scheduler.
 	// Returns nil if not running inside a job of this scheduler type.
-	GetJobResources() *JobResources
+	GetJobResources() *ResourceSpec
 }
 
-// ValidateSpecs validates job specs against cluster limits
+// ResolveResourceSpecFrom merges resources using the priority chain:
+//
+//	defaults → scriptSpecs.Spec (when HasDirectives=true) → jobResources (non-zero fields)
+//
+// Checks HasDirectives rather than Spec != nil: when a script has no directives,
+// the parser fills Spec with GetSpecDefaults(), so checking only Spec != nil would
+// silently replace the caller's defaults with scheduler defaults.
+// Always returns a non-nil *ResourceSpec.
+func ResolveResourceSpecFrom(defaults ResourceSpec, jobResources *ResourceSpec, scriptSpecs *ScriptSpecs) *ResourceSpec {
+	base := defaults
+	if scriptSpecs != nil && scriptSpecs.HasDirectives && scriptSpecs.Spec != nil {
+		base = *scriptSpecs.Spec
+	}
+	base.Override(jobResources)
+	return &base
+}
+
+// ResolveResourceSpec merges resources using the priority chain:
+//
+//	GetSpecDefaults() → scriptSpecs.Spec (when HasDirectives=true) → jobResources
+//
+// Always returns a non-nil *ResourceSpec.
+func ResolveResourceSpec(jobResources *ResourceSpec, scriptSpecs *ScriptSpecs) *ResourceSpec {
+	return ResolveResourceSpecFrom(GetSpecDefaults(), jobResources, scriptSpecs)
+}
+
+// ValidateSpecs validates job specs against cluster limits.
+// Skips validation when specs.Spec is nil (passthrough mode).
 func ValidateSpecs(specs *ScriptSpecs, limits *ResourceLimits) error {
-	if limits == nil {
-		return nil // No limits to validate against
+	if limits == nil || specs == nil || specs.Spec == nil {
+		return nil // No limits or passthrough mode — skip validation
 	}
+	s := specs.Spec
 
-	if limits.MaxCpus > 0 && specs.Ncpus > limits.MaxCpus {
+	// CPUs per node = CpusPerTask * TasksPerNode
+	cpusPerNode := s.CpusPerTask * s.TasksPerNode
+	if cpusPerNode <= 0 {
+		cpusPerNode = s.CpusPerTask
+	}
+	if limits.MaxCpusPerNode > 0 && cpusPerNode > limits.MaxCpusPerNode {
 		return &ValidationError{
-			Field:     "Ncpus",
-			Requested: specs.Ncpus,
-			Limit:     limits.MaxCpus,
+			Field:     "CpusPerNode",
+			Requested: cpusPerNode,
+			Limit:     limits.MaxCpusPerNode,
 			Partition: limits.Partition,
 		}
 	}
 
-	if limits.MaxMemMB > 0 && specs.MemMB > limits.MaxMemMB {
+	if limits.MaxMemMBPerNode > 0 && s.MemPerNodeMB > limits.MaxMemMBPerNode {
 		return &ValidationError{
-			Field:     "MemMB",
-			Requested: int(specs.MemMB),
-			Limit:     int(limits.MaxMemMB),
+			Field:     "MemPerNodeMB",
+			Requested: int(s.MemPerNodeMB),
+			Limit:     int(limits.MaxMemMBPerNode),
 			Partition: limits.Partition,
 		}
 	}
 
-	if specs.Gpu != nil && limits.MaxGpus > 0 && specs.Gpu.Count > limits.MaxGpus {
+	if limits.MaxTime > 0 && s.Time > limits.MaxTime {
 		return &ValidationError{
-			Field:     "Gpu",
-			Requested: specs.Gpu.Count,
-			Limit:     limits.MaxGpus,
+			Field:     "Time",
+			Requested: int(s.Time.Hours()),
+			Limit:     int(limits.MaxTime.Hours()),
 			Partition: limits.Partition,
+		}
+	}
+
+	// GPU count validation: Gpu.Count is per-node; compare total against MaxGpus
+	if s.Gpu != nil && limits.MaxGpus > 0 {
+		totalGpus := s.Gpu.Count * s.Nodes
+		if totalGpus > limits.MaxGpus {
+			return &ValidationError{
+				Field:     "Gpu",
+				Requested: totalGpus,
+				Limit:     limits.MaxGpus,
+				Partition: limits.Partition,
+			}
+		}
+	}
+
+	return nil
+}
+
+// ValidateAndConvertSpecs validates job specs against cluster limits.
+// Returns a descriptive error if any resource exceeds the partition limit.
+// Never modifies specs in-place.
+// Returns nil if cluster info is unavailable (validation skipped).
+func ValidateAndConvertSpecs(specs *ScriptSpecs) error {
+	sched, err := DetectScheduler()
+	if err != nil {
+		return nil
+	}
+	clusterInfo, err := sched.GetClusterInfo()
+	if err != nil {
+		return nil
+	}
+	// Skip all resource validation in passthrough mode
+	if specs.Spec == nil {
+		return nil
+	}
+
+	// Filter limits to the requested partition when specified.
+	// When Control.Partition is set, only validate against that partition's limits.
+	// Falls back to all limits if the requested partition is not found.
+	activeLimits := clusterInfo.Limits
+	if specs.Control.Partition != "" {
+		filtered := make([]ResourceLimits, 0, 1)
+		for _, limit := range clusterInfo.Limits {
+			if limit.Partition == specs.Control.Partition {
+				filtered = append(filtered, limit)
+				break
+			}
+		}
+		if len(filtered) > 0 {
+			activeLimits = filtered
+		}
+	}
+
+	// Validate all resources (CPU, memory, time, GPU count) against active partition limits.
+	// Specs are valid if they fit at least one partition.
+	if len(activeLimits) > 0 {
+		validForSomePartition := false
+		var firstValidationErr error
+
+		for _, limit := range activeLimits {
+			if err := ValidateSpecs(specs, &limit); err == nil {
+				validForSomePartition = true
+				break
+			} else if firstValidationErr == nil {
+				firstValidationErr = err
+			}
+		}
+
+		if !validForSomePartition {
+			return firstValidationErr
+		}
+	}
+
+	// Validate GPU availability — no conversion, just report error with suggestions.
+	nodes := specs.Spec.Nodes
+	if nodes <= 0 {
+		nodes = 1
+	}
+	if specs.Spec.Gpu != nil && len(clusterInfo.AvailableGpus) > 0 {
+		if err := ValidateGpuAvailability(specs.Spec.Gpu, nodes, clusterInfo); err != nil {
+			return err // GpuValidationError includes list of available alternatives
 		}
 	}
 
@@ -221,6 +418,8 @@ func DetectSchedulerWithBinary(preferredBin string) (Scheduler, error) {
 			return NewPbsSchedulerWithBinary(preferredBin)
 		case "bsub", "bjobs", "bkill":
 			return NewLsfSchedulerWithBinary(preferredBin)
+		case "condor_submit", "condor_q", "condor_status":
+			return NewHTCondorSchedulerWithBinary(preferredBin)
 		default:
 			// Default to SLURM for sbatch and any other binary
 			return NewSlurmSchedulerWithBinary(preferredBin)
@@ -243,6 +442,12 @@ func DetectSchedulerWithBinary(preferredBin string) (Scheduler, error) {
 	lsf, lsfErr := NewLsfScheduler()
 	if lsfErr == nil {
 		return lsf, nil
+	}
+
+	// Try HTCondor via PATH
+	htcondor, htcondorErr := NewHTCondorScheduler()
+	if htcondorErr == nil {
+		return htcondor, nil
 	}
 
 	return nil, ErrSchedulerNotFound
@@ -276,11 +481,11 @@ func ReadMaxSpecs(scheduler Scheduler) (*ResourceLimits, error) {
 	}
 
 	for _, limit := range info.Limits {
-		if limit.MaxCpus > maxLimits.MaxCpus {
-			maxLimits.MaxCpus = limit.MaxCpus
+		if limit.MaxCpusPerNode > maxLimits.MaxCpusPerNode {
+			maxLimits.MaxCpusPerNode = limit.MaxCpusPerNode
 		}
-		if limit.MaxMemMB > maxLimits.MaxMemMB {
-			maxLimits.MaxMemMB = limit.MaxMemMB
+		if limit.MaxMemMBPerNode > maxLimits.MaxMemMBPerNode {
+			maxLimits.MaxMemMBPerNode = limit.MaxMemMBPerNode
 		}
 		if limit.MaxGpus > maxLimits.MaxGpus {
 			maxLimits.MaxGpus = limit.MaxGpus
@@ -321,26 +526,30 @@ func ValidateScript(scheduler Scheduler, scriptPath string) error {
 		return nil
 	}
 
-	// Validate against all partition limits
-	// If the script doesn't specify a partition, validate against all of them
+	// Validate against the requested partition (or all if none specified)
 	if len(info.Limits) == 0 {
 		return nil // No limits to validate against
 	}
 
-	// Validate against each partition's limits
-	for _, limit := range info.Limits {
+	limits := info.Limits
+	if specs != nil && specs.Control.Partition != "" {
+		for _, limit := range info.Limits {
+			if limit.Partition == specs.Control.Partition {
+				return ValidateSpecs(specs, &limit)
+			}
+		}
+		// Requested partition not found — fall through to all-partition check
+	}
+
+	// Validate against each partition's limits; pass if any accepts the job
+	for _, limit := range limits {
 		if err := ValidateSpecs(specs, &limit); err != nil {
-			// If it exceeds limits in one partition, that's ok as long as
-			// there's another partition that can handle it
 			continue
 		}
-		// Found a partition that can handle this job
 		return nil
 	}
 
-	// If we get here, the job exceeds limits in all partitions
-	// Return validation error for the first partition
-	return ValidateSpecs(specs, &info.Limits[0])
+	return ValidateSpecs(specs, &limits[0])
 }
 
 // WriteScript creates a batch script with the given specifications
@@ -403,6 +612,11 @@ func DetectType() SchedulerType {
 		return SchedulerLSF
 	}
 
+	// Check for HTCondor (condor_submit)
+	if _, err := exec.LookPath("condor_submit"); err == nil {
+		return SchedulerHTCondor
+	}
+
 	return SchedulerUnknown
 }
 
@@ -419,6 +633,10 @@ func IsInsideJob() bool {
 	}
 	// Check LSF
 	if _, ok := os.LookupEnv("LSB_JOBID"); ok {
+		return true
+	}
+	// Check HTCondor
+	if _, ok := os.LookupEnv("_CONDOR_JOB_AD"); ok {
 		return true
 	}
 	return false
@@ -451,7 +669,7 @@ func ParseScriptAny(scriptPath string) (*ParsedScript, error) {
 	}
 
 	// Add other schedulers
-	allTypes := []SchedulerType{SchedulerSLURM, SchedulerPBS, SchedulerLSF}
+	allTypes := []SchedulerType{SchedulerSLURM, SchedulerPBS, SchedulerLSF, SchedulerHTCondor}
 	for _, st := range allTypes {
 		if st != currentType {
 			tryOrder = append(tryOrder, st)
@@ -470,6 +688,11 @@ func ParseScriptAny(scriptPath string) (*ParsedScript, error) {
 			specs, err = TryParsePbsScript(scriptPath)
 		case SchedulerLSF:
 			specs, err = TryParseLsfScript(scriptPath)
+		case SchedulerHTCondor:
+			// Only parse as HTCondor if the file has the native .sub extension.
+			if strings.HasSuffix(scriptPath, ".sub") {
+				specs, err = TryParseHTCondorScript(scriptPath)
+			}
 		default:
 			continue
 		}
@@ -479,7 +702,7 @@ func ParseScriptAny(scriptPath string) (*ParsedScript, error) {
 		}
 
 		// If we found directives, return the result
-		if specs != nil && len(specs.RawFlags) > 0 {
+		if specs != nil && HasSchedulerSpecs(specs) {
 			return &ParsedScript{
 				Specs:      specs,
 				ScriptType: schedType,
@@ -541,7 +764,9 @@ func getCudaDeviceCount() *int {
 // If the script's scheduler type differs from the host scheduler, a warning
 // message is returned (but not an error) to allow the build to proceed.
 //
-// Returns nil specs (not an error) if no scheduler directives are found.
+// Always returns a non-nil *ScriptSpecs. When no directives are found,
+// HasDirectives is false and Spec is filled with GetSpecDefaults() values (Nodes=1).
+// Use HasDirectives and IsPassthrough to distinguish the three states.
 func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 	// Parse script using any available parser
 	parsed, err := ParseScriptAny(scriptPath)
@@ -549,17 +774,34 @@ func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 		return nil, err
 	}
 
-	// No scheduler directives found
+	// No scheduler directives found — return a default spec with HasDirectives=false.
+	// Callers must check HasDirectives (not nil) to distinguish from normal/passthrough mode.
 	if parsed == nil {
-		return nil, nil
+		d := GetSpecDefaults()
+		d.Nodes = 1 // single-node default for local scripts
+		return &ScriptSpecs{
+			ScriptPath:    scriptPath,
+			HasDirectives: false,
+			Spec:          &d,
+		}, nil
 	}
 
 	// Check for scheduler mismatch and log warning
 	hostType := DetectType()
 	if hostType != SchedulerUnknown && parsed.ScriptType != hostType {
-		// Log warning about mismatch (the specs will still be used)
-		fmt.Printf("[CNT WARN] Script contains %s directives but host has %s scheduler. "+
-			"Specs will be translated.\n", parsed.ScriptType, hostType)
+		// Skip translation note when inside a job — allocation is already done.
+		if !IsInsideJob() {
+			utils.PrintNote("Script contains %s directives but host has %s scheduler. Specs will be translated.",
+				parsed.ScriptType, hostType)
+		}
+
+		// Clear RemainingFlags on cross-scheduler translation:
+		// scheduler-specific unrecognized flags cannot be translated.
+		// RawFlags is the immutable audit log — never cleared.
+		parsed.Specs.RemainingFlags = nil
+		// Clear Partition: the original partition name is scheduler-specific
+		// and cannot be translated to the host scheduler's partition names.
+		parsed.Specs.Control.Partition = ""
 	}
 
 	return parsed.Specs, nil

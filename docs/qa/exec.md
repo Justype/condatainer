@@ -34,20 +34,28 @@ lsof /path/to/my_env.img
 fuser -k -9 /path/to/my_env.img
 ```
 
-#### On an HPC Cluster (Slurm)
+#### On an HPC Cluster
 
-On a cluster, the image might be locked by a running job on a different node. lsof will not show processes running on other nodes.
+On a cluster, the image might be locked by a running job on a different node. `lsof` will not show processes running on other nodes.
 
-Check your running jobs:
+Check your running jobs and cancel if needed:
 
 ```bash
+# SLURM
 squeue -u $USER
-```
-
-If you find a job that might be using the overlay, you can cancel it:
-
-```bash
 scancel <job_id>
+
+# PBS/Torque
+qstat -u $USER
+qdel <job_id>
+
+# LSF
+bjobs
+bkill <job_id>
+
+# HTCondor
+condor_q $USER
+condor_rm <job_id>
 ```
 
 #### After killing
@@ -75,11 +83,6 @@ ls -l /path/to/my_env.img
 ```
 
 If you do not have the necessary permissions, and is not the owner, you may need to contact the system administrator or the owner of the file to adjust the permissions.
-
-```bash
-# only run if you are the owner
-chmod u+rw /path/to/my_env.img
-```
 
 #### Level 2: Inside the Overlay (Container)
 

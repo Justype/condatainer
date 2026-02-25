@@ -1,0 +1,33 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.10.0-cuda12.6-cudnn9-devel
+
+%environment
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export PS1='CNT \w> '
+
+%runscript
+    exec /bin/bash "$@"
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get update && apt-get install -y --no-install-recommends \
+        python3-pip \
+        python3-tk \
+        libpng-dev \
+        libfreetype6-dev
+
+    # Use the bypass flag to install directly to the system Python
+    pip install --no-cache-dir --upgrade pip --break-system-packages
+
+    pip install --no-cache-dir --break-system-packages \
+        numpy \
+        pandas \
+        matplotlib \
+        seaborn \
+        scikit-learn \
+        scipy
+
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*

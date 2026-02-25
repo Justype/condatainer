@@ -1,10 +1,13 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/fatih/color"
+	"golang.org/x/term"
 )
 
 // DebugMode controls whether PrintDebug output is visible.
@@ -202,15 +205,28 @@ func PrintDebug(format string, a ...interface{}) {
 // IsInteractiveShell checks if stdout is connected to a TTY (interactive terminal).
 // Returns true if the program is running in an interactive shell, false otherwise.
 func IsInteractiveShell() bool {
-	fileInfo, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return (fileInfo.Mode() & os.ModeCharDevice) != 0
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 // ShouldAnswerYes checks if we should automatically answer yes to prompts
 // Returns true if --yes flag is set, false otherwise
 func ShouldAnswerYes() bool {
 	return YesMode
+}
+
+// ReadLineContext reads a whitespace-trimmed line from stdin.
+// Returns context.Canceled if ctx is done before input arrives.
+func ReadLineContext(ctx context.Context) (string, error) {
+	ch := make(chan string, 1)
+	go func() {
+		var s string
+		fmt.Scanln(&s)
+		ch <- s
+	}()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case s := <-ch:
+		return strings.ToLower(strings.TrimSpace(s)), nil
+	}
 }

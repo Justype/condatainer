@@ -20,9 +20,9 @@ class Config:
     debug = False
     submit_job = True
     GITHUB_REPO = "Justype/condatainer"
-    REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json.gz"
-    MODGEN_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/modgen/modgen"
-    GIT_RAW_URL_PREFIX = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
+    SCRIPTS_REPO = "Justype/cnt-scripts"
+    REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{SCRIPTS_REPO}/main/metadata/build-scripts.json.gz"
+    GIT_RAW_URL_PREFIX = f"https://raw.githubusercontent.com/{SCRIPTS_REPO}/main/"
 
     # Folder paths
     SCRIPT_PATH = os.path.abspath(__file__)
@@ -179,7 +179,7 @@ class Utils:
                 for k, v in metadata.items():
                     key = Utils.normalize_name_version(k)
                     rel = v["relative_path"]
-                    link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{rel}"
+                    link = f"https://raw.githubusercontent.com/{Config.SCRIPTS_REPO}/main/build-scripts/{rel}"
                     if link.endswith('.def'):
                         continue  # skip def files
                     normalized[key] = link
@@ -381,27 +381,159 @@ class Utils:
         return env_dict
 
     @staticmethod
+    def _translate_pbs_to_sbatch(pbs_flags: List[str]) -> List[str]:
+        """Translate PBS (#PBS) directives to equivalent SBATCH flags.
+
+        Build jobs are always single-task; select/nodes > 1 and mpiprocs > 1
+        are ignored with a warning.
+        """
+        sbatch = []
+        for flag in pbs_flags:
+            flag = flag.strip()
+            if flag.startswith(("-N ", "-N\t")):
+                sbatch.append(f"--job-name={flag[2:].strip()}")
+            elif flag.startswith(("-l ", "-l\t")):
+                # Resources may be comma-separated: -l select=1:ncpus=8:mem=16gb,walltime=2:00:00
+                for resource in flag[2:].strip().split(","):
+                    resource = resource.strip()
+                    if resource.startswith("walltime="):
+                        sbatch.append(f"--time={resource[9:]}")
+                    elif "=" in resource:
+                        # Parse colon-separated chunk spec.
+                        # walltime=H:MM:SS has colons in its value — consume extra chunks.
+                        parts: Dict[str, str] = {}
+                        chunks = resource.split(":")
+                        i = 0
+                        while i < len(chunks):
+                            chunk = chunks[i]
+                            if "=" in chunk:
+                                k, v = chunk.split("=", 1)
+                                k = k.strip()
+                                if k == "walltime":
+                                    while i + 1 < len(chunks) and "=" not in chunks[i + 1]:
+                                        i += 1
+                                        v += ":" + chunks[i]
+                                parts[k] = v.strip()
+                            i += 1
+
+                        for key in ("select", "nodes"):
+                            if key in parts:
+                                try:
+                                    if int(parts[key]) > 1:
+                                        Utils.print_warning(
+                                            f"PBS {key}={parts[key]} ignored: build jobs are single-task only."
+                                        )
+                                except ValueError:
+                                    pass
+                        if "mpiprocs" in parts:
+                            try:
+                                if int(parts["mpiprocs"]) > 1:
+                                    Utils.print_warning(
+                                        f"PBS mpiprocs={parts['mpiprocs']} ignored: build jobs are single-task only."
+                                    )
+                            except ValueError:
+                                pass
+
+                        ncpus = parts.get("ncpus") or parts.get("ppn")
+                        if ncpus:
+                            sbatch.append(f"--cpus-per-task={ncpus}")
+                        if "mem" in parts:
+                            sbatch.append(f"--mem={parts['mem']}")
+                        if "walltime" in parts:
+                            sbatch.append(f"--time={parts['walltime']}")
+            elif flag.startswith(("-o ", "-o\t")):
+                sbatch.append(f"--output={flag[2:].strip()}")
+            elif flag.startswith(("-e ", "-e\t")):
+                sbatch.append(f"--error={flag[2:].strip()}")
+            elif flag.startswith(("-q ", "-q\t")):
+                sbatch.append(f"--partition={flag[2:].strip()}")
+        return sbatch
+
+    @staticmethod
+    def _translate_bsub_to_sbatch(bsub_flags: List[str]) -> List[str]:
+        """Translate LSF (#BSUB) directives to equivalent SBATCH flags.
+
+        Build jobs are always single-task; -n is treated as --cpus-per-task.
+        -M is treated as MB (assumes LSF_UNIT_FOR_LIMITS=MB, the most common HPC setting).
+        -W HH:MM is translated to --time=HH:MM:00.
+        span[hosts=N] with N > 1 is ignored with a warning.
+        """
+        sbatch = []
+        for flag in bsub_flags:
+            try:
+                parts = shlex.split(flag.strip())
+            except ValueError:
+                continue
+            if not parts:
+                continue
+            key = parts[0]
+            val = parts[1] if len(parts) > 1 else ""
+
+            if key == "-J":
+                sbatch.append(f"--job-name={val}")
+            elif key == "-n":
+                sbatch.append(f"--cpus-per-task={val}")
+            elif key == "-M":
+                sbatch.append(f"--mem={val}M")
+            elif key == "-W":
+                sbatch.append(f"--time={val}:00" if ":" in val else f"--time={val}")
+            elif key == "-o":
+                sbatch.append(f"--output={val}")
+            elif key == "-e":
+                sbatch.append(f"--error={val}")
+            elif key == "-q":
+                sbatch.append(f"--partition={val}")
+            elif key == "-R":
+                rest = " ".join(parts[1:])
+                if "span[hosts=" in rest:
+                    try:
+                        n = int(rest.split("span[hosts=")[1].split("]")[0])
+                        if n > 1:
+                            Utils.print_warning(
+                                f"LSF span[hosts={n}] ignored: build jobs are single-task only."
+                            )
+                    except (ValueError, IndexError):
+                        pass
+        return sbatch
+
+    @staticmethod
     def get_sbatch_args_from_build_script(script_path) -> List[str]:
+        """Parse scheduler directives from a build script and return them as
+        equivalent SBATCH flags.
+
+        Supports #SBATCH (native), #PBS, and #BSUB. The first scheduler type
+        found wins; mixed directives are not supported.
+
+        Build jobs are always single-task; multi-node/multi-task directives
+        are ignored with a warning.
         """
-        Parse #SBATCH: lines from build script.
-        Returns a list of sbatch arguments.
-        Example line in script:
-            #SBATCH --cpus-per-task=4
-        """
-        sbatch_args = []
+        sbatch_lines: List[str] = []
+        pbs_lines: List[str] = []
+        bsub_lines: List[str] = []
 
         if not os.path.isfile(script_path):
             Utils.print_error(f"Build script not found at {script_path}.")
-            return sbatch_args
+            return []
 
         with open(script_path, "r") as f:
             for line in f:
                 line = line.strip()
                 if line.startswith("#SBATCH"):
-                    arg = line[len("#SBATCH"):].strip()
-                    sbatch_args.append(arg)
+                    sbatch_lines.append(line[len("#SBATCH"):].strip())
+                elif line.startswith("#PBS"):
+                    pbs_lines.append(line[len("#PBS"):].strip())
+                elif line.startswith("#BSUB"):
+                    bsub_lines.append(line[len("#BSUB"):].strip())
 
-        return sbatch_args
+        if sbatch_lines:
+            return sbatch_lines
+        if pbs_lines:
+            Utils.print_note("Translating PBS directives to SBATCH for submission.")
+            return Utils._translate_pbs_to_sbatch(pbs_lines)
+        if bsub_lines:
+            Utils.print_note("Translating LSF directives to SBATCH for submission.")
+            return Utils._translate_bsub_to_sbatch(bsub_lines)
+        return []
 
     @staticmethod
     def get_interactive_prompts(script_path: str) -> List[str]:
@@ -656,7 +788,7 @@ class BuildObject:
             self.is_remote = False
         elif self.name_version in remote_scripts:
             self.build_script_path = os.path.join(Config.TMP_DIR, self.name_version.replace('/', '--') + ".sh")
-            link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{self.name_version}"
+            link = f"https://raw.githubusercontent.com/{Config.SCRIPTS_REPO}/main/build-scripts/{self.name_version}"
             if not Utils.download_executable(link, self.build_script_path):
                 raise RuntimeError(f"Failed to download remote build script for {self.name_version}.")
             self.is_remote = True
@@ -676,12 +808,20 @@ class BuildObject:
                     Utils.print_warning("Multiline input detected. Only the first line will be used.")
                     user_input = user_input.splitlines()[0]
                 self.interactive_inputs.append(user_input)
+            # Resolve ncpus: default(4) < script #SBATCH --cpus-per-task < live scheduler env
+            self.ncpus = 4
             for flag in self.sbatch_flags:
                 if flag.startswith("--cpus-per-task="):
                     try:
                         self.ncpus = int(flag.split("=")[1])
                     except ValueError:
                         pass
+            _live_cpus = os.environ.get("SLURM_CPUS_PER_TASK", "")
+            if _live_cpus:
+                try:
+                    self.ncpus = int(_live_cpus)
+                except ValueError:
+                    pass
             self.sbatch = len(self.sbatch_flags) > 0
 
     def __str__(self) -> str:
@@ -1219,12 +1359,12 @@ class ModGen_Exec:
         ModGen_Exec.exec_command(modules_final, command_final if command_final else ["bash"])
 
     @staticmethod
-    def exec_command(modules: List[str], command: List[str]):
+    def exec_command(modules: List[str], command: List[str], extra_env: Optional[Dict] = None):
         if not modules:
             Utils.print_warning("No modules specified to load. Executing command without module loading.")
             ml_commands = ""
         else:
-            ml_commands = "module purge && module load " + " ".join(modules) + " &&"
+            ml_commands = "module purge && module load " + " ".join(modules) + " && module() { :; } && ml() { :; } && export -f module ml &&"
         safe_command = " ".join([shlex.quote(part) for part in command])
         full_command = f"{ml_commands} {safe_command}"
 
@@ -1233,6 +1373,8 @@ class ModGen_Exec:
 
         running_env = os.environ.copy()
         running_env["IN_CONDATAINER"] = "1"
+        if extra_env:
+            running_env.update(extra_env)
 
         try:
             subprocess.run(["bash", "-c", full_command], check=True, env=running_env)
@@ -1585,12 +1727,142 @@ class ModGen_Run:
         return args
 
     @staticmethod
+    def _parse_mem_mb(mem_str: str) -> int:
+        """Parse SLURM memory string (e.g. '32G', '32GB', '1024M', '1024MB', '2T', '2TB') to MB."""
+        s = mem_str.strip().upper()
+        try:
+            if s.endswith('TB'):
+                return int(s[:-2]) * 1024 * 1024
+            if s.endswith('T'):
+                return int(s[:-1]) * 1024 * 1024
+            if s.endswith('GB'):
+                return int(s[:-2]) * 1024
+            if s.endswith('G'):
+                return int(s[:-1]) * 1024
+            if s.endswith('MB'):
+                return int(s[:-2])
+            if s.endswith('M'):
+                return int(s[:-1])
+            return int(s)  # bare number → assume MB
+        except ValueError:
+            return 0
+
+    @staticmethod
+    def _parse_resource_env(sbatch_flags: List[str]) -> dict:
+        """Parse NCPUS, MEM, MEM_MB, MEM_GB from a list of #SBATCH flag strings."""
+        cpus = 1
+        mem_mb = 0
+        for flag in sbatch_flags:
+            flag = flag.strip()
+            if flag.startswith('--cpus-per-task='):
+                try:
+                    cpus = int(flag.split('=', 1)[1])
+                except ValueError:
+                    pass
+            elif flag.startswith('-c '):
+                try:
+                    cpus = int(flag[3:].strip())
+                except ValueError:
+                    pass
+            elif flag.startswith('--mem='):
+                mem_mb = ModGen_Run._parse_mem_mb(flag.split('=', 1)[1])
+        env = {'NCPUS': str(cpus)}
+        if mem_mb > 0:
+            env['MEM'] = str(mem_mb)
+            env['MEM_MB'] = str(mem_mb)
+            env['MEM_GB'] = str(mem_mb // 1024)
+        return env
+
+    @staticmethod
+    def _get_slurm_resource_env() -> dict:
+        """Derive NCPUS, MEM, MEM_MB, MEM_GB from SLURM environment variables."""
+        env = {}
+        cpus_str = os.environ.get("SLURM_CPUS_PER_TASK", "")
+        if cpus_str:
+            env['NCPUS'] = cpus_str
+        mem_str = os.environ.get("SLURM_MEM_PER_NODE", "")
+        if mem_str:
+            try:
+                mem_mb = int(mem_str)
+                env['MEM'] = str(mem_mb)
+                env['MEM_MB'] = str(mem_mb)
+                env['MEM_GB'] = str(mem_mb // 1024)
+            except ValueError:
+                pass
+        return env
+
+    @staticmethod
+    def _resolve_resource_env(sbatch_flags: List[str]) -> dict:
+        """Resolve resource env using priority chain: default(NCPUS=4) < script #SBATCH < live scheduler env."""
+        env = {'NCPUS': '4'}
+        if sbatch_flags:
+            env.update(ModGen_Run._parse_resource_env(sbatch_flags))
+        env.update(ModGen_Run._get_slurm_resource_env())
+        return env
+
+    @staticmethod
+    def _create_run_sbatch_script(script_path: str, sbatch_flags: List[str], dep_ids: List[str]) -> Optional[str]:
+        script_name = os.path.splitext(os.path.basename(script_path))[0]
+        sbatch_script_path = os.path.join(Config.TMP_DIR, f"sbatch_run_{script_name}.sh")
+        log_path = os.path.join(Config.LOGS_DIR, f"ModGen_run_{script_name}.out")
+
+        os.makedirs(Config.LOGS_DIR, mode=0o775, exist_ok=True)
+        os.makedirs(Config.TMP_DIR, mode=0o775, exist_ok=True)
+        try:
+            resource_env = ModGen_Run._parse_resource_env(sbatch_flags)
+            with open(sbatch_script_path, 'w') as f:
+                f.write("#!/bin/bash\n")
+                for flag in sbatch_flags:
+                    if flag.startswith("--output") or flag.startswith("--error"):
+                        continue  # Override below
+                    f.write(f"#SBATCH {flag}\n")
+                f.write(f"#SBATCH --output={log_path}\n")
+                f.write("\n")
+                for k, v in resource_env.items():
+                    f.write(f"export {k}={v}\n")
+                f.write("\n")
+                f.write(f"{Config.SCRIPT_PATH} run {script_path}\n")
+                f.write(f"rm -f {sbatch_script_path}\n")
+            os.chmod(sbatch_script_path, 0o775)
+            return sbatch_script_path
+        except Exception as e:
+            Utils.print_error(f"Failed to create sbatch run script: {e}")
+            return None
+
+    @staticmethod
+    def _submit_run_sbatch(script_path: str, sbatch_flags: List[str], dep_ids: List[str]) -> Optional[str]:
+        sbatch_script_path = ModGen_Run._create_run_sbatch_script(script_path, sbatch_flags, dep_ids)
+        if not sbatch_script_path:
+            return None
+        slurm_job_id_regex = re.compile(r'Submitted batch job (\d+)')
+        cmd = ["sbatch"]
+        if dep_ids:
+            dep_str = ":".join(dep_ids)
+            cmd.append(f"--dependency=afterok:{dep_str}")
+        cmd.append(sbatch_script_path)
+        Utils.print_debug(f"[SBATCH] Submitting run job with command: {cmd}")
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            match = slurm_job_id_regex.search(result.stdout)
+            if match:
+                return match.group(1)
+            else:
+                Utils.print_error(f"Failed to parse sbatch submission output: {result.stdout}")
+                return None
+        except subprocess.CalledProcessError as e:
+            Utils.print_error(f"Failed to submit run job: {e.stderr}")
+            if os.path.isfile(sbatch_script_path):
+                os.remove(sbatch_script_path)
+            return None
+
+    @staticmethod
     def parse_run_args(args):
         script_path = args.script
         if not os.path.isfile(script_path):
             ModGen_Run.parser_run.error(f"Script file {script_path} not found.")
 
-        args_from_script = ModGen_Run.parse_args_in_script(args.script)
+        script_path = os.path.abspath(script_path)
+        args_from_script = ModGen_Run.parse_args_in_script(script_path)
         merged = args_from_script + sys.argv[2:]
         args = ModGen_Run.parser_run.parse_args(merged)
 
@@ -1601,14 +1873,24 @@ class ModGen_Run:
             Utils.print_message("ModGen is not compatible with overlay dependencies. Please use CondaTainer instead.")
             Utils.print_note(f"Please go to https://github.com/{Config.GITHUB_REPO} for more information.")
             return
+
+        # Parse #SBATCH directives from the script (needed for resource priority chain)
+        sbatch_flags = Utils.get_sbatch_args_from_build_script(script_path)
+
+        # Fast path: already inside a scheduler job — skip submission, run locally
+        if "SLURM_JOB_ID" in os.environ:
+            execution_command_list = [script_path] if os.access(script_path, os.X_OK) else [f"bash {script_path}"]
+            ModGen_Exec.exec_command(deps, execution_command_list, extra_env=ModGen_Run._resolve_resource_env(sbatch_flags))
+            return
+
         missing_deps = ModGen.get_missing_modules(deps)
+        build_job_ids = []
 
         if missing_deps:
             if not args.auto_install:
                 Utils.print_message("Missing dependencies:")
                 for md in missing_deps:
                     Utils.print_message(f"  - {Utils.yellow_text(md)}")
-
                 Utils.print_message(f"Please run {Utils.blue_text(Config.SCRIPT_NAME + ' check -a')} to install missing dependencies.")
                 return
 
@@ -1617,17 +1899,28 @@ class ModGen_Run:
             build_objects = [BuildObject(md) for md in missing_deps]
             build_graph = BuildGraph(build_objects)
             if build_graph.run():
+                build_job_ids = list(build_graph._build_job_ids.values())
                 Utils.print_success("All missing dependencies installed/submitted.")
             else:
                 Utils.print_error("Some dependencies failed to install.")
                 return
 
-        execution_command_list = []
-        if os.access(script_path, os.X_OK):
-            execution_command_list.append(script_path)
+        # Submit or run locally
+        if Config.submit_job and sbatch_flags and Utils.is_sbatch_available():
+            job_id = ModGen_Run._submit_run_sbatch(script_path, sbatch_flags, build_job_ids)
+            if job_id:
+                if build_job_ids:
+                    Utils.print_success(f"Submitted run job {Utils.blue_text(job_id)} (depends on build job(s): {Utils.blue_text(', '.join(build_job_ids))}).")
+                else:
+                    Utils.print_success(f"Submitted run job {Utils.blue_text(job_id)} for {Utils.yellow_text(os.path.basename(script_path))}.")
         else:
-            execution_command_list.append(f"bash {script_path}")
-        ModGen_Exec.exec_command(deps, execution_command_list)
+            if sbatch_flags and not Config.submit_job:
+                Utils.print_note("Script has #SBATCH specs but --local mode is enabled. Running locally.")
+            elif sbatch_flags and not Utils.is_sbatch_available():
+                Utils.print_note("Script has #SBATCH specs but no SLURM scheduler is available. Running locally.")
+            execution_command_list = [script_path] if os.access(script_path, os.X_OK) else [f"bash {script_path}"]
+            resource_env = ModGen_Run._resolve_resource_env(sbatch_flags)
+            ModGen_Exec.exec_command(deps, execution_command_list, extra_env=resource_env)
 
 class ModGen_Init:
     module_yes = False
@@ -1792,18 +2085,27 @@ class ModGen_Update:
             action="store_true",
             help="Automatically confirm update"
         )
+        ModGen_Update.parser_update.add_argument(
+            "--dev",
+            action="store_true",
+            help="Update from the dev branch instead of main"
+        )
 
     @staticmethod
     def parse_update_args(args):
+        branch = "dev" if args.dev else "main"
+        url = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/{branch}/assets/modgen/modgen"
+
         if not args.yes:
-            Utils.print_message("Are you sure to download and replace the current script from GitHub? [y/N]: ", end="", flush=True)
+            branch_note = f" ({branch} branch)" if args.dev else ""
+            Utils.print_message(f"Are you sure to download and replace the current script from GitHub{branch_note}? [y/N]: ", end="", flush=True)
             confirm = input()
             if confirm.lower() != 'y':
                 Utils.print_message("Update cancelled by user.")
                 return
 
-        Utils.print_message("Downloading the latest ModGen script...")
-        if Utils.download_executable(Config.MODGEN_URL, Config.SCRIPT_PATH + ".tmp"):
+        Utils.print_message(f"Downloading the latest ModGen script ({branch} branch)...")
+        if Utils.download_executable(url, Config.SCRIPT_PATH + ".tmp"):
             os.chmod(Config.SCRIPT_PATH + ".tmp", 0o775)
             shutil.move(Config.SCRIPT_PATH + ".tmp", Config.SCRIPT_PATH)
             Utils.print_success("ModGen updated.")

@@ -25,22 +25,26 @@ type BuildGraph struct {
 	scheduler       scheduler.Scheduler    // Active scheduler (SLURM, PBS, etc.)
 
 	// Config
+	ctx        context.Context
 	imagesDir  string
 	tmpDir     string
 	submitJobs bool // Whether to actually submit scheduler jobs
+	update     bool // If true, rebuild all overlays even if already installed
 }
 
 // NewBuildGraph creates a BuildGraph from a list of BuildObjects
 // All overlays are stored in imagesDir regardless of type
-func NewBuildGraph(buildObjects []BuildObject, imagesDir, tmpDir string, submitJobs bool) (*BuildGraph, error) {
+func NewBuildGraph(ctx context.Context, buildObjects []BuildObject, imagesDir, tmpDir string, submitJobs bool, update bool) (*BuildGraph, error) {
 	bg := &BuildGraph{
 		graph:           make(map[string]BuildObject),
 		localBuilds:     []BuildObject{},
 		schedulerBuilds: []BuildObject{},
 		jobIDs:          make(map[string]string),
+		ctx:             ctx,
 		imagesDir:       imagesDir,
 		tmpDir:          tmpDir,
 		submitJobs:      submitJobs,
+		update:          update,
 	}
 
 	// Detect and initialize scheduler if jobs should be submitted
@@ -82,7 +86,7 @@ func NewBuildGraph(buildObjects []BuildObject, imagesDir, tmpDir string, submitJ
 	// Seed graph with provided build objects
 	for _, obj := range buildObjects {
 		bg.graph[obj.NameVersion()] = obj
-		if obj.IsInstalled() {
+		if !update && obj.IsInstalled() {
 			utils.PrintMessage("Overlay %s is already installed. Skipping.", utils.StyleName(obj.NameVersion()))
 		}
 	}
@@ -115,7 +119,7 @@ func (bg *BuildGraph) topologicalSort() error {
 		nodeMeta, exists := bg.graph[node]
 		if !exists {
 			// Expand on-the-fly if needed
-			newObj, err := NewBuildObject(node, false, bg.imagesDir, bg.tmpDir)
+			newObj, err := NewBuildObject(bg.ctx, node, false, bg.imagesDir, bg.tmpDir, bg.update)
 			if err != nil {
 				delete(visiting, node)
 				return fmt.Errorf("failed to create BuildObject for dependency '%s': %w", node, err)
@@ -196,7 +200,7 @@ func (bg *BuildGraph) Run(ctx context.Context) error {
 // runLocalStep executes builds that don't require scheduler
 func (bg *BuildGraph) runLocalStep(ctx context.Context) error {
 	for _, meta := range bg.localBuilds {
-		if meta.IsInstalled() {
+		if !bg.update && meta.IsInstalled() {
 			continue
 		}
 		utils.PrintDebug("Processing overlay %s (local build)...", meta.NameVersion())
@@ -214,7 +218,7 @@ func (bg *BuildGraph) runSchedulerStep() error {
 	}
 
 	for _, meta := range bg.schedulerBuilds {
-		if meta.IsInstalled() {
+		if !bg.update && meta.IsInstalled() {
 			continue
 		}
 		utils.PrintDebug("Processing overlay %s (scheduler job)...", meta.NameVersion())
@@ -254,12 +258,35 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 	utils.PrintDebug("Submitting %s job for %s with dependencies: %s",
 		info.Type, meta.NameVersion(), strings.Join(depIDs, ", "))
 
+	// Get script specs
+	specs := meta.ScriptSpecs()
+
+	// Validate specs against cluster limits before submission
+	if specs != nil {
+		if err := scheduler.ValidateAndConvertSpecs(specs); err != nil {
+			return "", fmt.Errorf("job specs validation failed for %s: %w", meta.NameVersion(), err)
+		}
+	}
+
+	// Derive job name from name/version if not set in script (10 chars max)
+	if specs != nil && specs.Control.JobName == "" {
+		name := meta.NameVersion()
+		if idx := strings.Index(name, "/"); idx != -1 {
+			name = name[:idx]
+		}
+		if len(name) > 10 {
+			name = name[:10]
+		}
+		specs.Control.JobName = name
+	}
+
 	// Create job specification
 	jobSpec := &scheduler.JobSpec{
-		Name:      meta.NameVersion(),
-		Command:   fmt.Sprintf("condatainer create %s", meta.NameVersion()),
-		Specs:     meta.ScriptSpecs(),
-		DepJobIDs: depIDs,
+		Name:           meta.NameVersion(),
+		Command:        buildSchedulerCreateCommand(meta.NameVersion(), bg.update),
+		Specs:          specs,
+		DepJobIDs:      depIDs,
+		OverrideOutput: true,
 		Metadata: map[string]string{
 			"Target": meta.NameVersion(),
 			"Type":   meta.Type().String(),
@@ -282,25 +309,20 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 	return jobID, nil
 }
 
-// GetLocalBuilds returns the list of builds to run locally
-func (bg *BuildGraph) GetLocalBuilds() []BuildObject {
-	return bg.localBuilds
-}
-
-// GetSchedulerBuilds returns the list of builds to submit via scheduler
-func (bg *BuildGraph) GetSchedulerBuilds() []BuildObject {
-	return bg.schedulerBuilds
+// buildSchedulerCreateCommand returns the condatainer create command for scheduler jobs,
+// propagating the --remote and --update flags if active.
+func buildSchedulerCreateCommand(nameVersion string, update bool) string {
+	cmd := "condatainer create"
+	if PreferRemote {
+		cmd += " --remote"
+	}
+	if update {
+		cmd += " --update"
+	}
+	return cmd + " " + nameVersion
 }
 
 // GetJobIDs returns the map of job IDs for scheduler builds
 func (bg *BuildGraph) GetJobIDs() map[string]string {
 	return bg.jobIDs
-}
-
-// GetAllBuilds returns all builds in topologically sorted order
-func (bg *BuildGraph) GetAllBuilds() []BuildObject {
-	all := make([]BuildObject, 0, len(bg.localBuilds)+len(bg.schedulerBuilds))
-	all = append(all, bg.localBuilds...)
-	all = append(all, bg.schedulerBuilds...)
-	return all
 }

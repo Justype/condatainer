@@ -9,11 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
-	"strconv"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/apptainer"
+	"golang.org/x/mod/semver"
+
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
@@ -44,13 +43,10 @@ and replaces the current executable. A backup of the current version is not crea
 func init() {
 	rootCmd.AddCommand(updateCmd)
 	updateCmd.Flags().BoolVarP(&updateForce, "force", "f", false, "Force update even if already on latest version")
-	updateCmd.Flags().BoolVar(&updateDev, "dev", false, "Include pre-release versions (also enabled if config branch is 'dev')")
+	updateCmd.Flags().BoolVar(&updateDev, "dev", false, "Include pre-release versions")
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
-	// Capture old version before updating
-	oldVersion := config.VERSION
-
 	// Get current executable path
 	exePath, err := os.Executable()
 	if err != nil {
@@ -77,10 +73,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		arch = mappedArch
 	}
 
-	// Check if dev mode is enabled (via flag or config branch)
-	devMode := updateDev || config.Global.Branch == "dev"
-
-	if devMode {
+	if updateDev {
 		utils.PrintNote("Dev mode enabled, including pre-release versions")
 	}
 
@@ -88,7 +81,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	// Get release from GitHub API
 	var releaseURL string
-	if devMode {
+	if updateDev {
 		// Fetch all releases to find the latest (including pre-releases)
 		releaseURL = fmt.Sprintf("https://api.github.com/repos/%s/releases", config.GITHUB_REPO)
 	} else {
@@ -119,7 +112,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	var release releaseInfo
 
-	if devMode {
+	if updateDev {
 		// Parse array of releases and find the latest
 		var releases []releaseInfo
 		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
@@ -144,7 +137,8 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	currentVersion := "v" + config.VERSION
 	latestVersion := strings.TrimSpace(release.TagName)
 
-	// Compare versions semantically (not just string comparison)
+	// Compare versions semantically; if parsing fails we assume the
+	// latest version is newer (so we update).
 	cmp := compareVersions(currentVersion, latestVersion)
 
 	if cmp >= 0 && !updateForce {
@@ -168,11 +162,8 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	// Ask for confirmation unless global --yes flag or --force flag is provided
 	if !utils.ShouldAnswerYes() && !updateForce {
 		fmt.Print("Are you sure you want to download and replace the current binary from GitHub releases? [y/N]: ")
-		var confirm string
-		fmt.Scanln(&confirm)
-		confirm = strings.ToLower(strings.TrimSpace(confirm))
-
-		if confirm != "y" && confirm != "yes" {
+		confirm, err := utils.ReadLineContext(cmd.Context())
+		if err != nil || (confirm != "y" && confirm != "yes") {
 			utils.PrintNote("Update cancelled by user.")
 			return nil
 		}
@@ -218,16 +209,14 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	utils.PrintSuccess("condatainer updated to %s!", utils.StyleNumber(release.TagName))
 
 	// Update base image only if minor or major version changed
-	if shouldUpdateBaseImage(oldVersion, release.TagName) {
+	if getMajorMinor(currentVersion) != getMajorMinor(latestVersion) {
 		fmt.Println()
 		utils.PrintMessage("Downloading base image for version %s...", release.TagName)
 
-		// Download new base image (update=true, downloadOnly=true)
-		// This downloads to .new and replaces old if successful
-		if err := apptainer.EnsureBaseImage(context.Background(), true, true); err != nil {
+		// Update the base image. Errors are non-fatal — warn and let the user rebuild manually.
+		if err := build.EnsureBaseImage(context.Background(), true); err != nil {
 			utils.PrintWarning("Failed to update base image: %v", err)
 			utils.PrintWarning("You may need to manually rebuild the base image.")
-			// Don't fail - continue with version check
 		} else {
 			utils.PrintSuccess("Base image updated successfully")
 		}
@@ -235,147 +224,58 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		utils.PrintDebug("Base image update skipped (patch version change only)")
 	}
 
-	// Check for major version upgrade
-	oldMajor, err1 := parseMajorVersion(oldVersion)
-	newMajor, err2 := parseMajorVersion(release.TagName)
-
-	if err1 == nil && err2 == nil && oldMajor != newMajor {
-		fmt.Println()
-		utils.PrintWarning("Major version upgrade detected: %d.x → %d.x", oldMajor, newMajor)
-		fmt.Println()
-
-		// Get def-built containers
-		containers := getDefBuiltContainers()
-
-		if len(containers) > 0 {
-			fmt.Println("The following def-built containers may need to be rebuilt:")
-			for _, name := range containers {
-				fmt.Printf("  - %s\n", utils.StyleName(name))
-			}
-		}
-	}
-
 	return nil
 }
 
-// parseVersion extracts major, minor, patch from "v1.2.3" or "1.2.3"
-// Handles semantic versioning: strips pre-release tags and build metadata
-// Examples: "v1.2.3-alpha+build.123" → (1, 2, 3)
-// Returns (major, minor, patch, error)
-func parseVersion(version string) (int, int, int, error) {
-	// Strip "v" prefix
-	version = strings.TrimPrefix(version, "v")
-
-	// Strip build metadata (everything after "+")
-	// e.g., "1.2.3+build.123" → "1.2.3"
-	if idx := strings.Index(version, "+"); idx != -1 {
-		version = version[:idx]
+// getMajorMinor returns the "vMAJOR.MINOR" string for a version, ignoring
+// patch and any suffixes. Returns empty string on failure.
+func getMajorMinor(version string) string {
+	if !strings.HasPrefix(version, "v") {
+		version = "v" + version
 	}
-
-	// Strip pre-release tag (everything after "-")
-	// e.g., "1.2.3-alpha" → "1.2.3"
-	if idx := strings.Index(version, "-"); idx != -1 {
-		version = version[:idx]
+	c := semver.Canonical(version)
+	if c == "" {
+		return ""
 	}
-
-	// Split by "."
-	parts := strings.Split(version, ".")
-	if len(parts) < 2 {
-		return 0, 0, 0, fmt.Errorf("invalid version format")
-	}
-
-	major, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, 0, 0, err
-	}
-
-	minor, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return 0, 0, 0, err
-	}
-
-	patch := 0
-	if len(parts) >= 3 {
-		patch, err = strconv.Atoi(parts[2])
-		if err != nil {
-			return 0, 0, 0, err
-		}
-	}
-
-	return major, minor, patch, nil
+	return semver.MajorMinor(c)
 }
 
-// parseMajorVersion extracts major version from "v1.2.3" or "1.2.3"
-func parseMajorVersion(version string) (int, error) {
-	major, _, _, err := parseVersion(version)
-	return major, err
-}
-
-// compareVersions compares two semantic versions
-// Returns: -1 if v1 < v2, 0 if v1 == v2, 1 if v1 > v2
+// compareVersions compares two semantic versions. It returns:
+//
+//	-1 if v1 < v2, 0 if v1 == v2, 1 if v1 > v2.
+//
+// Pre-release data is taken into account according to semver rules
+// (e.g. "1.2.3-alpha" < "1.2.3"). Build metadata is used only as a
+// secondary lexicographic tie‑breaker.
 func compareVersions(v1, v2 string) int {
-	major1, minor1, patch1, err1 := parseVersion(v1)
-	major2, minor2, patch2, err2 := parseVersion(v2)
-
-	// If parsing fails, treat as different versions
-	if err1 != nil || err2 != nil {
-		return -1 // Assume v1 < v2 to trigger update
+	// semver package requires a leading 'v'; add it if missing so that
+	// canonicalization succeeds for numeric-only tags.
+	if !strings.HasPrefix(v1, "v") {
+		v1 = "v" + v1
 	}
-
-	// Compare major
-	if major1 < major2 {
+	if !strings.HasPrefix(v2, "v") {
+		v2 = "v" + v2
+	}
+	c1 := semver.Canonical(v1)
+	c2 := semver.Canonical(v2)
+	if c1 == "" || c2 == "" {
+		// If we can't parse a version, assume the first is older so an update
+		// will be attempted.
 		return -1
 	}
-	if major1 > major2 {
-		return 1
+	res := semver.Compare(c1, c2)
+	if res != 0 {
+		return res
 	}
-
-	// Major equal, compare minor
-	if minor1 < minor2 {
-		return -1
-	}
-	if minor1 > minor2 {
-		return 1
-	}
-
-	// Major and minor equal, compare patch
-	if patch1 < patch2 {
-		return -1
-	}
-	if patch1 > patch2 {
-		return 1
-	}
-
-	// All equal
-	return 0
-}
-
-// shouldUpdateBaseImage checks if base image should be updated based on version change
-// Returns true if major or minor version changed (not just patch)
-func shouldUpdateBaseImage(oldVersion, newVersion string) bool {
-	oldMajor, oldMinor, _, err1 := parseVersion(oldVersion)
-	newMajor, newMinor, _, err2 := parseVersion(newVersion)
-
-	if err1 != nil || err2 != nil {
-		// If we can't parse, assume update is needed
-		return true
-	}
-
-	// Update if major or minor changed
-	return oldMajor != newMajor || oldMinor != newMinor
-}
-
-// getDefBuiltContainers returns list of def-built containers (no "/" in name)
-func getDefBuiltContainers() []string {
-	defList := build.GetDefBuiltList()
-	containers := []string{}
-	for name := range defList {
-		if !strings.Contains(name, "/") {
-			containers = append(containers, name)
+	b1 := semver.Build(v1)
+	b2 := semver.Build(v2)
+	if b1 != b2 {
+		if b1 < b2 {
+			return -1
 		}
+		return 1
 	}
-	sort.Strings(containers)
-	return containers
+	return 0
 }
 
 // downloadFile downloads a file from a URL to a local path

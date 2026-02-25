@@ -1,0 +1,3 @@
+[submodule "cnt-scripts"]
+	path = cnt-scripts
+	url = https://github.com/Justype/cnt-scripts.git

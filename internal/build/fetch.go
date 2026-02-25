@@ -15,11 +15,16 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
+// PreferRemote controls the precedence of build script resolution.
+// When true, remote scripts take precedence over local scripts.
+// When false (default), local scripts take precedence over remote scripts.
+// Set by CLI commands (--remote flag) or config (prefer_remote: true).
+var PreferRemote bool
+
 // GetRemoteMetadataURL returns the URL for the remote build scripts metadata
-// using the configured branch
+// using the configured scripts_link
 func GetRemoteMetadataURL() string {
-	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/metadata/build-scripts.json.gz",
-		config.GitHubRepo, config.Global.Branch)
+	return config.Global.ScriptsLink + "/metadata/build-scripts.json.gz"
 }
 
 // ScriptInfo holds information about a build script
@@ -34,7 +39,6 @@ type ScriptInfo struct {
 type RemoteScriptEntry struct {
 	RelativePath string   `json:"relative_path"`
 	Deps         []string `json:"deps"`
-	Sbatch       bool     `json:"sbatch"`
 	Whatis       string   `json:"whatis"`
 }
 
@@ -79,10 +83,6 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 			// Handle .def files
 			isContainer := strings.HasSuffix(relPath, ".def")
 			if isContainer {
-				// Skip base image/overlay scripts
-				if strings.HasPrefix(relPath, "base_image") || strings.HasPrefix(relPath, "base-overlay") {
-					return nil
-				}
 				relPath = strings.TrimSuffix(relPath, ".def")
 			}
 
@@ -193,25 +193,42 @@ func GetAllBuildScripts(includeRemote bool) (map[string]ScriptInfo, error) {
 	return scripts, nil
 }
 
-// FindBuildScript looks for a build script by name/version
-// First checks local, then remote if not found locally
-// Returns the ScriptInfo and a boolean indicating if it was found
+// FindBuildScript looks for a build script by name/version.
+// By default, local scripts take precedence over remote.
+// When PreferRemote is true, remote scripts take precedence over local.
+// Returns the ScriptInfo and a boolean indicating if it was found.
 func FindBuildScript(nameVersion string) (ScriptInfo, bool) {
 	normalized := utils.NormalizeNameVersion(nameVersion)
 
-	// Check local first
-	localScripts, err := GetLocalBuildScripts()
-	if err == nil {
-		if info, found := localScripts[normalized]; found {
-			return info, true
+	if PreferRemote {
+		// Remote first: remote scripts take precedence over local
+		remoteScripts, err := GetRemoteBuildScripts()
+		if err == nil {
+			if info, found := remoteScripts[normalized]; found {
+				return info, true
+			}
 		}
-	}
 
-	// Check remote
-	remoteScripts, err := GetRemoteBuildScripts()
-	if err == nil {
-		if info, found := remoteScripts[normalized]; found {
-			return info, true
+		localScripts, err := GetLocalBuildScripts()
+		if err == nil {
+			if info, found := localScripts[normalized]; found {
+				return info, true
+			}
+		}
+	} else {
+		// Default: local scripts take precedence over remote
+		localScripts, err := GetLocalBuildScripts()
+		if err == nil {
+			if info, found := localScripts[normalized]; found {
+				return info, true
+			}
+		}
+
+		remoteScripts, err := GetRemoteBuildScripts()
+		if err == nil {
+			if info, found := remoteScripts[normalized]; found {
+				return info, true
+			}
 		}
 	}
 
@@ -225,9 +242,9 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 		return info.Path, nil
 	}
 
-	// Build the raw GitHub URL
+	// Build the raw URL using the configured scripts_link
 	// info.Path already contains the correct extension (.def for containers)
-	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/build-scripts/%s", config.GitHubRepo, config.Global.Branch, info.Path)
+	rawURL := fmt.Sprintf("%s/build-scripts/%s", config.Global.ScriptsLink, info.Path)
 
 	// Create HTTP client with timeout
 	client := &http.Client{

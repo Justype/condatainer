@@ -12,6 +12,7 @@ import (
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
 	execpkg "github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -110,11 +111,13 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 
 	styledOverlay := utils.StyleName(filepath.Base(targetOverlayPath))
 
-	// Check if already exists
-	if _, err := os.Stat(targetOverlayPath); err == nil {
-		utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
-			styledOverlay, utils.StylePath(targetOverlayPath))
-		return nil
+	// Check if already exists (skip only when not in update mode)
+	if !s.update {
+		if _, err := os.Stat(targetOverlayPath); err == nil {
+			utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
+				styledOverlay, utils.StylePath(targetOverlayPath))
+			return nil
+		}
 	}
 
 	buildMode := "local"
@@ -127,9 +130,14 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	utils.PrintMessage("Creating temporary overlay %s", utils.StylePath(s.tmpOverlayPath))
 	if err := s.CreateTmpOverlay(ctx, false); err != nil {
 		if errors.Is(err, ErrTmpOverlayExists) {
-			return fmt.Errorf("temporary overlay for %s already exists. Maybe a build is still running? %w", s.nameVersion, err)
+			utils.PrintWarning("Stale temporary overlay found for %s. Cleaning up...", s.nameVersion)
+			s.Cleanup(true)
+			if err := s.CreateTmpOverlay(ctx, false); err != nil {
+				return fmt.Errorf("failed to create temporary overlay: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to create temporary overlay: %w", err)
 		}
-		return fmt.Errorf("failed to create temporary overlay: %w", err)
 	}
 
 	utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleCommand(s.buildSource))
@@ -151,7 +159,7 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 			}
 
 			for _, dep := range missingDeps {
-				depObj, err := NewBuildObject(dep, false, writableImagesDir, config.GetWritableTmpDir())
+				depObj, err := NewBuildObject(ctx, dep, false, writableImagesDir, config.GetWritableTmpDir(), false)
 				if err != nil {
 					return fmt.Errorf("failed to create build object for dependency %s: %w", dep, err)
 				}
@@ -174,16 +182,25 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		version = nameVersionParts[1]
 	}
 
+	// Build resource spec: builds are always single-node/single-task.
+	// effectiveNcpus() derives CPU count from scriptSpecs (folds TasksPerNode) or defaults.
+	buildRS := &scheduler.ResourceSpec{
+		Nodes:        1,
+		TasksPerNode: 1,
+		CpusPerTask:  s.effectiveNcpus(),
+		MemPerNodeMB: s.effectiveMemMB(),
+	}
+
 	// Build environment settings (KEY=VALUE format for exec.Options.EnvSettings)
-	envSettings := []string{
+	envSettings := append(
+		scheduler.ResourceEnvVars(buildRS),
 		fmt.Sprintf("app_name=%s", name),
 		fmt.Sprintf("version=%s", version),
 		fmt.Sprintf("app_name_version=%s", s.nameVersion),
 		"tmp_dir=/ext3/tmp",
 		"TMPDIR=/ext3/tmp",
-		fmt.Sprintf("NCPUS=%d", s.ncpus),
 		"IN_CONDATAINER=1",
-	}
+	)
 
 	// Set target_dir based on ref type
 	targetDir := ""
@@ -310,6 +327,12 @@ fi
 	// This prevents the cleanup goroutine from removing tmpOverlayPath
 	// while createSquashfs has it mounted, which would cause a Bus error
 
+	// Determine final output path: write to .new when updating for atomic replacement
+	finalPath := targetOverlayPath
+	if s.update {
+		finalPath = targetOverlayPath + ".new"
+	}
+
 	// Create SquashFS
 	if s.isRef {
 		// For ref overlays: check files exist, then pack from cnt_dir
@@ -325,20 +348,20 @@ fi
 		}
 
 		utils.PrintMessage("Creating SquashFS from %s for overlay %s", utils.StylePath(s.cntDirPath), styledOverlay)
-		if err := s.createSquashfs(ctx, s.cntDirPath, targetOverlayPath); err != nil {
+		if err := s.createSquashfs(ctx, s.cntDirPath, finalPath); err != nil {
 			s.Cleanup(true)
 			return err
 		}
 	} else {
 		// For app overlays: set permissions and pack from /cnt
 		utils.PrintMessage("Preparing SquashFS from /cnt for overlay %s", styledOverlay)
-		if err := s.createSquashfs(ctx, "/cnt", targetOverlayPath); err != nil {
+		if err := s.createSquashfs(ctx, "/cnt", finalPath); err != nil {
 			s.Cleanup(true)
 			return err
 		}
 	}
 
-	// Extract and save ENV variables from build script
+	// Extract and save ENV variables from build script (always written directly to targetOverlayPath.env)
 	envDict, err := GetEnvDictFromBuildScript(s.buildSource)
 	if err != nil {
 		utils.PrintWarning("Failed to extract ENV from build script: %v", err)
@@ -348,9 +371,18 @@ fi
 		}
 	}
 
-	// Set permissions
-	if err := os.Chmod(targetOverlayPath, 0o664); err != nil {
-		utils.PrintDebug("Failed to set permissions on %s: %v", targetOverlayPath, err)
+	// Set permissions on output file
+	if err := os.Chmod(finalPath, 0o664); err != nil {
+		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
+	}
+
+	// Atomic replacement: remove old and rename .new → target
+	if s.update {
+		os.Remove(targetOverlayPath) //nolint:errcheck
+		if err := os.Rename(finalPath, targetOverlayPath); err != nil {
+			os.Remove(finalPath) //nolint:errcheck
+			return fmt.Errorf("failed to replace overlay %s: %w", targetOverlayPath, err)
+		}
 	}
 
 	utils.PrintSuccess("Finished overlay %s", utils.StylePath(targetOverlayPath))
@@ -409,7 +441,7 @@ find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
 
 echo "Packing overlay to SquashFS..."
 mksquashfs /cnt %s -processors %d -keep-as-directory %s
-`, targetPath, s.ncpus, config.Global.Build.CompressArgs)
+`, targetPath, s.effectiveNcpus(), config.Global.Build.CompressArgs)
 	} else {
 		// For ref overlays: fix permissions and pack the directory
 		if err := utils.FixPermissionsDefault(sourceDir); err != nil {
@@ -419,7 +451,7 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s
 trap 'exit 130' INT TERM
 echo "Packing overlay to SquashFS..."
 mksquashfs %s %s -processors %d -keep-as-directory %s
-`, sourceDir, targetPath, s.ncpus, config.Global.Build.CompressArgs)
+`, sourceDir, targetPath, s.effectiveNcpus(), config.Global.Build.CompressArgs)
 		packOverlays = []string{} // No need to pack with tmpOverlay for ref overlays since sourceDir is already prepared
 	}
 

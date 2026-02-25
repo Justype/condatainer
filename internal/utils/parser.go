@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+// StripInlineComment removes everything after the first '#' character (inline comment).
+// Returns the trimmed string without the comment.
+func StripInlineComment(s string) string {
+	if idx := strings.Index(s, "#"); idx >= 0 {
+		s = s[:idx]
+	}
+	return strings.TrimSpace(s)
+}
+
 // ParseSizeToMB converts strings like "10G", "500M", "1024" into Megabytes (int).
 // Default unit is MB if no suffix is provided.
 func ParseSizeToMB(sizeStr string) (int, error) {
@@ -109,10 +118,30 @@ func ParseDuration(s string) (time.Duration, error) {
 	return dur, nil
 }
 
+// GetWhatIsFromScript reads a script and extracts the first #WHATIS: line.
+// Returns the trimmed description string, or empty string if not found.
+func GetWhatIsFromScript(scriptPath string) string {
+	file, err := os.Open(scriptPath)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#WHATIS:") {
+			return strings.TrimSpace(line[len("#WHATIS:"):])
+		}
+	}
+	return ""
+}
+
 // GetDependenciesFromScript parses a build script and extracts dependencies
-// from #DEP: comments and module load commands.
+// from #DEP: comments and, optionally, module load / ml commands.
+// Set parseModuleLoad=true to also parse "module load" and "ml" lines.
 // Returns a list of normalized dependency names with duplicates removed.
-func GetDependenciesFromScript(scriptPath string) ([]string, error) {
+func GetDependenciesFromScript(scriptPath string, parseModuleLoad bool) ([]string, error) {
 	if !FileExists(scriptPath) {
 		return nil, fmt.Errorf("build script not found at %s", scriptPath)
 	}
@@ -126,7 +155,10 @@ func GetDependenciesFromScript(scriptPath string) ([]string, error) {
 	dependencies := []string{}
 	seen := make(map[string]bool)
 
-	moduleLoadRegex := regexp.MustCompile(`^\s*(module\s+load)\s+(.+)$`)
+	var moduleLoadRegex *regexp.Regexp
+	if parseModuleLoad {
+		moduleLoadRegex = regexp.MustCompile(`^\s*(module\s+load)\s+(.+)$`)
+	}
 	scanner := bufio.NewScanner(file)
 
 	for scanner.Scan() {
@@ -134,7 +166,7 @@ func GetDependenciesFromScript(scriptPath string) ([]string, error) {
 
 		// Check for #DEP: comments
 		if strings.HasPrefix(line, "#DEP:") {
-			depLine := strings.TrimSpace(line[5:])
+			depLine := StripInlineComment(line[5:])
 			if depLine != "" {
 				if IsOverlay(depLine) {
 					if !seen[depLine] {
@@ -152,35 +184,37 @@ func GetDependenciesFromScript(scriptPath string) ([]string, error) {
 			continue
 		}
 
-		// Check for module load commands
-		line = strings.TrimSpace(line)
-		if matches := moduleLoadRegex.FindStringSubmatch(line); matches != nil {
-			parts := strings.Fields(line)
-			if len(parts) >= 3 {
-				for _, mod := range parts[2:] {
-					normalized := NormalizeNameVersion(mod)
-					if !seen[normalized] {
-						dependencies = append(dependencies, normalized)
-						seen[normalized] = true
+		// Check for module load commands (only when enabled)
+		if parseModuleLoad {
+			line = strings.TrimSpace(line)
+			if matches := moduleLoadRegex.FindStringSubmatch(line); matches != nil {
+				parts := strings.Fields(line)
+				if len(parts) >= 3 {
+					for _, mod := range parts[2:] {
+						normalized := NormalizeNameVersion(mod)
+						if !seen[normalized] {
+							dependencies = append(dependencies, normalized)
+							seen[normalized] = true
+						}
 					}
 				}
-			}
-		} else if strings.HasPrefix(line, "ml") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				for _, mod := range parts[1:] {
-					// Skip ml subcommands that indicate no package names follow
-					if mod == "purge" || mod == "list" || mod == "avail" || mod == "av" {
-						break
-					}
-					// "ml load foo" may include the literal "load"; skip it and continue
-					if mod == "load" {
-						continue
-					}
-					normalized := NormalizeNameVersion(mod)
-					if !seen[normalized] {
-						dependencies = append(dependencies, normalized)
-						seen[normalized] = true
+			} else if strings.HasPrefix(line, "ml") {
+				parts := strings.Fields(line)
+				if len(parts) >= 2 {
+					for _, mod := range parts[1:] {
+						// Skip ml subcommands that indicate no package names follow
+						if mod == "purge" || mod == "list" || mod == "avail" || mod == "av" {
+							break
+						}
+						// "ml load foo" may include the literal "load"; skip it and continue
+						if mod == "load" {
+							continue
+						}
+						normalized := NormalizeNameVersion(mod)
+						if !seen[normalized] {
+							dependencies = append(dependencies, normalized)
+							seen[normalized] = true
+						}
 					}
 				}
 			}

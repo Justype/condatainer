@@ -43,7 +43,9 @@ Run the following command to check if a supported scheduler is available:
 condatainer scheduler
 ```
 
-Currently only **SLURM** is supported. PBS support is planned for future releases.
+```{note}
+Slurm is fully tested. Other schedulers are experimentally supported. Please report any issues you encounter.
+```
 
 ## SSH Port Forwarding
 
@@ -124,7 +126,7 @@ The script will do the following steps for you:
 3. If not,
    1. Check port and overlay integrity.
    2. Install R version overlay if needed.
-   3. Submit the SLURM job to start `rstudio-server`.
+   3. Submit the scheduler job to start `rstudio-server`.
    4. When the job starts, record and set up SSH port forwarding.
 
 ```
@@ -210,7 +212,7 @@ If `*.Rproj` file does not exist in the current working directory, **CondaTainer
 - A `*.Rproj` file with default settings.
 - A `.Rprofile` file to set up Posit Public Package Manager (P3M) CRAN and Bioconductor repositories.
 
-See [Rprofile](https://github.com/Justype/condatainer/blob/main/helpers/slurm/.Rprofile) for more details. At the end, it will call `.set_repository_options()` for you. So you can directly download binary packages from P3M.
+See [Rprofile](https://github.com/Justype/cnt-scripts/blob/main/helpers/slurm/.Rprofile) for more details. At the end, it will call `.set_repository_options()` for you. So you can directly download binary packages from P3M.
 
 If `*.Rproj` file already exists, `.Rprofile` will not be created or modified. You need to set up the repositories yourself if needed.
 
@@ -257,8 +259,6 @@ condatainer exec -o r4.4.3 -o build-essential -o env.img Rscript your_script.R
 # If you created additional overlay `r-deps.sqf`:
 condatainer exec -o r4.4.3 -o build-essential -o r-deps.sqf -o env.img Rscript your_script.R
 ```
-
-[How to pull Posit R Docker Images](../advanced_usage/custom_os.md#example-pulling-posit-r-docker-image)
 
 ## Using GPU
 

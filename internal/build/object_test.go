@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,13 +28,12 @@ func TestParseScriptMetadata_RequiresTTY(t *testing.T) {
 	base := &BaseBuildObject{
 		nameVersion:       "foo/bar",
 		buildSource:       tmp.Name(),
-		ncpus:             1,
 		cntDirPath:        "",
 		tmpOverlayPath:    "",
 		targetOverlayPath: "",
 	}
 
-	err = base.parseScriptMetadata()
+	err = base.parseScriptMetadata(context.Background())
 	if err == nil {
 		t.Fatalf("expected error when interactive prompts are present but no TTY is available")
 	}
@@ -56,13 +56,12 @@ func TestParseScriptMetadata_NoInteractive(t *testing.T) {
 	base := &BaseBuildObject{
 		nameVersion:       "foo/bar",
 		buildSource:       tmp.Name(),
-		ncpus:             1,
 		cntDirPath:        "",
 		tmpOverlayPath:    "",
 		targetOverlayPath: "",
 	}
 
-	err = base.parseScriptMetadata()
+	err = base.parseScriptMetadata(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -88,18 +87,17 @@ func TestParseScriptMetadata_NcpusFromSlurm(t *testing.T) {
 	base := &BaseBuildObject{
 		nameVersion:       "foo/bar",
 		buildSource:       tmp.Name(),
-		ncpus:             1, // default value
 		cntDirPath:        "",
 		tmpOverlayPath:    "",
 		targetOverlayPath: "",
 	}
 
-	err = base.parseScriptMetadata()
+	err = base.parseScriptMetadata(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if base.ncpus != 8 {
-		t.Fatalf("expected ncpus=8 from SLURM directive, got %d", base.ncpus)
+	if base.effectiveNcpus() != 8 {
+		t.Fatalf("expected effectiveNcpus=8 from SLURM directive, got %d", base.effectiveNcpus())
 	}
 }
 
@@ -120,18 +118,17 @@ func TestParseScriptMetadata_NcpusFromPBS(t *testing.T) {
 	base := &BaseBuildObject{
 		nameVersion:       "foo/bar",
 		buildSource:       tmp.Name(),
-		ncpus:             1, // default value
 		cntDirPath:        "",
 		tmpOverlayPath:    "",
 		targetOverlayPath: "",
 	}
 
-	err = base.parseScriptMetadata()
+	err = base.parseScriptMetadata(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if base.ncpus != 16 {
-		t.Fatalf("expected ncpus=16 from PBS directive, got %d", base.ncpus)
+	if base.effectiveNcpus() != 16 {
+		t.Fatalf("expected effectiveNcpus=16 from PBS directive, got %d", base.effectiveNcpus())
 	}
 }
 
@@ -142,10 +139,10 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenInstalled(t *testing.T) {
 	// Create a temporary base dir and add it to extra base dirs so it is searched first
 	baseDir := t.TempDir()
 	defer os.RemoveAll(baseDir)
-	if err := os.Setenv("CONDATAINER_EXTRA_BASE_DIRS", baseDir); err != nil {
+	if err := os.Setenv("CNT_EXTRA_BASE_DIRS", baseDir); err != nil {
 		t.Fatalf("failed to set env: %v", err)
 	}
-	defer os.Unsetenv("CONDATAINER_EXTRA_BASE_DIRS")
+	defer os.Unsetenv("CNT_EXTRA_BASE_DIRS")
 
 	// Create a build-scripts entry with an INTERACTIVE prompt to trigger parsing if it were called
 	scriptsDir := filepath.Join(baseDir, "build-scripts")
@@ -170,7 +167,7 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenInstalled(t *testing.T) {
 	config.InitDataPaths()
 
 	// Call NewBuildObject: should return without attempting to parse the interactive script
-	bo, err := NewBuildObject(nameVersion, false, imagesDir, tmpDir)
+	bo, err := NewBuildObject(context.Background(), nameVersion, false, imagesDir, tmpDir, false)
 	if err != nil {
 		t.Fatalf("NewBuildObject returned error: %v", err)
 	}
@@ -186,10 +183,10 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenTmpOverlayExists(t *testing.T
 	// Create a temporary base dir and add it to extra base dirs so it is searched first
 	baseDir := t.TempDir()
 	defer os.RemoveAll(baseDir)
-	if err := os.Setenv("CONDATAINER_EXTRA_BASE_DIRS", baseDir); err != nil {
+	if err := os.Setenv("CNT_EXTRA_BASE_DIRS", baseDir); err != nil {
 		t.Fatalf("failed to set env: %v", err)
 	}
-	defer os.Unsetenv("CONDATAINER_EXTRA_BASE_DIRS")
+	defer os.Unsetenv("CNT_EXTRA_BASE_DIRS")
 
 	// Create a build-scripts entry with an INTERACTIVE prompt to trigger parsing if it were called
 	scriptsDir := filepath.Join(baseDir, "build-scripts")
@@ -215,7 +212,7 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenTmpOverlayExists(t *testing.T
 	config.InitDataPaths()
 
 	// Call NewBuildObject: should return without attempting to parse the interactive script
-	bo, err := NewBuildObject(nameVersion, false, imagesDir, tmpDir)
+	bo, err := NewBuildObject(context.Background(), nameVersion, false, imagesDir, tmpDir, false)
 	if err != nil {
 		t.Fatalf("NewBuildObject returned error: %v", err)
 	}

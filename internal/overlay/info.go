@@ -43,6 +43,7 @@ func GetStats(path string) (*Stats, error) {
 
 	// tune2fs -l lists the superblock info
 	cmd := exec.Command("tune2fs", "-l", path)
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LC_TIME=C")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, &Error{Op: "read stats", Path: path, Tool: "tune2fs", BaseErr: err}

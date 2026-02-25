@@ -32,8 +32,8 @@ func TestLsfCreateScriptUsesOutputDir(t *testing.T) {
 		Name:    "lsftest/job",
 		Command: "echo 'hello'",
 		Specs: &ScriptSpecs{
-			RawFlags: []string{},
-			Ncpus:    1,
+			RemainingFlags: []string{},
+			Spec:           &ResourceSpec{CpusPerTask: 1},
 		},
 	}
 
@@ -50,6 +50,10 @@ func TestLsfCreateScriptUsesOutputDir(t *testing.T) {
 	}
 	if !strings.Contains(string(content), fmt.Sprintf("-o %s", logPath)) {
 		t.Errorf("Generated script does not contain expected output path %s\nScript:\n%s", logPath, string(content))
+	}
+	// Verify single-node enforcement via span
+	if !strings.Contains(string(content), `span[hosts=1]`) {
+		t.Errorf("Generated script does not contain span[hosts=1]\nScript:\n%s", string(content))
 	}
 }
 
@@ -145,17 +149,17 @@ func TestLsfEmailParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
-			if specs.EmailOnBegin != tt.wantBegin {
-				t.Errorf("EmailOnBegin = %v; want %v", specs.EmailOnBegin, tt.wantBegin)
+			if specs.Control.EmailOnBegin != tt.wantBegin {
+				t.Errorf("EmailOnBegin = %v; want %v", specs.Control.EmailOnBegin, tt.wantBegin)
 			}
-			if specs.EmailOnEnd != tt.wantEnd {
-				t.Errorf("EmailOnEnd = %v; want %v", specs.EmailOnEnd, tt.wantEnd)
+			if specs.Control.EmailOnEnd != tt.wantEnd {
+				t.Errorf("EmailOnEnd = %v; want %v", specs.Control.EmailOnEnd, tt.wantEnd)
 			}
-			if specs.EmailOnFail != tt.wantFail {
-				t.Errorf("EmailOnFail = %v; want %v", specs.EmailOnFail, tt.wantFail)
+			if specs.Control.EmailOnFail != tt.wantFail {
+				t.Errorf("EmailOnFail = %v; want %v", specs.Control.EmailOnFail, tt.wantFail)
 			}
-			if specs.MailUser != tt.wantMailUser {
-				t.Errorf("MailUser = %q; want %q", specs.MailUser, tt.wantMailUser)
+			if specs.Control.MailUser != tt.wantMailUser {
+				t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, tt.wantMailUser)
 			}
 		})
 	}
@@ -216,14 +220,18 @@ func TestLsfEmailScriptGeneration(t *testing.T) {
 				Name:    "test_job",
 				Command: "echo 'test'",
 				Specs: &ScriptSpecs{
-					JobName:      "test_job",
-					Ncpus:        4,
-					MemMB:        8000,
-					Time:         time.Hour,
-					EmailOnBegin: tt.emailOnBegin,
-					EmailOnEnd:   tt.emailOnEnd,
-					MailUser:     tt.mailUser,
-					RawFlags:     []string{},
+					Control: RuntimeConfig{
+						JobName:      "test_job",
+						EmailOnBegin: tt.emailOnBegin,
+						EmailOnEnd:   tt.emailOnEnd,
+						MailUser:     tt.mailUser,
+					},
+					Spec: &ResourceSpec{
+						CpusPerTask:  4,
+						MemPerNodeMB: 8000,
+						Time:         time.Hour,
+					},
+					RemainingFlags: []string{},
 				},
 			}
 
@@ -303,18 +311,21 @@ echo "Running job"
 	}
 
 	// Verify parsing
-	if !specs.EmailOnBegin || !specs.EmailOnEnd {
+	if !specs.Control.EmailOnBegin || !specs.Control.EmailOnEnd {
 		t.Errorf("Parsing failed: EmailOnBegin=%v, EmailOnEnd=%v",
-			specs.EmailOnBegin, specs.EmailOnEnd)
+			specs.Control.EmailOnBegin, specs.Control.EmailOnEnd)
 	}
-	if specs.MailUser != "roundtrip@example.com" {
-		t.Errorf("MailUser = %q; want %q", specs.MailUser, "roundtrip@example.com")
+	if specs.Control.MailUser != "roundtrip@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, "roundtrip@example.com")
 	}
-	if specs.Time != 2*time.Hour {
-		t.Errorf("Time = %v; want 2h", specs.Time)
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil; want non-nil")
 	}
-	if specs.Ncpus != 8 {
-		t.Errorf("Ncpus = %d; want 8", specs.Ncpus)
+	if specs.Spec.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
+	}
+	if specs.Spec.CpusPerTask != 8 {
+		t.Errorf("CpusPerTask = %d; want 8", specs.Spec.CpusPerTask)
 	}
 
 	// Generate a new script from the parsed specs
@@ -397,7 +408,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#BSUB -W 04:00",
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 			wantTime:  4 * time.Hour,
 		},
 		{
@@ -416,7 +427,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				`#BSUB -gpu "num=4"`,
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 			wantGpu:   &GpuSpec{Type: "gpu", Count: 4},
 		},
 		{
@@ -463,7 +474,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#BSUB -M 4096MB",
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 			wantMemMB: 4096,
 		},
 		{
@@ -472,7 +483,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#BSUB -M 8GB",
 			},
-			wantNcpus: 4, // default
+			wantNcpus: 2, // default
 			wantMemMB: 8 * 1024,
 		},
 	}
@@ -492,82 +503,30 @@ func TestLsfResourceParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
-			if specs.Ncpus != tt.wantNcpus {
-				t.Errorf("Ncpus = %d; want %d", specs.Ncpus, tt.wantNcpus)
+			if specs.Spec == nil {
+				t.Fatal("Spec is nil; want non-nil")
 			}
-			if tt.wantMemMB > 0 && specs.MemMB != tt.wantMemMB {
-				t.Errorf("MemMB = %d; want %d", specs.MemMB, tt.wantMemMB)
+			if specs.Spec.CpusPerTask != tt.wantNcpus {
+				t.Errorf("CpusPerTask = %d; want %d", specs.Spec.CpusPerTask, tt.wantNcpus)
 			}
-			if tt.wantTime > 0 && specs.Time != tt.wantTime {
-				t.Errorf("Time = %v; want %v", specs.Time, tt.wantTime)
+			if tt.wantMemMB > 0 && specs.Spec.MemPerNodeMB != tt.wantMemMB {
+				t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, tt.wantMemMB)
+			}
+			if tt.wantTime > 0 && specs.Spec.Time != tt.wantTime {
+				t.Errorf("Time = %v; want %v", specs.Spec.Time, tt.wantTime)
 			}
 			if tt.wantGpu != nil {
-				if specs.Gpu == nil {
+				if specs.Spec.Gpu == nil {
 					t.Fatal("Gpu is nil; want non-nil")
 				}
-				if specs.Gpu.Type != tt.wantGpu.Type {
-					t.Errorf("Gpu.Type = %q; want %q", specs.Gpu.Type, tt.wantGpu.Type)
+				if specs.Spec.Gpu.Type != tt.wantGpu.Type {
+					t.Errorf("Gpu.Type = %q; want %q", specs.Spec.Gpu.Type, tt.wantGpu.Type)
 				}
-				if specs.Gpu.Count != tt.wantGpu.Count {
-					t.Errorf("Gpu.Count = %d; want %d", specs.Gpu.Count, tt.wantGpu.Count)
+				if specs.Spec.Gpu.Count != tt.wantGpu.Count {
+					t.Errorf("Gpu.Count = %d; want %d", specs.Spec.Gpu.Count, tt.wantGpu.Count)
 				}
-			} else if specs.Gpu != nil {
-				t.Errorf("Gpu = %+v; want nil", specs.Gpu)
-			}
-		})
-	}
-}
-
-func TestLsfTimeParsing(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		wantDur time.Duration
-		wantErr bool
-	}{
-		{
-			name:    "HH:MM",
-			input:   "02:30",
-			wantDur: 2*time.Hour + 30*time.Minute,
-		},
-		{
-			name:    "minutes only",
-			input:   "90",
-			wantDur: 90 * time.Minute,
-		},
-		{
-			name:    "HH:MM:SS",
-			input:   "01:30:45",
-			wantDur: time.Hour + 30*time.Minute + 45*time.Second,
-		},
-		{
-			name:    "empty string",
-			input:   "",
-			wantDur: 0,
-		},
-		{
-			name:    "large walltime",
-			input:   "168:00",
-			wantDur: 168 * time.Hour,
-		},
-		{
-			name:    "zero",
-			input:   "00:00",
-			wantDur: 0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dur, err := parseLsfTime(tt.input)
-			if tt.wantErr && err == nil {
-				t.Error("Expected error, got nil")
-			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
-			if dur != tt.wantDur {
-				t.Errorf("parseLsfTime(%q) = %v; want %v", tt.input, dur, tt.wantDur)
+			} else if specs.Spec.Gpu != nil {
+				t.Errorf("Gpu = %+v; want nil", specs.Spec.Gpu)
 			}
 		})
 	}
@@ -745,23 +704,400 @@ func TestLsfRusageParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
-			if tt.wantMemMB > 0 && specs.MemMB != tt.wantMemMB {
-				t.Errorf("MemMB = %d; want %d", specs.MemMB, tt.wantMemMB)
+			if specs.Spec == nil {
+				t.Fatal("Spec is nil; want non-nil")
+			}
+			if tt.wantMemMB > 0 && specs.Spec.MemPerNodeMB != tt.wantMemMB {
+				t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, tt.wantMemMB)
 			}
 			if tt.wantGpu != nil {
-				if specs.Gpu == nil {
+				if specs.Spec.Gpu == nil {
 					t.Fatal("Gpu is nil; want non-nil")
 				}
-				if specs.Gpu.Type != tt.wantGpu.Type {
-					t.Errorf("Gpu.Type = %q; want %q", specs.Gpu.Type, tt.wantGpu.Type)
+				if specs.Spec.Gpu.Type != tt.wantGpu.Type {
+					t.Errorf("Gpu.Type = %q; want %q", specs.Spec.Gpu.Type, tt.wantGpu.Type)
 				}
-				if specs.Gpu.Count != tt.wantGpu.Count {
-					t.Errorf("Gpu.Count = %d; want %d", specs.Gpu.Count, tt.wantGpu.Count)
+				if specs.Spec.Gpu.Count != tt.wantGpu.Count {
+					t.Errorf("Gpu.Count = %d; want %d", specs.Spec.Gpu.Count, tt.wantGpu.Count)
 				}
-			} else if specs.Gpu != nil {
-				t.Errorf("Gpu = %+v; want nil", specs.Gpu)
+			} else if specs.Spec.Gpu != nil {
+				t.Errorf("Gpu = %+v; want nil", specs.Spec.Gpu)
 			}
 		})
+	}
+}
+
+func TestLsfSpanHostsParsing(t *testing.T) {
+	tests := []struct {
+		name      string
+		lines     []string
+		wantNodes int
+	}{
+		{
+			name: "span hosts=2 with rusage",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 8",
+				`#BSUB -R "span[hosts=2] rusage[mem=8192]"`,
+			},
+			wantNodes: 2,
+		},
+		{
+			name: "span hosts=1",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 4",
+				`#BSUB -R "span[hosts=1]"`,
+			},
+			wantNodes: 1,
+		},
+		{
+			name: "no span directive",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 16",
+				`#BSUB -R "rusage[mem=4096]"`,
+			},
+			wantNodes: 1, // default
+		},
+		{
+			name: "span hosts=4 on separate line",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 32",
+				`#BSUB -R "span[hosts=4]"`,
+				`#BSUB -R "rusage[mem=16384]"`,
+			},
+			wantNodes: 4,
+		},
+		{
+			name: "no resource directives at all",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -J testjob",
+			},
+			wantNodes: 1, // default
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			scriptPath := filepath.Join(tmpDir, "test.sh")
+			content := strings.Join(tt.lines, "\n")
+			if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
+				t.Fatalf("Failed to create test script: %v", err)
+			}
+
+			lsf := newTestLsfScheduler()
+			specs, err := lsf.ReadScriptSpecs(scriptPath)
+			if err != nil {
+				t.Fatalf("Failed to parse script: %v", err)
+			}
+
+			if specs.Spec == nil {
+				t.Fatal("Spec is nil; want non-nil")
+			}
+			if specs.Spec.Nodes != tt.wantNodes {
+				t.Errorf("Nodes = %d; want %d", specs.Spec.Nodes, tt.wantNodes)
+			}
+			// TasksPerNode should always be 1 (default) for LSF
+			if specs.Spec.TasksPerNode != 1 {
+				t.Errorf("TasksPerNode = %d; want 1", specs.Spec.TasksPerNode)
+			}
+		})
+	}
+}
+
+func TestLsfScriptGenerationNodesCpus(t *testing.T) {
+	tests := []struct {
+		name         string
+		specs        *ScriptSpecs
+		wantSpanHost string // expected span[hosts=N]
+		wantNcpus    string // expected -n N
+	}{
+		{
+			name: "default single node",
+			specs: &ScriptSpecs{
+				Spec:           &ResourceSpec{CpusPerTask: 4},
+				RemainingFlags: []string{},
+			},
+			wantSpanHost: `span[hosts=1]`,
+			wantNcpus:    "#BSUB -n 4",
+		},
+		{
+			name: "multi-node",
+			specs: &ScriptSpecs{
+				Spec:           &ResourceSpec{CpusPerTask: 8, Nodes: 2},
+				RemainingFlags: []string{},
+			},
+			wantSpanHost: `span[hosts=2]`,
+			wantNcpus:    "#BSUB -n 8",
+		},
+		{
+			name: "raw span no longer in RawFlags - only rusage preserved",
+			specs: &ScriptSpecs{
+				Spec:           &ResourceSpec{CpusPerTask: 16, Nodes: 3},
+				RemainingFlags: []string{`-R "rusage[mem=4096]"`}, // span parsed out, only rusage remains
+			},
+			wantSpanHost: `span[hosts=3]`,
+			wantNcpus:    "#BSUB -n 16",
+		},
+		{
+			name: "raw -n no longer in RawFlags - comes from Ncpus field",
+			specs: &ScriptSpecs{
+				Spec:           &ResourceSpec{CpusPerTask: 8, Nodes: 1},
+				RemainingFlags: []string{}, // -n not in RawFlags, comes from Ncpus
+			},
+			wantSpanHost: `span[hosts=1]`,
+			wantNcpus:    "#BSUB -n 8",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			lsf := newTestLsfScheduler()
+
+			jobSpec := &JobSpec{
+				Name:    "test_job",
+				Command: "echo 'test'",
+				Specs:   tt.specs,
+			}
+
+			scriptPath, err := lsf.CreateScriptWithSpec(jobSpec, tmpDir)
+			if err != nil {
+				t.Fatalf("Failed to create script: %v", err)
+			}
+
+			content, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatalf("Failed to read generated script: %v", err)
+			}
+			scriptContent := string(content)
+
+			// Check span directive
+			if !strings.Contains(scriptContent, tt.wantSpanHost) {
+				t.Errorf("Script missing expected span: %q\nScript:\n%s", tt.wantSpanHost, scriptContent)
+			}
+
+			// Check -n directive
+			if !strings.Contains(scriptContent, tt.wantNcpus) {
+				t.Errorf("Script missing expected -n: %q\nScript:\n%s", tt.wantNcpus, scriptContent)
+			}
+
+			// Verify no duplicate span directives
+			spanCount := strings.Count(scriptContent, "span[hosts=")
+			if spanCount != 1 {
+				t.Errorf("span[hosts=] appears %d times; want 1\nScript:\n%s", spanCount, scriptContent)
+			}
+
+			// Verify no duplicate -n directives
+			nCount := strings.Count(scriptContent, "#BSUB -n ")
+			if nCount != 1 {
+				t.Errorf("#BSUB -n appears %d times; want 1\nScript:\n%s", nCount, scriptContent)
+			}
+		})
+	}
+}
+
+func TestLsfScriptPreservesRusageWithSpan(t *testing.T) {
+	tmpDir := t.TempDir()
+	lsf := newTestLsfScheduler()
+
+	jobSpec := &JobSpec{
+		Name:    "test_job",
+		Command: "echo 'test'",
+		Specs: &ScriptSpecs{
+			Spec:           &ResourceSpec{CpusPerTask: 8, Nodes: 2, MemPerNodeMB: 4},
+			RemainingFlags: []string{`-R "span[hosts=2] rusage[mem=4096]"`},
+		},
+	}
+
+	scriptPath, err := lsf.CreateScriptWithSpec(jobSpec, tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to create script: %v", err)
+	}
+
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("Failed to read script: %v", err)
+	}
+	scriptContent := string(content)
+
+	// Rusage should be preserved (span stripped, rusage kept)
+	if !strings.Contains(scriptContent, "rusage[mem=4096]") {
+		t.Errorf("Script should preserve rusage after stripping span\nScript:\n%s", scriptContent)
+	}
+
+	// Span should be regenerated
+	if !strings.Contains(scriptContent, `span[hosts=2]`) {
+		t.Errorf("Script should contain regenerated span[hosts=2]\nScript:\n%s", scriptContent)
+	}
+}
+
+func TestLsfNodeTaskRoundTrip(t *testing.T) {
+	lsf := newTestLsfScheduler()
+
+	// Create a script with span and -n directives
+	lines := []string{
+		"#!/bin/bash",
+		"#BSUB -J roundtrip_test",
+		"#BSUB -n 8",
+		`#BSUB -R "span[hosts=2]"`,
+		"#BSUB -W 02:00",
+		"echo hello",
+	}
+	tmpFile := filepath.Join(t.TempDir(), "input.sh")
+	os.WriteFile(tmpFile, []byte(strings.Join(lines, "\n")), 0644)
+
+	// Parse
+	specs, err := lsf.ReadScriptSpecs(tmpFile)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil; want non-nil")
+	}
+	if specs.Spec.Nodes != 2 {
+		t.Fatalf("parse Nodes = %d; want 2", specs.Spec.Nodes)
+	}
+	if specs.Spec.CpusPerTask != 8 {
+		t.Fatalf("parse CpusPerTask = %d; want 8", specs.Spec.CpusPerTask)
+	}
+
+	// Generate
+	outputDir := t.TempDir()
+	jobSpec := &JobSpec{
+		Name:    "roundtrip_test",
+		Command: "echo hello",
+		Specs:   specs,
+	}
+	scriptPath, err := lsf.CreateScriptWithSpec(jobSpec, outputDir)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	// Re-parse generated script
+	specs2, err := lsf.ReadScriptSpecs(scriptPath)
+	if err != nil {
+		t.Fatalf("re-parse failed: %v", err)
+	}
+	if specs2.Spec == nil {
+		t.Fatal("specs2.Spec is nil; want non-nil")
+	}
+	if specs2.Spec.Nodes != 2 {
+		t.Errorf("round-trip Nodes = %d; want 2", specs2.Spec.Nodes)
+	}
+	if specs2.Spec.CpusPerTask != 8 {
+		t.Errorf("round-trip CpusPerTask = %d; want 8", specs2.Spec.CpusPerTask)
+	}
+
+	// Check no duplicates in generated script
+	content, _ := os.ReadFile(scriptPath)
+	script := string(content)
+	if strings.Count(script, "span[hosts=") != 1 {
+		t.Error("span[hosts=] should appear exactly once")
+	}
+	if strings.Count(script, "#BSUB -n ") != 1 {
+		t.Error("#BSUB -n should appear exactly once")
+	}
+}
+
+func TestLsfIsAvailable(t *testing.T) {
+	t.Run("not in job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		lsf := newTestLsfScheduler()
+		if !lsf.IsAvailable() {
+			t.Error("Expected IsAvailable to return true when not in a job")
+		}
+	})
+
+	t.Run("inside job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("LSB_JOBID", "99999")
+		lsf := newTestLsfScheduler()
+		if lsf.IsAvailable() {
+			t.Error("Expected IsAvailable to return false when inside a job")
+		}
+	})
+
+	t.Run("no binary", func(t *testing.T) {
+		clearJobEnvVars(t)
+		lsf := &LsfScheduler{}
+		if lsf.IsAvailable() {
+			t.Error("Expected IsAvailable to return false when no binary is set")
+		}
+	})
+}
+
+func TestLsfGetInfo(t *testing.T) {
+	clearJobEnvVars(t)
+	lsf := newTestLsfScheduler()
+
+	info := lsf.GetInfo()
+	if info.Type != "LSF" {
+		t.Errorf("Type = %q; want %q", info.Type, "LSF")
+	}
+	if info.Binary != "/usr/bin/bsub" {
+		t.Errorf("Binary = %q; want %q", info.Binary, "/usr/bin/bsub")
+	}
+	if info.InJob {
+		t.Error("InJob should be false")
+	}
+	if !info.Available {
+		t.Error("Available should be true")
+	}
+}
+
+func TestTryParseLsfScript(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	script := `#!/bin/bash
+#BSUB -J testjob
+#BSUB -n 4
+#BSUB -M 8GB
+#BSUB -W 02:00
+#BSUB -B
+#BSUB -N
+#BSUB -u user@example.com
+
+echo "Running job"
+`
+	scriptPath := filepath.Join(tmpDir, "test.sh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+		t.Fatalf("Failed to create test script: %v", err)
+	}
+
+	specs, err := TryParseLsfScript(scriptPath)
+	if err != nil {
+		t.Fatalf("TryParseLsfScript failed: %v", err)
+	}
+
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil; want non-nil")
+	}
+	if specs.Spec.CpusPerTask != 4 {
+		t.Errorf("CpusPerTask = %d; want 4", specs.Spec.CpusPerTask)
+	}
+	if specs.Spec.MemPerNodeMB != 8*1024 {
+		t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, 8*1024)
+	}
+	if specs.Spec.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
+	}
+	if !specs.Control.EmailOnBegin {
+		t.Error("EmailOnBegin should be true")
+	}
+	if !specs.Control.EmailOnEnd {
+		t.Error("EmailOnEnd should be true")
+	}
+	if specs.Control.MailUser != "user@example.com" {
+		t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, "user@example.com")
+	}
+	// RemainingFlags should be empty - all flags above are recognized and parsed into typed fields
+	if len(specs.RemainingFlags) != 0 {
+		t.Errorf("RemainingFlags count = %d; want 0 (all flags were recognized)", len(specs.RemainingFlags))
 	}
 }
 
@@ -786,14 +1122,14 @@ func TestLsfGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ncpus == nil || *res.Ncpus != 32 {
-			t.Errorf("Ncpus = %v; want 32", res.Ncpus)
+		if res.CpusPerTask != 32 {
+			t.Errorf("CpusPerTask = %d; want 32", res.CpusPerTask)
 		}
-		if res.MemMB == nil || *res.MemMB != 8192 {
-			t.Errorf("MemMB = %v; want 8192", res.MemMB)
+		if res.MemPerNodeMB != 8192 {
+			t.Errorf("MemPerNodeMB = %d; want 8192", res.MemPerNodeMB)
 		}
-		if res.Ngpus == nil || *res.Ngpus != 1 {
-			t.Errorf("Ngpus = %v; want 1", res.Ngpus)
+		if res.Gpu == nil || res.Gpu.Count != 1 {
+			t.Errorf("Gpu.Count = %v; want 1", res.Gpu)
 		}
 	})
 
@@ -806,8 +1142,46 @@ func TestLsfGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.Ncpus == nil || *res.Ncpus != 64 {
-			t.Errorf("Ncpus = %v; want 64", res.Ncpus)
+		if res.CpusPerTask != 64 {
+			t.Errorf("CpusPerTask = %d; want 64", res.CpusPerTask)
+		}
+	})
+
+	t.Run("partial data", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("LSB_JOBID", "99999")
+		t.Setenv("LSB_DJOB_NUMPROC", "4")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.CpusPerTask != 4 {
+			t.Errorf("CpusPerTask = %d; want 4", res.CpusPerTask)
+		}
+		if res.MemPerNodeMB != 0 {
+			t.Errorf("MemPerNodeMB should be 0 (not set), got %d", res.MemPerNodeMB)
+		}
+		if res.Gpu != nil {
+			t.Errorf("Gpu should be nil, got %+v", res.Gpu)
+		}
+	})
+
+	t.Run("invalid values", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("LSB_JOBID", "99999")
+		t.Setenv("LSB_DJOB_NUMPROC", "not-a-number")
+		t.Setenv("LSB_MAX_MEM_RUSAGE", "-100")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.CpusPerTask != 0 {
+			t.Errorf("CpusPerTask should be 0 for invalid value, got %d", res.CpusPerTask)
+		}
+		if res.MemPerNodeMB != 0 {
+			t.Errorf("MemPerNodeMB should be 0 for negative value, got %d", res.MemPerNodeMB)
 		}
 	})
 }

@@ -124,7 +124,7 @@ func TestFindCompatibleGpu(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			options, err := FindCompatibleGpu(tt.requestedGpu, clusterInfo)
+			options, err := FindCompatibleGpu(tt.requestedGpu, 1, clusterInfo)
 			if err != nil {
 				t.Fatalf("FindCompatibleGpu() error = %v", err)
 			}
@@ -183,7 +183,7 @@ func TestConvertGpuSpec(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ConvertGpuSpec(tt.requestedGpu, clusterInfo)
+			result, err := ConvertGpuSpec(tt.requestedGpu, 1, clusterInfo)
 
 			if tt.wantError {
 				if err == nil {
@@ -262,7 +262,7 @@ func TestCrossGpuTypeConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test FindCompatibleGpu
-			options, err := FindCompatibleGpu(tt.requestedGpu, tt.clusterInfo)
+			options, err := FindCompatibleGpu(tt.requestedGpu, 1, tt.clusterInfo)
 			if err != nil {
 				t.Fatalf("FindCompatibleGpu() error = %v", err)
 			}
@@ -285,7 +285,7 @@ func TestCrossGpuTypeConversion(t *testing.T) {
 			}
 
 			// Test ConvertGpuSpec
-			result, err := ConvertGpuSpec(tt.requestedGpu, tt.clusterInfo)
+			result, err := ConvertGpuSpec(tt.requestedGpu, 1, tt.clusterInfo)
 
 			if tt.wantError {
 				if err == nil {
@@ -346,7 +346,7 @@ func TestConvertGpuSpecOriginal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ConvertGpuSpec(tt.requestedGpu, clusterInfo)
+			result, err := ConvertGpuSpec(tt.requestedGpu, 1, clusterInfo)
 
 			if tt.wantError {
 				if err == nil {
@@ -407,7 +407,7 @@ func TestValidateGpuAvailability(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateGpuAvailability(tt.requestedGpu, clusterInfo)
+			err := ValidateGpuAvailability(tt.requestedGpu, 1, clusterInfo)
 
 			if tt.wantError {
 				if err == nil {
@@ -493,7 +493,7 @@ func ExampleFindCompatibleGpu() {
 		Count: 2,
 	}
 
-	options, err := FindCompatibleGpu(requestedSpec, clusterInfo)
+	options, err := FindCompatibleGpu(requestedSpec, 1, clusterInfo)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
@@ -531,7 +531,7 @@ func ExampleConvertGpuSpec() {
 		Count: 2,
 	}
 
-	convertedSpec, err := ConvertGpuSpec(requestedSpec, clusterInfo)
+	convertedSpec, err := ConvertGpuSpec(requestedSpec, 1, clusterInfo)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
@@ -862,7 +862,7 @@ func TestFindCompatibleGpuMIG(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			options, err := FindCompatibleGpu(tt.requestedGpu, clusterInfo)
+			options, err := FindCompatibleGpu(tt.requestedGpu, 1, clusterInfo)
 			if err != nil {
 				t.Fatalf("FindCompatibleGpu() error = %v", err)
 			}
