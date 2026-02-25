@@ -182,7 +182,8 @@ func IsInsideContainer() bool {
 	return false
 }
 
-// detectApptainerBin tries to find the apptainer binary, with special handling for containers
+// detectApptainerBin tries to find the apptainer (or singularity) binary, with special handling
+// for containers. Returns the full path when found, or "" when neither binary is available.
 func detectApptainerBin() string {
 	// If we're inside a container, apptainer might be in a different location
 	// or might not be available at all
@@ -201,13 +202,15 @@ func detectApptainerBin() string {
 		}
 	}
 
-	// Fall back to PATH lookup (works both inside and outside containers)
-	if binPath, err := exec.LookPath("apptainer"); err == nil {
-		return binPath
+	// Try both names in PATH order: apptainer first, singularity as fallback
+	for _, name := range []string{"apptainer", "singularity"} {
+		if binPath, err := exec.LookPath(name); err == nil {
+			return binPath
+		}
 	}
 
-	// Default to just "apptainer" and let the user's PATH resolve it
-	return "apptainer"
+	// Neither found; callers treat "" as "no binary available"
+	return ""
 }
 
 // BaseImageSifName returns the expected .sif filename for the configured DefaultDistro.

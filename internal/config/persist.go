@@ -550,10 +550,11 @@ func NormalizeCompressArgs(val string) string {
 	return ArgsForCompress(val)
 }
 
-// AutoDetectCompression sets compression to zstd if supported and user hasn't explicitly set it.
+// AutoDetectCompression sets compression based on the runtime binary and its version.
 // This should be called after apptainer version is known.
 // supportsZstd: whether the current apptainer version supports zstd (>= 1.4)
-func AutoDetectCompression(supportsZstd bool) {
+// isSingularity: whether the binary is Singularity (uses gzip by default)
+func AutoDetectCompression(supportsZstd bool, isSingularity bool) {
 	// Only auto-detect if user hasn't explicitly set compress_args in config
 	// Empty string in config means "auto-detect"
 	if viper.GetString("build.compress_args") != "" {
@@ -561,8 +562,10 @@ func AutoDetectCompression(supportsZstd bool) {
 		return
 	}
 
-	// Auto-detect: use zstd if supported, otherwise lz4
-	if supportsZstd {
+	if isSingularity {
+		Global.Build.CompressArgs = "-comp gzip"
+		utils.PrintDebug("Using gzip compression (Singularity detected)")
+	} else if supportsZstd {
 		Global.Build.CompressArgs = "-comp zstd -Xcompression-level 8"
 		utils.PrintDebug("Auto-detected zstd support, using zstd compression")
 	} else {
