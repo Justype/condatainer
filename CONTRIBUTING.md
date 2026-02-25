@@ -1,21 +1,26 @@
 # Contributing
 
-Thank you for helping improve this project! This document explains the main contribution types:
+Thank you for helping improve this project! This document covers contributions to `condatainer` (CLI code and docs).
 
-- Editing `condatainer` (code/tooling changes)
-- Adding `build-scripts` (new app/data/genome build definitions)
-- Adding or updating `helper-scripts` (interactive service helpers)
+> For build scripts and helper scripts, contribute to the [`cnt-scripts`](https://github.com/Justype/cnt-scripts) repo instead.
+
+## Repositories
+
+| Repo | Contents |
+|------|----------|
+| [`condatainer`](https://github.com/Justype/condatainer) | CLI binary (Go code, docs) |
+| [`cnt-scripts`](https://github.com/Justype/cnt-scripts) | Build scripts and helper scripts |
 
 ## Quick start
 
-1. Fork the repository from the `dev` branch and create a feature branch off `dev`.
+1. Fork this repository from the `dev` branch and create a feature branch off `dev`.
 2. Make changes, run tests, and verify on HPC and/or locally if applicable.
 3. Push your branch to your fork and open a Pull Request. Set the PR base/target to `dev` (do NOT open PRs against `main`).
 4. In your PR description include testing steps, relevant logs, and any backward-compatibility notes.
 
 > Branching model — `dev` = unstable/testing (for active development); `main` = stable/release-only (maintainer-managed).
 
-## 1) Editing `condatainer`
+## Editing `condatainer`
 
 What this covers
 - Bug fixes, feature additions, refactors, tests, or docs related to the `condatainer` tool.
@@ -29,57 +34,12 @@ Testing
 - Add tests for new functionality when applicable
 - Test your changes on both HPC and local environments if applicable
 
-Commit and PR notes
+PR notes
 - Use clear commit messages describing the change.
 - In your PR description, explain the change, why it's needed, and how to test it.
 - Set the PR base/target to `dev` (unstable/testing). Do NOT open PRs against `main` unless a maintainer explicitly requests it.
 
-## 2) Adding `build-scripts`
-
-What this covers
-- New `build-scripts` for building genome reference images, environment definitions, or packaging steps used by the project.
-
-Where to add
-- For system/text editor apps, add to `build-scripts/apps/<app-name>.def` (an apptainer definition file)
-- For applications, add to `build-scripts/<app-name>/<version>` (version is a script not a folder)
-- For references, add to `build-scripts/<assembly>/<data-type>/<version>` (sub-version is allowed)
-  - Add the tool version if the index/data is tool-version dependent. (If you are not sure, add the tool version)
-  - E.g., `build-scripts/grch38/star/2.7.11b/gencode47-101`
-  - E.g., `build-scripts/grch38/bowtie2/ucsc_no_alt`
-
-Guidelines
-- Please check the [Build Script Manual](./docs/manuals/build_script.md) for naming conventions and available variables.
-
-Testing
-- Test the build script locally and on HPC if applicable.
-- Ensure the resulting environment/image works as expected. (paths and environment variables)
-
-PR notes
-- Please include the sbatch running log or terminal output showing successful build and test.
-- Open Pull Requests to the `dev` branch (base = `dev`). Do NOT target `main` unless requested by a maintainer.
-
-## 3) Adding or updating `helper-scripts`
-
-What this covers
-- New interactive service helpers (e.g., a new web-based app to run on HPC compute nodes)
-- Bug fixes or updates to existing helpers
-
-Where to add
-- Scripts live in `helpers/<scheduler>/` — one directory per scheduler: `headless/`, `slurm/`, `pbs/`, `lsf/`, `htcondor/`
-- **A new helper must be added to all scheduler directories.** Use an existing script (e.g., `helpers/slurm/code-server`) as a template.
-- **A scheduler-specific fix** only needs to update the affected scheduler's script.
-- See [helpers/README.md](./helpers/README.md) for the shared-library API and script structure.
-
-Testing
-- SLURM is the primary tested scheduler. Test on a SLURM cluster when possible.
-- For other schedulers, include any available test output or note which cluster was used.
-
-PR notes
-- Specify which schedulers were tested in the PR description.
-- Include terminal output or job logs showing successful submission and connection.
-- Open Pull Requests to the `dev` branch (base = `dev`). Do NOT target `main` unless requested by a maintainer.
-
-## PR checklist (apply to all types)
+## PR checklist
 
 - Title and description explaining change and how to test
 - Small, focused commits with clear messages

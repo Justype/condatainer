@@ -22,10 +22,9 @@ import (
 var PreferRemote bool
 
 // GetRemoteMetadataURL returns the URL for the remote build scripts metadata
-// using the configured branch
+// using the configured scripts_link
 func GetRemoteMetadataURL() string {
-	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/metadata/build-scripts.json.gz",
-		config.GitHubRepo, config.Global.Branch)
+	return config.Global.ScriptsLink + "/metadata/build-scripts.json.gz"
 }
 
 // ScriptInfo holds information about a build script
@@ -40,7 +39,6 @@ type ScriptInfo struct {
 type RemoteScriptEntry struct {
 	RelativePath string   `json:"relative_path"`
 	Deps         []string `json:"deps"`
-	Sbatch       bool     `json:"sbatch"`
 	Whatis       string   `json:"whatis"`
 }
 
@@ -244,9 +242,9 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 		return info.Path, nil
 	}
 
-	// Build the raw GitHub URL
+	// Build the raw URL using the configured scripts_link
 	// info.Path already contains the correct extension (.def for containers)
-	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/build-scripts/%s", config.GitHubRepo, config.Global.Branch, info.Path)
+	rawURL := fmt.Sprintf("%s/build-scripts/%s", config.Global.ScriptsLink, info.Path)
 
 	// Create HTTP client with timeout
 	client := &http.Client{

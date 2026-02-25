@@ -31,13 +31,15 @@ go test -v ./internal/scheduler/...                       # Package tests
 
 ## Build Scripts
 
-Located in `build-scripts/` with naming:
-- Apps: `name/version` (e.g., `cellranger/9.0.1`)
-- References: `assembly/data-type/version` (e.g., `grch38/star/2.7.11b/gencode47-101`)
+Build scripts live in the [`cnt-scripts`](https://github.com/Justype/cnt-scripts) repo (fetched remotely via `scripts_link` config, or auto-detected from a local `cnt-scripts/` clone next to the binary). Three categories:
+
+- **OS**: `<distro>/<name>` (e.g., `ubuntu24/igv`) — Apptainer definition files for distro system tools
+- **Apps**: `<name>/<version>` (e.g., `cellranger/9.0.1`) — Apps that not available as conda packages, or specific versions not in conda
+- **Data**: `<assembly|project>/<datatype>/<version>` (e.g., `grch38/star/2.7.11b/gencode47-101`) — any data, including genome reference indexes
 
 Must define an `install()` function. Available vars: `$NCPUS`, `$target_dir`, `$tmp_dir`, `$app_name`, `$version`.
 
-Metadata headers: `#DEP:name/version` (deps), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params), `#ENV:VAR=$app_root` (env vars), `#INTERACTIVE:prompt` (user input). HTCondor uses native `.sub` submit files instead of in-script directives.
+Metadata headers: `#DEP:name/version` (deps), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params), `#ENV:VAR=$app_root` (env vars), `#INTERACTIVE:prompt` (user input).
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 
@@ -52,7 +54,7 @@ Each contains `images/`, `build-scripts/`, `helper-scripts/`. Writes go to first
 
 ## Helper Scripts
 
-Bash scripts in `helpers/` launch interactive services inside CondaTainer on HPC. Modes: `headless/` (direct) and `<scheduler>/` (submit + SSH tunnel). See `helpers/README.md` for details.
+Bash scripts in [`cnt-scripts/helpers/`](https://github.com/Justype/cnt-scripts) launch interactive services inside CondaTainer on HPC. Modes: `headless/` (direct) and `<scheduler>/` (submit + SSH tunnel). See `helpers/README.md` for details.
 
 Shared library `.common.sh` provides: config management (`config_init/load/require`), port helpers (`choose_port`, `validate_port`), overlay checks (`check_overlay_integrity`, `check_and_install_overlays`), job state (`read_job_state`, `wait_for_job`), reuse mode (`handle_reuse_mode`), and display (`spec_line`, `print_specs`, `countdown`).
 

@@ -20,9 +20,9 @@ class Config:
     debug = False
     submit_job = True
     GITHUB_REPO = "Justype/condatainer"
-    REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/metadata/build-scripts.json.gz"
-    MODGEN_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/assets/modgen/modgen"
-    GIT_RAW_URL_PREFIX = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
+    SCRIPTS_REPO = "Justype/cnt-scripts"
+    REMOTE_METADATA_URL = f"https://raw.githubusercontent.com/{SCRIPTS_REPO}/main/metadata/build-scripts.json.gz"
+    GIT_RAW_URL_PREFIX = f"https://raw.githubusercontent.com/{SCRIPTS_REPO}/main/"
 
     # Folder paths
     SCRIPT_PATH = os.path.abspath(__file__)
@@ -179,7 +179,7 @@ class Utils:
                 for k, v in metadata.items():
                     key = Utils.normalize_name_version(k)
                     rel = v["relative_path"]
-                    link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{rel}"
+                    link = f"https://raw.githubusercontent.com/{Config.SCRIPTS_REPO}/main/build-scripts/{rel}"
                     if link.endswith('.def'):
                         continue  # skip def files
                     normalized[key] = link
@@ -381,27 +381,159 @@ class Utils:
         return env_dict
 
     @staticmethod
+    def _translate_pbs_to_sbatch(pbs_flags: List[str]) -> List[str]:
+        """Translate PBS (#PBS) directives to equivalent SBATCH flags.
+
+        Build jobs are always single-task; select/nodes > 1 and mpiprocs > 1
+        are ignored with a warning.
+        """
+        sbatch = []
+        for flag in pbs_flags:
+            flag = flag.strip()
+            if flag.startswith(("-N ", "-N\t")):
+                sbatch.append(f"--job-name={flag[2:].strip()}")
+            elif flag.startswith(("-l ", "-l\t")):
+                # Resources may be comma-separated: -l select=1:ncpus=8:mem=16gb,walltime=2:00:00
+                for resource in flag[2:].strip().split(","):
+                    resource = resource.strip()
+                    if resource.startswith("walltime="):
+                        sbatch.append(f"--time={resource[9:]}")
+                    elif "=" in resource:
+                        # Parse colon-separated chunk spec.
+                        # walltime=H:MM:SS has colons in its value — consume extra chunks.
+                        parts: Dict[str, str] = {}
+                        chunks = resource.split(":")
+                        i = 0
+                        while i < len(chunks):
+                            chunk = chunks[i]
+                            if "=" in chunk:
+                                k, v = chunk.split("=", 1)
+                                k = k.strip()
+                                if k == "walltime":
+                                    while i + 1 < len(chunks) and "=" not in chunks[i + 1]:
+                                        i += 1
+                                        v += ":" + chunks[i]
+                                parts[k] = v.strip()
+                            i += 1
+
+                        for key in ("select", "nodes"):
+                            if key in parts:
+                                try:
+                                    if int(parts[key]) > 1:
+                                        Utils.print_warning(
+                                            f"PBS {key}={parts[key]} ignored: build jobs are single-task only."
+                                        )
+                                except ValueError:
+                                    pass
+                        if "mpiprocs" in parts:
+                            try:
+                                if int(parts["mpiprocs"]) > 1:
+                                    Utils.print_warning(
+                                        f"PBS mpiprocs={parts['mpiprocs']} ignored: build jobs are single-task only."
+                                    )
+                            except ValueError:
+                                pass
+
+                        ncpus = parts.get("ncpus") or parts.get("ppn")
+                        if ncpus:
+                            sbatch.append(f"--cpus-per-task={ncpus}")
+                        if "mem" in parts:
+                            sbatch.append(f"--mem={parts['mem']}")
+                        if "walltime" in parts:
+                            sbatch.append(f"--time={parts['walltime']}")
+            elif flag.startswith(("-o ", "-o\t")):
+                sbatch.append(f"--output={flag[2:].strip()}")
+            elif flag.startswith(("-e ", "-e\t")):
+                sbatch.append(f"--error={flag[2:].strip()}")
+            elif flag.startswith(("-q ", "-q\t")):
+                sbatch.append(f"--partition={flag[2:].strip()}")
+        return sbatch
+
+    @staticmethod
+    def _translate_bsub_to_sbatch(bsub_flags: List[str]) -> List[str]:
+        """Translate LSF (#BSUB) directives to equivalent SBATCH flags.
+
+        Build jobs are always single-task; -n is treated as --cpus-per-task.
+        -M is treated as MB (assumes LSF_UNIT_FOR_LIMITS=MB, the most common HPC setting).
+        -W HH:MM is translated to --time=HH:MM:00.
+        span[hosts=N] with N > 1 is ignored with a warning.
+        """
+        sbatch = []
+        for flag in bsub_flags:
+            try:
+                parts = shlex.split(flag.strip())
+            except ValueError:
+                continue
+            if not parts:
+                continue
+            key = parts[0]
+            val = parts[1] if len(parts) > 1 else ""
+
+            if key == "-J":
+                sbatch.append(f"--job-name={val}")
+            elif key == "-n":
+                sbatch.append(f"--cpus-per-task={val}")
+            elif key == "-M":
+                sbatch.append(f"--mem={val}M")
+            elif key == "-W":
+                sbatch.append(f"--time={val}:00" if ":" in val else f"--time={val}")
+            elif key == "-o":
+                sbatch.append(f"--output={val}")
+            elif key == "-e":
+                sbatch.append(f"--error={val}")
+            elif key == "-q":
+                sbatch.append(f"--partition={val}")
+            elif key == "-R":
+                rest = " ".join(parts[1:])
+                if "span[hosts=" in rest:
+                    try:
+                        n = int(rest.split("span[hosts=")[1].split("]")[0])
+                        if n > 1:
+                            Utils.print_warning(
+                                f"LSF span[hosts={n}] ignored: build jobs are single-task only."
+                            )
+                    except (ValueError, IndexError):
+                        pass
+        return sbatch
+
+    @staticmethod
     def get_sbatch_args_from_build_script(script_path) -> List[str]:
+        """Parse scheduler directives from a build script and return them as
+        equivalent SBATCH flags.
+
+        Supports #SBATCH (native), #PBS, and #BSUB. The first scheduler type
+        found wins; mixed directives are not supported.
+
+        Build jobs are always single-task; multi-node/multi-task directives
+        are ignored with a warning.
         """
-        Parse #SBATCH: lines from build script.
-        Returns a list of sbatch arguments.
-        Example line in script:
-            #SBATCH --cpus-per-task=4
-        """
-        sbatch_args = []
+        sbatch_lines: List[str] = []
+        pbs_lines: List[str] = []
+        bsub_lines: List[str] = []
 
         if not os.path.isfile(script_path):
             Utils.print_error(f"Build script not found at {script_path}.")
-            return sbatch_args
+            return []
 
         with open(script_path, "r") as f:
             for line in f:
                 line = line.strip()
                 if line.startswith("#SBATCH"):
-                    arg = line[len("#SBATCH"):].strip()
-                    sbatch_args.append(arg)
+                    sbatch_lines.append(line[len("#SBATCH"):].strip())
+                elif line.startswith("#PBS"):
+                    pbs_lines.append(line[len("#PBS"):].strip())
+                elif line.startswith("#BSUB"):
+                    bsub_lines.append(line[len("#BSUB"):].strip())
 
-        return sbatch_args
+        if sbatch_lines:
+            return sbatch_lines
+        if pbs_lines:
+            Utils.print_note("Translating PBS directives to SBATCH for submission.")
+            return Utils._translate_pbs_to_sbatch(pbs_lines)
+        if bsub_lines:
+            Utils.print_note("Translating LSF directives to SBATCH for submission.")
+            return Utils._translate_bsub_to_sbatch(bsub_lines)
+        return []
 
     @staticmethod
     def get_interactive_prompts(script_path: str) -> List[str]:
@@ -656,7 +788,7 @@ class BuildObject:
             self.is_remote = False
         elif self.name_version in remote_scripts:
             self.build_script_path = os.path.join(Config.TMP_DIR, self.name_version.replace('/', '--') + ".sh")
-            link = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/main/build-scripts/{self.name_version}"
+            link = f"https://raw.githubusercontent.com/{Config.SCRIPTS_REPO}/main/build-scripts/{self.name_version}"
             if not Utils.download_executable(link, self.build_script_path):
                 raise RuntimeError(f"Failed to download remote build script for {self.name_version}.")
             self.is_remote = True
@@ -1953,18 +2085,27 @@ class ModGen_Update:
             action="store_true",
             help="Automatically confirm update"
         )
+        ModGen_Update.parser_update.add_argument(
+            "--dev",
+            action="store_true",
+            help="Update from the dev branch instead of main"
+        )
 
     @staticmethod
     def parse_update_args(args):
+        branch = "dev" if args.dev else "main"
+        url = f"https://raw.githubusercontent.com/{Config.GITHUB_REPO}/{branch}/assets/modgen/modgen"
+
         if not args.yes:
-            Utils.print_message("Are you sure to download and replace the current script from GitHub? [y/N]: ", end="", flush=True)
+            branch_note = f" ({branch} branch)" if args.dev else ""
+            Utils.print_message(f"Are you sure to download and replace the current script from GitHub{branch_note}? [y/N]: ", end="", flush=True)
             confirm = input()
             if confirm.lower() != 'y':
                 Utils.print_message("Update cancelled by user.")
                 return
 
-        Utils.print_message("Downloading the latest ModGen script...")
-        if Utils.download_executable(Config.MODGEN_URL, Config.SCRIPT_PATH + ".tmp"):
+        Utils.print_message(f"Downloading the latest ModGen script ({branch} branch)...")
+        if Utils.download_executable(url, Config.SCRIPT_PATH + ".tmp"):
             os.chmod(Config.SCRIPT_PATH + ".tmp", 0o775)
             shutil.move(Config.SCRIPT_PATH + ".tmp", Config.SCRIPT_PATH)
             Utils.print_success("ModGen updated.")
