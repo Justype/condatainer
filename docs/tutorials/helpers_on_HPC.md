@@ -226,9 +226,12 @@ When a previous job has ended, the helper can reuse its settings (CPUs, memory, 
 
 The `REUSE_MODE` setting controls this behavior:
 
-- **`ask`** (default): Shows previous settings and prompts to reuse
+- **`ask`** (default): Shows previous settings and prompts:
+  - `Y` — reuse all previous settings (CPUs, memory, time, GPU, port, working directory, overlays)
+  - `n` — discard previous settings, use config defaults and **current directory** as working directory
+  - `Ctrl+C` — cancel
 - **`always`**: Automatically reuses without prompting
-- **`never`**: Always uses defaults from config
+- **`never`**: Always uses config defaults and current directory as working directory
 
 ```bash
 # Edit config file
