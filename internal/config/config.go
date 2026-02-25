@@ -29,8 +29,11 @@ func IsValidDistro(distro string) bool {
 	return slices.Contains(GetAvailableDistros(), distro)
 }
 
-// PrebuiltBaseURL is the base URL for downloading prebuilt images and overlays
-const PrebuiltBaseURL = "https://github.com/Justype/cnt-scripts/releases/download"
+// DefaultScriptsLink is the base URL for remote build scripts and helpers
+const DefaultScriptsLink = "https://raw.githubusercontent.com/Justype/cnt-scripts/main"
+
+// DefaultPrebuiltLink is the base URL for downloading prebuilt images and overlays
+const DefaultPrebuiltLink = "https://github.com/Justype/cnt-scripts/releases/download"
 
 // BuildConfig holds default settings for build operations
 type BuildConfig struct {
@@ -61,6 +64,7 @@ type Config struct {
 
 	// Remote repository settings
 	ScriptsLink  string // Base URL for remote build scripts and helpers (default: cnt-scripts/main)
+	PrebuiltLink string // Base URL for downloading prebuilt images and overlays (default: cnt-scripts releases)
 	PreferRemote bool   // Remote build scripts take precedence over local
 
 	// Dependency parsing
@@ -131,7 +135,8 @@ func LoadDefaults(executablePath string) {
 		SchedulerBin:  "", // Auto-detect scheduler binary (empty = search PATH)
 		DefaultDistro: DEFAULT_DISTRO,
 
-		ScriptsLink: "https://raw.githubusercontent.com/Justype/cnt-scripts/main",
+		ScriptsLink:  DefaultScriptsLink,
+		PrebuiltLink: DefaultPrebuiltLink,
 
 		Scheduler: scheduler.ResourceSpec{
 			Nodes:        1,

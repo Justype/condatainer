@@ -28,6 +28,7 @@ var configKeys = []string{
 	"default_distro",
 	"submit_job",
 	"scripts_link",
+	"prebuilt_link",
 	"prefer_remote",
 	"extra_base_dirs",
 	"scheduler.nodes",
@@ -273,8 +274,15 @@ Shows:
 		fmt.Printf("  default_distro: %s\n", config.Global.DefaultDistro)
 		fmt.Println()
 
-		// Runtime settings
-		fmt.Println(utils.StyleTitle("Runtime:"))
+		// Remote sources
+		fmt.Println(utils.StyleTitle("Remote Sources:"))
+		fmt.Printf("  scripts_link:  %s\n", config.Global.ScriptsLink)
+		fmt.Printf("  prebuilt_link: %s\n", config.Global.PrebuiltLink)
+		fmt.Printf("  prefer_remote: %v\n", config.Global.PreferRemote)
+		fmt.Println()
+
+		// Options
+		fmt.Println(utils.StyleTitle("Options:"))
 		submitJobConfig := viper.GetBool("submit_job")
 		submitJobActual := config.Global.SubmitJob
 		if submitJobConfig && !submitJobActual {
@@ -282,8 +290,6 @@ Shows:
 		} else {
 			fmt.Printf("  submit_job:        %v\n", submitJobActual)
 		}
-		fmt.Printf("  scripts_link:      %s\n", config.Global.ScriptsLink)
-		fmt.Printf("  prefer_remote:     %v\n", config.Global.PreferRemote)
 		fmt.Printf("  parse_module_load: %v\n", config.Global.ParseModuleLoad)
 		fmt.Println()
 
@@ -400,6 +406,7 @@ Time duration format (for build.time):
 			"default_distro":            true,
 			"submit_job":                true,
 			"scripts_link":              true,
+			"prebuilt_link":             true,
 			"prefer_remote":             true,
 			"parse_module_load":         true,
 			"scheduler.nodes":           true,
