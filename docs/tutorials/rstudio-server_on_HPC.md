@@ -212,7 +212,7 @@ If `*.Rproj` file does not exist in the current working directory, **CondaTainer
 - A `*.Rproj` file with default settings.
 - A `.Rprofile` file to set up Posit Public Package Manager (P3M) CRAN and Bioconductor repositories.
 
-See [Rprofile](https://github.com/Justype/condatainer/blob/main/helpers/slurm/.Rprofile) for more details. At the end, it will call `.set_repository_options()` for you. So you can directly download binary packages from P3M.
+See [Rprofile](https://github.com/Justype/cnt-scripts/blob/main/helpers/slurm/.Rprofile) for more details. At the end, it will call `.set_repository_options()` for you. So you can directly download binary packages from P3M.
 
 If `*.Rproj` file already exists, `.Rprofile` will not be created or modified. You need to set up the repositories yourself if needed.
 

@@ -12,8 +12,9 @@ This document gives instructions on how to create your own build scripts for **C
   - [Scheduler Parameters](#scheduler-parameters)
   - [Environment Variables](#environment-variables) and [ENV Naming Guidelines](#env-naming-guidelines)
   - [Interactive Tag](#interactive-tag)
+- [OS](#os)
 - [Apps](#apps)
-- [References](#references)
+- [Data](#data)
 
 ## Naming Conventions
 
@@ -23,39 +24,49 @@ The file path must follow the naming convention below to be recognized by CondaT
 
 Where `<name_conversion>` is defined as:
 
-### Application Overlays (Module)
+### OS
 
-Used for standard software packages and tools managed by **CondaTainer** build scripts.
+Apptainer definition files for distro-level system tools.
 
-* **Format:** `name/version`
+* **Format:** `<distro>/<name>`
+* **Structure:**
+  * **distro**: The base OS distribution (e.g., `ubuntu24`).
+  * **name**: The tool name (e.g., `igv`).
+* **Example:** `ubuntu24/igv`
+
+### Apps
+
+Apps not available as conda packages, or specific versions not in conda.
+
+* **Format:** `<name>/<version>`
 * **Structure:**
   * **name**: The software package or tool name (e.g., `bcftools`).
   * **version**: The specific version of the software (e.g., `1.22`).
 * **Example:** `cellranger/9.0.1`
 
-### Reference Overlays (Module)
+### Data
 
-Used for reference datasets, genome assemblies, or indices.
+Any data, including genome reference indexes.
 
-* **Format:** `assembly/data-type/version`
+* **Format:** `<assembly|project>/<datatype>/<version>`
 * **Structure:**
-  * **assembly**: The genome assembly or project (e.g., `grch38`).
-  * **data-type**: The type of data (e.g., `gtf-gencode`).
+  * **assembly/project**: The genome assembly or project name (e.g., `grch38`).
+  * **datatype**: The type of data (e.g., `gtf-gencode`).
   * **version**: The release or build version (e.g., `47`).
 * **Example:** `grch38/gtf-gencode/47`
 
 ### Example
 
-- [cellranger/9.0.1](https://github.com/Justype/condatainer/blob/main/build-scripts/cellranger/9.0.1) (App)
-- [grch38/cellranger/2024-A](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/cellranger/2024-A) (Ref)
-- [grch38/star/2.7.11b/gencode47-101](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/star/2.7.11b/gencode47-101) (Ref)
+- [cellranger/9.0.1](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cellranger/9.0.1) (App)
+- [grch38/cellranger/2024-A](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/cellranger/2024-A) (Data)
+- [grch38/star/2.7.11b/gencode47-101](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/star/2.7.11b/gencode47-101) (Data)
 
 ## Available Variables
 
 | Variable | Description |
 | -------- | ----------- |
 | `NCPUS` | Number of CPUs (from script directives, or `build.ncpus` config setting) |
-| `app_name` | apps: app name; ref: assembly/data-type |
+| `app_name` | app: name; data/ref: assembly/datatype |
 | `version` | apps: app version; ref: data version |
 | `target_dir` | Target installation directory (managed by **CondaTainer**) |
 | `tmp_dir` | Temporary working directory (managed by **CondaTainer**) |
@@ -71,7 +82,7 @@ Used for reference datasets, genome assemblies, or indices.
 
 Headers are special comments at the beginning of build scripts that provide metadata and instructions for CondaTainer.
 
-**Example Header**: [star/2.7.11b/gencode47-101](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/star/2.7.11b/gencode47-101)
+**Example Header**: [star/2.7.11b/gencode47-101](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/star/2.7.11b/gencode47-101)
 
 ```bash
 #!/usr/bin/bash
@@ -202,7 +213,7 @@ For tool-specific references, use the tool name as a prefix.
 #INTERACTIVE:⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.\nhttps://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
 ```
 
-Example: [cellranger/9.0.1](https://github.com/Justype/condatainer/blob/main/build-scripts/cellranger/9.0.1)
+Example: [cellranger/9.0.1](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cellranger/9.0.1)
 
 ## Apps
 
@@ -211,28 +222,28 @@ Example: [cellranger/9.0.1](https://github.com/Justype/condatainer/blob/main/bui
   - HPC systems often lack required build tools or dependencies unless you load specific modules.
   - To maximize compatibility (**CondaTainer**), it's better to rely on pre-compiled packages.
 
-Template: [build-template-apps](https://github.com/Justype/condatainer/blob/main/assets/build-template-apps)
+Template: [build-template-apps](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/apps-template)
 
 ### Tips
 
 You can use `tar_xf_pigz` and `pigz_or_gunzip` functions to speed up decompression of large files if `pigz` is available on your system.
 
-If the app requires specific environment variables to function properly, make sure to add them using `#ENV:` and `#ENVNOTE:` tags. e.g. [orad/2.7.0](https://github.com/Justype/condatainer/blob/main/build-scripts/orad/2.7.0)
+If the app requires specific environment variables to function properly, make sure to add them using `#ENV:` and `#ENVNOTE:` tags. e.g. [orad/2.7.0](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/orad/2.7.0)
 
 ### Examples
 
-- [cellranger/9.0.1](https://github.com/Justype/condatainer/blob/main/build-scripts/cellranger/9.0.1)
-- [orad/2.7.0](https://github.com/Justype/condatainer/blob/main/build-scripts/orad/2.7.0)
+- [cellranger/9.0.1](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cellranger/9.0.1)
+- [orad/2.7.0](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/orad/2.7.0)
 
-## References
+## Data
 
-- References often require downloading large files from external sources.
-- indices may need to be built using specific versions of software.
-  - If indices are version dependent, ensure the app version is included in the name. e.g. [grch38/star/2.7.11b/gencode47-101](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/star/2.7.11b/gencode47-101)
+- Data often require downloading large files from external sources.
+- Indices may need to be built using specific versions of software.
+  - If indices are version dependent, ensure the app version is included in the name. e.g. [grch38/star/2.7.11b/gencode47-101](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/star/2.7.11b/gencode47-101)
   - If indices require building, ensure you have the scheduler parameters (`#SBATCH`, `#PBS`, or `#BSUB`) set appropriately to allocate sufficient resources.
 - Always add environment variables using `#ENV:` and `#ENVNOTE:` to help users locate the reference data.
 
-Template: [build-template-ref](https://github.com/Justype/condatainer/blob/main/assets/build-template-ref)
+Template: [build-template-ref](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/ref-template)
 
 ### Tips
 
@@ -240,7 +251,8 @@ You can use `tar_xf_pigz` and `pigz_or_gunzip` functions to speed up decompressi
 
 ### Examples
 
-- [grch38/genome/ucsc_no_alt](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/genome/ucsc_no_alt)
-- [grch38/transcript-gencode/47](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/transcript-gencode/47)
-- [grch38/star/2.7.11b/gencode47-101](https://github.com/Justype/condatainer/blob/main/build-scripts/grch38/star/2.7.11b/gencode47-101)
-- [grcm39/salmon/1.10.2/gencodeM36](https://github.com/Justype/condatainer/blob/main/build-scripts/grcm39/salmon/1.10.2/gencodeM36)
+- [ubuntu24/igv.def](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/ubuntu24/igv.def)
+- [grch38/genome/ucsc_no_alt](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/genome/ucsc_no_alt)
+- [grch38/transcript-gencode/47](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/transcript-gencode/47)
+- [grch38/star/2.7.11b/gencode47-101](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/star/2.7.11b/gencode47-101)
+- [grcm39/salmon/1.10.2/gencodeM36](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grcm39/salmon/1.10.2/gencodeM36)

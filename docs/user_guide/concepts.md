@@ -28,23 +28,29 @@ OS overlays are stackable when based on the same distribution version.
 Like `condatainer e rstudio-server build-essential`
 ```
 
+You can use `condatainer info` to check overlay types and contents.
+
+### 🖥️ OS Overlays
+
+OS overlays are built from Apptainer definition files. They expose system-level paths (`/bin`, `/lib`, etc.) and can run standalone as a base image.
+
 ### 🧩 Module Overlays
 
-Module overlays are categorized into two main types: **App** modules and **Ref** modules.
+Module overlays are categorized into two types: **Apps** and **Data**.
 
-- **App Modules**: Contain the software applications, pipelines, or binaries needed for analysis.
-- **Ref Modules**: Contain version-specific genome indices, annotations, or reference files.
+- **Apps**: Software packages, binaries, pipelines. Mount at `/cnt/<name>/<version>`.
+- **Data**: Project data, genome indices, annotations. Mount at `/cnt/<assembly|project>/<datatype>/...`.
 
 Examples:
-- App Module: `salmon/1.10.2`
-- Ref Module: `grch38/salmon/1.10.2/gencode47`
+- App: `cellranger/9.0.1`
+- Data: `grch38/salmon/1.10.2/gencode47`
 
 ### 📂 Naming Convention
 
-- OS: `name` (e.g., `rstudio-server`)
-- Bundle/Workspace: `name` (e.g., `env`, `sci_rna`)
-- Module(Apps): `name/version` (e.g., `bcftools/1.16`)
-- Module(References): `assembly/datatype/version`
+- OS: `<distro>/<name>` (e.g., `ubuntu24/igv`)
+- Bundle / Env: `<name>` — no slash (e.g., `env`, `sci_rna`)
+- App (Module): `<name>/<version>` (e.g., `cellranger/9.0.1`)
+- Data (Module): `<assembly|project>/<datatype>/<version>`
   - `grcm39/genome/gencode`: GRCm39 genome with Gencode style naming
   - `grcm39/salmon/1.10.2/gencodeM33`: salmon index for GRCm39 Gencode M33 transcripts
 
@@ -60,7 +66,7 @@ The following delimiters are accepted for version specification: `/`, `--`, `=`,
 
 For software unavailable through conda, custom build scripts can be created to download and install the software.
 
-**Examples**: 10X [cellranger/9.0.1](https://github.com/Justype/condatainer/blob/main/build-scripts/cellranger/9.0.1) and Illumina [orad/2.7.0](https://github.com/Justype/condatainer/blob/main/build-scripts/orad/2.7.0)
+**Examples**: 10X [cellranger/9.0.1](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cellranger/9.0.1) and Illumina [orad/2.7.0](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/orad/2.7.0)
 
 ## 🔄 Module Workflow
 
