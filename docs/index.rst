@@ -1,7 +1,7 @@
 CondaTainer
 =========================
 
-`CondaTainer <https://github.com/Justype/condatainer>`_  is a rootless CLI designed to manage tools, data, and project environments, and seamlessly launch interactive apps on HPC clusters.
+`CondaTainer <https://github.com/Justype/condatainer>`_  is a rootless CLI designed to manage tools, data, and project environments, and seamlessly launch interactive apps on HPC clusters — perfect for individuals and small teams using institutional or regional compute.
 
 * **Web-App Ready:** Launch *RStudio*, *VS Code*, *Jupyter* and more with one command.
 * **Unified Management:** Easily organize group-level tools/data and isolate project environments.
