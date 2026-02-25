@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/viper"
@@ -470,12 +471,12 @@ func LoadFromViper() {
 
 	// Load scripts_link from config (base URL for remote build scripts and helpers)
 	if link := viper.GetString("scripts_link"); link != "" {
-		Global.ScriptsLink = link
+		Global.ScriptsLink = strings.TrimRight(link, "/")
 	}
 
 	// Load prebuilt_link from config (base URL for downloading prebuilt images and overlays)
 	if link := viper.GetString("prebuilt_link"); link != "" {
-		Global.PrebuiltLink = link
+		Global.PrebuiltLink = strings.TrimRight(link, "/")
 	}
 
 	// Load prefer_remote from config
