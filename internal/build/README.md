@@ -92,27 +92,37 @@ if found && info.IsRemote {
 ## Build Workflow
 
 **Conda:**
-1. Check if overlay exists
-2. Create temporary ext3 overlay
-3. `micromamba create` inside container
-4. Set permissions, pack to SquashFS
-5. Cleanup
+1. Check if overlay exists (skip if not updating)
+2. If updating existing overlay: probe exclusive lock — fail immediately if in use
+3. Create temporary ext3 overlay
+4. `micromamba create` inside container
+5. Set permissions, pack to SquashFS
+6. Atomic rename `.new` → target; cleanup
 
 **Shell:**
-1. Check if overlay exists
-2. Create temporary overlay
-3. Build missing dependencies (if enabled)
-4. Run script inside container with overlays
-5. For ref: verify files, create SquashFS from `$cnt_dir`
-6. For apps: create SquashFS from `/cnt`
-7. Extract and save ENV variables
-8. Cleanup
+1. Check if overlay exists (skip if not updating)
+2. If updating existing overlay: probe exclusive lock — fail immediately if in use
+3. Create temporary overlay
+4. Build missing dependencies (if enabled)
+5. Run script inside container with overlays
+6. For ref: verify files, create SquashFS from `$cnt_dir`
+7. For apps: create SquashFS from `/cnt`
+8. Extract and save ENV variables
+9. Atomic rename `.new` → target; cleanup
 
 **Def:**
-1. Check if overlay exists
-2. Build SIF with Apptainer
-3. Extract SquashFS partition from SIF
-4. Cleanup
+1. Check if overlay exists (skip if not updating)
+2. If updating existing overlay: probe exclusive lock — fail immediately if in use
+3. Try prebuilt download (if remote source)
+4. Build SIF with Apptainer; extract SquashFS partition
+5. Atomic rename `.new` → target; cleanup
+
+**Base image (`.sif`):**
+1. Check if already installed (skip if not updating)
+2. If updating existing image: probe exclusive lock — fail immediately if in use
+3. Try prebuilt `.sif` download (if remote source)
+4. Build SIF with Apptainer
+5. Atomic rename `.new` → target; cleanup
 
 ## BuildGraph Execution
 
@@ -150,3 +160,4 @@ Build defaults are configured via `build.*` keys in `config.yaml`. See [Config R
 
 - `ErrTmpOverlayExists` - Temporary overlay already exists (build in progress)
 - `ErrBuildCancelled` - User interrupted build (Ctrl+C)
+- `"cannot update <name>: ..."` - Target overlay is locked (currently used by a running `exec`/`run`)

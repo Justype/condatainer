@@ -60,6 +60,10 @@ Shared library `.common.sh` provides: config management (`config_init/load/requi
 
 Scheduler script flow: config_init → config_load → read_job_state → getopts (sets `_ARG_*` flags) → handle_reuse_mode → port resolution → print_specs → sanity checks → submit → wait_for_job → connect.
 
+## File Locking
+
+`exec`/`run` hold `LOCK_SH` on `.sqf`/`.sif` files during execution (`.img` skipped — Apptainer flocks those itself); `remove` and `build --update` probe `LOCK_EX` before modifying. See `internal/overlay/lock.go`.
+
 ## Key Patterns
 
 - Global config singleton: `config.Global`

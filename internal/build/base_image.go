@@ -11,6 +11,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -55,6 +56,15 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 
 	if !b.update && b.IsInstalled() {
 		return nil
+	}
+
+	// Before starting any build work, check that no exec/run is holding the existing base image.
+	if b.update && utils.FileExists(targetPath) {
+		if lock, err := overlay.AcquireLock(targetPath, true); err != nil {
+			return fmt.Errorf("cannot update base image: %w", err)
+		} else {
+			lock.Close()
+		}
 	}
 
 	utils.PrintMessage("Building base image %s (local build) from %s", styledImage, utils.StylePath(b.buildSource))

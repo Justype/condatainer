@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -160,6 +161,14 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		if !strings.HasPrefix(overlayPath, writableDir) {
 			utils.PrintWarning("Overlay %s is in a read-only directory and cannot be removed.", utils.StyleName(name))
 			continue
+		}
+
+		// Check if overlay is currently in use (a running exec/run holds a shared lock)
+		if lock, err := overlay.AcquireLock(overlayPath, true); err != nil {
+			utils.PrintError("Cannot remove %s: overlay is currently in use", utils.StyleName(name))
+			continue
+		} else {
+			lock.Close()
 		}
 
 		if err := os.Remove(overlayPath); err != nil {

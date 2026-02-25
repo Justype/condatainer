@@ -224,17 +224,16 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	// Update base image only if minor or major version changed
 	if getMajorMinor(currentVersion) != getMajorMinor(latestVersion) {
 		fmt.Println()
-		utils.PrintMessage("Downloading base image for version %s...", release.TagName)
+		utils.PrintMessage("Minor version change detected (%s → %s). Updating base image...",
+			utils.StyleNumber(currentVersion), utils.StyleNumber(latestVersion))
 
 		// Update the base image. Errors are non-fatal — warn and let the user rebuild manually.
 		if err := build.EnsureBaseImage(context.Background(), true); err != nil {
 			utils.PrintWarning("Failed to update base image: %v", err)
-			utils.PrintWarning("You may need to manually rebuild the base image.")
+			utils.PrintNote("Run %s to update it later.", utils.StyleCommand("condatainer self-update --base"))
 		} else {
-			utils.PrintSuccess("Base image updated successfully")
+			utils.PrintSuccess("Base image updated.")
 		}
-	} else {
-		utils.PrintDebug("Base image update skipped (patch version change only)")
 	}
 
 	return nil

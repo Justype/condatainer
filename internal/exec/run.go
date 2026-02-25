@@ -9,6 +9,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/container"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -66,6 +67,41 @@ func Run(ctx context.Context, options Options) error {
 			fmt.Println("")
 		}
 	}
+
+	// Acquire read locks on all overlay files for the duration of exec.
+	// This prevents concurrent remove/update from deleting files in use.
+	var execLocks []*overlay.Lock
+	releaseLocks := func() {
+		for _, l := range execLocks {
+			l.Close()
+		}
+	}
+	for _, ol := range setupResult.Overlays {
+		if !utils.FileExists(ol) || utils.DirExists(ol) {
+			continue
+		}
+		// Skip .img files: Apptainer flocks them itself during execution, so
+		// acquiring our own lock would conflict. They are pre-checked via
+		// container.Setup() → CheckAvailable() before exec starts.
+		if utils.IsImg(ol) {
+			continue
+		}
+		lock, err := overlay.AcquireLock(ol, false) // .sqf: always read-only
+		if err != nil {
+			releaseLocks()
+			return err
+		}
+		execLocks = append(execLocks, lock)
+	}
+	if utils.FileExists(options.BaseImage) {
+		lock, err := overlay.AcquireLock(options.BaseImage, false)
+		if err != nil {
+			releaseLocks()
+			return err
+		}
+		execLocks = append(execLocks, lock)
+	}
+	defer releaseLocks()
 
 	opts := &apptainer.ExecOptions{
 		Bind:       setupResult.BindPaths,

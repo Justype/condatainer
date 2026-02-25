@@ -81,7 +81,9 @@ exec.Run(ctx, opts)
 4. **Auto-enable fakeroot** - If writable .img overlay
 5. **Debug output** - Print configuration if debug mode
 6. **Print environment** - Show overlay environments (if interactive and not hidden)
-7. **Execute** - Call `apptainer.Exec()` with processed configuration
+7. **Acquire file locks** - Hold shared locks on all `.sqf` overlays and the base `.sif` for the duration of execution. `.img` overlays are skipped — Apptainer flocks them itself and our lock would conflict. Prevents concurrent `remove` or `build --update` from deleting `.sqf`/`.sif` files in use.
+8. **Execute** - Call `apptainer.Exec()` with processed configuration
+9. **Release locks** - All file locks released after `apptainer.Exec()` returns
 
 ## Environment Display
 

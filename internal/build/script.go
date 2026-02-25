@@ -12,6 +12,7 @@ import (
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
 	execpkg "github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -117,6 +118,15 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 			utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
 				styledOverlay, utils.StylePath(targetOverlayPath))
 			return nil
+		}
+	}
+
+	// Before starting any build work, check that no exec/run holds the existing overlay.
+	if s.update && utils.FileExists(targetOverlayPath) {
+		if lock, err := overlay.AcquireLock(targetOverlayPath, true); err != nil {
+			return fmt.Errorf("cannot update %s: %w", s.nameVersion, err)
+		} else {
+			lock.Close()
 		}
 	}
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -72,6 +73,15 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 			utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
 				styledOverlay, utils.StylePath(targetOverlayPath))
 			return nil
+		}
+	}
+
+	// Before starting any build work, check that no exec/run holds the existing overlay.
+	if d.update && utils.FileExists(targetOverlayPath) {
+		if lock, err := overlay.AcquireLock(targetOverlayPath, true); err != nil {
+			return fmt.Errorf("cannot update %s: %w", d.nameVersion, err)
+		} else {
+			lock.Close()
 		}
 	}
 
