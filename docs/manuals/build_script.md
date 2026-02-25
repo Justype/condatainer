@@ -109,7 +109,7 @@ install() {
 
 `#WHATIS:` and `#URL:` lines are used to replace modulefile's `{WHATIS}` and `{HELP}` placeholders.
 
-It will only be used by [ModGen](./modgen.md) when generating modulefiles. (**CondaTainer** does not support these tags yet.)
+It will only be used by [ModGen](https://github.com/Justype/condatainer/blob/main/assets/modgen/manual.md) when generating modulefiles. (**CondaTainer** does not support these tags yet.)
 
 ### Set Dependencies
 

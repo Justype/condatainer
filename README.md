@@ -129,7 +129,7 @@ condatainer helper rstudio-server # Launch RStudio Server
 condatainer helper igv            # Start IGV via XFCE4 noVNC
 ```
 
-Please check out [Helper README](./helpers/README.md) or [ReadTheDocs - Helper Scripts](https://condatainer.readthedocs.io/en/dev/tutorials/helpers_on_HPC.html) for more details and examples.
+Please check out [Helper README](https://github.com/Justype/cnt-scripts/blob/main/helpers/README.md) or [ReadTheDocs - Helper Scripts](https://condatainer.readthedocs.io/en/dev/tutorials/helpers_on_HPC.html) for more details and examples.
 
 ## 🚀 Automation
 
