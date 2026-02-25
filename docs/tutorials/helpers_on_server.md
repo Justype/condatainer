@@ -1,6 +1,6 @@
 # Helper Scripts on Headless Servers
 
-Helper scripts automate the workflow of running web-based applications (VS Code, RStudio, Jupyter, etc.) directly on a headless server without HPC schedulers.
+Helper scripts automate the workflow of running web-based applications (VS Code, RStudio, noVNC, etc.) directly on a headless server without HPC schedulers.
 
 This tutorial explains how to use helper scripts on servers where you have direct access (no job scheduler required).
 

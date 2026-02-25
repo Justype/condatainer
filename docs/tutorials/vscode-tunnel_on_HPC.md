@@ -15,7 +15,7 @@ VS Code Tunnel connects your local VS Code to a remote compute node **without re
 
 ## Checklist
 
-- [A supported scheduler is available on your HPC system](#scheduler--workload-manager)
+- [A supported scheduler is available on your HPC system](#scheduler)
 - [Have CondaTainer installed](#install-condatainer)
 - [Have a writable overlay image (optional)](#create-writable-overlay)
 - [Check the Script Parameters](#vs-code-tunnel-helper-script)
@@ -36,7 +36,7 @@ You can set [Config](./helpers_on_HPC.md#configuration-and-defaults) and helpers
 
 If you have any issues, see [Common Issues](#common-issues) section below.
 
-## Scheduler / Workload Manager
+## Scheduler
 
 Run the following command to check if a supported scheduler is available:
 
@@ -50,10 +50,10 @@ Slurm is fully tested. Other schedulers are experimentally supported. Please rep
 
 ## SSH Port Forwarding is Not Required
 
-VS Code Tunnel directly connects to the VS Code server instead of using SSH port forwarding.
+VS Code Tunnel directly connects to a relay server instead of using SSH port forwarding.
 
 ```
-Your machine <-----> VS Code server <-----> HPC Compute Node
+Your machine <-----> Relay server <-----> HPC Compute Node
 ```
 
 ## Install CondaTainer

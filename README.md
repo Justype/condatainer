@@ -8,7 +8,7 @@
 
 **CondaTainer** is a rootless CLI designed to manage tools, data, and project environments, and seamlessly launch interactive apps on HPC clusters — perfect for individuals and small teams using institutional or regional compute.
 
-* **Web-App Ready:** Launch *RStudio*, *VS Code*, *Jupyter* and more with one command.
+* **Web-App Ready:** Launch *RStudio*, *VS Code*, *noVNC* and more with one command.
 * **Unified Management:** Easily organize group-level tools/data and isolate project environments.
 * **Inode Saver:** Packing 30k+ Conda files into a single portable image to bypass quota limits.
 * **Scheduler Native:** Out-of-the-box integration with *Slurm*, *PBS*, *LSF*, and *HTCondor*.

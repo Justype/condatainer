@@ -90,15 +90,15 @@ This command will mount the overlay and set the `PATH` and `CONDA_PREFIX` variab
 Then you can use `mm-*` commands to manage your project environment.
 
 ```bash
-mm-install numpy
-mm-pin numpy
-mm-pin -d numpy # unpin numpy
-mm-list
-mm-remove numpy
-mm-update numpy
-mm-clean -a
-# Export environment
-mm-export > environment.yaml
+mm-install r-base=4.4 r-tidyverse  # Install packages
+mm-pin r-base           # Pin a package version
+mm-pin -r r-base        # Unpin a package
+mm-list                 # List installed packages
+mm-search r-ggplot2     # Search for a package
+mm-remove r-tidyverse   # Remove a package
+mm-update               # Update packages
+mm-clean -a             # Clean the cache and unused
+mm-export               # Export environment to YAML
 ```
 
 ## Writable or Read-Only
@@ -247,6 +247,7 @@ condatainer overlay chown env.img
 Or they can use `--fakeroot` when running `condatainer exec` to avoid permission issues:
 
 ```bash
+# Due to clusters apptainer configuration, this may not work.
 condatainer exec --fakeroot -o env.img <command>
 ```
 

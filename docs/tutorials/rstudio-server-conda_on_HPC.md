@@ -32,7 +32,7 @@ Use the regular `rstudio-server` when:
 
 ## Checklist
 
-- [A supported scheduler is available on your HPC system](#scheduler--workload-manager)
+- [A supported scheduler is available on your HPC system](#scheduler)
 - [Have SSH port forwarding set up to the login node](#ssh-port-forwarding)
 - [Have CondaTainer installed](#install-condatainer)
 - [Have R installed in a writable overlay image](#create-r-writable-overlay)
@@ -51,7 +51,7 @@ condatainer helper rstudio-server-conda
 
 You can set [Config](./helpers_on_HPC.md#configuration-and-defaults) and helpers also support [Reusing previous settings](./helpers_on_HPC.md#reuse-mode).
 
-## Scheduler / Workload Manager
+## Scheduler
 
 Run the following command to check if a supported scheduler is available:
 
@@ -140,6 +140,10 @@ mm-install python=3.11 conda
 ```
 
 See [Launch a Shell within the Workspace Overlay](../user_guide/workspace_overlays.md#launch-a-shell-within-the-workspace-overlay) for more details.
+
+```{note}
+Always use Conda to install R packages. If you want to use `install.packages()` in R, use [rstudio-server](./rstudio-server_on_HPC.md) variant instead.
+```
 
 ## RStudio Server Conda Helper Script
 
@@ -259,7 +263,7 @@ If required packages are not available in conda-forge or bioconda, consider usin
 You can run R script directly without RStudio Server:
 
 ```bash
-condatainer exec -o build-essential -o env.img Rscript your_script.R
+condatainer exec -o env.img Rscript your_script.R
 ```
 
 ## Using GPU

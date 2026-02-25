@@ -15,7 +15,7 @@ VS Code Server provides the **full VS Code experience** including all extensions
 
 ## Checklist
 
-- [A supported scheduler is available on your HPC system](#scheduler--workload-manager)
+- [A supported scheduler is available on your HPC system](#scheduler)
 - [Have SSH port forwarding set up to the login node](#ssh-port-forwarding)
 - [Have CondaTainer installed](#install-condatainer)
 - [Have a writable overlay image (optional)](#create-writable-overlay)
@@ -36,7 +36,7 @@ You can set [Config](./helpers_on_HPC.md#configuration-and-defaults) and helpers
 
 If you have any issues, see [Common Issues](#common-issues) section below.
 
-## Scheduler / Workload Manager
+## Scheduler
 
 Run the following command to check if a supported scheduler is available:
 

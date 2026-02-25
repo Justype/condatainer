@@ -1,6 +1,6 @@
 # Helper Scripts on HPC
 
-Helper scripts automate the workflow of running web-based app (VS Code, RStudio, Jupyter, etc.) on HPC compute nodes.
+Helper scripts automate the workflow of running web-based app (VS Code, RStudio, noVNC, etc.) on HPC compute nodes.
 
 This tutorial explains the core concepts behind helper scripts and how they simplify running interactive applications on HPC.
 
@@ -182,9 +182,9 @@ Scheduler Information:
 The scheduler is available and ready for job submission.
 
 Max Resource Limits:
-  Max CPUs:   44
-  Max Memory: 184000 MB (180 GB)
-  Max Time:   7d
+  Max CPUs/Node:  192
+  Max Mem/Node:   6000 GB
+  Max Time:       7d
 
 Available GPUs:
   h100: 2144 total, 416 available

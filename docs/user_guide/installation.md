@@ -1,10 +1,15 @@
 # CondaTainer Installation
 
-📦 **CondaTainer** is designed to manage tools/data/env on HPC systems by wrapping Conda environments into efficient SquashFS files using Apptainer. It can:
+📦 **CondaTainer** is designed to manage tools/data/env on HPC systems by wrapping Conda environments into efficient SquashFS files or ext3 OverlayFS. It can:
 
-- Pack tools into highly-compressed, read-only SquashFS overlays. e.g. `cellranger/9.0.1.sqf`
+- Pack tools into highly-compressed, read-only SquashFS overlays. e.g. `cellranger/9.0.1`
 - Run rstudio-server, code-server, and other web tools on HPC.
 - Generate project-wide writable images for development. e.g. `env.img`
+
+## 📋 Prerequisites
+
+- **Linux (x86_64 only)**: AArch64 is not supported yet.
+- **Apptainer**: Required for all core container operations.
 
 ## 🛠️ Quick Installation
 
@@ -43,11 +48,11 @@ condatainer config init
 If your system has Apptainer or Singularity modules instead of system-wide binaries, load the module first:
 
 ```bash
-ml apptainer   # or: ml singularity
+module load apptainer  # or: module load singularity
 condatainer config init
 ```
 
-Then CondaTainer saves the detected binary path, so future sessions work without reloading the module.
+This step ensures **CondaTainer** locates and saves the Apptainer path for future use, so future sessions work without reloading the module.
 
 Compression is chosen automatically based on the runtime:
 - **Singularity**: gzip (native default)

@@ -17,7 +17,7 @@ If you cannot write to an overlay image:
 
 ## If an overlay image cannot be mounted
 
-### 1. "Device or resource busy" (Used by another process)
+### 1. Used by another process
 
 If another process is already using the image, you cannot mount it as writable.
 

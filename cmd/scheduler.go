@@ -264,40 +264,40 @@ func runScheduler(cmd *cobra.Command, args []string) {
 		}
 
 		// Display max resource limits (aggregated from all partitions)
-		maxCpus := 0
-		var maxMemMB int64 = 0
+		maxCpusPerNode := 0
+		var maxMemMBPerNode int64 = 0
 		var maxTime time.Duration = 0
 
 		// Find max values across all partitions (not filtered)
 		for _, limit := range clusterInfo.Limits {
-			if limit.MaxCpusPerNode > maxCpus {
-				maxCpus = limit.MaxCpusPerNode
+			if limit.MaxCpusPerNode > maxCpusPerNode {
+				maxCpusPerNode = limit.MaxCpusPerNode
 			}
-			if limit.MaxMemMBPerNode > maxMemMB {
-				maxMemMB = limit.MaxMemMBPerNode
+			if limit.MaxMemMBPerNode > maxMemMBPerNode {
+				maxMemMBPerNode = limit.MaxMemMBPerNode
 			}
 			if limit.MaxTime > maxTime {
 				maxTime = limit.MaxTime
 			}
 		}
 
-		if maxCpus > 0 || maxMemMB > 0 || maxTime > 0 {
+		if maxCpusPerNode > 0 || maxMemMBPerNode > 0 || maxTime > 0 {
 			fmt.Println()
 			fmt.Println("Max Resource Limits (across all partitions):")
-			if maxCpus > 0 {
-				fmt.Printf("  Max CPUs:   %s\n", utils.StyleNumber(fmt.Sprintf("%d", maxCpus)))
+			if maxCpusPerNode > 0 {
+				fmt.Printf("  Max CPUs/Node:  %s\n", utils.StyleNumber(fmt.Sprintf("%d", maxCpusPerNode)))
 			}
-			if maxMemMB > 0 {
+			if maxMemMBPerNode > 0 {
 				var memStr string
-				if maxMemMB >= 1024 {
-					memStr = fmt.Sprintf("%d MB (%.0f GB)", maxMemMB, float64(maxMemMB)/1024)
+				if maxMemMBPerNode >= 1024 {
+					memStr = fmt.Sprintf("%.0f GB", float64(maxMemMBPerNode)/1024)
 				} else {
-					memStr = fmt.Sprintf("%d MB", maxMemMB)
+					memStr = fmt.Sprintf("%d MB", maxMemMBPerNode)
 				}
-				fmt.Printf("  Max Memory: %s\n", utils.StyleNumber(memStr))
+				fmt.Printf("  Max Mem/Node:   %s\n", utils.StyleNumber(memStr))
 			}
 			if maxTime > 0 {
-				fmt.Printf("  Max Time:   %s\n", utils.StyleNumber(formatDuration(maxTime)))
+				fmt.Printf("  Max Time:       %s\n", utils.StyleNumber(formatDuration(maxTime)))
 			}
 		}
 

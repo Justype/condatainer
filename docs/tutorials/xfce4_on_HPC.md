@@ -1,11 +1,11 @@
-# Run XFCE Desktop (VNC) on HPC
+# Run XFCE4 Desktop (VNC) on HPC
 
-Run following commands to start an XFCE desktop session on your HPC system:
+Run following commands to start an XFCE4 desktop session on your HPC system:
 
 ```bash
 # download/update helper scripts
 condatainer helper -u
-# start XFCE desktop
+# start XFCE4 desktop
 condatainer helper xfce4
 ```
 
@@ -13,7 +13,7 @@ The desktop is accessible through a browser via noVNC. You can also use the `igv
 
 ## Checklist
 
-- [A supported scheduler is available on your HPC system](#scheduler--workload-manager)
+- [A supported scheduler is available on your HPC system](#scheduler)
 - [Have SSH port forwarding set up to the login node](#ssh-port-forwarding)
 - [Have CondaTainer installed](#install-condatainer)
 - [Check the Script Parameters](#helper-script-options)
@@ -37,8 +37,8 @@ If you have any issues, see [Common Issues](#common-issues) section below.
 
 | Helper | Description |
 |--------|-------------|
-| `xfce4` | General-purpose XFCE desktop session |
-| `igv` | XFCE desktop with IGV auto-launched |
+| `xfce4` | General-purpose XFCE4 desktop session |
+| `igv` | XFCE4 desktop with IGV auto-launched |
 
 Both use the same VNC/noVNC setup. The `igv` helper additionally installs and launches IGV on startup.
 
@@ -50,7 +50,7 @@ condatainer helper xfce4
 condatainer helper igv
 ```
 
-## Scheduler / Workload Manager
+## Scheduler
 
 Run the following command to check if a supported scheduler is available:
 

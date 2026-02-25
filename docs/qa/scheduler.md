@@ -5,34 +5,31 @@ Understanding the difference between **nodes**, **tasks**, and **CPUs** helps yo
 ## Table of Contents
 
 - [Concepts: Nodes, Tasks, and CPUs](#concepts)
-- [Default: Use CPUs, Not Tasks](#default-use-cpus-not-tasks)
-- [MPI Jobs: When to Use Multiple Tasks](#mpi-jobs-when-to-use-multiple-tasks)
-- [Cross-Scheduler Translation](#cross-scheduler-translation)
+  - [Single-Task vs Multi-Task (MPI) Jobs](#single-task-vs-multi-task-mpi-jobs)
+  - [HTCondor: Single-Node Only](#htcondor-single-node-only)
+- [How Schedulers Define Resources](#how-schedulers-define-resources)
+- [How CondaTainer Handles Directives](#how-condatainer-handles-directives)
+  - [Normalizing Directives and Passthrough Mode](#normalizing-directives-and-passthrough-mode)
+  - [Cross-Scheduler Translation](#cross-scheduler-translation)
+  - [MPI Auto-Detection](#mpi-auto-detection)
+- [Passthrough Mode Workaround](#passthrough-mode-workaround)
 
 ## Concepts
 
-| Term | SLURM directive | Meaning |
-|------|----------------|---------|
-| **Node** | `--nodes` | A physical compute machine |
-| **Task** | `--ntasks`, `--ntasks-per-node` | An MPI process (one independent program rank) |
-| **CPU** | `--cpus-per-task` | Threads available to a single task |
+| Term | Meaning |
+|------|---------|
+| **Node** | A physical compute machine |
+| **Task** | An MPI process (one independent program rank) |
+| **CPU** | Threads available to a single task |
 
-A job with `--nodes=2 --ntasks-per-node=4 --cpus-per-task=2` runs:
+A job with 2 nodes, 4 tasks per node, and 2 CPUs per task runs:
 - 2 machines
 - 4 MPI processes per machine (8 total)
 - Each process may use up to 2 threads
 
-For PBS/LSF the terminology differs slightly but the concept is the same:
+### Single-Task vs Multi-Task (MPI) Jobs
 
-| Concept | SLURM | PBS | LSF |
-|---------|-------|-----|-----|
-| Nodes | `--nodes=N` | `select=N` | `-m host1+host2` |
-| Tasks per node | `--ntasks-per-node=N` | `mpiprocs=N` | `-R "span[ptile=N]"` |
-| CPUs per task | `--cpus-per-task=N` | `ncpus=N` | `-n N` |
-
-## Default: Use CPUs, Not Tasks
-
-**Most single-program jobs — Python, R, bash scripts — should request multiple CPUs (`--cpus-per-task`), not multiple tasks.**
+**Most jobs — Python, R, bash scripts — should request multiple CPUs, not multiple tasks.**
 
 Multiple tasks launch multiple independent copies of your program (MPI ranks). Unless your code explicitly calls `MPI_Init` / `from mpi4py import MPI`, extra tasks are wasted allocation.
 
@@ -59,11 +56,9 @@ Inside the container, thread-parallel libraries will use all 8 CPUs.
 #SBATCH --ntasks=8   # ❌ Launches 8 copies of python — each does the full job
 ```
 
-This starts 8 separate Python processes, each running `train_model.py` from scratch wasting 7× the resources.
+This starts 8 separate Python processes, each running `train_model.py` from scratch, wasting 7× the resources.
 
-## MPI Jobs
-
-Use multiple tasks **only** when your program uses MPI for inter-process communication.
+**Correct: MPI job**
 
 ```bash
 #!/bin/bash
@@ -78,84 +73,75 @@ Use multiple tasks **only** when your program uses MPI for inter-process communi
 python mpi_simulation.py
 ```
 
-When `condatainer run` detects `ntasks > 1`, it **automatically wraps the command with `mpiexec`**:
+### HTCondor: Single-Node Only
 
-```bash
-# Generated job command (via module system):
-module purge && module load openmpi/4.1.5 && mpiexec condatainer run mpi_job.sh
+HTCondor is inherently single-node (`universe = vanilla` is assumed for all jobs), so `nodes` and `tasks-per-node` do not apply. Job dependencies (after-OK chains) are not supported — `DAGMan` is not supported in the current version.
+
+When CondaTainer reads `.sub` files, it will get the script path by `executable = ...` and parse other resource requests. Then CondaTainer will read the overlay requirements from the script `#DEP:` tags and launch the container with the appropriate resources.
+
+## How Schedulers Define Resources
+
+Each scheduler has its own syntax for the same underlying resource concepts:
+
+| Concept | SLURM | PBS | LSF | HTCondor |
+|---------|-------|-----|-----|----------|
+| Nodes | `--nodes=N` | `select=N` | `span[hosts=N]` | *(single-node only)* |
+| Tasks per node | `--ntasks-per-node=N` | `mpiprocs=N` | `span[ptile=N]` | *(not applicable)* |
+| CPUs per task | `--cpus-per-task=N` | `ncpus=N` | `-n N` | `request_cpus = N` |
+| Memory per node | `--mem=N` | `mem=NMB` | `-M NMB` | `request_memory = N` |
+| GPU | `--gpus-per-node=N` | `ngpus=N` | `-gpu "num=N"` | `request_gpus = N` |
+| Wall time | `--time=HH:MM:SS` | `walltime=HH:MM:SS` | `-W HH:MM` | `+MaxRunningTime = N` |
+| Job name | `-J` / `--job-name` | `-N` | `-J` | `MyDescription = ...` |
+| Stdout / Stderr | `-o` / `-e` | `-o` / `-e` | `-o` / `-e` | `output` / `error` |
+| Email | `--mail-type/user` | `-m` / `-M` | `-B` / `-N` / `-u` | `notify_user` |
+
+For SLURM/PBS/LSF, directives appear as in-script comments (`#SBATCH`, `#PBS`, `#BSUB`). For HTCondor, they appear in a separate `.sub` file.
+
+## How CondaTainer Handles Directives
+
+When `condatainer run` is invoked, it reads the script's scheduler directives and processes them in three steps.
+
+### Normalizing Directives and Passthrough Mode
+
+CondaTainer first parses all directives into a **normalized internal representation** (nodes, tasks-per-node, CPUs-per-task, memory, GPU, time, job control).
+
+If a directive cannot be normalized — because it has no cross-scheduler equivalent — CondaTainer enters **passthrough mode**: no resource directives are written to the submission script and the unrecognized flags are forwarded as-is.
+
+SLURM directives that trigger passthrough mode:
+
+```
+--gpus-per-socket   --sockets-per-node   --cores-per-socket
+--threads-per-core  --ntasks-per-socket  --ntasks-per-core
+--distribution
 ```
 
-Each MPI rank launches its own container, all sharing the same MPI communicator via SLURM's process management interface.
-
-````{important}
-You need to have the same major and minor version of OpenMPI installed inside the container as on the host.
+**MPI task distribution must be even.** Schedulers like PBS use `mpiprocs=N` (tasks *per node*) rather than a global task count, so CondaTainer must convert `--ntasks` into a per-node value. If the division is uneven, it cannot be represented and passthrough mode is triggered.
 
 ```bash
-ml av openmpi
-# openmpi/4.1.5
-condatainer e mpi.img -- mm-install mpi4py openmpi=4.1 -y
-```
-````
-
-### Hybrid MPI + threading
-
-Some programs combine MPI ranks with per-rank threads:
-
-```bash
-#SBATCH --nodes=2
-#SBATCH --ntasks-per-node=2   # 2 MPI ranks per node
-#SBATCH --cpus-per-task=4     # 4 OpenMP threads per rank
-
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-```
-
-## CondaTainer MPI Limitations
-
-**Tasks must distribute evenly across nodes.**
-
-This constraint exists to enable **cross-scheduler translation**: schedulers like PBS use `ntasks-per-node` (`mpiprocs=N`) rather than a global task count, so CondaTainer must be able to convert `--ntasks` into a per-node value.
-
-If the division is uneven, that translation is ambiguous and CondaTainer falls back to **passthrough mode**, and `mpiexec` wrapping is disabled.
-
-**Will work** (8 tasks across 2 nodes = 4 per node):
-
-```bash
+# Will work — 8 tasks across 2 nodes = 4 per node
 #SBATCH --nodes=2
 #SBATCH --ntasks=8
-```
 
-**Passthrough mode triggered** (3 tasks across 2 nodes — uneven):
-
-```bash
+# Passthrough mode triggered — 3 % 2 != 0
 #SBATCH --nodes=2
-#SBATCH --ntasks=3   # ⚠ 3 % 2 != 0 → mpiexec wrapping disabled
+#SBATCH --ntasks=3
 ```
 
-Use `--ntasks-per-node` instead of `--ntasks` to guarantee even distribution and avoid passthrough mode:
+Use `--ntasks-per-node` to guarantee even distribution:
 
 ```bash
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4   # Always evenly distributed, translates cleanly to PBS/LSF
 ```
 
-See [Passthrough Mode Workaround](#passthrough-mode-workaround) for a workaround if you need to use an unsupported topology directive.
+### Cross-Scheduler Translation
 
-## Cross-Scheduler Translation
-
-CondaTainer can run a script written for one scheduler on a cluster running a different scheduler. When `condatainer run` detects that the script's directives (e.g., `#SBATCH`) do not match the host scheduler, it **automatically translates** the resource spec into the host's format.
-
-Supported schedulers: **SLURM**, **PBS/Torque**, **LSF/Spectrum LSF**, **HTCondor**.
-
-### How it works
-
-CondaTainer parses all scheduler directives into a normalized internal representation (nodes, tasks-per-node, CPUs-per-task, memory, GPU, time, job control).
-
-When generating the submission script for the host scheduler, it writes those fields out in the host's syntax.
+Once directives are normalized, CondaTainer can emit them in any supported scheduler's syntax. This allows a script written for one scheduler to run on a cluster running a different one.
 
 **Example: SLURM script submitted on a PBS cluster**
 
 ```bash
-#!/bin/bash
+# Original SLURM directives:
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=2
@@ -170,55 +156,50 @@ CondaTainer translates this into the PBS equivalent at submission time:
 #PBS -l walltime=02:00:00
 ```
 
-### What is translated
+Two fields are intentionally dropped during translation:
 
-| Field | SLURM | PBS | LSF |
-|-------|-------|-----|-----|
-| Nodes | `--nodes` | `select=N` | `span[hosts=N]` |
-| Tasks per node | `--ntasks-per-node` | `mpiprocs=N` | `span[ptile=N]` |
-| CPUs per task | `--cpus-per-task` | `ncpus=N` | `-n N` |
-| Memory per node | `--mem` | `mem=NMB` | `-M NMB` |
-| GPU | `--gpus-per-node:N` | `ngpus=N` | `-gpu "num=N"` |
-| Wall time | `--time` | `walltime=HH:MM:SS` | `-W HH:MM` |
-| Job name | `-J` / `--job-name` | `-N` | `-J` |
-| Stdout / Stderr | `-o` / `-e` | `-o` / `-e` | `-o` / `-e` |
-| Email | `--mail-type/user` | `-m` / `-M` | `-B` / `-N` / `-u` |
+- **Partition / queue** — queue names are site-specific. Set the target partition via `condatainer scheduler -p <partition>` or `scheduler.partition` in the config.
+- **Unrecognized flags** — directives with no target-scheduler equivalent (e.g., `#SBATCH --constraint=...`) are dropped with a warning.
 
-### What is NOT translated
+### MPI Auto-Detection
 
-Two fields are intentionally dropped during cross-scheduler translation:
+When CondaTainer detects `ntasks > 1`, it **automatically wraps the command with `mpiexec`**:
 
-- **Partition / queue** — queue names are site-specific and have no equivalent on the target scheduler. Set the target partition via `condatainer scheduler -p <partition>` or `scheduler.partition` in the config.
-- **Scheduler-specific flags** — unrecognized directives (e.g., `#SBATCH --constraint=...`) are dropped with a warning. They cannot be expressed in the target scheduler's syntax.
-
-### Passthrough mode
-
-If CondaTainer cannot safely translate the resource spec — due to topology directives that have no cross-scheduler equivalent — it enters **passthrough mode**: the job is submitted but no resource directives are written. The original unrecognized flags are forwarded as-is.
-
-Directives that trigger passthrough mode on SLURM scripts:
-
-```
---gpus-per-socket   --sockets-per-node   --cores-per-socket
---threads-per-core  --ntasks-per-socket  --ntasks-per-core
---distribution
+```bash
+# Generated job command (via module system):
+module purge && module load openmpi/4.1.5 && mpiexec condatainer run mpi_job.sh
 ```
 
-### HTCondor
+Each MPI rank launches its own container, all sharing the same MPI communicator via the scheduler's process management interface.
 
-HTCondor uses native `.sub` submit files rather than in-script directives. CondaTainer only parses HTCondor specs from files with a `.sub` extension.
+````{important}
+The OpenMPI version inside the container must match the major and minor version on the host.
 
-HTCondor is inherently single-node, so `nodes` and `tasks-per-node` are not translated. (`universe = vanilla` is assumed for all jobs.)
+```bash
+ml av openmpi
+# openmpi/4.1.5
+condatainer e mpi.img -- mm-install mpi4py openmpi=4.1 -y
+```
+````
 
-Job dependencies (after-OK chains) are not supported by HTCondor's simple submission interface (`DAGMan` is not supported in current version).
+**Hybrid MPI + threading** combines MPI ranks with per-rank threads:
 
-### Passthrough Mode Workaround
+```bash
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=2   # 2 MPI ranks per node
+#SBATCH --cpus-per-task=4     # 4 OpenMP threads per rank
 
-Just don't use `condatainer run` for the initial submission. Submit the job with `sbatch` as normal, and CondaTainer will detect the `IN_CONDATAINER` environment variable and re-run the script in container mode on the compute node.
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+```
+
+## Passthrough Mode Workaround
+
+If you need to use a directive that triggers passthrough mode, bypass `condatainer run` for the initial submission. Submit with `sbatch` directly — CondaTainer detects the `IN_CONDATAINER` environment variable on the compute node and re-runs the script in container mode automatically.
 
 ```bash
 #!/bin/bash
 #SBATCH --nodes=3
-#SBATCH --ntasks=8   # Triggers passthrough mode
+#SBATCH --ntasks=8   # Triggers passthrough mode — uneven across 3 nodes
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=1G
 #SBATCH --time=00:10:00

@@ -21,7 +21,7 @@ condatainer create -p prefix_name -f environment.yml
 Make sure the conda env YAML file is properly defined.
 
 ```{warning}
-CondaTainer uses the `sqf` name to locate resources inside the overlay. The overlay should not be renamed after creation. See [Naming Convention](./concepts.md#-naming-convention) for more details.
+CondaTainer uses the name to locate resources inside the overlay. The bundle overlay should not be renamed after creation. See [Naming Convention](./concepts.md#-naming-convention) for more details.
 ```
 
 ```{note}

@@ -1353,13 +1353,15 @@ condatainer self-update [FLAGS]
 * `-y`, `--yes`: Skip confirmation prompt and auto-update.
 * `-f`, `--force`: Force update even if already on the latest version.
 * `--dev`: Include pre-release versions (also enabled automatically when the config `branch` is set to `dev`).
+* `--base`: Update the base image only, without updating the condatainer binary.
 
 **Features:**
 
 * Downloads latest binary from GitHub releases.
 * Detects current OS and architecture.
 * Compares versions before updating.
-* Updates the base image (for the configured `default_distro`) when the minor or major version changes.
+* Automatically updates the base image when the minor or major version changes.
+* If the base image update fails, prints a warning and suggests running `condatainer self-update --base` to retry later.
 * Supports symlink resolution.
 
 **Examples:**
@@ -1376,6 +1378,9 @@ condatainer self-update -f
 
 # Include pre-release versions
 condatainer self-update --dev
+
+# Update the base image only (without updating the binary)
+condatainer self-update --base
 ```
 
 ## Completion

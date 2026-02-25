@@ -24,7 +24,7 @@ Also, when running `exec`, `e`, `run`, if the uid of `upper` inside the overlay 
 When executing commands inside the container, you can use the `-f` or `--fakeroot` flag to gain root-like privileges inside the container.
 
 ```bash
-condatainer exec --fakeroot -o /path/to/my_env.img <command>
+condatainer exec --fakeroot -w -o /path/to/my_env.img <command>
 
 # Using the 'e' shortcut
 condatainer e -f my_env.img
@@ -40,7 +40,7 @@ In CondaTainer, the container filesystem is assembled in layers:
 
 | Layer | Format | Writable? | Paths |
 |-------|--------|-----------|-------|
-| Apptainer image | `.sif` (SIF) | No (SquashFS inside) | `/usr`, `/bin`, `/lib`, `/var`, … |
+| Apptainer image | `.sif` (SIF) | No (SquashFS inside) | `/bin`, `/lib`, `/var`, … |
 | Module/Bundle overlays | `.sqf` (SquashFS) | No | `/cnt/<name>/<version>` |
 | Workspace overlay | `.img` (ext3) | Yes (when `-w`) | `/ext3/env` |
 

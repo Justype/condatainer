@@ -11,7 +11,7 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-const VERSION = "1.1.1"
+const VERSION = "1.2.0"
 const GitHubRepo = "Justype/condatainer"
 const GITHUB_REPO = GitHubRepo // Exported constant for compatibility
 const DEFAULT_DISTRO = "ubuntu24"

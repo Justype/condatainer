@@ -15,7 +15,7 @@ This tutorial uses **Posit R docker image** for R installation. If you prefer us
 
 ## Checklist
 
-- [A supported scheduler is available on your HPC system](#scheduler--workload-manager)
+- [A supported scheduler is available on your HPC system](#scheduler)
 - [Have SSH port forwarding set up to the login node](#ssh-port-forwarding)
 - [Have CondaTainer installed](#install-condatainer)
 - [Have a writable overlay image](#create-writable-overlay)
@@ -35,7 +35,7 @@ condatainer helper rstudio-server
 
 You can set [Config](./helpers_on_HPC.md#configuration-and-defaults) and helpers also support [Reusing previous settings](./helpers_on_HPC.md#reuse-mode).
 
-## Scheduler / Workload Manager
+## Scheduler
 
 Run the following command to check if a supported scheduler is available:
 
