@@ -419,6 +419,42 @@ condatainer create -p my_project_env -f install_packages.sh
 
 These methods will generate `my_project_env.sqf` in the current directory.
 
+### Exit Codes (script and job-submission behavior) ⚠️
+
+CondaTainer uses specific exit codes so automation and downstream tooling can detect special states:
+
+- `0` — Success (all requested builds completed locally or nothing to do)
+- `1` — Generic error (invalid arguments, build failures, or other fatal errors)
+- `3` — **Jobs submitted to scheduler** — overlays will be created asynchronously by scheduler jobs
+
+Commands that may return exit code `3` when scheduler jobs were submitted include:
+
+- `condatainer create ...`
+- `condatainer check -a ...` (auto-install missing deps)
+- `condatainer avail -i ...` (install from search results)
+
+Quick example for shell scripts that detect the job-submitted state:
+
+```bash
+condatainer create samtools/1.22
+if [ $? -eq 3 ]; then
+  echo "Jobs submitted to scheduler — overlays will be created asynchronously"
+  # Optionally: exit 0 or wait/monitor jobs here
+fi
+```
+
+Note: When exit code `3` is returned, CondaTainer prints a message showing the number of jobs submitted (and can be extended to emit JSON or write job metadata for automation).
+
+**Disabling Job Submission:**
+
+```bash
+# Run locally even with scheduler specs
+condatainer --local run analysis.sh
+
+# Or set in config
+condatainer config set submit_job false
+```
+
 ## Container Management (Avail, List, Remove)
 
 Manage your local library of built containers and available recipes.
@@ -920,41 +956,28 @@ condatainer run analysis.sh -a
 * Otherwise, logs are written to the global logs directory (`~/logs` by default)
 * Job scripts are created alongside the log files
 
-### Exit Codes (script and job-submission behavior) ⚠️
+### Usable ENV
 
-CondaTainer uses specific exit codes so automation and downstream tooling can detect special states:
+When running scripts with scheduler directives, the following environment variables are automatically available inside the container:
 
-- `0` — Success (all requested builds completed locally or nothing to do)
-- `1` — Generic error (invalid arguments, build failures, or other fatal errors)
-- `3` — **Jobs submitted to scheduler** — overlays will be created asynchronously by scheduler jobs
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `NNODES` | Number of compute nodes | `2` |
+| `NTASKS_PER_NODE` | Number of MPI tasks per node | `4` |
+| `NTASKS` | Total number of MPI tasks | `8` |
+| `NCPUS` | CPUs per node | `16` |
+| `NCPUS_PER_TASK` | CPUs per task | `4` |
+| `MEM` | Memory per node in MB | `8192` |
+| `MEM_MB` | Memory per node in MB | `8192` |
+| `MEM_GB` | Memory per node in GB | `8` |
 
-Commands that may return exit code `3` when scheduler jobs were submitted include:
+**Priority Order (Scheduler ENV > Script > Default):**
 
-- `condatainer create ...`
-- `condatainer check -a ...` (auto-install missing deps)
-- `condatainer avail -i ...` (install from search results)
+Environment variables are resolved with the following priority:
 
-Quick example for shell scripts that detect the job-submitted state:
-
-```bash
-condatainer create samtools/1.22
-if [ $? -eq 3 ]; then
-  echo "Jobs submitted to scheduler — overlays will be created asynchronously"
-  # Optionally: exit 0 or wait/monitor jobs here
-fi
-```
-
-Note: When exit code `3` is returned, CondaTainer prints a message showing the number of jobs submitted (and can be extended to emit JSON or write job metadata for automation).
-
-**Disabling Job Submission:**
-
-```bash
-# Run locally even with scheduler specs
-condatainer --local run analysis.sh
-
-# Or set in config
-condatainer config set submit_job false
-```
+1. **Scheduler ENV** (highest priority) — Environment variables from the scheduler (e.g., `$SLURM_CPUS_PER_TASK`)
+2. **Script** — Scheduler directives in the script (`#SBATCH`, `#PBS`, `#BSUB`)
+3. **Default** (lowest priority) — Built-in default values in config (`scheduler.*`)
 
 ### MPI Auto-Detection
 
