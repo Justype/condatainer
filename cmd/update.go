@@ -22,6 +22,7 @@ import (
 var (
 	updateForce bool
 	updateDev   bool
+	updateBase  bool
 )
 
 var updateCmd = &cobra.Command{
@@ -35,7 +36,8 @@ and replaces the current executable. A backup of the current version is not crea
 	Example: `  condatainer self-update       # Update to latest stable version
   condatainer self-update --yes # Update without confirmation
   condatainer self-update -f    # Force update even if already on latest version
-  condatainer self-update --dev # Include pre-release versions`,
+  condatainer self-update --dev # Include pre-release versions
+  condatainer self-update --base # Update the base image only`,
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runUpdate,
 }
@@ -44,6 +46,7 @@ func init() {
 	rootCmd.AddCommand(updateCmd)
 	updateCmd.Flags().BoolVarP(&updateForce, "force", "f", false, "Force update even if already on latest version")
 	updateCmd.Flags().BoolVar(&updateDev, "dev", false, "Include pre-release versions")
+	updateCmd.Flags().BoolVar(&updateBase, "base", false, "Update the base image without updating the condatainer binary")
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
@@ -71,6 +74,16 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if mappedArch, ok := archMap[arch]; ok {
 		arch = mappedArch
+	}
+
+	// Handle --base flag: update only the base image, skip binary update
+	if updateBase {
+		utils.PrintMessage("Updating base image...")
+		if err := build.EnsureBaseImage(cmd.Context(), true); err != nil {
+			return fmt.Errorf("failed to update base image: %w", err)
+		}
+		utils.PrintSuccess("Base image updated successfully")
+		return nil
 	}
 
 	if updateDev {
