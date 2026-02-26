@@ -43,3 +43,20 @@ rm src/logs/output.txt
 
 # run args test
 condatainer run --debug src/run_arg.sh test 1 3 'asdfsd asds'
+condatainer run --debug -o src/logs/run_arg_test_13.out src/run_arg.sh test 13 'another arg'
+
+# run dep test
+JOB=$(condatainer run --debug src/run_long.sh)
+condatainer run --debug --afterok "$JOB" src/run_dep.sh
+
+JOB=
+condatainer run --afterok "$JOB" src/run_dep.sh # should fail, ID is not valid
+JOB=abc123
+condatainer run --afterok "$JOB" src/run_dep.sh # should fail, ID is not valid
+JOB=12345.67890
+condatainer run --afterok "$JOB" --local src/run_dep.sh # should work (just testing the HTCondor like job ID)
+JOB=12345.node12.school.edu
+condatainer run --afterok "$JOB" --local src/run_dep.sh # should work (just testing the PBS like job ID)
+
+rm src/logs/long_job_output.txt
+

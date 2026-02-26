@@ -7,6 +7,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -31,10 +32,15 @@ var (
 	runParseModuleLoad bool
 	runStdout          string
 	runStderr          string
+	runAfterOK         string
 )
 
 // errRunAborted signals a handled stop (message already printed); caller returns nil.
 var errRunAborted = errors.New("run aborted")
+
+// jobIDRe matches a single scheduler job ID.
+// Slurm/LSF: pure digits. PBS: digits followed by .hostname (e.g. 12345.school.edu). HTCondor: ClusterID.ProcessID (e.g. 12345.0).
+var jobIDRe = regexp.MustCompile(`^\d+(\.\S+)?$`)
 
 var runCmd = &cobra.Command{
 	Use:   "run <script> [script_args...]",
@@ -53,19 +59,14 @@ Supported #CNT arguments:
   --bind HOST:CONTAINER  Bind mount path
   -f, --fakeroot         Run with fakeroot privileges
 
-Output override flags (CLI takes priority over script directives):
-  -o, --output PATH      Override job stdout path (creates parent dir if needed)
-  -e, --error  PATH      Override job stderr path
-
-Dependencies will be automatically loaded, and missing ones can be auto-installed
-with the --auto-install flag.`,
-	Example: `  condatainer run script.sh              # Run with dependency check
-  condatainer run script.sh arg1 arg2    # Pass arguments to the script
-  condatainer run -a script.sh           # Auto-install missing deps
-  condatainer run -w script.sh           # Make .img overlays writable
-  condatainer run -b base.sif script.sh  # Use custom base image
+Dependencies will be automatically loaded.`,
+	Example: `  condatainer run script.sh             # Run with dependency check
+  condatainer run script.sh arg1 arg2   # Pass arguments to the script
   condatainer run -o log/tool1_s1.out run_tool1.sh sample1  # Override stdout
-  condatainer run -o log/tool1_s1.out -e log/tool1_s1.err run_tool1.sh sample1`,
+
+  # Dependency chaining example
+  JOB=$(condatainer run run_align.sh sample1)
+  condatainer run --afterok "$JOB" run_quant.sh sample1`,
 	Args:         cobra.MinimumNArgs(1),
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runScript,
@@ -81,10 +82,22 @@ func init() {
 	runCmd.Flags().BoolVar(&runParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
 	runCmd.Flags().StringVarP(&runStdout, "output", "o", "", "Override job stdout path (creates parent dir if needed)")
 	runCmd.Flags().StringVarP(&runStderr, "error", "e", "", "Override job stderr path")
+	runCmd.Flags().StringVar(&runAfterOK, "afterok", "", "Depend on job IDs (colon-separated, e.g. 123:456:789)")
 	runCmd.Flags().SetInterspersed(false) // Stop flag parsing after script name; remaining args are passed to the script
 }
 
 func runScript(cmd *cobra.Command, args []string) error {
+	if cmd.Flags().Changed("afterok") {
+		if runAfterOK == "" {
+			ExitWithError("--afterok is empty; the upstream job may have failed to submit or run locally")
+		}
+		for id := range strings.SplitSeq(runAfterOK, ":") {
+			if id = strings.TrimSpace(id); !jobIDRe.MatchString(id) {
+				ExitWithError("--afterok %q is not a valid job ID", id)
+			}
+		}
+	}
+
 	scriptPath := args[0]
 	scriptArgs := args[1:] // arguments for the script itself
 
@@ -100,15 +113,13 @@ func runScript(cmd *cobra.Command, args []string) error {
 
 	// Validate script exists
 	if !utils.FileExists(scriptPath) {
-		utils.PrintError("Script file %s not found", utils.StylePath(scriptPath))
-		return nil
+		ExitWithError("Script file %s not found", utils.StylePath(scriptPath))
 	}
 
 	originScriptPath := scriptPath
 	scriptPath, err := filepath.Abs(scriptPath)
 	if err != nil {
-		utils.PrintError("Failed to get absolute path: %v", err)
-		return nil
+		ExitWithError("Failed to get absolute path: %v", err)
 	}
 
 	// 1. Read specs → resolve the content script (HTCondor: .sub → .sh; others: identity)
@@ -129,13 +140,12 @@ func runScript(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if runWritableImg && getNtasks(scriptSpecs) > 1 {
-		utils.PrintError("--writable cannot be used with multi-task jobs (ntasks=%d)", getNtasks(scriptSpecs))
-		return nil
+		ExitWithError("--writable cannot be used with multi-task jobs (ntasks=%d)", getNtasks(scriptSpecs))
 	}
-	overlays, buildJobIDs, err := checkDepsAndAutoInstall(cmd.Context(), contentScript, originScriptPath)
+	overlays, depJobIDs, err := checkDepsAndAutoInstall(cmd.Context(), contentScript, originScriptPath)
 	if err != nil {
 		if errors.Is(err, errRunAborted) {
-			return nil
+			os.Exit(ExitCodeError)
 		}
 		return err
 	}
@@ -148,7 +158,7 @@ func runScript(cmd *cobra.Command, args []string) error {
 	// 4. Submit if scheduler specs present and scheduler available
 	if config.Global.SubmitJob && scheduler.HasSchedulerSpecs(scriptSpecs) {
 		if err := validateAndConvertSpecs(scriptSpecs); err != nil {
-			return nil
+			os.Exit(ExitCodeError)
 		}
 		sched, schedErr := scheduler.DetectScheduler()
 		if schedErr != nil {
@@ -156,7 +166,12 @@ func runScript(cmd *cobra.Command, args []string) error {
 		} else if !sched.IsAvailable() {
 			utils.PrintNote("Script has scheduler specs but no scheduler is available. Running locally.")
 		} else {
-			return submitRunJob(sched, originScriptPath, contentScript, scriptSpecs, buildJobIDs, scriptArgs)
+			for _, id := range strings.Split(runAfterOK, ":") {
+				if id = strings.TrimSpace(id); id != "" {
+					depJobIDs = append(depJobIDs, id)
+				}
+			}
+			return submitRunJob(sched, originScriptPath, contentScript, scriptSpecs, depJobIDs, scriptArgs)
 		}
 	} else if !scheduler.HasSchedulerSpecs(scriptSpecs) {
 		utils.PrintNote("No scheduler specs found in script. Running locally.")
@@ -205,7 +220,7 @@ func processEmbeddedArgs(scriptPath string) error {
 // checkDepsAndAutoInstall resolves #DEP dependencies, checks installed overlays, and optionally
 // auto-installs missing ones. Returns overlay paths and build job IDs.
 // Returns errRunAborted (message already printed) for handled stop conditions.
-func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPath string) (overlays []string, buildJobIDs []string, err error) {
+func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPath string) (overlays []string, depJobIDs []string, err error) {
 	deps, err := utils.GetDependenciesFromScript(contentScript, config.Global.ParseModuleLoad || runParseModuleLoad)
 	if err != nil {
 		utils.PrintError("Failed to parse dependencies: %v", err)
@@ -303,10 +318,10 @@ func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPat
 
 		utils.PrintSuccess("All selected overlays installed/submitted.")
 		for _, id := range graph.GetJobIDs() {
-			buildJobIDs = append(buildJobIDs, id)
+			depJobIDs = append(depJobIDs, id)
 		}
-		if len(buildJobIDs) > 0 {
-			utils.PrintMessage("Build job(s) submitted: %s", strings.Join(buildJobIDs, ", "))
+		if len(depJobIDs) > 0 {
+			utils.PrintMessage("Build job(s) submitted: %s", strings.Join(depJobIDs, ", "))
 		}
 
 		installedOverlays, err = getInstalledOverlaysMap()
@@ -339,7 +354,7 @@ func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPat
 		}
 	}
 
-	return overlays, buildJobIDs, nil
+	return overlays, depJobIDs, nil
 }
 
 // effectiveResourceSpec resolves the resource spec using the priority chain:
@@ -391,8 +406,7 @@ export -f module ml
 `
 	fileInfo, err := os.Stat(contentScript)
 	if err != nil {
-		utils.PrintError("Failed to stat script: %v", err)
-		return nil
+		ExitWithError("Failed to stat script: %v", err)
 	}
 
 	if fileInfo.Mode()&0111 != 0 {
@@ -615,7 +629,7 @@ func buildMpiRunCommand(contentScript string, scriptArgs []string, specs *schedu
 }
 
 // shellQuote returns a single-quoted shell-safe version of s.
-// Embedded single quotes are escaped as '\''.
+// Embedded single quotes are escaped as '\'.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
@@ -625,11 +639,6 @@ func shellQuote(s string) string {
 // executable referenced in the .sub file, for other schedulers it equals scriptPath.
 func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript string, specs *scheduler.ScriptSpecs, depIDs []string, scriptArgs []string) error {
 	info := sched.GetInfo()
-	if len(depIDs) > 0 {
-		utils.PrintMessage("Submitting %s job to run %s (will wait for build job(s): %s)", info.Type, utils.StylePath(originScriptPath), strings.Join(depIDs, ", "))
-	} else {
-		utils.PrintMessage("Submitting %s job to run %s", info.Type, utils.StylePath(originScriptPath))
-	}
 
 	// Determine log directory - use spec's Stdout path if set, otherwise global log path
 	var logsDir string
@@ -692,16 +701,21 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 		return fmt.Errorf("failed to submit job: %w", err)
 	}
 
-	utils.PrintSuccess("Submitted %s job %s for %s", info.Type, utils.StyleNumber(jobID), utils.StylePath(originScriptPath))
+	fmt.Fprintln(os.Stdout, jobID)
+	if len(depIDs) > 0 {
+		utils.PrintSuccess("Submitted %s job %s for %s (after: %s)", info.Type, utils.StyleNumber(jobID), utils.StylePath(originScriptPath), strings.Join(depIDs, ", "))
+	} else {
+		utils.PrintSuccess("Submitted %s job %s for %s", info.Type, utils.StyleNumber(jobID), utils.StylePath(originScriptPath))
+	}
 
 	stdoutPath := jobSpec.Specs.Control.Stdout
 	stderrPath := jobSpec.Specs.Control.Stderr
 	if stdoutPath != "" {
 		if stderrPath == "" || stdoutPath == stderrPath {
-			utils.PrintHint("Stdout & Stderr => %s", utils.StylePath(stdoutPath))
+			utils.PrintMessage("Stdout & Stderr => %s", utils.StylePath(stdoutPath))
 		} else {
-			utils.PrintHint("Stdout => %s", utils.StylePath(stdoutPath))
-			utils.PrintHint("Stderr => %s", utils.StylePath(stderrPath))
+			utils.PrintMessage("Stdout => %s", utils.StylePath(stdoutPath))
+			utils.PrintMessage("Stderr => %s", utils.StylePath(stderrPath))
 		}
 	}
 
