@@ -160,7 +160,7 @@ condatainer run -a salmon_quant.sh
 
 ### Job Chaining
 
-All `[CNT]` messages go to stderr, only job ID is printed to stdout, so you can capture it for downstream job submission.
+All `[CNT]` messages go to stderr. Only job ID is printed to stdout, so you can capture it for downstream.
 
 ```bash
 set -e # Exit immediately if any command fails
@@ -172,9 +172,6 @@ while read sample; do
 done < samples.txt
 ```
 
-- **Local Fallback**: If no scheduler directives are found or job submission is disabled, the script will run immediately in the current shell.
-- **Cross-Scheduler Translation**: Write your scripts once using Slurm (`#SBATCH`). If cluster uses PBS, LSF, or HTCondor, **CondaTainer** will translate the directives. (*NOTE: MPI jobs must be evenly distributed across nodes for translation to work.*)
-
 ## 🔗 Links & Resources
 
 - [CondaTainer ReadTheDocs](https://condatainer.readthedocs.io/en/latest/)
@@ -183,7 +180,7 @@ done < samples.txt
 Related tools and resources:
 
 - [Compression Method Benchmarks](https://github.com/inikep/lzbench)
-- Apptainer [repo](https://github.com/apptainer/apptainer) and [docs](https://apptainer.org/docs/); Micromamba [repo](https://github.com/mamba-org/micromamba-releases); squashfs-tools [repo](https://github.com/plougher/squashfs-tools)
+- Used tools: [Apptainer](https://github.com/apptainer/apptainer), [Micromamba](https://github.com/mamba-org/micromamba-releases), [squashfs-tools](https://github.com/plougher/squashfs-tools) [e2fsprogs](https://github.com/tytso/e2fsprogs)
 - Container related: [Using Containers](https://services.rt.nyu.edu/docs/hpc/containers/containers/), [Singularity with Conda](https://services.rt.nyu.edu/docs/hpc/containers/singularity_with_conda/) and [Singularity with SquashFS](https://services.rt.nyu.edu/docs/hpc/containers/squash_file_system_and_singularity/)
 - Allocation related: [Multi-Instance GPU](https://docs.alliancecan.ca/wiki/Multi-Instance_GPU), [RAM GPU ratio](https://docs.alliancecan.ca/wiki/Allocations_and_compute_scheduling#Ratios_in_bundles)
 
