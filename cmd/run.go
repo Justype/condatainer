@@ -35,7 +35,7 @@ var (
 var errRunAborted = errors.New("run aborted")
 
 var runCmd = &cobra.Command{
-	Use:   "run [script]",
+	Use:   "run <script> [script_args...]",
 	Short: "Run a script and auto-solve the dependencies by #DEP tags",
 	Long: `Execute a script with automatic dependency resolution.
 
@@ -54,10 +54,11 @@ Supported #CNT arguments:
 Dependencies will be automatically loaded, and missing ones can be auto-installed
 with the --auto-install flag.`,
 	Example: `  condatainer run script.sh              # Run with dependency check
-  condatainer run script.sh -a           # Auto-install missing deps
-  condatainer run script.sh -w           # Make .img overlays writable
-  condatainer run script.sh -b base.sif  # Use custom base image`,
-	Args:         cobra.ExactArgs(1),
+  condatainer run script.sh arg1 arg2    # Pass arguments to the script
+  condatainer run -a script.sh           # Auto-install missing deps
+  condatainer run -w script.sh           # Make .img overlays writable
+  condatainer run -b base.sif script.sh  # Use custom base image`,
+	Args:         cobra.MinimumNArgs(1),
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runScript,
 }
@@ -70,10 +71,12 @@ func init() {
 	runCmd.Flags().BoolVarP(&runAutoInstall, "auto-install", "a", false, "Automatically install missing dependencies")
 	runCmd.Flags().BoolP("install", "i", false, "Alias for --auto-install")
 	runCmd.Flags().BoolVar(&runParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
+	runCmd.Flags().SetInterspersed(false) // Stop flag parsing after script name; remaining args are passed to the script
 }
 
 func runScript(cmd *cobra.Command, args []string) error {
 	scriptPath := args[0]
+	scriptArgs := args[1:] // arguments for the script itself
 
 	// Check if -i flag was used (alias for -a)
 	if installFlag, _ := cmd.Flags().GetBool("install"); installFlag {
@@ -119,7 +122,7 @@ func runScript(cmd *cobra.Command, args []string) error {
 
 	// 3. In-job or in-container: always run locally (no nested submission)
 	if scheduler.IsInsideJob() || config.IsInsideContainer() {
-		return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs)
+		return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs, scriptArgs)
 	}
 
 	// 4. Submit if scheduler specs present and scheduler available
@@ -133,12 +136,12 @@ func runScript(cmd *cobra.Command, args []string) error {
 		} else if !sched.IsAvailable() {
 			utils.PrintNote("Script has scheduler specs but no scheduler is available. Running locally.")
 		} else {
-			return submitRunJob(sched, originScriptPath, contentScript, scriptSpecs, buildJobIDs)
+			return submitRunJob(sched, originScriptPath, contentScript, scriptSpecs, buildJobIDs, scriptArgs)
 		}
 	} else if !scheduler.HasSchedulerSpecs(scriptSpecs) {
 		utils.PrintNote("No scheduler specs found in script. Running locally.")
 	}
-	return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs)
+	return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs, scriptArgs)
 }
 
 // resolveScriptAndSpecs tries to read scheduler specs and resolves the content script path.
@@ -357,7 +360,7 @@ func liveJobResourceEnvSettings() []string {
 }
 
 // runLocally executes the script directly via apptainer with the given overlays.
-func runLocally(ctx context.Context, contentScript string, overlays []string, specs *scheduler.ScriptSpecs) error {
+func runLocally(ctx context.Context, contentScript string, overlays []string, specs *scheduler.ScriptSpecs, scriptArgs []string) error {
 	// Disable module commands and run the script
 	executionScript := `module() { :; }
 ml() { :; }
@@ -370,11 +373,11 @@ export -f module ml
 	}
 
 	if fileInfo.Mode()&0111 != 0 {
-		// Script is executable
-		executionScript += contentScript
+		// Script is executable: $0 = contentScript, $@ = scriptArgs
+		executionScript += `"$0" "$@"`
 	} else {
-		// Run with bash
-		executionScript += "bash " + contentScript
+		// Run with bash: $0 = contentScript, $@ = scriptArgs
+		executionScript += `bash "$0" "$@"`
 	}
 
 	// Auto-bind the script's directory so it's accessible inside the container.
@@ -384,7 +387,7 @@ export -f module ml
 
 	options := execpkg.Options{
 		Overlays:     overlays,
-		Command:      []string{"/bin/bash", "-c", executionScript},
+		Command:      append([]string{"/bin/bash", "-c", executionScript, contentScript}, scriptArgs...),
 		WritableImg:  runWritableImg,
 		EnvSettings:  append(resourceEnvSettings(specs), runEnvSettings...),
 		BindPaths:    bindPaths,
@@ -563,28 +566,41 @@ func detectMpi() (bool, string, string) {
 // When ntasks > 1 it attempts to detect mpiexec (directly or via a module) and
 // wraps the condatainer run invocation with mpiexec.
 // The user is responsible for installing the same MPI version inside the container.
-func buildMpiRunCommand(contentScript string, specs *scheduler.ScriptSpecs) string {
+func buildMpiRunCommand(contentScript string, scriptArgs []string, specs *scheduler.ScriptSpecs) string {
+	runCmd := fmt.Sprintf("condatainer run %s", contentScript)
+	if len(scriptArgs) > 0 {
+		quoted := make([]string, len(scriptArgs))
+		for i, a := range scriptArgs {
+			quoted[i] = shellQuote(a)
+		}
+		runCmd += " " + strings.Join(quoted, " ")
+	}
 	if getNtasks(specs) <= 1 {
-		return fmt.Sprintf("condatainer run %s", contentScript)
+		return runCmd
 	}
 	ok, mod, mpiexecPath := detectMpi()
 	if !ok {
 		utils.PrintWarning("mpiexec not found; running %s without MPI wrapper", utils.StylePath(contentScript))
-		return fmt.Sprintf("condatainer run %s", contentScript)
+		return runCmd
 	}
 	if mod != "" {
 		utils.PrintNote("Detected MPI module: %s", utils.StyleName(mod))
-		return fmt.Sprintf("module purge && module load %s && mpiexec condatainer run %s",
-			mod, contentScript)
+		return fmt.Sprintf("module purge && module load %s && mpiexec %s", mod, runCmd)
 	}
 	utils.PrintNote("Detected mpiexec: %s", utils.StylePath(mpiexecPath))
-	return fmt.Sprintf("mpiexec condatainer run %s", contentScript)
+	return fmt.Sprintf("mpiexec %s", runCmd)
+}
+
+// shellQuote returns a single-quoted shell-safe version of s.
+// Embedded single quotes are escaped as '\''.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // submitRunJob creates and submits a scheduler job to run the script.
 // contentScript is the bash script containing #DEP/#CNT directives — for HTCondor this is the
 // executable referenced in the .sub file, for other schedulers it equals scriptPath.
-func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript string, specs *scheduler.ScriptSpecs, depIDs []string) error {
+func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript string, specs *scheduler.ScriptSpecs, depIDs []string, scriptArgs []string) error {
 	info := sched.GetInfo()
 	if len(depIDs) > 0 {
 		utils.PrintMessage("Submitting %s job to run %s (will wait for build job(s): %s)", info.Type, utils.StylePath(originScriptPath), strings.Join(depIDs, ", "))
@@ -619,7 +635,7 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 	// Build the condatainer run command pointing at the bash script.
 	// When the user provided a .sub file, contentScript is the executable .sh — the submitted
 	// job must re-invoke condatainer run on the bash script, not the submit file.
-	runCommand := buildMpiRunCommand(contentScript, specs)
+	runCommand := buildMpiRunCommand(contentScript, scriptArgs, specs)
 
 	// Generate names: short name for job, timestamped name for files
 	baseName := filepath.Base(originScriptPath)

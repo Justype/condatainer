@@ -40,3 +40,6 @@ rm src/logs/output.txt
 # ml openmpi mpi4py
 # mpiexec python src/mpi_file_handler.py
 # condatainer run src/mpi_test_slurm.sh
+
+# run args test
+condatainer run --debug src/run_arg.sh test 1 3 'asdfsd asds'
