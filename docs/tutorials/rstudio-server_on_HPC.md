@@ -183,7 +183,6 @@ condatainer helper rstudio-server
 After running the script, you will see output like this:
 
 ```
-Waiting for job 1299123 to start running. Current status: PENDING.
 Job 1299123 is now running on node cm23.
 rstudio-server at http://localhost:<port>
 You can run the following command in R to open the project directly:

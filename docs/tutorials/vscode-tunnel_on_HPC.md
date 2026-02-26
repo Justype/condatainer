@@ -160,7 +160,6 @@ condatainer helper vscode-tunnel
 After running the script, you will see output like this:
 
 ```
-Waiting for job 6628611 to start running. Current status: PENDING.
 [INFO] Waiting for VS Code Tunnel to initialize...
 
 Please use the following message for authentication:

@@ -175,7 +175,6 @@ condatainer helper xfce4
 After running the script, you will see output like this:
 
 ```
-Waiting for job 1299123 to start running. Current status: PENDING.
 Job 1299123 is now running on node cm23.
 noVNC at http://localhost:<port>/vnc.html?autoconnect=1&resize=remote#password=<password>
 If you want to stop it, run: scancel 1299123
