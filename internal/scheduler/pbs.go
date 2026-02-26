@@ -332,7 +332,7 @@ func (p *PbsScheduler) parseSingleResource(res string, rs *ResourceSpec) error {
 		rs.MemPerNodeMB = mem
 
 	case "walltime":
-		dur, err := parseHMSTime(value)
+		dur, err := utils.ParseHMSTime(value)
 		if err != nil {
 			return fmt.Errorf("invalid walltime value %q: %w", value, err)
 		}
@@ -788,7 +788,7 @@ func (p *PbsScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, erro
 
 		switch key {
 		case "resources_max.walltime", "max_walltime":
-			if duration, err := parseHMSTime(value); err == nil && duration > 0 {
+			if duration, err := utils.ParseHMSTime(value); err == nil && duration > 0 {
 				limit.MaxTime = duration
 			}
 		case "resources_max.mem", "max_mem":

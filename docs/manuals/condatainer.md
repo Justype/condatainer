@@ -889,6 +889,13 @@ condatainer run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
 * `-e`, `--error PATH`: Override the job stderr path. Takes priority over scheduler stderr settings.
 * `--afterok IDS`: Submit job with dependencies on existing job IDs. Use colon-separated IDs: `123:456:789`.
 
+**Resource override flags** (apply on top of script scheduler directives; highest priority):
+
+* `-c`, `--cpu INT`: Override CPUs per task (e.g. `4`).
+* `-m`, `--mem STRING`: Override memory per node (e.g. `4G`, `8192M`).
+* `-t`, `--time STRING`: Override walltime (e.g. `4d12h`, `2h30m`, `01:30:00`).
+* `-g`, `--gpu SPEC`: Override GPUs per node. Formats: `N` (any type), `TYPE:N`, or `TYPE` (count=1). E.g. `1`, `a100:2`, `a100`.
+
 **Script Tags:**
 
 Scripts can use special comment tags to declare dependencies and configure the container:
@@ -962,6 +969,22 @@ condatainer run -a analysis.sh
 * Otherwise, logs are written to the global logs directory (`~/logs` by default)
 * If only `-o` is set (no `-e`), stderr is merged into the same file
 * Job scripts are created in the same directory as the log file
+
+**Resource Override Examples:**
+
+```bash
+# Override CPU/memory/time on top of script's #SBATCH directives
+condatainer run -c 8 -m 32G -t 4h analysis.sh
+
+# Override GPU spec (any GPU type, count 2)
+condatainer run -g 2 gpu_job.sh
+
+# Override with specific GPU type and count
+condatainer run -g a100:4 gpu_job.sh
+
+# GPU type only (count defaults to 1)
+condatainer run -g h100 gpu_job.sh
+```
 
 ### Job Chaining
 

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,11 @@ var (
 	runStdout          string
 	runStderr          string
 	runAfterOK         string
+	runCPU             int
+	runMem             string
+	runTime            string
+	runGPU             string
+	runDryRun          bool
 )
 
 // errRunAborted signals a handled stop (message already printed); caller returns nil.
@@ -52,17 +58,19 @@ The script can contain special comment tags:
   #DEP: /path/overlay.img - Declares an overlay dependency (.sqf and .img)
   #CNT args               - Additional arguments to pass to condatainer
 
-Supported #CNT arguments:
+Supported #CNT arguments (also available as CLI flags):
   -w, --writable         Make .img overlays writable
   -b, --base-image PATH  Use custom base image
-  --env KEY=VALUE        Set environment variable
-  --bind HOST:CONTAINER  Bind mount path
+  --env KEY=VALUE        Set environment variable (repeatable)
+  --bind HOST:CONTAINER  Bind mount path (repeatable)
   -f, --fakeroot         Run with fakeroot privileges
 
 Dependencies will be automatically loaded.`,
-	Example: `  condatainer run script.sh             # Run with dependency check
-  condatainer run script.sh arg1 arg2   # Pass arguments to the script
+	Example: `  condatainer run script.sh                        # Run with dependency check
+  condatainer run script.sh arg1 arg2              # Pass arguments to the script
   condatainer run -o log/tool1_s1.out run_tool1.sh sample1  # Override stdout
+  condatainer run -g a100:2 gpu_job.sh             # Override GPU spec
+  condatainer run -c 8 -m 16G -t 2h job.sh        # Override resources
 
   # Dependency chaining example
   JOB=$(condatainer run run_align.sh sample1)
@@ -83,6 +91,14 @@ func init() {
 	runCmd.Flags().StringVarP(&runStdout, "output", "o", "", "Override job stdout path (creates parent dir if needed)")
 	runCmd.Flags().StringVarP(&runStderr, "error", "e", "", "Override job stderr path")
 	runCmd.Flags().StringVar(&runAfterOK, "afterok", "", "Depend on job IDs (colon-separated, e.g. 123:456:789)")
+	runCmd.Flags().StringArrayVar(&runEnvSettings, "env", nil, "Set environment variable KEY=VALUE (repeatable)")
+	runCmd.Flags().StringArrayVar(&runBindPaths, "bind", nil, "Bind mount HOST:CONTAINER (repeatable)")
+	runCmd.Flags().BoolVarP(&runFakeroot, "fakeroot", "f", false, "Run with fakeroot privileges")
+	runCmd.Flags().IntVarP(&runCPU, "cpu", "c", 0, "Override CPUs per task (e.g. 4)")
+	runCmd.Flags().StringVarP(&runMem, "mem", "m", "", "Override memory per node (e.g. 4G, 8192M)")
+	runCmd.Flags().StringVarP(&runTime, "time", "t", "", "Override walltime (e.g. 4d12h, 2h30m, 01:30:00)")
+	runCmd.Flags().StringVarP(&runGPU, "gpu", "g", "", "Override GPUs per node (e.g. 1, a100:2, a100)")
+	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Preview what would happen without executing")
 	runCmd.Flags().SetInterspersed(false) // Stop flag parsing after script name; remaining args are passed to the script
 }
 
@@ -135,9 +151,44 @@ func runScript(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// CLI -c/-m/-t/-g resource overrides (highest priority, only when spec is parsed)
+	if scriptSpecs != nil && scriptSpecs.Spec != nil {
+		override := &scheduler.ResourceSpec{}
+		if runCPU > 0 {
+			override.CpusPerTask = runCPU
+		}
+		if runMem != "" {
+			mb, err := utils.ParseMemoryMB(runMem)
+			if err != nil {
+				ExitWithError("--mem %q: %v", runMem, err)
+			}
+			override.MemPerNodeMB = mb
+		}
+		if runTime != "" {
+			d, err := utils.ParseWalltime(runTime)
+			if err != nil {
+				ExitWithError("--time %q: %v", runTime, err)
+			}
+			override.Time = d
+		}
+		if runGPU != "" {
+			gpu, err := parseGpuFlag(runGPU)
+			if err != nil {
+				ExitWithError("--gpu %q: %v", runGPU, err)
+			}
+			override.Gpu = gpu
+		}
+		scriptSpecs.Spec.Override(override)
+	}
+
 	// 2. Embedded #CNT args + dependency check/install
 	if err := processEmbeddedArgs(contentScript); err != nil {
 		return err
+	}
+	// Dry run: print summary and exit without executing
+	if runDryRun {
+		printDryRunSummary(contentScript, originScriptPath, scriptSpecs, scriptArgs)
+		return nil
 	}
 	if runWritableImg && getNtasks(scriptSpecs) > 1 {
 		ExitWithError("--writable cannot be used with multi-task jobs (ntasks=%d)", getNtasks(scriptSpecs))
@@ -176,8 +227,8 @@ func runScript(cmd *cobra.Command, args []string) error {
 	} else if !scheduler.HasSchedulerSpecs(scriptSpecs) {
 		utils.PrintNote("No scheduler specs found in script. Running locally.")
 	}
-	if runStdout != "" || runStderr != "" {
-		utils.PrintNote("-o/-e are only used for submitted jobs and will be ignored when running locally.")
+	if runStdout != "" || runStderr != "" || runMem != "" || runTime != "" || runGPU != "" {
+		utils.PrintNote("-o/-e/-m/-t/-g are only used for submitted jobs and will be ignored when running locally.")
 	}
 	return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs, scriptArgs)
 }
@@ -446,6 +497,222 @@ export -f module ml
 	return nil
 }
 
+// printDryRunSummary prints what condatainer run would do without executing.
+func printDryRunSummary(contentScript, originScript string, specs *scheduler.ScriptSpecs, scriptArgs []string) {
+	fmt.Printf("%s %s\n", utils.StyleTitle("Dry run:"), originScript)
+
+	// Dependencies
+	baseImg := runBaseImage
+	if baseImg == "" {
+		baseImg = config.GetBaseImage()
+	}
+
+	deps, err := utils.GetDependenciesFromScript(contentScript, config.Global.ParseModuleLoad || runParseModuleLoad)
+	if err != nil {
+		fmt.Printf("%s Could not parse dependencies: %v\n", utils.StyleWarning("[WARN]"), err)
+	} else {
+		installedOverlays, _ := getInstalledOverlaysMap()
+		check := utils.StyleSuccess("✓")
+		cross := utils.StyleError("✗")
+
+		// First pass: collect results and compute max dep name width for alignment
+		type depEntry struct {
+			dep, path string
+			ok        bool
+		}
+		entries := make([]depEntry, 0, len(deps))
+		for _, dep := range deps {
+			var entry depEntry
+			entry.dep = dep
+			if utils.IsOverlay(dep) {
+				entry.ok = utils.FileExists(dep)
+				entry.path = dep
+			} else {
+				normalized := utils.NormalizeNameVersion(dep)
+				entry.path, entry.ok = installedOverlays[normalized]
+			}
+			entries = append(entries, entry)
+		}
+
+		found, missing := 0, 0
+		if utils.FileExists(baseImg) {
+			found++
+		} else {
+			missing++
+		}
+		for _, e := range entries {
+			if e.ok {
+				found++
+			} else {
+				missing++
+			}
+		}
+		fmt.Printf("%s (%d found, %d missing):\n", utils.StyleTitle("Dependencies:"), found, missing)
+
+		// Base image
+		if utils.FileExists(baseImg) {
+			fmt.Printf("  Base:      %s %s\n", check, utils.StylePath(baseImg))
+		} else {
+			fmt.Printf("  Base:      %s %s %s\n", cross, utils.StylePath(baseImg), utils.StyleWarning("(not found)"))
+		}
+
+		// Group found deps by images directory, preserving insertion order
+		dirOrder := []string{}
+		dirDeps := map[string][]string{}
+		for _, e := range entries {
+			if e.ok {
+				dir := filepath.Dir(e.path)
+				if _, exists := dirDeps[dir]; !exists {
+					dirOrder = append(dirOrder, dir)
+				}
+				dirDeps[dir] = append(dirDeps[dir], e.dep)
+			}
+		}
+		for _, dir := range dirOrder {
+			fmt.Printf("  %s\n", utils.StylePath(dir+"/"))
+			for _, dep := range dirDeps[dir] {
+				fmt.Printf("    %s %s\n", check, dep)
+			}
+		}
+		// Missing deps listed after found
+		for _, e := range entries {
+			if !e.ok {
+				suffix := utils.StyleWarning("(not installed)")
+				if utils.IsOverlay(e.dep) {
+					suffix = utils.StyleWarning("(not found)")
+				}
+				fmt.Printf("  %s %s  %s\n", cross, e.dep, suffix)
+			}
+		}
+	}
+
+	// Scheduler specs
+	if specs != nil && specs.Spec != nil {
+		rs := effectiveResourceSpec(specs)
+		fmt.Printf("%s\n", utils.StyleTitle("Resource specs:"))
+		if rs.CpusPerTask > 0 {
+			fmt.Printf("  CPUs:      %d\n", rs.CpusPerTask)
+		}
+		if rs.MemPerNodeMB > 0 {
+			if rs.MemPerNodeMB >= 1024 && rs.MemPerNodeMB%1024 == 0 {
+				fmt.Printf("  Memory:    %d GB\n", rs.MemPerNodeMB/1024)
+			} else {
+				fmt.Printf("  Memory:    %d MB\n", rs.MemPerNodeMB)
+			}
+		}
+		if rs.Time > 0 {
+			total := int64(rs.Time.Seconds())
+			fmt.Printf("  Time:      %02d:%02d:%02d\n", total/3600, (total%3600)/60, total%60)
+		}
+		if rs.Gpu != nil {
+			if rs.Gpu.Type != "" {
+				fmt.Printf("  GPU:       %s x%d\n", rs.Gpu.Type, rs.Gpu.Count)
+			} else {
+				fmt.Printf("  GPU:       %d\n", rs.Gpu.Count)
+			}
+		}
+
+		fmt.Printf("%s\n", utils.StyleTitle("Job control:"))
+		scriptBase := strings.TrimSuffix(filepath.Base(originScript), filepath.Ext(originScript))
+		if specs.Control.JobName != "" {
+			fmt.Printf("  Name:      %s\n", specs.Control.JobName)
+		} else {
+			fmt.Printf("  Name:      %s (default)\n", scriptBase)
+		}
+		if specs.Control.Partition != "" {
+			fmt.Printf("  Partition: %s\n", specs.Control.Partition)
+		}
+		logsDir := config.Global.LogsDir
+		if logsDir == "" {
+			logsDir = filepath.Join(os.Getenv("HOME"), "logs")
+		}
+		defaultOut := filepath.Join(logsDir, scriptBase+"_<timestamp>.out")
+		if specs.Control.Stdout != "" {
+			fmt.Printf("  Stdout:    %s\n", specs.Control.Stdout)
+		} else {
+			fmt.Printf("  Stdout:    %s (default)\n", defaultOut)
+		}
+		if specs.Control.Stderr != "" {
+			fmt.Printf("  Stderr:    %s\n", specs.Control.Stderr)
+		} else if specs.Control.Stdout != "" {
+			fmt.Printf("  Stderr:    %s (default)\n", specs.Control.Stdout)
+		} else {
+			fmt.Printf("  Stderr:    %s (default)\n", defaultOut)
+		}
+
+		if runAfterOK != "" {
+			fmt.Printf("  AfterOK:   %s\n", runAfterOK)
+		}
+
+		// Email Notifications
+		var events []string
+		if specs.Control.EmailOnBegin {
+			events = append(events, "BEGIN")
+		}
+		if specs.Control.EmailOnEnd {
+			events = append(events, "END")
+		}
+		if specs.Control.EmailOnFail {
+			events = append(events, "FAIL")
+		}
+		if len(events) > 0 {
+			mailStr := strings.Join(events, ",")
+			if specs.Control.MailUser != "" {
+				mailStr += " to " + specs.Control.MailUser
+			}
+			fmt.Printf("  Mail:      %s\n", mailStr)
+		}
+	}
+
+	// Container args
+	hasContainerArgs := len(runEnvSettings) > 0 || len(runBindPaths) > 0 || runFakeroot || runWritableImg
+	if hasContainerArgs {
+		fmt.Printf("%s\n", utils.StyleTitle("Container args:"))
+		for _, env := range runEnvSettings {
+			fmt.Printf("  Env:       %s\n", env)
+		}
+		for _, bind := range runBindPaths {
+			fmt.Printf("  Bind:      %s\n", bind)
+		}
+		if runFakeroot {
+			fmt.Printf("  Fakeroot:  yes\n")
+		}
+		if runWritableImg {
+			fmt.Printf("  Writable:  yes\n")
+		}
+	}
+
+	// Script args
+	if len(scriptArgs) > 0 {
+		fmt.Printf("%s\n", utils.StyleTitle("Script args:"))
+		for i := 0; i < len(scriptArgs); i++ {
+			arg := scriptArgs[i]
+			if strings.HasPrefix(arg, "-") && i+1 < len(scriptArgs) && !strings.HasPrefix(scriptArgs[i+1], "-") {
+				fmt.Printf("  %s %s\n", arg, scriptArgs[i+1])
+				i++
+			} else {
+				fmt.Printf("  %s\n", arg)
+			}
+		}
+	}
+
+	// Action
+	if scheduler.IsInsideJob() {
+		fmt.Printf("%s Would run locally (in job)\n", utils.StyleTitle("Action:"))
+	} else if config.IsInsideContainer() {
+		fmt.Printf("%s Would run locally (in container)\n", utils.StyleTitle("Action:"))
+	} else if config.Global.SubmitJob && scheduler.HasSchedulerSpecs(specs) {
+		sched, err := scheduler.DetectScheduler()
+		if err != nil || !sched.IsAvailable() {
+			fmt.Printf("%s Would run locally (scheduler not available)\n", utils.StyleTitle("Action:"))
+		} else {
+			fmt.Printf("%s Would submit to %s\n", utils.StyleTitle("Action:"), sched.GetInfo().Type)
+		}
+	} else {
+		fmt.Printf("%s Would run locally\n", utils.StyleTitle("Action:"))
+	}
+}
+
 // applyScriptArgs parses #CNT arguments and applies them to run options
 func applyScriptArgs(scriptArgs []string) {
 	for _, argLine := range scriptArgs {
@@ -473,15 +740,15 @@ func applyScriptArgs(scriptArgs []string) {
 					runBindPaths = append(runBindPaths, parts[i])
 				}
 			default:
-				// Handle --env=VALUE and --bind=VALUE formats
-				if strings.HasPrefix(arg, "--env=") {
-					runEnvSettings = append(runEnvSettings, strings.TrimPrefix(arg, "--env="))
-				} else if strings.HasPrefix(arg, "--bind=") {
-					runBindPaths = append(runBindPaths, strings.TrimPrefix(arg, "--bind="))
-				} else if strings.HasPrefix(arg, "-b=") {
-					runBaseImage = strings.TrimPrefix(arg, "-b=")
-				} else if strings.HasPrefix(arg, "--base-image=") {
-					runBaseImage = strings.TrimPrefix(arg, "--base-image=")
+				// Handle --flag=VALUE formats
+				if v, ok := strings.CutPrefix(arg, "--env="); ok {
+					runEnvSettings = append(runEnvSettings, v)
+				} else if v, ok := strings.CutPrefix(arg, "--bind="); ok {
+					runBindPaths = append(runBindPaths, v)
+				} else if v, ok := strings.CutPrefix(arg, "-b="); ok {
+					runBaseImage = v
+				} else if v, ok := strings.CutPrefix(arg, "--base-image="); ok {
+					runBaseImage = v
 				}
 			}
 		}
@@ -489,6 +756,30 @@ func applyScriptArgs(scriptArgs []string) {
 }
 
 // parseArgsInScript extracts arguments from #CNT comments in the script
+// parseGpuFlag parses --gpu values: "N", "TYPE:N", or "TYPE" (count defaults to 1).
+func parseGpuFlag(s string) (*scheduler.GpuSpec, error) {
+	if before, after, found := strings.Cut(s, ":"); found {
+		// TYPE:N
+		count, err := strconv.Atoi(after)
+		if err != nil || count <= 0 {
+			return nil, fmt.Errorf("invalid GPU count %q (expected TYPE:N, e.g. a100:2)", after)
+		}
+		return &scheduler.GpuSpec{Type: strings.ToLower(before), Count: count}, nil
+	}
+	// bare N or bare TYPE
+	if count, err := strconv.Atoi(s); err == nil {
+		if count <= 0 {
+			return nil, fmt.Errorf("GPU count must be > 0")
+		}
+		return &scheduler.GpuSpec{Count: count}, nil
+	}
+	// TYPE only — default count 1
+	if s == "" {
+		return nil, fmt.Errorf("empty GPU spec")
+	}
+	return &scheduler.GpuSpec{Type: strings.ToLower(s), Count: 1}, nil
+}
+
 func parseArgsInScript(scriptPath string) ([]string, error) {
 	data, err := os.ReadFile(scriptPath)
 	if err != nil {
