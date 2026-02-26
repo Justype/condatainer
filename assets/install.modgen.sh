@@ -258,5 +258,5 @@ update_config_block "$RC_FILE" "$MOD_START" "$MOD_END" "$MOD_BLOCK" "MODGEN MODU
 echo -e "----------------------------------------"
 echo -e "${GREEN}Success!${NC}"
 echo "Run this to apply changes:"
-echo -e "  source ${BLUE}$RC_FILE${NC}"
+echo -e "  ${YELLOW}source $RC_FILE${NC}"
 echo -e "========================================"

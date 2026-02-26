@@ -301,5 +301,5 @@ fi
 echo -e "----------------------------------------"
 echo -e "${GREEN}Success!${NC}"
 echo "Run this to apply changes:"
-echo -e "  source ${BLUE}$RC_FILE${NC}"
+echo -e "  ${YELLOW}source $RC_FILE${NC}"
 echo -e "========================================"
