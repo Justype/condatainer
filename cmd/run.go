@@ -499,14 +499,17 @@ export -f module ml
 
 // printDryRunSummary prints what condatainer run would do without executing.
 func printDryRunSummary(contentScript, originScript string, specs *scheduler.ScriptSpecs, scriptArgs []string) {
-	utils.PrintMessage("%s %s", "Dry run:", utils.StylePath(originScript))
+	fmt.Printf("%s %s\n", utils.StyleTitle("Dry run:"), originScript)
 
 	// Dependencies
+	baseImg := runBaseImage
+	if baseImg == "" {
+		baseImg = config.GetBaseImage()
+	}
+
 	deps, err := utils.GetDependenciesFromScript(contentScript, config.Global.ParseModuleLoad || runParseModuleLoad)
 	if err != nil {
-		utils.PrintWarning("Could not parse dependencies: %v", err)
-	} else if len(deps) == 0 {
-		utils.PrintMessage("%s none", utils.StyleTitle("Dependencies:"))
+		fmt.Printf("%s Could not parse dependencies: %v\n", utils.StyleWarning("[WARN]"), err)
 	} else {
 		installedOverlays, _ := getInstalledOverlaysMap()
 		check := utils.StyleSuccess("✓")
@@ -532,6 +535,11 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		}
 
 		found, missing := 0, 0
+		if utils.FileExists(baseImg) {
+			found++
+		} else {
+			missing++
+		}
 		for _, e := range entries {
 			if e.ok {
 				found++
@@ -539,7 +547,14 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 				missing++
 			}
 		}
-		utils.PrintMessage("%s (%d found, %d missing):", utils.StyleTitle("Dependencies:"), found, missing)
+		fmt.Printf("%s (%d found, %d missing):\n", utils.StyleTitle("Dependencies:"), found, missing)
+
+		// Base image
+		if utils.FileExists(baseImg) {
+			fmt.Printf("  Base:      %s %s\n", check, utils.StylePath(baseImg))
+		} else {
+			fmt.Printf("  Base:      %s %s %s\n", cross, utils.StylePath(baseImg), utils.StyleWarning("(not found)"))
+		}
 
 		// Group found deps by images directory, preserving insertion order
 		dirOrder := []string{}
@@ -554,9 +569,9 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 			}
 		}
 		for _, dir := range dirOrder {
-			utils.PrintMessage("  %s", utils.StylePath(dir+"/"))
+			fmt.Printf("  %s\n", utils.StylePath(dir+"/"))
 			for _, dep := range dirDeps[dir] {
-				utils.PrintMessage("    %s %s", check, dep)
+				fmt.Printf("    %s %s\n", check, dep)
 			}
 		}
 		// Missing deps listed after found
@@ -566,7 +581,7 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 				if utils.IsOverlay(e.dep) {
 					suffix = utils.StyleWarning("(not found)")
 				}
-				utils.PrintMessage("  %s %s  %s", cross, e.dep, suffix)
+				fmt.Printf("  %s %s  %s\n", cross, e.dep, suffix)
 			}
 		}
 	}
@@ -574,36 +589,38 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 	// Scheduler specs
 	if specs != nil && specs.Spec != nil {
 		rs := effectiveResourceSpec(specs)
-		utils.PrintMessage("%s", utils.StyleTitle("Scheduler specs:"))
+		fmt.Printf("%s\n", utils.StyleTitle("Resource specs:"))
 		if rs.CpusPerTask > 0 {
-			utils.PrintMessage("  CPUs:      %d", rs.CpusPerTask)
+			fmt.Printf("  CPUs:      %d\n", rs.CpusPerTask)
 		}
 		if rs.MemPerNodeMB > 0 {
 			if rs.MemPerNodeMB >= 1024 && rs.MemPerNodeMB%1024 == 0 {
-				utils.PrintMessage("  Memory:    %d GB", rs.MemPerNodeMB/1024)
+				fmt.Printf("  Memory:    %d GB\n", rs.MemPerNodeMB/1024)
 			} else {
-				utils.PrintMessage("  Memory:    %d MB", rs.MemPerNodeMB)
+				fmt.Printf("  Memory:    %d MB\n", rs.MemPerNodeMB)
 			}
 		}
 		if rs.Time > 0 {
 			total := int64(rs.Time.Seconds())
-			utils.PrintMessage("  Time:      %02d:%02d:%02d", total/3600, (total%3600)/60, total%60)
+			fmt.Printf("  Time:      %02d:%02d:%02d\n", total/3600, (total%3600)/60, total%60)
 		}
 		if rs.Gpu != nil {
 			if rs.Gpu.Type != "" {
-				utils.PrintMessage("  GPU:       %s x%d", rs.Gpu.Type, rs.Gpu.Count)
+				fmt.Printf("  GPU:       %s x%d\n", rs.Gpu.Type, rs.Gpu.Count)
 			} else {
-				utils.PrintMessage("  GPU:       %d", rs.Gpu.Count)
+				fmt.Printf("  GPU:       %d\n", rs.Gpu.Count)
 			}
 		}
+
+		fmt.Printf("%s\n", utils.StyleTitle("Job control:"))
 		scriptBase := strings.TrimSuffix(filepath.Base(originScript), filepath.Ext(originScript))
 		if specs.Control.JobName != "" {
-			utils.PrintMessage("  Name:      %s", specs.Control.JobName)
+			fmt.Printf("  Name:      %s\n", specs.Control.JobName)
 		} else {
-			utils.PrintMessage("  Name:      %s (default)", scriptBase)
+			fmt.Printf("  Name:      %s (default)\n", scriptBase)
 		}
 		if specs.Control.Partition != "" {
-			utils.PrintMessage("  Partition: %s", specs.Control.Partition)
+			fmt.Printf("  Partition: %s\n", specs.Control.Partition)
 		}
 		logsDir := config.Global.LogsDir
 		if logsDir == "" {
@@ -611,68 +628,88 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		}
 		defaultOut := filepath.Join(logsDir, scriptBase+"_<timestamp>.out")
 		if specs.Control.Stdout != "" {
-			utils.PrintMessage("  Stdout:    %s", specs.Control.Stdout)
+			fmt.Printf("  Stdout:    %s\n", specs.Control.Stdout)
 		} else {
-			utils.PrintMessage("  Stdout:    %s (default)", defaultOut)
+			fmt.Printf("  Stdout:    %s (default)\n", defaultOut)
 		}
 		if specs.Control.Stderr != "" {
-			utils.PrintMessage("  Stderr:    %s", specs.Control.Stderr)
+			fmt.Printf("  Stderr:    %s\n", specs.Control.Stderr)
 		} else if specs.Control.Stdout != "" {
-			utils.PrintMessage("  Stderr:    %s (default)", specs.Control.Stdout)
+			fmt.Printf("  Stderr:    %s (default)\n", specs.Control.Stdout)
 		} else {
-			utils.PrintMessage("  Stderr:    %s (default)", defaultOut)
+			fmt.Printf("  Stderr:    %s (default)\n", defaultOut)
+		}
+
+		if runAfterOK != "" {
+			fmt.Printf("  AfterOK:   %s\n", runAfterOK)
+		}
+
+		// Email Notifications
+		var events []string
+		if specs.Control.EmailOnBegin {
+			events = append(events, "BEGIN")
+		}
+		if specs.Control.EmailOnEnd {
+			events = append(events, "END")
+		}
+		if specs.Control.EmailOnFail {
+			events = append(events, "FAIL")
+		}
+		if len(events) > 0 {
+			mailStr := strings.Join(events, ",")
+			if specs.Control.MailUser != "" {
+				mailStr += " to " + specs.Control.MailUser
+			}
+			fmt.Printf("  Mail:      %s\n", mailStr)
 		}
 	}
 
-	// Container args (only non-default values)
-	hasContainerArgs := runBaseImage != "" || len(runEnvSettings) > 0 || len(runBindPaths) > 0 || runFakeroot || runWritableImg
+	// Container args
+	hasContainerArgs := len(runEnvSettings) > 0 || len(runBindPaths) > 0 || runFakeroot || runWritableImg
 	if hasContainerArgs {
-		utils.PrintMessage("%s", utils.StyleTitle("Container args:"))
-		if runBaseImage != "" {
-			utils.PrintMessage("  Base:     %s", utils.StylePath(runBaseImage))
-		}
+		fmt.Printf("%s\n", utils.StyleTitle("Container args:"))
 		for _, env := range runEnvSettings {
-			utils.PrintMessage("  Env:      %s", env)
+			fmt.Printf("  Env:       %s\n", env)
 		}
 		for _, bind := range runBindPaths {
-			utils.PrintMessage("  Bind:     %s", bind)
+			fmt.Printf("  Bind:      %s\n", bind)
 		}
 		if runFakeroot {
-			utils.PrintMessage("  Fakeroot: yes")
+			fmt.Printf("  Fakeroot:  yes\n")
 		}
 		if runWritableImg {
-			utils.PrintMessage("  Writable: yes")
+			fmt.Printf("  Writable:  yes\n")
 		}
 	}
 
 	// Script args
 	if len(scriptArgs) > 0 {
-		utils.PrintMessage("%s", utils.StyleTitle("Script args:"))
+		fmt.Printf("%s\n", utils.StyleTitle("Script args:"))
 		for i := 0; i < len(scriptArgs); i++ {
 			arg := scriptArgs[i]
 			if strings.HasPrefix(arg, "-") && i+1 < len(scriptArgs) && !strings.HasPrefix(scriptArgs[i+1], "-") {
-				utils.PrintMessage("  %s %s", arg, scriptArgs[i+1])
+				fmt.Printf("  %s %s\n", arg, scriptArgs[i+1])
 				i++
 			} else {
-				utils.PrintMessage("  %s", arg)
+				fmt.Printf("  %s\n", arg)
 			}
 		}
 	}
 
 	// Action
 	if scheduler.IsInsideJob() {
-		utils.PrintMessage("%s Would run locally (in job)", utils.StyleTitle("Action:"))
+		fmt.Printf("%s Would run locally (in job)\n", utils.StyleTitle("Action:"))
 	} else if config.IsInsideContainer() {
-		utils.PrintMessage("%s Would run locally (in container)", utils.StyleTitle("Action:"))
+		fmt.Printf("%s Would run locally (in container)\n", utils.StyleTitle("Action:"))
 	} else if config.Global.SubmitJob && scheduler.HasSchedulerSpecs(specs) {
 		sched, err := scheduler.DetectScheduler()
 		if err != nil || !sched.IsAvailable() {
-			utils.PrintMessage("%s Would run locally (scheduler not available)", utils.StyleTitle("Action:"))
+			fmt.Printf("%s Would run locally (scheduler not available)\n", utils.StyleTitle("Action:"))
 		} else {
-			utils.PrintMessage("%s Would submit to %s", utils.StyleTitle("Action:"), sched.GetInfo().Type)
+			fmt.Printf("%s Would submit to %s\n", utils.StyleTitle("Action:"), sched.GetInfo().Type)
 		}
 	} else {
-		utils.PrintMessage("%s Would run locally", utils.StyleTitle("Action:"))
+		fmt.Printf("%s Would run locally\n", utils.StyleTitle("Action:"))
 	}
 }
 
