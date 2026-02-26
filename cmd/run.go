@@ -29,6 +29,8 @@ var (
 	runBindPaths       []string
 	runFakeroot        bool
 	runParseModuleLoad bool
+	runStdout          string
+	runStderr          string
 )
 
 // errRunAborted signals a handled stop (message already printed); caller returns nil.
@@ -51,13 +53,19 @@ Supported #CNT arguments:
   --bind HOST:CONTAINER  Bind mount path
   -f, --fakeroot         Run with fakeroot privileges
 
+Output override flags (CLI takes priority over script directives):
+  -o, --output PATH      Override job stdout path (creates parent dir if needed)
+  -e, --error  PATH      Override job stderr path
+
 Dependencies will be automatically loaded, and missing ones can be auto-installed
 with the --auto-install flag.`,
 	Example: `  condatainer run script.sh              # Run with dependency check
   condatainer run script.sh arg1 arg2    # Pass arguments to the script
   condatainer run -a script.sh           # Auto-install missing deps
   condatainer run -w script.sh           # Make .img overlays writable
-  condatainer run -b base.sif script.sh  # Use custom base image`,
+  condatainer run -b base.sif script.sh  # Use custom base image
+  condatainer run -o log/tool1_s1.out run_tool1.sh sample1  # Override stdout
+  condatainer run -o log/tool1_s1.out -e log/tool1_s1.err run_tool1.sh sample1`,
 	Args:         cobra.MinimumNArgs(1),
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runScript,
@@ -71,6 +79,8 @@ func init() {
 	runCmd.Flags().BoolVarP(&runAutoInstall, "auto-install", "a", false, "Automatically install missing dependencies")
 	runCmd.Flags().BoolP("install", "i", false, "Alias for --auto-install")
 	runCmd.Flags().BoolVar(&runParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
+	runCmd.Flags().StringVarP(&runStdout, "output", "o", "", "Override job stdout path (creates parent dir if needed)")
+	runCmd.Flags().StringVarP(&runStderr, "error", "e", "", "Override job stderr path")
 	runCmd.Flags().SetInterspersed(false) // Stop flag parsing after script name; remaining args are passed to the script
 }
 
@@ -103,6 +113,16 @@ func runScript(cmd *cobra.Command, args []string) error {
 
 	// 1. Read specs → resolve the content script (HTCondor: .sub → .sh; others: identity)
 	contentScript, scriptSpecs := resolveScriptAndSpecs(scriptPath)
+
+	// CLI -o/-e override script directives (highest priority)
+	if scriptSpecs != nil {
+		if runStdout != "" {
+			scriptSpecs.Control.Stdout = runStdout
+		}
+		if runStderr != "" {
+			scriptSpecs.Control.Stderr = runStderr
+		}
+	}
 
 	// 2. Embedded #CNT args + dependency check/install
 	if err := processEmbeddedArgs(contentScript); err != nil {
@@ -140,6 +160,9 @@ func runScript(cmd *cobra.Command, args []string) error {
 		}
 	} else if !scheduler.HasSchedulerSpecs(scriptSpecs) {
 		utils.PrintNote("No scheduler specs found in script. Running locally.")
+	}
+	if runStdout != "" || runStderr != "" {
+		utils.PrintNote("-o/-e are only used for submitted jobs and will be ignored when running locally.")
 	}
 	return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs, scriptArgs)
 }
