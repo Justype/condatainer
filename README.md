@@ -9,18 +9,12 @@
 **CondaTainer** is a rootless CLI designed to manage tools, data, and project environments, and seamlessly launch interactive apps on HPC clusters — perfect for individuals and small teams using institutional or regional compute.
 
 * **Web-App Ready:** Launch *RStudio*, *VS Code*, *noVNC* and more with one command.
-* **Unified Management:** Easily organize group-level tools/data and isolate project environments.
-* **Inode Saver:** Packing 30k+ Conda files into a single portable image to bypass quota limits.
+* **Unified Management:** Centralize group resources and easily isolate project environments.
+* **Inode Saver:** Packing 30k+ Conda files into a single portable image.
 * **Scheduler Native:** Out-of-the-box integration with *Slurm*, *PBS*, *LSF*, and *HTCondor*.
 
 > [!NOTE]
 > Slurm is the primary, tested scheduler. Others are experimental, bug reports are welcome!
-
-## 📋 Prerequisites
-
-- **Linux (x86_64 only)**: AArch64 is not supported yet.
-- **Apptainer/Singularity**: Required for all core container operations.
-- **squashfs-tools**, **e2fsprogs**: For overlay creation and management.
 
 ## 🛠️ Installation
 
@@ -36,7 +30,7 @@ After installation, reload your shell and initialize the default configuration:
 
 ```bash
 source ~/.bashrc # or source your shell config
-module load apptainer # if apptainer is provided as a module
+ml apptainer # or ml singularity # if using module system
 condatainer config init
 ```
 
@@ -52,22 +46,13 @@ condatainer list  # List installed tools/data
 condatainer create samtools/1.16
 condatainer exec -o samtools/1.16 samtools --version
 
-# Automatically install missing tools/data
-condatainer check alignment.sh -a
-
 # Print helpful info when running with overlays
 condatainer exec -o grch38/cellranger/2024-A bash
 # [CNT] Overlay envs:
 #   CELLRANGER_REF_DIR: cellranger reference dir
-#   GENOME_FASTA      : genome fasta
-#   ANNOTATION_GTF_GZ : 10X modified gtf
-#   STAR_INDEX_DIR    : STAR index dir
 ```
 
 **CondaTainer** will set `PATH` and other environment variables for you.
-
-- 📜 [Read the full CondaTainer Manual](./docs/manuals/condatainer.md)
-- 📁 [Naming Conventions](./docs/user_guide/concepts.md#-naming-convention)
 
 ## 📦 Project Environment Management
 
@@ -88,53 +73,41 @@ Manage a writable workspace overlay for development and testing:
 
 ```bash
 condatainer overlay create -s 5G env.img   # Create a 5G overlay
-condatainer overlay resize -s 10G env.img  # Resize an existing overlay to 10G
-condatainer overlay chown env.img          # Fix UID/GID for overlays created by others
-condatainer overlay chown --root env.img   # Make compatible with apptainer --fakeroot
+condatainer overlay resize -s 10G env.img  # Resize an overlay to 10G
+condatainer overlay chown --root env.img   # Make it compatible with --fakeroot
 
 condatainer exec -w -o env.img bash  # Launch a shell in writable mode
 condatainer e                        # Quick shortcut for the above command
-condatainer exec -o env.img bash     # Launch the same overlay in read-only mode
 ```
 
 Inside a writable mode, use `mm-*` Micromamba wrappers to manage packages
 
 ```bash
 mm-install r-base=4.4 r-tidyverse  # Install packages
-mm-pin r-base           # Pin a package version
-mm-pin -r r-base        # Unpin a package
-mm-list                 # List installed packages
-mm-search r-ggplot2     # Search for a package
-mm-remove r-tidyverse   # Remove a package
-mm-update               # Update packages
-mm-clean -a             # Clean the cache and unused
-mm-export               # Export environment to YAML
+mm-pin r-base         # Pin a package version
+mm-pin -r r-base      # Unpin a package
+mm-remove r-tidyverse # Remove a package
+mm-update             # Update packages
+mm-export             # Export environment to YAML
 ```
 
 ## 🐕‍🦺 Web Apps & GUI Helpers
 
-**CondaTainer** includes built-in helper scripts to launch apps (like RStudio, VS Code, and XFCE4 noVNC) directly on HPC compute nodes.
-
-These scripts automatically handle the heavy lifting:
-
-1. Fetching or building the required overlays.
-2. Submitting the job to cluster's scheduler.
-3. Setting up port forwarding for browser access.
+**CondaTainer** includes built-in helper scripts to launch apps (like RStudio, XFCE4 noVNC) directly on HPC compute nodes.
 
 ```bash
 condatainer helper --update       # Fetch the latest helper scripts
-condatainer helper --list         # View all available apps and tools
+condatainer helper --list         # View all available apps
 
 condatainer helper vscode-tunnel  # Start a VS Code tunnel
-condatainer helper rstudio-server # Launch RStudio Server
-condatainer helper igv            # Start IGV via XFCE4 noVNC
+condatainer helper igv -p 10212   # Start IGV via noVNC on port 10212
 ```
 
-Please check out [Helper README](https://github.com/Justype/cnt-scripts/blob/main/helpers/README.md) or [ReadTheDocs - Helper Scripts](https://condatainer.readthedocs.io/en/dev/tutorials/helpers_on_HPC.html) for more details and examples.
+Please check out [ReadTheDocs - Helper Scripts](https://condatainer.readthedocs.io/en/dev/tutorials/helpers_on_HPC.html) for more details and examples.
 
 ## 🚀 Automation
 
-**CondaTainer** can parse scripts to resolve dependencies and submit jobs. Just declare your requirements with `#DEP:` tags and use standard scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`). HTCondor uses native `.sub` submit files.
+**CondaTainer** can parse scripts to resolve dependencies (`#DEP:`) and scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`).
 
 Example Script (`salmon_quant.sh`):
 
@@ -163,8 +136,6 @@ condatainer run -a salmon_quant.sh
 All `[CNT]` messages go to stderr. Only job ID is printed to stdout, so you can capture it for downstream.
 
 ```bash
-set -e # Exit immediately if any command fails
-# samples.txt includes all sample names
 while read sample; do
   JOB=$(condatainer run -o log/trim_${sample}.out trim.sh $sample)
   JOB=$(condatainer run -o log/align_${sample}.out --afterok "$JOB" align.sh $sample)
