@@ -43,7 +43,7 @@ var errRunAborted = errors.New("run aborted")
 var jobIDRe = regexp.MustCompile(`^\d+(\.\S+)?$`)
 
 var runCmd = &cobra.Command{
-	Use:   "run <script> [script_args...]",
+	Use:   "run [flags] <script> [script_args...]",
 	Short: "Run a script and auto-solve the dependencies by #DEP tags",
 	Long: `Execute a script with automatic dependency resolution.
 

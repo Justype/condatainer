@@ -9,7 +9,8 @@
 ## 📋 Prerequisites
 
 - **Linux (x86_64 only)**: AArch64 is not supported yet.
-- **Apptainer**: Required for all core container operations.
+- **Apptainer/Singularity**: Required for all core container operations.
+- **squashfs-tools**, **e2fsprogs**: For overlay creation and management.
 
 ## 🛠️ Quick Installation
 

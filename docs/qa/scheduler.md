@@ -75,9 +75,37 @@ python mpi_simulation.py
 
 ### HTCondor: Single-Node Only
 
-HTCondor is inherently single-node (`universe = vanilla` is assumed for all jobs), so `nodes` and `tasks-per-node` do not apply. Job dependencies (after-OK chains) are not supported — `DAGMan` is not supported in the current version.
+HTCondor is inherently single-node (`universe = vanilla` is assumed for all jobs), so `nodes` and `tasks-per-node` do not apply.
 
 When CondaTainer reads `.sub` files, it will get the script path by `executable = ...` and parse other resource requests. Then CondaTainer will read the overlay requirements from the script `#DEP:` tags and launch the container with the appropriate resources.
+
+### Job Arrays
+
+Job arrays (`#SBATCH --array`, `#PBS -J`, `#BSUB -J`) are not supported in the current version. Submit individual jobs and chain them with `--afterok` instead.
+
+### Job Chaining
+
+CondaTainer supports job dependencies via `--afterok` (SLURM-style). You can submit a job and capture its ID for downstream submission.
+
+```bash
+JOB=$(condatainer run -o log/align_s1.out run_align.sh sample1)
+condatainer run -o log/quant_s1.out --afterok "$JOB" run_quant.sh sample1
+```
+
+If you have multiple samples in a text file, you can loop over them and chain each step:
+
+```bash
+set -e # Exit immediately if any command fails
+while read sample; do
+    JOB=$(condatainer run -o log/trim_${sample}.out trim.sh $sample)
+    JOB=$(condatainer run -o log/align_${sample}.out --afterok "$JOB" align.sh $sample)
+    condatainer run -o log/quant_${sample}.out --afterok "$JOB" quant.sh $sample
+done < samples.txt
+```
+
+More complex dependency chain can be achieved by capturing multiple job IDs and joining them with colons (`--afterok 111:222:333`).
+
+> **Note**: `DAGMan` is not supported in the current version. Please directly use `DADMan` for complex workflows on HTCondor clusters.
 
 ## How Schedulers Define Resources
 
