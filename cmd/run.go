@@ -83,6 +83,9 @@ func init() {
 	runCmd.Flags().StringVarP(&runStdout, "output", "o", "", "Override job stdout path (creates parent dir if needed)")
 	runCmd.Flags().StringVarP(&runStderr, "error", "e", "", "Override job stderr path")
 	runCmd.Flags().StringVar(&runAfterOK, "afterok", "", "Depend on job IDs (colon-separated, e.g. 123:456:789)")
+	runCmd.Flags().StringArrayVar(&runEnvSettings, "env", nil, "Set environment variable KEY=VALUE (repeatable)")
+	runCmd.Flags().StringArrayVar(&runBindPaths, "bind", nil, "Bind mount HOST:CONTAINER (repeatable)")
+	runCmd.Flags().BoolVarP(&runFakeroot, "fakeroot", "f", false, "Run with fakeroot privileges")
 	runCmd.Flags().SetInterspersed(false) // Stop flag parsing after script name; remaining args are passed to the script
 }
 
