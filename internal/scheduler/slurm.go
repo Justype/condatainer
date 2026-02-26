@@ -430,7 +430,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 
 	// Step 5: Time (independent).
 	if timeStr != "" {
-		t, err := parseSlurmTimeSpec(timeStr)
+		t, err := utils.ParseDHMSTime(timeStr)
 		if err != nil {
 			logParseWarning("SLURM: invalid --time value %q: %v; using passthrough mode", timeStr, err)
 			return nil, directives
@@ -898,13 +898,13 @@ func (s *SlurmScheduler) parsePartitionLine(line string) *ResourceLimits {
 			limit.Partition = value
 		case "MaxTime":
 			if value != "UNLIMITED" {
-				if dur, err := parseSlurmTimeSpec(value); err == nil {
+				if dur, err := utils.ParseDHMSTime(value); err == nil {
 					limit.MaxTime = dur
 				}
 			}
 		case "DefaultTime":
 			if value != "NONE" && value != "UNLIMITED" {
-				if dur, err := parseSlurmTimeSpec(value); err == nil {
+				if dur, err := utils.ParseDHMSTime(value); err == nil {
 					limit.DefaultTime = dur
 				}
 			}
@@ -1001,31 +1001,6 @@ func parseSlurmGpu(gpuStr string) (*GpuSpec, error) {
 	}
 
 	return spec, nil
-}
-
-func parseSlurmTimeSpec(timeStr string) (time.Duration, error) {
-	timeStr = strings.TrimSpace(timeStr)
-	if timeStr == "" {
-		return 0, nil
-	}
-
-	var days int64
-	hms := timeStr
-	if idx := strings.Index(hms, "-"); idx >= 0 {
-		dayPart := hms[:idx]
-		if parsed, err := strconv.ParseInt(dayPart, 10, 64); err == nil {
-			days = parsed
-		} else {
-			return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
-		}
-		hms = strings.TrimSpace(hms[idx+1:])
-	}
-
-	hmsDur, err := parseHMSTime(hms)
-	if err != nil {
-		return 0, fmt.Errorf("%w: %s", ErrInvalidTimeFormat, timeStr)
-	}
-	return time.Duration(days*24)*time.Hour + hmsDur, nil
 }
 
 func formatSlurmTimeSpec(d time.Duration) string {

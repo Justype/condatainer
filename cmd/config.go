@@ -444,9 +444,9 @@ Time duration format (for build.time):
 
 		// Validate value based on key type
 		if key == "scheduler.time" || key == "build.time" {
-			if _, err := utils.ParseDuration(value); err != nil {
+			if _, err := utils.ParseWalltime(value); err != nil {
 				utils.PrintError("Invalid duration format: %s", value)
-				utils.PrintHint("Use format like: 2h, 30m, 1h30m, or 02:00:00")
+				utils.PrintHint("Use format like: 4d12h, 2h30m, 1:30, or 01:30:00")
 				os.Exit(ExitCodeError)
 			}
 		}

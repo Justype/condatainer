@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,10 @@ var (
 	runStdout          string
 	runStderr          string
 	runAfterOK         string
+	runCPU             int
+	runMem             string
+	runTime            string
+	runGPU             string
 )
 
 // errRunAborted signals a handled stop (message already printed); caller returns nil.
@@ -52,17 +57,19 @@ The script can contain special comment tags:
   #DEP: /path/overlay.img - Declares an overlay dependency (.sqf and .img)
   #CNT args               - Additional arguments to pass to condatainer
 
-Supported #CNT arguments:
+Supported #CNT arguments (also available as CLI flags):
   -w, --writable         Make .img overlays writable
   -b, --base-image PATH  Use custom base image
-  --env KEY=VALUE        Set environment variable
-  --bind HOST:CONTAINER  Bind mount path
+  --env KEY=VALUE        Set environment variable (repeatable)
+  --bind HOST:CONTAINER  Bind mount path (repeatable)
   -f, --fakeroot         Run with fakeroot privileges
 
 Dependencies will be automatically loaded.`,
-	Example: `  condatainer run script.sh             # Run with dependency check
-  condatainer run script.sh arg1 arg2   # Pass arguments to the script
+	Example: `  condatainer run script.sh                        # Run with dependency check
+  condatainer run script.sh arg1 arg2              # Pass arguments to the script
   condatainer run -o log/tool1_s1.out run_tool1.sh sample1  # Override stdout
+  condatainer run -g a100:2 gpu_job.sh             # Override GPU spec
+  condatainer run -c 8 -m 16G -t 2h job.sh        # Override resources
 
   # Dependency chaining example
   JOB=$(condatainer run run_align.sh sample1)
@@ -86,6 +93,10 @@ func init() {
 	runCmd.Flags().StringArrayVar(&runEnvSettings, "env", nil, "Set environment variable KEY=VALUE (repeatable)")
 	runCmd.Flags().StringArrayVar(&runBindPaths, "bind", nil, "Bind mount HOST:CONTAINER (repeatable)")
 	runCmd.Flags().BoolVarP(&runFakeroot, "fakeroot", "f", false, "Run with fakeroot privileges")
+	runCmd.Flags().IntVarP(&runCPU, "cpu", "c", 0, "Override CPUs per task (e.g. 4)")
+	runCmd.Flags().StringVarP(&runMem, "mem", "m", "", "Override memory per node (e.g. 4G, 8192M)")
+	runCmd.Flags().StringVarP(&runTime, "time", "t", "", "Override walltime (e.g. 4d12h, 2h30m, 01:30:00)")
+	runCmd.Flags().StringVarP(&runGPU, "gpu", "g", "", "Override GPUs per node (e.g. 1, a100:2, a100)")
 	runCmd.Flags().SetInterspersed(false) // Stop flag parsing after script name; remaining args are passed to the script
 }
 
@@ -138,6 +149,36 @@ func runScript(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// CLI -c/-m/-t/-g resource overrides (highest priority, only when spec is parsed)
+	if scriptSpecs != nil && scriptSpecs.Spec != nil {
+		override := &scheduler.ResourceSpec{}
+		if runCPU > 0 {
+			override.CpusPerTask = runCPU
+		}
+		if runMem != "" {
+			mb, err := utils.ParseMemoryMB(runMem)
+			if err != nil {
+				ExitWithError("--mem %q: %v", runMem, err)
+			}
+			override.MemPerNodeMB = mb
+		}
+		if runTime != "" {
+			d, err := utils.ParseWalltime(runTime)
+			if err != nil {
+				ExitWithError("--time %q: %v", runTime, err)
+			}
+			override.Time = d
+		}
+		if runGPU != "" {
+			gpu, err := parseGpuFlag(runGPU)
+			if err != nil {
+				ExitWithError("--gpu %q: %v", runGPU, err)
+			}
+			override.Gpu = gpu
+		}
+		scriptSpecs.Spec.Override(override)
+	}
+
 	// 2. Embedded #CNT args + dependency check/install
 	if err := processEmbeddedArgs(contentScript); err != nil {
 		return err
@@ -179,8 +220,8 @@ func runScript(cmd *cobra.Command, args []string) error {
 	} else if !scheduler.HasSchedulerSpecs(scriptSpecs) {
 		utils.PrintNote("No scheduler specs found in script. Running locally.")
 	}
-	if runStdout != "" || runStderr != "" {
-		utils.PrintNote("-o/-e are only used for submitted jobs and will be ignored when running locally.")
+	if runStdout != "" || runStderr != "" || runMem != "" || runTime != "" || runGPU != "" {
+		utils.PrintNote("-o/-e/-m/-t/-g are only used for submitted jobs and will be ignored when running locally.")
 	}
 	return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs, scriptArgs)
 }
@@ -476,15 +517,15 @@ func applyScriptArgs(scriptArgs []string) {
 					runBindPaths = append(runBindPaths, parts[i])
 				}
 			default:
-				// Handle --env=VALUE and --bind=VALUE formats
-				if strings.HasPrefix(arg, "--env=") {
-					runEnvSettings = append(runEnvSettings, strings.TrimPrefix(arg, "--env="))
-				} else if strings.HasPrefix(arg, "--bind=") {
-					runBindPaths = append(runBindPaths, strings.TrimPrefix(arg, "--bind="))
-				} else if strings.HasPrefix(arg, "-b=") {
-					runBaseImage = strings.TrimPrefix(arg, "-b=")
-				} else if strings.HasPrefix(arg, "--base-image=") {
-					runBaseImage = strings.TrimPrefix(arg, "--base-image=")
+				// Handle --flag=VALUE formats
+				if v, ok := strings.CutPrefix(arg, "--env="); ok {
+					runEnvSettings = append(runEnvSettings, v)
+				} else if v, ok := strings.CutPrefix(arg, "--bind="); ok {
+					runBindPaths = append(runBindPaths, v)
+				} else if v, ok := strings.CutPrefix(arg, "-b="); ok {
+					runBaseImage = v
+				} else if v, ok := strings.CutPrefix(arg, "--base-image="); ok {
+					runBaseImage = v
 				}
 			}
 		}
@@ -492,6 +533,30 @@ func applyScriptArgs(scriptArgs []string) {
 }
 
 // parseArgsInScript extracts arguments from #CNT comments in the script
+// parseGpuFlag parses --gpu values: "N", "TYPE:N", or "TYPE" (count defaults to 1).
+func parseGpuFlag(s string) (*scheduler.GpuSpec, error) {
+	if before, after, found := strings.Cut(s, ":"); found {
+		// TYPE:N
+		count, err := strconv.Atoi(after)
+		if err != nil || count <= 0 {
+			return nil, fmt.Errorf("invalid GPU count %q (expected TYPE:N, e.g. a100:2)", after)
+		}
+		return &scheduler.GpuSpec{Type: strings.ToLower(before), Count: count}, nil
+	}
+	// bare N or bare TYPE
+	if count, err := strconv.Atoi(s); err == nil {
+		if count <= 0 {
+			return nil, fmt.Errorf("GPU count must be > 0")
+		}
+		return &scheduler.GpuSpec{Count: count}, nil
+	}
+	// TYPE only — default count 1
+	if s == "" {
+		return nil, fmt.Errorf("empty GPU spec")
+	}
+	return &scheduler.GpuSpec{Type: strings.ToLower(s), Count: 1}, nil
+}
+
 func parseArgsInScript(scriptPath string) ([]string, error) {
 	data, err := os.ReadFile(scriptPath)
 	if err != nil {

@@ -3,7 +3,90 @@ package utils
 import (
 	"os"
 	"testing"
+	"time"
 )
+
+func TestParseMemoryMB(t *testing.T) {
+	tests := []struct {
+		input  string
+		wantMB int64
+	}{
+		{"8G", 8 * 1024},
+		{"8GB", 8 * 1024},
+		{"1024M", 1024},
+		{"1024MB", 1024},
+		{"4096K", 4},
+		{"4096KB", 4},
+		{"1T", 1024 * 1024},
+		{"1TB", 1024 * 1024},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			mb, err := ParseMemoryMB(tt.input)
+			if err != nil {
+				t.Errorf("ParseMemoryMB(%q) error: %v", tt.input, err)
+				return
+			}
+			if mb != tt.wantMB {
+				t.Errorf("ParseMemoryMB(%q) = %d MB; want %d MB", tt.input, mb, tt.wantMB)
+			}
+		})
+	}
+}
+
+func TestParseWalltime(t *testing.T) {
+	hour := time.Hour
+	min := time.Minute
+	sec := time.Second
+	day := 24 * time.Hour
+
+	tests := []struct {
+		input   string
+		want    time.Duration
+		wantErr bool
+	}{
+		// Compound: Go-style with optional integer days
+		{"4d12h", 4*day + 12*hour, false},
+		{"2h30m", 2*hour + 30*min, false},
+		{"3h", 3 * hour, false},
+		{"3H", 3 * hour, false}, // case-insensitive
+		{"90m", 90 * min, false},
+		{"1.5h", 90 * min, false},
+		{"1d2h30m45s", day + 2*hour + 30*min + 45*sec, false},
+		{"4d", 4 * day, false},
+		{"", 0, false},
+		// Colon-separated
+		{"01:30:00", hour + 30*min, false},
+		{"1:30", hour + 30*min, false},
+		{"02:30:00", 2*hour + 30*min, false},
+		{"90", 90 * min, false}, // minutes only
+		// D-HH:MM:SS
+		{"1-12:00:00", day + 12*hour, false},
+		{"2-06:00:00", 2*day + 6*hour, false},
+		// Errors
+		{"abc", 0, true},      // no valid unit letters
+		{"1.5d", 0, true},     // fractional days not supported (integer only)
+		{"bad:time", 0, true}, // letters in colon-separated path
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			dur, err := ParseWalltime(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ParseWalltime(%q): expected error, got %v", tt.input, dur)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseWalltime(%q) unexpected error: %v", tt.input, err)
+			}
+			if dur != tt.want {
+				t.Errorf("ParseWalltime(%q) = %v; want %v", tt.input, dur, tt.want)
+			}
+		})
+	}
+}
 
 func TestStripInlineComment(t *testing.T) {
 	tests := []struct {

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Justype/condatainer/internal/utils"
 )
 
 // newTestSlurmScheduler creates a SLURM scheduler instance for testing
@@ -577,7 +579,7 @@ func TestSlurmTimeParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dur, err := parseSlurmTimeSpec(tt.input)
+			dur, err := utils.ParseDHMSTime(tt.input)
 			if tt.wantErr && err == nil {
 				t.Error("Expected error, got nil")
 			}
@@ -585,7 +587,7 @@ func TestSlurmTimeParsing(t *testing.T) {
 				t.Errorf("Unexpected error: %v", err)
 			}
 			if dur != tt.wantDur {
-				t.Errorf("parseSlurmTimeSpec(%q) = %v; want %v", tt.input, dur, tt.wantDur)
+				t.Errorf("utils.ParseDHMSTime(%q) = %v; want %v", tt.input, dur, tt.wantDur)
 			}
 		})
 	}

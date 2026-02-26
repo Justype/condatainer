@@ -198,7 +198,7 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 		case flagMatches(flag, "-M"):
 			_, parseErr = flagScan(flag, &rs.MemPerNodeMB, parseLsfMemory, "-M")
 		case flagMatches(flag, "-W"):
-			_, parseErr = flagScan(flag, &rs.Time, parseHMSTime, "-W")
+			_, parseErr = flagScan(flag, &rs.Time, utils.ParseHMSTime, "-W")
 		case flagMatches(flag, "-gpu"):
 			gpuStr, _ := flagValue(flag, "-gpu")
 			gpuStr = strings.Trim(gpuStr, "\"'")

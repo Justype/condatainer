@@ -508,7 +508,7 @@ func LoadFromViper() {
 		Global.Scheduler.MemPerNodeMB = memMBPerNode
 	}
 	if schedTime := viper.GetString("scheduler.time"); schedTime != "" {
-		if dur, err := utils.ParseDuration(schedTime); err == nil {
+		if dur, err := utils.ParseWalltime(schedTime); err == nil {
 			Global.Scheduler.Time = dur
 		}
 	}
@@ -523,7 +523,7 @@ func LoadFromViper() {
 	}
 
 	if buildTime := viper.GetString("build.time"); buildTime != "" {
-		if dur, err := utils.ParseDuration(buildTime); err == nil {
+		if dur, err := utils.ParseWalltime(buildTime); err == nil {
 			Global.Build.Defaults.Time = dur
 		}
 	}
