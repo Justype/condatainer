@@ -104,7 +104,7 @@ samtools --version
 Auto install dependencies and submit the job with:
 
 ```bash
-condatainer run analysis.sh -a
+condatainer run -a analysis.sh
 ```
 
 If no scheduler directives are found or job submission is disabled, the script will run immediately in the current shell.
@@ -168,10 +168,10 @@ condatainer run cellranger_quant.sh
 
 ## 🔗 Related Resources
 
-- [Installation](./installation.md)
 - [CondaTainer Manual](../manuals/condatainer.md)
 - [Workspace Overlays: Writable Project-Level](./workspace_overlays.md)
 - [Bundle Overlays: Read-Only Project-Level](./bundle_overlays.md)
+- [Scheduler Integration](../qa/scheduler.md)
 
 Tutorials using CondaTainer:
 

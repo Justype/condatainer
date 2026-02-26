@@ -19,7 +19,8 @@
 ## 📋 Prerequisites
 
 - **Linux (x86_64 only)**: AArch64 is not supported yet.
-- **Apptainer**: Required for all core container operations.
+- **Apptainer/Singularity**: Required for all core container operations.
+- **squashfs-tools**, **e2fsprogs**: For overlay creation and management.
 
 ## 🛠️ Installation
 
@@ -154,7 +155,21 @@ salmon quant \
 Auto install dependencies and submit the job with:
 
 ```bash
-condatainer run salmon_quant.sh -a
+condatainer run -a salmon_quant.sh
+```
+
+### Job Chaining
+
+All `[CNT]` messages go to stderr, only job ID is printed to stdout, so you can capture it for downstream job submission.
+
+```bash
+set -e # Exit immediately if any command fails
+# samples.txt includes all sample names
+while read sample; do
+  JOB=$(condatainer run -o log/trim_${sample}.out trim.sh $sample)
+  JOB=$(condatainer run -o log/align_${sample}.out --afterok "$JOB" align.sh $sample)
+  condatainer run -o log/quant_${sample}.out --afterok "$JOB" quant.sh $sample
+done < samples.txt
 ```
 
 - **Local Fallback**: If no scheduler directives are found or job submission is disabled, the script will run immediately in the current shell.

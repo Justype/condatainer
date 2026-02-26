@@ -873,8 +873,10 @@ condatainer check [SCRIPT] [-a] [--module]
 Executes a script inside the **CondaTainer** environment, mounting dependencies defined in the script. Autosolves dependencies based on `#DEP:` tags within the script.
 
 ```
-condatainer run [SCRIPT] [SCRIPT_ARGS...]
+condatainer run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
 ```
+
+> **Note:** All options (`-a`, `-o`, `--afterok`, etc.) must appear **before** `SCRIPT`. Arguments after the script name are forwarded to the script.
 
 **Options:**
 
@@ -883,6 +885,9 @@ condatainer run [SCRIPT] [SCRIPT_ARGS...]
 * `-a`, `--auto-install`: Automatically install missing dependencies.
 * `-i`, `--install`: Alias for `--auto-install`.
 * `--module`: Also parse `module load` / `ml` lines as dependencies.
+* `-o`, `--output PATH`: Override the job stdout path (creates parent directory if needed). Takes priority over scheduler stdout settings.
+* `-e`, `--error PATH`: Override the job stderr path. Takes priority over scheduler stderr settings.
+* `--afterok IDS`: Submit job with dependencies on existing job IDs. Use colon-separated IDs: `123:456:789`.
 
 **Script Tags:**
 
@@ -947,14 +952,31 @@ When you run this script:
 condatainer run analysis.sh
 
 # Auto-install missing deps first, then submit as job
-condatainer run analysis.sh -a
+condatainer run -a analysis.sh
 ```
 
 **Log Files:**
 
-* If a log output path is specified in the script (e.g., `#SBATCH --output=...`), logs go to that path
+* `-o`/`-e` CLI flags take highest priority — they override any `#SBATCH --output`/`--error` in the script
+* If no CLI flag, the path from the script directive (e.g., `#SBATCH --output=...`) is used
 * Otherwise, logs are written to the global logs directory (`~/logs` by default)
-* Job scripts are created alongside the log files
+* If only `-o` is set (no `-e`), stderr is merged into the same file
+* Job scripts are created in the same directory as the log file
+
+### Job Chaining
+
+All `[CNT]` messages go to stderr, only job ID is printed to stdout, so you can capture it for downstream job submission.
+
+```bash
+set -e # Exit immediately if any command fails
+while read sample; do
+  JOB=$(condatainer run -o log/trim_${sample}.out trim.sh $sample)
+  JOB=$(condatainer run -o log/align_${sample}.out --afterok "$JOB" align.sh $sample)
+  condatainer run -o log/quant_${sample}.out --afterok "$JOB" quant.sh $sample
+done < samples.txt
+```
+
+Multiple job IDs can be passed to `--afterok` as a colon-separated list (`--afterok 123:456:789`).
 
 ### Usable ENV
 

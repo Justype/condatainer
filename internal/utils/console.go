@@ -128,28 +128,28 @@ func FormatBytes(bytes int64) string {
 //    High-level functions that print entire lines with tags.
 // ---------------------------------------------------------
 
-// PrintMessage prints a standard info message.
+// PrintMessage prints a standard info message. → stderr
 // Output: [CNT] Message...
 func PrintMessage(format string, a ...interface{}) {
 	if QuietMode {
 		return
 	}
 	msg := fmt.Sprintf(format, a...)
-	fmt.Fprintf(os.Stdout, "%s %s\n", projectPrefix, msg)
+	fmt.Fprintf(os.Stderr, "%s %s\n", projectPrefix, msg)
 }
 
-// PrintSuccess prints a success message with a Green tag.
-// Output: [CNT][SUCCESS] Operation complete.
+// PrintSuccess prints a success message with a Green tag. → stderr
+// Output: [CNT][PASS] Operation complete.
 func PrintSuccess(format string, a ...interface{}) {
 	if QuietMode {
 		return
 	}
 	msg := fmt.Sprintf(format, a...)
 	tag := StyleSuccess("[PASS]")
-	fmt.Fprintf(os.Stdout, "%s%s %s\n", projectPrefix, tag, msg)
+	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
 }
 
-// PrintError prints an error message with a Red tag to Stderr.
+// PrintError prints an error message with a Red tag. → stderr
 // Output: [CNT][ERR] Something failed.
 func PrintError(format string, a ...interface{}) {
 	msg := fmt.Sprintf(format, a...)
@@ -157,7 +157,7 @@ func PrintError(format string, a ...interface{}) {
 	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
 }
 
-// PrintWarning prints a warning with a Yellow tag to Stderr.
+// PrintWarning prints a warning with a Yellow tag. → stderr
 // Output: [CNT][WARN] Disk is almost full.
 func PrintWarning(format string, a ...interface{}) {
 	msg := fmt.Sprintf(format, a...)
@@ -165,7 +165,7 @@ func PrintWarning(format string, a ...interface{}) {
 	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
 }
 
-// PrintHint prints a helpful hint with a Cyan tag.
+// PrintHint prints a helpful hint with a Cyan tag. → stderr
 // Output: [CNT][HINT] Try running with --force.
 func PrintHint(format string, a ...interface{}) {
 	if QuietMode {
@@ -173,11 +173,10 @@ func PrintHint(format string, a ...interface{}) {
 	}
 	msg := fmt.Sprintf(format, a...)
 	tag := StyleHint("[HINT]")
-	// Added extra spacing for alignment
-	fmt.Fprintf(os.Stdout, "%s%s %s\n", projectPrefix, tag, msg)
+	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
 }
 
-// PrintNote prints a note with a Magenta tag.
+// PrintNote prints a note with a Magenta tag. → stderr
 // Output: [CNT][NOTE] This might take a while.
 func PrintNote(format string, a ...interface{}) {
 	if QuietMode {
@@ -185,11 +184,11 @@ func PrintNote(format string, a ...interface{}) {
 	}
 	msg := fmt.Sprintf(format, a...)
 	tag := StyleNote("[NOTE]")
-	fmt.Fprintf(os.Stdout, "%s%s %s\n", projectPrefix, tag, msg)
+	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
 }
 
-// PrintDebug prints a debug message with a Gray tag (only if DebugMode is true).
-// Output: [CNT] [DBG] Executing: rm -rf /tmp/foo
+// PrintDebug prints a debug message with a Gray tag (only if DebugMode is true). → stderr
+// Output: [CNT][DBG] Executing: rm -rf /tmp/foo
 func PrintDebug(format string, a ...interface{}) {
 	if DebugMode {
 		msg := fmt.Sprintf(format, a...)
