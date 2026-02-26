@@ -93,7 +93,7 @@ mm-export             # Export environment to YAML
 
 ## 🐕‍🦺 Web Apps & GUI Helpers
 
-**CondaTainer** includes built-in helper scripts to launch apps (like RStudio, XFCE4 noVNC) directly on HPC compute nodes.
+**CondaTainer** includes built-in helpers to launch apps (like RStudio, XFCE4 noVNC) directly on compute nodes.
 
 ```bash
 condatainer helper --update       # Fetch the latest helper scripts
@@ -151,7 +151,7 @@ done < samples.txt
 Related tools and resources:
 
 - [Compression Method Benchmarks](https://github.com/inikep/lzbench)
-- Used tools: [Apptainer](https://github.com/apptainer/apptainer), [Micromamba](https://github.com/mamba-org/micromamba-releases), [squashfs-tools](https://github.com/plougher/squashfs-tools) [e2fsprogs](https://github.com/tytso/e2fsprogs)
+- Used tools: [Apptainer](https://github.com/apptainer/apptainer), [Micromamba](https://github.com/mamba-org/micromamba-releases), [squashfs-tools](https://github.com/plougher/squashfs-tools), [e2fsprogs](https://github.com/tytso/e2fsprogs)
 - Container related: [Using Containers](https://services.rt.nyu.edu/docs/hpc/containers/containers/), [Singularity with Conda](https://services.rt.nyu.edu/docs/hpc/containers/singularity_with_conda/) and [Singularity with SquashFS](https://services.rt.nyu.edu/docs/hpc/containers/squash_file_system_and_singularity/)
 - Allocation related: [Multi-Instance GPU](https://docs.alliancecan.ca/wiki/Multi-Instance_GPU), [RAM GPU ratio](https://docs.alliancecan.ca/wiki/Allocations_and_compute_scheduling#Ratios_in_bundles)
 
