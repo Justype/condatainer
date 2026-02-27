@@ -131,6 +131,8 @@ Auto install dependencies and submit the job with:
 condatainer run -a salmon_quant.sh
 ```
 
+For MPI jobs (ntasks > 1), CondaTainer will detect `mpiexec` and wrap the command accordingly.
+
 ### Job Array and Dependency
 
 All `[CNT]` messages go to stderr. Only job ID is printed to stdout, so you can capture it for downstream. 
