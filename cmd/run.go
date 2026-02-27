@@ -1008,8 +1008,8 @@ func detectMpi() (string, bool) {
 }
 
 // buildMpiRunCommand returns the shell command to embed in the job script.
-// When ntasks > 1 it attempts to detect mpiexec (directly or via a module) and
-// wraps the condatainer run invocation with mpiexec.
+// When ntasks > 1 it requires mpiexec in PATH and wraps the condatainer run
+// invocation with the full mpiexec path so compute nodes don't need a matching PATH.
 // Returns an error when ntasks > 1 but mpiexec cannot be found.
 // The user is responsible for installing the same MPI version inside the container.
 func buildMpiRunCommand(contentScript string, scriptArgs []string, specs *scheduler.ScriptSpecs, prependArrayArgs bool) (string, error) {
@@ -1032,7 +1032,7 @@ func buildMpiRunCommand(contentScript string, scriptArgs []string, specs *schedu
 		return "", fmt.Errorf("mpiexec not found; load the appropriate MPI module before submitting (ntasks=%d)", getNtasks(specs))
 	}
 	utils.PrintNote("Detected mpiexec: %s", utils.StylePath(mpiexecPath))
-	return fmt.Sprintf("mpiexec %s", runCmd), nil
+	return fmt.Sprintf("%s %s", mpiexecPath, runCmd), nil
 }
 
 // shellQuote returns a single-quoted shell-safe version of s.
