@@ -261,6 +261,44 @@ func writeJobFooter(w io.Writer, jobIDVar string) {
 	fmt.Fprintln(w, "echo \"========================================\"")
 }
 
+// writeArrayBlock writes the line_args-extraction and output-redirect block for array jobs.
+// Call this AFTER scheduler directives but BEFORE writeJobHeader.
+//
+//   - taskIDVar  : shell expression for the 1-based task index (e.g. "$SLURM_ARRAY_TASK_ID")
+//   - inputFile  : absolute path to the input list file
+//   - logDir     : absolute path to the log directory
+//   - jobName    : job name used as prefix for log filenames (already safeJobName-processed)
+//   - count      : total number of tasks (used to compute zero-padding width)
+//   - stdout, stderr : configured output paths — if stderr is empty or equal to stdout,
+//     a combined redirect (exec &>) is used; otherwise separate redirects are used
+//
+// All schedulers use 1-indexed ranges so taskIDVar maps directly to the sed line number.
+// Lines with spaces: the full line is exported as ARRAY_ARGS; the first space-delimited
+// token (_ARRAY_FIRST) is used for the log filename.
+func writeArrayBlock(w io.Writer, taskIDVar, inputFile, logDir, jobName string,
+	count int, stdout, stderr string) {
+
+	padWidth := len(fmt.Sprintf("%d", count))
+	fmt.Fprintln(w, "# Array job: extract input and redirect output")
+	fmt.Fprintf(w, "_ARRAY_IDX=%s\n", taskIDVar)
+	fmt.Fprintf(w, "ARRAY_ARGS=$(sed -n \"${_ARRAY_IDX}p\" %s)\n", inputFile)
+	fmt.Fprintln(w, "export ARRAY_ARGS")
+	fmt.Fprintln(w, "_ARRAY_FIRST=${ARRAY_ARGS%% *}")
+	fmt.Fprintf(w, "_PADDED_IDX=$(printf \"%%0%dd\" \"$_ARRAY_IDX\")\n", padWidth)
+
+	separated := stderr != "" && stderr != stdout
+	if separated {
+		fmt.Fprintf(w,
+			"exec > \"%s/%s_${_PADDED_IDX}_${_ARRAY_FIRST}.out\""+
+				" 2> \"%s/%s_${_PADDED_IDX}_${_ARRAY_FIRST}.err\"\n",
+			logDir, jobName, logDir, jobName)
+	} else {
+		fmt.Fprintf(w, "exec &> \"%s/%s_${_PADDED_IDX}_${_ARRAY_FIRST}.log\"\n",
+			logDir, jobName)
+	}
+	fmt.Fprintln(w)
+}
+
 // parseMemoryMB converts memory strings like "8G", "1024M", "512K" to MB.
 // Delegates to utils.ParseMemoryMB; wraps error with ErrInvalidMemoryFormat sentinel.
 func parseMemoryMB(memStr string) (int64, error) {
@@ -270,7 +308,6 @@ func parseMemoryMB(memStr string) (int64, error) {
 	}
 	return mb, nil
 }
-
 
 // formatHMSTime formats a duration as "HH:MM:SS" (PBS / HTCondor walltime format).
 func formatHMSTime(d time.Duration) string {
