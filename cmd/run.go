@@ -801,6 +801,14 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		fmt.Printf("%s Would run locally (in job)\n", utils.StyleTitle("Action:"))
 	} else if config.IsInsideContainer() {
 		fmt.Printf("%s Would run locally (in container)\n", utils.StyleTitle("Action:"))
+	} else if scheduler.IsPassthrough(specs) {
+		hostType := scheduler.DetectType()
+		if hostType != scheduler.SchedulerUnknown && specs.ScriptType != hostType {
+			fmt.Printf("%s %s\n", utils.StyleTitle("Action:"),
+				utils.StyleError(fmt.Sprintf("Would fail — %s passthrough directives cannot be submitted to %s", specs.ScriptType, hostType)))
+		} else {
+			fmt.Printf("%s Would submit to %s (passthrough)\n", utils.StyleTitle("Action:"), hostType)
+		}
 	} else if config.Global.SubmitJob && scheduler.HasSchedulerSpecs(specs) {
 		sched, err := scheduler.DetectScheduler()
 		if err != nil || !sched.IsAvailable() {
