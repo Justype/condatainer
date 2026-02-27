@@ -41,6 +41,7 @@ var (
 	runDryRun          bool
 	runArray           string
 	runArrayLimit      int
+	runName            string
 )
 
 // errRunAborted signals a handled stop (message already printed); caller returns nil.
@@ -101,6 +102,7 @@ func init() {
 	runCmd.Flags().StringVarP(&runTime, "time", "t", "", "Override walltime (e.g. 4d12h, 2h30m, 01:30:00)")
 	runCmd.Flags().StringVarP(&runGPU, "gpu", "g", "", "Override GPUs per node (e.g. 1, a100:2, a100)")
 	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Preview what would happen without executing")
+	runCmd.Flags().StringVarP(&runName, "name", "n", "", "Override job name")
 	runCmd.Flags().StringVar(&runArray, "array", "", "Input file for array job (one entry per line)")
 	runCmd.Flags().IntVar(&runArrayLimit, "array-limit", 0, "Max concurrent array subjobs (0 = unlimited)")
 	runCmd.Flags().SetInterspersed(false) // Stop flag parsing after script name; remaining args are passed to the script
@@ -151,8 +153,11 @@ func runScript(cmd *cobra.Command, args []string) error {
 	// 1. Read specs → resolve the content script (HTCondor: .sub → .sh; others: identity)
 	contentScript, scriptSpecs := resolveScriptAndSpecs(scriptPath)
 
-	// CLI -o/-e override script directives (highest priority)
+	// CLI -o/-e/-n override script directives (highest priority)
 	if scriptSpecs != nil {
+		if runName != "" {
+			scriptSpecs.Control.JobName = runName
+		}
 		if runStdout != "" {
 			scriptSpecs.Control.Stdout = runStdout
 		}
@@ -1122,12 +1127,12 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 	}
 
 	if arraySpec != nil {
-		// Array jobs redirect output per-task inside the script; show glob pattern
+		// Array jobs redirect output per-subjob inside the script; show glob pattern
 		safeName := strings.ReplaceAll(fileBaseName, "/", "--")
 		if arraySeparateOutput {
-			utils.PrintMessage("Per-task stdout/err => %s", utils.StylePath(filepath.Join(logsDir, safeName+"_*.out/*.err")))
+			utils.PrintMessage("Per-subjob stdout/err => %s", utils.StylePath(filepath.Join(logsDir, safeName+"_*.out/*.err")))
 		} else {
-			utils.PrintMessage("Per-task stdout&err => %s", utils.StylePath(filepath.Join(logsDir, safeName+"_*.log")))
+			utils.PrintMessage("Per-subjob stdout&err => %s", utils.StylePath(filepath.Join(logsDir, safeName+"_*.log")))
 		}
 	} else {
 		stdoutPath := jobSpec.Specs.Control.Stdout
