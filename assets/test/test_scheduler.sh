@@ -60,3 +60,8 @@ condatainer run --afterok "$JOB" --local src/run_dep.sh # should work (just test
 
 rm src/logs/long_job_output.txt
 
+# run array test
+JOB=$(condatainer run --array src/array.txt --array-limit 2 src/run_array.sh --testing this)
+condatainer run --afterok "$JOB" --array src/array.txt src/run_array.sh another test
+
+
