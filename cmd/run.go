@@ -218,6 +218,14 @@ func runScript(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Passthrough + cross-scheduler mismatch: directives are cleared during translation and lost.
+	if scheduler.IsPassthrough(scriptSpecs) {
+		if hostType := scheduler.DetectType(); hostType != scheduler.SchedulerUnknown && scriptSpecs.ScriptType != hostType {
+			ExitWithError("script contains %s passthrough directives that cannot be translated to %s; rewrite the directives for %s or submit with the native %s scheduler",
+				scriptSpecs.ScriptType, hostType, hostType, scriptSpecs.ScriptType)
+		}
+	}
+
 	// Blank lines in the array input file are only warned about in dry-run; error here
 	if arraySpec != nil && len(arraySpec.BlankLines) > 0 {
 		ExitWithError("--array: blank lines at %v in %s; please remove them", arraySpec.BlankLines, arraySpec.InputFile)
@@ -636,7 +644,15 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 	}
 
 	// Scheduler specs
-	if specs != nil && specs.Spec != nil {
+	if specs != nil && specs.Spec == nil && specs.HasDirectives {
+		hostType := scheduler.DetectType()
+		if hostType != scheduler.SchedulerUnknown && specs.ScriptType != hostType {
+			fmt.Printf("%s %s\n", utils.StyleTitle("Resource specs:"),
+				utils.StyleError(fmt.Sprintf("(passthrough — %s directives cannot be translated to %s)", specs.ScriptType, hostType)))
+		} else {
+			fmt.Printf("%s %s\n", utils.StyleTitle("Resource specs:"), utils.StyleWarning("(passthrough — directives not parsed)"))
+		}
+	} else if specs != nil && specs.Spec != nil {
 		rs := effectiveResourceSpec(specs)
 		fmt.Printf("%s\n", utils.StyleTitle("Resource specs:"))
 		if rs.CpusPerTask > 0 {

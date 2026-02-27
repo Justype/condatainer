@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/Justype/condatainer/internal/utils"
 )
 
 // SchedulerType represents the type of job scheduler
@@ -101,6 +99,7 @@ type ScriptSpecs struct {
 	HasDirectives  bool          // True if any scheduler directive (#SBATCH, #PBS, etc.) was found
 	RawFlags       []string      // ALL original directives — immutable audit log
 	RemainingFlags []string      // Directives not absorbed by Spec or Control
+	ScriptType     SchedulerType // Scheduler type detected from script directives
 }
 
 // HasSchedulerSpecs returns true if ScriptSpecs contains meaningful scheduler directives.
@@ -799,15 +798,12 @@ func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 		}, nil
 	}
 
-	// Check for scheduler mismatch and log warning
+	// Carry the original scheduler type forward so callers can inspect it.
+	parsed.Specs.ScriptType = parsed.ScriptType
+
+	// Check for scheduler mismatch
 	hostType := DetectType()
 	if hostType != SchedulerUnknown && parsed.ScriptType != hostType {
-		// Skip translation note when inside a job — allocation is already done.
-		if !IsInsideJob() {
-			utils.PrintNote("Script contains %s directives but host has %s scheduler. Specs will be translated.",
-				parsed.ScriptType, hostType)
-		}
-
 		// Clear RemainingFlags on cross-scheduler translation:
 		// scheduler-specific unrecognized flags cannot be translated.
 		// RawFlags is the immutable audit log — never cleared.

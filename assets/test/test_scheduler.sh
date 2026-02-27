@@ -32,6 +32,7 @@ cat src/logs/output.txt
 rm src/logs/output.txt
 
 # Test Passthrough workaround
+condatainer run --dry-run src/mpi_test_slurm_passthrough.sh
 sbatch src/mpi_test_slurm_passthrough.sh
 cat src/logs/output.txt
 rm src/logs/output.txt
