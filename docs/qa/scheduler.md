@@ -79,33 +79,51 @@ HTCondor is inherently single-node (`universe = vanilla` is assumed for all jobs
 
 When CondaTainer reads `.sub` files, it will get the script path by `executable = ...` and parse other resource requests. Then CondaTainer will read the overlay requirements from the script `#DEP:` tags and launch the container with the appropriate resources.
 
-### Job Arrays
+### Array Jobs
 
-Job arrays (`#SBATCH --array`, `#PBS -J`, `#BSUB -J`) are not supported in the current version. Submit individual jobs and chain them with `--afterok` instead.
+Use `--array` with `condatainer run` to submit the same script over a list of inputs. Each line in the input file becomes one subjob; its space-separated tokens arrive as positional arguments (`$1`, `$2`, …) inside the script.
+
+```
+sample1 condition_A
+sample2 condition_B
+```
+
+The file should have no blank lines, and all non-empty lines must have the same number of shell-split tokens (quoted strings count as one). Blank lines are flagged on `--dry-run` and block submission — remove them before submitting.
+
+```bash
+condatainer run --array samples.txt quant.sh
+condatainer run --array samples.txt --array-limit 4 quant.sh  # max 4 concurrent
+condatainer run --dry-run --array samples.txt quant.sh        # preview without submitting
+```
 
 ### Job Chaining
 
 CondaTainer supports job dependencies via `--afterok` (SLURM-style). You can submit a job and capture its ID for downstream submission.
 
 ```bash
-JOB=$(condatainer run -o log/align_s1.out run_align.sh sample1)
-condatainer run -o log/quant_s1.out --afterok "$JOB" run_quant.sh sample1
+TRIM=$(condatainer run trim.sh sample1)
+ALIGN=$(condatainer run --afterok "$TRIM" align.sh sample1)
+condatainer run --afterok "$ALIGN" quant.sh sample1
 ```
 
-If you have multiple samples in a text file, you can loop over them and chain each step:
+Multiple job IDs can be joined with colons: `--afterok 123:456:789`.
+
+> **Note**: `DAGMan` is not supported. Use `DAGMan` directly for complex workflows on HTCondor clusters.
+
+### Array Jobs + Chaining
+
+`--array` and `--afterok` can be combined: each stage submits an array job and waits for the previous stage to finish before starting. A final single job can collect results after all subjobs complete.
 
 ```bash
-set -e # Exit immediately if any command fails
-while read sample; do
-    JOB=$(condatainer run -o log/trim_${sample}.out trim.sh $sample)
-    JOB=$(condatainer run -o log/align_${sample}.out --afterok "$JOB" align.sh $sample)
-    condatainer run -o log/quant_${sample}.out --afterok "$JOB" quant.sh $sample
-done < samples.txt
+# Stage 1: trim all samples (no dependency)
+JOB=$(condatainer run --array samples.txt --array-limit 10 trim.sh)
+# Stage 2: align — waits for ALL trim subjobs to finish
+JOB=$(condatainer run --array samples.txt --array-limit 10 --afterok "$JOB" align.sh)
+# Stage 3: quant — waits for ALL align subjobs to finish
+JOB=$(condatainer run --array samples.txt --array-limit 10 --afterok "$JOB" quant.sh)
+# Final: single job collecting results — waits for ALL quant subjobs
+condatainer run --afterok "$JOB" collect_results.sh samples.txt
 ```
-
-More complex dependency chain can be achieved by capturing multiple job IDs and joining them with colons (`--afterok 111:222:333`).
-
-> **Note**: `DAGMan` is not supported in the current version. Please directly use `DADMan` for complex workflows on HTCondor clusters.
 
 ## How Schedulers Define Resources
 

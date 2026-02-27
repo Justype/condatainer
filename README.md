@@ -131,16 +131,15 @@ Auto install dependencies and submit the job with:
 condatainer run -a salmon_quant.sh
 ```
 
-### Job Chaining
+### Job Array and Dependency
 
 All `[CNT]` messages go to stderr. Only job ID is printed to stdout, so you can capture it for downstream.
 
 ```bash
-while read sample; do
-  JOB=$(condatainer run -o log/trim_${sample}.out trim.sh $sample)
-  JOB=$(condatainer run -o log/align_${sample}.out --afterok "$JOB" align.sh $sample)
-  condatainer run -o log/quant_${sample}.out --afterok "$JOB" quant.sh $sample
-done < samples.txt
+TRIM=$(condatainer run --array samples.txt --array-limit 10 trim.sh)
+ALGN=$(condatainer run --array samples.txt --array-limit 10 --afterok "$TRIM" align.sh)
+QUANT=$(condatainer run --array samples.txt --array-limit 10 --afterok "$ALGN" quant.sh)
+condatainer run --afterok "$QUANT" collect_results.sh samples.txt
 ```
 
 ## 🔗 Links & Resources
