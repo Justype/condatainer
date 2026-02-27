@@ -354,7 +354,11 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	}
 
 	// Set log path based on job name; only override if caller requests it or script has no output set
-	if jobSpec.Name != "" && (jobSpec.OverrideOutput || specs.Control.Stdout == "") {
+	if jobSpec.Array != nil {
+		// Array job: output/error paths are set per-task in the submit file using $(Process)_$(array_args)
+		specs.Control.Stdout = ""
+		specs.Control.Stderr = ""
+	} else if jobSpec.Name != "" && (jobSpec.OverrideOutput || specs.Control.Stdout == "") {
 		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", name))
 	}
 	if specs.Control.Stderr == "" && specs.Control.Stdout != "" {
@@ -386,6 +390,13 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 		fmt.Fprintf(shWriter, "export %s\n", kv)
 	}
 	fmt.Fprintln(shWriter, "")
+
+	// Array job: ARRAY_ARGS is set by HTCondor via the environment directive in the submit file
+	if jobSpec.Array != nil {
+		jobSpec.Metadata["Array Index"] = "$_CONDOR_PROC_ID"
+		jobSpec.Metadata["Array File"] = jobSpec.Array.InputFile
+		jobSpec.Metadata["Array Args"] = "$ARRAY_ARGS"
+	}
 
 	// Print job information at start
 	writeJobHeader(shWriter, "$_CONDOR_CLUSTER_ID.$_CONDOR_PROC_ID", specs, formatHMSTime, jobSpec.Metadata)
@@ -437,11 +448,18 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	}
 
 	// Output/error/log
-	if specs.Control.Stdout != "" {
-		fmt.Fprintf(subWriter, "output = %s\n", specs.Control.Stdout)
-	}
-	if specs.Control.Stderr != "" {
-		fmt.Fprintf(subWriter, "error = %s\n", specs.Control.Stderr)
+	if jobSpec.Array != nil {
+		// Array job: per-task output using $(Process) index and $(array_args) value
+		perTaskLog := fmt.Sprintf("%s/%s_$(Process)_$(array_args).log", outputDir, name)
+		fmt.Fprintf(subWriter, "output = %s\n", perTaskLog)
+		fmt.Fprintf(subWriter, "error = %s\n", perTaskLog)
+	} else {
+		if specs.Control.Stdout != "" {
+			fmt.Fprintf(subWriter, "output = %s\n", specs.Control.Stdout)
+		}
+		if specs.Control.Stderr != "" {
+			fmt.Fprintf(subWriter, "error = %s\n", specs.Control.Stderr)
+		}
 	}
 	condorLogPath := filepath.Join(outputDir, fmt.Sprintf("%s.condor.log", name))
 	fmt.Fprintf(subWriter, "log = %s\n", condorLogPath)
@@ -473,7 +491,13 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 
 	// Queue directive
 	fmt.Fprintln(subWriter, "")
-	fmt.Fprintln(subWriter, "queue")
+	if jobSpec.Array != nil {
+		// Array job: use item-based queue; ARRAY_ARGS is set from the queue variable
+		fmt.Fprintln(subWriter, "environment = \"ARRAY_ARGS=$(array_args)\"")
+		fmt.Fprintf(subWriter, "queue array_args from %s\n", jobSpec.Array.InputFile)
+	} else {
+		fmt.Fprintln(subWriter, "queue")
+	}
 
 	// Self-dispose: the wrapper script removes itself (unless in debug mode)
 	if !debugMode {

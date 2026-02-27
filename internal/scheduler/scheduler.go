@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/Justype/condatainer/internal/utils"
 )
 
 // SchedulerType represents the type of job scheduler
@@ -101,6 +99,7 @@ type ScriptSpecs struct {
 	HasDirectives  bool          // True if any scheduler directive (#SBATCH, #PBS, etc.) was found
 	RawFlags       []string      // ALL original directives — immutable audit log
 	RemainingFlags []string      // Directives not absorbed by Spec or Control
+	ScriptType     SchedulerType // Scheduler type detected from script directives
 }
 
 // HasSchedulerSpecs returns true if ScriptSpecs contains meaningful scheduler directives.
@@ -168,6 +167,18 @@ func (rs *ResourceSpec) Override(other *ResourceSpec) {
 	}
 }
 
+// ArraySpec describes an input-file-driven array job.
+// Each task processes one line from InputFile using the scheduler's
+// native array mechanism. Limit=0 means no concurrency cap.
+type ArraySpec struct {
+	InputFile   string   // Absolute path to input list (one entry per line)
+	Count       int      // Non-empty line count; computed by cmd/run.go
+	Limit       int      // Max concurrently running tasks (0 = unlimited)
+	ArgCount    int      // Number of shell-split tokens per line (all lines must match)
+	SampleArgs  []string // Tokens from the first line, for dry-run display
+	BlankLines  []int    // 1-based line numbers of all blank lines (nil = none)
+}
+
 // JobSpec represents specifications for submitting a batch job
 type JobSpec struct {
 	Name           string            // Job name (for temp and log file naming)
@@ -176,6 +187,7 @@ type JobSpec struct {
 	DepJobIDs      []string          // Job IDs this job depends on
 	Metadata       map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
 	OverrideOutput bool              // If true, always set Stdout/Stderr from Name (ignores script directives)
+	Array          *ArraySpec        // Non-nil → emit array job directives
 }
 
 // Scheduler defines the interface for job schedulers
@@ -786,15 +798,12 @@ func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 		}, nil
 	}
 
-	// Check for scheduler mismatch and log warning
+	// Carry the original scheduler type forward so callers can inspect it.
+	parsed.Specs.ScriptType = parsed.ScriptType
+
+	// Check for scheduler mismatch
 	hostType := DetectType()
 	if hostType != SchedulerUnknown && parsed.ScriptType != hostType {
-		// Skip translation note when inside a job — allocation is already done.
-		if !IsInsideJob() {
-			utils.PrintNote("Script contains %s directives but host has %s scheduler. Specs will be translated.",
-				parsed.ScriptType, hostType)
-		}
-
 		// Clear RemainingFlags on cross-scheduler translation:
 		// scheduler-specific unrecognized flags cannot be translated.
 		// RawFlags is the immutable audit log — never cleared.

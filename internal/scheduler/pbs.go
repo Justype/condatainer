@@ -378,7 +378,13 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	}
 
 	// Set log path based on job name; only override if caller requests it or script has no output set
-	if jobSpec.Name != "" && (jobSpec.OverrideOutput || specs.Control.Stdout == "") {
+	// Capture before override: separate output when stderr is explicitly set to a different path
+	arraySeparateOutput := jobSpec.Array != nil && specs.Control.Stderr != "" && specs.Control.Stderr != specs.Control.Stdout
+	if jobSpec.Array != nil {
+		// Array job: silence scheduler output; exec redirect in script body handles per-task logs
+		specs.Control.Stdout = "/dev/null"
+		specs.Control.Stderr = "/dev/null"
+	} else if jobSpec.Name != "" && (jobSpec.OverrideOutput || specs.Control.Stdout == "") {
 		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeJobName(jobSpec.Name)))
 	}
 	if specs.Control.Stderr == "" && specs.Control.Stdout != "" {
@@ -480,7 +486,28 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		fmt.Fprintf(writer, "#PBS -M %s\n", ctrl.MailUser)
 	}
 
+	// Array directive
+	if jobSpec.Array != nil {
+		arr := jobSpec.Array
+		r := fmt.Sprintf("1-%d", arr.Count)
+		if arr.Limit > 0 {
+			r += fmt.Sprintf("%%%d", arr.Limit)
+		}
+		fmt.Fprintf(writer, "#PBS -J %s\n", r)
+	}
+
 	fmt.Fprintln(writer, "")
+
+	// Array job: extract input line, set ARRAY_ARGS, and redirect output
+	if jobSpec.Array != nil {
+		writeArrayBlock(writer, "$PBS_ARRAY_INDEX",
+			jobSpec.Array.InputFile, outputDir, safeJobName(jobSpec.Name),
+			jobSpec.Array.Count, arraySeparateOutput)
+		jobSpec.Metadata["Array Job ID"] = "$PBS_JOBID"
+		jobSpec.Metadata["Array Index"] = "$PBS_ARRAY_INDEX"
+		jobSpec.Metadata["Array File"] = jobSpec.Array.InputFile
+		jobSpec.Metadata["Array Args"] = "$ARRAY_ARGS"
+	}
 
 	// Print job information at start
 	writeJobHeader(writer, "$PBS_JOBID", specs, formatHMSTime, jobSpec.Metadata)

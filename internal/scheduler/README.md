@@ -48,7 +48,15 @@ type Scheduler interface {
 
 **`ResourceSpec`** — compute geometry: `Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`, `Gpu`, `Exclusive`
 
-**`JobSpec`** — submission input: `Name`, `Command`, `Specs`, `DepJobIDs`, `Metadata`
+**`JobSpec`** — submission input: `Name`, `Command`, `Specs`, `DepJobIDs`, `Metadata`, `Array *ArraySpec`
+
+**`ArraySpec`** — array job descriptor:
+- `InputFile string` — absolute path to the input list (one entry per line)
+- `Count int` — number of non-empty lines (= number of subjobs)
+- `Limit int` — max concurrently running subjobs (0 = unlimited)
+- `ArgCount int` — number of shell-split tokens per line (validated uniform across all lines)
+- `SampleArgs []string` — tokens from the first line, used for dry-run display
+- `BlankLines []int` — 1-based line numbers of all blank lines; warned on dry-run, blocks submission
 
 ## Resource Spec Priority Chain
 
@@ -154,6 +162,32 @@ Generated job scripts export these regardless of scheduler:
 | HTCondor | inherently single-node |
 
 Multi-node: set `Nodes > 1` in `ScriptSpecs`.
+
+## Array Jobs
+
+Pass `JobSpec.Array = &ArraySpec{...}` to `CreateScriptWithSpec` to generate an array job.
+
+**How it works (SLURM / PBS / LSF):**
+
+1. Scheduler directive silences per-subjob output (`--output=/dev/null`).
+2. `writeArrayBlock` is injected after directives. It:
+   - Extracts the current subjob's input line via `sed -n "${IDX}p"` into `ARRAY_ARGS`.
+   - Exports `ARRAY_ARGS` (word-splits into positional args when used unquoted in the command).
+   - Redirects per-subjob output to `{logDir}/{jobName}_{paddedIdx}_{tag}.log` (combined) or `.out`/`.err` (separated, when the original stderr differs from stdout). `{tag}` is `ARRAY_ARGS` with all non-alphanumeric characters replaced by `_`, consecutive underscores squeezed, capped at 20 characters.
+3. The user command receives `$ARRAY_ARGS` prepended as positional arguments.
+
+**HTCondor:**
+
+Uses `queue array_args from {inputFile}` — HTCondor sets `ARRAY_ARGS` via an `environment` directive for each subjob. Per-subjob output goes to `{logDir}/{jobName}_$(Process)_$(array_args).log`.
+
+**Scheduler directives:**
+
+| Scheduler | Directive | Range format |
+|-----------|-----------|--------------|
+| SLURM | `#SBATCH --array=1-N[%limit]` | 1-based, optional concurrency cap |
+| PBS | `#PBS -J 1-N` + `qdel` limit | 1-based |
+| LSF | `#BSUB -J name[1-N]` | 1-based |
+| HTCondor | `queue array_args from file` | item-based |
 
 ## Dependency Formats
 

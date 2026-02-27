@@ -367,7 +367,13 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	}
 
 	// Set log path based on job name; only override if caller requests it or script has no output set
-	if jobSpec.Name != "" && (jobSpec.OverrideOutput || specs.Control.Stdout == "") {
+	// Capture before override: separate output when stderr is explicitly set to a different path
+	arraySeparateOutput := jobSpec.Array != nil && specs.Control.Stderr != "" && specs.Control.Stderr != specs.Control.Stdout
+	if jobSpec.Array != nil {
+		// Array job: silence scheduler output; exec redirect in script body handles per-task logs
+		specs.Control.Stdout = "/dev/null"
+		specs.Control.Stderr = "/dev/null"
+	} else if jobSpec.Name != "" && (jobSpec.OverrideOutput || specs.Control.Stdout == "") {
 		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeJobName(jobSpec.Name)))
 	}
 	if specs.Control.Stderr == "" && specs.Control.Stdout != "" {
@@ -400,9 +406,18 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		fmt.Fprintf(writer, "#BSUB %s\n", flag)
 	}
 
-	// Add job name if specified
+	// Add job name if specified; for array jobs embed the range inside the name
 	if specs.Control.JobName != "" {
-		fmt.Fprintf(writer, "#BSUB -J %s\n", specs.Control.JobName)
+		if jobSpec.Array != nil {
+			arr := jobSpec.Array
+			r := fmt.Sprintf("[1-%d", arr.Count)
+			if arr.Limit > 0 {
+				r += fmt.Sprintf("%%%d", arr.Limit)
+			}
+			fmt.Fprintf(writer, "#BSUB -J \"%s%s]\"\n", specs.Control.JobName, r)
+		} else {
+			fmt.Fprintf(writer, "#BSUB -J %s\n", specs.Control.JobName)
+		}
 	}
 
 	// Add custom stdout if specified
@@ -442,6 +457,18 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	}
 
 	fmt.Fprintln(writer, "")
+
+	// Array job: extract input line, set ARRAY_ARGS, and redirect output
+	if jobSpec.Array != nil {
+		// LSF is 1-indexed; LSB_JOBINDEX maps directly to the sed line number
+		writeArrayBlock(writer, "$LSB_JOBINDEX",
+			jobSpec.Array.InputFile, outputDir, safeJobName(jobSpec.Name),
+			jobSpec.Array.Count, arraySeparateOutput)
+		jobSpec.Metadata["Array Job ID"] = "$LSB_JOBID"
+		jobSpec.Metadata["Array Index"] = "$LSB_JOBINDEX"
+		jobSpec.Metadata["Array File"] = jobSpec.Array.InputFile
+		jobSpec.Metadata["Array Args"] = "$ARRAY_ARGS"
+	}
 
 	// Print job information at start
 	writeJobHeader(writer, "$LSB_JOBID", specs, formatLsfTime, jobSpec.Metadata)

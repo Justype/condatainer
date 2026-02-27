@@ -885,9 +885,15 @@ condatainer run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
 * `-a`, `--auto-install`: Automatically install missing dependencies.
 * `-i`, `--install`: Alias for `--auto-install`.
 * `--module`: Also parse `module load` / `ml` lines as dependencies.
+* `-n`, `--name NAME`: Override the job name shown in the scheduler queue (e.g. `squeue`). Takes priority over `#SBATCH --job-name` and similar directives.
 * `-o`, `--output PATH`: Override the job stdout path (creates parent directory if needed). Takes priority over scheduler stdout settings.
 * `-e`, `--error PATH`: Override the job stderr path. Takes priority over scheduler stderr settings.
 * `--afterok IDS`: Submit job with dependencies on existing job IDs. Use colon-separated IDs: `123:456:789`.
+* `-f`, `--fakeroot`: Run with fakeroot privileges.
+* `--bind HOST:CONTAINER`: Bind mount a path into the container (repeatable).
+* `--dry-run`: Preview what would be submitted without executing anything.
+* `--array FILE`: Input file for an array job — one subjob per line, tokens become positional args.
+* `--array-limit N`: Max concurrently running subjobs (0 = unlimited).
 
 **Resource override flags** (apply on top of script scheduler directives; highest priority):
 
@@ -986,20 +992,84 @@ condatainer run -g a100:4 gpu_job.sh
 condatainer run -g h100 gpu_job.sh
 ```
 
+### Array Jobs
+
+Run the same script over a list of inputs with `--array`. Each non-empty line in the input file becomes one subjob; its space-separated tokens arrive as positional arguments (`$1`, `$2`, …) inside the script.
+
+```bash
+# samples.txt — one entry per line; tokens become $1, $2, ...
+sample1 condition_A
+sample2 condition_B
+sample3 condition_C
+```
+
+```bash
+# quant.sh — $1=sample name, $2=condition
+salmon quant -i $SALMON_INDEX_DIR -p $NCPUS -l A \
+  -r reads/${1}.fq -o quants/${1}_${2}/
+```
+
+```bash
+condatainer run --array samples.txt quant.sh
+condatainer run --array samples.txt --array-limit 4 quant.sh  # max 4 concurrent
+condatainer run --dry-run --array samples.txt quant.sh        # preview args
+```
+
+**Rules:**
+- All non-empty lines must have the same number of shell-split tokens (quoted strings count as one).
+- Blank lines are flagged on `--dry-run` and block submission — remove them before submitting.
+- Per-subjob logs go to `{logsDir}/{jobname}_{idx}_{tag}.log` where `{tag}` is all args joined, with non-alphanumeric characters replaced by `_`, capped at 20 characters.
+- Array jobs always require scheduler submission (cannot run locally).
+
 ### Job Chaining
 
 All `[CNT]` messages go to stderr, only job ID is printed to stdout, so you can capture it for downstream job submission.
 
 ```bash
-set -e # Exit immediately if any command fails
-while read sample; do
-  JOB=$(condatainer run -o log/trim_${sample}.out trim.sh $sample)
-  JOB=$(condatainer run -o log/align_${sample}.out --afterok "$JOB" align.sh $sample)
-  condatainer run -o log/quant_${sample}.out --afterok "$JOB" quant.sh $sample
-done < samples.txt
+TRIM=$(condatainer run trim.sh sample1)
+ALIGN=$(condatainer run --afterok "$TRIM" align.sh sample1)
+condatainer run --afterok "$ALIGN" quant.sh sample1
 ```
 
 Multiple job IDs can be passed to `--afterok` as a colon-separated list (`--afterok 123:456:789`).
+
+### Array Jobs + Chaining
+
+`--array` and `--afterok` can be combined: each stage submits an array job and waits for the previous stage to finish before starting. A final single job can collect results after all subjobs complete.
+
+```bash
+# Stage 1: trim all samples (no dependency)
+JOB=$(condatainer run --array samples.txt --array-limit 10 trim.sh)
+
+# Stage 2: align — waits for ALL trim subjobs to finish
+JOB=$(condatainer run --array samples.txt --array-limit 10 --afterok "$JOB" align.sh)
+
+# Stage 3: quant — waits for ALL align subjobs to finish
+JOB=$(condatainer run --array samples.txt --array-limit 10 --afterok "$JOB" quant.sh)
+
+# Final: single job collecting results — waits for ALL quant subjobs
+condatainer run --afterok "$JOB" collect_results.sh samples.txt
+```
+
+Each array stage fans out across all samples in parallel (up to the concurrency limit), and `--afterok` ensures the next stage only starts once every subjob in the previous stage has succeeded.
+
+If you don't like this all-or-nothing behavior, you can chain individual subjobs.
+
+```bash
+declare -a FINAL_JOBS
+
+while IFS= read -r line; do
+  if [[ -z "$line" ]]; then continue; fi  # skip blank lines
+  TRIM=$(condatainer run trim.sh $line)
+  ALIGN=$(condatainer run --afterok "$TRIM" align.sh $line)
+  QUANT=$(condatainer run --afterok "$ALIGN" quant.sh $line)
+  FINAL_JOBS+=("$QUANT")
+done < samples.txt
+JOB_IDS=$(IFS=:; echo "${FINAL_JOBS[*]}")
+condatainer run --afterok "$JOB_IDS" collect_results.sh samples.txt
+```
+
+Do not quote the line variable in the loop if you want the tokens to be split into separate arguments.
 
 ### Usable ENV
 
@@ -1028,20 +1098,12 @@ Environment variables are resolved with the following priority:
 
 When a scheduler script requests more than one task (`--ntasks-per-node`, `--ntasks`, or PBS/LSF equivalents), `condatainer run` automatically detects the host MPI and wraps the job command with `mpiexec`:
 
-**Detection order:**
-
-1. `mpiexec` already in `PATH` → use it directly
-2. `module avail -t openmpi` → pick the highest available version, load it with `module purge && module load`
-3. Neither found → warn and run without MPI wrapper
+**Detection:** `mpiexec` must be available in `PATH` at submission time. If it is not found, `condatainer run` exits with an error.
 
 **Generated job command:**
 
 ```bash
-# Via direct PATH:
 mpiexec condatainer run script.sh
-
-# Via module system:
-module purge && module load openmpi/4.1.5 && mpiexec condatainer run script.sh
 ```
 
 **MPI Script Example:**
@@ -1061,6 +1123,7 @@ python my_mpi_script.py
 Run with:
 
 ```bash
+# ml openmpi # or other MPI module to ensure mpiexec is in PATH
 condatainer run mpi_job.sh
 ```
 

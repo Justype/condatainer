@@ -454,7 +454,13 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	}
 
 	// Set log path based on job name; only override if caller requests it or script has no output set
-	if jobSpec.Name != "" && (jobSpec.OverrideOutput || specs.Control.Stdout == "") {
+	// Capture before override: separate output when stderr is explicitly set to a different path
+	arraySeparateOutput := jobSpec.Array != nil && specs.Control.Stderr != "" && specs.Control.Stderr != specs.Control.Stdout
+	if jobSpec.Array != nil {
+		// Array job: silence scheduler output; exec redirect in script body handles per-task logs
+		specs.Control.Stdout = "/dev/null"
+		specs.Control.Stderr = "/dev/null"
+	} else if jobSpec.Name != "" && (jobSpec.OverrideOutput || specs.Control.Stdout == "") {
 		specs.Control.Stdout = filepath.Join(outputDir, fmt.Sprintf("%s.log", safeJobName(jobSpec.Name)))
 	}
 	if specs.Control.Stderr == "" && specs.Control.Stdout != "" {
@@ -552,10 +558,35 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 		}
 	}
 
+	// Array directive
+	if jobSpec.Array != nil {
+		arr := jobSpec.Array
+		r := fmt.Sprintf("1-%d", arr.Count)
+		if arr.Limit > 0 {
+			r += fmt.Sprintf("%%%d", arr.Limit)
+		}
+		fmt.Fprintf(writer, "#SBATCH --array=%s\n", r)
+	}
+
 	fmt.Fprintln(writer, "")
 
+	// Array job: extract input line, set ARRAY_ARGS, and redirect output
+	if jobSpec.Array != nil {
+		writeArrayBlock(writer, "$SLURM_ARRAY_TASK_ID",
+			jobSpec.Array.InputFile, outputDir, safeJobName(jobSpec.Name),
+			jobSpec.Array.Count, arraySeparateOutput)
+		jobSpec.Metadata["Array Job ID"] = "$SLURM_ARRAY_JOB_ID"
+		jobSpec.Metadata["Array Index"] = "$SLURM_ARRAY_TASK_ID"
+		jobSpec.Metadata["Array File"] = jobSpec.Array.InputFile
+		jobSpec.Metadata["Array Args"] = "$ARRAY_ARGS"
+	}
+
 	// Print job information at start
-	writeJobHeader(writer, "$SLURM_JOB_ID", specs, formatSlurmTimeSpec, jobSpec.Metadata)
+	jobIDVar := "$SLURM_JOB_ID"
+	if jobSpec.Array != nil {
+		jobIDVar = "$SLURM_ARRAY_JOB_ID"
+	}
+	writeJobHeader(writer, jobIDVar, specs, formatSlurmTimeSpec, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
 	// Write the command
@@ -563,7 +594,7 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 
 	// Print completion info
 	fmt.Fprintln(writer, "")
-	writeJobFooter(writer, "$SLURM_JOB_ID")
+	writeJobFooter(writer, jobIDVar)
 
 	// Self-dispose: remove this script file (unless in debug mode)
 	if !debugMode {
