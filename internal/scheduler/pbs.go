@@ -378,6 +378,8 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	}
 
 	// Set log path based on job name; only override if caller requests it or script has no output set
+	// Capture before override: separate output when stderr is explicitly set to a different path
+	arraySeparateOutput := jobSpec.Array != nil && specs.Control.Stderr != "" && specs.Control.Stderr != specs.Control.Stdout
 	if jobSpec.Array != nil {
 		// Array job: silence scheduler output; exec redirect in script body handles per-task logs
 		specs.Control.Stdout = "/dev/null"
@@ -500,7 +502,7 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	if jobSpec.Array != nil {
 		writeArrayBlock(writer, "$PBS_ARRAY_INDEX",
 			jobSpec.Array.InputFile, outputDir, safeJobName(jobSpec.Name),
-			jobSpec.Array.Count, specs.Control.Stdout, specs.Control.Stderr)
+			jobSpec.Array.Count, arraySeparateOutput)
 		jobSpec.Metadata["Array Job ID"] = "$PBS_JOBID"
 		jobSpec.Metadata["Array Index"] = "$PBS_ARRAY_INDEX"
 		jobSpec.Metadata["Array File"] = jobSpec.Array.InputFile

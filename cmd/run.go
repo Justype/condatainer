@@ -1049,6 +1049,9 @@ func shellSplitLine(line string) []string {
 func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript string, specs *scheduler.ScriptSpecs, depIDs []string, scriptArgs []string, arraySpec *scheduler.ArraySpec) error {
 	info := sched.GetInfo()
 
+	// Capture separate-output intent before CreateScriptWithSpec overrides Stdout/Stderr to /dev/null
+	arraySeparateOutput := arraySpec != nil && specs.Control.Stderr != "" && specs.Control.Stderr != specs.Control.Stdout
+
 	// Determine log directory - use spec's Stdout path if set, otherwise global log path
 	var logsDir string
 	if specs.Control.Stdout != "" {
@@ -1119,9 +1122,13 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 	}
 
 	if arraySpec != nil {
-		// Array jobs redirect output per-job inside the script; show glob pattern
+		// Array jobs redirect output per-task inside the script; show glob pattern
 		safeName := strings.ReplaceAll(fileBaseName, "/", "--")
-		utils.PrintMessage("Per-job logs => %s", utils.StylePath(filepath.Join(logsDir, safeName+"_{idx}_{line_arg}.log")))
+		if arraySeparateOutput {
+			utils.PrintMessage("Per-task stdout/err => %s", utils.StylePath(filepath.Join(logsDir, safeName+"_*.out/*.err")))
+		} else {
+			utils.PrintMessage("Per-task stdout&err => %s", utils.StylePath(filepath.Join(logsDir, safeName+"_*.log")))
+		}
 	} else {
 		stdoutPath := jobSpec.Specs.Control.Stdout
 		stderrPath := jobSpec.Specs.Control.Stderr

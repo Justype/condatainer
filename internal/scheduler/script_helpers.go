@@ -276,7 +276,7 @@ func writeJobFooter(w io.Writer, jobIDVar string) {
 // Lines with spaces: the full line is exported as ARRAY_ARGS; the first space-delimited
 // token (_ARRAY_FIRST) is used for the log filename.
 func writeArrayBlock(w io.Writer, taskIDVar, inputFile, logDir, jobName string,
-	count int, stdout, stderr string) {
+	count int, separateOutput bool) {
 
 	padWidth := len(fmt.Sprintf("%d", count))
 	fmt.Fprintln(w, "# Array job: extract input and redirect output")
@@ -286,8 +286,7 @@ func writeArrayBlock(w io.Writer, taskIDVar, inputFile, logDir, jobName string,
 	fmt.Fprintln(w, "_ARRAY_FIRST=${ARRAY_ARGS%% *}")
 	fmt.Fprintf(w, "_PADDED_IDX=$(printf \"%%0%dd\" \"$_ARRAY_IDX\")\n", padWidth)
 
-	separated := stderr != "" && stderr != stdout
-	if separated {
+	if separateOutput {
 		fmt.Fprintf(w,
 			"exec > \"%s/%s_${_PADDED_IDX}_${_ARRAY_FIRST}.out\""+
 				" 2> \"%s/%s_${_PADDED_IDX}_${_ARRAY_FIRST}.err\"\n",
