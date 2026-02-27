@@ -167,7 +167,13 @@ func runScript(cmd *cobra.Command, args []string) error {
 	}
 
 	// CLI -c/-m/-t/-g resource overrides (highest priority, only when spec is parsed)
-	if scriptSpecs != nil && scriptSpecs.Spec != nil {
+	if scriptSpecs != nil && scriptSpecs.Spec == nil && scriptSpecs.HasDirectives {
+		// Script is in passthrough mode — resource directives could not be fully parsed.
+		// Overrides cannot be applied; warn if the user specified any.
+		if runCPU > 0 || runMem != "" || runTime != "" || runGPU != "" {
+			utils.PrintWarning("resource overrides (-c/-m/-t/-g) have no effect in passthrough mode; edit the script directives directly")
+		}
+	} else if scriptSpecs != nil && scriptSpecs.Spec != nil {
 		override := &scheduler.ResourceSpec{}
 		if runCPU > 0 {
 			override.CpusPerTask = runCPU
@@ -194,6 +200,13 @@ func runScript(cmd *cobra.Command, args []string) error {
 			override.Gpu = gpu
 		}
 		scriptSpecs.Spec.Override(override)
+	}
+
+	// Conflict: --array flag + native scheduler array directive in the script
+	if arraySpec != nil {
+		if found := detectNativeArrayDirective(scriptSpecs); found != "" {
+			ExitWithError("script contains native array directive %q; remove it and use --array flag instead", found)
+		}
 	}
 
 	// 2. Embedded #CNT args + dependency check/install
@@ -1046,6 +1059,32 @@ func shellSplitLine(line string) []string {
 		tokens = append(tokens, cur.String())
 	}
 	return tokens
+}
+
+// detectNativeArrayDirective returns a non-empty string describing a native scheduler
+// array directive found in specs, or "" if none. Used to detect conflicts when the
+// --array CLI flag is also in use.
+func detectNativeArrayDirective(specs *scheduler.ScriptSpecs) string {
+	if specs == nil {
+		return ""
+	}
+	for _, f := range specs.RemainingFlags {
+		// SLURM: --array=N-M  --array N-M  -a N-M  -a=N-M
+		if strings.HasPrefix(f, "--array") || strings.HasPrefix(f, "-a=") ||
+			f == "-a" || strings.HasPrefix(f, "-a ") {
+			return f
+		}
+		// PBS: -J N-M (PBS job-name flag is -N, not -J)
+		if strings.HasPrefix(f, "-J ") || strings.HasPrefix(f, "-J\t") ||
+			strings.HasPrefix(f, "-J=") {
+			return f
+		}
+	}
+	// LSF: -J name[N-M] — array range embedded in job name with brackets
+	if strings.Contains(specs.Control.JobName, "[") {
+		return fmt.Sprintf("-J %s", specs.Control.JobName)
+	}
+	return ""
 }
 
 // submitRunJob creates and submits a scheduler job to run the script.
