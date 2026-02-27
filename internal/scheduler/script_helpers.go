@@ -264,17 +264,17 @@ func writeJobFooter(w io.Writer, jobIDVar string) {
 // writeArrayBlock writes the line_args-extraction and output-redirect block for array jobs.
 // Call this AFTER scheduler directives but BEFORE writeJobHeader.
 //
-//   - taskIDVar  : shell expression for the 1-based task index (e.g. "$SLURM_ARRAY_TASK_ID")
-//   - inputFile  : absolute path to the input list file
-//   - logDir     : absolute path to the log directory
-//   - jobName    : job name used as prefix for log filenames (already safeJobName-processed)
-//   - count      : total number of tasks (used to compute zero-padding width)
-//   - stdout, stderr : configured output paths — if stderr is empty or equal to stdout,
-//     a combined redirect (exec &>) is used; otherwise separate redirects are used
+//   - taskIDVar    : shell expression for the 1-based task index (e.g. "$SLURM_ARRAY_TASK_ID")
+//   - inputFile    : absolute path to the input list file
+//   - logDir       : absolute path to the log directory
+//   - jobName      : job name used as prefix for log filenames (already safeJobName-processed)
+//   - count        : total number of subjobs (used to compute zero-padding width)
+//   - separateOutput : when true, use separate .out/.err redirects; otherwise combined .log
 //
 // All schedulers use 1-indexed ranges so taskIDVar maps directly to the sed line number.
-// Lines with spaces: the full line is exported as ARRAY_ARGS; the first space-delimited
-// token (_ARRAY_FIRST) is used for the log filename.
+// _ARRAY_TAG is derived from ARRAY_ARGS: all non-alphanumeric chars are replaced with `_`,
+// consecutive underscores are squeezed, the result is capped at 20 characters, and any
+// trailing underscore is stripped. This makes it safe and predictable as a filename component.
 func writeArrayBlock(w io.Writer, taskIDVar, inputFile, logDir, jobName string,
 	count int, separateOutput bool) {
 
@@ -283,16 +283,17 @@ func writeArrayBlock(w io.Writer, taskIDVar, inputFile, logDir, jobName string,
 	fmt.Fprintf(w, "_ARRAY_IDX=%s\n", taskIDVar)
 	fmt.Fprintf(w, "ARRAY_ARGS=$(sed -n \"${_ARRAY_IDX}p\" %s)\n", inputFile)
 	fmt.Fprintln(w, "export ARRAY_ARGS")
-	fmt.Fprintln(w, "_ARRAY_FIRST=${ARRAY_ARGS%% *}")
+	fmt.Fprintf(w, "_ARRAY_TAG=$(printf '%%s' \"$ARRAY_ARGS\" | tr -cs '[:alnum:]_-' '_' | cut -c1-20)\n")
+	fmt.Fprintln(w, "_ARRAY_TAG=${_ARRAY_TAG%_}")
 	fmt.Fprintf(w, "_PADDED_IDX=$(printf \"%%0%dd\" \"$_ARRAY_IDX\")\n", padWidth)
 
 	if separateOutput {
 		fmt.Fprintf(w,
-			"exec > \"%s/%s_${_PADDED_IDX}_${_ARRAY_FIRST}.out\""+
-				" 2> \"%s/%s_${_PADDED_IDX}_${_ARRAY_FIRST}.err\"\n",
+			"exec > \"%s/%s_${_PADDED_IDX}_${_ARRAY_TAG}.out\""+
+				" 2> \"%s/%s_${_PADDED_IDX}_${_ARRAY_TAG}.err\"\n",
 			logDir, jobName, logDir, jobName)
 	} else {
-		fmt.Fprintf(w, "exec &> \"%s/%s_${_PADDED_IDX}_${_ARRAY_FIRST}.log\"\n",
+		fmt.Fprintf(w, "exec &> \"%s/%s_${_PADDED_IDX}_${_ARRAY_TAG}.log\"\n",
 			logDir, jobName)
 	}
 	fmt.Fprintln(w)
