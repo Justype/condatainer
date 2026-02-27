@@ -8,7 +8,6 @@ import (
 	osexec "os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -594,16 +593,28 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 			fmt.Printf("  Base:      %s %s %s\n", cross, utils.StylePath(baseImg), utils.StyleWarning("(not found)"))
 		}
 
-		// Group found deps by images directory, preserving insertion order
+		// External overlays (direct path): show under "External:" header; installed: group by folder
+		var externals []string
 		dirOrder := []string{}
 		dirDeps := map[string][]string{}
 		for _, e := range entries {
-			if e.ok {
+			if !e.ok {
+				continue
+			}
+			if utils.IsOverlay(e.dep) {
+				externals = append(externals, e.dep)
+			} else {
 				dir := filepath.Dir(e.path)
 				if _, exists := dirDeps[dir]; !exists {
 					dirOrder = append(dirOrder, dir)
 				}
 				dirDeps[dir] = append(dirDeps[dir], e.dep)
+			}
+		}
+		if len(externals) > 0 {
+			fmt.Printf("  %s\n", "External:")
+			for _, dep := range externals {
+				fmt.Printf("    %s %s\n", check, utils.StylePath(dep))
 			}
 		}
 		for _, dir := range dirOrder {
@@ -647,6 +658,22 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 				fmt.Printf("  GPU:       %s x%d\n", rs.Gpu.Type, rs.Gpu.Count)
 			} else {
 				fmt.Printf("  GPU:       %d\n", rs.Gpu.Count)
+			}
+		}
+		ntasks := getNtasks(specs)
+		if ntasks > 1 {
+			if rs.Nodes > 0 {
+				fmt.Printf("  Nodes:     %d\n", rs.Nodes)
+			}
+			if rs.TasksPerNode > 0 {
+				fmt.Printf("  Tasks/node: %d\n", rs.TasksPerNode)
+			}
+			fmt.Printf("  MPI tasks: %d\n", ntasks)
+			mpiexecPath, ok := detectMpi()
+			if !ok {
+				fmt.Printf("  mpiexec:   %s\n", utils.StyleError("not found"))
+			} else {
+				fmt.Printf("  mpiexec:   %s\n", utils.StylePath(mpiexecPath))
 			}
 		}
 
@@ -946,60 +973,22 @@ func getNtasks(specs *scheduler.ScriptSpecs) int {
 	return nodes * tpn
 }
 
-// detectMpi probes the current environment for mpiexec, first directly and then
-// via the module system.  Returns (available, moduleName, mpiexecPath): moduleName is
-// non-empty when a module must be loaded; mpiexecPath is the full path to mpiexec used
-// to derive the MPI installation root for bind-mounting into the container.
-func detectMpi() (bool, string, string) {
-	// Step 1: mpiexec already in PATH?
-	if path, err := osexec.LookPath("mpiexec"); err == nil {
-		return true, "", path
+// detectMpi checks whether mpiexec is available in the current PATH.
+// Returns the full path and true when found; empty string and false otherwise.
+func detectMpi() (string, bool) {
+	path, err := osexec.LookPath("mpiexec")
+	if err != nil {
+		return "", false
 	}
-
-	// Step 2: query the module system for an openmpi module.
-	availCmd := osexec.Command("bash", "-lc", "module avail -t openmpi 2>&1")
-	availOut, err := availCmd.Output()
-	if err != nil || len(availOut) == 0 {
-		return false, "", ""
-	}
-
-	var candidates []string
-	for _, line := range strings.Split(string(availOut), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(strings.ToLower(line), "openmpi") {
-			continue
-		}
-		// Strip attribute markers like (default), (L), etc.
-		if idx := strings.Index(line, "("); idx != -1 {
-			line = strings.TrimSpace(line[:idx])
-		}
-		if line != "" {
-			candidates = append(candidates, line)
-		}
-	}
-	if len(candidates) == 0 {
-		return false, "", ""
-	}
-
-	// Pick the highest version (lexicographic sort is sufficient for openmpi/X.Y.Z).
-	sort.Strings(candidates)
-	mod := candidates[len(candidates)-1]
-
-	// Step 3: load the module and capture the mpiexec path.
-	pathCmd := osexec.Command("bash", "-lc",
-		fmt.Sprintf("module purge && module load %s && which mpiexec", mod))
-	pathOut, err := pathCmd.Output()
-	if err != nil || len(pathOut) == 0 {
-		return false, "", ""
-	}
-	return true, mod, strings.TrimSpace(string(pathOut))
+	return path, true
 }
 
 // buildMpiRunCommand returns the shell command to embed in the job script.
 // When ntasks > 1 it attempts to detect mpiexec (directly or via a module) and
 // wraps the condatainer run invocation with mpiexec.
+// Returns an error when ntasks > 1 but mpiexec cannot be found.
 // The user is responsible for installing the same MPI version inside the container.
-func buildMpiRunCommand(contentScript string, scriptArgs []string, specs *scheduler.ScriptSpecs, prependArrayArgs bool) string {
+func buildMpiRunCommand(contentScript string, scriptArgs []string, specs *scheduler.ScriptSpecs, prependArrayArgs bool) (string, error) {
 	runCmd := fmt.Sprintf("condatainer run %s", contentScript)
 	if prependArrayArgs {
 		runCmd += " $ARRAY_ARGS"
@@ -1012,19 +1001,14 @@ func buildMpiRunCommand(contentScript string, scriptArgs []string, specs *schedu
 		runCmd += " " + strings.Join(quoted, " ")
 	}
 	if getNtasks(specs) <= 1 {
-		return runCmd
+		return runCmd, nil
 	}
-	ok, mod, mpiexecPath := detectMpi()
+	mpiexecPath, ok := detectMpi()
 	if !ok {
-		utils.PrintWarning("mpiexec not found; running %s without MPI wrapper", utils.StylePath(contentScript))
-		return runCmd
-	}
-	if mod != "" {
-		utils.PrintNote("Detected MPI module: %s", utils.StyleName(mod))
-		return fmt.Sprintf("module purge && module load %s && mpiexec %s", mod, runCmd)
+		return "", fmt.Errorf("mpiexec not found; load the appropriate MPI module before submitting (ntasks=%d)", getNtasks(specs))
 	}
 	utils.PrintNote("Detected mpiexec: %s", utils.StylePath(mpiexecPath))
-	return fmt.Sprintf("mpiexec %s", runCmd)
+	return fmt.Sprintf("mpiexec %s", runCmd), nil
 }
 
 // shellQuote returns a single-quoted shell-safe version of s.
@@ -1123,7 +1107,11 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 	// Build the condatainer run command pointing at the bash script.
 	// When the user provided a .sub file, contentScript is the executable .sh — the submitted
 	// job must re-invoke condatainer run on the bash script, not the submit file.
-	runCommand := buildMpiRunCommand(contentScript, scriptArgs, specs, arraySpec != nil)
+	runCommand, err := buildMpiRunCommand(contentScript, scriptArgs, specs, arraySpec != nil)
+	if err != nil {
+		utils.PrintError("%v", err)
+		return err
+	}
 
 	// Generate names: short name for job, timestamped name for files
 	baseName := filepath.Base(originScriptPath)

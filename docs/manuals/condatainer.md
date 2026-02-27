@@ -1098,20 +1098,12 @@ Environment variables are resolved with the following priority:
 
 When a scheduler script requests more than one task (`--ntasks-per-node`, `--ntasks`, or PBS/LSF equivalents), `condatainer run` automatically detects the host MPI and wraps the job command with `mpiexec`:
 
-**Detection order:**
-
-1. `mpiexec` already in `PATH` → use it directly
-2. `module avail -t openmpi` → pick the highest available version, load it with `module purge && module load`
-3. Neither found → warn and run without MPI wrapper
+**Detection:** `mpiexec` must be available in `PATH` at submission time. If it is not found, `condatainer run` exits with an error.
 
 **Generated job command:**
 
 ```bash
-# Via direct PATH:
 mpiexec condatainer run script.sh
-
-# Via module system:
-module purge && module load openmpi/4.1.5 && mpiexec condatainer run script.sh
 ```
 
 **MPI Script Example:**
@@ -1131,6 +1123,7 @@ python my_mpi_script.py
 Run with:
 
 ```bash
+# ml openmpi # or other MPI module to ensure mpiexec is in PATH
 condatainer run mpi_job.sh
 ```
 

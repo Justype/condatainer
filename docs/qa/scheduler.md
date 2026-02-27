@@ -212,9 +212,11 @@ Two fields are intentionally dropped during translation:
 When CondaTainer detects `ntasks > 1`, it **automatically wraps the command with `mpiexec`**:
 
 ```bash
-# Generated job command (via module system):
-module purge && module load openmpi/4.1.5 && mpiexec condatainer run mpi_job.sh
+# Generated job command:
+mpiexec condatainer run mpi_job.sh
 ```
+
+`mpiexec` must be available in `PATH` at submission time (e.g. load your MPI module before calling `condatainer run`). If it is not found, submission fails with an error.
 
 Each MPI rank launches its own container, all sharing the same MPI communicator via the scheduler's process management interface.
 
