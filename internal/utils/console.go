@@ -28,16 +28,14 @@ const projectPrefix = "[CNT]"
 // ---------------------------------------------------------
 
 var (
-	red         = color.New(color.FgRed).SprintFunc()
-	green       = color.New(color.FgGreen).SprintFunc()
-	yellow      = color.New(color.FgYellow).SprintFunc()
-	blueBold    = color.New(color.FgBlue, color.Bold).SprintFunc()
-	magenta     = color.New(color.FgMagenta).SprintFunc()
-	magentaBold = color.New(color.FgMagenta, color.Bold).SprintFunc()
-	cyan        = color.New(color.FgCyan).SprintFunc()
-	cyanBold    = color.New(color.FgCyan, color.Bold).SprintFunc()
-	gray        = color.New(color.FgWhite).SprintFunc() // FgWhite = Gray in ANSI
-	bold        = color.New(color.Bold).SprintFunc()
+	red      = color.New(color.FgRed).SprintFunc()
+	green    = color.New(color.FgGreen).SprintFunc()
+	yellow   = color.New(color.FgYellow).SprintFunc()
+	blueBold = color.New(color.FgBlue, color.Bold).SprintFunc()
+	magenta  = color.New(color.FgMagenta).SprintFunc()
+	cyan     = color.New(color.FgCyan).SprintFunc()
+	gray     = color.New(color.FgWhite).SprintFunc() // FgWhite = Gray in ANSI
+	bold     = color.New(color.Bold).SprintFunc()
 )
 
 // ---------------------------------------------------------
@@ -82,13 +80,13 @@ func StyleNumber(num interface{}) string {
 
 // StylePath formats file paths with context-aware coloring.
 func StylePath(path string) string {
-	// 1. Writable Overlay Images -> Bold Magenta
+	// 1. Writable Overlay Images -> Magenta
 	if IsImg(path) {
-		return magentaBold(path)
+		return magenta(path)
 	}
-	// 2. Read-Only Containers (SIF/SquashFS) -> Bold Cyan
+	// 2. Read-Only Containers (SIF/SquashFS) -> Cyan
 	if IsSif(path) || IsSqf(path) {
-		return cyanBold(path)
+		return cyan(path)
 	}
 	// 3. Standard System Paths -> Bold Blue
 	return blueBold(path)
