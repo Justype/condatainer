@@ -321,6 +321,7 @@ type HelperScriptEntry struct {
 // fetchRemoteHelperMetadata fetches the helper scripts metadata from the configured scripts_link
 func fetchRemoteHelperMetadata() (map[string]map[string]HelperScriptEntry, error) {
 	url := config.Global.ScriptsLink + "/metadata/helper-scripts.json.gz"
+	utils.PrintMessage("Fetching metadata from %s...", url)
 
 	resp, err := http.Get(url)
 	if err != nil {
