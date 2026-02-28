@@ -312,11 +312,19 @@ queue
 	if !strings.Contains(subContent, "+MaxRuntime = 7200") {
 		t.Errorf("Generated submit file missing +MaxRuntime directive:\n%s", subContent)
 	}
+	if !strings.Contains(subContent, "request_cpus = 8") {
+		t.Errorf("Generated submit file missing request_cpus directive:\n%s", subContent)
+	}
+	if !strings.Contains(subContent, "request_memory = 16384") {
+		t.Errorf("Generated submit file missing request_memory directive:\n%s", subContent)
+	}
 
 	// Verify NO duplicates
 	notificationCount := strings.Count(subContent, "notification =")
 	notifyUserCount := strings.Count(subContent, "notify_user =")
 	maxRuntimeCount := strings.Count(subContent, "+MaxRuntime =")
+	cpusCount := strings.Count(subContent, "request_cpus =")
+	memCount := strings.Count(subContent, "request_memory =")
 	if notificationCount != 1 {
 		t.Errorf("Expected exactly 1 notification directive, found %d:\n%s", notificationCount, subContent)
 	}
@@ -325,6 +333,12 @@ queue
 	}
 	if maxRuntimeCount != 1 {
 		t.Errorf("Expected exactly 1 +MaxRuntime directive, found %d:\n%s", maxRuntimeCount, subContent)
+	}
+	if cpusCount != 1 {
+		t.Errorf("Expected exactly 1 request_cpus directive, found %d:\n%s", cpusCount, subContent)
+	}
+	if memCount != 1 {
+		t.Errorf("Expected exactly 1 request_memory directive, found %d:\n%s", memCount, subContent)
 	}
 }
 
@@ -603,14 +617,12 @@ func TestHTCondorSubmitFileFormat(t *testing.T) {
 				CpusPerTask:  8,
 				MemPerNodeMB: 16384,
 				Time:         2 * time.Hour,
+				Gpu:          &GpuSpec{Type: "gpu", Count: 2},
 			},
 			Control: RuntimeConfig{
 				JobName: "format_test",
 			},
-			RemainingFlags: []string{
-				"request_cpus = 8",
-				"request_memory = 16384",
-			},
+			RemainingFlags: []string{},
 		},
 	}
 
@@ -630,6 +642,9 @@ func TestHTCondorSubmitFileFormat(t *testing.T) {
 		"universe = vanilla",
 		"executable =",
 		"transfer_executable = false",
+		"request_cpus = 8",
+		"request_memory = 16384",
+		"request_gpus = 2",
 		"+MaxRuntime = 7200",
 		"notification = Never",
 		"queue",
