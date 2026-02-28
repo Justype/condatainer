@@ -171,12 +171,12 @@ func (rs *ResourceSpec) Override(other *ResourceSpec) {
 // Each task processes one line from InputFile using the scheduler's
 // native array mechanism. Limit=0 means no concurrency cap.
 type ArraySpec struct {
-	InputFile   string   // Absolute path to input list (one entry per line)
-	Count       int      // Non-empty line count; computed by cmd/run.go
-	Limit       int      // Max concurrently running tasks (0 = unlimited)
-	ArgCount    int      // Number of shell-split tokens per line (all lines must match)
-	SampleArgs  []string // Tokens from the first line, for dry-run display
-	BlankLines  []int    // 1-based line numbers of all blank lines (nil = none)
+	InputFile  string   // Absolute path to input list (one entry per line)
+	Count      int      // Non-empty line count; computed by cmd/run.go
+	Limit      int      // Max concurrently running tasks (0 = unlimited)
+	ArgCount   int      // Number of shell-split tokens per line (all lines must match)
+	SampleArgs []string // Tokens from the first line, for dry-run display
+	BlankLines []int    // 1-based line numbers of all blank lines (nil = none)
 }
 
 // JobSpec represents specifications for submitting a batch job
@@ -639,7 +639,7 @@ func IsInsideJob() bool {
 	if _, ok := os.LookupEnv("SLURM_JOB_ID"); ok {
 		return true
 	}
-	// Check PBS/Torque
+	// Check PBS
 	if _, ok := os.LookupEnv("PBS_JOBID"); ok {
 		return true
 	}
