@@ -15,6 +15,8 @@
 
 > [!NOTE]
 > Slurm is the primary, tested scheduler. Others are experimental, bug reports are welcome!
+>
+> For `qsub`, only **PBS Pro** (OpenPBS) is supported. Torque and SGE are not supported.
 
 ## 🛠️ Installation
 
@@ -103,7 +105,7 @@ condatainer helper vscode-tunnel  # Start a VS Code tunnel
 condatainer helper igv -p 10212   # Start IGV via noVNC on port 10212
 ```
 
-Please check out [ReadTheDocs - Helper Scripts](https://condatainer.readthedocs.io/en/dev/tutorials/helpers_on_HPC.html) for more details and examples.
+Please check out [ReadTheDocs - Helpers HPC](https://condatainer.readthedocs.io/en/latest/tutorials/helpers_on_HPC.html) for more details and examples.
 
 ## 🚀 Automation
 

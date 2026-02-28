@@ -26,7 +26,7 @@ var (
 
 // eCmd is a quick shortcut for executing commands with overlays
 var eCmd = &cobra.Command{
-	Use:   "e [overlays...] [-- command...]",
+	Use:   "e [flags] [overlays...] [-- command...]",
 	Short: "Shortcut for exec with overlays, writable by default",
 	Long: `Quick shortcut for executing commands with overlays.
 

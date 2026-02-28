@@ -329,7 +329,7 @@ func DetectSchedulerBin() string {
 		return path
 	}
 
-	// Try PBS/Torque
+	// Try PBS
 	if path, err := exec.LookPath("qsub"); err == nil {
 		return path
 	}

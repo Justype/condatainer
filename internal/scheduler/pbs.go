@@ -14,7 +14,10 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// PbsScheduler implements the Scheduler interface for PBS/Torque
+// PbsScheduler implements the Scheduler interface for PBS
+//
+// NOTE: Only PBS Pro/OpenPBS is supported; Torque is not in the plan.
+//
 // EXPERIMENTAL: PBS is not tested on real clusters and may have edge cases. Feedback welcome.
 type PbsScheduler struct {
 	qsubBin     string

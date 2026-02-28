@@ -17,7 +17,7 @@
 
 ---
 
-### PBS/Torque (Experimental)
+### PBS (Experimental)
 | Function | Purpose | Status |
 |----------|---------|--------|
 | `getGpuInfo()` | Query GPU info with optional queue assignment | ✅ **IMPLEMENTED** |
