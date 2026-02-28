@@ -597,6 +597,18 @@ func TestLsfGpuParsing(t *testing.T) {
 			wantType:  "a100",
 			wantCount: 2,
 		},
+		{
+			name:      "gmodel key (LSF native format)",
+			input:     "num=4:gmodel=a100",
+			wantType:  "a100",
+			wantCount: 4,
+		},
+		{
+			name:      "gmodel with extra options",
+			input:     "num=2:gmodel=h100:mode=exclusive_process",
+			wantType:  "h100",
+			wantCount: 2,
+		},
 	}
 
 	for _, tt := range tests {
@@ -896,6 +908,83 @@ func TestLsfScriptGenerationNodesCpus(t *testing.T) {
 			nCount := strings.Count(scriptContent, "#BSUB -n ")
 			if nCount != 1 {
 				t.Errorf("#BSUB -n appears %d times; want 1\nScript:\n%s", nCount, scriptContent)
+			}
+		})
+	}
+}
+
+func TestLsfScriptGenerationGpu(t *testing.T) {
+	tests := []struct {
+		name        string
+		gpu         *GpuSpec
+		wantLine    string // expected in output; empty means assert absent
+		wantAbsent  string // must NOT appear in output
+		wantCount   int    // expected occurrence count of wantLine (0 = use absent check)
+	}{
+		{
+			name:       "no GPU",
+			gpu:        nil,
+			wantLine:   "",
+			wantAbsent: "#BSUB -gpu",
+		},
+		{
+			name:      "GPU count only (generic type)",
+			gpu:       &GpuSpec{Type: "gpu", Count: 2},
+			wantLine:  `#BSUB -gpu "num=2"`,
+			wantAbsent: "gmodel=",
+			wantCount: 1,
+		},
+		{
+			name:      "GPU with model type",
+			gpu:       &GpuSpec{Type: "a100", Count: 4},
+			wantLine:  `#BSUB -gpu "num=4:gmodel=a100"`,
+			wantCount: 1,
+		},
+		{
+			name:      "GPU with type — no duplicate",
+			gpu:       &GpuSpec{Type: "h100", Count: 1},
+			wantLine:  `#BSUB -gpu "num=1:gmodel=h100"`,
+			wantCount: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			lsf := newTestLsfScheduler()
+
+			jobSpec := &JobSpec{
+				Name:    "test_gpu",
+				Command: "echo 'test'",
+				Specs: &ScriptSpecs{
+					Spec:           &ResourceSpec{CpusPerTask: 4, Gpu: tt.gpu},
+					RemainingFlags: []string{},
+				},
+			}
+
+			scriptPath, err := lsf.CreateScriptWithSpec(jobSpec, tmpDir)
+			if err != nil {
+				t.Fatalf("CreateScriptWithSpec failed: %v", err)
+			}
+			content, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatalf("Failed to read script: %v", err)
+			}
+			scriptContent := string(content)
+
+			if tt.wantAbsent != "" && strings.Contains(scriptContent, tt.wantAbsent) {
+				t.Errorf("Script contains unexpected %q\nScript:\n%s", tt.wantAbsent, scriptContent)
+			}
+			if tt.wantLine != "" {
+				if !strings.Contains(scriptContent, tt.wantLine) {
+					t.Errorf("Script missing %q\nScript:\n%s", tt.wantLine, scriptContent)
+				}
+				if tt.wantCount > 0 {
+					n := strings.Count(scriptContent, tt.wantLine)
+					if n != tt.wantCount {
+						t.Errorf("%q appears %d times; want %d\nScript:\n%s", tt.wantLine, n, tt.wantCount, scriptContent)
+					}
+				}
 			}
 		})
 	}

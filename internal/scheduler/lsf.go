@@ -337,7 +337,7 @@ func parseLsfGpuDirective(gpuStr string) *GpuSpec {
 			if count, err := strconv.Atoi(value); err == nil {
 				spec.Count = count
 			}
-		case "type":
+		case "type", "gmodel":
 			spec.Type = value
 		}
 	}
@@ -448,6 +448,13 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 			fmt.Fprintf(writer, "#BSUB -n %d\n", specs.Spec.CpusPerTask)
 		}
 		fmt.Fprintf(writer, "#BSUB -R \"span[hosts=%d]\"\n", specs.Spec.Nodes)
+		if specs.Spec.Gpu != nil && specs.Spec.Gpu.Count > 0 {
+			if specs.Spec.Gpu.Type != "" && specs.Spec.Gpu.Type != "gpu" {
+				fmt.Fprintf(writer, "#BSUB -gpu \"num=%d:gmodel=%s\"\n", specs.Spec.Gpu.Count, specs.Spec.Gpu.Type)
+			} else {
+				fmt.Fprintf(writer, "#BSUB -gpu \"num=%d\"\n", specs.Spec.Gpu.Count)
+			}
+		}
 		if specs.Spec.Time > 0 {
 			fmt.Fprintf(writer, "#BSUB -W %s\n", formatLsfTime(specs.Spec.Time))
 		}
