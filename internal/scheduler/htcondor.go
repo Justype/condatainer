@@ -466,7 +466,15 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 
 	// Resource directives -- only when Spec is available
 	if specs.Spec != nil {
-		// Time limit
+		if specs.Spec.CpusPerTask > 0 {
+			fmt.Fprintf(subWriter, "request_cpus = %d\n", specs.Spec.CpusPerTask)
+		}
+		if specs.Spec.MemPerNodeMB > 0 {
+			fmt.Fprintf(subWriter, "request_memory = %d\n", specs.Spec.MemPerNodeMB)
+		}
+		if specs.Spec.Gpu != nil && specs.Spec.Gpu.Count > 0 {
+			fmt.Fprintf(subWriter, "request_gpus = %d\n", specs.Spec.Gpu.Count)
+		}
 		if specs.Spec.Time > 0 {
 			secs := int64(specs.Spec.Time.Seconds())
 			fmt.Fprintf(subWriter, "+MaxRuntime = %d\n", secs)
