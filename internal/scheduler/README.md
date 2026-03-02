@@ -1,13 +1,13 @@
 # scheduler
 
-HPC scheduler abstraction layer for job submission, script parsing, and resource management across SLURM, PBS/Torque, LSF, and HTCondor.
+HPC scheduler abstraction layer for job submission, script parsing, and resource management across SLURM, PBS, LSF, and HTCondor.
 
 ## Supported Schedulers
 
 | Scheduler | Binary | Directive | Status |
 |-----------|--------|-----------|--------|
 | SLURM | `sbatch` | `#SBATCH` | Stable |
-| PBS/Torque | `qsub` | `#PBS` | Experimental |
+| PBS | `qsub` | `#PBS` | Experimental |
 | LSF | `bsub` | `#BSUB` | Experimental |
 | HTCondor | `condor_submit` | Native `.sub` format | Experimental |
 
@@ -20,7 +20,7 @@ error.go            Structured error types
 gpu.go              GPU compatibility database, tier matching, MIG profiles
 script_helpers.go   Shared parsing/formatting helpers (memory, time, flags, job header/footer)
 slurm.go            SLURM implementation
-pbs.go              PBS/Torque implementation
+pbs.go              PBS implementation
 lsf.go              LSF implementation
 htcondor.go         HTCondor implementation
 ```

@@ -548,9 +548,9 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 		}
 		if rs.Gpu != nil && rs.Gpu.Count > 0 {
 			if rs.Gpu.Type != "" && rs.Gpu.Type != "gpu" {
-				fmt.Fprintf(writer, "#SBATCH --gres=gpu:%s:%d\n", rs.Gpu.Type, rs.Gpu.Count)
+				fmt.Fprintf(writer, "#SBATCH --gpus-per-node=%s:%d\n", rs.Gpu.Type, rs.Gpu.Count)
 			} else {
-				fmt.Fprintf(writer, "#SBATCH --gres=gpu:%d\n", rs.Gpu.Count)
+				fmt.Fprintf(writer, "#SBATCH --gpus-per-node=%d\n", rs.Gpu.Count)
 			}
 		}
 		if rs.Exclusive {

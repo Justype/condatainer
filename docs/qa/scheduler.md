@@ -143,6 +143,17 @@ Each scheduler has its own syntax for the same underlying resource concepts:
 
 For SLURM/PBS/LSF, directives appear as in-script comments (`#SBATCH`, `#PBS`, `#BSUB`). For HTCondor, they appear in a separate `.sub` file.
 
+### GPU support
+
+GPU resources are normalized across schedulers. SLURM and LSF support specifying a GPU model; PBS and HTCondor translate to count only.
+
+| Scheduler | Num | Model | Directive |
+|-----------|-----|-------|-----------|
+| SLURM | Yes | Yes | `--gpus-per-node=<model>:<num>` |
+| PBS Pro | Yes | No | `ngpus=<num>` (in `-l select=...`) |
+| LSF | Yes | Yes | `-gpu "num=<num>:gmodel=<model>"` |
+| HTCondor | Yes | No | `request_gpus = <num>` |
+
 ## How CondaTainer Handles Directives
 
 When `condatainer run` is invoked, it reads the script's scheduler directives and processes them in three steps.
