@@ -481,8 +481,9 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	writeJobHeader(writer, "$LSB_JOBID", specs, formatLsfTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
-	// Write the command
+	// Write the command and capture exit code
 	fmt.Fprintln(writer, jobSpec.Command)
+	fmt.Fprintln(writer, "_EXIT_CODE=$?")
 
 	// Print completion info
 	fmt.Fprintln(writer, "")
@@ -492,6 +493,9 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	if !debugMode {
 		fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
 	}
+
+	// Exit with command's exit code
+	fmt.Fprintln(writer, "exit $_EXIT_CODE")
 
 	// Make executable
 	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {

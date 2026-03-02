@@ -402,8 +402,9 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	writeJobHeader(shWriter, "$_CONDOR_CLUSTER_ID.$_CONDOR_PROC_ID", specs, formatHMSTime, jobSpec.Metadata)
 	fmt.Fprintln(shWriter, "")
 
-	// Write the command
+	// Write the command and capture exit code
 	fmt.Fprintln(shWriter, jobSpec.Command)
+	fmt.Fprintln(shWriter, "_EXIT_CODE=$?")
 
 	// Print completion info
 	fmt.Fprintln(shWriter, "")
@@ -508,12 +509,14 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	}
 
 	// Self-dispose: the wrapper script removes itself (unless in debug mode)
-	if !debugMode {
-		shAppend, err := os.OpenFile(shPath, os.O_APPEND|os.O_WRONLY, utils.PermExec)
-		if err == nil {
+	shAppend, err := os.OpenFile(shPath, os.O_APPEND|os.O_WRONLY, utils.PermExec)
+	if err == nil {
+		if !debugMode {
 			fmt.Fprintf(shAppend, "\n# Self-dispose\nrm -f %s %s\n", shPath, subPath)
-			shAppend.Close()
 		}
+		// Exit with command's exit code
+		fmt.Fprintln(shAppend, "exit $_EXIT_CODE")
+		shAppend.Close()
 	}
 
 	return subPath, nil

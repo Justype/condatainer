@@ -516,8 +516,9 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	writeJobHeader(writer, "$PBS_JOBID", specs, formatHMSTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
-	// Write the command
+	// Write the command and capture exit code
 	fmt.Fprintln(writer, jobSpec.Command)
+	fmt.Fprintln(writer, "_EXIT_CODE=$?")
 
 	// Print completion info
 	fmt.Fprintln(writer, "")
@@ -527,6 +528,9 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	if !debugMode {
 		fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
 	}
+
+	// Exit with command's exit code
+	fmt.Fprintln(writer, "exit $_EXIT_CODE")
 
 	// Make executable
 	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {
