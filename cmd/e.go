@@ -11,6 +11,7 @@ import (
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
 	"github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -33,7 +34,8 @@ var eCmd = &cobra.Command{
 Overlays and flags go before --, commands go after --.
 If no -- is provided, all positional arguments are treated as overlays.
 - Writable by default (use -r for read-only)
-- Auto-loads env.img (unless a different .img is provided or -n is specified)
+- Auto-loads the first env.img found in (unless a different .img is provided or -n is specified):
+    env.img → overlay/env.img → src/overlay/env.img
 - Defaults to bash if no command specified
 
 Note: Additional Apptainer flags must use --flag=value format (no space)`,
@@ -106,10 +108,21 @@ func runE(cmd *cobra.Command, args []string) error {
 		}
 		if !hasImgOverlay {
 			if pwd, err := os.Getwd(); err == nil {
-				localEnvPath := filepath.Join(pwd, "env.img")
-				if utils.FileExists(localEnvPath) {
-					utils.PrintNote("Autoload env.img at %s", utils.StylePath(localEnvPath))
-					overlays = append(overlays, localEnvPath)
+				candidates := []string{
+					filepath.Join(pwd, "env.img"),
+					filepath.Join(pwd, "overlay", "env.img"),
+					filepath.Join(pwd, "src", "overlay", "env.img"),
+				}
+				for _, candidate := range candidates {
+					if utils.FileExists(candidate) {
+						if err := overlay.CheckAvailable(candidate, false); err != nil {
+							utils.PrintWarning("env.img is in use, running without it")
+						} else {
+							utils.PrintNote("Autoload env.img at %s", utils.StylePath(candidate))
+							overlays = append(overlays, candidate)
+						}
+						break
+					}
 				}
 			}
 		}
