@@ -1,6 +1,9 @@
 package scheduler
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 // --- SLURM ------------------------------------------------------------------
 
@@ -223,6 +226,104 @@ func TestBuildLsfDepCondition(t *testing.T) {
 			got := buildLsfDepCondition(tt.deps)
 			if got != tt.want {
 				t.Errorf("buildLsfDepCondition() = %q; want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// --- SLURM submit args (--kill-on-invalid-dep) -----------------------------------
+
+func TestBuildSlurmSubmitArgs(t *testing.T) {
+	const script = "job.sh"
+	tests := []struct {
+		name string
+		deps []Dependency
+		want []string
+	}{
+		{
+			name: "no deps — no kill-on-invalid-dep",
+			deps: nil,
+			want: []string{script},
+		},
+		{
+			name: "empty deps — no kill-on-invalid-dep",
+			deps: []Dependency{},
+			want: []string{script},
+		},
+		{
+			name: "dep with no IDs — no kill-on-invalid-dep",
+			deps: []Dependency{{Type: DependencyAfterOK, JobIDs: nil}},
+			want: []string{script},
+		},
+		{
+			name: "afterok dep — includes kill-on-invalid-dep",
+			deps: []Dependency{{Type: DependencyAfterOK, JobIDs: []string{"123"}}},
+			want: []string{"--dependency=afterok:123", "--kill-on-invalid-dep=yes", script},
+		},
+		{
+			name: "mixed deps — includes kill-on-invalid-dep",
+			deps: []Dependency{
+				{Type: DependencyAfterOK, JobIDs: []string{"1", "2"}},
+				{Type: DependencyAfterNotOK, JobIDs: []string{"3"}},
+			},
+			want: []string{"--dependency=afterok:1:2,afternotok:3", "--kill-on-invalid-dep=yes", script},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildSlurmSubmitArgs(tt.deps, script)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("buildSlurmSubmitArgs() = %v; want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// --- LSF submit args (-ti) -------------------------------------------------------
+
+func TestBuildLsfArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		deps []Dependency
+		want []string
+	}{
+		{
+			name: "no deps — no -ti",
+			deps: nil,
+			want: nil,
+		},
+		{
+			name: "empty deps — no -ti",
+			deps: []Dependency{},
+			want: nil,
+		},
+		{
+			name: "dep with no IDs — no -ti",
+			deps: []Dependency{{Type: DependencyAfterOK, JobIDs: nil}},
+			want: nil,
+		},
+		{
+			name: "afterok dep — includes -ti",
+			deps: []Dependency{{Type: DependencyAfterOK, JobIDs: []string{"123"}}},
+			want: []string{"-w", "done(123)", "-ti"},
+		},
+		{
+			name: "mixed deps — includes -ti",
+			deps: []Dependency{
+				{Type: DependencyAfterOK, JobIDs: []string{"100"}},
+				{Type: DependencyAfterNotOK, JobIDs: []string{"200"}},
+				{Type: DependencyAfterAny, JobIDs: []string{"300"}},
+			},
+			want: []string{"-w", "done(100) && exit(200) && ended(300)", "-ti"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildLsfArgs(tt.deps)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("buildLsfArgs() = %v; want %v", got, tt.want)
 			}
 		})
 	}

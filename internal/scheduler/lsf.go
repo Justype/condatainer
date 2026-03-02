@@ -528,14 +528,17 @@ func buildLsfDepCondition(deps []Dependency) string {
 	return strings.Join(conditions, " && ")
 }
 
-func (l *LsfScheduler) Submit(scriptPath string, deps []Dependency) (string, error) {
-	args := []string{}
-
-	// Add dependency if provided
-	// LSF uses: -w "done(id1) && exit(id2) && ended(id3)"
+// buildLsfArgs returns the bsub arguments derived from deps (not including "< scriptPath").
+func buildLsfArgs(deps []Dependency) []string {
+	var args []string
 	if cond := buildLsfDepCondition(deps); cond != "" {
-		args = append(args, "-w", cond)
+		args = append(args, "-w", cond, "-ti")
 	}
+	return args
+}
+
+func (l *LsfScheduler) Submit(scriptPath string, deps []Dependency) (string, error) {
+	args := buildLsfArgs(deps)
 
 	// LSF reads the script from stdin: bsub < script.lsf
 	args = append(args, "<", scriptPath)

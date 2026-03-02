@@ -629,13 +629,17 @@ func buildSlurmDepFlag(deps []Dependency) string {
 	return "--dependency=" + strings.Join(parts, ",")
 }
 
-func (s *SlurmScheduler) Submit(scriptPath string, deps []Dependency) (string, error) {
+// buildSlurmSubmitArgs returns the sbatch argument list for the given deps and script path.
+func buildSlurmSubmitArgs(deps []Dependency, scriptPath string) []string {
 	args := []string{scriptPath}
-
-	// Add dependency flag if provided
 	if flag := buildSlurmDepFlag(deps); flag != "" {
-		args = append([]string{flag}, args...)
+		args = append([]string{flag, "--kill-on-invalid-dep=yes"}, args...)
 	}
+	return args
+}
+
+func (s *SlurmScheduler) Submit(scriptPath string, deps []Dependency) (string, error) {
+	args := buildSlurmSubmitArgs(deps, scriptPath)
 
 	// Execute sbatch
 	cmd := exec.Command(s.sbatchBin, args...)
