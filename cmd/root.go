@@ -169,7 +169,9 @@ func init() {
 	// Strip short flag shorthands for cleaner completions
 	// This is done at init time so __complete also sees the stripped flags
 	cobra.OnInitialize(func() {
-		stripShortFlags(rootCmd)
+		if detectCompletionShell() == "bash" {
+			stripShortFlags(rootCmd)
+		}
 	})
 }
 

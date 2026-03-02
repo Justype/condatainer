@@ -2,14 +2,15 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
 
-// detectShell auto-detects the current shell from environment
-func detectShell() string {
+// detectLoginShell reads $SHELL (the user's configured login shell).
+func detectLoginShell() string {
 	shell := os.Getenv("SHELL")
 	shellLower := strings.ToLower(shell)
 
@@ -25,15 +26,30 @@ func detectShell() string {
 	return "bash"
 }
 
+// detectCompletionShell detects which shell is requesting completions by
+// inspecting the parent process via /proc (Linux/HPC). Falls back to $SHELL.
+func detectCompletionShell() string {
+	ppid := os.Getppid()
+	if exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", ppid)); err == nil {
+		exe = strings.ToLower(exe)
+		switch {
+		case strings.Contains(exe, "fish"):
+			return "fish"
+		case strings.Contains(exe, "zsh"):
+			return "zsh"
+		case strings.Contains(exe, "bash"):
+			return "bash"
+		}
+	}
+	return detectLoginShell() // fallback to $SHELL on non-Linux or unrecognized parent
+}
+
 var completionCmd = &cobra.Command{
 	Use:   "completion [bash|zsh|fish]",
 	Short: "Generate shell completion script",
-	Long: func() string {
-		detected := detectShell()
-		return `Generate shell completion script for condatainer.
+	Long: `Generate shell completion script for condatainer.
 
-If no shell is specified, ` + detected + ` will be used (auto-detected from $SHELL).`
-	}(),
+If no shell is specified, the current shell will be auto-detected.`,
 	Example: `  Bash:
   # Current session
   source <(condatainer completion bash)
@@ -57,7 +73,7 @@ If no shell is specified, ` + detected + ` will be used (auto-detected from $SHE
 	ValidArgs:             []string{"bash", "zsh", "fish"},
 	Args:                  cobra.MatchAll(cobra.MaximumNArgs(1), cobra.OnlyValidArgs),
 	Run: func(cmd *cobra.Command, args []string) {
-		shell := detectShell()
+		shell := detectCompletionShell()
 		if len(args) > 0 {
 			shell = args[0]
 		}
@@ -154,15 +170,16 @@ func postProcessZshCompletion(script string) string {
     # Use fzf if available and we're completing for 'e/exec/instance start'
     if command -v fzf >/dev/null 2>&1 && [[ -n "$out" ]]; then
         local is_overlay_cmd=false
-        for i in "${!words[@]}"; do
-            word="${words[$i]}"
-            if [[ "$word" == "e" || "$word" == "exec" ]]; then
+        local _prev="" _word
+        for _word in "${words[@]}"; do
+            if [[ "$_word" == "e" || "$_word" == "exec" ]]; then
                 is_overlay_cmd=true
                 break
-            elif [[ "$word" == "instance" && "${words[$((i+1))]}" == "start" ]]; then
+            elif [[ "$_prev" == "instance" && "$_word" == "start" ]]; then
                 is_overlay_cmd=true
                 break
             fi
+            _prev="$_word"
         done
 
         if [[ "${words[$CURRENT]}" == -* ]]; then
@@ -195,9 +212,11 @@ func postProcessFishCompletion(script string) string {
 	// Note: We try to match the line where results are captured.
 	// Cobra sometimes generates 'eval' and sometimes not depending on version.
 	// We handle the standard pattern found in recent versions.
-	target := `set -l results ($requestComp 2> /dev/null)`
+	// Match cobra v1.10.x generated format (eval, no extra redirect)
+	target := `set -l results (eval $requestComp 2> /dev/null)`
 	if !strings.Contains(script, target) {
-		target = `set -l results (eval $requestComp 2> /dev/tty 2> /dev/null)`
+		// Older cobra without 'eval'
+		target = `set -l results ($requestComp 2> /dev/null)`
 	}
 
 	fzfInject := target + `
@@ -210,7 +229,7 @@ func postProcessFishCompletion(script string) string {
                 if not contains -- "--" $words
                     set -l candidates $results[1..-2]
                     if test (count $candidates) -gt 1
-                        set -l selection (string join \n $candidates | fzf --height 40% --reverse --select-1 --exit-0 --query (commandline -t) --header "Select overlay" < /dev/tty)
+                        set -l selection (string join \n $candidates | fzf --height 40% --reverse --select-1 --exit-0 --query (commandline -t) --header "Select overlay")
                         if test -n "$selection"
                             set results $selection $results[-1]
                         end
