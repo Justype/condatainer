@@ -112,7 +112,7 @@ func init() {
 	oCmd.Flags().StringP("type", "t", "balanced", "Overlay profile: small/balanced/large files")
 	oCmd.Flags().String("fs", "ext3", "Filesystem type: ext3 or ext4 (Now only ext3 is supported)")
 	oCmd.Flags().Bool("fakeroot", false, "Create a fakeroot-compatible overlay (owned by root)")
-	oCmd.Flags().Bool("sparse", false, "Create a sparse overlay image")
+	oCmd.Flags().BoolP("sparse", "S", false, "Create a sparse overlay image")
 	oCmd.Flags().StringP("file", "f", "", "Initialize with Conda environment file (.yml or .yaml)")
 
 	// Flag completions for shortcut 'o' (same as overlay create)
