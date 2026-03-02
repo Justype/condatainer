@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/build"
@@ -19,22 +20,24 @@ var (
 )
 
 var scriptCheckCmd = &cobra.Command{
-	Use:   "check [script]",
+	Use:   "check <script|dir> [script|dir ...]",
 	Short: "Check if the dependencies of a script are installed",
-	Long: `Check dependencies declared in a build script using #DEP: tags.
+	Long: `Check dependencies declared in build scripts using #DEP: tags.
 
-The script can be a local file path or a package name (e.g., samtools/1.22).
-If the script is not found locally, it will be downloaded from remote metadata.
+Each argument can be:
+  - A local .sh file path
+  - A directory (all .sh files under it are checked recursively)
+  - A package name (e.g., samtools/1.22) resolved from local or remote build scripts
 
-Dependencies are declared in scripts using comments like:
-  #DEP: package/version
-  #DEP: another-package/1.0
+Dependencies from all scripts are deduplicated and checked together.
 
 Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
-	Example: `  condatainer check script.sh           # Check local script
-  condatainer check samtools/1.22       # Check build script by name
-  condatainer check script.sh -a        # Check and auto-install missing deps`,
-	Args:         cobra.ExactArgs(1),
+	Example: `  condatainer check script.sh             # Check single local script
+  condatainer check samtools/1.22         # Check build script by name
+  condatainer check script1.sh script2.sh # Check multiple scripts
+  condatainer check ./my-scripts/         # Check all .sh files in a directory
+  condatainer check -a ./src/*sh          # Check and auto-install missing dependencies from multiple scripts`,
+	Args:         cobra.MinimumNArgs(1),
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runCheck,
 }
@@ -47,28 +50,53 @@ func init() {
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
-	scriptPathOrName := args[0]
-
 	// Check if -i flag was used (alias for -a)
 	if installFlag, _ := cmd.Flags().GetBool("install"); installFlag {
 		checkAutoInstall = true
 	}
 
-	// Resolve script path
-	scriptPath, isRemote, err := resolveScriptPath(scriptPathOrName)
+	// Resolve all args to concrete script paths
+	scriptPaths, remotePaths, err := resolveAllScriptPaths(args)
 	if err != nil {
 		return err
 	}
 
-	// Clean up remote script at the end
-	if isRemote {
-		defer os.Remove(scriptPath)
+	// Clean up any downloaded remote scripts at the end
+	for _, rp := range remotePaths {
+		defer os.Remove(rp)
 	}
 
-	// Get dependencies from script
-	deps, err := utils.GetDependenciesFromScript(scriptPath, config.Global.ParseModuleLoad || checkParseModuleLoad)
-	if err != nil {
-		return fmt.Errorf("failed to parse dependencies: %w", err)
+	if len(scriptPaths) == 0 {
+		utils.PrintWarning("No scripts found to check.")
+		return nil
+	}
+
+	// Collect dependencies from all scripts, deduplicating across scripts.
+	// All deps are aggregated into a single list before any checking or installing.
+	multiScript := len(scriptPaths) > 1
+	parseModuleLoad := config.Global.ParseModuleLoad || checkParseModuleLoad
+
+	seen := make(map[string]bool)
+	var deps []string
+
+	for _, scriptPath := range scriptPaths {
+		if multiScript {
+			utils.PrintMessage("Checking script: %s", utils.StylePath(scriptPath))
+		}
+		scriptDeps, parseErr := utils.GetDependenciesFromScript(scriptPath, parseModuleLoad)
+		if parseErr != nil {
+			return fmt.Errorf("failed to parse dependencies from %s: %w", scriptPath, parseErr)
+		}
+		for _, dep := range scriptDeps {
+			key := dep
+			if !utils.IsOverlay(dep) {
+				key = utils.NormalizeNameVersion(dep)
+			}
+			if !seen[key] {
+				seen[key] = true
+				deps = append(deps, dep)
+			}
+		}
 	}
 
 	if len(deps) == 0 {
@@ -191,6 +219,67 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	utils.PrintSuccess("All selected overlays installed.")
 	return nil
+}
+
+// findScriptsInDir recursively finds all .sh files under dir.
+// If no scripts are found, a warning is printed but an empty slice is returned without error.
+func findScriptsInDir(dir string) ([]string, error) {
+	var found []string
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			utils.PrintWarning("Skipping inaccessible path %s: %v", path, err)
+			return nil // continue walking
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".sh") {
+			found = append(found, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to walk directory %s: %w", dir, err)
+	}
+	if len(found) == 0 {
+		utils.PrintWarning("No .sh files found in directory %s", utils.StylePath(dir))
+	}
+	return found, nil
+}
+
+// resolveAllScriptPaths resolves all positional arguments to concrete file paths.
+// Directories are expanded to all .sh files found recursively.
+// Other args are resolved via resolveScriptPath (file, local build script, or remote download).
+// Returns scriptPaths (deduplicated), remotePaths (to defer-remove), and any error.
+func resolveAllScriptPaths(args []string) (scriptPaths []string, remotePaths []string, err error) {
+	seen := make(map[string]bool)
+
+	for _, arg := range args {
+		if utils.DirExists(arg) {
+			dirScripts, dirErr := findScriptsInDir(arg)
+			if dirErr != nil {
+				return nil, remotePaths, dirErr
+			}
+			for _, p := range dirScripts {
+				if !seen[p] {
+					seen[p] = true
+					scriptPaths = append(scriptPaths, p)
+				}
+			}
+			continue
+		}
+
+		resolved, isRemote, resolveErr := resolveScriptPath(arg)
+		if resolveErr != nil {
+			return nil, remotePaths, resolveErr
+		}
+		if isRemote {
+			remotePaths = append(remotePaths, resolved)
+		}
+		if !seen[resolved] {
+			seen[resolved] = true
+			scriptPaths = append(scriptPaths, resolved)
+		}
+	}
+
+	return scriptPaths, remotePaths, nil
 }
 
 // resolveScriptPath resolves a script path or name to an actual file path
