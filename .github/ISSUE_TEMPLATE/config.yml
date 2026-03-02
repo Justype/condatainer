@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📦 Request a Build Script / App / Data Overlay
+    url: https://github.com/Justype/cnt-scripts/issues/new
+    about: Requests for new app, OS, or data overlay build scripts belong in cnt-scripts
+  - name: 🔧 Report a Helper Script Issue or Request
+    url: https://github.com/Justype/cnt-scripts/issues/new
+    about: Issues or requests related to helper scripts belong in cnt-scripts
+  - name: 💬 Ask a Question / Get Support
+    url: https://github.com/Justype/condatainer/discussions/new?category=q-a
+    about: Ask usage questions, share workflows, or get help — use Discussions, not Issues
+  - name: 📖 Documentation
+    url: https://condatainer.readthedocs.io
+    about: Read the docs before opening an issue or starting a discussion
