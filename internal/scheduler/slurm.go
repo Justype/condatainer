@@ -614,15 +614,27 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 }
 
 // Submit submits a SLURM job with optional dependency chain
-func (s *SlurmScheduler) Submit(scriptPath string, dependencyJobIDs []string) (string, error) {
+// buildSlurmDepFlag returns the --dependency flag string for sbatch, or "" if deps is empty.
+// Format: --dependency=afterok:ID1:ID2,afternotok:ID3,afterany:ID4
+func buildSlurmDepFlag(deps []Dependency) string {
+	var parts []string
+	for _, dep := range deps {
+		if len(dep.JobIDs) > 0 {
+			parts = append(parts, dep.Type+":"+strings.Join(dep.JobIDs, ":"))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "--dependency=" + strings.Join(parts, ",")
+}
+
+func (s *SlurmScheduler) Submit(scriptPath string, deps []Dependency) (string, error) {
 	args := []string{scriptPath}
 
-	// Add dependency if provided
-	if len(dependencyJobIDs) > 0 {
-		// Use comma-separated job IDs, see: https://bioinformaticsworkbook.org/Appendix/HPC/SLURM/submitting-dependency-jobs-using-slurm.html
-		depStr := strings.Join(dependencyJobIDs, ",")
-		depArg := fmt.Sprintf("--dependency=afterok:%s", depStr)
-		args = append([]string{depArg}, args...)
+	// Add dependency flag if provided
+	if flag := buildSlurmDepFlag(deps); flag != "" {
+		args = append([]string{flag}, args...)
 	}
 
 	// Execute sbatch

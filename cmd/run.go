@@ -33,6 +33,8 @@ var (
 	runStdout          string
 	runStderr          string
 	runAfterOK         string
+	runAfterNotOK      string
+	runAfterAny        string
 	runCPU             int
 	runMem             string
 	runTime            string
@@ -92,7 +94,9 @@ func init() {
 	runCmd.Flags().BoolVar(&runParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
 	runCmd.Flags().StringVarP(&runStdout, "output", "o", "", "Override job stdout path (creates parent dir if needed)")
 	runCmd.Flags().StringVarP(&runStderr, "error", "e", "", "Override job stderr path")
-	runCmd.Flags().StringVar(&runAfterOK, "afterok", "", "Depend on job IDs (colon-separated, e.g. 123:456:789)")
+	runCmd.Flags().StringVar(&runAfterOK,    "afterok",    "", "Run after jobs succeed (colon-separated IDs, e.g. 123:456)")
+	runCmd.Flags().StringVar(&runAfterNotOK, "afternotok", "", "Run after jobs fail (colon-separated IDs)")
+	runCmd.Flags().StringVar(&runAfterAny,   "afterany",   "", "Run after jobs finish regardless of outcome (colon-separated IDs)")
 	runCmd.Flags().StringArrayVar(&runEnvSettings, "env", nil, "Set environment variable KEY=VALUE (repeatable)")
 	runCmd.Flags().StringArrayVar(&runBindPaths, "bind", nil, "Bind mount HOST:CONTAINER (repeatable)")
 	runCmd.Flags().BoolVarP(&runFakeroot, "fakeroot", "f", false, "Run with fakeroot privileges")
@@ -108,13 +112,19 @@ func init() {
 }
 
 func runScript(cmd *cobra.Command, args []string) error {
-	if cmd.Flags().Changed("afterok") {
-		if runAfterOK == "" {
-			ExitWithError("--afterok is empty; the upstream job may have failed to submit or run locally")
-		}
-		for id := range strings.SplitSeq(runAfterOK, ":") {
-			if id = strings.TrimSpace(id); !jobIDRe.MatchString(id) {
-				ExitWithError("--afterok %q is not a valid job ID", id)
+	for _, flagInfo := range []struct{ name, val string }{
+		{"afterok", runAfterOK},
+		{"afternotok", runAfterNotOK},
+		{"afterany", runAfterAny},
+	} {
+		if cmd.Flags().Changed(flagInfo.name) {
+			if flagInfo.val == "" {
+				ExitWithError("--%s is empty; the upstream job may have failed to submit or run locally", flagInfo.name)
+			}
+			for id := range strings.SplitSeq(flagInfo.val, ":") {
+				if id = strings.TrimSpace(id); !jobIDRe.MatchString(id) {
+					ExitWithError("--%s %q is not a valid job ID", flagInfo.name, id)
+				}
 			}
 		}
 	}
@@ -262,12 +272,29 @@ func runScript(cmd *cobra.Command, args []string) error {
 		} else if !sched.IsAvailable() {
 			utils.PrintNote("Script has scheduler specs but no scheduler is available. Running locally.")
 		} else {
-			for _, id := range strings.Split(runAfterOK, ":") {
-				if id = strings.TrimSpace(id); id != "" {
-					depJobIDs = append(depJobIDs, id)
+			var deps []scheduler.Dependency
+			// Build job IDs from auto-install are always afterok
+			if len(depJobIDs) > 0 {
+				deps = append(deps, scheduler.Dependency{Type: scheduler.DependencyAfterOK, JobIDs: depJobIDs})
+			}
+			parseDepFlag := func(val, depType string) {
+				if val == "" {
+					return
+				}
+				var ids []string
+				for _, id := range strings.Split(val, ":") {
+					if id = strings.TrimSpace(id); id != "" {
+						ids = append(ids, id)
+					}
+				}
+				if len(ids) > 0 {
+					deps = append(deps, scheduler.Dependency{Type: depType, JobIDs: ids})
 				}
 			}
-			return submitRunJob(sched, originScriptPath, contentScript, scriptSpecs, depJobIDs, scriptArgs, arraySpec)
+			parseDepFlag(runAfterOK,    scheduler.DependencyAfterOK)
+			parseDepFlag(runAfterNotOK, scheduler.DependencyAfterNotOK)
+			parseDepFlag(runAfterAny,   scheduler.DependencyAfterAny)
+			return submitRunJob(sched, originScriptPath, contentScript, scriptSpecs, deps, scriptArgs, arraySpec)
 		}
 	} else if !scheduler.HasSchedulerSpecs(scriptSpecs) {
 		utils.PrintNote("No scheduler specs found in script. Running locally.")
@@ -733,7 +760,13 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 			}
 		}
 		if runAfterOK != "" {
-			fmt.Printf("  AfterOK:   %s\n", runAfterOK)
+			fmt.Printf("  AfterOK:    %s\n", runAfterOK)
+		}
+		if runAfterNotOK != "" {
+			fmt.Printf("  AfterNotOK: %s\n", runAfterNotOK)
+		}
+		if runAfterAny != "" {
+			fmt.Printf("  AfterAny:   %s\n", runAfterAny)
 		}
 
 		// Email Notifications
@@ -1098,7 +1131,7 @@ func detectNativeArrayDirective(specs *scheduler.ScriptSpecs) string {
 // submitRunJob creates and submits a scheduler job to run the script.
 // contentScript is the bash script containing #DEP/#CNT directives — for HTCondor this is the
 // executable referenced in the .sub file, for other schedulers it equals scriptPath.
-func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript string, specs *scheduler.ScriptSpecs, depIDs []string, scriptArgs []string, arraySpec *scheduler.ArraySpec) error {
+func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript string, specs *scheduler.ScriptSpecs, deps []scheduler.Dependency, scriptArgs []string, arraySpec *scheduler.ArraySpec) error {
 	info := sched.GetInfo()
 
 	// Capture separate-output intent before CreateScriptWithSpec overrides Stdout/Stderr to /dev/null
@@ -1149,11 +1182,17 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 		specs.Control.JobName = nameWithoutExt
 	}
 
+	// Collect all dep IDs for JobSpec metadata (DepJobIDs is afterok-only build chain field)
+	var allDepIDs []string
+	for _, dep := range deps {
+		allDepIDs = append(allDepIDs, dep.JobIDs...)
+	}
+
 	jobSpec := &scheduler.JobSpec{
 		Name:      fileBaseName,
 		Command:   runCommand,
 		Specs:     specs,
-		DepJobIDs: depIDs,
+		DepJobIDs: allDepIDs,
 		Metadata:  map[string]string{},
 		Array:     arraySpec,
 	}
@@ -1164,15 +1203,19 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 		return fmt.Errorf("failed to create job script: %w", err)
 	}
 
-	// Submit the job (attach dependency job IDs so run waits for builds)
-	jobID, err := sched.Submit(jobScriptPath, depIDs)
+	// Submit the job with typed dependencies
+	jobID, err := sched.Submit(jobScriptPath, deps)
 	if err != nil {
 		return fmt.Errorf("failed to submit job: %w", err)
 	}
 
 	fmt.Fprintln(os.Stdout, jobID)
-	if len(depIDs) > 0 {
-		utils.PrintSuccess("Submitted %s job %s for %s (after: %s)", info.Type, utils.StyleNumber(jobID), utils.StylePath(originScriptPath), strings.Join(depIDs, ", "))
+	if len(deps) > 0 {
+		var depSummary []string
+		for _, dep := range deps {
+			depSummary = append(depSummary, fmt.Sprintf("%s(%s)", dep.Type, strings.Join(dep.JobIDs, ",")))
+		}
+		utils.PrintSuccess("Submitted %s job %s for %s (after: %s)", info.Type, utils.StyleNumber(jobID), utils.StylePath(originScriptPath), strings.Join(depSummary, " "))
 	} else {
 		utils.PrintSuccess("Submitted %s job %s for %s", info.Type, utils.StyleNumber(jobID), utils.StylePath(originScriptPath))
 	}

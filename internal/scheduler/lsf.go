@@ -506,18 +506,35 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 }
 
 // Submit submits an LSF job with optional dependency chain
-func (l *LsfScheduler) Submit(scriptPath string, dependencyJobIDs []string) (string, error) {
+// buildLsfDepCondition returns the condition expression for bsub -w, or "" if deps is empty.
+// Format: done(ID1) && exit(ID2) && ended(ID3)
+// afterok→done(), afternotok→exit(), afterany→ended()
+func buildLsfDepCondition(deps []Dependency) string {
+	var conditions []string
+	for _, dep := range deps {
+		var lsfFn string
+		switch dep.Type {
+		case DependencyAfterNotOK:
+			lsfFn = "exit"
+		case DependencyAfterAny:
+			lsfFn = "ended"
+		default: // DependencyAfterOK and any unknown type
+			lsfFn = "done"
+		}
+		for _, id := range dep.JobIDs {
+			conditions = append(conditions, fmt.Sprintf("%s(%s)", lsfFn, id))
+		}
+	}
+	return strings.Join(conditions, " && ")
+}
+
+func (l *LsfScheduler) Submit(scriptPath string, deps []Dependency) (string, error) {
 	args := []string{}
 
 	// Add dependency if provided
-	// LSF uses: -w "done(id1) && done(id2)"
-	if len(dependencyJobIDs) > 0 {
-		var conditions []string
-		for _, id := range dependencyJobIDs {
-			conditions = append(conditions, fmt.Sprintf("done(%s)", id))
-		}
-		depStr := strings.Join(conditions, " && ")
-		args = append(args, "-w", depStr)
+	// LSF uses: -w "done(id1) && exit(id2) && ended(id3)"
+	if cond := buildLsfDepCondition(deps); cond != "" {
+		args = append(args, "-w", cond)
 	}
 
 	// LSF reads the script from stdin: bsub < script.lsf
