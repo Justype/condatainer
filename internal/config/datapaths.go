@@ -122,7 +122,7 @@ func GetScratchDataDir() string {
 // This is useful for shared group directories or portable installations.
 //
 // Detection logic:
-//  1. If executable is in <dir>/bin/, check if <dir> has images/ subdirectory
+//  1. If executable is in <dir>/bin/ and <dir> is not a generic parent ($HOME, /usr, etc.), use <dir>
 //  2. Otherwise check for <exeDir>/condatainer/ directory
 func GetPortableDataDir() string {
 	exe, err := os.Executable()
@@ -143,10 +143,11 @@ func GetPortableDataDir() string {
 
 	// Case 1: Executable is in <install_dir>/bin/, data is in <install_dir>/
 	// e.g., /project/group/condatainer/bin/condatainer → /project/group/condatainer/
+	// e.g., $HOME/condatainer/bin/condatainer → $HOME/condatainer/
+	// Skip generic bin dirs whose parent is $HOME, $HOME/.local, /usr, /usr/local, /opt
 	if filepath.Base(exeDir) == "bin" {
 		parentDir := filepath.Dir(exeDir)
-		// Check if parent has images/ subdirectory (indicator of portable install)
-		if stat, err := os.Stat(filepath.Join(parentDir, "images")); err == nil && stat.IsDir() {
+		if !isNonPortableParent(parentDir) {
 			return parentDir
 		}
 	}
