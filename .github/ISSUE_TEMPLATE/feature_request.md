@@ -1,9 +1,10 @@
 ---
-name: 💡 Feature Request
+name: "\U0001F4A1 Feature Request"
 about: Suggest a new feature or improvement for CondaTainer
 title: "[Feature] <summary>"
 labels: enhancement
-assignees: ""
+assignees: ''
+
 ---
 
 ## Problem / Motivation
@@ -19,8 +20,8 @@ assignees: ""
 <!-- Check all that apply -->
 
 **Module Management**
-- [ ] `build` — build system, dependency graph, remote script fetching (`#DEP` resolution)
-- [ ] `check` — dependency checking for scripts
+- [ ] `build` — build system, dependency graph (`#DEP` resolution)
+- [ ] `avail` — remote script fetching
 - [ ] `list` — listing installed modules / overlays
 - [ ] `remove` — removing installed modules / overlays
 
@@ -40,7 +41,7 @@ assignees: ""
 - [ ] `check` — pre-flight dependency check for scripts
 
 **Scheduler**
-- [ ] Script parsing — reading `#SBATCH` / `#PBS` / `#BSUB` directives
+- [ ] Script parsing — reading `#SBATCH` / `#PBS` / `#BSUB` directives or `.sub` script
 - [ ] Script generation — creating scheduler job scripts
 - [ ] Info gathering — partition / queue / resource discovery
 
@@ -55,17 +56,14 @@ assignees: ""
 - [ ] `config init` — config file initialization
 - [ ] `config env` — `CNT_*` environment variable handling
 
-**Self-Update**
-- [ ] `self-update` — binary self-update from GitHub releases
-- [ ] `self-update --base` — base image update
-
 **Helper / Scripts**
 - [ ] `helper` — fetching / updating helper scripts from `cnt-scripts`
 - [ ] Apptainer wrapper — low-level Apptainer binary abstraction
 
 **Other**
 - [ ] CLI (new commands or parameters)
-- [ ] Shell completion
+- [ ] Update (binary or `--base` base image)
+- [ ] Shell completion (bash, zsh, fish)
 - [ ] Other: <!-- describe -->
 
 ## Alternatives Considered

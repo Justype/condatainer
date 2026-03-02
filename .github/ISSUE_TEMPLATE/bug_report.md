@@ -1,9 +1,10 @@
 ---
-name: 🐛 Bug Report
+name: "\U0001F41B Bug Report"
 about: Report a problem or unexpected behavior in CondaTainer
 title: "[Bug] <short description>"
 labels: bug
-assignees: ""
+assignees: ''
+
 ---
 
 ## Summary
@@ -32,16 +33,16 @@ assignees: ""
 
 | Item | Value |
 |------|-------|
-| OS & version | |
-| Shell | |
+| OS & version |  |
+| Shell |  |
 | HPC Scheduler | SLURM / PBS / LSF / HTCondor / None |
-| Apptainer/Singularity version | |
-| CondaTainer binary path | |
+| Apptainer/Singularity version |  |
+| CondaTainer binary path |  |
 
 ## Command & Log Output
 
 ```bash
-# Paste the exact command and output (add --debug / CNT_DEBUG=1 if possible)
+# Paste the exact command and output (add --debug if possible)
 ```
 
 ## Config Snippet (if relevant)
