@@ -516,8 +516,9 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	writeJobHeader(writer, "$PBS_JOBID", specs, formatHMSTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
-	// Write the command
+	// Write the command and capture exit code
 	fmt.Fprintln(writer, jobSpec.Command)
+	fmt.Fprintln(writer, "_EXIT_CODE=$?")
 
 	// Print completion info
 	fmt.Fprintln(writer, "")
@@ -528,6 +529,9 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
 	}
 
+	// Exit with command's exit code
+	fmt.Fprintln(writer, "exit $_EXIT_CODE")
+
 	// Make executable
 	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {
 		return "", NewScriptCreationError(jobSpec.Name, scriptPath, err)
@@ -537,14 +541,27 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 }
 
 // Submit submits a PBS job with optional dependency chain
-func (p *PbsScheduler) Submit(scriptPath string, dependencyJobIDs []string) (string, error) {
+// buildPbsDepFlag returns the -W depend= flag string for qsub, or "" if deps is empty.
+// Format: -W depend=afterok:ID1:ID2,afternotok:ID3,afterany:ID4
+func buildPbsDepFlag(deps []Dependency) string {
+	var parts []string
+	for _, dep := range deps {
+		if len(dep.JobIDs) > 0 {
+			parts = append(parts, dep.Type+":"+strings.Join(dep.JobIDs, ":"))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("-W depend=%s", strings.Join(parts, ","))
+}
+
+func (p *PbsScheduler) Submit(scriptPath string, deps []Dependency) (string, error) {
 	args := []string{scriptPath}
 
-	// Add dependency if provided
-	if len(dependencyJobIDs) > 0 {
-		depStr := strings.Join(dependencyJobIDs, ":")
-		depArg := fmt.Sprintf("-W depend=afterok:%s", depStr)
-		args = append([]string{depArg}, args...)
+	// Add dependency flag if provided
+	if flag := buildPbsDepFlag(deps); flag != "" {
+		args = append([]string{flag}, args...)
 	}
 
 	// Execute qsub

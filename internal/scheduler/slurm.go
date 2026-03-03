@@ -589,8 +589,9 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	writeJobHeader(writer, jobIDVar, specs, formatSlurmTimeSpec, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
-	// Write the command
+	// Write the command and capture exit code
 	fmt.Fprintln(writer, jobSpec.Command)
+	fmt.Fprintln(writer, "_EXIT_CODE=$?")
 
 	// Print completion info
 	fmt.Fprintln(writer, "")
@@ -601,6 +602,9 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 		fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
 	}
 
+	// Exit with command's exit code
+	fmt.Fprintln(writer, "exit $_EXIT_CODE")
+
 	// Make executable
 	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {
 		return "", NewScriptCreationError(jobSpec.Name, scriptPath, err)
@@ -610,16 +614,32 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 }
 
 // Submit submits a SLURM job with optional dependency chain
-func (s *SlurmScheduler) Submit(scriptPath string, dependencyJobIDs []string) (string, error) {
-	args := []string{scriptPath}
-
-	// Add dependency if provided
-	if len(dependencyJobIDs) > 0 {
-		// Use comma-separated job IDs, see: https://bioinformaticsworkbook.org/Appendix/HPC/SLURM/submitting-dependency-jobs-using-slurm.html
-		depStr := strings.Join(dependencyJobIDs, ",")
-		depArg := fmt.Sprintf("--dependency=afterok:%s", depStr)
-		args = append([]string{depArg}, args...)
+// buildSlurmDepFlag returns the --dependency flag string for sbatch, or "" if deps is empty.
+// Format: --dependency=afterok:ID1:ID2,afternotok:ID3,afterany:ID4
+func buildSlurmDepFlag(deps []Dependency) string {
+	var parts []string
+	for _, dep := range deps {
+		if len(dep.JobIDs) > 0 {
+			parts = append(parts, dep.Type+":"+strings.Join(dep.JobIDs, ":"))
+		}
 	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "--dependency=" + strings.Join(parts, ",")
+}
+
+// buildSlurmSubmitArgs returns the sbatch argument list for the given deps and script path.
+func buildSlurmSubmitArgs(deps []Dependency, scriptPath string) []string {
+	args := []string{scriptPath}
+	if flag := buildSlurmDepFlag(deps); flag != "" {
+		args = append([]string{flag, "--kill-on-invalid-dep=yes"}, args...)
+	}
+	return args
+}
+
+func (s *SlurmScheduler) Submit(scriptPath string, deps []Dependency) (string, error) {
+	args := buildSlurmSubmitArgs(deps, scriptPath)
 
 	// Execute sbatch
 	cmd := exec.Command(s.sbatchBin, args...)

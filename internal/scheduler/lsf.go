@@ -481,8 +481,9 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	writeJobHeader(writer, "$LSB_JOBID", specs, formatLsfTime, jobSpec.Metadata)
 	fmt.Fprintln(writer, "")
 
-	// Write the command
+	// Write the command and capture exit code
 	fmt.Fprintln(writer, jobSpec.Command)
+	fmt.Fprintln(writer, "_EXIT_CODE=$?")
 
 	// Print completion info
 	fmt.Fprintln(writer, "")
@@ -493,6 +494,9 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
 	}
 
+	// Exit with command's exit code
+	fmt.Fprintln(writer, "exit $_EXIT_CODE")
+
 	// Make executable
 	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {
 		return "", NewScriptCreationError(jobSpec.Name, scriptPath, err)
@@ -502,19 +506,39 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 }
 
 // Submit submits an LSF job with optional dependency chain
-func (l *LsfScheduler) Submit(scriptPath string, dependencyJobIDs []string) (string, error) {
-	args := []string{}
-
-	// Add dependency if provided
-	// LSF uses: -w "done(id1) && done(id2)"
-	if len(dependencyJobIDs) > 0 {
-		var conditions []string
-		for _, id := range dependencyJobIDs {
-			conditions = append(conditions, fmt.Sprintf("done(%s)", id))
+// buildLsfDepCondition returns the condition expression for bsub -w, or "" if deps is empty.
+// Format: done(ID1) && exit(ID2) && ended(ID3)
+// afterok→done(), afternotok→exit(), afterany→ended()
+func buildLsfDepCondition(deps []Dependency) string {
+	var conditions []string
+	for _, dep := range deps {
+		var lsfFn string
+		switch dep.Type {
+		case DependencyAfterNotOK:
+			lsfFn = "exit"
+		case DependencyAfterAny:
+			lsfFn = "ended"
+		default: // DependencyAfterOK and any unknown type
+			lsfFn = "done"
 		}
-		depStr := strings.Join(conditions, " && ")
-		args = append(args, "-w", depStr)
+		for _, id := range dep.JobIDs {
+			conditions = append(conditions, fmt.Sprintf("%s(%s)", lsfFn, id))
+		}
 	}
+	return strings.Join(conditions, " && ")
+}
+
+// buildLsfArgs returns the bsub arguments derived from deps (not including "< scriptPath").
+func buildLsfArgs(deps []Dependency) []string {
+	var args []string
+	if cond := buildLsfDepCondition(deps); cond != "" {
+		args = append(args, "-w", cond, "-ti")
+	}
+	return args
+}
+
+func (l *LsfScheduler) Submit(scriptPath string, deps []Dependency) (string, error) {
+	args := buildLsfArgs(deps)
 
 	// LSF reads the script from stdin: bsub < script.lsf
 	args = append(args, "<", scriptPath)

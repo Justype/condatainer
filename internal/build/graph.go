@@ -299,8 +299,12 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 		return "", fmt.Errorf("failed to create batch script: %w", err)
 	}
 
-	// Submit job
-	jobID, err := bg.scheduler.Submit(scriptPath, depIDs)
+	// Submit job (build chain always uses afterok)
+	var deps []scheduler.Dependency
+	if len(depIDs) > 0 {
+		deps = []scheduler.Dependency{{Type: scheduler.DependencyAfterOK, JobIDs: depIDs}}
+	}
+	jobID, err := bg.scheduler.Submit(scriptPath, deps)
 	if err != nil {
 		return "", fmt.Errorf("failed to submit job: %w", err)
 	}

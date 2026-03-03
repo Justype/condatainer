@@ -258,6 +258,7 @@ func writeJobFooter(w io.Writer, jobIDVar string) {
 	fmt.Fprintf(w, "echo \"Job ID:    %s\"\n", jobIDVar)
 	fmt.Fprintln(w, "echo \"Elapsed:   $(_format_time $(($SECONDS - $_START_TIME)))\"")
 	fmt.Fprintf(w, "%s\n", "echo \"Completed: $(date '+%Y-%m-%d %T')\"")
+	fmt.Fprintln(w, "echo \"Exit Code: $_EXIT_CODE\"")
 	fmt.Fprintln(w, "echo \"========================================\"")
 }
 

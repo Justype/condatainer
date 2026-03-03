@@ -179,12 +179,25 @@ type ArraySpec struct {
 	BlankLines []int    // 1-based line numbers of all blank lines (nil = none)
 }
 
+// Dependency types for job submission.
+const (
+	DependencyAfterOK    = "afterok"    // Run only if all dependency jobs succeeded
+	DependencyAfterNotOK = "afternotok" // Run only if any dependency job failed
+	DependencyAfterAny   = "afterany"   // Run regardless of dependency job outcome
+)
+
+// Dependency represents a typed job dependency for submission.
+type Dependency struct {
+	Type   string   // DependencyAfterOK, DependencyAfterNotOK, or DependencyAfterAny
+	JobIDs []string // Job IDs to depend on
+}
+
 // JobSpec represents specifications for submitting a batch job
 type JobSpec struct {
 	Name           string            // Job name (for temp and log file naming)
 	Command        string            // Command to execute
 	Specs          *ScriptSpecs      // Job specifications
-	DepJobIDs      []string          // Job IDs this job depends on
+	DepJobIDs      []string          // Job IDs this job depends on (always afterok, used by build chain)
 	Metadata       map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
 	OverrideOutput bool              // If true, always set Stdout/Stderr from Name (ignores script directives)
 	Array          *ArraySpec        // Non-nil → emit array job directives
@@ -203,9 +216,9 @@ type Scheduler interface {
 	// Returns the path to the created script
 	CreateScriptWithSpec(spec *JobSpec, outputDir string) (string, error)
 
-	// Submit submits a job script with optional dependency chain
-	// Returns the job ID assigned by the scheduler
-	Submit(scriptPath string, dependencyJobIDs []string) (string, error)
+	// Submit submits a job script with optional typed dependency list.
+	// Returns the job ID assigned by the scheduler.
+	Submit(scriptPath string, deps []Dependency) (string, error)
 
 	// GetClusterInfo retrieves cluster configuration (GPUs, limits)
 	// Returns nil if information is not available
@@ -385,8 +398,12 @@ func SubmitWithDependencies(scheduler Scheduler, jobs []*JobSpec, outputDir stri
 			return nil, fmt.Errorf("failed to create script for %s: %w", jobSpec.Name, err)
 		}
 
-		// Submit job
-		jobID, err := scheduler.Submit(scriptPath, depIDs)
+		// Submit job (build chain always uses afterok)
+		var deps []Dependency
+		if len(depIDs) > 0 {
+			deps = []Dependency{{Type: DependencyAfterOK, JobIDs: depIDs}}
+		}
+		jobID, err := scheduler.Submit(scriptPath, deps)
 		if err != nil {
 			return nil, fmt.Errorf("failed to submit job %s: %w", jobSpec.Name, err)
 		}
@@ -570,9 +587,14 @@ func WriteScript(scheduler Scheduler, jobSpec *JobSpec, outputDir string) (strin
 	return scheduler.CreateScriptWithSpec(jobSpec, outputDir)
 }
 
-// SubmitJob submits a single job and returns its job ID
+// SubmitJob submits a single job and returns its job ID.
+// dependencyJobIDs are treated as afterok dependencies.
 func SubmitJob(scheduler Scheduler, scriptPath string, dependencyJobIDs []string) (string, error) {
-	return scheduler.Submit(scriptPath, dependencyJobIDs)
+	var deps []Dependency
+	if len(dependencyJobIDs) > 0 {
+		deps = []Dependency{{Type: DependencyAfterOK, JobIDs: dependencyJobIDs}}
+	}
+	return scheduler.Submit(scriptPath, deps)
 }
 
 // SubmitJobs submits multiple jobs with dependency chains and returns their job IDs
