@@ -22,6 +22,13 @@ func StripInlineComment(s string) string {
 // ParseMemoryMB parses memory strings like "8G", "1024M", "512K", "1T" into MB (int64).
 // Default unit is MB when no suffix is given.
 func ParseMemoryMB(memStr string) (int64, error) {
+	return ParseMemoryMBWithDefault(memStr, "MB")
+}
+
+// ParseMemoryMBWithDefault parses a memory string into MB.
+// When the string has an explicit unit suffix (G/GB/M/MB/K/KB/T/TB) it is used directly.
+// For bare numbers the provided defaultUnit is applied (e.g. "KB", "MB", "GB").
+func ParseMemoryMBWithDefault(memStr, defaultUnit string) (int64, error) {
 	memStr = strings.ToUpper(strings.TrimSpace(memStr))
 
 	var value int64
@@ -32,10 +39,14 @@ func ParseMemoryMB(memStr string) (int64, error) {
 		return 0, fmt.Errorf("invalid memory format: %s", memStr)
 	}
 
+	if unit == "" {
+		unit = strings.ToUpper(strings.TrimSpace(defaultUnit))
+	}
+
 	switch unit {
 	case "G", "GB":
 		return value * 1024, nil
-	case "M", "MB", "":
+	case "M", "MB":
 		return value, nil
 	case "K", "KB":
 		return value / 1024, nil

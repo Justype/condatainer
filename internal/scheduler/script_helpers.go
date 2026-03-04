@@ -144,16 +144,26 @@ func absPath(path string) string {
 }
 
 // ResourceEnvVars returns KEY=VALUE strings for resource-related environment
-// variables derived from rs. All counts default to 1 when rs is nil or unset.
+// variables derived from rs.
 //
-//   - NNODES          — number of nodes
-//   - NTASKS_PER_NODE — tasks (MPI ranks) per node
-//   - NTASKS          — total tasks (NNODES × NTASKS_PER_NODE)
+// Always emitted:
+//   - NNODES         — number of nodes (default 1)
+//   - NTASKS         — total tasks: rs.Ntasks when set directly, else Nodes×TasksPerNode
+//   - NCPUS_PER_TASK — CPU threads per task / OpenMP degree (default 1)
+//
+// Emitted only when TasksPerNode is known (> 0):
+//   - NTASKS_PER_NODE — tasks per node
 //   - NCPUS           — CPUs per node (CpusPerTask × TasksPerNode, PBS-style)
-//   - NCPUS_PER_TASK  — CPUs per task (SLURM-style --cpus-per-task)
-//   - MEM / MEM_MB / MEM_GB — included only when MemPerNodeMB > 0
+//
+// Memory (emitted only when set):
+//   - MEM_PER_CPU / MEM_PER_CPU_MB — when MemPerCpuMB > 0
+//   - MEM / MEM_MB / MEM_GB        — when GetMemPerNodeMB() > 0
 func ResourceEnvVars(rs *ResourceSpec) []string {
-	nodes, tasksPerNode, cpusPerTask := 1, 1, 1
+	nodes := 1
+	cpusPerTask := 1
+	var tasksPerNode int // 0 = unknown / free-distribution
+	var directNtasks int // rs.Ntasks when explicitly set
+
 	if rs != nil {
 		if rs.Nodes > 0 {
 			nodes = rs.Nodes
@@ -164,20 +174,44 @@ func ResourceEnvVars(rs *ResourceSpec) []string {
 		if rs.CpusPerTask > 0 {
 			cpusPerTask = rs.CpusPerTask
 		}
+		directNtasks = rs.Ntasks
 	}
+
+	// Total task count: prefer the directly set Ntasks; fall back to topology derivation.
+	ntasks := directNtasks
+	if ntasks <= 0 {
+		t := tasksPerNode
+		if t <= 0 {
+			t = 1
+		}
+		ntasks = nodes * t
+	}
+
 	env := []string{
 		fmt.Sprintf("NNODES=%d", nodes),
-		fmt.Sprintf("NTASKS_PER_NODE=%d", tasksPerNode),
-		fmt.Sprintf("NTASKS=%d", nodes*tasksPerNode),
-		fmt.Sprintf("NCPUS=%d", cpusPerTask*tasksPerNode), // CPUs per node (PBS-style)
+		fmt.Sprintf("NTASKS=%d", ntasks),
 		fmt.Sprintf("NCPUS_PER_TASK=%d", cpusPerTask),
 	}
-	if rs != nil && rs.MemPerNodeMB > 0 {
+	if tasksPerNode > 0 {
 		env = append(env,
-			fmt.Sprintf("MEM=%d", rs.MemPerNodeMB),
-			fmt.Sprintf("MEM_MB=%d", rs.MemPerNodeMB),
-			fmt.Sprintf("MEM_GB=%d", rs.MemPerNodeMB/1024),
+			fmt.Sprintf("NTASKS_PER_NODE=%d", tasksPerNode),
+			fmt.Sprintf("NCPUS=%d", cpusPerTask*tasksPerNode),
 		)
+	}
+	if rs != nil && rs.MemPerCpuMB > 0 {
+		env = append(env,
+			fmt.Sprintf("MEM_PER_CPU=%d", rs.MemPerCpuMB),
+			fmt.Sprintf("MEM_PER_CPU_MB=%d", rs.MemPerCpuMB),
+		)
+	}
+	if rs != nil {
+		if memMB := rs.GetMemPerNodeMB(); memMB > 0 {
+			env = append(env,
+				fmt.Sprintf("MEM=%d", memMB),
+				fmt.Sprintf("MEM_MB=%d", memMB),
+				fmt.Sprintf("MEM_GB=%d", memMB/1024),
+			)
+		}
 	}
 	return env
 }
@@ -212,15 +246,11 @@ func writeJobHeader(w io.Writer, jobIDVar string, specs *ScriptSpecs, formatTime
 		if nodes <= 0 {
 			nodes = 1
 		}
-		tasksPerNode := rs.TasksPerNode
-		if tasksPerNode <= 0 {
-			tasksPerNode = 1
-		}
 		if nodes > 1 {
 			fmt.Fprintf(w, "echo \"Nodes:     %d\"\n", nodes)
 		}
-		if nodes*tasksPerNode > 1 {
-			fmt.Fprintf(w, "echo \"Tasks:     %d\"\n", nodes*tasksPerNode)
+		if rs.GetNtasks() > 1 {
+			fmt.Fprintf(w, "echo \"Tasks:     %d\"\n", rs.GetNtasks())
 		}
 		if rs.CpusPerTask > 0 {
 			fmt.Fprintf(w, "echo \"CPUs/Task: %d\"\n", rs.CpusPerTask)
@@ -249,6 +279,10 @@ func writeJobHeader(w io.Writer, jobIDVar string, specs *ScriptSpecs, formatTime
 	}
 	fmt.Fprintf(w, "%s\n", "echo \"Started:   $(date '+%Y-%m-%d %T')\"")
 	fmt.Fprintln(w, "echo \"========================================\"")
+	// Set OMP_NUM_THREADS to the allocated CPUs per task if not already set by the scheduler.
+	if rs != nil && rs.CpusPerTask > 0 {
+		fmt.Fprintf(w, "export OMP_NUM_THREADS=${OMP_NUM_THREADS:-%d}\n", rs.CpusPerTask)
+	}
 }
 
 // writeJobFooter writes the job completion footer echo block to w.

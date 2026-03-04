@@ -63,12 +63,65 @@ type ResourceLimits struct {
 // A nil pointer means resource parsing failed — the job runs in passthrough mode.
 type ResourceSpec struct {
 	Nodes        int           // Number of nodes
-	TasksPerNode int           // MPI ranks / tasks per node
-	CpusPerTask  int           // CPU threads per task
-	MemPerNodeMB int64         // Total RAM per node in MB
+	Ntasks       int           // Total MPI tasks (0 = not set; use Nodes*TasksPerNode)
+	TasksPerNode int           // MPI ranks per node (0 = non-uniform distribution, e.g. multi-chunk PBS)
+	CpusPerTask  int           // CPU threads per task (OpenMP)
+	MemPerCpuMB  int64         // RAM per logical CPU in MB (SLURM --mem-per-cpu, LSF rusage[mem]÷CpusPerTask)
+	MemPerNodeMB int64         // Total RAM per node in MB (SLURM --mem, PBS mem=)
 	Gpu          *GpuSpec      // GPU requirements (nil = no GPU; Count = per node)
 	Time         time.Duration // Job walltime limit
 	Exclusive    bool          // Request exclusive node access (no other jobs on the same node)
+}
+
+// IsMPI returns true if the job requests more than one MPI task.
+func (rs *ResourceSpec) IsMPI() bool {
+	if rs == nil {
+		return false
+	}
+	return rs.GetNtasks() > 1
+}
+
+// IsOpenMP returns true if the job requests more than one CPU per task.
+func (rs *ResourceSpec) IsOpenMP() bool {
+	if rs == nil {
+		return false
+	}
+	return rs.CpusPerTask > 1
+}
+
+// GetNtasks returns the effective total task count.
+// Prefers Ntasks if set; otherwise returns Nodes * TasksPerNode (minimum 1).
+func (rs *ResourceSpec) GetNtasks() int {
+	if rs.Ntasks > 0 {
+		return rs.Ntasks
+	}
+	n := rs.Nodes
+	if n <= 0 {
+		n = 1
+	}
+	t := rs.TasksPerNode
+	if t <= 0 {
+		t = 1
+	}
+	return n * t
+}
+
+// GetMemPerNodeMB returns the effective memory per node in MB.
+// If MemPerNodeMB is set, returns it directly.
+// If only MemPerCpuMB is set, derives from CpusPerTask × TasksPerNode (minimum 1 each).
+// Returns 0 if neither is set or geometry is insufficient to derive a value.
+func (rs *ResourceSpec) GetMemPerNodeMB() int64 {
+	if rs.MemPerNodeMB > 0 {
+		return rs.MemPerNodeMB
+	}
+	if rs.MemPerCpuMB > 0 && rs.TasksPerNode > 0 {
+		cpt := rs.CpusPerTask
+		if cpt <= 0 {
+			cpt = 1
+		}
+		return rs.MemPerCpuMB * int64(cpt*rs.TasksPerNode)
+	}
+	return 0
 }
 
 // RuntimeConfig holds job-level control settings (name, I/O paths, notifications).
@@ -120,11 +173,10 @@ func IsPassthrough(specs *ScriptSpecs) bool {
 
 // specDefaults is the package-level defaults used by all schedulers.
 var specDefaults = ResourceSpec{
-	CpusPerTask:  2,
-	MemPerNodeMB: 8192,
-	Time:         4 * time.Hour,
-	Nodes:        1,
-	TasksPerNode: 1,
+	Ntasks:       1,
+	CpusPerTask:  1,
+	MemPerNodeMB: 1024,
+	Time:         2 * time.Hour,
 }
 
 // SetSpecDefaults overrides the default values used by ReadScriptSpecs.
@@ -147,11 +199,20 @@ func (rs *ResourceSpec) Override(other *ResourceSpec) {
 	if other.Nodes > 0 {
 		rs.Nodes = other.Nodes
 	}
+	if other.Ntasks > 0 {
+		rs.Ntasks = other.Ntasks
+	}
 	if other.TasksPerNode > 0 {
 		rs.TasksPerNode = other.TasksPerNode
 	}
 	if other.CpusPerTask > 0 {
 		rs.CpusPerTask = other.CpusPerTask
+	}
+	if other.MemPerCpuMB > 0 {
+		rs.MemPerCpuMB = other.MemPerCpuMB
+		if other.MemPerNodeMB == 0 {
+			rs.MemPerNodeMB = 0 // clear default so MemPerCpuMB takes effect
+		}
 	}
 	if other.MemPerNodeMB > 0 {
 		rs.MemPerNodeMB = other.MemPerNodeMB

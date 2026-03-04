@@ -412,12 +412,13 @@ func TestSlurmCreateScriptUsesOutputDir(t *testing.T) {
 
 func TestSlurmResourceParsing(t *testing.T) {
 	tests := []struct {
-		name      string
-		lines     []string
-		wantCpus  int
-		wantMemMB int64
-		wantTime  time.Duration
-		wantGpu   *GpuSpec
+		name            string
+		lines           []string
+		wantCpus        int
+		wantMemMB       int64
+		wantMemPerCpuMB int64
+		wantTime        time.Duration
+		wantGpu         *GpuSpec
 	}{
 		{
 			name: "basic resources",
@@ -449,7 +450,7 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --mem=4096M",
 			},
-			wantCpus:  2, // default
+			wantCpus:  1, // default
 			wantMemMB: 4096,
 		},
 		{
@@ -468,8 +469,8 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --gpus=v100:4",
 			},
-			wantCpus: 2, // default
-			wantGpu:  &GpuSpec{Type: "v100", Count: 4},
+			wantCpus: 1, // default
+			wantGpu:  &GpuSpec{Type: "v100", Count: 1},
 		},
 		{
 			name: "GPU gpus-per-node",
@@ -477,7 +478,7 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --gpus-per-node=2",
 			},
-			wantCpus: 2, // default
+			wantCpus: 1, // default
 			wantGpu:  &GpuSpec{Type: "gpu", Count: 2},
 		},
 		{
@@ -486,7 +487,7 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --time=1-12:00:00",
 			},
-			wantCpus: 2, // default
+			wantCpus: 1, // default
 			wantTime: 36 * time.Hour,
 		},
 		{
@@ -512,7 +513,26 @@ func TestSlurmResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"echo hello",
 			},
-			wantCpus: 2, // default
+			wantCpus: 1, // default
+		},
+		{
+			name: "mem-per-cpu stored as MemPerCpuMB",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --cpus-per-task=4",
+				"#SBATCH --mem-per-cpu=2G",
+			},
+			wantCpus:        4,
+			wantMemPerCpuMB: 2 * 1024,
+		},
+		{
+			name: "mem-per-cpu MB unit",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --mem-per-cpu=512M",
+			},
+			wantCpus:        1, // default
+			wantMemPerCpuMB: 512,
 		},
 	}
 
@@ -541,6 +561,12 @@ func TestSlurmResourceParsing(t *testing.T) {
 			if tt.wantMemMB > 0 && specs.Spec.MemPerNodeMB != tt.wantMemMB {
 				t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, tt.wantMemMB)
 			}
+			if tt.wantMemPerCpuMB > 0 && specs.Spec.MemPerCpuMB != tt.wantMemPerCpuMB {
+				t.Errorf("MemPerCpuMB = %d; want %d", specs.Spec.MemPerCpuMB, tt.wantMemPerCpuMB)
+			}
+			if tt.wantMemPerCpuMB > 0 && specs.Spec.MemPerNodeMB != 0 {
+				t.Errorf("MemPerNodeMB should be 0 when MemPerCpuMB is set, got %d", specs.Spec.MemPerNodeMB)
+			}
 			if tt.wantTime > 0 && specs.Spec.Time != tt.wantTime {
 				t.Errorf("Time = %v; want %v", specs.Spec.Time, tt.wantTime)
 			}
@@ -556,6 +582,111 @@ func TestSlurmResourceParsing(t *testing.T) {
 				}
 			} else if specs.Spec.Gpu != nil {
 				t.Errorf("Gpu = %+v; want nil", specs.Spec.Gpu)
+			}
+		})
+	}
+}
+
+func TestSlurmNtasksParsing(t *testing.T) {
+	tests := []struct {
+		name             string
+		lines            []string
+		wantNtasks       int
+		wantTasksPerNode int // -1 = don't check
+		wantNodes        int
+		wantPassthrough  bool
+	}{
+		{
+			name: "--ntasks evenly divisible by --nodes",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --nodes=4",
+				"#SBATCH --ntasks=16",
+			},
+			wantNtasks:       16,
+			wantTasksPerNode: 4,
+			wantNodes:        4,
+		},
+		{
+			name: "--ntasks not divisible by --nodes: valid if no gpu specs",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --nodes=4",
+				"#SBATCH --ntasks=37",
+			},
+			wantNtasks:      37,
+			wantNodes:       4,
+			wantPassthrough: false,
+		},
+		{
+			name: "--ntasks not divisible by --nodes: passthrough with gpu",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --nodes=4",
+				"#SBATCH --ntasks=37",
+				"#SBATCH --gpus=2",
+			},
+			wantPassthrough: true,
+		},
+		{
+			name: "--ntasks without --nodes",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --ntasks=8",
+			},
+			// No --nodes: free distribution; TasksPerNode=0 (not constrained)
+			wantNtasks:       8,
+			wantTasksPerNode: 0,
+		},
+		{
+			name: "--ntasks-per-node only (no --ntasks)",
+			lines: []string{
+				"#!/bin/bash",
+				"#SBATCH --nodes=4",
+				"#SBATCH --ntasks-per-node=8",
+			},
+			wantNtasks:       0, // not set via --ntasks
+			wantTasksPerNode: 8,
+			wantNodes:        4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			scriptPath := filepath.Join(tmpDir, "test.sh")
+			content := strings.Join(tt.lines, "\n")
+			if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
+				t.Fatalf("Failed to create test script: %v", err)
+			}
+
+			slurm := newTestSlurmScheduler()
+			specs, err := slurm.ReadScriptSpecs(scriptPath)
+			if err != nil {
+				t.Fatalf("ReadScriptSpecs failed: %v", err)
+			}
+
+			if tt.wantPassthrough {
+				if specs.Spec != nil {
+					t.Errorf("Spec = non-nil; want nil (passthrough)")
+				}
+				return
+			}
+
+			if specs.Spec == nil {
+				t.Fatal("Spec is nil; want non-nil")
+			}
+			if tt.wantNtasks > 0 && specs.Spec.Ntasks != tt.wantNtasks {
+				t.Errorf("Ntasks = %d; want %d", specs.Spec.Ntasks, tt.wantNtasks)
+			}
+			if tt.wantNtasks == 0 && specs.Spec.Ntasks != 0 {
+				t.Errorf("Ntasks = %d; want 0 (not set)", specs.Spec.Ntasks)
+			}
+			if tt.wantTasksPerNode >= 0 && specs.Spec.TasksPerNode != tt.wantTasksPerNode {
+				t.Errorf("TasksPerNode = %d; want %d", specs.Spec.TasksPerNode, tt.wantTasksPerNode)
+			}
+			if tt.wantNodes > 0 && specs.Spec.Nodes != tt.wantNodes {
+				t.Errorf("Nodes = %d; want %d", specs.Spec.Nodes, tt.wantNodes)
 			}
 		})
 	}
@@ -696,12 +827,15 @@ func clearJobEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"SLURM_JOB_ID", "SLURM_CPUS_PER_TASK", "SLURM_MEM_PER_NODE",
-		"SLURM_NTASKS", "SLURM_JOB_NUM_NODES",
+		"SLURM_NTASKS", "SLURM_JOB_NUM_NODES", "SLURM_NTASKS_PER_NODE",
 		"PBS_JOBID", "PBS_NCPUS", "NCPUS", "PBS_VMEM",
 		"PBS_NUM_NODES", "PBS_NP", "PBS_TASKNUM",
 		"LSB_JOBID", "LSB_DJOB_NUMPROC", "LSB_MAX_NUM_PROCESSORS", "LSB_MAX_MEM_RUSAGE",
 		"_CONDOR_JOB_AD", "_CONDOR_REQUEST_CPUS", "_CONDOR_REQUEST_MEMORY",
 		"CUDA_VISIBLE_DEVICES",
+		// Normalized env vars injected by ResourceEnvVars (may be present on an HPC node).
+		"NNODES", "NTASKS", "NTASKS_PER_NODE", "NCPUS", "NCPUS_PER_TASK",
+		"MEM_PER_CPU", "MEM_PER_CPU_MB", "MEM", "MEM_MB", "MEM_GB",
 	} {
 		os.Unsetenv(key)
 		t.Setenv(key, "")
@@ -722,6 +856,7 @@ func TestSlurmGetJobResources(t *testing.T) {
 	t.Run("full resources", func(t *testing.T) {
 		clearJobEnvVars(t)
 		t.Setenv("SLURM_JOB_ID", "12345")
+		t.Setenv("SLURM_NTASKS", "4")
 		t.Setenv("SLURM_CPUS_PER_TASK", "16")
 		t.Setenv("SLURM_NTASKS_PER_NODE", "2")
 		t.Setenv("SLURM_JOB_NUM_NODES", "2")
@@ -731,6 +866,9 @@ func TestSlurmGetJobResources(t *testing.T) {
 		res := sched.GetJobResources()
 		if res == nil {
 			t.Fatal("expected non-nil")
+		}
+		if res.Ntasks != 4 {
+			t.Errorf("Ntasks = %d; want 4", res.Ntasks)
 		}
 		if res.CpusPerTask != 16 {
 			t.Errorf("CpusPerTask = %d; want 16", res.CpusPerTask)
@@ -839,8 +977,8 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 				"#SBATCH --ntasks=10",
 				"#SBATCH --ntasks-per-node=8",
 			},
-			// ntasks=10 overrides, nodes=2 => TasksPerNode = 10/2 = 5
-			wantNodes: 2, wantTasksPerNode: 5, wantCpus: 2,
+			// ntasks=10 overrides, nodes=2 => ntasks=10, explicit per-node preserved
+			wantNodes: 2, wantTasksPerNode: 8, wantCpus: 1,
 		},
 		{
 			name: "ntasks only",
@@ -848,8 +986,8 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --ntasks=8",
 			},
-			// ntasks=8, nodes defaults to 1 => TasksPerNode = 8/1 = 8
-			wantNodes: 1, wantTasksPerNode: 8, wantCpus: 2,
+			// ntasks=8, no --nodes: free distribution; TasksPerNode=0
+			wantNodes: 0, wantTasksPerNode: 0, wantCpus: 1,
 		},
 		{
 			name: "defaults when no node/task flags",
@@ -857,8 +995,8 @@ func TestSlurmNodeTaskParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#SBATCH --mem=8G",
 			},
-			// defaults: nodes=1, tasks=1 => TasksPerNode = 1
-			wantNodes: 1, wantTasksPerNode: 1, wantCpus: 2,
+			// defaults
+			wantNodes: 0, wantTasksPerNode: 0, wantCpus: 1,
 		},
 	}
 
@@ -1046,5 +1184,75 @@ echo "hello"
 	wantStdout := absPath("out.log")
 	if specs.Control.Stdout != wantStdout {
 		t.Errorf("Stdout = %q; want %q", specs.Control.Stdout, wantStdout)
+	}
+}
+
+func TestSlurmMemPerCpuRoundTrip(t *testing.T) {
+	sched := newTestSlurmScheduler()
+
+	// Parse a script with --mem-per-cpu
+	lines := []string{
+		"#!/bin/bash",
+		"#SBATCH --nodes=2",
+		"#SBATCH --ntasks-per-node=4",
+		"#SBATCH --cpus-per-task=2",
+		"#SBATCH --mem-per-cpu=1G",
+		"#SBATCH --time=1:00:00",
+		"echo hello",
+	}
+	tmpFile := filepath.Join(t.TempDir(), "input.sh")
+	os.WriteFile(tmpFile, []byte(strings.Join(lines, "\n")), 0644)
+
+	specs, err := sched.ReadScriptSpecs(tmpFile)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if specs.Spec == nil {
+		t.Fatal("Spec is nil")
+	}
+	if specs.Spec.MemPerCpuMB != 1024 {
+		t.Errorf("MemPerCpuMB = %d; want 1024", specs.Spec.MemPerCpuMB)
+	}
+	if specs.Spec.MemPerNodeMB != 0 {
+		t.Errorf("MemPerNodeMB should be 0 when --mem-per-cpu is set, got %d", specs.Spec.MemPerNodeMB)
+	}
+
+	// Generate the script
+	outputDir := t.TempDir()
+	jobSpec := &JobSpec{
+		Name:     "mem-per-cpu-test",
+		Command:  "echo hello",
+		Specs:    specs,
+		Metadata: map[string]string{},
+	}
+	scriptPath, err := sched.CreateScriptWithSpec(jobSpec, outputDir)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	script := string(content)
+
+	// Generated script should use --mem-per-cpu, not --mem
+	if !strings.Contains(script, "--mem-per-cpu=") {
+		t.Errorf("generated script should contain --mem-per-cpu=, got:\n%s", script)
+	}
+	if strings.Contains(script, "#SBATCH --mem=") {
+		t.Errorf("generated script should not contain --mem= when MemPerCpuMB is set, got:\n%s", script)
+	}
+
+	// Re-parse to verify round-trip
+	specs2, err := sched.ReadScriptSpecs(scriptPath)
+	if err != nil {
+		t.Fatalf("re-parse failed: %v", err)
+	}
+	if specs2.Spec == nil {
+		t.Fatal("re-parsed Spec is nil")
+	}
+	if specs2.Spec.MemPerCpuMB != 1024 {
+		t.Errorf("round-trip MemPerCpuMB = %d; want 1024", specs2.Spec.MemPerCpuMB)
 	}
 }

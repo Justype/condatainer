@@ -233,10 +233,12 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 
 		// GPU: at most one form expected; last one seen wins in Phase 1.
 		// Resolution priority in Phase 2: gres > per-node > total > per-task.
-		gpuGresStr    string // --gres=gpu:... (per-node by SLURM definition)
-		gpuPerNodeStr string // --gpus-per-node=...
-		gpuTotalStr   string // --gpus=... (total across all nodes)
-		gpuPerTaskStr string // --gpus-per-task=...
+		gpuGresStr      string // --gres=gpu:... (per-node by SLURM definition)
+		gpuPerNodeStr   string // --gpus-per-node=...
+		gpuTotalStr     string // --gpus=... (total across all nodes)
+		gpuPerTaskStr   string // --gpus-per-task=...
+		ntasksPerGpu    int
+		hasNtasksPerGpu bool
 
 		memStr       string // --mem
 		memPerCpuStr string // --mem-per-cpu (resolved after CPU)
@@ -283,6 +285,9 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 			gpuPerNodeStr, _ = flagValue(flag, "--gpus-per-node")
 		case flagMatches(flag, "--gpus-per-task"):
 			gpuPerTaskStr, _ = flagValue(flag, "--gpus-per-task")
+		case flagMatches(flag, "--ntasks-per-gpu"):
+			_, parseErr = flagScanInt(flag, &ntasksPerGpu, "--ntasks-per-gpu")
+			hasNtasksPerGpu = true
 		case flagMatches(flag, "--mem"):
 			memStr, _ = flagValue(flag, "--mem")
 		case flagMatches(flag, "--mem-per-cpu"):
@@ -316,72 +321,107 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		Exclusive:    exclusive,
 	}
 
-	// Step 1: Nodes & Tasks
-	rs.Nodes = nodes
-	if hasTotalNtasks {
-		if rs.Nodes > 0 && totalNtasks%rs.Nodes != 0 {
-			logParseWarning("SLURM: --ntasks=%d not divisible by --nodes=%d; using passthrough mode",
-				totalNtasks, rs.Nodes)
-			return nil, directives
-		}
-		if rs.Nodes > 0 {
-			rs.TasksPerNode = totalNtasks / rs.Nodes
-		} else {
-			rs.TasksPerNode = totalNtasks
-		}
-		if rs.TasksPerNode < 1 {
-			rs.TasksPerNode = 1
-		}
-	} else if hasNtasksPerNode {
-		rs.TasksPerNode = ntasksPerNode
+	// Conflict Check
+	if gpuPerTaskStr != "" && hasNtasksPerGpu {
+		logParseWarning("SLURM: --gpus-per-task and --ntasks-per-gpu are mutually exclusive; using passthrough")
+		return nil, directives
 	}
 
-	// Step 2: GPU (depends on Nodes and TasksPerNode)
+	// 1. Nodes
+	rs.Nodes = nodes
+
+	// 2. GPU Resolution
 	switch {
 	case gpuGresStr != "":
-		// --gres=gpu:TYPE:N is per-node by SLURM definition.
 		gpu, err := parseSlurmGpu(gpuGresStr)
 		if err != nil {
-			logParseWarning("SLURM: failed to parse --gres value %q: %v; using passthrough mode", gpuGresStr, err)
+			logParseWarning("SLURM: failed to parse --gres value %q: %v; using passthrough", gpuGresStr, err)
 			return nil, directives
+		}
+		if rs.Nodes <= 0 {
+			rs.Nodes = 1
 		}
 		rs.Gpu = gpu
 	case gpuPerNodeStr != "":
-		// --gpus-per-node=TYPE:N is directly per-node.
 		gpu, err := parseSlurmGpu(gpuPerNodeStr)
 		if err != nil {
-			logParseWarning("SLURM: failed to parse --gpus-per-node value %q: %v; using passthrough mode", gpuPerNodeStr, err)
+			logParseWarning("SLURM: failed to parse --gpus-per-node value %q: %v; using passthrough", gpuPerNodeStr, err)
 			return nil, directives
+		}
+		if rs.Nodes <= 0 {
+			rs.Nodes = 1
 		}
 		rs.Gpu = gpu
 	case gpuTotalStr != "":
-		// --gpus=N is total; must divide evenly by nodes.
 		gpu, err := parseSlurmGpu(gpuTotalStr)
 		if err != nil {
-			logParseWarning("SLURM: failed to parse --gpus value %q: %v; using passthrough mode", gpuTotalStr, err)
+			logParseWarning("SLURM: failed to parse --gpus value %q: %v; using passthrough", gpuTotalStr, err)
 			return nil, directives
 		}
-		if rs.Nodes > 1 {
+		if rs.Nodes <= 0 {
+			// If total gpus provided but no nodes, default to that many nodes with 1 gpu each
+			rs.Nodes = gpu.Count
+			gpu.Count = 1
+		} else {
 			if gpu.Count%rs.Nodes != 0 {
-				logParseWarning("SLURM: --gpus=%d not divisible by --nodes=%d; using passthrough mode",
-					gpu.Count, rs.Nodes)
+				logParseWarning("SLURM: --gpus=%d not divisible by --nodes=%d; using passthrough", gpu.Count, rs.Nodes)
 				return nil, directives
 			}
 			gpu.Count /= rs.Nodes
 		}
 		rs.Gpu = gpu
-	case gpuPerTaskStr != "":
-		// --gpus-per-task=N; multiply by tasks/node to get per-node count.
+	}
+
+	// 3. Tasks
+	// We want to calculate explicitly how many Ntasks we have.
+	if hasTotalNtasks {
+		rs.Ntasks = totalNtasks
+		if hasNtasksPerNode {
+			rs.TasksPerNode = ntasksPerNode
+		} else if rs.Nodes > 0 {
+			if totalNtasks%rs.Nodes == 0 {
+				rs.TasksPerNode = totalNtasks / rs.Nodes
+			} else if rs.Gpu != nil || gpuPerTaskStr != "" {
+				logParseWarning("SLURM: --ntasks=%d not evenly divisible by --nodes=%d with GPU specs; using passthrough mode", totalNtasks, rs.Nodes)
+				return nil, directives
+			}
+		} else {
+			rs.TasksPerNode = 0 // no node constraint: free distribution
+		}
+	} else if hasNtasksPerGpu {
+		if rs.Gpu != nil {
+			rs.Ntasks = ntasksPerGpu * (rs.Nodes * rs.Gpu.Count)
+		} else {
+			logParseWarning("SLURM: --ntasks-per-gpu requires a GPU spec; using passthrough")
+			return nil, directives
+		}
+	} else if hasNtasksPerNode {
+		rs.TasksPerNode = ntasksPerNode
+	}
+
+	// Back-calculate GPUs if --gpus-per-task was used
+	if gpuPerTaskStr != "" {
 		gpu, err := parseSlurmGpu(gpuPerTaskStr)
 		if err != nil {
 			logParseWarning("SLURM: failed to parse --gpus-per-task value %q: %v; using passthrough mode", gpuPerTaskStr, err)
 			return nil, directives
 		}
-		gpu.Count *= rs.TasksPerNode
+		if rs.Nodes > 0 {
+			// e.g. nodes=2, total tasks=8 => tasksPerNode=4.
+			// gpusPerNode = gpusPerTask * tasksPerNode
+			tasksUsed := rs.TasksPerNode
+			if tasksUsed == 0 && rs.Ntasks > 0 {
+				tasksUsed = rs.Ntasks / rs.Nodes
+			}
+			if tasksUsed == 0 {
+				tasksUsed = 1 // Safe fallback
+			}
+			gpu.Count *= tasksUsed
+		}
 		rs.Gpu = gpu
 	}
 
-	// Step 3: CPU (depends on GPU when --cpus-per-gpu is used)
+	// 4. CPU (depends on task distribution or GPUs)
 	if hasCpusPerTask {
 		rs.CpusPerTask = cpusPerTask
 	} else if hasCpusPerGpu {
@@ -390,12 +430,28 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 			return nil, directives
 		}
 		rs.CpusPerTask = cpusPerGpu * rs.Gpu.Count
+		// If MPI tasks spread things out, we need to divide CPUs evenly among tasks
+		// on that node. If TasksPerNode is defined, we divide.
+		tasksUsed := rs.TasksPerNode
+		if tasksUsed == 0 && rs.Nodes > 0 && rs.Ntasks > 0 {
+			tasksUsed = rs.Ntasks / rs.Nodes
+		}
+		if tasksUsed > 0 {
+			rs.CpusPerTask /= tasksUsed
+		}
+		if rs.CpusPerTask < 1 {
+			rs.CpusPerTask = 1
+		}
+	} else {
+		// New logic mandates fallback to 1 if not set
+		if rs.CpusPerTask <= 0 {
+			rs.CpusPerTask = 1
+		}
 	}
 
-	// Step 4: Memory — three forms, resolved after CPU and GPU.
+	// 5. Memory — three forms, resolved after CPU and GPU.
 	switch {
 	case memStr != "":
-		// --mem=N: direct per-node total.
 		mem, err := parseMemoryMB(memStr)
 		if err != nil {
 			logParseWarning("SLURM: invalid --mem value %q: %v; using passthrough mode", memStr, err)
@@ -403,19 +459,14 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		}
 		rs.MemPerNodeMB = mem
 	case memPerCpuStr != "":
-		// --mem-per-cpu=N: multiply by effective CPUs per node.
 		memPerCpu, err := parseMemoryMB(memPerCpuStr)
 		if err != nil {
 			logParseWarning("SLURM: invalid --mem-per-cpu value %q: %v; using passthrough mode", memPerCpuStr, err)
 			return nil, directives
 		}
-		cpusPerNode := rs.CpusPerTask * rs.TasksPerNode
-		if cpusPerNode < 1 {
-			cpusPerNode = 1
-		}
-		rs.MemPerNodeMB = memPerCpu * int64(cpusPerNode)
+		rs.MemPerCpuMB = memPerCpu
+		rs.MemPerNodeMB = 0 // clear default so GetMemPerNodeMB() derives correctly
 	case memPerGpuStr != "":
-		// --mem-per-gpu=N: multiply by GPUs per node.
 		if rs.Gpu == nil {
 			logParseWarning("SLURM: --mem-per-gpu requires a GPU spec; using passthrough mode")
 			return nil, directives
@@ -428,7 +479,7 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 		rs.MemPerNodeMB = memPerGpu * int64(rs.Gpu.Count)
 	}
 
-	// Step 5: Time (independent).
+	// 6. Time (independent).
 	if timeStr != "" {
 		t, err := utils.ParseDHMSTime(timeStr)
 		if err != nil {
@@ -527,20 +578,30 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	// Write ResourceSpec directives (only if not in passthrough mode)
 	if specs.Spec != nil {
 		rs := specs.Spec
-		nodes := rs.Nodes
-		if nodes <= 0 {
-			nodes = 1
+
+		if !rs.IsMPI() {
+			// Pure OpenMP: pin to 1 node and 1 task so --mem is unambiguous.
+			fmt.Fprintf(writer, "#SBATCH --nodes=1\n")
+			fmt.Fprintf(writer, "#SBATCH --ntasks=1\n")
+			if rs.CpusPerTask > 0 {
+				fmt.Fprintf(writer, "#SBATCH --cpus-per-task=%d\n", rs.CpusPerTask)
+			}
+		} else {
+			fmt.Fprintf(writer, "#SBATCH --ntasks=%d\n", rs.GetNtasks())
+			if rs.Nodes > 0 {
+				fmt.Fprintf(writer, "#SBATCH --nodes=%d\n", rs.Nodes)
+			}
+			if rs.TasksPerNode > 0 {
+				fmt.Fprintf(writer, "#SBATCH --ntasks-per-node=%d\n", rs.TasksPerNode)
+			}
+			if rs.CpusPerTask > 0 {
+				fmt.Fprintf(writer, "#SBATCH --cpus-per-task=%d\n", rs.CpusPerTask)
+			}
 		}
-		tasksPerNode := rs.TasksPerNode
-		if tasksPerNode <= 0 {
-			tasksPerNode = 1
-		}
-		fmt.Fprintf(writer, "#SBATCH --nodes=%d\n", nodes)
-		fmt.Fprintf(writer, "#SBATCH --ntasks=%d\n", nodes*tasksPerNode)
-		if rs.CpusPerTask > 0 {
-			fmt.Fprintf(writer, "#SBATCH --cpus-per-task=%d\n", rs.CpusPerTask)
-		}
-		if rs.MemPerNodeMB > 0 {
+
+		if rs.MemPerCpuMB > 0 {
+			fmt.Fprintf(writer, "#SBATCH --mem-per-cpu=%dmb\n", rs.MemPerCpuMB)
+		} else if rs.MemPerNodeMB > 0 {
 			fmt.Fprintf(writer, "#SBATCH --mem=%dmb\n", rs.MemPerNodeMB)
 		}
 		if rs.Time > 0 {
@@ -1076,13 +1137,19 @@ func (s *SlurmScheduler) GetJobResources() *ResourceSpec {
 	if v := getEnvInt("SLURM_JOB_NUM_NODES"); v != nil {
 		res.Nodes = *v
 	}
+	if v := getEnvInt("SLURM_NTASKS"); v != nil {
+		res.Ntasks = *v
+	}
 	if v := getEnvInt("SLURM_NTASKS_PER_NODE"); v != nil {
 		res.TasksPerNode = *v
+	} else if res.Ntasks > 0 && res.Nodes > 1 && res.Ntasks%res.Nodes == 0 {
+		// Derive TasksPerNode when SLURM_NTASKS_PER_NODE is absent but geometry is uniform.
+		res.TasksPerNode = res.Ntasks / res.Nodes
 	}
 	if v := getEnvInt("SLURM_CPUS_PER_TASK"); v != nil {
 		res.CpusPerTask = *v
 	}
-	// SLURM_MEM_PER_NODE is already in MB
+	// SLURM_MEM_PER_NODE is already in MB.
 	if v := getEnvInt64("SLURM_MEM_PER_NODE"); v != nil {
 		res.MemPerNodeMB = *v
 	}

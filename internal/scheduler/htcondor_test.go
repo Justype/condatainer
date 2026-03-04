@@ -417,7 +417,7 @@ func TestHTCondorResourceParsing(t *testing.T) {
 			wantCpus:  4,
 			wantMemMB: 8192,
 			wantGpus:  0,
-			wantTime:  4 * time.Hour, // default
+			wantTime:  2 * time.Hour, // default
 		},
 		{
 			name: "Memory with MB suffix",
@@ -426,10 +426,10 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"request_memory = 4096MB",
 				"queue",
 			},
-			wantCpus:  2, // default
+			wantCpus:  1, // default
 			wantMemMB: 4096,
 			wantGpus:  0,
-			wantTime:  4 * time.Hour, // default
+			wantTime:  2 * time.Hour, // default
 		},
 		{
 			name: "Plain memory (default MB)",
@@ -438,10 +438,10 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"request_memory = 2048",
 				"queue",
 			},
-			wantCpus:  2, // default
+			wantCpus:  1, // default
 			wantMemMB: 2048,
 			wantGpus:  0,
-			wantTime:  4 * time.Hour, // default
+			wantTime:  2 * time.Hour, // default
 		},
 		{
 			name: "Only CPUs",
@@ -451,9 +451,9 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"queue",
 			},
 			wantCpus:  16,
-			wantMemMB: 8192, // default
+			wantMemMB: 1024, // default
 			wantGpus:  0,
-			wantTime:  4 * time.Hour, // default
+			wantTime:  2 * time.Hour, // default
 		},
 		{
 			name: "Only GPUs",
@@ -462,10 +462,10 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"request_gpus = 4",
 				"queue",
 			},
-			wantCpus:  2,    // default
-			wantMemMB: 8192, // default
+			wantCpus:  1,    // default
+			wantMemMB: 1024, // default
 			wantGpus:  4,
-			wantTime:  4 * time.Hour, // default
+			wantTime:  2 * time.Hour, // default
 		},
 		{
 			name: "Time in seconds",
@@ -474,8 +474,8 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"+MaxRuntime = 86400",
 				"queue",
 			},
-			wantCpus:  2,    // default
-			wantMemMB: 8192, // default
+			wantCpus:  1,    // default
+			wantMemMB: 1024, // default
 			wantGpus:  0,
 			wantTime:  24 * time.Hour,
 		},
@@ -485,10 +485,10 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"# HTCondor Submit File",
 				"# Just a comment",
 			},
-			wantCpus:  2,    // default
-			wantMemMB: 8192, // default
+			wantCpus:  1,    // default
+			wantMemMB: 1024, // default
 			wantGpus:  0,
-			wantTime:  4 * time.Hour, // default
+			wantTime:  2 * time.Hour, // default
 		},
 	}
 

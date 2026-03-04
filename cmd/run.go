@@ -682,14 +682,36 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 	} else if specs != nil && specs.Spec != nil {
 		rs := effectiveResourceSpec(specs)
 		fmt.Printf("%s\n", utils.StyleTitle("Resource specs:"))
-		if rs.CpusPerTask > 0 {
-			fmt.Printf("  CPUs:       %d\n", rs.CpusPerTask)
+		ntasks := getNtasks(specs)
+		isMPI := ntasks > 1
+
+		if isMPI {
+			// MPI or Hybrid: show task geometry first
+			fmt.Printf("  MPI Tasks:  %d\n", ntasks)
+			if rs.Nodes > 0 {
+				fmt.Printf("  Nodes:      %d\n", rs.Nodes)
+			}
+			if rs.TasksPerNode > 0 {
+				fmt.Printf("  Tasks/Node: %d\n", rs.TasksPerNode)
+			}
+			if rs.CpusPerTask > 1 {
+				// Hybrid: also show per-task thread count
+				fmt.Printf("  CPU/Task:   %d\n", rs.CpusPerTask)
+			}
+		} else {
+			// Pure OpenMP / single-task
+			if rs.CpusPerTask > 0 {
+				fmt.Printf("  CPU/Task:   %d\n", rs.CpusPerTask)
+			}
 		}
-		if rs.MemPerNodeMB > 0 {
+
+		if rs.MemPerCpuMB > 0 {
+			fmt.Printf("  Mem/CPU:    %d MB\n", rs.MemPerCpuMB)
+		} else if rs.MemPerNodeMB > 0 {
 			if rs.MemPerNodeMB >= 1024 && rs.MemPerNodeMB%1024 == 0 {
-				fmt.Printf("  Memory:     %d GB\n", rs.MemPerNodeMB/1024)
+				fmt.Printf("  Mem/Node:   %d GB\n", rs.MemPerNodeMB/1024)
 			} else {
-				fmt.Printf("  Memory:     %d MB\n", rs.MemPerNodeMB)
+				fmt.Printf("  Mem/Node:   %d MB\n", rs.MemPerNodeMB)
 			}
 		}
 		if rs.Time > 0 {
@@ -703,15 +725,10 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 				fmt.Printf("  GPU:        %d\n", rs.Gpu.Count)
 			}
 		}
-		ntasks := getNtasks(specs)
-		if ntasks > 1 {
-			if rs.Nodes > 0 {
-				fmt.Printf("  Nodes:      %d\n", rs.Nodes)
-			}
-			if rs.TasksPerNode > 0 {
-				fmt.Printf("  Tasks/node: %d\n", rs.TasksPerNode)
-			}
-			fmt.Printf("  MPI tasks:  %d\n", ntasks)
+		if rs.Exclusive {
+			fmt.Printf("  Exclusive:  yes\n")
+		}
+		if isMPI {
 			mpiexecPath, ok := detectMpi()
 			if !ok {
 				fmt.Printf("  mpiexec:    %s\n", utils.StyleError("not found"))
@@ -1018,16 +1035,7 @@ func getNtasks(specs *scheduler.ScriptSpecs) int {
 	if specs == nil || specs.Spec == nil {
 		return 1
 	}
-	rs := effectiveResourceSpec(specs)
-	nodes := rs.Nodes
-	if nodes <= 0 {
-		nodes = 1
-	}
-	tpn := rs.TasksPerNode
-	if tpn <= 0 {
-		tpn = 1
-	}
-	return nodes * tpn
+	return effectiveResourceSpec(specs).GetNtasks()
 }
 
 // detectMpi checks whether mpiexec is available in the current PATH.
@@ -1065,7 +1073,7 @@ func buildMpiRunCommand(contentScript string, scriptArgs []string, specs *schedu
 		return "", fmt.Errorf("mpiexec not found; load the appropriate MPI module before submitting (ntasks=%d)", getNtasks(specs))
 	}
 	utils.PrintNote("Detected mpiexec: %s", utils.StylePath(mpiexecPath))
-	return fmt.Sprintf("%s %s", mpiexecPath, runCmd), nil
+	return fmt.Sprintf("%s -n %d %s", mpiexecPath, getNtasks(specs), runCmd), nil
 }
 
 // shellQuote returns a single-quoted shell-safe version of s.

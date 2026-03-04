@@ -387,6 +387,7 @@ func TestPbsResourceParsing(t *testing.T) {
 		wantMemMB       int64
 		wantTime        time.Duration
 		wantGpu         *GpuSpec
+		wantPassthrough bool
 	}{
 		{
 			name: "select format with ncpus, mem",
@@ -403,7 +404,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l walltime=02:30:00",
 			},
-			wantCpusPerTask: 2, // default
+			wantCpusPerTask: 1, // default
 			wantTime:        2*time.Hour + 30*time.Minute,
 		},
 		{
@@ -412,7 +413,7 @@ func TestPbsResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l nodes=1:ppn=8",
 			},
-			wantCpusPerTask: 8,
+			wantPassthrough: true,
 		},
 		{
 			name: "ngpus resource",
@@ -425,14 +426,14 @@ func TestPbsResourceParsing(t *testing.T) {
 			wantGpu:         &GpuSpec{Type: "gpu", Count: 2, Raw: "ngpus=2"},
 		},
 		{
-			name: "gpus with type on separate line",
+			// #PBS -l gpus=... is old Torque syntax; PBS Pro requires ngpus= inside select=.
+			name: "gpus standalone -l is old Torque syntax: passthrough",
 			lines: []string{
 				"#!/bin/bash",
 				"#PBS -l select=1:ncpus=4",
 				"#PBS -l gpus=a100:2",
 			},
-			wantCpusPerTask: 4,
-			wantGpu:         &GpuSpec{Type: "a100", Count: 2, Raw: "a100:2"},
+			wantPassthrough: true,
 		},
 		{
 			name: "multiple resource lines",
@@ -484,6 +485,13 @@ func TestPbsResourceParsing(t *testing.T) {
 			specs, err := pbs.ReadScriptSpecs(scriptPath)
 			if err != nil {
 				t.Fatalf("Failed to parse script: %v", err)
+			}
+
+			if tt.wantPassthrough {
+				if specs.Spec != nil {
+					t.Errorf("Spec = %+v; want nil (passthrough)", specs.Spec)
+				}
+				return
 			}
 
 			if specs.Spec == nil {
@@ -726,6 +734,7 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 		wantNodes        int
 		wantTasksPerNode int
 		wantCpusPerTask  int
+		wantPassthrough  bool
 	}{
 		{
 			name: "select with mpiprocs",
@@ -735,7 +744,7 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 			},
 			wantNodes:        4,
 			wantTasksPerNode: 2,
-			wantCpusPerTask:  8,
+			wantCpusPerTask:  4, // ncpus(8) / mpiprocs(2) = 4 threads per task
 		},
 		{
 			name: "select without mpiprocs",
@@ -753,9 +762,7 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l nodes=3:ppn=8",
 			},
-			wantNodes:        3,
-			wantTasksPerNode: 1, // default, nodes= doesn't set tasksPerNode
-			wantCpusPerTask:  8,
+			wantPassthrough: true,
 		},
 		{
 			name: "select=1 single node",
@@ -774,8 +781,8 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 				"#PBS -N testjob",
 			},
 			wantNodes:        1,
-			wantTasksPerNode: 1,
-			wantCpusPerTask:  2, // default
+			wantTasksPerNode: 0,
+			wantCpusPerTask:  1, // default
 		},
 		{
 			name: "select with mpiprocs and ngpus",
@@ -785,7 +792,15 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 			},
 			wantNodes:        2,
 			wantTasksPerNode: 4,
-			wantCpusPerTask:  16,
+			wantCpusPerTask:  4, // ncpus(16) / mpiprocs(4) = 4 threads per task
+		},
+		{
+			name: "ncpus not divisible by mpiprocs: passthrough",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l select=4:ncpus=7:mpiprocs=2:mem=8gb",
+			},
+			wantPassthrough: true, // 7 % 2 != 0 → passthrough
 		},
 	}
 
@@ -804,6 +819,13 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
+			if tt.wantPassthrough {
+				if specs.Spec != nil {
+					t.Errorf("Spec = %+v; want nil (passthrough)", specs.Spec)
+				}
+				return
+			}
+
 			if specs.Spec == nil {
 				t.Fatal("Spec is nil; want non-nil")
 			}
@@ -816,6 +838,138 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 			}
 			if specs.Spec.CpusPerTask != tt.wantCpusPerTask {
 				t.Errorf("CpusPerTask = %d; want %d", specs.Spec.CpusPerTask, tt.wantCpusPerTask)
+			}
+		})
+	}
+}
+
+func TestPbsMultiChunkParsing(t *testing.T) {
+	tests := []struct {
+		name            string
+		lines           []string
+		wantCpusPerTask int
+		wantMemPerCpuMB int64
+		wantPassthrough bool
+		wantOriginalL   bool // original -l select=...+... must be in RemainingFlags
+	}{
+		{
+			name: "uniform mpiprocs uniform mem",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l select=2:ncpus=8:mpiprocs=2:mem=16gb+2:ncpus=8:mpiprocs=2:mem=16gb",
+			},
+			// CpusPerTask: 8/2 = 4; MemPerCpuMB: 16*1024/8 = 2048
+			wantCpusPerTask: 4,
+			wantMemPerCpuMB: 2048,
+			wantOriginalL:   true,
+		},
+		{
+			name: "uniform mpiprocs no mem",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l select=2:ncpus=8:mpiprocs=2+2:ncpus=8:mpiprocs=2",
+			},
+			wantCpusPerTask: 4,
+			wantOriginalL:   true,
+		},
+		{
+			name: "non-uniform mpiprocs same CpusPerTask no mem",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l select=2:ncpus=4:mpiprocs=2+1:ncpus=8:mpiprocs=4",
+			},
+			// CpusPerTask: 4/2=2 and 8/4=2 (uniform); mpiprocs differ but CPT matches
+			wantCpusPerTask: 2,
+			wantOriginalL:   true,
+		},
+		{
+			name: "non-uniform mem per cpu: passthrough",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l select=2:ncpus=8:mpiprocs=2:mem=16gb+2:ncpus=8:mpiprocs=2:mem=32gb",
+			},
+			// MemPerCpu: 16*1024/8=2048 vs 32*1024/8=4096 → non-uniform → passthrough
+			wantPassthrough: true,
+		},
+		{
+			name: "non-uniform CpusPerTask: passthrough",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l select=1:ncpus=8:mpiprocs=2+1:ncpus=2:mpiprocs=1",
+			},
+			// CpusPerTask: 8/2=4 vs 2/1=2 (non-uniform) → hard passthrough
+			wantPassthrough: true,
+		},
+		{
+			name: "GPU in multi-chunk: passthrough",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l select=1:ncpus=4:ngpus=2+1:ncpus=4:ngpus=2",
+			},
+			// ngpus= inside multi-chunk select is not supported → hard passthrough
+			wantPassthrough: true,
+		},
+		{
+			name: "three-chunk uniform",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l select=1:ncpus=8:mpiprocs=2+2:ncpus=8:mpiprocs=2+1:ncpus=8:mpiprocs=2",
+			},
+			wantCpusPerTask: 4,
+			wantOriginalL:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			scriptPath := filepath.Join(tmpDir, "test.sh")
+			content := strings.Join(tt.lines, "\n")
+			if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
+				t.Fatalf("Failed to create test script: %v", err)
+			}
+
+			pbs := newTestPbsScheduler()
+			specs, err := pbs.ReadScriptSpecs(scriptPath)
+			if err != nil {
+				t.Fatalf("Failed to parse script: %v", err)
+			}
+
+			if tt.wantPassthrough {
+				if specs.Spec != nil {
+					t.Errorf("Spec = %+v; want nil (passthrough)", specs.Spec)
+				}
+				return
+			}
+
+			if specs.Spec == nil {
+				t.Fatal("Spec is nil; want non-nil")
+			}
+
+			if specs.Spec.CpusPerTask != tt.wantCpusPerTask {
+				t.Errorf("CpusPerTask = %d; want %d", specs.Spec.CpusPerTask, tt.wantCpusPerTask)
+			}
+			if specs.Spec.MemPerCpuMB != tt.wantMemPerCpuMB {
+				t.Errorf("MemPerCpuMB = %d; want %d", specs.Spec.MemPerCpuMB, tt.wantMemPerCpuMB)
+			}
+			// Multi-chunk: Nodes and TasksPerNode must be 0 (node count lives in RemainingFlags)
+			if specs.Spec.Nodes != 0 {
+				t.Errorf("Nodes = %d; want 0 (node count preserved in RemainingFlags for multi-chunk)", specs.Spec.Nodes)
+			}
+			if specs.Spec.TasksPerNode != 0 {
+				t.Errorf("TasksPerNode = %d; want 0 (multi-chunk)", specs.Spec.TasksPerNode)
+			}
+			if tt.wantOriginalL {
+				found := false
+				for _, f := range specs.RemainingFlags {
+					if strings.HasPrefix(f, "-l select=") && strings.Contains(f, "+") {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("original multi-chunk -l select= not in RemainingFlags; got %v", specs.RemainingFlags)
+				}
 			}
 		})
 	}
@@ -863,9 +1017,16 @@ func TestPbsGetJobResources(t *testing.T) {
 		if res.Nodes != 4 {
 			t.Errorf("Nodes = %d; want 4", res.Nodes)
 		}
+		if res.Ntasks != 16 {
+			t.Errorf("Ntasks = %d; want 16", res.Ntasks)
+		}
 		// TasksPerNode = PBS_NP / PBS_NUM_NODES = 16 / 4 = 4
 		if res.TasksPerNode != 4 {
 			t.Errorf("TasksPerNode = %d; want 4 (derived from PBS_NP/PBS_NUM_NODES)", res.TasksPerNode)
+		}
+		// CpusPerTask = PBS_NCPUS / TasksPerNode = 8 / 4 = 2
+		if res.CpusPerTask != 2 {
+			t.Errorf("CpusPerTask = %d; want 2 (PBS_NCPUS/TasksPerNode)", res.CpusPerTask)
 		}
 	})
 
@@ -878,6 +1039,9 @@ func TestPbsGetJobResources(t *testing.T) {
 		res := sched.GetJobResources()
 		if res == nil {
 			t.Fatal("expected non-nil")
+		}
+		if res.Ntasks != 8 {
+			t.Errorf("Ntasks = %d; want 8", res.Ntasks)
 		}
 		// TasksPerNode = PBS_TASKNUM / PBS_NUM_NODES = 8 / 2 = 4
 		if res.TasksPerNode != 4 {
@@ -950,4 +1114,176 @@ func TestPbsGetJobResources(t *testing.T) {
 			t.Errorf("MemPerNodeMB should be 0 for negative value, got %d", res.MemPerNodeMB)
 		}
 	})
+}
+
+// TestPbsOldStyleResourcePassthrough verifies that Torque-era standalone -l
+// resource directives (ncpus=, mem=, ngpus=, gpus=) are rejected and trigger
+// full passthrough (Spec == nil), consistent with how nodes= is handled.
+func TestPbsOldStyleResourcePassthrough(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+	}{
+		{
+			name: "standalone ncpus",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l ncpus=8",
+			},
+		},
+		{
+			name: "standalone mem",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l mem=16gb",
+			},
+		},
+		{
+			name: "standalone ngpus",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l ngpus=2",
+			},
+		},
+		{
+			name: "standalone gpus",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l gpus=a100:2",
+			},
+		},
+		{
+			name: "mixed: valid select then old-style mem",
+			lines: []string{
+				"#!/bin/bash",
+				"#PBS -l select=1:ncpus=4",
+				"#PBS -l mem=8gb",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			scriptPath := filepath.Join(tmpDir, "test.sh")
+			content := strings.Join(tt.lines, "\n")
+			if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
+				t.Fatalf("Failed to create test script: %v", err)
+			}
+
+			pbs := newTestPbsScheduler()
+			specs, err := pbs.ReadScriptSpecs(scriptPath)
+			if err != nil {
+				t.Fatalf("ReadScriptSpecs failed: %v", err)
+			}
+			if specs.Spec != nil {
+				t.Errorf("Spec = %+v; want nil (expected passthrough for old Torque syntax)", specs.Spec)
+			}
+		})
+	}
+}
+
+// TestPbsNonUniformMpiScriptGen tests CreateScriptWithSpec for non-uniform MPI distributions
+// where Ntasks % Nodes != 0. The scheduler should emit two select= chunks.
+func TestPbsNonUniformMpiScriptGen(t *testing.T) {
+	tests := []struct {
+		name       string
+		spec       *ResourceSpec
+		wantSelect string // expected substring in #PBS -l line
+		wantErr    bool
+	}{
+		{
+			name: "non-uniform with MemPerNodeMB: two chunks same mem",
+			spec: &ResourceSpec{
+				Nodes:        4,
+				Ntasks:       14,
+				CpusPerTask:  2,
+				MemPerNodeMB: 16384,
+			},
+			// ceil(14/4)=4 → nFull=3, rem=2, remNodes=1
+			// chunk1: 3:ncpus=8:mpiprocs=4:mem=16384mb
+			// chunk2: 1:ncpus=4:mpiprocs=2:mem=16384mb
+			wantSelect: "select=3:ncpus=8:mpiprocs=4:mem=16384mb+1:ncpus=4:mpiprocs=2:mem=16384mb",
+		},
+		{
+			name: "non-uniform with MemPerCpuMB: derived mem differs per chunk",
+			spec: &ResourceSpec{
+				Nodes:       4,
+				Ntasks:      14,
+				CpusPerTask: 2,
+				MemPerCpuMB: 2048,
+			},
+			// full chunk: mem=2048*8=16384mb; remainder: mem=2048*4=8192mb
+			wantSelect: "select=3:ncpus=8:mpiprocs=4:mem=16384mb+1:ncpus=4:mpiprocs=2:mem=8192mb",
+		},
+		{
+			name: "non-uniform no mem: two chunks without mem",
+			spec: &ResourceSpec{
+				Nodes:       4,
+				Ntasks:      14,
+				CpusPerTask: 2,
+			},
+			wantSelect: "select=3:ncpus=8:mpiprocs=4+1:ncpus=4:mpiprocs=2",
+		},
+		{
+			name: "uniform Ntasks divisible by Nodes: single chunk (inferred tasksPerNode)",
+			spec: &ResourceSpec{
+				Nodes:        4,
+				Ntasks:       12,
+				CpusPerTask:  2,
+				MemPerNodeMB: 8192,
+			},
+			// 12%4==0 → tasksPerNode=3 inferred
+			// single chunk: select=4:ncpus=6:mpiprocs=3:mem=8192mb
+			wantSelect: "select=4:ncpus=6:mpiprocs=3:mem=8192mb",
+		},
+		{
+			name: "GPU with non-uniform Ntasks: error",
+			spec: &ResourceSpec{
+				Nodes:       4,
+				Ntasks:      14,
+				CpusPerTask: 2,
+				Gpu:         &GpuSpec{Type: "gpu", Count: 1},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			pbs := newTestPbsScheduler()
+
+			jobSpec := &JobSpec{
+				Name:    "mpi_job",
+				Command: "mpirun ./app",
+				Specs: &ScriptSpecs{
+					Spec:           tt.spec,
+					RemainingFlags: []string{},
+				},
+				Metadata: map[string]string{},
+			}
+
+			scriptPath, err := pbs.CreateScriptWithSpec(jobSpec, tmpDir)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("CreateScriptWithSpec succeeded; want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CreateScriptWithSpec failed: %v", err)
+			}
+
+			content, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatalf("Failed to read generated script: %v", err)
+			}
+			scriptContent := string(content)
+
+			if !strings.Contains(scriptContent, tt.wantSelect) {
+				t.Errorf("Script missing expected select directive:\n  want: %q\n  script:\n%s", tt.wantSelect, scriptContent)
+			}
+		})
+	}
 }

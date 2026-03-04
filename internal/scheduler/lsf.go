@@ -176,7 +176,22 @@ func (l *LsfScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 	return rc, remaining, nil
 }
 
-// parseResourceSpec consumes resource fields from the directive list.
+// lsfSpanInfo accumulates span[...], affinity[cores(...)] and per-slot memory info from -R.
+// rawMLimitPerSlotMB is parsed from -M (memory limit/ulimit) and used only as a fallback
+// for MemPerNodeMB when no rusage[mem=X] is present. -M itself passes through to RemainingFlags.
+type lsfSpanInfo struct {
+	singleNode         bool  // span[hosts=1]
+	ptile              int   // span[ptile=M], 0 = not set
+	cores              int   // affinity[cores(T)], 0 = not set
+	rawMemPerSlotMB    int64 // rusage[mem=X] converted to MB, 0 = not set (priority)
+	rawMLimitPerSlotMB int64 // -M X converted to MB, 0 = not set (fallback only)
+}
+
+// lsfAffinityRe matches affinity[cores(N)] in an LSF -R resource string.
+var lsfAffinityRe = regexp.MustCompile(`affinity\[cores\((\d+)\)\]`)
+
+// parseResourceSpec consumes resource fields from the directive list using a two-pass
+// approach so that -n semantics can be resolved after all -R span/affinity info is known.
 // Returns nil + all directives on any parse failure (passthrough mode).
 func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []string) {
 	defaults := GetSpecDefaults()
@@ -188,15 +203,23 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 		Time:         defaults.Time,
 	}
 	remaining := make([]string, 0)
+
+	// Pass 1: collect all directives; defer -n interpretation until span context is known.
+	var rawN int
+	var hasN bool
+	var span lsfSpanInfo
+
 	for _, flag := range directives {
 		recognized := true
 		var parseErr error
 
 		switch {
 		case flagMatches(flag, "-n"):
-			_, parseErr = flagScanInt(flag, &rs.CpusPerTask, "-n")
+			_, parseErr = flagScanInt(flag, &rawN, "-n")
+			hasN = true
 		case flagMatches(flag, "-M"):
-			_, parseErr = flagScan(flag, &rs.MemPerNodeMB, parseLsfMemory, "-M")
+			_, parseErr = flagScan(flag, &span.rawMLimitPerSlotMB, parseLsfMemory, "-M")
+			recognized = false // -M is a limit (ulimit), not allocation; re-emit unchanged
 		case flagMatches(flag, "-W"):
 			_, parseErr = flagScan(flag, &rs.Time, utils.ParseHMSTime, "-W")
 		case flagMatches(flag, "-gpu"):
@@ -208,7 +231,7 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 		case flagMatches(flag, "-R"):
 			resStr, _ := flagValue(flag, "-R")
 			resStr = strings.Trim(resStr, "\"'")
-			parseErr = l.parseLsfResourceIntoSpec(resStr, rs)
+			parseErr = l.parseLsfResourceIntoSpec(resStr, rs, &span)
 		case flag == "-x":
 			rs.Exclusive = true
 		default:
@@ -223,14 +246,96 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 			remaining = append(remaining, flag)
 		}
 	}
+
+	// Pass 2: resolve -n meaning based on span context, then resolve per-slot memory.
+	if hasN {
+		switch {
+		case span.singleNode:
+			rs.Nodes = 1
+			if span.cores > 0 {
+				// Hybrid single-node: -n is number of processes; affinity[cores(T)] is CPUs per process.
+				// slot = one process = T cores; -n M → M processes × T cores on one node.
+				rs.Ntasks = rawN
+				rs.TasksPerNode = rawN
+				rs.CpusPerTask = span.cores
+			} else {
+				// OpenMP single-node: slot = one core; -n N means N CPU slots (cores).
+				// 1 process uses all N cores; rusage[mem=X] is X per core (per slot).
+				rs.Ntasks = 1
+				rs.TasksPerNode = 1
+				rs.CpusPerTask = rawN
+			}
+		case span.ptile > 0:
+			// MPI (±OpenMP): -n is total tasks; ptile is tasks per node.
+			// Even distribution is required; passthrough if non-divisible.
+			if rawN%span.ptile != 0 {
+				logParseWarning("LSF: -n %d not evenly divisible by span[ptile=%d]; using passthrough", rawN, span.ptile)
+				return nil, directives
+			}
+			rs.Ntasks = rawN
+			rs.TasksPerNode = span.ptile
+			rs.Nodes = rawN / span.ptile
+			if span.cores > 0 {
+				rs.CpusPerTask = span.cores // MPI+OpenMP: affinity sets thread count
+			} else {
+				rs.CpusPerTask = 1 // pure MPI: single-threaded tasks
+			}
+		default:
+			// No span: -n is total tasks, free distribution (no ptile constraint).
+			// Nodes=0 and TasksPerNode=0 signal "unspecified" — generation omits span.
+			// affinity[cores(T)] without ptile → hybrid free-dist; otherwise pure MPI.
+			rs.Nodes = 0
+			rs.Ntasks = rawN
+			rs.TasksPerNode = 0
+			if span.cores > 0 {
+				rs.CpusPerTask = span.cores // affinity[cores(T)] without ptile → hybrid
+			} else {
+				rs.CpusPerTask = 1 // pure MPI
+			}
+		}
+	}
+	// Resolve memory: both rusage[mem=X] and -M are per-slot (per-task in LSF).
+	// rusage[mem] takes priority over -M.
+	// rusage[mem=N] bare numbers are MB (LSF docs); -M bare numbers are KB (LSF convention).
+	// Both respect LSF_UNIT_FOR_LIMITS when set.
+	// Slot semantics depend on affinity:
+	//   span[hosts=1] no affinity : slot = 1 core  → MemPerCpuMB = X
+	//   span[hosts=1] affinity[T] : slot = T cores → MemPerCpuMB = X/T
+	//   span[ptile=M]             : slot = 1 task  → MemPerCpuMB = X/1 (pure MPI)
+	//                                                MemPerCpuMB = X/T (hybrid, affinity[T])
+	//   no span (free-dist)       : slot = 1 task  → same as ptile
+	// When -n is absent: treat memory value as per-node directly.
+	cpt := span.cores
+	if cpt <= 0 {
+		cpt = 1
+	}
+	if hasN {
+		if span.rawMemPerSlotMB > 0 {
+			rs.MemPerCpuMB = span.rawMemPerSlotMB / int64(cpt)
+			rs.MemPerNodeMB = 0 // clear default so GetMemPerNodeMB() derives correctly
+		} else if span.rawMLimitPerSlotMB > 0 {
+			rs.MemPerCpuMB = span.rawMLimitPerSlotMB / int64(cpt)
+			rs.MemPerNodeMB = 0 // clear default so GetMemPerNodeMB() derives correctly
+		}
+	} else {
+		// No -n: can't determine slot count; treat memory value as per-node directly.
+		if span.rawMemPerSlotMB > 0 {
+			rs.MemPerNodeMB = span.rawMemPerSlotMB
+		} else if span.rawMLimitPerSlotMB > 0 {
+			rs.MemPerNodeMB = span.rawMLimitPerSlotMB
+		}
+	}
+
 	return rs, remaining
 }
 
-// parseLsfResourceIntoSpec parses LSF -R resource requirement strings into a ResourceSpec.
-// Supports: rusage[mem=N], rusage[ngpus_physical=N], span[hosts=N], etc.
+// parseLsfResourceIntoSpec parses LSF -R resource requirement strings into a ResourceSpec
+// and accumulates span/affinity info in span.
+// Supports: rusage[mem=N], rusage[ngpus_physical=N], span[hosts=1], span[ptile=M],
+// affinity[cores(T)].
 // Returns an error if a known key has an invalid value.
-func (l *LsfScheduler) parseLsfResourceIntoSpec(resStr string, rs *ResourceSpec) error {
-	// Look for span[hosts=N] block
+func (l *LsfScheduler) parseLsfResourceIntoSpec(resStr string, rs *ResourceSpec, span *lsfSpanInfo) error {
+	// Look for span[...] block
 	spanIdx := strings.Index(resStr, "span[")
 	if spanIdx >= 0 {
 		start := spanIdx + len("span[")
@@ -242,18 +347,38 @@ func (l *LsfScheduler) parseLsfResourceIntoSpec(resStr string, rs *ResourceSpec)
 			})
 			for _, pair := range pairs {
 				kv := strings.SplitN(pair, "=", 2)
-				if len(kv) == 2 {
-					key := strings.TrimSpace(kv[0])
-					value := strings.TrimSpace(kv[1])
-					if key == "hosts" {
-						n, err := strconv.Atoi(value)
-						if err != nil {
-							return fmt.Errorf("invalid span[hosts=] value %q: %w", value, err)
-						}
-						rs.Nodes = n
+				if len(kv) != 2 {
+					continue
+				}
+				key := strings.TrimSpace(kv[0])
+				value := strings.TrimSpace(kv[1])
+				switch key {
+				case "hosts":
+					n, err := strconv.Atoi(value)
+					if err != nil {
+						return fmt.Errorf("invalid span[hosts=] value %q: %w", value, err)
 					}
+					if n == 1 {
+						span.singleNode = true
+					} else {
+						logParseWarning("LSF: span[hosts=%d] > 1 is not supported; ignoring (use span[ptile=M] for multi-node)", n)
+					}
+				case "ptile":
+					n, err := strconv.Atoi(value)
+					if err != nil {
+						return fmt.Errorf("invalid span[ptile=] value %q: %w", value, err)
+					}
+					span.ptile = n
 				}
 			}
+		}
+	}
+
+	// Look for affinity[cores(N)] block
+	if m := lsfAffinityRe.FindStringSubmatch(resStr); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err == nil {
+			span.cores = n
 		}
 	}
 
@@ -288,11 +413,12 @@ func (l *LsfScheduler) parseLsfResourceIntoSpec(resStr string, rs *ResourceSpec)
 
 		switch key {
 		case "mem":
-			mem, err := parseLsfMemory(value)
+			// rusage[mem=N] defaults to MB per LSF docs; LSF_UNIT_FOR_LIMITS overrides.
+			mem, err := parseLsfMemoryWithUnits(value)
 			if err != nil {
 				return fmt.Errorf("invalid rusage[mem=] value %q: %w", value, err)
 			}
-			rs.MemPerNodeMB = mem
+			span.rawMemPerSlotMB = mem // per-slot; resolved to per-cpu in Pass 2
 		case "ngpus_physical", "ngpus":
 			count, err := strconv.Atoi(value)
 			if err != nil {
@@ -349,15 +475,8 @@ func parseLsfGpuDirective(gpuStr string) *GpuSpec {
 func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) (string, error) {
 	specs := jobSpec.Specs
 
-	// Normalize node/task defaults when spec is available
-	if specs.Spec != nil {
-		if specs.Spec.Nodes <= 0 {
-			specs.Spec.Nodes = 1
-		}
-		if specs.Spec.TasksPerNode <= 0 {
-			specs.Spec.TasksPerNode = 1
-		}
-	}
+	// No TasksPerNode normalization: TasksPerNode=0 means "freely distributed" and
+	// routes to the no-span MPI path in generation. span[ptile=0] is never emitted.
 
 	// Create output directory if specified
 	if outputDir != "" {
@@ -444,21 +563,84 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	// Resource directives — only when Spec is available
 	if specs.Spec != nil {
-		if specs.Spec.CpusPerTask > 0 {
-			fmt.Fprintf(writer, "#BSUB -n %d\n", specs.Spec.CpusPerTask)
-		}
-		fmt.Fprintf(writer, "#BSUB -R \"span[hosts=%d]\"\n", specs.Spec.Nodes)
-		if specs.Spec.Gpu != nil && specs.Spec.Gpu.Count > 0 {
-			if specs.Spec.Gpu.Type != "" && specs.Spec.Gpu.Type != "gpu" {
-				fmt.Fprintf(writer, "#BSUB -gpu \"num=%d:gmodel=%s\"\n", specs.Spec.Gpu.Count, specs.Spec.Gpu.Type)
+		rs := specs.Spec
+
+		// rusage[mem=X] is the per-slot memory allocation request in LSF.
+		// Ceiling-divide per-node MB by slotsPerNode to get per-slot MB.
+		// MPI jobs: slot = one task (slotsPerNode = TasksPerNode).
+		// OpenMP / single-node / no-span: slot = one CPU (slotsPerNode = CpusPerTask).
+		// isMPI = GetNtasks() > 1 (uses Ntasks if set, else Nodes×TasksPerNode, min 1).
+		// Three generation paths:
+		//   !isMPI                     → OpenMP: span[hosts=1]
+		//   isMPI && TasksPerNode > 0  → MPI/Hybrid with known ptile: span[ptile=M]
+		//   isMPI && TasksPerNode == 0 → free distribution: no span, just -n Ntasks
+		isMPI := rs.IsMPI()
+		memStr := ""
+		if rs.MemPerCpuMB > 0 {
+			// Inverse of parse: rusage_mem (per-slot) = MemPerCpuMB × affinity_cores.
+			// Hybrid uses affinity[cores(CpusPerTask)]; all other cases affinity_cores = 1.
+			cpuPerSlot := 1
+			if isMPI && rs.CpusPerTask > 1 {
+				cpuPerSlot = rs.CpusPerTask
+			}
+			memStr = fmt.Sprintf(" rusage[mem=%dMB]", rs.MemPerCpuMB*int64(cpuPerSlot))
+		} else if rs.MemPerNodeMB > 0 {
+			// Per-node → per-slot: divide by slotsPerNode.
+			// When TasksPerNode is unknown (0), fall back to slotsPerNode=1.
+			slotsPerNode := 1
+			if isMPI {
+				if rs.TasksPerNode > 0 {
+					slotsPerNode = rs.TasksPerNode
+				}
 			} else {
-				fmt.Fprintf(writer, "#BSUB -gpu \"num=%d\"\n", specs.Spec.Gpu.Count)
+				if rs.CpusPerTask > 0 {
+					slotsPerNode = rs.CpusPerTask
+				}
+			}
+			memPerSlotMB := (rs.MemPerNodeMB + int64(slotsPerNode) - 1) / int64(slotsPerNode)
+			memStr = fmt.Sprintf(" rusage[mem=%dMB]", memPerSlotMB)
+		}
+
+		switch {
+		case !isMPI:
+			// OpenMP / single-node: -n = total CPUs; span[hosts=1]
+			if rs.CpusPerTask > 0 {
+				fmt.Fprintf(writer, "#BSUB -n %d\n", rs.CpusPerTask)
+			}
+			fmt.Fprintf(writer, "#BSUB -R \"span[hosts=1]%s\"\n", memStr)
+		case rs.TasksPerNode > 0:
+			// MPI/Hybrid with known tasks-per-node: span[ptile=M]
+			fmt.Fprintf(writer, "#BSUB -n %d\n", rs.GetNtasks())
+			if rs.CpusPerTask > 1 {
+				fmt.Fprintf(writer, "#BSUB -R \"span[ptile=%d] affinity[cores(%d)]%s\"\n",
+					rs.TasksPerNode, rs.CpusPerTask, memStr)
+			} else {
+				fmt.Fprintf(writer, "#BSUB -R \"span[ptile=%d]%s\"\n", rs.TasksPerNode, memStr)
+			}
+		default:
+			// MPI/Hybrid, free distribution: no span[ptile=], LSF distributes freely.
+			fmt.Fprintf(writer, "#BSUB -n %d\n", rs.GetNtasks())
+			rStr := ""
+			if rs.CpusPerTask > 1 {
+				rStr = fmt.Sprintf("affinity[cores(%d)]%s", rs.CpusPerTask, memStr)
+			} else {
+				rStr = strings.TrimSpace(memStr)
+			}
+			if rStr != "" {
+				fmt.Fprintf(writer, "#BSUB -R \"%s\"\n", rStr)
 			}
 		}
-		if specs.Spec.Time > 0 {
-			fmt.Fprintf(writer, "#BSUB -W %s\n", formatLsfTime(specs.Spec.Time))
+		if rs.Gpu != nil && rs.Gpu.Count > 0 {
+			if rs.Gpu.Type != "" && rs.Gpu.Type != "gpu" {
+				fmt.Fprintf(writer, "#BSUB -gpu \"num=%d:gmodel=%s\"\n", rs.Gpu.Count, rs.Gpu.Type)
+			} else {
+				fmt.Fprintf(writer, "#BSUB -gpu \"num=%d\"\n", rs.Gpu.Count)
+			}
 		}
-		if specs.Spec.Exclusive {
+		if rs.Time > 0 {
+			fmt.Fprintf(writer, "#BSUB -W %s\n", formatLsfTime(rs.Time))
+		}
+		if rs.Exclusive {
 			fmt.Fprintln(writer, "#BSUB -x")
 		}
 	}
@@ -1055,6 +1237,44 @@ func parseLsfMemoryToMB(memStr string) (int64, error) {
 	return parseMemoryMB(memStr)
 }
 
+// parseLsfMemoryWithUnits parses an LSF rusage[mem=] or select[mem=] value to MB.
+// Per LSF docs, bare numbers in rusage[] and select[] default to MB.
+// LSF_UNIT_FOR_LIMITS overrides the default when set.
+func parseLsfMemoryWithUnits(memStr string) (int64, error) {
+	memStr = strings.TrimSpace(memStr)
+	if memStr == "" {
+		return 0, fmt.Errorf("empty memory string")
+	}
+	defaultUnit := strings.ToUpper(strings.TrimSpace(os.Getenv("LSF_UNIT_FOR_LIMITS")))
+	if defaultUnit == "" {
+		defaultUnit = "MB" // rusage[mem=] and select[mem=] default to MB per LSF docs
+	}
+	result, err := utils.ParseMemoryMBWithDefault(memStr, defaultUnit)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %s", ErrInvalidMemoryFormat, memStr)
+	}
+	return result, nil
+}
+
+// parseLsfMemory parses an LSF -M (hard memory limit/ulimit) value to MB.
+// Per LSF convention, bare numbers for -M default to KB.
+// LSF_UNIT_FOR_LIMITS overrides the default when set.
+func parseLsfMemory(memStr string) (int64, error) {
+	memStr = strings.TrimSpace(memStr)
+	if memStr == "" {
+		return 0, fmt.Errorf("empty memory string")
+	}
+	defaultUnit := strings.ToUpper(strings.TrimSpace(os.Getenv("LSF_UNIT_FOR_LIMITS")))
+	if defaultUnit == "" {
+		defaultUnit = "KB" // -M defaults to KB per LSF convention
+	}
+	result, err := utils.ParseMemoryMBWithDefault(memStr, defaultUnit)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %s", ErrInvalidMemoryFormat, memStr)
+	}
+	return result, nil
+}
+
 // formatLsfTime formats a duration as LSF walltime (HH:MM)
 func formatLsfTime(d time.Duration) string {
 	if d <= 0 {
@@ -1066,62 +1286,66 @@ func formatLsfTime(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d", hours, minutes)
 }
 
-// parseLsfMemory parses LSF memory specification and returns MB
-// LSF -M flag uses KB by default, but can have suffixes
-func parseLsfMemory(memStr string) (int64, error) {
-	memStr = strings.TrimSpace(memStr)
-	if memStr == "" {
-		return 0, fmt.Errorf("empty memory string")
-	}
-
-	// Try to parse as plain number (KB by default in LSF)
-	if value, err := strconv.ParseInt(memStr, 10, 64); err == nil {
-		return value / 1024, nil // Convert KB to MB
-	}
-
-	// Try with unit suffix
-	memUpper := strings.ToUpper(memStr)
-	var value int64
-	var unit string
-
-	n, err := fmt.Sscanf(memUpper, "%d%s", &value, &unit)
-	if err != nil && n == 0 {
-		return 0, fmt.Errorf("%w: %s", ErrInvalidMemoryFormat, memStr)
-	}
-
-	switch unit {
-	case "G", "GB":
-		return value * 1024, nil
-	case "M", "MB":
-		return value, nil
-	case "K", "KB", "":
-		return value / 1024, nil
-	case "T", "TB":
-		return value * 1024 * 1024, nil
-	default:
-		return value / 1024, nil // Default to KB
-	}
-}
-
-// GetJobResources reads allocated resources from LSF environment variables.
-// Fields with value 0 were not exposed by LSF. Nodes and TasksPerNode are not
-// available from LSF env vars.
+// GetJobResources reads allocated resources from LSF environment variables and
+//
+// LSF does not expose Nodes or TasksPerNode natively, so geometry is read from
+// our injected NNODES / NTASKS_PER_NODE / NCPUS_PER_TASK / NTASKS vars first.
+//
+// LSB_DJOB_NUMPROC / LSB_MAX_NUM_PROCESSORS is the total number of allocated
+// slots (= Ntasks × CpusPerTask). It is used as a Ntasks fallback when our
+// injected NTASKS is absent; CpusPerTask (from NCPUS_PER_TASK) is used to
+// split the slot count correctly.
+//
+// LSB_MAX_MEM_RUSAGE is per-slot (per-task) memory in KB → MemPerCpuMB.
 func (s *LsfScheduler) GetJobResources() *ResourceSpec {
 	if _, ok := os.LookupEnv("LSB_JOBID"); !ok {
 		return nil
 	}
 	res := &ResourceSpec{}
-	if v := getEnvInt("LSB_DJOB_NUMPROC"); v != nil {
-		res.CpusPerTask = *v
-	} else if v := getEnvInt("LSB_MAX_NUM_PROCESSORS"); v != nil {
+
+	// 1. Geometry from our normalized env vars (most reliable source).
+	if v := getEnvInt("NNODES"); v != nil {
+		res.Nodes = *v
+	}
+	if v := getEnvInt("NTASKS_PER_NODE"); v != nil {
+		res.TasksPerNode = *v
+	}
+	if v := getEnvInt("NCPUS_PER_TASK"); v != nil {
 		res.CpusPerTask = *v
 	}
-	// LSB_MAX_MEM_RUSAGE is in KB
-	if memKB := getEnvInt64("LSB_MAX_MEM_RUSAGE"); memKB != nil {
-		if mb := *memKB / 1024; mb > 0 {
-			res.MemPerNodeMB = mb
+	if v := getEnvInt("NTASKS"); v != nil {
+		res.Ntasks = *v
+	}
+
+	// 2. Total slots from LSF native vars; used only when NTASKS was not injected.
+	if res.Ntasks == 0 {
+		var totalSlots int
+		if v := getEnvInt("LSB_DJOB_NUMPROC"); v != nil {
+			totalSlots = *v
+		} else if v := getEnvInt("LSB_MAX_NUM_PROCESSORS"); v != nil {
+			totalSlots = *v
+		}
+		if totalSlots > 0 {
+			if res.CpusPerTask > 1 {
+				// Hybrid: total slots = Ntasks × CpusPerTask.
+				res.Ntasks = totalSlots / res.CpusPerTask
+			} else {
+				// Pure MPI or unknown: treat each slot as one task.
+				res.Ntasks = totalSlots
+				if res.CpusPerTask == 0 {
+					res.CpusPerTask = 1
+				}
+			}
 		}
 	}
+
+	// 3. Memory: LSB_MAX_MEM_RUSAGE is per-slot (per-task) in KB → MemPerCpuMB.
+	if memKB := getEnvInt64("LSB_MAX_MEM_RUSAGE"); memKB != nil {
+		if mb := *memKB / 1024; mb > 0 {
+			res.MemPerCpuMB = mb
+		}
+	}
+
 	if n := getCudaDeviceCount(); n != nil && *n > 0 {
 		res.Gpu = &GpuSpec{Count: *n}
 	}

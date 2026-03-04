@@ -31,11 +31,6 @@ var configKeys = []string{
 	"prebuilt_link",
 	"prefer_remote",
 	"extra_base_dirs",
-	"scheduler.nodes",
-	"scheduler.tasks_per_node",
-	"scheduler.ncpus_per_task",
-	"scheduler.mem_per_node_mb",
-	"scheduler.time",
 	"parse_module_load",
 	"build.ncpus",
 	"build.mem_mb",
@@ -87,15 +82,11 @@ func configValueCompletion(key string) []string {
 		return []string{"true", "false"}
 	case "default_distro":
 		return config.GetAvailableDistros()
-	case "scheduler.nodes":
-		return []string{"1", "2", "4", "8"}
-	case "scheduler.tasks_per_node":
-		return []string{"1", "2", "4", "8"}
-	case "scheduler.ncpus_per_task", "build.ncpus":
+	case "build.ncpus":
 		return []string{"4", "8", "16", "32"}
-	case "scheduler.mem_per_node_mb", "build.mem_mb":
+	case "build.mem_mb":
 		return []string{"4096", "8192", "16384", "32768"}
-	case "scheduler.time", "build.time":
+	case "build.time":
 		return []string{"1h", "2h", "4h", "8h"}
 	case "build.tmp_size_mb":
 		return []string{"10240", "20480", "40960"}
@@ -294,23 +285,6 @@ Shows:
 		fmt.Println()
 
 		// Scheduler default specs
-		fmt.Printf("%s %s\n", utils.StyleTitle("Scheduler Default Specs:"), "scheduler.*")
-		fmt.Printf("  nodes:           %d\n", viper.GetInt("scheduler.nodes"))
-		fmt.Printf("  tasks_per_node:  %d\n", viper.GetInt("scheduler.tasks_per_node"))
-		fmt.Printf("  ncpus_per_task:  %d\n", viper.GetInt("scheduler.ncpus_per_task"))
-		schedMemMB := viper.GetInt64("scheduler.mem_per_node_mb")
-		if schedMemMB > 0 {
-			fmt.Printf("  mem_per_node_mb: %d\n", schedMemMB)
-		} else {
-			fmt.Printf("  mem_per_node_mb: %s\n", utils.StyleInfo("not set"))
-		}
-		schedTime := viper.GetString("scheduler.time")
-		if schedTime != "" {
-			fmt.Printf("  time:            %s\n", schedTime)
-		} else {
-			fmt.Printf("  time:            %s\n", utils.StyleInfo("not set"))
-		}
-		fmt.Println()
 
 		// Build settings
 		fmt.Printf("%s %s\n", utils.StyleTitle("Build Configuration:"), "build.*")
@@ -363,7 +337,6 @@ var configGetCmd = &cobra.Command{
 	Short: "Get a configuration value",
 	Long:  `Get a specific configuration value.`,
 	Example: `  condatainer config get apptainer_bin
-  condatainer config get scheduler.ncpus_per_task
   condatainer config get build.ncpus
   condatainer config get submit_job`,
 	Args:              cobra.ExactArgs(1),
@@ -387,8 +360,6 @@ Time duration format (for build.time):
   Go style:  2h, 30m, 1h30m, 90s
   HPC style: 02:00:00, 2:30:00, 1:30 (HH:MM:SS or HH:MM)`,
 	Example: `  condatainer config set apptainer_bin /usr/bin/apptainer
-  condatainer config set scheduler.ncpus_per_task 8
-  condatainer config set scheduler.time 4h
   condatainer config set build.ncpus 8
   condatainer config set build.time 02:00:00
   condatainer config set submit_job false`,
@@ -400,27 +371,22 @@ Time duration format (for build.time):
 
 		// Validate known keys
 		knownKeys := map[string]bool{
-			"logs_dir":                  true,
-			"apptainer_bin":             true,
-			"scheduler_bin":             true,
-			"default_distro":            true,
-			"submit_job":                true,
-			"scripts_link":              true,
-			"prebuilt_link":             true,
-			"prefer_remote":             true,
-			"parse_module_load":         true,
-			"scheduler.nodes":           true,
-			"scheduler.tasks_per_node":  true,
-			"scheduler.ncpus_per_task":  true,
-			"scheduler.mem_per_node_mb": true,
-			"scheduler.time":            true,
-			"build.ncpus":               true,
-			"build.mem_mb":              true,
-			"build.time":                true,
-			"build.tmp_size_mb":         true,
-			"build.compress_args":       true,
-			"build.overlay_type":        true,
-			"extra_base_dirs":           true,
+			"logs_dir":            true,
+			"apptainer_bin":       true,
+			"scheduler_bin":       true,
+			"default_distro":      true,
+			"submit_job":          true,
+			"scripts_link":        true,
+			"prebuilt_link":       true,
+			"prefer_remote":       true,
+			"parse_module_load":   true,
+			"build.ncpus":         true,
+			"build.mem_mb":        true,
+			"build.time":          true,
+			"build.tmp_size_mb":   true,
+			"build.compress_args": true,
+			"build.overlay_type":  true,
+			"extra_base_dirs":     true,
 		}
 
 		// Validate default_distro against known distros
@@ -443,7 +409,7 @@ Time duration format (for build.time):
 		}
 
 		// Validate value based on key type
-		if key == "scheduler.time" || key == "build.time" {
+		if key == "build.time" {
 			if _, err := utils.ParseWalltime(value); err != nil {
 				utils.PrintError("Invalid duration format: %s", value)
 				utils.PrintHint("Use format like: 4d12h, 2h30m, 1:30, or 01:30:00")

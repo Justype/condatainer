@@ -33,7 +33,7 @@ func TestLsfCreateScriptUsesOutputDir(t *testing.T) {
 		Command: "echo 'hello'",
 		Specs: &ScriptSpecs{
 			RemainingFlags: []string{},
-			Spec:           &ResourceSpec{CpusPerTask: 1},
+			Spec:           &ResourceSpec{CpusPerTask: 1, Nodes: 1},
 		},
 	}
 
@@ -324,8 +324,12 @@ echo "Running job"
 	if specs.Spec.Time != 2*time.Hour {
 		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
 	}
-	if specs.Spec.CpusPerTask != 8 {
-		t.Errorf("CpusPerTask = %d; want 8", specs.Spec.CpusPerTask)
+	// No span: -n 8 → MPI free-dist (Ntasks=8, CpusPerTask=1)
+	if specs.Spec.Ntasks != 8 {
+		t.Errorf("Ntasks = %d; want 8 (MPI free-dist)", specs.Spec.Ntasks)
+	}
+	if specs.Spec.CpusPerTask != 1 {
+		t.Errorf("CpusPerTask = %d; want 1 (MPI free-dist)", specs.Spec.CpusPerTask)
 	}
 
 	// Generate a new script from the parsed specs
@@ -390,8 +394,9 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#BSUB -M 8192",
 				"#BSUB -W 01:30",
 			},
-			wantNcpus: 4,
-			wantMemMB: 8, // 8192 KB = 8 MB
+			// no-span: -n=4 → Ntasks=4 (MPI free-dist), CpusPerTask=1, MemPerCpuMB=8MB
+			wantNcpus: 1,
+			wantMemMB: 0, // per-node undetermined without TasksPerNode; MemPerCpuMB=8MB
 			wantTime:  time.Hour + 30*time.Minute,
 		},
 		{
@@ -400,7 +405,8 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#BSUB -n 16",
 			},
-			wantNcpus: 16,
+			// no-span: -n=16 → Ntasks=16 (MPI free-dist), CpusPerTask=1
+			wantNcpus: 1,
 		},
 		{
 			name: "walltime only",
@@ -408,7 +414,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#BSUB -W 04:00",
 			},
-			wantNcpus: 2, // default
+			wantNcpus: 1, // default
 			wantTime:  4 * time.Hour,
 		},
 		{
@@ -418,7 +424,8 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#BSUB -n 8",
 				`#BSUB -gpu "num=2:type=a100"`,
 			},
-			wantNcpus: 8,
+			// no-span: -n=8 → Ntasks=8 (MPI free-dist), CpusPerTask=1
+			wantNcpus: 1,
 			wantGpu:   &GpuSpec{Type: "a100", Count: 2},
 		},
 		{
@@ -427,7 +434,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				`#BSUB -gpu "num=4"`,
 			},
-			wantNcpus: 2, // default
+			wantNcpus: 1, // default
 			wantGpu:   &GpuSpec{Type: "gpu", Count: 4},
 		},
 		{
@@ -437,8 +444,9 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#BSUB -n 4",
 				`#BSUB -R "rusage[mem=4096]"`,
 			},
-			wantNcpus: 4,
-			wantMemMB: 4, // 4096 KB = 4 MB
+			// no-span: -n=4 → Ntasks=4 (MPI free-dist), CpusPerTask=1, MemPerCpuMB=4096MB
+			wantNcpus: 1,
+			wantMemMB: 0, // per-node undetermined without TasksPerNode; MemPerCpuMB=4096MB
 		},
 		{
 			name: "rusage ngpus_physical",
@@ -447,7 +455,8 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#BSUB -n 8",
 				`#BSUB -R "rusage[ngpus_physical=2]"`,
 			},
-			wantNcpus: 8,
+			// no-span: -n=8 → Ntasks=8 (MPI free-dist), CpusPerTask=1
+			wantNcpus: 1,
 			wantGpu:   &GpuSpec{Type: "gpu", Count: 2},
 		},
 		{
@@ -463,8 +472,9 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#BSUB -u user@example.com",
 				`#BSUB -gpu "num=4:type=v100"`,
 			},
-			wantNcpus: 32,
-			wantMemMB: 64, // 65536 KB = 64 MB
+			// no-span: -n=32 → Ntasks=32 (MPI free-dist), CpusPerTask=1, MemPerCpuMB=64MB
+			wantNcpus: 1,
+			wantMemMB: 0, // per-node undetermined without TasksPerNode; MemPerCpuMB=64MB
 			wantTime:  12 * time.Hour,
 			wantGpu:   &GpuSpec{Type: "v100", Count: 4},
 		},
@@ -474,7 +484,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#BSUB -M 4096MB",
 			},
-			wantNcpus: 2, // default
+			wantNcpus: 1, // default
 			wantMemMB: 4096,
 		},
 		{
@@ -483,7 +493,7 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#BSUB -M 8GB",
 			},
-			wantNcpus: 2, // default
+			wantNcpus: 1, // default
 			wantMemMB: 8 * 1024,
 		},
 	}
@@ -509,8 +519,8 @@ func TestLsfResourceParsing(t *testing.T) {
 			if specs.Spec.CpusPerTask != tt.wantNcpus {
 				t.Errorf("CpusPerTask = %d; want %d", specs.Spec.CpusPerTask, tt.wantNcpus)
 			}
-			if tt.wantMemMB > 0 && specs.Spec.MemPerNodeMB != tt.wantMemMB {
-				t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, tt.wantMemMB)
+			if tt.wantMemMB > 0 && specs.Spec.GetMemPerNodeMB() != tt.wantMemMB {
+				t.Errorf("GetMemPerNodeMB() = %d; want %d (MemPerCpuMB=%d MemPerNodeMB=%d)", specs.Spec.GetMemPerNodeMB(), tt.wantMemMB, specs.Spec.MemPerCpuMB, specs.Spec.MemPerNodeMB)
 			}
 			if tt.wantTime > 0 && specs.Spec.Time != tt.wantTime {
 				t.Errorf("Time = %v; want %v", specs.Spec.Time, tt.wantTime)
@@ -671,7 +681,7 @@ func TestLsfRusageParsing(t *testing.T) {
 				"#!/bin/bash",
 				`#BSUB -R "rusage[mem=8192,ngpus_physical=2]"`,
 			},
-			wantMemMB: 8,
+			wantMemMB: 8192, // 8192 MB (bare number in rusage[] defaults to MB per LSF docs)
 			wantGpu:   &GpuSpec{Type: "gpu", Count: 2},
 		},
 		{
@@ -680,7 +690,7 @@ func TestLsfRusageParsing(t *testing.T) {
 				"#!/bin/bash",
 				`#BSUB -R "rusage[mem=4096:ngpus_physical=1]"`,
 			},
-			wantMemMB: 4,
+			wantMemMB: 4096, // 4096 MB
 			wantGpu:   &GpuSpec{Type: "gpu", Count: 1},
 		},
 		{
@@ -689,7 +699,7 @@ func TestLsfRusageParsing(t *testing.T) {
 				"#!/bin/bash",
 				`#BSUB -R "span[hosts=1] rusage[mem=16384]"`,
 			},
-			wantMemMB: 16,
+			wantMemMB: 16384, // 16384 MB
 		},
 		{
 			name: "rusage ngpus shorthand",
@@ -719,8 +729,8 @@ func TestLsfRusageParsing(t *testing.T) {
 			if specs.Spec == nil {
 				t.Fatal("Spec is nil; want non-nil")
 			}
-			if tt.wantMemMB > 0 && specs.Spec.MemPerNodeMB != tt.wantMemMB {
-				t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, tt.wantMemMB)
+			if tt.wantMemMB > 0 && specs.Spec.GetMemPerNodeMB() != tt.wantMemMB {
+				t.Errorf("GetMemPerNodeMB() = %d; want %d (MemPerCpuMB=%d MemPerNodeMB=%d)", specs.Spec.GetMemPerNodeMB(), tt.wantMemMB, specs.Spec.MemPerCpuMB, specs.Spec.MemPerNodeMB)
 			}
 			if tt.wantGpu != nil {
 				if specs.Spec.Gpu == nil {
@@ -741,46 +751,118 @@ func TestLsfRusageParsing(t *testing.T) {
 
 func TestLsfSpanHostsParsing(t *testing.T) {
 	tests := []struct {
-		name      string
-		lines     []string
-		wantNodes int
+		name             string
+		lines            []string
+		wantPassthrough  bool // true = expect Spec == nil (passthrough mode)
+		wantNodes        int  // 0 = don't check
+		wantNodesZero    bool // true = assert Nodes == 0 (no-span: no span emitted)
+		wantTasksPerNode int  // 0 = don't check
+		wantNtasks       int  // 0 = don't check
+		wantCpusPerTask  int  // 0 = don't check
 	}{
 		{
-			name: "span hosts=2 with rusage",
-			lines: []string{
-				"#!/bin/bash",
-				"#BSUB -n 8",
-				`#BSUB -R "span[hosts=2] rusage[mem=8192]"`,
-			},
-			wantNodes: 2,
-		},
-		{
-			name: "span hosts=1",
+			name: "span hosts=1: single-node OpenMP",
 			lines: []string{
 				"#!/bin/bash",
 				"#BSUB -n 4",
 				`#BSUB -R "span[hosts=1]"`,
 			},
-			wantNodes: 1,
+			wantNodes:        1,
+			wantTasksPerNode: 1,
+			wantNtasks:       1, // OpenMP: 1 MPI rank
+			wantCpusPerTask:  4,
 		},
 		{
-			name: "no span directive",
+			name: "span ptile=4: pure MPI, 16 total tasks → 4 nodes",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 16",
+				`#BSUB -R "span[ptile=4]"`,
+			},
+			wantNodes:        4,
+			wantTasksPerNode: 4,
+			wantNtasks:       16,
+			wantCpusPerTask:  1, // pure MPI: single-threaded tasks
+		},
+		{
+			name: "span ptile=4 affinity[cores(8)]: MPI+OpenMP",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 16",
+				`#BSUB -R "span[ptile=4] affinity[cores(8)]"`,
+			},
+			wantNodes:        4,
+			wantTasksPerNode: 4,
+			wantNtasks:       16,
+			wantCpusPerTask:  8,
+		},
+		{
+			name: "span ptile non-divisible: passthrough (even distribution required)",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 10",
+				`#BSUB -R "span[ptile=3]"`,
+			},
+			wantPassthrough: true, // 10 % 3 != 0 → passthrough
+		},
+		{
+			name: "span ptile with rusage",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 8",
+				`#BSUB -R "span[ptile=4] rusage[mem=8192]"`,
+			},
+			wantNodes:        2,
+			wantTasksPerNode: 4,
+			wantNtasks:       8,
+			wantCpusPerTask:  1, // pure MPI (no affinity)
+		},
+		{
+			name: "span hosts=1 affinity[cores(T)]: hybrid single-node",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 4",
+				`#BSUB -R "span[hosts=1] affinity[cores(8)]"`,
+			},
+			wantNodes:        1,
+			wantTasksPerNode: 4, // 4 processes on 1 node
+			wantNtasks:       4, // -n 4 = 4 processes
+			wantCpusPerTask:  8, // affinity[cores(8)] = 8 cores per process
+		},
+		{
+			name: "span hosts=1 on separate -R line",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 32",
+				`#BSUB -R "span[hosts=1]"`,
+				`#BSUB -R "rusage[mem=16384]"`,
+			},
+			wantNodes:        1,
+			wantTasksPerNode: 1,
+			wantNtasks:       1, // OpenMP: 1 MPI rank
+			wantCpusPerTask:  32,
+		},
+		{
+			name: "span hosts>1 is ignored (warns): falls back to no-span MPI",
+			lines: []string{
+				"#!/bin/bash",
+				"#BSUB -n 8",
+				`#BSUB -R "span[hosts=4]"`,
+			},
+			wantNodesZero:   true, // no-span: Nodes=0, free distribution
+			wantNtasks:      8,    // -n = total tasks
+			wantCpusPerTask: 1,    // pure MPI: one thread per task
+		},
+		{
+			name: "no span directive: free-distribution MPI",
 			lines: []string{
 				"#!/bin/bash",
 				"#BSUB -n 16",
 				`#BSUB -R "rusage[mem=4096]"`,
 			},
-			wantNodes: 1, // default
-		},
-		{
-			name: "span hosts=4 on separate line",
-			lines: []string{
-				"#!/bin/bash",
-				"#BSUB -n 32",
-				`#BSUB -R "span[hosts=4]"`,
-				`#BSUB -R "rusage[mem=16384]"`,
-			},
-			wantNodes: 4,
+			wantNodesZero:   true, // no-span: Nodes=0, free distribution
+			wantNtasks:      16,   // -n = total tasks
+			wantCpusPerTask: 1,    // pure MPI: one thread per task
 		},
 		{
 			name: "no resource directives at all",
@@ -788,7 +870,8 @@ func TestLsfSpanHostsParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#BSUB -J testjob",
 			},
-			wantNodes: 1, // default
+			wantNodes:        0, // passthrough
+			wantTasksPerNode: 0, // passthrough
 		},
 	}
 
@@ -807,15 +890,33 @@ func TestLsfSpanHostsParsing(t *testing.T) {
 				t.Fatalf("Failed to parse script: %v", err)
 			}
 
+			if tt.wantPassthrough {
+				if specs.Spec != nil {
+					t.Errorf("Spec = %+v; want nil (passthrough)", specs.Spec)
+				}
+				return
+			}
+
 			if specs.Spec == nil {
 				t.Fatal("Spec is nil; want non-nil")
 			}
-			if specs.Spec.Nodes != tt.wantNodes {
-				t.Errorf("Nodes = %d; want %d", specs.Spec.Nodes, tt.wantNodes)
+			if tt.wantNodesZero {
+				if specs.Spec.Nodes != 0 {
+					t.Errorf("Nodes = %d; want 0 (no-span)", specs.Spec.Nodes)
+				}
+			} else if tt.wantNodes > 0 {
+				if specs.Spec.Nodes != tt.wantNodes {
+					t.Errorf("Nodes = %d; want %d", specs.Spec.Nodes, tt.wantNodes)
+				}
 			}
-			// TasksPerNode should always be 1 (default) for LSF
-			if specs.Spec.TasksPerNode != 1 {
-				t.Errorf("TasksPerNode = %d; want 1", specs.Spec.TasksPerNode)
+			if tt.wantTasksPerNode > 0 && specs.Spec.TasksPerNode != tt.wantTasksPerNode {
+				t.Errorf("TasksPerNode = %d; want %d", specs.Spec.TasksPerNode, tt.wantTasksPerNode)
+			}
+			if tt.wantNtasks > 0 && specs.Spec.Ntasks != tt.wantNtasks {
+				t.Errorf("Ntasks = %d; want %d", specs.Spec.Ntasks, tt.wantNtasks)
+			}
+			if tt.wantCpusPerTask > 0 && specs.Spec.CpusPerTask != tt.wantCpusPerTask {
+				t.Errorf("CpusPerTask = %d; want %d", specs.Spec.CpusPerTask, tt.wantCpusPerTask)
 			}
 		})
 	}
@@ -823,46 +924,82 @@ func TestLsfSpanHostsParsing(t *testing.T) {
 
 func TestLsfScriptGenerationNodesCpus(t *testing.T) {
 	tests := []struct {
-		name         string
-		specs        *ScriptSpecs
-		wantSpanHost string // expected span[hosts=N]
-		wantNcpus    string // expected -n N
+		name      string
+		specs     *ScriptSpecs
+		wantSpan  string // expected span[...] content
+		wantNcpus string // expected -n N line
 	}{
 		{
-			name: "default single node",
+			name: "single-node OpenMP",
 			specs: &ScriptSpecs{
-				Spec:           &ResourceSpec{CpusPerTask: 4},
+				Spec:           &ResourceSpec{CpusPerTask: 4, Nodes: 1, TasksPerNode: 1},
 				RemainingFlags: []string{},
 			},
-			wantSpanHost: `span[hosts=1]`,
-			wantNcpus:    "#BSUB -n 4",
+			wantSpan:  `span[hosts=1]`,
+			wantNcpus: "#BSUB -n 4",
 		},
 		{
-			name: "multi-node",
+			name: "pure MPI: 4 nodes × 8 tasks/node = 32 total",
 			specs: &ScriptSpecs{
-				Spec:           &ResourceSpec{CpusPerTask: 8, Nodes: 2},
+				Spec:           &ResourceSpec{Nodes: 4, TasksPerNode: 8, CpusPerTask: 1},
 				RemainingFlags: []string{},
 			},
-			wantSpanHost: `span[hosts=2]`,
-			wantNcpus:    "#BSUB -n 8",
+			wantSpan:  `span[ptile=8]`,
+			wantNcpus: "#BSUB -n 32",
 		},
 		{
-			name: "raw span no longer in RawFlags - only rusage preserved",
+			name: "MPI+OpenMP: 4 nodes × 4 tasks/node × 8 threads",
 			specs: &ScriptSpecs{
-				Spec:           &ResourceSpec{CpusPerTask: 16, Nodes: 3},
-				RemainingFlags: []string{`-R "rusage[mem=4096]"`}, // span parsed out, only rusage remains
+				Spec:           &ResourceSpec{Nodes: 4, TasksPerNode: 4, CpusPerTask: 8},
+				RemainingFlags: []string{},
 			},
-			wantSpanHost: `span[hosts=3]`,
-			wantNcpus:    "#BSUB -n 16",
+			wantSpan:  `span[ptile=4] affinity[cores(8)]`,
+			wantNcpus: "#BSUB -n 16",
 		},
 		{
-			name: "raw -n no longer in RawFlags - comes from Ncpus field",
+			name: "explicit Ntasks used in -n output",
+			specs: &ScriptSpecs{
+				Spec:           &ResourceSpec{Ntasks: 16, Nodes: 4, TasksPerNode: 4},
+				RemainingFlags: []string{},
+			},
+			wantSpan:  `span[ptile=4]`,
+			wantNcpus: "#BSUB -n 16",
+		},
+		{
+			name: "single-node from Ncpus field only",
 			specs: &ScriptSpecs{
 				Spec:           &ResourceSpec{CpusPerTask: 8, Nodes: 1},
-				RemainingFlags: []string{}, // -n not in RawFlags, comes from Ncpus
+				RemainingFlags: []string{},
 			},
-			wantSpanHost: `span[hosts=1]`,
-			wantNcpus:    "#BSUB -n 8",
+			wantSpan:  `span[hosts=1]`,
+			wantNcpus: "#BSUB -n 8",
+		},
+		{
+			name: "rusage preserved alongside new span",
+			specs: &ScriptSpecs{
+				Spec:           &ResourceSpec{Nodes: 3, TasksPerNode: 4, CpusPerTask: 1},
+				RemainingFlags: []string{`-R "rusage[mem=4096]"`},
+			},
+			wantSpan:  `span[ptile=4]`,
+			wantNcpus: "#BSUB -n 12",
+		},
+		{
+			name: "free-dist pure MPI: Ntasks set, TasksPerNode=0",
+			specs: &ScriptSpecs{
+				Spec:           &ResourceSpec{Ntasks: 14, CpusPerTask: 1},
+				RemainingFlags: []string{},
+			},
+			wantSpan:  "", // no span[ptile=] emitted
+			wantNcpus: "#BSUB -n 14",
+		},
+		{
+			name: "free-dist hybrid: Ntasks set, CpusPerTask>1, TasksPerNode=0",
+			specs: &ScriptSpecs{
+				Spec:           &ResourceSpec{Ntasks: 14, CpusPerTask: 4},
+				RemainingFlags: []string{},
+			},
+			wantSpan:  "affinity[cores(4)]",
+			wantNcpus: "#BSUB -n 14",
 		},
 	}
 
@@ -888,20 +1025,18 @@ func TestLsfScriptGenerationNodesCpus(t *testing.T) {
 			}
 			scriptContent := string(content)
 
-			// Check span directive
-			if !strings.Contains(scriptContent, tt.wantSpanHost) {
-				t.Errorf("Script missing expected span: %q\nScript:\n%s", tt.wantSpanHost, scriptContent)
+			// Check span directive (empty wantSpan means assert span[ptile= is absent)
+			if tt.wantSpan == "" {
+				if strings.Contains(scriptContent, "span[ptile=") {
+					t.Errorf("Script contains unexpected span[ptile=]\nScript:\n%s", scriptContent)
+				}
+			} else if !strings.Contains(scriptContent, tt.wantSpan) {
+				t.Errorf("Script missing expected span: %q\nScript:\n%s", tt.wantSpan, scriptContent)
 			}
 
 			// Check -n directive
 			if !strings.Contains(scriptContent, tt.wantNcpus) {
 				t.Errorf("Script missing expected -n: %q\nScript:\n%s", tt.wantNcpus, scriptContent)
-			}
-
-			// Verify no duplicate span directives
-			spanCount := strings.Count(scriptContent, "span[hosts=")
-			if spanCount != 1 {
-				t.Errorf("span[hosts=] appears %d times; want 1\nScript:\n%s", spanCount, scriptContent)
 			}
 
 			// Verify no duplicate -n directives
@@ -915,11 +1050,11 @@ func TestLsfScriptGenerationNodesCpus(t *testing.T) {
 
 func TestLsfScriptGenerationGpu(t *testing.T) {
 	tests := []struct {
-		name        string
-		gpu         *GpuSpec
-		wantLine    string // expected in output; empty means assert absent
-		wantAbsent  string // must NOT appear in output
-		wantCount   int    // expected occurrence count of wantLine (0 = use absent check)
+		name       string
+		gpu        *GpuSpec
+		wantLine   string // expected in output; empty means assert absent
+		wantAbsent string // must NOT appear in output
+		wantCount  int    // expected occurrence count of wantLine (0 = use absent check)
 	}{
 		{
 			name:       "no GPU",
@@ -928,11 +1063,11 @@ func TestLsfScriptGenerationGpu(t *testing.T) {
 			wantAbsent: "#BSUB -gpu",
 		},
 		{
-			name:      "GPU count only (generic type)",
-			gpu:       &GpuSpec{Type: "gpu", Count: 2},
-			wantLine:  `#BSUB -gpu "num=2"`,
+			name:       "GPU count only (generic type)",
+			gpu:        &GpuSpec{Type: "gpu", Count: 2},
+			wantLine:   `#BSUB -gpu "num=2"`,
 			wantAbsent: "gmodel=",
-			wantCount: 1,
+			wantCount:  1,
 		},
 		{
 			name:      "GPU with model type",
@@ -990,6 +1125,166 @@ func TestLsfScriptGenerationGpu(t *testing.T) {
 	}
 }
 
+func TestLsfScriptGenerationMem(t *testing.T) {
+	tests := []struct {
+		name       string
+		spec       *ResourceSpec
+		wantLine   string
+		wantAbsent string
+	}{
+		{
+			name:       "no memory",
+			spec:       &ResourceSpec{Nodes: 1, CpusPerTask: 4},
+			wantAbsent: "rusage[mem=",
+		},
+		{
+			name: "MemPerNodeMB only — OpenMP",
+			spec: &ResourceSpec{Nodes: 1, CpusPerTask: 8, MemPerNodeMB: 16384},
+			// slotsPerNode = CpusPerTask = 8; per-slot = 16384/8 = 2048
+			wantLine: `#BSUB -R "span[hosts=1] rusage[mem=2048MB]"`,
+		},
+		{
+			name: "MemPerCpuMB only — OpenMP (single node)",
+			spec: &ResourceSpec{Nodes: 1, CpusPerTask: 8, MemPerCpuMB: 2048},
+			// cpuPerSlot = 1 (not hybrid); rusage_mem = 2048
+			wantLine: `#BSUB -R "span[hosts=1] rusage[mem=2048MB]"`,
+		},
+		{
+			name: "MemPerCpuMB only — pure MPI",
+			spec: &ResourceSpec{Nodes: 2, TasksPerNode: 4, CpusPerTask: 1, MemPerCpuMB: 4096},
+			// cpuPerSlot = 1 (CpusPerTask <= 1); rusage_mem = 4096
+			wantLine: `#BSUB -R "span[ptile=4] rusage[mem=4096MB]"`,
+		},
+		{
+			name: "MemPerCpuMB only — hybrid MPI+OpenMP",
+			spec: &ResourceSpec{Nodes: 2, TasksPerNode: 4, CpusPerTask: 4, MemPerCpuMB: 1024},
+			// cpuPerSlot = CpusPerTask = 4; rusage_mem = 1024*4 = 4096
+			wantLine: `#BSUB -R "span[ptile=4] affinity[cores(4)] rusage[mem=4096MB]"`,
+		},
+		{
+			name: "MemPerCpuMB — hybrid single-node (Ntasks=TasksPerNode=Nodes=1 forced via Nodes=1)",
+			// Nodes=1, TasksPerNode=4, CpusPerTask=8 → isMPI=true, TasksPerNode>0 → ptile path
+			spec: &ResourceSpec{Nodes: 1, TasksPerNode: 4, CpusPerTask: 8, MemPerCpuMB: 512},
+			// cpuPerSlot = 8; rusage_mem = 512*8 = 4096 MB per slot
+			wantLine: `#BSUB -R "span[ptile=4] affinity[cores(8)] rusage[mem=4096MB]"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			lsf := newTestLsfScheduler()
+
+			jobSpec := &JobSpec{
+				Name:    "test_mem",
+				Command: "echo 'test'",
+				Specs: &ScriptSpecs{
+					Spec:           tt.spec,
+					RemainingFlags: []string{},
+				},
+			}
+
+			scriptPath, err := lsf.CreateScriptWithSpec(jobSpec, tmpDir)
+			if err != nil {
+				t.Fatalf("CreateScriptWithSpec failed: %v", err)
+			}
+			content, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatalf("Failed to read script: %v", err)
+			}
+			scriptContent := string(content)
+
+			if tt.wantAbsent != "" && strings.Contains(scriptContent, tt.wantAbsent) {
+				t.Errorf("Script contains unexpected %q\nScript:\n%s", tt.wantAbsent, scriptContent)
+			}
+			if tt.wantLine != "" && !strings.Contains(scriptContent, tt.wantLine) {
+				t.Errorf("Script missing %q\nScript:\n%s", tt.wantLine, scriptContent)
+			}
+		})
+	}
+}
+
+func TestLsfMemPerCpuRoundTrip(t *testing.T) {
+	tests := []struct {
+		name     string
+		script   string
+		wantLine string
+	}{
+		{
+			name:   "OpenMP: rusage mem round-trips via MemPerCpuMB",
+			script: "#!/bin/bash\n#BSUB -J rt_openmp\n#BSUB -n 8\n#BSUB -R \"span[hosts=1] rusage[mem=4096MB]\"\necho hello\n",
+			// parsed: singleNode+no-affinity → CpusPerTask=8, Ntasks=1; MemPerCpuMB=4096 (slot=core)
+			// generated: cpuPerSlot=1 (isMPI=false) → rusage[mem=4096MB]
+			wantLine: `#BSUB -R "span[hosts=1] rusage[mem=4096MB]"`,
+		},
+		{
+			name:   "Hybrid single-node: rusage per slot (=per process) round-trips",
+			script: "#!/bin/bash\n#BSUB -J rt_hybrid_sn\n#BSUB -n 4\n#BSUB -R \"span[hosts=1] affinity[cores(8)] rusage[mem=8192MB]\"\necho hello\n",
+			// parsed: singleNode+affinity(8) → Ntasks=4, TasksPerNode=4, CpusPerTask=8
+			//         MemPerCpuMB = 8192/8 = 1024 (per core)
+			// generated: isMPI=true, TasksPerNode=4 → span[ptile=4]; cpuPerSlot=8 → rusage[mem=8192MB]
+			wantLine: `#BSUB -R "span[ptile=4] affinity[cores(8)] rusage[mem=8192MB]"`,
+		},
+		{
+			name:   "Pure MPI: rusage mem round-trips via MemPerCpuMB",
+			script: "#!/bin/bash\n#BSUB -J rt_mpi\n#BSUB -n 16\n#BSUB -R \"span[ptile=4] rusage[mem=2048MB]\"\necho hello\n",
+			// parsed: MemPerCpuMB=2048 (rusage/cpt=1), Ntasks=16, TasksPerNode=4, Nodes=4
+			// generated: cpuPerSlot=1 → rusage[mem=2048MB]
+			wantLine: `#BSUB -R "span[ptile=4] rusage[mem=2048MB]"`,
+		},
+		{
+			name:   "Hybrid MPI+OpenMP: rusage mem round-trips via MemPerCpuMB",
+			script: "#!/bin/bash\n#BSUB -J rt_hybrid\n#BSUB -n 8\n#BSUB -R \"span[ptile=4] affinity[cores(4)] rusage[mem=4096MB]\"\necho hello\n",
+			// parsed: MemPerCpuMB=4096/4=1024, CpusPerTask=4, TasksPerNode=4, Ntasks=8, Nodes=2
+			// generated: cpuPerSlot=4 → rusage_mem=1024*4=4096MB
+			wantLine: `#BSUB -R "span[ptile=4] affinity[cores(4)] rusage[mem=4096MB]"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			lsf := newTestLsfScheduler()
+
+			scriptPath := filepath.Join(tmpDir, "original.sh")
+			if err := os.WriteFile(scriptPath, []byte(tt.script), 0644); err != nil {
+				t.Fatalf("Write original script: %v", err)
+			}
+
+			specs, err := lsf.ReadScriptSpecs(scriptPath)
+			if err != nil {
+				t.Fatalf("ReadScriptSpecs: %v", err)
+			}
+			if specs.Spec == nil {
+				t.Fatal("Spec is nil")
+			}
+			if specs.Spec.MemPerCpuMB == 0 {
+				t.Errorf("Expected MemPerCpuMB > 0 after parsing, got 0 (MemPerNodeMB=%d)",
+					specs.Spec.MemPerNodeMB)
+			}
+
+			jobSpec := &JobSpec{
+				Name:    "rt_test",
+				Command: "echo hello",
+				Specs:   specs,
+			}
+			newPath, err := lsf.CreateScriptWithSpec(jobSpec, tmpDir)
+			if err != nil {
+				t.Fatalf("CreateScriptWithSpec: %v", err)
+			}
+			content, err := os.ReadFile(newPath)
+			if err != nil {
+				t.Fatalf("Read generated script: %v", err)
+			}
+			scriptContent := string(content)
+
+			if !strings.Contains(scriptContent, tt.wantLine) {
+				t.Errorf("Generated script missing %q\nScript:\n%s", tt.wantLine, scriptContent)
+			}
+		})
+	}
+}
+
 func TestLsfScriptPreservesRusageWithSpan(t *testing.T) {
 	tmpDir := t.TempDir()
 	lsf := newTestLsfScheduler()
@@ -998,8 +1293,8 @@ func TestLsfScriptPreservesRusageWithSpan(t *testing.T) {
 		Name:    "test_job",
 		Command: "echo 'test'",
 		Specs: &ScriptSpecs{
-			Spec:           &ResourceSpec{CpusPerTask: 8, Nodes: 2, MemPerNodeMB: 4},
-			RemainingFlags: []string{`-R "span[hosts=2] rusage[mem=4096]"`},
+			Spec:           &ResourceSpec{TasksPerNode: 4, Nodes: 2},
+			RemainingFlags: []string{`-R "rusage[mem=4096]"`},
 		},
 	}
 
@@ -1014,26 +1309,26 @@ func TestLsfScriptPreservesRusageWithSpan(t *testing.T) {
 	}
 	scriptContent := string(content)
 
-	// Rusage should be preserved (span stripped, rusage kept)
+	// Rusage should be preserved in the RemainingFlags passthrough
 	if !strings.Contains(scriptContent, "rusage[mem=4096]") {
-		t.Errorf("Script should preserve rusage after stripping span\nScript:\n%s", scriptContent)
+		t.Errorf("Script should preserve rusage\nScript:\n%s", scriptContent)
 	}
 
-	// Span should be regenerated
-	if !strings.Contains(scriptContent, `span[hosts=2]`) {
-		t.Errorf("Script should contain regenerated span[hosts=2]\nScript:\n%s", scriptContent)
+	// Span should be regenerated as ptile (multi-node MPI)
+	if !strings.Contains(scriptContent, `span[ptile=4]`) {
+		t.Errorf("Script should contain regenerated span[ptile=4]\nScript:\n%s", scriptContent)
 	}
 }
 
 func TestLsfNodeTaskRoundTrip(t *testing.T) {
 	lsf := newTestLsfScheduler()
 
-	// Create a script with span and -n directives
+	// Create a script with span[ptile=4] and -n 16 → 4 nodes × 4 tasks/node
 	lines := []string{
 		"#!/bin/bash",
 		"#BSUB -J roundtrip_test",
-		"#BSUB -n 8",
-		`#BSUB -R "span[hosts=2]"`,
+		"#BSUB -n 16",
+		`#BSUB -R "span[ptile=4]"`,
 		"#BSUB -W 02:00",
 		"echo hello",
 	}
@@ -1048,11 +1343,14 @@ func TestLsfNodeTaskRoundTrip(t *testing.T) {
 	if specs.Spec == nil {
 		t.Fatal("Spec is nil; want non-nil")
 	}
-	if specs.Spec.Nodes != 2 {
-		t.Fatalf("parse Nodes = %d; want 2", specs.Spec.Nodes)
+	if specs.Spec.Nodes != 4 {
+		t.Fatalf("parse Nodes = %d; want 4", specs.Spec.Nodes)
 	}
-	if specs.Spec.CpusPerTask != 8 {
-		t.Fatalf("parse CpusPerTask = %d; want 8", specs.Spec.CpusPerTask)
+	if specs.Spec.TasksPerNode != 4 {
+		t.Fatalf("parse TasksPerNode = %d; want 4", specs.Spec.TasksPerNode)
+	}
+	if specs.Spec.Ntasks != 16 {
+		t.Fatalf("parse Ntasks = %d; want 16", specs.Spec.Ntasks)
 	}
 
 	// Generate
@@ -1075,18 +1373,21 @@ func TestLsfNodeTaskRoundTrip(t *testing.T) {
 	if specs2.Spec == nil {
 		t.Fatal("specs2.Spec is nil; want non-nil")
 	}
-	if specs2.Spec.Nodes != 2 {
-		t.Errorf("round-trip Nodes = %d; want 2", specs2.Spec.Nodes)
+	if specs2.Spec.Nodes != 4 {
+		t.Errorf("round-trip Nodes = %d; want 4", specs2.Spec.Nodes)
 	}
-	if specs2.Spec.CpusPerTask != 8 {
-		t.Errorf("round-trip CpusPerTask = %d; want 8", specs2.Spec.CpusPerTask)
+	if specs2.Spec.TasksPerNode != 4 {
+		t.Errorf("round-trip TasksPerNode = %d; want 4", specs2.Spec.TasksPerNode)
+	}
+	if specs2.Spec.Ntasks != 16 {
+		t.Errorf("round-trip Ntasks = %d; want 16", specs2.Spec.Ntasks)
 	}
 
 	// Check no duplicates in generated script
 	content, _ := os.ReadFile(scriptPath)
 	script := string(content)
-	if strings.Count(script, "span[hosts=") != 1 {
-		t.Error("span[hosts=] should appear exactly once")
+	if strings.Count(script, "span[ptile=") != 1 {
+		t.Error("span[ptile=] should appear exactly once")
 	}
 	if strings.Count(script, "#BSUB -n ") != 1 {
 		t.Error("#BSUB -n should appear exactly once")
@@ -1166,11 +1467,16 @@ echo "Running job"
 	if specs.Spec == nil {
 		t.Fatal("Spec is nil; want non-nil")
 	}
-	if specs.Spec.CpusPerTask != 4 {
-		t.Errorf("CpusPerTask = %d; want 4", specs.Spec.CpusPerTask)
+	// No span: -n 4 → MPI free-dist (Ntasks=4, CpusPerTask=1)
+	if specs.Spec.Ntasks != 4 {
+		t.Errorf("Ntasks = %d; want 4 (MPI free-dist)", specs.Spec.Ntasks)
 	}
-	if specs.Spec.MemPerNodeMB != 8*1024 {
-		t.Errorf("MemPerNodeMB = %d; want %d", specs.Spec.MemPerNodeMB, 8*1024)
+	if specs.Spec.CpusPerTask != 1 {
+		t.Errorf("CpusPerTask = %d; want 1 (MPI free-dist)", specs.Spec.CpusPerTask)
+	}
+	// -M 8GB → MemPerCpuMB=8192 MB (per task); GetMemPerNodeMB()=0 since TasksPerNode=0 (free-dist)
+	if specs.Spec.MemPerCpuMB != 8192 {
+		t.Errorf("MemPerCpuMB = %d; want 8192 (8 GB per task)", specs.Spec.MemPerCpuMB)
 	}
 	if specs.Spec.Time != 2*time.Hour {
 		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
@@ -1184,9 +1490,9 @@ echo "Running job"
 	if specs.Control.MailUser != "user@example.com" {
 		t.Errorf("MailUser = %q; want %q", specs.Control.MailUser, "user@example.com")
 	}
-	// RemainingFlags should be empty - all flags above are recognized and parsed into typed fields
-	if len(specs.RemainingFlags) != 0 {
-		t.Errorf("RemainingFlags count = %d; want 0 (all flags were recognized)", len(specs.RemainingFlags))
+	// -M passes through to RemainingFlags (it is a limit/ulimit, not an allocation directive)
+	if len(specs.RemainingFlags) != 1 || specs.RemainingFlags[0] != "-M 8GB" {
+		t.Errorf("RemainingFlags = %v; want [\"-M 8GB\"]", specs.RemainingFlags)
 	}
 }
 
@@ -1200,28 +1506,76 @@ func TestLsfGetJobResources(t *testing.T) {
 		}
 	})
 
-	t.Run("full resources", func(t *testing.T) {
+	// Pure MPI: LSB_DJOB_NUMPROC = total tasks; no NCPUS_PER_TASK injected.
+	t.Run("pure MPI via LSB_DJOB_NUMPROC", func(t *testing.T) {
 		clearJobEnvVars(t)
 		t.Setenv("LSB_JOBID", "99999")
 		t.Setenv("LSB_DJOB_NUMPROC", "32")
-		t.Setenv("LSB_MAX_MEM_RUSAGE", "8388608") // 8 GB in KB
 		t.Setenv("CUDA_VISIBLE_DEVICES", "0")
 
 		res := sched.GetJobResources()
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.CpusPerTask != 32 {
-			t.Errorf("CpusPerTask = %d; want 32", res.CpusPerTask)
+		if res.Ntasks != 32 {
+			t.Errorf("Ntasks = %d; want 32", res.Ntasks)
 		}
-		if res.MemPerNodeMB != 8192 {
-			t.Errorf("MemPerNodeMB = %d; want 8192", res.MemPerNodeMB)
+		if res.CpusPerTask != 1 {
+			t.Errorf("CpusPerTask = %d; want 1", res.CpusPerTask)
 		}
 		if res.Gpu == nil || res.Gpu.Count != 1 {
 			t.Errorf("Gpu.Count = %v; want 1", res.Gpu)
 		}
 	})
 
+	// Hybrid: injected NCPUS_PER_TASK splits the total slot count correctly.
+	t.Run("hybrid MPI+OpenMP via injected NCPUS_PER_TASK", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("LSB_JOBID", "99999")
+		t.Setenv("LSB_DJOB_NUMPROC", "32") // 8 tasks × 4 threads
+		t.Setenv("NCPUS_PER_TASK", "4")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Ntasks != 8 {
+			t.Errorf("Ntasks = %d; want 8 (32 slots / 4 cpus-per-task)", res.Ntasks)
+		}
+		if res.CpusPerTask != 4 {
+			t.Errorf("CpusPerTask = %d; want 4", res.CpusPerTask)
+		}
+	})
+
+	// Full geometry from injected env vars wins over LSF native vars.
+	t.Run("full geometry from injected env vars", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("LSB_JOBID", "99999")
+		t.Setenv("LSB_DJOB_NUMPROC", "64") // ignored when NTASKS is already set
+		t.Setenv("NNODES", "4")
+		t.Setenv("NTASKS", "16")
+		t.Setenv("NTASKS_PER_NODE", "4")
+		t.Setenv("NCPUS_PER_TASK", "2")
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.Nodes != 4 {
+			t.Errorf("Nodes = %d; want 4", res.Nodes)
+		}
+		if res.Ntasks != 16 {
+			t.Errorf("Ntasks = %d; want 16", res.Ntasks)
+		}
+		if res.TasksPerNode != 4 {
+			t.Errorf("TasksPerNode = %d; want 4", res.TasksPerNode)
+		}
+		if res.CpusPerTask != 2 {
+			t.Errorf("CpusPerTask = %d; want 2", res.CpusPerTask)
+		}
+	})
+
+	// LSB_MAX_NUM_PROCESSORS is the fallback for LSB_DJOB_NUMPROC.
 	t.Run("LSB_MAX_NUM_PROCESSORS fallback", func(t *testing.T) {
 		clearJobEnvVars(t)
 		t.Setenv("LSB_JOBID", "99999")
@@ -1231,8 +1585,26 @@ func TestLsfGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.CpusPerTask != 64 {
-			t.Errorf("CpusPerTask = %d; want 64", res.CpusPerTask)
+		if res.Ntasks != 64 {
+			t.Errorf("Ntasks = %d; want 64", res.Ntasks)
+		}
+	})
+
+	// LSB_MAX_MEM_RUSAGE is per-slot (per-task) in KB → MemPerCpuMB.
+	t.Run("memory from LSB_MAX_MEM_RUSAGE", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("LSB_JOBID", "99999")
+		t.Setenv("LSB_MAX_MEM_RUSAGE", "8388608") // 8 GB in KB
+
+		res := sched.GetJobResources()
+		if res == nil {
+			t.Fatal("expected non-nil")
+		}
+		if res.MemPerCpuMB != 8192 {
+			t.Errorf("MemPerCpuMB = %d; want 8192", res.MemPerCpuMB)
+		}
+		if res.MemPerNodeMB != 0 {
+			t.Errorf("MemPerNodeMB should be 0 (per-slot memory goes to MemPerCpuMB), got %d", res.MemPerNodeMB)
 		}
 	})
 
@@ -1245,11 +1617,11 @@ func TestLsfGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.CpusPerTask != 4 {
-			t.Errorf("CpusPerTask = %d; want 4", res.CpusPerTask)
+		if res.Ntasks != 4 {
+			t.Errorf("Ntasks = %d; want 4", res.Ntasks)
 		}
-		if res.MemPerNodeMB != 0 {
-			t.Errorf("MemPerNodeMB should be 0 (not set), got %d", res.MemPerNodeMB)
+		if res.MemPerCpuMB != 0 {
+			t.Errorf("MemPerCpuMB should be 0 (not set), got %d", res.MemPerCpuMB)
 		}
 		if res.Gpu != nil {
 			t.Errorf("Gpu should be nil, got %+v", res.Gpu)
@@ -1266,11 +1638,11 @@ func TestLsfGetJobResources(t *testing.T) {
 		if res == nil {
 			t.Fatal("expected non-nil")
 		}
-		if res.CpusPerTask != 0 {
-			t.Errorf("CpusPerTask should be 0 for invalid value, got %d", res.CpusPerTask)
+		if res.Ntasks != 0 {
+			t.Errorf("Ntasks should be 0 for invalid value, got %d", res.Ntasks)
 		}
-		if res.MemPerNodeMB != 0 {
-			t.Errorf("MemPerNodeMB should be 0 for negative value, got %d", res.MemPerNodeMB)
+		if res.MemPerCpuMB != 0 {
+			t.Errorf("MemPerCpuMB should be 0 for negative value, got %d", res.MemPerCpuMB)
 		}
 	})
 }
