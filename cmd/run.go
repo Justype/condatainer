@@ -228,12 +228,10 @@ func runScript(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Passthrough + cross-scheduler mismatch: directives are cleared during translation and lost.
+	// Passthrough mode: resource directives could not be parsed; condatainer cannot safely
+	// regenerate the scheduler script. Reject submission and direct the user to submit manually.
 	if scheduler.IsPassthrough(scriptSpecs) {
-		if hostType := scheduler.DetectType(); hostType != scheduler.SchedulerUnknown && scriptSpecs.ScriptType != hostType {
-			ExitWithError("script contains %s passthrough directives that cannot be translated to %s; rewrite the directives for %s or submit with the native %s scheduler",
-				scriptSpecs.ScriptType, hostType, hostType, scriptSpecs.ScriptType)
-		}
+		ExitWithError("script %q has scheduler directives that could not be fully parsed (passthrough mode); please submit it manually", originScriptPath)
 	}
 
 	// Blank lines in the array input file are only warned about in dry-run; error here
@@ -852,13 +850,8 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 	} else if config.IsInsideContainer() {
 		fmt.Printf("%s Would run locally (in container)\n", utils.StyleTitle("Action:"))
 	} else if scheduler.IsPassthrough(specs) {
-		hostType := scheduler.DetectType()
-		if hostType != scheduler.SchedulerUnknown && specs.ScriptType != hostType {
-			fmt.Printf("%s %s\n", utils.StyleTitle("Action:"),
-				utils.StyleError(fmt.Sprintf("Would fail — %s passthrough directives cannot be submitted to %s", specs.ScriptType, hostType)))
-		} else {
-			fmt.Printf("%s Would submit to %s (passthrough)\n", utils.StyleTitle("Action:"), hostType)
-		}
+		fmt.Printf("%s %s\n", utils.StyleTitle("Action:"),
+			utils.StyleError("Would fail — directives not fully parsed (passthrough mode); please submit it manually"))
 	} else if config.Global.SubmitJob && scheduler.HasSchedulerSpecs(specs) {
 		sched, err := scheduler.DetectScheduler()
 		if err != nil || !sched.IsAvailable() {
