@@ -647,6 +647,18 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 
 	fmt.Fprintln(writer, "")
 
+	// Export normalized resource env vars: LSF's native env vars (LSB_DJOB_NUMPROC, etc.)
+	// don't directly provide the job geometry. Export NCPUS, NNODES, etc. so that:
+	// 1. User scripts can access them directly (e.g., `salmon -p $NCPUS`)
+	// 2. GetJobResources() can read them back reliably
+	// 3. Nested "condatainer run" inherits correct resource context
+	if specs.Spec != nil {
+		for _, kv := range ResourceEnvVars(specs.Spec) {
+			fmt.Fprintf(writer, "export %s\n", kv)
+		}
+		fmt.Fprintln(writer, "")
+	}
+
 	// Array job: extract input line, set ARRAY_ARGS, and redirect output
 	if jobSpec.Array != nil {
 		// LSF is 1-indexed; LSB_JOBINDEX maps directly to the sed line number
