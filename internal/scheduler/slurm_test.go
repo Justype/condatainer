@@ -834,7 +834,7 @@ func clearJobEnvVars(t *testing.T) {
 		"_CONDOR_JOB_AD", "_CONDOR_REQUEST_CPUS", "_CONDOR_REQUEST_MEMORY",
 		"CUDA_VISIBLE_DEVICES",
 		// Normalized env vars injected by ResourceEnvVars (may be present on an HPC node).
-		"NNODES", "NTASKS", "NTASKS_PER_NODE", "NCPUS", "NCPUS_PER_TASK",
+		"NNODES", "NTASKS", "NTASKS_PER_NODE", "NCPUS",
 		"MEM_PER_CPU", "MEM_PER_CPU_MB", "MEM", "MEM_MB", "MEM_GB",
 	} {
 		os.Unsetenv(key)

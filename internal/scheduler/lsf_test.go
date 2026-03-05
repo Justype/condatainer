@@ -1506,7 +1506,7 @@ func TestLsfGetJobResources(t *testing.T) {
 		}
 	})
 
-	// Pure MPI: LSB_DJOB_NUMPROC = total tasks; no NCPUS_PER_TASK injected.
+	// Pure MPI: LSB_DJOB_NUMPROC = total tasks; no NCPUS injected.
 	t.Run("pure MPI via LSB_DJOB_NUMPROC", func(t *testing.T) {
 		clearJobEnvVars(t)
 		t.Setenv("LSB_JOBID", "99999")
@@ -1528,12 +1528,12 @@ func TestLsfGetJobResources(t *testing.T) {
 		}
 	})
 
-	// Hybrid: injected NCPUS_PER_TASK splits the total slot count correctly.
-	t.Run("hybrid MPI+OpenMP via injected NCPUS_PER_TASK", func(t *testing.T) {
+	// Hybrid: injected NCPUS splits the total slot count correctly.
+	t.Run("hybrid MPI+OpenMP via injected NCPUS", func(t *testing.T) {
 		clearJobEnvVars(t)
 		t.Setenv("LSB_JOBID", "99999")
 		t.Setenv("LSB_DJOB_NUMPROC", "32") // 8 tasks × 4 threads
-		t.Setenv("NCPUS_PER_TASK", "4")
+		t.Setenv("NCPUS", "4")
 
 		res := sched.GetJobResources()
 		if res == nil {
@@ -1555,7 +1555,7 @@ func TestLsfGetJobResources(t *testing.T) {
 		t.Setenv("NNODES", "4")
 		t.Setenv("NTASKS", "16")
 		t.Setenv("NTASKS_PER_NODE", "4")
-		t.Setenv("NCPUS_PER_TASK", "2")
+		t.Setenv("NCPUS", "2")
 
 		res := sched.GetJobResources()
 		if res == nil {

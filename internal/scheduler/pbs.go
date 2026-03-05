@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,11 +13,6 @@ import (
 
 	"github.com/Justype/condatainer/internal/utils"
 )
-
-// errSelectNonUniform is returned by parseResourceList when a multi-chunk select=
-// has non-uniform CpusPerTask or MemPerCpuMB across chunks. The original -l flag
-// is preserved verbatim in RemainingFlags for script passthrough.
-var errSelectNonUniform = errors.New("select multi-chunk non-uniform per-task resources")
 
 // pbsChunkSpec holds the parsed resource values for a single PBS select chunk.
 type pbsChunkSpec struct {
@@ -262,7 +256,6 @@ func (p *PbsScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 	}
 
 	var unconsumed []string
-	hasMultiChunk := false // true when a multi-chunk select= was successfully partially parsed
 
 	for _, flag := range directives {
 		// Exclusive node access: -x
@@ -278,23 +271,14 @@ func (p *PbsScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 
 		resourceStr := strings.TrimSpace(strings.TrimPrefix(flag, "-l"))
 		if err := p.parseResourceList(resourceStr, rs); err != nil {
-			if errors.Is(err, errSelectNonUniform) {
-				// Multi-chunk select= with uniform CpusPerTask: only CpusPerTask is set.
-				// Keep the original -l flag verbatim for script regeneration.
-				unconsumed = append(unconsumed, flag)
-				hasMultiChunk = true
-				// do NOT return nil — continue processing remaining flags
-			} else {
-				logParseWarning("PBS: failed to parse resource directive %q: %v", flag, err)
-				return nil, directives
-			}
+			logParseWarning("PBS: failed to parse resource directive %q: %v", flag, err)
+			return nil, directives
 		}
 	}
 
 	// PBS always requires at least 1 node; if no select=/nodes= directive was found,
-	// default to 1 (single-node job). Skip this for multi-chunk jobs: their node
-	// count lives in the original -l flag preserved in RemainingFlags.
-	if rs.Nodes <= 0 && !hasMultiChunk {
+	// default to 1 (single-node job).
+	if rs.Nodes <= 0 {
 		rs.Nodes = 1
 	}
 
@@ -341,7 +325,7 @@ func (p *PbsScheduler) parseResourceList(resourceStr string, rs *ResourceSpec) e
 				// Multi-chunk select= ("+" groups for heterogeneous jobs).
 				// Validate that CpusPerTask and MemPerCpuMB are uniform across all chunks.
 				// If so, aggregate node counts and fully populate ResourceSpec (no passthrough).
-				// If not, return errSelectNonUniform to trigger verbatim passthrough.
+				// If not, return a plain error to trigger passthrough.
 				for _, chunk := range chunks {
 					if chunk.ngpus > 0 {
 						return fmt.Errorf("ngpus= inside multi-chunk (+) select is not supported; use passthrough")
@@ -362,14 +346,14 @@ func (p *PbsScheduler) parseResourceList(resourceStr string, rs *ResourceSpec) e
 						return fmt.Errorf("ncpus=%d not divisible by mpiprocs=%d in multi-chunk select", chunk.ncpus, nMPI)
 					}
 					if chunk.ncpus/nMPI != firstCpusPerTask {
-						return fmt.Errorf("%w: non-uniform CpusPerTask across + chunks (%d vs %d)", errSelectNonUniform, chunk.ncpus/nMPI, firstCpusPerTask)
+						return fmt.Errorf("non-uniform CpusPerTask across + chunks (%d vs %d)", chunk.ncpus/nMPI, firstCpusPerTask)
 					}
 					chunkMemPerCpuMB := int64(0)
 					if chunk.memMB > 0 && chunk.ncpus > 0 {
 						chunkMemPerCpuMB = chunk.memMB / int64(chunk.ncpus)
 					}
 					if chunkMemPerCpuMB != firstMemPerCpuMB {
-						return fmt.Errorf("%w: non-uniform MemPerCpu across + chunks (%d vs %d MB/cpu)", errSelectNonUniform, chunkMemPerCpuMB, firstMemPerCpuMB)
+						return fmt.Errorf("non-uniform MemPerCpu across + chunks (%d vs %d MB/cpu)", chunkMemPerCpuMB, firstMemPerCpuMB)
 					}
 				}
 				// CpusPerTask and MemPerCpuMB are uniform: aggregate and populate ResourceSpec.
@@ -1311,12 +1295,10 @@ func (s *PbsScheduler) GetJobResources() *ResourceSpec {
 	if v := getEnvInt("PBS_NUM_NODES"); v != nil {
 		res.Nodes = *v
 	}
-	// PBS_NCPUS / NCPUS: CPUs per node (= ncpus per select chunk).
-	var cpusPerNode int
-	if v := getEnvInt("PBS_NCPUS"); v != nil {
-		cpusPerNode = *v
-	} else if v := getEnvInt("NCPUS"); v != nil {
-		cpusPerNode = *v
+	// NCPUS: cpus per task (= OMP_NUM_THREADS = ompthreads per select chunk).
+	// https://help.altair.com/2024.1.0/PBS%20Professional/PBSUserGuide2024.1.pdf#page=119
+	if v := getEnvInt("NCPUS"); v != nil {
+		res.CpusPerTask = *v
 	}
 	// PBS_NP / PBS_TASKNUM: total MPI tasks across all nodes.
 	ntasks := getEnvInt("PBS_NP")
@@ -1328,14 +1310,6 @@ func (s *PbsScheduler) GetJobResources() *ResourceSpec {
 		if res.Nodes > 0 {
 			res.TasksPerNode = *ntasks / res.Nodes
 		}
-	}
-	// Derive CpusPerTask = cpusPerNode / tasksPerNode.
-	if cpusPerNode > 0 {
-		tpn := res.TasksPerNode
-		if tpn < 1 {
-			tpn = 1
-		}
-		res.CpusPerTask = cpusPerNode / tpn
 	}
 	// PBS_VMEM is total virtual memory in bytes across the job.
 	// Divide by node count to get per-node MB.

@@ -147,13 +147,13 @@ func absPath(path string) string {
 // variables derived from rs.
 //
 // Always emitted:
-//   - NNODES         — number of nodes (default 1)
-//   - NTASKS         — total tasks: rs.Ntasks when set directly, else Nodes×TasksPerNode
-//   - NCPUS_PER_TASK — CPU threads per task / OpenMP degree (default 1)
+//   - NNODES — number of nodes (default 1)
+//   - NTASKS — total tasks: rs.Ntasks when set directly, else Nodes×TasksPerNode
+//   - NCPUS  — cpus per task (default 1); matches PBS semantics where NCPUS = OMP_NUM_THREADS = cpus per task
+//   - OMP_NUM_THREADS — cpus per task
 //
 // Emitted only when TasksPerNode is known (> 0):
 //   - NTASKS_PER_NODE — tasks per node
-//   - NCPUS           — CPUs per node (CpusPerTask × TasksPerNode, PBS-style)
 //
 // Memory (emitted only when set):
 //   - MEM_PER_CPU / MEM_PER_CPU_MB — when MemPerCpuMB > 0
@@ -190,18 +190,19 @@ func ResourceEnvVars(rs *ResourceSpec) []string {
 	env := []string{
 		fmt.Sprintf("NNODES=%d", nodes),
 		fmt.Sprintf("NTASKS=%d", ntasks),
-		fmt.Sprintf("NCPUS_PER_TASK=%d", cpusPerTask),
+		fmt.Sprintf("NCPUS=%d", cpusPerTask),
+		fmt.Sprintf("OMP_NUM_THREADS=%d", cpusPerTask),
 	}
 	if tasksPerNode > 0 {
 		env = append(env,
 			fmt.Sprintf("NTASKS_PER_NODE=%d", tasksPerNode),
-			fmt.Sprintf("NCPUS=%d", cpusPerTask*tasksPerNode),
 		)
 	}
 	if rs != nil && rs.MemPerCpuMB > 0 {
 		env = append(env,
 			fmt.Sprintf("MEM_PER_CPU=%d", rs.MemPerCpuMB),
 			fmt.Sprintf("MEM_PER_CPU_MB=%d", rs.MemPerCpuMB),
+			fmt.Sprintf("MEM_PER_CPU_GB=%d", rs.MemPerCpuMB/1024),
 		)
 	}
 	if rs != nil {

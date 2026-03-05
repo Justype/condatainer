@@ -849,8 +849,9 @@ func TestPbsMultiChunkParsing(t *testing.T) {
 		lines           []string
 		wantCpusPerTask int
 		wantMemPerCpuMB int64
+		wantNodes       int
+		wantNtasks      int
 		wantPassthrough bool
-		wantOriginalL   bool // original -l select=...+... must be in RemainingFlags
 	}{
 		{
 			name: "uniform mpiprocs uniform mem",
@@ -858,10 +859,11 @@ func TestPbsMultiChunkParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l select=2:ncpus=8:mpiprocs=2:mem=16gb+2:ncpus=8:mpiprocs=2:mem=16gb",
 			},
-			// CpusPerTask: 8/2 = 4; MemPerCpuMB: 16*1024/8 = 2048
+			// CpusPerTask: 8/2=4; MemPerCpuMB: 16*1024/8=2048; Nodes: 2+2=4; Ntasks: 4+4=8
 			wantCpusPerTask: 4,
 			wantMemPerCpuMB: 2048,
-			wantOriginalL:   true,
+			wantNodes:       4,
+			wantNtasks:      8,
 		},
 		{
 			name: "uniform mpiprocs no mem",
@@ -870,7 +872,8 @@ func TestPbsMultiChunkParsing(t *testing.T) {
 				"#PBS -l select=2:ncpus=8:mpiprocs=2+2:ncpus=8:mpiprocs=2",
 			},
 			wantCpusPerTask: 4,
-			wantOriginalL:   true,
+			wantNodes:       4,
+			wantNtasks:      8,
 		},
 		{
 			name: "non-uniform mpiprocs same CpusPerTask no mem",
@@ -878,9 +881,10 @@ func TestPbsMultiChunkParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l select=2:ncpus=4:mpiprocs=2+1:ncpus=8:mpiprocs=4",
 			},
-			// CpusPerTask: 4/2=2 and 8/4=2 (uniform); mpiprocs differ but CPT matches
+			// CpusPerTask: 4/2=2 and 8/4=2 (uniform); Nodes: 2+1=3; Ntasks: 4+4=8
 			wantCpusPerTask: 2,
-			wantOriginalL:   true,
+			wantNodes:       3,
+			wantNtasks:      8,
 		},
 		{
 			name: "non-uniform mem per cpu: passthrough",
@@ -897,7 +901,7 @@ func TestPbsMultiChunkParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l select=1:ncpus=8:mpiprocs=2+1:ncpus=2:mpiprocs=1",
 			},
-			// CpusPerTask: 8/2=4 vs 2/1=2 (non-uniform) → hard passthrough
+			// CpusPerTask: 8/2=4 vs 2/1=2 (non-uniform) → passthrough
 			wantPassthrough: true,
 		},
 		{
@@ -906,7 +910,7 @@ func TestPbsMultiChunkParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l select=1:ncpus=4:ngpus=2+1:ncpus=4:ngpus=2",
 			},
-			// ngpus= inside multi-chunk select is not supported → hard passthrough
+			// ngpus= inside multi-chunk select is not supported → passthrough
 			wantPassthrough: true,
 		},
 		{
@@ -915,8 +919,10 @@ func TestPbsMultiChunkParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l select=1:ncpus=8:mpiprocs=2+2:ncpus=8:mpiprocs=2+1:ncpus=8:mpiprocs=2",
 			},
+			// Nodes: 1+2+1=4; Ntasks: 2+4+2=8
 			wantCpusPerTask: 4,
-			wantOriginalL:   true,
+			wantNodes:       4,
+			wantNtasks:      8,
 		},
 	}
 
@@ -952,24 +958,14 @@ func TestPbsMultiChunkParsing(t *testing.T) {
 			if specs.Spec.MemPerCpuMB != tt.wantMemPerCpuMB {
 				t.Errorf("MemPerCpuMB = %d; want %d", specs.Spec.MemPerCpuMB, tt.wantMemPerCpuMB)
 			}
-			// Multi-chunk: Nodes and TasksPerNode must be 0 (node count lives in RemainingFlags)
-			if specs.Spec.Nodes != 0 {
-				t.Errorf("Nodes = %d; want 0 (node count preserved in RemainingFlags for multi-chunk)", specs.Spec.Nodes)
+			if specs.Spec.Nodes != tt.wantNodes {
+				t.Errorf("Nodes = %d; want %d", specs.Spec.Nodes, tt.wantNodes)
+			}
+			if specs.Spec.Ntasks != tt.wantNtasks {
+				t.Errorf("Ntasks = %d; want %d", specs.Spec.Ntasks, tt.wantNtasks)
 			}
 			if specs.Spec.TasksPerNode != 0 {
 				t.Errorf("TasksPerNode = %d; want 0 (multi-chunk)", specs.Spec.TasksPerNode)
-			}
-			if tt.wantOriginalL {
-				found := false
-				for _, f := range specs.RemainingFlags {
-					if strings.HasPrefix(f, "-l select=") && strings.Contains(f, "+") {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("original multi-chunk -l select= not in RemainingFlags; got %v", specs.RemainingFlags)
-				}
 			}
 		})
 	}
@@ -988,7 +984,7 @@ func TestPbsGetJobResources(t *testing.T) {
 	t.Run("cpus and gpus", func(t *testing.T) {
 		clearJobEnvVars(t)
 		t.Setenv("PBS_JOBID", "67890.pbs-server")
-		t.Setenv("PBS_NCPUS", "8")
+		t.Setenv("NCPUS", "8")
 		t.Setenv("CUDA_VISIBLE_DEVICES", "0,1,2")
 
 		res := sched.GetJobResources()
@@ -1006,7 +1002,7 @@ func TestPbsGetJobResources(t *testing.T) {
 	t.Run("nodes and tasks", func(t *testing.T) {
 		clearJobEnvVars(t)
 		t.Setenv("PBS_JOBID", "67890.pbs-server")
-		t.Setenv("PBS_NCPUS", "8")
+		t.Setenv("NCPUS", "2") // cpus per task (ompthreads per chunk)
 		t.Setenv("PBS_NUM_NODES", "4")
 		t.Setenv("PBS_NP", "16")
 
@@ -1024,9 +1020,9 @@ func TestPbsGetJobResources(t *testing.T) {
 		if res.TasksPerNode != 4 {
 			t.Errorf("TasksPerNode = %d; want 4 (derived from PBS_NP/PBS_NUM_NODES)", res.TasksPerNode)
 		}
-		// CpusPerTask = PBS_NCPUS / TasksPerNode = 8 / 4 = 2
+		// CpusPerTask = NCPUS = 2
 		if res.CpusPerTask != 2 {
-			t.Errorf("CpusPerTask = %d; want 2 (PBS_NCPUS/TasksPerNode)", res.CpusPerTask)
+			t.Errorf("CpusPerTask = %d; want 2", res.CpusPerTask)
 		}
 	})
 
@@ -1049,7 +1045,7 @@ func TestPbsGetJobResources(t *testing.T) {
 		}
 	})
 
-	t.Run("NCPUS fallback", func(t *testing.T) {
+	t.Run("NCPUS direct", func(t *testing.T) {
 		clearJobEnvVars(t)
 		t.Setenv("PBS_JOBID", "67890")
 		t.Setenv("NCPUS", "12")
@@ -1080,7 +1076,7 @@ func TestPbsGetJobResources(t *testing.T) {
 	t.Run("partial data", func(t *testing.T) {
 		clearJobEnvVars(t)
 		t.Setenv("PBS_JOBID", "67890")
-		t.Setenv("PBS_NCPUS", "4")
+		t.Setenv("NCPUS", "4")
 
 		res := sched.GetJobResources()
 		if res == nil {
@@ -1100,7 +1096,7 @@ func TestPbsGetJobResources(t *testing.T) {
 	t.Run("invalid values", func(t *testing.T) {
 		clearJobEnvVars(t)
 		t.Setenv("PBS_JOBID", "67890")
-		t.Setenv("PBS_NCPUS", "not-a-number")
+		t.Setenv("NCPUS", "not-a-number")
 		t.Setenv("PBS_VMEM", "-100")
 
 		res := sched.GetJobResources()
@@ -1149,7 +1145,7 @@ func TestPbsOldStyleResourcePassthrough(t *testing.T) {
 			name: "standalone gpus",
 			lines: []string{
 				"#!/bin/bash",
-				"#PBS -l gpus=a100:2",
+				"#PBS -l gpus=2",
 			},
 		},
 		{

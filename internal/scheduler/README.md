@@ -102,18 +102,19 @@ ValidateGpuAvailability(gpu, nodes, info) // returns GpuValidationError with sug
 |----------|---------------|-----------|
 | `NNODES` | yes | — |
 | `NTASKS` | yes | — |
-| `NCPUS_PER_TASK` | yes | — |
+| `NCPUS` | yes | CPUs per task |
 | `NTASKS_PER_NODE` | no | `TasksPerNode > 0` (known per-node layout) |
-| `NCPUS` | no | `TasksPerNode > 0` (known per-node layout) |
 | `MEM_PER_CPU` / `MEM_PER_CPU_MB` | no | `MemPerCpuMB > 0` |
 | `MEM` / `MEM_MB` / `MEM_GB` | no | `GetMemPerNodeMB() > 0` |
 
 `NTASKS` uses `rs.Ntasks` directly when set; otherwise derives from `Nodes × TasksPerNode`.
 
-`NTASKS_PER_NODE` and `NCPUS` are **absent** in free-distribution jobs:
+`NTASKS_PER_NODE` is **absent** in free-distribution jobs:
 - SLURM: `--ntasks=N` without `--ntasks-per-node`
 - LSF: `-n N` without `span[ptile=M]`
 - PBS: multi-chunk `+` with varying `mpiprocs` across chunks
+
+> [PBS 2024 User Manual Page 118: Hybrid MPI-OpenMP Jobs](https://help.altair.com/2024.1.0/PBS%20Professional/PBSUserGuide2024.1.pdf#page=118)
 
 ## Per-Scheduler Environment Variables
 
@@ -123,7 +124,7 @@ ValidateGpuAvailability(gpu, nodes, info) // returns GpuValidationError with sug
 | Nodes | `SLURM_JOB_NUM_NODES` | `PBS_NUM_NODES` | *(injected `NNODES`)* |
 | Total tasks | `SLURM_NTASKS` | `PBS_NP` / `PBS_TASKNUM` | `LSB_DJOB_NUMPROC` / `LSB_MAX_NUM_PROCESSORS` (total slots) |
 | Tasks per node | `SLURM_NTASKS_PER_NODE` | *(derived)* | *(injected `NTASKS_PER_NODE`)* |
-| CPUs per task | `SLURM_CPUS_PER_TASK` | `PBS_NCPUS` / `NCPUS` (per node; `CpusPerTask = PBS_NCPUS ÷ TasksPerNode`) | *(injected `NCPUS_PER_TASK`)* |
+| CPUs per task | `SLURM_CPUS_PER_TASK` | `NCPUS` (cpus per task) | *(injected `NCPUS`)* |
 | Memory | `SLURM_MEM_PER_NODE` (MB) → `MemPerNodeMB` | `PBS_VMEM` (bytes) ÷ Nodes → `MemPerNodeMB` | `LSB_MAX_MEM_RUSAGE` (KB) → `MemPerCpuMB` |
 | GPU | `CUDA_VISIBLE_DEVICES` count → `Gpu` | `CUDA_VISIBLE_DEVICES` count → `Gpu` | `CUDA_VISIBLE_DEVICES` count → `Gpu` |
 | Array task index | `SLURM_ARRAY_TASK_ID` | `PBS_ARRAY_INDEX` | `LSB_JOBINDEX` |

@@ -1289,12 +1289,12 @@ func formatLsfTime(d time.Duration) string {
 // GetJobResources reads allocated resources from LSF environment variables and
 //
 // LSF does not expose Nodes or TasksPerNode natively, so geometry is read from
-// our injected NNODES / NTASKS_PER_NODE / NCPUS_PER_TASK / NTASKS vars first.
+// our injected NNODES / NTASKS_PER_NODE / NCPUS / NTASKS vars first.
 //
 // LSB_DJOB_NUMPROC / LSB_MAX_NUM_PROCESSORS is the total number of allocated
 // slots (= Ntasks × CpusPerTask). It is used as a Ntasks fallback when our
-// injected NTASKS is absent; CpusPerTask (from NCPUS_PER_TASK) is used to
-// split the slot count correctly.
+// injected NTASKS is absent; CpusPerTask (from NCPUS) is used to split the
+// slot count correctly.
 //
 // LSB_MAX_MEM_RUSAGE is per-slot (per-task) memory in KB → MemPerCpuMB.
 func (s *LsfScheduler) GetJobResources() *ResourceSpec {
@@ -1310,7 +1310,7 @@ func (s *LsfScheduler) GetJobResources() *ResourceSpec {
 	if v := getEnvInt("NTASKS_PER_NODE"); v != nil {
 		res.TasksPerNode = *v
 	}
-	if v := getEnvInt("NCPUS_PER_TASK"); v != nil {
+	if v := getEnvInt("NCPUS"); v != nil {
 		res.CpusPerTask = *v
 	}
 	if v := getEnvInt("NTASKS"); v != nil {
