@@ -845,13 +845,14 @@ func TestPbsNodeTaskParsing(t *testing.T) {
 
 func TestPbsMultiChunkParsing(t *testing.T) {
 	tests := []struct {
-		name            string
-		lines           []string
-		wantCpusPerTask int
-		wantMemPerCpuMB int64
-		wantNodes       int
-		wantNtasks      int
-		wantPassthrough bool
+		name             string
+		lines            []string
+		wantCpusPerTask  int
+		wantMemPerCpuMB  int64
+		wantNodes        int
+		wantNtasks       int
+		wantTasksPerNode int // Ceiling division for cross-scheduler translation
+		wantPassthrough  bool
 	}{
 		{
 			name: "uniform mpiprocs uniform mem",
@@ -860,10 +861,12 @@ func TestPbsMultiChunkParsing(t *testing.T) {
 				"#PBS -l select=2:ncpus=8:mpiprocs=2:mem=16gb+2:ncpus=8:mpiprocs=2:mem=16gb",
 			},
 			// CpusPerTask: 8/2=4; MemPerCpuMB: 16*1024/8=2048; Nodes: 2+2=4; Ntasks: 4+4=8
-			wantCpusPerTask: 4,
-			wantMemPerCpuMB: 2048,
-			wantNodes:       4,
-			wantNtasks:      8,
+			// TasksPerNode: (8+4-1)/4 = 2 (ceiling = exact for uniform)
+			wantCpusPerTask:  4,
+			wantMemPerCpuMB:  2048,
+			wantNodes:        4,
+			wantNtasks:       8,
+			wantTasksPerNode: 2,
 		},
 		{
 			name: "uniform mpiprocs no mem",
@@ -871,9 +874,11 @@ func TestPbsMultiChunkParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#PBS -l select=2:ncpus=8:mpiprocs=2+2:ncpus=8:mpiprocs=2",
 			},
-			wantCpusPerTask: 4,
-			wantNodes:       4,
-			wantNtasks:      8,
+			// TasksPerNode: (8+4-1)/4 = 2
+			wantCpusPerTask:  4,
+			wantNodes:        4,
+			wantNtasks:       8,
+			wantTasksPerNode: 2,
 		},
 		{
 			name: "non-uniform mpiprocs same CpusPerTask no mem",
@@ -882,9 +887,11 @@ func TestPbsMultiChunkParsing(t *testing.T) {
 				"#PBS -l select=2:ncpus=4:mpiprocs=2+1:ncpus=8:mpiprocs=4",
 			},
 			// CpusPerTask: 4/2=2 and 8/4=2 (uniform); Nodes: 2+1=3; Ntasks: 4+4=8
-			wantCpusPerTask: 2,
-			wantNodes:       3,
-			wantNtasks:      8,
+			// TasksPerNode: (8+3-1)/3 = 3 (ceiling, non-uniform)
+			wantCpusPerTask:  2,
+			wantNodes:        3,
+			wantNtasks:       8,
+			wantTasksPerNode: 3,
 		},
 		{
 			name: "non-uniform mem per cpu: passthrough",
@@ -920,9 +927,11 @@ func TestPbsMultiChunkParsing(t *testing.T) {
 				"#PBS -l select=1:ncpus=8:mpiprocs=2+2:ncpus=8:mpiprocs=2+1:ncpus=8:mpiprocs=2",
 			},
 			// Nodes: 1+2+1=4; Ntasks: 2+4+2=8
-			wantCpusPerTask: 4,
-			wantNodes:       4,
-			wantNtasks:      8,
+			// TasksPerNode: (8+4-1)/4 = 2 (ceiling = exact for uniform)
+			wantCpusPerTask:  4,
+			wantNodes:        4,
+			wantNtasks:       8,
+			wantTasksPerNode: 2,
 		},
 	}
 
@@ -964,8 +973,8 @@ func TestPbsMultiChunkParsing(t *testing.T) {
 			if specs.Spec.Ntasks != tt.wantNtasks {
 				t.Errorf("Ntasks = %d; want %d", specs.Spec.Ntasks, tt.wantNtasks)
 			}
-			if specs.Spec.TasksPerNode != 0 {
-				t.Errorf("TasksPerNode = %d; want 0 (multi-chunk)", specs.Spec.TasksPerNode)
+			if specs.Spec.TasksPerNode != tt.wantTasksPerNode {
+				t.Errorf("TasksPerNode = %d; want %d (ceiling for cross-scheduler translation)", specs.Spec.TasksPerNode, tt.wantTasksPerNode)
 			}
 		})
 	}

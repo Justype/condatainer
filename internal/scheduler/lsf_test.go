@@ -797,13 +797,16 @@ func TestLsfSpanHostsParsing(t *testing.T) {
 			wantCpusPerTask:  8,
 		},
 		{
-			name: "span ptile non-divisible: passthrough (even distribution required)",
+			name: "span ptile non-divisible: uses ceiling for node count",
 			lines: []string{
 				"#!/bin/bash",
 				"#BSUB -n 10",
 				`#BSUB -R "span[ptile=3]"`,
 			},
-			wantPassthrough: true, // 10 % 3 != 0 → passthrough
+			wantNodes:        4, // ceiling(10/3) = 4
+			wantTasksPerNode: 3,
+			wantNtasks:       10,
+			wantCpusPerTask:  1, // pure MPI (no affinity)
 		},
 		{
 			name: "span ptile with rusage",

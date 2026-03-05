@@ -608,15 +608,16 @@ func TestSlurmNtasksParsing(t *testing.T) {
 			wantNodes:        4,
 		},
 		{
-			name: "--ntasks not divisible by --nodes: valid if no gpu specs",
+			name: "--ntasks not divisible by --nodes: uses ceiling for TasksPerNode",
 			lines: []string{
 				"#!/bin/bash",
 				"#SBATCH --nodes=4",
 				"#SBATCH --ntasks=37",
 			},
-			wantNtasks:      37,
-			wantNodes:       4,
-			wantPassthrough: false,
+			wantNtasks:       37,
+			wantTasksPerNode: 10, // ceiling(37/4) = 10
+			wantNodes:        4,
+			wantPassthrough:  false,
 		},
 		{
 			name: "--ntasks not divisible by --nodes: passthrough with gpu",

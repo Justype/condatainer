@@ -267,14 +267,10 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 			}
 		case span.ptile > 0:
 			// MPI (±OpenMP): -n is total tasks; ptile is tasks per node.
-			// Even distribution is required; passthrough if non-divisible.
-			if rawN%span.ptile != 0 {
-				logParseWarning("LSF: -n %d not evenly divisible by span[ptile=%d]; using passthrough", rawN, span.ptile)
-				return nil, directives
-			}
+			// Use ceiling division to calculate nodes when not evenly divisible.
 			rs.Ntasks = rawN
 			rs.TasksPerNode = span.ptile
-			rs.Nodes = rawN / span.ptile
+			rs.Nodes = (rawN + span.ptile - 1) / span.ptile // ceiling division
 			if span.cores > 0 {
 				rs.CpusPerTask = span.cores // MPI+OpenMP: affinity sets thread count
 			} else {
@@ -575,6 +571,13 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		//   isMPI && TasksPerNode > 0  → MPI/Hybrid with known ptile: span[ptile=M]
 		//   isMPI && TasksPerNode == 0 → free distribution: no span, just -n Ntasks
 		isMPI := rs.IsMPI()
+		// Calculate TasksPerNode when both Nodes and Ntasks are set but TasksPerNode is not
+		tasksPerNode := rs.TasksPerNode
+		if tasksPerNode == 0 && rs.Nodes > 0 && rs.GetNtasks() > 0 {
+			// Use ceiling to ensure all tasks fit
+			tasksPerNode = (rs.GetNtasks() + rs.Nodes - 1) / rs.Nodes
+		}
+
 		memStr := ""
 		if rs.MemPerCpuMB > 0 {
 			// Inverse of parse: rusage_mem (per-slot) = MemPerCpuMB × affinity_cores.
@@ -586,11 +589,11 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 			memStr = fmt.Sprintf(" rusage[mem=%dMB]", rs.MemPerCpuMB*int64(cpuPerSlot))
 		} else if rs.MemPerNodeMB > 0 {
 			// Per-node → per-slot: divide by slotsPerNode.
-			// When TasksPerNode is unknown (0), fall back to slotsPerNode=1.
+			// Use calculated tasksPerNode if available; otherwise fall back to slotsPerNode=1.
 			slotsPerNode := 1
 			if isMPI {
-				if rs.TasksPerNode > 0 {
-					slotsPerNode = rs.TasksPerNode
+				if tasksPerNode > 0 {
+					slotsPerNode = tasksPerNode
 				}
 			} else {
 				if rs.CpusPerTask > 0 {
@@ -608,17 +611,17 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 				fmt.Fprintf(writer, "#BSUB -n %d\n", rs.CpusPerTask)
 			}
 			fmt.Fprintf(writer, "#BSUB -R \"span[hosts=1]%s\"\n", memStr)
-		case rs.TasksPerNode > 0:
+		case tasksPerNode > 0:
 			// MPI/Hybrid with known tasks-per-node: span[ptile=M]
 			fmt.Fprintf(writer, "#BSUB -n %d\n", rs.GetNtasks())
 			if rs.CpusPerTask > 1 {
 				fmt.Fprintf(writer, "#BSUB -R \"span[ptile=%d] affinity[cores(%d)]%s\"\n",
-					rs.TasksPerNode, rs.CpusPerTask, memStr)
+					tasksPerNode, rs.CpusPerTask, memStr)
 			} else {
-				fmt.Fprintf(writer, "#BSUB -R \"span[ptile=%d]%s\"\n", rs.TasksPerNode, memStr)
+				fmt.Fprintf(writer, "#BSUB -R \"span[ptile=%d]%s\"\n", tasksPerNode, memStr)
 			}
 		default:
-			// MPI/Hybrid, free distribution: no span[ptile=], LSF distributes freely.
+			// MPI/Hybrid, free distribution: no Nodes specified, only Ntasks
 			fmt.Fprintf(writer, "#BSUB -n %d\n", rs.GetNtasks())
 			rStr := ""
 			if rs.CpusPerTask > 1 {

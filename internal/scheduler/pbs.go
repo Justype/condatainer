@@ -363,8 +363,14 @@ func (p *PbsScheduler) parseResourceList(resourceStr string, rs *ResourceSpec) e
 					totalTasks += chunk.count * max(chunk.mpiprocs, 1)
 				}
 				rs.Nodes = totalNodes
-				rs.TasksPerNode = 0 // non-uniform across chunks; CreateScriptWithSpec will reconstruct via Ntasks%Nodes
 				rs.Ntasks = totalTasks
+				// Set TasksPerNode to ceiling for cross-scheduler translation consistency
+				// (Generation will reconstruct the exact multi-chunk layout)
+				if totalNodes > 0 && totalTasks > 0 {
+					rs.TasksPerNode = (totalTasks + totalNodes - 1) / totalNodes // ceiling division
+				} else {
+					rs.TasksPerNode = 0
+				}
 				rs.CpusPerTask = firstCpusPerTask
 				rs.MemPerCpuMB = firstMemPerCpuMB
 				rs.MemPerNodeMB = 0 // clear default so MemPerCpuMB takes effect
@@ -506,9 +512,8 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	if specs.Spec != nil {
 		rs := specs.Spec
 
-		// Emit select= only when TasksPerNode is uniform (> 0) or Nodes is set.
-		// When TasksPerNode=0 (non-uniform multi-chunk), the original -l select= is
-		// already in RemainingFlags and will be emitted above.
+		// Generate select= directive when node count or task distribution is specified.
+		// Multi-chunk (when Ntasks % Nodes != 0) is handled below at line 541.
 		if rs.TasksPerNode > 0 || rs.Nodes > 0 {
 			nodes := rs.Nodes
 			if nodes <= 0 {
@@ -579,10 +584,10 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 				fmt.Fprintf(writer, "#PBS -l %s\n", strings.Join(selectParts, ":"))
 			}
 		} else {
-			// Nodes=0 and TasksPerNode=0: either a multi-chunk passthrough or a
-			// translated single-task job with no node spec.
-			// Multi-chunk: the original -l select=...+... is already in RemainingFlags
-			// (written above), so detect it and skip emitting a second select=.
+			// TasksPerNode=0 and Nodes=0: either a passthrough multi-chunk job
+			// (non-uniform CpusPerTask/MemPerCpu across chunks), or a single-task
+			// job with no node specification.
+			// Passthrough: original -l select=...+... is in RemainingFlags (written above).
 			isMultiChunk := false
 			for _, f := range specs.RemainingFlags {
 				if strings.Contains(f, "select=") {

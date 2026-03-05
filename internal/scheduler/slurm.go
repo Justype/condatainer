@@ -384,6 +384,9 @@ func (s *SlurmScheduler) parseResourceSpec(directives []string) (*ResourceSpec, 
 			} else if rs.Gpu != nil || gpuPerTaskStr != "" {
 				logParseWarning("SLURM: --ntasks=%d not evenly divisible by --nodes=%d with GPU specs; using passthrough mode", totalNtasks, rs.Nodes)
 				return nil, directives
+			} else {
+				// Non-divisible: use ceiling to ensure all tasks fit; this matches memory allocation logic.
+				rs.TasksPerNode = (totalNtasks + rs.Nodes - 1) / rs.Nodes
 			}
 		} else {
 			rs.TasksPerNode = 0 // no node constraint: free distribution
@@ -591,8 +594,14 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 			if rs.Nodes > 0 {
 				fmt.Fprintf(writer, "#SBATCH --nodes=%d\n", rs.Nodes)
 			}
-			if rs.TasksPerNode > 0 {
-				fmt.Fprintf(writer, "#SBATCH --ntasks-per-node=%d\n", rs.TasksPerNode)
+			// Calculate and enforce TasksPerNode when both Nodes and Ntasks are set
+			tasksPerNode := rs.TasksPerNode
+			if tasksPerNode == 0 && rs.Nodes > 0 && rs.GetNtasks() > 0 {
+				// Use ceiling to ensure all tasks fit
+				tasksPerNode = (rs.GetNtasks() + rs.Nodes - 1) / rs.Nodes
+			}
+			if tasksPerNode > 0 {
+				fmt.Fprintf(writer, "#SBATCH --ntasks-per-node=%d\n", tasksPerNode)
 			}
 			if rs.CpusPerTask > 0 {
 				fmt.Fprintf(writer, "#SBATCH --cpus-per-task=%d\n", rs.CpusPerTask)
