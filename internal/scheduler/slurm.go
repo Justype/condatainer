@@ -1146,10 +1146,18 @@ func (s *SlurmScheduler) GetJobResources() *ResourceSpec {
 	if v := getEnvInt("SLURM_JOB_NUM_NODES"); v != nil {
 		res.Nodes = *v
 	}
-	if v := getEnvInt("SLURM_NTASKS"); v != nil {
+
+	// Prefer MPI library env vars (global across all ranks) over SLURM vars (task-local in MPI jobs).
+	if mpiSize := getMpiCommSize(); mpiSize != nil {
+		res.Ntasks = *mpiSize
+	} else if v := getEnvInt("SLURM_NTASKS"); v != nil {
 		res.Ntasks = *v
 	}
-	if v := getEnvInt("SLURM_NTASKS_PER_NODE"); v != nil {
+
+	// TasksPerNode: prefer MPI local size (actual tasks on this node) over SLURM var
+	if mpiLocal := getMpiLocalSize(); mpiLocal != nil {
+		res.TasksPerNode = *mpiLocal
+	} else if v := getEnvInt("SLURM_NTASKS_PER_NODE"); v != nil {
 		res.TasksPerNode = *v
 	} else if res.Ntasks > 0 && res.Nodes > 1 && res.Ntasks%res.Nodes == 0 {
 		// Derive TasksPerNode when SLURM_NTASKS_PER_NODE is absent but geometry is uniform.

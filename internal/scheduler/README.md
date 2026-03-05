@@ -98,21 +98,48 @@ ValidateGpuAvailability(gpu, nodes, info) // returns GpuValidationError with sug
 
 ## Normalized Environment Variables
 
-| Variable | Always emitted | Condition |
-|----------|---------------|-----------|
-| `NNODES` | yes | — |
-| `NTASKS` | yes | — |
-| `NCPUS` | yes | CPUs per task |
-| `NTASKS_PER_NODE` | no | `TasksPerNode > 0` (known per-node layout) |
-| `MEM_PER_CPU` / `MEM_PER_CPU_MB` | no | `MemPerCpuMB > 0` |
-| `MEM` / `MEM_MB` / `MEM_GB` | no | `GetMemPerNodeMB() > 0` |
+Normalized variables are **exported in the generated batch script** for LSF and HTCondor (which lack sufficient native environment variables). For SLURM and PBS, they are **computed on-demand** when entering containers via `condatainer run/exec`.
 
-`NTASKS` uses `rs.Ntasks` directly when set; otherwise derives from `Nodes × TasksPerNode`.
+### Always Available
 
-`NTASKS_PER_NODE` is **absent** in free-distribution jobs:
-- SLURM: `--ntasks=N` without `--ntasks-per-node`
-- LSF: `-n N` without `span[ptile=M]`
-- PBS: multi-chunk `+` with varying `mpiprocs` across chunks
+| Variable | Meaning | Always Set |
+|----------|---------|------------|
+| `NNODES` | Number of nodes | yes (default 1) |
+| `NTASKS` | Total MPI tasks | yes (default 1) |
+| `NCPUS` | CPUs per task (= `OMP_NUM_THREADS`) | yes (default 1) |
+| `OMP_NUM_THREADS` | OpenMP thread count | yes (= `NCPUS`) |
+
+### Conditionally Available
+
+| Variable | OpenMP | MPI | Hybrid | Free-Dist (no Nodes) | Availability Logic |
+|----------|--------|-----|--------|----------------------|-------------------|
+| `MEM_PER_CPU`/`MEM_PER_CPU_GB` | ✓ | ✓ | ✓ | ✓ | Always if memory specified |
+| `NTASKS_PER_NODE` | ✓ | ✓ | ✓ | ✗ | `TasksPerNode > 0` (known layout) |
+| `MEM`/`MEM_MB`/`MEM_GB` | ✓ | ✓ | ✓ | ✗ | Nodes info present |
+
+**Memory Variable Logic:**
+- `MEM_PER_CPU` is **always available** when memory is specified
+- `MEM` (per-node) is available **ONLY when TasksPerNode is known** (`> 0`)
+  - Automatically calculated when both Nodes and Ntasks are specified (using ceiling division)
+  - Without TasksPerNode, cannot guarantee actual per-node distribution
+
+**Job Types:**
+- **OpenMP**: 1 task, multiple CPUs per task (e.g., `NNODES=1, NTASKS=1, NCPUS=8`)
+- **MPI**: Multiple tasks, 1 CPU per task, fixed layout (e.g., `NNODES=2, NTASKS=16, NTASKS_PER_NODE=8, NCPUS=1`)
+- **Hybrid**: Multiple tasks, multiple CPUs per task, fixed layout (e.g., `NNODES=2, NTASKS=8, NTASKS_PER_NODE=4, NCPUS=4`)
+- **Free-Dist (no Nodes)**: Only tasks, no node info (e.g., `NTASKS=7, NCPUS=1`, `MEM` not available)
+
+**Ceiling Division for Non-Uniform Distribution:**
+
+When only get `Nodes` and `Ntasks` without `TasksPerNode`, CondaTainer will try to distribute the tasks by nodes as evenly as possible. (e.g. ntasks=7 and nodes=2 => tasks_per_node=4)
+
+### Implementation Notes
+
+- `NTASKS` uses `rs.Ntasks` directly when set; otherwise derives from `Nodes × TasksPerNode`
+- `NTASKS_PER_NODE` is **absent** only when node count is not specified:
+  - SLURM: `--ntasks=N` without `--nodes` (free distribution across any nodes)
+  - LSF: `-n N` without `span[]` directive (free distribution)
+  - PBS: requires explicit node count; single-task jobs default to 1 node
 
 > [PBS 2024 User Manual Page 118: Hybrid MPI-OpenMP Jobs](https://help.altair.com/2024.1.0/PBS%20Professional/PBSUserGuide2024.1.pdf#page=118)
 
@@ -206,8 +233,8 @@ Pass `JobSpec.Array = &ArraySpec{...}` to `CreateScriptWithSpec`.
 | Scheduler | Directive |
 |-----------|-----------|
 | SLURM | `#SBATCH --array=1-N%limit` |
-| PBS | `#PBS -J 1-N` |
-| LSF | `#BSUB -J name[1-N]` |
+| PBS | `#PBS -J 1-N%limit` |
+| LSF | `#BSUB -J name[1-N]%limit` |
 | HTCondor | `queue array_args from file` |
 
 ## Dependency Formats

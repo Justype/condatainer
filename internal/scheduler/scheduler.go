@@ -852,6 +852,71 @@ func getCudaDeviceCount() *int {
 	return &count
 }
 
+// getMpiCommSize returns the total MPI communicator size from MPI library environment variables.
+// Checks OpenMPI (OMPI_COMM_WORLD_SIZE) and MPICH/Intel MPI (PMI_SIZE) variables.
+// These variables are set by the MPI library and are consistent across all MPI ranks,
+// unlike scheduler-specific variables which may be task-local.
+// Returns nil if no MPI environment is detected.
+func getMpiCommSize() *int {
+	// OpenMPI sets OMPI_COMM_WORLD_SIZE
+	if v := getEnvInt("OMPI_COMM_WORLD_SIZE"); v != nil {
+		return v
+	}
+	// MPICH and Intel MPI set PMI_SIZE
+	if v := getEnvInt("PMI_SIZE"); v != nil {
+		return v
+	}
+	// MVAPICH2 also uses PMI_SIZE, but also sets MV2_COMM_WORLD_SIZE
+	if v := getEnvInt("MV2_COMM_WORLD_SIZE"); v != nil {
+		return v
+	}
+	return nil
+}
+
+// getMpiCommRank returns the MPI rank from MPI library environment variables.
+// Returns nil if no MPI environment is detected.
+func getMpiCommRank() *int {
+	// OpenMPI sets OMPI_COMM_WORLD_RANK
+	if v := getEnvInt("OMPI_COMM_WORLD_RANK"); v != nil {
+		return v
+	}
+	// MPICH and Intel MPI set PMI_RANK
+	if v := getEnvInt("PMI_RANK"); v != nil {
+		return v
+	}
+	return nil
+}
+
+// getMpiLocalSize returns the number of MPI ranks on the current node.
+// This corresponds to TasksPerNode in scheduler terminology.
+// Returns nil if no MPI environment is detected.
+func getMpiLocalSize() *int {
+	// OpenMPI sets OMPI_COMM_WORLD_LOCAL_SIZE
+	if v := getEnvInt("OMPI_COMM_WORLD_LOCAL_SIZE"); v != nil {
+		return v
+	}
+	// MPICH sets MPI_LOCALNRANKS
+	if v := getEnvInt("MPI_LOCALNRANKS"); v != nil {
+		return v
+	}
+	return nil
+}
+
+// getMpiLocalRank returns the MPI rank within the current node (0 to local_size-1).
+// This is different from the global rank (getMpiCommRank) which is 0 to comm_size-1.
+// Returns nil if no MPI environment is detected.
+func getMpiLocalRank() *int {
+	// OpenMPI sets OMPI_COMM_WORLD_LOCAL_RANK
+	if v := getEnvInt("OMPI_COMM_WORLD_LOCAL_RANK"); v != nil {
+		return v
+	}
+	// MPICH sets MPI_LOCALRANKID
+	if v := getEnvInt("MPI_LOCALRANKID"); v != nil {
+		return v
+	}
+	return nil
+}
+
 // ReadScriptSpecsFromPath reads scheduler specs from a script file.
 // It uses cross-scheduler translation: parses any scheduler format and returns
 // normalized specs that can be used with the active scheduler.

@@ -1318,17 +1318,23 @@ func (s *LsfScheduler) GetJobResources() *ResourceSpec {
 	}
 	res := &ResourceSpec{}
 
-	// 1. Geometry from our normalized env vars (most reliable source).
+	// 1. Geometry from normalized env vars or MPI library vars (most reliable sources).
 	if v := getEnvInt("NNODES"); v != nil {
 		res.Nodes = *v
 	}
-	if v := getEnvInt("NTASKS_PER_NODE"); v != nil {
+	// TasksPerNode: prefer MPI local size (actual tasks on this node)
+	if mpiLocal := getMpiLocalSize(); mpiLocal != nil {
+		res.TasksPerNode = *mpiLocal
+	} else if v := getEnvInt("NTASKS_PER_NODE"); v != nil {
 		res.TasksPerNode = *v
 	}
 	if v := getEnvInt("NCPUS"); v != nil {
 		res.CpusPerTask = *v
 	}
-	if v := getEnvInt("NTASKS"); v != nil {
+	// Prefer MPI library vars (global) over our normalized NTASKS var
+	if mpiSize := getMpiCommSize(); mpiSize != nil {
+		res.Ntasks = *mpiSize
+	} else if v := getEnvInt("NTASKS"); v != nil {
 		res.Ntasks = *v
 	}
 

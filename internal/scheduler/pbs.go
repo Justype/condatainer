@@ -1305,16 +1305,25 @@ func (s *PbsScheduler) GetJobResources() *ResourceSpec {
 	if v := getEnvInt("NCPUS"); v != nil {
 		res.CpusPerTask = *v
 	}
+
 	// PBS_NP / PBS_TASKNUM: total MPI tasks across all nodes.
-	ntasks := getEnvInt("PBS_NP")
+	// Prefer MPI library env vars (global) over PBS vars when running under mpiexec.
+	ntasks := getMpiCommSize()
+	if ntasks == nil {
+		ntasks = getEnvInt("PBS_NP")
+	}
 	if ntasks == nil {
 		ntasks = getEnvInt("PBS_TASKNUM")
 	}
 	if ntasks != nil {
 		res.Ntasks = *ntasks
-		if res.Nodes > 0 {
-			res.TasksPerNode = *ntasks / res.Nodes
-		}
+	}
+
+	// TasksPerNode: prefer MPI local size (actual tasks on this node)
+	if mpiLocal := getMpiLocalSize(); mpiLocal != nil {
+		res.TasksPerNode = *mpiLocal
+	} else if res.Ntasks > 0 && res.Nodes > 0 {
+		res.TasksPerNode = res.Ntasks / res.Nodes
 	}
 	// PBS_VMEM is total virtual memory in bytes across the job.
 	// Divide by node count to get per-node MB.
