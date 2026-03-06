@@ -20,6 +20,7 @@ import (
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var (
@@ -47,6 +48,14 @@ var (
 
 // errRunAborted signals a handled stop (message already printed); caller returns nil.
 var errRunAborted = errors.New("run aborted")
+
+// runJobFlagNames is the set of flags shown under "Job Flags:" in help.
+var runJobFlagNames = map[string]bool{
+	"output": true, "error": true,
+	"afterok": true, "afternotok": true, "afterany": true,
+	"cpu": true, "mem": true, "time": true, "gpu": true,
+	"dry-run": true, "name": true, "array": true, "array-limit": true,
+}
 
 // jobIDRe matches a single scheduler job ID.
 // Slurm/LSF: pure digits. PBS: digits followed by .hostname (e.g. 12345.school.edu). HTCondor: ClusterID.ProcessID (e.g. 12345.0).
@@ -109,6 +118,33 @@ func init() {
 	runCmd.Flags().StringVar(&runArray, "array", "", "Input file for array job (one entry per line)")
 	runCmd.Flags().IntVar(&runArrayLimit, "array-limit", 0, "Max concurrent array subjobs (0 = unlimited)")
 	runCmd.Flags().SetInterspersed(false) // Stop flag parsing after script name; remaining args are passed to the script
+
+	// Custom usage: two labeled sections — "Container Flags:" and "Job Flags:"
+	runCmd.SetUsageFunc(func(cmd *cobra.Command) error {
+		fmt.Fprintf(cmd.OutOrStderr(), "Usage:\n  %s\n", cmd.UseLine())
+		if cmd.HasExample() {
+			fmt.Fprintf(cmd.OutOrStderr(), "\nExamples:\n%s\n", cmd.Example)
+		}
+		container := pflag.NewFlagSet("", pflag.ContinueOnError)
+		job := pflag.NewFlagSet("", pflag.ContinueOnError)
+		cmd.Flags().VisitAll(func(fl *pflag.Flag) {
+			if runJobFlagNames[fl.Name] {
+				job.AddFlag(fl)
+			} else {
+				container.AddFlag(fl)
+			}
+		})
+		if container.HasFlags() {
+			fmt.Fprintf(cmd.OutOrStderr(), "\nContainer Flags:\n%s", container.FlagUsages())
+		}
+		if job.HasFlags() {
+			fmt.Fprintf(cmd.OutOrStderr(), "\nJob Flags:\n%s", job.FlagUsages())
+		}
+		if cmd.HasAvailableInheritedFlags() {
+			fmt.Fprintf(cmd.OutOrStderr(), "\nGlobal Flags:\n%s", cmd.InheritedFlags().FlagUsages())
+		}
+		return nil
+	})
 }
 
 func runScript(cmd *cobra.Command, args []string) error {

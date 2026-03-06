@@ -38,6 +38,8 @@ var configKeys = []string{
 	"build.tmp_size_mb",
 	"build.compress_args",
 	"build.overlay_type",
+	"build.block_size",
+	"build.data_block_size",
 }
 
 // getConfigEnvVars returns a list of environment variables corresponding to
@@ -94,6 +96,8 @@ func configValueCompletion(key string) []string {
 		return []string{"ext3", "squashfs"}
 	case "build.compress_args":
 		return config.CompressNames()
+	case "build.block_size", "build.data_block_size":
+		return config.BlockSizeCompletions
 	default:
 		return nil
 	}
@@ -301,6 +305,8 @@ Shows:
 			fmt.Printf("  compress_args:   %s\n", compressArgs)
 		}
 		fmt.Printf("  overlay_type:    %s\n", viper.GetString("build.overlay_type"))
+		fmt.Printf("  block_size:      %s\n", config.Global.Build.BlockSize)
+		fmt.Printf("  data_block_size: %s\n", config.Global.Build.DataBlockSize)
 		fmt.Println()
 
 		// Extra base directories
@@ -371,22 +377,24 @@ Time duration format (for build.time):
 
 		// Validate known keys
 		knownKeys := map[string]bool{
-			"logs_dir":            true,
-			"apptainer_bin":       true,
-			"scheduler_bin":       true,
-			"default_distro":      true,
-			"submit_job":          true,
-			"scripts_link":        true,
-			"prebuilt_link":       true,
-			"prefer_remote":       true,
-			"parse_module_load":   true,
-			"build.ncpus":         true,
-			"build.mem_mb":        true,
-			"build.time":          true,
-			"build.tmp_size_mb":   true,
-			"build.compress_args": true,
-			"build.overlay_type":  true,
-			"extra_base_dirs":     true,
+			"logs_dir":              true,
+			"apptainer_bin":         true,
+			"scheduler_bin":         true,
+			"default_distro":        true,
+			"submit_job":            true,
+			"scripts_link":          true,
+			"prebuilt_link":         true,
+			"prefer_remote":         true,
+			"parse_module_load":     true,
+			"build.ncpus":           true,
+			"build.mem_mb":          true,
+			"build.time":            true,
+			"build.tmp_size_mb":     true,
+			"build.compress_args":   true,
+			"build.overlay_type":    true,
+			"build.block_size":      true,
+			"build.data_block_size": true,
+			"extra_base_dirs":       true,
 		}
 
 		// Validate default_distro against known distros

@@ -79,6 +79,12 @@ func ResolveOverlayPaths(inputs []string) ([]string, error) {
 			pathToResolve = strings.TrimSuffix(entry, ":rw")
 		}
 
+		// If it's an absolute path to an existing file, use it directly (regardless of extension)
+		if filepath.IsAbs(pathToResolve) && utils.FileExists(pathToResolve) {
+			resolved = append(resolved, pathToResolve+suffix)
+			continue
+		}
+
 		if utils.IsOverlay(pathToResolve) {
 			absPath, err := filepath.Abs(pathToResolve)
 			if err != nil {

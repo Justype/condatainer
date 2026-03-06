@@ -60,3 +60,35 @@ func CheckIntegrity(ctx context.Context, path string, force bool) error {
 	utils.PrintSuccess("Filesystem check completed for %s", utils.StylePath(path))
 	return nil
 }
+
+// imgPathExists checks whether `entry` exists inside an ext3 image.
+// It uses debugfs to stat the 'upper/<entry>' path in the image.
+func imgPathExists(imgPath, entry string) bool {
+	entry = strings.TrimPrefix(entry, "/")
+	dbg, err := exec.LookPath("debugfs")
+	if err != nil {
+		return false
+	}
+	statArg := "stat upper/" + entry
+	cmd := exec.Command(dbg, "-R", statArg, imgPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		outStr := string(out)
+		if strings.Contains(outStr, "File not found") || strings.Contains(outStr, "No such file") {
+			return false
+		}
+		return false
+	}
+	return true
+}
+
+// PathExists dispatches to the appropriate backend check depending on the overlay type.
+func PathExists(overlayPath, entry string) bool {
+	if utils.IsSqf(overlayPath) {
+		return sqfPathExists(overlayPath, entry)
+	}
+	if utils.IsImg(overlayPath) {
+		return imgPathExists(overlayPath, entry)
+	}
+	return false
+}

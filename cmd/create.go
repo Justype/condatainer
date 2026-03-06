@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,21 +12,29 @@ import (
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // Variables to hold flag values
 var (
-	createName      string
-	createPrefix    string
-	createFile      string
-	createBaseImage string
-	createSource    string
-	createTempSize  string
-	createRemote    bool
-	createUpdate    bool
+	createName          string
+	createPrefix        string
+	createFile          string
+	createBaseImage     string
+	createSource        string
+	createTempSize      string
+	createBlockSize     string
+	createDataBlockSize string
+	createRemote        bool
+	createUpdate        bool
 
 	// compression flags are generated dynamically from config.CompressOptions
 	compFlags map[string]*bool
+
+	// buildFlagNames is the set of flags shown under "Build Flags:" in help.
+	buildFlagNames = map[string]bool{
+		"temp-size": true, "block-size": true, "data-block-size": true,
+	}
 )
 
 // compressArgsFromFlags inspects the map of boolean pointers produced by
@@ -54,18 +63,16 @@ var createCmd = &cobra.Command{
 	Long: `Create a new SquashFS overlay using available build scripts or Conda packages.
 
 Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
-	Example: `  condatainer create samtools/1.22                # Create from build script
-  condatainer create python=3.11 numpy -n myenv  # Create conda environment
-  condatainer create -f environment.yml -p myenv  # Create from conda file
-  condatainer create --source /data -p dataset    # Convert directory to overlay`,
+	Example: `  condatainer create samtools/1.22                       # Create from build script
+  condatainer create python=3.11 numpy -n myenv          # Create conda environment
+  condatainer create python=3.11 numpy -p /scratch/myenv # Create conda env at custom path
+  condatainer create -f environment.yml -p myenv         # Create from conda file
+  condatainer create --source /data -p dataset           # Convert directory to overlay`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
 		// 1. Validation Logic
 		if len(args) == 0 && createFile == "" && createSource == "" {
 			ExitWithError("At least one of [packages], --file, or --source must be provided.")
-		}
-		if len(args) > 0 && createPrefix != "" {
-			ExitWithError("Packages cannot be used with --prefix.")
 		}
 		if createPrefix != "" && createName != "" {
 			ExitWithError("Cannot use both --prefix and --name at the same time.")
@@ -81,6 +88,9 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 		}
 		if createFile != "" && createPrefix == "" {
 			ExitWithError("When using --file, --prefix must be provided.")
+		}
+		if createPrefix != "" && createFile == "" && len(args) == 0 {
+			ExitWithError("--prefix requires either packages or --file to be specified.")
 		}
 
 		// 2. Ensure base image exists (also checks for apptainer)
@@ -104,6 +114,20 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 				ExitWithError("Invalid temp size: %v", err)
 			}
 			config.Global.Build.TmpSizeMB = sizeMB
+		}
+
+		// 4b. Handle block sizes
+		if createBlockSize != "" {
+			if !config.IsValidBlockSize(createBlockSize) {
+				ExitWithError("Invalid --block-size %q: must be a positive integer with optional K or M suffix (e.g. 128k, 1M)", createBlockSize)
+			}
+			config.Global.Build.BlockSize = createBlockSize
+		}
+		if createDataBlockSize != "" {
+			if !config.IsValidBlockSize(createDataBlockSize) {
+				ExitWithError("Invalid --data-block-size %q: must be a positive integer with optional K or M suffix (e.g. 128k, 1M)", createDataBlockSize)
+			}
+			config.Global.Build.DataBlockSize = createDataBlockSize
 		}
 
 		// 5. Normalize package names (only for build-script mode, not for conda/prefix/source modes)
@@ -135,6 +159,9 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 		if createSource != "" {
 			// Mode: --source (external image like docker://ubuntu)
 			runCreateFromSource(ctx)
+		} else if createPrefix != "" && len(args) > 0 {
+			// Mode: --prefix + packages (conda env at custom path, like conda create -p)
+			runCreateWithPrefixAndPackages(ctx, args)
 		} else if createPrefix != "" {
 			// Mode: --prefix (with --file for YAML/def/sh)
 			runCreateWithPrefix(ctx)
@@ -155,11 +182,13 @@ func init() {
 	// Register Flags
 	f := createCmd.Flags()
 	f.StringVarP(&createName, "name", "n", "", "Custom name for the resulting overlay file")
-	f.StringVarP(&createPrefix, "prefix", "p", "", "Custom prefix path for the overlay file")
+	f.StringVarP(&createPrefix, "prefix", "p", "", "Custom prefix path for the overlay file (or conda env path when combined with packages)")
 	f.StringVarP(&createFile, "file", "f", "", "Path to definition file (.yaml, .sh, .def)")
 	f.StringVarP(&createBaseImage, "base-image", "b", "", "Base image to use instead of default")
 	f.StringVarP(&createSource, "source", "s", "", "Remote source URI (e.g., docker://ubuntu:22.04)")
 	f.StringVar(&createTempSize, "temp-size", "20G", "Size of temporary overlay")
+	f.StringVar(&createBlockSize, "block-size", "", "SquashFS block size for app/env/external overlays (e.g. 128k, 512k)")
+	f.StringVar(&createDataBlockSize, "data-block-size", "", "SquashFS block size for data overlays (e.g. 512k, 1m)")
 	f.BoolVar(&createRemote, "remote", false, "Remote build scripts take precedence over local")
 	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist (atomic .new swap)")
 
@@ -168,6 +197,44 @@ func init() {
 	for _, opt := range config.CompressOptions {
 		compFlags[opt.Name] = f.Bool(opt.Name, false, opt.Description)
 	}
+
+	blockSizeCompletion := func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return config.BlockSizeCompletions, cobra.ShellCompDirectiveNoFileComp
+	}
+	createCmd.RegisterFlagCompletionFunc("block-size", blockSizeCompletion)      //nolint:errcheck
+	createCmd.RegisterFlagCompletionFunc("data-block-size", blockSizeCompletion) //nolint:errcheck
+
+	// Mark compression flags as build flags
+	for _, opt := range config.CompressOptions {
+		buildFlagNames[opt.Name] = true
+	}
+
+	// Custom usage: two labeled sections — "Flags:" and "Build Flags:"
+	createCmd.SetUsageFunc(func(cmd *cobra.Command) error {
+		fmt.Fprintf(cmd.OutOrStderr(), "Usage:\n  %s\n", cmd.UseLine())
+		if cmd.HasExample() {
+			fmt.Fprintf(cmd.OutOrStderr(), "\nExamples:\n%s\n", cmd.Example)
+		}
+		general := pflag.NewFlagSet("", pflag.ContinueOnError)
+		build := pflag.NewFlagSet("", pflag.ContinueOnError)
+		cmd.Flags().VisitAll(func(fl *pflag.Flag) {
+			if buildFlagNames[fl.Name] {
+				build.AddFlag(fl)
+			} else {
+				general.AddFlag(fl)
+			}
+		})
+		if general.HasFlags() {
+			fmt.Fprintf(cmd.OutOrStderr(), "\nFlags:\n%s", general.FlagUsages())
+		}
+		if build.HasFlags() {
+			fmt.Fprintf(cmd.OutOrStderr(), "\nBuild Flags:\n%s", build.FlagUsages())
+		}
+		if cmd.HasAvailableInheritedFlags() {
+			fmt.Fprintf(cmd.OutOrStderr(), "\nGlobal Flags:\n%s", cmd.InheritedFlags().FlagUsages())
+		}
+		return nil
+	})
 }
 
 // getWritableImagesDir returns the writable images directory or exits with an error
@@ -266,10 +333,6 @@ func runCreateWithPrefix(ctx context.Context) {
 	// Use the directory from prefix path as output directory
 	outputDir := filepath.Dir(absPrefix)
 
-	if createFile == "" {
-		ExitWithError("--prefix requires --file to be specified")
-	}
-
 	if !utils.FileExists(createFile) {
 		ExitWithError("File %s not found", utils.StylePath(createFile))
 	}
@@ -280,7 +343,7 @@ func runCreateWithPrefix(ctx context.Context) {
 	if strings.HasSuffix(createFile, ".yml") || strings.HasSuffix(createFile, ".yaml") {
 		// YAML conda environment - use NewCondaObjectWithSource
 		absFile, _ := filepath.Abs(createFile)
-		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, config.GetWritableTmpDir(), createUpdate)
+		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, outputDir, createUpdate)
 		if err != nil {
 			ExitWithError("Failed to create build object: %v", err)
 		}
@@ -291,7 +354,7 @@ func runCreateWithPrefix(ctx context.Context) {
 		// Shell script or apptainer def file
 		isApptainer := strings.HasSuffix(createFile, ".def")
 		absFile, _ := filepath.Abs(createFile)
-		bo, err := build.FromExternalSource(ctx, absPrefix, absFile, isApptainer, outputDir, config.GetWritableTmpDir())
+		bo, err := build.FromExternalSource(ctx, absPrefix, absFile, isApptainer, outputDir)
 		if err != nil {
 			ExitWithError("Failed to create build object from %s: %v", createFile, err)
 		}
@@ -310,6 +373,23 @@ func runCreateWithPrefix(ctx context.Context) {
 		ExitIfJobsSubmitted(graph)
 	} else {
 		ExitWithError("File must be .yml, .yaml, .sh, .bash, or .def")
+	}
+}
+
+// runCreateWithPrefixAndPackages creates a conda sqf from packages at a custom prefix path.
+// Example: condatainer create python=3.11 numpy -p /scratch/myenv
+func runCreateWithPrefixAndPackages(ctx context.Context, packages []string) {
+	absPrefix, _ := filepath.Abs(createPrefix)
+	outputDir := filepath.Dir(absPrefix)
+	baseName := filepath.Base(absPrefix)
+	buildSource := strings.Join(packages, ",")
+
+	bo, err := build.NewCondaObjectWithSource(baseName, buildSource, outputDir, outputDir, createUpdate)
+	if err != nil {
+		ExitWithError("Failed to create build object: %v", err)
+	}
+	if err := bo.Build(ctx, false); err != nil {
+		ExitWithError("Build failed: %v", err)
 	}
 }
 
@@ -348,7 +428,7 @@ func runCreateFromSource(ctx context.Context) {
 
 	utils.PrintMessage("Creating overlay %s from %s", filepath.Base(targetOverlayPath), utils.StylePath(source))
 
-	bo, err := build.FromExternalSource(ctx, targetPrefix, source, isApptainer, imagesDir, config.GetWritableTmpDir())
+	bo, err := build.FromExternalSource(ctx, targetPrefix, source, isApptainer, imagesDir)
 	if err != nil {
 		ExitWithError("Failed to create build object from %s: %v", source, err)
 	}

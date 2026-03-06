@@ -14,12 +14,13 @@ import (
 // Low-level SquashFS operations
 // ============================================================================
 
-// PathExists returns true if the given entry exists at the top level of the
-// SquashFS archive. unsquashfs always exits 0, but prints only "squashfs-root"
-// when the entry is absent. A second line appears when found — so line count > 1 means found.
-// The process is killed after the second newline for efficiency.
-func PathExists(sqfPath, entry string) bool {
-	cmd := exec.Command("unsquashfs", "-l", sqfPath, entry)
+// sqfPathExists checks whether `entry` exists at the top-level of a SquashFS archive.
+// It uses `unsquashfs -lc` and returns true when the entry is present.
+func sqfPathExists(sqfPath, entry string) bool {
+	// Normalize entry (strip leading slash)
+	entry = strings.TrimPrefix(entry, "/")
+
+	cmd := exec.Command("unsquashfs", "-lc", sqfPath, entry)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -38,7 +39,7 @@ func PathExists(sqfPath, entry string) bool {
 		for _, b := range buf[:n] {
 			if b == '\n' {
 				count++
-				if count >= 2 {
+				if count >= 1 {
 					found = true
 					goto done
 				}
@@ -67,7 +68,7 @@ func Cat(sqfPath, filePath string) []byte {
 // IsOSType returns true if the SquashFS archive is an Apptainer OS image,
 // identified by the presence of .singularity.d at the archive root.
 func IsOSType(sqfPath string) bool {
-	return strings.HasSuffix(sqfPath, ".sqf") && PathExists(sqfPath, ".singularity.d")
+	return strings.HasSuffix(sqfPath, ".sqf") && sqfPathExists(sqfPath, ".singularity.d")
 }
 
 // HasCntBin returns true if the SquashFS archive contains a bin directory at
@@ -75,7 +76,7 @@ func IsOSType(sqfPath string) bool {
 // and the normalized double-dash form ("samtools--1.22").
 func HasCntBin(sqfPath, nameVersion string) bool {
 	nv := utils.NormalizeNameVersion(nameVersion)
-	return PathExists(sqfPath, "cnt/"+nv+"/bin")
+	return sqfPathExists(sqfPath, "cnt/"+nv+"/bin")
 }
 
 // ============================================================================
@@ -161,10 +162,10 @@ func GetSquashFSStats(path string) (*SquashFSStats, error) {
 //   - "Bundle Overlay" : contains cnt/ but filename has no --
 //   - ""               : unrecognized
 func GetOverlayType(sqfPath string) string {
-	if PathExists(sqfPath, ".singularity.d") {
+	if sqfPathExists(sqfPath, ".singularity.d") {
 		return "OS Overlay"
 	}
-	if PathExists(sqfPath, "cnt") {
+	if sqfPathExists(sqfPath, "cnt") {
 		base := strings.TrimSuffix(filepath.Base(sqfPath), filepath.Ext(sqfPath))
 		if strings.Contains(base, "--") {
 			return "Module Overlay"

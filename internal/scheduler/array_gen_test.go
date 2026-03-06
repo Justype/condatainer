@@ -39,16 +39,16 @@ func TestSlurmArrayJobScriptGeneration(t *testing.T) {
 	script := string(data)
 
 	checks := []struct{ label, want string }{
-		{"array directive",         "#SBATCH --array=1-3%2"},
-		{"output to /dev/null",     "#SBATCH --output=/dev/null"},
-		{"error to /dev/null",      "#SBATCH --error=/dev/null"},
-		{"ARRAY_IDX assignment",    "_ARRAY_IDX=$SLURM_ARRAY_TASK_ID"},
-		{"sed extraction",          "sed -n \"${_ARRAY_IDX}p\" " + inputFile},
-		{"ARRAY_ARGS export",     "export ARRAY_ARGS"},
-		{"tag sanitization",        `tr -cs '[:alnum:]_-' '_' | cut -c1-20`},
-		{"tag trailing strip",      "_ARRAY_TAG=${_ARRAY_TAG%_}"},
-		{"combined exec redirect",  "exec &>"},
-		{"array job ID in header",  "SLURM_ARRAY_JOB_ID"},
+		{"array directive", "#SBATCH --array=1-3%2"},
+		{"output to /dev/null", "#SBATCH --output=/dev/null"},
+		{"error to /dev/null", "#SBATCH --error=/dev/null"},
+		{"ARRAY_IDX assignment", "_ARRAY_IDX=$SLURM_ARRAY_TASK_ID"},
+		{"sed extraction", "sed -n \"${_ARRAY_IDX}p\" " + inputFile},
+		{"ARRAY_ARGS export", "export ARRAY_ARGS"},
+		{"tag sanitization", `tr -cs '[:alnum:]_-' '_' | cut -c1-20`},
+		{"tag trailing strip", "_ARRAY_TAG=${_ARRAY_TAG%_}"},
+		{"combined exec redirect", "exec &>"},
+		{"array job ID in header", "SLURM_ARRAY_JOB_ID"},
 		{"array index in metadata", "SLURM_ARRAY_TASK_ID"},
 	}
 

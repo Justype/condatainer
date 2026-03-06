@@ -450,8 +450,8 @@ find /cnt -type f -exec chmod ug+rw,o+r {} \;
 find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
 
 echo "Packing overlay to SquashFS..."
-mksquashfs /cnt %s -processors %d -keep-as-directory %s
-`, targetPath, s.effectiveNcpus(), config.Global.Build.CompressArgs)
+mksquashfs /cnt %s -processors %d -b %s -keep-as-directory %s
+`, targetPath, s.effectiveNcpus(), config.Global.Build.BlockSize, config.Global.Build.CompressArgs)
 	} else {
 		// For ref overlays: fix permissions and pack the directory
 		if err := utils.FixPermissionsDefault(sourceDir); err != nil {
@@ -460,8 +460,8 @@ mksquashfs /cnt %s -processors %d -keep-as-directory %s
 		bashScript = fmt.Sprintf(`
 trap 'exit 130' INT TERM
 echo "Packing overlay to SquashFS..."
-mksquashfs %s %s -processors %d -keep-as-directory %s
-`, sourceDir, targetPath, s.effectiveNcpus(), config.Global.Build.CompressArgs)
+mksquashfs %s %s -processors %d -b %s -keep-as-directory %s
+`, sourceDir, targetPath, s.effectiveNcpus(), config.Global.Build.DataBlockSize, config.Global.Build.CompressArgs)
 		packOverlays = []string{} // No need to pack with tmpOverlay for ref overlays since sourceDir is already prepared
 	}
 
