@@ -152,12 +152,13 @@ func (l *LsfScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 		switch {
 		case flagMatches(flag, "-J"):
 			rc.JobName, _ = flagValue(flag, "-J")
+		case flagMatches(flag, "-cwd"):
+			v, _ := flagValue(flag, "-cwd")
+			rc.WorkDir = absPath(v)
 		case flagMatches(flag, "-o"):
-			v, _ := flagValue(flag, "-o")
-			rc.Stdout = absPath(v)
+			rc.Stdout, _ = flagValue(flag, "-o")
 		case flagMatches(flag, "-e"):
-			v, _ := flagValue(flag, "-e")
-			rc.Stderr = absPath(v)
+			rc.Stderr, _ = flagValue(flag, "-e")
 		case flag == "-B":
 			rc.EmailOnBegin = true
 		case flag == "-N":
@@ -536,11 +537,14 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	}
 
 	// Add custom stdout if specified
+	if specs.Control.WorkDir != "" {
+		fmt.Fprintf(writer, "#BSUB -cwd %s\n", specs.Control.WorkDir)
+	}
 	if specs.Control.Stdout != "" {
-		fmt.Fprintf(writer, "#BSUB -o %s\n", specs.Control.Stdout)
+		fmt.Fprintf(writer, "#BSUB -o %s\n", specs.Control.AbsStdout())
 	}
 	if specs.Control.Stderr != "" {
-		fmt.Fprintf(writer, "#BSUB -e %s\n", specs.Control.Stderr)
+		fmt.Fprintf(writer, "#BSUB -e %s\n", specs.Control.AbsStderr())
 	}
 
 	// Add email notifications if specified

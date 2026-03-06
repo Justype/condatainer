@@ -872,8 +872,8 @@ queue
 		t.Fatalf("TryParseHTCondorScript failed: %v", err)
 	}
 
-	if specs.ScriptPath != "job.sh" {
-		t.Errorf("ScriptPath = %q; want %q", specs.ScriptPath, "job.sh")
+	if specs.ScriptPath != absPath("job.sh") {
+		t.Errorf("ScriptPath = %q; want %q", specs.ScriptPath, absPath("job.sh"))
 	}
 	if specs.Spec.CpusPerTask != 4 {
 		t.Errorf("Ncpus = %d; want 4", specs.Spec.CpusPerTask)

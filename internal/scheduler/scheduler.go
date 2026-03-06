@@ -127,6 +127,7 @@ func (rs *ResourceSpec) GetMemPerNodeMB() int64 {
 // RuntimeConfig holds job-level control settings (name, I/O paths, notifications).
 type RuntimeConfig struct {
 	JobName      string // Identifier for the job
+	WorkDir      string // Working directory for the job (e.g. initialdir in HTCondor, --chdir in SLURM)
 	Stdout       string // Standard output file path
 	Stderr       string // Standard error file path
 	EmailOnBegin bool   // Notification on job start
@@ -154,6 +155,28 @@ type ScriptSpecs struct {
 	RemainingFlags []string      // Directives not absorbed by Spec or Control
 	ScriptType     SchedulerType // Scheduler type detected from script directives
 }
+
+// ResolvePath returns path resolved against WorkDir when the path is relative.
+// If WorkDir is empty, falls back to the process CWD via filepath.Abs.
+// Already-absolute or empty paths are returned unchanged.
+func (rc *RuntimeConfig) ResolvePath(path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	if rc.WorkDir != "" {
+		return filepath.Join(rc.WorkDir, path)
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
+}
+
+// AbsStdout returns the absolute path for the Stdout file, resolved against WorkDir.
+func (rc *RuntimeConfig) AbsStdout() string { return rc.ResolvePath(rc.Stdout) }
+
+// AbsStderr returns the absolute path for the Stderr file, resolved against WorkDir.
+func (rc *RuntimeConfig) AbsStderr() string { return rc.ResolvePath(rc.Stderr) }
 
 // HasSchedulerSpecs returns true if ScriptSpecs contains meaningful scheduler directives.
 // This is used to determine if a script should be submitted to a scheduler,

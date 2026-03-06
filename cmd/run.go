@@ -315,12 +315,12 @@ func resolveScriptAndSpecs(scriptPath string) (string, *scheduler.ScriptSpecs) {
 	}
 	contentScript := scriptPath
 	if specs != nil && specs.ScriptPath != "" && specs.ScriptPath != scriptPath {
-		p := specs.ScriptPath
-		if !filepath.IsAbs(p) {
-			// Resolve relative executable paths against the directory of the submit file
-			p = filepath.Join(filepath.Dir(scriptPath), p)
+		contentScript = specs.ScriptPath
+	}
+	if !filepath.IsAbs(contentScript) {
+		if abs, err := filepath.Abs(contentScript); err == nil {
+			contentScript = abs
 		}
-		contentScript = p
 	}
 	return contentScript, specs
 }
@@ -569,7 +569,7 @@ export -f module ml
 
 // printDryRunSummary prints what condatainer run would do without executing.
 func printDryRunSummary(contentScript, originScript string, specs *scheduler.ScriptSpecs, scriptArgs []string, arraySpec *scheduler.ArraySpec) {
-	fmt.Printf("%s %s\n", utils.StyleTitle("Dry run:"), originScript)
+	fmt.Printf("%s %s\n", utils.StyleTitle("Dry run:"), specs.ScriptPath)
 
 	// Dependencies
 	baseImg := runBaseImage
@@ -590,13 +590,23 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 			dep, path string
 			ok        bool
 		}
+		// Resolve the working directory for relative overlay path checks.
+		workDir := specs.Control.WorkDir
+		if workDir == "" {
+			workDir, _ = os.Getwd()
+		}
+
 		entries := make([]depEntry, 0, len(deps))
 		for _, dep := range deps {
 			var entry depEntry
 			entry.dep = dep
 			if utils.IsOverlay(dep) {
-				entry.ok = utils.FileExists(dep)
-				entry.path = dep
+				p := dep
+				if !filepath.IsAbs(p) {
+					p = filepath.Join(workDir, p)
+				}
+				entry.ok = utils.FileExists(p)
+				entry.path = p
 			} else {
 				normalized := utils.NormalizeNameVersion(dep)
 				entry.path, entry.ok = installedOverlays[normalized]
@@ -742,6 +752,11 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		} else {
 			fmt.Printf("  Name:       %s (default)\n", scriptBase)
 		}
+		if specs.Control.WorkDir != "" {
+			fmt.Printf("  WorkDir:    %s\n", specs.Control.WorkDir)
+		} else {
+			fmt.Printf("  WorkDir:    . (default)\n")
+		}
 		if specs.Control.Partition != "" {
 			fmt.Printf("  Partition:  %s\n", specs.Control.Partition)
 		}
@@ -751,14 +766,14 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		}
 		defaultOut := filepath.Join(logsDir, scriptBase+"_<timestamp>.out")
 		if specs.Control.Stdout != "" {
-			fmt.Printf("  Stdout:     %s\n", specs.Control.Stdout)
+			fmt.Printf("  Stdout:     %s\n", specs.Control.AbsStdout())
 		} else {
 			fmt.Printf("  Stdout:     %s (default)\n", defaultOut)
 		}
 		if specs.Control.Stderr != "" {
-			fmt.Printf("  Stderr:     %s\n", specs.Control.Stderr)
+			fmt.Printf("  Stderr:     %s\n", specs.Control.AbsStderr())
 		} else if specs.Control.Stdout != "" {
-			fmt.Printf("  Stderr:     %s (default)\n", specs.Control.Stdout)
+			fmt.Printf("  Stderr:     %s (default)\n", specs.Control.AbsStdout())
 		} else {
 			fmt.Printf("  Stderr:     %s (default)\n", defaultOut)
 		}
@@ -1141,14 +1156,7 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 	// Determine log directory - use spec's Stdout path if set, otherwise global log path
 	var logsDir string
 	if specs.Control.Stdout != "" {
-		// Ensure absolute path
-		logPath := specs.Control.Stdout
-		if !filepath.IsAbs(logPath) {
-			if abs, err := filepath.Abs(logPath); err == nil {
-				logPath = abs
-			}
-		}
-		logsDir = filepath.Dir(logPath)
+		logsDir = filepath.Dir(specs.Control.AbsStdout())
 	} else {
 		// Use global log path
 		logsDir = config.Global.LogsDir
@@ -1230,8 +1238,8 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 			utils.PrintMessage("Per-subjob stdout&err => %s", utils.StylePath(filepath.Join(logsDir, safeName+"_*.log")))
 		}
 	} else {
-		stdoutPath := jobSpec.Specs.Control.Stdout
-		stderrPath := jobSpec.Specs.Control.Stderr
+		stdoutPath := jobSpec.Specs.Control.AbsStdout()
+		stderrPath := jobSpec.Specs.Control.AbsStderr()
 		if stdoutPath != "" {
 			if stderrPath == "" || stdoutPath == stderrPath {
 				utils.PrintMessage("Stdout & Stderr => %s", utils.StylePath(stdoutPath))

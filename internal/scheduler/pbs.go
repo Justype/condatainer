@@ -202,12 +202,13 @@ func (p *PbsScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 		switch {
 		case flagMatches(flag, "-N"):
 			rc.JobName, _ = flagValue(flag, "-N")
+		case flagMatches(flag, "-d"):
+			v, _ := flagValue(flag, "-d")
+			rc.WorkDir = absPath(v)
 		case flagMatches(flag, "-o"):
-			v, _ := flagValue(flag, "-o")
-			rc.Stdout = absPath(v)
+			rc.Stdout, _ = flagValue(flag, "-o")
 		case flagMatches(flag, "-e"):
-			v, _ := flagValue(flag, "-e")
-			rc.Stderr = absPath(v)
+			rc.Stderr, _ = flagValue(flag, "-e")
 		case flagMatches(flag, "-q"):
 			rc.Partition, _ = flagValue(flag, "-q")
 		case flagMatches(flag, "-M"):
@@ -498,11 +499,14 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	if ctrl.JobName != "" {
 		fmt.Fprintf(writer, "#PBS -N %s\n", ctrl.JobName)
 	}
+	if ctrl.WorkDir != "" {
+		fmt.Fprintf(writer, "#PBS -d %s\n", ctrl.WorkDir)
+	}
 	if ctrl.Stdout != "" {
-		fmt.Fprintf(writer, "#PBS -o %s\n", ctrl.Stdout)
+		fmt.Fprintf(writer, "#PBS -o %s\n", ctrl.AbsStdout())
 	}
 	if ctrl.Stderr != "" {
-		fmt.Fprintf(writer, "#PBS -e %s\n", ctrl.Stderr)
+		fmt.Fprintf(writer, "#PBS -e %s\n", ctrl.AbsStderr())
 	}
 	if ctrl.Partition != "" {
 		fmt.Fprintf(writer, "#PBS -q %s\n", ctrl.Partition)

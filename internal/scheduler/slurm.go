@@ -164,12 +164,13 @@ func (s *SlurmScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig,
 		switch {
 		case flagMatches(flag, "--job-name", "-J"):
 			rc.JobName, _ = flagValue(flag, "--job-name", "-J")
+		case flagMatches(flag, "--chdir", "-D"):
+			v, _ := flagValue(flag, "--chdir", "-D")
+			rc.WorkDir = absPath(v)
 		case flagMatches(flag, "--output", "-o"):
-			v, _ := flagValue(flag, "--output", "-o")
-			rc.Stdout = absPath(v)
+			rc.Stdout, _ = flagValue(flag, "--output", "-o")
 		case flagMatches(flag, "--error", "-e"):
-			v, _ := flagValue(flag, "--error", "-e")
-			rc.Stderr = absPath(v)
+			rc.Stderr, _ = flagValue(flag, "--error", "-e")
 		case flagMatches(flag, "--partition", "-p"):
 			rc.Partition, _ = flagValue(flag, "--partition", "-p")
 		case flagMatches(flag, "--mail-user"):
@@ -552,11 +553,14 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	if ctrl.JobName != "" {
 		fmt.Fprintf(writer, "#SBATCH --job-name=%s\n", ctrl.JobName)
 	}
+	if ctrl.WorkDir != "" {
+		fmt.Fprintf(writer, "#SBATCH --chdir=%s\n", ctrl.WorkDir)
+	}
 	if ctrl.Stdout != "" {
-		fmt.Fprintf(writer, "#SBATCH --output=%s\n", ctrl.Stdout)
+		fmt.Fprintf(writer, "#SBATCH --output=%s\n", ctrl.AbsStdout())
 	}
 	if ctrl.Stderr != "" {
-		fmt.Fprintf(writer, "#SBATCH --error=%s\n", ctrl.Stderr)
+		fmt.Fprintf(writer, "#SBATCH --error=%s\n", ctrl.AbsStderr())
 	}
 	if ctrl.EmailOnBegin || ctrl.EmailOnEnd || ctrl.EmailOnFail {
 		var mailTypes []string
