@@ -19,10 +19,7 @@ registry.go         Thread-safe active scheduler singleton + debugMode
 error.go            Structured error types
 gpu.go              GPU compatibility database, tier matching, MIG profiles
 script_helpers.go   Shared parsing/formatting helpers (memory, time, flags, job header/footer)
-slurm.go            SLURM implementation
-pbs.go              PBS implementation
-lsf.go              LSF implementation
-htcondor.go         HTCondor implementation
+slurm.go / pbs.go / lsf.go / htcondor.go   Scheduler implementations
 ```
 
 ## Interface
@@ -46,17 +43,18 @@ type Scheduler interface {
 - `Spec *ResourceSpec` — resource geometry; `nil` in passthrough mode
 - `Control RuntimeConfig` — job name, stdout/stderr, email, partition
 
-**`ResourceSpec`** — compute geometry: `Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`, `Gpu`, `Exclusive`
+**`ResourceSpec`** — compute geometry: `Nodes`, `Ntasks`, `TasksPerNode` (0 = not set / freely distributed), `CpusPerTask`, `MemPerCpuMB`, `MemPerNodeMB`, `Time`, `Gpu`, `Exclusive`
+
+| Memory field | Source | Meaning |
+|---|---|---|
+| `MemPerCpuMB` | SLURM `--mem-per-cpu`; LSF `rusage[mem=X]` ÷ CpusPerTask; PBS multi-chunk `+` (uniform per-cpu mem) | Per-CPU memory in MB |
+| `MemPerNodeMB` | SLURM `--mem`; PBS `select=…:mem=X` (per-node) | Per-node total memory in MB |
+
+`GetMemPerNodeMB()` returns `MemPerNodeMB` if set; otherwise derives `MemPerCpuMB × CpusPerTask × TasksPerNode` when geometry is known (`TasksPerNode > 0`); otherwise 0.
 
 **`JobSpec`** — submission input: `Name`, `Command`, `Specs`, `DepJobIDs`, `Metadata`, `Array *ArraySpec`
 
-**`ArraySpec`** — array job descriptor:
-- `InputFile string` — absolute path to the input list (one entry per line)
-- `Count int` — number of non-empty lines (= number of subjobs)
-- `Limit int` — max concurrently running subjobs (0 = unlimited)
-- `ArgCount int` — number of shell-split tokens per line (validated uniform across all lines)
-- `SampleArgs []string` — tokens from the first line, used for dry-run display
-- `BlankLines []int` — 1-based line numbers of all blank lines; warned on dry-run, blocks submission
+**`ArraySpec`**: `InputFile`, `Count` (non-empty lines), `Limit` (max concurrent), `ArgCount`, `SampleArgs`, `BlankLines`
 
 ## Resource Spec Priority Chain
 
@@ -83,117 +81,183 @@ ResolveResourceSpecFrom(defaults, jobResources, scriptSpecs) // custom baseline
 ## Key Functions
 
 ```go
-// Detection
 scheduler.Init("")                  // auto-detect and set active scheduler
 scheduler.InitIfAvailable("")       // non-failing
 scheduler.ActiveScheduler()         // get current scheduler
 
-// Script parsing
 ReadScriptSpecsFromPath(path)       // always non-nil
 HasSchedulerSpecs(specs)            // HasDirectives=true
 IsPassthrough(specs)                // HasDirectives=true && Spec=nil
 
-// Submission
 SubmitJob(sched, scriptPath, deps)  // single job
 SubmitJobs(sched, jobs, outputDir)  // multi-job with dependencies
 
-// Validation
 ValidateAndConvertSpecs(specs)      // validates against cluster limits
 ValidateGpuAvailability(gpu, nodes, info) // returns GpuValidationError with suggestions
 ```
 
-## Configurable Scheduler Defaults
-
-Applied when a script omits resource directives. Set via `SetSpecDefaults()` at CLI init.
-
-```yaml
-# ~/.config/condatainer/config.yaml
-scheduler:
-  nodes: 1
-  tasks_per_node: 1
-  ncpus_per_task: 2
-  mem_per_node_mb: 8192
-  time: "4h"
-```
-
 ## Normalized Environment Variables
 
-Generated job scripts export these regardless of scheduler:
-`NNODES`, `NTASKS`, `NTASKS_PER_NODE`, `NCPUS`, `NCPUS_PER_TASK`, `MEM_MB`, `MEM_GB`
+Normalized variables are **exported in the generated batch script** for LSF and HTCondor (which lack sufficient native environment variables). For SLURM and PBS, they are **computed on-demand** when entering containers via `condatainer run/exec`.
+
+### Always Available
+
+| Variable | Meaning | Always Set |
+|----------|---------|------------|
+| `NNODES` | Number of nodes | yes (default 1) |
+| `NTASKS` | Total MPI tasks | yes (default 1) |
+| `NCPUS` | CPUs per task (= `OMP_NUM_THREADS`) | yes (default 1) |
+| `OMP_NUM_THREADS` | OpenMP thread count | yes (= `NCPUS`) |
+
+### Conditionally Available
+
+| Variable | OpenMP | MPI | Hybrid | Free-Dist (no Nodes) | Availability Logic |
+|----------|--------|-----|--------|----------------------|-------------------|
+| `MEM_PER_CPU`/`MEM_PER_CPU_GB` | ✓ | ✓ | ✓ | ✓ | Always if memory specified |
+| `NTASKS_PER_NODE` | ✓ | ✓ | ✓ | ✗ | `TasksPerNode > 0` (known layout) |
+| `MEM`/`MEM_MB`/`MEM_GB` | ✓ | ✓ | ✓ | ✗ | Nodes info present |
+
+**Memory Variable Logic:**
+- `MEM_PER_CPU` is **always available** when memory is specified
+- `MEM` (per-node) is available **ONLY when TasksPerNode is known** (`> 0`)
+  - Automatically calculated when both Nodes and Ntasks are specified (using ceiling division)
+  - Without TasksPerNode, cannot guarantee actual per-node distribution
+
+**Job Types:**
+- **OpenMP**: 1 task, multiple CPUs per task (e.g., `NNODES=1, NTASKS=1, NCPUS=8`)
+- **MPI**: Multiple tasks, 1 CPU per task, fixed layout (e.g., `NNODES=2, NTASKS=16, NTASKS_PER_NODE=8, NCPUS=1`)
+- **Hybrid**: Multiple tasks, multiple CPUs per task, fixed layout (e.g., `NNODES=2, NTASKS=8, NTASKS_PER_NODE=4, NCPUS=4`)
+- **Free-Dist (no Nodes)**: Only tasks, no node info (e.g., `NTASKS=7, NCPUS=1`, `MEM` not available)
+
+**Ceiling Division for Non-Uniform Distribution:**
+
+When only get `Nodes` and `Ntasks` without `TasksPerNode`, CondaTainer will try to distribute the tasks by nodes as evenly as possible. (e.g. ntasks=7 and nodes=2 => tasks_per_node=4)
+
+### Implementation Notes
+
+- `NTASKS` uses `rs.Ntasks` directly when set; otherwise derives from `Nodes × TasksPerNode`
+- `NTASKS_PER_NODE` is **absent** only when node count is not specified:
+  - SLURM: `--ntasks=N` without `--nodes` (free distribution across any nodes)
+  - LSF: `-n N` without `span[]` directive (free distribution)
+  - PBS: requires explicit node count; single-task jobs default to 1 node
+
+> [PBS 2024 User Manual Page 118: Hybrid MPI-OpenMP Jobs](https://help.altair.com/2024.1.0/PBS%20Professional/PBSUserGuide2024.1.pdf#page=118)
+
+## Per-Scheduler Environment Variables
+
+| Field | SLURM | PBS | LSF |
+|-------|-------|-----|-----|
+| Job ID | `SLURM_JOB_ID` | `PBS_JOBID` | `LSB_JOBID` |
+| Nodes | `SLURM_JOB_NUM_NODES` | `PBS_NUM_NODES` | *(injected `NNODES`)* |
+| Total tasks | `SLURM_NTASKS` | `PBS_NP` / `PBS_TASKNUM` | `LSB_DJOB_NUMPROC` / `LSB_MAX_NUM_PROCESSORS` (total slots) |
+| Tasks per node | `SLURM_NTASKS_PER_NODE` | *(derived)* | *(injected `NTASKS_PER_NODE`)* |
+| CPUs per task | `SLURM_CPUS_PER_TASK` | `NCPUS` (cpus per task) | *(injected `NCPUS`)* |
+| Memory | `SLURM_MEM_PER_NODE` (MB) → `MemPerNodeMB` | `PBS_VMEM` (bytes) ÷ Nodes → `MemPerNodeMB` | `LSB_MAX_MEM_RUSAGE` (KB) → `MemPerCpuMB` |
+| GPU | `CUDA_VISIBLE_DEVICES` count → `Gpu` | `CUDA_VISIBLE_DEVICES` count → `Gpu` | `CUDA_VISIBLE_DEVICES` count → `Gpu` |
+| Array task index | `SLURM_ARRAY_TASK_ID` | `PBS_ARRAY_INDEX` | `LSB_JOBINDEX` |
+
+HTCondor does not set standard resource environment variables.
 
 ## Error Types
 
-- `ValidationError` - `IsValidationError(err)` — fields: `Field`, `Requested`, `Limit`, `Partition`
-- `GpuValidationError` - `IsGpuValidationError(err)` — has `Suggestions`
+- `ValidationError` — `IsValidationError(err)`: `Field`, `Requested`, `Limit`, `Partition`
+- `GpuValidationError` — `IsGpuValidationError(err)`: has `Suggestions`
 - `ParseError`, `SubmissionError`, `ClusterError` — checked with `Is*` helpers
 
-## Scheduler-Specific Notes
+## Schedulers
 
-### SLURM
-- GPU: `--gres=gpu:type:count` > `--gpus-per-node` > `--gpus`÷nodes > `--gpus-per-task`×tasks
-- Memory: `--mem` (per-node), `--mem-per-cpu` (×cpus), `--mem-per-gpu` (×gpu count)
-- Blacklisted flags (trigger passthrough): `--gpus-per-socket`, `--sockets-per-node`, `--cores-per-socket`, `--threads-per-core`, `--ntasks-per-socket`, `--ntasks-per-core`, `--distribution`
-- Cluster info from `sinfo` + `scontrol`
+Parallelism model fields: `Nodes`, `Ntasks` (0 = derive from `Nodes × TasksPerNode`), `TasksPerNode` (0 = free distribution), `CpusPerTask`.
+
+### Job Type Directives
+
+| Job type | SLURM | PBS | LSF | HTCondor |
+|----------|-------|-----|-----|----------|
+| **OpenMP** (`Ntasks=1, CpusPerTask=T`) | `--ntasks=1 --cpus-per-task=T` | `select=1:ncpus=T` | `-n T -R "span[hosts=1]"` | `request_cpus=T` |
+| **MPI** (`CpusPerTask=1`) | `--nodes=N --ntasks-per-node=M --cpus-per-task=1` | `select=N:ncpus=M:mpiprocs=M` | `-n N*M -R "span[ptile=M]"` | *(single-task)* |
+| **Hybrid** | `--nodes=N --ntasks-per-node=M --cpus-per-task=T` | `select=N:ncpus=M*T:mpiprocs=M:ompthreads=T` | `-n N*M -R "span[ptile=M] affinity[cores(T)]"` | *(single-task)* |
+
+Free-distribution (non-divisible `Ntasks`): SLURM emits `--ntasks=Total`; LSF emits `-n Total`; PBS uses two-chunk `select=`.
+
+### Slurm
+
+Phase 2 resolution order (after collecting all directives):
+
+1. **Nodes** — `--nodes`
+2. **GPU** — `--gres=gpu:type:count` > `--gpus-per-node` > `--gpus`÷nodes > `--gpus-per-task`×tasks
+3. **Tasks** — `--ntasks`; `--ntasks-per-node`; `--ntasks-per-gpu` × gpuCount × nodes (requires GPU)
+4. **CPU** — `--cpus-per-task`; `--cpus-per-gpu` × gpuCount ÷ tasksPerNode
+5. **Memory** — `--mem` → `MemPerNodeMB`; `--mem-per-cpu` → `MemPerCpuMB`; `--mem-per-gpu` × gpu count → `MemPerNodeMB`
+6. **Time** — `--time` (independent)
+
+Blacklisted (passthrough): `--gpus-per-socket`, `--sockets-per-node`, `--cores-per-socket`, `--threads-per-core`, `--ntasks-per-socket`, `--ntasks-per-core`, `--distribution`
 
 ### PBS
-- Resources: `select=N:ncpus=M:mpiprocs=P:mem=Xgb:ngpus=G` or `nodes=N:ppn=M`
-- Cluster info from `pbsnodes -a`
+
+PBS Pro/OpenPBS only; Torque not supported.
+
+- Resources: `select=N:ncpus=M:mpiprocs=P:mem=Xgb:ngpus=G`
+- Old-style standalone resources (`-l nodes=`, `-l ncpus=`, etc.) → **passthrough**
+- Multi-chunk `+`: all chunks must share the same `CpusPerTask = ncpus/mpiprocs`; `ngpus=` in any chunk → passthrough
 
 ### LSF
-- CPU: `-n`, memory: `-M` (KB), nodes: `-R "span[hosts=N]"`
-- GPU: `-gpu "num=N:type=T"` or `-R "rusage[ngpus_physical=N]"`
-- Custom rusage params beyond mem/ngpus are lost during parsing
-- Cluster info from `bhosts -w`
+
+- No node-count directive; nodes derived from `-n / span[ptile=M]`
+- If `span[hosts=1]`, `-n` = total CPUs; otherwise `-n` = total tasks
+- Memory: `rusage[mem=X]` is per-slot → `MemPerCpuMB = rusage_mem / affinity.cores` (default 1); without `-n` → `MemPerNodeMB`
+- `-M` (KB, ulimit) used as fallback; same division rule applies
+- GPU: `-gpu "num=N:gmodel=T"` or `-R "rusage[ngpus_physical=N]"`
+
+**LSF `-n` semantics:**
+
+| `-R` directive | `-n` meaning | `Nodes` |
+|----------------|-------------|---------|
+| `span[hosts=1]` | Total CPUs (= `CpusPerTask`) | 1 |
+| `span[ptile=M]` | Total tasks (= `Ntasks`) | `Ntasks / ptile` |
+| `affinity[cores(T)]` only | Total tasks | 0 |
+| *(none)* | Total tasks | 0 |
 
 ### HTCondor
-- Parses native `.sub` files; `executable` field → `ScriptSpecs.ScriptPath`
+
+- Parses native `.sub` files; `executable` → `ScriptSpecs.ScriptPath`
 - Resource keys: `request_cpus`, `request_memory`, `request_gpus`, `+MaxRuntime` (seconds)
-- Generates `.sub` + `.sh` wrapper; always single-node; no dependency support
-
-## Single-Node Enforcement
-
-`CreateScriptWithSpec` normalizes to single-node by default:
-
-| Scheduler | Mechanism |
-|-----------|-----------|
-| SLURM | `--nodes=1 --ntasks=1` |
-| PBS | `select=1:ncpus=N` |
-| LSF | `span[hosts=1]` + `-n N` |
-| HTCondor | inherently single-node |
-
-Multi-node: set `Nodes > 1` in `ScriptSpecs`.
+- Always single-task; no dependency support
 
 ## Array Jobs
 
-Pass `JobSpec.Array = &ArraySpec{...}` to `CreateScriptWithSpec` to generate an array job.
+Pass `JobSpec.Array = &ArraySpec{...}` to `CreateScriptWithSpec`.
 
-**How it works (SLURM / PBS / LSF):**
+- Scheduler directive silences per-subjob stdout (`--output=/dev/null`).
+- `writeArrayBlock` extracts the current line via `sed -n "${IDX}p"` → `ARRAY_ARGS`; redirects output to `{logDir}/{name}_{idx}_{tag}.log`.
+- HTCondor uses `queue array_args from {inputFile}`.
 
-1. Scheduler directive silences per-subjob output (`--output=/dev/null`).
-2. `writeArrayBlock` is injected after directives. It:
-   - Extracts the current subjob's input line via `sed -n "${IDX}p"` into `ARRAY_ARGS`.
-   - Exports `ARRAY_ARGS` (word-splits into positional args when used unquoted in the command).
-   - Redirects per-subjob output to `{logDir}/{jobName}_{paddedIdx}_{tag}.log` (combined) or `.out`/`.err` (separated, when the original stderr differs from stdout). `{tag}` is `ARRAY_ARGS` with all non-alphanumeric characters replaced by `_`, consecutive underscores squeezed, capped at 20 characters.
-3. The user command receives `$ARRAY_ARGS` prepended as positional arguments.
-
-**HTCondor:**
-
-Uses `queue array_args from {inputFile}` — HTCondor sets `ARRAY_ARGS` via an `environment` directive for each subjob. Per-subjob output goes to `{logDir}/{jobName}_$(Process)_$(array_args).log`.
-
-**Scheduler directives:**
-
-| Scheduler | Directive | Range format |
-|-----------|-----------|--------------|
-| SLURM | `#SBATCH --array=1-N[%limit]` | 1-based, optional concurrency cap |
-| PBS | `#PBS -J 1-N` + `qdel` limit | 1-based |
-| LSF | `#BSUB -J name[1-N]` | 1-based |
-| HTCondor | `queue array_args from file` | item-based |
+| Scheduler | Directive |
+|-----------|-----------|
+| SLURM | `#SBATCH --array=1-N%limit` |
+| PBS | `#PBS -J 1-N%limit` |
+| LSF | `#BSUB -J name[1-N]%limit` |
+| HTCondor | `queue array_args from file` |
 
 ## Dependency Formats
 
 | Scheduler | Format |
 |-----------|--------|
-| SLURM | `--dependency=afterok:ID1,ID2` |
+| SLURM | `--dependency=afterok:ID1:ID2` |
 | PBS | `-W depend=afterok:ID1:ID2` |
 | LSF | `-w "done(ID1) && done(ID2)"` |
 | HTCondor | not supported (requires DAGMan) |
+
+## Time Formats
+
+| Scheduler | Format | Example |
+|-----------|--------|---------|
+| SLURM | `D-HH:MM:SS` or `HH:MM:SS` | `1-12:00:00` |
+| PBS | `HH:MM:SS` | `04:00:00` |
+| LSF | `HH:MM` | `04:00` |
+| HTCondor | integer seconds (`+MaxRuntime`) | `14400` |
+
+## Scheduler Documentation
+
+- [Slurm Sbatch](https://slurm.schedmd.com/sbatch.html)
+- [LSF 10.1.0](https://www.ibm.com/docs/en/spectrum-lsf/10.1.0)
+- [PBS Pro 2024.1 User Guide](https://help.altair.com/2024.1.0/PBS%20Professional/PBSUserGuide2024.1.pdf)
+- [HTCondor Latest](https://htcondor.readthedocs.io/en/latest/)

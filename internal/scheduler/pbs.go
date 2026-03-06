@@ -14,6 +14,57 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
+// pbsChunkSpec holds the parsed resource values for a single PBS select chunk.
+type pbsChunkSpec struct {
+	count    int
+	ncpus    int
+	mpiprocs int
+	memMB    int64
+	ngpus    int
+}
+
+// parsePbsChunk parses a single PBS select chunk string (e.g. "2:ncpus=4:mpiprocs=2:mem=8gb").
+// The leading node count is optional; all key=value pairs are parsed and unknown keys ignored.
+func parsePbsChunk(chunkStr string) (pbsChunkSpec, error) {
+	chunk := pbsChunkSpec{count: 1, ncpus: 1, mpiprocs: 1}
+	parts := strings.Split(chunkStr, ":")
+	i := 1
+	if n, err := strconv.Atoi(parts[0]); err == nil {
+		chunk.count = n
+	} else {
+		i = 0 // no leading node count
+	}
+	for _, part := range parts[i:] {
+		switch {
+		case strings.HasPrefix(part, "ncpus="):
+			v, err := strconv.Atoi(strings.TrimPrefix(part, "ncpus="))
+			if err != nil {
+				return chunk, fmt.Errorf("invalid ncpus value %q: %w", part, err)
+			}
+			chunk.ncpus = v
+		case strings.HasPrefix(part, "mpiprocs="):
+			v, err := strconv.Atoi(strings.TrimPrefix(part, "mpiprocs="))
+			if err != nil {
+				return chunk, fmt.Errorf("invalid mpiprocs value %q: %w", part, err)
+			}
+			chunk.mpiprocs = v
+		case strings.HasPrefix(part, "mem="):
+			v, err := parseMemoryMB(strings.TrimPrefix(part, "mem="))
+			if err != nil {
+				return chunk, fmt.Errorf("invalid mem value %q: %w", part, err)
+			}
+			chunk.memMB = v
+		case strings.HasPrefix(part, "ngpus="):
+			v, err := strconv.Atoi(strings.TrimPrefix(part, "ngpus="))
+			if err != nil {
+				return chunk, fmt.Errorf("invalid ngpus value %q: %w", part, err)
+			}
+			chunk.ngpus = v
+		}
+	}
+	return chunk, nil
+}
+
 // PbsScheduler implements the Scheduler interface for PBS
 //
 // NOTE: Only PBS Pro/OpenPBS is supported; Torque is not in the plan.
@@ -151,12 +202,13 @@ func (p *PbsScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 		switch {
 		case flagMatches(flag, "-N"):
 			rc.JobName, _ = flagValue(flag, "-N")
+		case flagMatches(flag, "-d"):
+			v, _ := flagValue(flag, "-d")
+			rc.WorkDir = absPath(v)
 		case flagMatches(flag, "-o"):
-			v, _ := flagValue(flag, "-o")
-			rc.Stdout = absPath(v)
+			rc.Stdout, _ = flagValue(flag, "-o")
 		case flagMatches(flag, "-e"):
-			v, _ := flagValue(flag, "-e")
-			rc.Stderr = absPath(v)
+			rc.Stderr, _ = flagValue(flag, "-e")
 		case flagMatches(flag, "-q"):
 			rc.Partition, _ = flagValue(flag, "-q")
 		case flagMatches(flag, "-M"):
@@ -225,6 +277,12 @@ func (p *PbsScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 		}
 	}
 
+	// PBS always requires at least 1 node; if no select=/nodes= directive was found,
+	// default to 1 (single-node job).
+	if rs.Nodes <= 0 {
+		rs.Nodes = 1
+	}
+
 	return rs, unconsumed
 }
 
@@ -233,7 +291,7 @@ func (p *PbsScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 //   - select=1:ncpus=4:mem=8gb
 //   - walltime=01:00:00
 //   - ngpus=1
-//   - nodes=1:ppn=4
+//   - nodes=1:ppn=4:ncpus:2 (reject the nodes directive)
 func (p *PbsScheduler) parseResourceList(resourceStr string, rs *ResourceSpec) error {
 	// Split by comma, but be careful with select= which can have colons
 	resources := strings.Split(resourceStr, ",")
@@ -244,61 +302,101 @@ func (p *PbsScheduler) parseResourceList(resourceStr string, rs *ResourceSpec) e
 			continue
 		}
 
-		// Handle select=N:ncpus=M:mpiprocs=P:mem=X format
+		// Handle select=N:ncpus=M:mpiprocs=P:mem=X[+N2:ncpus=M2:mpiprocs=P2:...] format
+		// The "+" separates chunk groups for heterogeneous jobs.
+		// Just need to make sure that PerTask resources are uniform across chunks; total Nodes and Ntasks can be aggregated.
 		if strings.HasPrefix(res, "select=") {
-			selectParts := strings.Split(res, ":")
-			var mpiprocs int
-			for _, part := range selectParts {
-				// Extract chunk count (node count) from select=N
-				if strings.HasPrefix(part, "select=") {
-					selectVal := strings.TrimPrefix(part, "select=")
-					n, err := strconv.Atoi(selectVal)
-					if err != nil {
-						return fmt.Errorf("invalid select value %q: %w", selectVal, err)
-					}
-					rs.Nodes = n
-				} else if strings.HasPrefix(part, "mpiprocs=") {
-					// mpiprocs is tasks per chunk (per node)
-					mpStr := strings.TrimPrefix(part, "mpiprocs=")
-					mp, err := strconv.Atoi(mpStr)
-					if err != nil {
-						return fmt.Errorf("invalid mpiprocs value %q: %w", mpStr, err)
-					}
-					mpiprocs = mp
-				} else {
-					if err := p.parseSingleResource(part, rs); err != nil {
-						return err
+			selectBody := strings.TrimPrefix(res, "select=")
+			chunkStrs := strings.Split(selectBody, "+")
+
+			chunks := make([]pbsChunkSpec, 0, len(chunkStrs))
+			for _, chunkStr := range chunkStrs {
+				chunk, err := parsePbsChunk(chunkStr)
+				if err != nil {
+					return err
+				}
+				chunks = append(chunks, chunk)
+			}
+
+			if len(chunks) == 0 {
+				continue
+			}
+
+			if len(chunks) > 1 {
+				// Multi-chunk select= ("+" groups for heterogeneous jobs).
+				// Validate that CpusPerTask and MemPerCpuMB are uniform across all chunks.
+				// If so, aggregate node counts and fully populate ResourceSpec (no passthrough).
+				// If not, return a plain error to trigger passthrough.
+				for _, chunk := range chunks {
+					if chunk.ngpus > 0 {
+						return fmt.Errorf("ngpus= inside multi-chunk (+) select is not supported; use passthrough")
 					}
 				}
-			}
-			// mpiprocs maps to TasksPerNode
-			if mpiprocs > 0 {
-				rs.TasksPerNode = mpiprocs
+				firstMPI := max(chunks[0].mpiprocs, 1)
+				if chunks[0].ncpus%firstMPI != 0 {
+					return fmt.Errorf("ncpus=%d not divisible by mpiprocs=%d in first chunk", chunks[0].ncpus, firstMPI)
+				}
+				firstCpusPerTask := chunks[0].ncpus / firstMPI
+				firstMemPerCpuMB := int64(0)
+				if chunks[0].memMB > 0 && chunks[0].ncpus > 0 {
+					firstMemPerCpuMB = chunks[0].memMB / int64(chunks[0].ncpus)
+				}
+				for _, chunk := range chunks[1:] {
+					nMPI := max(chunk.mpiprocs, 1)
+					if chunk.ncpus%nMPI != 0 {
+						return fmt.Errorf("ncpus=%d not divisible by mpiprocs=%d in multi-chunk select", chunk.ncpus, nMPI)
+					}
+					if chunk.ncpus/nMPI != firstCpusPerTask {
+						return fmt.Errorf("non-uniform CpusPerTask across + chunks (%d vs %d)", chunk.ncpus/nMPI, firstCpusPerTask)
+					}
+					chunkMemPerCpuMB := int64(0)
+					if chunk.memMB > 0 && chunk.ncpus > 0 {
+						chunkMemPerCpuMB = chunk.memMB / int64(chunk.ncpus)
+					}
+					if chunkMemPerCpuMB != firstMemPerCpuMB {
+						return fmt.Errorf("non-uniform MemPerCpu across + chunks (%d vs %d MB/cpu)", chunkMemPerCpuMB, firstMemPerCpuMB)
+					}
+				}
+				// CpusPerTask and MemPerCpuMB are uniform: aggregate and populate ResourceSpec.
+				totalNodes, totalTasks := 0, 0
+				for _, chunk := range chunks {
+					totalNodes += chunk.count
+					totalTasks += chunk.count * max(chunk.mpiprocs, 1)
+				}
+				rs.Nodes = totalNodes
+				rs.Ntasks = totalTasks
+				// Set TasksPerNode to ceiling for cross-scheduler translation consistency
+				// (Generation will reconstruct the exact multi-chunk layout)
+				if totalNodes > 0 && totalTasks > 0 {
+					rs.TasksPerNode = (totalTasks + totalNodes - 1) / totalNodes // ceiling division
+				} else {
+					rs.TasksPerNode = 0
+				}
+				rs.CpusPerTask = firstCpusPerTask
+				rs.MemPerCpuMB = firstMemPerCpuMB
+				rs.MemPerNodeMB = 0 // clear default so MemPerCpuMB takes effect
+				return nil
+			} else {
+				// Single-chunk select=: fully populate ResourceSpec.
+				rs.Nodes = chunks[0].count
+				firstNTasks := max(chunks[0].mpiprocs, 1)
+				rs.TasksPerNode = firstNTasks
+				rs.Ntasks = rs.Nodes * firstNTasks
+				if chunks[0].ncpus%firstNTasks != 0 {
+					return fmt.Errorf("ncpus=%d not evenly divisible by mpiprocs=%d; using passthrough", chunks[0].ncpus, firstNTasks)
+				}
+				rs.CpusPerTask = chunks[0].ncpus / firstNTasks
+				rs.MemPerNodeMB = chunks[0].memMB
+				if chunks[0].ngpus > 0 {
+					rs.Gpu = &GpuSpec{Type: "gpu", Count: chunks[0].ngpus}
+				}
 			}
 			continue
 		}
 
-		// Handle nodes=N:ppn=M format
+		// Reject legacy nodes=N:ppn=M format to induce passthrough
 		if strings.HasPrefix(res, "nodes=") {
-			nodeParts := strings.Split(res, ":")
-			for _, part := range nodeParts {
-				if strings.HasPrefix(part, "nodes=") {
-					nodesStr := strings.TrimPrefix(part, "nodes=")
-					n, err := strconv.Atoi(nodesStr)
-					if err != nil {
-						return fmt.Errorf("invalid nodes value %q: %w", nodesStr, err)
-					}
-					rs.Nodes = n
-				} else if strings.HasPrefix(part, "ppn=") {
-					ppnStr := strings.TrimPrefix(part, "ppn=")
-					ppn, err := strconv.Atoi(ppnStr)
-					if err != nil {
-						return fmt.Errorf("invalid ppn value %q: %w", ppnStr, err)
-					}
-					rs.CpusPerTask = ppn
-				}
-			}
-			continue
+			return fmt.Errorf("Old style nodes=... directives are not supported; please use select=... syntax")
 		}
 
 		if err := p.parseSingleResource(res, rs); err != nil {
@@ -309,7 +407,10 @@ func (p *PbsScheduler) parseResourceList(resourceStr string, rs *ResourceSpec) e
 	return nil
 }
 
-// parseSingleResource parses a single resource=value specification
+// parseSingleResource parses a single resource=value specification.
+// Only walltime= and place= are valid standalone -l resources in PBS Pro.
+// Old Torque-style standalone resources (ncpus=, mem=, ngpus=, nodes=) are
+// rejected here to induce passthrough, just like nodes= in parseResourceList.
 func (p *PbsScheduler) parseSingleResource(res string, rs *ResourceSpec) error {
 	parts := strings.SplitN(res, "=", 2)
 	if len(parts) != 2 {
@@ -320,20 +421,6 @@ func (p *PbsScheduler) parseSingleResource(res string, rs *ResourceSpec) error {
 	value := strings.TrimSpace(parts[1])
 
 	switch key {
-	case "ncpus":
-		ncpus, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("invalid ncpus value %q: %w", value, err)
-		}
-		rs.CpusPerTask = ncpus
-
-	case "mem":
-		mem, err := parseMemoryMB(value)
-		if err != nil {
-			return fmt.Errorf("invalid mem value %q: %w", value, err)
-		}
-		rs.MemPerNodeMB = mem
-
 	case "walltime":
 		dur, err := utils.ParseHMSTime(value)
 		if err != nil {
@@ -341,29 +428,16 @@ func (p *PbsScheduler) parseSingleResource(res string, rs *ResourceSpec) error {
 		}
 		rs.Time = dur
 
-	case "ngpus":
-		count, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("invalid ngpus value %q: %w", value, err)
-		}
-		rs.Gpu = &GpuSpec{
-			Type:  "gpu",
-			Count: count,
-			Raw:   res,
-		}
-
-	case "gpus":
-		gpu, err := parseGpuString(value)
-		if err != nil {
-			return fmt.Errorf("invalid gpus value %q: %w", value, err)
-		}
-		rs.Gpu = gpu
-
 	case "place":
 		// place=excl (or place=excl:...) requests exclusive node access
 		if strings.Contains(value, "excl") {
 			rs.Exclusive = true
 		}
+
+	case "ncpus", "mem", "ngpus", "gpus", "procs", "pmem", "pvmem":
+		// Old Torque-style standalone resource directives are not supported in PBS Pro.
+		// These must be specified inside a select= chunk (e.g. select=1:ncpus=4:mem=8gb).
+		return fmt.Errorf("old-style standalone -l %s= is not supported in PBS Pro; use select= syntax", key)
 	}
 
 	return nil
@@ -425,11 +499,14 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	if ctrl.JobName != "" {
 		fmt.Fprintf(writer, "#PBS -N %s\n", ctrl.JobName)
 	}
+	if ctrl.WorkDir != "" {
+		fmt.Fprintf(writer, "#PBS -d %s\n", ctrl.WorkDir)
+	}
 	if ctrl.Stdout != "" {
-		fmt.Fprintf(writer, "#PBS -o %s\n", ctrl.Stdout)
+		fmt.Fprintf(writer, "#PBS -o %s\n", ctrl.AbsStdout())
 	}
 	if ctrl.Stderr != "" {
-		fmt.Fprintf(writer, "#PBS -e %s\n", ctrl.Stderr)
+		fmt.Fprintf(writer, "#PBS -e %s\n", ctrl.AbsStderr())
 	}
 	if ctrl.Partition != "" {
 		fmt.Fprintf(writer, "#PBS -q %s\n", ctrl.Partition)
@@ -438,30 +515,119 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	// Write ResourceSpec directives (only if not in passthrough mode)
 	if specs.Spec != nil {
 		rs := specs.Spec
-		nodes := rs.Nodes
-		if nodes <= 0 {
-			nodes = 1
-		}
-		tasksPerNode := rs.TasksPerNode
-		if tasksPerNode <= 0 {
-			tasksPerNode = 1
-		}
 
-		// Generate resource specification: select=N:ncpus=M[:mpiprocs=P][:mem=Xmb][:ngpus=G]
-		selectParts := []string{fmt.Sprintf("select=%d", nodes)}
-		if rs.CpusPerTask > 0 {
-			selectParts = append(selectParts, fmt.Sprintf("ncpus=%d", rs.CpusPerTask))
+		// Generate select= directive when node count or task distribution is specified.
+		// Multi-chunk (when Ntasks % Nodes != 0) is handled below at line 541.
+		if rs.TasksPerNode > 0 || rs.Nodes > 0 {
+			nodes := rs.Nodes
+			if nodes <= 0 {
+				// Nodes unspecified: safe to default to 1 for single-task jobs.
+				// Multi-task jobs need an explicit node count to distribute correctly.
+				if rs.IsMPI() {
+					return "", fmt.Errorf("PBS requires an explicit node count (select=N) for multi-task jobs; Ntasks=%d but Nodes is unset", rs.GetNtasks())
+				}
+				nodes = 1
+			}
+			cpuPerTask := rs.CpusPerTask
+			if cpuPerTask < 1 {
+				cpuPerTask = 1
+			}
+			// Infer tasksPerNode when Ntasks divides evenly into Nodes.
+			tasksPerNode := rs.TasksPerNode
+			if tasksPerNode <= 0 && rs.Ntasks > 0 && nodes > 0 && rs.Ntasks%nodes == 0 {
+				tasksPerNode = rs.Ntasks / nodes
+			}
+
+			// Non-uniform distribution: Ntasks explicitly set and not divisible by Nodes.
+			// Emit two chunks: nFullNodes with ceil(Ntasks/Nodes) tasks, one remainder node.
+			if rs.Ntasks > 0 && nodes > 0 && rs.Ntasks%nodes != 0 {
+				if rs.Gpu != nil && rs.Gpu.Count > 0 {
+					return "", fmt.Errorf("PBS: GPU jobs require uniform task distribution (Ntasks=%d not divisible by Nodes=%d)", rs.Ntasks, nodes)
+				}
+				tasksPerNodeCeil := (rs.Ntasks + nodes - 1) / nodes
+				nFullNodes := rs.Ntasks / tasksPerNodeCeil
+				remainderTasks := rs.Ntasks % tasksPerNodeCeil
+				remainderNodes := nodes - nFullNodes
+				var memPerFullMB, memPerRemMB int64
+				if rs.MemPerCpuMB > 0 {
+					memPerFullMB = rs.MemPerCpuMB * int64(cpuPerTask*tasksPerNodeCeil)
+					memPerRemMB = rs.MemPerCpuMB * int64(cpuPerTask*remainderTasks)
+				} else if rs.MemPerNodeMB > 0 {
+					memPerFullMB = rs.MemPerNodeMB
+					memPerRemMB = rs.MemPerNodeMB
+				}
+				chunk1 := pbsSelectChunkBody(nFullNodes, cpuPerTask*tasksPerNodeCeil, tasksPerNodeCeil, memPerFullMB)
+				chunk2 := pbsSelectChunkBody(remainderNodes, cpuPerTask*remainderTasks, remainderTasks, memPerRemMB)
+				fmt.Fprintf(writer, "#PBS -l select=%s+%s\n", chunk1, chunk2)
+			} else {
+				// Uniform distribution: single-chunk select=.
+				if tasksPerNode <= 0 {
+					tasksPerNode = 1
+				}
+				// Compute mem per node using local tasksPerNode (may be inferred above).
+				var memMB int64
+				if rs.MemPerCpuMB > 0 {
+					memMB = rs.MemPerCpuMB * int64(cpuPerTask*tasksPerNode)
+				} else if rs.MemPerNodeMB > 0 {
+					memMB = rs.MemPerNodeMB
+				}
+				// Generate resource specification: select=N:ncpus=M[:mpiprocs=P][:mem=Xmb][:ngpus=G]
+				selectParts := []string{fmt.Sprintf("select=%d", nodes)}
+				if rs.CpusPerTask > 0 || tasksPerNode > 1 {
+					selectParts = append(selectParts, fmt.Sprintf("ncpus=%d", cpuPerTask*tasksPerNode))
+				}
+				if tasksPerNode > 1 {
+					selectParts = append(selectParts, fmt.Sprintf("mpiprocs=%d", tasksPerNode))
+				}
+				if memMB > 0 {
+					selectParts = append(selectParts, fmt.Sprintf("mem=%dmb", memMB))
+				}
+				if rs.Gpu != nil && rs.Gpu.Count > 0 {
+					selectParts = append(selectParts, fmt.Sprintf("ngpus=%d", rs.Gpu.Count))
+				}
+				fmt.Fprintf(writer, "#PBS -l %s\n", strings.Join(selectParts, ":"))
+			}
+		} else {
+			// TasksPerNode=0 and Nodes=0: either a passthrough multi-chunk job
+			// (non-uniform CpusPerTask/MemPerCpu across chunks), or a single-task
+			// job with no node specification.
+			// Passthrough: original -l select=...+... is in RemainingFlags (written above).
+			isMultiChunk := false
+			for _, f := range specs.RemainingFlags {
+				if strings.Contains(f, "select=") {
+					isMultiChunk = true
+					break
+				}
+			}
+			if !isMultiChunk {
+				// PBS select= requires at least a node count; reject multi-task jobs.
+				if rs.Ntasks > 1 {
+					return "", fmt.Errorf("PBS requires explicit Nodes or TasksPerNode for multi-task jobs (Ntasks=%d); set node count via select=N or equivalent", rs.Ntasks)
+				}
+				// Single task (Ntasks=0 or 1): default to select=1.
+				cpuPerTask := rs.CpusPerTask
+				if cpuPerTask < 1 {
+					cpuPerTask = 1
+				}
+				var memMB int64
+				if rs.MemPerCpuMB > 0 {
+					memMB = rs.MemPerCpuMB * int64(cpuPerTask)
+				} else if rs.MemPerNodeMB > 0 {
+					memMB = rs.MemPerNodeMB
+				}
+				selectParts := []string{"select=1"}
+				if cpuPerTask > 1 {
+					selectParts = append(selectParts, fmt.Sprintf("ncpus=%d", cpuPerTask))
+				}
+				if memMB > 0 {
+					selectParts = append(selectParts, fmt.Sprintf("mem=%dmb", memMB))
+				}
+				if rs.Gpu != nil && rs.Gpu.Count > 0 {
+					selectParts = append(selectParts, fmt.Sprintf("ngpus=%d", rs.Gpu.Count))
+				}
+				fmt.Fprintf(writer, "#PBS -l %s\n", strings.Join(selectParts, ":"))
+			}
 		}
-		if tasksPerNode > 1 {
-			selectParts = append(selectParts, fmt.Sprintf("mpiprocs=%d", tasksPerNode))
-		}
-		if rs.MemPerNodeMB > 0 {
-			selectParts = append(selectParts, fmt.Sprintf("mem=%dmb", rs.MemPerNodeMB))
-		}
-		if rs.Gpu != nil && rs.Gpu.Count > 0 {
-			selectParts = append(selectParts, fmt.Sprintf("ngpus=%d", rs.Gpu.Count))
-		}
-		fmt.Fprintf(writer, "#PBS -l %s\n", strings.Join(selectParts, ":"))
 
 		if rs.Time > 0 {
 			fmt.Fprintf(writer, "#PBS -l walltime=%s\n", formatHMSTime(rs.Time))
@@ -538,6 +704,22 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	}
 
 	return scriptPath, nil
+}
+
+// pbsSelectChunkBody builds the body of a single PBS select chunk (without the "select=" prefix).
+// Format: N[:ncpus=M][:mpiprocs=P][:mem=Xmb]
+func pbsSelectChunkBody(count, ncpus, mpiprocs int, memMB int64) string {
+	parts := []string{strconv.Itoa(count)}
+	if ncpus > 0 {
+		parts = append(parts, fmt.Sprintf("ncpus=%d", ncpus))
+	}
+	if mpiprocs > 1 {
+		parts = append(parts, fmt.Sprintf("mpiprocs=%d", mpiprocs))
+	}
+	if memMB > 0 {
+		parts = append(parts, fmt.Sprintf("mem=%dmb", memMB))
+	}
+	return strings.Join(parts, ":")
 }
 
 // Submit submits a PBS job with optional dependency chain
@@ -1113,7 +1295,6 @@ func parseGpuString(gpuStr string) (*GpuSpec, error) {
 }
 
 // GetJobResources reads allocated resources from PBS environment variables.
-// GetJobResources reads allocated resources from PBS environment variables.
 // Fields with value 0 were not exposed by PBS.
 func (s *PbsScheduler) GetJobResources() *ResourceSpec {
 	if _, ok := os.LookupEnv("PBS_JOBID"); !ok {
@@ -1123,23 +1304,39 @@ func (s *PbsScheduler) GetJobResources() *ResourceSpec {
 	if v := getEnvInt("PBS_NUM_NODES"); v != nil {
 		res.Nodes = *v
 	}
-	// PBS_NCPUS: total CPUs per node (some PBS variants)
-	if v := getEnvInt("PBS_NCPUS"); v != nil {
-		res.CpusPerTask = *v
-	} else if v := getEnvInt("NCPUS"); v != nil {
+	// NCPUS: cpus per task (= OMP_NUM_THREADS = ompthreads per select chunk).
+	// https://help.altair.com/2024.1.0/PBS%20Professional/PBSUserGuide2024.1.pdf#page=119
+	if v := getEnvInt("NCPUS"); v != nil {
 		res.CpusPerTask = *v
 	}
-	// Derive TasksPerNode from total tasks / nodes
-	ntasks := getEnvInt("PBS_NP")
+
+	// PBS_NP / PBS_TASKNUM: total MPI tasks across all nodes.
+	// Prefer MPI library env vars (global) over PBS vars when running under mpiexec.
+	ntasks := getMpiCommSize()
+	if ntasks == nil {
+		ntasks = getEnvInt("PBS_NP")
+	}
 	if ntasks == nil {
 		ntasks = getEnvInt("PBS_TASKNUM")
 	}
-	if ntasks != nil && res.Nodes > 0 {
-		res.TasksPerNode = *ntasks / res.Nodes
+	if ntasks != nil {
+		res.Ntasks = *ntasks
 	}
-	// PBS_VMEM is in bytes
+
+	// TasksPerNode: prefer MPI local size (actual tasks on this node)
+	if mpiLocal := getMpiLocalSize(); mpiLocal != nil {
+		res.TasksPerNode = *mpiLocal
+	} else if res.Ntasks > 0 && res.Nodes > 0 {
+		res.TasksPerNode = res.Ntasks / res.Nodes
+	}
+	// PBS_VMEM is total virtual memory in bytes across the job.
+	// Divide by node count to get per-node MB.
 	if vmem := getEnvInt64("PBS_VMEM"); vmem != nil {
-		if mb := *vmem / (1024 * 1024); mb > 0 {
+		nodes := res.Nodes
+		if nodes < 1 {
+			nodes = 1
+		}
+		if mb := *vmem / (1024 * 1024) / int64(nodes); mb > 0 {
 			res.MemPerNodeMB = mb
 		}
 	}

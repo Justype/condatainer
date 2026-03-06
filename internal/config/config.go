@@ -70,9 +70,6 @@ type Config struct {
 	// Dependency parsing
 	ParseModuleLoad bool // Parse "module load" / "ml" lines as dependencies (default: false)
 
-	// Scheduler default specs
-	Scheduler scheduler.ResourceSpec
-
 	// Build configuration
 	Build BuildConfig
 }
@@ -137,14 +134,6 @@ func LoadDefaults(executablePath string) {
 
 		ScriptsLink:  DefaultScriptsLink,
 		PrebuiltLink: DefaultPrebuiltLink,
-
-		Scheduler: scheduler.ResourceSpec{
-			Nodes:        1,
-			TasksPerNode: 1,
-			CpusPerTask:  2,
-			MemPerNodeMB: 8192,          // 8GB
-			Time:         4 * time.Hour, // 4 hours
-		},
 
 		Build: BuildConfig{
 			Defaults: scheduler.ResourceSpec{

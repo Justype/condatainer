@@ -91,13 +91,6 @@ func setDefaults() {
 	// Each directory should contain images/, build-scripts/, helper-scripts/ subdirectories
 	viper.SetDefault("extra_base_dirs", []string{})
 
-	// Scheduler default specs (used when parsing scripts without explicit resource directives)
-	viper.SetDefault("scheduler.nodes", 1)
-	viper.SetDefault("scheduler.tasks_per_node", 1)
-	viper.SetDefault("scheduler.ncpus_per_task", 2)
-	viper.SetDefault("scheduler.mem_per_node_mb", 8192)
-	viper.SetDefault("scheduler.time", "4h")
-
 	// Build config defaults
 	viper.SetDefault("build.ncpus", 4)
 	viper.SetDefault("build.mem_mb", 8192)
@@ -492,25 +485,6 @@ func LoadFromViper() {
 			Global.DefaultDistro = DEFAULT_DISTRO
 		}
 		Global.DefaultDistro = distro
-	}
-
-	// Load scheduler default specs from Viper
-	if nodes := viper.GetInt("scheduler.nodes"); nodes > 0 {
-		Global.Scheduler.Nodes = nodes
-	}
-	if tasksPerNode := viper.GetInt("scheduler.tasks_per_node"); tasksPerNode > 0 {
-		Global.Scheduler.TasksPerNode = tasksPerNode
-	}
-	if ncpusPerTask := viper.GetInt("scheduler.ncpus_per_task"); ncpusPerTask > 0 {
-		Global.Scheduler.CpusPerTask = ncpusPerTask
-	}
-	if memMBPerNode := viper.GetInt64("scheduler.mem_per_node_mb"); memMBPerNode > 0 {
-		Global.Scheduler.MemPerNodeMB = memMBPerNode
-	}
-	if schedTime := viper.GetString("scheduler.time"); schedTime != "" {
-		if dur, err := utils.ParseWalltime(schedTime); err == nil {
-			Global.Scheduler.Time = dur
-		}
 	}
 
 	// Load build config from Viper

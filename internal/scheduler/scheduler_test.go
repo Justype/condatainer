@@ -8,20 +8,20 @@ import (
 
 func TestSpecDefaultsInitialValues(t *testing.T) {
 	defaults := GetSpecDefaults()
-	if defaults.CpusPerTask != 2 {
-		t.Errorf("CpusPerTask = %d; want 2", defaults.CpusPerTask)
+	if defaults.CpusPerTask != 1 {
+		t.Errorf("CpusPerTask = %d; want 1", defaults.CpusPerTask)
 	}
-	if defaults.Nodes != 1 {
-		t.Errorf("Nodes = %d; want 1", defaults.Nodes)
+	if defaults.Nodes != 0 {
+		t.Errorf("Nodes = %d; want 0", defaults.Nodes)
 	}
-	if defaults.TasksPerNode != 1 {
-		t.Errorf("TasksPerNode = %d; want 1", defaults.TasksPerNode)
+	if defaults.TasksPerNode != 0 {
+		t.Errorf("TasksPerNode = %d; want 0", defaults.TasksPerNode)
 	}
-	if defaults.MemPerNodeMB != 8192 {
-		t.Errorf("MemPerNodeMB = %d; want 8192", defaults.MemPerNodeMB)
+	if defaults.MemPerNodeMB != 1024 {
+		t.Errorf("MemPerNodeMB = %d; want 1024", defaults.MemPerNodeMB)
 	}
-	if defaults.Time != 4*time.Hour {
-		t.Errorf("Time = %v; want 4h", defaults.Time)
+	if defaults.Time != 2*time.Hour {
+		t.Errorf("Time = %v; want 2h", defaults.Time)
 	}
 }
 

@@ -135,12 +135,22 @@ func (h *HTCondorScheduler) getHTCondorVersion() (string, error) {
 
 // ReadScriptSpecs parses an HTCondor submit file (.sub) in native key=value format.
 // The executable line is extracted as the ScriptPath.
+// Relative executable paths are resolved: first against initialdir (if set), then
+// against the process CWD — matching real HTCondor behaviour and ensuring ScriptPath
+// is always absolute.
 func (h *HTCondorScheduler) ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error) {
 	lines, err := readFileLines(scriptPath)
 	if err != nil {
 		return nil, err
 	}
-	executable := extractHTCondorExecutable(lines)
+	executable, initialDir := extractHTCondorHeader(lines)
+	if executable != "" && !filepath.IsAbs(executable) {
+		if initialDir != "" {
+			executable = filepath.Join(initialDir, executable)
+		} else if abs, err := filepath.Abs(executable); err == nil {
+			executable = abs
+		}
+	}
 	return parseScript(executable, lines, h.extractDirectives, h.parseRuntimeConfig, h.parseResourceSpec)
 }
 
@@ -163,6 +173,7 @@ var htcondorKnownKeys = map[string]bool{
 	// Runtime config (parseRuntimeConfig)
 	"output": true, "log": true, "error": true,
 	"notify_user": true, "accounting_group": true, "notification": true,
+	"initialdir": true,
 	// Resource spec (parseResourceSpec)
 	"request_cpus": true, "request_memory": true, "request_gpus": true,
 	"+maxruntime": true,
@@ -193,19 +204,32 @@ func (h *HTCondorScheduler) extractDirectives(lines []string) []string {
 	return out
 }
 
-// extractHTCondorExecutable finds the executable path from HTCondor submit file lines.
-func extractHTCondorExecutable(lines []string) string {
+// extractHTCondorHeader scans submit file lines for the executable and initialdir values.
+// Both may affect relative path resolution: a relative executable is resolved against
+// initialdir when present (HTCondor's documented behaviour).
+func extractHTCondorHeader(lines []string) (executable, initialDir string) {
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") || trimmed == "" {
 			continue
 		}
 		parts := strings.SplitN(trimmed, "=", 2)
-		if len(parts) == 2 && strings.TrimSpace(strings.ToLower(parts[0])) == "executable" {
-			return strings.TrimSpace(parts[1])
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(strings.ToLower(parts[0]))
+		val := strings.TrimSpace(parts[1])
+		switch key {
+		case "executable":
+			executable = val
+		case "initialdir":
+			initialDir = absPath(val)
+		}
+		if executable != "" && initialDir != "" {
+			break
 		}
 	}
-	return ""
+	return
 }
 
 // parseRuntimeConfig consumes job control directives (name, I/O, email) from the directive list.
@@ -226,14 +250,16 @@ func (h *HTCondorScheduler) parseRuntimeConfig(directives []string) (RuntimeConf
 		consumed := true
 
 		switch key {
-		case "output", "log":
-			rc.Stdout = absPath(value)
+		case "output":
+			rc.Stdout = value
 		case "error":
-			rc.Stderr = absPath(value)
+			rc.Stderr = value
 		case "notify_user":
 			rc.MailUser = value
 		case "accounting_group":
 			rc.Partition = value
+		case "initialdir":
+			rc.WorkDir = absPath(value)
 		case "notification":
 			switch strings.ToLower(value) {
 			case "always":
@@ -433,6 +459,9 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	fmt.Fprintln(subWriter, "universe = vanilla")
 	fmt.Fprintf(subWriter, "executable = %s\n", shPath)
 	fmt.Fprintln(subWriter, "transfer_executable = false")
+	if specs.Control.WorkDir != "" {
+		fmt.Fprintf(subWriter, "initialdir = %s\n", specs.Control.WorkDir)
+	}
 	fmt.Fprintln(subWriter, "")
 
 	// Write unrecognized flags (RemainingFlags only contains flags not parsed into typed fields)
@@ -456,10 +485,10 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 		fmt.Fprintf(subWriter, "error = %s\n", perTaskLog)
 	} else {
 		if specs.Control.Stdout != "" {
-			fmt.Fprintf(subWriter, "output = %s\n", specs.Control.Stdout)
+			fmt.Fprintf(subWriter, "output = %s\n", specs.Control.AbsStdout())
 		}
 		if specs.Control.Stderr != "" {
-			fmt.Fprintf(subWriter, "error = %s\n", specs.Control.Stderr)
+			fmt.Fprintf(subWriter, "error = %s\n", specs.Control.AbsStderr())
 		}
 	}
 	condorLogPath := filepath.Join(outputDir, fmt.Sprintf("%s.condor.log", name))

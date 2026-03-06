@@ -94,9 +94,9 @@ func init() {
 	runCmd.Flags().BoolVar(&runParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
 	runCmd.Flags().StringVarP(&runStdout, "output", "o", "", "Override job stdout path (creates parent dir if needed)")
 	runCmd.Flags().StringVarP(&runStderr, "error", "e", "", "Override job stderr path")
-	runCmd.Flags().StringVar(&runAfterOK,    "afterok",    "", "Run after jobs succeed (colon-separated IDs, e.g. 123:456)")
+	runCmd.Flags().StringVar(&runAfterOK, "afterok", "", "Run after jobs succeed (colon-separated IDs, e.g. 123:456)")
 	runCmd.Flags().StringVar(&runAfterNotOK, "afternotok", "", "Run after jobs fail (colon-separated IDs)")
-	runCmd.Flags().StringVar(&runAfterAny,   "afterany",   "", "Run after jobs finish regardless of outcome (colon-separated IDs)")
+	runCmd.Flags().StringVar(&runAfterAny, "afterany", "", "Run after jobs finish regardless of outcome (colon-separated IDs)")
 	runCmd.Flags().StringArrayVar(&runEnvSettings, "env", nil, "Set environment variable KEY=VALUE (repeatable)")
 	runCmd.Flags().StringArrayVar(&runBindPaths, "bind", nil, "Bind mount HOST:CONTAINER (repeatable)")
 	runCmd.Flags().BoolVarP(&runFakeroot, "fakeroot", "f", false, "Run with fakeroot privileges")
@@ -228,12 +228,10 @@ func runScript(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Passthrough + cross-scheduler mismatch: directives are cleared during translation and lost.
+	// Passthrough mode: resource directives could not be parsed; condatainer cannot safely
+	// regenerate the scheduler script. Reject submission and direct the user to submit manually.
 	if scheduler.IsPassthrough(scriptSpecs) {
-		if hostType := scheduler.DetectType(); hostType != scheduler.SchedulerUnknown && scriptSpecs.ScriptType != hostType {
-			ExitWithError("script contains %s passthrough directives that cannot be translated to %s; rewrite the directives for %s or submit with the native %s scheduler",
-				scriptSpecs.ScriptType, hostType, hostType, scriptSpecs.ScriptType)
-		}
+		ExitWithError("script %q has scheduler directives that could not be fully parsed (passthrough mode); please submit it manually", originScriptPath)
 	}
 
 	// Blank lines in the array input file are only warned about in dry-run; error here
@@ -291,9 +289,9 @@ func runScript(cmd *cobra.Command, args []string) error {
 					deps = append(deps, scheduler.Dependency{Type: depType, JobIDs: ids})
 				}
 			}
-			parseDepFlag(runAfterOK,    scheduler.DependencyAfterOK)
+			parseDepFlag(runAfterOK, scheduler.DependencyAfterOK)
 			parseDepFlag(runAfterNotOK, scheduler.DependencyAfterNotOK)
-			parseDepFlag(runAfterAny,   scheduler.DependencyAfterAny)
+			parseDepFlag(runAfterAny, scheduler.DependencyAfterAny)
 			return submitRunJob(sched, originScriptPath, contentScript, scriptSpecs, deps, scriptArgs, arraySpec)
 		}
 	} else if !scheduler.HasSchedulerSpecs(scriptSpecs) {
@@ -317,12 +315,12 @@ func resolveScriptAndSpecs(scriptPath string) (string, *scheduler.ScriptSpecs) {
 	}
 	contentScript := scriptPath
 	if specs != nil && specs.ScriptPath != "" && specs.ScriptPath != scriptPath {
-		p := specs.ScriptPath
-		if !filepath.IsAbs(p) {
-			// Resolve relative executable paths against the directory of the submit file
-			p = filepath.Join(filepath.Dir(scriptPath), p)
+		contentScript = specs.ScriptPath
+	}
+	if !filepath.IsAbs(contentScript) {
+		if abs, err := filepath.Abs(contentScript); err == nil {
+			contentScript = abs
 		}
-		contentScript = p
 	}
 	return contentScript, specs
 }
@@ -571,7 +569,7 @@ export -f module ml
 
 // printDryRunSummary prints what condatainer run would do without executing.
 func printDryRunSummary(contentScript, originScript string, specs *scheduler.ScriptSpecs, scriptArgs []string, arraySpec *scheduler.ArraySpec) {
-	fmt.Printf("%s %s\n", utils.StyleTitle("Dry run:"), originScript)
+	fmt.Printf("%s %s\n", utils.StyleTitle("Dry run:"), specs.ScriptPath)
 
 	// Dependencies
 	baseImg := runBaseImage
@@ -592,13 +590,23 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 			dep, path string
 			ok        bool
 		}
+		// Resolve the working directory for relative overlay path checks.
+		workDir := specs.Control.WorkDir
+		if workDir == "" {
+			workDir, _ = os.Getwd()
+		}
+
 		entries := make([]depEntry, 0, len(deps))
 		for _, dep := range deps {
 			var entry depEntry
 			entry.dep = dep
 			if utils.IsOverlay(dep) {
-				entry.ok = utils.FileExists(dep)
-				entry.path = dep
+				p := dep
+				if !filepath.IsAbs(p) {
+					p = filepath.Join(workDir, p)
+				}
+				entry.ok = utils.FileExists(p)
+				entry.path = p
 			} else {
 				normalized := utils.NormalizeNameVersion(dep)
 				entry.path, entry.ok = installedOverlays[normalized]
@@ -623,9 +631,9 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 
 		// Base image
 		if utils.FileExists(baseImg) {
-			fmt.Printf("  Base:      %s %s\n", check, utils.StylePath(baseImg))
+			fmt.Printf("  Base:       %s %s\n", check, utils.StylePath(baseImg))
 		} else {
-			fmt.Printf("  Base:      %s %s %s\n", cross, utils.StylePath(baseImg), utils.StyleWarning("(not found)"))
+			fmt.Printf("  Base:       %s %s %s\n", cross, utils.StylePath(baseImg), utils.StyleWarning("(not found)"))
 		}
 
 		// External overlays (direct path): show under "External:" header; installed: group by folder
@@ -682,53 +690,75 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 	} else if specs != nil && specs.Spec != nil {
 		rs := effectiveResourceSpec(specs)
 		fmt.Printf("%s\n", utils.StyleTitle("Resource specs:"))
-		if rs.CpusPerTask > 0 {
-			fmt.Printf("  CPUs:      %d\n", rs.CpusPerTask)
+		ntasks := getNtasks(specs)
+		isMPI := ntasks > 1
+
+		if isMPI {
+			// MPI or Hybrid: show task geometry first
+			fmt.Printf("  MPI Tasks:  %d\n", ntasks)
+			if rs.Nodes > 0 {
+				fmt.Printf("  Nodes:      %d\n", rs.Nodes)
+			}
+			if rs.TasksPerNode > 0 {
+				fmt.Printf("  Tasks/Node: %d\n", rs.TasksPerNode)
+			}
+			if rs.CpusPerTask > 1 {
+				// Hybrid: also show per-task thread count
+				fmt.Printf("  CPU/Task:   %d\n", rs.CpusPerTask)
+			}
+		} else {
+			// Pure OpenMP / single-task
+			if rs.CpusPerTask > 0 {
+				fmt.Printf("  CPU/Task:   %d\n", rs.CpusPerTask)
+			}
 		}
-		if rs.MemPerNodeMB > 0 {
+
+		if rs.MemPerCpuMB > 0 {
+			fmt.Printf("  Mem/CPU:    %d MB\n", rs.MemPerCpuMB)
+		} else if rs.MemPerNodeMB > 0 {
 			if rs.MemPerNodeMB >= 1024 && rs.MemPerNodeMB%1024 == 0 {
-				fmt.Printf("  Memory:    %d GB\n", rs.MemPerNodeMB/1024)
+				fmt.Printf("  Mem/Node:   %d GB\n", rs.MemPerNodeMB/1024)
 			} else {
-				fmt.Printf("  Memory:    %d MB\n", rs.MemPerNodeMB)
+				fmt.Printf("  Mem/Node:   %d MB\n", rs.MemPerNodeMB)
 			}
 		}
 		if rs.Time > 0 {
 			total := int64(rs.Time.Seconds())
-			fmt.Printf("  Time:      %02d:%02d:%02d\n", total/3600, (total%3600)/60, total%60)
+			fmt.Printf("  Time:       %02d:%02d:%02d\n", total/3600, (total%3600)/60, total%60)
 		}
 		if rs.Gpu != nil {
 			if rs.Gpu.Type != "" {
-				fmt.Printf("  GPU:       %s x%d\n", rs.Gpu.Type, rs.Gpu.Count)
+				fmt.Printf("  GPU:        %s x%d\n", rs.Gpu.Type, rs.Gpu.Count)
 			} else {
-				fmt.Printf("  GPU:       %d\n", rs.Gpu.Count)
+				fmt.Printf("  GPU:        %d\n", rs.Gpu.Count)
 			}
 		}
-		ntasks := getNtasks(specs)
-		if ntasks > 1 {
-			if rs.Nodes > 0 {
-				fmt.Printf("  Nodes:     %d\n", rs.Nodes)
-			}
-			if rs.TasksPerNode > 0 {
-				fmt.Printf("  Tasks/node: %d\n", rs.TasksPerNode)
-			}
-			fmt.Printf("  MPI tasks: %d\n", ntasks)
+		if rs.Exclusive {
+			fmt.Printf("  Exclusive:  yes\n")
+		}
+		if isMPI {
 			mpiexecPath, ok := detectMpi()
 			if !ok {
-				fmt.Printf("  mpiexec:   %s\n", utils.StyleError("not found"))
+				fmt.Printf("  mpiexec:    %s\n", utils.StyleError("not found"))
 			} else {
-				fmt.Printf("  mpiexec:   %s\n", utils.StylePath(mpiexecPath))
+				fmt.Printf("  mpiexec:    %s\n", utils.StylePath(mpiexecPath))
 			}
 		}
 
 		fmt.Printf("%s\n", utils.StyleTitle("Job control:"))
 		scriptBase := strings.TrimSuffix(filepath.Base(originScript), filepath.Ext(originScript))
 		if specs.Control.JobName != "" {
-			fmt.Printf("  Name:      %s\n", specs.Control.JobName)
+			fmt.Printf("  Name:       %s\n", specs.Control.JobName)
 		} else {
-			fmt.Printf("  Name:      %s (default)\n", scriptBase)
+			fmt.Printf("  Name:       %s (default)\n", scriptBase)
+		}
+		if specs.Control.WorkDir != "" {
+			fmt.Printf("  WorkDir:    %s\n", specs.Control.WorkDir)
+		} else {
+			fmt.Printf("  WorkDir:    . (default)\n")
 		}
 		if specs.Control.Partition != "" {
-			fmt.Printf("  Partition: %s\n", specs.Control.Partition)
+			fmt.Printf("  Partition:  %s\n", specs.Control.Partition)
 		}
 		logsDir := config.Global.LogsDir
 		if logsDir == "" {
@@ -736,20 +766,20 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		}
 		defaultOut := filepath.Join(logsDir, scriptBase+"_<timestamp>.out")
 		if specs.Control.Stdout != "" {
-			fmt.Printf("  Stdout:    %s\n", specs.Control.Stdout)
+			fmt.Printf("  Stdout:     %s\n", specs.Control.AbsStdout())
 		} else {
-			fmt.Printf("  Stdout:    %s (default)\n", defaultOut)
+			fmt.Printf("  Stdout:     %s (default)\n", defaultOut)
 		}
 		if specs.Control.Stderr != "" {
-			fmt.Printf("  Stderr:    %s\n", specs.Control.Stderr)
+			fmt.Printf("  Stderr:     %s\n", specs.Control.AbsStderr())
 		} else if specs.Control.Stdout != "" {
-			fmt.Printf("  Stderr:    %s (default)\n", specs.Control.Stdout)
+			fmt.Printf("  Stderr:     %s (default)\n", specs.Control.AbsStdout())
 		} else {
-			fmt.Printf("  Stderr:    %s (default)\n", defaultOut)
+			fmt.Printf("  Stderr:     %s (default)\n", defaultOut)
 		}
 
 		if arraySpec != nil {
-			arrayLine := fmt.Sprintf("  Array:     %d subjobs from %s", arraySpec.Count, utils.StylePath(arraySpec.InputFile))
+			arrayLine := fmt.Sprintf("  Array:      %d subjobs from %s", arraySpec.Count, utils.StylePath(arraySpec.InputFile))
 			if arraySpec.Limit > 0 {
 				arrayLine += fmt.Sprintf(" (max %d concurrent)", arraySpec.Limit)
 			}
@@ -760,13 +790,13 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 			}
 		}
 		if runAfterOK != "" {
-			fmt.Printf("  AfterOK:    %s\n", runAfterOK)
+			fmt.Printf("  AfterOK:     %s\n", runAfterOK)
 		}
 		if runAfterNotOK != "" {
-			fmt.Printf("  AfterNotOK: %s\n", runAfterNotOK)
+			fmt.Printf("  AfterNotOK:  %s\n", runAfterNotOK)
 		}
 		if runAfterAny != "" {
-			fmt.Printf("  AfterAny:   %s\n", runAfterAny)
+			fmt.Printf("  AfterAny:    %s\n", runAfterAny)
 		}
 
 		// Email Notifications
@@ -785,7 +815,7 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 			if specs.Control.MailUser != "" {
 				mailStr += " to " + specs.Control.MailUser
 			}
-			fmt.Printf("  Mail:      %s\n", mailStr)
+			fmt.Printf("  Mail:       %s\n", mailStr)
 		}
 	}
 
@@ -794,16 +824,16 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 	if hasContainerArgs {
 		fmt.Printf("%s\n", utils.StyleTitle("Container args:"))
 		for _, env := range runEnvSettings {
-			fmt.Printf("  Env:       %s\n", env)
+			fmt.Printf("  Env:        %s\n", env)
 		}
 		for _, bind := range runBindPaths {
-			fmt.Printf("  Bind:      %s\n", bind)
+			fmt.Printf("  Bind:       %s\n", bind)
 		}
 		if runFakeroot {
-			fmt.Printf("  Fakeroot:  yes\n")
+			fmt.Printf("  Fakeroot:   yes\n")
 		}
 		if runWritableImg {
-			fmt.Printf("  Writable:  yes\n")
+			fmt.Printf("  Writable:   yes\n")
 		}
 	}
 
@@ -835,13 +865,8 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 	} else if config.IsInsideContainer() {
 		fmt.Printf("%s Would run locally (in container)\n", utils.StyleTitle("Action:"))
 	} else if scheduler.IsPassthrough(specs) {
-		hostType := scheduler.DetectType()
-		if hostType != scheduler.SchedulerUnknown && specs.ScriptType != hostType {
-			fmt.Printf("%s %s\n", utils.StyleTitle("Action:"),
-				utils.StyleError(fmt.Sprintf("Would fail — %s passthrough directives cannot be submitted to %s", specs.ScriptType, hostType)))
-		} else {
-			fmt.Printf("%s Would submit to %s (passthrough)\n", utils.StyleTitle("Action:"), hostType)
-		}
+		fmt.Printf("%s %s\n", utils.StyleTitle("Action:"),
+			utils.StyleError("Would fail — directives not fully parsed (passthrough mode); please submit it manually"))
 	} else if config.Global.SubmitJob && scheduler.HasSchedulerSpecs(specs) {
 		sched, err := scheduler.DetectScheduler()
 		if err != nil || !sched.IsAvailable() {
@@ -1018,16 +1043,7 @@ func getNtasks(specs *scheduler.ScriptSpecs) int {
 	if specs == nil || specs.Spec == nil {
 		return 1
 	}
-	rs := effectiveResourceSpec(specs)
-	nodes := rs.Nodes
-	if nodes <= 0 {
-		nodes = 1
-	}
-	tpn := rs.TasksPerNode
-	if tpn <= 0 {
-		tpn = 1
-	}
-	return nodes * tpn
+	return effectiveResourceSpec(specs).GetNtasks()
 }
 
 // detectMpi checks whether mpiexec is available in the current PATH.
@@ -1065,7 +1081,7 @@ func buildMpiRunCommand(contentScript string, scriptArgs []string, specs *schedu
 		return "", fmt.Errorf("mpiexec not found; load the appropriate MPI module before submitting (ntasks=%d)", getNtasks(specs))
 	}
 	utils.PrintNote("Detected mpiexec: %s", utils.StylePath(mpiexecPath))
-	return fmt.Sprintf("%s %s", mpiexecPath, runCmd), nil
+	return fmt.Sprintf("%s -n %d %s", mpiexecPath, getNtasks(specs), runCmd), nil
 }
 
 // shellQuote returns a single-quoted shell-safe version of s.
@@ -1140,14 +1156,7 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 	// Determine log directory - use spec's Stdout path if set, otherwise global log path
 	var logsDir string
 	if specs.Control.Stdout != "" {
-		// Ensure absolute path
-		logPath := specs.Control.Stdout
-		if !filepath.IsAbs(logPath) {
-			if abs, err := filepath.Abs(logPath); err == nil {
-				logPath = abs
-			}
-		}
-		logsDir = filepath.Dir(logPath)
+		logsDir = filepath.Dir(specs.Control.AbsStdout())
 	} else {
 		// Use global log path
 		logsDir = config.Global.LogsDir
@@ -1229,8 +1238,8 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 			utils.PrintMessage("Per-subjob stdout&err => %s", utils.StylePath(filepath.Join(logsDir, safeName+"_*.log")))
 		}
 	} else {
-		stdoutPath := jobSpec.Specs.Control.Stdout
-		stderrPath := jobSpec.Specs.Control.Stderr
+		stdoutPath := jobSpec.Specs.Control.AbsStdout()
+		stderrPath := jobSpec.Specs.Control.AbsStderr()
 		if stdoutPath != "" {
 			if stderrPath == "" || stdoutPath == stderrPath {
 				utils.PrintMessage("Stdout & Stderr => %s", utils.StylePath(stdoutPath))

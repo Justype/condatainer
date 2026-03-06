@@ -109,7 +109,7 @@ func TestParseScriptMetadata_NcpusFromPBS(t *testing.T) {
 	}
 	defer os.Remove(tmp.Name())
 
-	content := "#!/bin/bash\n#PBS -l ncpus=16\necho hi\n"
+	content := "#!/bin/bash\n#PBS -l select=1:ncpus=16\necho hi\n"
 	if _, err := tmp.WriteString(content); err != nil {
 		t.Fatalf("failed to write to temp file: %v", err)
 	}

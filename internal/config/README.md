@@ -86,13 +86,6 @@ parse_module_load: false
 extra_base_dirs:
   - "/custom/path/condatainer"
 
-scheduler:
-  nodes: 1
-  tasks_per_node: 1
-  ncpus_per_task: 2
-  mem_per_node_mb: 8192
-  time: "4h"
-
 build:
   ncpus: 4
   mem_mb: 8192

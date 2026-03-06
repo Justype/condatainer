@@ -10,6 +10,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -87,9 +88,22 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		if parseErr != nil {
 			return fmt.Errorf("failed to parse dependencies from %s: %w", scriptPath, parseErr)
 		}
+
+		// Resolve working directory: use scheduler specs WorkDir, else script's directory.
+		workDir := filepath.Dir(scriptPath)
+		if specs, _ := scheduler.ReadScriptSpecsFromPath(scriptPath); specs != nil && specs.Control.WorkDir != "" {
+			workDir = specs.Control.WorkDir
+		}
+
 		for _, dep := range scriptDeps {
 			key := dep
-			if !utils.IsOverlay(dep) {
+			if utils.IsOverlay(dep) {
+				// Resolve relative overlay paths against the script's working directory.
+				if !filepath.IsAbs(dep) {
+					dep = filepath.Join(workDir, dep)
+				}
+				key = dep
+			} else {
 				key = utils.NormalizeNameVersion(dep)
 			}
 			if !seen[key] {
