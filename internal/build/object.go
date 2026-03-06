@@ -389,8 +389,9 @@ func getCntDirPath(nameVersion, tmpDir string) string {
 	return filepath.Join(tmpDir, buildDirName, "cnt")
 }
 
-// getTmpOverlayPath returns the temporary overlay path
-// Format: <tmpDir>/<nameVersion>.sqf (with / replaced by --)
+// getTmpOverlayPath returns the temporary overlay path for ext3 builds (script/conda).
+// Format: <tmpDir>/<nameVersion>.img (with / replaced by --)
+// For def builds, the caller changes the extension to .sif.
 func getTmpOverlayPath(nameVersion, tmpDir string) string {
 	filename := strings.ReplaceAll(nameVersion, "/", "--") + ".img"
 	return filepath.Join(tmpDir, filename)
@@ -491,21 +492,22 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 
 // FromExternalSource creates a BuildObject from an external build script or def file
 // All overlays are stored in imagesDir regardless of type
-func FromExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, imagesDir, tmpDir string) (BuildObject, error) {
+func FromExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, imagesDir string) (BuildObject, error) {
 	nameVersion := filepath.Base(targetPrefix)
 	nameVersion = utils.NormalizeNameVersion(nameVersion)
-
-	// Make tmpDir absolute
-	if absDir, err := filepath.Abs(tmpDir); err == nil {
-		tmpDir = absDir
-	}
 
 	// Determine build type from source file extension
 	isDef := isApptainer || strings.HasSuffix(source, ".def")
 	isShell := strings.HasSuffix(source, ".sh") || strings.HasSuffix(source, ".bash")
 
-	cntDirPath := getCntDirPath(nameVersion, tmpDir)
-	tmpOverlayPath := getTmpOverlayPath(nameVersion, tmpDir)
+	targetDir := filepath.Dir(targetPrefix)
+	cntDirPath := getCntDirPath(nameVersion, targetDir)
+	// Def builds produce a SIF; shell/conda builds produce ext3
+	tmpExt := ".img"
+	if isDef {
+		tmpExt = ".sif"
+	}
+	tmpOverlayPath := strings.TrimSuffix(getTmpOverlayPath(nameVersion, targetDir), ".img") + tmpExt
 
 	utils.PrintDebug("[BUILD OBJECT] Creating external %s: source=%s, targetPrefix=%s, tmpOverlay=%s, cntDir=%s", nameVersion, source, targetPrefix, tmpOverlayPath, cntDirPath)
 
@@ -560,7 +562,8 @@ func createConcreteType(ctx context.Context, base *BaseBuildObject, isRef bool, 
 	}
 
 	if isContainer {
-		// It's a .def file
+		// Def builds produce a SIF file, not ext3 — update the tmp extension
+		base.tmpOverlayPath = strings.TrimSuffix(base.tmpOverlayPath, ".img") + ".sif"
 		return newDefBuildObject(base)
 	}
 
