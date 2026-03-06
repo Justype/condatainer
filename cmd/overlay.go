@@ -277,6 +277,21 @@ Multiple paths can be specified using multiple -p flags.`,
 }
 
 // ---------------------------------------------------------
+// 6. Export Command
+// ---------------------------------------------------------
+
+var exportCmd = &cobra.Command{
+	Use:   "export [overlay_path]",
+	Short: "Export a conda environment from an overlay",
+	Long: `Export a Micromamba/Conda environment from a persistent overlay.
+
+For .img overlays the environment prefix is /ext3/env.
+For .sqf module overlays the environment prefix is /cnt/<name>/<version>.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runExportOverlay,
+}
+
+// ---------------------------------------------------------
 // Helper: Shell Completion
 // ---------------------------------------------------------
 
@@ -304,6 +319,7 @@ func init() {
 	overlayCmd.AddCommand(infoCmd)
 	overlayCmd.AddCommand(checkCmd)
 	overlayCmd.AddCommand(chownCmd)
+	overlayCmd.AddCommand(exportCmd)
 
 	// 3. Define flags
 
@@ -355,6 +371,96 @@ func init() {
 	chownCmd.Flags().IntP("gid", "g", os.Getgid(), "Group ID to set")
 	chownCmd.Flags().Bool("root", false, "Set UID and GID to 0 (root); overrides -u and -g")
 	chownCmd.Flags().StringArrayP("path", "p", []string{"/"}, "Path inside the overlay (can specify multiple)")
+
+	// --- Export ---
+	exportCmd.Flags().BoolP("explicit", "e", false, "Use explicit format")
+	exportCmd.Flags().Bool("no-md5", false, "Disable md5")
+	exportCmd.Flags().Bool("no-build", false, "Disable the build string in spec")
+	exportCmd.Flags().Bool("no-builds", false, "Disable the build string in spec (alias)")
+	exportCmd.Flags().Bool("channel-subdir", false, "Enable channel/subdir in spec")
+	exportCmd.Flags().Bool("from-history", false, "Build environment spec from history")
+	exportCmd.Flags().Bool("json", false, "Report all output as json")
+}
+
+// runExportOverlay runs mm-export (micromamba env export) inside a mounted overlay.
+func runExportOverlay(cmd *cobra.Command, args []string) error {
+	overlayPath := args[0]
+
+	if !utils.FileExists(overlayPath) && !utils.DirExists(overlayPath) {
+		return fmt.Errorf("overlay %s not found", overlayPath)
+	}
+
+	// Build micromamba export args
+	flagsArgs := []string{}
+	explicit, _ := cmd.Flags().GetBool("explicit")
+	noMD5, _ := cmd.Flags().GetBool("no-md5")
+	noBuild, _ := cmd.Flags().GetBool("no-build")
+	noBuilds, _ := cmd.Flags().GetBool("no-builds")
+	channelSubdir, _ := cmd.Flags().GetBool("channel-subdir")
+	fromHistory, _ := cmd.Flags().GetBool("from-history")
+	jsonOut, _ := cmd.Flags().GetBool("json")
+
+	if explicit {
+		flagsArgs = append(flagsArgs, "-e")
+	}
+	if noMD5 {
+		flagsArgs = append(flagsArgs, "--no-md5")
+	}
+	if noBuild || noBuilds {
+		flagsArgs = append(flagsArgs, "--no-builds")
+	}
+	if channelSubdir {
+		flagsArgs = append(flagsArgs, "--channel-subdir")
+	}
+	if fromHistory {
+		flagsArgs = append(flagsArgs, "--from-history")
+	}
+	if jsonOut {
+		flagsArgs = append(flagsArgs, "--json")
+	}
+
+	// Determine internal prefix to export from
+	envPrefix := ""
+	if utils.IsImg(overlayPath) {
+		// For .img overlays export from /ext3/env (standard location)
+		envPrefix = "/ext3/env"
+		if !overlay.PathExists(overlayPath, "/ext3/env/conda-meta") {
+			cmd.SilenceUsage = true
+			return fmt.Errorf("overlay %s does not contain a conda environment at /ext3/env (missing conda-meta)", overlayPath)
+		}
+	} else if utils.IsSqf(overlayPath) {
+		// For .sqf overlays: derive name/version from filename
+		base := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
+		nv := utils.NormalizeNameVersion(base)
+		if !overlay.PathExists(overlayPath, "/cnt/"+nv+"/conda-meta") {
+			cmd.SilenceUsage = true
+			return fmt.Errorf("overlay %s does not contain a conda environment at /cnt/%s (missing conda-meta)", overlayPath, nv)
+		}
+		envPrefix = "/cnt/" + nv
+	} else {
+		cmd.SilenceUsage = true
+		return fmt.Errorf("unsupported overlay type: %s", overlayPath)
+	}
+
+	// Build final command: micromamba -p <prefix> env export [flags]
+	cmdArgs := []string{"micromamba", "-p", envPrefix, "env", "export"}
+	if len(flagsArgs) > 0 {
+		cmdArgs = append(cmdArgs, flagsArgs...)
+	}
+
+	opts := exec.Options{
+		Overlays:    []string{overlayPath},
+		Command:     cmdArgs,
+		WritableImg: false,
+		EnvSettings: []string{},
+		HideOutput:  false,
+		HidePrompt:  true,
+	}
+
+	if err := exec.Run(cmd.Context(), opts); err != nil {
+		return fmt.Errorf("failed to export environment: %w", err)
+	}
+	return nil
 }
 
 // initializeOverlayWithConda installs a conda environment from a YAML file into an overlay
