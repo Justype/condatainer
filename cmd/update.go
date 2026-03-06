@@ -15,6 +15,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -74,6 +75,13 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if mappedArch, ok := archMap[arch]; ok {
 		arch = mappedArch
+	}
+
+	// Bail out early if the base image is currently in use (condatainer is running).
+	if baseImagePath := config.FindBaseImage(); baseImagePath != "" {
+		if err := overlay.CheckAvailable(baseImagePath, true); err != nil {
+			return fmt.Errorf("condatainer is currently running (base image is locked); stop all running condatainer sessions before updating")
+		}
 	}
 
 	// Handle --base flag: update only the base image, skip binary update
