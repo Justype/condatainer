@@ -216,10 +216,10 @@ find /cnt -type f -exec chmod ug+rw,o+r {} \;
 find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
 
 echo "Packing overlay to SquashFS..."
-mksquashfs /cnt %s -processors %d -keep-as-directory %s
+mksquashfs /cnt %s -processors %d -b %s -keep-as-directory %s
 `,
 		installCmd,
-		finalPath, c.effectiveNcpus(), config.Global.Build.CompressArgs,
+		finalPath, c.effectiveNcpus(), config.Global.Build.BlockSize, config.Global.Build.CompressArgs,
 	)
 
 	// Always bind the target overlay directory so mksquashfs can write there
