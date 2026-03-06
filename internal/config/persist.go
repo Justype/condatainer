@@ -522,7 +522,7 @@ func LoadFromViper() {
 		if IsValidBlockSize(v) {
 			Global.Build.BlockSize = v
 		} else {
-			utils.PrintWarning("Invalid build.block_size %q (must be a positive integer with optional K or M suffix); using default 128k", v)
+			utils.PrintWarning("Invalid build.block_size %q (must be a power of two between 4k and 1m); using default 128k", v)
 			Global.Build.BlockSize = "128k"
 		}
 	}
@@ -530,7 +530,7 @@ func LoadFromViper() {
 		if IsValidBlockSize(v) {
 			Global.Build.DataBlockSize = v
 		} else {
-			utils.PrintWarning("Invalid build.data_block_size %q (must be a positive integer with optional K or M suffix); using default 1m", v)
+			utils.PrintWarning("Invalid build.data_block_size %q (must be a power of two between 4k and 1m); using default 1m", v)
 			Global.Build.DataBlockSize = "1m"
 		}
 	}

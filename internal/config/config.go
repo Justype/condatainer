@@ -4,8 +4,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Justype/condatainer/internal/scheduler"
@@ -117,10 +118,28 @@ func CompressNames() []string {
 // BlockSizeCompletions lists common mksquashfs block sizes for shell completion
 var BlockSizeCompletions = []string{"64k", "128k", "256k", "512k", "1m"}
 
-// IsValidBlockSize validates a mksquashfs -b value: a positive integer with an optional K or M suffix.
+// IsValidBlockSize validates a mksquashfs -b value.
+// Must be a power of two between 4096 and 1048576 (1M), with optional k/K or m/M suffix.
 func IsValidBlockSize(size string) bool {
-	matched, _ := regexp.MatchString(`^\d+[kKmM]?$`, size)
-	return matched
+	if size == "" {
+		return false
+	}
+	s := strings.ToLower(size)
+	var multiplier int64 = 1
+	if strings.HasSuffix(s, "k") {
+		multiplier = 1024
+		s = s[:len(s)-1]
+	} else if strings.HasSuffix(s, "m") {
+		multiplier = 1024 * 1024
+		s = s[:len(s)-1]
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n <= 0 {
+		return false
+	}
+	bytes := n * multiplier
+	// mksquashfs requires power of two, between 4096 and 1048576 (1M)
+	return bytes >= 4096 && bytes <= 1048576 && (bytes&(bytes-1)) == 0
 }
 
 // Global holds the singleton configuration instance

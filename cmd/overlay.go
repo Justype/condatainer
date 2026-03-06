@@ -17,7 +17,7 @@ import (
 // overlayCmd is the parent command for overlay management
 var overlayCmd = &cobra.Command{
 	Use:   "overlay",
-	Short: "Manage persistent overlay images (create, resize, check, info)",
+	Short: "Manage overlay images (create, resize, check, info)",
 	Long: `Utilities to manage ext3 overlay images for Apptainer.
 Allows creating images, resizing existing images,
 and verifying filesystem integrity.`,
@@ -283,7 +283,7 @@ Multiple paths can be specified using multiple -p flags.`,
 var exportCmd = &cobra.Command{
 	Use:   "export [overlay_path]",
 	Short: "Export a conda environment from an overlay",
-	Long: `Export a Micromamba/Conda environment from a persistent overlay.
+	Long: `Export a Conda environment from a overlay.
 
 For .img overlays the environment prefix is /ext3/env.
 For .sqf module overlays the environment prefix is /cnt/<name>/<version>.`,

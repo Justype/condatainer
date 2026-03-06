@@ -119,13 +119,13 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 		// 4b. Handle block sizes
 		if createBlockSize != "" {
 			if !config.IsValidBlockSize(createBlockSize) {
-				ExitWithError("Invalid --block-size %q: must be a positive integer with optional K or M suffix (e.g. 128k, 1M)", createBlockSize)
+				ExitWithError("Invalid --block-size %q: must be a power of two between 4096 and 1M (e.g. 64k, 128k, 512k, 1m)", createBlockSize)
 			}
 			config.Global.Build.BlockSize = createBlockSize
 		}
 		if createDataBlockSize != "" {
 			if !config.IsValidBlockSize(createDataBlockSize) {
-				ExitWithError("Invalid --data-block-size %q: must be a positive integer with optional K or M suffix (e.g. 128k, 1M)", createDataBlockSize)
+				ExitWithError("Invalid --data-block-size %q: must be a power of two between 4096 and 1M (e.g. 64k, 128k, 512k, 1m)", createDataBlockSize)
 			}
 			config.Global.Build.DataBlockSize = createDataBlockSize
 		}
