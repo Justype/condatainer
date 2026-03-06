@@ -38,10 +38,10 @@ const DefaultPrebuiltLink = "https://github.com/Justype/cnt-scripts/releases/dow
 
 // BuildConfig holds default settings for build operations
 type BuildConfig struct {
-	Defaults     scheduler.ResourceSpec // Default resource spec for build job submissions
-	TmpSizeMB    int                    // Size of temporary overlay in MB
-	CompressArgs string                 // mksquashfs compression arguments
-	OverlayType  string                 // Overlay filesystem type: "ext3" or "squashfs"
+	Defaults      scheduler.ResourceSpec // Default resource spec for build job submissions
+	TmpSizeMB     int                    // Size of temporary overlay in MB
+	CompressArgs  string                 // mksquashfs compression arguments
+	OverlayType   string                 // Overlay filesystem type: "ext3" or "squashfs"
 	BlockSize     string                 // mksquashfs block size for app/env/external overlays (default: 128k)
 	DataBlockSize string                 // mksquashfs block size for data/ref overlays (default: 1m)
 }
@@ -153,11 +153,11 @@ func LoadDefaults(executablePath string) {
 				MemPerNodeMB: 8192,          // 8GB default memory
 				Time:         2 * time.Hour, // 2 hour default time limit
 			},
-			TmpSizeMB:    20480,       // 20GB temporary overlay
-			CompressArgs: "-comp lz4", // zstd only compatible with apptainer version > 1.4
-			OverlayType:  "ext3",      // ext3 for temporary overlays
-			BlockSize:     "128k",     // mksquashfs block size for app/env/external overlays
-			DataBlockSize: "1m",       // mksquashfs block size for data/ref overlays
+			TmpSizeMB:     20480,       // 20GB temporary overlay
+			CompressArgs:  "-comp lz4", // zstd only compatible with apptainer version > 1.4
+			OverlayType:   "ext3",      // ext3 for temporary overlays
+			BlockSize:     "128k",      // mksquashfs block size for app/env/external overlays
+			DataBlockSize: "1m",        // mksquashfs block size for data/ref overlays
 		},
 	}
 }

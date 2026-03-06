@@ -23,7 +23,7 @@ var (
 	createBaseImage     string
 	createSource        string
 	createTempSize      string
-	createBlockSize  string
+	createBlockSize     string
 	createDataBlockSize string
 	createRemote        bool
 	createUpdate        bool
@@ -201,7 +201,7 @@ func init() {
 	blockSizeCompletion := func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return config.BlockSizeCompletions, cobra.ShellCompDirectiveNoFileComp
 	}
-	createCmd.RegisterFlagCompletionFunc("block-size", blockSizeCompletion)  //nolint:errcheck
+	createCmd.RegisterFlagCompletionFunc("block-size", blockSizeCompletion)      //nolint:errcheck
 	createCmd.RegisterFlagCompletionFunc("data-block-size", blockSizeCompletion) //nolint:errcheck
 
 	// Mark compression flags as build flags
