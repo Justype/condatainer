@@ -52,9 +52,7 @@ File
 To get the base image distro version:
 
 ```bash
-condatainer config get default_distro   # e.g. ubuntu24  →  24.04
-# or
-condatainer info base_image
+condatainer config get default_distro   # e.g. ubuntu24  → Ubuntu 24.04
 ```
 
 The output is `ubuntu24`, which is different from the overlay's distro version `ubuntu22`. This means you cannot load this overlay together with other overlays built on `ubuntu24` base image.

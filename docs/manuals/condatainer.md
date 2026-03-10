@@ -161,6 +161,7 @@ Manage overlay writable ext3 images:
 - **check**: Verify filesystem integrity.
 - **chown**: Change ownership of files inside the image.
 - **resize**: Resize the image file.
+- **export**: Export a conda environment spec from an overlay.
 
 ### Overlay Create
 
@@ -179,7 +180,7 @@ condatainer overlay create [OPTIONS] [NAME]
 * `--fs [FS]`: Filesystem type: `ext3` or `ext4` (default: ext3).
 * `-f`, `--file [FILE]`: Initialize with a Conda environment file (.yml or .yaml).
 * `--fakeroot`: Create image compatible with fakeroot (owned by root, must use with `--fakeroot` later).
-* `--sparse`: Create a sparse image file.
+* `--sparse`: Create a sparse image file. (Short form: `-S` available on the `o` shortcut only.)
 * NAME: Name of the overlay image (`env.img` by default if not specified).
 
 **Examples:**
@@ -322,6 +323,49 @@ condatainer overlay resize -s SIZE [image]
 condatainer overlay resize -s 20G env.img
 ```
 
+### Overlay Export
+
+Export a Micromamba/Conda environment spec from an overlay. The output is printed to stdout and can be redirected to a YAML or text file.
+
+- For `.img` workspace overlays the environment prefix is `/ext3/env`.
+- For `.sqf` module overlays the environment prefix is `/cnt/<name>/<version>`.
+
+Requires `conda-meta` to be present at the expected prefix — i.e., the overlay must contain an actual conda environment.
+
+**Usage:**
+
+```
+condatainer overlay export [OPTIONS] [overlay_path]
+```
+
+**Options:**
+
+* `-e`, `--explicit`: Use explicit (URL-pinned) format.
+* `--no-md5`: Disable MD5 checksums in explicit output.
+* `--no-build`, `--no-builds`: Strip build strings from the spec.
+* `--channel-subdir`: Include channel and subdir in the spec.
+* `--from-history`: Reconstruct spec from install history only.
+* `--json`: Output as JSON.
+
+**Examples:**
+
+```bash
+# Export environment from a workspace overlay
+condatainer overlay export env.img > environment.yml
+
+# Export from a module overlay (sqf)
+condatainer overlay export salmon/1.10.2.sqf > environment.yml
+
+# Export without build strings (more portable)
+condatainer overlay export env.img --no-builds > environment.yml
+
+# Export as explicit (URL-pinned, fully reproducible)
+condatainer overlay export env.img -e > explicit.txt
+
+# Export from history (only user-requested packages)
+condatainer overlay export env.img --from-history > minimal.yml
+```
+
 ## Create
 
 Initialize and build a new **CondaTainer** SquashFS overlay. You can build from existing recipes (local/remote), a Conda environment file, or a remote container source.
@@ -342,6 +386,8 @@ condatainer create [OPTIONS] [packages...]
 * `-b`, `--base-image [PATH]`: Base image to use instead of default.
 * `-s`, `--source [URI]`: Remote source URI (e.g., `docker://ubuntu:22.04`).
 * `--temp-size [SIZE]`: Size of temporary overlay (default: 20G).
+* `--block-size [SIZE]`: SquashFS block size for app/env/external overlays (e.g. `128k`, `512k`; default: `128k`). Must be a power of two between `4k` and `1m`.
+* `--data-block-size [SIZE]`: SquashFS block size for data/reference overlays (e.g. `512k`, `1m`; default: `1m`). Must be a power of two between `4k` and `1m`.
 * `-u`, `--update`: Rebuild overlays even if they already exist (atomic `.new` swap). Useful for refreshing a package to the latest version.
 * `--remote`: Remote build scripts take precedence over local.
 * `packages`: List of packages to install (e.g., `bcftools/1.22` or `samtools=1.10` or `grch38/genome/gencode`).
@@ -359,6 +405,7 @@ condatainer create [OPTIONS] [packages...]
 
 * **Default:** Each package gets its own `.sqf` via the build system.
 * **`--name`:** Create a single `.sqf` with multiple packages bundled together.
+* **`--prefix` + packages:** Create a conda env `.sqf` at a custom path, like `conda create -p`.
 * **`--prefix` + `--file`:** Create `.sqf` from external source file (.sh, .def, .yml).
 * **`--source`:** Create `.sqf` from a remote container source URI.
 
@@ -377,8 +424,10 @@ condatainer create samtools/1.16 bcftools/1.15
 # Create a reference overlay (Ref Overlay)
 condatainer create grch38/gtf-gencode/47
 
+# Create a conda env sqf with packages at a custom path (like conda create -p)
+condatainer create python=3.11 numpy -p /scratch/myenv
+
 # Create from a yaml file with a custom name (Custom Env)
-# NOTE: `-f/--file` must be used with `-p/--prefix`.
 condatainer create -p my_analysis_env -f environment.yml
 
 # Create a custom env with multiple packages bundled together
@@ -740,16 +789,11 @@ condatainer instance stop mysql*
 # Stop all instances
 condatainer instance stop --all
 
-# Force stop with custom signal
-condatainer instance stop --force --signal TERM myinstance
-
 # Custom timeout before force kill
 condatainer instance stop --timeout 30 myinstance
 ```
 
-**Wildcard Support:**
-
-You can use shell wildcards (`*`, `?`, `[]`) to stop multiple instances at once. State files are automatically cleaned up for stopped instances.
+State files are automatically cleaned up for stopped instances.
 
 ### Instance List
 
@@ -838,7 +882,7 @@ Here's a complete workflow showing how to use instances:
 
 ```bash
 # 1. Start an instance with your desired overlays and writable env
-condatainer instance start -o lxde -o igv -o env.img -w desktop
+condatainer instance start -o xfce4 -o igv -o env.img -w desktop
 
 # 2. Run multiple commands in the same instance
 condatainer instance exec desktop websockify --web /usr/share/novnc ...
@@ -880,7 +924,7 @@ condatainer run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
 
 **Options:**
 
-* `-w`, `--writable`: Make `.img` overlays writable (default: read-only).
+* `-w`, `--writable`, `--writable-img`: Make `.img` overlays writable (default: read-only).
 * `-b`, `--base-image [PATH]`: Use custom base image.
 * `-a`, `--auto-install`: Automatically install missing dependencies.
 * `-i`, `--install`: Alias for `--auto-install`.
@@ -888,9 +932,12 @@ condatainer run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
 * `-n`, `--name NAME`: Override the job name shown in the scheduler queue (e.g. `squeue`). Takes priority over `#SBATCH --job-name` and similar directives.
 * `-o`, `--output PATH`: Override the job stdout path (creates parent directory if needed). Takes priority over scheduler stdout settings.
 * `-e`, `--error PATH`: Override the job stderr path. Takes priority over scheduler stderr settings.
-* `--afterok IDS`: Submit job with dependencies on existing job IDs. Use colon-separated IDs: `123:456:789`.
+* `--afterok IDS`: Submit job that runs only if all listed jobs **succeed**. Colon-separated IDs: `123:456:789`.
+* `--afternotok IDS`: Submit job that runs only if any listed job **fails**. Colon-separated IDs.
+* `--afterany IDS`: Submit job that runs after all listed jobs finish **regardless of outcome**. Colon-separated IDs.
 * `-f`, `--fakeroot`: Run with fakeroot privileges.
 * `--bind HOST:CONTAINER`: Bind mount a path into the container (repeatable).
+* `--env KEY=VALUE`: Set an environment variable inside the container (repeatable).
 * `--dry-run`: Preview what would be submitted without executing anything.
 * `--array FILE`: Input file for an array job — one subjob per line, tokens become positional args.
 * `--array-limit N`: Max concurrently running subjobs (0 = unlimited).
@@ -938,12 +985,13 @@ bcftools view input.vcf | head
 
 If your script contains scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`), `condatainer run` will automatically submit it as a scheduler job instead of running it locally. HTCondor uses native `.sub` submit files instead of in-script directives.
 
-**Behavior:**
-
-1. **Script has scheduler specs + scheduler available**: Submits the script as a job
-2. **Script has scheduler specs + already inside a job**: Runs locally (avoids nested job submission)
-3. **Script has scheduler specs + `--local` flag**: Runs locally
-4. **Script without scheduler specs**: Runs locally (as before)
+| Condition | Behavior |
+|-----------|----------|
+| Already inside a running job or container | Always runs locally (no nested submission) |
+| `--local` flag or `submit_job: false` in config | Always runs locally |
+| Script has no scheduler specs | Runs locally (prints a note) |
+| Script has `#SBATCH`/`#PBS`/`#BSUB` + scheduler available | Submits as a scheduler job |
+| Script has scheduler specs but scheduler not found/available | Runs locally (prints a note) |
 
 **Scheduler Script Example:**
 
@@ -992,6 +1040,29 @@ condatainer run -g a100:4 gpu_job.sh
 condatainer run -g h100 gpu_job.sh
 ```
 
+### Script Arguments
+
+Anything after the script name is passed into the script as `$1`, `$2`, ...
+
+```bash
+#!/bin/bash
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+#SBATCH --time=1:00:00
+#DEP: samtools/1.22
+
+# $1 = input BAM, $2 = output directory
+mkdir -p "$2"
+samtools sort -@ $NCPUS "$1" -o "$2/sorted.bam"
+```
+
+Submit with:
+
+```bash
+condatainer run sort.sh /data/raw/sample1.bam results/sample1/
+# inside sort.sh: $1=/data/raw/sample1.bam  $2=results/sample1/
+```
+
 ### Array Jobs
 
 Run the same script over a list of inputs with `--array`. Each non-empty line in the input file becomes one subjob; its space-separated tokens arrive as positional arguments (`$1`, `$2`, …) inside the script.
@@ -1015,6 +1086,15 @@ condatainer run --array samples.txt --array-limit 4 quant.sh  # max 4 concurrent
 condatainer run --dry-run --array samples.txt quant.sh        # preview args
 ```
 
+**Mixing array args with extra CLI args:**
+
+When extra args are provided after the script name alongside `--array`, array line tokens are **prepended** before the CLI args inside the script:
+
+```bash
+condatainer run --array samples.txt quant.sh genome_version
+# line "sample1 treated" → $1=sample1  $2=treated  $3=genome_version
+```
+
 **Rules:**
 - All non-empty lines must have the same number of shell-split tokens (quoted strings count as one).
 - Blank lines are flagged on `--dry-run` and block submission — remove them before submitting.
@@ -1031,11 +1111,19 @@ ALIGN=$(condatainer run --afterok "$TRIM" align.sh sample1)
 condatainer run --afterok "$ALIGN" quant.sh sample1
 ```
 
-Multiple job IDs can be passed to `--afterok` as a colon-separated list (`--afterok 123:456:789`).
+Three dependency flags are available:
+
+| Flag | Runs when upstream job… |
+|---|---|
+| `--afterok IDS` | Succeeds |
+| `--afternotok IDS` | Fails |
+| `--afterany IDS` | Finishes (any outcome) |
+
+Multiple job IDs can be passed as a colon-separated list (e.g. `--afterok 123:456:789`). All three flags can be combined in a single submission.
 
 ### Array Jobs + Chaining
 
-`--array` and `--afterok` can be combined: each stage submits an array job and waits for the previous stage to finish before starting. A final single job can collect results after all subjobs complete.
+`--array` and `--afterok` can be combined: each stage submits an array job and waits for the previous stage to **succeed** before starting. A final single job can collect results after all subjobs complete.
 
 ```bash
 # Stage 1: trim all samples (no dependency)
@@ -1051,7 +1139,7 @@ JOB=$(condatainer run --array samples.txt --array-limit 10 --afterok "$JOB" quan
 condatainer run --afterok "$JOB" collect_results.sh samples.txt
 ```
 
-Each array stage fans out across all samples in parallel (up to the concurrency limit), and `--afterok` ensures the next stage only starts once every subjob in the previous stage has succeeded.
+Each array stage fans out across all samples in parallel (up to the concurrency limit), and `--afterok` ensures the next stage only starts once every subjob in the previous stage has succeeded. Use `--afterany` instead to proceed even if some subjobs failed.
 
 If you don't like this all-or-nothing behavior, you can chain individual subjobs.
 
@@ -1080,8 +1168,7 @@ When running scripts with scheduler directives, the following environment variab
 | `NNODES` | Number of compute nodes | `2` |
 | `NTASKS_PER_NODE` | Number of MPI tasks per node | `4` |
 | `NTASKS` | Total number of MPI tasks | `8` |
-| `NCPUS` | CPUs per node | `16` |
-| `NCPUS_PER_TASK` | CPUs per task | `4` |
+| `NCPUS` | CPUs per task | `4` |
 | `MEM` | Memory per node in MB | `8192` |
 | `MEM_MB` | Memory per node in MB | `8192` |
 | `MEM_GB` | Memory per node in GB | `8` |
@@ -1282,7 +1369,6 @@ condatainer config get <key>
 ```bash
 condatainer config get apptainer_bin
 condatainer config get build.ncpus
-condatainer config get scheduler.ncpus_per_task
 condatainer config get submit_job
 ```
 
@@ -1299,7 +1385,6 @@ condatainer config set <key> <value>
 ```bash
 condatainer config set apptainer_bin /usr/bin/apptainer
 condatainer config set submit_job false
-condatainer config set scheduler.ncpus_per_task 8
 condatainer config set build.ncpus 8
 condatainer config set build.time 4h
 ```
@@ -1378,12 +1463,6 @@ submit_job: true
 
 # Base OS distro: ubuntu20, ubuntu22, or ubuntu24 (default: ubuntu24)
 default_distro: ubuntu24
-
-# Default scheduler specs (used when scripts lack explicit directives)
-scheduler:
-  ncpus_per_task: 4
-  mem_per_node_mb: 8192
-  time: 4h
 
 # Build configuration
 build:

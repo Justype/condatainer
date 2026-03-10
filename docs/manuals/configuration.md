@@ -90,18 +90,6 @@ condatainer config init -l system
 | `parse_module_load` | `false` | Parse `module load` / `ml` lines as dependencies in `check` and `run` |
 | `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filename (e.g. `ubuntu24--base_image.sif`) and the distro prefix added to bare package names (e.g. `igv` → `ubuntu24/igv`). |
 
-### Scheduler Default Specs
-
-These values are used as defaults when a script does not include explicit resource directives (e.g., `#SBATCH` lines).
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `scheduler.nodes` | `1` | Default number of nodes |
-| `scheduler.tasks_per_node` | `1` | Default tasks per node |
-| `scheduler.ncpus_per_task` | `2` | Default CPUs per task |
-| `scheduler.mem_per_node_mb` | `8192` | Default memory per node (MB) |
-| `scheduler.time` | `4h` | Default wall-clock time limit |
-
 ### Build Configuration
 
 | Key | Default | Description |
@@ -111,9 +99,13 @@ These values are used as defaults when a script does not include explicit resour
 | `build.time` | `2h` | Time limit for builds |
 | `build.tmp_size_mb` | `20480` | Temporary overlay size in MB (20GB) |
 | `build.compress_args` | Auto-detected | mksquashfs compression arguments (gzip for singularity; zstd-medium for apptainer≥1.4; lz4 otherwise) |
+| `build.block_size` | `128k` | mksquashfs block size for app/env/external overlays (e.g. `128k`, `512k`) |
+| `build.data_block_size` | `1m` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
 | `build.overlay_type` | `ext3` | Overlay filesystem type: `ext3` or `squashfs` |
 
 > `build.compress_args` also accepts shortcuts: `gzip`, `lz4`, `zstd`, `zstd-fast`, `zstd-medium`, `zstd-high`
+>
+> `build.block_size` and `build.data_block_size` must be a power of two between `4k` and `1m` (mksquashfs `-b` limit). Larger blocks improve compression ratio but increase random-read latency.
 
 ## Managing Configuration
 
@@ -146,11 +138,6 @@ condatainer config set build.mem_mb 16384
 # Set build time limit (supports Go-style or HPC-style formats)
 condatainer config set build.time 4h
 condatainer config set build.time 02:00:00
-
-# Set default scheduler specs
-condatainer config set scheduler.ncpus_per_task 8
-condatainer config set scheduler.mem_per_node_mb 32768
-condatainer config set scheduler.time 8h
 
 # Disable job submission (run builds locally)
 condatainer config set submit_job false
@@ -198,6 +185,8 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_PREFER_REMOTE`        | `prefer_remote`        |
 | `CNT_SCHEDULER_NODES`      | `scheduler.nodes`      |
 | `CNT_BUILD_MEM_MB`         | `build.mem_mb`         |
+| `CNT_BUILD_BLOCK_SIZE`     | `build.block_size`     |
+| `CNT_BUILD_DATA_BLOCK_SIZE`| `build.data_block_size`|
 | `CNT_EXTRA_BASE_DIRS`      | `extra_base_dirs` (colon-separated) |
 
 Example:
@@ -278,14 +267,6 @@ extra_base_dirs:
   - /project/shared/condatainer
   - /apps/bioinformatics/condatainer
 
-# Default scheduler specs (used when scripts lack explicit directives)
-scheduler:
-  nodes: 1
-  tasks_per_node: 1
-  ncpus_per_task: 2
-  mem_per_node_mb: 8192
-  time: 4h
-
 # Build configuration
 build:
   ncpus: 4
@@ -293,6 +274,8 @@ build:
   time: 2h
   tmp_size_mb: 20480
   compress_args: -comp zstd -Xcompression-level 8
+  block_size: 128k       # SquashFS block size for app/env/external overlays
+  data_block_size: 1m    # SquashFS block size for data overlays
   overlay_type: ext3
 ```
 
@@ -330,7 +313,7 @@ Users can still have personal configs (`~/.config/condatainer/config.yaml`) that
 
 CondaTainer auto-detects the best compression based on your runtime:
 
-- **Singularity**: Uses gzip compression (`-comp gzip`) — Singularity's native default
+- **Singularity**: Uses gzip compression (`-comp gzip`)
 - **Apptainer >= 1.4**: Uses zstd compression (`-comp zstd -Xcompression-level 8`)
 - **Apptainer < 1.4**: Uses lz4 compression (`-comp lz4`)
 
@@ -343,6 +326,33 @@ condatainer config set build.compress_args "-comp gzip -Xcompression-level 9"
 # shorthand names (completion will offer these)
 condatainer config set build.compress_args gzip
 condatainer config set build.compress_args zstd-fast
+```
+
+## Block Size Settings
+
+The SquashFS block size controls how data is chunked during compression. Two separate defaults are used based on overlay type:
+
+| Overlay type | Config key | Default | CLI flag |
+|---|---|---|---|
+| App / Env / External | `build.block_size` | `128k` | `--block-size` |
+| Data / Reference | `build.data_block_size` | `1m` | `--data-block-size` |
+
+- Valid values: power of two between `4k` and `1m` (mksquashfs constraint). Common choices: `4k`, `8k`, `16k`, `32k`, `64k`, `128k`, `256k`, `512k`, `1m`.
+- Smaller blocks (`128k`) give better random-read performance — ideal for executables loaded at runtime.
+- Larger blocks (`1m`) give better compression ratios — ideal for large reference files that are read sequentially.
+
+To override per-build via CLI:
+
+```bash
+condatainer create samtools/1.22 --block-size 256k
+condatainer create grch38/gtf-gencode/49 --data-block-size 1m
+```
+
+To set persistent defaults:
+
+```bash
+condatainer config set build.block_size 256k
+condatainer config set build.data_block_size 1m
 ```
 
 ## Troubleshooting

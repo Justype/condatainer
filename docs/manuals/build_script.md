@@ -31,7 +31,7 @@ Apptainer definition files for distro-level system tools.
 * **Format:** `<distro>/<name>`
 * **Structure:**
   * **distro**: The base OS distribution (e.g., `ubuntu24`).
-  * **name**: The tool name (e.g., `igv`).
+  * **name**: The tool name (e.g., `igv`, `r4.4.3`).
 * **Example:** `ubuntu24/igv`
 
 ### Apps
@@ -222,7 +222,7 @@ Example: [cellranger/9.0.1](https://github.com/Justype/cnt-scripts/blob/main/bui
   - HPC systems often lack required build tools or dependencies unless you load specific modules.
   - To maximize compatibility (**CondaTainer**), it's better to rely on pre-compiled packages.
 
-Template: [build-template-apps](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/apps-template)
+Template: [build-template-apps](https://github.com/Justype/cnt-scripts/blob/main/assets/build-template-apps)
 
 ### Tips
 
@@ -243,7 +243,7 @@ If the app requires specific environment variables to function properly, make su
   - If indices require building, ensure you have the scheduler parameters (`#SBATCH`, `#PBS`, or `#BSUB`) set appropriately to allocate sufficient resources.
 - Always add environment variables using `#ENV:` and `#ENVNOTE:` to help users locate the reference data.
 
-Template: [build-template-ref](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/ref-template)
+Template: [build-template-ref](https://github.com/Justype/cnt-scripts/blob/main/assets/build-template-ref)
 
 ### Tips
 

@@ -21,9 +21,9 @@ In the following steps, we will:
 1. Use conda to install `pySCENIC`.
 2. Fix the [issue 475](https://github.com/aertslab/pySCENIC/issues/475) by editing `pySCENIC` files.
 
-### Pause a Moment: Why Not Just Build an OS Overlay?
+### Pause a Moment: Why Not Just Build an OS Overlay or Apptainer Image?
 
-**CondaTainer** is good for managing writable environments during development. If you have already developed a pipeline and fixed package versions, you can directly build a read-only Apptainer (Singularity) image with all dependencies included.
+**CondaTainer** is good for managing writable environments during development. If you have already developed a pipeline and fixed package versions, you should directly build a read-only Apptainer image or OS overlay with all dependencies included.
 
 If target app already has docker or singularity images, consider using them as base instead. See [Custom System Overlays](./custom_os.md#example-pulling-pytorch-docker-image) for details.
 
