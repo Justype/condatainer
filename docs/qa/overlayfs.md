@@ -1,17 +1,31 @@
-# Fakeroot
+# OverlayFS and Fakeroot
+
+## OverlayFS
+
+Apptainer uses OverlayFS to stack multiple filesystems on top of the base `.sif` image. Each additional layer is passed via `--overlay <path>[:ro|:rw]`.
+
+OverlayFS has three components:
+
+| Component | Where | Role |
+|-----------|-------|------|
+| `lower` | the `.sif` itself  | Read-only base — never modified |
+| `upper` | directory inside `.img` | Writable layer — all modifications land here (copy-on-write) |
+| `work` | directory inside `.img` | Kernel-internal scratch directory |
+
+A writable ext3 `.img` overlay stores both `upper/` and `work/` internally. When you write inside the container, the file is copied from `lower` into `upper` — the original layers are never modified.
+
+- In `ro` (read-only) mode, all layers go to `lower` and no modifications are allowed.
+- In `rw` (read-write) mode, the container writes to `upper` and modifications are persisted.
+
+## Fakeroot
 
 The `--fakeroot` flag allows an unprivileged user to appear as the **root user (UID 0)** inside the container. This relies on user namespace mapping (specifically `/etc/subuid` and `/etc/subgid` mappings on the host).
 
-Fakeroot is useful when you:
-
-- [Build the image](#build-the-image-with-fakeroot)
-- [Run the container/overlay](#run-the-containeroverlay-with-fakeroot)
-
-```{warning}
-Fakeroot makes you appear as root, but it **cannot make read-only filesystems writable**. See [SIF vs SQF](#sif-vs-sqf).
+```{note}
+Fakeroot makes you appear as root, but it **cannot make read-only filesystems writable**. A writable `.img` overlay is required for any writes inside the container.
 ```
 
-## Build the image with fakeroot
+### Build the image with fakeroot
 
 On HPC systems, you don't have root privileges. Using `--fakeroot` allows you to create an overlay image that behaves like root inside the container.
 
@@ -19,7 +33,7 @@ By default, CondaTainer uses `--fakeroot` when creating overlays using `.def` fi
 
 Also, when running `exec`, `e`, `run`, if the uid of `upper` inside the overlay is `0` (root), CondaTainer will automatically add the `--fakeroot` flag.
 
-## Run the container/overlay with fakeroot
+### Run the container/overlay with fakeroot
 
 When executing commands inside the container, you can use the `-f` or `--fakeroot` flag to gain root-like privileges inside the container.
 
@@ -30,21 +44,11 @@ condatainer exec --fakeroot -w -o /path/to/my_env.img <command>
 condatainer e -f my_env.img
 ```
 
-This is useful when you need modification on existing images/overlays (like installing missing system libraries using `apt`)
+This is useful when you need to modify existing images/overlays (like installing missing system libraries using `apt`).
 
-## SIF vs SQF
+## How to Use
 
-**Fakeroot makes you appear as root, but it cannot make read-only filesystems writable.**
-
-In CondaTainer, the container filesystem is assembled in layers:
-
-| Layer | Format | Writable? | Paths |
-|-------|--------|-----------|-------|
-| Apptainer image | `.sif` (SIF) | No (SquashFS inside) | `/bin`, `/lib`, `/var`, … |
-| Module/Bundle overlays | `.sqf` (SquashFS) | No | `/cnt/<name>/<version>` |
-| Workspace overlay | `.img` (ext3) | Yes (when `-w`) | `/ext3/env` |
-
-`apt` will modify `/usr/var` directories, but `sqf` overlays are read-only, so you cannot modify them even with `--fakeroot`.
+### Installing missing system libraries
 
 The common ways to install missing system libraries:
 
@@ -62,7 +66,11 @@ We created an overlay first, but found out that `tesseract-ocr-eng` is missing (
 
 ```bash
 condatainer overlay chown --root env.img
-condatainer e # load env.img with fakeroot (no other overlays)
+# load env.img with fakeroot (autodetects the upper ownership)
+condatainer e r4.4.3 build-essential
+
+# If apt install failed, try only loading the workspace overlay without sqfs:
+condatainer e
 ```
 
 Within the container, run `apt` to install missing libraries:
@@ -88,7 +96,7 @@ install.packages("orderanalyzer") # required tesseract-ocr-eng
 I don't recommend this path. IO performance of workspace overlays is bad. Try [custom OS overlays](../advanced_usage/custom_os.md) instead.
 ```
 
-## Changing Overlay Ownership
+### Changing Overlay Ownership
 
 You can use `overlay chown` to change the `upper` and `work` ownership inside the overlayFS.
 
@@ -96,7 +104,7 @@ You can use `overlay chown` to change the `upper` and `work` ownership inside th
 condatainer overlay chown --root /path/to/my_env.img
 ```
 
-You can also change the ownership to back to you:
+You can also change the ownership back to you:
 
 ```bash
 condatainer overlay chown /path/to/my_env.img

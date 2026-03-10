@@ -19,7 +19,7 @@ CondaTainer
   Read-Only Bundle Overlays <user_guide/bundle_overlays>
 
 .. toctree::
-  :caption: HPC Tutorials:
+  :caption: HPC Helpers:
   :maxdepth: 1
 
   Helper Scripts Overview <tutorials/helpers_on_HPC>
@@ -51,9 +51,8 @@ CondaTainer
   manuals/*
 
 .. toctree::
-  :caption: Other Tutorials:
+  :caption: Headless Helpers:
   :hidden:
 
-  code-server on HPC <tutorials/code-server_on_HPC>
   Helper Scripts on Headless <tutorials/helpers_on_server>
   RStudio Server on Headless <tutorials/rstudio-server_on_server>

@@ -1,23 +1,19 @@
 # Exec Troubleshooting
 
-Two possible reasons for errors when mounting writable overlays `.img`:
+If you cannot mount the writable overlay, it commonly means:
 
-- The image is locked by another process
-- File permissions (internal or external) are incorrect
+- [Other process is using the image](#used-by-another-process)
+- [You do not have permissions to access the image](#permission-denied-errors)
 
-If you cannot write to an overlay image:
+If you cannot write to an workspace overlay, it may be caused by the following reasons:
 
-- Overlay is full
-- Permission denied errors
-
-## Table of Contents
-
-- [Cannot mount overlay](#if-an-overlay-image-cannot-be-mounted)
-- [Cannot write to overlay](#if-cannot-write-to-an-overlay-image)
+- [Used in read-only mode](#read-only-file-system)
+- [Overlay is full](#overlay-is-full)
+- [Permission denied errors](#permission-denied-errors-in-container)
 
 ## If an overlay image cannot be mounted
 
-### 1. Used by another process
+### Used by another process
 
 If another process is already using the image, you cannot mount it as writable.
 
@@ -45,7 +41,7 @@ Check your running jobs and cancel if needed:
 squeue -u $USER
 scancel <job_id>
 
-# PBS/Torque
+# PBS
 qstat -u $USER
 qdel <job_id>
 
@@ -72,7 +68,7 @@ If `-p` does not fix all issues, you can run it without `-p` to enter interactiv
 e2fsck /path/to/my_env.img
 ```
 
-### 2. Permission Denied Errors
+### Permission Denied Errors
 
 #### Level 1: The Image File (Host)
 
@@ -99,7 +95,16 @@ condatainer overlay chown --root /path/to/my_env.img
 
 ## If cannot write to an overlay image
 
-### 1. Overlay is Full
+### Read-only File System
+
+The overlay is mounted as read-only. Use `-w` to mount it as writable, or use `e` (exec with writable overlay) instead:
+
+```bash
+condatainer exec -o env.img -w <command>
+condatainer e -- <command>
+```
+
+### Overlay is Full
 
 If often happens when installing new packages inside the overlay. Increase the size of the overlay image:
 
@@ -113,7 +118,7 @@ Example:
 condatainer overlay resize -s 15G /path/to/my_env.img
 ```
 
-### 2. Permission Denied Errors
+### Permission Denied Errors in Container
 
 If you encounter permission denied errors when writing to files inside the overlay, follow the steps in [Level 2: Inside the Overlay (Container)](#level-2-inside-the-overlay-container) above to change ownership of files inside the overlay.
 

@@ -6,13 +6,13 @@ Understanding the difference between **nodes**, **tasks**, and **CPUs** helps yo
 
 - [Concepts: Nodes, Tasks, and CPUs](#concepts)
   - [Single-Task vs Multi-Task (MPI) Jobs](#single-task-vs-multi-task-mpi-jobs)
-  - [HTCondor: Single-Node Only](#htcondor-single-node-only)
+  - [HTCondor: Single-Task Only](#htcondor-single-task-only)
 - [How Schedulers Define Resources](#how-schedulers-define-resources)
 - [How CondaTainer Handles Directives](#how-condatainer-handles-directives)
   - [Normalizing Directives and Passthrough Mode](#normalizing-directives-and-passthrough-mode)
   - [Cross-Scheduler Translation](#cross-scheduler-translation)
   - [MPI Auto-Detection](#mpi-auto-detection)
-- [Passthrough Mode Workaround](#passthrough-mode-workaround)
+- [Manual Submission](#manual-submission)
 
 ## Concepts
 
@@ -29,7 +29,7 @@ A job with 2 nodes, 4 tasks per node, and 2 CPUs per task runs:
 
 ### Single-Task vs Multi-Task (MPI) Jobs
 
-**Most jobs — Python, R, bash scripts — should request multiple CPUs, not multiple tasks.**
+**Most jobs — Python, R, bash scripts — should request multiple treads, not multiple tasks.**
 
 Multiple tasks launch multiple independent copies of your program (MPI ranks). Unless your code explicitly calls `MPI_Init` / `from mpi4py import MPI`, extra tasks are wasted allocation.
 
@@ -73,9 +73,9 @@ This starts 8 separate Python processes, each running `train_model.py` from scra
 python mpi_simulation.py
 ```
 
-### HTCondor: Single-Node Only
+### HTCondor: Single-Task Only
 
-HTCondor is inherently single-node (`universe = vanilla` is assumed for all jobs), so `nodes` and `tasks-per-node` do not apply.
+HTCondor is inherently single-task (`universe = vanilla` is assumed for all jobs), so `nodes` and `tasks-per-node` do not apply.
 
 When CondaTainer reads `.sub` files, it will get the script path by `executable = ...` and parse other resource requests. Then CondaTainer will read the overlay requirements from the script `#DEP:` tags and launch the container with the appropriate resources.
 
@@ -98,7 +98,13 @@ condatainer run --dry-run --array samples.txt quant.sh        # preview without 
 
 ### Job Chaining
 
-CondaTainer supports job dependencies via `--afterok` (SLURM-style). You can submit a job and capture its ID for downstream submission.
+CondaTainer supports three job dependency flags, each mapping to a native scheduler dependency type:
+
+| Flag | Runs when upstream job… | SLURM / PBS | LSF |
+|---|---|---|---|
+| `--afterok IDS` | Succeeds | `afterok` | `done()` |
+| `--afternotok IDS` | Fails | `afternotok` | `exit()` |
+| `--afterany IDS` | Finishes (any outcome) | `afterany` | `ended()` |
 
 ```bash
 TRIM=$(condatainer run trim.sh sample1)
@@ -106,13 +112,13 @@ ALIGN=$(condatainer run --afterok "$TRIM" align.sh sample1)
 condatainer run --afterok "$ALIGN" quant.sh sample1
 ```
 
-Multiple job IDs can be joined with colons: `--afterok 123:456:789`.
+Multiple job IDs can be joined with colons: `--afterok 123:456:789`. All three flags can be combined in one submission.
 
-> **Note**: `DAGMan` is not supported. Use `DAGMan` directly for complex workflows on HTCondor clusters.
+> **Note**: `DAGMan` is not supported. Please use `DAGMan` directly for complex workflows on HTCondor clusters.
 
 ### Array Jobs + Chaining
 
-`--array` and `--afterok` can be combined: each stage submits an array job and waits for the previous stage to finish before starting. A final single job can collect results after all subjobs complete.
+`--array` and `--afterok` can be combined: each stage submits an array job and waits for the previous stage to **succeed** before starting. Use `--afterany` to proceed even if some subjobs failed. A final single job can collect results after all subjobs complete.
 
 ```bash
 # Stage 1: trim all samples (no dependency)
@@ -127,21 +133,25 @@ condatainer run --afterok "$JOB" collect_results.sh samples.txt
 
 ## How Schedulers Define Resources
 
-Each scheduler has its own syntax for the same underlying resource concepts:
+Each scheduler has its own syntax for the same underlying resource concepts. All directives below appear as in-script comments (`#SBATCH`, `#PBS`, `#BSUB`) for SLURM/PBS/LSF, or in a separate `.sub` file for HTCondor.
 
-| Concept | SLURM | PBS | LSF | HTCondor |
-|---------|-------|-----|-----|----------|
-| Nodes | `--nodes=N` | `select=N` | `span[hosts=N]` | *(single-node only)* |
-| Tasks per node | `--ntasks-per-node=N` | `mpiprocs=N` | `span[ptile=N]` | *(not applicable)* |
-| CPUs per task | `--cpus-per-task=N` | `ncpus=N` | `-n N` | `request_cpus = N` |
-| Memory per node | `--mem=N` | `mem=NMB` | `-M NMB` | `request_memory = N` |
-| GPU | `--gpus-per-node=N` | `ngpus=N` | `-gpu "num=N"` | `request_gpus = N` |
-| Wall time | `--time=HH:MM:SS` | `walltime=HH:MM:SS` | `-W HH:MM` | `+MaxRunningTime = N` |
-| Job name | `-J` / `--job-name` | `-N` | `-J` | `MyDescription = ...` |
+| Concept | SLURM | PBS (`#PBS -l`) | LSF | HTCondor |
+|---------|-------|-----------------|-----|----------|
+| Nodes | `--nodes=N` | `select=N:...` | *(derived from `-n` ÷ `ptile`)* | *(single-task only)* |
+| Total tasks | `--ntasks=N` | *(Chunks × mpiprocs)* | `-n N` | *(not applicable)* |
+| Tasks per node | `--ntasks-per-node=N` | `select=N:mpiprocs=P:...` | `-R "span[ptile=N]"` | *(not applicable)* |
+| CPUs per task | `--cpus-per-task=N` | `select=1:ncpus=N:mpiprocs=1:...` | `-R "affinity[cores(N)]"` | `request_cpus = N` |
+| Memory | `--mem=N` / `--mem-per-cpu=N` | `select=1:mem=N:...` (per node) | `-R "rusage[mem=N]"` (per slot) | `request_memory = N` |
+| GPU | `--gpus-per-node=N` | `select=1:ngpus=N:...` | `-gpu "num=N"` | `request_gpus = N` |
+| Wall time | `--time=HH:MM:SS` | `walltime=HH:MM:SS` | `-W HH:MM` | `+MaxRuntime = N` (sec) |
+| Job name | `--job-name=NAME` | `-N NAME` | `-J NAME` | *(not supported)* |
 | Stdout / Stderr | `-o` / `-e` | `-o` / `-e` | `-o` / `-e` | `output` / `error` |
-| Email | `--mail-type/user` | `-m` / `-M` | `-B` / `-N` / `-u` | `notify_user` |
+| Email type | `--mail-type=TYPE` | `-m <aben>` | `-B` / `-N` | `notification = ...` |
+| Email address | `--mail-user=ADDR` | `-M ADDR` | `-u ADDR` | `notify_user = ADDR` |
 
-For SLURM/PBS/LSF, directives appear as in-script comments (`#SBATCH`, `#PBS`, `#BSUB`). For HTCondor, they appear in a separate `.sub` file.
+**PBS** packs chunks, tasks-per-node, CPUs, and memory into a single `-l select=N:ncpus=M:mpiprocs=P:mem=X` command. Multiple chunks separated by `+` allow different resource shapes on different nodes.
+
+**LSF** uses a single `-R` string to express node constraint (`span[hosts=1]` for single-node), task distribution (`span[ptile=N]`), CPU affinity (`affinity[cores(N)]`), and memory allocation (`rusage[mem=N]`). `-n N` sets the total slot count. `-M N` is a per-slot memory ulimit and passes through separately.
 
 ### GPU support
 
@@ -156,44 +166,33 @@ GPU resources are normalized across schedulers. SLURM and LSF support specifying
 
 ## How CondaTainer Handles Directives
 
-When `condatainer run` is invoked, it reads the script's scheduler directives and processes them in three steps.
+When `condatainer run` is invoked, it reads the script's scheduler directives and processes them.
 
 ### Normalizing Directives and Passthrough Mode
 
-CondaTainer first parses all directives into a **normalized internal representation** (nodes, tasks-per-node, CPUs-per-task, memory, GPU, time, job control).
+CondaTainer parses all directives into a **normalized internal representation**: 
 
-If a directive cannot be normalized — because it has no cross-scheduler equivalent — CondaTainer enters **passthrough mode**: no resource directives are written to the submission script and the unrecognized flags are forwarded as-is.
-
-SLURM directives that trigger passthrough mode:
-
-```
---gpus-per-socket   --sockets-per-node   --cores-per-socket
---threads-per-core  --ntasks-per-socket  --ntasks-per-core
---distribution
-```
-
-**MPI task distribution must be even.** Schedulers like PBS use `mpiprocs=N` (tasks *per node*) rather than a global task count, so CondaTainer must convert `--ntasks` into a per-node value. If the division is uneven, it cannot be represented and passthrough mode is triggered.
-
-```bash
-# Will work — 8 tasks across 2 nodes = 4 per node
-#SBATCH --nodes=2
-#SBATCH --ntasks=8
-
-# Passthrough mode triggered — 3 % 2 != 0
-#SBATCH --nodes=2
-#SBATCH --ntasks=3
+```go
+type ResourceSpec struct {
+	Nodes        int           // Number of nodes
+	Ntasks       int           // Total MPI tasks (0 = not set; use Nodes*TasksPerNode)
+	TasksPerNode int           // MPI ranks per node (0 = non-uniform distribution, e.g. multi-chunk PBS)
+	CpusPerTask  int           // CPU threads per task (OpenMP)
+	MemPerCpuMB  int64         // RAM per logical CPU in MB (SLURM --mem-per-cpu, LSF rusage[mem])
+	MemPerNodeMB int64         // Total RAM per node in MB (SLURM --mem, PBS mem=)
+	Gpu          *GpuSpec      // GPU requirements (nil = no GPU; Count = per node)
+	Time         time.Duration // Job walltime limit
+	Exclusive    bool          // Request exclusive node access (no other jobs on the same node)
+}
 ```
 
-Use `--ntasks-per-node` to guarantee even distribution:
+If a directive cannot be represented in this schema — for example, low-level CPU topology constraints — CondaTainer enters **passthrough mode**: the script's directives cannot be regenerated and `condatainer run` will **reject the submission with an error**, directing you to submit manually with the native scheduler command. See [Manual Submission](#manual-submission) below.
 
-```bash
-#SBATCH --nodes=2
-#SBATCH --ntasks-per-node=4   # Always evenly distributed, translates cleanly to PBS/LSF
-```
+**For MPI jobs, all tasks must share the same CPUs-per-task and memory-per-CPU.** CondaTainer stores a single CPUs-per-task and a memory-per-CPU for the entire job. PBS can use multi chunks (`select=...+...`) for uneven task distributions.
 
 ### Cross-Scheduler Translation
 
-Once directives are normalized, CondaTainer can emit them in any supported scheduler's syntax. This allows a script written for one scheduler to run on a cluster running a different one.
+Once normalized, CondaTainer can emit directives in any target scheduler's syntax, enabling scripts written for one scheduler to run on a cluster running a different one.
 
 **Example: SLURM script submitted on a PBS cluster**
 
@@ -206,17 +205,31 @@ Once directives are normalized, CondaTainer can emit them in any supported sched
 #SBATCH --time=02:00:00
 ```
 
-CondaTainer translates this into the PBS equivalent at submission time:
+```bash
+# PBS equivalent generated at submission time:
+#PBS -l select=2:ncpus=8:mpiprocs=4:mem=32768mb
+#PBS -l walltime=02:00:00
+```
+
+Uneven MPI distributions are reconstructed as multi-chunk PBS select:
 
 ```bash
-#PBS -l select=2:ncpus=2:mpiprocs=4:mem=32768mb
-#PBS -l walltime=02:00:00
+# SLURM: 8 tasks across 3 nodes (3+3+2)
+#SBATCH --nodes=3
+#SBATCH --ntasks-per-node=3
+#SBATCH --cpus-per-task=1
+#SBATCH --mem-per-cpu=100M
+```
+
+```bash
+# PBS: two chunks — 2 full nodes + 1 remainder
+#PBS -l select=2:ncpus=3:mpiprocs=3:mem=300mb+1:ncpus=2:mpiprocs=2:mem=200mb
 ```
 
 Two fields are intentionally dropped during translation:
 
-- **Partition / queue** — queue names are site-specific. Set the target partition via `condatainer scheduler -p <partition>` or `scheduler.partition` in the config.
-- **Unrecognized flags** — directives with no target-scheduler equivalent (e.g., `#SBATCH --constraint=...`) are dropped with a warning.
+- **Partition / queue** — queue names are site-specific.
+- **Unrecognized flags** — directives with no cross-scheduler equivalent are dropped with a warning.
 
 ### MPI Auto-Detection
 
@@ -241,27 +254,19 @@ condatainer e mpi.img -- mm-install mpi4py openmpi=4.1 -y
 ```
 ````
 
-**Hybrid MPI + threading** combines MPI ranks with per-rank threads:
+## Manual Submission
 
-```bash
-#SBATCH --nodes=2
-#SBATCH --ntasks-per-node=2   # 2 MPI ranks per node
-#SBATCH --cpus-per-task=4     # 4 OpenMP threads per rank
+When a script triggers passthrough mode, `condatainer run` rejects it with an error. You must submit directly with the native scheduler command (`sbatch`, `qsub`, `bsub`).
 
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-```
-
-## Passthrough Mode Workaround
-
-If you need to use a directive that triggers passthrough mode, bypass `condatainer run` for the initial submission. Submit with `sbatch` directly — CondaTainer detects the `IN_CONDATAINER` environment variable on the compute node and re-runs the script in container mode automatically.
+To still run your payload inside a CondaTainer container in this case, use the **self-bootstrap pattern**: the script detects whether it is already running inside a container (`$IN_CONDATAINER`) and, if not, re-invokes itself via `condatainer run`. CondaTainer then resolves the `#DEP:` tags and starts the container.
 
 ```bash
 #!/bin/bash
-#SBATCH --nodes=3
-#SBATCH --ntasks=8   # Triggers passthrough mode — uneven across 3 nodes
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=1G
-#SBATCH --time=00:10:00
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=4
+#SBATCH --cpus-per-task=2
+#SBATCH --mem-per-cpu=200M
+#SBATCH --time=02:00:00
 
 #DEP: mpi.img
 
@@ -280,4 +285,8 @@ fi
 python my_script.py
 ```
 
-Then use `sbatch my_script.sh` to submit as normal.
+Submit with the native scheduler — **not** `condatainer run`:
+
+```bash
+sbatch my_script.sh
+```
