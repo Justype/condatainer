@@ -123,7 +123,7 @@ Example Script (`salmon_quant.sh`):
 
 salmon quant \
   -i $SALMON_INDEX_DIR \
-  -p $SLURM_CPUS_PER_TASK \
+  -p $NCPUS \
   -l A -r reads.fq -o quants/
 ```
 
@@ -132,6 +132,13 @@ Auto install dependencies and submit the job with:
 ```bash
 condatainer run -a salmon_quant.sh
 ```
+
+Useful ENVs are automatically set in the container (single task job):
+
+| Variable Name | Description | Slurm | PBS | LSF | HTCondor |
+| --- | --- | --- | --- | --- | --- |
+| `$NCPUS` | CPUs per task | `--cpus-per-task` | `ncpus` | `-n` with `span[host=1]` | `request_cpus` |
+| `$MEM`/`$MEM_GB` | Mem per node MB/GB | `--mem` | `mem` | `rusage[mem]`*cpu | `request_memory` |
 
 For MPI jobs (ntasks > 1), CondaTainer will detect `mpiexec` and wrap the command accordingly.
 

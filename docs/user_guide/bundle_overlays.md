@@ -47,9 +47,9 @@ Then you can use the applications installed in the overlay.
 Bundle overlays are read-only and stackable. You can mount multiple overlays together:
 
 ```bash
-condatainer exec -o \
-  grch38/salmon/1.10.2/gencode47 \
-  prefix_name.sqf
+condatainer exec \
+  -o grch38/salmon/1.10.2/gencode47 \
+  -o prefix_name.sqf
 ```
 
 ```{note}

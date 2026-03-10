@@ -12,6 +12,8 @@
 - **Apptainer/Singularity**: Required for all core container operations.
 - **squashfs-tools**, **e2fsprogs**: For overlay creation and management.
 
+Most HPC systems have already met these requirements. If not, please contact your system administrator to install them.
+
 ## 🛠️ Quick Installation
 
 To install **CondaTainer**, run the following interactive script in your terminal:
@@ -50,19 +52,24 @@ If your system has Apptainer or Singularity modules instead of system-wide binar
 
 ```bash
 module load apptainer  # or: module load singularity
+# apptainer version > 1.4 is recommended for zstd support
+# e.g. module load apptainer/1.4
+```
+
+Then initialize the config to let **CondaTainer** locate the Apptainer/Singularity path and save it for future use:
+
+```
 condatainer config init
 ```
 
-This step ensures **CondaTainer** locates and saves the Apptainer path for future use, so future sessions work without reloading the module.
-
 Compression is chosen automatically based on the runtime:
-- **Singularity**: gzip (native default)
-- **Apptainer >= 1.4**: zstd
+- **Singularity**: gzip
+- **Apptainer >= 1.4**: zstd level 8
 - **Apptainer < 1.4**: lz4
 
 ## ⌨️ Shell Completion
 
-CondaTainer supports shell completion for **Bash** and **Zsh**. Add the following lines to your shell configuration file:
+CondaTainer supports shell completion for **Bash** and **Zsh**. The installation script will automatically add the necessary lines to your shell configuration file:
 
 - **Bash** (`~/.bashrc`): (must have `bash-completion` installed)
 - **Zsh** (`~/.zshrc`):
@@ -71,12 +78,17 @@ CondaTainer supports shell completion for **Bash** and **Zsh**. Add the followin
 source <(condatainer completion)
 ```
 
+## 🗺️ Next Steps
+
+- [Concepts: Overlays](./concepts.md) — Understand the overlay model before proceeding
+- [Helpers on HPC](../tutorials/helpers_on_HPC.md) — Running Applications (e.g. VS Code, RStudio, IGV) with CondaTainer on HPC
+- [Helpers on headless servers](../tutorials/helpers_on_server.md) — Running Applications without a scheduler
+
 ## 🗑️ Uninstallation
 
-If you need to remove **CondaTainer** from your system, you can do so by reversing the steps taken during the interactive installation.
+To uninstall **CondaTainer**, follow these steps:
 
-1.  **Remove the Installation Directory**: Delete the folder where **CondaTainer** was installed. eg. `rm -r $SCRATCH/condatainer/`
-2.  **Clean Up Shell Configuration**: Open your `~/.bashrc` or `~/.zshrc` file and remove the lines related to **CondaTainer**. And find and remove the following lines:
+1.  **Clean Up Shell Configuration**: Open your `~/.bashrc` or `~/.zshrc` file and remove the lines related to **CondaTainer**. And find and remove the following lines:
 
 ```bash
 # >>> CONDATAINER >>>
@@ -84,8 +96,25 @@ condatainer settings
 # <<< CONDATAINER <<<
 ```
 
-## Next Steps
+2. **Remove Data Directories**: CondaTainer stores images and scripts in one or more of the following locations. Check which exist and remove them:
 
-- [Concepts: Overlays](./concepts.md) — Understand the overlay model before proceeding
-- [Helpers on HPC](../tutorials/helpers_on_HPC.md) — Running Applications (e.g. VS Code, RStudio, IGV) with CondaTainer on HPC
-- [Helpers on headless servers](../tutorials/helpers_on_server.md) — Running Applications without a scheduler
+| Type | Path | Condition |
+|----|----|----|
+| Portable | `<install-dir>/` | Install directory containing `bin/condatainer`|
+| User Scratch | `$SCRATCH/condatainer/` | If `$SCRATCH` is set (most HPC systems) |
+| User Data | `~/.local/share/condatainer/` | Default user data dir (XDG: `$XDG_DATA_HOME/condatainer/`) |
+
+4. **Remove Config File**: The config file is stored at one of the following locations:
+
+
+| Type | Path | Condition |
+|----|----|----|
+| Portable | `<install-dir>/config.yaml` | Same directory as `bin/` |
+| User Config | `~/.config/condatainer/config.yaml` | Default user config (XDG: `$XDG_CONFIG_HOME/condatainer/`) |
+
+5. **Remove State Files**: Instance state and helper state files are stored at one of the following locations:
+
+```
+~/.local/state/condatainer/    (XDG: $XDG_STATE_HOME/condatainer/)
+```
+

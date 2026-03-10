@@ -2,7 +2,7 @@
 
 📦 **CondaTainer** allows you to create [workspace overlays](./concepts.md#-overlay-types) for your project.
 
-The main advantage of **CondaTainer** is that it packs a Conda environment inside a writable `ext3` overlay for development, which significantly reduces inode usage.
+The main advantage of **CondaTainer** is that it packs a Conda environment inside a writable ext3 overlay for development, which significantly reduces inode usage.
 
 ## Table of Contents
 
@@ -11,6 +11,7 @@ The main advantage of **CondaTainer** is that it packs a Conda environment insid
 - [Writable or Read-Only](#writable-or-read-only)
 - [Use Workspace Overlay in a Script](#use-workspace-overlay-in-a-script)
 - [Set Environment Variables for the Overlay](#set-environment-variables-for-the-overlay)
+- [Export the Conda Environment](#export-the-conda-environment)
 - [Share the Overlay with Others](#share-the-overlay-with-others)
 - [Common Issues](#common-issues)
 
@@ -45,7 +46,7 @@ Flags:
 - For R projects, you may want to increase the size to 20GiB or more, especially if you are working with bioconductor packages.
 
 ```{note}
-Only one overlay can be mounted at a time, regardless of writable or read-only mode.
+Only one workspace overlay can be mounted at a time, regardless of writable or read-only mode.
 
 The mounting path is `/ext3/env`. So the img name does not matter.
 ```
@@ -61,7 +62,7 @@ condatainer overlay resize env.img -s 30G
 Or you can shrink it as well:
 
 ```bash
-condatainer overlay resize env.img -s 5G
+condatainer overlay resize env.img -s 5g
 ```
 
 ## Launch a Shell within the Workspace Overlay
@@ -74,15 +75,16 @@ condatainer e
 
 ```
 Usage:
-  condatainer e [flags] [overlays...] [--] [command...]
+  condatainer e [flags] [overlays...] [-- command...]
 
 Flags:
-  -b, --base-image string   base image to use instead of default
-      --bind strings        bind path 'HOST:CONTAINER' (can be used multiple times)
-      --env strings         set environment variable 'KEY=VALUE' (can be used multiple times)
-  -f, --fakeroot            run container with fakeroot privileges
-  -n, --no-autoload         disable autoloading 'env.img' from current directory
-  -r, --read-only           mount .img overlays as read-only (only applies when using the 'e' shortcut)
+  -b, --base-image string   Base image to use instead of default
+      --bind strings        Bind path 'HOST:CONTAINER' (can be used multiple times)
+      --env strings         Set environment variable 'KEY=VALUE' (can be used multiple times)
+  -f, --fakeroot            Run container with fakeroot privileges
+  -h, --help                help for e
+  -n, --no-autoload         Disable auto-loading env.img from current directory
+  -r, --read-only           Mount .img overlays as read-only (default: writable)
 ```
 
 This command will mount the overlay and set the `PATH` and `CONDA_PREFIX` variables accordingly.
@@ -98,8 +100,24 @@ mm-search r-ggplot2     # Search for a package
 mm-remove r-tidyverse   # Remove a package
 mm-update               # Update packages
 mm-clean -a             # Clean the cache and unused
-mm-export               # Export environment to YAML
+mm-export               # Export environment
 ```
+
+Or you can use `micromamba` directly:
+
+```bash
+micromamba install r-base=4.4 r-tidyverse
+micromamba list
+```
+
+If you prefer `conda`, you can install the it:
+
+```bash
+mm-install conda python=3.12 # choose a Python version for conda
+conda install r-base=4.4 r-tidyverse
+```
+
+You don't need to activate the environment because the **CondaTainer** sets the `CONDA_PREFIX` and `PATH` for you.
 
 ## Writable or Read-Only
 
@@ -118,7 +136,7 @@ Two commands can enter a container with a workspace overlay, and they have diffe
 condatainer exec -o env.img <command>
 ```
 
-To make `.img` overlays writable with `exec`, add `-w`:
+To make `.img` overlays writable with `exec`, add `-w`/`--writable`:
 
 ```bash
 condatainer exec -w -o env.img bash
@@ -141,7 +159,7 @@ Then when you run `e` or `exec`, these environment variables will be set automat
 
 ```bash
 $ condatainer e
-[CNT][NOTE] Autoload env.img at /scratch/chengz63/condatainer/env.img
+[CNT][NOTE] Autoload env.img at /path/condatainer/env.img
 [CNT] Overlay envs:
   GOROOT: /ext3/env/go
   GOPATH: /ext3/home/go
@@ -161,7 +179,7 @@ Then when you run `e` or `exec`, the notes will be displayed:
 
 ```bash
 $ condatainer e
-[CNT][NOTE] Autoload env.img at /scratch/chengz63/condatainer/env.img
+[CNT][NOTE] Autoload env.img at /path/condatainer/env.img
 [CNT] Overlay envs:
   GOROOT: Go Installation Path
   GOPATH: Go Workspace Path
@@ -194,7 +212,9 @@ condatainer exec \
     python src/test.py
 ```
 
-You can also write the `run_job.sh` in this way:
+Then run `sbatch src/run_job.sh` to submit the job.
+
+But I recommend using `condatainer run` to let **CondaTainer** check the overlay and the file locking for you:
 
 ```bash
 #!/bin/bash
@@ -212,7 +232,23 @@ You should run this from the project directory:
 condatainer run src/run_job.sh
 ```
 
-And make sure when you run the script, the `env.img` is not mounted in writable mode by another process. You can also make a copy of `env.img` and use that one instead.
+The `run` will check the `img` file lock, before submission:
+- if read-only (default), it will make sure no exclusive lock exists.
+- if writable (`-w`), it will make sure no other lock exists.
+
+## Export the Conda Environment
+
+To export a reproducible environment spec from a workspace overlay (without entering it interactively), use:
+
+```bash
+condatainer overlay export env.img > environment.yml
+```
+
+Or you can mount the overlay and use `conda` or `micromamba` to export:
+
+```bash
+condatainer e -- micromamba env export > environment.yml
+```
 
 ## Share the Overlay with Others
 
@@ -251,9 +287,20 @@ Or they can use `--fakeroot` when running `condatainer exec` to avoid permission
 condatainer exec --fakeroot -o env.img <command>
 ```
 
-See [Fakeroot](../qa/fakeroot.md) for details on when and how fakeroot works.
+See [Fakeroot](../qa/overlayfs.md#fakeroot) for details on when and how fakeroot works.
 
 ## Common Issues
+
+### Read-only file system
+
+If you see "Read-only file system" errors when trying to write to the overlay, it means the overlay is used in read-only mode.
+
+You need to exit the current shell and run it in writable mode:
+
+```bash
+condatainer e <name>.img
+# or condatainer exec -w -o <name>.img <command>
+```
 
 ### No space left on device
 

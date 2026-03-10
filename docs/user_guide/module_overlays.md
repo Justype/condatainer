@@ -2,7 +2,7 @@
 
 📦 **CondaTainer** allows you to create [module overlays](./concepts.md#-overlay-types) for your project.
 
-They are stackable, read-only, and highly compressed overlays that contain pre-installed modules (apps and references), which is ideal for HPC environments where inode usage is a concern.
+They are stackable, read-only, and highly compressed overlays that contain app or reference data, which is ideal for HPC environments where inode usage is a concern.
 
 Please read [Concepts](concepts.md) before proceeding.
 
@@ -34,7 +34,7 @@ condatainer exec -o grch38/cellranger/2024-A bash
 
 ## 🚀 Dependencies Automation
 
-### 🧬 Reference Overlay Installation
+### 🧬 Data Overlay Installation
 
 To Install a Salmon Index Overlay. You don't need to:
 
@@ -48,10 +48,10 @@ To Install a Salmon Index Overlay. You don't need to:
 ```bash
 condatainer create grch38/salmon/1.10.2/gencode47
 # This command will:
-# - Install Salmon 1.10.2 via bioconda
-# - Download GRCh38 genome FASTA
-# - Download Gencode 47 transcript FASTA
-# - Build Salmon decoy index (scheduler job automatically submitted)
+# - Create Salmon 1.10.2 module overlay
+# - Download GRCh38 genome FASTA as overlay
+# - Download Gencode 47 transcript FASTA as another overlay
+# - Submit scheduler jobs to build the Salmon index using these overlays
 ```
 
 ### 🏷️ Declaring Dependencies in Scripts
@@ -67,6 +67,19 @@ Example Script (`analysis.sh`):
 
 salmon quant -i $SALMON_INDEX_DIR ...
 ```
+
+````{note}
+**CondaTainer** will automatically set environment variables like `SALMON_INDEX_DIR`.
+
+If you don't know the variable names, you can use `info` to check:
+
+```bash
+condatainer info grcm39/transcript-gencode/M9
+# Environment
+#  - TRANSCRIPT_FASTA=/cnt/grcm39/transcript-gencode/M9/gencode.vM9.transcripts.fa
+#    # GRCm39 GENCODE vM9 transcript
+```
+````
 
 Check and auto install dependencies:
 
@@ -128,8 +141,8 @@ cellranger count --id=sample1 \
   --transcriptome=$CELLRANGER_REF_DIR \
   --fastqs=/path/to/fastqs \
   --sample=sample1 \
-  --localcores=$SLURM_CPUS_PER_TASK \
-  --localmem=$((SLURM_MEM_PER_NODE/1024))
+  --localcores=$NCPUS \
+  --localmem=$MEM_GB
 ```
 
 ### 📥 Install required overlays
@@ -176,5 +189,5 @@ condatainer run cellranger_quant.sh
 Tutorials using CondaTainer:
 
 - [RStudio Server on HPC](../tutorials/rstudio-server_on_HPC.md)
-- [code-server on HPC](../tutorials/code-server_on_HPC.md)
+- [VS Code Server on HPC](../tutorials/vscode-server_on_HPC.md)
 - [VS Code Tunnel on HPC](../tutorials/vscode-tunnel_on_HPC.md)
