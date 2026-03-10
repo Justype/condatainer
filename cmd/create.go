@@ -66,7 +66,7 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 	Example: `  condatainer create samtools/1.22                       # Create from build script
   condatainer create python=3.11 numpy -n myenv          # Create conda environment
   condatainer create python=3.11 numpy -p /scratch/myenv # Create conda env at custom path
-  condatainer create -f environment.yml -p myenv         # Create from conda file
+  condatainer create -f environment.yml -p myenv         # Create from conda file with prefix
   condatainer create --source /data -p dataset           # Convert directory to overlay`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
@@ -87,7 +87,7 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 			ExitWithUsageError("When using --source, either --name or --prefix must be provided.")
 		}
 		if createFile != "" && createPrefix == "" {
-			ExitWithUsageError("When using --file, --prefix must be provided.")
+			createPrefix = createFile[:len(createFile)-len(filepath.Ext(createFile))]
 		}
 		if createPrefix != "" && createFile == "" && len(args) == 0 {
 			ExitWithUsageError("--prefix requires either packages or --file to be specified.")
