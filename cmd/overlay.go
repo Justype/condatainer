@@ -49,7 +49,7 @@ If no image path is provided, defaults to 'env.img'.`,
 		// Auto-append .img extension if not present and path doesn't have an extension
 		if !utils.IsImg(path) {
 			if strings.Contains(filepath.Base(path), ".") {
-				ExitWithError("Overlay image must have a .img extension.")
+				ExitWithUsageError("Overlay image must have a .img extension.")
 			}
 			path += ".img"
 		}
@@ -62,7 +62,7 @@ If no image path is provided, defaults to 'env.img'.`,
 		path = absPath
 
 		if utils.FileExists(path) || utils.DirExists(path) {
-			ExitWithError("Path %s already exists.", utils.StylePath(path))
+			ExitWithUsageError("Path %s already exists.", utils.StylePath(path))
 		}
 
 		// 2. Parse Flags
@@ -137,7 +137,7 @@ var resizeCmd = &cobra.Command{
 		if sizeStr == "" {
 			utils.PrintError("Size flag is required (e.g., -s 20G)")
 			_ = cmd.Usage()
-			os.Exit(ExitCodeError)
+			os.Exit(ExitCodeUsage)
 		}
 
 		// 2. Parse Size
