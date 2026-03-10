@@ -50,7 +50,9 @@ type Scheduler interface {
 | `MemPerCpuMB` | SLURM `--mem-per-cpu`; LSF `rusage[mem=X]` ÷ CpusPerTask; PBS multi-chunk `+` (uniform per-cpu mem) | Per-CPU memory in MB |
 | `MemPerNodeMB` | SLURM `--mem`; PBS `select=…:mem=X` (per-node) | Per-node total memory in MB |
 
-`GetMemPerNodeMB()` returns `MemPerNodeMB` if set; otherwise derives `MemPerCpuMB × CpusPerTask × TasksPerNode` when geometry is known (`TasksPerNode > 0`); otherwise 0.
+`GetMemPerNodeMB()` checks `MemPerCpuMB × CpusPerTask × TasksPerNode` first (requires `TasksPerNode > 0`); otherwise returns `MemPerNodeMB` (0 if not set).
+
+`GetMemPerTaskMB()` checks `MemPerCpuMB × CpusPerTask` first; otherwise returns `MemPerNodeMB ÷ TasksPerNode` (treats 0 as 1). Returns 0 if no memory is specified.
 
 **`JobSpec`** — submission input: `Name`, `Command`, `Specs`, `DepJobIDs`, `Metadata`, `Array *ArraySpec`
 
@@ -113,21 +115,20 @@ Normalized variables are **exported in the generated batch script** for LSF and 
 
 | Variable | OpenMP | MPI | Hybrid | Free-Dist (no Nodes) | Availability Logic |
 |----------|--------|-----|--------|----------------------|-------------------|
-| `MEM_PER_CPU`/`MEM_PER_CPU_GB` | ✓ | ✓ | ✓ | ✓ | Always if memory specified |
 | `NTASKS_PER_NODE` | ✓ | ✓ | ✓ | ✗ | `TasksPerNode > 0` (known layout) |
-| `MEM`/`MEM_MB`/`MEM_GB` | ✓ | ✓ | ✓ | ✗ | Nodes info present |
+| `MEM` / `MEM_GB` | ✓ | ✓ | ✓ | ✓ | Always if memory specified |
 
 **Memory Variable Logic:**
-- `MEM_PER_CPU` is **always available** when memory is specified
-- `MEM` (per-node) is available **ONLY when TasksPerNode is known** (`> 0`)
-  - Automatically calculated when both Nodes and Ntasks are specified (using ceiling division)
-  - Without TasksPerNode, cannot guarantee actual per-node distribution
+- `MEM` is memory **per task** in MB — always available when memory is specified
+  - From `MemPerCpuMB`: `MEM = MemPerCpuMB × CpusPerTask`
+  - From `MemPerNodeMB`: `MEM = MemPerNodeMB ÷ TasksPerNode` (treats 0 as 1)
+- `MEM_GB` is `MEM ÷ 1024` (integer)
 
 **Job Types:**
 - **OpenMP**: 1 task, multiple CPUs per task (e.g., `NNODES=1, NTASKS=1, NCPUS=8`)
 - **MPI**: Multiple tasks, 1 CPU per task, fixed layout (e.g., `NNODES=2, NTASKS=16, NTASKS_PER_NODE=8, NCPUS=1`)
 - **Hybrid**: Multiple tasks, multiple CPUs per task, fixed layout (e.g., `NNODES=2, NTASKS=8, NTASKS_PER_NODE=4, NCPUS=4`)
-- **Free-Dist (no Nodes)**: Only tasks, no node info (e.g., `NTASKS=7, NCPUS=1`, `MEM` not available)
+- **Free-Dist (no Nodes)**: Only tasks, no node info (e.g., `NTASKS=7, NCPUS=1, MEM=8192`)
 
 **Ceiling Division for Non-Uniform Distribution:**
 

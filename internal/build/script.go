@@ -194,11 +194,16 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 
 	// Build resource spec: builds are always single-node/single-task.
 	// effectiveNcpus() derives CPU count from scriptSpecs (folds TasksPerNode) or defaults.
+	// Pass both mem fields so GetMemPerTaskMB() on buildRS correctly derives per-task memory:
+	//   MemPerCpuMB × effectiveNcpus()  (when --mem-per-cpu was specified)
+	//   MemPerNodeMB / 1                (when --mem was specified; TasksPerNode=1)
+	effRS := buildEffectiveResourceSpec(s.scriptSpecs)
 	buildRS := &scheduler.ResourceSpec{
 		Nodes:        1,
 		TasksPerNode: 1,
 		CpusPerTask:  s.effectiveNcpus(),
-		MemPerNodeMB: s.effectiveMemMB(),
+		MemPerCpuMB:  effRS.MemPerCpuMB,
+		MemPerNodeMB: effRS.MemPerNodeMB,
 	}
 
 	// Build environment settings (KEY=VALUE format for exec.Options.EnvSettings)

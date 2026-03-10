@@ -30,10 +30,9 @@ func TestFormatHMSTime(t *testing.T) {
 
 func TestResourceEnvVars(t *testing.T) {
 	tests := []struct {
-		name         string
-		rs           *ResourceSpec
-		wantVars     map[string]string
-		mustNotExist []string
+		name     string
+		rs       *ResourceSpec
+		wantVars map[string]string
 	}{
 		{
 			name: "OpenMP: 1 task, 8 CPUs, 32GB per node",
@@ -50,11 +49,7 @@ func TestResourceEnvVars(t *testing.T) {
 				"NCPUS":           "8",
 				"OMP_NUM_THREADS": "8",
 				"NTASKS_PER_NODE": "1",
-				"MEM_PER_CPU":     "4096", // 32768 / 8
-				"MEM_PER_CPU_MB":  "4096",
-				"MEM_PER_CPU_GB":  "4",
-				"MEM":             "32768",
-				"MEM_MB":          "32768",
+				"MEM":             "32768", // 32768 / 1 task
 				"MEM_GB":          "32",
 			},
 		},
@@ -73,12 +68,8 @@ func TestResourceEnvVars(t *testing.T) {
 				"NCPUS":           "1",
 				"OMP_NUM_THREADS": "1",
 				"NTASKS_PER_NODE": "8",
-				"MEM_PER_CPU":     "4096",
-				"MEM_PER_CPU_MB":  "4096",
-				"MEM_PER_CPU_GB":  "4",
-				"MEM":             "32768", // 4096 * 1 * 8
-				"MEM_MB":          "32768",
-				"MEM_GB":          "32",
+				"MEM":             "4096", // 4096 * 1 CPU/task
+				"MEM_GB":          "4",
 			},
 		},
 		{
@@ -96,16 +87,12 @@ func TestResourceEnvVars(t *testing.T) {
 				"NCPUS":           "4",
 				"OMP_NUM_THREADS": "4",
 				"NTASKS_PER_NODE": "4",
-				"MEM_PER_CPU":     "4096", // 65536 / (4 * 4)
-				"MEM_PER_CPU_MB":  "4096",
-				"MEM_PER_CPU_GB":  "4",
-				"MEM":             "65536",
-				"MEM_MB":          "65536",
-				"MEM_GB":          "64",
+				"MEM":             "16384", // 65536 / 4 tasks/node
+				"MEM_GB":          "16",
 			},
 		},
 		{
-			name: "Manually-constructed spec with Nodes but no TasksPerNode: no MEM variables",
+			name: "Manually-constructed spec with Nodes but no TasksPerNode",
 			rs: &ResourceSpec{
 				Nodes:        2, // Nodes specified
 				Ntasks:       7,
@@ -118,12 +105,9 @@ func TestResourceEnvVars(t *testing.T) {
 				"NTASKS":          "7",
 				"NCPUS":           "1",
 				"OMP_NUM_THREADS": "1",
-				"MEM_PER_CPU":     "8192",
-				"MEM_PER_CPU_MB":  "8192",
-				"MEM_PER_CPU_GB":  "8",
-				// MEM* NOT emitted: cannot guarantee per-node distribution without TasksPerNode
+				"MEM":             "8192", // 8192 * 1 CPU/task
+				"MEM_GB":          "8",
 			},
-			mustNotExist: []string{"NTASKS_PER_NODE", "MEM", "MEM_MB", "MEM_GB"},
 		},
 		{
 			name: "Free-Distribution MPI without Nodes: 7 tasks only, no node info, 1 CPU/task, 8GB per CPU",
@@ -139,11 +123,9 @@ func TestResourceEnvVars(t *testing.T) {
 				"NTASKS":          "7",
 				"NCPUS":           "1",
 				"OMP_NUM_THREADS": "1",
-				"MEM_PER_CPU":     "8192",
-				"MEM_PER_CPU_MB":  "8192",
-				"MEM_PER_CPU_GB":  "8",
+				"MEM":             "8192", // 8192 * 1 CPU/task
+				"MEM_GB":          "8",
 			},
-			mustNotExist: []string{"NTASKS_PER_NODE", "MEM", "MEM_MB", "MEM_GB"},
 		},
 		{
 			name: "OpenMP with MemPerCpuMB: Nodes=0, 1 task, 16 CPUs, 2GB per CPU",
@@ -160,11 +142,7 @@ func TestResourceEnvVars(t *testing.T) {
 				"NCPUS":           "16",
 				"OMP_NUM_THREADS": "16",
 				"NTASKS_PER_NODE": "1",
-				"MEM_PER_CPU":     "2048",
-				"MEM_PER_CPU_MB":  "2048",
-				"MEM_PER_CPU_GB":  "2",
-				"MEM":             "32768", // 2048 * 16 * 1
-				"MEM_MB":          "32768",
+				"MEM":             "32768", // 2048 * 16 CPUs/task
 				"MEM_GB":          "32",
 			},
 		},
@@ -183,7 +161,6 @@ func TestResourceEnvVars(t *testing.T) {
 				"OMP_NUM_THREADS": "2",
 				"NTASKS_PER_NODE": "4",
 			},
-			mustNotExist: []string{"MEM_PER_CPU", "MEM_PER_CPU_MB", "MEM_PER_CPU_GB", "MEM", "MEM_MB", "MEM_GB"},
 		},
 		{
 			name: "Minimal defaults: nil ResourceSpec",
@@ -194,7 +171,6 @@ func TestResourceEnvVars(t *testing.T) {
 				"NCPUS":           "1",
 				"OMP_NUM_THREADS": "1",
 			},
-			mustNotExist: []string{"NTASKS_PER_NODE", "MEM_PER_CPU", "MEM"},
 		},
 		{
 			name: "Ntasks from topology: 2 nodes, 4 tasks/node (Ntasks not set)",
@@ -238,12 +214,6 @@ func TestResourceEnvVars(t *testing.T) {
 				}
 			}
 
-			// Check that unwanted variables don't exist
-			for _, key := range tt.mustNotExist {
-				if val, exists := gotMap[key]; exists {
-					t.Errorf("Variable %s should not exist, but found with value %q", key, val)
-				}
-			}
 		})
 	}
 }

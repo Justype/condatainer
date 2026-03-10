@@ -946,7 +946,7 @@ condatainer run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
 **Resource override flags** (apply on top of script scheduler directives; highest priority):
 
 * `-c`, `--cpu INT`: Override CPUs per task (e.g. `4`).
-* `-m`, `--mem STRING`: Override memory per node (e.g. `4G`, `8192M`).
+* `-m`, `--mem STRING`: Override memory per task (e.g. `4G`, `8192M`).
 * `-t`, `--time STRING`: Override walltime (e.g. `4d12h`, `2h30m`, `01:30:00`).
 * `-g`, `--gpu SPEC`: Override GPUs per node. Formats: `N` (any type), `TYPE:N`, or `TYPE` (count=1). E.g. `1`, `a100:2`, `a100`.
 
@@ -1170,9 +1170,8 @@ When running scripts with scheduler directives, the following environment variab
 | `NTASKS_PER_NODE` | Number of MPI tasks per node | `4` |
 | `NTASKS` | Total number of MPI tasks | `8` |
 | `NCPUS` | CPUs per task | `4` |
-| `MEM` | Memory per node in MB | `8192` |
-| `MEM_MB` | Memory per node in MB | `8192` |
-| `MEM_GB` | Memory per node in GB | `8` |
+| `MEM` | Memory per task in MB | `8192` |
+| `MEM_GB` | Memory per task in GB | `8` |
 
 **Priority Order (Scheduler ENV > Script > Default):**
 

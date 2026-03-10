@@ -176,10 +176,6 @@ func (b *BaseBuildObject) effectiveNcpus() int {
 	return cpus
 }
 
-// effectiveMemMB returns the effective memory per node in MB for this build.
-func (b *BaseBuildObject) effectiveMemMB() int64 {
-	return buildEffectiveResourceSpec(b.scriptSpecs).MemPerNodeMB
-}
 
 func (b *BaseBuildObject) IsInstalled() bool {
 	// Check if target overlay exists

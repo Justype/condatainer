@@ -236,9 +236,8 @@ Resource environment variables are set using the following priority chain (lowes
 | Variable | Description |
 |---|---|
 | `NCPUS` | CPUs per task (default: `4`) |
-| `MEM` | Memory in MB (`--mem`, e.g. `32G` → `32768`) |
-| `MEM_MB` | Same as `MEM` |
-| `MEM_GB` | Memory in GB |
+| `MEM` | Memory per task in MB (`--mem`, e.g. `32G` → `32768`) |
+| `MEM_GB` | Memory per task in GB |
 
 > [!NOTE]
 > Overlay file dependencies (`.sqf`, `.img`) in `#DEP:` tags are not supported. Use CondaTainer instead.
