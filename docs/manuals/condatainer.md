@@ -473,7 +473,8 @@ These methods will generate `my_project_env.sqf` in the current directory.
 CondaTainer uses specific exit codes so automation and downstream tooling can detect special states:
 
 - `0` — Success (all requested builds completed locally or nothing to do)
-- `1` — Generic error (invalid arguments, build failures, or other fatal errors)
+- `1` — Generic error (build failures, runtime errors, or other fatal errors)
+- `2` — Wrong or missing arguments (misuse of command, invalid flag values)
 - `3` — **Jobs submitted to scheduler** — overlays will be created asynchronously by scheduler jobs
 
 Commands that may return exit code `3` when scheduler jobs were submitted include:
@@ -567,7 +568,7 @@ condatainer list [search_terms...] [flags]
 * Searches across all image directories.
 * Marks system apps and env overlays.
 * Uses AND logic for multiple search terms (substring mode).
-* Exits with code 1 if no overlays match the search terms.
+* Exits with code `1` if no overlays match the search terms.
 
 ### Remove
 

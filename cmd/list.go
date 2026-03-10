@@ -134,7 +134,7 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	if !printed {
 		utils.PrintWarning("No installed overlays match the provided search terms.")
-		os.Exit(1)
+		os.Exit(ExitCodeError)
 	}
 
 	// Handle delete if requested

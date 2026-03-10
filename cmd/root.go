@@ -151,6 +151,13 @@ func Execute() {
 			}
 			os.Exit(ExitCodeError)
 		}
+		// Commands with SilenceUsage:false show usage on errors, meaning cobra
+		// generated a usage/argument error (unknown command, wrong arg count, etc.)
+		// → exit 2. Runtime commands set SilenceUsage:true → exit 1.
+		cmd, _, _ := rootCmd.Find(os.Args[1:])
+		if cmd != nil && !cmd.SilenceUsage {
+			ExitWithUsageError("%v", err)
+		}
 		ExitWithError("%v", err)
 	}
 }

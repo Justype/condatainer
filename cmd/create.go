@@ -72,25 +72,25 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 		ctx := cmd.Context()
 		// 1. Validation Logic
 		if len(args) == 0 && createFile == "" && createSource == "" {
-			ExitWithError("At least one of [packages], --file, or --source must be provided.")
+			ExitWithUsageError("At least one of [packages], --file, or --source must be provided.")
 		}
 		if createPrefix != "" && createName != "" {
-			ExitWithError("Cannot use both --prefix and --name at the same time.")
+			ExitWithUsageError("Cannot use both --prefix and --name at the same time.")
 		}
 		if createPrefix != "" {
 			baseName := strings.TrimSuffix(filepath.Base(createPrefix), ".sqf")
 			if strings.Contains(baseName, "--") {
-				ExitWithError("--prefix name cannot contain '--' (reserved name/version separator)")
+				ExitWithUsageError("--prefix name cannot contain '--' (reserved name/version separator)")
 			}
 		}
 		if createSource != "" && createName == "" && createPrefix == "" {
-			ExitWithError("When using --source, either --name or --prefix must be provided.")
+			ExitWithUsageError("When using --source, either --name or --prefix must be provided.")
 		}
 		if createFile != "" && createPrefix == "" {
-			ExitWithError("When using --file, --prefix must be provided.")
+			ExitWithUsageError("When using --file, --prefix must be provided.")
 		}
 		if createPrefix != "" && createFile == "" && len(args) == 0 {
-			ExitWithError("--prefix requires either packages or --file to be specified.")
+			ExitWithUsageError("--prefix requires either packages or --file to be specified.")
 		}
 
 		// 2. Ensure base image exists (also checks for apptainer)

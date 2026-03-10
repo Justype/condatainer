@@ -351,7 +351,7 @@ var configGetCmd = &cobra.Command{
 		key := args[0]
 		value := viper.Get(key)
 		if value == nil {
-			ExitWithError("Unknown config key: %s", key)
+			ExitWithUsageError("Unknown config key: %s", key)
 		}
 		fmt.Println(value)
 	},
@@ -401,7 +401,7 @@ Time duration format (for build.time):
 		if key == "default_distro" {
 			if !config.IsValidDistro(value) {
 				utils.PrintError("Unknown distro '%s'. Available: %s", value, strings.Join(config.GetAvailableDistros(), ", "))
-				os.Exit(ExitCodeError)
+				os.Exit(ExitCodeUsage)
 			}
 		}
 
@@ -409,7 +409,7 @@ Time duration format (for build.time):
 		if key == "extra_base_dirs" {
 			utils.PrintError("'%s' is an array setting. Use 'condatainer config edit' or environment variable.", key)
 			utils.PrintHint("Config file (YAML array):\n  extra_base_dirs:\n    - /path/to/dir1\n    - /path/to/dir2\n\nEnvironment variable (colon-separated):\n  export CNT_EXTRA_BASE_DIRS=/path/to/dir1:/path/to/dir2")
-			os.Exit(ExitCodeError)
+			os.Exit(ExitCodeUsage)
 		}
 
 		if !knownKeys[key] {
@@ -421,7 +421,7 @@ Time duration format (for build.time):
 			if _, err := utils.ParseWalltime(value); err != nil {
 				utils.PrintError("Invalid duration format: %s", value)
 				utils.PrintHint("Use format like: 4d12h, 2h30m, 1:30, or 01:30:00")
-				os.Exit(ExitCodeError)
+				os.Exit(ExitCodeUsage)
 			}
 		}
 
