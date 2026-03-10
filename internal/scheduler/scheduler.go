@@ -107,19 +107,37 @@ func (rs *ResourceSpec) GetNtasks() int {
 }
 
 // GetMemPerNodeMB returns the effective memory per node in MB.
-// If MemPerNodeMB is set, returns it directly.
-// If only MemPerCpuMB is set, derives from CpusPerTask × TasksPerNode (minimum 1 each).
+// Checks MemPerCpuMB × CpusPerTask × TasksPerNode first (requires TasksPerNode > 0),
+// then returns MemPerNodeMB directly.
 // Returns 0 if neither is set or geometry is insufficient to derive a value.
 func (rs *ResourceSpec) GetMemPerNodeMB() int64 {
-	if rs.MemPerNodeMB > 0 {
-		return rs.MemPerNodeMB
-	}
 	if rs.MemPerCpuMB > 0 && rs.TasksPerNode > 0 {
 		cpt := rs.CpusPerTask
 		if cpt <= 0 {
 			cpt = 1
 		}
 		return rs.MemPerCpuMB * int64(cpt*rs.TasksPerNode)
+	}
+	return rs.MemPerNodeMB
+}
+
+// GetMemPerTaskMB returns the effective memory per task in MB.
+// Checks MemPerCpuMB × CpusPerTask first, then MemPerNodeMB ÷ TasksPerNode (treats 0 as 1).
+// Returns 0 if no memory is specified.
+func (rs *ResourceSpec) GetMemPerTaskMB() int64 {
+	if rs.MemPerCpuMB > 0 {
+		cpt := rs.CpusPerTask
+		if cpt <= 0 {
+			cpt = 1
+		}
+		return rs.MemPerCpuMB * int64(cpt)
+	}
+	if rs.MemPerNodeMB > 0 {
+		tpn := int64(rs.TasksPerNode)
+		if tpn < 1 {
+			tpn = 1
+		}
+		return rs.MemPerNodeMB / tpn
 	}
 	return 0
 }

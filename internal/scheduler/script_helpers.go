@@ -156,10 +156,8 @@ func absPath(path string) string {
 //   - NTASKS_PER_NODE — tasks per node
 //
 // Memory variables (emitted when memory is specified):
-//   - MEM_PER_CPU / MEM_PER_CPU_MB / MEM_PER_CPU_GB — always available when memory is set;
-//     uses MemPerCpuMB directly, or derives from MemPerNodeMB ÷ (NCPUS × NTASKS_PER_NODE)
-//   - MEM / MEM_MB / MEM_GB — per-node total; available ONLY when TasksPerNode is known (> 0);
-//     uses MemPerNodeMB directly, or derives from MemPerCpuMB × NCPUS × TasksPerNode
+//   - MEM    — memory per task in MB; derived from MemPerCpuMB×CpusPerTask, or MemPerNodeMB÷TasksPerNode
+//   - MEM_GB — memory per task in GB (integer)
 //
 // Note: Script parsing sets TasksPerNode using ceiling division when Nodes and Ntasks are
 // specified but not evenly divisible (e.g., 7 tasks on 2 nodes → TasksPerNode=4), ensuring
@@ -205,43 +203,12 @@ func ResourceEnvVars(rs *ResourceSpec) []string {
 		)
 	}
 
-	// Memory environment variables
+	// Memory environment variables: MEM = memory per task
 	if rs != nil {
-		var memPerCpuMB int64
-		var memPerNodeMB int64
-
-		// Determine MEM_PER_CPU (always available when memory is specified)
-		if rs.MemPerCpuMB > 0 {
-			memPerCpuMB = rs.MemPerCpuMB
-		} else if rs.MemPerNodeMB > 0 && tasksPerNode > 0 {
-			// Derive from total: MemPerNodeMB / (cpusPerTask × tasksPerNode)
-			cpusPerNode := int64(cpusPerTask * tasksPerNode)
-			memPerCpuMB = rs.MemPerNodeMB / cpusPerNode
-		}
-
-		// Determine MEM (per-node total; available only when layout is known)
-		if rs.MemPerNodeMB > 0 {
-			memPerNodeMB = rs.MemPerNodeMB
-		} else if rs.MemPerCpuMB > 0 && tasksPerNode > 0 {
-			// Known layout: use exact tasks per node
-			memPerNodeMB = rs.MemPerCpuMB * int64(cpusPerTask*tasksPerNode)
-		}
-
-		// Emit MEM_PER_CPU variables
-		if memPerCpuMB > 0 {
+		if memPerTaskMB := rs.GetMemPerTaskMB(); memPerTaskMB > 0 {
 			env = append(env,
-				fmt.Sprintf("MEM_PER_CPU=%d", memPerCpuMB),
-				fmt.Sprintf("MEM_PER_CPU_MB=%d", memPerCpuMB),
-				fmt.Sprintf("MEM_PER_CPU_GB=%d", memPerCpuMB/1024),
-			)
-		}
-
-		// Emit MEM variables (per-node total)
-		if memPerNodeMB > 0 {
-			env = append(env,
-				fmt.Sprintf("MEM=%d", memPerNodeMB),
-				fmt.Sprintf("MEM_MB=%d", memPerNodeMB),
-				fmt.Sprintf("MEM_GB=%d", memPerNodeMB/1024),
+				fmt.Sprintf("MEM=%d", memPerTaskMB),
+				fmt.Sprintf("MEM_GB=%d", memPerTaskMB/1024),
 			)
 		}
 	}
@@ -290,8 +257,8 @@ func writeJobHeader(w io.Writer, jobIDVar string, specs *ScriptSpecs, formatTime
 		if rs.CpusPerTask > 0 {
 			fmt.Fprintf(w, "echo \"CPUs/Task:  %d\"\n", rs.CpusPerTask)
 		}
-		if rs.MemPerNodeMB > 0 {
-			fmt.Fprintf(w, "echo \"Memory:     %d MB\"\n", rs.MemPerNodeMB)
+		if memPerTaskMB := rs.GetMemPerTaskMB(); memPerTaskMB > 0 {
+			fmt.Fprintf(w, "echo \"Mem/Task:   %d MB\"\n", memPerTaskMB)
 		}
 		if rs.Time > 0 && formatTime != nil {
 			fmt.Fprintf(w, "echo \"Time:       %s\"\n", formatTime(rs.Time))

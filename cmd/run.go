@@ -110,7 +110,7 @@ func init() {
 	runCmd.Flags().StringArrayVar(&runBindPaths, "bind", nil, "Bind mount HOST:CONTAINER (repeatable)")
 	runCmd.Flags().BoolVarP(&runFakeroot, "fakeroot", "f", false, "Run with fakeroot privileges")
 	runCmd.Flags().IntVarP(&runCPU, "cpu", "c", 0, "Override CPUs per task (e.g. 4)")
-	runCmd.Flags().StringVarP(&runMem, "mem", "m", "", "Override memory per node (e.g. 4G, 8192M)")
+	runCmd.Flags().StringVarP(&runMem, "mem", "m", "", "Override memory per task (e.g. 4G, 8192M)")
 	runCmd.Flags().StringVarP(&runTime, "time", "t", "", "Override walltime (e.g. 4d12h, 2h30m, 01:30:00)")
 	runCmd.Flags().StringVarP(&runGPU, "gpu", "g", "", "Override GPUs per node (e.g. 1, a100:2, a100)")
 	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Preview what would happen without executing")
@@ -228,7 +228,11 @@ func runScript(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				ExitWithError("--mem %q: %v", runMem, err)
 			}
-			override.MemPerNodeMB = mb
+			cpus := runCPU
+			if cpus <= 0 {
+				cpus = 1
+			}
+			override.MemPerCpuMB = (mb + int64(cpus) - 1) / int64(cpus)
 		}
 		if runTime != "" {
 			d, err := utils.ParseWalltime(runTime)
@@ -745,17 +749,19 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		} else {
 			// Pure OpenMP / single-task
 			if rs.CpusPerTask > 0 {
-				fmt.Printf("  CPU/Task:   %d\n", rs.CpusPerTask)
+				fmt.Printf("  CPU:        %d\n", rs.CpusPerTask)
 			}
 		}
 
-		if rs.MemPerCpuMB > 0 {
-			fmt.Printf("  Mem/CPU:    %d MB\n", rs.MemPerCpuMB)
-		} else if rs.MemPerNodeMB > 0 {
-			if rs.MemPerNodeMB >= 1024 && rs.MemPerNodeMB%1024 == 0 {
-				fmt.Printf("  Mem/Node:   %d GB\n", rs.MemPerNodeMB/1024)
+		if memPerTaskMB := rs.GetMemPerTaskMB(); memPerTaskMB > 0 {
+			memLabel := "Mem/Task:  "
+			if !isMPI {
+				memLabel = "Mem:       "
+			}
+			if memPerTaskMB >= 1024 && memPerTaskMB%1024 == 0 {
+				fmt.Printf("  %s %d GB\n", memLabel, memPerTaskMB/1024)
 			} else {
-				fmt.Printf("  Mem/Node:   %d MB\n", rs.MemPerNodeMB)
+				fmt.Printf("  %s %d MB\n", memLabel, memPerTaskMB)
 			}
 		}
 		if rs.Time > 0 {
