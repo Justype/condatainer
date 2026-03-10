@@ -145,6 +145,12 @@ All helper scripts support:
 -o <overlay>    # Additional overlay (can use multiple -o)
 ```
 
+When `-e` is `env.img` (the default), the helper searches for it in order:
+
+1. `env.img` (current directory)
+2. `overlay/env.img`
+3. `src/overlay/env.img`
+
 ```{note}
 Using `-w` will set the working directory to your current directory and clear any additional overlays (`-o`) from previous runs. This is useful when you've `cd` to a new project directory and want to start fresh.
 ```
@@ -217,7 +223,7 @@ MEM="32G"
 TIME="24:00:00"
 PORT="13182"
 OVERLAY="env.img"
-REUSE_MODE="ask"    # Control reuse behavior: 'always', 'ask', or 'never'
+REUSE_MODE="ask"   # 'always', 'ask' (default), or 'never'
 ```
 
 ### Reuse Mode
@@ -237,7 +243,7 @@ The `REUSE_MODE` setting controls this behavior:
 # Edit config file
 nano ~/.config/condatainer/helper/vscode-server
 
-# Set to auto-reuse previous settings:
+# Set to never-reuse previous settings:
 REUSE_MODE="never"
 ```
 
@@ -266,8 +272,8 @@ When you pass any CLI flags (e.g., `-w`, `-g ''`, `-c 8`), the script automatica
 # Let script auto-select a port
 condatainer helper vscode-server
 
-# Or choose a different port
-condatainer helper vscode-server -p 13183
+# Or specify a port explicitly
+condatainer helper vscode-server -p 13182
 ```
 
 ### Cannot Connect
@@ -293,7 +299,7 @@ e2fsck -f env.img
 
 - [VS Code Server](./vscode-server_on_HPC.md) - Full VS Code experience (recommended)
 - [VS Code Tunnel](./vscode-tunnel_on_HPC.md) - No port forwarding needed
-- [code-server](./code-server_on_HPC.md) - Open-source alternative
+- code-server - Open-source alternative (Cannot use Microsoft extensions)
 
 ### RStudio
 

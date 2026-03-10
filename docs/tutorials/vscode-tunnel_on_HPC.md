@@ -104,16 +104,18 @@ Then you can either:
 Usage: vscode-tunnel [options]
 
 Options:
-  -c <number>     Number of CPUs to allocate (default: 4)
-  -m <memory>     Amount of memory to allocate (default: 16G)
-  -t <time>       Time limit for the job (default: 12:00:00)
-  -g <gpu>        GPU resources (e.g., 1, a100:2). Empty means no GPU.
-  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00
-
   -a <provider>   github or microsoft for authentication (default: github)
   -n <name>       Machine name for the tunnel (default: <username>-<hostname>)
+
+  -c <number>     Number of CPUs to allocate (default: 4)
+  -m <memory>     Total amount of memory to allocate (default: 16G)
+  -t <time>       Time limit for the job (default: 12:00:00)
+  -g <gpu>        GPU resources (e.g., 1, a100:2). Use -g '' to clear
+  -v              View Mode NCPUS:1 MEM:4G TIME:02:00:00, GPU cleared
+  -w              Use current directory as working directory (clears additional overlays)
+
   -b <image>      Base image file
-  -e <overlay>    Environment overlay image file (default: env.img)
+  -e <.img>       Writable overlay (default: env.img)
   -o <overlay>    Additional overlay files (can have multiple -o options)
 
   config          Show config file path and contents
@@ -131,16 +133,11 @@ condatainer helper vscode-tunnel config
 rm ~/.config/condatainer/helper/vscode-tunnel
 ```
 
-Config files use simple `KEY="VALUE"` format and can be edited directly:
+### Reuse Mode
 
-```bash
-NCPUS="4"
-MEM="16G"
-TIME="12:00:00"
-AUTH="github"
-MACHINE_NAME="username-hpc"
-OVERLAY="env.img"
-```
+After a job ends, the helper can reuse your previous settings (working directory, overlays, resource flags, machine name) — no need to retype anything. When starting a new project folder, use `-w` to switch the working directory.
+
+See [Reuse Mode](./helpers_on_HPC.md#reuse-mode) for configuration details.
 
 ## Running VS Code Tunnel
 

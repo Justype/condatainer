@@ -130,11 +130,11 @@ Options:
   -a <passwd>     VNC password (if empty, one is generated)
 
   -c <number>     Number of CPUs to allocate (default: 3)
-  -m <memory>     Amount of memory to allocate (default: 12G)
+  -m <memory>     Total amount of memory to allocate (default: 12G)
   -t <time>       Time limit for the job (default: 12:00:00)
   -g <gpu>        GPU resources (e.g., 1, a100:2). Use -g '' to clear
-  -v              View Mode NCPUS:2 MEM:8G TIME:02:00:00
-  -w              Use current directory as working directory
+  -v              View Mode NCPUS:2 MEM:8G TIME:02:00:00, GPU cleared
+  -w              Use current directory as working directory (clears additional overlays)
 
   -b <image>      Base image file
   -e <.img>       Writable overlay (default: env.img)
@@ -155,6 +155,12 @@ condatainer helper xfce4 config
 rm ~/.config/condatainer/helper/xfce4
 ```
 
+### Reuse Mode
+
+After a job ends, the helper can reuse your previous settings (port, working directory, overlays, resource flags) — no need to retype anything. When starting a new project folder, use `-w` to switch the working directory.
+
+See [Reuse Mode](./helpers_on_HPC.md#reuse-mode) for configuration details.
+
 ### Desktop Home Directory
 
 By default, the desktop XDG directories (Desktop, Documents, Downloads, etc.) are redirected to `$SCRATCH/desktop-home/` to avoid cluttering your `$HOME` directory. You can change this by editing the `DESKTOP_HOME` setting in the config file.
@@ -169,7 +175,7 @@ condatainer helper -u
 Then you can run the script:
 
 ```bash
-condatainer helper xfce4
+condatainer helper xfce4 -w -p 13182
 ```
 
 After running the script, you will see output like this:

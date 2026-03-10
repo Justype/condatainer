@@ -29,7 +29,7 @@ condatainer helper rstudio-server
 #   -p port_number=auto-selected if omitted
 ```
 
-You can set [Config](./helpers_on_HPC.md#configuration-and-defaults) and helpers also support [Reusing previous settings](./helpers_on_HPC.md#reuse-mode).
+You can set [Config](./helpers_on_server.md#configuration-and-defaults) and helpers also support [Reusing previous settings](./helpers_on_server.md#reuse-mode).
 
 If you encounter `file name too long` error, see [File name too long ERROR](#file-name-too-long-system36-error) section below.
 
@@ -114,9 +114,11 @@ The headless version works differently from the SLURM version:
 Usage: rstudio-server [options]
 
 Options:
-  -r <r_version>  R version to use (e.g., 4.4). If omitted, uses latest available.
-  -p <port>       Port for rstudio-server (if omitted, an available port will be chosen)
-  -e <overlay>    Environment overlay image file (default: env.img)
+  -r <r_version>  R version to use (e.g., 4.4.3) Use latest available if omitted.
+  -p <port>       Port for rstudio-server (default: randomly picked). Valid range: 1024-65535
+  -w              Use current directory as working directory (clears additional overlays)
+
+  -e <.img>       Writable overlay (default: env.img)
   -o <overlay>    Additional overlay files (can have multiple -o options)
 
   config          Show config file path and contents
@@ -139,6 +141,12 @@ condatainer helper rstudio-server config
 # Reset to defaults (delete config file, next run recreates it)
 rm ~/.config/condatainer/helper/rstudio-server
 ```
+
+### Reuse Mode
+
+When you run the helper again, it can reuse your previous settings (port, working directory, overlays) — no need to retype anything. When starting a new project folder, use `-w` to switch the working directory.
+
+See [Reuse Mode](./helpers_on_server.md#reuse-mode) for configuration details.
 
 ## Running RStudio Server
 

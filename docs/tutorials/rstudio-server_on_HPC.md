@@ -133,15 +133,17 @@ The script will do the following steps for you:
 Usage: rstudio-server [options]
 
 Options:
-  -r <r_version>  R version to use (e.g., 4.4). If omitted, uses latest available.
-  -c <number>     Number of CPUs to allocate (default: 4)
-  -m <memory>     Amount of memory to allocate (default: 32G)
-  -t <time>       Time limit for the job (default: 12:00:00)
-  -g <gpu>        GPU resources (e.g., 1, a100:2). Empty means no GPU.
-  -v              View Mode NCPUS:1 MEM:8G TIME:02:00:00
+  -r <r_version>  R version to use (e.g., 4.4.3) Use latest available if omitted.
+  -p <port>       Port for rstudio-server (default: randomly picked). Valid range: 1024-65535
 
-  -p <port>       Port for rstudio-server (default: randomly picked). Valid range: 1024-65535.
-  -e <overlay>    Environment overlay image file (default: env.img)
+  -c <number>     Number of CPUs to allocate (default: 4)
+  -m <memory>     Total amount of memory to allocate (default: 32G)
+  -t <time>       Time limit for the job (default: 12:00:00)
+  -g <gpu>        GPU resources (e.g., 1, a100:2). Use -g '' to clear
+  -v              View Mode NCPUS:1 MEM:8G TIME:02:00:00, GPU cleared
+  -w              Use current directory as working directory (clears additional overlays)
+
+  -e <.img>       Writable overlay (default: env.img)
   -o <overlay>    Additional overlay files (can have multiple -o options)
 
   config          Show config file path and contents
@@ -164,6 +166,12 @@ condatainer helper rstudio-server config
 # Reset to defaults (delete config file, next run recreates it)
 rm ~/.config/condatainer/helper/rstudio-server
 ```
+
+### Reuse Mode
+
+After a job ends, the helper can reuse your previous settings (port, working directory, overlays, resource flags) — no need to retype anything. When starting a new project folder, use `-w` to switch the working directory.
+
+See [Reuse Mode](./helpers_on_HPC.md#reuse-mode) for configuration details.
 
 ## Running RStudio Server
 
