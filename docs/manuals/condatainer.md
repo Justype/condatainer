@@ -381,7 +381,7 @@ condatainer create [OPTIONS] [packages...]
 **Options:**
 
 * `-n`, `--name [NAME]`: Custom name for the resulting overlay file. If used, all specified packages are bundled into one overlay.
-* `-p`, `--prefix [PATH]`: Custom prefix path for the overlay file.
+* `-p`, `--prefix [PATH]`: Custom prefix path for the overlay file. When `-f` is used, this can be omitted — the prefix is inferred from the file name.
 * `-f`, `--file [FILE]`: Path to definition file (.yaml, .sh, .def).
 * `-b`, `--base-image [PATH]`: Base image to use instead of default.
 * `-s`, `--source [URI]`: Remote source URI (e.g., `docker://ubuntu:22.04`).
@@ -406,7 +406,8 @@ condatainer create [OPTIONS] [packages...]
 * **Default:** Each package gets its own `.sqf` via the build system.
 * **`--name`:** Create a single `.sqf` with multiple packages bundled together.
 * **`--prefix` + packages:** Create a conda env `.sqf` at a custom path, like `conda create -p`.
-* **`--prefix` + `--file`:** Create `.sqf` from external source file (.sh, .def, .yml).
+* **`--file` only:** Create `.sqf` from external source file; prefix inferred from file name (e.g. `condatainer create -f r-collect.sh` → `r-collect.sqf`).
+* **`--prefix` + `--file`:** Create `.sqf` from external source file at a custom path.
 * **`--source`:** Create `.sqf` from a remote container source URI.
 
 ### System level Examples
@@ -427,7 +428,10 @@ condatainer create grch38/gtf-gencode/47
 # Create a conda env sqf with packages at a custom path (like conda create -p)
 condatainer create python=3.11 numpy -p /scratch/myenv
 
-# Create from a yaml file with a custom name (Custom Env)
+# Create from a yaml file (prefix inferred from filename)
+condatainer create -f environment.yml
+
+# Create from a yaml file with a custom prefix
 condatainer create -p my_analysis_env -f environment.yml
 
 # Create a custom env with multiple packages bundled together
@@ -448,25 +452,27 @@ condatainer create -n nvim nvim nodejs -u
 
 ### Project level Examples
 
-Create a read-only overlay with a Conda environment using a Conda YAML file.
+Create a read-only overlay with a Conda environment using a Conda YAML file. The prefix can be omitted — it is inferred from the file name.
 
 ```bash
+# Prefix inferred: generates environment.sqf in the current directory
+condatainer create -f environment.yml
+
+# Custom prefix: generates my_project_env.sqf
 condatainer create -p my_project_env -f environment.yml
 ```
 
 Create a read-only overlay using a custom Apptainer definition file. See [Custom OS Overlays](../advanced_usage/custom_os.md) for more details.
 
 ```bash
-condatainer create -p my_project_env -f custom_def.def
+condatainer create -f custom_def.def
 ```
 
 Create a read-only overlay using a shell script that installs packages. See [Custom Build Script using Build Scripts](../advanced_usage/custom_bundle.md) for more details.
 
 ```bash
-condatainer create -p my_project_env -f install_packages.sh
+condatainer create -f install_packages.sh
 ```
-
-These methods will generate `my_project_env.sqf` in the current directory.
 
 ### Exit Codes (script and job-submission behavior) ⚠️
 
@@ -903,15 +909,47 @@ Utilities for running scripts with automatic dependency handling via `#DEP:` tag
 
 ### Check
 
-Parses a script for `#DEP:` tags and checks if the required overlays are installed.
+Parses scripts for `#DEP:` tags and checks if the required overlays are installed.
+
+**Usage:**
 
 ```
-condatainer check [SCRIPT] [-a] [--module]
+condatainer check <script|dir> [script|dir ...] [-a] [--module]
 ```
 
-* `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies found in the script.
+Each argument can be:
+- A local `.sh` file path
+- A directory — all `.sh` files **directly inside** it are checked (non-recursive)
+- A package name (e.g., `grch38/salmon/1.10.2/gencode49`) resolved from local or remote build scripts
+
+**Options:**
+
+* `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies.
 * `-i`, `--install`: Alias for `--auto-install`.
 * `--module`: Also parse `module load` / `ml` lines as dependencies.
+
+**Output:**
+
+Dependencies are grouped into two sections:
+
+```
+Module Overlays:
+  ✓ samtools/1.22
+  ✗ bcftools/1.21
+
+External Overlays:
+  ✓ src/overlay/r-env.sqf
+  ✗ src/overlay/r-collect.sqf  (.yml found)
+  ✗ src/overlay/custom.sqf     (.sh found, but has #DEP - create manually)
+```
+
+**Auto-install (`-a`):**
+
+- **Module overlays**: resolved via build scripts or conda, same as `condatainer create`.
+- **External overlays**: auto-created from the sibling source file if found and has no `#DEP:` tags.
+  - `.yml` / `.yaml` → conda environment
+  - `.def` → Apptainer build and extract the squashfs
+  - `.sh` (no `#DEP:`) → shell build (cannot have `#DEP:` tags)
 
 ### Run
 
@@ -927,8 +965,6 @@ condatainer run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
 
 * `-w`, `--writable`, `--writable-img`: Make `.img` overlays writable (default: read-only).
 * `-b`, `--base-image [PATH]`: Use custom base image.
-* `-a`, `--auto-install`: Automatically install missing dependencies.
-* `-i`, `--install`: Alias for `--auto-install`.
 * `--module`: Also parse `module load` / `ml` lines as dependencies.
 * `-n`, `--name NAME`: Override the job name shown in the scheduler queue (e.g. `squeue`). Takes priority over `#SBATCH --job-name` and similar directives.
 * `-o`, `--output PATH`: Override the job stdout path (creates parent directory if needed). Takes priority over scheduler stdout settings.
@@ -1007,14 +1043,16 @@ If your script contains scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`), `c
 samtools view -@ 4 input.bam | bcftools call -mv -o output.vcf
 ```
 
-When you run this script:
+Install missing dependencies first:
 
 ```bash
-# Shows missing deps, then submits as SLURM job
-condatainer run analysis.sh
+condatainer check -a salmon_quant.sh
+```
 
-# Auto-install missing deps first, then submit as job
-condatainer run -a analysis.sh
+After all dependencies are installed, submit as a job:
+
+```bash
+condatainer run salmon_quant.sh
 ```
 
 **Log Files:**

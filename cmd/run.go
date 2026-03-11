@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Justype/condatainer/internal/apptainer"
-	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	execpkg "github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/overlay"
@@ -26,7 +25,6 @@ import (
 var (
 	runWritableImg     bool
 	runBaseImage       string
-	runAutoInstall     bool
 	runEnvSettings     []string
 	runBindPaths       []string
 	runFakeroot        bool
@@ -98,8 +96,6 @@ func init() {
 	runCmd.Flags().BoolVarP(&runWritableImg, "writable", "w", false, "Make .img overlays writable (default: read-only)")
 	runCmd.Flags().BoolVar(&runWritableImg, "writable-img", false, "Alias for --writable")
 	runCmd.Flags().StringVarP(&runBaseImage, "base-image", "b", "", "Base image to use instead of default")
-	runCmd.Flags().BoolVarP(&runAutoInstall, "auto-install", "a", false, "Automatically install missing dependencies")
-	runCmd.Flags().BoolP("install", "i", false, "Alias for --auto-install")
 	runCmd.Flags().BoolVar(&runParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
 	runCmd.Flags().StringVarP(&runStdout, "output", "o", "", "Override job stdout path (creates parent dir if needed)")
 	runCmd.Flags().StringVarP(&runStderr, "error", "e", "", "Override job stderr path")
@@ -127,7 +123,7 @@ func init() {
 		}
 		container := pflag.NewFlagSet("", pflag.ContinueOnError)
 		job := pflag.NewFlagSet("", pflag.ContinueOnError)
-		cmd.Flags().VisitAll(func(fl *pflag.Flag) {
+		cmd.LocalFlags().VisitAll(func(fl *pflag.Flag) {
 			if runJobFlagNames[fl.Name] {
 				job.AddFlag(fl)
 			} else {
@@ -173,11 +169,6 @@ func runScript(cmd *cobra.Command, args []string) error {
 
 	scriptPath := args[0]
 	scriptArgs := args[1:] // arguments for the script itself
-
-	// Check if -i flag was used (alias for -a)
-	if installFlag, _ := cmd.Flags().GetBool("install"); installFlag {
-		runAutoInstall = true
-	}
 
 	// Ensure base image exists
 	if err := ensureBaseImage(cmd.Context()); err != nil {
@@ -286,7 +277,7 @@ func runScript(cmd *cobra.Command, args []string) error {
 	if runWritableImg && getNtasks(scriptSpecs) > 1 {
 		ExitWithError("--writable cannot be used with multi-task jobs (ntasks=%d)", getNtasks(scriptSpecs))
 	}
-	overlays, depJobIDs, err := checkDepsAndAutoInstall(cmd.Context(), contentScript, originScriptPath)
+	overlays, err := resolveDeps(contentScript, originScriptPath)
 	if err != nil {
 		if errors.Is(err, errRunAborted) {
 			os.Exit(ExitCodeError)
@@ -311,10 +302,6 @@ func runScript(cmd *cobra.Command, args []string) error {
 			utils.PrintNote("Script has scheduler specs but no scheduler is available. Running locally.")
 		} else {
 			var deps []scheduler.Dependency
-			// Build job IDs from auto-install are always afterok
-			if len(depJobIDs) > 0 {
-				deps = append(deps, scheduler.Dependency{Type: scheduler.DependencyAfterOK, JobIDs: depJobIDs})
-			}
 			parseDepFlag := func(val, depType string) {
 				if val == "" {
 					return
@@ -378,19 +365,18 @@ func processEmbeddedArgs(scriptPath string) error {
 	return nil
 }
 
-// checkDepsAndAutoInstall resolves #DEP dependencies, checks installed overlays, and optionally
-// auto-installs missing ones. Returns overlay paths and build job IDs.
-// Returns errRunAborted (message already printed) for handled stop conditions.
-func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPath string) (overlays []string, depJobIDs []string, err error) {
+// resolveDeps parses #DEP dependencies, checks installed overlays, and returns resolved paths.
+// Returns errRunAborted (message already printed) if any dependencies are missing.
+func resolveDeps(contentScript, originScriptPath string) (overlays []string, err error) {
 	deps, err := utils.GetDependenciesFromScript(contentScript, config.Global.ParseModuleLoad || runParseModuleLoad)
 	if err != nil {
 		utils.PrintError("Failed to parse dependencies: %v", err)
-		return nil, nil, errRunAborted
+		return nil, errRunAborted
 	}
 
 	installedOverlays, err := getInstalledOverlaysMap()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	missingDeps := []string{}
@@ -412,26 +398,6 @@ func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPat
 		for _, md := range missingDeps {
 			utils.PrintMessage("  - %s", utils.StyleWarning(md))
 		}
-
-		if !runAutoInstall {
-			externalFiles := []string{}
-			for _, md := range missingDeps {
-				if utils.IsOverlay(md) {
-					externalFiles = append(externalFiles, md)
-				}
-			}
-			if len(externalFiles) > 0 {
-				fileList := strings.Join(externalFiles, ", ")
-				utils.PrintError("External overlay(s) %s not found. Cannot use -a to install.", utils.StyleName(fileList))
-				return nil, nil, errRunAborted
-			}
-			utils.PrintHint("Please run %s to install missing dependencies.", utils.StyleAction("condatainer check -a "+originScriptPath))
-			return nil, nil, errRunAborted
-		}
-
-		// Auto-install missing dependencies
-		utils.PrintMessage("Attempting to auto-install missing dependencies...")
-
 		externalFiles := []string{}
 		for _, md := range missingDeps {
 			if utils.IsOverlay(md) {
@@ -440,55 +406,11 @@ func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPat
 		}
 		if len(externalFiles) > 0 {
 			fileList := strings.Join(externalFiles, ", ")
-			utils.PrintError("External overlay(s) %s not found - cannot proceed with auto-installation", utils.StyleName(fileList))
-			return nil, nil, errRunAborted
+			utils.PrintError("External overlay(s) %s not found - use condatainer check -a to create them.", utils.StyleName(fileList))
+		} else {
+			utils.PrintHint("Please run %s to install missing dependencies.", utils.StyleAction("condatainer check -a "+originScriptPath))
 		}
-
-		imagesDir, err := config.GetWritableImagesDir()
-		if err != nil {
-			utils.PrintError("No writable images directory found: %v", err)
-			return nil, nil, errRunAborted
-		}
-		buildObjects := make([]build.BuildObject, 0, len(missingDeps))
-		for _, pkg := range missingDeps {
-			bo, err := build.NewBuildObject(ctx, pkg, false, imagesDir, config.GetWritableTmpDir(), false)
-			if err != nil {
-				utils.PrintError("Failed to create build object for %s: %v", utils.StyleName(pkg), err)
-				return nil, nil, errRunAborted
-			}
-			buildObjects = append(buildObjects, bo)
-		}
-
-		graph, err := build.NewBuildGraph(ctx, buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, false)
-		if err != nil {
-			utils.PrintError("Failed to create build graph: %v", err)
-			return nil, nil, errRunAborted
-		}
-
-		if err := graph.Run(ctx); err != nil {
-			if errors.Is(err, build.ErrBuildCancelled) ||
-				errors.Is(ctx.Err(), context.Canceled) ||
-				strings.Contains(err.Error(), "signal: killed") ||
-				strings.Contains(err.Error(), "context canceled") {
-				utils.PrintWarning("Auto-installation cancelled.")
-				return nil, nil, errRunAborted
-			}
-			utils.PrintError("Some overlays failed to install: %v", err)
-			return nil, nil, errRunAborted
-		}
-
-		utils.PrintSuccess("All selected overlays installed/submitted.")
-		for _, id := range graph.GetJobIDs() {
-			depJobIDs = append(depJobIDs, id)
-		}
-		if len(depJobIDs) > 0 {
-			utils.PrintMessage("Build job(s) submitted: %s", strings.Join(depJobIDs, ", "))
-		}
-
-		installedOverlays, err = getInstalledOverlaysMap()
-		if err != nil {
-			return nil, nil, err
-		}
+		return nil, errRunAborted
 	}
 
 	// Resolve overlay paths
@@ -510,12 +432,12 @@ func checkDepsAndAutoInstall(ctx context.Context, contentScript, originScriptPat
 	for _, ol := range overlays {
 		if utils.IsImg(ol) && utils.FileExists(ol) {
 			if err := overlay.CheckAvailable(ol, runWritableImg); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		}
 	}
 
-	return overlays, depJobIDs, nil
+	return overlays, nil
 }
 
 // effectiveResourceSpec resolves the resource spec using the priority chain:
