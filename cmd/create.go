@@ -217,7 +217,7 @@ func init() {
 		}
 		general := pflag.NewFlagSet("", pflag.ContinueOnError)
 		build := pflag.NewFlagSet("", pflag.ContinueOnError)
-		cmd.Flags().VisitAll(func(fl *pflag.Flag) {
+		cmd.LocalFlags().VisitAll(func(fl *pflag.Flag) {
 			if buildFlagNames[fl.Name] {
 				build.AddFlag(fl)
 			} else {

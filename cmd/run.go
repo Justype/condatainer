@@ -123,7 +123,7 @@ func init() {
 		}
 		container := pflag.NewFlagSet("", pflag.ContinueOnError)
 		job := pflag.NewFlagSet("", pflag.ContinueOnError)
-		cmd.Flags().VisitAll(func(fl *pflag.Flag) {
+		cmd.LocalFlags().VisitAll(func(fl *pflag.Flag) {
 			if runJobFlagNames[fl.Name] {
 				job.AddFlag(fl)
 			} else {
