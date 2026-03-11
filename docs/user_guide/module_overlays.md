@@ -114,10 +114,16 @@ Example Script (`analysis.sh`):
 samtools --version
 ```
 
-Auto install dependencies and submit the job with:
+Install missing dependencies first:
 
 ```bash
-condatainer run -a analysis.sh
+condatainer check -a salmon_quant.sh
+```
+
+After all dependencies are installed, submit as a job:
+
+```bash
+condatainer run salmon_quant.sh
 ```
 
 If no scheduler directives are found or job submission is disabled, the script will run immediately in the current shell.

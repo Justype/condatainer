@@ -127,10 +127,16 @@ salmon quant \
   -l A -r reads.fq -o quants/
 ```
 
-Auto install dependencies and submit the job with:
+Install missing dependencies first:
 
 ```bash
-condatainer run -a salmon_quant.sh
+condatainer check -a salmon_quant.sh
+```
+
+After all dependencies are installed, submit as a job:
+
+```bash
+condatainer run salmon_quant.sh
 ```
 
 Useful ENVs are automatically set in the container (single task job):
