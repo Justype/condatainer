@@ -101,11 +101,14 @@ var rootCmd = &cobra.Command{
 			utils.PrintDebug("Yes mode enabled (automatically answering yes to prompts)")
 		}
 
-		// Step 6: Auto-detect compression based on apptainer/singularity version
+		// Step 6: Auto-detect compression based on apptainer/singularity version.
+		// Skip the version subprocess when compression is already explicitly configured.
 		if err := apptainer.SetBin(config.Global.ApptainerBin); err == nil {
-			if version, err := apptainer.GetVersion(); err == nil {
-				supportsZstd := apptainer.CheckZstdSupport(version)
-				config.AutoDetectCompression(supportsZstd, apptainer.IsSingularity())
+			if config.Global.Build.CompressArgs == "" {
+				if version, err := apptainer.GetVersion(); err == nil {
+					supportsZstd := apptainer.CheckZstdSupport(version)
+					config.AutoDetectCompression(supportsZstd, apptainer.IsSingularity())
+				}
 			}
 		}
 
