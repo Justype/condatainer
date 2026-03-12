@@ -22,6 +22,7 @@ type HTCondorScheduler struct {
 	condorStatusBin    string
 	condorConfigValBin string
 	jobIDRe            *regexp.Regexp
+	cachedClusterInfo  *ClusterInfo
 }
 
 // NewHTCondorScheduler creates a new HTCondor scheduler instance using condor_submit from PATH
@@ -586,6 +587,10 @@ func (h *HTCondorScheduler) Submit(scriptPath string, deps []Dependency) (string
 
 // GetClusterInfo retrieves HTCondor cluster configuration
 func (h *HTCondorScheduler) GetClusterInfo() (*ClusterInfo, error) {
+	if h.cachedClusterInfo != nil {
+		return h.cachedClusterInfo, nil
+	}
+
 	info := &ClusterInfo{
 		AvailableGpus: make([]GpuInfo, 0),
 		Limits:        make([]ResourceLimits, 0),
@@ -616,6 +621,7 @@ func (h *HTCondorScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		}
 	}
 
+	h.cachedClusterInfo = info
 	return info, nil
 }
 

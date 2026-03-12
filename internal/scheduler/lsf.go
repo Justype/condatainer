@@ -18,12 +18,13 @@ import (
 // LsfScheduler implements the Scheduler interface for IBM Spectrum LSF
 // EXPERIMENTAL: LSF is not tested on real clusters and may have edge cases. Feedback welcome.
 type LsfScheduler struct {
-	bsubBin     string
-	bjobsBin    string
-	bhostsBin   string
-	bqueuesBin  string
-	directiveRe *regexp.Regexp
-	jobIDRe     *regexp.Regexp
+	bsubBin           string
+	bjobsBin          string
+	bhostsBin         string
+	bqueuesBin        string
+	directiveRe       *regexp.Regexp
+	jobIDRe           *regexp.Regexp
+	cachedClusterInfo *ClusterInfo
 }
 
 // NewLsfScheduler creates a new LSF scheduler instance using bsub from PATH
@@ -762,6 +763,10 @@ func (l *LsfScheduler) Submit(scriptPath string, deps []Dependency) (string, err
 
 // GetClusterInfo retrieves cluster configuration (GPUs, limits)
 func (l *LsfScheduler) GetClusterInfo() (*ClusterInfo, error) {
+	if l.cachedClusterInfo != nil {
+		return l.cachedClusterInfo, nil
+	}
+
 	info := &ClusterInfo{
 		AvailableGpus: make([]GpuInfo, 0),
 		Limits:        make([]ResourceLimits, 0),
@@ -794,6 +799,7 @@ func (l *LsfScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		return nil, ErrClusterInfoUnavailable
 	}
 
+	l.cachedClusterInfo = info
 	return info, nil
 }
 

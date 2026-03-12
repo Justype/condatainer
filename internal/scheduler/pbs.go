@@ -71,11 +71,12 @@ func parsePbsChunk(chunkStr string) (pbsChunkSpec, error) {
 //
 // EXPERIMENTAL: PBS is not tested on real clusters and may have edge cases. Feedback welcome.
 type PbsScheduler struct {
-	qsubBin     string
-	qstatBin    string
-	pbsnodesBin string
-	directiveRe *regexp.Regexp
-	jobIDRe     *regexp.Regexp
+	qsubBin           string
+	qstatBin          string
+	pbsnodesBin       string
+	directiveRe       *regexp.Regexp
+	jobIDRe           *regexp.Regexp
+	cachedClusterInfo *ClusterInfo
 }
 
 // NewPbsScheduler creates a new PBS scheduler instance using qsub from PATH
@@ -763,6 +764,10 @@ func (p *PbsScheduler) Submit(scriptPath string, deps []Dependency) (string, err
 // GetClusterInfo retrieves cluster configuration (GPUs, limits)
 // Returns nil if information is not available
 func (p *PbsScheduler) GetClusterInfo() (*ClusterInfo, error) {
+	if p.cachedClusterInfo != nil {
+		return p.cachedClusterInfo, nil
+	}
+
 	info := &ClusterInfo{
 		AvailableGpus: make([]GpuInfo, 0),
 		Limits:        make([]ResourceLimits, 0),
@@ -795,6 +800,7 @@ func (p *PbsScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		return nil, ErrClusterInfoUnavailable
 	}
 
+	p.cachedClusterInfo = info
 	return info, nil
 }
 

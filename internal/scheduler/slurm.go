@@ -28,11 +28,12 @@ var slurmBlacklistedFlags = []string{
 
 // SlurmScheduler implements the Scheduler interface for SLURM
 type SlurmScheduler struct {
-	sbatchBin       string
-	sinfoCommand    string
-	scontrolCommand string
-	directiveRe     *regexp.Regexp
-	jobIDRe         *regexp.Regexp
+	sbatchBin        string
+	sinfoCommand     string
+	scontrolCommand  string
+	directiveRe      *regexp.Regexp
+	jobIDRe          *regexp.Regexp
+	cachedClusterInfo *ClusterInfo
 }
 
 // NewSlurmScheduler creates a new SLURM scheduler instance using sbatch from PATH
@@ -732,6 +733,10 @@ func (s *SlurmScheduler) Submit(scriptPath string, deps []Dependency) (string, e
 
 // GetClusterInfo retrieves SLURM cluster configuration
 func (s *SlurmScheduler) GetClusterInfo() (*ClusterInfo, error) {
+	if s.cachedClusterInfo != nil {
+		return s.cachedClusterInfo, nil
+	}
+
 	info := &ClusterInfo{
 		AvailableGpus: make([]GpuInfo, 0),
 		Limits:        make([]ResourceLimits, 0),
@@ -760,6 +765,7 @@ func (s *SlurmScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		}
 	}
 
+	s.cachedClusterInfo = info
 	return info, nil
 }
 
