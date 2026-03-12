@@ -448,11 +448,10 @@ func LoadFromViper() {
 		Global.SubmitJob = false
 	} else {
 		// Auto-disable if no scheduler binary is available
-		schedulerBin := Global.SchedulerBin
-		if schedulerBin == "" {
-			schedulerBin = DetectSchedulerBin()
+		if Global.SchedulerBin == "" {
+			Global.SchedulerBin = DetectSchedulerBin()
 		}
-		if schedulerBin == "" || !ValidateBinary(schedulerBin) {
+		if Global.SchedulerBin == "" || !ValidateBinary(Global.SchedulerBin) {
 			Global.SubmitJob = false
 		}
 	}
