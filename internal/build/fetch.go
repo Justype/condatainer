@@ -21,6 +21,12 @@ import (
 // Set by CLI commands (--remote flag) or config (prefer_remote: true).
 var PreferRemote bool
 
+// in-process caches — valid for the lifetime of one CLI invocation
+var (
+	cachedLocalScripts  map[string]ScriptInfo
+	cachedRemoteScripts map[string]ScriptInfo
+)
+
 // GetRemoteMetadataURL returns the URL for the remote build scripts metadata
 // using the configured scripts_link
 func GetRemoteMetadataURL() string {
@@ -46,6 +52,10 @@ type RemoteScriptEntry struct {
 // Searches user → scratch → legacy → system directories.
 // First match wins (user scripts shadow system ones).
 func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
+	if cachedLocalScripts != nil {
+		return cachedLocalScripts, nil
+	}
+
 	scripts := make(map[string]ScriptInfo)
 
 	// Scan all build script directories in priority order
@@ -104,12 +114,17 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 		}
 	}
 
+	cachedLocalScripts = scripts
 	return scripts, nil
 }
 
 // GetRemoteBuildScripts fetches the build scripts metadata from GitHub
 // Returns a map of name -> ScriptInfo
 func GetRemoteBuildScripts() (map[string]ScriptInfo, error) {
+	if cachedRemoteScripts != nil {
+		return cachedRemoteScripts, nil
+	}
+
 	scripts := make(map[string]ScriptInfo)
 
 	// Create HTTP client with timeout
@@ -159,6 +174,7 @@ func GetRemoteBuildScripts() (map[string]ScriptInfo, error) {
 		}
 	}
 
+	cachedRemoteScripts = scripts
 	return scripts, nil
 }
 
