@@ -74,6 +74,9 @@ type Config struct {
 	// Dependency parsing
 	ParseModuleLoad bool // Parse "module load" / "ml" lines as dependencies (default: false)
 
+	// Scheduler command timeout in seconds (default: 5)
+	SchedulerTimeout time.Duration
+
 	// Build configuration
 	Build BuildConfig
 }
@@ -163,8 +166,9 @@ func LoadDefaults(executablePath string) {
 		SchedulerBin:  "", // Auto-detect scheduler binary (empty = search PATH)
 		DefaultDistro: DEFAULT_DISTRO,
 
-		ScriptsLink:  DefaultScriptsLink,
-		PrebuiltLink: DefaultPrebuiltLink,
+		ScriptsLink:      DefaultScriptsLink,
+		PrebuiltLink:     DefaultPrebuiltLink,
+		SchedulerTimeout: 5 * time.Second,
 
 		Build: BuildConfig{
 			Defaults: scheduler.ResourceSpec{

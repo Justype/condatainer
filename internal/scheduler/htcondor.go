@@ -22,6 +22,7 @@ type HTCondorScheduler struct {
 	condorStatusBin    string
 	condorConfigValBin string
 	jobIDRe            *regexp.Regexp
+	cachedClusterInfo  *ClusterInfo
 }
 
 // NewHTCondorScheduler creates a new HTCondor scheduler instance using condor_submit from PATH
@@ -55,9 +56,9 @@ func newHTCondorSchedulerWithBinary(condorSubmitBin string) (*HTCondorScheduler,
 		}
 	}
 
-	condorQBin, _ := exec.LookPath("condor_q")
-	condorStatusBin, _ := exec.LookPath("condor_status")
-	condorConfigValBin, _ := exec.LookPath("condor_config_val")
+	condorQBin := siblingBin(binPath, "condor_q")
+	condorStatusBin := siblingBin(binPath, "condor_status")
+	condorConfigValBin := siblingBin(binPath, "condor_config_val")
 
 	return &HTCondorScheduler{
 		condorSubmitBin:    binPath,
@@ -106,8 +107,7 @@ func (h *HTCondorScheduler) GetInfo() *SchedulerInfo {
 
 // getHTCondorVersion attempts to get the HTCondor version
 func (h *HTCondorScheduler) getHTCondorVersion() (string, error) {
-	cmd := exec.Command(h.condorSubmitBin, "-version")
-	output, err := cmd.Output()
+	output, err := runCommand("HTCondor", "get-version", h.condorSubmitBin, "-version")
 	if err != nil {
 		return "", err
 	}
@@ -569,8 +569,7 @@ func (h *HTCondorScheduler) Submit(scriptPath string, deps []Dependency) (string
 	}
 
 	// Execute condor_submit
-	cmd := exec.Command(h.condorSubmitBin, scriptPath)
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("HTCondor", "submit", h.condorSubmitBin, scriptPath)
 	if err != nil {
 		return "", NewSubmissionError("HTCondor", filepath.Base(scriptPath), string(output), err)
 	}
@@ -588,6 +587,10 @@ func (h *HTCondorScheduler) Submit(scriptPath string, deps []Dependency) (string
 
 // GetClusterInfo retrieves HTCondor cluster configuration
 func (h *HTCondorScheduler) GetClusterInfo() (*ClusterInfo, error) {
+	if h.cachedClusterInfo != nil {
+		return h.cachedClusterInfo, nil
+	}
+
 	info := &ClusterInfo{
 		AvailableGpus: make([]GpuInfo, 0),
 		Limits:        make([]ResourceLimits, 0),
@@ -618,14 +621,14 @@ func (h *HTCondorScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		}
 	}
 
+	h.cachedClusterInfo = info
 	return info, nil
 }
 
 // getMaxNodeResources queries HTCondor for max CPU and memory per node
 func (h *HTCondorScheduler) getMaxNodeResources() (int, int64, error) {
 	// condor_status -af TotalSlotCpus TotalSlotMemory
-	cmd := exec.Command(h.condorStatusBin, "-compact", "-af", "TotalSlotCpus", "TotalSlotMemory")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("HTCondor", "query-node-resources", h.condorStatusBin, "-compact", "-af", "TotalSlotCpus", "TotalSlotMemory")
 	if err != nil {
 		return 0, 0, NewClusterError("HTCondor", "query node resources", err)
 	}
@@ -658,9 +661,8 @@ func (h *HTCondorScheduler) getMaxNodeResources() (int, int64, error) {
 
 // getGpuInfo queries HTCondor for available GPU info
 func (h *HTCondorScheduler) getGpuInfo() ([]GpuInfo, error) {
-	cmd := exec.Command(h.condorStatusBin, "-compact", "-constraint", "TotalGpus > 0",
+	output, err := runCommand("HTCondor", "query-gpu-info", h.condorStatusBin, "-compact", "-constraint", "TotalGpus > 0",
 		"-af", "TotalGpus", "Machine")
-	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, NewClusterError("HTCondor", "query GPUs", err)
 	}
@@ -753,8 +755,7 @@ func (h *HTCondorScheduler) getConfigValue(param string) (string, error) {
 		return "", fmt.Errorf("condor_config_val not available")
 	}
 
-	cmd := exec.Command(h.condorConfigValBin, param)
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("HTCondor", "query-config", h.condorConfigValBin, param)
 	if err != nil {
 		return "", err
 	}

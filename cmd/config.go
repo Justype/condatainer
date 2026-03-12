@@ -32,6 +32,7 @@ var configKeys = []string{
 	"prefer_remote",
 	"extra_base_dirs",
 	"parse_module_load",
+	"scheduler_timeout",
 	"build.ncpus",
 	"build.mem_mb",
 	"build.time",
@@ -285,6 +286,11 @@ Shows:
 		} else {
 			fmt.Printf("  submit_job:        %v\n", submitJobActual)
 		}
+		if config.Global.SchedulerTimeout == 0 {
+			fmt.Printf("  scheduler_timeout: 0 (disabled)\n")
+		} else {
+			fmt.Printf("  scheduler_timeout: %ds\n", int(config.Global.SchedulerTimeout.Seconds()))
+		}
 		fmt.Printf("  parse_module_load: %v\n", config.Global.ParseModuleLoad)
 		fmt.Println()
 
@@ -375,26 +381,10 @@ Time duration format (for build.time):
 		key := args[0]
 		value := args[1]
 
-		// Validate known keys
-		knownKeys := map[string]bool{
-			"logs_dir":              true,
-			"apptainer_bin":         true,
-			"scheduler_bin":         true,
-			"default_distro":        true,
-			"submit_job":            true,
-			"scripts_link":          true,
-			"prebuilt_link":         true,
-			"prefer_remote":         true,
-			"parse_module_load":     true,
-			"build.ncpus":           true,
-			"build.mem_mb":          true,
-			"build.time":            true,
-			"build.tmp_size_mb":     true,
-			"build.compress_args":   true,
-			"build.overlay_type":    true,
-			"build.block_size":      true,
-			"build.data_block_size": true,
-			"extra_base_dirs":       true,
+		// Build set of known keys from configKeys (single source of truth)
+		knownKeys := make(map[string]bool, len(configKeys))
+		for _, k := range configKeys {
+			knownKeys[k] = true
 		}
 
 		// Validate default_distro against known distros
@@ -417,6 +407,14 @@ Time duration format (for build.time):
 		}
 
 		// Validate value based on key type
+		if key == "scheduler_timeout" {
+			var n int
+			if _, err := fmt.Sscan(value, &n); err != nil || n < 0 {
+				utils.PrintError("Invalid value for scheduler_timeout: %s (must be a non-negative integer; 0 disables the timeout)", value)
+				os.Exit(ExitCodeUsage)
+			}
+		}
+
 		if key == "build.time" {
 			if _, err := utils.ParseWalltime(value); err != nil {
 				utils.PrintError("Invalid duration format: %s", value)

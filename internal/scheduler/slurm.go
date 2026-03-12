@@ -28,11 +28,12 @@ var slurmBlacklistedFlags = []string{
 
 // SlurmScheduler implements the Scheduler interface for SLURM
 type SlurmScheduler struct {
-	sbatchBin       string
-	sinfoCommand    string
-	scontrolCommand string
-	directiveRe     *regexp.Regexp
-	jobIDRe         *regexp.Regexp
+	sbatchBin        string
+	sinfoCommand     string
+	scontrolCommand  string
+	directiveRe      *regexp.Regexp
+	jobIDRe          *regexp.Regexp
+	cachedClusterInfo *ClusterInfo
 }
 
 // NewSlurmScheduler creates a new SLURM scheduler instance using sbatch from PATH
@@ -66,8 +67,8 @@ func newSlurmSchedulerWithBinary(sbatchBin string) (*SlurmScheduler, error) {
 		}
 	}
 
-	sinfoCmd, _ := exec.LookPath("sinfo")
-	scontrolCmd, _ := exec.LookPath("scontrol")
+	sinfoCmd := siblingBin(binPath, "sinfo")
+	scontrolCmd := siblingBin(binPath, "scontrol")
 
 	return &SlurmScheduler{
 		sbatchBin:       binPath,
@@ -117,8 +118,7 @@ func (s *SlurmScheduler) GetInfo() *SchedulerInfo {
 
 // getSlurmVersion attempts to get the SLURM version
 func (s *SlurmScheduler) getSlurmVersion() (string, error) {
-	cmd := exec.Command(s.sbatchBin, "--version")
-	output, err := cmd.Output()
+	output, err := runCommand("SLURM", "get-version", s.sbatchBin, "--version")
 	if err != nil {
 		return "", err
 	}
@@ -716,8 +716,7 @@ func (s *SlurmScheduler) Submit(scriptPath string, deps []Dependency) (string, e
 	args := buildSlurmSubmitArgs(deps, scriptPath)
 
 	// Execute sbatch
-	cmd := exec.Command(s.sbatchBin, args...)
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("SLURM", "submit", s.sbatchBin, args...)
 	if err != nil {
 		return "", NewSubmissionError("SLURM", filepath.Base(scriptPath), string(output), err)
 	}
@@ -734,6 +733,10 @@ func (s *SlurmScheduler) Submit(scriptPath string, deps []Dependency) (string, e
 
 // GetClusterInfo retrieves SLURM cluster configuration
 func (s *SlurmScheduler) GetClusterInfo() (*ClusterInfo, error) {
+	if s.cachedClusterInfo != nil {
+		return s.cachedClusterInfo, nil
+	}
+
 	info := &ClusterInfo{
 		AvailableGpus: make([]GpuInfo, 0),
 		Limits:        make([]ResourceLimits, 0),
@@ -762,13 +765,13 @@ func (s *SlurmScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		}
 	}
 
+	s.cachedClusterInfo = info
 	return info, nil
 }
 
 // getGpuInfo queries SLURM for available GPU types
 func (s *SlurmScheduler) getGpuInfo() ([]GpuInfo, error) {
-	cmd := exec.Command(s.sinfoCommand, "-o", "%P|%G|%D|%T", "--noheader")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("SLURM", "query-gpus", s.sinfoCommand, "-o", "%P|%G|%D|%T", "--noheader")
 	if err != nil {
 		return nil, NewClusterError("SLURM", "query GPUs", err)
 	}
@@ -867,8 +870,7 @@ func (s *SlurmScheduler) getGpuInfo() ([]GpuInfo, error) {
 // getPartitionLimits queries SLURM for partition resource limits
 func (s *SlurmScheduler) getPartitionLimits(gpuInfo []GpuInfo) ([]ResourceLimits, error) {
 	// First, get partition config limits
-	cmd := exec.Command(s.scontrolCommand, "show", "partition", "-o")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("SLURM", "query-partition-limits", s.scontrolCommand, "show", "partition", "-o")
 	if err != nil {
 		return nil, NewClusterError("SLURM", "query partition limits", err)
 	}
@@ -925,8 +927,7 @@ func (s *SlurmScheduler) getPartitionLimits(gpuInfo []GpuInfo) ([]ResourceLimits
 // getAvailableResourcesByPartition queries available CPUs and memory per partition
 func (s *SlurmScheduler) getAvailableResourcesByPartition() (map[string]ResourceLimits, error) {
 	// Query sinfo for partition, CPUs, and memory: %R = partition, %c = CPUs, %m = memory (MB)
-	cmd := exec.Command(s.sinfoCommand, "-o", "%R|%c|%m", "--noheader")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("SLURM", "query-available-resources", s.sinfoCommand, "-o", "%R|%c|%m", "--noheader")
 	if err != nil {
 		return nil, NewClusterError("SLURM", "query available resources", err)
 	}
@@ -971,8 +972,7 @@ func (s *SlurmScheduler) getAvailableResourcesByPartition() (map[string]Resource
 // getMaxNodeResources queries SLURM for maximum CPU and memory available per node
 func (s *SlurmScheduler) getMaxNodeResources() (int, int64, error) {
 	// Query sinfo for CPUs and memory per node: %c = CPUs, %m = memory in MB
-	cmd := exec.Command(s.sinfoCommand, "-o", "%c|%m", "--noheader")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("SLURM", "query-node-resources", s.sinfoCommand, "-o", "%c|%m", "--noheader")
 	if err != nil {
 		return 0, 0, NewClusterError("SLURM", "query node resources", err)
 	}

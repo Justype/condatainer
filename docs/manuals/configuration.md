@@ -88,6 +88,7 @@ condatainer config init -l system
 |-----|---------|-------------|
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
 | `parse_module_load` | `false` | Parse `module load` / `ml` lines as dependencies in `check` and `run` |
+| `scheduler_timeout` | `5` | Seconds to wait for a scheduler command (sbatch, qsub, etc.) before returning an error. Set to `0` to disable the timeout. |
 | `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filename (e.g. `ubuntu24--base_image.sif`) and the distro prefix added to bare package names (e.g. `igv` → `ubuntu24/igv`). |
 
 ### Build Configuration
@@ -141,6 +142,9 @@ condatainer config set build.time 02:00:00
 
 # Disable job submission (run builds locally)
 condatainer config set submit_job false
+
+# Set scheduler command timeout (seconds)
+condatainer config set scheduler_timeout 10
 ```
 
 ### Edit Config File Directly
@@ -188,6 +192,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_BUILD_BLOCK_SIZE`     | `build.block_size`     |
 | `CNT_BUILD_DATA_BLOCK_SIZE`| `build.data_block_size`|
 | `CNT_EXTRA_BASE_DIRS`      | `extra_base_dirs` (colon-separated) |
+| `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
 
 Example:
 
@@ -257,6 +262,9 @@ prefer_remote: false
 
 # Parse "module load" / "ml" lines as dependencies in 'check' and 'run' (default: false)
 parse_module_load: false
+
+# Maximum seconds to wait for scheduler CLI commands (default: 5, 0 = disabled)
+scheduler_timeout: 5
 
 # Base OS distro: ubuntu20, ubuntu22, or ubuntu24 (default: ubuntu24)
 # Sets the base image (e.g. ubuntu24--base_image.sif) and prefix for bare package names
@@ -376,6 +384,15 @@ If your HPC uses a non-standard scheduler path, set the binary and the type will
 
 ```bash
 condatainer config set scheduler_bin /custom/path/sbatch  # or qsub, bsub, condor_submit
+```
+
+### Scheduler commands timing out
+
+If CondaTainer reports a scheduler timeout error, the scheduler daemon may be slow to respond. Increase the timeout or disable it entirely:
+
+```bash
+condatainer config set scheduler_timeout 30  # increase to 30 seconds
+condatainer config set scheduler_timeout 0   # disable timeout entirely
 ```
 
 ### Disable job submission

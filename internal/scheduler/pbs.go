@@ -71,11 +71,12 @@ func parsePbsChunk(chunkStr string) (pbsChunkSpec, error) {
 //
 // EXPERIMENTAL: PBS is not tested on real clusters and may have edge cases. Feedback welcome.
 type PbsScheduler struct {
-	qsubBin     string
-	qstatBin    string
-	pbsnodesBin string
-	directiveRe *regexp.Regexp
-	jobIDRe     *regexp.Regexp
+	qsubBin           string
+	qstatBin          string
+	pbsnodesBin       string
+	directiveRe       *regexp.Regexp
+	jobIDRe           *regexp.Regexp
+	cachedClusterInfo *ClusterInfo
 }
 
 // NewPbsScheduler creates a new PBS scheduler instance using qsub from PATH
@@ -109,8 +110,8 @@ func newPbsSchedulerWithBinary(qsubBin string) (*PbsScheduler, error) {
 		}
 	}
 
-	qstatCmd, _ := exec.LookPath("qstat")
-	pbsnodesCmd, _ := exec.LookPath("pbsnodes")
+	qstatCmd := siblingBin(binPath, "qstat")
+	pbsnodesCmd := siblingBin(binPath, "pbsnodes")
 
 	return &PbsScheduler{
 		qsubBin:     binPath,
@@ -160,8 +161,7 @@ func (p *PbsScheduler) GetInfo() *SchedulerInfo {
 
 // getPbsVersion attempts to get the PBS version
 func (p *PbsScheduler) getPbsVersion() (string, error) {
-	cmd := exec.Command(p.qsubBin, "--version")
-	output, err := cmd.Output()
+	output, err := runCommand("PBS", "get-version", p.qsubBin, "--version")
 	if err != nil {
 		return "", err
 	}
@@ -747,8 +747,7 @@ func (p *PbsScheduler) Submit(scriptPath string, deps []Dependency) (string, err
 	}
 
 	// Execute qsub
-	cmd := exec.Command(p.qsubBin, args...)
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("PBS", "submit", p.qsubBin, args...)
 	if err != nil {
 		return "", NewSubmissionError("PBS", filepath.Base(scriptPath), string(output), err)
 	}
@@ -765,6 +764,10 @@ func (p *PbsScheduler) Submit(scriptPath string, deps []Dependency) (string, err
 // GetClusterInfo retrieves cluster configuration (GPUs, limits)
 // Returns nil if information is not available
 func (p *PbsScheduler) GetClusterInfo() (*ClusterInfo, error) {
+	if p.cachedClusterInfo != nil {
+		return p.cachedClusterInfo, nil
+	}
+
 	info := &ClusterInfo{
 		AvailableGpus: make([]GpuInfo, 0),
 		Limits:        make([]ResourceLimits, 0),
@@ -797,13 +800,13 @@ func (p *PbsScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		return nil, ErrClusterInfoUnavailable
 	}
 
+	p.cachedClusterInfo = info
 	return info, nil
 }
 
 // getNodeResources queries PBS for node resources using pbsnodes
 func (p *PbsScheduler) getNodeResources() (int, int64, error) {
-	cmd := exec.Command(p.pbsnodesBin, "-a")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("PBS", "query-nodes", p.pbsnodesBin, "-a")
 	if err != nil {
 		return 0, 0, NewClusterError("PBS", "query nodes", err)
 	}
@@ -880,8 +883,7 @@ func (p *PbsScheduler) getNodeResources() (int, int64, error) {
 
 // getGpuInfo queries PBS for GPU information using pbsnodes
 func (p *PbsScheduler) getGpuInfo() ([]GpuInfo, error) {
-	cmd := exec.Command(p.pbsnodesBin, "-a")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("PBS", "query-gpu-info", p.pbsnodesBin, "-a")
 	if err != nil {
 		return nil, NewClusterError("PBS", "query GPU info", err)
 	}
@@ -973,8 +975,7 @@ func (p *PbsScheduler) getGpuInfo() ([]GpuInfo, error) {
 
 // getQueueLimits queries PBS for queue resource limits using qstat -Qf
 func (p *PbsScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, error) {
-	cmd := exec.Command(p.qstatBin, "-Qf")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("PBS", "query-queues", p.qstatBin, "-Qf")
 	if err != nil {
 		return nil, NewClusterError("PBS", "query queues", err)
 	}
@@ -1097,8 +1098,7 @@ func (p *PbsScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, erro
 
 // getAvailableResourcesByQueue queries available CPUs and memory per queue
 func (p *PbsScheduler) getAvailableResourcesByQueue() (map[string]ResourceLimits, error) {
-	cmd := exec.Command(p.pbsnodesBin, "-a")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("PBS", "query-available-resources", p.pbsnodesBin, "-a")
 	if err != nil {
 		return nil, NewClusterError("PBS", "query available resources by queue", err)
 	}
