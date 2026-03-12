@@ -168,6 +168,14 @@ func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	// Determine build mode and create appropriate micromamba command
 	var installCmd string
 	var bindPaths []string
+	var quietFlag string
+	var echoPrefix string
+	if utils.QuietMode {
+		quietFlag = "-q"
+		echoPrefix = ": #"
+	} else {
+		echoPrefix = "echo"
+	}
 
 	if strings.HasSuffix(c.buildSource, ".yml") || strings.HasSuffix(c.buildSource, ".yaml") {
 		// Mode 3: YAML file (-p prefix -f environment.yml)
@@ -177,7 +185,7 @@ func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 			return fmt.Errorf("failed to get absolute path for %s: %w", c.buildSource, err)
 		}
 		bindPaths = append(bindPaths, filepath.Dir(absFilePath))
-		installCmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/%s -f %s", c.nameVersion, absFilePath)
+		installCmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -y %s -p /cnt/%s -f %s", quietFlag, c.nameVersion, absFilePath)
 		utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleCommand("environment.yml"))
 	} else if c.buildSource != "" {
 		// Mode 2: Multiple packages (-n name pkg1 pkg2 ...)
@@ -187,13 +195,13 @@ func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		for i, pkg := range packages {
 			packages[i] = strings.ReplaceAll(strings.TrimSpace(pkg), "/", "=")
 		}
-		installCmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/%s %s",
-			c.nameVersion, strings.Join(packages, " "))
+		installCmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -y %s -p /cnt/%s %s",
+			quietFlag, c.nameVersion, strings.Join(packages, " "))
 		utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleCommand(fmt.Sprintf("micromamba (%s)", strings.Join(packages, ", "))))
 	} else {
 		// Mode 1: Single package (name/version)
-		installCmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -q -y -p /cnt/%s %s=%s",
-			c.nameVersion, c.packageName, c.packageVersion)
+		installCmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -y %s -p /cnt/%s %s=%s",
+			quietFlag, c.nameVersion, c.packageName, c.packageVersion)
 		utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleCommand(fmt.Sprintf("micromamba (%s=%s)", c.packageName, c.packageVersion)))
 	}
 
@@ -208,17 +216,17 @@ func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 trap 'exit 130' INT TERM
 
 mkdir -p $TMPDIR
-echo "Creating conda environment in overlay..."
-%s
+%[1]s "Creating conda environment in overlay..."
+%[2]s
 
-echo "Setting permissions..."
+%[1]s "Setting permissions..."
 find /cnt -type f -exec chmod ug+rw,o+r {} \;
 find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
 
-echo "Packing overlay to SquashFS..."
-mksquashfs /cnt %s -processors %d -b %s -keep-as-directory %s
+%[1]s "Packing overlay to SquashFS..."
+mksquashfs /cnt %[3]s -processors %[4]d -b %[5]s -keep-as-directory %[6]s
 `,
-		installCmd,
+		echoPrefix, installCmd,
 		finalPath, c.effectiveNcpus(), config.Global.Build.BlockSize, config.Global.Build.CompressArgs,
 	)
 

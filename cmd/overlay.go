@@ -496,10 +496,13 @@ func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string
 	var mmCreateCmd []string
 	if envFile != "" {
 		utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(envFile))
-		mmCreateCmd = []string{"mm-create", "-f", envFile, "-y", "-q"}
+		mmCreateCmd = []string{"mm-create", "-f", envFile, "-y"}
 	} else {
 		utils.PrintMessage("Initializing minimal conda environment with small package (zlib)...")
-		mmCreateCmd = []string{"mm-create", "zlib", "-y", "-q"}
+		mmCreateCmd = []string{"mm-create", "zlib", "-y"}
+	}
+	if utils.QuietMode {
+		mmCreateCmd = append(mmCreateCmd, "-q")
 	}
 
 	// Run mm-create command
