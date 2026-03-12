@@ -706,6 +706,8 @@ func SubmitJobs(scheduler Scheduler, jobs []*JobSpec, outputDir string) (map[str
 
 // Init auto-detects and initializes the active scheduler.
 // If preferredBin is provided, it will be used instead of auto-detection.
+// When preferredBin is set, the constructor has already validated the binary
+// via os.Stat — no version query subprocess is run (fast path).
 // Returns the detected scheduler type and any error.
 func Init(preferredBin string) (SchedulerType, error) {
 	sched, err := DetectSchedulerWithBinary(preferredBin)
@@ -716,7 +718,22 @@ func Init(preferredBin string) (SchedulerType, error) {
 
 	SetActiveScheduler(sched)
 
-	// Determine scheduler type from info
+	// Fast path: binary was explicitly configured, constructor already validated
+	// it exists. Derive type from the concrete struct — no subprocess needed.
+	if preferredBin != "" {
+		switch sched.(type) {
+		case *SlurmScheduler:
+			return SchedulerSLURM, nil
+		case *PbsScheduler:
+			return SchedulerPBS, nil
+		case *LsfScheduler:
+			return SchedulerLSF, nil
+		case *HTCondorScheduler:
+			return SchedulerHTCondor, nil
+		}
+	}
+
+	// Auto-detected: run version query to confirm the scheduler is reachable.
 	info := sched.GetInfo()
 	return SchedulerType(info.Type), nil
 }

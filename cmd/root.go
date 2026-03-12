@@ -112,6 +112,7 @@ var rootCmd = &cobra.Command{
 		// Step 7: Apply debug mode and resource defaults from config
 		scheduler.SetDebugMode(config.Global.Debug)
 		build.SetBuildDefaults(config.Global.Build.Defaults)
+		scheduler.DefaultCommandTimeout = config.Global.SchedulerTimeout
 
 		// Step 8: Initialize scheduler if job submission is enabled
 		if config.Global.SubmitJob {

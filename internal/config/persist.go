@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/viper"
@@ -102,6 +103,7 @@ func setDefaults() {
 	viper.SetDefault("build.data_block_size", "1m")
 
 	viper.SetDefault("parse_module_load", false)
+	viper.SetDefault("scheduler_timeout", 5) // seconds
 }
 
 // GetUserConfigPath returns the path to the user config file
@@ -536,6 +538,8 @@ func LoadFromViper() {
 	}
 
 	Global.ParseModuleLoad = viper.GetBool("parse_module_load")
+
+	Global.SchedulerTimeout = time.Duration(viper.GetInt("scheduler_timeout")) * time.Second
 }
 
 // NormalizeCompressArgs is a thin wrapper around ArgsForCompress and exists

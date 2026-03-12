@@ -57,9 +57,9 @@ func newLsfSchedulerWithBinary(bsubBin string) (*LsfScheduler, error) {
 		}
 	}
 
-	bjobsCmd, _ := exec.LookPath("bjobs")
-	bhostsCmd, _ := exec.LookPath("bhosts")
-	bqueuesCmd, _ := exec.LookPath("bqueues")
+	bjobsCmd := siblingBin(binPath, "bjobs")
+	bhostsCmd := siblingBin(binPath, "bhosts")
+	bqueuesCmd := siblingBin(binPath, "bqueues")
 
 	return &LsfScheduler{
 		bsubBin:     binPath,
@@ -110,8 +110,7 @@ func (l *LsfScheduler) GetInfo() *SchedulerInfo {
 
 // getLsfVersion attempts to get the LSF version
 func (l *LsfScheduler) getLsfVersion() (string, error) {
-	cmd := exec.Command(l.bsubBin, "-V")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("LSF", "get-version", l.bsubBin, "-V")
 	if err != nil {
 		return "", err
 	}
@@ -746,8 +745,7 @@ func (l *LsfScheduler) Submit(scriptPath string, deps []Dependency) (string, err
 
 	// Execute bsub with shell to handle stdin redirection
 	shellCmd := fmt.Sprintf("%s %s", l.bsubBin, strings.Join(args, " "))
-	cmd := exec.Command("bash", "-c", shellCmd)
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("LSF", "submit", "bash", "-c", shellCmd)
 	if err != nil {
 		return "", NewSubmissionError("LSF", filepath.Base(scriptPath), string(output), err)
 	}
@@ -802,8 +800,7 @@ func (l *LsfScheduler) GetClusterInfo() (*ClusterInfo, error) {
 // getHostResources queries LSF for host resources using bhosts and lshosts
 func (l *LsfScheduler) getHostResources() (int, int64, error) {
 	// First get CPU info from bhosts
-	cmd := exec.Command(l.bhostsBin, "-w")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("LSF", "query-hosts", l.bhostsBin, "-w")
 	if err != nil {
 		return 0, 0, NewClusterError("LSF", "query hosts", err)
 	}
@@ -831,8 +828,7 @@ func (l *LsfScheduler) getHostResources() (int, int64, error) {
 	var maxMemMB int64
 	lshostsCmd, err := exec.LookPath("lshosts")
 	if err == nil {
-		cmd := exec.Command(lshostsCmd, "-w")
-		output, err := cmd.CombinedOutput()
+		output, err := runCommand("LSF", "query-host-memory", lshostsCmd, "-w")
 		if err == nil {
 			lines := strings.Split(string(output), "\n")
 			for i, line := range lines {
@@ -858,8 +854,7 @@ func (l *LsfScheduler) getHostResources() (int, int64, error) {
 
 // getQueueLimits queries LSF for queue resource limits using bqueues
 func (l *LsfScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, error) {
-	cmd := exec.Command(l.bqueuesBin, "-l")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("LSF", "query-queues", l.bqueuesBin, "-l")
 	if err != nil {
 		return nil, NewClusterError("LSF", "query queues", err)
 	}
@@ -993,8 +988,7 @@ func (l *LsfScheduler) getAvailableResourcesByQueue() (map[string]ResourceLimits
 	// We'll use bhosts to get host info and try to match to queues via bqueues
 	// This is a best-effort implementation
 
-	cmd := exec.Command(l.bhostsBin, "-w")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("LSF", "query-available-resources", l.bhostsBin, "-w")
 	if err != nil {
 		return nil, NewClusterError("LSF", "query available resources by queue", err)
 	}
@@ -1036,8 +1030,7 @@ func (l *LsfScheduler) getAvailableResourcesByQueue() (map[string]ResourceLimits
 	// Get memory info from lshosts
 	lshostsCmd, err := exec.LookPath("lshosts")
 	if err == nil {
-		cmd := exec.Command(lshostsCmd, "-w")
-		output, err := cmd.CombinedOutput()
+		output, err := runCommand("LSF", "query-host-memory", lshostsCmd, "-w")
 		if err == nil {
 			lines := strings.Split(string(output), "\n")
 			for i, line := range lines {
@@ -1064,8 +1057,7 @@ func (l *LsfScheduler) getAvailableResourcesByQueue() (map[string]ResourceLimits
 	// Note: This is simplified - LSF queue-host mapping can be complex
 	// For a more accurate implementation, we'd need to parse bqueues -l output
 	// or use LSF API if available
-	cmd = exec.Command(l.bqueuesBin)
-	output, err = cmd.CombinedOutput()
+	output, err = runCommand("LSF", "query-queue-mapping", l.bqueuesBin)
 	if err == nil {
 		// For now, aggregate all host resources under each queue
 		// This is a simplification - in reality, queues may have specific host groups
@@ -1114,8 +1106,7 @@ func (l *LsfScheduler) getAvailableResourcesByQueue() (map[string]ResourceLimits
 // getGpuInfo queries LSF for GPU information using bhosts
 func (l *LsfScheduler) getGpuInfo() ([]GpuInfo, error) {
 	// Try bhosts -gpu first (LSF 10.1+)
-	cmd := exec.Command(l.bhostsBin, "-gpu")
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("LSF", "query-gpu-info", l.bhostsBin, "-gpu")
 	if err != nil {
 		// If -gpu flag not supported, try parsing bhosts -l output
 		return l.getGpuInfoFromHostDetails()
@@ -1190,8 +1181,7 @@ func (l *LsfScheduler) getGpuInfo() ([]GpuInfo, error) {
 func (l *LsfScheduler) getGpuInfoFromHostDetails() ([]GpuInfo, error) {
 	// This is a fallback for older LSF versions
 	// Query bhosts for list of hosts, then bhosts -l for each
-	cmd := exec.Command(l.bhostsBin)
-	output, err := cmd.CombinedOutput()
+	output, err := runCommand("LSF", "query-gpu-hosts", l.bhostsBin)
 	if err != nil {
 		return nil, NewClusterError("LSF", "query GPU info", err)
 	}
@@ -1211,8 +1201,7 @@ func (l *LsfScheduler) getGpuInfoFromHostDetails() ([]GpuInfo, error) {
 		hostName := fields[0]
 
 		// Query detailed host info
-		detailCmd := exec.Command(l.bhostsBin, "-l", hostName)
-		detailOutput, err := detailCmd.CombinedOutput()
+		detailOutput, err := runCommand("LSF", "query-gpu-host-detail", l.bhostsBin, "-l", hostName)
 		if err != nil {
 			continue
 		}

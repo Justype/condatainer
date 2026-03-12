@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Common errors
@@ -262,4 +263,21 @@ func NewGpuValidationError(requestedType string, requestedCount int, suggestions
 func IsGpuValidationError(err error) bool {
 	var gve *GpuValidationError
 	return errors.As(err, &gve)
+}
+
+// TimeoutError represents a scheduler command that exceeded the configured timeout
+type TimeoutError struct {
+	Scheduler string
+	Operation string
+	Timeout   time.Duration
+}
+
+func (e *TimeoutError) Error() string {
+	return fmt.Sprintf("%s: %q timed out after %s", e.Scheduler, e.Operation, e.Timeout)
+}
+
+// IsTimeoutError checks if an error is a TimeoutError
+func IsTimeoutError(err error) bool {
+	var te *TimeoutError
+	return errors.As(err, &te)
 }
