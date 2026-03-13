@@ -144,6 +144,22 @@ Overlays can export environment variables via `#ENV:` directives:
 
 Extracted to `.env` file alongside overlay, loaded at runtime.
 
+## Tmp Directory Strategy
+
+Each build type uses a different base directory for build artifacts (`$TMPDIR`, build dir, tmp overlay):
+
+| Build path | `tmpDir` source | Rationale |
+|---|---|---|
+| Conda (`name/version`) | `utils.GetTmpDir()` | Fast local node storage (scheduler TMPDIR → TMPDIR → `/tmp/cnt-$USER`) |
+| App script (`name/version`) | `utils.GetTmpDir()` | Fast local node storage |
+| Ref script (`a/b/c`, 2+ slashes) | `config.GetWritableTmpDir()` | Stable condatainer data path (large datasets) |
+| Def (internal) | `config.GetWritableTmpDir()` | Stable path; set in `createConcreteType` after type is resolved |
+| External sh | `filepath.Dir(targetPrefix)` | Next to output target (user controls location) |
+| External def | `filepath.Dir(targetPrefix)` | Next to output target (user controls location) |
+| Base image | `config.GetWritableTmpDir()` | Stable condatainer data path |
+
+`utils.GetTmpDir()` priority: scheduler-assigned scratch (`SLURM_TMPDIR`, `PBS_TMPDIR`, `LSF_TMPDIR`, `_CONDOR_SCRATCH_DIR`) → `TMPDIR`/`TEMP`/`TMP` → `/tmp/cnt-$USER`.
+
 ## Resource Allocation for Builds
 
 CPU and memory derived from `scriptSpecs`:

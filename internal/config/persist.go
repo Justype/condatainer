@@ -96,12 +96,12 @@ func setDefaults() {
 	viper.SetDefault("build.ncpus", 4)
 	viper.SetDefault("build.mem_mb", 8192)
 	viper.SetDefault("build.time", "2h")
-	viper.SetDefault("build.tmp_size_mb", 20480)
 	viper.SetDefault("build.compress_args", "") // Empty means auto-detect based on apptainer version
 	viper.SetDefault("build.overlay_type", "ext3")
 	viper.SetDefault("build.block_size", "128k")
 	viper.SetDefault("build.data_block_size", "1m")
-	viper.SetDefault("build.use_host_dirs", true)
+	viper.SetDefault("build.use_tmp_overlay", false)
+	viper.SetDefault("build.tmp_overlay_size_mb", 20480)
 
 	viper.SetDefault("parse_module_load", false)
 	viper.SetDefault("scheduler_timeout", 5) // seconds
@@ -506,7 +506,7 @@ func LoadFromViper() {
 		}
 	}
 
-	if tmpSizeMB := viper.GetInt("build.tmp_size_mb"); tmpSizeMB > 0 {
+	if tmpSizeMB := viper.GetInt("build.tmp_overlay_size_mb"); tmpSizeMB > 0 {
 		Global.Build.TmpSizeMB = tmpSizeMB
 	}
 
@@ -537,7 +537,7 @@ func LoadFromViper() {
 		}
 	}
 
-	Global.Build.UseHostDirs = viper.GetBool("build.use_host_dirs")
+	Global.Build.UseTmpOverlay = viper.GetBool("build.use_tmp_overlay")
 
 	Global.ParseModuleLoad = viper.GetBool("parse_module_load")
 

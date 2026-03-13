@@ -22,9 +22,7 @@ type DefBuildObject struct {
 
 // newDefBuildObject creates a DefBuildObject from base
 func newDefBuildObject(base *BaseBuildObject) (*DefBuildObject, error) {
-	return &DefBuildObject{
-		BaseBuildObject: base,
-	}, nil
+	return &DefBuildObject{BaseBuildObject: base}, nil
 }
 
 // Type returns the build type
@@ -84,6 +82,12 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 			lock.Close()
 		}
 	}
+
+	// Acquire build lock to prevent concurrent builds of the same package.
+	if err := d.createBuildLock(); err != nil {
+		return err
+	}
+	defer d.removeBuildLock()
 
 	buildMode := "local"
 	if d.RequiresScheduler() {

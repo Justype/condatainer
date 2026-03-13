@@ -130,6 +130,12 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		}
 	}
 
+	// Acquire build lock to prevent concurrent builds of the same package.
+	if err := s.createBuildLock(); err != nil {
+		return err
+	}
+	defer s.removeBuildLock()
+
 	buildMode := "local"
 	if s.RequiresScheduler() {
 		buildMode = "sbatch"
@@ -137,7 +143,7 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	utils.PrintMessage("Building overlay %s (%s build)", styledOverlay, utils.StyleAction(buildMode))
 
 	// Create build workspace (host dirs or ext3 overlay depending on config)
-	if config.Global.Build.UseHostDirs {
+	if !config.Global.Build.UseTmpOverlay {
 		utils.PrintMessage("Creating build directories for %s", styledOverlay)
 		if err := s.CreateBuildDirs(ctx, false); err != nil {
 			if errors.Is(err, ErrTmpOverlayExists) {
@@ -232,16 +238,20 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		"IN_CONDATAINER=1",
 	)
 
-	// Set target_dir: in dir-mode both ref and app use container-side /cnt/<nameVersion>
-	// (cntDirPath is bound as /cnt so writes go to host). In ext3-mode, ref overlays
-	// use the host cntDirPath directly (bound into container via getAllBaseDirs).
+	// Set target_dir. In ext3-mode, ref overlays use the absolute host path (bound into
+	// container via getAllBaseDirs). In dir-mode, ref builds also use the absolute host path
+	// to avoid the /cnt bind shadowing dependency overlay content at /cnt. App builds in
+	// dir-mode use the container-side /cnt/<nameVersion> path (no dep overlay conflict).
 	relativePath := s.nameVersion
 	var targetDir string // host path used for post-build checks (ref builds only)
-	if config.Global.Build.UseHostDirs {
-		// All builds: container-side path (cntDirPath bound as /cnt)
-		envSettings = append(envSettings, fmt.Sprintf("target_dir=/cnt/%s", relativePath))
+	if !config.Global.Build.UseTmpOverlay {
 		if s.isRef {
+			// Ref builds: absolute host path so /cnt is not bound and dep overlays are visible
 			targetDir = filepath.Join(s.cntDirPath, s.nameVersion)
+			envSettings = append(envSettings, fmt.Sprintf("target_dir=%s", targetDir))
+		} else {
+			// App builds: container-side /cnt path (cntDirPath bound as /cnt)
+			envSettings = append(envSettings, fmt.Sprintf("target_dir=/cnt/%s", relativePath))
 		}
 	} else {
 		if s.isRef {
@@ -294,7 +304,7 @@ fi
 
 	// Convert overlay args to overlay paths (dependency overlays only; tmp overlay added below if ext3 mode)
 	var overlays []string
-	if !config.Global.Build.UseHostDirs {
+	if config.Global.Build.UseTmpOverlay {
 		overlays = []string{s.tmpOverlayPath}
 	}
 	for i := 0; i < len(overlayArgs); i += 2 {
@@ -305,9 +315,16 @@ fi
 
 	// Collect bind directories (for accessing overlays and build scripts)
 	bindDirs := container.DeduplicateBindPaths(getAllBaseDirs())
-	if config.Global.Build.UseHostDirs {
+	if !config.Global.Build.UseTmpOverlay {
 		buildTmpDir := getBuildTmpDir(s.BaseBuildObject)
-		bindDirs = append(bindDirs, buildTmpDir+":/ext3/tmp", s.cntDirPath+":/cnt")
+		if s.isRef {
+			// Ref builds: self-bind cntDirPath so the container can write to the absolute host
+			// path. /cnt is NOT bound, keeping it free for dependency overlays.
+			bindDirs = append(bindDirs, buildTmpDir+":/ext3/tmp", s.cntDirPath+":"+s.cntDirPath)
+		} else {
+			// App builds: bind cntDirPath as /cnt (no dep overlay conflict for app builds)
+			bindDirs = append(bindDirs, buildTmpDir+":/ext3/tmp", s.cntDirPath+":/cnt")
+		}
 	}
 
 	// Create exec options for running build script
@@ -319,9 +336,9 @@ fi
 		EnvSettings:  envSettings,
 		Command:      []string{"/bin/bash", "-c", bashScript},
 		HidePrompt:   true,
-		WritableImg:  !config.Global.Build.UseHostDirs,
+		WritableImg:  config.Global.Build.UseTmpOverlay,
 	}
-	if config.Global.Build.UseHostDirs {
+	if !config.Global.Build.UseTmpOverlay {
 		opts.ApptainerFlags = []string{"--writable-tmpfs"}
 	}
 
@@ -384,7 +401,7 @@ fi
 	}
 
 	// Create SquashFS
-	if config.Global.Build.UseHostDirs {
+	if !config.Global.Build.UseTmpOverlay {
 		// Dir mode: all build types pack from cntDirPath (host dir bound as /cnt)
 		checkDir := s.cntDirPath
 		if s.isRef && targetDir != "" {
@@ -502,7 +519,7 @@ func (s *ScriptBuildObject) createSquashfs(ctx context.Context, sourceDir, targe
 	var packOverlays []string
 	var packBindDirs []string
 
-	if config.Global.Build.UseHostDirs {
+	if !config.Global.Build.UseTmpOverlay {
 		// Dir mode: sourceDir is a host path (cntDirPath); permissions already set by caller.
 		// Bind sourceDir and output dir at their host paths so mksquashfs can access them.
 		blockSize := config.Global.Build.BlockSize
@@ -551,9 +568,9 @@ mksquashfs %s %s -processors %d -b %s -keep-as-directory %s
 		BindPaths:    packBindDirs,
 		Command:      []string{"/bin/bash", "-c", bashScript},
 		HidePrompt:   true,
-		WritableImg:  !config.Global.Build.UseHostDirs,
+		WritableImg:  config.Global.Build.UseTmpOverlay,
 	}
-	if config.Global.Build.UseHostDirs {
+	if !config.Global.Build.UseTmpOverlay {
 		opts.ApptainerFlags = []string{"--writable-tmpfs"}
 	}
 

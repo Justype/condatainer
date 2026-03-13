@@ -89,8 +89,8 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 		if createFile != "" && createPrefix == "" {
 			createPrefix = createFile[:len(createFile)-len(filepath.Ext(createFile))]
 		}
-		if createPrefix != "" && createFile == "" && len(args) == 0 {
-			ExitWithUsageError("--prefix requires either packages or --file to be specified.")
+		if createPrefix != "" && createFile == "" && len(args) == 0 && createSource == "" {
+			ExitWithUsageError("--prefix requires either packages, --file, or --source to be specified.")
 		}
 
 		// 2. Ensure base image exists (also checks for apptainer)

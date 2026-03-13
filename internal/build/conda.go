@@ -120,6 +120,12 @@ func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		}
 	}
 
+	// Acquire build lock to prevent concurrent builds of the same package.
+	if err := c.createBuildLock(); err != nil {
+		return err
+	}
+	defer c.removeBuildLock()
+
 	buildMode := "local"
 	if c.RequiresScheduler() {
 		buildMode = "sbatch"
@@ -127,7 +133,7 @@ func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	utils.PrintMessage("Building overlay %s (%s build)", styledOverlay, utils.StyleAction(buildMode))
 
 	// Create build workspace (host dirs or ext3 overlay depending on config)
-	if config.Global.Build.UseHostDirs {
+	if !config.Global.Build.UseTmpOverlay {
 		if err := c.CreateBuildDirs(ctx, false); err != nil {
 			if errors.Is(err, ErrTmpOverlayExists) {
 				utils.PrintWarning("Stale build directory found for %s. Cleaning up...", c.nameVersion)
@@ -228,10 +234,16 @@ func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	// Build the bash script to run inside container
 	bashScript := fmt.Sprintf(`
 trap 'exit 130' INT TERM
+set -e
 
 mkdir -p $TMPDIR
 %[1]s "Creating conda environment in overlay..."
 %[2]s
+
+if [ -z "$(ls -A /cnt 2>/dev/null)" ]; then
+    %[1]s "Conda environment is empty, nothing to pack."
+    exit 1
+fi
 
 %[1]s "Setting permissions..."
 find /cnt -type f -exec chmod ug+rw,o+r {} \;
@@ -246,7 +258,7 @@ mksquashfs /cnt %[3]s -processors %[4]d -b %[5]s -keep-as-directory %[6]s
 
 	// Build exec options: dir-mode uses host bind mounts; ext3-mode uses overlay image
 	var opts exec.Options
-	if config.Global.Build.UseHostDirs {
+	if !config.Global.Build.UseTmpOverlay {
 		buildTmpDir := getBuildTmpDir(c.BaseBuildObject)
 		bindPaths = append(bindPaths,
 			buildTmpDir+":/ext3/tmp",

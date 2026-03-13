@@ -45,7 +45,7 @@ type BuildConfig struct {
 	OverlayType   string                 // Overlay filesystem type: "ext3" or "squashfs"
 	BlockSize     string                 // mksquashfs block size for app/env/external overlays (default: 128k)
 	DataBlockSize string                 // mksquashfs block size for data/ref overlays (default: 1m)
-	UseHostDirs   bool                   // Use host directories instead of ext3 overlay for build tmp/target (default: true)
+	UseTmpOverlay bool                   // Use ext3 tmp overlay for build tmp/target instead of host directories (default: false)
 }
 
 // Config holds global application settings

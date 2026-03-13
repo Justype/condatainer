@@ -139,6 +139,7 @@ type BuildObject interface {
 type BaseBuildObject struct {
 	nameVersion       string
 	buildSource       string
+	tmpDir            string // base tmp directory (dynamic; scheduler/TMPDIR-based for conda/app)
 	dependencies      []string
 	tmpOverlayPath    string
 	targetOverlayPath string
@@ -157,6 +158,7 @@ type BaseBuildObject struct {
 func (b *BaseBuildObject) NameVersion() string       { return b.nameVersion }
 func (b *BaseBuildObject) BuildSource() string       { return b.buildSource }
 func (b *BaseBuildObject) Dependencies() []string    { return b.dependencies }
+func (b *BaseBuildObject) TmpDir() string            { return b.tmpDir }
 func (b *BaseBuildObject) TmpOverlayPath() string    { return b.tmpOverlayPath }
 func (b *BaseBuildObject) TargetOverlayPath() string { return b.targetOverlayPath }
 func (b *BaseBuildObject) CntDirPath() string        { return b.cntDirPath }
@@ -164,6 +166,29 @@ func (b *BaseBuildObject) ScriptSpecs() *ScriptSpecs { return b.scriptSpecs }
 func (b *BaseBuildObject) Update() bool              { return b.update }
 func (b *BaseBuildObject) RequiresScheduler() bool {
 	return b.submitJob && scheduler.HasSchedulerSpecs(b.scriptSpecs)
+}
+
+// buildLockPath returns the lock file path for this build (stable, in imagesDir).
+func (b *BaseBuildObject) buildLockPath() string {
+	return b.targetOverlayPath + ".lock"
+}
+
+// createBuildLock creates the lock file exclusively. Returns error if already locked.
+func (b *BaseBuildObject) createBuildLock() error {
+	f, err := os.OpenFile(b.buildLockPath(), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o664)
+	if err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("build already in progress: lock file exists at %s", b.buildLockPath())
+		}
+		return fmt.Errorf("failed to create build lock: %w", err)
+	}
+	f.Close()
+	return nil
+}
+
+// removeBuildLock removes the lock file on build completion or failure.
+func (b *BaseBuildObject) removeBuildLock() {
+	os.Remove(b.buildLockPath()) //nolint:errcheck
 }
 
 // effectiveNcpus returns the effective total CPUs (CpusPerTask × TasksPerNode) for this build.
@@ -261,7 +286,7 @@ func (b *BaseBuildObject) CreateTmpOverlay(ctx context.Context, force bool) erro
 	return nil
 }
 
-// CreateBuildDirs creates host directories for dir-mode builds (UseHostDirs=true).
+// CreateBuildDirs creates host directories for dir-mode builds (use_tmp_overlay=false).
 // Layout: <buildDir>/cnt/ (bound as /cnt) and <buildDir>/tmp/ (bound as /ext3/tmp).
 // Checks both dir-mode (buildDir) and ext3-mode (.img) artifacts for cross-mode stale detection.
 func (b *BaseBuildObject) CreateBuildDirs(ctx context.Context, force bool) error {
@@ -282,7 +307,7 @@ func (b *BaseBuildObject) CreateBuildDirs(ctx context.Context, force bool) error
 	if err := os.MkdirAll(filepath.Join(buildDir, "tmp"), 0o775); err != nil {
 		return fmt.Errorf("failed to create build tmp dir: %w", err)
 	}
-	utils.PrintDebug("Created build dirs at %s", utils.StylePath(buildDir))
+	utils.PrintMessage("Build dir: %s", utils.StylePath(buildDir))
 	return nil
 }
 
@@ -308,15 +333,22 @@ func (b *BaseBuildObject) Cleanup(failed bool) error {
 	// Remove cnt directory
 	if b.cntDirPath != "" {
 		cntBaseDir := filepath.Dir(b.cntDirPath)
-		if config.Global.Build.UseHostDirs {
-			utils.PrintMessage("Cleaning up build directory %s (this may take a while if number of files is large)...", cntBaseDir)
-		} else {
-			utils.PrintMessage("Cleaning up build directory %s...", cntBaseDir)
-		}
+		utils.PrintMessage("Cleaning up build directory %s...", cntBaseDir)
 		if err := os.RemoveAll(cntBaseDir); err != nil && !os.IsNotExist(err) {
 			utils.PrintWarning("Failed to remove cnt dir %s: %v", cntBaseDir, err)
 		} else if utils.FileExists(cntBaseDir) {
 			utils.PrintDebug("Removed cnt dir %s", cntBaseDir)
+		}
+
+		// Remove tmpDir itself if it is now empty (no other builds using it)
+		if b.tmpDir != "" && b.tmpDir != cntBaseDir {
+			if entries, err := os.ReadDir(b.tmpDir); err == nil && len(entries) == 0 {
+				if err := os.Remove(b.tmpDir); err != nil && !os.IsNotExist(err) {
+					utils.PrintDebug("Failed to remove empty tmp dir %s: %v", b.tmpDir, err)
+				} else {
+					utils.PrintDebug("Removed empty tmp dir %s", b.tmpDir)
+				}
+			}
 		}
 	}
 
@@ -443,6 +475,11 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 	// 2+ slashes: ref shell script (e.g., "genomes/hg38/full")
 	isRef := slashCount > 1
 
+	// Use fast local storage for conda/app builds; keep stable path for data/ref
+	if !isRef {
+		tmpDir = utils.GetTmpDir()
+	}
+
 	// Make tmpDir absolute
 	if absDir, err := filepath.Abs(tmpDir); err == nil {
 		tmpDir = absDir
@@ -465,6 +502,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 	base := &BaseBuildObject{
 		nameVersion:       normalized,
 		submitJob:         config.Global.SubmitJob,
+		tmpDir:            tmpDir,
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetOverlay,
@@ -476,11 +514,9 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 		return createConcreteType(ctx, base, isRef, tmpDir)
 	}
 
-	// Check if already installed or a build is in progress (either mode).
-	// Skip this optimisation in update mode so the correct concrete type is resolved
-	// (the build will proceed regardless of install status).
-	buildDir := filepath.Dir(base.cntDirPath)
-	if !update && (base.IsInstalled() || utils.FileExists(base.tmpOverlayPath) || utils.DirExists(buildDir)) {
+	// Check if already installed or a build is currently in progress (lock file exists).
+	// Skip this optimisation in update mode so the correct concrete type is resolved.
+	if !update && (base.IsInstalled() || utils.FileExists(base.buildLockPath())) {
 		return newScriptBuildObject(base, isRef)
 	}
 
@@ -495,6 +531,9 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 //   - Comma-separated package list (e.g., "nvim,nodejs,samtools/1.16")
 func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir string, update bool) (BuildObject, error) {
 	normalized := utils.NormalizeNameVersion(nameVersion)
+
+	// Conda builds always use fast local storage
+	tmpDir = utils.GetTmpDir()
 
 	// Make tmpDir absolute
 	if absDir, err := filepath.Abs(tmpDir); err == nil {
@@ -515,6 +554,7 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 		nameVersion:       normalized,
 		buildSource:       buildSource,
 		submitJob:         config.Global.SubmitJob,
+		tmpDir:            tmpDir,
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetOverlay,
@@ -534,13 +574,17 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 	isDef := isApptainer || strings.HasSuffix(source, ".def")
 	isShell := strings.HasSuffix(source, ".sh") || strings.HasSuffix(source, ".bash")
 
+	// Build artifacts go next to the target (user controls target location)
 	targetDir := filepath.Dir(targetPrefix)
+	if absDir, err := filepath.Abs(targetDir); err == nil {
+		targetDir = absDir
+	}
 	cntDirPath := getCntDirPath(nameVersion, targetDir)
 	// Def builds produce a SIF; shell builds use host dirs (dir mode) or ext3 (img mode)
 	var tmpOverlayPath string
 	if isDef {
 		tmpOverlayPath = strings.TrimSuffix(getTmpOverlayPath(nameVersion, targetDir), ".img") + ".sif"
-	} else if !config.Global.Build.UseHostDirs {
+	} else if config.Global.Build.UseTmpOverlay {
 		tmpOverlayPath = getTmpOverlayPath(nameVersion, targetDir) // .img for ext3 mode
 		// tmpOverlayPath stays "" for shell builds in dir mode
 	}
@@ -551,6 +595,7 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 		nameVersion:       nameVersion,
 		buildSource:       source,
 		submitJob:         config.Global.SubmitJob,
+		tmpDir:            targetDir,
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetPrefix + ".sqf",
@@ -598,8 +643,14 @@ func createConcreteType(ctx context.Context, base *BaseBuildObject, isRef bool, 
 	}
 
 	if isContainer {
-		// Def builds produce a SIF file, not ext3 — update the tmp extension
-		base.tmpOverlayPath = strings.TrimSuffix(base.tmpOverlayPath, ".img") + ".sif"
+		// Internal def builds use GetWritableTmpDir (NewBuildObject set fast local tmp above)
+		defTmpDir := config.GetWritableTmpDir()
+		if absDir, err := filepath.Abs(defTmpDir); err == nil {
+			defTmpDir = absDir
+		}
+		base.tmpDir = defTmpDir
+		base.cntDirPath = getCntDirPath(base.nameVersion, defTmpDir)
+		base.tmpOverlayPath = strings.TrimSuffix(getTmpOverlayPath(base.nameVersion, defTmpDir), ".img") + ".sif"
 		return newDefBuildObject(base)
 	}
 
