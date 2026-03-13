@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -211,19 +212,19 @@ func ShouldAnswerYes() bool {
 	return YesMode
 }
 
-// ReadLineContext reads a whitespace-trimmed line from stdin.
+// ReadLineContext reads a trimmed line from stdin, preserving case.
 // Returns context.Canceled if ctx is done before input arrives.
 func ReadLineContext(ctx context.Context) (string, error) {
 	ch := make(chan string, 1)
 	go func() {
-		var s string
-		fmt.Scanln(&s)
-		ch <- s
+		reader := bufio.NewReader(os.Stdin)
+		s, _ := reader.ReadString('\n')
+		ch <- strings.TrimSpace(s)
 	}()
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
 	case s := <-ch:
-		return strings.ToLower(strings.TrimSpace(s)), nil
+		return s, nil
 	}
 }
