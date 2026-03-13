@@ -199,14 +199,22 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenTmpOverlayExists(t *testing.T
 		t.Fatalf("failed to write script: %v", err)
 	}
 
-	// Create a tmp overlay file in tmpDir to simulate a build in progress
+	// Simulate a build in progress: create both the ext3-mode .img file and the
+	// dir-mode build directory so that stale detection works for either mode.
 	nameVersion := "cellranger/8.0.1"
-	// tmp overlay filename uses -- for / and .img suffix (see getTmpOverlayPath)
+	// ext3-mode artifact: tmp overlay .img file
 	tmpFileName := strings.ReplaceAll(utils.NormalizeNameVersion(nameVersion), "/", "--") + ".img"
 	tmpOverlayPath := filepath.Join(tmpDir, tmpFileName)
 	if err := os.WriteFile(tmpOverlayPath, []byte{}, 0o664); err != nil {
 		t.Fatalf("failed to create tmp overlay file: %v", err)
 	}
+	// dir-mode artifact: build directory
+	buildDirName := "build_" + strings.ReplaceAll(utils.NormalizeNameVersion(nameVersion), "/", "_")
+	buildDir := filepath.Join(tmpDir, buildDirName)
+	if err := os.MkdirAll(buildDir, 0o775); err != nil {
+		t.Fatalf("failed to create build dir: %v", err)
+	}
+	defer os.RemoveAll(buildDir)
 
 	// Re-init data paths so the test's extra base dir is picked up
 	config.InitDataPaths()

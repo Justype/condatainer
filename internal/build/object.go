@@ -176,7 +176,6 @@ func (b *BaseBuildObject) effectiveNcpus() int {
 	return cpus
 }
 
-
 func (b *BaseBuildObject) IsInstalled() bool {
 	// Check if target overlay exists
 	_, err := os.Stat(b.targetOverlayPath)
@@ -227,15 +226,17 @@ func (b *BaseBuildObject) GetMissingDependencies() ([]string, error) {
 }
 
 func (b *BaseBuildObject) CreateTmpOverlay(ctx context.Context, force bool) error {
-	// Check if tmp overlay already exists
-	if _, err := os.Stat(b.tmpOverlayPath); err == nil {
+	// Check both ext3-mode artifact (.img) and dir-mode artifact (buildDir) for cross-mode stale detection
+	buildDir := filepath.Dir(b.cntDirPath)
+	stale := utils.FileExists(b.tmpOverlayPath) || (b.cntDirPath != "" && utils.DirExists(buildDir))
+	if stale {
 		if !force {
 			return fmt.Errorf("%w: %s", ErrTmpOverlayExists, b.tmpOverlayPath)
 		}
-		// Remove existing if force=true
-		if err := os.Remove(b.tmpOverlayPath); err != nil {
+		if err := os.Remove(b.tmpOverlayPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to remove existing tmp overlay: %w", err)
 		}
+		os.RemoveAll(buildDir) //nolint:errcheck
 	}
 
 	// Ensure parent directory for tmp overlay exists (mkdir -p)
@@ -251,12 +252,37 @@ func (b *BaseBuildObject) CreateTmpOverlay(ctx context.Context, force bool) erro
 
 	// Use overlay package to create ext3 overlay
 	// For build overlays, we use a temporary size from config (default 20GB)
-	// Use "conda" profile for small files, sparse=true for faster creation
+	// Use "default" profile, sparse=true for faster creation
 	// quiet=true suppresses detailed specs output since users don't need to see those for temp overlays
 	if err := overlay.CreateForCurrentUser(ctx, b.tmpOverlayPath, config.Global.Build.TmpSizeMB, "default", true, config.Global.Build.OverlayType, true); err != nil {
 		return fmt.Errorf("failed to create temporary overlay: %w", err)
 	}
 
+	return nil
+}
+
+// CreateBuildDirs creates host directories for dir-mode builds (UseHostDirs=true).
+// Layout: <buildDir>/cnt/ (bound as /cnt) and <buildDir>/tmp/ (bound as /ext3/tmp).
+// Checks both dir-mode (buildDir) and ext3-mode (.img) artifacts for cross-mode stale detection.
+func (b *BaseBuildObject) CreateBuildDirs(ctx context.Context, force bool) error {
+	buildDir := filepath.Dir(b.cntDirPath)
+	// Check both dir-mode artifact (buildDir) and ext3-mode artifact (.img)
+	stale := utils.DirExists(buildDir) || utils.FileExists(b.tmpOverlayPath)
+	if stale {
+		if !force {
+			return fmt.Errorf("%w: %s", ErrTmpOverlayExists, buildDir)
+		}
+		os.RemoveAll(buildDir)      //nolint:errcheck — clean dir-mode artifact
+		os.Remove(b.tmpOverlayPath) //nolint:errcheck — clean ext3-mode artifact (no-op if "")
+	}
+
+	if err := os.MkdirAll(b.cntDirPath, 0o775); err != nil {
+		return fmt.Errorf("failed to create build cnt dir %s: %w", b.cntDirPath, err)
+	}
+	if err := os.MkdirAll(filepath.Join(buildDir, "tmp"), 0o775); err != nil {
+		return fmt.Errorf("failed to create build tmp dir: %w", err)
+	}
+	utils.PrintDebug("Created build dirs at %s", utils.StylePath(buildDir))
 	return nil
 }
 
@@ -282,6 +308,11 @@ func (b *BaseBuildObject) Cleanup(failed bool) error {
 	// Remove cnt directory
 	if b.cntDirPath != "" {
 		cntBaseDir := filepath.Dir(b.cntDirPath)
+		if config.Global.Build.UseHostDirs {
+			utils.PrintMessage("Cleaning up build directory %s (this may take a while if number of files is large)...", cntBaseDir)
+		} else {
+			utils.PrintMessage("Cleaning up build directory %s...", cntBaseDir)
+		}
 		if err := os.RemoveAll(cntBaseDir); err != nil && !os.IsNotExist(err) {
 			utils.PrintWarning("Failed to remove cnt dir %s: %v", cntBaseDir, err)
 		} else if utils.FileExists(cntBaseDir) {
@@ -385,6 +416,12 @@ func getCntDirPath(nameVersion, tmpDir string) string {
 	return filepath.Join(tmpDir, buildDirName, "cnt")
 }
 
+// getBuildTmpDir returns the host tmp directory used for TMPDIR/micromamba root in dir-mode builds.
+// Format: <tmpDir>/build_<nameVersion>/tmp
+func getBuildTmpDir(b *BaseBuildObject) string {
+	return filepath.Join(filepath.Dir(b.cntDirPath), "tmp")
+}
+
 // getTmpOverlayPath returns the temporary overlay path for ext3 builds (script/conda).
 // Format: <tmpDir>/<nameVersion>.img (with / replaced by --)
 // For def builds, the caller changes the extension to .sif.
@@ -439,10 +476,11 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 		return createConcreteType(ctx, base, isRef, tmpDir)
 	}
 
-	// Check if already installed or temporary overlay exists.
+	// Check if already installed or a build is in progress (either mode).
 	// Skip this optimisation in update mode so the correct concrete type is resolved
 	// (the build will proceed regardless of install status).
-	if !update && (base.IsInstalled() || utils.FileExists(base.tmpOverlayPath)) {
+	buildDir := filepath.Dir(base.cntDirPath)
+	if !update && (base.IsInstalled() || utils.FileExists(base.tmpOverlayPath) || utils.DirExists(buildDir)) {
 		return newScriptBuildObject(base, isRef)
 	}
 
@@ -498,12 +536,14 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 
 	targetDir := filepath.Dir(targetPrefix)
 	cntDirPath := getCntDirPath(nameVersion, targetDir)
-	// Def builds produce a SIF; shell/conda builds produce ext3
-	tmpExt := ".img"
+	// Def builds produce a SIF; shell builds use host dirs (dir mode) or ext3 (img mode)
+	var tmpOverlayPath string
 	if isDef {
-		tmpExt = ".sif"
+		tmpOverlayPath = strings.TrimSuffix(getTmpOverlayPath(nameVersion, targetDir), ".img") + ".sif"
+	} else if !config.Global.Build.UseHostDirs {
+		tmpOverlayPath = getTmpOverlayPath(nameVersion, targetDir) // .img for ext3 mode
+		// tmpOverlayPath stays "" for shell builds in dir mode
 	}
-	tmpOverlayPath := strings.TrimSuffix(getTmpOverlayPath(nameVersion, targetDir), ".img") + tmpExt
 
 	utils.PrintDebug("[BUILD OBJECT] Creating external %s: source=%s, targetPrefix=%s, tmpOverlay=%s, cntDir=%s", nameVersion, source, targetPrefix, tmpOverlayPath, cntDirPath)
 

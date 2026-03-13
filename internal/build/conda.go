@@ -126,16 +126,30 @@ func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	}
 	utils.PrintMessage("Building overlay %s (%s build)", styledOverlay, utils.StyleAction(buildMode))
 
-	// Create temporary overlay
-	if err := c.CreateTmpOverlay(ctx, false); err != nil {
-		if errors.Is(err, ErrTmpOverlayExists) {
-			utils.PrintWarning("Stale temporary overlay found for %s. Cleaning up...", c.nameVersion)
-			c.Cleanup(true)
-			if err := c.CreateTmpOverlay(ctx, false); err != nil {
+	// Create build workspace (host dirs or ext3 overlay depending on config)
+	if config.Global.Build.UseHostDirs {
+		if err := c.CreateBuildDirs(ctx, false); err != nil {
+			if errors.Is(err, ErrTmpOverlayExists) {
+				utils.PrintWarning("Stale build directory found for %s. Cleaning up...", c.nameVersion)
+				c.Cleanup(true)
+				if err := c.CreateBuildDirs(ctx, false); err != nil {
+					return fmt.Errorf("failed to create build dirs: %w", err)
+				}
+			} else {
+				return fmt.Errorf("failed to create build dirs: %w", err)
+			}
+		}
+	} else {
+		if err := c.CreateTmpOverlay(ctx, false); err != nil {
+			if errors.Is(err, ErrTmpOverlayExists) {
+				utils.PrintWarning("Stale temporary overlay found for %s. Cleaning up...", c.nameVersion)
+				c.Cleanup(true)
+				if err := c.CreateTmpOverlay(ctx, false); err != nil {
+					return fmt.Errorf("failed to create temporary overlay: %w", err)
+				}
+			} else {
 				return fmt.Errorf("failed to create temporary overlay: %w", err)
 			}
-		} else {
-			return fmt.Errorf("failed to create temporary overlay: %w", err)
 		}
 	}
 
@@ -230,20 +244,41 @@ mksquashfs /cnt %[3]s -processors %[4]d -b %[5]s -keep-as-directory %[6]s
 		finalPath, c.effectiveNcpus(), config.Global.Build.BlockSize, config.Global.Build.CompressArgs,
 	)
 
-	// Always bind the target overlay directory so mksquashfs can write there
-	bindPaths = append(bindPaths, filepath.Dir(c.targetOverlayPath))
-
-	// Create exec options for building the conda package
-	opts := exec.Options{
-		BaseImage:     config.GetBaseImage(),
-		ApptainerBin:  config.Global.ApptainerBin,
-		Overlays:      []string{c.tmpOverlayPath},
-		BindPaths:     bindPaths,
-		EnvSettings:   []string{"TMPDIR=/ext3/tmp"},
-		Command:       []string{"/bin/bash", "-c", bashScript},
-		HidePrompt:    true,
-		WritableImg:   true,
-		PassThruStdin: true,
+	// Build exec options: dir-mode uses host bind mounts; ext3-mode uses overlay image
+	var opts exec.Options
+	if config.Global.Build.UseHostDirs {
+		buildTmpDir := getBuildTmpDir(c.BaseBuildObject)
+		bindPaths = append(bindPaths,
+			buildTmpDir+":/ext3/tmp",
+			c.cntDirPath+":/cnt",
+			filepath.Dir(c.targetOverlayPath),
+		)
+		opts = exec.Options{
+			BaseImage:      config.GetBaseImage(),
+			ApptainerBin:   config.Global.ApptainerBin,
+			Overlays:       []string{},
+			BindPaths:      bindPaths,
+			EnvSettings:    []string{"TMPDIR=/ext3/tmp"},
+			Command:        []string{"/bin/bash", "-c", bashScript},
+			HidePrompt:     true,
+			WritableImg:    false,
+			ApptainerFlags: []string{"--writable-tmpfs"},
+			PassThruStdin:  true,
+		}
+	} else {
+		// Always bind the target overlay directory so mksquashfs can write there
+		bindPaths = append(bindPaths, filepath.Dir(c.targetOverlayPath))
+		opts = exec.Options{
+			BaseImage:     config.GetBaseImage(),
+			ApptainerBin:  config.Global.ApptainerBin,
+			Overlays:      []string{c.tmpOverlayPath},
+			BindPaths:     bindPaths,
+			EnvSettings:   []string{"TMPDIR=/ext3/tmp"},
+			Command:       []string{"/bin/bash", "-c", bashScript},
+			HidePrompt:    true,
+			WritableImg:   true,
+			PassThruStdin: true,
+		}
 	}
 
 	utils.PrintDebug("[BUILD] Creating overlay for %s with options: overlays=%v, bindPaths=%v",

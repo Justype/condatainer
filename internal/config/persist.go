@@ -101,6 +101,7 @@ func setDefaults() {
 	viper.SetDefault("build.overlay_type", "ext3")
 	viper.SetDefault("build.block_size", "128k")
 	viper.SetDefault("build.data_block_size", "1m")
+	viper.SetDefault("build.use_host_dirs", true)
 
 	viper.SetDefault("parse_module_load", false)
 	viper.SetDefault("scheduler_timeout", 5) // seconds
@@ -535,6 +536,8 @@ func LoadFromViper() {
 			Global.Build.DataBlockSize = "1m"
 		}
 	}
+
+	Global.Build.UseHostDirs = viper.GetBool("build.use_host_dirs")
 
 	Global.ParseModuleLoad = viper.GetBool("parse_module_load")
 

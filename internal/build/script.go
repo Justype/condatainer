@@ -136,17 +136,32 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	}
 	utils.PrintMessage("Building overlay %s (%s build)", styledOverlay, utils.StyleAction(buildMode))
 
-	// Create temporary overlay
-	utils.PrintMessage("Creating temporary overlay %s", utils.StylePath(s.tmpOverlayPath))
-	if err := s.CreateTmpOverlay(ctx, false); err != nil {
-		if errors.Is(err, ErrTmpOverlayExists) {
-			utils.PrintWarning("Stale temporary overlay found for %s. Cleaning up...", s.nameVersion)
-			s.Cleanup(true)
-			if err := s.CreateTmpOverlay(ctx, false); err != nil {
+	// Create build workspace (host dirs or ext3 overlay depending on config)
+	if config.Global.Build.UseHostDirs {
+		utils.PrintMessage("Creating build directories for %s", styledOverlay)
+		if err := s.CreateBuildDirs(ctx, false); err != nil {
+			if errors.Is(err, ErrTmpOverlayExists) {
+				utils.PrintWarning("Stale build directory found for %s. Cleaning up...", s.nameVersion)
+				s.Cleanup(true)
+				if err := s.CreateBuildDirs(ctx, false); err != nil {
+					return fmt.Errorf("failed to create build dirs: %w", err)
+				}
+			} else {
+				return fmt.Errorf("failed to create build dirs: %w", err)
+			}
+		}
+	} else {
+		utils.PrintMessage("Creating temporary overlay %s", utils.StylePath(s.tmpOverlayPath))
+		if err := s.CreateTmpOverlay(ctx, false); err != nil {
+			if errors.Is(err, ErrTmpOverlayExists) {
+				utils.PrintWarning("Stale temporary overlay found for %s. Cleaning up...", s.nameVersion)
+				s.Cleanup(true)
+				if err := s.CreateTmpOverlay(ctx, false); err != nil {
+					return fmt.Errorf("failed to create temporary overlay: %w", err)
+				}
+			} else {
 				return fmt.Errorf("failed to create temporary overlay: %w", err)
 			}
-		} else {
-			return fmt.Errorf("failed to create temporary overlay: %w", err)
 		}
 	}
 
@@ -217,18 +232,28 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		"IN_CONDATAINER=1",
 	)
 
-	// Set target_dir based on ref type
-	targetDir := ""
+	// Set target_dir: in dir-mode both ref and app use container-side /cnt/<nameVersion>
+	// (cntDirPath is bound as /cnt so writes go to host). In ext3-mode, ref overlays
+	// use the host cntDirPath directly (bound into container via getAllBaseDirs).
 	relativePath := s.nameVersion
-	if s.isRef {
-		// Create cnt_dir for ref overlays (large reference datasets)
-		if err := os.MkdirAll(s.cntDirPath, 0o775); err != nil {
-			return fmt.Errorf("failed to create cnt_dir %s: %w", s.cntDirPath, err)
-		}
-		targetDir = filepath.Join(s.cntDirPath, s.nameVersion)
-		envSettings = append(envSettings, fmt.Sprintf("target_dir=%s", targetDir))
-	} else {
+	var targetDir string // host path used for post-build checks (ref builds only)
+	if config.Global.Build.UseHostDirs {
+		// All builds: container-side path (cntDirPath bound as /cnt)
 		envSettings = append(envSettings, fmt.Sprintf("target_dir=/cnt/%s", relativePath))
+		if s.isRef {
+			targetDir = filepath.Join(s.cntDirPath, s.nameVersion)
+		}
+	} else {
+		if s.isRef {
+			// Create cnt_dir for ref overlays (large reference datasets)
+			if err := os.MkdirAll(s.cntDirPath, 0o775); err != nil {
+				return fmt.Errorf("failed to create cnt_dir %s: %w", s.cntDirPath, err)
+			}
+			targetDir = filepath.Join(s.cntDirPath, s.nameVersion)
+			envSettings = append(envSettings, fmt.Sprintf("target_dir=%s", targetDir))
+		} else {
+			envSettings = append(envSettings, fmt.Sprintf("target_dir=/cnt/%s", relativePath))
+		}
 	}
 
 	// Add PATH from dependencies
@@ -267,8 +292,11 @@ fi
 		utils.PrintWarning("Failed to get overlay args from dependencies: %v", err)
 	}
 
-	// Convert overlay args to overlay paths
-	overlays := []string{s.tmpOverlayPath}
+	// Convert overlay args to overlay paths (dependency overlays only; tmp overlay added below if ext3 mode)
+	var overlays []string
+	if !config.Global.Build.UseHostDirs {
+		overlays = []string{s.tmpOverlayPath}
+	}
 	for i := 0; i < len(overlayArgs); i += 2 {
 		if overlayArgs[i] == "--overlay" && i+1 < len(overlayArgs) {
 			overlays = append(overlays, overlayArgs[i+1])
@@ -277,6 +305,10 @@ fi
 
 	// Collect bind directories (for accessing overlays and build scripts)
 	bindDirs := container.DeduplicateBindPaths(getAllBaseDirs())
+	if config.Global.Build.UseHostDirs {
+		buildTmpDir := getBuildTmpDir(s.BaseBuildObject)
+		bindDirs = append(bindDirs, buildTmpDir+":/ext3/tmp", s.cntDirPath+":/cnt")
+	}
 
 	// Create exec options for running build script
 	opts := execpkg.Options{
@@ -287,7 +319,10 @@ fi
 		EnvSettings:  envSettings,
 		Command:      []string{"/bin/bash", "-c", bashScript},
 		HidePrompt:   true,
-		WritableImg:  true,
+		WritableImg:  !config.Global.Build.UseHostDirs,
+	}
+	if config.Global.Build.UseHostDirs {
+		opts.ApptainerFlags = []string{"--writable-tmpfs"}
 	}
 
 	// Enable stdin pass-through if there are interactive inputs
@@ -349,8 +384,27 @@ fi
 	}
 
 	// Create SquashFS
-	if s.isRef {
-		// For ref overlays: check files exist, then pack from cnt_dir
+	if config.Global.Build.UseHostDirs {
+		// Dir mode: all build types pack from cntDirPath (host dir bound as /cnt)
+		checkDir := s.cntDirPath
+		if s.isRef && targetDir != "" {
+			checkDir = targetDir
+		}
+		if entries, err := os.ReadDir(checkDir); err != nil || len(entries) == 0 {
+			s.Cleanup(true)
+			return fmt.Errorf("build script did not create any files in %s", checkDir)
+		}
+		utils.PrintMessage("Setting permissions for %s", utils.StylePath(s.cntDirPath))
+		if err := utils.ShareToUGORecursive(s.cntDirPath); err != nil {
+			utils.PrintWarning("Failed to set permissions for %s: %v", utils.StylePath(s.cntDirPath), err)
+		}
+		utils.PrintMessage("Creating SquashFS from %s for overlay %s", utils.StylePath(s.cntDirPath), styledOverlay)
+		if err := s.createSquashfs(ctx, s.cntDirPath, finalPath); err != nil {
+			s.Cleanup(true)
+			return err
+		}
+	} else if s.isRef {
+		// Ext3 mode, ref overlays: check files exist, then pack from cnt_dir
 		if entries, err := os.ReadDir(targetDir); err != nil || len(entries) == 0 {
 			s.Cleanup(true)
 			return fmt.Errorf("overlay build script did not create any files in %s", targetDir)
@@ -368,7 +422,7 @@ fi
 			return err
 		}
 	} else {
-		// For app overlays: set permissions and pack from /cnt
+		// Ext3 mode, app overlays: set permissions and pack from /cnt (inside container via overlay)
 		utils.PrintMessage("Preparing SquashFS from /cnt for overlay %s", styledOverlay)
 		if err := s.createSquashfs(ctx, "/cnt", finalPath); err != nil {
 			s.Cleanup(true)
@@ -443,11 +497,27 @@ func (s *ScriptBuildObject) createSquashfs(ctx context.Context, sourceDir, targe
 		}
 	}()
 
-	// Build mksquashfs command
-	bashScript := ""
-	packOverlays := []string{s.tmpOverlayPath}
-	if sourceDir == "/cnt" {
-		// For app overlays: set permissions first
+	// Build mksquashfs command and exec options
+	var bashScript string
+	var packOverlays []string
+	var packBindDirs []string
+
+	if config.Global.Build.UseHostDirs {
+		// Dir mode: sourceDir is a host path (cntDirPath); permissions already set by caller.
+		// Bind sourceDir and output dir at their host paths so mksquashfs can access them.
+		blockSize := config.Global.Build.BlockSize
+		if s.isRef {
+			blockSize = config.Global.Build.DataBlockSize
+		}
+		bashScript = fmt.Sprintf(`
+trap 'exit 130' INT TERM
+echo "Packing overlay to SquashFS..."
+mksquashfs %s %s -processors %d -b %s -keep-as-directory %s
+`, sourceDir, targetPath, s.effectiveNcpus(), blockSize, config.Global.Build.CompressArgs)
+		packOverlays = []string{}
+		packBindDirs = append(container.DeduplicateBindPaths(getAllBaseDirs()), sourceDir, filepath.Dir(targetPath))
+	} else if sourceDir == "/cnt" {
+		// Ext3 mode, app overlays: set permissions inside container then pack from /cnt
 		bashScript = fmt.Sprintf(`
 trap 'exit 130' INT TERM
 echo "Setting permissions..."
@@ -457,8 +527,10 @@ find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
 echo "Packing overlay to SquashFS..."
 mksquashfs /cnt %s -processors %d -b %s -keep-as-directory %s
 `, targetPath, s.effectiveNcpus(), config.Global.Build.BlockSize, config.Global.Build.CompressArgs)
+		packOverlays = []string{s.tmpOverlayPath}
+		packBindDirs = container.DeduplicateBindPaths(getAllBaseDirs())
 	} else {
-		// For ref overlays: fix permissions and pack the directory
+		// Ext3 mode, ref overlays: fix permissions on host, pack from host path
 		if err := utils.FixPermissionsDefault(sourceDir); err != nil {
 			utils.PrintWarning("Failed to fix permissions on %s: %v", sourceDir, err)
 		}
@@ -467,21 +539,22 @@ trap 'exit 130' INT TERM
 echo "Packing overlay to SquashFS..."
 mksquashfs %s %s -processors %d -b %s -keep-as-directory %s
 `, sourceDir, targetPath, s.effectiveNcpus(), config.Global.Build.DataBlockSize, config.Global.Build.CompressArgs)
-		packOverlays = []string{} // No need to pack with tmpOverlay for ref overlays since sourceDir is already prepared
+		packOverlays = []string{}
+		packBindDirs = container.DeduplicateBindPaths(getAllBaseDirs())
 	}
-
-	// Collect bind directories (deduplicated)
-	bindDirs := container.DeduplicateBindPaths(getAllBaseDirs())
 
 	// Create exec options for creating SquashFS
 	opts := execpkg.Options{
 		BaseImage:    config.GetBaseImage(),
 		ApptainerBin: config.Global.ApptainerBin,
 		Overlays:     packOverlays,
-		BindPaths:    bindDirs,
+		BindPaths:    packBindDirs,
 		Command:      []string{"/bin/bash", "-c", bashScript},
 		HidePrompt:   true,
-		WritableImg:  true,
+		WritableImg:  !config.Global.Build.UseHostDirs,
+	}
+	if config.Global.Build.UseHostDirs {
+		opts.ApptainerFlags = []string{"--writable-tmpfs"}
 	}
 
 	utils.PrintDebug("[BUILD] Creating SquashFS for %s with options: overlays=%v, bindPaths=%v",

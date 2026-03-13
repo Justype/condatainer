@@ -41,6 +41,7 @@ var configKeys = []string{
 	"build.overlay_type",
 	"build.block_size",
 	"build.data_block_size",
+	"build.use_host_dirs",
 }
 
 // getConfigEnvVars returns a list of environment variables corresponding to
@@ -99,6 +100,8 @@ func configValueCompletion(key string) []string {
 		return config.CompressNames()
 	case "build.block_size", "build.data_block_size":
 		return config.BlockSizeCompletions
+	case "build.use_host_dirs":
+		return []string{"true", "false"}
 	default:
 		return nil
 	}
@@ -313,6 +316,7 @@ Shows:
 		fmt.Printf("  overlay_type:    %s\n", viper.GetString("build.overlay_type"))
 		fmt.Printf("  block_size:      %s\n", config.Global.Build.BlockSize)
 		fmt.Printf("  data_block_size: %s\n", config.Global.Build.DataBlockSize)
+		fmt.Printf("  use_host_dirs:   %v\n", config.Global.Build.UseHostDirs)
 		fmt.Println()
 
 		// Extra base directories
