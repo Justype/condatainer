@@ -30,8 +30,16 @@ env.go          Environment variable extraction from overlays
 - `NameVersion()`, `BuildSource()`, `Dependencies()`, `Type()`
 - `IsInstalled()`, `RequiresScheduler()`, `Update()`
 - `ScriptSpecs()` - Parsed scheduler directives
+- `LockPath()` - Path to the build lock file
 - `Build(ctx, buildDeps bool)`, `GetMissingDependencies()`
 - `CreateTmpOverlay(ctx, force bool)`, `Cleanup(failed bool)`
+
+**BuildLockInfo** - JSON metadata stored in `.lock` files:
+- `Type` - `"local"`, `"slurm"`, `"pbs"`, `"lsf"`, or `"htcondor"`
+- `JobID` - Scheduler job ID (empty until submit returns; set by `submitJob`)
+- `Node` - Short hostname (domain suffix stripped) where lock was created
+- `PID` - OS process ID for local builds; 0 for scheduler builds
+- `CreatedAt` - RFC3339 timestamp
 
 **BuildType** - `IsConda`, `IsDef`, `IsShell`, `IsRef`
 
@@ -89,40 +97,61 @@ if found && info.IsRemote {
 }
 ```
 
+## Build Lock
+
+Each build target has a lock file at `<targetOverlayPath>.lock` containing `BuildLockInfo` JSON.
+
+**Lifecycle:**
+- **Scheduler submit** (`submitJob` in `graph.go`): lock created with `type=scheduler`, `job_id=""`, **no node** before calling the scheduler. Updated with the real job ID after `Submit()` returns. Removed if submit fails.
+- **Local / scheduler job start** (`Build()`): `createBuildLock()` writes `type=local` with current node and PID. If a scheduler lock already exists with a matching job ID (`$SLURM_JOB_ID` / `$PBS_JOBID` / `$LSB_JOBID`), it adopts and updates that lock with the runtime node and PID.
+- **Build end**: `defer removeBuildLock()` removes the lock on success or failure.
+
+**Stale detection** (in `NewBuildObject`):
+
+| Lock state | Action |
+|---|---|
+| Empty or corrupt file (old format) | Treat as stale — remove and continue |
+| `type=slurm/pbs/lsf/htcondor`, `job_id=""` | Stale (failed before submit returned) — remove |
+| `type=slurm/pbs/lsf/htcondor`, `job_id` set | Call `scheduler.IsJobAlive(job_id)` — remove if not alive |
+| `type=local`, same node, PID dead | Stale — remove and continue |
+| `type=local`, same node, PID alive | Active — error with details |
+| `type=local`, different node | Cannot verify remotely — error, ask user to check |
+| Scheduler unavailable for job check | Conservative — error, ask user to check |
+
 ## Build Workflow
 
 **Conda:**
 1. Check if overlay exists (skip if not updating)
 2. If updating existing overlay: probe exclusive lock — fail immediately if in use
-3. Create temporary ext3 overlay
+3. Create build lock (local); create temporary ext3 overlay
 4. `micromamba create` inside container
 5. Set permissions, pack to SquashFS
-6. Atomic rename `.new` → target; cleanup
+6. Atomic rename `.new` → target; remove lock
 
 **Shell:**
 1. Check if overlay exists (skip if not updating)
 2. If updating existing overlay: probe exclusive lock — fail immediately if in use
-3. Create temporary overlay
+3. Create build lock (local, or adopt scheduler lock); create temporary overlay
 4. Build missing dependencies (if enabled)
 5. Run script inside container with overlays
 6. For ref: verify files, create SquashFS from `$cnt_dir`
 7. For apps: create SquashFS from `/cnt`
 8. Extract and save ENV variables
-9. Atomic rename `.new` → target; cleanup
+9. Atomic rename `.new` → target; remove lock
 
 **Def:**
 1. Check if overlay exists (skip if not updating)
 2. If updating existing overlay: probe exclusive lock — fail immediately if in use
-3. Try prebuilt download (if remote source)
+3. Create build lock; try prebuilt download (if remote source)
 4. Build SIF with Apptainer; extract SquashFS partition
-5. Atomic rename `.new` → target; cleanup
+5. Atomic rename `.new` → target; remove lock
 
 **Base image (`.sif`):**
 1. Check if already installed (skip if not updating)
 2. If updating existing image: probe exclusive lock — fail immediately if in use
-3. Try prebuilt `.sif` download (if remote source)
+3. Create build lock; try prebuilt `.sif` download (if remote source)
 4. Build SIF with Apptainer
-5. Atomic rename `.new` → target; cleanup
+5. Atomic rename `.new` → target; remove lock
 
 ## BuildGraph Execution
 
@@ -174,6 +203,8 @@ Build defaults are configured via `build.*` keys in `config.yaml`. See [Config R
 
 ## Error Handling
 
-- `ErrTmpOverlayExists` - Temporary overlay already exists (build in progress)
+- `ErrTmpOverlayExists` - Temporary overlay already exists (stale from previous run)
 - `ErrBuildCancelled` - User interrupted build (Ctrl+C)
+- `"build lock found for <name> ..."` - Lock exists and is active (job pending/running or local build in progress)
+- `"build already queued or running for <name>"` - Duplicate scheduler submission blocked by submit-time lock
 - `"cannot update <name>: ..."` - Target overlay is locked (currently used by a running `exec`/`run`)

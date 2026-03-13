@@ -2,10 +2,12 @@ package build
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
@@ -199,14 +201,25 @@ func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 		t.Fatalf("failed to write script: %v", err)
 	}
 
-	// Simulate a build in progress: create a lock file next to the target overlay.
+	// Simulate a build in progress: create a live JSON lock file next to the target overlay.
+	// Use the current process PID and hostname so isBuildLockStale() treats it as active.
 	// NewBuildObject overrides tmpDir via resolveTmpDirForConda(), so tmp artifacts
 	// in the caller-supplied tmpDir are invisible to it. The build-in-progress guard
 	// checks base.buildLockPath() = targetOverlayPath + ".lock" (lives in imagesDir).
 	nameVersion := "cellranger/8.0.1"
 	sqfName := strings.ReplaceAll(utils.NormalizeNameVersion(nameVersion), "/", "--") + ".sqf"
 	lockPath := filepath.Join(imagesDir, sqfName+".lock")
-	if err := os.WriteFile(lockPath, []byte{}, 0o664); err != nil {
+	liveLock := BuildLockInfo{
+		Type:      "local",
+		Node:      shortHostname(),
+		PID:       os.Getpid(), // this process is definitely alive
+		CreatedAt: time.Now().Format(time.RFC3339),
+	}
+	lockData, err := json.Marshal(liveLock)
+	if err != nil {
+		t.Fatalf("failed to marshal lock: %v", err)
+	}
+	if err := os.WriteFile(lockPath, lockData, 0o664); err != nil {
 		t.Fatalf("failed to create lock file: %v", err)
 	}
 	defer os.Remove(lockPath)
@@ -214,12 +227,12 @@ func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 	// Re-init data paths so the test's extra base dir is picked up
 	config.InitDataPaths()
 
-	// Call NewBuildObject: should return an error directing the user to remove the stale lock.
-	_, err := NewBuildObject(context.Background(), nameVersion, false, imagesDir, tmpDir, false)
+	// Call NewBuildObject: should return an error with lock details.
+	_, err = NewBuildObject(context.Background(), nameVersion, false, imagesDir, tmpDir, false)
 	if err == nil {
 		t.Fatal("expected error when build lock file exists, got nil")
 	}
-	if !strings.Contains(err.Error(), "build lock file found") {
+	if !strings.Contains(err.Error(), "build lock found") {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }

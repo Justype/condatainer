@@ -69,6 +69,9 @@ func newHTCondorSchedulerWithBinary(condorSubmitBin string) (*HTCondorScheduler,
 	}, nil
 }
 
+// GetCurrentJobID returns the HTCondor job ID of the currently running job, or "".
+func (h *HTCondorScheduler) GetCurrentJobID() string { return os.Getenv("CONDOR_ID") }
+
 // IsAvailable checks if HTCondor is available and we're not inside an HTCondor job
 func (h *HTCondorScheduler) IsAvailable() bool {
 	if h.condorSubmitBin == "" {
@@ -798,6 +801,26 @@ func parseHTCondorMemory(memStr string) (int64, error) {
 
 	// Try with unit suffix
 	return parseMemoryMB(memStr)
+}
+
+// GetJobStatus returns the current status of the given HTCondor job ID.
+// Uses condor_q; returns JobStatusUnknown conservatively when condor_q is unavailable or times out.
+// condor_q doesn't easily distinguish idle vs running without --format; presence = alive.
+func (h *HTCondorScheduler) GetJobStatus(jobID string) (JobStatus, error) {
+	if h.condorQBin == "" {
+		return JobStatusUnknown, nil // conservative: can't check
+	}
+	out, err := runCommand("HTCondor", "job-status", h.condorQBin, jobID)
+	if err != nil {
+		if _, ok := err.(*TimeoutError); ok {
+			return JobStatusUnknown, nil // conservative: timed out
+		}
+		return JobStatusDone, nil
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		return JobStatusRunning, nil // in queue (can't distinguish idle vs running without --format)
+	}
+	return JobStatusDone, nil
 }
 
 // TryParseHTCondorScript attempts to parse an HTCondor submit file without requiring HTCondor binaries.

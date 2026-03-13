@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Justype/condatainer/internal/config"
@@ -117,6 +119,7 @@ type BuildObject interface {
 	TmpOverlayPath() string
 	TargetOverlayPath() string
 	CntDirPath() string
+	LockPath() string
 
 	// Scheduler metadata
 	ScriptSpecs() *ScriptSpecs
@@ -168,21 +171,170 @@ func (b *BaseBuildObject) RequiresScheduler() bool {
 	return b.submitJob && scheduler.HasSchedulerSpecs(b.scriptSpecs)
 }
 
+// BuildLockInfo holds metadata stored inside a build lock file.
+type BuildLockInfo struct {
+	Type      string `json:"type"`       // "local", "slurm", "pbs", "lsf", or "htcondor"
+	JobID     string `json:"job_id"`     // scheduler job ID (empty until submit returns)
+	Node      string `json:"node"`       // short hostname where lock was created
+	PID       int    `json:"pid"`        // OS PID for local builds; 0 for scheduler
+	CreatedAt string `json:"created_at"` // RFC3339 timestamp
+}
+
+// shortHostname returns the unqualified hostname (strips domain suffix).
+// os.Hostname() may return "cn001" or "cn001.cluster.edu" depending on system
+// configuration; always store/compare the short form to avoid false mismatches.
+func shortHostname() string {
+	h, _ := os.Hostname()
+	if idx := strings.Index(h, "."); idx > 0 {
+		return h[:idx]
+	}
+	return h
+}
+
 // buildLockPath returns the lock file path for this build (stable, in imagesDir).
 func (b *BaseBuildObject) buildLockPath() string {
 	return b.targetOverlayPath + ".lock"
 }
 
-// createBuildLock creates the lock file exclusively. Returns error if already locked.
-func (b *BaseBuildObject) createBuildLock() error {
-	f, err := os.OpenFile(b.buildLockPath(), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o664)
+// LockPath satisfies the BuildObject interface — returns the lock file path.
+func (b *BaseBuildObject) LockPath() string { return b.buildLockPath() }
+
+// writeBuildLock atomically creates the lock file and writes JSON metadata.
+// Returns an os.ErrExist-wrapped error if the lock already exists.
+func (b *BaseBuildObject) writeBuildLock(info BuildLockInfo) error {
+	return acquireBuildLockFile(b.buildLockPath(), info)
+}
+
+// acquireBuildLockFile is a package-level helper that creates a lock file
+// atomically (O_CREATE|O_EXCL) and writes JSON metadata.
+// Used by both BaseBuildObject and graph.go's submitJob.
+func acquireBuildLockFile(path string, info BuildLockInfo) error {
+	data, err := json.Marshal(info)
 	if err != nil {
-		if os.IsExist(err) {
-			return fmt.Errorf("build already in progress: lock file exists at %s", b.buildLockPath())
-		}
-		return fmt.Errorf("failed to create build lock: %w", err)
+		return fmt.Errorf("failed to marshal build lock: %w", err)
 	}
-	f.Close()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o664)
+	if err != nil {
+		return err // caller checks os.IsExist
+	}
+	defer f.Close()
+	_, err = f.Write(data)
+	return err
+}
+
+// overwriteBuildLockFile overwrites an existing lock file with new JSON metadata.
+// The caller must already hold the lock (i.e. have created it via acquireBuildLockFile).
+func overwriteBuildLockFile(path string, info BuildLockInfo) error {
+	data, err := json.Marshal(info)
+	if err != nil {
+		return fmt.Errorf("failed to marshal build lock: %w", err)
+	}
+	return os.WriteFile(path, data, 0o664)
+}
+
+// readBuildLock reads and parses the lock file JSON.
+// An empty or corrupt file (old empty-lock format) returns a zero-value struct.
+func (b *BaseBuildObject) readBuildLock() (BuildLockInfo, error) {
+	return readBuildLockFile(b.buildLockPath())
+}
+
+// readBuildLockFile reads and parses a lock file at the given path.
+func readBuildLockFile(path string) (BuildLockInfo, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return BuildLockInfo{}, err
+	}
+	if len(data) == 0 {
+		// Old empty-lock format — treat as stale.
+		return BuildLockInfo{}, nil
+	}
+	var info BuildLockInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return BuildLockInfo{}, fmt.Errorf("corrupt lock file: %w", err)
+	}
+	return info, nil
+}
+
+// updateBuildLock overwrites the lock file contents.
+func (b *BaseBuildObject) updateBuildLock(info BuildLockInfo) error {
+	return overwriteBuildLockFile(b.buildLockPath(), info)
+}
+
+// isBuildLockStale returns whether the lock is stale, the job's current status, and any
+// uncertainty error. Returns (true, Unknown, nil) when definitely stale, (false, status, nil)
+// when definitely alive, or (false, Unknown, err) when the state cannot be verified.
+func isBuildLockStale(info BuildLockInfo) (stale bool, status scheduler.JobStatus, err error) {
+	// Empty type means old empty-lock format → treat as stale for backward compat.
+	if info.Type == "" {
+		return true, scheduler.JobStatusUnknown, nil
+	}
+
+	if info.Type != "local" {
+		if info.JobID == "" {
+			// Lock was written before submit returned — treat as stale.
+			return true, scheduler.JobStatusUnknown, nil
+		}
+		sched := scheduler.ActiveScheduler()
+		if sched == nil {
+			// Can't check without a scheduler — be conservative.
+			return false, scheduler.JobStatusUnknown, fmt.Errorf("scheduler unavailable, cannot verify job %s", info.JobID)
+		}
+		st, err := sched.GetJobStatus(info.JobID)
+		if err != nil {
+			return false, scheduler.JobStatusUnknown, fmt.Errorf("cannot check job %s: %w", info.JobID, err)
+		}
+		if st == scheduler.JobStatusUnknown {
+			// Can't determine state — be conservative (treat as alive).
+			return false, st, fmt.Errorf("cannot determine status of job %s", info.JobID)
+		}
+		return !st.IsAlive(), st, nil
+	}
+
+	// Local lock: compare node + PID.
+	if info.Node != shortHostname() {
+		return false, scheduler.JobStatusUnknown, fmt.Errorf("lock held by node %q (current: %q); cannot verify remotely", info.Node, shortHostname())
+	}
+	// Same node: check if the PID is still alive via signal 0.
+	// EPERM means process exists (different owner); ESRCH means no such process.
+	proc, err := os.FindProcess(info.PID)
+	if err != nil {
+		return true, scheduler.JobStatusUnknown, nil // process not found → stale
+	}
+	if err := proc.Signal(syscall.Signal(0)); err != nil {
+		if err == syscall.EPERM {
+			return false, scheduler.JobStatusRunning, nil // alive, different owner
+		}
+		return true, scheduler.JobStatusUnknown, nil // ESRCH → process gone → stale
+	}
+	return false, scheduler.JobStatusRunning, nil // process alive
+}
+
+// createBuildLock creates the lock file for a local build.
+// If a scheduler job lock already exists for this job, it adopts that lock
+// (updating it with the runtime node and PID) instead of failing.
+func (b *BaseBuildObject) createBuildLock() error {
+	info := BuildLockInfo{
+		Type:      "local",
+		Node:      shortHostname(),
+		PID:       os.Getpid(),
+		CreatedAt: time.Now().Format(time.RFC3339),
+	}
+	if err := b.writeBuildLock(info); err != nil {
+		if !os.IsExist(err) {
+			return fmt.Errorf("failed to create build lock: %w", err)
+		}
+		// Lock exists — check if it belongs to our scheduler job.
+		existing, readErr := b.readBuildLock()
+		if readErr == nil && existing.Type != "local" && existing.Type != "" {
+			if myJobID := scheduler.CurrentJobID(); myJobID != "" && existing.JobID == myJobID {
+				// Adopt the lock: update with runtime node + PID.
+				existing.Node = shortHostname()
+				existing.PID = os.Getpid()
+				return b.updateBuildLock(existing)
+			}
+		}
+		return fmt.Errorf("build already in progress: lock file exists at %s", b.buildLockPath())
+	}
 	return nil
 }
 
@@ -515,11 +667,37 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 	// Skip this optimisation in update mode so the correct concrete type is resolved.
 	if !update {
 		if utils.FileExists(base.buildLockPath()) {
-			return nil, fmt.Errorf(
-				"build lock file found for %s at %s.\n"+
-					"If no build is currently running, remove it manually and retry.",
-				utils.StyleName(normalized), utils.StylePath(base.buildLockPath()),
-			)
+			info, readErr := base.readBuildLock()
+			if readErr != nil {
+				// Corrupt or old empty lock → treat as stale.
+				utils.PrintWarning("Corrupt build lock for %s; removing.", utils.StyleName(normalized))
+				base.removeBuildLock()
+			} else if info.JobID != "" && info.JobID == scheduler.CurrentJobID() {
+				// Our own scheduler lock — proceed; createBuildLock() will adopt it
+			} else if stale, jobStatus, _ := isBuildLockStale(info); stale {
+				detail := info.JobID
+				if detail == "" {
+					detail = fmt.Sprintf("pid=%d", info.PID)
+				}
+				utils.PrintWarning("Stale build lock for %s (%s); removing.", utils.StyleName(normalized), detail)
+				base.removeBuildLock()
+			} else {
+				statusHint := ""
+				switch jobStatus {
+				case scheduler.JobStatusPending:
+					statusHint = fmt.Sprintf(" (job %s is pending in queue)", info.JobID)
+				case scheduler.JobStatusRunning:
+					if info.JobID != "" {
+						statusHint = fmt.Sprintf(" (job %s is running)", info.JobID)
+					} else if info.PID != 0 {
+						statusHint = fmt.Sprintf(" (pid %d is running)", info.PID)
+					}
+				}
+				return nil, fmt.Errorf(
+					"build lock found for %s%s.\nLock file: %s",
+					utils.StyleName(normalized), statusHint, utils.StylePath(base.buildLockPath()),
+				)
+			}
 		}
 		if base.IsInstalled() {
 			return newScriptBuildObject(base, isRef)

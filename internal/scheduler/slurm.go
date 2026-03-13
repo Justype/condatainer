@@ -79,6 +79,9 @@ func newSlurmSchedulerWithBinary(sbatchBin string) (*SlurmScheduler, error) {
 	}, nil
 }
 
+// GetCurrentJobID returns the SLURM job ID of the currently running job, or "".
+func (s *SlurmScheduler) GetCurrentJobID() string { return os.Getenv("SLURM_JOB_ID") }
+
 // IsAvailable checks if SLURM is available and we're not inside a SLURM job
 func (s *SlurmScheduler) IsAvailable() bool {
 	if s.sbatchBin == "" {
@@ -1178,6 +1181,35 @@ func (s *SlurmScheduler) GetJobResources() *ResourceSpec {
 		res.Gpu = &GpuSpec{Count: *n}
 	}
 	return res
+}
+
+// GetJobStatus returns the current status of the given SLURM job ID.
+// Uses squeue --format=%T; returns JobStatusUnknown conservatively when squeue is unavailable or times out.
+// squeue only lists active jobs; empty output means the job has finished or is absent.
+func (s *SlurmScheduler) GetJobStatus(jobID string) (JobStatus, error) {
+	squeueBin := siblingBin(s.sbatchBin, "squeue")
+	if squeueBin == "" {
+		return JobStatusUnknown, nil // conservative: can't check
+	}
+	out, err := runCommand("SLURM", "job-status", squeueBin, "-j", jobID, "--noheader", "--format=%T")
+	if err != nil {
+		// squeue exits non-zero when the job ID is no longer known (completed/cancelled).
+		// "Invalid job id" covers both old IDs and IDs that never existed.
+		if strings.Contains(strings.ToLower(string(out)), "invalid job id") {
+			return JobStatusDone, nil
+		}
+		return JobStatusUnknown, nil // conservative: timeout or unavailable
+	}
+	state := strings.TrimSpace(string(out))
+	if state == "" {
+		return JobStatusDone, nil // not in queue → finished or absent
+	}
+	switch strings.ToUpper(state) {
+	case "PENDING", "CONFIGURING", "STAGE_IN":
+		return JobStatusPending, nil
+	default: // RUNNING, COMPLETING, STAGE_OUT, or any other active state
+		return JobStatusRunning, nil
+	}
 }
 
 // TryParseSlurmScript attempts to parse a SLURM script without requiring SLURM binaries.

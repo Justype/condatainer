@@ -275,7 +275,7 @@ func writeJobHeader(w io.Writer, jobIDVar string, specs *ScriptSpecs, formatTime
 		for key, value := range metadata {
 			if value != "" {
 				padding := maxLen - len(key)
-				fmt.Fprintf(w, "echo \"%s:%s %s\"\n", key, strings.Repeat(" ", padding+3), value)
+				fmt.Fprintf(w, "echo \"%s:%s %s\"\n", key, strings.Repeat(" ", padding+4), value)
 			}
 		}
 	}

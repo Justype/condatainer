@@ -122,6 +122,9 @@ func newPbsSchedulerWithBinary(qsubBin string) (*PbsScheduler, error) {
 	}, nil
 }
 
+// GetCurrentJobID returns the PBS job ID of the currently running job, or "".
+func (p *PbsScheduler) GetCurrentJobID() string { return os.Getenv("PBS_JOBID") }
+
 // IsAvailable checks if PBS is available and we're not inside a PBS job
 func (p *PbsScheduler) IsAvailable() bool {
 	if p.qsubBin == "" {
@@ -1344,6 +1347,36 @@ func (s *PbsScheduler) GetJobResources() *ResourceSpec {
 		res.Gpu = &GpuSpec{Count: *n}
 	}
 	return res
+}
+
+// GetJobStatus returns the current status of the given PBS job ID.
+// Uses qstat -f; returns JobStatusUnknown conservatively when qstat is unavailable or times out.
+func (p *PbsScheduler) GetJobStatus(jobID string) (JobStatus, error) {
+	if p.qstatBin == "" {
+		return JobStatusUnknown, nil // conservative: can't check
+	}
+	out, err := runCommand("PBS", "job-status", p.qstatBin, "-f", jobID)
+	if err != nil {
+		// qstat exits non-zero when job ID is unknown or finished.
+		if _, ok := err.(*TimeoutError); ok {
+			return JobStatusUnknown, nil // conservative: timed out
+		}
+		return JobStatusDone, nil
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "job_state = ") {
+			switch strings.TrimPrefix(line, "job_state = ") {
+			case "Q", "H", "W", "T":
+				return JobStatusPending, nil
+			case "R", "E":
+				return JobStatusRunning, nil
+			case "C", "F":
+				return JobStatusDone, nil
+			}
+		}
+	}
+	return JobStatusUnknown, nil
 }
 
 // TryParsePbsScript attempts to parse a PBS script without requiring PBS binaries.

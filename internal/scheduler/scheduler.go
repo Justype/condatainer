@@ -22,6 +22,38 @@ const (
 	SchedulerHTCondor SchedulerType = "HTCondor"
 )
 
+// JobStatus represents the current state of a scheduler job.
+type JobStatus int
+
+const (
+	JobStatusUnknown JobStatus = iota // cannot determine (tool unavailable or timeout)
+	JobStatusPending                  // queued, waiting for resources
+	JobStatusRunning                  // currently executing on a node
+	JobStatusDone                     // completed successfully
+	JobStatusFailed                   // completed with failure or was cancelled
+)
+
+// IsAlive returns true if the job is pending or running.
+func (s JobStatus) IsAlive() bool {
+	return s == JobStatusPending || s == JobStatusRunning
+}
+
+// String returns a human-readable job status label.
+func (s JobStatus) String() string {
+	switch s {
+	case JobStatusPending:
+		return "pending"
+	case JobStatusRunning:
+		return "running"
+	case JobStatusDone:
+		return "done"
+	case JobStatusFailed:
+		return "failed"
+	default:
+		return "unknown"
+	}
+}
+
 // SchedulerInfo holds information about the detected scheduler
 type SchedulerInfo struct {
 	Type      string // Scheduler type (e.g., "SLURM", "PBS", "LSF")
@@ -333,6 +365,16 @@ type Scheduler interface {
 	// Fields with value 0 were not exposed by the scheduler.
 	// Returns nil if not running inside a job of this scheduler type.
 	GetJobResources() *ResourceSpec
+
+	// GetJobStatus returns the current status of the given job ID.
+	// Returns JobStatusUnknown conservatively when the status cannot be determined
+	// (tool unavailable, timeout). Returns JobStatusDone when definitely absent.
+	GetJobStatus(jobID string) (JobStatus, error)
+
+	// GetCurrentJobID returns the job ID of the currently running job for this
+	// scheduler type, read from the scheduler-specific environment variable.
+	// Returns "" if not inside a job of this type.
+	GetCurrentJobID() string
 }
 
 // ResolveResourceSpecFrom merges resources using the priority chain:
@@ -764,6 +806,15 @@ func DetectType() SchedulerType {
 	}
 
 	return SchedulerUnknown
+}
+
+// CurrentJobID returns the job ID of the currently running scheduler job,
+// or "" if not inside a scheduler job or no scheduler is configured.
+func CurrentJobID() string {
+	if s := ActiveScheduler(); s != nil {
+		return s.GetCurrentJobID()
+	}
+	return ""
 }
 
 // IsInsideJob checks if we're currently running inside a scheduler job.
