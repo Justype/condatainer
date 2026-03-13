@@ -50,11 +50,19 @@ func DeduplicateBindPaths(paths []string) []string {
 		resolved = append(resolved, resolvedBind)
 	}
 
-	// Second pass: filter out child paths covered by parent paths
+	// Second pass: filter out child paths covered by parent paths.
+	// Binds with an explicit container path (e.g. /host:/container) are deliberate
+	// remaps and must never be filtered — the parent bind does not provide that mapping.
 	filtered := make([]string, 0, len(resolved))
 	for _, bind := range resolved {
 		parts := strings.SplitN(bind, ":", 3)
 		hostPath := parts[0]
+
+		// Explicit remap — always keep
+		if len(parts) >= 2 {
+			filtered = append(filtered, bind)
+			continue
+		}
 
 		isChild := false
 		for _, otherBind := range resolved {
