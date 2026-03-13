@@ -411,10 +411,6 @@ fi
 			s.Cleanup(true)
 			return fmt.Errorf("build script did not create any files in %s", checkDir)
 		}
-		utils.PrintMessage("Setting permissions for %s", utils.StylePath(s.cntDirPath))
-		if err := utils.ShareToUGORecursive(s.cntDirPath); err != nil {
-			utils.PrintWarning("Failed to set permissions for %s: %v", utils.StylePath(s.cntDirPath), err)
-		}
 		utils.PrintMessage("Creating SquashFS from %s for overlay %s", utils.StylePath(s.cntDirPath), styledOverlay)
 		if err := s.createSquashfs(ctx, s.cntDirPath, finalPath); err != nil {
 			s.Cleanup(true)
@@ -425,12 +421,6 @@ fi
 		if entries, err := os.ReadDir(targetDir); err != nil || len(entries) == 0 {
 			s.Cleanup(true)
 			return fmt.Errorf("overlay build script did not create any files in %s", targetDir)
-		}
-
-		// Set permissions recursively
-		utils.PrintMessage("Setting permissions recursively for %s", utils.StylePath(s.cntDirPath))
-		if err := utils.ShareToUGORecursive(s.cntDirPath); err != nil {
-			utils.PrintWarning("Failed to set permissions for %s: %v", utils.StylePath(s.cntDirPath), err)
 		}
 
 		utils.PrintMessage("Creating SquashFS from %s for overlay %s", utils.StylePath(s.cntDirPath), styledOverlay)
@@ -529,7 +519,7 @@ func (s *ScriptBuildObject) createSquashfs(ctx context.Context, sourceDir, targe
 		bashScript = fmt.Sprintf(`
 trap 'exit 130' INT TERM
 echo "Packing overlay to SquashFS..."
-mksquashfs %s %s -processors %d -b %s -keep-as-directory %s
+mksquashfs %s %s -processors %d -b %s -keep-as-directory -all-root %s
 `, sourceDir, targetPath, s.effectiveNcpus(), blockSize, config.Global.Build.CompressArgs)
 		packOverlays = []string{}
 		packBindDirs = append(container.DeduplicateBindPaths(getAllBaseDirs()), sourceDir, filepath.Dir(targetPath))
@@ -537,24 +527,17 @@ mksquashfs %s %s -processors %d -b %s -keep-as-directory %s
 		// Ext3 mode, app overlays: set permissions inside container then pack from /cnt
 		bashScript = fmt.Sprintf(`
 trap 'exit 130' INT TERM
-echo "Setting permissions..."
-find /cnt -type f -exec chmod ug+rw,o+r {} \;
-find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
-
 echo "Packing overlay to SquashFS..."
-mksquashfs /cnt %s -processors %d -b %s -keep-as-directory %s
+mksquashfs /cnt %s -processors %d -b %s -keep-as-directory -all-root %s
 `, targetPath, s.effectiveNcpus(), config.Global.Build.BlockSize, config.Global.Build.CompressArgs)
 		packOverlays = []string{s.tmpOverlayPath}
 		packBindDirs = container.DeduplicateBindPaths(getAllBaseDirs())
 	} else {
-		// Ext3 mode, ref overlays: fix permissions on host, pack from host path
-		if err := utils.FixPermissionsDefault(sourceDir); err != nil {
-			utils.PrintWarning("Failed to fix permissions on %s: %v", sourceDir, err)
-		}
+		// Ext3 mode, ref overlays: pack from host path
 		bashScript = fmt.Sprintf(`
 trap 'exit 130' INT TERM
 echo "Packing overlay to SquashFS..."
-mksquashfs %s %s -processors %d -b %s -keep-as-directory %s
+mksquashfs %s %s -processors %d -b %s -keep-as-directory -all-root %s
 `, sourceDir, targetPath, s.effectiveNcpus(), config.Global.Build.DataBlockSize, config.Global.Build.CompressArgs)
 		packOverlays = []string{}
 		packBindDirs = container.DeduplicateBindPaths(getAllBaseDirs())

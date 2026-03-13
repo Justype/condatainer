@@ -245,12 +245,8 @@ if [ -z "$(ls -A /cnt 2>/dev/null)" ]; then
     exit 1
 fi
 
-%[1]s "Setting permissions..."
-find /cnt -type f -exec chmod ug+rw,o+r {} \;
-find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
-
 %[1]s "Packing overlay to SquashFS..."
-mksquashfs /cnt %[3]s -processors %[4]d -b %[5]s -keep-as-directory %[6]s
+mksquashfs /cnt %[3]s -processors %[4]d -b %[5]s -keep-as-directory -all-root %[6]s
 `,
 		echoPrefix, installCmd,
 		finalPath, c.effectiveNcpus(), config.Global.Build.BlockSize, config.Global.Build.CompressArgs,
