@@ -176,7 +176,7 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenInstalled(t *testing.T) {
 	}
 }
 
-func TestNewBuildObject_DoesNotParseInteractiveWhenTmpOverlayExists(t *testing.T) {
+func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 	imagesDir := t.TempDir()
 	tmpDir := t.TempDir()
 
@@ -199,32 +199,27 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenTmpOverlayExists(t *testing.T
 		t.Fatalf("failed to write script: %v", err)
 	}
 
-	// Simulate a build in progress: create both the ext3-mode .img file and the
-	// dir-mode build directory so that stale detection works for either mode.
+	// Simulate a build in progress: create a lock file next to the target overlay.
+	// NewBuildObject overrides tmpDir via resolveTmpDirForConda(), so tmp artifacts
+	// in the caller-supplied tmpDir are invisible to it. The build-in-progress guard
+	// checks base.buildLockPath() = targetOverlayPath + ".lock" (lives in imagesDir).
 	nameVersion := "cellranger/8.0.1"
-	// ext3-mode artifact: tmp overlay .img file
-	tmpFileName := strings.ReplaceAll(utils.NormalizeNameVersion(nameVersion), "/", "--") + ".img"
-	tmpOverlayPath := filepath.Join(tmpDir, tmpFileName)
-	if err := os.WriteFile(tmpOverlayPath, []byte{}, 0o664); err != nil {
-		t.Fatalf("failed to create tmp overlay file: %v", err)
+	sqfName := strings.ReplaceAll(utils.NormalizeNameVersion(nameVersion), "/", "--") + ".sqf"
+	lockPath := filepath.Join(imagesDir, sqfName+".lock")
+	if err := os.WriteFile(lockPath, []byte{}, 0o664); err != nil {
+		t.Fatalf("failed to create lock file: %v", err)
 	}
-	// dir-mode artifact: build directory
-	buildDirName := "build_" + strings.ReplaceAll(utils.NormalizeNameVersion(nameVersion), "/", "_")
-	buildDir := filepath.Join(tmpDir, buildDirName)
-	if err := os.MkdirAll(buildDir, 0o775); err != nil {
-		t.Fatalf("failed to create build dir: %v", err)
-	}
-	defer os.RemoveAll(buildDir)
+	defer os.Remove(lockPath)
 
 	// Re-init data paths so the test's extra base dir is picked up
 	config.InitDataPaths()
 
-	// Call NewBuildObject: should return without attempting to parse the interactive script
-	bo, err := NewBuildObject(context.Background(), nameVersion, false, imagesDir, tmpDir, false)
-	if err != nil {
-		t.Fatalf("NewBuildObject returned error: %v", err)
+	// Call NewBuildObject: should return an error directing the user to remove the stale lock.
+	_, err := NewBuildObject(context.Background(), nameVersion, false, imagesDir, tmpDir, false)
+	if err == nil {
+		t.Fatal("expected error when build lock file exists, got nil")
 	}
-	if bo == nil {
-		t.Fatalf("expected non-nil BuildObject")
+	if !strings.Contains(err.Error(), "build lock file found") {
+		t.Fatalf("unexpected error message: %v", err)
 	}
 }

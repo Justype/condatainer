@@ -30,7 +30,10 @@ func CollectOverlayEnv(paths []string) (map[string]string, map[string]string) {
 		if overlay == "" {
 			continue
 		}
-		envPath := overlay + ".env"
+		// Strip :ro/:rw suffix — ResolveOverlayPaths preserves it but the .env
+		// file lives next to the bare path (e.g. dep.sqf.env, not dep.sqf:ro.env).
+		cleanOverlay := strings.TrimSuffix(strings.TrimSuffix(overlay, ":ro"), ":rw")
+		envPath := cleanOverlay + ".env"
 		if !utils.FileExists(envPath) {
 			continue
 		}

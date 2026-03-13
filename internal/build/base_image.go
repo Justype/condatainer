@@ -7,11 +7,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -47,11 +45,7 @@ func (b *BaseImageBuildObject) IsInstalled() bool {
 // Unlike regular def builds, the SIF produced by apptainer is kept directly as the
 // final image — no SquashFS extraction step is performed.
 func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error {
-	targetPath := b.targetOverlayPath
-	if absTarget, err := filepath.Abs(targetPath); err == nil {
-		targetPath = absTarget
-	}
-
+	targetPath, finalPath := buildOverlayPaths(b.BaseBuildObject)
 	styledImage := utils.StyleName(filepath.Base(targetPath))
 
 	if !b.update && b.IsInstalled() {
@@ -59,51 +53,26 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 	}
 
 	// Before starting any build work, check that no exec/run is holding the existing base image.
-	if b.update && utils.FileExists(targetPath) {
-		if lock, err := overlay.AcquireLock(targetPath, true); err != nil {
-			return fmt.Errorf("cannot update base image: %w", err)
-		} else {
-			lock.Close()
-		}
+	if skip, err := checkShouldBuild(b.BaseBuildObject); err != nil {
+		return err
+	} else if skip {
+		// IsInstalled already handled the skip case above; checkShouldBuild handles the lock check.
+		return nil
 	}
 
 	utils.PrintMessage("Building base image %s (local build) from %s", styledImage, utils.StylePath(b.buildSource))
 
-	done := make(chan struct{})
+	done := watchContext(ctx, "base image build")
 	defer close(done)
-
-	var cleanupOnce sync.Once
-	cleanupFunc := func() {
-		cleanupOnce.Do(func() {
-			utils.PrintMessage("Cleaning up temporary files for %s...", styledImage)
-			b.Cleanup(true)
-		})
-	}
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			utils.PrintWarning("Build cancelled. Interrupting build...")
-		case <-done:
-			return
-		}
-	}()
 
 	// Try to download prebuilt .sif from GitHub releases if build source is remote.
 	if b.isRemote {
 		if writableDir, err := config.GetWritableImagesDir(); err == nil {
 			if filepath.Dir(targetPath) == writableDir {
-				downloadPath := targetPath
-				if b.update {
-					downloadPath = targetPath + ".new"
-				}
+				downloadPath := buildFinalPath(targetPath, b.update)
 				if tryDownloadPrebuiltSif(b.nameVersion, downloadPath) {
-					if b.update {
-						os.Remove(targetPath) //nolint:errcheck
-						if err := os.Rename(downloadPath, targetPath); err != nil {
-							os.Remove(downloadPath) //nolint:errcheck
-							return fmt.Errorf("failed to replace base image %s: %w", targetPath, err)
-						}
+					if err := atomicInstall(downloadPath, targetPath, b.update); err != nil {
+						return err
 					}
 					b.Cleanup(false)
 					return nil
@@ -123,7 +92,7 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 	}
 
 	if err := apptainer.Build(ctx, b.tmpOverlayPath, b.buildSource, buildOpts); err != nil {
-		cleanupFunc()
+		b.Cleanup(true)
 		if apptainer.IsBuildCancelled(err) {
 			utils.PrintMessage("Build cancelled for %s. Base image unchanged.", styledImage)
 			return ErrBuildCancelled
@@ -131,16 +100,10 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 		return fmt.Errorf("failed to build SIF from %s: %w", b.buildSource, err)
 	}
 
-	// Determine final output path; write to .new in update mode for atomic replacement.
-	finalPath := targetPath
-	if b.update {
-		finalPath = targetPath + ".new"
-	}
-
 	// Move the SIF to its final location (no SquashFS extraction needed).
 	if err := os.Rename(b.tmpOverlayPath, finalPath); err != nil {
 		os.Remove(finalPath) //nolint:errcheck
-		cleanupFunc()
+		b.Cleanup(true)
 		return fmt.Errorf("failed to move SIF to %s: %w", finalPath, err)
 	}
 
@@ -148,12 +111,8 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
 	}
 
-	if b.update {
-		os.Remove(targetPath) //nolint:errcheck
-		if err := os.Rename(finalPath, targetPath); err != nil {
-			os.Remove(finalPath) //nolint:errcheck
-			return fmt.Errorf("failed to replace base image %s: %w", targetPath, err)
-		}
+	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
+		return err
 	}
 
 	utils.PrintSuccess("Finished base image %s", utils.StylePath(targetPath))
@@ -192,8 +151,8 @@ func NewBaseImageBuildObject(update bool) (*BaseImageBuildObject, error) {
 		targetOverlayPath = abs
 	}
 
-	tmpDir := config.GetWritableTmpDir()
-	tmpOverlayPath := getTmpOverlayPath(nameVersion, tmpDir)
+	tmpDir := resolveTmpDirForDef()
+	tmpOverlayPath, _ := buildTmpPaths(nameVersion, tmpDir, ".img")
 
 	base := &BaseBuildObject{
 		nameVersion:       nameVersion,

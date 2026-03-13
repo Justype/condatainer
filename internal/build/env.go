@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/container"
@@ -135,54 +134,6 @@ func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath s
 	return nil
 }
 
-// GetPathEnvFromDependencies generates the PATH environment variable from dependencies.
-// It prepends /cnt/<dep>/bin paths for each dependency overlay.
-func GetPathEnvFromDependencies(dependencies []string) (string, error) {
-	if len(dependencies) == 0 {
-		return "", nil
-	}
-
-	// Resolve dependency paths
-	depPaths, err := container.ResolveOverlayPaths(dependencies)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve dependency paths: %w", err)
-	}
-
-	// Build PATH components
-	paths := []string{}
-	for _, depPath := range depPaths {
-		// Strip :ro or :rw suffix for path checking
-		cleanPath := strings.TrimSuffix(strings.TrimSuffix(depPath, ":ro"), ":rw")
-		name := strings.TrimSuffix(filepath.Base(cleanPath), filepath.Ext(cleanPath))
-		normalized := utils.NormalizeNameVersion(name)
-		if normalized == "" {
-			continue
-		}
-		// Skip ref overlays (more than one slash)
-		if strings.Count(normalized, "/") > 1 {
-			continue
-		}
-
-		var binPath string
-		if utils.IsImg(cleanPath) {
-			binPath = "/ext3/env/bin"
-		} else if utils.IsSqf(cleanPath) {
-			binPath = fmt.Sprintf("/cnt/%s/bin", normalized)
-		} else {
-			utils.PrintWarning("Unknown overlay file extension for %s. Skipping PATH addition.", utils.StylePath(depPath))
-			continue
-		}
-		paths = append(paths, binPath)
-	}
-
-	if len(paths) == 0 {
-		return "", nil
-	}
-
-	// Return as PATH-style string
-	return strings.Join(paths, ":"), nil
-}
-
 // GetOverlayArgsFromDependencies generates overlay mount arguments for Apptainer from dependencies.
 // Each dependency is mounted as read-only.
 func GetOverlayArgsFromDependencies(dependencies []string) ([]string, error) {
@@ -200,76 +151,6 @@ func GetOverlayArgsFromDependencies(dependencies []string) ([]string, error) {
 	args := []string{}
 	for _, depPath := range depPaths {
 		args = append(args, "--overlay", depPath+":ro")
-	}
-
-	return args, nil
-}
-
-// GetOverlayEnvConfigsFromDependencies reads .env files from dependencies and returns environment settings.
-// Returns a list of ["--env", "KEY=VALUE", ...] arguments.
-func GetOverlayEnvConfigsFromDependencies(dependencies []string) ([]string, error) {
-	if len(dependencies) == 0 {
-		return nil, nil
-	}
-
-	// Resolve dependency paths
-	depPaths, err := container.ResolveOverlayPaths(dependencies)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve dependency paths: %w", err)
-	}
-
-	configs := make(map[string]string)
-
-	// Read .env files from each dependency
-	for _, depPath := range depPaths {
-		// Strip :ro or :rw suffix for file path
-		cleanPath := strings.TrimSuffix(strings.TrimSuffix(depPath, ":ro"), ":rw")
-		envPath := cleanPath + ".env"
-		if !utils.FileExists(envPath) {
-			continue
-		}
-
-		file, err := os.Open(envPath)
-		if err != nil {
-			utils.PrintWarning("Unable to read overlay env %s: %v", utils.StylePath(envPath), err)
-			continue
-		}
-
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) != 2 {
-				continue
-			}
-
-			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-			if key == "" {
-				continue
-			}
-
-			if _, exists := configs[key]; exists {
-				utils.PrintMessage("Environment variable %s is defined in multiple overlays. Using value from %s.",
-					utils.StyleName(key), utils.StylePath(filepath.Base(depPath)))
-			}
-			configs[key] = value
-		}
-
-		if err := scanner.Err(); err != nil {
-			utils.PrintWarning("Failed to scan %s: %v", utils.StylePath(envPath), err)
-		}
-		file.Close()
-	}
-
-	// Convert to KEY=VALUE format (not --env prefixed, exec.Options.EnvSettings expects raw KEY=VALUE)
-	args := []string{}
-	for key, value := range configs {
-		args = append(args, fmt.Sprintf("%s=%s", key, value))
 	}
 
 	return args, nil

@@ -56,10 +56,10 @@ func NewBuildGraph(ctx context.Context, buildObjects []BuildObject, imagesDir, t
 				// If the binary exists but isn't available, it is likely that we're
 				// inside a job (or otherwise unable to submit). Report that explicitly.
 				if _, err2 := scheduler.DetectSchedulerWithBinary(config.Global.SchedulerBin); err2 == nil {
-					utils.PrintWarning("Scheduler detected but unavailable (likely inside a job); all builds will run locally")
+					utils.PrintNote("Scheduler detected but unavailable (likely inside a job); all builds will run locally")
 				} else {
 					// Fallback message
-					utils.PrintWarning("Scheduler not available; all builds will run locally")
+					utils.PrintNote("Scheduler not available; all builds will run locally")
 				}
 			} else if errors.Is(err, scheduler.ErrSchedulerNotFound) {
 				utils.PrintWarning("No scheduler detected, all builds will run locally")

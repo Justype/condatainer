@@ -28,11 +28,11 @@ var slurmBlacklistedFlags = []string{
 
 // SlurmScheduler implements the Scheduler interface for SLURM
 type SlurmScheduler struct {
-	sbatchBin        string
-	sinfoCommand     string
-	scontrolCommand  string
-	directiveRe      *regexp.Regexp
-	jobIDRe          *regexp.Regexp
+	sbatchBin         string
+	sinfoCommand      string
+	scontrolCommand   string
+	directiveRe       *regexp.Regexp
+	jobIDRe           *regexp.Regexp
 	cachedClusterInfo *ClusterInfo
 }
 
