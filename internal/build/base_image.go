@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
@@ -178,37 +177,5 @@ func NewBaseImageBuildObject(update bool) (*BaseImageBuildObject, error) {
 
 // tryDownloadPrebuiltSif attempts to download a prebuilt .sif base image from GitHub releases.
 func tryDownloadPrebuiltSif(nameVersion, destPath string) bool {
-	arch := runtime.GOARCH
-
-	archMap := map[string]string{
-		"amd64": "x86_64",
-		"arm64": "aarch64",
-	}
-
-	archName, ok := archMap[arch]
-	if !ok {
-		return false
-	}
-
-	normalized := utils.NormalizeNameVersion(nameVersion)
-	parts := strings.SplitN(normalized, "/", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	sifFilename := parts[1] + "_" + archName + ".sif"
-	url := fmt.Sprintf("%s/%s/%s", config.Global.PrebuiltLink, parts[0], sifFilename)
-
-	if !utils.URLExists(url) {
-		return false
-	}
-
-	utils.PrintMessage("Found pre-built base image %s. Downloading...", utils.StyleName(normalized))
-
-	if err := utils.DownloadExecutable(url, destPath); err != nil {
-		utils.PrintWarning("Download failed. Falling back to local build.")
-		return false
-	}
-
-	utils.PrintSuccess("Pre-built base image %s downloaded.", utils.StyleName(normalized))
-	return true
+	return tryDownloadPrebuilt(nameVersion, destPath, "sif", utils.DownloadExecutable)
 }

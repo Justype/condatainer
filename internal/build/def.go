@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
@@ -140,39 +138,5 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 
 // tryDownloadPrebuiltOverlay attempts to download a prebuilt overlay from GitHub releases
 func tryDownloadPrebuiltOverlay(nameVersion, destPath string) bool {
-	arch := runtime.GOARCH
-
-	// Map Go arch names to the format used in releases
-	archMap := map[string]string{
-		"amd64": "x86_64",
-		"arm64": "aarch64",
-	}
-
-	archName, ok := archMap[arch]
-	if !ok {
-		return false
-	}
-
-	normalized := utils.NormalizeNameVersion(nameVersion)
-	parts := strings.SplitN(normalized, "/", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	overlayFilename := parts[1] + "_" + archName + ".sqf"
-	url := fmt.Sprintf("%s/%s/%s", config.Global.PrebuiltLink, parts[0], overlayFilename)
-
-	// Check if prebuilt exists before attempting download
-	if !utils.URLExists(url) {
-		return false
-	}
-
-	utils.PrintMessage("Found pre-built %s. Downloading...", utils.StyleName(normalized))
-
-	if err := utils.DownloadFile(url, destPath); err != nil {
-		utils.PrintWarning("Download failed. Falling back to local build.")
-		return false
-	}
-
-	utils.PrintSuccess("Pre-built %s downloaded.", utils.StyleName(normalized))
-	return true
+	return tryDownloadPrebuilt(nameVersion, destPath, "sqf", utils.DownloadFile)
 }

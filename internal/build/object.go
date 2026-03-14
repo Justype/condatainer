@@ -2,15 +2,11 @@ package build
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/Justype/condatainer/internal/config"
@@ -56,53 +52,8 @@ func (bt BuildType) String() string {
 	return "unknown"
 }
 
-// isCancelledByUser checks if the error is due to user cancellation (Ctrl+C)
-// Exit code 130 = 128 + SIGINT(2), checks for "signal: killed/interrupt" or context errors
-func isCancelledByUser(err error) bool {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	errMsg := err.Error()
-	if strings.Contains(errMsg, "signal: killed") || strings.Contains(errMsg, "signal: interrupt") {
-		return true
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		// 130 (SIGINT) or -1 (signal killed)
-		return exitErr.ExitCode() == 130 || exitErr.ExitCode() == -1
-	}
-	return false
-}
-
 // ScriptSpecs mirrors the scheduler module's job spec metadata.
 type ScriptSpecs = scheduler.ScriptSpecs
-
-// buildDefaults holds resource defaults for build operations.
-// Set from config at CLI startup via SetBuildDefaults.
-var buildDefaults = scheduler.ResourceSpec{
-	Nodes:        1,
-	TasksPerNode: 1,
-	CpusPerTask:  4, // conservative default for local builds
-	MemPerNodeMB: 8192,
-	Time:         2 * time.Hour,
-}
-
-// SetBuildDefaults sets the resource defaults used for build job submissions.
-func SetBuildDefaults(d scheduler.ResourceSpec) { buildDefaults = d }
-
-// GetBuildDefaults returns the current build resource defaults.
-func GetBuildDefaults() scheduler.ResourceSpec { return buildDefaults }
-
-// buildEffectiveResourceSpec resolves resources for build using the priority chain:
-//
-//	buildDefaults → scriptSpecs.Spec (when HasDirectives=true) → scheduler job resources
-func buildEffectiveResourceSpec(specs *scheduler.ScriptSpecs) *scheduler.ResourceSpec {
-	var jobRes *scheduler.ResourceSpec
-	if sched := scheduler.ActiveScheduler(); sched != nil {
-		jobRes = sched.GetJobResources()
-	}
-	return scheduler.ResolveResourceSpecFrom(buildDefaults, jobRes, specs)
-}
 
 // BuildObject represents a build target with its metadata and dependencies
 type BuildObject interface {
@@ -180,17 +131,6 @@ type BuildLockInfo struct {
 	CreatedAt string `json:"created_at"` // RFC3339 timestamp
 }
 
-// shortHostname returns the unqualified hostname (strips domain suffix).
-// os.Hostname() may return "cn001" or "cn001.cluster.edu" depending on system
-// configuration; always store/compare the short form to avoid false mismatches.
-func shortHostname() string {
-	h, _ := os.Hostname()
-	if idx := strings.Index(h, "."); idx > 0 {
-		return h[:idx]
-	}
-	return h
-}
-
 // buildLockPath returns the lock file path for this build (stable, in imagesDir).
 func (b *BaseBuildObject) buildLockPath() string {
 	return b.targetOverlayPath + ".lock"
@@ -205,108 +145,15 @@ func (b *BaseBuildObject) writeBuildLock(info BuildLockInfo) error {
 	return acquireBuildLockFile(b.buildLockPath(), info)
 }
 
-// acquireBuildLockFile is a package-level helper that creates a lock file
-// atomically (O_CREATE|O_EXCL) and writes JSON metadata.
-// Used by both BaseBuildObject and graph.go's submitJob.
-func acquireBuildLockFile(path string, info BuildLockInfo) error {
-	data, err := json.Marshal(info)
-	if err != nil {
-		return fmt.Errorf("failed to marshal build lock: %w", err)
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o664)
-	if err != nil {
-		return err // caller checks os.IsExist
-	}
-	defer f.Close()
-	_, err = f.Write(data)
-	return err
-}
-
-// overwriteBuildLockFile overwrites an existing lock file with new JSON metadata.
-// The caller must already hold the lock (i.e. have created it via acquireBuildLockFile).
-func overwriteBuildLockFile(path string, info BuildLockInfo) error {
-	data, err := json.Marshal(info)
-	if err != nil {
-		return fmt.Errorf("failed to marshal build lock: %w", err)
-	}
-	return os.WriteFile(path, data, 0o664)
-}
-
 // readBuildLock reads and parses the lock file JSON.
 // An empty or corrupt file (old empty-lock format) returns a zero-value struct.
 func (b *BaseBuildObject) readBuildLock() (BuildLockInfo, error) {
 	return readBuildLockFile(b.buildLockPath())
 }
 
-// readBuildLockFile reads and parses a lock file at the given path.
-func readBuildLockFile(path string) (BuildLockInfo, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return BuildLockInfo{}, err
-	}
-	if len(data) == 0 {
-		// Old empty-lock format — treat as stale.
-		return BuildLockInfo{}, nil
-	}
-	var info BuildLockInfo
-	if err := json.Unmarshal(data, &info); err != nil {
-		return BuildLockInfo{}, fmt.Errorf("corrupt lock file: %w", err)
-	}
-	return info, nil
-}
-
 // updateBuildLock overwrites the lock file contents.
 func (b *BaseBuildObject) updateBuildLock(info BuildLockInfo) error {
 	return overwriteBuildLockFile(b.buildLockPath(), info)
-}
-
-// isBuildLockStale returns whether the lock is stale, the job's current status, and any
-// uncertainty error. Returns (true, Unknown, nil) when definitely stale, (false, status, nil)
-// when definitely alive, or (false, Unknown, err) when the state cannot be verified.
-func isBuildLockStale(info BuildLockInfo) (stale bool, status scheduler.JobStatus, err error) {
-	// Empty type means old empty-lock format → treat as stale for backward compat.
-	if info.Type == "" {
-		return true, scheduler.JobStatusUnknown, nil
-	}
-
-	if info.Type != "local" {
-		if info.JobID == "" {
-			// Lock was written before submit returned — treat as stale.
-			return true, scheduler.JobStatusUnknown, nil
-		}
-		sched := scheduler.ActiveScheduler()
-		if sched == nil {
-			// Can't check without a scheduler — be conservative.
-			return false, scheduler.JobStatusUnknown, fmt.Errorf("scheduler unavailable, cannot verify job %s", info.JobID)
-		}
-		st, err := sched.GetJobStatus(info.JobID)
-		if err != nil {
-			return false, scheduler.JobStatusUnknown, fmt.Errorf("cannot check job %s: %w", info.JobID, err)
-		}
-		if st == scheduler.JobStatusUnknown {
-			// Can't determine state — be conservative (treat as alive).
-			return false, st, fmt.Errorf("cannot determine status of job %s", info.JobID)
-		}
-		return !st.IsAlive(), st, nil
-	}
-
-	// Local lock: compare node + PID.
-	if info.Node != shortHostname() {
-		return false, scheduler.JobStatusUnknown, fmt.Errorf("lock held by node %q (current: %q); cannot verify remotely", info.Node, shortHostname())
-	}
-	// Same node: check if the PID is still alive via signal 0.
-	// EPERM means process exists (different owner); ESRCH means no such process.
-	proc, err := os.FindProcess(info.PID)
-	if err != nil {
-		return true, scheduler.JobStatusUnknown, nil // process not found → stale
-	}
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		if err == syscall.EPERM {
-			return false, scheduler.JobStatusRunning, nil // alive, different owner
-		}
-		return true, scheduler.JobStatusUnknown, nil // ESRCH → process gone → stale
-	}
-	return false, scheduler.JobStatusRunning, nil // process alive
 }
 
 // createBuildLock creates the lock file for a local build.
@@ -354,51 +201,18 @@ func (b *BaseBuildObject) effectiveNcpus() int {
 }
 
 func (b *BaseBuildObject) IsInstalled() bool {
-	// Check if target overlay exists
 	_, err := os.Stat(b.targetOverlayPath)
 	return err == nil
 }
 
 func (b *BaseBuildObject) GetMissingDependencies() ([]string, error) {
-	missing := []string{}
-
-	// Build a set of installed overlays from all search paths
-	installed := make(map[string]bool)
-
-	for _, imagesDir := range config.GetImageSearchPaths() {
-		if !utils.DirExists(imagesDir) {
-			continue
-		}
-
-		entries, err := os.ReadDir(imagesDir)
-		if err != nil {
-			utils.PrintWarning("Failed to read directory %s: %v", imagesDir, err)
-			continue
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			if !utils.IsOverlay(entry.Name()) {
-				continue
-			}
-
-			// Convert filename to name/version format
-			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			// Convert samtools--1.21.sqf to samtools/1.21
-			normalized := strings.ReplaceAll(nameVersion, "--", "/")
-			installed[normalized] = true
-		}
-	}
-
-	// Check which dependencies are missing
+	installed := getInstalledOverlays()
+	var missing []string
 	for _, dep := range b.dependencies {
 		if !installed[dep] {
 			missing = append(missing, dep)
 		}
 	}
-
 	return missing, nil
 }
 
@@ -424,13 +238,12 @@ func (b *BaseBuildObject) CreateTmpOverlay(ctx context.Context, force bool) erro
 		}
 	}
 
-	// Create actual ext3 overlay using overlay package
 	utils.PrintDebug("Creating temporary overlay at %s", utils.StylePath(b.tmpOverlayPath))
 
-	// Use overlay package to create ext3 overlay
-	// For build overlays, we use a temporary size from config (default 20GB)
-	// Use "default" profile, sparse=true for faster creation
-	// quiet=true suppresses detailed specs output since users don't need to see those for temp overlays
+	// Use overlay package to create ext3 overlay.
+	// For build overlays, we use a temporary size from config (default 20GB).
+	// Use "default" profile, sparse=true for faster creation.
+	// quiet=true suppresses detailed specs output since users don't need to see those for temp overlays.
 	if err := overlay.CreateForCurrentUser(ctx, b.tmpOverlayPath, config.Global.Build.TmpSizeMB, "default", true, config.Global.Build.OverlayType, true); err != nil {
 		return fmt.Errorf("failed to create temporary overlay: %w", err)
 	}
@@ -666,6 +479,9 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 	// Check if already installed or a build is currently in progress (lock file exists).
 	// Skip this optimisation in update mode so the correct concrete type is resolved.
 	if !update {
+		if base.IsInstalled() {
+			return newScriptBuildObject(base, isRef)
+		}
 		if utils.FileExists(base.buildLockPath()) {
 			info, readErr := base.readBuildLock()
 			if readErr != nil {
@@ -698,9 +514,6 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 					utils.StyleName(normalized), statusHint, utils.StylePath(base.buildLockPath()),
 				)
 			}
-		}
-		if base.IsInstalled() {
-			return newScriptBuildObject(base, isRef)
 		}
 	}
 

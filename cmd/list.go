@@ -42,11 +42,7 @@ func init() {
 func runList(cmd *cobra.Command, args []string) error {
 	filters := normalizeFilters(args)
 
-	appOverlays, err := collectAppOverlays(filters, listExact)
-	if err != nil {
-		return err
-	}
-	dataOverlays, err := collectDataOverlays(filters, listExact)
+	appOverlays, dataOverlays, err := scanOverlays(filters, listExact)
 	if err != nil {
 		return err
 	}
@@ -233,42 +229,47 @@ func runList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func collectAppOverlays(filters []string, exactMatch bool) (map[string][]string, error) {
-	grouped := map[string]map[string]struct{}{}
-	seen := make(map[string]bool) // Track seen files to avoid duplicates
+// scanOverlays does a single ReadDir pass per image directory and returns both
+// app overlays (map[name][]version) and data overlays ([]displayName).
+// OS overlays (Apptainer-built SIF/SquashFS) are treated as app overlays
+// regardless of their delimiter count.
+func scanOverlays(filters []string, exactMatch bool) (map[string][]string, []string, error) {
+	appGrouped := map[string]map[string]struct{}{}
+	var dataList []string
+	seen := make(map[string]bool)
+	distroPrefix := strings.ToLower(config.Global.DefaultDistro) + "/"
 
-	// Scan all image directories (user → scratch → system)
 	for _, imageDir := range config.GetImageSearchPaths() {
 		if !utils.DirExists(imageDir) {
 			continue
 		}
-
 		entries, err := os.ReadDir(imageDir)
 		if err != nil {
 			utils.PrintDebug("Unable to list overlays in %s: %v", imageDir, err)
 			continue
 		}
-
 		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			if !utils.IsOverlay(entry.Name()) {
-				continue
-			}
-
-			// Skip if already seen in higher-priority directory
-			if seen[entry.Name()] {
+			if entry.IsDir() || !utils.IsOverlay(entry.Name()) || seen[entry.Name()] {
 				continue
 			}
 			seen[entry.Name()] = true
 
 			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 			normalized := strings.ToLower(utils.NormalizeNameVersion(nameVersion))
+			overlayPath := filepath.Join(imageDir, entry.Name())
+			delimCount := strings.Count(entry.Name(), "--")
+			osOverlay := isOSOverlay(overlayPath)
+
+			if !osOverlay && delimCount > 1 {
+				// Data overlay: filter without alias
+				if matchesFilters(normalized, filters, exactMatch) {
+					dataList = append(dataList, strings.ReplaceAll(nameVersion, "--", "/"))
+				}
+				continue
+			}
+
+			// App overlay (OS or regular): filter with distro-prefix alias fallback
 			if !matchesFilters(normalized, filters, exactMatch) {
-				// Also try the shorthand alias: strip default_distro prefix and recheck.
-				// e.g. "ubuntu24/r4.4.3" → alias "r4.4.3", so `-e r4.4.3` finds it.
-				distroPrefix := strings.ToLower(config.Global.DefaultDistro) + "/"
 				alias := strings.TrimPrefix(normalized, distroPrefix)
 				if alias == normalized || !matchesFilters(alias, filters, exactMatch) {
 					continue
@@ -276,96 +277,38 @@ func collectAppOverlays(filters []string, exactMatch bool) (map[string][]string,
 			}
 
 			var name, version string
-			overlayPath := filepath.Join(imageDir, entry.Name())
-			if isOSOverlay(overlayPath) {
-				// OS overlays are classified regardless of delimiter count
+			if osOverlay {
 				name = strings.ReplaceAll(nameVersion, "--", "/")
 				version = "(system app)"
+			} else if strings.Contains(nameVersion, "--") {
+				parts := strings.SplitN(nameVersion, "--", 2)
+				name = parts[0]
+				version = parts[1]
 			} else {
-				delimCount := strings.Count(entry.Name(), "--")
-				if delimCount > 1 {
-					// Not an app overlay
-					continue
-				}
-				if strings.Contains(nameVersion, "--") {
-					parts := strings.SplitN(nameVersion, "--", 2)
-					name = parts[0]
-					version = parts[1]
-				} else {
-					name = nameVersion
-					version = "(env)"
-				}
+				name = nameVersion
+				version = "(env)"
 			}
 			if name == "" {
 				continue
 			}
-
-			if grouped[name] == nil {
-				grouped[name] = map[string]struct{}{}
+			if appGrouped[name] == nil {
+				appGrouped[name] = map[string]struct{}{}
 			}
-			grouped[name][version] = struct{}{}
+			appGrouped[name][version] = struct{}{}
 		}
 	}
 
-	result := map[string][]string{}
-	for name, versions := range grouped {
+	apps := map[string][]string{}
+	for name, versions := range appGrouped {
 		valueList := make([]string, 0, len(versions))
 		for version := range versions {
 			valueList = append(valueList, version)
 		}
 		sort.Strings(valueList)
-		result[name] = valueList
+		apps[name] = valueList
 	}
-	return result, nil
-}
-
-func collectDataOverlays(filters []string, exactMatch bool) ([]string, error) {
-	seen := make(map[string]bool) // Track seen files to avoid duplicates
-	names := []string{}
-
-	// Scan all image directories (user → scratch → system)
-	for _, imageDir := range config.GetImageSearchPaths() {
-		if !utils.DirExists(imageDir) {
-			continue
-		}
-
-		entries, err := os.ReadDir(imageDir)
-		if err != nil {
-			utils.PrintDebug("Unable to list overlays in %s: %v", imageDir, err)
-			continue
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			if !utils.IsOverlay(entry.Name()) {
-				continue
-			}
-
-			// Skip if already seen in higher-priority directory
-			if seen[entry.Name()] {
-				continue
-			}
-			seen[entry.Name()] = true
-
-			delimCount := strings.Count(entry.Name(), "--")
-			if delimCount <= 1 {
-				// Not a data overlay
-				continue
-			}
-			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			normalized := strings.ToLower(utils.NormalizeNameVersion(nameVersion))
-			if !matchesFilters(normalized, filters, exactMatch) {
-				continue
-			}
-			displayName := strings.ReplaceAll(nameVersion, "--", "/")
-			names = append(names, displayName)
-		}
-	}
-
-	sort.Strings(names)
-	return names, nil
+	sort.Strings(dataList)
+	return apps, dataList, nil
 }
 
 func normalizeFilters(filters []string) []string {
