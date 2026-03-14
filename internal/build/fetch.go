@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -28,6 +29,19 @@ type RemoteMetadataCache struct {
 	Metadata     map[string]RemoteScriptEntry `json:"metadata"`
 }
 
+type localScriptsDirFingerprint struct {
+	Exists        bool           `json:"exists"`
+	ModTimeUnix   int64          `json:"mod_time_unix"`
+	ImmediateDirs map[string]int `json:"immediate_dirs,omitempty"`
+}
+
+type LocalScriptsCache struct {
+	FetchedAt    time.Time                             `json:"fetched_at"`
+	SearchPaths  []string                              `json:"search_paths"`
+	Fingerprints map[string]localScriptsDirFingerprint `json:"fingerprints"`
+	Scripts      map[string]ScriptInfo                 `json:"scripts"`
+}
+
 // remoteMetadataCachePathForURL returns the absolute path for the metadata cache file for a given base URL.
 // Uses a 12-char SHA-256 prefix so each URL gets a stable, unique filename.
 func remoteMetadataCachePathForURL(baseURL string) (string, error) {
@@ -40,21 +54,63 @@ func remoteMetadataCachePathForURL(baseURL string) (string, error) {
 	return filepath.Join(cacheDir, name), nil
 }
 
+func localScriptsCachePath() (string, error) {
+	cacheDir, err := config.GetWritableCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cacheDir, "local-scripts-cache.json.gz"), nil
+}
+
+func collectLocalScriptsFingerprints(paths []string) map[string]localScriptsDirFingerprint {
+	out := make(map[string]localScriptsDirFingerprint, len(paths))
+	for _, dir := range paths {
+		fp := localScriptsDirFingerprint{Exists: false}
+		info, err := os.Stat(dir)
+		if err != nil || !info.IsDir() {
+			out[dir] = fp
+			continue
+		}
+
+		fp.Exists = true
+		fp.ModTimeUnix = info.ModTime().UnixNano()
+		fp.ImmediateDirs = map[string]int{}
+
+		entries, err := os.ReadDir(dir)
+		if err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				subPath := filepath.Join(dir, entry.Name())
+				subInfo, statErr := os.Stat(subPath)
+				if statErr != nil {
+					continue
+				}
+				fp.ImmediateDirs[entry.Name()] = int(subInfo.ModTime().Unix())
+			}
+		}
+
+		out[dir] = fp
+	}
+	return out
+}
+
+func loadLocalScriptsCache(path string) (*LocalScriptsCache, error) {
+	var cache LocalScriptsCache
+	if err := utils.ReadGzipJSONFile(path, &cache); err != nil {
+		return nil, err
+	}
+	return &cache, nil
+}
+
+func saveLocalScriptsCache(path string, cache *LocalScriptsCache) error {
+	return utils.WriteGzipJSONFileAtomic(path, cache)
+}
+
 func loadRemoteMetadataCacheAny(path, sourceURL string, ttl time.Duration, checkTTL bool) (*RemoteMetadataCache, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	gzReader, err := gzip.NewReader(f)
-	if err != nil {
-		return nil, err
-	}
-	defer gzReader.Close()
-
 	var cache RemoteMetadataCache
-	if err := json.NewDecoder(gzReader).Decode(&cache); err != nil {
+	if err := utils.ReadGzipJSONFile(path, &cache); err != nil {
 		return nil, fmt.Errorf("corrupt cache: %w", err)
 	}
 	if cache.SourceURL != sourceURL {
@@ -80,31 +136,7 @@ func loadRemoteMetadataCacheIgnoreExpiry(path, sourceURL string) (*RemoteMetadat
 
 // saveRemoteMetadataCache writes the cache envelope to disk atomically.
 func saveRemoteMetadataCache(path string, cache *RemoteMetadataCache) error {
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, utils.PermFile)
-	if err != nil {
-		return err
-	}
-
-	gzWriter, err := gzip.NewWriterLevel(f, gzip.BestSpeed)
-	if err != nil {
-		f.Close()
-		return err
-	}
-	if err := json.NewEncoder(gzWriter).Encode(cache); err != nil {
-		gzWriter.Close()
-		f.Close()
-		return err
-	}
-	if err := gzWriter.Close(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-
-	return os.Rename(tmp, path)
+	return utils.WriteGzipJSONFileAtomic(path, cache)
 }
 
 // fetchRemoteMetadata performs the HTTP+gzip+JSON fetch from the given metadata URL.
@@ -203,25 +235,12 @@ func PruneOrphanedCaches() {
 			continue
 		}
 		path := filepath.Join(cacheDir, name)
-		f, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		gzReader, err := gzip.NewReader(f)
-		if err != nil {
-			f.Close()
-			continue
-		}
 		var envelope struct {
 			SourceURL string `json:"source_url"`
 		}
-		if err := json.NewDecoder(gzReader).Decode(&envelope); err != nil {
-			gzReader.Close()
-			f.Close()
+		if err := utils.ReadGzipJSONFile(path, &envelope); err != nil {
 			continue
 		}
-		gzReader.Close()
-		f.Close()
 		if !active[envelope.SourceURL] {
 			utils.PrintDebug("Removing orphaned cache file: %s (URL: %s)", name, envelope.SourceURL)
 			if err := os.Remove(path); err != nil {
@@ -265,14 +284,35 @@ type RemoteScriptEntry struct {
 // Searches user → scratch → legacy → system directories.
 // First match wins (user scripts shadow system ones).
 func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
-	if cachedLocalScripts != nil {
+	if ForceRefresh {
+		cachedLocalScripts = nil
+	}
+
+	if !ForceRefresh && cachedLocalScripts != nil {
 		return cachedLocalScripts, nil
+	}
+
+	searchPaths := config.GetBuildScriptSearchPaths()
+	fingerprints := collectLocalScriptsFingerprints(searchPaths)
+	if !ForceRefresh {
+		if cachePath, err := localScriptsCachePath(); err == nil {
+			if cache, cacheErr := loadLocalScriptsCache(cachePath); cacheErr == nil {
+				if reflect.DeepEqual(cache.SearchPaths, searchPaths) && reflect.DeepEqual(cache.Fingerprints, fingerprints) {
+					utils.PrintDebug("Using cached local build scripts (fetched %s ago)", time.Since(cache.FetchedAt).Round(time.Minute))
+					cachedLocalScripts = cache.Scripts
+					if cachedLocalScripts == nil {
+						cachedLocalScripts = map[string]ScriptInfo{}
+					}
+					return cachedLocalScripts, nil
+				}
+			}
+		}
 	}
 
 	scripts := make(map[string]ScriptInfo)
 
 	// Scan all build script directories in priority order
-	for _, buildScriptsDir := range config.GetBuildScriptSearchPaths() {
+	for _, buildScriptsDir := range searchPaths {
 		if !utils.DirExists(buildScriptsDir) {
 			continue
 		}
@@ -328,6 +368,17 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 	}
 
 	cachedLocalScripts = scripts
+	if cachePath, err := localScriptsCachePath(); err == nil {
+		envelope := &LocalScriptsCache{
+			FetchedAt:    time.Now(),
+			SearchPaths:  searchPaths,
+			Fingerprints: fingerprints,
+			Scripts:      scripts,
+		}
+		if writeErr := saveLocalScriptsCache(cachePath, envelope); writeErr != nil {
+			utils.PrintDebug("Failed to write local scripts cache: %v", writeErr)
+		}
+	}
 	return scripts, nil
 }
 
@@ -352,6 +403,7 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 	}
 
 	// Network fetch
+	utils.PrintDebug("Fetching remote build metadata from %s...", baseURL)
 	metadata, err := fetchRemoteMetadata(metaURL)
 	if err != nil {
 		// Stale fallback
@@ -366,6 +418,7 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 		}
 		return nil, err
 	}
+	utils.PrintDebug("Fetched remote build metadata from %s (%d entries)", baseURL, len(metadata))
 
 	// Fetch per-source prebuilt base URL (non-fatal; empty = no prebuilt for this source)
 	prebuiltLink := fetchPrebuiltLink(baseURL)
@@ -516,7 +569,7 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 	}
 
 	// Write to file
-	file, err := os.Create(localPath)
+	file, err := utils.CreateFileWritable(localPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to create file: %w", err)
 	}
@@ -527,7 +580,7 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 	}
 
 	// Set permissions for downloaded script (664 for group-writable)
-	if err := os.Chmod(localPath, 0o664); err != nil {
+	if err := os.Chmod(localPath, utils.PermFile); err != nil {
 		utils.PrintDebug("Failed to set permissions on %s: %v", localPath, err)
 	}
 

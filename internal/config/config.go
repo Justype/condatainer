@@ -270,20 +270,7 @@ func GetBaseImage() string {
 
 // isWritableDir checks if a directory is writable by trying to create a test file
 func isWritableDir(dir string) bool {
-	// Try to create directory if it doesn't exist
-	if err := os.MkdirAll(dir, utils.PermDir); err != nil {
-		return false
-	}
-
-	// Test write permission
-	testFile := filepath.Join(dir, ".write-test")
-	f, err := os.Create(testFile)
-	if err != nil {
-		return false
-	}
-	f.Close()
-	os.Remove(testFile)
-	return true
+	return utils.IsWritableDir(dir)
 }
 
 // GetWritableTmpDir returns the first writable tmp directory

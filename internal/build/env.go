@@ -103,7 +103,7 @@ func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath s
 	}
 
 	envFilePath := overlayPath + ".env"
-	file, err := os.Create(envFilePath)
+	file, err := utils.CreateFileWritable(envFilePath)
 	if err != nil {
 		return fmt.Errorf("failed to create env file: %w", err)
 	}
@@ -126,7 +126,7 @@ func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath s
 		}
 	}
 
-	if err := os.Chmod(envFilePath, 0o664); err != nil {
+	if err := os.Chmod(envFilePath, utils.PermFile); err != nil {
 		utils.PrintDebug("Failed to set permissions on %s: %v", envFilePath, err)
 	}
 

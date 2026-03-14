@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -222,18 +221,6 @@ Shows:
 		// Show base directory search paths
 		fmt.Println(utils.StyleTitle("Base Directory Search Paths:"))
 
-		// Helper function to check if directory is writable
-		isWritable := func(dir string) bool {
-			testFile := filepath.Join(dir, ".write-test")
-			f, err := os.Create(testFile)
-			if err != nil {
-				return false
-			}
-			f.Close()
-			os.Remove(testFile)
-			return true
-		}
-
 		pathIndex := 1
 
 		// Extra base directories
@@ -241,7 +228,7 @@ Shows:
 		for _, dir := range extraBaseDirs {
 			status := ""
 			if _, err := os.Stat(dir); err == nil {
-				if isWritable(dir) {
+				if utils.IsWritableDir(dir) {
 					status = " " + utils.StyleSuccess("(writable)")
 				} else {
 					status = " " + utils.StyleWarning("(read-only)")
@@ -255,7 +242,7 @@ Shows:
 		if portableDir := config.GetPortableDataDir(); portableDir != "" {
 			status := ""
 			if _, err := os.Stat(portableDir); err == nil {
-				if isWritable(portableDir) {
+				if utils.IsWritableDir(portableDir) {
 					status = " " + utils.StyleSuccess("(writable)")
 				} else {
 					status = " " + utils.StyleWarning("(read-only)")
@@ -269,7 +256,7 @@ Shows:
 		if scratchDir := config.GetScratchDataDir(); scratchDir != "" {
 			status := ""
 			if _, err := os.Stat(scratchDir); err == nil {
-				if isWritable(scratchDir) {
+				if utils.IsWritableDir(scratchDir) {
 					status = " " + utils.StyleSuccess("(writable)")
 				} else {
 					status = " " + utils.StyleWarning("(read-only)")
@@ -283,7 +270,7 @@ Shows:
 		if userDir := config.GetUserDataDir(); userDir != "" {
 			status := ""
 			if _, err := os.Stat(userDir); err == nil {
-				if isWritable(userDir) {
+				if utils.IsWritableDir(userDir) {
 					status = " " + utils.StyleSuccess("(writable)")
 				} else {
 					status = " " + utils.StyleWarning("(read-only)")

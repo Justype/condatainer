@@ -25,7 +25,7 @@ func DownloadFile(url, destPath string) error {
 	}
 
 	tmpPath := destPath + ".tmp"
-	file, err := os.Create(tmpPath)
+	file, err := CreateFileWritable(tmpPath)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}

@@ -196,28 +196,24 @@ func checkDeps(deps []string, installedOverlays map[string]string) []string {
 
 	var missing []string
 
-	printDep := func(format string, a ...any) {
-		fmt.Fprintf(os.Stdout, format+"\n", a...)
-	}
-
 	if len(packages) > 0 {
-		printDep("%s", utils.StyleTitle("Module Overlays:"))
+		fmt.Fprintf(os.Stdout, "%s\n", utils.StyleTitle("Module Overlays:"))
 		for _, dep := range packages {
 			normalized := utils.NormalizeNameVersion(dep)
 			if _, ok := installedOverlays[normalized]; ok {
-				printDep("  %s %s", check, dep)
+				fmt.Fprintf(os.Stdout, "  %s %s\n", check, dep)
 			} else {
-				printDep("  %s %s", cross, dep)
+				fmt.Fprintf(os.Stdout, "  %s %s\n", cross, dep)
 				missing = append(missing, dep)
 			}
 		}
 	}
 
 	if len(overlays) > 0 {
-		printDep("%s", utils.StyleTitle("External Overlays:"))
+		fmt.Fprintf(os.Stdout, "%s\n", utils.StyleTitle("External Overlays:"))
 		for _, dep := range overlays {
 			if utils.FileExists(dep) {
-				printDep("  %s %s", check, depDisplay(dep))
+				fmt.Fprintf(os.Stdout, "  %s %s\n", check, depDisplay(dep))
 			} else {
 				sibling := findSiblingSourceFile(dep)
 				hint := ""
@@ -233,7 +229,7 @@ func checkDeps(deps []string, installedOverlays map[string]string) []string {
 						hint = "  (" + utils.StyleNote(ext) + " found)"
 					}
 				}
-				printDep("  %s %s%s", cross, depDisplay(dep), hint)
+				fmt.Fprintf(os.Stdout, "  %s %s%s\n", cross, depDisplay(dep), hint)
 				missing = append(missing, dep)
 			}
 		}

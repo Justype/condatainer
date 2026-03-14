@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/utils"
 )
 
 // DeduplicateBindPaths resolves, deduplicates, and filters child paths from bind directories.
@@ -111,18 +112,6 @@ func BindPaths(paths ...string) []string {
 		bindPaths = append(bindPaths, scratch)
 	}
 
-	// Helper to check if directory is writable
-	isWritable := func(dir string) bool {
-		testFile := filepath.Join(dir, ".write-test")
-		f, err := os.Create(testFile)
-		if err != nil {
-			return false
-		}
-		f.Close()
-		os.Remove(testFile)
-		return true
-	}
-
 	// Collect all base directories
 	baseDirs := []string{}
 
@@ -148,7 +137,7 @@ func BindPaths(paths ...string) []string {
 		if _, err := os.Stat(dir); err != nil {
 			continue
 		}
-		if !isWritable(dir) {
+		if !utils.IsWritableDir(dir) {
 			bindPaths = append(bindPaths, dir+":"+dir+":ro")
 		} else {
 			bindPaths = append(bindPaths, dir)

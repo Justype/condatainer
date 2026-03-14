@@ -355,20 +355,8 @@ func helperMetadataCachePathForURL(baseURL string) (string, error) {
 }
 
 func loadHelperMetadataCacheAny(path, baseURL string, ttl time.Duration, checkTTL bool) (*RemoteHelperMetadataCache, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	gzReader, err := gzip.NewReader(f)
-	if err != nil {
-		return nil, err
-	}
-	defer gzReader.Close()
-
 	var cache RemoteHelperMetadataCache
-	if err := json.NewDecoder(gzReader).Decode(&cache); err != nil {
+	if err := utils.ReadGzipJSONFile(path, &cache); err != nil {
 		return nil, err
 	}
 	if cache.SourceURL != baseURL {
@@ -427,23 +415,8 @@ func fetchHelperMetadataFromURL(baseURL string) (map[string]map[string]HelperScr
 			SourceURL: baseURL,
 			Metadata:  rawMeta,
 		}
-		tmp := cachePath + ".tmp"
-		if f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, utils.PermFile); err == nil {
-			if gzWriter, err := gzip.NewWriterLevel(f, gzip.BestSpeed); err == nil {
-				if err := json.NewEncoder(gzWriter).Encode(envelope); err == nil {
-					if gzWriter.Close() == nil {
-						_ = f.Close()
-						_ = os.Rename(tmp, cachePath)
-					} else {
-						_ = f.Close()
-					}
-				} else {
-					_ = gzWriter.Close()
-					_ = f.Close()
-				}
-			} else {
-				_ = f.Close()
-			}
+		if err := utils.WriteGzipJSONFileAtomic(cachePath, envelope); err != nil {
+			utils.PrintDebug("Failed to write helper metadata cache for %s: %v", baseURL, err)
 		}
 	}
 
@@ -549,7 +522,7 @@ func downloadExecutable(url, destPath string) error {
 	}
 
 	// Write file
-	out, err := os.Create(destPath)
+	out, err := utils.CreateFileWritable(destPath)
 	if err != nil {
 		return err
 	}

@@ -71,3 +71,4 @@ Scheduler script flow: config_init → config_load → read_job_state → getopt
 - Console output: `utils.PrintMessage`, `PrintWarning`, `PrintError`, `PrintDebug`
 - Always use absolute paths; `config.Get*Dir()` for standard locations
 - File permissions: `utils.PermFile` (0664), `utils.PermDir` (0775), `utils.PermExec` (0775)
+- Prefer `utils.CreateFileWritable(path)` for runtime file creation so new files consistently use `utils.PermFile`.

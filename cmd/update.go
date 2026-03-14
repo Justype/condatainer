@@ -59,6 +59,13 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	buildRefreshed := false
 	if updateBuild {
+		utils.PrintMessage("Refreshing local build script metadata cache ...")
+		build.ForceRefresh = true
+		if _, err := build.GetLocalBuildScripts(); err != nil {
+			return fmt.Errorf("failed to update local build script metadata: %w", err)
+		}
+		utils.PrintSuccess("Local build script metadata updated.")
+
 		for _, url := range config.Global.ScriptsLinks {
 			utils.PrintMessage("Fetching build script metadata from %s ...", url)
 		}
@@ -401,7 +408,7 @@ func downloadFile(url, destPath string) error {
 	}
 
 	// Create destination file
-	out, err := os.Create(destPath)
+	out, err := utils.CreateFileWritable(destPath)
 	if err != nil {
 		return err
 	}
@@ -409,5 +416,8 @@ func downloadFile(url, destPath string) error {
 
 	// Copy data
 	_, err = io.Copy(out, resp.Body)
-	return err
+	if err != nil {
+		return err
+	}
+	return os.Chmod(destPath, utils.PermFile)
 }

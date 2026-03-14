@@ -111,6 +111,20 @@ func GetUserDataDir() string {
 	return ""
 }
 
+// GetUserCacheDir returns the user's cache directory following XDG spec.
+// Returns $XDG_CACHE_HOME/condatainer or ~/.cache/condatainer
+func GetUserCacheDir() string {
+	if cacheHome := os.Getenv("XDG_CACHE_HOME"); cacheHome != "" {
+		return filepath.Join(cacheHome, "condatainer")
+	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".cache", "condatainer")
+	}
+
+	return ""
+}
+
 // GetUserStateDir returns the user's state directory following XDG spec.
 // Returns $XDG_STATE_HOME/condatainer or ~/.local/state/condatainer
 func GetUserStateDir() string {
@@ -358,6 +372,43 @@ func buildScriptSearchPaths(subdir string) []string {
 	return paths
 }
 
+// buildCacheSearchPaths builds search paths for cache directories.
+// Priority: extra_base_dirs → portable → scratch
+// Note: Per-user cache is intentionally excluded for shared CondaTainer caches.
+func buildCacheSearchPaths() []string {
+	var paths []string
+	seen := make(map[string]bool)
+
+	addPath := func(dir string) {
+		if dir == "" {
+			return
+		}
+		dir = os.ExpandEnv(dir)
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			absDir = dir
+		}
+		if !seen[absDir] {
+			seen[absDir] = true
+			paths = append(paths, absDir)
+		}
+	}
+
+	for _, baseDir := range GetExtraBaseDirs() {
+		addPath(filepath.Join(baseDir, "cache"))
+	}
+
+	if portableDir := GetPortableDataDir(); portableDir != "" {
+		addPath(filepath.Join(portableDir, "cache"))
+	}
+
+	if scratchDir := GetScratchDataDir(); scratchDir != "" {
+		addPath(filepath.Join(scratchDir, "cache"))
+	}
+
+	return paths
+}
+
 // GetImageSearchPaths returns all paths to search for images.
 func GetImageSearchPaths() []string {
 	if len(GlobalDataPaths.ImagesDirs) == 0 {
@@ -428,20 +479,9 @@ func FindHelperScript(name string) (string, error) {
 // Creates the directory if it doesn't exist.
 func GetWritableImagesDir() (string, error) {
 	for _, dir := range GetImageSearchPaths() {
-		// Try to create directory if it doesn't exist
-		if err := os.MkdirAll(dir, utils.PermDir); err != nil {
-			continue
+		if utils.IsWritableDir(dir) {
+			return dir, nil
 		}
-
-		// Test write permission
-		testFile := filepath.Join(dir, ".write-test")
-		f, err := os.Create(testFile)
-		if err != nil {
-			continue
-		}
-		f.Close()
-		os.Remove(testFile)
-		return dir, nil
 	}
 
 	return "", fmt.Errorf("no writable images directory found (searched: %v)", GetImageSearchPaths())
@@ -450,18 +490,9 @@ func GetWritableImagesDir() (string, error) {
 // GetWritableBuildScriptsDir returns the first writable build scripts directory.
 func GetWritableBuildScriptsDir() (string, error) {
 	for _, dir := range GetBuildScriptSearchPaths() {
-		if err := os.MkdirAll(dir, utils.PermDir); err != nil {
-			continue
+		if utils.IsWritableDir(dir) {
+			return dir, nil
 		}
-
-		testFile := filepath.Join(dir, ".write-test")
-		f, err := os.Create(testFile)
-		if err != nil {
-			continue
-		}
-		f.Close()
-		os.Remove(testFile)
-		return dir, nil
 	}
 
 	return "", fmt.Errorf("no writable build scripts directory found")
@@ -469,39 +500,21 @@ func GetWritableBuildScriptsDir() (string, error) {
 
 // GetWritableCacheDir returns the first writable cache directory (creates it if needed).
 func GetWritableCacheDir() (string, error) {
-	for _, dir := range buildScriptSearchPaths("cache") {
-		if err := os.MkdirAll(dir, utils.PermDir); err != nil {
-			continue
+	for _, dir := range buildCacheSearchPaths() {
+		if utils.IsWritableDir(dir) {
+			return dir, nil
 		}
-
-		testFile := filepath.Join(dir, ".write-test")
-		f, err := os.Create(testFile)
-		if err != nil {
-			continue
-		}
-		f.Close()
-		os.Remove(testFile)
-		return dir, nil
 	}
 
-	return "", fmt.Errorf("no writable cache directory found")
+	return "", fmt.Errorf("no writable shared cache directory found")
 }
 
 // GetWritableHelperScriptsDir returns the first writable helper scripts directory.
 func GetWritableHelperScriptsDir() (string, error) {
 	for _, dir := range GetHelperScriptSearchPaths() {
-		if err := os.MkdirAll(dir, utils.PermDir); err != nil {
-			continue
+		if utils.IsWritableDir(dir) {
+			return dir, nil
 		}
-
-		testFile := filepath.Join(dir, ".write-test")
-		f, err := os.Create(testFile)
-		if err != nil {
-			continue
-		}
-		f.Close()
-		os.Remove(testFile)
-		return dir, nil
 	}
 
 	return "", fmt.Errorf("no writable helper scripts directory found")

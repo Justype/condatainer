@@ -259,7 +259,7 @@ func acquireBuildLockFile(path string, info BuildLockInfo) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal build lock: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o664)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, utils.PermFile)
 	if err != nil {
 		return err // caller checks os.IsExist
 	}
@@ -275,7 +275,7 @@ func overwriteBuildLockFile(path string, info BuildLockInfo) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal build lock: %w", err)
 	}
-	return os.WriteFile(path, data, 0o664)
+	return os.WriteFile(path, data, utils.PermFile)
 }
 
 // readBuildLockFile reads and parses a lock file at the given path.
