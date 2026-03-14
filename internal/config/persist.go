@@ -103,6 +103,7 @@ func setDefaults() {
 	viper.SetDefault("build.use_tmp_overlay", false)
 	viper.SetDefault("build.tmp_overlay_size_mb", 20480)
 
+	viper.SetDefault("extra_scripts_links", []string{})
 	viper.SetDefault("parse_module_load", false)
 	viper.SetDefault("scheduler_timeout", 5)   // seconds
 	viper.SetDefault("metadata_cache_ttl", 7) // days (1 week)
@@ -471,6 +472,16 @@ func LoadFromViper() {
 	if link := viper.GetString("scripts_link"); link != "" {
 		Global.ScriptsLink = strings.TrimRight(link, "/")
 	}
+
+	// Build effective ScriptsLinks: [extra_scripts_links..., scripts_link]
+	extras := GetExtraScriptsLinks()
+	trimmed := make([]string, 0, len(extras))
+	for _, l := range extras {
+		if l = strings.TrimRight(l, "/"); l != "" {
+			trimmed = append(trimmed, l)
+		}
+	}
+	Global.ScriptsLinks = append(trimmed, Global.ScriptsLink)
 
 	// Load prebuilt_link from config (base URL for downloading prebuilt images and overlays)
 	if link := viper.GetString("prebuilt_link"); link != "" {

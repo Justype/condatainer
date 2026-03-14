@@ -68,9 +68,10 @@ type Config struct {
 	DefaultDistro string
 
 	// Remote repository settings
-	ScriptsLink  string // Base URL for remote build scripts and helpers (default: cnt-scripts/main)
-	PrebuiltLink string // Base URL for downloading prebuilt images and overlays (default: cnt-scripts releases)
-	PreferRemote bool   // Remote build scripts take precedence over local
+	ScriptsLink  string   // Base remote URL (scripts_link config key; lowest priority)
+	ScriptsLinks []string // Effective ordered list: [extra_scripts_links..., scripts_link]
+	PrebuiltLink string   // Base URL for downloading prebuilt images and overlays (default: cnt-scripts releases)
+	PreferRemote bool     // Remote build scripts take precedence over local
 
 	// Dependency parsing
 	ParseModuleLoad bool // Parse "module load" / "ml" lines as dependencies (default: false)
@@ -171,6 +172,7 @@ func LoadDefaults(executablePath string) {
 		DefaultDistro: DEFAULT_DISTRO,
 
 		ScriptsLink:      DefaultScriptsLink,
+		ScriptsLinks:     []string{DefaultScriptsLink}, // overwritten in LoadFromViper
 		PrebuiltLink:     DefaultPrebuiltLink,
 		SchedulerTimeout: 5 * time.Second,
 		MetadataCacheTTL: 7 * 24 * time.Hour, // 1 week

@@ -22,6 +22,26 @@ type DataPaths struct {
 // GlobalDataPaths holds the computed data paths
 var GlobalDataPaths DataPaths
 
+// GetExtraScriptsLinks returns extra remote build script source URLs.
+// These take precedence over the base scripts_link.
+// Checks CNT_EXTRA_SCRIPTS_LINKS (pipe-separated) first, then config.
+// Pipe is used instead of colon because URLs contain "://".
+func GetExtraScriptsLinks() []string {
+	if envLinks := os.Getenv("CNT_EXTRA_SCRIPTS_LINKS"); envLinks != "" {
+		var links []string
+		for _, l := range strings.Split(envLinks, "|") {
+			l = strings.TrimSpace(l)
+			if l != "" {
+				links = append(links, l)
+			}
+		}
+		if len(links) > 0 {
+			return links
+		}
+	}
+	return viper.GetStringSlice("extra_scripts_links")
+}
+
 // GetExtraBaseDirs returns extra base directories from config or environment.
 // Environment variable CNT_EXTRA_BASE_DIRS uses colon-separated paths (Unix convention).
 // Config file uses YAML array format.

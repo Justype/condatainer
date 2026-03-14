@@ -2,6 +2,7 @@ package build
 
 import (
 	"compress/gzip"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,13 +27,16 @@ type RemoteMetadataCache struct {
 	Metadata  map[string]RemoteScriptEntry `json:"metadata"`
 }
 
-// remoteMetadataCachePath returns the absolute path for the metadata cache file.
-func remoteMetadataCachePath() (string, error) {
+// remoteMetadataCachePathForURL returns the absolute path for the metadata cache file for a given base URL.
+// Uses a 12-char SHA-256 prefix so each URL gets a stable, unique filename.
+func remoteMetadataCachePathForURL(baseURL string) (string, error) {
 	cacheDir, err := config.GetWritableCacheDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(cacheDir, "remote-scripts-metadata.json"), nil
+	h := sha256.Sum256([]byte(baseURL))
+	name := fmt.Sprintf("remote-scripts-%x.json", h[:6]) // 12 hex chars
+	return filepath.Join(cacheDir, name), nil
 }
 
 // loadRemoteMetadataCache reads and validates the on-disk cache.
@@ -85,7 +89,7 @@ func saveRemoteMetadataCache(path string, cache *RemoteMetadataCache) error {
 	return os.Rename(tmp, path)
 }
 
-// fetchRemoteMetadata performs the HTTP+gzip+JSON fetch from the given URL.
+// fetchRemoteMetadata performs the HTTP+gzip+JSON fetch from the given metadata URL.
 func fetchRemoteMetadata(url string) (map[string]RemoteScriptEntry, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(url)
@@ -116,8 +120,8 @@ func fetchRemoteMetadata(url string) (map[string]RemoteScriptEntry, error) {
 	return metadata, nil
 }
 
-// convertToScriptInfoMap converts a raw metadata map to ScriptInfo map.
-func convertToScriptInfoMap(metadata map[string]RemoteScriptEntry) map[string]ScriptInfo {
+// convertToScriptInfoMap converts a raw metadata map to ScriptInfo map, tagging each entry with sourceURL.
+func convertToScriptInfoMap(metadata map[string]RemoteScriptEntry, sourceURL string) map[string]ScriptInfo {
 	scripts := make(map[string]ScriptInfo, len(metadata))
 	for name, entry := range metadata {
 		scripts[name] = ScriptInfo{
@@ -125,9 +129,61 @@ func convertToScriptInfoMap(metadata map[string]RemoteScriptEntry) map[string]Sc
 			Path:        entry.RelativePath,
 			IsContainer: strings.HasSuffix(entry.RelativePath, ".def"),
 			IsRemote:    true,
+			SourceURL:   sourceURL,
 		}
 	}
 	return scripts
+}
+
+// PruneOrphanedCaches removes cache files (build and helper) for URLs no longer in ScriptsLinks.
+// Errors are non-fatal.
+func PruneOrphanedCaches() {
+	cacheDir, err := config.GetWritableCacheDir()
+	if err != nil {
+		utils.PrintDebug("PruneOrphanedCaches: cannot get cache dir: %v", err)
+		return
+	}
+
+	active := make(map[string]bool, len(config.Global.ScriptsLinks))
+	for _, u := range config.Global.ScriptsLinks {
+		active[u] = true
+	}
+
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		utils.PrintDebug("PruneOrphanedCaches: cannot read cache dir: %v", err)
+		return
+	}
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, "remote-scripts-") && !strings.HasPrefix(name, "helper-scripts-") {
+			continue
+		}
+		if !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		path := filepath.Join(cacheDir, name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var envelope struct {
+			SourceURL string `json:"source_url"`
+		}
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			continue
+		}
+		if !active[envelope.SourceURL] {
+			utils.PrintDebug("Removing orphaned cache file: %s (URL: %s)", name, envelope.SourceURL)
+			if err := os.Remove(path); err != nil {
+				utils.PrintDebug("Failed to remove orphaned cache: %v", err)
+			}
+		}
+	}
 }
 
 // PreferRemote controls the precedence of build script resolution.
@@ -138,12 +194,13 @@ var PreferRemote bool
 
 // in-process caches — valid for the lifetime of one CLI invocation
 var (
-	cachedLocalScripts  map[string]ScriptInfo
-	cachedRemoteScripts map[string]ScriptInfo
+	cachedLocalScripts      map[string]ScriptInfo
+	cachedRemoteScriptsByURL = map[string]map[string]ScriptInfo{} // per-URL
+	cachedMergedRemote      map[string]ScriptInfo                 // merged across all URLs
 )
 
-// GetRemoteMetadataURL returns the URL for the remote build scripts metadata
-// using the configured scripts_link
+// GetRemoteMetadataURL returns the metadata URL for the primary (base) scripts_link.
+// Kept for backward compatibility.
 func GetRemoteMetadataURL() string {
 	return config.Global.ScriptsLink + "/metadata/build-scripts.json.gz"
 }
@@ -154,6 +211,7 @@ type ScriptInfo struct {
 	Path        string // full path to build script (local) or relative path (remote)
 	IsContainer bool   // true if .def file
 	IsRemote    bool   // true if from remote repository
+	SourceURL   string // base URL of the remote this script came from (empty for local)
 }
 
 // RemoteScriptEntry represents a single script entry in the metadata
@@ -233,36 +291,37 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 	return scripts, nil
 }
 
-// GetRemoteBuildScripts fetches (or loads from disk cache) the remote build scripts metadata.
-// Returns a map of name -> ScriptInfo.
-func GetRemoteBuildScripts() (map[string]ScriptInfo, error) {
-	if cachedRemoteScripts != nil {
-		return cachedRemoteScripts, nil
+// getRemoteBuildScriptsForURL fetches (or loads from per-URL disk cache) the build scripts for one base URL.
+func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) {
+	// In-process cache
+	if scripts, ok := cachedRemoteScriptsByURL[baseURL]; ok {
+		return scripts, nil
 	}
 
-	sourceURL := GetRemoteMetadataURL()
-	cachePath, cacheErr := remoteMetadataCachePath()
+	metaURL := baseURL + "/metadata/build-scripts.json.gz"
+	cachePath, cacheErr := remoteMetadataCachePathForURL(baseURL)
 
-	// Try disk cache
 	ttl := config.Global.MetadataCacheTTL
 	if !ForceRefresh && cacheErr == nil && ttl > 0 {
-		if cache, err := loadRemoteMetadataCache(cachePath, sourceURL, ttl); err == nil {
-			utils.PrintDebug("Using cached remote metadata (fetched %s ago)", time.Since(cache.FetchedAt).Round(time.Minute))
-			cachedRemoteScripts = convertToScriptInfoMap(cache.Metadata)
-			return cachedRemoteScripts, nil
+		if cache, err := loadRemoteMetadataCache(cachePath, baseURL, ttl); err == nil {
+			utils.PrintDebug("Using cached remote metadata for %s (fetched %s ago)", baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
+			scripts := convertToScriptInfoMap(cache.Metadata, baseURL)
+			cachedRemoteScriptsByURL[baseURL] = scripts
+			return scripts, nil
 		}
 	}
 
 	// Network fetch
-	metadata, err := fetchRemoteMetadata(sourceURL)
+	metadata, err := fetchRemoteMetadata(metaURL)
 	if err != nil {
-		// Stale fallback: use expired cache if network is unavailable
+		// Stale fallback
 		if cacheErr == nil {
-			if cache, staleErr := loadRemoteMetadataCacheIgnoreExpiry(cachePath, sourceURL); staleErr == nil {
-				utils.PrintWarning("Network unavailable; using cached metadata (fetched %s ago)",
-					time.Since(cache.FetchedAt).Round(time.Minute))
-				cachedRemoteScripts = convertToScriptInfoMap(cache.Metadata)
-				return cachedRemoteScripts, nil
+			if cache, staleErr := loadRemoteMetadataCacheIgnoreExpiry(cachePath, baseURL); staleErr == nil {
+				utils.PrintWarning("Network unavailable for %s; using cached metadata (fetched %s ago)",
+					baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
+				scripts := convertToScriptInfoMap(cache.Metadata, baseURL)
+				cachedRemoteScriptsByURL[baseURL] = scripts
+				return scripts, nil
 			}
 		}
 		return nil, err
@@ -272,16 +331,56 @@ func GetRemoteBuildScripts() (map[string]ScriptInfo, error) {
 	if cacheErr == nil && ttl > 0 {
 		envelope := &RemoteMetadataCache{
 			FetchedAt: time.Now(),
-			SourceURL: sourceURL,
+			SourceURL: baseURL,
 			Metadata:  metadata,
 		}
 		if writeErr := saveRemoteMetadataCache(cachePath, envelope); writeErr != nil {
-			utils.PrintDebug("Failed to write metadata cache: %v", writeErr)
+			utils.PrintDebug("Failed to write metadata cache for %s: %v", baseURL, writeErr)
 		}
 	}
 
-	cachedRemoteScripts = convertToScriptInfoMap(metadata)
-	return cachedRemoteScripts, nil
+	scripts := convertToScriptInfoMap(metadata, baseURL)
+	cachedRemoteScriptsByURL[baseURL] = scripts
+	return scripts, nil
+}
+
+// GetRemoteBuildScripts fetches and merges build script metadata from all configured remote URLs.
+// Earlier URLs in ScriptsLinks take precedence (first match wins).
+func GetRemoteBuildScripts() (map[string]ScriptInfo, error) {
+	// In-process merged cache
+	if cachedMergedRemote != nil {
+		return cachedMergedRemote, nil
+	}
+
+	if ForceRefresh {
+		cachedRemoteScriptsByURL = map[string]map[string]ScriptInfo{}
+	}
+
+	merged := map[string]ScriptInfo{}
+	var firstErr error
+
+	for _, baseURL := range config.Global.ScriptsLinks {
+		scripts, err := getRemoteBuildScriptsForURL(baseURL)
+		if err != nil {
+			utils.PrintDebug("Failed to fetch remote scripts from %s: %v", baseURL, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		for name, info := range scripts {
+			if _, exists := merged[name]; !exists {
+				merged[name] = info // earlier URL wins
+			}
+		}
+	}
+
+	if len(merged) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+
+	cachedMergedRemote = merged
+	return merged, nil
 }
 
 // GetAllBuildScripts returns both local and remote build scripts
@@ -357,16 +456,20 @@ func FindBuildScript(nameVersion string) (ScriptInfo, bool) {
 	return ScriptInfo{}, false
 }
 
-// DownloadRemoteScript downloads a remote build script to the local tmp directory
-// Returns the local path to the downloaded script
+// DownloadRemoteScript downloads a remote build script to the local tmp directory.
+// Uses info.SourceURL (set during metadata fetch) as the base for the download URL.
 func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 	if !info.IsRemote {
 		return info.Path, nil
 	}
 
-	// Build the raw URL using the configured scripts_link
-	// info.Path already contains the correct extension (.def for containers)
-	rawURL := fmt.Sprintf("%s/build-scripts/%s", config.Global.ScriptsLink, info.Path)
+	// Use SourceURL if available; fall back to primary scripts_link for backward compat
+	baseURL := info.SourceURL
+	if baseURL == "" {
+		baseURL = config.Global.ScriptsLink
+	}
+
+	rawURL := fmt.Sprintf("%s/build-scripts/%s", baseURL, info.Path)
 
 	// Create HTTP client with timeout
 	client := &http.Client{

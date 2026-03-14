@@ -23,8 +23,9 @@ import (
 // ── update command ──────────────────────────────────────────────────────────
 
 var (
-	updateBuild bool
-	updateBase  bool
+	updateBuild       bool
+	updateBase        bool
+	updateHelpScripts bool
 )
 
 var updateCmd = &cobra.Command{
@@ -32,34 +33,58 @@ var updateCmd = &cobra.Command{
 	Short: "Update build script metadata cache or the base image",
 	Long: `Update build script metadata or the base image.
 
-By default (no flags), refreshes the cached remote build script metadata.
-Use --base to update the base Apptainer image instead.`,
-	Example: `  condatainer update             # Refresh build script metadata (default)
-  condatainer update --build     # Same as above (explicit)
-  condatainer update --base      # Update the base image only`,
+By default (no flags), refreshes both the build script and helper script
+metadata caches. Use --base to update the base Apptainer image instead.`,
+	Example: `  condatainer update            # Refresh build + helper metadata (default)
+  condatainer update --build    # Build script metadata only
+  condatainer update --helper   # Helper script metadata only
+  condatainer update --base     # Update the base image only`,
 	SilenceUsage: true,
 	RunE:         runUpdate,
 }
 
 func init() {
 	rootCmd.AddCommand(updateCmd)
-	updateCmd.Flags().BoolVar(&updateBuild, "build", false, "Refresh build script metadata cache (default)")
+	updateCmd.Flags().BoolVar(&updateBuild, "build", false, "Refresh build script metadata cache")
+	updateCmd.Flags().BoolVar(&updateHelpScripts, "helper", false, "Refresh helper script metadata cache")
 	updateCmd.Flags().BoolVar(&updateBase, "base", false, "Update the base image")
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
-	// Default: --build when no flags given
-	if !updateBase {
+	// Default: both --build and --help-scripts when no content flags given
+	if !updateBase && !updateBuild && !updateHelpScripts {
 		updateBuild = true
+		updateHelpScripts = true
 	}
 
+	buildRefreshed := false
 	if updateBuild {
-		utils.PrintMessage("Fetching remote build script metadata...")
+		for _, url := range config.Global.ScriptsLinks {
+			utils.PrintMessage("Fetching build script metadata from %s ...", url)
+		}
 		build.ForceRefresh = true
 		if _, err := build.GetRemoteBuildScripts(); err != nil {
 			return fmt.Errorf("failed to update build script metadata: %w", err)
 		}
 		utils.PrintSuccess("Build script metadata updated.")
+		buildRefreshed = true
+	}
+
+	if updateHelpScripts {
+		for _, url := range config.Global.ScriptsLinks {
+			utils.PrintMessage("Fetching helper script metadata from %s ...", url)
+		}
+		ForceRefreshHelpers = true
+		if _, err := GetAllRemoteHelperMetadata(); err != nil {
+			utils.PrintWarning("Failed to update helper script metadata: %v", err)
+		} else {
+			utils.PrintSuccess("Helper script metadata updated.")
+		}
+	}
+
+	// Prune cache files for URLs no longer in ScriptsLinks
+	if buildRefreshed {
+		build.PruneOrphanedCaches()
 	}
 
 	if updateBase {

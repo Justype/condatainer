@@ -28,6 +28,7 @@ var configKeys = []string{
 	"default_distro",
 	"submit_job",
 	"scripts_link",
+	"extra_scripts_links",
 	"prebuilt_link",
 	"prefer_remote",
 	"extra_base_dirs",
@@ -72,6 +73,10 @@ func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) 
 		//  extra_base_dirs should only complete directories
 		if args[0] == "extra_base_dirs" {
 			return nil, cobra.ShellCompDirectiveFilterDirs
+		}
+		// extra_scripts_links is an array setting; allow free-form input
+		if args[0] == "extra_scripts_links" {
+			return nil, cobra.ShellCompDirectiveDefault
 		}
 		return configValueCompletion(args[0]), cobra.ShellCompDirectiveNoFileComp
 	}
@@ -279,6 +284,15 @@ Shows:
 		// Remote sources
 		fmt.Println(utils.StyleTitle("Remote Sources:"))
 		fmt.Printf("  scripts_link:  %s\n", config.Global.ScriptsLink)
+		extraScriptsLinks := config.GetExtraScriptsLinks()
+		if len(extraScriptsLinks) > 0 {
+			fmt.Printf("  extra_scripts_links:\n")
+			for _, l := range extraScriptsLinks {
+				fmt.Printf("    - %s\n", l)
+			}
+		} else {
+			fmt.Printf("  extra_scripts_links: %s\n", utils.StyleInfo("none"))
+		}
 		fmt.Printf("  prebuilt_link: %s\n", config.Global.PrebuiltLink)
 		fmt.Printf("  prefer_remote: %v\n", config.Global.PreferRemote)
 		fmt.Println()
@@ -411,6 +425,11 @@ Time duration format (for build.time):
 		if key == "extra_base_dirs" {
 			utils.PrintError("'%s' is an array setting. Use 'condatainer config edit' or environment variable.", key)
 			utils.PrintHint("Config file (YAML array):\n  extra_base_dirs:\n    - /path/to/dir1\n    - /path/to/dir2\n\nEnvironment variable (colon-separated):\n  export CNT_EXTRA_BASE_DIRS=/path/to/dir1:/path/to/dir2")
+			os.Exit(ExitCodeUsage)
+		}
+		if key == "extra_scripts_links" {
+			utils.PrintError("'%s' is an array setting. Use 'condatainer config edit' or environment variable.", key)
+			utils.PrintHint("Config file (YAML array):\n  extra_scripts_links:\n    - https://example.com/scripts\n\nEnvironment variable (pipe-separated):\n  export CNT_EXTRA_SCRIPTS_LINKS=https://example.com/scripts|https://other.com/scripts")
 			os.Exit(ExitCodeUsage)
 		}
 
