@@ -545,17 +545,7 @@ By default, the location is chosen based on the installation:
 			if err != nil {
 				ExitWithError("Invalid location: %v", err)
 			}
-			// Normalize shortcut to full name for display
-			switch initLocation {
-			case "u":
-				locationType = "user"
-			case "p":
-				locationType = "portable"
-			case "s":
-				locationType = "system"
-			default:
-				locationType = initLocation
-			}
+			locationType = config.NormalizeConfigLocation(initLocation)
 		} else {
 			// Smart default: portable if in dedicated installation, otherwise user
 			if config.IsPortableInstallation() {
@@ -592,33 +582,30 @@ By default, the location is chosen based on the installation:
 			ExitWithError("Cannot initialize config inside a container. Please run this command on the host system.")
 		}
 
-		// If neither apptainer nor singularity is in PATH, exit with an error
-		if config.DetectApptainerBin() == "" {
-			ExitWithError("Neither 'apptainer' nor 'singularity' binary found in PATH.")
+		// Detect apptainer/singularity (PATH first, then module avail).
+		// Pre-set in viper so ForceDetectAndSaveTo reuses it without re-probing modules.
+		detectedApptainerBin := config.DetectApptainerBin()
+		if detectedApptainerBin == "" {
+			ExitWithError("Neither 'apptainer' nor 'singularity' binary found (checked PATH and 'module avail').")
 		}
+		viper.Set("apptainer_bin", detectedApptainerBin)
 
-		// Force re-detect binaries from current environment and save to specified path
+		// Auto-detect compression based on binary type and version.
+		// Clear any previously set viper value so AutoDetectCompression always runs during init.
+		detectedCompression := config.Global.Build.CompressArgs // fallback to runtime default
+		viper.Set("build.compress_args", "")
+		if err := apptainer.SetBin(detectedApptainerBin); err == nil {
+			if version, err := apptainer.GetVersion(); err == nil {
+				config.AutoDetectCompression(apptainer.CheckZstdSupport(version), apptainer.IsSingularity())
+				detectedCompression = config.Global.Build.CompressArgs
+			}
+		}
+		viper.Set("build.compress_args", detectedCompression)
+
+		// Detect scheduler and save everything to config in one pass.
 		updated, err := config.ForceDetectAndSaveTo(configPath)
 		if err != nil {
 			ExitWithError("Failed to save config: %v", err)
-		}
-
-		// Auto-detect compression based on binary type and version, then save to config.
-		// Clear any previously set viper value so AutoDetectCompression always runs during init.
-		detectedCompression := config.Global.Build.CompressArgs // fallback to runtime default
-		apptainerBin := viper.GetString("apptainer_bin")
-		if apptainerBin != "" && config.ValidateBinary(apptainerBin) {
-			if err := apptainer.SetBin(apptainerBin); err == nil {
-				if version, err := apptainer.GetVersion(); err == nil {
-					viper.Set("build.compress_args", "")
-					config.AutoDetectCompression(apptainer.CheckZstdSupport(version), apptainer.IsSingularity())
-					detectedCompression = config.Global.Build.CompressArgs
-				}
-			}
-		}
-		// Save detected compression to config
-		if err := config.SetCompressArgsInConfigTo(detectedCompression, configPath); err != nil {
-			utils.PrintWarning("Failed to save compression setting: %v", err)
 		}
 
 		if updated {
