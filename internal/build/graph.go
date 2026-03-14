@@ -254,13 +254,6 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 	// Get script specs
 	specs := meta.ScriptSpecs()
 
-	// Validate specs against cluster limits before submission
-	if specs != nil {
-		if err := scheduler.ValidateAndConvertSpecs(specs); err != nil {
-			return "", fmt.Errorf("job specs validation failed for %s: %w", meta.NameVersion(), err)
-		}
-	}
-
 	// Derive job name from name/version if not set in script (10 chars max)
 	if specs != nil && specs.Control.JobName == "" {
 		name := meta.NameVersion()

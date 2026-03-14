@@ -14,10 +14,9 @@ HPC scheduler abstraction layer for job submission, script parsing, and resource
 ## Architecture
 
 ```
-scheduler.go        Core interface, types, resource resolution, validation
+scheduler.go        Core interface, types, resource resolution
 registry.go         Thread-safe active scheduler singleton + debugMode
 error.go            Structured error types
-gpu.go              GPU compatibility database, tier matching, MIG profiles
 script_helpers.go   Shared parsing/formatting helpers (memory, time, flags, job header/footer)
 slurm.go / pbs.go / lsf.go / htcondor.go   Scheduler implementations
 ```
@@ -85,18 +84,11 @@ ResolveResourceSpecFrom(defaults, jobResources, scriptSpecs) // custom baseline
 
 ```go
 scheduler.Init("")                  // auto-detect and set active scheduler
-scheduler.InitIfAvailable("")       // non-failing
 scheduler.ActiveScheduler()         // get current scheduler
 
 ReadScriptSpecsFromPath(path)       // always non-nil
 HasSchedulerSpecs(specs)            // HasDirectives=true
 IsPassthrough(specs)                // HasDirectives=true && Spec=nil
-
-SubmitJob(sched, scriptPath, deps)  // single job
-SubmitJobs(sched, jobs, outputDir)  // multi-job with dependencies
-
-ValidateAndConvertSpecs(specs)      // validates against cluster limits
-ValidateGpuAvailability(gpu, nodes, info) // returns GpuValidationError with suggestions
 ```
 
 ## Normalized Environment Variables
@@ -162,9 +154,10 @@ HTCondor does not set standard resource environment variables.
 
 ## Error Types
 
-- `ValidationError` — `IsValidationError(err)`: `Field`, `Requested`, `Limit`, `Partition`
-- `GpuValidationError` — `IsGpuValidationError(err)`: has `Suggestions`
-- `ParseError`, `SubmissionError`, `ClusterError` — checked with `Is*` helpers
+- `SubmissionError` — job submission failed; includes scheduler name, job name, and output
+- `ClusterError` — cluster info query failed; includes scheduler name and operation
+- `ScriptCreationError` — batch script creation failed
+- `TimeoutError` — scheduler command timed out
 
 ## Schedulers
 

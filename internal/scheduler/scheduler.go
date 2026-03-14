@@ -2,7 +2,6 @@
 package scheduler
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -252,11 +251,6 @@ var specDefaults = ResourceSpec{
 	Time:         2 * time.Hour,
 }
 
-// SetSpecDefaults overrides the default values used by ReadScriptSpecs.
-func SetSpecDefaults(d ResourceSpec) {
-	specDefaults = d
-}
-
 // GetSpecDefaults returns the current default values for ScriptSpecs.
 func GetSpecDefaults() ResourceSpec {
 	return specDefaults
@@ -407,168 +401,6 @@ func ResolveResourceSpec(jobResources *ResourceSpec, scriptSpecs *ScriptSpecs) *
 	return ResolveResourceSpecFrom(GetSpecDefaults(), jobResources, scriptSpecs)
 }
 
-// ValidateSpecs validates job specs against cluster limits.
-// Skips validation when specs.Spec is nil (passthrough mode).
-func ValidateSpecs(specs *ScriptSpecs, limits *ResourceLimits) error {
-	if limits == nil || specs == nil || specs.Spec == nil {
-		return nil // No limits or passthrough mode — skip validation
-	}
-	s := specs.Spec
-
-	// CPUs per node = CpusPerTask * TasksPerNode
-	cpusPerNode := s.CpusPerTask * s.TasksPerNode
-	if cpusPerNode <= 0 {
-		cpusPerNode = s.CpusPerTask
-	}
-	if limits.MaxCpusPerNode > 0 && cpusPerNode > limits.MaxCpusPerNode {
-		return &ValidationError{
-			Field:     "CpusPerNode",
-			Requested: cpusPerNode,
-			Limit:     limits.MaxCpusPerNode,
-			Partition: limits.Partition,
-		}
-	}
-
-	if limits.MaxMemMBPerNode > 0 && s.MemPerNodeMB > limits.MaxMemMBPerNode {
-		return &ValidationError{
-			Field:     "MemPerNodeMB",
-			Requested: int(s.MemPerNodeMB),
-			Limit:     int(limits.MaxMemMBPerNode),
-			Partition: limits.Partition,
-		}
-	}
-
-	if limits.MaxTime > 0 && s.Time > limits.MaxTime {
-		return &ValidationError{
-			Field:     "Time",
-			Requested: int(s.Time.Hours()),
-			Limit:     int(limits.MaxTime.Hours()),
-			Partition: limits.Partition,
-		}
-	}
-
-	// GPU count validation: Gpu.Count is per-node; compare total against MaxGpus
-	if s.Gpu != nil && limits.MaxGpus > 0 {
-		totalGpus := s.Gpu.Count * s.Nodes
-		if totalGpus > limits.MaxGpus {
-			return &ValidationError{
-				Field:     "Gpu",
-				Requested: totalGpus,
-				Limit:     limits.MaxGpus,
-				Partition: limits.Partition,
-			}
-		}
-	}
-
-	return nil
-}
-
-// ValidateAndConvertSpecs validates job specs against cluster limits.
-// Returns a descriptive error if any resource exceeds the partition limit.
-// Never modifies specs in-place.
-// Returns nil if cluster info is unavailable (validation skipped).
-func ValidateAndConvertSpecs(specs *ScriptSpecs) error {
-	sched := ActiveScheduler()
-	if sched == nil {
-		return nil
-	}
-	clusterInfo, err := sched.GetClusterInfo()
-	if err != nil {
-		return nil
-	}
-	// Skip all resource validation in passthrough mode
-	if specs.Spec == nil {
-		return nil
-	}
-
-	// Filter limits to the requested partition when specified.
-	// When Control.Partition is set, only validate against that partition's limits.
-	// Falls back to all limits if the requested partition is not found.
-	activeLimits := clusterInfo.Limits
-	if specs.Control.Partition != "" {
-		filtered := make([]ResourceLimits, 0, 1)
-		for _, limit := range clusterInfo.Limits {
-			if limit.Partition == specs.Control.Partition {
-				filtered = append(filtered, limit)
-				break
-			}
-		}
-		if len(filtered) > 0 {
-			activeLimits = filtered
-		}
-	}
-
-	// Validate all resources (CPU, memory, time, GPU count) against active partition limits.
-	// Specs are valid if they fit at least one partition.
-	if len(activeLimits) > 0 {
-		validForSomePartition := false
-		var firstValidationErr error
-
-		for _, limit := range activeLimits {
-			if err := ValidateSpecs(specs, &limit); err == nil {
-				validForSomePartition = true
-				break
-			} else if firstValidationErr == nil {
-				firstValidationErr = err
-			}
-		}
-
-		if !validForSomePartition {
-			return firstValidationErr
-		}
-	}
-
-	// Validate GPU availability — no conversion, just report error with suggestions.
-	nodes := specs.Spec.Nodes
-	if nodes <= 0 {
-		nodes = 1
-	}
-	if specs.Spec.Gpu != nil && len(clusterInfo.AvailableGpus) > 0 {
-		if err := ValidateGpuAvailability(specs.Spec.Gpu, nodes, clusterInfo); err != nil {
-			return err // GpuValidationError includes list of available alternatives
-		}
-	}
-
-	return nil
-}
-
-// SubmitWithDependencies submits multiple jobs with dependency chain
-func SubmitWithDependencies(scheduler Scheduler, jobs []*JobSpec, outputDir string) (map[string]string, error) {
-	jobIDs := make(map[string]string)
-
-	for _, jobSpec := range jobs {
-		// Use explicit job ID dependencies only
-		depIDs := jobSpec.DepJobIDs
-
-		// Create batch script
-		scriptPath, err := scheduler.CreateScriptWithSpec(jobSpec, outputDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create script for %s: %w", jobSpec.Name, err)
-		}
-
-		// Submit job (build chain always uses afterok)
-		var deps []Dependency
-		if len(depIDs) > 0 {
-			deps = []Dependency{{Type: DependencyAfterOK, JobIDs: depIDs}}
-		}
-		jobID, err := scheduler.Submit(scriptPath, deps)
-		if err != nil {
-			return nil, fmt.Errorf("failed to submit job %s: %w", jobSpec.Name, err)
-		}
-
-		// Store job ID
-		jobIDs[jobSpec.Name] = jobID
-
-		fmt.Printf("Submitted job %s with ID %s", jobSpec.Name, jobID)
-		if len(depIDs) > 0 {
-			fmt.Printf(" (depends on: %s)", strings.Join(depIDs, ", "))
-		}
-		fmt.Println()
-	}
-
-	return jobIDs, nil
-}
-
 // DetectSchedulerWithBinary attempts to initialize a scheduler using a preferred binary path.
 // If preferredBin is empty, detection falls back to the default discovery path.
 // Returns a Scheduler instance if the scheduler binary is present, or ErrSchedulerNotFound.
@@ -617,117 +449,6 @@ func DetectSchedulerWithBinary(preferredBin string) (Scheduler, error) {
 	return nil, ErrSchedulerNotFound
 }
 
-
-// ReadMaxSpecs reads cluster information and returns the maximum resource limits
-// Returns the most permissive limits across all partitions
-func ReadMaxSpecs(scheduler Scheduler) (*ResourceLimits, error) {
-	info, err := scheduler.GetClusterInfo()
-	if err != nil {
-		return nil, err
-	}
-
-	if len(info.Limits) == 0 {
-		return nil, ErrClusterInfoUnavailable
-	}
-
-	// Find the most permissive limits across all partitions
-	maxLimits := &ResourceLimits{
-		Partition: "all",
-	}
-
-	for _, limit := range info.Limits {
-		if limit.MaxCpusPerNode > maxLimits.MaxCpusPerNode {
-			maxLimits.MaxCpusPerNode = limit.MaxCpusPerNode
-		}
-		if limit.MaxMemMBPerNode > maxLimits.MaxMemMBPerNode {
-			maxLimits.MaxMemMBPerNode = limit.MaxMemMBPerNode
-		}
-		if limit.MaxGpus > maxLimits.MaxGpus {
-			maxLimits.MaxGpus = limit.MaxGpus
-		}
-		if limit.MaxNodes > maxLimits.MaxNodes {
-			maxLimits.MaxNodes = limit.MaxNodes
-		}
-		if limit.MaxTime > maxLimits.MaxTime {
-			maxLimits.MaxTime = limit.MaxTime
-		}
-		if limit.DefaultTime > maxLimits.DefaultTime {
-			maxLimits.DefaultTime = limit.DefaultTime
-		}
-	}
-
-	return maxLimits, nil
-}
-
-// ReadScript reads and parses scheduler directives from a build script
-// This is an alias for ReadScriptSpecs for convenience
-func ReadScript(scheduler Scheduler, scriptPath string) (*ScriptSpecs, error) {
-	return scheduler.ReadScriptSpecs(scriptPath)
-}
-
-// ValidateScript validates a script's specs against cluster limits
-func ValidateScript(scheduler Scheduler, scriptPath string) error {
-	// Read script specs
-	specs, err := scheduler.ReadScriptSpecs(scriptPath)
-	if err != nil {
-		return err
-	}
-
-	// Get cluster info
-	info, err := scheduler.GetClusterInfo()
-	if err != nil {
-		// If we can't get cluster info, we can't validate
-		// This is not necessarily an error (cluster might not expose this info)
-		return nil
-	}
-
-	// Validate against the requested partition (or all if none specified)
-	if len(info.Limits) == 0 {
-		return nil // No limits to validate against
-	}
-
-	limits := info.Limits
-	if specs != nil && specs.Control.Partition != "" {
-		for _, limit := range info.Limits {
-			if limit.Partition == specs.Control.Partition {
-				return ValidateSpecs(specs, &limit)
-			}
-		}
-		// Requested partition not found — fall through to all-partition check
-	}
-
-	// Validate against each partition's limits; pass if any accepts the job
-	for _, limit := range limits {
-		if err := ValidateSpecs(specs, &limit); err != nil {
-			continue
-		}
-		return nil
-	}
-
-	return ValidateSpecs(specs, &limits[0])
-}
-
-// WriteScript creates a batch script with the given specifications
-// This is an alias for CreateScriptWithSpec for convenience
-func WriteScript(scheduler Scheduler, jobSpec *JobSpec, outputDir string) (string, error) {
-	return scheduler.CreateScriptWithSpec(jobSpec, outputDir)
-}
-
-// SubmitJob submits a single job and returns its job ID.
-// dependencyJobIDs are treated as afterok dependencies.
-func SubmitJob(scheduler Scheduler, scriptPath string, dependencyJobIDs []string) (string, error) {
-	var deps []Dependency
-	if len(dependencyJobIDs) > 0 {
-		deps = []Dependency{{Type: DependencyAfterOK, JobIDs: dependencyJobIDs}}
-	}
-	return scheduler.Submit(scriptPath, deps)
-}
-
-// SubmitJobs submits multiple jobs with dependency chains and returns their job IDs
-func SubmitJobs(scheduler Scheduler, jobs []*JobSpec, outputDir string) (map[string]string, error) {
-	return SubmitWithDependencies(scheduler, jobs, outputDir)
-}
-
 // Init auto-detects and initializes the active scheduler.
 // If preferredBin is provided, it will be used instead of auto-detection.
 // Type is derived from the concrete struct — no version subprocess is run.
@@ -753,14 +474,6 @@ func Init(preferredBin string) (SchedulerType, error) {
 		return SchedulerHTCondor, nil
 	}
 	return SchedulerUnknown, nil
-}
-
-// InitIfAvailable attempts to initialize a scheduler if one is available.
-// Unlike Init, this does not return an error if no scheduler is found.
-// Returns the detected scheduler type (or SchedulerUnknown if none).
-func InitIfAvailable(preferredBin string) SchedulerType {
-	schedType, _ := Init(preferredBin)
-	return schedType
 }
 
 // DetectType returns the type of scheduler available on the system without initializing it.

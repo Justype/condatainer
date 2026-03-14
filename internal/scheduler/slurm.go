@@ -829,11 +829,6 @@ func (s *SlurmScheduler) getGpuInfo() ([]GpuInfo, error) {
 			fmt.Sscanf(nodesStr, "%d", &nodes)
 			totalGpus := gpuCount * nodes
 
-			// Dynamically add MIG profiles to the GPU database if not already present
-			if IsMigProfile(gpuType) {
-				EnsureMigProfileInDatabase(gpuType)
-			}
-
 			key := fmt.Sprintf("%s:%s", partition, gpuType)
 			if existing, ok := gpuMap[key]; ok {
 				existing.Total += totalGpus
