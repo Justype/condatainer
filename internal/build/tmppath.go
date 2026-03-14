@@ -1,6 +1,7 @@
 package build
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -8,28 +9,37 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// resolveTmpDirForConda returns the fast local node scratch for conda/app builds.
-// Prefers scheduler-assigned scratch (SLURM_TMPDIR, etc.), then TMPDIR, then /tmp/cnt-$USER.
+// resolveTmpDirForConda returns the tmp directory for conda/app builds.
+// If CNT_TMPDIR is set, it takes precedence over scheduler-assigned scratch and TMPDIR.
 func resolveTmpDirForConda() string {
 	return utils.GetTmpDir()
 }
 
-// resolveTmpDirForRef returns the stable condatainer writable tmp for ref/data builds.
+// resolveTmpDirForRef returns the writable tmp for ref/data builds.
 // Ref builds involve large datasets that benefit from a persistent, shared filesystem path.
+// If CNT_TMPDIR is set, it overrides the writable tmp path.
 func resolveTmpDirForRef() string {
 	return config.GetWritableTmpDir()
 }
 
-// resolveTmpDirForDef returns the stable condatainer writable tmp for def/base-image builds.
+// resolveTmpDirForDef returns the writable tmp for def/base-image builds.
 // Def builds produce a SIF which is also stored here before extraction.
+// If CNT_TMPDIR is set, it overrides the writable tmp path.
 func resolveTmpDirForDef() string {
 	return config.GetWritableTmpDir()
 }
 
-// resolveTmpDirForExternal returns the directory next to the target for external source builds.
-// This keeps build artifacts alongside the user-specified output location.
-func resolveTmpDirForExternal(targetDir string) string {
-	return targetDir
+// resolveTmpDirForExternal resolves tmp directory for external source builds by TYPE.
+// CNT_TMPDIR has highest priority and overrides all external TYPE behaviors.
+// Without CNT_TMPDIR: TYPE=app (default) uses dynamic scratch (utils.GetTmpDir), TYPE=data uses target-adjacent path.
+func resolveTmpDirForExternal(targetDir, externalType string) string {
+	if os.Getenv("CNT_TMPDIR") != "" {
+		return utils.GetTmpDir()
+	}
+	if strings.ToLower(strings.TrimSpace(externalType)) == "data" {
+		return targetDir
+	}
+	return utils.GetTmpDir()
 }
 
 // buildTmpPaths computes tmpOverlayPath and cntDirPath from tmpDir and nameVersion.

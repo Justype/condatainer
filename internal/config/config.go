@@ -287,6 +287,11 @@ func isWritableDir(dir string) bool {
 
 // GetWritableTmpDir returns the first writable tmp directory
 func GetWritableTmpDir() string {
+	// Global override for all build temp paths
+	if os.Getenv("CNT_TMPDIR") != "" {
+		return utils.GetTmpDir()
+	}
+
 	// Check extra base dirs
 	for _, baseDir := range GetExtraBaseDirs() {
 		if baseDir == "" {

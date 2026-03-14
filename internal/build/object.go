@@ -756,9 +756,17 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 	// Determine build type from source file extension
 	isDef := isApptainer || strings.HasSuffix(source, ".def")
 	isShell := strings.HasSuffix(source, ".sh") || strings.HasSuffix(source, ".bash")
+	externalType := "app"
+	if isShell {
+		parsedType, err := utils.GetExternalBuildTypeFromScript(source)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse external build type: %w", err)
+		}
+		externalType = parsedType
+	}
 
 	// Build artifacts go next to the target (user controls target location)
-	targetDir := resolveTmpDirForExternal(filepath.Dir(targetPrefix))
+	targetDir := resolveTmpDirForExternal(filepath.Dir(targetPrefix), externalType)
 	if absDir, err := filepath.Abs(targetDir); err == nil {
 		targetDir = absDir
 	}

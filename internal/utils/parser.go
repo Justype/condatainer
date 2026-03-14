@@ -277,6 +277,62 @@ func GetDependenciesFromScript(scriptPath string, parseModuleLoad bool) ([]strin
 	return dependencies, nil
 }
 
+// GetExternalBuildTypeFromScript parses external build script TYPE metadata.
+// Supported tag forms:
+//   - #TYPE:<value>
+//   - TYPE:<value>
+//
+// If TYPE is not present, it defaults to "app".
+// Supported values (case-insensitive):
+//   - app aliases: app, env, tool, conda, small
+//   - data aliases: data, ref, large
+func GetExternalBuildTypeFromScript(scriptPath string) (string, error) {
+	if !FileExists(scriptPath) {
+		return "", fmt.Errorf("build script not found at %s", scriptPath)
+	}
+
+	file, err := os.Open(scriptPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open script: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		var raw string
+		switch {
+		case strings.HasPrefix(line, "#TYPE:"):
+			raw = strings.TrimSpace(line[len("#TYPE:"):])
+		case strings.HasPrefix(line, "TYPE:"):
+			raw = strings.TrimSpace(line[len("TYPE:"):])
+		default:
+			continue
+		}
+
+		value := strings.ToLower(StripInlineComment(raw))
+		if value == "" {
+			continue
+		}
+
+		switch value {
+		case "app", "env", "tool", "conda", "small":
+			return "app", nil
+		case "data", "ref", "large":
+			return "data", nil
+		default:
+			return "", fmt.Errorf("invalid TYPE value %q: valid values are app or data", value)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("error reading script: %w", err)
+	}
+
+	return "app", nil
+}
+
 // GetInteractivePromptsFromScript parses a build script and extracts interactive
 // prompt lines beginning with "#INTERACTIVE:". Returns a list of prompt
 // strings (without the prefix) or an error if the file cannot be read.

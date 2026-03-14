@@ -178,6 +178,12 @@ upper‑casing, replacing `.` with `_`, and prefixing with
 You can list the supported variables with
 `condatainer config show` (it prints any that are currently set).
 
+`CNT_TMPDIR` is a special override used by the build system to select
+temporary directories across build types. If set, it takes precedence over
+scheduler-provided scratch, writable tmp auto-detection, and
+`TMPDIR`/`TEMP`/`TMP`. CondaTainer will append `cnt-$USER` to the path to avoid
+user collisions, including external `.sh`/`.bash` builds.
+
 A few common overrides are shown below for clarity, but the
 mapping is consistent for every key handled by the CLI:
 
@@ -194,6 +200,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_BUILD_DATA_BLOCK_SIZE`| `build.data_block_size`|
 | `CNT_EXTRA_BASE_DIRS`      | `extra_base_dirs` (colon-separated) |
 | `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
+| `CNT_TMPDIR`               | (special override)     |
 
 Example:
 

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Justype/condatainer/internal/utils"
 )
 
 // Test that CreateTmpOverlay creates parent directory when it does not exist
@@ -104,5 +106,46 @@ func TestCreateBuildDirs_ForceRemovesStale(t *testing.T) {
 	// Marker should be gone (dir was removed and recreated)
 	if _, err := os.Stat(markerFile); !os.IsNotExist(err) {
 		t.Fatal("expected stale marker to be removed after force cleanup")
+	}
+}
+
+func TestResolveTmpDirForExternal_DataUsesTargetDir(t *testing.T) {
+	targetDir := t.TempDir()
+	got := resolveTmpDirForExternal(targetDir, "data")
+	if got != targetDir {
+		t.Fatalf("resolveTmpDirForExternal(data) = %q, want %q", got, targetDir)
+	}
+}
+
+func TestResolveTmpDirForExternal_AppUsesScratch(t *testing.T) {
+	targetDir := t.TempDir()
+	got := resolveTmpDirForExternal(targetDir, "app")
+	want := utils.GetTmpDir()
+	if got != want {
+		t.Fatalf("resolveTmpDirForExternal(app) = %q, want %q", got, want)
+	}
+}
+
+func TestResolveTmpDirForExternal_EmptyDefaultsToScratch(t *testing.T) {
+	targetDir := t.TempDir()
+	got := resolveTmpDirForExternal(targetDir, "")
+	want := utils.GetTmpDir()
+	if got != want {
+		t.Fatalf("resolveTmpDirForExternal(empty) = %q, want %q", got, want)
+	}
+}
+
+func TestResolveTmpDirForExternal_CNTTMPDIROverridesData(t *testing.T) {
+	override := t.TempDir()
+	if err := os.Setenv("CNT_TMPDIR", override); err != nil {
+		t.Fatalf("failed to set CNT_TMPDIR: %v", err)
+	}
+	defer os.Unsetenv("CNT_TMPDIR")
+
+	targetDir := t.TempDir()
+	got := resolveTmpDirForExternal(targetDir, "data")
+	want := utils.GetTmpDir()
+	if got != want {
+		t.Fatalf("resolveTmpDirForExternal(data) with CNT_TMPDIR = %q, want %q", got, want)
 	}
 }
