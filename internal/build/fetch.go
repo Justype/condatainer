@@ -22,9 +22,10 @@ var ForceRefresh bool
 
 // RemoteMetadataCache is the on-disk envelope for the cached remote build script metadata.
 type RemoteMetadataCache struct {
-	FetchedAt time.Time                    `json:"fetched_at"`
-	SourceURL string                       `json:"source_url"`
-	Metadata  map[string]RemoteScriptEntry `json:"metadata"`
+	FetchedAt    time.Time                    `json:"fetched_at"`
+	SourceURL    string                       `json:"source_url"`
+	PrebuiltLink string                       `json:"prebuilt_link,omitempty"`
+	Metadata     map[string]RemoteScriptEntry `json:"metadata"`
 }
 
 // remoteMetadataCachePathForURL returns the absolute path for the metadata cache file for a given base URL.
@@ -120,19 +121,37 @@ func fetchRemoteMetadata(url string) (map[string]RemoteScriptEntry, error) {
 	return metadata, nil
 }
 
-// convertToScriptInfoMap converts a raw metadata map to ScriptInfo map, tagging each entry with sourceURL.
-func convertToScriptInfoMap(metadata map[string]RemoteScriptEntry, sourceURL string) map[string]ScriptInfo {
+// convertToScriptInfoMap converts a raw metadata map to ScriptInfo map, tagging each entry with sourceURL and prebuiltLink.
+func convertToScriptInfoMap(metadata map[string]RemoteScriptEntry, sourceURL, prebuiltLink string) map[string]ScriptInfo {
 	scripts := make(map[string]ScriptInfo, len(metadata))
 	for name, entry := range metadata {
 		scripts[name] = ScriptInfo{
-			Name:        name,
-			Path:        entry.RelativePath,
-			IsContainer: strings.HasSuffix(entry.RelativePath, ".def"),
-			IsRemote:    true,
-			SourceURL:   sourceURL,
+			Name:         name,
+			Path:         entry.RelativePath,
+			IsContainer:  strings.HasSuffix(entry.RelativePath, ".def"),
+			IsRemote:     true,
+			SourceURL:    sourceURL,
+			PrebuiltLink: prebuiltLink,
 		}
 	}
 	return scripts
+}
+
+// fetchPrebuiltLink retrieves the prebuilt base URL for a remote scripts source.
+// It fetches {baseURL}/metadata/prebuilt_link (plain text, one line).
+// Returns empty string if the file is absent or unreachable — meaning no prebuilt for that source.
+func fetchPrebuiltLink(baseURL string) string {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(baseURL + "/metadata/prebuilt_link")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 512))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // PruneOrphanedCaches removes cache files (build and helper) for URLs no longer in ScriptsLinks.
@@ -194,9 +213,9 @@ var PreferRemote bool
 
 // in-process caches — valid for the lifetime of one CLI invocation
 var (
-	cachedLocalScripts      map[string]ScriptInfo
+	cachedLocalScripts       map[string]ScriptInfo
 	cachedRemoteScriptsByURL = map[string]map[string]ScriptInfo{} // per-URL
-	cachedMergedRemote      map[string]ScriptInfo                 // merged across all URLs
+	cachedMergedRemote       map[string]ScriptInfo                // merged across all URLs
 )
 
 // GetRemoteMetadataURL returns the metadata URL for the primary (base) scripts_link.
@@ -207,11 +226,12 @@ func GetRemoteMetadataURL() string {
 
 // ScriptInfo holds information about a build script
 type ScriptInfo struct {
-	Name        string // name/version format (e.g., "samtools/1.21")
-	Path        string // full path to build script (local) or relative path (remote)
-	IsContainer bool   // true if .def file
-	IsRemote    bool   // true if from remote repository
-	SourceURL   string // base URL of the remote this script came from (empty for local)
+	Name         string // name/version format (e.g., "samtools/1.21")
+	Path         string // full path to build script (local) or relative path (remote)
+	IsContainer  bool   // true if .def file
+	IsRemote     bool   // true if from remote repository
+	SourceURL    string // base URL of the remote this script came from (empty for local)
+	PrebuiltLink string // base URL for prebuilt downloads (from metadata/prebuilt_link); empty = no prebuilt
 }
 
 // RemoteScriptEntry represents a single script entry in the metadata
@@ -305,7 +325,7 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 	if !ForceRefresh && cacheErr == nil && ttl > 0 {
 		if cache, err := loadRemoteMetadataCache(cachePath, baseURL, ttl); err == nil {
 			utils.PrintDebug("Using cached remote metadata for %s (fetched %s ago)", baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
-			scripts := convertToScriptInfoMap(cache.Metadata, baseURL)
+			scripts := convertToScriptInfoMap(cache.Metadata, baseURL, cache.PrebuiltLink)
 			cachedRemoteScriptsByURL[baseURL] = scripts
 			return scripts, nil
 		}
@@ -319,7 +339,7 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 			if cache, staleErr := loadRemoteMetadataCacheIgnoreExpiry(cachePath, baseURL); staleErr == nil {
 				utils.PrintWarning("Network unavailable for %s; using cached metadata (fetched %s ago)",
 					baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
-				scripts := convertToScriptInfoMap(cache.Metadata, baseURL)
+				scripts := convertToScriptInfoMap(cache.Metadata, baseURL, cache.PrebuiltLink)
 				cachedRemoteScriptsByURL[baseURL] = scripts
 				return scripts, nil
 			}
@@ -327,19 +347,23 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 		return nil, err
 	}
 
+	// Fetch per-source prebuilt base URL (non-fatal; empty = no prebuilt for this source)
+	prebuiltLink := fetchPrebuiltLink(baseURL)
+
 	// Persist to disk (non-fatal)
 	if cacheErr == nil && ttl > 0 {
 		envelope := &RemoteMetadataCache{
-			FetchedAt: time.Now(),
-			SourceURL: baseURL,
-			Metadata:  metadata,
+			FetchedAt:    time.Now(),
+			SourceURL:    baseURL,
+			PrebuiltLink: prebuiltLink,
+			Metadata:     metadata,
 		}
 		if writeErr := saveRemoteMetadataCache(cachePath, envelope); writeErr != nil {
 			utils.PrintDebug("Failed to write metadata cache for %s: %v", baseURL, writeErr)
 		}
 	}
 
-	scripts := convertToScriptInfoMap(metadata, baseURL)
+	scripts := convertToScriptInfoMap(metadata, baseURL, prebuiltLink)
 	cachedRemoteScriptsByURL[baseURL] = scripts
 	return scripts, nil
 }

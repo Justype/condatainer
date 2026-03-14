@@ -77,7 +77,7 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		if writableDir, err := config.GetWritableImagesDir(); err == nil {
 			if filepath.Dir(targetPath) == writableDir {
 				downloadPath := buildFinalPath(targetPath, d.update)
-				if tryDownloadPrebuiltOverlay(d.nameVersion, downloadPath) {
+				if tryDownloadPrebuiltOverlay(d.nameVersion, downloadPath, d.prebuiltLink) {
 					if err := atomicInstall(downloadPath, targetPath, d.update); err != nil {
 						return err
 					}
@@ -136,7 +136,7 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	return nil
 }
 
-// tryDownloadPrebuiltOverlay attempts to download a prebuilt overlay from GitHub releases
-func tryDownloadPrebuiltOverlay(nameVersion, destPath string) bool {
-	return tryDownloadPrebuilt(nameVersion, destPath, "sqf", utils.DownloadFile)
+// tryDownloadPrebuiltOverlay attempts to download a prebuilt overlay from the given prebuiltLink base URL.
+func tryDownloadPrebuiltOverlay(nameVersion, destPath, prebuiltLink string) bool {
+	return tryDownloadPrebuilt(nameVersion, destPath, "sqf", prebuiltLink, utils.DownloadFile)
 }

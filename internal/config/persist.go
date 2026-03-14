@@ -85,7 +85,6 @@ func setDefaults() {
 	viper.SetDefault("submit_job", true)
 	viper.SetDefault("logs_dir", "")
 	viper.SetDefault("scripts_link", DefaultScriptsLink)
-	viper.SetDefault("prebuilt_link", DefaultPrebuiltLink)
 	viper.SetDefault("prefer_remote", false)
 
 	// Extra base directories to search (prepended to default search paths)
@@ -105,7 +104,7 @@ func setDefaults() {
 
 	viper.SetDefault("extra_scripts_links", []string{})
 	viper.SetDefault("parse_module_load", false)
-	viper.SetDefault("scheduler_timeout", 5)   // seconds
+	viper.SetDefault("scheduler_timeout", 5)  // seconds
 	viper.SetDefault("metadata_cache_ttl", 7) // days (1 week)
 }
 
@@ -482,11 +481,6 @@ func LoadFromViper() {
 		}
 	}
 	Global.ScriptsLinks = append(trimmed, Global.ScriptsLink)
-
-	// Load prebuilt_link from config (base URL for downloading prebuilt images and overlays)
-	if link := viper.GetString("prebuilt_link"); link != "" {
-		Global.PrebuiltLink = strings.TrimRight(link, "/")
-	}
 
 	// Load prefer_remote from config
 	if viper.GetBool("prefer_remote") {

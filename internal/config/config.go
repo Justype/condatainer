@@ -34,9 +34,6 @@ func IsValidDistro(distro string) bool {
 // DefaultScriptsLink is the base URL for remote build scripts and helpers
 const DefaultScriptsLink = "https://raw.githubusercontent.com/Justype/cnt-scripts/main"
 
-// DefaultPrebuiltLink is the base URL for downloading prebuilt images and overlays
-const DefaultPrebuiltLink = "https://github.com/Justype/cnt-scripts/releases/download"
-
 // BuildConfig holds default settings for build operations
 type BuildConfig struct {
 	Defaults      scheduler.ResourceSpec // Default resource spec for build job submissions
@@ -70,7 +67,6 @@ type Config struct {
 	// Remote repository settings
 	ScriptsLink  string   // Base remote URL (scripts_link config key; lowest priority)
 	ScriptsLinks []string // Effective ordered list: [extra_scripts_links..., scripts_link]
-	PrebuiltLink string   // Base URL for downloading prebuilt images and overlays (default: cnt-scripts releases)
 	PreferRemote bool     // Remote build scripts take precedence over local
 
 	// Dependency parsing
@@ -173,7 +169,6 @@ func LoadDefaults(executablePath string) {
 
 		ScriptsLink:      DefaultScriptsLink,
 		ScriptsLinks:     []string{DefaultScriptsLink}, // overwritten in LoadFromViper
-		PrebuiltLink:     DefaultPrebuiltLink,
 		SchedulerTimeout: 5 * time.Second,
 		MetadataCacheTTL: 7 * 24 * time.Hour, // 1 week
 

@@ -98,9 +98,10 @@ type BaseBuildObject struct {
 	tmpOverlayPath    string
 	targetOverlayPath string
 	cntDirPath        string
-	submitJob         bool // Whether to submit to scheduler (from config at construction time)
-	isRemote          bool // Whether build source was downloaded
-	update            bool // If true, rebuild even if overlay already exists (atomic .new swap)
+	submitJob         bool   // Whether to submit to scheduler (from config at construction time)
+	isRemote          bool   // Whether build source was downloaded
+	prebuiltLink      string // per-source prebuilt base URL (from metadata/prebuilt_link); empty = no prebuilt
+	update            bool   // If true, rebuild even if overlay already exists (atomic .new swap)
 	scriptSpecs       *scheduler.ScriptSpecs
 
 	// Interactive inputs for shell scripts
@@ -709,6 +710,7 @@ func resolveBuildSource(base *BaseBuildObject, tmpDir string) (isConda bool, isC
 		}
 		base.buildSource = localPath
 		base.isRemote = true
+		base.prebuiltLink = info.PrebuiltLink
 		utils.PrintDebug("Downloaded remote build script to %s", utils.StylePath(localPath))
 	} else {
 		base.buildSource = info.Path

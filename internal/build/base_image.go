@@ -69,7 +69,7 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 		if writableDir, err := config.GetWritableImagesDir(); err == nil {
 			if filepath.Dir(targetPath) == writableDir {
 				downloadPath := buildFinalPath(targetPath, b.update)
-				if tryDownloadPrebuiltSif(b.nameVersion, downloadPath) {
+				if tryDownloadPrebuiltSif(b.nameVersion, downloadPath, b.prebuiltLink) {
 					if err := atomicInstall(downloadPath, targetPath, b.update); err != nil {
 						return err
 					}
@@ -175,7 +175,7 @@ func NewBaseImageBuildObject(update bool) (*BaseImageBuildObject, error) {
 	return &BaseImageBuildObject{DefBuildObject: defObj}, nil
 }
 
-// tryDownloadPrebuiltSif attempts to download a prebuilt .sif base image from GitHub releases.
-func tryDownloadPrebuiltSif(nameVersion, destPath string) bool {
-	return tryDownloadPrebuilt(nameVersion, destPath, "sif", utils.DownloadExecutable)
+// tryDownloadPrebuiltSif attempts to download a prebuilt .sif base image from the given prebuiltLink base URL.
+func tryDownloadPrebuiltSif(nameVersion, destPath, prebuiltLink string) bool {
+	return tryDownloadPrebuilt(nameVersion, destPath, "sif", prebuiltLink, utils.DownloadExecutable)
 }

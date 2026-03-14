@@ -127,4 +127,3 @@ type TimeoutError struct {
 func (e *TimeoutError) Error() string {
 	return fmt.Sprintf("%s: %q timed out after %s", e.Scheduler, e.Operation, e.Timeout)
 }
-

@@ -29,7 +29,6 @@ var configKeys = []string{
 	"submit_job",
 	"scripts_link",
 	"extra_scripts_links",
-	"prebuilt_link",
 	"prefer_remote",
 	"extra_base_dirs",
 	"parse_module_load",
@@ -339,7 +338,6 @@ Shows:
 		} else {
 			fmt.Printf("  extra_scripts_links: %s\n", utils.StyleInfo("none"))
 		}
-		fmt.Printf("  prebuilt_link: %s\n", config.Global.PrebuiltLink)
 		fmt.Printf("  prefer_remote: %v\n", config.Global.PreferRemote)
 		fmt.Println()
 
