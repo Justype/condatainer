@@ -39,7 +39,6 @@ type BuildConfig struct {
 	Defaults      scheduler.ResourceSpec // Default resource spec for build job submissions
 	TmpSizeMB     int                    // Size of temporary overlay in MB
 	CompressArgs  string                 // mksquashfs compression arguments
-	OverlayType   string                 // Overlay filesystem type: "ext3" or "squashfs"
 	BlockSize     string                 // mksquashfs block size for app/env/external overlays (default: 128k)
 	DataBlockSize string                 // mksquashfs block size for data/ref overlays (default: 1m)
 	UseTmpOverlay bool                   // Use ext3 tmp overlay for build tmp/target instead of host directories (default: false)
@@ -180,7 +179,6 @@ func LoadDefaults(executablePath string) {
 			},
 			TmpSizeMB:     20480,       // 20GB temporary overlay
 			CompressArgs:  "-comp lz4", // zstd only compatible with apptainer version > 1.4
-			OverlayType:   "ext3",      // ext3 for temporary overlays
 			BlockSize:     "128k",      // mksquashfs block size for app/env/external overlays
 			DataBlockSize: "1m",        // mksquashfs block size for data/ref overlays
 		},

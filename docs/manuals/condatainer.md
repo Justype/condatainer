@@ -178,7 +178,6 @@ condatainer overlay create [OPTIONS] [NAME]
 
 * `-s`, `--size [SIZE]`: Size of the overlay image (default: 10G). Supports units like `20G`, `2048M`.
 * `-t`, `--type [TYPE]`: Overlay profile: `small`, `balanced`, or `large` (default: balanced).
-* `--fs [FS]`: Filesystem type: `ext3` or `ext4` (default: ext3).
 * `-f`, `--file [FILE]`: Initialize with a Conda environment file (.yml or .yaml).
 * `--fakeroot`: Create image compatible with fakeroot (owned by root, must use with `--fakeroot` later).
 * `--sparse`: Create a sparse image file. (Short form: `-S` available on the `o` shortcut only.)
@@ -1593,8 +1592,6 @@ build:
   time: 4h
   # compress_args options (gzip, lz4, zstd, zstd-fast, zstd-medium, zstd-high)
   compress_args: "-comp zstd -Xcompression-level 8"
-  overlay_type: ext3
-
 # Additional data directories
 extra_base_dirs:
   - /path/to/shared/data

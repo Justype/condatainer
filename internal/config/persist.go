@@ -98,7 +98,6 @@ func setDefaults() {
 	viper.SetDefault("build.mem_mb", 8192)
 	viper.SetDefault("build.time", "2h")
 	viper.SetDefault("build.compress_args", "") // Empty means auto-detect based on apptainer version
-	viper.SetDefault("build.overlay_type", "ext3")
 	viper.SetDefault("build.block_size", "128k")
 	viper.SetDefault("build.data_block_size", "1m")
 	viper.SetDefault("build.use_tmp_overlay", false)
@@ -712,10 +711,6 @@ func LoadFromViper() {
 	// Empty means auto-detect based on apptainer version (handled by AutoDetectCompression)
 	if compressArgs := viper.GetString("build.compress_args"); compressArgs != "" {
 		Global.Build.CompressArgs = NormalizeCompressArgs(compressArgs)
-	}
-
-	if overlayType := viper.GetString("build.overlay_type"); overlayType != "" {
-		Global.Build.OverlayType = overlayType
 	}
 
 	if v := viper.GetString("build.block_size"); v != "" {

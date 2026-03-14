@@ -70,7 +70,6 @@ If no image path is provided, defaults to 'env.img'.`,
 		fakeroot, _ := cmd.Flags().GetBool("fakeroot")
 		sparse, _ := cmd.Flags().GetBool("sparse")
 		typeFlag, _ := cmd.Flags().GetString("type")
-		fsType, _ := cmd.Flags().GetString("fs")
 		envFile, _ := cmd.Flags().GetString("file")
 
 		sizeMB, err := utils.ParseSizeToMB(sizeStr)
@@ -80,9 +79,9 @@ If no image path is provided, defaults to 'env.img'.`,
 
 		// 3. Create the Overlay
 		if fakeroot {
-			err = overlay.CreateForRoot(cmd.Context(), path, sizeMB, typeFlag, sparse, fsType, false)
+			err = overlay.CreateForRoot(cmd.Context(), path, sizeMB, typeFlag, sparse, "ext3", false)
 		} else {
-			err = overlay.CreateForCurrentUser(cmd.Context(), path, sizeMB, typeFlag, sparse, fsType, false)
+			err = overlay.CreateForCurrentUser(cmd.Context(), path, sizeMB, typeFlag, sparse, "ext3", false)
 		}
 
 		if err != nil {
@@ -326,22 +325,9 @@ func init() {
 	// --- Create ---
 	overlayCreateCmd.Flags().StringP("size", "s", "10G", "Set overlay size (e.g., 500M, 10G)")
 	overlayCreateCmd.Flags().StringP("type", "t", "balanced", "Overlay profile: small/balanced/large files")
-	overlayCreateCmd.Flags().String("fs", "ext3", "Filesystem type: ext3 or ext4 (Now only ext3 is supported)")
 	overlayCreateCmd.Flags().Bool("fakeroot", false, "Create a fakeroot-compatible overlay (owned by root)")
 	overlayCreateCmd.Flags().Bool("sparse", false, "Create a sparse overlay image")
 	overlayCreateCmd.Flags().StringP("file", "f", "", "Initialize with Conda environment file (.yml or .yaml)")
-
-	// --- Flag completion helpers ---
-	overlayCreateCmd.RegisterFlagCompletionFunc("fs", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		opts := []string{"ext3", "ext4"}
-		res := make([]string, 0, len(opts))
-		for _, o := range opts {
-			if toComplete == "" || strings.HasPrefix(o, toComplete) {
-				res = append(res, o)
-			}
-		}
-		return res, cobra.ShellCompDirectiveNoFileComp
-	})
 
 	overlayCreateCmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		opts := []string{"small", "balanced", "large"}
