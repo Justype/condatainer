@@ -46,6 +46,52 @@ var configKeys = []string{
 	"build.tmp_overlay_size_mb",
 }
 
+// arrayConfigKeys is the set of config keys that hold string slices.
+var arrayConfigKeys = []string{"extra_base_dirs", "extra_scripts_links"}
+
+func isArrayKey(key string) bool {
+	for _, k := range arrayConfigKeys {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
+// modifyArrayConfig reads the current slice for key, applies modify, writes back.
+func modifyArrayConfig(key string, modify func([]string) []string) error {
+	if !isArrayKey(key) {
+		return fmt.Errorf("'%s' is not an array config key; array keys: %s",
+			key, strings.Join(arrayConfigKeys, ", "))
+	}
+	current := viper.GetStringSlice(key)
+	updated := modify(current)
+	viper.Set(key, updated)
+	return config.SaveConfig()
+}
+
+func arrayKeyCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		return arrayConfigKeys, cobra.ShellCompDirectiveNoFileComp
+	}
+	if len(args) == 1 {
+		switch args[0] {
+		case "extra_base_dirs":
+			return nil, cobra.ShellCompDirectiveFilterDirs
+		case "extra_scripts_links":
+			return nil, cobra.ShellCompDirectiveDefault
+		}
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func arrayRemoveValueCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 1 && isArrayKey(args[0]) {
+		return viper.GetStringSlice(args[0]), cobra.ShellCompDirectiveNoFileComp
+	}
+	return arrayKeyCompletion(cmd, args, toComplete)
+}
+
 // getConfigEnvVars returns a list of environment variables corresponding to
 // the supported configuration keys.  We base the list on the known config
 // keys (configKeys) so that the envelope is automatically updated when new
@@ -385,7 +431,13 @@ var configGetCmd = &cobra.Command{
 		if value == nil {
 			ExitWithUsageError("Unknown config key: %s", key)
 		}
-		fmt.Println(value)
+		if isArrayKey(key) {
+			for _, v := range viper.GetStringSlice(key) {
+				fmt.Println(v)
+			}
+		} else {
+			fmt.Println(value)
+		}
 	},
 }
 
@@ -421,15 +473,10 @@ Time duration format (for build.time):
 			}
 		}
 
-		// Array keys that should be edited via config edit or env var
-		if key == "extra_base_dirs" {
-			utils.PrintError("'%s' is an array setting. Use 'condatainer config edit' or environment variable.", key)
-			utils.PrintHint("Config file (YAML array):\n  extra_base_dirs:\n    - /path/to/dir1\n    - /path/to/dir2\n\nEnvironment variable (colon-separated):\n  export CNT_EXTRA_BASE_DIRS=/path/to/dir1:/path/to/dir2")
-			os.Exit(ExitCodeUsage)
-		}
-		if key == "extra_scripts_links" {
-			utils.PrintError("'%s' is an array setting. Use 'condatainer config edit' or environment variable.", key)
-			utils.PrintHint("Config file (YAML array):\n  extra_scripts_links:\n    - https://example.com/scripts\n\nEnvironment variable (pipe-separated):\n  export CNT_EXTRA_SCRIPTS_LINKS=https://example.com/scripts|https://other.com/scripts")
+		// Array keys require append/prepend/remove subcommands
+		if isArrayKey(key) {
+			utils.PrintError("'%s' is an array setting. Use append/prepend/remove subcommands.", key)
+			utils.PrintHint("  condatainer config append  %s <value>\n  condatainer config prepend %s <value>\n  condatainer config remove  %s <value>", key, key, key)
 			os.Exit(ExitCodeUsage)
 		}
 
@@ -807,6 +854,79 @@ var configValidateCmd = &cobra.Command{
 	},
 }
 
+var configAppendCmd = &cobra.Command{
+	Use:               "append <key> <value>",
+	Short:             "Append a value to an array config key",
+	Example:           "  condatainer config append extra_base_dirs /scratch/shared\n  condatainer config append extra_scripts_links https://example.com/scripts",
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: arrayKeyCompletion,
+	SilenceUsage:      true,
+	Run: func(cmd *cobra.Command, args []string) {
+		key, value := args[0], args[1]
+		if err := modifyArrayConfig(key, func(cur []string) []string {
+			return append(cur, value)
+		}); err != nil {
+			ExitWithError("%v", err)
+		}
+		configPath, _ := config.GetActiveOrUserConfigPath()
+		utils.PrintSuccess("Appended %s to %s", utils.StyleInfo(value), utils.StyleInfo(key))
+		utils.PrintNote("Config saved to: %s", configPath)
+	},
+}
+
+var configPrependCmd = &cobra.Command{
+	Use:               "prepend <key> <value>",
+	Short:             "Prepend a value to an array config key (highest priority)",
+	Example:           "  condatainer config prepend extra_base_dirs /project/common\n  condatainer config prepend extra_scripts_links https://myorg.com/scripts",
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: arrayKeyCompletion,
+	SilenceUsage:      true,
+	Run: func(cmd *cobra.Command, args []string) {
+		key, value := args[0], args[1]
+		if err := modifyArrayConfig(key, func(cur []string) []string {
+			return append([]string{value}, cur...)
+		}); err != nil {
+			ExitWithError("%v", err)
+		}
+		configPath, _ := config.GetActiveOrUserConfigPath()
+		utils.PrintSuccess("Prepended %s to %s", utils.StyleInfo(value), utils.StyleInfo(key))
+		utils.PrintNote("Config saved to: %s", configPath)
+	},
+}
+
+var configRemoveCmd = &cobra.Command{
+	Use:               "remove <key> <value>",
+	Short:             "Remove a value from an array config key",
+	Example:           "  condatainer config remove extra_base_dirs /scratch/shared\n  condatainer config remove extra_scripts_links https://example.com/scripts",
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: arrayRemoveValueCompletion,
+	SilenceUsage:      true,
+	Run: func(cmd *cobra.Command, args []string) {
+		key, value := args[0], args[1]
+		removed := false
+		if err := modifyArrayConfig(key, func(cur []string) []string {
+			var out []string
+			for _, v := range cur {
+				if v == value {
+					removed = true
+					continue
+				}
+				out = append(out, v)
+			}
+			return out
+		}); err != nil {
+			ExitWithError("%v", err)
+		}
+		configPath, _ := config.GetActiveOrUserConfigPath()
+		if removed {
+			utils.PrintSuccess("Removed %s from %s", utils.StyleInfo(value), utils.StyleInfo(key))
+			utils.PrintNote("Config saved to: %s", configPath)
+		} else {
+			utils.PrintWarning("%s not found in %s", utils.StyleInfo(value), utils.StyleInfo(key))
+		}
+	},
+}
+
 func init() {
 	// Add flags
 	configShowCmd.Flags().BoolVar(&showPath, "path", false, "Show only the config file path")
@@ -816,6 +936,9 @@ func init() {
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configGetCmd)
 	configCmd.AddCommand(configSetCmd)
+	configCmd.AddCommand(configAppendCmd)
+	configCmd.AddCommand(configPrependCmd)
+	configCmd.AddCommand(configRemoveCmd)
 	configCmd.AddCommand(configInitCmd)
 	configCmd.AddCommand(configEditCmd)
 	configCmd.AddCommand(configPathsCmd)

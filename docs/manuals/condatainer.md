@@ -1453,7 +1453,7 @@ condatainer config get submit_job
 
 ### Config Set
 
-Set a configuration value and save to the active config file. For a full list of supported keys, see the [Configuration manual](configuration.md).
+Set a scalar configuration value and save to the active config file. For a full list of supported keys, see the [Configuration manual](configuration.md).
 
 ```
 condatainer config set <key> <value>
@@ -1469,6 +1469,39 @@ condatainer config set build.time 4h
 ```
 
 **Time formats:** `2h`, `30m`, `1h30m`, `90s`, `02:00:00`, `HH:MM:SS`
+
+> Array keys (`extra_base_dirs`, `extra_scripts_links`) cannot be set with this command — use `append`, `prepend`, or `remove` instead.
+
+### Config Append / Prepend / Remove
+
+Manage array config keys (`extra_base_dirs`, `extra_scripts_links`) from the CLI.
+
+```
+condatainer config append  <key> <value>
+condatainer config prepend <key> <value>
+condatainer config remove  <key> <value>
+```
+
+* `append` — add a value to the **end** of the array (lower priority).
+* `prepend` — add a value to the **beginning** of the array (higher priority).
+* `remove` — delete all occurrences of a value from the array.
+
+**Examples:**
+
+```bash
+# Add an extra data directory (lowest priority among extras)
+condatainer config append extra_base_dirs /scratch/shared
+
+# Add an institutional scripts source (takes priority over the default)
+condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+
+# Remove a directory no longer needed
+condatainer config remove extra_base_dirs /scratch/shared
+
+# Show result
+condatainer config show
+condatainer config get extra_base_dirs
+```
 
 ### Config Init
 

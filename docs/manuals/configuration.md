@@ -150,6 +150,26 @@ condatainer config set submit_job false
 condatainer config set scheduler_timeout 10
 ```
 
+### Manage Array Config Values
+
+Array keys (`extra_base_dirs`, `extra_scripts_links`) use dedicated subcommands:
+
+```bash
+# Append (lower priority)
+condatainer config append extra_base_dirs /scratch/shared
+condatainer config append extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+
+# Prepend (higher priority — checked first)
+condatainer config prepend extra_base_dirs /project/common
+condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+
+# Remove
+condatainer config remove extra_base_dirs /scratch/shared
+condatainer config remove extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+```
+
+Shell completion for `remove` offers the current values of the array as candidates.
+
 ### Edit Config File Directly
 
 ```bash
@@ -443,13 +463,11 @@ condatainer config set metadata_cache_ttl 14
 To add institutional or personal script repositories alongside the default:
 
 ```bash
-# Edit config file to add extra_scripts_links (YAML array)
-condatainer config edit
-```
+# Add via CLI (takes priority over the default scripts_link)
+condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
 
-```yaml
-extra_scripts_links:
-  - https://raw.githubusercontent.com/MyOrg/my-scripts/main
+# Remove when no longer needed
+condatainer config remove extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
 ```
 
 Or via environment variable (pipe-separated):
