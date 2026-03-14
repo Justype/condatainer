@@ -161,10 +161,14 @@ func buildOverlayPaths(b *BaseBuildObject) (targetPath, finalPath string) {
 	return
 }
 
-// tryDownloadPrebuilt attempts to download a prebuilt asset from GitHub releases.
+// tryDownloadPrebuilt attempts to download a prebuilt asset from the given prebuiltLink base URL.
 // ext is the file extension without a dot (e.g. "sif", "sqf").
 // downloadFn is called with (url, destPath) and should return an error on failure.
-func tryDownloadPrebuilt(nameVersion, destPath, ext string, downloadFn func(string, string) error) bool {
+// Returns false immediately if prebuiltLink is empty (no prebuilt source for this script).
+func tryDownloadPrebuilt(nameVersion, destPath, ext, prebuiltLink string, downloadFn func(string, string) error) bool {
+	if prebuiltLink == "" {
+		return false
+	}
 	archMap := map[string]string{
 		"amd64": "x86_64",
 		"arm64": "aarch64",
@@ -178,7 +182,7 @@ func tryDownloadPrebuilt(nameVersion, destPath, ext string, downloadFn func(stri
 	if len(parts) != 2 {
 		return false
 	}
-	url := fmt.Sprintf("%s/%s/%s_%s.%s", config.Global.PrebuiltLink, parts[0], parts[1], archName, ext)
+	url := fmt.Sprintf("%s/%s/%s_%s.%s", prebuiltLink, parts[0], parts[1], archName, ext)
 	if !utils.URLExists(url) {
 		return false
 	}
@@ -255,7 +259,7 @@ func acquireBuildLockFile(path string, info BuildLockInfo) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal build lock: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o664)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, utils.PermFile)
 	if err != nil {
 		return err // caller checks os.IsExist
 	}
@@ -271,7 +275,7 @@ func overwriteBuildLockFile(path string, info BuildLockInfo) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal build lock: %w", err)
 	}
-	return os.WriteFile(path, data, 0o664)
+	return os.WriteFile(path, data, utils.PermFile)
 }
 
 // readBuildLockFile reads and parses a lock file at the given path.

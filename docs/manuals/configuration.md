@@ -78,7 +78,8 @@ condatainer config init -l system
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `scripts_link` | `https://raw.githubusercontent.com/Justype/cnt-scripts/main` | Base URL for remote build and helper scripts |
+| `scripts_link` | `https://raw.githubusercontent.com/Justype/cnt-scripts/main` | Base URL for remote build and helper scripts (lowest-priority remote) |
+| `extra_scripts_links` | `[]` | Additional remote URLs prepended before `scripts_link` (first entry = highest priority); array, set via `config edit` or `CNT_EXTRA_SCRIPTS_LINKS` |
 | `prebuilt_link` | `https://github.com/Justype/cnt-scripts/releases/download` | Base URL for downloading prebuilt overlays |
 | `prefer_remote` | `false` | Remote build scripts take precedence over local |
 
@@ -89,6 +90,7 @@ condatainer config init -l system
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
 | `parse_module_load` | `false` | Parse `module load` / `ml` lines as dependencies in `check` and `run` |
 | `scheduler_timeout` | `5` | Seconds to wait for a scheduler command (sbatch, qsub, etc.) before returning an error. Set to `0` to disable the timeout. |
+| `metadata_cache_ttl` | `7` | Days to keep the cached remote build script metadata (default: 7 days = 1 week). Set to `0` to disable caching and always fetch from the network. |
 | `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filename (e.g. `ubuntu24--base_image.sif`) and the distro prefix added to bare package names (e.g. `igv` → `ubuntu24/igv`). |
 
 ### Build Configuration
@@ -148,6 +150,26 @@ condatainer config set submit_job false
 condatainer config set scheduler_timeout 10
 ```
 
+### Manage Array Config Values
+
+Array keys (`extra_base_dirs`, `extra_scripts_links`) use dedicated subcommands:
+
+```bash
+# Append (lower priority)
+condatainer config append extra_base_dirs /scratch/shared
+condatainer config append extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+
+# Prepend (higher priority — checked first)
+condatainer config prepend extra_base_dirs /project/common
+condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+
+# Remove
+condatainer config remove extra_base_dirs /scratch/shared
+condatainer config remove extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+```
+
+Shell completion for `remove` offers the current values of the array as candidates.
+
 ### Edit Config File Directly
 
 ```bash
@@ -198,8 +220,10 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_BUILD_MEM_MB`         | `build.mem_mb`         |
 | `CNT_BUILD_BLOCK_SIZE`     | `build.block_size`     |
 | `CNT_BUILD_DATA_BLOCK_SIZE`| `build.data_block_size`|
-| `CNT_EXTRA_BASE_DIRS`      | `extra_base_dirs` (colon-separated) |
-| `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
+| `CNT_EXTRA_BASE_DIRS`         | `extra_base_dirs` (colon-separated) |
+| `CNT_EXTRA_SCRIPTS_LINKS`     | `extra_scripts_links` (pipe-separated, since URLs contain `:`) |
+| `CNT_SCHEDULER_TIMEOUT`       | `scheduler_timeout`    |
+| `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
 | `CNT_TMPDIR`               | (special override)     |
 
 Example:
@@ -240,6 +264,7 @@ Each base directory follows this structure:
   images/           # Container images and overlays
   build-scripts/    # Build recipes
   helper-scripts/   # Runtime helpers
+  cache/            # Cached remote metadata (remote-scripts-<hash>.json, helper-scripts-<hash>.json)
   tmp/              # Temporary files during builds
 ```
 
@@ -262,6 +287,10 @@ submit_job: true
 # Change to use a private or institutional scripts repo
 scripts_link: https://raw.githubusercontent.com/Justype/cnt-scripts/main
 
+# Additional remote sources (higher priority than scripts_link; first entry wins on conflict)
+# extra_scripts_links:
+#   - https://raw.githubusercontent.com/MyOrg/my-scripts/main
+
 # Base URL for downloading prebuilt images and overlays
 prebuilt_link: https://github.com/Justype/cnt-scripts/releases/download
 
@@ -273,6 +302,9 @@ parse_module_load: false
 
 # Maximum seconds to wait for scheduler CLI commands (default: 5, 0 = disabled)
 scheduler_timeout: 5
+
+# Days to cache remote build script metadata (default: 7 = 1 week, 0 = disabled)
+metadata_cache_ttl: 7
 
 # Base OS distro: ubuntu20, ubuntu22, or ubuntu24 (default: ubuntu24)
 # Sets the base image (e.g. ubuntu24--base_image.sif) and prefix for bare package names
@@ -403,6 +435,48 @@ If CondaTainer reports a scheduler timeout error, the scheduler daemon may be sl
 condatainer config set scheduler_timeout 30  # increase to 30 seconds
 condatainer config set scheduler_timeout 0   # disable timeout entirely
 ```
+
+### Remote metadata unavailable or stale
+
+CondaTainer caches remote build script and helper script metadata for 1 week by default. If the cache is expired and the network is unavailable, the stale cache is used with a warning. To force a refresh:
+
+```bash
+condatainer update           # re-fetch build + helper metadata (default)
+condatainer update --build   # build metadata only
+condatainer update --helper  # helper metadata only
+```
+
+To disable caching entirely (always fetch live):
+
+```bash
+condatainer config set metadata_cache_ttl 0
+```
+
+To extend the cache lifetime (e.g. 2 weeks):
+
+```bash
+condatainer config set metadata_cache_ttl 14
+```
+
+### Using multiple remote script sources
+
+To add institutional or personal script repositories alongside the default:
+
+```bash
+# Add via CLI (takes priority over the default scripts_link)
+condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+
+# Remove when no longer needed
+condatainer config remove extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+```
+
+Or via environment variable (pipe-separated):
+
+```bash
+export CNT_EXTRA_SCRIPTS_LINKS=https://raw.githubusercontent.com/MyOrg/my-scripts/main
+```
+
+Earlier entries take priority over `scripts_link`. Each remote gets its own cache file (`remote-scripts-<hash>.json`, `helper-scripts-<hash>.json`). Cache files for removed remotes are cleaned up automatically on `condatainer update`.
 
 ### Disable job submission
 

@@ -108,7 +108,7 @@ func DumpSifToSquashfs(ctx context.Context, sifPath, outputPath string) error {
 	utils.PrintDebug("Dumping to SquashFS file at %s", utils.StylePath(outputPath))
 
 	// Create output file
-	outFile, err := os.Create(outputPath)
+	outFile, err := utils.CreateFileWritable(outputPath)
 	if err != nil {
 		return fmt.Errorf("failed to create output file %s: %w", outputPath, err)
 	}
@@ -133,7 +133,7 @@ func DumpSifToSquashfs(ctx context.Context, sifPath, outputPath string) error {
 	}
 
 	// Set permissions to 0664 (rw-rw-r--)
-	if err := os.Chmod(outputPath, 0o664); err != nil {
+	if err := os.Chmod(outputPath, utils.PermFile); err != nil {
 		return fmt.Errorf("failed to set permissions on %s: %w", outputPath, err)
 	}
 

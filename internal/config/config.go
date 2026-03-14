@@ -34,9 +34,6 @@ func IsValidDistro(distro string) bool {
 // DefaultScriptsLink is the base URL for remote build scripts and helpers
 const DefaultScriptsLink = "https://raw.githubusercontent.com/Justype/cnt-scripts/main"
 
-// DefaultPrebuiltLink is the base URL for downloading prebuilt images and overlays
-const DefaultPrebuiltLink = "https://github.com/Justype/cnt-scripts/releases/download"
-
 // BuildConfig holds default settings for build operations
 type BuildConfig struct {
 	Defaults      scheduler.ResourceSpec // Default resource spec for build job submissions
@@ -68,15 +65,18 @@ type Config struct {
 	DefaultDistro string
 
 	// Remote repository settings
-	ScriptsLink  string // Base URL for remote build scripts and helpers (default: cnt-scripts/main)
-	PrebuiltLink string // Base URL for downloading prebuilt images and overlays (default: cnt-scripts releases)
-	PreferRemote bool   // Remote build scripts take precedence over local
+	ScriptsLink  string   // Base remote URL (scripts_link config key; lowest priority)
+	ScriptsLinks []string // Effective ordered list: [extra_scripts_links..., scripts_link]
+	PreferRemote bool     // Remote build scripts take precedence over local
 
 	// Dependency parsing
 	ParseModuleLoad bool // Parse "module load" / "ml" lines as dependencies (default: false)
 
 	// Scheduler command timeout in seconds (default: 5)
 	SchedulerTimeout time.Duration
+
+	// Max age of the on-disk remote build script metadata cache (default: 1 week)
+	MetadataCacheTTL time.Duration
 
 	// Build configuration
 	Build BuildConfig
@@ -168,8 +168,9 @@ func LoadDefaults(executablePath string) {
 		DefaultDistro: DEFAULT_DISTRO,
 
 		ScriptsLink:      DefaultScriptsLink,
-		PrebuiltLink:     DefaultPrebuiltLink,
+		ScriptsLinks:     []string{DefaultScriptsLink}, // overwritten in LoadFromViper
 		SchedulerTimeout: 5 * time.Second,
+		MetadataCacheTTL: 7 * 24 * time.Hour, // 1 week
 
 		Build: BuildConfig{
 			Defaults: scheduler.ResourceSpec{
@@ -269,20 +270,7 @@ func GetBaseImage() string {
 
 // isWritableDir checks if a directory is writable by trying to create a test file
 func isWritableDir(dir string) bool {
-	// Try to create directory if it doesn't exist
-	if err := os.MkdirAll(dir, utils.PermDir); err != nil {
-		return false
-	}
-
-	// Test write permission
-	testFile := filepath.Join(dir, ".write-test")
-	f, err := os.Create(testFile)
-	if err != nil {
-		return false
-	}
-	f.Close()
-	os.Remove(testFile)
-	return true
+	return utils.IsWritableDir(dir)
 }
 
 // GetWritableTmpDir returns the first writable tmp directory

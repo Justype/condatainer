@@ -85,7 +85,6 @@ func setDefaults() {
 	viper.SetDefault("submit_job", true)
 	viper.SetDefault("logs_dir", "")
 	viper.SetDefault("scripts_link", DefaultScriptsLink)
-	viper.SetDefault("prebuilt_link", DefaultPrebuiltLink)
 	viper.SetDefault("prefer_remote", false)
 
 	// Extra base directories to search (prepended to default search paths)
@@ -103,8 +102,10 @@ func setDefaults() {
 	viper.SetDefault("build.use_tmp_overlay", false)
 	viper.SetDefault("build.tmp_overlay_size_mb", 20480)
 
+	viper.SetDefault("extra_scripts_links", []string{})
 	viper.SetDefault("parse_module_load", false)
-	viper.SetDefault("scheduler_timeout", 5) // seconds
+	viper.SetDefault("scheduler_timeout", 5)  // seconds
+	viper.SetDefault("metadata_cache_ttl", 7) // days (1 week)
 }
 
 // GetUserConfigPath returns the path to the user config file
@@ -471,10 +472,15 @@ func LoadFromViper() {
 		Global.ScriptsLink = strings.TrimRight(link, "/")
 	}
 
-	// Load prebuilt_link from config (base URL for downloading prebuilt images and overlays)
-	if link := viper.GetString("prebuilt_link"); link != "" {
-		Global.PrebuiltLink = strings.TrimRight(link, "/")
+	// Build effective ScriptsLinks: [extra_scripts_links..., scripts_link]
+	extras := GetExtraScriptsLinks()
+	trimmed := make([]string, 0, len(extras))
+	for _, l := range extras {
+		if l = strings.TrimRight(l, "/"); l != "" {
+			trimmed = append(trimmed, l)
+		}
 	}
+	Global.ScriptsLinks = append(trimmed, Global.ScriptsLink)
 
 	// Load prefer_remote from config
 	if viper.GetBool("prefer_remote") {
@@ -542,6 +548,8 @@ func LoadFromViper() {
 	Global.ParseModuleLoad = viper.GetBool("parse_module_load")
 
 	Global.SchedulerTimeout = time.Duration(viper.GetInt("scheduler_timeout")) * time.Second
+
+	Global.MetadataCacheTTL = time.Duration(viper.GetInt("metadata_cache_ttl")) * 24 * time.Hour
 }
 
 // NormalizeCompressArgs is a thin wrapper around ArgsForCompress and exists

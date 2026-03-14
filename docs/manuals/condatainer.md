@@ -46,6 +46,7 @@ Available Commands:
   run         Run a script and auto-solve the dependencies by #DEP tags
   scheduler   Display scheduler information
   self-update Update condatainer to the latest version from GitHub
+  update      Update build script metadata cache or the base image
 
 Flags:
       --debug     Enable debug mode with verbose output
@@ -1452,7 +1453,7 @@ condatainer config get submit_job
 
 ### Config Set
 
-Set a configuration value and save to the active config file. For a full list of supported keys, see the [Configuration manual](configuration.md).
+Set a scalar configuration value and save to the active config file. For a full list of supported keys, see the [Configuration manual](configuration.md).
 
 ```
 condatainer config set <key> <value>
@@ -1468,6 +1469,39 @@ condatainer config set build.time 4h
 ```
 
 **Time formats:** `2h`, `30m`, `1h30m`, `90s`, `02:00:00`, `HH:MM:SS`
+
+> Array keys (`extra_base_dirs`, `extra_scripts_links`) cannot be set with this command — use `append`, `prepend`, or `remove` instead.
+
+### Config Append / Prepend / Remove
+
+Manage array config keys (`extra_base_dirs`, `extra_scripts_links`) from the CLI.
+
+```
+condatainer config append  <key> <value>
+condatainer config prepend <key> <value>
+condatainer config remove  <key> <value>
+```
+
+* `append` — add a value to the **end** of the array (lower priority).
+* `prepend` — add a value to the **beginning** of the array (higher priority).
+* `remove` — delete all occurrences of a value from the array.
+
+**Examples:**
+
+```bash
+# Add an extra data directory (lowest priority among extras)
+condatainer config append extra_base_dirs /scratch/shared
+
+# Add an institutional scripts source (takes priority over the default)
+condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+
+# Remove a directory no longer needed
+condatainer config remove extra_base_dirs /scratch/shared
+
+# Show result
+condatainer config show
+condatainer config get extra_base_dirs
+```
 
 ### Config Init
 
@@ -1542,14 +1576,22 @@ submit_job: true
 # Base OS distro: ubuntu20, ubuntu22, or ubuntu24 (default: ubuntu24)
 default_distro: ubuntu24
 
+# Remote build/helper script source (base URL)
+scripts_link: https://raw.githubusercontent.com/Justype/cnt-scripts/main
+
+# Additional remote sources (higher priority than scripts_link; first entry wins on conflict)
+# extra_scripts_links:
+#   - https://raw.githubusercontent.com/MyOrg/my-scripts/main
+
+# Days to cache remote metadata (default: 7, set 0 to always fetch live)
+metadata_cache_ttl: 7
+
 # Build configuration
 build:
   ncpus: 8
   mem_mb: 16384
   time: 4h
-  tmp_size_mb: 20480
   # compress_args options (gzip, lz4, zstd, zstd-fast, zstd-medium, zstd-high)
-  # Or explicitly set mksquashfs arguments:
   compress_args: "-comp zstd -Xcompression-level 8"
   overlay_type: ext3
 
@@ -1603,9 +1645,49 @@ condatainer scheduler -p --cpu
 
 ## Update
 
-Updates the **CondaTainer** binary to the latest version from GitHub releases.
+Refreshes the remote build script and helper script metadata caches, or updates the base image.
 
-**Aliases:** `update`
+**Usage:**
+
+```
+condatainer update [FLAGS]
+```
+
+**Options:**
+
+* `--build`: Refresh the build script metadata cache.
+* `--helper`: Refresh the helper script metadata cache.
+* `--base`: Update the base Apptainer image only.
+
+By default (no flags), both `--build` and `--helper` are enabled.
+
+**Features:**
+
+* Prints each remote URL as it fetches metadata.
+* Downloads and caches metadata locally per remote URL (default TTL: 7 days).
+* Cached metadata is reused by `avail` and `create` without a network round-trip.
+* Supports multiple remote sources (`extra_scripts_links`); each gets its own cache file.
+* Removes cache files for remotes no longer configured (orphan cleanup).
+
+**Examples:**
+
+```bash
+# Refresh build + helper metadata (default)
+condatainer update
+
+# Build script metadata only
+condatainer update --build
+
+# Helper script metadata only
+condatainer update --helper
+
+# Update the base image only
+condatainer update --base
+```
+
+## Self-Update
+
+Updates the **CondaTainer** binary to the latest version from GitHub releases.
 
 **Usage:**
 
@@ -1617,7 +1699,7 @@ condatainer self-update [FLAGS]
 
 * `-y`, `--yes`: Skip confirmation prompt and auto-update.
 * `-f`, `--force`: Force update even if already on the latest version.
-* `--dev`: Include pre-release versions (also enabled automatically when the config `branch` is set to `dev`).
+* `--dev`: Include pre-release versions.
 * `--base`: Update the base image only, without updating the condatainer binary.
 
 **Features:**

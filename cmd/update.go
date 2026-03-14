@@ -20,16 +20,108 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// ── update command ──────────────────────────────────────────────────────────
+
 var (
-	updateForce bool
-	updateDev   bool
-	updateBase  bool
+	updateBuild       bool
+	updateBase        bool
+	updateHelpScripts bool
 )
 
 var updateCmd = &cobra.Command{
-	Use:     "self-update",
-	Aliases: []string{"update"},
-	Short:   "Update condatainer to the latest version from GitHub",
+	Use:   "update",
+	Short: "Update build script metadata cache or the base image",
+	Long: `Update build script metadata or the base image.
+
+By default (no flags), refreshes both the build script and helper script
+metadata caches. Use --base to update the base Apptainer image instead.`,
+	Example: `  condatainer update            # Refresh build + helper metadata (default)
+  condatainer update --build    # Build script metadata only
+  condatainer update --helper   # Helper script metadata only
+  condatainer update --base     # Update the base image only`,
+	SilenceUsage: true,
+	RunE:         runUpdate,
+}
+
+func init() {
+	rootCmd.AddCommand(updateCmd)
+	updateCmd.Flags().BoolVar(&updateBuild, "build", false, "Refresh build script metadata cache")
+	updateCmd.Flags().BoolVar(&updateHelpScripts, "helper", false, "Refresh helper script metadata cache")
+	updateCmd.Flags().BoolVar(&updateBase, "base", false, "Update the base image")
+}
+
+func runUpdate(cmd *cobra.Command, args []string) error {
+	// Default: both --build and --help-scripts when no content flags given
+	if !updateBase && !updateBuild && !updateHelpScripts {
+		updateBuild = true
+		updateHelpScripts = true
+	}
+
+	buildRefreshed := false
+	if updateBuild {
+		utils.PrintMessage("Refreshing local build script metadata cache ...")
+		build.ForceRefresh = true
+		if _, err := build.GetLocalBuildScripts(); err != nil {
+			return fmt.Errorf("failed to update local build script metadata: %w", err)
+		}
+		utils.PrintSuccess("Local build script metadata updated.")
+
+		for _, url := range config.Global.ScriptsLinks {
+			utils.PrintMessage("Fetching build script metadata from %s ...", url)
+		}
+		build.ForceRefresh = true
+		if _, err := build.GetRemoteBuildScripts(); err != nil {
+			return fmt.Errorf("failed to update build script metadata: %w", err)
+		}
+		utils.PrintSuccess("Build script metadata updated.")
+		buildRefreshed = true
+	}
+
+	if updateHelpScripts {
+		for _, url := range config.Global.ScriptsLinks {
+			utils.PrintMessage("Fetching helper script metadata from %s ...", url)
+		}
+		ForceRefreshHelpers = true
+		if _, err := GetAllRemoteHelperMetadata(); err != nil {
+			utils.PrintWarning("Failed to update helper script metadata: %v", err)
+		} else {
+			utils.PrintSuccess("Helper script metadata updated.")
+		}
+	}
+
+	// Prune cache files for URLs no longer in ScriptsLinks
+	if buildRefreshed {
+		build.PruneOrphanedCaches()
+	}
+
+	if updateBase {
+		// Bail out early if the base image is currently in use
+		if baseImagePath := config.FindBaseImage(); baseImagePath != "" {
+			if err := overlay.CheckAvailable(baseImagePath, true); err != nil {
+				return fmt.Errorf("condatainer is currently running (base image is locked); stop all running condatainer sessions before updating")
+			}
+		}
+		utils.PrintMessage("Updating base image...")
+		if err := build.EnsureBaseImage(cmd.Context(), true); err != nil {
+			return fmt.Errorf("failed to update base image: %w", err)
+		}
+		utils.PrintSuccess("Base image updated successfully.")
+	}
+
+	return nil
+}
+
+// ── self-update command ──────────────────────────────────────────────────────
+
+var (
+	selfUpdateForce bool
+	selfUpdateDev   bool
+	selfUpdateBase  bool
+)
+
+var selfUpdateCmd = &cobra.Command{
+	Use:   "self-update",
+	Short: "Update condatainer to the latest version from GitHub",
 	Long: `Download and replace the current condatainer binary with the latest version from GitHub.
 
 This command downloads the latest binary from the GitHub repository
@@ -39,18 +131,18 @@ and replaces the current executable. A backup of the current version is not crea
   condatainer self-update -f    # Force update even if already on latest version
   condatainer self-update --dev # Include pre-release versions
   condatainer self-update --base # Update the base image only`,
-	SilenceUsage: true, // Runtime errors should not show usage
-	RunE:         runUpdate,
+	SilenceUsage: true,
+	RunE:         runSelfUpdate,
 }
 
 func init() {
-	rootCmd.AddCommand(updateCmd)
-	updateCmd.Flags().BoolVarP(&updateForce, "force", "f", false, "Force update even if already on latest version")
-	updateCmd.Flags().BoolVar(&updateDev, "dev", false, "Include pre-release versions")
-	updateCmd.Flags().BoolVar(&updateBase, "base", false, "Update the base image without updating the condatainer binary")
+	rootCmd.AddCommand(selfUpdateCmd)
+	selfUpdateCmd.Flags().BoolVarP(&selfUpdateForce, "force", "f", false, "Force update even if already on latest version")
+	selfUpdateCmd.Flags().BoolVar(&selfUpdateDev, "dev", false, "Include pre-release versions")
+	selfUpdateCmd.Flags().BoolVar(&selfUpdateBase, "base", false, "Update the base image without updating the condatainer binary")
 }
 
-func runUpdate(cmd *cobra.Command, args []string) error {
+func runSelfUpdate(cmd *cobra.Command, args []string) error {
 	// Get current executable path
 	exePath, err := os.Executable()
 	if err != nil {
@@ -85,7 +177,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Handle --base flag: update only the base image, skip binary update
-	if updateBase {
+	if selfUpdateBase {
 		utils.PrintMessage("Updating base image...")
 		if err := build.EnsureBaseImage(cmd.Context(), true); err != nil {
 			return fmt.Errorf("failed to update base image: %w", err)
@@ -94,7 +186,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if updateDev {
+	if selfUpdateDev {
 		utils.PrintNote("Dev mode enabled, including pre-release versions")
 	}
 
@@ -102,7 +194,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	// Get release from GitHub API
 	var releaseURL string
-	if updateDev {
+	if selfUpdateDev {
 		// Fetch all releases to find the latest (including pre-releases)
 		releaseURL = fmt.Sprintf("https://api.github.com/repos/%s/releases", config.GITHUB_REPO)
 	} else {
@@ -133,7 +225,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	var release releaseInfo
 
-	if updateDev {
+	if selfUpdateDev {
 		// Parse array of releases and find the latest
 		var releases []releaseInfo
 		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
@@ -162,7 +254,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	// latest version is newer (so we update).
 	cmp := compareVersions(currentVersion, latestVersion)
 
-	if cmp >= 0 && !updateForce {
+	if cmp >= 0 && !selfUpdateForce {
 		// Current version >= latest version (equal or newer)
 		if cmp == 0 {
 			utils.PrintSuccess("Already on the latest version %s!", utils.StyleNumber(latestVersion))
@@ -181,7 +273,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ask for confirmation unless global --yes flag or --force flag is provided
-	if !utils.ShouldAnswerYes() && !updateForce {
+	if !utils.ShouldAnswerYes() && !selfUpdateForce {
 		fmt.Print("Are you sure you want to download and replace the current binary from GitHub releases? [y/N]: ")
 		confirm, err := utils.ReadLineContext(cmd.Context())
 		if err != nil || (confirm != "y" && confirm != "yes") {
@@ -316,7 +408,7 @@ func downloadFile(url, destPath string) error {
 	}
 
 	// Create destination file
-	out, err := os.Create(destPath)
+	out, err := utils.CreateFileWritable(destPath)
 	if err != nil {
 		return err
 	}
@@ -324,5 +416,8 @@ func downloadFile(url, destPath string) error {
 
 	// Copy data
 	_, err = io.Copy(out, resp.Body)
-	return err
+	if err != nil {
+		return err
+	}
+	return os.Chmod(destPath, utils.PermFile)
 }

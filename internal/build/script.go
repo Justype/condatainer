@@ -136,7 +136,7 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 
 	s.saveEnvFile(targetPath)
 
-	if err := os.Chmod(finalPath, 0o664); err != nil {
+	if err := os.Chmod(finalPath, utils.PermFile); err != nil {
 		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
 	}
 
@@ -232,7 +232,7 @@ func (s *ScriptBuildObject) buildExecOpts() (execpkg.Options, error) {
 		}
 	} else {
 		if s.isRef {
-			if err := os.MkdirAll(s.cntDirPath, 0o775); err != nil {
+			if err := os.MkdirAll(s.cntDirPath, utils.PermDir); err != nil {
 				return execpkg.Options{}, fmt.Errorf("failed to create cnt_dir %s: %w", s.cntDirPath, err)
 			}
 			targetDir := filepath.Join(s.cntDirPath, s.nameVersion)

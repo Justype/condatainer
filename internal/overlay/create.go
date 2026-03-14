@@ -183,7 +183,7 @@ func CreateWithOptions(ctx context.Context, opts *CreateOptions) error {
 	}
 
 	// Set permissions on overlay image (664 for group-writable)
-	if err := os.Chmod(opts.Path, 0o664); err != nil {
+	if err := os.Chmod(opts.Path, utils.PermFile); err != nil {
 		utils.PrintDebug("Failed to set permissions on %s: %v", opts.Path, err)
 	}
 

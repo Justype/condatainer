@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"compress/gzip"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
@@ -17,6 +19,24 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
+
+// ForceRefreshHelpers skips the helper metadata disk cache when set.
+var ForceRefreshHelpers bool
+
+// RemoteHelperMetadataCache is the on-disk envelope for cached helper script metadata.
+type RemoteHelperMetadataCache struct {
+	FetchedAt time.Time                            `json:"fetched_at"`
+	SourceURL string                               `json:"source_url"`
+	Metadata  map[string]map[string]rawHelperEntry `json:"metadata"`
+}
+
+// rawHelperEntry is the wire format for a helper script entry (no SourceURL).
+type rawHelperEntry struct {
+	Path string `json:"path"`
+}
+
+// in-process cache for helper metadata, keyed by base URL
+var cachedHelperMetadataByURL = map[string]map[string]map[string]HelperScriptEntry{}
 
 var (
 	helperPath   bool
@@ -234,7 +254,7 @@ func runHelper(cmd *cobra.Command, args []string) error {
 // updateHelperScripts downloads and updates helper scripts from remote metadata
 func updateHelperScripts(args []string, helperScriptsDir string) error {
 	// Fetch remote metadata
-	metadata, err := fetchRemoteHelperMetadata()
+	metadata, err := GetAllRemoteHelperMetadata()
 	if err != nil {
 		return fmt.Errorf("failed to fetch remote helper metadata: %w", err)
 	}
@@ -298,7 +318,11 @@ func updateHelperScripts(args []string, helperScriptsDir string) error {
 			continue
 		}
 
-		url := fmt.Sprintf("%s/%s", config.Global.ScriptsLink, entry.Path)
+		sourceURL := entry.SourceURL
+		if sourceURL == "" {
+			sourceURL = config.Global.ScriptsLink
+		}
+		url := fmt.Sprintf("%s/%s", sourceURL, entry.Path)
 		destName := filepath.Base(entry.Path)
 		dest := filepath.Join(helperScriptsDir, destName)
 
@@ -313,16 +337,108 @@ func updateHelperScripts(args []string, helperScriptsDir string) error {
 	return nil
 }
 
-// HelperScriptEntry represents a helper script metadata entry
+// HelperScriptEntry represents a helper script metadata entry.
 type HelperScriptEntry struct {
-	Path string `json:"path"`
+	Path      string `json:"path"`
+	SourceURL string `json:"-"` // injected during merge; not stored in remote JSON
 }
 
-// fetchRemoteHelperMetadata fetches the helper scripts metadata from the configured scripts_link
-func fetchRemoteHelperMetadata() (map[string]map[string]HelperScriptEntry, error) {
-	url := config.Global.ScriptsLink + "/metadata/helper-scripts.json.gz"
-	utils.PrintMessage("Fetching metadata from %s...", url)
+// helperMetadataCachePathForURL returns the disk cache path for helper metadata from a given base URL.
+func helperMetadataCachePathForURL(baseURL string) (string, error) {
+	cacheDir, err := config.GetWritableCacheDir()
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256([]byte(baseURL))
+	name := fmt.Sprintf("helper-scripts-%x.json.gz", h[:6])
+	return filepath.Join(cacheDir, name), nil
+}
 
+func loadHelperMetadataCacheAny(path, baseURL string, ttl time.Duration, checkTTL bool) (*RemoteHelperMetadataCache, error) {
+	var cache RemoteHelperMetadataCache
+	if err := utils.ReadGzipJSONFile(path, &cache); err != nil {
+		return nil, err
+	}
+	if cache.SourceURL != baseURL {
+		return nil, fmt.Errorf("source URL changed")
+	}
+	if checkTTL && time.Since(cache.FetchedAt) > ttl {
+		return nil, fmt.Errorf("cache expired")
+	}
+	return &cache, nil
+}
+
+// fetchHelperMetadataFromURL fetches (or loads from per-URL cache) helper metadata for one base URL.
+// Injects SourceURL into each entry during conversion.
+func fetchHelperMetadataFromURL(baseURL string) (map[string]map[string]HelperScriptEntry, error) {
+	// In-process cache
+	if cached, ok := cachedHelperMetadataByURL[baseURL]; ok {
+		return cached, nil
+	}
+
+	metaURL := baseURL + "/metadata/helper-scripts.json.gz"
+	cachePath, cacheErr := helperMetadataCachePathForURL(baseURL)
+
+	ttl := config.Global.MetadataCacheTTL
+
+	// Try disk cache
+	if !ForceRefreshHelpers && cacheErr == nil && ttl > 0 {
+		if cache, err := loadHelperMetadataCacheAny(cachePath, baseURL, ttl, true); err == nil {
+			utils.PrintDebug("Using cached helper metadata for %s (fetched %s ago)", baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
+			result := injectHelperSourceURL(cache.Metadata, baseURL)
+			cachedHelperMetadataByURL[baseURL] = result
+			return result, nil
+		}
+	}
+
+	// Network fetch
+	utils.PrintDebug("Fetching helper metadata from %s...", baseURL)
+	rawMeta, err := fetchRawHelperMetadata(metaURL)
+	if err != nil {
+		// Stale fallback
+		if cacheErr == nil {
+			if cache, staleErr := loadHelperMetadataCacheAny(cachePath, baseURL, 0, false); staleErr == nil {
+				utils.PrintWarning("Network unavailable for %s; using cached helper metadata (fetched %s ago)",
+					baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
+				result := injectHelperSourceURL(cache.Metadata, baseURL)
+				cachedHelperMetadataByURL[baseURL] = result
+				return result, nil
+			}
+		}
+		return nil, err
+	}
+
+	// Persist to disk (non-fatal)
+	if cacheErr == nil && ttl > 0 {
+		envelope := RemoteHelperMetadataCache{
+			FetchedAt: time.Now(),
+			SourceURL: baseURL,
+			Metadata:  rawMeta,
+		}
+		if err := utils.WriteGzipJSONFileAtomic(cachePath, envelope); err != nil {
+			utils.PrintDebug("Failed to write helper metadata cache for %s: %v", baseURL, err)
+		}
+	}
+
+	result := injectHelperSourceURL(rawMeta, baseURL)
+	cachedHelperMetadataByURL[baseURL] = result
+	return result, nil
+}
+
+// injectHelperSourceURL converts raw entries to HelperScriptEntry, injecting SourceURL.
+func injectHelperSourceURL(raw map[string]map[string]rawHelperEntry, baseURL string) map[string]map[string]HelperScriptEntry {
+	out := make(map[string]map[string]HelperScriptEntry, len(raw))
+	for category, scripts := range raw {
+		out[category] = make(map[string]HelperScriptEntry, len(scripts))
+		for name, e := range scripts {
+			out[category][name] = HelperScriptEntry{Path: e.Path, SourceURL: baseURL}
+		}
+	}
+	return out
+}
+
+// fetchRawHelperMetadata performs the HTTP+gzip+JSON fetch for helper metadata.
+func fetchRawHelperMetadata(url string) (map[string]map[string]rawHelperEntry, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
@@ -344,12 +460,48 @@ func fetchRemoteHelperMetadata() (map[string]map[string]HelperScriptEntry, error
 		return nil, err
 	}
 
-	var metadata map[string]map[string]HelperScriptEntry
+	var metadata map[string]map[string]rawHelperEntry
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		return nil, err
 	}
-
 	return metadata, nil
+}
+
+// GetAllRemoteHelperMetadata merges helper metadata from all configured remote URLs.
+// Earlier URLs in ScriptsLinks take precedence (first match per category/name wins).
+func GetAllRemoteHelperMetadata() (map[string]map[string]HelperScriptEntry, error) {
+	if ForceRefreshHelpers {
+		cachedHelperMetadataByURL = map[string]map[string]map[string]HelperScriptEntry{}
+	}
+
+	merged := map[string]map[string]HelperScriptEntry{}
+	var firstErr error
+
+	for _, baseURL := range config.Global.ScriptsLinks {
+		meta, err := fetchHelperMetadataFromURL(baseURL)
+		if err != nil {
+			utils.PrintDebug("Failed to fetch helper metadata from %s: %v", baseURL, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		for category, scripts := range meta {
+			if _, ok := merged[category]; !ok {
+				merged[category] = map[string]HelperScriptEntry{}
+			}
+			for name, entry := range scripts {
+				if _, exists := merged[category][name]; !exists {
+					merged[category][name] = entry // earlier URL wins
+				}
+			}
+		}
+	}
+
+	if len(merged) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	return merged, nil
 }
 
 // downloadExecutable downloads a file and makes it executable
@@ -370,7 +522,7 @@ func downloadExecutable(url, destPath string) error {
 	}
 
 	// Write file
-	out, err := os.Create(destPath)
+	out, err := utils.CreateFileWritable(destPath)
 	if err != nil {
 		return err
 	}

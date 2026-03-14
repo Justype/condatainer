@@ -98,9 +98,10 @@ type BaseBuildObject struct {
 	tmpOverlayPath    string
 	targetOverlayPath string
 	cntDirPath        string
-	submitJob         bool // Whether to submit to scheduler (from config at construction time)
-	isRemote          bool // Whether build source was downloaded
-	update            bool // If true, rebuild even if overlay already exists (atomic .new swap)
+	submitJob         bool   // Whether to submit to scheduler (from config at construction time)
+	isRemote          bool   // Whether build source was downloaded
+	prebuiltLink      string // per-source prebuilt base URL (from metadata/prebuilt_link); empty = no prebuilt
+	update            bool   // If true, rebuild even if overlay already exists (atomic .new swap)
 	scriptSpecs       *scheduler.ScriptSpecs
 
 	// Interactive inputs for shell scripts
@@ -233,7 +234,7 @@ func (b *BaseBuildObject) CreateTmpOverlay(ctx context.Context, force bool) erro
 	// Ensure parent directory for tmp overlay exists (mkdir -p)
 	parentDir := filepath.Dir(b.tmpOverlayPath)
 	if parentDir != "" {
-		if err := os.MkdirAll(parentDir, 0o775); err != nil {
+		if err := os.MkdirAll(parentDir, utils.PermDir); err != nil {
 			return fmt.Errorf("failed to create tmp overlay parent dir %s: %w", parentDir, err)
 		}
 	}
@@ -266,10 +267,10 @@ func (b *BaseBuildObject) CreateBuildDirs(ctx context.Context, force bool) error
 		os.Remove(b.tmpOverlayPath) //nolint:errcheck — clean ext3-mode artifact (no-op if "")
 	}
 
-	if err := os.MkdirAll(b.cntDirPath, 0o775); err != nil {
+	if err := os.MkdirAll(b.cntDirPath, utils.PermDir); err != nil {
 		return fmt.Errorf("failed to create build cnt dir %s: %w", b.cntDirPath, err)
 	}
-	if err := os.MkdirAll(filepath.Join(buildDir, "tmp"), 0o775); err != nil {
+	if err := os.MkdirAll(filepath.Join(buildDir, "tmp"), utils.PermDir); err != nil {
 		return fmt.Errorf("failed to create build tmp dir: %w", err)
 	}
 	utils.PrintMessage("Build dir: %s", utils.StylePath(buildDir))
@@ -709,6 +710,7 @@ func resolveBuildSource(base *BaseBuildObject, tmpDir string) (isConda bool, isC
 		}
 		base.buildSource = localPath
 		base.isRemote = true
+		base.prebuiltLink = info.PrebuiltLink
 		utils.PrintDebug("Downloaded remote build script to %s", utils.StylePath(localPath))
 	} else {
 		base.buildSource = info.Path

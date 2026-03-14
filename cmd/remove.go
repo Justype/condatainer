@@ -118,15 +118,10 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	// Sort for consistent display
 	sort.Strings(filtered)
 
-	// Display overlays to be removed with highlighted terms
+	// Display overlays to be removed
 	fmt.Println("Overlays to be removed:")
-	highlightRe := query.HighlightRegexp()
 	for _, name := range filtered {
-		highlighted := name
-		if highlightRe != nil {
-			highlighted = highlightRe.ReplaceAllStringFunc(highlighted, utils.StyleWarning)
-		}
-		fmt.Printf(" - %s\n", highlighted)
+		fmt.Printf(" - %s\n", name)
 	}
 
 	// Ask for confirmation (skip if --yes flag is set)

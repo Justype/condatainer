@@ -473,7 +473,7 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	scriptPath := filepath.Join(outputDir, scriptName)
 
 	// Create the batch script
-	file, err := os.Create(scriptPath)
+	file, err := utils.CreateFileWritable(scriptPath)
 	if err != nil {
 		return "", NewScriptCreationError(jobSpec.Name, scriptPath, err)
 	}

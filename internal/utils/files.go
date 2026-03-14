@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -203,4 +205,83 @@ func EnsureDir(path string) error {
 		return nil
 	}
 	return os.MkdirAll(path, PermDir)
+}
+
+// CreateFileWritable creates or truncates a file using standard writable file permissions.
+func CreateFileWritable(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, PermFile)
+}
+
+// IsWritableDir checks whether dir is writable by creating a small probe file.
+// It creates the directory if needed and enforces standard directory/file permissions.
+func IsWritableDir(dir string) bool {
+	if err := os.MkdirAll(dir, PermDir); err != nil {
+		return false
+	}
+	_ = os.Chmod(dir, PermDir)
+
+	testFile := filepath.Join(dir, ".write-test")
+	f, err := os.OpenFile(testFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, PermFile)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	_ = os.Chmod(testFile, PermFile)
+	_ = os.Remove(testFile)
+	return true
+}
+
+// --- Gzip JSON Helpers ---
+
+// ReadGzipJSONFile opens a .json.gz file and decodes JSON into out.
+func ReadGzipJSONFile(path string, out any) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	gzReader, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer gzReader.Close()
+
+	return json.NewDecoder(gzReader).Decode(out)
+}
+
+// WriteGzipJSONFileAtomic encodes value as JSON, writes it as .json.gz to a temp file,
+// then atomically renames it to path.
+func WriteGzipJSONFileAtomic(path string, value any) error {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, PermFile)
+	if err != nil {
+		return err
+	}
+
+	gzWriter, err := gzip.NewWriterLevel(f, gzip.BestSpeed)
+	if err != nil {
+		f.Close()
+		return err
+	}
+	if err := json.NewEncoder(gzWriter).Encode(value); err != nil {
+		gzWriter.Close()
+		f.Close()
+		return err
+	}
+	if err := gzWriter.Close(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, PermFile); err != nil {
+		return err
+	}
+	return nil
 }

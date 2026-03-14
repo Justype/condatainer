@@ -390,7 +390,7 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 
 	// === Create wrapper bash script ===
 	shPath := filepath.Join(outputDir, fmt.Sprintf("%s.sh", name))
-	shFile, err := os.Create(shPath)
+	shFile, err := utils.CreateFileWritable(shPath)
 	if err != nil {
 		return "", NewScriptCreationError(jobSpec.Name, shPath, err)
 	}
@@ -442,7 +442,7 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 
 	// === Create HTCondor submit file ===
 	subPath := filepath.Join(outputDir, fmt.Sprintf("%s.sub", name))
-	subFile, err := os.Create(subPath)
+	subFile, err := utils.CreateFileWritable(subPath)
 	if err != nil {
 		return "", NewScriptCreationError(jobSpec.Name, subPath, err)
 	}

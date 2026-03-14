@@ -113,7 +113,7 @@ func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		return err
 	}
 
-	if err := os.Chmod(finalPath, 0o664); err != nil {
+	if err := os.Chmod(finalPath, utils.PermFile); err != nil {
 		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
 	}
 
