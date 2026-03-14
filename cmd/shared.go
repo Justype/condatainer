@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -14,6 +15,187 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
+
+// ============================================================================
+// Search / filter helpers shared by avail, list, and remove
+// ============================================================================
+
+// SearchMode describes how a SearchQuery matches candidate names.
+type SearchMode int
+
+const (
+	SearchModeAnd     SearchMode = iota // all terms must substring-match (default)
+	SearchModeExact                     // each term is an exact full-name match (OR across terms)
+	SearchModePattern                   // single term compiled as regex (wildcard or literal regex)
+)
+
+// SearchQuery holds the compiled, normalised search state for one command invocation.
+type SearchQuery struct {
+	Raw     []string // normalised (lowercased) terms
+	Mode    SearchMode
+	pattern *regexp.Regexp // set only when Mode == SearchModePattern
+}
+
+// NewSearchQuery builds a SearchQuery from normalised filter terms.
+// exactLookup(term) must return true when term is a case-insensitive exact full
+// name in the candidate set (installed overlays or available build scripts).
+// Pass nil to skip exact-first detection.
+//
+// Detection order (single term):
+//  1. exactLookup match            → SearchModeExact
+//  2. regex metacharacters present → SearchModePattern (regex)
+//  3. '*' or '?' present           → SearchModePattern (wildcard anchored)
+//  4. plain string                 → SearchModeAnd (substring)
+//
+// Multiple terms: exact-first detection only (no pattern matching).
+func NewSearchQuery(filters []string, exactLookup func(string) bool) *SearchQuery {
+	q := &SearchQuery{Raw: filters}
+	if len(filters) == 0 {
+		q.Mode = SearchModeAnd
+		return q
+	}
+
+	// Multiple terms: exact-first only
+	if len(filters) > 1 {
+		if exactLookup != nil && exactLookup(filters[0]) {
+			q.Mode = SearchModeExact
+		} else {
+			q.Mode = SearchModeAnd
+		}
+		return q
+	}
+
+	// Single term
+	term := filters[0]
+
+	// 1. Exact lookup takes highest priority
+	if exactLookup != nil && exactLookup(term) {
+		q.Mode = SearchModeExact
+		return q
+	}
+
+	// 2. Regex metacharacters before wildcard check (e.g. ^term.*another)
+	if strings.ContainsAny(term, `^$([+{|`) {
+		re, err := regexp.Compile("(?i)" + term)
+		if err != nil {
+			utils.PrintWarning("Invalid regex pattern %q, using substring match: %v", term, err)
+			q.Mode = SearchModeAnd
+			return q
+		}
+		q.Mode = SearchModePattern
+		q.pattern = re
+		return q
+	}
+
+	// 3. Wildcard (* or ?)
+	if strings.ContainsAny(term, "*?") {
+		re, err := regexp.Compile("(?i)^" + wildcardToRegex(term) + "$")
+		if err != nil {
+			utils.PrintWarning("Invalid wildcard pattern %q, using substring match: %v", term, err)
+			q.Mode = SearchModeAnd
+			return q
+		}
+		q.Mode = SearchModePattern
+		q.pattern = re
+		return q
+	}
+
+	// 4. Plain substring
+	q.Mode = SearchModeAnd
+	return q
+}
+
+// wildcardToRegex converts a glob-style wildcard pattern to a regex fragment.
+// '*' → '.*', '?' → '.', all other characters are escaped.
+func wildcardToRegex(term string) string {
+	var sb strings.Builder
+	for _, ch := range term {
+		switch ch {
+		case '*':
+			sb.WriteString(".*")
+		case '?':
+			sb.WriteByte('.')
+		default:
+			sb.WriteString(regexp.QuoteMeta(string(ch)))
+		}
+	}
+	return sb.String()
+}
+
+// Matches reports whether name satisfies the query.
+func (q *SearchQuery) Matches(name string) bool {
+	if len(q.Raw) == 0 {
+		return true
+	}
+	switch q.Mode {
+	case SearchModePattern:
+		return q.pattern.MatchString(name)
+	case SearchModeExact:
+		nameLower := strings.ToLower(name)
+		for _, term := range q.Raw {
+			if nameLower == term {
+				return true
+			}
+		}
+		return false
+	default: // SearchModeAnd
+		nameLower := strings.ToLower(name)
+		for _, term := range q.Raw {
+			if !strings.Contains(nameLower, term) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// MatchesOrAlias is like Matches but, in exact mode only, also accepts alias as an
+// alternative name (e.g. "rstudio-server" for "ubuntu24/rstudio-server").
+// Pass an empty alias to skip the alias check.
+func (q *SearchQuery) MatchesOrAlias(name, alias string) bool {
+	if q.Matches(name) {
+		return true
+	}
+	if q.Mode == SearchModeExact && alias != "" {
+		return q.Matches(alias)
+	}
+	return false
+}
+
+// HighlightRegexp returns a compiled regex suitable for single-pass term highlighting.
+// Returns nil when there are no terms.
+// In pattern mode the match regex itself is reused.
+// In and/exact modes every raw term is highlighted literally.
+func (q *SearchQuery) HighlightRegexp() *regexp.Regexp {
+	if len(q.Raw) == 0 {
+		return nil
+	}
+	if q.Mode == SearchModePattern {
+		return q.pattern
+	}
+	sorted := make([]string, len(q.Raw))
+	copy(sorted, q.Raw)
+	sort.Slice(sorted, func(i, j int) bool { return len(sorted[i]) > len(sorted[j]) })
+	parts := make([]string, len(sorted))
+	for i, t := range sorted {
+		parts[i] = regexp.QuoteMeta(t)
+	}
+	re, _ := regexp.Compile("(?i)(" + strings.Join(parts, "|") + ")")
+	return re
+}
+
+// normalizeFilters lowercases and normalises a slice of raw user-supplied filter strings.
+func normalizeFilters(filters []string) []string {
+	normalized := make([]string, 0, len(filters))
+	for _, filter := range filters {
+		trimmed := strings.TrimSpace(filter)
+		if trimmed == "" {
+			continue
+		}
+		normalized = append(normalized, strings.ToLower(utils.NormalizeNameVersion(trimmed)))
+	}
+	return normalized
+}
 
 // CommonFlags holds the common flags used by exec, instance start, and instance exec
 type CommonFlags struct {

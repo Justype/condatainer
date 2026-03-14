@@ -517,7 +517,7 @@ Manage your local library of built containers and available recipes.
 
 ### Avail
 
-Search for available build scripts (both local scripts in build-scripts/ and remote metadata). Search terms are combined using **AND** logic (all terms must be present).
+Search for available build scripts (both local scripts in build-scripts/ and remote metadata).
 
 **Aliases:** `av`
 
@@ -531,30 +531,41 @@ condatainer avail [search_terms...] [flags]
 * `-i`, `--install`: Install any found packages that are not currently installed.
 * `-a`, `--add`: Alias for `--install`.
 
+**Search rules:**
+
+| Input | Mode |
+|---|---|
+| Single plain string | Substring match |
+| Single term with `*` / `?` | Wildcard (e.g. `cell*`) |
+| Single term with `^` `$` `(` `[` `+` `{` `\|` | Regex (e.g. `^cell.*9\.0`) |
+| Multiple terms, first is an exact name | Each term matched exactly (OR) |
+| Multiple terms, first not found | All terms AND substring |
+
 **Examples:**
 
 ```bash
+# Substring search
+$ condatainer avail cellranger
+
+# Wildcard
+$ condatainer avail 'cell*'
+
+# AND search with multiple terms
+$ condatainer avail cellranger 9
+
+# Install exact version
+$ condatainer avail cellranger/9.0.1 -i
+
 # Search for all resources matching 'grcm' and 'M33'
 $ condatainer avail grcm M33
 grcm39/gtf-gencode/M33
 grcm39/salmon/1.10.2/gencodeM33
 grcm39/star-2.7.11b/gencodeM33-101
-grcm39/star-2.7.11b/gencodeM33-151
-grcm39/transcript-gencode/M33
-
-# Search for salmon using specific reference tags
-$ condatainer avail grcm M33 salmon
-grcm39/salmon/1.10.2/gencodeM33
-
-# Directly install from search results (will have prompt)
-$ condatainer avail grcm M33 salmon -i
-grcm39/gtf-gencode/M33
-[CondaTainer] Do you want to install the above overlays? [y/N]:
 ```
 
 ### List
 
-List installed overlays stored in the `images/` directory (app and reference overlays now share that location).
+List installed overlays stored in the `images/` directory.
 
 **Aliases:** `ls`
 
@@ -566,19 +577,29 @@ condatainer list [search_terms...] [flags]
 
 * `-d`, `--delete`: Prompt to delete listed overlays after displaying them.
 * `-r`, `--remove`: Alias for `--delete`.
-* `-e`, `--exact`: Require exact match instead of substring match.
+
+**Search rules:**
+
+Same as `avail` (single term: substring/wildcard/regex; multiple terms: exact-first or AND substring). Distro-prefix aliases are recognised for exact multi-term matching (e.g. `rstudio-server` matches `ubuntu24/rstudio-server`).
 
 **Features:**
 
-* Lists both app overlays (with versions) and reference overlays.
+* Lists app overlays (with versions), OS overlays, and data overlays.
 * Searches across all image directories.
-* Marks system apps and env overlays.
-* Uses AND logic for multiple search terms (substring mode).
 * Exits with code `1` if no overlays match the search terms.
+
+**Examples:**
+
+```bash
+$ condatainer list cellranger          # substring
+$ condatainer list 'cell*'             # wildcard
+$ condatainer list cellranger 9        # AND search
+$ condatainer list cellranger/9.0.1 -d # show then prompt to delete
+```
 
 ### Remove
 
-Deletes specific overlays and their associated .env files.
+Deletes specific overlays and their associated `.env` files.
 
 **Aliases:** `rm`, `delete`, `uninstall`
 
@@ -586,12 +607,31 @@ Deletes specific overlays and their associated .env files.
 condatainer remove [search_terms...]
 ```
 
+**Search rules:**
+
+| Input | Mode |
+|---|---|
+| Single plain string | Exact match (including distro-prefix alias) |
+| Single term with `*` / `?` | Wildcard |
+| Single term with `^` `$` `(` `[` `+` `{` `\|` | Regex |
+| Multiple terms, first is an exact name | Each term matched exactly (OR), warns if not found |
+| Multiple terms, first not found | All terms AND substring |
+
 **Features:**
 
-* Exact match mode for single overlay names.
-* Search mode with AND logic for multiple terms.
 * Prompts for confirmation before deletion.
-* Only removes from writable directories.
+* Warns if an exact term is not found.
+* Only removes overlays in writable directories.
+
+**Examples:**
+
+```bash
+$ condatainer rm cellranger/9.0.1                    # exact version
+$ condatainer rm cellranger                          # all cellranger versions (exact)
+$ condatainer rm 'cell*'                             # wildcard
+$ condatainer rm cellranger/9.0.1 cellranger/8.0.1  # multiple exact versions
+$ condatainer rm cellranger 9                        # AND search
+```
 
 ## Exec
 

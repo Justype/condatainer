@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -14,20 +13,27 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-var (
-	listDelete bool
-	listExact  bool
-)
+var listDelete bool
 
 var listCmd = &cobra.Command{
 	Use:     "list [terms...]",
 	Aliases: []string{"ls"},
 	Short:   "List installed overlays matching search terms",
-	Long:    `List installed overlays with optional search filtering.`,
-	Example: `  condatainer list              # List all installed overlays
-  condatainer list samtools     # Search for samtools
-  condatainer list sam 1.22     # Search with multiple terms (AND logic)
-  condatainer list -e python    # Exact match only`,
+	Long: `List installed overlays with optional search filtering.
+
+Search rules (single term):
+  Plain string  substring match
+  cell*         wildcard (* and ?)
+  ^cell.*9\.0   regex (any of ^ $ ( [ + { |)
+
+Search rules (multiple terms, space-separated):
+  First term is an exact name  → all terms treated as exact names
+  First term not found         → AND substring match`,
+	Example: `  condatainer list                      # List all
+  condatainer list cellranger           # Substring match
+  condatainer list 'cell*'              # Wildcard
+  condatainer list cellranger 9         # AND search (multiple terms)
+  condatainer list cellranger/9.0.1 -d  # Delete exact version`,
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runList,
 }
@@ -36,13 +42,35 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.Flags().BoolVarP(&listDelete, "delete", "d", false, "Delete listed overlays after confirmation (used with search terms)")
 	listCmd.Flags().BoolP("remove", "r", false, "Alias for --delete")
-	listCmd.Flags().BoolVarP(&listExact, "exact", "e", false, "Require exact match instead of substring match")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
 	filters := normalizeFilters(args)
 
-	appOverlays, dataOverlays, err := scanOverlays(filters, listExact)
+	// Build exact lookup from installed overlay names (including distro-prefix aliases)
+	installedMap, err := getInstalledOverlaysMap()
+	if err != nil {
+		return err
+	}
+	distroLower := strings.ToLower(config.Global.DefaultDistro)
+	distroPrefix := distroLower + "/"
+	installedLower := make(map[string]bool, len(installedMap))
+	for name := range installedMap {
+		lower := strings.ToLower(name)
+		installedLower[lower] = true
+		if distroLower != "" {
+			if alias, ok := strings.CutPrefix(lower, distroPrefix); ok {
+				installedLower[alias] = true
+			}
+		}
+	}
+	var listExactLookup func(string) bool
+	if len(filters) > 1 {
+		listExactLookup = func(term string) bool { return installedLower[term] }
+	}
+	query := NewSearchQuery(filters, listExactLookup)
+
+	appOverlays, dataOverlays, err := scanOverlays(query)
 	if err != nil {
 		return err
 	}
@@ -139,9 +167,6 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	if listDelete && len(filters) > 0 && (len(appOverlays) > 0 || len(dataOverlays) > 0) {
-		fmt.Println()
-		fmt.Println("==================REMOVE==================")
-
 		// Collect all matching overlays for deletion
 		allMatching := []string{}
 		for name, versions := range appOverlays {
@@ -158,41 +183,12 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 
 		if len(allMatching) > 0 {
-			fmt.Println("Overlays to be removed:")
-			for _, name := range allMatching {
-				highlighted := name
-
-				// Use single-pass highlighting to avoid ANSI code interference
-				if len(filters) > 0 {
-					// Sort filters by length (longest first) to prefer longer matches
-					sortedFilters := make([]string, len(filters))
-					copy(sortedFilters, filters)
-					sort.Slice(sortedFilters, func(i, j int) bool {
-						return len(sortedFilters[i]) > len(sortedFilters[j])
-					})
-
-					// Combine all terms into one regex with alternation
-					patterns := make([]string, len(sortedFilters))
-					for i, term := range sortedFilters {
-						patterns[i] = regexp.QuoteMeta(term)
-					}
-					combinedPattern := "(?i)(" + strings.Join(patterns, "|") + ")"
-					re := regexp.MustCompile(combinedPattern)
-
-					highlighted = re.ReplaceAllStringFunc(highlighted, func(match string) string {
-						return utils.StyleWarning(match)
-					})
-				}
-
-				fmt.Printf(" - %s\n", highlighted)
-			}
-
 			fmt.Print("\n")
 			shouldDelete := false
 			if utils.ShouldAnswerYes() {
 				shouldDelete = true
 			} else {
-				fmt.Print("Are you sure? Cannot be undone. [y/N]: ")
+				fmt.Printf("Remove listed %d overlay(s)? Cannot be undone. [y/N]: ", len(allMatching))
 				choice, choiceErr := utils.ReadLineContext(cmd.Context())
 				shouldDelete = choiceErr == nil && (choice == "y" || choice == "yes")
 			}
@@ -233,7 +229,7 @@ func runList(cmd *cobra.Command, args []string) error {
 // app overlays (map[name][]version) and data overlays ([]displayName).
 // OS overlays (Apptainer-built SIF/SquashFS) are treated as app overlays
 // regardless of their delimiter count.
-func scanOverlays(filters []string, exactMatch bool) (map[string][]string, []string, error) {
+func scanOverlays(query *SearchQuery) (map[string][]string, []string, error) {
 	appGrouped := map[string]map[string]struct{}{}
 	var dataList []string
 	seen := make(map[string]bool)
@@ -262,16 +258,16 @@ func scanOverlays(filters []string, exactMatch bool) (map[string][]string, []str
 
 			if !osOverlay && delimCount > 1 {
 				// Data overlay: filter without alias
-				if matchesFilters(normalized, filters, exactMatch) {
+				if query.Matches(normalized) {
 					dataList = append(dataList, strings.ReplaceAll(nameVersion, "--", "/"))
 				}
 				continue
 			}
 
 			// App overlay (OS or regular): filter with distro-prefix alias fallback
-			if !matchesFilters(normalized, filters, exactMatch) {
+			if !query.Matches(normalized) {
 				alias := strings.TrimPrefix(normalized, distroPrefix)
-				if alias == normalized || !matchesFilters(alias, filters, exactMatch) {
+				if alias == normalized || !query.Matches(alias) {
 					continue
 				}
 			}
@@ -309,40 +305,6 @@ func scanOverlays(filters []string, exactMatch bool) (map[string][]string, []str
 	}
 	sort.Strings(dataList)
 	return apps, dataList, nil
-}
-
-func normalizeFilters(filters []string) []string {
-	normalized := make([]string, 0, len(filters))
-	for _, filter := range filters {
-		trimmed := strings.TrimSpace(filter)
-		if trimmed == "" {
-			continue
-		}
-		normalized = append(normalized, strings.ToLower(utils.NormalizeNameVersion(trimmed)))
-	}
-	return normalized
-}
-
-func matchesFilters(name string, filters []string, exactMatch bool) bool {
-	if len(filters) == 0 {
-		return true
-	}
-	if exactMatch {
-		// For exact match, the name must equal one of the filters
-		for _, filter := range filters {
-			if name == filter {
-				return true
-			}
-		}
-		return false
-	}
-	// For substring match, all filters must be present in the name
-	for _, filter := range filters {
-		if !strings.Contains(name, filter) {
-			return false
-		}
-	}
-	return true
 }
 
 func maxWidth(names []string) int {
