@@ -30,12 +30,24 @@ var availCmd = &cobra.Command{
 By default, shows both local and remote build scripts.
 When duplicates exist, local scripts take precedence.
 Use --remote to make remote scripts take precedence over local.
-Use search terms to filter results (AND logic applied).
+
+Search rules (single term):
+  Plain string  substring match
+  cell*         wildcard (* and ?)
+  ^cell.*9\.0   regex (any of ^ $ ( [ + { |)
+
+Search rules (multiple terms, space-separated):
+  First term is an exact name  → all terms treated as exact names
+  First term not found         → AND substring match
 
 Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
-	Example: `  condatainer avail              # List all (local takes precedence on duplicates)
-  condatainer avail --remote     # List all (remote takes precedence on duplicates)
-  condatainer avail sam 1.21     # Search with multiple terms (AND logic)`,
+	Example: `  condatainer avail                          # List all
+  condatainer avail --remote                 # Remote takes precedence on duplicates
+  condatainer avail cellranger               # Substring match
+  condatainer avail 'cell*'                  # Wildcard
+  condatainer avail 'cellranger|spaceranger' # Regex
+  condatainer avail cellranger 9             # AND search (multiple terms)
+  condatainer avail cellranger/9.0.1 -i      # Install exact version`,
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runAvail,
 }
@@ -139,8 +151,38 @@ func runAvail(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Filter packages
-	filtered := filterPackages(packages, filters)
+	// Build search query (exact-first: check if first term is a known package name or alias)
+	distroLower := strings.ToLower(config.Global.DefaultDistro)
+	distroPrefix := distroLower + "/"
+	packageNameSet := make(map[string]bool, len(packages))
+	for _, pkg := range packages {
+		lower := strings.ToLower(pkg.Name)
+		packageNameSet[lower] = true
+		if distroLower != "" {
+			if alias, ok := strings.CutPrefix(lower, distroPrefix); ok {
+				packageNameSet[alias] = true
+			}
+		}
+	}
+	var availExactLookup func(string) bool
+	if len(filters) > 1 {
+		availExactLookup = func(term string) bool { return packageNameSet[term] }
+	}
+	query := NewSearchQuery(filters, availExactLookup)
+
+	// Filter packages; in exact mode also accept distro-prefix alias
+	filtered := make([]PackageInfo, 0)
+	for _, pkg := range packages {
+		var alias string
+		if distroLower != "" {
+			if a, ok := strings.CutPrefix(strings.ToLower(pkg.Name), distroPrefix); ok {
+				alias = a
+			}
+		}
+		if query.MatchesOrAlias(pkg.Name, alias) {
+			filtered = append(filtered, pkg)
+		}
+	}
 
 	if len(filtered) == 0 {
 		utils.PrintWarning("No matching build scripts found.")
@@ -158,8 +200,9 @@ func runAvail(cmd *cobra.Command, args []string) error {
 	}
 
 	// Print results
+	highlightRe := query.HighlightRegexp()
 	for _, pkg := range filtered {
-		line := formatPackageLine(pkg, filters)
+		line := formatPackageLine(pkg, highlightRe)
 		fmt.Println(line)
 	}
 
@@ -296,31 +339,8 @@ func getInstalledOverlays() map[string]bool {
 	return installed
 }
 
-// filterPackages filters packages based on search terms (AND logic)
-func filterPackages(packages []PackageInfo, filters []string) []PackageInfo {
-	if len(filters) == 0 {
-		return packages
-	}
-
-	filtered := make([]PackageInfo, 0)
-	for _, pkg := range packages {
-		nameLower := strings.ToLower(pkg.Name)
-		matchAll := true
-		for _, filter := range filters {
-			if !strings.Contains(nameLower, filter) {
-				matchAll = false
-				break
-			}
-		}
-		if matchAll {
-			filtered = append(filtered, pkg)
-		}
-	}
-	return filtered
-}
-
 // formatPackageLine formats a package for display with optional highlighting
-func formatPackageLine(pkg PackageInfo, filters []string) string {
+func formatPackageLine(pkg PackageInfo, highlightRe *regexp.Regexp) string {
 	line := pkg.Name
 
 	// Compute alias before highlighting (e.g. "ubuntu24/igv" → "[igv]")
@@ -332,27 +352,8 @@ func formatPackageLine(pkg PackageInfo, filters []string) string {
 	}
 
 	// Highlight search terms in the name only (before adding suffixes)
-	// Use a single-pass approach to avoid ANSI code interference
-	if len(filters) > 0 {
-		// Build a combined regex pattern for all search terms
-		// Sort by length (longest first) to prefer longer matches
-		sortedFilters := make([]string, len(filters))
-		copy(sortedFilters, filters)
-		sort.Slice(sortedFilters, func(i, j int) bool {
-			return len(sortedFilters[i]) > len(sortedFilters[j])
-		})
-
-		// Combine all terms into one regex with alternation
-		patterns := make([]string, len(sortedFilters))
-		for i, term := range sortedFilters {
-			patterns[i] = regexp.QuoteMeta(term)
-		}
-		combinedPattern := "(?i)(" + strings.Join(patterns, "|") + ")"
-		re := regexp.MustCompile(combinedPattern)
-
-		line = re.ReplaceAllStringFunc(line, func(match string) string {
-			return utils.StyleHighlight(match)
-		})
+	if highlightRe != nil {
+		line = highlightRe.ReplaceAllStringFunc(line, utils.StyleHighlight)
 	}
 
 	// Build suffix (after highlighting to avoid highlighting text in suffixes)

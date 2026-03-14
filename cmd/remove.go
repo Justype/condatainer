@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -18,13 +17,23 @@ var removeCmd = &cobra.Command{
 	Use:     "remove [terms...]",
 	Aliases: []string{"rm", "delete", "uninstall"},
 	Short:   "Remove installed overlays matching search terms",
-	Long: `Remove installed overlays by exact name or search terms.
+	Long: `Remove installed overlays by name, alias, or search terms.
 
-Multiple terms use AND logic - all terms must match for an overlay to be selected.
+Search rules (single term):
+  Plain string  exact match (including distro-prefix alias)
+  cell*         wildcard (* and ?)
+  ^cell.*9\.0   regex (any of ^ $ ( [ + { |)
+
+Search rules (multiple terms, space-separated):
+  First term is an exact name  → all terms treated as exact names
+  First term not found         → AND substring match
+
 The command will ask for confirmation before removing overlays.`,
-	Example: `  condatainer remove samtools/1.22      # Remove exact overlay
-  condatainer remove samtools           # Remove all samtools versions
-  condatainer rm sam 1.22               # Search with multiple terms (AND logic)`,
+	Example: `  condatainer rm cellranger/9.0.1    # Remove exact version
+  condatainer rm cellranger          # Exact match: all cellranger
+  condatainer rm 'cell*'             # Wildcard
+  condatainer rm cellranger/9.0.1 cellranger/8.0.1 # Remove multiple
+  condatainer rm cellranger 9        # AND search (multiple terms)`,
 	Args:         cobra.MinimumNArgs(1),
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runRemove,
@@ -36,10 +45,7 @@ func init() {
 
 func runRemove(cmd *cobra.Command, args []string) error {
 	// Normalize search terms
-	terms := make([]string, len(args))
-	for i, term := range args {
-		terms[i] = utils.NormalizeNameVersion(term)
-	}
+	terms := normalizeFilters(args)
 
 	// Get installed overlays
 	installedOverlays, err := getInstalledOverlaysMap()
@@ -52,49 +58,54 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Filter overlays
-	var filtered []string
-	firstTermNormalized := strings.ToLower(terms[0])
-
-	// Check if first term is exact match
-	exactMatch := false
+	// Build search query (exact-first detection, including distro-prefix aliases)
+	distroLower := strings.ToLower(config.Global.DefaultDistro)
+	distroPrefix := distroLower + "/"
+	installedLower := make(map[string]bool, len(installedOverlays))
 	for name := range installedOverlays {
-		if strings.ToLower(name) == firstTermNormalized {
-			exactMatch = true
-			break
+		lower := strings.ToLower(name)
+		installedLower[lower] = true
+		if distroLower != "" {
+			if alias, ok := strings.CutPrefix(lower, distroPrefix); ok {
+				installedLower[alias] = true
+			}
+		}
+	}
+	query := NewSearchQuery(terms, func(term string) bool { return installedLower[term] })
+
+	// Filter overlays; in exact mode also accept distro-prefix alias
+	var filtered []string
+	for name := range installedOverlays {
+		var alias string
+		if distroLower != "" {
+			if a, ok := strings.CutPrefix(strings.ToLower(name), distroPrefix); ok {
+				alias = a
+			}
+		}
+		if query.MatchesOrAlias(name, alias) {
+			filtered = append(filtered, name)
 		}
 	}
 
-	if exactMatch {
-		// Exact match mode - treat terms as exact names
-		for _, term := range terms {
-			termLower := strings.ToLower(term)
+	// In exact mode, warn for any term that matched nothing (check full name and alias)
+	if query.Mode == SearchModeExact {
+		for _, term := range query.Raw {
 			found := false
-			for name := range installedOverlays {
-				if strings.ToLower(name) == termLower {
-					filtered = append(filtered, name)
+			for _, name := range filtered {
+				lower := strings.ToLower(name)
+				if lower == term {
 					found = true
 					break
+				}
+				if distroLower != "" {
+					if alias, ok := strings.CutPrefix(lower, distroPrefix); ok && alias == term {
+						found = true
+						break
+					}
 				}
 			}
 			if !found {
 				utils.PrintWarning("Overlay %s not found among installed overlays.", utils.StyleName(term))
-			}
-		}
-	} else {
-		// Search mode - match all terms (AND logic)
-		for name := range installedOverlays {
-			nameLower := strings.ToLower(name)
-			matchAll := true
-			for _, term := range terms {
-				termLower := strings.ToLower(term)
-				if !strings.Contains(nameLower, termLower) {
-					matchAll = false
-					break
-				}
-			}
-			if matchAll {
-				filtered = append(filtered, name)
 			}
 		}
 	}
@@ -109,31 +120,12 @@ func runRemove(cmd *cobra.Command, args []string) error {
 
 	// Display overlays to be removed with highlighted terms
 	fmt.Println("Overlays to be removed:")
+	highlightRe := query.HighlightRegexp()
 	for _, name := range filtered {
 		highlighted := name
-
-		// Use single-pass highlighting to avoid ANSI code interference
-		if len(terms) > 0 {
-			// Sort terms by length (longest first) to prefer longer matches
-			sortedTerms := make([]string, len(terms))
-			copy(sortedTerms, terms)
-			sort.Slice(sortedTerms, func(i, j int) bool {
-				return len(sortedTerms[i]) > len(sortedTerms[j])
-			})
-
-			// Combine all terms into one regex with alternation
-			patterns := make([]string, len(sortedTerms))
-			for i, term := range sortedTerms {
-				patterns[i] = regexp.QuoteMeta(term)
-			}
-			combinedPattern := "(?i)(" + strings.Join(patterns, "|") + ")"
-			re := regexp.MustCompile(combinedPattern)
-
-			highlighted = re.ReplaceAllStringFunc(highlighted, func(match string) string {
-				return utils.StyleWarning(match)
-			})
+		if highlightRe != nil {
+			highlighted = highlightRe.ReplaceAllStringFunc(highlighted, utils.StyleWarning)
 		}
-
 		fmt.Printf(" - %s\n", highlighted)
 	}
 
