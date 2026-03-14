@@ -350,8 +350,34 @@ func helperMetadataCachePathForURL(baseURL string) (string, error) {
 		return "", err
 	}
 	h := sha256.Sum256([]byte(baseURL))
-	name := fmt.Sprintf("helper-scripts-%x.json", h[:6])
+	name := fmt.Sprintf("helper-scripts-%x.json.gz", h[:6])
 	return filepath.Join(cacheDir, name), nil
+}
+
+func loadHelperMetadataCacheAny(path, baseURL string, ttl time.Duration, checkTTL bool) (*RemoteHelperMetadataCache, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	gzReader, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, err
+	}
+	defer gzReader.Close()
+
+	var cache RemoteHelperMetadataCache
+	if err := json.NewDecoder(gzReader).Decode(&cache); err != nil {
+		return nil, err
+	}
+	if cache.SourceURL != baseURL {
+		return nil, fmt.Errorf("source URL changed")
+	}
+	if checkTTL && time.Since(cache.FetchedAt) > ttl {
+		return nil, fmt.Errorf("cache expired")
+	}
+	return &cache, nil
 }
 
 // fetchHelperMetadataFromURL fetches (or loads from per-URL cache) helper metadata for one base URL.
@@ -369,15 +395,11 @@ func fetchHelperMetadataFromURL(baseURL string) (map[string]map[string]HelperScr
 
 	// Try disk cache
 	if !ForceRefreshHelpers && cacheErr == nil && ttl > 0 {
-		if data, err := os.ReadFile(cachePath); err == nil {
-			var cache RemoteHelperMetadataCache
-			if json.Unmarshal(data, &cache) == nil && cache.SourceURL == baseURL &&
-				time.Since(cache.FetchedAt) <= ttl {
-				utils.PrintDebug("Using cached helper metadata for %s (fetched %s ago)", baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
-				result := injectHelperSourceURL(cache.Metadata, baseURL)
-				cachedHelperMetadataByURL[baseURL] = result
-				return result, nil
-			}
+		if cache, err := loadHelperMetadataCacheAny(cachePath, baseURL, ttl, true); err == nil {
+			utils.PrintDebug("Using cached helper metadata for %s (fetched %s ago)", baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
+			result := injectHelperSourceURL(cache.Metadata, baseURL)
+			cachedHelperMetadataByURL[baseURL] = result
+			return result, nil
 		}
 	}
 
@@ -387,15 +409,12 @@ func fetchHelperMetadataFromURL(baseURL string) (map[string]map[string]HelperScr
 	if err != nil {
 		// Stale fallback
 		if cacheErr == nil {
-			if data, readErr := os.ReadFile(cachePath); readErr == nil {
-				var cache RemoteHelperMetadataCache
-				if json.Unmarshal(data, &cache) == nil && cache.SourceURL == baseURL {
-					utils.PrintWarning("Network unavailable for %s; using cached helper metadata (fetched %s ago)",
-						baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
-					result := injectHelperSourceURL(cache.Metadata, baseURL)
-					cachedHelperMetadataByURL[baseURL] = result
-					return result, nil
-				}
+			if cache, staleErr := loadHelperMetadataCacheAny(cachePath, baseURL, 0, false); staleErr == nil {
+				utils.PrintWarning("Network unavailable for %s; using cached helper metadata (fetched %s ago)",
+					baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
+				result := injectHelperSourceURL(cache.Metadata, baseURL)
+				cachedHelperMetadataByURL[baseURL] = result
+				return result, nil
 			}
 		}
 		return nil, err
@@ -408,10 +427,22 @@ func fetchHelperMetadataFromURL(baseURL string) (map[string]map[string]HelperScr
 			SourceURL: baseURL,
 			Metadata:  rawMeta,
 		}
-		if b, err := json.Marshal(envelope); err == nil {
-			tmp := cachePath + ".tmp"
-			if os.WriteFile(tmp, b, utils.PermFile) == nil {
-				_ = os.Rename(tmp, cachePath)
+		tmp := cachePath + ".tmp"
+		if f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, utils.PermFile); err == nil {
+			if gzWriter, err := gzip.NewWriterLevel(f, gzip.BestSpeed); err == nil {
+				if err := json.NewEncoder(gzWriter).Encode(envelope); err == nil {
+					if gzWriter.Close() == nil {
+						_ = f.Close()
+						_ = os.Rename(tmp, cachePath)
+					} else {
+						_ = f.Close()
+					}
+				} else {
+					_ = gzWriter.Close()
+					_ = f.Close()
+				}
+			} else {
+				_ = f.Close()
 			}
 		}
 	}

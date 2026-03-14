@@ -36,57 +36,74 @@ func remoteMetadataCachePathForURL(baseURL string) (string, error) {
 		return "", err
 	}
 	h := sha256.Sum256([]byte(baseURL))
-	name := fmt.Sprintf("remote-scripts-%x.json", h[:6]) // 12 hex chars
+	name := fmt.Sprintf("remote-scripts-%x.json.gz", h[:6]) // 12 hex chars
 	return filepath.Join(cacheDir, name), nil
 }
 
-// loadRemoteMetadataCache reads and validates the on-disk cache.
-// Returns an error if the file is missing, corrupt, the URL has changed, or the TTL has expired.
-func loadRemoteMetadataCache(path, sourceURL string, ttl time.Duration) (*RemoteMetadataCache, error) {
-	data, err := os.ReadFile(path)
+func loadRemoteMetadataCacheAny(path, sourceURL string, ttl time.Duration, checkTTL bool) (*RemoteMetadataCache, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
+
+	gzReader, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, err
+	}
+	defer gzReader.Close()
+
 	var cache RemoteMetadataCache
-	if err := json.Unmarshal(data, &cache); err != nil {
+	if err := json.NewDecoder(gzReader).Decode(&cache); err != nil {
 		return nil, fmt.Errorf("corrupt cache: %w", err)
 	}
 	if cache.SourceURL != sourceURL {
 		return nil, fmt.Errorf("source URL changed")
 	}
-	if time.Since(cache.FetchedAt) > ttl {
+	if checkTTL && time.Since(cache.FetchedAt) > ttl {
 		return nil, fmt.Errorf("cache expired")
 	}
 	return &cache, nil
 }
 
+// loadRemoteMetadataCache reads and validates the on-disk cache.
+// Returns an error if the file is missing, corrupt, the URL has changed, or the TTL has expired.
+func loadRemoteMetadataCache(path, sourceURL string, ttl time.Duration) (*RemoteMetadataCache, error) {
+	return loadRemoteMetadataCacheAny(path, sourceURL, ttl, true)
+}
+
 // loadRemoteMetadataCacheIgnoreExpiry is like loadRemoteMetadataCache but skips the TTL check.
 // Used as a stale fallback when the network is unavailable.
 func loadRemoteMetadataCacheIgnoreExpiry(path, sourceURL string) (*RemoteMetadataCache, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var cache RemoteMetadataCache
-	if err := json.Unmarshal(data, &cache); err != nil {
-		return nil, fmt.Errorf("corrupt cache: %w", err)
-	}
-	if cache.SourceURL != sourceURL {
-		return nil, fmt.Errorf("source URL changed")
-	}
-	return &cache, nil
+	return loadRemoteMetadataCacheAny(path, sourceURL, 0, false)
 }
 
 // saveRemoteMetadataCache writes the cache envelope to disk atomically.
 func saveRemoteMetadataCache(path string, cache *RemoteMetadataCache) error {
-	data, err := json.Marshal(cache)
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, utils.PermFile)
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, utils.PermFile); err != nil {
+
+	gzWriter, err := gzip.NewWriterLevel(f, gzip.BestSpeed)
+	if err != nil {
+		f.Close()
 		return err
 	}
+	if err := json.NewEncoder(gzWriter).Encode(cache); err != nil {
+		gzWriter.Close()
+		f.Close()
+		return err
+	}
+	if err := gzWriter.Close(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+
 	return os.Rename(tmp, path)
 }
 
@@ -182,20 +199,29 @@ func PruneOrphanedCaches() {
 		if !strings.HasPrefix(name, "remote-scripts-") && !strings.HasPrefix(name, "helper-scripts-") {
 			continue
 		}
-		if !strings.HasSuffix(name, ".json") {
+		if !strings.HasSuffix(name, ".json.gz") {
 			continue
 		}
 		path := filepath.Join(cacheDir, name)
-		data, err := os.ReadFile(path)
+		f, err := os.Open(path)
 		if err != nil {
+			continue
+		}
+		gzReader, err := gzip.NewReader(f)
+		if err != nil {
+			f.Close()
 			continue
 		}
 		var envelope struct {
 			SourceURL string `json:"source_url"`
 		}
-		if err := json.Unmarshal(data, &envelope); err != nil {
+		if err := json.NewDecoder(gzReader).Decode(&envelope); err != nil {
+			gzReader.Close()
+			f.Close()
 			continue
 		}
+		gzReader.Close()
+		f.Close()
 		if !active[envelope.SourceURL] {
 			utils.PrintDebug("Removing orphaned cache file: %s (URL: %s)", name, envelope.SourceURL)
 			if err := os.Remove(path); err != nil {
@@ -217,12 +243,6 @@ var (
 	cachedRemoteScriptsByURL = map[string]map[string]ScriptInfo{} // per-URL
 	cachedMergedRemote       map[string]ScriptInfo                // merged across all URLs
 )
-
-// GetRemoteMetadataURL returns the metadata URL for the primary (base) scripts_link.
-// Kept for backward compatibility.
-func GetRemoteMetadataURL() string {
-	return config.Global.ScriptsLink + "/metadata/build-scripts.json.gz"
-}
 
 // ScriptInfo holds information about a build script
 type ScriptInfo struct {
@@ -405,37 +425,6 @@ func GetRemoteBuildScripts() (map[string]ScriptInfo, error) {
 
 	cachedMergedRemote = merged
 	return merged, nil
-}
-
-// GetAllBuildScripts returns both local and remote build scripts
-// Local scripts take precedence over remote scripts with the same name
-func GetAllBuildScripts(includeRemote bool) (map[string]ScriptInfo, error) {
-	// Get local scripts first
-	scripts, err := GetLocalBuildScripts()
-	if err != nil {
-		return nil, err
-	}
-
-	if !includeRemote {
-		return scripts, nil
-	}
-
-	// Get remote scripts
-	remoteScripts, err := GetRemoteBuildScripts()
-	if err != nil {
-		// Log warning but don't fail - remote is optional
-		utils.PrintDebug("Failed to fetch remote scripts: %v", err)
-		return scripts, nil
-	}
-
-	// Merge remote scripts (local takes precedence)
-	for name, info := range remoteScripts {
-		if _, exists := scripts[name]; !exists {
-			scripts[name] = info
-		}
-	}
-
-	return scripts, nil
 }
 
 // FindBuildScript looks for a build script by name/version.

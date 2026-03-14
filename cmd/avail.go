@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -200,9 +199,8 @@ func runAvail(cmd *cobra.Command, args []string) error {
 	}
 
 	// Print results
-	highlightRe := query.HighlightRegexp()
 	for _, pkg := range filtered {
-		line := formatPackageLine(pkg, highlightRe)
+		line := formatPackageLine(pkg)
 		fmt.Println(line)
 	}
 
@@ -339,8 +337,8 @@ func getInstalledOverlays() map[string]bool {
 	return installed
 }
 
-// formatPackageLine formats a package for display with optional highlighting
-func formatPackageLine(pkg PackageInfo, highlightRe *regexp.Regexp) string {
+// formatPackageLine formats a package for display.
+func formatPackageLine(pkg PackageInfo) string {
 	line := pkg.Name
 
 	// Compute alias before highlighting (e.g. "ubuntu24/igv" → "[igv]")
@@ -351,12 +349,7 @@ func formatPackageLine(pkg PackageInfo, highlightRe *regexp.Regexp) string {
 		}
 	}
 
-	// Highlight search terms in the name only (before adding suffixes)
-	if highlightRe != nil {
-		line = highlightRe.ReplaceAllStringFunc(line, utils.StyleHighlight)
-	}
-
-	// Build suffix (after highlighting to avoid highlighting text in suffixes)
+	// Build suffix
 	var suffixes []string
 	if pkg.IsInstalled {
 		suffixes = append(suffixes, utils.StyleSuccess("installed"))
