@@ -36,11 +36,12 @@ var configKeys = []string{
 	"build.ncpus",
 	"build.mem_mb",
 	"build.time",
-	"build.tmp_size_mb",
 	"build.compress_args",
 	"build.overlay_type",
 	"build.block_size",
 	"build.data_block_size",
+	"build.use_tmp_overlay",
+	"build.tmp_overlay_size_mb",
 }
 
 // getConfigEnvVars returns a list of environment variables corresponding to
@@ -91,14 +92,16 @@ func configValueCompletion(key string) []string {
 		return []string{"4096", "8192", "16384", "32768"}
 	case "build.time":
 		return []string{"1h", "2h", "4h", "8h"}
-	case "build.tmp_size_mb":
-		return []string{"10240", "20480", "40960"}
 	case "build.overlay_type":
 		return []string{"ext3", "squashfs"}
 	case "build.compress_args":
 		return config.CompressNames()
 	case "build.block_size", "build.data_block_size":
 		return config.BlockSizeCompletions
+	case "build.use_tmp_overlay":
+		return []string{"true", "false"}
+	case "build.tmp_overlay_size_mb":
+		return []string{"10240", "20480", "40960"}
 	default:
 		return nil
 	}
@@ -298,21 +301,22 @@ Shows:
 
 		// Build settings
 		fmt.Printf("%s %s\n", utils.StyleTitle("Build Configuration:"), "build.*")
-		fmt.Printf("  ncpus:           %d\n", viper.GetInt("build.ncpus"))
-		fmt.Printf("  mem_mb:          %d\n", viper.GetInt64("build.mem_mb"))
-		fmt.Printf("  time:            %s\n", viper.GetString("build.time"))
-		fmt.Printf("  tmp_size_mb:     %d\n", viper.GetInt("build.tmp_size_mb"))
+		fmt.Printf("  ncpus:                %d\n", viper.GetInt("build.ncpus"))
+		fmt.Printf("  mem_mb:               %d\n", viper.GetInt64("build.mem_mb"))
+		fmt.Printf("  time:                 %s\n", viper.GetString("build.time"))
 		// Show actual compress_args (may be auto-detected based on apptainer version)
 		compressArgs := viper.GetString("build.compress_args")
 		actualCompressArgs := config.Global.Build.CompressArgs
 		if compressArgs != actualCompressArgs {
-			fmt.Printf("  compress_args:   %s\n", actualCompressArgs)
+			fmt.Printf("  compress_args:        %s\n", actualCompressArgs)
 		} else {
-			fmt.Printf("  compress_args:   %s\n", compressArgs)
+			fmt.Printf("  compress_args:        %s\n", compressArgs)
 		}
-		fmt.Printf("  overlay_type:    %s\n", viper.GetString("build.overlay_type"))
-		fmt.Printf("  block_size:      %s\n", config.Global.Build.BlockSize)
-		fmt.Printf("  data_block_size: %s\n", config.Global.Build.DataBlockSize)
+		fmt.Printf("  overlay_type:         %s\n", viper.GetString("build.overlay_type"))
+		fmt.Printf("  block_size:           %s\n", config.Global.Build.BlockSize)
+		fmt.Printf("  data_block_size:      %s\n", config.Global.Build.DataBlockSize)
+		fmt.Printf("  use_tmp_overlay:      %v\n", config.Global.Build.UseTmpOverlay)
+		fmt.Printf("  tmp_overlay_size_mb:  %d\n", viper.GetInt("build.tmp_overlay_size_mb"))
 		fmt.Println()
 
 		// Extra base directories

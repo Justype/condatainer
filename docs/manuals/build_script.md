@@ -10,6 +10,7 @@ This document gives instructions on how to create your own build scripts for **C
   - [WhatIs and URL](#whatis-and-url)
   - [Set Dependencies](#set-dependencies)
   - [Scheduler Parameters](#scheduler-parameters)
+  - [Type Tag](#type-tag)
   - [Environment Variables](#environment-variables) and [ENV Naming Guidelines](#env-naming-guidelines)
   - [Interactive Tag](#interactive-tag)
 - [OS](#os)
@@ -72,6 +73,14 @@ Any data, including genome reference indexes.
 | `version` | apps: app version; ref: data version |
 | `target_dir` | Target installation directory (managed by **CondaTainer**) |
 | `tmp_dir` | Temporary working directory (managed by **CondaTainer**) |
+
+> `tmp_dir`:
+>
+> - For OS `.def`: intermediate `.sif` will created to condatainer tmp, or next to the target dir.
+> - For app module: use  scheduler tmp/`$TMP`/`/tmp`
+> - For data module: use condatainer tmp
+> - For external script: determined by `#TYPE:` tag, if app(default) use tmp, if data use target dir
+> - if `CNT_TMPDIR` is set, it overrides all tmp behaviors.
 
 | Function | Description |
 | -------- | ----------- |
@@ -159,6 +168,28 @@ If a supported scheduler is available, **CondaTainer** will submit the build job
 For LSF, **CondaTainer** will add `-R "span[hosts=1]"` to ensure all CPUs are allocated on the same node.
 
 > **Note**: Certain SLURM flags are not supported and will cause the build to fail: `--topology-plugin`, `--switches`, `--gpus-per-socket`, `--sockets-per-node`, `--cores-per-socket`, `--threads-per-core`, `--ntasks-per-socket`, `--ntasks-per-core`, `--distribution`. Remove these from your build script.
+
+### Type Tag
+
+`#TYPE:` controls temporary build path behavior for **external** `.sh`/`.bash` builds.
+
+- `#TYPE:app` (default): build in scratch tmp (`utils.GetTmpDir()`, affected by `CNT_TMPDIR`).
+- `#TYPE:data`: build alongside the target prefix directory.
+
+If `CNT_TMPDIR` is set, it overrides both `#TYPE:app` and `#TYPE:data` behavior and forces scratch tmp resolution under `CNT_TMPDIR/cnt-$USER`.
+
+Accepted aliases (case-insensitive):
+
+- App aliases: `app`, `env`, `tool`, `conda`, `small`
+- Data aliases: `data`, `ref`, `large`
+
+Examples:
+
+```bash
+#TYPE:app
+#TYPE:data
+#TYPE:ref
+```
 
 ### Environment Variables
 

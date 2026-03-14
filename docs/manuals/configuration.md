@@ -98,11 +98,12 @@ condatainer config init -l system
 | `build.ncpus` | `4` | CPUs for build jobs |
 | `build.mem_mb` | `8192` | Memory in MB (8GB) |
 | `build.time` | `2h` | Time limit for builds |
-| `build.tmp_size_mb` | `20480` | Temporary overlay size in MB (20GB) |
 | `build.compress_args` | Auto-detected | mksquashfs compression arguments (gzip for singularity; zstd-medium for apptainer≥1.4; lz4 otherwise) |
+| `build.overlay_type` | `ext3` | Overlay filesystem type: `ext3` or `squashfs` |
 | `build.block_size` | `128k` | mksquashfs block size for app/env/external overlays (e.g. `128k`, `512k`) |
 | `build.data_block_size` | `1m` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
-| `build.overlay_type` | `ext3` | Overlay filesystem type: `ext3` or `squashfs` |
+| `build.use_tmp_overlay` | `false` | Use a temporary ext3 overlay during builds instead of host directories |
+| `build.tmp_overlay_size_mb` | `20480` | Temporary ext3 overlay size in MB (20GB); only used when `use_tmp_overlay` is `true` |
 
 > `build.compress_args` also accepts shortcuts: `gzip`, `lz4`, `zstd`, `zstd-fast`, `zstd-medium`, `zstd-high`
 >
@@ -172,10 +173,16 @@ upper‑casing, replacing `.` with `_`, and prefixing with
 
 * `logs_dir` → `CNT_LOGS_DIR`
 * `scheduler.time` → `CNT_SCHEDULER_TIME`
-* `build.tmp_size_mb` → `CNT_BUILD_TMP_SIZE_MB`
+* `build.tmp_overlay_size_mb` → `CNT_BUILD_TMP_OVERLAY_SIZE_MB`
 
 You can list the supported variables with
 `condatainer config show` (it prints any that are currently set).
+
+`CNT_TMPDIR` is a special override used by the build system to select
+temporary directories across build types. If set, it takes precedence over
+scheduler-provided scratch, writable tmp auto-detection, and
+`TMPDIR`/`TEMP`/`TMP`. CondaTainer will append `cnt-$USER` to the path to avoid
+user collisions, including external `.sh`/`.bash` builds.
 
 A few common overrides are shown below for clarity, but the
 mapping is consistent for every key handled by the CLI:
@@ -193,6 +200,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_BUILD_DATA_BLOCK_SIZE`| `build.data_block_size`|
 | `CNT_EXTRA_BASE_DIRS`      | `extra_base_dirs` (colon-separated) |
 | `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
+| `CNT_TMPDIR`               | (special override)     |
 
 Example:
 
@@ -280,11 +288,12 @@ build:
   ncpus: 4
   mem_mb: 8192
   time: 2h
-  tmp_size_mb: 20480
   compress_args: -comp zstd -Xcompression-level 8
+  overlay_type: ext3
   block_size: 128k       # SquashFS block size for app/env/external overlays
   data_block_size: 1m    # SquashFS block size for data overlays
-  overlay_type: ext3
+  use_tmp_overlay: false  # Use ext3 tmp overlay instead of host directories
+  tmp_overlay_size_mb: 20480  # Only used when use_tmp_overlay is true
 ```
 
 ## Time Duration Format

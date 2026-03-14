@@ -122,31 +122,27 @@ func newPbsSchedulerWithBinary(qsubBin string) (*PbsScheduler, error) {
 	}, nil
 }
 
-// IsAvailable checks if PBS is available and we're not inside a PBS job
+// GetCurrentJobID returns the PBS job ID of the currently running job, or "".
+func (p *PbsScheduler) GetCurrentJobID() string { return os.Getenv("PBS_JOBID") }
+
+// IsAvailable checks if the PBS binary is present on this system.
 func (p *PbsScheduler) IsAvailable() bool {
-	if p.qsubBin == "" {
-		return false
-	}
+	return p.qsubBin != ""
+}
 
-	// Check if we're already inside a PBS job
-	_, inJob := os.LookupEnv("PBS_JOBID")
-	if inJob {
-		return false
-	}
-
-	return true
+// IsInsideJob returns true if the current process is running inside a PBS job.
+func (p *PbsScheduler) IsInsideJob() bool {
+	_, ok := os.LookupEnv("PBS_JOBID")
+	return ok
 }
 
 // GetInfo returns information about the PBS scheduler
 func (p *PbsScheduler) GetInfo() *SchedulerInfo {
-	_, inJob := os.LookupEnv("PBS_JOBID")
-	available := p.IsAvailable()
-
 	info := &SchedulerInfo{
 		Type:      "PBS",
 		Binary:    p.qsubBin,
-		InJob:     inJob,
-		Available: available,
+		InJob:     p.IsInsideJob(),
+		Available: p.IsAvailable(),
 	}
 
 	// Try to get PBS version
@@ -1228,72 +1224,6 @@ func parsePbsMemory(memStr string) (int64, error) {
 	}
 }
 
-// parseGpuString parses GPU specifications from various formats
-// Supports: "2", "a100:1", "gpu:a100:2", "nvidia_h100:2"
-func parseGpuString(gpuStr string) (*GpuSpec, error) {
-	if gpuStr == "" {
-		return nil, nil
-	}
-
-	spec := &GpuSpec{
-		Raw:   gpuStr,
-		Count: 1,
-	}
-
-	// Check if this is a MIG profile (contains dots and underscores)
-	if strings.Contains(gpuStr, ".") && strings.Contains(gpuStr, "_") {
-		parts := strings.Split(gpuStr, ":")
-		if len(parts) == 1 {
-			spec.Type = parts[0]
-			spec.Count = 1
-		} else if len(parts) == 2 {
-			spec.Type = parts[0]
-			if count, err := strconv.Atoi(parts[1]); err == nil {
-				spec.Count = count
-			}
-		}
-		return spec, nil
-	}
-
-	parts := strings.Split(gpuStr, ":")
-
-	switch len(parts) {
-	case 1:
-		if count, err := strconv.Atoi(parts[0]); err == nil {
-			spec.Count = count
-			spec.Type = "gpu"
-		} else {
-			spec.Type = parts[0]
-			spec.Count = 1
-		}
-
-	case 2:
-		spec.Type = parts[0]
-		if count, err := strconv.Atoi(parts[1]); err == nil {
-			spec.Count = count
-		}
-
-	case 3:
-		spec.Type = parts[1]
-		if count, err := strconv.Atoi(parts[2]); err == nil {
-			spec.Count = count
-		}
-
-	default:
-		lastColon := strings.LastIndex(gpuStr, ":")
-		if lastColon > 0 {
-			spec.Type = gpuStr[:lastColon]
-			if count, err := strconv.Atoi(gpuStr[lastColon+1:]); err == nil {
-				spec.Count = count
-			}
-		} else {
-			spec.Type = gpuStr
-		}
-	}
-
-	return spec, nil
-}
-
 // GetJobResources reads allocated resources from PBS environment variables.
 // Fields with value 0 were not exposed by PBS.
 func (s *PbsScheduler) GetJobResources() *ResourceSpec {
@@ -1344,6 +1274,36 @@ func (s *PbsScheduler) GetJobResources() *ResourceSpec {
 		res.Gpu = &GpuSpec{Count: *n}
 	}
 	return res
+}
+
+// GetJobStatus returns the current status of the given PBS job ID.
+// Uses qstat -f; returns JobStatusUnknown conservatively when qstat is unavailable or times out.
+func (p *PbsScheduler) GetJobStatus(jobID string) (JobStatus, error) {
+	if p.qstatBin == "" {
+		return JobStatusUnknown, nil // conservative: can't check
+	}
+	out, err := runCommand("PBS", "job-status", p.qstatBin, "-f", jobID)
+	if err != nil {
+		// qstat exits non-zero when job ID is unknown or finished.
+		if _, ok := err.(*TimeoutError); ok {
+			return JobStatusUnknown, nil // conservative: timed out
+		}
+		return JobStatusDone, nil
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "job_state = ") {
+			switch strings.TrimPrefix(line, "job_state = ") {
+			case "Q", "H", "W", "T":
+				return JobStatusPending, nil
+			case "R", "E":
+				return JobStatusRunning, nil
+			case "C", "F":
+				return JobStatusDone, nil
+			}
+		}
+	}
+	return JobStatusUnknown, nil
 }
 
 // TryParsePbsScript attempts to parse a PBS script without requiring PBS binaries.

@@ -3,10 +3,8 @@ package build
 import (
 	"context"
 	"errors"
-
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -54,53 +52,8 @@ func (bt BuildType) String() string {
 	return "unknown"
 }
 
-// isCancelledByUser checks if the error is due to user cancellation (Ctrl+C)
-// Exit code 130 = 128 + SIGINT(2), checks for "signal: killed/interrupt" or context errors
-func isCancelledByUser(err error) bool {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	errMsg := err.Error()
-	if strings.Contains(errMsg, "signal: killed") || strings.Contains(errMsg, "signal: interrupt") {
-		return true
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		// 130 (SIGINT) or -1 (signal killed)
-		return exitErr.ExitCode() == 130 || exitErr.ExitCode() == -1
-	}
-	return false
-}
-
 // ScriptSpecs mirrors the scheduler module's job spec metadata.
 type ScriptSpecs = scheduler.ScriptSpecs
-
-// buildDefaults holds resource defaults for build operations.
-// Set from config at CLI startup via SetBuildDefaults.
-var buildDefaults = scheduler.ResourceSpec{
-	Nodes:        1,
-	TasksPerNode: 1,
-	CpusPerTask:  4, // conservative default for local builds
-	MemPerNodeMB: 8192,
-	Time:         2 * time.Hour,
-}
-
-// SetBuildDefaults sets the resource defaults used for build job submissions.
-func SetBuildDefaults(d scheduler.ResourceSpec) { buildDefaults = d }
-
-// GetBuildDefaults returns the current build resource defaults.
-func GetBuildDefaults() scheduler.ResourceSpec { return buildDefaults }
-
-// buildEffectiveResourceSpec resolves resources for build using the priority chain:
-//
-//	buildDefaults → scriptSpecs.Spec (when HasDirectives=true) → scheduler job resources
-func buildEffectiveResourceSpec(specs *scheduler.ScriptSpecs) *scheduler.ResourceSpec {
-	var jobRes *scheduler.ResourceSpec
-	if sched := scheduler.ActiveScheduler(); sched != nil {
-		jobRes = sched.GetJobResources()
-	}
-	return scheduler.ResolveResourceSpecFrom(buildDefaults, jobRes, specs)
-}
 
 // BuildObject represents a build target with its metadata and dependencies
 type BuildObject interface {
@@ -117,6 +70,7 @@ type BuildObject interface {
 	TmpOverlayPath() string
 	TargetOverlayPath() string
 	CntDirPath() string
+	LockPath() string
 
 	// Scheduler metadata
 	ScriptSpecs() *ScriptSpecs
@@ -139,6 +93,7 @@ type BuildObject interface {
 type BaseBuildObject struct {
 	nameVersion       string
 	buildSource       string
+	tmpDir            string // base tmp directory (dynamic; scheduler/TMPDIR-based for conda/app)
 	dependencies      []string
 	tmpOverlayPath    string
 	targetOverlayPath string
@@ -157,6 +112,7 @@ type BaseBuildObject struct {
 func (b *BaseBuildObject) NameVersion() string       { return b.nameVersion }
 func (b *BaseBuildObject) BuildSource() string       { return b.buildSource }
 func (b *BaseBuildObject) Dependencies() []string    { return b.dependencies }
+func (b *BaseBuildObject) TmpDir() string            { return b.tmpDir }
 func (b *BaseBuildObject) TmpOverlayPath() string    { return b.tmpOverlayPath }
 func (b *BaseBuildObject) TargetOverlayPath() string { return b.targetOverlayPath }
 func (b *BaseBuildObject) CntDirPath() string        { return b.cntDirPath }
@@ -164,6 +120,74 @@ func (b *BaseBuildObject) ScriptSpecs() *ScriptSpecs { return b.scriptSpecs }
 func (b *BaseBuildObject) Update() bool              { return b.update }
 func (b *BaseBuildObject) RequiresScheduler() bool {
 	return b.submitJob && scheduler.HasSchedulerSpecs(b.scriptSpecs)
+}
+
+// BuildLockInfo holds metadata stored inside a build lock file.
+type BuildLockInfo struct {
+	Type      string `json:"type"`       // "local", "slurm", "pbs", "lsf", or "htcondor"
+	JobID     string `json:"job_id"`     // scheduler job ID (empty until submit returns)
+	Node      string `json:"node"`       // short hostname where lock was created
+	PID       int    `json:"pid"`        // OS PID for local builds; 0 for scheduler
+	CreatedAt string `json:"created_at"` // RFC3339 timestamp
+}
+
+// buildLockPath returns the lock file path for this build (stable, in imagesDir).
+func (b *BaseBuildObject) buildLockPath() string {
+	return b.targetOverlayPath + ".lock"
+}
+
+// LockPath satisfies the BuildObject interface — returns the lock file path.
+func (b *BaseBuildObject) LockPath() string { return b.buildLockPath() }
+
+// writeBuildLock atomically creates the lock file and writes JSON metadata.
+// Returns an os.ErrExist-wrapped error if the lock already exists.
+func (b *BaseBuildObject) writeBuildLock(info BuildLockInfo) error {
+	return acquireBuildLockFile(b.buildLockPath(), info)
+}
+
+// readBuildLock reads and parses the lock file JSON.
+// An empty or corrupt file (old empty-lock format) returns a zero-value struct.
+func (b *BaseBuildObject) readBuildLock() (BuildLockInfo, error) {
+	return readBuildLockFile(b.buildLockPath())
+}
+
+// updateBuildLock overwrites the lock file contents.
+func (b *BaseBuildObject) updateBuildLock(info BuildLockInfo) error {
+	return overwriteBuildLockFile(b.buildLockPath(), info)
+}
+
+// createBuildLock creates the lock file for a local build.
+// If a scheduler job lock already exists for this job, it adopts that lock
+// (updating it with the runtime node and PID) instead of failing.
+func (b *BaseBuildObject) createBuildLock() error {
+	info := BuildLockInfo{
+		Type:      "local",
+		Node:      shortHostname(),
+		PID:       os.Getpid(),
+		CreatedAt: time.Now().Format(time.RFC3339),
+	}
+	if err := b.writeBuildLock(info); err != nil {
+		if !os.IsExist(err) {
+			return fmt.Errorf("failed to create build lock: %w", err)
+		}
+		// Lock exists — check if it belongs to our scheduler job.
+		existing, readErr := b.readBuildLock()
+		if readErr == nil && existing.Type != "local" && existing.Type != "" {
+			if myJobID := scheduler.CurrentJobID(); myJobID != "" && existing.JobID == myJobID {
+				// Adopt the lock: update with runtime node + PID.
+				existing.Node = shortHostname()
+				existing.PID = os.Getpid()
+				return b.updateBuildLock(existing)
+			}
+		}
+		return fmt.Errorf("build already in progress: lock file exists at %s", b.buildLockPath())
+	}
+	return nil
+}
+
+// removeBuildLock removes the lock file on build completion or failure.
+func (b *BaseBuildObject) removeBuildLock() {
+	os.Remove(b.buildLockPath()) //nolint:errcheck
 }
 
 // effectiveNcpus returns the effective total CPUs (CpusPerTask × TasksPerNode) for this build.
@@ -176,66 +200,34 @@ func (b *BaseBuildObject) effectiveNcpus() int {
 	return cpus
 }
 
-
 func (b *BaseBuildObject) IsInstalled() bool {
-	// Check if target overlay exists
 	_, err := os.Stat(b.targetOverlayPath)
 	return err == nil
 }
 
 func (b *BaseBuildObject) GetMissingDependencies() ([]string, error) {
-	missing := []string{}
-
-	// Build a set of installed overlays from all search paths
-	installed := make(map[string]bool)
-
-	for _, imagesDir := range config.GetImageSearchPaths() {
-		if !utils.DirExists(imagesDir) {
-			continue
-		}
-
-		entries, err := os.ReadDir(imagesDir)
-		if err != nil {
-			utils.PrintWarning("Failed to read directory %s: %v", imagesDir, err)
-			continue
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			if !utils.IsOverlay(entry.Name()) {
-				continue
-			}
-
-			// Convert filename to name/version format
-			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			// Convert samtools--1.21.sqf to samtools/1.21
-			normalized := strings.ReplaceAll(nameVersion, "--", "/")
-			installed[normalized] = true
-		}
-	}
-
-	// Check which dependencies are missing
+	installed := getInstalledOverlays()
+	var missing []string
 	for _, dep := range b.dependencies {
 		if !installed[dep] {
 			missing = append(missing, dep)
 		}
 	}
-
 	return missing, nil
 }
 
 func (b *BaseBuildObject) CreateTmpOverlay(ctx context.Context, force bool) error {
-	// Check if tmp overlay already exists
-	if _, err := os.Stat(b.tmpOverlayPath); err == nil {
+	// Check both ext3-mode artifact (.img) and dir-mode artifact (buildDir) for cross-mode stale detection
+	buildDir := filepath.Dir(b.cntDirPath)
+	stale := utils.FileExists(b.tmpOverlayPath) || (b.cntDirPath != "" && utils.DirExists(buildDir))
+	if stale {
 		if !force {
 			return fmt.Errorf("%w: %s", ErrTmpOverlayExists, b.tmpOverlayPath)
 		}
-		// Remove existing if force=true
-		if err := os.Remove(b.tmpOverlayPath); err != nil {
+		if err := os.Remove(b.tmpOverlayPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to remove existing tmp overlay: %w", err)
 		}
+		os.RemoveAll(buildDir) //nolint:errcheck
 	}
 
 	// Ensure parent directory for tmp overlay exists (mkdir -p)
@@ -246,17 +238,41 @@ func (b *BaseBuildObject) CreateTmpOverlay(ctx context.Context, force bool) erro
 		}
 	}
 
-	// Create actual ext3 overlay using overlay package
 	utils.PrintDebug("Creating temporary overlay at %s", utils.StylePath(b.tmpOverlayPath))
 
-	// Use overlay package to create ext3 overlay
-	// For build overlays, we use a temporary size from config (default 20GB)
-	// Use "conda" profile for small files, sparse=true for faster creation
-	// quiet=true suppresses detailed specs output since users don't need to see those for temp overlays
+	// Use overlay package to create ext3 overlay.
+	// For build overlays, we use a temporary size from config (default 20GB).
+	// Use "default" profile, sparse=true for faster creation.
+	// quiet=true suppresses detailed specs output since users don't need to see those for temp overlays.
 	if err := overlay.CreateForCurrentUser(ctx, b.tmpOverlayPath, config.Global.Build.TmpSizeMB, "default", true, config.Global.Build.OverlayType, true); err != nil {
 		return fmt.Errorf("failed to create temporary overlay: %w", err)
 	}
 
+	return nil
+}
+
+// CreateBuildDirs creates host directories for dir-mode builds (use_tmp_overlay=false).
+// Layout: <buildDir>/cnt/ (bound as /cnt) and <buildDir>/tmp/ (bound as /ext3/tmp).
+// Checks both dir-mode (buildDir) and ext3-mode (.img) artifacts for cross-mode stale detection.
+func (b *BaseBuildObject) CreateBuildDirs(ctx context.Context, force bool) error {
+	buildDir := filepath.Dir(b.cntDirPath)
+	// Check both dir-mode artifact (buildDir) and ext3-mode artifact (.img)
+	stale := utils.DirExists(buildDir) || utils.FileExists(b.tmpOverlayPath)
+	if stale {
+		if !force {
+			return fmt.Errorf("%w: %s", ErrTmpOverlayExists, buildDir)
+		}
+		os.RemoveAll(buildDir)      //nolint:errcheck — clean dir-mode artifact
+		os.Remove(b.tmpOverlayPath) //nolint:errcheck — clean ext3-mode artifact (no-op if "")
+	}
+
+	if err := os.MkdirAll(b.cntDirPath, 0o775); err != nil {
+		return fmt.Errorf("failed to create build cnt dir %s: %w", b.cntDirPath, err)
+	}
+	if err := os.MkdirAll(filepath.Join(buildDir, "tmp"), 0o775); err != nil {
+		return fmt.Errorf("failed to create build tmp dir: %w", err)
+	}
+	utils.PrintMessage("Build dir: %s", utils.StylePath(buildDir))
 	return nil
 }
 
@@ -282,10 +298,22 @@ func (b *BaseBuildObject) Cleanup(failed bool) error {
 	// Remove cnt directory
 	if b.cntDirPath != "" {
 		cntBaseDir := filepath.Dir(b.cntDirPath)
+		utils.PrintMessage("Cleaning up build directory %s...", cntBaseDir)
 		if err := os.RemoveAll(cntBaseDir); err != nil && !os.IsNotExist(err) {
 			utils.PrintWarning("Failed to remove cnt dir %s: %v", cntBaseDir, err)
 		} else if utils.FileExists(cntBaseDir) {
 			utils.PrintDebug("Removed cnt dir %s", cntBaseDir)
+		}
+
+		// Remove tmpDir itself if it is now empty (no other builds using it)
+		if b.tmpDir != "" && b.tmpDir != cntBaseDir {
+			if entries, err := os.ReadDir(b.tmpDir); err == nil && len(entries) == 0 {
+				if err := os.Remove(b.tmpDir); err != nil && !os.IsNotExist(err) {
+					utils.PrintDebug("Failed to remove empty tmp dir %s: %v", b.tmpDir, err)
+				} else {
+					utils.PrintDebug("Removed empty tmp dir %s", b.tmpDir)
+				}
+			}
 		}
 	}
 
@@ -308,61 +336,78 @@ func (b *BaseBuildObject) Cleanup(failed bool) error {
 	return nil
 }
 
-// parseScriptMetadata extracts dependencies, sbatch flags, and interactive prompts from shell scripts
+// parseScriptMetadata extracts dependencies, scheduler specs, and interactive prompts from shell scripts.
 func (b *BaseBuildObject) parseScriptMetadata(ctx context.Context) error {
 	if b.buildSource == "" {
 		return nil
 	}
+	if err := b.parseDependencies(); err != nil {
+		return err
+	}
+	if err := b.collectInteractiveInputs(ctx); err != nil {
+		return err
+	}
+	return b.resolveResourceSpec()
+}
 
-	// Always parse dependencies (needed for dependency graph)
+// parseDependencies reads #DEP: lines from the build script and sets b.dependencies.
+func (b *BaseBuildObject) parseDependencies() error {
 	deps, err := utils.GetDependenciesFromScript(b.buildSource, config.Global.ParseModuleLoad)
 	if err != nil {
 		return fmt.Errorf("failed to parse dependencies: %w", err)
 	}
 	b.dependencies = deps
+	return nil
+}
 
-	// Parse interactive prompts from build script and collect user inputs if needed
+// collectInteractiveInputs handles #INTERACTIVE: prompts — checks TTY, supports --yes shortcut,
+// and reads user input from stdin. Sets b.interactiveInputs.
+func (b *BaseBuildObject) collectInteractiveInputs(ctx context.Context) error {
 	prompts, err := utils.GetInteractivePromptsFromScript(b.buildSource)
 	if err != nil {
 		return fmt.Errorf("failed to parse interactive prompts: %w", err)
 	}
 	b.interactiveInputs = []string{}
-	if len(prompts) > 0 {
-		// If --yes flag is set, automatically provide empty responses
-		if utils.ShouldAnswerYes() {
-			// Provide empty responses for all prompts with --yes
-			for range prompts {
-				b.interactiveInputs = append(b.interactiveInputs, "")
-			}
-		} else {
-			// If interactive prompts exist, we must be in an interactive shell
-			if !utils.IsInteractiveShell() {
-				return fmt.Errorf("build script for %s requires interactive input, but no TTY is available", b.nameVersion)
-			}
-
-			for _, prompt := range prompts {
-				msg := strings.ReplaceAll(prompt, `\\n`, "\n")
-				msg = strings.ReplaceAll(msg, "\\n", "\n")
-				for _, line := range strings.Split(msg, "\n") {
-					utils.PrintNote("%s", line)
-				}
-				fmt.Print("Enter here: ")
-				input, err := utils.ReadLineContext(ctx)
-				if err != nil {
-					return err
-				}
-				b.interactiveInputs = append(b.interactiveInputs, input)
-			}
-		}
+	if len(prompts) == 0 {
+		return nil
 	}
 
-	// Always parse scheduler specs to get ncpus from script (for both local and scheduler builds)
+	// If --yes flag is set, automatically provide empty responses
+	if utils.ShouldAnswerYes() {
+		for range prompts {
+			b.interactiveInputs = append(b.interactiveInputs, "")
+		}
+		return nil
+	}
+
+	// Interactive prompts require a TTY
+	if !utils.IsInteractiveShell() {
+		return fmt.Errorf("build script for %s requires interactive input, but no TTY is available", b.nameVersion)
+	}
+
+	for _, prompt := range prompts {
+		msg := strings.ReplaceAll(prompt, `\\n`, "\n")
+		msg = strings.ReplaceAll(msg, "\\n", "\n")
+		for _, line := range strings.Split(msg, "\n") {
+			utils.PrintNote("%s", line)
+		}
+		fmt.Print("Enter here: ")
+		input, err := utils.ReadLineContext(ctx)
+		if err != nil {
+			return err
+		}
+		b.interactiveInputs = append(b.interactiveInputs, input)
+	}
+	return nil
+}
+
+// resolveResourceSpec parses scheduler directives from the build script and sets b.scriptSpecs.
+// Applies the priority chain: buildDefaults → script directives → current job resources.
+func (b *BaseBuildObject) resolveResourceSpec() error {
 	specs, err := scheduler.ReadScriptSpecsFromPath(b.buildSource)
 	if err != nil {
 		return err
 	}
-
-	// Always store scriptSpecs — effectiveNcpus()/effectiveMemMB() derive values from it.
 	b.scriptSpecs = specs
 
 	// Passthrough mode: scheduler directives found but resource parsing failed (unsupported flags).
@@ -374,23 +419,6 @@ func (b *BaseBuildObject) parseScriptMetadata(ctx context.Context) error {
 	// Resolve using the priority chain: buildDefaults → script → job resources.
 	specs.Spec = buildEffectiveResourceSpec(specs)
 	return nil
-}
-
-// Helper functions
-
-// getCntDirPath returns the container directory path for a name/version
-// Format: <tmpDir>/build_<nameVersion>/cnt
-func getCntDirPath(nameVersion, tmpDir string) string {
-	buildDirName := "build_" + strings.ReplaceAll(nameVersion, "/", "_")
-	return filepath.Join(tmpDir, buildDirName, "cnt")
-}
-
-// getTmpOverlayPath returns the temporary overlay path for ext3 builds (script/conda).
-// Format: <tmpDir>/<nameVersion>.img (with / replaced by --)
-// For def builds, the caller changes the extension to .sif.
-func getTmpOverlayPath(nameVersion, tmpDir string) string {
-	filename := strings.ReplaceAll(nameVersion, "/", "--") + ".img"
-	return filepath.Join(tmpDir, filename)
 }
 
 // NewBuildObject creates a BuildObject from a name/version string
@@ -405,6 +433,14 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 	// 1 slash: conda or shell (e.g., "numpy/1.24")
 	// 2+ slashes: ref shell script (e.g., "genomes/hg38/full")
 	isRef := slashCount > 1
+
+	// Use fast local storage for conda/app builds; keep stable path for ref/data.
+	// Def builds will override this in createConcreteType via resolveTmpDirForDef.
+	if isRef {
+		tmpDir = resolveTmpDirForRef()
+	} else {
+		tmpDir = resolveTmpDirForConda()
+	}
 
 	// Make tmpDir absolute
 	if absDir, err := filepath.Abs(tmpDir); err == nil {
@@ -428,6 +464,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 	base := &BaseBuildObject{
 		nameVersion:       normalized,
 		submitJob:         config.Global.SubmitJob,
+		tmpDir:            tmpDir,
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetOverlay,
@@ -439,11 +476,45 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 		return createConcreteType(ctx, base, isRef, tmpDir)
 	}
 
-	// Check if already installed or temporary overlay exists.
-	// Skip this optimisation in update mode so the correct concrete type is resolved
-	// (the build will proceed regardless of install status).
-	if !update && (base.IsInstalled() || utils.FileExists(base.tmpOverlayPath)) {
-		return newScriptBuildObject(base, isRef)
+	// Check if already installed or a build is currently in progress (lock file exists).
+	// Skip this optimisation in update mode so the correct concrete type is resolved.
+	if !update {
+		if base.IsInstalled() {
+			return newScriptBuildObject(base, isRef)
+		}
+		if utils.FileExists(base.buildLockPath()) {
+			info, readErr := base.readBuildLock()
+			if readErr != nil {
+				// Corrupt or old empty lock → treat as stale.
+				utils.PrintWarning("Corrupt build lock for %s; removing.", utils.StyleName(normalized))
+				base.removeBuildLock()
+			} else if info.JobID != "" && info.JobID == scheduler.CurrentJobID() {
+				// Our own scheduler lock — proceed; createBuildLock() will adopt it
+			} else if stale, jobStatus, _ := isBuildLockStale(info); stale {
+				detail := info.JobID
+				if detail == "" {
+					detail = fmt.Sprintf("pid=%d", info.PID)
+				}
+				utils.PrintWarning("Stale build lock for %s (%s); removing.", utils.StyleName(normalized), detail)
+				base.removeBuildLock()
+			} else {
+				statusHint := ""
+				switch jobStatus {
+				case scheduler.JobStatusPending:
+					statusHint = fmt.Sprintf(" (job %s is pending in queue)", info.JobID)
+				case scheduler.JobStatusRunning:
+					if info.JobID != "" {
+						statusHint = fmt.Sprintf(" (job %s is running)", info.JobID)
+					} else if info.PID != 0 {
+						statusHint = fmt.Sprintf(" (pid %d is running)", info.PID)
+					}
+				}
+				return nil, fmt.Errorf(
+					"build lock found for %s%s.\nLock file: %s",
+					utils.StyleName(normalized), statusHint, utils.StylePath(base.buildLockPath()),
+				)
+			}
+		}
 	}
 
 	// Resolve build source and determine concrete type
@@ -458,6 +529,9 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir string, update bool) (BuildObject, error) {
 	normalized := utils.NormalizeNameVersion(nameVersion)
 
+	// Conda builds always use fast local storage
+	tmpDir = resolveTmpDirForConda()
+
 	// Make tmpDir absolute
 	if absDir, err := filepath.Abs(tmpDir); err == nil {
 		tmpDir = absDir
@@ -468,8 +542,7 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 		targetOverlay = abs
 	}
 
-	cntDirPath := getCntDirPath(normalized, tmpDir)
-	tmpOverlayPath := getTmpOverlayPath(normalized, tmpDir)
+	tmpOverlayPath, cntDirPath := buildTmpPaths(normalized, tmpDir, ".img")
 
 	utils.PrintDebug("[BUILD OBJECT] Creating conda %s: buildSource=%s, targetOverlay=%s, tmpOverlay=%s, cntDir=%s", nameVersion, buildSource, targetOverlay, tmpOverlayPath, cntDirPath)
 
@@ -477,6 +550,7 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 		nameVersion:       normalized,
 		buildSource:       buildSource,
 		submitJob:         config.Global.SubmitJob,
+		tmpDir:            tmpDir,
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetOverlay,
@@ -495,15 +569,28 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 	// Determine build type from source file extension
 	isDef := isApptainer || strings.HasSuffix(source, ".def")
 	isShell := strings.HasSuffix(source, ".sh") || strings.HasSuffix(source, ".bash")
-
-	targetDir := filepath.Dir(targetPrefix)
-	cntDirPath := getCntDirPath(nameVersion, targetDir)
-	// Def builds produce a SIF; shell/conda builds produce ext3
-	tmpExt := ".img"
-	if isDef {
-		tmpExt = ".sif"
+	externalType := "app"
+	if isShell {
+		parsedType, err := utils.GetExternalBuildTypeFromScript(source)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse external build type: %w", err)
+		}
+		externalType = parsedType
 	}
-	tmpOverlayPath := strings.TrimSuffix(getTmpOverlayPath(nameVersion, targetDir), ".img") + tmpExt
+
+	// Build artifacts go next to the target (user controls target location)
+	targetDir := resolveTmpDirForExternal(filepath.Dir(targetPrefix), externalType)
+	if absDir, err := filepath.Abs(targetDir); err == nil {
+		targetDir = absDir
+	}
+	// Def builds produce a SIF; shell builds use ext3 (.img) or dir-mode (no overlay).
+	var ext string
+	if isDef {
+		ext = ".sif"
+	} else if config.Global.Build.UseTmpOverlay {
+		ext = ".img"
+	}
+	tmpOverlayPath, cntDirPath := buildTmpPaths(nameVersion, targetDir, ext)
 
 	utils.PrintDebug("[BUILD OBJECT] Creating external %s: source=%s, targetPrefix=%s, tmpOverlay=%s, cntDir=%s", nameVersion, source, targetPrefix, tmpOverlayPath, cntDirPath)
 
@@ -511,6 +598,7 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 		nameVersion:       nameVersion,
 		buildSource:       source,
 		submitJob:         config.Global.SubmitJob,
+		tmpDir:            targetDir,
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetPrefix + ".sqf",
@@ -558,8 +646,13 @@ func createConcreteType(ctx context.Context, base *BaseBuildObject, isRef bool, 
 	}
 
 	if isContainer {
-		// Def builds produce a SIF file, not ext3 — update the tmp extension
-		base.tmpOverlayPath = strings.TrimSuffix(base.tmpOverlayPath, ".img") + ".sif"
+		// Internal def builds use the stable writable tmp dir (not fast local scratch).
+		defTmpDir := resolveTmpDirForDef()
+		if absDir, err := filepath.Abs(defTmpDir); err == nil {
+			defTmpDir = absDir
+		}
+		base.tmpDir = defTmpDir
+		base.tmpOverlayPath, base.cntDirPath = buildTmpPaths(base.nameVersion, defTmpDir, ".sif")
 		return newDefBuildObject(base)
 	}
 
@@ -594,9 +687,23 @@ func resolveBuildSource(base *BaseBuildObject, tmpDir string) (isConda bool, isC
 		return true, false, nil
 	}
 
+	// If remote, skip download when target already exists and we're not updating.
+	// This avoids unnecessary network requests for installed overlays (e.g. dep
+	// graph traversal where bg.update is propagated to already-installed nodes).
+	if info.IsRemote && !base.update && base.IsInstalled() {
+		utils.PrintDebug("Skipping remote download for %s: target already exists", utils.StyleName(base.nameVersion))
+		return false, info.IsContainer, nil
+	}
+
 	// If remote, download to tmp directory
 	if info.IsRemote {
-		localPath, err := DownloadRemoteScript(info, tmpDir)
+		dlDir := tmpDir
+		if info.IsContainer {
+			// Def builds use GetWritableTmpDir; download there so buildSource
+			// and tmpOverlayPath (SIF) are in the same directory.
+			dlDir = resolveTmpDirForDef()
+		}
+		localPath, err := DownloadRemoteScript(info, dlDir)
 		if err != nil {
 			return false, false, fmt.Errorf("failed to download remote build script: %w", err)
 		}

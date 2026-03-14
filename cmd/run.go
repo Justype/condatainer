@@ -292,13 +292,8 @@ func runScript(cmd *cobra.Command, args []string) error {
 
 	// 4. Submit if scheduler specs present and scheduler available
 	if config.Global.SubmitJob && scheduler.HasSchedulerSpecs(scriptSpecs) {
-		if err := validateAndConvertSpecs(scriptSpecs); err != nil {
-			os.Exit(ExitCodeError)
-		}
-		sched, schedErr := scheduler.DetectScheduler()
-		if schedErr != nil {
-			utils.PrintNote("Script has scheduler specs but scheduler detection failed: %v. Running locally.", schedErr)
-		} else if !sched.IsAvailable() {
+		sched := scheduler.ActiveScheduler()
+		if sched == nil {
 			utils.PrintNote("Script has scheduler specs but no scheduler is available. Running locally.")
 		} else {
 			var deps []scheduler.Dependency
@@ -832,8 +827,8 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		fmt.Printf("%s %s\n", utils.StyleTitle("Action:"),
 			utils.StyleError("Would fail — directives not fully parsed (passthrough mode); please submit it manually"))
 	} else if config.Global.SubmitJob && scheduler.HasSchedulerSpecs(specs) {
-		sched, err := scheduler.DetectScheduler()
-		if err != nil || !sched.IsAvailable() {
+		sched := scheduler.ActiveScheduler()
+		if sched == nil {
 			fmt.Printf("%s Would run locally (scheduler not available)\n", utils.StyleTitle("Action:"))
 		} else {
 			fmt.Printf("%s Would submit to %s\n", utils.StyleTitle("Action:"), sched.GetInfo().Type)
@@ -978,27 +973,6 @@ func parseArgsInScript(scriptPath string) ([]string, error) {
 	}
 
 	return args, nil
-}
-
-// validateAndConvertSpecs validates job specs against cluster limits.
-// Prints a descriptive error if any resource exceeds the partition limit.
-// For GPU errors, available alternatives are printed as suggestions.
-func validateAndConvertSpecs(specs *scheduler.ScriptSpecs) error {
-	if err := scheduler.ValidateAndConvertSpecs(specs); err != nil {
-		utils.PrintError("Job specs validation failed: %v", err)
-
-		// If it's a GPU validation error with suggestions, print them
-		if gpuErr, ok := err.(*scheduler.GpuValidationError); ok && len(gpuErr.Suggestions) > 0 {
-			utils.PrintMessage("Available GPU options:")
-			for _, suggestion := range gpuErr.Suggestions {
-				utils.PrintMessage("  - %s", suggestion)
-			}
-		}
-
-		return err
-	}
-
-	return nil
 }
 
 // getNtasks returns the total number of MPI tasks using the priority chain:

@@ -72,31 +72,27 @@ func newLsfSchedulerWithBinary(bsubBin string) (*LsfScheduler, error) {
 	}, nil
 }
 
-// IsAvailable checks if LSF is available and we're not inside an LSF job
+// GetCurrentJobID returns the LSF job ID of the currently running job, or "".
+func (l *LsfScheduler) GetCurrentJobID() string { return os.Getenv("LSB_JOBID") }
+
+// IsAvailable checks if the LSF binary is present on this system.
 func (l *LsfScheduler) IsAvailable() bool {
-	if l.bsubBin == "" {
-		return false
-	}
+	return l.bsubBin != ""
+}
 
-	// Check if we're already inside an LSF job
-	_, inJob := os.LookupEnv("LSB_JOBID")
-	if inJob {
-		return false
-	}
-
-	return true
+// IsInsideJob returns true if the current process is running inside an LSF job.
+func (l *LsfScheduler) IsInsideJob() bool {
+	_, ok := os.LookupEnv("LSB_JOBID")
+	return ok
 }
 
 // GetInfo returns information about the LSF scheduler
 func (l *LsfScheduler) GetInfo() *SchedulerInfo {
-	_, inJob := os.LookupEnv("LSB_JOBID")
-	available := l.IsAvailable()
-
 	info := &SchedulerInfo{
 		Type:      "LSF",
 		Binary:    l.bsubBin,
-		InJob:     inJob,
-		Available: available,
+		InJob:     l.IsInsideJob(),
+		Available: l.IsAvailable(),
 	}
 
 	// Try to get LSF version
@@ -1370,6 +1366,38 @@ func (s *LsfScheduler) GetJobResources() *ResourceSpec {
 		res.Gpu = &GpuSpec{Count: *n}
 	}
 	return res
+}
+
+// GetJobStatus returns the current status of the given LSF job ID.
+// Uses bjobs; returns JobStatusUnknown conservatively when bjobs is unavailable or times out.
+func (l *LsfScheduler) GetJobStatus(jobID string) (JobStatus, error) {
+	if l.bjobsBin == "" {
+		return JobStatusUnknown, nil // conservative: can't check
+	}
+	out, err := runCommand("LSF", "job-status", l.bjobsBin, jobID)
+	if err != nil {
+		if _, ok := err.(*TimeoutError); ok {
+			return JobStatusUnknown, nil // conservative: timed out
+		}
+		return JobStatusDone, nil // bjobs exits non-zero for unknown/finished jobs
+	}
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines[1:] { // skip header line
+		fields := strings.Fields(line)
+		if len(fields) >= 3 {
+			switch fields[2] {
+			case "PEND", "WAIT", "SSUSP", "USUSP", "PSUSP":
+				return JobStatusPending, nil
+			case "RUN", "UNKWN":
+				return JobStatusRunning, nil
+			case "DONE":
+				return JobStatusDone, nil
+			case "EXIT", "ZOMBI":
+				return JobStatusFailed, nil
+			}
+		}
+	}
+	return JobStatusUnknown, nil
 }
 
 // TryParseLsfScript attempts to parse an LSF script without requiring LSF binaries.

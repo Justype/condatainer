@@ -28,11 +28,11 @@ var slurmBlacklistedFlags = []string{
 
 // SlurmScheduler implements the Scheduler interface for SLURM
 type SlurmScheduler struct {
-	sbatchBin        string
-	sinfoCommand     string
-	scontrolCommand  string
-	directiveRe      *regexp.Regexp
-	jobIDRe          *regexp.Regexp
+	sbatchBin         string
+	sinfoCommand      string
+	scontrolCommand   string
+	directiveRe       *regexp.Regexp
+	jobIDRe           *regexp.Regexp
 	cachedClusterInfo *ClusterInfo
 }
 
@@ -79,31 +79,27 @@ func newSlurmSchedulerWithBinary(sbatchBin string) (*SlurmScheduler, error) {
 	}, nil
 }
 
-// IsAvailable checks if SLURM is available and we're not inside a SLURM job
+// GetCurrentJobID returns the SLURM job ID of the currently running job, or "".
+func (s *SlurmScheduler) GetCurrentJobID() string { return os.Getenv("SLURM_JOB_ID") }
+
+// IsAvailable checks if the SLURM binary is present on this system.
 func (s *SlurmScheduler) IsAvailable() bool {
-	if s.sbatchBin == "" {
-		return false
-	}
+	return s.sbatchBin != ""
+}
 
-	// Check if we're already inside a SLURM job
-	_, inJob := os.LookupEnv("SLURM_JOB_ID")
-	if inJob {
-		return false
-	}
-
-	return true
+// IsInsideJob returns true if the current process is running inside a SLURM job.
+func (s *SlurmScheduler) IsInsideJob() bool {
+	_, ok := os.LookupEnv("SLURM_JOB_ID")
+	return ok
 }
 
 // GetInfo returns information about the SLURM scheduler
 func (s *SlurmScheduler) GetInfo() *SchedulerInfo {
-	_, inJob := os.LookupEnv("SLURM_JOB_ID")
-	available := s.IsAvailable()
-
 	info := &SchedulerInfo{
 		Type:      "SLURM",
 		Binary:    s.sbatchBin,
-		InJob:     inJob,
-		Available: available,
+		InJob:     s.IsInsideJob(),
+		Available: s.IsAvailable(),
 	}
 
 	// Try to get SLURM version
@@ -833,11 +829,6 @@ func (s *SlurmScheduler) getGpuInfo() ([]GpuInfo, error) {
 			fmt.Sscanf(nodesStr, "%d", &nodes)
 			totalGpus := gpuCount * nodes
 
-			// Dynamically add MIG profiles to the GPU database if not already present
-			if IsMigProfile(gpuType) {
-				EnsureMigProfileInDatabase(gpuType)
-			}
-
 			key := fmt.Sprintf("%s:%s", partition, gpuType)
 			if existing, ok := gpuMap[key]; ok {
 				existing.Total += totalGpus
@@ -1178,6 +1169,35 @@ func (s *SlurmScheduler) GetJobResources() *ResourceSpec {
 		res.Gpu = &GpuSpec{Count: *n}
 	}
 	return res
+}
+
+// GetJobStatus returns the current status of the given SLURM job ID.
+// Uses squeue --format=%T; returns JobStatusUnknown conservatively when squeue is unavailable or times out.
+// squeue only lists active jobs; empty output means the job has finished or is absent.
+func (s *SlurmScheduler) GetJobStatus(jobID string) (JobStatus, error) {
+	squeueBin := siblingBin(s.sbatchBin, "squeue")
+	if squeueBin == "" {
+		return JobStatusUnknown, nil // conservative: can't check
+	}
+	out, err := runCommand("SLURM", "job-status", squeueBin, "-j", jobID, "--noheader", "--format=%T")
+	if err != nil {
+		// squeue exits non-zero when the job ID is no longer known (completed/cancelled).
+		// "Invalid job id" covers both old IDs and IDs that never existed.
+		if strings.Contains(strings.ToLower(string(out)), "invalid job id") {
+			return JobStatusDone, nil
+		}
+		return JobStatusUnknown, nil // conservative: timeout or unavailable
+	}
+	state := strings.TrimSpace(string(out))
+	if state == "" {
+		return JobStatusDone, nil // not in queue → finished or absent
+	}
+	switch strings.ToUpper(state) {
+	case "PENDING", "CONFIGURING", "STAGE_IN":
+		return JobStatusPending, nil
+	default: // RUNNING, COMPLETING, STAGE_OUT, or any other active state
+		return JobStatusRunning, nil
+	}
 }
 
 // TryParseSlurmScript attempts to parse a SLURM script without requiring SLURM binaries.

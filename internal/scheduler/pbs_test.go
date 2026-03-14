@@ -551,110 +551,37 @@ func TestPbsMemoryParsing(t *testing.T) {
 
 }
 
-func TestPbsGpuParsing(t *testing.T) {
-	tests := []struct {
-		name      string
-		input     string
-		wantType  string
-		wantCount int
-	}{
-		{
-			name:      "count only",
-			input:     "2",
-			wantType:  "gpu",
-			wantCount: 2,
-		},
-		{
-			name:      "type only",
-			input:     "a100",
-			wantType:  "a100",
-			wantCount: 1,
-		},
-		{
-			name:      "type:count",
-			input:     "a100:2",
-			wantType:  "a100",
-			wantCount: 2,
-		},
-		{
-			name:      "gpu:type:count",
-			input:     "gpu:a100:4",
-			wantType:  "a100",
-			wantCount: 4,
-		},
-		{
-			name:      "MIG profile without count",
-			input:     "nvidia_h100_80gb_hbm3_1g.10gb",
-			wantType:  "nvidia_h100_80gb_hbm3_1g.10gb",
-			wantCount: 1,
-		},
-		{
-			name:      "MIG profile with count",
-			input:     "nvidia_h100_80gb_hbm3_1g.10gb:2",
-			wantType:  "nvidia_h100_80gb_hbm3_1g.10gb",
-			wantCount: 2,
-		},
-		{
-			name:      "v100 single",
-			input:     "v100:1",
-			wantType:  "v100",
-			wantCount: 1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			spec, err := parseGpuString(tt.input)
-			if err != nil {
-				t.Fatalf("parseGpuString(%q) error: %v", tt.input, err)
-			}
-			if spec == nil {
-				t.Fatal("parseGpuString returned nil")
-			}
-			if spec.Type != tt.wantType {
-				t.Errorf("Type = %q; want %q", spec.Type, tt.wantType)
-			}
-			if spec.Count != tt.wantCount {
-				t.Errorf("Count = %d; want %d", spec.Count, tt.wantCount)
-			}
-		})
-	}
-
-	// Test empty string returns nil
-	t.Run("empty string", func(t *testing.T) {
-		spec, err := parseGpuString("")
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
-		if spec != nil {
-			t.Errorf("Expected nil for empty string, got %+v", spec)
-		}
-	})
-}
-
 func TestPbsIsAvailable(t *testing.T) {
-	t.Run("not in job", func(t *testing.T) {
-		clearJobEnvVars(t)
+	t.Run("with binary", func(t *testing.T) {
 		pbs := newTestPbsScheduler()
 		if !pbs.IsAvailable() {
-			t.Error("Expected IsAvailable to return true when not in a job")
-		}
-	})
-
-	t.Run("inside job", func(t *testing.T) {
-		clearJobEnvVars(t)
-		t.Setenv("PBS_JOBID", "67890.pbs-server")
-		pbs := newTestPbsScheduler()
-		if pbs.IsAvailable() {
-			t.Error("Expected IsAvailable to return false when inside a job")
+			t.Error("Expected IsAvailable to return true when binary is set")
 		}
 	})
 
 	t.Run("no binary", func(t *testing.T) {
-		clearJobEnvVars(t)
 		pbs := &PbsScheduler{}
 		if pbs.IsAvailable() {
 			t.Error("Expected IsAvailable to return false when no binary is set")
+		}
+	})
+}
+
+func TestPbsIsInsideJob(t *testing.T) {
+	t.Run("inside job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("PBS_JOBID", "67890.pbs-server")
+		pbs := newTestPbsScheduler()
+		if !pbs.IsInsideJob() {
+			t.Error("Expected IsInsideJob to return true when PBS_JOBID is set")
+		}
+	})
+
+	t.Run("not in job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		pbs := newTestPbsScheduler()
+		if pbs.IsInsideJob() {
+			t.Error("Expected IsInsideJob to return false when PBS_JOBID is not set")
 		}
 	})
 }

@@ -45,6 +45,7 @@ type BuildConfig struct {
 	OverlayType   string                 // Overlay filesystem type: "ext3" or "squashfs"
 	BlockSize     string                 // mksquashfs block size for app/env/external overlays (default: 128k)
 	DataBlockSize string                 // mksquashfs block size for data/ref overlays (default: 1m)
+	UseTmpOverlay bool                   // Use ext3 tmp overlay for build tmp/target instead of host directories (default: false)
 }
 
 // Config holds global application settings
@@ -286,6 +287,11 @@ func isWritableDir(dir string) bool {
 
 // GetWritableTmpDir returns the first writable tmp directory
 func GetWritableTmpDir() string {
+	// Global override for all build temp paths
+	if os.Getenv("CNT_TMPDIR") != "" {
+		return utils.GetTmpDir()
+	}
+
 	// Check extra base dirs
 	for _, baseDir := range GetExtraBaseDirs() {
 		if baseDir == "" {

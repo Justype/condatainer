@@ -2,9 +2,10 @@ package build
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/scheduler"
@@ -47,39 +48,16 @@ func NewBuildGraph(ctx context.Context, buildObjects []BuildObject, imagesDir, t
 		update:          update,
 	}
 
-	// Detect and initialize scheduler if jobs should be submitted
+	// Assign scheduler if job submission is enabled and we're not inside a job
 	if submitJobs {
-		sched, err := scheduler.DetectScheduler()
-		if err != nil {
-			// Distinguish between "not found" and "found but unavailable"
-			if errors.Is(err, scheduler.ErrSchedulerNotAvailable) {
-				// If the binary exists but isn't available, it is likely that we're
-				// inside a job (or otherwise unable to submit). Report that explicitly.
-				if _, err2 := scheduler.DetectSchedulerWithBinary(config.Global.SchedulerBin); err2 == nil {
-					utils.PrintWarning("Scheduler detected but unavailable (likely inside a job); all builds will run locally")
-				} else {
-					// Fallback message
-					utils.PrintWarning("Scheduler not available; all builds will run locally")
-				}
-			} else if errors.Is(err, scheduler.ErrSchedulerNotFound) {
-				utils.PrintWarning("No scheduler detected, all builds will run locally")
-			} else {
-				// Generic fallback for other errors
-				utils.PrintWarning("Scheduler not available, all builds will run locally")
-			}
-		} else if !sched.IsAvailable() {
-			// Defensive: this should be covered by DetectScheduler() returning an error,
-			// but handle it just in case.
-			info := sched.GetInfo()
-			if info.Binary != "" {
-				utils.PrintWarning("Scheduler %s detected but unavailable (inside job); all builds will run locally", info.Type)
-			} else {
-				utils.PrintWarning("Scheduler not available, all builds will run locally")
-			}
-		} else {
+		if scheduler.IsInsideJob() {
+			utils.PrintNote("Already inside a scheduler job; all builds will run locally")
+		} else if sched := scheduler.ActiveScheduler(); sched != nil {
 			bg.scheduler = sched
 			info := sched.GetInfo()
 			utils.PrintDebug("Using %s scheduler: %s", info.Type, info.Binary)
+		} else {
+			utils.PrintWarning("No scheduler detected, all builds will run locally")
 		}
 	}
 
@@ -258,15 +236,23 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 	utils.PrintDebug("Submitting %s job for %s with dependencies: %s",
 		info.Type, meta.NameVersion(), strings.Join(depIDs, ", "))
 
+	// Acquire lock before submitting to prevent duplicate scheduler submissions.
+	// The lock is created with an empty job_id and updated after Submit() returns.
+	lockPath := meta.LockPath()
+	pendingLock := BuildLockInfo{
+		Type:      info.Type, // e.g. "slurm", "pbs", "lsf", "htcondor"
+		CreatedAt: time.Now().Format(time.RFC3339),
+	}
+	if err := acquireBuildLockFile(lockPath, pendingLock); err != nil {
+		if os.IsExist(err) {
+			return "", fmt.Errorf("build already queued or running for %s (lock exists at %s)",
+				utils.StyleName(meta.NameVersion()), utils.StylePath(lockPath))
+		}
+		return "", fmt.Errorf("failed to create build lock for %s: %w", meta.NameVersion(), err)
+	}
+
 	// Get script specs
 	specs := meta.ScriptSpecs()
-
-	// Validate specs against cluster limits before submission
-	if specs != nil {
-		if err := scheduler.ValidateAndConvertSpecs(specs); err != nil {
-			return "", fmt.Errorf("job specs validation failed for %s: %w", meta.NameVersion(), err)
-		}
-	}
 
 	// Derive job name from name/version if not set in script (10 chars max)
 	if specs != nil && specs.Control.JobName == "" {
@@ -306,8 +292,13 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 	}
 	jobID, err := bg.scheduler.Submit(scriptPath, deps)
 	if err != nil {
+		os.Remove(lockPath) // release lock on submission failure
 		return "", fmt.Errorf("failed to submit job: %w", err)
 	}
+
+	// Update lock with the actual job ID now that we have it.
+	pendingLock.JobID = jobID
+	_ = overwriteBuildLockFile(lockPath, pendingLock) // best-effort; we already hold the lock
 
 	utils.PrintMessage("Submitted %s job %s for %s", info.Type, jobID, meta.NameVersion())
 	return jobID, nil

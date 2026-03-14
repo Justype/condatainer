@@ -221,3 +221,67 @@ module load alpha/1.0 beta/2.0
 		}
 	}
 }
+
+func TestGetExternalBuildTypeFromScript(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		wantType string
+		wantErr  bool
+	}{
+		{
+			name:     "NoTypeDefaultsToApp",
+			content:  "#!/bin/bash\necho hello\n",
+			wantType: "app",
+		},
+		{
+			name:     "HashTypeData",
+			content:  "#!/bin/bash\n#TYPE:data\n",
+			wantType: "data",
+		},
+		{
+			name:     "TypeRefAlias",
+			content:  "#!/bin/bash\nTYPE:ref\n",
+			wantType: "data",
+		},
+		{
+			name:     "HashTypeToolAlias",
+			content:  "#!/bin/bash\n#TYPE:tool\n",
+			wantType: "app",
+		},
+		{
+			name:    "InvalidType",
+			content: "#!/bin/bash\n#TYPE:unknown\n",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp, err := os.CreateTemp("", "script-type-*.sh")
+			if err != nil {
+				t.Fatalf("failed to create temp file: %v", err)
+			}
+			defer os.Remove(tmp.Name())
+
+			if _, err := tmp.WriteString(tt.content); err != nil {
+				t.Fatalf("failed to write temp file: %v", err)
+			}
+			tmp.Close()
+
+			got, err := GetExternalBuildTypeFromScript(tmp.Name())
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.wantType {
+				t.Fatalf("GetExternalBuildTypeFromScript() = %q, want %q", got, tt.wantType)
+			}
+		})
+	}
+}

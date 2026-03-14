@@ -21,23 +21,23 @@ func (e *Error) Error() string {
 	hint := e.analyze()
 	var msg strings.Builder
 
-	msg.WriteString(fmt.Sprintf("Overlay filesystem operation '%s' failed.\n", utils.StyleAction(e.Op)))
-	msg.WriteString(fmt.Sprintf("\tTarget:  %s\n", utils.StylePath(e.Path)))
-	msg.WriteString(fmt.Sprintf("\tTool:    %s\n", utils.StyleCommand(e.Tool)))
+	fmt.Fprintf(&msg, "Overlay filesystem operation '%s' failed.\n", utils.StyleAction(e.Op))
+	fmt.Fprintf(&msg, "\tTarget:  %s\n", utils.StylePath(e.Path))
+	fmt.Fprintf(&msg, "\tTool:    %s\n", utils.StyleCommand(e.Tool))
 
 	if e.Output != "" {
 		cleanOut := strings.TrimSpace(e.Output)
 		if len(cleanOut) > 0 {
 			// Indent output slightly for better readability
-			msg.WriteString(fmt.Sprintf("\tOutput:  %s\n", utils.StyleError(cleanOut)))
+			fmt.Fprintf(&msg, "\tOutput:  %s\n", utils.StyleError(cleanOut))
 		}
 	}
 
 	if hint != "" {
-		msg.WriteString(fmt.Sprintf("\t%s    %s\n", utils.StyleHint("Hint:"), hint))
+		fmt.Fprintf(&msg, "\t%s    %s\n", utils.StyleHint("Hint:"), hint)
 	}
 
-	msg.WriteString(fmt.Sprintf("\tError:   %v", e.BaseErr))
+	fmt.Fprintf(&msg, "\tError:   %v", e.BaseErr)
 
 	return msg.String()
 }

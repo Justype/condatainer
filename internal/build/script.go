@@ -2,17 +2,14 @@ package build
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
 	execpkg "github.com/Justype/condatainer/internal/exec"
-	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -96,95 +93,104 @@ func (s *ScriptBuildObject) String() string {
 // Build implements the shell script build workflow
 // Workflow:
 //  1. Check if overlay already exists (skip if yes)
-//  2. Create temporary ext3 overlay
+//  2. Create temporary ext3 overlay or host dirs
 //  3. Check and build missing dependencies if buildDeps=true
 //  4. Run shell script inside container with overlays
-//  5. For ref overlays: verify files exist, create SquashFS from cnt_dir
-//  6. For app overlays: set permissions, create SquashFS from /cnt
-//  7. Extract and save ENV variables if present
-//  8. Set permissions and cleanup
+//  5. Create SquashFS from the output directory
+//  6. Extract and save ENV variables if present
+//  7. Set permissions, atomic install, and cleanup
 func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
-	// Ensure target overlay path is absolute
-	targetOverlayPath := s.targetOverlayPath
-	if absTarget, err := filepath.Abs(targetOverlayPath); err == nil {
-		targetOverlayPath = absTarget
+	targetPath, finalPath := buildOverlayPaths(s.BaseBuildObject)
+	styledOverlay := utils.StyleName(filepath.Base(targetPath))
+
+	if skip, err := checkShouldBuild(s.BaseBuildObject); skip || err != nil {
+		return err
 	}
 
-	styledOverlay := utils.StyleName(filepath.Base(targetOverlayPath))
-
-	// Check if already exists (skip only when not in update mode)
-	if !s.update {
-		if _, err := os.Stat(targetOverlayPath); err == nil {
-			utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
-				styledOverlay, utils.StylePath(targetOverlayPath))
-			return nil
-		}
+	if err := s.createBuildLock(); err != nil {
+		return err
 	}
+	defer s.removeBuildLock()
 
-	// Before starting any build work, check that no exec/run holds the existing overlay.
-	if s.update && utils.FileExists(targetOverlayPath) {
-		if lock, err := overlay.AcquireLock(targetOverlayPath, true); err != nil {
-			return fmt.Errorf("cannot update %s: %w", s.nameVersion, err)
-		} else {
-			lock.Close()
-		}
-	}
+	utils.PrintMessage("Building overlay %s (%s build)", styledOverlay, utils.StyleAction(buildModeLabel(s.BaseBuildObject)))
 
-	buildMode := "local"
-	if s.RequiresScheduler() {
-		buildMode = "sbatch"
-	}
-	utils.PrintMessage("Building overlay %s (%s build)", styledOverlay, utils.StyleAction(buildMode))
-
-	// Create temporary overlay
-	utils.PrintMessage("Creating temporary overlay %s", utils.StylePath(s.tmpOverlayPath))
-	if err := s.CreateTmpOverlay(ctx, false); err != nil {
-		if errors.Is(err, ErrTmpOverlayExists) {
-			utils.PrintWarning("Stale temporary overlay found for %s. Cleaning up...", s.nameVersion)
-			s.Cleanup(true)
-			if err := s.CreateTmpOverlay(ctx, false); err != nil {
-				return fmt.Errorf("failed to create temporary overlay: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to create temporary overlay: %w", err)
-		}
+	if err := prepareBuildWorkspace(ctx, s.BaseBuildObject, config.Global.Build.UseTmpOverlay); err != nil {
+		return err
 	}
 
 	utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleCommand(s.buildSource))
 
-	// Check dependencies
+	if err := s.buildDependencies(ctx, buildDeps); err != nil {
+		return err
+	}
+
+	if err := s.runBuildScript(ctx); err != nil {
+		s.Cleanup(true)
+		return err
+	}
+
+	if err := s.packOutput(ctx, finalPath); err != nil {
+		// packOutput calls Cleanup(true) before returning an error.
+		return err
+	}
+
+	s.saveEnvFile(targetPath)
+
+	if err := os.Chmod(finalPath, 0o664); err != nil {
+		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
+	}
+
+	if err := atomicInstall(finalPath, targetPath, s.update); err != nil {
+		return err
+	}
+
+	utils.PrintSuccess("Finished overlay %s", utils.StylePath(targetPath))
+	s.Cleanup(false)
+	return nil
+}
+
+// buildDependencies checks for missing dependencies and optionally builds them.
+func (s *ScriptBuildObject) buildDependencies(ctx context.Context, buildDeps bool) error {
 	missingDeps, err := s.GetMissingDependencies()
 	if err != nil {
 		return fmt.Errorf("failed to check dependencies: %w", err)
 	}
+	if len(missingDeps) == 0 {
+		return nil
+	}
 
-	if len(missingDeps) > 0 {
-		depList := strings.Join(missingDeps, ", ")
-		if buildDeps {
-			utils.PrintMessage("Building missing dependencies for %s: %s", styledOverlay, utils.StyleNumber(depList))
+	styledOverlay := utils.StyleName(filepath.Base(s.targetOverlayPath))
+	depList := strings.Join(missingDeps, ", ")
 
-			writableImagesDir, err := config.GetWritableImagesDir()
-			if err != nil {
-				return fmt.Errorf("no writable images directory found: %w", err)
-			}
+	if !buildDeps {
+		utils.PrintError("Missing dependencies for %s: %s", styledOverlay, utils.StyleNumber(depList))
+		return fmt.Errorf("missing dependencies for %s: %s. Please install them first", s.nameVersion, depList)
+	}
 
-			for _, dep := range missingDeps {
-				depObj, err := NewBuildObject(ctx, dep, false, writableImagesDir, config.GetWritableTmpDir(), false)
-				if err != nil {
-					return fmt.Errorf("failed to create build object for dependency %s: %w", dep, err)
-				}
-				if err := depObj.Build(ctx, false); err != nil {
-					return fmt.Errorf("failed to build dependency %s: %w", dep, err)
-				}
-			}
-			utils.PrintSuccess("All dependencies for %s built successfully.", styledOverlay)
-		} else {
-			utils.PrintError("Missing dependencies for %s: %s", styledOverlay, utils.StyleNumber(depList))
-			return fmt.Errorf("missing dependencies for %s: %s. Please install them first", s.nameVersion, depList)
+	utils.PrintMessage("Building missing dependencies for %s: %s", styledOverlay, utils.StyleNumber(depList))
+
+	writableImagesDir, err := config.GetWritableImagesDir()
+	if err != nil {
+		return fmt.Errorf("no writable images directory found: %w", err)
+	}
+
+	for _, dep := range missingDeps {
+		depObj, err := NewBuildObject(ctx, dep, false, writableImagesDir, config.GetWritableTmpDir(), false)
+		if err != nil {
+			return fmt.Errorf("failed to create build object for dependency %s: %w", dep, err)
+		}
+		if err := depObj.Build(ctx, false); err != nil {
+			return fmt.Errorf("failed to build dependency %s: %w", dep, err)
 		}
 	}
 
-	// Parse name and version
+	utils.PrintSuccess("All dependencies for %s built successfully.", styledOverlay)
+	return nil
+}
+
+// buildExecOpts constructs the exec.Options for running the build script inside the container.
+func (s *ScriptBuildObject) buildExecOpts() (execpkg.Options, error) {
+	// Parse name and version from nameVersion
 	nameVersionParts := strings.Split(s.nameVersion, "/")
 	name := nameVersionParts[0]
 	version := "env"
@@ -194,9 +200,7 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 
 	// Build resource spec: builds are always single-node/single-task.
 	// effectiveNcpus() derives CPU count from scriptSpecs (folds TasksPerNode) or defaults.
-	// Pass both mem fields so GetMemPerTaskMB() on buildRS correctly derives per-task memory:
-	//   MemPerCpuMB × effectiveNcpus()  (when --mem-per-cpu was specified)
-	//   MemPerNodeMB / 1                (when --mem was specified; TasksPerNode=1)
+	// Pass both mem fields so GetMemPerTaskMB() on buildRS correctly derives per-task memory.
 	effRS := buildEffectiveResourceSpec(s.scriptSpecs)
 	buildRS := &scheduler.ResourceSpec{
 		Nodes:        1,
@@ -217,36 +221,25 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		"IN_CONDATAINER=1",
 	)
 
-	// Set target_dir based on ref type
-	targetDir := ""
-	relativePath := s.nameVersion
-	if s.isRef {
-		// Create cnt_dir for ref overlays (large reference datasets)
-		if err := os.MkdirAll(s.cntDirPath, 0o775); err != nil {
-			return fmt.Errorf("failed to create cnt_dir %s: %w", s.cntDirPath, err)
+	// Set target_dir based on build mode and overlay type.
+	// In ext3-mode ref builds: create cnt_dir so the script can write there.
+	if !config.Global.Build.UseTmpOverlay {
+		if s.isRef {
+			targetDir := filepath.Join(s.cntDirPath, s.nameVersion)
+			envSettings = append(envSettings, fmt.Sprintf("target_dir=%s", targetDir))
+		} else {
+			envSettings = append(envSettings, fmt.Sprintf("target_dir=/cnt/%s", s.nameVersion))
 		}
-		targetDir = filepath.Join(s.cntDirPath, s.nameVersion)
-		envSettings = append(envSettings, fmt.Sprintf("target_dir=%s", targetDir))
 	} else {
-		envSettings = append(envSettings, fmt.Sprintf("target_dir=/cnt/%s", relativePath))
-	}
-
-	// Add PATH from dependencies
-	pathEnv, err := GetPathEnvFromDependencies(s.dependencies)
-	if err != nil {
-		utils.PrintWarning("Failed to get PATH from dependencies: %v", err)
-	} else if pathEnv != "" {
-		// Prepend dependency paths to system paths
-		pathEnv = pathEnv + ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-		envSettings = append(envSettings, fmt.Sprintf("PATH=%s", pathEnv))
-	}
-
-	// Add overlay env configs from dependencies (already in KEY=VALUE format)
-	envConfigs, err := GetOverlayEnvConfigsFromDependencies(s.dependencies)
-	if err != nil {
-		utils.PrintWarning("Failed to get env configs from dependencies: %v", err)
-	} else {
-		envSettings = append(envSettings, envConfigs...)
+		if s.isRef {
+			if err := os.MkdirAll(s.cntDirPath, 0o775); err != nil {
+				return execpkg.Options{}, fmt.Errorf("failed to create cnt_dir %s: %w", s.cntDirPath, err)
+			}
+			targetDir := filepath.Join(s.cntDirPath, s.nameVersion)
+			envSettings = append(envSettings, fmt.Sprintf("target_dir=%s", targetDir))
+		} else {
+			envSettings = append(envSettings, fmt.Sprintf("target_dir=/cnt/%s", s.nameVersion))
+		}
 	}
 
 	// Build bash command to execute script
@@ -267,8 +260,11 @@ fi
 		utils.PrintWarning("Failed to get overlay args from dependencies: %v", err)
 	}
 
-	// Convert overlay args to overlay paths
-	overlays := []string{s.tmpOverlayPath}
+	// Build overlay list (dependency overlays; tmp overlay added first in ext3 mode)
+	var overlays []string
+	if config.Global.Build.UseTmpOverlay {
+		overlays = []string{s.tmpOverlayPath}
+	}
 	for i := 0; i < len(overlayArgs); i += 2 {
 		if overlayArgs[i] == "--overlay" && i+1 < len(overlayArgs) {
 			overlays = append(overlays, overlayArgs[i+1])
@@ -277,8 +273,18 @@ fi
 
 	// Collect bind directories (for accessing overlays and build scripts)
 	bindDirs := container.DeduplicateBindPaths(getAllBaseDirs())
+	if !config.Global.Build.UseTmpOverlay {
+		buildTmpDir := getBuildTmpDir(s.BaseBuildObject)
+		if s.isRef {
+			// Ref builds: self-bind cntDirPath so the container can write to the absolute host path.
+			// /cnt is NOT bound, keeping it free for dependency overlays.
+			bindDirs = append(bindDirs, buildTmpDir+":/ext3/tmp", s.cntDirPath+":"+s.cntDirPath)
+		} else {
+			// App builds: bind cntDirPath as /cnt (no dep overlay conflict for app builds)
+			bindDirs = append(bindDirs, buildTmpDir+":/ext3/tmp", s.cntDirPath+":/cnt")
+		}
+	}
 
-	// Create exec options for running build script
 	opts := execpkg.Options{
 		BaseImage:    config.GetBaseImage(),
 		ApptainerBin: config.Global.ApptainerBin,
@@ -287,215 +293,109 @@ fi
 		EnvSettings:  envSettings,
 		Command:      []string{"/bin/bash", "-c", bashScript},
 		HidePrompt:   true,
-		WritableImg:  true,
+		WritableImg:  config.Global.Build.UseTmpOverlay,
+	}
+	if !config.Global.Build.UseTmpOverlay {
+		opts.ApptainerFlags = []string{"--writable-tmpfs"}
 	}
 
-	// Enable stdin pass-through if there are interactive inputs
-	// This allows build scripts to read from stdin for user input (download links, etc.)
+	// Enable stdin pass-through for interactive inputs or real-time user interaction
 	if len(s.interactiveInputs) > 0 {
-		// Pre-collected inputs: provide them as stdin
 		inputStr := strings.Join(s.interactiveInputs, "\n") + "\n"
 		opts.PassThruStdin = true
 		opts.Stdin = strings.NewReader(inputStr)
 	} else {
-		// Allow container to read from user's stdin for real-time interaction
 		opts.PassThruStdin = true
+	}
+
+	return opts, nil
+}
+
+// runBuildScript sets up a context watcher and runs the build script.
+// The caller is responsible for calling Cleanup(true) if an error is returned.
+func (s *ScriptBuildObject) runBuildScript(ctx context.Context) error {
+	opts, err := s.buildExecOpts()
+	if err != nil {
+		return err
 	}
 
 	utils.PrintDebug("[BUILD] Running build script for %s with options: overlays=%v, bindPaths=%v, passThruStdin=%v",
 		s.nameVersion, opts.Overlays, opts.BindPaths, opts.PassThruStdin)
 
-	// Set up signal handling and cleanup for build script phase
-	var cleanupOnce sync.Once
-	cleanupFunc := func() {
-		cleanupOnce.Do(func() {
-			utils.PrintMessage("Cleaning up temporary files for %s...", utils.StyleName(s.nameVersion))
-			s.Cleanup(true)
-		})
-	}
-
-	done := make(chan struct{})
+	done := watchContext(ctx, "build script")
 	defer close(done)
 
-	// Monitor signals in background during build script execution
-	go func() {
-		select {
-		case <-ctx.Done():
-			utils.PrintWarning("Build cancelled. Interrupting build...")
-			// Do not call cleanupFunc() here to avoid race condition with process termination
-			// cleanupFunc() will be called after execpkg.Run returns
-		case <-done:
-			return
-		}
-	}()
-
-	// Run build script
 	if err := execpkg.Run(ctx, opts); err != nil {
-		cleanupFunc()
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
 		}
 		return fmt.Errorf("build script %s failed: %w", s.buildSource, err)
 	}
 
-	// Build succeeded - stop the signal handler before createSquashfs
-	// This prevents the cleanup goroutine from removing tmpOverlayPath
-	// while createSquashfs has it mounted, which would cause a Bus error
+	return nil
+}
 
-	// Determine final output path: write to .new when updating for atomic replacement
-	finalPath := targetOverlayPath
-	if s.update {
-		finalPath = targetOverlayPath + ".new"
+// packOutput determines the squashfs source directory and creates the SquashFS file.
+// Calls Cleanup(true) and returns an error if packing fails.
+func (s *ScriptBuildObject) packOutput(ctx context.Context, finalPath string) error {
+	// For ref builds, targetDir is the host path where the script writes files.
+	var targetDir string
+	if s.isRef {
+		targetDir = filepath.Join(s.cntDirPath, s.nameVersion)
 	}
 
-	// Create SquashFS
-	if s.isRef {
-		// For ref overlays: check files exist, then pack from cnt_dir
+	styledOverlay := utils.StyleName(filepath.Base(s.targetOverlayPath))
+
+	if !config.Global.Build.UseTmpOverlay {
+		// Dir mode: all build types pack from cntDirPath (host dir bound as /cnt)
+		checkDir := s.cntDirPath
+		if s.isRef && targetDir != "" {
+			checkDir = targetDir
+		}
+		if entries, err := os.ReadDir(checkDir); err != nil || len(entries) == 0 {
+			s.Cleanup(true)
+			return fmt.Errorf("build script did not create any files in %s", checkDir)
+		}
+		utils.PrintMessage("Creating SquashFS from %s for overlay %s", utils.StylePath(s.cntDirPath), styledOverlay)
+		if err := createSquashfs(ctx, s.BaseBuildObject, s.isRef, s.cntDirPath, finalPath); err != nil {
+			s.Cleanup(true)
+			return err
+		}
+	} else if s.isRef {
+		// Ext3 mode, ref overlays: verify files exist, then pack from cnt_dir
 		if entries, err := os.ReadDir(targetDir); err != nil || len(entries) == 0 {
 			s.Cleanup(true)
 			return fmt.Errorf("overlay build script did not create any files in %s", targetDir)
 		}
-
-		// Set permissions recursively
-		utils.PrintMessage("Setting permissions recursively for %s", utils.StylePath(s.cntDirPath))
-		if err := utils.ShareToUGORecursive(s.cntDirPath); err != nil {
-			utils.PrintWarning("Failed to set permissions for %s: %v", utils.StylePath(s.cntDirPath), err)
-		}
-
 		utils.PrintMessage("Creating SquashFS from %s for overlay %s", utils.StylePath(s.cntDirPath), styledOverlay)
-		if err := s.createSquashfs(ctx, s.cntDirPath, finalPath); err != nil {
+		if err := createSquashfs(ctx, s.BaseBuildObject, s.isRef, s.cntDirPath, finalPath); err != nil {
 			s.Cleanup(true)
 			return err
 		}
 	} else {
-		// For app overlays: set permissions and pack from /cnt
+		// Ext3 mode, app overlays: pack from /cnt inside container via overlay
 		utils.PrintMessage("Preparing SquashFS from /cnt for overlay %s", styledOverlay)
-		if err := s.createSquashfs(ctx, "/cnt", finalPath); err != nil {
+		if err := createSquashfs(ctx, s.BaseBuildObject, s.isRef, "/cnt", finalPath); err != nil {
 			s.Cleanup(true)
 			return err
 		}
 	}
-
-	// Extract and save ENV variables from build script (always written directly to targetOverlayPath.env)
-	envDict, err := GetEnvDictFromBuildScript(s.buildSource)
-	if err != nil {
-		utils.PrintWarning("Failed to extract ENV from build script: %v", err)
-	} else if len(envDict) > 0 {
-		if err := SaveEnvFile(targetOverlayPath, envDict, relativePath); err != nil {
-			utils.PrintWarning("Failed to save ENV file: %v", err)
-		}
-	}
-
-	// Set permissions on output file
-	if err := os.Chmod(finalPath, 0o664); err != nil {
-		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
-	}
-
-	// Atomic replacement: remove old and rename .new → target
-	if s.update {
-		os.Remove(targetOverlayPath) //nolint:errcheck
-		if err := os.Rename(finalPath, targetOverlayPath); err != nil {
-			os.Remove(finalPath) //nolint:errcheck
-			return fmt.Errorf("failed to replace overlay %s: %w", targetOverlayPath, err)
-		}
-	}
-
-	utils.PrintSuccess("Finished overlay %s", utils.StylePath(targetOverlayPath))
-
-	// Cleanup
-	s.Cleanup(false)
 
 	return nil
 }
 
-// createSquashfs creates a SquashFS file from the given source directory
-func (s *ScriptBuildObject) createSquashfs(ctx context.Context, sourceDir, targetOverlayPath string) error {
-	targetPath := targetOverlayPath
-	if absTarget, err := filepath.Abs(targetPath); err == nil {
-		targetPath = absTarget
+// saveEnvFile extracts #ENV: declarations from the build script and writes the .env file.
+// Errors are logged as warnings only — env file failures don't abort the build.
+func (s *ScriptBuildObject) saveEnvFile(targetPath string) {
+	envDict, err := GetEnvDictFromBuildScript(s.buildSource)
+	if err != nil {
+		utils.PrintWarning("Failed to extract ENV from build script: %v", err)
+		return
 	}
-
-	// Set up signal handling for SquashFS creation phase
-	var cleanupOnce sync.Once
-	cleanupFunc := func() {
-		cleanupOnce.Do(func() {
-			utils.PrintMessage("Cleaning up temporary files for %s...", utils.StyleName(s.nameVersion))
-			s.Cleanup(true)
-			// Remove partial SquashFS file if it exists
-			if _, err := os.Stat(targetPath); err == nil {
-				os.Remove(targetPath)
-			}
-		})
+	if len(envDict) == 0 {
+		return
 	}
-
-	done := make(chan struct{})
-	defer close(done)
-
-	// Monitor signals in background during SquashFS creation
-	go func() {
-		select {
-		case <-ctx.Done():
-			utils.PrintWarning("Build cancelled during SquashFS creation. Cleaning up...")
-			// Do not call cleanupFunc() here to avoid race condition with process termination
-			// cleanupFunc() will be called after execpkg.Run returns
-		case <-done:
-			return
-		}
-	}()
-
-	// Build mksquashfs command
-	bashScript := ""
-	packOverlays := []string{s.tmpOverlayPath}
-	if sourceDir == "/cnt" {
-		// For app overlays: set permissions first
-		bashScript = fmt.Sprintf(`
-trap 'exit 130' INT TERM
-echo "Setting permissions..."
-find /cnt -type f -exec chmod ug+rw,o+r {} \;
-find /cnt -type d -exec chmod ug+rwx,o+rx {} \;
-
-echo "Packing overlay to SquashFS..."
-mksquashfs /cnt %s -processors %d -b %s -keep-as-directory %s
-`, targetPath, s.effectiveNcpus(), config.Global.Build.BlockSize, config.Global.Build.CompressArgs)
-	} else {
-		// For ref overlays: fix permissions and pack the directory
-		if err := utils.FixPermissionsDefault(sourceDir); err != nil {
-			utils.PrintWarning("Failed to fix permissions on %s: %v", sourceDir, err)
-		}
-		bashScript = fmt.Sprintf(`
-trap 'exit 130' INT TERM
-echo "Packing overlay to SquashFS..."
-mksquashfs %s %s -processors %d -b %s -keep-as-directory %s
-`, sourceDir, targetPath, s.effectiveNcpus(), config.Global.Build.DataBlockSize, config.Global.Build.CompressArgs)
-		packOverlays = []string{} // No need to pack with tmpOverlay for ref overlays since sourceDir is already prepared
+	if err := SaveEnvFile(targetPath, envDict, s.nameVersion); err != nil {
+		utils.PrintWarning("Failed to save ENV file: %v", err)
 	}
-
-	// Collect bind directories (deduplicated)
-	bindDirs := container.DeduplicateBindPaths(getAllBaseDirs())
-
-	// Create exec options for creating SquashFS
-	opts := execpkg.Options{
-		BaseImage:    config.GetBaseImage(),
-		ApptainerBin: config.Global.ApptainerBin,
-		Overlays:     packOverlays,
-		BindPaths:    bindDirs,
-		Command:      []string{"/bin/bash", "-c", bashScript},
-		HidePrompt:   true,
-		WritableImg:  true,
-	}
-
-	utils.PrintDebug("[BUILD] Creating SquashFS for %s with options: overlays=%v, bindPaths=%v",
-		s.nameVersion, opts.Overlays, opts.BindPaths)
-	utils.PrintMessage("Packing %s into %s", utils.StylePath(sourceDir), utils.StylePath(targetPath))
-
-	// Run the SquashFS creation using exec.Run
-	if err := execpkg.Run(ctx, opts); err != nil {
-		cleanupFunc()
-		if isCancelledByUser(err) {
-			return ErrBuildCancelled
-		}
-		return fmt.Errorf("failed to create SquashFS: %w", err)
-	}
-
-	return nil
 }
