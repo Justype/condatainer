@@ -27,6 +27,7 @@ slurm.go / pbs.go / lsf.go / htcondor.go   Scheduler implementations
 ```go
 type Scheduler interface {
     IsAvailable() bool
+    IsInsideJob() bool
     ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error)
     CreateScriptWithSpec(spec *JobSpec, outputDir string) (string, error)
     Submit(scriptPath string, dependencyJobIDs []string) (string, error)

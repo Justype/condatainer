@@ -633,28 +633,36 @@ func TestPbsGpuParsing(t *testing.T) {
 }
 
 func TestPbsIsAvailable(t *testing.T) {
-	t.Run("not in job", func(t *testing.T) {
-		clearJobEnvVars(t)
+	t.Run("with binary", func(t *testing.T) {
 		pbs := newTestPbsScheduler()
 		if !pbs.IsAvailable() {
-			t.Error("Expected IsAvailable to return true when not in a job")
-		}
-	})
-
-	t.Run("inside job", func(t *testing.T) {
-		clearJobEnvVars(t)
-		t.Setenv("PBS_JOBID", "67890.pbs-server")
-		pbs := newTestPbsScheduler()
-		if pbs.IsAvailable() {
-			t.Error("Expected IsAvailable to return false when inside a job")
+			t.Error("Expected IsAvailable to return true when binary is set")
 		}
 	})
 
 	t.Run("no binary", func(t *testing.T) {
-		clearJobEnvVars(t)
 		pbs := &PbsScheduler{}
 		if pbs.IsAvailable() {
 			t.Error("Expected IsAvailable to return false when no binary is set")
+		}
+	})
+}
+
+func TestPbsIsInsideJob(t *testing.T) {
+	t.Run("inside job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("PBS_JOBID", "67890.pbs-server")
+		pbs := newTestPbsScheduler()
+		if !pbs.IsInsideJob() {
+			t.Error("Expected IsInsideJob to return true when PBS_JOBID is set")
+		}
+	})
+
+	t.Run("not in job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		pbs := newTestPbsScheduler()
+		if pbs.IsInsideJob() {
+			t.Error("Expected IsInsideJob to return false when PBS_JOBID is not set")
 		}
 	})
 }

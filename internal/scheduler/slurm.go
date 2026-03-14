@@ -82,31 +82,24 @@ func newSlurmSchedulerWithBinary(sbatchBin string) (*SlurmScheduler, error) {
 // GetCurrentJobID returns the SLURM job ID of the currently running job, or "".
 func (s *SlurmScheduler) GetCurrentJobID() string { return os.Getenv("SLURM_JOB_ID") }
 
-// IsAvailable checks if SLURM is available and we're not inside a SLURM job
+// IsAvailable checks if the SLURM binary is present on this system.
 func (s *SlurmScheduler) IsAvailable() bool {
-	if s.sbatchBin == "" {
-		return false
-	}
+	return s.sbatchBin != ""
+}
 
-	// Check if we're already inside a SLURM job
-	_, inJob := os.LookupEnv("SLURM_JOB_ID")
-	if inJob {
-		return false
-	}
-
-	return true
+// IsInsideJob returns true if the current process is running inside a SLURM job.
+func (s *SlurmScheduler) IsInsideJob() bool {
+	_, ok := os.LookupEnv("SLURM_JOB_ID")
+	return ok
 }
 
 // GetInfo returns information about the SLURM scheduler
 func (s *SlurmScheduler) GetInfo() *SchedulerInfo {
-	_, inJob := os.LookupEnv("SLURM_JOB_ID")
-	available := s.IsAvailable()
-
 	info := &SchedulerInfo{
 		Type:      "SLURM",
 		Binary:    s.sbatchBin,
-		InJob:     inJob,
-		Available: available,
+		InJob:     s.IsInsideJob(),
+		Available: s.IsAvailable(),
 	}
 
 	// Try to get SLURM version

@@ -803,28 +803,36 @@ func TestHTCondorDefaultNodesTasks(t *testing.T) {
 }
 
 func TestHTCondorIsAvailable(t *testing.T) {
-	t.Run("not in job", func(t *testing.T) {
-		clearJobEnvVars(t)
+	t.Run("with binary", func(t *testing.T) {
 		htcondor := newTestHTCondorScheduler()
 		if !htcondor.IsAvailable() {
-			t.Error("Expected IsAvailable to return true when not in a job")
-		}
-	})
-
-	t.Run("inside job", func(t *testing.T) {
-		clearJobEnvVars(t)
-		t.Setenv("_CONDOR_JOB_AD", "/tmp/condor_job_ad")
-		htcondor := newTestHTCondorScheduler()
-		if htcondor.IsAvailable() {
-			t.Error("Expected IsAvailable to return false when inside a job")
+			t.Error("Expected IsAvailable to return true when binary is set")
 		}
 	})
 
 	t.Run("no binary", func(t *testing.T) {
-		clearJobEnvVars(t)
 		htcondor := &HTCondorScheduler{}
 		if htcondor.IsAvailable() {
 			t.Error("Expected IsAvailable to return false when no binary is set")
+		}
+	})
+}
+
+func TestHTCondorIsInsideJob(t *testing.T) {
+	t.Run("inside job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("_CONDOR_JOB_AD", "/tmp/condor_job_ad")
+		htcondor := newTestHTCondorScheduler()
+		if !htcondor.IsInsideJob() {
+			t.Error("Expected IsInsideJob to return true when _CONDOR_JOB_AD is set")
+		}
+	})
+
+	t.Run("not in job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		htcondor := newTestHTCondorScheduler()
+		if htcondor.IsInsideJob() {
+			t.Error("Expected IsInsideJob to return false when _CONDOR_JOB_AD is not set")
 		}
 	})
 }

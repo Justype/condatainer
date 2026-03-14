@@ -2,7 +2,6 @@ package build
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -49,39 +48,16 @@ func NewBuildGraph(ctx context.Context, buildObjects []BuildObject, imagesDir, t
 		update:          update,
 	}
 
-	// Detect and initialize scheduler if jobs should be submitted
+	// Assign scheduler if job submission is enabled and we're not inside a job
 	if submitJobs {
-		sched, err := scheduler.DetectScheduler()
-		if err != nil {
-			// Distinguish between "not found" and "found but unavailable"
-			if errors.Is(err, scheduler.ErrSchedulerNotAvailable) {
-				// If the binary exists but isn't available, it is likely that we're
-				// inside a job (or otherwise unable to submit). Report that explicitly.
-				if _, err2 := scheduler.DetectSchedulerWithBinary(config.Global.SchedulerBin); err2 == nil {
-					utils.PrintNote("Scheduler detected but unavailable (likely inside a job); all builds will run locally")
-				} else {
-					// Fallback message
-					utils.PrintNote("Scheduler not available; all builds will run locally")
-				}
-			} else if errors.Is(err, scheduler.ErrSchedulerNotFound) {
-				utils.PrintWarning("No scheduler detected, all builds will run locally")
-			} else {
-				// Generic fallback for other errors
-				utils.PrintWarning("Scheduler not available, all builds will run locally")
-			}
-		} else if !sched.IsAvailable() {
-			// Defensive: this should be covered by DetectScheduler() returning an error,
-			// but handle it just in case.
-			info := sched.GetInfo()
-			if info.Binary != "" {
-				utils.PrintWarning("Scheduler %s detected but unavailable (inside job); all builds will run locally", info.Type)
-			} else {
-				utils.PrintWarning("Scheduler not available, all builds will run locally")
-			}
-		} else {
+		if scheduler.IsInsideJob() {
+			utils.PrintNote("Already inside a scheduler job; all builds will run locally")
+		} else if sched := scheduler.ActiveScheduler(); sched != nil {
 			bg.scheduler = sched
 			info := sched.GetInfo()
 			utils.PrintDebug("Using %s scheduler: %s", info.Type, info.Binary)
+		} else {
+			utils.PrintWarning("No scheduler detected, all builds will run locally")
 		}
 	}
 

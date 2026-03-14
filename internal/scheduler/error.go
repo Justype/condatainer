@@ -9,14 +9,8 @@ import (
 
 // Common errors
 var (
-	// ErrSchedulerNotAvailable indicates the scheduler is not available
-	ErrSchedulerNotAvailable = errors.New("scheduler is not available")
-
 	// ErrSchedulerNotFound indicates the scheduler binary was not found
 	ErrSchedulerNotFound = errors.New("scheduler binary not found in PATH")
-
-	// ErrAlreadyInJob indicates we're already inside a scheduler job
-	ErrAlreadyInJob = errors.New("already inside a scheduler job")
 
 	// ErrScriptNotFound indicates the script file was not found
 	ErrScriptNotFound = errors.New("script file not found")

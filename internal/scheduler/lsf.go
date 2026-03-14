@@ -75,31 +75,24 @@ func newLsfSchedulerWithBinary(bsubBin string) (*LsfScheduler, error) {
 // GetCurrentJobID returns the LSF job ID of the currently running job, or "".
 func (l *LsfScheduler) GetCurrentJobID() string { return os.Getenv("LSB_JOBID") }
 
-// IsAvailable checks if LSF is available and we're not inside an LSF job
+// IsAvailable checks if the LSF binary is present on this system.
 func (l *LsfScheduler) IsAvailable() bool {
-	if l.bsubBin == "" {
-		return false
-	}
+	return l.bsubBin != ""
+}
 
-	// Check if we're already inside an LSF job
-	_, inJob := os.LookupEnv("LSB_JOBID")
-	if inJob {
-		return false
-	}
-
-	return true
+// IsInsideJob returns true if the current process is running inside an LSF job.
+func (l *LsfScheduler) IsInsideJob() bool {
+	_, ok := os.LookupEnv("LSB_JOBID")
+	return ok
 }
 
 // GetInfo returns information about the LSF scheduler
 func (l *LsfScheduler) GetInfo() *SchedulerInfo {
-	_, inJob := os.LookupEnv("LSB_JOBID")
-	available := l.IsAvailable()
-
 	info := &SchedulerInfo{
 		Type:      "LSF",
 		Binary:    l.bsubBin,
-		InJob:     inJob,
-		Available: available,
+		InJob:     l.IsInsideJob(),
+		Available: l.IsAvailable(),
 	}
 
 	// Try to get LSF version

@@ -339,8 +339,12 @@ type JobSpec struct {
 
 // Scheduler defines the interface for job schedulers
 type Scheduler interface {
-	// IsAvailable checks if the scheduler is available and we're not already in a job
+	// IsAvailable checks if the scheduler binary is present on this system.
 	IsAvailable() bool
+
+	// IsInsideJob returns true if the current process is running inside a job
+	// of this specific scheduler type, based on scheduler-set environment variables.
+	IsInsideJob() bool
 
 	// ReadScriptSpecs parses scheduler-specific directives from a build script
 	// Returns ScriptSpecs with parsed scheduler directives (excludes #DEP and module directives)
@@ -464,8 +468,8 @@ func ValidateSpecs(specs *ScriptSpecs, limits *ResourceLimits) error {
 // Never modifies specs in-place.
 // Returns nil if cluster info is unavailable (validation skipped).
 func ValidateAndConvertSpecs(specs *ScriptSpecs) error {
-	sched, err := DetectScheduler()
-	if err != nil {
+	sched := ActiveScheduler()
+	if sched == nil {
 		return nil
 	}
 	clusterInfo, err := sched.GetClusterInfo()
@@ -565,23 +569,10 @@ func SubmitWithDependencies(scheduler Scheduler, jobs []*JobSpec, outputDir stri
 	return jobIDs, nil
 }
 
-// DetectScheduler attempts to detect and return an available scheduler.
-// Returns the scheduler instance if available, otherwise returns ErrSchedulerNotAvailable or ErrSchedulerNotFound.
-func DetectScheduler() (Scheduler, error) {
-	sched, err := DetectSchedulerWithBinary("")
-	if err != nil {
-		return nil, err
-	}
-	if !sched.IsAvailable() {
-		return nil, ErrSchedulerNotAvailable
-	}
-	return sched, nil
-}
-
 // DetectSchedulerWithBinary attempts to initialize a scheduler using a preferred binary path.
 // If preferredBin is empty, detection falls back to the default discovery path.
-// This function returns a Scheduler instance if the scheduler binary is present, regardless of availability.
-// Use DetectScheduler to require availability (not inside a job and submission enabled).
+// Returns a Scheduler instance if the scheduler binary is present, or ErrSchedulerNotFound.
+// Use ActiveScheduler() to get the already-initialized instance instead of re-detecting.
 func DetectSchedulerWithBinary(preferredBin string) (Scheduler, error) {
 	// If a preferred binary is specified, infer scheduler type from the binary name
 	if preferredBin != "" {
@@ -626,15 +617,6 @@ func DetectSchedulerWithBinary(preferredBin string) (Scheduler, error) {
 	return nil, ErrSchedulerNotFound
 }
 
-// CheckAvailability checks if a scheduler is available on the system
-// Returns true if a scheduler is available and we're not inside a job
-func CheckAvailability() bool {
-	scheduler, err := DetectScheduler()
-	if err != nil {
-		return false
-	}
-	return scheduler.IsAvailable()
-}
 
 // ReadMaxSpecs reads cluster information and returns the maximum resource limits
 // Returns the most permissive limits across all partitions

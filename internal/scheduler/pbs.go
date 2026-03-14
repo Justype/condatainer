@@ -125,31 +125,24 @@ func newPbsSchedulerWithBinary(qsubBin string) (*PbsScheduler, error) {
 // GetCurrentJobID returns the PBS job ID of the currently running job, or "".
 func (p *PbsScheduler) GetCurrentJobID() string { return os.Getenv("PBS_JOBID") }
 
-// IsAvailable checks if PBS is available and we're not inside a PBS job
+// IsAvailable checks if the PBS binary is present on this system.
 func (p *PbsScheduler) IsAvailable() bool {
-	if p.qsubBin == "" {
-		return false
-	}
+	return p.qsubBin != ""
+}
 
-	// Check if we're already inside a PBS job
-	_, inJob := os.LookupEnv("PBS_JOBID")
-	if inJob {
-		return false
-	}
-
-	return true
+// IsInsideJob returns true if the current process is running inside a PBS job.
+func (p *PbsScheduler) IsInsideJob() bool {
+	_, ok := os.LookupEnv("PBS_JOBID")
+	return ok
 }
 
 // GetInfo returns information about the PBS scheduler
 func (p *PbsScheduler) GetInfo() *SchedulerInfo {
-	_, inJob := os.LookupEnv("PBS_JOBID")
-	available := p.IsAvailable()
-
 	info := &SchedulerInfo{
 		Type:      "PBS",
 		Binary:    p.qsubBin,
-		InJob:     inJob,
-		Available: available,
+		InJob:     p.IsInsideJob(),
+		Available: p.IsAvailable(),
 	}
 
 	// Try to get PBS version

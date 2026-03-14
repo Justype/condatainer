@@ -72,30 +72,24 @@ func newHTCondorSchedulerWithBinary(condorSubmitBin string) (*HTCondorScheduler,
 // GetCurrentJobID returns the HTCondor job ID of the currently running job, or "".
 func (h *HTCondorScheduler) GetCurrentJobID() string { return os.Getenv("CONDOR_ID") }
 
-// IsAvailable checks if HTCondor is available and we're not inside an HTCondor job
+// IsAvailable checks if the HTCondor binary is present on this system.
 func (h *HTCondorScheduler) IsAvailable() bool {
-	if h.condorSubmitBin == "" {
-		return false
-	}
+	return h.condorSubmitBin != ""
+}
 
-	// Check if we're already inside an HTCondor job
-	if _, inJob := os.LookupEnv("_CONDOR_JOB_AD"); inJob {
-		return false
-	}
-
-	return true
+// IsInsideJob returns true if the current process is running inside an HTCondor job.
+func (h *HTCondorScheduler) IsInsideJob() bool {
+	_, ok := os.LookupEnv("_CONDOR_JOB_AD")
+	return ok
 }
 
 // GetInfo returns information about the HTCondor scheduler
 func (h *HTCondorScheduler) GetInfo() *SchedulerInfo {
-	_, inJob := os.LookupEnv("_CONDOR_JOB_AD")
-	available := h.IsAvailable()
-
 	info := &SchedulerInfo{
 		Type:      "HTCondor",
 		Binary:    h.condorSubmitBin,
-		InJob:     inJob,
-		Available: available,
+		InJob:     h.IsInsideJob(),
+		Available: h.IsAvailable(),
 	}
 
 	// Try to get HTCondor version

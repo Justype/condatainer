@@ -69,24 +69,26 @@ func runScheduler(cmd *cobra.Command, args []string) {
 		schedulerShowPartitions = true
 	}
 
-	// Try to detect scheduler
-	sched, err := scheduler.DetectSchedulerWithBinary(config.Global.SchedulerBin)
+	// Fast path: check if already inside a job before binary lookup
+	if scheduler.IsInsideJob() {
+		utils.PrintMessage("Scheduler Status: %s", utils.StyleWarning("Unavailable (inside job)"))
+		utils.PrintMessage("")
+		utils.PrintMessage("You are currently inside a scheduled job; job submission is disabled to prevent nested submissions.")
+		return
+	}
 
-	if err != nil {
-		// If we're inside a scheduled job, show a concise message and exit
-		if scheduler.IsInsideJob() {
-			utils.PrintMessage("Scheduler Status: %s", utils.StyleWarning("Unavailable (inside job)"))
+	// Use already-initialized scheduler if available; otherwise detect for status display.
+	sched := scheduler.ActiveScheduler()
+	if sched == nil {
+		var err error
+		sched, err = scheduler.DetectSchedulerWithBinary(config.Global.SchedulerBin)
+		if err != nil {
+			utils.PrintMessage("Scheduler Status: %s", utils.StyleError("Not Found"))
 			utils.PrintMessage("")
-			utils.PrintMessage("You are currently inside a scheduled job; job submission is disabled to prevent nested submissions.")
+			utils.PrintMessage("No job scheduler detected on this system.")
+			utils.PrintMessage("Supported schedulers: SLURM (more coming soon)")
 			return
 		}
-
-		// No scheduler found
-		utils.PrintMessage("Scheduler Status: %s", utils.StyleError("Not Found"))
-		utils.PrintMessage("")
-		utils.PrintMessage("No job scheduler detected on this system.")
-		utils.PrintMessage("Supported schedulers: SLURM (more coming soon)")
-		return
 	}
 
 	// Get scheduler info

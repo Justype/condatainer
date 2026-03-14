@@ -726,28 +726,36 @@ func TestSlurmTimeParsing(t *testing.T) {
 }
 
 func TestSlurmIsAvailable(t *testing.T) {
-	t.Run("not in job", func(t *testing.T) {
-		clearJobEnvVars(t)
+	t.Run("with binary", func(t *testing.T) {
 		slurm := newTestSlurmScheduler()
 		if !slurm.IsAvailable() {
-			t.Error("Expected IsAvailable to return true when not in a job")
-		}
-	})
-
-	t.Run("inside job", func(t *testing.T) {
-		clearJobEnvVars(t)
-		t.Setenv("SLURM_JOB_ID", "12345")
-		slurm := newTestSlurmScheduler()
-		if slurm.IsAvailable() {
-			t.Error("Expected IsAvailable to return false when inside a job")
+			t.Error("Expected IsAvailable to return true when binary is set")
 		}
 	})
 
 	t.Run("no binary", func(t *testing.T) {
-		clearJobEnvVars(t)
 		slurm := &SlurmScheduler{}
 		if slurm.IsAvailable() {
 			t.Error("Expected IsAvailable to return false when no binary is set")
+		}
+	})
+}
+
+func TestSlurmIsInsideJob(t *testing.T) {
+	t.Run("inside job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		t.Setenv("SLURM_JOB_ID", "12345")
+		slurm := newTestSlurmScheduler()
+		if !slurm.IsInsideJob() {
+			t.Error("Expected IsInsideJob to return true when SLURM_JOB_ID is set")
+		}
+	})
+
+	t.Run("not in job", func(t *testing.T) {
+		clearJobEnvVars(t)
+		slurm := newTestSlurmScheduler()
+		if slurm.IsInsideJob() {
+			t.Error("Expected IsInsideJob to return false when SLURM_JOB_ID is not set")
 		}
 	})
 }

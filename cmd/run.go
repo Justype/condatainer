@@ -295,10 +295,8 @@ func runScript(cmd *cobra.Command, args []string) error {
 		if err := validateAndConvertSpecs(scriptSpecs); err != nil {
 			os.Exit(ExitCodeError)
 		}
-		sched, schedErr := scheduler.DetectScheduler()
-		if schedErr != nil {
-			utils.PrintNote("Script has scheduler specs but scheduler detection failed: %v. Running locally.", schedErr)
-		} else if !sched.IsAvailable() {
+		sched := scheduler.ActiveScheduler()
+		if sched == nil {
 			utils.PrintNote("Script has scheduler specs but no scheduler is available. Running locally.")
 		} else {
 			var deps []scheduler.Dependency
@@ -832,8 +830,8 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		fmt.Printf("%s %s\n", utils.StyleTitle("Action:"),
 			utils.StyleError("Would fail — directives not fully parsed (passthrough mode); please submit it manually"))
 	} else if config.Global.SubmitJob && scheduler.HasSchedulerSpecs(specs) {
-		sched, err := scheduler.DetectScheduler()
-		if err != nil || !sched.IsAvailable() {
+		sched := scheduler.ActiveScheduler()
+		if sched == nil {
 			fmt.Printf("%s Would run locally (scheduler not available)\n", utils.StyleTitle("Action:"))
 		} else {
 			fmt.Printf("%s Would submit to %s\n", utils.StyleTitle("Action:"), sched.GetInfo().Type)
