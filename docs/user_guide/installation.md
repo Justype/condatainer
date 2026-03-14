@@ -42,23 +42,17 @@ condatainer avail
 
 ## ⚙️ Initialize Configuration
 
-Run the following command to create a default configuration file:
+Run the following command to let **CondaTainer** locate the Apptainer/Singularity path and save it for future use:
 
 ```bash
 condatainer config init
 ```
 
-If your system has Apptainer or Singularity modules instead of system-wide binaries, load the module first:
+
+**CondaTainer** will automatically search for Apptainer/Singularity in your `PATH` and via `module avail`. If you want to use a specific Apptainer/Singularity module:
 
 ```bash
-module load apptainer  # or: module load singularity
-# apptainer version > 1.4 is recommended for zstd support
-# e.g. module load apptainer/1.4
-```
-
-Then initialize the config to let **CondaTainer** locate the Apptainer/Singularity path and save it for future use:
-
-```
+module load apptainer/1.4
 condatainer config init
 ```
 

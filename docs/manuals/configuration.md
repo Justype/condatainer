@@ -28,15 +28,6 @@ View current configuration:
 condatainer config show
 ```
 
-````{note}
-If you have Apptainer modules instead of system-wide binaries, load the module first:
-
-```bash
-ml apptainer
-condatainer config init
-```
-````
-
 ## Config File Locations
 
 | Type | Path | Use Case |
@@ -412,11 +403,10 @@ Run `condatainer config init` to create a config file with auto-detected setting
 
 ### Apptainer/Singularity not found
 
-Load the apptainer (or singularity) module first, then reinitialize:
+Run `condatainer config init` — it will automatically search environment modules via `module avail` if no binary is found in `PATH`. If detection still fails, verify the module name with `module avail apptainer` and set the path manually:
 
 ```bash
-module load apptainer   # or: module load singularity
-condatainer config init
+condatainer config set apptainer_bin /path/to/apptainer
 ```
 
 ### Scheduler not detected

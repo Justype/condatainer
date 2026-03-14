@@ -14,7 +14,7 @@ type ApptainerNotFoundError struct {
 }
 
 func (e *ApptainerNotFoundError) Error() string {
-	return fmt.Sprintf("apptainer binary not found: %s", e.Path)
+	return fmt.Sprintf("apptainer or singularity binary not found: %s", e.Path)
 }
 
 // ApptainerError represents errors from apptainer command execution

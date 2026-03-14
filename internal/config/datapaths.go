@@ -64,37 +64,6 @@ func GetExtraBaseDirs() []string {
 	return viper.GetStringSlice("extra_base_dirs")
 }
 
-// GetSystemDataDir returns the system-wide data directory.
-// Checks XDG_DATA_DIRS first, then standard paths.
-func GetSystemDataDir() string {
-	// Check XDG_DATA_DIRS first (colon-separated list)
-	if dataDirs := os.Getenv("XDG_DATA_DIRS"); dataDirs != "" {
-		for _, dir := range strings.Split(dataDirs, ":") {
-			if dir == "" {
-				continue
-			}
-			candidate := filepath.Join(dir, "condatainer")
-			if stat, err := os.Stat(candidate); err == nil && stat.IsDir() {
-				return candidate
-			}
-		}
-	}
-
-	// Standard fallbacks
-	standardPaths := []string{
-		"/usr/local/share/condatainer",
-		"/usr/share/condatainer",
-		"/opt/condatainer",
-	}
-	for _, dir := range standardPaths {
-		if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
-			return dir
-		}
-	}
-
-	return ""
-}
-
 // GetUserDataDir returns the user's data directory following XDG spec.
 // Returns $XDG_DATA_HOME/condatainer or ~/.local/share/condatainer
 func GetUserDataDir() string {

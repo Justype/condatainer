@@ -61,12 +61,13 @@ var rootCmd = &cobra.Command{
 		// Step 3: Load config values into Global (with runtime detection fallback)
 		config.LoadFromViper()
 
-		// Warn if apptainer is still not accessible after auto-detection
-		// (skip during completion requests to avoid polluting output)
-		if !isCompleteRequest && !config.ValidateBinary(config.Global.ApptainerBin) {
+		// Warn if apptainer is still not accessible after auto-detection.
+		// Skip for all `config` commands so users can inspect/repair config
+		// without seeing contradictory warnings before re-detection runs.
+		isConfigCommand := strings.HasPrefix(cmd.CommandPath(), "condatainer config")
+		if !isCompleteRequest && !isConfigCommand && !config.ValidateBinary(config.Global.ApptainerBin) {
 			utils.PrintWarning("Apptainer not accessible. The module may have been unloaded or removed.")
-			utils.PrintHint("Load the apptainer module: %s", utils.StyleAction("ml apptainer"))
-			utils.PrintHint("Then run: %s", utils.StyleAction("condatainer config init"))
+			utils.PrintHint("Run: %s", utils.StyleAction("condatainer config init"))
 		}
 
 		// Step 5: Apply command-line flags (highest priority)

@@ -32,11 +32,10 @@ After installation, reload your shell and initialize the default configuration:
 
 ```bash
 source ~/.bashrc # or source your shell config
-ml apptainer # or ml singularity # if using module system
 condatainer config init
 ```
 
-This step ensures **CondaTainer** locates and saves Apptainer path for future use.
+If Apptainer/Singularity is served as module, **CondaTainer** will search it and save the latest version for future use.
 
 ## 🧰 Tools/Data Management
 
@@ -152,7 +151,7 @@ For MPI jobs (ntasks > 1), CondaTainer will detect `mpiexec` and wrap the comman
 
 All `[CNT]` messages go to stderr. Only job ID is printed to stdout, so you can capture it for downstream. 
 
-> Arrays are currently only supported in pre-release versions.
+> HTCondor uses its own DAGMan for job dependencies, so `--afterok` is not supported.
 
 ```bash
 TRIM=$(condatainer run --array samples.txt --array-limit 10 trim.sh)

@@ -5,7 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -102,6 +104,7 @@ func setDefaults() {
 	viper.SetDefault("build.use_tmp_overlay", false)
 	viper.SetDefault("build.tmp_overlay_size_mb", 20480)
 
+	viper.SetDefault("default_distro", DEFAULT_DISTRO)
 	viper.SetDefault("extra_scripts_links", []string{})
 	viper.SetDefault("parse_module_load", false)
 	viper.SetDefault("scheduler_timeout", 5)  // seconds
@@ -226,6 +229,21 @@ func GetConfigSearchPaths() []ConfigSearchPath {
 	return paths
 }
 
+// NormalizeConfigLocation expands location shorthand to its full name.
+// Returns the full name ("user", "portable", "system") or the input unchanged if not a known shorthand.
+func NormalizeConfigLocation(location string) string {
+	switch location {
+	case "u":
+		return "user"
+	case "p":
+		return "portable"
+	case "s":
+		return "system"
+	default:
+		return location
+	}
+}
+
 // GetConfigPathByLocation returns the config path for the specified location type.
 // Supported locations: "user"/"u", "portable"/"p", "system"/"s"
 func GetConfigPathByLocation(location string) (string, error) {
@@ -317,7 +335,203 @@ func DetectApptainerBin() string {
 		}
 	}
 
+	// Try module systems as fallback (e.g., HPC environments where binaries are not in PATH)
+	if path := detectApptainerFromModules(); path != "" {
+		return path
+	}
+
 	return ""
+}
+
+func detectApptainerFromModules() string {
+	utils.PrintMessage("Searching modules for apptainer/singularity via 'module avail'...")
+
+	bestModule := ""
+	bestVersion := ""
+
+	for _, moduleName := range []string{"apptainer", "singularity"} {
+		module, version := detectLatestModule(moduleName)
+		if module == "" {
+			continue
+		}
+
+		if bestModule == "" || compareModuleVersion(version, bestVersion) > 0 {
+			bestModule = module
+			bestVersion = version
+		}
+	}
+
+	if bestModule == "" {
+		utils.PrintDebug("No apptainer/singularity modules found via module avail")
+		return ""
+	}
+
+	utils.PrintMessage("Using module candidate: %s", bestModule)
+
+	// Resolve the actual binary path after loading the selected module.
+	// Use both names as fallback because module name and binary name can differ.
+	cmdStr := fmt.Sprintf("module load %q >/dev/null 2>&1 && (command -v apptainer || command -v singularity)", bestModule)
+	out, err := exec.Command("bash", "-lc", cmdStr).Output()
+	if err != nil {
+		return ""
+	}
+
+	resolved := strings.TrimSpace(string(out))
+	if resolved == "" {
+		return ""
+	}
+
+	line := strings.Split(resolved, "\n")[0]
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return ""
+	}
+
+	if filepath.IsAbs(line) {
+		if info, statErr := os.Stat(line); statErr == nil && info.Mode()&0111 != 0 {
+			return line
+		}
+	}
+
+	if fullPath, lookErr := exec.LookPath(line); lookErr == nil {
+		return fullPath
+	}
+
+	return ""
+}
+
+func detectLatestModule(moduleName string) (module string, version string) {
+	cmdStr := fmt.Sprintf("module -t avail %s 2>&1 || true", moduleName)
+	out, err := exec.Command("bash", "-lc", cmdStr).Output()
+	if err != nil {
+		return "", ""
+	}
+
+	module, version = parseLatestModuleFromAvailOutput(moduleName, string(out))
+	return module, version
+}
+
+func parseLatestModuleFromAvailOutput(moduleName, output string) (module string, version string) {
+	lineRe := regexp.MustCompile(`^` + regexp.QuoteMeta(moduleName) + `(?:/([^\s()]+))?(?:\([^)]*\))?$`)
+
+	bestModule := ""
+	bestVersion := ""
+
+	for _, rawLine := range strings.Split(output, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+
+		if strings.Contains(line, ":") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "Lmod") {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+
+		for _, token := range fields {
+			token = strings.TrimSpace(token)
+			token = strings.TrimSuffix(token, "*")
+
+			match := lineRe.FindStringSubmatch(token)
+			if len(match) == 0 {
+				continue
+			}
+
+			moduleVersion := ""
+			if len(match) > 1 {
+				moduleVersion = match[1]
+			}
+
+			cleanModule := moduleName
+			if moduleVersion != "" {
+				cleanModule = moduleName + "/" + moduleVersion
+			}
+
+			if bestModule == "" || compareModuleVersion(moduleVersion, bestVersion) > 0 {
+				bestModule = cleanModule
+				bestVersion = moduleVersion
+			}
+		}
+	}
+
+	return bestModule, bestVersion
+}
+
+func compareModuleVersion(a, b string) int {
+	if a == b {
+		return 0
+	}
+	if a == "" {
+		return -1
+	}
+	if b == "" {
+		return 1
+	}
+
+	partsA := splitVersionParts(a)
+	partsB := splitVersionParts(b)
+	maxLen := len(partsA)
+	if len(partsB) > maxLen {
+		maxLen = len(partsB)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		va := ""
+		vb := ""
+		if i < len(partsA) {
+			va = partsA[i]
+		}
+		if i < len(partsB) {
+			vb = partsB[i]
+		}
+
+		na, errA := strconv.Atoi(va)
+		nb, errB := strconv.Atoi(vb)
+
+		switch {
+		case errA == nil && errB == nil:
+			if na > nb {
+				return 1
+			}
+			if na < nb {
+				return -1
+			}
+		case errA == nil && errB != nil:
+			return 1
+		case errA != nil && errB == nil:
+			return -1
+		default:
+			if va > vb {
+				return 1
+			}
+			if va < vb {
+				return -1
+			}
+		}
+	}
+
+	return 0
+}
+
+func splitVersionParts(v string) []string {
+	parts := strings.FieldsFunc(v, func(r rune) bool {
+		switch r {
+		case '.', '-', '_', '+':
+			return true
+		default:
+			return false
+		}
+	})
+
+	if len(parts) == 0 {
+		return []string{v}
+	}
+
+	return parts
 }
 
 // DetectSchedulerBin attempts to find scheduler binary
@@ -366,25 +580,19 @@ func GetSchedulerTypeFromBin(binPath string) string {
 	}
 }
 
-// ForceDetectAndSave always re-detects binaries from current environment and saves
-// This is useful for config init to capture the exact paths from current PATH
-// Returns true if config was updated
-func ForceDetectAndSave() (bool, error) {
-	configPath, err := GetUserConfigPath()
-	if err != nil {
-		return false, err
-	}
-	return ForceDetectAndSaveTo(configPath)
-}
-
 // ForceDetectAndSaveTo always re-detects binaries and saves to the specified path
 // Returns true if config was updated
 func ForceDetectAndSaveTo(configPath string) (bool, error) {
 	updated := false
 
 	if !IsInsideContainer() {
-		// Always re-detect apptainer binary
-		detected := DetectApptainerBin()
+		// Reuse already-detected valid value when available; otherwise detect.
+		detected := ""
+		if currentBin := viper.GetString("apptainer_bin"); currentBin != "" && ValidateBinary(currentBin) {
+			detected = currentBin
+		} else {
+			detected = DetectApptainerBin()
+		}
 		if detected != "" {
 			currentBin := viper.GetString("apptainer_bin")
 			if currentBin != detected {
@@ -410,22 +618,6 @@ func ForceDetectAndSaveTo(configPath string) (bool, error) {
 	}
 
 	return updated, nil
-}
-
-// SetCompressArgsInConfig saves the compress_args to config file
-// This is called during config init to persist the auto-detected compression
-func SetCompressArgsInConfig(compressArgs string) error {
-	configPath, err := GetUserConfigPath()
-	if err != nil {
-		return err
-	}
-	return SetCompressArgsInConfigTo(compressArgs, configPath)
-}
-
-// SetCompressArgsInConfigTo saves the compress_args to the specified config file
-func SetCompressArgsInConfigTo(compressArgs, configPath string) error {
-	viper.Set("build.compress_args", compressArgs)
-	return SaveConfigTo(configPath)
 }
 
 // LoadFromViper loads config from Viper into Global struct
@@ -487,12 +679,12 @@ func LoadFromViper() {
 		Global.PreferRemote = true
 	}
 
-	// Load default_distro from config (overrides built-in default "ubuntu24")
+	// Load default_distro from config
 	if distro := viper.GetString("default_distro"); distro != "" {
 		if !slices.Contains(GetAvailableDistros(), distro) {
 			utils.PrintWarning("Config distro '%s' not available; falling back to '%s'", distro, DEFAULT_DISTRO)
 			viper.Set("default_distro", DEFAULT_DISTRO)
-			Global.DefaultDistro = DEFAULT_DISTRO
+			distro = DEFAULT_DISTRO
 		}
 		Global.DefaultDistro = distro
 	}
