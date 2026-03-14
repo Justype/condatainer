@@ -89,6 +89,7 @@ condatainer config init -l system
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
 | `parse_module_load` | `false` | Parse `module load` / `ml` lines as dependencies in `check` and `run` |
 | `scheduler_timeout` | `5` | Seconds to wait for a scheduler command (sbatch, qsub, etc.) before returning an error. Set to `0` to disable the timeout. |
+| `metadata_cache_ttl` | `7` | Days to keep the cached remote build script metadata (default: 7 days = 1 week). Set to `0` to disable caching and always fetch from the network. |
 | `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filename (e.g. `ubuntu24--base_image.sif`) and the distro prefix added to bare package names (e.g. `igv` → `ubuntu24/igv`). |
 
 ### Build Configuration
@@ -200,6 +201,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_BUILD_DATA_BLOCK_SIZE`| `build.data_block_size`|
 | `CNT_EXTRA_BASE_DIRS`      | `extra_base_dirs` (colon-separated) |
 | `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
+| `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
 | `CNT_TMPDIR`               | (special override)     |
 
 Example:
@@ -240,6 +242,7 @@ Each base directory follows this structure:
   images/           # Container images and overlays
   build-scripts/    # Build recipes
   helper-scripts/   # Runtime helpers
+  cache/            # Cached remote metadata (build-script index)
   tmp/              # Temporary files during builds
 ```
 
@@ -273,6 +276,9 @@ parse_module_load: false
 
 # Maximum seconds to wait for scheduler CLI commands (default: 5, 0 = disabled)
 scheduler_timeout: 5
+
+# Days to cache remote build script metadata (default: 7 = 1 week, 0 = disabled)
+metadata_cache_ttl: 7
 
 # Base OS distro: ubuntu20, ubuntu22, or ubuntu24 (default: ubuntu24)
 # Sets the base image (e.g. ubuntu24--base_image.sif) and prefix for bare package names
@@ -402,6 +408,26 @@ If CondaTainer reports a scheduler timeout error, the scheduler daemon may be sl
 ```bash
 condatainer config set scheduler_timeout 30  # increase to 30 seconds
 condatainer config set scheduler_timeout 0   # disable timeout entirely
+```
+
+### Remote metadata unavailable or stale
+
+CondaTainer caches the remote build script index for 1 week by default. If the cache is expired and the network is unavailable, the stale cache is used with a warning. To force a refresh:
+
+```bash
+condatainer update           # re-fetch and cache metadata
+```
+
+To disable caching entirely (always fetch live):
+
+```bash
+condatainer config set metadata_cache_ttl 0
+```
+
+To extend the cache lifetime (e.g. 2 weeks):
+
+```bash
+condatainer config set metadata_cache_ttl 14
 ```
 
 ### Disable job submission

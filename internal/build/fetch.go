@@ -15,6 +15,121 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
+// ForceRefresh skips the on-disk metadata cache and fetches fresh data from remote.
+// Set by CLI commands (e.g. `update` command).
+var ForceRefresh bool
+
+// RemoteMetadataCache is the on-disk envelope for the cached remote build script metadata.
+type RemoteMetadataCache struct {
+	FetchedAt time.Time                    `json:"fetched_at"`
+	SourceURL string                       `json:"source_url"`
+	Metadata  map[string]RemoteScriptEntry `json:"metadata"`
+}
+
+// remoteMetadataCachePath returns the absolute path for the metadata cache file.
+func remoteMetadataCachePath() (string, error) {
+	cacheDir, err := config.GetWritableCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cacheDir, "remote-scripts-metadata.json"), nil
+}
+
+// loadRemoteMetadataCache reads and validates the on-disk cache.
+// Returns an error if the file is missing, corrupt, the URL has changed, or the TTL has expired.
+func loadRemoteMetadataCache(path, sourceURL string, ttl time.Duration) (*RemoteMetadataCache, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cache RemoteMetadataCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return nil, fmt.Errorf("corrupt cache: %w", err)
+	}
+	if cache.SourceURL != sourceURL {
+		return nil, fmt.Errorf("source URL changed")
+	}
+	if time.Since(cache.FetchedAt) > ttl {
+		return nil, fmt.Errorf("cache expired")
+	}
+	return &cache, nil
+}
+
+// loadRemoteMetadataCacheIgnoreExpiry is like loadRemoteMetadataCache but skips the TTL check.
+// Used as a stale fallback when the network is unavailable.
+func loadRemoteMetadataCacheIgnoreExpiry(path, sourceURL string) (*RemoteMetadataCache, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cache RemoteMetadataCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return nil, fmt.Errorf("corrupt cache: %w", err)
+	}
+	if cache.SourceURL != sourceURL {
+		return nil, fmt.Errorf("source URL changed")
+	}
+	return &cache, nil
+}
+
+// saveRemoteMetadataCache writes the cache envelope to disk atomically.
+func saveRemoteMetadataCache(path string, cache *RemoteMetadataCache) error {
+	data, err := json.Marshal(cache)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, utils.PermFile); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// fetchRemoteMetadata performs the HTTP+gzip+JSON fetch from the given URL.
+func fetchRemoteMetadata(url string) (map[string]RemoteScriptEntry, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch remote metadata: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch remote metadata: HTTP %d", resp.StatusCode)
+	}
+
+	gzReader, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decompress metadata: %w", err)
+	}
+	defer gzReader.Close()
+
+	data, err := io.ReadAll(gzReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read metadata: %w", err)
+	}
+
+	var metadata map[string]RemoteScriptEntry
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return nil, fmt.Errorf("failed to parse metadata: %w", err)
+	}
+	return metadata, nil
+}
+
+// convertToScriptInfoMap converts a raw metadata map to ScriptInfo map.
+func convertToScriptInfoMap(metadata map[string]RemoteScriptEntry) map[string]ScriptInfo {
+	scripts := make(map[string]ScriptInfo, len(metadata))
+	for name, entry := range metadata {
+		scripts[name] = ScriptInfo{
+			Name:        name,
+			Path:        entry.RelativePath,
+			IsContainer: strings.HasSuffix(entry.RelativePath, ".def"),
+			IsRemote:    true,
+		}
+	}
+	return scripts
+}
+
 // PreferRemote controls the precedence of build script resolution.
 // When true, remote scripts take precedence over local scripts.
 // When false (default), local scripts take precedence over remote scripts.
@@ -118,64 +233,55 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 	return scripts, nil
 }
 
-// GetRemoteBuildScripts fetches the build scripts metadata from GitHub
-// Returns a map of name -> ScriptInfo
+// GetRemoteBuildScripts fetches (or loads from disk cache) the remote build scripts metadata.
+// Returns a map of name -> ScriptInfo.
 func GetRemoteBuildScripts() (map[string]ScriptInfo, error) {
 	if cachedRemoteScripts != nil {
 		return cachedRemoteScripts, nil
 	}
 
-	scripts := make(map[string]ScriptInfo)
+	sourceURL := GetRemoteMetadataURL()
+	cachePath, cacheErr := remoteMetadataCachePath()
 
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	// Fetch the gzipped metadata
-	resp, err := client.Get(GetRemoteMetadataURL())
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch remote metadata: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch remote metadata: HTTP %d", resp.StatusCode)
-	}
-
-	// Decompress gzip
-	gzReader, err := gzip.NewReader(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decompress metadata: %w", err)
-	}
-	defer gzReader.Close()
-
-	// Read all data
-	data, err := io.ReadAll(gzReader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata: %w", err)
-	}
-
-	// Parse JSON - it's a flat map of name -> entry
-	var metadata map[string]RemoteScriptEntry
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata: %w", err)
-	}
-
-	// Convert to ScriptInfo map
-	for name, entry := range metadata {
-		// Determine if it's a container (.def file)
-		isContainer := strings.HasSuffix(entry.RelativePath, ".def")
-		scripts[name] = ScriptInfo{
-			Name:        name,
-			Path:        entry.RelativePath,
-			IsContainer: isContainer,
-			IsRemote:    true,
+	// Try disk cache
+	ttl := config.Global.MetadataCacheTTL
+	if !ForceRefresh && cacheErr == nil && ttl > 0 {
+		if cache, err := loadRemoteMetadataCache(cachePath, sourceURL, ttl); err == nil {
+			utils.PrintDebug("Using cached remote metadata (fetched %s ago)", time.Since(cache.FetchedAt).Round(time.Minute))
+			cachedRemoteScripts = convertToScriptInfoMap(cache.Metadata)
+			return cachedRemoteScripts, nil
 		}
 	}
 
-	cachedRemoteScripts = scripts
-	return scripts, nil
+	// Network fetch
+	metadata, err := fetchRemoteMetadata(sourceURL)
+	if err != nil {
+		// Stale fallback: use expired cache if network is unavailable
+		if cacheErr == nil {
+			if cache, staleErr := loadRemoteMetadataCacheIgnoreExpiry(cachePath, sourceURL); staleErr == nil {
+				utils.PrintWarning("Network unavailable; using cached metadata (fetched %s ago)",
+					time.Since(cache.FetchedAt).Round(time.Minute))
+				cachedRemoteScripts = convertToScriptInfoMap(cache.Metadata)
+				return cachedRemoteScripts, nil
+			}
+		}
+		return nil, err
+	}
+
+	// Persist to disk (non-fatal)
+	if cacheErr == nil && ttl > 0 {
+		envelope := &RemoteMetadataCache{
+			FetchedAt: time.Now(),
+			SourceURL: sourceURL,
+			Metadata:  metadata,
+		}
+		if writeErr := saveRemoteMetadataCache(cachePath, envelope); writeErr != nil {
+			utils.PrintDebug("Failed to write metadata cache: %v", writeErr)
+		}
+	}
+
+	cachedRemoteScripts = convertToScriptInfoMap(metadata)
+	return cachedRemoteScripts, nil
 }
 
 // GetAllBuildScripts returns both local and remote build scripts

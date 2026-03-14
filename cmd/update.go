@@ -20,16 +20,76 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// ── update command ──────────────────────────────────────────────────────────
+
 var (
-	updateForce bool
-	updateDev   bool
+	updateBuild bool
 	updateBase  bool
 )
 
 var updateCmd = &cobra.Command{
-	Use:     "self-update",
-	Aliases: []string{"update"},
-	Short:   "Update condatainer to the latest version from GitHub",
+	Use:   "update",
+	Short: "Update build script metadata cache or the base image",
+	Long: `Update build script metadata or the base image.
+
+By default (no flags), refreshes the cached remote build script metadata.
+Use --base to update the base Apptainer image instead.`,
+	Example: `  condatainer update             # Refresh build script metadata (default)
+  condatainer update --build     # Same as above (explicit)
+  condatainer update --base      # Update the base image only`,
+	SilenceUsage: true,
+	RunE:         runUpdate,
+}
+
+func init() {
+	rootCmd.AddCommand(updateCmd)
+	updateCmd.Flags().BoolVar(&updateBuild, "build", false, "Refresh build script metadata cache (default)")
+	updateCmd.Flags().BoolVar(&updateBase, "base", false, "Update the base image")
+}
+
+func runUpdate(cmd *cobra.Command, args []string) error {
+	// Default: --build when no flags given
+	if !updateBase {
+		updateBuild = true
+	}
+
+	if updateBuild {
+		utils.PrintMessage("Fetching remote build script metadata...")
+		build.ForceRefresh = true
+		if _, err := build.GetRemoteBuildScripts(); err != nil {
+			return fmt.Errorf("failed to update build script metadata: %w", err)
+		}
+		utils.PrintSuccess("Build script metadata updated.")
+	}
+
+	if updateBase {
+		// Bail out early if the base image is currently in use
+		if baseImagePath := config.FindBaseImage(); baseImagePath != "" {
+			if err := overlay.CheckAvailable(baseImagePath, true); err != nil {
+				return fmt.Errorf("condatainer is currently running (base image is locked); stop all running condatainer sessions before updating")
+			}
+		}
+		utils.PrintMessage("Updating base image...")
+		if err := build.EnsureBaseImage(cmd.Context(), true); err != nil {
+			return fmt.Errorf("failed to update base image: %w", err)
+		}
+		utils.PrintSuccess("Base image updated successfully.")
+	}
+
+	return nil
+}
+
+// ── self-update command ──────────────────────────────────────────────────────
+
+var (
+	selfUpdateForce bool
+	selfUpdateDev   bool
+	selfUpdateBase  bool
+)
+
+var selfUpdateCmd = &cobra.Command{
+	Use:   "self-update",
+	Short: "Update condatainer to the latest version from GitHub",
 	Long: `Download and replace the current condatainer binary with the latest version from GitHub.
 
 This command downloads the latest binary from the GitHub repository
@@ -39,18 +99,18 @@ and replaces the current executable. A backup of the current version is not crea
   condatainer self-update -f    # Force update even if already on latest version
   condatainer self-update --dev # Include pre-release versions
   condatainer self-update --base # Update the base image only`,
-	SilenceUsage: true, // Runtime errors should not show usage
-	RunE:         runUpdate,
+	SilenceUsage: true,
+	RunE:         runSelfUpdate,
 }
 
 func init() {
-	rootCmd.AddCommand(updateCmd)
-	updateCmd.Flags().BoolVarP(&updateForce, "force", "f", false, "Force update even if already on latest version")
-	updateCmd.Flags().BoolVar(&updateDev, "dev", false, "Include pre-release versions")
-	updateCmd.Flags().BoolVar(&updateBase, "base", false, "Update the base image without updating the condatainer binary")
+	rootCmd.AddCommand(selfUpdateCmd)
+	selfUpdateCmd.Flags().BoolVarP(&selfUpdateForce, "force", "f", false, "Force update even if already on latest version")
+	selfUpdateCmd.Flags().BoolVar(&selfUpdateDev, "dev", false, "Include pre-release versions")
+	selfUpdateCmd.Flags().BoolVar(&selfUpdateBase, "base", false, "Update the base image without updating the condatainer binary")
 }
 
-func runUpdate(cmd *cobra.Command, args []string) error {
+func runSelfUpdate(cmd *cobra.Command, args []string) error {
 	// Get current executable path
 	exePath, err := os.Executable()
 	if err != nil {
@@ -85,7 +145,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Handle --base flag: update only the base image, skip binary update
-	if updateBase {
+	if selfUpdateBase {
 		utils.PrintMessage("Updating base image...")
 		if err := build.EnsureBaseImage(cmd.Context(), true); err != nil {
 			return fmt.Errorf("failed to update base image: %w", err)
@@ -94,7 +154,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if updateDev {
+	if selfUpdateDev {
 		utils.PrintNote("Dev mode enabled, including pre-release versions")
 	}
 
@@ -102,7 +162,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	// Get release from GitHub API
 	var releaseURL string
-	if updateDev {
+	if selfUpdateDev {
 		// Fetch all releases to find the latest (including pre-releases)
 		releaseURL = fmt.Sprintf("https://api.github.com/repos/%s/releases", config.GITHUB_REPO)
 	} else {
@@ -133,7 +193,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	var release releaseInfo
 
-	if updateDev {
+	if selfUpdateDev {
 		// Parse array of releases and find the latest
 		var releases []releaseInfo
 		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
@@ -162,7 +222,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	// latest version is newer (so we update).
 	cmp := compareVersions(currentVersion, latestVersion)
 
-	if cmp >= 0 && !updateForce {
+	if cmp >= 0 && !selfUpdateForce {
 		// Current version >= latest version (equal or newer)
 		if cmp == 0 {
 			utils.PrintSuccess("Already on the latest version %s!", utils.StyleNumber(latestVersion))
@@ -181,7 +241,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ask for confirmation unless global --yes flag or --force flag is provided
-	if !utils.ShouldAnswerYes() && !updateForce {
+	if !utils.ShouldAnswerYes() && !selfUpdateForce {
 		fmt.Print("Are you sure you want to download and replace the current binary from GitHub releases? [y/N]: ")
 		confirm, err := utils.ReadLineContext(cmd.Context())
 		if err != nil || (confirm != "y" && confirm != "yes") {

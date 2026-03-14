@@ -51,6 +51,9 @@ logs/
 # Generated Environment files
 *.env
 
+# cache folder
+cache/
+
 # Ignore content in image directories but keep the folder structure
 images
 ref-images

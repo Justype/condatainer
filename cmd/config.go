@@ -33,6 +33,7 @@ var configKeys = []string{
 	"extra_base_dirs",
 	"parse_module_load",
 	"scheduler_timeout",
+	"metadata_cache_ttl",
 	"build.ncpus",
 	"build.mem_mb",
 	"build.time",
@@ -102,6 +103,8 @@ func configValueCompletion(key string) []string {
 		return []string{"true", "false"}
 	case "build.tmp_overlay_size_mb":
 		return []string{"10240", "20480", "40960"}
+	case "metadata_cache_ttl":
+		return []string{"1", "3", "7", "14", "0"}
 	default:
 		return nil
 	}
@@ -295,6 +298,11 @@ Shows:
 			fmt.Printf("  scheduler_timeout: %ds\n", int(config.Global.SchedulerTimeout.Seconds()))
 		}
 		fmt.Printf("  parse_module_load: %v\n", config.Global.ParseModuleLoad)
+		if config.Global.MetadataCacheTTL == 0 {
+			fmt.Printf("  metadata_cache_ttl: 0 (disabled)\n")
+		} else {
+			fmt.Printf("  metadata_cache_ttl: %dd\n", int(config.Global.MetadataCacheTTL.Hours()/24))
+		}
 		fmt.Println()
 
 		// Scheduler default specs
@@ -415,6 +423,14 @@ Time duration format (for build.time):
 			var n int
 			if _, err := fmt.Sscan(value, &n); err != nil || n < 0 {
 				utils.PrintError("Invalid value for scheduler_timeout: %s (must be a non-negative integer; 0 disables the timeout)", value)
+				os.Exit(ExitCodeUsage)
+			}
+		}
+
+		if key == "metadata_cache_ttl" {
+			var n int
+			if _, err := fmt.Sscan(value, &n); err != nil || n < 0 {
+				utils.PrintError("Invalid value for metadata_cache_ttl: %s (must be a non-negative integer in days; 0 disables the cache)", value)
 				os.Exit(ExitCodeUsage)
 			}
 		}

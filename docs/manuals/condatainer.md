@@ -46,6 +46,7 @@ Available Commands:
   run         Run a script and auto-solve the dependencies by #DEP tags
   scheduler   Display scheduler information
   self-update Update condatainer to the latest version from GitHub
+  update      Update build script metadata cache or the base image
 
 Flags:
       --debug     Enable debug mode with verbose output
@@ -1603,9 +1604,44 @@ condatainer scheduler -p --cpu
 
 ## Update
 
-Updates the **CondaTainer** binary to the latest version from GitHub releases.
+Refreshes the remote build script metadata cache or updates the base image.
 
-**Aliases:** `update`
+**Usage:**
+
+```
+condatainer update [FLAGS]
+```
+
+**Options:**
+
+* `--build`: Refresh the build script metadata cache (default when no flags are given).
+* `--base`: Update the base Apptainer image only.
+
+**Features:**
+
+* Downloads and caches remote build script metadata locally (default TTL: 7 days).
+* Cached metadata is reused by `avail` and `create` without a network round-trip.
+* Pass `--base` to update the base image independently of the metadata cache.
+
+**Examples:**
+
+```bash
+# Refresh build script metadata (default)
+condatainer update
+
+# Explicit --build flag
+condatainer update --build
+
+# Update the base image only
+condatainer update --base
+
+# Refresh both metadata and base image
+condatainer update --build --base
+```
+
+## Self-Update
+
+Updates the **CondaTainer** binary to the latest version from GitHub releases.
 
 **Usage:**
 
@@ -1617,7 +1653,7 @@ condatainer self-update [FLAGS]
 
 * `-y`, `--yes`: Skip confirmation prompt and auto-update.
 * `-f`, `--force`: Force update even if already on the latest version.
-* `--dev`: Include pre-release versions (also enabled automatically when the config `branch` is set to `dev`).
+* `--dev`: Include pre-release versions.
 * `--base`: Update the base image only, without updating the condatainer binary.
 
 **Features:**

@@ -78,6 +78,9 @@ type Config struct {
 	// Scheduler command timeout in seconds (default: 5)
 	SchedulerTimeout time.Duration
 
+	// Max age of the on-disk remote build script metadata cache (default: 1 week)
+	MetadataCacheTTL time.Duration
+
 	// Build configuration
 	Build BuildConfig
 }
@@ -170,6 +173,7 @@ func LoadDefaults(executablePath string) {
 		ScriptsLink:      DefaultScriptsLink,
 		PrebuiltLink:     DefaultPrebuiltLink,
 		SchedulerTimeout: 5 * time.Second,
+		MetadataCacheTTL: 7 * 24 * time.Hour, // 1 week
 
 		Build: BuildConfig{
 			Defaults: scheduler.ResourceSpec{

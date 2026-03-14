@@ -447,6 +447,26 @@ func GetWritableBuildScriptsDir() (string, error) {
 	return "", fmt.Errorf("no writable build scripts directory found")
 }
 
+// GetWritableCacheDir returns the first writable cache directory (creates it if needed).
+func GetWritableCacheDir() (string, error) {
+	for _, dir := range buildScriptSearchPaths("cache") {
+		if err := os.MkdirAll(dir, utils.PermDir); err != nil {
+			continue
+		}
+
+		testFile := filepath.Join(dir, ".write-test")
+		f, err := os.Create(testFile)
+		if err != nil {
+			continue
+		}
+		f.Close()
+		os.Remove(testFile)
+		return dir, nil
+	}
+
+	return "", fmt.Errorf("no writable cache directory found")
+}
+
 // GetWritableHelperScriptsDir returns the first writable helper scripts directory.
 func GetWritableHelperScriptsDir() (string, error) {
 	for _, dir := range GetHelperScriptSearchPaths() {

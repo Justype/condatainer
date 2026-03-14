@@ -104,7 +104,8 @@ func setDefaults() {
 	viper.SetDefault("build.tmp_overlay_size_mb", 20480)
 
 	viper.SetDefault("parse_module_load", false)
-	viper.SetDefault("scheduler_timeout", 5) // seconds
+	viper.SetDefault("scheduler_timeout", 5)   // seconds
+	viper.SetDefault("metadata_cache_ttl", 7) // days (1 week)
 }
 
 // GetUserConfigPath returns the path to the user config file
@@ -542,6 +543,8 @@ func LoadFromViper() {
 	Global.ParseModuleLoad = viper.GetBool("parse_module_load")
 
 	Global.SchedulerTimeout = time.Duration(viper.GetInt("scheduler_timeout")) * time.Second
+
+	Global.MetadataCacheTTL = time.Duration(viper.GetInt("metadata_cache_ttl")) * 24 * time.Hour
 }
 
 // NormalizeCompressArgs is a thin wrapper around ArgsForCompress and exists
