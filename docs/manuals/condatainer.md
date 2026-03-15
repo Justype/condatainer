@@ -180,7 +180,8 @@ condatainer overlay create [OPTIONS] [NAME]
 * `-t`, `--type [TYPE]`: Overlay profile: `small`, `balanced`, or `large` (default: balanced).
 * `-f`, `--file [FILE]`: Initialize with a Conda environment file (.yml or .yaml).
 * `--fakeroot`: Create image compatible with fakeroot (owned by root, must use with `--fakeroot` later).
-* `--sparse`: Create a sparse image file. (Short form: `-S` available on the `o` shortcut only.)
+* `--sparse`: Create a sparse image file (no pre-allocation). (Short form: `-S` available on the `o` shortcut only.)
+* `--no-tmp`: Create the overlay directly at the target path instead of staging at a local tmp directory first. By default CondaTainer creates the image on a fast local filesystem (e.g. `/tmp`) and moves it to the destination once ready — this is significantly faster on HPC network filesystems (LustreFS). Use `--no-tmp` only when the target is already on local storage.
 * NAME: Name of the overlay image (`env.img` by default if not specified).
 
 **Examples:**

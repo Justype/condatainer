@@ -71,30 +71,38 @@ If no image path is provided, defaults to 'env.img'.`,
 		sparse, _ := cmd.Flags().GetBool("sparse")
 		typeFlag, _ := cmd.Flags().GetString("type")
 		envFile, _ := cmd.Flags().GetString("file")
+		noTmp, _ := cmd.Flags().GetBool("no-tmp")
 
 		sizeMB, err := utils.ParseSizeToMB(sizeStr)
 		if err != nil {
 			ExitWithError("Invalid size format '%s': %v", sizeStr, err)
 		}
 
-		// 3. Create the Overlay
+		uid, gid := os.Getuid(), os.Getgid()
 		if fakeroot {
-			err = overlay.CreateForRoot(cmd.Context(), path, sizeMB, typeFlag, sparse, "ext3", false)
-		} else {
-			err = overlay.CreateForCurrentUser(cmd.Context(), path, sizeMB, typeFlag, sparse, "ext3", false)
+			uid, gid = 0, 0
+		}
+		opts := &overlay.CreateOptions{
+			Path:           path,
+			SizeMB:         sizeMB,
+			UID:            uid,
+			GID:            gid,
+			Profile:        overlay.GetProfile(typeFlag),
+			Sparse:         sparse,
+			FilesystemType: "ext3",
 		}
 
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
-				utils.PrintWarning("Overlay creation cancelled.")
-				return
+		if noTmp {
+			// 3a. Create directly at target path (no tmp), then conda init there.
+			if err := overlay.CreateDirectly(cmd.Context(), opts); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+					utils.PrintWarning("Overlay creation cancelled.")
+					return
+				}
+				ExitWithError("%v", err)
 			}
-			ExitWithError("%v", err)
-		}
-
-		// 4. Initialize with Conda environment if file specified
-		if envFile != "" {
 			if err := initializeOverlayWithConda(cmd.Context(), path, envFile, fakeroot); err != nil {
+				os.Remove(path)
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 					utils.PrintWarning("Overlay initialization cancelled.")
 					return
@@ -102,15 +110,39 @@ If no image path is provided, defaults to 'env.img'.`,
 				ExitWithError("Failed to initialize overlay with conda environment: %v", err)
 			}
 		} else {
-			// Initialize with minimal conda environment (zlib)
-			if err := initializeOverlayWithConda(cmd.Context(), path, "", fakeroot); err != nil {
+			// 3b. Create sparse at local tmp (fast I/O), conda init there, then move + allocate.
+			tmpPath, err := overlay.CreateInTmp(cmd.Context(), opts)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+					utils.PrintWarning("Overlay creation cancelled.")
+					return
+				}
+				ExitWithError("%v", err)
+			}
+
+			if err := initializeOverlayWithConda(cmd.Context(), tmpPath, envFile, fakeroot); err != nil {
+				os.Remove(tmpPath)
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 					utils.PrintWarning("Overlay initialization cancelled.")
 					return
 				}
 				ExitWithError("Failed to initialize overlay with conda environment: %v", err)
 			}
+
+			utils.PrintMessage("Moving overlay to %s", utils.StylePath(path))
+			copied, err := overlay.MoveOverlayCopied(tmpPath, path, sparse)
+			if err != nil {
+				os.Remove(tmpPath)
+				ExitWithError("Failed to move overlay to destination: %v", err)
+			}
+
+			// Skip AllocateOverlay when io.Copy was used: zeros already written physically.
+			if !sparse && !copied {
+				overlay.AllocateOverlay(cmd.Context(), path, sizeMB)
+			}
 		}
+
+		utils.PrintSuccess("Created overlay %s", utils.StylePath(path))
 	},
 }
 
@@ -326,8 +358,9 @@ func init() {
 	overlayCreateCmd.Flags().StringP("size", "s", "10G", "Set overlay size (e.g., 500M, 10G)")
 	overlayCreateCmd.Flags().StringP("type", "t", "balanced", "Overlay profile: small/balanced/large files")
 	overlayCreateCmd.Flags().Bool("fakeroot", false, "Create a fakeroot-compatible overlay (owned by root)")
-	overlayCreateCmd.Flags().Bool("sparse", false, "Create a sparse overlay image")
+	overlayCreateCmd.Flags().Bool("sparse", false, "Create a sparse overlay image (no pre-allocation)")
 	overlayCreateCmd.Flags().StringP("file", "f", "", "Initialize with Conda environment file (.yml or .yaml)")
+	overlayCreateCmd.Flags().Bool("no-tmp", false, "Create directly at target path instead of local tmp (slower on network filesystems)")
 
 	overlayCreateCmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		opts := []string{"small", "balanced", "large"}
@@ -497,7 +530,7 @@ func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string
 		Command:     mmCreateCmd,
 		WritableImg: true,
 		Fakeroot:    fakeroot,
-		HideOutput:  true, // Suppress mm-create verbose output
+		HidePrompt:  true,
 	}
 
 	if err := exec.Run(ctx, opts); err != nil {

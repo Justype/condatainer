@@ -37,13 +37,21 @@ Examples:
 Flags:
       --fakeroot      Create a fakeroot-compatible overlay (owned by root)
   -f, --file string   Initialize with Conda environment file (.yml or .yaml)
+      --no-tmp        Create directly at target path (skip local tmp staging)
   -s, --size string   Set overlay size (e.g., 500M, 10G) (default "10G")
-      --sparse        Create a sparse overlay image
+      --sparse        Create a sparse overlay image (no pre-allocation)
   -t, --type string   Overlay profile: small/balanced/large files (default "balanced")
 ```
 
 - For Python projects, 10GiB is usually sufficient.
 - For R projects, you may want to increase the size to 20GiB or more, especially if you are working with bioconductor packages.
+
+```{note}
+By default, CondaTainer stages the overlay at a fast local tmp directory (e.g. `/tmp`) and moves it to the target path once ready.
+This avoids slow random I/O on HPC network filesystems (LustreFS) during image creation and conda initialization.
+
+Use `--no-tmp` to skip this and write directly to the target path, if the tmp size is limited.
+```
 
 ```{note}
 Only one workspace overlay can be mounted at a time, regardless of writable or read-only mode.

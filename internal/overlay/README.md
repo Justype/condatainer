@@ -26,12 +26,46 @@ error.go    Structured error types
 
 **Lock** - `Close() error`
 
+## Creation API
+
+There are three creation paths depending on the caller's needs:
+
+| Function | When to use |
+|---|---|
+| `CreateWithOptions(ctx, opts)` | Simple create + move in one call (e.g. `internal/build`) |
+| `CreateInTmp(ctx, opts)` → `MoveOverlayCopied` | Caller needs to run work on the tmp image first (e.g. conda init in `cmd/overlay`) |
+| `CreateDirectly(ctx, opts)` | Target is already on fast local storage (`--no-tmp`) |
+
+**Default tmp-staging flow** (used by `condatainer o` / `overlay create`):
+
+1. `CreateInTmp` — builds the overlay **sparse** at `utils.GetTmpDir()` (local SSD, fast random I/O for `dd`/`mke2fs`/`debugfs`/conda)
+2. Caller runs additional work (e.g. conda environment init) on the tmp path
+3. `MoveOverlayCopied(tmpPath, finalPath, sparse)` — moves to destination:
+   - Same filesystem → `os.Rename` (instant); may need `AllocateOverlay` afterward
+   - Cross-filesystem (e.g. local `/tmp` → LustreFS) → copy then remove src:
+     - `sparse=false`: `io.Copy` writes all zeros, destination is fully allocated
+     - `sparse=true`: `sparseAwareCopy` via `SEEK_DATA`/`SEEK_HOLE`, holes preserved
+
+Override the tmp location with `CNT_TMPDIR` (takes priority over `SLURM_TMPDIR`, `TMPDIR`, `/tmp`).
+
 ## Usage
 
 ```go
-// Create
-overlay.CreateForCurrentUser(ctx, "env.img", 3000, "small", true, "ext3", false)
-overlay.CreateForRoot(ctx, "env.img", 3000, "default", false, "ext3", false)
+// --- Simple create (internal/build) ---
+overlay.CreateWithOptions(ctx, &overlay.CreateOptions{
+    Path: "env.img", SizeMB: 3000,
+    UID: os.Getuid(), GID: os.Getgid(),
+    Profile: overlay.ProfileDefault, Sparse: true, FilesystemType: "ext3", Quiet: true,
+})
+
+// --- Create at tmp, do work, then move (cmd/overlay) ---
+opts := &overlay.CreateOptions{Path: "env.img", SizeMB: 10240, ...}
+tmpPath, err := overlay.CreateInTmp(ctx, opts)
+// ... run conda init on tmpPath ...
+copied, err := overlay.MoveOverlayCopied(tmpPath, opts.Path, opts.Sparse)
+if !opts.Sparse && !copied {
+    overlay.AllocateOverlay(ctx, opts.Path, opts.SizeMB)
+}
 
 // Resize (grow or shrink)
 overlay.Resize(ctx, "env.img", 5000)

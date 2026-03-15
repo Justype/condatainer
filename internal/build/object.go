@@ -245,7 +245,11 @@ func (b *BaseBuildObject) CreateTmpOverlay(ctx context.Context, force bool) erro
 	// For build overlays, we use a temporary size from config (default 20GB).
 	// Use "default" profile, sparse=true for faster creation.
 	// quiet=true suppresses detailed specs output since users don't need to see those for temp overlays.
-	if err := overlay.CreateForCurrentUser(ctx, b.tmpOverlayPath, config.Global.Build.TmpSizeMB, "default", true, "ext3", true); err != nil {
+	if err := overlay.CreateWithOptions(ctx, &overlay.CreateOptions{
+		Path: b.tmpOverlayPath, SizeMB: config.Global.Build.TmpSizeMB,
+		UID: os.Getuid(), GID: os.Getgid(),
+		Profile: overlay.ProfileDefault, Sparse: true, FilesystemType: "ext3", Quiet: true,
+	}); err != nil {
 		return fmt.Errorf("failed to create temporary overlay: %w", err)
 	}
 
