@@ -96,6 +96,7 @@ condatainer config init -l system
 | `build.data_block_size` | `1m` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
 | `build.use_tmp_overlay` | `false` | Use a temporary ext3 overlay during builds instead of host directories |
 | `build.tmp_overlay_size_mb` | `20480` | Temporary ext3 overlay size in MB (20GB); only used when `use_tmp_overlay` is `true` |
+| `channels` | `[conda-forge, bioconda]` | Conda channels passed to micromamba in priority order (first = highest priority) |
 
 > `build.compress_args` also accepts shortcuts: `gzip`, `lz4`, `zstd`, `zstd-fast`, `zstd-medium`, `zstd-high`
 >
@@ -142,7 +143,7 @@ condatainer config set scheduler_timeout 10
 
 ### Manage Array Config Values
 
-Array keys (`extra_base_dirs`, `extra_scripts_links`) use dedicated subcommands:
+Array keys (`extra_base_dirs`, `extra_scripts_links`, `channels`) use dedicated subcommands:
 
 ```bash
 # Append (lower priority)
@@ -210,9 +211,10 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_BUILD_MEM_MB`         | `build.mem_mb`         |
 | `CNT_BUILD_BLOCK_SIZE`     | `build.block_size`     |
 | `CNT_BUILD_DATA_BLOCK_SIZE`| `build.data_block_size`|
-| `CNT_EXTRA_BASE_DIRS`         | `extra_base_dirs` (colon-separated) |
-| `CNT_EXTRA_SCRIPTS_LINKS`     | `extra_scripts_links` (pipe-separated, since URLs contain `:`) |
-| `CNT_SCHEDULER_TIMEOUT`       | `scheduler_timeout`    |
+| `CNT_EXTRA_BASE_DIRS`      | `extra_base_dirs` (colon-separated) |
+| `CNT_EXTRA_SCRIPTS_LINKS`  | `extra_scripts_links` (pipe-separated) |
+| `CNT_CHANNELS`             | `channels` (colon-separated) |
+| `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
 | `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
 | `CNT_TMPDIR`               | (special override)     |
 
@@ -315,6 +317,11 @@ build:
   data_block_size: 1m    # SquashFS block size for data overlays
   use_tmp_overlay: false  # Use ext3 tmp overlay instead of host directories
   tmp_overlay_size_mb: 20480  # Only used when use_tmp_overlay is true
+
+# Default: conda-forge then bioconda
+channels:
+  - conda-forge
+  - bioconda
 ```
 
 ## Time Duration Format

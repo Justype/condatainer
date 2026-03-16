@@ -42,6 +42,7 @@ type BuildConfig struct {
 	BlockSize     string                 // mksquashfs block size for app/env/external overlays (default: 128k)
 	DataBlockSize string                 // mksquashfs block size for data/ref overlays (default: 1m)
 	UseTmpOverlay bool                   // Use ext3 tmp overlay for build tmp/target instead of host directories (default: false)
+	Channels      []string               // conda channels in priority order (default: [conda-forge, bioconda])
 }
 
 // Config holds global application settings
@@ -177,10 +178,11 @@ func LoadDefaults(executablePath string) {
 				MemPerNodeMB: 8192,          // 8GB default memory
 				Time:         2 * time.Hour, // 2 hour default time limit
 			},
-			TmpSizeMB:     20480,       // 20GB temporary overlay
-			CompressArgs:  "-comp lz4", // zstd only compatible with apptainer version > 1.4
-			BlockSize:     "128k",      // mksquashfs block size for app/env/external overlays
-			DataBlockSize: "1m",        // mksquashfs block size for data/ref overlays
+			TmpSizeMB:     20480,                          // 20GB temporary overlay
+			CompressArgs:  "-comp lz4",                    // zstd only compatible with apptainer version > 1.4
+			BlockSize:     "128k",                         // mksquashfs block size for app/env/external overlays
+			DataBlockSize: "1m",                           // mksquashfs block size for data/ref overlays
+			Channels:      []string{"conda-forge", "bioconda"}, // default conda channels
 		},
 	}
 }

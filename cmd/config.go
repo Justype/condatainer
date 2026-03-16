@@ -19,47 +19,46 @@ var (
 	initLocation string // user, portable, system, or a custom path
 )
 
-// configKeys is the list of known configuration keys for shell completion
-var configKeys = []string{
-	"logs_dir",
-	"apptainer_bin",
-	"scheduler_bin",
-	"default_distro",
-	"submit_job",
-	"scripts_link",
-	"extra_scripts_links",
-	"prefer_remote",
-	"extra_base_dirs",
-	"parse_module_load",
-	"scheduler_timeout",
-	"metadata_cache_ttl",
-	"build.ncpus",
-	"build.mem_mb",
-	"build.time",
-	"build.compress_args",
-	"build.block_size",
-	"build.data_block_size",
-	"build.use_tmp_overlay",
-	"build.tmp_overlay_size_mb",
+// configKeyDefs maps every known config key to whether it holds a string slice (array).
+// true = array key (use append/prepend/remove); false = scalar key (use set).
+var configKeyDefs = map[string]bool{
+	"logs_dir":               false,
+	"apptainer_bin":          false,
+	"scheduler_bin":          false,
+	"default_distro":         false,
+	"submit_job":             false,
+	"scripts_link":           false,
+	"extra_scripts_links":    true,
+	"prefer_remote":          false,
+	"extra_base_dirs":        true,
+	"parse_module_load":      false,
+	"scheduler_timeout":      false,
+	"metadata_cache_ttl":     false,
+	"build.ncpus":            false,
+	"build.mem_mb":           false,
+	"build.time":             false,
+	"build.compress_args":    false,
+	"build.block_size":       false,
+	"build.data_block_size":  false,
+	"build.use_tmp_overlay":  false,
+	"build.tmp_overlay_size_mb": false,
+	"channels":               true,
 }
 
-// arrayConfigKeys is the set of config keys that hold string slices.
-var arrayConfigKeys = []string{"extra_base_dirs", "extra_scripts_links"}
-
-func isArrayKey(key string) bool {
-	for _, k := range arrayConfigKeys {
-		if k == key {
-			return true
-		}
-	}
-	return false
-}
+func isArrayKey(key string) bool { return configKeyDefs[key] }
 
 // modifyArrayConfig reads the current slice for key, applies modify, writes back.
 func modifyArrayConfig(key string, modify func([]string) []string) error {
 	if !isArrayKey(key) {
+		var arrayKeys []string
+		for k, isArr := range configKeyDefs {
+			if isArr {
+				arrayKeys = append(arrayKeys, k)
+			}
+		}
+		sort.Strings(arrayKeys)
 		return fmt.Errorf("'%s' is not an array config key; array keys: %s",
-			key, strings.Join(arrayConfigKeys, ", "))
+			key, strings.Join(arrayKeys, ", "))
 	}
 	current := viper.GetStringSlice(key)
 	updated := modify(current)
@@ -69,7 +68,13 @@ func modifyArrayConfig(key string, modify func([]string) []string) error {
 
 func arrayKeyCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) == 0 {
-		return arrayConfigKeys, cobra.ShellCompDirectiveNoFileComp
+		var keys []string
+		for k, isArr := range configKeyDefs {
+			if isArr {
+				keys = append(keys, k)
+			}
+		}
+		return keys, cobra.ShellCompDirectiveNoFileComp
 	}
 	if len(args) == 1 {
 		switch args[0] {
@@ -89,27 +94,47 @@ func arrayRemoveValueCompletion(cmd *cobra.Command, args []string, toComplete st
 	return arrayKeyCompletion(cmd, args, toComplete)
 }
 
-// getConfigEnvVars returns a list of environment variables corresponding to
-// the supported configuration keys.  We base the list on the known config
-// keys (configKeys) so that the envelope is automatically updated when new
-// settings are added.  The variable names are simply the uppercased key with
-// dots replaced by underscores and a CNT_ prefix.
+// getConfigEnvVars returns a sorted list of CNT_* environment variables for all known config keys.
 func getConfigEnvVars() []string {
-	vars := make([]string, 0, len(configKeys))
-	for _, key := range configKeys {
-		env := "CNT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
-		vars = append(vars, env)
+	vars := make([]string, 0, len(configKeyDefs))
+	for key := range configKeyDefs {
+		vars = append(vars, "CNT_"+strings.ToUpper(strings.ReplaceAll(key, ".", "_")))
 	}
-	// sort for deterministic output
 	sort.Strings(vars)
 	return vars
+}
+
+// scalarConfigKeys returns all non-array config keys.
+func scalarConfigKeys() []string {
+	var out []string
+	for k, isArr := range configKeyDefs {
+		if !isArr {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// configSetKeysCompletion returns only scalar (non-array) config keys for `config set`.
+func configSetKeysCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		return scalarConfigKeys(), cobra.ShellCompDirectiveNoFileComp
+	}
+	if len(args) == 1 {
+		return configValueCompletion(args[0]), cobra.ShellCompDirectiveNoFileComp
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
 // configKeysCompletion returns config keys for shell completion
 func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) == 0 {
-		// First arg: complete config keys
-		return configKeys, cobra.ShellCompDirectiveNoFileComp
+		// First arg: complete all config keys
+		var keys []string
+		for k := range configKeyDefs {
+			keys = append(keys, k)
+		}
+		return keys, cobra.ShellCompDirectiveNoFileComp
 	}
 	if len(args) == 1 {
 		// Second arg: complete values based on the key
@@ -283,17 +308,8 @@ Shows:
 		fmt.Println(utils.StyleTitle("Current Configuration:"))
 		fmt.Println()
 
-		// Directories
-		fmt.Println(utils.StyleTitle("Directories:"))
-		logsDir := viper.GetString("logs_dir")
-		if logsDir == "" {
-			logsDir = config.Global.LogsDir + " (default)"
-		}
-		fmt.Printf("  logs_dir:       %s\n", logsDir)
-		fmt.Println()
-
-		// Binary paths
-		fmt.Println(utils.StyleTitle("Binaries:"))
+		// Paths: binaries then directories
+		fmt.Println(utils.StyleTitle("Paths:"))
 		fmt.Printf("  apptainer_bin:  %s\n", viper.GetString("apptainer_bin"))
 		schedulerBin := viper.GetString("scheduler_bin")
 		schedulerType := config.GetSchedulerTypeFromBin(schedulerBin)
@@ -302,12 +318,20 @@ Shows:
 		} else {
 			fmt.Printf("  scheduler_bin:  %s\n", schedulerBin)
 		}
-		fmt.Println()
-
-		// Distros and default
-		fmt.Println(utils.StyleTitle("Distros:"))
-		fmt.Printf("  Available:      %s\n", strings.Join(config.GetAvailableDistros(), ", "))
-		fmt.Printf("  default_distro: %s\n", config.Global.DefaultDistro)
+		logsDir := viper.GetString("logs_dir")
+		if logsDir == "" {
+			logsDir = config.Global.LogsDir + " (default)"
+		}
+		fmt.Printf("  logs_dir:       %s\n", logsDir)
+		extraDirs := config.GetExtraBaseDirs()
+		if len(extraDirs) > 0 {
+			fmt.Printf("  extra_base_dirs:\n")
+			for _, dir := range extraDirs {
+				fmt.Printf("    - %s\n", dir)
+			}
+		} else {
+			fmt.Printf("  extra_base_dirs: %s\n", utils.StyleInfo("none"))
+		}
 		fmt.Println()
 
 		// Remote sources
@@ -327,6 +351,8 @@ Shows:
 
 		// Options
 		fmt.Println(utils.StyleTitle("Options:"))
+		fmt.Printf("  default_distro:    %s  (avail: %s)\n",
+			config.Global.DefaultDistro, strings.Join(config.GetAvailableDistros(), ", "))
 		submitJobConfig := viper.GetBool("submit_job")
 		submitJobActual := config.Global.SubmitJob
 		if submitJobConfig && !submitJobActual {
@@ -345,9 +371,16 @@ Shows:
 		} else {
 			fmt.Printf("  metadata_cache_ttl: %dd\n", int(config.Global.MetadataCacheTTL.Hours()/24))
 		}
+		channels := config.Global.Build.Channels
+		if len(channels) > 0 {
+			fmt.Printf("  channels:\n")
+			for _, ch := range channels {
+				fmt.Printf("    - %s\n", ch)
+			}
+		} else {
+			fmt.Printf("  channels: %s\n", utils.StyleInfo("none"))
+		}
 		fmt.Println()
-
-		// Scheduler default specs
 
 		// Build settings
 		fmt.Printf("%s %s\n", utils.StyleTitle("Build Configuration:"), "build.*")
@@ -366,19 +399,6 @@ Shows:
 		fmt.Printf("  data_block_size:      %s\n", config.Global.Build.DataBlockSize)
 		fmt.Printf("  use_tmp_overlay:      %v\n", config.Global.Build.UseTmpOverlay)
 		fmt.Printf("  tmp_overlay_size_mb:  %d\n", viper.GetInt("build.tmp_overlay_size_mb"))
-		fmt.Println()
-
-		// Extra base directories
-		fmt.Println(utils.StyleTitle("Extra Base Directories:"))
-		extraDirs := config.GetExtraBaseDirs()
-		if len(extraDirs) > 0 {
-			fmt.Printf("  extra_base_dirs:\n")
-			for _, dir := range extraDirs {
-				fmt.Printf("    - %s\n", dir)
-			}
-		} else {
-			fmt.Printf("  extra_base_dirs: %s\n", utils.StyleInfo("none"))
-		}
 		fmt.Println()
 
 		// Show environment variable overrides
@@ -435,16 +455,13 @@ Time duration format (for build.time):
   condatainer config set build.time 02:00:00
   condatainer config set submit_job false`,
 	Args:              cobra.ExactArgs(2),
-	ValidArgsFunction: configKeysCompletion,
+	ValidArgsFunction: configSetKeysCompletion,
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
 		value := args[1]
 
-		// Build set of known keys from configKeys (single source of truth)
-		knownKeys := make(map[string]bool, len(configKeys))
-		for _, k := range configKeys {
-			knownKeys[k] = true
-		}
+		// configKeyDefs is the single source of truth for known keys
+		knownKeys := configKeyDefs
 
 		// Validate default_distro against known distros
 		if key == "default_distro" {
@@ -461,7 +478,7 @@ Time duration format (for build.time):
 			os.Exit(ExitCodeUsage)
 		}
 
-		if !knownKeys[key] {
+		if _, known := knownKeys[key]; !known {
 			utils.PrintWarning("Warning: '%s' is not a standard config key", key)
 		}
 

@@ -315,23 +315,28 @@ func CreateWithOptions(ctx context.Context, opts *CreateOptions) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmpPath)
 
 	label := typeLabel(opts)
 
-	if !opts.Quiet {
-		utils.PrintMessage("Moving overlay to %s", utils.StylePath(opts.Path))
-	}
-	copied, err := moveFile(ctx, tmpPath, opts.Path, opts.Sparse)
-	if err != nil {
-		return fmt.Errorf("failed to install overlay: %w", err)
-	}
+	// When tmpPath == opts.Path the overlay was created directly at the final location
+	// (opts.Path is already inside the tmp dir). Skip the move and do not remove the file.
+	if tmpPath != opts.Path {
+		defer os.Remove(tmpPath)
 
-	// Allocate space only if not sparse and io.Copy was not used.
-	// When io.Copy was used (cross-filesystem), all zero-bytes were already written physically
-	// so the destination is fully allocated — fallocate is unnecessary and may not be supported.
-	if !opts.Sparse && !copied {
-		AllocateOverlay(ctx, opts.Path, opts.SizeMB)
+		if !opts.Quiet {
+			utils.PrintMessage("Moving overlay to %s", utils.StylePath(opts.Path))
+		}
+		copied, err := moveFile(ctx, tmpPath, opts.Path, opts.Sparse)
+		if err != nil {
+			return fmt.Errorf("failed to install overlay: %w", err)
+		}
+
+		// Allocate space only if not sparse and io.Copy was not used.
+		// When io.Copy was used (cross-filesystem), all zero-bytes were already written physically
+		// so the destination is fully allocated — fallocate is unnecessary and may not be supported.
+		if !opts.Sparse && !copied {
+			AllocateOverlay(ctx, opts.Path, opts.SizeMB)
+		}
 	}
 
 	utils.PrintSuccess("Created %soverlay %s", utils.StyleInfo(label), utils.StylePath(opts.Path))

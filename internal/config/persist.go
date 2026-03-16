@@ -103,6 +103,7 @@ func setDefaults() {
 	viper.SetDefault("build.use_tmp_overlay", false)
 	viper.SetDefault("build.tmp_overlay_size_mb", 20480)
 
+	viper.SetDefault("channels", []string{"conda-forge", "bioconda"})
 	viper.SetDefault("default_distro", DEFAULT_DISTRO)
 	viper.SetDefault("extra_scripts_links", []string{})
 	viper.SetDefault("parse_module_load", false)
@@ -731,6 +732,10 @@ func LoadFromViper() {
 	}
 
 	Global.Build.UseTmpOverlay = viper.GetBool("build.use_tmp_overlay")
+
+	if ch := GetChannels(); len(ch) > 0 {
+		Global.Build.Channels = ch
+	}
 
 	Global.ParseModuleLoad = viper.GetBool("parse_module_load")
 

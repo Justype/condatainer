@@ -126,6 +126,15 @@ func (c *CondaBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	return nil
 }
 
+// buildChannelFlags builds the micromamba -c flags from the configured channels.
+func buildChannelFlags() string {
+	var parts []string
+	for _, ch := range config.Global.Build.Channels {
+		parts = append(parts, "-c "+ch)
+	}
+	return strings.Join(parts, " ")
+}
+
 // buildInstallCmd returns the micromamba install command string and any extra bind paths.
 // Handles three modes: YAML file, comma-separated packages, and single package.
 func (c *CondaBuildObject) buildInstallCmd() (cmd string, extraBindPaths []string, err error) {
@@ -133,6 +142,7 @@ func (c *CondaBuildObject) buildInstallCmd() (cmd string, extraBindPaths []strin
 	if utils.QuietMode {
 		quietFlag = "-q"
 	}
+	channelFlags := buildChannelFlags()
 
 	if strings.HasSuffix(c.buildSource, ".yml") || strings.HasSuffix(c.buildSource, ".yaml") {
 		// Mode 3: YAML file (-p prefix -f environment.yml)
@@ -141,8 +151,8 @@ func (c *CondaBuildObject) buildInstallCmd() (cmd string, extraBindPaths []strin
 			return "", nil, fmt.Errorf("failed to get absolute path for %s: %w", c.buildSource, err)
 		}
 		extraBindPaths = []string{filepath.Dir(absFilePath)}
-		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -y %s -p /cnt/%s -f %s",
-			quietFlag, c.nameVersion, absFilePath)
+		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp %s -y %s -p /cnt/%s -f %s",
+			channelFlags, quietFlag, c.nameVersion, absFilePath)
 		utils.PrintMessage("Populating overlay %s via %s",
 			utils.StyleName(filepath.Base(c.targetOverlayPath)), utils.StyleCommand("environment.yml"))
 	} else if c.buildSource != "" {
@@ -151,15 +161,15 @@ func (c *CondaBuildObject) buildInstallCmd() (cmd string, extraBindPaths []strin
 		for i, pkg := range packages {
 			packages[i] = strings.ReplaceAll(strings.TrimSpace(pkg), "/", "=")
 		}
-		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -y %s -p /cnt/%s %s",
-			quietFlag, c.nameVersion, strings.Join(packages, " "))
+		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp %s -y %s -p /cnt/%s %s",
+			channelFlags, quietFlag, c.nameVersion, strings.Join(packages, " "))
 		utils.PrintMessage("Populating overlay %s via %s",
 			utils.StyleName(filepath.Base(c.targetOverlayPath)),
 			utils.StyleCommand(fmt.Sprintf("micromamba (%s)", strings.Join(packages, ", "))))
 	} else {
 		// Mode 1: Single package (name/version)
-		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp -c conda-forge -c bioconda -y %s -p /cnt/%s %s=%s",
-			quietFlag, c.nameVersion, c.packageName, c.packageVersion)
+		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp %s -y %s -p /cnt/%s %s=%s",
+			channelFlags, quietFlag, c.nameVersion, c.packageName, c.packageVersion)
 		utils.PrintMessage("Populating overlay %s via %s",
 			utils.StyleName(filepath.Base(c.targetOverlayPath)),
 			utils.StyleCommand(fmt.Sprintf("micromamba (%s=%s)", c.packageName, c.packageVersion)))
