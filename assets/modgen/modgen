@@ -1802,6 +1802,14 @@ class ModGen_Run:
             type=str, default="", metavar="JOB_IDS",
             help="Run after jobs succeed (colon-separated IDs, e.g. 123:456)")
         ModGen_Run.parser_run.add_argument(
+            "--afternotok",
+            type=str, default="", metavar="JOB_IDS",
+            help="Run after jobs fail (colon-separated IDs)")
+        ModGen_Run.parser_run.add_argument(
+            "--afterany",
+            type=str, default="", metavar="JOB_IDS",
+            help="Run after jobs finish regardless of outcome (colon-separated IDs)")
+        ModGen_Run.parser_run.add_argument(
             "--array",
             type=str, default=None, metavar="FILE",
             help="Input file for array job (one entry per line)")
@@ -2001,16 +2009,22 @@ class ModGen_Run:
             return None
 
     @staticmethod
-    def _submit_run_sbatch(script_path: str, sbatch_flags: List[str], dep_ids: List[str], script_args: Optional[List[str]] = None, afterok_ids: Optional[List[str]] = None, array_spec: Optional[dict] = None) -> Optional[str]:
+    def _submit_run_sbatch(script_path: str, sbatch_flags: List[str], dep_ids: List[str], script_args: Optional[List[str]] = None, afterok_ids: Optional[List[str]] = None, afternotok_ids: Optional[List[str]] = None, afterany_ids: Optional[List[str]] = None, array_spec: Optional[dict] = None) -> Optional[str]:
         sbatch_script_path = ModGen_Run._create_run_sbatch_script(script_path, sbatch_flags, dep_ids, script_args, array_spec)
         if not sbatch_script_path:
             return None
         slurm_job_id_regex = re.compile(r'Submitted batch job (\d+)')
         cmd = ["sbatch"]
+        dep_parts = []
         all_afterok = (dep_ids or []) + (afterok_ids or [])
         if all_afterok:
-            dep_str = ":".join(all_afterok)
-            cmd.append(f"--dependency=afterok:{dep_str}")
+            dep_parts.append("afterok:" + ":".join(all_afterok))
+        if afternotok_ids:
+            dep_parts.append("afternotok:" + ":".join(afternotok_ids))
+        if afterany_ids:
+            dep_parts.append("afterany:" + ":".join(afterany_ids))
+        if dep_parts:
+            cmd.append(f"--dependency={','.join(dep_parts)}")
         cmd.append(sbatch_script_path)
         Utils.print_debug(f"[SBATCH] Submitting run job with command: {cmd}")
         try:
@@ -2049,7 +2063,9 @@ class ModGen_Run:
         # Parse #SBATCH directives from the script (needed for resource priority chain)
         sbatch_flags = Utils.get_sbatch_args_from_build_script(script_path)
         script_args = args.script_args or []
-        afterok_ids = [i for i in args.afterok.split(":") if i] if args.afterok else []
+        afterok_ids    = [i for i in args.afterok.split(":")    if i] if args.afterok    else []
+        afternotok_ids = [i for i in args.afternotok.split(":") if i] if args.afternotok else []
+        afterany_ids   = [i for i in args.afterany.split(":")   if i] if args.afterany   else []
 
         # Build array spec (validates input file and arg consistency)
         array_spec = None
@@ -2093,9 +2109,9 @@ class ModGen_Run:
 
         # Submit or run locally
         if Config.submit_job and sbatch_flags and Utils.is_sbatch_available():
-            job_id = ModGen_Run._submit_run_sbatch(script_path, sbatch_flags, build_job_ids, script_args, afterok_ids, array_spec)
+            job_id = ModGen_Run._submit_run_sbatch(script_path, sbatch_flags, build_job_ids, script_args, afterok_ids, afternotok_ids, afterany_ids, array_spec)
             if job_id:
-                all_deps = build_job_ids + afterok_ids
+                all_deps = build_job_ids + afterok_ids + afternotok_ids + afterany_ids
                 if array_spec:
                     dep_note = f" (afterok: {Utils.blue_text(', '.join(all_deps))})" if all_deps else ""
                     Utils.print_success(
