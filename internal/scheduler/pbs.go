@@ -125,6 +125,9 @@ func newPbsSchedulerWithBinary(qsubBin string) (*PbsScheduler, error) {
 // GetCurrentJobID returns the PBS job ID of the currently running job, or "".
 func (p *PbsScheduler) GetCurrentJobID() string { return os.Getenv("PBS_JOBID") }
 
+// GetTmpDir returns the PBS node-local tmp directory for the current job, or "".
+func (p *PbsScheduler) GetTmpDir() string { return os.Getenv("PBS_TMPDIR") }
+
 // IsAvailable checks if the PBS binary is present on this system.
 func (p *PbsScheduler) IsAvailable() bool {
 	return p.qsubBin != ""

@@ -72,6 +72,9 @@ func newHTCondorSchedulerWithBinary(condorSubmitBin string) (*HTCondorScheduler,
 // GetCurrentJobID returns the HTCondor job ID of the currently running job, or "".
 func (h *HTCondorScheduler) GetCurrentJobID() string { return os.Getenv("CONDOR_ID") }
 
+// GetTmpDir returns the HTCondor node-local tmp directory for the current job, or "".
+func (h *HTCondorScheduler) GetTmpDir() string { return os.Getenv("_CONDOR_SCRATCH_DIR") }
+
 // IsAvailable checks if the HTCondor binary is present on this system.
 func (h *HTCondorScheduler) IsAvailable() bool {
 	return h.condorSubmitBin != ""

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -110,6 +111,11 @@ func BindPaths(paths ...string) []string {
 	// Add $SCRATCH if set
 	if scratch := os.Getenv("SCRATCH"); scratch != "" {
 		bindPaths = append(bindPaths, scratch)
+	}
+
+	// Add scheduler-assigned node-local tmp (fast SSD scratch, not bound by Apptainer automatically).
+	if tmpDir := scheduler.ActiveTmpDir(); tmpDir != "" {
+		bindPaths = append(bindPaths, tmpDir)
 	}
 
 	// Collect all base directories
