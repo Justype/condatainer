@@ -198,34 +198,70 @@ Utilities for running scripts with automatic dependency handling via  `#DEP:` ta
 
 ### Check
 
-Parses a script for `#DEP:` tags and `module load` or `ml` commands and checks if the required modules are installed.
+Parses one or more scripts for `#DEP:` tags and `module load` or `ml` commands and checks if the required modules are installed. Dependencies are deduplicated across all scripts before checking.
 
 ```
-modgen check [SCRIPT] [-a]
+modgen check [SCRIPT ...] [-a]
 ```
+
+**Arguments:**
+
+Each argument can be:
+- A local `.sh` file path
+- A directory (all `.sh` files in it are checked)
+- A package name (e.g., `samtools/1.22`) resolved from local or remote build scripts
+
+**Options:**
 
 * `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies found in the script.
 * `-i`, `--install`: Alias for `--auto-install`.
+
+**Output:** Installed and missing dependencies are shown in grouped ✓/✗ sections.
+
+**Examples:**
+
+```bash
+# Check a single script
+modgen check script.sh
+
+# Check multiple scripts
+modgen check src/*.sh
+
+# Check all .sh files in a directory
+modgen check ./my-scripts/
+
+# Check by package name (resolves from local/remote build scripts)
+modgen check samtools/1.22
+
+# Check and auto-install missing dependencies
+modgen check -a script1.sh script2.sh
+```
 
 ### Run
 
 Run a script with automatic dependency resolution based on `#DEP:` tags and `module load` or `ml` commands within the script.
 
 ```
-modgen run [SCRIPT] [SCRIPT_ARGS...]
+modgen run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
 ```
 
-* **Dependency Injection:** Reads `#DEP:` tags and `module load`/`ml` lines in the script to determine which modules to load before execution.
-* **Argument Injection:** Reads `#CNT` lines in the script to inject arguments into the modgen command itself.
+**Options:**
+
+* `-a`, `--auto-install`, `-i`, `--install`: Automatically attempt to build/install missing dependencies.
+* `--afterok JOB_IDS`: Submit after jobs succeed (colon-separated IDs, e.g. `123:456`).
+* `--afternotok JOB_IDS`: Submit after jobs fail.
+* `--afterany JOB_IDS`: Submit after jobs finish regardless of outcome.
+* `--array FILE`: Submit as an array job; `FILE` contains one set of arguments per line.
+* `--array-limit N`: Max concurrent array subjobs (default: unlimited).
 * `-w`, `--writable`: Placeholder for CondaTainer compatibility (no effect).
-* `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies found in the script.
-* `-i`, `--install`: Alias for `--auto-install`.
 
 **Execution behavior:**
 
 1. If already inside a SLURM job, run locally immediately.
 2. If `#SBATCH` is found and SLURM is available, submit a job that re-invokes `modgen run <script>`. (unless `--local` is set)
 3. Otherwise, run the script directly with modules pre-loaded. `module` and `ml` are stubbed as no-ops to prevent accidental `module purge`.
+
+**`#SBATCH` directives** are passed through verbatim to the generated batch script. Only `--output`/`--error` are overridden by modgen's own log path.
 
 Resource environment variables are set using the following priority chain (lowest → highest):
 
@@ -260,6 +296,30 @@ bcftools view input.vcf | head
 #DEP: bcftools/1.22
 bcftools view input.vcf | head
 ```
+
+**Examples:**
+
+```bash
+# Run a script (submits if #SBATCH directives present)
+modgen run script.sh
+
+# Pass arguments to the script
+modgen run script.sh sample1 sample2
+
+# Submit after another job succeeds
+JOB=$(modgen run align.sh sample1)
+modgen run --afterok "$JOB" quant.sh sample1
+
+# Array job: samples.txt has one sample name per line
+modgen run --array samples.txt process.sh
+
+# Array job with concurrency limit
+modgen run --array samples.txt --array-limit 4 process.sh
+```
+
+**Array job behavior:**
+
+Each line in the `--array` input file becomes the `$ARRAY_ARGS` variable for one subjob, prepended to any fixed script arguments. Output is redirected per subjob to `<logs-dir>/<script>_<timestamp>_<idx>_<tag>.log`. The scheduler log (`--output`/`--error`) is silenced to `/dev/null`; all output goes to the per-subjob log.
 
 ## Update
 

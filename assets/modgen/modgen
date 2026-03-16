@@ -10,6 +10,7 @@ import urllib.request
 import platform
 import stat
 import shlex
+import time
 from typing import Dict, List, Optional, Tuple
 
 os.umask(0o002)
@@ -1621,9 +1622,10 @@ class ModGen_Check:
             "check", aliases=["c"],
             help="Check if the dependencies of a script are installed")
         ModGen_Check.parser_check.add_argument(
-            "script",
-            type=str,
-            help="Path to the script to check"
+            "scripts",
+            nargs='+',
+            metavar="script",
+            help="Script path(s), directory, or package name (e.g. samtools/1.22)"
         )
         ModGen_Check.parser_check.add_argument(
             "-a", "--auto-install",
@@ -1634,62 +1636,147 @@ class ModGen_Check:
         )
 
     @staticmethod
-    def parse_check_args(args):
-        script_path_or_name = args.script
-        is_remote = False
-        if not os.path.isfile(script_path_or_name):
-            script_path_or_name = Utils.normalize_name_version(script_path_or_name)
+    def _resolve_script_paths(args_list):
+        """Resolve a list of args (file, dir, or package name) to concrete script paths.
+        Returns (script_paths, remote_paths); remote_paths must be deleted after use."""
+        seen = set()
+        script_paths = []
+        remote_paths = []
+
+        for arg in args_list:
+            # Directory: expand to all .sh files (non-recursive)
+            if os.path.isdir(arg):
+                found = sorted(
+                    os.path.join(arg, f) for f in os.listdir(arg)
+                    if f.endswith('.sh') and os.path.isfile(os.path.join(arg, f))
+                )
+                if not found:
+                    Utils.print_warning(f"No .sh files found in directory {Utils.blue_text(arg)}")
+                for p in found:
+                    p = os.path.abspath(p)
+                    if p not in seen:
+                        seen.add(p)
+                        script_paths.append(p)
+                continue
+
+            # Existing local file
+            if os.path.isfile(arg):
+                p = os.path.abspath(arg)
+                if p not in seen:
+                    seen.add(p)
+                    script_paths.append(p)
+                continue
+
+            # Package name — try local then remote build scripts
+            normalized = Utils.normalize_name_version(arg)
+            Utils.print_debug(f"[CHECK] Checking for build script {normalized} locally and remotely...")
             local_build_scripts = Utils.get_local_build_scripts()
-            Utils.print_debug(f"[CHECK] Checking for build script {script_path_or_name} locally and remotely...")
-            if script_path_or_name in local_build_scripts:
-                script_path = local_build_scripts[script_path_or_name]
-                Utils.print_message(f"Found local build script {Utils.blue_text(script_path)}")
-            elif script_path_or_name in Utils.fetch_remote_build_scripts():
-                Utils.print_message(f"Downloading build script for {script_path_or_name} from remote metadata...")
-                is_remote = True
-                url = Utils.fetch_remote_build_scripts()[script_path_or_name]
-                script_path = os.path.join(Config.CONDATINER_DIR, f"{script_path_or_name.replace('/', '--')}.sh")
-                if Utils.download_executable(url, script_path):
-                    Utils.print_message(f"Downloaded build script to {Utils.blue_text(script_path)}")
+            if normalized in local_build_scripts:
+                p = local_build_scripts[normalized]
+                Utils.print_message(f"Found local build script {Utils.blue_text(p)}")
+                if p not in seen:
+                    seen.add(p)
+                    script_paths.append(p)
+            elif normalized in Utils.fetch_remote_build_scripts():
+                Utils.print_message(f"Downloading build script for {normalized} from remote metadata...")
+                url = Utils.fetch_remote_build_scripts()[normalized]
+                os.makedirs(Config.TMP_DIR, exist_ok=True)
+                tmp_path = os.path.join(Config.TMP_DIR, f"{normalized.replace('/', '--')}.sh")
+                if Utils.download_executable(url, tmp_path):
+                    Utils.print_message(f"Downloaded build script to {Utils.blue_text(tmp_path)}")
+                    if tmp_path not in seen:
+                        seen.add(tmp_path)
+                        script_paths.append(tmp_path)
+                        remote_paths.append(tmp_path)
                 else:
-                    Utils.print_error(f"Failed to download build script for {script_path_or_name} from {url}.")
-                    return
+                    Utils.print_error(f"Failed to download build script for {normalized}.")
             else:
-                Utils.print_error(f"Build script for {script_path_or_name} not found.")
-                return
-        else:
-            script_path = script_path_or_name
+                Utils.print_error(f"Build script for {normalized} not found.")
 
-        deps = Utils.get_dependencies_from_script(script_path, raise_when_finding_overlay=False)
-        for d in deps:
-            Utils.print_message(f"Dependency: {Utils.yellow_text(d)}" + Utils.red_text(" (missing)" if not ModGen.is_module_installed(d) and not ModGen.is_module_available(d) else ""))
-        missing_deps = ModGen.get_missing_modules(deps)
+        return script_paths, remote_paths
 
-        if not missing_deps:
-            Utils.print_message("All dependencies are installed.")
-            if is_remote and os.path.isfile(script_path):
-                os.remove(script_path)
+    @staticmethod
+    def parse_check_args(args):
+        script_paths, remote_paths = ModGen_Check._resolve_script_paths(args.scripts)
+
+        if not script_paths:
+            Utils.print_warning("No scripts found to check.")
             return
 
-        if args.auto_install:
-            Utils.print_message("Attempting to auto-install missing dependencies...")
-            for md in missing_deps:
-                if md.endswith(('.sqf', '.img', '.squashfs')):
-                    Utils.print_error(f"ModGen is not compatible with overlay dependencies. Please use CondaTainer instead.")
-                    Utils.print_note(f"Please go to https://github.com/{Config.GITHUB_REPO} for more information.")
-                    continue
-            ModGen.ensure_micromamba()
-            build_objects = [BuildObject(md) for md in missing_deps]
-            build_graph = BuildGraph(build_objects)
-            if build_graph.run():
-                Utils.print_success("All missing dependencies installed/submitted.")
-            else:
-                Utils.print_error("Some dependencies failed to install.")
-        else:
-            Utils.print_message(f"Run the command again with {Utils.blue_text('-a')} or {Utils.blue_text('--auto-install')} to install missing dependencies.")
+        # Collect and deduplicate deps across all scripts
+        multi = len(script_paths) > 1
+        seen_deps = {}  # normalized key -> original dep string
 
-        if is_remote and os.path.isfile(script_path):
-            os.remove(script_path)
+        for script_path in script_paths:
+            if multi:
+                Utils.print_message(f"Checking script: {Utils.blue_text(os.path.basename(script_path))}")
+            deps = Utils.get_dependencies_from_script(script_path, raise_when_finding_overlay=False)
+            for dep in deps:
+                key = Utils.normalize_name_version(dep)
+                if key not in seen_deps:
+                    seen_deps[key] = dep
+
+        all_deps = list(seen_deps.values())
+
+        if not all_deps:
+            Utils.print_message("No dependencies found in script.")
+            for p in remote_paths:
+                if os.path.isfile(p):
+                    os.remove(p)
+            return
+
+        # Grouped ✓/✗ output
+        check_mark = Utils.green_text("✓")
+        cross_mark = Utils.red_text("✗")
+        installed = []
+        missing = []
+
+        for dep in all_deps:
+            key = Utils.normalize_name_version(dep)
+            if ModGen.is_module_installed(key) or ModGen.is_module_available(key):
+                installed.append(dep)
+            else:
+                missing.append(dep)
+
+        if installed:
+            Utils.print_message("Installed:")
+            for dep in installed:
+                Utils.print_message(f"  {check_mark} {dep}")
+        if missing:
+            Utils.print_message("Missing:")
+            for dep in missing:
+                Utils.print_message(f"  {cross_mark} {dep}")
+
+        if not missing:
+            Utils.print_success("All dependencies are installed.")
+            for p in remote_paths:
+                if os.path.isfile(p):
+                    os.remove(p)
+            return
+
+        if not args.auto_install:
+            Utils.print_message(
+                f"Run the command again with {Utils.blue_text('-a')} or "
+                f"{Utils.blue_text('--auto-install')} to install missing dependencies."
+            )
+            for p in remote_paths:
+                if os.path.isfile(p):
+                    os.remove(p)
+            return
+
+        # Auto-install missing dependencies
+        Utils.print_message("Attempting to auto-install missing dependencies...")
+        ModGen.ensure_micromamba()
+        build_objects = [BuildObject(md) for md in missing]
+        build_graph = BuildGraph(build_objects)
+        if build_graph.run():
+            Utils.print_success("All missing dependencies installed/submitted.")
+        else:
+            Utils.print_error("Some dependencies failed to install.")
+
+        for p in remote_paths:
+            if os.path.isfile(p):
+                os.remove(p)
 
 class ModGen_Run:
     @staticmethod
@@ -1710,6 +1797,30 @@ class ModGen_Run:
             "-a", "--auto-install", "-i", "--install",
             dest="auto_install", action="store_true",
             help="Automatically install missing dependencies")
+        ModGen_Run.parser_run.add_argument(
+            "--afterok",
+            type=str, default="", metavar="JOB_IDS",
+            help="Run after jobs succeed (colon-separated IDs, e.g. 123:456)")
+        ModGen_Run.parser_run.add_argument(
+            "--afternotok",
+            type=str, default="", metavar="JOB_IDS",
+            help="Run after jobs fail (colon-separated IDs)")
+        ModGen_Run.parser_run.add_argument(
+            "--afterany",
+            type=str, default="", metavar="JOB_IDS",
+            help="Run after jobs finish regardless of outcome (colon-separated IDs)")
+        ModGen_Run.parser_run.add_argument(
+            "--array",
+            type=str, default=None, metavar="FILE",
+            help="Input file for array job (one entry per line)")
+        ModGen_Run.parser_run.add_argument(
+            "--array-limit",
+            type=int, default=0, metavar="N",
+            help="Max concurrent array subjobs (0 = unlimited)")
+        ModGen_Run.parser_run.add_argument(
+            "script_args",
+            nargs=argparse.REMAINDER,
+            help="Arguments to pass to the script")
 
     @staticmethod
     def parse_args_in_script(script_path: str) -> List[str]:
@@ -1801,7 +1912,40 @@ class ModGen_Run:
         return env
 
     @staticmethod
-    def _create_run_sbatch_script(script_path: str, sbatch_flags: List[str], dep_ids: List[str]) -> Optional[str]:
+    def _build_array_spec(array_file: str, array_limit: int) -> Optional[dict]:
+        """Read and validate the array input file. Returns dict or None on error."""
+        abs_file = os.path.abspath(array_file)
+        if not os.path.isfile(abs_file):
+            Utils.print_error(f"--array: file {Utils.blue_text(abs_file)} not found.")
+            return None
+        with open(abs_file, 'r') as f:
+            raw_lines = f.read().splitlines()
+        count = 0
+        blank_lines = []
+        expected_arg_count = -1
+        for i, line in enumerate(raw_lines):
+            if not line.strip():
+                blank_lines.append(i + 1)
+                continue
+            count += 1
+            tokens = shlex.split(line)
+            if expected_arg_count == -1:
+                expected_arg_count = len(tokens)
+            elif len(tokens) != expected_arg_count:
+                Utils.print_error(
+                    f"--array: line {i+1} has {len(tokens)} arg(s) but line 1 has "
+                    f"{expected_arg_count}; all lines must have the same number of arguments")
+                return None
+        if count == 0:
+            Utils.print_error(f"--array: input file {Utils.blue_text(abs_file)} is empty.")
+            return None
+        if blank_lines:
+            Utils.print_error(f"--array: blank lines at {blank_lines} in {abs_file}; please remove them.")
+            return None
+        return {'input_file': abs_file, 'count': count, 'limit': array_limit}
+
+    @staticmethod
+    def _create_run_sbatch_script(script_path: str, sbatch_flags: List[str], dep_ids: List[str], script_args: Optional[List[str]] = None, array_spec: Optional[dict] = None) -> Optional[str]:
         script_name = os.path.splitext(os.path.basename(script_path))[0]
         sbatch_script_path = os.path.join(Config.TMP_DIR, f"sbatch_run_{script_name}.sh")
         log_path = os.path.join(Config.LOGS_DIR, f"ModGen_run_{script_name}.out")
@@ -1810,35 +1954,78 @@ class ModGen_Run:
         os.makedirs(Config.TMP_DIR, mode=0o775, exist_ok=True)
         try:
             resource_env = ModGen_Run._parse_resource_env(sbatch_flags)
+            args_str = (" " + " ".join(shlex.quote(a) for a in script_args)) if script_args else ""
+
+            # Array job: compute log prefix and pad width
+            if array_spec:
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                array_log_base = f"{script_name}_{timestamp}"
+                pad_width = len(str(array_spec['count']))
+
             with open(sbatch_script_path, 'w') as f:
                 f.write("#!/bin/bash\n")
                 for flag in sbatch_flags:
                     if flag.startswith("--output") or flag.startswith("--error"):
                         continue  # Override below
                     f.write(f"#SBATCH {flag}\n")
-                f.write(f"#SBATCH --output={log_path}\n")
+                if array_spec:
+                    array_range = f"1-{array_spec['count']}"
+                    if array_spec['limit'] > 0:
+                        array_range += f"%{array_spec['limit']}"
+                    f.write(f"#SBATCH --array={array_range}\n")
+                    f.write("#SBATCH --output=/dev/null\n")
+                    f.write("#SBATCH --error=/dev/null\n")
+                else:
+                    f.write(f"#SBATCH --output={log_path}\n")
                 f.write("\n")
+                if array_spec:
+                    f.write("# Array job: extract input and redirect output\n")
+                    f.write("_ARRAY_IDX=$SLURM_ARRAY_TASK_ID\n")
+                    f.write(f"ARRAY_ARGS=$(sed -n \"${{_ARRAY_IDX}}p\" {array_spec['input_file']})\n")
+                    f.write("export ARRAY_ARGS\n")
+                    f.write("_ARRAY_TAG=$(printf '%s' \"$ARRAY_ARGS\" | tr -cs '[:alnum:]_-' '_' | cut -c1-20)\n")
+                    f.write("_ARRAY_TAG=${_ARRAY_TAG%_}\n")
+                    f.write(f"_PADDED_IDX=$(printf \"%0{pad_width}d\" \"$_ARRAY_IDX\")\n")
+                    f.write(f"exec &> \"{Config.LOGS_DIR}/{array_log_base}_${{_PADDED_IDX}}_${{_ARRAY_TAG}}.log\"\n")
+                    f.write("\n")
                 for k, v in resource_env.items():
                     f.write(f"export {k}={v}\n")
                 f.write("\n")
-                f.write(f"{Config.SCRIPT_PATH} run {script_path}\n")
+                if array_spec:
+                    run_cmd = f"{Config.SCRIPT_PATH} run {script_path} $ARRAY_ARGS{args_str}"
+                else:
+                    run_cmd = f"{Config.SCRIPT_PATH} run {script_path}{args_str}"
+                f.write(f"{run_cmd}\n")
+                f.write(f"_exit_code=$?\n")
                 f.write(f"rm -f {sbatch_script_path}\n")
+                f.write(f"exit $_exit_code\n")
             os.chmod(sbatch_script_path, 0o775)
+            if array_spec:
+                _log_glob = os.path.join(Config.LOGS_DIR, f"{script_name}_*_*.log")
+                Utils.print_message(f"Per-subjob output => {Utils.blue_text(_log_glob)}")
             return sbatch_script_path
         except Exception as e:
             Utils.print_error(f"Failed to create sbatch run script: {e}")
             return None
 
     @staticmethod
-    def _submit_run_sbatch(script_path: str, sbatch_flags: List[str], dep_ids: List[str]) -> Optional[str]:
-        sbatch_script_path = ModGen_Run._create_run_sbatch_script(script_path, sbatch_flags, dep_ids)
+    def _submit_run_sbatch(script_path: str, sbatch_flags: List[str], dep_ids: List[str], script_args: Optional[List[str]] = None, afterok_ids: Optional[List[str]] = None, afternotok_ids: Optional[List[str]] = None, afterany_ids: Optional[List[str]] = None, array_spec: Optional[dict] = None) -> Optional[str]:
+        sbatch_script_path = ModGen_Run._create_run_sbatch_script(script_path, sbatch_flags, dep_ids, script_args, array_spec)
         if not sbatch_script_path:
             return None
         slurm_job_id_regex = re.compile(r'Submitted batch job (\d+)')
         cmd = ["sbatch"]
-        if dep_ids:
-            dep_str = ":".join(dep_ids)
-            cmd.append(f"--dependency=afterok:{dep_str}")
+        dep_parts = []
+        all_afterok = (dep_ids or []) + (afterok_ids or [])
+        if all_afterok:
+            dep_parts.append("afterok:" + ":".join(all_afterok))
+        if afternotok_ids:
+            dep_parts.append("afternotok:" + ":".join(afternotok_ids))
+        if afterany_ids:
+            dep_parts.append("afterany:" + ":".join(afterany_ids))
+        if dep_parts:
+            cmd.append(f"--dependency={','.join(dep_parts)}")
+            cmd.append("--kill-on-invalid-dep=yes")
         cmd.append(sbatch_script_path)
         Utils.print_debug(f"[SBATCH] Submitting run job with command: {cmd}")
         try:
@@ -1876,10 +2063,26 @@ class ModGen_Run:
 
         # Parse #SBATCH directives from the script (needed for resource priority chain)
         sbatch_flags = Utils.get_sbatch_args_from_build_script(script_path)
+        script_args = args.script_args or []
+        afterok_ids    = [i for i in args.afterok.split(":")    if i] if args.afterok    else []
+        afternotok_ids = [i for i in args.afternotok.split(":") if i] if args.afternotok else []
+        afterany_ids   = [i for i in args.afterany.split(":")   if i] if args.afterany   else []
+
+        # Build array spec (validates input file and arg consistency)
+        array_spec = None
+        if args.array:
+            array_spec = ModGen_Run._build_array_spec(args.array, args.array_limit)
+            if array_spec is None:
+                return  # Error already printed
+
+        # Array jobs require SLURM submission
+        if array_spec and not (Config.submit_job and sbatch_flags and Utils.is_sbatch_available()):
+            Utils.print_error("--array requires SLURM scheduler submission (script must have #SBATCH directives and sbatch must be available).")
+            return
 
         # Fast path: already inside a scheduler job — skip submission, run locally
         if "SLURM_JOB_ID" in os.environ:
-            execution_command_list = [script_path] if os.access(script_path, os.X_OK) else [f"bash {script_path}"]
+            execution_command_list = ([script_path] if os.access(script_path, os.X_OK) else ["bash", script_path]) + script_args
             ModGen_Exec.exec_command(deps, execution_command_list, extra_env=ModGen_Run._resolve_resource_env(sbatch_flags))
             return
 
@@ -1907,10 +2110,16 @@ class ModGen_Run:
 
         # Submit or run locally
         if Config.submit_job and sbatch_flags and Utils.is_sbatch_available():
-            job_id = ModGen_Run._submit_run_sbatch(script_path, sbatch_flags, build_job_ids)
+            job_id = ModGen_Run._submit_run_sbatch(script_path, sbatch_flags, build_job_ids, script_args, afterok_ids, afternotok_ids, afterany_ids, array_spec)
             if job_id:
-                if build_job_ids:
-                    Utils.print_success(f"Submitted run job {Utils.blue_text(job_id)} (depends on build job(s): {Utils.blue_text(', '.join(build_job_ids))}).")
+                all_deps = build_job_ids + afterok_ids + afternotok_ids + afterany_ids
+                if array_spec:
+                    dep_note = f" (afterok: {Utils.blue_text(', '.join(all_deps))})" if all_deps else ""
+                    Utils.print_success(
+                        f"Submitted array job {Utils.blue_text(job_id)} "
+                        f"({array_spec['count']} subjobs) for {Utils.yellow_text(os.path.basename(script_path))}{dep_note}.")
+                elif all_deps:
+                    Utils.print_success(f"Submitted run job {Utils.blue_text(job_id)} (afterok: {Utils.blue_text(', '.join(all_deps))}).")
                 else:
                     Utils.print_success(f"Submitted run job {Utils.blue_text(job_id)} for {Utils.yellow_text(os.path.basename(script_path))}.")
         else:
@@ -1918,7 +2127,7 @@ class ModGen_Run:
                 Utils.print_note("Script has #SBATCH specs but --local mode is enabled. Running locally.")
             elif sbatch_flags and not Utils.is_sbatch_available():
                 Utils.print_note("Script has #SBATCH specs but no SLURM scheduler is available. Running locally.")
-            execution_command_list = [script_path] if os.access(script_path, os.X_OK) else [f"bash {script_path}"]
+            execution_command_list = ([script_path] if os.access(script_path, os.X_OK) else ["bash", script_path]) + script_args
             resource_env = ModGen_Run._resolve_resource_env(sbatch_flags)
             ModGen_Exec.exec_command(deps, execution_command_list, extra_env=resource_env)
 
