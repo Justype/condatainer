@@ -2025,6 +2025,7 @@ class ModGen_Run:
             dep_parts.append("afterany:" + ":".join(afterany_ids))
         if dep_parts:
             cmd.append(f"--dependency={','.join(dep_parts)}")
+            cmd.append("--kill-on-invalid-dep=yes")
         cmd.append(sbatch_script_path)
         Utils.print_debug(f"[SBATCH] Submitting run job with command: {cmd}")
         try:
