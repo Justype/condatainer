@@ -14,6 +14,7 @@ import (
 )
 
 var listDelete bool
+var listExact bool
 
 var listCmd = &cobra.Command{
 	Use:     "list [terms...]",
@@ -25,15 +26,16 @@ Search rules (single term):
   Plain string  substring match
   cell*         wildcard (* and ?)
   ^cell.*9\.0   regex (any of ^ $ ( [ + { |)
+  -e/--exact    force exact full-name match
 
 Search rules (multiple terms, space-separated):
   First term is an exact name  → all terms treated as exact names
   First term not found         → AND substring match`,
-	Example: `  condatainer list                      # List all
-  condatainer list cellranger           # Substring match
-  condatainer list 'cell*'              # Wildcard
-  condatainer list cellranger 9         # AND search (multiple terms)
-  condatainer list cellranger/9.0.1 -d  # Delete exact version`,
+	Example: `  condatainer list                        # List all
+  condatainer list cellranger             # Substring match
+  condatainer list 'cell*'               # Wildcard
+  condatainer list cellranger 9          # AND search (multiple terms)
+  condatainer list cellranger/9.0.1 -e   # Exact match (single term)`,
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runList,
 }
@@ -42,6 +44,7 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.Flags().BoolVarP(&listDelete, "delete", "d", false, "Delete listed overlays after confirmation (used with search terms)")
 	listCmd.Flags().BoolP("remove", "r", false, "Alias for --delete")
+	listCmd.Flags().BoolVarP(&listExact, "exact", "e", false, "Force exact full-name match even for a single term")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -65,7 +68,9 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 	}
 	var listExactLookup func(string) bool
-	if len(filters) > 1 {
+	if listExact {
+		listExactLookup = func(string) bool { return true }
+	} else if len(filters) > 1 {
 		listExactLookup = func(term string) bool { return installedLower[term] }
 	}
 	query := NewSearchQuery(filters, listExactLookup)
