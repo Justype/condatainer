@@ -8,7 +8,7 @@
 - [Mount Points](#mount-points)
 - [Overlay](#overlay)
 - [Create](#create)
-- [Container Management (Avail, List, Remove)](#container-management-avail-list-remove)
+- [Container Management (Avail, List, Remove, Search)](#container-management-avail-list-remove-search)
 - [Exec](#exec)
 - [E (Quick Exec)](#e-quick-exec)
 - [Runtime (Check, Run)](#runtime-check-run)
@@ -45,6 +45,7 @@ Available Commands:
   remove      Remove installed overlays matching search terms
   run         Run a script and auto-solve the dependencies by #DEP tags
   scheduler   Display scheduler information
+  search      Search conda packages via micromamba
   self-update Update condatainer to the latest version from GitHub
   update      Update build script metadata cache or the base image
 
@@ -530,7 +531,7 @@ condatainer --local run analysis.sh
 condatainer config set submit_job false
 ```
 
-## Container Management (Avail, List, Remove)
+## Container Management (Avail, List, Remove, Search)
 
 Manage your local library of built containers and available recipes.
 
@@ -650,6 +651,34 @@ $ condatainer rm cellranger                          # all cellranger versions (
 $ condatainer rm 'cell*'                             # wildcard
 $ condatainer rm cellranger/9.0.1 cellranger/8.0.1  # multiple exact versions
 $ condatainer rm cellranger 9                        # AND search
+```
+
+### Search
+
+Search conda packages using micromamba inside the base image.
+
+```
+condatainer search <package> [flags]
+```
+
+**Options:**
+
+* `--json`: Output results in JSON format.
+* `--pretty`: Pretty-print output (passes `--pretty` to micromamba).
+
+**Notes:**
+
+* Runs `micromamba search` inside the base image (no overlays required).
+* Uses channels from the config (`build.channels`, default: `conda-forge`, `bioconda`).
+* `--no-rc` is always passed to prevent user `.mambarc`/`.condarc` from overriding channels.
+
+**Examples:**
+
+```bash
+$ condatainer search samtools
+$ condatainer search 'samtools>1.10'
+$ condatainer search samtools --json
+$ condatainer search samtools --pretty
 ```
 
 ## Exec
