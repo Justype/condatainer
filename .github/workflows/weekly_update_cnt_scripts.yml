@@ -1,0 +1,51 @@
+name: Weekly Update cnt-scripts Submodule
+
+on:
+  schedule:
+    - cron: '0 12 * * 2'  # Every Tuesday at 12:00 UTC
+  workflow_dispatch:      # Allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-submodule:
+    name: Check and Update cnt-scripts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Update cnt-scripts to latest main
+        id: update
+        run: |
+          cd cnt-scripts
+          git fetch origin main
+          OLD=$(git rev-parse HEAD)
+          NEW=$(git rev-parse origin/main)
+          if [ "$OLD" = "$NEW" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            git checkout origin/main
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "old_sha=${OLD:0:7}" >> $GITHUB_OUTPUT
+            echo "new_sha=${NEW:0:7}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request
+        if: steps.update.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore(cnt-scripts): update submodule ${{ steps.update.outputs.old_sha }}..${{ steps.update.outputs.new_sha }}"
+          branch: chore/update-cnt-scripts
+          title: "chore(cnt-scripts): update submodule ${{ steps.update.outputs.old_sha }}..${{ steps.update.outputs.new_sha }}"
+          body: |
+            Automated update of the `cnt-scripts` submodule.
+
+            Changes: https://github.com/Justype/cnt-scripts/compare/${{ steps.update.outputs.old_sha }}...${{ steps.update.outputs.new_sha }}
+          labels: dependencies
