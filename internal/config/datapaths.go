@@ -42,6 +42,25 @@ func GetExtraScriptsLinks() []string {
 	return viper.GetStringSlice("extra_scripts_links")
 }
 
+// GetChannels returns the conda channels from config or environment.
+// Environment variable CNT_CHANNELS uses colon-separated values (same convention as CNT_EXTRA_BASE_DIRS).
+// Config file uses YAML array format.
+func GetChannels() []string {
+	if envVal := os.Getenv("CNT_CHANNELS"); envVal != "" {
+		var channels []string
+		for ch := range strings.SplitSeq(envVal, ":") {
+			ch = strings.TrimSpace(ch)
+			if ch != "" {
+				channels = append(channels, ch)
+			}
+		}
+		if len(channels) > 0 {
+			return channels
+		}
+	}
+	return viper.GetStringSlice("channels")
+}
+
 // GetExtraBaseDirs returns extra base directories from config or environment.
 // Environment variable CNT_EXTRA_BASE_DIRS uses colon-separated paths (Unix convention).
 // Config file uses YAML array format.

@@ -49,9 +49,9 @@ func TestConfigSetNormalizeCompressArgs(t *testing.T) {
 
 func TestGetConfigEnvVars(t *testing.T) {
 	vars := getConfigEnvVars()
-	// build expected slice from configKeys
-	expected := make([]string, 0, len(configKeys))
-	for _, key := range configKeys {
+	// build expected slice from configKeyDefs
+	expected := make([]string, 0, len(configKeyDefs))
+	for key := range configKeyDefs {
 		env := "CNT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
 		expected = append(expected, env)
 	}
