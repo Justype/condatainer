@@ -180,6 +180,7 @@ func moveFile(ctx context.Context, src, dst string, sparse bool) (copied bool, e
 	}
 
 	if err := os.Rename(src, dst); err == nil {
+		utils.RemoveDirIfEmpty(filepath.Dir(src))
 		return false, nil
 	} else if !errors.Is(err, syscall.EXDEV) {
 		return false, fmt.Errorf("rename %s → %s: %w", src, dst, err)
@@ -190,6 +191,7 @@ func moveFile(ctx context.Context, src, dst string, sparse bool) (copied bool, e
 		return false, err
 	}
 	os.Remove(src)
+	utils.RemoveDirIfEmpty(filepath.Dir(src))
 	return true, nil
 }
 

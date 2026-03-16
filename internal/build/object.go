@@ -312,13 +312,7 @@ func (b *BaseBuildObject) Cleanup(failed bool) error {
 
 		// Remove tmpDir itself if it is now empty (no other builds using it)
 		if b.tmpDir != "" && b.tmpDir != cntBaseDir {
-			if entries, err := os.ReadDir(b.tmpDir); err == nil && len(entries) == 0 {
-				if err := os.Remove(b.tmpDir); err != nil && !os.IsNotExist(err) {
-					utils.PrintDebug("Failed to remove empty tmp dir %s: %v", b.tmpDir, err)
-				} else {
-					utils.PrintDebug("Removed empty tmp dir %s", b.tmpDir)
-				}
-			}
+			utils.RemoveDirIfEmpty(b.tmpDir)
 		}
 	}
 

@@ -199,6 +199,16 @@ func DirExists(path string) bool {
 	return info.IsDir()
 }
 
+// RemoveDirIfEmpty removes dir if it exists and contains no files or subdirectories.
+// Silently does nothing if dir is not empty or does not exist.
+func RemoveDirIfEmpty(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) > 0 {
+		return
+	}
+	os.Remove(dir)
+}
+
 // EnsureDir checks if a directory exists, and creates it if it doesn't.
 func EnsureDir(path string) error {
 	if DirExists(path) {
@@ -258,6 +268,7 @@ func WriteGzipJSONFileAtomic(path string, value any) error {
 	if err != nil {
 		return err
 	}
+	defer os.Remove(tmp) // no-op after successful rename; cleans up on any error path
 
 	gzWriter, err := gzip.NewWriterLevel(f, gzip.BestSpeed)
 	if err != nil {
