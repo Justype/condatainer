@@ -1621,9 +1621,10 @@ class ModGen_Check:
             "check", aliases=["c"],
             help="Check if the dependencies of a script are installed")
         ModGen_Check.parser_check.add_argument(
-            "script",
-            type=str,
-            help="Path to the script to check"
+            "scripts",
+            nargs='+',
+            metavar="script",
+            help="Script path(s), directory, or package name (e.g. samtools/1.22)"
         )
         ModGen_Check.parser_check.add_argument(
             "-a", "--auto-install",
@@ -1634,62 +1635,147 @@ class ModGen_Check:
         )
 
     @staticmethod
-    def parse_check_args(args):
-        script_path_or_name = args.script
-        is_remote = False
-        if not os.path.isfile(script_path_or_name):
-            script_path_or_name = Utils.normalize_name_version(script_path_or_name)
+    def _resolve_script_paths(args_list):
+        """Resolve a list of args (file, dir, or package name) to concrete script paths.
+        Returns (script_paths, remote_paths); remote_paths must be deleted after use."""
+        seen = set()
+        script_paths = []
+        remote_paths = []
+
+        for arg in args_list:
+            # Directory: expand to all .sh files (non-recursive)
+            if os.path.isdir(arg):
+                found = sorted(
+                    os.path.join(arg, f) for f in os.listdir(arg)
+                    if f.endswith('.sh') and os.path.isfile(os.path.join(arg, f))
+                )
+                if not found:
+                    Utils.print_warning(f"No .sh files found in directory {Utils.blue_text(arg)}")
+                for p in found:
+                    p = os.path.abspath(p)
+                    if p not in seen:
+                        seen.add(p)
+                        script_paths.append(p)
+                continue
+
+            # Existing local file
+            if os.path.isfile(arg):
+                p = os.path.abspath(arg)
+                if p not in seen:
+                    seen.add(p)
+                    script_paths.append(p)
+                continue
+
+            # Package name — try local then remote build scripts
+            normalized = Utils.normalize_name_version(arg)
+            Utils.print_debug(f"[CHECK] Checking for build script {normalized} locally and remotely...")
             local_build_scripts = Utils.get_local_build_scripts()
-            Utils.print_debug(f"[CHECK] Checking for build script {script_path_or_name} locally and remotely...")
-            if script_path_or_name in local_build_scripts:
-                script_path = local_build_scripts[script_path_or_name]
-                Utils.print_message(f"Found local build script {Utils.blue_text(script_path)}")
-            elif script_path_or_name in Utils.fetch_remote_build_scripts():
-                Utils.print_message(f"Downloading build script for {script_path_or_name} from remote metadata...")
-                is_remote = True
-                url = Utils.fetch_remote_build_scripts()[script_path_or_name]
-                script_path = os.path.join(Config.CONDATINER_DIR, f"{script_path_or_name.replace('/', '--')}.sh")
-                if Utils.download_executable(url, script_path):
-                    Utils.print_message(f"Downloaded build script to {Utils.blue_text(script_path)}")
+            if normalized in local_build_scripts:
+                p = local_build_scripts[normalized]
+                Utils.print_message(f"Found local build script {Utils.blue_text(p)}")
+                if p not in seen:
+                    seen.add(p)
+                    script_paths.append(p)
+            elif normalized in Utils.fetch_remote_build_scripts():
+                Utils.print_message(f"Downloading build script for {normalized} from remote metadata...")
+                url = Utils.fetch_remote_build_scripts()[normalized]
+                os.makedirs(Config.TMP_DIR, exist_ok=True)
+                tmp_path = os.path.join(Config.TMP_DIR, f"{normalized.replace('/', '--')}.sh")
+                if Utils.download_executable(url, tmp_path):
+                    Utils.print_message(f"Downloaded build script to {Utils.blue_text(tmp_path)}")
+                    if tmp_path not in seen:
+                        seen.add(tmp_path)
+                        script_paths.append(tmp_path)
+                        remote_paths.append(tmp_path)
                 else:
-                    Utils.print_error(f"Failed to download build script for {script_path_or_name} from {url}.")
-                    return
+                    Utils.print_error(f"Failed to download build script for {normalized}.")
             else:
-                Utils.print_error(f"Build script for {script_path_or_name} not found.")
-                return
-        else:
-            script_path = script_path_or_name
+                Utils.print_error(f"Build script for {normalized} not found.")
 
-        deps = Utils.get_dependencies_from_script(script_path, raise_when_finding_overlay=False)
-        for d in deps:
-            Utils.print_message(f"Dependency: {Utils.yellow_text(d)}" + Utils.red_text(" (missing)" if not ModGen.is_module_installed(d) and not ModGen.is_module_available(d) else ""))
-        missing_deps = ModGen.get_missing_modules(deps)
+        return script_paths, remote_paths
 
-        if not missing_deps:
-            Utils.print_message("All dependencies are installed.")
-            if is_remote and os.path.isfile(script_path):
-                os.remove(script_path)
+    @staticmethod
+    def parse_check_args(args):
+        script_paths, remote_paths = ModGen_Check._resolve_script_paths(args.scripts)
+
+        if not script_paths:
+            Utils.print_warning("No scripts found to check.")
             return
 
-        if args.auto_install:
-            Utils.print_message("Attempting to auto-install missing dependencies...")
-            for md in missing_deps:
-                if md.endswith(('.sqf', '.img', '.squashfs')):
-                    Utils.print_error(f"ModGen is not compatible with overlay dependencies. Please use CondaTainer instead.")
-                    Utils.print_note(f"Please go to https://github.com/{Config.GITHUB_REPO} for more information.")
-                    continue
-            ModGen.ensure_micromamba()
-            build_objects = [BuildObject(md) for md in missing_deps]
-            build_graph = BuildGraph(build_objects)
-            if build_graph.run():
-                Utils.print_success("All missing dependencies installed/submitted.")
-            else:
-                Utils.print_error("Some dependencies failed to install.")
-        else:
-            Utils.print_message(f"Run the command again with {Utils.blue_text('-a')} or {Utils.blue_text('--auto-install')} to install missing dependencies.")
+        # Collect and deduplicate deps across all scripts
+        multi = len(script_paths) > 1
+        seen_deps = {}  # normalized key -> original dep string
 
-        if is_remote and os.path.isfile(script_path):
-            os.remove(script_path)
+        for script_path in script_paths:
+            if multi:
+                Utils.print_message(f"Checking script: {Utils.blue_text(os.path.basename(script_path))}")
+            deps = Utils.get_dependencies_from_script(script_path, raise_when_finding_overlay=False)
+            for dep in deps:
+                key = Utils.normalize_name_version(dep)
+                if key not in seen_deps:
+                    seen_deps[key] = dep
+
+        all_deps = list(seen_deps.values())
+
+        if not all_deps:
+            Utils.print_message("No dependencies found in script.")
+            for p in remote_paths:
+                if os.path.isfile(p):
+                    os.remove(p)
+            return
+
+        # Grouped ✓/✗ output
+        check_mark = Utils.green_text("✓")
+        cross_mark = Utils.red_text("✗")
+        installed = []
+        missing = []
+
+        for dep in all_deps:
+            key = Utils.normalize_name_version(dep)
+            if ModGen.is_module_installed(key) or ModGen.is_module_available(key):
+                installed.append(dep)
+            else:
+                missing.append(dep)
+
+        if installed:
+            Utils.print_message("Installed:")
+            for dep in installed:
+                Utils.print_message(f"  {check_mark} {dep}")
+        if missing:
+            Utils.print_message("Missing:")
+            for dep in missing:
+                Utils.print_message(f"  {cross_mark} {dep}")
+
+        if not missing:
+            Utils.print_success("All dependencies are installed.")
+            for p in remote_paths:
+                if os.path.isfile(p):
+                    os.remove(p)
+            return
+
+        if not args.auto_install:
+            Utils.print_message(
+                f"Run the command again with {Utils.blue_text('-a')} or "
+                f"{Utils.blue_text('--auto-install')} to install missing dependencies."
+            )
+            for p in remote_paths:
+                if os.path.isfile(p):
+                    os.remove(p)
+            return
+
+        # Auto-install missing dependencies
+        Utils.print_message("Attempting to auto-install missing dependencies...")
+        ModGen.ensure_micromamba()
+        build_objects = [BuildObject(md) for md in missing]
+        build_graph = BuildGraph(build_objects)
+        if build_graph.run():
+            Utils.print_success("All missing dependencies installed/submitted.")
+        else:
+            Utils.print_error("Some dependencies failed to install.")
+
+        for p in remote_paths:
+            if os.path.isfile(p):
+                os.remove(p)
 
 class ModGen_Run:
     @staticmethod

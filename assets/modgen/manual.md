@@ -198,14 +198,44 @@ Utilities for running scripts with automatic dependency handling via  `#DEP:` ta
 
 ### Check
 
-Parses a script for `#DEP:` tags and `module load` or `ml` commands and checks if the required modules are installed.
+Parses one or more scripts for `#DEP:` tags and `module load` or `ml` commands and checks if the required modules are installed. Dependencies are deduplicated across all scripts before checking.
 
 ```
-modgen check [SCRIPT] [-a]
+modgen check [SCRIPT ...] [-a]
 ```
+
+**Arguments:**
+
+Each argument can be:
+- A local `.sh` file path
+- A directory (all `.sh` files in it are checked)
+- A package name (e.g., `samtools/1.22`) resolved from local or remote build scripts
+
+**Options:**
 
 * `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies found in the script.
 * `-i`, `--install`: Alias for `--auto-install`.
+
+**Output:** Installed and missing dependencies are shown in grouped ✓/✗ sections.
+
+**Examples:**
+
+```bash
+# Check a single script
+modgen check script.sh
+
+# Check multiple scripts
+modgen check src/*.sh
+
+# Check all .sh files in a directory
+modgen check ./my-scripts/
+
+# Check by package name (resolves from local/remote build scripts)
+modgen check samtools/1.22
+
+# Check and auto-install missing dependencies
+modgen check -a script1.sh script2.sh
+```
 
 ### Run
 
