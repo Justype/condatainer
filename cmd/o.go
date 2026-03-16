@@ -14,24 +14,35 @@ import (
 
 // oCmd is a shortcut for "overlay create"
 var oCmd = &cobra.Command{
-	Use:   "o [image_path]",
+	Use:   "o [flags] [image_path] [-- packages...]",
 	Short: "Shortcut for 'overlay create'",
 	Long: `Creates an ext3 overlay image optimized for specific workloads.
 This is a shortcut for the 'overlay create' command.
 
-If no image path is provided, defaults to 'env.img'.`,
+If no image path is provided, defaults to 'env.img'.
+Conda packages can be specified after -- to initialize the environment inline.`,
 	Example: `  condatainer o # 10G with default inode ratio
   condatainer o my_data.img -s 50G -t data
   condatainer o --fakeroot --sparse
-  condatainer o -f environment.yml # Initialize with conda env file`,
+  condatainer o -f environment.yml
+  condatainer o myenv.img -- python=3.11`,
 
-	Args: cobra.RangeArgs(0, 1),
+	Args: cobra.ArbitraryArgs,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		// 1. Handle Positional Argument (Image Path)
+		// 1. Split args at -- into image path and packages
+		var packages []string
+		if dashAt := cmd.ArgsLenAtDash(); dashAt >= 0 {
+			packages = args[dashAt:]
+			args = args[:dashAt]
+		}
+
+		// Handle Positional Argument (Image Path)
 		path := "env.img"
 		if len(args) > 0 {
 			path = args[0]
+		} else if len(args) > 1 {
+			ExitWithUsageError("Too many positional arguments before --.")
 		}
 
 		// Auto-append .img extension if not present and path doesn't have an extension
@@ -60,6 +71,10 @@ If no image path is provided, defaults to 'env.img'.`,
 		typeFlag, _ := cmd.Flags().GetString("type")
 		envFile, _ := cmd.Flags().GetString("file")
 		noTmp, _ := cmd.Flags().GetBool("no-tmp")
+
+		if envFile != "" && len(packages) > 0 {
+			ExitWithUsageError("Cannot use -f/--file and inline packages (--) at the same time.")
+		}
 
 		// 3. Parse size
 		sizeMB, err := utils.ParseSizeToMB(sizeStr)
@@ -90,7 +105,7 @@ If no image path is provided, defaults to 'env.img'.`,
 				}
 				ExitWithError("%v", err)
 			}
-			if err := initializeOverlayWithConda(cmd.Context(), path, envFile, fakeroot); err != nil {
+			if err := initializeOverlayWithConda(cmd.Context(), path, envFile, packages, fakeroot); err != nil {
 				os.Remove(path)
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 					utils.PrintWarning("Overlay initialization cancelled.")
@@ -109,7 +124,7 @@ If no image path is provided, defaults to 'env.img'.`,
 				ExitWithError("%v", err)
 			}
 
-			if err := initializeOverlayWithConda(cmd.Context(), tmpPath, envFile, fakeroot); err != nil {
+			if err := initializeOverlayWithConda(cmd.Context(), tmpPath, envFile, packages, fakeroot); err != nil {
 				os.Remove(tmpPath)
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 					utils.PrintWarning("Overlay initialization cancelled.")
@@ -119,7 +134,7 @@ If no image path is provided, defaults to 'env.img'.`,
 			}
 
 			utils.PrintMessage("Moving overlay to %s", utils.StylePath(path))
-			copied, err := overlay.MoveOverlayCopied(tmpPath, path, sparse)
+			copied, err := overlay.MoveOverlayCopied(cmd.Context(), tmpPath, path, sparse)
 			if err != nil {
 				os.Remove(tmpPath)
 				ExitWithError("Failed to move overlay to destination: %v", err)

@@ -11,6 +11,7 @@
 * **Web-App Ready:** Launch *RStudio*, *VS Code*, *noVNC* and more with one command.
 * **Unified Management:** Centralize group resources and easily isolate project environments.
 * **Inode Saver:** Packing 30k+ Conda files into a single portable image.
+* **LustreFS Friendly:** Stages conda creation on node-local SSD to reduce network filesystem load.
 * **Scheduler Native:** Out-of-the-box integration with *Slurm*, *PBS*, *LSF*, and *HTCondor*.
 
 > [!NOTE]

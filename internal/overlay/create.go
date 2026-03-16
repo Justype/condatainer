@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -149,111 +148,47 @@ func createOverlayFile(ctx context.Context, opts *CreateOptions, filePath string
 	return nil
 }
 
-// Linux lseek whence values for sparse file support (available since kernel 3.1).
-const (
-	seekData = 3 // SEEK_DATA: seek to next data region
-	seekHole = 4 // SEEK_HOLE: seek to next hole
-)
-
-// sparseAwareCopy copies src → dst preserving sparse holes.
-// It uses SEEK_DATA/SEEK_HOLE to skip over holes, writing only data segments.
-// The destination file is truncated to match the source size so holes are implicit.
-func sparseAwareCopy(src, dst *os.File) error {
-	srcFd := int(src.Fd())
-
-	// Get total size for the final truncate.
-	info, err := src.Stat()
-	if err != nil {
-		return err
+// crossFsCopy copies src to dst using the system cp command, which:
+//   - Is a subprocess → context-cancellable (Ctrl+C works during large copies)
+//   - sparse=true:  cp --sparse=always — detects holes, destination stays sparse
+//   - sparse=false: cp --sparse=never  — writes all zeros, destination is fully allocated
+func crossFsCopy(ctx context.Context, src, dst string, sparse bool) error {
+	sparseFlag := "--sparse=never"
+	if sparse {
+		sparseFlag = "--sparse=always"
 	}
-	size := info.Size()
-
-	var offset int64
-	buf := make([]byte, 1<<20) // 1 MiB copy buffer
-	for {
-		// Find next data segment starting at offset.
-		dataStart, err := syscall.Seek(srcFd, offset, seekData)
-		if err != nil {
-			break // ENXIO means no more data segments
-		}
-		holeStart, err := syscall.Seek(srcFd, dataStart, seekHole)
-		if err != nil {
-			holeStart = size // data runs to EOF
-		}
-
-		// Seek both files to the data region.
-		if _, err := src.Seek(dataStart, io.SeekStart); err != nil {
-			return err
-		}
-		if _, err := dst.Seek(dataStart, io.SeekStart); err != nil {
-			return err
-		}
-
-		// Copy the data segment.
-		remaining := holeStart - dataStart
-		for remaining > 0 {
-			n := min(int64(len(buf)), remaining)
-			nr, err := src.Read(buf[:n])
-			if nr > 0 {
-				if _, werr := dst.Write(buf[:nr]); werr != nil {
-					return werr
-				}
-				remaining -= int64(nr)
-			}
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				return fmt.Errorf("read from tmp overlay: %w", err)
-			}
-		}
-		offset = holeStart
+	cmd := exec.CommandContext(ctx, "cp", sparseFlag, src, dst)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		os.Remove(dst)
+		return fmt.Errorf("cp %s → %s: %w\n%s", src, dst, err, strings.TrimSpace(string(output)))
 	}
-
-	// Truncate dst to exact source size so trailing holes are implicit.
-	return dst.Truncate(size)
+	// cp applies umask when creating the destination — enforce the expected permission explicitly.
+	if err := os.Chmod(dst, utils.PermFile); err != nil {
+		utils.PrintDebug("Failed to set permissions on overlay: %v", err)
+	}
+	return nil
 }
 
 // moveFile moves src to dst. It tries os.Rename first (same-filesystem, instant).
 // If that fails due to a cross-device link (e.g. local /tmp → LustreFS), it falls
-// back to a copy followed by removal of src.
-// When sparse=true it uses a hole-aware copy so the destination stays sparse.
-// When sparse=false it uses io.Copy which materialises all holes (fully allocated).
+// back to crossFsCopy which uses cp and is context-cancellable (Ctrl+C works).
 // Returns (copied=true) when a copy was performed, (copied=false) when renamed.
-func moveFile(src, dst string, sparse bool) (copied bool, err error) {
+func moveFile(ctx context.Context, src, dst string, sparse bool) (copied bool, err error) {
+	// Ensure the destination directory exists.
+	if err := os.MkdirAll(filepath.Dir(dst), utils.PermDir); err != nil {
+		return false, fmt.Errorf("create destination directory: %w", err)
+	}
+
 	if err := os.Rename(src, dst); err == nil {
 		return false, nil
 	} else if !errors.Is(err, syscall.EXDEV) {
 		return false, fmt.Errorf("rename %s → %s: %w", src, dst, err)
 	}
 
-	// Cross-filesystem: copy then remove src.
-	in, err := os.Open(src)
-	if err != nil {
-		return false, fmt.Errorf("open tmp overlay: %w", err)
+	// Cross-filesystem: use cp subprocess (context-cancellable).
+	if err := crossFsCopy(ctx, src, dst, sparse); err != nil {
+		return false, err
 	}
-	defer in.Close()
-
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, utils.PermFile)
-	if err != nil {
-		return false, fmt.Errorf("create destination overlay: %w", err)
-	}
-
-	var copyErr error
-	if sparse {
-		copyErr = sparseAwareCopy(in, out)
-	} else {
-		_, copyErr = io.Copy(out, in)
-	}
-	if copyErr != nil {
-		out.Close()
-		os.Remove(dst)
-		return false, fmt.Errorf("copy overlay to destination: %w", copyErr)
-	}
-	if err := out.Close(); err != nil {
-		os.Remove(dst)
-		return false, fmt.Errorf("flush destination overlay: %w", err)
-	}
-
 	os.Remove(src)
 	return true, nil
 }
@@ -266,8 +201,8 @@ func moveFile(src, dst string, sparse bool) (copied bool, err error) {
 // sparse=true preserves holes (space-efficient, slightly slower);
 // sparse=false materialises all zeros via io.Copy (fully allocated, faster sequential write).
 // Returns copied=true when a cross-filesystem copy was done, copied=false when os.Rename was used.
-func MoveOverlayCopied(src, dst string, sparse bool) (copied bool, err error) {
-	return moveFile(src, dst, sparse)
+func MoveOverlayCopied(ctx context.Context, src, dst string, sparse bool) (copied bool, err error) {
+	return moveFile(ctx, src, dst, sparse)
 }
 
 // AllocateOverlay pre-allocates disk blocks for a sparse overlay file using fallocate.
@@ -345,6 +280,10 @@ func CreateDirectly(ctx context.Context, opts *CreateOptions) error {
 		return err
 	}
 
+	if err := os.MkdirAll(filepath.Dir(opts.Path), utils.PermDir); err != nil {
+		return fmt.Errorf("create destination directory: %w", err)
+	}
+
 	label := typeLabel(opts)
 
 	if !opts.Quiet {
@@ -379,7 +318,7 @@ func CreateWithOptions(ctx context.Context, opts *CreateOptions) error {
 	if !opts.Quiet {
 		utils.PrintMessage("Moving overlay to %s", utils.StylePath(opts.Path))
 	}
-	copied, err := moveFile(tmpPath, opts.Path, opts.Sparse)
+	copied, err := moveFile(ctx, tmpPath, opts.Path, opts.Sparse)
 	if err != nil {
 		return fmt.Errorf("failed to install overlay: %w", err)
 	}

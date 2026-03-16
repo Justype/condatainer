@@ -182,6 +182,7 @@ condatainer overlay create [OPTIONS] [NAME]
 * `--fakeroot`: Create image compatible with fakeroot (owned by root, must use with `--fakeroot` later).
 * `--sparse`: Create a sparse image file (no pre-allocation). (Short form: `-S` available on the `o` shortcut only.)
 * `--no-tmp`: Create the overlay directly at the target path instead of staging at a local tmp directory first. By default CondaTainer creates the image on a fast local filesystem (e.g. `/tmp`) and moves it to the destination once ready — this is significantly faster on HPC network filesystems (LustreFS). Use `--no-tmp` only when the target is already on local storage.
+* `-- [packages...] [-c channel...]`: Initialize with inline conda packages instead of a YAML file. Mutually exclusive with `-f`. Channels passed with `-c` are saved in `.condarc` inside the overlay for reuse by `mm-install`, `mm-update`, and `mm-search`. Default channels when no `-c` is given: `conda-forge` + `bioconda`. `conda-forge` is always appended if not explicitly listed.
 * NAME: Name of the overlay image (`env.img` by default if not specified).
 
 **Examples:**
@@ -198,13 +199,30 @@ condatainer o -f environment.yml project_env.img
 
 # Create a fakeroot-compatible sparse overlay
 condatainer o --fakeroot --sparse
+
+# Initialize with inline conda packages (faster than writing a YAML)
+condatainer o -- python=3.11 numpy pandas
+condatainer o myenv.img -- python=3.11
+
+# Specify channels with -c; conda-forge is always appended if not listed
+condatainer o -- pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
 ```
 
 Then you can use the `mm-<operation>` helper commands to create/install/update/remove conda packages inside the writable container.
 
 ```bash
-# install more packages
+# install more packages (uses channels saved during creation)
 mm-install numpy pandas
+mm-install pytorch-cuda=12.4 -c pytorch -c nvidia  # extra channels merged with saved ones
+
+# manage channels
+mm-channels get              # show configured channels
+mm-channels prepend pytorch  # move/add channel to highest priority
+mm-channels append bioconda  # move/add channel to lowest priority
+mm-channels remove nvidia    # remove a channel
+
+# search for packages (uses saved channels)
+mm-search pytorch-cuda
 
 # pin the package version
 mm-pin numpy # after installation

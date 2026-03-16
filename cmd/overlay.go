@@ -28,22 +28,33 @@ and verifying filesystem integrity.`,
 // ---------------------------------------------------------
 
 var overlayCreateCmd = &cobra.Command{
-	Use:   "create [image_path]",
-	Short: "Create a new sparse overlay image",
+	Use:   "create [flags] [image_path] [-- packages...]",
+	Short: "Create a new ext3 overlay image",
 	Long: `Creates an ext3 overlay image optimized for specific workloads.
 
-If no image path is provided, defaults to 'env.img'.`,
+If no image path is provided, defaults to 'env.img'.
+Conda packages can be specified after -- to initialize the environment inline.`,
 	Example: `  condatainer overlay create # 10G with default inode ratio
   condatainer overlay create my_data.img -s 50G -t data
-  condatainer overlay create --fakeroot --sparse`,
+  condatainer overlay create --fakeroot --sparse
+  condatainer overlay create myenv.img -- python=3.11`,
 
-	Args: cobra.RangeArgs(0, 1),
+	Args: cobra.ArbitraryArgs,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		// 1. Handle Positional Argument (Image Path)
+		// 1. Split args at -- into image path and packages
+		var packages []string
+		if dashAt := cmd.ArgsLenAtDash(); dashAt >= 0 {
+			packages = args[dashAt:]
+			args = args[:dashAt]
+		}
+
+		// Handle Positional Argument (Image Path)
 		path := "env.img"
 		if len(args) > 0 {
 			path = args[0]
+		} else if len(args) > 1 {
+			ExitWithUsageError("Too many positional arguments before --.")
 		}
 
 		// Auto-append .img extension if not present and path doesn't have an extension
@@ -73,6 +84,10 @@ If no image path is provided, defaults to 'env.img'.`,
 		envFile, _ := cmd.Flags().GetString("file")
 		noTmp, _ := cmd.Flags().GetBool("no-tmp")
 
+		if envFile != "" && len(packages) > 0 {
+			ExitWithUsageError("Cannot use -f/--file and inline packages (--) at the same time.")
+		}
+
 		sizeMB, err := utils.ParseSizeToMB(sizeStr)
 		if err != nil {
 			ExitWithError("Invalid size format '%s': %v", sizeStr, err)
@@ -101,7 +116,7 @@ If no image path is provided, defaults to 'env.img'.`,
 				}
 				ExitWithError("%v", err)
 			}
-			if err := initializeOverlayWithConda(cmd.Context(), path, envFile, fakeroot); err != nil {
+			if err := initializeOverlayWithConda(cmd.Context(), path, envFile, packages, fakeroot); err != nil {
 				os.Remove(path)
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 					utils.PrintWarning("Overlay initialization cancelled.")
@@ -120,7 +135,7 @@ If no image path is provided, defaults to 'env.img'.`,
 				ExitWithError("%v", err)
 			}
 
-			if err := initializeOverlayWithConda(cmd.Context(), tmpPath, envFile, fakeroot); err != nil {
+			if err := initializeOverlayWithConda(cmd.Context(), tmpPath, envFile, packages, fakeroot); err != nil {
 				os.Remove(tmpPath)
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 					utils.PrintWarning("Overlay initialization cancelled.")
@@ -130,7 +145,7 @@ If no image path is provided, defaults to 'env.img'.`,
 			}
 
 			utils.PrintMessage("Moving overlay to %s", utils.StylePath(path))
-			copied, err := overlay.MoveOverlayCopied(tmpPath, path, sparse)
+			copied, err := overlay.MoveOverlayCopied(cmd.Context(), tmpPath, path, sparse)
 			if err != nil {
 				os.Remove(tmpPath)
 				ExitWithError("Failed to move overlay to destination: %v", err)
@@ -151,7 +166,7 @@ If no image path is provided, defaults to 'env.img'.`,
 // ---------------------------------------------------------
 
 var resizeCmd = &cobra.Command{
-	Use:   "resize [image_path]",
+	Use:   "resize [flags] [image_path]",
 	Short: "Expand or shrink an existing overlay image",
 	Example: `  condatainer overlay resize env.img -s 20G
   condatainer overlay resize data.img --size 512M`,
@@ -219,7 +234,7 @@ Delegates to the top-level 'condatainer info' command, so both commands produce 
 // ---------------------------------------------------------
 
 var checkCmd = &cobra.Command{
-	Use:   "check [path]",
+	Use:   "check [flags] [path]",
 	Short: "Verify filesystem integrity (e2fsck)",
 	Args:  cobra.ExactArgs(1),
 
@@ -249,7 +264,7 @@ var checkCmd = &cobra.Command{
 // ---------------------------------------------------------
 
 var chownCmd = &cobra.Command{
-	Use:   "chown [image_path]",
+	Use:   "chown [flags] [image_path]",
 	Short: "Recursively set internal files to specific UID/GID",
 	Long: `Walks the overlay filesystem (without mounting) and updates the UID/GID.
 
@@ -312,7 +327,7 @@ Multiple paths can be specified using multiple -p flags.`,
 // ---------------------------------------------------------
 
 var exportCmd = &cobra.Command{
-	Use:   "export [overlay_path]",
+	Use:   "export [flags] [overlay_path]",
 	Short: "Export a conda environment from an overlay",
 	Long: `Export a Conda environment from a overlay.
 
@@ -482,9 +497,10 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// initializeOverlayWithConda installs a conda environment from a YAML file into an overlay
-// If envFile is empty, it creates a minimal environment with zlib
-func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string, fakeroot bool) error {
+// initializeOverlayWithConda installs a conda environment into an overlay.
+// Priority: envFile (-f flag) > packages (-- args) > minimal (zlib).
+// envFile and packages are mutually exclusive and validated before this call.
+func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string, packages []string, fakeroot bool) error {
 	// Validate environment file if provided
 	if envFile != "" {
 		absEnvFile, err := filepath.Abs(envFile)
@@ -516,6 +532,9 @@ func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string
 	if envFile != "" {
 		utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(envFile))
 		mmCreateCmd = []string{"mm-create", "-f", envFile, "-y"}
+	} else if len(packages) > 0 {
+		utils.PrintMessage("Initializing conda environment with: %s...", strings.Join(packages, " "))
+		mmCreateCmd = append([]string{"mm-create", "-y"}, packages...)
 	} else {
 		utils.PrintMessage("Initializing minimal conda environment with small package (zlib)...")
 		mmCreateCmd = []string{"mm-create", "zlib", "-y"}
