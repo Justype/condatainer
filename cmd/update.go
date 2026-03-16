@@ -26,6 +26,7 @@ var (
 	updateBuild       bool
 	updateBase        bool
 	updateHelpScripts bool
+	updateRemote      bool
 )
 
 var updateCmd = &cobra.Command{
@@ -38,7 +39,8 @@ metadata caches. Use --base to update the base Apptainer image instead.`,
 	Example: `  condatainer update            # Refresh build + helper metadata (default)
   condatainer update --build    # Build script metadata only
   condatainer update --helper   # Helper script metadata only
-  condatainer update --base     # Update the base image only`,
+  condatainer update --base     # Update the base image only
+  condatainer update --base --remote # Update the base image using remote script`,
 	SilenceUsage: true,
 	RunE:         runUpdate,
 }
@@ -48,6 +50,7 @@ func init() {
 	updateCmd.Flags().BoolVar(&updateBuild, "build", false, "Refresh build script metadata cache")
 	updateCmd.Flags().BoolVar(&updateHelpScripts, "helper", false, "Refresh helper script metadata cache")
 	updateCmd.Flags().BoolVar(&updateBase, "base", false, "Update the base image")
+	updateCmd.Flags().BoolVar(&updateRemote, "remote", false, "Remote build script takes precedence over local (used with --base)")
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
@@ -101,6 +104,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("condatainer is currently running (base image is locked); stop all running condatainer sessions before updating")
 			}
 		}
+		build.PreferRemote = updateRemote || config.Global.PreferRemote
 		utils.PrintMessage("Updating base image...")
 		if err := build.EnsureBaseImage(cmd.Context(), true); err != nil {
 			return fmt.Errorf("failed to update base image: %w", err)
