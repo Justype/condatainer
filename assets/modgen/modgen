@@ -1797,6 +1797,10 @@ class ModGen_Run:
             dest="auto_install", action="store_true",
             help="Automatically install missing dependencies")
         ModGen_Run.parser_run.add_argument(
+            "--afterok",
+            type=str, default="", metavar="JOB_IDS",
+            help="Run after jobs succeed (colon-separated IDs, e.g. 123:456)")
+        ModGen_Run.parser_run.add_argument(
             "script_args",
             nargs=argparse.REMAINDER,
             help="Arguments to pass to the script")
@@ -1891,7 +1895,7 @@ class ModGen_Run:
         return env
 
     @staticmethod
-    def _create_run_sbatch_script(script_path: str, sbatch_flags: List[str], dep_ids: List[str], script_args: List[str] = None) -> Optional[str]:
+    def _create_run_sbatch_script(script_path: str, sbatch_flags: List[str], dep_ids: List[str], script_args: Optional[List[str]] = None) -> Optional[str]:
         script_name = os.path.splitext(os.path.basename(script_path))[0]
         sbatch_script_path = os.path.join(Config.TMP_DIR, f"sbatch_run_{script_name}.sh")
         log_path = os.path.join(Config.LOGS_DIR, f"ModGen_run_{script_name}.out")
@@ -1913,7 +1917,9 @@ class ModGen_Run:
                     f.write(f"export {k}={v}\n")
                 f.write("\n")
                 f.write(f"{Config.SCRIPT_PATH} run {script_path}{args_str}\n")
+                f.write(f"_exit_code=$?\n")
                 f.write(f"rm -f {sbatch_script_path}\n")
+                f.write(f"exit $_exit_code\n")
             os.chmod(sbatch_script_path, 0o775)
             return sbatch_script_path
         except Exception as e:
@@ -1921,14 +1927,15 @@ class ModGen_Run:
             return None
 
     @staticmethod
-    def _submit_run_sbatch(script_path: str, sbatch_flags: List[str], dep_ids: List[str], script_args: List[str] = None) -> Optional[str]:
+    def _submit_run_sbatch(script_path: str, sbatch_flags: List[str], dep_ids: List[str], script_args: Optional[List[str]] = None, afterok_ids: Optional[List[str]] = None) -> Optional[str]:
         sbatch_script_path = ModGen_Run._create_run_sbatch_script(script_path, sbatch_flags, dep_ids, script_args)
         if not sbatch_script_path:
             return None
         slurm_job_id_regex = re.compile(r'Submitted batch job (\d+)')
         cmd = ["sbatch"]
-        if dep_ids:
-            dep_str = ":".join(dep_ids)
+        all_afterok = (dep_ids or []) + (afterok_ids or [])
+        if all_afterok:
+            dep_str = ":".join(all_afterok)
             cmd.append(f"--dependency=afterok:{dep_str}")
         cmd.append(sbatch_script_path)
         Utils.print_debug(f"[SBATCH] Submitting run job with command: {cmd}")
@@ -1968,6 +1975,7 @@ class ModGen_Run:
         # Parse #SBATCH directives from the script (needed for resource priority chain)
         sbatch_flags = Utils.get_sbatch_args_from_build_script(script_path)
         script_args = args.script_args or []
+        afterok_ids = [i for i in args.afterok.split(":") if i] if args.afterok else []
 
         # Fast path: already inside a scheduler job — skip submission, run locally
         if "SLURM_JOB_ID" in os.environ:
@@ -1999,10 +2007,11 @@ class ModGen_Run:
 
         # Submit or run locally
         if Config.submit_job and sbatch_flags and Utils.is_sbatch_available():
-            job_id = ModGen_Run._submit_run_sbatch(script_path, sbatch_flags, build_job_ids, script_args)
+            job_id = ModGen_Run._submit_run_sbatch(script_path, sbatch_flags, build_job_ids, script_args, afterok_ids)
             if job_id:
-                if build_job_ids:
-                    Utils.print_success(f"Submitted run job {Utils.blue_text(job_id)} (depends on build job(s): {Utils.blue_text(', '.join(build_job_ids))}).")
+                all_deps = build_job_ids + afterok_ids
+                if all_deps:
+                    Utils.print_success(f"Submitted run job {Utils.blue_text(job_id)} (afterok: {Utils.blue_text(', '.join(all_deps))}).")
                 else:
                     Utils.print_success(f"Submitted run job {Utils.blue_text(job_id)} for {Utils.yellow_text(os.path.basename(script_path))}.")
         else:
