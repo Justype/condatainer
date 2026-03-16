@@ -245,9 +245,11 @@ func createAtTmp(ctx context.Context, opts *CreateOptions) (tmpPath string, err 
 
 	label := typeLabel(opts)
 
-	// Prepare local tmp path
+	// Prepare local tmp path.
+	// EnsureTmpSubdir uses 0700 when the parent is world-writable (/tmp),
+	// and PermDir (0775) for private scheduler job dirs.
 	tmpDir := utils.GetTmpDir()
-	if err := os.MkdirAll(tmpDir, utils.PermDir); err != nil {
+	if err := utils.EnsureTmpSubdir(tmpDir); err != nil {
 		return "", fmt.Errorf("failed to create tmp dir %s: %w", tmpDir, err)
 	}
 	tmpPath = filepath.Join(tmpDir, filepath.Base(opts.Path))

@@ -271,6 +271,10 @@ func (b *BaseBuildObject) CreateBuildDirs(ctx context.Context, force bool) error
 		os.Remove(b.tmpOverlayPath) //nolint:errcheck — clean ext3-mode artifact (no-op if "")
 	}
 
+	// Create cnt-$USER leaf first with appropriate permissions (0700 under /tmp, 0775 elsewhere).
+	if err := utils.EnsureTmpSubdir(b.tmpDir); err != nil {
+		return fmt.Errorf("failed to create tmp dir %s: %w", b.tmpDir, err)
+	}
 	if err := os.MkdirAll(b.cntDirPath, utils.PermDir); err != nil {
 		return fmt.Errorf("failed to create build cnt dir %s: %w", b.cntDirPath, err)
 	}
