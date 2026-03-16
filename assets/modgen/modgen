@@ -1796,6 +1796,10 @@ class ModGen_Run:
             "-a", "--auto-install", "-i", "--install",
             dest="auto_install", action="store_true",
             help="Automatically install missing dependencies")
+        ModGen_Run.parser_run.add_argument(
+            "script_args",
+            nargs=argparse.REMAINDER,
+            help="Arguments to pass to the script")
 
     @staticmethod
     def parse_args_in_script(script_path: str) -> List[str]:
@@ -1887,7 +1891,7 @@ class ModGen_Run:
         return env
 
     @staticmethod
-    def _create_run_sbatch_script(script_path: str, sbatch_flags: List[str], dep_ids: List[str]) -> Optional[str]:
+    def _create_run_sbatch_script(script_path: str, sbatch_flags: List[str], dep_ids: List[str], script_args: List[str] = None) -> Optional[str]:
         script_name = os.path.splitext(os.path.basename(script_path))[0]
         sbatch_script_path = os.path.join(Config.TMP_DIR, f"sbatch_run_{script_name}.sh")
         log_path = os.path.join(Config.LOGS_DIR, f"ModGen_run_{script_name}.out")
@@ -1896,6 +1900,7 @@ class ModGen_Run:
         os.makedirs(Config.TMP_DIR, mode=0o775, exist_ok=True)
         try:
             resource_env = ModGen_Run._parse_resource_env(sbatch_flags)
+            args_str = (" " + " ".join(shlex.quote(a) for a in script_args)) if script_args else ""
             with open(sbatch_script_path, 'w') as f:
                 f.write("#!/bin/bash\n")
                 for flag in sbatch_flags:
@@ -1907,7 +1912,7 @@ class ModGen_Run:
                 for k, v in resource_env.items():
                     f.write(f"export {k}={v}\n")
                 f.write("\n")
-                f.write(f"{Config.SCRIPT_PATH} run {script_path}\n")
+                f.write(f"{Config.SCRIPT_PATH} run {script_path}{args_str}\n")
                 f.write(f"rm -f {sbatch_script_path}\n")
             os.chmod(sbatch_script_path, 0o775)
             return sbatch_script_path
@@ -1916,8 +1921,8 @@ class ModGen_Run:
             return None
 
     @staticmethod
-    def _submit_run_sbatch(script_path: str, sbatch_flags: List[str], dep_ids: List[str]) -> Optional[str]:
-        sbatch_script_path = ModGen_Run._create_run_sbatch_script(script_path, sbatch_flags, dep_ids)
+    def _submit_run_sbatch(script_path: str, sbatch_flags: List[str], dep_ids: List[str], script_args: List[str] = None) -> Optional[str]:
+        sbatch_script_path = ModGen_Run._create_run_sbatch_script(script_path, sbatch_flags, dep_ids, script_args)
         if not sbatch_script_path:
             return None
         slurm_job_id_regex = re.compile(r'Submitted batch job (\d+)')
@@ -1962,10 +1967,11 @@ class ModGen_Run:
 
         # Parse #SBATCH directives from the script (needed for resource priority chain)
         sbatch_flags = Utils.get_sbatch_args_from_build_script(script_path)
+        script_args = args.script_args or []
 
         # Fast path: already inside a scheduler job — skip submission, run locally
         if "SLURM_JOB_ID" in os.environ:
-            execution_command_list = [script_path] if os.access(script_path, os.X_OK) else [f"bash {script_path}"]
+            execution_command_list = ([script_path] if os.access(script_path, os.X_OK) else ["bash", script_path]) + script_args
             ModGen_Exec.exec_command(deps, execution_command_list, extra_env=ModGen_Run._resolve_resource_env(sbatch_flags))
             return
 
@@ -1993,7 +1999,7 @@ class ModGen_Run:
 
         # Submit or run locally
         if Config.submit_job and sbatch_flags and Utils.is_sbatch_available():
-            job_id = ModGen_Run._submit_run_sbatch(script_path, sbatch_flags, build_job_ids)
+            job_id = ModGen_Run._submit_run_sbatch(script_path, sbatch_flags, build_job_ids, script_args)
             if job_id:
                 if build_job_ids:
                     Utils.print_success(f"Submitted run job {Utils.blue_text(job_id)} (depends on build job(s): {Utils.blue_text(', '.join(build_job_ids))}).")
@@ -2004,7 +2010,7 @@ class ModGen_Run:
                 Utils.print_note("Script has #SBATCH specs but --local mode is enabled. Running locally.")
             elif sbatch_flags and not Utils.is_sbatch_available():
                 Utils.print_note("Script has #SBATCH specs but no SLURM scheduler is available. Running locally.")
-            execution_command_list = [script_path] if os.access(script_path, os.X_OK) else [f"bash {script_path}"]
+            execution_command_list = ([script_path] if os.access(script_path, os.X_OK) else ["bash", script_path]) + script_args
             resource_env = ModGen_Run._resolve_resource_env(sbatch_flags)
             ModGen_Exec.exec_command(deps, execution_command_list, extra_env=resource_env)
 
