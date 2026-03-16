@@ -831,13 +831,26 @@ var configAppendCmd = &cobra.Command{
 	SilenceUsage:      true,
 	Run: func(cmd *cobra.Command, args []string) {
 		key, value := args[0], args[1]
+		moved := false
 		if err := modifyArrayConfig(key, func(cur []string) []string {
-			return append(cur, value)
+			out := make([]string, 0, len(cur))
+			for _, v := range cur {
+				if v == value {
+					moved = true
+					continue
+				}
+				out = append(out, v)
+			}
+			return append(out, value)
 		}); err != nil {
 			ExitWithError("%v", err)
 		}
 		configPath, _ := config.GetActiveOrUserConfigPath()
-		utils.PrintSuccess("Appended %s to %s", utils.StyleInfo(value), utils.StyleInfo(key))
+		if moved {
+			utils.PrintSuccess("Moved %s to end of %s", utils.StyleInfo(value), utils.StyleInfo(key))
+		} else {
+			utils.PrintSuccess("Appended %s to %s", utils.StyleInfo(value), utils.StyleInfo(key))
+		}
 		utils.PrintNote("Config saved to: %s", configPath)
 	},
 }
@@ -851,13 +864,26 @@ var configPrependCmd = &cobra.Command{
 	SilenceUsage:      true,
 	Run: func(cmd *cobra.Command, args []string) {
 		key, value := args[0], args[1]
+		moved := false
 		if err := modifyArrayConfig(key, func(cur []string) []string {
-			return append([]string{value}, cur...)
+			out := make([]string, 0, len(cur))
+			for _, v := range cur {
+				if v == value {
+					moved = true
+					continue
+				}
+				out = append(out, v)
+			}
+			return append([]string{value}, out...)
 		}); err != nil {
 			ExitWithError("%v", err)
 		}
 		configPath, _ := config.GetActiveOrUserConfigPath()
-		utils.PrintSuccess("Prepended %s to %s", utils.StyleInfo(value), utils.StyleInfo(key))
+		if moved {
+			utils.PrintSuccess("Moved %s to front of %s", utils.StyleInfo(value), utils.StyleInfo(key))
+		} else {
+			utils.PrintSuccess("Prepended %s to %s", utils.StyleInfo(value), utils.StyleInfo(key))
+		}
 		utils.PrintNote("Config saved to: %s", configPath)
 	},
 }
