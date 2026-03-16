@@ -37,7 +37,6 @@ var configKeys = []string{
 	"build.mem_mb",
 	"build.time",
 	"build.compress_args",
-	"build.overlay_type",
 	"build.block_size",
 	"build.data_block_size",
 	"build.use_tmp_overlay",
@@ -142,8 +141,6 @@ func configValueCompletion(key string) []string {
 		return []string{"4096", "8192", "16384", "32768"}
 	case "build.time":
 		return []string{"1h", "2h", "4h", "8h"}
-	case "build.overlay_type":
-		return []string{"ext3", "squashfs"}
 	case "build.compress_args":
 		return config.CompressNames()
 	case "build.block_size", "build.data_block_size":
@@ -365,7 +362,6 @@ Shows:
 		} else {
 			fmt.Printf("  compress_args:        %s\n", compressArgs)
 		}
-		fmt.Printf("  overlay_type:         %s\n", viper.GetString("build.overlay_type"))
 		fmt.Printf("  block_size:           %s\n", config.Global.Build.BlockSize)
 		fmt.Printf("  data_block_size:      %s\n", config.Global.Build.DataBlockSize)
 		fmt.Printf("  use_tmp_overlay:      %v\n", config.Global.Build.UseTmpOverlay)

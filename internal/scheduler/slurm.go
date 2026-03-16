@@ -82,6 +82,9 @@ func newSlurmSchedulerWithBinary(sbatchBin string) (*SlurmScheduler, error) {
 // GetCurrentJobID returns the SLURM job ID of the currently running job, or "".
 func (s *SlurmScheduler) GetCurrentJobID() string { return os.Getenv("SLURM_JOB_ID") }
 
+// GetTmpDir returns the SLURM node-local tmp directory for the current job, or "".
+func (s *SlurmScheduler) GetTmpDir() string { return os.Getenv("SLURM_TMPDIR") }
+
 // IsAvailable checks if the SLURM binary is present on this system.
 func (s *SlurmScheduler) IsAvailable() bool {
 	return s.sbatchBin != ""

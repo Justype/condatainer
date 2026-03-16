@@ -245,7 +245,11 @@ func (b *BaseBuildObject) CreateTmpOverlay(ctx context.Context, force bool) erro
 	// For build overlays, we use a temporary size from config (default 20GB).
 	// Use "default" profile, sparse=true for faster creation.
 	// quiet=true suppresses detailed specs output since users don't need to see those for temp overlays.
-	if err := overlay.CreateForCurrentUser(ctx, b.tmpOverlayPath, config.Global.Build.TmpSizeMB, "default", true, config.Global.Build.OverlayType, true); err != nil {
+	if err := overlay.CreateWithOptions(ctx, &overlay.CreateOptions{
+		Path: b.tmpOverlayPath, SizeMB: config.Global.Build.TmpSizeMB,
+		UID: os.Getuid(), GID: os.Getgid(),
+		Profile: overlay.ProfileDefault, Sparse: true, FilesystemType: "ext3", Quiet: true,
+	}); err != nil {
 		return fmt.Errorf("failed to create temporary overlay: %w", err)
 	}
 
@@ -267,6 +271,10 @@ func (b *BaseBuildObject) CreateBuildDirs(ctx context.Context, force bool) error
 		os.Remove(b.tmpOverlayPath) //nolint:errcheck — clean ext3-mode artifact (no-op if "")
 	}
 
+	// Create cnt-$USER leaf first with appropriate permissions (0700 under /tmp, 0775 elsewhere).
+	if err := utils.EnsureTmpSubdir(b.tmpDir); err != nil {
+		return fmt.Errorf("failed to create tmp dir %s: %w", b.tmpDir, err)
+	}
 	if err := os.MkdirAll(b.cntDirPath, utils.PermDir); err != nil {
 		return fmt.Errorf("failed to create build cnt dir %s: %w", b.cntDirPath, err)
 	}
@@ -308,13 +316,7 @@ func (b *BaseBuildObject) Cleanup(failed bool) error {
 
 		// Remove tmpDir itself if it is now empty (no other builds using it)
 		if b.tmpDir != "" && b.tmpDir != cntBaseDir {
-			if entries, err := os.ReadDir(b.tmpDir); err == nil && len(entries) == 0 {
-				if err := os.Remove(b.tmpDir); err != nil && !os.IsNotExist(err) {
-					utils.PrintDebug("Failed to remove empty tmp dir %s: %v", b.tmpDir, err)
-				} else {
-					utils.PrintDebug("Removed empty tmp dir %s", b.tmpDir)
-				}
-			}
+			utils.RemoveDirIfEmpty(b.tmpDir)
 		}
 	}
 

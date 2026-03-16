@@ -23,27 +23,49 @@ By default, CondaTainer will create a 10GiB ext3 overlay named `env.img` in the 
 condatainer o
 ```
 
+Initialize with specific packages directly (no YAML file needed):
+
+```bash
+condatainer o -- python=3.11 numpy
+condatainer o myenv.img -- python=3.11 r-base
+
+# Add extra channels with -c; conda-forge is always appended if not listed
+condatainer o -- pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
+```
+
 Full command with options:
 
 ```
-  condatainer o [image_path] [flags]
+Usage:
+  condatainer o [flags] [image_path] [-- packages...]
 
 Examples:
   condatainer o # 10G with default inode ratio
   condatainer o my_data.img -s 50G -t data
   condatainer o --fakeroot --sparse
-  condatainer o -f environment.yml # Initialize with conda env file
+  condatainer o -f environment.yml
+  condatainer o myenv.img -- python=3.11
 
 Flags:
       --fakeroot      Create a fakeroot-compatible overlay (owned by root)
   -f, --file string   Initialize with Conda environment file (.yml or .yaml)
+      --no-tmp        Create directly at target path instead of local tmp (slower on network filesystems)
   -s, --size string   Set overlay size (e.g., 500M, 10G) (default "10G")
-      --sparse        Create a sparse overlay image
+  -S, --sparse        Create a sparse overlay image (no pre-allocation)
   -t, --type string   Overlay profile: small/balanced/large files (default "balanced")
 ```
 
+Default channels when no `-c` is given: `conda-forge` + `bioconda`. When `-c` is given, `conda-forge` is appended automatically if not already listed. The resolved channels are saved in `.condarc` inside the overlay and reused by `mm-install`, `mm-update`, and `mm-search`.
+
 - For Python projects, 10GiB is usually sufficient.
 - For R projects, you may want to increase the size to 20GiB or more, especially if you are working with bioconductor packages.
+
+```{note}
+By default, CondaTainer stages the overlay at a fast local tmp directory (e.g. `/tmp`) and moves it to the target path once ready.
+This avoids slow random I/O on HPC network filesystems (LustreFS) during image creation and conda initialization.
+
+Use `--no-tmp` to skip this and write directly to the target path, if the tmp size is limited.
+```
 
 ```{note}
 Only one workspace overlay can be mounted at a time, regardless of writable or read-only mode.
@@ -93,28 +115,20 @@ Then you can use `mm-*` commands to manage your project environment.
 
 ```bash
 mm-install r-base=4.4 r-tidyverse  # Install packages
+mm-install pytorch-cuda=12.4 -c pytorch -c nvidia  # Install with extra channels
 mm-pin r-base           # Pin a package version
 mm-pin -r r-base        # Unpin a package
 mm-list                 # List installed packages
-mm-search r-ggplot2     # Search for a package
+mm-search r-ggplot2     # Search for a package (uses saved channels)
 mm-remove r-tidyverse   # Remove a package
 mm-update               # Update packages
 mm-clean -a             # Clean the cache and unused
 mm-export               # Export environment
-```
 
-Or you can use `micromamba` directly:
-
-```bash
-micromamba install r-base=4.4 r-tidyverse
-micromamba list
-```
-
-If you prefer `conda`, you can install the it:
-
-```bash
-mm-install conda python=3.12 # choose a Python version for conda
-conda install r-base=4.4 r-tidyverse
+mm-channels get          # Show configured channels
+mm-channels prepend pytorch  # Move/add channel to highest priority
+mm-channels append bioconda  # Move/add channel to lowest priority
+mm-channels remove nvidia    # Remove a channel
 ```
 
 You don't need to activate the environment because the **CondaTainer** sets the `CONDA_PREFIX` and `PATH` for you.
@@ -244,10 +258,10 @@ To export a reproducible environment spec from a workspace overlay (without ente
 condatainer overlay export env.img > environment.yml
 ```
 
-Or you can mount the overlay and use `conda` or `micromamba` to export:
+Or mount the overlay and run `mm-export` directly:
 
 ```bash
-condatainer e -- micromamba env export > environment.yml
+condatainer e -- mm-export --no-builds > environment.yml
 ```
 
 ## Share the Overlay with Others

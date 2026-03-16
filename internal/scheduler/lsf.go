@@ -75,6 +75,9 @@ func newLsfSchedulerWithBinary(bsubBin string) (*LsfScheduler, error) {
 // GetCurrentJobID returns the LSF job ID of the currently running job, or "".
 func (l *LsfScheduler) GetCurrentJobID() string { return os.Getenv("LSB_JOBID") }
 
+// GetTmpDir returns the LSF node-local tmp directory for the current job, or "".
+func (l *LsfScheduler) GetTmpDir() string { return os.Getenv("LSF_TMPDIR") }
+
 // IsAvailable checks if the LSF binary is present on this system.
 func (l *LsfScheduler) IsAvailable() bool {
 	return l.bsubBin != ""

@@ -92,7 +92,6 @@ build:
   time: "2h"
   tmp_size_mb: 20480
   compress_args: ""   # empty = auto-detect: gzip (singularity), zstd-medium (apptainer>=1.4), lz4 (apptainer<1.4)
-  overlay_type: "ext3"
 ```
 
 ## Constants

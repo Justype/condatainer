@@ -92,7 +92,6 @@ condatainer config init -l system
 | `build.mem_mb` | `8192` | Memory in MB (8GB) |
 | `build.time` | `2h` | Time limit for builds |
 | `build.compress_args` | Auto-detected | mksquashfs compression arguments (gzip for singularity; zstd-medium for apptainer≥1.4; lz4 otherwise) |
-| `build.overlay_type` | `ext3` | Overlay filesystem type: `ext3` or `squashfs` |
 | `build.block_size` | `128k` | mksquashfs block size for app/env/external overlays (e.g. `128k`, `512k`) |
 | `build.data_block_size` | `1m` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
 | `build.use_tmp_overlay` | `false` | Use a temporary ext3 overlay during builds instead of host directories |
@@ -312,7 +311,6 @@ build:
   mem_mb: 8192
   time: 2h
   compress_args: -comp zstd -Xcompression-level 8
-  overlay_type: ext3
   block_size: 128k       # SquashFS block size for app/env/external overlays
   data_block_size: 1m    # SquashFS block size for data overlays
   use_tmp_overlay: false  # Use ext3 tmp overlay instead of host directories

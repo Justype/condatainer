@@ -373,6 +373,11 @@ type Scheduler interface {
 	// scheduler type, read from the scheduler-specific environment variable.
 	// Returns "" if not inside a job of this type.
 	GetCurrentJobID() string
+
+	// GetTmpDir returns the scheduler-assigned node-local tmp directory for the
+	// current job (e.g. SLURM_TMPDIR, PBS_TMPDIR). Returns "" if not in a job
+	// or if the scheduler does not expose a tmp directory variable.
+	GetTmpDir() string
 }
 
 // ResolveResourceSpecFrom merges resources using the priority chain:
@@ -508,6 +513,15 @@ func DetectType() SchedulerType {
 func CurrentJobID() string {
 	if s := ActiveScheduler(); s != nil {
 		return s.GetCurrentJobID()
+	}
+	return ""
+}
+
+// ActiveTmpDir returns the scheduler-assigned node-local tmp directory for the current job,
+// or "" if not inside a job or no tmp dir is exposed by the active scheduler.
+func ActiveTmpDir() string {
+	if s := ActiveScheduler(); s != nil {
+		return s.GetTmpDir()
 	}
 	return ""
 }
