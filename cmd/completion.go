@@ -223,7 +223,13 @@ func postProcessFishCompletion(script string) string {
 
     # Use fzf if available and we're completing for 'e/exec/instance start'
     if type -q fzf
-        if contains "e" $words; or contains "exec" $words; or (contains "instance" $words; and contains "start" $words)
+        set -l _is_overlay_cmd false
+        if contains "e" $words; or contains "exec" $words
+            set _is_overlay_cmd true
+        else if contains "instance" $words; and contains "start" $words
+            set _is_overlay_cmd true
+        end
+        if test $_is_overlay_cmd = true
             if not string match -q -- "-*" (commandline -t)
                 # Check if -- is in the command line; if so, skip fzf and use default results
                 if not contains -- "--" $words
