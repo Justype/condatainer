@@ -446,7 +446,7 @@ func effectiveResourceSpec(specs *scheduler.ScriptSpecs) *scheduler.ResourceSpec
 	return scheduler.ResolveResourceSpec(jobRes, specs)
 }
 
-// resourceEnvSettings derives NCPUS, MEM, MEM_MB, MEM_GB from scheduler specs
+// resourceEnvSettings derives NCPUS, MEM, MEM_GB from scheduler specs
 // and returns them as KEY=VALUE strings suitable for EnvSettings.
 // In passthrough mode (Spec == nil) it falls back to live job resources.
 // Applies priority chain: JobResources > ScriptSpec > Defaults.
