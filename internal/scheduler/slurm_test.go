@@ -844,7 +844,7 @@ func clearJobEnvVars(t *testing.T) {
 		"CUDA_VISIBLE_DEVICES",
 		// Normalized env vars injected by ResourceEnvVars (may be present on an HPC node).
 		"NNODES", "NTASKS", "NTASKS_PER_NODE", "NCPUS",
-		"MEM_PER_CPU", "MEM_PER_CPU_MB", "MEM", "MEM_MB", "MEM_GB",
+		"MEM_PER_CPU", "MEM_PER_CPU_MB", "MEM", "MEM_GB",
 	} {
 		os.Unsetenv(key)
 		t.Setenv(key, "")

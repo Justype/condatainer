@@ -1860,7 +1860,7 @@ class ModGen_Run:
 
     @staticmethod
     def _parse_resource_env(sbatch_flags: List[str]) -> dict:
-        """Parse NCPUS, MEM, MEM_MB, MEM_GB from a list of #SBATCH flag strings."""
+        """Parse NCPUS, MEM, MEM_GB from a list of #SBATCH flag strings."""
         cpus = 1
         mem_mb = 0
         for flag in sbatch_flags:
@@ -1880,13 +1880,12 @@ class ModGen_Run:
         env = {'NCPUS': str(cpus)}
         if mem_mb > 0:
             env['MEM'] = str(mem_mb)
-            env['MEM_MB'] = str(mem_mb)
             env['MEM_GB'] = str(mem_mb // 1024)
         return env
 
     @staticmethod
     def _get_slurm_resource_env() -> dict:
-        """Derive NCPUS, MEM, MEM_MB, MEM_GB from SLURM environment variables."""
+        """Derive NCPUS, MEM, MEM, MEM_GB from SLURM environment variables."""
         env = {}
         cpus_str = os.environ.get("SLURM_CPUS_PER_TASK", "")
         if cpus_str:
@@ -1896,7 +1895,7 @@ class ModGen_Run:
             try:
                 mem_mb = int(mem_str)
                 env['MEM'] = str(mem_mb)
-                env['MEM_MB'] = str(mem_mb)
+                env['MEM'] = str(mem_mb)
                 env['MEM_GB'] = str(mem_mb // 1024)
             except ValueError:
                 pass

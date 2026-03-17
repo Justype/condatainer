@@ -272,8 +272,12 @@ func (b *BaseBuildObject) CreateBuildDirs(ctx context.Context, force bool) error
 	}
 
 	// Create cnt-$USER leaf first with appropriate permissions (0700 under /tmp, 0775 elsewhere).
-	if err := utils.EnsureTmpSubdir(b.tmpDir); err != nil {
-		return fmt.Errorf("failed to create tmp dir %s: %w", b.tmpDir, err)
+	tmpBase := b.tmpDir
+	if tmpBase == "" {
+		tmpBase = filepath.Dir(buildDir)
+	}
+	if err := utils.EnsureTmpSubdir(tmpBase); err != nil {
+		return fmt.Errorf("failed to create tmp dir %s: %w", tmpBase, err)
 	}
 	if err := os.MkdirAll(b.cntDirPath, utils.PermDir); err != nil {
 		return fmt.Errorf("failed to create build cnt dir %s: %w", b.cntDirPath, err)
