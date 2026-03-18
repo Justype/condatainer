@@ -1002,7 +1002,7 @@ Parses scripts for `#DEP:` tags and checks if the required overlays are installe
 **Usage:**
 
 ```
-condatainer check <script|dir> [script|dir ...] [-a] [--module]
+condatainer check <script|dir> [script|dir ...] [-a] [--module] [--remote]
 ```
 
 Each argument can be:
@@ -1015,6 +1015,7 @@ Each argument can be:
 * `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies.
 * `-i`, `--install`: Alias for `--auto-install`.
 * `--module`: Also parse `module load` / `ml` lines as dependencies.
+* `--remote`: Remote build scripts take precedence over local when resolving package names.
 
 **Output:**
 
