@@ -95,13 +95,13 @@ func setDefaults() {
 
 	// Build config defaults
 	viper.SetDefault("build.ncpus", 4)
-	viper.SetDefault("build.mem_mb", 8192)
+	viper.SetDefault("build.mem", 8192)
 	viper.SetDefault("build.time", "2h")
 	viper.SetDefault("build.compress_args", "") // Empty means auto-detect based on apptainer version
 	viper.SetDefault("build.block_size", "128k")
 	viper.SetDefault("build.data_block_size", "1m")
 	viper.SetDefault("build.use_tmp_overlay", false)
-	viper.SetDefault("build.tmp_overlay_size_mb", 20480)
+	viper.SetDefault("build.tmp_overlay_size", 20480)
 
 	viper.SetDefault("channels", []string{"conda-forge", "bioconda"})
 	viper.SetDefault("default_distro", DEFAULT_DISTRO)
@@ -694,8 +694,10 @@ func LoadFromViper() {
 		Global.Build.Defaults.CpusPerTask = ncpus
 	}
 
-	if memMB := viper.GetInt64("build.mem_mb"); memMB > 0 {
-		Global.Build.Defaults.MemPerNodeMB = memMB
+	if memStr := viper.GetString("build.mem"); memStr != "" {
+		if memMB, err := utils.ParseMemoryMB(memStr); err == nil && memMB > 0 {
+			Global.Build.Defaults.MemPerNodeMB = memMB
+		}
 	}
 
 	if buildTime := viper.GetString("build.time"); buildTime != "" {
@@ -704,8 +706,10 @@ func LoadFromViper() {
 		}
 	}
 
-	if tmpSizeMB := viper.GetInt("build.tmp_overlay_size_mb"); tmpSizeMB > 0 {
-		Global.Build.TmpSizeMB = tmpSizeMB
+	if tmpStr := viper.GetString("build.tmp_overlay_size"); tmpStr != "" {
+		if tmpSizeMB, err := utils.ParseMemoryMB(tmpStr); err == nil && tmpSizeMB > 0 {
+			Global.Build.TmpSizeMB = int(tmpSizeMB)
+		}
 	}
 
 	// Only override compress_args if explicitly set in config (non-empty)

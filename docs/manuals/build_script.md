@@ -67,7 +67,7 @@ Any data, including genome reference indexes.
 | Variable | Description |
 | -------- | ----------- |
 | `NCPUS` | Number of CPUs (from script directives, or `build.ncpus` config setting) |
-| `MEM` | Memory per task in MB (from script directives, or `build.mem_mb` config setting) |
+| `MEM` | Memory per task in MB (from script directives, or `build.mem` config setting) |
 | `MEM_GB` | Memory per task in GB (integer) |
 | `app_name` | app: name; data/ref: assembly/datatype |
 | `version` | apps: app version; ref: data version |

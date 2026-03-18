@@ -25,6 +25,43 @@ func ParseMemoryMB(memStr string) (int64, error) {
 	return ParseMemoryMBWithDefault(memStr, "MB")
 }
 
+// FormatMemoryMB formats a MB value into a human-readable string.
+// Uses "GB" when divisible by 1024, otherwise "MB". Examples: 8192 → "8GB", 1536 → "1536MB".
+func FormatMemoryMB(mb int64) string {
+	if mb%1024 == 0 {
+		return fmt.Sprintf("%dGB", mb/1024)
+	}
+	return fmt.Sprintf("%dMB", mb)
+}
+
+// FormatDuration formats a duration dropping zero trailing components.
+// Examples: 2h0m0s → "2h", 48h → "2d", 25h30m → "1d1h30m", 1h30m15s → "1h30m15s".
+func FormatDuration(d time.Duration) string {
+	total := int(d.Seconds())
+	days := total / 86400
+	hours := (total % 86400) / 3600
+	mins := (total % 3600) / 60
+	secs := total % 60
+
+	var parts []string
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if mins > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", mins))
+	}
+	if secs > 0 {
+		parts = append(parts, fmt.Sprintf("%ds", secs))
+	}
+	if len(parts) == 0 {
+		return "0s"
+	}
+	return strings.Join(parts, "")
+}
+
 // ParseMemoryMBWithDefault parses a memory string into MB.
 // When the string has an explicit unit suffix (G/GB/M/MB/K/KB/T/TB) it is used directly.
 // For bare numbers the provided defaultUnit is applied (e.g. "KB", "MB", "GB").
@@ -53,7 +90,7 @@ func ParseMemoryMBWithDefault(memStr, defaultUnit string) (int64, error) {
 	case "T", "TB":
 		return value * 1024 * 1024, nil
 	default:
-		return value, nil
+		return 0, fmt.Errorf("invalid memory unit %q in: %s", unit, memStr)
 	}
 }
 
