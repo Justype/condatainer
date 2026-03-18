@@ -34,13 +34,11 @@ func CollectOverlayEnv(paths []string) (map[string]string, map[string]string) {
 		// file lives next to the bare path (e.g. dep.sqf.env, not dep.sqf:ro.env).
 		cleanOverlay := strings.TrimSuffix(strings.TrimSuffix(overlay, ":ro"), ":rw")
 		envPath := cleanOverlay + ".env"
-		if !utils.FileExists(envPath) {
-			continue
-		}
-
 		file, err := os.Open(envPath)
 		if err != nil {
-			utils.PrintWarning("Unable to read overlay env %s: %v", utils.StylePath(envPath), err)
+			if !os.IsNotExist(err) {
+				utils.PrintWarning("Unable to read overlay env %s: %v", utils.StylePath(envPath), err)
+			}
 			continue
 		}
 
