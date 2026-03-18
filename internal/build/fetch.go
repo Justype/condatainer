@@ -181,6 +181,7 @@ func convertToScriptInfoMap(metadata map[string]RemoteScriptEntry, sourceURL, pr
 			IsRemote:     true,
 			SourceURL:    sourceURL,
 			PrebuiltLink: prebuiltLink,
+			Deps:         entry.Deps,
 		}
 	}
 	return scripts
@@ -265,12 +266,13 @@ var (
 
 // ScriptInfo holds information about a build script
 type ScriptInfo struct {
-	Name         string // name/version format (e.g., "samtools/1.21")
-	Path         string // full path to build script (local) or relative path (remote)
-	IsContainer  bool   // true if .def file
-	IsRemote     bool   // true if from remote repository
-	SourceURL    string // base URL of the remote this script came from (empty for local)
-	PrebuiltLink string // base URL for prebuilt downloads (from metadata/prebuilt_link); empty = no prebuilt
+	Name         string   // name/version format (e.g., "samtools/1.21")
+	Path         string   // full path to build script (local) or relative path (remote)
+	IsContainer  bool     // true if .def file
+	IsRemote     bool     // true if from remote repository
+	SourceURL    string   // base URL of the remote this script came from (empty for local)
+	PrebuiltLink string   // base URL for prebuilt downloads (from metadata/prebuilt_link); empty = no prebuilt
+	Deps         []string // dependencies from remote metadata; nil for local scripts
 }
 
 // RemoteScriptEntry represents a single script entry in the metadata

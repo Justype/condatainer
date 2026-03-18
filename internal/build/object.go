@@ -358,7 +358,11 @@ func (b *BaseBuildObject) parseScriptMetadata(ctx context.Context) error {
 }
 
 // parseDependencies reads #DEP: lines from the build script and sets b.dependencies.
+// Skips parsing if dependencies were already populated from remote metadata.
 func (b *BaseBuildObject) parseDependencies() error {
+	if b.dependencies != nil {
+		return nil // already populated from metadata
+	}
 	deps, err := utils.GetDependenciesFromScript(b.buildSource, config.Global.ParseModuleLoad)
 	if err != nil {
 		return fmt.Errorf("failed to parse dependencies: %w", err)
@@ -721,6 +725,12 @@ func resolveBuildSource(base *BaseBuildObject, tmpDir string) (isConda bool, isC
 	} else {
 		base.buildSource = info.Path
 		utils.PrintDebug("Using local build script at %s", utils.StylePath(info.Path))
+	}
+
+	// Pre-populate dependencies from metadata when available (avoids re-parsing the script file).
+	// nil means "not set" (local script or metadata without deps field); []string{} means "no deps".
+	if info.Deps != nil {
+		base.dependencies = info.Deps
 	}
 
 	return false, info.IsContainer, nil
