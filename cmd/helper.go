@@ -268,14 +268,13 @@ func updateHelperScripts(args []string, helperScriptsDir string) error {
 			return fmt.Errorf("submit requested but no scheduler found: %v", err)
 		}
 
-		info := sched.GetInfo()
-		if !info.Available || info.InJob {
-			return fmt.Errorf("scheduler is not available for submission (available=%v, in_job=%v)", info.Available, info.InJob)
+		if !sched.IsAvailable() || sched.IsInsideJob() {
+			return fmt.Errorf("scheduler is not available for submission (available=%v, in_job=%v)", sched.IsAvailable(), sched.IsInsideJob())
 		}
 
 		matched := false
 		for _, st := range supportedSchedulerTypes {
-			if info.Type == string(st) {
+			if sched.GetType() == st {
 				category = strings.ToLower(string(st))
 				matched = true
 				break
@@ -283,7 +282,7 @@ func updateHelperScripts(args []string, helperScriptsDir string) error {
 		}
 
 		if !matched {
-			return fmt.Errorf("unsupported scheduler type '%s'", info.Type)
+			return fmt.Errorf("unsupported scheduler type '%s'", sched.GetType())
 		}
 	}
 

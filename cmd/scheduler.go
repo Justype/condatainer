@@ -91,26 +91,23 @@ func runScheduler(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Get scheduler info
-	info := sched.GetInfo()
-
 	// Display scheduler information (no [CNT] prefix for structured output)
 	fmt.Println("Scheduler Information:")
-	fmt.Printf("  Type:      %s\n", utils.StyleInfo(info.Type))
-	fmt.Printf("  Binary:    %s\n", utils.StylePath(info.Binary))
+	fmt.Printf("  Type:      %s\n", utils.StyleInfo(string(sched.GetType())))
+	fmt.Printf("  Binary:    %s\n", utils.StylePath(sched.GetBinary()))
 
-	if info.Version != "" {
-		fmt.Printf("  Version:   %s\n", utils.StyleNumber(info.Version))
+	if version := sched.GetVersion(); version != "" {
+		fmt.Printf("  Version:   %s\n", utils.StyleNumber(version))
 	}
 
-	if info.InJob {
+	if sched.IsInsideJob() {
 		fmt.Printf("  Status:    %s (inside job)\n", utils.StyleError("Unavailable"))
 		fmt.Println()
 		fmt.Println("You are currently inside a scheduled job (detected via environment).")
 		fmt.Println("Job submission is disabled to prevent nested job submissions.")
 		// Do not query or print cluster information when inside a job
 		return
-	} else if info.Available {
+	} else if sched.IsAvailable() {
 		fmt.Printf("  Status:    %s\n", utils.StyleSuccess("Available"))
 		fmt.Println()
 		fmt.Println("The scheduler is available and ready for job submission.")

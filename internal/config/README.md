@@ -90,7 +90,7 @@ build:
   ncpus: 4
   mem: 8g
   time: "2h"
-  tmp_size_mb: 20480
+  tmp_overlay_size: 20480
   compress_args: ""   # empty = auto-detect: gzip (singularity), zstd-medium (apptainer>=1.4), lz4 (apptainer<1.4)
 ```
 

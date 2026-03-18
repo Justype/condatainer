@@ -13,10 +13,10 @@ state.go    State file persistence (JSON)
 
 ## Key Types
 
-**Options** - `Name`, `Overlays`, `WritableImg`, `EnvSettings`, `BindPaths`, `Fakeroot`, `BaseImage`
-**ExecOptions** - `InstanceName`, `Command`, `ApptainerBin`
-**StopOptions** - `InstanceName`, `DeleteAll`, `Pattern`
-**State** - Persisted config: `Name`, `BaseImage`, `Overlays`, `StartTime`, `PID`
+**Options** - `Name`, `Overlays`, `WritableImg`, `EnvSettings`, `BindPaths`, `ApptainerFlags`, `Fakeroot`, `BaseImage`, `ApptainerBin`
+**ExecOptions** - `Name`, `Command`, `EnvSettings`, `ApptainerFlags`, `ApptainerBin`, `PrintEnv`
+**StopOptions** - `ApptainerBin`, `ApptainerFlags`, `All`, `InstanceNames`
+**State** - Persisted config: `Name`, `Env`, `Overlays`, `BindPaths`, `BaseImage`, `Notes`
 
 ## Usage
 
@@ -31,12 +31,12 @@ instance.Start(ctx, opts)
 
 // Execute in instance
 instance.Exec(ctx, instance.ExecOptions{
-    InstanceName: "myinstance",
-    Command:      []string{"python", "script.py"},
+    Name:    "myinstance",
+    Command: []string{"python", "script.py"},
 })
 
 // Stop instance
-instance.Stop(ctx, instance.StopOptions{InstanceName: "myinstance"})
+instance.Stop(ctx, instance.StopOptions{InstanceNames: []string{"myinstance"}})
 ```
 
 ## State Persistence

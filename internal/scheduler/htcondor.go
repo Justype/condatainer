@@ -86,23 +86,19 @@ func (h *HTCondorScheduler) IsInsideJob() bool {
 	return ok
 }
 
-// GetInfo returns information about the HTCondor scheduler
-func (h *HTCondorScheduler) GetInfo() *SchedulerInfo {
-	info := &SchedulerInfo{
-		Type:      "HTCondor",
-		Binary:    h.condorSubmitBin,
-		InJob:     h.IsInsideJob(),
-		Available: h.IsAvailable(),
-	}
+func (h *HTCondorScheduler) GetType() SchedulerType { return SchedulerHTCondor }
+func (h *HTCondorScheduler) GetBinary() string { return h.condorSubmitBin }
 
-	// Try to get HTCondor version
-	if h.condorSubmitBin != "" {
-		if version, err := h.getHTCondorVersion(); err == nil {
-			info.Version = version
-		}
+// GetVersion returns the HTCondor version string, or "" on failure.
+func (h *HTCondorScheduler) GetVersion() string {
+	if h.condorSubmitBin == "" {
+		return ""
 	}
-
-	return info
+	version, err := h.getHTCondorVersion()
+	if err != nil {
+		return ""
+	}
+	return version
 }
 
 // getHTCondorVersion attempts to get the HTCondor version

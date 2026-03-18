@@ -17,6 +17,7 @@ HPC scheduler abstraction layer for job submission, script parsing, and resource
 scheduler.go        Core interface, types, resource resolution
 registry.go         Thread-safe active scheduler singleton + debugMode
 error.go            Structured error types
+exec.go             Shared runCommand helper with configurable timeout
 script_helpers.go   Shared parsing/formatting helpers (memory, time, flags, job header/footer)
 slurm.go / pbs.go / lsf.go / htcondor.go   Scheduler implementations
 ```
@@ -29,19 +30,28 @@ type Scheduler interface {
     IsInsideJob() bool
     ReadScriptSpecs(scriptPath string) (*ScriptSpecs, error)
     CreateScriptWithSpec(spec *JobSpec, outputDir string) (string, error)
-    Submit(scriptPath string, dependencyJobIDs []string) (string, error)
+    Submit(scriptPath string, deps []Dependency) (string, error)
     GetClusterInfo() (*ClusterInfo, error)
-    GetInfo() *SchedulerInfo
-    GetJobResources() *ResourceSpec // from scheduler env vars; zero fields = not set
+    GetType() SchedulerType
+    GetBinary() string
+    GetVersion() string                          // slow — only call when result will be displayed
+    GetJobResources() *ResourceSpec              // from scheduler env vars; zero fields = not set
+    GetJobStatus(jobID string) (JobStatus, error)
+    GetCurrentJobID() string
+    GetTmpDir() string
 }
 ```
 
 ## Key Types
 
 **`ScriptSpecs`** — parsed job specification:
+- `ScriptPath string` — absolute path of the parsed script (for HTCondor `.sub`: the executable)
 - `HasDirectives bool` — `false` when no `#SBATCH`/`#PBS`/`#BSUB` lines exist
 - `Spec *ResourceSpec` — resource geometry; `nil` in passthrough mode
 - `Control RuntimeConfig` — job name, stdout/stderr, email, partition
+- `RawFlags []string` — immutable audit log of all original directives
+- `RemainingFlags []string` — directives not absorbed by `Spec` or `Control`
+- `ScriptType SchedulerType` — scheduler type detected from script directives
 
 **`ResourceSpec`** — compute geometry: `Nodes`, `Ntasks`, `TasksPerNode` (0 = not set / freely distributed), `CpusPerTask`, `MemPerCpuMB`, `MemPerNodeMB`, `Time`, `Gpu`, `Exclusive`
 
@@ -54,7 +64,7 @@ type Scheduler interface {
 
 `GetMemPerTaskMB()` checks `MemPerCpuMB × CpusPerTask` first; otherwise returns `MemPerNodeMB ÷ TasksPerNode` (treats 0 as 1). Returns 0 if no memory is specified.
 
-**`JobSpec`** — submission input: `Name`, `Command`, `Specs`, `DepJobIDs`, `Metadata`, `Array *ArraySpec`
+**`JobSpec`** — submission input: `Name`, `Command`, `Specs`, `DepJobIDs`, `Metadata`, `OverrideOutput bool`, `Array *ArraySpec`
 
 **`ArraySpec`**: `InputFile`, `Count` (non-empty lines), `Limit` (max concurrent), `ArgCount`, `SampleArgs`, `BlankLines`
 
@@ -222,7 +232,7 @@ PBS Pro/OpenPBS only; Torque not supported.
 Pass `JobSpec.Array = &ArraySpec{...}` to `CreateScriptWithSpec`.
 
 - Scheduler directive silences per-subjob stdout (`--output=/dev/null`).
-- `writeArrayBlock` extracts the current line via `sed -n "${IDX}p"` → `ARRAY_ARGS`; redirects output to `{logDir}/{name}_{idx}_{tag}.log`.
+- `writeArrayBlock` extracts the current line via `sed -n "${_ARRAY_IDX}p"` → `ARRAY_ARGS`; redirects output to `{logDir}/{name}_{padded_idx}_{tag}.log` (or `.out`/`.err` for separate output).
 - HTCondor uses `queue array_args from {inputFile}`.
 
 | Scheduler | Directive |
@@ -234,12 +244,14 @@ Pass `JobSpec.Array = &ArraySpec{...}` to `CreateScriptWithSpec`.
 
 ## Dependency Formats
 
+`Submit` accepts a `[]Dependency` slice. Each `Dependency` has a `Type` (`afterok`, `afternotok`, `afterany`) and a list of `JobIDs`. HTCondor does not support dependencies (requires DAGMan) — passing a non-empty dep list returns an error.
+
 | Scheduler | Format |
 |-----------|--------|
 | SLURM | `--dependency=afterok:ID1:ID2` |
 | PBS | `-W depend=afterok:ID1:ID2` |
 | LSF | `-w "done(ID1) && done(ID2)"` |
-| HTCondor | not supported (requires DAGMan) |
+| HTCondor | not supported (returns error) |
 
 ## Time Formats
 

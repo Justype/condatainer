@@ -317,18 +317,18 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 			continue
 		}
 
-		err := filepath.Walk(buildScriptsDir, func(path string, info os.FileInfo, err error) error {
+		err := filepath.WalkDir(buildScriptsDir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return nil // Skip errors, continue with other files
 			}
 
 			// Skip directories
-			if info.IsDir() {
+			if d.IsDir() {
 				return nil
 			}
 
 			// Skip .py and .sh files (helper scripts)
-			if strings.HasSuffix(info.Name(), ".py") || strings.HasSuffix(info.Name(), ".sh") {
+			if strings.HasSuffix(d.Name(), ".py") || strings.HasSuffix(d.Name(), ".sh") {
 				return nil
 			}
 
