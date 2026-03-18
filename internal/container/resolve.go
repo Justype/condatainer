@@ -10,11 +10,20 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
+// cachedInstalledOverlays caches the result of the last InstalledOverlays scan.
+// Nil means the cache is cold or has been invalidated.
+var cachedInstalledOverlays map[string]string
+
 // InstalledOverlays scans all image search paths and returns a mapping
 // from normalized overlay names to their absolute file path.
 // Searches user → scratch → legacy → system directories.
 // First match wins (user overlays shadow system ones).
+// Result is cached for the lifetime of the process; call InvalidateInstalledOverlaysCache
+// after installing a new overlay.
 func InstalledOverlays() (map[string]string, error) {
+	if cachedInstalledOverlays != nil {
+		return cachedInstalledOverlays, nil
+	}
 	overlays := map[string]string{}
 	dirs := config.GetImageSearchPaths()
 	utils.PrintDebug("[RESOLVE] Scanning for installed overlays in: %v", dirs)
@@ -24,7 +33,14 @@ func InstalledOverlays() (map[string]string, error) {
 		}
 	}
 	utils.PrintDebug("[RESOLVE] Found %d installed overlays", len(overlays))
+	cachedInstalledOverlays = overlays
 	return overlays, nil
+}
+
+// InvalidateInstalledOverlaysCache clears the cached overlay map so the next call
+// to InstalledOverlays rescans the image directories.
+func InvalidateInstalledOverlaysCache() {
+	cachedInstalledOverlays = nil
 }
 
 func populateOverlays(dir string, store map[string]string) error {
