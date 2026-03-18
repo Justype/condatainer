@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/viper"
@@ -147,6 +149,20 @@ func GetScratchDataDir() string {
 //  1. If executable is in <dir>/bin/ and <dir> is not a generic parent ($HOME, /usr, etc.), use <dir>
 //  2. Otherwise check for <exeDir>/condatainer/ directory
 func GetPortableDataDir() string {
+	portableDirOnce.Do(func() {
+		portableDirCache = detectPortableDataDir()
+	})
+	return portableDirCache
+}
+
+var (
+	portableDirOnce  sync.Once
+	portableDirCache string
+	portableBinOnce  sync.Once
+	portableBinCache string
+)
+
+func detectPortableDataDir() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
@@ -163,7 +179,7 @@ func GetPortableDataDir() string {
 		return ""
 	}
 
-	// Case 1: Executable is in <install_dir>/bin/, data is in <install_dir>/
+	// Executable is in <install_dir>/bin/, data is in <install_dir>/
 	// e.g., /project/group/condatainer/bin/condatainer → /project/group/condatainer/
 	// e.g., $HOME/condatainer/bin/condatainer → $HOME/condatainer/
 	// Skip generic bin dirs whose parent is $HOME, $HOME/.local, /usr, /usr/local, /opt
@@ -172,13 +188,6 @@ func GetPortableDataDir() string {
 		if !isNonPortableParent(parentDir) {
 			return parentDir
 		}
-	}
-
-	// Case 2: Check for sibling condatainer/ directory
-	// e.g., /opt/bin/condatainer → /opt/bin/condatainer/
-	candidate := filepath.Join(exeDir, "condatainer")
-	if stat, err := os.Stat(candidate); err == nil && stat.IsDir() {
-		return candidate
 	}
 
 	return ""
@@ -193,13 +202,15 @@ func IsPortable() bool {
 // GetPortableBinDir returns the bin directory of a portable installation, or empty string if not portable.
 // This is typically used to add the installation's bin directory to PATH for nested usage.
 func GetPortableBinDir() string {
-	if portableDir := GetPortableDataDir(); portableDir != "" {
-		binDir := filepath.Join(portableDir, "bin")
-		if stat, err := os.Stat(binDir); err == nil && stat.IsDir() {
-			return binDir
+	portableBinOnce.Do(func() {
+		if portableDir := GetPortableDataDir(); portableDir != "" {
+			binDir := filepath.Join(portableDir, "bin")
+			if stat, err := os.Stat(binDir); err == nil && stat.IsDir() {
+				portableBinCache = binDir
+			}
 		}
-	}
-	return ""
+	})
+	return portableBinCache
 }
 
 // isStandardUserPath checks if a path is under standard user directories
@@ -246,12 +257,7 @@ func isNonPortableParent(dir string) bool {
 		"/opt",                        // /opt/bin
 	}
 
-	for _, excluded := range excludedParents {
-		if dir == excluded {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(excludedParents, dir)
 }
 
 // InitDataPaths initializes GlobalDataPaths based on environment and config.
