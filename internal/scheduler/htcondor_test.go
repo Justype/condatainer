@@ -841,18 +841,17 @@ func TestHTCondorGetInfo(t *testing.T) {
 	clearJobEnvVars(t)
 	htcondor := newTestHTCondorScheduler()
 
-	info := htcondor.GetInfo()
-	if info.Type != "HTCondor" {
-		t.Errorf("Type = %q; want %q", info.Type, "HTCondor")
+	if htcondor.GetType() != SchedulerHTCondor {
+		t.Errorf("GetType() = %q; want %q", htcondor.GetType(), SchedulerHTCondor)
 	}
-	if info.Binary != "/usr/bin/condor_submit" {
-		t.Errorf("Binary = %q; want %q", info.Binary, "/usr/bin/condor_submit")
+	if htcondor.GetBinary() != "/usr/bin/condor_submit" {
+		t.Errorf("GetBinary() = %q; want %q", htcondor.GetBinary(), "/usr/bin/condor_submit")
 	}
-	if info.InJob {
-		t.Error("InJob should be false")
+	if htcondor.IsInsideJob() {
+		t.Error("IsInsideJob() should be false")
 	}
-	if !info.Available {
-		t.Error("Available should be true")
+	if !htcondor.IsAvailable() {
+		t.Error("IsAvailable() should be true")
 	}
 }
 

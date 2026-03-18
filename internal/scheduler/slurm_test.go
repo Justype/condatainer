@@ -764,18 +764,17 @@ func TestSlurmGetInfo(t *testing.T) {
 	clearJobEnvVars(t)
 	slurm := newTestSlurmScheduler()
 
-	info := slurm.GetInfo()
-	if info.Type != "SLURM" {
-		t.Errorf("Type = %q; want %q", info.Type, "SLURM")
+	if slurm.GetType() != SchedulerSLURM {
+		t.Errorf("GetType() = %q; want %q", slurm.GetType(), SchedulerSLURM)
 	}
-	if info.Binary != "/usr/bin/sbatch" {
-		t.Errorf("Binary = %q; want %q", info.Binary, "/usr/bin/sbatch")
+	if slurm.GetBinary() != "/usr/bin/sbatch" {
+		t.Errorf("GetBinary() = %q; want %q", slurm.GetBinary(), "/usr/bin/sbatch")
 	}
-	if info.InJob {
-		t.Error("InJob should be false")
+	if slurm.IsInsideJob() {
+		t.Error("IsInsideJob() should be false")
 	}
-	if !info.Available {
-		t.Error("Available should be true")
+	if !slurm.IsAvailable() {
+		t.Error("IsAvailable() should be true")
 	}
 }
 

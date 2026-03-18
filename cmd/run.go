@@ -637,7 +637,12 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 
 	// Scheduler specs
 	if specs != nil && specs.Spec == nil && specs.HasDirectives {
-		hostType := scheduler.DetectType()
+		var hostType scheduler.SchedulerType
+		if s := scheduler.ActiveScheduler(); s != nil {
+			hostType = s.GetType()
+		} else {
+			hostType = scheduler.DetectType()
+		}
 		if hostType != scheduler.SchedulerUnknown && specs.ScriptType != hostType {
 			fmt.Printf("%s %s\n", utils.StyleTitle("Resource specs:"),
 				utils.StyleError(fmt.Sprintf("(passthrough — %s directives cannot be translated to %s)", specs.ScriptType, hostType)))
@@ -831,7 +836,7 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		if sched == nil {
 			fmt.Printf("%s Would run locally (scheduler not available)\n", utils.StyleTitle("Action:"))
 		} else {
-			fmt.Printf("%s Would submit to %s\n", utils.StyleTitle("Action:"), sched.GetInfo().Type)
+			fmt.Printf("%s Would submit to %s\n", utils.StyleTitle("Action:"), sched.GetType())
 		}
 	} else {
 		fmt.Printf("%s Would run locally\n", utils.StyleTitle("Action:"))
@@ -1086,8 +1091,6 @@ func detectNativeArrayDirective(specs *scheduler.ScriptSpecs) string {
 // contentScript is the bash script containing #DEP/#CNT directives — for HTCondor this is the
 // executable referenced in the .sub file, for other schedulers it equals scriptPath.
 func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript string, specs *scheduler.ScriptSpecs, deps []scheduler.Dependency, scriptArgs []string, arraySpec *scheduler.ArraySpec) error {
-	info := sched.GetInfo()
-
 	// Capture separate-output intent before CreateScriptWithSpec overrides Stdout/Stderr to /dev/null
 	arraySeparateOutput := arraySpec != nil && specs.Control.Stderr != "" && specs.Control.Stderr != specs.Control.Stdout
 
@@ -1162,9 +1165,9 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 		for _, dep := range deps {
 			depSummary = append(depSummary, fmt.Sprintf("%s(%s)", dep.Type, strings.Join(dep.JobIDs, ",")))
 		}
-		utils.PrintSuccess("Submitted %s job %s for %s (after: %s)", info.Type, utils.StyleNumber(jobID), utils.StylePath(originScriptPath), strings.Join(depSummary, " "))
+		utils.PrintSuccess("Submitted %s job %s for %s (after: %s)", sched.GetType(), utils.StyleNumber(jobID), utils.StylePath(originScriptPath), strings.Join(depSummary, " "))
 	} else {
-		utils.PrintSuccess("Submitted %s job %s for %s", info.Type, utils.StyleNumber(jobID), utils.StylePath(originScriptPath))
+		utils.PrintSuccess("Submitted %s job %s for %s", sched.GetType(), utils.StyleNumber(jobID), utils.StylePath(originScriptPath))
 	}
 
 	if arraySpec != nil {

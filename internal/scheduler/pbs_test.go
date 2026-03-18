@@ -590,18 +590,17 @@ func TestPbsGetInfo(t *testing.T) {
 	clearJobEnvVars(t)
 	pbs := newTestPbsScheduler()
 
-	info := pbs.GetInfo()
-	if info.Type != "PBS" {
-		t.Errorf("Type = %q; want %q", info.Type, "PBS")
+	if pbs.GetType() != SchedulerPBS {
+		t.Errorf("GetType() = %q; want %q", pbs.GetType(), SchedulerPBS)
 	}
-	if info.Binary != "/usr/bin/qsub" {
-		t.Errorf("Binary = %q; want %q", info.Binary, "/usr/bin/qsub")
+	if pbs.GetBinary() != "/usr/bin/qsub" {
+		t.Errorf("GetBinary() = %q; want %q", pbs.GetBinary(), "/usr/bin/qsub")
 	}
-	if info.InJob {
-		t.Error("InJob should be false")
+	if pbs.IsInsideJob() {
+		t.Error("IsInsideJob() should be false")
 	}
-	if !info.Available {
-		t.Error("Available should be true")
+	if !pbs.IsAvailable() {
+		t.Error("IsAvailable() should be true")
 	}
 }
 

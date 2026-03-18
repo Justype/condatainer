@@ -54,8 +54,7 @@ func NewBuildGraph(ctx context.Context, buildObjects []BuildObject, imagesDir, t
 			utils.PrintNote("Already inside a scheduler job; all builds will run locally")
 		} else if sched := scheduler.ActiveScheduler(); sched != nil {
 			bg.scheduler = sched
-			info := sched.GetInfo()
-			utils.PrintDebug("Using %s scheduler: %s", info.Type, info.Binary)
+			utils.PrintDebug("Using %s scheduler: %s", sched.GetType(), sched.GetBinary())
 		} else {
 			utils.PrintWarning("No scheduler detected, all builds will run locally")
 		}
@@ -232,15 +231,14 @@ func (bg *BuildGraph) runSchedulerStep() error {
 
 // submitJob creates and submits a scheduler job for the build
 func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, error) {
-	info := bg.scheduler.GetInfo()
 	utils.PrintDebug("Submitting %s job for %s with dependencies: %s",
-		info.Type, meta.NameVersion(), strings.Join(depIDs, ", "))
+		bg.scheduler.GetType(), meta.NameVersion(), strings.Join(depIDs, ", "))
 
 	// Acquire lock before submitting to prevent duplicate scheduler submissions.
 	// The lock is created with an empty job_id and updated after Submit() returns.
 	lockPath := meta.LockPath()
 	pendingLock := BuildLockInfo{
-		Type:      info.Type, // e.g. "slurm", "pbs", "lsf", "htcondor"
+		Type:      string(bg.scheduler.GetType()), // e.g. "slurm", "pbs", "lsf", "htcondor"
 		CreatedAt: time.Now().Format(time.RFC3339),
 	}
 	if err := acquireBuildLockFile(lockPath, pendingLock); err != nil {
@@ -300,7 +298,7 @@ func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, erro
 	pendingLock.JobID = jobID
 	_ = overwriteBuildLockFile(lockPath, pendingLock) // best-effort; we already hold the lock
 
-	utils.PrintMessage("Submitted %s job %s for %s", info.Type, jobID, meta.NameVersion())
+	utils.PrintMessage("Submitted %s job %s for %s", bg.scheduler.GetType(), jobID, meta.NameVersion())
 	return jobID, nil
 }
 

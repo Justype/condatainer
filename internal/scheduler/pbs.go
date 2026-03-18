@@ -139,23 +139,19 @@ func (p *PbsScheduler) IsInsideJob() bool {
 	return ok
 }
 
-// GetInfo returns information about the PBS scheduler
-func (p *PbsScheduler) GetInfo() *SchedulerInfo {
-	info := &SchedulerInfo{
-		Type:      "PBS",
-		Binary:    p.qsubBin,
-		InJob:     p.IsInsideJob(),
-		Available: p.IsAvailable(),
-	}
+func (p *PbsScheduler) GetType() SchedulerType { return SchedulerPBS }
+func (p *PbsScheduler) GetBinary() string { return p.qsubBin }
 
-	// Try to get PBS version
-	if p.qsubBin != "" {
-		if version, err := p.getPbsVersion(); err == nil {
-			info.Version = version
-		}
+// GetVersion returns the PBS version string, or "" on failure.
+func (p *PbsScheduler) GetVersion() string {
+	if p.qsubBin == "" {
+		return ""
 	}
-
-	return info
+	version, err := p.getPbsVersion()
+	if err != nil {
+		return ""
+	}
+	return version
 }
 
 // getPbsVersion attempts to get the PBS version

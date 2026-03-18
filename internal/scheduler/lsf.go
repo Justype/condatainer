@@ -89,23 +89,19 @@ func (l *LsfScheduler) IsInsideJob() bool {
 	return ok
 }
 
-// GetInfo returns information about the LSF scheduler
-func (l *LsfScheduler) GetInfo() *SchedulerInfo {
-	info := &SchedulerInfo{
-		Type:      "LSF",
-		Binary:    l.bsubBin,
-		InJob:     l.IsInsideJob(),
-		Available: l.IsAvailable(),
-	}
+func (l *LsfScheduler) GetType() SchedulerType { return SchedulerLSF }
+func (l *LsfScheduler) GetBinary() string { return l.bsubBin }
 
-	// Try to get LSF version
-	if l.bsubBin != "" {
-		if version, err := l.getLsfVersion(); err == nil {
-			info.Version = version
-		}
+// GetVersion returns the LSF version string, or "" on failure.
+func (l *LsfScheduler) GetVersion() string {
+	if l.bsubBin == "" {
+		return ""
 	}
-
-	return info
+	version, err := l.getLsfVersion()
+	if err != nil {
+		return ""
+	}
+	return version
 }
 
 // getLsfVersion attempts to get the LSF version

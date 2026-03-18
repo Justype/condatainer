@@ -53,15 +53,6 @@ func (s JobStatus) String() string {
 	}
 }
 
-// SchedulerInfo holds information about the detected scheduler
-type SchedulerInfo struct {
-	Type      string // Scheduler type (e.g., "SLURM", "PBS", "LSF")
-	Binary    string // Path to scheduler binary (e.g., "/usr/bin/sbatch")
-	Version   string // Scheduler version (if available)
-	InJob     bool   // Whether we're currently inside a scheduled job
-	Available bool   // Whether scheduler is available for job submission
-}
-
 // GpuSpec holds GPU requirements parsed from scheduler directives.
 // Count is per node (not total). Total GPUs = Count * ResourceSpec.Nodes.
 type GpuSpec struct {
@@ -356,8 +347,15 @@ type Scheduler interface {
 	// Returns nil if information is not available
 	GetClusterInfo() (*ClusterInfo, error)
 
-	// GetInfo returns information about the scheduler
-	GetInfo() *SchedulerInfo
+	// GetType returns the scheduler type.
+	GetType() SchedulerType
+
+	// GetBinary returns the path to the scheduler binary.
+	GetBinary() string
+
+	// GetVersion runs the scheduler version command and returns the version string.
+	// Returns "" on failure. This is slow — only call when the result will be displayed.
+	GetVersion() string
 
 	// GetJobResources reads allocated resources from scheduler environment variables.
 	// Fields with value 0 were not exposed by the scheduler.
@@ -563,8 +561,13 @@ type ParsedScript struct {
 //   - nil ParsedScript if no scheduler directives found (not an error)
 //   - error if parsing fails
 func ParseScriptAny(scriptPath string) (*ParsedScript, error) {
-	// Determine current scheduler type
-	currentType := DetectType()
+	// Determine current scheduler type — use active scheduler if already initialized.
+	var currentType SchedulerType
+	if s := ActiveScheduler(); s != nil {
+		currentType = s.GetType()
+	} else {
+		currentType = DetectType()
+	}
 
 	// Try current scheduler first, then others
 	tryOrder := []SchedulerType{}
@@ -761,7 +764,12 @@ func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 	parsed.Specs.ScriptType = parsed.ScriptType
 
 	// Check for scheduler mismatch
-	hostType := DetectType()
+	var hostType SchedulerType
+	if s := ActiveScheduler(); s != nil {
+		hostType = s.GetType()
+	} else {
+		hostType = DetectType()
+	}
 	if hostType != SchedulerUnknown && parsed.ScriptType != hostType {
 		// Clear RemainingFlags on cross-scheduler translation:
 		// scheduler-specific unrecognized flags cannot be translated.

@@ -1436,18 +1436,17 @@ func TestLsfGetInfo(t *testing.T) {
 	clearJobEnvVars(t)
 	lsf := newTestLsfScheduler()
 
-	info := lsf.GetInfo()
-	if info.Type != "LSF" {
-		t.Errorf("Type = %q; want %q", info.Type, "LSF")
+	if lsf.GetType() != SchedulerLSF {
+		t.Errorf("GetType() = %q; want %q", lsf.GetType(), SchedulerLSF)
 	}
-	if info.Binary != "/usr/bin/bsub" {
-		t.Errorf("Binary = %q; want %q", info.Binary, "/usr/bin/bsub")
+	if lsf.GetBinary() != "/usr/bin/bsub" {
+		t.Errorf("GetBinary() = %q; want %q", lsf.GetBinary(), "/usr/bin/bsub")
 	}
-	if info.InJob {
-		t.Error("InJob should be false")
+	if lsf.IsInsideJob() {
+		t.Error("IsInsideJob() should be false")
 	}
-	if !info.Available {
-		t.Error("Available should be true")
+	if !lsf.IsAvailable() {
+		t.Error("IsAvailable() should be true")
 	}
 }
 

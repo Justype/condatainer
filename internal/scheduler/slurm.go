@@ -96,23 +96,19 @@ func (s *SlurmScheduler) IsInsideJob() bool {
 	return ok
 }
 
-// GetInfo returns information about the SLURM scheduler
-func (s *SlurmScheduler) GetInfo() *SchedulerInfo {
-	info := &SchedulerInfo{
-		Type:      "SLURM",
-		Binary:    s.sbatchBin,
-		InJob:     s.IsInsideJob(),
-		Available: s.IsAvailable(),
-	}
+func (s *SlurmScheduler) GetType() SchedulerType { return SchedulerSLURM }
+func (s *SlurmScheduler) GetBinary() string { return s.sbatchBin }
 
-	// Try to get SLURM version
-	if s.sbatchBin != "" {
-		if version, err := s.getSlurmVersion(); err == nil {
-			info.Version = version
-		}
+// GetVersion returns the SLURM version string, or "" on failure.
+func (s *SlurmScheduler) GetVersion() string {
+	if s.sbatchBin == "" {
+		return ""
 	}
-
-	return info
+	version, err := s.getSlurmVersion()
+	if err != nil {
+		return ""
+	}
+	return version
 }
 
 // getSlurmVersion attempts to get the SLURM version
