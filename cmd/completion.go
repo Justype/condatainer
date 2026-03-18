@@ -108,8 +108,43 @@ func init() {
 	rootCmd.AddCommand(completionCmd)
 }
 
+// bashCompletionFallback defines minimal stubs for _get_comp_words_by_ref and
+// _init_completion so that the generated script works on systems that do not
+// have the bash-completion package installed.
+const bashCompletionFallback = `
+# Minimal fallback for systems without the bash-completion package
+if ! type _get_comp_words_by_ref &>/dev/null; then
+    _get_comp_words_by_ref() {
+        while [[ $# -gt 0 ]]; do
+            case $1 in
+                -n) shift 2 ;;
+                cur)   cur=${COMP_WORDS[COMP_CWORD]} ;;
+                prev)  prev=${COMP_WORDS[COMP_CWORD-1]} ;;
+                words) words=("${COMP_WORDS[@]}") ;;
+                cword) cword=$COMP_CWORD ;;
+            esac
+            shift
+        done
+    }
+fi
+if ! type _init_completion &>/dev/null; then
+    _init_completion() {
+        COMPREPLY=()
+        while [[ $1 == -* ]]; do shift; [[ $1 == -n ]] && shift; done
+        cur=${COMP_WORDS[COMP_CWORD]}
+        prev=${COMP_WORDS[COMP_CWORD-1]}
+        words=("${COMP_WORDS[@]}")
+        cword=$COMP_CWORD
+        return 0
+    }
+fi
+`
+
 // postProcessBashCompletion modifies the generated bash completion script
 func postProcessBashCompletion(script string) string {
+	// 0. Prepend fallback stubs for systems without bash-completion installed
+	script = bashCompletionFallback + script
+
 	// 1. Handle -- properly (use file completion after --)
 	oldCode := `args=("${words[@]:1}")
     requestComp="${words[0]} __complete ${args[*]}"`
