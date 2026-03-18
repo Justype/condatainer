@@ -13,7 +13,7 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-const VERSION = "1.2.0"
+const VERSION = "1.3.0"
 const GitHubRepo = "Justype/condatainer"
 const GITHUB_REPO = GitHubRepo // Exported constant for compatibility
 const DEFAULT_DISTRO = "ubuntu24"
@@ -178,10 +178,10 @@ func LoadDefaults(executablePath string) {
 				MemPerNodeMB: 8192,          // 8GB default memory
 				Time:         2 * time.Hour, // 2 hour default time limit
 			},
-			TmpSizeMB:     20480,                          // 20GB temporary overlay
-			CompressArgs:  "-comp lz4",                    // zstd only compatible with apptainer version > 1.4
-			BlockSize:     "128k",                         // mksquashfs block size for app/env/external overlays
-			DataBlockSize: "1m",                           // mksquashfs block size for data/ref overlays
+			TmpSizeMB:     20480,                               // 20GB temporary overlay
+			CompressArgs:  "-comp lz4",                         // zstd only compatible with apptainer version > 1.4
+			BlockSize:     "128k",                              // mksquashfs block size for app/env/external overlays
+			DataBlockSize: "1m",                                // mksquashfs block size for data/ref overlays
 			Channels:      []string{"conda-forge", "bioconda"}, // default conda channels
 		},
 	}
