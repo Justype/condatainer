@@ -22,30 +22,14 @@ func DetectGPUFlags() []string {
 	return flags
 }
 
-// hasNvidiaGPU checks for the presence of NVIDIA GPUs on the host by /dev/nvidia*.
+// hasNvidiaGPU checks for the presence of NVIDIA GPUs on the host by /dev/nvidia0.
 func hasNvidiaGPU() bool {
-	entries, err := os.ReadDir("/dev")
-	if err != nil {
-		return false
-	}
-	for _, entry := range entries {
-		if strings.Contains(strings.ToLower(entry.Name()), "nvidia") {
-			return true
-		}
-	}
-	return false
+	_, err := os.Stat("/dev/nvidia0")
+	return err == nil
 }
 
 // hasRocmGPU checks for the presence of ROCm GPUs on the host by /dev/kfd.
 func hasRocmGPU() bool {
-	entries, err := os.ReadDir("/dev")
-	if err != nil {
-		return false
-	}
-	for _, entry := range entries {
-		if strings.Contains(strings.ToLower(entry.Name()), "kfd") {
-			return true
-		}
-	}
-	return false
+	_, err := os.Stat("/dev/kfd")
+	return err == nil
 }
