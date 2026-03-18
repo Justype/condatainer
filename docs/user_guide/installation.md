@@ -42,12 +42,11 @@ condatainer avail
 
 ## ⚙️ Initialize Configuration
 
-Run the following command to let **CondaTainer** locate the Apptainer/Singularity path and save it for future use:
+The installation script will also run `condatainer config init` for you. If you want to re-run it or customize the configuration, simply run:
 
 ```bash
 condatainer config init
 ```
-
 
 **CondaTainer** will automatically search for Apptainer/Singularity in your `PATH` and via `module avail`. If you want to use a specific Apptainer/Singularity module:
 

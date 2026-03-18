@@ -25,18 +25,7 @@
 curl -fsSL https://get-condatainer.justype.net | bash
 ```
 
-You will be prompted to confirm the installation path (defaults to `$SCRATCH/condatainer/` or `$HOME/condatainer/`). The script will also update shell config.
-
-### ⚙️ Configuration
-
-After installation, reload your shell and initialize the default configuration:
-
-```bash
-source ~/.bashrc # or source your shell config
-condatainer config init
-```
-
-If Apptainer/Singularity is served as module, **CondaTainer** will search it and save the latest version for future use.
+You will be prompted to confirm the installation path (defaults to `$SCRATCH/condatainer/` or `$HOME/condatainer/`). The script will also update shell config and run `condatainer config init` for you.
 
 ## 🧰 Tools/Data Management
 

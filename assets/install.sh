@@ -77,7 +77,7 @@ confirm_default() {
     local response=""
 
     # Auto-Yes Logic
-    if [ "${AUTO_YES:-false}" = "true" ]; then
+    if [ "${CLI_YES:-false}" = "true" ]; then
         [ "$default" = "yes" ] && return 0 || return 1
     fi
 
@@ -117,7 +117,41 @@ download_file() {
         echo -e "${RED}[ERROR]${NC} Neither curl nor wget found."
         exit 1
     fi
-    chmod +x "$dest"
+    chmod 0775 "$dest"
+}
+
+resolve_prerelease_url() {
+    local api_url="https://api.github.com/repos/Justype/condatainer/releases"
+    local release_json tag
+
+    if command -v wget >/dev/null 2>&1; then
+        release_json=$(wget -qO - "$api_url")
+    elif command -v curl >/dev/null 2>&1; then
+        release_json=$(curl -fsSL "$api_url")
+    else
+        echo -e "${RED}[ERROR]${NC} Neither curl nor wget found."
+        exit 1
+    fi
+
+    tag=$(printf '%s' "$release_json" \
+        | tr -d '\n' \
+        | sed 's/},{/}\n{/g' \
+        | awk '{
+            obj=$0
+            gsub(/[[:space:]]+/, "", obj)
+            if (obj ~ /"prerelease":true/ && match(obj, /"tag_name":"[^"]+"/)) {
+                print substr(obj, RSTART + 12, RLENGTH - 13)
+                exit
+            }
+        }')
+
+    if [ -z "$tag" ]; then
+        echo -e "${RED}[ERROR]${NC} Could not find a prerelease tag from GitHub Releases."
+        exit 1
+    fi
+
+    URL_CONDATAINER="https://github.com/Justype/condatainer/releases/download/${tag}/${BINARY_NAME}"
+    echo -e "${BLUE}[INFO]${NC} Using prerelease: ${BLUE}${tag}${NC}"
 }
 
 update_config_block() {
@@ -184,12 +218,14 @@ echo -e "\nConfiguration:"
 # CLI options parsing
 CLI_PATH=""
 CLI_YES=false
+CLI_DEV=false
 
 show_usage() {
     cat <<'USAGE'
 Usage: install_condatainer.sh [options]
 Options:
   -p, --path PATH      Install base path (non-interactive)
+  -d, --dev            Install latest prerelease build
   -y, --yes            Assume yes for all prompts
   -h, --help           Show this help
 USAGE
@@ -198,13 +234,16 @@ USAGE
 while [ $# -gt 0 ]; do
     case "$1" in
         -p|--path)  [ -n "$2" ] && { CLI_PATH="$2"; shift 2; } || { echo -e "${RED}[ERROR]${NC} --path requires an argument."; exit 1; } ;;
+        -d|--dev)   CLI_DEV=true; shift ;;
         -y|--yes)   CLI_YES=true; shift ;;
         -h|--help)  show_usage; exit 0 ;;
         *)          echo -e "${RED}[ERROR]${NC} Unknown option: $1"; show_usage; exit 1 ;;
     esac
 done
 
-AUTO_YES=${CLI_YES}
+if [ "${CLI_DEV}" = true ]; then
+    resolve_prerelease_url
+fi
 
 # Determine Install Path
 TARGET_FROM_EXISTING="false"
@@ -258,6 +297,11 @@ fi
 
 echo -e "\n--------- Installation Summary ---------"
 echo -e "Directory   : ${BLUE}$INSTALL_BIN${NC}"
+if [ "${CLI_DEV}" = true ]; then
+    echo -e "Release     : ${YELLOW}Prerelease (--dev)${NC}"
+else
+    echo -e "Release     : ${GREEN}Stable${NC}"
+fi
 echo -e "Condatainer : ${GREEN}Yes${NC}"
 echo -e "----------------------------------------"
 
@@ -289,13 +333,25 @@ if command -v condatainer &> /dev/null; then
     if [ -n \"\$ZSH_VERSION\" ]; then
         source <(condatainer completion zsh)
     elif [ -n \"\$BASH_VERSION\" ]; then
-        if type _init_completion &> /dev/null; then
-            source <(condatainer completion bash)
-        fi
+        source <(condatainer completion bash)
     fi
 fi
 $MARKER_END"
     update_config_block "$RC_FILE" "$MARKER_START" "$MARKER_END" "$PATH_BLOCK" "CONDATAINER PATH"
+fi
+
+# Init the condatainer config
+if [ "${CLI_YES:-false}" = "true" ]; then
+    "$INSTALL_BIN/condatainer" config init -y
+    _exit_code=$?
+else
+    "$INSTALL_BIN/condatainer" config init
+    _exit_code=$?
+fi
+
+if [ $_exit_code -ne 0 ]; then
+    echo -e "${RED}[ERROR]${NC} Failed to initialize CondaTainer config."
+    exit 1
 fi
 
 echo -e "----------------------------------------"
