@@ -89,13 +89,13 @@ condatainer config init -l system
 | Key | Default | Description |
 |-----|---------|-------------|
 | `build.ncpus` | `4` | CPUs for build jobs |
-| `build.mem_mb` | `8192` | Memory in MB (8GB) |
+| `build.mem` | `8192` | Memory for build jobs (supports units: `8g`, `8192`) |
 | `build.time` | `2h` | Time limit for builds |
 | `build.compress_args` | Auto-detected | mksquashfs compression arguments (gzip for singularity; zstd-medium for apptainer≥1.4; lz4 otherwise) |
 | `build.block_size` | `128k` | mksquashfs block size for app/env/external overlays (e.g. `128k`, `512k`) |
 | `build.data_block_size` | `1m` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
 | `build.use_tmp_overlay` | `false` | Use a temporary ext3 overlay during builds instead of host directories |
-| `build.tmp_overlay_size_mb` | `20480` | Temporary ext3 overlay size in MB (20GB); only used when `use_tmp_overlay` is `true` |
+| `build.tmp_overlay_size` | `20480` | Temporary ext3 overlay size (supports units: `20g`, `20480`); only used when `use_tmp_overlay` is `true` |
 | `channels` | `[conda-forge, bioconda]` | Conda channels passed to micromamba in priority order (first = highest priority) |
 
 > `build.compress_args` also accepts shortcuts: `gzip`, `lz4`, `zstd`, `zstd-fast`, `zstd-medium`, `zstd-high`
@@ -128,7 +128,7 @@ condatainer config set apptainer_bin /usr/bin/apptainer
 
 # Set build resources
 condatainer config set build.ncpus 8
-condatainer config set build.mem_mb 16384
+condatainer config set build.mem 16g
 
 # Set build time limit (supports Go-style or HPC-style formats)
 condatainer config set build.time 4h
@@ -186,7 +186,7 @@ upper‑casing, replacing `.` with `_`, and prefixing with
 
 * `logs_dir` → `CNT_LOGS_DIR`
 * `scheduler.time` → `CNT_SCHEDULER_TIME`
-* `build.tmp_overlay_size_mb` → `CNT_BUILD_TMP_OVERLAY_SIZE_MB`
+* `build.tmp_overlay_size` → `CNT_BUILD_TMP_OVERLAY_SIZE`
 
 You can list the supported variables with
 `condatainer config show` (it prints any that are currently set).
@@ -208,7 +208,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_PREBUILT_LINK`        | `prebuilt_link`        |
 | `CNT_PREFER_REMOTE`        | `prefer_remote`        |
 | `CNT_SCHEDULER_NODES`      | `scheduler.nodes`      |
-| `CNT_BUILD_MEM_MB`         | `build.mem_mb`         |
+| `CNT_BUILD_MEM`            | `build.mem`            |
 | `CNT_BUILD_BLOCK_SIZE`     | `build.block_size`     |
 | `CNT_BUILD_DATA_BLOCK_SIZE`| `build.data_block_size`|
 | `CNT_EXTRA_BASE_DIRS`      | `extra_base_dirs` (colon-separated) |
@@ -310,13 +310,13 @@ extra_base_dirs:
 # Build configuration
 build:
   ncpus: 4
-  mem_mb: 8192
+  mem: 8g
   time: 2h
   compress_args: -comp zstd -Xcompression-level 8
   block_size: 128k       # SquashFS block size for app/env/external overlays
   data_block_size: 1m    # SquashFS block size for data overlays
   use_tmp_overlay: false  # Use ext3 tmp overlay instead of host directories
-  tmp_overlay_size_mb: 20480  # Only used when use_tmp_overlay is true
+  tmp_overlay_size: 20g  # Only used when use_tmp_overlay is true
 
 # Default: conda-forge then bioconda
 channels:

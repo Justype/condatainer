@@ -35,13 +35,13 @@ var configKeyDefs = map[string]bool{
 	"scheduler_timeout":      false,
 	"metadata_cache_ttl":     false,
 	"build.ncpus":            false,
-	"build.mem_mb":           false,
+	"build.mem":              false,
 	"build.time":             false,
 	"build.compress_args":    false,
 	"build.block_size":       false,
 	"build.data_block_size":  false,
 	"build.use_tmp_overlay":  false,
-	"build.tmp_overlay_size_mb": false,
+	"build.tmp_overlay_size": false,
 	"channels":               true,
 }
 
@@ -162,8 +162,8 @@ func configValueCompletion(key string) []string {
 		return config.GetAvailableDistros()
 	case "build.ncpus":
 		return []string{"4", "8", "16", "32"}
-	case "build.mem_mb":
-		return []string{"4096", "8192", "16384", "32768"}
+	case "build.mem":
+		return []string{"4g", "8g", "16g", "32g"}
 	case "build.time":
 		return []string{"1h", "2h", "4h", "8h"}
 	case "build.compress_args":
@@ -172,8 +172,8 @@ func configValueCompletion(key string) []string {
 		return config.BlockSizeCompletions
 	case "build.use_tmp_overlay":
 		return []string{"true", "false"}
-	case "build.tmp_overlay_size_mb":
-		return []string{"10240", "20480", "40960"}
+	case "build.tmp_overlay_size":
+		return []string{"10g", "20g", "40g"}
 	case "metadata_cache_ttl":
 		return []string{"1", "3", "7", "14", "0"}
 	default:
@@ -310,19 +310,19 @@ Shows:
 
 		// Paths: binaries then directories
 		fmt.Println(utils.StyleTitle("Paths:"))
-		fmt.Printf("  apptainer_bin:  %s\n", viper.GetString("apptainer_bin"))
+		fmt.Printf("  apptainer_bin: %s\n", viper.GetString("apptainer_bin"))
 		schedulerBin := viper.GetString("scheduler_bin")
 		schedulerType := config.GetSchedulerTypeFromBin(schedulerBin)
 		if schedulerBin != "" {
-			fmt.Printf("  scheduler_bin:  %s (%s)\n", schedulerBin, schedulerType)
+			fmt.Printf("  scheduler_bin: %s (%s)\n", schedulerBin, schedulerType)
 		} else {
-			fmt.Printf("  scheduler_bin:  %s\n", schedulerBin)
+			fmt.Printf("  scheduler_bin: %s\n", schedulerBin)
 		}
 		logsDir := viper.GetString("logs_dir")
 		if logsDir == "" {
 			logsDir = config.Global.LogsDir + " (default)"
 		}
-		fmt.Printf("  logs_dir:       %s\n", logsDir)
+		fmt.Printf("  logs_dir:      %s\n", logsDir)
 		extraDirs := config.GetExtraBaseDirs()
 		if len(extraDirs) > 0 {
 			fmt.Printf("  extra_base_dirs:\n")
@@ -349,56 +349,56 @@ Shows:
 		fmt.Printf("  prefer_remote: %v\n", config.Global.PreferRemote)
 		fmt.Println()
 
-		// Options
+		// Options (longest key: metadata_cache_ttl = 18 chars)
 		fmt.Println(utils.StyleTitle("Options:"))
-		fmt.Printf("  default_distro:    %s  (avail: %s)\n",
+		fmt.Printf("  %-19s %s  (avail: %s)\n", "default_distro:",
 			config.Global.DefaultDistro, strings.Join(config.GetAvailableDistros(), ", "))
 		submitJobConfig := viper.GetBool("submit_job")
 		submitJobActual := config.Global.SubmitJob
 		if submitJobConfig && !submitJobActual {
-			fmt.Printf("  submit_job:        %v (disabled: scheduler not accessible)\n", submitJobConfig)
+			fmt.Printf("  %-19s %v (disabled: scheduler not accessible)\n", "submit_job:", submitJobConfig)
 		} else {
-			fmt.Printf("  submit_job:        %v\n", submitJobActual)
+			fmt.Printf("  %-19s %v\n", "submit_job:", submitJobActual)
 		}
 		if config.Global.SchedulerTimeout == 0 {
-			fmt.Printf("  scheduler_timeout: 0 (disabled)\n")
+			fmt.Printf("  %-19s 0 (disabled)\n", "scheduler_timeout:")
 		} else {
-			fmt.Printf("  scheduler_timeout: %ds\n", int(config.Global.SchedulerTimeout.Seconds()))
+			fmt.Printf("  %-19s %s\n", "scheduler_timeout:", utils.FormatDuration(config.Global.SchedulerTimeout))
 		}
-		fmt.Printf("  parse_module_load: %v\n", config.Global.ParseModuleLoad)
+		fmt.Printf("  %-19s %v\n", "parse_module_load:", config.Global.ParseModuleLoad)
 		if config.Global.MetadataCacheTTL == 0 {
-			fmt.Printf("  metadata_cache_ttl: 0 (disabled)\n")
+			fmt.Printf("  %-19s 0 (disabled)\n", "metadata_cache_ttl:")
 		} else {
-			fmt.Printf("  metadata_cache_ttl: %dd\n", int(config.Global.MetadataCacheTTL.Hours()/24))
+			fmt.Printf("  %-19s %dd\n", "metadata_cache_ttl:", int(config.Global.MetadataCacheTTL.Hours()/24))
 		}
 		channels := config.Global.Build.Channels
 		if len(channels) > 0 {
-			fmt.Printf("  channels:\n")
+			fmt.Printf("  %-19s\n", "channels:")
 			for _, ch := range channels {
 				fmt.Printf("    - %s\n", ch)
 			}
 		} else {
-			fmt.Printf("  channels: %s\n", utils.StyleInfo("none"))
+			fmt.Printf("  %-19s %s\n", "channels:", utils.StyleInfo("none"))
 		}
 		fmt.Println()
 
-		// Build settings
+		// Build settings (longest key: tmp_overlay_size = 16 chars)
 		fmt.Printf("%s %s\n", utils.StyleTitle("Build Configuration:"), "build.*")
-		fmt.Printf("  ncpus:                %d\n", viper.GetInt("build.ncpus"))
-		fmt.Printf("  mem_mb:               %d\n", viper.GetInt64("build.mem_mb"))
-		fmt.Printf("  time:                 %s\n", viper.GetString("build.time"))
+		fmt.Printf("  %-17s %d\n", "ncpus:", config.Global.Build.Defaults.CpusPerTask)
+		fmt.Printf("  %-17s %s\n", "mem:", utils.FormatMemoryMB(config.Global.Build.Defaults.MemPerNodeMB))
+		fmt.Printf("  %-17s %s\n", "time:", utils.FormatDuration(config.Global.Build.Defaults.Time))
 		// Show actual compress_args (may be auto-detected based on apptainer version)
 		compressArgs := viper.GetString("build.compress_args")
 		actualCompressArgs := config.Global.Build.CompressArgs
 		if compressArgs != actualCompressArgs {
-			fmt.Printf("  compress_args:        %s\n", actualCompressArgs)
+			fmt.Printf("  %-17s %s\n", "compress_args:", actualCompressArgs)
 		} else {
-			fmt.Printf("  compress_args:        %s\n", compressArgs)
+			fmt.Printf("  %-17s %s\n", "compress_args:", compressArgs)
 		}
-		fmt.Printf("  block_size:           %s\n", config.Global.Build.BlockSize)
-		fmt.Printf("  data_block_size:      %s\n", config.Global.Build.DataBlockSize)
-		fmt.Printf("  use_tmp_overlay:      %v\n", config.Global.Build.UseTmpOverlay)
-		fmt.Printf("  tmp_overlay_size_mb:  %d\n", viper.GetInt("build.tmp_overlay_size_mb"))
+		fmt.Printf("  %-17s %s\n", "block_size:", config.Global.Build.BlockSize)
+		fmt.Printf("  %-17s %s\n", "data_block_size:", config.Global.Build.DataBlockSize)
+		fmt.Printf("  %-17s %v\n", "use_tmp_overlay:", config.Global.Build.UseTmpOverlay)
+		fmt.Printf("  %-17s %s\n", "tmp_overlay_size:", utils.FormatMemoryMB(int64(config.Global.Build.TmpSizeMB)))
 		fmt.Println()
 
 		// Show environment variable overrides
@@ -504,6 +504,26 @@ Time duration format (for build.time):
 				utils.PrintError("Invalid duration format: %s", value)
 				utils.PrintHint("Use format like: 4d12h, 2h30m, 1:30, or 01:30:00")
 				os.Exit(ExitCodeUsage)
+			}
+		}
+
+		if key == "build.mem" {
+			if mb, err := utils.ParseMemoryMB(value); err != nil || mb <= 0 {
+				utils.PrintError("Invalid memory format: %s", value)
+				utils.PrintHint("Use format like: 8GB, 16384MB, 8192")
+				os.Exit(ExitCodeUsage)
+			} else {
+				value = fmt.Sprintf("%d", mb)
+			}
+		}
+
+		if key == "build.tmp_overlay_size" {
+			if mb, err := utils.ParseMemoryMB(value); err != nil || mb <= 0 {
+				utils.PrintError("Invalid memory format: %s", value)
+				utils.PrintHint("Use format like: 10g, 20480m, 20480, 1t")
+				os.Exit(ExitCodeUsage)
+			} else {
+				value = fmt.Sprintf("%d", mb)
 			}
 		}
 
@@ -795,7 +815,7 @@ var configValidateCmd = &cobra.Command{
 		}
 
 		// Check build config
-		ncpus := viper.GetInt("build.ncpus")
+		ncpus := config.Global.Build.Defaults.CpusPerTask
 		if ncpus > 0 {
 			if !utils.QuietMode {
 				fmt.Printf("%s Build CPUs: %d\n", utils.StyleSuccess("✓"), ncpus)
@@ -805,7 +825,7 @@ var configValidateCmd = &cobra.Command{
 			valid = false
 		}
 
-		memMB := viper.GetInt64("build.mem_mb")
+		memMB := config.Global.Build.Defaults.MemPerNodeMB
 		if memMB > 0 {
 			if !utils.QuietMode {
 				fmt.Printf("%s Build Memory: %d MB\n", utils.StyleSuccess("✓"), memMB)

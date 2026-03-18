@@ -1636,7 +1636,7 @@ metadata_cache_ttl: 7
 # Build configuration
 build:
   ncpus: 8
-  mem_mb: 16384
+  mem: 16g
   time: 4h
   # compress_args options (gzip, lz4, zstd, zstd-fast, zstd-medium, zstd-high)
   compress_args: "-comp zstd -Xcompression-level 8"
