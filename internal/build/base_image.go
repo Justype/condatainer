@@ -85,6 +85,11 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 
 	utils.PrintMessage("Running apptainer build from %s", utils.StylePath(b.buildSource))
 
+	// Ensure the tmp directory exists before apptainer tries to write the SIF there.
+	if err := utils.EnsureTmpSubdir(b.tmpDir); err != nil {
+		return fmt.Errorf("failed to create tmp dir %s: %w", b.tmpDir, err)
+	}
+
 	buildOpts := &apptainer.BuildOptions{
 		Force:     false,
 		NoCleanup: false,
