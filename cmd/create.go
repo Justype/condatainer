@@ -136,12 +136,16 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 			normalizedArgs = make([]string, len(args))
 			for i, arg := range args {
 				normalized := utils.NormalizeNameVersion(arg)
-				// Bare name (no slash) → expand to <default_distro>/<name>
+				// Bare name (no slash) → expand to <default_distro>/<name> only when
+				// a build script exists for that distro/name combination.
 				// e.g. "igv" → "ubuntu24/igv"  →  ubuntu24--igv.sqf
+				// Without a script, keep the original name so the user gets a clear error.
 				if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
-					expanded := config.Global.DefaultDistro + "/" + normalized
-					utils.PrintNote("Expanding '%s' to '%s'", normalized, expanded)
-					normalized = expanded
+					candidate := config.Global.DefaultDistro + "/" + normalized
+					if _, found := build.FindBuildScript(candidate); found {
+						utils.PrintNote("Expanding '%s' to '%s'", normalized, candidate)
+						normalized = candidate
+					}
 				}
 				normalizedArgs[i] = normalized
 			}
