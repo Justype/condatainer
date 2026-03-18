@@ -93,6 +93,11 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 
 	utils.PrintMessage("Running apptainer build from %s", utils.StylePath(d.buildSource))
 
+	// Ensure the tmp directory exists before apptainer tries to write the SIF there.
+	if err := utils.EnsureTmpSubdir(d.tmpDir); err != nil {
+		return fmt.Errorf("failed to create tmp dir %s: %w", d.tmpDir, err)
+	}
+
 	// Build SIF using apptainer build --fakeroot
 	// Note: tmpOverlayPath is actually a SIF file at this stage, not sqf yet
 	buildOpts := &apptainer.BuildOptions{
