@@ -1,7 +1,7 @@
 # CondaTainer
 
 <div>
-<a href="#condatainer"><img src="docs/_static/logo_cnt.svg" height="80" alt="CondaTainer Logo"></a>
+<a href="#condatainer"><img src="docs/_static/logo_cnt.svg" height="70" alt="CondaTainer Logo"></a>
 </div>
 
 [![Read the Docs](https://readthedocs.org/projects/condatainer/badge/?version=latest)](https://condatainer.readthedocs.io/en/latest/) [![Go Reference](https://pkg.go.dev/badge/github.com/Justype/condatainer.svg)](https://pkg.go.dev/github.com/Justype/condatainer) [![GitHub Release](https://img.shields.io/github/v/release/Justype/condatainer)](https://github.com/Justype/condatainer/releases)
