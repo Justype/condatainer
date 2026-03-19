@@ -208,9 +208,22 @@ PBS Pro/OpenPBS only; Torque not supported.
 
 - No node-count directive; nodes derived from `-n / span[ptile=M]`
 - If `span[hosts=1]`, `-n` = total CPUs; otherwise `-n` = total tasks
-- Memory: `rusage[mem=X]` is per-slot → `MemPerCpuMB = rusage_mem / affinity.cores` (default 1); without `-n` → `MemPerNodeMB`
-- `-M` (KB, ulimit) used as fallback; same division rule applies
+- Memory: `rusage[mem=X]` is the per-slot **scheduling reservation** → `MemPerCpuMB = rusage_mem / affinity.cores` (default 1); without `-n` → `MemPerNodeMB`
+- `-M` (per-process ulimit) is **not** used as a memory source when parsing; it passes through to `RemainingFlags` unchanged
+- On script **generation**, `-M` is emitted only when memory enforcement is configured (see below); any existing `-M` in `RemainingFlags` is suppressed to avoid duplicates
 - GPU: `-gpu "num=N:gmodel=T"` or `-R "rusage[ngpus_physical=N]"`
+
+**LSF `-M` generation (enforced memory limit):**
+
+`-M` is set to `ceil(base × 110%)` and only emitted when one of these env vars is set:
+
+| Env var | `-M` semantics | `base` value |
+|---|---|---|
+| `LSB_MEMLIMIT_ENFORCE=y` | per-process RSS limit (LSF polls) | `memPerSlotMB` |
+| `LSB_RESOURCE_ENFORCE=memory` | cgroup per-job enforcement; `-M` is secondary per-process ulimit | `memPerSlotMB` |
+| `LSB_JOB_MEMLIMIT=y` | per-job aggregate limit (`-M` = total job memory) | `memPerSlotMB × totalSlots` |
+
+`totalSlots` = `CpusPerTask` for OpenMP jobs; `GetNtasks()` for MPI/Hybrid jobs.
 
 **LSF `-n` semantics:**
 

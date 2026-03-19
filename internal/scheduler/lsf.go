@@ -173,14 +173,11 @@ func (l *LsfScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 }
 
 // lsfSpanInfo accumulates span[...], affinity[cores(...)] and per-slot memory info from -R.
-// rawMLimitPerSlotMB is parsed from -M (memory limit/ulimit) and used only as a fallback
-// for MemPerNodeMB when no rusage[mem=X] is present. -M itself passes through to RemainingFlags.
 type lsfSpanInfo struct {
-	singleNode         bool  // span[hosts=1]
-	ptile              int   // span[ptile=M], 0 = not set
-	cores              int   // affinity[cores(T)], 0 = not set
-	rawMemPerSlotMB    int64 // rusage[mem=X] converted to MB, 0 = not set (priority)
-	rawMLimitPerSlotMB int64 // -M X converted to MB, 0 = not set (fallback only)
+	singleNode      bool  // span[hosts=1]
+	ptile           int   // span[ptile=M], 0 = not set
+	cores           int   // affinity[cores(T)], 0 = not set
+	rawMemPerSlotMB int64 // rusage[mem=X] converted to MB, 0 = not set
 }
 
 // lsfAffinityRe matches affinity[cores(N)] in an LSF -R resource string.
@@ -213,9 +210,6 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 		case flagMatches(flag, "-n"):
 			_, parseErr = flagScanInt(flag, &rawN, "-n")
 			hasN = true
-		case flagMatches(flag, "-M"):
-			_, parseErr = flagScan(flag, &span.rawMLimitPerSlotMB, parseLsfMemory, "-M")
-			recognized = false // -M is a limit (ulimit), not allocation; re-emit unchanged
 		case flagMatches(flag, "-W"):
 			_, parseErr = flagScan(flag, &rs.Time, utils.ParseHMSTime, "-W")
 		case flagMatches(flag, "-gpu"):
@@ -287,9 +281,7 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 		}
 	}
 	// Resolve memory: both rusage[mem=X] and -M are per-slot (per-task in LSF).
-	// rusage[mem] takes priority over -M.
-	// rusage[mem=N] bare numbers are MB (LSF docs); -M bare numbers are KB (LSF convention).
-	// Both respect LSF_UNIT_FOR_LIMITS when set.
+	// Resolve rusage[mem=X]: per-slot memory reservation (MB, per LSF docs).
 	// Slot semantics depend on affinity:
 	//   span[hosts=1] no affinity : slot = 1 core  → MemPerCpuMB = X
 	//   span[hosts=1] affinity[T] : slot = T cores → MemPerCpuMB = X/T
@@ -305,16 +297,11 @@ func (l *LsfScheduler) parseResourceSpec(directives []string) (*ResourceSpec, []
 		if span.rawMemPerSlotMB > 0 {
 			rs.MemPerCpuMB = span.rawMemPerSlotMB / int64(cpt)
 			rs.MemPerNodeMB = 0 // clear default so GetMemPerNodeMB() derives correctly
-		} else if span.rawMLimitPerSlotMB > 0 {
-			rs.MemPerCpuMB = span.rawMLimitPerSlotMB / int64(cpt)
-			rs.MemPerNodeMB = 0 // clear default so GetMemPerNodeMB() derives correctly
 		}
 	} else {
 		// No -n: can't determine slot count; treat memory value as per-node directly.
 		if span.rawMemPerSlotMB > 0 {
 			rs.MemPerNodeMB = span.rawMemPerSlotMB
-		} else if span.rawMLimitPerSlotMB > 0 {
-			rs.MemPerNodeMB = span.rawMLimitPerSlotMB
 		}
 	}
 
@@ -512,8 +499,14 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	// Write shebang
 	fmt.Fprintln(writer, "#!/bin/bash")
 
-	// Write unrecognized flags (RemainingFlags only contains flags not parsed into typed fields)
+	// Write unrecognized flags (RemainingFlags only contains flags not parsed into typed fields).
+	// Skip any -M flags when enforcement is active: a computed -M will be emitted in the
+	// resource section below, so preserving the original would produce a duplicate.
+	skipExistingM := specs.Spec != nil && lsfMemoryEnforcement() != lsfMemEnforcementNone
 	for _, flag := range specs.RemainingFlags {
+		if skipExistingM && flagMatches(flag, "-M") {
+			continue
+		}
 		fmt.Fprintf(writer, "#BSUB %s\n", flag)
 	}
 
@@ -577,15 +570,16 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 			tasksPerNode = (rs.GetNtasks() + rs.Nodes - 1) / rs.Nodes
 		}
 
-		memStr := ""
+		// Compute per-slot memory (MB) for rusage[mem=] and -M.
+		// rusage_mem (per-slot) = MemPerCpuMB × affinity_cores.
+		// Hybrid uses affinity[cores(CpusPerTask)]; all other cases affinity_cores = 1.
+		var memPerSlotMB int64
 		if rs.MemPerCpuMB > 0 {
-			// Inverse of parse: rusage_mem (per-slot) = MemPerCpuMB × affinity_cores.
-			// Hybrid uses affinity[cores(CpusPerTask)]; all other cases affinity_cores = 1.
 			cpuPerSlot := 1
 			if isMPI && rs.CpusPerTask > 1 {
 				cpuPerSlot = rs.CpusPerTask
 			}
-			memStr = fmt.Sprintf(" rusage[mem=%dMB]", rs.MemPerCpuMB*int64(cpuPerSlot))
+			memPerSlotMB = rs.MemPerCpuMB * int64(cpuPerSlot)
 		} else if rs.MemPerNodeMB > 0 {
 			// Per-node → per-slot: divide by slotsPerNode.
 			// Use calculated tasksPerNode if available; otherwise fall back to slotsPerNode=1.
@@ -599,7 +593,10 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 					slotsPerNode = rs.CpusPerTask
 				}
 			}
-			memPerSlotMB := (rs.MemPerNodeMB + int64(slotsPerNode) - 1) / int64(slotsPerNode)
+			memPerSlotMB = (rs.MemPerNodeMB + int64(slotsPerNode) - 1) / int64(slotsPerNode)
+		}
+		memStr := ""
+		if memPerSlotMB > 0 {
 			memStr = fmt.Sprintf(" rusage[mem=%dMB]", memPerSlotMB)
 		}
 
@@ -644,6 +641,31 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 		}
 		if rs.Exclusive {
 			fmt.Fprintln(writer, "#BSUB -x")
+		}
+		// -M: only emitted when the cluster is configured to enforce memory limits.
+		// The base value depends on enforcement semantics:
+		//   PerProcess (LSB_MEMLIMIT_ENFORCE / LSB_RESOURCE_ENFORCE=memory):
+		//     -M is per-process → base = memPerSlotMB
+		//   PerJob (LSB_JOB_MEMLIMIT): -M is the total job aggregate →
+		//     base = memPerSlotMB × totalSlots (-n value)
+		// In both cases -M is set to ceil(base × 110%) to give 10% headroom.
+		if memPerSlotMB > 0 {
+			enforcement := lsfMemoryEnforcement()
+			if enforcement != lsfMemEnforcementNone {
+				mBase := memPerSlotMB
+				if enforcement == lsfMemEnforcementPerJob {
+					totalSlots := int64(rs.GetNtasks())
+					if !isMPI {
+						totalSlots = int64(rs.CpusPerTask)
+					}
+					if totalSlots <= 0 {
+						totalSlots = 1
+					}
+					mBase = memPerSlotMB * totalSlots
+				}
+				mLimit := (mBase*11 + 9) / 10 // ceiling of 110%
+				fmt.Fprintf(writer, "#BSUB -M %dMB\n", mLimit)
+			}
 		}
 	}
 
@@ -1265,23 +1287,33 @@ func parseLsfMemoryWithUnits(memStr string) (int64, error) {
 	return result, nil
 }
 
-// parseLsfMemory parses an LSF -M (hard memory limit/ulimit) value to MB.
-// Per LSF convention, bare numbers for -M default to KB.
-// LSF_UNIT_FOR_LIMITS overrides the default when set.
-func parseLsfMemory(memStr string) (int64, error) {
-	memStr = strings.TrimSpace(memStr)
-	if memStr == "" {
-		return 0, fmt.Errorf("empty memory string")
+// lsfMemEnforcement describes how the cluster enforces -M memory limits.
+type lsfMemEnforcement int
+
+const (
+	lsfMemEnforcementNone       lsfMemEnforcement = iota
+	lsfMemEnforcementPerProcess                   // LSB_MEMLIMIT_ENFORCE=y or LSB_RESOURCE_ENFORCE=memory
+	lsfMemEnforcementPerJob                       // LSB_JOB_MEMLIMIT=y: -M is total per-job
+)
+
+// lsfMemoryEnforcement returns the active memory enforcement mode by inspecting
+// standard LSF configuration environment variables:
+//
+//	LSB_JOB_MEMLIMIT=y              → -M is a per-job aggregate limit
+//	LSB_MEMLIMIT_ENFORCE=y          → -M is a per-process RSS limit (LSF polls)
+//	LSB_RESOURCE_ENFORCE containing "memory" → cgroup per-job enforcement;
+//	                                  -M still acts as a per-process ulimit backstop
+func lsfMemoryEnforcement() lsfMemEnforcement {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("LSB_JOB_MEMLIMIT")), "y") {
+		return lsfMemEnforcementPerJob
 	}
-	defaultUnit := strings.ToUpper(strings.TrimSpace(os.Getenv("LSF_UNIT_FOR_LIMITS")))
-	if defaultUnit == "" {
-		defaultUnit = "KB" // -M defaults to KB per LSF convention
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("LSB_MEMLIMIT_ENFORCE")), "y") {
+		return lsfMemEnforcementPerProcess
 	}
-	result, err := utils.ParseMemoryMBWithDefault(memStr, defaultUnit)
-	if err != nil {
-		return 0, fmt.Errorf("%w: %s", ErrInvalidMemoryFormat, memStr)
+	if strings.Contains(strings.ToLower(os.Getenv("LSB_RESOURCE_ENFORCE")), "memory") {
+		return lsfMemEnforcementPerProcess
 	}
-	return result, nil
+	return lsfMemEnforcementNone
 }
 
 // formatLsfTime formats a duration as LSF walltime (HH:MM)

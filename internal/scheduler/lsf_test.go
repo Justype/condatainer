@@ -394,9 +394,10 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#BSUB -M 8192",
 				"#BSUB -W 01:30",
 			},
-			// no-span: -n=4 → Ntasks=4 (MPI free-dist), CpusPerTask=1, MemPerCpuMB=8MB
+			// no-span: -n=4 → Ntasks=4 (MPI free-dist), CpusPerTask=1
+			// -M passes through to RemainingFlags; no memory derived from it
 			wantNcpus: 1,
-			wantMemMB: 0, // per-node undetermined without TasksPerNode; MemPerCpuMB=8MB
+			wantMemMB: 0,
 			wantTime:  time.Hour + 30*time.Minute,
 		},
 		{
@@ -472,9 +473,10 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#BSUB -u user@example.com",
 				`#BSUB -gpu "num=4:type=v100"`,
 			},
-			// no-span: -n=32 → Ntasks=32 (MPI free-dist), CpusPerTask=1, MemPerCpuMB=64MB
+			// no-span: -n=32 → Ntasks=32 (MPI free-dist), CpusPerTask=1
+			// -M passes through to RemainingFlags; no memory derived from it
 			wantNcpus: 1,
-			wantMemMB: 0, // per-node undetermined without TasksPerNode; MemPerCpuMB=64MB
+			wantMemMB: 0,
 			wantTime:  12 * time.Hour,
 			wantGpu:   &GpuSpec{Type: "v100", Count: 4},
 		},
@@ -484,8 +486,9 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#BSUB -M 4096MB",
 			},
+			// -M passes through to RemainingFlags; no memory derived from it
 			wantNcpus: 1, // default
-			wantMemMB: 4096,
+			wantMemMB: 0,
 		},
 		{
 			name: "memory with GB suffix",
@@ -493,8 +496,9 @@ func TestLsfResourceParsing(t *testing.T) {
 				"#!/bin/bash",
 				"#BSUB -M 8GB",
 			},
+			// -M passes through to RemainingFlags; no memory derived from it
 			wantNcpus: 1, // default
-			wantMemMB: 8 * 1024,
+			wantMemMB: 0,
 		},
 	}
 
@@ -542,33 +546,6 @@ func TestLsfResourceParsing(t *testing.T) {
 	}
 }
 
-func TestLsfMemoryParsing(t *testing.T) {
-	tests := []struct {
-		input  string
-		wantMB int64
-	}{
-		{"8192", 8},          // 8192 KB = 8 MB
-		{"1048576", 1024},    // 1048576 KB = 1024 MB
-		{"4096MB", 4096},     // 4096 MB
-		{"8GB", 8 * 1024},    // 8 GB
-		{"1TB", 1024 * 1024}, // 1 TB
-		{"512", 0},           // 512 KB = 0 MB (integer division)
-		{"1024", 1},          // 1024 KB = 1 MB
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			mb, err := parseLsfMemory(tt.input)
-			if err != nil {
-				t.Errorf("parseLsfMemory(%q) error: %v", tt.input, err)
-				return
-			}
-			if mb != tt.wantMB {
-				t.Errorf("parseLsfMemory(%q) = %d MB; want %d MB", tt.input, mb, tt.wantMB)
-			}
-		})
-	}
-}
 
 func TestLsfGpuParsing(t *testing.T) {
 	tests := []struct {
@@ -1207,6 +1184,74 @@ func TestLsfScriptGenerationMem(t *testing.T) {
 	}
 }
 
+func TestLsfScriptGenerationMemLimit(t *testing.T) {
+	// -M is emitted only when a memory enforcement env var is set,
+	// at 10% above the per-slot rusage[mem=] value.
+	spec := &ResourceSpec{Nodes: 1, CpusPerTask: 4, MemPerCpuMB: 1000}
+	// per-slot = 1000 MB (OpenMP, cpuPerSlot=1); -M = ceil(1000*1.1) = 1100 MB
+
+	makeScript := func(t *testing.T) string {
+		t.Helper()
+		tmpDir := t.TempDir()
+		lsf := newTestLsfScheduler()
+		jobSpec := &JobSpec{
+			Name:    "memlimit_test",
+			Command: "echo test",
+			Specs:   &ScriptSpecs{Spec: spec, RemainingFlags: []string{}},
+		}
+		scriptPath, err := lsf.CreateScriptWithSpec(jobSpec, tmpDir)
+		if err != nil {
+			t.Fatalf("CreateScriptWithSpec failed: %v", err)
+		}
+		content, err := os.ReadFile(scriptPath)
+		if err != nil {
+			t.Fatalf("Failed to read script: %v", err)
+		}
+		return string(content)
+	}
+
+	t.Run("no enforcement — no -M emitted", func(t *testing.T) {
+		t.Setenv("LSB_MEMLIMIT_ENFORCE", "")
+		t.Setenv("LSB_JOB_MEMLIMIT", "")
+		t.Setenv("LSB_RESOURCE_ENFORCE", "")
+		script := makeScript(t)
+		if strings.Contains(script, "#BSUB -M ") {
+			t.Errorf("expected no -M directive without enforcement, got:\n%s", script)
+		}
+	})
+
+	t.Run("LSB_MEMLIMIT_ENFORCE=y — -M emitted at 110%%", func(t *testing.T) {
+		t.Setenv("LSB_MEMLIMIT_ENFORCE", "y")
+		t.Setenv("LSB_JOB_MEMLIMIT", "")
+		t.Setenv("LSB_RESOURCE_ENFORCE", "")
+		script := makeScript(t)
+		if !strings.Contains(script, "#BSUB -M 1100MB") {
+			t.Errorf("expected '#BSUB -M 1100MB', got:\n%s", script)
+		}
+	})
+
+	t.Run("LSB_JOB_MEMLIMIT=y — -M emitted as per-job total at 110%%", func(t *testing.T) {
+		t.Setenv("LSB_MEMLIMIT_ENFORCE", "")
+		t.Setenv("LSB_JOB_MEMLIMIT", "y")
+		t.Setenv("LSB_RESOURCE_ENFORCE", "")
+		script := makeScript(t)
+		// OpenMP: totalSlots = CpusPerTask = 4; mBase = 1000*4 = 4000; mLimit = ceil(4400) = 4400
+		if !strings.Contains(script, "#BSUB -M 4400MB") {
+			t.Errorf("expected '#BSUB -M 4400MB' (per-job total), got:\n%s", script)
+		}
+	})
+
+	t.Run("LSB_RESOURCE_ENFORCE=memory — -M emitted at 110%%", func(t *testing.T) {
+		t.Setenv("LSB_MEMLIMIT_ENFORCE", "")
+		t.Setenv("LSB_JOB_MEMLIMIT", "")
+		t.Setenv("LSB_RESOURCE_ENFORCE", "memory")
+		script := makeScript(t)
+		if !strings.Contains(script, "#BSUB -M 1100MB") {
+			t.Errorf("expected '#BSUB -M 1100MB', got:\n%s", script)
+		}
+	})
+}
+
 func TestLsfMemPerCpuRoundTrip(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1484,9 +1529,9 @@ echo "Running job"
 	if specs.Spec.CpusPerTask != 1 {
 		t.Errorf("CpusPerTask = %d; want 1 (MPI free-dist)", specs.Spec.CpusPerTask)
 	}
-	// -M 8GB → MemPerCpuMB=8192 MB (per task); GetMemPerNodeMB()=0 since TasksPerNode=0 (free-dist)
-	if specs.Spec.MemPerCpuMB != 8192 {
-		t.Errorf("MemPerCpuMB = %d; want 8192 (8 GB per task)", specs.Spec.MemPerCpuMB)
+	// -M passes through to RemainingFlags; no memory derived from it
+	if specs.Spec.MemPerCpuMB != 0 {
+		t.Errorf("MemPerCpuMB = %d; want 0 (-M is a ulimit, not a scheduling reservation)", specs.Spec.MemPerCpuMB)
 	}
 	if specs.Spec.Time != 2*time.Hour {
 		t.Errorf("Time = %v; want 2h", specs.Spec.Time)
