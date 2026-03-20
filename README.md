@@ -150,10 +150,13 @@ QUANT=$(condatainer run --array samples.txt --array-limit 10 --afterok "$ALGN" q
 condatainer run --afterok "$QUANT" collect_results.sh samples.txt
 ```
 
+Please see [cnt-tutorials - Airway Salmon Quant](https://github.com/Justype/cnt-tutorials/tree/main/airway-salmon) for a real-world example.
+
 ## 🔗 Links & Resources
 
 - [CondaTainer ReadTheDocs](https://condatainer.readthedocs.io/en/latest/)
 - [cnt-scripts Repository](https://github.com/Justype/cnt-scripts)
+- [cnt-tutorials Repository](https://github.com/Justype/cnt-tutorials)
 
 Related tools and resources:
 
