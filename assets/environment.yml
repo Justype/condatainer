@@ -1,0 +1,16 @@
+name: base
+channels:
+  - conda-forge
+dependencies:
+  - gcc
+  - go=1.25.5
+  - myst-parser
+  - pandoc
+  - python=3.10
+  - python-docx
+  - sphinx
+  - sphinx-autobuild
+  - sphinx-copybutton
+  - sphinx-rtd-theme
+
+prefix: "/ext3/env"
