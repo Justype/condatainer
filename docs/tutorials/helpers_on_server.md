@@ -95,13 +95,21 @@ mkdir ~/projects/my-analysis
 cd ~/projects/my-analysis
 
 # 2. Create overlay for this project
-condatainer o -s 20g
+condatainer o -s 20g -- python=3.11 numpy pandas scikit-learn
 
-# 3. Install dependencies
-condatainer e -- mm-install python=3.11 numpy pandas scikit-learn
+# 3. Install dependencies (optional)
+condatainer e -- mm-install seaborn scipy
 
 # 4. Start VS Code Server
 condatainer helper vscode-server -w -p 13182
+```
+
+```{note}
+`o -- <packages>` will create the overlay on the node local SSD, which is much faster.
+
+The latter `e -- mm-install <packages>` will be slower since it modifies the overlay on the network filesystem.
+
+Therefore, it's best to install as many dependencies as possible in the initial `condatainer o` step. You can always add more later with `condatainer e` if needed.
 ```
 
 ### Working on Existing Project

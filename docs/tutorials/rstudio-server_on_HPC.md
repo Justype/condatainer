@@ -7,8 +7,8 @@ Simply run the following commands to set up and run RStudio Server on your HPC s
 condatainer helper -u
 # create a 30G overlay to store R packages and conda env
 condatainer o -s 30g
-# start RStudio Server
-condatainer helper rstudio-server
+# start RStudio Server on port 13182
+condatainer helper rstudio-server -p 13182
 ```
 
 This tutorial uses **Posit R docker image** for R installation. If you prefer using Conda-managed R (via `mm-install r-base`), see [RStudio Server (Conda)](./rstudio-server-conda_on_HPC.md) instead.
@@ -106,13 +106,13 @@ condatainer o -s 30g
 If you need `reticulate`, you need to set up a conda environment inside the overlay:
 
 ```bash
-# Launch a shell within the overlay
-condatainer e
+# Directly create the overlay with python and conda installed
+condatainer o -s 30g -- python=3.11 conda
 ```
 
 ```bash
-# You can change python version and add packages as needed
-mm-install python=3.11 conda
+# Or you can install them later (but slower)
+condatainer e -- mm-install python=3.11 conda
 ```
 
 See [Launch a Shell within the Workspace Overlay](../user_guide/workspace_overlays.md#launch-a-shell-within-the-workspace-overlay) for more details.

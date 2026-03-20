@@ -6,13 +6,11 @@ Simply run the following commands to set up and run RStudio Server with Conda-ma
 # download/update helper scripts
 condatainer helper -u
 # create a 30G overlay to store conda env
-condatainer o -s 30g
-# install R in the conda env
-condatainer e -- mm-install r-base=4.4 r-tidyverse -y
+condatainer o -s 30g -- r-base=4.4 r-tidyverse
 # pin R version to avoid accidental updates
 condatainer e -- mm-pin r-base
-# start RStudio Server
-condatainer helper rstudio-server-conda
+# start RStudio Server on port 13182
+condatainer helper rstudio-server-conda -p 13182
 ```
 
 This tutorial uses **Conda-managed R** (via `mm-install r-base`). If you you need to build R libraries from source (e.g., GitHub packages), see [RStudio Server](./rstudio-server_on_HPC.md) instead.
@@ -116,20 +114,19 @@ Creating an ext3 overlay image with Conda-managed R:
 
 ```bash
 # create a 30G ext3 image named `env.img` in the current working directory
-condatainer o -s 30g
+condatainer o -s 30g -- r-base=4.4 r-tidyverse
 
 # Launch a shell within the overlay
 condatainer e
 ```
 
-Inside the overlay, install R using Conda:
+Inside the overlay, install additional R packages through Conda:
 
 ```bash
-# install R and commonly used packages
-mm-install r-base=4.4 r-tidyverse
-
 # pin the R version to avoid accidental updates
 mm-pin r-base
+
+mm-install r-seurat r-patchwork bioconductor-clusterprofiler
 ```
 
 If you need `reticulate`, you can also install conda:
@@ -143,6 +140,10 @@ See [Launch a Shell within the Workspace Overlay](../user_guide/workspace_overla
 
 ```{note}
 Always use Conda to install R packages. If you want to use `install.packages()` in R, use [rstudio-server](./rstudio-server_on_HPC.md) variant instead.
+```
+
+```{note}
+In the `o` overlay creation step, it is better to install as many conda packages as possible since it uses the node local SSD which is much faster. The subsequent `e` step modifies the overlay on the shared filesystem, which is slower.
 ```
 
 ## RStudio Server Conda Helper Script

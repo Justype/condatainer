@@ -7,8 +7,8 @@ Run following commands to start VS Code Server on your HPC system:
 condatainer helper -u
 # create a 20G writable overlay (optional but recommended)
 condatainer o -s 20g
-# start vscode-server
-condatainer helper vscode-server
+# start vscode-server on port 13182
+condatainer helper vscode-server -p 13182
 ```
 
 VS Code Server provides the **full VS Code experience** including all extensions (Pylance, Copilot, etc.) in your browser.
@@ -101,19 +101,25 @@ Creating an ext3 overlay image (optional but recommended for persistent settings
 
 ```bash
 # create a 20G ext3 image named `env.img` in the current working directory
-condatainer o -s 20g
+condatainer o -s 20g # minimal conda env
+
+# If you want to create with packages pre-installed, use:
+condatainer o -s 20g -- python=3.11 numpy pandas scikit-learn
 
 # go into the overlay
 condatainer e
 ```
 
 ```bash
-# INSIDE THE OVERLAY
-# install Python and required packages
-mm-install python=3.11
+# INSIDE THE OVERLAY; install additional packages
+mm-install scipy seaborn
 ```
 
 See [Launch a Shell within the Workspace Overlay](../user_guide/workspace_overlays.md#launch-a-shell-within-the-workspace-overlay) for more details.
+
+```{note}
+In the `o` overlay creation step, it is better to install as many conda packages as possible since it uses the node local SSD which is much faster. The subsequent `e` step modifies the overlay on the shared filesystem, which is slower.
+```
 
 ## VS Code Server Helper Script
 
@@ -234,8 +240,8 @@ If your previously selected port is already in use, the script will notify you. 
 For GPU-accelerated R packages, specify GPU resources:
 
 ```bash
-condatainer helper rstudio-server -g 1        # Request 1 GPU
-condatainer helper rstudio-server -g a100:2   # Request 2 A100 GPUs
+condatainer helper vscode-server -g 1        # Request 1 GPU
+condatainer helper vscode-server -g a100:2   # Request 2 A100 GPUs
 ```
 
 You can use the following command to check available GPU types on your HPC system:

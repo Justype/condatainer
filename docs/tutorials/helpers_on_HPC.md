@@ -88,6 +88,22 @@ Local Browser → localhost:13182 (local)
 Make sure to choose a unique port number for each session to avoid conflicts. Avoid common ports like 8080, 8787, etc.
 ```
 
+````{tips}
+To avoid idle timeouts, you can use `tmux` or `screen` on the HPC login node.
+
+Or you can add the following to the end of your local `~/.ssh/config` to enable automatic keep-alives for all SSH connections:
+
+```
+Host *
+    ServerAliveInterval 60
+    ServerAliveCountMax 5
+```
+
+Every 60 seconds, your local machine will send a keep-alive packet to the HPC login node. If the login node doesn't respond after 5 attempts, it will close the connection.
+
+By default, your machine will never send keep-alives, which can lead to idle timeouts if you're not actively using the terminal. Enabling this helps maintain the connection while you're working in the web app, even if you're not actively typing in the terminal.
+````
+
 ## Common Workflow
 
 ### Starting a New Project
@@ -98,14 +114,22 @@ mkdir $SCRATCH/my-analysis
 cd $SCRATCH/my-analysis
 
 # 2. Create overlay for this project
-condatainer o -s 20g
+condatainer o -s 20g -- python=3.11 numpy pandas scikit-learn
 
-# 3. Install dependencies
-condatainer e -- mm-install python=3.11 numpy pandas scikit-learn
+# 3. Install additional dependencies (optional)
+condatainer e -- mm-install seaborn scipy
 
 # 4. Start VS Code Server
 # -w sets working directory to pwd
 condatainer helper vscode-server -p 13182 -w
+```
+
+```{note}
+`o -- <packages>` will create the overlay on the node local SSD, which is much faster.
+
+The latter `e -- mm-install <packages>` will be slower since it modifies the overlay on the network filesystem.
+
+Therefore, it's best to install as many dependencies as possible in the initial `condatainer o` step. You can always add more later with `condatainer e` if needed.
 ```
 
 ### Working on Existing Project
