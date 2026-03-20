@@ -19,7 +19,7 @@ VS Code Server provides the **full VS Code experience** including all extensions
 - [Have SSH port forwarding set up to the login node](#ssh-port-forwarding)
 - [Have CondaTainer installed](#install-condatainer)
 - [Have a writable overlay image (optional)](#create-writable-overlay)
-- [Check the Script Parameters](#vscode-server-helper-script)
+- [Check the Script Parameters](#vs-code-server-helper-script)
 
 Then you can run:
 

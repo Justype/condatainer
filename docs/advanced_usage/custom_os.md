@@ -23,7 +23,6 @@ apptainer cache clean
 Examples:
 
 - [Pulling PyTorch Docker Image](#example-pulling-pytorch-docker-image)
-- [Pulling Posit R Docker Image](#example-pulling-posit-r-docker-image)
 - [R Package Dependencies](#example-r-package-dependencies) (use with `env.img` for development)
 - [Read-only R Package Environment](#example-read-only-r-package-environment) (for production)
 

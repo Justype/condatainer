@@ -84,11 +84,11 @@ Local Browser → localhost:13182 (local)
                 localhost:13182 (compute node)
 ```
 
-```{warn}
+```{warning}
 Make sure to choose a unique port number for each session to avoid conflicts. Avoid common ports like 8080, 8787, etc.
 ```
 
-````{tips}
+````{tip}
 To avoid idle timeouts, you can use `tmux` or `screen` on the HPC login node.
 
 Or you can add the following to the end of your local `~/.ssh/config` to enable automatic keep-alives for all SSH connections:

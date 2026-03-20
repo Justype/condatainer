@@ -81,7 +81,7 @@ Local Browser → localhost:13182 (local)
                 localhost:13182 (server)
 ```
 
-```{warn}
+```{warning}
 Make sure to choose a unique port number for each session to avoid conflicts. Avoid common ports like 8080, 8787, etc.
 ```
 
