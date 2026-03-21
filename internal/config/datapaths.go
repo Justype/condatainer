@@ -403,6 +403,22 @@ func buildCacheSearchPaths() []string {
 	return paths
 }
 
+// GetCacheSearchPaths returns all paths to search for cache directories.
+// Includes the user cache dir as the final fallback.
+func GetCacheSearchPaths() []string {
+	paths := buildCacheSearchPaths()
+	if userCacheDir := GetUserCacheDir(); userCacheDir != "" {
+		seen := make(map[string]bool)
+		for _, p := range paths {
+			seen[p] = true
+		}
+		if !seen[userCacheDir] {
+			paths = append(paths, userCacheDir)
+		}
+	}
+	return paths
+}
+
 // GetImageSearchPaths returns all paths to search for images.
 func GetImageSearchPaths() []string {
 	if len(GlobalDataPaths.ImagesDirs) == 0 {
@@ -470,47 +486,60 @@ func FindHelperScript(name string) (string, error) {
 }
 
 // GetWritableImagesDir returns the first writable images directory.
-// Creates the directory if it doesn't exist.
+// Probes existing directories first (no side effects); creates only the last
+// (user-owned) directory if none are currently writable.
 func GetWritableImagesDir() (string, error) {
-	for _, dir := range GetImageSearchPaths() {
-		if utils.IsWritableDir(dir) {
+	paths := GetImageSearchPaths()
+	for _, dir := range paths {
+		if utils.CanWriteToDir(dir) {
 			return dir, nil
 		}
 	}
-
-	return "", fmt.Errorf("no writable images directory found (searched: %v)", GetImageSearchPaths())
-}
-
-// GetWritableBuildScriptsDir returns the first writable build scripts directory.
-func GetWritableBuildScriptsDir() (string, error) {
-	for _, dir := range GetBuildScriptSearchPaths() {
-		if utils.IsWritableDir(dir) {
-			return dir, nil
+	if len(paths) > 0 {
+		last := paths[len(paths)-1]
+		if utils.IsWritableDir(last) {
+			return last, nil
 		}
 	}
-
-	return "", fmt.Errorf("no writable build scripts directory found")
+	return "", fmt.Errorf("no writable images directory found (searched: %v)", paths)
 }
 
-// GetWritableCacheDir returns the first writable cache directory (creates it if needed).
+
+// GetWritableCacheDir returns the first writable cache directory.
+// Probes existing directories first (no side effects). Falls back to the XDG
+// user cache directory (~/.cache/condatainer) if no shared cache is writable,
+// creating it on first use. This ensures cache always works even when the
+// portable install dir is read-only and $SCRATCH is unset.
 func GetWritableCacheDir() (string, error) {
 	for _, dir := range buildCacheSearchPaths() {
-		if utils.IsWritableDir(dir) {
+		if utils.CanWriteToDir(dir) {
 			return dir, nil
 		}
 	}
-
+	if userCacheDir := GetUserCacheDir(); userCacheDir != "" {
+		if utils.IsWritableDir(userCacheDir) {
+			return userCacheDir, nil
+		}
+	}
 	return "", fmt.Errorf("no writable shared cache directory found")
 }
 
 // GetWritableHelperScriptsDir returns the first writable helper scripts directory.
+// Probes existing directories first; creates only the last (user-owned) directory
+// if none are currently writable.
 func GetWritableHelperScriptsDir() (string, error) {
-	for _, dir := range GetHelperScriptSearchPaths() {
-		if utils.IsWritableDir(dir) {
+	paths := GetHelperScriptSearchPaths()
+	for _, dir := range paths {
+		if utils.CanWriteToDir(dir) {
 			return dir, nil
 		}
 	}
-
+	if len(paths) > 0 {
+		last := paths[len(paths)-1]
+		if utils.IsWritableDir(last) {
+			return last, nil
+		}
+	}
 	return "", fmt.Errorf("no writable helper scripts directory found")
 }
 

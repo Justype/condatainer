@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 // Standard default permissions
@@ -239,6 +241,18 @@ func IsWritableDir(dir string) bool {
 	_ = os.Chmod(testFile, PermFile)
 	_ = os.Remove(testFile)
 	return true
+}
+
+// CanWriteToDir checks whether an existing directory is writable using a permission
+// check syscall, without creating the directory or writing any files.
+// Returns false if the directory does not exist.
+// Use this for probe operations (display, bind decisions, search-path scanning).
+// Use IsWritableDir when you intend to actually create the directory on first use.
+func CanWriteToDir(dir string) bool {
+	if _, err := os.Stat(dir); err != nil {
+		return false
+	}
+	return unix.Access(dir, unix.W_OK|unix.X_OK) == nil
 }
 
 // --- Gzip JSON Helpers ---

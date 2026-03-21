@@ -250,7 +250,7 @@ Shows:
 		for _, dir := range extraBaseDirs {
 			status := ""
 			if _, err := os.Stat(dir); err == nil {
-				if utils.IsWritableDir(dir) {
+				if utils.CanWriteToDir(dir) {
 					status = " " + utils.StyleSuccess("(writable)")
 				} else {
 					status = " " + utils.StyleWarning("(read-only)")
@@ -264,7 +264,7 @@ Shows:
 		if portableDir := config.GetPortableDataDir(); portableDir != "" {
 			status := ""
 			if _, err := os.Stat(portableDir); err == nil {
-				if utils.IsWritableDir(portableDir) {
+				if utils.CanWriteToDir(portableDir) {
 					status = " " + utils.StyleSuccess("(writable)")
 				} else {
 					status = " " + utils.StyleWarning("(read-only)")
@@ -278,7 +278,7 @@ Shows:
 		if scratchDir := config.GetScratchDataDir(); scratchDir != "" {
 			status := ""
 			if _, err := os.Stat(scratchDir); err == nil {
-				if utils.IsWritableDir(scratchDir) {
+				if utils.CanWriteToDir(scratchDir) {
 					status = " " + utils.StyleSuccess("(writable)")
 				} else {
 					status = " " + utils.StyleWarning("(read-only)")
@@ -292,7 +292,7 @@ Shows:
 		if userDir := config.GetUserDataDir(); userDir != "" {
 			status := ""
 			if _, err := os.Stat(userDir); err == nil {
-				if utils.IsWritableDir(userDir) {
+				if utils.CanWriteToDir(userDir) {
 					status = " " + utils.StyleSuccess("(writable)")
 				} else {
 					status = " " + utils.StyleWarning("(read-only)")
@@ -714,45 +714,54 @@ Portable is preferred for group/shared use, user is the fallback.`,
 		fmt.Println(utils.StyleTitle("Data Search Paths"))
 		fmt.Println()
 
+		// pathStatus returns inline status tags for a search-path entry.
+		// writeTarget is the resolved writable directory for this section (empty = not applicable).
+		pathStatus := func(dir, writeTarget string) string {
+			if !config.DirExists(dir) {
+				return " " + utils.StyleWarning("(not found)")
+			}
+			var tags string
+			if utils.CanWriteToDir(dir) {
+				if writeTarget != "" && dir == writeTarget {
+					tags = " " + utils.StyleSuccess("(writable, target)")
+				} else {
+					tags = " " + utils.StyleSuccess("(writable)")
+				}
+			} else {
+				tags = " " + utils.StyleWarning("(read-only)")
+			}
+			return tags
+		}
+
+		imagesWritable, _ := config.GetWritableImagesDir()
+		helperWritable, _ := config.GetWritableHelperScriptsDir()
+		cacheWritable, _ := config.GetWritableCacheDir()
+
 		// Images
 		fmt.Println(utils.StyleTitle("Images:"))
 		for i, dir := range config.GetImageSearchPaths() {
-			status := ""
-			if !config.DirExists(dir) {
-				status = " " + utils.StyleWarning("(not found)")
-			}
-			fmt.Printf("  %d. %s%s\n", i+1, dir, status)
-		}
-		if writableDir, err := config.GetWritableImagesDir(); err == nil {
-			fmt.Printf("  → Writable: %s\n", utils.StyleSuccess(writableDir))
+			fmt.Printf("  %d. %s%s\n", i+1, dir, pathStatus(dir, imagesWritable))
 		}
 		fmt.Println()
 
-		// Build scripts
+		// Build scripts (read-only search — nothing writes here)
 		fmt.Println(utils.StyleTitle("Build Scripts:"))
 		for i, dir := range config.GetBuildScriptSearchPaths() {
-			status := ""
-			if !config.DirExists(dir) {
-				status = " " + utils.StyleWarning("(not found)")
-			}
-			fmt.Printf("  %d. %s%s\n", i+1, dir, status)
-		}
-		if writableDir, err := config.GetWritableBuildScriptsDir(); err == nil {
-			fmt.Printf("  → Writable: %s\n", utils.StyleSuccess(writableDir))
+			fmt.Printf("  %d. %s%s\n", i+1, dir, pathStatus(dir, ""))
 		}
 		fmt.Println()
 
 		// Helper scripts
 		fmt.Println(utils.StyleTitle("Helper Scripts:"))
 		for i, dir := range config.GetHelperScriptSearchPaths() {
-			status := ""
-			if !config.DirExists(dir) {
-				status = " " + utils.StyleWarning("(not found)")
-			}
-			fmt.Printf("  %d. %s%s\n", i+1, dir, status)
+			fmt.Printf("  %d. %s%s\n", i+1, dir, pathStatus(dir, helperWritable))
 		}
-		if writableDir, err := config.GetWritableHelperScriptsDir(); err == nil {
-			fmt.Printf("  → Writable: %s\n", utils.StyleSuccess(writableDir))
+		fmt.Println()
+
+		// Cache
+		fmt.Println(utils.StyleTitle("Cache:"))
+		for i, dir := range config.GetCacheSearchPaths() {
+			fmt.Printf("  %d. %s%s\n", i+1, dir, pathStatus(dir, cacheWritable))
 		}
 		fmt.Println()
 

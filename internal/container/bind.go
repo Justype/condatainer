@@ -143,7 +143,7 @@ func BindPaths(paths ...string) []string {
 		if _, err := os.Stat(dir); err != nil {
 			continue
 		}
-		if !utils.IsWritableDir(dir) {
+		if !utils.CanWriteToDir(dir) {
 			bindPaths = append(bindPaths, dir+":"+dir+":ro")
 		} else {
 			bindPaths = append(bindPaths, dir)
