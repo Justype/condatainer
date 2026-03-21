@@ -276,6 +276,118 @@ func GetActiveOrUserConfigPath() (string, error) {
 	return GetUserConfigPath()
 }
 
+// inferLocationType returns "portable", "system", or "user" by comparing path against
+// known config file paths. Returns "user" for any unrecognised path.
+func inferLocationType(path string) string {
+	if p := GetPortableConfigPath(); p != "" && path == p {
+		return "portable"
+	}
+	if path == GetSystemConfigPath() {
+		return "system"
+	}
+	return "user"
+}
+
+// ResolveWritableConfigPath determines where a config-mutating command should write.
+// If location is non-empty it is resolved and checked for writability.
+// If location is empty the active config file is used when writable; otherwise falls back
+// to the user config path, mirroring the config init smart-default behaviour.
+func ResolveWritableConfigPath(location string) (path, locationType string, err error) {
+	if location != "" {
+		path, err = GetConfigPathByLocation(location)
+		if err != nil {
+			return "", "", err
+		}
+		locationType = NormalizeConfigLocation(location)
+		if !utils.CanWriteToDir(filepath.Dir(path)) {
+			return "", "", fmt.Errorf(
+				"config location '%s' is read-only: %s\nUse a different location or run with appropriate permissions.",
+				locationType, filepath.Dir(path),
+			)
+		}
+		return path, locationType, nil
+	}
+
+	// Auto-detect: active config file when writable, else user config
+	if active := viper.ConfigFileUsed(); active != "" {
+		if utils.CanWriteToDir(filepath.Dir(active)) {
+			return active, inferLocationType(active), nil
+		}
+	}
+	path, err = GetUserConfigPath()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to determine user config path: %w", err)
+	}
+	return path, "user", nil
+}
+
+// ReadConfigSliceKey reads a string-slice key from a config file without touching
+// global viper state. Returns nil if the file doesn't exist or the key is not set.
+func ReadConfigSliceKey(configPath, key string) []string {
+	if configPath == "" {
+		return nil
+	}
+	v := viper.New()
+	v.SetConfigFile(configPath)
+	if err := v.ReadInConfig(); err != nil {
+		return nil
+	}
+	return v.GetStringSlice(key)
+}
+
+// UpdateConfigKey reads path into a fresh viper instance, updates key to value,
+// and writes the result back to path. No global viper state is affected.
+// Creates the directory and file if needed (first-use creation).
+func UpdateConfigKey(path, key string, value any) error {
+	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	v := viper.New()
+	v.SetConfigType(ConfigType)
+	v.SetConfigFile(path)
+	_ = v.ReadInConfig() // ignore error: file may not exist yet
+	v.Set(key, value)
+	if err := v.WriteConfigAs(path); err != nil {
+		return fmt.Errorf("failed to write config to %s: %w", path, err)
+	}
+	return os.Chmod(path, utils.PermFile)
+}
+
+// ReadConfigKey reads a single key from a config file without touching global viper state.
+// Returns "" if the file doesn't exist, can't be read, or the key is not set.
+func ReadConfigKey(configPath, key string) string {
+	if configPath == "" {
+		return ""
+	}
+	v := viper.New()
+	v.SetConfigFile(configPath)
+	if err := v.ReadInConfig(); err != nil {
+		return ""
+	}
+	return v.GetString(key)
+}
+
+// SaveMinimalConfigTo writes only the provided non-empty keys to path using a fresh viper
+// instance, so no default values bleed in. Intended for user config init when
+// portable/system config supplies everything else.
+func SaveMinimalConfigTo(path string, apptainerBin, schedulerBin string) error {
+	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	v := viper.New()
+	v.SetConfigType(ConfigType)
+	if apptainerBin != "" {
+		v.Set("apptainer_bin", apptainerBin)
+	}
+	if schedulerBin != "" {
+		v.Set("scheduler_bin", schedulerBin)
+	}
+	if err := v.WriteConfigAs(path); err != nil {
+		return fmt.Errorf("failed to write config to %s: %w", path, err)
+	}
+	return os.Chmod(path, utils.PermFile)
+}
+
 // SaveConfig saves current Viper config to the active config file,
 // or to user config file if no config is currently active
 func SaveConfig() error {

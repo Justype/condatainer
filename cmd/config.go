@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -17,6 +18,7 @@ import (
 var (
 	showPath     bool
 	initLocation string // user, portable, system, or a custom path
+	setLocation  string // target location for config set/append/prepend/remove
 )
 
 // configKeyDefs maps every known config key to whether it holds a string slice (array).
@@ -47,8 +49,9 @@ var configKeyDefs = map[string]bool{
 
 func isArrayKey(key string) bool { return configKeyDefs[key] }
 
-// modifyArrayConfig reads the current slice for key, applies modify, writes back.
-func modifyArrayConfig(key string, modify func([]string) []string) error {
+// modifyArrayConfig reads the current slice for key from the target config file,
+// applies modify, and writes the result back. Returns the config path written.
+func modifyArrayConfig(key string, modify func([]string) []string) (string, error) {
 	if !isArrayKey(key) {
 		var arrayKeys []string
 		for k, isArr := range configKeyDefs {
@@ -57,13 +60,16 @@ func modifyArrayConfig(key string, modify func([]string) []string) error {
 			}
 		}
 		sort.Strings(arrayKeys)
-		return fmt.Errorf("'%s' is not an array config key; array keys: %s",
+		return "", fmt.Errorf("'%s' is not an array config key; array keys: %s",
 			key, strings.Join(arrayKeys, ", "))
 	}
-	current := viper.GetStringSlice(key)
+	configPath, _, err := config.ResolveWritableConfigPath(setLocation)
+	if err != nil {
+		return "", err
+	}
+	current := config.ReadConfigSliceKey(configPath, key)
 	updated := modify(current)
-	viper.Set(key, updated)
-	return config.SaveConfig()
+	return configPath, config.UpdateConfigKey(configPath, key, updated)
 }
 
 func arrayKeyCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -530,22 +536,17 @@ Time duration format (for build.time):
 		if key == "build.compress_args" {
 			value = config.NormalizeCompressArgs(value)
 		}
-		// Set the value
-		viper.Set(key, value)
 
-		// Get the config path that will be updated
-		configPath, err := config.GetActiveOrUserConfigPath()
+		configPath, locationType, err := config.ResolveWritableConfigPath(setLocation)
 		if err != nil {
-			ExitWithError("Failed to get config path: %v", err)
+			ExitWithError("%v", err)
 		}
-
-		// Save to config file
-		if err := config.SaveConfig(); err != nil {
+		if err := config.UpdateConfigKey(configPath, key, value); err != nil {
 			ExitWithError("Failed to save config: %v", err)
 		}
 
 		utils.PrintSuccess("Set %s = %s", utils.StyleInfo(key), utils.StyleInfo(value))
-		utils.PrintNote("Config saved to: %s", configPath)
+		utils.PrintNote("Config saved to: %s (%s)", configPath, locationType)
 	},
 }
 
@@ -579,12 +580,27 @@ By default, the location is chosen based on the installation:
 				ExitWithError("Invalid location: %v", err)
 			}
 			locationType = config.NormalizeConfigLocation(initLocation)
+			// Fail early with an actionable error if the portable dir is read-only
+			if locationType == "portable" {
+				if portableDir := filepath.Dir(configPath); !utils.CanWriteToDir(portableDir) {
+					ExitWithError(
+						"Portable config directory is read-only: %s\n"+
+							"Run as a privileged user, or use '-l user' to create a personal config instead.",
+						portableDir,
+					)
+				}
+			}
 		} else {
-			// Smart default: portable if in dedicated installation, otherwise user
-			if config.IsPortableInstallation() {
-				configPath = config.GetPortableConfigPath()
+			// Smart default: portable if in dedicated installation AND writable, otherwise user
+			portablePath := config.GetPortableConfigPath()
+			if portablePath != "" && utils.CanWriteToDir(filepath.Dir(portablePath)) {
+				configPath = portablePath
 				locationType = "portable"
 			} else {
+				if portablePath != "" {
+					// Portable install detected but dir is read-only — fall back gracefully
+					utils.PrintNote("Portable install detected but directory is read-only; using user config instead.")
+				}
 				configPath, err = config.GetUserConfigPath()
 				if err != nil {
 					ExitWithError("Failed to get config path: %v", err)
@@ -615,37 +631,60 @@ By default, the location is chosen based on the installation:
 			ExitWithError("Cannot initialize config inside a container. Please run this command on the host system.")
 		}
 
-		// Detect apptainer/singularity (PATH first, then module avail).
-		// Pre-set in viper so ForceDetectAndSaveTo reuses it without re-probing modules.
-		detectedApptainerBin := config.DetectApptainerBin()
-		if detectedApptainerBin == "" {
-			ExitWithError("Neither 'apptainer' nor 'singularity' binary found (checked PATH and 'module avail').")
-		}
-		viper.Set("apptainer_bin", detectedApptainerBin)
+		var detectedCompression string
 
-		// Auto-detect compression based on binary type and version.
-		// Clear any previously set viper value so AutoDetectCompression always runs during init.
-		detectedCompression := config.Global.Build.CompressArgs // fallback to runtime default
-		viper.Set("build.compress_args", "")
-		if err := apptainer.SetBin(detectedApptainerBin); err == nil {
-			if version, err := apptainer.GetVersion(); err == nil {
-				config.AutoDetectCompression(apptainer.CheckZstdSupport(version), apptainer.IsSingularity())
-				detectedCompression = config.Global.Build.CompressArgs
+		if locationType == "user" {
+			// Minimal user init: only detect and write keys not already in portable/system config.
+			portablePath := config.GetPortableConfigPath()
+			systemPath := config.GetSystemConfigPath()
+
+			apptainerForUser := ""
+			if config.ReadConfigKey(portablePath, "apptainer_bin") == "" &&
+				config.ReadConfigKey(systemPath, "apptainer_bin") == "" {
+				detectedApptainerBin := config.DetectApptainerBin()
+				if detectedApptainerBin == "" {
+					ExitWithError("Neither 'apptainer' nor 'singularity' binary found (checked PATH and 'module avail').")
+				}
+				apptainerForUser = detectedApptainerBin
+				viper.Set("apptainer_bin", detectedApptainerBin)
+			}
+
+			schedulerForUser := ""
+			if config.ReadConfigKey(portablePath, "scheduler_bin") == "" &&
+				config.ReadConfigKey(systemPath, "scheduler_bin") == "" {
+				detectedSchedulerBin := config.DetectSchedulerBin()
+				if detectedSchedulerBin != "" {
+					schedulerForUser = detectedSchedulerBin
+					viper.Set("scheduler_bin", detectedSchedulerBin)
+				}
+			}
+
+			if err := config.SaveMinimalConfigTo(configPath, apptainerForUser, schedulerForUser); err != nil {
+				ExitWithError("Failed to save config: %v", err)
+			}
+		} else {
+			// Full portable/system init: always detect apptainer binary.
+			detectedApptainerBin := config.DetectApptainerBin()
+			if detectedApptainerBin == "" {
+				ExitWithError("Neither 'apptainer' nor 'singularity' binary found (checked PATH and 'module avail').")
+			}
+			viper.Set("apptainer_bin", detectedApptainerBin)
+			detectedCompression = config.Global.Build.CompressArgs // fallback to runtime default
+			viper.Set("build.compress_args", "")
+			if err := apptainer.SetBin(detectedApptainerBin); err == nil {
+				if version, err := apptainer.GetVersion(); err == nil {
+					config.AutoDetectCompression(apptainer.CheckZstdSupport(version), apptainer.IsSingularity())
+					detectedCompression = config.Global.Build.CompressArgs
+				}
+			}
+			viper.Set("build.compress_args", detectedCompression)
+
+			if _, err := config.ForceDetectAndSaveTo(configPath); err != nil {
+				ExitWithError("Failed to save config: %v", err)
 			}
 		}
-		viper.Set("build.compress_args", detectedCompression)
 
-		// Detect scheduler and save everything to config in one pass.
-		updated, err := config.ForceDetectAndSaveTo(configPath)
-		if err != nil {
-			ExitWithError("Failed to save config: %v", err)
-		}
-
-		if updated {
-			utils.PrintSuccess("Config file created with auto-detected settings")
-		} else {
-			utils.PrintSuccess("Config file created")
-		}
+		utils.PrintSuccess("Config file created")
 		fmt.Printf("  Location: %s (%s)\n", utils.StylePath(configPath), locationType)
 
 		// Show what was detected
@@ -657,7 +696,9 @@ By default, the location is chosen based on the installation:
 		} else {
 			fmt.Printf("  Scheduler: %s\n", utils.StyleWarning("not found"))
 		}
-		fmt.Printf("  Compression: %s\n", detectedCompression)
+		if locationType != "user" {
+			fmt.Printf("  Compression: %s\n", detectedCompression)
+		}
 	},
 }
 
@@ -878,7 +919,7 @@ var configAppendCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		key, value := args[0], args[1]
 		moved := false
-		if err := modifyArrayConfig(key, func(cur []string) []string {
+		configPath, err := modifyArrayConfig(key, func(cur []string) []string {
 			out := make([]string, 0, len(cur))
 			for _, v := range cur {
 				if v == value {
@@ -888,10 +929,10 @@ var configAppendCmd = &cobra.Command{
 				out = append(out, v)
 			}
 			return append(out, value)
-		}); err != nil {
+		})
+		if err != nil {
 			ExitWithError("%v", err)
 		}
-		configPath, _ := config.GetActiveOrUserConfigPath()
 		if moved {
 			utils.PrintSuccess("Moved %s to end of %s", utils.StyleInfo(value), utils.StyleInfo(key))
 		} else {
@@ -911,7 +952,7 @@ var configPrependCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		key, value := args[0], args[1]
 		moved := false
-		if err := modifyArrayConfig(key, func(cur []string) []string {
+		configPath, err := modifyArrayConfig(key, func(cur []string) []string {
 			out := make([]string, 0, len(cur))
 			for _, v := range cur {
 				if v == value {
@@ -921,10 +962,10 @@ var configPrependCmd = &cobra.Command{
 				out = append(out, v)
 			}
 			return append([]string{value}, out...)
-		}); err != nil {
+		})
+		if err != nil {
 			ExitWithError("%v", err)
 		}
-		configPath, _ := config.GetActiveOrUserConfigPath()
 		if moved {
 			utils.PrintSuccess("Moved %s to front of %s", utils.StyleInfo(value), utils.StyleInfo(key))
 		} else {
@@ -944,7 +985,7 @@ var configRemoveCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		key, value := args[0], args[1]
 		removed := false
-		if err := modifyArrayConfig(key, func(cur []string) []string {
+		configPath, err := modifyArrayConfig(key, func(cur []string) []string {
 			var out []string
 			for _, v := range cur {
 				if v == value {
@@ -954,10 +995,10 @@ var configRemoveCmd = &cobra.Command{
 				out = append(out, v)
 			}
 			return out
-		}); err != nil {
+		})
+		if err != nil {
 			ExitWithError("%v", err)
 		}
-		configPath, _ := config.GetActiveOrUserConfigPath()
 		if removed {
 			utils.PrintSuccess("Removed %s from %s", utils.StyleInfo(value), utils.StyleInfo(key))
 			utils.PrintNote("Config saved to: %s", configPath)
@@ -971,6 +1012,10 @@ func init() {
 	// Add flags
 	configShowCmd.Flags().BoolVar(&showPath, "path", false, "Show only the config file path")
 	configInitCmd.Flags().StringVarP(&initLocation, "location", "l", "", "Config location: user (u), portable (p), or system (s)")
+	configSetCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), portable (p), or system (s)")
+	configAppendCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), portable (p), or system (s)")
+	configPrependCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), portable (p), or system (s)")
+	configRemoveCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), portable (p), or system (s)")
 
 	// Add subcommands
 	configCmd.AddCommand(configShowCmd)
