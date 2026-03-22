@@ -21,62 +21,66 @@ const ConfigFilename = "config"
 // ConfigType is the type of config file (yaml, json, toml)
 const ConfigType = "yaml"
 
-// InitViper initializes Viper with proper search paths and defaults
+// configLayers holds per-file viper instances in priority order (user → portable → system).
+// Populated by InitViper(). Used by mergeFromLayers() for array key merging.
+var configLayers []*viper.Viper
+
+// InitViper initializes Viper with proper search paths and defaults.
 // Priority (highest to lowest):
 // 1. Command-line flags (handled by cobra)
-// 2. Environment variables (CNT_*)
+// 2. Environment variables (CNT_*) — always replaces for that key
 // 3. User config file (~/.config/condatainer/config.yaml)
-// 4. Portable config (parent of bin/ folder where executable lives)
+// 4. Portable config (<install>/config.yaml, if in dedicated bin/ folder)
 // 5. System config file (/etc/condatainer/config.yaml)
 // 6. Defaults
 //
-// Rationale: User config takes priority over portable/shared config,
-// allowing users to override shared defaults (e.g., API keys, queues)
-// without affecting other users of the shared installation.
+// Scalar keys: highest-priority config file that sets the key wins.
+// Array keys (extra_*_dirs, extra_scripts_links): merged across all config layers
+// so that e.g. a sysadmin's extra_base_dirs in system config are visible to users
+// who also have their own config. channels is an exception — overwrite, not merge.
 func InitViper() error {
 	viper.SetConfigName(ConfigFilename)
 	viper.SetConfigType(ConfigType)
-
-	// Set config search paths (order matters - first found wins)
-
-	// 1. User config (highest priority - allows user overrides)
-	if userConfigDir, err := os.UserConfigDir(); err == nil {
-		viper.AddConfigPath(filepath.Join(userConfigDir, "condatainer"))
-	}
-
-	// 2. Portable config: if executable is in a "bin" folder, check parent folder
-	// e.g., /path/to/condatainer/bin/condatainer -> /path/to/condatainer/config.yaml
-	// Excludes common user bin directories ($HOME/bin, $HOME/.local/bin, /usr/bin, etc.)
-	if exePath, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exePath)
-		if filepath.Base(exeDir) == "bin" {
-			parentDir := filepath.Dir(exeDir)
-			// Exclude common bin directories that aren't dedicated installations
-			if !isNonPortableParent(parentDir) {
-				viper.AddConfigPath(parentDir)
-			}
-		}
-	}
-
-	// 3. System-wide config (lower priority)
-	viper.AddConfigPath("/etc/condatainer")
-
-	// Environment variables
 	viper.SetEnvPrefix("CNT")
 	viper.AutomaticEnv()
-
-	// Set defaults (lowest priority)
 	setDefaults()
 
-	// Read config file (non-fatal if not found)
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			// Config file not found; will use defaults and auto-detect
-			return nil
-		}
-		return fmt.Errorf("error reading config file: %w", err)
+	// Collect config paths in priority order: user > portable > system
+	type configSource struct{ path, label string }
+	var sources []configSource
+	if userPath, err := GetUserConfigPath(); err == nil {
+		sources = append(sources, configSource{userPath, "user"})
 	}
+	if portablePath := GetPortableConfigPath(); portablePath != "" {
+		sources = append(sources, configSource{portablePath, "portable"})
+	}
+	sources = append(sources, configSource{GetSystemConfigPath(), "system"})
 
+	// Load each existing config file.
+	// The first found becomes the global viper primary (for scalar keys + env var compat).
+	// configLayers[0] reuses the global viper instance to avoid reading the primary file twice.
+	primaryLoaded := false
+	configLayers = nil
+	for _, src := range sources {
+		if !fileExists(src.path) {
+			continue
+		}
+		if !primaryLoaded {
+			viper.SetConfigFile(src.path)
+			if err := viper.ReadInConfig(); err != nil {
+				return fmt.Errorf("error reading config %s: %w", src.path, err)
+			}
+			configLayers = append(configLayers, viper.GetViper()) // reuse, no re-read
+			primaryLoaded = true
+		} else {
+			v := viper.New()
+			v.SetConfigFile(src.path)
+			if err := v.ReadInConfig(); err != nil {
+				return fmt.Errorf("error reading config %s: %w", src.path, err)
+			}
+			configLayers = append(configLayers, v)
+		}
+	}
 	return nil
 }
 

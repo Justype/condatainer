@@ -12,9 +12,19 @@ persist.go      Configuration file loading (Viper)
 
 ## Configuration Hierarchy
 
+Two independent mechanisms with different semantics:
+
+**1. Environment variables (`CNT_*`)** — admin-level control (e.g. set in a module file).
+Always **replaces** the config file value for that key entirely.
+
+**2. Config files** — layered user/group/system config. All existing files are loaded:
+- Scalar keys (`apptainer_bin`, `default_distro`, etc.): highest-priority file that sets the key wins.
+- Array keys (`extra_*_dirs`, `extra_scripts_links`): **merged** across all layers (user ++ portable ++ system), deduplicated, user entries first.
+- `channels`: **overwrite** — highest-priority config file that sets it wins (not merged).
+
 Priority order (highest to lowest):
 1. Command-line flags
-2. Environment variables
+2. Environment variables (`CNT_*`) — replaces, not merged
 3. User config (`~/.config/condatainer/config.yaml`)
 4. Portable config (`<install>/config.yaml`)
 5. System config (`/etc/condatainer/config.yaml`)

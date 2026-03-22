@@ -63,14 +63,40 @@ func splitPipeOrColon(val string) []string {
 // getEnvSlice reads a string-slice config key, checking the corresponding env var first.
 // The env var name is derived from the key: "extra_image_dirs" → "CNT_EXTRA_IMAGE_DIRS".
 // The split function controls how the env var value is parsed.
-func getEnvSlice(key string, split func(string) []string) []string {
+// If merge is true and no env var is set, values are concatenated across all config layers
+// (user ++ portable ++ system). If merge is false, only the primary config layer is used.
+// ENV vars always replace — config layer merging is never consulted when an env var is set.
+func getEnvSlice(key string, split func(string) []string, merge bool) []string {
 	envKey := "CNT_" + strings.ToUpper(key)
 	if envVal := os.Getenv(envKey); envVal != "" {
 		if vals := split(envVal); len(vals) > 0 {
 			return vals
 		}
 	}
+	if merge {
+		return mergeFromLayers(key)
+	}
 	return viper.GetStringSlice(key)
+}
+
+// mergeFromLayers returns the concatenation of a string-slice key across all config
+// layers (user ++ portable ++ system), deduplicating while preserving order.
+// Falls back to viper.GetStringSlice if no layers are loaded (e.g. in tests).
+func mergeFromLayers(key string) []string {
+	if len(configLayers) == 0 {
+		return viper.GetStringSlice(key)
+	}
+	seen := make(map[string]bool)
+	var result []string
+	for _, v := range configLayers {
+		for _, entry := range v.GetStringSlice(key) {
+			if !seen[entry] {
+				seen[entry] = true
+				result = append(result, entry)
+			}
+		}
+	}
+	return result
 }
 
 // ParseDirEntry splits a dir entry ("path", "path:ro", or "path:rw") into (path, readOnly).
@@ -88,27 +114,28 @@ func ParseDirEntry(entry string) (string, bool) {
 
 // GetChannels returns the conda channels from config or environment.
 // CNT_CHANNELS supports "|" and ":" as separators ("|" takes precedence).
-func GetChannels() []string { return getEnvSlice("channels", splitPipeOrColon) }
+// Overwrite semantics: if set in config, highest-priority layer wins (no merge).
+func GetChannels() []string { return getEnvSlice("channels", splitPipeOrColon, false) }
 
 // GetExtraBaseDirs returns extra base directories from config or environment.
 // CNT_EXTRA_BASE_DIRS supports "|" and ":" as separators ("|" takes precedence).
-func GetExtraBaseDirs() []string { return getEnvSlice("extra_base_dirs", splitPipeOrColon) }
+func GetExtraBaseDirs() []string { return getEnvSlice("extra_base_dirs", splitPipeOrColon, true) }
 
 // GetExtraImageDirs returns explicit extra image directories from config or environment.
 // CNT_EXTRA_IMAGE_DIRS uses "|" as separator; entries support ":ro"/":rw" markers.
-func GetExtraImageDirs() []string { return getEnvSlice("extra_image_dirs", splitPipe) }
+func GetExtraImageDirs() []string { return getEnvSlice("extra_image_dirs", splitPipe, true) }
 
 // GetExtraBuildDirs returns explicit extra build-scripts directories from config or environment.
 // CNT_EXTRA_BUILD_DIRS supports "|" and ":" as separators ("|" takes precedence).
-func GetExtraBuildDirs() []string { return getEnvSlice("extra_build_dirs", splitPipeOrColon) }
+func GetExtraBuildDirs() []string { return getEnvSlice("extra_build_dirs", splitPipeOrColon, true) }
 
 // GetExtraHelperDirs returns explicit extra helper-scripts directories from config or environment.
 // CNT_EXTRA_HELPER_DIRS uses "|" as separator; entries support ":ro"/":rw" markers.
-func GetExtraHelperDirs() []string { return getEnvSlice("extra_helper_dirs", splitPipe) }
+func GetExtraHelperDirs() []string { return getEnvSlice("extra_helper_dirs", splitPipe, true) }
 
 // GetExtraScriptsLinks returns extra remote build script source URLs.
 // CNT_EXTRA_SCRIPTS_LINKS uses "|" as separator (URLs contain "://").
-func GetExtraScriptsLinks() []string { return getEnvSlice("extra_scripts_links", splitPipe) }
+func GetExtraScriptsLinks() []string { return getEnvSlice("extra_scripts_links", splitPipe, true) }
 
 // =============================================================================
 // Dir Getters (single path, no IO)

@@ -1,18 +1,32 @@
 # Configuration
 
-**CondaTainer** uses a layered configuration system with multiple sources. Configuration values are applied in priority order, with higher-priority sources overriding lower ones.
+**CondaTainer** uses a layered configuration system with two independent mechanisms.
 
 - [Configuration Priority](#configuration-priority)
 - [Data Directory Search Paths](#data-directory-search-paths)
 
 ## Configuration Priority
 
+### Environment Variables (admin override)
+
+`CNT_*` environment variables always **replace** the config file value for that key. When set (e.g. via a module file), config files are not consulted for that key. This is the recommended way for sysadmins to enforce cluster-wide settings without editing user configs.
+
+### Config Files (layered)
+
+All three config files are loaded and merged when they exist:
+
 1. **Command-line flags** (highest priority)
-2. **Environment variables** (`CNT_*`)
+2. **Environment variables** (`CNT_*`) — replaces; config files not consulted
 3. **User config file** (`~/.config/condatainer/config.yaml`)
 4. **Portable config** (`<install-dir>/config.yaml`)
 5. **System config file** (`/etc/condatainer/config.yaml`)
 6. **Defaults** (lowest priority)
+
+**Scalar keys** (`apptainer_bin`, `default_distro`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
+
+**Directory and source array keys** (`extra_base_dirs`, `extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`): **merged** across all config files. Entries from user config appear first (higher search priority), followed by portable, then system. This lets a sysadmin publish shared directories in `/etc/condatainer/config.yaml` without requiring every user to copy them into their own config.
+
+**`channels`**: overwrite — the highest-priority config file that sets it wins (not merged), since channel order controls conda package resolution priority.
 
 ## Quick Start
 
@@ -177,6 +191,8 @@ condatainer config validate
 This command checks that key binaries are accessible, build settings are sane, and the `default_distro` value is one of the supported distro names.
 
 ## Environment Variables
+
+Environment variables **always replace** the corresponding config file value — including merged array keys. Setting `CNT_EXTRA_BASE_DIRS` overrides all `extra_base_dirs` values from every config file. This makes env vars suitable for module-file-based admin control: setting a variable in a module file gives a predictable, reproducible environment regardless of what users have in their configs.
 
 Most configuration settings may be overridden by environment variables.
 The name is derived automatically from the Viper key by
@@ -377,12 +393,20 @@ For shared group installations, CondaTainer supports "portable" mode where the c
 /project/group/condatainer/
   bin/
     condatainer         # Executable
-  config.yaml           # Portable config
+  config.yaml           # Portable config (loaded alongside user + system configs)
   images/               # Shared images
   build-scripts/        # Shared build scripts
 ```
 
-Users can still have personal configs (`~/.config/condatainer/config.yaml`) that override the shared settings.
+All three config files (user, portable, system) are loaded simultaneously. For `extra_base_dirs` and other directory keys, entries from all configs are **merged** — so a group admin can add shared directories to the portable config and every user automatically searches those directories, even if they also have a personal config.
+
+For scalar keys like `apptainer_bin`, the user config takes priority; users can override portable/system defaults in their own config without affecting other users.
+
+To set up a portable config for a shared installation:
+
+```bash
+condatainer config init -l portable
+```
 
 ## Compression Settings
 
