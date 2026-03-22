@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -46,6 +47,7 @@ func init() {
 	listCmd.Flags().BoolVarP(&listDelete, "delete", "d", false, "Delete listed overlays after confirmation (used with search terms)")
 	listCmd.Flags().BoolP("remove", "r", false, "Alias for --delete")
 	listCmd.Flags().BoolVarP(&listExact, "exact", "e", false, "Force exact full-name match even for a single term")
+	listCmd.Flags().StringP("dir", "D", "", "Limit to a specific image directory (substring match)")
 }
 
 // DirOverlays holds the scan results for a single image directory.
@@ -83,7 +85,13 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 	query := NewSearchQuery(filters, listExactLookup)
 
-	results := scanOverlaysByDir(query)
+	dirFilter, _ := cmd.Flags().GetString("dir")
+	dirs := filterImageDirs(config.GetImageSearchPaths(), dirFilter)
+	if dirFilter != "" && len(dirs) == 0 {
+		utils.PrintWarning("No image directory matching %q found.", dirFilter)
+		os.Exit(ExitCodeError)
+	}
+	results := scanOverlaysByDir(dirs, query)
 
 	hasAnyMatch := false
 	firstSection := true
@@ -181,8 +189,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	if listDelete && filterActive && hasAnyMatch {
-		// Collect all matching overlays across dirs for deletion
-		allMatching := []string{}
+		var allMatching []string
 		for _, d := range results {
 			for name, versions := range d.AppGroups {
 				for _, version := range versions {
@@ -195,57 +202,8 @@ func runList(cmd *cobra.Command, args []string) error {
 			}
 			allMatching = append(allMatching, d.DataList...)
 		}
-		// Deduplicate names for deletion
-		seen := make(map[string]bool)
-		deduped := allMatching[:0]
-		for _, name := range allMatching {
-			if !seen[name] {
-				seen[name] = true
-				deduped = append(deduped, name)
-			}
-		}
-		allMatching = deduped
-
-		if len(allMatching) > 0 {
-			fmt.Print("\n")
-			shouldDelete := false
-			if utils.ShouldAnswerYes() {
-				shouldDelete = true
-			} else {
-				fmt.Printf("Remove listed %d overlay(s)? Cannot be undone. [y/N]: ", len(allMatching))
-				input, readErr := utils.ReadLineContext(cmd.Context())
-				shouldDelete = readErr == nil && (input == "y" || input == "yes")
-			}
-
-			if shouldDelete {
-				resolvedMap, err := getInstalledOverlaysMap()
-				if err != nil {
-					return err
-				}
-				for _, name := range allMatching {
-					normalized := utils.NormalizeNameVersion(name)
-					overlayPath, ok := resolvedMap[normalized]
-					if !ok {
-						continue
-					}
-					if !utils.CanWriteToDir(filepath.Dir(overlayPath)) {
-						utils.PrintWarning("Overlay %s is in a read-only directory and cannot be removed.", utils.StyleName(name))
-						continue
-					}
-					if err := os.Remove(overlayPath); err != nil {
-						utils.PrintError("Failed to remove overlay %s: %v", utils.StyleName(name), err)
-						continue
-					}
-					utils.PrintSuccess("Overlay %s removed.", utils.StyleName(name))
-					envPath := overlayPath + ".env"
-					if utils.FileExists(envPath) {
-						os.Remove(envPath)
-					}
-				}
-			} else {
-				utils.PrintNote("Cancelled")
-			}
-		}
+		fmt.Print("\n")
+		return performDelete(cmd, allMatching)
 	}
 
 	return nil
@@ -253,11 +211,11 @@ func runList(cmd *cobra.Command, args []string) error {
 
 // scanOverlaysByDir scans each image directory independently and returns per-dir results.
 // Missing directories are skipped; empty directories are included with empty groups.
-func scanOverlaysByDir(query *SearchQuery) []DirOverlays {
+func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 	distroPrefix := strings.ToLower(config.Global.DefaultDistro) + "/"
 	var result []DirOverlays
 
-	for _, imageDir := range config.GetImageSearchPaths() {
+	for _, imageDir := range dirs {
 		if !utils.DirExists(imageDir) {
 			continue // skip missing
 		}
@@ -369,4 +327,37 @@ func maxWidth(names []string) int {
 		}
 	}
 	return width
+}
+
+// filterImageDirs filters dirs according to dirFilter:
+//   - empty          → return all
+//   - no leading /   → substring match ("scratch" matches "/scratch/user/images")
+//   - starts with /  → exact match, unless it contains * or ? (wildcard via filepath.Match)
+func filterImageDirs(dirs []string, dirFilter string) []string {
+	if dirFilter == "" {
+		return dirs
+	}
+	var out []string
+	for _, d := range dirs {
+		if matchDirFilter(d, dirFilter) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func matchDirFilter(dir, filter string) bool {
+	if !strings.HasPrefix(filter, "/") {
+		return strings.Contains(dir, filter)
+	}
+	if strings.ContainsAny(filter, "*?") {
+		// filepath.Match only matches within a single path component (* won't cross /).
+		// Convert to regex so * matches across slashes: /scratch/* → ^/scratch/.*$
+		pattern := "^" + regexp.QuoteMeta(filter) + "$"
+		pattern = strings.ReplaceAll(pattern, `\*`, `.*`)
+		pattern = strings.ReplaceAll(pattern, `\?`, `.`)
+		matched, _ := regexp.MatchString(pattern, dir)
+		return matched
+	}
+	return dir == filter
 }

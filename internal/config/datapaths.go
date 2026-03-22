@@ -361,11 +361,12 @@ func buildScriptSearchPaths(subdir string) []string {
 	}
 
 	// 0a. Explicit extra script directories (highest priority)
-	if subdir == "build-scripts" {
+	switch subdir {
+	case "build-scripts":
 		for _, path := range GetExtraBuildDirs() {
 			addPath(path)
 		}
-	} else if subdir == "helper-scripts" {
+	case "helper-scripts":
 		for _, entry := range GetExtraHelperDirs() {
 			path, _ := ParseDirEntry(entry)
 			addPath(path)

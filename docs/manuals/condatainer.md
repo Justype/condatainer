@@ -595,8 +595,9 @@ condatainer list [search_terms...] [flags]
 
 **Options:**
 
-* `-d`, `--delete`: Prompt to delete listed overlays after displaying them.
+* `-d`, `--delete`: Prompt to delete listed overlays after displaying them (requires search terms).
 * `-r`, `--remove`: Alias for `--delete`.
+* `-D`, `--dir`: Limit listing (and deletion) to specific image directories. Matching rules: no leading `/` → substring match (`scratch` matches `/scratch/user/images`); leading `/` → exact match; leading `/` with `*`/`?` → wildcard where `*` matches across path separators (`/scratch/*` matches `/scratch/user/images`).
 
 **Search rules:**
 
@@ -604,17 +605,29 @@ Same as `avail` (single term: substring/wildcard/regex; multiple terms: exact-fi
 
 **Features:**
 
+* Output is grouped by image directory with a full-width header per directory.
 * Lists app overlays (with versions), OS overlays, and data overlays.
-* Searches across all image directories.
-* Exits with code `1` if no overlays match the search terms.
+* Missing directories are skipped; existing but empty directories show a `(no overlays)` line.
+* Exits with code `1` if search terms are given but no overlays match.
+
+**Delete mode (`-d`/`-r`):**
+
+* Requires search terms — `list -r` alone only lists.
+* If the same overlay name exists in multiple directories, `--dir` is required to avoid ambiguity.
+* Checks file lock and write permission before each deletion.
 
 **Examples:**
 
 ```bash
-$ condatainer list cellranger          # substring
-$ condatainer list 'cell*'             # wildcard
-$ condatainer list cellranger 9        # AND search
-$ condatainer list cellranger/9.0.1 -d # show then prompt to delete
+$ condatainer list                            # all overlays, grouped by dir
+$ condatainer list cellranger                 # substring match
+$ condatainer list 'cell*'                    # wildcard
+$ condatainer list cellranger 9               # AND search
+$ condatainer list --dir scratch              # only dirs with "scratch" in path
+$ condatainer list --dir /scratch/user/images # exact dir match
+$ condatainer list --dir '/scratch/*'         # wildcard: all dirs under /scratch
+$ condatainer list cellranger/9.0.1 -d        # show then prompt to delete
+$ condatainer list cellranger -r --dir /scratch  # delete from /scratch only
 ```
 
 ### Remove
@@ -624,10 +637,16 @@ Deletes specific overlays and their associated `.env` files.
 **Aliases:** `rm`, `delete`, `uninstall`
 
 ```
-condatainer remove [search_terms...]
+condatainer remove [search_terms... | file_paths...]
 ```
 
-**Search rules:**
+**Options:**
+
+* `-D`, `--dir`: Limit to specific image directories (search mode only). No leading `/` → substring match; leading `/` → exact match; leading `/` with `*`/`?` → wildcard.
+
+**Modes:**
+
+**Search mode** — args have no overlay extension:
 
 | Input | Mode |
 |---|---|
@@ -637,11 +656,17 @@ condatainer remove [search_terms...]
 | Multiple terms, first is an exact name | Each term matched exactly (OR), warns if not found |
 | Multiple terms, first not found | All terms AND substring |
 
+**File mode** — args end with `.img`, `.sqf`, `.sqsh`, or `.squashfs`:
+
+Removes the specified files directly, bypassing the name-based search. Useful for overlays that are not in any configured image directory.
+
 **Features:**
 
-* Prompts for confirmation before deletion.
-* Warns if an exact term is not found.
-* Only removes overlays in writable directories.
+* Overlays to be removed are displayed grouped by directory before confirmation.
+* If the same overlay name exists in multiple directories, `--dir` is required to avoid ambiguity.
+* Checks file lock and write permission before each deletion.
+* Also removes the associated `.env` file if present.
+* Cannot mix file paths and search terms in one invocation.
 
 **Examples:**
 
@@ -651,6 +676,10 @@ $ condatainer rm cellranger                          # all cellranger versions (
 $ condatainer rm 'cell*'                             # wildcard
 $ condatainer rm cellranger/9.0.1 cellranger/8.0.1  # multiple exact versions
 $ condatainer rm cellranger 9                        # AND search
+$ condatainer rm cellranger --dir scratch            # only from dirs with "scratch" in path
+$ condatainer rm cellranger --dir '/scratch/*'       # wildcard: all dirs under /scratch
+$ condatainer rm /path/to/cellranger--9.0.1.sqf      # direct file path
+$ condatainer rm *.img                               # all .img files in current dir
 ```
 
 ### Search
