@@ -118,6 +118,27 @@ func BindPaths(paths ...string) []string {
 		bindPaths = append(bindPaths, tmpDir)
 	}
 
+	// Bind explicit extra image dirs (respecting :ro marker)
+	for _, entry := range config.GetExtraImageDirs() {
+		path, readOnly := config.ParseDirEntry(entry)
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		if readOnly || !utils.CanWriteToDir(path) {
+			bindPaths = append(bindPaths, path+":"+path+":ro")
+		} else {
+			bindPaths = append(bindPaths, path)
+		}
+	}
+
+	// Bind explicit extra build-scripts dirs (always read-only — condatainer never writes there)
+	for _, path := range config.GetExtraBuildDirs() {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		bindPaths = append(bindPaths, path+":"+path+":ro")
+	}
+
 	// Collect all base directories
 	baseDirs := []string{}
 

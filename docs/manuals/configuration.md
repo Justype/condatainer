@@ -56,7 +56,10 @@ condatainer config init -l system
 | Key | Default | Description |
 |-----|---------|-------------|
 | `logs_dir` | `$HOME/logs` | Directory for build job logs |
-| `extra_base_dirs` | `[]` | Additional directories to search for images and scripts |
+| `extra_image_dirs` | `[]` | Explicit image directories (direct paths). Entries support `:ro` (search-only) or `:rw` (writable, default) markers. |
+| `extra_build_dirs` | `[]` | Explicit build-scripts directories (direct paths). |
+| `extra_helper_dirs` | `[]` | Explicit helper-scripts target directories (direct paths). Entries support `:ro` (search-only) or `:rw` (writable, default) markers. |
+| `extra_base_dirs` | `[]` | Extra base directories using standard layout — auto-expands to `<base>/images/`, `<base>/build-scripts/`, etc. |
 
 ### Binaries
 
@@ -70,7 +73,7 @@ condatainer config init -l system
 | Key | Default | Description |
 |-----|---------|-------------|
 | `scripts_link` | `https://raw.githubusercontent.com/Justype/cnt-scripts/main` | Base URL for remote build and helper scripts (lowest-priority remote) |
-| `extra_scripts_links` | `[]` | Additional remote URLs prepended before `scripts_link` (first entry = highest priority); array, set via `config edit` or `CNT_EXTRA_SCRIPTS_LINKS` |
+| `extra_scripts_links` | `[]` | Additional remote URLs prepended before `scripts_link` (first entry = highest priority); array, set via `config append/prepend` or `CNT_EXTRA_SCRIPTS_LINKS` |
 | `prebuilt_link` | `https://github.com/Justype/cnt-scripts/releases/download` | Base URL for downloading prebuilt overlays |
 | `prefer_remote` | `false` | Remote build scripts take precedence over local |
 
@@ -143,31 +146,27 @@ condatainer config set scheduler_timeout 10
 
 ### Manage Array Config Values
 
-Array keys (`extra_base_dirs`, `extra_scripts_links`, `channels`) use dedicated subcommands:
+Array keys (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_base_dirs`, `extra_scripts_links`, `channels`) use dedicated subcommands:
 
 ```bash
-# Append (lower priority)
-condatainer config append extra_base_dirs /scratch/shared
-condatainer config append extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+# Explicit image/scripts directories
+condatainer config append extra_image_dirs /shared/lab/images:ro   # search-only
+condatainer config append extra_image_dirs /fast/scratch/images    # writable
+condatainer config append extra_build_dirs /shared/lab/scripts
+
+# Base directories (standard layout: images/, build-scripts/, etc.)
+condatainer config append extra_base_dirs /project/condatainer
 
 # Prepend (higher priority — checked first)
-condatainer config prepend extra_base_dirs /project/common
+condatainer config prepend extra_image_dirs /fast/images
 condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
 
 # Remove
-condatainer config remove extra_base_dirs /scratch/shared
-condatainer config remove extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+condatainer config remove extra_image_dirs /shared/lab/images:ro
+condatainer config remove extra_base_dirs /project/condatainer
 ```
 
 Shell completion for `remove` offers the current values of the array as candidates.
-
-### Edit Config File Directly
-
-```bash
-condatainer config edit
-```
-
-This opens the config file in your default editor (`$EDITOR`).
 
 ### Validate Configuration
 
@@ -211,9 +210,12 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_BUILD_MEM`            | `build.mem`            |
 | `CNT_BUILD_BLOCK_SIZE`     | `build.block_size`     |
 | `CNT_BUILD_DATA_BLOCK_SIZE`| `build.data_block_size`|
-| `CNT_EXTRA_BASE_DIRS`      | `extra_base_dirs` (colon-separated) |
+| `CNT_EXTRA_IMAGE_DIRS`     | `extra_image_dirs` (pipe-separated; entries support `:ro`/`:rw`) |
+| `CNT_EXTRA_BUILD_DIRS`     | `extra_build_dirs` (pipe or colon-separated; plain paths) |
+| `CNT_EXTRA_HELPER_DIRS`    | `extra_helper_dirs` (pipe-separated; entries support `:ro`/`:rw`) |
+| `CNT_EXTRA_BASE_DIRS`      | `extra_base_dirs` (pipe or colon-separated) |
 | `CNT_EXTRA_SCRIPTS_LINKS`  | `extra_scripts_links` (pipe-separated) |
-| `CNT_CHANNELS`             | `channels` (colon-separated) |
+| `CNT_CHANNELS`             | `channels` (pipe or colon-separated) |
 | `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
 | `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
 | `CNT_TMPDIR`               | (special override)     |
@@ -221,8 +223,11 @@ mapping is consistent for every key handled by the CLI:
 Example:
 
 ```bash
-# Add extra search directories (highest priority)
-export CNT_EXTRA_BASE_DIRS=/shared/tools:/project/common
+# Explicit image directories (pipe-separated; supports :ro/:rw markers)
+export CNT_EXTRA_IMAGE_DIRS="/shared/lab/images:ro|/fast/scratch/images"
+
+# Extra base directories (pipe or colon-separated)
+export CNT_EXTRA_BASE_DIRS="/shared/tools|/project/common"
 ```
 
 ## Data Directory Search Paths
@@ -231,10 +236,23 @@ export CNT_EXTRA_BASE_DIRS=/shared/tools:/project/common
 
 ### Search Priority
 
-1. **Extra base directories** (from `extra_base_dirs` config or `CNT_EXTRA_BASE_DIRS`)
-2. **Portable** (group/shared directory next to the executable; if not under `$HOME`)
-3. **Scratch** (`$SCRATCH/condatainer` on HPC systems)
-4. **User** (`~/.local/share/condatainer`)
+**Images:**
+1. `extra_image_dirs` — explicit image directories (`:ro` entries skipped for writes)
+2. `extra_base_dirs` → `<base>/images/`
+3. **Portable** → `<install>/images/`
+4. **Scratch** → `$SCRATCH/condatainer/images/`
+5. **User** → `~/.local/share/condatainer/images/`
+
+**Build / Helper Scripts:**
+**Build scripts:**
+1. `extra_build_dirs` — explicit build-scripts directories
+2. `extra_base_dirs` → `<base>/build-scripts/`
+3. **Portable**, **Scratch**, **User** (same pattern)
+
+**Helper scripts:**
+1. `extra_helper_dirs` — explicit helper-scripts directories
+2. `extra_base_dirs` → `<base>/helper-scripts/`
+3. **Portable**, **Scratch**, **User** (same pattern)
 
 ### View Search Paths
 
@@ -302,10 +320,22 @@ metadata_cache_ttl: 7
 # Sets the base image (e.g. ubuntu24--base_image.sif) and prefix for bare package names
 default_distro: ubuntu24
 
-# Additional search directories
-extra_base_dirs:
-  - /project/shared/condatainer
-  - /apps/bioinformatics/condatainer
+# Explicit image directories (direct paths; :ro = search-only, :rw = writable default)
+extra_image_dirs:
+  - /shared/lab/images:ro        # shared read-only store
+  - /fast/scratch/images         # writable personal store
+
+# Explicit build-scripts directories
+# extra_build_dirs:
+#   - /shared/lab/scripts
+
+# Explicit helper-scripts directories
+# extra_helper_dirs:
+#   - /shared/lab/helpers
+
+# Extra base directories (standard layout: images/, build-scripts/, etc.)
+# extra_base_dirs:
+#   - /project/shared/condatainer
 
 # Build configuration
 build:

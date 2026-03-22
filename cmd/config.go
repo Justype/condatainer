@@ -32,6 +32,9 @@ var configKeyDefs = map[string]bool{
 	"extra_scripts_links":    true,
 	"prefer_remote":          false,
 	"extra_base_dirs":        true,
+	"extra_image_dirs":       true,
+	"extra_build_dirs":       true,
+	"extra_helper_dirs":      true,
 	"parse_module_load":      false,
 	"scheduler_timeout":      false,
 	"metadata_cache_ttl":     false,
@@ -143,8 +146,8 @@ func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) 
 	}
 	if len(args) == 1 {
 		// Second arg: complete values based on the key
-		//  extra_base_dirs should only complete directories
-		if args[0] == "extra_base_dirs" {
+		//  extra_base_dirs / extra_image_dirs / extra_build_dirs / extra_helper_dirs should only complete directories
+		if args[0] == "extra_base_dirs" || args[0] == "extra_image_dirs" || args[0] == "extra_build_dirs" || args[0] == "extra_helper_dirs" {
 			return nil, cobra.ShellCompDirectiveFilterDirs
 		}
 		// extra_scripts_links is an array setting; allow free-form input
@@ -250,6 +253,46 @@ Shows:
 
 		pathIndex := 1
 
+		// Explicit extra image directories
+		for _, entry := range config.GetExtraImageDirs() {
+			path, ro := config.ParseDirEntry(entry)
+			status := ""
+			if _, err := os.Stat(path); err == nil {
+				if ro {
+					status = " " + utils.StyleWarning("(search-only)")
+				} else if utils.CanWriteToDir(path) {
+					status = " " + utils.StyleSuccess("(writable)")
+				} else {
+					status = " " + utils.StyleWarning("(read-only)")
+				}
+			}
+			fmt.Printf("  %d. [extra-images] %s%s\n", pathIndex, path, status)
+			pathIndex++
+		}
+
+		// Explicit extra build-scripts directories
+		for _, path := range config.GetExtraBuildDirs() {
+			fmt.Printf("  %d. [extra-build] %s\n", pathIndex, path)
+			pathIndex++
+		}
+
+		// Explicit extra helper-scripts directories
+		for _, entry := range config.GetExtraHelperDirs() {
+			path, ro := config.ParseDirEntry(entry)
+			status := ""
+			if _, err := os.Stat(path); err == nil {
+				if ro {
+					status = " " + utils.StyleWarning("(search-only)")
+				} else if utils.CanWriteToDir(path) {
+					status = " " + utils.StyleSuccess("(writable)")
+				} else {
+					status = " " + utils.StyleWarning("(read-only)")
+				}
+			}
+			fmt.Printf("  %d. [extra-helper] %s%s\n", pathIndex, path, status)
+			pathIndex++
+		}
+
 		// Extra base directories
 		extraBaseDirs := config.GetExtraBaseDirs()
 		for _, dir := range extraBaseDirs {
@@ -328,6 +371,38 @@ Shows:
 			logsDir = config.Global.LogsDir + " (default)"
 		}
 		fmt.Printf("  logs_dir:      %s\n", logsDir)
+		extraImageDirs := config.GetExtraImageDirs()
+		if len(extraImageDirs) > 0 {
+			fmt.Printf("  extra_image_dirs:\n")
+			for _, entry := range extraImageDirs {
+				path, ro := config.ParseDirEntry(entry)
+				roSuffix := ""
+				if ro {
+					roSuffix = " " + utils.StyleWarning("(search-only)")
+				}
+				fmt.Printf("    - %s%s\n", path, roSuffix)
+			}
+		} else {
+			fmt.Printf("  extra_image_dirs: %s\n", utils.StyleInfo("none"))
+		}
+		extraBuildDirs := config.GetExtraBuildDirs()
+		if len(extraBuildDirs) > 0 {
+			fmt.Printf("  extra_build_dirs:\n")
+			for _, path := range extraBuildDirs {
+				fmt.Printf("    - %s\n", path)
+			}
+		} else {
+			fmt.Printf("  extra_build_dirs: %s\n", utils.StyleInfo("none"))
+		}
+		extraHelperDirs := config.GetExtraHelperDirs()
+		if len(extraHelperDirs) > 0 {
+			fmt.Printf("  extra_helper_dirs:\n")
+			for _, path := range extraHelperDirs {
+				fmt.Printf("    - %s\n", path)
+			}
+		} else {
+			fmt.Printf("  extra_helper_dirs: %s\n", utils.StyleInfo("none"))
+		}
 		extraDirs := config.GetExtraBaseDirs()
 		if len(extraDirs) > 0 {
 			fmt.Printf("  extra_base_dirs:\n")

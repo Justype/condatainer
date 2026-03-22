@@ -92,6 +92,12 @@ func setDefaults() {
 	// Extra base directories to search (prepended to default search paths)
 	// Each directory should contain images/, build-scripts/, helper-scripts/ subdirectories
 	viper.SetDefault("extra_base_dirs", []string{})
+	// Explicit extra image directories (direct paths); entries may end with ":ro" (search-only)
+	// or ":rw" (explicit writable, same as no marker).
+	viper.SetDefault("extra_image_dirs", []string{})
+	// Explicit extra build/helper-scripts directories (direct paths, plain paths only).
+	viper.SetDefault("extra_build_dirs", []string{})
+	viper.SetDefault("extra_helper_dirs", []string{})
 
 	// Build config defaults
 	viper.SetDefault("build.ncpus", 4)

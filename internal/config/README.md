@@ -38,15 +38,30 @@ config.Global  // Singleton instance
 
 ## Data Directory Search
 
-**Search Order:**
-1. `CNT_EXTRA_BASE_DIRS` / `extra_base_dirs` config
-2. Portable dir (auto-detected from install location)
-3. Scratch dir (`$SCRATCH/condatainer/`)
-4. User dir (`$XDG_DATA_HOME/condatainer/` or `~/.local/share/condatainer/`)
+**Search order for images:**
+1. `extra_image_dirs` — explicit image directories (direct paths, support `:ro`/`:rw`)
+2. `extra_base_dirs` — auto-expands to `<base>/images/`
+3. Portable dir → `<install>/images/`
+4. Scratch dir → `$SCRATCH/condatainer/images/`
+5. User dir → `$XDG_DATA_HOME/condatainer/images/` or `~/.local/share/condatainer/images/`
 
-Each contains: `images/`, `build-scripts/`, `helper-scripts/`
+**Search order for scripts:**
+**Build scripts:**
+1. `extra_build_dirs` — explicit build-scripts directories (direct paths)
+2. `extra_base_dirs` — auto-expands to `<base>/build-scripts/`
+3. Portable dir, Scratch dir, User dir (same pattern)
 
-**Write Operations:** First writable directory in search order
+**Helper scripts:**
+1. `extra_helper_dirs` — explicit helper-scripts directories (direct paths)
+2. `extra_base_dirs` — auto-expands to `<base>/helper-scripts/`
+3. Portable dir, Scratch dir, User dir (same pattern)
+
+**Write operations:** For images, first writable directory in search order. `:ro` entries are always skipped. `extra_build_dirs` entries are never written to — condatainer treats build-scripts dirs as read-only.
+
+**`:ro` / `:rw` markers** (image dirs only, config file only):
+- `:ro` — search-only; condatainer never writes here even if filesystem allows it
+- `:rw` — explicit writable annotation (same as no marker; for documentation clarity)
+- Only applies to `extra_image_dirs`; `extra_build_dirs` entries are plain paths
 
 ## Usage
 
@@ -66,32 +81,52 @@ config.GetUserStateDir()                    // instance state directory
 
 ## Environment Variables
 
-- `CNT_EXTRA_BASE_DIRS` - Colon-separated extra data dirs
-- `XDG_DATA_HOME` / `XDG_CONFIG_HOME` / `XDG_STATE_HOME` - XDG dirs
-- `SCRATCH` - HPC scratch directory
+All multi-value env vars use `|` as separator. `CNT_EXTRA_BASE_DIRS` also accepts `:` for compatibility.
+
+| Variable | Separator | Description |
+|---|---|---|
+| `CNT_EXTRA_IMAGE_DIRS` | `\|` | Extra image directories; entries support `:ro`/`:rw` |
+| `CNT_EXTRA_BUILD_DIRS` | `\|` or `:` | Extra build-scripts directories |
+| `CNT_EXTRA_HELPER_DIRS` | `\|` | Extra helper-scripts directories; entries support `:ro`/`:rw` |
+| `CNT_EXTRA_BASE_DIRS` | `\|` or `:` | Extra base dirs (auto-expands to `images/`, `build-scripts/`, etc.) |
+| `CNT_EXTRA_SCRIPTS_LINKS` | `\|` | Extra remote build script source URLs |
+| `CNT_CHANNELS` | `\|` or `:`  | Conda channels |
+| `CNT_TMPDIR` | — | Override build temp directory |
+| `SCRATCH` | — | HPC scratch directory (`$SCRATCH/condatainer/`) |
+| `XDG_DATA_HOME` / `XDG_CONFIG_HOME` / `XDG_STATE_HOME` | — | XDG base dirs |
 
 ## Configuration File
 
 Location: `~/.config/condatainer/config.yaml`
 
 ```yaml
-debug: false
-submit_job: true
 apptainer_bin: "apptainer"
-branch: "main"
+scheduler_bin: ""         # auto-detect if empty
+
 prefer_remote: false
 default_distro: "ubuntu24"
 parse_module_load: false
 
+# Extra directories — team/lab use via module file or config
+extra_image_dirs:
+  - "/shared/lab/images:ro"   # search-only shared store
+  - "/fast/scratch/images"    # writable personal store
+extra_build_dirs:
+  - "/shared/lab/scripts"
+extra_helper_dirs:
+  - "/shared/lab/helpers"
 extra_base_dirs:
-  - "/custom/path/condatainer"
+  - "/proj/condatainer"       # standard layout: images/, build-scripts/, etc.
+
+channels:
+  - conda-forge
+  - bioconda
 
 build:
   ncpus: 4
-  mem: 8g
+  mem: 8192   # MB
   time: "2h"
-  tmp_overlay_size: 20480
-  compress_args: ""   # empty = auto-detect: gzip (singularity), zstd-medium (apptainer>=1.4), lz4 (apptainer<1.4)
+  compress_args: ""   # auto-detect: zstd-medium (apptainer>=1.4), lz4 (older), gzip (singularity)
 ```
 
 ## Constants

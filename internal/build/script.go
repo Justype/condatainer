@@ -50,6 +50,17 @@ func getAllBaseDirs() []string {
 		}
 	}
 
+	// Explicit extra image dirs (strip :ro/:rw marker)
+	for _, entry := range config.GetExtraImageDirs() {
+		path, _ := config.ParseDirEntry(entry)
+		addIfExists(path)
+	}
+
+	// Explicit extra build-scripts dirs (plain paths)
+	for _, path := range config.GetExtraBuildDirs() {
+		addIfExists(path)
+	}
+
 	// Extra base dirs
 	for _, baseDir := range config.GetExtraBaseDirs() {
 		addIfExists(baseDir)

@@ -24,66 +24,83 @@ type DataPaths struct {
 // GlobalDataPaths holds the computed data paths
 var GlobalDataPaths DataPaths
 
-// GetExtraScriptsLinks returns extra remote build script source URLs.
-// These take precedence over the base scripts_link.
-// Checks CNT_EXTRA_SCRIPTS_LINKS (pipe-separated) first, then config.
-// Pipe is used instead of colon because URLs contain "://".
-func GetExtraScriptsLinks() []string {
-	if envLinks := os.Getenv("CNT_EXTRA_SCRIPTS_LINKS"); envLinks != "" {
-		var links []string
-		for _, l := range strings.Split(envLinks, "|") {
-			l = strings.TrimSpace(l)
-			if l != "" {
-				links = append(links, l)
-			}
-		}
-		if len(links) > 0 {
-			return links
+// splitPipe splits an env var value on "|".
+// Use when ":" is ambiguous — e.g. values contain "://" (URLs) or ":ro"/":rw" markers.
+func splitPipe(val string) []string {
+	var result []string
+	for _, entry := range strings.Split(val, "|") {
+		if entry = strings.TrimSpace(entry); entry != "" {
+			result = append(result, entry)
 		}
 	}
-	return viper.GetStringSlice("extra_scripts_links")
+	return result
+}
+
+// splitPipeOrColon splits an env var value on "|" or ":" ("|" takes precedence).
+// Use for plain paths or plain strings where ":" is unambiguous (no markers).
+func splitPipeOrColon(val string) []string {
+	sep := ":"
+	if strings.Contains(val, "|") {
+		sep = "|"
+	}
+	var result []string
+	for _, entry := range strings.Split(val, sep) {
+		if entry = strings.TrimSpace(entry); entry != "" {
+			result = append(result, entry)
+		}
+	}
+	return result
+}
+
+// getEnvSlice reads a string-slice config key, checking the corresponding env var first.
+// The env var name is derived from the key: "extra_image_dirs" → "CNT_EXTRA_IMAGE_DIRS".
+// The split function controls how the env var value is parsed.
+func getEnvSlice(key string, split func(string) []string) []string {
+	envKey := "CNT_" + strings.ToUpper(key)
+	if envVal := os.Getenv(envKey); envVal != "" {
+		if vals := split(envVal); len(vals) > 0 {
+			return vals
+		}
+	}
+	return viper.GetStringSlice(key)
+}
+
+// ParseDirEntry splits a dir entry ("path", "path:ro", or "path:rw") into (path, readOnly).
+// :ro = force search-only (never written). :rw = explicit writable annotation (same as no marker).
+// Default (no marker) is writable if filesystem perms allow — matches all other dir types.
+func ParseDirEntry(entry string) (string, bool) {
+	if after, ok := strings.CutSuffix(entry, ":ro"); ok {
+		return after, true
+	}
+	if after, ok := strings.CutSuffix(entry, ":rw"); ok {
+		return after, false
+	}
+	return entry, false
 }
 
 // GetChannels returns the conda channels from config or environment.
-// Environment variable CNT_CHANNELS uses colon-separated values (same convention as CNT_EXTRA_BASE_DIRS).
-// Config file uses YAML array format.
-func GetChannels() []string {
-	if envVal := os.Getenv("CNT_CHANNELS"); envVal != "" {
-		var channels []string
-		for ch := range strings.SplitSeq(envVal, ":") {
-			ch = strings.TrimSpace(ch)
-			if ch != "" {
-				channels = append(channels, ch)
-			}
-		}
-		if len(channels) > 0 {
-			return channels
-		}
-	}
-	return viper.GetStringSlice("channels")
-}
+// CNT_CHANNELS supports "|" and ":" as separators ("|" takes precedence).
+func GetChannels() []string { return getEnvSlice("channels", splitPipeOrColon) }
 
 // GetExtraBaseDirs returns extra base directories from config or environment.
-// Environment variable CNT_EXTRA_BASE_DIRS uses colon-separated paths (Unix convention).
-// Config file uses YAML array format.
-func GetExtraBaseDirs() []string {
-	// Check environment variable first (colon-separated, like PATH)
-	if envDirs := os.Getenv("CNT_EXTRA_BASE_DIRS"); envDirs != "" {
-		var dirs []string
-		for _, dir := range strings.Split(envDirs, ":") {
-			dir = strings.TrimSpace(dir)
-			if dir != "" {
-				dirs = append(dirs, dir)
-			}
-		}
-		if len(dirs) > 0 {
-			return dirs
-		}
-	}
+// CNT_EXTRA_BASE_DIRS supports "|" and ":" as separators ("|" takes precedence).
+func GetExtraBaseDirs() []string { return getEnvSlice("extra_base_dirs", splitPipeOrColon) }
 
-	// Fall back to viper config
-	return viper.GetStringSlice("extra_base_dirs")
-}
+// GetExtraImageDirs returns explicit extra image directories from config or environment.
+// CNT_EXTRA_IMAGE_DIRS uses "|" as separator; entries support ":ro"/":rw" markers.
+func GetExtraImageDirs() []string { return getEnvSlice("extra_image_dirs", splitPipe) }
+
+// GetExtraBuildDirs returns explicit extra build-scripts directories from config or environment.
+// CNT_EXTRA_BUILD_DIRS supports "|" and ":" as separators ("|" takes precedence).
+func GetExtraBuildDirs() []string { return getEnvSlice("extra_build_dirs", splitPipeOrColon) }
+
+// GetExtraHelperDirs returns explicit extra helper-scripts directories from config or environment.
+// CNT_EXTRA_HELPER_DIRS uses "|" as separator; entries support ":ro"/":rw" markers.
+func GetExtraHelperDirs() []string { return getEnvSlice("extra_helper_dirs", splitPipe) }
+
+// GetExtraScriptsLinks returns extra remote build script source URLs.
+// CNT_EXTRA_SCRIPTS_LINKS uses "|" as separator (URLs contain "://").
+func GetExtraScriptsLinks() []string { return getEnvSlice("extra_scripts_links", splitPipe) }
 
 // GetUserDataDir returns the user's data directory following XDG spec.
 // Returns $XDG_DATA_HOME/condatainer or ~/.local/share/condatainer
@@ -271,7 +288,7 @@ func InitDataPaths() {
 }
 
 // buildImageSearchPaths builds the search paths for images.
-// Priority: extra_base_dirs → portable → scratch → user
+// Priority: extra_image_dirs → extra_base_dirs → portable → scratch → user
 func buildImageSearchPaths() []string {
 	var paths []string
 	seen := make(map[string]bool)
@@ -292,7 +309,13 @@ func buildImageSearchPaths() []string {
 		}
 	}
 
-	// 0. Extra base directories (highest priority) - auto-append /images
+	// 0a. Explicit extra image directories (highest priority, strip :ro/:rw marker)
+	for _, entry := range GetExtraImageDirs() {
+		path, _ := ParseDirEntry(entry)
+		addPath(path)
+	}
+
+	// 0b. Extra base directories - auto-append /images
 	for _, baseDir := range GetExtraBaseDirs() {
 		addPath(filepath.Join(baseDir, "images"))
 	}
@@ -316,7 +339,7 @@ func buildImageSearchPaths() []string {
 }
 
 // buildScriptSearchPaths builds the search paths for scripts (build-scripts or helper-scripts).
-// Priority: extra_base_dirs → portable → scratch → user
+// Priority: extra_build_dirs (build-scripts only) → extra_base_dirs → portable → scratch → user
 func buildScriptSearchPaths(subdir string) []string {
 	var paths []string
 	seen := make(map[string]bool)
@@ -337,7 +360,19 @@ func buildScriptSearchPaths(subdir string) []string {
 		}
 	}
 
-	// 0. Extra base directories (highest priority) - auto-append subdir
+	// 0a. Explicit extra script directories (highest priority)
+	if subdir == "build-scripts" {
+		for _, path := range GetExtraBuildDirs() {
+			addPath(path)
+		}
+	} else if subdir == "helper-scripts" {
+		for _, entry := range GetExtraHelperDirs() {
+			path, _ := ParseDirEntry(entry)
+			addPath(path)
+		}
+	}
+
+	// 0b. Extra base directories - auto-append subdir
 	for _, baseDir := range GetExtraBaseDirs() {
 		addPath(filepath.Join(baseDir, subdir))
 	}
@@ -346,9 +381,9 @@ func buildScriptSearchPaths(subdir string) []string {
 	if portableDir := GetPortableDataDir(); portableDir != "" {
 		addPath(filepath.Join(portableDir, subdir))
 
-		// Auto-detect cnt-scripts subdir (split-repo layout):
+		// Auto-detect cnt-scripts subdir for build-scripts only (split-repo layout):
 		// clone cnt-scripts next to the binary and it is found automatically
-		if DirExists(filepath.Join(portableDir, "cnt-scripts")) {
+		if subdir == "build-scripts" && DirExists(filepath.Join(portableDir, "cnt-scripts")) {
 			addPath(filepath.Join(portableDir, "cnt-scripts", subdir))
 		}
 	}
@@ -486,24 +521,43 @@ func FindHelperScript(name string) (string, error) {
 }
 
 // GetWritableImagesDir returns the first writable images directory.
+// Explicit extra_image_dirs entries marked :ro are skipped.
 // Probes existing directories first (no side effects); creates only the last
 // (user-owned) directory if none are currently writable.
 func GetWritableImagesDir() (string, error) {
+	// Phase 0: explicit extra_image_dirs — skip :ro entries
+	for _, entry := range GetExtraImageDirs() {
+		path, readOnly := ParseDirEntry(entry)
+		if !readOnly && utils.CanWriteToDir(path) {
+			return path, nil
+		}
+	}
+	// Phase 1: remaining search paths (extra_base_dirs → portable → scratch → user)
+	// Build a deduplicated list excluding explicit extra_image_dirs paths already checked
+	extraSet := make(map[string]bool)
+	for _, entry := range GetExtraImageDirs() {
+		path, _ := ParseDirEntry(entry)
+		if p, err := filepath.Abs(os.ExpandEnv(path)); err == nil {
+			extraSet[p] = true
+		}
+	}
 	paths := GetImageSearchPaths()
 	for _, dir := range paths {
+		if extraSet[dir] {
+			continue // already checked in phase 0
+		}
 		if utils.CanWriteToDir(dir) {
 			return dir, nil
 		}
 	}
 	if len(paths) > 0 {
 		last := paths[len(paths)-1]
-		if utils.IsWritableDir(last) {
+		if !extraSet[last] && utils.IsWritableDir(last) {
 			return last, nil
 		}
 	}
 	return "", fmt.Errorf("no writable images directory found (searched: %v)", paths)
 }
-
 
 // GetWritableCacheDir returns the first writable cache directory.
 // Probes existing directories first (no side effects). Falls back to the XDG
@@ -525,18 +579,37 @@ func GetWritableCacheDir() (string, error) {
 }
 
 // GetWritableHelperScriptsDir returns the first writable helper scripts directory.
+// Explicit extra_helper_dirs entries marked :ro are skipped.
 // Probes existing directories first; creates only the last (user-owned) directory
 // if none are currently writable.
 func GetWritableHelperScriptsDir() (string, error) {
+	// Phase 0: explicit extra_helper_dirs — skip :ro entries
+	for _, entry := range GetExtraHelperDirs() {
+		path, readOnly := ParseDirEntry(entry)
+		if !readOnly && utils.CanWriteToDir(path) {
+			return path, nil
+		}
+	}
+	// Phase 1: remaining search paths, excluding extra_helper_dirs already checked
+	extraSet := make(map[string]bool)
+	for _, entry := range GetExtraHelperDirs() {
+		path, _ := ParseDirEntry(entry)
+		if p, err := filepath.Abs(os.ExpandEnv(path)); err == nil {
+			extraSet[p] = true
+		}
+	}
 	paths := GetHelperScriptSearchPaths()
 	for _, dir := range paths {
+		if extraSet[dir] {
+			continue
+		}
 		if utils.CanWriteToDir(dir) {
 			return dir, nil
 		}
 	}
 	if len(paths) > 0 {
 		last := paths[len(paths)-1]
-		if utils.IsWritableDir(last) {
+		if !extraSet[last] && utils.IsWritableDir(last) {
 			return last, nil
 		}
 	}

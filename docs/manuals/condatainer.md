@@ -1518,11 +1518,9 @@ condatainer config set build.time 4h
 
 **Time formats:** `2h`, `30m`, `1h30m`, `90s`, `02:00:00`, `HH:MM:SS`
 
-> Array keys (`extra_base_dirs`, `extra_scripts_links`) cannot be set with this command — use `append`, `prepend`, or `remove` instead.
-
 ### Config Append / Prepend / Remove
 
-Manage array config keys (`extra_base_dirs`, `extra_scripts_links`) from the CLI.
+Manage array config keys (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_base_dirs`, `extra_scripts_links`, `channels`) from the CLI.
 
 ```
 condatainer config append  <key> <value>
@@ -1537,18 +1535,25 @@ condatainer config remove  <key> <value>
 **Examples:**
 
 ```bash
-# Add an extra data directory (lowest priority among extras)
-condatainer config append extra_base_dirs /scratch/shared
+# Explicit image directory (search-only shared store)
+condatainer config append extra_image_dirs /shared/lab/images:ro
+
+# Explicit image directory (writable personal store)
+condatainer config append extra_image_dirs /fast/scratch/images
+
+# Base directory using standard layout (images/, build-scripts/, etc.)
+condatainer config append extra_base_dirs /project/condatainer
 
 # Add an institutional scripts source (takes priority over the default)
 condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
 
-# Remove a directory no longer needed
-condatainer config remove extra_base_dirs /scratch/shared
+# Remove entries
+condatainer config remove extra_image_dirs /shared/lab/images:ro
+condatainer config remove extra_base_dirs /project/condatainer
 
 # Show result
 condatainer config show
-condatainer config get extra_base_dirs
+condatainer config get extra_image_dirs
 ```
 
 ### Config Init
@@ -1565,16 +1570,6 @@ condatainer config init [-l|--location user|portable|system]
 * Apptainer binary
 * Scheduler binary
 * Compression support (zstd vs lz4)
-
-### Config Edit
-
-Edit configuration file in your default editor.
-
-```
-condatainer config edit
-```
-
-Opens the config file in `$EDITOR` (falls back to `vi`).
 
 ### Config Paths
 
@@ -1641,10 +1636,13 @@ build:
   time: 4h
   # compress_args options (gzip, lz4, zstd, zstd-fast, zstd-medium, zstd-high)
   compress_args: "-comp zstd -Xcompression-level 8"
-# Additional data directories
-extra_base_dirs:
-  - /path/to/shared/data
-  - /path/to/other/location
+# Explicit image directories (:ro = search-only, :rw = writable default)
+extra_image_dirs:
+  - /shared/lab/images:ro
+  - /fast/scratch/images
+# Base directories (standard layout: images/, build-scripts/, etc.)
+# extra_base_dirs:
+#   - /project/shared/condatainer
 ```
 
 ## Scheduler
