@@ -7,8 +7,8 @@ Run following commands to start VS Code Tunnel on your HPC system:
 condatainer helper -u
 # create a 20G writable overlay (optional but recommended)
 condatainer o -s 20g
-# start vscode-tunnel on port 13182
-condatainer helper vscode-tunnel -p 13182
+# start vscode-tunnel
+condatainer helper vscode-tunnel
 ```
 
 VS Code Tunnel connects your local VS Code to a remote compute node **without requiring SSH port forwarding**. It uses Microsoft's relay service to establish the connection.
