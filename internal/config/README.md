@@ -56,12 +56,14 @@ config.Global  // Singleton instance
 2. `extra_base_dirs` — auto-expands to `<base>/helper-scripts/`
 3. Portable dir, Scratch dir, User dir (same pattern)
 
-**Write operations:** For images, first writable directory in search order. `:ro` entries are always skipped. `extra_build_dirs` entries are never written to — condatainer treats build-scripts dirs as read-only.
+**Write operations:**
+- **Images / helpers**: first writable directory in search order. `:ro` entries and `extra_build_dirs` are always skipped. Shared dirs (extra, portable) are probed only; personal dirs (scratch, user) are created on first use.
+- **Cache**: always written to a personal directory (scratch → user cache) to avoid cross-user pollution. Shared dirs are never written to.
 
-**`:ro` / `:rw` markers** (image dirs only, config file only):
+**`:ro` / `:rw` markers** (image and helper dirs, config file only):
 - `:ro` — search-only; condatainer never writes here even if filesystem allows it
 - `:rw` — explicit writable annotation (same as no marker; for documentation clarity)
-- Only applies to `extra_image_dirs`; `extra_build_dirs` entries are plain paths
+- Only applies to `extra_image_dirs` and `extra_helper_dirs`; `extra_build_dirs` entries are plain paths
 
 ## Usage
 
@@ -77,6 +79,8 @@ config.FindHelperScript("jupyter")           // search helper script paths
 config.GlobalDataPaths.ImagesDirs           // ordered image search paths
 config.GlobalDataPaths.BuildScriptsDirs     // ordered script search paths
 config.GetUserStateDir()                    // instance state directory
+config.GetWritableCacheDir()                // personal writable cache directory (scratch → user)
+config.GetCacheSearchPaths()                // personal cache search paths
 ```
 
 ## Environment Variables

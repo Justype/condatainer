@@ -133,27 +133,12 @@ func GetUserConfigPath() (string, error) {
 }
 
 // GetPortableConfigPath returns the portable config path if the executable is in a
-// dedicated installation (bin/ folder that's not a common user/system bin).
-// Returns empty string if not in a portable installation.
+// dedicated installation. Returns empty string if not in a portable installation.
 func GetPortableConfigPath() string {
-	exePath, err := os.Executable()
-	if err != nil {
-		return ""
+	if portableDir := GetPortableDataDir(); portableDir != "" {
+		return filepath.Join(portableDir, ConfigFilename+"."+ConfigType)
 	}
-
-	exeDir := filepath.Dir(exePath)
-	if filepath.Base(exeDir) != "bin" {
-		return ""
-	}
-
-	parentDir := filepath.Dir(exeDir)
-
-	// Exclude common bin directories that aren't dedicated installations
-	if isNonPortableParent(parentDir) {
-		return ""
-	}
-
-	return filepath.Join(parentDir, ConfigFilename+"."+ConfigType)
+	return ""
 }
 
 // GetDefaultConfigPath returns the recommended config path based on installation type.
@@ -167,11 +152,6 @@ func GetDefaultConfigPath() (string, error) {
 
 	// Fall back to user config
 	return GetUserConfigPath()
-}
-
-// IsPortableInstallation returns true if the executable is in a portable installation
-func IsPortableInstallation() bool {
-	return GetPortableConfigPath() != ""
 }
 
 // GetSystemConfigPath returns the system-wide config path
