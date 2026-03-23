@@ -1586,7 +1586,7 @@ condatainer config get extra_image_dirs
 Create a config file with auto-detected defaults.
 
 ```
-condatainer config init [-l|--location user|portable|system]
+condatainer config init [-l|--location user|root|extra-root|system]
 ```
 
 * `-l`, `--location`: Config location (default: auto-detect).
@@ -1625,9 +1625,10 @@ Configuration is loaded in the following order (highest to lowest priority):
 1. Command-line flags
 2. Environment variables (`CNT_*`)
 3. User config file (`~/.config/condatainer/config.yaml`)
-4. Portable config (`<install-dir>/config.yaml`)
-5. System config (`/etc/condatainer/config.yaml`)
-6. Built-in defaults
+4. Extra-root config (`$CNT_EXTRA_ROOT/config.yaml`, group/lab layer)
+5. Root config (`$CNT_ROOT/config.yaml` or `<install-dir>/config.yaml`)
+6. System config (`/etc/condatainer/config.yaml`)
+7. Built-in defaults
 
 ### Configuration File Example
 

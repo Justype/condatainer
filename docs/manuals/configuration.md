@@ -18,13 +18,14 @@ All three config files are loaded and merged when they exist:
 1. **Command-line flags** (highest priority)
 2. **Environment variables** (`CNT_*`) — replaces; config files not consulted
 3. **User config file** (`~/.config/condatainer/config.yaml`)
-4. **Portable config** (`<install-dir>/config.yaml`)
-5. **System config file** (`/etc/condatainer/config.yaml`)
-6. **Defaults** (lowest priority)
+4. **Extra-root config** (`$CNT_EXTRA_ROOT/config.yaml`, group/lab layer)
+5. **Root config** (`$CNT_ROOT/config.yaml` or `<install-dir>/config.yaml`)
+6. **System config file** (`/etc/condatainer/config.yaml`)
+7. **Defaults** (lowest priority)
 
 **Scalar keys** (`apptainer_bin`, `default_distro`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
 
-**Directory and source array keys** (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`): **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, portable, then system. This lets a sysadmin publish shared directories in a portable or system config without requiring every user to copy them into their own config.
+**Directory and source array keys** (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`): **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, root, then system. This lets a sysadmin publish shared directories in a root or system config without requiring every user to copy them into their own config.
 
 **`channels`**: overwrite — the highest-priority config file that sets it wins (not merged), since channel order controls conda package resolution priority.
 
@@ -47,7 +48,8 @@ condatainer config show
 | Type | Path | Use Case |
 |------|------|----------|
 | User | `~/.config/condatainer/config.yaml` | Personal settings |
-| Portable | `<install-dir>/config.yaml` | Shared group installation |
+| Extra-root | `$CNT_EXTRA_ROOT/config.yaml` | Group/lab layer (requires `CNT_EXTRA_ROOT`) |
+| Root | `$CNT_ROOT/config.yaml` or `<install-dir>/config.yaml` | Shared cluster/group installation |
 | System | `/etc/condatainer/config.yaml` | System-wide defaults |
 
 To create a config file at a specific location:
@@ -56,8 +58,11 @@ To create a config file at a specific location:
 # User config (default for home installations)
 condatainer config init -l user
 
-# Portable config (for shared installations; not under home directory)
-condatainer config init -l portable
+# Root config (for shared installations; not under home directory)
+condatainer config init -l root
+
+# Extra-root config (group/lab layer)
+CNT_EXTRA_ROOT=/shared/labA/condatainer condatainer config init -l extra-root
 
 # System config (requires appropriate permissions)
 condatainer config init -l system
@@ -253,18 +258,18 @@ export CNT_EXTRA_IMAGE_DIRS="/shared/lab/images:ro|/fast/scratch/images"
 **Images:**
 1. `extra_image_dirs` — explicit image directories (`:ro` entries skipped for writes)
 2. **Extra root** → `$CNT_EXTRA_ROOT/images/` (group/lab layer)
-3. **Portable** → `$CNT_ROOT/images/` or `<install>/images/`
+3. **Root** → `$CNT_ROOT/images/` or `<install>/images/`
 4. **Scratch** → `$SCRATCH/condatainer/images/`
 5. **User** → `~/.local/share/condatainer/images/`
 
 **Build / Helper Scripts:**
 **Build scripts:**
 1. `extra_build_dirs` — explicit build-scripts directories
-2. **Extra root**, **Portable**, **Scratch**, **User** (same pattern)
+2. **Extra root**, **Root**, **Scratch**, **User** (same pattern)
 
 **Helper scripts:**
 1. `extra_helper_dirs` — explicit helper-scripts directories
-2. **Extra root**, **Portable**, **Scratch**, **User** (same pattern)
+2. **Extra root**, **Root**, **Scratch**, **User** (same pattern)
 
 ### View Search Paths
 
@@ -381,22 +386,22 @@ The `build.time` setting accepts two formats:
 - `2:30:00` - 2 hours 30 minutes
 - `1:30` - 1 hour 30 minutes (HH:MM)
 
-## Portable Installations
+## Standalone Installations
 
-For shared group installations, CondaTainer supports "portable" mode where the config and data live alongside the executable:
+For shared group installations, CondaTainer supports a standalone layout where the config and data live alongside the executable:
 
 ```
 /project/group/condatainer/
   bin/
     condatainer         # Executable
-  config.yaml           # Portable config (loaded alongside user + system configs)
+  config.yaml           # Root config (loaded alongside user, extra-root, and system configs)
   images/               # Shared images
   build-scripts/        # Shared build scripts
 ```
 
-All config files (user, extra-root, portable, system) are loaded simultaneously. For `extra_image_dirs` and other directory keys, entries from all configs are **merged** — so a group admin can add shared directories to the portable config and every user automatically searches those directories, even if they also have a personal config.
+All config files (user, extra-root, root, system) are loaded simultaneously. For `extra_image_dirs` and other directory keys, entries from all configs are **merged** — so a group admin can add shared directories to the root config and every user automatically searches those directories, even if they also have a personal config.
 
-For scalar keys like `apptainer_bin`, the user config takes priority; users can override portable/system defaults in their own config without affecting other users.
+For scalar keys like `apptainer_bin`, the user config takes priority; users can override root/system defaults in their own config without affecting other users.
 
 **Explicit root via `CNT_ROOT`:** Instead of relying on the `bin/` layout detection, set `CNT_ROOT` to point directly to the installation directory. This is useful when the binary is installed to a standard location (e.g. `/usr/local/bin`) but the data lives elsewhere:
 
@@ -407,10 +412,10 @@ export CNT_ROOT=/shared/cluster/condatainer
 
 `CNT_ROOT` takes priority over the executable-location heuristic. The directory does not need a `bin/` subdirectory.
 
-To set up a portable config for a shared installation:
+To set up a root config for a shared installation:
 
 ```bash
-condatainer config init -l portable
+condatainer config init -l root
 ```
 
 ## Multi-Tier Setup (System → Group → User)
@@ -470,7 +475,7 @@ build:
 
 Initialize the group config:
 ```bash
-CNT_EXTRA_ROOT=/shared/labA/condatainer condatainer config init -l portable
+CNT_EXTRA_ROOT=/shared/labA/condatainer condatainer config init -l extra-root
 ```
 
 > **Environment variables are always the highest priority.** Any `CNT_*` variable set in the shell overrides the corresponding key from all config files. This is useful for one-off overrides or admin control via module files — e.g. `export CNT_BUILD_NCPUS=16` overrides `build.ncpus` from every config layer.

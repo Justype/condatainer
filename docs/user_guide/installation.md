@@ -93,7 +93,7 @@ condatainer settings
 
 | Type | Path | Condition |
 |----|----|----|
-| Portable | `<install-dir>/` | Install directory containing `bin/condatainer`|
+| Standalone | `<install-dir>/` | Install directory containing `bin/condatainer`|
 | User Scratch | `$SCRATCH/condatainer/` | If `$SCRATCH` is set (most HPC systems) |
 | User Data | `~/.local/share/condatainer/` | Default user data dir (XDG: `$XDG_DATA_HOME/condatainer/`) |
 
@@ -102,7 +102,7 @@ condatainer settings
 
 | Type | Path | Condition |
 |----|----|----|
-| Portable | `<install-dir>/config.yaml` | Same directory as `bin/` |
+| Standalone | `<install-dir>/config.yaml` | Same directory as `bin/` |
 | User Config | `~/.config/condatainer/config.yaml` | Default user config (XDG: `$XDG_CONFIG_HOME/condatainer/`) |
 
 5. **Remove State Files**: Instance state and helper state files are stored at one of the following locations:
