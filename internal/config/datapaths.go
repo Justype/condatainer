@@ -17,7 +17,7 @@ import (
 // =============================================================================
 
 // DataPaths holds the search paths for data directories.
-// Search order: extra → portable → scratch → user (first match wins for lookups).
+// Search order: extra → root → scratch → user (first match wins for lookups).
 // Write operations go to the first writable path in the same order.
 type DataPaths struct {
 	ImagesDirs        []string // Search paths for images
@@ -64,7 +64,7 @@ func splitPipeOrColon(val string) []string {
 // The env var name is derived from the key: "extra_image_dirs" → "CNT_EXTRA_IMAGE_DIRS".
 // The split function controls how the env var value is parsed.
 // If merge is true and no env var is set, values are concatenated across all config layers
-// (user ++ portable ++ system). If merge is false, only the primary config layer is used.
+// (user ++ extra-root ++ root ++ system). If merge is false, only the primary config layer is used.
 // ENV vars always replace — config layer merging is never consulted when an env var is set.
 func getEnvSlice(key string, split func(string) []string, merge bool) []string {
 	envKey := "CNT_" + strings.ToUpper(key)
@@ -80,7 +80,7 @@ func getEnvSlice(key string, split func(string) []string, merge bool) []string {
 }
 
 // mergeFromLayers returns the concatenation of a string-slice key across all config
-// layers (user ++ portable ++ system), deduplicating while preserving order.
+// layers (user ++ extra-root ++ root ++ system), deduplicating while preserving order.
 // Falls back to viper.GetStringSlice if no layers are loaded (e.g. in tests).
 func mergeFromLayers(key string) []string {
 	if len(configLayers) == 0 {
@@ -119,17 +119,21 @@ func GetChannels() []string { return getEnvSlice("channels", splitPipeOrColon, f
 
 // GetExtraRootDir returns the extra root directory from CNT_EXTRA_ROOT env var.
 // Single value, env only (no config key). Used for group/lab shared installations.
-// Returns empty string if not set.
+// Returns empty string if not set. Cached via sync.Once.
 func GetExtraRootDir() string {
-	root := os.Getenv("CNT_EXTRA_ROOT")
-	if root == "" {
-		return ""
-	}
-	root = os.ExpandEnv(root)
-	if abs, err := filepath.Abs(root); err == nil {
-		return abs
-	}
-	return root
+	extraRootOnce.Do(func() {
+		root := os.Getenv("CNT_EXTRA_ROOT")
+		if root == "" {
+			return
+		}
+		root = os.ExpandEnv(root)
+		if abs, err := filepath.Abs(root); err == nil {
+			extraRootCache = abs
+		} else {
+			extraRootCache = root
+		}
+	})
+	return extraRootCache
 }
 
 // GetExtraImageDirs returns explicit extra image directories from config or environment.
@@ -197,32 +201,34 @@ func GetScratchDataDir() string {
 	return ""
 }
 
-// GetPortableDataDir returns the portable data directory for group/shared use.
-// Only detects truly portable installations - directories next to the executable
-// that are NOT in standard user locations (~/.config, ~/.local, etc.).
-// This is useful for shared group directories or portable installations.
+// GetRootDir returns the installation root directory.
+// CNT_ROOT env var takes priority; otherwise auto-detected from the executable location.
 //
 // Detection logic:
-//  1. If executable is in <dir>/bin/ and <dir> is not a generic parent ($HOME, /usr, etc.), use <dir>
-//  2. Otherwise check for <exeDir>/condatainer/ directory
-func GetPortableDataDir() string {
-	portableDirOnce.Do(func() {
-		portableDirCache = detectPortableDataDir()
+//  1. CNT_ROOT env var — explicit root (set by sysadmin in module file)
+//  2. Executable in <dir>/bin/ and <dir> is not a standard user/system parent → use <dir>
+//
+// Cached via sync.Once.
+func GetRootDir() string {
+	rootDirOnce.Do(func() {
+		rootDirCache = detectRootDir()
 	})
-	return portableDirCache
+	return rootDirCache
 }
 
 // =============================================================================
-// Portable Detection (internal)
+// Root Detection (internal)
 // =============================================================================
 
 var (
-	portableDirOnce  sync.Once
-	portableDirCache string
+	rootDirOnce    sync.Once
+	rootDirCache   string
+	extraRootOnce  sync.Once
+	extraRootCache string
 )
 
-func detectPortableDataDir() string {
-	// Explicit override: CNT_ROOT sets the portable base dir directly,
+func detectRootDir() string {
+	// Explicit override: CNT_ROOT sets the root dir directly,
 	// bypassing the executable-location heuristic below.
 	if root := os.Getenv("CNT_ROOT"); root != "" {
 		root = os.ExpandEnv(root)
@@ -245,7 +251,7 @@ func detectPortableDataDir() string {
 	// Executable must be in <install_dir>/bin/
 	if filepath.Base(exeDir) == "bin" {
 		parentDir := filepath.Dir(exeDir)
-		if !isNonPortableParent(parentDir) {
+		if !isNonRootParent(parentDir) {
 			return parentDir
 		}
 	}
@@ -253,9 +259,9 @@ func detectPortableDataDir() string {
 	return ""
 }
 
-// isNonPortableParent checks if a directory is a common user or system bin parent
-// that should not be treated as a portable installation root.
-func isNonPortableParent(dir string) bool {
+// isNonRootParent returns true for standard user/system directories that should
+// not be treated as an installation root.
+func isNonRootParent(dir string) bool {
 	home, _ := os.UserHomeDir()
 	excludedParents := []string{
 		home,
@@ -286,7 +292,7 @@ func InitDataPaths() {
 // =============================================================================
 
 // buildImageSearchPaths builds the search paths for images.
-// Priority: extra_image_dirs → CNT_EXTRA_ROOT → portable → scratch → user
+// Priority: extra_image_dirs → CNT_EXTRA_ROOT → root → scratch → user
 func buildImageSearchPaths() []string {
 	var paths []string
 	seen := make(map[string]bool)
@@ -313,8 +319,8 @@ func buildImageSearchPaths() []string {
 	if extraRoot := GetExtraRootDir(); extraRoot != "" {
 		addPath(filepath.Join(extraRoot, "images"))
 	}
-	if portableDir := GetPortableDataDir(); portableDir != "" {
-		addPath(filepath.Join(portableDir, "images"))
+	if rootDir := GetRootDir(); rootDir != "" {
+		addPath(filepath.Join(rootDir, "images"))
 	}
 	if scratchDir := GetScratchDataDir(); scratchDir != "" {
 		addPath(filepath.Join(scratchDir, "images"))
@@ -327,7 +333,7 @@ func buildImageSearchPaths() []string {
 }
 
 // buildScriptSearchPaths builds the search paths for scripts (build-scripts or helper-scripts).
-// Priority: extra_build_dirs (build-scripts only) → CNT_EXTRA_ROOT → portable → scratch → user
+// Priority: extra_build_dirs (build-scripts only) → CNT_EXTRA_ROOT → root → scratch → user
 func buildScriptSearchPaths(subdir string) []string {
 	var paths []string
 	seen := make(map[string]bool)
@@ -361,11 +367,11 @@ func buildScriptSearchPaths(subdir string) []string {
 	if extraRoot := GetExtraRootDir(); extraRoot != "" {
 		addPath(filepath.Join(extraRoot, subdir))
 	}
-	if portableDir := GetPortableDataDir(); portableDir != "" {
-		addPath(filepath.Join(portableDir, subdir))
+	if rootDir := GetRootDir(); rootDir != "" {
+		addPath(filepath.Join(rootDir, subdir))
 		// Auto-detect cnt-scripts subdir for build-scripts (split-repo layout)
-		if subdir == "build-scripts" && DirExists(filepath.Join(portableDir, "cnt-scripts")) {
-			addPath(filepath.Join(portableDir, "cnt-scripts", subdir))
+		if subdir == "build-scripts" && DirExists(filepath.Join(rootDir, "cnt-scripts")) {
+			addPath(filepath.Join(rootDir, "cnt-scripts", subdir))
 		}
 	}
 	if scratchDir := GetScratchDataDir(); scratchDir != "" {
@@ -423,15 +429,15 @@ func GetCacheSearchPaths() []string {
 
 // SearchDir is a candidate directory for write operations.
 // Personal dirs (scratch, XDG user) are created on first use via IsWritableDir.
-// Shared dirs (CNT_EXTRA_ROOT, portable, extra_*_dirs) are only probed via CanWriteToDir.
+// Shared dirs (CNT_EXTRA_ROOT, root, extra_*_dirs) are only probed via CanWriteToDir.
 type SearchDir struct {
 	Path     string
 	Personal bool
 }
 
 // deduplicateWriteDirs removes duplicate paths, upgrading Personal=false → true when
-// the same path appears in both a shared tier (portable) and a personal tier (scratch).
-// This handles the case where CNT_ROOT or portable dir equals $SCRATCH/condatainer.
+// the same path appears in both a shared tier (root) and a personal tier (scratch).
+// This handles the case where CNT_ROOT or root dir equals $SCRATCH/condatainer.
 func deduplicateWriteDirs(dirs []SearchDir) []SearchDir {
 	seen := make(map[string]int) // path → index in result
 	result := make([]SearchDir, 0, len(dirs))
@@ -466,7 +472,7 @@ func firstWritableDir(dirs []SearchDir) string {
 }
 
 // imageWriteDirs returns the ordered write candidates for image directories.
-// Shared: extra_image_dirs (non-:ro), CNT_EXTRA_ROOT, portable.
+// Shared: extra_image_dirs (non-:ro), CNT_EXTRA_ROOT, root.
 // Personal: scratch, user.
 func imageWriteDirs() []SearchDir {
 	var dirs []SearchDir
@@ -479,7 +485,7 @@ func imageWriteDirs() []SearchDir {
 	if extraRoot := GetExtraRootDir(); extraRoot != "" {
 		dirs = append(dirs, SearchDir{Path: filepath.Join(extraRoot, "images")})
 	}
-	if p := GetPortableDataDir(); p != "" {
+	if p := GetRootDir(); p != "" {
 		dirs = append(dirs, SearchDir{Path: filepath.Join(p, "images")})
 	}
 	if s := GetScratchDataDir(); s != "" {
@@ -492,7 +498,7 @@ func imageWriteDirs() []SearchDir {
 }
 
 // helperWriteDirs returns the ordered write candidates for helper-scripts directories.
-// Shared: extra_helper_dirs (non-:ro), CNT_EXTRA_ROOT, portable.
+// Shared: extra_helper_dirs (non-:ro), CNT_EXTRA_ROOT, root.
 // Personal: scratch, user.
 func helperWriteDirs() []SearchDir {
 	var dirs []SearchDir
@@ -505,7 +511,7 @@ func helperWriteDirs() []SearchDir {
 	if extraRoot := GetExtraRootDir(); extraRoot != "" {
 		dirs = append(dirs, SearchDir{Path: filepath.Join(extraRoot, "helper-scripts")})
 	}
-	if p := GetPortableDataDir(); p != "" {
+	if p := GetRootDir(); p != "" {
 		dirs = append(dirs, SearchDir{Path: filepath.Join(p, "helper-scripts")})
 	}
 	if s := GetScratchDataDir(); s != "" {
@@ -536,7 +542,7 @@ func cacheWriteDirs() []SearchDir {
 
 // GetWritableImagesDir returns the first writable images directory.
 // Explicit extra_image_dirs entries marked :ro are skipped.
-// Shared dirs (extra_image_dirs, CNT_EXTRA_ROOT, portable) are probed only.
+// Shared dirs (extra_image_dirs, CNT_EXTRA_ROOT, root) are probed only.
 // Personal dirs (scratch, user) are created on first use.
 func GetWritableImagesDir() (string, error) {
 	dirs := imageWriteDirs()
@@ -552,7 +558,7 @@ func GetWritableImagesDir() (string, error) {
 
 // GetWritableHelperScriptsDir returns the first writable helper scripts directory.
 // Explicit extra_helper_dirs entries marked :ro are skipped.
-// Shared dirs (extra_helper_dirs, CNT_EXTRA_ROOT, portable) are probed only.
+// Shared dirs (extra_helper_dirs, CNT_EXTRA_ROOT, root) are probed only.
 // Personal dirs (scratch, user) are created on first use.
 func GetWritableHelperScriptsDir() (string, error) {
 	dirs := helperWriteDirs()

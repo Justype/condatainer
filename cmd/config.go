@@ -16,7 +16,9 @@ import (
 
 var (
 	showPath     bool
-	initLocation string // user, portable, system, or a custom path
+	showSources  bool
+	initLocation string // user, root, extra-root, system, or a custom path
+	getLocation  string // target location for config get (single-layer read)
 	setLocation  string // target location for config set/append/prepend/remove
 )
 
@@ -94,6 +96,12 @@ func arrayKeyCompletion(cmd *cobra.Command, args []string, toComplete string) ([
 
 func arrayRemoveValueCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) == 1 && isArrayKey(args[0]) {
+		// Read only from the target config file, not the merged viper view,
+		// so completions match what the target layer actually contains.
+		loc, _ := cmd.Flags().GetString("location")
+		if configPath, _, err := config.ResolveWritableConfigPath(loc); err == nil {
+			return config.ReadConfigSliceKey(configPath, args[0]), cobra.ShellCompDirectiveNoFileComp
+		}
 		return viper.GetStringSlice(args[0]), cobra.ShellCompDirectiveNoFileComp
 	}
 	return arrayKeyCompletion(cmd, args, toComplete)
@@ -195,15 +203,17 @@ Configuration file priority (highest to lowest):
   1. Command-line flags
   2. Environment variables (CNT_*)
   3. User config file (~/.config/condatainer/config.yaml)
-  4. Portable config (<install-dir>/config.yaml, if in dedicated folder)
-  5. System config file (/etc/condatainer/config.yaml)
-  6. Defaults
+  4. Extra-root config ($CNT_EXTRA_ROOT/config.yaml, group/lab layer)
+  5. Root config (<install-dir>/config.yaml, if in dedicated folder or CNT_ROOT set)
+  6. System config file (/etc/condatainer/config.yaml)
+  7. Defaults
 
 Data directory priority (for read/write operations):
   1. Extra base directories (CNT_EXTRA_BASE_DIRS or config)
-  2. Portable directory (group/shared, from executable location)
-  3. User scratch directory ($SCRATCH/condatainer, HPC systems)
-  4. User XDG directory (~/.local/share/condatainer)`,
+  2. Extra-root directory ($CNT_EXTRA_ROOT, group/lab layer)
+  3. Root directory (auto-detected or CNT_ROOT)
+  4. User scratch directory ($SCRATCH/condatainer, HPC systems)
+  5. User XDG directory (~/.local/share/condatainer)`,
 }
 
 var configShowCmd = &cobra.Command{
@@ -215,7 +225,9 @@ Shows:
   - Config file search paths and which one is in use
   - Base directory search paths with writable status
   - All configuration settings (directories, binaries, build config)
-  - Environment variable overrides`,
+  - Environment variable overrides
+
+Use --sources (-s) to annotate each value with which config layer provides it.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if showPath {
 			configPath, err := config.GetUserConfigPath()
@@ -224,6 +236,73 @@ Shows:
 			}
 			fmt.Println(configPath)
 			return
+		}
+
+		// --sources helpers: inline [layer] / [env] annotations
+		layers := config.GetConfigLayerInfos()
+
+		// srcTag returns "  [layer]" (green) or "  [env: VAR]" (yellow) for a scalar key.
+		srcTag := func(key string) string {
+			if !showSources {
+				return ""
+			}
+			envVar := "CNT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+			if os.Getenv(envVar) != "" {
+				return "  " + utils.StyleWarning("[env: "+envVar+"]")
+			}
+			for _, layer := range layers {
+				if layer.InConfig(key) {
+					return "  " + utils.StyleSuccess("["+layer.Type+"]")
+				}
+			}
+			return ""
+		}
+
+		// srcEntryTag returns "  [layer]" (green/yellow) for a value inside an array key.
+		srcEntryTag := func(key, val string) string {
+			if !showSources {
+				return ""
+			}
+			envVar := "CNT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+			if os.Getenv(envVar) != "" {
+				return "  " + utils.StyleWarning("[env]")
+			}
+			for _, layer := range layers {
+				if !layer.InConfig(key) {
+					continue
+				}
+				for _, v := range layer.GetStringSlice(key) {
+					if v == val {
+						return "  " + utils.StyleSuccess("["+layer.Type+"]")
+					}
+				}
+			}
+			return ""
+		}
+
+		// printOverridden prints dimmed lines for lower-priority layers that also set key.
+		// indent should pad to the same column as the active value on the line above.
+		printOverridden := func(indent, key string) {
+			if !showSources {
+				return
+			}
+			envActive := os.Getenv("CNT_"+strings.ToUpper(strings.ReplaceAll(key, ".", "_"))) != ""
+			skippedFirst := false
+			for _, layer := range layers {
+				if !layer.InConfig(key) {
+					continue
+				}
+				if !skippedFirst && !envActive {
+					skippedFirst = true
+					continue
+				}
+				suffix := "(overridden)"
+				if envActive {
+					suffix = "(overridden by env)"
+				}
+				fmt.Printf("%s%s\n", indent,
+					utils.StyleDebug(layer.GetString(key)+" ["+layer.Type+"] "+suffix))
+			}
 		}
 
 		// Show config file search paths
@@ -283,9 +362,9 @@ Shows:
 			addBaseDir("extra-helper", path, ro)
 		}
 
-		// Tier base directories (extra-root → portable → scratch → user)
+		// Tier base directories (extra-root → root → scratch → user)
 		addBaseDir("extra-root", config.GetExtraRootDir(), false)
-		addBaseDir("portable", config.GetPortableDataDir(), false)
+		addBaseDir("root", config.GetRootDir(), false)
 		addBaseDir("scratch", config.GetScratchDataDir(), false)
 		addBaseDir("user", config.GetUserDataDir(), false)
 
@@ -297,19 +376,22 @@ Shows:
 
 		// Paths: binaries then directories
 		fmt.Println(utils.StyleTitle("Paths:"))
-		fmt.Printf("  apptainer_bin: %s\n", viper.GetString("apptainer_bin"))
+		fmt.Printf("  apptainer_bin: %s%s\n", viper.GetString("apptainer_bin"), srcTag("apptainer_bin"))
+		printOverridden("                 ", "apptainer_bin")
 		schedulerBin := viper.GetString("scheduler_bin")
 		schedulerType := config.GetSchedulerTypeFromBin(schedulerBin)
 		if schedulerBin != "" {
-			fmt.Printf("  scheduler_bin: %s (%s)\n", schedulerBin, schedulerType)
+			fmt.Printf("  scheduler_bin: %s (%s)%s\n", schedulerBin, schedulerType, srcTag("scheduler_bin"))
 		} else {
-			fmt.Printf("  scheduler_bin: %s\n", schedulerBin)
+			fmt.Printf("  scheduler_bin: %s%s\n", schedulerBin, srcTag("scheduler_bin"))
 		}
+		printOverridden("                 ", "scheduler_bin")
 		logsDir := viper.GetString("logs_dir")
 		if logsDir == "" {
 			logsDir = config.Global.LogsDir + " (default)"
 		}
-		fmt.Printf("  logs_dir:      %s\n", logsDir)
+		fmt.Printf("  logs_dir:      %s%s\n", logsDir, srcTag("logs_dir"))
+		printOverridden("                 ", "logs_dir")
 		extraImageDirs := config.GetExtraImageDirs()
 		if len(extraImageDirs) > 0 {
 			fmt.Printf("  extra_image_dirs:\n")
@@ -319,7 +401,7 @@ Shows:
 				if ro {
 					roSuffix = " " + utils.StyleWarning("(search-only)")
 				}
-				fmt.Printf("    - %s%s\n", path, roSuffix)
+				fmt.Printf("    - %s%s%s\n", path, roSuffix, srcEntryTag("extra_image_dirs", entry))
 			}
 		} else {
 			fmt.Printf("  extra_image_dirs: %s\n", utils.StyleInfo("none"))
@@ -328,7 +410,7 @@ Shows:
 		if len(extraBuildDirs) > 0 {
 			fmt.Printf("  extra_build_dirs:\n")
 			for _, path := range extraBuildDirs {
-				fmt.Printf("    - %s\n", path)
+				fmt.Printf("    - %s%s\n", path, srcEntryTag("extra_build_dirs", path))
 			}
 		} else {
 			fmt.Printf("  extra_build_dirs: %s\n", utils.StyleInfo("none"))
@@ -337,7 +419,7 @@ Shows:
 		if len(extraHelperDirs) > 0 {
 			fmt.Printf("  extra_helper_dirs:\n")
 			for _, path := range extraHelperDirs {
-				fmt.Printf("    - %s\n", path)
+				fmt.Printf("    - %s%s\n", path, srcEntryTag("extra_helper_dirs", path))
 			}
 		} else {
 			fmt.Printf("  extra_helper_dirs: %s\n", utils.StyleInfo("none"))
@@ -346,46 +428,52 @@ Shows:
 
 		// Remote sources
 		fmt.Println(utils.StyleTitle("Remote Sources:"))
-		fmt.Printf("  scripts_link:  %s\n", config.Global.ScriptsLink)
+		fmt.Printf("  scripts_link:  %s%s\n", config.Global.ScriptsLink, srcTag("scripts_link"))
+		printOverridden("                 ", "scripts_link")
 		extraScriptsLinks := config.GetExtraScriptsLinks()
 		if len(extraScriptsLinks) > 0 {
 			fmt.Printf("  extra_scripts_links:\n")
 			for _, l := range extraScriptsLinks {
-				fmt.Printf("    - %s\n", l)
+				fmt.Printf("    - %s%s\n", l, srcEntryTag("extra_scripts_links", l))
 			}
 		} else {
 			fmt.Printf("  extra_scripts_links: %s\n", utils.StyleInfo("none"))
 		}
-		fmt.Printf("  prefer_remote: %v\n", config.Global.PreferRemote)
+		fmt.Printf("  prefer_remote: %v%s\n", config.Global.PreferRemote, srcTag("prefer_remote"))
+		printOverridden("                 ", "prefer_remote")
 		fmt.Println()
 
 		// Options (longest key: metadata_cache_ttl = 18 chars)
 		fmt.Println(utils.StyleTitle("Options:"))
-		fmt.Printf("  %-19s %s  (avail: %s)\n", "default_distro:",
-			config.Global.DefaultDistro, strings.Join(config.GetAvailableDistros(), ", "))
+		fmt.Printf("  %-19s %s%s\n", "default_distro:", config.Global.DefaultDistro, srcTag("default_distro"))
+		printOverridden("                      ", "default_distro")
 		submitJobConfig := viper.GetBool("submit_job")
 		submitJobActual := config.Global.SubmitJob
 		if submitJobConfig && !submitJobActual {
-			fmt.Printf("  %-19s %v (disabled: scheduler not accessible)\n", "submit_job:", submitJobConfig)
+			fmt.Printf("  %-19s %v (disabled: scheduler not accessible)%s\n", "submit_job:", submitJobConfig, srcTag("submit_job"))
 		} else {
-			fmt.Printf("  %-19s %v\n", "submit_job:", submitJobActual)
+			fmt.Printf("  %-19s %v%s\n", "submit_job:", submitJobActual, srcTag("submit_job"))
 		}
+		printOverridden("                      ", "submit_job")
 		if config.Global.SchedulerTimeout == 0 {
-			fmt.Printf("  %-19s 0 (disabled)\n", "scheduler_timeout:")
+			fmt.Printf("  %-19s 0 (disabled)%s\n", "scheduler_timeout:", srcTag("scheduler_timeout"))
 		} else {
-			fmt.Printf("  %-19s %s\n", "scheduler_timeout:", utils.FormatDuration(config.Global.SchedulerTimeout))
+			fmt.Printf("  %-19s %s%s\n", "scheduler_timeout:", utils.FormatDuration(config.Global.SchedulerTimeout), srcTag("scheduler_timeout"))
 		}
-		fmt.Printf("  %-19s %v\n", "parse_module_load:", config.Global.ParseModuleLoad)
+		printOverridden("                      ", "scheduler_timeout")
+		fmt.Printf("  %-19s %v%s\n", "parse_module_load:", config.Global.ParseModuleLoad, srcTag("parse_module_load"))
+		printOverridden("                      ", "parse_module_load")
 		if config.Global.MetadataCacheTTL == 0 {
-			fmt.Printf("  %-19s 0 (disabled)\n", "metadata_cache_ttl:")
+			fmt.Printf("  %-19s 0 (disabled)%s\n", "metadata_cache_ttl:", srcTag("metadata_cache_ttl"))
 		} else {
-			fmt.Printf("  %-19s %dd\n", "metadata_cache_ttl:", int(config.Global.MetadataCacheTTL.Hours()/24))
+			fmt.Printf("  %-19s %dd%s\n", "metadata_cache_ttl:", int(config.Global.MetadataCacheTTL.Hours()/24), srcTag("metadata_cache_ttl"))
 		}
+		printOverridden("                      ", "metadata_cache_ttl")
 		channels := config.Global.Build.Channels
 		if len(channels) > 0 {
 			fmt.Printf("  %-19s\n", "channels:")
 			for _, ch := range channels {
-				fmt.Printf("    - %s\n", ch)
+				fmt.Printf("    - %s%s\n", ch, srcEntryTag("channels", ch))
 			}
 		} else {
 			fmt.Printf("  %-19s %s\n", "channels:", utils.StyleInfo("none"))
@@ -394,21 +482,29 @@ Shows:
 
 		// Build settings (longest key: tmp_overlay_size = 16 chars)
 		fmt.Printf("%s %s\n", utils.StyleTitle("Build Configuration:"), "build.*")
-		fmt.Printf("  %-17s %d\n", "ncpus:", config.Global.Build.Defaults.CpusPerTask)
-		fmt.Printf("  %-17s %s\n", "mem:", utils.FormatMemoryMB(config.Global.Build.Defaults.MemPerNodeMB))
-		fmt.Printf("  %-17s %s\n", "time:", utils.FormatDuration(config.Global.Build.Defaults.Time))
+		fmt.Printf("  %-17s %d%s\n", "ncpus:", config.Global.Build.Defaults.CpusPerTask, srcTag("build.ncpus"))
+		printOverridden("                    ", "build.ncpus")
+		fmt.Printf("  %-17s %s%s\n", "mem:", utils.FormatMemoryMB(config.Global.Build.Defaults.MemPerNodeMB), srcTag("build.mem"))
+		printOverridden("                    ", "build.mem")
+		fmt.Printf("  %-17s %s%s\n", "time:", utils.FormatDuration(config.Global.Build.Defaults.Time), srcTag("build.time"))
+		printOverridden("                    ", "build.time")
 		// Show actual compress_args (may be auto-detected based on apptainer version)
 		compressArgs := viper.GetString("build.compress_args")
 		actualCompressArgs := config.Global.Build.CompressArgs
 		if compressArgs != actualCompressArgs {
-			fmt.Printf("  %-17s %s\n", "compress_args:", actualCompressArgs)
+			fmt.Printf("  %-17s %s%s\n", "compress_args:", actualCompressArgs, srcTag("build.compress_args"))
 		} else {
-			fmt.Printf("  %-17s %s\n", "compress_args:", compressArgs)
+			fmt.Printf("  %-17s %s%s\n", "compress_args:", compressArgs, srcTag("build.compress_args"))
 		}
-		fmt.Printf("  %-17s %s\n", "block_size:", config.Global.Build.BlockSize)
-		fmt.Printf("  %-17s %s\n", "data_block_size:", config.Global.Build.DataBlockSize)
-		fmt.Printf("  %-17s %v\n", "use_tmp_overlay:", config.Global.Build.UseTmpOverlay)
-		fmt.Printf("  %-17s %s\n", "tmp_overlay_size:", utils.FormatMemoryMB(int64(config.Global.Build.TmpSizeMB)))
+		printOverridden("                    ", "build.compress_args")
+		fmt.Printf("  %-17s %s%s\n", "block_size:", config.Global.Build.BlockSize, srcTag("build.block_size"))
+		printOverridden("                    ", "build.block_size")
+		fmt.Printf("  %-17s %s%s\n", "data_block_size:", config.Global.Build.DataBlockSize, srcTag("build.data_block_size"))
+		printOverridden("                    ", "build.data_block_size")
+		fmt.Printf("  %-17s %v%s\n", "use_tmp_overlay:", config.Global.Build.UseTmpOverlay, srcTag("build.use_tmp_overlay"))
+		printOverridden("                    ", "build.use_tmp_overlay")
+		fmt.Printf("  %-17s %s%s\n", "tmp_overlay_size:", utils.FormatMemoryMB(int64(config.Global.Build.TmpSizeMB)), srcTag("build.tmp_overlay_size"))
+		printOverridden("                    ", "build.tmp_overlay_size")
 		fmt.Println()
 
 		// Show environment variable overrides
@@ -437,14 +533,36 @@ Shows:
 var configGetCmd = &cobra.Command{
 	Use:   "get <key>",
 	Short: "Get a configuration value",
-	Long:  `Get a specific configuration value.`,
+	Long: `Get a specific configuration value.
+
+Without -l, returns the effective merged value (env overrides + all config layers).
+With -l, reads only the specified config layer file.`,
 	Example: `  condatainer config get apptainer_bin
   condatainer config get build.ncpus
-  condatainer config get submit_job`,
+  condatainer config get extra_image_dirs
+  condatainer config get extra_image_dirs -l root   # root layer only`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: configKeysCompletion,
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
+
+		// Layer-specific read
+		if getLocation != "" {
+			configPath, _, err := config.ResolveReadableConfigPath(getLocation)
+			if err != nil {
+				ExitWithError("Invalid location: %v", err)
+			}
+			if isArrayKey(key) {
+				for _, v := range config.ReadConfigSliceKey(configPath, key) {
+					fmt.Println(v)
+				}
+			} else {
+				fmt.Println(config.ReadConfigKey(configPath, key))
+			}
+			return
+		}
+
+		// Merged effective value
 		value := viper.Get(key)
 		if value == nil {
 			ExitWithUsageError("Unknown config key: %s", key)
@@ -567,17 +685,20 @@ var configInitCmd = &cobra.Command{
 	Long: `Create a configuration file with default values and auto-detected settings.
 
 Config location options (-l, --location):
-  u, user      ~/.config/condatainer/config.yaml (default for standard installations)
-  p, portable  <install-dir>/config.yaml (default if installed in a dedicated folder)
-  s, system    /etc/condatainer/config.yaml (requires appropriate permissions)
+  u, user        ~/.config/condatainer/config.yaml (default for standard installations)
+  r, root        <install-dir>/config.yaml (default if installed in a dedicated folder, or CNT_ROOT set)
+  e, extra-root  $CNT_EXTRA_ROOT/config.yaml (group/lab layer, requires CNT_EXTRA_ROOT)
+  s, system      /etc/condatainer/config.yaml (requires appropriate permissions)
 
 By default, the location is chosen based on the installation:
   - If the executable is in a dedicated folder (e.g., /apps/condatainer/bin/),
-    the config is created in the parent folder (portable mode).
+    the config is created in the parent folder (standalone layout, -l root).
   - Otherwise, it uses the user's config directory.`,
 	Example: `  condatainer config init              # Create config with smart default location
   condatainer config init -l user      # Force user config location
-  condatainer config init -l portable  # Force portable config location`,
+  condatainer config init -l root      # Force root config location
+  condatainer config init -l r         # Same as -l root
+  CNT_EXTRA_ROOT=/lab condatainer config init -l extra-root  # Group/lab layer`,
 	Run: func(cmd *cobra.Command, args []string) {
 		var configPath string
 		var err error
@@ -591,26 +712,26 @@ By default, the location is chosen based on the installation:
 				ExitWithError("Invalid location: %v", err)
 			}
 			locationType = config.NormalizeConfigLocation(initLocation)
-			// Fail early with an actionable error if the portable dir is read-only
-			if locationType == "portable" {
-				if portableDir := filepath.Dir(configPath); !utils.CanWriteToDir(portableDir) {
+			// Fail early with an actionable error if the root dir is read-only
+			if locationType == "root" {
+				if rootDir := filepath.Dir(configPath); !utils.CanWriteToDir(rootDir) {
 					ExitWithError(
-						"Portable config directory is read-only: %s\n"+
+						"Root config directory is read-only: %s\n"+
 							"Run as a privileged user, or use '-l user' to create a personal config instead.",
-						portableDir,
+						rootDir,
 					)
 				}
 			}
 		} else {
-			// Smart default: portable if in dedicated installation AND writable, otherwise user
-			portablePath := config.GetPortableConfigPath()
-			if portablePath != "" && utils.CanWriteToDir(filepath.Dir(portablePath)) {
-				configPath = portablePath
-				locationType = "portable"
+			// Smart default: root if in dedicated installation AND writable, otherwise user
+			rootPath := config.GetRootConfigPath()
+			if rootPath != "" && utils.CanWriteToDir(filepath.Dir(rootPath)) {
+				configPath = rootPath
+				locationType = "root"
 			} else {
-				if portablePath != "" {
-					// Portable install detected but dir is read-only — fall back gracefully
-					utils.PrintNote("Portable install detected but directory is read-only; using user config instead.")
+				if rootPath != "" {
+					// Standalone layout detected but dir is read-only — fall back gracefully
+					utils.PrintNote("Standalone layout detected but directory is read-only; using user config instead.")
 				}
 				configPath, err = config.GetUserConfigPath()
 				if err != nil {
@@ -645,12 +766,12 @@ By default, the location is chosen based on the installation:
 		var detectedCompression string
 
 		if locationType == "user" {
-			// Minimal user init: only detect and write keys not already in portable/system config.
-			portablePath := config.GetPortableConfigPath()
+			// Minimal user init: only detect and write keys not already in root/system config.
+			rootPath := config.GetRootConfigPath()
 			systemPath := config.GetSystemConfigPath()
 
 			apptainerForUser := ""
-			if config.ReadConfigKey(portablePath, "apptainer_bin") == "" &&
+			if config.ReadConfigKey(rootPath, "apptainer_bin") == "" &&
 				config.ReadConfigKey(systemPath, "apptainer_bin") == "" {
 				detectedApptainerBin := config.DetectApptainerBin()
 				if detectedApptainerBin == "" {
@@ -661,7 +782,7 @@ By default, the location is chosen based on the installation:
 			}
 
 			schedulerForUser := ""
-			if config.ReadConfigKey(portablePath, "scheduler_bin") == "" &&
+			if config.ReadConfigKey(rootPath, "scheduler_bin") == "" &&
 				config.ReadConfigKey(systemPath, "scheduler_bin") == "" {
 				detectedSchedulerBin := config.DetectSchedulerBin()
 				if detectedSchedulerBin != "" {
@@ -674,7 +795,7 @@ By default, the location is chosen based on the installation:
 				ExitWithError("Failed to save config: %v", err)
 			}
 		} else {
-			// Full portable/system init: always detect apptainer binary.
+			// Full root/system/extra-root init: always detect apptainer binary.
 			detectedApptainerBin := config.DetectApptainerBin()
 			if detectedApptainerBin == "" {
 				ExitWithError("Neither 'apptainer' nor 'singularity' binary found (checked PATH and 'module avail').")
@@ -721,12 +842,13 @@ var configPathsCmd = &cobra.Command{
 
 Search paths are checked in priority order (first match wins for reads):
   1. Extra base directories (highest priority)
-  2. Portable (group/shared directory)
-  3. Scratch (user HPC large storage, $SCRATCH/condatainer)
-  4. User XDG directory (~/.local/share/condatainer)
+  2. Extra-root ($CNT_EXTRA_ROOT, group/lab layer)
+  3. Root (auto-detected or $CNT_ROOT)
+  4. Scratch (user HPC large storage, $SCRATCH/condatainer)
+  5. User XDG directory (~/.local/share/condatainer)
 
 Write operations use the first writable directory in the same order.
-Portable is preferred for group/shared use, user is the fallback.`,
+Root is preferred for group/shared use, user is the fallback.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println(utils.StyleTitle("Data Search Paths"))
 		fmt.Println()
@@ -782,12 +904,23 @@ Portable is preferred for group/shared use, user is the fallback.`,
 		}
 		fmt.Println()
 
+		// Config file search paths
+		fmt.Println(utils.StyleTitle("Config Files:"))
+		for _, cp := range config.GetConfigSearchPaths() {
+			var status string
+			if !cp.Exists {
+				status = " " + utils.StyleCommand("(not found)")
+			}
+			fmt.Printf("  %-12s %s%s\n", cp.Type+":", cp.Path, status)
+		}
+		fmt.Println()
+
 		// Directory info
 		fmt.Println(utils.StyleTitle("Directory Locations:"))
-		if portableDir := config.GetPortableDataDir(); portableDir != "" {
-			fmt.Printf("  Portable: %s\n", portableDir)
+		if rootDir := config.GetRootDir(); rootDir != "" {
+			fmt.Printf("  Root:     %s\n", rootDir)
 		} else {
-			fmt.Printf("  Portable: %s\n", utils.StyleWarning("not detected"))
+			fmt.Printf("  Root:     %s\n", utils.StyleWarning("not detected (set CNT_ROOT to override)"))
 		}
 		if scratchDir := config.GetScratchDataDir(); scratchDir != "" {
 			fmt.Printf("  Scratch:  %s\n", scratchDir)
@@ -987,11 +1120,13 @@ var configRemoveCmd = &cobra.Command{
 func init() {
 	// Add flags
 	configShowCmd.Flags().BoolVar(&showPath, "path", false, "Show only the config file path")
-	configInitCmd.Flags().StringVarP(&initLocation, "location", "l", "", "Config location: user (u), portable (p), or system (s)")
-	configSetCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), portable (p), or system (s)")
-	configAppendCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), portable (p), or system (s)")
-	configPrependCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), portable (p), or system (s)")
-	configRemoveCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), portable (p), or system (s)")
+	configShowCmd.Flags().BoolVarP(&showSources, "sources", "s", false, "Show which config layer provides each value")
+	configInitCmd.Flags().StringVarP(&initLocation, "location", "l", "", "Config location: user (u), root (r), extra-root (e), or system (s)")
+	configGetCmd.Flags().StringVarP(&getLocation, "location", "l", "", "Read from a specific config layer: user (u), root (r), extra-root (e), or system (s)")
+	configSetCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), root (r), extra-root (e), or system (s)")
+	configAppendCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), root (r), extra-root (e), or system (s)")
+	configPrependCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), root (r), extra-root (e), or system (s)")
+	configRemoveCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), root (r), extra-root (e), or system (s)")
 
 	// Add subcommands
 	configCmd.AddCommand(configShowCmd)

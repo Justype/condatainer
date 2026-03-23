@@ -21,9 +21,32 @@ const ConfigFilename = "config"
 // ConfigType is the type of config file (yaml, json, toml)
 const ConfigType = "yaml"
 
-// configLayers holds per-file viper instances in priority order (user → portable → system).
+// configLayers holds per-file viper instances in priority order (user → extra-root → root → system).
 // Populated by InitViper(). Used by mergeFromLayers() for array key merging.
 var configLayers []*viper.Viper
+
+// ConfigLayerInfo exposes one loaded config layer for per-layer display.
+type ConfigLayerInfo struct {
+	Path string
+	Type string // "user", "extra-root", "root", "system"
+	v    *viper.Viper
+}
+
+// InConfig reports whether key is explicitly set in this config file (not just a default).
+func (l ConfigLayerInfo) InConfig(key string) bool { return l.v.InConfig(key) }
+
+// GetString returns the string value of key from this config layer.
+func (l ConfigLayerInfo) GetString(key string) string { return l.v.GetString(key) }
+
+// GetStringSlice returns the string slice value of key from this config layer.
+func (l ConfigLayerInfo) GetStringSlice(key string) []string { return l.v.GetStringSlice(key) }
+
+// loadedLayers mirrors configLayers but with labels, for per-layer display in config show --sources.
+var loadedLayers []ConfigLayerInfo
+
+// GetConfigLayerInfos returns all loaded config layers in priority order.
+// Used by config show --sources to display per-layer value annotations.
+func GetConfigLayerInfos() []ConfigLayerInfo { return loadedLayers }
 
 // InitViper initializes Viper with proper search paths and defaults.
 // Priority (highest to lowest):
@@ -31,9 +54,9 @@ var configLayers []*viper.Viper
 // 2. Environment variables (CNT_*) — always replaces for that key
 // 3. User config file (~/.config/condatainer/config.yaml)
 // 4. Extra root config ($CNT_EXTRA_ROOT/config.yaml, group/lab layer)
-// 5. Portable config ($CNT_ROOT/config.yaml or <install>/config.yaml)
+// 5. Root config ($CNT_ROOT/config.yaml or <install>/config.yaml)
 // 6. System config file (/etc/condatainer/config.yaml)
-// 6. Defaults
+// 7. Defaults
 //
 // Scalar keys: highest-priority config file that sets the key wins.
 // Array keys (extra_*_dirs, extra_scripts_links): merged across all config layers
@@ -46,7 +69,7 @@ func InitViper() error {
 	viper.AutomaticEnv()
 	setDefaults()
 
-	// Collect config paths in priority order: user > portable > system
+	// Collect config paths in priority order: user > extra-root > root > system
 	type configSource struct{ path, label string }
 	var sources []configSource
 	if userPath, err := GetUserConfigPath(); err == nil {
@@ -55,8 +78,8 @@ func InitViper() error {
 	if extraRoot := GetExtraRootDir(); extraRoot != "" {
 		sources = append(sources, configSource{filepath.Join(extraRoot, ConfigFilename+"."+ConfigType), "extra-root"})
 	}
-	if portablePath := GetPortableConfigPath(); portablePath != "" {
-		sources = append(sources, configSource{portablePath, "portable"})
+	if rootPath := GetRootConfigPath(); rootPath != "" {
+		sources = append(sources, configSource{rootPath, "root"})
 	}
 	sources = append(sources, configSource{GetSystemConfigPath(), "system"})
 
@@ -66,6 +89,7 @@ func InitViper() error {
 	// seenPaths prevents loading the same file twice (e.g. CNT_EXTRA_ROOT == CNT_ROOT).
 	primaryLoaded := false
 	configLayers = nil
+	loadedLayers = nil
 	seenPaths := make(map[string]bool)
 	for _, src := range sources {
 		if !fileExists(src.path) {
@@ -81,6 +105,7 @@ func InitViper() error {
 				return fmt.Errorf("error reading config %s: %w", src.path, err)
 			}
 			configLayers = append(configLayers, viper.GetViper()) // reuse, no re-read
+			loadedLayers = append(loadedLayers, ConfigLayerInfo{src.path, src.label, viper.GetViper()})
 			primaryLoaded = true
 		} else {
 			v := viper.New()
@@ -89,6 +114,7 @@ func InitViper() error {
 				return fmt.Errorf("error reading config %s: %w", src.path, err)
 			}
 			configLayers = append(configLayers, v)
+			loadedLayers = append(loadedLayers, ConfigLayerInfo{src.path, src.label, v})
 		}
 	}
 	return nil
@@ -143,25 +169,31 @@ func GetUserConfigPath() (string, error) {
 	return filepath.Join(userConfigDir, "condatainer", ConfigFilename+"."+ConfigType), nil
 }
 
-// GetPortableConfigPath returns the portable config path if the executable is in a
-// dedicated installation. Returns empty string if not in a portable installation.
-func GetPortableConfigPath() string {
-	if portableDir := GetPortableDataDir(); portableDir != "" {
-		return filepath.Join(portableDir, ConfigFilename+"."+ConfigType)
+// GetRootConfigPath returns the root config path (CNT_ROOT or standalone layout).
+// Returns empty string if the root dir is not set.
+func GetRootConfigPath() string {
+	if rootDir := GetRootDir(); rootDir != "" {
+		return filepath.Join(rootDir, ConfigFilename+"."+ConfigType)
+	}
+	return ""
+}
+
+// GetExtraRootConfigPath returns the extra-root config path ($CNT_EXTRA_ROOT/config.yaml).
+// Returns empty string if CNT_EXTRA_ROOT is not set.
+func GetExtraRootConfigPath() string {
+	if extraRoot := GetExtraRootDir(); extraRoot != "" {
+		return filepath.Join(extraRoot, ConfigFilename+"."+ConfigType)
 	}
 	return ""
 }
 
 // GetDefaultConfigPath returns the recommended config path based on installation type.
-// - If in a portable installation (bin/ folder), returns the portable path
+// - If in a standalone layout (bin/ folder) or CNT_ROOT is set, returns the root path
 // - Otherwise, returns the user config path (~/.config/condatainer/config.yaml)
 func GetDefaultConfigPath() (string, error) {
-	// Check for portable installation first
-	if portablePath := GetPortableConfigPath(); portablePath != "" {
-		return portablePath, nil
+	if rootPath := GetRootConfigPath(); rootPath != "" {
+		return rootPath, nil
 	}
-
-	// Fall back to user config
 	return GetUserConfigPath()
 }
 
@@ -173,7 +205,7 @@ func GetSystemConfigPath() string {
 // ConfigSearchPath represents a config file location with metadata
 type ConfigSearchPath struct {
 	Path   string // Full path to config file
-	Type   string // Type: "portable", "user", "system", "cwd"
+	Type   string // Type: "root", "extra-root", "user", "system"
 	Exists bool   // Whether the file exists
 	InUse  bool   // Whether this is the active config file
 }
@@ -227,15 +259,15 @@ func GetConfigSearchPaths() []ConfigSearchPath {
 		})
 	}
 
-	// Priority order matches InitViper: user > extra-root > portable > system
+	// Priority order matches InitViper: user > extra-root > root > system
 	if userConfigDir, err := os.UserConfigDir(); err == nil {
 		add(filepath.Join(userConfigDir, "condatainer", ConfigFilename+"."+ConfigType), "user")
 	}
 	if extraRoot := GetExtraRootDir(); extraRoot != "" {
 		add(filepath.Join(extraRoot, ConfigFilename+"."+ConfigType), "extra-root")
 	}
-	if portablePath := GetPortableConfigPath(); portablePath != "" {
-		add(portablePath, "portable")
+	if rootPath := GetRootConfigPath(); rootPath != "" {
+		add(rootPath, "root")
 	}
 	add(GetSystemConfigPath(), "system")
 
@@ -243,13 +275,15 @@ func GetConfigSearchPaths() []ConfigSearchPath {
 }
 
 // NormalizeConfigLocation expands location shorthand to its full name.
-// Returns the full name ("user", "portable", "system") or the input unchanged if not a known shorthand.
+// Returns the full name ("user", "root", "extra-root", "system") or the input unchanged.
 func NormalizeConfigLocation(location string) string {
 	switch location {
 	case "u":
 		return "user"
-	case "p":
-		return "portable"
+	case "r":
+		return "root"
+	case "e":
+		return "extra-root"
 	case "s":
 		return "system"
 	default:
@@ -258,20 +292,25 @@ func NormalizeConfigLocation(location string) string {
 }
 
 // GetConfigPathByLocation returns the config path for the specified location type.
-// Supported locations: "user"/"u", "portable"/"p", "system"/"s"
+// Supported locations: "user"/"u", "root"/"r", "extra-root"/"e", "system"/"s"
 func GetConfigPathByLocation(location string) (string, error) {
 	switch location {
 	case "user", "u":
 		return GetUserConfigPath()
-	case "portable", "p":
-		if path := GetPortableConfigPath(); path != "" {
+	case "root", "r":
+		if path := GetRootConfigPath(); path != "" {
 			return path, nil
 		}
-		return "", fmt.Errorf("not in a portable installation (executable not in a dedicated bin/ folder)")
+		return "", fmt.Errorf("root dir not available (not a standalone layout and CNT_ROOT not set)")
+	case "extra-root", "e":
+		if path := GetExtraRootConfigPath(); path != "" {
+			return path, nil
+		}
+		return "", fmt.Errorf("CNT_EXTRA_ROOT is not set")
 	case "system", "s":
 		return GetSystemConfigPath(), nil
 	default:
-		return "", fmt.Errorf("invalid location '%s': use 'user' (u), 'portable' (p), or 'system' (s)", location)
+		return "", fmt.Errorf("invalid location '%s': use 'user' (u), 'root' (r), 'extra-root' (e), or 'system' (s)", location)
 	}
 }
 
@@ -289,11 +328,14 @@ func GetActiveOrUserConfigPath() (string, error) {
 	return GetUserConfigPath()
 }
 
-// inferLocationType returns "portable", "system", or "user" by comparing path against
-// known config file paths. Returns "user" for any unrecognised path.
+// inferLocationType returns "root", "extra-root", "system", or "user" by comparing path
+// against known config file paths. Returns "user" for any unrecognised path.
 func inferLocationType(path string) string {
-	if p := GetPortableConfigPath(); p != "" && path == p {
-		return "portable"
+	if p := GetExtraRootConfigPath(); p != "" && path == p {
+		return "extra-root"
+	}
+	if p := GetRootConfigPath(); p != "" && path == p {
+		return "root"
 	}
 	if path == GetSystemConfigPath() {
 		return "system"
@@ -332,6 +374,23 @@ func ResolveWritableConfigPath(location string) (path, locationType string, err 
 		return "", "", fmt.Errorf("failed to determine user config path: %w", err)
 	}
 	return path, "user", nil
+}
+
+// ResolveReadableConfigPath resolves a location string to a config file path for reading.
+// Unlike ResolveWritableConfigPath it does not check write permissions.
+func ResolveReadableConfigPath(location string) (path, locationType string, err error) {
+	if location == "" {
+		path, err = GetUserConfigPath()
+		if err != nil {
+			return "", "", fmt.Errorf("failed to determine user config path: %w", err)
+		}
+		return path, "user", nil
+	}
+	path, err = GetConfigPathByLocation(location)
+	if err != nil {
+		return "", "", err
+	}
+	return path, NormalizeConfigLocation(location), nil
 }
 
 // ReadConfigSliceKey reads a string-slice key from a config file without touching
@@ -382,7 +441,7 @@ func ReadConfigKey(configPath, key string) string {
 
 // SaveMinimalConfigTo writes only the provided non-empty keys to path using a fresh viper
 // instance, so no default values bleed in. Intended for user config init when
-// portable/system config supplies everything else.
+// root/system config supplies everything else.
 func SaveMinimalConfigTo(path string, apptainerBin, schedulerBin string) error {
 	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
@@ -745,10 +804,60 @@ func ForceDetectAndSaveTo(configPath string) (bool, error) {
 	return updated, nil
 }
 
+// layerString returns the value of a scalar string key from the first source that
+// explicitly sets it. Priority: env var > user > extra-root > root > system.
+// Returns "" if no source explicitly sets the key.
+func layerString(key string) string {
+	envKey := "CNT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+	if ev := os.Getenv(envKey); ev != "" {
+		return ev
+	}
+	for _, v := range configLayers {
+		if v.InConfig(key) {
+			return v.GetString(key)
+		}
+	}
+	return ""
+}
+
+// layerBool returns the value of a scalar bool key and whether it was explicitly set.
+// Priority: env var > user > extra-root > root > system.
+func layerBool(key string) (bool, bool) {
+	envKey := "CNT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+	if ev := os.Getenv(envKey); ev != "" {
+		if val, err := strconv.ParseBool(ev); err == nil {
+			return val, true
+		}
+	}
+	for _, v := range configLayers {
+		if v.InConfig(key) {
+			return v.GetBool(key), true
+		}
+	}
+	return false, false
+}
+
+// layerInt returns the value of a scalar int key and whether it was explicitly set.
+// Priority: env var > user > extra-root > root > system.
+func layerInt(key string) (int, bool) {
+	envKey := "CNT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+	if ev := os.Getenv(envKey); ev != "" {
+		if n, err := strconv.Atoi(ev); err == nil {
+			return n, true
+		}
+	}
+	for _, v := range configLayers {
+		if v.InConfig(key) {
+			return v.GetInt(key), true
+		}
+	}
+	return 0, false
+}
+
 // LoadFromViper loads config from Viper into Global struct
 func LoadFromViper() {
 	// Update binary paths from Viper, with fallback to detection
-	if bin := viper.GetString("apptainer_bin"); bin != "" && ValidateBinary(bin) {
+	if bin := layerString("apptainer_bin"); bin != "" && ValidateBinary(bin) {
 		Global.ApptainerBin = bin
 	} else if bin == "" || !ValidateBinary(bin) {
 		// Fallback to detection if config value is empty or invalid
@@ -758,12 +867,12 @@ func LoadFromViper() {
 		}
 	}
 
-	if bin := viper.GetString("scheduler_bin"); bin != "" {
+	if bin := layerString("scheduler_bin"); bin != "" {
 		Global.SchedulerBin = bin
 	}
 
 	// Handle submit_job: disable if scheduler is not accessible
-	if submitJob := viper.GetBool("submit_job"); !submitJob {
+	if submitJob, ok := layerBool("submit_job"); ok && !submitJob {
 		Global.SubmitJob = false
 	} else {
 		// Auto-disable if no scheduler binary is available
@@ -776,7 +885,7 @@ func LoadFromViper() {
 	}
 
 	// Load logs_dir from config (overrides default $HOME/logs)
-	if logsDir := viper.GetString("logs_dir"); logsDir != "" {
+	if logsDir := layerString("logs_dir"); logsDir != "" {
 		logsDir = os.ExpandEnv(logsDir)
 		if absLogsDir, err := filepath.Abs(logsDir); err == nil {
 			logsDir = absLogsDir
@@ -785,7 +894,7 @@ func LoadFromViper() {
 	}
 
 	// Load scripts_link from config (base URL for remote build scripts and helpers)
-	if link := viper.GetString("scripts_link"); link != "" {
+	if link := layerString("scripts_link"); link != "" {
 		Global.ScriptsLink = strings.TrimRight(link, "/")
 	}
 
@@ -800,12 +909,12 @@ func LoadFromViper() {
 	Global.ScriptsLinks = append(trimmed, Global.ScriptsLink)
 
 	// Load prefer_remote from config
-	if viper.GetBool("prefer_remote") {
+	if preferRemote, ok := layerBool("prefer_remote"); ok && preferRemote {
 		Global.PreferRemote = true
 	}
 
 	// Load default_distro from config
-	if distro := viper.GetString("default_distro"); distro != "" {
+	if distro := layerString("default_distro"); distro != "" {
 		if !slices.Contains(GetAvailableDistros(), distro) {
 			utils.PrintWarning("Config distro '%s' not available; falling back to '%s'", distro, DEFAULT_DISTRO)
 			viper.Set("default_distro", DEFAULT_DISTRO)
@@ -815,23 +924,23 @@ func LoadFromViper() {
 	}
 
 	// Load build config from Viper
-	if ncpus := viper.GetInt("build.ncpus"); ncpus > 0 {
+	if ncpus, ok := layerInt("build.ncpus"); ok && ncpus > 0 {
 		Global.Build.Defaults.CpusPerTask = ncpus
 	}
 
-	if memStr := viper.GetString("build.mem"); memStr != "" {
+	if memStr := layerString("build.mem"); memStr != "" {
 		if memMB, err := utils.ParseMemoryMB(memStr); err == nil && memMB > 0 {
 			Global.Build.Defaults.MemPerNodeMB = memMB
 		}
 	}
 
-	if buildTime := viper.GetString("build.time"); buildTime != "" {
+	if buildTime := layerString("build.time"); buildTime != "" {
 		if dur, err := utils.ParseWalltime(buildTime); err == nil {
 			Global.Build.Defaults.Time = dur
 		}
 	}
 
-	if tmpStr := viper.GetString("build.tmp_overlay_size"); tmpStr != "" {
+	if tmpStr := layerString("build.tmp_overlay_size"); tmpStr != "" {
 		if tmpSizeMB, err := utils.ParseMemoryMB(tmpStr); err == nil && tmpSizeMB > 0 {
 			Global.Build.TmpSizeMB = int(tmpSizeMB)
 		}
@@ -839,11 +948,11 @@ func LoadFromViper() {
 
 	// Only override compress_args if explicitly set in config (non-empty)
 	// Empty means auto-detect based on apptainer version (handled by AutoDetectCompression)
-	if compressArgs := viper.GetString("build.compress_args"); compressArgs != "" {
+	if compressArgs := layerString("build.compress_args"); compressArgs != "" {
 		Global.Build.CompressArgs = NormalizeCompressArgs(compressArgs)
 	}
 
-	if v := viper.GetString("build.block_size"); v != "" {
+	if v := layerString("build.block_size"); v != "" {
 		if IsValidBlockSize(v) {
 			Global.Build.BlockSize = v
 		} else {
@@ -851,7 +960,7 @@ func LoadFromViper() {
 			Global.Build.BlockSize = "128k"
 		}
 	}
-	if v := viper.GetString("build.data_block_size"); v != "" {
+	if v := layerString("build.data_block_size"); v != "" {
 		if IsValidBlockSize(v) {
 			Global.Build.DataBlockSize = v
 		} else {
@@ -860,17 +969,25 @@ func LoadFromViper() {
 		}
 	}
 
-	Global.Build.UseTmpOverlay = viper.GetBool("build.use_tmp_overlay")
+	if useTmp, ok := layerBool("build.use_tmp_overlay"); ok {
+		Global.Build.UseTmpOverlay = useTmp
+	}
 
 	if ch := GetChannels(); len(ch) > 0 {
 		Global.Build.Channels = ch
 	}
 
-	Global.ParseModuleLoad = viper.GetBool("parse_module_load")
+	if parseModuleLoad, ok := layerBool("parse_module_load"); ok {
+		Global.ParseModuleLoad = parseModuleLoad
+	}
 
-	Global.SchedulerTimeout = time.Duration(viper.GetInt("scheduler_timeout")) * time.Second
+	if timeout, ok := layerInt("scheduler_timeout"); ok {
+		Global.SchedulerTimeout = time.Duration(timeout) * time.Second
+	}
 
-	Global.MetadataCacheTTL = time.Duration(viper.GetInt("metadata_cache_ttl")) * 24 * time.Hour
+	if ttl, ok := layerInt("metadata_cache_ttl"); ok {
+		Global.MetadataCacheTTL = time.Duration(ttl) * 24 * time.Hour
+	}
 }
 
 // NormalizeCompressArgs is a thin wrapper around ArgsForCompress and exists
@@ -886,7 +1003,7 @@ func NormalizeCompressArgs(val string) string {
 func AutoDetectCompression(supportsZstd bool, isSingularity bool) {
 	// Only auto-detect if user hasn't explicitly set compress_args in config
 	// Empty string in config means "auto-detect"
-	if viper.GetString("build.compress_args") != "" {
+	if layerString("build.compress_args") != "" {
 		// User explicitly set compress_args, respect it
 		return
 	}

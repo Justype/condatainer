@@ -64,8 +64,8 @@ func getAllBaseDirs() []string {
 	// Extra root dir
 	addIfExists(config.GetExtraRootDir())
 
-	// Portable dir
-	addIfExists(config.GetPortableDataDir())
+	// Root dir
+	addIfExists(config.GetRootDir())
 
 	// Scratch dir
 	addIfExists(config.GetScratchDataDir())

@@ -269,7 +269,7 @@ func GetBaseImage() string {
 }
 
 // GetWritableTmpDir returns the first writable tmp directory.
-// Probes existing directories without creating them (extra, portable, scratch);
+// Probes existing directories without creating them (extra-root, root, scratch);
 // only the user-owned tmp dir is created on first use.
 func GetWritableTmpDir() string {
 	// Global override for all build temp paths
@@ -285,9 +285,9 @@ func GetWritableTmpDir() string {
 		}
 	}
 
-	// Check portable data dir — probe only, no creation
-	if portableDir := GetPortableDataDir(); portableDir != "" {
-		tmpDir := filepath.Join(portableDir, "tmp")
+	// Check root data dir — probe only, no creation
+	if rootDir := GetRootDir(); rootDir != "" {
+		tmpDir := filepath.Join(rootDir, "tmp")
 		if utils.CanWriteToDir(tmpDir) {
 			return tmpDir
 		}

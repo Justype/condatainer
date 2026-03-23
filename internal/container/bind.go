@@ -146,8 +146,8 @@ func BindPaths(paths ...string) []string {
 		baseDirs = append(baseDirs, dir)
 	}
 
-	// Portable, Scratch, User directories
-	if dir := config.GetPortableDataDir(); dir != "" {
+	// Root, Scratch, User directories
+	if dir := config.GetRootDir(); dir != "" {
 		baseDirs = append(baseDirs, dir)
 	}
 	if dir := config.GetScratchDataDir(); dir != "" {

@@ -19,16 +19,17 @@ Always **replaces** the config file value for that key entirely.
 
 **2. Config files** — layered user/group/system config. All existing files are loaded:
 - Scalar keys (`apptainer_bin`, `default_distro`, etc.): highest-priority file that sets the key wins.
-- Array keys (`extra_*_dirs`, `extra_scripts_links`): **merged** across all layers (user ++ portable ++ system), deduplicated, user entries first.
+- Array keys (`extra_*_dirs`, `extra_scripts_links`): **merged** across all layers (user ++ extra-root ++ root ++ system), deduplicated, user entries first.
 - `channels`: **overwrite** — highest-priority config file that sets it wins (not merged).
 
 Priority order (highest to lowest):
 1. Command-line flags
 2. Environment variables (`CNT_*`) — replaces, not merged
 3. User config (`~/.config/condatainer/config.yaml`)
-4. Portable config (`<install>/config.yaml`)
-5. System config (`/etc/condatainer/config.yaml`)
-6. Hardcoded defaults
+4. Extra-root config (`$CNT_EXTRA_ROOT/config.yaml`, group/lab layer)
+5. Root config (`$CNT_ROOT/config.yaml` or `<install>/config.yaml`)
+6. System config (`/etc/condatainer/config.yaml`)
+7. Hardcoded defaults
 
 ## Global Config
 
@@ -51,21 +52,21 @@ config.Global  // Singleton instance
 **Search order for images:**
 1. `extra_image_dirs` — explicit image directories (direct paths, support `:ro`/`:rw`)
 2. `CNT_EXTRA_ROOT` → `<extra-root>/images/` (group/lab layer)
-3. Portable dir → `$CNT_ROOT/images/` or `<install>/images/`
+3. Root dir → `$CNT_ROOT/images/` or `<install>/images/`
 4. Scratch dir → `$SCRATCH/condatainer/images/`
 5. User dir → `$XDG_DATA_HOME/condatainer/images/` or `~/.local/share/condatainer/images/`
 
 **Search order for scripts:**
 **Build scripts:**
 1. `extra_build_dirs` — explicit build-scripts directories (direct paths)
-2. `CNT_EXTRA_ROOT`, Portable dir, Scratch dir, User dir (same pattern)
+2. `CNT_EXTRA_ROOT`, Root dir, Scratch dir, User dir (same pattern)
 
 **Helper scripts:**
 1. `extra_helper_dirs` — explicit helper-scripts directories (direct paths)
-2. `CNT_EXTRA_ROOT`, Portable dir, Scratch dir, User dir (same pattern)
+2. `CNT_EXTRA_ROOT`, Root dir, Scratch dir, User dir (same pattern)
 
 **Write operations:**
-- **Images / helpers**: first writable directory in search order. `:ro` entries and `extra_build_dirs` are always skipped. Shared dirs (extra, portable) are probed only; personal dirs (scratch, user) are created on first use.
+- **Images / helpers**: first writable directory in search order. `:ro` entries and `extra_build_dirs` are always skipped. Shared dirs (extra-root, root) are probed only; personal dirs (scratch, user) are created on first use.
 - **Cache**: always written to a personal directory (scratch → user cache) to avoid cross-user pollution. Shared dirs are never written to.
 
 **`:ro` / `:rw` markers** (image and helper dirs, config file only):
