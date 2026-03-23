@@ -105,6 +105,7 @@ All multi-value env vars use `|` as separator. `CNT_EXTRA_BASE_DIRS` also accept
 | `CNT_EXTRA_BASE_DIRS` | `\|` or `:` | Extra base dirs (auto-expands to `images/`, `build-scripts/`, etc.) |
 | `CNT_EXTRA_SCRIPTS_LINKS` | `\|` | Extra remote build script source URLs |
 | `CNT_CHANNELS` | `\|` or `:`  | Conda channels |
+| `CNT_ROOT` | — | Explicit portable base dir (replaces executable-location heuristic) |
 | `CNT_TMPDIR` | — | Override build temp directory |
 | `SCRATCH` | — | HPC scratch directory (`$SCRATCH/condatainer/`) |
 | `XDG_DATA_HOME` / `XDG_CONFIG_HOME` / `XDG_STATE_HOME` | — | XDG base dirs |

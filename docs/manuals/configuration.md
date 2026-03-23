@@ -234,6 +234,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_CHANNELS`             | `channels` (pipe or colon-separated) |
 | `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
 | `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
+| `CNT_ROOT`                 | (special override — sets portable base dir) |
 | `CNT_TMPDIR`               | (special override)     |
 
 Example:
@@ -401,6 +402,15 @@ For shared group installations, CondaTainer supports "portable" mode where the c
 All three config files (user, portable, system) are loaded simultaneously. For `extra_base_dirs` and other directory keys, entries from all configs are **merged** — so a group admin can add shared directories to the portable config and every user automatically searches those directories, even if they also have a personal config.
 
 For scalar keys like `apptainer_bin`, the user config takes priority; users can override portable/system defaults in their own config without affecting other users.
+
+**Explicit root via `CNT_ROOT`:** Instead of relying on the `bin/` layout detection, set `CNT_ROOT` to point directly to the installation directory. This is useful when the binary is installed to a standard location (e.g. `/usr/local/bin`) but the data lives elsewhere:
+
+```bash
+# In a module file:
+export CNT_ROOT=/shared/cluster/condatainer
+```
+
+`CNT_ROOT` takes priority over the executable-location heuristic. The directory does not need a `bin/` subdirectory.
 
 To set up a portable config for a shared installation:
 

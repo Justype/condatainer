@@ -485,6 +485,13 @@ Shows:
 		fmt.Println(utils.StyleTitle("Environment Variable Overrides:"))
 		envVars := getConfigEnvVars()
 		hasEnvOverrides := false
+		// Special vars not derived from config keys
+		for _, envVar := range []string{"CNT_ROOT", "SCRATCH"} {
+			if val := os.Getenv(envVar); val != "" {
+				fmt.Printf("  %s=%s\n", envVar, val)
+				hasEnvOverrides = true
+			}
+		}
 		for _, envVar := range envVars {
 			if val := os.Getenv(envVar); val != "" {
 				fmt.Printf("  %s=%s\n", envVar, val)

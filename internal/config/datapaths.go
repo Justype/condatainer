@@ -231,6 +231,16 @@ var (
 )
 
 func detectPortableDataDir() string {
+	// Explicit override: CNT_ROOT sets the portable base dir directly,
+	// bypassing the executable-location heuristic below.
+	if root := os.Getenv("CNT_ROOT"); root != "" {
+		root = os.ExpandEnv(root)
+		if abs, err := filepath.Abs(root); err == nil {
+			return abs
+		}
+		return root
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
