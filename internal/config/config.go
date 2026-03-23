@@ -304,7 +304,7 @@ func GetWritableTmpDir() string {
 	// Check user data dir — allowed to create (user-owned)
 	if userDir := GetUserDataDir(); userDir != "" {
 		tmpDir := filepath.Join(userDir, "tmp")
-		if utils.IsWritableDir(tmpDir) {
+		if utils.EnsureWritableDir(tmpDir) {
 			return tmpDir
 		}
 	}

@@ -66,7 +66,7 @@ config.Global  // Singleton instance
 2. `CNT_EXTRA_ROOT`, Root dir, Scratch dir, User dir (same pattern)
 
 **Write operations:**
-- **Images / helpers**: first writable directory in search order. `:ro` entries and `extra_build_dirs` are always skipped. Shared dirs (extra-root, root) are probed only; personal dirs (scratch, user) are created on first use.
+- **Images / helpers**: first writable directory in search order. `:ro` entries and `extra_build_dirs` are always skipped. Personal dirs (scratch, user) are always created on first use. Shared dirs (extra-root, root): subdirs (`images/`, `build-scripts/`, etc.) are auto-created if the parent directory already exists — the parent itself is never auto-created.
 - **Cache**: always written to a personal directory (scratch → user cache) to avoid cross-user pollution. Shared dirs are never written to.
 
 **`:ro` / `:rw` markers** (image and helper dirs, config file only):

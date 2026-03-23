@@ -428,8 +428,9 @@ func GetCacheSearchPaths() []string {
 // =============================================================================
 
 // SearchDir is a candidate directory for write operations.
-// Personal dirs (scratch, XDG user) are created on first use via IsWritableDir.
-// Shared dirs (CNT_EXTRA_ROOT, root, extra_*_dirs) are only probed via CanWriteToDir.
+// Personal dirs (scratch, XDG user) are always created on first use via EnsureWritableDir.
+// Shared dirs (CNT_EXTRA_ROOT, root, extra_*_dirs): subdirs are created if the parent
+// exists, but the parent itself is never auto-created.
 type SearchDir struct {
 	Path     string
 	Personal bool
@@ -455,15 +456,17 @@ func deduplicateWriteDirs(dirs []SearchDir) []SearchDir {
 }
 
 // firstWritableDir returns the first writable path from the slice.
-// Personal dirs are created if needed (IsWritableDir); shared dirs are probed only (CanWriteToDir).
+// Personal dirs are always created on first use (EnsureWritableDir).
+// Shared dirs are created only if the parent directory already exists — the parent
+// itself is never auto-created, but subdirs (images/, build-scripts/, etc.) are.
 func firstWritableDir(dirs []SearchDir) string {
 	for _, d := range dirs {
 		if d.Personal {
-			if utils.IsWritableDir(d.Path) {
+			if utils.EnsureWritableDir(d.Path) {
 				return d.Path
 			}
 		} else {
-			if utils.CanWriteToDir(d.Path) {
+			if utils.DirExists(filepath.Dir(d.Path)) && utils.EnsureWritableDir(d.Path) {
 				return d.Path
 			}
 		}
