@@ -1549,7 +1549,7 @@ condatainer config set build.time 4h
 
 ### Config Append / Prepend / Remove
 
-Manage array config keys (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_base_dirs`, `extra_scripts_links`, `channels`) from the CLI.
+Manage array config keys (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`, `channels`) from the CLI.
 
 ```
 condatainer config append  <key> <value>
@@ -1570,15 +1570,11 @@ condatainer config append extra_image_dirs /shared/lab/images:ro
 # Explicit image directory (writable personal store)
 condatainer config append extra_image_dirs /fast/scratch/images
 
-# Base directory using standard layout (images/, build-scripts/, etc.)
-condatainer config append extra_base_dirs /project/condatainer
-
 # Add an institutional scripts source (takes priority over the default)
 condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
 
 # Remove entries
 condatainer config remove extra_image_dirs /shared/lab/images:ro
-condatainer config remove extra_base_dirs /project/condatainer
 
 # Show result
 condatainer config show
@@ -1669,9 +1665,8 @@ build:
 extra_image_dirs:
   - /shared/lab/images:ro
   - /fast/scratch/images
-# Base directories (standard layout: images/, build-scripts/, etc.)
-# extra_base_dirs:
-#   - /project/shared/condatainer
+# For a group/lab root with standard layout, set in module file:
+# export CNT_EXTRA_ROOT=/project/shared/condatainer
 ```
 
 ## Scheduler

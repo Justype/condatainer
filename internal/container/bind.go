@@ -7,7 +7,6 @@ import (
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/scheduler"
-	"github.com/Justype/condatainer/internal/utils"
 )
 
 // DeduplicateBindPaths resolves, deduplicates, and filters child paths from bind directories.
@@ -124,7 +123,7 @@ func BindPaths(paths ...string) []string {
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		if readOnly || !utils.CanWriteToDir(path) {
+		if readOnly {
 			bindPaths = append(bindPaths, path+":"+path+":ro")
 		} else {
 			bindPaths = append(bindPaths, path)
@@ -142,8 +141,10 @@ func BindPaths(paths ...string) []string {
 	// Collect all base directories
 	baseDirs := []string{}
 
-	// Extra base directories
-	baseDirs = append(baseDirs, config.GetExtraBaseDirs()...)
+	// Extra root dir (CNT_EXTRA_ROOT, group/lab layer)
+	if dir := config.GetExtraRootDir(); dir != "" {
+		baseDirs = append(baseDirs, dir)
+	}
 
 	// Portable, Scratch, User directories
 	if dir := config.GetPortableDataDir(); dir != "" {
@@ -156,7 +157,7 @@ func BindPaths(paths ...string) []string {
 		baseDirs = append(baseDirs, dir)
 	}
 
-	// Add base directories with :ro flag if not writable
+	// Add base directories
 	for _, dir := range baseDirs {
 		if dir == "" {
 			continue
@@ -164,18 +165,13 @@ func BindPaths(paths ...string) []string {
 		if _, err := os.Stat(dir); err != nil {
 			continue
 		}
-		if !utils.CanWriteToDir(dir) {
-			bindPaths = append(bindPaths, dir+":"+dir+":ro")
-		} else {
-			bindPaths = append(bindPaths, dir)
-		}
+		bindPaths = append(bindPaths, dir)
 	}
 
-	// Bind condatainer executable for nested calls (non-portable only)
-	if !config.IsPortable() {
-		if execPath, err := os.Executable(); err == nil && execPath != "" {
-			bindPaths = append(bindPaths, execPath+":/usr/bin/condatainer:ro")
-		}
+	// Bind condatainer executable for nested calls.
+	// Always bind the actual exe regardless of install location.
+	if execPath, err := os.Executable(); err == nil && execPath != "" {
+		bindPaths = append(bindPaths, execPath+":/usr/bin/condatainer:ro")
 	}
 
 	return bindPaths

@@ -30,13 +30,14 @@ var configLayers []*viper.Viper
 // 1. Command-line flags (handled by cobra)
 // 2. Environment variables (CNT_*) — always replaces for that key
 // 3. User config file (~/.config/condatainer/config.yaml)
-// 4. Portable config (<install>/config.yaml, if in dedicated bin/ folder)
-// 5. System config file (/etc/condatainer/config.yaml)
+// 4. Extra root config ($CNT_EXTRA_ROOT/config.yaml, group/lab layer)
+// 5. Portable config ($CNT_ROOT/config.yaml or <install>/config.yaml)
+// 6. System config file (/etc/condatainer/config.yaml)
 // 6. Defaults
 //
 // Scalar keys: highest-priority config file that sets the key wins.
 // Array keys (extra_*_dirs, extra_scripts_links): merged across all config layers
-// so that e.g. a sysadmin's extra_base_dirs in system config are visible to users
+// so that e.g. a sysadmin's extra_image_dirs in system config are visible to users
 // who also have their own config. channels is an exception — overwrite, not merge.
 func InitViper() error {
 	viper.SetConfigName(ConfigFilename)
@@ -51,6 +52,9 @@ func InitViper() error {
 	if userPath, err := GetUserConfigPath(); err == nil {
 		sources = append(sources, configSource{userPath, "user"})
 	}
+	if extraRoot := GetExtraRootDir(); extraRoot != "" {
+		sources = append(sources, configSource{filepath.Join(extraRoot, ConfigFilename+"."+ConfigType), "extra-root"})
+	}
 	if portablePath := GetPortableConfigPath(); portablePath != "" {
 		sources = append(sources, configSource{portablePath, "portable"})
 	}
@@ -59,12 +63,18 @@ func InitViper() error {
 	// Load each existing config file.
 	// The first found becomes the global viper primary (for scalar keys + env var compat).
 	// configLayers[0] reuses the global viper instance to avoid reading the primary file twice.
+	// seenPaths prevents loading the same file twice (e.g. CNT_EXTRA_ROOT == CNT_ROOT).
 	primaryLoaded := false
 	configLayers = nil
+	seenPaths := make(map[string]bool)
 	for _, src := range sources {
 		if !fileExists(src.path) {
 			continue
 		}
+		if seenPaths[src.path] {
+			continue
+		}
+		seenPaths[src.path] = true
 		if !primaryLoaded {
 			viper.SetConfigFile(src.path)
 			if err := viper.ReadInConfig(); err != nil {
@@ -93,9 +103,6 @@ func setDefaults() {
 	viper.SetDefault("scripts_link", DefaultScriptsLink)
 	viper.SetDefault("prefer_remote", false)
 
-	// Extra base directories to search (prepended to default search paths)
-	// Each directory should contain images/, build-scripts/, helper-scripts/ subdirectories
-	viper.SetDefault("extra_base_dirs", []string{})
 	// Explicit extra image directories (direct paths); entries may end with ":ro" (search-only)
 	// or ":rw" (explicit writable, same as no marker).
 	viper.SetDefault("extra_image_dirs", []string{})
@@ -180,41 +187,57 @@ func fileExists(path string) bool {
 	return info.Mode().IsRegular()
 }
 
+// GetLoadedConfigPaths returns the file paths of all config files actually loaded by
+// InitViper, in priority order. These are the files that actively contribute to the
+// effective configuration (via scalar precedence + array merging).
+func GetLoadedConfigPaths() []string {
+	paths := make([]string, 0, len(configLayers))
+	for _, v := range configLayers {
+		if p := v.ConfigFileUsed(); p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
 // GetConfigSearchPaths returns all config search paths in priority order.
 // This matches the order used by InitViper.
+// InUse is true for every config file that was loaded (all contribute via merging),
+// not just the primary. Duplicate paths (e.g. CNT_EXTRA_ROOT == CNT_ROOT) are skipped.
 func GetConfigSearchPaths() []ConfigSearchPath {
+	// Build loaded-path set for InUse: all loaded layers contribute, not just primary.
+	loadedPaths := make(map[string]bool)
+	for _, p := range GetLoadedConfigPaths() {
+		loadedPaths[p] = true
+	}
+
 	var paths []ConfigSearchPath
-	activeConfig := viper.ConfigFileUsed()
+	seenPaths := make(map[string]bool)
 
-	// 1. User config (XDG) - highest priority
+	add := func(path, typ string) {
+		if path == "" || seenPaths[path] {
+			return
+		}
+		seenPaths[path] = true
+		paths = append(paths, ConfigSearchPath{
+			Path:   path,
+			Type:   typ,
+			Exists: fileExists(path),
+			InUse:  loadedPaths[path],
+		})
+	}
+
+	// Priority order matches InitViper: user > extra-root > portable > system
 	if userConfigDir, err := os.UserConfigDir(); err == nil {
-		userPath := filepath.Join(userConfigDir, "condatainer", ConfigFilename+"."+ConfigType)
-		paths = append(paths, ConfigSearchPath{
-			Path:   userPath,
-			Type:   "user",
-			Exists: fileExists(userPath),
-			InUse:  userPath == activeConfig,
-		})
+		add(filepath.Join(userConfigDir, "condatainer", ConfigFilename+"."+ConfigType), "user")
 	}
-
-	// 2. Portable config
+	if extraRoot := GetExtraRootDir(); extraRoot != "" {
+		add(filepath.Join(extraRoot, ConfigFilename+"."+ConfigType), "extra-root")
+	}
 	if portablePath := GetPortableConfigPath(); portablePath != "" {
-		paths = append(paths, ConfigSearchPath{
-			Path:   portablePath,
-			Type:   "portable",
-			Exists: fileExists(portablePath),
-			InUse:  portablePath == activeConfig,
-		})
+		add(portablePath, "portable")
 	}
-
-	// 3. System config
-	systemPath := GetSystemConfigPath()
-	paths = append(paths, ConfigSearchPath{
-		Path:   systemPath,
-		Type:   "system",
-		Exists: fileExists(systemPath),
-		InUse:  systemPath == activeConfig,
-	})
+	add(GetSystemConfigPath(), "system")
 
 	return paths
 }

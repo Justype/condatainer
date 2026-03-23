@@ -31,7 +31,6 @@ var configKeyDefs = map[string]bool{
 	"scripts_link":           false,
 	"extra_scripts_links":    true,
 	"prefer_remote":          false,
-	"extra_base_dirs":        true,
 	"extra_image_dirs":       true,
 	"extra_build_dirs":       true,
 	"extra_helper_dirs":      true,
@@ -86,8 +85,6 @@ func arrayKeyCompletion(cmd *cobra.Command, args []string, toComplete string) ([
 	}
 	if len(args) == 1 {
 		switch args[0] {
-		case "extra_base_dirs":
-			return nil, cobra.ShellCompDirectiveFilterDirs
 		case "extra_scripts_links":
 			return nil, cobra.ShellCompDirectiveDefault
 		}
@@ -146,8 +143,8 @@ func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) 
 	}
 	if len(args) == 1 {
 		// Second arg: complete values based on the key
-		//  extra_base_dirs / extra_image_dirs / extra_build_dirs / extra_helper_dirs should only complete directories
-		if args[0] == "extra_base_dirs" || args[0] == "extra_image_dirs" || args[0] == "extra_build_dirs" || args[0] == "extra_helper_dirs" {
+		//  extra_image_dirs / extra_build_dirs / extra_helper_dirs should only complete directories
+		if args[0] == "extra_image_dirs" || args[0] == "extra_build_dirs" || args[0] == "extra_helper_dirs" {
 			return nil, cobra.ShellCompDirectiveFilterDirs
 		}
 		// extra_scripts_links is an array setting; allow free-form input
@@ -252,103 +249,45 @@ Shows:
 		fmt.Println(utils.StyleTitle("Base Directory Search Paths:"))
 
 		pathIndex := 1
+		seenBaseDirs := make(map[string]bool)
 
-		// Explicit extra image directories
+		addBaseDir := func(label, path string, ro bool) {
+			if path == "" || seenBaseDirs[path] {
+				return
+			}
+			seenBaseDirs[path] = true
+			status := ""
+			if _, err := os.Stat(path); err == nil {
+				if ro {
+					status = " " + utils.StyleWarning("(search-only)")
+				} else if utils.CanWriteToDir(path) {
+					status = " " + utils.StyleSuccess("(writable)")
+				} else {
+					status = " " + utils.StyleWarning("(read-only)")
+				}
+			}
+			fmt.Printf("  %d. [%s] %s%s\n", pathIndex, label, path, status)
+			pathIndex++
+		}
+
+		// Explicit extra image/build/helper directories
 		for _, entry := range config.GetExtraImageDirs() {
 			path, ro := config.ParseDirEntry(entry)
-			status := ""
-			if _, err := os.Stat(path); err == nil {
-				if ro {
-					status = " " + utils.StyleWarning("(search-only)")
-				} else if utils.CanWriteToDir(path) {
-					status = " " + utils.StyleSuccess("(writable)")
-				} else {
-					status = " " + utils.StyleWarning("(read-only)")
-				}
-			}
-			fmt.Printf("  %d. [extra-images] %s%s\n", pathIndex, path, status)
-			pathIndex++
+			addBaseDir("extra-images", path, ro)
 		}
-
-		// Explicit extra build-scripts directories
 		for _, path := range config.GetExtraBuildDirs() {
-			fmt.Printf("  %d. [extra-build] %s\n", pathIndex, path)
-			pathIndex++
+			addBaseDir("extra-build", path, false)
 		}
-
-		// Explicit extra helper-scripts directories
 		for _, entry := range config.GetExtraHelperDirs() {
 			path, ro := config.ParseDirEntry(entry)
-			status := ""
-			if _, err := os.Stat(path); err == nil {
-				if ro {
-					status = " " + utils.StyleWarning("(search-only)")
-				} else if utils.CanWriteToDir(path) {
-					status = " " + utils.StyleSuccess("(writable)")
-				} else {
-					status = " " + utils.StyleWarning("(read-only)")
-				}
-			}
-			fmt.Printf("  %d. [extra-helper] %s%s\n", pathIndex, path, status)
-			pathIndex++
+			addBaseDir("extra-helper", path, ro)
 		}
 
-		// Extra base directories
-		extraBaseDirs := config.GetExtraBaseDirs()
-		for _, dir := range extraBaseDirs {
-			status := ""
-			if _, err := os.Stat(dir); err == nil {
-				if utils.CanWriteToDir(dir) {
-					status = " " + utils.StyleSuccess("(writable)")
-				} else {
-					status = " " + utils.StyleWarning("(read-only)")
-				}
-			}
-			fmt.Printf("  %d. [extra] %s%s\n", pathIndex, dir, status)
-			pathIndex++
-		}
-
-		// Portable directory
-		if portableDir := config.GetPortableDataDir(); portableDir != "" {
-			status := ""
-			if _, err := os.Stat(portableDir); err == nil {
-				if utils.CanWriteToDir(portableDir) {
-					status = " " + utils.StyleSuccess("(writable)")
-				} else {
-					status = " " + utils.StyleWarning("(read-only)")
-				}
-			}
-			fmt.Printf("  %d. [portable] %s%s\n", pathIndex, portableDir, status)
-			pathIndex++
-		}
-
-		// Scratch directory
-		if scratchDir := config.GetScratchDataDir(); scratchDir != "" {
-			status := ""
-			if _, err := os.Stat(scratchDir); err == nil {
-				if utils.CanWriteToDir(scratchDir) {
-					status = " " + utils.StyleSuccess("(writable)")
-				} else {
-					status = " " + utils.StyleWarning("(read-only)")
-				}
-			}
-			fmt.Printf("  %d. [scratch] %s%s\n", pathIndex, scratchDir, status)
-			pathIndex++
-		}
-
-		// User directory
-		if userDir := config.GetUserDataDir(); userDir != "" {
-			status := ""
-			if _, err := os.Stat(userDir); err == nil {
-				if utils.CanWriteToDir(userDir) {
-					status = " " + utils.StyleSuccess("(writable)")
-				} else {
-					status = " " + utils.StyleWarning("(read-only)")
-				}
-			}
-			fmt.Printf("  %d. [user] %s%s\n", pathIndex, userDir, status)
-			pathIndex++
-		}
+		// Tier base directories (extra-root → portable → scratch → user)
+		addBaseDir("extra-root", config.GetExtraRootDir(), false)
+		addBaseDir("portable", config.GetPortableDataDir(), false)
+		addBaseDir("scratch", config.GetScratchDataDir(), false)
+		addBaseDir("user", config.GetUserDataDir(), false)
 
 		fmt.Println()
 
@@ -402,15 +341,6 @@ Shows:
 			}
 		} else {
 			fmt.Printf("  extra_helper_dirs: %s\n", utils.StyleInfo("none"))
-		}
-		extraDirs := config.GetExtraBaseDirs()
-		if len(extraDirs) > 0 {
-			fmt.Printf("  extra_base_dirs:\n")
-			for _, dir := range extraDirs {
-				fmt.Printf("    - %s\n", dir)
-			}
-		} else {
-			fmt.Printf("  extra_base_dirs: %s\n", utils.StyleInfo("none"))
 		}
 		fmt.Println()
 
@@ -485,8 +415,8 @@ Shows:
 		fmt.Println(utils.StyleTitle("Environment Variable Overrides:"))
 		envVars := getConfigEnvVars()
 		hasEnvOverrides := false
-		// Special vars not derived from config keys
-		for _, envVar := range []string{"CNT_ROOT", "SCRATCH"} {
+		// Special vars not derived from config keys (system → group → personal)
+		for _, envVar := range []string{"CNT_ROOT", "CNT_EXTRA_ROOT", "SCRATCH"} {
 			if val := os.Getenv(envVar); val != "" {
 				fmt.Printf("  %s=%s\n", envVar, val)
 				hasEnvOverrides = true
@@ -958,7 +888,7 @@ var configValidateCmd = &cobra.Command{
 var configAppendCmd = &cobra.Command{
 	Use:               "append <key> <value>",
 	Short:             "Append a value to an array config key",
-	Example:           "  condatainer config append extra_base_dirs /scratch/shared\n  condatainer config append extra_scripts_links https://example.com/scripts",
+	Example:           "  condatainer config append extra_image_dirs /shared/lab/images:ro\n  condatainer config append extra_scripts_links https://example.com/scripts",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: arrayKeyCompletion,
 	SilenceUsage:      true,
@@ -991,7 +921,7 @@ var configAppendCmd = &cobra.Command{
 var configPrependCmd = &cobra.Command{
 	Use:               "prepend <key> <value>",
 	Short:             "Prepend a value to an array config key (highest priority)",
-	Example:           "  condatainer config prepend extra_base_dirs /project/common\n  condatainer config prepend extra_scripts_links https://myorg.com/scripts",
+	Example:           "  condatainer config prepend extra_image_dirs /fast/images\n  condatainer config prepend extra_scripts_links https://myorg.com/scripts",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: arrayKeyCompletion,
 	SilenceUsage:      true,
@@ -1024,7 +954,7 @@ var configPrependCmd = &cobra.Command{
 var configRemoveCmd = &cobra.Command{
 	Use:               "remove <key> <value>",
 	Short:             "Remove a value from an array config key",
-	Example:           "  condatainer config remove extra_base_dirs /scratch/shared\n  condatainer config remove extra_scripts_links https://example.com/scripts",
+	Example:           "  condatainer config remove extra_image_dirs /shared/lab/images:ro\n  condatainer config remove extra_scripts_links https://example.com/scripts",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: arrayRemoveValueCompletion,
 	SilenceUsage:      true,

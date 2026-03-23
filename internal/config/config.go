@@ -277,12 +277,9 @@ func GetWritableTmpDir() string {
 		return utils.GetTmpDir()
 	}
 
-	// Check extra base dirs — probe only, no creation
-	for _, baseDir := range GetExtraBaseDirs() {
-		if baseDir == "" {
-			continue
-		}
-		tmpDir := filepath.Join(baseDir, "tmp")
+	// Check extra root dir — probe only, no creation
+	if extraRoot := GetExtraRootDir(); extraRoot != "" {
+		tmpDir := filepath.Join(extraRoot, "tmp")
 		if utils.CanWriteToDir(tmpDir) {
 			return tmpDir
 		}

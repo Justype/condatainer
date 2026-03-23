@@ -61,10 +61,8 @@ func getAllBaseDirs() []string {
 		addIfExists(path)
 	}
 
-	// Extra base dirs
-	for _, baseDir := range config.GetExtraBaseDirs() {
-		addIfExists(baseDir)
-	}
+	// Extra root dir
+	addIfExists(config.GetExtraRootDir())
 
 	// Portable dir
 	addIfExists(config.GetPortableDataDir())

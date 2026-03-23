@@ -50,21 +50,19 @@ config.Global  // Singleton instance
 
 **Search order for images:**
 1. `extra_image_dirs` — explicit image directories (direct paths, support `:ro`/`:rw`)
-2. `extra_base_dirs` — auto-expands to `<base>/images/`
-3. Portable dir → `<install>/images/`
+2. `CNT_EXTRA_ROOT` → `<extra-root>/images/` (group/lab layer)
+3. Portable dir → `$CNT_ROOT/images/` or `<install>/images/`
 4. Scratch dir → `$SCRATCH/condatainer/images/`
 5. User dir → `$XDG_DATA_HOME/condatainer/images/` or `~/.local/share/condatainer/images/`
 
 **Search order for scripts:**
 **Build scripts:**
 1. `extra_build_dirs` — explicit build-scripts directories (direct paths)
-2. `extra_base_dirs` — auto-expands to `<base>/build-scripts/`
-3. Portable dir, Scratch dir, User dir (same pattern)
+2. `CNT_EXTRA_ROOT`, Portable dir, Scratch dir, User dir (same pattern)
 
 **Helper scripts:**
 1. `extra_helper_dirs` — explicit helper-scripts directories (direct paths)
-2. `extra_base_dirs` — auto-expands to `<base>/helper-scripts/`
-3. Portable dir, Scratch dir, User dir (same pattern)
+2. `CNT_EXTRA_ROOT`, Portable dir, Scratch dir, User dir (same pattern)
 
 **Write operations:**
 - **Images / helpers**: first writable directory in search order. `:ro` entries and `extra_build_dirs` are always skipped. Shared dirs (extra, portable) are probed only; personal dirs (scratch, user) are created on first use.
@@ -95,17 +93,17 @@ config.GetCacheSearchPaths()                // personal cache search paths
 
 ## Environment Variables
 
-All multi-value env vars use `|` as separator. `CNT_EXTRA_BASE_DIRS` also accepts `:` for compatibility.
+All multi-value env vars use `|` as separator. `CNT_EXTRA_BUILD_DIRS` also accepts `:`.
 
 | Variable | Separator | Description |
 |---|---|---|
+| `CNT_ROOT` | — | Cluster/system root dir (loads `config.yaml` + data dirs; replaces bin/ heuristic) |
+| `CNT_EXTRA_ROOT` | — | Group/lab root dir (single path; loads `config.yaml` + data dirs) |
 | `CNT_EXTRA_IMAGE_DIRS` | `\|` | Extra image directories; entries support `:ro`/`:rw` |
 | `CNT_EXTRA_BUILD_DIRS` | `\|` or `:` | Extra build-scripts directories |
 | `CNT_EXTRA_HELPER_DIRS` | `\|` | Extra helper-scripts directories; entries support `:ro`/`:rw` |
-| `CNT_EXTRA_BASE_DIRS` | `\|` or `:` | Extra base dirs (auto-expands to `images/`, `build-scripts/`, etc.) |
 | `CNT_EXTRA_SCRIPTS_LINKS` | `\|` | Extra remote build script source URLs |
 | `CNT_CHANNELS` | `\|` or `:`  | Conda channels |
-| `CNT_ROOT` | — | Explicit portable base dir (replaces executable-location heuristic) |
 | `CNT_TMPDIR` | — | Override build temp directory |
 | `SCRATCH` | — | HPC scratch directory (`$SCRATCH/condatainer/`) |
 | `XDG_DATA_HOME` / `XDG_CONFIG_HOME` / `XDG_STATE_HOME` | — | XDG base dirs |
@@ -130,8 +128,8 @@ extra_build_dirs:
   - "/shared/lab/scripts"
 extra_helper_dirs:
   - "/shared/lab/helpers"
-extra_base_dirs:
-  - "/proj/condatainer"       # standard layout: images/, build-scripts/, etc.
+# For a group/lab root with standard layout (images/, build-scripts/, etc.),
+# set CNT_EXTRA_ROOT=/proj/condatainer in the module file instead.
 
 channels:
   - conda-forge
