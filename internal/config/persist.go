@@ -187,16 +187,6 @@ func GetExtraRootConfigPath() string {
 	return ""
 }
 
-// GetDefaultConfigPath returns the recommended config path based on installation type.
-// - If in a standalone layout (bin/ folder) or CNT_ROOT is set, returns the root path
-// - Otherwise, returns the user config path (~/.config/condatainer/config.yaml)
-func GetDefaultConfigPath() (string, error) {
-	if rootPath := GetRootConfigPath(); rootPath != "" {
-		return rootPath, nil
-	}
-	return GetUserConfigPath()
-}
-
 // GetSystemConfigPath returns the system-wide config path
 func GetSystemConfigPath() string {
 	return filepath.Join("/etc", "condatainer", ConfigFilename+"."+ConfigType)
@@ -464,6 +454,28 @@ func SaveMinimalConfigTo(path, apptainerBin, schedulerBin, compressArgs string, 
 	}
 	if err := v.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("failed to write config to %s: %w", path, err)
+	}
+	return os.Chmod(path, utils.PermFile)
+}
+
+// SetConfigKey sets a single key in the config file at path, creating it if needed.
+// Existing keys are preserved. No-op if the file already has the key set to the same value.
+func SetConfigKey(path, key, value string) error {
+	v := viper.New()
+	v.SetConfigType(ConfigType)
+	v.SetConfigFile(path)
+	if err := v.ReadInConfig(); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read config %s: %w", path, err)
+	}
+	if v.GetString(key) == value {
+		return nil // already set to this value
+	}
+	v.Set(key, value)
+	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	if err := v.WriteConfigAs(path); err != nil {
+		return fmt.Errorf("failed to write config %s: %w", path, err)
 	}
 	return os.Chmod(path, utils.PermFile)
 }

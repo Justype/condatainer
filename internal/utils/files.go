@@ -105,12 +105,6 @@ func IsSif(path string) bool {
 	return ext == ".sif"
 }
 
-// IsApptainerImage checks if the file matches any supported Apptainer image format.
-// Returns true for .sif, .img, .sqf, .sqsh, .squashfs.
-func IsApptainerImage(path string) bool {
-	return IsSif(path) || IsImg(path) || IsSqf(path)
-}
-
 // IsOverlay checks if the path is an overlay file (.img, .sqf, .sqsh, .squashfs).
 // This is used for CondaTainer overlay detection.
 func IsOverlay(path string) bool {
@@ -152,14 +146,6 @@ func RemoveDirIfEmpty(dir string) {
 		return
 	}
 	os.Remove(dir)
-}
-
-// EnsureDir checks if a directory exists, and creates it if it doesn't.
-func EnsureDir(path string) error {
-	if DirExists(path) {
-		return nil
-	}
-	return os.MkdirAll(path, PermDir)
 }
 
 // CreateFileWritable creates or truncates a file using standard writable file permissions.

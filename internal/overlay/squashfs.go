@@ -289,36 +289,6 @@ func (o *OSInfo) MajorVersion() string {
 	return o.VersionID
 }
 
-// SameFamily returns true if both OSInfo values share an ID or ID_LIKE entry,
-// indicating compatibility within the same OS family.
-//
-//	Ubuntu + Debian  → true  (both ID_LIKE=debian)
-//	Rocky  + RHEL    → true  (Rocky has ID_LIKE=rhel)
-//	Ubuntu + Rocky   → false
-func (o *OSInfo) SameFamily(other *OSInfo) bool {
-	if o == nil || other == nil {
-		return false
-	}
-	// Build a set of all IDs that o belongs to
-	ids := map[string]bool{}
-	if o.ID != "" {
-		ids[o.ID] = true
-	}
-	for _, l := range o.IDLike {
-		ids[l] = true
-	}
-	// Check if other's ID or any IDLike is in the set
-	if other.ID != "" && ids[other.ID] {
-		return true
-	}
-	for _, l := range other.IDLike {
-		if ids[l] {
-			return true
-		}
-	}
-	return false
-}
-
 // SameIDMajorVersion returns true if both OSInfo values share the same id and major version.
 func (o *OSInfo) SameIDMajorVersion(other *OSInfo) bool {
 	if o == nil || other == nil {
