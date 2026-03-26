@@ -125,7 +125,7 @@ func setDefaults() {
 	viper.SetDefault("apptainer_bin", "apptainer")
 	viper.SetDefault("scheduler_bin", "")
 	viper.SetDefault("submit_job", true)
-	viper.SetDefault("logs_dir", "")
+	viper.SetDefault("logs_dir", filepath.Join(os.Getenv("HOME"), "logs"))
 	viper.SetDefault("scripts_link", DefaultScriptsLink)
 	viper.SetDefault("prefer_remote", false)
 
@@ -314,20 +314,6 @@ func GetConfigPathByLocation(location string) (string, error) {
 	}
 }
 
-// GetActiveOrUserConfigPath returns the currently active config file path,
-// or the user config path if no config is currently active.
-// This ensures that 'config set' updates the in-use config rather than
-// always creating/updating the user config.
-func GetActiveOrUserConfigPath() (string, error) {
-	// Check if there's an active config file
-	if activeConfig := viper.ConfigFileUsed(); activeConfig != "" {
-		return activeConfig, nil
-	}
-
-	// No active config - return user config path as default
-	return GetUserConfigPath()
-}
-
 // inferLocationType returns "root", "extra-root", "system", or "user" by comparing path
 // against known config file paths. Returns "user" for any unrecognised path.
 func inferLocationType(path string) string {
@@ -425,6 +411,17 @@ func UpdateConfigKey(path, key string, value any) error {
 	return os.Chmod(path, utils.PermFile)
 }
 
+// ReadConfigAllKeys returns all keys explicitly set in the config file at path.
+func ReadConfigAllKeys(path string) []string {
+	v := viper.New()
+	v.SetConfigType(ConfigType)
+	v.SetConfigFile(path)
+	if err := v.ReadInConfig(); err != nil {
+		return nil
+	}
+	return v.AllKeys()
+}
+
 // ReadConfigKey reads a single key from a config file without touching global viper state.
 // Returns "" if the file doesn't exist, can't be read, or the key is not set.
 func ReadConfigKey(configPath, key string) string {
@@ -439,20 +436,30 @@ func ReadConfigKey(configPath, key string) string {
 	return v.GetString(key)
 }
 
-// SaveMinimalConfigTo writes only the provided non-empty keys to path using a fresh viper
-// instance, so no default values bleed in. Intended for user config init when
-// root/system config supplies everything else.
-func SaveMinimalConfigTo(path string, apptainerBin, schedulerBin string) error {
+// SaveMinimalConfigTo writes only detected keys to path using a fresh viper instance,
+// so no default values bleed in. Keys already provided by lowerLayers are skipped.
+func SaveMinimalConfigTo(path, apptainerBin, schedulerBin, compressArgs string, lowerLayers []ConfigLayerInfo) error {
 	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
+	alreadySet := func(key string) bool {
+		for _, l := range lowerLayers {
+			if l.InConfig(key) {
+				return true
+			}
+		}
+		return false
+	}
 	v := viper.New()
 	v.SetConfigType(ConfigType)
-	if apptainerBin != "" {
+	if apptainerBin != "" && !alreadySet("apptainer_bin") {
 		v.Set("apptainer_bin", apptainerBin)
 	}
-	if schedulerBin != "" {
+	if schedulerBin != "" && !alreadySet("scheduler_bin") {
 		v.Set("scheduler_bin", schedulerBin)
+	}
+	if compressArgs != "" && !alreadySet("build.compress_args") {
+		v.Set("build.compress_args", compressArgs)
 	}
 	if err := v.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("failed to write config to %s: %w", path, err)
@@ -460,30 +467,46 @@ func SaveMinimalConfigTo(path string, apptainerBin, schedulerBin string) error {
 	return os.Chmod(path, utils.PermFile)
 }
 
-// SaveConfig saves current Viper config to the active config file,
-// or to user config file if no config is currently active
-func SaveConfig() error {
-	configPath, err := GetActiveOrUserConfigPath()
-	if err != nil {
-		return fmt.Errorf("failed to get config path: %w", err)
+// DeleteConfigKey removes a key from the config file at path.
+// Nested keys (e.g. "build.compress_args") are handled by navigating the settings map.
+// If removing a nested key leaves the parent empty, the parent is removed too.
+func DeleteConfigKey(path, key string) error {
+	v := viper.New()
+	v.SetConfigType(ConfigType)
+	v.SetConfigFile(path)
+	if err := v.ReadInConfig(); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to read config %s: %w", path, err)
 	}
-	return SaveConfigTo(configPath)
+	all := v.AllSettings()
+	deleteNestedKey(all, strings.Split(key, "."))
+	v2 := viper.New()
+	v2.SetConfigType(ConfigType)
+	for k, val := range all {
+		v2.Set(k, val)
+	}
+	if err := v2.WriteConfigAs(path); err != nil {
+		return fmt.Errorf("failed to write config %s: %w", path, err)
+	}
+	return os.Chmod(path, utils.PermFile)
 }
 
-// SaveConfigTo saves current Viper config to the specified path
-func SaveConfigTo(configPath string) error {
-	// Create directory if it doesn't exist
-	configDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(configDir, utils.PermDir); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
+func deleteNestedKey(m map[string]any, parts []string) {
+	if len(parts) == 0 {
+		return
 	}
-
-	// Write config file
-	if err := viper.WriteConfigAs(configPath); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
+	if len(parts) == 1 {
+		delete(m, parts[0])
+		return
 	}
-
-	return nil
+	if sub, ok := m[parts[0]].(map[string]any); ok {
+		deleteNestedKey(sub, parts[1:])
+		if len(sub) == 0 {
+			delete(m, parts[0])
+		}
+	}
 }
 
 // ValidateBinary checks if a binary exists and is executable
@@ -762,46 +785,6 @@ func GetSchedulerTypeFromBin(binPath string) string {
 	default:
 		return ""
 	}
-}
-
-// ForceDetectAndSaveTo always re-detects binaries and saves to the specified path
-// Returns true if config was updated
-func ForceDetectAndSaveTo(configPath string) (bool, error) {
-	updated := false
-
-	if !IsInsideContainer() {
-		// Reuse already-detected valid value when available; otherwise detect.
-		detected := ""
-		if currentBin := viper.GetString("apptainer_bin"); currentBin != "" && ValidateBinary(currentBin) {
-			detected = currentBin
-		} else {
-			detected = DetectApptainerBin()
-		}
-		if detected != "" {
-			currentBin := viper.GetString("apptainer_bin")
-			if currentBin != detected {
-				viper.Set("apptainer_bin", detected)
-				updated = true
-			}
-		}
-	}
-
-	// Always re-detect scheduler binary (type is derived from binary, not stored)
-	detectedBin := DetectSchedulerBin()
-	if detectedBin != "" {
-		currentBin := viper.GetString("scheduler_bin")
-		if currentBin != detectedBin {
-			viper.Set("scheduler_bin", detectedBin)
-			updated = true
-		}
-	}
-
-	// Always save (even if nothing changed, to create the file)
-	if err := SaveConfigTo(configPath); err != nil {
-		return false, err
-	}
-
-	return updated, nil
 }
 
 // layerString returns the value of a scalar string key from the first source that

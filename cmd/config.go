@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -72,6 +73,9 @@ func modifyArrayConfig(key string, modify func([]string) []string) (string, erro
 	}
 	current := config.ReadConfigSliceKey(configPath, key)
 	updated := modify(current)
+	if len(updated) == 0 {
+		return configPath, config.DeleteConfigKey(configPath, key)
+	}
 	return configPath, config.UpdateConfigKey(configPath, key, updated)
 }
 
@@ -95,16 +99,32 @@ func arrayKeyCompletion(cmd *cobra.Command, args []string, toComplete string) ([
 }
 
 func arrayRemoveValueCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	loc, _ := cmd.Flags().GetString("location")
+	if len(args) == 0 {
+		// Suggest only keys that are actually set in the target config file.
+		if configPath, _, err := config.ResolveWritableConfigPath(loc); err == nil {
+			v := config.ReadConfigAllKeys(configPath)
+			if len(v) > 0 {
+				sort.Strings(v)
+				return v, cobra.ShellCompDirectiveNoFileComp
+			}
+		}
+		// Fallback: all known keys
+		var keys []string
+		for k := range configKeyDefs {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		return keys, cobra.ShellCompDirectiveNoFileComp
+	}
 	if len(args) == 1 && isArrayKey(args[0]) {
-		// Read only from the target config file, not the merged viper view,
-		// so completions match what the target layer actually contains.
-		loc, _ := cmd.Flags().GetString("location")
+		// Suggest values present in the target config file for this array key.
 		if configPath, _, err := config.ResolveWritableConfigPath(loc); err == nil {
 			return config.ReadConfigSliceKey(configPath, args[0]), cobra.ShellCompDirectiveNoFileComp
 		}
 		return viper.GetStringSlice(args[0]), cobra.ShellCompDirectiveNoFileComp
 	}
-	return arrayKeyCompletion(cmd, args, toComplete)
+	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
 // getConfigEnvVars returns a sorted list of CNT_* environment variables for all known config keys.
@@ -242,20 +262,24 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 		layers := config.GetConfigLayerInfos()
 
 		// srcTag returns "  [layer]" (green) or "  [env: VAR]" (yellow) for a scalar key.
+		// Always returns "  [default]" (gray) if the key is not set in any layer.
 		srcTag := func(key string) string {
-			if !showSources {
-				return ""
-			}
 			envVar := "CNT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
 			if os.Getenv(envVar) != "" {
-				return "  " + utils.StyleWarning("[env: "+envVar+"]")
+				if showSources {
+					return "  " + utils.StyleWarning("[env: "+envVar+"]")
+				}
+				return ""
 			}
 			for _, layer := range layers {
 				if layer.InConfig(key) {
-					return "  " + utils.StyleSuccess("["+layer.Type+"]")
+					if showSources {
+						return "  " + utils.StyleSuccess("["+layer.Type+"]")
+					}
+					return ""
 				}
 			}
-			return ""
+			return "  " + utils.StyleDebug("[default]")
 		}
 
 		// srcEntryTag returns "  [layer]" (green/yellow) for a value inside an array key.
@@ -562,9 +586,8 @@ With -l, reads only the specified config layer file.`,
 			return
 		}
 
-		// Merged effective value
-		value := viper.Get(key)
-		if value == nil {
+		// Merged effective value: env > layers in priority order > viper default
+		if _, known := configKeyDefs[key]; !known {
 			ExitWithUsageError("Unknown config key: %s", key)
 		}
 		if isArrayKey(key) {
@@ -572,7 +595,22 @@ With -l, reads only the specified config layer file.`,
 				fmt.Println(v)
 			}
 		} else {
-			fmt.Println(value)
+			envVar := "CNT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+			if ev := os.Getenv(envVar); ev != "" {
+				fmt.Println(ev)
+			} else {
+				found := false
+				for _, layer := range config.GetConfigLayerInfos() {
+					if layer.InConfig(key) {
+						fmt.Println(layer.GetString(key))
+						found = true
+						break
+					}
+				}
+				if !found {
+					fmt.Println(viper.GetString(key)) // default
+				}
+			}
 		}
 	},
 }
@@ -594,6 +632,9 @@ Time duration format (for build.time):
 	Run: func(cmd *cobra.Command, args []string) {
 		key := args[0]
 		value := args[1]
+		if strings.TrimSpace(value) == "" {
+			ExitWithError("value cannot be empty")
+		}
 
 		// configKeyDefs is the single source of truth for known keys
 		knownKeys := configKeyDefs
@@ -763,57 +804,43 @@ By default, the location is chosen based on the installation:
 			ExitWithError("Cannot initialize config inside a container. Please run this command on the host system.")
 		}
 
-		var detectedCompression string
-
-		if locationType == "user" {
-			// Minimal user init: only detect and write keys not already in root/system config.
-			rootPath := config.GetRootConfigPath()
-			systemPath := config.GetSystemConfigPath()
-
-			apptainerForUser := ""
-			if config.ReadConfigKey(rootPath, "apptainer_bin") == "" &&
-				config.ReadConfigKey(systemPath, "apptainer_bin") == "" {
-				detectedApptainerBin := config.DetectApptainerBin()
-				if detectedApptainerBin == "" {
-					ExitWithError("Neither 'apptainer' nor 'singularity' binary found (checked PATH and 'module avail').")
-				}
-				apptainerForUser = detectedApptainerBin
-				viper.Set("apptainer_bin", detectedApptainerBin)
-			}
-
-			schedulerForUser := ""
-			if config.ReadConfigKey(rootPath, "scheduler_bin") == "" &&
-				config.ReadConfigKey(systemPath, "scheduler_bin") == "" {
-				detectedSchedulerBin := config.DetectSchedulerBin()
-				if detectedSchedulerBin != "" {
-					schedulerForUser = detectedSchedulerBin
-					viper.Set("scheduler_bin", detectedSchedulerBin)
+		// lowerLayersFor returns loaded config layers that are lower priority than loc.
+		// Keys already set in these layers will be skipped when saving.
+		layerOrder := []string{"user", "extra-root", "root", "system"}
+		lowerLayersFor := func(loc string) []config.ConfigLayerInfo {
+			cutIdx := slices.Index(layerOrder, loc) + 1
+			var result []config.ConfigLayerInfo
+			for _, l := range config.GetConfigLayerInfos() {
+				if slices.Index(layerOrder, l.Type) >= cutIdx {
+					result = append(result, l)
 				}
 			}
+			return result
+		}
 
-			if err := config.SaveMinimalConfigTo(configPath, apptainerForUser, schedulerForUser); err != nil {
-				ExitWithError("Failed to save config: %v", err)
-			}
-		} else {
-			// Full root/system/extra-root init: always detect apptainer binary.
-			detectedApptainerBin := config.DetectApptainerBin()
-			if detectedApptainerBin == "" {
-				ExitWithError("Neither 'apptainer' nor 'singularity' binary found (checked PATH and 'module avail').")
-			}
-			viper.Set("apptainer_bin", detectedApptainerBin)
-			detectedCompression = config.Global.Build.CompressArgs // fallback to runtime default
-			viper.Set("build.compress_args", "")
-			if err := apptainer.SetBin(detectedApptainerBin); err == nil {
-				if version, err := apptainer.GetVersion(); err == nil {
-					config.AutoDetectCompression(apptainer.CheckZstdSupport(version), apptainer.IsSingularity())
-					detectedCompression = config.Global.Build.CompressArgs
-				}
-			}
-			viper.Set("build.compress_args", detectedCompression)
+		// Detect the three minimal keys: apptainer_bin, scheduler_bin, build.compress_args
+		detectedApptainerBin := config.DetectApptainerBin()
+		if detectedApptainerBin == "" {
+			ExitWithError("Neither 'apptainer' nor 'singularity' binary found (checked PATH and 'module avail').")
+		}
+		viper.Set("apptainer_bin", detectedApptainerBin)
 
-			if _, err := config.ForceDetectAndSaveTo(configPath); err != nil {
-				ExitWithError("Failed to save config: %v", err)
+		detectedSchedulerBin := config.DetectSchedulerBin()
+		if detectedSchedulerBin != "" {
+			viper.Set("scheduler_bin", detectedSchedulerBin)
+		}
+
+		detectedCompression := config.Global.Build.CompressArgs // fallback to runtime default
+		if err := apptainer.SetBin(detectedApptainerBin); err == nil {
+			if version, err := apptainer.GetVersion(); err == nil {
+				config.AutoDetectCompression(apptainer.CheckZstdSupport(version), apptainer.IsSingularity())
+				detectedCompression = config.Global.Build.CompressArgs
 			}
+		}
+		viper.Set("build.compress_args", detectedCompression)
+
+		if err := config.SaveMinimalConfigTo(configPath, detectedApptainerBin, detectedSchedulerBin, detectedCompression, lowerLayersFor(locationType)); err != nil {
+			ExitWithError("Failed to save config: %v", err)
 		}
 
 		utils.PrintSuccess("Config file created")
@@ -822,18 +849,15 @@ By default, the location is chosen based on the installation:
 		// Show what was detected
 		fmt.Println()
 		fmt.Println(utils.StyleTitle("Detected settings:"))
-		fmt.Printf("  Apptainer: %s\n", viper.GetString("apptainer_bin"))
-		if schedulerBin := viper.GetString("scheduler_bin"); schedulerBin != "" {
-			fmt.Printf("  Scheduler: %s (%s)\n", schedulerBin, config.GetSchedulerTypeFromBin(schedulerBin))
+		fmt.Printf("  Apptainer: %s\n", detectedApptainerBin)
+		if detectedSchedulerBin != "" {
+			fmt.Printf("  Scheduler: %s (%s)\n", detectedSchedulerBin, config.GetSchedulerTypeFromBin(detectedSchedulerBin))
 		} else {
 			fmt.Printf("  Scheduler: %s\n", utils.StyleWarning("not found"))
 		}
-		if locationType != "user" {
-			fmt.Printf("  Compression: %s\n", detectedCompression)
-		}
+		fmt.Printf("  Compression: %s\n", detectedCompression)
 	},
 }
-
 
 var configPathsCmd = &cobra.Command{
 	Use:   "paths",
@@ -1027,6 +1051,9 @@ var configAppendCmd = &cobra.Command{
 	SilenceUsage:      true,
 	Run: func(cmd *cobra.Command, args []string) {
 		key, value := args[0], args[1]
+		if strings.TrimSpace(value) == "" {
+			ExitWithError("value cannot be empty")
+		}
 		moved := false
 		configPath, err := modifyArrayConfig(key, func(cur []string) []string {
 			out := make([]string, 0, len(cur))
@@ -1060,6 +1087,9 @@ var configPrependCmd = &cobra.Command{
 	SilenceUsage:      true,
 	Run: func(cmd *cobra.Command, args []string) {
 		key, value := args[0], args[1]
+		if strings.TrimSpace(value) == "" {
+			ExitWithError("value cannot be empty")
+		}
 		moved := false
 		configPath, err := modifyArrayConfig(key, func(cur []string) []string {
 			out := make([]string, 0, len(cur))
@@ -1085,14 +1115,36 @@ var configPrependCmd = &cobra.Command{
 }
 
 var configRemoveCmd = &cobra.Command{
-	Use:               "remove <key> <value>",
-	Short:             "Remove a value from an array config key",
-	Example:           "  condatainer config remove extra_image_dirs /shared/lab/images:ro\n  condatainer config remove extra_scripts_links https://example.com/scripts",
-	Args:              cobra.ExactArgs(2),
+	Use:               "remove <key> [value]",
+	Short:             "Remove a config key or a value from an array key",
+	Example:           "  condatainer config remove apptainer_bin\n  condatainer config remove extra_image_dirs /shared/lab/images:ro",
+	Args:              cobra.RangeArgs(1, 2),
 	ValidArgsFunction: arrayRemoveValueCompletion,
 	SilenceUsage:      true,
 	Run: func(cmd *cobra.Command, args []string) {
-		key, value := args[0], args[1]
+		key := args[0]
+		if len(args) == 1 {
+			// Scalar removal: unset the key entirely
+			if isArrayKey(key) {
+				ExitWithError("'%s' is an array key; specify a value to remove: config remove %s <value>", key, key)
+			}
+			configPath, _, err := config.ResolveWritableConfigPath(setLocation)
+			if err != nil {
+				ExitWithError("%v", err)
+			}
+			if config.ReadConfigKey(configPath, key) == "" {
+				utils.PrintWarning("%s is not set in %s", utils.StyleInfo(key), utils.StylePath(configPath))
+				return
+			}
+			if err := config.DeleteConfigKey(configPath, key); err != nil {
+				ExitWithError("%v", err)
+			}
+			utils.PrintSuccess("Removed %s from config", utils.StyleInfo(key))
+			utils.PrintNote("Config saved to: %s", configPath)
+			return
+		}
+		// Array removal
+		value := args[1]
 		removed := false
 		configPath, err := modifyArrayConfig(key, func(cur []string) []string {
 			var out []string
