@@ -109,6 +109,10 @@ var rootCmd = &cobra.Command{
 				if version, err := apptainer.GetVersion(); err == nil {
 					supportsZstd := apptainer.CheckZstdSupport(version)
 					config.AutoDetectCompression(supportsZstd, apptainer.IsSingularity())
+					// Cache detected value to skip this subprocess on future startups.
+					if writableCfg, _, err := config.ResolveWritableConfigPath(""); err == nil && config.Global.Build.CompressArgs != "" {
+						_ = config.SetConfigKey(writableCfg, "build.compress_args", config.Global.Build.CompressArgs)
+					}
 				}
 			}
 		}
