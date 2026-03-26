@@ -224,14 +224,14 @@ Configuration file priority (highest to lowest):
   2. Environment variables (CNT_*)
   3. User config file (~/.config/condatainer/config.yaml)
   4. Extra-root config ($CNT_EXTRA_ROOT/config.yaml, group/lab layer)
-  5. Root config (<install-dir>/config.yaml, if in dedicated folder or CNT_ROOT set)
+  5. App-root config (<install-dir>/config.yaml, if in dedicated folder or CNT_ROOT set)
   6. System config file (/etc/condatainer/config.yaml)
   7. Defaults
 
 Data directory priority (for read/write operations):
   1. Extra base directories (CNT_EXTRA_BASE_DIRS or config)
   2. Extra-root directory ($CNT_EXTRA_ROOT, group/lab layer)
-  3. Root directory (auto-detected or CNT_ROOT)
+  3. App-root directory (auto-detected or CNT_ROOT)
   4. User scratch directory ($SCRATCH/condatainer, HPC systems)
   5. User XDG directory (~/.local/share/condatainer)`,
 }
@@ -336,10 +336,9 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 		for i, sp := range searchPaths {
 			status := ""
 			if sp.InUse {
-				status = " " + utils.StyleSuccess("← in use")
 				foundActive = true
-			} else if sp.Exists {
-				status = " " + utils.StyleInfo("(exists)")
+			} else if !sp.Exists {
+				status = " " + utils.StyleWarning("(not found)")
 			}
 			fmt.Printf("  %d. [%s] %s%s\n", i+1, sp.Type, sp.Path, status)
 		}
@@ -388,7 +387,7 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 
 		// Tier base directories (extra-root → root → scratch → user)
 		addBaseDir("extra-root", config.GetExtraRootDir(), false)
-		addBaseDir("root", config.GetRootDir(), false)
+		addBaseDir("app-root", config.GetRootDir(), false)
 		addBaseDir("scratch", config.GetScratchDataDir(), false)
 		addBaseDir("user", config.GetUserDataDir(), false)
 
@@ -564,7 +563,7 @@ With -l, reads only the specified config layer file.`,
 	Example: `  condatainer config get apptainer_bin
   condatainer config get build.ncpus
   condatainer config get extra_image_dirs
-  condatainer config get extra_image_dirs -l root   # root layer only`,
+  condatainer config get extra_image_dirs -l app-root   # app-root layer only`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: configKeysCompletion,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -727,18 +726,18 @@ var configInitCmd = &cobra.Command{
 
 Config location options (-l, --location):
   u, user        ~/.config/condatainer/config.yaml (default for standard installations)
-  r, root        <install-dir>/config.yaml (default if installed in a dedicated folder, or CNT_ROOT set)
+  r, app-root    <install-dir>/config.yaml (default if installed in a dedicated folder, or CNT_ROOT set)
   e, extra-root  $CNT_EXTRA_ROOT/config.yaml (group/lab layer, requires CNT_EXTRA_ROOT)
   s, system      /etc/condatainer/config.yaml (requires appropriate permissions)
 
 By default, the location is chosen based on the installation:
   - If the executable is in a dedicated folder (e.g., /apps/condatainer/bin/),
-    the config is created in the parent folder (standalone layout, -l root).
+    the config is created in the parent folder (standalone layout, -l app-root).
   - Otherwise, it uses the user's config directory.`,
 	Example: `  condatainer config init              # Create config with smart default location
   condatainer config init -l user      # Force user config location
-  condatainer config init -l root      # Force root config location
-  condatainer config init -l r         # Same as -l root
+  condatainer config init -l app-root  # Force app-root config location
+  condatainer config init -l r         # Same as -l app-root
   CNT_EXTRA_ROOT=/lab condatainer config init -l extra-root  # Group/lab layer`,
 	Run: func(cmd *cobra.Command, args []string) {
 		var configPath string
@@ -754,10 +753,10 @@ By default, the location is chosen based on the installation:
 			}
 			locationType = config.NormalizeConfigLocation(initLocation)
 			// Fail early with an actionable error if the root dir is read-only
-			if locationType == "root" {
+			if locationType == "app-root" {
 				if rootDir := filepath.Dir(configPath); !utils.CanWriteToDir(rootDir) {
 					ExitWithError(
-						"Root config directory is read-only: %s\n"+
+						"App-root config directory is read-only: %s\n"+
 							"Run as a privileged user, or use '-l user' to create a personal config instead.",
 						rootDir,
 					)
@@ -768,7 +767,7 @@ By default, the location is chosen based on the installation:
 			rootPath := config.GetRootConfigPath()
 			if rootPath != "" && utils.CanWriteToDir(filepath.Dir(rootPath)) {
 				configPath = rootPath
-				locationType = "root"
+				locationType = "app-root"
 			} else {
 				if rootPath != "" {
 					// Standalone layout detected but dir is read-only — fall back gracefully
@@ -806,7 +805,7 @@ By default, the location is chosen based on the installation:
 
 		// lowerLayersFor returns loaded config layers that are lower priority than loc.
 		// Keys already set in these layers will be skipped when saving.
-		layerOrder := []string{"user", "extra-root", "root", "system"}
+		layerOrder := []string{"user", "extra-root", "app-root", "system"}
 		lowerLayersFor := func(loc string) []config.ConfigLayerInfo {
 			cutIdx := slices.Index(layerOrder, loc) + 1
 			var result []config.ConfigLayerInfo
@@ -867,12 +866,12 @@ var configPathsCmd = &cobra.Command{
 Search paths are checked in priority order (first match wins for reads):
   1. Extra base directories (highest priority)
   2. Extra-root ($CNT_EXTRA_ROOT, group/lab layer)
-  3. Root (auto-detected or $CNT_ROOT)
+  3. App-root (auto-detected or $CNT_ROOT)
   4. Scratch (user HPC large storage, $SCRATCH/condatainer)
   5. User XDG directory (~/.local/share/condatainer)
 
 Write operations use the first writable directory in the same order.
-Root is preferred for group/shared use, user is the fallback.`,
+App-root is preferred for group/shared use, user is the fallback.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println(utils.StyleTitle("Data Search Paths"))
 		fmt.Println()
@@ -933,7 +932,7 @@ Root is preferred for group/shared use, user is the fallback.`,
 		for _, cp := range config.GetConfigSearchPaths() {
 			var status string
 			if !cp.Exists {
-				status = " " + utils.StyleCommand("(not found)")
+				status = " " + utils.StyleWarning("(not found)")
 			}
 			fmt.Printf("  %-12s %s%s\n", cp.Type+":", cp.Path, status)
 		}
@@ -942,9 +941,9 @@ Root is preferred for group/shared use, user is the fallback.`,
 		// Directory info
 		fmt.Println(utils.StyleTitle("Directory Locations:"))
 		if rootDir := config.GetRootDir(); rootDir != "" {
-			fmt.Printf("  Root:     %s\n", rootDir)
+			fmt.Printf("  App-root: %s\n", rootDir)
 		} else {
-			fmt.Printf("  Root:     %s\n", utils.StyleWarning("not detected (set CNT_ROOT to override)"))
+			fmt.Printf("  App-root: %s\n", utils.StyleWarning("not detected (set CNT_ROOT to override)"))
 		}
 		if scratchDir := config.GetScratchDataDir(); scratchDir != "" {
 			fmt.Printf("  Scratch:  %s\n", scratchDir)
@@ -1173,12 +1172,12 @@ func init() {
 	// Add flags
 	configShowCmd.Flags().BoolVar(&showPath, "path", false, "Show only the config file path")
 	configShowCmd.Flags().BoolVarP(&showSources, "sources", "s", false, "Show which config layer provides each value")
-	configInitCmd.Flags().StringVarP(&initLocation, "location", "l", "", "Config location: user (u), root (r), extra-root (e), or system (s)")
-	configGetCmd.Flags().StringVarP(&getLocation, "location", "l", "", "Read from a specific config layer: user (u), root (r), extra-root (e), or system (s)")
-	configSetCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), root (r), extra-root (e), or system (s)")
-	configAppendCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), root (r), extra-root (e), or system (s)")
-	configPrependCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), root (r), extra-root (e), or system (s)")
-	configRemoveCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), root (r), extra-root (e), or system (s)")
+	configInitCmd.Flags().StringVarP(&initLocation, "location", "l", "", "Config location: user (u), app-root (r), extra-root (e), or system (s)")
+	configGetCmd.Flags().StringVarP(&getLocation, "location", "l", "", "Read from a specific config layer: user (u), app-root (r), extra-root (e), or system (s)")
+	configSetCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), app-root (r), extra-root (e), or system (s)")
+	configAppendCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), app-root (r), extra-root (e), or system (s)")
+	configPrependCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), app-root (r), extra-root (e), or system (s)")
+	configRemoveCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), app-root (r), extra-root (e), or system (s)")
 
 	// Add subcommands
 	configCmd.AddCommand(configShowCmd)

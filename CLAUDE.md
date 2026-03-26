@@ -21,7 +21,7 @@ go test -v ./internal/scheduler/...                       # Package tests
 **internal/** packages:
 - `apptainer/` - Apptainer binary wrapper (exec, build, instance management)
 - `build/` - Build system: resolves name/version → Conda, Script, or Def build type; dependency graphs; remote script fetching
-- `config/` - Multi-level config (flags > env > user > portable > system > defaults), data directory search
+- `config/` - Multi-level config (flags > env > user > extra-root > app-root > system > defaults), data directory search
 - `container/` - Container setup pipeline: overlay resolution, bind dedup, env collection, GPU detection
 - `exec/` - Ephemeral container execution
 - `instance/` - Persistent instance management (start/exec/stop) with state persistence
@@ -45,10 +45,11 @@ Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 
 ## Data Directory Search Order
 
-1. `CNT_EXTRA_BASE_DIRS` / config `extra_base_dirs`
-2. `<install-dir>/` (portable, auto-detected)
-3. `$SCRATCH/condatainer/`
-4. `~/.local/share/condatainer/`
+1. `extra_image_dirs` / `extra_build_dirs` / `extra_helper_dirs` (config keys)
+2. `CNT_EXTRA_ROOT` (group/lab root, env only)
+3. `CNT_ROOT` / `<install-dir>/` (app-root, auto-detected)
+4. `$SCRATCH/condatainer/`
+5. `~/.local/share/condatainer/`
 
 Each contains `images/`, `build-scripts/`, `helper-scripts/`. Writes go to first writable dir.
 

@@ -79,7 +79,7 @@ func InitViper() error {
 		sources = append(sources, configSource{filepath.Join(extraRoot, ConfigFilename+"."+ConfigType), "extra-root"})
 	}
 	if rootPath := GetRootConfigPath(); rootPath != "" {
-		sources = append(sources, configSource{rootPath, "root"})
+		sources = append(sources, configSource{rootPath, "app-root"})
 	}
 	sources = append(sources, configSource{GetSystemConfigPath(), "system"})
 
@@ -267,7 +267,7 @@ func GetConfigSearchPaths() []ConfigSearchPath {
 		add(filepath.Join(extraRoot, ConfigFilename+"."+ConfigType), "extra-root")
 	}
 	if rootPath := GetRootConfigPath(); rootPath != "" {
-		add(rootPath, "root")
+		add(rootPath, "app-root")
 	}
 	add(GetSystemConfigPath(), "system")
 
@@ -275,13 +275,14 @@ func GetConfigSearchPaths() []ConfigSearchPath {
 }
 
 // NormalizeConfigLocation expands location shorthand to its full name.
-// Returns the full name ("user", "root", "extra-root", "system") or the input unchanged.
+// Returns the full name ("user", "app-root", "extra-root", "system") or the input unchanged.
+// "root" and "r" are accepted as aliases for "app-root".
 func NormalizeConfigLocation(location string) string {
 	switch location {
 	case "u":
 		return "user"
-	case "r":
-		return "root"
+	case "r", "root":
+		return "app-root"
 	case "e":
 		return "extra-root"
 	case "s":
@@ -292,16 +293,16 @@ func NormalizeConfigLocation(location string) string {
 }
 
 // GetConfigPathByLocation returns the config path for the specified location type.
-// Supported locations: "user"/"u", "root"/"r", "extra-root"/"e", "system"/"s"
+// Supported locations: "user"/"u", "app-root"/"root"/"r", "extra-root"/"e", "system"/"s"
 func GetConfigPathByLocation(location string) (string, error) {
 	switch location {
 	case "user", "u":
 		return GetUserConfigPath()
-	case "root", "r":
+	case "app-root", "root", "r":
 		if path := GetRootConfigPath(); path != "" {
 			return path, nil
 		}
-		return "", fmt.Errorf("root dir not available (not a standalone layout and CNT_ROOT not set)")
+		return "", fmt.Errorf("app-root dir not available (not a standalone layout and CNT_ROOT not set)")
 	case "extra-root", "e":
 		if path := GetExtraRootConfigPath(); path != "" {
 			return path, nil
@@ -310,7 +311,7 @@ func GetConfigPathByLocation(location string) (string, error) {
 	case "system", "s":
 		return GetSystemConfigPath(), nil
 	default:
-		return "", fmt.Errorf("invalid location '%s': use 'user' (u), 'root' (r), 'extra-root' (e), or 'system' (s)", location)
+		return "", fmt.Errorf("invalid location '%s': use 'user' (u), 'app-root' (r), 'extra-root' (e), or 'system' (s)", location)
 	}
 }
 
@@ -321,7 +322,7 @@ func inferLocationType(path string) string {
 		return "extra-root"
 	}
 	if p := GetRootConfigPath(); p != "" && path == p {
-		return "root"
+		return "app-root"
 	}
 	if path == GetSystemConfigPath() {
 		return "system"

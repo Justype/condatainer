@@ -1626,7 +1626,7 @@ Configuration is loaded in the following order (highest to lowest priority):
 2. Environment variables (`CNT_*`)
 3. User config file (`~/.config/condatainer/config.yaml`)
 4. Extra-root config (`$CNT_EXTRA_ROOT/config.yaml`, group/lab layer)
-5. Root config (`$CNT_ROOT/config.yaml` or `<install-dir>/config.yaml`)
+5. App-root config (`$CNT_ROOT/config.yaml` or `<install-dir>/config.yaml`)
 6. System config (`/etc/condatainer/config.yaml`)
 7. Built-in defaults
 

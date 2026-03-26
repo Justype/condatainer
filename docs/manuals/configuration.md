@@ -19,13 +19,13 @@ All three config files are loaded and merged when they exist:
 2. **Environment variables** (`CNT_*`) — replaces; config files not consulted
 3. **User config file** (`~/.config/condatainer/config.yaml`)
 4. **Extra-root config** (`$CNT_EXTRA_ROOT/config.yaml`, group/lab layer)
-5. **Root config** (`$CNT_ROOT/config.yaml` or `<install-dir>/config.yaml`)
+5. **App-root config** (`$CNT_ROOT/config.yaml` or `<install-dir>/config.yaml`)
 6. **System config file** (`/etc/condatainer/config.yaml`)
 7. **Defaults** (lowest priority)
 
 **Scalar keys** (`apptainer_bin`, `default_distro`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
 
-**Directory and source array keys** (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`): **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, root, then system. This lets a sysadmin publish shared directories in a root or system config without requiring every user to copy them into their own config.
+**Directory and source array keys** (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`): **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, app-root, then system. This lets a sysadmin publish shared directories in an app-root or system config without requiring every user to copy them into their own config.
 
 **`channels`**: overwrite — the highest-priority config file that sets it wins (not merged), since channel order controls conda package resolution priority.
 
@@ -49,7 +49,7 @@ condatainer config show
 |------|------|----------|
 | User | `~/.config/condatainer/config.yaml` | Personal settings |
 | Extra-root | `$CNT_EXTRA_ROOT/config.yaml` | Group/lab layer (requires `CNT_EXTRA_ROOT`) |
-| Root | `$CNT_ROOT/config.yaml` or `<install-dir>/config.yaml` | Shared cluster/group installation |
+| App-root | `$CNT_ROOT/config.yaml` or `<install-dir>/config.yaml` | Shared cluster/group installation |
 | System | `/etc/condatainer/config.yaml` | System-wide defaults |
 
 To create a config file at a specific location:
@@ -58,8 +58,8 @@ To create a config file at a specific location:
 # User config (default for home installations)
 condatainer config init -l user
 
-# Root config (for shared installations; not under home directory)
-condatainer config init -l root
+# App-root config (for shared installations; not under home directory)
+condatainer config init -l app-root
 
 # Extra-root config (group/lab layer)
 CNT_EXTRA_ROOT=/shared/labA/condatainer condatainer config init -l extra-root
@@ -257,19 +257,19 @@ export CNT_EXTRA_IMAGE_DIRS="/shared/lab/images:ro|/fast/scratch/images"
 
 **Images:**
 1. `extra_image_dirs` — explicit image directories (`:ro` entries skipped for writes)
-2. **Extra root** → `$CNT_EXTRA_ROOT/images/` (group/lab layer)
-3. **Root** → `$CNT_ROOT/images/` or `<install>/images/`
+2. **Extra-root** → `$CNT_EXTRA_ROOT/images/` (group/lab layer)
+3. **App-root** → `$CNT_ROOT/images/` or `<install>/images/`
 4. **Scratch** → `$SCRATCH/condatainer/images/`
 5. **User** → `~/.local/share/condatainer/images/`
 
 **Build / Helper Scripts:**
 **Build scripts:**
 1. `extra_build_dirs` — explicit build-scripts directories
-2. **Extra root**, **Root**, **Scratch**, **User** (same pattern)
+2. **Extra-root**, **App-root**, **Scratch**, **User** (same pattern)
 
 **Helper scripts:**
 1. `extra_helper_dirs` — explicit helper-scripts directories
-2. **Extra root**, **Root**, **Scratch**, **User** (same pattern)
+2. **Extra-root**, **App-root**, **Scratch**, **User** (same pattern)
 
 ### View Search Paths
 
@@ -399,9 +399,9 @@ For shared group installations, CondaTainer supports a standalone layout where t
   build-scripts/        # Shared build scripts
 ```
 
-All config files (user, extra-root, root, system) are loaded simultaneously. For `extra_image_dirs` and other directory keys, entries from all configs are **merged** — so a group admin can add shared directories to the root config and every user automatically searches those directories, even if they also have a personal config.
+All config files (user, extra-root, app-root, system) are loaded simultaneously. For `extra_image_dirs` and other directory keys, entries from all configs are **merged** — so a group admin can add shared directories to the app-root config and every user automatically searches those directories, even if they also have a personal config.
 
-For scalar keys like `apptainer_bin`, the user config takes priority; users can override root/system defaults in their own config without affecting other users.
+For scalar keys like `apptainer_bin`, the user config takes priority; users can override app-root/system defaults in their own config without affecting other users.
 
 **Explicit root via `CNT_ROOT`:** Instead of relying on the `bin/` layout detection, set `CNT_ROOT` to point directly to the installation directory. This is useful when the binary is installed to a standard location (e.g. `/usr/local/bin`) but the data lives elsewhere:
 
@@ -412,10 +412,10 @@ export CNT_ROOT=/shared/cluster/condatainer
 
 `CNT_ROOT` takes priority over the executable-location heuristic. The directory does not need a `bin/` subdirectory.
 
-To set up a root config for a shared installation:
+To set up an app-root config for a shared installation:
 
 ```bash
-condatainer config init -l root
+condatainer config init -l app-root
 ```
 
 ## Multi-Tier Setup (System → Group → User)
