@@ -513,7 +513,7 @@ func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string
 			return fmt.Errorf("environment file %s not found", envFile)
 		}
 
-		if !strings.HasSuffix(envFile, ".yml") && !strings.HasSuffix(envFile, ".yaml") {
+		if !utils.IsYaml(envFile) {
 			return fmt.Errorf("environment file must be .yml or .yaml")
 		}
 	}

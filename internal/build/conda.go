@@ -144,7 +144,7 @@ func (c *CondaBuildObject) buildInstallCmd() (cmd string, extraBindPaths []strin
 	}
 	channelFlags := buildChannelFlags()
 
-	if strings.HasSuffix(c.buildSource, ".yml") || strings.HasSuffix(c.buildSource, ".yaml") {
+	if utils.IsYaml(c.buildSource) {
 		// Mode 3: YAML file (-p prefix -f environment.yml)
 		absFilePath, err := filepath.Abs(c.buildSource)
 		if err != nil {

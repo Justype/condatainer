@@ -276,7 +276,7 @@ func autoCreateExternalOverlay(ctx context.Context, dep string) bool {
 
 	utils.PrintMessage("Auto-creating %s from %s...", utils.StyleName(filepath.Base(dep)), utils.StylePath(sibling))
 
-	if strings.HasSuffix(sibling, ".yaml") || strings.HasSuffix(sibling, ".yml") {
+	if utils.IsYaml(sibling) {
 		bo, err := build.NewCondaObjectWithSource(baseName, absFile, outputDir, outputDir, false)
 		if err != nil {
 			utils.PrintError("Failed to create build object for %s: %v", dep, err)
