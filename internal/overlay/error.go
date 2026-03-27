@@ -23,7 +23,7 @@ func (e *Error) Error() string {
 
 	fmt.Fprintf(&msg, "Overlay filesystem operation '%s' failed.\n", utils.StyleAction(e.Op))
 	fmt.Fprintf(&msg, "\tTarget:  %s\n", utils.StylePath(e.Path))
-	fmt.Fprintf(&msg, "\tTool:    %s\n", utils.StyleCommand(e.Tool))
+	fmt.Fprintf(&msg, "\tTool:    %s\n", utils.StyleAction(e.Tool))
 
 	if e.Output != "" {
 		cleanOut := strings.TrimSpace(e.Output)

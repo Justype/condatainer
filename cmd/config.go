@@ -372,13 +372,13 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 			pathIndex++
 		}
 
-		// Explicit extra image/build/helper directories
+		// Explicit extra build/image/helper directories
+		for _, path := range config.GetExtraBuildDirs() {
+			addBaseDir("extra-build", path, false)
+		}
 		for _, entry := range config.GetExtraImageDirs() {
 			path, ro := config.ParseDirEntry(entry)
 			addBaseDir("extra-images", path, ro)
-		}
-		for _, path := range config.GetExtraBuildDirs() {
-			addBaseDir("extra-build", path, false)
 		}
 		for _, entry := range config.GetExtraHelperDirs() {
 			path, ro := config.ParseDirEntry(entry)
@@ -394,9 +394,6 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 		fmt.Println()
 
 		// Show all settings
-		fmt.Println(utils.StyleTitle("Current Configuration:"))
-		fmt.Println()
-
 		// Paths: binaries then directories
 		fmt.Println(utils.StyleTitle("Paths:"))
 		fmt.Printf("  apptainer_bin: %s%s\n", viper.GetString("apptainer_bin"), srcTag("apptainer_bin"))
@@ -415,6 +412,15 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 		}
 		fmt.Printf("  logs_dir:      %s%s\n", logsDir, srcTag("logs_dir"))
 		printOverridden("                 ", "logs_dir")
+		extraBuildDirs := config.GetExtraBuildDirs()
+		if len(extraBuildDirs) > 0 {
+			fmt.Printf("  extra_build_dirs:\n")
+			for _, path := range extraBuildDirs {
+				fmt.Printf("    - %s%s\n", path, srcEntryTag("extra_build_dirs", path))
+			}
+		} else {
+			fmt.Printf("  extra_build_dirs: %s\n", utils.StyleInfo("none"))
+		}
 		extraImageDirs := config.GetExtraImageDirs()
 		if len(extraImageDirs) > 0 {
 			fmt.Printf("  extra_image_dirs:\n")
@@ -428,15 +434,6 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 			}
 		} else {
 			fmt.Printf("  extra_image_dirs: %s\n", utils.StyleInfo("none"))
-		}
-		extraBuildDirs := config.GetExtraBuildDirs()
-		if len(extraBuildDirs) > 0 {
-			fmt.Printf("  extra_build_dirs:\n")
-			for _, path := range extraBuildDirs {
-				fmt.Printf("    - %s%s\n", path, srcEntryTag("extra_build_dirs", path))
-			}
-		} else {
-			fmt.Printf("  extra_build_dirs: %s\n", utils.StyleInfo("none"))
 		}
 		extraHelperDirs := config.GetExtraHelperDirs()
 		if len(extraHelperDirs) > 0 {
@@ -873,9 +870,6 @@ Search paths are checked in priority order (first match wins for reads):
 Write operations use the first writable directory in the same order.
 App-root is preferred for group/shared use, user is the fallback.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(utils.StyleTitle("Data Search Paths"))
-		fmt.Println()
-
 		// pathStatus returns inline status tags for a search-path entry.
 		// writeTarget is the resolved writable directory for this section (empty = not applicable).
 		pathStatus := func(dir, writeTarget string) string {
@@ -899,17 +893,17 @@ App-root is preferred for group/shared use, user is the fallback.`,
 		helperWritable, _ := config.GetWritableHelperScriptsDir()
 		cacheWritable, _ := config.GetWritableCacheDir()
 
-		// Images
-		fmt.Println(utils.StyleTitle("Images:"))
-		for i, dir := range config.GetImageSearchPaths() {
-			fmt.Printf("  %d. %s%s\n", i+1, dir, pathStatus(dir, imagesWritable))
-		}
-		fmt.Println()
-
 		// Build scripts (read-only search — nothing writes here)
 		fmt.Println(utils.StyleTitle("Build Scripts:"))
 		for i, dir := range config.GetBuildScriptSearchPaths() {
 			fmt.Printf("  %d. %s%s\n", i+1, dir, pathStatus(dir, ""))
+		}
+		fmt.Println()
+
+		// Images
+		fmt.Println(utils.StyleTitle("Images:"))
+		for i, dir := range config.GetImageSearchPaths() {
+			fmt.Printf("  %d. %s%s\n", i+1, dir, pathStatus(dir, imagesWritable))
 		}
 		fmt.Println()
 

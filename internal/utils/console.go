@@ -35,7 +35,7 @@ var (
 	blueBold = color.New(color.FgBlue, color.Bold).SprintFunc()
 	magenta  = color.New(color.FgMagenta).SprintFunc()
 	cyan     = color.New(color.FgCyan).SprintFunc()
-	gray     = color.New(color.FgWhite).SprintFunc() // FgWhite = Gray in ANSI
+	gray     = color.New(color.FgHiBlack).SprintFunc()
 	bold     = color.New(color.Bold).SprintFunc()
 )
 
@@ -64,9 +64,6 @@ func StyleInfo(msg string) string { return magenta(msg) }
 
 // StyleDebug formats low-level technical info (Gray).
 func StyleDebug(msg string) string { return gray(msg) }
-
-// StyleCommand formats shell commands or flags (Gray/Faint).
-func StyleCommand(cmd string) string { return gray(cmd) }
 
 // StyleAction formats verbs or active operations (Yellow).
 func StyleAction(act string) string { return yellow(act) }
@@ -150,7 +147,7 @@ func PrintSuccess(format string, a ...interface{}) {
 
 // PrintError prints an error message with a Red tag. → stderr
 // Output: [CNT][ERR] Something failed.
-func PrintError(format string, a ...interface{}) {
+func PrintError(format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
 	tag := StyleError("[ERR]")
 	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
@@ -158,7 +155,7 @@ func PrintError(format string, a ...interface{}) {
 
 // PrintWarning prints a warning with a Yellow tag. → stderr
 // Output: [CNT][WARN] Disk is almost full.
-func PrintWarning(format string, a ...interface{}) {
+func PrintWarning(format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
 	tag := StyleWarning("[WARN]")
 	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
@@ -166,7 +163,7 @@ func PrintWarning(format string, a ...interface{}) {
 
 // PrintHint prints a helpful hint with a Cyan tag. → stderr
 // Output: [CNT][HINT] Try running with --force.
-func PrintHint(format string, a ...interface{}) {
+func PrintHint(format string, a ...any) {
 	if QuietMode {
 		return
 	}
@@ -177,7 +174,7 @@ func PrintHint(format string, a ...interface{}) {
 
 // PrintNote prints a note with a Magenta tag. → stderr
 // Output: [CNT][NOTE] This might take a while.
-func PrintNote(format string, a ...interface{}) {
+func PrintNote(format string, a ...any) {
 	if QuietMode {
 		return
 	}
@@ -188,7 +185,7 @@ func PrintNote(format string, a ...interface{}) {
 
 // PrintDebug prints a debug message with a Gray tag (only if DebugMode is true). → stderr
 // Output: [CNT][DBG] Executing: rm -rf /tmp/foo
-func PrintDebug(format string, a ...interface{}) {
+func PrintDebug(format string, a ...any) {
 	if DebugMode {
 		msg := fmt.Sprintf(format, a...)
 		tag := StyleDebug("[DBG]")
