@@ -45,6 +45,9 @@ func newCondaBuildObject(base *BaseBuildObject) (*CondaBuildObject, error) {
 	} else {
 		// Standard conda package - must be in name/version format
 		if len(parts) != 2 {
+			if base.condaChannelPkg != "" {
+				return nil, fmt.Errorf("channel-annotated package requires a version (e.g. %s=1.0)", base.condaChannelPkg)
+			}
 			return nil, fmt.Errorf("conda package must be in format name/version, got: %s", base.nameVersion)
 		}
 		packageName = parts[0]

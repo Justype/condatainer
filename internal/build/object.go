@@ -445,10 +445,10 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 	if colonIdx := strings.Index(normalized, "::"); colonIdx != -1 {
 		channel := normalized[:colonIdx]
 		rest := normalized[colonIdx+2:] // "star/2.7.11b" or "star"
-		if !strings.Contains(rest, "/") {
-			return nil, fmt.Errorf("channel-annotated package %q requires a version (e.g. %s::%s=1.0)", normalized, channel, rest)
+		pkgName := rest
+		if before, _, ok := strings.Cut(rest, "/"); ok {
+			pkgName = before
 		}
-		pkgName := rest[:strings.Index(rest, "/")]
 		condaChannelPkg = channel + "::" + pkgName
 		normalized = rest // strip channel prefix for sqf naming and env path
 	}
