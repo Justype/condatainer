@@ -69,7 +69,7 @@ func StyleDebug(msg string) string { return gray(msg) }
 func StyleAction(act string) string { return yellow(act) }
 
 // StyleTitle
-func StyleTitle(title string) string { return bold(cyan(title)) }
+func StyleTitle(title string) string { return cyan(title) }
 
 // StyleNumber formats counts, sizes, or IDs (Magenta).
 func StyleNumber(num interface{}) string {

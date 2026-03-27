@@ -17,6 +17,7 @@ import (
 
 var listDelete bool
 var listExact bool
+var listOne bool
 
 var listCmd = &cobra.Command{
 	Use:     "list [terms...]",
@@ -48,6 +49,7 @@ func init() {
 	listCmd.Flags().BoolP("remove", "r", false, "Alias for --delete")
 	listCmd.Flags().BoolVarP(&listExact, "exact", "e", false, "Force exact full-name match even for a single term")
 	listCmd.Flags().StringP("dir", "D", "", "Limit to a specific image directory (substring match)")
+	listCmd.Flags().BoolVarP(&listOne, "one", "1", false, "One entry per line (disable multi-column layout)")
 }
 
 // DirOverlays holds the scan results for a single image directory.
@@ -150,31 +152,39 @@ func runList(cmd *cobra.Command, args []string) error {
 					}
 				}
 			}
-			printColumns(plain, styled, 1, terminalWidth())
+			printColumns(plain, styled, 1, listTermWidth())
 		}
 
 		if len(moduleOverlays) > 0 {
 			fmt.Println(utils.StyleTitle("Available app overlays:"))
-			names := sortedKeys(moduleOverlays)
-			nameWidth := maxWidth(names)
-			for _, name := range names {
-				vers := moduleOverlays[name]
-				colored := make([]string, len(vers))
-				for i, v := range vers {
+			var plain, styled []string
+			for _, name := range sortedKeys(moduleOverlays) {
+				for _, v := range moduleOverlays[name] {
 					if v == "(env)" {
-						colored[i] = v
+						plain = append(plain, name+" (env)")
+						styled = append(styled, name+" (env)")
 					} else {
-						colored[i] = utils.StyleInfo(v)
+						plain = append(plain, name+"/"+v)
+						styled = append(styled, name+"/"+utils.StyleName(v))
 					}
 				}
-				nameField := fmt.Sprintf("%-*s", nameWidth, name)
-				fmt.Printf(" %s: %s\n", nameField, strings.Join(colored, ", "))
 			}
+			printColumns(plain, styled, 1, listTermWidth())
 		}
 
 		if len(d.DataList) > 0 {
 			fmt.Println(utils.StyleTitle("Available data overlays:"))
-			printColumns(d.DataList, d.DataList, 1, terminalWidth())
+			styled := make([]string, len(d.DataList))
+			for i, data := range d.DataList {
+				parts := strings.Split(data, "/")
+				for j, p := range parts {
+					if j%2 == 1 {
+						parts[j] = utils.StyleName(p)
+					}
+				}
+				styled[i] = strings.Join(parts, "/")
+			}
+			printColumns(d.DataList, styled, 1, listTermWidth())
 		}
 	}
 
@@ -308,6 +318,14 @@ func terminalWidth() int {
 		return w
 	}
 	return 80
+}
+
+// listTermWidth returns 0 (single column) when -1 is set, otherwise the terminal width.
+func listTermWidth() int {
+	if listOne {
+		return 0
+	}
+	return terminalWidth()
 }
 
 func sortedKeys(m map[string][]string) []string {
