@@ -136,45 +136,45 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 
 		if len(osOverlays) > 0 {
-			fmt.Println("Available OS overlays:")
+			fmt.Println(utils.StyleTitle("Available OS overlays:"))
 			names := sortedKeys(osOverlays)
-			nameWidth := maxWidth(names)
-			for _, name := range names {
-				nameField := fmt.Sprintf("%-*s", nameWidth, name)
-				line := fmt.Sprintf(" %s", utils.StyleName(nameField))
+			plain := make([]string, len(names))
+			styled := make([]string, len(names))
+			for i, name := range names {
+				plain[i] = name
+				styled[i] = name
 				if distroLower != "" {
 					if alias, ok := strings.CutPrefix(name, distroLower+"/"); ok {
-						line += "  " + utils.StyleInfo("["+alias+"]")
+						plain[i] += "  [" + alias + "]"
+						styled[i] += "  " + utils.StyleInfo("["+alias+"]")
 					}
 				}
-				fmt.Println(line)
 			}
+			printColumns(plain, styled, 1, terminalWidth())
 		}
 
 		if len(moduleOverlays) > 0 {
-			fmt.Println("Available app overlays:")
+			fmt.Println(utils.StyleTitle("Available app overlays:"))
 			names := sortedKeys(moduleOverlays)
 			nameWidth := maxWidth(names)
 			for _, name := range names {
 				vers := moduleOverlays[name]
-				colored := make([]string, 0, len(vers))
-				for _, v := range vers {
+				colored := make([]string, len(vers))
+				for i, v := range vers {
 					if v == "(env)" {
-						colored = append(colored, v)
+						colored[i] = v
 					} else {
-						colored = append(colored, utils.StyleInfo(v))
+						colored[i] = utils.StyleInfo(v)
 					}
 				}
 				nameField := fmt.Sprintf("%-*s", nameWidth, name)
-				fmt.Printf(" %s: %s\n", utils.StyleName(nameField), strings.Join(colored, ", "))
+				fmt.Printf(" %s: %s\n", nameField, strings.Join(colored, ", "))
 			}
 		}
 
 		if len(d.DataList) > 0 {
-			fmt.Println("Available data overlays:")
-			for _, data := range d.DataList {
-				fmt.Printf(" %s\n", utils.StyleName(data))
-			}
+			fmt.Println(utils.StyleTitle("Available data overlays:"))
+			printColumns(d.DataList, d.DataList, 1, terminalWidth())
 		}
 	}
 
@@ -327,6 +327,44 @@ func maxWidth(names []string) int {
 		}
 	}
 	return width
+}
+
+// printColumns prints items in a newspaper-style multi-column layout.
+// plain[i] is used for width calculation; styled[i] is what gets printed.
+// indent is the number of leading spaces per row.
+func printColumns(plain, styled []string, indent, termWidth int) {
+	if len(plain) == 0 {
+		return
+	}
+	maxW := 0
+	for _, s := range plain {
+		if len(s) > maxW {
+			maxW = len(s)
+		}
+	}
+	colWidth := maxW + 2
+	numCols := (termWidth - indent) / colWidth
+	if numCols < 1 {
+		numCols = 1
+	}
+	numRows := (len(plain) + numCols - 1) / numCols
+	prefix := strings.Repeat(" ", indent)
+	for row := 0; row < numRows; row++ {
+		fmt.Print(prefix)
+		for col := 0; col < numCols; col++ {
+			idx := col*numRows + row
+			if idx >= len(plain) {
+				break
+			}
+			isLast := col == numCols-1 || (col+1)*numRows+row >= len(plain)
+			if isLast {
+				fmt.Print(styled[idx])
+			} else {
+				fmt.Print(styled[idx] + strings.Repeat(" ", colWidth-len(plain[idx])))
+			}
+		}
+		fmt.Println()
+	}
 }
 
 // filterImageDirs filters dirs according to dirFilter:
