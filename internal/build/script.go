@@ -127,7 +127,7 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		return err
 	}
 
-	utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleCommand(s.buildSource))
+	utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleAction(s.buildSource))
 
 	if err := s.buildDependencies(ctx, buildDeps); err != nil {
 		return err

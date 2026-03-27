@@ -110,7 +110,7 @@ func atomicInstall(finalPath, targetPath string, update bool) error {
 		os.Remove(finalPath) //nolint:errcheck
 		return fmt.Errorf("failed to replace overlay %s: %w", targetPath, err)
 	}
-	cachedInstalledOverlays = nil          // invalidate so next dep-check sees the new overlay
+	cachedInstalledOverlays = nil                // invalidate so next dep-check sees the new overlay
 	container.InvalidateInstalledOverlaysCache() // invalidate container resolve cache too
 	return nil
 }
