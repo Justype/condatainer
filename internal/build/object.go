@@ -103,6 +103,7 @@ type BaseBuildObject struct {
 	prebuiltLink      string // per-source prebuilt base URL (from metadata/prebuilt_link); empty = no prebuilt
 	update            bool   // If true, rebuild even if overlay already exists (atomic .new swap)
 	scriptSpecs       *scheduler.ScriptSpecs
+	condaChannelPkg   string // channel-annotated package spec, e.g. "bioconda::star"; set when input uses "::" notation
 
 	// Interactive inputs for shell scripts
 	interactiveInputs []string
@@ -437,6 +438,21 @@ func (b *BaseBuildObject) resolveResourceSpec() error {
 // All overlays are stored in imagesDir regardless of type
 func NewBuildObject(ctx context.Context, nameVersion string, external bool, imagesDir, tmpDir string, update bool) (BuildObject, error) {
 	normalized := utils.NormalizeNameVersion(nameVersion)
+
+	// Handle channel annotation (e.g. "bioconda::star/2.7.11b"):
+	// strip the channel prefix for path/naming; keep it for the micromamba spec.
+	var condaChannelPkg string
+	if colonIdx := strings.Index(normalized, "::"); colonIdx != -1 {
+		channel := normalized[:colonIdx]
+		rest := normalized[colonIdx+2:] // "star/2.7.11b" or "star"
+		pkgName := rest
+		if before, _, ok := strings.Cut(rest, "/"); ok {
+			pkgName = before
+		}
+		condaChannelPkg = channel + "::" + pkgName
+		normalized = rest // strip channel prefix for sqf naming and env path
+	}
+
 	slashCount := strings.Count(normalized, "/")
 
 	// Determine build type based on slash count
@@ -480,6 +496,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetOverlay,
 		update:            update,
+		condaChannelPkg:   condaChannelPkg,
 	}
 
 	if external {
@@ -683,6 +700,11 @@ func createConcreteType(ctx context.Context, base *BaseBuildObject, isRef bool, 
 // - both false: found shell script (no extension)
 // First checks local and remote build scripts, falls back to conda if not found
 func resolveBuildSource(base *BaseBuildObject, tmpDir string) (isConda bool, isContainer bool, err error) {
+	// Channel-annotated packages (e.g. "bioconda::star") always go through conda.
+	if base.condaChannelPkg != "" {
+		return true, false, nil
+	}
+
 	// Check if already has a build source
 	if base.buildSource != "" {
 		// Determine type from extension

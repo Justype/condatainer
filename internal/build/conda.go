@@ -45,10 +45,17 @@ func newCondaBuildObject(base *BaseBuildObject) (*CondaBuildObject, error) {
 	} else {
 		// Standard conda package - must be in name/version format
 		if len(parts) != 2 {
+			if base.condaChannelPkg != "" {
+				return nil, fmt.Errorf("channel-annotated package requires a version (e.g. %s=1.0)", base.condaChannelPkg)
+			}
 			return nil, fmt.Errorf("conda package must be in format name/version, got: %s", base.nameVersion)
 		}
 		packageName = parts[0]
 		packageVersion = parts[1]
+		// Channel-annotated input (e.g. "bioconda::star/2.7.11b"): use full spec for micromamba.
+		if base.condaChannelPkg != "" {
+			packageName = base.condaChannelPkg
+		}
 	}
 
 	return &CondaBuildObject{
@@ -144,7 +151,7 @@ func (c *CondaBuildObject) buildInstallCmd() (cmd string, extraBindPaths []strin
 	}
 	channelFlags := buildChannelFlags()
 
-	if strings.HasSuffix(c.buildSource, ".yml") || strings.HasSuffix(c.buildSource, ".yaml") {
+	if utils.IsYaml(c.buildSource) {
 		// Mode 3: YAML file (-p prefix -f environment.yml)
 		absFilePath, err := filepath.Abs(c.buildSource)
 		if err != nil {

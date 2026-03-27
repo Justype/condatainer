@@ -9,6 +9,7 @@ import (
 
 var searchJSON bool
 var searchPretty bool
+var searchChannels []string
 
 var searchCmd = &cobra.Command{
 	Use:   "search <package>",
@@ -28,6 +29,7 @@ func init() {
 	rootCmd.AddCommand(searchCmd)
 	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "Output results in JSON format")
 	searchCmd.Flags().BoolVar(&searchPretty, "pretty", false, "Pretty-print output")
+	searchCmd.Flags().StringArrayVarP(&searchChannels, "channel", "c", nil, "Conda channel to search (overrides config; repeatable)")
 }
 
 func runSearch(cmd *cobra.Command, args []string) error {
@@ -35,7 +37,11 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	mmArgs := []string{"micromamba", "search"}
 	mmArgs = append(mmArgs, args...)
 	mmArgs = append(mmArgs, "--no-rc")
-	for _, ch := range config.Global.Build.Channels {
+	channels := config.Global.Build.Channels
+	if len(searchChannels) > 0 {
+		channels = searchChannels
+	}
+	for _, ch := range channels {
 		mmArgs = append(mmArgs, "-c", ch)
 	}
 	if searchJSON {

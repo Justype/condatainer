@@ -25,6 +25,7 @@ var (
 	createTempSize      string
 	createBlockSize     string
 	createDataBlockSize string
+	createChannels      []string
 	createRemote        bool
 	createUpdate        bool
 
@@ -107,7 +108,12 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 		}
 		// If no compression flag provided, use config default (auto-detected in root.go)
 
-		// 4. Handle temp size
+		// 4. Override channels if -c was provided
+		if len(createChannels) > 0 {
+			config.Global.Build.Channels = createChannels
+		}
+
+		// 5. Handle temp size
 		if createTempSize != "" {
 			sizeMB, err := utils.ParseSizeToMB(createTempSize)
 			if err != nil {
@@ -116,7 +122,7 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 			config.Global.Build.TmpSizeMB = sizeMB
 		}
 
-		// 4b. Handle block sizes
+		// 5b. Handle block sizes
 		if createBlockSize != "" {
 			if !config.IsValidBlockSize(createBlockSize) {
 				ExitWithError("Invalid --block-size %q: must be a power of two between 4096 and 1M (e.g. 64k, 128k, 512k, 1m)", createBlockSize)
@@ -130,7 +136,7 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 			config.Global.Build.DataBlockSize = createDataBlockSize
 		}
 
-		// 5. Normalize package names (only for build-script mode, not for conda/prefix/source modes)
+		// 6. Normalize package names (only for build-script mode, not for conda/prefix/source modes)
 		normalizedArgs := args
 		if createName == "" && createPrefix == "" && createSource == "" {
 			normalizedArgs = make([]string, len(args))
@@ -140,7 +146,7 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 				// a build script exists for that distro/name combination.
 				// e.g. "igv" → "ubuntu24/igv"  →  ubuntu24--igv.sqf
 				// Without a script, keep the original name so the user gets a clear error.
-				if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
+				if !strings.Contains(normalized, "/") && !strings.Contains(normalized, "::") && config.Global.DefaultDistro != "" {
 					candidate := config.Global.DefaultDistro + "/" + normalized
 					if _, found := build.FindBuildScript(candidate); found {
 						utils.PrintNote("Expanding '%s' to '%s'", normalized, candidate)
@@ -151,15 +157,15 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 			}
 		}
 
-		// 6. Handle --remote flag (CLI flag or config)
+		// 7. Handle --remote flag (CLI flag or config)
 		build.PreferRemote = createRemote || config.Global.PreferRemote
 
-		// 7. Announce update mode
+		// 8. Announce update mode
 		if createUpdate {
 			utils.PrintNote("Update mode: existing overlays will be rebuilt.")
 		}
 
-		// 8. Execute create based on mode
+		// 9. Execute create based on mode
 		if createSource != "" {
 			// Mode: --source (external image like docker://ubuntu)
 			runCreateFromSource(ctx)
@@ -193,6 +199,7 @@ func init() {
 	f.StringVar(&createTempSize, "temp-size", "20G", "Size of temporary overlay")
 	f.StringVar(&createBlockSize, "block-size", "", "SquashFS block size for app/env/external overlays (e.g. 128k, 512k)")
 	f.StringVar(&createDataBlockSize, "data-block-size", "", "SquashFS block size for data overlays (e.g. 512k, 1m)")
+	f.StringArrayVarP(&createChannels, "channel", "c", nil, "Conda channel to use (overrides config; repeatable)")
 	f.BoolVar(&createRemote, "remote", false, "Remote build scripts take precedence over local")
 	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist (atomic .new swap)")
 
@@ -309,7 +316,7 @@ func runCreateWithName(ctx context.Context, packages []string) {
 	var buildSource string
 	if createFile != "" {
 		// YAML file mode
-		if !strings.HasSuffix(createFile, ".yml") && !strings.HasSuffix(createFile, ".yaml") {
+		if !utils.IsYaml(createFile) {
 			ExitWithError("File must be .yml or .yaml for conda environments")
 		}
 		buildSource, _ = filepath.Abs(createFile)
@@ -344,7 +351,7 @@ func runCreateWithPrefix(ctx context.Context) {
 	utils.PrintDebug("[CREATE] Creating overlay with prefix: %s", createPrefix)
 
 	// Determine file type and create appropriate BuildObject
-	if strings.HasSuffix(createFile, ".yml") || strings.HasSuffix(createFile, ".yaml") {
+	if utils.IsYaml(createFile) {
 		// YAML conda environment - use NewCondaObjectWithSource
 		absFile, _ := filepath.Abs(createFile)
 		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, outputDir, createUpdate)

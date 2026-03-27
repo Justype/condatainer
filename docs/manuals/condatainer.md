@@ -405,12 +405,13 @@ condatainer create [OPTIONS] [packages...]
 * `-f`, `--file [FILE]`: Path to definition file (.yaml, .sh, .def).
 * `-b`, `--base-image [PATH]`: Base image to use instead of default.
 * `-s`, `--source [URI]`: Remote source URI (e.g., `docker://ubuntu:22.04`).
+* `-c`, `--channel [CHANNEL]`: Conda channel to use, overriding config channels. Repeatable: `-c conda-forge -c bioconda`. Also accepts channel-annotated packages like `bioconda::star=2.7.11b` directly as package arguments (see below).
 * `--temp-size [SIZE]`: Size of temporary overlay (default: 20G).
 * `--block-size [SIZE]`: SquashFS block size for app/env/external overlays (e.g. `128k`, `512k`; default: `128k`). Must be a power of two between `4k` and `1m`.
 * `--data-block-size [SIZE]`: SquashFS block size for data/reference overlays (e.g. `512k`, `1m`; default: `1m`). Must be a power of two between `4k` and `1m`.
 * `-u`, `--update`: Rebuild overlays even if they already exist (atomic `.new` swap). Useful for refreshing a package to the latest version.
 * `--remote`: Remote build scripts take precedence over local.
-* `packages`: List of packages to install (e.g., `bcftools/1.22` or `samtools=1.10` or `grch38/genome/gencode`).
+* `packages`: List of packages to install (e.g., `bcftools/1.22` or `samtools=1.10` or `grch38/genome/gencode`). Supports conda channel annotations: `bioconda::star=2.7.11b` (version required in default mode; optional with `-n`/`-p`).
 
 **Compression Options:**
 
@@ -423,7 +424,7 @@ condatainer create [OPTIONS] [packages...]
 
 **Build Modes:**
 
-* **Default:** Each package gets its own `.sqf` via the build system.
+* **Default:** Each package gets its own `.sqf` via the build system. Build script lookup is skipped when a package uses channel annotation (`bioconda::star=2.7.11b`).
 * **`--name`:** Create a single `.sqf` with multiple packages bundled together.
 * **`--prefix` + packages:** Create a conda env `.sqf` at a custom path, like `conda create -p`.
 * **`--file` only:** Create `.sqf` from external source file; prefix inferred from file name (e.g. `condatainer create -f r-collect.sh` → `r-collect.sqf`).
@@ -462,6 +463,16 @@ condatainer create --source docker://ubuntu:22.04 -n myubuntu
 
 # Rebuild an existing conda overlay (force update)
 condatainer create -n nvim nvim nodejs -u
+
+# Override channels for this build only
+condatainer create python=3.11 -n myenv -c conda-forge -c bioconda
+
+# Channel-annotated package: skips build script lookup, goes direct to conda
+# (version required in default mode)
+condatainer create bioconda::star=2.7.11b
+
+# Channel annotation in bundled env (version optional with -n/-p)
+condatainer create -n rnaseq bioconda::star bioconda::salmon=1.10.0
 ```
 
 **Features**:
@@ -694,11 +705,12 @@ condatainer search <package> [flags]
 
 * `--json`: Output results in JSON format.
 * `--pretty`: Pretty-print output (passes `--pretty` to micromamba).
+* `-c`, `--channel [CHANNEL]`: Channel to search, overriding config channels. Repeatable: `-c bioconda -c conda-forge`.
 
 **Notes:**
 
 * Runs `micromamba search` inside the base image (no overlays required).
-* Uses channels from the config (`build.channels`, default: `conda-forge`, `bioconda`).
+* Uses channels from the config (`build.channels`, default: `conda-forge`, `bioconda`). `-c` fully replaces the config channel list for this invocation.
 * `--no-rc` is always passed to prevent user `.mambarc`/`.condarc` from overriding channels.
 
 **Examples:**
@@ -708,6 +720,7 @@ $ condatainer search samtools
 $ condatainer search 'samtools>1.10'
 $ condatainer search samtools --json
 $ condatainer search samtools --pretty
+$ condatainer search star -c bioconda
 ```
 
 ## Exec
