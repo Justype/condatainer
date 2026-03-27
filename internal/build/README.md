@@ -6,7 +6,7 @@ Build system for creating overlay images from Conda packages, shell scripts, or 
 
 | Type | Source | Description |
 |------|--------|-------------|
-| Conda | Package spec or YAML | Micromamba environment |
+| Conda | Package spec, YAML, or `channel::pkg/version` | Micromamba environment |
 | Shell | Build script (`#DEP`, `#SBATCH`, `#ENV`, `#INTERACTIVE`) | Custom installation |
 | Def | Apptainer `.def` file | Apptainer build |
 | Ref | Shell script (large datasets) | Reference data (genomes, indices) |
@@ -52,6 +52,10 @@ env.go          Environment variable extraction from overlays
 ```go
 // Auto-resolve from name/version
 obj, err := build.NewBuildObject(ctx, "cellranger/9.0.1", false, imagesDir, tmpDir, false)
+
+// Channel-annotated package: skips build script lookup, version required
+obj, err := build.NewBuildObject(ctx, "bioconda::star/2.7.11b", false, imagesDir, tmpDir, false)
+// → sqf: star--2.7.11b.sqf, micromamba spec: bioconda::star=2.7.11b
 
 // Conda with custom source (YAML or package list)
 obj, err := build.NewCondaObjectWithSource("myenv/1.0", "/path/env.yml", imagesDir, tmpDir, false)
