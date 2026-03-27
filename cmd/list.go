@@ -17,6 +17,7 @@ import (
 
 var listDelete bool
 var listExact bool
+var listOne bool
 
 var listCmd = &cobra.Command{
 	Use:     "list [terms...]",
@@ -48,6 +49,7 @@ func init() {
 	listCmd.Flags().BoolP("remove", "r", false, "Alias for --delete")
 	listCmd.Flags().BoolVarP(&listExact, "exact", "e", false, "Force exact full-name match even for a single term")
 	listCmd.Flags().StringP("dir", "D", "", "Limit to a specific image directory (substring match)")
+	listCmd.Flags().BoolVarP(&listOne, "one", "1", false, "One entry per line (disable multi-column layout)")
 }
 
 // DirOverlays holds the scan results for a single image directory.
@@ -136,45 +138,53 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 
 		if len(osOverlays) > 0 {
-			fmt.Println("Available OS overlays:")
+			fmt.Println(utils.StyleTitle("Available OS overlays:"))
 			names := sortedKeys(osOverlays)
-			nameWidth := maxWidth(names)
-			for _, name := range names {
-				nameField := fmt.Sprintf("%-*s", nameWidth, name)
-				line := fmt.Sprintf(" %s", utils.StyleName(nameField))
+			plain := make([]string, len(names))
+			styled := make([]string, len(names))
+			for i, name := range names {
+				plain[i] = name
+				styled[i] = name
 				if distroLower != "" {
 					if alias, ok := strings.CutPrefix(name, distroLower+"/"); ok {
-						line += "  " + utils.StyleInfo("["+alias+"]")
+						plain[i] += "  [" + alias + "]"
+						styled[i] += "  " + utils.StyleInfo("["+alias+"]")
 					}
 				}
-				fmt.Println(line)
 			}
+			printColumns(plain, styled, 1, listTermWidth())
 		}
 
 		if len(moduleOverlays) > 0 {
-			fmt.Println("Available app overlays:")
-			names := sortedKeys(moduleOverlays)
-			nameWidth := maxWidth(names)
-			for _, name := range names {
-				vers := moduleOverlays[name]
-				colored := make([]string, 0, len(vers))
-				for _, v := range vers {
+			fmt.Println(utils.StyleTitle("Available app overlays:"))
+			var plain, styled []string
+			for _, name := range sortedKeys(moduleOverlays) {
+				for _, v := range moduleOverlays[name] {
 					if v == "(env)" {
-						colored = append(colored, v)
+						plain = append(plain, name+" (env)")
+						styled = append(styled, name+" (env)")
 					} else {
-						colored = append(colored, utils.StyleInfo(v))
+						plain = append(plain, name+"/"+v)
+						styled = append(styled, name+"/"+utils.StyleName(v))
 					}
 				}
-				nameField := fmt.Sprintf("%-*s", nameWidth, name)
-				fmt.Printf(" %s: %s\n", utils.StyleName(nameField), strings.Join(colored, ", "))
 			}
+			printColumns(plain, styled, 1, listTermWidth())
 		}
 
 		if len(d.DataList) > 0 {
-			fmt.Println("Available data overlays:")
-			for _, data := range d.DataList {
-				fmt.Printf(" %s\n", utils.StyleName(data))
+			fmt.Println(utils.StyleTitle("Available data overlays:"))
+			styled := make([]string, len(d.DataList))
+			for i, data := range d.DataList {
+				parts := strings.Split(data, "/")
+				for j, p := range parts {
+					if j%2 == 1 {
+						parts[j] = utils.StyleName(p)
+					}
+				}
+				styled[i] = strings.Join(parts, "/")
 			}
+			printColumns(d.DataList, styled, 1, listTermWidth())
 		}
 	}
 
@@ -310,6 +320,14 @@ func terminalWidth() int {
 	return 80
 }
 
+// listTermWidth returns 0 (single column) when -1 is set, otherwise the terminal width.
+func listTermWidth() int {
+	if listOne {
+		return 0
+	}
+	return terminalWidth()
+}
+
 func sortedKeys(m map[string][]string) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -327,6 +345,44 @@ func maxWidth(names []string) int {
 		}
 	}
 	return width
+}
+
+// printColumns prints items in a newspaper-style multi-column layout.
+// plain[i] is used for width calculation; styled[i] is what gets printed.
+// indent is the number of leading spaces per row.
+func printColumns(plain, styled []string, indent, termWidth int) {
+	if len(plain) == 0 {
+		return
+	}
+	maxW := 0
+	for _, s := range plain {
+		if len(s) > maxW {
+			maxW = len(s)
+		}
+	}
+	colWidth := maxW + 2
+	numCols := (termWidth - indent) / colWidth
+	if numCols < 1 {
+		numCols = 1
+	}
+	numRows := (len(plain) + numCols - 1) / numCols
+	prefix := strings.Repeat(" ", indent)
+	for row := 0; row < numRows; row++ {
+		fmt.Print(prefix)
+		for col := 0; col < numCols; col++ {
+			idx := col*numRows + row
+			if idx >= len(plain) {
+				break
+			}
+			isLast := col == numCols-1 || (col+1)*numRows+row >= len(plain)
+			if isLast {
+				fmt.Print(styled[idx])
+			} else {
+				fmt.Print(styled[idx] + strings.Repeat(" ", colWidth-len(plain[idx])))
+			}
+		}
+		fmt.Println()
+	}
 }
 
 // filterImageDirs filters dirs according to dirFilter:
