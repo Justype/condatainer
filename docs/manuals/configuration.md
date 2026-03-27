@@ -1,18 +1,33 @@
 # Configuration
 
-**CondaTainer** uses a layered configuration system with multiple sources. Configuration values are applied in priority order, with higher-priority sources overriding lower ones.
+**CondaTainer** uses a layered configuration system with two independent mechanisms.
 
 - [Configuration Priority](#configuration-priority)
 - [Data Directory Search Paths](#data-directory-search-paths)
 
 ## Configuration Priority
 
+### Environment Variables (admin override)
+
+`CNT_*` environment variables always **replace** the config file value for that key. When set (e.g. via a module file), config files are not consulted for that key. This is the recommended way for sysadmins to enforce cluster-wide settings without editing user configs.
+
+### Config Files (layered)
+
+All three config files are loaded and merged when they exist:
+
 1. **Command-line flags** (highest priority)
-2. **Environment variables** (`CNT_*`)
+2. **Environment variables** (`CNT_*`) — replaces; config files not consulted
 3. **User config file** (`~/.config/condatainer/config.yaml`)
-4. **Portable config** (`<install-dir>/config.yaml`)
-5. **System config file** (`/etc/condatainer/config.yaml`)
-6. **Defaults** (lowest priority)
+4. **Extra-root config** (`$CNT_EXTRA_ROOT/config.yaml`, group/lab layer)
+5. **App-root config** (`$CNT_ROOT/config.yaml` or `<install-dir>/config.yaml`)
+6. **System config file** (`/etc/condatainer/config.yaml`)
+7. **Defaults** (lowest priority)
+
+**Scalar keys** (`apptainer_bin`, `default_distro`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
+
+**Directory and source array keys** (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`): **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, app-root, then system. This lets a sysadmin publish shared directories in an app-root or system config without requiring every user to copy them into their own config.
+
+**`channels`**: overwrite — the highest-priority config file that sets it wins (not merged), since channel order controls conda package resolution priority.
 
 ## Quick Start
 
@@ -33,7 +48,8 @@ condatainer config show
 | Type | Path | Use Case |
 |------|------|----------|
 | User | `~/.config/condatainer/config.yaml` | Personal settings |
-| Portable | `<install-dir>/config.yaml` | Shared group installation |
+| Extra-root | `$CNT_EXTRA_ROOT/config.yaml` | Group/lab layer (requires `CNT_EXTRA_ROOT`) |
+| App-root | `$CNT_ROOT/config.yaml` or `<install-dir>/config.yaml` | Shared cluster/group installation |
 | System | `/etc/condatainer/config.yaml` | System-wide defaults |
 
 To create a config file at a specific location:
@@ -42,8 +58,11 @@ To create a config file at a specific location:
 # User config (default for home installations)
 condatainer config init -l user
 
-# Portable config (for shared installations; not under home directory)
-condatainer config init -l portable
+# App-root config (for shared installations; not under home directory)
+condatainer config init -l app-root
+
+# Extra-root config (group/lab layer)
+CNT_EXTRA_ROOT=/shared/labA/condatainer condatainer config init -l extra-root
 
 # System config (requires appropriate permissions)
 condatainer config init -l system
@@ -56,7 +75,10 @@ condatainer config init -l system
 | Key | Default | Description |
 |-----|---------|-------------|
 | `logs_dir` | `$HOME/logs` | Directory for build job logs |
-| `extra_base_dirs` | `[]` | Additional directories to search for images and scripts |
+| `extra_image_dirs` | `[]` | Explicit image directories (direct paths). Entries support `:ro` (search-only) or `:rw` (writable, default) markers. |
+| `extra_build_dirs` | `[]` | Explicit build-scripts directories (direct paths). |
+| `extra_helper_dirs` | `[]` | Explicit helper-scripts target directories (direct paths). Entries support `:ro` (search-only) or `:rw` (writable, default) markers. |
+| `extra_image_dirs` entries with `:ro` | — | Search-only image dirs (no writes) |
 
 ### Binaries
 
@@ -70,7 +92,7 @@ condatainer config init -l system
 | Key | Default | Description |
 |-----|---------|-------------|
 | `scripts_link` | `https://raw.githubusercontent.com/Justype/cnt-scripts/main` | Base URL for remote build and helper scripts (lowest-priority remote) |
-| `extra_scripts_links` | `[]` | Additional remote URLs prepended before `scripts_link` (first entry = highest priority); array, set via `config edit` or `CNT_EXTRA_SCRIPTS_LINKS` |
+| `extra_scripts_links` | `[]` | Additional remote URLs prepended before `scripts_link` (first entry = highest priority); array, set via `config append/prepend` or `CNT_EXTRA_SCRIPTS_LINKS` |
 | `prebuilt_link` | `https://github.com/Justype/cnt-scripts/releases/download` | Base URL for downloading prebuilt overlays |
 | `prefer_remote` | `false` | Remote build scripts take precedence over local |
 
@@ -143,31 +165,23 @@ condatainer config set scheduler_timeout 10
 
 ### Manage Array Config Values
 
-Array keys (`extra_base_dirs`, `extra_scripts_links`, `channels`) use dedicated subcommands:
+Array keys (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`, `channels`) use dedicated subcommands:
 
 ```bash
-# Append (lower priority)
-condatainer config append extra_base_dirs /scratch/shared
-condatainer config append extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+# Explicit image/scripts directories
+condatainer config append extra_image_dirs /shared/lab/images:ro   # search-only
+condatainer config append extra_image_dirs /fast/scratch/images    # writable
+condatainer config append extra_build_dirs /shared/lab/scripts
 
 # Prepend (higher priority — checked first)
-condatainer config prepend extra_base_dirs /project/common
+condatainer config prepend extra_image_dirs /fast/images
 condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
 
 # Remove
-condatainer config remove extra_base_dirs /scratch/shared
-condatainer config remove extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+condatainer config remove extra_image_dirs /shared/lab/images:ro
 ```
 
 Shell completion for `remove` offers the current values of the array as candidates.
-
-### Edit Config File Directly
-
-```bash
-condatainer config edit
-```
-
-This opens the config file in your default editor (`$EDITOR`).
 
 ### Validate Configuration
 
@@ -178,6 +192,8 @@ condatainer config validate
 This command checks that key binaries are accessible, build settings are sane, and the `default_distro` value is one of the supported distro names.
 
 ## Environment Variables
+
+Environment variables **always replace** the corresponding config file value — including merged array keys. This makes env vars suitable for module-file-based admin control: setting a variable in a module file gives a predictable, reproducible environment regardless of what users have in their configs.
 
 Most configuration settings may be overridden by environment variables.
 The name is derived automatically from the Viper key by
@@ -211,9 +227,13 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_BUILD_MEM`            | `build.mem`            |
 | `CNT_BUILD_BLOCK_SIZE`     | `build.block_size`     |
 | `CNT_BUILD_DATA_BLOCK_SIZE`| `build.data_block_size`|
-| `CNT_EXTRA_BASE_DIRS`      | `extra_base_dirs` (colon-separated) |
+| `CNT_ROOT`                 | Cluster/system root dir (loads `config.yaml` + data dirs; replaces bin/ heuristic) |
+| `CNT_EXTRA_ROOT`           | Group/lab root dir — single path, loads `config.yaml` + data dirs |
+| `CNT_EXTRA_IMAGE_DIRS`     | `extra_image_dirs` (pipe-separated; entries support `:ro`/`:rw`) |
+| `CNT_EXTRA_BUILD_DIRS`     | `extra_build_dirs` (pipe or colon-separated; plain paths) |
+| `CNT_EXTRA_HELPER_DIRS`    | `extra_helper_dirs` (pipe-separated; entries support `:ro`/`:rw`) |
 | `CNT_EXTRA_SCRIPTS_LINKS`  | `extra_scripts_links` (pipe-separated) |
-| `CNT_CHANNELS`             | `channels` (colon-separated) |
+| `CNT_CHANNELS`             | `channels` (pipe or colon-separated) |
 | `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
 | `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
 | `CNT_TMPDIR`               | (special override)     |
@@ -221,8 +241,12 @@ mapping is consistent for every key handled by the CLI:
 Example:
 
 ```bash
-# Add extra search directories (highest priority)
-export CNT_EXTRA_BASE_DIRS=/shared/tools:/project/common
+# Group/lab root (set in module file)
+export CNT_ROOT=/cluster/condatainer      # cluster-level
+export CNT_EXTRA_ROOT=/shared/lab/tools   # group-level
+
+# Explicit image directories (pipe-separated; supports :ro/:rw markers)
+export CNT_EXTRA_IMAGE_DIRS="/shared/lab/images:ro|/fast/scratch/images"
 ```
 
 ## Data Directory Search Paths
@@ -231,10 +255,21 @@ export CNT_EXTRA_BASE_DIRS=/shared/tools:/project/common
 
 ### Search Priority
 
-1. **Extra base directories** (from `extra_base_dirs` config or `CNT_EXTRA_BASE_DIRS`)
-2. **Portable** (group/shared directory next to the executable; if not under `$HOME`)
-3. **Scratch** (`$SCRATCH/condatainer` on HPC systems)
-4. **User** (`~/.local/share/condatainer`)
+**Images:**
+1. `extra_image_dirs` — explicit image directories (`:ro` entries skipped for writes)
+2. **Extra-root** → `$CNT_EXTRA_ROOT/images/` (group/lab layer)
+3. **App-root** → `$CNT_ROOT/images/` or `<install>/images/`
+4. **Scratch** → `$SCRATCH/condatainer/images/`
+5. **User** → `~/.local/share/condatainer/images/`
+
+**Build / Helper Scripts:**
+**Build scripts:**
+1. `extra_build_dirs` — explicit build-scripts directories
+2. **Extra-root**, **App-root**, **Scratch**, **User** (same pattern)
+
+**Helper scripts:**
+1. `extra_helper_dirs` — explicit helper-scripts directories
+2. **Extra-root**, **App-root**, **Scratch**, **User** (same pattern)
 
 ### View Search Paths
 
@@ -302,10 +337,22 @@ metadata_cache_ttl: 7
 # Sets the base image (e.g. ubuntu24--base_image.sif) and prefix for bare package names
 default_distro: ubuntu24
 
-# Additional search directories
-extra_base_dirs:
-  - /project/shared/condatainer
-  - /apps/bioinformatics/condatainer
+# Explicit image directories (direct paths; :ro = search-only, :rw = writable default)
+extra_image_dirs:
+  - /shared/lab/images:ro        # shared read-only store
+  - /fast/scratch/images         # writable personal store
+
+# Explicit build-scripts directories
+# extra_build_dirs:
+#   - /shared/lab/scripts
+
+# Explicit helper-scripts directories
+# extra_helper_dirs:
+#   - /shared/lab/helpers
+
+# Extra base directories (standard layout: images/, build-scripts/, etc.)
+# For a group/lab root with standard layout, set in module file:
+# export CNT_EXTRA_ROOT=/project/shared/condatainer
 
 # Build configuration
 build:
@@ -339,20 +386,101 @@ The `build.time` setting accepts two formats:
 - `2:30:00` - 2 hours 30 minutes
 - `1:30` - 1 hour 30 minutes (HH:MM)
 
-## Portable Installations
+## Standalone Installations
 
-For shared group installations, CondaTainer supports "portable" mode where the config and data live alongside the executable:
+For shared group installations, CondaTainer supports a standalone layout where the config and data live alongside the executable:
 
 ```
 /project/group/condatainer/
   bin/
     condatainer         # Executable
-  config.yaml           # Portable config
+  config.yaml           # Root config (loaded alongside user, extra-root, and system configs)
   images/               # Shared images
   build-scripts/        # Shared build scripts
 ```
 
-Users can still have personal configs (`~/.config/condatainer/config.yaml`) that override the shared settings.
+All config files (user, extra-root, app-root, system) are loaded simultaneously. For `extra_image_dirs` and other directory keys, entries from all configs are **merged** — so a group admin can add shared directories to the app-root config and every user automatically searches those directories, even if they also have a personal config.
+
+For scalar keys like `apptainer_bin`, the user config takes priority; users can override app-root/system defaults in their own config without affecting other users.
+
+**Explicit root via `CNT_ROOT`:** Instead of relying on the `bin/` layout detection, set `CNT_ROOT` to point directly to the installation directory. This is useful when the binary is installed to a standard location (e.g. `/usr/local/bin`) but the data lives elsewhere:
+
+```bash
+# In a module file:
+export CNT_ROOT=/shared/cluster/condatainer
+```
+
+`CNT_ROOT` takes priority over the executable-location heuristic. The directory does not need a `bin/` subdirectory.
+
+To set up an app-root config for a shared installation:
+
+```bash
+condatainer config init -l app-root
+```
+
+## Multi-Tier Setup (System → Group → User)
+
+On HPC systems, configuration is typically layered across three scopes. CondaTainer supports this natively — all config files are loaded and merged simultaneously.
+
+| Tier | Scope | Sets |
+|---|---|---|
+| System / cluster | Sysadmin | `apptainer_bin`, `scheduler_bin`, shared images, `channels` |
+| Group / lab | Lab admin | Lab-specific images, build scripts, helper scripts |
+| User | Individual | Personal overrides, personal scratch dirs |
+
+Priority: **user > group > system > defaults**
+
+---
+
+**Filesystem layout:**
+```
+/cluster/condatainer/          ← system tier (CNT_ROOT or bin/ detection)
+  bin/condatainer
+  config.yaml                  ← apptainer_bin, scheduler_bin, channels
+  images/                      ← cluster-wide base images
+
+/shared/labA/condatainer/      ← group tier (CNT_EXTRA_ROOT)
+  config.yaml                  ← extra_image_dirs, extra_build_dirs
+  images/                      ← lab-specific images
+  build-scripts/               ← lab-specific build recipes
+
+~/.config/condatainer/config.yaml   ← user tier (auto-loaded)
+```
+
+**System config** (`/cluster/condatainer/config.yaml`):
+```yaml
+apptainer_bin: /usr/local/bin/apptainer
+scheduler_bin: /usr/bin/sbatch
+channels:
+  - conda-forge
+  - bioconda
+```
+
+**Group config** (`/shared/labA/condatainer/config.yaml`):
+```yaml
+extra_image_dirs:
+  - /shared/labA/condatainer/images
+extra_build_dirs:
+  - /shared/labA/condatainer/build-scripts
+scripts_link: https://raw.githubusercontent.com/LabA/cnt-scripts/main
+```
+
+**User config** (`~/.config/condatainer/config.yaml`):
+```yaml
+logs_dir: /scratch/myuser/logs
+build:
+  ncpus: 8
+  mem: 16g
+```
+
+Initialize the group config:
+```bash
+CNT_EXTRA_ROOT=/shared/labA/condatainer condatainer config init -l extra-root
+```
+
+> **Environment variables are always the highest priority.** Any `CNT_*` variable set in the shell overrides the corresponding key from all config files. This is useful for one-off overrides or admin control via module files — e.g. `export CNT_BUILD_NCPUS=16` overrides `build.ncpus` from every config layer.
+
+---
 
 ## Compression Settings
 

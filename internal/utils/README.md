@@ -31,7 +31,7 @@ utils.ReadLineContext(ctx context.Context)    // read line with cancellation
 **Checks:** `FileExists`, `DirExists`, `IsImg`, `IsSqf`, `IsSif`, `IsOverlay`
 **Operations:** `EnsureDir`
 **Permissions:** `PermFile` (0664), `PermDir` (0775), `PermExec` (0775)
-**Permission Fixers:** `FixPermissionsDefault(path)`, `ShareToUGORecursive(path)`
+**Permission Fixers:** `FixPermissionsDefault(path)`
 
 ## Downloads
 

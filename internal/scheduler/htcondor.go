@@ -87,7 +87,7 @@ func (h *HTCondorScheduler) IsInsideJob() bool {
 }
 
 func (h *HTCondorScheduler) GetType() SchedulerType { return SchedulerHTCondor }
-func (h *HTCondorScheduler) GetBinary() string { return h.condorSubmitBin }
+func (h *HTCondorScheduler) GetBinary() string      { return h.condorSubmitBin }
 
 // GetVersion returns the HTCondor version string, or "" on failure.
 func (h *HTCondorScheduler) GetVersion() string {

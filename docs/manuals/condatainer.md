@@ -595,8 +595,9 @@ condatainer list [search_terms...] [flags]
 
 **Options:**
 
-* `-d`, `--delete`: Prompt to delete listed overlays after displaying them.
+* `-d`, `--delete`: Prompt to delete listed overlays after displaying them (requires search terms).
 * `-r`, `--remove`: Alias for `--delete`.
+* `-D`, `--dir`: Limit listing (and deletion) to specific image directories. Matching rules: no leading `/` → substring match (`scratch` matches `/scratch/user/images`); leading `/` → exact match; leading `/` with `*`/`?` → wildcard where `*` matches across path separators (`/scratch/*` matches `/scratch/user/images`).
 
 **Search rules:**
 
@@ -604,17 +605,29 @@ Same as `avail` (single term: substring/wildcard/regex; multiple terms: exact-fi
 
 **Features:**
 
+* Output is grouped by image directory with a full-width header per directory.
 * Lists app overlays (with versions), OS overlays, and data overlays.
-* Searches across all image directories.
-* Exits with code `1` if no overlays match the search terms.
+* Missing directories are skipped; existing but empty directories show a `(no overlays)` line.
+* Exits with code `1` if search terms are given but no overlays match.
+
+**Delete mode (`-d`/`-r`):**
+
+* Requires search terms — `list -r` alone only lists.
+* If the same overlay name exists in multiple directories, `--dir` is required to avoid ambiguity.
+* Checks file lock and write permission before each deletion.
 
 **Examples:**
 
 ```bash
-$ condatainer list cellranger          # substring
-$ condatainer list 'cell*'             # wildcard
-$ condatainer list cellranger 9        # AND search
-$ condatainer list cellranger/9.0.1 -d # show then prompt to delete
+$ condatainer list                            # all overlays, grouped by dir
+$ condatainer list cellranger                 # substring match
+$ condatainer list 'cell*'                    # wildcard
+$ condatainer list cellranger 9               # AND search
+$ condatainer list --dir scratch              # only dirs with "scratch" in path
+$ condatainer list --dir /scratch/user/images # exact dir match
+$ condatainer list --dir '/scratch/*'         # wildcard: all dirs under /scratch
+$ condatainer list cellranger/9.0.1 -d        # show then prompt to delete
+$ condatainer list cellranger -r --dir /scratch  # delete from /scratch only
 ```
 
 ### Remove
@@ -624,10 +637,16 @@ Deletes specific overlays and their associated `.env` files.
 **Aliases:** `rm`, `delete`, `uninstall`
 
 ```
-condatainer remove [search_terms...]
+condatainer remove [search_terms... | file_paths...]
 ```
 
-**Search rules:**
+**Options:**
+
+* `-D`, `--dir`: Limit to specific image directories (search mode only). No leading `/` → substring match; leading `/` → exact match; leading `/` with `*`/`?` → wildcard.
+
+**Modes:**
+
+**Search mode** — args have no overlay extension:
 
 | Input | Mode |
 |---|---|
@@ -637,11 +656,17 @@ condatainer remove [search_terms...]
 | Multiple terms, first is an exact name | Each term matched exactly (OR), warns if not found |
 | Multiple terms, first not found | All terms AND substring |
 
+**File mode** — args end with `.img`, `.sqf`, `.sqsh`, or `.squashfs`:
+
+Removes the specified files directly, bypassing the name-based search. Useful for overlays that are not in any configured image directory.
+
 **Features:**
 
-* Prompts for confirmation before deletion.
-* Warns if an exact term is not found.
-* Only removes overlays in writable directories.
+* Overlays to be removed are displayed grouped by directory before confirmation.
+* If the same overlay name exists in multiple directories, `--dir` is required to avoid ambiguity.
+* Checks file lock and write permission before each deletion.
+* Also removes the associated `.env` file if present.
+* Cannot mix file paths and search terms in one invocation.
 
 **Examples:**
 
@@ -651,6 +676,10 @@ $ condatainer rm cellranger                          # all cellranger versions (
 $ condatainer rm 'cell*'                             # wildcard
 $ condatainer rm cellranger/9.0.1 cellranger/8.0.1  # multiple exact versions
 $ condatainer rm cellranger 9                        # AND search
+$ condatainer rm cellranger --dir scratch            # only from dirs with "scratch" in path
+$ condatainer rm cellranger --dir '/scratch/*'       # wildcard: all dirs under /scratch
+$ condatainer rm /path/to/cellranger--9.0.1.sqf      # direct file path
+$ condatainer rm *.img                               # all .img files in current dir
 ```
 
 ### Search
@@ -1518,11 +1547,9 @@ condatainer config set build.time 4h
 
 **Time formats:** `2h`, `30m`, `1h30m`, `90s`, `02:00:00`, `HH:MM:SS`
 
-> Array keys (`extra_base_dirs`, `extra_scripts_links`) cannot be set with this command — use `append`, `prepend`, or `remove` instead.
-
 ### Config Append / Prepend / Remove
 
-Manage array config keys (`extra_base_dirs`, `extra_scripts_links`) from the CLI.
+Manage array config keys (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`, `channels`) from the CLI.
 
 ```
 condatainer config append  <key> <value>
@@ -1537,18 +1564,21 @@ condatainer config remove  <key> <value>
 **Examples:**
 
 ```bash
-# Add an extra data directory (lowest priority among extras)
-condatainer config append extra_base_dirs /scratch/shared
+# Explicit image directory (search-only shared store)
+condatainer config append extra_image_dirs /shared/lab/images:ro
+
+# Explicit image directory (writable personal store)
+condatainer config append extra_image_dirs /fast/scratch/images
 
 # Add an institutional scripts source (takes priority over the default)
 condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
 
-# Remove a directory no longer needed
-condatainer config remove extra_base_dirs /scratch/shared
+# Remove entries
+condatainer config remove extra_image_dirs /shared/lab/images:ro
 
 # Show result
 condatainer config show
-condatainer config get extra_base_dirs
+condatainer config get extra_image_dirs
 ```
 
 ### Config Init
@@ -1556,7 +1586,7 @@ condatainer config get extra_base_dirs
 Create a config file with auto-detected defaults.
 
 ```
-condatainer config init [-l|--location user|portable|system]
+condatainer config init [-l|--location user|root|extra-root|system]
 ```
 
 * `-l`, `--location`: Config location (default: auto-detect).
@@ -1565,16 +1595,6 @@ condatainer config init [-l|--location user|portable|system]
 * Apptainer binary
 * Scheduler binary
 * Compression support (zstd vs lz4)
-
-### Config Edit
-
-Edit configuration file in your default editor.
-
-```
-condatainer config edit
-```
-
-Opens the config file in `$EDITOR` (falls back to `vi`).
 
 ### Config Paths
 
@@ -1605,9 +1625,10 @@ Configuration is loaded in the following order (highest to lowest priority):
 1. Command-line flags
 2. Environment variables (`CNT_*`)
 3. User config file (`~/.config/condatainer/config.yaml`)
-4. Portable config (`<install-dir>/config.yaml`)
-5. System config (`/etc/condatainer/config.yaml`)
-6. Built-in defaults
+4. Extra-root config (`$CNT_EXTRA_ROOT/config.yaml`, group/lab layer)
+5. App-root config (`$CNT_ROOT/config.yaml` or `<install-dir>/config.yaml`)
+6. System config (`/etc/condatainer/config.yaml`)
+7. Built-in defaults
 
 ### Configuration File Example
 
@@ -1641,10 +1662,12 @@ build:
   time: 4h
   # compress_args options (gzip, lz4, zstd, zstd-fast, zstd-medium, zstd-high)
   compress_args: "-comp zstd -Xcompression-level 8"
-# Additional data directories
-extra_base_dirs:
-  - /path/to/shared/data
-  - /path/to/other/location
+# Explicit image directories (:ro = search-only, :rw = writable default)
+extra_image_dirs:
+  - /shared/lab/images:ro
+  - /fast/scratch/images
+# For a group/lab root with standard layout, set in module file:
+# export CNT_EXTRA_ROOT=/project/shared/condatainer
 ```
 
 ## Scheduler

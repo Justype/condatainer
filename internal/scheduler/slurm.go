@@ -97,7 +97,7 @@ func (s *SlurmScheduler) IsInsideJob() bool {
 }
 
 func (s *SlurmScheduler) GetType() SchedulerType { return SchedulerSLURM }
-func (s *SlurmScheduler) GetBinary() string { return s.sbatchBin }
+func (s *SlurmScheduler) GetBinary() string      { return s.sbatchBin }
 
 // GetVersion returns the SLURM version string, or "" on failure.
 func (s *SlurmScheduler) GetVersion() string {

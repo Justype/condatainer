@@ -546,7 +546,6 @@ func TestLsfResourceParsing(t *testing.T) {
 	}
 }
 
-
 func TestLsfGpuParsing(t *testing.T) {
 	tests := []struct {
 		name      string

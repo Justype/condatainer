@@ -90,7 +90,7 @@ func (l *LsfScheduler) IsInsideJob() bool {
 }
 
 func (l *LsfScheduler) GetType() SchedulerType { return SchedulerLSF }
-func (l *LsfScheduler) GetBinary() string { return l.bsubBin }
+func (l *LsfScheduler) GetBinary() string      { return l.bsubBin }
 
 // GetVersion returns the LSF version string, or "" on failure.
 func (l *LsfScheduler) GetVersion() string {

@@ -154,7 +154,7 @@ func (c *CondaBuildObject) buildInstallCmd() (cmd string, extraBindPaths []strin
 		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp %s -y %s -p /cnt/%s -f %s",
 			channelFlags, quietFlag, c.nameVersion, absFilePath)
 		utils.PrintMessage("Populating overlay %s via %s",
-			utils.StyleName(filepath.Base(c.targetOverlayPath)), utils.StyleCommand("environment.yml"))
+			utils.StyleName(filepath.Base(c.targetOverlayPath)), "environment.yml")
 	} else if c.buildSource != "" {
 		// Mode 2: Multiple packages (-n name pkg1 pkg2 ...)
 		packages := strings.Split(c.buildSource, ",")
@@ -165,14 +165,14 @@ func (c *CondaBuildObject) buildInstallCmd() (cmd string, extraBindPaths []strin
 			channelFlags, quietFlag, c.nameVersion, strings.Join(packages, " "))
 		utils.PrintMessage("Populating overlay %s via %s",
 			utils.StyleName(filepath.Base(c.targetOverlayPath)),
-			utils.StyleCommand(fmt.Sprintf("micromamba (%s)", strings.Join(packages, ", "))))
+			fmt.Sprintf("micromamba (%s)", strings.Join(packages, ", ")))
 	} else {
 		// Mode 1: Single package (name/version)
 		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp %s -y %s -p /cnt/%s %s=%s",
 			channelFlags, quietFlag, c.nameVersion, c.packageName, c.packageVersion)
 		utils.PrintMessage("Populating overlay %s via %s",
 			utils.StyleName(filepath.Base(c.targetOverlayPath)),
-			utils.StyleCommand(fmt.Sprintf("micromamba (%s=%s)", c.packageName, c.packageVersion)))
+			fmt.Sprintf("micromamba (%s=%s)", c.packageName, c.packageVersion))
 	}
 
 	return cmd, extraBindPaths, nil

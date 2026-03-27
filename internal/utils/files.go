@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 // Standard default permissions
@@ -80,63 +82,6 @@ func FixPermissions(path string, filePerm, dirPerm os.FileMode) error {
 	})
 }
 
-// ShareToUGORecursive recursively sets permissions to share files with user, group, and others.
-// Files: ug+rw,o+r (0664)
-// Directories: ug+rwx,o+rx (0775)
-// This matches the Python implementation's share_to_ugo_recursive function.
-func ShareToUGORecursive(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("could not stat path %s: %w", path, err)
-	}
-
-	// 1. Handle Single File
-	if !info.IsDir() {
-		// Files: ug+rw,o+r
-		currentMode := info.Mode()
-		newMode := currentMode | 0644 // u+rw, o+r
-		newMode = newMode | 0060      // g+rw
-		if err := os.Chmod(path, newMode); err != nil {
-			PrintWarning("Failed to set permissions for %s: %v", StylePath(path), err)
-			return err
-		}
-		return nil
-	}
-
-	// 2. Handle Directory (Recursive Walk)
-	return filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			PrintWarning("Skipping inaccessible path: %s", StylePath(p))
-			return nil // Continue walking
-		}
-
-		fileInfo, err := d.Info()
-		if err != nil {
-			PrintWarning("Could not get info for %s: %v", StylePath(p), err)
-			return nil
-		}
-
-		currentMode := fileInfo.Mode()
-		var newMode os.FileMode
-
-		if d.IsDir() {
-			// Directories: ug+rwx,o+rx
-			newMode = currentMode | 0755 // u+rwx, o+rx
-			newMode = newMode | 0070     // g+rwx
-		} else {
-			// Files: ug+rw,o+r
-			newMode = currentMode | 0644 // u+rw, o+r
-			newMode = newMode | 0060     // g+rw
-		}
-
-		if err := os.Chmod(p, newMode); err != nil {
-			PrintWarning("Could not chmod %s: %v", StylePath(p), err)
-		}
-
-		return nil
-	})
-}
-
 // --- Extension Checks (String-based) ---
 
 // IsImg checks if the path has an ext3 overlay extension (.img).
@@ -158,12 +103,6 @@ func IsSqf(path string) bool {
 func IsSif(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	return ext == ".sif"
-}
-
-// IsApptainerImage checks if the file matches any supported Apptainer image format.
-// Returns true for .sif, .img, .sqf, .sqsh, .squashfs.
-func IsApptainerImage(path string) bool {
-	return IsSif(path) || IsImg(path) || IsSqf(path)
 }
 
 // IsOverlay checks if the path is an overlay file (.img, .sqf, .sqsh, .squashfs).
@@ -209,36 +148,34 @@ func RemoveDirIfEmpty(dir string) {
 	os.Remove(dir)
 }
 
-// EnsureDir checks if a directory exists, and creates it if it doesn't.
-func EnsureDir(path string) error {
-	if DirExists(path) {
-		return nil
-	}
-	return os.MkdirAll(path, PermDir)
-}
-
 // CreateFileWritable creates or truncates a file using standard writable file permissions.
 func CreateFileWritable(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, PermFile)
 }
 
-// IsWritableDir checks whether dir is writable by creating a small probe file.
-// It creates the directory if needed and enforces standard directory/file permissions.
-func IsWritableDir(dir string) bool {
-	if err := os.MkdirAll(dir, PermDir); err != nil {
-		return false
+// EnsureWritableDir creates dir if it does not exist, then checks it is writable.
+// Permissions are set only when the directory is newly created.
+// Returns true if the directory exists (or was created) and is writable.
+func EnsureWritableDir(dir string) bool {
+	if !DirExists(dir) {
+		if err := os.MkdirAll(dir, PermDir); err != nil {
+			return false
+		}
+		_ = os.Chmod(dir, PermDir)
 	}
-	_ = os.Chmod(dir, PermDir)
+	return CanWriteToDir(dir)
+}
 
-	testFile := filepath.Join(dir, ".write-test")
-	f, err := os.OpenFile(testFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, PermFile)
-	if err != nil {
+// CanWriteToDir checks whether an existing directory is writable using a permission
+// check syscall, without creating the directory or writing any files.
+// Returns false if the directory does not exist.
+// Use this for probe operations (display, bind decisions, search-path scanning).
+// Use EnsureWritableDir when you intend to actually create the directory on first use.
+func CanWriteToDir(dir string) bool {
+	if _, err := os.Stat(dir); err != nil {
 		return false
 	}
-	f.Close()
-	_ = os.Chmod(testFile, PermFile)
-	_ = os.Remove(testFile)
-	return true
+	return unix.Access(dir, unix.W_OK|unix.X_OK) == nil
 }
 
 // --- Gzip JSON Helpers ---

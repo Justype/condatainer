@@ -140,7 +140,7 @@ func (p *PbsScheduler) IsInsideJob() bool {
 }
 
 func (p *PbsScheduler) GetType() SchedulerType { return SchedulerPBS }
-func (p *PbsScheduler) GetBinary() string { return p.qsubBin }
+func (p *PbsScheduler) GetBinary() string      { return p.qsubBin }
 
 // GetVersion returns the PBS version string, or "" on failure.
 func (p *PbsScheduler) GetVersion() string {

@@ -77,9 +77,6 @@ var rootCmd = &cobra.Command{
 			utils.PrintDebug("Debug mode enabled")
 			utils.PrintDebug("CondaTainer Version: %s", utils.StyleInfo(config.VERSION))
 			utils.PrintDebug("Executable: %s", exe)
-			if writableDir, _ := config.GetWritableImagesDir(); writableDir != "" {
-				utils.PrintDebug("Writable Images Directory: %s", writableDir)
-			}
 			utils.PrintDebug("Base Image: %s", config.GetBaseImage())
 			utils.PrintDebug("Apptainer Binary: %s", config.Global.ApptainerBin)
 			if config.Global.SchedulerBin != "" {
@@ -109,6 +106,10 @@ var rootCmd = &cobra.Command{
 				if version, err := apptainer.GetVersion(); err == nil {
 					supportsZstd := apptainer.CheckZstdSupport(version)
 					config.AutoDetectCompression(supportsZstd, apptainer.IsSingularity())
+					// Cache detected value to skip this subprocess on future startups.
+					if writableCfg, _, err := config.ResolveWritableConfigPath(""); err == nil && config.Global.Build.CompressArgs != "" {
+						_ = config.SetConfigKey(writableCfg, "build.compress_args", config.Global.Build.CompressArgs)
+					}
 				}
 			}
 		}

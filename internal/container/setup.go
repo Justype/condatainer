@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -143,13 +142,6 @@ func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]str
 
 	// Build PATH
 	pathEnv := BuildPathEnv(overlays)
-
-	// For nested usage: if this is a portable installation, prepend its bin directory to PATH
-	if config.IsPortable() {
-		if portableBin := config.GetPortableBinDir(); portableBin != "" {
-			pathEnv = portableBin + ":" + pathEnv
-		}
-	}
 
 	// Add standard environment variables
 	envList = append(envList,

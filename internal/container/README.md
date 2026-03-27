@@ -140,7 +140,7 @@ Loaded automatically and merged into final environment list.
 | Current working directory | Always |
 | `$SCRATCH` | When env var is set |
 | Base data directories | From config; added `:ro` if not writable |
-| `condatainer` executable | For nested calls (non-portable installs only) |
+| `condatainer` executable | For nested calls (always; bound to `/usr/bin/condatainer`) |
 
 After collection, `DeduplicateBindPaths()` removes conflicting bind paths:
 - Keeps longest/most specific paths

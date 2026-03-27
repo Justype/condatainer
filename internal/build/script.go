@@ -50,13 +50,22 @@ func getAllBaseDirs() []string {
 		}
 	}
 
-	// Extra base dirs
-	for _, baseDir := range config.GetExtraBaseDirs() {
-		addIfExists(baseDir)
+	// Explicit extra image dirs (strip :ro/:rw marker)
+	for _, entry := range config.GetExtraImageDirs() {
+		path, _ := config.ParseDirEntry(entry)
+		addIfExists(path)
 	}
 
-	// Portable dir
-	addIfExists(config.GetPortableDataDir())
+	// Explicit extra build-scripts dirs (plain paths)
+	for _, path := range config.GetExtraBuildDirs() {
+		addIfExists(path)
+	}
+
+	// Extra root dir
+	addIfExists(config.GetExtraRootDir())
+
+	// Root dir
+	addIfExists(config.GetRootDir())
 
 	// Scratch dir
 	addIfExists(config.GetScratchDataDir())
@@ -118,7 +127,7 @@ func (s *ScriptBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		return err
 	}
 
-	utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleCommand(s.buildSource))
+	utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleAction(s.buildSource))
 
 	if err := s.buildDependencies(ctx, buildDeps); err != nil {
 		return err

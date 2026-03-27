@@ -334,7 +334,7 @@ func runSelfUpdate(cmd *cobra.Command, args []string) error {
 		// Update the base image. Errors are non-fatal — warn and let the user rebuild manually.
 		if err := build.EnsureBaseImage(context.Background(), true); err != nil {
 			utils.PrintWarning("Failed to update base image: %v", err)
-			utils.PrintNote("Run %s to update it later.", utils.StyleCommand("condatainer self-update --base"))
+			utils.PrintNote("Run %s to update it later.", utils.StyleAction("condatainer self-update --base"))
 		} else {
 			utils.PrintSuccess("Base image updated.")
 		}

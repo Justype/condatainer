@@ -268,49 +268,43 @@ func GetBaseImage() string {
 	return "base_image.sif"
 }
 
-// isWritableDir checks if a directory is writable by trying to create a test file
-func isWritableDir(dir string) bool {
-	return utils.IsWritableDir(dir)
-}
-
-// GetWritableTmpDir returns the first writable tmp directory
+// GetWritableTmpDir returns the first writable tmp directory.
+// Probes existing directories without creating them (extra-root, root, scratch);
+// only the user-owned tmp dir is created on first use.
 func GetWritableTmpDir() string {
 	// Global override for all build temp paths
 	if os.Getenv("CNT_TMPDIR") != "" {
 		return utils.GetTmpDir()
 	}
 
-	// Check extra base dirs
-	for _, baseDir := range GetExtraBaseDirs() {
-		if baseDir == "" {
-			continue
-		}
-		tmpDir := filepath.Join(baseDir, "tmp")
-		if isWritableDir(tmpDir) {
+	// Check extra root dir — probe only, no creation
+	if extraRoot := GetExtraRootDir(); extraRoot != "" {
+		tmpDir := filepath.Join(extraRoot, "tmp")
+		if utils.CanWriteToDir(tmpDir) {
 			return tmpDir
 		}
 	}
 
-	// Check portable data dir
-	if portableDir := GetPortableDataDir(); portableDir != "" {
-		tmpDir := filepath.Join(portableDir, "tmp")
-		if isWritableDir(tmpDir) {
+	// Check root data dir — probe only, no creation
+	if rootDir := GetRootDir(); rootDir != "" {
+		tmpDir := filepath.Join(rootDir, "tmp")
+		if utils.CanWriteToDir(tmpDir) {
 			return tmpDir
 		}
 	}
 
-	// Check scratch data dir
+	// Check scratch data dir — probe only, no creation
 	if scratchDir := GetScratchDataDir(); scratchDir != "" {
 		tmpDir := filepath.Join(scratchDir, "tmp")
-		if isWritableDir(tmpDir) {
+		if utils.CanWriteToDir(tmpDir) {
 			return tmpDir
 		}
 	}
 
-	// Check user data dir
+	// Check user data dir — allowed to create (user-owned)
 	if userDir := GetUserDataDir(); userDir != "" {
 		tmpDir := filepath.Join(userDir, "tmp")
-		if isWritableDir(tmpDir) {
+		if utils.EnsureWritableDir(tmpDir) {
 			return tmpDir
 		}
 	}

@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
@@ -20,7 +22,7 @@ var listCmd = &cobra.Command{
 	Use:     "list [terms...]",
 	Aliases: []string{"ls"},
 	Short:   "List installed overlays matching search terms",
-	Long: `List installed overlays with optional search filtering.
+	Long: `List installed overlays grouped by directory, with optional search filtering.
 
 Search rules (single term):
   Plain string  substring match
@@ -36,7 +38,7 @@ Search rules (multiple terms, space-separated):
   condatainer list 'cell*'               # Wildcard
   condatainer list cellranger 9          # AND search (multiple terms)
   condatainer list cellranger/9.0.1 -e   # Exact match (single term)`,
-	SilenceUsage: true, // Runtime errors should not show usage
+	SilenceUsage: true,
 	RunE:         runList,
 }
 
@@ -45,10 +47,19 @@ func init() {
 	listCmd.Flags().BoolVarP(&listDelete, "delete", "d", false, "Delete listed overlays after confirmation (used with search terms)")
 	listCmd.Flags().BoolP("remove", "r", false, "Alias for --delete")
 	listCmd.Flags().BoolVarP(&listExact, "exact", "e", false, "Force exact full-name match even for a single term")
+	listCmd.Flags().StringP("dir", "D", "", "Limit to a specific image directory (substring match)")
+}
+
+// DirOverlays holds the scan results for a single image directory.
+type DirOverlays struct {
+	Dir       string
+	AppGroups map[string][]string // name → sorted []version
+	DataList  []string
 }
 
 func runList(cmd *cobra.Command, args []string) error {
 	filters := normalizeFilters(args)
+	filterActive := len(filters) > 0
 
 	// Build exact lookup from installed overlay names (including distro-prefix aliases)
 	installedMap, err := getInstalledOverlaysMap()
@@ -56,13 +67,12 @@ func runList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	distroLower := strings.ToLower(config.Global.DefaultDistro)
-	distroPrefix := distroLower + "/"
 	installedLower := make(map[string]bool, len(installedMap))
 	for name := range installedMap {
 		lower := strings.ToLower(name)
 		installedLower[lower] = true
 		if distroLower != "" {
-			if alias, ok := strings.CutPrefix(lower, distroPrefix); ok {
+			if alias, ok := strings.CutPrefix(lower, distroLower+"/"); ok {
 				installedLower[alias] = true
 			}
 		}
@@ -71,97 +81,104 @@ func runList(cmd *cobra.Command, args []string) error {
 	if listExact {
 		listExactLookup = func(string) bool { return true }
 	} else if len(filters) > 1 {
-		listExactLookup = func(term string) bool { return installedLower[term] }
+		listExactLookup = func(t string) bool { return installedLower[t] }
 	}
 	query := NewSearchQuery(filters, listExactLookup)
 
-	appOverlays, dataOverlays, err := scanOverlays(query)
-	if err != nil {
-		return err
+	dirFilter, _ := cmd.Flags().GetString("dir")
+	dirs := filterImageDirs(config.GetImageSearchPaths(), dirFilter)
+	if dirFilter != "" && len(dirs) == 0 {
+		utils.PrintWarning("No image directory matching %q found.", dirFilter)
+		os.Exit(ExitCodeError)
 	}
+	results := scanOverlaysByDir(dirs, query)
 
-	// Separate OS overlays (def-built) from app/env overlays
-	osOverlays := map[string][]string{}
-	moduleOverlays := map[string][]string{}
-	for name, versions := range appOverlays {
-		var osVers, modVers []string
-		for _, v := range versions {
-			if v == "(system app)" {
-				osVers = append(osVers, v)
-			} else {
-				modVers = append(modVers, v)
-			}
+	hasAnyMatch := false
+	firstSection := true
+	for _, d := range results {
+		total := len(d.AppGroups) + len(d.DataList)
+		// When filtering, skip dirs with no matches
+		if filterActive && total == 0 {
+			continue
 		}
-		if len(osVers) > 0 {
-			osOverlays[name] = osVers
-		}
-		if len(modVers) > 0 {
-			moduleOverlays[name] = modVers
-		}
-	}
+		hasAnyMatch = hasAnyMatch || total > 0
 
-	printed := false
-	if len(osOverlays) > 0 {
-		printed = true
-		fmt.Println("Available OS overlays:")
-		names := make([]string, 0, len(osOverlays))
-		for name := range osOverlays {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		nameWidth := maxWidth(names)
-		for _, name := range names {
-			nameField := fmt.Sprintf("%-*s", nameWidth, name)
-			line := fmt.Sprintf(" %s", utils.StyleName(nameField))
-			if distro := config.Global.DefaultDistro; distro != "" {
-				if alias, ok := strings.CutPrefix(name, distro+"/"); ok {
-					line += "  " + utils.StyleInfo("["+alias+"]")
-				}
-			}
-			fmt.Println(line)
-		}
-	}
-
-	if len(moduleOverlays) > 0 {
-		if printed {
+		if !firstSection {
 			fmt.Println()
 		}
-		printed = true
-		fmt.Println("Available app overlays:")
-		names := make([]string, 0, len(moduleOverlays))
-		for name := range moduleOverlays {
-			names = append(names, name)
+		firstSection = false
+
+		fmt.Println(dirHeader(d.Dir))
+
+		if total == 0 {
+			fmt.Println("  (no overlays)")
+			continue
 		}
-		sort.Strings(names)
-		nameWidth := maxWidth(names)
-		for _, name := range names {
-			vers := moduleOverlays[name]
-			colored := make([]string, 0, len(vers))
-			for _, v := range vers {
-				if v == "(env)" {
-					colored = append(colored, v)
+
+		// Separate OS overlays from app overlays
+		osOverlays := map[string][]string{}
+		moduleOverlays := map[string][]string{}
+		for name, versions := range d.AppGroups {
+			var osVers, modVers []string
+			for _, v := range versions {
+				if v == "(system app)" {
+					osVers = append(osVers, v)
 				} else {
-					colored = append(colored, utils.StyleInfo(v))
+					modVers = append(modVers, v)
 				}
 			}
-			values := strings.Join(colored, ", ")
-			nameField := fmt.Sprintf("%-*s", nameWidth, name)
-			fmt.Printf(" %s: %s\n", utils.StyleName(nameField), values)
+			if len(osVers) > 0 {
+				osOverlays[name] = osVers
+			}
+			if len(modVers) > 0 {
+				moduleOverlays[name] = modVers
+			}
+		}
+
+		if len(osOverlays) > 0 {
+			fmt.Println("Available OS overlays:")
+			names := sortedKeys(osOverlays)
+			nameWidth := maxWidth(names)
+			for _, name := range names {
+				nameField := fmt.Sprintf("%-*s", nameWidth, name)
+				line := fmt.Sprintf(" %s", utils.StyleName(nameField))
+				if distroLower != "" {
+					if alias, ok := strings.CutPrefix(name, distroLower+"/"); ok {
+						line += "  " + utils.StyleInfo("["+alias+"]")
+					}
+				}
+				fmt.Println(line)
+			}
+		}
+
+		if len(moduleOverlays) > 0 {
+			fmt.Println("Available app overlays:")
+			names := sortedKeys(moduleOverlays)
+			nameWidth := maxWidth(names)
+			for _, name := range names {
+				vers := moduleOverlays[name]
+				colored := make([]string, 0, len(vers))
+				for _, v := range vers {
+					if v == "(env)" {
+						colored = append(colored, v)
+					} else {
+						colored = append(colored, utils.StyleInfo(v))
+					}
+				}
+				nameField := fmt.Sprintf("%-*s", nameWidth, name)
+				fmt.Printf(" %s: %s\n", utils.StyleName(nameField), strings.Join(colored, ", "))
+			}
+		}
+
+		if len(d.DataList) > 0 {
+			fmt.Println("Available data overlays:")
+			for _, data := range d.DataList {
+				fmt.Printf(" %s\n", utils.StyleName(data))
+			}
 		}
 	}
 
-	if len(dataOverlays) > 0 {
-		if printed {
-			fmt.Println()
-		}
-		fmt.Println("Available data overlays:")
-		for _, data := range dataOverlays {
-			fmt.Printf(" %s\n", utils.StyleName(data))
-		}
-		printed = true
-	}
-
-	if !printed {
+	if !hasAnyMatch && filterActive {
 		utils.PrintWarning("No installed overlays match the provided search terms.")
 		os.Exit(ExitCodeError)
 	}
@@ -171,90 +188,50 @@ func runList(cmd *cobra.Command, args []string) error {
 		listDelete = true
 	}
 
-	if listDelete && len(filters) > 0 && (len(appOverlays) > 0 || len(dataOverlays) > 0) {
-		// Collect all matching overlays for deletion
-		allMatching := []string{}
-		for name, versions := range appOverlays {
-			for _, version := range versions {
-				if version == "(system app)" || version == "(env)" {
-					allMatching = append(allMatching, name)
-				} else {
-					allMatching = append(allMatching, name+"/"+version)
-				}
-			}
-		}
-		for _, data := range dataOverlays {
-			allMatching = append(allMatching, data)
-		}
-
-		if len(allMatching) > 0 {
-			fmt.Print("\n")
-			shouldDelete := false
-			if utils.ShouldAnswerYes() {
-				shouldDelete = true
-			} else {
-				fmt.Printf("Remove listed %d overlay(s)? Cannot be undone. [y/N]: ", len(allMatching))
-				choice, choiceErr := utils.ReadLineContext(cmd.Context())
-				shouldDelete = choiceErr == nil && (choice == "y" || choice == "yes")
-			}
-
-			if shouldDelete {
-				// Get installed overlays map for deletion
-				installedMap, err := getInstalledOverlaysMap()
-				if err != nil {
-					return err
-				}
-
-				for _, name := range allMatching {
-					normalized := utils.NormalizeNameVersion(name)
-					if overlayPath, ok := installedMap[normalized]; ok {
-						if err := os.Remove(overlayPath); err != nil {
-							utils.PrintError("Failed to remove overlay %s: %v", utils.StyleName(name), err)
-							continue
-						}
-						utils.PrintSuccess("Overlay %s removed.", utils.StyleName(name))
-
-						// Also remove .env file if exists
-						envPath := overlayPath + ".env"
-						if utils.FileExists(envPath) {
-							os.Remove(envPath)
-						}
+	if listDelete && filterActive && hasAnyMatch {
+		var allMatching []string
+		for _, d := range results {
+			for name, versions := range d.AppGroups {
+				for _, version := range versions {
+					if version == "(system app)" || version == "(env)" {
+						allMatching = append(allMatching, name)
+					} else {
+						allMatching = append(allMatching, name+"/"+version)
 					}
 				}
-			} else {
-				utils.PrintNote("Cancelled")
 			}
+			allMatching = append(allMatching, d.DataList...)
 		}
+		fmt.Print("\n")
+		return performDelete(cmd, allMatching)
 	}
 
 	return nil
 }
 
-// scanOverlays does a single ReadDir pass per image directory and returns both
-// app overlays (map[name][]version) and data overlays ([]displayName).
-// OS overlays (Apptainer-built SIF/SquashFS) are treated as app overlays
-// regardless of their delimiter count.
-func scanOverlays(query *SearchQuery) (map[string][]string, []string, error) {
-	appGrouped := map[string]map[string]struct{}{}
-	var dataList []string
-	seen := make(map[string]bool)
+// scanOverlaysByDir scans each image directory independently and returns per-dir results.
+// Missing directories are skipped; empty directories are included with empty groups.
+func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 	distroPrefix := strings.ToLower(config.Global.DefaultDistro) + "/"
+	var result []DirOverlays
 
-	for _, imageDir := range config.GetImageSearchPaths() {
+	for _, imageDir := range dirs {
 		if !utils.DirExists(imageDir) {
-			continue
+			continue // skip missing
 		}
+		d := DirOverlays{Dir: imageDir, AppGroups: map[string][]string{}}
+
 		entries, err := os.ReadDir(imageDir)
 		if err != nil {
-			utils.PrintDebug("Unable to list overlays in %s: %v", imageDir, err)
+			result = append(result, d)
 			continue
 		}
+
+		appGrouped := map[string]map[string]struct{}{}
 		for _, entry := range entries {
-			if entry.IsDir() || !utils.IsOverlay(entry.Name()) || seen[entry.Name()] {
+			if entry.IsDir() || !utils.IsOverlay(entry.Name()) {
 				continue
 			}
-			seen[entry.Name()] = true
-
 			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 			normalized := strings.ToLower(utils.NormalizeNameVersion(nameVersion))
 			overlayPath := filepath.Join(imageDir, entry.Name())
@@ -262,14 +239,14 @@ func scanOverlays(query *SearchQuery) (map[string][]string, []string, error) {
 			osOverlay := isOSOverlay(overlayPath)
 
 			if !osOverlay && delimCount > 1 {
-				// Data overlay: filter without alias
+				// Data overlay
 				if query.Matches(normalized) {
-					dataList = append(dataList, strings.ReplaceAll(nameVersion, "--", "/"))
+					d.DataList = append(d.DataList, strings.ReplaceAll(nameVersion, "--", "/"))
 				}
 				continue
 			}
 
-			// App overlay (OS or regular): filter with distro-prefix alias fallback
+			// App overlay
 			if !query.Matches(normalized) {
 				alias := strings.TrimPrefix(normalized, distroPrefix)
 				if alias == normalized || !query.Matches(alias) {
@@ -297,19 +274,49 @@ func scanOverlays(query *SearchQuery) (map[string][]string, []string, error) {
 			}
 			appGrouped[name][version] = struct{}{}
 		}
-	}
 
-	apps := map[string][]string{}
-	for name, versions := range appGrouped {
-		valueList := make([]string, 0, len(versions))
-		for version := range versions {
-			valueList = append(valueList, version)
+		for name, versions := range appGrouped {
+			vers := make([]string, 0, len(versions))
+			for v := range versions {
+				vers = append(vers, v)
+			}
+			sort.Strings(vers)
+			d.AppGroups[name] = vers
 		}
-		sort.Strings(valueList)
-		apps[name] = valueList
+		sort.Strings(d.DataList)
+		result = append(result, d)
 	}
-	sort.Strings(dataList)
-	return apps, dataList, nil
+	return result
+}
+
+// dirHeader returns a full-width separator line with the directory path centered.
+func dirHeader(path string) string {
+	w := terminalWidth()
+	inner := " " + path + " "
+	pad := w - len(inner)
+	if pad < 2 {
+		return inner
+	}
+	left := pad / 2
+	right := pad - left
+	return strings.Repeat("═", left) + inner + strings.Repeat("═", right)
+}
+
+// terminalWidth returns the current terminal width, defaulting to 80.
+func terminalWidth() int {
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		return w
+	}
+	return 80
+}
+
+func sortedKeys(m map[string][]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func maxWidth(names []string) int {
@@ -320,4 +327,37 @@ func maxWidth(names []string) int {
 		}
 	}
 	return width
+}
+
+// filterImageDirs filters dirs according to dirFilter:
+//   - empty          → return all
+//   - no leading /   → substring match ("scratch" matches "/scratch/user/images")
+//   - starts with /  → exact match, unless it contains * or ? (wildcard via filepath.Match)
+func filterImageDirs(dirs []string, dirFilter string) []string {
+	if dirFilter == "" {
+		return dirs
+	}
+	var out []string
+	for _, d := range dirs {
+		if matchDirFilter(d, dirFilter) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func matchDirFilter(dir, filter string) bool {
+	if !strings.HasPrefix(filter, "/") {
+		return strings.Contains(dir, filter)
+	}
+	if strings.ContainsAny(filter, "*?") {
+		// filepath.Match only matches within a single path component (* won't cross /).
+		// Convert to regex so * matches across slashes: /scratch/* → ^/scratch/.*$
+		pattern := "^" + regexp.QuoteMeta(filter) + "$"
+		pattern = strings.ReplaceAll(pattern, `\*`, `.*`)
+		pattern = strings.ReplaceAll(pattern, `\?`, `.`)
+		matched, _ := regexp.MatchString(pattern, dir)
+		return matched
+	}
+	return dir == filter
 }
