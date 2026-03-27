@@ -146,7 +146,7 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 				// a build script exists for that distro/name combination.
 				// e.g. "igv" → "ubuntu24/igv"  →  ubuntu24--igv.sqf
 				// Without a script, keep the original name so the user gets a clear error.
-				if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
+				if !strings.Contains(normalized, "/") && !strings.Contains(normalized, "::") && config.Global.DefaultDistro != "" {
 					candidate := config.Global.DefaultDistro + "/" + normalized
 					if _, found := build.FindBuildScript(candidate); found {
 						utils.PrintNote("Expanding '%s' to '%s'", normalized, candidate)

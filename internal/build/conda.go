@@ -49,6 +49,10 @@ func newCondaBuildObject(base *BaseBuildObject) (*CondaBuildObject, error) {
 		}
 		packageName = parts[0]
 		packageVersion = parts[1]
+		// Channel-annotated input (e.g. "bioconda::star/2.7.11b"): use full spec for micromamba.
+		if base.condaChannelPkg != "" {
+			packageName = base.condaChannelPkg
+		}
 	}
 
 	return &CondaBuildObject{
