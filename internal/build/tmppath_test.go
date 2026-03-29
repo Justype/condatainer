@@ -12,7 +12,7 @@ import (
 // Test that CreateTmpOverlay creates parent directory when it does not exist
 // even if overlay creation fails (system tools may not be present in test env).
 func TestCreateTmpOverlay_CreatesParentDir(t *testing.T) {
-	base := &BaseBuildObject{
+	base := &BuildObject{
 		nameVersion:       "foo/bar",
 		tmpOverlayPath:    filepath.Join(t.TempDir(), "nonexistent", "foo.img"),
 		targetOverlayPath: "",
@@ -46,7 +46,7 @@ func TestCreateTmpOverlay_CreatesParentDir(t *testing.T) {
 // cnt/ and tmp/ subdirectories under the build directory.
 func TestCreateBuildDirs_CreatesDirs(t *testing.T) {
 	tmpDir := t.TempDir()
-	base := &BaseBuildObject{
+	base := &BuildObject{
 		nameVersion: "foo/bar",
 		cntDirPath:  filepath.Join(tmpDir, "build_foo_bar", "cnt"),
 	}
@@ -71,7 +71,7 @@ func TestCreateBuildDirs_CreatesDirs(t *testing.T) {
 func TestCreateBuildDirs_StaleDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	cntDir := filepath.Join(tmpDir, "build_foo_bar", "cnt")
-	base := &BaseBuildObject{
+	base := &BuildObject{
 		nameVersion: "foo/bar",
 		cntDirPath:  cntDir,
 	}
@@ -89,7 +89,7 @@ func TestCreateBuildDirs_StaleDir(t *testing.T) {
 func TestCreateBuildDirs_ForceRemovesStale(t *testing.T) {
 	tmpDir := t.TempDir()
 	cntDir := filepath.Join(tmpDir, "build_foo_bar", "cnt")
-	base := &BaseBuildObject{
+	base := &BuildObject{
 		nameVersion: "foo/bar",
 		cntDirPath:  cntDir,
 	}

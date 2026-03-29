@@ -54,7 +54,7 @@ func getInstalledOverlays() map[string]bool {
 
 // checkShouldBuild returns (skip=true, nil) if the overlay already exists and update=false.
 // In update mode, if the overlay is locked by a running container, returns an error.
-func checkShouldBuild(b *BaseBuildObject) (skip bool, err error) {
+func checkShouldBuild(b *BuildObject) (skip bool, err error) {
 	styledOverlay := utils.StyleName(filepath.Base(b.targetOverlayPath))
 	if !b.update {
 		if _, err := os.Stat(b.targetOverlayPath); err == nil {
@@ -117,7 +117,7 @@ func atomicInstall(finalPath, targetPath string, update bool) error {
 
 // prepareBuildWorkspace creates the build workspace (tmp overlay or host dirs).
 // Handles stale-artifact detection with one retry after cleanup.
-func prepareBuildWorkspace(ctx context.Context, b *BaseBuildObject, useTmpOverlay bool) error {
+func prepareBuildWorkspace(ctx context.Context, b *BuildObject, useTmpOverlay bool) error {
 	if !useTmpOverlay {
 		if err := b.CreateBuildDirs(ctx, false); err != nil {
 			if !errors.Is(err, ErrTmpOverlayExists) {
@@ -145,7 +145,7 @@ func prepareBuildWorkspace(ctx context.Context, b *BaseBuildObject, useTmpOverla
 }
 
 // buildModeLabel returns the build mode string for display ("local" or "sbatch").
-func buildModeLabel(b *BaseBuildObject) string {
+func buildModeLabel(b *BuildObject) string {
 	if b.RequiresScheduler() {
 		return "sbatch"
 	}
@@ -154,7 +154,7 @@ func buildModeLabel(b *BaseBuildObject) string {
 
 // buildOverlayPaths returns (targetPath, finalPath) where finalPath is the atomic-write
 // destination (.new suffix in update mode).
-func buildOverlayPaths(b *BaseBuildObject) (targetPath, finalPath string) {
+func buildOverlayPaths(b *BuildObject) (targetPath, finalPath string) {
 	targetPath = b.targetOverlayPath
 	if abs, err := filepath.Abs(targetPath); err == nil {
 		targetPath = abs
@@ -255,7 +255,7 @@ func buildEffectiveResourceSpec(specs *scheduler.ScriptSpecs) *scheduler.Resourc
 
 // acquireBuildLockFile is a package-level helper that creates a lock file
 // atomically (O_CREATE|O_EXCL) and writes JSON metadata.
-// Used by both BaseBuildObject and graph.go's submitJob.
+// Used by both BuildObject and graph.go's submitJob.
 func acquireBuildLockFile(path string, info BuildLockInfo) error {
 	data, err := json.Marshal(info)
 	if err != nil {

@@ -18,6 +18,8 @@ import (
 var (
 	availRemote  bool
 	availInstall bool
+	availExpand  bool
+	availWhatis  bool
 )
 
 var availCmd = &cobra.Command{
@@ -56,15 +58,21 @@ func init() {
 	availCmd.Flags().BoolVar(&availRemote, "remote", false, "Remote build scripts take precedence over local")
 	availCmd.Flags().BoolVarP(&availInstall, "install", "i", false, "Install the selected build scripts (used with search terms)")
 	availCmd.Flags().BoolP("add", "a", false, "Alias for --install")
+	availCmd.Flags().BoolVarP(&availExpand, "expand", "e", false, "Expand template groups to show individual entries")
+	availCmd.Flags().BoolVarP(&availWhatis, "whatis", "w", false, "Show description for each build script")
 }
 
 // PackageInfo holds information about a build script
 type PackageInfo struct {
-	Name        string // name/version format
-	Path        string // full path to build script
-	IsContainer bool   // true if .def file
-	IsInstalled bool   // true if overlay exists
-	IsRemote    bool   // true if from remote repository
+	Name        string              // name/version format
+	Path        string              // full path to build script
+	IsContainer bool                // true if .def file
+	IsInstalled bool                // true if overlay exists
+	IsRemote    bool                // true if from remote repository
+	IsTemplate  bool                // true if script has #PL: placeholders
+	Whatis      string              // description string
+	PL          map[string][]string // placeholder values (all values for templates; single-element for expanded)
+	PLOrder     []string            // placeholder key declaration order
 }
 
 func runAvail(cmd *cobra.Command, args []string) error {
@@ -80,6 +88,20 @@ func runAvail(cmd *cobra.Command, args []string) error {
 	packages := make([]PackageInfo, 0)
 	seen := make(map[string]bool)
 
+	scriptInfoToPackageInfo := func(name string, info build.ScriptInfo, isRemote bool) PackageInfo {
+		return PackageInfo{
+			Name:        name,
+			Path:        info.Path,
+			IsContainer: info.IsContainer,
+			IsInstalled: installedOverlays[name],
+			IsRemote:    isRemote,
+			IsTemplate:  info.IsTemplate,
+			Whatis:      info.Whatis,
+			PL:          info.PL,
+			PLOrder:     info.PLOrder,
+		}
+	}
+
 	if availRemote {
 		// Remote first: remote scripts take precedence
 		remoteScripts, err := build.GetRemoteBuildScripts()
@@ -87,13 +109,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 			utils.PrintDebug("Failed to fetch remote scripts: %v", err)
 		} else {
 			for name, info := range remoteScripts {
-				packages = append(packages, PackageInfo{
-					Name:        name,
-					Path:        info.Path,
-					IsContainer: info.IsContainer,
-					IsInstalled: installedOverlays[name],
-					IsRemote:    true,
-				})
+				packages = append(packages, scriptInfoToPackageInfo(name, info, true))
 				seen[name] = true
 			}
 		}
@@ -106,13 +122,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 			if seen[name] {
 				continue
 			}
-			packages = append(packages, PackageInfo{
-				Name:        name,
-				Path:        info.Path,
-				IsContainer: info.IsContainer,
-				IsInstalled: installedOverlays[name],
-				IsRemote:    false,
-			})
+			packages = append(packages, scriptInfoToPackageInfo(name, info, false))
 		}
 	} else {
 		// Default: local scripts take precedence
@@ -121,13 +131,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		for name, info := range localScripts {
-			packages = append(packages, PackageInfo{
-				Name:        name,
-				Path:        info.Path,
-				IsContainer: info.IsContainer,
-				IsInstalled: installedOverlays[name],
-				IsRemote:    false,
-			})
+			packages = append(packages, scriptInfoToPackageInfo(name, info, false))
 			seen[name] = true
 		}
 
@@ -139,13 +143,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 				if seen[name] {
 					continue
 				}
-				packages = append(packages, PackageInfo{
-					Name:        name,
-					Path:        info.Path,
-					IsContainer: info.IsContainer,
-					IsInstalled: installedOverlays[name],
-					IsRemote:    true,
-				})
+				packages = append(packages, scriptInfoToPackageInfo(name, info, true))
 			}
 		}
 	}
@@ -198,10 +196,74 @@ func runAvail(cmd *cobra.Command, args []string) error {
 		availInstall = true
 	}
 
+	// When --expand is set and the filter matched a template entry, also include all
+	// of that template's expanded variants from the full package list.
+	if availExpand {
+		templatePaths := make(map[string]bool)
+		for _, pkg := range filtered {
+			if pkg.IsTemplate {
+				templatePaths[pkg.Path] = true
+			}
+		}
+		if len(templatePaths) > 0 {
+			seen := make(map[string]bool, len(filtered))
+			for _, pkg := range filtered {
+				seen[pkg.Name] = true
+			}
+			for _, pkg := range packages {
+				if !pkg.IsTemplate && len(pkg.PLOrder) > 0 && templatePaths[pkg.Path] && !seen[pkg.Name] {
+					filtered = append(filtered, pkg)
+					seen[pkg.Name] = true
+				}
+			}
+			// Re-sort after adding expanded variants
+			sort.Slice(filtered, func(i, j int) bool {
+				return filtered[i].Name < filtered[j].Name
+			})
+		}
+	}
+
 	// Print results
-	for _, pkg := range filtered {
-		line := formatPackageLine(pkg)
-		fmt.Println(line)
+	// --expand: show individual expanded entries (skip template headers)
+	// no filter / no --expand: collapsed view (template headers + non-PL entries)
+	// filter without --expand: same collapsed logic, but templates that matched are shown as group headers
+	if availExpand {
+		for _, pkg := range filtered {
+			if !pkg.IsTemplate {
+				fmt.Println(formatPackageLine(pkg, availWhatis))
+			}
+		}
+	} else {
+		// Collapsed view: show template groups as a single summary line;
+		// skip expanded entries whose template is also in the list.
+		templateNames := make(map[string]bool)
+		for _, pkg := range filtered {
+			if pkg.IsTemplate {
+				templateNames[pkg.Name] = true
+			}
+		}
+		for _, pkg := range filtered {
+			if !pkg.IsTemplate && len(pkg.PLOrder) > 0 {
+				// This is an expanded PL entry — suppress it if its template is shown.
+				// An expanded entry shares the same script path as its template.
+				// Check by seeing whether any template in the list has the same Path.
+				suppress := false
+				for _, t := range filtered {
+					if t.IsTemplate && t.Path == pkg.Path {
+						suppress = true
+						break
+					}
+				}
+				if suppress {
+					continue
+				}
+			}
+			if pkg.IsTemplate {
+				fmt.Println(formatTemplateLine(pkg, filtered, availWhatis))
+			} else {
+				fmt.Println(formatPackageLine(pkg, availWhatis))
+			}
+		}
 	}
 
 	// Handle install if requested
@@ -245,7 +307,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 			// If --remote flag or config is set, ensure build resolution only uses remote scripts
 			build.PreferRemote = availRemote || config.Global.PreferRemote
 
-			buildObjects := make([]build.BuildObject, 0, len(uninstalled))
+			buildObjects := make([]*build.BuildObject, 0, len(uninstalled))
 			for _, pkg := range uninstalled {
 				bo, err := build.NewBuildObject(cmd.Context(), pkg, false, imagesDir, config.GetWritableTmpDir(), false)
 				if err != nil {
@@ -337,9 +399,90 @@ func getInstalledOverlays() map[string]bool {
 	return installed
 }
 
+// formatTemplateLine formats a template (PL) package as a collapsed group header.
+// Shows placeholders and their value lists, plus a variant count.
+//
+//	grch38/star-gencode  [10 variants]
+//	    STAR GRCh38 GENCODE{gencode_version} index for read length {read_length}
+//	    star_version:    2.7.11b, 2.7.11a
+//	    gencode_version: 22-49  (28 values)
+//	    read_length:     151, 101, *
+func formatTemplateLine(pkg PackageInfo, allFiltered []PackageInfo, showWhatis bool) string {
+	// Compute variant count as the Cartesian product of concrete (non-*) values.
+	variantCount := 1
+	for _, vals := range pkg.PL {
+		concrete := 0
+		for _, v := range vals {
+			if v != "*" {
+				concrete++
+			}
+		}
+		if concrete > 0 {
+			variantCount *= concrete
+		}
+	}
+	if variantCount == 1 && len(pkg.PL) == 0 {
+		variantCount = 0
+	}
+
+	var label string
+	if variantCount > 0 {
+		label = fmt.Sprintf("%d variants", variantCount)
+	} else {
+		label = "template"
+	}
+	if pkg.IsRemote {
+		label += ", " + utils.StyleHint("remote")
+	}
+
+	line := fmt.Sprintf("%s  [%s]", utils.StyleName(pkg.Name), label)
+	if showWhatis && pkg.Whatis != "" {
+		line += "\n  " + utils.StyleHint(pkg.Whatis)
+	}
+
+	// Show placeholder value summaries with aligned keys.
+	// First pass: compute max key length for alignment.
+	maxKeyLen := 0
+	for _, key := range pkg.PLOrder {
+		if _, ok := pkg.PL[key]; ok && len(key) > maxKeyLen {
+			maxKeyLen = len(key)
+		}
+	}
+	for _, key := range pkg.PLOrder {
+		vals, ok := pkg.PL[key]
+		if !ok {
+			continue
+		}
+		var concrete []string
+		hasOpen := false
+		for _, v := range vals {
+			if v == "*" {
+				hasOpen = true
+			} else {
+				concrete = append(concrete, v)
+			}
+		}
+		n := len(concrete)
+		var display string
+		if n > 8 {
+			display = fmt.Sprintf("%s-%s  (%d values)", concrete[n-1], concrete[0], n)
+		} else {
+			display = strings.Join(concrete, ", ")
+		}
+		if hasOpen {
+			display += ", *"
+		}
+		// Pad key to align values column
+		padding := strings.Repeat(" ", maxKeyLen-len(key))
+		line += fmt.Sprintf("\n  - %s:%s  %s", key, padding, display)
+	}
+
+	return line
+}
+
 // formatPackageLine formats a package for display.
-func formatPackageLine(pkg PackageInfo) string {
-	line := pkg.Name
+func formatPackageLine(pkg PackageInfo, showWhatis bool) string {
+	line := utils.StyleName(pkg.Name)
 
 	// Compute alias before highlighting (e.g. "ubuntu24/igv" → "[igv]")
 	var alias string
@@ -367,6 +510,10 @@ func formatPackageLine(pkg PackageInfo) string {
 
 	if alias != "" {
 		line += "  " + utils.StyleInfo("["+alias+"]")
+	}
+
+	if showWhatis && pkg.Whatis != "" {
+		line += "  " + utils.StyleHint(pkg.Whatis)
 	}
 
 	return line

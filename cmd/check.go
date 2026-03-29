@@ -296,7 +296,7 @@ func autoCreateExternalOverlay(ctx context.Context, dep string) bool {
 		utils.PrintError("Failed to create build object for %s: %v", dep, err)
 		return false
 	}
-	graph, err := build.NewBuildGraph(ctx, []build.BuildObject{bo}, outputDir, config.GetWritableTmpDir(), config.Global.SubmitJob, false)
+	graph, err := build.NewBuildGraph(ctx, []*build.BuildObject{bo}, outputDir, config.GetWritableTmpDir(), config.Global.SubmitJob, false)
 	if err != nil {
 		utils.PrintError("Failed to create build graph for %s: %v", dep, err)
 		return false
@@ -316,7 +316,7 @@ func autoInstallPackages(ctx context.Context, packages []string) error {
 	if err != nil {
 		return fmt.Errorf("no writable images directory found: %w", err)
 	}
-	buildObjects := make([]build.BuildObject, 0, len(packages))
+	buildObjects := make([]*build.BuildObject, 0, len(packages))
 	for _, pkg := range packages {
 		bo, err := build.NewBuildObject(ctx, pkg, false, imagesDir, config.GetWritableTmpDir(), false)
 		if err != nil {

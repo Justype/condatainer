@@ -19,11 +19,11 @@ import (
 //   - localBuilds: BuildObjects without scheduler requirements (build locally)
 //   - schedulerBuilds: BuildObjects that require scheduler submission
 type BuildGraph struct {
-	graph           map[string]BuildObject // All build objects by name/version
-	localBuilds     []BuildObject          // Builds to run locally (no scheduler)
-	schedulerBuilds []BuildObject          // Builds to submit via scheduler
-	jobIDs          map[string]string      // Job IDs for scheduler builds (name/version -> job ID)
-	scheduler       scheduler.Scheduler    // Active scheduler (SLURM, PBS, etc.)
+	graph           map[string]*BuildObject // All build objects by name/version
+	localBuilds     []*BuildObject          // Builds to run locally (no scheduler)
+	schedulerBuilds []*BuildObject          // Builds to submit via scheduler
+	jobIDs          map[string]string       // Job IDs for scheduler builds (name/version -> job ID)
+	scheduler       scheduler.Scheduler     // Active scheduler (SLURM, PBS, etc.)
 
 	// Config
 	ctx        context.Context
@@ -35,11 +35,11 @@ type BuildGraph struct {
 
 // NewBuildGraph creates a BuildGraph from a list of BuildObjects
 // All overlays are stored in imagesDir regardless of type
-func NewBuildGraph(ctx context.Context, buildObjects []BuildObject, imagesDir, tmpDir string, submitJobs bool, update bool) (*BuildGraph, error) {
+func NewBuildGraph(ctx context.Context, buildObjects []*BuildObject, imagesDir, tmpDir string, submitJobs bool, update bool) (*BuildGraph, error) {
 	bg := &BuildGraph{
-		graph:           make(map[string]BuildObject),
-		localBuilds:     []BuildObject{},
-		schedulerBuilds: []BuildObject{},
+		graph:           make(map[string]*BuildObject),
+		localBuilds:     []*BuildObject{},
+		schedulerBuilds: []*BuildObject{},
 		jobIDs:          make(map[string]string),
 		ctx:             ctx,
 		imagesDir:       imagesDir,
@@ -153,14 +153,14 @@ func (bg *BuildGraph) Run(ctx context.Context) error {
 	// Check if any apptainer jobs were run
 	hasDefBuilds := false
 	for _, obj := range bg.schedulerBuilds {
-		if obj.Type().IsDef {
+		if obj.Type() == BuildTypeDef {
 			hasDefBuilds = true
 			break
 		}
 	}
 	if !hasDefBuilds {
 		for _, obj := range bg.localBuilds {
-			if obj.Type().IsDef {
+			if obj.Type() == BuildTypeDef {
 				hasDefBuilds = true
 				break
 			}
@@ -230,7 +230,7 @@ func (bg *BuildGraph) runSchedulerStep() error {
 }
 
 // submitJob creates and submits a scheduler job for the build
-func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, error) {
+func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, error) {
 	utils.PrintDebug("Submitting %s job for %s with dependencies: %s",
 		bg.scheduler.GetType(), meta.NameVersion(), strings.Join(depIDs, ", "))
 

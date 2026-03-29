@@ -18,36 +18,28 @@ import (
 var ErrTmpOverlayExists = errors.New("temporary overlay already exists")
 var ErrBuildCancelled = errors.New("build cancelled by user")
 
-// BuildType represents the type of build target
-type BuildType struct {
-	IsConda bool
-	IsDef   bool
-	IsShell bool
-	IsRef   bool
-}
+// BuildType represents the type of build target.
+type BuildType int
 
-// Predefined build types
-var (
-	BuildTypeConda = BuildType{IsConda: true}
-	BuildTypeDef   = BuildType{IsDef: true}
-	BuildTypeShell = BuildType{IsShell: true}
-	BuildTypeRef   = BuildType{IsShell: true, IsRef: true}
+// Predefined build types.
+const (
+	BuildTypeConda BuildType = iota + 1
+	BuildTypeDef
+	BuildTypeShell
+	BuildTypeRef
 )
 
 // String implements fmt.Stringer for BuildType.
-// IsRef is checked before IsShell so ref overlays are reported as "ref".
 func (bt BuildType) String() string {
-	if bt.IsRef {
-		return "ref"
-	}
-	if bt.IsConda {
+	switch bt {
+	case BuildTypeConda:
 		return "conda"
-	}
-	if bt.IsDef {
+	case BuildTypeDef:
 		return "def"
-	}
-	if bt.IsShell {
+	case BuildTypeShell:
 		return "shell"
+	case BuildTypeRef:
+		return "ref"
 	}
 	return "unknown"
 }
@@ -55,42 +47,8 @@ func (bt BuildType) String() string {
 // ScriptSpecs mirrors the scheduler module's job spec metadata.
 type ScriptSpecs = scheduler.ScriptSpecs
 
-// BuildObject represents a build target with its metadata and dependencies
-type BuildObject interface {
-	// Core properties
-	NameVersion() string
-	BuildSource() string
-	Dependencies() []string
-	IsInstalled() bool
-
-	// Type information
-	Type() BuildType
-
-	// Path management
-	TmpOverlayPath() string
-	TargetOverlayPath() string
-	CntDirPath() string
-	LockPath() string
-
-	// Scheduler metadata
-	ScriptSpecs() *ScriptSpecs
-	RequiresScheduler() bool
-
-	// Build operations
-	Build(ctx context.Context, buildDeps bool) error
-	GetMissingDependencies() ([]string, error)
-	CreateTmpOverlay(ctx context.Context, force bool) error
-	Cleanup(failed bool) error
-
-	// Update mode
-	Update() bool
-
-	// String representation
-	String() string
-}
-
-// BaseBuildObject provides common functionality for all build types
-type BaseBuildObject struct {
+// BuildObject holds all state and implements all build operations.
+type BuildObject struct {
 	nameVersion       string
 	buildSource       string
 	tmpDir            string // base tmp directory (dynamic; scheduler/TMPDIR-based for conda/app)
@@ -107,20 +65,88 @@ type BaseBuildObject struct {
 
 	// Interactive inputs for shell scripts
 	interactiveInputs []string
+
+	// Placeholder variable values for PL (template) scripts, e.g. {"star_version": "2.7.11b"}.
+	// Injected as env vars at build time and interpolated into dependency names.
+	vars map[string]string
+
+	// Build type and conda-specific fields
+	buildType      BuildType
+	packageName    string // conda: primary package name
+	packageVersion string // conda: primary package version
 }
 
-// Common interface implementations for BaseBuildObject
+// Common interface implementations for BuildObject
 
-func (b *BaseBuildObject) NameVersion() string       { return b.nameVersion }
-func (b *BaseBuildObject) BuildSource() string       { return b.buildSource }
-func (b *BaseBuildObject) Dependencies() []string    { return b.dependencies }
-func (b *BaseBuildObject) TmpDir() string            { return b.tmpDir }
-func (b *BaseBuildObject) TmpOverlayPath() string    { return b.tmpOverlayPath }
-func (b *BaseBuildObject) TargetOverlayPath() string { return b.targetOverlayPath }
-func (b *BaseBuildObject) CntDirPath() string        { return b.cntDirPath }
-func (b *BaseBuildObject) ScriptSpecs() *ScriptSpecs { return b.scriptSpecs }
-func (b *BaseBuildObject) Update() bool              { return b.update }
-func (b *BaseBuildObject) RequiresScheduler() bool {
+func (b *BuildObject) NameVersion() string       { return b.nameVersion }
+func (b *BuildObject) BuildSource() string       { return b.buildSource }
+func (b *BuildObject) Dependencies() []string    { return b.dependencies }
+func (b *BuildObject) TmpDir() string            { return b.tmpDir }
+func (b *BuildObject) TmpOverlayPath() string    { return b.tmpOverlayPath }
+func (b *BuildObject) TargetOverlayPath() string { return b.targetOverlayPath }
+func (b *BuildObject) CntDirPath() string        { return b.cntDirPath }
+func (b *BuildObject) ScriptSpecs() *ScriptSpecs { return b.scriptSpecs }
+func (b *BuildObject) Update() bool              { return b.update }
+func (b *BuildObject) Type() BuildType           { return b.buildType }
+
+func (b *BuildObject) String() string {
+	return fmt.Sprintf(`BuildObject:
+		name_version: %s
+		build_source_type: %s
+		build_source: %s
+		dependencies: %v
+		script_specs: %v
+		tmp_overlay_path: %s
+		target_overlay_path: %s
+		cnt_dir_path: %s`,
+		b.nameVersion, b.buildType, b.buildSource,
+		b.dependencies, b.scriptSpecs,
+		b.tmpOverlayPath, b.targetOverlayPath, b.cntDirPath,
+	)
+}
+
+// Build dispatches to the appropriate build implementation based on buildType.
+func (b *BuildObject) Build(ctx context.Context, buildDeps bool) error {
+	switch b.buildType {
+	case BuildTypeConda:
+		return b.buildConda(ctx)
+	case BuildTypeDef:
+		return b.buildDef(ctx)
+	default: // BuildTypeShell, BuildTypeRef
+		return b.buildScript(ctx, buildDeps)
+	}
+}
+
+// setupCondaFields parses packageName and packageVersion from nameVersion/buildSource.
+// Must be called before setting buildType = BuildTypeConda.
+func (b *BuildObject) setupCondaFields() error {
+	parts := strings.Split(b.nameVersion, "/")
+	if b.buildSource != "" {
+		// Custom buildSource (YAML or comma-separated packages): name without version is OK.
+		if len(parts) == 2 {
+			b.packageName = parts[0]
+			b.packageVersion = parts[1]
+		} else {
+			b.packageName = b.nameVersion
+			b.packageVersion = "env"
+		}
+	} else {
+		// Standard conda package: must be name/version.
+		if len(parts) != 2 {
+			if b.condaChannelPkg != "" {
+				return fmt.Errorf("channel-annotated package requires a version (e.g. %s=1.0)", b.condaChannelPkg)
+			}
+			return fmt.Errorf("conda package must be in format name/version, got: %s", b.nameVersion)
+		}
+		b.packageName = parts[0]
+		b.packageVersion = parts[1]
+		if b.condaChannelPkg != "" {
+			b.packageName = b.condaChannelPkg
+		}
+	}
+	return nil
+}
+func (b *BuildObject) RequiresScheduler() bool {
 	return b.submitJob && scheduler.HasSchedulerSpecs(b.scriptSpecs)
 }
 
@@ -134,34 +160,34 @@ type BuildLockInfo struct {
 }
 
 // buildLockPath returns the lock file path for this build (stable, in imagesDir).
-func (b *BaseBuildObject) buildLockPath() string {
+func (b *BuildObject) buildLockPath() string {
 	return b.targetOverlayPath + ".lock"
 }
 
-// LockPath satisfies the BuildObject interface — returns the lock file path.
-func (b *BaseBuildObject) LockPath() string { return b.buildLockPath() }
+// LockPath returns the lock file path.
+func (b *BuildObject) LockPath() string { return b.buildLockPath() }
 
 // writeBuildLock atomically creates the lock file and writes JSON metadata.
 // Returns an os.ErrExist-wrapped error if the lock already exists.
-func (b *BaseBuildObject) writeBuildLock(info BuildLockInfo) error {
+func (b *BuildObject) writeBuildLock(info BuildLockInfo) error {
 	return acquireBuildLockFile(b.buildLockPath(), info)
 }
 
 // readBuildLock reads and parses the lock file JSON.
 // An empty or corrupt file (old empty-lock format) returns a zero-value struct.
-func (b *BaseBuildObject) readBuildLock() (BuildLockInfo, error) {
+func (b *BuildObject) readBuildLock() (BuildLockInfo, error) {
 	return readBuildLockFile(b.buildLockPath())
 }
 
 // updateBuildLock overwrites the lock file contents.
-func (b *BaseBuildObject) updateBuildLock(info BuildLockInfo) error {
+func (b *BuildObject) updateBuildLock(info BuildLockInfo) error {
 	return overwriteBuildLockFile(b.buildLockPath(), info)
 }
 
 // createBuildLock creates the lock file for a local build.
 // If a scheduler job lock already exists for this job, it adopts that lock
 // (updating it with the runtime node and PID) instead of failing.
-func (b *BaseBuildObject) createBuildLock() error {
+func (b *BuildObject) createBuildLock() error {
 	info := BuildLockInfo{
 		Type:      "local",
 		Node:      shortHostname(),
@@ -188,12 +214,12 @@ func (b *BaseBuildObject) createBuildLock() error {
 }
 
 // removeBuildLock removes the lock file on build completion or failure.
-func (b *BaseBuildObject) removeBuildLock() {
+func (b *BuildObject) removeBuildLock() {
 	os.Remove(b.buildLockPath()) //nolint:errcheck
 }
 
 // effectiveNcpus returns the effective total CPUs (CpusPerTask × TasksPerNode) for this build.
-func (b *BaseBuildObject) effectiveNcpus() int {
+func (b *BuildObject) effectiveNcpus() int {
 	rs := buildEffectiveResourceSpec(b.scriptSpecs)
 	cpus := rs.CpusPerTask
 	if rs.TasksPerNode > 1 {
@@ -202,12 +228,12 @@ func (b *BaseBuildObject) effectiveNcpus() int {
 	return cpus
 }
 
-func (b *BaseBuildObject) IsInstalled() bool {
+func (b *BuildObject) IsInstalled() bool {
 	_, err := os.Stat(b.targetOverlayPath)
 	return err == nil
 }
 
-func (b *BaseBuildObject) GetMissingDependencies() ([]string, error) {
+func (b *BuildObject) GetMissingDependencies() ([]string, error) {
 	installed := getInstalledOverlays()
 	var missing []string
 	for _, dep := range b.dependencies {
@@ -218,7 +244,7 @@ func (b *BaseBuildObject) GetMissingDependencies() ([]string, error) {
 	return missing, nil
 }
 
-func (b *BaseBuildObject) CreateTmpOverlay(ctx context.Context, force bool) error {
+func (b *BuildObject) CreateTmpOverlay(ctx context.Context, force bool) error {
 	// Check both ext3-mode artifact (.img) and dir-mode artifact (buildDir) for cross-mode stale detection
 	buildDir := filepath.Dir(b.cntDirPath)
 	stale := utils.FileExists(b.tmpOverlayPath) || (b.cntDirPath != "" && utils.DirExists(buildDir))
@@ -260,7 +286,7 @@ func (b *BaseBuildObject) CreateTmpOverlay(ctx context.Context, force bool) erro
 // CreateBuildDirs creates host directories for dir-mode builds (use_tmp_overlay=false).
 // Layout: <buildDir>/cnt/ (bound as /cnt) and <buildDir>/tmp/ (bound as /ext3/tmp).
 // Checks both dir-mode (buildDir) and ext3-mode (.img) artifacts for cross-mode stale detection.
-func (b *BaseBuildObject) CreateBuildDirs(ctx context.Context, force bool) error {
+func (b *BuildObject) CreateBuildDirs(ctx context.Context, force bool) error {
 	buildDir := filepath.Dir(b.cntDirPath)
 	// Check both dir-mode artifact (buildDir) and ext3-mode artifact (.img)
 	stale := utils.DirExists(buildDir) || utils.FileExists(b.tmpOverlayPath)
@@ -290,7 +316,7 @@ func (b *BaseBuildObject) CreateBuildDirs(ctx context.Context, force bool) error
 	return nil
 }
 
-func (b *BaseBuildObject) Cleanup(failed bool) error {
+func (b *BuildObject) Cleanup(failed bool) error {
 	// Remove remote build source if downloaded
 	if b.isRemote && b.buildSource != "" {
 		if err := os.Remove(b.buildSource); err != nil && !os.IsNotExist(err) {
@@ -345,7 +371,7 @@ func (b *BaseBuildObject) Cleanup(failed bool) error {
 }
 
 // parseScriptMetadata extracts dependencies, scheduler specs, and interactive prompts from shell scripts.
-func (b *BaseBuildObject) parseScriptMetadata(ctx context.Context) error {
+func (b *BuildObject) parseScriptMetadata(ctx context.Context) error {
 	if b.buildSource == "" {
 		return nil
 	}
@@ -360,13 +386,24 @@ func (b *BaseBuildObject) parseScriptMetadata(ctx context.Context) error {
 
 // parseDependencies reads #DEP: lines from the build script and sets b.dependencies.
 // Skips parsing if dependencies were already populated from remote metadata.
-func (b *BaseBuildObject) parseDependencies() error {
+func (b *BuildObject) parseDependencies() error {
 	if b.dependencies != nil {
-		return nil // already populated from metadata
+		// Dependencies were pre-populated from metadata; apply var interpolation if needed.
+		if len(b.vars) > 0 {
+			for i, dep := range b.dependencies {
+				b.dependencies[i] = utils.InterpolateVars(dep, b.vars)
+			}
+		}
+		return nil
 	}
 	deps, err := utils.GetDependenciesFromScript(b.buildSource, config.Global.ParseModuleLoad)
 	if err != nil {
 		return fmt.Errorf("failed to parse dependencies: %w", err)
+	}
+	if len(b.vars) > 0 {
+		for i, dep := range deps {
+			deps[i] = utils.InterpolateVars(dep, b.vars)
+		}
 	}
 	b.dependencies = deps
 	return nil
@@ -374,7 +411,7 @@ func (b *BaseBuildObject) parseDependencies() error {
 
 // collectInteractiveInputs handles #INTERACTIVE: prompts — checks TTY, supports --yes shortcut,
 // and reads user input from stdin. Sets b.interactiveInputs.
-func (b *BaseBuildObject) collectInteractiveInputs(ctx context.Context) error {
+func (b *BuildObject) collectInteractiveInputs(ctx context.Context) error {
 	prompts, err := utils.GetInteractivePromptsFromScript(b.buildSource)
 	if err != nil {
 		return fmt.Errorf("failed to parse interactive prompts: %w", err)
@@ -398,6 +435,9 @@ func (b *BaseBuildObject) collectInteractiveInputs(ctx context.Context) error {
 	}
 
 	for _, prompt := range prompts {
+		if len(b.vars) > 0 {
+			prompt = utils.InterpolateVars(prompt, b.vars)
+		}
 		msg := strings.ReplaceAll(prompt, `\\n`, "\n")
 		msg = strings.ReplaceAll(msg, "\\n", "\n")
 		for _, line := range strings.Split(msg, "\n") {
@@ -415,7 +455,7 @@ func (b *BaseBuildObject) collectInteractiveInputs(ctx context.Context) error {
 
 // resolveResourceSpec parses scheduler directives from the build script and sets b.scriptSpecs.
 // Applies the priority chain: buildDefaults → script directives → current job resources.
-func (b *BaseBuildObject) resolveResourceSpec() error {
+func (b *BuildObject) resolveResourceSpec() error {
 	specs, err := scheduler.ReadScriptSpecsFromPath(b.buildSource)
 	if err != nil {
 		return err
@@ -436,7 +476,7 @@ func (b *BaseBuildObject) resolveResourceSpec() error {
 // NewBuildObject creates a BuildObject from a name/version string
 // Format: "name/version" for conda/shell, "name" for def, "prefix/name/version" for ref
 // All overlays are stored in imagesDir regardless of type
-func NewBuildObject(ctx context.Context, nameVersion string, external bool, imagesDir, tmpDir string, update bool) (BuildObject, error) {
+func NewBuildObject(ctx context.Context, nameVersion string, external bool, imagesDir, tmpDir string, update bool) (*BuildObject, error) {
 	normalized := utils.NormalizeNameVersion(nameVersion)
 
 	// Handle channel annotation (e.g. "bioconda::star/2.7.11b"):
@@ -488,7 +528,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 
 	utils.PrintDebug("[BUILD OBJECT] Creating %s: nameVersion=%s, targetOverlay=%s, tmpOverlay=%s, cntDir=%s", nameVersion, normalized, targetOverlay, tmpOverlayPath, cntDirPath)
 
-	base := &BaseBuildObject{
+	base := &BuildObject{
 		nameVersion:       normalized,
 		submitJob:         config.Global.SubmitJob,
 		tmpDir:            tmpDir,
@@ -508,7 +548,12 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 	// Skip this optimisation in update mode so the correct concrete type is resolved.
 	if !update {
 		if base.IsInstalled() {
-			return newScriptBuildObject(base, isRef)
+			if isRef {
+				base.buildType = BuildTypeRef
+			} else {
+				base.buildType = BuildTypeShell
+			}
+			return base, nil
 		}
 		if utils.FileExists(base.buildLockPath()) {
 			info, readErr := base.readBuildLock()
@@ -554,7 +599,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 // buildSource can be:
 //   - Path to YAML file (e.g., "/path/to/environment.yml")
 //   - Comma-separated package list (e.g., "nvim,nodejs,samtools/1.16")
-func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir string, update bool) (BuildObject, error) {
+func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir string, update bool) (*BuildObject, error) {
 	normalized := utils.NormalizeNameVersion(nameVersion)
 
 	// Conda builds always use fast local storage
@@ -574,7 +619,7 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 
 	utils.PrintDebug("[BUILD OBJECT] Creating conda %s: buildSource=%s, targetOverlay=%s, tmpOverlay=%s, cntDir=%s", nameVersion, buildSource, targetOverlay, tmpOverlayPath, cntDirPath)
 
-	base := &BaseBuildObject{
+	base := &BuildObject{
 		nameVersion:       normalized,
 		buildSource:       buildSource,
 		submitJob:         config.Global.SubmitJob,
@@ -585,12 +630,16 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 		update:            update,
 	}
 
-	return newCondaBuildObject(base)
+	if err := base.setupCondaFields(); err != nil {
+		return nil, err
+	}
+	base.buildType = BuildTypeConda
+	return base, nil
 }
 
 // FromExternalSource creates a BuildObject from an external build script or def file
 // All overlays are stored in imagesDir regardless of type
-func FromExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, imagesDir string) (BuildObject, error) {
+func FromExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, imagesDir string) (*BuildObject, error) {
 	nameVersion := filepath.Base(targetPrefix)
 	nameVersion = utils.NormalizeNameVersion(nameVersion)
 
@@ -622,7 +671,7 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 
 	utils.PrintDebug("[BUILD OBJECT] Creating external %s: source=%s, targetPrefix=%s, tmpOverlay=%s, cntDir=%s", nameVersion, source, targetPrefix, tmpOverlayPath, cntDirPath)
 
-	base := &BaseBuildObject{
+	base := &BuildObject{
 		nameVersion:       nameVersion,
 		buildSource:       source,
 		submitJob:         config.Global.SubmitJob,
@@ -639,30 +688,23 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 		}
 	}
 
-	var obj BuildObject
-	var err error
-
 	if isDef {
-		obj, err = newDefBuildObject(base)
+		base.buildType = BuildTypeDef
 	} else if isShell {
-		obj, err = newScriptBuildObject(base, false) // External sources are not ref overlays
+		base.buildType = BuildTypeShell // External sources are not ref overlays
 	} else {
 		return nil, fmt.Errorf("unknown source type for %s", source)
 	}
 
-	if err != nil {
-		return nil, err
-	}
-
-	utils.PrintDebug("[EXTERNAL] Created BuildObject from external path: %s", obj.String())
-	return obj, nil
+	utils.PrintDebug("[EXTERNAL] Created BuildObject from external path: %s", base.String())
+	return base, nil
 }
 
 // createConcreteType creates the appropriate concrete BuildObject type
 // It determines whether to create a conda, def, or script build based on:
 // - isRef flag (from slash count > 1)
-// - build source resolution: .def -> DefBuildObject, shell script -> ScriptBuildObject, not found -> conda
-func createConcreteType(ctx context.Context, base *BaseBuildObject, isRef bool, tmpDir string) (BuildObject, error) {
+// - build source resolution: .def -> BuildTypeDef, shell script -> BuildTypeShell/Ref, not found -> conda
+func createConcreteType(ctx context.Context, base *BuildObject, isRef bool, tmpDir string) (*BuildObject, error) {
 	// Resolve build source - this determines the actual type based on file extension
 	isConda, isContainer, err := resolveBuildSource(base, tmpDir)
 	if err != nil {
@@ -670,7 +712,11 @@ func createConcreteType(ctx context.Context, base *BaseBuildObject, isRef bool, 
 	}
 
 	if isConda {
-		return newCondaBuildObject(base)
+		if err := base.setupCondaFields(); err != nil {
+			return nil, err
+		}
+		base.buildType = BuildTypeConda
+		return base, nil
 	}
 
 	if isContainer {
@@ -681,16 +727,20 @@ func createConcreteType(ctx context.Context, base *BaseBuildObject, isRef bool, 
 		}
 		base.tmpDir = defTmpDir
 		base.tmpOverlayPath, base.cntDirPath = buildTmpPaths(base.nameVersion, defTmpDir, ".sif")
-		return newDefBuildObject(base)
+		base.buildType = BuildTypeDef
+		return base, nil
 	}
 
 	// It's a shell script (no extension or .sh/.bash)
-	// Parse script metadata
 	if err := base.parseScriptMetadata(ctx); err != nil {
 		return nil, err
 	}
-
-	return newScriptBuildObject(base, isRef)
+	if isRef {
+		base.buildType = BuildTypeRef
+	} else {
+		base.buildType = BuildTypeShell
+	}
+	return base, nil
 }
 
 // resolveBuildSource finds the build script and determines the build type
@@ -699,7 +749,7 @@ func createConcreteType(ctx context.Context, base *BaseBuildObject, isRef bool, 
 // - isContainer=true: found .def file
 // - both false: found shell script (no extension)
 // First checks local and remote build scripts, falls back to conda if not found
-func resolveBuildSource(base *BaseBuildObject, tmpDir string) (isConda bool, isContainer bool, err error) {
+func resolveBuildSource(base *BuildObject, tmpDir string) (isConda bool, isContainer bool, err error) {
 	// Channel-annotated packages (e.g. "bioconda::star") always go through conda.
 	if base.condaChannelPkg != "" {
 		return true, false, nil
@@ -755,5 +805,26 @@ func resolveBuildSource(base *BaseBuildObject, tmpDir string) (isConda bool, isC
 		base.dependencies = info.Deps
 	}
 
+	// Capture placeholder variable values for PL scripts.
+	if vars := info.CurrentVars(); len(vars) > 0 {
+		base.vars = vars
+	}
+
 	return false, info.IsContainer, nil
+}
+
+// substituteTemplateFile reads srcPath, replaces all {key} tokens using vars,
+// writes the result to a temp file in tmpDir, and returns the temp path.
+// The caller is responsible for removing the temp file when done.
+func substituteTemplateFile(srcPath string, vars map[string]string, tmpDir string) (string, error) {
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read template file: %w", err)
+	}
+	content := utils.InterpolateVars(string(data), vars)
+	tmpPath := filepath.Join(tmpDir, "pl-"+filepath.Base(srcPath))
+	if err := os.WriteFile(tmpPath, []byte(content), utils.PermFile); err != nil {
+		return "", fmt.Errorf("failed to write substituted file: %w", err)
+	}
+	return tmpPath, nil
 }

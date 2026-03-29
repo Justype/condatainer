@@ -11,41 +11,7 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// DefBuildObject implements BuildObject for Apptainer definition files
-type DefBuildObject struct {
-	*BaseBuildObject
-}
-
-// newDefBuildObject creates a DefBuildObject from base
-func newDefBuildObject(base *BaseBuildObject) (*DefBuildObject, error) {
-	return &DefBuildObject{BaseBuildObject: base}, nil
-}
-
-// Type returns the build type
-func (d *DefBuildObject) Type() BuildType { return BuildTypeDef }
-
-// String returns a string representation
-func (d *DefBuildObject) String() string {
-	return fmt.Sprintf(`BuildObject:
-		name_version: %s
-		build_source_type: Apptainer File
-		build_source: %s
-		dependencies: %v
-		script_specs: %v
-		tmp_overlay_path: %s
-		target_overlay_path: %s
-		cnt_dir_path: %s`,
-		d.nameVersion,
-		d.buildSource,
-		d.dependencies,
-		d.scriptSpecs,
-		d.tmpOverlayPath,
-		d.targetOverlayPath,
-		d.cntDirPath,
-	)
-}
-
-// Build implements the Apptainer .def build workflow
+// buildDef implements the Apptainer .def build workflow on BuildObject.
 // Workflow:
 //  1. Check if overlay already exists (skip if yes)
 //  2. Try downloading prebuilt overlay if available
@@ -53,73 +19,82 @@ func (d *DefBuildObject) String() string {
 //  4. Extract SquashFS partition from SIF
 //  5. Set permissions
 //  6. Cleanup
-func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
-	targetPath, finalPath := buildOverlayPaths(d.BaseBuildObject)
+func (b *BuildObject) buildDef(ctx context.Context) error {
+	targetPath, finalPath := buildOverlayPaths(b)
 	styledOverlay := utils.StyleName(filepath.Base(targetPath))
 
-	if skip, err := checkShouldBuild(d.BaseBuildObject); skip || err != nil {
+	if skip, err := checkShouldBuild(b); skip || err != nil {
 		return err
 	}
 
-	if err := d.createBuildLock(); err != nil {
+	if err := b.createBuildLock(); err != nil {
 		return err
 	}
-	defer d.removeBuildLock()
+	defer b.removeBuildLock()
 
-	utils.PrintMessage("Building overlay %s (%s build) from %s", styledOverlay, utils.StyleAction(buildModeLabel(d.BaseBuildObject)), utils.StylePath(d.buildSource))
+	utils.PrintMessage("Building overlay %s (%s build) from %s", styledOverlay, utils.StyleAction(buildModeLabel(b)), utils.StylePath(b.buildSource))
 
 	done := watchContext(ctx, "def build")
 	defer close(done)
 
-	// Try to download prebuilt overlay first, fall back to building if not available
-	// Only attempt download if the build script source is remote
-	if d.isRemote {
+	// Try to download prebuilt overlay first, fall back to building if not available.
+	// Only attempt download if the build script source is remote.
+	if b.isRemote {
 		if writableDir, err := config.GetWritableImagesDir(); err == nil {
 			if filepath.Dir(targetPath) == writableDir {
-				downloadPath := buildFinalPath(targetPath, d.update)
-				if tryDownloadPrebuiltOverlay(d.nameVersion, downloadPath, d.prebuiltLink) {
-					if err := atomicInstall(downloadPath, targetPath, d.update); err != nil {
+				downloadPath := buildFinalPath(targetPath, b.update)
+				if tryDownloadPrebuiltOverlay(b.nameVersion, downloadPath, b.prebuiltLink) {
+					if err := atomicInstall(downloadPath, targetPath, b.update); err != nil {
 						return err
 					}
-					d.Cleanup(false)
+					b.Cleanup(false)
 					return nil
 				}
-				if d.update {
-					os.Remove(downloadPath) //nolint:errcheck // clean up partial download
+				if b.update {
+					os.Remove(downloadPath) //nolint:errcheck
 				}
 			}
 		}
 	}
 
-	utils.PrintMessage("Running apptainer build from %s", utils.StylePath(d.buildSource))
-
 	// Ensure the tmp directory exists before apptainer tries to write the SIF there.
-	if err := utils.EnsureTmpSubdir(d.tmpDir); err != nil {
-		return fmt.Errorf("failed to create tmp dir %s: %w", d.tmpDir, err)
+	if err := utils.EnsureTmpSubdir(b.tmpDir); err != nil {
+		return fmt.Errorf("failed to create tmp dir %s: %w", b.tmpDir, err)
 	}
 
-	// Build SIF using apptainer build --fakeroot
-	// Note: tmpOverlayPath is actually a SIF file at this stage, not sqf yet
+	// For PL template .def files, substitute {key} placeholders before passing to
+	// Apptainer. Apptainer reads directives like From: verbatim — no env expansion.
+	defSource := b.buildSource
+	if len(b.vars) > 0 {
+		subPath, err := substituteTemplateFile(b.buildSource, b.vars, b.tmpDir)
+		if err != nil {
+			return fmt.Errorf("failed to substitute placeholders in .def file: %w", err)
+		}
+		defer os.Remove(subPath) //nolint:errcheck
+		defSource = subPath
+	}
+
+	utils.PrintMessage("Running apptainer build from %s", utils.StylePath(b.buildSource))
+
 	buildOpts := &apptainer.BuildOptions{
 		Force:     false,
 		NoCleanup: false,
 	}
 
-	if err := apptainer.Build(ctx, d.tmpOverlayPath, d.buildSource, buildOpts); err != nil {
-		d.Cleanup(true)
+	if err := apptainer.Build(ctx, b.tmpOverlayPath, defSource, buildOpts); err != nil {
+		b.Cleanup(true)
 		if apptainer.IsBuildCancelled(err) {
 			utils.PrintMessage("Build cancelled for %s. Overlay unchanged.", styledOverlay)
 			return ErrBuildCancelled
 		}
-		return fmt.Errorf("failed to build SIF from %s: %w", d.buildSource, err)
+		return fmt.Errorf("failed to build SIF from %s: %w", b.buildSource, err)
 	}
 
 	utils.PrintMessage("Extracting SquashFS to %s", utils.StylePath(finalPath))
 
-	// Extract SquashFS from SIF
-	if err := apptainer.DumpSifToSquashfs(ctx, d.tmpOverlayPath, finalPath); err != nil {
+	if err := apptainer.DumpSifToSquashfs(ctx, b.tmpOverlayPath, finalPath); err != nil {
 		os.Remove(finalPath) //nolint:errcheck
-		d.Cleanup(true)
+		b.Cleanup(true)
 		if apptainer.IsBuildCancelled(err) {
 			utils.PrintMessage("Build cancelled for %s. Overlay unchanged.", styledOverlay)
 			return ErrBuildCancelled
@@ -127,17 +102,16 @@ func (d *DefBuildObject) Build(ctx context.Context, buildDeps bool) error {
 		return fmt.Errorf("failed to dump SquashFS from SIF: %w", err)
 	}
 
-	// Set permissions on output file
 	if err := os.Chmod(finalPath, utils.PermFile); err != nil {
 		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
 	}
 
-	if err := atomicInstall(finalPath, targetPath, d.update); err != nil {
+	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
 		return err
 	}
 
 	utils.PrintSuccess("Finished overlay %s", utils.StylePath(targetPath))
-	d.Cleanup(false)
+	b.Cleanup(false)
 	return nil
 }
 
