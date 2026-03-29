@@ -181,7 +181,7 @@ func LoadDefaults(executablePath string) {
 			TmpSizeMB:     20480,                               // 20GB temporary overlay
 			CompressArgs:  "-comp lz4",                         // zstd only compatible with apptainer version > 1.4
 			BlockSize:     "128k",                              // mksquashfs block size for app/env/external overlays
-			DataBlockSize: "1m",                                // mksquashfs block size for data/ref overlays
+			DataBlockSize: "512k",                              // mksquashfs block size for data/ref overlays
 			Channels:      []string{"conda-forge", "bioconda"}, // default conda channels
 		},
 	}
@@ -269,44 +269,31 @@ func GetBaseImage() string {
 }
 
 // GetWritableTmpDir returns the first writable tmp directory.
-// Probes existing directories without creating them (extra-root, root, scratch);
-// only the user-owned tmp dir is created on first use.
+// Uses the same SearchDir + firstWritableDir logic as the other writable-dir resolvers:
+// shared dirs (extra-root, root) create tmp only when the parent already exists;
+// personal dirs (scratch, user) always create on first use.
 func GetWritableTmpDir() string {
 	// Global override for all build temp paths
 	if os.Getenv("CNT_TMPDIR") != "" {
 		return utils.GetTmpDir()
 	}
 
-	// Check extra root dir — probe only, no creation
+	var dirs []SearchDir
 	if extraRoot := GetExtraRootDir(); extraRoot != "" {
-		tmpDir := filepath.Join(extraRoot, "tmp")
-		if utils.CanWriteToDir(tmpDir) {
-			return tmpDir
-		}
+		dirs = append(dirs, SearchDir{Path: filepath.Join(extraRoot, "tmp")})
 	}
-
-	// Check root data dir — probe only, no creation
 	if rootDir := GetRootDir(); rootDir != "" {
-		tmpDir := filepath.Join(rootDir, "tmp")
-		if utils.CanWriteToDir(tmpDir) {
-			return tmpDir
-		}
+		dirs = append(dirs, SearchDir{Path: filepath.Join(rootDir, "tmp")})
 	}
-
-	// Check scratch data dir — probe only, no creation
 	if scratchDir := GetScratchDataDir(); scratchDir != "" {
-		tmpDir := filepath.Join(scratchDir, "tmp")
-		if utils.CanWriteToDir(tmpDir) {
-			return tmpDir
-		}
+		dirs = append(dirs, SearchDir{Path: filepath.Join(scratchDir, "tmp"), Personal: true})
+	}
+	if userDir := GetUserDataDir(); userDir != "" {
+		dirs = append(dirs, SearchDir{Path: filepath.Join(userDir, "tmp"), Personal: true})
 	}
 
-	// Check user data dir — allowed to create (user-owned)
-	if userDir := GetUserDataDir(); userDir != "" {
-		tmpDir := filepath.Join(userDir, "tmp")
-		if utils.EnsureWritableDir(tmpDir) {
-			return tmpDir
-		}
+	if dir := firstWritableDir(deduplicateWriteDirs(dirs)); dir != "" {
+		return dir
 	}
 
 	// Last resort: current directory

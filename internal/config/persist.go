@@ -142,7 +142,7 @@ func setDefaults() {
 	viper.SetDefault("build.time", "2h")
 	viper.SetDefault("build.compress_args", "") // Empty means auto-detect based on apptainer version
 	viper.SetDefault("build.block_size", "128k")
-	viper.SetDefault("build.data_block_size", "1m")
+	viper.SetDefault("build.data_block_size", "512k")
 	viper.SetDefault("build.use_tmp_overlay", false)
 	viper.SetDefault("build.tmp_overlay_size", 20480)
 
@@ -960,8 +960,8 @@ func LoadFromViper() {
 		if IsValidBlockSize(v) {
 			Global.Build.DataBlockSize = v
 		} else {
-			utils.PrintWarning("Invalid build.data_block_size %q (must be a power of two between 4k and 1m); using default 1m", v)
-			Global.Build.DataBlockSize = "1m"
+			utils.PrintWarning("Invalid build.data_block_size %q (must be a power of two between 4k and 1m); using default 512k", v)
+			Global.Build.DataBlockSize = "512k"
 		}
 	}
 
