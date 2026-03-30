@@ -680,6 +680,33 @@ func GetTargetFromScript(scriptPath string) (string, error) {
 	return "", nil
 }
 
+// plTokenRe matches {varname} placeholder tokens.
+var plTokenRe = regexp.MustCompile(`\{(\w+)\}`)
+
+// MatchTemplateTarget extracts placeholder values from a concrete name by matching
+// it against a template pattern (e.g. a #TARGET: or #DEP: line containing {var} tokens).
+// Returns the vars map and true on a full match, or nil and false otherwise.
+func MatchTemplateTarget(pattern, concrete string) (map[string]string, bool) {
+	varNames := plTokenRe.FindAllStringSubmatch(pattern, -1)
+	regex := regexp.QuoteMeta(pattern)
+	for _, m := range varNames {
+		regex = strings.ReplaceAll(regex, regexp.QuoteMeta("{"+m[1]+"}"), `([^/]+)`)
+	}
+	re, err := regexp.Compile("^" + regex + "$")
+	if err != nil {
+		return nil, false
+	}
+	matches := re.FindStringSubmatch(concrete)
+	if matches == nil {
+		return nil, false
+	}
+	result := make(map[string]string, len(varNames))
+	for i, m := range varNames {
+		result[m[1]] = matches[i+1]
+	}
+	return result, true
+}
+
 // InterpolateVars replaces {varname} occurrences in s with the corresponding
 // value from vars. Unknown keys are left unchanged.
 func InterpolateVars(s string, vars map[string]string) string {

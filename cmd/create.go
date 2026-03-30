@@ -7,10 +7,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/container"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/chzyer/readline"
 	"github.com/spf13/cobra"
@@ -310,6 +312,27 @@ func resolveTemplateInteractively(ctx context.Context, info build.ScriptInfo) (s
 	}
 	chosenVars := make(map[string]string, len(info.PLOrder))
 
+	// Build per-placeholder installed defaults from single-slash tool #DEP: patterns.
+	installedDefaults := map[string]string{}
+	if overlays, err := container.InstalledOverlays(); err == nil {
+		installedVals := map[string][]string{}
+		for _, dep := range info.Deps {
+			if !strings.Contains(dep, "{") || strings.Count(dep, "/") != 1 {
+				continue
+			}
+			for name := range overlays {
+				if vars, ok := utils.MatchTemplateTarget(dep, name); ok {
+					for k, v := range vars {
+						installedVals[k] = append(installedVals[k], v)
+					}
+				}
+			}
+		}
+		for k, vals := range installedVals {
+			installedDefaults[k] = utils.SortVersionsDescending(vals)[0]
+		}
+	}
+
 	for _, key := range info.PLOrder {
 		vals, ok := info.PL[key]
 		if !ok {
@@ -327,10 +350,15 @@ func resolveTemplateInteractively(ctx context.Context, info build.ScriptInfo) (s
 			}
 		}
 
-		// Determine the default (first concrete value)
+		// Determine the default: prefer latest installed, fall back to latest available.
 		var defaultVal string
 		if len(concrete) > 0 {
 			defaultVal = concrete[0]
+		}
+		if iv, ok := installedDefaults[key]; ok {
+			if hasOpen || slices.Contains(concrete, iv) {
+				defaultVal = iv
+			}
 		}
 
 		// Build the prompt string
