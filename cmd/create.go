@@ -305,6 +305,9 @@ func resolveTemplateInteractively(ctx context.Context, info build.ScriptInfo) (s
 	if info.Whatis != "" {
 		utils.PrintNote("%s", utils.StyleHint(info.Whatis))
 	}
+	if info.TargetTemplate != "" {
+		utils.PrintNote("Target: %s", utils.StyleName(info.TargetTemplate))
+	}
 	chosenVars := make(map[string]string, len(info.PLOrder))
 
 	for _, key := range info.PLOrder {

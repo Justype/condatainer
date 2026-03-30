@@ -105,15 +105,94 @@ func ParseSizeToMB(sizeStr string) (int, error) {
 	return int(mb), nil
 }
 
+// SplitDepConstraint splits a raw dep string into its nameVersion and optional
+// version constraint. Supports ">=" and ">" operators.
+// Example: "samtools/1.21>=1.16" → ("samtools/1.21", ">=", "1.16")
+// Example: "samtools/1.21" → ("samtools/1.21", "", "")
+func SplitDepConstraint(raw string) (nameVersion, op, minVersion string) {
+	for _, sep := range []string{">=", ">"} {
+		if idx := strings.Index(raw, sep); idx >= 0 {
+			return raw[:idx], sep, raw[idx+len(sep):]
+		}
+	}
+	return raw, "", ""
+}
+
+// versionParts splits a version string like "1.21.3" into integer components.
+// Stops at the first non-numeric segment (e.g. "1.16rc1" → [1, 16]).
+func versionParts(v string) []int {
+	var parts []int
+	for _, s := range strings.Split(v, ".") {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			break
+		}
+		parts = append(parts, n)
+	}
+	return parts
+}
+
+// CompareVersions compares two partial version strings component by component.
+// Missing trailing components are treated as 0 (so "1.16" == "1.16.0").
+// Returns -1 if a < b, 0 if equal, 1 if a > b.
+func CompareVersions(a, b string) int {
+	ap, bp := versionParts(a), versionParts(b)
+	n := len(ap)
+	if len(bp) > n {
+		n = len(bp)
+	}
+	for i := 0; i < n; i++ {
+		av, bv := 0, 0
+		if i < len(ap) {
+			av = ap[i]
+		}
+		if i < len(bp) {
+			bv = bp[i]
+		}
+		if av < bv {
+			return -1
+		}
+		if av > bv {
+			return 1
+		}
+	}
+	return 0
+}
+
+// DepSatisfiedByVersion returns true if installedVersion satisfies the constraint
+// (op + minVersion) and does not exceed preferredVersion (upper bound).
+// op must be ">=" or ">". preferredVersion may be empty to skip the upper bound check.
+func DepSatisfiedByVersion(installedVersion, op, minVersion, preferredVersion string) bool {
+	cmp := CompareVersions(installedVersion, minVersion)
+	var lower bool
+	switch op {
+	case ">=":
+		lower = cmp >= 0
+	case ">":
+		lower = cmp > 0
+	default:
+		return false
+	}
+	if !lower {
+		return false
+	}
+	// Upper bound: installed must not exceed the preferred version.
+	if preferredVersion != "" && CompareVersions(installedVersion, preferredVersion) > 0 {
+		return false
+	}
+	return true
+}
+
 // NormalizeNameVersion normalizes package spec formats so that
 // "name/version", "name=version", "name@version" are treated the same.
 // Converts = and @ to /, and -- to /, then strips whitespace.
+// Any version constraint suffix (e.g. ">=1.10") is preserved as-is.
 func NormalizeNameVersion(nameVersion string) string {
-	s := strings.TrimSpace(nameVersion)
-	s = strings.ReplaceAll(s, "=", "/")
+	nv, op, minVer := SplitDepConstraint(strings.TrimSpace(nameVersion))
+	s := strings.ReplaceAll(nv, "=", "/")
 	s = strings.ReplaceAll(s, "@", "/")
 	s = strings.ReplaceAll(s, "--", "/")
-	return s
+	return s + op + minVer
 }
 
 // ParseHMSTime parses colon-separated walltime "HH:MM:SS", "HH:MM", or "MM" (bare minutes).
@@ -261,7 +340,9 @@ func GetDependenciesFromScript(scriptPath string, parseModuleLoad bool) ([]strin
 						seen[depLine] = true
 					}
 				} else {
-					normalized := NormalizeNameVersion(depLine)
+					// Split constraint before normalizing so "=" in ">=" isn't mangled.
+					nv, op, minVer := SplitDepConstraint(depLine)
+					normalized := NormalizeNameVersion(nv) + op + minVer
 					if !seen[normalized] {
 						dependencies = append(dependencies, normalized)
 						seen[normalized] = true

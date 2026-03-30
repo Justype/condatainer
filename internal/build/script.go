@@ -126,12 +126,15 @@ func (b *BuildObject) buildDependencies(ctx context.Context, buildDeps bool) err
 	}
 
 	for _, dep := range missingDeps {
-		depObj, err := NewBuildObject(ctx, dep, false, writableImagesDir, config.GetWritableTmpDir(), false)
+		// Strip any version constraint (e.g. "samtools/1.21>=1.16" → "samtools/1.21")
+		// before passing to NewBuildObject, which expects a plain name/version.
+		preferredNV, _, _ := utils.SplitDepConstraint(dep)
+		depObj, err := NewBuildObject(ctx, preferredNV, false, writableImagesDir, config.GetWritableTmpDir(), false)
 		if err != nil {
-			return fmt.Errorf("failed to create build object for dependency %s: %w", dep, err)
+			return fmt.Errorf("failed to create build object for dependency %s: %w", preferredNV, err)
 		}
 		if err := depObj.Build(ctx, false); err != nil {
-			return fmt.Errorf("failed to build dependency %s: %w", dep, err)
+			return fmt.Errorf("failed to build dependency %s: %w", preferredNV, err)
 		}
 	}
 

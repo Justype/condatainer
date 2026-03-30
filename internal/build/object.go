@@ -237,8 +237,35 @@ func (b *BuildObject) GetMissingDependencies() ([]string, error) {
 	installed := getInstalledOverlays()
 	var missing []string
 	for _, dep := range b.dependencies {
-		if !installed[dep] {
-			missing = append(missing, dep)
+		nameVersion, op, minVersion := utils.SplitDepConstraint(dep)
+		if op == "" {
+			// Exact match (existing behaviour).
+			if !installed[nameVersion] {
+				missing = append(missing, dep)
+			}
+			continue
+		}
+		// Constraint present: accept any installed version of the same package
+		// that satisfies op+minVersion and does not exceed the preferred version.
+		name := nameVersion
+		preferredVer := ""
+		if idx := strings.LastIndex(nameVersion, "/"); idx >= 0 {
+			name = nameVersion[:idx]
+			preferredVer = nameVersion[idx+1:]
+		}
+		prefix := name + "/"
+		satisfied := false
+		for key := range installed {
+			if after, ok := strings.CutPrefix(key, prefix); ok {
+				installedVer := after
+				if utils.DepSatisfiedByVersion(installedVer, op, minVersion, preferredVer) {
+					satisfied = true
+					break
+				}
+			}
+		}
+		if !satisfied {
+			missing = append(missing, nameVersion) // build the preferred version
 		}
 	}
 	return missing, nil

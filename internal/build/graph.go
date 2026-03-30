@@ -105,8 +105,15 @@ func (bg *BuildGraph) topologicalSort() error {
 			nodeMeta = newObj
 		}
 
-		// Visit dependencies first
-		for _, dep := range nodeMeta.Dependencies() {
+		// Visit dependencies first — strip any version constraint before graph lookup.
+		for _, rawDep := range nodeMeta.Dependencies() {
+			dep, op, minVer := utils.SplitDepConstraint(rawDep)
+			// If a constraint is present and an installed version already satisfies it,
+			// skip this dep entirely — the overlay resolver will pick the best installed version.
+			if op != "" && constraintAlreadySatisfied(dep, op, minVer) {
+				utils.PrintDebug("[GRAPH] Skipping %s: constraint %s%s satisfied by an installed version", dep, op, minVer)
+				continue
+			}
 			if err := visit(dep); err != nil {
 				return err
 			}
@@ -227,6 +234,28 @@ func (bg *BuildGraph) runSchedulerStep() error {
 		bg.jobIDs[meta.NameVersion()] = jobID
 	}
 	return nil
+}
+
+// constraintAlreadySatisfied returns true if any installed overlay for the same package
+// name satisfies op+minVer and does not exceed the preferred version in dep.
+// dep is the preferred nameVersion, e.g. "samtools/1.22.1".
+func constraintAlreadySatisfied(dep, op, minVer string) bool {
+	name := dep
+	preferredVer := ""
+	if idx := strings.LastIndex(dep, "/"); idx >= 0 {
+		name = dep[:idx]
+		preferredVer = dep[idx+1:]
+	}
+	prefix := name + "/"
+	for key := range getInstalledOverlays() {
+		if strings.HasPrefix(key, prefix) {
+			ver := strings.TrimPrefix(key, prefix)
+			if utils.DepSatisfiedByVersion(ver, op, minVer, preferredVer) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // submitJob creates and submits a scheduler job for the build
