@@ -260,10 +260,9 @@ func (b *BuildObject) runBuildScript(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to substitute placeholders in build script: %w", err)
 		}
-		if b.isRemote {
-			defer os.Remove(origSource) //nolint:errcheck
-			b.isRemote = false
-		}
+		// Keep origSource alive so saveEnvFile can read #ENV: from it after this
+		// function returns. Cleanup() will remove it via isRemote. Only the
+		// substituted tmp script (subPath) needs to be removed here.
 		defer func() {
 			os.Remove(subPath) //nolint:errcheck
 			b.buildSource = origSource

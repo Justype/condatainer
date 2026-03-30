@@ -756,18 +756,3 @@ func ExpandPlaceholders(defs []PlaceholderDef) []map[string]string {
 	return result
 }
 
-// DefaultVarsFromPlaceholders returns a map of {name: first_concrete_value}
-// for each placeholder. If a placeholder is open-only (no concrete values),
-// the key is omitted.
-func DefaultVarsFromPlaceholders(defs []PlaceholderDef) map[string]string {
-	vars := make(map[string]string, len(defs))
-	for _, def := range defs {
-		for _, v := range def.Values {
-			if v != "*" {
-				vars[def.Name] = v
-				break
-			}
-		}
-	}
-	return vars
-}

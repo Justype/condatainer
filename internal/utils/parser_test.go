@@ -3,7 +3,6 @@ package utils
 import (
 	"os"
 	"reflect"
-	"sort"
 	"testing"
 	"time"
 )
@@ -493,30 +492,4 @@ func TestExpandPlaceholders_Empty(t *testing.T) {
 	if len(combos) != 1 {
 		t.Fatalf("expected [{}], got %v", combos)
 	}
-}
-
-func TestDefaultVarsFromPlaceholders(t *testing.T) {
-	defs := []PlaceholderDef{
-		{Name: "a", Values: []string{"3", "2", "1"}},
-		{Name: "b", Values: []string{"x", "y"}},
-		{Name: "c", Values: []string{"*"}, Open: true}, // open-only
-	}
-	vars := DefaultVarsFromPlaceholders(defs)
-	if vars["a"] != "3" {
-		t.Errorf("default for a = %q; want 3", vars["a"])
-	}
-	if vars["b"] != "x" {
-		t.Errorf("default for b = %q; want x", vars["b"])
-	}
-	if _, ok := vars["c"]; ok {
-		t.Error("open-only placeholder c should not appear in DefaultVars")
-	}
-}
-
-// helper to ensure a slice of strings is sorted descending (ignores order of equal elements)
-func isSortedDesc(vals []string) bool {
-	cp := make([]string, len(vals))
-	copy(cp, vals)
-	sort.Slice(cp, func(i, j int) bool { return naturalVersionGreater(cp[i], cp[j]) })
-	return reflect.DeepEqual(vals, cp)
 }

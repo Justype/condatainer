@@ -303,12 +303,12 @@ func readLineWithCompletion(ctx context.Context, prompt string, completions []st
 // in a PL template script and returns the interpolated concrete name (from #TARGET:).
 // When --yes is set, defaults are used without prompting.
 func resolveTemplateInteractively(ctx context.Context, info build.ScriptInfo) (string, error) {
-	utils.PrintNote("Placeholder template: %s", info.Name)
+	utils.PrintMessage("Placeholder template: %s", info.Name)
 	if info.Whatis != "" {
-		utils.PrintNote("%s", utils.StyleHint(info.Whatis))
+		utils.PrintMessage("%s", utils.StyleHint(info.Whatis))
 	}
 	if info.TargetTemplate != "" {
-		utils.PrintNote("Target: %s", utils.StyleName(info.TargetTemplate))
+		fmt.Fprintf(os.Stdout, "Target: %s\n", utils.HighlightTemplatePlaceholders(info.TargetTemplate))
 	}
 	chosenVars := make(map[string]string, len(info.PLOrder))
 
@@ -429,7 +429,7 @@ func resolveTemplateInteractively(ctx context.Context, info build.ScriptInfo) (s
 	}
 
 	concrete := utils.InterpolateVars(info.TargetTemplate, chosenVars)
-	fmt.Printf("\n  → Creating %s\n\n", concrete)
+	fmt.Fprintf(os.Stdout, "  → Creating %s\n", concrete)
 	return concrete, nil
 }
 

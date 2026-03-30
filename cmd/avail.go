@@ -259,7 +259,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 				}
 			}
 			if pkg.IsTemplate {
-				fmt.Println(formatTemplateLine(pkg, filtered, availWhatis))
+				fmt.Println(formatTemplateLine(pkg, availWhatis))
 			} else {
 				fmt.Println(formatPackageLine(pkg, availWhatis))
 			}
@@ -268,12 +268,36 @@ func runAvail(cmd *cobra.Command, args []string) error {
 
 	// Handle install if requested
 	if availInstall && len(filters) > 0 {
-		// Get uninstalled packages
+		// Resolve templates interactively; collect concrete uninstalled names.
+		// Skip expanded PL entries (their template is shown instead).
 		uninstalled := []string{}
 		for _, pkg := range filtered {
-			if !pkg.IsInstalled {
-				uninstalled = append(uninstalled, pkg.Name)
+			if pkg.IsInstalled {
+				continue
 			}
+			if pkg.IsTemplate {
+				// Re-fetch full ScriptInfo (has TargetTemplate + Deps) then resolve interactively.
+				info, found := build.FindBuildScript(pkg.Name)
+				if !found {
+					utils.PrintWarning("Could not find build script for %s — skipping.", pkg.Name)
+					continue
+				}
+				concrete, err := resolveTemplateInteractively(cmd.Context(), info)
+				if err != nil {
+					return err
+				}
+				if !installedOverlays[concrete] {
+					uninstalled = append(uninstalled, concrete)
+				} else {
+					utils.PrintNote("%s is already installed.", concrete)
+				}
+				continue
+			}
+			// Skip expanded PL entries (their template handles installation above).
+			if len(pkg.PLOrder) > 0 {
+				continue
+			}
+			uninstalled = append(uninstalled, pkg.Name)
 		}
 
 		if len(uninstalled) > 0 {
@@ -288,11 +312,12 @@ func runAvail(cmd *cobra.Command, args []string) error {
 			// Ask for confirmation (skip if --yes flag is set)
 			if !utils.ShouldAnswerYes() {
 				fmt.Print("Do you want to proceed with the installation? [y/N]: ")
-				var choice string
-				fmt.Scanln(&choice)
-				choice = strings.ToLower(strings.TrimSpace(choice))
-
-				if choice != "y" && choice != "yes" {
+				choice, err := utils.ReadLineContext(cmd.Context())
+				if err != nil {
+					utils.PrintWarning("Installation cancelled.")
+					return nil
+				}
+				if strings.ToLower(choice) != "y" && strings.ToLower(choice) != "yes" {
 					utils.PrintNote("Installation cancelled.")
 					return nil
 				}
@@ -407,7 +432,7 @@ func getInstalledOverlays() map[string]bool {
 //	    star_version:    2.7.11b, 2.7.11a
 //	    gencode_version: 22-49  (28 values)
 //	    read_length:     151, 101, *
-func formatTemplateLine(pkg PackageInfo, allFiltered []PackageInfo, showWhatis bool) string {
+func formatTemplateLine(pkg PackageInfo, showWhatis bool) string {
 	// Compute variant count as the Cartesian product of concrete (non-*) values.
 	variantCount := 1
 	for _, vals := range pkg.PL {
@@ -425,17 +450,18 @@ func formatTemplateLine(pkg PackageInfo, allFiltered []PackageInfo, showWhatis b
 		variantCount = 0
 	}
 
-	var label string
+	var labelParts []string
 	if variantCount > 0 {
-		label = fmt.Sprintf("%d variants", variantCount)
+		labelParts = append(labelParts, utils.StyleDebug(fmt.Sprintf("%d variants", variantCount)))
 	} else {
-		label = "template"
+		labelParts = append(labelParts, utils.StyleDebug("template"))
 	}
 	if pkg.IsRemote {
-		label += ", " + utils.StyleHint("remote")
+		labelParts = append(labelParts, utils.StyleHint("remote"))
 	}
 
-	line := fmt.Sprintf("%s  [%s]", utils.StyleName(pkg.Name), label)
+	line := fmt.Sprintf("%s  %s%s%s", utils.StyleName(pkg.Name),
+		utils.StyleDebug("["), strings.Join(labelParts, utils.StyleDebug(", ")), utils.StyleDebug("]"))
 	if showWhatis && pkg.Whatis != "" {
 		line += "\n  " + utils.StyleHint(pkg.Whatis)
 	}
@@ -465,7 +491,7 @@ func formatTemplateLine(pkg PackageInfo, allFiltered []PackageInfo, showWhatis b
 		n := len(concrete)
 		var display string
 		if n > 8 {
-			display = fmt.Sprintf("%s-%s  (%d values)", concrete[n-1], concrete[0], n)
+			display = fmt.Sprintf("%s-%s  %s", concrete[n-1], concrete[0], utils.StyleDebug(fmt.Sprintf("(%d values)", n)))
 		} else {
 			display = strings.Join(concrete, ", ")
 		}
