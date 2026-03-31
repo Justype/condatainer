@@ -80,7 +80,8 @@ info, found := build.FindBuildScript("cellranger/9.0.1")
 ## Build Scripts
 
 Shell scripts support metadata headers:
-- `#DEP:name/version` - Dependencies
+- `#DEP:name/version` - Exact dependency
+- `#DEP:name/version>=min` - Dependency with version constraint (range `[min, version]`)
 - `#SBATCH` / `#PBS` / `#BSUB` - Scheduler directives (HTCondor uses native `.sub` files)
 - `#ENV:VAR=$app_root` - Environment variables to export
 - `#INTERACTIVE:prompt` - User input prompts
@@ -89,6 +90,12 @@ Available variables: `$NCPUS`, `$target_dir`, `$tmp_dir`, `$app_name`, `$version
 Required function: `install()`
 
 ### Dependency Resolution
+
+`#DEP:samtools/1.22.1>=1.10` — accepts any installed version in `[1.10, 1.22.1]`:
+- If a satisfying version is installed → skip build, mount the latest satisfying version
+- If none installed → build the preferred version (`1.22.1`)
+- Versions above preferred (`2.0`) are rejected (implicit upper bound)
+- Operators: `>=` (inclusive lower bound) and `>` (exclusive lower bound)
 
 ```go
 // Check missing dependencies

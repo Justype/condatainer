@@ -559,6 +559,8 @@ condatainer avail [search_terms...] [flags]
 **Options:**
 
 * `--remote`: Remote build scripts take precedence over local (on duplicates).
+* `-e`, `--expand`: Expand template groups to show individual concrete entries instead of the collapsed template header.
+* `-w`, `--whatis`: Show the description (`#WHATIS:`) for each build script.
 * `-i`, `--install`: Install any found packages that are not currently installed.
 * `-a`, `--add`: Alias for `--install`.
 
@@ -571,6 +573,21 @@ condatainer avail [search_terms...] [flags]
 | Single term with `^` `$` `(` `[` `+` `{` `\|` | Regex (e.g. `^cell.*9\.0`) |
 | Multiple terms, first is an exact name | Each term matched exactly (OR) |
 | Multiple terms, first not found | All terms AND substring |
+
+**Template display:**
+
+Template scripts (`#PL:` / `#TARGET:`) are shown collapsed by default as a group header with variant count and placeholder value summaries. Use `-e` to expand all concrete combinations instead.
+
+```
+grcm39/salmon-gencode  [34 variants, remote]
+  salmon_version  (4 values)  1.10.2-1.7.0
+  gencode_version (8 values)  M37-M25, *
+```
+
+**Install behavior with `-i`:**
+
+- **Concrete entry** (e.g. `grch38/gtf-gencode/47`): queued directly.
+- **Template entry** (e.g. `grch38/star-gencode`): prompts for each placeholder interactively, then queues the resolved concrete name. Default values prefer the latest already-installed version of each dependency, falling back to the latest available.
 
 **Examples:**
 
@@ -592,6 +609,12 @@ $ condatainer avail grcm M33
 grcm39/gtf-gencode/M33
 grcm39/salmon/1.10.2/gencodeM33
 grcm39/star-2.7.11b/gencodeM33-101
+
+# Show with descriptions
+$ condatainer avail star -w
+
+# Expand all template combinations
+$ condatainer avail star -e
 ```
 
 ### List

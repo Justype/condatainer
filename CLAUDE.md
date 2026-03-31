@@ -39,7 +39,7 @@ Build scripts live in the [`cnt-scripts`](https://github.com/Justype/cnt-scripts
 
 Must define an `install()` function. Available vars: `$NCPUS`, `$target_dir`, `$tmp_dir`, `$app_name`, `$version`.
 
-Metadata headers: `#DEP:name/version` (deps), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params), `#ENV:VAR=$app_root` (env vars), `#INTERACTIVE:prompt` (user input).
+Metadata headers: `#DEP:name/version` or `#DEP:name/version>=min` (deps; preferred version is implicit upper bound, so valid range is `[min, version]`), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params), `#ENV:VAR=$app_root` (env vars), `#INTERACTIVE:prompt` (user input).
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 
