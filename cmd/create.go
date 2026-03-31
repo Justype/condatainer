@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/container"
 	"github.com/Justype/condatainer/internal/utils"
+	"github.com/chzyer/readline"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -257,13 +261,194 @@ func getWritableImagesDir() string {
 	return dir
 }
 
+// readLineWithCompletion reads a line from stdin with tab-completion over completions.
+// Ctrl-C / EOF and context cancellation all return context.Canceled.
+func readLineWithCompletion(ctx context.Context, prompt string, completions []string) (string, error) {
+	items := make([]readline.PrefixCompleterInterface, len(completions))
+	for i, v := range completions {
+		items[i] = readline.PcItem(v)
+	}
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:       prompt,
+		AutoComplete: readline.NewPrefixCompleter(items...),
+	})
+	if err != nil {
+		return "", err
+	}
+	defer rl.Close()
+
+	type result struct {
+		s   string
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		s, err := rl.Readline()
+		ch <- result{strings.TrimSpace(s), err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		rl.Close()
+		return "", context.Canceled
+	case r := <-ch:
+		if r.err == readline.ErrInterrupt || r.err == io.EOF {
+			return "", context.Canceled
+		}
+		return r.s, r.err
+	}
+}
+
+// resolveTemplateInteractively prompts the user to choose a value for each placeholder
+// in a PL template script and returns the interpolated concrete name (from #TARGET:).
+// When --yes is set, defaults are used without prompting.
+func resolveTemplateInteractively(ctx context.Context, info build.ScriptInfo) (string, error) {
+	utils.PrintMessage("Placeholder template: %s", info.Name)
+	if info.Whatis != "" {
+		utils.PrintMessage("%s", utils.StyleHint(info.Whatis))
+	}
+	if info.TargetTemplate != "" {
+		fmt.Fprintf(os.Stdout, "Target: %s\n", utils.HighlightTemplatePlaceholders(info.TargetTemplate))
+	}
+	chosenVars := make(map[string]string, len(info.PLOrder))
+
+	// Build per-placeholder installed defaults from single-slash tool #DEP: patterns.
+	installedDefaults := map[string]string{}
+	if overlays, err := container.InstalledOverlays(); err == nil {
+		installedVals := map[string][]string{}
+		for _, dep := range info.Deps {
+			if !strings.Contains(dep, "{") || strings.Count(dep, "/") != 1 {
+				continue
+			}
+			for name := range overlays {
+				if vars, ok := utils.MatchTemplateTarget(dep, name); ok {
+					for k, v := range vars {
+						installedVals[k] = append(installedVals[k], v)
+					}
+				}
+			}
+		}
+		for k, vals := range installedVals {
+			installedDefaults[k] = utils.SortVersionsDescending(vals)[0]
+		}
+	}
+
+	for _, key := range info.PLOrder {
+		vals, ok := info.PL[key]
+		if !ok {
+			continue
+		}
+
+		// Separate concrete values from "*"
+		var concrete []string
+		hasOpen := false
+		for _, v := range vals {
+			if v == "*" {
+				hasOpen = true
+			} else {
+				concrete = append(concrete, v)
+			}
+		}
+
+		// Determine the default: prefer latest installed, fall back to latest available.
+		var defaultVal string
+		if len(concrete) > 0 {
+			defaultVal = concrete[0]
+		}
+		if iv, ok := installedDefaults[key]; ok {
+			if hasOpen || slices.Contains(concrete, iv) {
+				defaultVal = iv
+			}
+		}
+
+		// Build the prompt string
+		var prompt string
+		n := len(concrete)
+		switch {
+		case hasOpen && n > 0:
+			if n > 8 {
+				prompt = fmt.Sprintf("  %s [suggested: %s-%s, or any value] (default: %s): ",
+					key, concrete[n-1], concrete[0], defaultVal)
+			} else {
+				prompt = fmt.Sprintf("  %s [suggested: %s, or any value] (default: %s): ",
+					key, strings.Join(concrete, ", "), defaultVal)
+			}
+		case hasOpen && n == 0:
+			prompt = fmt.Sprintf("  %s [any value]: ", key)
+		case n > 8:
+			prompt = fmt.Sprintf("  %s [%s-%s] (default: %s): ",
+				key, concrete[n-1], concrete[0], defaultVal)
+		default:
+			prompt = fmt.Sprintf("  %s [%s] (default: %s): ",
+				key, strings.Join(concrete, ", "), defaultVal)
+		}
+
+		if utils.ShouldAnswerYes() {
+			if defaultVal != "" {
+				fmt.Printf("%s%s\n", prompt, defaultVal)
+				chosenVars[key] = defaultVal
+			}
+			continue
+		}
+
+		for {
+			input, err := readLineWithCompletion(ctx, prompt, concrete)
+			if err != nil {
+				return "", err
+			}
+
+			// Empty input → use default
+			if input == "" {
+				if defaultVal == "" {
+					utils.PrintWarning("No default available for %q — please enter a value.", key)
+					continue
+				}
+				chosenVars[key] = defaultVal
+				break
+			}
+
+			// For closed lists, validate against known values
+			if !hasOpen {
+				valid := false
+				for _, v := range concrete {
+					if v == input {
+						valid = true
+						break
+					}
+				}
+				if !valid {
+					utils.PrintWarning("Invalid value %q for %s. Valid values: %s",
+						input, key, strings.Join(concrete, ", "))
+					continue
+				}
+			}
+
+			chosenVars[key] = input
+			break
+		}
+	}
+
+	concrete := utils.InterpolateVars(info.TargetTemplate, chosenVars)
+	fmt.Fprintf(os.Stdout, "  → Creating %s\n", concrete)
+	return concrete, nil
+}
+
 // runCreatePackages creates separate sqf files for each package using BuildGraph
 // Example: condatainer create samtools/1.16 bcftools/1.15
 func runCreatePackages(ctx context.Context, packages []string) {
 	imagesDir := getWritableImagesDir()
 
-	buildObjects := make([]build.BuildObject, 0, len(packages))
+	buildObjects := make([]*build.BuildObject, 0, len(packages))
 	for _, pkg := range packages {
+		// Resolve template scripts interactively before building
+		if info, found := build.FindBuildScript(pkg); found && info.IsTemplate {
+			resolved, err := resolveTemplateInteractively(ctx, info)
+			if err != nil {
+				ExitWithError("Template resolution cancelled for %s: %v", pkg, err)
+			}
+			pkg = resolved
+		}
+
 		bo, err := build.NewBuildObject(ctx, pkg, false, imagesDir, config.GetWritableTmpDir(), createUpdate)
 		if err != nil {
 			ExitWithError("Failed to create build object for %s: %v", pkg, err)
@@ -370,7 +555,7 @@ func runCreateWithPrefix(ctx context.Context) {
 			ExitWithError("Failed to create build object from %s: %v", createFile, err)
 		}
 
-		buildObjects := []build.BuildObject{bo}
+		buildObjects := []*build.BuildObject{bo}
 		graph, err := build.NewBuildGraph(ctx, buildObjects, outputDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
 		if err != nil {
 			ExitWithError("Failed to create build graph: %v", err)
@@ -444,7 +629,7 @@ func runCreateFromSource(ctx context.Context) {
 		ExitWithError("Failed to create build object from %s: %v", source, err)
 	}
 
-	buildObjects := []build.BuildObject{bo}
+	buildObjects := []*build.BuildObject{bo}
 	graph, err := build.NewBuildGraph(ctx, buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build graph: %v", err)

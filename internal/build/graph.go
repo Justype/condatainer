@@ -19,11 +19,11 @@ import (
 //   - localBuilds: BuildObjects without scheduler requirements (build locally)
 //   - schedulerBuilds: BuildObjects that require scheduler submission
 type BuildGraph struct {
-	graph           map[string]BuildObject // All build objects by name/version
-	localBuilds     []BuildObject          // Builds to run locally (no scheduler)
-	schedulerBuilds []BuildObject          // Builds to submit via scheduler
-	jobIDs          map[string]string      // Job IDs for scheduler builds (name/version -> job ID)
-	scheduler       scheduler.Scheduler    // Active scheduler (SLURM, PBS, etc.)
+	graph           map[string]*BuildObject // All build objects by name/version
+	localBuilds     []*BuildObject          // Builds to run locally (no scheduler)
+	schedulerBuilds []*BuildObject          // Builds to submit via scheduler
+	jobIDs          map[string]string       // Job IDs for scheduler builds (name/version -> job ID)
+	scheduler       scheduler.Scheduler     // Active scheduler (SLURM, PBS, etc.)
 
 	// Config
 	ctx        context.Context
@@ -35,11 +35,11 @@ type BuildGraph struct {
 
 // NewBuildGraph creates a BuildGraph from a list of BuildObjects
 // All overlays are stored in imagesDir regardless of type
-func NewBuildGraph(ctx context.Context, buildObjects []BuildObject, imagesDir, tmpDir string, submitJobs bool, update bool) (*BuildGraph, error) {
+func NewBuildGraph(ctx context.Context, buildObjects []*BuildObject, imagesDir, tmpDir string, submitJobs bool, update bool) (*BuildGraph, error) {
 	bg := &BuildGraph{
-		graph:           make(map[string]BuildObject),
-		localBuilds:     []BuildObject{},
-		schedulerBuilds: []BuildObject{},
+		graph:           make(map[string]*BuildObject),
+		localBuilds:     []*BuildObject{},
+		schedulerBuilds: []*BuildObject{},
 		jobIDs:          make(map[string]string),
 		ctx:             ctx,
 		imagesDir:       imagesDir,
@@ -105,8 +105,15 @@ func (bg *BuildGraph) topologicalSort() error {
 			nodeMeta = newObj
 		}
 
-		// Visit dependencies first
-		for _, dep := range nodeMeta.Dependencies() {
+		// Visit dependencies first — strip any version constraint before graph lookup.
+		for _, rawDep := range nodeMeta.Dependencies() {
+			dep, op, minVer := utils.SplitDepConstraint(rawDep)
+			// If a constraint is present and an installed version already satisfies it,
+			// skip this dep entirely — the overlay resolver will pick the best installed version.
+			if op != "" && constraintAlreadySatisfied(dep, op, minVer) {
+				utils.PrintDebug("[GRAPH] Skipping %s: constraint %s%s satisfied by an installed version", dep, op, minVer)
+				continue
+			}
 			if err := visit(dep); err != nil {
 				return err
 			}
@@ -153,14 +160,14 @@ func (bg *BuildGraph) Run(ctx context.Context) error {
 	// Check if any apptainer jobs were run
 	hasDefBuilds := false
 	for _, obj := range bg.schedulerBuilds {
-		if obj.Type().IsDef {
+		if obj.Type() == BuildTypeDef {
 			hasDefBuilds = true
 			break
 		}
 	}
 	if !hasDefBuilds {
 		for _, obj := range bg.localBuilds {
-			if obj.Type().IsDef {
+			if obj.Type() == BuildTypeDef {
 				hasDefBuilds = true
 				break
 			}
@@ -229,8 +236,30 @@ func (bg *BuildGraph) runSchedulerStep() error {
 	return nil
 }
 
+// constraintAlreadySatisfied returns true if any installed overlay for the same package
+// name satisfies op+minVer and does not exceed the preferred version in dep.
+// dep is the preferred nameVersion, e.g. "samtools/1.22.1".
+func constraintAlreadySatisfied(dep, op, minVer string) bool {
+	name := dep
+	preferredVer := ""
+	if idx := strings.LastIndex(dep, "/"); idx >= 0 {
+		name = dep[:idx]
+		preferredVer = dep[idx+1:]
+	}
+	prefix := name + "/"
+	for key := range getInstalledOverlays() {
+		if strings.HasPrefix(key, prefix) {
+			ver := strings.TrimPrefix(key, prefix)
+			if utils.DepSatisfiedByVersion(ver, op, minVer, preferredVer) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // submitJob creates and submits a scheduler job for the build
-func (bg *BuildGraph) submitJob(meta BuildObject, depIDs []string) (string, error) {
+func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, error) {
 	utils.PrintDebug("Submitting %s job for %s with dependencies: %s",
 		bg.scheduler.GetType(), meta.NameVersion(), strings.Join(depIDs, ", "))
 

@@ -18,7 +18,7 @@ import (
 //   - Ext3 ref mode (useTmpOverlay, other sourceDir): pack from a host path with no overlay.
 //
 // The caller is responsible for calling b.Cleanup(true) if an error is returned.
-func createSquashfs(ctx context.Context, b *BaseBuildObject, isRef bool, sourceDir, targetPath string) error {
+func createSquashfs(ctx context.Context, b *BuildObject, isRef bool, sourceDir, targetPath string) error {
 	if absTarget, err := filepath.Abs(targetPath); err == nil {
 		targetPath = absTarget
 	}
@@ -56,7 +56,7 @@ func createSquashfs(ctx context.Context, b *BaseBuildObject, isRef bool, sourceD
 }
 
 // buildSquashfsOpts constructs the bash script, overlay list, and bind dirs for mksquashfs.
-func buildSquashfsOpts(b *BaseBuildObject, isRef bool, sourceDir, targetPath string) (bashScript string, overlays, bindDirs []string) {
+func buildSquashfsOpts(b *BuildObject, isRef bool, sourceDir, targetPath string) (bashScript string, overlays, bindDirs []string) {
 	ncpus := b.effectiveNcpus()
 	compressArgs := config.Global.Build.CompressArgs
 

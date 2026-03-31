@@ -27,7 +27,7 @@ func TestParseScriptMetadata_RequiresTTY(t *testing.T) {
 	}
 	tmp.Close()
 
-	base := &BaseBuildObject{
+	base := &BuildObject{
 		nameVersion:       "foo/bar",
 		buildSource:       tmp.Name(),
 		cntDirPath:        "",
@@ -55,7 +55,7 @@ func TestParseScriptMetadata_NoInteractive(t *testing.T) {
 	}
 	tmp.Close()
 
-	base := &BaseBuildObject{
+	base := &BuildObject{
 		nameVersion:       "foo/bar",
 		buildSource:       tmp.Name(),
 		cntDirPath:        "",
@@ -86,7 +86,7 @@ func TestParseScriptMetadata_NcpusFromSlurm(t *testing.T) {
 	}
 	tmp.Close()
 
-	base := &BaseBuildObject{
+	base := &BuildObject{
 		nameVersion:       "foo/bar",
 		buildSource:       tmp.Name(),
 		cntDirPath:        "",
@@ -117,7 +117,7 @@ func TestParseScriptMetadata_NcpusFromPBS(t *testing.T) {
 	}
 	tmp.Close()
 
-	base := &BaseBuildObject{
+	base := &BuildObject{
 		nameVersion:       "foo/bar",
 		buildSource:       tmp.Name(),
 		cntDirPath:        "",

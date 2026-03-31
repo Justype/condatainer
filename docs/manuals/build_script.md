@@ -11,6 +11,7 @@ This document gives instructions on how to create your own build scripts for **C
   - [Set Dependencies](#set-dependencies)
   - [Scheduler Parameters](#scheduler-parameters)
   - [Type Tag](#type-tag)
+  - [Template Tags](#template-tags)
   - [Environment Variables](#environment-variables) and [ENV Naming Guidelines](#env-naming-guidelines)
   - [Interactive Tag](#interactive-tag)
 - [OS](#os)
@@ -120,13 +121,41 @@ install() {
 
 `#WHATIS:` and `#URL:` lines are used to replace modulefile's `{WHATIS}` and `{HELP}` placeholders.
 
-It will only be used by [ModGen](https://github.com/Justype/condatainer/blob/main/assets/modgen/manual.md) when generating modulefiles. (**CondaTainer** does not support these tags yet.)
+They are used by [ModGen](https://github.com/Justype/condatainer/blob/main/assets/modgen/manual.md) when generating modulefiles, and displayed by **CondaTainer** during interactive template resolution (`condatainer create`).
 
 ### Set Dependencies
 
 `#DEP:` lines specify dependencies that must be installed before building the current overlay.
 
 When **CondaTainer** processes the build script, it will ensure that all specified dependencies are available and load them in the same order as listed.
+
+**Basic (exact version):**
+
+```bash
+#DEP:samtools/1.21
+```
+
+Requires exactly `samtools/1.21`. If not installed, builds it.
+
+**With version constraint:**
+
+```bash
+#DEP:samtools/1.22.1>=1.10
+```
+
+- **Preferred version**: `1.22.1` — built if no compatible version is installed.
+- **Minimum version** (`>=1.10`): any installed version in the range `[1.10, 1.22.1]` is accepted.
+- **Upper bound**: the preferred version acts as an implicit upper bound. A version higher than `1.22.1` (e.g., `2.0`) will not be used and the preferred version will be built instead.
+
+`>` is also supported for a strict lower bound:
+
+```bash
+#DEP:samtools/1.22.1>1.10
+```
+
+**Version format**: partial versions are accepted — `1`, `1.10`, `1.22.1`. Missing components are treated as `0` (so `1.10` matches `1.10.0`, `1.10.3`, etc.).
+
+**When multiple installed versions satisfy the constraint**, the latest one is used.
 
 ### Scheduler Parameters
 
@@ -190,6 +219,55 @@ Examples:
 #TYPE:data
 #TYPE:ref
 ```
+
+### Template Tags
+
+`#PL:` and `#TARGET:` turn a single script into a parameterized **template**. Running `condatainer create <template-path>` prompts the user for each placeholder value and then creates the concrete overlay.
+
+- `#PL:<name>:<values>` — declares a placeholder.
+  `<values>` is a comma-separated list of concrete options (sorted descending).
+  Integer ranges (`a-b`) expand to every integer between `a` and `b`, inclusive.
+  Adding `*` as the last entry makes the list open-ended (any value accepted).
+- `#TARGET:<pattern>` — the concrete overlay name produced after placeholders are filled.
+  Use `{name}` tokens matching the `#PL:` names.
+
+**Example** — STAR index template:
+
+```bash
+#!/usr/bin/bash
+#WHATIS:STAR grch38 index
+#PL:star_version:2.7.11b, 2.7.10, 2.7.9
+#PL:gencode_version:40-47
+#PL:read_length:50, 75, 100, 150
+#TARGET:grch38/star/{star_version}/gencode{gencode_version}-{read_length}
+#DEP:grch38/genome/gencode
+#DEP:grch38/gtf-gencode/{gencode_version}
+#DEP:star/{star_version}
+
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=42G
+#SBATCH --time=2:00:00
+
+install() {
+    ...
+}
+```
+
+When the user runs `condatainer create grch38/star-gencode`, **CondaTainer** shows the `#WHATIS:` description, the `#TARGET:` pattern (with `{placeholder}` tokens highlighted), then prompts for each placeholder in declaration order:
+
+```
+[CNT] Placeholder template: grch38/star-gencode
+[CNT] STAR grch38 index
+  Target: grch38/star/{star_version}/gencode{gencode_version}-{read_length}
+  star_version [2.7.11b, 2.7.10, 2.7.9] (default: 2.7.11b):
+  gencode_version [47, 46, 45] (default: 47):
+  read_length [50, 75, 100, 150] (default: 50):
+  → Creating grch38/star/2.7.11b/gencode47-50
+```
+
+If the user already has a compatible dependency installed (e.g. `star/2.7.10` is installed), the default for `star_version` will be `2.7.10` instead of the latest available `2.7.11b`.
+
+See [grch38/star-gencode](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/star-gencode) for a real template example.
 
 ### Environment Variables
 

@@ -62,7 +62,7 @@ func getCntDirPath(nameVersion, tmpDir string) string {
 
 // getBuildTmpDir returns the host tmp directory used for TMPDIR/micromamba root in dir-mode builds.
 // Format: <tmpDir>/build_<nameVersion>/tmp
-func getBuildTmpDir(b *BaseBuildObject) string {
+func getBuildTmpDir(b *BuildObject) string {
 	return filepath.Join(filepath.Dir(b.cntDirPath), "tmp")
 }
 

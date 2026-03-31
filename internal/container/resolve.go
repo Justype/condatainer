@@ -113,9 +113,43 @@ func ResolveOverlayPaths(inputs []string) ([]string, error) {
 			continue
 		}
 
-		normalized := utils.NormalizeNameVersion(pathToResolve)
+		// Split version constraint (e.g. "samtools/1.21>=1.16") before normalizing
+		// so that "=" in ">=" is not mangled by NormalizeNameVersion.
+		rawNV, op, minVersion := utils.SplitDepConstraint(pathToResolve)
+		normalized := utils.NormalizeNameVersion(rawNV)
 		if normalized == "" {
 			return nil, fmt.Errorf("invalid overlay specification %q", entry)
+		}
+
+		// With a constraint: pick the highest installed version that satisfies it,
+		// up to and including the preferred version (upper bound).
+		if op != "" {
+			name := normalized
+			preferredVer := ""
+			if idx := strings.LastIndex(normalized, "/"); idx >= 0 {
+				name = normalized[:idx]
+				preferredVer = normalized[idx+1:]
+			}
+			prefix := name + "/"
+			bestVer := ""
+			bestPath := ""
+			for key, path := range installed {
+				if strings.HasPrefix(key, prefix) {
+					ver := strings.TrimPrefix(key, prefix)
+					if utils.DepSatisfiedByVersion(ver, op, minVersion, preferredVer) {
+						if bestVer == "" || utils.CompareVersions(ver, bestVer) > 0 {
+							bestVer = ver
+							bestPath = path
+						}
+					}
+				}
+			}
+			if bestPath != "" {
+				utils.PrintDebug("[RESOLVE] Constraint %s%s%s satisfied by %s/%s", normalized, op, minVersion, name, bestVer)
+				resolved = append(resolved, bestPath+suffix)
+				continue
+			}
+			// No satisfying version installed — fall through to exact preferred version.
 		}
 
 		utils.PrintDebug("[RESOLVE] Looking up overlay %s in installed map", normalized)

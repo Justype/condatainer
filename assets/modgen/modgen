@@ -32,6 +32,8 @@ class Config:
     CONDATINER_DIR = os.path.abspath(os.path.join(PROGRAM_DIR, ".."))
 
     BUILD_SCRIPTS_DIR = os.path.join(CONDATINER_DIR, "build-scripts")
+    # Fallback: source-repo layout where cnt-scripts is a subdir
+    CNT_SCRIPTS_BUILD_SCRIPTS_DIR = os.path.join(CONDATINER_DIR, "cnt-scripts", "build-scripts")
     APPS_DIR = os.path.join(CONDATINER_DIR, "apps")
     APPS_MODULEFILES_DIR = os.path.join(CONDATINER_DIR, "apps-modules")
     REF_DIR = os.path.join(CONDATINER_DIR, "ref")
@@ -107,8 +109,9 @@ def main():
         ModGen_Update.parse_update_args(args)
 
 class Utils:
-    remote_build_scripts_links: Optional[Dict[str, str]] = None
-    local_build_scripts_paths: Optional[Dict[str, str]] = None
+    remote_build_scripts_info: Optional[Dict[str, dict]] = None
+    local_build_scripts_paths: Optional[Dict[str, str]] = None   # expanded (template entries shadow concrete)
+    local_build_scripts_base: Optional[Dict[str, str]] = None    # raw scan, no template expansion
 
     @staticmethod
     def blue_text(text): return f"\033[94m{text}\033[0m"
@@ -122,110 +125,431 @@ class Utils:
     def cyan_text(text): return f"\033[96m{text}\033[0m"
     @staticmethod
     def magenta_text(text): return f"\033[95m{text}\033[0m"
+    @staticmethod
+    def gray_text(text): return f"\033[90m{text}\033[0m"
 
     @staticmethod
-    def print_message(message, end="\n", flush=True): print(f"[MG] {message}", end=end, flush=flush)
+    def print_message(message, end="\n", flush=True): print(f"[MG] {message}", end=end, flush=flush, file=sys.stderr)
     @staticmethod
     def print_debug(debug_object, end="\n", flush=True):
         if Config.debug:
-            print(f"[MG][{Utils.yellow_text('DEBUG')}]", end=" ", flush=True)
-            print(debug_object, end=end, flush=flush)
+            print(f"[MG][{Utils.yellow_text('DEBUG')}]", end=" ", flush=True, file=sys.stderr)
+            print(debug_object, end=end, flush=flush, file=sys.stderr)
     @staticmethod
-    def print_note(message, end="\n", flush=True): print(f"[MG][{Utils.blue_text('NOTE')}] {message}", end=end, flush=flush)
+    def print_note(message, end="\n", flush=True): print(f"[MG][{Utils.blue_text('NOTE')}] {message}", end=end, flush=flush, file=sys.stderr)
     @staticmethod
     def print_warning(message, end="\n", flush=True): print(f"[MG][{Utils.yellow_text('WARNING')}] {message}", file=sys.stderr, end=end, flush=flush)
     @staticmethod
     def print_error(message, end="\n", flush=True): print(f"[MG][{Utils.red_text('ERROR')}] {message}", file=sys.stderr, end=end, flush=flush)
     @staticmethod
-    def print_success(message, end="\n", flush=True): print(f"[MG][{Utils.green_text('SUCCESS')}] {message}", end=end, flush=flush)
+    def print_success(message, end="\n", flush=True): print(f"[MG][{Utils.green_text('SUCCESS')}] {message}", end=end, flush=flush, file=sys.stderr)
+
+    @staticmethod
+    def split_dep_constraint(raw: str):
+        """Split 'name/ver>=min' into ('name/ver', '>=', 'min'). Returns (raw,'','') if no op."""
+        for op in (">=", ">"):
+            idx = raw.find(op)
+            if idx >= 0:
+                return raw[:idx], op, raw[idx+len(op):]
+        return raw, "", ""
+
+    @staticmethod
+    def compare_versions(a: str, b: str) -> int:
+        """Compare partial version strings component by component. Missing components = 0. Returns -1/0/1."""
+        def parts(v):
+            result = []
+            for s in v.split('.'):
+                try: result.append(int(s))
+                except ValueError: break
+            return result
+        ap, bp = parts(a), parts(b)
+        n = max(len(ap), len(bp))
+        for i in range(n):
+            av = ap[i] if i < len(ap) else 0
+            bv = bp[i] if i < len(bp) else 0
+            if av < bv: return -1
+            if av > bv: return 1
+        return 0
+
+    @staticmethod
+    def dep_satisfied_by_version(installed: str, op: str, min_ver: str, preferred_ver: str = "") -> bool:
+        """Return True if installed satisfies op+min_ver and does not exceed preferred_ver (upper bound)."""
+        cmp = Utils.compare_versions(installed, min_ver)
+        if op == ">=":
+            lower = cmp >= 0
+        elif op == ">":
+            lower = cmp > 0
+        else:
+            return False
+        if not lower:
+            return False
+        if preferred_ver and Utils.compare_versions(installed, preferred_ver) > 0:
+            return False
+        return True
+
+    @staticmethod
+    def get_placeholders_from_script(script_path: str) -> dict:
+        """Return {key: values_str} for #PL:KEY:values lines, or {} if none."""
+        pl = {}
+        if not os.path.isfile(script_path):
+            return pl
+        with open(script_path) as f:
+            for line in f:
+                if line.startswith("#PL:"):
+                    rest = line[4:].strip()
+                    if ':' in rest:
+                        key, _, vals = rest.partition(':')
+                        pl[key] = vals
+        return pl
+
+    @staticmethod
+    def sort_versions_descending(values: list) -> list:
+        """Natural version sort, highest first. Splits on '.', '-', '_'; numeric parts sorted numerically."""
+        def key(v):
+            result = []
+            for s in re.split(r'[.\-_]', v):
+                try: result.append((0, -int(s), ''))
+                except ValueError: result.append((1, 0, s))
+            return result
+        return sorted(values, key=key)
+
+    @staticmethod
+    def parse_pl_values(raw: str):
+        """Parse a #PL: value string into (concrete_values, is_open).
+        Supports comma lists, integer ranges (a-b), and '*' for open-ended."""
+        range_re = re.compile(r'^(\d+)-(\d+)$')
+        concrete = []
+        seen = set()
+        open_ = False
+        for tok in raw.split(','):
+            tok = tok.strip()
+            if not tok: continue
+            if tok == '*':
+                open_ = True
+                continue
+            m = range_re.match(tok)
+            if m:
+                a, b = int(m.group(1)), int(m.group(2))
+                lo, hi = min(a, b), max(a, b)
+                for i in range(hi, lo - 1, -1):
+                    s = str(i)
+                    if s not in seen:
+                        concrete.append(s)
+                        seen.add(s)
+            else:
+                if tok not in seen:
+                    concrete.append(tok)
+                    seen.add(tok)
+        return Utils.sort_versions_descending(concrete), open_
+
+    @staticmethod
+    def interpolate_vars(s: str, vars_dict: dict) -> str:
+        """Replace {key} tokens in s with values from vars_dict."""
+        for k, v in vars_dict.items():
+            s = s.replace('{' + k + '}', v)
+        return s
+
+    @staticmethod
+    def resolve_template_interactively(name_version: str, script_path: str):
+        """Parse #PL:/#TARGET: from a template script, prompt for each placeholder.
+        Returns (concrete_name, vars_dict)."""
+        placeholders = []
+        target = ""
+        with open(script_path) as f:
+            for line in f:
+                if line.startswith("#PL:"):
+                    rest = line[4:].strip()
+                    idx = rest.find(':')
+                    if idx < 0: continue
+                    pl_name = rest[:idx].strip()
+                    raw_vals = rest[idx+1:]
+                    ci = raw_vals.find(' #')
+                    if ci >= 0: raw_vals = raw_vals[:ci]
+                    values, open_ = Utils.parse_pl_values(raw_vals.strip())
+                    placeholders.append((pl_name, values, open_))
+                elif line.startswith("#TARGET:"):
+                    target = line[8:].strip()
+
+        if not target:
+            raise RuntimeError(f"Template {name_version} has #PL: but no #TARGET: line.")
+
+        Utils.print_message(f"Placeholder template: {name_version}")
+        print(f"Target: {target}")
+
+        # Build per-placeholder installed defaults from single-slash tool #DEP: patterns.
+        dep_patterns = []
+        with open(script_path) as f:
+            for line in f:
+                if line.startswith("#DEP:") and '{' in line:
+                    pat = line[5:].strip()
+                    if pat.count('/') == 1:  # tool-level only, skip ref/data deps
+                        dep_patterns.append(pat)
+        installed_vals = {}
+        for dep_pat in dep_patterns:
+            # Check modgen-managed modules
+            for mod_name in ModGen.get_installed_modules():
+                matched = Utils.match_template_target(dep_pat, mod_name)
+                if matched:
+                    for k, v in matched.items():
+                        installed_vals.setdefault(k, []).append(v)
+            # Also check system modules via `module avail <name>/`
+            pkg_name = dep_pat.split('/')[0]
+            try:
+                result = subprocess.run(
+                    ["bash", "-c", f"module avail {pkg_name}/"],
+                    capture_output=True, text=True
+                )
+                output = result.stdout + result.stderr
+                for m in re.finditer(rf'{re.escape(pkg_name)}/([^\s(/]+)', output):
+                    mod_name = f"{pkg_name}/{m.group(1)}"
+                    matched = Utils.match_template_target(dep_pat, mod_name)
+                    if matched:
+                        for k, v in matched.items():
+                            installed_vals.setdefault(k, []).append(v)
+            except Exception:
+                pass
+        installed_defaults = {
+            k: Utils.sort_versions_descending(v)[0]
+            for k, v in installed_vals.items()
+        }
+
+        vars_dict = {}
+        for pl_name, concrete, open_ in placeholders:
+            installed_val = installed_defaults.get(pl_name, "")
+            if installed_val and (open_ or installed_val in concrete):
+                default = installed_val
+            elif concrete:
+                default = concrete[0]
+            else:
+                default = ""
+            if concrete and open_:
+                if len(concrete) > 8:
+                    label = f"suggested: {concrete[-1]}-{concrete[0]}, or any value"
+                else:
+                    label = ', '.join(concrete) + ', or any value'
+            elif concrete:
+                label = ', '.join(concrete) if len(concrete) <= 8 else f"{concrete[-1]}-{concrete[0]}"
+            else:
+                label = "any value"
+
+            prompt = f"  {pl_name} [{label}]"
+            if default:
+                prompt += f" (default: {default})"
+            prompt += ": "
+
+            while True:
+                val = input(prompt).strip()
+                if not val:
+                    if default:
+                        val = default
+                    else:
+                        Utils.print_warning("Please enter a value.")
+                        continue
+                if concrete and not open_ and val not in concrete:
+                    Utils.print_warning(f"'{val}' is not a valid option. Choose from: {', '.join(concrete)}")
+                    continue
+                break
+
+            vars_dict[pl_name] = val
+
+        concrete_name = Utils.interpolate_vars(target, vars_dict)
+        print(f"  → Creating {concrete_name}")
+        return concrete_name, vars_dict
+
+    @staticmethod
+    def get_target_from_script(script_path: str) -> str:
+        """Return the #TARGET: pattern from a build script, or '' if absent."""
+        with open(script_path) as f:
+            for line in f:
+                if line.startswith("#TARGET:"):
+                    return line[8:].strip()
+        return ""
+
+    @staticmethod
+    def match_template_target(pattern: str, concrete: str):
+        """Try to extract placeholder values from a concrete name against a #TARGET: pattern.
+        Returns vars_dict if matched, else None."""
+        var_names = re.findall(r'\{(\w+)\}', pattern)
+        regex = re.escape(pattern)
+        for vname in var_names:
+            regex = regex.replace(re.escape('{' + vname + '}'), f'(?P<{vname}>[^/]+)')
+        m = re.fullmatch(regex, concrete)
+        if not m:
+            return None
+        return m.groupdict()
 
     @staticmethod
     def normalize_name_version(name_version: str) -> str:
         """
         Normalize package spec formats so that `name/version`, `name=version`, `name@version`
-        are treated the same. This converts slashes to equal signs and strips
-        surrounding whitespace.
+        are treated the same. Preserves any version constraint suffix (e.g. >=1.10).
         """
         if not isinstance(name_version, str):
             return name_version
-        return name_version.strip().replace('=', '/').replace('@', '/').replace('--', '/')
+        raw = name_version.strip()
+        nv, op, minver = Utils.split_dep_constraint(raw)
+        nv = nv.replace('=', '/').replace('@', '/').replace('--', '/')
+        return nv + op + minver
 
     @staticmethod
     def fetch_remote_build_scripts() -> dict:
         """
-        Fetch JSON metadata from a remote http(s) URL
+        Fetch JSON metadata from the remote cnt-scripts repository.
 
-        Returns a name-version to link mapping dictionary.
+        Returns a dict mapping normalized name → info dict with keys:
+          url           - full raw-content download URL for the script
+          deps          - list of dep strings (interpolated for expanded entries)
+          whatis        - description string (interpolated for expanded entries)
+          is_template   - True only for template (collapsed) entries
+          pl            - {name: [values]} — full list for templates, [current_val] for expanded
+          pl_order      - list of placeholder names in declaration order
+          target_template - raw #TARGET: string (template entries only)
+
+        Template entries and all their Cartesian-product expansions are included.
+        Expanded entries with is_template=False can be looked up directly by name.
         """
+        if Utils.remote_build_scripts_info is not None:
+            return Utils.remote_build_scripts_info
+
         url = Config.REMOTE_METADATA_URL
         if not url:
+            Utils.remote_build_scripts_info = {}
             return {}
-
-        if Utils.remote_build_scripts_links is not None:
-            return Utils.remote_build_scripts_links
-
-        normalized = {}
 
         try:
             with urllib.request.urlopen(url) as resp:
+                import gzip as _gzip
                 if url.endswith('.gz'):
-                    import gzip
-                    with gzip.GzipFile(fileobj=resp) as gz:
-                        data = gz.read()
-                    metadata = json.loads(data)
+                    with _gzip.GzipFile(fileobj=resp) as gz:
+                        raw = gz.read()
                 else:
-                    data = resp.read()
-                    metadata = json.loads(data)
-
-                for k, v in metadata.items():
-                    key = Utils.normalize_name_version(k)
-                    rel = v["relative_path"]
-                    link = f"https://raw.githubusercontent.com/{Config.SCRIPTS_REPO}/main/build-scripts/{rel}"
-                    if link.endswith('.def'):
-                        continue  # skip def files
-                    normalized[key] = link
-
+                    raw = resp.read()
+            metadata = json.loads(raw)
         except Exception as e:
-            Utils.print_warning(f"Failed to fetch remote metadata from {url}: {e}")
+            Utils.print_warning(f"Failed to fetch remote metadata: {e}")
+            Utils.remote_build_scripts_info = {}
             return {}
 
-        if normalized:
-            Utils.remote_build_scripts_links = normalized
+        result = {}
 
-        return normalized
+        for k, v in metadata.items():
+            key = Utils.normalize_name_version(k)
+            path = v.get("path", k)
+            if path.endswith(".def"):
+                continue  # skip container definition files
+
+            script_url = f"{Config.GIT_RAW_URL_PREFIX}build-scripts/{path}"
+            deps = list(v.get("deps", []))
+            whatis = v.get("whatis", "")
+            is_template = bool(v.get("is_template", False))
+            target_template = v.get("target_template", "")
+            pl = v.get("pl", {})
+            pl_order = v.get("pl_order", [])
+
+            result[key] = {
+                "url": script_url,
+                "deps": deps,
+                "whatis": whatis,
+                "is_template": is_template,
+                "pl": pl,
+                "pl_order": pl_order,
+                "target_template": target_template,
+            }
+
+            # Expand template into concrete per-combination entries
+            if is_template and target_template and pl_order:
+                defs = [(name, pl[name]) for name in pl_order if name in pl]
+                combos = [{}]
+                for pl_name, values in defs:
+                    concrete_vals = [val for val in values if val != "*"]
+                    combos = [dict(c, **{pl_name: val}) for c in combos for val in concrete_vals]
+                for combo in combos:
+                    concrete_key = Utils.interpolate_vars(target_template, combo)
+                    if not concrete_key or concrete_key == key or concrete_key in result:
+                        continue
+                    expanded_pl = {pk: [pv] for pk, pv in combo.items()}
+                    result[concrete_key] = {
+                        "url": script_url,
+                        "deps": [Utils.interpolate_vars(d, combo) for d in deps],
+                        "whatis": Utils.interpolate_vars(whatis, combo),
+                        "is_template": False,
+                        "pl": expanded_pl,
+                        "pl_order": pl_order,
+                        "target_template": "",
+                    }
+
+        Utils.remote_build_scripts_info = result
+        return result
 
     @staticmethod
-    def get_local_build_scripts():
+    def get_local_build_scripts(expand_templates: bool = True) -> dict:
         """
         Get a name-version to local script path mapping dictionary.
-        """
-        if Utils.local_build_scripts_paths is not None:
-            return Utils.local_build_scripts_paths
 
+        Searches two locations (first match wins):
+          1. BUILD_SCRIPTS_DIR              — deployment layout: <root>/build-scripts/
+          2. CNT_SCRIPTS_BUILD_SCRIPTS_DIR  — source-repo layout: <root>/cnt-scripts/build-scripts/
+
+        expand_templates=True (default): template entries shadow concrete entries with the
+          same resolved name, so BuildObject can resolve any concrete expanded name back to
+          its template script.
+        expand_templates=False: raw scan only — templates appear under their own key, no
+          expansion. Used by `avail` to show one entry per template instead of all combinations.
+        """
+        if not expand_templates:
+            if Utils.local_build_scripts_base is not None:
+                return Utils.local_build_scripts_base
+        else:
+            if Utils.local_build_scripts_paths is not None:
+                return Utils.local_build_scripts_paths
+
+        # Base scan (shared by both modes)
         packages = {}
-        if not os.path.isdir(Config.BUILD_SCRIPTS_DIR):
+        for base_dir in (Config.BUILD_SCRIPTS_DIR, Config.CNT_SCRIPTS_BUILD_SCRIPTS_DIR):
+            if not os.path.isdir(base_dir):
+                continue
+            for root, _, files in os.walk(base_dir):
+                for filename in files:
+                    if filename.endswith(('.py', '.sh', '.def')):
+                        continue
+                    if "template" in filename:
+                        continue
+                    full_path = os.path.join(root, filename)
+                    relative_key = os.path.relpath(full_path, base_dir)
+                    if relative_key not in packages:
+                        packages[relative_key] = full_path
+
+        if not expand_templates:
+            Utils.local_build_scripts_base = packages
             return packages
 
-        # os.walk mimics 'find' by visiting every subdirectory recursively
-        for root, _, files in os.walk(Config.BUILD_SCRIPTS_DIR):
-            for filename in files:
-                # 1. skip non-build-script files
-                if filename.endswith(('.py', '.sh', ".def")):
-                    continue
-
-                full_path = os.path.join(root, filename)
-
-                # 2. skip template files
-                if "template" in full_path:
-                    continue
-
-                # 3. generate key (relative path like 'apps/tool/v1')
-                relative_key = os.path.relpath(full_path, Config.BUILD_SCRIPTS_DIR)
-
-                if relative_key.endswith('.def'):
-                    continue  # skip def files
-
-                packages[relative_key] = full_path
+        # Second pass: expand templates and let them shadow concrete entries.
+        for key, path in list(packages.items()):
+            pl = Utils.get_placeholders_from_script(path)
+            if not pl:
+                continue
+            target = Utils.get_target_from_script(path)
+            if not target:
+                continue
+            defs = []
+            with open(path) as f:
+                for line in f:
+                    if line.startswith("#PL:"):
+                        rest = line[4:].strip()
+                        idx = rest.find(':')
+                        if idx < 0: continue
+                        pl_name = rest[:idx].strip()
+                        raw_vals = rest[idx+1:]
+                        ci = raw_vals.find(' #')
+                        if ci >= 0: raw_vals = raw_vals[:ci]
+                        values, _ = Utils.parse_pl_values(raw_vals.strip())
+                        defs.append((pl_name, values))
+            combos = [{}]
+            for pl_name, values in defs:
+                combos = [dict(c, **{pl_name: v}) for c in combos for v in values]
+            for combo in combos:
+                concrete_key = Utils.interpolate_vars(target, combo)
+                packages[concrete_key] = path
 
         Utils.local_build_scripts_paths = packages
         return packages
@@ -682,8 +1006,29 @@ class ModGen:
     def is_module_available(normalized_name_version: str) -> bool:
         """
         Check if a module is available in the current environment.
+        For constrained deps (e.g. samtools/1.23.1>=1.18), runs 'module avail <name>/'
+        and checks whether any listed version satisfies the constraint range.
         """
-        module_name = normalized_name_version.replace('=', '/')
+        nv, op, min_ver = Utils.split_dep_constraint(normalized_name_version)
+        if op:
+            parts = nv.rsplit('/', 1)
+            name = parts[0] if len(parts) == 2 else nv
+            preferred_ver = parts[1] if len(parts) == 2 else ""
+            try:
+                result = subprocess.run(
+                    ["bash", "-c", f"module avail {name}/"],
+                    capture_output=True, text=True
+                )
+                output = result.stdout + result.stderr
+                for m in re.finditer(rf'{re.escape(name)}/([^\s(/]+)', output):
+                    ver = m.group(1)
+                    if Utils.dep_satisfied_by_version(ver, op, min_ver, preferred_ver):
+                        return True
+            except Exception:
+                pass
+            return False
+        # no constraint — exact name match
+        module_name = nv
         try:
             result = subprocess.run(["bash", "-c", f"module avail {module_name}"], capture_output=True, text=True)
             output = result.stdout + result.stderr
@@ -737,14 +1082,30 @@ class ModGen:
 
     @staticmethod
     def is_module_installed(normalized_name_version: str) -> bool:
+        nv, op, min_ver = Utils.split_dep_constraint(normalized_name_version)
         installed_modules = ModGen.get_installed_modules()
-        return normalized_name_version in installed_modules
+        if op == "":
+            return nv in installed_modules
+        # constraint: accept any installed version in [min_ver, preferred_ver]
+        parts = nv.rsplit('/', 1)
+        name = parts[0] if len(parts) == 2 else nv
+        preferred_ver = parts[1] if len(parts) == 2 else ""
+        prefix = name + "/"
+        for key in installed_modules:
+            if key.startswith(prefix):
+                ver = key[len(prefix):]
+                if Utils.dep_satisfied_by_version(ver, op, min_ver, preferred_ver):
+                    return True
+        return False
+
+    @staticmethod
+    def is_dep_satisfied(dep: str) -> bool:
+        """Check if a dependency is satisfied by either a modgen-managed or system module."""
+        return ModGen.is_module_installed(dep) or ModGen.is_module_available(dep)
 
     @staticmethod
     def get_missing_modules(required_modules: List[str]) -> List[str]:
-        installed_modules = ModGen.get_installed_modules()
-        missing_modules = [mod for mod in required_modules if mod not in installed_modules and not ModGen.is_module_available(mod)]
-        return missing_modules
+        return [mod for mod in required_modules if not ModGen.is_dep_satisfied(mod)]
 
     @staticmethod
     def remove_module(normalized_name_version: str):
@@ -789,7 +1150,7 @@ class BuildObject:
             self.is_remote = False
         elif self.name_version in remote_scripts:
             self.build_script_path = os.path.join(Config.TMP_DIR, self.name_version.replace('/', '--') + ".sh")
-            link = f"https://raw.githubusercontent.com/{Config.SCRIPTS_REPO}/main/build-scripts/{self.name_version}"
+            link = remote_scripts[self.name_version]["url"]
             if not Utils.download_executable(link, self.build_script_path):
                 raise RuntimeError(f"Failed to download remote build script for {self.name_version}.")
             self.is_remote = True
@@ -797,13 +1158,45 @@ class BuildObject:
             self.is_conda = True
 
         if not self.is_conda:
+            template_vars = {}
+            pl = Utils.get_placeholders_from_script(self.build_script_path)
+            if pl:
+                target = Utils.get_target_from_script(self.build_script_path)
+                pre_matched = Utils.match_template_target(target, self.name_version) if target else None
+                if pre_matched:
+                    # name_version is already a concrete expanded name — extract vars from it
+                    concrete_name, template_vars = self.name_version, pre_matched
+                else:
+                    if not Utils.is_in_interactive_shell():
+                        raise RuntimeError(f"Build script for {self.name_version} is a template and requires interactive input, but no TTY is available.")
+                    concrete_name, template_vars = Utils.resolve_template_interactively(self.name_version, self.build_script_path)
+                # re-initialize with the resolved concrete name
+                self.name_version = concrete_name
+                self.is_ref = concrete_name.count('/') > 1
+                self.target_path = ModGen.get_target_dir(concrete_name)
+                self.target_modulefile_path = ModGen.get_modulefile_path(concrete_name)
+                self.tmp_dir_path = ModGen.get_tmp_dir(concrete_name)
+                if ModGen.is_module_installed(concrete_name):
+                    Utils.print_warning(f"Module {Utils.yellow_text(concrete_name)} is already installed. Skipping creation.")
+                    return
+                # write substituted script to tmp so deps and execution use concrete values
+                os.makedirs(Config.TMP_DIR, exist_ok=True)
+                substituted_path = os.path.join(Config.TMP_DIR, concrete_name.replace('/', '--') + ".sh")
+                with open(self.build_script_path) as f:
+                    content = f.read()
+                with open(substituted_path, 'w') as f:
+                    f.write(Utils.interpolate_vars(content, template_vars))
+                os.chmod(substituted_path, 0o755)
+                self.build_script_path = substituted_path
+                self.is_remote = True  # ensures cleanup removes the tmp script
             self.dependencies = Utils.get_dependencies_from_script(self.build_script_path)
             self.sbatch_flags = Utils.get_sbatch_args_from_build_script(self.build_script_path)
             self.interactive_prompts = Utils.get_interactive_prompts(self.build_script_path)
             if self.interactive_prompts and not Utils.is_in_interactive_shell():
                 raise RuntimeError(f"Build script for {self.name_version} requires interactive input, but no TTY is available.")
             for prompt in self.interactive_prompts:
-                Utils.print_note("Build script requires input: " +prompt.replace('\\n', '\n'))
+                display_prompt = Utils.interpolate_vars(prompt, template_vars) if template_vars else prompt
+                Utils.print_note("Build script requires input: " + display_prompt.replace('\\n', '\n'))
                 user_input = input("Enter here: ")
                 if "\n" in user_input or "\r" in user_input:
                     Utils.print_warning("Multiline input detected. Only the first line will be used.")
@@ -1065,10 +1458,13 @@ class BuildGraph:
                 # Missing node should not normally happen because we expanded graph, but guard against it.
                 raise RuntimeError(f"Unknown dependency '{node}' encountered during graph traversal")
             for dep in node_meta.dependencies:
-                if dep not in self.graph:
-                    # Expand on-the-fly if needed
-                    self.graph[dep] = BuildObject(dep)
-                visit(dep)
+                plain_dep, op, _ = Utils.split_dep_constraint(dep)
+                # Skip if a constraint is present and already satisfied by an installed version
+                if op and ModGen.is_dep_satisfied(dep):
+                    continue
+                if plain_dep not in self.graph:
+                    self.graph[plain_dep] = BuildObject(plain_dep)
+                visit(plain_dep)
             visiting.remove(node)
             visited.add(node)
             order.append(node)
@@ -1105,13 +1501,14 @@ class BuildGraph:
         for metadata in self.build_metadata:
             Utils.print_message(f"Processing module {Utils.yellow_text(metadata.name_version)} (with sbatch)...")
             dep_ids = []
-            for dep in metadata.dependencies:
-                if dep in self._build_job_ids:
-                    dep_ids.append(self._build_job_ids[dep])
-                elif ModGen.is_module_installed(dep):
+            for raw_dep in metadata.dependencies:
+                plain_dep, _, _ = Utils.split_dep_constraint(raw_dep)
+                if plain_dep in self._build_job_ids:
+                    dep_ids.append(self._build_job_ids[plain_dep])
+                elif ModGen.is_dep_satisfied(raw_dep):
                     continue
                 else:
-                    Utils.print_error(f"Dependency {Utils.yellow_text(dep)} for {Utils.yellow_text(metadata.name_version)} is not installed and was not submitted via sbatch.")
+                    Utils.print_error(f"Dependency {Utils.yellow_text(raw_dep)} for {Utils.yellow_text(metadata.name_version)} is not installed and was not submitted via sbatch.")
                     return False
             job_id = metadata._submit_sbatch(dep_ids)
             if job_id is None:
@@ -1348,7 +1745,7 @@ class ModGen_Exec:
         if not args.keep and not args.modules and args.commands:
             for command in args.commands:
                 normalized_name_version = Utils.normalize_name_version(command)
-                if ModGen.is_module_installed(normalized_name_version) or ModGen.is_module_available(normalized_name_version):
+                if ModGen.is_dep_satisfied(normalized_name_version):
                     modules_final.append(normalized_name_version)
                 else:
                     command_final.append(command)
@@ -1405,70 +1802,104 @@ class ModGen_Avail:
             action="store_true",
             help="Install the selected build scripts (used with terms)"
         )
+        ModGen_Avail.parser_avail.add_argument(
+            "-e", "--expand",
+            dest="expand",
+            action="store_true",
+            help="Expand template entries to all concrete combinations"
+        )
 
     @staticmethod
     def parse_avail_args(args):
         if args.terms:
             args.terms = [Utils.normalize_name_version(term) for term in args.terms]
 
-        local_packages = Utils.get_local_build_scripts()
-        # Fetch remote metadata entries if configured
+        local_packages = Utils.get_local_build_scripts(expand_templates=args.expand)
         remote_packages = {}
         if Config.REMOTE_METADATA_URL:
             remote_packages = Utils.fetch_remote_build_scripts()
 
         installed_modules = ModGen.get_installed_modules()
 
+        # Build list of (sort_key, name, tags) tuples
+        # tags: set of strings like "installed", "remote", "template"
         added_packages = set()
-        all_packages = []
-        for p in local_packages.keys():
-            if p in installed_modules:
-                all_packages.append(f"{p} (installed)")
-            else:
-                all_packages.append(p)
-            added_packages.add(p)
-        # add remote-only packages with a marker
+        entries = []  # (name, tags_set, script_path_or_None)
+
+        for name, path in local_packages.items():
+            tags = set()
+            if name in installed_modules:
+                tags.add("installed")
+            if not args.expand and Utils.get_placeholders_from_script(path):
+                tags.add("template")
+            entries.append((name, tags, path))
+            added_packages.add(name)
+
+        # URLs of remote scripts that have a template entry — used to suppress their
+        # expanded concrete entries in collapsed view (same as local template handling)
+        remote_template_urls = {
+            info["url"] for info in remote_packages.values() if info.get("is_template")
+        }
+
         for k in sorted(remote_packages.keys()):
-            if k not in added_packages:
-                if k in installed_modules:
-                    all_packages.append(f"{k} (remote, installed)")
-                else:
-                    all_packages.append(f"{k} (remote)")
-                added_packages.add(k)
+            if k in added_packages:
+                continue
+            info = remote_packages[k]
+            is_tmpl = info.get("is_template", False)
 
+            # In collapsed view: skip expanded entries whose template is also present
+            if not args.expand and not is_tmpl and info["url"] in remote_template_urls:
+                continue
+
+            tags = {"remote"}
+            if k in installed_modules:
+                tags.add("installed")
+            if is_tmpl:
+                tags.add("template")
+            entries.append((k, tags, None))
+            added_packages.add(k)
+
+        # Filter by search terms (AND logic, match against name only)
         if args.terms:
-            # match ONLY packages that contain *all* terms (logical AND)
-            filtered_packages = [
-                p for p in all_packages
-                if all(re.search(re.escape(term), p, re.IGNORECASE) for term in args.terms)
+            entries = [
+                (n, t, p) for n, t, p in entries
+                if all(re.search(re.escape(term), n, re.IGNORECASE) for term in args.terms)
             ]
-        else:
-            filtered_packages = all_packages
 
-        if not filtered_packages:
+        if not entries:
             Utils.print_warning("No matching local or remote build scripts found.")
             return
 
-        for pkg in sorted(filtered_packages):
+        for name, tags, _ in sorted(entries, key=lambda e: e[0]):
+            # Colour the name: yellow (StyleName), highlight search terms in bold-yellow
+            colored_name = name
             if args.terms:
-                highlighted = pkg
                 for term in args.terms:
-                    highlighted = re.sub(
+                    colored_name = re.sub(
                         re.escape(term),
-                        lambda m: Utils.yellow_text(m.group(0)),
-                        highlighted,
+                        lambda m: f"\033[1;33m{m.group(0)}\033[0;93m",  # bold-yellow within yellow
+                        colored_name,
                         flags=re.IGNORECASE
                     )
-                print(highlighted)
-            else:
-                print(pkg)
+            colored_name = Utils.yellow_text(colored_name)
 
-        uninstalled_packages = set()
-        for pkg in filtered_packages:
-            if "installed" in pkg:
-                continue
-            else:
-                uninstalled_packages.add(pkg.split(' ')[0])
+            # Build suffix markers
+            suffix_parts = []
+            if "template" in tags:
+                suffix_parts.append(Utils.cyan_text("[template]"))
+            if "installed" in tags:
+                suffix_parts.append(Utils.green_text("(installed)"))
+            if "remote" in tags:
+                suffix_parts.append(Utils.gray_text("(remote)"))
+
+            line = colored_name
+            if suffix_parts:
+                line += " " + " ".join(suffix_parts)
+            print(line)
+
+        uninstalled_packages = set(
+            name for name, tags, _ in entries if "installed" not in tags
+        )
 
         if Utils.is_in_interactive_shell() and args.install and args.terms and uninstalled_packages:
             Utils.print_message("Do you want to install the above modules? [y/N]: ", end="")
@@ -1679,7 +2110,7 @@ class ModGen_Check:
                     script_paths.append(p)
             elif normalized in Utils.fetch_remote_build_scripts():
                 Utils.print_message(f"Downloading build script for {normalized} from remote metadata...")
-                url = Utils.fetch_remote_build_scripts()[normalized]
+                url = Utils.fetch_remote_build_scripts()[normalized]["url"]
                 os.makedirs(Config.TMP_DIR, exist_ok=True)
                 tmp_path = os.path.join(Config.TMP_DIR, f"{normalized.replace('/', '--')}.sh")
                 if Utils.download_executable(url, tmp_path):
@@ -1733,7 +2164,7 @@ class ModGen_Check:
 
         for dep in all_deps:
             key = Utils.normalize_name_version(dep)
-            if ModGen.is_module_installed(key) or ModGen.is_module_available(key):
+            if ModGen.is_dep_satisfied(key):
                 installed.append(dep)
             else:
                 missing.append(dep)
@@ -2121,6 +2552,7 @@ class ModGen_Run:
                     Utils.print_success(f"Submitted run job {Utils.blue_text(job_id)} (afterok: {Utils.blue_text(', '.join(all_deps))}).")
                 else:
                     Utils.print_success(f"Submitted run job {Utils.blue_text(job_id)} for {Utils.yellow_text(os.path.basename(script_path))}.")
+                print(job_id)
         else:
             if sbatch_flags and not Config.submit_job:
                 Utils.print_note("Script has #SBATCH specs but --local mode is enabled. Running locally.")
@@ -2330,5 +2762,6 @@ if __name__ == "__main__":
         Utils.print_error(str(e))
         sys.exit(1)
     except KeyboardInterrupt:
+        print("", file=sys.stderr)
         Utils.print_message("ModGen interrupted by user.")
         sys.exit(1)

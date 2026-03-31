@@ -109,11 +109,12 @@ Manage the library of installed modules and available recipes.
 Search for available build scripts (both local scripts in build-scripts/ and remote metadata). Search terms are combined using **AND** logic (all terms must be present).
 
 ```
-modgen avail [search_terms...] [-i|--install]
+modgen avail [search_terms...] [-i|--install] [-e|--expand]
 ```
 
-* `-i`, `--install`: Automatically install any found packages that are not currently installed.
+* `-i`, `--install`: Automatically install any found packages that are not currently installed. For template entries this prompts for placeholder values interactively; default values prefer the latest already-installed version of each dependency.
 * `-a`, `--add`: Alias for `--install`.
+* `-e`, `--expand`: Show all concrete combinations of a template instead of the collapsed `[template]` entry.
 
 **Examples:**
 

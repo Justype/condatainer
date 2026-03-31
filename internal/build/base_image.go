@@ -12,10 +12,10 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// BaseImageBuildObject wraps DefBuildObject but overrides IsInstalled() to search
-// all configured image paths (not just the writable directory).
+// BaseImageBuildObject wraps BuildObject but overrides IsInstalled() and Build()
+// to search all configured image paths and skip SquashFS extraction.
 type BaseImageBuildObject struct {
-	*DefBuildObject
+	*BuildObject
 }
 
 // EnsureBaseImage is the fast-path entry point for ensuring the base image exists.
@@ -44,7 +44,7 @@ func (b *BaseImageBuildObject) IsInstalled() bool {
 // Unlike regular def builds, the SIF produced by apptainer is kept directly as the
 // final image — no SquashFS extraction step is performed.
 func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error {
-	targetPath, finalPath := buildOverlayPaths(b.BaseBuildObject)
+	targetPath, finalPath := buildOverlayPaths(b.BuildObject)
 	styledImage := utils.StyleName(filepath.Base(targetPath))
 
 	if !b.update && b.IsInstalled() {
@@ -52,7 +52,7 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 	}
 
 	// Before starting any build work, check that no exec/run is holding the existing base image.
-	if skip, err := checkShouldBuild(b.BaseBuildObject); err != nil {
+	if skip, err := checkShouldBuild(b.BuildObject); err != nil {
 		return err
 	} else if skip {
 		// IsInstalled already handled the skip case above; checkShouldBuild handles the lock check.
@@ -158,7 +158,7 @@ func NewBaseImageBuildObject(update bool) (*BaseImageBuildObject, error) {
 	tmpDir := resolveTmpDirForDef()
 	tmpOverlayPath, _ := buildTmpPaths(nameVersion, tmpDir, ".img")
 
-	base := &BaseBuildObject{
+	base := &BuildObject{
 		nameVersion:       nameVersion,
 		submitJob:         false, // base image is always built locally
 		tmpOverlayPath:    tmpOverlayPath,
@@ -176,8 +176,8 @@ func NewBaseImageBuildObject(update bool) (*BaseImageBuildObject, error) {
 		return nil, fmt.Errorf("base image build source not found or is not a .def file")
 	}
 
-	defObj := &DefBuildObject{BaseBuildObject: base}
-	return &BaseImageBuildObject{DefBuildObject: defObj}, nil
+	base.buildType = BuildTypeDef
+	return &BaseImageBuildObject{BuildObject: base}, nil
 }
 
 // tryDownloadPrebuiltSif attempts to download a prebuilt .sif base image from the given prebuiltLink base URL.

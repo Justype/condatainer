@@ -8,6 +8,7 @@ go 1.25.5
 // golang.org/x/term   for Terminal Detection
 
 require (
+	github.com/chzyer/readline v1.5.1
 	github.com/fatih/color v1.19.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10

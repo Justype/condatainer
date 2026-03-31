@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,10 +24,10 @@ var ForceRefresh bool
 
 // RemoteMetadataCache is the on-disk envelope for the cached remote build script metadata.
 type RemoteMetadataCache struct {
-	FetchedAt    time.Time                    `json:"fetched_at"`
-	SourceURL    string                       `json:"source_url"`
-	PrebuiltLink string                       `json:"prebuilt_link,omitempty"`
-	Metadata     map[string]RemoteScriptEntry `json:"metadata"`
+	FetchedAt    time.Time             `json:"fetched_at"`
+	SourceURL    string                `json:"source_url"`
+	PrebuiltLink string                `json:"prebuilt_link,omitempty"`
+	Metadata     map[string]ScriptInfo `json:"metadata"`
 }
 
 type localScriptsDirFingerprint struct {
@@ -101,7 +102,20 @@ func loadLocalScriptsCache(path string) (*LocalScriptsCache, error) {
 	if err := utils.ReadGzipJSONFile(path, &cache); err != nil {
 		return nil, err
 	}
+	// Name is json:"-" — repopulate from map keys after deserialization
+	populateNamesFromKeys(cache.Scripts)
 	return &cache, nil
+}
+
+// populateNamesFromKeys fills the runtime Name field from the map key for
+// every entry that has an empty Name (e.g. after JSON deserialization).
+func populateNamesFromKeys(scripts map[string]ScriptInfo) {
+	for k, v := range scripts {
+		if v.Name == "" {
+			v.Name = k
+			scripts[k] = v
+		}
+	}
 }
 
 func saveLocalScriptsCache(path string, cache *LocalScriptsCache) error {
@@ -140,7 +154,7 @@ func saveRemoteMetadataCache(path string, cache *RemoteMetadataCache) error {
 }
 
 // fetchRemoteMetadata performs the HTTP+gzip+JSON fetch from the given metadata URL.
-func fetchRemoteMetadata(url string) (map[string]RemoteScriptEntry, error) {
+func fetchRemoteMetadata(url string) (map[string]ScriptInfo, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -163,28 +177,11 @@ func fetchRemoteMetadata(url string) (map[string]RemoteScriptEntry, error) {
 		return nil, fmt.Errorf("failed to read metadata: %w", err)
 	}
 
-	var metadata map[string]RemoteScriptEntry
+	var metadata map[string]ScriptInfo
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		return nil, fmt.Errorf("failed to parse metadata: %w", err)
 	}
 	return metadata, nil
-}
-
-// convertToScriptInfoMap converts a raw metadata map to ScriptInfo map, tagging each entry with sourceURL and prebuiltLink.
-func convertToScriptInfoMap(metadata map[string]RemoteScriptEntry, sourceURL, prebuiltLink string) map[string]ScriptInfo {
-	scripts := make(map[string]ScriptInfo, len(metadata))
-	for name, entry := range metadata {
-		scripts[name] = ScriptInfo{
-			Name:         name,
-			Path:         entry.RelativePath,
-			IsContainer:  strings.HasSuffix(entry.RelativePath, ".def"),
-			IsRemote:     true,
-			SourceURL:    sourceURL,
-			PrebuiltLink: prebuiltLink,
-			Deps:         entry.Deps,
-		}
-	}
-	return scripts
 }
 
 // fetchPrebuiltLink retrieves the prebuilt base URL for a remote scripts source.
@@ -264,22 +261,42 @@ var (
 	cachedMergedRemote       map[string]ScriptInfo                // merged across all URLs
 )
 
-// ScriptInfo holds information about a build script
+// ScriptInfo holds information about a build script.
+// Runtime-only fields are tagged json:"-" so they are not serialized to
+// the on-disk cache. Serialized fields use lowercase JSON keys shared by
+// both the local scripts cache and the PL remote metadata JSON.
 type ScriptInfo struct {
-	Name         string   // name/version format (e.g., "samtools/1.21")
-	Path         string   // full path to build script (local) or relative path (remote)
-	IsContainer  bool     // true if .def file
-	IsRemote     bool     // true if from remote repository
-	SourceURL    string   // base URL of the remote this script came from (empty for local)
-	PrebuiltLink string   // base URL for prebuilt downloads (from metadata/prebuilt_link); empty = no prebuilt
-	Deps         []string // dependencies from remote metadata; nil for local scripts
+	// ---- runtime fields (NOT serialized) ----
+	Name         string `json:"-"` // populated from map key after loading
+	IsRemote     bool   `json:"-"` // set after loading based on source
+	SourceURL    string `json:"-"` // base URL of the remote (empty for local)
+	PrebuiltLink string `json:"-"` // base URL for prebuilt downloads; empty = no prebuilt
+
+	// ---- serialized fields ----
+	Path           string              `json:"path"`                      // full path (local) or relative path (remote)
+	IsContainer    bool                `json:"is_container,omitempty"`    // true if .def file
+	Deps           []string            `json:"deps,omitempty"`            // build dependencies
+	IsTemplate     bool                `json:"is_template,omitempty"`     // true if the script has #PL: placeholders
+	TargetTemplate string              `json:"target_template,omitempty"` // raw #TARGET: value before interpolation
+	PL             map[string][]string `json:"pl,omitempty"`              // template: all values (sorted desc, "*" last if open); expanded: single-element [current_value]
+	PLOrder        []string            `json:"pl_order,omitempty"`        // placeholder key declaration order (PL map iteration is non-deterministic)
+	Whatis         string              `json:"whatis,omitempty"`          // description (interpolated for expanded entries)
 }
 
-// RemoteScriptEntry represents a single script entry in the metadata
-type RemoteScriptEntry struct {
-	RelativePath string   `json:"relative_path"`
-	Deps         []string `json:"deps"`
-	Whatis       string   `json:"whatis"`
+// CurrentVars returns a map of placeholder name → current value for an
+// expanded (non-template) entry. The current value is PL[key][0].
+// Returns nil if PL is empty or if this is a template entry.
+func (s ScriptInfo) CurrentVars() map[string]string {
+	if len(s.PL) == 0 || s.IsTemplate {
+		return nil
+	}
+	vars := make(map[string]string, len(s.PL))
+	for k, vs := range s.PL {
+		if len(vs) > 0 && vs[0] != "*" {
+			vars[k] = vs[0]
+		}
+	}
+	return vars
 }
 
 // GetLocalBuildScripts scans all build-scripts directories and returns a map of name -> ScriptInfo.
@@ -351,13 +368,58 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 				relPath = strings.TrimSuffix(relPath, ".def")
 			}
 
+			// Check for #PL: placeholders
+			pls, plErr := utils.GetPlaceholdersFromScript(path)
+			if plErr == nil && len(pls) > 0 {
+				// PL template script
+				target, _ := utils.GetTargetFromScript(path)
+				if target == "" {
+					utils.PrintDebug("Script %s has #PL: but no #TARGET: — skipping PL expansion", relPath)
+					if _, exists := scripts[relPath]; !exists {
+						scripts[relPath] = ScriptInfo{Name: relPath, Path: path, IsContainer: isContainer}
+					}
+					return nil
+				}
+
+				rawWhatis := utils.GetWhatIsFromScript(path)
+				rawDeps, _ := utils.GetDependenciesFromScript(path, false)
+
+				// Build pl dict and order
+				plDict := make(map[string][]string, len(pls))
+				plOrder := make([]string, 0, len(pls))
+				for _, def := range pls {
+					plDict[def.Name] = def.Values
+					plOrder = append(plOrder, def.Name)
+				}
+
+				// Register template entry (keyed by its own relative path).
+				// Raw (un-interpolated) deps are stored so matchTemplateTarget can
+				// interpolate them when resolving open-ended (*) target names.
+				if _, exists := scripts[relPath]; !exists {
+					scripts[relPath] = ScriptInfo{
+						Name:           relPath,
+						Path:           path,
+						IsContainer:    isContainer,
+						IsTemplate:     true,
+						TargetTemplate: target,
+						PL:             plDict,
+						PLOrder:        plOrder,
+						Whatis:         rawWhatis,
+						Deps:           rawDeps,
+					}
+				}
+
+				return nil
+			}
+
+			// Regular (non-PL) script
 			// First match wins - don't overwrite if already found in higher-priority dir
 			if _, exists := scripts[relPath]; !exists {
 				scripts[relPath] = ScriptInfo{
 					Name:        relPath,
 					Path:        path,
 					IsContainer: isContainer,
-					IsRemote:    false,
+					Whatis:      utils.GetWhatIsFromScript(path),
 				}
 			}
 			return nil
@@ -368,6 +430,10 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 			utils.PrintDebug("Error scanning %s: %v", buildScriptsDir, err)
 		}
 	}
+
+	// Expand all local PL template entries into per-combination entries.
+	// Reuses the same logic as the remote path (expandTemplates).
+	expandTemplates(scripts)
 
 	cachedLocalScripts = scripts
 	if cachePath, err := localScriptsCachePath(); err == nil {
@@ -398,9 +464,10 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 	if !ForceRefresh && cacheErr == nil && ttl > 0 {
 		if cache, err := loadRemoteMetadataCache(cachePath, baseURL, ttl); err == nil {
 			utils.PrintDebug("Using cached remote metadata for %s (fetched %s ago)", baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
-			scripts := convertToScriptInfoMap(cache.Metadata, baseURL, cache.PrebuiltLink)
-			cachedRemoteScriptsByURL[baseURL] = scripts
-			return scripts, nil
+			setRemoteFields(cache.Metadata, baseURL, cache.PrebuiltLink)
+			expandTemplates(cache.Metadata)
+			cachedRemoteScriptsByURL[baseURL] = cache.Metadata
+			return cache.Metadata, nil
 		}
 	}
 
@@ -413,9 +480,10 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 			if cache, staleErr := loadRemoteMetadataCacheIgnoreExpiry(cachePath, baseURL); staleErr == nil {
 				utils.PrintWarning("Network unavailable for %s; using cached metadata (fetched %s ago)",
 					baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
-				scripts := convertToScriptInfoMap(cache.Metadata, baseURL, cache.PrebuiltLink)
-				cachedRemoteScriptsByURL[baseURL] = scripts
-				return scripts, nil
+				setRemoteFields(cache.Metadata, baseURL, cache.PrebuiltLink)
+				expandTemplates(cache.Metadata)
+				cachedRemoteScriptsByURL[baseURL] = cache.Metadata
+				return cache.Metadata, nil
 			}
 		}
 		return nil, err
@@ -424,6 +492,8 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 
 	// Fetch per-source prebuilt base URL (non-fatal; empty = no prebuilt for this source)
 	prebuiltLink := fetchPrebuiltLink(baseURL)
+	setRemoteFields(metadata, baseURL, prebuiltLink)
+	expandTemplates(metadata)
 
 	// Persist to disk (non-fatal)
 	if cacheErr == nil && ttl > 0 {
@@ -438,9 +508,8 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 		}
 	}
 
-	scripts := convertToScriptInfoMap(metadata, baseURL, prebuiltLink)
-	cachedRemoteScriptsByURL[baseURL] = scripts
-	return scripts, nil
+	cachedRemoteScriptsByURL[baseURL] = metadata
+	return metadata, nil
 }
 
 // GetRemoteBuildScripts fetches and merges build script metadata from all configured remote URLs.
@@ -482,46 +551,213 @@ func GetRemoteBuildScripts() (map[string]ScriptInfo, error) {
 	return merged, nil
 }
 
+// setRemoteFields populates the runtime (json:"-") fields on every entry after loading
+// from a remote source (network fetch or disk cache).
+func setRemoteFields(scripts map[string]ScriptInfo, sourceURL, prebuiltLink string) {
+	for name, info := range scripts {
+		info.Name = name
+		info.IsRemote = true
+		info.SourceURL = sourceURL
+		info.PrebuiltLink = prebuiltLink
+		if !info.IsContainer {
+			info.IsContainer = strings.HasSuffix(info.Path, ".def")
+		}
+		scripts[name] = info
+	}
+}
+
+// expandTemplates expands PL template entries into per-combination entries.
+// Remote metadata only stores templates; this mirrors what GetLocalBuildScripts does locally.
+func expandTemplates(scripts map[string]ScriptInfo) {
+	for _, info := range scripts {
+		if !info.IsTemplate || info.TargetTemplate == "" || len(info.PLOrder) == 0 {
+			continue
+		}
+		pls := make([]utils.PlaceholderDef, 0, len(info.PLOrder))
+		for _, key := range info.PLOrder {
+			vals := info.PL[key]
+			open := len(vals) > 0 && vals[len(vals)-1] == "*"
+			pls = append(pls, utils.PlaceholderDef{Name: key, Values: vals, Open: open})
+		}
+		for _, combo := range utils.ExpandPlaceholders(pls) {
+			expandedName := utils.InterpolateVars(info.TargetTemplate, combo)
+			if expandedName == "" || expandedName == info.Name {
+				continue
+			}
+			if _, exists := scripts[expandedName]; exists {
+				continue
+			}
+			expandedPL := make(map[string][]string, len(combo))
+			for k, v := range combo {
+				expandedPL[k] = []string{v}
+			}
+			expandedDeps := make([]string, len(info.Deps))
+			for i, dep := range info.Deps {
+				expandedDeps[i] = utils.InterpolateVars(dep, combo)
+			}
+			scripts[expandedName] = ScriptInfo{
+				Name:         expandedName,
+				Path:         info.Path,
+				IsContainer:  info.IsContainer,
+				IsRemote:     info.IsRemote,
+				SourceURL:    info.SourceURL,
+				PrebuiltLink: info.PrebuiltLink,
+				Deps:         expandedDeps,
+				PL:           expandedPL,
+				PLOrder:      info.PLOrder,
+				Whatis:       utils.InterpolateVars(info.Whatis, combo),
+			}
+		}
+	}
+}
+
 // FindBuildScript looks for a build script by name/version.
 // By default, local scripts take precedence over remote.
 // When PreferRemote is true, remote scripts take precedence over local.
+// Falls back to template pattern matching for open-ended (*) placeholders.
 // Returns the ScriptInfo and a boolean indicating if it was found.
 func FindBuildScript(nameVersion string) (ScriptInfo, bool) {
 	normalized := utils.NormalizeNameVersion(nameVersion)
 
+	var localScripts, remoteScripts map[string]ScriptInfo
+
 	if PreferRemote {
-		// Remote first: remote scripts take precedence over local
-		remoteScripts, err := GetRemoteBuildScripts()
-		if err == nil {
-			if info, found := remoteScripts[normalized]; found {
+		if s, err := GetRemoteBuildScripts(); err == nil {
+			remoteScripts = s
+			if info, found := s[normalized]; found {
 				return info, true
 			}
 		}
-
-		localScripts, err := GetLocalBuildScripts()
-		if err == nil {
-			if info, found := localScripts[normalized]; found {
+		if s, err := GetLocalBuildScripts(); err == nil {
+			localScripts = s
+			if info, found := s[normalized]; found {
 				return info, true
 			}
 		}
 	} else {
-		// Default: local scripts take precedence over remote
-		localScripts, err := GetLocalBuildScripts()
-		if err == nil {
-			if info, found := localScripts[normalized]; found {
+		if s, err := GetLocalBuildScripts(); err == nil {
+			localScripts = s
+			if info, found := s[normalized]; found {
 				return info, true
 			}
 		}
-
-		remoteScripts, err := GetRemoteBuildScripts()
-		if err == nil {
-			if info, found := remoteScripts[normalized]; found {
+		if s, err := GetRemoteBuildScripts(); err == nil {
+			remoteScripts = s
+			if info, found := s[normalized]; found {
 				return info, true
 			}
 		}
 	}
 
+	// Fallback: match against template #TARGET: patterns.
+	// This lets users reference open-ended (*) values by name directly,
+	// e.g. "grch38/star/2.7.11b/gencode47-75" resolves via star-gencode template.
+	if info, found := matchTemplateTarget(normalized, localScripts); found {
+		return info, true
+	}
+	if info, found := matchTemplateTarget(normalized, remoteScripts); found {
+		return info, true
+	}
+
 	return ScriptInfo{}, false
+}
+
+// matchTemplateTarget tries to match name against every template's TargetTemplate
+// pattern, extracting placeholder values. Returns a synthesized expanded ScriptInfo
+// on success.
+func matchTemplateTarget(name string, scripts map[string]ScriptInfo) (ScriptInfo, bool) {
+	if name == "" || len(scripts) == 0 {
+		return ScriptInfo{}, false
+	}
+	for _, tmpl := range scripts {
+		if !tmpl.IsTemplate || tmpl.TargetTemplate == "" {
+			continue
+		}
+		vars, ok := matchTarget(name, tmpl.TargetTemplate, tmpl.PLOrder)
+		if !ok {
+			continue
+		}
+		expandedPL := make(map[string][]string, len(vars))
+		for k, v := range vars {
+			expandedPL[k] = []string{v}
+		}
+		var expandedDeps []string
+		for _, dep := range tmpl.Deps {
+			expandedDeps = append(expandedDeps, utils.InterpolateVars(dep, vars))
+		}
+		return ScriptInfo{
+			Name:         name,
+			Path:         tmpl.Path,
+			IsContainer:  tmpl.IsContainer,
+			IsRemote:     tmpl.IsRemote,
+			SourceURL:    tmpl.SourceURL,
+			PrebuiltLink: tmpl.PrebuiltLink,
+			Deps:         expandedDeps,
+			PL:           expandedPL,
+			PLOrder:      tmpl.PLOrder,
+			Whatis:       utils.InterpolateVars(tmpl.Whatis, vars),
+		}, true
+	}
+	return ScriptInfo{}, false
+}
+
+// matchTarget converts a TargetTemplate like "grch38/star/{star_version}/gencode{gencode_version}-{read_length}"
+// into a regex and matches name against it, returning the extracted variable map.
+func matchTarget(name, tmpl string, plOrder []string) (map[string]string, bool) {
+	// Build regex: escape literal parts, replace {key} with a named capture group
+	// whose stop character is inferred from the next literal character (or end of string).
+	re := regexp.MustCompile(`\{([^}]+)\}`)
+	parts := re.FindAllStringSubmatchIndex(tmpl, -1)
+	if len(parts) == 0 {
+		return nil, false
+	}
+
+	var sb strings.Builder
+	sb.WriteString("^")
+	pos := 0
+	for i, loc := range parts {
+		// literal before this placeholder
+		sb.WriteString(regexp.QuoteMeta(tmpl[pos:loc[0]]))
+		key := tmpl[loc[2]:loc[3]]
+		// determine stop character: first char of next literal segment
+		nextLitStart := loc[1]
+		var stopChar string
+		if i+1 < len(parts) {
+			nextLit := tmpl[nextLitStart:parts[i+1][0]]
+			if len(nextLit) > 0 {
+				stopChar = regexp.QuoteMeta(string(nextLit[0]))
+			}
+		}
+		if stopChar != "" {
+			sb.WriteString("(?P<" + key + ">[^" + stopChar + "]+)")
+		} else {
+			sb.WriteString("(?P<" + key + ">.+)")
+		}
+		pos = nextLitStart
+	}
+	// remaining literal after last placeholder
+	sb.WriteString(regexp.QuoteMeta(tmpl[pos:]))
+	sb.WriteString("$")
+
+	compiled, err := regexp.Compile(sb.String())
+	if err != nil {
+		return nil, false
+	}
+	m := compiled.FindStringSubmatch(name)
+	if m == nil {
+		return nil, false
+	}
+	vars := make(map[string]string, len(plOrder))
+	for _, key := range compiled.SubexpNames() {
+		if key == "" {
+			continue
+		}
+		idx := compiled.SubexpIndex(key)
+		if idx >= 0 && idx < len(m) {
+			vars[key] = m[idx]
+		}
+	}
+	return vars, true
 }
 
 // DownloadRemoteScript downloads a remote build script to the local tmp directory.

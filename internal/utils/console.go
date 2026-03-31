@@ -96,6 +96,12 @@ func StyleName(name string) string { return yellow(name) }
 // StyleHighlight formats search matches or highlighted text (Yellow Bold).
 func StyleHighlight(text string) string { return bold(yellow(text)) }
 
+// HighlightTemplatePlaceholders renders a #TARGET: pattern with {var} tokens in
+// yellow-bold and the surrounding literal path segments in default color.
+func HighlightTemplatePlaceholders(pattern string) string {
+	return plTokenRe.ReplaceAllStringFunc(pattern, StyleHighlight)
+}
+
 // FormatBytes formats bytes into human-readable format (e.g., "1.50 GB").
 func FormatBytes(bytes int64) string {
 	const (
