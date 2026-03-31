@@ -63,7 +63,8 @@ config.yaml
 
 # --- Helper & Build Scripts ---
 # Generated helper scripts (downloaded dynamically)
-helper-scripts
+build-scripts/
+helper-scripts/
 
 # --- Documentation (Sphinx) ---
 docs/_build/
