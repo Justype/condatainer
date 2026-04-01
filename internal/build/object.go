@@ -147,7 +147,7 @@ func (b *BuildObject) setupCondaFields() error {
 	return nil
 }
 func (b *BuildObject) RequiresScheduler() bool {
-	return b.submitJob && scheduler.HasSchedulerSpecs(b.scriptSpecs)
+	return b.submitJob && (config.Global.Build.AlwaysSubmit || scheduler.HasSchedulerSpecs(b.scriptSpecs))
 }
 
 // BuildLockInfo holds metadata stored inside a build lock file.

@@ -42,6 +42,7 @@ type BuildConfig struct {
 	BlockSize     string                 // mksquashfs block size for app/env/external overlays (default: 128k)
 	DataBlockSize string                 // mksquashfs block size for data/ref overlays (default: 1m)
 	UseTmpOverlay bool                   // Use ext3 tmp overlay for build tmp/target instead of host directories (default: false)
+	AlwaysSubmit  bool                   // Always submit builds as scheduler jobs even without script directives (default: false)
 	Channels      []string               // conda channels in priority order (default: [conda-forge, bioconda])
 }
 

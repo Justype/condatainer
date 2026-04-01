@@ -144,6 +144,7 @@ func setDefaults() {
 	viper.SetDefault("build.block_size", "128k")
 	viper.SetDefault("build.data_block_size", "512k")
 	viper.SetDefault("build.use_tmp_overlay", false)
+	viper.SetDefault("build.always_submit", false)
 	viper.SetDefault("build.tmp_overlay_size", 20480)
 
 	viper.SetDefault("channels", []string{"conda-forge", "bioconda"})
@@ -967,6 +968,10 @@ func LoadFromViper() {
 
 	if useTmp, ok := layerBool("build.use_tmp_overlay"); ok {
 		Global.Build.UseTmpOverlay = useTmp
+	}
+
+	if alwaysSubmit, ok := layerBool("build.always_submit"); ok {
+		Global.Build.AlwaysSubmit = alwaysSubmit
 	}
 
 	if ch := GetChannels(); len(ch) > 0 {
