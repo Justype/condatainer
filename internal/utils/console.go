@@ -209,6 +209,15 @@ func IsInteractiveShell() bool {
 	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }
 
+// IsStdinPiped returns true if stdin is a pipe or redirected (not a TTY).
+func IsStdinPiped() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice == 0
+}
+
 // ShouldAnswerYes checks if we should automatically answer yes to prompts
 // Returns true if --yes flag is set, false otherwise
 func ShouldAnswerYes() bool {

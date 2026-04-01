@@ -47,7 +47,7 @@ var configKeyDefs = map[string]bool{
 	"build.block_size":       false,
 	"build.data_block_size":  false,
 	"build.use_tmp_overlay":  false,
-	"build.always_submit":   false,
+	"build.always_submit":    false,
 	"build.tmp_overlay_size": false,
 	"channels":               true,
 }

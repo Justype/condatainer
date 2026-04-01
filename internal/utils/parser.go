@@ -755,4 +755,3 @@ func ExpandPlaceholders(defs []PlaceholderDef) []map[string]string {
 
 	return result
 }
-
