@@ -47,6 +47,7 @@ var configKeyDefs = map[string]bool{
 	"build.block_size":       false,
 	"build.data_block_size":  false,
 	"build.use_tmp_overlay":  false,
+	"build.always_submit":    false,
 	"build.tmp_overlay_size": false,
 	"channels":               true,
 }
@@ -203,7 +204,7 @@ func configValueCompletion(key string) []string {
 		return config.CompressNames()
 	case "build.block_size", "build.data_block_size":
 		return config.BlockSizeCompletions
-	case "build.use_tmp_overlay":
+	case "build.use_tmp_overlay", "build.always_submit":
 		return []string{"true", "false"}
 	case "build.tmp_overlay_size":
 		return []string{"10g", "20g", "40g"}
@@ -502,6 +503,8 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 
 		// Build settings (longest key: tmp_overlay_size = 16 chars)
 		fmt.Printf("%s %s\n", utils.StyleTitle("Build Configuration:"), "build.*")
+		fmt.Printf("  %-17s %v%s\n", "always_submit:", config.Global.Build.AlwaysSubmit, srcTag("build.always_submit"))
+		printOverridden("                    ", "build.always_submit")
 		fmt.Printf("  %-17s %d%s\n", "ncpus:", config.Global.Build.Defaults.CpusPerTask, srcTag("build.ncpus"))
 		printOverridden("                    ", "build.ncpus")
 		fmt.Printf("  %-17s %s%s\n", "mem:", utils.FormatMemoryMB(config.Global.Build.Defaults.MemPerNodeMB), srcTag("build.mem"))

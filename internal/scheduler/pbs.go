@@ -492,7 +492,12 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	// Write RuntimeConfig directives
 	ctrl := specs.Control
 	if ctrl.JobName != "" {
-		fmt.Fprintf(writer, "#PBS -N %s\n", ctrl.JobName)
+		// PBS may limit job names to 15 characters; truncate if necessary to avoid qsub rejections.
+		jobName := ctrl.JobName
+		if len(jobName) > 15 {
+			jobName = jobName[:15]
+		}
+		fmt.Fprintf(writer, "#PBS -N %s\n", jobName)
 	}
 	if ctrl.WorkDir != "" {
 		fmt.Fprintf(writer, "#PBS -d %s\n", ctrl.WorkDir)

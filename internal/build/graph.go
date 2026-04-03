@@ -209,7 +209,12 @@ func (bg *BuildGraph) runSchedulerStep() error {
 
 		// Collect dependency job IDs
 		depIDs := []string{}
-		for _, dep := range meta.Dependencies() {
+		for _, rawDep := range meta.Dependencies() {
+			dep, op, minVer := utils.SplitDepConstraint(rawDep)
+			// If a constraint is present and already satisfied, skip — same logic as topologicalSort
+			if op != "" && constraintAlreadySatisfied(dep, op, minVer) {
+				continue
+			}
 			if jobID, exists := bg.jobIDs[dep]; exists {
 				// Dependency was submitted as a scheduler job
 				depIDs = append(depIDs, jobID)
@@ -278,25 +283,26 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 		return "", fmt.Errorf("failed to create build lock for %s: %w", meta.NameVersion(), err)
 	}
 
-	// Get script specs
+	// Get script specs; when always_submit forces submission without directives, synthesize empty specs
 	specs := meta.ScriptSpecs()
+	if specs == nil {
+		effRS := buildEffectiveResourceSpec(nil)
+		specs = &scheduler.ScriptSpecs{Spec: effRS}
+	}
 
-	// Derive job name from name/version if not set in script (10 chars max)
-	if specs != nil && specs.Control.JobName == "" {
+	// Derive job name from name/version if not set in script
+	if specs.Control.JobName == "" {
 		name := meta.NameVersion()
-		if idx := strings.Index(name, "/"); idx != -1 {
+		if idx := strings.LastIndex(name, "/"); idx != -1 {
 			name = name[:idx]
 		}
-		if len(name) > 10 {
-			name = name[:10]
-		}
-		specs.Control.JobName = name
+		specs.Control.JobName = "cnt-" + name
 	}
 
 	// Create job specification
 	jobSpec := &scheduler.JobSpec{
 		Name:           meta.NameVersion(),
-		Command:        buildSchedulerCreateCommand(meta.NameVersion(), bg.update),
+		Command:        buildSchedulerCreateCommand(meta.NameVersion(), bg.update, meta.InteractiveInputs()),
 		Specs:          specs,
 		DepJobIDs:      depIDs,
 		OverrideOutput: true,
@@ -333,15 +339,26 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 
 // buildSchedulerCreateCommand returns the condatainer create command for scheduler jobs,
 // propagating the --remote and --update flags if active.
-func buildSchedulerCreateCommand(nameVersion string, update bool) string {
-	cmd := "condatainer create"
+// If interactiveInputs is non-empty, the inputs are embedded as a heredoc so the
+// scheduler node does not need a TTY.
+func buildSchedulerCreateCommand(nameVersion string, update bool, interactiveInputs []string) string {
+	var cmd strings.Builder
+	cmd.WriteString("condatainer create")
 	if PreferRemote {
-		cmd += " --remote"
+		cmd.WriteString(" --remote")
 	}
 	if update {
-		cmd += " --update"
+		cmd.WriteString(" --update")
 	}
-	return cmd + " " + nameVersion
+	cmd.WriteString(" " + nameVersion)
+	if len(interactiveInputs) > 0 {
+		cmd.WriteString(" << 'CNT_INPUTS_EOF'")
+		for _, input := range interactiveInputs {
+			cmd.WriteString("\n" + input)
+		}
+		cmd.WriteString("\nCNT_INPUTS_EOF")
+	}
+	return cmd.String()
 }
 
 // GetJobIDs returns the map of job IDs for scheduler builds

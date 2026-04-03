@@ -78,16 +78,17 @@ type BuildObject struct {
 
 // Common interface implementations for BuildObject
 
-func (b *BuildObject) NameVersion() string       { return b.nameVersion }
-func (b *BuildObject) BuildSource() string       { return b.buildSource }
-func (b *BuildObject) Dependencies() []string    { return b.dependencies }
-func (b *BuildObject) TmpDir() string            { return b.tmpDir }
-func (b *BuildObject) TmpOverlayPath() string    { return b.tmpOverlayPath }
-func (b *BuildObject) TargetOverlayPath() string { return b.targetOverlayPath }
-func (b *BuildObject) CntDirPath() string        { return b.cntDirPath }
-func (b *BuildObject) ScriptSpecs() *ScriptSpecs { return b.scriptSpecs }
-func (b *BuildObject) Update() bool              { return b.update }
-func (b *BuildObject) Type() BuildType           { return b.buildType }
+func (b *BuildObject) NameVersion() string         { return b.nameVersion }
+func (b *BuildObject) BuildSource() string         { return b.buildSource }
+func (b *BuildObject) Dependencies() []string      { return b.dependencies }
+func (b *BuildObject) TmpDir() string              { return b.tmpDir }
+func (b *BuildObject) TmpOverlayPath() string      { return b.tmpOverlayPath }
+func (b *BuildObject) TargetOverlayPath() string   { return b.targetOverlayPath }
+func (b *BuildObject) CntDirPath() string          { return b.cntDirPath }
+func (b *BuildObject) ScriptSpecs() *ScriptSpecs   { return b.scriptSpecs }
+func (b *BuildObject) Update() bool                { return b.update }
+func (b *BuildObject) Type() BuildType             { return b.buildType }
+func (b *BuildObject) InteractiveInputs() []string { return b.interactiveInputs }
 
 func (b *BuildObject) String() string {
 	return fmt.Sprintf(`BuildObject:
@@ -147,7 +148,7 @@ func (b *BuildObject) setupCondaFields() error {
 	return nil
 }
 func (b *BuildObject) RequiresScheduler() bool {
-	return b.submitJob && scheduler.HasSchedulerSpecs(b.scriptSpecs)
+	return b.submitJob && (config.Global.Build.AlwaysSubmit || scheduler.HasSchedulerSpecs(b.scriptSpecs))
 }
 
 // BuildLockInfo holds metadata stored inside a build lock file.
@@ -456,8 +457,8 @@ func (b *BuildObject) collectInteractiveInputs(ctx context.Context) error {
 		return nil
 	}
 
-	// Interactive prompts require a TTY
-	if !utils.IsInteractiveShell() {
+	// Interactive prompts require a TTY or piped stdin (e.g. scheduler job with embedded heredoc)
+	if !utils.IsInteractiveShell() && !utils.IsStdinPiped() {
 		return fmt.Errorf("build script for %s requires interactive input, but no TTY is available", b.nameVersion)
 	}
 

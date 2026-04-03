@@ -200,6 +200,7 @@ Blacklisted (passthrough): `--gpus-per-socket`, `--sockets-per-node`, `--cores-p
 
 PBS Pro/OpenPBS only; Torque not supported.
 
+- Job names (`-N`) are truncated to **15 characters** at script generation time for safety.
 - Resources: `select=N:ncpus=M:mpiprocs=P:mem=Xgb:ngpus=G`
 - Old-style standalone resources (`-l nodes=`, `-l ncpus=`, etc.) → **passthrough**
 - Multi-chunk `+`: all chunks must share the same `CpusPerTask = ncpus/mpiprocs`; `ngpus=` in any chunk → passthrough

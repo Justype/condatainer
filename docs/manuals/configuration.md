@@ -117,6 +117,7 @@ condatainer config init -l system
 | `build.block_size` | `128k` | mksquashfs block size for app/env/external overlays (e.g. `128k`, `512k`) |
 | `build.data_block_size` | `1m` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
 | `build.use_tmp_overlay` | `false` | Use a temporary ext3 overlay during builds instead of host directories |
+| `build.always_submit` | `false` | Always submit builds as scheduler jobs even if the script has no scheduler directives |
 | `build.tmp_overlay_size` | `20480` | Temporary ext3 overlay size (supports units: `20g`, `20480`); only used when `use_tmp_overlay` is `true` |
 | `channels` | `[conda-forge, bioconda]` | Conda channels passed to micromamba in priority order (first = highest priority) |
 
@@ -225,6 +226,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_PREFER_REMOTE`        | `prefer_remote`        |
 | `CNT_SCHEDULER_NODES`      | `scheduler.nodes`      |
 | `CNT_BUILD_MEM`            | `build.mem`            |
+| `CNT_BUILD_ALWAYS_SUBMIT`  | `build.always_submit`  |
 | `CNT_BUILD_BLOCK_SIZE`     | `build.block_size`     |
 | `CNT_BUILD_DATA_BLOCK_SIZE`| `build.data_block_size`|
 | `CNT_ROOT`                 | Cluster/system root dir (loads `config.yaml` + data dirs; replaces bin/ heuristic) |
@@ -363,6 +365,7 @@ build:
   block_size: 128k       # SquashFS block size for app/env/external overlays
   data_block_size: 1m    # SquashFS block size for data overlays
   use_tmp_overlay: false  # Use ext3 tmp overlay instead of host directories
+  always_submit: false    # Always submit as scheduler jobs even without directives
   tmp_overlay_size: 20g  # Only used when use_tmp_overlay is true
 
 # Default: conda-forge then bioconda

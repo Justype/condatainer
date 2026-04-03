@@ -84,7 +84,7 @@ Shell scripts support metadata headers:
 - `#DEP:name/version>=min` - Dependency with version constraint (range `[min, version]`)
 - `#SBATCH` / `#PBS` / `#BSUB` - Scheduler directives (HTCondor uses native `.sub` files)
 - `#ENV:VAR=$app_root` - Environment variables to export
-- `#INTERACTIVE:prompt` - User input prompts
+- `#INTERACTIVE:prompt` - User input prompts (collected locally before scheduler submission; embedded as a heredoc in the job script)
 
 Available variables: `$NCPUS`, `$target_dir`, `$tmp_dir`, `$app_name`, `$version`
 Required function: `install()`
