@@ -24,7 +24,6 @@ var (
 	createName          string
 	createPrefix        string
 	createFile          string
-	createBaseImage     string
 	createSource        string
 	createTempSize      string
 	createBlockSize     string
@@ -32,13 +31,14 @@ var (
 	createChannels      []string
 	createRemote        bool
 	createUpdate        bool
+	createUseTmpOverlay bool
 
 	// compression flags are generated dynamically from config.CompressOptions
 	compFlags map[string]*bool
 
 	// buildFlagNames is the set of flags shown under "Build Flags:" in help.
 	buildFlagNames = map[string]bool{
-		"temp-size": true, "block-size": true, "data-block-size": true,
+		"temp-size": true, "block-size": true, "data-block-size": true, "use-tmp-overlay": true,
 	}
 )
 
@@ -140,6 +140,11 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 			config.Global.Build.DataBlockSize = createDataBlockSize
 		}
 
+		// 5c. Handle use-tmp-overlay
+		if createUseTmpOverlay {
+			config.Global.Build.UseTmpOverlay = true
+		}
+
 		// 6. Normalize package names (only for build-script mode, not for conda/prefix/source modes)
 		normalizedArgs := args
 		if createName == "" && createPrefix == "" && createSource == "" {
@@ -196,9 +201,8 @@ func init() {
 	// Register Flags
 	f := createCmd.Flags()
 	f.StringVarP(&createName, "name", "n", "", "Custom name for the resulting overlay file")
-	f.StringVarP(&createPrefix, "prefix", "p", "", "Custom prefix path for the overlay file (or conda env path when combined with packages)")
+	f.StringVarP(&createPrefix, "prefix", "p", "", "Custom prefix path for the overlay file")
 	f.StringVarP(&createFile, "file", "f", "", "Path to definition file (.yaml, .sh, .def)")
-	f.StringVarP(&createBaseImage, "base-image", "b", "", "Base image to use instead of default")
 	f.StringVarP(&createSource, "source", "s", "", "Remote source URI (e.g., docker://ubuntu:22.04)")
 	f.StringVar(&createTempSize, "temp-size", "20G", "Size of temporary overlay")
 	f.StringVar(&createBlockSize, "block-size", "", "SquashFS block size for app/env/external overlays (e.g. 128k, 512k)")
@@ -206,6 +210,7 @@ func init() {
 	f.StringArrayVarP(&createChannels, "channel", "c", nil, "Conda channel to use (overrides config; repeatable)")
 	f.BoolVar(&createRemote, "remote", false, "Remote build scripts take precedence over local")
 	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist (atomic .new swap)")
+	f.BoolVar(&createUseTmpOverlay, "use-tmp-overlay", false, "Use a temporary overlay instead of a temp directory")
 
 	// Compression flags: create a bool flag for each known option
 	compFlags = make(map[string]*bool)
