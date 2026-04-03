@@ -403,12 +403,12 @@ condatainer create [OPTIONS] [packages...]
 * `-n`, `--name [NAME]`: Custom name for the resulting overlay file. If used, all specified packages are bundled into one overlay.
 * `-p`, `--prefix [PATH]`: Custom prefix path for the overlay file. When `-f` is used, this can be omitted — the prefix is inferred from the file name.
 * `-f`, `--file [FILE]`: Path to definition file (.yaml, .sh, .def).
-* `-b`, `--base-image [PATH]`: Base image to use instead of default.
 * `-s`, `--source [URI]`: Remote source URI (e.g., `docker://ubuntu:22.04`).
 * `-c`, `--channel [CHANNEL]`: Conda channel to use, overriding config channels. Repeatable: `-c conda-forge -c bioconda`. Also accepts channel-annotated packages like `bioconda::star=2.7.11b` directly as package arguments (see below).
 * `--temp-size [SIZE]`: Size of temporary overlay (default: 20G).
 * `--block-size [SIZE]`: SquashFS block size for app/env/external overlays (e.g. `128k`, `512k`; default: `128k`). Must be a power of two between `4k` and `1m`.
 * `--data-block-size [SIZE]`: SquashFS block size for data/reference overlays (e.g. `512k`, `1m`; default: `1m`). Must be a power of two between `4k` and `1m`.
+* `--use-tmp-overlay`: Use a temporary ext3 overlay during builds instead of host directories. Equivalent to setting `build.use_tmp_overlay = true` in config.
 * `-u`, `--update`: Rebuild overlays even if they already exist (atomic `.new` swap). Useful for refreshing a package to the latest version.
 * `--remote`: Remote build scripts take precedence over local.
 * `packages`: List of packages to install (e.g., `bcftools/1.22` or `samtools=1.10` or `grch38/genome/gencode`). Supports conda channel annotations: `bioconda::star=2.7.11b` (version required in default mode; optional with `-n`/`-p`).
