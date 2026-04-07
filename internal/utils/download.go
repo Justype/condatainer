@@ -69,7 +69,7 @@ func URLExists(url string) bool {
 
 // FetchCondaSummary queries the anaconda.org API for a package summary.
 // Tries bioconda first, then conda-forge. Returns "" if not found or on error.
-// The summary is truncated to at most 50 words.
+// The summary is truncated to at most 100 words.
 func FetchCondaSummary(packageName string) string {
 	client := &http.Client{Timeout: 10 * time.Second}
 	for _, channel := range []string{"bioconda", "conda-forge"} {
@@ -89,7 +89,7 @@ func FetchCondaSummary(packageName string) string {
 		if err != nil || result.Summary == "" {
 			continue
 		}
-		return truncateWords(result.Summary, 50)
+		return truncateWords(result.Summary, 100)
 	}
 	return ""
 }
