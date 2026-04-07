@@ -37,6 +37,7 @@ var (
 	cyan     = color.New(color.FgCyan).SprintFunc()
 	gray     = color.New(color.FgHiBlack).SprintFunc()
 	bold     = color.New(color.Bold).SprintFunc()
+	white    = color.New(color.FgHiWhite).SprintFunc()
 )
 
 // ---------------------------------------------------------
@@ -95,6 +96,9 @@ func StyleName(name string) string { return yellow(name) }
 
 // StyleHighlight formats search matches or highlighted text (Yellow Bold).
 func StyleHighlight(text string) string { return bold(yellow(text)) }
+
+// StyleWhatis formats whatis/description text (White).
+func StyleWhatis(text string) string { return white(text) }
 
 // HighlightTemplatePlaceholders renders a #TARGET: pattern with {var} tokens in
 // yellow-bold and the surrounding literal path segments in default color.

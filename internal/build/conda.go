@@ -51,6 +51,8 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 		return err
 	}
 
+	b.saveCondaEnvFile(targetPath)
+
 	utils.PrintSuccess("Finished overlay %s", utils.StylePath(targetPath))
 	b.Cleanup(false)
 	return nil

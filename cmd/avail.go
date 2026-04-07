@@ -465,7 +465,7 @@ func formatTemplateLine(pkg PackageInfo, showWhatis bool) string {
 	line := fmt.Sprintf("%s  %s%s%s", utils.StyleName(pkg.Name),
 		utils.StyleDebug("["), strings.Join(labelParts, utils.StyleDebug(", ")), utils.StyleDebug("]"))
 	if showWhatis && pkg.Whatis != "" {
-		line += "\n  " + utils.StyleHint(pkg.Whatis)
+		line += "\n  " + utils.StyleWhatis(pkg.Whatis)
 	}
 	if pkg.TargetTemplate != "" {
 		line += "\n  " + utils.StyleHint("→ "+pkg.TargetTemplate)
@@ -544,7 +544,7 @@ func formatPackageLine(pkg PackageInfo, showWhatis bool) string {
 	}
 
 	if showWhatis && pkg.Whatis != "" {
-		line += "  " + utils.StyleHint(pkg.Whatis)
+		line += "  " + utils.StyleWhatis(pkg.Whatis)
 	}
 
 	return line

@@ -153,7 +153,9 @@ func runRemove(cmd *cobra.Command, args []string) error {
 
 // performDelete handles duplicate detection, confirmation, and deletion of named overlays.
 // names should be in "name/version" format. It reads --dir from cmd to restrict to a dir.
-func performDelete(cmd *cobra.Command, names []string) error {
+// Pass showListing=false to skip reprinting the overlay list (e.g. when list -d already showed it).
+func performDelete(cmd *cobra.Command, names []string, showListing ...bool) error {
+	printListing := len(showListing) == 0 || showListing[0]
 	dirFilter, _ := cmd.Flags().GetString("dir")
 
 	allCopies, err := getAllOverlayCopies()
@@ -228,20 +230,21 @@ func performDelete(cmd *cobra.Command, names []string) error {
 		dir := filepath.Dir(installedOverlays[name])
 		byDir[dir] = append(byDir[dir], name)
 	}
-	fmt.Println("Overlays to be removed:")
-	firstDir := true
-	for _, dir := range config.GetImageSearchPaths() {
-		dirNames := byDir[dir]
-		if len(dirNames) == 0 {
-			continue
-		}
-		if !firstDir {
-			fmt.Println()
-		}
-		firstDir = false
-		fmt.Println(dirHeader(dir))
-		for _, name := range dirNames {
-			fmt.Printf("  %s\n", utils.StyleName(name))
+	if printListing {
+		firstDir := true
+		for _, dir := range config.GetImageSearchPaths() {
+			dirNames := byDir[dir]
+			if len(dirNames) == 0 {
+				continue
+			}
+			if !firstDir {
+				fmt.Println()
+			}
+			firstDir = false
+			fmt.Println(dirHeader(dir))
+			for _, name := range dirNames {
+				fmt.Printf("  %s\n", utils.StyleName(name))
+			}
 		}
 	}
 

@@ -1,10 +1,12 @@
 package utils
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -63,6 +65,42 @@ func URLExists(url string) bool {
 	defer resp.Body.Close()
 
 	return resp.StatusCode == http.StatusOK
+}
+
+// FetchCondaSummary queries the anaconda.org API for a package summary.
+// Tries bioconda first, then conda-forge. Returns "" if not found or on error.
+// The summary is truncated to at most 50 words.
+func FetchCondaSummary(packageName string) string {
+	client := &http.Client{Timeout: 10 * time.Second}
+	for _, channel := range []string{"bioconda", "conda-forge"} {
+		url := "https://api.anaconda.org/package/" + channel + "/" + packageName
+		resp, err := client.Get(url)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			continue
+		}
+		var result struct {
+			Summary string `json:"summary"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+		if err != nil || result.Summary == "" {
+			continue
+		}
+		return truncateWords(result.Summary, 50)
+	}
+	return ""
+}
+
+// truncateWords returns s truncated to at most n words, appending "..." if truncated.
+func truncateWords(s string, n int) string {
+	words := strings.Fields(s)
+	if len(words) <= n {
+		return s
+	}
+	return strings.Join(words[:n], " ") + "..."
 }
 
 // DownloadExecutable downloads a file and sets it as executable (PermExec).
