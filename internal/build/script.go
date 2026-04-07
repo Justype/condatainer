@@ -362,7 +362,7 @@ func (b *BuildObject) saveCondaEnvFile(targetPath string) {
 	if b.packageName == "" {
 		return
 	}
-	whatis := utils.FetchCondaSummary(b.packageName)
+	whatis := utils.FetchCondaSummary(b.packageName, config.Global.Build.Channels)
 	if err := SaveEnvFile(targetPath, map[string]EnvEntry{}, b.nameVersion, whatis); err != nil {
 		utils.PrintWarning("Failed to save ENV file: %v", err)
 	}
