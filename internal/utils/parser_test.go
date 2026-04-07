@@ -295,6 +295,7 @@ func TestSortVersionsDescending(t *testing.T) {
 	}{
 		{"integers", []string{"22", "26", "23", "25", "24"}, []string{"26", "25", "24", "23", "22"}},
 		{"semver", []string{"2.7.11a", "2.7.11b", "2.7.10"}, []string{"2.7.11b", "2.7.11a", "2.7.10"}},
+		{"semver-mixed-suffix", []string{"2.7.9a", "2.7.11b", "2.7.10"}, []string{"2.7.11b", "2.7.10", "2.7.9a"}},
 		{"mixed", []string{"101", "75", "151"}, []string{"151", "101", "75"}},
 		{"single", []string{"1.0"}, []string{"1.0"}},
 		{"empty", []string{}, []string{}},

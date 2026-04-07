@@ -516,19 +516,42 @@ func naturalVersionGreater(a, b string) bool {
 		n = len(segsB)
 	}
 	for i := 0; i < n; i++ {
-		ia, aErr := strconv.ParseInt(segsA[i], 10, 64)
-		ib, bErr := strconv.ParseInt(segsB[i], 10, 64)
-		if aErr == nil && bErr == nil {
+		ia, aAlpha, aHasNum := parseVersionSegment(segsA[i])
+		ib, bAlpha, bHasNum := parseVersionSegment(segsB[i])
+		if aHasNum && bHasNum {
+			// Both start with a numeric prefix: compare numeric part first, then alpha suffix.
 			if ia != ib {
 				return ia > ib
 			}
+			if aAlpha != bAlpha {
+				return aAlpha > bAlpha
+			}
 		} else {
+			// Pure alpha vs pure alpha: lexicographic.
 			if segsA[i] != segsB[i] {
 				return segsA[i] > segsB[i]
 			}
 		}
 	}
 	return len(segsA) > len(segsB)
+}
+
+// parseVersionSegment splits a segment into its leading numeric value and
+// remaining alpha suffix. "11b" → (11, "b", true), "10" → (10, "", true),
+// "abc" → (0, "abc", false).
+func parseVersionSegment(seg string) (int64, string, bool) {
+	i := 0
+	for i < len(seg) && seg[i] >= '0' && seg[i] <= '9' {
+		i++
+	}
+	if i == 0 {
+		return 0, seg, false // pure alpha
+	}
+	n, err := strconv.ParseInt(seg[:i], 10, 64)
+	if err != nil {
+		return 0, seg, false
+	}
+	return n, seg[i:], true
 }
 
 var versionSplitRe = regexp.MustCompile(`[.\-_]`)
