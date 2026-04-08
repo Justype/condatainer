@@ -159,7 +159,7 @@ func runList(cmd *cobra.Command, args []string) error {
 				for i, name := range names {
 					w := readOverlayWhatis(d.Paths[name+"/(system app)"])
 					if w != "" {
-						fmt.Printf(" %s: %s\n", styled[i], utils.StyleWhatis(w))
+						fmt.Printf(" %s: %s\n", styled[i], w)
 					} else {
 						fmt.Printf(" %s\n", styled[i])
 					}
@@ -190,7 +190,7 @@ func runList(cmd *cobra.Command, args []string) error {
 				for i := range plain {
 					w := readOverlayWhatis(d.Paths[keys[i]])
 					if w != "" {
-						fmt.Printf(" %s: %s\n", styled[i], utils.StyleWhatis(w))
+						fmt.Printf(" %s: %s\n", styled[i], w)
 					} else {
 						fmt.Printf(" %s\n", styled[i])
 					}
@@ -216,7 +216,7 @@ func runList(cmd *cobra.Command, args []string) error {
 				for i, data := range d.DataList {
 					w := readOverlayWhatis(d.Paths[data])
 					if w != "" {
-						fmt.Printf(" %s: %s\n", styled[i], utils.StyleWhatis(w))
+						fmt.Printf(" %s: %s\n", styled[i], w)
 					} else {
 						fmt.Printf(" %s\n", styled[i])
 					}

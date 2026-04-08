@@ -15,6 +15,7 @@ import (
 var searchJSON bool
 var searchFuzzy bool
 var searchChannels []string
+var searchLimit int
 
 var searchCmd = &cobra.Command{
 	Use:   "search <package>",
@@ -23,6 +24,8 @@ var searchCmd = &cobra.Command{
 Results are filtered to the configured channels (or --channel overrides).`,
 	Example: `  condatainer search samtools
   condatainer search samtools --json
+  condatainer search -f samtool
+  condatainer search -f samtool -l 200
   condatainer search samtools -c bioconda`,
 	Args:         cobra.MinimumNArgs(1),
 	SilenceUsage: true,
@@ -34,6 +37,16 @@ func init() {
 	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "Output results in JSON format")
 	searchCmd.Flags().BoolVarP(&searchFuzzy, "fuzzy", "f", false, "Substring match instead of exact name match")
 	searchCmd.Flags().StringArrayVarP(&searchChannels, "channel", "c", nil, "Conda channel to search (overrides config; repeatable)")
+	searchCmd.Flags().IntVarP(&searchLimit, "limit", "l", 100, "Maximum number of fuzzy search results")
+}
+
+func platformSupported(platform string, platforms []string) bool {
+	for _, p := range platforms {
+		if p == platform || p == "noarch" {
+			return true
+		}
+	}
+	return false
 }
 
 func runSearch(cmd *cobra.Command, args []string) error {
@@ -43,7 +56,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		channels = searchChannels
 	}
 
-	results, capped, err := utils.SearchCondaPackages(query, channels, searchFuzzy)
+	results, capped, err := utils.SearchCondaPackages(query, channels, searchFuzzy, searchLimit)
 	if err != nil {
 		return err
 	}
@@ -59,21 +72,29 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		return enc.Encode(results)
 	}
 
+	currentPlatform := utils.CurrentCondaPlatform()
 	for i, r := range results {
 		if i > 0 {
 			fmt.Println()
 		}
-		fmt.Printf("%s (%s)\n", utils.StyleName(r.Name), utils.StyleHint(r.Channel))
+		archSuffix := ""
+		if currentPlatform != "" && len(r.Platforms) > 0 {
+			archSuffix = " " + utils.StyleHint("["+currentPlatform+"]")
+		}
+		fmt.Printf("%s (%s)%s\n", utils.StyleName(r.Name), utils.StyleHint(r.Channel), archSuffix)
 		if r.Summary != "" {
-			fmt.Printf("  %s\n", utils.StyleWhatis(r.Summary))
+			fmt.Printf("  %s\n", r.Summary)
 		}
 		if len(r.Versions) > 0 {
 			fmt.Printf("  Versions: %s\n", strings.Join(r.Versions, ", "))
 		}
+		if currentPlatform != "" && len(r.Platforms) > 0 && !platformSupported(currentPlatform, r.Platforms) {
+			utils.PrintWarning("Package %s is not available for %s", r.Name, currentPlatform)
+		}
 	}
 
 	if capped {
-		utils.PrintWarning("Results may be incomplete: anaconda.org search is capped at 100 entries.")
+		utils.PrintWarning("Results may be incomplete: reached the limit of %d results. Use -l to increase.", searchLimit)
 	}
 
 	return nil

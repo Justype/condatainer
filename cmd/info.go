@@ -275,7 +275,7 @@ func readEnvFile(overlayPath string) (whatis string, notes map[string]string, va
 func displayWhatis(overlayPath string) {
 	whatis, _, _ := readEnvFile(overlayPath)
 	if whatis != "" {
-		fmt.Printf("  %-14s %s\n", "Whatis:", utils.StyleWhatis(whatis))
+		fmt.Printf("  %-14s %s\n", "Whatis:", whatis)
 	}
 }
 
