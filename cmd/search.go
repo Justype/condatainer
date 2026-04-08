@@ -22,11 +22,11 @@ var searchCmd = &cobra.Command{
 	Short: "Search conda packages via anaconda.org",
 	Long: `Search conda packages using the anaconda.org API.
 Results are filtered to the configured channels (or --channel overrides).`,
-	Example: `  condatainer search samtools
-  condatainer search samtools --json
-  condatainer search -f samtool
-  condatainer search -f samtool -l 200
-  condatainer search samtools -c bioconda`,
+	Example: `  condatainer search samtools             # Exact match (first channel that has it)
+  condatainer search samtools --json      # JSON output
+  condatainer search -f samtool           # Fuzzy/substring match
+  condatainer search -f samtool -l 200    # Fuzzy with higher result limit
+  condatainer search samtools -c bioconda # Search specific channel`,
 	Args:         cobra.MinimumNArgs(1),
 	SilenceUsage: true,
 	RunE:         runSearch,

@@ -20,8 +20,8 @@ var infoOverlayCmd = &cobra.Command{
 
 For SquashFS (.sqf) overlays: shows compression details, inode count, block size, and mount path.
 For ext3 (.img) overlays: shows filesystem stats, disk/inode usage, block size, and ownership.`,
-	Example: `  condatainer info samtools/1.22    # Show info for installed overlay
-  condatainer info env.img          # Show info for local overlay file`,
+	Example: `  condatainer info samtools/1.22 # Show info for installed overlay
+  condatainer info env.img       # Show info for local overlay file`,
 	Args:              cobra.ExactArgs(1),
 	SilenceUsage:      true,
 	ValidArgsFunction: completeInfoArgs,

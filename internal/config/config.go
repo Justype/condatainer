@@ -93,7 +93,7 @@ type CompressOption struct {
 // CompressOptions lists all supported compression shorthand names.
 var CompressOptions = []CompressOption{
 	{"gzip", "-comp gzip", "Use gzip compression"},
-	{"lz4", "-comp lz4", "Use LZ4 compression"},
+	{"lz4", "-comp lz4", "Use lz4 compression"},
 	{"zstd", "-comp zstd -Xcompression-level 14", "Use zstd compression level 14"},
 	{"zstd-fast", "-comp zstd -Xcompression-level 3", "Use zstd compression level 3"},
 	{"zstd-medium", "-comp zstd -Xcompression-level 8", "Use zstd compression level 8"},

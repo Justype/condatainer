@@ -32,13 +32,16 @@ var (
 	createRemote        bool
 	createUpdate        bool
 	createUseTmpOverlay bool
+	createAlwaysSubmit  bool
 
 	// compression flags are generated dynamically from config.CompressOptions
-	compFlags map[string]*bool
+	compFlags     map[string]*bool
+	compFlagNames map[string]bool
 
 	// buildFlagNames is the set of flags shown under "Build Flags:" in help.
 	buildFlagNames = map[string]bool{
 		"temp-size": true, "block-size": true, "data-block-size": true, "use-tmp-overlay": true,
+		"always-submit": true,
 	}
 )
 
@@ -63,7 +66,7 @@ func compressArgsFromFlags(flags map[string]*bool) (string, error) {
 
 var createCmd = &cobra.Command{
 	Use:     "create [packages...]",
-	Aliases: []string{"install", "i"},
+	Aliases: []string{"install", "i", "build"},
 	Short:   "Create a new SquashFS overlay",
 	Long: `Create a new SquashFS overlay using available build scripts or Conda packages.
 
@@ -169,6 +172,11 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 		// 7. Handle --remote flag (CLI flag or config)
 		build.PreferRemote = createRemote || config.Global.PreferRemote
 
+		// 7b. Handle --always-submit flag
+		if createAlwaysSubmit {
+			config.Global.Build.AlwaysSubmit = true
+		}
+
 		// 8. Announce update mode
 		if createUpdate {
 			utils.PrintNote("Update mode: existing overlays will be rebuilt.")
@@ -211,6 +219,7 @@ func init() {
 	f.BoolVar(&createRemote, "remote", false, "Remote build scripts take precedence over local")
 	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist (atomic .new swap)")
 	f.BoolVar(&createUseTmpOverlay, "use-tmp-overlay", false, "Use a temporary overlay instead of a temp directory")
+	f.BoolVar(&createAlwaysSubmit, "always-submit", false, "Submit all builds as scheduler jobs even without scheduler directives")
 
 	// Compression flags: create a bool flag for each known option
 	compFlags = make(map[string]*bool)
@@ -224,9 +233,10 @@ func init() {
 	createCmd.RegisterFlagCompletionFunc("block-size", blockSizeCompletion)      //nolint:errcheck
 	createCmd.RegisterFlagCompletionFunc("data-block-size", blockSizeCompletion) //nolint:errcheck
 
-	// Mark compression flags as build flags
+	// Mark compression flags in their own section
+	compFlagNames = make(map[string]bool, len(config.CompressOptions))
 	for _, opt := range config.CompressOptions {
-		buildFlagNames[opt.Name] = true
+		compFlagNames[opt.Name] = true
 	}
 
 	// Custom usage: two labeled sections — "Flags:" and "Build Flags:"
@@ -240,8 +250,11 @@ func init() {
 		}
 		general := pflag.NewFlagSet("", pflag.ContinueOnError)
 		build := pflag.NewFlagSet("", pflag.ContinueOnError)
+		compress := pflag.NewFlagSet("", pflag.ContinueOnError)
 		cmd.LocalFlags().VisitAll(func(fl *pflag.Flag) {
-			if buildFlagNames[fl.Name] {
+			if compFlagNames[fl.Name] {
+				compress.AddFlag(fl)
+			} else if buildFlagNames[fl.Name] {
 				build.AddFlag(fl)
 			} else {
 				general.AddFlag(fl)
@@ -252,6 +265,9 @@ func init() {
 		}
 		if build.HasFlags() {
 			fmt.Fprintf(cmd.OutOrStderr(), "\nBuild Flags:\n%s", build.FlagUsages())
+		}
+		if compress.HasFlags() {
+			fmt.Fprintf(cmd.OutOrStderr(), "\nCompression Flags:\n%s", compress.FlagUsages())
 		}
 		if cmd.HasAvailableInheritedFlags() {
 			fmt.Fprintf(cmd.OutOrStderr(), "\nGlobal Flags:\n%s", cmd.InheritedFlags().FlagUsages())

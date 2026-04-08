@@ -77,11 +77,11 @@ Supported #CNT arguments (also available as CLI flags):
   -f, --fakeroot         Run with fakeroot privileges
 
 Dependencies will be automatically loaded.`,
-	Example: `  condatainer run script.sh                        # Run with dependency check
-  condatainer run script.sh arg1 arg2              # Pass arguments to the script
-  condatainer run -o log/tool1_s1.out run_tool1.sh sample1  # Override stdout
-  condatainer run -g a100:2 gpu_job.sh             # Override GPU spec
-  condatainer run -c 8 -m 16G -t 2h job.sh        # Override resources
+	Example: `  condatainer run script.sh                         # Run with dependency check
+  condatainer run script.sh arg1 arg2               # Pass arguments to the script
+  condatainer run -o log/tool1_s1.out run_tool1.sh sample1 # Override stdout
+  condatainer run -g a100:2 gpu_job.sh              # Override GPU spec
+  condatainer run -c 8 -m 16G -t 2h job.sh          # Override resources
 
   # Dependency chaining example
   JOB=$(condatainer run run_align.sh sample1)

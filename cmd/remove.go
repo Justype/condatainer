@@ -29,11 +29,11 @@ Search rules (multiple terms, space-separated):
   First term not found         → AND substring match
 
 The command will ask for confirmation before removing overlays.`,
-	Example: `  condatainer rm cellranger/9.0.1    # Remove exact version
-  condatainer rm cellranger          # Exact match: all cellranger
-  condatainer rm 'cell*'             # Wildcard
-  condatainer rm cellranger/9.0.1 cellranger/8.0.1 # Remove multiple
-  condatainer rm cellranger 9        # AND search (multiple terms)`,
+	Example: `  condatainer rm cellranger/9.0.1                   # Remove exact version
+  condatainer rm cellranger                         # Exact match: all cellranger
+  condatainer rm 'cell*'                            # Wildcard
+  condatainer rm cellranger/9.0.1 cellranger/8.0.1  # Remove multiple
+  condatainer rm cellranger 9                       # AND search (multiple terms)`,
 	Args:         cobra.MinimumNArgs(1),
 	SilenceUsage: true,
 	RunE:         runRemove,

@@ -35,11 +35,11 @@ Search rules (single term):
 Search rules (multiple terms, space-separated):
   First term is an exact name  → all terms treated as exact names
   First term not found         → AND substring match`,
-	Example: `  condatainer list                        # List all
-  condatainer list cellranger             # Substring match
-  condatainer list 'cell*'               # Wildcard
-  condatainer list cellranger 9          # AND search (multiple terms)
-  condatainer list cellranger/9.0.1 -e   # Exact match (single term)`,
+	Example: `  condatainer list                     # List all
+  condatainer list cellranger          # Substring match
+  condatainer list 'cell*'             # Wildcard
+  condatainer list cellranger 9        # AND search (multiple terms)
+  condatainer list cellranger/9.0.1 -e # Exact match (single term)`,
 	SilenceUsage: true,
 	RunE:         runList,
 }
