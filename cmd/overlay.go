@@ -272,10 +272,11 @@ Defaults to the current user and paths '/' inside the image.
 Use --root to force ownership to 0:0.
 
 Multiple paths can be specified using multiple -p flags.`,
-	Example: `  condatainer overlay chown env.img                    # Set entire image to current user
-  condatainer overlay chown env.img --root -p /        # Set entire image to root
-  condatainer overlay chown env.img -u 1001 -g 1001    # Set to specific ID
-  condatainer overlay chown env.img -p /ext3 -p /data  # Chown multiple paths`,
+	Example: `
+  condatainer overlay chown env.img                   # Set entire image to current user
+  condatainer overlay chown env.img --root            # Set entire image to root
+  condatainer overlay chown env.img -u 1001 -g 1001   # Set to specific ID
+  condatainer overlay chown env.img -p /ext3 -p /data # Chown multiple paths`,
 	Args: cobra.ExactArgs(1),
 
 	// Enable Smart Tab Completion for .img files

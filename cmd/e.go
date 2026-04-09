@@ -39,8 +39,8 @@ If no -- is provided, all positional arguments are treated as overlays.
 - Defaults to bash if no command specified
 
 Note: Additional Apptainer flags must use --flag=value format (no space)`,
-	Example: `  condatainer e               # Auto-load env.img if present, run bash
-  condatainer e testing.img   # Use a specific writable overlay
+	Example: `  condatainer e             # Auto-load env.img if present, run bash
+  condatainer e testing.img  # Use a specific writable overlay
 
   # Multiple overlays, run bash (auto loads env.img)
   condatainer e samtools/1.22 bcftools/1.20

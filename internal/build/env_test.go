@@ -3,6 +3,7 @@ package build
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -158,7 +159,7 @@ func TestSaveEnvFile(t *testing.T) {
 	}
 
 	// Test saving
-	err := SaveEnvFile(overlayPath, envDict, "star/2.7.11a")
+	err := SaveEnvFile(overlayPath, envDict, "star/2.7.11a", "")
 	if err != nil {
 		t.Fatalf("SaveEnvFile failed: %v", err)
 	}
@@ -196,6 +197,56 @@ func TestSaveEnvFile(t *testing.T) {
 			t.Errorf("ENV file does not contain expected line: %s", expected)
 		}
 	}
+}
+
+func TestSaveEnvFileWhatis(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("whatis only", func(t *testing.T) {
+		overlayPath := filepath.Join(tmpDir, "whatis_only.sqf")
+		err := SaveEnvFile(overlayPath, map[string]EnvEntry{}, "", "SAMtools alignment toolkit")
+		if err != nil {
+			t.Fatalf("SaveEnvFile failed: %v", err)
+		}
+		content, _ := os.ReadFile(overlayPath + ".env")
+		if !contains(string(content), "#WHATIS:SAMtools alignment toolkit") {
+			t.Errorf("missing #WHATIS: line, got: %s", string(content))
+		}
+	})
+
+	t.Run("whatis with env", func(t *testing.T) {
+		overlayPath := filepath.Join(tmpDir, "whatis_env.sqf")
+		envDict := map[string]EnvEntry{"BIN": {Value: "$app_root/bin", Note: "binary dir"}}
+		err := SaveEnvFile(overlayPath, envDict, "tool/1.0", "My Tool")
+		if err != nil {
+			t.Fatalf("SaveEnvFile failed: %v", err)
+		}
+		content, _ := os.ReadFile(overlayPath + ".env")
+		contentStr := string(content)
+		if !contains(contentStr, "#WHATIS:My Tool") {
+			t.Errorf("missing #WHATIS: line")
+		}
+		if !contains(contentStr, "BIN=/cnt/tool/1.0/bin") {
+			t.Errorf("missing BIN env line")
+		}
+		// #WHATIS: must appear before env lines
+		whatisIdx := strings.Index(contentStr, "#WHATIS:")
+		binIdx := strings.Index(contentStr, "BIN=")
+		if whatisIdx > binIdx {
+			t.Errorf("#WHATIS: should appear before env lines")
+		}
+	})
+
+	t.Run("empty both", func(t *testing.T) {
+		overlayPath := filepath.Join(tmpDir, "empty.sqf")
+		err := SaveEnvFile(overlayPath, map[string]EnvEntry{}, "", "")
+		if err != nil {
+			t.Fatalf("SaveEnvFile failed: %v", err)
+		}
+		if _, err := os.Stat(overlayPath + ".env"); !os.IsNotExist(err) {
+			t.Error("env file should not be created when both whatis and envDict are empty")
+		}
+	})
 }
 
 func contains(s, substr string) bool {

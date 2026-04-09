@@ -37,9 +37,9 @@ var updateCmd = &cobra.Command{
 By default (no flags), refreshes both the build script and helper script
 metadata caches. Use --base to update the base Apptainer image instead.`,
 	Example: `  condatainer update            # Refresh build + helper metadata (default)
-  condatainer update --build    # Build script metadata only
-  condatainer update --helper   # Helper script metadata only
-  condatainer update --base     # Update the base image only
+  condatainer update --build         # Build script metadata only
+  condatainer update --helper        # Helper script metadata only
+  condatainer update --base          # Update the base image only
   condatainer update --base --remote # Update the base image using remote script`,
 	SilenceUsage: true,
 	RunE:         runUpdate,
@@ -131,9 +131,9 @@ var selfUpdateCmd = &cobra.Command{
 This command downloads the latest binary from the GitHub repository
 and replaces the current executable. A backup of the current version is not created.`,
 	Example: `  condatainer self-update       # Update to latest stable version
-  condatainer self-update --yes # Update without confirmation
-  condatainer self-update -f    # Force update even if already on latest version
-  condatainer self-update --dev # Include pre-release versions
+  condatainer self-update --yes  # Update without confirmation
+  condatainer self-update -f     # Force update even if already on latest version
+  condatainer self-update --dev  # Include pre-release versions
   condatainer self-update --base # Update the base image only`,
 	SilenceUsage: true,
 	RunE:         runSelfUpdate,

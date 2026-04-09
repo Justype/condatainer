@@ -20,8 +20,8 @@ var infoOverlayCmd = &cobra.Command{
 
 For SquashFS (.sqf) overlays: shows compression details, inode count, block size, and mount path.
 For ext3 (.img) overlays: shows filesystem stats, disk/inode usage, block size, and ownership.`,
-	Example: `  condatainer info samtools/1.22    # Show info for installed overlay
-  condatainer info env.img          # Show info for local overlay file`,
+	Example: `  condatainer info samtools/1.22 # Show info for installed overlay
+  condatainer info env.img       # Show info for local overlay file`,
 	Args:              cobra.ExactArgs(1),
 	SilenceUsage:      true,
 	ValidArgsFunction: completeInfoArgs,
@@ -115,6 +115,7 @@ func displaySqfInfo(overlayPath string) error {
 	// File section
 	fmt.Println(utils.StyleTitle("File"))
 	fmt.Printf("  %-14s %s\n", "Name:", utils.StyleName(filepath.Base(overlayPath)))
+	displayWhatis(overlayPath)
 	fmt.Printf("  %-14s %s\n", "Path:", utils.StylePath(overlayPath))
 	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatBytes(fileInfo.Size()))
 	if overlayType != "" {
@@ -183,6 +184,7 @@ func displayImgInfo(overlayPath string) error {
 	// File section
 	fmt.Println(utils.StyleTitle("File"))
 	fmt.Printf("  %-14s %s\n", "Name:", utils.StyleName(filepath.Base(overlayPath)))
+	displayWhatis(overlayPath)
 	fmt.Printf("  %-14s %s\n", "Path:", utils.StylePath(overlayPath))
 	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatBytes(stats.FileSizeBytes))
 	if stats.IsSparse {
@@ -244,29 +246,21 @@ func displayImgInfo(overlayPath string) error {
 	return nil
 }
 
-// displayEnvVars prints the Environment section from the .env sidecar file, if present.
-// Lines of the form #ENVNOTE:VAR=description are shown as inline annotations on the
-// corresponding VAR=... line instead of being printed as raw entries.
-func displayEnvVars(overlayPath string) {
-	envPath := overlayPath + ".env"
-	if !utils.FileExists(envPath) {
-		return
-	}
-	data, err := os.ReadFile(envPath)
+// readEnvFile parses the .env sidecar and returns whatis, notes, and var lines.
+func readEnvFile(overlayPath string) (whatis string, notes map[string]string, varLines []string) {
+	notes = map[string]string{}
+	data, err := os.ReadFile(overlayPath + ".env")
 	if err != nil {
 		return
 	}
-
-	// First pass: collect notes keyed by variable name.
-	notes := map[string]string{}
-	var varLines []string
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		if after, ok := strings.CutPrefix(line, "#ENVNOTE:"); ok {
-			// Format: #ENVNOTE:VARNAME=description
+		if after, ok := strings.CutPrefix(line, "#WHATIS:"); ok {
+			whatis = strings.TrimSpace(after)
+		} else if after, ok := strings.CutPrefix(line, "#ENVNOTE:"); ok {
 			if k, v, found := strings.Cut(after, "="); found {
 				notes[strings.TrimSpace(k)] = strings.TrimSpace(v)
 			}
@@ -274,11 +268,23 @@ func displayEnvVars(overlayPath string) {
 			varLines = append(varLines, line)
 		}
 	}
+	return
+}
 
+// displayWhatis prints the Whatis line from the .env sidecar in the File section.
+func displayWhatis(overlayPath string) {
+	whatis, _, _ := readEnvFile(overlayPath)
+	if whatis != "" {
+		fmt.Printf("  %-14s %s\n", "Whatis:", whatis)
+	}
+}
+
+// displayEnvVars prints the Environment section (env vars only) from the .env sidecar.
+func displayEnvVars(overlayPath string) {
+	_, notes, varLines := readEnvFile(overlayPath)
 	if len(varLines) == 0 {
 		return
 	}
-
 	fmt.Println(utils.StyleTitle("Environment"))
 	for _, line := range varLines {
 		fmt.Printf("  - %s\n", line)

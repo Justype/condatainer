@@ -64,15 +64,16 @@ func init() {
 
 // PackageInfo holds information about a build script
 type PackageInfo struct {
-	Name        string              // name/version format
-	Path        string              // full path to build script
-	IsContainer bool                // true if .def file
-	IsInstalled bool                // true if overlay exists
-	IsRemote    bool                // true if from remote repository
-	IsTemplate  bool                // true if script has #PL: placeholders
-	Whatis      string              // description string
-	PL          map[string][]string // placeholder values (all values for templates; single-element for expanded)
-	PLOrder     []string            // placeholder key declaration order
+	Name           string              // name/version format
+	Path           string              // full path to build script
+	IsContainer    bool                // true if .def file
+	IsInstalled    bool                // true if overlay exists
+	IsRemote       bool                // true if from remote repository
+	IsTemplate     bool                // true if script has #PL: placeholders
+	Whatis         string              // description string
+	TargetTemplate string              // raw #TARGET: pattern (e.g. "grch38/star/{star_version}/gencode{gencode_version}-{read_length}")
+	PL             map[string][]string // placeholder values (all values for templates; single-element for expanded)
+	PLOrder        []string            // placeholder key declaration order
 }
 
 func runAvail(cmd *cobra.Command, args []string) error {
@@ -90,15 +91,16 @@ func runAvail(cmd *cobra.Command, args []string) error {
 
 	scriptInfoToPackageInfo := func(name string, info build.ScriptInfo, isRemote bool) PackageInfo {
 		return PackageInfo{
-			Name:        name,
-			Path:        info.Path,
-			IsContainer: info.IsContainer,
-			IsInstalled: installedOverlays[name],
-			IsRemote:    isRemote,
-			IsTemplate:  info.IsTemplate,
-			Whatis:      info.Whatis,
-			PL:          info.PL,
-			PLOrder:     info.PLOrder,
+			Name:           name,
+			Path:           info.Path,
+			IsContainer:    info.IsContainer,
+			IsInstalled:    installedOverlays[name],
+			IsRemote:       isRemote,
+			IsTemplate:     info.IsTemplate,
+			Whatis:         info.Whatis,
+			TargetTemplate: info.TargetTemplate,
+			PL:             info.PL,
+			PLOrder:        info.PLOrder,
 		}
 	}
 
@@ -463,7 +465,10 @@ func formatTemplateLine(pkg PackageInfo, showWhatis bool) string {
 	line := fmt.Sprintf("%s  %s%s%s", utils.StyleName(pkg.Name),
 		utils.StyleDebug("["), strings.Join(labelParts, utils.StyleDebug(", ")), utils.StyleDebug("]"))
 	if showWhatis && pkg.Whatis != "" {
-		line += "\n  " + utils.StyleHint(pkg.Whatis)
+		line += "\n  " + pkg.Whatis
+	}
+	if pkg.TargetTemplate != "" {
+		line += "\n  " + utils.StyleHint("→ "+pkg.TargetTemplate)
 	}
 
 	// Show placeholder value summaries with aligned keys.
@@ -539,7 +544,7 @@ func formatPackageLine(pkg PackageInfo, showWhatis bool) string {
 	}
 
 	if showWhatis && pkg.Whatis != "" {
-		line += "  " + utils.StyleHint(pkg.Whatis)
+		line += "  " + pkg.Whatis
 	}
 
 	return line

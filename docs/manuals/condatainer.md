@@ -45,7 +45,7 @@ Available Commands:
   remove      Remove installed overlays matching search terms
   run         Run a script and auto-solve the dependencies by #DEP tags
   scheduler   Display scheduler information
-  search      Search conda packages via micromamba
+  search      Search conda packages via anaconda.org API
   self-update Update condatainer to the latest version from GitHub
   update      Update build script metadata cache or the base image
 
@@ -718,7 +718,7 @@ $ condatainer rm *.img                               # all .img files in current
 
 ### Search
 
-Search conda packages using micromamba inside the base image.
+Search conda packages via the anaconda.org API.
 
 ```
 condatainer search <package> [flags]
@@ -727,22 +727,25 @@ condatainer search <package> [flags]
 **Options:**
 
 * `--json`: Output results in JSON format.
-* `--pretty`: Pretty-print output (passes `--pretty` to micromamba).
+* `-f`, `--fuzzy`: Substring match instead of exact name match.
+* `-l`, `--limit N`: Maximum number of fuzzy search results (default: 100).
 * `-c`, `--channel [CHANNEL]`: Channel to search, overriding config channels. Repeatable: `-c bioconda -c conda-forge`.
 
 **Notes:**
 
-* Runs `micromamba search` inside the base image (no overlays required).
+* Uses the anaconda.org REST API — no base image or micromamba required.
+* **Exact match** (default): queries each configured channel's package API in order and returns the first hit, matching install behaviour. Versions shown are filtered to the current platform (e.g. `linux-64`) and `noarch`.
+* **Fuzzy match** (`-f`): queries the anaconda.org search API with two requests — one for the current platform and one for `noarch` — then merges and sorts results alphabetically. Results are capped at `--limit`; a warning is shown if the limit was hit.
 * Uses channels from the config (`build.channels`, default: `conda-forge`, `bioconda`). `-c` fully replaces the config channel list for this invocation.
-* `--no-rc` is always passed to prevent user `.mambarc`/`.condarc` from overriding channels.
+* The current platform (e.g. `[linux-64]`) is shown in the output header. A warning is printed if the package is not available for the current platform.
 
 **Examples:**
 
 ```bash
 $ condatainer search samtools
-$ condatainer search 'samtools>1.10'
 $ condatainer search samtools --json
-$ condatainer search samtools --pretty
+$ condatainer search -f samtool
+$ condatainer search -f samtool -l 200
 $ condatainer search star -c bioconda
 ```
 

@@ -1660,59 +1660,33 @@ class ModGen_Create:
     @staticmethod
     def fetch_whatis_url_from_anaconda(normalized_name_version: str) -> Tuple[str, str]:
         """
-        Fetch the whatis and URL from Anaconda package metadata.
+        Fetch the whatis and URL from the anaconda.org JSON API.
+        Tries bioconda first, then conda-forge. Falls back to defaults on error.
         """
         package_name, version = normalized_name_version.split('/', 1)
-        conda_forge_url = f"https://anaconda.org/channels/conda-forge/packages/{package_name}/overview"
-        bioconda_url = f"https://anaconda.org/channels/bioconda/packages/{package_name}/overview"
+        default_whatis_url = (f"Load module {package_name} version {version}", f"https://anaconda.org/search?q={package_name}")
 
-        default_whatis_url = (f"Load module {package_name} version {version}", bioconda_url)
+        for channel in ("bioconda", "conda-forge"):
+            api_url = f"https://api.anaconda.org/package/{channel}/{package_name}"
+            try:
+                req = urllib.request.Request(api_url, headers={"User-Agent": "modgen"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    if resp.status != 200:
+                        continue
+                    data = json.loads(resp.read().decode())
+                summary = data.get("summary", "").strip()
+                home = data.get("home", "").strip() or f"https://anaconda.org/{channel}/{package_name}"
+                if not summary:
+                    continue
+                # Truncate to 100 words
+                words = summary.split()
+                if len(words) > 100:
+                    summary = " ".join(words[:100]) + "..."
+                return (summary, home)
+            except Exception:
+                continue
 
-        try:
-            import requests
-            from bs4 import BeautifulSoup
-        except ImportError:
-            Utils.print_warning("Required libraries 'requests' and 'beautifulsoup4' not installed.")
-            Utils.print_warning("Cannot fetch whatis and url info. Falling back to defaults.")
-            return default_whatis_url
-
-        try:
-            url = conda_forge_url
-            resp = requests.get(url)
-            if resp.status_code != 200:
-                Utils.print_warning("Cannot fetch whatis and url info. Falling back to defaults.")
-                return default_whatis_url
-            if "not found" in resp.text.lower():
-                url = bioconda_url
-                resp = requests.get(url)
-                if resp.status_code != 200 or "not found" in resp.text.lower():
-                    Utils.print_warning("Cannot fetch whatis and url info. Falling back to defaults.")
-                    return default_whatis_url
-
-            soup = BeautifulSoup(resp.text, 'html.parser')
-
-            p = soup.select_one("body > prex-root > prex-package-details > div > div > div > prex-package-overview > div > div.overview-content-cards > div.right-column > kendo-card > kendo-card-body > div:nth-child(1) > p:nth-child(2)")
-            if p:
-                text = p.get_text()
-                # take first line and 150 max
-                text = text.split("\n")[0].strip().replace("\t", " ").replace("\"", "").replace("'", "").strip(".")[:150]
-                text = text[0].upper() + text[1:]  # Capitalize first letter
-                if len(text) == 150:
-                    text = text + "..."
-                whatis = text
-                a = soup.select_one("body > prex-root > prex-package-details > div > div > div > prex-package-overview > div > div.overview-content-cards > div.right-column > kendo-card > kendo-card-body > div:nth-child(6) > a")
-                if a:
-                    url = str(a['href'])
-                return (whatis, url)
-            else:
-                Utils.print_warning("Cannot fetch whatis and url info. Falling back to defaults.")
-                Utils.print_warning(f"⚠️ The website layout may have changed. Please check the URL manually and update the {Utils.yellow_text('soup.select_one')} selectors accordingly.")
-                Utils.print_warning(f"Current URL: {url}")
-                return default_whatis_url
-
-        except Exception:
-            Utils.print_warning("Cannot fetch whatis and url info. Falling back to defaults.")
-            return default_whatis_url
+        return default_whatis_url
 
 class ModGen_Exec:
     @staticmethod

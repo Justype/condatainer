@@ -18,6 +18,7 @@ import (
 var listDelete bool
 var listExact bool
 var listOne bool
+var listWhatis bool
 
 var listCmd = &cobra.Command{
 	Use:     "list [terms...]",
@@ -34,11 +35,11 @@ Search rules (single term):
 Search rules (multiple terms, space-separated):
   First term is an exact name  → all terms treated as exact names
   First term not found         → AND substring match`,
-	Example: `  condatainer list                        # List all
-  condatainer list cellranger             # Substring match
-  condatainer list 'cell*'               # Wildcard
-  condatainer list cellranger 9          # AND search (multiple terms)
-  condatainer list cellranger/9.0.1 -e   # Exact match (single term)`,
+	Example: `  condatainer list                     # List all
+  condatainer list cellranger          # Substring match
+  condatainer list 'cell*'             # Wildcard
+  condatainer list cellranger 9        # AND search (multiple terms)
+  condatainer list cellranger/9.0.1 -e # Exact match (single term)`,
 	SilenceUsage: true,
 	RunE:         runList,
 }
@@ -50,6 +51,7 @@ func init() {
 	listCmd.Flags().BoolVarP(&listExact, "exact", "e", false, "Force exact full-name match even for a single term")
 	listCmd.Flags().StringP("dir", "D", "", "Limit to a specific image directory (substring match)")
 	listCmd.Flags().BoolVarP(&listOne, "one", "1", false, "One entry per line (disable multi-column layout)")
+	listCmd.Flags().BoolVarP(&listWhatis, "whatis", "w", false, "Show description for each overlay")
 }
 
 // DirOverlays holds the scan results for a single image directory.
@@ -57,6 +59,7 @@ type DirOverlays struct {
 	Dir       string
 	AppGroups map[string][]string // name → sorted []version
 	DataList  []string
+	Paths     map[string]string // normalized name/version → full overlay path
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -152,24 +155,49 @@ func runList(cmd *cobra.Command, args []string) error {
 					}
 				}
 			}
-			printColumns(plain, styled, 1, listTermWidth())
+			if listWhatis {
+				for i, name := range names {
+					w := readOverlayWhatis(d.Paths[name+"/(system app)"])
+					if w != "" {
+						fmt.Printf(" %s: %s\n", styled[i], w)
+					} else {
+						fmt.Printf(" %s\n", styled[i])
+					}
+				}
+			} else {
+				printColumns(plain, styled, 1, listTermWidth())
+			}
 		}
 
 		if len(moduleOverlays) > 0 {
 			fmt.Println(utils.StyleTitle("Available app overlays:"))
 			var plain, styled []string
+			var keys []string // parallel slice for path lookup
 			for _, name := range sortedKeys(moduleOverlays) {
 				for _, v := range moduleOverlays[name] {
 					if v == "(env)" {
 						plain = append(plain, name+" (env)")
 						styled = append(styled, name+" (env)")
+						keys = append(keys, name+"/(env)")
 					} else {
 						plain = append(plain, name+"/"+v)
 						styled = append(styled, name+"/"+utils.StyleName(v))
+						keys = append(keys, name+"/"+v)
 					}
 				}
 			}
-			printColumns(plain, styled, 1, listTermWidth())
+			if listWhatis {
+				for i := range plain {
+					w := readOverlayWhatis(d.Paths[keys[i]])
+					if w != "" {
+						fmt.Printf(" %s: %s\n", styled[i], w)
+					} else {
+						fmt.Printf(" %s\n", styled[i])
+					}
+				}
+			} else {
+				printColumns(plain, styled, 1, listTermWidth())
+			}
 		}
 
 		if len(d.DataList) > 0 {
@@ -184,7 +212,18 @@ func runList(cmd *cobra.Command, args []string) error {
 				}
 				styled[i] = strings.Join(parts, "/")
 			}
-			printColumns(d.DataList, styled, 1, listTermWidth())
+			if listWhatis {
+				for i, data := range d.DataList {
+					w := readOverlayWhatis(d.Paths[data])
+					if w != "" {
+						fmt.Printf(" %s: %s\n", styled[i], w)
+					} else {
+						fmt.Printf(" %s\n", styled[i])
+					}
+				}
+			} else {
+				printColumns(d.DataList, styled, 1, listTermWidth())
+			}
 		}
 	}
 
@@ -212,8 +251,7 @@ func runList(cmd *cobra.Command, args []string) error {
 			}
 			allMatching = append(allMatching, d.DataList...)
 		}
-		fmt.Print("\n")
-		return performDelete(cmd, allMatching)
+		return performDelete(cmd, allMatching, false)
 	}
 
 	return nil
@@ -229,7 +267,7 @@ func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 		if !utils.DirExists(imageDir) {
 			continue // skip missing
 		}
-		d := DirOverlays{Dir: imageDir, AppGroups: map[string][]string{}}
+		d := DirOverlays{Dir: imageDir, AppGroups: map[string][]string{}, Paths: map[string]string{}}
 
 		entries, err := os.ReadDir(imageDir)
 		if err != nil {
@@ -251,7 +289,9 @@ func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 			if !osOverlay && delimCount > 1 {
 				// Data overlay
 				if query.Matches(normalized) {
-					d.DataList = append(d.DataList, strings.ReplaceAll(nameVersion, "--", "/"))
+					displayName := strings.ReplaceAll(nameVersion, "--", "/")
+					d.DataList = append(d.DataList, displayName)
+					d.Paths[displayName] = overlayPath
 				}
 				continue
 			}
@@ -283,6 +323,7 @@ func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 				appGrouped[name] = map[string]struct{}{}
 			}
 			appGrouped[name][version] = struct{}{}
+			d.Paths[name+"/"+version] = overlayPath
 		}
 
 		for name, versions := range appGrouped {
@@ -320,9 +361,9 @@ func terminalWidth() int {
 	return 80
 }
 
-// listTermWidth returns 0 (single column) when -1 is set, otherwise the terminal width.
+// listTermWidth returns 0 (single column) when -1 or --whatis is set, otherwise the terminal width.
 func listTermWidth() int {
-	if listOne {
+	if listOne || listWhatis {
 		return 0
 	}
 	return terminalWidth()
@@ -383,6 +424,21 @@ func printColumns(plain, styled []string, indent, termWidth int) {
 		}
 		fmt.Println()
 	}
+}
+
+// readOverlayWhatis reads the #WHATIS: line from the overlay's .env sidecar file.
+// Returns an empty string if the file is absent or has no #WHATIS: line.
+func readOverlayWhatis(overlayPath string) string {
+	data, err := os.ReadFile(overlayPath + ".env")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if after, ok := strings.CutPrefix(strings.TrimSpace(line), "#WHATIS:"); ok {
+			return strings.TrimSpace(after)
+		}
+	}
+	return ""
 }
 
 // filterImageDirs filters dirs according to dirFilter:

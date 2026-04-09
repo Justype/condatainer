@@ -563,7 +563,7 @@ With -l, reads only the specified config layer file.`,
 	Example: `  condatainer config get apptainer_bin
   condatainer config get build.ncpus
   condatainer config get extra_image_dirs
-  condatainer config get extra_image_dirs -l app-root   # app-root layer only`,
+  condatainer config get extra_image_dirs -l app-root`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: configKeysCompletion,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -1039,9 +1039,10 @@ var configValidateCmd = &cobra.Command{
 }
 
 var configAppendCmd = &cobra.Command{
-	Use:               "append <key> <value>",
-	Short:             "Append a value to an array config key",
-	Example:           "  condatainer config append extra_image_dirs /shared/lab/images:ro\n  condatainer config append extra_scripts_links https://example.com/scripts",
+	Use:   "append <key> <value>",
+	Short: "Append a value to an array config key",
+	Example: `  condatainer config append extra_image_dirs /shared/lab/images:ro
+  condatainer config append extra_scripts_links https://example.com/scripts`,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: arrayKeyCompletion,
 	SilenceUsage:      true,
@@ -1075,9 +1076,10 @@ var configAppendCmd = &cobra.Command{
 }
 
 var configPrependCmd = &cobra.Command{
-	Use:               "prepend <key> <value>",
-	Short:             "Prepend a value to an array config key (highest priority)",
-	Example:           "  condatainer config prepend extra_image_dirs /fast/images\n  condatainer config prepend extra_scripts_links https://myorg.com/scripts",
+	Use:   "prepend <key> <value>",
+	Short: "Prepend a value to an array config key (highest priority)",
+	Example: `  condatainer config prepend extra_image_dirs /fast/images
+  condatainer config prepend extra_scripts_links https://myorg.com/scripts`,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: arrayKeyCompletion,
 	SilenceUsage:      true,
@@ -1111,9 +1113,10 @@ var configPrependCmd = &cobra.Command{
 }
 
 var configRemoveCmd = &cobra.Command{
-	Use:               "remove <key> [value]",
-	Short:             "Remove a config key or a value from an array key",
-	Example:           "  condatainer config remove apptainer_bin\n  condatainer config remove extra_image_dirs /shared/lab/images:ro",
+	Use:   "remove <key> [value]",
+	Short: "Remove a config key or a value from an array key",
+	Example: `  condatainer config remove apptainer_bin
+  condatainer config remove extra_image_dirs /shared/lab/images:ro`,
 	Args:              cobra.RangeArgs(1, 2),
 	ValidArgsFunction: arrayRemoveValueCompletion,
 	SilenceUsage:      true,

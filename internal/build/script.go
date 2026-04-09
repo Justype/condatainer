@@ -336,24 +336,34 @@ func (b *BuildObject) packOutput(ctx context.Context, finalPath string) error {
 	return nil
 }
 
-// saveEnvFile extracts #ENV: declarations from the build script and writes the .env file.
+// saveEnvFile extracts #ENV: declarations and #WHATIS: from the build script and writes the .env file.
 func (b *BuildObject) saveEnvFile(targetPath string) {
 	envDict, err := GetEnvDictFromBuildScript(b.buildSource)
 	if err != nil {
 		utils.PrintWarning("Failed to extract ENV from build script: %v", err)
 		return
 	}
-	if len(envDict) == 0 {
-		return
-	}
+	whatis := utils.GetWhatIsFromScript(b.buildSource)
 	if len(b.vars) > 0 {
+		whatis = utils.InterpolateVars(whatis, b.vars)
 		for key, entry := range envDict {
 			entry.Value = utils.InterpolateVars(entry.Value, b.vars)
 			entry.Note = utils.InterpolateVars(entry.Note, b.vars)
 			envDict[key] = entry
 		}
 	}
-	if err := SaveEnvFile(targetPath, envDict, b.nameVersion); err != nil {
+	if err := SaveEnvFile(targetPath, envDict, b.nameVersion, whatis); err != nil {
+		utils.PrintWarning("Failed to save ENV file: %v", err)
+	}
+}
+
+// saveCondaEnvFile fetches a package description from anaconda.org and writes the .env file.
+func (b *BuildObject) saveCondaEnvFile(targetPath string) {
+	if b.packageName == "" {
+		return
+	}
+	whatis := utils.FetchCondaSummary(b.packageName, config.Global.Build.Channels)
+	if err := SaveEnvFile(targetPath, map[string]EnvEntry{}, b.nameVersion, whatis); err != nil {
 		utils.PrintWarning("Failed to save ENV file: %v", err)
 	}
 }

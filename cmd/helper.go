@@ -59,9 +59,9 @@ Use --list to see available helper scripts.
 Use --update to download or refresh helper scripts from remote.
 
 Note: Helper is not available inside a container or a scheduler job.`,
-	Example: `  condatainer helper --update                # Update all helper scripts
-  condatainer helper --path                  # Show helper scripts directory
-  condatainer helper code-server -p 11908    # Run code-server and forward flags`,
+	Example: `  condatainer helper --update             # Update all helper scripts
+  condatainer helper --path               # Show helper scripts directory
+  condatainer helper code-server -p 11908 # Run code-server and forward flags`,
 	RunE:              runHelper,
 	ValidArgsFunction: completeHelperScripts,
 }

@@ -48,10 +48,10 @@ var schedulerCmd = &cobra.Command{
 Shows scheduler type (SLURM, PBS, etc.), binary path, version, and availability status.
 Use -p to show per-partition resource limits.
 Use --cpu or --gpu to filter by node type.`,
-	Example: `  condatainer scheduler           # Show scheduler information
-  condatainer scheduler -p        # Show per-partition/queue limits
-  condatainer scheduler --gpu     # Show only GPU partitions
-  condatainer scheduler -p --cpu  # Show per-partition limits for CPU-only partitions`,
+	Example: `  condatainer scheduler          # Show scheduler information
+  condatainer scheduler -p       # Show per-partition/queue limits
+  condatainer scheduler --gpu    # Show only GPU partitions
+  condatainer scheduler -p --cpu # Show per-partition limits for CPU-only partitions`,
 	Run: runScheduler,
 }
 

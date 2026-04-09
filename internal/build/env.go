@@ -97,8 +97,9 @@ type EnvEntry struct {
 
 // SaveEnvFile saves environment variables to a .env file next to the overlay.
 // The $app_root placeholder is replaced with the actual overlay path.
-func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath string) error {
-	if len(envDict) == 0 {
+// whatis is written as a #WHATIS: comment at the top if non-empty.
+func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath string, whatis string) error {
+	if len(envDict) == 0 && whatis == "" {
 		return nil
 	}
 
@@ -108,6 +109,12 @@ func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath s
 		return fmt.Errorf("failed to create env file: %w", err)
 	}
 	defer file.Close()
+
+	if whatis != "" {
+		if _, err := fmt.Fprintf(file, "#WHATIS:%s\n", whatis); err != nil {
+			return fmt.Errorf("failed to write whatis: %w", err)
+		}
+	}
 
 	for key, entry := range envDict {
 		// Replace $app_root placeholder with actual path
