@@ -44,6 +44,7 @@ config.Global  // Singleton instance
 - `DefaultDistro` - Base OS slug (e.g. `"ubuntu24"`)
 - `Branch`, `PreferRemote` (remote script fetching)
 - `ParseModuleLoad` - Treat `module load` lines as `#DEP` dependencies
+- `Notification` - Notification method when a helper job starts (default: `""` = none). Values: `"bell"` (terminal bell), `"email"` (scheduler email directive), ≥5-char string (ntfy.sh topic, fires from compute node), `""` or `"none"` (silent).
 - `Scheduler scheduler.ResourceSpec` - Default scheduler specs (`Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`)
 - `Build BuildConfig` - Build settings (`Defaults scheduler.ResourceSpec`, `TmpSizeMB`, `CompressArgs`, `OverlayType`)
 
@@ -105,6 +106,7 @@ All multi-value env vars use `|` as separator. `CNT_EXTRA_BUILD_DIRS` also accep
 | `CNT_EXTRA_HELPER_DIRS` | `\|` | Extra helper-scripts directories; entries support `:ro`/`:rw` |
 | `CNT_EXTRA_SCRIPTS_LINKS` | `\|` | Extra remote build script source URLs |
 | `CNT_CHANNELS` | `\|` or `:`  | Conda channels |
+| `CNT_NOTIFICATION` | — | Override `notification` for the current session (e.g. `bell`, `email`, ntfy.sh topic) |
 | `CNT_TMPDIR` | — | Override build temp directory |
 | `SCRATCH` | — | HPC scratch directory (`$SCRATCH/condatainer/`) |
 | `XDG_DATA_HOME` / `XDG_CONFIG_HOME` / `XDG_STATE_HOME` | — | XDG base dirs |

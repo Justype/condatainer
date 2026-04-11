@@ -76,6 +76,10 @@ type Config struct {
 	// Scheduler command timeout in seconds (default: 5)
 	SchedulerTimeout time.Duration
 
+	// Notification method when a helper job starts running (default: "" = none).
+	// Values: "bell" (terminal bell), "email" (scheduler email), ≥5-char string (ntfy.sh topic), "" or "none" (silent).
+	Notification string
+
 	// Max age of the on-disk remote build script metadata cache (default: 1 week)
 	MetadataCacheTTL time.Duration
 
@@ -171,6 +175,7 @@ func LoadDefaults(executablePath string) {
 		ScriptsLink:      DefaultScriptsLink,
 		ScriptsLinks:     []string{DefaultScriptsLink}, // overwritten in LoadFromViper
 		SchedulerTimeout: 5 * time.Second,
+		Notification:     "",
 		MetadataCacheTTL: 7 * 24 * time.Hour, // 1 week
 
 		Build: BuildConfig{

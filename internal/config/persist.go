@@ -152,6 +152,7 @@ func setDefaults() {
 	viper.SetDefault("extra_scripts_links", []string{})
 	viper.SetDefault("parse_module_load", false)
 	viper.SetDefault("scheduler_timeout", 5)  // seconds
+	viper.SetDefault("notification", "")      // "" or "none" = silent; "bell" = terminal bell; "email" = scheduler email; ≥5-char = ntfy.sh topic
 	viper.SetDefault("metadata_cache_ttl", 7) // days (1 week)
 }
 
@@ -985,6 +986,11 @@ func LoadFromViper() {
 	if timeout, ok := layerInt("scheduler_timeout"); ok {
 		Global.SchedulerTimeout = time.Duration(timeout) * time.Second
 	}
+
+	if _, ok := layerBool("bell"); ok {
+		fmt.Fprintln(os.Stderr, "[WARN] 'bell' config key is deprecated. Replace with 'notification: bell' to enable or remove the key (default is none).")
+	}
+	Global.Notification = layerString("notification")
 
 	if ttl, ok := layerInt("metadata_cache_ttl"); ok {
 		Global.MetadataCacheTTL = time.Duration(ttl) * 24 * time.Hour
