@@ -39,6 +39,7 @@ var configKeyDefs = map[string]bool{
 	"extra_helper_dirs":      true,
 	"parse_module_load":      false,
 	"scheduler_timeout":      false,
+	"notification":           false,
 	"metadata_cache_ttl":     false,
 	"build.ncpus":            false,
 	"build.mem":              false,
@@ -208,6 +209,8 @@ func configValueCompletion(key string) []string {
 		return []string{"true", "false"}
 	case "build.tmp_overlay_size":
 		return []string{"10g", "20g", "40g"}
+	case "notification":
+		return []string{"none", "bell", "email"}
 	case "metadata_cache_ttl":
 		return []string{"1", "3", "7", "14", "0"}
 	default:
@@ -484,6 +487,12 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 		printOverridden("                      ", "scheduler_timeout")
 		fmt.Printf("  %-19s %v%s\n", "parse_module_load:", config.Global.ParseModuleLoad, srcTag("parse_module_load"))
 		printOverridden("                      ", "parse_module_load")
+		notif := config.Global.Notification
+		if notif == "" {
+			notif = "none"
+		}
+		fmt.Printf("  %-19s %s%s\n", "notification:", notif, srcTag("notification"))
+		printOverridden("                      ", "notification")
 		if config.Global.MetadataCacheTTL == 0 {
 			fmt.Printf("  %-19s 0 (disabled)%s\n", "metadata_cache_ttl:", srcTag("metadata_cache_ttl"))
 		} else {
@@ -662,6 +671,14 @@ Time duration format (for build.time):
 			var n int
 			if _, err := fmt.Sscan(value, &n); err != nil || n < 0 {
 				utils.PrintError("Invalid value for scheduler_timeout: %s (must be a non-negative integer; 0 disables the timeout)", value)
+				os.Exit(ExitCodeUsage)
+			}
+		}
+
+		if key == "notification" {
+			v := strings.ToLower(value)
+			if v != "" && v != "none" && v != "bell" && v != "email" && len(value) < 5 {
+				utils.PrintError("Invalid value for notification: %q (use 'none', 'bell', 'email', or an ntfy.sh topic of at least 5 characters)", value)
 				os.Exit(ExitCodeUsage)
 			}
 		}
