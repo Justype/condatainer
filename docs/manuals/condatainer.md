@@ -433,18 +433,14 @@ condatainer create [OPTIONS] [packages...]
 
 ### System level Examples
 
+**Conda environment:**
+
 ```bash
-# Create from a specific recipe (App Overlay)
+# Single package module overlay (conda fallback)
 condatainer create bcftools/1.22
 
-# Bare package name is expanded using default_distro (e.g. ubuntu24/igv)
-condatainer create igv
-
-# Create multiple overlays at once
+# Multiple package module overlays at once
 condatainer create samtools/1.16 bcftools/1.15
-
-# Create a reference overlay (Ref Overlay)
-condatainer create grch38/gtf-gencode/47
 
 # Create a conda env sqf with packages at a custom path (like conda create -p)
 condatainer create python=3.11 numpy -p /scratch/myenv
@@ -457,9 +453,6 @@ condatainer create -p my_analysis_env -f environment.yml
 
 # Create a custom env with multiple packages bundled together
 condatainer create -n tools samtools=1.16 bcftools=1.15
-
-# Create from a remote container source
-condatainer create --source docker://ubuntu:22.04 -n myubuntu
 
 # Rebuild an existing conda overlay (force update)
 condatainer create -n nvim nvim nodejs -u
@@ -475,11 +468,40 @@ condatainer create bioconda::star=2.7.11b
 condatainer create -n rnaseq bioconda::star bioconda::salmon=1.10.0
 ```
 
+**Build script:**
+
+```bash
+# App overlay via build script
+condatainer create cellranger/9.0.1
+
+# Bare package name is expanded using default_distro (e.g. ubuntu24/igv)
+condatainer create igv
+
+# Data overlay
+condatainer create grch38/gtf-gencode/47
+
+# From a remote container source
+condatainer create --source docker://ubuntu:22.04 -n myubuntu
+
+# Template script — prompts for each placeholder interactively
+condatainer create grch38/salmon-gencode
+# [CNT] Placeholder template: grch38/salmon-gencode
+# [CNT] Salmon GRCh38 GENCODE{gencode_version} index for transcript quantification
+#   Target: grch38/salmon/{salmon_version}/gencode{gencode_version}
+#   salmon_version [1.0.0-1.11.4] (default: 1.11.4): 1.10.2
+#   gencode_version [23-49] (default: 49):
+#   → Creating grch38/salmon/1.10.2/gencode49
+
+# Template script — skip prompts by specifying the resolved target name directly
+condatainer create grch38/salmon/1.10.2/gencode49
+```
+
 **Features**:
 
 - Automatic Fetching: If a build script is not found locally, **CondaTainer** attempts to fetch it from the remote repository.
 - Conda Fallback: If no build script exists, **CondaTainer** attempts to create the module by installing the package with the requested name and version from conda-forge or bioconda.
 - Metadata Parsing: Parses `#ENV` and `#ENVNOTE` tags from build scripts to inject environment variables and help text into the generated modulefile.
+- Template Resolution: If the name matches a template script (`#PL:` / `#TARGET:`), **CondaTainer** prompts for each placeholder interactively, then builds the resolved concrete overlay. You can also bypass prompts by specifying the resolved target name directly.
 
 ### Project level Examples
 

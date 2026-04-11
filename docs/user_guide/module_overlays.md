@@ -32,6 +32,55 @@ condatainer exec -o grch38/cellranger/2024-A bash
 #   STAR_INDEX_DIR    : STAR index dir
 ```
 
+## 📥 Installing Module Overlays
+
+Use `condatainer avail` to browse available build scripts, then `condatainer create` to install.
+
+### Normal Build Script Module
+
+A normal build script targets a fixed name and version. Install it directly:
+
+```bash
+condatainer avail cellranger           # search available scripts
+condatainer create cellranger/9.0.1    # app module
+condatainer create grch38/genome/gencode  # data module
+```
+
+### Template Script Module
+
+A template script covers many versions through placeholders. It appears in `avail` output as a collapsed group:
+
+```
+grch38/salmon-gencode  [486 variants]
+  → grch38/salmon/{salmon_version}/gencode{gencode_version}
+  - salmon_version:   1.0.0-1.11.4  (18 values)
+  - gencode_version:  23-49  (27 values)
+```
+
+There are two ways to install:
+
+**1. Use the template name** — **CondaTainer** prompts for each placeholder interactively:
+
+```bash
+condatainer create grch38/salmon-gencode
+# [CNT] Placeholder template: grch38/salmon-gencode
+# [CNT] Salmon GRCh38 GENCODE{gencode_version} index for transcript quantification
+# Target: grch38/salmon/{salmon_version}/gencode{gencode_version}
+#   salmon_version [1.0.0-1.11.4] (default: 1.11.4): 1.10.2
+#   gencode_version [23-49] (default: 49):
+#   → Creating grch38/salmon/1.10.2/gencode49
+```
+
+**2. Specify the target directly** — skip the prompts by providing the resolved name:
+
+```bash
+condatainer create grch38/salmon/1.10.2/gencode47
+```
+
+```{tip}
+When entering placeholder values, you can hit <Tab> to see the available options and autocomplete.
+```
+
 ## 🚀 Dependencies Automation
 
 ### 🧬 Data Overlay Installation
