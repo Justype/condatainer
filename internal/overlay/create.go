@@ -180,7 +180,6 @@ func moveFile(ctx context.Context, src, dst string, sparse bool) (copied bool, e
 	}
 
 	if err := os.Rename(src, dst); err == nil {
-		utils.RemoveDirIfEmpty(filepath.Dir(src))
 		return false, nil
 	} else if !errors.Is(err, syscall.EXDEV) {
 		return false, fmt.Errorf("rename %s → %s: %w", src, dst, err)
@@ -191,7 +190,6 @@ func moveFile(ctx context.Context, src, dst string, sparse bool) (copied bool, e
 		return false, err
 	}
 	os.Remove(src)
-	utils.RemoveDirIfEmpty(filepath.Dir(src))
 	return true, nil
 }
 
@@ -266,6 +264,7 @@ func createAtTmp(ctx context.Context, opts *CreateOptions) (tmpPath string, err 
 	// Always create sparse in tmp to save local disk space.
 	// If the final overlay must be allocated, call AllocateOverlay after MoveOverlay.
 	if err := createOverlayFile(ctx, opts, tmpPath, true); err != nil {
+		utils.RemoveDirIfEmpty(tmpDir)
 		return "", err
 	}
 
@@ -321,7 +320,10 @@ func CreateWithOptions(ctx context.Context, opts *CreateOptions) error {
 	// When tmpPath == opts.Path the overlay was created directly at the final location
 	// (opts.Path is already inside the tmp dir). Skip the move and do not remove the file.
 	if tmpPath != opts.Path {
-		defer os.Remove(tmpPath)
+		defer func() {
+			os.Remove(tmpPath)
+			utils.RemoveDirIfEmpty(filepath.Dir(tmpPath))
+		}()
 
 		if !opts.Quiet {
 			utils.PrintMessage("Moving overlay to %s", utils.StylePath(opts.Path))

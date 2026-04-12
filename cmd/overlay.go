@@ -137,6 +137,7 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 
 			if err := initializeOverlayWithConda(cmd.Context(), tmpPath, envFile, packages, fakeroot); err != nil {
 				os.Remove(tmpPath)
+				utils.RemoveDirIfEmpty(filepath.Dir(tmpPath))
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 					utils.PrintWarning("Overlay initialization cancelled.")
 					return
@@ -148,8 +149,10 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 			copied, err := overlay.MoveOverlayCopied(cmd.Context(), tmpPath, path, sparse)
 			if err != nil {
 				os.Remove(tmpPath)
+				utils.RemoveDirIfEmpty(filepath.Dir(tmpPath))
 				ExitWithError("Failed to move overlay to destination: %v", err)
 			}
+			utils.RemoveDirIfEmpty(filepath.Dir(tmpPath))
 
 			// Skip AllocateOverlay when io.Copy was used: zeros already written physically.
 			if !sparse && !copied {
