@@ -225,7 +225,7 @@ func runScheduler(cmd *cobra.Command, args []string) {
 						gpuLines := make([]string, 0)
 						for _, gpuType := range gpuNames {
 							gpu := gpuMap[gpuType]
-							gpuLines = append(gpuLines, fmt.Sprintf("%s (%d/%d)", gpu.Type, gpu.Available, gpu.Total))
+							gpuLines = append(gpuLines, fmt.Sprintf("%s (%d)", gpu.Type, gpu.Total))
 						}
 						gpuTypesStr = strings.Join(gpuLines, "\n")
 					}
@@ -325,11 +325,10 @@ func runScheduler(cmd *cobra.Command, args []string) {
 			sort.Strings(gpuNames)
 
 			fmt.Println()
-			fmt.Println("Available GPUs:")
+			fmt.Println("GPUs:")
 			for _, name := range gpuNames {
 				gpu := gpuMap[name]
-				fmt.Printf("  %s: %d total, %d available\n",
-					utils.StyleName(gpu.Type), gpu.Total, gpu.Available)
+				fmt.Printf("  %s: %d total\n", utils.StyleName(gpu.Type), gpu.Total)
 			}
 		}
 	}

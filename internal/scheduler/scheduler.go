@@ -72,15 +72,15 @@ type GpuInfo struct {
 // ResourceLimits holds scheduler resource limits per partition/queue.
 // CPU and memory limits are per-node (matching how schedulers report them).
 type ResourceLimits struct {
-	MaxNodes           int           // Maximum nodes per job
-	MaxCpusPerNode     int           // Maximum CPUs per node in this partition
-	MaxMemMBPerNode    int64         // Maximum memory per node in MB
-	MaxGpus            int           // Maximum GPUs per job (total across all nodes)
-	DefaultTime        time.Duration // Default walltime if not specified
-	MaxTime            time.Duration // Maximum walltime (e.g., "7-00:00:00")
-	Partition          string        // Partition/queue name these limits apply to
-	IsDefault          bool          // true when this is the cluster's default partition
-	DefaultMemPerNodeUnlimited bool  // true when DefMemPerNode=UNLIMITED (cluster rejects --mem)
+	MaxNodes                   int           // Maximum nodes per job
+	MaxCpusPerNode             int           // Maximum CPUs per node in this partition
+	MaxMemMBPerNode            int64         // Maximum memory per node in MB
+	MaxGpus                    int           // Maximum GPUs per job (total across all nodes)
+	DefaultTime                time.Duration // Default walltime if not specified
+	MaxTime                    time.Duration // Maximum walltime (e.g., "7-00:00:00")
+	Partition                  string        // Partition/queue name these limits apply to
+	IsDefault                  bool          // true when this is the cluster's default partition
+	DefaultMemPerNodeUnlimited bool          // true when DefMemPerNode=UNLIMITED (cluster rejects --mem)
 }
 
 // ResourceSpec holds compute geometry for a job.
@@ -181,11 +181,11 @@ type RuntimeConfig struct {
 
 // ClusterInfo holds cluster configuration information
 type ClusterInfo struct {
-	AvailableGpus      []GpuInfo        // Available GPU types
-	Limits             []ResourceLimits // Resource limits per partition
-	MaxCpusPerNode     int              // Maximum CPUs available per node (from node info)
-	MaxMemMBPerNode    int64            // Maximum memory available per node in MB (from node info)
-	DefaultMemPerNodeUnlimited bool     // true if the default partition has DefMemPerNode=UNLIMITED
+	AvailableGpus              []GpuInfo        // Available GPU types
+	Limits                     []ResourceLimits // Resource limits per partition
+	MaxCpusPerNode             int              // Maximum CPUs available per node (from node info)
+	MaxMemMBPerNode            int64            // Maximum memory available per node in MB (from node info)
+	DefaultMemPerNodeUnlimited bool             // true if the default partition has DefMemPerNode=UNLIMITED
 }
 
 // ScriptSpecs holds the full result of parsing a scheduler script.

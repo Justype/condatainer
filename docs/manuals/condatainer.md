@@ -1755,7 +1755,7 @@ condatainer scheduler [FLAGS]
 * Version
 * Availability status
 * Max resource limits across all partitions (CPUs, memory, time)
-* Available GPUs (type, total, available)
+* GPUs (type, total)
 
 **Examples:**
 
