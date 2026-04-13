@@ -607,7 +607,8 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 			}
 		}
 
-		memUnlimited := s.cachedClusterInfo != nil && s.cachedClusterInfo.DefaultMemPerNodeUnlimited
+		clusterInfo, _ := s.GetClusterInfo()
+		memUnlimited := clusterInfo != nil && clusterInfo.DefaultMemPerNodeUnlimited
 		if !memUnlimited {
 			if rs.MemPerCpuMB > 0 {
 				fmt.Fprintf(writer, "#SBATCH --mem-per-cpu=%dmb\n", rs.MemPerCpuMB)
