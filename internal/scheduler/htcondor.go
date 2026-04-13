@@ -596,16 +596,11 @@ func (h *HTCondorScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		return info, nil
 	}
 
-	// Get node info from condor_status
-	maxCpus, maxMem, err := h.getMaxNodeResources()
+	// Single condor_status call: CPU, mem, and GPU info per machine.
+	maxCpus, maxMem, gpus, err := h.getNodeAndGpuInfo()
 	if err == nil {
 		info.MaxCpusPerNode = maxCpus
 		info.MaxMemMBPerNode = maxMem
-	}
-
-	// Get GPU info
-	gpus, err := h.getGpuInfo()
-	if err == nil {
 		info.AvailableGpus = gpus
 	}
 
@@ -621,28 +616,32 @@ func (h *HTCondorScheduler) GetClusterInfo() (*ClusterInfo, error) {
 	return info, nil
 }
 
-// getMaxNodeResources queries HTCondor for max CPU and memory per node
-func (h *HTCondorScheduler) getMaxNodeResources() (int, int64, error) {
-	// condor_status -af TotalSlotCpus TotalSlotMemory
-	output, err := runCommand("HTCondor", "query-node-resources", h.condorStatusBin, "-compact", "-af", "TotalSlotCpus", "TotalSlotMemory")
+// getNodeAndGpuInfo queries HTCondor for CPU, memory, and GPU info in a single condor_status call.
+func (h *HTCondorScheduler) getNodeAndGpuInfo() (int, int64, []GpuInfo, error) {
+	output, err := runCommand("HTCondor", "query-node-info", h.condorStatusBin,
+		"-compact", "-af", "TotalSlotCpus", "TotalSlotMemory", "TotalGpus", "Machine")
 	if err != nil {
-		return 0, 0, NewClusterError("HTCondor", "query node resources", err)
+		return 0, 0, nil, NewClusterError("HTCondor", "query node info", err)
 	}
 
 	var maxCpus int
 	var maxMemMB int64
+	gpuMap := make(map[string]*GpuInfo)
 
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	for _, line := range lines {
 		fields := strings.Fields(line)
-		if len(fields) < 2 {
+		if len(fields) < 4 {
 			continue
 		}
 
 		var cpus int
 		var memMB int64
+		var gpuCount int
 		fmt.Sscanf(fields[0], "%d", &cpus)
 		fmt.Sscanf(fields[1], "%d", &memMB)
+		fmt.Sscanf(fields[2], "%d", &gpuCount)
+		machine := fields[3]
 
 		if cpus > maxCpus {
 			maxCpus = cpus
@@ -650,56 +649,26 @@ func (h *HTCondorScheduler) getMaxNodeResources() (int, int64, error) {
 		if memMB > maxMemMB {
 			maxMemMB = memMB
 		}
-	}
 
-	return maxCpus, maxMemMB, nil
-}
-
-// getGpuInfo queries HTCondor for available GPU info
-func (h *HTCondorScheduler) getGpuInfo() ([]GpuInfo, error) {
-	output, err := runCommand("HTCondor", "query-gpu-info", h.condorStatusBin, "-compact", "-constraint", "TotalGpus > 0",
-		"-af", "TotalGpus", "Machine")
-	if err != nil {
-		return nil, NewClusterError("HTCondor", "query GPUs", err)
-	}
-
-	gpuMap := make(map[string]*GpuInfo)
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-
-	for _, line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-
-		var gpuCount int
-		fmt.Sscanf(fields[0], "%d", &gpuCount)
-		machine := fields[1]
-
-		if gpuCount <= 0 {
-			continue
-		}
-
-		key := fmt.Sprintf("gpu:%s", machine)
-		if existing, ok := gpuMap[key]; ok {
-			existing.Total += gpuCount
-			existing.Available += gpuCount
-		} else {
-			gpuMap[key] = &GpuInfo{
-				Type:      "gpu",
-				Total:     gpuCount,
-				Available: gpuCount,
-				Partition: machine,
+		if gpuCount > 0 {
+			key := "gpu:" + machine
+			if existing, ok := gpuMap[key]; ok {
+				existing.Total += gpuCount
+			} else {
+				gpuMap[key] = &GpuInfo{
+					Type:      "gpu",
+					Total:     gpuCount,
+					Partition: machine,
+				}
 			}
 		}
 	}
 
 	gpus := make([]GpuInfo, 0, len(gpuMap))
-	for _, info := range gpuMap {
-		gpus = append(gpus, *info)
+	for _, g := range gpuMap {
+		gpus = append(gpus, *g)
 	}
-
-	return gpus, nil
+	return maxCpus, maxMemMB, gpus, nil
 }
 
 // getClusterLimits queries HTCondor for cluster-wide resource limits

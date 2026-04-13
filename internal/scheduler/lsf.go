@@ -789,7 +789,7 @@ func (l *LsfScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		Limits:        make([]ResourceLimits, 0),
 	}
 
-	// Get host resources using bhosts
+	// Single pass: get host CPU/mem (bhosts -w + lshosts -w).
 	if l.bhostsBin != "" {
 		maxCpus, maxMem, err := l.getHostResources()
 		if err == nil {
@@ -797,16 +797,15 @@ func (l *LsfScheduler) GetClusterInfo() (*ClusterInfo, error) {
 			info.MaxMemMBPerNode = maxMem
 		}
 
-		// Get GPU info
 		gpus, err := l.getGpuInfo()
 		if err == nil {
 			info.AvailableGpus = gpus
 		}
 	}
 
-	// Get queue limits
+	// Get queue limits; pass already-computed host maxima to avoid re-querying.
 	if l.bqueuesBin != "" {
-		limits, err := l.getQueueLimits(info.AvailableGpus)
+		limits, err := l.getQueueLimits(info.MaxCpusPerNode, info.MaxMemMBPerNode, info.AvailableGpus)
 		if err == nil {
 			info.Limits = limits
 		}
@@ -875,8 +874,9 @@ func (l *LsfScheduler) getHostResources() (int, int64, error) {
 	return maxCpus, maxMemMB, nil
 }
 
-// getQueueLimits queries LSF for queue resource limits using bqueues
-func (l *LsfScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, error) {
+// getQueueLimits queries LSF for queue resource limits using bqueues.
+// maxCpus/maxMemMB (from getHostResources) are merged in to avoid re-querying hosts.
+func (l *LsfScheduler) getQueueLimits(maxCpus int, maxMemMB int64, gpuInfo []GpuInfo) ([]ResourceLimits, error) {
 	output, err := runCommand("LSF", "query-queues", l.bqueuesBin, "-l")
 	if err != nil {
 		return nil, NewClusterError("LSF", "query queues", err)
@@ -953,22 +953,16 @@ func (l *LsfScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, erro
 		}
 	}
 
-	// Get available resources per queue from actual hosts
-	if l.bhostsBin != "" {
-		availRes, err := l.getAvailableResourcesByQueue()
-		if err == nil {
-			// Merge available resources into queue limits
-			for queueName, limit := range queueLimits {
-				if avail, ok := availRes[queueName]; ok {
-					// Use available resources as limits if they're set and larger than config
-					if avail.MaxCpusPerNode > 0 {
-						limit.MaxCpusPerNode = avail.MaxCpusPerNode
-					}
-					if avail.MaxMemMBPerNode > 0 {
-						limit.MaxMemMBPerNode = avail.MaxMemMBPerNode
-					}
-				}
+	// Merge host-level maxima into each queue that has no config-set value.
+	if maxCpus > 0 || maxMemMB > 0 {
+		for queueName, limit := range queueLimits {
+			if limit.MaxCpusPerNode == 0 && maxCpus > 0 {
+				limit.MaxCpusPerNode = maxCpus
 			}
+			if limit.MaxMemMBPerNode == 0 && maxMemMB > 0 {
+				limit.MaxMemMBPerNode = maxMemMB
+			}
+			queueLimits[queueName] = limit
 		}
 	}
 
@@ -1003,127 +997,6 @@ func (l *LsfScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, erro
 	})
 
 	return limits, nil
-}
-
-// getAvailableResourcesByQueue queries available CPUs and memory per queue
-func (l *LsfScheduler) getAvailableResourcesByQueue() (map[string]ResourceLimits, error) {
-	// LSF doesn't directly expose queue-to-host mapping in simple commands
-	// We'll use bhosts to get host info and try to match to queues via bqueues
-	// This is a best-effort implementation
-
-	output, err := runCommand("LSF", "query-available-resources", l.bhostsBin, "-w")
-	if err != nil {
-		return nil, NewClusterError("LSF", "query available resources by queue", err)
-	}
-
-	// Track resources per queue
-	resources := make(map[string]ResourceLimits)
-
-	// Parse bhosts output to get host capabilities
-	type hostInfo struct {
-		cpus   int
-		memMB  int64
-		status string
-	}
-	hosts := make(map[string]hostInfo)
-
-	lines := strings.Split(string(output), "\n")
-	for i, line := range lines {
-		if i == 0 {
-			continue // Skip header line
-		}
-
-		fields := strings.Fields(line)
-		if len(fields) < 4 {
-			continue
-		}
-
-		// bhosts -w output: HOST_NAME STATUS JL/U MAX NJOBS RUN SSUSP USUSP RSV
-		hostName := fields[0]
-		status := fields[1]
-		var cpus int
-		fmt.Sscanf(fields[3], "%d", &cpus)
-
-		hosts[hostName] = hostInfo{
-			cpus:   cpus,
-			status: status,
-		}
-	}
-
-	// Get memory info from lshosts
-	lshostsCmd, err := exec.LookPath("lshosts")
-	if err == nil {
-		output, err := runCommand("LSF", "query-host-memory", lshostsCmd, "-w")
-		if err == nil {
-			lines := strings.Split(string(output), "\n")
-			for i, line := range lines {
-				if i == 0 {
-					continue // Skip header
-				}
-
-				fields := strings.Fields(line)
-				if len(fields) >= 6 {
-					hostName := fields[0]
-					if host, ok := hosts[hostName]; ok {
-						memStr := fields[5]
-						if memMB, err := parseLsfMemoryToMB(memStr); err == nil {
-							host.memMB = memMB
-							hosts[hostName] = host
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Query bqueues to get queue-to-host mapping
-	// Note: This is simplified - LSF queue-host mapping can be complex
-	// For a more accurate implementation, we'd need to parse bqueues -l output
-	// or use LSF API if available
-	output, err = runCommand("LSF", "query-queue-mapping", l.bqueuesBin)
-	if err == nil {
-		// For now, aggregate all host resources under each queue
-		// This is a simplification - in reality, queues may have specific host groups
-		lines := strings.Split(string(output), "\n")
-		for i, line := range lines {
-			if i == 0 {
-				continue // Skip header
-			}
-
-			fields := strings.Fields(line)
-			if len(fields) == 0 {
-				continue
-			}
-
-			queueName := fields[0]
-
-			// Aggregate all ok/closed hosts for this queue
-			// In a real implementation, we'd filter by queue's host groups
-			var maxCpus int
-			var maxMemMB int64
-
-			for _, host := range hosts {
-				if host.status == "ok" || host.status == "closed" {
-					if host.cpus > maxCpus {
-						maxCpus = host.cpus
-					}
-					if host.memMB > maxMemMB {
-						maxMemMB = host.memMB
-					}
-				}
-			}
-
-			if maxCpus > 0 || maxMemMB > 0 {
-				resources[queueName] = ResourceLimits{
-					Partition:       queueName,
-					MaxCpusPerNode:  maxCpus,
-					MaxMemMBPerNode: maxMemMB,
-				}
-			}
-		}
-	}
-
-	return resources, nil
 }
 
 // getGpuInfo queries LSF for GPU information using bhosts

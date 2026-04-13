@@ -1269,27 +1269,27 @@ func TestParsePartitionLineDefaultMemPerNodeUnlimited(t *testing.T) {
 	slurm := newTestSlurmScheduler()
 
 	tests := []struct {
-		name                          string
-		line                          string
-		wantIsDefault                 bool
+		name                           string
+		line                           string
+		wantIsDefault                  bool
 		wantDefaultMemPerNodeUnlimited bool
 	}{
 		{
-			name:                          "default partition with UNLIMITED mem — Trillium-style",
-			line:                          "PartitionName=compute AllowGroups=ALL Default=YES DefMemPerNode=UNLIMITED MaxMemPerNode=UNLIMITED MaxTime=1-00:00:00 State=UP",
-			wantIsDefault:                 true,
+			name:                           "default partition with UNLIMITED mem — Trillium-style",
+			line:                           "PartitionName=compute AllowGroups=ALL Default=YES DefMemPerNode=UNLIMITED MaxMemPerNode=UNLIMITED MaxTime=1-00:00:00 State=UP",
+			wantIsDefault:                  true,
 			wantDefaultMemPerNodeUnlimited: true,
 		},
 		{
-			name:                          "non-default partition with fixed mem",
-			line:                          "PartitionName=gpu AllowGroups=ALL Default=NO DefMemPerNode=16384 MaxMemPerNode=UNLIMITED MaxTime=2-00:00:00 State=UP",
-			wantIsDefault:                 false,
+			name:                           "non-default partition with fixed mem",
+			line:                           "PartitionName=gpu AllowGroups=ALL Default=NO DefMemPerNode=16384 MaxMemPerNode=UNLIMITED MaxTime=2-00:00:00 State=UP",
+			wantIsDefault:                  false,
 			wantDefaultMemPerNodeUnlimited: false,
 		},
 		{
-			name:                          "partition without DefMemPerNode key — defaults to false",
-			line:                          "PartitionName=debug AllowGroups=ALL Default=NO MaxTime=01:00:00 State=UP",
-			wantIsDefault:                 false,
+			name:                           "partition without DefMemPerNode key — defaults to false",
+			line:                           "PartitionName=debug AllowGroups=ALL Default=NO MaxTime=01:00:00 State=UP",
+			wantIsDefault:                  false,
 			wantDefaultMemPerNodeUnlimited: false,
 		},
 	}

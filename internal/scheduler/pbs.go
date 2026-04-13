@@ -773,24 +773,27 @@ func (p *PbsScheduler) GetClusterInfo() (*ClusterInfo, error) {
 		Limits:        make([]ResourceLimits, 0),
 	}
 
-	// Get node resources using pbsnodes
+	// Single pbsnodes call: CPU/mem per queue, GPU info.
+	var nodeInfo map[string]ResourceLimits
 	if p.pbsnodesBin != "" {
-		maxCpus, maxMem, err := p.getNodeResources()
+		ni, gpus, err := p.getNodeInfoByQueue()
 		if err == nil {
-			info.MaxCpusPerNode = maxCpus
-			info.MaxMemMBPerNode = maxMem
-		}
-
-		// Get GPU info separately
-		gpus, err := p.getGpuInfo()
-		if err == nil {
+			nodeInfo = ni
 			info.AvailableGpus = gpus
+			for _, r := range ni {
+				if r.MaxCpusPerNode > info.MaxCpusPerNode {
+					info.MaxCpusPerNode = r.MaxCpusPerNode
+				}
+				if r.MaxMemMBPerNode > info.MaxMemMBPerNode {
+					info.MaxMemMBPerNode = r.MaxMemMBPerNode
+				}
+			}
 		}
 	}
 
 	// Get queue limits
 	if p.qstatBin != "" {
-		limits, err := p.getQueueLimits(info.AvailableGpus)
+		limits, err := p.getQueueLimits(nodeInfo, info.AvailableGpus)
 		if err == nil {
 			info.Limits = limits
 		}
@@ -804,106 +807,82 @@ func (p *PbsScheduler) GetClusterInfo() (*ClusterInfo, error) {
 	return info, nil
 }
 
-// getNodeResources queries PBS for node resources using pbsnodes
-func (p *PbsScheduler) getNodeResources() (int, int64, error) {
-	output, err := runCommand("PBS", "query-nodes", p.pbsnodesBin, "-a")
+// getNodeInfoByQueue queries PBS for node CPU/mem and GPU info in a single pbsnodes -a call.
+// Returns per-queue max CPU/mem and a GPU list.
+func (p *PbsScheduler) getNodeInfoByQueue() (map[string]ResourceLimits, []GpuInfo, error) {
+	output, err := runCommand("PBS", "query-node-info", p.pbsnodesBin, "-a")
 	if err != nil {
-		return 0, 0, NewClusterError("PBS", "query nodes", err)
+		return nil, nil, NewClusterError("PBS", "query node info", err)
 	}
 
-	var maxCpus int
-	var maxMemMB int64
+	nodeInfo := make(map[string]ResourceLimits)
+	gpuMap := make(map[string]*GpuInfo)
 
-	// Parse pbsnodes output
-	// Format is key = value pairs, with node names as headers
 	lines := strings.Split(string(output), "\n")
 	var currentNode string
 	var nodeCpus int
 	var nodeMemKB int64
 	var nodeState string
+	var nodeQueue string
+	var nodeGpus int
+	var nodeGpuType string
+
+	flushNode := func() {
+		if currentNode == "" {
+			return
+		}
+		active := nodeState == "free" || nodeState == "job-exclusive" || strings.Contains(nodeState, "busy")
+
+		// Per-queue max CPU/mem (active nodes only)
+		if nodeQueue != "" && active {
+			nodeMB := nodeMemKB / 1024
+			if existing, ok := nodeInfo[nodeQueue]; ok {
+				if nodeCpus > existing.MaxCpusPerNode {
+					existing.MaxCpusPerNode = nodeCpus
+				}
+				if nodeMB > existing.MaxMemMBPerNode {
+					existing.MaxMemMBPerNode = nodeMB
+				}
+				nodeInfo[nodeQueue] = existing
+			} else {
+				nodeInfo[nodeQueue] = ResourceLimits{
+					Partition:       nodeQueue,
+					MaxCpusPerNode:  nodeCpus,
+					MaxMemMBPerNode: nodeMB,
+				}
+			}
+		}
+
+		// GPU info
+		if nodeGpus > 0 {
+			gpuType := nodeGpuType
+			if gpuType == "" {
+				gpuType = "gpu"
+			}
+			key := nodeQueue + ":" + gpuType
+			if existing, ok := gpuMap[key]; ok {
+				existing.Total += nodeGpus
+			} else {
+				gpuMap[key] = &GpuInfo{
+					Type:      gpuType,
+					Total:     nodeGpus,
+					Partition: nodeQueue,
+				}
+			}
+		}
+	}
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-
-		// Node name line (no leading whitespace in original, but we trimmed)
-		if line != "" && !strings.Contains(line, "=") {
-			// Save previous node's data
-			if currentNode != "" && (nodeState == "free" || nodeState == "job-exclusive" || strings.Contains(nodeState, "busy")) {
-				if nodeCpus > maxCpus {
-					maxCpus = nodeCpus
-				}
-				nodeMB := nodeMemKB / 1024
-				if nodeMB > maxMemMB {
-					maxMemMB = nodeMB
-				}
-			}
-			currentNode = line
-			nodeCpus = 0
-			nodeMemKB = 0
-			nodeState = ""
+		if line == "" {
 			continue
 		}
 
-		// Parse key = value pairs
-		if strings.Contains(line, "=") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-
-			switch key {
-			case "state":
-				nodeState = value
-			case "np", "pcpus":
-				fmt.Sscanf(value, "%d", &nodeCpus)
-			case "resources_available.ncpus":
-				fmt.Sscanf(value, "%d", &nodeCpus)
-			case "resources_available.mem":
-				// Memory can be in kb, mb, gb format
-				nodeMemKB, _ = parsePbsMemory(value)
-			}
-		}
-	}
-
-	// Don't forget the last node
-	if currentNode != "" && (nodeState == "free" || nodeState == "job-exclusive" || strings.Contains(nodeState, "busy")) {
-		if nodeCpus > maxCpus {
-			maxCpus = nodeCpus
-		}
-		nodeMB := nodeMemKB / 1024
-		if nodeMB > maxMemMB {
-			maxMemMB = nodeMB
-		}
-	}
-
-	return maxCpus, maxMemMB, nil
-}
-
-// getGpuInfo queries PBS for GPU information using pbsnodes
-func (p *PbsScheduler) getGpuInfo() ([]GpuInfo, error) {
-	output, err := runCommand("PBS", "query-gpu-info", p.pbsnodesBin, "-a")
-	if err != nil {
-		return nil, NewClusterError("PBS", "query GPU info", err)
-	}
-
-	gpuMap := make(map[string]*GpuInfo)
-
-	// Parse pbsnodes output for GPU information
-	lines := strings.Split(string(output), "\n")
-	var currentNode string
-	var nodeState string
-	var nodeQueue string // Try to detect queue assignment if available
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		// Node name line
-		if line != "" && !strings.Contains(line, "=") {
+		if !strings.Contains(line, "=") {
+			flushNode()
 			currentNode = line
-			nodeState = ""
-			nodeQueue = "" // Reset queue for new node
+			nodeCpus, nodeMemKB, nodeGpus = 0, 0, 0
+			nodeState, nodeQueue, nodeGpuType = "", "", ""
 			continue
 		}
 
@@ -911,70 +890,42 @@ func (p *PbsScheduler) getGpuInfo() ([]GpuInfo, error) {
 			continue
 		}
 
-		// Parse key = value pairs
-		if strings.Contains(line, "=") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
 
-			switch key {
-			case "state":
-				nodeState = value
-			case "queue":
-				// Some PBS installations show queue assignment
-				nodeQueue = value
-			case "resources_available.ngpus":
-				var gpuCount int
-				fmt.Sscanf(value, "%d", &gpuCount)
-				if gpuCount > 0 {
-					// Try to get GPU type from other fields
-					gpuType := "gpu" // default
-
-					// Build key with queue if available
-					key := gpuType
-					if nodeQueue != "" {
-						key = fmt.Sprintf("%s:%s", nodeQueue, gpuType)
-					}
-
-					if existing, ok := gpuMap[key]; ok {
-						existing.Total += gpuCount
-						if nodeState == "free" {
-							existing.Available += gpuCount
-						}
-					} else {
-						available := 0
-						if nodeState == "free" {
-							available = gpuCount
-						}
-						gpuMap[key] = &GpuInfo{
-							Type:      gpuType,
-							Total:     gpuCount,
-							Available: available,
-							Partition: nodeQueue, // May be empty
-						}
-					}
-				}
-			case "resources_available.gpu_model", "gpu_type":
-				// Some PBS installations expose GPU model/type
-				// This would be used to set gpuType above
-				// For now, we keep it simple with "gpu" as the type
-			}
+		switch key {
+		case "state":
+			nodeState = value
+		case "queue":
+			nodeQueue = value
+		case "np", "pcpus":
+			fmt.Sscanf(value, "%d", &nodeCpus)
+		case "resources_available.ncpus":
+			fmt.Sscanf(value, "%d", &nodeCpus)
+		case "resources_available.mem":
+			nodeMemKB, _ = parsePbsMemory(value)
+		case "resources_available.ngpus":
+			fmt.Sscanf(value, "%d", &nodeGpus)
+		case "resources_available.gpu_model", "gpu_type":
+			nodeGpuType = value
 		}
 	}
+	flushNode()
 
 	gpus := make([]GpuInfo, 0, len(gpuMap))
-	for _, info := range gpuMap {
-		gpus = append(gpus, *info)
+	for _, g := range gpuMap {
+		gpus = append(gpus, *g)
 	}
-
-	return gpus, nil
+	return nodeInfo, gpus, nil
 }
 
-// getQueueLimits queries PBS for queue resource limits using qstat -Qf
-func (p *PbsScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, error) {
+// getQueueLimits queries PBS for queue resource limits using qstat -Qf.
+// nodeInfo (from getNodeInfoByQueue) provides actual node CPU/mem maxima per queue.
+func (p *PbsScheduler) getQueueLimits(nodeInfo map[string]ResourceLimits, gpuInfo []GpuInfo) ([]ResourceLimits, error) {
 	output, err := runCommand("PBS", "query-queues", p.qstatBin, "-Qf")
 	if err != nil {
 		return nil, NewClusterError("PBS", "query queues", err)
@@ -1044,21 +995,17 @@ func (p *PbsScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, erro
 		}
 	}
 
-	// Get available resources per queue from actual nodes
-	if p.pbsnodesBin != "" {
-		availRes, err := p.getAvailableResourcesByQueue()
-		if err == nil {
-			// Merge available resources into queue limits
-			for queueName, limit := range queueLimits {
-				if avail, ok := availRes[queueName]; ok {
-					// Use available resources as limits if they're set and larger than config
-					if avail.MaxCpusPerNode > 0 {
-						limit.MaxCpusPerNode = avail.MaxCpusPerNode
-					}
-					if avail.MaxMemMBPerNode > 0 {
-						limit.MaxMemMBPerNode = avail.MaxMemMBPerNode
-					}
+	// Merge actual node CPU/mem into queue limits
+	if nodeInfo != nil {
+		for queueName, limit := range queueLimits {
+			if node, ok := nodeInfo[queueName]; ok {
+				if node.MaxCpusPerNode > 0 {
+					limit.MaxCpusPerNode = node.MaxCpusPerNode
 				}
+				if node.MaxMemMBPerNode > 0 {
+					limit.MaxMemMBPerNode = node.MaxMemMBPerNode
+				}
+				queueLimits[queueName] = limit
 			}
 		}
 	}
@@ -1094,110 +1041,6 @@ func (p *PbsScheduler) getQueueLimits(gpuInfo []GpuInfo) ([]ResourceLimits, erro
 	})
 
 	return limits, nil
-}
-
-// getAvailableResourcesByQueue queries available CPUs and memory per queue
-func (p *PbsScheduler) getAvailableResourcesByQueue() (map[string]ResourceLimits, error) {
-	output, err := runCommand("PBS", "query-available-resources", p.pbsnodesBin, "-a")
-	if err != nil {
-		return nil, NewClusterError("PBS", "query available resources by queue", err)
-	}
-
-	// Track resources per queue
-	resources := make(map[string]ResourceLimits)
-
-	// Parse pbsnodes output
-	lines := strings.Split(string(output), "\n")
-	var currentNode string
-	var nodeCpus int
-	var nodeMemKB int64
-	var nodeState string
-	var nodeQueue string
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		// Node name line
-		if line != "" && !strings.Contains(line, "=") {
-			// Save previous node's data
-			if currentNode != "" && nodeQueue != "" && (nodeState == "free" || nodeState == "job-exclusive" || strings.Contains(nodeState, "busy")) {
-				nodeMB := nodeMemKB / 1024
-
-				// Update max for this queue
-				if existing, ok := resources[nodeQueue]; ok {
-					if nodeCpus > existing.MaxCpusPerNode {
-						existing.MaxCpusPerNode = nodeCpus
-					}
-					if nodeMB > existing.MaxMemMBPerNode {
-						existing.MaxMemMBPerNode = nodeMB
-					}
-					resources[nodeQueue] = existing
-				} else {
-					resources[nodeQueue] = ResourceLimits{
-						Partition:       nodeQueue,
-						MaxCpusPerNode:  nodeCpus,
-						MaxMemMBPerNode: nodeMB,
-					}
-				}
-			}
-			currentNode = line
-			nodeCpus = 0
-			nodeMemKB = 0
-			nodeState = ""
-			nodeQueue = ""
-			continue
-		}
-
-		if currentNode == "" {
-			continue
-		}
-
-		// Parse key = value pairs
-		if strings.Contains(line, "=") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-
-			switch key {
-			case "state":
-				nodeState = value
-			case "queue":
-				nodeQueue = value
-			case "np", "pcpus":
-				fmt.Sscanf(value, "%d", &nodeCpus)
-			case "resources_available.ncpus":
-				fmt.Sscanf(value, "%d", &nodeCpus)
-			case "resources_available.mem":
-				nodeMemKB, _ = parsePbsMemory(value)
-			}
-		}
-	}
-
-	// Don't forget the last node
-	if currentNode != "" && nodeQueue != "" && (nodeState == "free" || nodeState == "job-exclusive" || strings.Contains(nodeState, "busy")) {
-		nodeMB := nodeMemKB / 1024
-
-		if existing, ok := resources[nodeQueue]; ok {
-			if nodeCpus > existing.MaxCpusPerNode {
-				existing.MaxCpusPerNode = nodeCpus
-			}
-			if nodeMB > existing.MaxMemMBPerNode {
-				existing.MaxMemMBPerNode = nodeMB
-			}
-			resources[nodeQueue] = existing
-		} else {
-			resources[nodeQueue] = ResourceLimits{
-				Partition:       nodeQueue,
-				MaxCpusPerNode:  nodeCpus,
-				MaxMemMBPerNode: nodeMB,
-			}
-		}
-	}
-
-	return resources, nil
 }
 
 // parsePbsMemory parses PBS memory format (e.g., "8gb", "1024mb", "1048576kb")

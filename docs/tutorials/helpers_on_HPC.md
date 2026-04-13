@@ -198,7 +198,7 @@ condatainer helper vscode-server -c 14 -m 250G -g h100 -t 48:00:00
 condatainer scheduler
 ```
 
-Shows scheduler type, max resources, and available GPUs.
+Shows scheduler type, max resources, and GPU inventory.
 
 Example output:
 
@@ -216,13 +216,13 @@ Max Resource Limits:
   Max Mem/Node:   6000 GB
   Max Time:       7d
 
-Available GPUs:
-  h100: 2144 total, 416 available
-  mi300a: 4 total, 0 available
-  nvidia_h100_80gb_hbm3_1g.10gb: 2264 total, 728 available
-  nvidia_h100_80gb_hbm3_2g.20gb: 768 total, 0 available
-  nvidia_h100_80gb_hbm3_3g.40gb: 768 total, 0 available
-  t4: 28 total, 0 available
+GPUs:
+  h100: 2144 total
+  mi300a: 4 total
+  nvidia_h100_80gb_hbm3_1g.10gb: 2264 total
+  nvidia_h100_80gb_hbm3_2g.20gb: 768 total
+  nvidia_h100_80gb_hbm3_3g.40gb: 768 total
+  t4: 28 total
 ```
 
 ## Configuration and Defaults
