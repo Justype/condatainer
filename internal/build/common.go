@@ -115,7 +115,9 @@ func atomicInstall(finalPath, targetPath string, update bool) error {
 }
 
 // prepareBuildWorkspace creates the build workspace (tmp overlay or host dirs).
-// Handles stale-artifact detection with one retry after cleanup.
+// Stale artifacts are detected by Create*; on detection a warning is printed and
+// the workspace is re-created with force=true, which removes only build dirs/overlays
+// and leaves the remote build source intact.
 func prepareBuildWorkspace(ctx context.Context, b *BuildObject, useTmpOverlay bool) error {
 	if !useTmpOverlay {
 		if err := b.CreateBuildDirs(ctx, false); err != nil {
@@ -123,8 +125,7 @@ func prepareBuildWorkspace(ctx context.Context, b *BuildObject, useTmpOverlay bo
 				return fmt.Errorf("failed to create build dirs: %w", err)
 			}
 			utils.PrintWarning("Stale build directory found for %s. Cleaning up...", b.nameVersion)
-			b.Cleanup(true)
-			if err := b.CreateBuildDirs(ctx, false); err != nil {
+			if err := b.CreateBuildDirs(ctx, true); err != nil {
 				return fmt.Errorf("failed to create build dirs: %w", err)
 			}
 		}
@@ -134,8 +135,7 @@ func prepareBuildWorkspace(ctx context.Context, b *BuildObject, useTmpOverlay bo
 				return fmt.Errorf("failed to create temporary overlay: %w", err)
 			}
 			utils.PrintWarning("Stale temporary overlay found for %s. Cleaning up...", b.nameVersion)
-			b.Cleanup(true)
-			if err := b.CreateTmpOverlay(ctx, false); err != nil {
+			if err := b.CreateTmpOverlay(ctx, true); err != nil {
 				return fmt.Errorf("failed to create temporary overlay: %w", err)
 			}
 		}
