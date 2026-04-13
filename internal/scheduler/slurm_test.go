@@ -1264,3 +1264,82 @@ func TestSlurmMemPerCpuRoundTrip(t *testing.T) {
 		t.Errorf("round-trip MemPerCpuMB = %d; want 1024", specs2.Spec.MemPerCpuMB)
 	}
 }
+
+func TestParsePartitionLineDefaultMemPerNodeUnlimited(t *testing.T) {
+	slurm := newTestSlurmScheduler()
+
+	tests := []struct {
+		name                          string
+		line                          string
+		wantIsDefault                 bool
+		wantDefaultMemPerNodeUnlimited bool
+	}{
+		{
+			name:                          "default partition with UNLIMITED mem — Trillium-style",
+			line:                          "PartitionName=compute AllowGroups=ALL Default=YES DefMemPerNode=UNLIMITED MaxMemPerNode=UNLIMITED MaxTime=1-00:00:00 State=UP",
+			wantIsDefault:                 true,
+			wantDefaultMemPerNodeUnlimited: true,
+		},
+		{
+			name:                          "non-default partition with fixed mem",
+			line:                          "PartitionName=gpu AllowGroups=ALL Default=NO DefMemPerNode=16384 MaxMemPerNode=UNLIMITED MaxTime=2-00:00:00 State=UP",
+			wantIsDefault:                 false,
+			wantDefaultMemPerNodeUnlimited: false,
+		},
+		{
+			name:                          "partition without DefMemPerNode key — defaults to false",
+			line:                          "PartitionName=debug AllowGroups=ALL Default=NO MaxTime=01:00:00 State=UP",
+			wantIsDefault:                 false,
+			wantDefaultMemPerNodeUnlimited: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			limit := slurm.parsePartitionLine(tt.line)
+			if limit == nil {
+				t.Fatal("parsePartitionLine returned nil")
+			}
+			if limit.IsDefault != tt.wantIsDefault {
+				t.Errorf("IsDefault = %v; want %v", limit.IsDefault, tt.wantIsDefault)
+			}
+			if limit.DefaultMemPerNodeUnlimited != tt.wantDefaultMemPerNodeUnlimited {
+				t.Errorf("DefaultMemPerNodeUnlimited = %v; want %v", limit.DefaultMemPerNodeUnlimited, tt.wantDefaultMemPerNodeUnlimited)
+			}
+		})
+	}
+}
+
+func TestCreateScriptSkipsMemWhenDefaultMemPerNodeUnlimited(t *testing.T) {
+	sched := newTestSlurmScheduler()
+	sched.cachedClusterInfo = &ClusterInfo{DefaultMemPerNodeUnlimited: true}
+
+	tmpDir := t.TempDir()
+	jobSpec := &JobSpec{
+		Name: "test-no-mem",
+		Specs: &ScriptSpecs{
+			Spec: &ResourceSpec{
+				Nodes:        1,
+				CpusPerTask:  4,
+				MemPerNodeMB: 16384,
+				Time:         12 * time.Hour,
+			},
+		},
+	}
+
+	scriptPath, err := sched.CreateScriptWithSpec(jobSpec, tmpDir)
+	if err != nil {
+		t.Fatalf("CreateScriptWithSpec failed: %v", err)
+	}
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("failed to read script: %v", err)
+	}
+	script := string(content)
+	if strings.Contains(script, "#SBATCH --mem=") {
+		t.Errorf("script should not contain --mem= when DefaultMemPerNodeUnlimited=true, got:\n%s", script)
+	}
+	if !strings.Contains(script, "#SBATCH --cpus-per-task=4") {
+		t.Errorf("script should still contain --cpus-per-task=4")
+	}
+}
