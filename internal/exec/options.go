@@ -15,7 +15,8 @@ type Options struct {
 	ApptainerFlags []string // Flags to pass directly to apptainer (e.g., --home=/path, --nv)
 	Fakeroot       bool
 	WritableImg    bool
-	HideOutput     bool
+	Stdout         io.Writer // Redirect container stdout (nil = os.Stdout)
+	Stderr         io.Writer // Redirect container stderr (nil = os.Stderr)
 	HidePrompt     bool
 
 	BaseImage    string

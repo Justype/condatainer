@@ -49,7 +49,7 @@ func Run(ctx context.Context, options Options) error {
 	}
 
 	// Print environment notes if interactive
-	if utils.IsInteractiveShell() && !options.HideOutput && !options.HidePrompt {
+	if utils.IsInteractiveShell() && !options.HidePrompt {
 		if len(setupResult.EnvNotes) > 0 {
 			utils.PrintMessage("Overlay envs:")
 			sortedNotes := make([]string, 0, len(setupResult.EnvNotes))
@@ -108,8 +108,9 @@ func Run(ctx context.Context, options Options) error {
 		Overlay:    setupResult.OverlayArgs,
 		Env:        setupResult.EnvList,
 		Fakeroot:   fakeroot,
-		HideOutput: options.HideOutput,
 		Additional: setupResult.ApptainerFlags,
+		Stdout:     options.Stdout,
+		Stderr:     options.Stderr,
 	}
 
 	// Pass through stdin if requested (for interactive build scripts)

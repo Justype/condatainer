@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,6 +138,7 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 
 			if err := initializeOverlayWithConda(cmd.Context(), tmpPath, envFile, packages, fakeroot); err != nil {
 				os.Remove(tmpPath)
+				utils.RemoveDirIfEmpty(filepath.Dir(tmpPath))
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 					utils.PrintWarning("Overlay initialization cancelled.")
 					return
@@ -148,8 +150,10 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 			copied, err := overlay.MoveOverlayCopied(cmd.Context(), tmpPath, path, sparse)
 			if err != nil {
 				os.Remove(tmpPath)
+				utils.RemoveDirIfEmpty(filepath.Dir(tmpPath))
 				ExitWithError("Failed to move overlay to destination: %v", err)
 			}
+			utils.RemoveDirIfEmpty(filepath.Dir(tmpPath))
 
 			// Skip AllocateOverlay when io.Copy was used: zeros already written physically.
 			if !sparse && !copied {
@@ -488,7 +492,6 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 		Command:     cmdArgs,
 		WritableImg: false,
 		EnvSettings: []string{},
-		HideOutput:  false,
 		HidePrompt:  true,
 	}
 
@@ -565,7 +568,9 @@ func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string
 		Command:     []string{"mm-clean", "-a", "-y", "-q"},
 		WritableImg: true,
 		Fakeroot:    fakeroot,
-		HideOutput:  true, // Suppress mm-clean verbose output
+		Stdout:      io.Discard, // Suppress mm-clean verbose output
+		Stderr:      io.Discard,
+		HidePrompt:  true,
 	}
 
 	if err := exec.Run(ctx, cleanOpts); err != nil {

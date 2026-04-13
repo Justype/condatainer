@@ -14,9 +14,10 @@ type ExecOptions struct {
 	Overlay    []string  // Overlay images to use
 	Fakeroot   bool      // Run with fakeroot
 	Env        []string  // Environment variables to set (format: "KEY=VALUE")
-	HideOutput bool      // Hide output by redirecting to /dev/null
 	Additional []string  // Additional flags to pass to apptainer exec
 	Stdin      io.Reader // Custom stdin reader (optional, defaults to os.Stdin)
+	Stdout     io.Writer // Redirect stdout (optional; nil = os.Stdout)
+	Stderr     io.Writer // Redirect stderr (optional; nil = os.Stderr)
 }
 
 // Exec executes a command inside a container
@@ -51,5 +52,5 @@ func Exec(ctx context.Context, imagePath string, command []string, opts *ExecOpt
 		utils.StylePath(imagePath),
 		utils.StyleAction(strings.Join(command, " ")))
 
-	return runApptainerWithOutput(ctx, "exec", imagePath, false, opts.HideOutput, opts.Stdin, args...)
+	return runApptainerWithOutput(ctx, "exec", imagePath, false, opts.Stdin, opts.Stdout, opts.Stderr, args...)
 }

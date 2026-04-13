@@ -99,5 +99,5 @@ func InstanceExec(ctx context.Context, instanceName string, command []string, op
 	// Add command
 	args = append(args, command...)
 
-	return runApptainerWithOutput(ctx, "instance exec", instanceURI, false, false, opts.Stdin, args...)
+	return runApptainerWithOutput(ctx, "instance exec", instanceURI, false, opts.Stdin, nil, nil, args...)
 }

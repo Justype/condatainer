@@ -148,7 +148,7 @@ func CheckZstdSupport(currentVersion string) bool {
 // imagePath: optional, helpful for logging which container failed
 // capture: whether to capture stdout/stderr for storing on the error.
 func runApptainer(ctx context.Context, op string, imagePath string, capture bool, args ...string) error {
-	return runApptainerWithOutput(ctx, op, imagePath, capture, false, nil, args...)
+	return runApptainerWithOutput(ctx, op, imagePath, capture, nil, nil, nil, args...)
 }
 
 // runApptainerWithOutput executes an apptainer command with control over output handling.
@@ -156,8 +156,12 @@ func runApptainer(ctx context.Context, op string, imagePath string, capture bool
 // op: "exec", "pull", "build", "instance start", etc.
 // imagePath: optional, helpful for logging which container failed
 // capture: whether to capture stdout/stderr for storing on the error.
-// hideOutput: whether to redirect stdout/stderr to /dev/null
-func runApptainerWithOutput(ctx context.Context, op string, imagePath string, capture bool, hideOutput bool, stdin io.Reader, args ...string) error {
+// stdin: custom stdin reader (optional, defaults to os.Stdin)
+// stdout/stderr: redirect streams to these writers (optional; nil = os.Stdout/os.Stderr).
+//
+//	Both are always teed with an internal buffer so ApptainerError.Output is
+//	populated on failure regardless of redirection.
+func runApptainerWithOutput(ctx context.Context, op string, imagePath string, capture bool, stdin io.Reader, stdout, stderr io.Writer, args ...string) error {
 	cmd := exec.CommandContext(ctx, apptainerCmd, args...)
 
 	// Set stdin - use provided stdin or default to os.Stdin
@@ -183,24 +187,24 @@ func runApptainerWithOutput(ctx context.Context, op string, imagePath string, ca
 	var stdoutBuf, stderrBuf bytes.Buffer
 	var stdoutWriter, stderrWriter io.Writer
 
-	if hideOutput {
-		// Redirect to /dev/null - suppress all output
-		devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-		if err != nil {
-			return fmt.Errorf("failed to open /dev/null: %w", err)
-		}
-		defer devNull.Close()
-		stdoutWriter = devNull
-		stderrWriter = devNull
-	} else if capture {
+	if capture {
 		// Only buffer output when explicitly requested for capture
 		// This prevents memory exhaustion on long-running builds in SLURM
 		stdoutWriter = io.MultiWriter(os.Stdout, &stdoutBuf)
 		stderrWriter = io.MultiWriter(os.Stderr, &stderrBuf)
 	} else {
-		// Normal streaming output
-		stdoutWriter = os.Stdout
-		stderrWriter = os.Stderr
+		// Tee custom writers with error buffers so ApptainerError.Output
+		// is always populated on failure.
+		if stdout != nil {
+			stdoutWriter = io.MultiWriter(stdout, &stdoutBuf)
+		} else {
+			stdoutWriter = os.Stdout
+		}
+		if stderr != nil {
+			stderrWriter = io.MultiWriter(stderr, &stderrBuf)
+		} else {
+			stderrWriter = os.Stderr
+		}
 	}
 
 	cmd.Stdout = stdoutWriter
