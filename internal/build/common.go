@@ -100,15 +100,14 @@ func buildFinalPath(targetPath string, update bool) string {
 
 // atomicInstall atomically installs finalPath as targetPath.
 // In update mode: removes old target, renames finalPath → targetPath.
-// In non-update mode: no-op (finalPath == targetPath already).
+// In non-update mode: finalPath == targetPath already; only invalidates caches.
 func atomicInstall(finalPath, targetPath string, update bool) error {
-	if !update {
-		return nil
-	}
-	os.Remove(targetPath) //nolint:errcheck
-	if err := os.Rename(finalPath, targetPath); err != nil {
-		os.Remove(finalPath) //nolint:errcheck
-		return fmt.Errorf("failed to replace overlay %s: %w", targetPath, err)
+	if update {
+		os.Remove(targetPath) //nolint:errcheck
+		if err := os.Rename(finalPath, targetPath); err != nil {
+			os.Remove(finalPath) //nolint:errcheck
+			return fmt.Errorf("failed to replace overlay %s: %w", targetPath, err)
+		}
 	}
 	cachedInstalledOverlays = nil                // invalidate so next dep-check sees the new overlay
 	container.InvalidateInstalledOverlaysCache() // invalidate container resolve cache too
