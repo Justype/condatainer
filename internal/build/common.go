@@ -165,9 +165,9 @@ func buildOverlayPaths(b *BuildObject) (targetPath, finalPath string) {
 
 // tryDownloadPrebuilt attempts to download a prebuilt asset from the given prebuiltLink base URL.
 // ext is the file extension without a dot (e.g. "sif", "sqf").
-// downloadFn is called with (url, destPath) and should return an error on failure.
+// downloadFn is called with (ctx, url, destPath) and should return an error on failure.
 // Returns false immediately if prebuiltLink is empty (no prebuilt source for this script).
-func tryDownloadPrebuilt(nameVersion, destPath, ext, prebuiltLink string, downloadFn func(string, string) error) bool {
+func tryDownloadPrebuilt(ctx context.Context, nameVersion, destPath, ext, prebuiltLink string, downloadFn func(context.Context, string, string) error) bool {
 	if prebuiltLink == "" {
 		return false
 	}
@@ -185,11 +185,11 @@ func tryDownloadPrebuilt(nameVersion, destPath, ext, prebuiltLink string, downlo
 		return false
 	}
 	url := fmt.Sprintf("%s/%s/%s_%s.%s", prebuiltLink, parts[0], parts[1], archName, ext)
-	if !utils.URLExists(url) {
+	if !utils.URLExists(ctx, url) {
 		return false
 	}
 	utils.PrintMessage("Found pre-built %s. Downloading...", utils.StyleName(normalized))
-	if err := downloadFn(url, destPath); err != nil {
+	if err := downloadFn(ctx, url, destPath); err != nil {
 		utils.PrintWarning("Download failed. Falling back to local build.")
 		return false
 	}

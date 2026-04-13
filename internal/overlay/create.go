@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -152,16 +153,42 @@ func createOverlayFile(ctx context.Context, opts *CreateOptions, filePath string
 //   - Is a subprocess → context-cancellable (Ctrl+C works during large copies)
 //   - sparse=true:  cp --sparse=always — detects holes, destination stays sparse
 //   - sparse=false: cp --sparse=never  — writes all zeros, destination is fully allocated
+//
+// Uses cmd.Start + a Wait goroutine instead of CombinedOutput so that cancellation
+// returns immediately. CombinedOutput blocks in cmd.Wait even after SIGKILL because
+// on network filesystems (Lustre/NFS) the cp process can enter D-state
+// (uninterruptible I/O sleep) and not honour SIGKILL until the I/O resolves.
+// The background Wait goroutine will eventually clean up once the process exits.
 func crossFsCopy(ctx context.Context, src, dst string, sparse bool) error {
 	sparseFlag := "--sparse=never"
 	if sparse {
 		sparseFlag = "--sparse=always"
 	}
-	cmd := exec.CommandContext(ctx, "cp", sparseFlag, src, dst)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		os.Remove(dst)
-		return fmt.Errorf("cp %s → %s: %w\n%s", src, dst, err, strings.TrimSpace(string(output)))
+	var outBuf bytes.Buffer
+	cmd := exec.Command("cp", sparseFlag, src, dst)
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &outBuf
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("cp %s → %s: %w", src, dst, err)
 	}
+
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cmd.Wait() }()
+
+	select {
+	case err := <-waitErr:
+		if err != nil {
+			os.Remove(dst) //nolint:errcheck
+			return fmt.Errorf("cp %s → %s: %w\n%s", src, dst, err, strings.TrimSpace(outBuf.String()))
+		}
+	case <-ctx.Done():
+		cmd.Process.Kill() //nolint:errcheck
+		os.Remove(dst)     //nolint:errcheck
+		// Don't wait for cmd.Wait() — on network filesystems the killed process
+		// may stay in D-state (uninterruptible I/O) for an unknown duration.
+		return ctx.Err()
+	}
+
 	// cp applies umask when creating the destination — enforce the expected permission explicitly.
 	if err := os.Chmod(dst, utils.PermFile); err != nil {
 		utils.PrintDebug("Failed to set permissions on overlay: %v", err)

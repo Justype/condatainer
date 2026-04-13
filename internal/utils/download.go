@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,12 +14,17 @@ import (
 )
 
 // DownloadFile downloads a file from url to destPath.
-func DownloadFile(url, destPath string) error {
+// The download is cancelled if ctx is cancelled.
+func DownloadFile(ctx context.Context, url, destPath string) error {
 	client := &http.Client{
 		Timeout: 5 * time.Minute,
 	}
 
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request for %s: %w", url, err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to fetch %s: %w", url, err)
 	}
@@ -55,12 +61,17 @@ func DownloadFile(url, destPath string) error {
 }
 
 // URLExists checks if a URL exists (returns HTTP 200) using a HEAD request.
-func URLExists(url string) bool {
+// Returns false if ctx is cancelled.
+func URLExists(ctx context.Context, url string) bool {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 	}
 
-	resp, err := client.Head(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}
@@ -310,8 +321,9 @@ func TruncateWords(s string, n int) string {
 }
 
 // DownloadExecutable downloads a file and sets it as executable (PermExec).
-func DownloadExecutable(url, destPath string) error {
-	if err := DownloadFile(url, destPath); err != nil {
+// The download is cancelled if ctx is cancelled.
+func DownloadExecutable(ctx context.Context, url, destPath string) error {
+	if err := DownloadFile(ctx, url, destPath); err != nil {
 		return err
 	}
 
