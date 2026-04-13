@@ -6,7 +6,7 @@ Run following commands to start VS Code Server on your HPC system:
 # download/update helper scripts
 condatainer helper -u
 # create a 20G writable overlay (optional but recommended)
-condatainer o -s 20g
+condatainer o -s 20g [-- <packages>]
 # start vscode-server on port 13182
 condatainer helper vscode-server -p 13182
 ```
@@ -96,6 +96,8 @@ curl -fsSL https://get-condatainer.justype.net | bash
 ```
 
 ## Create Writable Overlay
+
+The helper script will guide you through the creation process. But you can also manually create one before running it.
 
 Creating an ext3 overlay image (optional but recommended for persistent settings):
 

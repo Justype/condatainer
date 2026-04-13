@@ -5,8 +5,6 @@ Simply run the following commands to set up and run RStudio Server on your HPC s
 ```bash
 # download/update helper scripts
 condatainer helper -u
-# create a 30G overlay to store R packages and conda env
-condatainer o -s 30g
 # start RStudio Server on port 13182
 condatainer helper rstudio-server -p 13182
 ```
@@ -95,6 +93,8 @@ curl -fsSL https://get-condatainer.justype.net | bash
 ```
 
 ## Create Writable Overlay
+
+The helper script will guide you through the creation process. But you can also manually create one before running it.
 
 Creating an ext3 overlay image for your packages and project files:
 
