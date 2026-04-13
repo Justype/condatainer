@@ -86,7 +86,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  %s\n", r.Summary)
 		}
 		if len(r.Versions) > 0 {
-			fmt.Printf("  Versions: %s\n", strings.Join(r.Versions, ", "))
+			printWrapped("Versions:", strings.Join(r.Versions, " "), 0)
 		}
 		if currentPlatform != "" && len(r.Platforms) > 0 && !platformSupported(currentPlatform, r.Platforms) {
 			utils.PrintWarning("Package %s is not available for %s", r.Name, currentPlatform)

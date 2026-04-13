@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -491,7 +492,6 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 		Command:     cmdArgs,
 		WritableImg: false,
 		EnvSettings: []string{},
-		HideOutput:  false,
 		HidePrompt:  true,
 	}
 
@@ -568,7 +568,9 @@ func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string
 		Command:     []string{"mm-clean", "-a", "-y", "-q"},
 		WritableImg: true,
 		Fakeroot:    fakeroot,
-		HideOutput:  true, // Suppress mm-clean verbose output
+		Stdout:      io.Discard, // Suppress mm-clean verbose output
+		Stderr:      io.Discard,
+		HidePrompt:  true,
 	}
 
 	if err := exec.Run(ctx, cleanOpts); err != nil {

@@ -358,8 +358,9 @@ func (b *BuildObject) saveEnvFile(targetPath string) {
 }
 
 // saveCondaEnvFile fetches a package description from anaconda.org and writes the .env file.
+// Skipped for multi-package / YAML builds where packageName is a user-chosen env name, not a real package.
 func (b *BuildObject) saveCondaEnvFile(targetPath string) {
-	if b.packageName == "" {
+	if b.packageName == "" || b.buildSource != "" {
 		return
 	}
 	whatis := utils.FetchCondaSummary(b.packageName, config.Global.Build.Channels)

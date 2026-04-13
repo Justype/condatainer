@@ -159,6 +159,9 @@ func displaySqfInfo(overlayPath string) error {
 		fmt.Printf("  %-14s /cnt/%s\n", "Path:", name)
 	}
 
+	// Conda environment section (sqf overlays use /cnt/<name/version>)
+	displayCondaEnv(overlayPath, "/cnt/"+name)
+
 	// Environment variables section
 	displayEnvVars(overlayPath)
 
@@ -240,6 +243,9 @@ func displayImgInfo(overlayPath string) error {
 	fmt.Println(utils.StyleTitle("Mount"))
 	fmt.Printf("  %-14s %s\n", "Path:", "/ext3/env")
 
+	// Conda environment section (img overlays always use /ext3/env)
+	displayCondaEnv(overlayPath, "/ext3/env")
+
 	// Environment variables section
 	displayEnvVars(overlayPath)
 
@@ -276,6 +282,104 @@ func displayWhatis(overlayPath string) {
 	whatis, _, _ := readEnvFile(overlayPath)
 	if whatis != "" {
 		fmt.Printf("  %-14s %s\n", "Whatis:", whatis)
+	}
+}
+
+// displayCondaEnv reads conda-meta/history from inside the overlay and prints
+// a "Conda Env" section with the channels and explicitly-installed packages.
+// Silently does nothing if the history file is absent or unreadable.
+func displayCondaEnv(overlayPath, envPrefix string) {
+	info := overlay.ReadCondaInfo(overlayPath, envPrefix)
+	if info == nil {
+		return
+	}
+
+	fmt.Println(utils.StyleTitle("Conda Env"))
+	if len(info.Channels) > 0 {
+		printWrapped("Channels:", strings.Join(info.Channels, " "), 4)
+	}
+	printWrapped("Packages:", strings.Join(info.Specs, " "), 4)
+}
+
+// printWrapped prints label + content (comma-separated tokens) wrapping at word
+// boundaries to fit the terminal width, across at most maxLines lines.
+// Any tokens that don't fit are summarised as "... and N more".
+func printWrapped(label, content string, maxLines int) {
+	prefix := "  " + label + " "
+	indent := "    "
+	tw := terminalWidth()
+	availFirst := max(tw-len(prefix), 20)
+	availRest := max(tw-len(indent), 20)
+
+	tokens := strings.Fields(content)
+	var lines []string
+	var cur strings.Builder
+	remaining := 0
+
+	for _, tok := range tokens {
+		if maxLines > 0 && len(lines) >= maxLines {
+			remaining++
+			continue
+		}
+		avail := availRest
+		if len(lines) == 0 {
+			avail = availFirst
+		}
+		sep := ""
+		if cur.Len() > 0 {
+			sep = "   "
+		}
+		if cur.Len()+len(sep)+len(tok) <= avail {
+			cur.WriteString(sep)
+			cur.WriteString(tok)
+		} else {
+			if cur.Len() > 0 {
+				lines = append(lines, cur.String())
+				cur.Reset()
+			}
+			if maxLines > 0 && len(lines) >= maxLines {
+				remaining++
+				continue
+			}
+			cur.WriteString(tok)
+		}
+	}
+	if cur.Len() > 0 {
+		lines = append(lines, cur.String())
+	}
+
+	// If there are remaining tokens, ensure the suffix fits on the last line.
+	// Bleed tokens back from the last line into remaining until it fits.
+	if remaining > 0 && len(lines) > 0 {
+		suffixAvail := availRest
+		if len(lines) == 1 {
+			suffixAvail = availFirst
+		}
+		for {
+			suffix := fmt.Sprintf(" ... and %d more", remaining)
+			last := lines[len(lines)-1]
+			if len(last)+len(suffix) <= suffixAvail {
+				break
+			}
+			idx := strings.LastIndex(last, "   ")
+			if idx < 0 {
+				break // single token on last line; let it overflow
+			}
+			lines[len(lines)-1] = last[:idx]
+			remaining++
+		}
+	}
+
+	for i, line := range lines {
+		suffix := ""
+		if i == len(lines)-1 && remaining > 0 {
+			suffix = fmt.Sprintf(" ... and %d more", remaining)
+		}
+		if i == 0 {
+			fmt.Printf("%s%s%s\n", prefix, line, suffix)
+		} else {
+			fmt.Printf("%s%s%s\n", indent, line, suffix)
+		}
 	}
 }
 
