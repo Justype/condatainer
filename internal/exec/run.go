@@ -10,6 +10,7 @@ import (
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/container"
 	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/proxy"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -103,10 +104,36 @@ func Run(ctx context.Context, options Options) error {
 	}
 	defer releaseLocks()
 
+	// Inject SOCKS5 proxy env vars if a proxy tunnel is active
+	// (started via "condatainer proxy start" on login node).
+	// Applies both inside scheduler jobs and direct executions on compute nodes.
+	envList := setupResult.EnvList
+	if host, port, _, err := proxy.ReadPidFile(); err == nil {
+		alive := proxy.ProxyAlive(host, port)
+		if !alive {
+			utils.PrintWarning("Proxy not reachable at %s:%d — restarting...", host, port)
+			alive = proxy.RestartProxy(host, port)
+		}
+		if alive {
+			proxyURL := fmt.Sprintf("socks5://%s:%d", host, port)
+			proxyEnv := []string{
+				"http_proxy=" + proxyURL,
+				"https_proxy=" + proxyURL,
+				"HTTP_PROXY=" + proxyURL,
+				"HTTPS_PROXY=" + proxyURL,
+				"ALL_PROXY=" + proxyURL,
+			}
+			// Prepend so explicit --env flags from the user take precedence.
+			envList = append(proxyEnv, envList...)
+		} else {
+			utils.PrintWarning("Proxy restart failed — continuing without proxy")
+		}
+	}
+
 	opts := &apptainer.ExecOptions{
 		Bind:       setupResult.BindPaths,
 		Overlay:    setupResult.OverlayArgs,
-		Env:        setupResult.EnvList,
+		Env:        envList,
 		Fakeroot:   fakeroot,
 		Additional: setupResult.ApptainerFlags,
 		Stdout:     options.Stdout,
