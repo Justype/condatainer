@@ -190,7 +190,7 @@ func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) 
 // configValueCompletion returns suggested values for a config key
 func configValueCompletion(key string) []string {
 	switch key {
-	case "submit_job":
+	case "submit_job", "proxy_perjob":
 		return []string{"true", "false"}
 	case "prefer_remote", "parse_module_load":
 		return []string{"true", "false"}
