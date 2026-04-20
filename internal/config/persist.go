@@ -154,6 +154,7 @@ func setDefaults() {
 	viper.SetDefault("scheduler_timeout", 5)  // seconds
 	viper.SetDefault("notification", "")      // "" or "none" = silent; "bell" = terminal bell; "email" = scheduler email; ≥5-char = ntfy.sh topic
 	viper.SetDefault("metadata_cache_ttl", 7) // days (1 week)
+	viper.SetDefault("proxy_perjob", false)
 }
 
 // GetUserConfigPath returns the path to the user config file
@@ -994,6 +995,10 @@ func LoadFromViper() {
 
 	if ttl, ok := layerInt("metadata_cache_ttl"); ok {
 		Global.MetadataCacheTTL = time.Duration(ttl) * 24 * time.Hour
+	}
+
+	if proxyPerJob, ok := layerBool("proxy_perjob"); ok {
+		Global.ProxyPerJob = proxyPerJob
 	}
 }
 

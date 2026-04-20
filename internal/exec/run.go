@@ -104,30 +104,21 @@ func Run(ctx context.Context, options Options) error {
 	}
 	defer releaseLocks()
 
-	// Inject SOCKS5 proxy env vars if a proxy tunnel is active
-	// (started via "condatainer proxy start" on login node).
-	// Applies both inside scheduler jobs and direct executions on compute nodes.
+	// Inject SOCKS5 proxy env vars if a proxy tunnel is active.
+	// Checks per-job local proxy first, then shared NFS proxy.
+	// Auto-starts a per-job proxy if proxy_perjob=true or CNT_PROXY_PERJOB=1.
+	// Prepend so explicit --env flags from the user take precedence.
 	envList := setupResult.EnvList
-	if host, port, _, err := proxy.ReadPidFile(); err == nil {
-		alive := proxy.ProxyAlive(host, port)
-		if !alive {
-			utils.PrintWarning("Proxy not reachable at %s:%d — restarting...", host, port)
-			alive = proxy.RestartProxy(host, port)
+	if proxyURL, ok := proxy.GetJobProxy(); ok {
+		proxyEnv := []string{
+			"http_proxy=" + proxyURL,
+			"https_proxy=" + proxyURL,
+			"HTTP_PROXY=" + proxyURL,
+			"HTTPS_PROXY=" + proxyURL,
+			"all_proxy=" + proxyURL,
+			"ALL_PROXY=" + proxyURL,
 		}
-		if alive {
-			proxyURL := fmt.Sprintf("socks5://%s:%d", host, port)
-			proxyEnv := []string{
-				"http_proxy=" + proxyURL,
-				"https_proxy=" + proxyURL,
-				"HTTP_PROXY=" + proxyURL,
-				"HTTPS_PROXY=" + proxyURL,
-				"ALL_PROXY=" + proxyURL,
-			}
-			// Prepend so explicit --env flags from the user take precedence.
-			envList = append(proxyEnv, envList...)
-		} else {
-			utils.PrintWarning("Proxy restart failed — continuing without proxy")
-		}
+		envList = append(proxyEnv, envList...)
 	}
 
 	opts := &apptainer.ExecOptions{

@@ -41,6 +41,7 @@ var configKeyDefs = map[string]bool{
 	"scheduler_timeout":      false,
 	"notification":           false,
 	"metadata_cache_ttl":     false,
+	"proxy_perjob":           false,
 	"build.ncpus":            false,
 	"build.mem":              false,
 	"build.time":             false,
@@ -499,6 +500,8 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 			fmt.Printf("  %-19s %dd%s\n", "metadata_cache_ttl:", int(config.Global.MetadataCacheTTL.Hours()/24), srcTag("metadata_cache_ttl"))
 		}
 		printOverridden("                      ", "metadata_cache_ttl")
+		fmt.Printf("  %-19s %v%s\n", "proxy_perjob:", config.Global.ProxyPerJob, srcTag("proxy_perjob"))
+		printOverridden("                      ", "proxy_perjob")
 		channels := config.Global.Build.Channels
 		if len(channels) > 0 {
 			fmt.Printf("  %-19s\n", "channels:")

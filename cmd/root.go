@@ -11,7 +11,6 @@ import (
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/proxy"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -130,19 +129,6 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
-		// Step 9: On compute nodes, inject proxy env vars into condatainer's own process
-		// so Go HTTP clients (script fetching, metadata downloads) also use the tunnel.
-		// os.Setenv only affects this process — the user's shell is unaffected.
-		if sched := scheduler.ActiveScheduler(); sched != nil && sched.IsInsideJob() {
-			if host, port, _, err := proxy.ReadPidFile(); err == nil && proxy.ProxyAlive(host, port) {
-				proxyURL := fmt.Sprintf("socks5://%s:%d", host, port)
-				for _, key := range []string{"http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"} {
-					if os.Getenv(key) == "" {
-						os.Setenv(key, proxyURL) //nolint:errcheck
-					}
-				}
-			}
-		}
 	},
 }
 

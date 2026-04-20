@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/proxy"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -155,7 +157,7 @@ func saveRemoteMetadataCache(path string, cache *RemoteMetadataCache) error {
 
 // fetchRemoteMetadata performs the HTTP+gzip+JSON fetch from the given metadata URL.
 func fetchRemoteMetadata(url string) (map[string]ScriptInfo, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newHTTPClient(30 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch remote metadata: %w", err)
@@ -188,7 +190,7 @@ func fetchRemoteMetadata(url string) (map[string]ScriptInfo, error) {
 // It fetches {baseURL}/metadata/prebuilt_link (plain text, one line).
 // Returns empty string if the file is absent or unreachable — meaning no prebuilt for that source.
 func fetchPrebuiltLink(baseURL string) string {
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newHTTPClient(10 * time.Second)
 	resp, err := client.Get(baseURL + "/metadata/prebuilt_link")
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return ""
@@ -260,6 +262,20 @@ var (
 	cachedRemoteScriptsByURL = map[string]map[string]ScriptInfo{} // per-URL
 	cachedMergedRemote       map[string]ScriptInfo                // merged across all URLs
 )
+
+// newHTTPClient returns an http.Client with the given timeout.
+// If an active SOCKS5 proxy is found for the current job, the transport routes through it.
+func newHTTPClient(timeout time.Duration) *http.Client {
+	if u, ok := proxy.GetJobProxy(); ok {
+		if parsed, err := url.Parse(u); err == nil {
+			return &http.Client{
+				Timeout:   timeout,
+				Transport: &http.Transport{Proxy: http.ProxyURL(parsed)},
+			}
+		}
+	}
+	return &http.Client{Timeout: timeout}
+}
 
 // ScriptInfo holds information about a build script.
 // Runtime-only fields are tagged json:"-" so they are not serialized to
@@ -775,10 +791,7 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 
 	rawURL := fmt.Sprintf("%s/build-scripts/%s", baseURL, info.Path)
 
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 60 * time.Second,
-	}
+	client := newHTTPClient(60 * time.Second)
 
 	// Fetch the script
 	resp, err := client.Get(rawURL)

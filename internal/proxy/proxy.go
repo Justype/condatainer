@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -8,51 +10,70 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/scheduler"
+	"github.com/Justype/condatainer/internal/utils"
 )
 
-// PidFilePath returns the path to the proxy PID file in the user data directory.
+// PidFilePath returns the NFS-shared proxy PID file path (shared mode).
 func PidFilePath() string {
 	return filepath.Join(config.GetUserDataDir(), "proxy.pid")
 }
 
-// WritePidFile writes host, port, and pid to the proxy PID file (NFS-visible).
-func WritePidFile(host string, port, pid int) error {
-	path := PidFilePath()
+// LocalPidFilePath returns the node-local proxy PID file path (per-job mode).
+// Uses utils.GetTmpDir() which respects SLURM_TMPDIR, PBS_TMPDIR, etc.
+func LocalPidFilePath() string {
+	return filepath.Join(utils.GetTmpDir(), "proxy.pid")
+}
+
+// ProxyState holds the state written to a proxy PID file.
+type ProxyState struct {
+	Host string `json:"host"`
+	Via  string `json:"via"`
+	Port int    `json:"port"`
+	PID  int    `json:"pid"`
+}
+
+// WritePidFileAt writes proxy state to an arbitrary PID file path as JSON.
+func WritePidFileAt(path string, ps ProxyState) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0775); err != nil {
 		return err
 	}
-	content := fmt.Sprintf("%s\n%d\n%d\n", host, port, pid)
-	return os.WriteFile(path, []byte(content), 0600)
+	data, err := json.Marshal(ps)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
 }
 
-// ReadPidFile reads the proxy PID file and returns host, port, pid.
-// Returns an error if the file does not exist or cannot be parsed.
-func ReadPidFile() (host string, port, pid int, err error) {
-	data, err := os.ReadFile(PidFilePath())
+// ReadPidFileAt reads and parses a JSON proxy PID file.
+func ReadPidFileAt(path string) (*ProxyState, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", 0, 0, err
+		return nil, err
 	}
-	parts := strings.SplitN(strings.TrimSpace(string(data)), "\n", 3)
-	if len(parts) != 3 {
-		return "", 0, 0, fmt.Errorf("malformed proxy PID file")
+	var ps ProxyState
+	if err := json.Unmarshal(data, &ps); err != nil {
+		return nil, fmt.Errorf("malformed proxy PID file: %w", err)
 	}
-	host = strings.TrimSpace(parts[0])
-	port, err = strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err != nil {
-		return "", 0, 0, fmt.Errorf("invalid port in proxy PID file: %w", err)
-	}
-	pid, err = strconv.Atoi(strings.TrimSpace(parts[2]))
-	if err != nil {
-		return "", 0, 0, fmt.Errorf("invalid PID in proxy PID file: %w", err)
-	}
-	return host, port, pid, nil
+	return &ps, nil
 }
 
-// RemovePidFile removes the proxy PID file.
+// ReadPidFile reads the shared NFS proxy PID file.
+func ReadPidFile() (*ProxyState, error) {
+	return ReadPidFileAt(PidFilePath())
+}
+
+// ReadLocalPidFile reads the node-local per-job proxy PID file.
+func ReadLocalPidFile() (*ProxyState, error) {
+	return ReadPidFileAt(LocalPidFilePath())
+}
+
+// RemovePidFile removes the shared NFS proxy PID file.
 func RemovePidFile() {
 	os.Remove(PidFilePath()) //nolint:errcheck
 }
@@ -61,22 +82,12 @@ func RemovePidFile() {
 func ProxyAlive(host string, port int) bool {
 	conn, err := net.DialTimeout("tcp",
 		fmt.Sprintf("%s:%d", host, port),
-		2*time.Second)
+		500*time.Millisecond)
 	if err != nil {
 		return false
 	}
 	conn.Close()
 	return true
-}
-
-// ProcessAlive checks if a process with the given PID is still running on the current node.
-func ProcessAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = proc.Signal(syscall.Signal(0))
-	return err == nil || err == syscall.EPERM
 }
 
 // FreePort asks the OS for an available TCP port on all interfaces and returns it.
@@ -90,25 +101,128 @@ func FreePort() (int, error) {
 	return port, nil
 }
 
-// RestartProxy SSHes to host and runs "condatainer proxy start" to bring the tunnel
-// back up on the same port. Waits up to 3 seconds for the proxy to become reachable.
-// Returns true if the proxy is alive after the restart attempt.
-func RestartProxy(host string, port int) bool {
-	exec.Command("ssh", host, //nolint:errcheck
-		"-o", "BatchMode=yes",
-		"-o", "ConnectTimeout=5",
-		"condatainer", "proxy", "start",
-		"--host", host,
-		"--port", strconv.Itoa(port),
-	).Run()
+// ResolveViaHost resolves the SSH server to tunnel through for a per-job proxy.
+// Priority: --via flag > CNT_PROXY_VIA env (baked at submit time by condatainer).
+func ResolveViaHost(flagVia string) (string, error) {
+	if flagVia != "" {
+		return flagVia, nil
+	}
+	if h := os.Getenv("CNT_PROXY_VIA"); h != "" {
+		return h, nil
+	}
+	return "", errors.New("cannot determine login node: use --via, or submit jobs via condatainer so CNT_PROXY_VIA is set automatically")
+}
 
-	for range 6 {
+// StartOnNode SSHes to host and runs "condatainer proxy start" there (delegation).
+// Passes --via and --port if set. Waits up to 10s for the NFS PID file to appear.
+func StartOnNode(host, via string, port int) error {
+	args := []string{
+		host,
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=10",
+		"condatainer", "proxy", "start",
+	}
+	if via != "" {
+		args = append(args, "--via", via)
+	}
+	if port > 0 {
+		args = append(args, "--port", strconv.Itoa(port))
+	}
+	out, err := exec.Command("ssh", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to start proxy on %s: %w\n%s", host, err, strings.TrimSpace(string(out)))
+	}
+	// Wait up to 10s for NFS PID file to appear (NFS flush lag)
+	for range 20 {
+		if _, err := ReadPidFile(); err == nil {
+			return nil
+		}
 		time.Sleep(500 * time.Millisecond)
-		if ProxyAlive(host, port) {
-			return true
+	}
+	return fmt.Errorf("proxy started on %s but PID file not yet visible — NFS lag?", host)
+}
+
+// FindActiveProxy returns the proxy URL to use for the current job.
+// Checks the local per-job PID file first, then the shared NFS PID file.
+// If autostart is true and no active proxy is found, attempts to start a
+// per-job local proxy using ResolveViaHost.
+func FindActiveProxy(autostart bool) (string, bool) {
+	// 1. Local per-job proxy (127.0.0.1:PORT — this compute node only)
+	if ps, err := ReadLocalPidFile(); err == nil && ProxyAlive(ps.Host, ps.Port) {
+		return fmt.Sprintf("socks5h://%s:%d", ps.Host, ps.Port), true
+	}
+	// 2. Shared NFS proxy (loginNode:PORT — all compute nodes)
+	if ps, err := ReadPidFile(); err == nil {
+		if ProxyAlive(ps.Host, ps.Port) {
+			return fmt.Sprintf("socks5h://%s:%d", ps.Host, ps.Port), true
+		}
+		utils.PrintWarning("Shared proxy on %s:%d is unreachable", ps.Host, ps.Port)
+	}
+	// 3. Auto-start per-job proxy if enabled and login node is known
+	if autostart {
+		if via, err := ResolveViaHost(""); err == nil {
+			if url, ok := autoStartLocalProxy(via); ok {
+				return url, true
+			}
+			utils.PrintWarning("Failed to auto-start per-job proxy via %s — SSH may have failed", via)
 		}
 	}
-	return false
+	return "", false
+}
+
+var (
+	jobProxyOnce sync.Once
+	jobProxyURL  string
+)
+
+// GetJobProxy returns the active proxy URL for injection into container envs and
+// HTTP clients inside a scheduler job. Returns "", false on login nodes — they
+// have direct internet access and need no proxy.
+// Result is cached after the first call.
+func GetJobProxy() (string, bool) {
+	jobProxyOnce.Do(func() {
+		if !scheduler.IsInsideJob() {
+			return
+		}
+		if u, ok := FindActiveProxy(config.Global.ProxyPerJob); ok {
+			jobProxyURL = u
+		}
+	})
+	if jobProxyURL == "" {
+		return "", false
+	}
+	return jobProxyURL, true
+}
+
+// autoStartLocalProxy double-forks a per-job daemon (127.0.0.1, localOnly=true)
+// tunneling through via, waits for the local PID file, and returns the proxy URL.
+func autoStartLocalProxy(via string) (string, bool) {
+	port, err := FreePort()
+	if err != nil {
+		return "", false
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		return "", false
+	}
+
+	daemonCmd := exec.Command(exe, "_proxy_daemon", "--local", via, strconv.Itoa(port))
+	daemonCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	if err := daemonCmd.Start(); err != nil {
+		return "", false
+	}
+	daemonCmd.Process.Release() //nolint:errcheck
+
+	// Wait up to 2s for local PID file
+	for range 20 {
+		if ps, err := ReadLocalPidFile(); err == nil && ProxyAlive(ps.Host, ps.Port) {
+			return fmt.Sprintf("socks5h://%s:%d", ps.Host, ps.Port), true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return "", false
 }
 
 // WillSurviveLogout returns true if the proxy daemon is expected to survive user logout.
@@ -192,13 +306,13 @@ func grepLogindFile(path, key string) (value string, found bool) {
 	if err != nil {
 		return "", false
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "#") {
 			continue
 		}
-		if strings.HasPrefix(line, key+"=") {
-			return strings.TrimPrefix(line, key+"="), true
+		if v, ok := strings.CutPrefix(line, key+"="); ok {
+			return v, true
 		}
 	}
 	return "", false

@@ -1120,6 +1120,11 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 		return err
 	}
 
+	// Bake the login node hostname so per-job proxy knows where to tunnel.
+	if h, err2 := os.Hostname(); err2 == nil && h != "" {
+		runCommand = "export CNT_PROXY_VIA=" + h + "\n" + runCommand
+	}
+
 	// Generate names: short name for job, timestamped name for files
 	baseName := filepath.Base(originScriptPath)
 	ext := filepath.Ext(baseName)
