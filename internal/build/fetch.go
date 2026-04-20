@@ -488,14 +488,14 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 	}
 
 	// Network fetch
-	utils.PrintDebug("Fetching remote build metadata from %s...", baseURL)
+	utils.PrintDebug("Fetching remote build metadata from %s...", metaURL)
 	metadata, err := fetchRemoteMetadata(metaURL)
 	if err != nil {
 		// Stale fallback
 		if cacheErr == nil {
 			if cache, staleErr := loadRemoteMetadataCacheIgnoreExpiry(cachePath, baseURL); staleErr == nil {
 				utils.PrintWarning("Network unavailable for %s; using cached metadata (fetched %s ago)",
-					baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
+					metaURL, time.Since(cache.FetchedAt).Round(time.Minute))
 				setRemoteFields(cache.Metadata, baseURL, cache.PrebuiltLink)
 				expandTemplates(cache.Metadata)
 				cachedRemoteScriptsByURL[baseURL] = cache.Metadata

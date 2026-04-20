@@ -391,14 +391,14 @@ func fetchHelperMetadataFromURL(baseURL string) (map[string]map[string]HelperScr
 	}
 
 	// Network fetch
-	utils.PrintDebug("Fetching helper metadata from %s...", baseURL)
+	utils.PrintDebug("Fetching helper metadata from %s...", metaURL)
 	rawMeta, err := fetchRawHelperMetadata(metaURL)
 	if err != nil {
 		// Stale fallback
 		if cacheErr == nil {
 			if cache, staleErr := loadHelperMetadataCacheAny(cachePath, baseURL, 0, false); staleErr == nil {
 				utils.PrintWarning("Network unavailable for %s; using cached helper metadata (fetched %s ago)",
-					baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
+					metaURL, time.Since(cache.FetchedAt).Round(time.Minute))
 				result := injectHelperSourceURL(cache.Metadata, baseURL)
 				cachedHelperMetadataByURL[baseURL] = result
 				return result, nil
