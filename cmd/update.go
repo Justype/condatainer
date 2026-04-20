@@ -70,7 +70,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		utils.PrintSuccess("Local build script metadata updated.")
 
 		for _, url := range config.Global.ScriptsLinks {
-			utils.PrintMessage("Fetching build script metadata from %s ...", url)
+			utils.PrintMessage("Fetching build script metadata from %s ...", url+"/metadata/build-scripts.json.gz")
 		}
 		build.ForceRefresh = true
 		if _, err := build.GetRemoteBuildScripts(); err != nil {
@@ -82,7 +82,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	if updateHelpScripts {
 		for _, url := range config.Global.ScriptsLinks {
-			utils.PrintMessage("Fetching helper script metadata from %s ...", url)
+			utils.PrintMessage("Fetching helper script metadata from %s ...", url+"/metadata/helper-scripts.json.gz")
 		}
 		ForceRefreshHelpers = true
 		if _, err := GetAllRemoteHelperMetadata(); err != nil {

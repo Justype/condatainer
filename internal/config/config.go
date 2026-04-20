@@ -83,6 +83,10 @@ type Config struct {
 	// Max age of the on-disk remote build script metadata cache (default: 1 week)
 	MetadataCacheTTL time.Duration
 
+	// ProxyPerJob: if true, automatically start a per-job local SOCKS5 proxy inside
+	// submitted jobs when no shared proxy is active and CNT_PROXY_VIA is set.
+	ProxyPerJob bool
+
 	// Build configuration
 	Build BuildConfig
 }

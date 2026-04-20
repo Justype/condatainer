@@ -128,6 +128,7 @@ var rootCmd = &cobra.Command{
 				utils.PrintDebug("Scheduler not available: %v", err)
 			}
 		}
+
 	},
 }
 

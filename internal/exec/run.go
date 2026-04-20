@@ -10,6 +10,7 @@ import (
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/container"
 	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/proxy"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -103,10 +104,27 @@ func Run(ctx context.Context, options Options) error {
 	}
 	defer releaseLocks()
 
+	// Inject SOCKS5 proxy env vars if a proxy tunnel is active.
+	// Checks per-job local proxy first, then shared NFS proxy.
+	// Auto-starts a per-job proxy if proxy_perjob=true or CNT_PROXY_PERJOB=1.
+	// Prepend so explicit --env flags from the user take precedence.
+	envList := setupResult.EnvList
+	if proxyURL, ok := proxy.GetJobProxy(); ok {
+		proxyEnv := []string{
+			"http_proxy=" + proxyURL,
+			"https_proxy=" + proxyURL,
+			"HTTP_PROXY=" + proxyURL,
+			"HTTPS_PROXY=" + proxyURL,
+			"all_proxy=" + proxyURL,
+			"ALL_PROXY=" + proxyURL,
+		}
+		envList = append(proxyEnv, envList...)
+	}
+
 	opts := &apptainer.ExecOptions{
 		Bind:       setupResult.BindPaths,
 		Overlay:    setupResult.OverlayArgs,
-		Env:        setupResult.EnvList,
+		Env:        envList,
 		Fakeroot:   fakeroot,
 		Additional: setupResult.ApptainerFlags,
 		Stdout:     options.Stdout,

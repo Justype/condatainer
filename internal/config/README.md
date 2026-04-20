@@ -45,6 +45,7 @@ config.Global  // Singleton instance
 - `Branch`, `PreferRemote` (remote script fetching)
 - `ParseModuleLoad` - Treat `module load` lines as `#DEP` dependencies
 - `Notification` - Notification method when a helper job starts (default: `""` = none). Values: `"bell"` (terminal bell), `"email"` (scheduler email directive), ≥5-char string (ntfy.sh topic, fires from compute node), `""` or `"none"` (silent).
+- `ProxyPerJob` - Auto-start a per-job SOCKS5 proxy inside submitted jobs when no active proxy is found (`proxy_perjob` config key, default: `false`)
 - `Scheduler scheduler.ResourceSpec` - Default scheduler specs (`Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`)
 - `Build BuildConfig` - Build settings (`Defaults scheduler.ResourceSpec`, `TmpSizeMB`, `CompressArgs`, `OverlayType`)
 
@@ -107,6 +108,7 @@ All multi-value env vars use `|` as separator. `CNT_EXTRA_BUILD_DIRS` also accep
 | `CNT_EXTRA_SCRIPTS_LINKS` | `\|` | Extra remote build script source URLs |
 | `CNT_CHANNELS` | `\|` or `:`  | Conda channels |
 | `CNT_NOTIFICATION` | — | Override `notification` for the current session (e.g. `bell`, `email`, ntfy.sh topic) |
+| `CNT_PROXY_PERJOB` | — | Override `proxy_perjob` for the current invocation (`1` = enable) |
 | `CNT_TMPDIR` | — | Override build temp directory |
 | `SCRATCH` | — | HPC scratch directory (`$SCRATCH/condatainer/`) |
 | `XDG_DATA_HOME` / `XDG_CONFIG_HOME` / `XDG_STATE_HOME` | — | XDG base dirs |

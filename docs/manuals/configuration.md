@@ -106,6 +106,7 @@ condatainer config init -l system
 | `notification` | `` | Notification when a helper job starts. `bell` = terminal bell twice; `email` = scheduler email (`#SBATCH --mail-type=BEGIN`, `#PBS -m b`, `#BSUB -B`, HTCondor `notification = Start`); any string ≥5 chars = ntfy.sh topic (curl fires from the compute node); `none` or empty = silent (default). |
 | `metadata_cache_ttl` | `7` | Days to keep the cached remote build script metadata (default: 7 days = 1 week). Set to `0` to disable caching and always fetch from the network. |
 | `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filename (e.g. `ubuntu24--base_image.sif`) and the distro prefix added to bare package names (e.g. `igv` → `ubuntu24/igv`). |
+| `proxy_perjob` | `false` | Auto-start a per-job SOCKS5 proxy inside submitted jobs. See [Proxy](#proxy). |
 
 ### Build Configuration
 
@@ -240,6 +241,8 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
 | `CNT_NOTIFICATION`         | `notification`         |
 | `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
+| `CNT_PROXY_PERJOB`         | `proxy_perjob`         |
+| `CNT_PROXY_VIA`            | Internal. Set automatically at job submission time for per-job proxy. |
 | `CNT_TMPDIR`               | (special override)     |
 
 Example:
@@ -373,6 +376,8 @@ build:
   use_tmp_overlay: false  # Use ext3 tmp overlay instead of host directories
   always_submit: false    # Always submit as scheduler jobs even without directives
   tmp_overlay_size: 20g  # Only used when use_tmp_overlay is true
+
+# proxy_perjob: true   # auto-start per-job SOCKS5 proxy inside submitted jobs
 
 # Default: conda-forge then bioconda
 channels:
