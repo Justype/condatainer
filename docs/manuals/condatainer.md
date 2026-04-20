@@ -18,6 +18,7 @@
 - [Config](#config)
 - [Scheduler](#scheduler)
 - [Update](#update)
+- [Proxy](#proxy)
 - [Completion](#completion)
 
 ## Overall Command Structure
@@ -43,6 +44,7 @@ Available Commands:
   o           Shortcut for 'overlay create'
   overlay     Manage persistent overlay images (create, resize, check, info)
   remove      Remove installed overlays matching search terms
+  proxy       Manage the shared SOCKS5 proxy tunnel for compute nodes
   run         Run a script and auto-solve the dependencies by #DEP tags
   scheduler   Display scheduler information
   search      Search conda packages via anaconda.org API
@@ -1859,6 +1861,77 @@ condatainer self-update --dev
 # Update the base image only (without updating the binary)
 condatainer self-update --base
 ```
+
+## Proxy
+
+SSH SOCKS5 tunnels so compute node jobs can reach the internet through the login node.
+
+```
+condatainer proxy start|stop|status|show
+```
+
+### Two modes
+
+| | Shared | Per-job |
+|---|---|---|
+| **Started on** | Login node | Compute node (inside job) |
+| **Bind** | `0.0.0.0:PORT` | `127.0.0.1:PORT` |
+| **Scope** | All compute nodes | This node only |
+| **PID file** | `~/.local/share/condatainer/proxy.pid` (NFS) | `$SLURM_TMPDIR/cnt-$USER/proxy.pid` (local) |
+| **Lifetime** | Until stopped / logout | Until job ends (tmpdir cleaned by scheduler) |
+| **Start** | `condatainer proxy start` | `condatainer proxy start --via <login-node>` |
+
+### proxy start
+
+```
+condatainer proxy start [--host HOST] [--via VIA] [--port PORT]
+```
+
+| Flag | Description |
+|---|---|
+| `--host HOST` | Run the daemon on `HOST` instead of the current node (login node only; delegates via SSH). |
+| `--via VIA` | SSH server to tunnel through. Default: current node (shared) or `CNT_PROXY_VIA` (per-job). |
+| `--port PORT` | Listen port. Default: OS-assigned. |
+
+Shared mode attempts `loginctl enable-linger` so the daemon survives logout. A warning is printed if it fails.
+
+```bash
+condatainer proxy start                 # shared, OS picks port
+condatainer proxy start --port 1080     # shared, fixed port
+condatainer proxy start --host login02  # shared, delegate to login02
+condatainer proxy start --via gateway   # shared, custom SSH gateway
+condatainer proxy start --via login01   # per-job (inside a job)
+```
+
+### proxy stop / status / show
+
+```bash
+condatainer proxy stop      # kill shared proxy (SSH to other login node if needed)
+condatainer proxy status    # check per-job then shared; clean stale PID files
+condatainer proxy show      # print active URL (per-job first); empty if none
+
+export ALL_PROXY=$(condatainer proxy show)
+```
+
+### Automatic injection (inside jobs)
+
+When running inside a scheduler job, condatainer auto-injects the proxy URL into:
+- **container env** — `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`, `all_proxy`, `ALL_PROXY`
+- **condatainer's HTTP clients** — script fetching and metadata downloads use the proxy transport directly
+
+Lookup order: per-job proxy → shared proxy → auto-start (if `proxy_perjob=true`).
+
+Uses `socks5://` — compatible with all tools (curl, wget, pip, micromamba, etc.).
+
+### `proxy_perjob` config option
+
+When `proxy_perjob: true`, condatainer auto-starts a per-job proxy inside every submitted job if no active proxy is found. Requires `CNT_PROXY_VIA` to be set — done automatically by `condatainer build` and `condatainer run` at submission time.
+
+```yaml
+proxy_perjob: true   # default: false
+```
+
+`CNT_PROXY_PERJOB=1` enables it for a single invocation without changing the config file.
 
 ## Completion
 
