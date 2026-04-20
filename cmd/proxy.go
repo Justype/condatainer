@@ -160,11 +160,11 @@ func startProxyDaemon(sshDest string, port int, localOnly bool) error {
 
 	if localOnly {
 		utils.PrintSuccess("Per-job proxy started on 127.0.0.1:%d (via %s)", port, sshDest)
-		utils.PrintMessage("This job will use socks5h://127.0.0.1:%d", port)
+		utils.PrintMessage("This job will use socks5://127.0.0.1:%d", port)
 	} else {
 		currentHost, _ := os.Hostname()
 		utils.PrintSuccess("Proxy started on %s:%d", currentHost, port)
-		utils.PrintMessage("Compute node jobs will use socks5h://%s:%d", currentHost, port)
+		utils.PrintMessage("Compute node jobs will use socks5://%s:%d", currentHost, port)
 
 		// Try to enable linger so the proxy survives logout.
 		if survives, _, _ := proxy.WillSurviveLogout(); !survives {
@@ -247,7 +247,7 @@ var proxyStatusCmd = &cobra.Command{
 				} else {
 					utils.PrintSuccess("Per-job proxy running on %s:%d (PID %d)", ps.Host, ps.Port, ps.PID)
 				}
-				utils.PrintMessage("This job uses: socks5h://%s:%d", ps.Host, ps.Port)
+				utils.PrintMessage("This job uses: socks5://%s:%d", ps.Host, ps.Port)
 				return
 			}
 			utils.PrintWarning("Per-job proxy dead — stale PID file at %s", proxy.LocalPidFilePath())
@@ -266,7 +266,7 @@ var proxyStatusCmd = &cobra.Command{
 			} else {
 				utils.PrintSuccess("Shared proxy running on %s:%d (PID %d)", ps.Host, ps.Port, ps.PID)
 			}
-			utils.PrintMessage("Jobs will use: socks5h://%s:%d", ps.Host, ps.Port)
+			utils.PrintMessage("Jobs will use: socks5://%s:%d", ps.Host, ps.Port)
 		} else {
 			utils.PrintWarning("Proxy dead — stale PID file at %s", proxy.PidFilePath())
 			proxy.RemovePidFile()

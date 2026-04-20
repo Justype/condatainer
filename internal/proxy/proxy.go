@@ -149,12 +149,12 @@ func StartOnNode(host, via string, port int) error {
 func FindActiveProxy(autostart bool) (string, bool) {
 	// 1. Local per-job proxy (127.0.0.1:PORT — this compute node only)
 	if ps, err := ReadLocalPidFile(); err == nil && ProxyAlive(ps.Host, ps.Port) {
-		return fmt.Sprintf("socks5h://%s:%d", ps.Host, ps.Port), true
+		return fmt.Sprintf("socks5://%s:%d", ps.Host, ps.Port), true
 	}
 	// 2. Shared NFS proxy (loginNode:PORT — all compute nodes)
 	if ps, err := ReadPidFile(); err == nil {
 		if ProxyAlive(ps.Host, ps.Port) {
-			return fmt.Sprintf("socks5h://%s:%d", ps.Host, ps.Port), true
+			return fmt.Sprintf("socks5://%s:%d", ps.Host, ps.Port), true
 		}
 		utils.PrintWarning("Shared proxy on %s:%d is unreachable", ps.Host, ps.Port)
 	}
@@ -218,7 +218,7 @@ func autoStartLocalProxy(via string) (string, bool) {
 	// Wait up to 2s for local PID file
 	for range 20 {
 		if ps, err := ReadLocalPidFile(); err == nil && ProxyAlive(ps.Host, ps.Port) {
-			return fmt.Sprintf("socks5h://%s:%d", ps.Host, ps.Port), true
+			return fmt.Sprintf("socks5://%s:%d", ps.Host, ps.Port), true
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
