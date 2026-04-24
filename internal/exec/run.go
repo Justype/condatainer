@@ -110,15 +110,7 @@ func Run(ctx context.Context, options Options) error {
 	// Prepend so explicit --env flags from the user take precedence.
 	envList := setupResult.EnvList
 	if proxyURL, ok := proxy.GetJobProxy(); ok {
-		proxyEnv := []string{
-			"http_proxy=" + proxyURL,
-			"https_proxy=" + proxyURL,
-			"HTTP_PROXY=" + proxyURL,
-			"HTTPS_PROXY=" + proxyURL,
-			"all_proxy=" + proxyURL,
-			"ALL_PROXY=" + proxyURL,
-		}
-		envList = append(proxyEnv, envList...)
+		envList = append(proxy.ProxyEnvList(proxyURL), envList...)
 	}
 
 	opts := &apptainer.ExecOptions{

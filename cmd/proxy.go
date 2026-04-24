@@ -119,6 +119,12 @@ var proxyStartCmd = &cobra.Command{
 // localOnly=false: shared mode (0.0.0.0, NFS PID file).
 // localOnly=true:  per-job mode (127.0.0.1, node-local PID file).
 func startProxyDaemon(sshDest string, port int, localOnly bool) error {
+	// Validate SSH connectivity before forking so errors are shown immediately.
+	utils.PrintMessage("Testing SSH connection to %s…", sshDest)
+	if err := proxy.TestSSH(sshDest); err != nil {
+		return err
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to determine executable path: %w", err)
@@ -160,11 +166,11 @@ func startProxyDaemon(sshDest string, port int, localOnly bool) error {
 
 	if localOnly {
 		utils.PrintSuccess("Per-job proxy started on 127.0.0.1:%d (via %s)", port, sshDest)
-		utils.PrintMessage("This job will use socks5://127.0.0.1:%d", port)
+		utils.PrintMessage("This job will use http://127.0.0.1:%d", port)
 	} else {
 		currentHost, _ := os.Hostname()
 		utils.PrintSuccess("Proxy started on %s:%d", currentHost, port)
-		utils.PrintMessage("Compute node jobs will use socks5://%s:%d", currentHost, port)
+		utils.PrintMessage("Compute node jobs will use http://%s:%d", currentHost, port)
 
 		// Try to enable linger so the proxy survives logout.
 		if survives, _, _ := proxy.WillSurviveLogout(); !survives {
@@ -225,12 +231,30 @@ var proxyStopCmd = &cobra.Command{
 	},
 }
 
+var proxyShowExport bool
+
 var proxyShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Print the proxy URL for use by other programs",
+	Long: `Print the active proxy URL.
+
+Without flags: prints the HTTP CONNECT URL (http://host:PORT).
+
+With --export: prints shell export statements for all proxy env vars.
+Suitable for: eval $(condatainer proxy show --export)
+
+If no proxy is active, prints nothing.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		if url, ok := proxy.FindActiveProxy(false); ok {
-			fmt.Println(url)
+		httpURL, ok := proxy.FindActiveProxy(false)
+		if !ok {
+			return
+		}
+		if !proxyShowExport {
+			fmt.Println(httpURL)
+			return
+		}
+		for _, kv := range proxy.ProxyEnvList(httpURL) {
+			fmt.Printf("export %s\n", kv)
 		}
 	},
 }
@@ -247,7 +271,7 @@ var proxyStatusCmd = &cobra.Command{
 				} else {
 					utils.PrintSuccess("Per-job proxy running on %s:%d (PID %d)", ps.Host, ps.Port, ps.PID)
 				}
-				utils.PrintMessage("This job uses: socks5://%s:%d", ps.Host, ps.Port)
+				utils.PrintMessage("This job uses: http://%s:%d", ps.Host, ps.Port)
 				return
 			}
 			utils.PrintWarning("Per-job proxy dead — stale PID file at %s", proxy.LocalPidFilePath())
@@ -266,7 +290,7 @@ var proxyStatusCmd = &cobra.Command{
 			} else {
 				utils.PrintSuccess("Shared proxy running on %s:%d (PID %d)", ps.Host, ps.Port, ps.PID)
 			}
-			utils.PrintMessage("Jobs will use: socks5://%s:%d", ps.Host, ps.Port)
+			utils.PrintMessage("Jobs will use: http://%s:%d", ps.Host, ps.Port)
 		} else {
 			utils.PrintWarning("Proxy dead — stale PID file at %s", proxy.PidFilePath())
 			proxy.RemovePidFile()
@@ -300,6 +324,7 @@ func init() {
 	proxyStartCmd.Flags().StringVar(&proxyStartVia, "via", "", "SSH server to tunnel through (default: current node for shared; auto-detected via CNT_PROXY_VIA for per-job)")
 	proxyStartCmd.Flags().IntVar(&proxyStartPort, "port", 0, "Local port to listen on (default: OS-assigned free port)")
 
+	proxyShowCmd.Flags().BoolVar(&proxyShowExport, "export", false, "Print shell export statements for all proxy env vars (eval-friendly)")
 	proxyDaemonCmd.Flags().BoolVar(&proxyDaemonLocalMode, "local", false, "Per-job mode: bind 127.0.0.1 and write node-local PID file")
 
 	proxyCmd.AddCommand(proxyStartCmd)
