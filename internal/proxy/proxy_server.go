@@ -3,18 +3,26 @@ package proxy
 import (
 	"bufio"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"strconv"
+	"sync"
 )
 
+var brPool = sync.Pool{
+	New: func() any { return bufio.NewReader(nil) },
+}
+
+type closeWriter interface{ CloseWrite() error }
+
+// DialFunc dials a network connection to addr. Compatible with
+// net.Dialer.DialContext and http.Transport.DialContext.
+type DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+
 // RunProxy listens on listenAddr and serves both SOCKS5 and HTTP CONNECT,
-// forwarding connections through the upstream SOCKS5 proxy at socks5Addr.
-// Stops when ctx is cancelled.
-func RunProxy(ctx context.Context, listenAddr, socks5Addr string) error {
+// forwarding connections through dial. Stops when ctx is cancelled.
+func RunProxy(ctx context.Context, listenAddr string, dial DialFunc) error {
 	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		return fmt.Errorf("proxy listen on %s: %w", listenAddr, err)
@@ -33,28 +41,29 @@ func RunProxy(ctx context.Context, listenAddr, socks5Addr string) error {
 				return err
 			}
 		}
-		go serveConn(conn, socks5Addr)
+		go serveConn(ctx, conn, dial)
 	}
 }
 
 // serveConn peeks the first byte to distinguish SOCKS5 (0x05) from HTTP CONNECT.
-func serveConn(conn net.Conn, socks5Addr string) {
+func serveConn(ctx context.Context, conn net.Conn, dial DialFunc) {
 	defer conn.Close()
-	br := bufio.NewReader(conn)
+	br := brPool.Get().(*bufio.Reader)
+	br.Reset(conn)
+	defer func() { br.Reset(nil); brPool.Put(br) }()
 	b, err := br.Peek(1)
 	if err != nil {
 		return
 	}
 	if b[0] == 0x05 {
-		handleSOCKS5(br, conn, socks5Addr)
+		handleSOCKS5(ctx, br, conn, dial)
 	} else {
-		handleHTTPConnect(br, conn, socks5Addr)
+		handleHTTPConnect(ctx, br, conn, dial)
 	}
 }
 
 // handleSOCKS5 implements RFC 1928 SOCKS5: no-auth negotiation + CONNECT command.
-// Dials the target via the upstream SOCKS5 proxy.
-func handleSOCKS5(br *bufio.Reader, conn net.Conn, socks5Addr string) {
+func handleSOCKS5(ctx context.Context, br *bufio.Reader, conn net.Conn, dial DialFunc) {
 	// Greeting: {ver=5, nMethods, methods...} → reply {5, 0} (no auth)
 	hdr := make([]byte, 2)
 	if _, err := io.ReadFull(br, hdr); err != nil || hdr[0] != 0x05 {
@@ -96,7 +105,7 @@ func handleSOCKS5(br *bufio.Reader, conn net.Conn, socks5Addr string) {
 		if _, err := io.ReadFull(br, addr); err != nil {
 			return
 		}
-		host = net.IP(addr).String()
+		host = "[" + net.IP(addr).String() + "]"
 	default:
 		conn.Write([]byte{0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) //nolint:errcheck
 		return
@@ -106,10 +115,9 @@ func handleSOCKS5(br *bufio.Reader, conn net.Conn, socks5Addr string) {
 	if _, err := io.ReadFull(br, portB); err != nil {
 		return
 	}
-	port := binary.BigEndian.Uint16(portB)
-	target := fmt.Sprintf("%s:%d", host, port)
+	target := fmt.Sprintf("%s:%d", host, int(portB[0])<<8|int(portB[1]))
 
-	upstream, err := dialViaSocks5(socks5Addr, target)
+	upstream, err := dial(ctx, "tcp", target)
 	if err != nil {
 		conn.Write([]byte{0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) //nolint:errcheck
 		return
@@ -120,8 +128,8 @@ func handleSOCKS5(br *bufio.Reader, conn net.Conn, socks5Addr string) {
 	relay(conn, upstream)
 }
 
-// handleHTTPConnect parses an HTTP CONNECT request and tunnels through the upstream SOCKS5.
-func handleHTTPConnect(br *bufio.Reader, conn net.Conn, socks5Addr string) {
+// handleHTTPConnect parses an HTTP CONNECT request and tunnels through dial.
+func handleHTTPConnect(ctx context.Context, br *bufio.Reader, conn net.Conn, dial DialFunc) {
 	req, err := http.ReadRequest(br)
 	if err != nil {
 		return
@@ -131,7 +139,7 @@ func handleHTTPConnect(br *bufio.Reader, conn net.Conn, socks5Addr string) {
 		return
 	}
 
-	upstream, err := dialViaSocks5(socks5Addr, req.Host)
+	upstream, err := dial(ctx, "tcp", req.Host)
 	if err != nil {
 		fmt.Fprintf(conn, "HTTP/1.1 502 Bad Gateway\r\n\r\n") //nolint:errcheck
 		return
@@ -142,67 +150,22 @@ func handleHTTPConnect(br *bufio.Reader, conn net.Conn, socks5Addr string) {
 	relay(conn, upstream)
 }
 
-// dialViaSocks5 connects to target ("host:port") through the SOCKS5 proxy at socks5Addr.
-func dialViaSocks5(socks5Addr, target string) (net.Conn, error) {
-	host, portStr, err := net.SplitHostPort(target)
-	if err != nil {
-		return nil, err
-	}
-	p, err := strconv.ParseUint(portStr, 10, 16)
-	if err != nil {
-		return nil, fmt.Errorf("invalid port %q: %w", portStr, err)
-	}
-	port := uint16(p)
-
-	conn, err := net.Dial("tcp", socks5Addr)
-	if err != nil {
-		return nil, err
-	}
-
-	// Greeting
-	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	resp := make([]byte, 2)
-	if _, err := io.ReadFull(conn, resp); err != nil || resp[0] != 0x05 || resp[1] != 0x00 {
-		conn.Close()
-		return nil, fmt.Errorf("socks5 handshake failed")
-	}
-
-	// CONNECT request with domain name
-	req := []byte{0x05, 0x01, 0x00, 0x03, byte(len(host))}
-	req = append(req, []byte(host)...)
-	req = append(req, byte(port>>8), byte(port))
-	if _, err := conn.Write(req); err != nil {
-		conn.Close()
-		return nil, err
-	}
-
-	// Response header (4 bytes minimum)
-	hdr := make([]byte, 4)
-	if _, err := io.ReadFull(conn, hdr); err != nil || hdr[1] != 0x00 {
-		conn.Close()
-		return nil, fmt.Errorf("socks5 CONNECT failed: status %d", hdr[1])
-	}
-	// Skip bound address in response
-	switch hdr[3] {
-	case 0x01:
-		io.ReadFull(conn, make([]byte, 6)) //nolint:errcheck
-	case 0x03:
-		l := make([]byte, 1)
-		io.ReadFull(conn, l)                         //nolint:errcheck
-		io.ReadFull(conn, make([]byte, int(l[0])+2)) //nolint:errcheck
-	case 0x04:
-		io.ReadFull(conn, make([]byte, 18)) //nolint:errcheck
-	}
-	return conn, nil
-}
-
-func relay(a, b io.ReadWriter) {
+func relay(a, b net.Conn) {
 	done := make(chan struct{}, 2)
-	go func() { io.Copy(b, a); done <- struct{}{} }() //nolint:errcheck
-	go func() { io.Copy(a, b); done <- struct{}{} }() //nolint:errcheck
+	go func() {
+		io.Copy(b, a) //nolint:errcheck
+		if cw, ok := b.(closeWriter); ok {
+			cw.CloseWrite() //nolint:errcheck
+		}
+		done <- struct{}{}
+	}()
+	go func() {
+		io.Copy(a, b) //nolint:errcheck
+		if cw, ok := a.(closeWriter); ok {
+			cw.CloseWrite() //nolint:errcheck
+		}
+		done <- struct{}{}
+	}()
 	<-done
 	<-done
 }

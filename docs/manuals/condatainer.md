@@ -1864,7 +1864,12 @@ condatainer self-update --base
 
 ## Proxy
 
-SSH SOCKS5 tunnels so compute node jobs can reach the internet through the login node.
+SSH tunnel + dual-protocol (HTTP CONNECT + SOCKS5) proxy so compute node jobs can reach the internet through the login node.
+
+The daemon automatically selects the best available SSH tunnel method:
+1. **Go SSH library** — pure Go, uses hostbased auth (no user keys needed), SSH agent, or key files
+2. **`ssh -D` Unix socket** — delegates to the system `ssh` binary
+3. **`ssh -D` TCP port** — fallback for older OpenSSH (< 6.7)
 
 ```
 condatainer proxy start|stop|status|show
@@ -1921,7 +1926,7 @@ When running inside a scheduler job, condatainer auto-injects the proxy URL into
 
 Lookup order: per-job proxy → shared proxy → auto-start (if `proxy_perjob=true`).
 
-Uses `socks5://` — compatible with all tools (curl, wget, pip, micromamba, etc.).
+The proxy port speaks both HTTP CONNECT (`http_proxy`) and SOCKS5 (`all_proxy`) — compatible with all tools (curl, wget, pip, micromamba, etc.).
 
 ### `proxy_perjob` config option
 

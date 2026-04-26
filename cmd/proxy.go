@@ -2,11 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
-	"time"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/proxy"
@@ -115,75 +116,74 @@ var proxyStartCmd = &cobra.Command{
 	},
 }
 
-// startProxyDaemon double-forks the proxy daemon and waits for the PID file to appear.
+// startProxyDaemon forks the proxy daemon and waits for it to signal readiness.
+// The daemon reports back via a pipe: EOF = ready, non-empty message = error.
 // localOnly=false: shared mode (0.0.0.0, NFS PID file).
 // localOnly=true:  per-job mode (127.0.0.1, node-local PID file).
 func startProxyDaemon(sshDest string, port int, localOnly bool) error {
-	// Validate SSH connectivity before forking so errors are shown immediately.
-	utils.PrintMessage("Testing SSH connection to %s…", sshDest)
-	if err := proxy.TestSSH(sshDest); err != nil {
-		return err
-	}
-
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to determine executable path: %w", err)
 	}
 
-	args := []string{"_proxy_daemon"}
+	// Report pipe: daemon closes write end (EOF) on success or writes error message.
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("report pipe: %w", err)
+	}
+
+	args := []string{"_proxy_daemon", "--report-fd", "3"}
 	if localOnly {
 		args = append(args, "--local")
+	}
+	if utils.DebugMode {
+		args = append(args, "--debug")
 	}
 	args = append(args, sshDest, strconv.Itoa(port))
 
 	daemonCmd := exec.Command(exe, args...)
 	daemonCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	daemonCmd.ExtraFiles = []*os.File{pw} // ExtraFiles[0] → fd 3 in daemon
+	if utils.DebugMode {
+		daemonCmd.Stderr = os.Stderr
+	}
 
 	if err := daemonCmd.Start(); err != nil {
+		pw.Close()
+		pr.Close()
 		return fmt.Errorf("failed to start proxy daemon: %w", err)
 	}
+	pw.Close()                  // parent closes its copy of the write end
 	daemonCmd.Process.Release() //nolint:errcheck
 
-	readFn := proxy.ReadPidFile
-	if localOnly {
-		readFn = proxy.ReadLocalPidFile
-	}
-
-	pidFileReady := false
-	for i := 0; i < 20; i++ {
-		if _, err := readFn(); err == nil {
-			pidFileReady = true
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	if !pidFileReady {
-		utils.PrintWarning("Proxy daemon started but PID file not yet written — SSH may have failed")
-		utils.PrintMessage("Check: condatainer proxy status")
-		return nil
+	// Block until daemon signals ready (EOF) or reports an error.
+	msg, _ := io.ReadAll(pr)
+	pr.Close()
+	if len(msg) > 0 {
+		return fmt.Errorf("%s", strings.TrimSpace(string(msg)))
 	}
 
 	if localOnly {
 		utils.PrintSuccess("Per-job proxy started on 127.0.0.1:%d (via %s)", port, sshDest)
 		utils.PrintMessage("This job will use http://127.0.0.1:%d", port)
-	} else {
-		currentHost, _ := os.Hostname()
-		utils.PrintSuccess("Proxy started on %s:%d", currentHost, port)
-		utils.PrintMessage("Compute node jobs will use http://%s:%d", currentHost, port)
+		return nil
+	}
 
-		// Try to enable linger so the proxy survives logout.
-		if survives, _, _ := proxy.WillSurviveLogout(); !survives {
-			user := os.Getenv("USER")
-			lingerCmd := exec.Command("loginctl", "enable-linger", user)
-			lingerCmd.Stderr = nil
-			if err := lingerCmd.Run(); err == nil {
-				utils.PrintMessage("Enabled linger for %s — proxy will survive logout.", user)
-			} else {
-				utils.PrintWarning("Proxy may be killed on full logout (KillUserProcesses=yes, Linger=no, enable-linger failed).")
-				utils.PrintMessage("Proxy will survive SSH disconnects but not complete logout.")
-				utils.PrintMessage("Ask your sysadmin to run: loginctl enable-linger %s", user)
-			}
+	currentHost, _ := os.Hostname()
+	utils.PrintSuccess("Proxy started on %s:%d", currentHost, port)
+	utils.PrintMessage("Compute node jobs will use http://%s:%d", currentHost, port)
+
+	// Try to enable linger so the proxy survives logout.
+	if survives, _, _ := proxy.WillSurviveLogout(); !survives {
+		user := os.Getenv("USER")
+		lingerCmd := exec.Command("loginctl", "enable-linger", user)
+		lingerCmd.Stderr = nil
+		if err := lingerCmd.Run(); err == nil {
+			utils.PrintMessage("Enabled linger for %s — proxy will survive logout.", user)
+		} else {
+			utils.PrintWarning("Proxy may be killed on full logout (KillUserProcesses=yes, Linger=no, enable-linger failed).")
+			utils.PrintMessage("Proxy will survive SSH disconnects but not complete logout.")
+			utils.PrintMessage("Ask your sysadmin to run: loginctl enable-linger %s", user)
 		}
 	}
 	return nil
@@ -304,6 +304,7 @@ var proxyStatusCmd = &cobra.Command{
 // Without --local: shared mode (0.0.0.0, NFS PID file).
 // With --local:    per-job mode (127.0.0.1, node-local PID file).
 var proxyDaemonLocalMode bool
+var proxyDaemonReportFd int
 
 var proxyDaemonCmd = &cobra.Command{
 	Use:    "_proxy_daemon",
@@ -315,7 +316,7 @@ var proxyDaemonCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("invalid port: %w", err)
 		}
-		return proxy.RunDaemon(sshDest, port, proxyDaemonLocalMode)
+		return proxy.RunDaemon(sshDest, port, proxyDaemonLocalMode, proxyDaemonReportFd)
 	},
 }
 
@@ -326,6 +327,7 @@ func init() {
 
 	proxyShowCmd.Flags().BoolVar(&proxyShowExport, "export", false, "Print shell export statements for all proxy env vars (eval-friendly)")
 	proxyDaemonCmd.Flags().BoolVar(&proxyDaemonLocalMode, "local", false, "Per-job mode: bind 127.0.0.1 and write node-local PID file")
+	proxyDaemonCmd.Flags().IntVar(&proxyDaemonReportFd, "report-fd", 0, "File descriptor to report startup result to parent")
 
 	proxyCmd.AddCommand(proxyStartCmd)
 	proxyCmd.AddCommand(proxyStopCmd)
