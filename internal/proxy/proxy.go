@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -28,6 +29,18 @@ func PidFilePath() string {
 // Uses utils.GetTmpDir() which respects SLURM_TMPDIR, PBS_TMPDIR, etc.
 func LocalPidFilePath() string {
 	return filepath.Join(utils.GetTmpDir(), "proxy.pid")
+}
+
+// SockPath returns the Unix socket path for the shared-mode SSH SOCKS5 tunnel.
+// Lives in the state dir (same node as the daemon; not accessed by compute nodes).
+func SockPath() string {
+	return filepath.Join(config.GetUserStateDir(), "proxy.sock")
+}
+
+// LocalSockPath returns the Unix socket path for the per-job SSH SOCKS5 tunnel.
+// Lives in the node-local tmpdir alongside LocalPidFilePath.
+func LocalSockPath() string {
+	return filepath.Join(utils.GetTmpDir(), "proxy.sock")
 }
 
 // ProxyState holds the state written to a proxy PID file.
@@ -142,6 +155,22 @@ func StartOnNode(host, via string, port int) error {
 	return fmt.Errorf("proxy started on %s but PID file not yet visible — NFS lag?", host)
 }
 
+// ProxyEnvList returns env var assignments for an http:// proxy URL.
+// Both http:// and socks5:// point to the same dual-protocol port.
+func ProxyEnvList(httpURL string) []string {
+	socks5URL := "socks5" + httpURL[4:]
+	return []string{
+		"http_proxy=" + httpURL,
+		"https_proxy=" + httpURL,
+		"HTTP_PROXY=" + httpURL,
+		"HTTPS_PROXY=" + httpURL,
+		"all_proxy=" + socks5URL,
+		"ALL_PROXY=" + socks5URL,
+		"no_proxy=localhost,127.0.0.1",
+		"NO_PROXY=localhost,127.0.0.1",
+	}
+}
+
 // FindActiveProxy returns the proxy URL to use for the current job.
 // Checks the local per-job PID file first, then the shared NFS PID file.
 // If autostart is true and no active proxy is found, attempts to start a
@@ -149,20 +178,20 @@ func StartOnNode(host, via string, port int) error {
 func FindActiveProxy(autostart bool) (string, bool) {
 	// 1. Local per-job proxy (127.0.0.1:PORT — this compute node only)
 	if ps, err := ReadLocalPidFile(); err == nil && ProxyAlive(ps.Host, ps.Port) {
-		return fmt.Sprintf("socks5://%s:%d", ps.Host, ps.Port), true
+		return fmt.Sprintf("http://%s:%d", ps.Host, ps.Port), true
 	}
 	// 2. Shared NFS proxy (loginNode:PORT — all compute nodes)
 	if ps, err := ReadPidFile(); err == nil {
 		if ProxyAlive(ps.Host, ps.Port) {
-			return fmt.Sprintf("socks5://%s:%d", ps.Host, ps.Port), true
+			return fmt.Sprintf("http://%s:%d", ps.Host, ps.Port), true
 		}
 		utils.PrintWarning("Shared proxy on %s:%d is unreachable", ps.Host, ps.Port)
 	}
 	// 3. Auto-start per-job proxy if enabled and login node is known
 	if autostart {
 		if via, err := ResolveViaHost(""); err == nil {
-			if url, ok := autoStartLocalProxy(via); ok {
-				return url, true
+			if u, ok := autoStartLocalProxy(via); ok {
+				return u, true
 			}
 			utils.PrintWarning("Failed to auto-start per-job proxy via %s — SSH may have failed", via)
 		}
@@ -207,22 +236,40 @@ func autoStartLocalProxy(via string) (string, bool) {
 		return "", false
 	}
 
-	daemonCmd := exec.Command(exe, "_proxy_daemon", "--local", via, strconv.Itoa(port))
-	daemonCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-
-	if err := daemonCmd.Start(); err != nil {
+	pr, pw, err := os.Pipe()
+	if err != nil {
 		return "", false
 	}
+
+	daemonArgs := []string{"_proxy_daemon", "--report-fd", "3", "--local"}
+	if utils.DebugMode {
+		daemonArgs = append(daemonArgs, "--debug")
+	}
+	daemonArgs = append(daemonArgs, via, strconv.Itoa(port))
+	daemonCmd := exec.Command(exe, daemonArgs...)
+	daemonCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	daemonCmd.ExtraFiles = []*os.File{pw}
+	if utils.DebugMode {
+		daemonCmd.Stderr = os.Stderr
+	}
+
+	if err := daemonCmd.Start(); err != nil {
+		pw.Close()
+		pr.Close()
+		return "", false
+	}
+	pw.Close()
 	daemonCmd.Process.Release() //nolint:errcheck
 
-	// Wait up to 2s for local PID file
-	for range 20 {
-		if ps, err := ReadLocalPidFile(); err == nil && ProxyAlive(ps.Host, ps.Port) {
-			return fmt.Sprintf("socks5://%s:%d", ps.Host, ps.Port), true
-		}
-		time.Sleep(100 * time.Millisecond)
+	msg, _ := io.ReadAll(pr)
+	pr.Close()
+	if len(msg) > 0 {
+		return "", false
 	}
-	return "", false
+	if ps, err := ReadLocalPidFile(); err == nil {
+		return fmt.Sprintf("http://%s:%d", ps.Host, ps.Port), true
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", port), true
 }
 
 // WillSurviveLogout returns true if the proxy daemon is expected to survive user logout.
