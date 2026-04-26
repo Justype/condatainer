@@ -35,10 +35,14 @@ type rsaSHA2PublicKey struct{ ssh.PublicKey }
 
 func (k *rsaSHA2PublicKey) Type() string { return ssh.KeyAlgoRSASHA256 }
 
-// findHostKey reads the first available /etc/ssh/ssh_host_*_key.pub.
-// Prefers ed25519 > ecdsa > rsa.
+// findHostKey reads the first available host public key from /etc/ssh/.
+// Certificates are preferred over plain keys (many clusters require cert-based
+// hostbased auth). Within each group: ed25519 > ecdsa > rsa.
 func findHostKey() (ssh.PublicKey, error) {
 	for _, path := range []string{
+		"/etc/ssh/ssh_host_ed25519_key-cert.pub",
+		"/etc/ssh/ssh_host_ecdsa_key-cert.pub",
+		"/etc/ssh/ssh_host_rsa_key-cert.pub",
 		"/etc/ssh/ssh_host_ed25519_key.pub",
 		"/etc/ssh/ssh_host_ecdsa_key.pub",
 		"/etc/ssh/ssh_host_rsa_key.pub",
