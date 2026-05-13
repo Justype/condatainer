@@ -1,10 +1,12 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -164,6 +166,18 @@ func GetUserDataDir() string {
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		return filepath.Join(home, ".local", "share", "condatainer")
+	}
+	return ""
+}
+
+// GetUserConfigDir returns the user's config directory following XDG spec.
+// Returns $XDG_CONFIG_HOME/condatainer or ~/.config/condatainer
+func GetUserConfigDir() string {
+	if configHome := os.Getenv("XDG_CONFIG_HOME"); configHome != "" {
+		return filepath.Join(configHome, "condatainer")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".config", "condatainer")
 	}
 	return ""
 }
@@ -656,4 +670,151 @@ func DirExists(path string) bool {
 		return false
 	}
 	return info.IsDir()
+}
+
+// GetHelperStateDir returns the per-ID helper state directory on NFS.
+// Each helper run writes its ready/messages/done files under this path.
+// Path: ~/.local/state/condatainer/helper/{id}/
+func GetHelperStateDir(id string) string {
+	stateDir := GetUserStateDir()
+	if stateDir == "" {
+		return ""
+	}
+	return filepath.Join(stateDir, "helper", id)
+}
+
+// GetHelperHistoryPath returns the path to the JSONL helper run history file.
+// Path: ~/.local/state/condatainer/helper-history.jsonl
+func GetHelperHistoryPath() string {
+	stateDir := GetUserStateDir()
+	if stateDir == "" {
+		return ""
+	}
+	return filepath.Join(stateDir, "helper-history.jsonl")
+}
+
+// ServerState is the JSON written to the server PID file (NFS-visible).
+type ServerState struct {
+	Host  string `json:"host"`
+	Port  int    `json:"port"`
+	Token string `json:"token"`
+	PID   int    `json:"pid"`
+}
+
+// GetServerPidFilePath returns the path to the server PID/state file for the current host.
+// Path: ~/.local/state/condatainer/server-{hostname}.pid
+// Per-host files allow NFS home dirs shared across login nodes without conflicts.
+func GetServerPidFilePath() string {
+	stateDir := GetUserStateDir()
+	if stateDir == "" {
+		return ""
+	}
+	host, _ := os.Hostname()
+	if host == "" {
+		host = "local"
+	}
+	return filepath.Join(stateDir, "server-"+host+".pid")
+}
+
+// GetServerLogPath returns the path to the server log file for the current host.
+// Path: ~/.local/state/condatainer/server-{hostname}.log
+func GetServerLogPath() string {
+	host, _ := os.Hostname()
+	if host == "" {
+		host = "local"
+	}
+	return GetServerLogPathForHost(host)
+}
+
+// GetServerLogPathForHost returns the path to the server log file for the given host.
+// Path: ~/.local/state/condatainer/server-{host}.log
+// Since the state dir is on NFS, this works for any login node.
+func GetServerLogPathForHost(host string) string {
+	stateDir := GetUserStateDir()
+	if stateDir == "" {
+		return ""
+	}
+	return filepath.Join(stateDir, "server-"+host+".log")
+}
+
+// GetRunningServerPort returns the port of the currently running server on this host,
+// reading it directly from the PID file. Returns 0 if the server is not running.
+func GetRunningServerPort() int {
+	pidFile := GetServerPidFilePath()
+	if pidFile == "" {
+		return 0
+	}
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		return 0
+	}
+	var ss ServerState
+	if err := json.Unmarshal(data, &ss); err != nil {
+		return 0
+	}
+	return ss.Port
+}
+
+// GetServerSavedPortPath returns the path to the shared saved-port file.
+// Path: ~/.local/state/condatainer/server.port
+// Written by "server start --port" so the same port is reused on subsequent starts
+// across all login nodes.
+func GetServerSavedPortPath() string {
+	stateDir := GetUserStateDir()
+	if stateDir == "" {
+		return ""
+	}
+	return filepath.Join(stateDir, "server.port")
+}
+
+// ReadSavedServerPort reads the port saved by a previous "server start --port" call.
+// Returns 0 if no port has been saved or the file cannot be read.
+func ReadSavedServerPort() int {
+	path := GetServerSavedPortPath()
+	if path == "" {
+		return 0
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+// SaveServerPort writes port to the shared saved-port file so it is reused on
+// subsequent "server start" calls without --port.
+func SaveServerPort(port int) error {
+	path := GetServerSavedPortPath()
+	if path == "" {
+		return fmt.Errorf("cannot determine state directory")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(strconv.Itoa(port)+"\n"), utils.PermFile)
+}
+
+// ListServerPidFiles returns paths to all server-*.pid files in the user state directory.
+// Each file corresponds to a login node that may have (or have had) a server running.
+// On NFS home dirs shared across login nodes, this reveals servers on other nodes.
+func ListServerPidFiles() []string {
+	stateDir := GetUserStateDir()
+	if stateDir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "server-") && strings.HasSuffix(e.Name(), ".pid") {
+			files = append(files, filepath.Join(stateDir, e.Name()))
+		}
+	}
+	return files
 }

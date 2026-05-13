@@ -249,15 +249,7 @@ var checkCmd = &cobra.Command{
 		path := args[0]
 		force, _ := cmd.Flags().GetBool("force")
 
-		absPath, _ := filepath.Abs(path)
-		lock, err := overlay.AcquireLock(absPath, true)
-		if err != nil {
-			ExitWithError("%v", err)
-		}
-		defer lock.Close()
-
-		err = overlay.CheckIntegrity(cmd.Context(), path, force)
-		if err != nil {
+		if err := overlay.CheckIntegrity(cmd.Context(), path, force); err != nil {
 			ExitWithError("%v", err)
 		}
 	},
@@ -495,7 +487,7 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 		HidePrompt:  true,
 	}
 
-	if err := exec.Run(cmd.Context(), opts); err != nil {
+	if err := exec.Run(cmd.Context(), opts, exec.IO{Stdout: os.Stdout, Stderr: os.Stderr}); err != nil {
 		return fmt.Errorf("failed to export environment: %w", err)
 	}
 	return nil
@@ -556,7 +548,7 @@ func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string
 		HidePrompt:  true,
 	}
 
-	if err := exec.Run(ctx, opts); err != nil {
+	if err := exec.Run(ctx, opts, exec.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}); err != nil {
 		os.Remove(absOverlayPath)
 		return fmt.Errorf("failed to run mm-create: %w", err)
 	}
@@ -568,12 +560,10 @@ func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string
 		Command:     []string{"mm-clean", "-a", "-y", "-q"},
 		WritableImg: true,
 		Fakeroot:    fakeroot,
-		Stdout:      io.Discard, // Suppress mm-clean verbose output
-		Stderr:      io.Discard,
 		HidePrompt:  true,
 	}
 
-	if err := exec.Run(ctx, cleanOpts); err != nil {
+	if err := exec.Run(ctx, cleanOpts, exec.IO{Stdout: io.Discard, Stderr: io.Discard}); err != nil {
 		utils.PrintWarning("Failed to clean micromamba cache: %v", err)
 		// Not a critical error, continue
 	}

@@ -2,19 +2,23 @@ package cmd
 
 import (
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	ui "github.com/Justype/condatainer/cmd/internal/ui"
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/helper"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -35,6 +39,25 @@ type rawHelperEntry struct {
 	Path string `json:"path"`
 }
 
+type postScriptHelperFlags struct {
+	cpusSet    bool
+	cpus       int
+	memSet     bool
+	mem        string
+	timeSet    bool
+	time       string
+	gpuSet     bool
+	gpu        string
+	baseSet    bool
+	base       string
+	envSet     bool
+	env        string
+	overlaySet bool
+	overlays   []string
+	cwdSet     bool
+	newSet     bool
+}
+
 // in-process cache for helper metadata, keyed by base URL
 var cachedHelperMetadataByURL = map[string]map[string]map[string]HelperScriptEntry{}
 
@@ -42,6 +65,7 @@ var (
 	helperPath   bool
 	helperList   bool
 	helperUpdate bool
+	helperStatus bool
 )
 
 // supportedSchedulerTypes lists scheduler types supported for helper scripts.
@@ -59,9 +83,11 @@ Use --list to see available helper scripts.
 Use --update to download or refresh helper scripts from remote.
 
 Note: Helper is not available inside a container or a scheduler job.`,
-	Example: `  condatainer helper --update             # Update all helper scripts
-  condatainer helper --path               # Show helper scripts directory
-  condatainer helper code-server -p 11908 # Run code-server and forward flags`,
+	Example: `  condatainer helper                 # Show running helpers
+  condatainer helper code-server     # Run code-server
+  condatainer helper code-server -h  # Show code-server flags and options
+  condatainer helper --update        # Update all helper scripts
+  condatainer helper --list          # List available helper scripts`,
 	RunE:              runHelper,
 	ValidArgsFunction: completeHelperScripts,
 }
@@ -71,9 +97,11 @@ func init() {
 	helperCmd.Flags().BoolVar(&helperPath, "path", false, "Show path to helper scripts directory")
 	helperCmd.Flags().BoolVarP(&helperList, "list", "l", false, "List available helper scripts")
 	helperCmd.Flags().BoolVarP(&helperUpdate, "update", "u", false, "Update helper scripts from remote")
+	helperCmd.Flags().BoolVar(&helperStatus, "status", false, "Show status of running helpers")
+	helperCmd.Flags().MarkHidden("status") //nolint:errcheck
 
-	// Stop flag parsing after the first positional argument so script flags (like -p or -v)
-	// are passed through to the helper script rather than being interpreted by cobra.
+	// Stop flag parsing after the first positional argument so helper-specific flags
+	// (e.g. -c/--cpus) are passed through to parsePostScriptHelperFlags rather than cobra.
 	helperCmd.Flags().SetInterspersed(false)
 }
 
@@ -109,13 +137,191 @@ func completeHelperScripts(cmd *cobra.Command, args []string, toComplete string)
 	return scripts, cobra.ShellCompDirectiveNoFileComp
 }
 
+func parsePostScriptHelperFlags(args []string) (postScriptHelperFlags, []string, error) {
+	var flags postScriptHelperFlags
+	var passthrough []string
+
+	valueFor := func(name string, i *int, inline string, hasInline bool) (string, error) {
+		if hasInline {
+			return inline, nil
+		}
+		*i = *i + 1
+		if *i >= len(args) {
+			return "", fmt.Errorf("flag %s requires a value", name)
+		}
+		return args[*i], nil
+	}
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			passthrough = append(passthrough, args[i:]...)
+			break
+		}
+
+		if strings.HasPrefix(arg, "--") {
+			name, val, hasVal := strings.Cut(arg, "=")
+			switch name {
+			case "--cpus":
+				v, err := valueFor(name, &i, val, hasVal)
+				if err != nil {
+					return flags, nil, err
+				}
+				n, err := parsePositiveIntFlag(name, v)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.cpusSet = true
+				flags.cpus = n
+			case "--mem":
+				v, err := valueFor(name, &i, val, hasVal)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.memSet = true
+				flags.mem = v
+			case "--time":
+				v, err := valueFor(name, &i, val, hasVal)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.timeSet = true
+				flags.time = v
+			case "--gpu":
+				v, err := valueFor(name, &i, val, hasVal)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.gpuSet = true
+				flags.gpu = v
+			case "--base":
+				v, err := valueFor(name, &i, val, hasVal)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.baseSet = true
+				flags.base = v
+			case "--env":
+				v, err := valueFor(name, &i, val, hasVal)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.envSet = true
+				flags.env = v
+			case "--overlay":
+				v, err := valueFor(name, &i, val, hasVal)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.overlaySet = true
+				flags.overlays = append(flags.overlays, v)
+			case "--cwd":
+				if hasVal {
+					return flags, nil, fmt.Errorf("flag %s does not take a value", name)
+				}
+				flags.cwdSet = true
+			case "--new":
+				if hasVal {
+					return flags, nil, fmt.Errorf("flag %s does not take a value", name)
+				}
+				flags.newSet = true
+			default:
+				passthrough = append(passthrough, arg)
+			}
+			continue
+		}
+
+		if strings.HasPrefix(arg, "-") && len(arg) > 1 {
+			name := arg[:2]
+			attached := arg[2:]
+			hasAttached := attached != ""
+			switch name {
+			case "-c":
+				v, err := valueFor(name, &i, attached, hasAttached)
+				if err != nil {
+					return flags, nil, err
+				}
+				n, err := parsePositiveIntFlag(name, v)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.cpusSet = true
+				flags.cpus = n
+			case "-m":
+				v, err := valueFor(name, &i, attached, hasAttached)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.memSet = true
+				flags.mem = v
+			case "-t":
+				v, err := valueFor(name, &i, attached, hasAttached)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.timeSet = true
+				flags.time = v
+			case "-g":
+				v, err := valueFor(name, &i, attached, hasAttached)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.gpuSet = true
+				flags.gpu = v
+			case "-b":
+				v, err := valueFor(name, &i, attached, hasAttached)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.baseSet = true
+				flags.base = v
+			case "-e":
+				v, err := valueFor(name, &i, attached, hasAttached)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.envSet = true
+				flags.env = v
+			case "-o":
+				v, err := valueFor(name, &i, attached, hasAttached)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.overlaySet = true
+				flags.overlays = append(flags.overlays, v)
+			case "-w":
+				if hasAttached {
+					passthrough = append(passthrough, arg)
+					continue
+				}
+				flags.cwdSet = true
+			default:
+				passthrough = append(passthrough, arg)
+			}
+			continue
+		}
+
+		passthrough = append(passthrough, arg)
+	}
+
+	return flags, passthrough, nil
+}
+
+func parsePositiveIntFlag(name, value string) (int, error) {
+	n, err := strconv.Atoi(value)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("invalid %s value %q", name, value)
+	}
+	return n, nil
+}
+
 func runHelper(cmd *cobra.Command, args []string) error {
-	// Prevent helper commands when inside a container or scheduler job (except --path / --list)
-	if config.IsInsideContainer() && !helperPath && !helperList {
+	// Prevent helper commands when inside a container or scheduler job (except --path / --list / --status)
+	if config.IsInsideContainer() && !helperPath && !helperList && !helperStatus {
 		cmd.SilenceUsage = true
 		ExitWithError("helper commands are not available inside a container")
 	}
-	if scheduler.IsInsideJob() && !helperPath && !helperList {
+	if scheduler.IsInsideJob() && !helperPath && !helperList && !helperStatus {
 		cmd.SilenceUsage = true
 		ExitWithError("helper commands are not available inside a scheduler job")
 	}
@@ -204,16 +410,54 @@ func runHelper(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// --- Status Mode ---
+	if helperStatus {
+		name := ""
+		if len(args) > 0 {
+			name = args[0]
+		}
+		return showHelperStatus(name)
+	}
+
 	// --- Run Mode ---
 	if len(args) == 0 {
-		// Parameter error - show usage
-		return fmt.Errorf("no helper script name provided - use --update to update scripts")
+		helper.EnsureServer()
+		return showHelperStatus("")
 	}
 
 	scriptName := args[0]
 	scriptArgs := args[1:]
 
-	// Find script in all search paths
+	// Intercept: condatainer helper <name> config [path|show|get <key>|set <key> <val>]
+	if len(scriptArgs) > 0 && scriptArgs[0] == "config" {
+		scriptPath, _ := config.FindHelperScript(scriptName)
+		return runHelperConfig(scriptName, scriptPath, scriptArgs[1:])
+	}
+
+	// Intercept -h/--help in the remaining args to show helper-specific usage.
+	for _, a := range scriptArgs {
+		if a == "-h" || a == "--help" {
+			scriptPath, findErr := config.FindHelperScript(scriptName)
+			if findErr != nil {
+				return fmt.Errorf("helper script '%s' not found", scriptName)
+			}
+			return showHelperHelp(scriptName, scriptPath)
+		}
+	}
+
+	postFlags, scriptArgs, err := parsePostScriptHelperFlags(scriptArgs)
+	if err != nil {
+		return err
+	}
+
+	// startedWithArgs is true when the user supplied explicit resource/path/param flags,
+	// meaning we skip the history-reuse menu and go straight to settings.
+	startedWithArgs := postFlags.cpusSet || postFlags.memSet ||
+		postFlags.timeSet || postFlags.gpuSet || postFlags.baseSet ||
+		postFlags.envSet || postFlags.overlaySet || postFlags.cwdSet ||
+		postFlags.newSet || len(scriptArgs) > 0
+
+	// Find script in all search paths.
 	scriptPath, err := config.FindHelperScript(scriptName)
 	if err != nil {
 		cmd.SilenceUsage = true
@@ -221,33 +465,370 @@ func runHelper(cmd *cobra.Command, args []string) error {
 			scriptName, config.GetHelperScriptSearchPaths(), utils.StyleAction("condatainer helper --update"))
 	}
 
-	// Ensure executable
+	// Ensure executable.
 	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {
 		utils.PrintDebug("Failed to chmod helper script: %v", err)
 	}
 
-	// Check apptainer is available before running helper script
+	// Check apptainer is available.
 	if err := apptainer.EnsureApptainer(); err != nil {
 		cmd.SilenceUsage = true
 		ExitWithError("apptainer is required to run helper scripts: %v", err)
 	}
 
-	// Run the helper script
-	cmdArgs := append([]string{scriptPath}, scriptArgs...)
-	utils.PrintDebug("Running helper command: %v", cmdArgs)
+	// Build resource overrides from explicit flags.
+	var overrides *scheduler.ResourceSpec
+	if postFlags.cpusSet || postFlags.memSet || postFlags.timeSet || postFlags.gpuSet {
+		overrides = &scheduler.ResourceSpec{}
+		if postFlags.cpusSet {
+			overrides.CpusPerTask = postFlags.cpus
+		}
+		if postFlags.memSet {
+			mb, parseErr := utils.ParseMemoryMB(postFlags.mem)
+			if parseErr != nil {
+				return fmt.Errorf("invalid --mem value %q: %w", postFlags.mem, parseErr)
+			}
+			overrides.MemPerNodeMB = mb
+		}
+		if postFlags.timeSet {
+			d, parseErr := utils.ParseWalltime(postFlags.time)
+			if parseErr != nil {
+				return fmt.Errorf("invalid --time value %q: %w", postFlags.time, parseErr)
+			}
+			overrides.Time = d
+		}
+		if postFlags.gpuSet {
+			overrides.Gpu = helper.ParseGPUSpec(postFlags.gpu)
+		}
+	}
 
-	helperCmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-	helperCmd.Stdin = os.Stdin
-	helperCmd.Stdout = os.Stdout
-	helperCmd.Stderr = os.Stderr
+	cwd := ""
+	if postFlags.cwdSet {
+		cwd, _ = os.Getwd()
+	}
 
-	if err := helperCmd.Run(); err != nil {
-		// Propagate the exit code from the helper script
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			os.Exit(exitErr.ExitCode())
+	meta, _ := helper.ParseHelperScriptMeta(scriptPath)
+	versions := meta.ParamValues
+
+	opts := helper.RunOptions{
+		ScriptPath: scriptPath,
+		ScriptName: scriptName,
+		Resources:  overrides,
+		BaseImage:  postFlags.base,
+		EnvImg:     postFlags.env,
+		Overlays:   postFlags.overlays,
+		CWD:        cwd,
+		ForceNew:   postFlags.newSet,
+		FlagArgs:   scriptArgs,
+	}
+
+	ctx := cmd.Context()
+	cmd.SilenceUsage = true
+
+	// Check for running instances; enforce singleton.
+	if !opts.ForceNew {
+		running, _ := helper.RunningHelpers(opts.ScriptName)
+		if helper.SingletonBlocked(meta, running) {
+			return ui.OfferSingletonBlocked(opts.ScriptName, running, config.GetRunningServerPort())
+		}
+		if !startedWithArgs {
+			// Combined running + history session list.
+			serverPort := config.GetRunningServerPort()
+			chosen, isRunning, startNew, sesErr := ui.OfferRecentSessions(ctx, opts.ScriptName, running, serverPort)
+			if sesErr != nil {
+				if errors.Is(sesErr, context.Canceled) {
+					return nil
+				}
+				return sesErr
+			}
+			if isRunning && chosen != nil {
+				if url := chosen.AccessURL(serverPort); url != "" {
+					utils.PrintSuccess("Access at: %s", url)
+				}
+				return nil
+			}
+			if !startNew && chosen != nil {
+				ui.ApplyHistoryRun(&opts, chosen)
+			}
+		} else if len(running) > 0 {
+			// User supplied explicit flags — just show a brief notice about running jobs.
+			serverPort := config.GetRunningServerPort()
+			for _, r := range running {
+				if url := r.AccessURL(serverPort); url != "" {
+					fmt.Printf("%s already running: %s\n", utils.StyleName(opts.ScriptName), url)
+				}
+			}
+		}
+	}
+
+	// Ensure server is running.
+	helper.EnsureServer()
+
+	// Resolve params and resources together in one combined prompt.
+	scriptParams, _ := helper.ParseHelperParams(opts.ScriptPath)
+	if err := helper.ValidateHelperParamConflicts(scriptParams); err != nil {
+		return err
+	}
+	flagValues, _, err := helper.ApplyParamFlags(scriptParams, opts.FlagArgs)
+	if err != nil {
+		return fmt.Errorf("parsing param flags: %w", err)
+	}
+	saved, _ := helper.LoadHelperConfig(opts.ScriptName)
+	spec := helper.ResolveHelperSpec(opts.ScriptPath)
+	filled, err := ui.PromptSettings(ctx, scriptParams, flagValues, saved, versions, &opts, spec)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil
 		}
 		return err
 	}
+	opts.Params = filled
+
+	// Guided overlay creation for helpers that require a writable conda env.
+	if meta.ImgPackages != "" && opts.EnvImg == "" {
+		created, err := ui.GuidedOverlayCreate(ctx, opts.ScriptName, meta, opts.Params, versions)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
+		}
+		opts.EnvImg = created
+	}
+
+	// Plan: non-interactive validation + resource resolution.
+	plan, err := helper.PlanRun(ctx, opts)
+	if err != nil {
+		var ep *helper.ErrMissingParam
+		var es *helper.ErrSingletonRunning
+		var ee *helper.ErrEnvInUse
+		switch {
+		case errors.As(err, &ep):
+			return fmt.Errorf("missing required params: %s", ep.Error())
+		case errors.As(err, &es):
+			return ui.OfferSingletonBlocked(opts.ScriptName, es.Existing, config.GetRunningServerPort())
+		case errors.As(err, &ee):
+			return fmt.Errorf("env overlay in use: %s", ee.Path)
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return err
+	}
+
+	// Print launch spec and wait before submit (when the user supplied explicit flags).
+	if startedWithArgs {
+		ui.PrintLaunchSpec(plan)
+		if err := ui.WaitBeforeStart(ctx, 3*time.Second); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
+		}
+	}
+
+	// Execute: submit to scheduler or run headless.
+	helperID, err := helper.ExecutePlan(ctx, plan, helper.IO{Stdout: os.Stdout, Stderr: os.Stderr})
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return err
+	}
+
+	// Monitor: poll NFS state files until ready or done.
+	if err := ui.MonitorHelper(ctx, helperID); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// showHelperStatus lists running helpers (optionally filtered by name) from JSONL history.
+func showHelperStatus(name string) error {
+	running, err := helper.RunningHelpers(name)
+	if err != nil {
+		return err
+	}
+	if len(running) == 0 {
+		if name != "" {
+			fmt.Printf("No %s helpers running. Use 'condatainer helper %s' to start.\n", name, name)
+		} else {
+			fmt.Println("No helpers running. Use 'condatainer helper <name>' to start.")
+		}
+		return nil
+	}
+	serverPort := config.GetRunningServerPort()
+	for _, r := range running {
+		url := r.AccessURL(serverPort)
+		age := formatAge(time.Since(r.StartedAt))
+		res := ui.FormatRunResources(r)
+		cwd := r.CWD
+		if cwd == "" {
+			cwd = "(no cwd)"
+		}
+		fmt.Printf("  %-14s  %-14s  %-40s  %s ago\n", r.Name, res, cwd, age)
+		if url != "" {
+			fmt.Printf("    %s\n", utils.StyleDebug("→ "+url))
+		}
+	}
+	return nil
+}
+
+// formatAge formats an elapsed duration as a compact human-readable string (e.g. "6h11m", "2d3h", "45m").
+func formatAge(d time.Duration) string {
+	d = d.Round(time.Minute)
+	if d < time.Minute {
+		return "just now"
+	}
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	mins := int(d.Minutes()) % 60
+	switch {
+	case days > 0 && hours > 0:
+		return fmt.Sprintf("%dd%dh", days, hours)
+	case days > 0:
+		return fmt.Sprintf("%dd", days)
+	case hours > 0 && mins > 0:
+		return fmt.Sprintf("%dh%dm", hours, mins)
+	case hours > 0:
+		return fmt.Sprintf("%dh", hours)
+	default:
+		return fmt.Sprintf("%dm", mins)
+	}
+}
+
+// runHelperConfig handles: condatainer helper <name> config [show|get <key>|set <key> <val>|path|-h]
+func runHelperConfig(name, scriptPath string, args []string) error {
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+
+	// Load params and spec once (needed for show and -h).
+	var params []helper.HelperParam
+	var spec *scheduler.ResourceSpec
+	if scriptPath != "" {
+		params, _ = helper.ParseHelperParams(scriptPath)
+		spec = helper.ResolveHelperSpec(scriptPath)
+	}
+
+	switch sub {
+	case "-h", "--help", "":
+		keys := []string{"cpus", "mem", "time", "gpu"}
+		for _, p := range params {
+			keys = append(keys, p.Key)
+		}
+		fmt.Printf("Usage: condatainer helper %s config <command>\n\n", name)
+		fmt.Println("  show              Show saved defaults")
+		fmt.Println("  get <KEY>         Print a single saved value")
+		fmt.Println("  set <KEY> <VALUE> Save a default value")
+		fmt.Println("  path              Print config file path")
+		fmt.Printf("\nSaveable keys: %s\n", strings.Join(keys, ", "))
+
+	case "path":
+		p := helper.HelperConfigPath(name)
+		if p == "" {
+			return fmt.Errorf("cannot determine config path")
+		}
+		fmt.Println(p)
+
+	case "get":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: condatainer helper %s config get <key>", name)
+		}
+		v, ok := helper.GetHelperConfigKey(name, args[1])
+		if !ok {
+			return fmt.Errorf("key %q not found in %s config", args[1], name)
+		}
+		fmt.Println(v)
+
+	case "set":
+		if len(args) < 3 {
+			return fmt.Errorf("usage: condatainer helper %s config set <key> <value>", name)
+		}
+		if err := helper.SetHelperConfigKey(name, args[1], args[2]); err != nil {
+			return fmt.Errorf("saving config: %w", err)
+		}
+
+	case "show":
+		cfg, err := helper.LoadHelperConfig(name)
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+		p := helper.HelperConfigPath(name)
+		fmt.Printf("# %s\n", p)
+
+		type configRow struct {
+			key, def string
+		}
+		var rows []configRow
+		// Resource rows with spec defaults.
+		resDefault := func(v string) string {
+			if v == "" {
+				return "(none)"
+			}
+			return v
+		}
+		cpuDef, memDef, timeDef := "", "", ""
+		if spec != nil {
+			if spec.CpusPerTask > 0 {
+				cpuDef = fmt.Sprintf("%d", spec.CpusPerTask)
+			}
+			if mb := spec.GetMemPerNodeMB(); mb > 0 {
+				memDef = utils.FormatMemoryMB(mb)
+			}
+			if spec.Time > 0 {
+				timeDef = utils.FormatDuration(spec.Time)
+			}
+		}
+		rows = append(rows,
+			configRow{"cpus", resDefault(cpuDef)},
+			configRow{"mem", resDefault(memDef)},
+			configRow{"time", resDefault(timeDef)},
+			configRow{"gpu", "(none)"},
+		)
+		for _, pp := range params {
+			rows = append(rows, configRow{strings.ToLower(pp.Key), pp.Default})
+		}
+
+		maxKey := 4 // len("cpus")
+		for _, r := range rows {
+			if len(r.key) > maxKey {
+				maxKey = len(r.key)
+			}
+		}
+		for _, r := range rows {
+			val, ok := cfg[strings.ToLower(r.key)]
+			valDisp := "(not set)"
+			if ok && val != "" {
+				valDisp = val
+			}
+			defDisp := ""
+			if r.def != "" {
+				defDisp = utils.StyleDebug(fmt.Sprintf("(default: %s)", r.def))
+			}
+			fmt.Printf("  %-*s  %-20s  %s\n", maxKey, r.key, valDisp, defDisp)
+		}
+
+	default:
+		return fmt.Errorf("unknown config command %q — try: condatainer helper %s config -h", sub, name)
+	}
+	return nil
+}
+
+func showHelperHelp(scriptName, scriptPath string) error {
+	params, err := helper.ParseHelperParams(scriptPath)
+	if err != nil {
+		return err
+	}
+	if err := helper.ValidateHelperParamConflicts(params); err != nil {
+		return err
+	}
+	meta, _ := helper.ParseHelperScriptMeta(scriptPath)
+	helper.PrintHelperUsage(scriptName, params, helper.ResolveHelperSpec(scriptPath), meta.ParamValues)
 	return nil
 }
 

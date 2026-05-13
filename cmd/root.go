@@ -3,14 +3,18 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
+	"github.com/Justype/condatainer/cmd/internal/clilog"
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
+	execpkg "github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -26,7 +30,7 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:           "condatainer",
-	Short:         "CondaTainer: Use Apptainer/Conda/Overlays/SquashFS to manage tools/data/env for HPC users.",
+	Short:         "CondaTainer: Use Apptainer/Conda/OverlayFS/SquashFS to manage tools/data/env for HPC users.",
 	Version:       config.VERSION,
 	SilenceErrors: true,
 
@@ -98,6 +102,15 @@ var rootCmd = &cobra.Command{
 			utils.YesMode = true
 			utils.PrintDebug("Yes mode enabled (automatically answering yes to prompts)")
 		}
+
+		// Route logging.FromContext(ctx) calls through the CLI's utils.Print*
+		// functions so internal packages produce the familiar [CNT] output.
+		cmd.SetContext(logging.WithLogger(cmd.Context(), slog.New(clilog.New())))
+		cmd.SetContext(execpkg.WithIO(cmd.Context(), execpkg.IO{
+			Stdin:  os.Stdin,
+			Stdout: os.Stdout,
+			Stderr: os.Stderr,
+		}))
 
 		// Step 6: Auto-detect compression based on apptainer/singularity version.
 		// Skip the version subprocess when compression is already explicitly configured.

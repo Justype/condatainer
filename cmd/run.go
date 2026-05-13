@@ -314,7 +314,7 @@ func runScript(cmd *cobra.Command, args []string) error {
 			parseDepFlag(runAfterOK, scheduler.DependencyAfterOK)
 			parseDepFlag(runAfterNotOK, scheduler.DependencyAfterNotOK)
 			parseDepFlag(runAfterAny, scheduler.DependencyAfterAny)
-			return submitRunJob(sched, originScriptPath, contentScript, scriptSpecs, deps, scriptArgs, arraySpec)
+			return submitRunJob(cmd.Context(), sched, originScriptPath, contentScript, scriptSpecs, deps, scriptArgs, arraySpec)
 		}
 	} else if !scheduler.HasSchedulerSpecs(scriptSpecs) {
 		utils.PrintNote("No scheduler specs found in script. Running locally.")
@@ -512,7 +512,7 @@ export -f module ml
 		HidePrompt:   true,
 	}
 
-	if err := execpkg.Run(ctx, options); err != nil {
+	if err := execpkg.Run(ctx, options, execpkg.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}); err != nil {
 		// Propagate exit code from container command
 		if appErr, ok := err.(*apptainer.ApptainerError); ok {
 			if code := appErr.ExitCode(); code >= 0 {
@@ -1090,7 +1090,7 @@ func detectNativeArrayDirective(specs *scheduler.ScriptSpecs) string {
 // submitRunJob creates and submits a scheduler job to run the script.
 // contentScript is the bash script containing #DEP/#CNT directives — for HTCondor this is the
 // executable referenced in the .sub file, for other schedulers it equals scriptPath.
-func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript string, specs *scheduler.ScriptSpecs, deps []scheduler.Dependency, scriptArgs []string, arraySpec *scheduler.ArraySpec) error {
+func submitRunJob(ctx context.Context, sched scheduler.Scheduler, originScriptPath, contentScript string, specs *scheduler.ScriptSpecs, deps []scheduler.Dependency, scriptArgs []string, arraySpec *scheduler.ArraySpec) error {
 	// Capture separate-output intent before CreateScriptWithSpec overrides Stdout/Stderr to /dev/null
 	arraySeparateOutput := arraySpec != nil && specs.Control.Stderr != "" && specs.Control.Stderr != specs.Control.Stdout
 
@@ -1159,7 +1159,7 @@ func submitRunJob(sched scheduler.Scheduler, originScriptPath, contentScript str
 	}
 
 	// Submit the job with typed dependencies
-	jobID, err := sched.Submit(jobScriptPath, deps)
+	jobID, err := sched.Submit(ctx, jobScriptPath, deps)
 	if err != nil {
 		return fmt.Errorf("failed to submit job: %w", err)
 	}

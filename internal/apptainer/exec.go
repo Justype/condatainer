@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/utils"
+	"github.com/Justype/condatainer/internal/logging"
 )
 
 // ExecOptions contains options for executing commands in a container
@@ -16,8 +16,8 @@ type ExecOptions struct {
 	Env        []string  // Environment variables to set (format: "KEY=VALUE")
 	Additional []string  // Additional flags to pass to apptainer exec
 	Stdin      io.Reader // Custom stdin reader (optional, defaults to os.Stdin)
-	Stdout     io.Writer // Redirect stdout (optional; nil = os.Stdout)
-	Stderr     io.Writer // Redirect stderr (optional; nil = os.Stderr)
+	Stdout     io.Writer // Redirect stdout (optional; nil = discard)
+	Stderr     io.Writer // Redirect stderr (optional; nil = discard)
 }
 
 // Exec executes a command inside a container
@@ -48,9 +48,7 @@ func Exec(ctx context.Context, imagePath string, command []string, opts *ExecOpt
 	args = append(args, imagePath)
 	args = append(args, command...)
 
-	utils.PrintDebug("Executing in container %s: %s",
-		utils.StylePath(imagePath),
-		utils.StyleAction(strings.Join(command, " ")))
+	logging.FromContext(ctx).Debug("executing in container", "image", imagePath, "command", strings.Join(command, " "))
 
 	return runApptainerWithOutput(ctx, "exec", imagePath, false, opts.Stdin, opts.Stdout, opts.Stderr, args...)
 }

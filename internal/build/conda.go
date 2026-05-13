@@ -197,7 +197,7 @@ func (b *BuildObject) runCondaBuild(ctx context.Context, finalPath string) error
 	done := watchContext(ctx, "conda build")
 	defer close(done)
 
-	if err := exec.Run(ctx, opts); err != nil {
+	if err := exec.Run(ctx, opts, exec.IOFromContext(ctx)); err != nil {
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
 		}

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -222,6 +223,91 @@ func DialGoSSH(sshDest string) (DialFunc, func(), <-chan struct{}, error) {
 	}
 	return dial, stop, done, nil
 }
+
+// DialSystemSSH dials a remote service by spawning `ssh -W node:port node` for
+// each connection, piping the subprocess stdin/stdout as a net.Conn. This serves
+// as a fallback when DialGoSSH fails (e.g. GSSAPI/Kerberos auth, strict known_hosts).
+// The returned done channel is closed only on explicit stop(), not on connection drop,
+// because there is no persistent underlying connection to monitor.
+func DialSystemSSH(node string) (DialFunc, func(), <-chan struct{}, error) {
+	// Quick connectivity test: ssh -o BatchMode=yes node true
+	test := exec.Command("ssh",
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=10",
+		"-o", "StrictHostKeyChecking=no",
+		node, "true")
+	if out, err := test.CombinedOutput(); err != nil {
+		utils.PrintDebug("proxy system-ssh: test to %s failed: %v — %s", node, err, strings.TrimSpace(string(out)))
+		return nil, nil, nil, fmt.Errorf("system ssh test to %s: %w", node, err)
+	}
+	utils.PrintDebug("proxy system-ssh: using ssh -W for %s", node)
+
+	done := make(chan struct{})
+	var once sync.Once
+	stop := func() { once.Do(func() { close(done) }) }
+
+	dial := func(ctx context.Context, _, addr string) (net.Conn, error) {
+		select {
+		case <-done:
+			return nil, fmt.Errorf("system ssh dialer stopped")
+		default:
+		}
+		cmd := exec.CommandContext(ctx, "ssh",
+			"-o", "BatchMode=yes",
+			"-o", "ConnectTimeout=10",
+			"-o", "StrictHostKeyChecking=no",
+			"-W", addr,
+			node)
+		return newCmdConn(cmd)
+	}
+	return dial, stop, done, nil
+}
+
+// cmdConn wraps a command's stdin/stdout as a net.Conn.
+type cmdConn struct {
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+	closed chan struct{}
+	once   sync.Once
+}
+
+func newCmdConn(cmd *exec.Cmd) (net.Conn, error) {
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		stdin.Close()
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		stdin.Close()
+		stdout.Close()
+		return nil, fmt.Errorf("ssh -W: %w", err)
+	}
+	c := &cmdConn{cmd: cmd, stdin: stdin, stdout: stdout, closed: make(chan struct{})}
+	go func() { cmd.Wait(); close(c.closed) }() //nolint:errcheck
+	return c, nil
+}
+
+func (c *cmdConn) Read(b []byte) (int, error)  { return c.stdout.Read(b) }
+func (c *cmdConn) Write(b []byte) (int, error) { return c.stdin.Write(b) }
+func (c *cmdConn) Close() error {
+	c.once.Do(func() { c.stdin.Close(); c.stdout.Close(); c.cmd.Process.Kill() }) //nolint:errcheck
+	return nil
+}
+func (c *cmdConn) LocalAddr() net.Addr              { return cmdAddr("local") }
+func (c *cmdConn) RemoteAddr() net.Addr             { return cmdAddr("remote") }
+func (c *cmdConn) SetDeadline(time.Time) error      { return nil }
+func (c *cmdConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *cmdConn) SetWriteDeadline(time.Time) error { return nil }
+
+type cmdAddr string
+
+func (a cmdAddr) Network() string { return "pipe" }
+func (a cmdAddr) String() string  { return string(a) }
 
 func sshUsername() string {
 	if u, err := user.Current(); err == nil && u.Username != "" {

@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/cmd/internal/ui"
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
@@ -108,20 +108,12 @@ func runE(cmd *cobra.Command, args []string) error {
 		}
 		if !hasImgOverlay {
 			if pwd, err := os.Getwd(); err == nil {
-				candidates := []string{
-					filepath.Join(pwd, "env.img"),
-					filepath.Join(pwd, "overlay", "env.img"),
-					filepath.Join(pwd, "src", "overlay", "env.img"),
-				}
-				for _, candidate := range candidates {
-					if utils.FileExists(candidate) {
-						if err := overlay.CheckAvailable(candidate, false); err != nil {
-							utils.PrintWarning("env.img is in use, running without it")
-						} else {
-							utils.PrintNote("Autoload env.img at %s", utils.StylePath(candidate))
-							overlays = append(overlays, candidate)
-						}
-						break
+				if candidate := utils.FindEnvOverlay("", pwd); candidate != "" {
+					if err := overlay.CheckAvailable(candidate, false); err != nil {
+						utils.PrintWarning("env.img is in use, running without it")
+					} else {
+						utils.PrintNote("Autoload env.img at %s", utils.StylePath(candidate))
+						overlays = append(overlays, candidate)
 					}
 				}
 			}
@@ -154,7 +146,12 @@ func runE(cmd *cobra.Command, args []string) error {
 		HidePrompt:     hidePrompt,
 	}
 
-	if err := exec.Run(cmd.Context(), options); err != nil {
+	plan, err := exec.Prepare(cmd.Context(), options)
+	if err != nil {
+		return err
+	}
+	ui.RenderExecPlan(plan)
+	if err := exec.RunPrepared(cmd.Context(), plan, exec.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 			return nil
 		}

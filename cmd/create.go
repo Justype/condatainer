@@ -153,17 +153,9 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 		if createName == "" && createPrefix == "" && createSource == "" {
 			normalizedArgs = make([]string, len(args))
 			for i, arg := range args {
-				normalized := utils.NormalizeNameVersion(arg)
-				// Bare name (no slash) → expand to <default_distro>/<name> only when
-				// a build script exists for that distro/name combination.
-				// e.g. "igv" → "ubuntu24/igv"  →  ubuntu24--igv.sqf
-				// Without a script, keep the original name so the user gets a clear error.
-				if !strings.Contains(normalized, "/") && !strings.Contains(normalized, "::") && config.Global.DefaultDistro != "" {
-					candidate := config.Global.DefaultDistro + "/" + normalized
-					if _, found := build.FindBuildScript(candidate); found {
-						utils.PrintNote("Expanding '%s' to '%s'", normalized, candidate)
-						normalized = candidate
-					}
+				normalized, expanded := build.ExpandDefaultDistroName(arg)
+				if expanded {
+					utils.PrintNote("Expanding '%s' to '%s'", utils.NormalizeNameVersion(arg), normalized)
 				}
 				normalizedArgs[i] = normalized
 			}

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -79,11 +80,18 @@ func newSlurmSchedulerWithBinary(sbatchBin string) (*SlurmScheduler, error) {
 	}, nil
 }
 
+// JobIDVar returns the name of the SLURM job ID environment variable.
+func (s *SlurmScheduler) JobIDVar() string { return "SLURM_JOB_ID" }
+
 // GetCurrentJobID returns the SLURM job ID of the currently running job, or "".
-func (s *SlurmScheduler) GetCurrentJobID() string { return os.Getenv("SLURM_JOB_ID") }
+func (s *SlurmScheduler) GetCurrentJobID() string { return os.Getenv(s.JobIDVar()) }
+func (s *SlurmScheduler) JobIDEnvExpr() string    { return "${" + s.JobIDVar() + "}" }
+
+// TmpDirVar returns the name of the SLURM per-job node-local tmpdir env var.
+func (s *SlurmScheduler) TmpDirVar() string { return "SLURM_TMPDIR" }
 
 // GetTmpDir returns the SLURM node-local tmp directory for the current job, or "".
-func (s *SlurmScheduler) GetTmpDir() string { return os.Getenv("SLURM_TMPDIR") }
+func (s *SlurmScheduler) GetTmpDir() string { return os.Getenv(s.TmpDirVar()) }
 
 // IsAvailable checks if the SLURM binary is present on this system.
 func (s *SlurmScheduler) IsAvailable() bool {
@@ -100,11 +108,11 @@ func (s *SlurmScheduler) GetType() SchedulerType { return SchedulerSLURM }
 func (s *SlurmScheduler) GetBinary() string      { return s.sbatchBin }
 
 // GetVersion returns the SLURM version string, or "" on failure.
-func (s *SlurmScheduler) GetVersion() string {
+func (s *SlurmScheduler) GetVersion(ctx context.Context) string {
 	if s.sbatchBin == "" {
 		return ""
 	}
-	version, err := s.getSlurmVersion()
+	version, err := s.getSlurmVersion(ctx)
 	if err != nil {
 		return ""
 	}
@@ -112,8 +120,8 @@ func (s *SlurmScheduler) GetVersion() string {
 }
 
 // getSlurmVersion attempts to get the SLURM version
-func (s *SlurmScheduler) getSlurmVersion() (string, error) {
-	output, err := runCommand("SLURM", "get-version", s.sbatchBin, "--version")
+func (s *SlurmScheduler) getSlurmVersion(ctx context.Context) (string, error) {
+	output, err := runCommand(ctx, "SLURM", "get-version", s.sbatchBin, "--version")
 	if err != nil {
 		return "", err
 	}
@@ -607,7 +615,7 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 			}
 		}
 
-		clusterInfo, _ := s.GetClusterInfo()
+		clusterInfo, _ := s.GetClusterInfo(context.Background())
 		memUnlimited := clusterInfo != nil && clusterInfo.DefaultMemPerNodeUnlimited
 		if !memUnlimited {
 			if rs.MemPerCpuMB > 0 {
@@ -711,11 +719,11 @@ func buildSlurmSubmitArgs(deps []Dependency, scriptPath string) []string {
 	return args
 }
 
-func (s *SlurmScheduler) Submit(scriptPath string, deps []Dependency) (string, error) {
+func (s *SlurmScheduler) Submit(ctx context.Context, scriptPath string, deps []Dependency) (string, error) {
 	args := buildSlurmSubmitArgs(deps, scriptPath)
 
 	// Execute sbatch
-	output, err := runCommand("SLURM", "submit", s.sbatchBin, args...)
+	output, err := runCommand(ctx, "SLURM", "submit", s.sbatchBin, args...)
 	if err != nil {
 		return "", NewSubmissionError("SLURM", filepath.Base(scriptPath), string(output), err)
 	}
@@ -731,7 +739,7 @@ func (s *SlurmScheduler) Submit(scriptPath string, deps []Dependency) (string, e
 }
 
 // GetClusterInfo retrieves SLURM cluster configuration
-func (s *SlurmScheduler) GetClusterInfo() (*ClusterInfo, error) {
+func (s *SlurmScheduler) GetClusterInfo(ctx context.Context) (*ClusterInfo, error) {
 	if s.cachedClusterInfo != nil {
 		return s.cachedClusterInfo, nil
 	}
@@ -775,7 +783,7 @@ func (s *SlurmScheduler) GetClusterInfo() (*ClusterInfo, error) {
 // Returns a map of partition→ResourceLimits (max CPU/mem per node) and a slice of GpuInfo.
 func (s *SlurmScheduler) getNodeInfoByPartition() (map[string]ResourceLimits, []GpuInfo, error) {
 	// %R=partition %c=CPUs/node %m=mem/node(MB) %G=GRES %D=node-count
-	output, err := runCommand("SLURM", "query-node-info", s.sinfoCommand, "-o", "%R|%c|%m|%G|%D", "--noheader")
+	output, err := runCommand(context.Background(), "SLURM", "query-node-info", s.sinfoCommand, "-o", "%R|%c|%m|%G|%D", "--noheader")
 	if err != nil {
 		return nil, nil, NewClusterError("SLURM", "query node info", err)
 	}
@@ -866,7 +874,7 @@ func (s *SlurmScheduler) getNodeInfoByPartition() (map[string]ResourceLimits, []
 // nodeInfo (from getNodeInfoByPartition) provides actual CPU/mem maxima per partition.
 // gpuInfo (also from getNodeInfoByPartition) provides GPU totals per partition.
 func (s *SlurmScheduler) getPartitionLimits(nodeInfo map[string]ResourceLimits, gpuInfo []GpuInfo) ([]ResourceLimits, error) {
-	output, err := runCommand("SLURM", "query-partition-limits", s.scontrolCommand, "show", "partition", "-o")
+	output, err := runCommand(context.Background(), "SLURM", "query-partition-limits", s.scontrolCommand, "show", "partition", "-o")
 	if err != nil {
 		return nil, NewClusterError("SLURM", "query partition limits", err)
 	}
@@ -1096,12 +1104,12 @@ func (s *SlurmScheduler) GetJobResources() *ResourceSpec {
 // GetJobStatus returns the current status of the given SLURM job ID.
 // Uses squeue --format=%T; returns JobStatusUnknown conservatively when squeue is unavailable or times out.
 // squeue only lists active jobs; empty output means the job has finished or is absent.
-func (s *SlurmScheduler) GetJobStatus(jobID string) (JobStatus, error) {
+func (s *SlurmScheduler) GetJobStatus(ctx context.Context, jobID string) (JobStatus, error) {
 	squeueBin := siblingBin(s.sbatchBin, "squeue")
 	if squeueBin == "" {
 		return JobStatusUnknown, nil // conservative: can't check
 	}
-	out, err := runCommand("SLURM", "job-status", squeueBin, "-j", jobID, "--noheader", "--format=%T")
+	out, err := runCommand(ctx, "SLURM", "job-status", squeueBin, "-j", jobID, "--noheader", "--format=%T")
 	if err != nil {
 		// squeue exits non-zero when the job ID is no longer known (completed/cancelled).
 		// "Invalid job id" covers both old IDs and IDs that never existed.
@@ -1120,6 +1128,23 @@ func (s *SlurmScheduler) GetJobStatus(jobID string) (JobStatus, error) {
 	default: // RUNNING, COMPLETING, STAGE_OUT, or any other active state
 		return JobStatusRunning, nil
 	}
+}
+
+// CancelJob cancels the SLURM job with the given ID using scancel.
+// Returns nil if the job is already gone.
+func (s *SlurmScheduler) CancelJob(ctx context.Context, jobID string) error {
+	scancelBin := siblingBin(s.sbatchBin, "scancel")
+	if scancelBin == "" {
+		return fmt.Errorf("scancel not found")
+	}
+	_, err := runCommand(ctx, "SLURM", "cancel-job", scancelBin, jobID)
+	if err != nil {
+		if _, ok := err.(*TimeoutError); ok {
+			return err
+		}
+		return nil // scancel exits non-zero for already-gone jobs
+	}
+	return nil
 }
 
 // TryParseSlurmScript attempts to parse a SLURM script without requiring SLURM binaries.

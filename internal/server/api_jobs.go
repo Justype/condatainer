@@ -1,0 +1,290 @@
+package server
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/helper"
+	"github.com/Justype/condatainer/internal/scheduler"
+)
+
+// historyCache reduces repeated LoadHistory() disk reads across the frequent polling endpoints.
+// Entries are reused for up to historyCacheTTL; the watcher's own writes bypass this cache
+// (they go directly to disk) so stale data is bounded by the TTL.
+const historyCacheTTL = 3 * time.Second
+
+var (
+	historyCacheMu   sync.Mutex
+	historyCacheRuns []*helper.HelperRun
+	historyCacheAt   time.Time
+)
+
+// cachedLoadHistory returns a cached history slice, re-reading from disk at most once per historyCacheTTL.
+func cachedLoadHistory() ([]*helper.HelperRun, error) {
+	historyCacheMu.Lock()
+	defer historyCacheMu.Unlock()
+	if historyCacheRuns != nil && time.Since(historyCacheAt) < historyCacheTTL {
+		return historyCacheRuns, nil
+	}
+	runs, err := helper.LoadHistory()
+	if err != nil {
+		return nil, err
+	}
+	historyCacheRuns = runs
+	historyCacheAt = time.Now()
+	return runs, nil
+}
+
+// invalidateHistoryCache clears the cached history so the next API request reads fresh data.
+// Called by the watcher after each history write so status transitions appear promptly.
+func invalidateHistoryCache() {
+	historyCacheMu.Lock()
+	historyCacheRuns = nil
+	historyCacheMu.Unlock()
+}
+
+// handleHelpersList serves GET /api/helpers?q=&limit=&status=
+func (s *srv) handleHelpersList(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	status := r.URL.Query().Get("status")
+
+	runs, err := cachedLoadHistory()
+	if err != nil {
+		http.Error(w, "reading history", http.StatusInternalServerError)
+		return
+	}
+
+	var out []*helper.HelperRun
+	for i := len(runs) - 1; i >= 0; i-- {
+		run := runs[i]
+		if status == "active" {
+			if !isActiveRunStatus(run.Status) {
+				continue
+			}
+		} else if status != "" && run.Status != status {
+			continue
+		}
+		if q != "" && !strings.Contains(run.Name, q) && !strings.Contains(run.CWD, q) {
+			continue
+		}
+		out = append(out, run)
+		if len(out) >= 50 {
+			break
+		}
+	}
+
+	if r.Header.Get("Accept") == "text/html" || r.URL.Query().Get("format") == "html" {
+		s.renderHelperCards(w, out)
+		return
+	}
+	var resp []helperListEntry
+	for _, run := range out {
+		resp = append(resp, s.enrichRun(run))
+	}
+	writeJSON(w, resp)
+}
+
+// handleHelperLogs serves GET /api/helpers/{id}/logs as SSE.
+func (s *srv) handleHelperLogs(w http.ResponseWriter, r *http.Request, id string) {
+	broker := s.brokers.get(id)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	const maxBackfill = 200
+	msgs, _, _ := helper.ReadMessages(id, 0)
+	if len(msgs) > maxBackfill {
+		msgs = msgs[len(msgs)-maxBackfill:]
+	}
+	for _, m := range msgs {
+		data, _ := json.Marshal(m)
+		fmt.Fprintf(w, "data: %s\n\n", data) //nolint:errcheck
+	}
+	flusher.Flush()
+
+	ch := broker.subscribe()
+	defer broker.unsubscribe(ch)
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case data := <-ch:
+			fmt.Fprintf(w, "data: %s\n\n", data) //nolint:errcheck
+			flusher.Flush()
+		}
+	}
+}
+
+// defaultJobLogTail is the default number of lines returned by handleHelperJobLog.
+// Prevents loading arbitrarily large log files into the browser.
+const defaultJobLogTail = 1000
+
+// handleHelperJobLog serves GET /api/helpers/{id}/joblog — returns the last N lines
+// of the job output file (?tail=N, default 1000). Sets X-Log-Truncated: true when
+// the file contains more lines than the requested tail.
+func (s *srv) handleHelperJobLog(w http.ResponseWriter, r *http.Request, id string) {
+	logPath := helper.JobLogFilePath(id)
+	tailN := defaultJobLogTail
+	if q := r.URL.Query().Get("tail"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 {
+			tailN = n
+		}
+	}
+	data, truncated, err := tailFile(logPath, tailN)
+	if err != nil {
+		http.Error(w, "job log not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if truncated {
+		w.Header().Set("X-Log-Truncated", "true")
+	}
+	w.Write(data) //nolint:errcheck
+}
+
+// tailFile returns the last maxLines lines of the file at path, reading backwards
+// from EOF in 64 KiB chunks. truncated is true when the file has more lines than maxLines.
+func tailFile(path string, maxLines int) (data []byte, truncated bool, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+
+	size, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, false, err
+	}
+	if size == 0 {
+		return nil, false, nil
+	}
+
+	const chunkSize = 65536
+	pos := size
+	newlinesSeen := 0
+
+	for pos > 0 {
+		n := int64(chunkSize)
+		if pos < n {
+			n = pos
+		}
+		pos -= n
+		chunk := make([]byte, n)
+		if _, err = f.ReadAt(chunk, pos); err != nil {
+			return nil, false, err
+		}
+		for i := int(n) - 1; i >= 0; i-- {
+			if chunk[i] == '\n' {
+				newlinesSeen++
+				if newlinesSeen > maxLines {
+					startAt := pos + int64(i) + 1
+					out := make([]byte, size-startAt)
+					_, err = f.ReadAt(out, startAt)
+					return out, true, err
+				}
+			}
+		}
+	}
+
+	// File has ≤ maxLines lines — return all of it.
+	if _, err = f.Seek(0, io.SeekStart); err != nil {
+		return nil, false, err
+	}
+	data, err = io.ReadAll(f)
+	return data, false, err
+}
+
+// handleHelperStop serves POST /api/helpers/{id}/stop.
+func (s *srv) handleHelperStop(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	s.proxies.Close(id)
+	if run := helper.HistoryEntryForID(id); run != nil && run.JobID != "" {
+		if sched := scheduler.ActiveScheduler(); sched != nil {
+			_ = sched.CancelJob(r.Context(), run.JobID)
+		}
+	}
+	_ = helper.UpdateHistoryStatus(id, "done", time.Now())
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"ok":true}`)
+}
+
+// handleHelperDelete serves DELETE /api/helpers/{id}/delete — removes a finished history entry.
+// Active entries (pending/starting/running) are rejected with 409 Conflict.
+func (s *srv) handleHelperDelete(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "DELETE required", http.StatusMethodNotAllowed)
+		return
+	}
+	if run := helper.HistoryEntryForID(id); run != nil && isActiveRunStatus(run.Status) {
+		http.Error(w, "cannot delete an active helper; stop it first", http.StatusConflict)
+		return
+	}
+	if err := helper.DeleteHistoryEntry(id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	invalidateHistoryCache()
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+// renderHelperCards renders running helpers as HTMX-compatible HTML cards.
+func (s *srv) renderHelperCards(w http.ResponseWriter, runs []*helper.HelperRun) {
+	w.Header().Set("Content-Type", "text/html")
+	if len(runs) == 0 {
+		fmt.Fprint(w, `<p style="color:var(--muted)">No running helpers.</p>`)
+		return
+	}
+	serverPort := config.GetRunningServerPort()
+	for _, r := range runs {
+		url := r.AccessURL(serverPort)
+		est := r.EstimatedEnd()
+		countdown := ""
+		if !est.IsZero() {
+			remaining := time.Until(est).Round(time.Minute)
+			if remaining > 0 {
+				countdown = fmt.Sprintf("Ends in ~%s", remaining)
+			} else {
+				countdown = "⚠ Walltime reached"
+			}
+		}
+		fmt.Fprintf(w, `<div class="card">
+  <div class="card-header">
+    <span class="badge badge-%s">%s</span>
+    <span class="card-title">%s</span>
+    <span class="card-sub">%s · %s</span>
+    <span class="countdown">%s</span>
+  </div>`, r.Status, r.Status, r.Label, r.ID, r.Node, countdown)
+		if url != "" {
+			fmt.Fprintf(w, `<div class="access-link">
+    <a href="%s" target="_blank">%s</a>
+    <button class="copy-btn" onclick="copyText('%s')">copy</button>
+  </div>`, url, url, url)
+		}
+		fmt.Fprintf(w, `<div class="last-msg" id="last-msg-%s"></div>`, r.ID)
+		fmt.Fprintf(w, `<details><summary>Messages</summary>
+  <div class="msg-log" data-sse-id="%s" id="log-%s"></div>
+</details>`, r.ID, r.ID)
+		fmt.Fprintf(w, `<div class="card-actions">
+  <a href="/api/helpers/%s/joblog" class="btn" target="_blank">Job log</a>
+  <button class="btn btn-stop" onclick="stopHelper('%s')">Stop</button>
+</div>`, r.ID, r.ID)
+		fmt.Fprint(w, `</div>`)
+	}
+}

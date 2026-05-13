@@ -315,7 +315,7 @@ func isBuildLockStale(info BuildLockInfo) (stale bool, status scheduler.JobStatu
 			// Can't check without a scheduler — be conservative.
 			return false, scheduler.JobStatusUnknown, fmt.Errorf("scheduler unavailable, cannot verify job %s", info.JobID)
 		}
-		st, err := sched.GetJobStatus(info.JobID)
+		st, err := sched.GetJobStatus(context.Background(), info.JobID)
 		if err != nil {
 			return false, scheduler.JobStatusUnknown, fmt.Errorf("cannot check job %s: %w", info.JobID, err)
 		}

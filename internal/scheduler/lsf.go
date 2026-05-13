@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -72,11 +73,18 @@ func newLsfSchedulerWithBinary(bsubBin string) (*LsfScheduler, error) {
 	}, nil
 }
 
+// JobIDVar returns the name of the LSF job ID environment variable.
+func (l *LsfScheduler) JobIDVar() string { return "LSB_JOBID" }
+
 // GetCurrentJobID returns the LSF job ID of the currently running job, or "".
-func (l *LsfScheduler) GetCurrentJobID() string { return os.Getenv("LSB_JOBID") }
+func (l *LsfScheduler) GetCurrentJobID() string { return os.Getenv(l.JobIDVar()) }
+func (l *LsfScheduler) JobIDEnvExpr() string    { return "${" + l.JobIDVar() + "}" }
+
+// TmpDirVar returns the name of the LSF per-job node-local tmpdir env var.
+func (l *LsfScheduler) TmpDirVar() string { return "LSF_TMPDIR" }
 
 // GetTmpDir returns the LSF node-local tmp directory for the current job, or "".
-func (l *LsfScheduler) GetTmpDir() string { return os.Getenv("LSF_TMPDIR") }
+func (l *LsfScheduler) GetTmpDir() string { return os.Getenv(l.TmpDirVar()) }
 
 // IsAvailable checks if the LSF binary is present on this system.
 func (l *LsfScheduler) IsAvailable() bool {
@@ -93,11 +101,11 @@ func (l *LsfScheduler) GetType() SchedulerType { return SchedulerLSF }
 func (l *LsfScheduler) GetBinary() string      { return l.bsubBin }
 
 // GetVersion returns the LSF version string, or "" on failure.
-func (l *LsfScheduler) GetVersion() string {
+func (l *LsfScheduler) GetVersion(ctx context.Context) string {
 	if l.bsubBin == "" {
 		return ""
 	}
-	version, err := l.getLsfVersion()
+	version, err := l.getLsfVersion(ctx)
 	if err != nil {
 		return ""
 	}
@@ -105,8 +113,8 @@ func (l *LsfScheduler) GetVersion() string {
 }
 
 // getLsfVersion attempts to get the LSF version
-func (l *LsfScheduler) getLsfVersion() (string, error) {
-	output, err := runCommand("LSF", "get-version", l.bsubBin, "-V")
+func (l *LsfScheduler) getLsfVersion(ctx context.Context) (string, error) {
+	output, err := runCommand(ctx, "LSF", "get-version", l.bsubBin, "-V")
 	if err != nil {
 		return "", err
 	}
@@ -755,7 +763,7 @@ func buildLsfArgs(deps []Dependency) []string {
 	return args
 }
 
-func (l *LsfScheduler) Submit(scriptPath string, deps []Dependency) (string, error) {
+func (l *LsfScheduler) Submit(ctx context.Context, scriptPath string, deps []Dependency) (string, error) {
 	args := buildLsfArgs(deps)
 
 	// LSF reads the script from stdin: bsub < script.lsf
@@ -763,7 +771,7 @@ func (l *LsfScheduler) Submit(scriptPath string, deps []Dependency) (string, err
 
 	// Execute bsub with shell to handle stdin redirection
 	shellCmd := fmt.Sprintf("%s %s", l.bsubBin, strings.Join(args, " "))
-	output, err := runCommand("LSF", "submit", "bash", "-c", shellCmd)
+	output, err := runCommand(ctx, "LSF", "submit", "bash", "-c", shellCmd)
 	if err != nil {
 		return "", NewSubmissionError("LSF", filepath.Base(scriptPath), string(output), err)
 	}
@@ -779,7 +787,7 @@ func (l *LsfScheduler) Submit(scriptPath string, deps []Dependency) (string, err
 }
 
 // GetClusterInfo retrieves cluster configuration (GPUs, limits)
-func (l *LsfScheduler) GetClusterInfo() (*ClusterInfo, error) {
+func (l *LsfScheduler) GetClusterInfo(ctx context.Context) (*ClusterInfo, error) {
 	if l.cachedClusterInfo != nil {
 		return l.cachedClusterInfo, nil
 	}
@@ -822,7 +830,7 @@ func (l *LsfScheduler) GetClusterInfo() (*ClusterInfo, error) {
 // getHostResources queries LSF for host resources using bhosts and lshosts
 func (l *LsfScheduler) getHostResources() (int, int64, error) {
 	// First get CPU info from bhosts
-	output, err := runCommand("LSF", "query-hosts", l.bhostsBin, "-w")
+	output, err := runCommand(context.Background(), "LSF", "query-hosts", l.bhostsBin, "-w")
 	if err != nil {
 		return 0, 0, NewClusterError("LSF", "query hosts", err)
 	}
@@ -850,7 +858,7 @@ func (l *LsfScheduler) getHostResources() (int, int64, error) {
 	var maxMemMB int64
 	lshostsCmd, err := exec.LookPath("lshosts")
 	if err == nil {
-		output, err := runCommand("LSF", "query-host-memory", lshostsCmd, "-w")
+		output, err := runCommand(context.Background(), "LSF", "query-host-memory", lshostsCmd, "-w")
 		if err == nil {
 			lines := strings.Split(string(output), "\n")
 			for i, line := range lines {
@@ -877,7 +885,7 @@ func (l *LsfScheduler) getHostResources() (int, int64, error) {
 // getQueueLimits queries LSF for queue resource limits using bqueues.
 // maxCpus/maxMemMB (from getHostResources) are merged in to avoid re-querying hosts.
 func (l *LsfScheduler) getQueueLimits(maxCpus int, maxMemMB int64, gpuInfo []GpuInfo) ([]ResourceLimits, error) {
-	output, err := runCommand("LSF", "query-queues", l.bqueuesBin, "-l")
+	output, err := runCommand(context.Background(), "LSF", "query-queues", l.bqueuesBin, "-l")
 	if err != nil {
 		return nil, NewClusterError("LSF", "query queues", err)
 	}
@@ -1002,7 +1010,7 @@ func (l *LsfScheduler) getQueueLimits(maxCpus int, maxMemMB int64, gpuInfo []Gpu
 // getGpuInfo queries LSF for GPU information using bhosts
 func (l *LsfScheduler) getGpuInfo() ([]GpuInfo, error) {
 	// Try bhosts -gpu first (LSF 10.1+)
-	output, err := runCommand("LSF", "query-gpu-info", l.bhostsBin, "-gpu")
+	output, err := runCommand(context.Background(), "LSF", "query-gpu-info", l.bhostsBin, "-gpu")
 	if err != nil {
 		// If -gpu flag not supported, try parsing bhosts -l output
 		return l.getGpuInfoFromHostDetails()
@@ -1077,7 +1085,7 @@ func (l *LsfScheduler) getGpuInfo() ([]GpuInfo, error) {
 func (l *LsfScheduler) getGpuInfoFromHostDetails() ([]GpuInfo, error) {
 	// This is a fallback for older LSF versions
 	// Query bhosts for list of hosts, then bhosts -l for each
-	output, err := runCommand("LSF", "query-gpu-hosts", l.bhostsBin)
+	output, err := runCommand(context.Background(), "LSF", "query-gpu-hosts", l.bhostsBin)
 	if err != nil {
 		return nil, NewClusterError("LSF", "query GPU info", err)
 	}
@@ -1097,7 +1105,7 @@ func (l *LsfScheduler) getGpuInfoFromHostDetails() ([]GpuInfo, error) {
 		hostName := fields[0]
 
 		// Query detailed host info
-		detailOutput, err := runCommand("LSF", "query-gpu-host-detail", l.bhostsBin, "-l", hostName)
+		detailOutput, err := runCommand(context.Background(), "LSF", "query-gpu-host-detail", l.bhostsBin, "-l", hostName)
 		if err != nil {
 			continue
 		}
@@ -1274,11 +1282,11 @@ func (s *LsfScheduler) GetJobResources() *ResourceSpec {
 
 // GetJobStatus returns the current status of the given LSF job ID.
 // Uses bjobs; returns JobStatusUnknown conservatively when bjobs is unavailable or times out.
-func (l *LsfScheduler) GetJobStatus(jobID string) (JobStatus, error) {
+func (l *LsfScheduler) GetJobStatus(ctx context.Context, jobID string) (JobStatus, error) {
 	if l.bjobsBin == "" {
 		return JobStatusUnknown, nil // conservative: can't check
 	}
-	out, err := runCommand("LSF", "job-status", l.bjobsBin, jobID)
+	out, err := runCommand(ctx, "LSF", "job-status", l.bjobsBin, jobID)
 	if err != nil {
 		if _, ok := err.(*TimeoutError); ok {
 			return JobStatusUnknown, nil // conservative: timed out
@@ -1302,6 +1310,23 @@ func (l *LsfScheduler) GetJobStatus(jobID string) (JobStatus, error) {
 		}
 	}
 	return JobStatusUnknown, nil
+}
+
+// CancelJob cancels the LSF job with the given ID using bkill.
+// Returns nil if the job is already gone.
+func (l *LsfScheduler) CancelJob(ctx context.Context, jobID string) error {
+	bkillBin := siblingBin(l.bsubBin, "bkill")
+	if bkillBin == "" {
+		return fmt.Errorf("bkill not found")
+	}
+	_, err := runCommand(ctx, "LSF", "cancel-job", bkillBin, jobID)
+	if err != nil {
+		if _, ok := err.(*TimeoutError); ok {
+			return err
+		}
+		return nil // bkill exits non-zero for already-gone jobs
+	}
+	return nil
 }
 
 // TryParseLsfScript attempts to parse an LSF script without requiring LSF binaries.

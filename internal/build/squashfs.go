@@ -45,7 +45,7 @@ func createSquashfs(ctx context.Context, b *BuildObject, isRef bool, sourceDir, 
 		b.nameVersion, opts.Overlays, opts.BindPaths)
 	utils.PrintMessage("Packing %s into %s", utils.StylePath(sourceDir), utils.StylePath(targetPath))
 
-	if err := execpkg.Run(ctx, opts); err != nil {
+	if err := execpkg.Run(ctx, opts, execpkg.IOFromContext(ctx)); err != nil {
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
 		}

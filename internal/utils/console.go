@@ -72,7 +72,7 @@ func StyleAction(act string) string { return yellow(act) }
 func StyleTitle(title string) string { return cyan(title) }
 
 // StyleNumber formats counts, sizes, or IDs (Magenta).
-func StyleNumber(num interface{}) string {
+func StyleNumber(num any) string {
 	return magenta(fmt.Sprintf("%v", num))
 }
 
@@ -132,7 +132,7 @@ func FormatBytes(bytes int64) string {
 
 // PrintMessage prints a standard info message. → stderr
 // Output: [CNT] Message...
-func PrintMessage(format string, a ...interface{}) {
+func PrintMessage(format string, a ...any) {
 	if QuietMode {
 		return
 	}
@@ -142,7 +142,7 @@ func PrintMessage(format string, a ...interface{}) {
 
 // PrintSuccess prints a success message with a Green tag. → stderr
 // Output: [CNT][PASS] Operation complete.
-func PrintSuccess(format string, a ...interface{}) {
+func PrintSuccess(format string, a ...any) {
 	if QuietMode {
 		return
 	}

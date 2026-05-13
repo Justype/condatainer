@@ -57,7 +57,7 @@ func Start(ctx context.Context, options Options) error {
 	}
 
 	// Auto-enable fakeroot if needed for writable .img
-	fakeroot := container.AutoEnableFakeroot(setupResult.LastImg, options.WritableImg, setupResult.Fakeroot)
+	fakeroot, _ := container.AutoEnableFakeroot(setupResult.LastImg, options.WritableImg, setupResult.Fakeroot)
 
 	// Build apptainer instance start options
 	opts := &apptainer.InstanceStartOptions{

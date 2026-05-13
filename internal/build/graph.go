@@ -323,7 +323,7 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 	if len(depIDs) > 0 {
 		deps = []scheduler.Dependency{{Type: scheduler.DependencyAfterOK, JobIDs: depIDs}}
 	}
-	jobID, err := bg.scheduler.Submit(scriptPath, deps)
+	jobID, err := bg.scheduler.Submit(bg.ctx, scriptPath, deps)
 	if err != nil {
 		os.Remove(lockPath) // release lock on submission failure
 		return "", fmt.Errorf("failed to submit job: %w", err)

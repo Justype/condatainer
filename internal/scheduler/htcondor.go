@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -69,11 +70,18 @@ func newHTCondorSchedulerWithBinary(condorSubmitBin string) (*HTCondorScheduler,
 	}, nil
 }
 
+// JobIDVar returns the name of the HTCondor job ID environment variable (set inside the job).
+func (h *HTCondorScheduler) JobIDVar() string { return "_CONDOR_JOB_ID" }
+
 // GetCurrentJobID returns the HTCondor job ID of the currently running job, or "".
-func (h *HTCondorScheduler) GetCurrentJobID() string { return os.Getenv("CONDOR_ID") }
+func (h *HTCondorScheduler) GetCurrentJobID() string { return os.Getenv(h.JobIDVar()) }
+func (h *HTCondorScheduler) JobIDEnvExpr() string    { return "${" + h.JobIDVar() + "}" }
+
+// TmpDirVar returns the name of the HTCondor per-job node-local tmpdir env var.
+func (h *HTCondorScheduler) TmpDirVar() string { return "_CONDOR_SCRATCH_DIR" }
 
 // GetTmpDir returns the HTCondor node-local tmp directory for the current job, or "".
-func (h *HTCondorScheduler) GetTmpDir() string { return os.Getenv("_CONDOR_SCRATCH_DIR") }
+func (h *HTCondorScheduler) GetTmpDir() string { return os.Getenv(h.TmpDirVar()) }
 
 // IsAvailable checks if the HTCondor binary is present on this system.
 func (h *HTCondorScheduler) IsAvailable() bool {
@@ -90,11 +98,11 @@ func (h *HTCondorScheduler) GetType() SchedulerType { return SchedulerHTCondor }
 func (h *HTCondorScheduler) GetBinary() string      { return h.condorSubmitBin }
 
 // GetVersion returns the HTCondor version string, or "" on failure.
-func (h *HTCondorScheduler) GetVersion() string {
+func (h *HTCondorScheduler) GetVersion(ctx context.Context) string {
 	if h.condorSubmitBin == "" {
 		return ""
 	}
-	version, err := h.getHTCondorVersion()
+	version, err := h.getHTCondorVersion(ctx)
 	if err != nil {
 		return ""
 	}
@@ -102,8 +110,8 @@ func (h *HTCondorScheduler) GetVersion() string {
 }
 
 // getHTCondorVersion attempts to get the HTCondor version
-func (h *HTCondorScheduler) getHTCondorVersion() (string, error) {
-	output, err := runCommand("HTCondor", "get-version", h.condorSubmitBin, "-version")
+func (h *HTCondorScheduler) getHTCondorVersion(ctx context.Context) (string, error) {
+	output, err := runCommand(ctx, "HTCondor", "get-version", h.condorSubmitBin, "-version")
 	if err != nil {
 		return "", err
 	}
@@ -548,7 +556,7 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 }
 
 // Submit submits an HTCondor job with optional dependency chain
-func (h *HTCondorScheduler) Submit(scriptPath string, deps []Dependency) (string, error) {
+func (h *HTCondorScheduler) Submit(ctx context.Context, scriptPath string, deps []Dependency) (string, error) {
 	// HTCondor does not support simple dependency flags like SLURM/PBS/LSF.
 	// Job dependencies require DAGMan, which is out of scope here.
 	// Return an error so the caller knows the run job was NOT submitted — the user
@@ -565,7 +573,7 @@ func (h *HTCondorScheduler) Submit(scriptPath string, deps []Dependency) (string
 	}
 
 	// Execute condor_submit
-	output, err := runCommand("HTCondor", "submit", h.condorSubmitBin, scriptPath)
+	output, err := runCommand(ctx, "HTCondor", "submit", h.condorSubmitBin, scriptPath)
 	if err != nil {
 		return "", NewSubmissionError("HTCondor", filepath.Base(scriptPath), string(output), err)
 	}
@@ -582,7 +590,7 @@ func (h *HTCondorScheduler) Submit(scriptPath string, deps []Dependency) (string
 }
 
 // GetClusterInfo retrieves HTCondor cluster configuration
-func (h *HTCondorScheduler) GetClusterInfo() (*ClusterInfo, error) {
+func (h *HTCondorScheduler) GetClusterInfo(ctx context.Context) (*ClusterInfo, error) {
 	if h.cachedClusterInfo != nil {
 		return h.cachedClusterInfo, nil
 	}
@@ -618,7 +626,7 @@ func (h *HTCondorScheduler) GetClusterInfo() (*ClusterInfo, error) {
 
 // getNodeAndGpuInfo queries HTCondor for CPU, memory, and GPU info in a single condor_status call.
 func (h *HTCondorScheduler) getNodeAndGpuInfo() (int, int64, []GpuInfo, error) {
-	output, err := runCommand("HTCondor", "query-node-info", h.condorStatusBin,
+	output, err := runCommand(context.Background(), "HTCondor", "query-node-info", h.condorStatusBin,
 		"-compact", "-af", "TotalSlotCpus", "TotalSlotMemory", "TotalGpus", "Machine")
 	if err != nil {
 		return 0, 0, nil, NewClusterError("HTCondor", "query node info", err)
@@ -720,7 +728,7 @@ func (h *HTCondorScheduler) getConfigValue(param string) (string, error) {
 		return "", fmt.Errorf("condor_config_val not available")
 	}
 
-	output, err := runCommand("HTCondor", "query-config", h.condorConfigValBin, param)
+	output, err := runCommand(context.Background(), "HTCondor", "query-config", h.condorConfigValBin, param)
 	if err != nil {
 		return "", err
 	}
@@ -768,11 +776,11 @@ func parseHTCondorMemory(memStr string) (int64, error) {
 // GetJobStatus returns the current status of the given HTCondor job ID.
 // Uses condor_q; returns JobStatusUnknown conservatively when condor_q is unavailable or times out.
 // condor_q doesn't easily distinguish idle vs running without --format; presence = alive.
-func (h *HTCondorScheduler) GetJobStatus(jobID string) (JobStatus, error) {
+func (h *HTCondorScheduler) GetJobStatus(ctx context.Context, jobID string) (JobStatus, error) {
 	if h.condorQBin == "" {
 		return JobStatusUnknown, nil // conservative: can't check
 	}
-	out, err := runCommand("HTCondor", "job-status", h.condorQBin, jobID)
+	out, err := runCommand(ctx, "HTCondor", "job-status", h.condorQBin, jobID)
 	if err != nil {
 		if _, ok := err.(*TimeoutError); ok {
 			return JobStatusUnknown, nil // conservative: timed out
@@ -783,6 +791,23 @@ func (h *HTCondorScheduler) GetJobStatus(jobID string) (JobStatus, error) {
 		return JobStatusRunning, nil // in queue (can't distinguish idle vs running without --format)
 	}
 	return JobStatusDone, nil
+}
+
+// CancelJob cancels the HTCondor job with the given ID using condor_rm.
+// Returns nil if the job is already gone.
+func (h *HTCondorScheduler) CancelJob(ctx context.Context, jobID string) error {
+	condorRmBin := siblingBin(h.condorSubmitBin, "condor_rm")
+	if condorRmBin == "" {
+		return fmt.Errorf("condor_rm not found")
+	}
+	_, err := runCommand(ctx, "HTCondor", "cancel-job", condorRmBin, jobID)
+	if err != nil {
+		if _, ok := err.(*TimeoutError); ok {
+			return err
+		}
+		return nil // condor_rm exits non-zero for already-gone jobs
+	}
+	return nil
 }
 
 // TryParseHTCondorScript attempts to parse an HTCondor submit file without requiring HTCondor binaries.

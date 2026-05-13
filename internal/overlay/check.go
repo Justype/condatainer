@@ -2,6 +2,7 @@ package overlay
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 
@@ -10,8 +11,14 @@ import (
 
 // CheckIntegrity runs a filesystem check (e2fsck) on the overlay image.
 // force: If true, adds '-f' to force the check even if the filesystem appears clean.
+// Returns an error immediately if the image is currently in use (mounted writable).
 func CheckIntegrity(ctx context.Context, path string, force bool) error {
-	// 0. Check Dependencies
+	// 0. Refuse to run e2fsck on a live-mounted image.
+	if err := CheckAvailable(path, true); err != nil {
+		return fmt.Errorf("%s is currently in use — stop any running jobs using it first", utils.StylePath(path))
+	}
+
+	// 1. Check Dependencies
 	if err := checkDependencies([]string{"e2fsck"}); err != nil {
 		return err
 	}

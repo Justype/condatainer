@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/utils"
 )
 
 // apptainerCmd holds the resolved, absolute path to the binary.
@@ -38,7 +37,6 @@ func SetBin(path string) error {
 				}
 				apptainerCmd = fullPath
 				cachedVersion = ""
-				utils.PrintDebug("Apptainer binary resolved to: %s", utils.StylePath(apptainerCmd))
 				return nil
 			}
 		}
@@ -58,7 +56,6 @@ func SetBin(path string) error {
 
 	apptainerCmd = fullPath
 	cachedVersion = "" // Clear cached version when binary changes
-	utils.PrintDebug("Apptainer binary resolved to: %s", utils.StylePath(apptainerCmd))
 	return nil
 }
 
@@ -111,7 +108,6 @@ func GetVersion() (string, error) {
 	}
 
 	cachedVersion = match
-	utils.PrintDebug("Detected Apptainer Version: %s", utils.StyleNumber(match))
 	return match, nil
 }
 
@@ -130,10 +126,6 @@ func CheckZstdSupport(currentVersion string) bool {
 		return true
 	}
 
-	utils.PrintDebug("ZSTD compression %s (requires Apptainer >= 1.4, found %s)",
-		utils.StyleInfo("disabled"),
-		utils.StyleNumber(currentVersion),
-	)
 	return false
 }
 
@@ -156,20 +148,15 @@ func runApptainer(ctx context.Context, op string, imagePath string, capture bool
 // op: "exec", "pull", "build", "instance start", etc.
 // imagePath: optional, helpful for logging which container failed
 // capture: whether to capture stdout/stderr for storing on the error.
-// stdin: custom stdin reader (optional, defaults to os.Stdin)
-// stdout/stderr: redirect streams to these writers (optional; nil = os.Stdout/os.Stderr).
+// stdin: custom stdin reader (optional; nil means no stdin)
+// stdout/stderr: redirect streams to these writers (optional; nil means discard).
 //
 //	Both are always teed with an internal buffer so ApptainerError.Output is
 //	populated on failure regardless of redirection.
 func runApptainerWithOutput(ctx context.Context, op string, imagePath string, capture bool, stdin io.Reader, stdout, stderr io.Writer, args ...string) error {
 	cmd := exec.CommandContext(ctx, apptainerCmd, args...)
 
-	// Set stdin - use provided stdin or default to os.Stdin
-	if stdin != nil {
-		cmd.Stdin = stdin
-	} else {
-		cmd.Stdin = os.Stdin
-	}
+	cmd.Stdin = stdin
 
 	// For build operations, unset SINGULARITY_BIND and APPTAINER_BIND to prevent
 	// mount conflicts during container build (e.g., when %post tries to access bound paths)
@@ -188,22 +175,31 @@ func runApptainerWithOutput(ctx context.Context, op string, imagePath string, ca
 	var stdoutWriter, stderrWriter io.Writer
 
 	if capture {
-		// Only buffer output when explicitly requested for capture
-		// This prevents memory exhaustion on long-running builds in SLURM
-		stdoutWriter = io.MultiWriter(os.Stdout, &stdoutBuf)
-		stderrWriter = io.MultiWriter(os.Stderr, &stderrBuf)
+		stdoutWriter = &stdoutBuf
+		stderrWriter = &stderrBuf
 	} else {
 		// Tee custom writers with error buffers so ApptainerError.Output
-		// is always populated on failure.
+		// is populated on failure when doing so does not hide a real TTY from
+		// the child process. Interactive CLI callers pass *os.File streams, and
+		// those must be attached directly so shells and tools can detect width,
+		// colors, job control, etc.
 		if stdout != nil {
-			stdoutWriter = io.MultiWriter(stdout, &stdoutBuf)
+			if f, ok := stdout.(*os.File); ok {
+				stdoutWriter = f
+			} else {
+				stdoutWriter = io.MultiWriter(stdout, &stdoutBuf)
+			}
 		} else {
-			stdoutWriter = os.Stdout
+			stdoutWriter = io.Discard
 		}
 		if stderr != nil {
-			stderrWriter = io.MultiWriter(stderr, &stderrBuf)
+			if f, ok := stderr.(*os.File); ok {
+				stderrWriter = f
+			} else {
+				stderrWriter = io.MultiWriter(stderr, &stderrBuf)
+			}
 		} else {
-			stderrWriter = os.Stderr
+			stderrWriter = io.Discard
 		}
 	}
 

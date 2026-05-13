@@ -143,7 +143,7 @@ func (b *BuildObject) buildDependencies(ctx context.Context, buildDeps bool) err
 }
 
 // buildExecOpts constructs the exec.Options for running the build script inside the container.
-func (b *BuildObject) buildExecOpts() (execpkg.Options, error) {
+func (b *BuildObject) buildExecOpts() (execpkg.Options, execpkg.IO, error) {
 	nameVersionParts := strings.Split(b.nameVersion, "/")
 	name := nameVersionParts[0]
 	version := "env"
@@ -182,7 +182,7 @@ func (b *BuildObject) buildExecOpts() (execpkg.Options, error) {
 	} else {
 		if isRef {
 			if err := os.MkdirAll(b.cntDirPath, utils.PermDir); err != nil {
-				return execpkg.Options{}, fmt.Errorf("failed to create cnt_dir %s: %w", b.cntDirPath, err)
+				return execpkg.Options{}, execpkg.IO{}, fmt.Errorf("failed to create cnt_dir %s: %w", b.cntDirPath, err)
 			}
 			targetDir := filepath.Join(b.cntDirPath, b.nameVersion)
 			envSettings = append(envSettings, fmt.Sprintf("target_dir=%s", targetDir))
@@ -241,15 +241,16 @@ fi
 		opts.ApptainerFlags = []string{"--writable-tmpfs"}
 	}
 
+	var ioStreams execpkg.IO
 	if len(b.interactiveInputs) > 0 {
 		inputStr := strings.Join(b.interactiveInputs, "\n") + "\n"
 		opts.PassThruStdin = true
-		opts.Stdin = strings.NewReader(inputStr)
+		ioStreams.Stdin = strings.NewReader(inputStr)
 	} else {
 		opts.PassThruStdin = true
 	}
 
-	return opts, nil
+	return opts, ioStreams, nil
 }
 
 // runBuildScript sets up a context watcher and runs the build script.
@@ -270,7 +271,7 @@ func (b *BuildObject) runBuildScript(ctx context.Context) error {
 		b.buildSource = subPath
 	}
 
-	opts, err := b.buildExecOpts()
+	opts, ioStreams, err := b.buildExecOpts()
 	if err != nil {
 		return err
 	}
@@ -281,7 +282,10 @@ func (b *BuildObject) runBuildScript(ctx context.Context) error {
 	done := watchContext(ctx, "build script")
 	defer close(done)
 
-	if err := execpkg.Run(ctx, opts); err != nil {
+	if ioStreams.IsZero() {
+		ioStreams = execpkg.IOFromContext(ctx)
+	}
+	if err := execpkg.Run(ctx, opts, ioStreams); err != nil {
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
 		}

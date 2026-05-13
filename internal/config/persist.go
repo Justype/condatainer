@@ -1000,6 +1000,7 @@ func LoadFromViper() {
 	if proxyPerJob, ok := layerBool("proxy_perjob"); ok {
 		Global.ProxyPerJob = proxyPerJob
 	}
+
 }
 
 // NormalizeCompressArgs is a thin wrapper around ArgsForCompress and exists

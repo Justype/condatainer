@@ -39,10 +39,17 @@ type SetupResult struct {
 	OverlayArgs    []string          // Overlay paths with :ro/:rw suffixes
 	EnvList        []string          // Complete environment variable list
 	EnvNotes       map[string]string // Environment variable notes for display
+	Diagnostics    []Diagnostic      // Non-fatal messages for callers to present or log
 	BindPaths      []string          // Deduplicated bind paths
 	Fakeroot       bool              // Final fakeroot setting (may be auto-enabled)
 	ApptainerFlags []string          // Apptainer flags including GPU flags
 	LastImg        string            // Path to .img overlay if present
+}
+
+// Diagnostic is a non-fatal setup message returned to presentation layers.
+type Diagnostic struct {
+	Level   string
+	Message string
 }
 
 // Setup processes all container configuration and returns a ready-to-use result
@@ -86,7 +93,7 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 	}
 
 	// Build environment variables
-	envList, envNotes := buildEnvironment(overlays, lastImg, cfg)
+	envList, envNotes, diagnostics := buildEnvironment(overlays, lastImg, cfg)
 
 	// Build bind paths
 	bindPaths := BindPaths()
@@ -104,6 +111,7 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 		OverlayArgs:    overlayArgs,
 		EnvList:        envList,
 		EnvNotes:       envNotes,
+		Diagnostics:    diagnostics,
 		BindPaths:      bindPaths,
 		Fakeroot:       cfg.Fakeroot,
 		ApptainerFlags: apptainerFlags,
@@ -112,9 +120,9 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 }
 
 // buildEnvironment constructs the complete environment variable list
-func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]string, map[string]string) {
+func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]string, map[string]string, []Diagnostic) {
 	// Collect overlay environment variables (from .env files)
-	configs, notes := CollectOverlayEnv(overlays)
+	configs, notes, diagnostics := CollectOverlayEnv(overlays)
 	envKeys := make([]string, 0, len(configs))
 	for key := range configs {
 		envKeys = append(envKeys, key)
@@ -154,7 +162,10 @@ func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]str
 	// Add .img-specific environment variables
 	if lastImg != "" {
 		if os.Getenv("IN_CONDATAINER") != "" {
-			utils.PrintWarning("You are trying to mount an .img overlay inside an existing CondaTainer environment. This may lead to unexpected behavior.")
+			diagnostics = append(diagnostics, Diagnostic{
+				Level:   "warn",
+				Message: "You are trying to mount an .img overlay inside an existing CondaTainer environment. This may lead to unexpected behavior.",
+			})
 		}
 
 		envList = append(envList,
@@ -176,7 +187,10 @@ func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]str
 			continue
 		}
 		if !strings.Contains(setting, "=") {
-			utils.PrintWarning("Invalid env setting %s. It should be in KEY=VALUE format. Skipping.", utils.StyleName(setting))
+			diagnostics = append(diagnostics, Diagnostic{
+				Level:   "warn",
+				Message: fmt.Sprintf("Invalid env setting %s. It should be in KEY=VALUE format. Skipping.", setting),
+			})
 			continue
 		}
 		envList = append(envList, setting)
@@ -195,26 +209,30 @@ func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]str
 		envNotes["CNT_CONDA_PREFIX"] = "/ext3/env"
 	}
 
-	return envList, envNotes
+	return envList, envNotes, diagnostics
 }
 
 // AutoEnableFakeroot checks if fakeroot should be auto-enabled for writable .img overlays
 // Returns the updated fakeroot setting
-func AutoEnableFakeroot(lastImg string, writable bool, currentFakeroot bool) bool {
+func AutoEnableFakeroot(lastImg string, writable bool, currentFakeroot bool) (bool, []Diagnostic) {
 	if lastImg == "" || !writable || currentFakeroot {
-		return currentFakeroot
+		return currentFakeroot, nil
 	}
 
 	// Check UID status and auto-enable fakeroot if needed
 	if status := overlay.InspectImageUIDStatus(lastImg); status == overlay.UIDStatusRoot {
-		utils.PrintNote("Root overlay %s detected. --fakeroot enabled automatically.", utils.StylePath(filepath.Base(lastImg)))
-		return true
+		return true, []Diagnostic{{
+			Level:   "note",
+			Message: fmt.Sprintf("Root overlay %s detected. --fakeroot enabled automatically.", filepath.Base(lastImg)),
+		}}
 	} else if status == overlay.UIDStatusDifferentUser {
-		utils.PrintWarning("%s's inner UID differs from current user. --fakeroot enabled automatically.", utils.StylePath(filepath.Base(lastImg)))
-		return true
+		return true, []Diagnostic{{
+			Level:   "warn",
+			Message: fmt.Sprintf("%s's inner UID differs from current user. --fakeroot enabled automatically.", filepath.Base(lastImg)),
+		}}
 	}
 
-	return currentFakeroot
+	return currentFakeroot, nil
 }
 
 // ensureSingleImage checks that at most one .img overlay is specified

@@ -62,7 +62,21 @@ func populateOverlays(dir string, store map[string]string) error {
 		}
 		normalized := strings.TrimSuffix(name, filepath.Ext(name))
 		normalized = strings.ReplaceAll(normalized, "--", "/")
-		store[normalized] = filepath.Join(dir, name)
+		path := filepath.Join(dir, name)
+		if _, exists := store[normalized]; !exists {
+			store[normalized] = path
+		}
+
+		// Default distro overlays can also be addressed by their bare name.
+		// Keep first-match-wins semantics and never override a real bare overlay.
+		if prefix := config.Global.DefaultDistro + "/"; prefix != "/" && strings.HasPrefix(normalized, prefix) {
+			alias := strings.TrimPrefix(normalized, prefix)
+			if alias != "" {
+				if _, exists := store[alias]; !exists {
+					store[alias] = path
+				}
+			}
+		}
 	}
 	return nil
 }

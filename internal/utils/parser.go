@@ -778,3 +778,99 @@ func ExpandPlaceholders(defs []PlaceholderDef) []map[string]string {
 
 	return result
 }
+
+// imgPackageTokenRe matches {UPPER_CASE} tokens in #IMG_PACKAGES: templates.
+var imgPackageTokenRe = regexp.MustCompile(`\{([A-Z][A-Z0-9_]*)\}`)
+
+// ExtractImgPackageTokens returns the unique {KEY} token names from an #IMG_PACKAGES: template.
+func ExtractImgPackageTokens(imgPackages string) []string {
+	matches := imgPackageTokenRe.FindAllStringSubmatch(imgPackages, -1)
+	seen := map[string]bool{}
+	var result []string
+	for _, m := range matches {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			result = append(result, m[1])
+		}
+	}
+	return result
+}
+
+// MatchVersion does a partial version match against a list sorted newest-first.
+// Input "3.12" matches the first entry beginning with "3.12." (latest patch).
+// Exact match always takes priority. Returns input unchanged if nothing matches.
+func MatchVersion(input string, versions []string) string {
+	for _, v := range versions {
+		if v == input {
+			return v
+		}
+	}
+	prefix := input + "."
+	for _, v := range versions {
+		if strings.HasPrefix(v, prefix) {
+			return v
+		}
+	}
+	return input
+}
+
+// LatestVersion returns the first (newest) entry in a versions list, or "" if empty.
+func LatestVersion(versions []string) string {
+	if len(versions) == 0 {
+		return ""
+	}
+	return versions[0]
+}
+
+// VersionChoicesDisplay formats a newest-first full-patch list into grouped minor
+// version summary strings: ["3.13.2","3.12.10","3.11.12"] →
+// ["3.13 (3.13.2)", "3.12 (3.12.10)", "3.11 (3.11.12)"].
+func VersionChoicesDisplay(versions []string) []string {
+	seen := map[string]bool{}
+	var result []string
+	for _, v := range versions {
+		parts := strings.SplitN(v, ".", 3)
+		if len(parts) < 2 {
+			continue
+		}
+		minor := parts[0] + "." + parts[1]
+		if !seen[minor] {
+			seen[minor] = true
+			result = append(result, fmt.Sprintf("%s (%s)", minor, v))
+		}
+	}
+	return result
+}
+
+// FormatChoicesInline formats a value list for single-line display.
+// Version lists (entries containing a dot) are grouped by minor version with
+// the patch shown in dim parentheses: "3.13(.2), 3.12(.10), 3.11(.12)".
+// Option lists are joined with " | ": "github | microsoft".
+func FormatChoicesInline(vlist []string) string {
+	if len(vlist) == 0 {
+		return ""
+	}
+	// Detect version list: first entry must have at least one dot.
+	if !strings.Contains(vlist[0], ".") {
+		return strings.Join(vlist, " | ")
+	}
+	seen := map[string]bool{}
+	var parts []string
+	for _, v := range vlist {
+		segs := strings.SplitN(v, ".", 3)
+		if len(segs) < 2 {
+			continue
+		}
+		minor := segs[0] + "." + segs[1]
+		if seen[minor] {
+			continue
+		}
+		seen[minor] = true
+		entry := minor
+		if len(segs) == 3 {
+			entry += StyleDebug("(." + segs[2] + ")")
+		}
+		parts = append(parts, entry)
+	}
+	return strings.Join(parts, ", ")
+}
