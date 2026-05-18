@@ -104,11 +104,13 @@ func CheckRequiredOverlays(ctx context.Context, requiredTemplate string, params 
 	return checkAndInstallNamedOverlays(ctx, names)
 }
 
-// CheckHelperInstallPaths verifies meta.CheckPaths exist inside the chosen
-// env/named overlays or base image. Public wrapper around checkInstallPaths
-// so the server can run pre-submission validation without going through Plan.
-func CheckHelperInstallPaths(ctx context.Context, meta HelperScriptMeta, envImg string, namedOverlays []string, baseImage, apptainerBin string) error {
-	return checkInstallPaths(ctx, meta, envImg, namedOverlays, baseImage, apptainerBin)
+// CheckHelperPackages verifies that every package in meta.ImgPackages is
+// installed in the conda environment inside envImg. {KEY} tokens in ImgPackages
+// are substituted from params before checking.
+// Public wrapper around checkPackages so the server can run pre-submission
+// validation without going through PlanRun.
+func CheckHelperPackages(meta HelperScriptMeta, envImg string, params map[string]string) error {
+	return checkPackages(meta, envImg, params)
 }
 
 // ResolveResources merges script headers with config defaults and explicit overrides.

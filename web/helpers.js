@@ -1,9 +1,16 @@
 /* ── Progress window ─────────────────────── */
 let _progES = null;
 
+function toggleMinimizeProgressWindow() {
+  const minimized = gid('prog-window').classList.toggle('minimized');
+  gid('prog-win-toggle').innerHTML = iconSvg(minimized ? 'expand_circle_up' : 'expand_circle_down');
+}
+
 function openProgressWindow(title, taskId, onDone) {
   gid('prog-win-title').textContent = title;
-  gid('prog-win-status').textContent = '⏳';
+  gid('prog-win-status').innerHTML = iconSvg('progress_activity', 'spin');
+  gid('prog-window').classList.remove('minimized');
+  gid('prog-win-toggle').innerHTML = iconSvg('expand_circle_down');
   gid('prog-win-close').disabled = true;
   gid('prog-window').classList.add('visible');
 
@@ -22,7 +29,7 @@ function openProgressWindow(title, taskId, onDone) {
         tv.write(msg.d);
       } else if (msg.t === 'done') {
         tv.done(msg.ok, msg.err);
-        gid('prog-win-status').textContent = msg.ok ? '✓' : '✗';
+        gid('prog-win-status').innerHTML = iconSvg(msg.ok ? 'check' : 'close');
         gid('prog-win-close').disabled = false;
         es.close(); _progES = null;
         if (onDone) onDone(msg);
@@ -31,7 +38,7 @@ function openProgressWindow(title, taskId, onDone) {
   };
   es.onerror = () => {
     tv.done(false, 'Connection lost');
-    gid('prog-win-status').textContent = '✗';
+    gid('prog-win-status').innerHTML = iconSvg('close');
     gid('prog-win-close').disabled = false;
     es.close(); _progES = null;
   };
@@ -76,18 +83,10 @@ async function loadHelpers() {
   renderHelperList();
 }
 
-function _defaultStartResources(helper) {
-  const defaults = helper && helper.resource_defaults ? helper.resource_defaults : {};
-  return {
-    cpus: defaults.cpus || 4,
-    mem: defaults.mem || '16G',
-    walltime: defaults.walltime || '08:00:00',
-  };
-}
-
 function resetStartForm(helper) {
   const h = helper || selectedHelper;
-  const defaults = _defaultStartResources(h);
+  const d = (h && h.resource_defaults) || {};
+  const defaults = { cpus: d.cpus || 4, mem: d.mem || '16G', walltime: d.walltime || '08:00:00' };
 
   selectedModules = [];
   renderModuleChips();
@@ -96,7 +95,7 @@ function resetStartForm(helper) {
   _setVal('cfg-mem', defaults.mem);
   _setVal('cfg-wall', defaults.walltime);
   _setVal('cfg-gpu', '');
-  _setVal('cfg-cwd', '');
+  _setCwd('');
   _setVal('cfg-overlay', '');
   gid('cfg-overlay').dispatchEvent(new Event('input'));
 
@@ -141,7 +140,7 @@ function renderHelperList(filter) {
         (h.whatis || '').toLowerCase().includes(q))
     : allHelpers;
   if (!helpers.length) {
-    list.innerHTML = '<div style="padding:20px;color:var(--muted);font-size:12px;text-align:center;">' +
+    list.innerHTML = '<div class="modal-empty">' +
       (q ? 'No matches.' : 'No helpers found.') + '</div>';
     return;
   }
@@ -174,12 +173,15 @@ function selectHelper(name, overrides) {
   const paramWrap  = gid('helper-params-wrap');
   if (params.length) {
     const pv = selectedHelper.param_values || {};
+    const computed = params.map(p => {
+      const values = pv[p.key] || [];
+      const isOpen = values.length > 0 && values[values.length - 1] === '*';
+      const opts   = isOpen ? values.slice(0, -1) : values;
+      return { p, opts, isOpen };
+    });
     paramWrap.innerHTML =
       '<div class="f-divider">Helper params</div>' +
-      params.map(p => {
-        const values = pv[p.key] || [];
-        const isOpen = values.length > 0 && values[values.length - 1] === '*';
-        const opts   = isOpen ? values.slice(0, -1) : values;
+      computed.map(({ p, opts }) => {
         const defVal = p.default || (opts[0] || '');
         const input  = opts.length
           ? makeComboboxHtml('hparam-' + p.key, defVal)
@@ -194,10 +196,7 @@ function selectHelper(name, overrides) {
         '</div>';
       }).join('');
     // Wire comboboxes after HTML is in the DOM
-    params.forEach(p => {
-      const values = pv[p.key] || [];
-      const isOpen = values.length > 0 && values[values.length - 1] === '*';
-      const opts   = isOpen ? values.slice(0, -1) : values;
+    computed.forEach(({ p, opts, isOpen }) => {
       if (opts.length) initCombobox('hparam-' + p.key, opts, isOpen, null);
     });
     // Restore param values when rerunning
@@ -237,7 +236,7 @@ function selectHelper(name, overrides) {
 
   // When rerunning, apply saved cwd/overlay directly and skip auto-resolution.
   if (overrides) {
-    _setVal('cfg-cwd',     overrides.cwd     || '');
+    _setCwd(overrides.cwd || '');
     _setVal('cfg-overlay', overrides.overlay || '');
     gid('cfg-overlay').dispatchEvent(new Event('input'));
     renderModuleChips();
@@ -267,15 +266,11 @@ async function refreshEnvOverlayFromCWD() {
   try {
     const d = await fetch(url).then(r => r.json());
     if (!selectedHelper || selectedHelper.name !== helperName) return;
-    if (d.path) {
-      _setVal('cfg-overlay', d.path);
-      gid('cfg-overlay').dispatchEvent(new Event('input'));
-    } else if (selectedHelper.img_packages) {
-      gid('ov-notice').classList.add('visible');
-    }
+    _setVal('cfg-overlay', d.path || '');
   } catch {
-    if (selectedHelper.img_packages) gid('ov-notice').classList.add('visible');
+    _setVal('cfg-overlay', '');
   }
+  gid('cfg-overlay').dispatchEvent(new Event('input'));
 }
 
 function clearEnvOverlay() {
@@ -286,10 +281,30 @@ function clearEnvOverlay() {
 gid('cfg-overlay').addEventListener('input', function () {
   const hasOverlay = !!this.value;
   gid('ov-clear-btn').disabled = !hasOverlay;
-  gid('ov-notice').classList.toggle(
-    'visible',
-    !!(selectedHelper && selectedHelper.img_packages && !hasOverlay)
-  );
+
+  const notice  = gid('ov-notice');
+  const startBtn = gid('start-btn');
+  const required = !!(selectedHelper && selectedHelper.img_packages);
+
+  if (!hasOverlay && selectedHelper) {
+    notice.classList.add('visible');
+    if (required) {
+      notice.classList.add('error');
+      notice.classList.remove('info');
+      gid('ov-notice-icon').setAttribute('href', '#i-error');
+      gid('ov-notice-text').textContent = 'No env overlay selected — required by ' + selectedHelper.name + ' helper';
+      if (startBtn) startBtn.disabled = true;
+    } else {
+      notice.classList.add('info');
+      notice.classList.remove('error');
+      gid('ov-notice-icon').setAttribute('href', '#i-info');
+      gid('ov-notice-text').textContent = 'No env overlay selected — helpful for storing packages and conda env';
+      if (startBtn) startBtn.disabled = false;
+    }
+  } else {
+    notice.classList.remove('visible', 'error', 'info');
+    if (startBtn) startBtn.disabled = false;
+  }
 });
 
 gid('cfg-cwd').addEventListener('input', refreshEnvOverlayFromCWD);
@@ -310,7 +325,15 @@ let _ovTokenKeys = [];
 
 function toggleOverlayCreate() {
   const form = gid('ov-create-form');
+  const wasHidden = !form.classList.contains('visible');
   form.classList.toggle('visible');
+  if (wasHidden) {
+    const nameEl = gid('ov-name');
+    if (!nameEl.value.trim()) {
+      nameEl.value = 'env.img';
+      gid('ov-create-btn').disabled = false;
+    }
+  }
 }
 
 // Renders token inputs (comboboxes/text) driven by img_packages {KEY} tokens.
@@ -337,29 +360,30 @@ function renderOverlayCreateForm() {
   const paramValues = selectedHelper.param_values || {};
   const params      = selectedHelper.params || [];
 
+  const computed = tokens.map(key => {
+    const values = paramValues[key] || [];
+    const isOpen = values.length > 0 && values[values.length - 1] === '*';
+    const opts   = isOpen ? values.slice(0, -1) : values;
+    const param  = params.find(p => p.key === key);
+    return { key, opts, isOpen, param };
+  });
+
   wrap.innerHTML = '<div class="form-grid">' +
-    tokens.map(key => {
-      const values  = paramValues[key] || [];
-      const isOpen  = values.length > 0 && values[values.length - 1] === '*';
-      const opts    = isOpen ? values.slice(0, -1) : values;
-      const param   = params.find(p => p.key === key);
-      const defVal  = (param && param.default) || (opts[0] || '');
-      const desc    = param ? param.desc : '';
+    computed.map(({ key, opts, param }) => {
+      const defVal = (param && param.default) || (opts[0] || '');
+      const desc   = param ? param.desc : '';
       return '<div class="field">' +
         '<label class="field-label">' + escHtml(key) + '</label>' +
         (opts.length
-          ? makeComboboxHtml('ovtok-' + key, defVal)
-          : '<input class="field-input" id="ovtok-' + escHtml(key) + '" value="' + escHtml(defVal) + '">') +
-        (desc ? '<span style="font-size:10px;color:var(--muted);">' + escHtml(desc) + '</span>' : '') +
+          ? makeComboboxHtml('ovtok-' + key, '', defVal)
+          : '<input class="field-input" id="ovtok-' + escHtml(key) + '" placeholder="' + escHtml(defVal) + '">') +
+        (desc ? '<span class="param-desc">' + escHtml(desc) + '</span>' : '') +
       '</div>';
     }).join('') +
   '</div>';
 
   // Wire comboboxes and inputs to preview updates
-  tokens.forEach(key => {
-    const values  = paramValues[key] || [];
-    const isOpen  = values.length > 0 && values[values.length - 1] === '*';
-    const opts    = isOpen ? values.slice(0, -1) : values;
+  computed.forEach(({ key, opts, isOpen }) => {
     if (opts.length) {
       initCombobox('ovtok-' + key, opts, isOpen, updateOvPreview);
     } else {
@@ -369,6 +393,7 @@ function renderOverlayCreateForm() {
   });
 
   prevWrap.style.display = '';
+  gid('ov-pkgs').addEventListener('input', updateOvPreview);
   updateOvPreview();
 }
 
@@ -385,18 +410,25 @@ function updateOvPreview() {
   if (!selectedHelper || !selectedHelper.img_packages) return;
   let s = selectedHelper.img_packages;
   _ovTokenKeys.forEach(k => {
-    const el = gid('ovtok-' + k);
-    const v  = el ? (el.dataset.value !== undefined ? el.dataset.value : el.value) : '';
-    s = s.replaceAll('{' + k + '}', v || ('{' + k + '}'));
+    const el       = gid('ovtok-' + k);
+    const v        = el ? (el.dataset.value !== undefined ? el.dataset.value : el.value) : '';
+    const fallback = el ? (el.placeholder || ('{' + k + '}')) : ('{' + k + '}');
+    s = s.replaceAll('{' + k + '}', v || fallback);
   });
+  const extra = (gid('ov-pkgs')?.value || '').trim();
+  if (extra) s += ' ' + extra;
   gid('ov-pkg-preview').textContent = s;
 }
 
 /* ── Searchable combobox ─────────────────── */
-function makeComboboxHtml(id, defVal) {
+// If placeholder is provided, the input starts empty and shows placeholder as hint.
+// Otherwise defVal is used as both value and placeholder (existing behaviour).
+function makeComboboxHtml(id, defVal, placeholder) {
+  const val = placeholder !== undefined ? '' : defVal;
+  const ph  = placeholder !== undefined ? placeholder : defVal;
   return '<div class="combo-wrap" id="combo-' + escHtml(id) + '">' +
     '<input class="field-input combo-input" id="' + escHtml(id) + '" autocomplete="off"' +
-      ' value="' + escHtml(defVal) + '" data-value="' + escHtml(defVal) + '">' +
+      ' value="' + escHtml(val) + '" data-value="' + escHtml(val) + '" placeholder="' + escHtml(ph) + '">' +
     '<div class="combo-list" id="combo-list-' + escHtml(id) + '"></div>' +
   '</div>';
 }
@@ -462,6 +494,19 @@ function initCombobox(id, options, isOpen, onChange) {
   input.dataset.value = input.value;
 }
 
+/* ── Shared busy state ───────────────────── */
+function _setStartBusy(busy, label) {
+  const btn  = gid('start-btn');
+  const wrap = gid('helper-list-wrap');
+  if (btn) {
+    btn.disabled = busy;
+    btn.innerHTML = busy && label
+      ? label
+      : iconSvg('play_arrow') + ' Start ' + escHtml(selectedHelper?.name || '');
+  }
+  if (wrap) wrap.classList.toggle('locked', busy);
+}
+
 /* ── Create overlay ──────────────────────── */
 async function createOverlay() {
   const name = gid('ov-name').value || 'my-env.img';
@@ -500,9 +545,16 @@ async function createOverlay() {
   const body = {
     name,
     size,
+    cwd:              gid('cfg-cwd').value.trim(),
     base_packages:    basePkgs,
     extra_packages:   extraPkgs,
     post_install_cmd: selectedHelper?.post_install_cmd || '',
+  };
+
+  const createUseBtn = gid('ov-create-btn');
+  const _setBusy = busy => {
+    _setStartBusy(busy);
+    if (createUseBtn) createUseBtn.disabled = busy;
   };
 
   try {
@@ -517,7 +569,9 @@ async function createOverlay() {
       return;
     }
     const { id } = await r.json();
+    _setBusy(true);
     openProgressWindow('Creating ' + name, id, async msg => {
+      _setBusy(false);
       if (msg.ok && msg.path) {
         _setVal('cfg-overlay', msg.path);
         gid('cfg-overlay').dispatchEvent(new Event('input'));
@@ -527,6 +581,7 @@ async function createOverlay() {
       }
     });
   } catch (e) {
+    _setBusy(false);
     alert('Error: ' + e);
   }
 }
@@ -534,13 +589,13 @@ async function createOverlay() {
 /* ── Start helper job ────────────────────── */
 async function startHelper() {
   if (!selectedHelper) return;
-  const startBtn = gid('start-btn');
+  if (selectedHelper.img_packages && !gid('cfg-overlay').value) return;
   const body = {
     cpus:    parseInt(gid('cfg-cpus').value)  || 4,
     mem:     gid('cfg-mem').value   || '16G',
     time:    gid('cfg-wall').value  || '08:00:00',
     gpu:     gid('cfg-gpu').value   || '',
-    cwd:     gid('cfg-cwd').value   || '',
+    cwd:     gid('cfg-cwd').value || '',
     overlay: gid('cfg-overlay').value || '',
     overlays: selectedModules.map(m => m.path),
     params:  _collectParams(),
@@ -549,10 +604,7 @@ async function startHelper() {
   const term = gid('start-term');
   term.classList.add('visible');
   term.innerHTML = '';
-  if (startBtn) {
-    startBtn.disabled = true;
-    startBtn.innerHTML = iconSvg('play_arrow') + 'Starting…';
-  }
+  _setStartBusy(true, iconSvg('play_arrow') + ' Starting…');
 
   try {
     const r = await fetch('/api/helpers/' + encodeURIComponent(selectedHelper.name) + '/start', {
@@ -593,14 +645,12 @@ async function startHelper() {
     }
     await loadJobs();
     resetStartForm(selectedHelper);
-    setTimeout(() => navigate('jobs'), 500);
+    if (gid('sec-start')?.classList.contains('active'))
+      setTimeout(() => navigate('jobs'), 500);
   } catch (e) {
     term.innerHTML += '<div class="tl-err">Error: ' + escHtml(String(e)) + '</div>';
   } finally {
-    if (startBtn) {
-      startBtn.disabled = false;
-      startBtn.innerHTML = iconSvg('play_arrow') + ' Start ' + escHtml(selectedHelper ? selectedHelper.name : '');
-    }
+    _setStartBusy(false);
   }
 }
 
@@ -612,18 +662,16 @@ function renderModuleChips() {
   // Required overlays from the helper script — greyed out, not removable.
   const requiredNames = (selectedHelper?.required_overlays || '').trim().split(/\s+/).filter(Boolean);
   const requiredChips = requiredNames.map(name =>
-    '<div style="display:flex;align-items:center;gap:6px;padding:4px 8px;' +
-      'background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);opacity:.5;">' +
-      '<span style="font-family:var(--mono);font-size:11px;flex:1;">' + escHtml(name) + '</span>' +
-      '<span style="font-size:10px;color:var(--muted);">default</span>' +
+    '<div class="module-chip required">' +
+      '<span class="module-chip-name">' + escHtml(name) + '</span>' +
+      '<span class="module-chip-label">default</span>' +
     '</div>'
   ).join('');
 
   const userChips = selectedModules.map((m, i) =>
-    '<div style="display:flex;align-items:center;gap:6px;padding:4px 8px;' +
-      'background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);">' +
-      '<span style="font-family:var(--mono);font-size:11px;flex:1;">' + escHtml(m.name) + '</span>' +
-      '<button class="btn btn-ghost btn-sm" style="padding:0 4px;" onclick="removeModule(' + i + ')">' + iconSvg('close') + '</button>' +
+    '<div class="module-chip">' +
+      '<span class="module-chip-name">' + escHtml(m.name) + '</span>' +
+      '<button class="btn btn-ghost btn-sm" onclick="removeModule(' + i + ')">' + iconSvg('close') + '</button>' +
     '</div>'
   ).join('');
 

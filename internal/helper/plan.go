@@ -70,6 +70,30 @@ type ErrEnvInUse struct {
 	Path string
 }
 
+// ErrMissingPackages is returned by PlanRun when #IMG_PACKAGES: specs are not
+// satisfied in the conda environment inside EnvImg. Specs holds the raw
+// unsatisfied specs suitable for micromamba install; Messages holds matching
+// human-readable descriptions for display.
+// ErrMissingPackages is returned by PlanRun when #IMG_PACKAGES: specs are not
+// satisfied in the conda environment inside EnvImg. Specs holds the raw
+// unsatisfied specs suitable for micromamba install; Messages holds matching
+// human-readable descriptions for display.
+// VersionChoices is non-nil when one or more missing packages had an unresolved
+// version token ({CONDA_PYTHON} etc.) with a known #VALUE: list — the UI should
+// prompt the user to pick a concrete version before installing.
+// Keys are package names (e.g. "python"); values are the selectable versions.
+type ErrMissingPackages struct {
+	EnvImg         string
+	Specs          []string            // raw specs for micromamba install, e.g. ["jupyterlab", "python>=3.12"]
+	Messages       []string            // human-readable per-spec descriptions
+	VersionChoices map[string][]string // package name → selectable versions (from #VALUE:)
+}
+
+func (e *ErrMissingPackages) Error() string {
+	return fmt.Sprintf("conda packages not satisfied in %s:\n  %s",
+		e.EnvImg, strings.Join(e.Messages, "\n  "))
+}
+
 func (e *ErrEnvInUse) Error() string {
 	return "env overlay in use: " + e.Path
 }
@@ -169,15 +193,7 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 		return nil, fmt.Errorf("helper requires a writable overlay (#IMG_PACKAGES set) — create one and pass --env or set EnvImg")
 	}
 
-	baseImage := opts.BaseImage
-	if baseImage == "" {
-		baseImage = config.GetBaseImage()
-	}
-	apptainerBin := config.Global.ApptainerBin
-	if apptainerBin == "" {
-		apptainerBin = "apptainer"
-	}
-	if err := CheckHelperInstallPaths(ctx, meta, opts.EnvImg, namedOverlays, baseImage, apptainerBin); err != nil {
+	if err := CheckHelperPackages(meta, opts.EnvImg, params); err != nil {
 		return nil, err
 	}
 

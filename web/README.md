@@ -26,4 +26,15 @@ embedded as fill-based paths with `viewBox="0 -960 960 960"`.
 
 The `.icon` CSS class renders them: `fill:currentColor; width/height:16px`.
 
-To fetch a new icon: `https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/{name}/materialsymbolsoutlined/{name}_24px.svg`
+### Adding a new icon
+
+1. Look up the icon name on [fonts.google.com/icons](https://fonts.google.com/icons) — use the snake_case identifier shown below the icon (e.g. `arrow_back`).
+2. Add the name to the appropriate group in the `ICONS` array in `fetch-icons.sh`.
+3. Re-run the script to regenerate `icons.js`:
+   ```bash
+   ./fetch-icons.sh
+   ```
+4. Reference it in HTML/JS with `#i-<name>`:
+   ```html
+   <svg class="icon"><use href="#i-arrow_back"></use></svg>
+   ```

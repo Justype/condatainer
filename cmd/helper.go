@@ -564,6 +564,16 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	// Ensure server is running.
 	helper.EnsureServer()
 
+	// Resolve env.img from cwd before PromptSettings so the settings table
+	// shows the found overlay and the guided creation check below sees it.
+	if opts.EnvImg == "" {
+		resolvedCwd := cwd
+		if resolvedCwd == "" {
+			resolvedCwd, _ = os.Getwd()
+		}
+		opts.EnvImg = helper.ResolveEnvOverlayInDir("", resolvedCwd)
+	}
+
 	// Resolve params and resources together in one combined prompt.
 	scriptParams, _ := helper.ParseHelperParams(opts.ScriptPath)
 	if err := helper.ValidateHelperParamConflicts(scriptParams); err != nil {
@@ -586,7 +596,7 @@ func runHelper(cmd *cobra.Command, args []string) error {
 
 	// Guided overlay creation for helpers that require a writable conda env.
 	if meta.ImgPackages != "" && opts.EnvImg == "" {
-		created, err := ui.GuidedOverlayCreate(ctx, opts.ScriptName, meta, opts.Params, versions)
+		created, err := ui.GuidedOverlayCreate(ctx, opts.ScriptName, meta, opts.Params, versions, opts.CWD)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
@@ -598,6 +608,19 @@ func runHelper(cmd *cobra.Command, args []string) error {
 
 	// Plan: non-interactive validation + resource resolution.
 	plan, err := helper.PlanRun(ctx, opts)
+	// Offer to install missing conda packages, then retry planning once.
+	if err != nil {
+		var em *helper.ErrMissingPackages
+		if errors.As(err, &em) {
+			if installErr := ui.GuidedInstallMissing(ctx, em); installErr != nil {
+				if errors.Is(installErr, context.Canceled) {
+					return nil
+				}
+				return installErr
+			}
+			plan, err = helper.PlanRun(ctx, opts)
+		}
+	}
 	if err != nil {
 		var ep *helper.ErrMissingParam
 		var es *helper.ErrSingletonRunning

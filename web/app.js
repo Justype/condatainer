@@ -52,6 +52,15 @@ function badgeClass(status) {
 function gid(id) { return document.getElementById(id); }
 function _setText(id, val) { const e = gid(id); if (e) e.textContent = val || '—'; }
 function _setVal(id, val)  { const e = gid(id); if (e) e.value = val; }
+// Sets cfg-cwd value and placeholder. Placeholder is always $SCRATCH (or $HOME).
+// Value is set to val if non-empty, otherwise defaults to $SCRATCH/$HOME.
+function _setCwd(val) {
+  const e = gid('cfg-cwd');
+  if (!e) return;
+  const def = srvScratch || srvHome || '';
+  e.placeholder = def;
+  e.value = val || def;
+}
 function iconSvg(name, cls) {
   return '<svg class="icon' + (cls ? ' ' + cls : '') + '" aria-hidden="true"><use href="#i-' + name + '"></use></svg>';
 }
@@ -78,29 +87,38 @@ let srvHome    = '';
 let srvScratch = '';
 
 // file picker modal
-let fpTargetId = '', fpMode = 'dir', fpPath = '';
+let fpTargetId = '', fpMode = 'dir', fpPath = '', fpSuffix = '';
 
 // overlay picker modal
 let opTargetType  = 'module';
 
 /* ── Theme ───────────────────────────────── */
+const _sysMq      = matchMedia('(prefers-color-scheme: dark)');
 const _savedTheme = localStorage.getItem('conda-theme');
-const _sysTheme   = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-let theme = _savedTheme || _sysTheme;
-document.documentElement.setAttribute('data-theme', theme);
+let theme = _savedTheme || 'system';
+
+function _resolvedTheme() {
+  return theme === 'system' ? (_sysMq.matches ? 'dark' : 'light') : theme;
+}
+function _applyTheme() {
+  document.documentElement.setAttribute('data-theme', _resolvedTheme());
+}
+_applyTheme();
 _updateThemeBtn();
 
+_sysMq.addEventListener('change', () => { if (theme === 'system') { _applyTheme(); _updateThemeBtn(); } });
+
 function toggleTheme() {
-  theme = theme === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', theme);
+  theme = theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light';
   localStorage.setItem('conda-theme', theme);
+  _applyTheme();
   _updateThemeBtn();
 }
 function _updateThemeBtn() {
   const icon  = gid('theme-icon');
   const label = document.querySelector('#theme-toggle .sb-btn-label');
-  if (icon)  icon.innerHTML  = iconSvg(theme === 'dark' ? 'dark_mode' : 'light_mode');
-  if (label) label.textContent = theme === 'dark' ? 'Dark mode' : 'Light mode';
+  if (icon)  icon.innerHTML  = iconSvg(theme === 'dark' ? 'dark_mode' : theme === 'light' ? 'light_mode' : 'computer');
+  if (label) label.textContent = theme === 'dark' ? 'Dark Mode' : theme === 'light' ? 'Light Mode' : ('System (' + (_sysMq.matches ? 'Dark' : 'Light') + ')');
 }
 gid('theme-toggle').addEventListener('click', toggleTheme);
 
@@ -160,6 +178,12 @@ function _setStatus(alive, d) {
     _setText('ssh-hint', 'LocalForward ' + d.port + ' localhost:' + d.port);
     if (d.home)    srvHome    = d.home;
     if (d.scratch) srvScratch = d.scratch;
+    const cwdEl = gid('cfg-cwd');
+    if (cwdEl) {
+      const def = srvScratch || srvHome || '';
+      cwdEl.placeholder = def;
+      if (!cwdEl.value) cwdEl.value = def;
+    }
     renderFileTree();
   }
 }
@@ -191,6 +215,16 @@ gid('app').addEventListener('click', e => {
 });
 
 /* ── Copy helpers ────────────────────────── */
+function initCodeBlocks() {
+  document.querySelectorAll('.code-block').forEach(el => {
+    if (el.querySelector('button')) return;
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-sm';
+    btn.innerHTML = iconSvg('content_copy') + ' Copy';
+    btn.onclick = function() { copyStr(el.querySelector(':not(button)')?.textContent || '', this); };
+    el.appendChild(btn);
+  });
+}
 function copyText(elId, btn) {
   const text = gid(elId)?.textContent || '';
   navigator.clipboard.writeText(text).then(() => {
@@ -206,3 +240,4 @@ function copyStr(str, btn) {
     setTimeout(() => { btn.innerHTML = o; }, 1500);
   });
 }
+initCodeBlocks();

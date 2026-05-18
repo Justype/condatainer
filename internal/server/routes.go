@@ -36,6 +36,4 @@ func registerRoutes(mux *http.ServeMux, s *srv) {
 	mux.HandleFunc("/api/overlays", s.handleOverlaysList)
 	mux.HandleFunc("/api/fs", s.handleFS)
 
-	// Reverse proxy
-	mux.HandleFunc("/proxy/", s.ServeProxy)
 }

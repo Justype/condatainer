@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/Justype/condatainer/internal/config"
+	cntexec "github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/helper"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -329,13 +331,19 @@ func PromptSettings(ctx context.Context,
 	}
 
 	// Path and env img (always shown).
+	effectiveCwd := opts.CWD
+	if effectiveCwd == "" {
+		effectiveCwd, _ = os.Getwd()
+	}
 	cwdDisp := opts.CWD
 	if cwdDisp == "" {
-		cwdDisp = "(current dir)"
+		cwdDisp = effectiveCwd + " (cwd)"
 	}
 	envDisp := opts.EnvImg
 	if envDisp == "" {
 		envDisp = "(none)"
+	} else if rel, err := filepath.Rel(effectiveCwd, envDisp); err == nil && !strings.HasPrefix(rel, "..") {
+		envDisp = rel
 	}
 	printRow("w", cwdDisp, "Working directory", "")
 	printRow("e", envDisp, "Writable overlay (.img)", "")
@@ -560,13 +568,14 @@ func WaitBeforeStart(ctx context.Context, d time.Duration) error {
 
 // GuidedOverlayCreate runs the interactive wizard for creating a writable conda
 // overlay and installing the packages specified by meta.ImgPackages.
+// cwd is the working directory used to compute the default overlay path (env.img
+// lives next to the project so FindEnvOverlay can auto-detect it on later runs).
 // Returns the path of the created overlay.
-func GuidedOverlayCreate(ctx context.Context, helperName string, meta helper.HelperScriptMeta, params map[string]string, versions map[string][]string) (string, error) {
-	defaultDir := helperName
-	if dir, err := config.GetWritableImagesDir(); err == nil {
-		defaultDir = filepath.Join(dir, helperName)
+func GuidedOverlayCreate(ctx context.Context, helperName string, meta helper.HelperScriptMeta, params map[string]string, versions map[string][]string, cwd string) (string, error) {
+	if cwd == "" {
+		cwd, _ = os.Getwd()
 	}
-	defaultPath := filepath.Join(defaultDir, "env.img")
+	defaultPath := filepath.Join(cwd, "env.img")
 
 	utils.PrintMessage("%s requires a writable overlay (conda environment).", utils.StyleName(helperName))
 	utils.PrintMessage("No overlay specified with -e/--env.")
@@ -575,7 +584,7 @@ func GuidedOverlayCreate(ctx context.Context, helperName string, meta helper.Hel
 	if err != nil {
 		return "", err
 	}
-	sizeStr, err := promptDefault(ctx, "[?] Overlay size", "8G")
+	sizeStr, err := promptDefault(ctx, "[?] Overlay size", "20G")
 	if err != nil {
 		return "", err
 	}
@@ -583,12 +592,12 @@ func GuidedOverlayCreate(ctx context.Context, helperName string, meta helper.Hel
 	if err != nil {
 		return "", fmt.Errorf("invalid size %q: %w", sizeStr, err)
 	}
-	extraPkgs, err := promptDefault(ctx, "[?] Extra packages (space-separated, or Enter to skip)", "")
+	creationVars, err := promptCreationTokens(ctx, meta.ImgPackages, params, versions)
 	if err != nil {
 		return "", err
 	}
 
-	creationVars, err := promptCreationTokens(ctx, meta.ImgPackages, params, versions)
+	extraPkgs, err := promptDefault(ctx, "[?] Extra packages (space-separated, or Enter to skip)", "")
 	if err != nil {
 		return "", err
 	}
@@ -609,30 +618,70 @@ func GuidedOverlayCreate(ctx context.Context, helperName string, meta helper.Hel
 		return "", fmt.Errorf("creating overlay directory: %w", err)
 	}
 
-	utils.PrintMessage("Creating overlay...")
-	if err := helper.CreateOverlay(ctx, imgPath, sizeMB); err != nil {
-		return "", fmt.Errorf("creating overlay: %w", err)
+	opts := &overlay.CreateOptions{
+		Path:    imgPath,
+		SizeMB:  sizeMB,
+		Profile: overlay.ProfileSmall,
 	}
-
-	baseImage := config.GetBaseImage()
-	apptainerBin := config.Global.ApptainerBin
-	if apptainerBin == "" {
-		apptainerBin = "apptainer"
-	}
-
-	utils.PrintMessage("Installing packages: %s", strings.Join(allPkgs, " "))
-	if err := helper.InstallPackagesInOverlay(ctx, apptainerBin, baseImage, imgPath, allPkgs, os.Stdout); err != nil {
-		return "", fmt.Errorf("micromamba install failed: %w", err)
-	}
-
-	if meta.PostInstallCmd != "" {
-		utils.PrintMessage("Running post-install: %s", meta.PostInstallCmd)
-		if err := helper.RunPostInstall(ctx, apptainerBin, baseImage, imgPath, meta.PostInstallCmd, os.Stdout); err != nil {
-			return "", fmt.Errorf("post-install command failed: %w", err)
-		}
+	io := cntexec.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
+	utils.PrintMessage("Creating overlay and installing packages: %s", strings.Join(allPkgs, " "))
+	if err := cntexec.CreateCondaOverlay(ctx, opts, allPkgs, meta.PostInstallCmd, false, io); err != nil {
+		return "", fmt.Errorf("overlay creation failed: %w", err)
 	}
 
 	return imgPath, nil
+}
+
+// GuidedInstallMissing prompts the user to install packages that failed the
+// #IMG_PACKAGES: check. Prints the unsatisfied specs, asks Y/n, then runs
+// micromamba install inside the overlay if confirmed.
+func GuidedInstallMissing(ctx context.Context, e *helper.ErrMissingPackages) error {
+	utils.PrintWarning("conda packages not satisfied in %s:", e.EnvImg)
+	for _, m := range e.Messages {
+		fmt.Printf("  %s\n", m)
+	}
+
+	// For packages with unresolved version tokens, prompt the user to pick a version.
+	// Build pkgVersion (package name → chosen version) to inject into the install spec.
+	pkgVersion := make(map[string]string)
+	for pkg, vlist := range e.VersionChoices {
+		choices := utils.VersionChoicesDisplay(vlist)
+		utils.PrintMessage("Available %s: %s", pkg, strings.Join(choices, ", "))
+		label := strings.ToUpper(pkg[:1]) + pkg[1:] + " version"
+		val, err := promptDefault(ctx, "[?] "+label, utils.LatestVersion(vlist))
+		if err != nil {
+			return err
+		}
+		if val != "" {
+			matched := utils.MatchVersion(val, vlist)
+			if matched != val {
+				utils.PrintMessage("  → resolved to %s", matched)
+				val = matched
+			}
+			pkgVersion[pkg] = val
+		}
+	}
+
+	fmt.Print("[?] Install missing packages? [Y/n]: ")
+	line, err := utils.ReadLineContext(ctx)
+	if err != nil {
+		return err
+	}
+	if line != "" && strings.ToLower(strings.TrimSpace(line)) != "y" {
+		return fmt.Errorf("aborted — install missing packages manually, then retry")
+	}
+
+	// Build final install specs, injecting chosen versions where applicable.
+	specs := make([]string, len(e.Specs))
+	for i, spec := range e.Specs {
+		if ver, ok := pkgVersion[spec]; ok {
+			specs[i] = spec + "=" + ver
+		} else {
+			specs[i] = spec
+		}
+	}
+	utils.PrintMessage("Installing: %s", strings.Join(specs, " "))
+	return cntexec.InstallPackages(ctx, e.EnvImg, specs, false, cntexec.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr})
 }
 
 // MonitorHelper polls NFS state files until the job finishes or the user presses

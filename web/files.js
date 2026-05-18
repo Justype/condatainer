@@ -22,7 +22,7 @@ async function navigateFiles(path) {
   } catch(err) {
     if (err.name === 'AbortError') return;
     gid('file-tbody').innerHTML =
-      '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--danger);">Error loading path.</td></tr>';
+      '<tr><td colspan="3" class="td-error">Error loading path.</td></tr>';
   }
   renderFileTree();
 }
@@ -30,11 +30,13 @@ async function navigateFiles(path) {
 function renderFileBreadcrumb(path) {
   const parts = (path || '/').split('/').filter(Boolean);
   gid('bc').innerHTML =
-    '<span class="bc-seg" onclick="navigateFiles(\'/\')">/ </span>' +
+    '<span class="bc-seg" onclick="navigateFiles(\'/\')">/</span>' +
     parts.map((p, i) => {
       const full = '/' + parts.slice(0, i + 1).join('/');
-      return '<span class="bc-sep">/</span>' +
-        '<span class="bc-seg" onclick="navigateFiles(\'' + escHtml(full) + '\')">' + escHtml(p) + '</span>';
+      const isLast = i === parts.length - 1;
+      if (isLast) return '<span class="bc-cur">' + escHtml(p) + '</span>';
+      return '<span class="bc-seg" onclick="navigateFiles(\'' + escHtml(full) + '\')">' + escHtml(p) + '</span>' +
+        '<span class="bc-sep">/</span>';
     }).join('');
 }
 
@@ -42,25 +44,25 @@ function renderFileListing(entries, truncated) {
   const tbody = gid('file-tbody');
   const vis = showHiddenFiles ? entries : entries.filter(e => !e.name.startsWith('.'));
   if (!vis.length) {
-    tbody.innerHTML = '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--muted);">Empty directory</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="3" class="td-empty">Empty directory</td></tr>';
     return;
   }
   const truncRow = truncated
-    ? '<tr><td colspan="3" style="padding:6px 12px;text-align:center;color:var(--warn,#e6a817);font-size:12px;">' +
-      '⚠ Showing first 500 entries — use the path bar to navigate deeper.</td></tr>'
+    ? '<tr><td colspan="3" class="td-warn">' +
+      iconSvg('warning') + ' Showing first 500 entries — use the path bar to navigate deeper.</td></tr>'
     : '';
   tbody.innerHTML = truncRow + vis.map(e => {
     if (e.is_dir) {
-      return '<tr style="cursor:pointer;" onclick="navigateFiles(\'' + escHtml(e.path) + '\')">' +
+      return '<tr onclick="navigateFiles(\'' + escHtml(e.path) + '\')">' +
         '<td>' + iconSvg('folder') + ' ' + escHtml(e.name) + '</td>' +
-        '<td class="mono" style="color:var(--muted);">—</td>' +
-        '<td style="color:var(--muted);">' + (e.modified_at ? fmtDate(e.modified_at) : '—') + '</td>' +
+        '<td class="mono td-muted">—</td>' +
+        '<td class="td-muted">' + (e.modified_at ? fmtDate(e.modified_at) : '—') + '</td>' +
         '</tr>';
     }
     return '<tr>' +
       '<td>' + iconSvg('draft') + ' ' + escHtml(e.name) + '</td>' +
-      '<td class="mono" style="color:var(--muted);">' + fmtSize(e.size) + '</td>' +
-      '<td style="color:var(--muted);">' + (e.modified_at ? fmtDate(e.modified_at) : '—') + '</td>' +
+      '<td class="mono td-muted">' + fmtSize(e.size) + '</td>' +
+      '<td class="td-muted">' + (e.modified_at ? fmtDate(e.modified_at) : '—') + '</td>' +
       '</tr>';
   }).join('');
 }
@@ -99,9 +101,10 @@ function _parentDir(path) {
   return parent || '/';
 }
 
-function openFilePicker(targetId, mode, fallbackId) {
+function openFilePicker(targetId, mode, fallbackId, suffix) {
   fpTargetId = targetId;
   fpMode     = mode;
+  fpSuffix   = suffix || '';
   const targetPath   = gid(targetId)?.value || '';
   const fallbackPath = (fallbackId && gid(fallbackId)?.value) || '';
   fpPath = mode === 'file' && targetPath
@@ -117,11 +120,13 @@ function openFilePicker(targetId, mode, fallbackId) {
 function _renderFpBreadcrumb(path) {
   const parts = (path || '/').split('/').filter(Boolean);
   gid('fp-bc').innerHTML =
-    '<span class="bc-seg" onclick="fpNavigate(\'/\')">/ </span>' +
+    '<span class="bc-seg" onclick="fpNavigate(\'/\')">/</span>' +
     parts.map((p, i) => {
       const full = '/' + parts.slice(0, i + 1).join('/');
-      return '<span class="bc-sep">/</span>' +
-        '<span class="bc-seg" onclick="fpNavigate(\'' + escHtml(full) + '\')">' + escHtml(p) + '</span>';
+      const isLast = i === parts.length - 1;
+      if (isLast) return '<span class="bc-cur">' + escHtml(p) + '</span>';
+      return '<span class="bc-seg" onclick="fpNavigate(\'' + escHtml(full) + '\')">' + escHtml(p) + '</span>' +
+        '<span class="bc-sep">/</span>';
     }).join('');
 }
 
@@ -141,7 +146,7 @@ async function fpNavigate(path) {
     }
     _renderFpBreadcrumb(fpPath);
     const dirs  = entries.filter(e =>  e.is_dir && (showHiddenFiles || !e.name.startsWith('.')));
-    const files = fpMode !== 'dir' ? entries.filter(e => !e.is_dir && (showHiddenFiles || !e.name.startsWith('.'))) : [];
+    const files = fpMode !== 'dir' ? entries.filter(e => !e.is_dir && (showHiddenFiles || !e.name.startsWith('.')) && (!fpSuffix || e.name.endsWith(fpSuffix))) : [];
     gid('fp-body').innerHTML =
       dirs.map(d =>
         '<div class="modal-row" onclick="fpNavigate(\'' + escHtml(d.path) + '\')">' +
@@ -159,11 +164,11 @@ async function fpNavigate(path) {
             '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();fpSelectFile(\'' + escHtml(f.path) + '\')">Select</button>' +
           '</span></div>'
       ).join('') ||
-      '<div style="padding:20px;text-align:center;color:var(--muted);">Empty directory</div>';
+      '<div class="modal-empty">Empty directory</div>';
   } catch(err) {
     if (err.name === 'AbortError') return;
     gid('fp-body').innerHTML =
-      '<div style="padding:20px;text-align:center;color:var(--danger);">Error loading directory</div>';
+      '<div class="modal-error">Error loading directory</div>';
   }
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -38,13 +39,15 @@ type HelperRun struct {
 }
 
 // AccessURL returns the link the user should open.
-// ExternalURL takes priority; otherwise returns the server proxy URL.
+// ExternalURL takes priority; otherwise returns the subdomain proxy URL
+// (http://{id}.localhost:{port}/{urlPath}).
 func (r *HelperRun) AccessURL(serverPort int) string {
 	if r.ExternalURL != "" {
 		return r.ExternalURL
 	}
 	if serverPort > 0 && r.Port > 0 {
-		return fmt.Sprintf("http://localhost:%d/proxy/%s/%s", serverPort, r.ID, r.URLPath)
+		urlPath := strings.TrimPrefix(r.URLPath, "/")
+		return fmt.Sprintf("http://%s.localhost:%d/%s", r.ID, serverPort, urlPath)
 	}
 	return ""
 }

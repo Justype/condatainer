@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -254,106 +253,103 @@ func checkAndInstallNamedOverlays(ctx context.Context, names []string) ([]string
 	return paths, nil
 }
 
-// checkInstallPaths verifies that at least one of meta.CheckPaths exists before
-// job submission. Three modes, checked in priority order:
+// checkPackages verifies that every package declared in meta.ImgPackages is
+// installed in the conda environment inside envImg. {KEY} tokens in ImgPackages
+// are first substituted from params.
 //
-//   - Conda-env mode (meta.ImgPackages != "" and envImg != ""): mount writable
-//     overlay, check path inside it. Fatal if none found — packages should have
-//     been installed by guidedOverlayCreate.
-//   - Named-overlay mode (namedOverlayPaths non-empty): mount all named SquashFS
-//     overlays, check path inside them. Fatal if none found — the overlay was just
-//     built so a missing binary means a broken build.
-//   - Base-image mode (neither above): check base image only, non-fatal warning —
-//     user may have a custom image or the binary may be on PATH.
-func checkInstallPaths(ctx context.Context, meta HelperScriptMeta, envImg string, namedOverlayPaths []string, baseImage, apptainerBin string) error {
-	if len(meta.CheckPaths) == 0 {
+// Skipped (returns nil) when ImgPackages is empty or envImg is empty.
+// Uses overlay.ListCondaPackages (debugfs) — no container launch required.
+// Supports conda-style version constraints: =, ==, >=, <=, >, <, !=.
+func checkPackages(meta HelperScriptMeta, envImg string, params map[string]string) error {
+	if meta.ImgPackages == "" || envImg == "" {
 		return nil
 	}
 
-	condaEnvMode := meta.ImgPackages != "" && envImg != ""
-	namedMode := len(namedOverlayPaths) > 0
-
-	baseArgs := []string{"exec"}
-	switch {
-	case condaEnvMode:
-		baseArgs = append(baseArgs, "--overlay", envImg)
-	case namedMode:
-		for _, p := range namedOverlayPaths {
-			baseArgs = append(baseArgs, "--overlay", p)
-		}
-	}
-	baseArgs = append(baseArgs, baseImage)
-
-	for _, cp := range meta.CheckPaths {
-		args := append(baseArgs, "test", "-f", cp.Path) //nolint:gocritic
-		if exec.CommandContext(ctx, apptainerBin, args...).Run() == nil {
-			return nil // at least one path found
-		}
+	// Substitute {KEY} tokens with resolved param values.
+	resolved := meta.ImgPackages
+	for k, v := range params {
+		resolved = strings.ReplaceAll(resolved, "{"+k+"}", v)
 	}
 
-	// Build per-path detail lines for error messages.
-	var details []string
-	for _, cp := range meta.CheckPaths {
-		if cp.Message != "" {
-			details = append(details, fmt.Sprintf("  %s — %s", cp.Path, cp.Message))
-		} else {
-			details = append(details, fmt.Sprintf("  %s", cp.Path))
+	installed, err := overlay.ListCondaPackages(envImg)
+	if err != nil {
+		return fmt.Errorf("reading conda packages from %s: %w", envImg, err)
+	}
+	if installed == nil {
+		return fmt.Errorf("no conda environment found in %s — run guided overlay setup first", envImg)
+	}
+
+	var badSpecs, badMsgs []string
+	var versionChoices map[string][]string
+	for _, spec := range strings.Fields(resolved) {
+		name, op, ver := splitPkgConstraint(spec)
+		// If the version value still contains an unresolved {TOKEN}, skip the version
+		// check and treat it as a name-only requirement. If the token has a known #VALUE:
+		// list, record it so the UI can prompt the user to pick a concrete version.
+		if strings.Contains(ver, "{") {
+			if strings.HasPrefix(ver, "{") && strings.HasSuffix(ver, "}") {
+				tokenName := ver[1 : len(ver)-1]
+				if vlist := meta.ParamValues[tokenName]; len(vlist) > 0 {
+					if versionChoices == nil {
+						versionChoices = make(map[string][]string)
+					}
+					versionChoices[name] = vlist
+				}
+			}
+			op, ver = "", ""
+			spec = name
+		}
+		instVer, ok := installed[name]
+		if !ok {
+			badSpecs = append(badSpecs, spec)
+			badMsgs = append(badMsgs, name+" (not installed)")
+			continue
+		}
+		if op != "" && !checkPkgConstraint(instVer, op, ver) {
+			badSpecs = append(badSpecs, spec)
+			badMsgs = append(badMsgs, fmt.Sprintf("%s (installed: %s, need: %s%s)", name, instVer, op, ver))
 		}
 	}
-	detailStr := strings.Join(details, "\n")
-
-	switch {
-	case condaEnvMode:
-		return fmt.Errorf(
-			"required paths not found in %s:\n%s\n"+
-				"  Install with: condatainer e -e %s -- micromamba install -y %s\n"+
-				"  Or recreate:  condatainer helper %s --new",
-			envImg, detailStr, envImg,
-			strings.Join(strings.Fields(meta.ImgPackages), " "),
-			meta.ImgPackages)
-	case namedMode:
-		return fmt.Errorf(
-			"required paths not found in named overlays %v:\n%s\n"+
-				"  The overlay may be stale — rebuild with: condatainer create %s",
-			namedOverlayPaths, detailStr,
-			meta.RequiredOverlays)
-	default:
-		// Non-fatal: user may have a custom base image or binary in PATH.
-		logging.FromContext(ctx).Warn("base image check: required paths not found — job may fail if software is missing", "paths", detailStr)
+	if len(badSpecs) == 0 {
 		return nil
 	}
+	return &ErrMissingPackages{EnvImg: envImg, Specs: badSpecs, Messages: badMsgs, VersionChoices: versionChoices}
 }
 
-// CreateOverlay creates a new writable ext3 overlay image at imgPath with the given size in MB.
-// This is exported for use by the server API handler.
-func CreateOverlay(ctx context.Context, imgPath string, sizeMB int) error {
-	return overlay.CreateWithOptions(ctx, &overlay.CreateOptions{
-		Path:    imgPath,
-		SizeMB:  sizeMB,
-		Profile: overlay.ProfileSmall,
-	})
+// splitPkgConstraint splits a conda package spec (e.g. "python>=3.12", "jupyterlab=4.2.1")
+// into (name, op, version). Single "=" is treated as exact match "==".
+// Returns (spec, "", "") when no operator is found.
+func splitPkgConstraint(spec string) (name, op, ver string) {
+	for _, sep := range []string{">=", "<=", "!=", "==", ">", "<"} {
+		if idx := strings.Index(spec, sep); idx >= 0 {
+			return spec[:idx], sep, spec[idx+len(sep):]
+		}
+	}
+	// conda single "=" means exact version
+	if idx := strings.Index(spec, "="); idx >= 0 {
+		return spec[:idx], "==", spec[idx+1:]
+	}
+	return spec, "", ""
 }
 
-// InstallPackagesInOverlay runs micromamba install inside an overlay image, streaming output to w.
-func InstallPackagesInOverlay(ctx context.Context, apptainerBin, baseImage, imgPath string, pkgs []string, w io.Writer) error {
-	cmd := exec.CommandContext(ctx, apptainerBin, "exec",
-		"--overlay", imgPath+":rw",
-		baseImage,
-		"bash", "-c", "micromamba install -y -n base "+strings.Join(pkgs, " "))
-	cmd.Stdout = w
-	cmd.Stderr = w
-	return cmd.Run()
-}
-
-// RunPostInstall runs a post-install command inside an overlay image, streaming output to w.
-func RunPostInstall(ctx context.Context, apptainerBin, baseImage, imgPath, postCmd string, w io.Writer) error {
-	cmd := exec.CommandContext(ctx, apptainerBin, "exec",
-		"--overlay", imgPath+":rw",
-		baseImage,
-		"bash", "-c", postCmd)
-	cmd.Stdout = w
-	cmd.Stderr = w
-	return cmd.Run()
+// checkPkgConstraint reports whether installedVer satisfies op+requiredVer.
+func checkPkgConstraint(installedVer, op, requiredVer string) bool {
+	cmp := utils.CompareVersions(installedVer, requiredVer)
+	switch op {
+	case ">=":
+		return cmp >= 0
+	case ">":
+		return cmp > 0
+	case "<=":
+		return cmp <= 0
+	case "<":
+		return cmp < 0
+	case "==":
+		return cmp == 0
+	case "!=":
+		return cmp != 0
+	}
+	return true
 }
 
 // buildHelperCommandBody constructs the bash body embedded by CreateScriptWithSpec
@@ -688,4 +684,3 @@ func HistoryEntryForID(id string) *HelperRun {
 	}
 	return nil
 }
-

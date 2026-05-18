@@ -16,6 +16,7 @@ import (
 // proxyEntry holds a live reverse-proxy for one helper run.
 type proxyEntry struct {
 	rp   *httputil.ReverseProxy
+	name string // helper script name (e.g. "code-server")
 	node string
 	port int
 }
@@ -55,7 +56,7 @@ func isLocalHost(node string) bool {
 // The SSH dial happens outside the registry lock so HTTP Get() calls are never
 // blocked by a slow or failing dial. Concurrent Open() calls for the same ID
 // are deduplicated via the pending set.
-func (r *proxyRegistry) Open(id, node string, port int) {
+func (r *proxyRegistry) Open(id, name, node string, port int) {
 	r.mu.Lock()
 	if _, ok := r.entries[id]; ok {
 		r.mu.Unlock()
@@ -72,10 +73,11 @@ func (r *proxyRegistry) Open(id, node string, port int) {
 	if isLocalHost(node) {
 		target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
 		rp := httputil.NewSingleHostReverseProxy(target)
+		rp.Director = hostRewriteDirector(target)
 		r.mu.Lock()
 		delete(r.pending, id)
 		if _, ok := r.entries[id]; !ok {
-			r.entries[id] = &proxyEntry{rp: rp, node: node, port: port}
+			r.entries[id] = &proxyEntry{rp: rp, name: name, node: node, port: port}
 			delete(r.lastErrors, id)
 			r.log.Debug("server: proxy direct TCP", "id", id, "port", port)
 		}
@@ -125,9 +127,10 @@ func (r *proxyRegistry) Open(id, node string, port int) {
 		stop()
 	}()
 	rp := httputil.NewSingleHostReverseProxy(target)
+	rp.Director = hostRewriteDirector(target)
 	rp.Transport = transport
 
-	r.entries[id] = &proxyEntry{rp: rp, node: node, port: port}
+	r.entries[id] = &proxyEntry{rp: rp, name: name, node: node, port: port}
 	delete(r.lastErrors, id)
 	r.log.Debug("server: proxy tunnel opened", "id", id, "node", node, "port", port)
 }
@@ -148,6 +151,26 @@ func (r *proxyRegistry) Get(id string) *proxyEntry {
 	return r.entries[id]
 }
 
+// GetByName returns the oldest active proxy entry whose helper name matches,
+// or nil if none is open. Used for stable-name subdomain routing
+// (e.g. code-server.localhost → oldest running code-server instance).
+// IDs have the form "{name}-YYYYMMDD-HHMMSS", so the lexicographically smallest
+// ID is the oldest one; this ensures the name URL stays stable when a newer
+// instance starts alongside an existing one.
+func (r *proxyRegistry) GetByName(name string) *proxyEntry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var oldestID string
+	var oldest *proxyEntry
+	for id, entry := range r.entries {
+		if entry.name == name && (oldestID == "" || id < oldestID) {
+			oldestID = id
+			oldest = entry
+		}
+	}
+	return oldest
+}
+
 // LastError returns the most recent Open() failure reason for a helper, or "".
 func (r *proxyRegistry) LastError(id string) string {
 	r.mu.RLock()
@@ -155,17 +178,16 @@ func (r *proxyRegistry) LastError(id string) string {
 	return r.lastErrors[id]
 }
 
-// ServeProxy handles /proxy/{id}/{path...} by forwarding to the helper's tunnel.
-func (s *srv) ServeProxy(w http.ResponseWriter, r *http.Request) {
-	// Path: /proxy/{id}/{rest...}
-	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/proxy/"), "/", 2)
-	if len(parts) == 0 || parts[0] == "" {
-		http.Error(w, "missing helper ID", http.StatusBadRequest)
-		return
-	}
-	id := parts[0]
-
+// serveSubdomainProxy handles requests to {id}.localhost:{port} by forwarding
+// to the helper's tunnel. The full request path is forwarded as-is — no URL
+// rewriting needed since the service is at the root of its own subdomain.
+// Lookup order: exact ID match first, then first active instance by name
+// (e.g. "code-server.localhost" → first running code-server).
+func (s *srv) serveSubdomainProxy(w http.ResponseWriter, r *http.Request, id string) {
 	entry := s.proxies.Get(id)
+	if entry == nil {
+		entry = s.proxies.GetByName(id)
+	}
 	if entry == nil {
 		msg := "no active tunnel for " + id
 		if reason := s.proxies.LastError(id); reason != "" {
@@ -174,17 +196,45 @@ func (s *srv) ServeProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, http.StatusServiceUnavailable)
 		return
 	}
+	entry.rp.ServeHTTP(w, r)
+}
 
-	// Rewrite the request path to strip the /proxy/{id} prefix.
-	rest := "/"
-	if len(parts) > 1 {
-		rest = "/" + parts[1]
+// hostRewriteDirector returns a director func that rewrites req.Host and the
+// Origin header to the backend address. This prevents host-header and
+// WebSocket origin checks in apps like JupyterLab and code-server (which
+// reject requests whose Host/Origin doesn't match their bound address) from
+// blocking proxied requests that arrive with a subdomain Host header.
+func hostRewriteDirector(target *url.URL) func(*http.Request) {
+	std := httputil.NewSingleHostReverseProxy(target).Director
+	origin := "http://" + target.Host
+	return func(req *http.Request) {
+		std(req)
+		req.Host = target.Host
+		if req.Header.Get("Origin") != "" {
+			req.Header.Set("Origin", origin)
+		}
 	}
-	r2 := r.Clone(r.Context())
-	r2.URL.Path = rest
-	r2.URL.RawPath = rest
-	if r.URL.RawQuery != "" {
-		r2.URL.RawQuery = r.URL.RawQuery
-	}
-	entry.rp.ServeHTTP(w, r2)
+}
+
+// hostDispatch wraps the dashboard mux with subdomain-based proxy routing.
+// Requests to {id}.localhost:{port} are forwarded to the matching helper tunnel;
+// all other requests (localhost:{port}) are handled by the dashboard mux.
+func (s *srv) hostDispatch(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		// Strip port suffix.
+		if i := strings.LastIndex(host, ":"); i >= 0 {
+			host = host[:i]
+		}
+		// {id}.localhost → proxy to helper.
+		const suffix = ".localhost"
+		if strings.HasSuffix(host, suffix) {
+			id := host[:len(host)-len(suffix)]
+			if id != "" {
+				s.serveSubdomainProxy(w, r, id)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }

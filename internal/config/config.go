@@ -87,7 +87,6 @@ type Config struct {
 	// submitted jobs when no shared proxy is active and CNT_PROXY_VIA is set.
 	ProxyPerJob bool
 
-
 	// Build configuration
 	Build BuildConfig
 }

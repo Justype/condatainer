@@ -15,7 +15,7 @@ function renderHistory(filter) {
     : allHistory;
   const tbody = gid('hist-tbody');
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--muted);">' +
+    tbody.innerHTML = '<tr><td colspan="7" class="td-empty">' +
       (q ? 'No matches.' : 'No history yet.') + '</td></tr>';
     return;
   }
@@ -24,14 +24,16 @@ function renderHistory(filter) {
     const id  = escHtml(h.id);
     return (
       '<tr data-id="' + id + '" onclick="openDetail(\'' + id + '\')">' +
-        '<td style="font-weight:600;">' + escHtml(h.label || h.name) + '</td>' +
-        '<td><span class="badge ' + badgeClass(h.status) + '">' + escHtml(h.status) + '</span></td>' +
-        '<td class="mono" style="color:var(--muted);">' + escHtml(h.node || '—') + '</td>' +
-        '<td class="mono path-cell" style="color:var(--muted);">' + pathTailHtml(h.cwd) + '</td>' +
-        '<td style="color:var(--muted);">' + (h.started_at ? fmtRelTime(h.started_at) : '—') + '</td>' +
-        '<td style="color:var(--muted);">' + dur + '</td>' +
-        '<td style="white-space:nowrap;">' +
-          '<button class="btn btn-sm" onclick="rerunHistoryJob(event,\'' + id + '\')">' + iconSvg('refresh') + 'Rerun</button>' +
+        '<td class="td-name">' + escHtml(h.label || h.name) + '</td>' +
+        '<td class="td-fit"><span class="badge ' + badgeClass(h.status) + '">' + escHtml(h.status) + '</span></td>' +
+        '<td class="mono td-muted td-node" title="' + escHtml(h.node || '') + '">' + escHtml(h.node || '—') + '</td>' +
+        '<td class="mono path-cell td-muted">' + pathTailHtml(h.cwd) + '</td>' +
+        '<td class="td-muted td-fit">' + (h.started_at ? fmtRelTime(h.started_at) : '—') + '</td>' +
+        '<td class="td-muted td-fit">' + dur + '</td>' +
+        '<td class="td-nowrap td-fit">' +
+          (isActiveHistoryStatus(h.status)
+            ? '<button class="btn btn-sm" disabled title="Job is still active">' + iconSvg('replay') + '</button>'
+            : '<button class="btn btn-sm" onclick="rerunHistoryJob(event,\'' + id + '\')" title="Rerun">' + iconSvg('replay') + '</button>') +
           ' ' + (isActiveHistoryStatus(h.status)
             ? '<button class="btn btn-sm btn-danger" disabled title="Stop the job before removing it">' + iconSvg('delete') + '</button>'
             : '<button class="btn btn-sm btn-danger" onclick="removeHistoryEntry(event,\'' + id + '\',this)" title="Remove entry">' + iconSvg('delete') + '</button>') +

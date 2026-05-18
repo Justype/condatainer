@@ -21,26 +21,17 @@ type HelperParam struct {
 	Desc      string `json:"desc,omitempty"`
 }
 
-// CheckPath is one entry from a #CHECK_PATH: header: an absolute container path
-// and an optional message shown when that path is not found.
-type CheckPath struct {
-	Path    string
-	Message string // empty → generic error message
-}
-
 // HelperScriptMeta holds overlay and singleton metadata extracted from a helper script.
 type HelperScriptMeta struct {
-	// ImgPackages is a template of conda packages for guided overlay creation.
-	// {KEY} tokens are substituted from #VALUE: choices at creation time.
+	// ImgPackages is a template of conda packages for guided overlay creation and
+	// pre-submission package verification. {KEY} tokens are substituted from
+	// resolved #PARAM: values before use.
 	ImgPackages string
 	// RequiredOverlays is a space-separated template of named condatainer overlays
 	// (SquashFS images) to load before the helper runs. {KEY} tokens are substituted
 	// from resolved #PARAM: values (e.g. "rstudio-server build-essential r{POSIT_R}").
 	// Parsed from #REQUIRED_OVERLAYS: (alias: legacy #OVERLAY_PACKAGES:).
 	RequiredOverlays string
-	// CheckPaths is a list of paths to verify before job submission; at least one must exist.
-	// Each entry carries an optional message shown when that path is missing.
-	CheckPaths []CheckPath
 	// PostInstallCmd is run inside the container after micromamba installs ImgPackages.
 	PostInstallCmd string
 	// Singleton is true when at most one running instance of this helper is allowed.
@@ -204,7 +195,7 @@ func extractQuotedSuffix(s string) (string, string, error) {
 
 // ParseHelperScriptMeta extracts metadata from a helper script.
 // Recognised headers: #NCPUS:, #MEM:, #TIME:, #GPU:, #IMG_PACKAGES:, #REQUIRED_OVERLAYS:,
-// #OVERLAY_PACKAGES: (legacy), #CHECK_PATH:, #POST_INSTALL_CMD:, #SINGLETON:, #VALUE:.
+// #OVERLAY_PACKAGES: (legacy), #POST_INSTALL_CMD:, #SINGLETON:, #BIND:, #VALUE:.
 func ParseHelperScriptMeta(scriptPath string) (HelperScriptMeta, error) {
 	if !utils.FileExists(scriptPath) {
 		return HelperScriptMeta{}, fmt.Errorf("helper script not found at %s", scriptPath)
@@ -241,20 +232,6 @@ func ParseHelperScriptMeta(scriptPath string) (HelperScriptMeta, error) {
 			// #OVERLAY_PACKAGES: is a legacy alias
 			idx := strings.Index(line, ":") + 1
 			meta.RequiredOverlays = strings.TrimSpace(line[idx:])
-		case strings.HasPrefix(line, "#CHECK_PATH:"):
-			rest := strings.TrimSpace(line[len("#CHECK_PATH:"):])
-			// Try to extract a trailing quoted message, e.g.: /path "install hint"
-			if msg, pathPart, err := extractQuotedSuffix(rest); err == nil {
-				// Single path + message
-				if p := strings.TrimSpace(pathPart); p != "" {
-					meta.CheckPaths = append(meta.CheckPaths, CheckPath{Path: p, Message: msg})
-				}
-			} else {
-				// No quotes: space-separated paths, no message (legacy / plain form)
-				for _, p := range strings.Fields(rest) {
-					meta.CheckPaths = append(meta.CheckPaths, CheckPath{Path: p})
-				}
-			}
 		case strings.HasPrefix(line, "#BIND:"):
 			if b := strings.TrimSpace(line[len("#BIND:"):]); b != "" {
 				meta.Binds = append(meta.Binds, b)

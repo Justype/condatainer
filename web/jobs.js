@@ -11,7 +11,7 @@ function renderJobs() {
   const wrap = gid('job-list-wrap');
   if (!allJobs.length) {
     wrap.innerHTML = '<div class="empty"><div>No running jobs.</div>' +
-      '<div style="margin-top:4px;font-size:12px;"><a href="#" onclick="navigate(\'start\');return false;">Start a helper →</a></div></div>';
+      '<div class="empty-link"><a href="#" onclick="navigate(\'start\');return false;">Start a helper →</a></div></div>';
     return;
   }
   wrap.innerHTML = '<div class="job-list">' + allJobs.map(jobCardHTML).join('') + '</div>';
@@ -36,7 +36,7 @@ function jobCardHTML(j) {
       '</div>' +
       '<div class="jc-meta">' +
         '<span>' + escHtml(j.node || '—') + '</span><span class="jc-sep">|</span>' +
-        pathTailHtml(j.cwd, '200px') +
+        pathTailHtml(j.cwd) +
         (overlay
           ? '<span class="jc-sep">|</span>' + pathTailHtml(overlay, '200px')
           : '') +
@@ -123,7 +123,7 @@ function openDetail(id) {
   if (job.node)    meta += '<span class="d-key">Node</span><span class="d-val">'   + escHtml(job.node)   + '</span>';
   if (job.job_id)  meta += '<span class="d-key">Job ID</span><span class="d-val">' + escHtml(job.job_id) + '</span>';
   if (job.overlays && job.overlays.length) {
-    meta += '<span class="d-key">Modules</span><span class="d-val" style="display:flex;flex-direction:column;gap:2px;">' +
+    meta += '<span class="d-key">Modules</span><span class="d-val-col">' +
       job.overlays.map(p => {
         const o = allOverlays.find(ov => ov.path === p || ov.name === p);
         return o
@@ -155,6 +155,7 @@ function openDetail(id) {
   } else { dp.style.display = 'none'; }
 
   gid('d-stop').style.display = isRunning ? '' : 'none';
+  gid('d-rerun').disabled = isRunning;
   gid('d-log-link').href = '/api/helpers/' + encodeURIComponent(id) + '/joblog';
 
   switchDetailTab(detailTabActive);
@@ -181,7 +182,7 @@ function switchDetailTab(tab) {
         div.className = 'log-line log-' + lvl;
         if (m.ts) {
           const ts = document.createElement('span');
-          ts.style.cssText = 'color:var(--muted);margin-right:8px;';
+          ts.className = 'log-ts';
           try { ts.textContent = new Date(m.ts).toLocaleTimeString(); } catch {}
           div.appendChild(ts);
         }
@@ -205,7 +206,7 @@ function switchDetailTab(tab) {
     };
   } else {
     // Job log tab — request last 1000 lines to avoid freezing on large logs
-    content.innerHTML = '<div style="color:var(--muted);">Loading log…</div>';
+    content.innerHTML = '<div class="state-muted">Loading log…</div>';
     fetch('/api/helpers/' + encodeURIComponent(detailJobId) + '/joblog?tail=1000')
       .then(r => {
         const truncated = r.headers.get('X-Log-Truncated') === 'true';
@@ -216,17 +217,17 @@ function switchDetailTab(tab) {
         if (truncated) {
           const notice = document.createElement('div');
           notice.className = 'log-line log-dim';
-          notice.style.cssText = 'padding-top:4px;padding-bottom:4px;';
+          notice.classList.add('log-notice');
           notice.textContent = '— showing last 1000 lines (use Full log ↗ for complete output) —';
           content.appendChild(notice);
         }
         const pre = document.createElement('pre');
-        pre.style.cssText = 'margin:0;padding:4px 0;color:var(--text);white-space:pre-wrap;word-break:break-all;font-size:12px;';
+        pre.className = 'log-pre';
         pre.textContent = text || '(empty log)';
         content.appendChild(pre);
         content.scrollTop = content.scrollHeight;
       })
-      .catch(() => { content.innerHTML = '<div style="color:var(--danger);">Failed to load log.</div>'; });
+      .catch(() => { content.innerHTML = '<div class="state-danger">Failed to load log.</div>'; });
   }
 }
 

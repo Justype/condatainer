@@ -824,7 +824,7 @@ func LatestVersion(versions []string) string {
 
 // VersionChoicesDisplay formats a newest-first full-patch list into grouped minor
 // version summary strings: ["3.13.2","3.12.10","3.11.12"] →
-// ["3.13 (3.13.2)", "3.12 (3.12.10)", "3.11 (3.11.12)"].
+// ["3.13(.2)", "3.12(.10)", "3.11(.12)"].
 func VersionChoicesDisplay(versions []string) []string {
 	seen := map[string]bool{}
 	var result []string
@@ -836,7 +836,11 @@ func VersionChoicesDisplay(versions []string) []string {
 		minor := parts[0] + "." + parts[1]
 		if !seen[minor] {
 			seen[minor] = true
-			result = append(result, fmt.Sprintf("%s (%s)", minor, v))
+			if len(parts) == 3 {
+				result = append(result, fmt.Sprintf("%s(.%s)", minor, parts[2]))
+			} else {
+				result = append(result, minor)
+			}
 		}
 	}
 	return result

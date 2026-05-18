@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -96,6 +97,7 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 			FilesystemType: "ext3",
 		}
 
+		condaIO := exec.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 		if noTmp {
 			// 4a. Create directly at target path (no tmp), then conda init there.
 			if err := overlay.CreateDirectly(cmd.Context(), opts); err != nil {
@@ -105,7 +107,7 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 				}
 				ExitWithError("%v", err)
 			}
-			if err := initializeOverlayWithConda(cmd.Context(), path, envFile, packages, fakeroot); err != nil {
+			if err := initCondaInOverlay(cmd.Context(), path, envFile, packages, fakeroot, condaIO); err != nil {
 				os.Remove(path)
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 					utils.PrintWarning("Overlay initialization cancelled.")
@@ -124,7 +126,7 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 				ExitWithError("%v", err)
 			}
 
-			if err := initializeOverlayWithConda(cmd.Context(), tmpPath, envFile, packages, fakeroot); err != nil {
+			if err := initCondaInOverlay(cmd.Context(), tmpPath, envFile, packages, fakeroot, condaIO); err != nil {
 				os.Remove(tmpPath)
 				utils.RemoveDirIfEmpty(filepath.Dir(tmpPath))
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/server"
@@ -196,13 +197,66 @@ var serverStatusCmd = &cobra.Command{
 	},
 }
 
+var serverRestartPort int
+
+var serverRestartCmd = &cobra.Command{
+	Use:   "restart",
+	Short: "Restart the dashboard server (stop + start)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
+
+		pidFile := config.GetServerPidFilePath()
+		ss, err := server.ReadState(pidFile)
+
+		// Determine target port: flag > saved state > saved config > free port.
+		port := serverRestartPort
+		if port != 0 {
+			if err := config.SaveServerPort(port); err != nil {
+				utils.PrintDebug("saving server port: %v", err)
+			}
+		} else if ss != nil {
+			port = ss.Port
+		} else {
+			port = config.ReadSavedServerPort()
+		}
+
+		if err != nil || ss == nil {
+			utils.PrintMessage("Server is not running, starting fresh.")
+			return startServerDaemon(port, serverStartDaemon)
+		}
+
+		p, err := os.FindProcess(ss.PID)
+		if err != nil {
+			utils.PrintMessage("Server process not found, starting fresh.")
+			return startServerDaemon(port, serverStartDaemon)
+		}
+		if err := p.Signal(syscall.SIGTERM); err != nil {
+			return fmt.Errorf("sending SIGTERM to PID %d: %w", ss.PID, err)
+		}
+		utils.PrintMessage("Stopping server (PID %d)…", ss.PID)
+
+		// Wait for the process to exit (up to 10s).
+		for range 50 {
+			time.Sleep(200 * time.Millisecond)
+			if p.Signal(syscall.Signal(0)) != nil {
+				break
+			}
+		}
+
+		utils.PrintMessage("Starting server on port %d…", port)
+		return startServerDaemon(port, serverStartDaemon)
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(serverCmd)
-	serverCmd.AddCommand(serverStartCmd, serverStopCmd, serverStatusCmd)
+	serverCmd.AddCommand(serverStartCmd, serverStopCmd, serverStatusCmd, serverRestartCmd)
 
 	serverStartCmd.Flags().IntVarP(&serverStartPort, "port", "p", 0, "Port to listen on (saved to config for reuse)")
 	serverStartCmd.Flags().BoolVar(&serverStartDaemon, "daemon", false, "Survive SSH logout (useful with a permanent SSH LocalForward)")
 	serverStopCmd.Flags().StringVarP(&serverStopNodeFlag, "node", "n", "", "Login node to stop (partial match, e.g. l5)")
+	serverRestartCmd.Flags().IntVarP(&serverRestartPort, "port", "p", 0, "Restart on a different port (saved to config for reuse)")
+	serverRestartCmd.Flags().BoolVar(&serverStartDaemon, "daemon", false, "Survive SSH logout")
 }
 
 // startServerDaemon forks the server using the pipe-readiness protocol.
@@ -268,7 +322,7 @@ func startServerDaemon(port int, daemon bool) error {
 		return fmt.Errorf("%s", strings.TrimSpace(string(msg)))
 	}
 
-	utils.PrintSuccess("Severt Dashboard started: http://localhost:%d/", port)
+	utils.PrintSuccess("Sever Dashboard started: http://localhost:%d/", port)
 	if logPath != "" {
 		utils.PrintMessage("Log: %s", logPath)
 	}

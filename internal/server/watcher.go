@@ -34,6 +34,7 @@ const tunnelReopenInterval = 30 * time.Second
 // Avoids re-reading history.jsonl on every tick.
 type helperInfo struct {
 	jobID     string
+	name      string // helper script name (e.g. "code-server")
 	status    string
 	startedAt time.Time
 	walltime  time.Duration
@@ -96,6 +97,7 @@ func (w *watcher) prePopulateDone() {
 		} else {
 			w.info[r.ID] = helperInfo{
 				jobID:     r.JobID,
+				name:      r.Name,
 				status:    r.Status,
 				startedAt: r.StartedAt,
 				walltime:  r.Walltime,
@@ -202,6 +204,7 @@ func (w *watcher) pollHelper(id string) {
 		if run := helper.HistoryEntryForID(id); run != nil {
 			w.info[id] = helperInfo{
 				jobID:     run.JobID,
+				name:      run.Name,
 				status:    run.Status,
 				startedAt: run.StartedAt,
 				walltime:  run.Walltime,
@@ -243,7 +246,7 @@ func (w *watcher) pollHelper(id string) {
 	if inf, ok := w.info[id]; ok && inf.status == "running" && inf.port > 0 && w.s.proxies.Get(id) == nil {
 		if last, seen := w.lastOpenAttempt[id]; !seen || time.Since(last) >= tunnelReopenInterval {
 			w.lastOpenAttempt[id] = time.Now()
-			go w.s.proxies.Open(id, inf.node, inf.port)
+			go w.s.proxies.Open(id, inf.name, inf.node, inf.port)
 		}
 	}
 
@@ -251,12 +254,13 @@ func (w *watcher) pollHelper(id string) {
 		rs := r.Ready
 		walltime := time.Duration(rs.WalltimeSec) * time.Second
 		if rs.Port > 0 && w.s.proxies.Get(id) == nil {
-			w.s.proxies.Open(id, rs.Node, rs.Port)
+			w.s.proxies.Open(id, w.info[id].name, rs.Node, rs.Port)
 		}
 		// Update cached info with actual start time, walltime, and service address from the ready event.
 		if inf, ok := w.info[id]; ok {
 			w.info[id] = helperInfo{
 				jobID:     inf.jobID,
+				name:      inf.name,
 				status:    "running",
 				startedAt: rs.Timestamp,
 				walltime:  walltime,
@@ -310,7 +314,7 @@ func (w *watcher) syncSchedulerStatus(id string) bool {
 	switch status {
 	case scheduler.JobStatusRunning:
 		if inf.status == "pending" {
-			w.info[id] = helperInfo{jobID: inf.jobID, status: "starting", startedAt: inf.startedAt, walltime: inf.walltime}
+			w.info[id] = helperInfo{jobID: inf.jobID, name: inf.name, status: "starting", startedAt: inf.startedAt, walltime: inf.walltime}
 			_ = helper.UpdateHistoryRun(id, func(run *helper.HelperRun) {
 				run.Status = "starting"
 			})
@@ -369,7 +373,7 @@ func (w *watcher) restoreExisting() {
 		if err != nil || rs == nil || rs.Port == 0 {
 			continue
 		}
-		w.s.proxies.Open(r.ID, rs.Node, rs.Port)
+		w.s.proxies.Open(r.ID, r.Name, rs.Node, rs.Port)
 		logging.FromContext(w.s.ctx).Debug("server: restored tunnel", "id", r.ID, "node", rs.Node, "port", rs.Port)
 	}
 }

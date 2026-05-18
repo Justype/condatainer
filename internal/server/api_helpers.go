@@ -14,7 +14,9 @@ import (
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
+	cntexec "github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/helper"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -27,7 +29,6 @@ func (s *srv) handleHelpersAvailable(w http.ResponseWriter, r *http.Request) {
 		ImgPackages      string               `json:"img_packages,omitempty"`
 		PostInstallCmd   string               `json:"post_install_cmd,omitempty"`
 		RequiredOverlays string               `json:"required_overlays,omitempty"`
-		CheckPaths       []helper.CheckPath   `json:"check_paths,omitempty"`
 		Singleton        bool                 `json:"singleton,omitempty"`
 		Params           []helper.HelperParam `json:"params,omitempty"`
 		ParamValues      map[string][]string  `json:"param_values,omitempty"`
@@ -68,9 +69,6 @@ func (s *srv) handleHelpersAvailable(w http.ResponseWriter, r *http.Request) {
 				}
 				if meta.RequiredOverlays != "" {
 					ent.RequiredOverlays = meta.RequiredOverlays
-				}
-				if len(meta.CheckPaths) > 0 {
-					ent.CheckPaths = meta.CheckPaths
 				}
 				scripts = append(scripts, ent)
 			}
@@ -251,8 +249,14 @@ func (s *srv) handleHelperResources(w http.ResponseWriter, r *http.Request, name
 }
 
 // handleHelperOverlay serves GET /api/helpers/{name}/find-env
+// cwd is required; if empty, returns no path rather than falling back to the
+// server's working directory, which is unrelated to the user's job directory.
 func (s *srv) handleHelperOverlay(w http.ResponseWriter, r *http.Request, name string) {
-	path := helper.ResolveEnvOverlayInDir("", r.URL.Query().Get("cwd"))
+	cwd := r.URL.Query().Get("cwd")
+	var path string
+	if cwd != "" {
+		path = helper.ResolveEnvOverlayInDir("", cwd)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"path": path}) //nolint:errcheck
 }
@@ -358,6 +362,7 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 		ExtraPackages string `json:"extra_packages"`
 		BaseImage     string `json:"base_image"`
 		PostInstall   string `json:"post_install_cmd"`
+		CWD           string `json:"cwd"`
 	}
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -371,21 +376,16 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 
 	imgPath := req.Name
 	if !filepath.IsAbs(imgPath) {
-		dir, err := config.GetWritableImagesDir()
-		if err != nil {
-			http.Error(w, "cannot determine images dir: "+err.Error(), http.StatusInternalServerError)
-			return
+		cwd := req.CWD
+		if cwd == "" {
+			cwd, _ = os.Getwd()
 		}
-		if filepath.Ext(imgPath) == "" {
-			imgPath = filepath.Join(dir, imgPath, "env.img")
-		} else {
-			imgPath = filepath.Join(dir, imgPath)
-		}
+		imgPath = filepath.Join(cwd, imgPath)
 	}
 
 	sizeStr := req.Size
 	if sizeStr == "" {
-		sizeStr = "8G"
+		sizeStr = "20G"
 	}
 	sizeMB, err := utils.ParseSizeToMB(sizeStr)
 	if err != nil {
@@ -400,15 +400,6 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 	if len(allPkgs) == 0 {
 		http.Error(w, "no packages specified", http.StatusBadRequest)
 		return
-	}
-
-	baseImage := req.BaseImage
-	if baseImage == "" {
-		baseImage = config.GetBaseImage()
-	}
-	apptainerBin := config.Global.ApptainerBin
-	if apptainerBin == "" {
-		apptainerBin = "apptainer"
 	}
 
 	// Create the background task and return its ID immediately.
@@ -428,23 +419,16 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 			broadcastDone(broker, fmt.Errorf("mkdir: %w", err))
 			return
 		}
-		if err := helper.CreateOverlay(ctx, imgPath, sizeMB); err != nil {
+		opts := &overlay.CreateOptions{
+			Path:    imgPath,
+			SizeMB:  sizeMB,
+			Profile: overlay.ProfileSmall,
+		}
+		io := cntexec.IO{Stdout: bw, Stderr: bw}
+		fmt.Fprintf(bw, "Installing packages: %s\n", strings.Join(allPkgs, " "))
+		if err := cntexec.CreateCondaOverlay(ctx, opts, allPkgs, req.PostInstall, false, io); err != nil {
 			broadcastDone(broker, fmt.Errorf("create overlay: %w", err))
 			return
-		}
-
-		fmt.Fprintf(bw, "Installing packages: %s\n", strings.Join(allPkgs, " "))
-		if err := helper.InstallPackagesInOverlay(ctx, apptainerBin, baseImage, imgPath, allPkgs, bw); err != nil {
-			broadcastDone(broker, fmt.Errorf("install packages: %w", err))
-			return
-		}
-
-		if req.PostInstall != "" {
-			fmt.Fprintf(bw, "Running post-install...\n")
-			if err := helper.RunPostInstall(ctx, apptainerBin, baseImage, imgPath, req.PostInstall, bw); err != nil {
-				broadcastDone(broker, fmt.Errorf("post-install: %w", err))
-				return
-			}
 		}
 
 		container.InvalidateInstalledOverlaysCache()

@@ -13,17 +13,16 @@ function renderOverlays(filter) {
   const rows = q ? sqfs.filter(o => o.name.toLowerCase().includes(q)) : sqfs;
   const tbody = gid('ov-tbody');
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="padding:20px;text-align:center;color:var(--muted);">' +
+    tbody.innerHTML = '<tr><td colspan="4" class="td-empty">' +
       (q ? 'No matches.' : 'No module overlays found.') + '</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map(o =>
     '<tr>' +
-      '<td style="font-weight:600;">' + escHtml(o.name) + '</td>' +
-      '<td class="mono" style="color:var(--muted);">' + escHtml(o.type || '—') + '</td>' +
-      '<td class="mono" style="color:var(--muted);">' + fmtSize(o.size) + '</td>' +
-      '<td class="mono path-cell" style="color:var(--muted);">' + pathTailHtml(o.path) + '</td>' +
-      '<td><div style="display:flex;gap:6px;">' +
+      '<td class="td-name">' + escHtml(o.name) + '</td>' +
+      '<td class="mono td-muted td-fit">' + fmtSize(o.size) + '</td>' +
+      '<td class="mono path-cell td-muted">' + pathTailHtml(o.path) + '</td>' +
+      '<td><div class="td-actions">' +
         '<button class="btn btn-sm" onclick="pickOverlay(\'' + escHtml(o.path) + '\')">Use</button>' +
         '<button class="btn btn-sm btn-ghost" onclick="copyStr(\'' + escHtml(o.path) + '\',this)" title="Copy path">' + iconSvg('content_copy') + '</button>' +
       '</div></td>' +
@@ -56,13 +55,13 @@ function filterAppOverlays(q) {
   gid('op-app-list').innerHTML = hits.length
     ? hits.map(o =>
         '<div class="modal-row" onclick="selectOverlay(\'' + escHtml(o.path) + '\')">' +
-          '<span class="modal-row-icon" style="color:var(--muted);">' + iconSvg('hexagon') + '</span>' +
-          '<span class="modal-row-name" style="font-weight:600;">' + escHtml(o.name) + '</span>' +
+          '<span class="modal-row-icon">' + iconSvg('hexagon') + '</span>' +
+          '<span class="modal-row-name fw-bold">' + escHtml(o.name) + '</span>' +
           '<span class="modal-row-size mono">' + fmtSize(o.size) + '</span>' +
           '<span class="modal-row-sel"><button class="btn btn-sm btn-primary">Select</button></span>' +
         '</div>'
       ).join('')
-    : '<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px;">' +
+    : '<div class="modal-empty">' +
         (q ? 'No matches.' : 'No .sqf overlays found.') + '</div>';
 }
 

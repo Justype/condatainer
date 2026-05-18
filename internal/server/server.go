@@ -79,7 +79,7 @@ func RunDaemon(port int, reportPipe *os.File, watchPID int) error {
 
 	mux := http.NewServeMux()
 	registerRoutes(mux, s)
-	httpServer := &http.Server{Handler: mux}
+	httpServer := &http.Server{Handler: s.hostDispatch(mux)}
 
 	// Write PID file.
 	host, _ := os.Hostname()
