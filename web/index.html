@@ -123,6 +123,30 @@
               <svg class="icon"><use id="ov-notice-icon" href="#i-info"></use></svg>
               <span id="ov-notice-text"></span>
             </div>
+            <div class="ov-create" id="ov-edit-form">
+              <div class="f-divider">Edit env overlay</div>
+              <div class="form-grid">
+                <div class="field">
+                  <label class="field-label">New size <span id="ov-edit-cur-size" style="font-weight:400;color:var(--muted)"></span></label>
+                  <input class="field-input" id="ov-edit-size" placeholder="e.g. 30G">
+                </div>
+              </div>
+              <div class="field" id="ov-edit-pkgs-wrap" style="display:none">
+                <div class="field-label">Installed packages</div>
+                <div id="ov-edit-pkg-list" style="font-size:12px;font-family:var(--mono);color:var(--muted);max-height:72px;overflow-y:auto;line-height:1.8;word-break:break-all;"></div>
+              </div>
+              <div class="field">
+                <label class="field-label">Remove packages</label>
+                <input class="field-input mono" id="ov-edit-remove" placeholder="space-separated package names">
+              </div>
+              <div class="field">
+                <label class="field-label">Add packages</label>
+                <input class="field-input mono" id="ov-edit-add" placeholder="space-separated package names">
+              </div>
+              <div>
+                <button class="btn btn-primary btn-sm" id="ov-edit-btn" onclick="editOverlay()">Update</button>
+              </div>
+            </div>
             <div class="ov-create" id="ov-create-form">
               <div class="f-divider">Create env overlay</div>
               <div class="form-grid">

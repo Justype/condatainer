@@ -110,8 +110,9 @@ Example:
 				return nil
 			}
 			p, err := os.FindProcess(ss.PID)
-			if err != nil {
-				utils.PrintMessage("Server process not found.")
+			if err != nil || p.Signal(syscall.Signal(0)) != nil {
+				utils.PrintMessage("Server is not running (stale PID file).")
+				os.Remove(pidFile)
 				return nil
 			}
 			if err := p.Signal(syscall.SIGTERM); err != nil {
@@ -226,7 +227,7 @@ var serverRestartCmd = &cobra.Command{
 		}
 
 		p, err := os.FindProcess(ss.PID)
-		if err != nil {
+		if err != nil || p.Signal(syscall.Signal(0)) != nil {
 			utils.PrintMessage("Server process not found, starting fresh.")
 			return startServerDaemon(port, serverStartDaemon)
 		}

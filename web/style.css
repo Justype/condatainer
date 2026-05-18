@@ -16,13 +16,13 @@
   --bg: #0d1117; --surface: #161b22; --surface2: #1c2128;
   --border: #30363d; --text: #c9d1d9; --muted: #7d8590;
   --accent: #58a6ff; --success: #3fb950; --warn: #d29922;
-  --danger: #da6b64; --term-bg: #010409; --term-fg: #b8c0c8;
+  --danger: #da6b64; --term-bg: #282c34; --term-fg: #dcdfe4; --term-err: #e06c75; --term-warn: #e5c07b;
 }
 [data-theme="light"] {
   --bg: #ffffff; --surface: #f6f8fa; --surface2: #eaeef2;
   --border: #d0d7de; --text: #1f2328; --muted: #656d76;
   --accent: #0969da; --success: #1a7f37; --warn: #9a6700;
-  --danger: #cf222e; --term-bg: #1b1f24; --term-fg: #cdd9e5;
+  --danger: #cf222e; --term-bg: #fafafa; --term-fg: #383a42; --term-err: #e45649; --term-warn: #c18401;
 }
 
 /* ── Reset ──────────────────────────────── */
@@ -250,19 +250,19 @@ input,button,select{font-family:inherit;font-size:inherit;}
 .prog-win-hdr{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;}
 .prog-win-title{font-size:13px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .prog-win-status{font-size:14px;flex-shrink:0;}
-.prog-win-close{margin-left:4px;}
 .prog-win-body{flex:1;overflow-y:auto;padding:8px 10px;min-height:60px;background:var(--term-bg);}
 
 /* ── TermView pre ────────────────────────── */
 .tv-pre{margin:0;font-family:var(--mono);font-size:12px;color:var(--term-fg);white-space:pre-wrap;word-break:break-all;line-height:1.55;}
 
 /* ── Terminal box ─────────────────────────── */
-.term-box{background:var(--term-bg);border:1px solid #30363d;border-radius:var(--radius);padding:10px 12px;font-family:var(--mono);font-size:12px;color:var(--term-fg);max-height:180px;overflow-y:auto;line-height:1.7;display:none;}
+.term-box{background:var(--term-bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-family:var(--mono);font-size:12px;color:var(--term-fg);max-height:180px;overflow-y:auto;line-height:1.7;display:none;}
 .term-box.visible{display:block;}
 .tl-info{color:var(--term-fg);}
 .tl-ok{color:#3fb950;}
-.tl-warn{color:#d29922;}
-.tl-err{color:#f85149;}
+.tl-warn{color:var(--term-warn);}
+.tl-err{color:var(--term-err);}
+.tv-err{font-family:var(--mono);font-size:12px;color:var(--term-err);white-space:pre-wrap;word-break:break-all;line-height:1.55;}
 .tl-dim{color:#484f58;}
 
 /* ── Detail panel ─────────────────────────── */

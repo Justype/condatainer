@@ -70,7 +70,12 @@ class TermView {
     this._pre.parentElement.scrollTop = this._pre.parentElement.scrollHeight;
   }
   done(ok, errMsg) {
-    if (!ok && errMsg) this.write('\nERROR: ' + errMsg + '\n');
+    if (!ok && errMsg) {
+      const div = document.createElement('div');
+      div.className = 'tv-err';
+      div.textContent = 'ERROR: ' + errMsg;
+      this._pre.parentElement.appendChild(div);
+    }
   }
 }
 
@@ -281,6 +286,7 @@ function clearEnvOverlay() {
 gid('cfg-overlay').addEventListener('input', function () {
   const hasOverlay = !!this.value;
   gid('ov-clear-btn').disabled = !hasOverlay;
+  _scheduleOvCheck(this.value.trim());
 
   const notice  = gid('ov-notice');
   const startBtn = gid('start-btn');
@@ -322,11 +328,131 @@ function _collectParams() {
 
 /* ── Overlay create form ─────────────────── */
 let _ovTokenKeys = [];
+let _ovExists    = false; // true when cfg-overlay points to an existing .img
+let _ovWritable  = false; // true when that .img is writable
+
+/* ── Overlay state check (New vs Edit button) ── */
+let _ovCheckTimer = null;
+function _scheduleOvCheck(path) {
+  clearTimeout(_ovCheckTimer);
+  _ovCheckTimer = setTimeout(() => _checkOverlayState(path), 300);
+}
+
+async function _checkOverlayState(path) {
+  const btn = gid('ov-new-btn');
+  if (!path) {
+    _ovExists = false; _ovWritable = false;
+    btn.textContent = 'New';
+    btn.onclick = toggleOverlayCreate;
+    gid('ov-edit-form').classList.remove('visible');
+    _setFormOpen(false);
+    return;
+  }
+  try {
+    const r = await fetch('/api/env/check?path=' + encodeURIComponent(path));
+    if (!r.ok) return;
+    const st = await r.json();
+    _ovExists   = !!st.exists;
+    _ovWritable = !!st.writable;
+    if (_ovExists && _ovWritable) {
+      btn.textContent = 'Edit';
+      btn.onclick = toggleOverlayEdit;
+      if (gid('ov-create-form').classList.contains('visible')) {
+        gid('ov-create-form').classList.remove('visible');
+        _setFormOpen(false);
+      }
+    } else {
+      btn.textContent = 'New';
+      btn.onclick = toggleOverlayCreate;
+      if (gid('ov-edit-form').classList.contains('visible')) {
+        gid('ov-edit-form').classList.remove('visible');
+        _setFormOpen(false);
+      }
+    }
+  } catch (_) {}
+}
+
+/* ── Overlay edit form ───────────────────── */
+
+// Shared busy state for when create/edit forms are open.
+// Locks the helper list and start button; on close, re-evaluates start button
+// state via the cfg-overlay input event (handles required-overlay validation).
+function _setFormOpen(open) {
+  _setStartBusy(open);
+  if (!open) gid('cfg-overlay').dispatchEvent(new Event('input'));
+}
+
+function toggleOverlayEdit() {
+  const form = gid('ov-edit-form');
+  const wasHidden = !form.classList.contains('visible');
+  form.classList.toggle('visible');
+  _setFormOpen(wasHidden);
+  if (wasHidden) _loadOverlayInfo();
+}
+
+async function _loadOverlayInfo() {
+  const path = gid('cfg-overlay').value.trim();
+  if (!path) return;
+  try {
+    const r = await fetch('/api/env/info?path=' + encodeURIComponent(path));
+    if (!r.ok) return;
+    const info = await r.json();
+    const curSize = gid('ov-edit-cur-size');
+    if (curSize && info.size_mb) curSize.textContent = '(current: ' + info.size_mb + ' MiB)';
+    const pkgWrap = gid('ov-edit-pkgs-wrap');
+    const pkgList = gid('ov-edit-pkg-list');
+    if (info.specs && info.specs.length) {
+      pkgWrap.style.display = '';
+      pkgList.textContent = info.specs.join('  ');
+    } else {
+      pkgWrap.style.display = 'none';
+    }
+  } catch (_) {}
+}
+
+async function editOverlay() {
+  const path       = gid('cfg-overlay').value.trim();
+  const size       = gid('ov-edit-size').value.trim();
+  const addPkgs    = gid('ov-edit-add').value.trim();
+  const removePkgs = gid('ov-edit-remove').value.trim();
+  if (!path) return;
+  if (!size && !addPkgs && !removePkgs) { alert('Nothing to change.'); return; }
+
+  const editBtn = gid('ov-edit-btn');
+  editBtn.disabled = true;
+  try {
+    const r = await fetch('/api/overlay/edit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, size, add_packages: addPkgs, remove_packages: removePkgs }),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      alert('Error: ' + (e.error || r.status));
+      editBtn.disabled = false;
+      return;
+    }
+    const { id } = await r.json();
+    openProgressWindow('Editing ' + path.split('/').pop(), id, async msg => {
+      editBtn.disabled = false;
+      if (msg.ok) {
+        gid('ov-edit-size').value   = '';
+        gid('ov-edit-add').value    = '';
+        gid('ov-edit-remove').value = '';
+        gid('ov-edit-form').classList.remove('visible');
+      }
+    });
+  } catch (e) {
+    editBtn.disabled = false;
+    alert('Error: ' + e);
+  }
+}
 
 function toggleOverlayCreate() {
   const form = gid('ov-create-form');
   const wasHidden = !form.classList.contains('visible');
   form.classList.toggle('visible');
+  _setFormOpen(wasHidden);
   if (wasHidden) {
     const nameEl = gid('ov-name');
     if (!nameEl.value.trim()) {
@@ -495,7 +621,13 @@ function initCombobox(id, options, isOpen, onChange) {
 }
 
 /* ── Shared busy state ───────────────────── */
+let _startBusy = false;
+window.addEventListener('beforeunload', e => {
+  if (_startBusy) e.preventDefault();
+});
+
 function _setStartBusy(busy, label) {
+  _startBusy = busy;
   const btn  = gid('start-btn');
   const wrap = gid('helper-list-wrap');
   if (btn) {

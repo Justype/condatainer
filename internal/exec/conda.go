@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
-
-	"github.com/Justype/condatainer/internal/overlay"
+"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -83,13 +81,24 @@ func InitCondaEnv(ctx context.Context, imgPath string, pkgs []string, fakeroot b
 }
 
 // InstallPackages installs additional conda packages into an existing base
-// environment inside imgPath using micromamba install.
+// environment inside imgPath using mm-install (respects overlay's .condarc channels).
 func InstallPackages(ctx context.Context, imgPath string, pkgs []string, fakeroot bool, io IO) error {
 	return Run(ctx, Options{
 		Overlays:    []string{imgPath},
 		WritableImg: true,
 		Fakeroot:    fakeroot,
-		Command:     []string{"bash", "-c", "micromamba install -y -n base " + strings.Join(pkgs, " ")},
+		Command:     append([]string{"mm-install", "-y"}, pkgs...),
+		HidePrompt:  true,
+	}, io)
+}
+
+// RemovePackages removes conda packages from the base environment inside imgPath.
+func RemovePackages(ctx context.Context, imgPath string, pkgs []string, fakeroot bool, io IO) error {
+	return Run(ctx, Options{
+		Overlays:    []string{imgPath},
+		WritableImg: true,
+		Fakeroot:    fakeroot,
+		Command:     append([]string{"mm-remove", "-y"}, pkgs...),
 		HidePrompt:  true,
 	}, io)
 }

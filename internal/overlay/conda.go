@@ -63,6 +63,7 @@ func ReadCondaInfo(overlayPath, envPrefix string) *CondaInfo {
 // Channels are extracted from installed package URLs (+https://conda.anaconda.org/<channel>/...).
 // Explicitly-requested specs come from "# update specs:" JSON arrays, deduplicating
 // by package name and keeping the last-seen spec for each name.
+// Packages listed in "# remove specs:" are removed from the result.
 func parseCondaHistory(content string) *CondaInfo {
 	channelsSeen := map[string]bool{}
 	var channels []string
@@ -103,6 +104,19 @@ func parseCondaHistory(content string) *CondaInfo {
 				}
 				specMap[name] = spec
 			}
+
+		case strings.HasPrefix(line, "# remove specs:"):
+			after := strings.TrimPrefix(line, "# remove specs:")
+			var specs []string
+			if err := json.Unmarshal([]byte(strings.TrimSpace(after)), &specs); err != nil {
+				continue
+			}
+			for _, spec := range specs {
+				name := strings.FieldsFunc(spec, func(r rune) bool {
+					return r == '=' || r == '>' || r == '<' || r == '!'
+				})[0]
+				delete(specMap, name)
+			}
 		}
 	}
 
@@ -110,9 +124,14 @@ func parseCondaHistory(content string) *CondaInfo {
 		return nil
 	}
 
-	specs := make([]string, len(specNames))
-	for i, name := range specNames {
-		specs[i] = specMap[name]
+	var specs []string
+	for _, name := range specNames {
+		if s, ok := specMap[name]; ok {
+			specs = append(specs, s)
+		}
+	}
+	if len(specs) == 0 {
+		return nil
 	}
 	return &CondaInfo{Channels: channels, Specs: specs}
 }

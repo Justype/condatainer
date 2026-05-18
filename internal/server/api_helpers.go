@@ -132,6 +132,30 @@ func (s *srv) handleHelpersSub(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleEnvInfo serves GET /api/env/info?path=... — returns size and explicitly-installed
+// conda specs for an existing .img overlay (read from conda-meta/history).
+func (s *srv) handleEnvInfo(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		http.Error(w, "path required", http.StatusBadRequest)
+		return
+	}
+	type envInfoResp struct {
+		SizeMB   int64    `json:"size_mb"`
+		Channels []string `json:"channels"`
+		Specs    []string `json:"specs"`
+	}
+	var resp envInfoResp
+	if info, err := os.Stat(path); err == nil {
+		resp.SizeMB = info.Size() / (1024 * 1024)
+	}
+	if ci := overlay.ReadCondaInfo(path, "/ext3/env"); ci != nil {
+		resp.Channels = ci.Channels
+		resp.Specs = ci.Specs
+	}
+	writeJSON(w, resp)
+}
+
 // handleEnvCheck serves GET /api/env/check?path=...&name=...&cwd=...
 func (s *srv) handleEnvCheck(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
