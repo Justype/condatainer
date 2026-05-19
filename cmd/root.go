@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -164,19 +165,16 @@ func Execute() {
 		// Cobra's automatic error printing is silenced. For Apptainer errors
 		// print only the captured output (trimmed) and exit with non-zero
 		// status. For other errors, print the default error string.
+		// Ctrl+C or timeout: ^C on the terminal is feedback enough.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			os.Exit(ExitCodeError)
+		}
 		if ae, ok := err.(*apptainer.ApptainerError); ok {
 			out := strings.TrimSpace(ae.Output)
 			if out != "" {
 				fmt.Fprintln(os.Stderr, out)
 			}
 			os.Exit(ExitCodeError)
-		}
-		// Commands with SilenceUsage:false show usage on errors, meaning cobra
-		// generated a usage/argument error (unknown command, wrong arg count, etc.)
-		// → exit 2. Runtime commands set SilenceUsage:true → exit 1.
-		cmd, _, _ := rootCmd.Find(os.Args[1:])
-		if cmd != nil && !cmd.SilenceUsage {
-			ExitWithUsageError("%v", err)
 		}
 		ExitWithError("%v", err)
 	}

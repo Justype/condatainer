@@ -248,10 +248,8 @@ func KnownFlags() map[string]bool {
 const (
 	// Generic error code
 	ExitCodeError = 1
-	// Wrong or missing arguments (misuse of command)
-	ExitCodeUsage = 2
 	// Returned when jobs were submitted to a scheduler (overlays will be created asynchronously)
-	ExitCodeJobsSubmitted = 3
+	ExitCodeJobsSubmitted = config.ExitCodeJobsSubmitted
 )
 
 // ExitIfJobsSubmitted exits the process with ExitCodeJobsSubmitted if a scheduler
@@ -270,11 +268,6 @@ func ExitWithError(format string, a ...interface{}) {
 	os.Exit(ExitCodeError)
 }
 
-// ExitWithUsageError prints an error and exits with ExitCodeUsage (2)
-func ExitWithUsageError(format string, a ...interface{}) {
-	utils.PrintError(format, a...)
-	os.Exit(ExitCodeUsage)
-}
 
 // ParseCommandArgs parses arguments from os.Args after a given subcommand
 // Returns: commands (positional args), apptainerFlags (unknown flags for apptainer)

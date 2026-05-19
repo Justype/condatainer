@@ -3,6 +3,7 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -231,24 +232,41 @@ func checkAndInstallNamedOverlays(ctx context.Context, names []string) ([]string
 		condaBin = "condatainer"
 	}
 
+	// First pass: resolve already-present overlays and collect missing names.
 	var paths []string
+	var missing []string
 	for _, name := range names {
 		resolved, lookupErr := container.ResolveOverlayPaths([]string{name})
 		if lookupErr != nil {
-			logging.FromContext(ctx).Info("required overlay not found, building now", "overlay", name)
-			cmd := exec.CommandContext(ctx, condaBin, "create", name)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				return nil, fmt.Errorf("condatainer create %s failed: %w", name, err)
+			missing = append(missing, name)
+		} else {
+			paths = append(paths, resolved...)
+		}
+	}
+
+	// Second pass: build all missing overlays in one condatainer create call.
+	if len(missing) > 0 {
+		logging.FromContext(ctx).Info("required overlays not found, building now", "overlays", strings.Join(missing, " "))
+		args := append([]string{"create"}, missing...)
+		cmd := exec.CommandContext(ctx, condaBin, args...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == config.ExitCodeJobsSubmitted {
+				return nil, fmt.Errorf("overlay build(s) submitted to scheduler: %s — wait for them to finish, then re-run the helper",
+					strings.Join(missing, ", "))
 			}
-			container.InvalidateInstalledOverlaysCache()
-			resolved, err = container.ResolveOverlayPaths([]string{name})
+			return nil, fmt.Errorf("condatainer create %s failed: %w", strings.Join(missing, " "), err)
+		}
+		container.InvalidateInstalledOverlaysCache()
+		for _, name := range missing {
+			resolved, err := container.ResolveOverlayPaths([]string{name})
 			if err != nil {
 				return nil, fmt.Errorf("overlay %q not found after build: %w", name, err)
 			}
+			paths = append(paths, resolved...)
 		}
-		paths = append(paths, resolved...)
 	}
 	return paths, nil
 }
@@ -385,12 +403,12 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	// auto-cleaned by the scheduler; the /tmp fallback is cleaned by the wrapper trap.
 	if sched != nil {
 		if v := sched.TmpDirVar(); v != "" {
-			fmt.Fprintf(&sb, "export CNT_JOB_TMPDIR=\"${%s:-/tmp/${CNT_HELPER_ID}}\"\n", v)
+			fmt.Fprintf(&sb, "export CNT_JOB_TMPDIR=\"${%s:-/tmp/cnt-${USER:-nobody}/${CNT_HELPER_ID}}\"\n", v)
 		} else {
-			fmt.Fprintln(&sb, `export CNT_JOB_TMPDIR="/tmp/${CNT_HELPER_ID}"`)
+			fmt.Fprintln(&sb, `export CNT_JOB_TMPDIR="/tmp/cnt-${USER:-nobody}/${CNT_HELPER_ID}"`)
 		}
 	} else {
-		fmt.Fprintln(&sb, `export CNT_JOB_TMPDIR="/tmp/${CNT_HELPER_ID}"`)
+		fmt.Fprintln(&sb, `export CNT_JOB_TMPDIR="/tmp/cnt-${USER:-nobody}/${CNT_HELPER_ID}"`)
 	}
 
 	// #PARAM: values resolved from flags + prompts
@@ -412,7 +430,7 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	// are cleaned by the scheduler itself).
 	cleanupTrap := `condatainer _server_done --exit-code 130`
 	if sched == nil {
-		cleanupTrap += `; rm -rf "/tmp/${CNT_HELPER_ID}"`
+		cleanupTrap += `; rm -rf "$CNT_JOB_TMPDIR"; rmdir "/tmp/cnt-${USER:-nobody}" 2>/dev/null || true`
 	}
 	fmt.Fprintf(&sb, "trap '%s; exit 130' TERM INT\n", cleanupTrap)
 	fmt.Fprintln(&sb)
@@ -426,11 +444,38 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	fmt.Fprintln(&sb, `trap - TERM INT`)
 	fmt.Fprintln(&sb, `condatainer _server_done --exit-code $_cnt_exit`)
 	if sched == nil {
-		fmt.Fprintln(&sb, `rm -rf "/tmp/${CNT_HELPER_ID}"`)
+		fmt.Fprintln(&sb, `rm -rf "$CNT_JOB_TMPDIR"`)
+		fmt.Fprintln(&sb, `rmdir "/tmp/cnt-${USER:-nobody}" 2>/dev/null || true`)
 	}
 	fmt.Fprintln(&sb, `(exit $_cnt_exit)`)
 
 	return sb.String()
+}
+
+// pruneStaleTmpdirs removes leftover /tmp/cnt-$USER/{id} dirs for helpers
+// that are marked done in history. Handles SIGKILL leaks where the bash
+// wrapper's trap never fired. Called in a goroutine — errors are ignored.
+func pruneStaleTmpdirs() {
+	user := os.Getenv("USER")
+	if user == "" {
+		user = "nobody"
+	}
+	parentDir := fmt.Sprintf("/tmp/cnt-%s", user)
+	entries, err := os.ReadDir(parentDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		id := e.Name()
+		run := HistoryEntryForID(id)
+		if run != nil && run.Status == "done" {
+			os.RemoveAll(filepath.Join(parentDir, id))
+		}
+	}
+	os.Remove(parentDir) // no-op if other dirs remain
 }
 
 // newHelperID returns a stable, human-readable helper run ID of the form

@@ -599,7 +599,7 @@ With -l, reads only the specified config layer file.`,
 
 		// Merged effective value: env > layers in priority order > viper default
 		if _, known := configKeyDefs[key]; !known {
-			ExitWithUsageError("Unknown config key: %s", key)
+			ExitWithError("Unknown config key: %s", key)
 		}
 		if isArrayKey(key) {
 			for _, v := range viper.GetStringSlice(key) {
@@ -654,7 +654,7 @@ Time duration format (for build.time):
 		if key == "default_distro" {
 			if !config.IsValidDistro(value) {
 				utils.PrintError("Unknown distro '%s'. Available: %s", value, strings.Join(config.GetAvailableDistros(), ", "))
-				os.Exit(ExitCodeUsage)
+				os.Exit(ExitCodeError)
 			}
 		}
 
@@ -662,7 +662,7 @@ Time duration format (for build.time):
 		if isArrayKey(key) {
 			utils.PrintError("'%s' is an array setting. Use append/prepend/remove subcommands.", key)
 			utils.PrintHint("  condatainer config append  %s <value>\n  condatainer config prepend %s <value>\n  condatainer config remove  %s <value>", key, key, key)
-			os.Exit(ExitCodeUsage)
+			os.Exit(ExitCodeError)
 		}
 
 		if _, known := knownKeys[key]; !known {
@@ -674,7 +674,7 @@ Time duration format (for build.time):
 			var n int
 			if _, err := fmt.Sscan(value, &n); err != nil || n < 0 {
 				utils.PrintError("Invalid value for scheduler_timeout: %s (must be a non-negative integer; 0 disables the timeout)", value)
-				os.Exit(ExitCodeUsage)
+				os.Exit(ExitCodeError)
 			}
 		}
 
@@ -682,7 +682,7 @@ Time duration format (for build.time):
 			v := strings.ToLower(value)
 			if v != "" && v != "none" && v != "bell" && v != "email" && len(value) < 5 {
 				utils.PrintError("Invalid value for notification: %q (use 'none', 'bell', 'email', or an ntfy.sh topic of at least 5 characters)", value)
-				os.Exit(ExitCodeUsage)
+				os.Exit(ExitCodeError)
 			}
 		}
 
@@ -690,7 +690,7 @@ Time duration format (for build.time):
 			var n int
 			if _, err := fmt.Sscan(value, &n); err != nil || n < 0 {
 				utils.PrintError("Invalid value for metadata_cache_ttl: %s (must be a non-negative integer in days; 0 disables the cache)", value)
-				os.Exit(ExitCodeUsage)
+				os.Exit(ExitCodeError)
 			}
 		}
 
@@ -698,7 +698,7 @@ Time duration format (for build.time):
 			if _, err := utils.ParseWalltime(value); err != nil {
 				utils.PrintError("Invalid duration format: %s", value)
 				utils.PrintHint("Use format like: 4d12h, 2h30m, 1:30, or 01:30:00")
-				os.Exit(ExitCodeUsage)
+				os.Exit(ExitCodeError)
 			}
 		}
 
@@ -706,7 +706,7 @@ Time duration format (for build.time):
 			if mb, err := utils.ParseMemoryMB(value); err != nil || mb <= 0 {
 				utils.PrintError("Invalid memory format: %s", value)
 				utils.PrintHint("Use format like: 8GB, 16384MB, 8192")
-				os.Exit(ExitCodeUsage)
+				os.Exit(ExitCodeError)
 			} else {
 				value = fmt.Sprintf("%d", mb)
 			}
@@ -716,7 +716,7 @@ Time duration format (for build.time):
 			if mb, err := utils.ParseMemoryMB(value); err != nil || mb <= 0 {
 				utils.PrintError("Invalid memory format: %s", value)
 				utils.PrintHint("Use format like: 10g, 20480m, 20480, 1t")
-				os.Exit(ExitCodeUsage)
+				os.Exit(ExitCodeError)
 			} else {
 				value = fmt.Sprintf("%d", mb)
 			}

@@ -43,13 +43,13 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 		if len(args) > 0 {
 			path = args[0]
 		} else if len(args) > 1 {
-			ExitWithUsageError("Too many positional arguments before --.")
+			ExitWithError("Too many positional arguments before --.")
 		}
 
 		// Auto-append .img extension if not present and path doesn't have an extension
 		if !utils.IsImg(path) {
 			if strings.Contains(filepath.Base(path), ".") {
-				ExitWithUsageError("Overlay image must have a .img extension.")
+				ExitWithError("Overlay image must have a .img extension.")
 			}
 			path += ".img"
 		}
@@ -62,7 +62,7 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 		path = absPath
 
 		if utils.FileExists(path) || utils.DirExists(path) {
-			ExitWithUsageError("Path %s already exists.", utils.StylePath(path))
+			ExitWithError("Path %s already exists.", utils.StylePath(path))
 		}
 
 		// 2. Parse Flags
@@ -74,7 +74,7 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 		noTmp, _ := cmd.Flags().GetBool("no-tmp")
 
 		if envFile != "" && len(packages) > 0 {
-			ExitWithUsageError("Cannot use -f/--file and inline packages (--) at the same time.")
+			ExitWithError("Cannot use -f/--file and inline packages (--) at the same time.")
 		}
 
 		// 3. Parse size

@@ -236,6 +236,21 @@ func (w *watcher) pollHelper(id string) {
 		return
 	}
 
+	// Headless crash detection: if the pid file exists but the process is gone and
+	// no done event was written, synthesize done immediately rather than waiting
+	// for walltime expiry. The pid file gate prevents false positives during the
+	// brief window between cmd.Start() and WriteHelperPid completing.
+	if inf, ok := w.info[id]; ok && inf.jobID == "" {
+		if _, pidErr := helper.ReadHelperPid(id); pidErr == nil {
+			if !helper.IsHeadlessProcessAlive(id) {
+				logging.FromContext(w.s.ctx).Debug("server: headless process gone, synthesizing done", "id", id)
+				w.synthesizeDone(id)
+				w.closeDone(id, 0, time.Now())
+				return
+			}
+		}
+	}
+
 	if w.syncSchedulerStatus(id) {
 		return
 	}

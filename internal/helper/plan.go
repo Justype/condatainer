@@ -284,6 +284,7 @@ func ExecutePlan(ctx context.Context, plan *RunPlan, io IO) (string, error) {
 	}
 
 	logger.Info("Starting helper headless", "name", plan.Options.ScriptName)
+	go pruneStaleTmpdirs()
 	cmd := exec.CommandContext(ctx, "bash", wrapperPath)
 	cmd.Stdin = nil
 	cmd.Stdout = io.Stdout
@@ -292,6 +293,11 @@ func ExecutePlan(ctx context.Context, plan *RunPlan, io IO) (string, error) {
 	if err := cmd.Start(); err != nil {
 		os.RemoveAll(stateDir)
 		return "", fmt.Errorf("starting helper: %w", err)
+	}
+	// Write the wrapper PID so handleHelperStop can kill the process group.
+	// Non-fatal: if this fails, stop degrades gracefully (history still marked done).
+	if err := WriteHelperPid(helperID, cmd.Process.Pid); err != nil {
+		logger.Debug("helper: failed to write pid file", "id", helperID, "err", err)
 	}
 	_ = AppendHistory(newHelperRun(helperID, plan.Options.ScriptName, "", cwd, plan.Spec.Time,
 		plan.Options, plan.UserOverlays, plan.Spec, plan.Params, "starting"))

@@ -88,6 +88,7 @@ Note: Helper is not available inside a container or a scheduler job.`,
   condatainer helper code-server -h  # Show code-server flags and options
   condatainer helper --update        # Update all helper scripts
   condatainer helper --list          # List available helper scripts`,
+	SilenceUsage:      true,
 	RunE:              runHelper,
 	ValidArgsFunction: completeHelperScripts,
 }
@@ -425,6 +426,17 @@ func runHelper(cmd *cobra.Command, args []string) error {
 		return showHelperStatus("")
 	}
 
+	// Intercept: condatainer helper stop [--all] — stop across all helper names
+	if args[0] == "stop" {
+		stopAll := false
+		for _, a := range args[1:] {
+			if a == "--all" || a == "-a" {
+				stopAll = true
+			}
+		}
+		return runHelperStop(cmd.Context(), "", stopAll)
+	}
+
 	scriptName := args[0]
 	scriptArgs := args[1:]
 
@@ -432,6 +444,17 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	if len(scriptArgs) > 0 && scriptArgs[0] == "config" {
 		scriptPath, _ := config.FindHelperScript(scriptName)
 		return runHelperConfig(scriptName, scriptPath, scriptArgs[1:])
+	}
+
+	// Intercept: condatainer helper <name> stop [--all]
+	if len(scriptArgs) > 0 && scriptArgs[0] == "stop" {
+		stopAll := false
+		for _, a := range scriptArgs[1:] {
+			if a == "--all" || a == "-a" {
+				stopAll = true
+			}
+		}
+		return runHelperStop(cmd.Context(), scriptName, stopAll)
 	}
 
 	// Intercept -h/--help in the remaining args to show helper-specific usage.
@@ -1137,4 +1160,69 @@ func downloadExecutable(url, destPath string) error {
 
 	// Make executable
 	return os.Chmod(destPath, utils.PermExec)
+}
+
+// runHelperStop stops running instances of a helper.
+// name filters to a specific helper script; empty means all helpers.
+// If stopAll is true, all matching instances are stopped without prompting.
+// When name is set and exactly one instance is running, it is stopped directly.
+// When name is empty, the picker is always shown (acts as confirmation).
+// When multiple instances are running and stopAll is false, the user is prompted
+// to choose one or all via OfferStopPicker.
+func runHelperStop(ctx context.Context, name string, stopAll bool) error {
+	running, err := helper.RunningHelpers(name)
+	if err != nil {
+		return err
+	}
+	if len(running) == 0 {
+		if name == "" {
+			utils.PrintMessage("No running helpers.")
+		} else {
+			utils.PrintMessage("No running %s helpers.", name)
+		}
+		return nil
+	}
+
+	var toStop []*helper.HelperRun
+	// Skip picker only when a specific name is given and there is exactly one match.
+	if stopAll || (name != "" && len(running) == 1) {
+		toStop = running
+	} else {
+		chosen, pickErr := ui.OfferStopPicker(ctx, name, running)
+		if pickErr != nil {
+			return pickErr
+		}
+		if len(chosen) == 0 {
+			return nil // user cancelled
+		}
+		toStop = chosen
+	}
+
+	for _, r := range toStop {
+		if err := stopHelperRun(r); err != nil {
+			utils.PrintWarning("Failed to stop %s: %v", r.ID, err)
+		} else {
+			utils.PrintSuccess("Stopped %s", r.ID)
+		}
+	}
+	return nil
+}
+
+// stopHelperRun terminates a single helper run:
+//   - Scheduled (JobID != ""): asks the scheduler to cancel
+//   - Headless (JobID == ""): sends SIGTERM to the process group via the pid file
+//
+// Always marks the history entry as "done" so the server watcher and status
+// commands see it as finished even if the signal fails (process already dead).
+func stopHelperRun(r *helper.HelperRun) error {
+	if r.JobID != "" {
+		if sched := scheduler.ActiveScheduler(); sched != nil {
+			_ = sched.CancelJob(context.Background(), r.JobID)
+		}
+	} else {
+		if err := helper.KillHeadlessProcess(r.ID); err != nil {
+			utils.PrintDebug("kill headless process %s: %v", r.ID, err)
+		}
+	}
+	return helper.UpdateHistoryStatus(r.ID, "done", time.Now())
 }

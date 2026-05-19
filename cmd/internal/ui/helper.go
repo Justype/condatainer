@@ -826,6 +826,53 @@ func promptCreationTokens(ctx context.Context, imgPackages string, params map[st
 	return result, nil
 }
 
+// OfferStopPicker prompts the user to choose which running instance(s) to stop.
+// When name is empty, lists all running helpers with their names shown.
+// Returns the runs to stop: one entry when the user picks a number, all when "a" is entered.
+// Returns nil slice (no error) when the user cancels with an invalid input.
+func OfferStopPicker(ctx context.Context, name string, running []*helper.HelperRun) ([]*helper.HelperRun, error) {
+	if name == "" {
+		fmt.Println("Running helpers:")
+	} else {
+		fmt.Printf("Multiple %s instances running:\n", utils.StyleName(name))
+	}
+	for i, r := range running {
+		age := time.Since(r.StartedAt).Round(time.Minute)
+		cwd := r.CWD
+		if cwd == "" {
+			cwd = "(no cwd)"
+		}
+		res := formatRunResources(r)
+		if name == "" {
+			fmt.Printf("  %d. %-20s  %-36s  %-14s  started %s ago\n", i+1, utils.StyleName(r.Name), cwd, res, age)
+		} else {
+			fmt.Printf("  %d. %-36s  %-14s  started %s ago\n", i+1, cwd, res, age)
+		}
+	}
+	fmt.Print("  a. Stop all\n  n. None\n\n[?] Which to stop [")
+	for i := range running {
+		fmt.Printf("%d/", i+1)
+	}
+	fmt.Print("a/n]: ")
+
+	line, err := utils.ReadLineContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	line = strings.TrimSpace(line)
+	if line == "n" || line == "" {
+		return nil, nil // cancelled
+	}
+	if line == "a" {
+		return running, nil
+	}
+	idx, convErr := strconv.Atoi(line)
+	if convErr != nil || idx < 1 || idx > len(running) {
+		return nil, nil // cancelled
+	}
+	return []*helper.HelperRun{running[idx-1]}, nil
+}
+
 func formatTokenLabel(tok string) string {
 	name := strings.TrimPrefix(tok, "CONDA_")
 	name = strings.TrimPrefix(name, "POSIT_")

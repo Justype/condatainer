@@ -13,6 +13,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/helper"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/scheduler"
 )
 
@@ -215,9 +216,16 @@ func (s *srv) handleHelperStop(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	s.proxies.Close(id)
-	if run := helper.HistoryEntryForID(id); run != nil && run.JobID != "" {
-		if sched := scheduler.ActiveScheduler(); sched != nil {
-			_ = sched.CancelJob(r.Context(), run.JobID)
+	if run := helper.HistoryEntryForID(id); run != nil {
+		if run.JobID != "" {
+			if sched := scheduler.ActiveScheduler(); sched != nil {
+				_ = sched.CancelJob(r.Context(), run.JobID)
+			}
+		} else {
+			if err := helper.KillHeadlessProcess(id); err != nil {
+				logging.FromContext(s.ctx).Debug("server: stop headless helper failed",
+					"id", id, "err", err)
+			}
 		}
 	}
 	_ = helper.UpdateHistoryStatus(id, "done", time.Now())

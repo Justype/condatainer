@@ -13,6 +13,11 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
+// ExitCodeJobsSubmitted is returned by condatainer commands when build jobs are
+// submitted to the scheduler rather than run immediately. Callers (e.g. helper
+// overlay checks) can detect this exit code to show a more helpful message.
+const ExitCodeJobsSubmitted = 3
+
 const VERSION = "1.4.1"
 const GitHubRepo = "Justype/condatainer"
 const GITHUB_REPO = GitHubRepo // Exported constant for compatibility
