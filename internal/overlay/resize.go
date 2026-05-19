@@ -6,12 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Justype/condatainer/internal/utils"
+	"github.com/Justype/condatainer/internal/logging"
 )
 
 // Resize adjusts the size of an existing ext3 overlay image.
 func Resize(ctx context.Context, imagePath string, newSizeMB int) error {
-	// 0. Check Dependencies (resize2fs needs to be checked here, e2fsck is checked in CheckIntegrity)
 	if err := checkDependencies([]string{"resize2fs"}); err != nil {
 		return err
 	}
@@ -21,7 +20,6 @@ func Resize(ctx context.Context, imagePath string, newSizeMB int) error {
 		return fmt.Errorf("failed to resolve path %s: %w", imagePath, err)
 	}
 
-	// 1. Validate Target
 	info, err := os.Stat(absPath)
 	if os.IsNotExist(err) {
 		return fmt.Errorf("overlay image not found: %s", absPath)
@@ -30,51 +28,42 @@ func Resize(ctx context.Context, imagePath string, newSizeMB int) error {
 	currentSizeBytes := info.Size()
 	newSizeBytes := int64(newSizeMB) * 1024 * 1024
 
+	log := logging.FromContext(ctx)
+
 	if currentSizeBytes == newSizeBytes {
-		utils.PrintMessage("Size unchanged (%d MiB) for %s", newSizeMB, utils.StylePath(absPath))
+		log.Info(fmt.Sprintf("size unchanged (%d MiB) for %s", newSizeMB, absPath))
 		return nil
 	}
 
-	utils.PrintMessage("Resizing %s to %d MiB", utils.StylePath(absPath), newSizeMB)
+	log.Info(fmt.Sprintf("resizing %s to %d MiB", absPath, newSizeMB))
 
-	// 2. Pre-check Integrity (Force = true is recommended before resizing)
 	if err := CheckIntegrity(ctx, absPath, true); err != nil {
 		return err
 	}
 
-	// 3. Perform Resize
 	if newSizeBytes < currentSizeBytes {
-		// --- SHRINK ---
-		utils.PrintMessage("Shrinking overlay image to %d MiB", newSizeMB)
-
+		log.Info(fmt.Sprintf("shrinking overlay image to %d MiB", newSizeMB))
 		sizeArg := fmt.Sprintf("%dM", newSizeMB)
 		if err := runCommand(ctx, "shrink filesystem", absPath, "resize2fs", "-p", absPath, sizeArg); err != nil {
 			return err
 		}
-
 		if err := os.Truncate(absPath, newSizeBytes); err != nil {
 			return fmt.Errorf("failed to truncate file: %w", err)
 		}
-
 	} else {
-		// --- EXPAND ---
-		utils.PrintMessage("Expanding overlay image to %d MiB", newSizeMB)
-
+		log.Info(fmt.Sprintf("expanding overlay image to %d MiB", newSizeMB))
 		if err := os.Truncate(absPath, newSizeBytes); err != nil {
 			return fmt.Errorf("failed to expand file: %w", err)
 		}
-
 		if err := runCommand(ctx, "expand filesystem", absPath, "resize2fs", "-p", absPath); err != nil {
 			return err
 		}
 	}
 
-	// 4. Final Verification
-	// We run it again to ensure the resize didn't corrupt anything.
 	if err := CheckIntegrity(ctx, absPath, true); err != nil {
 		return err
 	}
 
-	utils.PrintMessage("Overlay image resized to %d MiB: %s", newSizeMB, utils.StylePath(absPath))
+	log.Info(fmt.Sprintf("overlay image resized to %d MiB: %s", newSizeMB, absPath), "kind", "success")
 	return nil
 }

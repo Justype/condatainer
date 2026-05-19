@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -68,12 +71,9 @@ func Start(ctx context.Context, options Options) error {
 	}
 
 	// Debug output
-	if utils.DebugMode {
-		utils.PrintDebug("[INSTANCE]Instance name: %s", options.Name)
-		utils.PrintDebug("[INSTANCE]Overlays: %v", setupResult.Overlays)
-		utils.PrintDebug("[INSTANCE]Bind paths: %v", setupResult.BindPaths)
-		utils.PrintDebug("[INSTANCE]Env list: %v", setupResult.EnvList)
-	}
+	slog.Default().Debug("starting instance",
+		"name", options.Name, "overlays", setupResult.Overlays,
+		"bindPaths", setupResult.BindPaths, "envList", setupResult.EnvList)
 
 	// Start the instance using apptainer package
 	if err := apptainer.InstanceStart(ctx, baseImage, options.Name, opts); err != nil {
@@ -91,8 +91,8 @@ func Start(ctx context.Context, options Options) error {
 	}
 
 	if err := saveState(state); err != nil {
-		utils.PrintWarning("Failed to save instance state: %v", err)
-		utils.PrintNote("Environment variables may not work correctly with 'instance exec'")
+		logging.FromContext(ctx).Warn("failed to save instance state", "err", err)
+		logging.FromContext(ctx).Info("environment variables may not work correctly with 'instance exec'", "kind", "note")
 	}
 
 	return nil

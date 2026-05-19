@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-"github.com/Justype/condatainer/internal/overlay"
+
+	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -15,7 +17,6 @@ import (
 // postInstallCmd is run inside the overlay after conda init (empty = skip).
 // fakeroot should be false for normal user-owned overlays.
 func CreateCondaOverlay(ctx context.Context, opts *overlay.CreateOptions, pkgs []string, postInstallCmd string, fakeroot bool, io IO) error {
-	// Ensure overlay is owned by the current user so fakeroot is not needed.
 	if opts.UID == 0 && opts.GID == 0 {
 		opts.UID = os.Getuid()
 		opts.GID = os.Getgid()
@@ -42,7 +43,7 @@ func CreateCondaOverlay(ctx context.Context, opts *overlay.CreateOptions, pkgs [
 		}
 	}
 
-	utils.PrintMessage("Moving overlay to %s", utils.StylePath(opts.Path))
+	logging.FromContext(ctx).Info(fmt.Sprintf("moving overlay to %s", opts.Path))
 	copied, err := overlay.MoveOverlayCopied(ctx, tmpPath, opts.Path, opts.Sparse)
 	if err != nil {
 		cleanup()

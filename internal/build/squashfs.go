@@ -8,7 +8,7 @@ import (
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
 	execpkg "github.com/Justype/condatainer/internal/exec"
-	"github.com/Justype/condatainer/internal/utils"
+	"github.com/Justype/condatainer/internal/logging"
 )
 
 // createSquashfs runs mksquashfs inside a container to pack sourceDir into targetPath.
@@ -41,9 +41,9 @@ func createSquashfs(ctx context.Context, b *BuildObject, isRef bool, sourceDir, 
 		opts.ApptainerFlags = []string{"--writable-tmpfs"}
 	}
 
-	utils.PrintDebug("[BUILD] Creating SquashFS for %s with options: overlays=%v, bindPaths=%v",
-		b.nameVersion, opts.Overlays, opts.BindPaths)
-	utils.PrintMessage("Packing %s into %s", utils.StylePath(sourceDir), utils.StylePath(targetPath))
+	log := logging.FromContext(ctx)
+	log.Debug("creating SquashFS", "name", b.nameVersion, "overlays", opts.Overlays, "bindPaths", opts.BindPaths)
+	log.Info("packing SquashFS", "source", sourceDir, "target", targetPath)
 
 	if err := execpkg.Run(ctx, opts, execpkg.IOFromContext(ctx)); err != nil {
 		if isCancelledByUser(err) {

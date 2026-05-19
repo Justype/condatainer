@@ -12,13 +12,17 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
 	cntexec "github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/helper"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
+	"github.com/Justype/condatainer/internal/weblog"
 )
 
 // handleHelpersAvailable serves GET /api/helpers/available
@@ -434,6 +438,8 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"id": taskID})
 
 	bw := &brokerWriter{broker}
+	ctx = logging.WithLogger(ctx, slog.New(weblog.New(bw)))
+	ctx = logging.WithWriter(ctx, bw)
 	go func() {
 		defer cancel()
 		defer s.tasks.Delete(taskID)

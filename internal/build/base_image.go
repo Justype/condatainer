@@ -9,6 +9,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -45,7 +46,7 @@ func (b *BaseImageBuildObject) IsInstalled() bool {
 // final image — no SquashFS extraction step is performed.
 func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error {
 	targetPath, finalPath := buildOverlayPaths(b.BuildObject)
-	styledImage := utils.StyleName(filepath.Base(targetPath))
+	log := logging.FromContext(ctx)
 
 	if !b.update && b.IsInstalled() {
 		return nil
@@ -59,7 +60,7 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 		return nil
 	}
 
-	utils.PrintMessage("Building base image %s (local build) from %s", styledImage, utils.StylePath(b.buildSource))
+	log.Info("building base image", "image", filepath.Base(targetPath), "source", b.buildSource)
 
 	done := watchContext(ctx, "base image build")
 	defer close(done)
@@ -83,7 +84,7 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 		}
 	}
 
-	utils.PrintMessage("Running apptainer build from %s", utils.StylePath(b.buildSource))
+	log.Info("running apptainer build", "source", b.buildSource)
 
 	// Ensure the tmp directory exists before apptainer tries to write the SIF there.
 	if err := utils.EnsureTmpSubdir(b.tmpDir); err != nil {
@@ -98,7 +99,7 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 	if err := apptainer.Build(ctx, b.tmpOverlayPath, b.buildSource, buildOpts); err != nil {
 		b.Cleanup(true)
 		if apptainer.IsBuildCancelled(err) {
-			utils.PrintMessage("Build cancelled for %s. Base image unchanged.", styledImage)
+			log.Info("build cancelled, base image unchanged", "image", filepath.Base(targetPath))
 			return ErrBuildCancelled
 		}
 		return fmt.Errorf("failed to build SIF from %s: %w", b.buildSource, err)
@@ -112,14 +113,14 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 	}
 
 	if err := os.Chmod(finalPath, utils.PermExec); err != nil {
-		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
+		log.Debug("failed to set permissions", "path", finalPath, "err", err)
 	}
 
 	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
 		return err
 	}
 
-	utils.PrintSuccess("Finished base image %s", utils.StylePath(targetPath))
+	log.Info("base image ready", "kind", "success", "path", targetPath)
 	b.Cleanup(false)
 	return nil
 }

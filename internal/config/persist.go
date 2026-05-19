@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -567,7 +568,7 @@ func DetectApptainerBin() string {
 }
 
 func detectApptainerFromModules() string {
-	utils.PrintMessage("Searching modules for apptainer/singularity via 'module avail'...")
+	slog.Default().Info("searching modules for apptainer/singularity via 'module avail'")
 
 	bestModule := ""
 	bestVersion := ""
@@ -585,11 +586,11 @@ func detectApptainerFromModules() string {
 	}
 
 	if bestModule == "" {
-		utils.PrintDebug("No apptainer/singularity modules found via module avail")
+		slog.Default().Debug("no apptainer/singularity modules found via module avail")
 		return ""
 	}
 
-	utils.PrintMessage("Using module candidate: %s", bestModule)
+	slog.Default().Info("using module candidate", "module", bestModule)
 
 	// Resolve the actual binary path after loading the selected module.
 	// Use both names as fallback because module name and binary name can differ.
@@ -915,7 +916,7 @@ func LoadFromViper() {
 	// Load default_distro from config
 	if distro := layerString("default_distro"); distro != "" {
 		if !slices.Contains(GetAvailableDistros(), distro) {
-			utils.PrintWarning("Config distro '%s' not available; falling back to '%s'", distro, DEFAULT_DISTRO)
+			slog.Default().Warn("config distro not available, falling back to default", "distro", distro, "fallback", DEFAULT_DISTRO)
 			viper.Set("default_distro", DEFAULT_DISTRO)
 			distro = DEFAULT_DISTRO
 		}
@@ -955,7 +956,7 @@ func LoadFromViper() {
 		if IsValidBlockSize(v) {
 			Global.Build.BlockSize = v
 		} else {
-			utils.PrintWarning("Invalid build.block_size %q (must be a power of two between 4k and 1m); using default 128k", v)
+			slog.Default().Warn("invalid build.block_size, using default 128k", "value", v)
 			Global.Build.BlockSize = "128k"
 		}
 	}
@@ -963,7 +964,7 @@ func LoadFromViper() {
 		if IsValidBlockSize(v) {
 			Global.Build.DataBlockSize = v
 		} else {
-			utils.PrintWarning("Invalid build.data_block_size %q (must be a power of two between 4k and 1m); using default 512k", v)
+			slog.Default().Warn("invalid build.data_block_size, using default 512k", "value", v)
 			Global.Build.DataBlockSize = "512k"
 		}
 	}
@@ -1023,12 +1024,12 @@ func AutoDetectCompression(supportsZstd bool, isSingularity bool) {
 
 	if isSingularity {
 		Global.Build.CompressArgs = "-comp gzip"
-		utils.PrintDebug("Using gzip compression (Singularity detected)")
+		slog.Default().Debug("using gzip compression (Singularity detected)")
 	} else if supportsZstd {
 		Global.Build.CompressArgs = "-comp zstd -Xcompression-level 8"
-		utils.PrintDebug("Auto-detected zstd support, using zstd compression")
+		slog.Default().Debug("auto-detected zstd support, using zstd compression")
 	} else {
 		Global.Build.CompressArgs = "-comp lz4"
-		utils.PrintDebug("Using lz4 compression (zstd not supported)")
+		slog.Default().Debug("using lz4 compression (zstd not supported)")
 	}
 }

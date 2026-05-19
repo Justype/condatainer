@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"log/slog"
+
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
-
-	"github.com/Justype/condatainer/internal/utils"
 )
 
 // rsaSHA2Signer wraps an ssh.AlgorithmSigner to advertise and sign with
@@ -88,24 +88,24 @@ func buildAuthMethods() []ssh.AuthMethod {
 	if keysign, err := findSSHKeysign(); err == nil {
 		if hostKey, err := findHostKey(); err == nil {
 			methods = append(methods, ssh.Hostbased(hostKey, keysign))
-			utils.PrintDebug("proxy go-ssh auth: hostbased (%s via %s)", hostKey.Type(), keysign)
+			slog.Default().Debug("proxy go-ssh auth: hostbased", "type", hostKey.Type(), "keysign", keysign)
 		} else {
-			utils.PrintDebug("proxy go-ssh auth: hostbased skip — %v", err)
+			slog.Default().Debug("proxy go-ssh auth: hostbased skip", "err", err)
 		}
 	} else {
-		utils.PrintDebug("proxy go-ssh auth: hostbased skip — %v", err)
+		slog.Default().Debug("proxy go-ssh auth: hostbased skip", "err", err)
 	}
 
 	// SSH agent: handles RSA sha-256 correctly on its own
 	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
 		if conn, err := net.Dial("unix", sock); err == nil {
 			methods = append(methods, ssh.PublicKeysCallback(agent.NewClient(conn).Signers))
-			utils.PrintDebug("proxy go-ssh auth: agent (%s)", sock)
+			slog.Default().Debug("proxy go-ssh auth: agent", "sock", sock)
 		} else {
-			utils.PrintDebug("proxy go-ssh auth: agent skip — dial %s: %v", sock, err)
+			slog.Default().Debug("proxy go-ssh auth: agent skip", "sock", sock, "err", err)
 		}
 	} else {
-		utils.PrintDebug("proxy go-ssh auth: agent skip — SSH_AUTH_SOCK not set")
+		slog.Default().Debug("proxy go-ssh auth: agent skip, SSH_AUTH_SOCK not set")
 	}
 
 	// Key files: ed25519/ecdsa (no algorithm negotiation issues)
@@ -119,21 +119,21 @@ func buildAuthMethods() []ssh.AuthMethod {
 		}
 		s, err := ssh.ParsePrivateKey(data)
 		if err != nil {
-			utils.PrintDebug("proxy go-ssh auth: %s skip — encrypted or unreadable", name)
+			slog.Default().Debug("proxy go-ssh auth: key skip, encrypted or unreadable", "name", name)
 			continue
 		}
 		signers = append(signers, s)
-		utils.PrintDebug("proxy go-ssh auth: key file %s", path)
+		slog.Default().Debug("proxy go-ssh auth: key file", "path", path)
 	}
 	// RSA with sha2-256 wrapper to fix Go crypto/ssh algorithm mismatch
 	if data, err := os.ReadFile(filepath.Join(home, ".ssh", "id_rsa")); err == nil {
 		if s, err := ssh.ParsePrivateKey(data); err == nil {
 			if alg, ok := s.(ssh.AlgorithmSigner); ok {
 				signers = append(signers, &rsaSHA2Signer{alg})
-				utils.PrintDebug("proxy go-ssh auth: key file id_rsa (rsa-sha2-256 wrapper)")
+				slog.Default().Debug("proxy go-ssh auth: key file id_rsa (rsa-sha2-256 wrapper)")
 			}
 		} else {
-			utils.PrintDebug("proxy go-ssh auth: id_rsa skip — encrypted or unreadable")
+			slog.Default().Debug("proxy go-ssh auth: id_rsa skip, encrypted or unreadable", "err", err)
 		}
 	}
 	if len(signers) > 0 {
@@ -149,10 +149,10 @@ func buildAuthMethods() []ssh.AuthMethod {
 func DialGoSSH(sshDest string) (DialFunc, func(), <-chan struct{}, error) {
 	auths := buildAuthMethods()
 	if len(auths) == 0 {
-		utils.PrintDebug("proxy go-ssh: no non-interactive auth methods available — skipping")
+		slog.Default().Debug("proxy go-ssh: no non-interactive auth methods available, skipping")
 		return nil, nil, nil, fmt.Errorf("no non-interactive SSH auth methods available")
 	}
-	utils.PrintDebug("proxy go-ssh: dialing %s with %d auth method(s)", sshDest, len(auths))
+	slog.Default().Debug("proxy go-ssh: dialing", "dest", sshDest, "authMethods", len(auths))
 
 	addr := sshDest
 	if _, _, err := net.SplitHostPort(sshDest); err != nil {
@@ -174,10 +174,10 @@ func DialGoSSH(sshDest string) (DialFunc, func(), <-chan struct{}, error) {
 
 	client, err := ssh.Dial("tcp", addr, cfg)
 	if err != nil {
-		utils.PrintDebug("proxy go-ssh: dial %s failed: %v", sshDest, err)
+		slog.Default().Debug("proxy go-ssh: dial failed", "dest", sshDest, "err", err)
 		return nil, nil, nil, fmt.Errorf("go-ssh dial %s: %w", sshDest, err)
 	}
-	utils.PrintDebug("proxy go-ssh: connected to %s as %s", sshDest, username)
+	slog.Default().Debug("proxy go-ssh: connected", "dest", sshDest, "user", username)
 
 	done := make(chan struct{})
 	go func() {
@@ -237,10 +237,10 @@ func DialSystemSSH(node string) (DialFunc, func(), <-chan struct{}, error) {
 		"-o", "StrictHostKeyChecking=no",
 		node, "true")
 	if out, err := test.CombinedOutput(); err != nil {
-		utils.PrintDebug("proxy system-ssh: test to %s failed: %v — %s", node, err, strings.TrimSpace(string(out)))
+		slog.Default().Debug("proxy system-ssh: test failed", "node", node, "err", err, "output", strings.TrimSpace(string(out)))
 		return nil, nil, nil, fmt.Errorf("system ssh test to %s: %w", node, err)
 	}
-	utils.PrintDebug("proxy system-ssh: using ssh -W for %s", node)
+	slog.Default().Debug("proxy system-ssh: using ssh -W", "node", node)
 
 	done := make(chan struct{})
 	var once sync.Once

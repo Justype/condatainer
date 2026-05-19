@@ -1,10 +1,9 @@
 package container
 
 import (
+	"log/slog"
 	"os"
 	"strings"
-
-	"github.com/Justype/condatainer/internal/utils"
 )
 
 // DetectGPUFlags inspects the host for GPU support and returns the necessary apptainer flags.
@@ -17,7 +16,7 @@ func DetectGPUFlags() []string {
 		flags = append(flags, "--rocm")
 	}
 	if len(flags) > 0 {
-		utils.PrintDebug("Detected GPU flags: %s", strings.Join(flags, " "))
+		slog.Default().Debug("detected GPU flags", "flags", strings.Join(flags, " "))
 	}
 	return flags
 }

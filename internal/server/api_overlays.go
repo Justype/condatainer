@@ -11,10 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/container"
 	cntexec "github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
+	"github.com/Justype/condatainer/internal/weblog"
 )
 
 // handleOverlayEdit serves POST /api/overlay/edit — resize, remove, or add packages
@@ -69,6 +73,8 @@ func (s *srv) handleOverlayEdit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"id": taskID})
 
 	bw := &brokerWriter{broker}
+	ctx = logging.WithLogger(ctx, slog.New(weblog.New(bw)))
+	ctx = logging.WithWriter(ctx, bw)
 	io := cntexec.IO{Stdout: bw, Stderr: bw}
 
 	go func() {

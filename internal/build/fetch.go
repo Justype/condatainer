@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/proxy"
 	"github.com/Justype/condatainer/internal/utils"
@@ -208,7 +210,7 @@ func fetchPrebuiltLink(baseURL string) string {
 func PruneOrphanedCaches() {
 	cacheDir, err := config.GetWritableCacheDir()
 	if err != nil {
-		utils.PrintDebug("PruneOrphanedCaches: cannot get cache dir: %v", err)
+		slog.Default().Debug("PruneOrphanedCaches: cannot get cache dir", "err", err)
 		return
 	}
 
@@ -219,7 +221,7 @@ func PruneOrphanedCaches() {
 
 	entries, err := os.ReadDir(cacheDir)
 	if err != nil {
-		utils.PrintDebug("PruneOrphanedCaches: cannot read cache dir: %v", err)
+		slog.Default().Debug("PruneOrphanedCaches: cannot read cache dir", "err", err)
 		return
 	}
 
@@ -242,9 +244,9 @@ func PruneOrphanedCaches() {
 			continue
 		}
 		if !active[envelope.SourceURL] {
-			utils.PrintDebug("Removing orphaned cache file: %s (URL: %s)", name, envelope.SourceURL)
+			slog.Default().Debug("removing orphaned cache file", "name", name, "url", envelope.SourceURL)
 			if err := os.Remove(path); err != nil {
-				utils.PrintDebug("Failed to remove orphaned cache: %v", err)
+				slog.Default().Debug("failed to remove orphaned cache", "err", err)
 			}
 		}
 	}
@@ -333,7 +335,7 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 		if cachePath, err := localScriptsCachePath(); err == nil {
 			if cache, cacheErr := loadLocalScriptsCache(cachePath); cacheErr == nil {
 				if reflect.DeepEqual(cache.SearchPaths, searchPaths) && reflect.DeepEqual(cache.Fingerprints, fingerprints) {
-					utils.PrintDebug("Using cached local build scripts (fetched %s ago)", time.Since(cache.FetchedAt).Round(time.Minute))
+					slog.Default().Debug("using cached local build scripts", "age", time.Since(cache.FetchedAt).Round(time.Minute))
 					cachedLocalScripts = cache.Scripts
 					if cachedLocalScripts == nil {
 						cachedLocalScripts = map[string]ScriptInfo{}
@@ -390,7 +392,7 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 				// PL template script
 				target, _ := utils.GetTargetFromScript(path)
 				if target == "" {
-					utils.PrintDebug("Script %s has #PL: but no #TARGET: — skipping PL expansion", relPath)
+					slog.Default().Debug("script has #PL: but no #TARGET:, skipping PL expansion", "script", relPath)
 					if _, exists := scripts[relPath]; !exists {
 						scripts[relPath] = ScriptInfo{Name: relPath, Path: path, IsContainer: isContainer}
 					}
@@ -443,7 +445,7 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 
 		if err != nil {
 			// Log but continue with other directories
-			utils.PrintDebug("Error scanning %s: %v", buildScriptsDir, err)
+			slog.Default().Debug("error scanning build scripts dir", "dir", buildScriptsDir, "err", err)
 		}
 	}
 
@@ -460,7 +462,7 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 			Scripts:      scripts,
 		}
 		if writeErr := saveLocalScriptsCache(cachePath, envelope); writeErr != nil {
-			utils.PrintDebug("Failed to write local scripts cache: %v", writeErr)
+			slog.Default().Debug("failed to write local scripts cache", "err", writeErr)
 		}
 	}
 	return scripts, nil
@@ -479,7 +481,7 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 	ttl := config.Global.MetadataCacheTTL
 	if !ForceRefresh && cacheErr == nil && ttl > 0 {
 		if cache, err := loadRemoteMetadataCache(cachePath, baseURL, ttl); err == nil {
-			utils.PrintDebug("Using cached remote metadata for %s (fetched %s ago)", baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
+			slog.Default().Debug("using cached remote metadata", "url", baseURL, "age", time.Since(cache.FetchedAt).Round(time.Minute))
 			setRemoteFields(cache.Metadata, baseURL, cache.PrebuiltLink)
 			expandTemplates(cache.Metadata)
 			cachedRemoteScriptsByURL[baseURL] = cache.Metadata
@@ -488,14 +490,14 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 	}
 
 	// Network fetch
-	utils.PrintDebug("Fetching remote build metadata from %s...", metaURL)
+	slog.Default().Debug("fetching remote build metadata", "url", metaURL)
 	metadata, err := fetchRemoteMetadata(metaURL)
 	if err != nil {
 		// Stale fallback
 		if cacheErr == nil {
 			if cache, staleErr := loadRemoteMetadataCacheIgnoreExpiry(cachePath, baseURL); staleErr == nil {
-				utils.PrintWarning("Network unavailable for %s; using cached metadata (fetched %s ago)",
-					metaURL, time.Since(cache.FetchedAt).Round(time.Minute))
+				slog.Default().Warn("network unavailable, using cached metadata",
+					"url", metaURL, "age", time.Since(cache.FetchedAt).Round(time.Minute))
 				setRemoteFields(cache.Metadata, baseURL, cache.PrebuiltLink)
 				expandTemplates(cache.Metadata)
 				cachedRemoteScriptsByURL[baseURL] = cache.Metadata
@@ -504,7 +506,7 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 		}
 		return nil, err
 	}
-	utils.PrintDebug("Fetched remote build metadata from %s (%d entries)", baseURL, len(metadata))
+	slog.Default().Debug("fetched remote build metadata", "url", baseURL, "entries", len(metadata))
 
 	// Fetch per-source prebuilt base URL (non-fatal; empty = no prebuilt for this source)
 	prebuiltLink := fetchPrebuiltLink(baseURL)
@@ -520,7 +522,7 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 			Metadata:     metadata,
 		}
 		if writeErr := saveRemoteMetadataCache(cachePath, envelope); writeErr != nil {
-			utils.PrintDebug("Failed to write metadata cache for %s: %v", baseURL, writeErr)
+			slog.Default().Debug("failed to write metadata cache", "url", baseURL, "err", writeErr)
 		}
 	}
 
@@ -546,7 +548,7 @@ func GetRemoteBuildScripts() (map[string]ScriptInfo, error) {
 	for _, baseURL := range config.Global.ScriptsLinks {
 		scripts, err := getRemoteBuildScriptsForURL(baseURL)
 		if err != nil {
-			utils.PrintDebug("Failed to fetch remote scripts from %s: %v", baseURL, err)
+			slog.Default().Debug("failed to fetch remote scripts", "url", baseURL, "err", err)
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -832,7 +834,7 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 
 	// Set permissions for downloaded script (664 for group-writable)
 	if err := os.Chmod(localPath, utils.PermFile); err != nil {
-		utils.PrintDebug("Failed to set permissions on %s: %v", localPath, err)
+		slog.Default().Debug("failed to set permissions on downloaded script", "path", localPath, "err", err)
 	}
 
 	return localPath, nil

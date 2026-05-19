@@ -10,13 +10,15 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// logParseWarning prints a parser diagnostic warning, except in a job.
+// logParseWarning logs a parser diagnostic warning, except in a job.
 func logParseWarning(format string, args ...any) {
 	if !IsInsideJob() {
-		utils.PrintWarning(format, args...)
+		slog.Default().Warn(fmt.Sprintf(format, args...))
 	}
 }
 

@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
@@ -185,7 +187,7 @@ func FindActiveProxy(autostart bool) (string, bool) {
 		if ProxyAlive(ps.Host, ps.Port) {
 			return fmt.Sprintf("http://%s:%d", ps.Host, ps.Port), true
 		}
-		utils.PrintWarning("Shared proxy on %s:%d is unreachable", ps.Host, ps.Port)
+		slog.Default().Warn("shared proxy is unreachable", "host", ps.Host, "port", ps.Port)
 	}
 	// 3. Auto-start per-job proxy if enabled and login node is known
 	if autostart {
@@ -193,7 +195,7 @@ func FindActiveProxy(autostart bool) (string, bool) {
 			if u, ok := autoStartLocalProxy(via); ok {
 				return u, true
 			}
-			utils.PrintWarning("Failed to auto-start per-job proxy via %s — SSH may have failed", via)
+			slog.Default().Warn("failed to auto-start per-job proxy, SSH may have failed", "via", via)
 		}
 	}
 	return "", false
