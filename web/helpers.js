@@ -49,6 +49,20 @@ function closeProgressWindow() {
   gid('prog-window').classList.remove('visible');
 }
 
+function showProgressError(title, msg) {
+  if (_progES) { _progES.close(); _progES = null; }
+  gid('prog-win-title').textContent = title;
+  gid('prog-win-status').innerHTML = iconSvg('close');
+  gid('prog-window').classList.remove('minimized');
+  gid('prog-win-toggle').innerHTML = iconSvg('expand_circle_down');
+  gid('prog-win-close').disabled = false;
+  gid('prog-window').classList.add('visible');
+  const body = gid('prog-win-body');
+  body.innerHTML = '';
+  const tv = new TermView(body);
+  tv.done(false, msg);
+}
+
 /* ── TermView — terminal renderer ────────── */
 class TermView {
   constructor(el) {
@@ -251,7 +265,7 @@ function selectHelper(name, overrides) {
   // Keep a user-selected env overlay when switching helpers; auto-resolve only
   // when the field is blank.
   if (selectedHelper.img_packages) {
-    gid('ov-pkgs').placeholder = selectedHelper.img_packages;
+    gid('ov-pkgs').placeholder = 'additional packages';
     if (gid('cfg-overlay').value) {
       gid('cfg-overlay').dispatchEvent(new Event('input'));
     } else {
@@ -345,7 +359,10 @@ async function _checkOverlayState(path) {
     btn.textContent = 'New';
     btn.onclick = toggleOverlayCreate;
     gid('ov-edit-form').classList.remove('visible');
-    _setFormOpen(false);
+    // Don't unfreeze if the create form is still open (user opened it intentionally).
+    if (!gid('ov-create-form').classList.contains('visible')) {
+      _setFormOpen(false);
+    }
     return;
   }
   try {
@@ -357,6 +374,9 @@ async function _checkOverlayState(path) {
     if (_ovExists && _ovWritable) {
       btn.textContent = 'Edit';
       btn.onclick = toggleOverlayEdit;
+      if (gid('ov-edit-form').classList.contains('visible')) {
+        _loadOverlayInfo();
+      }
       if (gid('ov-create-form').classList.contains('visible')) {
         gid('ov-create-form').classList.remove('visible');
         _setFormOpen(false);
@@ -416,7 +436,11 @@ async function editOverlay() {
   const addPkgs    = gid('ov-edit-add').value.trim();
   const removePkgs = gid('ov-edit-remove').value.trim();
   if (!path) return;
-  if (!size && !addPkgs && !removePkgs) { alert('Nothing to change.'); return; }
+  const title = 'Editing ' + path.split('/').pop();
+  if (!size && !addPkgs && !removePkgs) {
+    showProgressError(title, 'Nothing to change.');
+    return;
+  }
 
   const editBtn = gid('ov-edit-btn');
   editBtn.disabled = true;
@@ -428,23 +452,27 @@ async function editOverlay() {
     });
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
-      alert('Error: ' + (e.error || r.status));
+      showProgressError(title, e.detail || e.error || String(r.status));
       editBtn.disabled = false;
       return;
     }
     const { id } = await r.json();
-    openProgressWindow('Editing ' + path.split('/').pop(), id, async msg => {
+    _opRunning = true;
+    openProgressWindow(title, id, async msg => {
+      _opRunning = false;
       editBtn.disabled = false;
       if (msg.ok) {
         gid('ov-edit-size').value   = '';
         gid('ov-edit-add').value    = '';
         gid('ov-edit-remove').value = '';
         gid('ov-edit-form').classList.remove('visible');
+        _setFormOpen(false);
       }
     });
   } catch (e) {
+    _opRunning = false;
     editBtn.disabled = false;
-    alert('Error: ' + e);
+    showProgressError(title, String(e));
   }
 }
 
@@ -467,7 +495,12 @@ function renderOverlayCreateForm() {
   _ovTokenKeys = [];
   const wrap = gid('ov-token-wrap');
   const prevWrap = gid('ov-pkg-preview-wrap');
-  if (!selectedHelper || !selectedHelper.img_packages) {
+  if (!selectedHelper) {
+    wrap.innerHTML = '';
+    prevWrap.style.display = 'none';
+    return;
+  }
+  if (!selectedHelper.img_packages) {
     wrap.innerHTML = '';
     prevWrap.style.display = 'none';
     return;
@@ -478,7 +511,8 @@ function renderOverlayCreateForm() {
 
   if (!tokens.length) {
     wrap.innerHTML = '';
-    prevWrap.style.display = 'none';
+    prevWrap.style.display = 'block';
+    gid('ov-pkgs').addEventListener('input', updateOvPreview);
     updateOvPreview();
     return;
   }
@@ -518,7 +552,7 @@ function renderOverlayCreateForm() {
     }
   });
 
-  prevWrap.style.display = '';
+  prevWrap.style.display = 'block';
   gid('ov-pkgs').addEventListener('input', updateOvPreview);
   updateOvPreview();
 }
@@ -533,8 +567,8 @@ function extractTokens(tmpl) {
 }
 
 function updateOvPreview() {
-  if (!selectedHelper || !selectedHelper.img_packages) return;
-  let s = selectedHelper.img_packages;
+  if (!selectedHelper) return;
+  let s = selectedHelper.img_packages || '';
   _ovTokenKeys.forEach(k => {
     const el       = gid('ovtok-' + k);
     const v        = el ? (el.dataset.value !== undefined ? el.dataset.value : el.value) : '';
@@ -621,9 +655,10 @@ function initCombobox(id, options, isOpen, onChange) {
 }
 
 /* ── Shared busy state ───────────────────── */
-let _startBusy = false;
+let _startBusy  = false;
+let _opRunning  = false; // true only during an active create/edit/start operation
 window.addEventListener('beforeunload', e => {
-  if (_startBusy) e.preventDefault();
+  if (_opRunning) e.preventDefault();
 });
 
 function _setStartBusy(busy, label) {
@@ -644,7 +679,7 @@ async function createOverlay() {
   const name = gid('ov-name').value || 'my-env.img';
   const size  = gid('ov-size').value || '8G';
 
-  // Validate closed comboboxes
+  // Validate closed comboboxes — non-empty values must be from the list.
   for (const key of _ovTokenKeys) {
     const paramValues = (selectedHelper && selectedHelper.param_values) || {};
     const values = paramValues[key] || [];
@@ -653,20 +688,22 @@ async function createOverlay() {
     if (!isOpen && opts.length) {
       const el = gid('ovtok-' + key);
       const v  = el ? el.value : '';
-      if (!opts.includes(v)) {
+      if (v && !opts.includes(v)) {
         el && el.classList.add('combo-invalid');
+        showProgressError('Creating ' + name, key + ': select a value from the list.');
         return;
       }
     }
   }
 
-  // Resolve {KEY} tokens in img_packages
+  // Resolve {KEY} tokens in img_packages; empty → fall back to placeholder (default).
   const params = _collectParams();
   let basePkgs = selectedHelper?.img_packages || '';
   _ovTokenKeys.forEach(k => {
-    const el = gid('ovtok-' + k);
-    const v  = el ? (el.dataset.value !== undefined ? el.dataset.value : el.value) : '';
-    basePkgs = basePkgs.replaceAll('{' + k + '}', v);
+    const el       = gid('ovtok-' + k);
+    const v        = el ? (el.dataset.value !== undefined ? el.dataset.value : el.value) : '';
+    const fallback = el ? (el.placeholder || ('{' + k + '}')) : ('{' + k + '}');
+    basePkgs = basePkgs.replaceAll('{' + k + '}', v || fallback);
   });
   // Also resolve helper params ({KEY} in img_packages that come from #PARAM:)
   for (const [k, v] of Object.entries(params)) {
@@ -685,10 +722,12 @@ async function createOverlay() {
 
   const createUseBtn = gid('ov-create-btn');
   const _setBusy = busy => {
+    _opRunning = busy;
     _setStartBusy(busy);
     if (createUseBtn) createUseBtn.disabled = busy;
   };
 
+  const createTitle = 'Creating ' + name;
   try {
     const r = await fetch('/api/overlay/create', {
       method: 'POST',
@@ -697,12 +736,12 @@ async function createOverlay() {
     });
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
-      alert('Error: ' + (e.error || r.status));
+      showProgressError(createTitle, e.detail || e.error || String(r.status));
       return;
     }
     const { id } = await r.json();
     _setBusy(true);
-    openProgressWindow('Creating ' + name, id, async msg => {
+    openProgressWindow(createTitle, id, async msg => {
       _setBusy(false);
       if (msg.ok && msg.path) {
         _setVal('cfg-overlay', msg.path);
@@ -736,6 +775,7 @@ async function startHelper() {
   const term = gid('start-term');
   term.classList.add('visible');
   term.innerHTML = '';
+  _opRunning = true;
   _setStartBusy(true, iconSvg('play_arrow') + ' Starting…');
 
   try {
@@ -782,6 +822,7 @@ async function startHelper() {
   } catch (e) {
     term.innerHTML += '<div class="tl-err">Error: ' + escHtml(String(e)) + '</div>';
   } finally {
+    _opRunning = false;
     _setStartBusy(false);
   }
 }

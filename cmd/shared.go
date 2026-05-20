@@ -268,7 +268,6 @@ func ExitWithError(format string, a ...interface{}) {
 	os.Exit(ExitCodeError)
 }
 
-
 // ParseCommandArgs parses arguments from os.Args after a given subcommand
 // Returns: commands (positional args), apptainerFlags (unknown flags for apptainer)
 func ParseCommandArgs(subcommand string) ([]string, []string) {

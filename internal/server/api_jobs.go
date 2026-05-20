@@ -278,7 +278,7 @@ func (s *srv) renderHelperCards(w http.ResponseWriter, runs []*helper.HelperRun)
     <span class="card-title">%s</span>
     <span class="card-sub">%s · %s</span>
     <span class="countdown">%s</span>
-  </div>`, r.Status, r.Status, r.Label, r.ID, r.Node, countdown)
+  </div>`, r.Status, r.Status, r.Name, r.ID, r.Node, countdown)
 		if url != "" {
 			fmt.Fprintf(w, `<div class="access-link">
     <a href="%s" target="_blank">%s</a>

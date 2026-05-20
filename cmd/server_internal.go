@@ -25,7 +25,6 @@ func init() {
 var (
 	serverReadyID          string
 	serverReadyPort        int
-	serverReadyLabel       string
 	serverReadyNode        string
 	serverReadyURLPath     string
 	serverReadyExternalURL string
@@ -61,7 +60,6 @@ var serverReadyCmd = &cobra.Command{
 			Type:        "ready",
 			Port:        serverReadyPort,
 			Node:        node,
-			Label:       serverReadyLabel,
 			WalltimeSec: walltimeSec,
 			JobID:       jobID,
 			URLPath:     serverReadyURLPath,
@@ -77,7 +75,6 @@ var serverReadyCmd = &cobra.Command{
 func init() {
 	serverReadyCmd.Flags().StringVar(&serverReadyID, "id", "", "Helper run ID (defaults to $CNT_HELPER_ID)")
 	serverReadyCmd.Flags().IntVar(&serverReadyPort, "port", 0, "Service port (0 = no tunnel)")
-	serverReadyCmd.Flags().StringVar(&serverReadyLabel, "label", "", "Human-readable service label")
 	serverReadyCmd.Flags().StringVar(&serverReadyNode, "node", "", "Compute node hostname (defaults to $HOSTNAME)")
 	serverReadyCmd.Flags().StringVar(&serverReadyURLPath, "url-path", "", "URL path/query appended to proxy URL")
 	serverReadyCmd.Flags().StringVar(&serverReadyExternalURL, "external-url", "", "External URL shown as-is")

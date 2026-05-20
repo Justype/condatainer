@@ -287,7 +287,6 @@ func (w *watcher) pollHelper(id string) {
 			run.Status = "running"
 			run.Node = rs.Node
 			run.Port = rs.Port
-			run.Label = rs.Label
 			run.URLPath = rs.URLPath
 			run.ExternalURL = rs.ExternalURL
 			run.StartedAt = rs.Timestamp

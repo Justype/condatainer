@@ -31,7 +31,7 @@ function jobCardHTML(j) {
   return (
     '<div class="job-card" id="jcard-' + id + '" onclick="openDetail(\'' + id + '\')">' +
       '<div class="jc-top">' +
-        '<span class="jc-name">' + escHtml(j.label || j.name) + '</span>' +
+        '<span class="jc-name">' + escHtml(j.name) + '</span>' +
         '<span class="badge ' + badgeClass(j.status) + '">' + escHtml(j.status) + '</span>' +
       '</div>' +
       '<div class="jc-meta">' +
@@ -111,7 +111,7 @@ function openDetail(id) {
   const card = gid('jcard-' + id) || document.querySelector('tr[data-id="' + id + '"]');
   if (card) card.classList.add('selected');
 
-  gid('d-title').textContent = job.label || job.name;
+  gid('d-title').textContent = job.name;
   gid('d-badge').innerHTML = '<span class="badge ' + badgeClass(job.status) + '">' + escHtml(job.status) + '</span>';
 
   // Meta

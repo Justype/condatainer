@@ -24,7 +24,6 @@ func PollOnce(id string, offset int64) PollResult {
 			result.Ready = &ReadyState{
 				Port:        ev.Port,
 				Node:        ev.Node,
-				Label:       ev.Label,
 				Timestamp:   ev.Ts,
 				WalltimeSec: ev.WalltimeSec,
 				JobID:       ev.JobID,

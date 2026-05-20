@@ -411,6 +411,17 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 		imgPath = filepath.Join(cwd, imgPath)
 	}
 
+	// Abort early if the target file already exists to prevent accidental overwrites.
+	if _, err := os.Stat(imgPath); err == nil {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+			"error":  "file_exists",
+			"detail": imgPath + " already exists; delete or rename it first",
+		})
+		return
+	}
+
 	sizeStr := req.Size
 	if sizeStr == "" {
 		sizeStr = "20G"

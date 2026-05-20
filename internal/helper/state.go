@@ -22,7 +22,6 @@ type HelperRun struct {
 	JobID       string            `json:"job_id"`        // scheduler job ID or ""
 	Node        string            `json:"node"`          // compute node hostname
 	Port        int               `json:"port"`          // 0 = URL-only service (vscode-tunnel)
-	Label       string            `json:"label"`         // human-readable label
 	CWD         string            `json:"cwd"`           // working directory
 	Walltime    time.Duration     `json:"walltime_secs"` // from #TIME: / -t flag
 	CPUs        int               `json:"cpus,omitempty"`
@@ -74,7 +73,6 @@ type StateEvent struct {
 	// "ready" fields
 	Port        int    `json:"port,omitempty"`
 	Node        string `json:"node,omitempty"`
-	Label       string `json:"label,omitempty"`
 	WalltimeSec int64  `json:"walltime_secs,omitempty"`
 	JobID       string `json:"job_id,omitempty"`
 	URLPath     string `json:"url_path,omitempty"`
@@ -89,7 +87,6 @@ type StateEvent struct {
 type ReadyState struct {
 	Port        int       `json:"port"`
 	Node        string    `json:"node"`
-	Label       string    `json:"label"`
 	Timestamp   time.Time `json:"ts"`
 	WalltimeSec int64     `json:"walltime_secs"`
 	JobID       string    `json:"job_id"`
@@ -247,7 +244,6 @@ func ReadReadyEvent(id string) (*ReadyState, error) {
 			return &ReadyState{
 				Port:        ev.Port,
 				Node:        ev.Node,
-				Label:       ev.Label,
 				Timestamp:   ev.Ts,
 				WalltimeSec: ev.WalltimeSec,
 				JobID:       ev.JobID,
