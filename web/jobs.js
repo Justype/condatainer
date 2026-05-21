@@ -117,7 +117,7 @@ function openDetail(id) {
   // Meta
   let meta =
     '<span class="d-key">Working Dir</span>' + pathTailHtml(job.cwd, null, 'd-val') +
-    '<span class="d-key">Overlay</span>' + pathTailHtml(job.env_overlay, null, 'd-val') +
+    '<span class="d-key">Env Overlay</span>' + pathTailHtml(job.env_overlay, null, 'd-val') +
     '<span class="d-key">Base Image</span>' + pathTailHtml(job.base_image, null, 'd-val') +
     '<span class="d-key">Started</span><span class="d-val">' + (job.started_at ? fmtDate(job.started_at) : '—') + '</span>';
   if (job.node)    meta += '<span class="d-key">Node</span><span class="d-val">'   + escHtml(job.node)   + '</span>';

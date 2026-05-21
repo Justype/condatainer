@@ -200,20 +200,21 @@ function selectHelper(name, overrides) {
     });
     paramWrap.innerHTML =
       '<div class="f-divider">Helper params</div>' +
+      '<div class="param-grid">' +
       computed.map(({ p, opts }) => {
         const defVal = p.default || (opts[0] || '');
+        const ph     = p.optional && !p.default ? '(auto)' : (p.default || '');
         const input  = opts.length
           ? makeComboboxHtml('hparam-' + p.key, defVal)
           : '<input class="field-input" id="hparam-' + escHtml(p.key) + '"' +
-              ' placeholder="' + escHtml(p.default || '') + '">';
-        return '<div class="param-row">' +
-          '<span class="param-name">' + escHtml(p.key) + '</span>' +
+              ' placeholder="' + escHtml(ph) + '">';
+        return '<span class="param-name">' + escHtml(p.key) + '</span>' +
           '<div class="param-cell">' +
             input +
             (p.desc ? '<span class="param-desc">' + escHtml(p.desc) + '</span>' : '') +
-          '</div>' +
-        '</div>';
-      }).join('');
+          '</div>';
+      }).join('') +
+      '</div>';
     // Wire comboboxes after HTML is in the DOM
     computed.forEach(({ p, opts, isOpen }) => {
       if (opts.length) initCombobox('hparam-' + p.key, opts, isOpen, null);

@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"maps"
 	"bufio"
 	"fmt"
 	"os"
@@ -111,8 +112,8 @@ func ParseSizeToMB(sizeStr string) (int, error) {
 // Example: "samtools/1.21" → ("samtools/1.21", "", "")
 func SplitDepConstraint(raw string) (nameVersion, op, minVersion string) {
 	for _, sep := range []string{">=", ">"} {
-		if idx := strings.Index(raw, sep); idx >= 0 {
-			return raw[:idx], sep, raw[idx+len(sep):]
+		if before, after, ok := strings.Cut(raw, sep); ok {
+			return before, sep, after
 		}
 	}
 	return raw, "", ""
@@ -122,7 +123,7 @@ func SplitDepConstraint(raw string) (nameVersion, op, minVersion string) {
 // Stops at the first non-numeric segment (e.g. "1.16rc1" → [1, 16]).
 func versionParts(v string) []int {
 	var parts []int
-	for _, s := range strings.Split(v, ".") {
+	for s := range strings.SplitSeq(v, ".") {
 		n, err := strconv.Atoi(s)
 		if err != nil {
 			break
@@ -137,10 +138,7 @@ func versionParts(v string) []int {
 // Returns -1 if a < b, 0 if equal, 1 if a > b.
 func CompareVersions(a, b string) int {
 	ap, bp := versionParts(a), versionParts(b)
-	n := len(ap)
-	if len(bp) > n {
-		n = len(bp)
-	}
+	n := max(len(bp), len(ap))
 	for i := 0; i < n; i++ {
 		av, bv := 0, 0
 		if i < len(ap) {
@@ -300,6 +298,7 @@ func GetWhatIsFromScript(scriptPath string) string {
 			return strings.TrimSpace(line[len("#WHATIS:"):])
 		}
 	}
+	_ = scanner.Err()
 	return ""
 }
 
@@ -511,11 +510,8 @@ func SortVersionsDescending(values []string) []string {
 func naturalVersionGreater(a, b string) bool {
 	segsA := splitVersionSegments(a)
 	segsB := splitVersionSegments(b)
-	n := len(segsA)
-	if len(segsB) < n {
-		n = len(segsB)
-	}
-	for i := 0; i < n; i++ {
+	n := min(len(segsB), len(segsA))
+	for i := range n {
 		ia, aAlpha, aHasNum := parseVersionSegment(segsA[i])
 		ib, bAlpha, bHasNum := parseVersionSegment(segsB[i])
 		if aHasNum && bHasNum {
@@ -766,9 +762,7 @@ func ExpandPlaceholders(defs []PlaceholderDef) []map[string]string {
 		for _, existing := range result {
 			for _, val := range concreteVals {
 				combo := make(map[string]string, len(existing)+1)
-				for k, v := range existing {
-					combo[k] = v
-				}
+				maps.Copy(combo, existing)
 				combo[def.Name] = val
 				next = append(next, combo)
 			}

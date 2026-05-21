@@ -403,12 +403,13 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	// auto-cleaned by the scheduler; the /tmp fallback is cleaned by the wrapper trap.
 	if sched != nil {
 		if v := sched.TmpDirVar(); v != "" {
-			fmt.Fprintf(&sb, "export CNT_JOB_TMPDIR=\"${%s:-/tmp/cnt-${USER:-nobody}/${CNT_HELPER_ID}}\"\n", v)
+			fmt.Fprintf(&sb, "export CNT_JOB_TMPDIR=\"${%s:-/tmp/cnt-${USER:-condatainer}/${CNT_HELPER_ID}}\"\n", v)
 		} else {
-			fmt.Fprintln(&sb, `export CNT_JOB_TMPDIR="/tmp/cnt-${USER:-nobody}/${CNT_HELPER_ID}"`)
+			fmt.Fprintln(&sb, `export CNT_JOB_TMPDIR="/tmp/cnt-${USER:-condatainer}/${CNT_HELPER_ID}"`)
 		}
 	} else {
-		fmt.Fprintln(&sb, `export CNT_JOB_TMPDIR="/tmp/cnt-${USER:-nobody}/${CNT_HELPER_ID}"`)
+		// Headless: generated and executed on the same login node, so resolve at generation time.
+		fmt.Fprintf(&sb, "export CNT_JOB_TMPDIR=%s\n", shellQuote(filepath.Join(utils.GetTmpDir(), id)))
 	}
 
 	// #PARAM: values resolved from flags + prompts
@@ -430,7 +431,10 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	// are cleaned by the scheduler itself).
 	cleanupTrap := `condatainer _server_done --exit-code 130`
 	if sched == nil {
-		cleanupTrap += `; rm -rf "$CNT_JOB_TMPDIR"; rmdir "/tmp/cnt-${USER:-nobody}" 2>/dev/null || true`
+		parentDir := utils.GetTmpDir()
+		jobTmpDir := filepath.Join(parentDir, id)
+		cleanupTrap += fmt.Sprintf(`; rm -rf %s; rmdir %s 2>/dev/null || true`,
+			shellQuote(jobTmpDir), shellQuote(parentDir))
 	}
 	fmt.Fprintf(&sb, "trap '%s; exit 130' TERM INT\n", cleanupTrap)
 	fmt.Fprintln(&sb)
@@ -444,8 +448,10 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	fmt.Fprintln(&sb, `trap - TERM INT`)
 	fmt.Fprintln(&sb, `condatainer _server_done --exit-code $_cnt_exit`)
 	if sched == nil {
-		fmt.Fprintln(&sb, `rm -rf "$CNT_JOB_TMPDIR"`)
-		fmt.Fprintln(&sb, `rmdir "/tmp/cnt-${USER:-nobody}" 2>/dev/null || true`)
+		parentDir := utils.GetTmpDir()
+		jobTmpDir := filepath.Join(parentDir, id)
+		fmt.Fprintf(&sb, "rm -rf %s\n", shellQuote(jobTmpDir))
+		fmt.Fprintf(&sb, "rmdir %s 2>/dev/null || true\n", shellQuote(parentDir))
 	}
 	fmt.Fprintln(&sb, `(exit $_cnt_exit)`)
 
@@ -456,11 +462,7 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 // that are marked done in history. Handles SIGKILL leaks where the bash
 // wrapper's trap never fired. Called in a goroutine — errors are ignored.
 func pruneStaleTmpdirs() {
-	user := os.Getenv("USER")
-	if user == "" {
-		user = "nobody"
-	}
-	parentDir := fmt.Sprintf("/tmp/cnt-%s", user)
+	parentDir := utils.GetTmpDir()
 	entries, err := os.ReadDir(parentDir)
 	if err != nil {
 		return

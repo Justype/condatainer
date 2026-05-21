@@ -69,6 +69,10 @@ func MissingParams(scriptPath string, supplied map[string]string) ([]HelperParam
 		if v, ok := supplied[p.Key]; ok && v != "" {
 			continue
 		}
+		// Optional params (KEY=?) pass through empty — script handles them.
+		if p.Optional {
+			continue
+		}
 		// Non-version defaults auto-fill — not missing.
 		if p.Default != "" && !versionTokenRe.MatchString(p.Default) {
 			continue

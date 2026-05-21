@@ -317,12 +317,14 @@ func parsePositiveIntFlag(name, value string) (int, error) {
 }
 
 func runHelper(cmd *cobra.Command, args []string) error {
-	// Prevent helper commands when inside a container or scheduler job (except --path / --list / --status)
-	if config.IsInsideContainer() && !helperPath && !helperList && !helperStatus {
+	// Prevent helper commands when inside a container or scheduler job
+	// (except --path / --list / --status / config — config writes to NFS and is safe from inside).
+	helperConfigMode := len(args) > 1 && args[1] == "config"
+	if config.IsInsideContainer() && !helperPath && !helperList && !helperStatus && !helperConfigMode {
 		cmd.SilenceUsage = true
 		ExitWithError("helper commands are not available inside a container")
 	}
-	if scheduler.IsInsideJob() && !helperPath && !helperList && !helperStatus {
+	if scheduler.IsInsideJob() && !helperPath && !helperList && !helperStatus && !helperConfigMode {
 		cmd.SilenceUsage = true
 		ExitWithError("helper commands are not available inside a scheduler job")
 	}

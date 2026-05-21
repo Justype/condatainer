@@ -158,6 +158,10 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 		if _, set := flagValues[p.Key]; set {
 			continue
 		}
+		if p.Optional {
+			flagValues[p.Key] = "" // export as empty; script handles missing value
+			continue
+		}
 		if p.Default != "" && !versionTokenRe.MatchString(p.Default) {
 			flagValues[p.Key] = p.Default
 		}
