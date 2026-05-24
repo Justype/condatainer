@@ -61,8 +61,10 @@ function _setCwd(val) {
   e.placeholder = def;
   e.value = val || def;
 }
-function iconSvg(name, cls) {
-  return '<svg class="icon' + (cls ? ' ' + cls : '') + '" aria-hidden="true"><use href="#i-' + name + '"></use></svg>';
+// fill: true → i-fill-{name} (filled variant); default → i-{name} (outline)
+function iconSvg(name, cls, fill) {
+  const id = fill ? 'fill-' + name : name;
+  return '<svg class="icon' + (cls ? ' ' + cls : '') + '" aria-hidden="true"><use href="#i-' + id + '"></use></svg>';
 }
 
 /* ── Global state ────────────────────────── */

@@ -94,6 +94,19 @@ class TermView {
 }
 
 /* ── Helpers / Start section ─────────────── */
+let _helperSavedConfig = {}; // saved config for the currently selected helper
+let _gpuOptions = [];        // available GPU types from scheduler
+
+async function loadGpuOptions() {
+  try {
+    const opts = await fetch('/api/gpu-options').then(r => r.json());
+    if (Array.isArray(opts) && opts.length) {
+      _gpuOptions = opts;
+      initCombobox('cfg-gpu', opts, true, null);
+    }
+  } catch {}
+}
+
 async function loadHelpers() {
   try {
     const r = await fetch('/api/helpers/available');
@@ -102,29 +115,154 @@ async function loadHelpers() {
   renderHelperList();
 }
 
+/* ── Apply saved-config as placeholders ───── */
+function _applyConfigPlaceholders() {
+  const cfg = _helperSavedConfig;
+  const rd  = (selectedHelper && selectedHelper.resource_defaults) || {};
+  gid('cfg-cpus').placeholder = cfg.cpus     || String(rd.cpus || 4);
+  gid('cfg-mem').placeholder  = cfg.mem      || rd.mem      || '16G';
+  gid('cfg-wall').placeholder = cfg.time     || rd.walltime || '08:00:00';
+  gid('cfg-gpu').placeholder  = cfg.gpu      || rd.gpu      || '';
+  _helperParamKeys.forEach(key => {
+    const el    = gid('hparam-' + key);
+    if (!el) return;
+    const param = (selectedHelper?.params || []).find(p => p.key === key);
+    const pv    = (selectedHelper?.param_values || {})[key] || [];
+    const opts  = pv[pv.length - 1] === '*' ? pv.slice(0, -1) : pv;
+    el.placeholder = cfg[key.toLowerCase()] || param?.default || opts[0] || '';
+  });
+}
+
+/* ── Saved-config gear button ────────────── */
+function _renderHelperConfigWrap() {
+  const wrap = gid('helper-config-wrap');
+  if (!wrap) return;
+  if (!selectedHelper) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML =
+    '<button class="btn btn-ghost btn-sm" onclick="openHelperConfigModal()">' +
+    iconSvg('settings') + ' Defaults</button>';
+}
+
+function openHelperConfigModal() {
+  if (!selectedHelper) return;
+  gid('hcfg-title').textContent = 'Saved Defaults — ' + selectedHelper.name;
+  const body   = gid('hcfg-body');
+  const rd     = selectedHelper.resource_defaults || {};
+  const params = selectedHelper.params || [];
+  const pv     = selectedHelper.param_values || {};
+
+  const resRows = [
+    { key: 'cpus', label: 'CPUs',         ph: String(rd.cpus || 4) },
+    { key: 'mem',  label: 'Memory',        ph: rd.mem     || '16G' },
+    { key: 'time', label: 'Walltime',      ph: rd.walltime || '08:00:00' },
+    { key: 'gpu',  label: 'GPU (optional)', ph: rd.gpu    || '' },
+  ];
+
+  const paramComputed = params.map(p => {
+    const values = pv[p.key] || [];
+    const isOpen = values.length > 0 && values[values.length - 1] === '*';
+    const opts   = isOpen ? values.slice(0, -1) : values;
+    return { p, opts, isOpen };
+  });
+
+  let html = '<div class="param-grid">';
+
+  resRows.forEach(({ key, label, ph }) => {
+    const saved = _helperSavedConfig[key] || '';
+    const useCombo = key === 'gpu' && _gpuOptions.length > 0;
+    html += '<span class="param-name">' + escHtml(label) + '</span>' +
+      '<div class="param-cell">' +
+        (useCombo
+          ? '<div class="combo-wrap" id="combo-hcfg-gpu">' +
+              '<input class="field-input combo-input" id="hcfg-gpu" autocomplete="off"' +
+              ' value="' + escHtml(saved) + '" data-value="' + escHtml(saved) + '"' +
+              ' placeholder="' + escHtml(ph) + '">' +
+              '<div class="combo-list" id="combo-list-hcfg-gpu"></div>' +
+            '</div>'
+          : '<input class="field-input" id="hcfg-' + key + '" value="' + escHtml(saved) +
+              '" placeholder="' + escHtml(ph) + '">') +
+      '</div>';
+  });
+
+  if (params.length) {
+    html += '<div class="f-divider" style="grid-column:1/-1;margin:10px 0 2px">Helper params</div>';
+  }
+
+  paramComputed.forEach(({ p, opts }) => {
+    const saved = _helperSavedConfig[p.key.toLowerCase()] || '';
+    const ph    = p.default || (opts[0] || '');
+    html += '<span class="param-name">' + escHtml(p.key) + '</span>' +
+      '<div class="param-cell">' +
+        (opts.length
+          ? '<div class="combo-wrap" id="combo-hcfg-' + escHtml(p.key) + '">' +
+              '<input class="field-input combo-input" id="hcfg-' + escHtml(p.key) + '" autocomplete="off"' +
+              ' value="' + escHtml(saved) + '" data-value="' + escHtml(saved) + '"' +
+              ' placeholder="' + escHtml(ph) + '">' +
+              '<div class="combo-list" id="combo-list-hcfg-' + escHtml(p.key) + '"></div>' +
+            '</div>'
+          : '<input class="field-input" id="hcfg-' + escHtml(p.key) + '" value="' + escHtml(saved) +
+              '" placeholder="' + escHtml(ph) + '">') +
+        (p.desc ? '<span class="param-desc">' + escHtml(p.desc) + '</span>' : '') +
+      '</div>';
+  });
+
+  html += '</div>';
+  body.innerHTML = html;
+
+  if (_gpuOptions.length) initCombobox('hcfg-gpu', _gpuOptions, true, null);
+  paramComputed.forEach(({ p, opts, isOpen }) => {
+    if (opts.length) initCombobox('hcfg-' + p.key, opts, isOpen, null);
+  });
+
+  gid('hcfg-modal').classList.add('open');
+}
+
+async function saveHelperConfigModal() {
+  if (!selectedHelper) return;
+  const data = {};
+  ['cpus', 'mem', 'time', 'gpu'].forEach(k => {
+    const el = gid('hcfg-' + k);
+    if (el) data[k] = el.value.trim();
+  });
+  (selectedHelper.params || []).forEach(p => {
+    const el = gid('hcfg-' + p.key);
+    if (!el) return;
+    data[p.key.toLowerCase()] = (el.dataset.value !== undefined ? el.dataset.value : el.value).trim();
+  });
+  try {
+    const r = await fetch('/api/helpers/' + encodeURIComponent(selectedHelper.name) + '/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!r.ok) return;
+    _helperSavedConfig = await r.json();
+    _applyConfigPlaceholders();
+    closeModal('hcfg-modal');
+  } catch {}
+}
+
 function resetStartForm(helper) {
   const h = helper || selectedHelper;
   const d = (h && h.resource_defaults) || {};
-  const defaults = { cpus: d.cpus || 4, mem: d.mem || '16G', walltime: d.walltime || '08:00:00' };
 
   selectedModules = [];
   renderModuleChips();
 
-  _setVal('cfg-cpus', defaults.cpus);
-  _setVal('cfg-mem', defaults.mem);
-  _setVal('cfg-wall', defaults.walltime);
-  _setVal('cfg-gpu', '');
-  _setCwd('');
+  // Clear typed values; placeholders already reflect the defaults.
+  gid('cfg-cpus').value = '';
+  gid('cfg-mem').value  = '';
+  gid('cfg-wall').value = '';
+  gid('cfg-gpu').value  = '';
+  // Keep cwd between runs; clear overlay.
   _setVal('cfg-overlay', '');
   gid('cfg-overlay').dispatchEvent(new Event('input'));
 
   _helperParamKeys.forEach(key => {
     const input = gid('hparam-' + key);
     if (!input) return;
-    const param = (h?.params || []).find(p => p.key === key);
-    const value = param?.default || '';
-    input.value = value;
-    input.dataset.value = value;
+    input.value = '';
+    if (input.dataset.value !== undefined) input.dataset.value = '';
     input.classList.remove('combo-invalid');
   });
 
@@ -150,25 +288,55 @@ function resetStartForm(helper) {
   updateOvPreview();
 }
 
+/* ── Helper pin state ────────────────────── */
+const _pinnedKey = 'cnt_pinned_helpers';
+function _getPinned() {
+  try { return new Set(JSON.parse(localStorage.getItem(_pinnedKey) || '[]')); } catch { return new Set(); }
+}
+function togglePin(name, e) {
+  e.stopPropagation();
+  const pinned = _getPinned();
+  if (pinned.has(name)) pinned.delete(name); else pinned.add(name);
+  localStorage.setItem(_pinnedKey, JSON.stringify([...pinned]));
+  renderHelperList(gid('h-search')?.value);
+}
+
 function renderHelperList(filter) {
-  const list = gid('helper-list');
-  const q = (filter || '').toLowerCase().trim();
-  const helpers = q
+  const list   = gid('helper-list');
+  const q      = (filter || '').toLowerCase().trim();
+  const pinned = _getPinned();
+  let helpers  = q
     ? allHelpers.filter(h =>
         h.name.toLowerCase().includes(q) ||
         (h.whatis || '').toLowerCase().includes(q))
     : allHelpers;
+  // Pinned items float to the top
+  helpers = [
+    ...helpers.filter(h => pinned.has(h.name)),
+    ...helpers.filter(h => !pinned.has(h.name)),
+  ];
   if (!helpers.length) {
     list.innerHTML = '<div class="modal-empty">' +
       (q ? 'No matches.' : 'No helpers found.') + '</div>';
     return;
   }
-  list.innerHTML = helpers.map(h =>
-    '<div class="h-item" data-name="' + escHtml(h.name) + '" onclick="selectHelper(\'' + escHtml(h.name) + '\')">' +
-      '<div class="h-item-name">' + escHtml(h.name) + '</div>' +
-      '<div class="h-item-desc">'  + escHtml(h.whatis || '') + '</div>' +
-    '</div>'
-  ).join('');
+  list.innerHTML = helpers.map(h => {
+    const isPinned = pinned.has(h.name);
+    return '<div class="h-item" data-name="' + escHtml(h.name) + '" onclick="selectHelper(\'' + escHtml(h.name) + '\')">' +
+      '<div class="h-item-content">' +
+        '<div class="h-item-name">' + escHtml(h.name) + '</div>' +
+        '<div class="h-item-desc">'  + escHtml(h.whatis || '') + '</div>' +
+      '</div>' +
+      '<button class="h-pin-btn' + (isPinned ? ' pinned' : '') + '" onclick="togglePin(\'' + escHtml(h.name) + '\',event)" title="' + (isPinned ? 'Unpin' : 'Pin') + '">' +
+        iconSvg('star', null, isPinned) +
+      '</button>' +
+    '</div>';
+  }).join('');
+  // Restore active state for currently selected helper
+  if (selectedHelper) {
+    document.querySelectorAll('.h-item').forEach(e =>
+      e.classList.toggle('active', e.dataset.name === selectedHelper.name));
+  }
 }
 
 function selectHelper(name, overrides) {
@@ -204,9 +372,11 @@ function selectHelper(name, overrides) {
       computed.map(({ p, opts }) => {
         const defVal = p.default || (opts[0] || '');
         const ph     = p.optional && !p.default ? '(auto)' : (p.default || '');
+        const isRequired = !p.optional && !p.default;
         const input  = opts.length
-          ? makeComboboxHtml('hparam-' + p.key, defVal)
+          ? makeComboboxHtml('hparam-' + p.key, '', defVal)
           : '<input class="field-input" id="hparam-' + escHtml(p.key) + '"' +
+              (isRequired ? ' data-required="1"' : '') +
               ' placeholder="' + escHtml(ph) + '">';
         return '<span class="param-name">' + escHtml(p.key) + '</span>' +
           '<div class="param-cell">' +
@@ -218,6 +388,15 @@ function selectHelper(name, overrides) {
     // Wire comboboxes after HTML is in the DOM
     computed.forEach(({ p, opts, isOpen }) => {
       if (opts.length) initCombobox('hparam-' + p.key, opts, isOpen, null);
+      const isRequired = !p.optional && !p.default;
+      const el = gid('hparam-' + p.key);
+      if (!el || !isRequired) return;
+      el.dataset.required = '1';
+      // Plain inputs need their own blur listener; combobox inputs use initCombobox's
+      if (!opts.length) {
+        el.addEventListener('blur', () =>
+          el.classList.toggle('combo-invalid', !el.value.trim()));
+      }
     });
     // Restore param values when rerunning
     if (overrides && overrides.params) {
@@ -241,11 +420,22 @@ function selectHelper(name, overrides) {
         _setVal('cfg-wall',  overrides.wall  || d.walltime || '08:00:00');
         _setVal('cfg-gpu',   overrides.gpu   != null ? overrides.gpu   : (d.gpu      || ''));
       } else {
-        if (d.cpus)     _setVal('cfg-cpus', d.cpus);
-        if (d.mem)      _setVal('cfg-mem',  d.mem);
-        if (d.walltime) _setVal('cfg-wall', d.walltime);
-        if (d.gpu)      _setVal('cfg-gpu',  d.gpu);
+        // Script defaults loaded — re-apply placeholders (saved config may already be set).
+        _applyConfigPlaceholders();
       }
+    }).catch(() => {});
+
+  // Load saved config; apply resource + param values and render the gear button.
+  _helperSavedConfig = {};
+  _renderHelperConfigWrap();
+  fetch('/api/helpers/' + encodeURIComponent(name) + '/config')
+    .then(r => r.json())
+    .then(cfg => {
+      _helperSavedConfig = cfg || {};
+      if (!overrides) {
+        _applyConfigPlaceholders();
+      }
+      _renderHelperConfigWrap();
     }).catch(() => {});
 
   // Reset create form
@@ -636,8 +826,8 @@ function initCombobox(id, options, isOpen, onChange) {
   });
   input.addEventListener('blur', () => {
     setTimeout(() => list.classList.remove('open'), 150);
-    // Validate closed lists
-    if (!isOpen && options.length && !options.includes(input.value)) {
+    // Only mark invalid when explicitly required and empty
+    if (input.dataset.required && !input.value.trim()) {
       input.classList.add('combo-invalid');
     } else {
       input.classList.remove('combo-invalid');
@@ -762,11 +952,24 @@ async function createOverlay() {
 async function startHelper() {
   if (!selectedHelper) return;
   if (selectedHelper.img_packages && !gid('cfg-overlay').value) return;
+  // Validate required params
+  let hasEmpty = false;
+  _helperParamKeys.forEach(key => {
+    const el = gid('hparam-' + key);
+    if (!el || !el.dataset.required) return;
+    const empty = !el.value.trim();
+    el.classList.toggle('combo-invalid', empty);
+    if (empty) hasEmpty = true;
+  });
+  if (hasEmpty) return;
+  const _rv  = id => { const e = gid(id); return e.value.trim() || e.placeholder; };
+  const _mem  = v => /^\d+$/.test(v) ? v + 'G' : v;
+  const _wall = v => /^\d+$/.test(v) ? v + ':00:00' : /^\d+:\d+$/.test(v) ? v + ':00' : v;
   const body = {
-    cpus:    parseInt(gid('cfg-cpus').value)  || 4,
-    mem:     gid('cfg-mem').value   || '16G',
-    time:    gid('cfg-wall').value  || '08:00:00',
-    gpu:     gid('cfg-gpu').value   || '',
+    cpus:    parseInt(_rv('cfg-cpus')) || 4,
+    mem:     _mem(_rv('cfg-mem'))  || '16G',
+    time:    _wall(_rv('cfg-wall')) || '08:00:00',
+    gpu:     gid('cfg-gpu').value.trim() || gid('cfg-gpu').placeholder || '',
     cwd:     gid('cfg-cwd').value || '',
     overlay: gid('cfg-overlay').value || '',
     overlays: selectedModules.map(m => m.path),

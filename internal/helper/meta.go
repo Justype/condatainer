@@ -224,11 +224,18 @@ func ParseHelperScriptMeta(scriptPath string) (HelperScriptMeta, error) {
 				meta.NCPUs = n
 			}
 		case strings.HasPrefix(line, "#MEM:"):
-			if mb, err := utils.ParseMemoryMB(strings.TrimSpace(line[len("#MEM:"):])); err == nil && mb > 0 {
+			// Default unit is GB (bare number like "16" means 16 GB).
+			rawMem := strings.TrimSpace(line[len("#MEM:"):])
+			if mb, err := utils.ParseMemoryMBWithDefault(rawMem, "GB"); err == nil && mb > 0 {
 				meta.MemMB = mb
 			}
 		case strings.HasPrefix(line, "#TIME:"):
-			if d, err := utils.ParseWalltime(strings.TrimSpace(line[len("#TIME:"):])); err == nil && d > 0 {
+			raw := strings.TrimSpace(line[len("#TIME:"):])
+			// Bare integer defaults to hours (e.g. "12" → "12h").
+			if _, err := strconv.Atoi(raw); err == nil {
+				raw = raw + "h"
+			}
+			if d, err := utils.ParseWalltime(raw); err == nil && d > 0 {
 				meta.Walltime = d
 			}
 		case strings.HasPrefix(line, "#GPU:"):

@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -253,6 +255,36 @@ func (s *srv) handleHelperDelete(w http.ResponseWriter, r *http.Request, id stri
 }
 
 // renderHelperCards renders running helpers as HTMX-compatible HTML cards.
+// handleGpuOptions serves GET /api/gpu-options
+// Returns a sorted list of unique GPU type names discovered from the active scheduler.
+func (s *srv) handleGpuOptions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	sched := scheduler.ActiveScheduler()
+	if sched == nil {
+		json.NewEncoder(w).Encode([]string{}) //nolint:errcheck
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	info, err := sched.GetClusterInfo(ctx)
+	if err != nil || info == nil {
+		json.NewEncoder(w).Encode([]string{}) //nolint:errcheck
+		return
+	}
+	seen := make(map[string]bool)
+	for _, g := range info.AvailableGpus {
+		if g.Type != "" && g.Type != "gpu" {
+			seen[g.Type] = true
+		}
+	}
+	opts := make([]string, 0, len(seen))
+	for t := range seen {
+		opts = append(opts, t)
+	}
+	sort.Strings(opts)
+	json.NewEncoder(w).Encode(opts) //nolint:errcheck
+}
+
 func (s *srv) renderHelperCards(w http.ResponseWriter, runs []*helper.HelperRun) {
 	w.Header().Set("Content-Type", "text/html")
 	if len(runs) == 0 {

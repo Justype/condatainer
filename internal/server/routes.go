@@ -37,5 +37,6 @@ func registerRoutes(mux *http.ServeMux, s *srv) {
 	mux.HandleFunc("/api/tasks/", s.handleTaskSub)
 	mux.HandleFunc("/api/overlays", s.handleOverlaysList)
 	mux.HandleFunc("/api/fs", s.handleFS)
+	mux.HandleFunc("/api/gpu-options", s.handleGpuOptions)
 
 }

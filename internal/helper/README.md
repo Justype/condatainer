@@ -24,8 +24,9 @@ Parsed by `scheduler.ReadScriptSpecs()`. Standard scheduler directives also work
 
 ```bash
 #NCPUS: 4          # default CPU count
-#MEM:   16G        # default memory
-#TIME:  12:00:00   # default walltime — also accepts: 12h, 2h30m, 4d, 1-12:00:00
+#MEM:   16G        # default memory       — bare number defaults to GB (16 = 16G)
+#TIME:  12:00:00   # default walltime     — bare number defaults to hours (12 = 12h)
+                   # also accepts: 12h, 2h30m, 4d, 1-12:00:00
 #GPU:   a100:1     # optional GPU spec (type:count)
 ```
 

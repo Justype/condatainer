@@ -131,6 +131,8 @@ func (s *srv) handleHelpersSub(w http.ResponseWriter, r *http.Request) {
 		s.handleHelperRunning(w, r, id)
 	case "resources":
 		s.handleHelperResources(w, r, id)
+	case "config":
+		s.handleHelperConfig(w, r, id)
 	default:
 		http.NotFound(w, r)
 	}
@@ -274,6 +276,45 @@ func (s *srv) handleHelperResources(w http.ResponseWriter, r *http.Request, name
 		out.GPU = helper.FormatGpuSpec(spec)
 	}
 	writeJSON(w, out)
+}
+
+// handleHelperConfig serves GET/POST /api/helpers/{name}/config.
+// GET returns the saved per-helper key=value config as JSON.
+// POST accepts a JSON object of updates; empty string value deletes the key.
+func (s *srv) handleHelperConfig(w http.ResponseWriter, r *http.Request, name string) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg, _ := helper.LoadHelperConfig(name)
+		if cfg == nil {
+			cfg = map[string]string{}
+		}
+		writeJSON(w, cfg)
+	case http.MethodPost:
+		var updates map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+			http.Error(w, "bad request body", http.StatusBadRequest)
+			return
+		}
+		cfg, _ := helper.LoadHelperConfig(name)
+		if cfg == nil {
+			cfg = map[string]string{}
+		}
+		for k, v := range updates {
+			lk := strings.ToLower(k)
+			if v == "" {
+				delete(cfg, lk)
+			} else {
+				cfg[lk] = v
+			}
+		}
+		if err := helper.SaveHelperConfig(name, cfg); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, cfg)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // handleHelperOverlay serves GET /api/helpers/{name}/find-env

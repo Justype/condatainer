@@ -1,3 +1,17 @@
+/* ── Message text renderer (linkifies URLs) ─ */
+function appendMsgText(text, container) {
+  const urlRe = /https?:\/\/\S+/g;
+  let last = 0, m;
+  while ((m = urlRe.exec(text)) !== null) {
+    if (m.index > last) container.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const a = document.createElement('a');
+    a.href = m[0]; a.textContent = m[0]; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    container.appendChild(a);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) container.appendChild(document.createTextNode(text.slice(last)));
+}
+
 /* ── Jobs section ────────────────────────── */
 async function loadJobs() {
   try {
@@ -186,7 +200,7 @@ function switchDetailTab(tab) {
           try { ts.textContent = new Date(m.ts).toLocaleTimeString(); } catch {}
           div.appendChild(ts);
         }
-        div.appendChild(document.createTextNode(m.text || ''));
+        appendMsgText(m.text || '', div);
         content.appendChild(div);
         content.scrollTop = content.scrollHeight;
         // Update last-message snippet on the card

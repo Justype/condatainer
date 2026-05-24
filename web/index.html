@@ -89,25 +89,28 @@
           <div class="form-grid">
             <div class="field">
               <label class="field-label">CPUs</label>
-              <input class="field-input" id="cfg-cpus" value="4">
+              <input class="field-input" id="cfg-cpus" placeholder="4">
             </div>
             <div class="field">
-              <label class="field-label">Memory</label>
-              <input class="field-input" id="cfg-mem" value="16G">
+              <label class="field-label">Memory (GB)</label>
+              <input class="field-input" id="cfg-mem" placeholder="16G">
             </div>
             <div class="field">
-              <label class="field-label">Walltime</label>
-              <input class="field-input" id="cfg-wall" value="08:00:00">
+              <label class="field-label">Walltime (hours)</label>
+              <input class="field-input" id="cfg-wall" placeholder="08:00:00">
             </div>
             <div class="field">
               <label class="field-label">GPU (optional)</label>
-              <input class="field-input" id="cfg-gpu" placeholder="e.g. a100:1">
+              <div class="combo-wrap" id="combo-cfg-gpu">
+                <input class="field-input combo-input" id="cfg-gpu" autocomplete="off">
+                <div class="combo-list" id="combo-list-cfg-gpu"></div>
+              </div>
             </div>
           </div>
           <div class="field">
             <label class="field-label">Working Directory</label>
             <div class="field-row">
-              <input class="field-input" id="cfg-cwd" placeholder="/scratch/user/proj">
+              <input class="field-input" id="cfg-cwd" placeholder="Working directory (default: current)">
               <button class="btn btn-sm" onclick="openFilePicker('cfg-cwd','dir')">Browse</button>
             </div>
           </div>
@@ -180,6 +183,7 @@
           </div>
           <div id="helper-params-wrap"></div>
           <div class="form-actions">
+            <div id="helper-config-wrap"></div>
             <button class="btn btn-success" id="start-btn" onclick="startHelper()"><svg class="icon"><use href="#i-play_arrow"></use></svg>Start</button>
           </div>
           <div class="term-box" id="start-term"></div>
@@ -359,6 +363,21 @@
   </div>
 </div>
 
+<!-- ── Helper Config Modal ───────────────── -->
+<div class="modal-backdrop" id="hcfg-modal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <span id="hcfg-title">Saved Defaults</span>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('hcfg-modal')"><svg class="icon"><use href="#i-close"></use></svg></button>
+    </div>
+    <div class="modal-body" id="hcfg-body"></div>
+    <div class="modal-ftr">
+      <button class="btn btn-sm" onclick="closeModal('hcfg-modal')">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveHelperConfigModal()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Scripts (order matters) ───────────── -->
 <script src="/static/icons.js"></script>
 <script src="/static/htmx.min.js"></script>
@@ -376,6 +395,7 @@
   setInterval(loadJobs, 5000);
   loadHelpers();
   loadOverlays();
+  loadGpuOptions();
 </script>
 
 <!-- ─ Global progress window ──────────── -->
