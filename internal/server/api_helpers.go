@@ -30,6 +30,7 @@ func (s *srv) handleHelpersAvailable(w http.ResponseWriter, r *http.Request) {
 	type entry struct {
 		Name             string               `json:"name"`
 		Whatis           string               `json:"whatis,omitempty"`
+		ImgRequired      bool                 `json:"img_required,omitempty"`
 		ImgPackages      string               `json:"img_packages,omitempty"`
 		PostInstallCmd   string               `json:"post_install_cmd,omitempty"`
 		RequiredOverlays string               `json:"required_overlays,omitempty"`
@@ -65,6 +66,7 @@ func (s *srv) handleHelpersAvailable(w http.ResponseWriter, r *http.Request) {
 				ent := entry{
 					Name:           name,
 					Whatis:         whatis,
+					ImgRequired:    meta.ImgRequired,
 					ImgPackages:    meta.ImgPackages,
 					PostInstallCmd: meta.PostInstallCmd,
 					Singleton:      meta.Singleton,
@@ -83,7 +85,7 @@ func (s *srv) handleHelpersAvailable(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, `<div class="helper-grid">`)
 		for _, sc := range scripts {
-			needsOverlay := sc.ImgPackages != ""
+			needsOverlay := sc.ImgRequired
 			fmt.Fprintf(w, `<div class="helper-item" data-name="%s" data-img-packages="%s" onclick="selectHelper('%s')"><strong>%s</strong>`,
 				sc.Name, sc.ImgPackages, sc.Name, sc.Name)
 			if sc.Whatis != "" {
@@ -393,22 +395,32 @@ func (s *srv) handleHelperStart(w http.ResponseWriter, r *http.Request, name str
 		opts.EnvImg = req.Overlay
 	}
 
-	plan, err := helper.PlanRun(s.ctx, opts)
-	if err != nil {
-		writePlanError(w, err)
-		return
-	}
-
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	flusher, _ := w.(http.Flusher)
-	fmt.Fprintf(w, "Starting %s...\n", name)
-	if flusher != nil {
-		flusher.Flush()
+	flush := func() {
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	fmt.Fprintf(w, "Preparing %s...\n", name)
+	flush()
+
+	planCtx := logging.WithLogger(s.ctx, slog.New(weblog.New(w)))
+	planCtx = logging.WithWriter(planCtx, w)
+
+	plan, err := helper.PlanRun(planCtx, opts)
+	if err != nil {
+		flush()
+		fmt.Fprintf(w, "ERROR: %s\n", planErrMsg(err))
+		flush()
+		return
 	}
 
 	id, err := helper.ExecutePlan(s.ctx, plan, helper.IO{Stdout: w, Stderr: w})
 	if err != nil {
 		fmt.Fprintf(w, "ERROR: %v\n", err)
+		flush()
 		return
 	}
 	fmt.Fprintf(w, "Submitted: %s\n", id)
@@ -519,6 +531,28 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 		result, _ := json.Marshal(map[string]interface{}{"t": "done", "ok": true, "path": imgPath})
 		broker.publish(result)
 	}()
+}
+
+// planErrMsg converts a PlanRun error into a human-readable string for the
+// streaming start terminal (used when headers are already committed).
+func planErrMsg(err error) string {
+	var missing *helper.ErrMissingParam
+	if errors.As(err, &missing) {
+		keys := make([]string, len(missing.Params))
+		for i, p := range missing.Params {
+			keys[i] = p.Key
+		}
+		return "missing required param(s): " + strings.Join(keys, ", ")
+	}
+	var singleton *helper.ErrSingletonRunning
+	if errors.As(err, &singleton) {
+		return fmt.Sprintf("already running (%d instance(s)) — stop it first or open the existing session", len(singleton.Existing))
+	}
+	var inUse *helper.ErrEnvInUse
+	if errors.As(err, &inUse) {
+		return "env overlay is in use by another running instance — stop it first or choose a different overlay"
+	}
+	return err.Error()
 }
 
 // writePlanError translates helper.PlanRun errors into typed JSON HTTP responses.

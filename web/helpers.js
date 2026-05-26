@@ -113,6 +113,27 @@ async function loadHelpers() {
     allHelpers = (await r.json()) || [];
   } catch { allHelpers = []; }
   renderHelperList();
+  _restoreSelection();
+}
+
+/* ── Selection persistence ───────────────── */
+const _selKey = 'cnt_start_selection';
+function _saveSelection() {
+  if (!selectedHelper) return;
+  const params = {};
+  _helperParamKeys.forEach(key => {
+    const el = gid('hparam-' + key);
+    if (el && el.value) params[key] = el.value;
+  });
+  localStorage.setItem(_selKey, JSON.stringify({ name: selectedHelper.name, params }));
+}
+function _restoreSelection() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(_selKey) || 'null');
+    if (!saved || !saved.name) return;
+    if (!allHelpers.find(h => h.name === saved.name)) return;
+    selectHelper(saved.name, Object.keys(saved.params || {}).length ? { params: saved.params } : undefined);
+  } catch { /* ignore */ }
 }
 
 /* ── Apply saved-config as placeholders ───── */
@@ -342,6 +363,7 @@ function renderHelperList(filter) {
 function selectHelper(name, overrides) {
   selectedHelper = allHelpers.find(h => h.name === name);
   if (!selectedHelper) return;
+  if (!overrides) localStorage.setItem(_selKey, JSON.stringify({ name, params: {} }));
   selectedModules  = overrides && overrides.modules ? overrides.modules : [];
   _helperParamKeys = [];
   renderModuleChips();
@@ -387,10 +409,12 @@ function selectHelper(name, overrides) {
       '</div>';
     // Wire comboboxes after HTML is in the DOM
     computed.forEach(({ p, opts, isOpen }) => {
-      if (opts.length) initCombobox('hparam-' + p.key, opts, isOpen, null);
+      if (opts.length) initCombobox('hparam-' + p.key, opts, isOpen, () => renderModuleChips());
       const isRequired = !p.optional && !p.default;
       const el = gid('hparam-' + p.key);
-      if (!el || !isRequired) return;
+      if (!el) return;
+      el.addEventListener('input', () => { renderModuleChips(); _saveSelection(); });
+      if (!isRequired) return;
       el.dataset.required = '1';
       // Plain inputs need their own blur listener; combobox inputs use initCombobox's
       if (!opts.length) {
@@ -455,7 +479,7 @@ function selectHelper(name, overrides) {
 
   // Keep a user-selected env overlay when switching helpers; auto-resolve only
   // when the field is blank.
-  if (selectedHelper.img_packages) {
+  if (selectedHelper.img_required) {
     gid('ov-pkgs').placeholder = 'additional packages';
     if (gid('cfg-overlay').value) {
       gid('cfg-overlay').dispatchEvent(new Event('input'));
@@ -495,7 +519,7 @@ gid('cfg-overlay').addEventListener('input', function () {
 
   const notice  = gid('ov-notice');
   const startBtn = gid('start-btn');
-  const required = !!(selectedHelper && selectedHelper.img_packages);
+  const required = !!(selectedHelper && selectedHelper.img_required);
 
   if (!hasOverlay && selectedHelper) {
     notice.classList.add('visible');
@@ -951,7 +975,7 @@ async function createOverlay() {
 /* ── Start helper job ────────────────────── */
 async function startHelper() {
   if (!selectedHelper) return;
-  if (selectedHelper.img_packages && !gid('cfg-overlay').value) return;
+  if (selectedHelper.img_required && !gid('cfg-overlay').value) return;
   // Validate required params
   let hasEmpty = false;
   _helperParamKeys.forEach(key => {
@@ -1007,22 +1031,27 @@ async function startHelper() {
 
     const reader = r.body.getReader();
     const dec    = new TextDecoder();
+    let hasError = false;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       dec.decode(value).split('\n').forEach(line => {
         if (!line) return;
+        const isErr = line.startsWith('ERROR:');
+        if (isErr) hasError = true;
         const div = document.createElement('div');
-        div.className = 'tl-info';
+        div.className = isErr ? 'tl-err' : 'tl-info';
         div.textContent = line;
         term.appendChild(div);
         term.scrollTop = term.scrollHeight;
       });
     }
     await loadJobs();
-    resetStartForm(selectedHelper);
-    if (gid('sec-start')?.classList.contains('active'))
-      setTimeout(() => navigate('jobs'), 500);
+    if (!hasError) {
+      resetStartForm(selectedHelper);
+      if (gid('sec-start')?.classList.contains('active'))
+        setTimeout(() => navigate('jobs'), 500);
+    }
   } catch (e) {
     term.innerHTML += '<div class="tl-err">Error: ' + escHtml(String(e)) + '</div>';
   } finally {
@@ -1037,13 +1066,24 @@ function renderModuleChips() {
   if (!list) return;
 
   // Required overlays from the helper script — greyed out, not removable.
+  // Resolve {KEY} tokens using current param values (or defaults).
+  const params = _collectParams();
+  const pv     = selectedHelper?.param_values || {};
+  (selectedHelper?.params || []).forEach(p => {
+    if (!(p.key in params)) {
+      const vals = pv[p.key] || [];
+      params[p.key] = p.default || (vals[0] || '');
+    }
+  });
   const requiredNames = (selectedHelper?.required_overlays || '').trim().split(/\s+/).filter(Boolean);
-  const requiredChips = requiredNames.map(name =>
-    '<div class="module-chip required">' +
-      '<span class="module-chip-name">' + escHtml(name) + '</span>' +
+  const requiredChips = requiredNames.map(name => {
+    let resolved = name;
+    Object.entries(params).forEach(([k, v]) => { resolved = resolved.replaceAll('{' + k + '}', v); });
+    return '<div class="module-chip required">' +
+      '<span class="module-chip-name">' + escHtml(resolved) + '</span>' +
       '<span class="module-chip-label">default</span>' +
-    '</div>'
-  ).join('');
+    '</div>';
+  }).join('');
 
   const userChips = selectedModules.map((m, i) =>
     '<div class="module-chip">' +

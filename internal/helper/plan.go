@@ -127,6 +127,7 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 	}
 	opts.EnvImg = ResolveEnvOverlayInDir(opts.EnvImg, cwd)
 	if opts.EnvImg != "" {
+		logger.Info("Checking env overlay", "path", opts.EnvImg)
 		st, err := CheckEnv(ctx, opts.EnvImg)
 		if err != nil {
 			return nil, fmt.Errorf("checking env overlay: %w", err)
@@ -185,6 +186,9 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 	}
 
 	userOverlays := opts.Overlays
+	if meta.RequiredOverlays != "" {
+		logger.Info("Checking required overlays", "overlays", meta.RequiredOverlays)
+	}
 	namedOverlays, err := CheckRequiredOverlays(ctx, meta.RequiredOverlays, params)
 	if err != nil {
 		return nil, err
@@ -193,7 +197,7 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 		opts.Overlays = append(append([]string(nil), namedOverlays...), opts.Overlays...)
 	}
 
-	if meta.ImgPackages != "" && opts.EnvImg == "" {
+	if meta.ImgRequired && opts.EnvImg == "" {
 		return nil, fmt.Errorf("helper requires a writable overlay (#IMG_PACKAGES set) — create one and pass --env or set EnvImg")
 	}
 

@@ -25,9 +25,12 @@ type HelperParam struct {
 
 // HelperScriptMeta holds overlay and singleton metadata extracted from a helper script.
 type HelperScriptMeta struct {
+	// ImgRequired is true when the #IMG_PACKAGES: header is present, meaning the
+	// helper requires a writable overlay (.img) even if no packages are listed.
+	ImgRequired bool
 	// ImgPackages is a template of conda packages for guided overlay creation and
 	// pre-submission package verification. {KEY} tokens are substituted from
-	// resolved #PARAM: values before use.
+	// resolved #PARAM: values before use. Empty when #IMG_PACKAGES: has no value.
 	ImgPackages string
 	// RequiredOverlays is a space-separated template of named condatainer overlays
 	// (SquashFS images) to load before the helper runs. {KEY} tokens are substituted
@@ -241,6 +244,7 @@ func ParseHelperScriptMeta(scriptPath string) (HelperScriptMeta, error) {
 		case strings.HasPrefix(line, "#GPU:"):
 			meta.GPU = strings.TrimSpace(line[len("#GPU:"):])
 		case strings.HasPrefix(line, "#IMG_PACKAGES:"):
+			meta.ImgRequired = true
 			meta.ImgPackages = strings.TrimSpace(line[len("#IMG_PACKAGES:"):])
 		case strings.HasPrefix(line, "#REQUIRED_OVERLAYS:"),
 			strings.HasPrefix(line, "#OVERLAY_PACKAGES:"):

@@ -233,14 +233,14 @@ func checkAndInstallNamedOverlays(ctx context.Context, names []string) ([]string
 	}
 
 	// First pass: resolve already-present overlays and collect missing names.
-	var paths []string
+	resolved := make(map[string][]string, len(names))
 	var missing []string
 	for _, name := range names {
-		resolved, lookupErr := container.ResolveOverlayPaths([]string{name})
+		paths, lookupErr := container.ResolveOverlayPaths([]string{name})
 		if lookupErr != nil {
 			missing = append(missing, name)
 		} else {
-			paths = append(paths, resolved...)
+			resolved[name] = paths
 		}
 	}
 
@@ -249,8 +249,12 @@ func checkAndInstallNamedOverlays(ctx context.Context, names []string) ([]string
 		logging.FromContext(ctx).Info("required overlays not found, building now", "overlays", strings.Join(missing, " "))
 		args := append([]string{"create"}, missing...)
 		cmd := exec.CommandContext(ctx, condaBin, args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		cmdOut := logging.WriterFromCtx(ctx)
+		if cmdOut == nil {
+			cmdOut = os.Stdout
+		}
+		cmd.Stdout = cmdOut
+		cmd.Stderr = cmdOut
 		if err := cmd.Run(); err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) && exitErr.ExitCode() == config.ExitCodeJobsSubmitted {
@@ -261,12 +265,18 @@ func checkAndInstallNamedOverlays(ctx context.Context, names []string) ([]string
 		}
 		container.InvalidateInstalledOverlaysCache()
 		for _, name := range missing {
-			resolved, err := container.ResolveOverlayPaths([]string{name})
+			paths, err := container.ResolveOverlayPaths([]string{name})
 			if err != nil {
 				return nil, fmt.Errorf("overlay %q not found after build: %w", name, err)
 			}
-			paths = append(paths, resolved...)
+			resolved[name] = paths
 		}
+	}
+
+	// Reconstruct in original order so overlay precedence matches #REQUIRED_OVERLAYS.
+	var paths []string
+	for _, name := range names {
+		paths = append(paths, resolved[name]...)
 	}
 	return paths, nil
 }
@@ -398,9 +408,11 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	fmt.Fprintf(&sb, "export CNT_HELPER_SCRIPT_DIR=%s\n", shellQuote(scriptDir))
 	fmt.Fprintln(&sb, `export SCRATCH="${SCRATCH:-$HOME}"`)
 
-	// CNT_JOB_TMPDIR: per-job node-local tmpdir. Unix sockets (dbus, X11, PulseAudio)
-	// require local storage and do not work over NFS. Scheduler-assigned dirs are
-	// auto-cleaned by the scheduler; the /tmp fallback is cleaned by the wrapper trap.
+	// CNT_JOB_TMPDIR: per-job node-local scratch dir. Unix sockets (dbus, X11, PulseAudio,
+	// rserver RPC) require local storage and do not work over NFS.
+	// For schedulers: scheduler-assigned dir (SLURM_TMPDIR etc.) when available, falling
+	// back to /tmp/cnt-$USER/$CNT_HELPER_ID. For headless: resolved at generation time.
+	// The directory is created here; cleanup is handled by the wrapper trap below.
 	if sched != nil {
 		if v := sched.TmpDirVar(); v != "" {
 			fmt.Fprintf(&sb, "export CNT_JOB_TMPDIR=\"${%s:-/tmp/cnt-${USER:-condatainer}/${CNT_HELPER_ID}}\"\n", v)
@@ -411,6 +423,7 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 		// Headless: generated and executed on the same login node, so resolve at generation time.
 		fmt.Fprintf(&sb, "export CNT_JOB_TMPDIR=%s\n", shellQuote(filepath.Join(utils.GetTmpDir(), id)))
 	}
+	fmt.Fprintln(&sb, `mkdir -p "$CNT_JOB_TMPDIR"`)
 
 	// #PARAM: values resolved from flags + prompts
 	for k, v := range params {
@@ -427,14 +440,17 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	fmt.Fprintln(&sb)
 
 	// Trap SIGTERM/INT (walltime kill, scancel, qdel) so done is recorded even when killed.
-	// Also clean up the /tmp fallback dir used in headless mode (scheduler-assigned dirs
-	// are cleaned by the scheduler itself).
+	// CNT_JOB_TMPDIR is always cleaned up: headless uses rm -rf on the resolved path;
+	// scheduler uses the shell variable so it works for both the scheduler-assigned dir
+	// and the /tmp fallback (scheduler-assigned dirs being wiped twice is harmless).
 	cleanupTrap := `condatainer _server_done --exit-code 130`
 	if sched == nil {
 		parentDir := utils.GetTmpDir()
 		jobTmpDir := filepath.Join(parentDir, id)
 		cleanupTrap += fmt.Sprintf(`; rm -rf %s; rmdir %s 2>/dev/null || true`,
 			shellQuote(jobTmpDir), shellQuote(parentDir))
+	} else {
+		cleanupTrap += `; rm -rf "$CNT_JOB_TMPDIR"`
 	}
 	fmt.Fprintf(&sb, "trap '%s; exit 130' TERM INT\n", cleanupTrap)
 	fmt.Fprintln(&sb)
@@ -452,6 +468,8 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 		jobTmpDir := filepath.Join(parentDir, id)
 		fmt.Fprintf(&sb, "rm -rf %s\n", shellQuote(jobTmpDir))
 		fmt.Fprintf(&sb, "rmdir %s 2>/dev/null || true\n", shellQuote(parentDir))
+	} else {
+		fmt.Fprintln(&sb, `rm -rf "$CNT_JOB_TMPDIR"`)
 	}
 	fmt.Fprintln(&sb, `(exit $_cnt_exit)`)
 

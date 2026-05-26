@@ -80,10 +80,11 @@ Two formats:
 Presence signals that a writable conda-env overlay is required. Value is the default package list for guided creation; `{KEY}` tokens are substituted from resolved `#PARAM:` values.
 
 ```bash
-#IMG_PACKAGES: python={CONDA_PYTHON} jupyterlab
+#IMG_PACKAGES: python={CONDA_PYTHON} jupyterlab   # overlay required + package check
+#IMG_PACKAGES:                                     # overlay required, no package check
 ```
 
-- **With overlay (`-e` given)**: Go runs a pre-submission install check (fatal if packages not found).
+- **With overlay (`-e` given)**: if packages are listed, Go runs a pre-submission install check (fatal if packages not found). If the value is empty, the overlay is still required but no check is performed.
 - **Without overlay**: Go prompts to create one (guided overlay creation flow).
 
 ### `#POST_INSTALL_CMD:` — post-install hook
@@ -107,11 +108,12 @@ Multiple lines accumulate independently (one path checked per line).
 
 ### `#REQUIRED_OVERLAYS:` — named SquashFS overlays
 
-Space-separated overlay names. `{KEY}` tokens are substituted from resolved params. Go checks each overlay exists on disk and installs any that are missing before submitting the job.
+Space-separated overlay names. `{KEY}` tokens are substituted from resolved params. Go checks each overlay exists on disk and installs any that are missing before submitting the job. **Declaration order is preserved** in the Apptainer overlay stack — the last name is the topmost layer (wins on file conflicts such as `/var/lib/dpkg/status`).
 
 ```bash
 #REQUIRED_OVERLAYS: r{POSIT_R} rstudio-server build-essential
 # resolves to: r4.4.3 rstudio-server build-essential
+# → build-essential is topmost; its dpkg database is visible to tools like pak
 ```
 
 ### `#BIND:` — extra bind mounts

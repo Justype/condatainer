@@ -222,7 +222,7 @@ function initCodeBlocks() {
     if (el.querySelector('button')) return;
     const btn = document.createElement('button');
     btn.className = 'btn btn-sm';
-    btn.innerHTML = iconSvg('content_copy') + ' Copy';
+    btn.innerHTML = iconSvg('content_copy');
     btn.onclick = function() { copyStr(el.querySelector(':not(button)')?.textContent || '', this); };
     el.appendChild(btn);
   });
