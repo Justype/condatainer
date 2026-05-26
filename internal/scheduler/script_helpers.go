@@ -287,6 +287,10 @@ func writeJobHeader(w io.Writer, jobIDVar string, specs *ScriptSpecs, formatTime
 	if rs != nil && rs.CpusPerTask > 0 {
 		fmt.Fprintf(w, "export OMP_NUM_THREADS=${OMP_NUM_THREADS:-%d}\n", rs.CpusPerTask)
 	}
+	// Per-job proxy: start tunnel back to the submitting login node.
+	if specs != nil && specs.ProxyVia != "" {
+		fmt.Fprintf(w, "condatainer proxy start --via %s 2>/dev/null || true\n", specs.ProxyVia)
+	}
 }
 
 // writeJobFooter writes the job completion footer echo block to w.

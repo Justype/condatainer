@@ -198,6 +198,10 @@ type ScriptSpecs struct {
 	RawFlags       []string      // ALL original directives — immutable audit log
 	RemainingFlags []string      // Directives not absorbed by Spec or Control
 	ScriptType     SchedulerType // Scheduler type detected from script directives
+	// ProxyVia, when non-empty, causes writeJobHeader to emit
+	// "condatainer proxy start --via <host>" at the top of the job body.
+	// Set by callers when proxy_perjob=true.
+	ProxyVia string
 }
 
 // ResolvePath returns path resolved against WorkDir when the path is relative.

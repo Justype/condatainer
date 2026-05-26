@@ -1895,7 +1895,7 @@ condatainer proxy start [--host HOST] [--via VIA] [--port PORT]
 | Flag | Description |
 |---|---|
 | `--host HOST` | Run the daemon on `HOST` instead of the current node (login node only; delegates via SSH). |
-| `--via VIA` | SSH server to tunnel through. Default: current node (shared) or `CNT_PROXY_VIA` (per-job). |
+| `--via VIA` | SSH server to tunnel through. Default: current node (shared mode); required for per-job mode inside a job. |
 | `--port PORT` | Listen port. Default: OS-assigned. |
 
 Shared mode attempts `loginctl enable-linger` so the daemon survives logout. A warning is printed if it fails.
@@ -1924,13 +1924,13 @@ When running inside a scheduler job, condatainer auto-injects the proxy URL into
 - **container env** — `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`, `all_proxy`, `ALL_PROXY`
 - **condatainer's HTTP clients** — script fetching and metadata downloads use the proxy transport directly
 
-Lookup order: per-job proxy → shared proxy → auto-start (if `proxy_perjob=true`).
+Lookup order: per-job proxy → shared proxy.
 
 The proxy port speaks both HTTP CONNECT (`http_proxy`) and SOCKS5 (`all_proxy`) — compatible with all tools (curl, wget, pip, micromamba, etc.).
 
 ### `proxy_perjob` config option
 
-When `proxy_perjob: true`, condatainer auto-starts a per-job proxy inside every submitted job if no active proxy is found. Requires `CNT_PROXY_VIA` to be set — done automatically by `condatainer build` and `condatainer run` at submission time.
+When `proxy_perjob: true`, condatainer injects `condatainer proxy start --via <login-node>` at the top of every generated scheduler script (build, run, helper jobs). The per-job proxy starts automatically on the compute node before the job body runs.
 
 ```yaml
 proxy_perjob: true   # default: false

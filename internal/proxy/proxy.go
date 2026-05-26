@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -12,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"log/slog"
@@ -117,15 +115,12 @@ func FreePort() (int, error) {
 }
 
 // ResolveViaHost resolves the SSH server to tunnel through for a per-job proxy.
-// Priority: --via flag > CNT_PROXY_VIA env (baked at submit time by condatainer).
+// Uses the --via flag value, or returns an error if not provided.
 func ResolveViaHost(flagVia string) (string, error) {
 	if flagVia != "" {
 		return flagVia, nil
 	}
-	if h := os.Getenv("CNT_PROXY_VIA"); h != "" {
-		return h, nil
-	}
-	return "", errors.New("cannot determine login node: use --via, or submit jobs via condatainer so CNT_PROXY_VIA is set automatically")
+	return "", errors.New("cannot determine login node: use --via to specify the SSH server to tunnel through")
 }
 
 // StartOnNode SSHes to host and runs "condatainer proxy start" there (delegation).
@@ -175,9 +170,7 @@ func ProxyEnvList(httpURL string) []string {
 
 // FindActiveProxy returns the proxy URL to use for the current job.
 // Checks the local per-job PID file first, then the shared NFS PID file.
-// If autostart is true and no active proxy is found, attempts to start a
-// per-job local proxy using ResolveViaHost.
-func FindActiveProxy(autostart bool) (string, bool) {
+func FindActiveProxy() (string, bool) {
 	// 1. Local per-job proxy (127.0.0.1:PORT — this compute node only)
 	if ps, err := ReadLocalPidFile(); err == nil && ProxyAlive(ps.Host, ps.Port) {
 		return fmt.Sprintf("http://%s:%d", ps.Host, ps.Port), true
@@ -188,15 +181,6 @@ func FindActiveProxy(autostart bool) (string, bool) {
 			return fmt.Sprintf("http://%s:%d", ps.Host, ps.Port), true
 		}
 		slog.Default().Warn("shared proxy is unreachable", "host", ps.Host, "port", ps.Port)
-	}
-	// 3. Auto-start per-job proxy if enabled and login node is known
-	if autostart {
-		if via, err := ResolveViaHost(""); err == nil {
-			if u, ok := autoStartLocalProxy(via); ok {
-				return u, true
-			}
-			slog.Default().Warn("failed to auto-start per-job proxy, SSH may have failed", "via", via)
-		}
 	}
 	return "", false
 }
@@ -215,7 +199,7 @@ func GetJobProxy() (string, bool) {
 		if !scheduler.IsInsideJob() {
 			return
 		}
-		if u, ok := FindActiveProxy(config.Global.ProxyPerJob); ok {
+		if u, ok := FindActiveProxy(); ok {
 			jobProxyURL = u
 		}
 	})
@@ -223,55 +207,6 @@ func GetJobProxy() (string, bool) {
 		return "", false
 	}
 	return jobProxyURL, true
-}
-
-// autoStartLocalProxy double-forks a per-job daemon (127.0.0.1, localOnly=true)
-// tunneling through via, waits for the local PID file, and returns the proxy URL.
-func autoStartLocalProxy(via string) (string, bool) {
-	port, err := FreePort()
-	if err != nil {
-		return "", false
-	}
-
-	exe, err := os.Executable()
-	if err != nil {
-		return "", false
-	}
-
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		return "", false
-	}
-
-	daemonArgs := []string{"_proxy_daemon", "--report-fd", "3", "--local"}
-	if utils.DebugMode {
-		daemonArgs = append(daemonArgs, "--debug")
-	}
-	daemonArgs = append(daemonArgs, via, strconv.Itoa(port))
-	daemonCmd := exec.Command(exe, daemonArgs...)
-	daemonCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	daemonCmd.ExtraFiles = []*os.File{pw}
-	if utils.DebugMode {
-		daemonCmd.Stderr = os.Stderr
-	}
-
-	if err := daemonCmd.Start(); err != nil {
-		pw.Close()
-		pr.Close()
-		return "", false
-	}
-	pw.Close()
-	daemonCmd.Process.Release() //nolint:errcheck
-
-	msg, _ := io.ReadAll(pr)
-	pr.Close()
-	if len(msg) > 0 {
-		return "", false
-	}
-	if ps, err := ReadLocalPidFile(); err == nil {
-		return fmt.Sprintf("http://%s:%d", ps.Host, ps.Port), true
-	}
-	return fmt.Sprintf("http://127.0.0.1:%d", port), true
 }
 
 // WillSurviveLogout returns true if the proxy daemon is expected to survive user logout.

@@ -522,7 +522,7 @@ func newHelperID(name string) string {
 // Stdout and Stderr are /dev/null because the command body uses `exec >>` to
 // redirect output to the per-ID state dir; the scheduler-level log is unused.
 func buildHelperScriptSpecs(name, cwd string, spec *scheduler.ResourceSpec) *scheduler.ScriptSpecs {
-	return &scheduler.ScriptSpecs{
+	ss := &scheduler.ScriptSpecs{
 		Spec: spec,
 		Control: scheduler.RuntimeConfig{
 			JobName: "cnt-" + name,
@@ -532,6 +532,12 @@ func buildHelperScriptSpecs(name, cwd string, spec *scheduler.ResourceSpec) *sch
 		},
 		HasDirectives: spec != nil,
 	}
+	if config.Global.ProxyPerJob {
+		if h, err := os.Hostname(); err == nil && h != "" {
+			ss.ProxyVia = h
+		}
+	}
+	return ss
 }
 
 // generateWrapper writes the job submission script into the helper's state

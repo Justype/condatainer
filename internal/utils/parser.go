@@ -1,9 +1,9 @@
 package utils
 
 import (
-	"maps"
 	"bufio"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
 	"sort"

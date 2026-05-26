@@ -242,7 +242,6 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_NOTIFICATION`         | `notification`         |
 | `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
 | `CNT_PROXY_PERJOB`         | `proxy_perjob`         |
-| `CNT_PROXY_VIA`            | Internal. Set automatically at job submission time for per-job proxy. |
 | `CNT_TMPDIR`               | (special override)     |
 
 Example:

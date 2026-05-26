@@ -116,9 +116,8 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 		execLocks = append(execLocks, lock)
 	}
 
-	// Inject SOCKS5 proxy env vars if a proxy tunnel is active.
+	// Inject SOCKS5 proxy env vars if a proxy tunnel is active (inside a job only).
 	// Checks per-job local proxy first, then shared NFS proxy.
-	// Auto-starts a per-job proxy if proxy_perjob=true or CNT_PROXY_PERJOB=1.
 	// Prepend so explicit --env flags from the user take precedence.
 	envList := setupResult.EnvList
 	if proxyURL, ok := proxy.GetJobProxy(); ok {

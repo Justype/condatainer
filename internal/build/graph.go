@@ -294,6 +294,11 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 		effRS := buildEffectiveResourceSpec(nil)
 		specs = &scheduler.ScriptSpecs{Spec: effRS}
 	}
+	if config.Global.ProxyPerJob {
+		if h, err := os.Hostname(); err == nil && h != "" {
+			specs.ProxyVia = h
+		}
+	}
 
 	// Derive job name from name/version if not set in script
 	if specs.Control.JobName == "" {
@@ -348,11 +353,6 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 // scheduler node does not need a TTY.
 func buildSchedulerCreateCommand(nameVersion string, update bool, interactiveInputs []string) string {
 	var cmd strings.Builder
-	// Bake the login node hostname so per-job proxy knows where to tunnel.
-	// CNT_PROXY_VIA is used by "condatainer proxy start --via" and proxy_perjob autostart.
-	if h, err := os.Hostname(); err == nil && h != "" {
-		cmd.WriteString("export CNT_PROXY_VIA=" + h + "\n")
-	}
 	cmd.WriteString("condatainer create")
 	if PreferRemote {
 		cmd.WriteString(" --remote")
