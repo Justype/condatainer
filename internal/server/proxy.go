@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,30 @@ import (
 
 	internalproxy "github.com/Justype/condatainer/internal/proxy"
 )
+
+// origHostKey is the context key for passing the original frontend Host header
+// through the proxy Director so ModifyResponse can rewrite Location headers.
+type origHostKey struct{}
+
+// rewriteLocationResponse returns a ModifyResponse func that rewrites absolute
+// Location headers pointing to the backend (http://127.0.0.1:port/...) to the
+// original frontend host. Fixes apps like RStudio that issue absolute redirects
+// using their own bound address (e.g. /auth-sign-in with --auth-none=1).
+func rewriteLocationResponse(target *url.URL) func(*http.Response) error {
+	backendPrefix := "http://" + target.Host
+	return func(resp *http.Response) error {
+		loc := resp.Header.Get("Location")
+		if loc == "" || !strings.HasPrefix(loc, backendPrefix) {
+			return nil
+		}
+		origHost, _ := resp.Request.Context().Value(origHostKey{}).(string)
+		if origHost == "" {
+			return nil
+		}
+		resp.Header.Set("Location", "http://"+origHost+loc[len(backendPrefix):])
+		return nil
+	}
+}
 
 // proxyEntry holds a live reverse-proxy for one helper run.
 type proxyEntry struct {
@@ -74,6 +99,8 @@ func (r *proxyRegistry) Open(id, name, node string, port int) {
 		target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
 		rp := httputil.NewSingleHostReverseProxy(target)
 		rp.Director = hostRewriteDirector(target)
+		rp.ModifyResponse = rewriteLocationResponse(target)
+		rp.FlushInterval = -1 // flush immediately for streaming (R console, terminal)
 		r.mu.Lock()
 		delete(r.pending, id)
 		if _, ok := r.entries[id]; !ok {
@@ -128,6 +155,8 @@ func (r *proxyRegistry) Open(id, name, node string, port int) {
 	}()
 	rp := httputil.NewSingleHostReverseProxy(target)
 	rp.Director = hostRewriteDirector(target)
+	rp.ModifyResponse = rewriteLocationResponse(target)
+	rp.FlushInterval = -1 // flush immediately for streaming (R console, terminal)
 	rp.Transport = transport
 
 	r.entries[id] = &proxyEntry{rp: rp, name: name, node: node, port: port}
@@ -196,7 +225,10 @@ func (s *srv) serveSubdomainProxy(w http.ResponseWriter, r *http.Request, id str
 		http.Error(w, msg, http.StatusServiceUnavailable)
 		return
 	}
-	entry.rp.ServeHTTP(w, r)
+	// Store the original frontend Host so ModifyResponse can rewrite Location
+	// headers that apps (e.g. RStudio) emit using their own bound address.
+	ctx := context.WithValue(r.Context(), origHostKey{}, r.Host)
+	entry.rp.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // hostRewriteDirector returns a director func that rewrites req.Host and the
