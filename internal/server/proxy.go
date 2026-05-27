@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -33,9 +34,23 @@ func rewriteLocationResponse(target *url.URL) func(*http.Response) error {
 		if origHost == "" {
 			return nil
 		}
-		resp.Header.Set("Location", "http://"+origHost+loc[len(backendPrefix):])
+		trimmedPath := strings.TrimPrefix(loc, backendPrefix)
+		resp.Header.Set("Location", "http://"+origHost+trimmedPath)
 		return nil
 	}
+}
+
+// newReverseProxy creates a fully configured ReverseProxy for the given target.
+func newReverseProxy(target *url.URL, transport http.RoundTripper) *httputil.ReverseProxy {
+	rp := httputil.NewSingleHostReverseProxy(target)
+	rp.Director = hostRewriteDirector(target)
+	rp.ModifyResponse = rewriteLocationResponse(target)
+	rp.FlushInterval = -1 // flush immediately for streaming (R console, terminal)
+
+	if transport != nil {
+		rp.Transport = transport
+	}
+	return rp
 }
 
 // proxyEntry holds a live reverse-proxy for one helper run.
@@ -97,14 +112,14 @@ func (r *proxyRegistry) Open(id, name, node string, port int) {
 	// Level 1: same-host — direct TCP, no SSH needed (headless jobs).
 	if isLocalHost(node) {
 		target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
-		rp := httputil.NewSingleHostReverseProxy(target)
-		rp.Director = hostRewriteDirector(target)
-		rp.ModifyResponse = rewriteLocationResponse(target)
-		rp.FlushInterval = -1 // flush immediately for streaming (R console, terminal)
+		rp := newReverseProxy(target, nil)
+
 		r.mu.Lock()
 		delete(r.pending, id)
 		if _, ok := r.entries[id]; !ok {
-			r.entries[id] = &proxyEntry{rp: rp, name: name, node: node, port: port}
+			r.entries[id] = &proxyEntry{
+				rp: rp, name: name, node: node, port: port,
+			}
 			delete(r.lastErrors, id)
 			r.log.Debug("server: proxy direct TCP", "id", id, "port", port)
 		}
@@ -144,20 +159,15 @@ func (r *proxyRegistry) Open(id, name, node string, port int) {
 	}
 
 	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
-	transport := &http.Transport{
-		DialContext: dial,
-	}
+	transport := &http.Transport{DialContext: dial}
+	rp := newReverseProxy(target, transport)
+
 	// Watch for unexpected tunnel closure and clean up.
 	go func() {
 		<-done
 		r.Close(id)
 		stop()
 	}()
-	rp := httputil.NewSingleHostReverseProxy(target)
-	rp.Director = hostRewriteDirector(target)
-	rp.ModifyResponse = rewriteLocationResponse(target)
-	rp.FlushInterval = -1 // flush immediately for streaming (R console, terminal)
-	rp.Transport = transport
 
 	r.entries[id] = &proxyEntry{rp: rp, name: name, node: node, port: port}
 	delete(r.lastErrors, id)
@@ -231,6 +241,11 @@ func (s *srv) serveSubdomainProxy(w http.ResponseWriter, r *http.Request, id str
 	entry.rp.ServeHTTP(w, r.WithContext(ctx))
 }
 
+// isWebSocketUpgrade reports whether r is a WebSocket upgrade request.
+func isWebSocketUpgrade(req *http.Request) bool {
+	return strings.EqualFold(req.Header.Get("Upgrade"), "websocket")
+}
+
 // hostRewriteDirector returns a director func that rewrites req.Host and the
 // Origin header to the backend address. This prevents host-header and
 // WebSocket origin checks in apps like JupyterLab and code-server (which
@@ -240,7 +255,26 @@ func hostRewriteDirector(target *url.URL) func(*http.Request) {
 	std := httputil.NewSingleHostReverseProxy(target).Director
 	origin := "http://" + target.Host
 	return func(req *http.Request) {
+		originalHost := req.Host
+		// Run standard director (modifies req.URL, etc.)
 		std(req)
+		// X-Forwarded headers should be injected ONLY for normal HTTP requests.
+		// These are required by vscode-server on initial load so the correct client UI can be built.
+		// However, during WebSocket upgrades, the match between Origin and X-Forwarded-Host is strictly verified by code-server.
+		// Since the Origin is spoofed to 127.0.0.1 below, a mismatch and a 403/1006 error are caused if the real X-Forwarded-Host is passed.
+		if !isWebSocketUpgrade(req) {
+			req.Header.Set("X-Forwarded-Host", originalHost)
+			proto := req.Header.Get("X-Forwarded-Proto")
+			if proto == "" {
+				if req.TLS != nil {
+					proto = "https"
+				} else {
+					proto = "http"
+				}
+			}
+			req.Header.Set("X-Forwarded-Proto", proto)
+		}
+		// Overwrite the primary Host/Origin headers to satisfy backend binding checks.
 		req.Host = target.Host
 		if req.Header.Get("Origin") != "" {
 			req.Header.Set("Origin", origin)
@@ -254,9 +288,9 @@ func hostRewriteDirector(target *url.URL) func(*http.Request) {
 func (s *srv) hostDispatch(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := r.Host
-		// Strip port suffix.
-		if i := strings.LastIndex(host, ":"); i >= 0 {
-			host = host[:i]
+		// Safely strip port suffix, ignoring the error if no port exists.
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
 		}
 		// {id}.localhost → proxy to helper.
 		const suffix = ".localhost"
