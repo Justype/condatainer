@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
@@ -42,6 +43,7 @@ var configKeyDefs = map[string]bool{
 	"notification":           false,
 	"metadata_cache_ttl":     false,
 	"proxy_perjob":           false,
+	"helper_bind_all":        false,
 	"build.ncpus":            false,
 	"build.mem":              false,
 	"build.time":             false,
@@ -55,6 +57,16 @@ var configKeyDefs = map[string]bool{
 }
 
 func isArrayKey(key string) bool { return configKeyDefs[key] }
+
+func isBoolKey(key string) bool {
+	switch key {
+	case "submit_job", "proxy_perjob", "helper_bind_all",
+		"prefer_remote", "parse_module_load",
+		"build.use_tmp_overlay", "build.always_submit":
+		return true
+	}
+	return false
+}
 
 // modifyArrayConfig reads the current slice for key from the target config file,
 // applies modify, and writes the result back. Returns the config path written.
@@ -190,7 +202,7 @@ func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) 
 // configValueCompletion returns suggested values for a config key
 func configValueCompletion(key string) []string {
 	switch key {
-	case "submit_job", "proxy_perjob":
+	case "submit_job", "proxy_perjob", "helper_bind_all":
 		return []string{"true", "false"}
 	case "prefer_remote", "parse_module_load":
 		return []string{"true", "false"}
@@ -513,6 +525,11 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 		}
 		fmt.Println()
 
+		fmt.Println(utils.StyleTitle("Server:"))
+		fmt.Printf("  %-20s %v%s\n", "helper_bind_all:", config.Global.HelperBindAll, srcTag("helper_bind_all"))
+		printOverridden("                       ", "helper_bind_all")
+		fmt.Println()
+
 		// Build settings (longest key: tmp_overlay_size = 16 chars)
 		fmt.Printf("%s %s\n", utils.StyleTitle("Build Configuration:"), "build.*")
 		fmt.Printf("  %-17s %v%s\n", "always_submit:", config.Global.Build.AlwaysSubmit, srcTag("build.always_submit"))
@@ -613,13 +630,21 @@ With -l, reads only the specified config layer file.`,
 				found := false
 				for _, layer := range config.GetConfigLayerInfos() {
 					if layer.InConfig(key) {
-						fmt.Println(layer.GetString(key))
+						if isBoolKey(key) {
+							fmt.Println(layer.GetBool(key))
+						} else {
+							fmt.Println(layer.GetString(key))
+						}
 						found = true
 						break
 					}
 				}
 				if !found {
-					fmt.Println(viper.GetString(key)) // default
+					if isBoolKey(key) {
+						fmt.Println(viper.GetBool(key))
+					} else {
+						fmt.Println(viper.GetString(key)) // default
+					}
 				}
 			}
 		}
@@ -724,6 +749,15 @@ Time duration format (for build.time):
 
 		if key == "build.compress_args" {
 			value = config.NormalizeCompressArgs(value)
+		}
+
+		if isBoolKey(key) {
+			b, err := strconv.ParseBool(value)
+			if err != nil {
+				utils.PrintError("Invalid value for %s: %q (use true or false)", key, value)
+				os.Exit(ExitCodeError)
+			}
+			value = strconv.FormatBool(b)
 		}
 
 		configPath, locationType, err := config.ResolveWritableConfigPath(setLocation)

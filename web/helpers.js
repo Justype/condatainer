@@ -656,7 +656,11 @@ function selectHelper(name, overrides) {
   // When rerunning, apply saved cwd/overlay directly and skip auto-resolution.
   if (overrides) {
     _setCwd(overrides.cwd || '');
-    _setVal('cfg-overlay', overrides.overlay || '');
+    let overlayPath = overrides.overlay || '';
+    if (overlayPath && !overlayPath.startsWith('/')) {
+      overlayPath = (overrides.cwd || '').replace(/\/+$/, '') + '/' + overlayPath;
+    }
+    _setVal('cfg-overlay', overlayPath);
     gid('cfg-overlay').dispatchEvent(new Event('input'));
     renderModuleChips();
     return;
@@ -676,6 +680,7 @@ function selectHelper(name, overrides) {
 
 async function refreshEnvOverlayFromCWD() {
   if (!selectedHelper) return;
+  if (gid('cfg-overlay').value) return; // don't overwrite a manually-set or rerun overlay
   const helperName = selectedHelper.name;
   const cwd = gid('cfg-cwd').value || '';
   const url = '/api/helpers/' + encodeURIComponent(helperName) +
@@ -830,7 +835,7 @@ async function _loadOverlayInfo() {
     const pkgList = gid('ov-edit-pkg-list');
     if (info.specs && info.specs.length) {
       pkgWrap.style.display = '';
-      pkgList.textContent = info.specs.join('  ');
+      pkgList.innerHTML = info.specs.map(s => '<span>' + escHtml(s) + '</span>').join(' ');
     } else {
       pkgWrap.style.display = 'none';
     }
@@ -1191,7 +1196,7 @@ async function createOverlay() {
     });
   } catch (e) {
     _setBusy(false);
-    alert('Error: ' + e);
+    showProgressError(createTitle, String(e));
   }
 }
 

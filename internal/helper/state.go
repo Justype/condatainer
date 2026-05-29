@@ -33,6 +33,7 @@ type HelperRun struct {
 	Params      map[string]string `json:"params,omitempty"`      // resolved #PARAM: values
 	URLPath     string            `json:"url_path"`              // appended to proxy URL (e.g. "?token=abc123")
 	ExternalURL string            `json:"external_url"`          // shown as-is, no proxy (e.g. vscode-tunnel URL)
+	BindAll     bool              `json:"bind_all,omitempty"`    // true = direct TCP proxy (no SSH tunnel)
 	StartedAt   time.Time         `json:"started_at"`
 	EndedAt     *time.Time        `json:"ended_at,omitempty"`
 	Status      string            `json:"status"` // "running"|"done"|"failed"
@@ -339,13 +340,51 @@ func LoadHistory() ([]*HelperRun, error) {
 	return runs, scanner.Err()
 }
 
+// HistoryRetentionLimit is the maximum number of completed (non-active) entries
+// kept in history. Active entries are always preserved. 0 disables pruning.
+var HistoryRetentionLimit = 100
+
 // UpdateHistoryStatus rewrites the JSONL history, setting status and endedAt for the given ID.
 // endedAt should reflect when the job actually ended (e.g. the done-event timestamp or
 // StartedAt+Walltime for synthesised expiry), not merely when the server noticed.
+// Prunes old completed entries if HistoryRetentionLimit is set.
 func UpdateHistoryStatus(id, status string, endedAt time.Time) error {
-	return UpdateHistoryRun(id, func(r *HelperRun) {
+	err := UpdateHistoryRun(id, func(r *HelperRun) {
 		r.Status = status
 		r.EndedAt = &endedAt
+	})
+	if err == nil && HistoryRetentionLimit > 0 {
+		_ = pruneHistory(HistoryRetentionLimit)
+	}
+	return err
+}
+
+// pruneHistory trims the history file so that at most limit completed entries
+// are retained. Active entries (pending/starting/running) are always kept.
+func pruneHistory(limit int) error {
+	path := HistoryPath()
+	if path == "" {
+		return nil
+	}
+	return withHistoryLock(path, func() error {
+		runs, err := LoadHistory()
+		if err != nil {
+			return err
+		}
+		var active, done []*HelperRun
+		for _, r := range runs {
+			if isActiveStatus(r.Status) {
+				active = append(active, r)
+			} else {
+				done = append(done, r)
+			}
+		}
+		if len(done) <= limit {
+			return nil
+		}
+		// Keep the most recent `limit` completed entries (they are in insertion order).
+		done = done[len(done)-limit:]
+		return rewriteHistory(path, append(active, done...))
 	})
 }
 

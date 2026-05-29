@@ -116,7 +116,6 @@ async function stopJob(id, btn) {
     btn.dataset.confirm = '';
     btn.innerHTML = 'Stopping…';
     btn.disabled = true;
-    _stoppingJobs.add(id);
 
     let ok = false;
     try {
@@ -124,7 +123,6 @@ async function stopJob(id, btn) {
       ok = r.ok;
     } catch {}
 
-    _stoppingJobs.delete(id);
     try {
       const r = await fetch('/api/helpers?status=active');
       allJobs = (await r.json()) || [];
@@ -190,14 +188,13 @@ function openDetail(id) {
   gid('d-title').textContent = job.name;
   gid('d-badge').innerHTML = '<span class="badge ' + badgeClass(job.status) + '">' + escHtml(job.status) + '</span>';
 
-  // Meta
-  let meta =
-    '<span class="d-key">Working Dir</span>' + pathTailHtml(job.cwd, null, 'd-val') +
-    '<span class="d-key">Env Overlay</span>' + pathTailHtml(job.env_overlay, null, 'd-val') +
-    '<span class="d-key">Base Image</span>' + pathTailHtml(job.base_image, null, 'd-val') +
-    '<span class="d-key">Started</span><span class="d-val">' + (job.started_at ? fmtDate(job.started_at) : '—') + '</span>';
-  if (job.node)    meta += '<span class="d-key">Node</span><span class="d-val">'   + escHtml(job.node)   + '</span>';
-  if (job.job_id)  meta += '<span class="d-key">Job ID</span><span class="d-val">' + escHtml(job.job_id) + '</span>';
+  // Meta — grouped: Location | Container | Job | Access
+  let meta = '';
+  // Location
+  meta += '<span class="d-key">Working Dir</span>' + pathTailHtml(job.cwd, null, 'd-val');
+  // Container
+  if (job.base_image) meta += '<span class="d-key">Base Image</span>' + pathTailHtml(job.base_image, null, 'd-val');
+  meta += '<span class="d-key">Env Overlay</span>' + pathTailHtml(job.env_overlay, null, 'd-val');
   if (job.overlays && job.overlays.length) {
     meta += '<span class="d-key">Modules</span><span class="d-val-col">' +
       job.overlays.map(p => {
@@ -207,6 +204,15 @@ function openDetail(id) {
           : pathTailHtml(p, null);
       }).join('') + '</span>';
   }
+  // Job
+  if (job.job_id) meta += '<span class="d-key">Job ID</span><span class="d-val">' + escHtml(job.job_id) + '</span>';
+  meta += '<span class="d-key">Started</span><span class="d-val">' + (job.started_at ? fmtDate(job.started_at) : '—') + '</span>';
+  if (job.node) meta += '<span class="d-key">Node</span><span class="d-val">' + escHtml(job.node) + '</span>';
+  if (job.port > 0) {
+    const bindAddr = (job.bind_all ? '0.0.0.0' : '127.0.0.1') + ':' + job.port;
+    meta += '<span class="d-key">Bind</span><span class="d-val">' + escHtml(bindAddr) + '</span>';
+  }
+  // Access
   const url = job.access_url || job.external_url;
   if (url) meta += '<span class="d-key">URL</span><span class="d-val"><a href="' + escHtml(url) + '" target="_blank">' + escHtml(url) + '</a></span>';
   gid('d-meta').innerHTML = meta;

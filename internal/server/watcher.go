@@ -40,6 +40,7 @@ type helperInfo struct {
 	walltime  time.Duration
 	port      int    // service port; 0 = URL-only (no tunnel needed)
 	node      string // compute node hostname
+	bindAll   bool   // true = direct TCP proxy (no SSH tunnel)
 }
 
 // watcher polls NFS helper state directories every 2 seconds.
@@ -103,6 +104,7 @@ func (w *watcher) prePopulateDone() {
 				walltime:  r.Walltime,
 				port:      r.Port,
 				node:      r.Node,
+				bindAll:   r.BindAll,
 			}
 			w.runningCount.Add(1)
 		}
@@ -210,6 +212,7 @@ func (w *watcher) pollHelper(id string) {
 				walltime:  run.Walltime,
 				port:      run.Port,
 				node:      run.Node,
+				bindAll:   run.BindAll,
 			}
 			w.runningCount.Add(1)
 		}
@@ -261,18 +264,19 @@ func (w *watcher) pollHelper(id string) {
 	if inf, ok := w.info[id]; ok && inf.status == "running" && inf.port > 0 && w.s.proxies.Get(id) == nil {
 		if last, seen := w.lastOpenAttempt[id]; !seen || time.Since(last) >= tunnelReopenInterval {
 			w.lastOpenAttempt[id] = time.Now()
-			go w.s.proxies.Open(id, inf.name, inf.node, inf.port)
+			go w.s.proxies.Open(id, inf.name, inf.node, inf.port, inf.bindAll)
 		}
 	}
 
 	if r.Ready != nil {
 		rs := r.Ready
 		walltime := time.Duration(rs.WalltimeSec) * time.Second
-		if rs.Port > 0 && w.s.proxies.Get(id) == nil {
-			w.s.proxies.Open(id, w.info[id].name, rs.Node, rs.Port)
-		}
-		// Update cached info with actual start time, walltime, and service address from the ready event.
 		if inf, ok := w.info[id]; ok {
+			if rs.Port > 0 && w.s.proxies.Get(id) == nil {
+				w.s.proxies.Open(id, inf.name, rs.Node, rs.Port, inf.bindAll)
+			}
+			// Update cached info with actual start time, walltime, and service address from the ready event.
+			// bindAll is preserved from the initial history entry (set at submission time).
 			w.info[id] = helperInfo{
 				jobID:     inf.jobID,
 				name:      inf.name,
@@ -281,6 +285,7 @@ func (w *watcher) pollHelper(id string) {
 				walltime:  walltime,
 				port:      rs.Port,
 				node:      rs.Node,
+				bindAll:   inf.bindAll,
 			}
 		}
 		_ = helper.UpdateHistoryRun(id, func(run *helper.HelperRun) {
@@ -320,7 +325,9 @@ func (w *watcher) syncSchedulerStatus(id string) bool {
 		return false
 	}
 	w.lastSchedPoll[id] = time.Now()
-	status, err := sched.GetJobStatus(context.Background(), inf.jobID)
+	schedCtx, schedCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	status, err := sched.GetJobStatus(schedCtx, inf.jobID)
+	schedCancel()
 	if err != nil {
 		logging.FromContext(w.s.ctx).Debug("server: GetJobStatus failed", "jobID", inf.jobID, "err", err)
 		return false
@@ -328,7 +335,7 @@ func (w *watcher) syncSchedulerStatus(id string) bool {
 	switch status {
 	case scheduler.JobStatusRunning:
 		if inf.status == "pending" {
-			w.info[id] = helperInfo{jobID: inf.jobID, name: inf.name, status: "starting", startedAt: inf.startedAt, walltime: inf.walltime}
+			w.info[id] = helperInfo{jobID: inf.jobID, name: inf.name, status: "starting", startedAt: inf.startedAt, walltime: inf.walltime, bindAll: inf.bindAll}
 			_ = helper.UpdateHistoryRun(id, func(run *helper.HelperRun) {
 				run.Status = "starting"
 			})
@@ -387,7 +394,7 @@ func (w *watcher) restoreExisting() {
 		if err != nil || rs == nil || rs.Port == 0 {
 			continue
 		}
-		w.s.proxies.Open(r.ID, r.Name, rs.Node, rs.Port)
+		w.s.proxies.Open(r.ID, r.Name, rs.Node, rs.Port, r.BindAll)
 		logging.FromContext(w.s.ctx).Debug("server: restored tunnel", "id", r.ID, "node", rs.Node, "port", rs.Port)
 	}
 }

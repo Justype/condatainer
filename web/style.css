@@ -45,6 +45,7 @@ input,button,select{font-family:inherit;font-size:inherit;}
 
 /* ── Sidebar ─────────────────────────────── */
 #sidebar-wrap{position:relative;display:flex;flex-shrink:0;}
+.no-transition{transition:none !important;}
 #sidebar{
   width:var(--sidebar-w);min-width:var(--sidebar-w);
   height:100%;background:var(--surface);border-right:1px solid var(--border);

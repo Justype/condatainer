@@ -387,7 +387,7 @@ func checkPkgConstraint(installedVer, op, requiredVer string) bool {
 // The final `(exit $_cnt_exit)` subshell propagates the container exit code to
 // the `_EXIT_CODE=$?` line that CreateScriptWithSpec appends after Command.
 func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime time.Duration,
-	params map[string]string, sched scheduler.Scheduler, containerCmd string) string {
+	params map[string]string, sched scheduler.Scheduler, containerCmd string, bindAll bool) string {
 
 	jobIDExpr := "$$" // headless: shell PID
 	if sched != nil {
@@ -436,6 +436,14 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 
 	// Free port (resolved on the compute node, not the login node)
 	fmt.Fprintln(&sb, `export CNT_HELPER_PORT=$(condatainer _pick_port)`)
+
+	// Bind address: 0.0.0.0 when helper_bind_all is set (direct TCP proxy, no SSH tunnel).
+	if bindAll {
+		fmt.Fprintln(&sb, `export CNT_HELPER_BIND_ADDR=0.0.0.0`)
+		fmt.Fprintln(&sb, `export CNT_HELPER_BIND_ALL=1`)
+	} else {
+		fmt.Fprintln(&sb, `export CNT_HELPER_BIND_ADDR=127.0.0.1`)
+	}
 	fmt.Fprintln(&sb)
 
 	// Trap SIGTERM/INT (walltime kill, scancel, qdel) so done is recorded even when killed.
@@ -555,7 +563,7 @@ func generateWrapper(id, name, cwd, scriptDir, stateDir string, walltime time.Du
 	params map[string]string, spec *scheduler.ResourceSpec, sched scheduler.Scheduler,
 	containerCmd string) (string, error) {
 
-	body := buildHelperCommandBody(id, name, cwd, scriptDir, stateDir, walltime, params, sched, containerCmd)
+	body := buildHelperCommandBody(id, name, cwd, scriptDir, stateDir, walltime, params, sched, containerCmd, config.Global.HelperBindAll)
 
 	if err := os.MkdirAll(stateDir, utils.PermDir); err != nil {
 		return "", fmt.Errorf("creating state dir: %w", err)
@@ -667,6 +675,7 @@ func newHelperRun(id, name, jobID, cwd string, walltime time.Duration,
 		Params:     params,
 		StartedAt:  time.Now(),
 		Status:     status,
+		BindAll:    config.Global.HelperBindAll,
 	}
 	if spec != nil {
 		run.CPUs = spec.CpusPerTask

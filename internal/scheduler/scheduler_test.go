@@ -16,8 +16,8 @@ func TestSpecDefaultsInitialValues(t *testing.T) {
 	if defaults.TasksPerNode != 0 {
 		t.Errorf("TasksPerNode = %d; want 0", defaults.TasksPerNode)
 	}
-	if defaults.MemPerNodeMB != 1024 {
-		t.Errorf("MemPerNodeMB = %d; want 1024", defaults.MemPerNodeMB)
+	if defaults.MemPerNodeMB != 2048 {
+		t.Errorf("MemPerNodeMB = %d; want 2048", defaults.MemPerNodeMB)
 	}
 	if defaults.Time != 2*time.Hour {
 		t.Errorf("Time = %v; want 2h", defaults.Time)

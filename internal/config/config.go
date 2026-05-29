@@ -92,6 +92,10 @@ type Config struct {
 	// top of every generated scheduler script so the compute node starts a per-job proxy.
 	ProxyPerJob bool
 
+	// HelperBindAll: if true, helper services bind to 0.0.0.0 and the server connects
+	// via direct TCP instead of SSH tunnel (for clusters where inter-node SSH is blocked).
+	HelperBindAll bool
+
 	// Build configuration
 	Build BuildConfig
 }

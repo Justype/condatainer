@@ -65,6 +65,13 @@ func (s *srv) handleHelpersList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
 	var out []*helper.HelperRun
 	for i := len(runs) - 1; i >= 0; i-- {
 		run := runs[i]
@@ -79,7 +86,7 @@ func (s *srv) handleHelpersList(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out = append(out, run)
-		if len(out) >= 50 {
+		if len(out) >= limit {
 			break
 		}
 	}
@@ -218,19 +225,24 @@ func (s *srv) handleHelperStop(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	s.proxies.Close(id)
-	if run := helper.HistoryEntryForID(id); run != nil {
-		if run.JobID != "" {
-			if sched := scheduler.ActiveScheduler(); sched != nil {
-				_ = sched.CancelJob(r.Context(), run.JobID)
-			}
-		} else {
-			if err := helper.KillHeadlessProcess(id); err != nil {
-				logging.FromContext(s.ctx).Debug("server: stop headless helper failed",
-					"id", id, "err", err)
-			}
+	log := logging.FromContext(s.ctx)
+	if run := helper.HistoryEntryForID(id); run == nil {
+		log.Warn("server: stop — history entry not found", "id", id)
+	} else if run.JobID == "" {
+		if err := helper.KillHeadlessProcess(id); err != nil {
+			log.Debug("server: stop headless helper failed", "id", id, "err", err)
 		}
+	} else if sched := scheduler.ActiveScheduler(); sched == nil {
+		log.Warn("server: stop — no scheduler available", "id", id, "jobID", run.JobID)
+	} else {
+		cancelCtx, cancelCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := sched.CancelJob(cancelCtx, run.JobID); err != nil {
+			log.Warn("server: cancel job failed", "id", id, "jobID", run.JobID, "err", err)
+		}
+		cancelCancel()
 	}
 	_ = helper.UpdateHistoryStatus(id, "done", time.Now())
+	invalidateHistoryCache()
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"ok":true}`)
 }

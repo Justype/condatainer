@@ -163,6 +163,8 @@ The Go runner injects these into every job before the helper script body runs:
 | `CNT_HELPER_NAME` | Helper script name (e.g. `jupyterlab`) |
 | `CNT_HELPER_ID` | Unique run ID: `{name}-{job_id}` or `{name}-{pid}` |
 | `CNT_HELPER_PORT` | Free TCP port on the compute node (helper must bind here) |
+| `CNT_HELPER_BIND_ADDR` | `127.0.0.1` normally; `0.0.0.0` when `helper_bind_all` is set |
+| `CNT_HELPER_BIND_ALL` | Set to `1` when `helper_bind_all` is enabled; absent otherwise |
 | `CNT_HELPER_CWD` | Working directory |
 | `CNT_HELPER_STATE_DIR` | NFS state directory for this run — write runtime files here |
 | `CNT_HELPER_WALLTIME_SECS` | Walltime in seconds |
@@ -170,6 +172,8 @@ The Go runner injects these into every job before the helper script body runs:
 | `CNT_HELPER_SCRIPT_DIR` | Directory containing the helper script |
 | `SCRATCH` | `$SCRATCH` or `$HOME` if unset |
 | `$KEY` | One var per resolved `#PARAM:` key |
+
+When writing helper scripts, use `${CNT_HELPER_BIND_ADDR:-127.0.0.1}` as the bind address so the script works correctly in both normal and `helper_bind_all` modes.
 
 ---
 

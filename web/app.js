@@ -138,7 +138,10 @@ collapseTab.addEventListener('click', () => {
   gid('sidebar').classList.toggle('collapsed', sidebarCollapsed);
   _updateCollapseTab();
 });
-gid('sidebar').classList.toggle('collapsed', sidebarCollapsed);
+const sidebar = gid('sidebar');
+sidebar.classList.add('no-transition');
+sidebar.classList.toggle('collapsed', sidebarCollapsed);
+requestAnimationFrame(() => requestAnimationFrame(() => sidebar.classList.remove('no-transition')));
 _updateCollapseTab();
 
 /* ── Navigation ──────────────────────────── */

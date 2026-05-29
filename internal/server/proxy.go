@@ -92,11 +92,13 @@ func isLocalHost(node string) bool {
 }
 
 // Open creates (or returns existing) a reverse-proxy for the given helper using
-// a three-level fallback: direct TCP (same host) → Go SSH → system ssh -W.
+// a three-level fallback: direct TCP (same host or bindAll) → Go SSH → system ssh -W.
+// When bindAll is true the service binds to 0.0.0.0 and is reachable via direct TCP
+// from the login node — SSH tunnel is skipped entirely.
 // The SSH dial happens outside the registry lock so HTTP Get() calls are never
 // blocked by a slow or failing dial. Concurrent Open() calls for the same ID
 // are deduplicated via the pending set.
-func (r *proxyRegistry) Open(id, name, node string, port int) {
+func (r *proxyRegistry) Open(id, name, node string, port int, bindAll bool) {
 	r.mu.Lock()
 	if _, ok := r.entries[id]; ok {
 		r.mu.Unlock()
@@ -109,9 +111,14 @@ func (r *proxyRegistry) Open(id, name, node string, port int) {
 	r.pending[id] = struct{}{}
 	r.mu.Unlock()
 
-	// Level 1: same-host — direct TCP, no SSH needed (headless jobs).
-	if isLocalHost(node) {
-		target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
+	// Level 1: same-host or bind_all — direct TCP, no SSH needed.
+	// bind_all: service binds to 0.0.0.0 so the login node can reach it via TCP.
+	if bindAll || isLocalHost(node) {
+		addr := "127.0.0.1"
+		if bindAll && !isLocalHost(node) {
+			addr = node
+		}
+		target, _ := url.Parse(fmt.Sprintf("http://%s:%d", addr, port))
 		rp := newReverseProxy(target, nil)
 
 		r.mu.Lock()

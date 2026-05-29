@@ -191,7 +191,7 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 
 	userOverlays := opts.Overlays
 	if meta.RequiredOverlays != "" {
-		logger.Info("Checking required overlays", "overlays", meta.RequiredOverlays)
+		logger.Info("Checking required overlays")
 	}
 	namedOverlays, err := CheckRequiredOverlays(ctx, meta.RequiredOverlays, params)
 	if err != nil {

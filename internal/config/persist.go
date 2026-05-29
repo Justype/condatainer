@@ -39,6 +39,9 @@ func (l ConfigLayerInfo) InConfig(key string) bool { return l.v.InConfig(key) }
 // GetString returns the string value of key from this config layer.
 func (l ConfigLayerInfo) GetString(key string) string { return l.v.GetString(key) }
 
+// GetBool returns the bool value of key from this config layer.
+func (l ConfigLayerInfo) GetBool(key string) bool { return l.v.GetBool(key) }
+
 // GetStringSlice returns the string slice value of key from this config layer.
 func (l ConfigLayerInfo) GetStringSlice(key string) []string { return l.v.GetStringSlice(key) }
 
@@ -152,10 +155,11 @@ func setDefaults() {
 	viper.SetDefault("default_distro", DEFAULT_DISTRO)
 	viper.SetDefault("extra_scripts_links", []string{})
 	viper.SetDefault("parse_module_load", false)
-	viper.SetDefault("scheduler_timeout", 5)  // seconds
+	viper.SetDefault("scheduler_timeout", 0)  // seconds; 0 = no timeout
 	viper.SetDefault("notification", "")      // "" or "none" = silent; "bell" = terminal bell; "email" = scheduler email; ≥5-char = ntfy.sh topic
 	viper.SetDefault("metadata_cache_ttl", 7) // days (1 week)
 	viper.SetDefault("proxy_perjob", false)
+	viper.SetDefault("helper_bind_all", false)
 }
 
 // GetUserConfigPath returns the path to the user config file
@@ -1000,6 +1004,10 @@ func LoadFromViper() {
 
 	if proxyPerJob, ok := layerBool("proxy_perjob"); ok {
 		Global.ProxyPerJob = proxyPerJob
+	}
+
+	if helperBindAll, ok := layerBool("helper_bind_all"); ok {
+		Global.HelperBindAll = helperBindAll
 	}
 
 }
