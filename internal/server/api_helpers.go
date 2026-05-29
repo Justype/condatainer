@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"log/slog"
@@ -25,22 +26,47 @@ import (
 	"github.com/Justype/condatainer/internal/weblog"
 )
 
-// handleHelpersAvailable serves GET /api/helpers/available
-func (s *srv) handleHelpersAvailable(w http.ResponseWriter, r *http.Request) {
-	type entry struct {
-		Name             string               `json:"name"`
-		Whatis           string               `json:"whatis,omitempty"`
-		ImgRequired      bool                 `json:"img_required,omitempty"`
-		ImgPackages      string               `json:"img_packages,omitempty"`
-		PostInstallCmd   string               `json:"post_install_cmd,omitempty"`
-		RequiredOverlays string               `json:"required_overlays,omitempty"`
-		Singleton        bool                 `json:"singleton,omitempty"`
-		Params           []helper.HelperParam `json:"params,omitempty"`
-		ParamValues      map[string][]string  `json:"param_values,omitempty"`
+const helperAvailableCacheTTL = 30 * time.Second
+
+// flushWriter wraps an http.ResponseWriter and flushes after every Write call.
+type flushWriter struct {
+	w     http.ResponseWriter
+	flush func()
+}
+
+func (fw flushWriter) Write(p []byte) (int, error) {
+	n, err := fw.w.Write(p)
+	fw.flush()
+	return n, err
+}
+
+type helperAvailableEntry struct {
+	Name             string               `json:"name"`
+	Whatis           string               `json:"whatis,omitempty"`
+	ImgRequired      bool                 `json:"img_required,omitempty"`
+	ImgPackages      string               `json:"img_packages,omitempty"`
+	PostInstallCmd   string               `json:"post_install_cmd,omitempty"`
+	RequiredOverlays string               `json:"required_overlays,omitempty"`
+	Singleton        bool                 `json:"singleton,omitempty"`
+	Params           []helper.HelperParam `json:"params,omitempty"`
+	ParamValues      map[string][]string  `json:"param_values,omitempty"`
+}
+
+var (
+	helperAvailableCacheMu      sync.Mutex
+	helperAvailableCacheEntries []helperAvailableEntry
+	helperAvailableCacheAt      time.Time
+)
+
+func cachedAvailableHelpers() []helperAvailableEntry {
+	helperAvailableCacheMu.Lock()
+	defer helperAvailableCacheMu.Unlock()
+	if helperAvailableCacheEntries != nil && time.Since(helperAvailableCacheAt) < helperAvailableCacheTTL {
+		return helperAvailableCacheEntries
 	}
 
 	seen := make(map[string]bool)
-	var scripts []entry
+	var scripts []helperAvailableEntry
 
 	for _, dir := range config.GetHelperScriptSearchPaths() {
 		dirEntries, err := os.ReadDir(dir)
@@ -49,37 +75,57 @@ func (s *srv) handleHelpersAvailable(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, e := range dirEntries {
 			name := e.Name()
-			if !e.IsDir() && !strings.HasPrefix(name, ".") && !seen[name] {
-				seen[name] = true
-				scriptPath := filepath.Join(dir, name)
-				whatis := ""
-				if data, err := os.ReadFile(scriptPath); err == nil {
-					for _, line := range strings.Split(string(data), "\n") {
-						if strings.HasPrefix(line, "#WHATIS:") {
-							whatis = strings.TrimSpace(line[8:])
-							break
-						}
+			if e.IsDir() || strings.HasPrefix(name, ".") || seen[name] {
+				continue
+			}
+			seen[name] = true
+			scriptPath := filepath.Join(dir, name)
+			whatis := ""
+			if data, err := os.ReadFile(scriptPath); err == nil {
+				for _, line := range strings.Split(string(data), "\n") {
+					if strings.HasPrefix(line, "#WHATIS:") {
+						whatis = strings.TrimSpace(line[8:])
+						break
 					}
 				}
-				meta, _ := helper.ParseHelperScriptMeta(scriptPath)
-				params, _ := helper.ParseHelperParams(scriptPath)
-				ent := entry{
-					Name:           name,
-					Whatis:         whatis,
-					ImgRequired:    meta.ImgRequired,
-					ImgPackages:    meta.ImgPackages,
-					PostInstallCmd: meta.PostInstallCmd,
-					Singleton:      meta.Singleton,
-					Params:         params,
-					ParamValues:    meta.ParamValues,
-				}
-				if meta.RequiredOverlays != "" {
-					ent.RequiredOverlays = meta.RequiredOverlays
-				}
-				scripts = append(scripts, ent)
 			}
+			meta, _ := helper.ParseHelperScriptMeta(scriptPath)
+			params, _ := helper.ParseHelperParams(scriptPath)
+			ent := helperAvailableEntry{
+				Name:           name,
+				Whatis:         whatis,
+				ImgRequired:    meta.ImgRequired,
+				ImgPackages:    meta.ImgPackages,
+				PostInstallCmd: meta.PostInstallCmd,
+				Singleton:      meta.Singleton,
+				Params:         params,
+				ParamValues:    meta.ParamValues,
+			}
+			if meta.RequiredOverlays != "" {
+				ent.RequiredOverlays = meta.RequiredOverlays
+			}
+			scripts = append(scripts, ent)
 		}
 	}
+
+	helperAvailableCacheEntries = scripts
+	helperAvailableCacheAt = time.Now()
+	return scripts
+}
+
+func invalidateHelperAvailableCache() {
+	helperAvailableCacheMu.Lock()
+	helperAvailableCacheEntries = nil
+	helperAvailableCacheAt = time.Time{}
+	helperAvailableCacheMu.Unlock()
+}
+
+// handleHelpersAvailable serves GET /api/helpers/available
+func (s *srv) handleHelpersAvailable(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("refresh") == "1" {
+		invalidateHelperAvailableCache()
+	}
+	scripts := cachedAvailableHelpers()
 
 	if r.Header.Get("Accept") == "text/html" || r.URL.Query().Get("format") == "html" {
 		w.Header().Set("Content-Type", "text/html")
@@ -100,6 +146,40 @@ func (s *srv) handleHelpersAvailable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, scripts)
+}
+
+// handleHelpersUpdate serves POST /api/helpers/update — syncs helper scripts from remote sources.
+func (s *srv) handleHelpersUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	type updateReq struct {
+		Name string `json:"name"`
+	}
+	var req updateReq
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	taskID := fmt.Sprintf("helpers-update-%d", time.Now().UnixNano())
+	broker := newSSEBroker()
+	ctx, cancel := context.WithCancel(s.ctx)
+	s.tasks.Store(taskID, &taskEntry{broker: broker, cancel: cancel})
+	writeJSON(w, map[string]string{"id": taskID})
+
+	bw := &brokerWriter{broker}
+	go func() {
+		defer cancel()
+		defer s.tasks.Delete(taskID)
+
+		if err := helper.UpdateRemoteScripts(ctx, req.Name, false, bw); err != nil {
+			broadcastDone(broker, err)
+			return
+		}
+		invalidateHelperAvailableCache()
+		broadcastDone(broker, nil)
+	}()
 }
 
 // handleHelpersSub routes /api/helpers/{id-or-name}/{action}.
@@ -402,12 +482,13 @@ func (s *srv) handleHelperStart(w http.ResponseWriter, r *http.Request, name str
 			flusher.Flush()
 		}
 	}
-
 	fmt.Fprintf(w, "Preparing %s...\n", name)
 	flush()
 
-	planCtx := logging.WithLogger(s.ctx, slog.New(weblog.New(w)))
-	planCtx = logging.WithWriter(planCtx, w)
+	// flushW flushes after every write so log lines reach the browser immediately.
+	flushW := flushWriter{w: w, flush: flush}
+	planCtx := logging.WithLogger(s.ctx, slog.New(weblog.New(flushW)))
+	planCtx = logging.WithWriter(planCtx, flushW)
 
 	plan, err := helper.PlanRun(planCtx, opts)
 	if err != nil {
@@ -489,10 +570,6 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 	if req.ExtraPackages != "" {
 		allPkgs = append(allPkgs, strings.Fields(req.ExtraPackages)...)
 	}
-	if len(allPkgs) == 0 {
-		http.Error(w, "no packages specified", http.StatusBadRequest)
-		return
-	}
 
 	// Create the background task and return its ID immediately.
 	taskID := fmt.Sprintf("overlay-%d", time.Now().UnixNano())
@@ -519,7 +596,7 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 			Profile: overlay.ProfileSmall,
 		}
 		io := cntexec.IO{Stdout: bw, Stderr: bw}
-		fmt.Fprintf(bw, "Installing packages: %s\n", strings.Join(allPkgs, " "))
+		fmt.Fprintf(bw, "Installing packages: %s\n", cntexec.DescribeInitialCondaPackages(allPkgs))
 		if err := cntexec.CreateCondaOverlay(ctx, opts, allPkgs, req.PostInstall, false, io); err != nil {
 			broadcastDone(broker, fmt.Errorf("create overlay: %w", err))
 			return

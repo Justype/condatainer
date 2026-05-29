@@ -15,7 +15,7 @@ ICONS=(
   # navigation
   chevron_left chevron_right close expand_circle_down expand_circle_up
   # actions
-  add_2 content_copy delete play_arrow play_circle refresh replay star
+  add_2 content_copy delete download link_2 play_arrow play_circle refresh replay star
   # status / feedback
   check error info progress_activity question_mark warning
   # files

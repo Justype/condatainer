@@ -1,5 +1,14 @@
 /* ── Progress window ─────────────────────── */
-let _progES = null;
+let _progES        = null;
+let _progAutoClose = null;
+
+function _scheduleAutoHide() {
+  if (_progAutoClose) clearTimeout(_progAutoClose);
+  _progAutoClose = setTimeout(() => {
+    gid('prog-window').classList.add('minimized');
+    gid('prog-win-toggle').innerHTML = iconSvg('expand_circle_up');
+  }, 3000);
+}
 
 function toggleMinimizeProgressWindow() {
   const minimized = gid('prog-window').classList.toggle('minimized');
@@ -7,6 +16,7 @@ function toggleMinimizeProgressWindow() {
 }
 
 function openProgressWindow(title, taskId, onDone) {
+  if (_progAutoClose) { clearTimeout(_progAutoClose); _progAutoClose = null; }
   gid('prog-win-title').textContent = title;
   gid('prog-win-status').innerHTML = iconSvg('progress_activity', 'spin');
   gid('prog-window').classList.remove('minimized');
@@ -33,6 +43,7 @@ function openProgressWindow(title, taskId, onDone) {
         gid('prog-win-close').disabled = false;
         es.close(); _progES = null;
         if (onDone) onDone(msg);
+        if (msg.ok) _scheduleAutoHide();
       }
     } catch {}
   };
@@ -41,10 +52,42 @@ function openProgressWindow(title, taskId, onDone) {
     gid('prog-win-status').innerHTML = iconSvg('close');
     gid('prog-win-close').disabled = false;
     es.close(); _progES = null;
+    if (onDone) onDone({ ok: false, err: 'Connection lost' });
+  };
+}
+
+function openStreamProgressWindow(title) {
+  if (_progAutoClose) { clearTimeout(_progAutoClose); _progAutoClose = null; }
+  gid('prog-win-title').textContent = title;
+  gid('prog-win-status').innerHTML = iconSvg('progress_activity', 'spin');
+  gid('prog-window').classList.remove('minimized');
+  gid('prog-win-toggle').innerHTML = iconSvg('expand_circle_down');
+  gid('prog-win-close').disabled = true;
+  gid('prog-window').classList.add('visible');
+
+  const body = gid('prog-win-body');
+  body.innerHTML = '';
+  const tv = new TermView(body);
+
+  if (_progES) { _progES.close(); _progES = null; }
+  let finished = false;
+  return {
+    write(chunk) {
+      if (!finished) tv.write(chunk);
+    },
+    done(ok, errMsg) {
+      if (finished) return;
+      finished = true;
+      tv.done(ok, errMsg);
+      gid('prog-win-status').innerHTML = iconSvg(ok ? 'check' : 'close');
+      gid('prog-win-close').disabled = false;
+      if (ok) _scheduleAutoHide();
+    },
   };
 }
 
 function closeProgressWindow() {
+  if (_progAutoClose) { clearTimeout(_progAutoClose); _progAutoClose = null; }
   if (_progES) { _progES.close(); _progES = null; }
   gid('prog-window').classList.remove('visible');
 }
@@ -96,28 +139,124 @@ class TermView {
 /* ── Helpers / Start section ─────────────── */
 let _helperSavedConfig = {}; // saved config for the currently selected helper
 let _gpuOptions = [];        // available GPU types from scheduler
+let _gpuOptionsLoaded = false;
+let _gpuOptionsLoading = null;
+let _helpersLoaded = false;
+let _helpersLoading = null;
 
-async function loadGpuOptions() {
+async function loadGpuOptions(force) {
+  if (!force && (_gpuOptionsLoaded || _gpuOptionsLoading)) return _gpuOptionsLoading;
+  _gpuOptionsLoading = (async () => {
+    try {
+      const opts = await fetch('/api/gpu-options').then(r => r.json());
+      if (Array.isArray(opts) && opts.length) {
+        _gpuOptions = opts;
+        initCombobox('cfg-gpu', opts, true, null);
+      }
+      _gpuOptionsLoaded = true;
+    } catch {}
+  })();
   try {
-    const opts = await fetch('/api/gpu-options').then(r => r.json());
-    if (Array.isArray(opts) && opts.length) {
-      _gpuOptions = opts;
-      initCombobox('cfg-gpu', opts, true, null);
-    }
-  } catch {}
+    await _gpuOptionsLoading;
+  } finally {
+    _gpuOptionsLoading = null;
+  }
 }
 
-async function loadHelpers() {
+async function loadHelpers(force) {
+  if (!force && _helpersLoading) {
+    await _helpersLoading;
+    return;
+  }
+  if (!force && _helpersLoaded) {
+    renderHelperList(gid('h-search')?.value);
+    _applyStartLock();
+    if (_formOpen || _opRunning) return;
+    if (_startBusy && _startRunHelperName) {
+      _setStartBusy(true, iconSvg('play_arrow') + ' Starting…');
+      return;
+    }
+    if (_applyPendingStartSelection(true)) return;
+    _restoreSelection();
+    loadGpuOptions();
+    return;
+  }
+
+  _helpersLoading = (async () => {
+    try {
+      const r = await fetch('/api/helpers/available' + (force ? '?refresh=1' : ''));
+      allHelpers = (await r.json()) || [];
+      _helpersLoaded = true;
+    } catch { allHelpers = []; }
+  })();
   try {
-    const r = await fetch('/api/helpers/available');
-    allHelpers = (await r.json()) || [];
-  } catch { allHelpers = []; }
-  renderHelperList();
+    await _helpersLoading;
+  } finally {
+    _helpersLoading = null;
+  }
+  if (_startBusy && _startRunHelperName) {
+    const h = allHelpers.find(h => h.name === _startRunHelperName);
+    if (h) selectedHelper = h;
+  }
+  renderHelperList(gid('h-search')?.value);
+  _applyStartLock();
+  if (_formOpen || _opRunning) return;
+  if (_startBusy && _startRunHelperName) {
+    _setStartBusy(true, iconSvg('play_arrow') + ' Starting…');
+    return;
+  }
+  if (_applyPendingStartSelection(true)) return;
   _restoreSelection();
+  loadGpuOptions(force);
+}
+
+async function refreshStartHelpers() {
+  const btn = gid('start-refresh-btn');
+  const old = btn && btn.innerHTML;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = iconSvg('refresh', 'spin') + ' Refreshing';
+  }
+  try {
+    _helpersLoaded = false;
+    await loadHelpers(true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = old;
+    }
+  }
+}
+
+async function updateHelperScripts() {
+  const btn = gid('start-update-btn');
+  if (btn) btn.disabled = true;
+  _opRunning = true;
+  try {
+    const r = await fetch('/api/helpers/update', { method: 'POST' });
+    if (!r.ok) {
+      const msg = await r.text();
+      showProgressError('Updating helpers', msg || String(r.status));
+      if (btn) btn.disabled = false;
+      _opRunning = false;
+      return;
+    }
+    const { id } = await r.json();
+    openProgressWindow('Updating helpers', id, async msg => {
+      if (btn) btn.disabled = false;
+      _opRunning = false;
+      if (msg.ok) await refreshStartHelpers();
+    });
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    _opRunning = false;
+    showProgressError('Updating helpers', String(e));
+  }
 }
 
 /* ── Selection persistence ───────────────── */
 const _selKey = 'cnt_start_selection';
+let _pendingStartSelection = null;
 function _saveSelection() {
   if (!selectedHelper) return;
   const params = {};
@@ -136,21 +275,64 @@ function _restoreSelection() {
   } catch { /* ignore */ }
 }
 
+function queueStartSelection(name, overrides) {
+  _pendingStartSelection = { name, overrides };
+  localStorage.setItem(_selKey, JSON.stringify({ name, params: (overrides && overrides.params) || {} }));
+  _applyPendingStartSelection(false);
+}
+
+function _applyPendingStartSelection(clear) {
+  const pending = _pendingStartSelection;
+  if (!pending || !allHelpers.find(h => h.name === pending.name)) return false;
+  selectHelper(pending.name, pending.overrides);
+  if (clear) _pendingStartSelection = null;
+  return true;
+}
+
 /* ── Apply saved-config as placeholders ───── */
+function _parseParamOpts(pv, key) {
+  const values = (pv || {})[key] || [];
+  const isOpen = values.length > 0 && values[values.length - 1] === '*';
+  const opts   = isOpen ? values.slice(0, -1) : values;
+  return { opts, isOpen };
+}
+
+function _computeParams(params, pv) {
+  return (params || []).map(p => {
+    const { opts, isOpen } = _parseParamOpts(pv, p.key);
+    return { p, opts, isOpen };
+  });
+}
+
+function _rdPh(rd) {
+  return {
+    cpus: rd.cpus ? String(rd.cpus) : '',
+    mem:  rd.mem      || '',
+    time: rd.walltime || '',
+    gpu:  rd.gpu      || '',
+  };
+}
+
+function _paramPlaceholder(param, opts) {
+  if (!param) return '';
+  if (param.default) return param.default;
+  if (opts && opts.length) return opts[0];
+  return param.optional ? '(optional)' : '';
+}
+
 function _applyConfigPlaceholders() {
   const cfg = _helperSavedConfig;
-  const rd  = (selectedHelper && selectedHelper.resource_defaults) || {};
-  gid('cfg-cpus').placeholder = cfg.cpus     || String(rd.cpus || 4);
-  gid('cfg-mem').placeholder  = cfg.mem      || rd.mem      || '16G';
-  gid('cfg-wall').placeholder = cfg.time     || rd.walltime || '08:00:00';
-  gid('cfg-gpu').placeholder  = cfg.gpu      || rd.gpu      || '';
+  const ph  = _rdPh((selectedHelper && selectedHelper.resource_defaults) || {});
+  gid('cfg-cpus').placeholder = cfg.cpus || ph.cpus;
+  gid('cfg-mem').placeholder  = cfg.mem  || ph.mem;
+  gid('cfg-wall').placeholder = cfg.time || ph.time;
+  gid('cfg-gpu').placeholder  = cfg.gpu  || ph.gpu;
   _helperParamKeys.forEach(key => {
-    const el    = gid('hparam-' + key);
+    const el = gid('hparam-' + key);
     if (!el) return;
     const param = (selectedHelper?.params || []).find(p => p.key === key);
-    const pv    = (selectedHelper?.param_values || {})[key] || [];
-    const opts  = pv[pv.length - 1] === '*' ? pv.slice(0, -1) : pv;
-    el.placeholder = cfg[key.toLowerCase()] || param?.default || opts[0] || '';
+    const { opts } = _parseParamOpts(selectedHelper?.param_values, key);
+    el.placeholder = cfg[key.toLowerCase()] || _paramPlaceholder(param, opts);
   });
 }
 
@@ -172,19 +354,15 @@ function openHelperConfigModal() {
   const params = selectedHelper.params || [];
   const pv     = selectedHelper.param_values || {};
 
+  const rph = _rdPh(rd);
   const resRows = [
-    { key: 'cpus', label: 'CPUs',         ph: String(rd.cpus || 4) },
-    { key: 'mem',  label: 'Memory',        ph: rd.mem     || '16G' },
-    { key: 'time', label: 'Walltime',      ph: rd.walltime || '08:00:00' },
-    { key: 'gpu',  label: 'GPU (optional)', ph: rd.gpu    || '' },
+    { key: 'cpus', label: 'CPUs',          ph: rph.cpus },
+    { key: 'mem',  label: 'Memory',        ph: rph.mem  },
+    { key: 'time', label: 'Walltime',      ph: rph.time },
+    { key: 'gpu',  label: 'GPU (optional)', ph: rph.gpu },
   ];
 
-  const paramComputed = params.map(p => {
-    const values = pv[p.key] || [];
-    const isOpen = values.length > 0 && values[values.length - 1] === '*';
-    const opts   = isOpen ? values.slice(0, -1) : values;
-    return { p, opts, isOpen };
-  });
+  const paramComputed = _computeParams(params, pv);
 
   let html = '<div class="param-grid">';
 
@@ -211,7 +389,7 @@ function openHelperConfigModal() {
 
   paramComputed.forEach(({ p, opts }) => {
     const saved = _helperSavedConfig[p.key.toLowerCase()] || '';
-    const ph    = p.default || (opts[0] || '');
+    const ph    = _paramPlaceholder(p, opts);
     html += '<span class="param-name">' + escHtml(p.key) + '</span>' +
       '<div class="param-cell">' +
         (opts.length
@@ -265,9 +443,9 @@ async function saveHelperConfigModal() {
 
 function resetStartForm(helper) {
   const h = helper || selectedHelper;
-  const d = (h && h.resource_defaults) || {};
 
-  selectedModules = [];
+  selectedModules          = [];
+  selectedExternalOverlays = [];
   renderModuleChips();
 
   // Clear typed values; placeholders already reflect the defaults.
@@ -275,7 +453,8 @@ function resetStartForm(helper) {
   gid('cfg-mem').value  = '';
   gid('cfg-wall').value = '';
   gid('cfg-gpu').value  = '';
-  // Keep cwd between runs; clear overlay.
+  _setCwd('');
+  gid('cfg-cwd').dispatchEvent(new Event('input'));
   _setVal('cfg-overlay', '');
   gid('cfg-overlay').dispatchEvent(new Event('input'));
 
@@ -289,17 +468,15 @@ function resetStartForm(helper) {
 
   gid('ov-create-form').classList.remove('visible');
   gid('ov-name').value = '';
-  gid('ov-size').value = '8G';
+  gid('ov-size').value = '';
   gid('ov-pkgs').value = '';
   gid('ov-create-btn').disabled = true;
 
+  const _pv = (h && h.param_values) || {};
   _ovTokenKeys.forEach(key => {
     const input = gid('ovtok-' + key);
     if (!input) return;
-    const paramValues = (h && h.param_values) || {};
-    const values = paramValues[key] || [];
-    const isOpen = values.length > 0 && values[values.length - 1] === '*';
-    const opts = isOpen ? values.slice(0, -1) : values;
+    const { opts } = _parseParamOpts(_pv, key);
     const param = (h?.params || []).find(p => p.key === key);
     const value = (param && param.default) || (opts[0] || '');
     input.value = value;
@@ -361,10 +538,12 @@ function renderHelperList(filter) {
 }
 
 function selectHelper(name, overrides) {
+  if ((_formOpen || _opRunning) && selectedHelper && selectedHelper.name !== name) return;
   selectedHelper = allHelpers.find(h => h.name === name);
   if (!selectedHelper) return;
   if (!overrides) localStorage.setItem(_selKey, JSON.stringify({ name, params: {} }));
-  selectedModules  = overrides && overrides.modules ? overrides.modules : [];
+  selectedModules          = overrides?.modules   ?? [];
+  selectedExternalOverlays = overrides?.externals ?? [];
   _helperParamKeys = [];
   renderModuleChips();
 
@@ -375,6 +554,15 @@ function selectHelper(name, overrides) {
   gid('start-btn').innerHTML = iconSvg('play_arrow') + ' Start ' + escHtml(name);
   gid('start-term').classList.remove('visible');
   gid('start-term').innerHTML = '';
+  if (_startBusy) _setStartBusy(true, iconSvg('play_arrow') + ' Starting…');
+  if (!overrides) {
+    ['cfg-cpus', 'cfg-mem', 'cfg-wall', 'cfg-gpu'].forEach(id => {
+      const el = gid(id);
+      if (!el) return;
+      el.value = '';
+      if (el.dataset.value !== undefined) el.dataset.value = '';
+    });
+  }
 
   // Helper-specific params
   const params    = selectedHelper.params || [];
@@ -382,21 +570,16 @@ function selectHelper(name, overrides) {
   const paramWrap  = gid('helper-params-wrap');
   if (params.length) {
     const pv = selectedHelper.param_values || {};
-    const computed = params.map(p => {
-      const values = pv[p.key] || [];
-      const isOpen = values.length > 0 && values[values.length - 1] === '*';
-      const opts   = isOpen ? values.slice(0, -1) : values;
-      return { p, opts, isOpen };
-    });
+    const computed = _computeParams(params, pv);
     paramWrap.innerHTML =
       '<div class="f-divider">Helper params</div>' +
       '<div class="param-grid">' +
       computed.map(({ p, opts }) => {
-        const defVal = p.default || (opts[0] || '');
-        const ph     = p.optional && !p.default ? '(auto)' : (p.default || '');
+        const ph      = _paramPlaceholder(p, opts);
         const isRequired = !p.optional && !p.default;
+        const initVal = (p.optional && opts.length) ? opts[0] : '';
         const input  = opts.length
-          ? makeComboboxHtml('hparam-' + p.key, '', defVal)
+          ? makeComboboxHtml('hparam-' + p.key, initVal, ph)
           : '<input class="field-input" id="hparam-' + escHtml(p.key) + '"' +
               (isRequired ? ' data-required="1"' : '') +
               ' placeholder="' + escHtml(ph) + '">';
@@ -437,11 +620,12 @@ function selectHelper(name, overrides) {
   fetch('/api/helpers/' + encodeURIComponent(name) + '/resources')
     .then(r => r.json())
     .then(d => {
+      if (!selectedHelper || selectedHelper.name !== name) return;
       selectedHelper.resource_defaults = d || {};
       if (overrides) {
-        _setVal('cfg-cpus',  overrides.cpus  != null ? overrides.cpus  : (d.cpus     || 4));
-        _setVal('cfg-mem',   overrides.mem   || d.mem   || '16G');
-        _setVal('cfg-wall',  overrides.wall  || d.walltime || '08:00:00');
+        _setVal('cfg-cpus',  overrides.cpus  != null ? overrides.cpus  : (d.cpus  || ''));
+        _setVal('cfg-mem',   overrides.mem   || d.mem      || '');
+        _setVal('cfg-wall',  overrides.wall  || d.walltime || '');
         _setVal('cfg-gpu',   overrides.gpu   != null ? overrides.gpu   : (d.gpu      || ''));
       } else {
         // Script defaults loaded — re-apply placeholders (saved config may already be set).
@@ -455,6 +639,7 @@ function selectHelper(name, overrides) {
   fetch('/api/helpers/' + encodeURIComponent(name) + '/config')
     .then(r => r.json())
     .then(cfg => {
+      if (!selectedHelper || selectedHelper.name !== name) return;
       _helperSavedConfig = cfg || {};
       if (!overrides) {
         _applyConfigPlaceholders();
@@ -481,13 +666,11 @@ function selectHelper(name, overrides) {
   // when the field is blank.
   if (selectedHelper.img_required) {
     gid('ov-pkgs').placeholder = 'additional packages';
-    if (gid('cfg-overlay').value) {
-      gid('cfg-overlay').dispatchEvent(new Event('input'));
-    } else {
-      refreshEnvOverlayFromCWD();
-    }
-  } else {
+  }
+  if (gid('cfg-overlay').value) {
     gid('cfg-overlay').dispatchEvent(new Event('input'));
+  } else {
+    refreshEnvOverlayFromCWD();
   }
 }
 
@@ -534,15 +717,22 @@ gid('cfg-overlay').addEventListener('input', function () {
       notice.classList.remove('error');
       gid('ov-notice-icon').setAttribute('href', '#i-info');
       gid('ov-notice-text').textContent = 'No env overlay selected — helpful for storing packages and conda env';
-      if (startBtn) startBtn.disabled = false;
+      if (startBtn) startBtn.disabled = _startBusy || _formOpen;
     }
   } else {
     notice.classList.remove('visible', 'error', 'info');
-    if (startBtn) startBtn.disabled = false;
+    if (startBtn) startBtn.disabled = _startBusy || _formOpen;
   }
 });
 
 gid('cfg-cwd').addEventListener('input', refreshEnvOverlayFromCWD);
+
+function _addExternalOverlay(path) {
+  if (path && !selectedExternalOverlays.includes(path)) {
+    selectedExternalOverlays.push(path);
+    renderModuleChips();
+  }
+}
 
 function _collectParams() {
   const out = {};
@@ -613,11 +803,13 @@ async function _checkOverlayState(path) {
 // Locks the helper list and start button; on close, re-evaluates start button
 // state via the cfg-overlay input event (handles required-overlay validation).
 function _setFormOpen(open) {
-  _setStartBusy(open);
+  _formOpen = open;
+  _applyStartLock();
   if (!open) gid('cfg-overlay').dispatchEvent(new Event('input'));
 }
 
 function toggleOverlayEdit() {
+  if (_startBusy || _opRunning) return;
   const form = gid('ov-edit-form');
   const wasHidden = !form.classList.contains('visible');
   form.classList.toggle('visible');
@@ -646,6 +838,7 @@ async function _loadOverlayInfo() {
 }
 
 async function editOverlay() {
+  if (_startBusy || _opRunning) return;
   const path       = gid('cfg-overlay').value.trim();
   const size       = gid('ov-edit-size').value.trim();
   const addPkgs    = gid('ov-edit-add').value.trim();
@@ -659,6 +852,8 @@ async function editOverlay() {
 
   const editBtn = gid('ov-edit-btn');
   editBtn.disabled = true;
+  _opRunning = true;
+  _applyStartLock();
   try {
     const r = await fetch('/api/overlay/edit', {
       method: 'POST',
@@ -668,13 +863,15 @@ async function editOverlay() {
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
       showProgressError(title, e.detail || e.error || String(r.status));
+      _opRunning = false;
+      _applyStartLock();
       editBtn.disabled = false;
       return;
     }
     const { id } = await r.json();
-    _opRunning = true;
     openProgressWindow(title, id, async msg => {
       _opRunning = false;
+      _applyStartLock();
       editBtn.disabled = false;
       if (msg.ok) {
         gid('ov-edit-size').value   = '';
@@ -686,12 +883,14 @@ async function editOverlay() {
     });
   } catch (e) {
     _opRunning = false;
+    _applyStartLock();
     editBtn.disabled = false;
     showProgressError(title, String(e));
   }
 }
 
 function toggleOverlayCreate() {
+  if (_startBusy || _opRunning) return;
   const form = gid('ov-create-form');
   const wasHidden = !form.classList.contains('visible');
   form.classList.toggle('visible');
@@ -736,9 +935,7 @@ function renderOverlayCreateForm() {
   const params      = selectedHelper.params || [];
 
   const computed = tokens.map(key => {
-    const values = paramValues[key] || [];
-    const isOpen = values.length > 0 && values[values.length - 1] === '*';
-    const opts   = isOpen ? values.slice(0, -1) : values;
+    const { opts, isOpen } = _parseParamOpts(paramValues, key);
     const param  = params.find(p => p.key === key);
     return { key, opts, isOpen, param };
   });
@@ -871,6 +1068,9 @@ function initCombobox(id, options, isOpen, onChange) {
 
 /* ── Shared busy state ───────────────────── */
 let _startBusy  = false;
+let _startBusyLabel = '';
+let _startRunHelperName = '';
+let _formOpen = false;
 let _opRunning  = false; // true only during an active create/edit/start operation
 window.addEventListener('beforeunload', e => {
   if (_opRunning) e.preventDefault();
@@ -878,21 +1078,42 @@ window.addEventListener('beforeunload', e => {
 
 function _setStartBusy(busy, label) {
   _startBusy = busy;
+  _startBusyLabel = busy ? (label || _startBusyLabel) : '';
+  _applyStartLock();
+}
+
+function _applyStartLock() {
+  const busy = _startBusy || _formOpen || _opRunning;
   const btn  = gid('start-btn');
   const wrap = gid('helper-list-wrap');
   if (btn) {
     btn.disabled = busy;
-    btn.innerHTML = busy && label
-      ? label
+    btn.innerHTML = _startBusy && _startBusyLabel
+      ? _startBusyLabel
       : iconSvg('play_arrow') + ' Start ' + escHtml(selectedHelper?.name || '');
   }
   if (wrap) wrap.classList.toggle('locked', busy);
+
+  const overlayBtn = gid('ov-new-btn');
+  if (overlayBtn) overlayBtn.disabled = _startBusy || _opRunning;
+  const cwdBrowseBtn = gid('cfg-cwd-browse-btn');
+  if (cwdBrowseBtn) cwdBrowseBtn.disabled = busy;
+  const overlayBrowseBtn = gid('cfg-overlay-browse-btn');
+  if (overlayBrowseBtn) overlayBrowseBtn.disabled = busy;
+  const clearBtn = gid('ov-clear-btn');
+  if (clearBtn) clearBtn.disabled = busy || !gid('cfg-overlay')?.value;
+  const createBtn = gid('ov-create-btn');
+  if (createBtn && (_startBusy || _opRunning)) createBtn.disabled = true;
+  const editBtn = gid('ov-edit-btn');
+  if (editBtn && (_startBusy || _opRunning)) editBtn.disabled = true;
+  if (editBtn && !_startBusy && !_opRunning) editBtn.disabled = false;
 }
 
 /* ── Create overlay ──────────────────────── */
 async function createOverlay() {
+  if (_startBusy || _opRunning) return;
   const name = gid('ov-name').value || 'my-env.img';
-  const size  = gid('ov-size').value || '8G';
+  const size  = gid('ov-size').value || '20G';
 
   // Validate closed comboboxes — non-empty values must be from the list.
   for (const key of _ovTokenKeys) {
@@ -938,11 +1159,12 @@ async function createOverlay() {
   const createUseBtn = gid('ov-create-btn');
   const _setBusy = busy => {
     _opRunning = busy;
-    _setStartBusy(busy);
+    _applyStartLock();
     if (createUseBtn) createUseBtn.disabled = busy;
   };
 
   const createTitle = 'Creating ' + name;
+  _setBusy(true);
   try {
     const r = await fetch('/api/overlay/create', {
       method: 'POST',
@@ -952,10 +1174,10 @@ async function createOverlay() {
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
       showProgressError(createTitle, e.detail || e.error || String(r.status));
+      _setBusy(false);
       return;
     }
     const { id } = await r.json();
-    _setBusy(true);
     openProgressWindow(createTitle, id, async msg => {
       _setBusy(false);
       if (msg.ok && msg.path) {
@@ -964,6 +1186,7 @@ async function createOverlay() {
         await loadOverlays();
         // collapse create form
         gid('ov-create-form').classList.remove('visible');
+        _setFormOpen(false);
       }
     });
   } catch (e) {
@@ -990,20 +1213,19 @@ async function startHelper() {
   const _mem  = v => /^\d+$/.test(v) ? v + 'G' : v;
   const _wall = v => /^\d+$/.test(v) ? v + ':00:00' : /^\d+:\d+$/.test(v) ? v + ':00' : v;
   const body = {
-    cpus:    parseInt(_rv('cfg-cpus')) || 4,
-    mem:     _mem(_rv('cfg-mem'))  || '16G',
-    time:    _wall(_rv('cfg-wall')) || '08:00:00',
+    cpus:    parseInt(_rv('cfg-cpus')) || 0,
+    mem:     _mem(_rv('cfg-mem'))  || '',
+    time:    _wall(_rv('cfg-wall')) || '',
     gpu:     gid('cfg-gpu').value.trim() || gid('cfg-gpu').placeholder || '',
     cwd:     gid('cfg-cwd').value || '',
     overlay: gid('cfg-overlay').value || '',
-    overlays: selectedModules.map(m => m.path),
+    overlays: [...selectedModules.map(m => m.path), ...selectedExternalOverlays],
     params:  _collectParams(),
   };
 
-  const term = gid('start-term');
-  term.classList.add('visible');
-  term.innerHTML = '';
+  const term = openStreamProgressWindow('Starting ' + selectedHelper.name);
   _opRunning = true;
+  _startRunHelperName = selectedHelper.name;
   _setStartBusy(true, iconSvg('play_arrow') + ' Starting…');
 
   try {
@@ -1025,27 +1247,29 @@ async function startHelper() {
       } else if (e.error) {
         msg = e.error;
       }
-      term.innerHTML = '<div class="tl-err">' + escHtml(msg) + '</div>';
+      term.done(false, msg);
       return;
     }
 
     const reader = r.body.getReader();
     const dec    = new TextDecoder();
     let hasError = false;
+    let output = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      dec.decode(value).split('\n').forEach(line => {
-        if (!line) return;
-        const isErr = line.startsWith('ERROR:');
-        if (isErr) hasError = true;
-        const div = document.createElement('div');
-        div.className = isErr ? 'tl-err' : 'tl-info';
-        div.textContent = line;
-        term.appendChild(div);
-        term.scrollTop = term.scrollHeight;
-      });
+      const chunk = dec.decode(value, { stream: true });
+      output += chunk;
+      if (output.includes('ERROR:')) hasError = true;
+      term.write(chunk);
     }
+    const rest = dec.decode();
+    if (rest) {
+      output += rest;
+      if (output.includes('ERROR:')) hasError = true;
+      term.write(rest);
+    }
+    term.done(!hasError);
     await loadJobs();
     if (!hasError) {
       resetStartForm(selectedHelper);
@@ -1053,9 +1277,10 @@ async function startHelper() {
         setTimeout(() => navigate('jobs'), 500);
     }
   } catch (e) {
-    term.innerHTML += '<div class="tl-err">Error: ' + escHtml(String(e)) + '</div>';
+    term.done(false, String(e));
   } finally {
     _opRunning = false;
+    _startRunHelperName = '';
     _setStartBusy(false);
   }
 }
@@ -1092,10 +1317,24 @@ function renderModuleChips() {
     '</div>'
   ).join('');
 
-  list.innerHTML = requiredChips + userChips;
+  const extChips = selectedExternalOverlays.map((p, i) => {
+    const label = p.split('/').pop();
+    return '<div class="module-chip" title="' + escHtml(p) + '">' +
+      iconSvg('draft') +
+      '<span class="module-chip-name">' + escHtml(label) + '</span>' +
+      '<button class="btn btn-ghost btn-sm" onclick="removeExternalOverlay(' + i + ')">' + iconSvg('close') + '</button>' +
+    '</div>';
+  }).join('');
+
+  list.innerHTML = requiredChips + userChips + extChips;
 }
 
 function removeModule(i) {
   selectedModules.splice(i, 1);
+  renderModuleChips();
+}
+
+function removeExternalOverlay(i) {
+  selectedExternalOverlays.splice(i, 1);
   renderModuleChips();
 }

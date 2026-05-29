@@ -29,6 +29,7 @@ func registerRoutes(mux *http.ServeMux, s *srv) {
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/env/check", s.handleEnvCheck)
 	mux.HandleFunc("/api/helpers/available", s.handleHelpersAvailable)
+	mux.HandleFunc("/api/helpers/update", s.handleHelpersUpdate)
 	mux.HandleFunc("/api/helpers/", s.handleHelpersSub) // /api/helpers/{id}/...
 	mux.HandleFunc("/api/helpers", s.handleHelpersList)
 	mux.HandleFunc("/api/overlay/create", s.handleOverlayCreate)

@@ -30,22 +30,37 @@ function renderOverlays(filter) {
   ).join('');
 }
 
-function pickOverlay(path) {
+function _addModuleOverlay(path) {
   const entry = allOverlays.find(o => o.path === path);
   if (entry && !selectedModules.find(m => m.path === path)) {
     selectedModules.push(entry);
     renderModuleChips();
   }
+}
+
+function pickOverlay(path) {
+  _addModuleOverlay(path);
   navigate('start');
 }
 
 /* ── Overlay Picker Modal ────────────────── */
+let _opFileController = null;
+
 function openOverlayPicker(type) {
   opTargetType = type;
-  if (type !== 'module') return;
   gid('op-app-search').value = '';
   filterAppOverlays('');
+  opSwitchTab('module');
   gid('op-modal').classList.add('open');
+}
+
+function opSwitchTab(tab) {
+  const isModule = tab === 'module';
+  gid('op-tab-module-btn').classList.toggle('active', isModule);
+  gid('op-tab-file-btn').classList.toggle('active', !isModule);
+  gid('op-tab-app').classList.toggle('active', isModule);
+  gid('op-tab-file').classList.toggle('active', !isModule);
+  if (!isModule) opFileNavigate(gid('cfg-cwd')?.value || srvScratch || srvHome || '/');
 }
 
 function filterAppOverlays(q) {
@@ -65,11 +80,47 @@ function filterAppOverlays(q) {
         (q ? 'No matches.' : 'No .sqf overlays found.') + '</div>';
 }
 
-function selectOverlay(path) {
-  const entry = allOverlays.find(o => o.path === path);
-  if (entry && !selectedModules.find(m => m.path === path)) {
-    selectedModules.push(entry);
-    renderModuleChips();
+async function opFileNavigate(path) {
+  if (_opFileController) _opFileController.abort();
+  _opFileController = new AbortController();
+  const url = path ? '/api/fs?path=' + encodeURIComponent(path) : '/api/fs';
+  try {
+    const r       = await fetch(url, { signal: _opFileController.signal });
+    const entries = (await r.json()) || [];
+    const curPath = entries.length > 0 ? entries[0].path.replace(/\/[^/]+$/, '') || '/' : (path || '/');
+    _renderBreadcrumb('op-file-bc', curPath, 'opFileNavigate');
+    const dirs  = entries.filter(e =>  e.is_dir && !e.name.startsWith('.'));
+    const files = entries.filter(e => !e.is_dir && e.name.endsWith('.sqf'));
+    gid('op-file-list').innerHTML =
+      dirs.map(d =>
+        '<div class="modal-row" onclick="opFileNavigate(\'' + escHtml(d.path) + '\')">' +
+          '<span class="modal-row-icon">' + iconSvg('folder') + '</span>' +
+          '<span class="modal-row-name">' + escHtml(d.name) + '</span>' +
+          '<span class="modal-row-sel">' + iconSvg('chevron_right') + '</span>' +
+        '</div>'
+      ).join('') +
+      (files.length
+        ? files.map(f =>
+            '<div class="modal-row" onclick="selectExternalOverlay(\'' + escHtml(f.path) + '\')">' +
+              '<span class="modal-row-icon">' + iconSvg('draft') + '</span>' +
+              '<span class="modal-row-name">' + escHtml(f.name) + '</span>' +
+              '<span class="modal-row-size mono">' + fmtSize(f.size) + '</span>' +
+              '<span class="modal-row-sel"><button class="btn btn-sm btn-primary" onclick="event.stopPropagation();selectExternalOverlay(\'' + escHtml(f.path) + '\')">Select</button></span>' +
+            '</div>'
+          ).join('')
+        : (!dirs.length ? '<div class="modal-empty">No .sqf files here.</div>' : ''));
+  } catch(err) {
+    if (err.name === 'AbortError') return;
+    gid('op-file-list').innerHTML = '<div class="modal-error">Error loading directory.</div>';
   }
+}
+
+function selectOverlay(path) {
+  _addModuleOverlay(path);
+  closeModal('op-modal');
+}
+
+function selectExternalOverlay(path) {
+  _addExternalOverlay(path);
   closeModal('op-modal');
 }

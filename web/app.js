@@ -75,7 +75,8 @@ let allHistory  = [];
 
 // start section
 let selectedHelper   = null;
-let selectedModules  = [];
+let selectedModules          = [];
+let selectedExternalOverlays = [];
 let _helperParamKeys = [];
 
 // detail panel
@@ -125,7 +126,7 @@ function _updateThemeBtn() {
 gid('theme-toggle').addEventListener('click', toggleTheme);
 
 /* ── Sidebar collapse ───────────────────── */
-let sidebarCollapsed = false;
+let sidebarCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
 const collapseTab = gid('collapse-tab');
 function _updateCollapseTab() {
   collapseTab.innerHTML = iconSvg(sidebarCollapsed ? 'chevron_right' : 'chevron_left');
@@ -133,9 +134,11 @@ function _updateCollapseTab() {
 }
 collapseTab.addEventListener('click', () => {
   sidebarCollapsed = !sidebarCollapsed;
+  localStorage.setItem('sidebarCollapsed', sidebarCollapsed);
   gid('sidebar').classList.toggle('collapsed', sidebarCollapsed);
   _updateCollapseTab();
 });
+gid('sidebar').classList.toggle('collapsed', sidebarCollapsed);
 _updateCollapseTab();
 
 /* ── Navigation ──────────────────────────── */
@@ -225,14 +228,6 @@ function initCodeBlocks() {
     btn.innerHTML = iconSvg('content_copy');
     btn.onclick = function() { copyStr(el.querySelector(':not(button)')?.textContent || '', this); };
     el.appendChild(btn);
-  });
-}
-function copyText(elId, btn) {
-  const text = gid(elId)?.textContent || '';
-  navigator.clipboard.writeText(text).then(() => {
-    const o = btn.innerHTML;
-    btn.innerHTML = iconSvg('check') + ' Copied';
-    setTimeout(() => { btn.innerHTML = o; }, 1500);
   });
 }
 function copyStr(str, btn) {

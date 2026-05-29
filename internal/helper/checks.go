@@ -54,9 +54,8 @@ func CheckEnv(ctx context.Context, path string) (EnvStatus, error) {
 }
 
 // MissingParams returns the #PARAM: entries from scriptPath that need user
-// input — i.e. not present in `supplied` and without an auto-usable default.
-// Version-token defaults (e.g. "{CONDA_PYTHON}") always count as missing
-// because the user must pick a concrete version.
+// input — i.e. not present in `supplied`, not optional (KEY=?), and without
+// a literal default.
 //
 // Pure: no prompts, no I/O beyond reading the script file.
 func MissingParams(scriptPath string, supplied map[string]string) ([]HelperParam, error) {
@@ -69,12 +68,12 @@ func MissingParams(scriptPath string, supplied map[string]string) ([]HelperParam
 		if v, ok := supplied[p.Key]; ok && v != "" {
 			continue
 		}
-		// Optional params (KEY=?) pass through empty — script handles them.
+		// Optional params (KEY=?) auto-fill from #VALUE: or pass empty.
 		if p.Optional {
 			continue
 		}
-		// Non-version defaults auto-fill — not missing.
-		if p.Default != "" && !versionTokenRe.MatchString(p.Default) {
+		// Literal defaults auto-fill — not missing.
+		if p.Default != "" {
 			continue
 		}
 		missing = append(missing, p)

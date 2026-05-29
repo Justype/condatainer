@@ -246,7 +246,7 @@ func IsPassthrough(specs *ScriptSpecs) bool {
 var specDefaults = ResourceSpec{
 	Ntasks:       1,
 	CpusPerTask:  1,
-	MemPerNodeMB: 1024,
+	MemPerNodeMB: 2048,
 	Time:         2 * time.Hour,
 }
 

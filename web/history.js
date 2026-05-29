@@ -9,27 +9,33 @@ async function loadHistory() {
 
 function renderHistory(filter) {
   const q    = (filter || '').toLowerCase();
-  const rows = q
+  let rows = q
     ? allHistory.filter(h =>
         [h.name, h.label, h.status, h.node, h.cwd].join(' ').toLowerCase().includes(q))
-    : allHistory;
+    : allHistory.slice();
+  rows.sort((a, b) => {
+    const aActive = isActiveHistoryStatus(a.status) ? 1 : 0;
+    const bActive = isActiveHistoryStatus(b.status) ? 1 : 0;
+    if (aActive !== bActive) return bActive - aActive;
+    const at = a.ended_at ? new Date(a.ended_at).getTime() : 0;
+    const bt = b.ended_at ? new Date(b.ended_at).getTime() : 0;
+    return bt - at;
+  });
   const tbody = gid('hist-tbody');
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="td-empty">' +
+    tbody.innerHTML = '<tr><td colspan="6" class="td-empty">' +
       (q ? 'No matches.' : 'No history yet.') + '</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map(h => {
-    const dur = calcDuration(h.started_at, h.ended_at, h.status, h.walltime_str);
     const id  = escHtml(h.id);
     return (
       '<tr data-id="' + id + '" onclick="openDetail(\'' + id + '\')">' +
         '<td class="td-name">' + escHtml(h.label || h.name) + '</td>' +
         '<td class="td-fit"><span class="badge ' + badgeClass(h.status) + '">' + escHtml(h.status) + '</span></td>' +
-        '<td class="mono td-muted td-node" title="' + escHtml(h.node || '') + '">' + escHtml(h.node || '—') + '</td>' +
+        '<td class="mono td-muted td-node" title="' + escHtml(h.node || '') + '">' + escHtml((h.node || '—').split('.')[0]) + '</td>' +
         '<td class="mono path-cell td-muted">' + pathTailHtml(h.cwd) + '</td>' +
-        '<td class="td-muted td-fit">' + (h.started_at ? fmtRelTime(h.started_at) : '—') + '</td>' +
-        '<td class="td-muted td-fit">' + dur + '</td>' +
+        '<td class="td-muted td-fit">' + (h.ended_at ? fmtRelTime(h.ended_at) : '—') + '</td>' +
         '<td class="td-nowrap td-fit">' +
           (isActiveHistoryStatus(h.status)
             ? '<button class="btn btn-sm" disabled title="Job is still active">' + iconSvg('replay') + '</button>'
@@ -54,8 +60,7 @@ function rerunHistoryJob(ev, id) {
     ev.preventDefault();
     ev.stopPropagation();
   }
-  detailJobId = id;
-  rerunJob();
+  rerunJob(id);
 }
 
 async function removeHistoryEntry(ev, id, btn) {

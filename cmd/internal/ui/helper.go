@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -21,9 +20,6 @@ import (
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
-
-// versionTokenRe matches a default value that is a single {KEY} version token.
-var versionTokenRe = regexp.MustCompile(`^\{([A-Z][A-Z0-9_]*)\}$`)
 
 // OfferRecentSessions shows a combined list of running instances and recent history,
 // deduplicated by CWD. Running entries are marked [RUNNING] with their access URL.
@@ -195,12 +191,10 @@ func PromptSettings(ctx context.Context,
 	paramEntries := make([]paramEntry, 0, len(params))
 	for _, p := range params {
 		defVal := p.Default
-		var vlist []string
-		if m := versionTokenRe.FindStringSubmatch(defVal); m != nil {
-			if vl := versions[m[1]]; len(vl) > 0 {
-				vlist = vl
-				defVal = utils.LatestVersion(vl)
-			}
+		vlist := versions[p.Key]
+		// KEY=? auto-fills with first (latest) value from #VALUE: list.
+		if p.Optional && len(vlist) > 0 && defVal == "" {
+			defVal = vlist[0]
 		}
 		// History params seed defaults (below saved config, above script defaults).
 		if hp, ok := opts.Params[p.Key]; ok && hp != "" {
@@ -356,8 +350,8 @@ func PromptSettings(ctx context.Context,
 	// Script params at the end.
 	for _, e := range paramEntries {
 		rawVal := result[e.p.Key]
-		if rawVal == "" {
-			rawVal = "(auto)"
+		if rawVal == "" && e.p.Optional {
+			rawVal = "(optional)"
 		}
 		choices := ""
 		if len(e.versionList) > 0 {
@@ -624,7 +618,7 @@ func GuidedOverlayCreate(ctx context.Context, helperName string, meta helper.Hel
 		Profile: overlay.ProfileSmall,
 	}
 	io := cntexec.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
-	utils.PrintMessage("Creating overlay and installing packages: %s", strings.Join(allPkgs, " "))
+	utils.PrintMessage("Creating overlay and installing packages: %s", cntexec.DescribeInitialCondaPackages(allPkgs))
 	if err := cntexec.CreateCondaOverlay(ctx, opts, allPkgs, meta.PostInstallCmd, false, io); err != nil {
 		return "", fmt.Errorf("overlay creation failed: %w", err)
 	}

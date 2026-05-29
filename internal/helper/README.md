@@ -40,19 +40,34 @@ Shown in `condatainer helper --list` and the server dashboard.
 
 ### `#PARAM:` — helper-specific parameters
 
-Defines a configurable variable. The Go runner resolves each param from (in order): CLI flag → saved config → interactive prompt → default value.
+Defines a configurable variable. The Go runner resolves each param from (in order): CLI flag → saved config → script default.
 
 ```
 #PARAM: KEY=default --long-flag,-s "Description shown in --help and prompts"
 ```
 
-- `KEY=default` — variable name and default value. Empty default means the user must supply a value.
+Three forms for the default value:
+
+| Default | Behavior |
+|---------|----------|
+| `KEY=` | **Required** — user must supply a value via CLI flag, saved config, or interactive prompt. |
+| `KEY=?` | **Auto** — filled from the first entry of the matching `#VALUE:` list; empty (optional) if no list. |
+| `KEY=literal` | **Literal** — always uses `literal` unless overridden by flag or saved config. |
+
 - `--long-flag,-s` — optional CLI flags (long and short). Omit entirely for prompt-only params.
-- `"Description"` — shown in `condatainer helper <name> --help` and the interactive prompt.
+- `"Description"` — shown in `condatainer helper <name> --help` and the settings table.
 
-The resolved value is exported as `$KEY` inside the job wrapper, so the script sees it as a plain env var.
+The resolved value is exported as `$KEY` inside the job wrapper.
 
-**First-run save pattern** — for params that must be computed at runtime (e.g. tunnel names), leave the default empty and compute+save inside the script on first run:
+**Auto default (`KEY=?`) example** — picks the latest R version from `#VALUE:` automatically; user can override with `-r`:
+
+```bash
+#PARAM: POSIT_R=? --rversion,-r "R version"
+#VALUE: POSIT_R=4.5.3,4.5.2,4.5.1,...
+#REQUIRED_OVERLAYS: r{POSIT_R} rstudio-server
+```
+
+**First-run save pattern** — for params computed at runtime (e.g. tunnel names), leave the default empty (`KEY=`) and compute+save inside the script on first run:
 
 ```bash
 if [ -z "${MACHINE_NAME:-}" ]; then

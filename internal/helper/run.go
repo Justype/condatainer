@@ -111,11 +111,10 @@ func ResolveHelperSpec(scriptPath string) *scheduler.ResourceSpec {
 	return resolveSpec(scriptPath, nil)
 }
 
-// resolveSpec merges resources with priority: config defaults < script headers < overrides.
+// resolveSpec merges resources with priority: scheduler defaults < script headers < overrides.
 // Recognised script headers: #NCPUS:, #MEM:, #TIME:, #GPU:.
 func resolveSpec(scriptPath string, overrides *scheduler.ResourceSpec) *scheduler.ResourceSpec {
-	// Start with global config defaults as the base.
-	base := config.Global.Build.Defaults
+	base := scheduler.GetSpecDefaults()
 
 	// Script headers (#NCPUS:/#MEM:/#TIME:/#GPU:) override config defaults.
 	meta, err := ParseHelperScriptMeta(scriptPath)
@@ -455,6 +454,11 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	fmt.Fprintf(&sb, "trap '%s; exit 130' TERM INT\n", cleanupTrap)
 	fmt.Fprintln(&sb)
 
+	// cd to CWD before invoking condatainer so relative overlay paths resolve correctly.
+	if cwd != "" {
+		fmt.Fprintf(&sb, "cd %s\n", shellQuote(cwd))
+	}
+
 	// Run the helper inside the container
 	fmt.Fprintln(&sb, containerCmd)
 	fmt.Fprintln(&sb)
@@ -632,7 +636,7 @@ func normalizeOverlayForHistory(path, cwd string) string {
 	}
 	// External: store relative to cwd when the path stays nearby (no deep "../../").
 	if cwd != "" {
-		if rel, err := filepath.Rel(cwd, p); err == nil && !strings.HasPrefix(rel, "../..") {
+		if rel, err := filepath.Rel(cwd, p); err == nil && !strings.HasPrefix(rel, "..") {
 			return rel + suffix
 		}
 	}

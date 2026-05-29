@@ -4,11 +4,32 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
+
+const minimalCondaPackage = "zlib"
+
+// ResolveInitialCondaPackages returns the package list used to initialize a
+// fresh conda overlay. An empty list gets a tiny package so mm-create creates
+// the environment instead of receiving no specs.
+func ResolveInitialCondaPackages(pkgs []string) []string {
+	if len(pkgs) == 0 {
+		return []string{minimalCondaPackage}
+	}
+	return pkgs
+}
+
+// DescribeInitialCondaPackages returns user-facing text for the resolved initial package list.
+func DescribeInitialCondaPackages(pkgs []string) string {
+	if len(pkgs) == 0 {
+		return "minimal conda environment with small package (" + minimalCondaPackage + ")"
+	}
+	return strings.Join(pkgs, " ")
+}
 
 // CreateCondaOverlay creates a new user-owned ext3 overlay at opts.Path,
 // initializes a conda environment with pkgs using mm-create, then moves and
@@ -21,6 +42,7 @@ func CreateCondaOverlay(ctx context.Context, opts *overlay.CreateOptions, pkgs [
 		opts.UID = os.Getuid()
 		opts.GID = os.Getgid()
 	}
+	pkgs = ResolveInitialCondaPackages(pkgs)
 
 	tmpPath, err := overlay.CreateInTmp(ctx, opts)
 	if err != nil {
@@ -60,6 +82,7 @@ func CreateCondaOverlay(ctx context.Context, opts *overlay.CreateOptions, pkgs [
 // Use for initial environment creation on a fresh overlay.
 // For adding packages to an existing environment, use InstallPackages.
 func InitCondaEnv(ctx context.Context, imgPath string, pkgs []string, fakeroot bool, io IO) error {
+	pkgs = ResolveInitialCondaPackages(pkgs)
 	cmd := append([]string{"mm-create", "-y"}, pkgs...)
 	if err := Run(ctx, Options{
 		Overlays:    []string{imgPath},

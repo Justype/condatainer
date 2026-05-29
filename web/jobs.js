@@ -28,11 +28,45 @@ function renderJobs() {
       '<div class="empty-link"><a href="#" onclick="navigate(\'start\');return false;">Start a helper →</a></div></div>';
     return;
   }
-  wrap.innerHTML = '<div class="job-list">' + allJobs.map(jobCardHTML).join('') + '</div>';
+  const stableJobIds = oldestRunningJobIdsByName(allJobs);
+  wrap.innerHTML = '<div class="job-list">' + allJobs.map(j => jobCardHTML(j, stableJobIds)).join('') + '</div>';
   startWalltimeCountdowns();
 }
 
-function jobCardHTML(j) {
+function oldestRunningJobIdsByName(jobs) {
+  const out = {};
+  jobs.forEach(j => {
+    if (j.status !== 'running' || !j.name || !j.id) return;
+    const cur = out[j.name];
+    if (!cur || _jobIsOlder(j, cur)) out[j.name] = j;
+  });
+  const ids = {};
+  Object.keys(out).forEach(name => { ids[name] = out[name].id; });
+  return ids;
+}
+
+function _jobIsOlder(a, b) {
+  const at = a.started_at ? new Date(a.started_at).getTime() : NaN;
+  const bt = b.started_at ? new Date(b.started_at).getTime() : NaN;
+  if (Number.isFinite(at) && Number.isFinite(bt)) return at < bt;
+  if (Number.isFinite(at)) return true;
+  if (Number.isFinite(bt)) return false;
+  return String(a.id || '') < String(b.id || '');
+}
+
+function stableHelperURL(j, url) {
+  if (!url || j.external_url || j.port === 0) return '';
+  try {
+    const u = new URL(url);
+    if (u.hostname !== 'localhost' && !u.hostname.endsWith('.localhost')) return '';
+    u.hostname = j.name + '.localhost';
+    return u.toString();
+  } catch {
+    return '';
+  }
+}
+
+function jobCardHTML(j, stableJobIds) {
   const endsAt     = j.ends_at_ms || 0;
   const showEndsIn = endsAt && j.status === 'running';
   const walltimeEl = showEndsIn
@@ -40,6 +74,8 @@ function jobCardHTML(j) {
     : (j.walltime_str ? '⏱ ' + escHtml(j.walltime_str) : '');
   const overlay = j.env_overlay || '';
   const url     = j.access_url || j.external_url || '';
+  const stableURL = stableJobIds[j.name] === j.id ? stableHelperURL(j, url) : '';
+  const copyURL = stableURL || url;
   const lastMsg = j.last_message || '';
   const id      = escHtml(j.id);
   return (
@@ -59,8 +95,13 @@ function jobCardHTML(j) {
       (lastMsg ? '<div class="jc-lastmsg">"' + escHtml(lastMsg) + '"</div>' : '') +
       (url
         ? '<div class="jc-access" onclick="event.stopPropagation()">' +
-            '<a class="jc-link" href="' + escHtml(url) + '" target="_blank">' + escHtml(url) + ' ↗</a>' +
-            '<button class="btn btn-sm" onclick="copyStr(\'' + escHtml(url) + '\',this)" title="Copy URL">' + iconSvg('content_copy') + '</button>' +
+            '<a class="jc-link" href="' + escHtml(url) + '" target="_blank" title="' + escHtml(url) + '">' +
+              '<span class="jc-link-text">' + escHtml(url) + '</span><span class="jc-link-ext">↗</span>' +
+            '</a>' +
+            '<button class="btn btn-sm jc-icon-btn" onclick="copyStr(\'' + escHtml(copyURL) + '\',this)" title="' + escHtml(stableURL ? 'Copy stable URL' : 'Copy URL') + '">' + iconSvg('content_copy') + '</button>' +
+            (stableURL
+              ? '<a class="btn btn-sm jc-icon-btn" href="' + escHtml(stableURL) + '" target="_blank" title="' + escHtml(stableURL) + '">' + iconSvg('link_2') + '</a>'
+              : '') +
           '</div>'
         : '') +
       '<div class="jc-stop-wrap" onclick="event.stopPropagation()">' +
@@ -75,9 +116,30 @@ async function stopJob(id, btn) {
     btn.dataset.confirm = '';
     btn.innerHTML = 'Stopping…';
     btn.disabled = true;
-    try { await fetch('/api/helpers/' + encodeURIComponent(id) + '/stop', { method: 'POST' }); } catch {}
-    await loadJobs();
+    _stoppingJobs.add(id);
+
+    let ok = false;
+    try {
+      const r = await fetch('/api/helpers/' + encodeURIComponent(id) + '/stop', { method: 'POST' });
+      ok = r.ok;
+    } catch {}
+
+    _stoppingJobs.delete(id);
+    try {
+      const r = await fetch('/api/helpers?status=active');
+      allJobs = (await r.json()) || [];
+    } catch {}
     if (detailJobId === id) closeDetail();
+    renderJobs();
+
+    if (!ok) {
+      const card = gid('jcard-' + id);
+      const newBtn = card && card.querySelector('.btn-danger');
+      if (newBtn) {
+        newBtn.textContent = 'Stop failed';
+        setTimeout(() => { if (newBtn.textContent === 'Stop failed') newBtn.textContent = 'Stop'; }, 3000);
+      }
+    }
   } else {
     btn.dataset.confirm = '1';
     btn.innerHTML = 'Confirm?';
@@ -261,23 +323,22 @@ function detailStop() {
   if (btn && detailJobId) stopJob(detailJobId, btn);
 }
 
-function rerunJob() {
-  const job = allJobs.find(j => j.id === detailJobId) || allHistory.find(j => j.id === detailJobId);
+function rerunJob(jobOrId) {
+  const id = typeof jobOrId === 'string' ? jobOrId : detailJobId;
+  const job = typeof jobOrId === 'object' && jobOrId
+    ? jobOrId
+    : allJobs.find(j => j.id === id) || allHistory.find(j => j.id === id);
   if (!job) return;
   navigate('start');
-  setTimeout(() => {
-    const h = allHelpers.find(h => h.name === job.name);
-    if (h) selectHelper(h.name, {
-      cpus:    job.cpus,
-      mem:     job.mem,
-      wall:    job.walltime_str,
-      gpu:     job.gpu     || '',
-      cwd:     job.cwd     || '',
-      overlay: job.env_overlay || '',
-      modules: (job.overlays || [])
-        .map(p => allOverlays.find(o => o.path === p || o.name === p))
-        .filter(Boolean),
-      params:  job.params  || {},
-    });
-  }, 60);
+  queueStartSelection(job.name, {
+    cpus:    job.cpus,
+    mem:     job.mem,
+    wall:    job.walltime_str,
+    gpu:     job.gpu     || '',
+    cwd:     job.cwd     || '',
+    overlay: job.env_overlay || '',
+    modules:   (job.overlays || []).map(p => allOverlays.find(o => o.name === p || o.path === p)).filter(Boolean),
+    externals: (job.overlays || []).filter(p => !allOverlays.find(o => o.name === p || o.path === p)),
+    params:  job.params  || {},
+  });
 }

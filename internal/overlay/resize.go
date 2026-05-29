@@ -37,7 +37,7 @@ func Resize(ctx context.Context, imagePath string, newSizeMB int) error {
 
 	log.Info(fmt.Sprintf("resizing %s to %d MiB", absPath, newSizeMB))
 
-	if err := CheckIntegrity(ctx, absPath, true); err != nil {
+	if err := CheckIntegrity(ctx, absPath, false); err != nil {
 		return err
 	}
 

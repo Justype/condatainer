@@ -73,6 +73,10 @@
           <div class="s-title">Start Helper</div>
           <div class="s-sub">Launch a new helper on a compute node</div>
         </div>
+        <div class="btn-row">
+          <button class="btn btn-sm" id="start-update-btn" onclick="updateHelperScripts()" title="Download remote helper scripts"><svg class="icon"><use href="#i-download"></use></svg>Update</button>
+          <button class="btn btn-sm" id="start-refresh-btn" onclick="refreshStartHelpers()" title="Reload helper list"><svg class="icon"><use href="#i-refresh"></use></svg>Refresh</button>
+        </div>
       </div>
       <div class="start-layout">
         <div class="helper-list" id="helper-list-wrap">
@@ -89,15 +93,15 @@
           <div class="form-grid">
             <div class="field">
               <label class="field-label">CPUs</label>
-              <input class="field-input" id="cfg-cpus" placeholder="4">
+              <input class="field-input" id="cfg-cpus">
             </div>
             <div class="field">
               <label class="field-label">Memory (GB)</label>
-              <input class="field-input" id="cfg-mem" placeholder="16G">
+              <input class="field-input" id="cfg-mem">
             </div>
             <div class="field">
               <label class="field-label">Walltime (hours)</label>
-              <input class="field-input" id="cfg-wall" placeholder="08:00:00">
+              <input class="field-input" id="cfg-wall">
             </div>
             <div class="field">
               <label class="field-label">GPU (optional)</label>
@@ -111,7 +115,7 @@
             <label class="field-label">Working Directory</label>
             <div class="field-row">
               <input class="field-input" id="cfg-cwd" placeholder="Working directory (default: current)">
-              <button class="btn btn-sm" onclick="openFilePicker('cfg-cwd','dir')">Browse</button>
+              <button class="btn btn-sm" id="cfg-cwd-browse-btn" onclick="openFilePicker('cfg-cwd','dir')">Browse</button>
             </div>
           </div>
           <div class="field">
@@ -119,7 +123,7 @@
             <div class="field-row">
               <input class="field-input" id="cfg-overlay" placeholder="optional — path to env .img">
               <button class="btn btn-sm btn-ghost" id="ov-clear-btn" disabled onclick="clearEnvOverlay()">Clear</button>
-              <button class="btn btn-sm" onclick="openFilePicker('cfg-overlay','file','cfg-cwd','.img')">Browse</button>
+              <button class="btn btn-sm" id="cfg-overlay-browse-btn" onclick="openFilePicker('cfg-overlay','file','cfg-cwd','.img')">Browse</button>
               <button class="btn btn-sm" id="ov-new-btn" onclick="toggleOverlayCreate()">New</button>
             </div>
             <div class="ov-notice" id="ov-notice">
@@ -159,7 +163,7 @@
                 </div>
                 <div class="field">
                   <label class="field-label">Size</label>
-                  <input class="field-input" id="ov-size" value="20G">
+                  <input class="field-input" id="ov-size" placeholder="20G">
                 </div>
               </div>
               <div id="ov-token-wrap"></div>
@@ -179,7 +183,7 @@
           <div class="field">
             <label class="field-label">Module Overlays (.sqf)</label>
             <div id="cfg-modules-list"></div>
-            <button class="btn btn-sm btn-start" onclick="openOverlayPicker('module')"><svg class="icon"><use href="#i-add_2"></use></svg>Add module</button>
+            <button class="btn btn-sm btn-start" onclick="openOverlayPicker('module')"><svg class="icon"><use href="#i-add_2"></use></svg>Add overlay</button>
           </div>
           <div id="helper-params-wrap"></div>
           <div class="form-actions">
@@ -254,9 +258,9 @@
       </div>
       <div class="tbl-wrap">
         <table class="data-table">
-          <thead><tr><th>Name</th><th>Status</th><th>Node</th><th>CWD</th><th>Started</th><th>Duration</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Name</th><th>Status</th><th>Node</th><th>CWD</th><th>Ended</th><th>Actions</th></tr></thead>
           <tbody id="hist-tbody">
-            <tr><td colspan="7" class="td-empty">Loading…</td></tr>
+            <tr><td colspan="6" class="td-empty">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -348,14 +352,22 @@
 <div class="modal-backdrop" id="op-modal">
   <div class="modal modal-lg">
     <div class="modal-hdr">
-      <span>Select Module Overlay</span>
+      <span>Add Overlay</span>
       <button class="btn btn-ghost btn-sm" onclick="closeModal('op-modal')"><svg class="icon"><use href="#i-close"></use></svg></button>
+    </div>
+    <div class="modal-tabs">
+      <button class="modal-tab active" id="op-tab-module-btn" onclick="opSwitchTab('module')">Module overlay</button>
+      <button class="modal-tab" id="op-tab-file-btn" onclick="opSwitchTab('file')">File (.sqf)</button>
     </div>
     <div class="modal-tab-body active" id="op-tab-app">
       <div class="modal-search">
         <input id="op-app-search" placeholder="Search module overlays…" oninput="filterAppOverlays(this.value)">
       </div>
       <div id="op-app-list"></div>
+    </div>
+    <div class="modal-tab-body" id="op-tab-file">
+      <div class="modal-bc" id="op-file-bc"></div>
+      <div class="modal-body" id="op-file-list"></div>
     </div>
     <div class="modal-ftr">
       <button class="btn btn-sm" onclick="closeModal('op-modal')">Cancel</button>
@@ -393,9 +405,7 @@
   setInterval(pollStatus, 10000);
   loadJobs();
   setInterval(loadJobs, 5000);
-  loadHelpers();
   loadOverlays();
-  loadGpuOptions();
 </script>
 
 <!-- ─ Global progress window ──────────── -->

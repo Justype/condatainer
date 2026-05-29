@@ -27,18 +27,19 @@ async function navigateFiles(path) {
   renderFileTree();
 }
 
-function renderFileBreadcrumb(path) {
+function _renderBreadcrumb(containerId, path, navFn) {
   const parts = (path || '/').split('/').filter(Boolean);
-  gid('bc').innerHTML =
-    '<span class="bc-seg" onclick="navigateFiles(\'/\')">/</span>' +
+  gid(containerId).innerHTML =
+    '<span class="bc-seg" onclick="' + navFn + '(\'/\')">/</span>' +
     parts.map((p, i) => {
       const full = '/' + parts.slice(0, i + 1).join('/');
       const isLast = i === parts.length - 1;
       if (isLast) return '<span class="bc-cur">' + escHtml(p) + '</span>';
-      return '<span class="bc-seg" onclick="navigateFiles(\'' + escHtml(full) + '\')">' + escHtml(p) + '</span>' +
+      return '<span class="bc-seg" onclick="' + navFn + '(\'' + escHtml(full) + '\')">' + escHtml(p) + '</span>' +
         '<span class="bc-sep">/</span>';
     }).join('');
 }
+function renderFileBreadcrumb(path) { _renderBreadcrumb('bc',    path, 'navigateFiles'); }
 
 function renderFileListing(entries, truncated) {
   const tbody = gid('file-tbody');
@@ -102,6 +103,12 @@ function _parentDir(path) {
 }
 
 function openFilePicker(targetId, mode, fallbackId, suffix) {
+  if ((targetId === 'cfg-cwd' || targetId === 'cfg-overlay') &&
+      ((typeof _startBusy !== 'undefined' && _startBusy) ||
+       (typeof _formOpen !== 'undefined' && _formOpen) ||
+       (typeof _opRunning !== 'undefined' && _opRunning))) {
+    return;
+  }
   fpTargetId = targetId;
   fpMode     = mode;
   fpSuffix   = suffix || '';
@@ -117,18 +124,7 @@ function openFilePicker(targetId, mode, fallbackId, suffix) {
   gid('fp-modal').classList.add('open');
 }
 
-function _renderFpBreadcrumb(path) {
-  const parts = (path || '/').split('/').filter(Boolean);
-  gid('fp-bc').innerHTML =
-    '<span class="bc-seg" onclick="fpNavigate(\'/\')">/</span>' +
-    parts.map((p, i) => {
-      const full = '/' + parts.slice(0, i + 1).join('/');
-      const isLast = i === parts.length - 1;
-      if (isLast) return '<span class="bc-cur">' + escHtml(p) + '</span>';
-      return '<span class="bc-seg" onclick="fpNavigate(\'' + escHtml(full) + '\')">' + escHtml(p) + '</span>' +
-        '<span class="bc-sep">/</span>';
-    }).join('');
-}
+function _renderFpBreadcrumb(path) { _renderBreadcrumb('fp-bc', path, 'fpNavigate'); }
 
 let _fpController = null; // AbortController for the in-flight fpNavigate request
 
@@ -156,12 +152,12 @@ async function fpNavigate(path) {
         '</div>'
       ).join('') +
       files.map(f =>
-        '<div class="modal-row" onclick="fpSelectFile(\'' + escHtml(f.path) + '\')">' +
+        '<div class="modal-row" onclick="fpSelectDir(\'' + escHtml(f.path) + '\')">' +
           '<span class="modal-row-icon">' + iconSvg('draft') + '</span>' +
           '<span class="modal-row-name">' + escHtml(f.name) + '</span>' +
           '<span class="modal-row-size mono">' + fmtSize(f.size) + '</span>' +
           '<span class="modal-row-sel">' +
-            '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();fpSelectFile(\'' + escHtml(f.path) + '\')">Select</button>' +
+            '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();fpSelectDir(\'' + escHtml(f.path) + '\')">Select</button>' +
           '</span></div>'
       ).join('') ||
       '<div class="modal-empty">Empty directory</div>';
@@ -172,16 +168,10 @@ async function fpNavigate(path) {
   }
 }
 
-function fpSelectDir(path)  {
+function fpSelectDir(path) {
   _setVal(fpTargetId, path);
   const e = gid(fpTargetId);
   if (e) e.dispatchEvent(new Event('input'));
   closeModal('fp-modal');
 }
-function fpSelectFile(path) {
-  _setVal(fpTargetId, path);
-  const e = gid(fpTargetId);
-  if (e) e.dispatchEvent(new Event('input'));
-  closeModal('fp-modal');
-}
-function fpSelect()         { fpSelectDir(fpPath); }
+function fpSelect() { fpSelectDir(fpPath); }

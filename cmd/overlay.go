@@ -520,18 +520,18 @@ func initCondaInOverlay(ctx context.Context, overlayPath, envFile string, packag
 		return fmt.Errorf("failed to get absolute path of overlay: %w", err)
 	}
 
-	var pkgs []string
 	if envFile != "" {
 		utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(envFile))
-		pkgs = []string{"-f", envFile}
 	} else if len(packages) > 0 {
 		utils.PrintMessage("Initializing conda environment with: %s...", strings.Join(packages, " "))
-		pkgs = packages
 	} else {
-		utils.PrintMessage("Initializing minimal conda environment with small package (zlib)...")
-		pkgs = []string{"zlib"}
+		utils.PrintMessage("Initializing %s...", exec.DescribeInitialCondaPackages(nil))
 	}
 
+	pkgs := packages
+	if envFile != "" {
+		pkgs = []string{"-f", envFile}
+	}
 	if err := exec.InitCondaEnv(ctx, absOverlayPath, pkgs, fakeroot, io); err != nil {
 		return fmt.Errorf("failed to run mm-create: %w", err)
 	}

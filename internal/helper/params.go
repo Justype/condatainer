@@ -2,7 +2,6 @@ package helper
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/scheduler"
@@ -91,9 +90,6 @@ func ValidateHelperParamConflicts(params []HelperParam) error {
 	}
 	return nil
 }
-
-// versionTokenRe matches a default value that is a single {KEY} version token.
-var versionTokenRe = regexp.MustCompile(`^\{([A-Z][A-Z0-9_]*)\}$`)
 
 // PrintHelperUsage prints the combined --help text for a helper.
 // versions is the map from ParseHelperScriptMeta().ParamValues; pass nil if unavailable.

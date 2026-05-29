@@ -121,27 +121,6 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 		}
 	}
 
-	cwd := opts.CWD
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	opts.EnvImg = ResolveEnvOverlayInDir(opts.EnvImg, cwd)
-	if opts.EnvImg != "" {
-		logger.Info("Checking env overlay", "path", opts.EnvImg)
-		st, err := CheckEnv(ctx, opts.EnvImg)
-		if err != nil {
-			return nil, fmt.Errorf("checking env overlay: %w", err)
-		}
-		if st.InUse {
-			return nil, &ErrEnvInUse{Path: opts.EnvImg}
-		}
-		if st.Exists && st.Writable {
-			if err := checkOverlayIntegrity(ctx, opts.EnvImg); err != nil {
-				return nil, fmt.Errorf("overlay integrity check failed: %w", err)
-			}
-		}
-	}
-
 	scriptParams, err := ParseHelperParams(opts.ScriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("parsing #PARAM: headers: %w", err)
@@ -160,10 +139,15 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 			continue
 		}
 		if p.Optional {
-			flagValues[p.Key] = "" // export as empty; script handles missing value
+			// KEY=? auto-fills with first #VALUE: entry; falls back to empty.
+			if vals := meta.ParamValues[p.Key]; len(vals) > 0 {
+				flagValues[p.Key] = vals[0]
+			} else {
+				flagValues[p.Key] = ""
+			}
 			continue
 		}
-		if p.Default != "" && !versionTokenRe.MatchString(p.Default) {
+		if p.Default != "" {
 			flagValues[p.Key] = p.Default
 		}
 	}
@@ -175,6 +159,26 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 		return nil, &ErrMissingParam{Params: missing}
 	}
 	params := flagValues
+
+	cwd := opts.CWD
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	if opts.EnvImg != "" {
+		logger.Info("Checking env overlay", "path", opts.EnvImg)
+		st, err := CheckEnv(ctx, opts.EnvImg)
+		if err != nil {
+			return nil, fmt.Errorf("checking env overlay: %w", err)
+		}
+		if st.InUse {
+			return nil, &ErrEnvInUse{Path: opts.EnvImg}
+		}
+		if st.Exists && st.Writable {
+			if err := checkOverlayIntegrity(ctx, opts.EnvImg); err != nil {
+				return nil, fmt.Errorf("overlay integrity check failed: %w", err)
+			}
+		}
+	}
 
 	// Resolve {KEY} tokens in #BIND: specs from resolved params.
 	for _, b := range meta.Binds {
