@@ -231,6 +231,9 @@ func checkAndInstallNamedOverlays(ctx context.Context, names []string) ([]string
 		condaBin = "condatainer"
 	}
 
+	// Invalidate cache so removals since process start are reflected.
+	container.InvalidateInstalledOverlaysCache()
+
 	// First pass: resolve already-present overlays and collect missing names.
 	resolved := make(map[string][]string, len(names))
 	var missing []string

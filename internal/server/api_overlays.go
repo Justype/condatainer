@@ -110,6 +110,7 @@ func (s *srv) handleOverlayEdit(w http.ResponseWriter, r *http.Request) {
 
 // handleOverlaysList serves GET /api/overlays — lists module (.sqf) overlays.
 func (s *srv) handleOverlaysList(w http.ResponseWriter, r *http.Request) {
+	container.InvalidateInstalledOverlaysCache()
 	installed, err := container.InstalledOverlays()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
