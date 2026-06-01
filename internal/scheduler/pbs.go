@@ -700,8 +700,8 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	fmt.Fprintln(writer, "")
 	writeJobFooter(writer, "$PBS_JOBID")
 
-	// Self-delete the script after execution (unless in debug mode)
-	if !debugMode {
+	// Self-delete the script after execution (unless in debug mode or KeepScript)
+	if !debugMode && !jobSpec.KeepScript {
 		fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
 	}
 

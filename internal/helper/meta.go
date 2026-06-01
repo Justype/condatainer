@@ -233,7 +233,7 @@ func ParseHelperScriptMeta(scriptPath string) (HelperScriptMeta, error) {
 		line := scanner.Text()
 		switch {
 		case strings.HasPrefix(line, "#NCPUS:"):
-			if n, err := strconv.Atoi(stripInlineComment(strings.TrimSpace(line[len("#NCPUS:"):])));err == nil && n > 0 {
+			if n, err := strconv.Atoi(stripInlineComment(strings.TrimSpace(line[len("#NCPUS:"):]))); err == nil && n > 0 {
 				meta.NCPUs = n
 			}
 		case strings.HasPrefix(line, "#MEM:"):

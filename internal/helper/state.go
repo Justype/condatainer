@@ -511,7 +511,7 @@ func RunningHelpers(name string) ([]*HelperRun, error) {
 		done, _ := ReadDoneEvent(r.ID)
 		if done != nil {
 			status := "done"
-			if done.ExitCode != 0 {
+			if done.ExitCode != 0 && done.ExitCode < 128 {
 				status = "failed"
 			}
 			_ = UpdateHistoryStatus(r.ID, status, done.Ts)

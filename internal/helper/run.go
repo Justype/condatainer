@@ -45,6 +45,9 @@ type RunOptions struct {
 }
 
 func detectScheduler() (scheduler.Scheduler, error) {
+	if !config.Global.SubmitJob {
+		return nil, scheduler.ErrSchedulerNotFound
+	}
 	if sched := scheduler.ActiveScheduler(); sched != nil {
 		if sched.IsInsideJob() {
 			return nil, scheduler.ErrSchedulerNotFound
@@ -457,12 +460,23 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	if sched == nil {
 		parentDir := utils.GetTmpDir()
 		jobTmpDir := filepath.Join(parentDir, id)
+		cleanupTrap += `; kill -KILL $_cnt_watchdog_pid 2>/dev/null`
 		cleanupTrap += fmt.Sprintf(`; rm -rf %s; rmdir %s 2>/dev/null || true`,
 			shellQuote(jobTmpDir), shellQuote(parentDir))
 	} else {
 		cleanupTrap += `; rm -rf "$CNT_JOB_TMPDIR"`
 	}
 	fmt.Fprintf(&sb, "trap '%s; exit 130' TERM INT\n", cleanupTrap)
+
+	// Headless walltime watchdog: background subshell that ignores TERM/INT so it
+	// survives the group SIGTERM it sends, then SIGKILLs after a 2-minute grace period.
+	if sched == nil {
+		fmt.Fprintln(&sb, `_cnt_main_pid=$$`)
+		fmt.Fprintf(&sb,
+			"( trap '' TERM INT; sleep %d; kill -TERM -$_cnt_main_pid 2>/dev/null; sleep 120; kill -KILL -$_cnt_main_pid 2>/dev/null ) &\n",
+			int64(walltime.Seconds()))
+		fmt.Fprintln(&sb, `_cnt_watchdog_pid=$!`)
+	}
 	fmt.Fprintln(&sb)
 
 	// cd to CWD before invoking condatainer so relative overlay paths resolve correctly.
@@ -474,9 +488,12 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	fmt.Fprintln(&sb, containerCmd)
 	fmt.Fprintln(&sb)
 
-	// Normal exit: disarm trap then record done with real exit code.
+	// Normal exit: disarm trap, kill watchdog, then record done with real exit code.
 	fmt.Fprintln(&sb, `_cnt_exit=$?`)
 	fmt.Fprintln(&sb, `trap - TERM INT`)
+	if sched == nil {
+		fmt.Fprintln(&sb, `kill -KILL $_cnt_watchdog_pid 2>/dev/null`)
+	}
 	fmt.Fprintln(&sb, `condatainer _server_done --exit-code $_cnt_exit`)
 	if sched == nil {
 		parentDir := utils.GetTmpDir()
@@ -589,9 +606,10 @@ func generateWrapper(id, name, cwd, scriptDir, stateDir string, walltime time.Du
 	}
 
 	jobSpec := &scheduler.JobSpec{
-		Name:    "cnt-" + name,
-		Command: body,
-		Specs:   buildHelperScriptSpecs(name, cwd, spec),
+		Name:       "cnt-" + name,
+		Command:    body,
+		Specs:      buildHelperScriptSpecs(name, cwd, spec),
+		KeepScript: true,
 	}
 
 	scriptPath, err := sched.CreateScriptWithSpec(jobSpec, stateDir)

@@ -358,7 +358,7 @@ func (w *watcher) closeDone(id string, exitCode int, endedAt time.Time) {
 		logging.FromContext(w.s.ctx).Debug("server: helper done, tunnel closed", "id", id, "exit", exitCode)
 	}
 	status := "done"
-	if exitCode != 0 {
+	if exitCode != 0 && exitCode < 128 { // Treat SIGINT and SIGTERM as done
 		status = "failed"
 	}
 	_ = helper.UpdateHistoryStatus(id, status, endedAt)

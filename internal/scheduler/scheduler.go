@@ -328,6 +328,7 @@ type JobSpec struct {
 	Metadata       map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
 	OverrideOutput bool              // If true, always set Stdout/Stderr from Name (ignores script directives)
 	Array          *ArraySpec        // Non-nil → emit array job directives
+	KeepScript     bool              // If true, skip self-removal of the generated script after execution
 }
 
 // Scheduler defines the interface for job schedulers

@@ -544,7 +544,7 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	// Self-dispose: the wrapper script removes itself (unless in debug mode)
 	shAppend, err := os.OpenFile(shPath, os.O_APPEND|os.O_WRONLY, utils.PermExec)
 	if err == nil {
-		if !debugMode {
+		if !debugMode && !jobSpec.KeepScript {
 			fmt.Fprintf(shAppend, "\n# Self-dispose\nrm -f %s %s\n", shPath, subPath)
 		}
 		// Exit with command's exit code
