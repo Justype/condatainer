@@ -128,12 +128,17 @@ func (s *srv) handleHelperLogs(w http.ResponseWriter, r *http.Request, id string
 
 	ch := broker.subscribe()
 	defer broker.unsubscribe(ch)
+	ticker := time.NewTicker(25 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case data := <-ch:
 			fmt.Fprintf(w, "data: %s\n\n", data) //nolint:errcheck
+			flusher.Flush()
+		case <-ticker.C:
+			fmt.Fprintf(w, ": keepalive\n\n") //nolint:errcheck
 			flusher.Flush()
 		}
 	}

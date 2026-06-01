@@ -189,7 +189,7 @@ func LoadDefaults(executablePath string) {
 		ScriptsLink:      DefaultScriptsLink,
 		ScriptsLinks:     []string{DefaultScriptsLink}, // overwritten in LoadFromViper
 		SchedulerTimeout: 5 * time.Second,
-		Notification:     "",
+		Notification:     "web",
 		MetadataCacheTTL: 7 * 24 * time.Hour, // 1 week
 
 		Build: BuildConfig{

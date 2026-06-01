@@ -284,6 +284,10 @@ function switchDetailTab(tab) {
   if (tab === 'messages') {
     content.innerHTML = '';
     detailSSE = new EventSource('/api/helpers/' + encodeURIComponent(detailJobId) + '/logs');
+    detailSSE.onopen = function() {
+      // Clear on each (re)connect so backfill doesn't duplicate old messages
+      content.innerHTML = '';
+    };
     detailSSE.onmessage = function(ev) {
       try {
         const m   = JSON.parse(ev.data);
@@ -308,6 +312,8 @@ function switchDetailTab(tab) {
       } catch {}
     };
     detailSSE.onerror = function() {
+      // CONNECTING means the browser is auto-reconnecting — don't interfere.
+      if (detailSSE && detailSSE.readyState === EventSource.CONNECTING) return;
       if (detailSSE) { detailSSE.close(); detailSSE = null; }
       const dim = document.createElement('div');
       dim.className = 'log-line log-dim';

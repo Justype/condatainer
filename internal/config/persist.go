@@ -156,7 +156,7 @@ func setDefaults() {
 	viper.SetDefault("extra_scripts_links", []string{})
 	viper.SetDefault("parse_module_load", false)
 	viper.SetDefault("scheduler_timeout", 0)  // seconds; 0 = no timeout
-	viper.SetDefault("notification", "")      // "" or "none" = silent; "bell" = terminal bell; "email" = scheduler email; ≥5-char = ntfy.sh topic
+	viper.SetDefault("notification", "web")   // "web" = browser notification via dashboard; "terminal" = bell; "both" = terminal + web; "" or "none" = silent
 	viper.SetDefault("metadata_cache_ttl", 7) // days (1 week)
 	viper.SetDefault("proxy_perjob", false)
 	viper.SetDefault("helper_bind_all", false)
