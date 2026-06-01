@@ -115,7 +115,7 @@ func ParseHelperParams(scriptPath string) ([]HelperParam, error) {
 		if !strings.HasPrefix(line, "#PARAM:") {
 			continue
 		}
-		rest := strings.TrimSpace(line[len("#PARAM:"):])
+		rest := stripInlineComment(strings.TrimSpace(line[len("#PARAM:"):]))
 		if rest == "" {
 			continue
 		}
@@ -204,6 +204,16 @@ func extractQuotedSuffix(s string) (string, string, error) {
 	return quoted, rest, nil
 }
 
+// stripInlineComment removes a trailing inline comment (` #...`) from a header value.
+// A comment must be preceded by a space so bare `#` inside values (e.g. colour codes)
+// are not accidentally stripped.
+func stripInlineComment(s string) string {
+	if idx := strings.Index(s, " #"); idx >= 0 {
+		return strings.TrimRight(s[:idx], " \t")
+	}
+	return s
+}
+
 // ParseHelperScriptMeta extracts metadata from a helper script.
 // Recognised headers: #NCPUS:, #MEM:, #TIME:, #GPU:, #IMG_PACKAGES:, #REQUIRED_OVERLAYS:,
 // #OVERLAY_PACKAGES: (legacy), #POST_INSTALL_CMD:, #SINGLETON:, #BIND:, #VALUE:.
@@ -223,18 +233,16 @@ func ParseHelperScriptMeta(scriptPath string) (HelperScriptMeta, error) {
 		line := scanner.Text()
 		switch {
 		case strings.HasPrefix(line, "#NCPUS:"):
-			if n, err := strconv.Atoi(strings.TrimSpace(line[len("#NCPUS:"):])); err == nil && n > 0 {
+			if n, err := strconv.Atoi(stripInlineComment(strings.TrimSpace(line[len("#NCPUS:"):])));err == nil && n > 0 {
 				meta.NCPUs = n
 			}
 		case strings.HasPrefix(line, "#MEM:"):
-			// Default unit is GB (bare number like "16" means 16 GB).
-			rawMem := strings.TrimSpace(line[len("#MEM:"):])
+			rawMem := stripInlineComment(strings.TrimSpace(line[len("#MEM:"):]))
 			if mb, err := utils.ParseMemoryMBWithDefault(rawMem, "GB"); err == nil && mb > 0 {
 				meta.MemMB = mb
 			}
 		case strings.HasPrefix(line, "#TIME:"):
-			raw := strings.TrimSpace(line[len("#TIME:"):])
-			// Bare integer defaults to hours (e.g. "12" → "12h").
+			raw := stripInlineComment(strings.TrimSpace(line[len("#TIME:"):]))
 			if _, err := strconv.Atoi(raw); err == nil {
 				raw = raw + "h"
 			}
@@ -242,26 +250,25 @@ func ParseHelperScriptMeta(scriptPath string) (HelperScriptMeta, error) {
 				meta.Walltime = d
 			}
 		case strings.HasPrefix(line, "#GPU:"):
-			meta.GPU = strings.TrimSpace(line[len("#GPU:"):])
+			meta.GPU = stripInlineComment(strings.TrimSpace(line[len("#GPU:"):]))
 		case strings.HasPrefix(line, "#IMG_PACKAGES:"):
 			meta.ImgRequired = true
-			meta.ImgPackages = strings.TrimSpace(line[len("#IMG_PACKAGES:"):])
+			meta.ImgPackages = stripInlineComment(strings.TrimSpace(line[len("#IMG_PACKAGES:"):]))
 		case strings.HasPrefix(line, "#REQUIRED_OVERLAYS:"),
 			strings.HasPrefix(line, "#OVERLAY_PACKAGES:"):
-			// #OVERLAY_PACKAGES: is a legacy alias
 			idx := strings.Index(line, ":") + 1
-			meta.RequiredOverlays = strings.TrimSpace(line[idx:])
+			meta.RequiredOverlays = stripInlineComment(strings.TrimSpace(line[idx:]))
 		case strings.HasPrefix(line, "#BIND:"):
-			if b := strings.TrimSpace(line[len("#BIND:"):]); b != "" {
+			if b := stripInlineComment(strings.TrimSpace(line[len("#BIND:"):])); b != "" {
 				meta.Binds = append(meta.Binds, b)
 			}
 		case strings.HasPrefix(line, "#POST_INSTALL_CMD:"):
-			meta.PostInstallCmd = strings.TrimSpace(line[len("#POST_INSTALL_CMD:"):])
+			meta.PostInstallCmd = stripInlineComment(strings.TrimSpace(line[len("#POST_INSTALL_CMD:"):]))
 		case strings.HasPrefix(line, "#SINGLETON:"):
-			v := strings.TrimSpace(line[len("#SINGLETON:"):])
+			v := stripInlineComment(strings.TrimSpace(line[len("#SINGLETON:"):]))
 			meta.Singleton = strings.EqualFold(v, "true") || v == "1"
 		case strings.HasPrefix(line, "#VALUE:"):
-			rest := strings.TrimSpace(line[len("#VALUE:"):])
+			rest := stripInlineComment(strings.TrimSpace(line[len("#VALUE:"):]))
 			key, spec, ok := strings.Cut(rest, "=")
 			if ok && strings.TrimSpace(key) != "" {
 				meta.ParamValues[strings.TrimSpace(key)] = ParseValueSpec(spec)

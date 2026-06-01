@@ -54,7 +54,7 @@ Three forms for the default value:
 | `KEY=?` | **Auto** — filled from the first entry of the matching `#VALUE:` list; empty (optional) if no list. |
 | `KEY=literal` | **Literal** — always uses `literal` unless overridden by flag or saved config. |
 
-- `--long-flag,-s` — optional CLI flags (long and short). Omit entirely for prompt-only params.
+- `--long-flag,-s` — optional CLI flags. All combinations are valid: both (`--flag,-s`), long-only (`--flag`), short-only (`-s`), or omitted entirely (prompt-only param).
 - `"Description"` — shown in `condatainer helper <name> --help` and the settings table.
 
 The resolved value is exported as `$KEY` inside the job wrapper.

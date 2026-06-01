@@ -124,7 +124,7 @@ func PrintHelperUsage(scriptName string, params []HelperParam, spec *scheduler.R
 			if p.ShortFlag != "" && p.LongFlag != "" {
 				flags = fmt.Sprintf("%s, %s", p.ShortFlag, p.LongFlag)
 			} else if p.LongFlag != "" {
-				flags = p.LongFlag
+				flags = "    " + p.LongFlag // align --long under the --long part of "-x, --long"
 			} else if p.ShortFlag != "" {
 				flags = p.ShortFlag
 			}
@@ -139,9 +139,9 @@ func PrintHelperUsage(scriptName string, params []HelperParam, spec *scheduler.R
 				}
 			}
 			if flags != "" {
-				fmt.Printf("  %-20s  %s%s%s\n", flags, p.Desc, defStr, choicesStr)
+				fmt.Printf("  %-18s%s%s%s\n", flags, p.Desc, defStr, choicesStr)
 			} else {
-				fmt.Printf("  %-20s  %s%s%s  [prompt-only]\n", p.Key, p.Desc, defStr, choicesStr)
+				fmt.Printf("  %-18s%s%s%s  [prompt-only]\n", p.Key, p.Desc, defStr, choicesStr)
 			}
 		}
 	}

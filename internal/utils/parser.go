@@ -866,7 +866,7 @@ func FormatChoicesInline(vlist []string) string {
 		seen[minor] = true
 		entry := minor
 		if len(segs) == 3 {
-			entry += StyleDebug("(." + segs[2] + ")")
+			entry += "(." + segs[2] + ")"
 		}
 		parts = append(parts, entry)
 	}
