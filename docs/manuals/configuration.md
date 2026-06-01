@@ -103,7 +103,7 @@ condatainer config init -l system
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
 | `parse_module_load` | `false` | Parse `module load` / `ml` lines as dependencies in `check` and `run` |
 | `scheduler_timeout` | `5` | Seconds to wait for a scheduler command (sbatch, qsub, etc.) before returning an error. Set to `0` to disable the timeout. |
-| `notification` | `` | Notification when a helper job starts. `bell` = terminal bell twice; `email` = scheduler email (`#SBATCH --mail-type=BEGIN`, `#PBS -m b`, `#BSUB -B`, HTCondor `notification = Start`); any string ≥5 chars = ntfy.sh topic (curl fires from the compute node); `none` or empty = silent (default). |
+| `notification` | `` | Notification when a helper job starts running. `terminal` = terminal bell ×2 (1.1 s apart, CLI only); `web` = browser notification via the dashboard; `both` = terminal + web; `none` or empty = silent (default). |
 | `metadata_cache_ttl` | `7` | Days to keep the cached remote build script metadata (default: 7 days = 1 week). Set to `0` to disable caching and always fetch from the network. |
 | `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filename (e.g. `ubuntu24--base_image.sif`) and the distro prefix added to bare package names (e.g. `igv` → `ubuntu24/igv`). |
 | `proxy_perjob` | `false` | Auto-start a per-job SOCKS5 proxy inside submitted jobs. See [Proxy](#proxy). |

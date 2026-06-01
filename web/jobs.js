@@ -13,12 +13,40 @@ function appendMsgText(text, container) {
 }
 
 /* ── Jobs section ────────────────────────── */
+let _prevJobStatuses = null; // null = first load not yet done
+
 async function loadJobs() {
   try {
     const r = await fetch('/api/helpers?status=active');
     allJobs = (await r.json()) || [];
   } catch { allJobs = []; }
+  _checkJobNotifications(allJobs);
   if (!document.querySelector('#job-list-wrap [data-confirm="1"]')) renderJobs();
+}
+
+function _checkJobNotifications(jobs) {
+  if (_prevJobStatuses === null) {
+    _prevJobStatuses = {};
+    jobs.forEach(j => { _prevJobStatuses[j.id] = j.status; });
+    return;
+  }
+  const next = {};
+  jobs.forEach(j => {
+    next[j.id] = j.status;
+    if (j.status === 'running' && _prevJobStatuses[j.id] !== 'running') {
+      _fireJobNotification(j);
+    }
+  });
+  _prevJobStatuses = next;
+}
+
+function _fireJobNotification(job) {
+  if (srvNotification !== 'web' && srvNotification !== 'both') return;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  new Notification('Helper ready: ' + job.name, {
+    body: job.node ? 'Running on ' + job.node : 'Job started',
+    tag: 'condatainer-' + job.id,
+  });
 }
 
 function renderJobs() {

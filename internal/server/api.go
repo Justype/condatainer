@@ -69,13 +69,14 @@ func (s *srv) handleStatus(w http.ResponseWriter, r *http.Request) {
 	home, _ := os.UserHomeDir()
 	scratch := os.Getenv("SCRATCH")
 	writeJSON(w, map[string]interface{}{
-		"port":    s.port,
-		"pid":     os.Getpid(),
-		"running": s.watcher.RunningCount(),
-		"uptime":  fmtUptime(s.startTime),
-		"version": config.Global.Version,
-		"home":    home,
-		"scratch": scratch,
+		"port":         s.port,
+		"pid":          os.Getpid(),
+		"running":      s.watcher.RunningCount(),
+		"uptime":       fmtUptime(s.startTime),
+		"version":      config.Global.Version,
+		"home":         home,
+		"scratch":      scratch,
+		"notification": config.Global.Notification,
 	})
 }
 

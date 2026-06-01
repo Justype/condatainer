@@ -223,7 +223,7 @@ func configValueCompletion(key string) []string {
 	case "build.tmp_overlay_size":
 		return []string{"10g", "20g", "40g"}
 	case "notification":
-		return []string{"none", "bell", "email"}
+		return []string{"none", "terminal", "web", "both"}
 	case "metadata_cache_ttl":
 		return []string{"1", "3", "7", "14", "0"}
 	default:
@@ -413,9 +413,9 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 		// Show all settings
 		// Paths: binaries then directories
 		fmt.Println(utils.StyleTitle("Paths:"))
-		fmt.Printf("  apptainer_bin: %s%s\n", viper.GetString("apptainer_bin"), srcTag("apptainer_bin"))
+		fmt.Printf("  apptainer_bin: %s%s\n", config.Global.ApptainerBin, srcTag("apptainer_bin"))
 		printOverridden("                 ", "apptainer_bin")
-		schedulerBin := viper.GetString("scheduler_bin")
+		schedulerBin := config.Global.SchedulerBin
 		schedulerType := config.GetSchedulerTypeFromBin(schedulerBin)
 		if schedulerBin != "" {
 			fmt.Printf("  scheduler_bin: %s (%s)%s\n", schedulerBin, schedulerType, srcTag("scheduler_bin"))
@@ -423,11 +423,7 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 			fmt.Printf("  scheduler_bin: %s%s\n", schedulerBin, srcTag("scheduler_bin"))
 		}
 		printOverridden("                 ", "scheduler_bin")
-		logsDir := viper.GetString("logs_dir")
-		if logsDir == "" {
-			logsDir = config.Global.LogsDir + " (default)"
-		}
-		fmt.Printf("  logs_dir:      %s%s\n", logsDir, srcTag("logs_dir"))
+		fmt.Printf("  logs_dir:      %s%s\n", config.Global.LogsDir, srcTag("logs_dir"))
 		printOverridden("                 ", "logs_dir")
 		extraBuildDirs := config.GetExtraBuildDirs()
 		if len(extraBuildDirs) > 0 {
@@ -500,12 +496,6 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 		printOverridden("                      ", "scheduler_timeout")
 		fmt.Printf("  %-19s %v%s\n", "parse_module_load:", config.Global.ParseModuleLoad, srcTag("parse_module_load"))
 		printOverridden("                      ", "parse_module_load")
-		notif := config.Global.Notification
-		if notif == "" {
-			notif = "none"
-		}
-		fmt.Printf("  %-19s %s%s\n", "notification:", notif, srcTag("notification"))
-		printOverridden("                      ", "notification")
 		if config.Global.MetadataCacheTTL == 0 {
 			fmt.Printf("  %-19s 0 (disabled)%s\n", "metadata_cache_ttl:", srcTag("metadata_cache_ttl"))
 		} else {
@@ -525,9 +515,15 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 		}
 		fmt.Println()
 
-		fmt.Println(utils.StyleTitle("Server:"))
-		fmt.Printf("  %-20s %v%s\n", "helper_bind_all:", config.Global.HelperBindAll, srcTag("helper_bind_all"))
+		fmt.Println(utils.StyleTitle("Helper:"))
+		fmt.Printf("  %-19s %v%s\n", "helper_bind_all:", config.Global.HelperBindAll, srcTag("helper_bind_all"))
 		printOverridden("                       ", "helper_bind_all")
+		notif := config.Global.Notification
+		if notif == "" {
+			notif = "none"
+		}
+		fmt.Printf("  %-19s %s%s\n", "notification:", notif, srcTag("notification"))
+		printOverridden("                       ", "notification")
 		fmt.Println()
 
 		// Build settings (longest key: tmp_overlay_size = 16 chars)
@@ -705,8 +701,8 @@ Time duration format (for build.time):
 
 		if key == "notification" {
 			v := strings.ToLower(value)
-			if v != "" && v != "none" && v != "bell" && v != "email" && len(value) < 5 {
-				utils.PrintError("Invalid value for notification: %q (use 'none', 'bell', 'email', or an ntfy.sh topic of at least 5 characters)", value)
+			if v != "" && v != "none" && v != "terminal" && v != "web" && v != "both" {
+				utils.PrintError("Invalid value for notification: %q (valid values: none, terminal, web, both)", value)
 				os.Exit(ExitCodeError)
 			}
 		}

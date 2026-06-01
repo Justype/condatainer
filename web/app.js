@@ -88,6 +88,7 @@ let detailSSE       = null;
 let currentPath = '';
 let srvHome    = '';
 let srvScratch = '';
+let srvNotification = '';
 
 // file picker modal
 let fpTargetId = '', fpMode = 'dir', fpPath = '', fpSuffix = '';
@@ -192,8 +193,42 @@ function _setStatus(alive, d) {
       cwdEl.placeholder = def;
       if (!cwdEl.value) cwdEl.value = def;
     }
+    const notif = d.notification || '';
+    srvNotification = notif;
+    _updateNotifCard();
     renderFileTree();
   }
+}
+
+/* ── Browser notifications ───────────────── */
+function _updateNotifCard() {
+  const card = gid('notif-card');
+  const statusEl = gid('notif-status');
+  const btn = gid('notif-btn');
+  if (!card) return;
+  const webEnabled = srvNotification === 'web' || srvNotification === 'both';
+  card.style.display = webEnabled ? '' : 'none';
+  if (!webEnabled) return;
+  if (typeof Notification === 'undefined') {
+    statusEl.textContent = 'Browser notifications are not supported.';
+    btn.style.display = 'none';
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    statusEl.textContent = 'Browser notifications are enabled.';
+    btn.style.display = 'none';
+  } else if (Notification.permission === 'denied') {
+    statusEl.textContent = 'Notifications blocked. Allow them in your browser site settings.';
+    btn.style.display = 'none';
+  } else {
+    statusEl.textContent = 'Click below to receive a notification when a helper job starts.';
+    btn.style.display = '';
+  }
+}
+
+function requestNotifPermission() {
+  if (typeof Notification === 'undefined') return;
+  Notification.requestPermission().then(() => _updateNotifCard());
 }
 
 /* ── Modal helpers ───────────────────────── */

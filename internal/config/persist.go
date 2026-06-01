@@ -993,10 +993,14 @@ func LoadFromViper() {
 		Global.SchedulerTimeout = time.Duration(timeout) * time.Second
 	}
 
-	if _, ok := layerBool("bell"); ok {
-		fmt.Fprintln(os.Stderr, "[WARN] 'bell' config key is deprecated. Replace with 'notification: bell' to enable or remove the key (default is none).")
-	}
 	Global.Notification = layerString("notification")
+	switch Global.Notification {
+	case "", "none", "terminal", "web", "both":
+		// valid
+	default:
+		fmt.Fprintf(os.Stderr, "[WARN] Unknown notification value %q. Valid values: terminal, web, both, none. Treating as none.\n", Global.Notification)
+		Global.Notification = ""
+	}
 
 	if ttl, ok := layerInt("metadata_cache_ttl"); ok {
 		Global.MetadataCacheTTL = time.Duration(ttl) * 24 * time.Hour
@@ -1039,5 +1043,19 @@ func AutoDetectCompression(supportsZstd bool, isSingularity bool) {
 	} else {
 		Global.Build.CompressArgs = "-comp lz4"
 		slog.Default().Debug("using lz4 compression (zstd not supported)")
+	}
+}
+
+// ApplyConfigChange updates the in-memory Global config for a given key/value pair
+// so changes written to disk take effect immediately without a restart.
+func ApplyConfigChange(key, value string) {
+	switch key {
+	case "notification":
+		switch value {
+		case "", "none", "terminal", "web", "both":
+			Global.Notification = value
+		default:
+			Global.Notification = ""
+		}
 	}
 }

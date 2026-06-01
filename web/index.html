@@ -278,6 +278,11 @@
           <div class="info-item"><span class="info-k">Version</span><span class="info-v" id="srv-version">—</span></div>
         </div>
       </div>
+      <div class="settings-card" id="notif-card" style="display:none">
+        <div class="sc-title">Notifications</div>
+        <p class="settings-p" id="notif-status"></p>
+        <button class="btn btn-sm" id="notif-btn" onclick="requestNotifPermission()" style="display:none">Enable browser notifications</button>
+      </div>
       <div class="settings-card">
         <div class="sc-title">SSH Config</div>
         <p class="settings-p">Add to <code>~/.ssh/config</code> for a persistent tunnel:</p>

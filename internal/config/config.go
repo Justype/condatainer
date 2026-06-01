@@ -82,7 +82,8 @@ type Config struct {
 	SchedulerTimeout time.Duration
 
 	// Notification method when a helper job starts running (default: "" = none).
-	// Values: "bell" (terminal bell), "email" (scheduler email), ≥5-char string (ntfy.sh topic), "" or "none" (silent).
+	// Values: "terminal" (bell ×2, 1.1 s apart), "web" (browser notification via dashboard),
+	// "both" (terminal + web), "" or "none" (silent).
 	Notification string
 
 	// Max age of the on-disk remote build script metadata cache (default: 1 week)

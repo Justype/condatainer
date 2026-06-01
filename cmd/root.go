@@ -104,9 +104,12 @@ var rootCmd = &cobra.Command{
 			utils.PrintDebug("Yes mode enabled (automatically answering yes to prompts)")
 		}
 
-		// Route logging.FromContext(ctx) calls through the CLI's utils.Print*
-		// functions so internal packages produce the familiar [CNT] output.
-		cmd.SetContext(logging.WithLogger(cmd.Context(), slog.New(clilog.New())))
+		// Route all slog output (both context-based and slog.Default()) through
+		// the CLI's utils.Print* functions so internal packages produce the
+		// familiar [CNT] output instead of the raw "2006/01/02 INFO ..." format.
+		cliHandler := slog.New(clilog.New())
+		slog.SetDefault(cliHandler)
+		cmd.SetContext(logging.WithLogger(cmd.Context(), cliHandler))
 		cmd.SetContext(execpkg.WithIO(cmd.Context(), execpkg.IO{
 			Stdin:  os.Stdin,
 			Stdout: os.Stdout,

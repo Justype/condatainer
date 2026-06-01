@@ -732,6 +732,11 @@ func MonitorHelper(ctx context.Context, id string) error {
 				if u := tmp.AccessURL(config.GetRunningServerPort()); u != "" {
 					utils.PrintSuccess("Access at: %s", u)
 				}
+				if n := config.Global.Notification; n == "terminal" || n == "both" {
+					fmt.Print("\a")
+					time.Sleep(1100 * time.Millisecond)
+					fmt.Print("\a")
+				}
 				return nil
 			}
 
