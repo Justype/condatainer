@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -41,7 +42,9 @@ func rewriteLocationResponse(target *url.URL) func(*http.Response) error {
 }
 
 // newReverseProxy creates a fully configured ReverseProxy for the given target.
-func newReverseProxy(target *url.URL, transport http.RoundTripper) *httputil.ReverseProxy {
+// closeFunc is called on backend transport errors so the caller can evict the
+// stale entry from the registry; the watcher will then attempt to reopen it.
+func newReverseProxy(target *url.URL, transport http.RoundTripper, closeFunc func()) *httputil.ReverseProxy {
 	rp := httputil.NewSingleHostReverseProxy(target)
 	rp.Director = hostRewriteDirector(target)
 	rp.ModifyResponse = rewriteLocationResponse(target)
@@ -49,6 +52,15 @@ func newReverseProxy(target *url.URL, transport http.RoundTripper) *httputil.Rev
 
 	if transport != nil {
 		rp.Transport = transport
+	}
+	rp.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
+		// Client disconnected — nothing to do; don't evict the healthy entry.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+		// Backend unreachable: evict so the watcher reopens on next tick.
+		closeFunc()
+		http.Error(w, "helper unreachable, retrying: "+err.Error(), http.StatusServiceUnavailable)
 	}
 	return rp
 }
@@ -119,7 +131,7 @@ func (r *proxyRegistry) Open(id, name, node string, port int, bindAll bool) {
 			addr = node
 		}
 		target, _ := url.Parse(fmt.Sprintf("http://%s:%d", addr, port))
-		rp := newReverseProxy(target, nil)
+		rp := newReverseProxy(target, nil, func() { r.Close(id) })
 
 		r.mu.Lock()
 		delete(r.pending, id)
@@ -167,7 +179,7 @@ func (r *proxyRegistry) Open(id, name, node string, port int, bindAll bool) {
 
 	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
 	transport := &http.Transport{DialContext: dial}
-	rp := newReverseProxy(target, transport)
+	rp := newReverseProxy(target, transport, func() { r.Close(id) })
 
 	// Watch for unexpected tunnel closure and clean up.
 	go func() {
@@ -227,8 +239,8 @@ func (r *proxyRegistry) LastError(id string) string {
 // serveSubdomainProxy handles requests to {id}.localhost:{port} by forwarding
 // to the helper's tunnel. The full request path is forwarded as-is — no URL
 // rewriting needed since the service is at the root of its own subdomain.
-// Lookup order: exact ID match first, then first active instance by name
-// (e.g. "code-server.localhost" → first running code-server).
+// Lookup order: exact ID match first, then oldest active instance by name
+// (e.g. "code-server.localhost" → oldest running code-server).
 func (s *srv) serveSubdomainProxy(w http.ResponseWriter, r *http.Request, id string) {
 	entry := s.proxies.Get(id)
 	if entry == nil {
