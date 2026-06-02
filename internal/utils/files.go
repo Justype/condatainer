@@ -211,6 +211,19 @@ func CanWriteToDir(dir string) bool {
 	return unix.Access(dir, unix.W_OK|unix.X_OK) == nil
 }
 
+// CanWriteToExistingAncestor walks up the path until it finds an existing
+// directory and checks whether it is writable. Use this when dir may not exist
+// yet but will be created by MkdirAll — a non-existent dir is not read-only,
+// it just needs a writable parent.
+func CanWriteToExistingAncestor(dir string) bool {
+	for d := dir; d != filepath.Dir(d); d = filepath.Dir(d) {
+		if _, err := os.Stat(d); err == nil {
+			return unix.Access(d, unix.W_OK|unix.X_OK) == nil
+		}
+	}
+	return false
+}
+
 // --- Gzip JSON Helpers ---
 
 // ReadGzipJSONFile opens a .json.gz file and decodes JSON into out.

@@ -339,7 +339,7 @@ func ResolveWritableConfigPath(location string) (path, locationType string, err 
 			return "", "", err
 		}
 		locationType = NormalizeConfigLocation(location)
-		if !utils.CanWriteToDir(filepath.Dir(path)) {
+		if !utils.CanWriteToExistingAncestor(filepath.Dir(path)) {
 			return "", "", fmt.Errorf(
 				"config location '%s' is read-only: %s\nUse a different location or run with appropriate permissions.",
 				locationType, filepath.Dir(path),

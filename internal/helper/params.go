@@ -115,7 +115,7 @@ func PrintHelperUsage(scriptName string, params []HelperParam, spec *scheduler.R
 	fmt.Println("  -b, --base        Override base image")
 	fmt.Println("  -e, --env         Writable overlay (.img)")
 	fmt.Println("  -o, --overlay     Additional read-only overlay (repeatable)")
-	fmt.Println("  -w, --cwd         Use current directory as working dir")
+	fmt.Println("  -w, --cwd <path>  Change working directory (e.g. -w .)")
 	fmt.Println("      --new         Skip reuse prompt, force new instance")
 	if len(params) > 0 {
 		fmt.Println("\nHelper-specific flags:")

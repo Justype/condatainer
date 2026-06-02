@@ -35,6 +35,7 @@ type postScriptHelperFlags struct {
 	overlaySet bool
 	overlays   []string
 	cwdSet     bool
+	cwd        string
 	newSet     bool
 }
 
@@ -188,10 +189,12 @@ func parsePostScriptHelperFlags(args []string) (postScriptHelperFlags, []string,
 				flags.overlaySet = true
 				flags.overlays = append(flags.overlays, v)
 			case "--cwd":
-				if hasVal {
-					return flags, nil, fmt.Errorf("flag %s does not take a value", name)
+				v, err := valueFor(name, &i, val, hasVal)
+				if err != nil {
+					return flags, nil, err
 				}
 				flags.cwdSet = true
+				flags.cwd = v
 			case "--new":
 				if hasVal {
 					return flags, nil, fmt.Errorf("flag %s does not take a value", name)
@@ -262,11 +265,12 @@ func parsePostScriptHelperFlags(args []string) (postScriptHelperFlags, []string,
 				flags.overlaySet = true
 				flags.overlays = append(flags.overlays, v)
 			case "-w":
-				if hasAttached {
-					passthrough = append(passthrough, arg)
-					continue
+				v, err := valueFor(name, &i, attached, hasAttached)
+				if err != nil {
+					return flags, nil, err
 				}
 				flags.cwdSet = true
+				flags.cwd = v
 			default:
 				passthrough = append(passthrough, arg)
 			}
@@ -498,7 +502,11 @@ func runHelper(cmd *cobra.Command, args []string) error {
 
 	cwd := ""
 	if postFlags.cwdSet {
-		cwd, _ = os.Getwd()
+		abs, err := filepath.Abs(postFlags.cwd)
+		if err != nil {
+			return fmt.Errorf("invalid --cwd path %q: %w", postFlags.cwd, err)
+		}
+		cwd = abs
 	}
 
 	meta, _ := helper.ParseHelperScriptMeta(scriptPath)
