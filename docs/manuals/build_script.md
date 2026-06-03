@@ -12,6 +12,7 @@ This document gives instructions on how to create your own build scripts for **C
   - [Scheduler Parameters](#scheduler-parameters)
   - [Type Tag](#type-tag)
   - [Template Tags](#template-tags)
+  - [Auto-Update Tag](#auto-update-tag)
   - [Environment Variables](#environment-variables) and [ENV Naming Guidelines](#env-naming-guidelines)
   - [Interactive Tag](#interactive-tag)
 - [OS](#os)
@@ -40,11 +41,16 @@ Apptainer definition files for distro-level system tools.
 
 Apps not available as conda packages, or specific versions not in conda.
 
+**Single version per file:**
+
 * **Format:** `<name>/<version>`
-* **Structure:**
-  * **name**: The software package or tool name (e.g., `bcftools`).
-  * **version**: The specific version of the software (e.g., `1.22`).
 * **Example:** `cellranger/9.0.1`
+
+**PL template (multiple versions, one file):**
+
+* **Format:** `<name>` (a single file with `#PL:` and `#TARGET:` headers)
+* **Example:** `cytoscape` → expands to `cytoscape/3.10.3`, `cytoscape/3.10.4`, etc.
+* Use this when the install logic is identical across versions and only the download URL changes.
 
 ### Data
 
@@ -268,6 +274,51 @@ When the user runs `condatainer create grch38/star-gencode`, **CondaTainer** sho
 If the user already has a compatible dependency installed (e.g. `star/2.7.10` is installed), the default for `star_version` will be `2.7.10` instead of the latest available `2.7.11b`.
 
 See [grch38/star-gencode](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/star-gencode) for a real template example.
+
+### Auto-Update Tag
+
+`#AUTOUPDATE:` opts a script into automatic version maintenance. A CI workflow runs twice every month, fetches the latest versions from the specified source, and rewrites the version list in place.
+
+```
+#AUTOUPDATE:{key}:{source}:{identifier}[>={min}][<{max}|<={max}]
+```
+
+`{key}` must match an existing `#PL:`, `#DEP:`, or (in helpers) `#VALUE:` header in the same file. The target type is detected automatically:
+
+| Header matched | Behavior |
+|---|---|
+| `#PL:key:` | Rewrites the full version list (all versions ≥ min) |
+| `#DEP:key/` | Rewrites the pinned version to latest only; preserves `>=constraint` |
+
+**Supported sources:**
+
+| Source | Format | Example |
+|---|---|---|
+| `github` | `github:{org}/{repo}` | `github:cytoscape/cytoscape>=3.9.0` |
+| `bioconda` | `bioconda:{package}` | `bioconda:star>=2.7.0b` |
+| `conda-forge` | `conda-forge:{package}` | `conda-forge:r-base>=4.0.0` |
+| `docker` | `docker:{image}:{tag_regex}` | `docker:posit/r-base:^(\d+\.\d+\.\d+)-noble(?:-[^-]+)?$>=4.0.0` |
+
+The `docker` source requires a full capture-group regex as the tag pattern — the first capture group is extracted as the version string.
+
+**Examples:**
+
+```bash
+# PL template — full version list, all 3.9+
+#PL:cytoscape_version:3.9.0,3.9.1,3.10.0,3.10.3,3.10.4
+#AUTOUPDATE:cytoscape_version:github:cytoscape/cytoscape>=3.9.0
+#TARGET:cytoscape/{cytoscape_version}
+
+# DEP pin — latest samtools; min constraint preserved from the #DEP: line
+#DEP:samtools/1.23.1>=1.10
+#AUTOUPDATE:samtools:bioconda:samtools
+
+# DEP pin with upper bound — stay on openjdk 17.x, never upgrade to 18+
+#DEP:openjdk/17.0.12>=17
+#AUTOUPDATE:openjdk:bioconda:openjdk>=17<18
+```
+
+Place `#AUTOUPDATE:` immediately after the `#PL:` or `#DEP:` line it manages.
 
 ### Environment Variables
 

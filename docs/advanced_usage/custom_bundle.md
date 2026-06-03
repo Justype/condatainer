@@ -1,4 +1,4 @@
-# Custom Bundle Overlays using Build Scripts
+# Custom Bundle Overlays
 
 This guide focuses on building [bundle overlays](../user_guide/concepts.md#-overlay-types) using custom build scripts. The build scripts aim to let you modify the conda packages.
 

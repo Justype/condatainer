@@ -217,8 +217,8 @@ condatainer create cellranger/9.0.1 grch38/cellranger/2024-A
 Since the download link for cellranger is only valid for one day, you will be prompted to provide the download link during the build process.
 
 ```
-[CNT][NOTE] Build script requires input: ⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.
-https://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
+[CNT◇] ⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.
+[CNT◇] https://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
 Enter here:
 ```
 
@@ -243,6 +243,5 @@ condatainer run cellranger_quant.sh
 
 Tutorials using CondaTainer:
 
-- [RStudio Server on HPC](../tutorials/rstudio-server_on_HPC.md)
-- [VS Code Server on HPC](../tutorials/vscode-server_on_HPC.md)
-- [VS Code Tunnel on HPC](../tutorials/vscode-tunnel_on_HPC.md)
+- [RStudio Server](../tutorials/rstudio-server.md)
+- [VS Code](../tutorials/vscode.md)

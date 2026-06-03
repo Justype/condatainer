@@ -170,6 +170,7 @@ The Go runner injects these into every job before the helper script body runs:
 | `CNT_HELPER_WALLTIME_SECS` | Walltime in seconds |
 | `CNT_HELPER_JOB_ID` | Scheduler job ID (empty for headless) |
 | `CNT_HELPER_SCRIPT_DIR` | Directory containing the helper script |
+| `CNT_JOB_TMPDIR` | Node-local scratch dir (Unix sockets, etc.); cleaned up on exit |
 | `SCRATCH` | `$SCRATCH` or `$HOME` if unset |
 | `$KEY` | One var per resolved `#PARAM:` key |
 

@@ -106,7 +106,7 @@ condatainer config init -l system
 | `notification` | `` | Notification when a helper job starts running. `terminal` = terminal bell ×2 (1.1 s apart, CLI only); `web` = browser notification via the dashboard; `both` = terminal + web; `none` or empty = silent (default). |
 | `metadata_cache_ttl` | `7` | Days to keep the cached remote build script metadata (default: 7 days = 1 week). Set to `0` to disable caching and always fetch from the network. |
 | `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filename (e.g. `ubuntu24--base_image.sif`) and the distro prefix added to bare package names (e.g. `igv` → `ubuntu24/igv`). |
-| `proxy_perjob` | `false` | Auto-start a per-job SOCKS5 proxy inside submitted jobs. See [Proxy](#proxy). |
+| `proxy_perjob` | `false` | Auto-start a per-job SOCKS5 proxy inside submitted jobs. See [Proxy](condatainer.md#proxy). |
 
 ### Build Configuration
 
