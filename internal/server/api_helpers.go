@@ -462,13 +462,30 @@ func (s *srv) handleHelperStart(w http.ResponseWriter, r *http.Request, name str
 		}
 	}
 
+	params := req.Params
+	if saved, err := helper.LoadHelperConfig(name); err == nil && len(saved) > 0 {
+		if params == nil {
+			params = make(map[string]string)
+		}
+		for k, v := range saved {
+			switch k {
+			case "cpus", "mem", "time", "gpu":
+				// resources handled via ResourceSpec
+			default:
+				if _, exists := params[k]; !exists {
+					params[k] = v
+				}
+			}
+		}
+	}
+
 	opts := helper.RunOptions{
 		ScriptPath: scriptPath,
 		ScriptName: name,
 		Resources:  startOverrides,
 		CWD:        req.CWD,
 		Overlays:   req.Overlays,
-		Params:     req.Params,
+		Params:     params,
 		ForceNew:   true,
 	}
 	if req.Overlay != "" {

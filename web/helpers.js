@@ -334,6 +334,7 @@ function _applyConfigPlaceholders() {
     const { opts } = _parseParamOpts(selectedHelper?.param_values, key);
     el.placeholder = cfg[key.toLowerCase()] || _paramPlaceholder(param, opts);
   });
+  renderModuleChips();
 }
 
 /* ── Saved-config gear button ────────────── */
@@ -1302,7 +1303,7 @@ function renderModuleChips() {
   (selectedHelper?.params || []).forEach(p => {
     if (!(p.key in params)) {
       const vals = pv[p.key] || [];
-      params[p.key] = p.default || (vals[0] || '');
+      params[p.key] = _helperSavedConfig[p.key.toLowerCase()] || p.default || (vals[0] || '');
     }
   });
   const requiredNames = (selectedHelper?.required_overlays || '').trim().split(/\s+/).filter(Boolean);
