@@ -107,6 +107,11 @@ func (w *watcher) prePopulateDone() {
 				bindAll:   r.BindAll,
 			}
 			w.runningCount.Add(1)
+			// Seed the offset to the current end of the events file so the first
+			// tick does not re-publish already-existing messages to the broker.
+			if info, err := os.Stat(helper.EventsFilePath(r.ID)); err == nil {
+				w.offsets[r.ID] = info.Size()
+			}
 		}
 	}
 }
