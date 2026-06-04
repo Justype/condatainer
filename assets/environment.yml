@@ -3,7 +3,7 @@ channels:
   - conda-forge
 dependencies:
   - gcc
-  - go=1.25.5
+  - go
   - myst-parser
   - pandoc
   - python=3.10
