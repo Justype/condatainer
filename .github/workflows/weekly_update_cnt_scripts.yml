@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Checkout with submodules
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: true
           fetch-depth: 0
@@ -39,7 +39,7 @@ jobs:
 
       - name: Create Pull Request
         if: steps.update.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "chore(cnt-scripts): update submodule ${{ steps.update.outputs.old_sha }}..${{ steps.update.outputs.new_sha }}"
           branch: chore/update-cnt-scripts
