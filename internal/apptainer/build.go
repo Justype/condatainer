@@ -74,8 +74,8 @@ func DumpSifToSquashfs(ctx context.Context, sifPath, outputPath string) error {
 	// Step 2: Parse output to find Squashfs/*System partition
 	var squashfsID int
 	found := false
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(string(output), "\n")
+	for line := range lines {
 		if strings.Contains(line, "Squashfs/*System") {
 			// Format: "ID|GROUP|LINK|SIF POSITION|TYPE|..."
 			// Example: "1|1|NONE|32768|Squashfs/*System|..."

@@ -747,9 +747,9 @@ func matchTarget(name, tmpl string, plOrder []string) (map[string]string, bool) 
 			}
 		}
 		if stopChar != "" {
-			sb.WriteString("(?P<" + key + ">[^" + stopChar + "]+)")
+			fmt.Fprintf(&sb, "(?P<%s>[^%s]+)", key, stopChar)
 		} else {
-			sb.WriteString("(?P<" + key + ">.+)")
+			fmt.Fprintf(&sb, "(?P<%s>.+)", key)
 		}
 		pos = nextLitStart
 	}

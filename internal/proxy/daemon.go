@@ -262,22 +262,3 @@ func dialViaSocks5(sockNet, sockAddr string) DialFunc {
 		return conn, nil
 	}
 }
-
-// TestSSH verifies SSH connectivity to sshDest using the system ssh binary.
-// Uses BatchMode so it never prompts — mirrors exactly what the daemon tunnel does.
-func TestSSH(sshDest string) error {
-	out, err := exec.Command("ssh",
-		"-o", "BatchMode=yes",
-		"-o", "ConnectTimeout=10",
-		"-o", "StrictHostKeyChecking=no",
-		sshDest, "true",
-	).CombinedOutput()
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			return fmt.Errorf("SSH connection to %s failed", sshDest)
-		}
-		return fmt.Errorf("SSH connection to %s failed: %s", sshDest, msg)
-	}
-	return nil
-}

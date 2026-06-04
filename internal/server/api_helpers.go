@@ -127,24 +127,6 @@ func (s *srv) handleHelpersAvailable(w http.ResponseWriter, r *http.Request) {
 	}
 	scripts := cachedAvailableHelpers()
 
-	if r.Header.Get("Accept") == "text/html" || r.URL.Query().Get("format") == "html" {
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, `<div class="helper-grid">`)
-		for _, sc := range scripts {
-			needsOverlay := sc.ImgRequired
-			fmt.Fprintf(w, `<div class="helper-item" data-name="%s" data-img-packages="%s" onclick="selectHelper('%s')"><strong>%s</strong>`,
-				sc.Name, sc.ImgPackages, sc.Name, sc.Name)
-			if sc.Whatis != "" {
-				fmt.Fprintf(w, `<br><small style="color:var(--muted)">%s</small>`, sc.Whatis)
-			}
-			if needsOverlay {
-				fmt.Fprint(w, `<br><span class="badge badge-overlay">overlay required</span>`)
-			}
-			fmt.Fprint(w, `</div>`)
-		}
-		fmt.Fprint(w, `</div>`)
-		return
-	}
 	writeJSON(w, scripts)
 }
 
@@ -647,49 +629,4 @@ func planErrMsg(err error) string {
 		return "env overlay is in use by another running instance — stop it first or choose a different overlay"
 	}
 	return err.Error()
-}
-
-// writePlanError translates helper.PlanRun errors into typed JSON HTTP responses.
-func writePlanError(w http.ResponseWriter, err error) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	var missing *helper.ErrMissingParam
-	if errors.As(err, &missing) {
-		w.WriteHeader(http.StatusBadRequest)
-		keys := make([]string, len(missing.Params))
-		for i, p := range missing.Params {
-			keys[i] = p.Key
-		}
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":          "missing_params",
-			"missing_params": keys,
-			"detail":         missing.Error(),
-		})
-		return
-	}
-	var singleton *helper.ErrSingletonRunning
-	if errors.As(err, &singleton) {
-		w.WriteHeader(http.StatusConflict)
-		ids := make([]string, len(singleton.Existing))
-		for i, r := range singleton.Existing {
-			ids[i] = r.ID
-		}
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":   "singleton_running",
-			"running": ids,
-			"detail":  singleton.Error(),
-		})
-		return
-	}
-	var inUse *helper.ErrEnvInUse
-	if errors.As(err, &inUse) {
-		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":  "env_in_use",
-			"path":   inUse.Path,
-			"detail": inUse.Error(),
-		})
-		return
-	}
-	w.WriteHeader(http.StatusInternalServerError)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }

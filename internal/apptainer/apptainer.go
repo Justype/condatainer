@@ -133,16 +133,6 @@ func CheckZstdSupport(currentVersion string) bool {
 // Internal Helper
 // ---------------------------------------------------------
 
-// runApptainer executes an apptainer command and wraps errors with specific context.
-// Use this for any command where you don't strictly need to parse stdout.
-//
-// op: "exec", "pull", "build", "instance start", etc.
-// imagePath: optional, helpful for logging which container failed
-// capture: whether to capture stdout/stderr for storing on the error.
-func runApptainer(ctx context.Context, op string, imagePath string, capture bool, args ...string) error {
-	return runApptainerWithOutput(ctx, op, imagePath, capture, nil, nil, nil, args...)
-}
-
 // runApptainerWithOutput executes an apptainer command with control over output handling.
 //
 // op: "exec", "pull", "build", "instance start", etc.

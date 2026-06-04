@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/helper"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/scheduler"
@@ -91,10 +90,6 @@ func (s *srv) handleHelpersList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if r.Header.Get("Accept") == "text/html" || r.URL.Query().Get("format") == "html" {
-		s.renderHelperCards(w, out)
-		return
-	}
 	var resp []helperListEntry
 	for _, run := range out {
 		resp = append(resp, s.enrichRun(run))
@@ -229,7 +224,6 @@ func (s *srv) handleHelperStop(w http.ResponseWriter, r *http.Request, id string
 		http.Error(w, "POST required", http.StatusMethodNotAllowed)
 		return
 	}
-	s.proxies.Close(id)
 	log := logging.FromContext(s.ctx)
 	if run := helper.HistoryEntryForID(id); run == nil {
 		log.Warn("server: stop — history entry not found", "id", id)
@@ -246,8 +240,11 @@ func (s *srv) handleHelperStop(w http.ResponseWriter, r *http.Request, id string
 		}
 		cancelCancel()
 	}
-	_ = helper.UpdateHistoryStatus(id, "done", time.Now())
-	invalidateHistoryCache()
+	// closeDone cleans up the proxy, updates history, decrements runningCount, and
+	// moves the ID to the done-map so the watcher skips it on future ticks.
+	// This ensures the count is correct immediately even if the trap never fires
+	// (e.g. SIGKILL, node crash, NFS issue).
+	s.watcher.closeDone(id, 0, time.Now())
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"ok":true}`)
 }
@@ -271,9 +268,7 @@ func (s *srv) handleHelperDelete(w http.ResponseWriter, r *http.Request, id stri
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
-// renderHelperCards renders running helpers as HTMX-compatible HTML cards.
-// handleGpuOptions serves GET /api/gpu-options
-// Returns a sorted list of unique GPU type names discovered from the active scheduler.
+// handleGpuOptions serves GET /api/gpu-options — returns unique GPU type names from the active scheduler.
 func (s *srv) handleGpuOptions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	sched := scheduler.ActiveScheduler()
@@ -300,48 +295,4 @@ func (s *srv) handleGpuOptions(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(opts)
 	json.NewEncoder(w).Encode(opts) //nolint:errcheck
-}
-
-func (s *srv) renderHelperCards(w http.ResponseWriter, runs []*helper.HelperRun) {
-	w.Header().Set("Content-Type", "text/html")
-	if len(runs) == 0 {
-		fmt.Fprint(w, `<p style="color:var(--muted)">No running helpers.</p>`)
-		return
-	}
-	serverPort := config.GetRunningServerPort()
-	for _, r := range runs {
-		url := r.AccessURL(serverPort)
-		est := r.EstimatedEnd()
-		countdown := ""
-		if !est.IsZero() {
-			remaining := time.Until(est).Round(time.Minute)
-			if remaining > 0 {
-				countdown = fmt.Sprintf("Ends in ~%s", remaining)
-			} else {
-				countdown = "⚠ Walltime reached"
-			}
-		}
-		fmt.Fprintf(w, `<div class="card">
-  <div class="card-header">
-    <span class="badge badge-%s">%s</span>
-    <span class="card-title">%s</span>
-    <span class="card-sub">%s · %s</span>
-    <span class="countdown">%s</span>
-  </div>`, r.Status, r.Status, r.Name, r.ID, r.Node, countdown)
-		if url != "" {
-			fmt.Fprintf(w, `<div class="access-link">
-    <a href="%s" target="_blank">%s</a>
-    <button class="copy-btn" onclick="copyText('%s')">copy</button>
-  </div>`, url, url, url)
-		}
-		fmt.Fprintf(w, `<div class="last-msg" id="last-msg-%s"></div>`, r.ID)
-		fmt.Fprintf(w, `<details><summary>Messages</summary>
-  <div class="msg-log" data-sse-id="%s" id="log-%s"></div>
-</details>`, r.ID, r.ID)
-		fmt.Fprintf(w, `<div class="card-actions">
-  <a href="/api/helpers/%s/joblog" class="btn" target="_blank">Job log</a>
-  <button class="btn btn-stop" onclick="stopHelper('%s')">Stop</button>
-</div>`, r.ID, r.ID)
-		fmt.Fprint(w, `</div>`)
-	}
 }

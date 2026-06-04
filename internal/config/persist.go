@@ -1045,17 +1045,3 @@ func AutoDetectCompression(supportsZstd bool, isSingularity bool) {
 		slog.Default().Debug("using lz4 compression (zstd not supported)")
 	}
 }
-
-// ApplyConfigChange updates the in-memory Global config for a given key/value pair
-// so changes written to disk take effect immediately without a restart.
-func ApplyConfigChange(key, value string) {
-	switch key {
-	case "notification":
-		switch value {
-		case "", "none", "terminal", "web", "both":
-			Global.Notification = value
-		default:
-			Global.Notification = ""
-		}
-	}
-}

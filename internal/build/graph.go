@@ -360,11 +360,13 @@ func buildSchedulerCreateCommand(nameVersion string, update bool, interactiveInp
 	if update {
 		cmd.WriteString(" --update")
 	}
-	cmd.WriteString(" " + nameVersion)
+	cmd.WriteString(" ")
+	cmd.WriteString(nameVersion)
 	if len(interactiveInputs) > 0 {
 		cmd.WriteString(" << 'CNT_INPUTS_EOF'")
 		for _, input := range interactiveInputs {
-			cmd.WriteString("\n" + input)
+			cmd.WriteString("\n")
+			cmd.WriteString(input)
 		}
 		cmd.WriteString("\nCNT_INPUTS_EOF")
 	}

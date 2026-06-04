@@ -97,18 +97,3 @@ func SaveHelperConfig(name string, cfg map[string]string) error {
 	}
 	return nil
 }
-
-// MergeHelperConfig applies saved config values as defaults for any key not already set.
-// Returns the merged map.
-func MergeHelperConfig(params map[string]string, saved map[string]string) map[string]string {
-	out := make(map[string]string, len(params))
-	for k, v := range params {
-		out[k] = v
-	}
-	for k, v := range saved {
-		if _, exists := out[k]; !exists {
-			out[k] = v
-		}
-	}
-	return out
-}
