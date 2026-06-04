@@ -2,6 +2,7 @@ package container
 
 import (
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 
@@ -57,7 +58,7 @@ func BuildPathEnv(overlays []string) string {
 			}
 			relative = fmt.Sprintf("/cnt/%s/bin", normalized)
 		} else {
-			utils.PrintWarning("Unknown overlay file extension for %s. Skipping PATH addition.", utils.StylePath(ov))
+			slog.Default().Warn("unknown overlay file extension, skipping PATH addition", "path", ov)
 			continue
 		}
 		paths = append([]string{relative}, paths...)

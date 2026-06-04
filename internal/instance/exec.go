@@ -6,8 +6,11 @@ import (
 	"os"
 	"sort"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -34,24 +37,24 @@ func Exec(ctx context.Context, opts ExecOptions) error {
 	// Load instance state to get environment variables
 	state, err := loadState(opts.Name)
 	if err != nil {
-		utils.PrintDebug("[INSTANCE]Could not load state: %v", err)
-		utils.PrintNote("Instance state not found. Environment variables will not be set.")
+		slog.Default().Debug("instance: could not load state", "err", err)
+		logging.FromContext(ctx).Info("instance state not found, environment variables will not be set", "kind", "note")
 	}
 
 	// Print overlay environment notes for interactive shells with simple commands
 	// (similar to exec behavior: only print when command length <= 1)
 	if state != nil && utils.IsInteractiveShell() && opts.PrintEnv {
+		log := logging.FromContext(ctx)
 		if len(state.Notes) > 0 {
-			utils.PrintMessage("Overlay envs:")
+			log.Info("overlay envs:")
 			sortedNotes := make([]string, 0, len(state.Notes))
 			for key := range state.Notes {
 				sortedNotes = append(sortedNotes, key)
 			}
 			sort.Strings(sortedNotes)
 			for _, key := range sortedNotes {
-				fmt.Printf("  %s: %s\n", utils.StyleName(key), utils.StyleInfo(state.Notes[key]))
+				log.Info(fmt.Sprintf("  %s: %s", key, state.Notes[key]))
 			}
-			fmt.Println("")
 		}
 	}
 
@@ -59,7 +62,7 @@ func Exec(ctx context.Context, opts ExecOptions) error {
 	envList := opts.EnvSettings
 	if state != nil {
 		envList = append(state.Env, opts.EnvSettings...)
-		utils.PrintDebug("[INSTANCE]Applied %d environment variables from state", len(state.Env))
+		slog.Default().Debug("instance: applied environment variables from state", "count", len(state.Env))
 	}
 
 	// Execute in instance using apptainer package

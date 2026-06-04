@@ -3,6 +3,7 @@ package utils
 import (
 	"bufio"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
 	"sort"
@@ -111,8 +112,8 @@ func ParseSizeToMB(sizeStr string) (int, error) {
 // Example: "samtools/1.21" → ("samtools/1.21", "", "")
 func SplitDepConstraint(raw string) (nameVersion, op, minVersion string) {
 	for _, sep := range []string{">=", ">"} {
-		if idx := strings.Index(raw, sep); idx >= 0 {
-			return raw[:idx], sep, raw[idx+len(sep):]
+		if before, after, ok := strings.Cut(raw, sep); ok {
+			return before, sep, after
 		}
 	}
 	return raw, "", ""
@@ -122,7 +123,7 @@ func SplitDepConstraint(raw string) (nameVersion, op, minVersion string) {
 // Stops at the first non-numeric segment (e.g. "1.16rc1" → [1, 16]).
 func versionParts(v string) []int {
 	var parts []int
-	for _, s := range strings.Split(v, ".") {
+	for s := range strings.SplitSeq(v, ".") {
 		n, err := strconv.Atoi(s)
 		if err != nil {
 			break
@@ -137,10 +138,7 @@ func versionParts(v string) []int {
 // Returns -1 if a < b, 0 if equal, 1 if a > b.
 func CompareVersions(a, b string) int {
 	ap, bp := versionParts(a), versionParts(b)
-	n := len(ap)
-	if len(bp) > n {
-		n = len(bp)
-	}
+	n := max(len(bp), len(ap))
 	for i := 0; i < n; i++ {
 		av, bv := 0, 0
 		if i < len(ap) {
@@ -300,6 +298,7 @@ func GetWhatIsFromScript(scriptPath string) string {
 			return strings.TrimSpace(line[len("#WHATIS:"):])
 		}
 	}
+	_ = scanner.Err()
 	return ""
 }
 
@@ -511,11 +510,8 @@ func SortVersionsDescending(values []string) []string {
 func naturalVersionGreater(a, b string) bool {
 	segsA := splitVersionSegments(a)
 	segsB := splitVersionSegments(b)
-	n := len(segsA)
-	if len(segsB) < n {
-		n = len(segsB)
-	}
-	for i := 0; i < n; i++ {
+	n := min(len(segsB), len(segsA))
+	for i := range n {
 		ia, aAlpha, aHasNum := parseVersionSegment(segsA[i])
 		ib, bAlpha, bHasNum := parseVersionSegment(segsB[i])
 		if aHasNum && bHasNum {
@@ -766,9 +762,7 @@ func ExpandPlaceholders(defs []PlaceholderDef) []map[string]string {
 		for _, existing := range result {
 			for _, val := range concreteVals {
 				combo := make(map[string]string, len(existing)+1)
-				for k, v := range existing {
-					combo[k] = v
-				}
+				maps.Copy(combo, existing)
 				combo[def.Name] = val
 				next = append(next, combo)
 			}
@@ -777,4 +771,104 @@ func ExpandPlaceholders(defs []PlaceholderDef) []map[string]string {
 	}
 
 	return result
+}
+
+// imgPackageTokenRe matches {UPPER_CASE} tokens in #IMG_PACKAGES: templates.
+var imgPackageTokenRe = regexp.MustCompile(`\{([A-Z][A-Z0-9_]*)\}`)
+
+// ExtractImgPackageTokens returns the unique {KEY} token names from an #IMG_PACKAGES: template.
+func ExtractImgPackageTokens(imgPackages string) []string {
+	matches := imgPackageTokenRe.FindAllStringSubmatch(imgPackages, -1)
+	seen := map[string]bool{}
+	var result []string
+	for _, m := range matches {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			result = append(result, m[1])
+		}
+	}
+	return result
+}
+
+// MatchVersion does a partial version match against a list sorted newest-first.
+// Input "3.12" matches the first entry beginning with "3.12." (latest patch).
+// Exact match always takes priority. Returns input unchanged if nothing matches.
+func MatchVersion(input string, versions []string) string {
+	for _, v := range versions {
+		if v == input {
+			return v
+		}
+	}
+	prefix := input + "."
+	for _, v := range versions {
+		if strings.HasPrefix(v, prefix) {
+			return v
+		}
+	}
+	return input
+}
+
+// LatestVersion returns the first (newest) entry in a versions list, or "" if empty.
+func LatestVersion(versions []string) string {
+	if len(versions) == 0 {
+		return ""
+	}
+	return versions[0]
+}
+
+// VersionChoicesDisplay formats a newest-first full-patch list into grouped minor
+// version summary strings: ["3.13.2","3.12.10","3.11.12"] →
+// ["3.13(.2)", "3.12(.10)", "3.11(.12)"].
+func VersionChoicesDisplay(versions []string) []string {
+	seen := map[string]bool{}
+	var result []string
+	for _, v := range versions {
+		parts := strings.SplitN(v, ".", 3)
+		if len(parts) < 2 {
+			continue
+		}
+		minor := parts[0] + "." + parts[1]
+		if !seen[minor] {
+			seen[minor] = true
+			if len(parts) == 3 {
+				result = append(result, fmt.Sprintf("%s(.%s)", minor, parts[2]))
+			} else {
+				result = append(result, minor)
+			}
+		}
+	}
+	return result
+}
+
+// FormatChoicesInline formats a value list for single-line display.
+// Version lists (entries containing a dot) are grouped by minor version with
+// the patch shown in dim parentheses: "3.13(.2), 3.12(.10), 3.11(.12)".
+// Option lists are joined with " | ": "github | microsoft".
+func FormatChoicesInline(vlist []string) string {
+	if len(vlist) == 0 {
+		return ""
+	}
+	// Detect version list: first entry must have at least one dot.
+	if !strings.Contains(vlist[0], ".") {
+		return strings.Join(vlist, " | ")
+	}
+	seen := map[string]bool{}
+	var parts []string
+	for _, v := range vlist {
+		segs := strings.SplitN(v, ".", 3)
+		if len(segs) < 2 {
+			continue
+		}
+		minor := segs[0] + "." + segs[1]
+		if seen[minor] {
+			continue
+		}
+		seen[minor] = true
+		entry := minor
+		if len(segs) == 3 {
+			entry += "(." + segs[2] + ")"
+		}
+		parts = append(parts, entry)
+	}
+	return strings.Join(parts, ", ")
 }

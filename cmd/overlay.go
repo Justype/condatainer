@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,13 +54,13 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 		if len(args) > 0 {
 			path = args[0]
 		} else if len(args) > 1 {
-			ExitWithUsageError("Too many positional arguments before --.")
+			ExitWithError("Too many positional arguments before --.")
 		}
 
 		// Auto-append .img extension if not present and path doesn't have an extension
 		if !utils.IsImg(path) {
 			if strings.Contains(filepath.Base(path), ".") {
-				ExitWithUsageError("Overlay image must have a .img extension.")
+				ExitWithError("Overlay image must have a .img extension.")
 			}
 			path += ".img"
 		}
@@ -74,7 +73,7 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 		path = absPath
 
 		if utils.FileExists(path) || utils.DirExists(path) {
-			ExitWithUsageError("Path %s already exists.", utils.StylePath(path))
+			ExitWithError("Path %s already exists.", utils.StylePath(path))
 		}
 
 		// 2. Parse Flags
@@ -86,7 +85,7 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 		noTmp, _ := cmd.Flags().GetBool("no-tmp")
 
 		if envFile != "" && len(packages) > 0 {
-			ExitWithUsageError("Cannot use -f/--file and inline packages (--) at the same time.")
+			ExitWithError("Cannot use -f/--file and inline packages (--) at the same time.")
 		}
 
 		sizeMB, err := utils.ParseSizeToMB(sizeStr)
@@ -108,6 +107,7 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 			FilesystemType: "ext3",
 		}
 
+		condaIO := exec.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 		if noTmp {
 			// 3a. Create directly at target path (no tmp), then conda init there.
 			if err := overlay.CreateDirectly(cmd.Context(), opts); err != nil {
@@ -117,7 +117,7 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 				}
 				ExitWithError("%v", err)
 			}
-			if err := initializeOverlayWithConda(cmd.Context(), path, envFile, packages, fakeroot); err != nil {
+			if err := initCondaInOverlay(cmd.Context(), path, envFile, packages, fakeroot, condaIO); err != nil {
 				os.Remove(path)
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 					utils.PrintWarning("Overlay initialization cancelled.")
@@ -136,7 +136,7 @@ Conda packages can be specified after -- to initialize the environment inline.`,
 				ExitWithError("%v", err)
 			}
 
-			if err := initializeOverlayWithConda(cmd.Context(), tmpPath, envFile, packages, fakeroot); err != nil {
+			if err := initCondaInOverlay(cmd.Context(), tmpPath, envFile, packages, fakeroot, condaIO); err != nil {
 				os.Remove(tmpPath)
 				utils.RemoveDirIfEmpty(filepath.Dir(tmpPath))
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
@@ -187,7 +187,7 @@ var resizeCmd = &cobra.Command{
 		if sizeStr == "" {
 			utils.PrintError("Size flag is required (e.g., -s 20G)")
 			_ = cmd.Usage()
-			os.Exit(ExitCodeUsage)
+			os.Exit(ExitCodeError)
 		}
 
 		// 2. Parse Size
@@ -249,15 +249,7 @@ var checkCmd = &cobra.Command{
 		path := args[0]
 		force, _ := cmd.Flags().GetBool("force")
 
-		absPath, _ := filepath.Abs(path)
-		lock, err := overlay.AcquireLock(absPath, true)
-		if err != nil {
-			ExitWithError("%v", err)
-		}
-		defer lock.Close()
-
-		err = overlay.CheckIntegrity(cmd.Context(), path, force)
-		if err != nil {
+		if err := overlay.CheckIntegrity(cmd.Context(), path, force); err != nil {
 			ExitWithError("%v", err)
 		}
 	},
@@ -495,34 +487,30 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 		HidePrompt:  true,
 	}
 
-	if err := exec.Run(cmd.Context(), opts); err != nil {
+	if err := exec.Run(cmd.Context(), opts, exec.IO{Stdout: os.Stdout, Stderr: os.Stderr}); err != nil {
 		return fmt.Errorf("failed to export environment: %w", err)
 	}
 	return nil
 }
 
-// initializeOverlayWithConda installs a conda environment into an overlay.
+// initCondaInOverlay initializes a conda environment in an existing overlay.
 // Priority: envFile (-f flag) > packages (-- args) > minimal (zlib).
 // envFile and packages are mutually exclusive and validated before this call.
-func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string, packages []string, fakeroot bool) error {
-	// Validate environment file if provided
+func initCondaInOverlay(ctx context.Context, overlayPath, envFile string, packages []string, fakeroot bool, io exec.IO) error {
 	if envFile != "" {
 		absEnvFile, err := filepath.Abs(envFile)
 		if err != nil {
 			return fmt.Errorf("failed to get absolute path of environment file: %w", err)
 		}
 		envFile = absEnvFile
-
 		if !utils.FileExists(envFile) {
 			return fmt.Errorf("environment file %s not found", envFile)
 		}
-
 		if !utils.IsYaml(envFile) {
 			return fmt.Errorf("environment file must be .yml or .yaml")
 		}
 	}
 
-	// Ensure base image exists
 	if err := ensureBaseImage(ctx); err != nil {
 		return err
 	}
@@ -532,50 +520,20 @@ func initializeOverlayWithConda(ctx context.Context, overlayPath, envFile string
 		return fmt.Errorf("failed to get absolute path of overlay: %w", err)
 	}
 
-	var mmCreateCmd []string
 	if envFile != "" {
 		utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(envFile))
-		mmCreateCmd = []string{"mm-create", "-f", envFile, "-y"}
 	} else if len(packages) > 0 {
 		utils.PrintMessage("Initializing conda environment with: %s...", strings.Join(packages, " "))
-		mmCreateCmd = append([]string{"mm-create", "-y"}, packages...)
 	} else {
-		utils.PrintMessage("Initializing minimal conda environment with small package (zlib)...")
-		mmCreateCmd = []string{"mm-create", "zlib", "-y"}
-	}
-	if utils.QuietMode {
-		mmCreateCmd = append(mmCreateCmd, "-q")
+		utils.PrintMessage("Initializing %s...", exec.DescribeInitialCondaPackages(nil))
 	}
 
-	// Run mm-create command
-	opts := exec.Options{
-		Overlays:    []string{absOverlayPath},
-		Command:     mmCreateCmd,
-		WritableImg: true,
-		Fakeroot:    fakeroot,
-		HidePrompt:  true,
+	pkgs := packages
+	if envFile != "" {
+		pkgs = []string{"-f", envFile}
 	}
-
-	if err := exec.Run(ctx, opts); err != nil {
-		os.Remove(absOverlayPath)
+	if err := exec.InitCondaEnv(ctx, absOverlayPath, pkgs, fakeroot, io); err != nil {
 		return fmt.Errorf("failed to run mm-create: %w", err)
-	}
-
-	// Clean up micromamba cache
-	utils.PrintMessage("Cleaning up micromamba cache...")
-	cleanOpts := exec.Options{
-		Overlays:    []string{absOverlayPath},
-		Command:     []string{"mm-clean", "-a", "-y", "-q"},
-		WritableImg: true,
-		Fakeroot:    fakeroot,
-		Stdout:      io.Discard, // Suppress mm-clean verbose output
-		Stderr:      io.Discard,
-		HidePrompt:  true,
-	}
-
-	if err := exec.Run(ctx, cleanOpts); err != nil {
-		utils.PrintWarning("Failed to clean micromamba cache: %v", err)
-		// Not a critical error, continue
 	}
 
 	utils.PrintSuccess("Conda env is created inside %s.", utils.StylePath(overlayPath))

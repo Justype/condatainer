@@ -13,8 +13,11 @@ import (
 	"syscall"
 	"time"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
@@ -37,7 +40,7 @@ func getInstalledOverlays() map[string]bool {
 		}
 		entries, err := os.ReadDir(imagesDir)
 		if err != nil {
-			utils.PrintWarning("Failed to read directory %s: %v", imagesDir, err)
+			slog.Default().Warn("failed to read image directory", "dir", imagesDir, "err", err)
 			continue
 		}
 		for _, entry := range entries {
@@ -55,11 +58,10 @@ func getInstalledOverlays() map[string]bool {
 // checkShouldBuild returns (skip=true, nil) if the overlay already exists and update=false.
 // In update mode, if the overlay is locked by a running container, returns an error.
 func checkShouldBuild(b *BuildObject) (skip bool, err error) {
-	styledOverlay := utils.StyleName(filepath.Base(b.targetOverlayPath))
 	if !b.update {
 		if _, err := os.Stat(b.targetOverlayPath); err == nil {
-			utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
-				styledOverlay, utils.StylePath(b.targetOverlayPath))
+			slog.Default().Info("overlay already exists, skipping",
+				"overlay", filepath.Base(b.targetOverlayPath), "path", b.targetOverlayPath)
 			return true, nil
 		}
 	}
@@ -80,7 +82,7 @@ func watchContext(ctx context.Context, label string) (done chan struct{}) {
 	go func() {
 		select {
 		case <-ctx.Done():
-			utils.PrintWarning("Build cancelled. Interrupting %s...", label)
+			logging.FromContext(ctx).Warn("build cancelled, interrupting", "step", label)
 			// Cleanup is the caller's responsibility after exec returns.
 		case <-done:
 			return
@@ -124,7 +126,7 @@ func prepareBuildWorkspace(ctx context.Context, b *BuildObject, useTmpOverlay bo
 			if !errors.Is(err, ErrTmpOverlayExists) {
 				return fmt.Errorf("failed to create build dirs: %w", err)
 			}
-			utils.PrintWarning("Stale build directory found for %s. Cleaning up...", b.nameVersion)
+			logging.FromContext(ctx).Warn("stale build directory found, cleaning up", "name", b.nameVersion)
 			if err := b.CreateBuildDirs(ctx, true); err != nil {
 				return fmt.Errorf("failed to create build dirs: %w", err)
 			}
@@ -134,7 +136,7 @@ func prepareBuildWorkspace(ctx context.Context, b *BuildObject, useTmpOverlay bo
 			if !errors.Is(err, ErrTmpOverlayExists) {
 				return fmt.Errorf("failed to create temporary overlay: %w", err)
 			}
-			utils.PrintWarning("Stale temporary overlay found for %s. Cleaning up...", b.nameVersion)
+			logging.FromContext(ctx).Warn("stale temporary overlay found, cleaning up", "name", b.nameVersion)
 			if err := b.CreateTmpOverlay(ctx, true); err != nil {
 				return fmt.Errorf("failed to create temporary overlay: %w", err)
 			}
@@ -187,12 +189,12 @@ func tryDownloadPrebuilt(ctx context.Context, nameVersion, destPath, ext, prebui
 	if !utils.URLExists(ctx, url) {
 		return false
 	}
-	utils.PrintMessage("Found pre-built %s. Downloading...", utils.StyleName(normalized))
+	logging.FromContext(ctx).Info("found pre-built, downloading", "name", normalized)
 	if err := downloadFn(ctx, url, destPath); err != nil {
-		utils.PrintWarning("Download failed. Falling back to local build.")
+		logging.FromContext(ctx).Warn("pre-built download failed, falling back to local build", "err", err)
 		return false
 	}
-	utils.PrintSuccess("Pre-built %s downloaded.", utils.StyleName(normalized))
+	logging.FromContext(ctx).Info("pre-built downloaded", "kind", "success", "name", normalized)
 	return true
 }
 
@@ -315,7 +317,7 @@ func isBuildLockStale(info BuildLockInfo) (stale bool, status scheduler.JobStatu
 			// Can't check without a scheduler — be conservative.
 			return false, scheduler.JobStatusUnknown, fmt.Errorf("scheduler unavailable, cannot verify job %s", info.JobID)
 		}
-		st, err := sched.GetJobStatus(info.JobID)
+		st, err := sched.GetJobStatus(context.Background(), info.JobID)
 		if err != nil {
 			return false, scheduler.JobStatusUnknown, fmt.Errorf("cannot check job %s: %w", info.JobID, err)
 		}

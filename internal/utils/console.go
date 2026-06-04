@@ -21,7 +21,7 @@ var QuietMode = false
 var YesMode = false
 
 // projectPrefix is the standard tag for all logs.
-const projectPrefix = "[CNT]"
+const projectPrefix = "CNT"
 
 // ---------------------------------------------------------
 // 1. Private Color Definitions
@@ -72,7 +72,7 @@ func StyleAction(act string) string { return yellow(act) }
 func StyleTitle(title string) string { return cyan(title) }
 
 // StyleNumber formats counts, sizes, or IDs (Magenta).
-func StyleNumber(num interface{}) string {
+func StyleNumber(num any) string {
 	return magenta(fmt.Sprintf("%v", num))
 }
 
@@ -132,70 +132,64 @@ func FormatBytes(bytes int64) string {
 
 // PrintMessage prints a standard info message. → stderr
 // Output: [CNT] Message...
-func PrintMessage(format string, a ...interface{}) {
+func PrintMessage(format string, a ...any) {
 	if QuietMode {
 		return
 	}
 	msg := fmt.Sprintf(format, a...)
-	fmt.Fprintf(os.Stderr, "%s %s\n", projectPrefix, msg)
+	fmt.Fprintf(os.Stderr, "[%s] %s\n", projectPrefix, msg)
 }
 
-// PrintSuccess prints a success message with a Green tag. → stderr
-// Output: [CNT][PASS] Operation complete.
-func PrintSuccess(format string, a ...interface{}) {
+// PrintSuccess prints a success message with a Green prefix. → stderr
+// Output: [CNT✓] Operation complete.
+func PrintSuccess(format string, a ...any) {
 	if QuietMode {
 		return
 	}
 	msg := fmt.Sprintf(format, a...)
-	tag := StyleSuccess("[PASS]")
-	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
+	fmt.Fprintf(os.Stderr, "%s %s\n", StyleSuccess("["+projectPrefix+"✓]"), msg)
 }
 
-// PrintError prints an error message with a Red tag. → stderr
-// Output: [CNT][ERR] Something failed.
+// PrintError prints an error message with a Red prefix. → stderr
+// Output: [CNT✗] Something failed.
 func PrintError(format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
-	tag := StyleError("[ERR]")
-	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
+	fmt.Fprintf(os.Stderr, "%s %s\n", StyleError("["+projectPrefix+"✗]"), msg)
 }
 
-// PrintWarning prints a warning with a Yellow tag. → stderr
-// Output: [CNT][WARN] Disk is almost full.
+// PrintWarning prints a warning with a Yellow prefix. → stderr
+// Output: [CNT!] Disk is almost full.
 func PrintWarning(format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
-	tag := StyleWarning("[WARN]")
-	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
+	fmt.Fprintf(os.Stderr, "%s %s\n", StyleWarning("["+projectPrefix+"!]"), msg)
 }
 
-// PrintHint prints a helpful hint with a Cyan tag. → stderr
-// Output: [CNT][HINT] Try running with --force.
+// PrintHint prints a helpful hint with a Cyan prefix. → stderr
+// Output: [CNT▶] Try running with --force.
 func PrintHint(format string, a ...any) {
 	if QuietMode {
 		return
 	}
 	msg := fmt.Sprintf(format, a...)
-	tag := StyleHint("[HINT]")
-	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
+	fmt.Fprintf(os.Stderr, "%s %s\n", StyleHint("["+projectPrefix+"▶]"), msg)
 }
 
-// PrintNote prints a note with a Magenta tag. → stderr
-// Output: [CNT][NOTE] This might take a while.
+// PrintNote prints a note with a Magenta prefix. → stderr
+// Output: [CNT◇] This might take a while.
 func PrintNote(format string, a ...any) {
 	if QuietMode {
 		return
 	}
 	msg := fmt.Sprintf(format, a...)
-	tag := StyleNote("[NOTE]")
-	fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
+	fmt.Fprintf(os.Stderr, "%s %s\n", StyleNote("["+projectPrefix+"◇]"), msg)
 }
 
-// PrintDebug prints a debug message with a Gray tag (only if DebugMode is true). → stderr
-// Output: [CNT][DBG] Executing: rm -rf /tmp/foo
+// PrintDebug prints a debug message with a Gray prefix (only if DebugMode is true). → stderr
+// Output: [CNT…] Executing: rm -rf /tmp/foo
 func PrintDebug(format string, a ...any) {
 	if DebugMode {
 		msg := fmt.Sprintf(format, a...)
-		tag := StyleDebug("[DBG]")
-		fmt.Fprintf(os.Stderr, "%s%s %s\n", projectPrefix, tag, msg)
+		fmt.Fprintf(os.Stderr, "%s %s\n", StyleDebug("["+projectPrefix+"…]"), msg)
 	}
 }
 

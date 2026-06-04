@@ -2,15 +2,20 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
+	"github.com/Justype/condatainer/cmd/internal/clilog"
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
+	execpkg "github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -26,7 +31,7 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:           "condatainer",
-	Short:         "CondaTainer: Use Apptainer/Conda/Overlays/SquashFS to manage tools/data/env for HPC users.",
+	Short:         "CondaTainer: Use Apptainer/Conda/OverlayFS/SquashFS to manage tools/data/env for HPC users.",
 	Version:       config.VERSION,
 	SilenceErrors: true,
 
@@ -99,6 +104,18 @@ var rootCmd = &cobra.Command{
 			utils.PrintDebug("Yes mode enabled (automatically answering yes to prompts)")
 		}
 
+		// Route all slog output (both context-based and slog.Default()) through
+		// the CLI's utils.Print* functions so internal packages produce the
+		// familiar [CNT] output instead of the raw "2006/01/02 INFO ..." format.
+		cliHandler := slog.New(clilog.New())
+		slog.SetDefault(cliHandler)
+		cmd.SetContext(logging.WithLogger(cmd.Context(), cliHandler))
+		cmd.SetContext(execpkg.WithIO(cmd.Context(), execpkg.IO{
+			Stdin:  os.Stdin,
+			Stdout: os.Stdout,
+			Stderr: os.Stderr,
+		}))
+
 		// Step 6: Auto-detect compression based on apptainer/singularity version.
 		// Skip the version subprocess when compression is already explicitly configured.
 		if err := apptainer.SetBin(config.Global.ApptainerBin); err == nil {
@@ -151,19 +168,16 @@ func Execute() {
 		// Cobra's automatic error printing is silenced. For Apptainer errors
 		// print only the captured output (trimmed) and exit with non-zero
 		// status. For other errors, print the default error string.
+		// Ctrl+C or timeout: ^C on the terminal is feedback enough.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			os.Exit(ExitCodeError)
+		}
 		if ae, ok := err.(*apptainer.ApptainerError); ok {
 			out := strings.TrimSpace(ae.Output)
 			if out != "" {
 				fmt.Fprintln(os.Stderr, out)
 			}
 			os.Exit(ExitCodeError)
-		}
-		// Commands with SilenceUsage:false show usage on errors, meaning cobra
-		// generated a usage/argument error (unknown command, wrong arg count, etc.)
-		// → exit 2. Runtime commands set SilenceUsage:true → exit 1.
-		cmd, _, _ := rootCmd.Find(os.Args[1:])
-		if cmd != nil && !cmd.SilenceUsage {
-			ExitWithUsageError("%v", err)
 		}
 		ExitWithError("%v", err)
 	}

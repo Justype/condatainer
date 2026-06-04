@@ -7,7 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -48,15 +51,17 @@ func NewBuildGraph(ctx context.Context, buildObjects []*BuildObject, imagesDir, 
 		update:          update,
 	}
 
+	log := logging.FromContext(ctx)
+
 	// Assign scheduler if job submission is enabled and we're not inside a job
 	if submitJobs {
 		if scheduler.IsInsideJob() {
-			utils.PrintNote("Already inside a scheduler job; all builds will run locally")
+			log.Info("already inside a scheduler job, all builds will run locally", "kind", "note")
 		} else if sched := scheduler.ActiveScheduler(); sched != nil {
 			bg.scheduler = sched
-			utils.PrintDebug("Using %s scheduler: %s", sched.GetType(), sched.GetBinary())
+			log.Debug("using scheduler", "type", sched.GetType(), "binary", sched.GetBinary())
 		} else {
-			utils.PrintWarning("No scheduler detected, all builds will run locally")
+			log.Warn("no scheduler detected, all builds will run locally")
 		}
 	}
 
@@ -64,7 +69,7 @@ func NewBuildGraph(ctx context.Context, buildObjects []*BuildObject, imagesDir, 
 	for _, obj := range buildObjects {
 		bg.graph[obj.NameVersion()] = obj
 		if !update && obj.IsInstalled() {
-			utils.PrintMessage("Overlay %s is already installed. Skipping.", utils.StyleName(obj.NameVersion()))
+			log.Info("overlay already installed, skipping", "name", obj.NameVersion())
 		}
 	}
 
@@ -111,7 +116,7 @@ func (bg *BuildGraph) topologicalSort() error {
 			// If a constraint is present and an installed version already satisfies it,
 			// skip this dep entirely — the overlay resolver will pick the best installed version.
 			if op != "" && constraintAlreadySatisfied(dep, op, minVer) {
-				utils.PrintDebug("[GRAPH] Skipping %s: constraint %s%s satisfied by an installed version", dep, op, minVer)
+				slog.Default().Debug("skipping dep, constraint satisfied by installed version", "dep", dep, "op", op, "minVer", minVer)
 				continue
 			}
 			if err := visit(dep); err != nil {
@@ -175,7 +180,7 @@ func (bg *BuildGraph) Run(ctx context.Context) error {
 	}
 
 	if hasDefBuilds {
-		utils.PrintDebug("Apptainer is used. You can run 'apptainer cache clean' to free up space.")
+		logging.FromContext(ctx).Debug("apptainer was used; run 'apptainer cache clean' to free up space")
 	}
 
 	return nil
@@ -187,7 +192,7 @@ func (bg *BuildGraph) runLocalStep(ctx context.Context) error {
 		if !bg.update && meta.IsInstalled() {
 			continue
 		}
-		utils.PrintDebug("Processing overlay %s (local build)...", meta.NameVersion())
+		logging.FromContext(ctx).Debug("processing overlay (local build)", "name", meta.NameVersion())
 		if err := meta.Build(ctx, false); err != nil {
 			return fmt.Errorf("failed to build %s: %w", meta.NameVersion(), err)
 		}
@@ -205,7 +210,7 @@ func (bg *BuildGraph) runSchedulerStep() error {
 		if !bg.update && meta.IsInstalled() {
 			continue
 		}
-		utils.PrintDebug("Processing overlay %s (scheduler job)...", meta.NameVersion())
+		logging.FromContext(bg.ctx).Debug("processing overlay (scheduler job)", "name", meta.NameVersion())
 
 		// Collect dependency job IDs
 		depIDs := []string{}
@@ -265,8 +270,8 @@ func constraintAlreadySatisfied(dep, op, minVer string) bool {
 
 // submitJob creates and submits a scheduler job for the build
 func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, error) {
-	utils.PrintDebug("Submitting %s job for %s with dependencies: %s",
-		bg.scheduler.GetType(), meta.NameVersion(), strings.Join(depIDs, ", "))
+	log := logging.FromContext(bg.ctx)
+	log.Debug("submitting scheduler job", "type", bg.scheduler.GetType(), "name", meta.NameVersion(), "deps", depIDs)
 
 	// Acquire lock before submitting to prevent duplicate scheduler submissions.
 	// The lock is created with an empty job_id and updated after Submit() returns.
@@ -278,7 +283,7 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 	if err := acquireBuildLockFile(lockPath, pendingLock); err != nil {
 		if os.IsExist(err) {
 			return "", fmt.Errorf("build already queued or running for %s (lock exists at %s)",
-				utils.StyleName(meta.NameVersion()), utils.StylePath(lockPath))
+				meta.NameVersion(), lockPath)
 		}
 		return "", fmt.Errorf("failed to create build lock for %s: %w", meta.NameVersion(), err)
 	}
@@ -288,6 +293,11 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 	if specs == nil {
 		effRS := buildEffectiveResourceSpec(nil)
 		specs = &scheduler.ScriptSpecs{Spec: effRS}
+	}
+	if config.Global.ProxyPerJob {
+		if h, err := os.Hostname(); err == nil && h != "" {
+			specs.ProxyVia = h
+		}
 	}
 
 	// Derive job name from name/version if not set in script
@@ -323,7 +333,7 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 	if len(depIDs) > 0 {
 		deps = []scheduler.Dependency{{Type: scheduler.DependencyAfterOK, JobIDs: depIDs}}
 	}
-	jobID, err := bg.scheduler.Submit(scriptPath, deps)
+	jobID, err := bg.scheduler.Submit(bg.ctx, scriptPath, deps)
 	if err != nil {
 		os.Remove(lockPath) // release lock on submission failure
 		return "", fmt.Errorf("failed to submit job: %w", err)
@@ -333,7 +343,7 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 	pendingLock.JobID = jobID
 	_ = overwriteBuildLockFile(lockPath, pendingLock) // best-effort; we already hold the lock
 
-	utils.PrintMessage("Submitted %s job %s for %s", bg.scheduler.GetType(), jobID, meta.NameVersion())
+	log.Info("submitted scheduler job", "type", bg.scheduler.GetType(), "jobID", jobID, "name", meta.NameVersion())
 	return jobID, nil
 }
 
@@ -343,11 +353,6 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 // scheduler node does not need a TTY.
 func buildSchedulerCreateCommand(nameVersion string, update bool, interactiveInputs []string) string {
 	var cmd strings.Builder
-	// Bake the login node hostname so per-job proxy knows where to tunnel.
-	// CNT_PROXY_VIA is used by "condatainer proxy start --via" and proxy_perjob autostart.
-	if h, err := os.Hostname(); err == nil && h != "" {
-		cmd.WriteString("export CNT_PROXY_VIA=" + h + "\n")
-	}
 	cmd.WriteString("condatainer create")
 	if PreferRemote {
 		cmd.WriteString(" --remote")
@@ -355,11 +360,13 @@ func buildSchedulerCreateCommand(nameVersion string, update bool, interactiveInp
 	if update {
 		cmd.WriteString(" --update")
 	}
-	cmd.WriteString(" " + nameVersion)
+	cmd.WriteString(" ")
+	cmd.WriteString(nameVersion)
 	if len(interactiveInputs) > 0 {
 		cmd.WriteString(" << 'CNT_INPUTS_EOF'")
 		for _, input := range interactiveInputs {
-			cmd.WriteString("\n" + input)
+			cmd.WriteString("\n")
+			cmd.WriteString(input)
 		}
 		cmd.WriteString("\nCNT_INPUTS_EOF")
 	}

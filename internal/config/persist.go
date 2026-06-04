@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +38,9 @@ func (l ConfigLayerInfo) InConfig(key string) bool { return l.v.InConfig(key) }
 
 // GetString returns the string value of key from this config layer.
 func (l ConfigLayerInfo) GetString(key string) string { return l.v.GetString(key) }
+
+// GetBool returns the bool value of key from this config layer.
+func (l ConfigLayerInfo) GetBool(key string) bool { return l.v.GetBool(key) }
 
 // GetStringSlice returns the string slice value of key from this config layer.
 func (l ConfigLayerInfo) GetStringSlice(key string) []string { return l.v.GetStringSlice(key) }
@@ -151,10 +155,11 @@ func setDefaults() {
 	viper.SetDefault("default_distro", DEFAULT_DISTRO)
 	viper.SetDefault("extra_scripts_links", []string{})
 	viper.SetDefault("parse_module_load", false)
-	viper.SetDefault("scheduler_timeout", 5)  // seconds
-	viper.SetDefault("notification", "")      // "" or "none" = silent; "bell" = terminal bell; "email" = scheduler email; ≥5-char = ntfy.sh topic
+	viper.SetDefault("scheduler_timeout", 0)  // seconds; 0 = no timeout
+	viper.SetDefault("notification", "web")   // "web" = browser notification via dashboard; "terminal" = bell; "both" = terminal + web; "" or "none" = silent
 	viper.SetDefault("metadata_cache_ttl", 7) // days (1 week)
 	viper.SetDefault("proxy_perjob", false)
+	viper.SetDefault("helper_bind_all", false)
 }
 
 // GetUserConfigPath returns the path to the user config file
@@ -334,7 +339,7 @@ func ResolveWritableConfigPath(location string) (path, locationType string, err 
 			return "", "", err
 		}
 		locationType = NormalizeConfigLocation(location)
-		if !utils.CanWriteToDir(filepath.Dir(path)) {
+		if !utils.CanWriteToExistingAncestor(filepath.Dir(path)) {
 			return "", "", fmt.Errorf(
 				"config location '%s' is read-only: %s\nUse a different location or run with appropriate permissions.",
 				locationType, filepath.Dir(path),
@@ -567,7 +572,7 @@ func DetectApptainerBin() string {
 }
 
 func detectApptainerFromModules() string {
-	utils.PrintMessage("Searching modules for apptainer/singularity via 'module avail'...")
+	slog.Default().Info("searching modules for apptainer/singularity via 'module avail'")
 
 	bestModule := ""
 	bestVersion := ""
@@ -585,11 +590,11 @@ func detectApptainerFromModules() string {
 	}
 
 	if bestModule == "" {
-		utils.PrintDebug("No apptainer/singularity modules found via module avail")
+		slog.Default().Debug("no apptainer/singularity modules found via module avail")
 		return ""
 	}
 
-	utils.PrintMessage("Using module candidate: %s", bestModule)
+	slog.Default().Info("using module candidate", "module", bestModule)
 
 	// Resolve the actual binary path after loading the selected module.
 	// Use both names as fallback because module name and binary name can differ.
@@ -915,7 +920,7 @@ func LoadFromViper() {
 	// Load default_distro from config
 	if distro := layerString("default_distro"); distro != "" {
 		if !slices.Contains(GetAvailableDistros(), distro) {
-			utils.PrintWarning("Config distro '%s' not available; falling back to '%s'", distro, DEFAULT_DISTRO)
+			slog.Default().Warn("config distro not available, falling back to default", "distro", distro, "fallback", DEFAULT_DISTRO)
 			viper.Set("default_distro", DEFAULT_DISTRO)
 			distro = DEFAULT_DISTRO
 		}
@@ -955,7 +960,7 @@ func LoadFromViper() {
 		if IsValidBlockSize(v) {
 			Global.Build.BlockSize = v
 		} else {
-			utils.PrintWarning("Invalid build.block_size %q (must be a power of two between 4k and 1m); using default 128k", v)
+			slog.Default().Warn("invalid build.block_size, using default 128k", "value", v)
 			Global.Build.BlockSize = "128k"
 		}
 	}
@@ -963,7 +968,7 @@ func LoadFromViper() {
 		if IsValidBlockSize(v) {
 			Global.Build.DataBlockSize = v
 		} else {
-			utils.PrintWarning("Invalid build.data_block_size %q (must be a power of two between 4k and 1m); using default 512k", v)
+			slog.Default().Warn("invalid build.data_block_size, using default 512k", "value", v)
 			Global.Build.DataBlockSize = "512k"
 		}
 	}
@@ -988,10 +993,14 @@ func LoadFromViper() {
 		Global.SchedulerTimeout = time.Duration(timeout) * time.Second
 	}
 
-	if _, ok := layerBool("bell"); ok {
-		fmt.Fprintln(os.Stderr, "[WARN] 'bell' config key is deprecated. Replace with 'notification: bell' to enable or remove the key (default is none).")
-	}
 	Global.Notification = layerString("notification")
+	switch Global.Notification {
+	case "", "none", "terminal", "web", "both":
+		// valid
+	default:
+		fmt.Fprintf(os.Stderr, "[WARN] Unknown notification value %q. Valid values: terminal, web, both, none. Treating as none.\n", Global.Notification)
+		Global.Notification = ""
+	}
 
 	if ttl, ok := layerInt("metadata_cache_ttl"); ok {
 		Global.MetadataCacheTTL = time.Duration(ttl) * 24 * time.Hour
@@ -1000,6 +1009,11 @@ func LoadFromViper() {
 	if proxyPerJob, ok := layerBool("proxy_perjob"); ok {
 		Global.ProxyPerJob = proxyPerJob
 	}
+
+	if helperBindAll, ok := layerBool("helper_bind_all"); ok {
+		Global.HelperBindAll = helperBindAll
+	}
+
 }
 
 // NormalizeCompressArgs is a thin wrapper around ArgsForCompress and exists
@@ -1022,12 +1036,12 @@ func AutoDetectCompression(supportsZstd bool, isSingularity bool) {
 
 	if isSingularity {
 		Global.Build.CompressArgs = "-comp gzip"
-		utils.PrintDebug("Using gzip compression (Singularity detected)")
+		slog.Default().Debug("using gzip compression (Singularity detected)")
 	} else if supportsZstd {
 		Global.Build.CompressArgs = "-comp zstd -Xcompression-level 8"
-		utils.PrintDebug("Auto-detected zstd support, using zstd compression")
+		slog.Default().Debug("auto-detected zstd support, using zstd compression")
 	} else {
 		Global.Build.CompressArgs = "-comp lz4"
-		utils.PrintDebug("Using lz4 compression (zstd not supported)")
+		slog.Default().Debug("using lz4 compression (zstd not supported)")
 	}
 }

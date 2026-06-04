@@ -13,6 +13,11 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
+// ExitCodeJobsSubmitted is returned by condatainer commands when build jobs are
+// submitted to the scheduler rather than run immediately. Callers (e.g. helper
+// overlay checks) can detect this exit code to show a more helpful message.
+const ExitCodeJobsSubmitted = 3
+
 const VERSION = "1.4.1"
 const GitHubRepo = "Justype/condatainer"
 const GITHUB_REPO = GitHubRepo // Exported constant for compatibility
@@ -77,15 +82,20 @@ type Config struct {
 	SchedulerTimeout time.Duration
 
 	// Notification method when a helper job starts running (default: "" = none).
-	// Values: "bell" (terminal bell), "email" (scheduler email), ≥5-char string (ntfy.sh topic), "" or "none" (silent).
+	// Values: "terminal" (bell ×2, 1.1 s apart), "web" (browser notification via dashboard),
+	// "both" (terminal + web), "" or "none" (silent).
 	Notification string
 
 	// Max age of the on-disk remote build script metadata cache (default: 1 week)
 	MetadataCacheTTL time.Duration
 
-	// ProxyPerJob: if true, automatically start a per-job local SOCKS5 proxy inside
-	// submitted jobs when no shared proxy is active and CNT_PROXY_VIA is set.
+	// ProxyPerJob: if true, inject "condatainer proxy start --via <login-node>" at the
+	// top of every generated scheduler script so the compute node starts a per-job proxy.
 	ProxyPerJob bool
+
+	// HelperBindAll: if true, helper services bind to 0.0.0.0 and the server connects
+	// via direct TCP instead of SSH tunnel (for clusters where inter-node SSH is blocked).
+	HelperBindAll bool
 
 	// Build configuration
 	Build BuildConfig
@@ -179,7 +189,7 @@ func LoadDefaults(executablePath string) {
 		ScriptsLink:      DefaultScriptsLink,
 		ScriptsLinks:     []string{DefaultScriptsLink}, // overwritten in LoadFromViper
 		SchedulerTimeout: 5 * time.Second,
-		Notification:     "",
+		Notification:     "web",
 		MetadataCacheTTL: 7 * 24 * time.Hour, // 1 week
 
 		Build: BuildConfig{

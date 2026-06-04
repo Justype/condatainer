@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Justype/condatainer/internal/utils"
+	"log/slog"
 )
 
 // RunDaemon starts a dual-protocol (SOCKS5 + HTTP CONNECT) proxy on the visible port.
@@ -63,7 +63,7 @@ func RunDaemon(sshDest string, port int, localOnly bool, reportFd int) error {
 		return fmt.Errorf("no working tunnel to %s: %w", sshDest, err)
 	}
 	defer tunnelStop()
-	utils.PrintDebug("proxy tunnel established via %s", method)
+	slog.Default().Debug("proxy tunnel established", "method", method)
 
 	if err := WritePidFileAt(pidPath, ProxyState{
 		Host: pidHost,
@@ -124,11 +124,11 @@ func tryEstablishTunnel(sshDest, sockPath string) (DialFunc, func(), <-chan stru
 	var errs []string
 
 	// Option 1: Go SSH with non-interactive auth
-	utils.PrintDebug("proxy tunnel: trying go-ssh → %s", sshDest)
+	slog.Default().Debug("proxy tunnel: trying go-ssh", "dest", sshDest)
 	if dial, stop, done, err := DialGoSSH(sshDest); err == nil {
 		return dial, stop, done, "go-ssh", nil
 	} else {
-		utils.PrintDebug("proxy tunnel: go-ssh failed — %v", err)
+		slog.Default().Debug("proxy tunnel: go-ssh failed", "err", err)
 		errs = append(errs, "go-ssh: "+err.Error())
 	}
 
@@ -142,16 +142,16 @@ func tryEstablishTunnel(sshDest, sockPath string) (DialFunc, func(), <-chan stru
 	}
 
 	// Option 2: system ssh -D Unix socket
-	utils.PrintDebug("proxy tunnel: trying ssh/unix-sock → %s (sock: %s)", sshDest, sockPath)
+	slog.Default().Debug("proxy tunnel: trying ssh/unix-sock", "dest", sshDest, "sock", sockPath)
 	os.Remove(sockPath) //nolint:errcheck
 	if cmd := exec.Command("ssh", append([]string{"-D", sockPath}, sshArgs...)...); func() bool {
 		if err := cmd.Start(); err != nil {
-			utils.PrintDebug("proxy tunnel: ssh/unix-sock start failed — %v", err)
+			slog.Default().Debug("proxy tunnel: ssh/unix-sock start failed", "err", err)
 			errs = append(errs, "ssh/unix-sock start: "+err.Error())
 			return false
 		}
 		if err := waitUnixSock(sockPath, 10*time.Second); err != nil {
-			utils.PrintDebug("proxy tunnel: ssh/unix-sock socket never appeared — %v", err)
+			slog.Default().Debug("proxy tunnel: ssh/unix-sock socket never appeared", "err", err)
 			cmd.Process.Kill() //nolint:errcheck
 			errs = append(errs, "ssh/unix-sock: "+err.Error())
 			return false
@@ -171,7 +171,7 @@ func tryEstablishTunnel(sshDest, sockPath string) (DialFunc, func(), <-chan stru
 	}
 
 	// Option 3: system ssh -D TCP port (127.0.0.1)
-	utils.PrintDebug("proxy tunnel: trying ssh/tcp → %s", sshDest)
+	slog.Default().Debug("proxy tunnel: trying ssh/tcp", "dest", sshDest)
 	innerPort, err := FreePort()
 	if err != nil {
 		errs = append(errs, "ssh/tcp free port: "+err.Error())
@@ -180,7 +180,7 @@ func tryEstablishTunnel(sshDest, sockPath string) (DialFunc, func(), <-chan stru
 	innerAddr := fmt.Sprintf("127.0.0.1:%d", innerPort)
 	cmd := exec.Command("ssh", append([]string{"-D", innerAddr}, sshArgs...)...)
 	if err := cmd.Start(); err != nil {
-		utils.PrintDebug("proxy tunnel: ssh/tcp start failed — %v", err)
+		slog.Default().Debug("proxy tunnel: ssh/tcp start failed", "err", err)
 		errs = append(errs, "ssh/tcp start: "+err.Error())
 		return nil, nil, nil, "", fmt.Errorf("all tunnel methods failed: %s", strings.Join(errs, "; "))
 	}
@@ -199,7 +199,7 @@ func tryEstablishTunnel(sshDest, sockPath string) (DialFunc, func(), <-chan stru
 		time.Sleep(100 * time.Millisecond)
 	}
 	cmd.Process.Kill() //nolint:errcheck
-	utils.PrintDebug("proxy tunnel: ssh/tcp port %s never opened", innerAddr)
+	slog.Default().Debug("proxy tunnel: ssh/tcp port never opened", "addr", innerAddr)
 	errs = append(errs, "ssh/tcp: port did not open in time")
 	return nil, nil, nil, "", fmt.Errorf("all tunnel methods failed: %s", strings.Join(errs, "; "))
 }
@@ -261,23 +261,4 @@ func dialViaSocks5(sockNet, sockAddr string) DialFunc {
 		}
 		return conn, nil
 	}
-}
-
-// TestSSH verifies SSH connectivity to sshDest using the system ssh binary.
-// Uses BatchMode so it never prompts — mirrors exactly what the daemon tunnel does.
-func TestSSH(sshDest string) error {
-	out, err := exec.Command("ssh",
-		"-o", "BatchMode=yes",
-		"-o", "ConnectTimeout=10",
-		"-o", "StrictHostKeyChecking=no",
-		sshDest, "true",
-	).CombinedOutput()
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			return fmt.Errorf("SSH connection to %s failed", sshDest)
-		}
-		return fmt.Errorf("SSH connection to %s failed: %s", sshDest, msg)
-	}
-	return nil
 }

@@ -1,0 +1,325 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+
+	internalproxy "github.com/Justype/condatainer/internal/proxy"
+)
+
+// origHostKey is the context key for passing the original frontend Host header
+// through the proxy Director so ModifyResponse can rewrite Location headers.
+type origHostKey struct{}
+
+// rewriteLocationResponse returns a ModifyResponse func that rewrites absolute
+// Location headers pointing to the backend (http://127.0.0.1:port/...) to the
+// original frontend host. Fixes apps like RStudio that issue absolute redirects
+// using their own bound address (e.g. /auth-sign-in with --auth-none=1).
+func rewriteLocationResponse(target *url.URL) func(*http.Response) error {
+	backendPrefix := "http://" + target.Host
+	return func(resp *http.Response) error {
+		loc := resp.Header.Get("Location")
+		if loc == "" || !strings.HasPrefix(loc, backendPrefix) {
+			return nil
+		}
+		origHost, _ := resp.Request.Context().Value(origHostKey{}).(string)
+		if origHost == "" {
+			return nil
+		}
+		trimmedPath := strings.TrimPrefix(loc, backendPrefix)
+		resp.Header.Set("Location", "http://"+origHost+trimmedPath)
+		return nil
+	}
+}
+
+// newReverseProxy creates a fully configured ReverseProxy for the given target.
+// closeFunc is called on backend transport errors so the caller can evict the
+// stale entry from the registry; the watcher will then attempt to reopen it.
+func newReverseProxy(target *url.URL, transport http.RoundTripper, closeFunc func()) *httputil.ReverseProxy {
+	rp := httputil.NewSingleHostReverseProxy(target)
+	rp.Director = hostRewriteDirector(target)
+	rp.ModifyResponse = rewriteLocationResponse(target)
+	rp.FlushInterval = -1 // flush immediately for streaming (R console, terminal)
+
+	if transport != nil {
+		rp.Transport = transport
+	}
+	rp.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
+		// Client disconnected — nothing to do; don't evict the healthy entry.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+		// Backend unreachable: evict so the watcher reopens on next tick.
+		closeFunc()
+		http.Error(w, "helper unreachable, retrying: "+err.Error(), http.StatusServiceUnavailable)
+	}
+	return rp
+}
+
+// proxyEntry holds a live reverse-proxy for one helper run.
+type proxyEntry struct {
+	rp   *httputil.ReverseProxy
+	name string // helper script name (e.g. "code-server")
+	node string
+	port int
+}
+
+// proxyRegistry caches one reverse-proxy per helper ID.
+type proxyRegistry struct {
+	mu         sync.RWMutex
+	entries    map[string]*proxyEntry
+	pending    map[string]struct{} // IDs with an in-flight Open() dial
+	lastErrors map[string]string   // last Open() failure reason per ID
+	log        *slog.Logger
+}
+
+func newProxyRegistry(log *slog.Logger) *proxyRegistry {
+	return &proxyRegistry{
+		entries:    make(map[string]*proxyEntry),
+		pending:    make(map[string]struct{}),
+		lastErrors: make(map[string]string),
+		log:        log,
+	}
+}
+
+// isLocalHost returns true when node refers to the current machine, meaning no
+// SSH tunnel is needed (headless / same-node jobs).
+func isLocalHost(node string) bool {
+	if node == "localhost" || node == "127.0.0.1" || node == "::1" {
+		return true
+	}
+	if h, err := os.Hostname(); err == nil && h == node {
+		return true
+	}
+	return false
+}
+
+// Open creates (or returns existing) a reverse-proxy for the given helper using
+// a three-level fallback: direct TCP (same host or bindAll) → Go SSH → system ssh -W.
+// When bindAll is true the service binds to 0.0.0.0 and is reachable via direct TCP
+// from the login node — SSH tunnel is skipped entirely.
+// The SSH dial happens outside the registry lock so HTTP Get() calls are never
+// blocked by a slow or failing dial. Concurrent Open() calls for the same ID
+// are deduplicated via the pending set.
+func (r *proxyRegistry) Open(id, name, node string, port int, bindAll bool) {
+	r.mu.Lock()
+	if _, ok := r.entries[id]; ok {
+		r.mu.Unlock()
+		return
+	}
+	if _, ok := r.pending[id]; ok {
+		r.mu.Unlock()
+		return // another goroutine is already dialing
+	}
+	r.pending[id] = struct{}{}
+	r.mu.Unlock()
+
+	// Level 1: same-host or bind_all — direct TCP, no SSH needed.
+	// bind_all: service binds to 0.0.0.0 so the login node can reach it via TCP.
+	if bindAll || isLocalHost(node) {
+		addr := "127.0.0.1"
+		if bindAll && !isLocalHost(node) {
+			addr = node
+		}
+		target, _ := url.Parse(fmt.Sprintf("http://%s:%d", addr, port))
+		rp := newReverseProxy(target, nil, func() { r.Close(id) })
+
+		r.mu.Lock()
+		delete(r.pending, id)
+		if _, ok := r.entries[id]; !ok {
+			r.entries[id] = &proxyEntry{
+				rp: rp, name: name, node: node, port: port,
+			}
+			delete(r.lastErrors, id)
+			r.log.Debug("server: proxy direct TCP", "id", id, "port", port)
+		}
+		r.mu.Unlock()
+		return
+	}
+
+	// SSH dial happens outside the lock — may take up to 25 s on unreachable nodes.
+	// Level 2: Go SSH.
+	dial, stop, done, err := internalproxy.DialGoSSH(node)
+	var goSSHErr error
+	if err != nil {
+		goSSHErr = err
+		r.log.Debug("server: go-ssh failed", "node", node, "err", err)
+		r.log.Info("server: falling back to system ssh", "node", node)
+		// Level 3: system ssh -W fallback.
+		dial, stop, done, err = internalproxy.DialSystemSSH(node)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.pending, id)
+
+	if err != nil {
+		r.log.Warn("server: cannot open tunnel", "node", node, "id", id, "err", err)
+		if goSSHErr != nil {
+			r.lastErrors[id] = fmt.Sprintf("SSH to %s failed: %v", node, goSSHErr)
+		} else {
+			r.lastErrors[id] = fmt.Sprintf("SSH to %s failed: %v", node, err)
+		}
+		return
+	}
+	// Double-check: another goroutine may have opened it while we were dialing.
+	if _, already := r.entries[id]; already {
+		stop()
+		return
+	}
+
+	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
+	transport := &http.Transport{DialContext: dial}
+	rp := newReverseProxy(target, transport, func() { r.Close(id) })
+
+	// Watch for unexpected tunnel closure and clean up.
+	go func() {
+		<-done
+		r.Close(id)
+		stop()
+	}()
+
+	r.entries[id] = &proxyEntry{rp: rp, name: name, node: node, port: port}
+	delete(r.lastErrors, id)
+	r.log.Debug("server: proxy tunnel opened", "id", id, "node", node, "port", port)
+}
+
+// Close removes and discards the proxy entry for a helper.
+func (r *proxyRegistry) Close(id string) {
+	r.mu.Lock()
+	delete(r.entries, id)
+	delete(r.pending, id)
+	delete(r.lastErrors, id)
+	r.mu.Unlock()
+}
+
+// Get returns the proxy entry for a helper, or nil if not open.
+func (r *proxyRegistry) Get(id string) *proxyEntry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.entries[id]
+}
+
+// GetByName returns the oldest active proxy entry whose helper name matches,
+// or nil if none is open. Used for stable-name subdomain routing
+// (e.g. code-server.localhost → oldest running code-server instance).
+// IDs have the form "{name}-YYYYMMDD-HHMMSS", so the lexicographically smallest
+// ID is the oldest one; this ensures the name URL stays stable when a newer
+// instance starts alongside an existing one.
+func (r *proxyRegistry) GetByName(name string) *proxyEntry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var oldestID string
+	var oldest *proxyEntry
+	for id, entry := range r.entries {
+		if entry.name == name && (oldestID == "" || id < oldestID) {
+			oldestID = id
+			oldest = entry
+		}
+	}
+	return oldest
+}
+
+// LastError returns the most recent Open() failure reason for a helper, or "".
+func (r *proxyRegistry) LastError(id string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.lastErrors[id]
+}
+
+// serveSubdomainProxy handles requests to {id}.localhost:{port} by forwarding
+// to the helper's tunnel. The full request path is forwarded as-is — no URL
+// rewriting needed since the service is at the root of its own subdomain.
+// Lookup order: exact ID match first, then oldest active instance by name
+// (e.g. "code-server.localhost" → oldest running code-server).
+func (s *srv) serveSubdomainProxy(w http.ResponseWriter, r *http.Request, id string) {
+	entry := s.proxies.Get(id)
+	if entry == nil {
+		entry = s.proxies.GetByName(id)
+	}
+	if entry == nil {
+		msg := "no active tunnel for " + id
+		if reason := s.proxies.LastError(id); reason != "" {
+			msg += ": " + reason
+		}
+		http.Error(w, msg, http.StatusServiceUnavailable)
+		return
+	}
+	// Store the original frontend Host so ModifyResponse can rewrite Location
+	// headers that apps (e.g. RStudio) emit using their own bound address.
+	ctx := context.WithValue(r.Context(), origHostKey{}, r.Host)
+	entry.rp.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// isWebSocketUpgrade reports whether r is a WebSocket upgrade request.
+func isWebSocketUpgrade(req *http.Request) bool {
+	return strings.EqualFold(req.Header.Get("Upgrade"), "websocket")
+}
+
+// hostRewriteDirector returns a director func that rewrites req.Host and the
+// Origin header to the backend address. This prevents host-header and
+// WebSocket origin checks in apps like JupyterLab and code-server (which
+// reject requests whose Host/Origin doesn't match their bound address) from
+// blocking proxied requests that arrive with a subdomain Host header.
+func hostRewriteDirector(target *url.URL) func(*http.Request) {
+	std := httputil.NewSingleHostReverseProxy(target).Director
+	origin := "http://" + target.Host
+	return func(req *http.Request) {
+		originalHost := req.Host
+		// Run standard director (modifies req.URL, etc.)
+		std(req)
+		// X-Forwarded headers should be injected ONLY for normal HTTP requests.
+		// These are required by vscode-server on initial load so the correct client UI can be built.
+		// However, during WebSocket upgrades, the match between Origin and X-Forwarded-Host is strictly verified by code-server.
+		// Since the Origin is spoofed to 127.0.0.1 below, a mismatch and a 403/1006 error are caused if the real X-Forwarded-Host is passed.
+		if !isWebSocketUpgrade(req) {
+			req.Header.Set("X-Forwarded-Host", originalHost)
+			proto := req.Header.Get("X-Forwarded-Proto")
+			if proto == "" {
+				if req.TLS != nil {
+					proto = "https"
+				} else {
+					proto = "http"
+				}
+			}
+			req.Header.Set("X-Forwarded-Proto", proto)
+		}
+		// Overwrite the primary Host/Origin headers to satisfy backend binding checks.
+		req.Host = target.Host
+		if req.Header.Get("Origin") != "" {
+			req.Header.Set("Origin", origin)
+		}
+	}
+}
+
+// hostDispatch wraps the dashboard mux with subdomain-based proxy routing.
+// Requests to {id}.localhost:{port} are forwarded to the matching helper tunnel;
+// all other requests (localhost:{port}) are handled by the dashboard mux.
+func (s *srv) hostDispatch(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		// Safely strip port suffix, ignoring the error if no port exists.
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		// {id}.localhost → proxy to helper.
+		const suffix = ".localhost"
+		if strings.HasSuffix(host, suffix) {
+			id := host[:len(host)-len(suffix)]
+			if id != "" {
+				s.serveSubdomainProxy(w, r, id)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}

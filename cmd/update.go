@@ -15,6 +15,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/helper"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -81,11 +82,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if updateHelpScripts {
-		for _, url := range config.Global.ScriptsLinks {
-			utils.PrintMessage("Fetching helper script metadata from %s ...", url+"/metadata/helper-scripts.json.gz")
-		}
-		ForceRefreshHelpers = true
-		if _, err := GetAllRemoteHelperMetadata(); err != nil {
+		if _, err := helper.RefreshRemoteMetadata(cmd.Context(), true, os.Stdout); err != nil {
 			utils.PrintWarning("Failed to update helper script metadata: %v", err)
 		} else {
 			utils.PrintSuccess("Helper script metadata updated.")

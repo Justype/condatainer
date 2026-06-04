@@ -96,7 +96,7 @@ func runScheduler(cmd *cobra.Command, args []string) {
 	fmt.Printf("  Type:      %s\n", utils.StyleInfo(string(sched.GetType())))
 	fmt.Printf("  Binary:    %s\n", utils.StylePath(sched.GetBinary()))
 
-	if version := sched.GetVersion(); version != "" {
+	if version := sched.GetVersion(cmd.Context()); version != "" {
 		fmt.Printf("  Version:   %s\n", utils.StyleNumber(version))
 	}
 
@@ -118,7 +118,7 @@ func runScheduler(cmd *cobra.Command, args []string) {
 	}
 
 	// Try to get cluster info
-	clusterInfo, err := sched.GetClusterInfo()
+	clusterInfo, err := sched.GetClusterInfo(cmd.Context())
 	if err == nil && clusterInfo != nil {
 		// Build GPU map by partition
 		gpusByPartition := make(map[string][]scheduler.GpuInfo)

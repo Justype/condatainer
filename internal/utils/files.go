@@ -120,6 +120,39 @@ func IsYaml(path string) bool {
 
 // --- Filesystem Checks (OS-based) ---
 
+// FindEnvOverlay returns the first env.img found under wd using the standard
+// search order. At each location the user-specific variant (env-$USER.img) is
+// checked before the generic one:
+//
+//	{wd}/env-$USER.img → {wd}/env.img
+//	{wd}/overlay/env-$USER.img → {wd}/overlay/env.img
+//	{wd}/src/overlay/env-$USER.img → {wd}/src/overlay/env.img
+//
+// envImg may be an explicit path (returned as-is) or "" / "env.img" (triggers search).
+// Returns "" if nothing is found.
+func FindEnvOverlay(envImg, wd string) string {
+	if envImg != "" && envImg != "env.img" {
+		return envImg
+	}
+	base := wd
+	if base == "" {
+		base, _ = os.Getwd()
+	}
+	userSuffix := os.Getenv("USER")
+	dirs := []string{base, filepath.Join(base, "overlay"), filepath.Join(base, "src", "overlay")}
+	for _, dir := range dirs {
+		if userSuffix != "" {
+			if p := filepath.Join(dir, "env-"+userSuffix+".img"); FileExists(p) {
+				return p
+			}
+		}
+		if p := filepath.Join(dir, "env.img"); FileExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
 // FileExists checks if a file exists and is not a directory.
 func FileExists(path string) bool {
 	info, err := os.Stat(path)
@@ -176,6 +209,19 @@ func CanWriteToDir(dir string) bool {
 		return false
 	}
 	return unix.Access(dir, unix.W_OK|unix.X_OK) == nil
+}
+
+// CanWriteToExistingAncestor walks up the path until it finds an existing
+// directory and checks whether it is writable. Use this when dir may not exist
+// yet but will be created by MkdirAll — a non-existent dir is not read-only,
+// it just needs a writable parent.
+func CanWriteToExistingAncestor(dir string) bool {
+	for d := dir; d != filepath.Dir(d); d = filepath.Dir(d) {
+		if _, err := os.Stat(d); err == nil {
+			return unix.Access(d, unix.W_OK|unix.X_OK) == nil
+		}
+	}
+	return false
 }
 
 // --- Gzip JSON Helpers ---

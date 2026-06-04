@@ -10,13 +10,15 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// logParseWarning prints a parser diagnostic warning, except in a job.
+// logParseWarning logs a parser diagnostic warning, except in a job.
 func logParseWarning(format string, args ...any) {
 	if !IsInsideJob() {
-		utils.PrintWarning(format, args...)
+		slog.Default().Warn(fmt.Sprintf(format, args...))
 	}
 }
 
@@ -284,6 +286,10 @@ func writeJobHeader(w io.Writer, jobIDVar string, specs *ScriptSpecs, formatTime
 	// Set OMP_NUM_THREADS to the allocated CPUs per task if not already set by the scheduler.
 	if rs != nil && rs.CpusPerTask > 0 {
 		fmt.Fprintf(w, "export OMP_NUM_THREADS=${OMP_NUM_THREADS:-%d}\n", rs.CpusPerTask)
+	}
+	// Per-job proxy: start tunnel back to the submitting login node.
+	if specs != nil && specs.ProxyVia != "" {
+		fmt.Fprintf(w, "condatainer proxy start --via %s 2>/dev/null || true\n", specs.ProxyVia)
 	}
 }
 

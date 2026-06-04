@@ -2,10 +2,9 @@ package container
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strings"
-
-	"github.com/Justype/condatainer/internal/utils"
 )
 
 func splitKeyNote(content string) (string, string) {
@@ -21,10 +20,12 @@ func splitKeyNote(content string) (string, string) {
 	return content, ""
 }
 
-// CollectOverlayEnv reads .env files from overlay paths and returns environment configs and notes
-func CollectOverlayEnv(paths []string) (map[string]string, map[string]string) {
+// CollectOverlayEnv reads .env files from overlay paths and returns environment configs, notes,
+// and non-fatal diagnostics for callers to present or log.
+func CollectOverlayEnv(paths []string) (map[string]string, map[string]string, []Diagnostic) {
 	configs := map[string]string{}
 	notes := map[string]string{}
+	var diagnostics []Diagnostic
 
 	for _, overlay := range paths {
 		if overlay == "" {
@@ -37,7 +38,10 @@ func CollectOverlayEnv(paths []string) (map[string]string, map[string]string) {
 		file, err := os.Open(envPath)
 		if err != nil {
 			if !os.IsNotExist(err) {
-				utils.PrintWarning("Unable to read overlay env %s: %v", utils.StylePath(envPath), err)
+				diagnostics = append(diagnostics, Diagnostic{
+					Level:   "warn",
+					Message: fmt.Sprintf("Unable to read overlay env %s: %v", envPath, err),
+				})
 			}
 			continue
 		}
@@ -68,16 +72,21 @@ func CollectOverlayEnv(paths []string) (map[string]string, map[string]string) {
 				continue
 			}
 			if _, exists := configs[key]; exists {
-				utils.PrintMessage("Environment variable %s is defined in multiple overlays. Using value from %s.",
-					utils.StyleName(key), utils.StylePath(overlay))
+				diagnostics = append(diagnostics, Diagnostic{
+					Level:   "info",
+					Message: fmt.Sprintf("Environment variable %s is defined in multiple overlays. Using value from %s.", key, overlay),
+				})
 			}
 			configs[key] = value
 		}
 		if err := scanner.Err(); err != nil {
-			utils.PrintWarning("Failed to scan %s: %v", utils.StylePath(envPath), err)
+			diagnostics = append(diagnostics, Diagnostic{
+				Level:   "warn",
+				Message: fmt.Sprintf("Failed to scan %s: %v", envPath, err),
+			})
 		}
 		file.Close()
 	}
 
-	return configs, notes
+	return configs, notes, diagnostics
 }

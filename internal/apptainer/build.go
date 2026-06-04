@@ -3,11 +3,13 @@ package apptainer
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -44,11 +46,9 @@ func Build(ctx context.Context, imagePath, defFile string, opts *BuildOptions) e
 	// Add image path and definition file
 	args = append(args, imagePath, defFile)
 
-	utils.PrintDebug("Building container: %s %s",
-		utils.StylePath(imagePath),
-		utils.StyleInfo("from "+defFile))
+	logging.FromContext(ctx).Debug("building container", "image", imagePath, "definition", defFile)
 
-	return runApptainer(ctx, "build", imagePath, false, args...)
+	return runApptainerWithOutput(ctx, "build", imagePath, false, os.Stdin, os.Stdout, os.Stderr, args...)
 }
 
 // DumpSifToSquashfs extracts the SquashFS partition from a SIF image to a .sqfs file
@@ -74,8 +74,8 @@ func DumpSifToSquashfs(ctx context.Context, sifPath, outputPath string) error {
 	// Step 2: Parse output to find Squashfs/*System partition
 	var squashfsID int
 	found := false
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(string(output), "\n")
+	for line := range lines {
 		if strings.Contains(line, "Squashfs/*System") {
 			// Format: "ID|GROUP|LINK|SIF POSITION|TYPE|..."
 			// Example: "1|1|NONE|32768|Squashfs/*System|..."
@@ -101,11 +101,10 @@ func DumpSifToSquashfs(ctx context.Context, sifPath, outputPath string) error {
 		}
 	}
 
-	utils.PrintDebug("Found SquashFS partition ID %d in %s",
-		squashfsID, utils.StylePath(sifPath))
+	logging.FromContext(ctx).Debug("found SquashFS partition", "id", squashfsID, "sif", sifPath)
 
 	// Step 3: Dump SquashFS partition to output file
-	utils.PrintDebug("Dumping to SquashFS file at %s", utils.StylePath(outputPath))
+	logging.FromContext(ctx).Debug("dumping SquashFS", "output", outputPath)
 
 	// Create output file
 	outFile, err := utils.CreateFileWritable(outputPath)
@@ -117,7 +116,7 @@ func DumpSifToSquashfs(ctx context.Context, sifPath, outputPath string) error {
 	// Run: apptainer sif dump <id> <sifPath>
 	dumpCmd := exec.CommandContext(ctx, apptainerCmd, "sif", "dump", strconv.Itoa(squashfsID), sifPath)
 	dumpCmd.Stdout = outFile
-	dumpCmd.Stderr = os.Stderr
+	dumpCmd.Stderr = io.Discard
 
 	if err := dumpCmd.Run(); err != nil {
 		// Clean up partial file on error
@@ -137,6 +136,6 @@ func DumpSifToSquashfs(ctx context.Context, sifPath, outputPath string) error {
 		return fmt.Errorf("failed to set permissions on %s: %w", outputPath, err)
 	}
 
-	utils.PrintDebug("Dumped SquashFS to %s", utils.StylePath(outputPath))
+	logging.FromContext(ctx).Debug("dumped SquashFS", "output", outputPath)
 	return nil
 }

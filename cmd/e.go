@@ -5,8 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
+	"github.com/Justype/condatainer/cmd/internal/ui"
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
@@ -75,11 +77,9 @@ func init() {
 	eCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		// During completion, check if -- appears in os.Args
 		// This is more reliable than checking the processed args array
-		for _, arg := range os.Args {
-			if arg == "--" {
-				// After --, use default file completion
-				return nil, cobra.ShellCompDirectiveDefault
-			}
+		if slices.Contains(os.Args, "--") {
+			// After --, use default file completion
+			return nil, cobra.ShellCompDirectiveDefault
 		}
 		// Before --, complete overlays
 		return overlaySuggestions(true, true, toComplete)
@@ -99,29 +99,15 @@ func runE(cmd *cobra.Command, args []string) error {
 
 	// Auto-load env.img if not disabled and no .img in overlays
 	if !eNoAutoload {
-		hasImgOverlay := false
-		for _, overlay := range overlays {
-			if utils.IsImg(overlay) {
-				hasImgOverlay = true
-				break
-			}
-		}
+		hasImgOverlay := slices.ContainsFunc(overlays, utils.IsImg)
 		if !hasImgOverlay {
 			if pwd, err := os.Getwd(); err == nil {
-				candidates := []string{
-					filepath.Join(pwd, "env.img"),
-					filepath.Join(pwd, "overlay", "env.img"),
-					filepath.Join(pwd, "src", "overlay", "env.img"),
-				}
-				for _, candidate := range candidates {
-					if utils.FileExists(candidate) {
-						if err := overlay.CheckAvailable(candidate, false); err != nil {
-							utils.PrintWarning("env.img is in use, running without it")
-						} else {
-							utils.PrintNote("Autoload env.img at %s", utils.StylePath(candidate))
-							overlays = append(overlays, candidate)
-						}
-						break
+				if candidate := utils.FindEnvOverlay("", pwd); candidate != "" {
+					if err := overlay.CheckAvailable(candidate, false); err != nil {
+						utils.PrintWarning("%s is in use, running without it", filepath.Base(candidate))
+					} else {
+						utils.PrintNote("Autoload workspace overlay at %s", utils.StylePath(candidate))
+						overlays = append(overlays, candidate)
 					}
 				}
 			}
@@ -154,7 +140,12 @@ func runE(cmd *cobra.Command, args []string) error {
 		HidePrompt:     hidePrompt,
 	}
 
-	if err := exec.Run(cmd.Context(), options); err != nil {
+	plan, err := exec.Prepare(cmd.Context(), options)
+	if err != nil {
+		return err
+	}
+	ui.RenderExecPlan(plan)
+	if err := exec.RunPrepared(cmd.Context(), plan, exec.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 			return nil
 		}

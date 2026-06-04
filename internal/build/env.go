@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/container"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -134,10 +136,10 @@ func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath s
 	}
 
 	if err := os.Chmod(envFilePath, utils.PermFile); err != nil {
-		utils.PrintDebug("Failed to set permissions on %s: %v", envFilePath, err)
+		slog.Default().Debug("failed to set permissions on env file", "path", envFilePath, "err", err)
 	}
 
-	utils.PrintMessage("ENV file created at %s", utils.StylePath(envFilePath))
+	slog.Default().Info("ENV file created", "path", envFilePath)
 	return nil
 }
 

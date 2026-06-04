@@ -402,15 +402,12 @@ func printColumns(plain, styled []string, indent, termWidth int) {
 		}
 	}
 	colWidth := maxW + 2
-	numCols := (termWidth - indent) / colWidth
-	if numCols < 1 {
-		numCols = 1
-	}
+	numCols := max((termWidth - indent) / colWidth, 1)
 	numRows := (len(plain) + numCols - 1) / numCols
 	prefix := strings.Repeat(" ", indent)
-	for row := 0; row < numRows; row++ {
+	for row := range numRows {
 		fmt.Print(prefix)
-		for col := 0; col < numCols; col++ {
+		for col := range numCols {
 			idx := col*numRows + row
 			if idx >= len(plain) {
 				break
@@ -433,7 +430,7 @@ func readOverlayWhatis(overlayPath string) string {
 	if err != nil {
 		return ""
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if after, ok := strings.CutPrefix(strings.TrimSpace(line), "#WHATIS:"); ok {
 			return strings.TrimSpace(after)
 		}

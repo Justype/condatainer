@@ -4,9 +4,10 @@ import (
 	"context"
 	"strings"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/utils"
 )
 
 // StopOptions holds configuration for stopping an instance
@@ -36,7 +37,7 @@ func Stop(ctx context.Context, opts StopOptions) error {
 	if opts.All {
 		// Delete all state files when --all flag is used
 		if err := deleteAllStates(); err != nil {
-			utils.PrintDebug("[INSTANCE]Failed to delete all states: %v", err)
+			slog.Default().Debug("instance: failed to delete all states", "err", err)
 		}
 		return nil
 	}
@@ -47,12 +48,12 @@ func Stop(ctx context.Context, opts StopOptions) error {
 		if strings.ContainsAny(name, "*?[]") {
 			// Delete states matching the pattern
 			if err := deleteStatesMatching(name); err != nil {
-				utils.PrintDebug("[INSTANCE]Failed to delete states matching %s: %v", name, err)
+				slog.Default().Debug("instance: failed to delete states matching pattern", "pattern", name, "err", err)
 			}
 		} else {
 			// Delete specific instance state
 			if err := deleteState(name); err != nil {
-				utils.PrintDebug("[INSTANCE]Failed to delete state for %s: %v", name, err)
+				slog.Default().Debug("instance: failed to delete state", "name", name, "err", err)
 			}
 		}
 	}

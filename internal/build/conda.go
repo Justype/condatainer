@@ -9,6 +9,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -21,7 +22,7 @@ import (
 //  5. Cleanup
 func (b *BuildObject) buildConda(ctx context.Context) error {
 	targetPath, finalPath := buildOverlayPaths(b)
-	styledOverlay := utils.StyleName(filepath.Base(targetPath))
+	log := logging.FromContext(ctx)
 
 	if skip, err := checkShouldBuild(b); skip || err != nil {
 		return err
@@ -32,7 +33,7 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 	}
 	defer b.removeBuildLock()
 
-	utils.PrintMessage("Building overlay %s (%s build)", styledOverlay, utils.StyleAction(buildModeLabel(b)))
+	log.Info("building overlay", "overlay", filepath.Base(targetPath), "mode", buildModeLabel(b))
 
 	if err := prepareBuildWorkspace(ctx, b, config.Global.Build.UseTmpOverlay); err != nil {
 		return err
@@ -44,7 +45,7 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 	}
 
 	if err := os.Chmod(finalPath, utils.PermFile); err != nil {
-		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
+		log.Debug("failed to set permissions", "path", finalPath, "err", err)
 	}
 
 	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
@@ -53,7 +54,7 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 
 	b.saveCondaEnvFile(targetPath)
 
-	utils.PrintSuccess("Finished overlay %s", utils.StylePath(targetPath))
+	log.Info("overlay ready", "kind", "success", "path", targetPath)
 	b.Cleanup(false)
 	return nil
 }
@@ -85,8 +86,6 @@ func (b *BuildObject) buildInstallCmd() (cmd string, extraBindPaths []string, er
 		extraBindPaths = []string{filepath.Dir(absFilePath)}
 		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp %s -y %s -p /cnt/%s -f %s",
 			channelFlags, quietFlag, b.nameVersion, absFilePath)
-		utils.PrintMessage("Populating overlay %s via %s",
-			utils.StyleName(filepath.Base(b.targetOverlayPath)), "environment.yml")
 	} else if b.buildSource != "" {
 		// Mode 2: Multiple packages (-n name pkg1 pkg2 ...)
 		packages := strings.Split(b.buildSource, ",")
@@ -95,16 +94,10 @@ func (b *BuildObject) buildInstallCmd() (cmd string, extraBindPaths []string, er
 		}
 		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp %s -y %s -p /cnt/%s %s",
 			channelFlags, quietFlag, b.nameVersion, strings.Join(packages, " "))
-		utils.PrintMessage("Populating overlay %s via %s",
-			utils.StyleName(filepath.Base(b.targetOverlayPath)),
-			fmt.Sprintf("micromamba (%s)", strings.Join(packages, ", ")))
 	} else {
 		// Mode 1: Single package (name/version)
 		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp %s -y %s -p /cnt/%s %s=%s",
 			channelFlags, quietFlag, b.nameVersion, b.packageName, b.packageVersion)
-		utils.PrintMessage("Populating overlay %s via %s",
-			utils.StyleName(filepath.Base(b.targetOverlayPath)),
-			fmt.Sprintf("micromamba (%s=%s)", b.packageName, b.packageVersion))
 	}
 
 	return cmd, extraBindPaths, nil
@@ -191,13 +184,12 @@ func (b *BuildObject) runCondaBuild(ctx context.Context, finalPath string) error
 		return err
 	}
 
-	utils.PrintDebug("[BUILD] Creating overlay for %s with options: overlays=%v, bindPaths=%v",
-		b.nameVersion, opts.Overlays, opts.BindPaths)
+	logging.FromContext(ctx).Debug("creating overlay", "name", b.nameVersion, "overlays", opts.Overlays, "bindPaths", opts.BindPaths)
 
 	done := watchContext(ctx, "conda build")
 	defer close(done)
 
-	if err := exec.Run(ctx, opts); err != nil {
+	if err := exec.Run(ctx, opts, exec.IOFromContext(ctx)); err != nil {
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
 		}

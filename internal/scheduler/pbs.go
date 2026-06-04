@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -122,11 +123,20 @@ func newPbsSchedulerWithBinary(qsubBin string) (*PbsScheduler, error) {
 	}, nil
 }
 
+// JobIDVar returns the name of the PBS job ID environment variable.
+func (p *PbsScheduler) JobIDVar() string { return "PBS_JOBID" }
+
 // GetCurrentJobID returns the PBS job ID of the currently running job, or "".
-func (p *PbsScheduler) GetCurrentJobID() string { return os.Getenv("PBS_JOBID") }
+func (p *PbsScheduler) GetCurrentJobID() string { return os.Getenv(p.JobIDVar()) }
+
+// JobIDEnvExpr strips the server suffix (e.g. "123.server" → "123") present on some PBS clusters.
+func (p *PbsScheduler) JobIDEnvExpr() string { return "${" + p.JobIDVar() + "%%.*}" }
+
+// TmpDirVar returns the name of the PBS per-job node-local tmpdir env var.
+func (p *PbsScheduler) TmpDirVar() string { return "PBS_TMPDIR" }
 
 // GetTmpDir returns the PBS node-local tmp directory for the current job, or "".
-func (p *PbsScheduler) GetTmpDir() string { return os.Getenv("PBS_TMPDIR") }
+func (p *PbsScheduler) GetTmpDir() string { return os.Getenv(p.TmpDirVar()) }
 
 // IsAvailable checks if the PBS binary is present on this system.
 func (p *PbsScheduler) IsAvailable() bool {
@@ -143,11 +153,11 @@ func (p *PbsScheduler) GetType() SchedulerType { return SchedulerPBS }
 func (p *PbsScheduler) GetBinary() string      { return p.qsubBin }
 
 // GetVersion returns the PBS version string, or "" on failure.
-func (p *PbsScheduler) GetVersion() string {
+func (p *PbsScheduler) GetVersion(ctx context.Context) string {
 	if p.qsubBin == "" {
 		return ""
 	}
-	version, err := p.getPbsVersion()
+	version, err := p.getPbsVersion(ctx)
 	if err != nil {
 		return ""
 	}
@@ -155,8 +165,8 @@ func (p *PbsScheduler) GetVersion() string {
 }
 
 // getPbsVersion attempts to get the PBS version
-func (p *PbsScheduler) getPbsVersion() (string, error) {
-	output, err := runCommand("PBS", "get-version", p.qsubBin, "--version")
+func (p *PbsScheduler) getPbsVersion(ctx context.Context) (string, error) {
+	output, err := runCommand(ctx, "PBS", "get-version", p.qsubBin, "--version")
 	if err != nil {
 		return "", err
 	}
@@ -690,8 +700,8 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	fmt.Fprintln(writer, "")
 	writeJobFooter(writer, "$PBS_JOBID")
 
-	// Self-delete the script after execution (unless in debug mode)
-	if !debugMode {
+	// Self-delete the script after execution (unless in debug mode or KeepScript)
+	if !debugMode && !jobSpec.KeepScript {
 		fmt.Fprintf(writer, "rm -f %s\n", scriptPath)
 	}
 
@@ -738,7 +748,7 @@ func buildPbsDepFlag(deps []Dependency) string {
 	return fmt.Sprintf("-W depend=%s", strings.Join(parts, ","))
 }
 
-func (p *PbsScheduler) Submit(scriptPath string, deps []Dependency) (string, error) {
+func (p *PbsScheduler) Submit(ctx context.Context, scriptPath string, deps []Dependency) (string, error) {
 	args := []string{scriptPath}
 
 	// Add dependency flag if provided
@@ -747,7 +757,7 @@ func (p *PbsScheduler) Submit(scriptPath string, deps []Dependency) (string, err
 	}
 
 	// Execute qsub
-	output, err := runCommand("PBS", "submit", p.qsubBin, args...)
+	output, err := runCommand(ctx, "PBS", "submit", p.qsubBin, args...)
 	if err != nil {
 		return "", NewSubmissionError("PBS", filepath.Base(scriptPath), string(output), err)
 	}
@@ -763,7 +773,7 @@ func (p *PbsScheduler) Submit(scriptPath string, deps []Dependency) (string, err
 
 // GetClusterInfo retrieves cluster configuration (GPUs, limits)
 // Returns nil if information is not available
-func (p *PbsScheduler) GetClusterInfo() (*ClusterInfo, error) {
+func (p *PbsScheduler) GetClusterInfo(ctx context.Context) (*ClusterInfo, error) {
 	if p.cachedClusterInfo != nil {
 		return p.cachedClusterInfo, nil
 	}
@@ -810,7 +820,7 @@ func (p *PbsScheduler) GetClusterInfo() (*ClusterInfo, error) {
 // getNodeInfoByQueue queries PBS for node CPU/mem and GPU info in a single pbsnodes -a call.
 // Returns per-queue max CPU/mem and a GPU list.
 func (p *PbsScheduler) getNodeInfoByQueue() (map[string]ResourceLimits, []GpuInfo, error) {
-	output, err := runCommand("PBS", "query-node-info", p.pbsnodesBin, "-a")
+	output, err := runCommand(context.Background(), "PBS", "query-node-info", p.pbsnodesBin, "-a")
 	if err != nil {
 		return nil, nil, NewClusterError("PBS", "query node info", err)
 	}
@@ -926,7 +936,7 @@ func (p *PbsScheduler) getNodeInfoByQueue() (map[string]ResourceLimits, []GpuInf
 // getQueueLimits queries PBS for queue resource limits using qstat -Qf.
 // nodeInfo (from getNodeInfoByQueue) provides actual node CPU/mem maxima per queue.
 func (p *PbsScheduler) getQueueLimits(nodeInfo map[string]ResourceLimits, gpuInfo []GpuInfo) ([]ResourceLimits, error) {
-	output, err := runCommand("PBS", "query-queues", p.qstatBin, "-Qf")
+	output, err := runCommand(context.Background(), "PBS", "query-queues", p.qstatBin, "-Qf")
 	if err != nil {
 		return nil, NewClusterError("PBS", "query queues", err)
 	}
@@ -1125,11 +1135,11 @@ func (s *PbsScheduler) GetJobResources() *ResourceSpec {
 
 // GetJobStatus returns the current status of the given PBS job ID.
 // Uses qstat -f; returns JobStatusUnknown conservatively when qstat is unavailable or times out.
-func (p *PbsScheduler) GetJobStatus(jobID string) (JobStatus, error) {
+func (p *PbsScheduler) GetJobStatus(ctx context.Context, jobID string) (JobStatus, error) {
 	if p.qstatBin == "" {
 		return JobStatusUnknown, nil // conservative: can't check
 	}
-	out, err := runCommand("PBS", "job-status", p.qstatBin, "-f", jobID)
+	out, err := runCommand(ctx, "PBS", "job-status", p.qstatBin, "-f", jobID)
 	if err != nil {
 		// qstat exits non-zero when job ID is unknown or finished.
 		if _, ok := err.(*TimeoutError); ok {
@@ -1151,6 +1161,23 @@ func (p *PbsScheduler) GetJobStatus(jobID string) (JobStatus, error) {
 		}
 	}
 	return JobStatusUnknown, nil
+}
+
+// CancelJob cancels the PBS job with the given ID using qdel.
+// Returns nil if the job is already gone.
+func (p *PbsScheduler) CancelJob(ctx context.Context, jobID string) error {
+	qdelBin := siblingBin(p.qsubBin, "qdel")
+	if qdelBin == "" {
+		return fmt.Errorf("qdel not found")
+	}
+	_, err := runCommand(ctx, "PBS", "cancel-job", qdelBin, jobID)
+	if err != nil {
+		if _, ok := err.(*TimeoutError); ok {
+			return err
+		}
+		return nil // qdel exits non-zero for already-gone jobs
+	}
+	return nil
 }
 
 // TryParsePbsScript attempts to parse a PBS script without requiring PBS binaries.

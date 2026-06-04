@@ -55,8 +55,8 @@ The Go SSH client sends a `keepalive@openssh.com` request every 60 s to prevent 
 
 ```go
 proxy.GetJobProxy() (string, bool)                   // cached; returns "", false on login nodes
-proxy.FindActiveProxy(autostart bool) (string, bool) // per-job → shared → auto-start
-proxy.ResolveViaHost(flagVia string) (string, error) // --via > CNT_PROXY_VIA > error
+proxy.FindActiveProxy() (string, bool)               // per-job → shared
+proxy.ResolveViaHost(flagVia string) (string, error) // --via flag, or error if missing
 proxy.StartOnNode(host, via string, port int) error  // SSH delegation; waits for NFS PID file
 proxy.ProxyAlive(host string, port int) bool         // TCP dial, 500ms timeout
 proxy.RunDaemon(sshDest string, port int, localOnly bool, reportFd int) error
@@ -71,14 +71,10 @@ no-ops on login nodes. Used by `internal/exec/run.go` (container env vars) and
 
 ## Daemon Readiness Protocol
 
-`proxy start` and `autoStartLocalProxy` use an `os.Pipe` to synchronise with the daemon:
+`proxy start` uses an `os.Pipe` to synchronise with the daemon:
 
 1. Parent creates `(pr, pw)`, passes `pw` as `ExtraFiles[0]` (fd 3 in daemon) and `--report-fd 3`
 2. Daemon closes `pw` (EOF) once tunnel is up and PID file is written → success
 3. Daemon writes an error message before closing → startup failed, surfaced to user
 4. Parent blocks on `io.ReadAll(pr)` — no polling needed
 
-## CNT_PROXY_VIA
-
-Baked at job submission time by `condatainer build`/`run` using `os.Hostname()` on the login node.
-Used by `ResolveViaHost` so compute nodes know which login node to tunnel through.

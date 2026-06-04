@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 
+	"github.com/Justype/condatainer/cmd/internal/ui"
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
@@ -94,7 +95,12 @@ func runExec(cmd *cobra.Command, args []string) error {
 		HidePrompt:     hidePrompt,
 	}
 
-	if err := exec.Run(cmd.Context(), options); err != nil {
+	plan, err := exec.Prepare(cmd.Context(), options)
+	if err != nil {
+		return err
+	}
+	ui.RenderExecPlan(plan)
+	if err := exec.RunPrepared(cmd.Context(), plan, exec.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 			return nil
 		}

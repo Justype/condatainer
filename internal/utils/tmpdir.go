@@ -29,7 +29,7 @@ func EnsureTmpSubdir(dir string) error {
 // Priority:
 //  1. CNT_TMPDIR (explicit override)
 //  2. Scheduler-specific local node storage: SLURM_TMPDIR, PBS_TMPDIR, LSF_TMPDIR, _CONDOR_SCRATCH_DIR
-//  3. Common tmp env vars: TMPDIR, TEMP, TMP
+//  3. TMPDIR (POSIX standard)
 //  4. /tmp (always available)
 //
 // Always appends cnt-$USER to avoid collisions between users.
@@ -52,11 +52,9 @@ func GetTmpDir() string {
 		}
 	}
 
-	// Priority 3: common tmp env vars
-	for _, env := range []string{"TMPDIR", "TEMP", "TMP"} {
-		if v := os.Getenv(env); v != "" {
-			return filepath.Join(v, sub)
-		}
+	// Priority 3: POSIX standard tmp dir
+	if v := os.Getenv("TMPDIR"); v != "" {
+		return filepath.Join(v, sub)
 	}
 
 	return filepath.Join("/tmp", sub)

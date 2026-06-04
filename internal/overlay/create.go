@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -38,14 +39,12 @@ type CreateOptions struct {
 
 var (
 	// ProfileSmall is tuned for environments with many small files (Conda packages, Python/site-packages).
-	// 1 inode per 4KB keeps metadata lean so you don't hit inode exhaustion inside Conda envs.
 	ProfileSmall = Profile{InodeRatio: 4096, ReservedPerc: 3}
 
 	// ProfileDefault is a general-purpose profile (Linux default 16K).
-	// 1 inode per 16KB balances metadata and data for typical workloads.
 	ProfileDefault = Profile{InodeRatio: 16384, ReservedPerc: 3}
+
 	// ProfileLarge is optimized for large files (genomes, FASTA, databases).
-	// 1 inode per 1MB drastically lowers metadata pressure for huge single files.
 	ProfileLarge = Profile{InodeRatio: 1048576, ReservedPerc: 3}
 )
 
@@ -93,6 +92,7 @@ func typeLabel(opts *CreateOptions) string {
 // createOverlayFile runs dd + mke2fs + debugfs to build a raw overlay at filePath.
 // sparse controls whether dd creates a sparse file (fast, saves local space) or a fully-allocated one.
 func createOverlayFile(ctx context.Context, opts *CreateOptions, filePath string, sparse bool) error {
+	log := logging.FromContext(ctx)
 	cleanup := func() { os.Remove(filePath) }
 
 	// 1. Create raw file (dd)
@@ -129,21 +129,28 @@ func createOverlayFile(ctx context.Context, opts *CreateOptions, filePath string
 
 	cmd := exec.CommandContext(ctx, "debugfs", "-w", filePath)
 	cmd.Stdin = strings.NewReader(script.String())
-	output, execErr := cmd.CombinedOutput()
-	if execErr != nil {
+	var debugBuf bytes.Buffer
+	if w := logging.WriterFromCtx(ctx); w != nil {
+		cmd.Stdout = w
+		cmd.Stderr = w
+	} else {
+		cmd.Stdout = &debugBuf
+		cmd.Stderr = &debugBuf
+	}
+	if execErr := cmd.Run(); execErr != nil {
 		cleanup()
 		return &Error{
 			Op:      "inject structure",
 			Path:    opts.Path,
 			Tool:    "debugfs",
-			Output:  string(output),
+			Output:  debugBuf.String(),
 			BaseErr: execErr,
 		}
 	}
 
 	// 4. Set permissions
 	if err := os.Chmod(filePath, utils.PermFile); err != nil {
-		utils.PrintDebug("Failed to set permissions on overlay: %v", err)
+		log.Debug(fmt.Sprintf("failed to set permissions on overlay: %v", err))
 	}
 
 	return nil
@@ -184,14 +191,11 @@ func crossFsCopy(ctx context.Context, src, dst string, sparse bool) error {
 	case <-ctx.Done():
 		cmd.Process.Kill() //nolint:errcheck
 		os.Remove(dst)     //nolint:errcheck
-		// Don't wait for cmd.Wait() — on network filesystems the killed process
-		// may stay in D-state (uninterruptible I/O) for an unknown duration.
 		return ctx.Err()
 	}
 
-	// cp applies umask when creating the destination — enforce the expected permission explicitly.
 	if err := os.Chmod(dst, utils.PermFile); err != nil {
-		utils.PrintDebug("Failed to set permissions on overlay: %v", err)
+		logging.FromContext(ctx).Debug(fmt.Sprintf("failed to set permissions on overlay: %v", err))
 	}
 	return nil
 }
@@ -201,7 +205,6 @@ func crossFsCopy(ctx context.Context, src, dst string, sparse bool) error {
 // back to crossFsCopy which uses cp and is context-cancellable (Ctrl+C works).
 // Returns (copied=true) when a copy was performed, (copied=false) when renamed.
 func moveFile(ctx context.Context, src, dst string, sparse bool) (copied bool, err error) {
-	// Ensure the destination directory exists.
 	if err := os.MkdirAll(filepath.Dir(dst), utils.PermDir); err != nil {
 		return false, fmt.Errorf("create destination directory: %w", err)
 	}
@@ -212,7 +215,6 @@ func moveFile(ctx context.Context, src, dst string, sparse bool) (copied bool, e
 		return false, fmt.Errorf("rename %s → %s: %w", src, dst, err)
 	}
 
-	// Cross-filesystem: use cp subprocess (context-cancellable).
 	if err := crossFsCopy(ctx, src, dst, sparse); err != nil {
 		return false, err
 	}
@@ -225,40 +227,31 @@ func moveFile(ctx context.Context, src, dst string, sparse bool) (copied bool, e
 // ---------------------------------------------------------
 
 // MoveOverlayCopied moves src to dst and reports whether a copy was performed.
-// sparse=true preserves holes (space-efficient, slightly slower);
-// sparse=false materialises all zeros via io.Copy (fully allocated, faster sequential write).
-// Returns copied=true when a cross-filesystem copy was done, copied=false when os.Rename was used.
 func MoveOverlayCopied(ctx context.Context, src, dst string, sparse bool) (copied bool, err error) {
 	return moveFile(ctx, src, dst, sparse)
 }
 
 // AllocateOverlay pre-allocates disk blocks for a sparse overlay file using fallocate.
-// After a cross-filesystem move the file is already allocated (io.Copy fills holes);
-// after a same-filesystem rename it may still be sparse — fallocate handles both cases efficiently.
-// A warning is printed if fallocate is unavailable; the overlay remains functional but sparse.
 func AllocateOverlay(ctx context.Context, path string, sizeMB int) {
-	utils.PrintMessage("Allocating %s MB at %s", utils.StyleNumber(sizeMB), utils.StylePath(path))
+	log := logging.FromContext(ctx)
+	log.Info(fmt.Sprintf("allocating %d MiB at %s", sizeMB, path))
 	cmd := exec.CommandContext(ctx, "fallocate", "-l", fmt.Sprintf("%dM", sizeMB), path)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		utils.PrintWarning("fallocate failed, overlay may be sparse: %s", strings.TrimSpace(string(output)))
+		log.Warn(fmt.Sprintf("fallocate failed, overlay may be sparse: %s", strings.TrimSpace(string(output))))
 	}
 }
 
 // CreateInTmp builds the overlay at a local temp path and returns that path.
 // The overlay is always created sparse to minimize local disk usage.
-// The caller is responsible for:
-//   - Running any additional initialization (e.g. conda init) on the returned tmp path.
-//   - Calling MoveOverlay to move the file to its final destination.
-//   - Calling AllocateOverlay if the final overlay should be fully allocated (not sparse).
-//   - Removing the temp file on error.
+// The caller is responsible for running additional init, moving to final destination,
+// and calling AllocateOverlay if needed. The caller must remove the temp file on error.
 func CreateInTmp(ctx context.Context, opts *CreateOptions) (tmpPath string, err error) {
 	tmpPath, err = createAtTmp(ctx, opts)
 	return
 }
 
 // createAtTmp builds the overlay at a local temp path under utils.GetTmpDir() and returns
-// that path. The overlay is always created sparse to minimize local disk usage.
-// The caller owns the file and must move it or remove it.
+// that path. Always created sparse to minimize local disk usage.
 func createAtTmp(ctx context.Context, opts *CreateOptions) (tmpPath string, err error) {
 	if err := validateOpts(opts); err != nil {
 		return "", err
@@ -269,10 +262,8 @@ func createAtTmp(ctx context.Context, opts *CreateOptions) (tmpPath string, err 
 	}
 
 	label := typeLabel(opts)
+	log := logging.FromContext(ctx)
 
-	// Prepare local tmp path.
-	// EnsureTmpSubdir uses 0700 when the parent is world-writable (/tmp),
-	// and PermDir (0775) for private scheduler job dirs.
 	tmpDir := utils.GetTmpDir()
 	if err := utils.EnsureTmpSubdir(tmpDir); err != nil {
 		return "", fmt.Errorf("failed to create tmp dir %s: %w", tmpDir, err)
@@ -280,16 +271,12 @@ func createAtTmp(ctx context.Context, opts *CreateOptions) (tmpPath string, err 
 	tmpPath = filepath.Join(tmpDir, filepath.Base(opts.Path))
 
 	if !opts.Quiet {
-		utils.PrintMessage("Creating %soverlay %s", utils.StyleInfo(label), utils.StylePath(opts.Path))
-		utils.PrintMessage("Size %s MB | Filesystem %s | Profile Inode Ratio %s Reserved %s%%",
-			utils.StyleNumber(opts.SizeMB), utils.StyleInfo(opts.FilesystemType),
-			utils.StyleNumber(opts.Profile.InodeRatio),
-			utils.StyleNumber(opts.Profile.ReservedPerc))
-		utils.PrintMessage("Building at local tmp: %s", utils.StylePath(tmpPath))
+		log.Info(fmt.Sprintf("creating %soverlay %s", label, opts.Path))
+		log.Info(fmt.Sprintf("size %d MiB | filesystem %s | inode ratio %d | reserved %d%%",
+			opts.SizeMB, opts.FilesystemType, opts.Profile.InodeRatio, opts.Profile.ReservedPerc))
+		log.Info(fmt.Sprintf("building at local tmp: %s", tmpPath))
 	}
 
-	// Always create sparse in tmp to save local disk space.
-	// If the final overlay must be allocated, call AllocateOverlay after MoveOverlay.
 	if err := createOverlayFile(ctx, opts, tmpPath, true); err != nil {
 		utils.RemoveDirIfEmpty(tmpDir)
 		return "", err
@@ -299,8 +286,6 @@ func createAtTmp(ctx context.Context, opts *CreateOptions) (tmpPath string, err 
 }
 
 // CreateDirectly builds the overlay at opts.Path without using a local tmp directory.
-// The overlay is created with opts.Sparse as-is (no deferred allocation step).
-// Use this when the target filesystem is fast (e.g. local SSD via --no-tmp).
 func CreateDirectly(ctx context.Context, opts *CreateOptions) error {
 	if err := validateOpts(opts); err != nil {
 		return err
@@ -315,27 +300,26 @@ func CreateDirectly(ctx context.Context, opts *CreateOptions) error {
 	}
 
 	label := typeLabel(opts)
+	log := logging.FromContext(ctx)
 
 	if !opts.Quiet {
-		utils.PrintMessage("Creating %soverlay %s", utils.StyleInfo(label), utils.StylePath(opts.Path))
-		utils.PrintMessage("Size %s MB | Filesystem %s | Profile Inode Ratio %s Reserved %s%%",
-			utils.StyleNumber(opts.SizeMB), utils.StyleInfo(opts.FilesystemType),
-			utils.StyleNumber(opts.Profile.InodeRatio),
-			utils.StyleNumber(opts.Profile.ReservedPerc))
+		log.Info(fmt.Sprintf("creating %soverlay %s", label, opts.Path))
+		log.Info(fmt.Sprintf("size %d MiB | filesystem %s | inode ratio %d | reserved %d%%",
+			opts.SizeMB, opts.FilesystemType, opts.Profile.InodeRatio, opts.Profile.ReservedPerc))
 	}
 
 	if err := createOverlayFile(ctx, opts, opts.Path, opts.Sparse); err != nil {
 		return err
 	}
 
-	utils.PrintSuccess("Created %soverlay %s", utils.StyleInfo(label), utils.StylePath(opts.Path))
+	log.Info(fmt.Sprintf("created %soverlay %s", label, opts.Path), "kind", "success")
 	return nil
 }
 
 // CreateWithOptions builds the overlay at a local tmp path and moves it to opts.Path.
 // If opts.Sparse is false, AllocateOverlay is called after the move to fill sparse holes.
 // For cases where additional work must happen before the final move (e.g. conda init),
-// use CreateInTmp + MoveOverlay + AllocateOverlay instead.
+// use CreateInTmp + MoveOverlayCopied + AllocateOverlay instead.
 func CreateWithOptions(ctx context.Context, opts *CreateOptions) error {
 	tmpPath, err := createAtTmp(ctx, opts)
 	if err != nil {
@@ -343,9 +327,8 @@ func CreateWithOptions(ctx context.Context, opts *CreateOptions) error {
 	}
 
 	label := typeLabel(opts)
+	log := logging.FromContext(ctx)
 
-	// When tmpPath == opts.Path the overlay was created directly at the final location
-	// (opts.Path is already inside the tmp dir). Skip the move and do not remove the file.
 	if tmpPath != opts.Path {
 		defer func() {
 			os.Remove(tmpPath)
@@ -353,21 +336,18 @@ func CreateWithOptions(ctx context.Context, opts *CreateOptions) error {
 		}()
 
 		if !opts.Quiet {
-			utils.PrintMessage("Moving overlay to %s", utils.StylePath(opts.Path))
+			log.Info(fmt.Sprintf("moving overlay to %s", opts.Path))
 		}
 		copied, err := moveFile(ctx, tmpPath, opts.Path, opts.Sparse)
 		if err != nil {
 			return fmt.Errorf("failed to install overlay: %w", err)
 		}
 
-		// Allocate space only if not sparse and io.Copy was not used.
-		// When io.Copy was used (cross-filesystem), all zero-bytes were already written physically
-		// so the destination is fully allocated — fallocate is unnecessary and may not be supported.
 		if !opts.Sparse && !copied {
 			AllocateOverlay(ctx, opts.Path, opts.SizeMB)
 		}
 	}
 
-	utils.PrintSuccess("Created %soverlay %s", utils.StyleInfo(label), utils.StylePath(opts.Path))
+	log.Info(fmt.Sprintf("created %soverlay %s", label, opts.Path), "kind", "success")
 	return nil
 }

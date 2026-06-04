@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"context"
 	"io"
 
 	"github.com/Justype/condatainer/internal/config"
@@ -15,19 +16,41 @@ type Options struct {
 	ApptainerFlags []string // Flags to pass directly to apptainer (e.g., --home=/path, --nv)
 	Fakeroot       bool
 	WritableImg    bool
-	Stdout         io.Writer // Redirect container stdout (nil = os.Stdout)
-	Stderr         io.Writer // Redirect container stderr (nil = os.Stderr)
 	HidePrompt     bool
 
 	BaseImage    string
 	ApptainerBin string
 
-	// PassThruStdin allows the container command to read from stdin
-	// This is needed for build scripts that require interactive input (download links, passwords, etc.)
+	// PassThruStdin is retained for callers that track whether stdin is expected.
+	// Actual stdin is owned by IO.Stdin so internal execution never assumes a terminal.
 	PassThruStdin bool
+}
 
-	// Stdin specifies a custom input reader (optional, defaults to os.Stdin if PassThruStdin=true)
-	Stdin io.Reader
+// IO contains caller-owned process streams. Nil streams are silent/no input.
+type IO struct {
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+type ioContextKey struct{}
+
+// WithIO returns a context carrying caller-owned process streams.
+func WithIO(ctx context.Context, ioStreams IO) context.Context {
+	return context.WithValue(ctx, ioContextKey{}, ioStreams)
+}
+
+// IOFromContext returns caller-owned process streams from ctx, if present.
+func IOFromContext(ctx context.Context) IO {
+	if ioStreams, ok := ctx.Value(ioContextKey{}).(IO); ok {
+		return ioStreams
+	}
+	return IO{}
+}
+
+// IsZero reports whether no streams are set.
+func (ioStreams IO) IsZero() bool {
+	return ioStreams.Stdin == nil && ioStreams.Stdout == nil && ioStreams.Stderr == nil
 }
 
 func (o Options) ensureDefaults() Options {

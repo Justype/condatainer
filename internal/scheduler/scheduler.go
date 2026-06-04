@@ -2,6 +2,7 @@
 package scheduler
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -197,6 +198,10 @@ type ScriptSpecs struct {
 	RawFlags       []string      // ALL original directives — immutable audit log
 	RemainingFlags []string      // Directives not absorbed by Spec or Control
 	ScriptType     SchedulerType // Scheduler type detected from script directives
+	// ProxyVia, when non-empty, causes writeJobHeader to emit
+	// "condatainer proxy start --via <host>" at the top of the job body.
+	// Set by callers when proxy_perjob=true.
+	ProxyVia string
 }
 
 // ResolvePath returns path resolved against WorkDir when the path is relative.
@@ -241,7 +246,7 @@ func IsPassthrough(specs *ScriptSpecs) bool {
 var specDefaults = ResourceSpec{
 	Ntasks:       1,
 	CpusPerTask:  1,
-	MemPerNodeMB: 1024,
+	MemPerNodeMB: 2048,
 	Time:         2 * time.Hour,
 }
 
@@ -323,6 +328,7 @@ type JobSpec struct {
 	Metadata       map[string]string // Additional metadata: ScriptPath, BuildSource, etc.
 	OverrideOutput bool              // If true, always set Stdout/Stderr from Name (ignores script directives)
 	Array          *ArraySpec        // Non-nil → emit array job directives
+	KeepScript     bool              // If true, skip self-removal of the generated script after execution
 }
 
 // Scheduler defines the interface for job schedulers
@@ -344,11 +350,11 @@ type Scheduler interface {
 
 	// Submit submits a job script with optional typed dependency list.
 	// Returns the job ID assigned by the scheduler.
-	Submit(scriptPath string, deps []Dependency) (string, error)
+	Submit(ctx context.Context, scriptPath string, deps []Dependency) (string, error)
 
 	// GetClusterInfo retrieves cluster configuration (GPUs, limits)
 	// Returns nil if information is not available
-	GetClusterInfo() (*ClusterInfo, error)
+	GetClusterInfo(ctx context.Context) (*ClusterInfo, error)
 
 	// GetType returns the scheduler type.
 	GetType() SchedulerType
@@ -358,7 +364,7 @@ type Scheduler interface {
 
 	// GetVersion runs the scheduler version command and returns the version string.
 	// Returns "" on failure. This is slow — only call when the result will be displayed.
-	GetVersion() string
+	GetVersion(ctx context.Context) string
 
 	// GetJobResources reads allocated resources from scheduler environment variables.
 	// Fields with value 0 were not exposed by the scheduler.
@@ -368,17 +374,38 @@ type Scheduler interface {
 	// GetJobStatus returns the current status of the given job ID.
 	// Returns JobStatusUnknown conservatively when the status cannot be determined
 	// (tool unavailable, timeout). Returns JobStatusDone when definitely absent.
-	GetJobStatus(jobID string) (JobStatus, error)
+	GetJobStatus(ctx context.Context, jobID string) (JobStatus, error)
 
 	// GetCurrentJobID returns the job ID of the currently running job for this
 	// scheduler type, read from the scheduler-specific environment variable.
 	// Returns "" if not inside a job of this type.
 	GetCurrentJobID() string
 
+	// JobIDVar returns the name of the scheduler-assigned job ID environment
+	// variable (e.g. "SLURM_JOB_ID", "PBS_JOBID"). Returns "" if this scheduler
+	// does not expose a job ID variable.
+	JobIDVar() string
+
+	// JobIDEnvExpr returns a shell expression that expands to the job ID at
+	// runtime inside a submitted job (e.g. "${SLURM_JOB_ID}"). Used by the
+	// helper wrapper to set CNT_HELPER_JOB_ID scheduler-specifically.
+	// Derived from JobIDVar() for most schedulers; PBS strips the server suffix.
+	JobIDEnvExpr() string
+
+	// TmpDirVar returns the name of the scheduler-assigned per-job node-local tmpdir
+	// environment variable (e.g. "SLURM_TMPDIR", "PBS_TMPDIR"). Returns "" if this
+	// scheduler does not expose a per-job tmpdir variable.
+	TmpDirVar() string
+
 	// GetTmpDir returns the scheduler-assigned node-local tmp directory for the
 	// current job (e.g. SLURM_TMPDIR, PBS_TMPDIR). Returns "" if not in a job
 	// or if the scheduler does not expose a tmp directory variable.
 	GetTmpDir() string
+
+	// CancelJob cancels the job with the given ID. Returns nil on success or if
+	// the job is already gone. Returns an error only if the cancel command fails
+	// for a reason other than the job not existing.
+	CancelJob(ctx context.Context, jobID string) error
 }
 
 // ResolveResourceSpecFrom merges resources using the priority chain:

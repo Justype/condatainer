@@ -9,7 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
@@ -294,7 +297,7 @@ func (b *BuildObject) CreateTmpOverlay(ctx context.Context, force bool) error {
 		}
 	}
 
-	utils.PrintDebug("Creating temporary overlay at %s", utils.StylePath(b.tmpOverlayPath))
+	logging.FromContext(ctx).Debug("creating temporary overlay", "path", b.tmpOverlayPath)
 
 	// Use overlay package to create ext3 overlay.
 	// For build overlays, we use a temporary size from config (default 20GB).
@@ -340,37 +343,35 @@ func (b *BuildObject) CreateBuildDirs(ctx context.Context, force bool) error {
 	if err := os.MkdirAll(filepath.Join(buildDir, "tmp"), utils.PermDir); err != nil {
 		return fmt.Errorf("failed to create build tmp dir: %w", err)
 	}
-	utils.PrintMessage("Build dir: %s", utils.StylePath(buildDir))
+	logging.FromContext(ctx).Info("build dir created", "path", buildDir)
 	return nil
 }
 
 func (b *BuildObject) Cleanup(failed bool) error {
+	log := slog.Default()
+
 	// Remove remote build source if downloaded
 	if b.isRemote && b.buildSource != "" {
 		if err := os.Remove(b.buildSource); err != nil && !os.IsNotExist(err) {
-			utils.PrintWarning("Failed to remove remote build source %s: %v", b.buildSource, err)
+			log.Warn("failed to remove remote build source", "path", b.buildSource, "err", err)
 		} else {
-			utils.PrintDebug("Removed remote build source %s", b.buildSource)
+			log.Debug("removed remote build source", "path", b.buildSource)
 		}
 	}
 
 	// Remove tmp overlay
 	if b.tmpOverlayPath != "" {
 		if err := os.Remove(b.tmpOverlayPath); err != nil && !os.IsNotExist(err) {
-			utils.PrintWarning("Failed to remove tmp overlay %s: %v", b.tmpOverlayPath, err)
-		} else if utils.FileExists(b.tmpOverlayPath) {
-			utils.PrintDebug("Removed tmp overlay %s", b.tmpOverlayPath)
+			log.Warn("failed to remove tmp overlay", "path", b.tmpOverlayPath, "err", err)
 		}
 	}
 
 	// Remove cnt directory
 	if b.cntDirPath != "" {
 		cntBaseDir := filepath.Dir(b.cntDirPath)
-		utils.PrintMessage("Cleaning up build directory %s...", cntBaseDir)
+		log.Debug("cleaning up build directory", "path", cntBaseDir)
 		if err := os.RemoveAll(cntBaseDir); err != nil && !os.IsNotExist(err) {
-			utils.PrintWarning("Failed to remove cnt dir %s: %v", cntBaseDir, err)
-		} else if utils.FileExists(cntBaseDir) {
-			utils.PrintDebug("Removed cnt dir %s", cntBaseDir)
+			log.Warn("failed to remove cnt dir", "path", cntBaseDir, "err", err)
 		}
 
 		// Remove tmpDir itself if it is now empty (no other builds using it)
@@ -386,11 +387,11 @@ func (b *BuildObject) Cleanup(failed bool) error {
 			// existing target so a failed update doesn't destroy the installed overlay.
 			newPath := b.targetOverlayPath + ".new"
 			if err := os.Remove(newPath); err != nil && !os.IsNotExist(err) {
-				utils.PrintWarning("Failed to remove partial new overlay %s: %v", newPath, err)
+				log.Warn("failed to remove partial new overlay", "path", newPath, "err", err)
 			}
 		} else {
 			if err := os.Remove(b.targetOverlayPath); err != nil && !os.IsNotExist(err) {
-				utils.PrintWarning("Failed to remove target overlay %s: %v", b.targetOverlayPath, err)
+				log.Warn("failed to remove target overlay", "path", b.targetOverlayPath, "err", err)
 			}
 		}
 	}
@@ -462,6 +463,7 @@ func (b *BuildObject) collectInteractiveInputs(ctx context.Context) error {
 		return fmt.Errorf("build script for %s requires interactive input, but no TTY is available", b.nameVersion)
 	}
 
+	log := logging.FromContext(ctx)
 	for _, prompt := range prompts {
 		if len(b.vars) > 0 {
 			prompt = utils.InterpolateVars(prompt, b.vars)
@@ -469,7 +471,7 @@ func (b *BuildObject) collectInteractiveInputs(ctx context.Context) error {
 		msg := strings.ReplaceAll(prompt, `\\n`, "\n")
 		msg = strings.ReplaceAll(msg, "\\n", "\n")
 		for _, line := range strings.Split(msg, "\n") {
-			utils.PrintNote("%s", line)
+			log.Info(line, "kind", "note")
 		}
 		fmt.Print("Enter here: ")
 		input, err := utils.ReadLineContext(ctx)
@@ -554,7 +556,9 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 	cntDirPath := getCntDirPath(normalized, tmpDir)
 	tmpOverlayPath := getTmpOverlayPath(normalized, tmpDir)
 
-	utils.PrintDebug("[BUILD OBJECT] Creating %s: nameVersion=%s, targetOverlay=%s, tmpOverlay=%s, cntDir=%s", nameVersion, normalized, targetOverlay, tmpOverlayPath, cntDirPath)
+	logging.FromContext(ctx).Debug("creating build object",
+		"input", nameVersion, "nameVersion", normalized,
+		"targetOverlay", targetOverlay, "tmpOverlay", tmpOverlayPath, "cntDir", cntDirPath)
 
 	base := &BuildObject{
 		nameVersion:       normalized,
@@ -587,7 +591,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 			info, readErr := base.readBuildLock()
 			if readErr != nil {
 				// Corrupt or old empty lock → treat as stale.
-				utils.PrintWarning("Corrupt build lock for %s; removing.", utils.StyleName(normalized))
+				logging.FromContext(ctx).Warn("corrupt build lock, removing", "name", normalized)
 				base.removeBuildLock()
 			} else if info.JobID != "" && info.JobID == scheduler.CurrentJobID() {
 				// Our own scheduler lock — proceed; createBuildLock() will adopt it
@@ -596,7 +600,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 				if detail == "" {
 					detail = fmt.Sprintf("pid=%d", info.PID)
 				}
-				utils.PrintWarning("Stale build lock for %s (%s); removing.", utils.StyleName(normalized), detail)
+				logging.FromContext(ctx).Warn("stale build lock, removing", "name", normalized, "detail", detail)
 				base.removeBuildLock()
 			} else {
 				statusHint := ""
@@ -612,7 +616,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 				}
 				return nil, fmt.Errorf(
 					"build lock found for %s%s.\nLock file: %s",
-					utils.StyleName(normalized), statusHint, utils.StylePath(base.buildLockPath()),
+					normalized, statusHint, base.buildLockPath(),
 				)
 			}
 		}
@@ -645,7 +649,9 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 
 	tmpOverlayPath, cntDirPath := buildTmpPaths(normalized, tmpDir, ".img")
 
-	utils.PrintDebug("[BUILD OBJECT] Creating conda %s: buildSource=%s, targetOverlay=%s, tmpOverlay=%s, cntDir=%s", nameVersion, buildSource, targetOverlay, tmpOverlayPath, cntDirPath)
+	slog.Default().Debug("creating conda build object",
+		"nameVersion", nameVersion, "buildSource", buildSource,
+		"targetOverlay", targetOverlay, "tmpOverlay", tmpOverlayPath, "cntDir", cntDirPath)
 
 	base := &BuildObject{
 		nameVersion:       normalized,
@@ -697,7 +703,9 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 	}
 	tmpOverlayPath, cntDirPath := buildTmpPaths(nameVersion, targetDir, ext)
 
-	utils.PrintDebug("[BUILD OBJECT] Creating external %s: source=%s, targetPrefix=%s, tmpOverlay=%s, cntDir=%s", nameVersion, source, targetPrefix, tmpOverlayPath, cntDirPath)
+	logging.FromContext(ctx).Debug("creating external build object",
+		"nameVersion", nameVersion, "source", source,
+		"targetPrefix", targetPrefix, "tmpOverlay", tmpOverlayPath, "cntDir", cntDirPath)
 
 	base := &BuildObject{
 		nameVersion:       nameVersion,
@@ -724,7 +732,7 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 		return nil, fmt.Errorf("unknown source type for %s", source)
 	}
 
-	utils.PrintDebug("[EXTERNAL] Created BuildObject from external path: %s", base.String())
+	logging.FromContext(ctx).Debug("created external build object", "obj", base.String())
 	return base, nil
 }
 
@@ -794,7 +802,7 @@ func resolveBuildSource(base *BuildObject, tmpDir string) (isConda bool, isConta
 	info, found := FindBuildScript(base.nameVersion)
 	if !found {
 		// No build script found, use conda
-		utils.PrintDebug("No build script found for %s, using conda", utils.StyleName(base.nameVersion))
+		slog.Default().Debug("no build script found, using conda", "name", base.nameVersion)
 		return true, false, nil
 	}
 
@@ -802,7 +810,7 @@ func resolveBuildSource(base *BuildObject, tmpDir string) (isConda bool, isConta
 	// This avoids unnecessary network requests for installed overlays (e.g. dep
 	// graph traversal where bg.update is propagated to already-installed nodes).
 	if info.IsRemote && !base.update && base.IsInstalled() {
-		utils.PrintDebug("Skipping remote download for %s: target already exists", utils.StyleName(base.nameVersion))
+		slog.Default().Debug("skipping remote download, target already exists", "name", base.nameVersion)
 		return false, info.IsContainer, nil
 	}
 
@@ -821,10 +829,10 @@ func resolveBuildSource(base *BuildObject, tmpDir string) (isConda bool, isConta
 		base.buildSource = localPath
 		base.isRemote = true
 		base.prebuiltLink = info.PrebuiltLink
-		utils.PrintDebug("Downloaded remote build script to %s", utils.StylePath(localPath))
+		slog.Default().Debug("downloaded remote build script", "path", localPath)
 	} else {
 		base.buildSource = info.Path
-		utils.PrintDebug("Using local build script at %s", utils.StylePath(info.Path))
+		slog.Default().Debug("using local build script", "path", info.Path)
 	}
 
 	// Pre-populate dependencies from metadata when available (avoids re-parsing the script file).

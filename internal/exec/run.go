@@ -2,24 +2,50 @@ package exec
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"sort"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/container"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/proxy"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// Run executes a command inside a configured Apptainer container.
-func Run(ctx context.Context, options Options) error {
+// Diagnostic is a non-fatal execution message returned to presentation layers.
+type Diagnostic struct {
+	Level   string
+	Message string
+}
+
+// Plan is a prepared container execution. Call Close if RunPrepared is not used.
+type Plan struct {
+	Options      Options
+	Setup        *container.SetupResult
+	Fakeroot     bool
+	EnvList      []string
+	Diagnostics  []Diagnostic
+	ExecOptions  *apptainer.ExecOptions
+	OverlayLocks []*overlay.Lock
+}
+
+// Close releases resources acquired during Prepare.
+func (p *Plan) Close() {
+	if p == nil {
+		return
+	}
+	for _, l := range p.OverlayLocks {
+		l.Close()
+	}
+	p.OverlayLocks = nil
+}
+
+// Prepare resolves and validates container execution inputs without printing.
+func Prepare(ctx context.Context, options Options) (*Plan, error) {
 	options = options.ensureDefaults()
 
 	if err := apptainer.SetBin(options.ApptainerBin); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Use shared container setup logic
@@ -32,41 +58,28 @@ func Run(ctx context.Context, options Options) error {
 		ApptainerFlags: options.ApptainerFlags,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Auto-enable fakeroot if needed for writable .img
-	fakeroot := container.AutoEnableFakeroot(setupResult.LastImg, options.WritableImg, setupResult.Fakeroot)
+	fakeroot, fakerootDiagnostics := container.AutoEnableFakeroot(setupResult.LastImg, options.WritableImg, setupResult.Fakeroot)
 
-	if utils.DebugMode {
-		utils.PrintDebug("[EXEC]Exec overlays: %v", setupResult.Overlays)
-		utils.PrintDebug("[EXEC]Bind paths: %v", setupResult.BindPaths)
-		utils.PrintDebug("[EXEC]Overlay mounts: %v", setupResult.OverlayArgs)
-		utils.PrintDebug("[EXEC]Env list: %v", setupResult.EnvList)
-		utils.PrintDebug("[EXEC]Command: %s", strings.Join(options.Command, " "))
-		if len(options.EnvSettings) > 0 {
-			utils.PrintDebug("[EXEC]Env overrides: %v", options.EnvSettings)
-		}
+	logger := logging.FromContext(ctx)
+	logger.Debug("prepared exec setup",
+		"overlays", setupResult.Overlays,
+		"bind_paths", setupResult.BindPaths,
+		"overlay_mounts", setupResult.OverlayArgs,
+		"env", setupResult.EnvList,
+		"command", strings.Join(options.Command, " "),
+		"env_overrides", options.EnvSettings,
+	)
+
+	diagnostics := make([]Diagnostic, 0, len(setupResult.Diagnostics)+len(fakerootDiagnostics))
+	for _, d := range setupResult.Diagnostics {
+		diagnostics = append(diagnostics, Diagnostic{Level: d.Level, Message: d.Message})
 	}
-
-	// Print environment notes if interactive
-	if utils.IsInteractiveShell() && !options.HidePrompt {
-		if len(setupResult.EnvNotes) > 0 {
-			utils.PrintMessage("Overlay envs:")
-			sortedNotes := make([]string, 0, len(setupResult.EnvNotes))
-			for key := range setupResult.EnvNotes {
-				sortedNotes = append(sortedNotes, key)
-			}
-			sort.Strings(sortedNotes)
-			for _, key := range sortedNotes {
-				fmt.Printf("  %s: %s\n", utils.StyleName(key), utils.StyleInfo(setupResult.EnvNotes[key]))
-			}
-			fmt.Println("")
-		} else if setupResult.LastImg != "" && options.WritableImg {
-			utils.PrintMessage("Overlay env:")
-			fmt.Printf("  %s: %s\n", utils.StyleName("CNT_CONDA_PREFIX"), utils.StylePath("/ext3/env"))
-			fmt.Println("")
-		}
+	for _, d := range fakerootDiagnostics {
+		diagnostics = append(diagnostics, Diagnostic{Level: d.Level, Message: d.Message})
 	}
 
 	// Acquire read locks on all overlay files for the duration of exec.
@@ -90,7 +103,7 @@ func Run(ctx context.Context, options Options) error {
 		lock, err := overlay.AcquireLock(ol, false) // .sqf: always read-only
 		if err != nil {
 			releaseLocks()
-			return err
+			return nil, err
 		}
 		execLocks = append(execLocks, lock)
 	}
@@ -98,15 +111,13 @@ func Run(ctx context.Context, options Options) error {
 		lock, err := overlay.AcquireLock(options.BaseImage, false)
 		if err != nil {
 			releaseLocks()
-			return err
+			return nil, err
 		}
 		execLocks = append(execLocks, lock)
 	}
-	defer releaseLocks()
 
-	// Inject SOCKS5 proxy env vars if a proxy tunnel is active.
+	// Inject SOCKS5 proxy env vars if a proxy tunnel is active (inside a job only).
 	// Checks per-job local proxy first, then shared NFS proxy.
-	// Auto-starts a per-job proxy if proxy_perjob=true or CNT_PROXY_PERJOB=1.
 	// Prepend so explicit --env flags from the user take precedence.
 	envList := setupResult.EnvList
 	if proxyURL, ok := proxy.GetJobProxy(); ok {
@@ -119,21 +130,40 @@ func Run(ctx context.Context, options Options) error {
 		Env:        envList,
 		Fakeroot:   fakeroot,
 		Additional: setupResult.ApptainerFlags,
-		Stdout:     options.Stdout,
-		Stderr:     options.Stderr,
 	}
 
-	// Pass through stdin if requested (for interactive build scripts)
-	if options.PassThruStdin {
-		if options.Stdin != nil {
-			opts.Stdin = options.Stdin
-		} else {
-			opts.Stdin = os.Stdin
-		}
-	}
+	return &Plan{
+		Options:      options,
+		Setup:        setupResult,
+		Fakeroot:     fakeroot,
+		EnvList:      envList,
+		Diagnostics:  diagnostics,
+		ExecOptions:  opts,
+		OverlayLocks: execLocks,
+	}, nil
+}
 
-	if err := apptainer.Exec(ctx, options.BaseImage, options.Command, opts); err != nil {
+// RunPrepared executes a prepared plan with caller-owned IO streams.
+func RunPrepared(ctx context.Context, plan *Plan, ioStreams IO) error {
+	defer plan.Close()
+
+	opts := *plan.ExecOptions
+	opts.Stdin = ioStreams.Stdin
+	opts.Stdout = ioStreams.Stdout
+	opts.Stderr = ioStreams.Stderr
+
+	if err := apptainer.Exec(ctx, plan.Options.BaseImage, plan.Options.Command, &opts); err != nil {
 		return err
 	}
 	return nil
+}
+
+// Run executes a command inside a configured Apptainer container. It is silent by default;
+// callers that want terminal or web output must pass explicit IO writers.
+func Run(ctx context.Context, options Options, ioStreams IO) error {
+	plan, err := Prepare(ctx, options)
+	if err != nil {
+		return err
+	}
+	return RunPrepared(ctx, plan, ioStreams)
 }

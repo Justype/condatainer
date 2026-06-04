@@ -27,17 +27,20 @@ func siblingBin(base, name string) string {
 // DefaultCommandTimeout is the maximum time to wait for a scheduler command to respond.
 // Set this before calling any scheduler methods (e.g., from cmd/root.go after loading config).
 // A value of 0 disables the timeout (command runs until completion).
-var DefaultCommandTimeout = 5 * time.Second
+var DefaultCommandTimeout = 0 * time.Second
 
 // runCommand executes a scheduler CLI command with DefaultCommandTimeout.
 // Returns TimeoutError if the command does not respond within the timeout.
 // If DefaultCommandTimeout is 0, the command runs without a time limit.
-func runCommand(schedulerName, operation, bin string, args ...string) ([]byte, error) {
+func runCommand(ctx context.Context, schedulerName, operation, bin string, args ...string) ([]byte, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if DefaultCommandTimeout == 0 {
-		out, err := exec.Command(bin, args...).CombinedOutput()
+		out, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
 		return out, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultCommandTimeout)
+	ctx, cancel := context.WithTimeout(ctx, DefaultCommandTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {

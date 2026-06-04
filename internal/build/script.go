@@ -7,9 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
 	execpkg "github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -53,7 +56,7 @@ func getAllBaseDirs() []string {
 //  7. Set permissions, atomic install, and cleanup
 func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 	targetPath, finalPath := buildOverlayPaths(b)
-	styledOverlay := utils.StyleName(filepath.Base(targetPath))
+	log := logging.FromContext(ctx)
 
 	if skip, err := checkShouldBuild(b); skip || err != nil {
 		return err
@@ -64,13 +67,13 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 	}
 	defer b.removeBuildLock()
 
-	utils.PrintMessage("Building overlay %s (%s build)", styledOverlay, utils.StyleAction(buildModeLabel(b)))
+	log.Info("building overlay", "overlay", filepath.Base(targetPath), "mode", buildModeLabel(b))
 
 	if err := prepareBuildWorkspace(ctx, b, config.Global.Build.UseTmpOverlay); err != nil {
 		return err
 	}
 
-	utils.PrintMessage("Populating overlay %s via %s", styledOverlay, utils.StyleAction(b.buildSource))
+	log.Info("populating overlay", "overlay", filepath.Base(targetPath), "source", b.buildSource)
 
 	if err := b.buildDependencies(ctx, buildDeps); err != nil {
 		return err
@@ -88,14 +91,14 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 	b.saveEnvFile(targetPath)
 
 	if err := os.Chmod(finalPath, utils.PermFile); err != nil {
-		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
+		log.Debug("failed to set permissions", "path", finalPath, "err", err)
 	}
 
 	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
 		return err
 	}
 
-	utils.PrintSuccess("Finished overlay %s", utils.StylePath(targetPath))
+	log.Info("overlay ready", "kind", "success", "path", targetPath)
 	b.Cleanup(false)
 	return nil
 }
@@ -110,15 +113,14 @@ func (b *BuildObject) buildDependencies(ctx context.Context, buildDeps bool) err
 		return nil
 	}
 
-	styledOverlay := utils.StyleName(filepath.Base(b.targetOverlayPath))
 	depList := strings.Join(missingDeps, ", ")
 
 	if !buildDeps {
-		utils.PrintError("Missing dependencies for %s: %s", styledOverlay, utils.StyleNumber(depList))
+		logging.FromContext(ctx).Error("missing dependencies", "overlay", filepath.Base(b.targetOverlayPath), "deps", depList)
 		return fmt.Errorf("missing dependencies for %s: %s. Please install them first", b.nameVersion, depList)
 	}
 
-	utils.PrintMessage("Building missing dependencies for %s: %s", styledOverlay, utils.StyleNumber(depList))
+	logging.FromContext(ctx).Info("building missing dependencies", "overlay", filepath.Base(b.targetOverlayPath), "deps", depList)
 
 	writableImagesDir, err := config.GetWritableImagesDir()
 	if err != nil {
@@ -138,12 +140,12 @@ func (b *BuildObject) buildDependencies(ctx context.Context, buildDeps bool) err
 		}
 	}
 
-	utils.PrintSuccess("All dependencies for %s built successfully.", styledOverlay)
+	logging.FromContext(ctx).Info("all dependencies built", "kind", "success", "overlay", filepath.Base(b.targetOverlayPath))
 	return nil
 }
 
 // buildExecOpts constructs the exec.Options for running the build script inside the container.
-func (b *BuildObject) buildExecOpts() (execpkg.Options, error) {
+func (b *BuildObject) buildExecOpts() (execpkg.Options, execpkg.IO, error) {
 	nameVersionParts := strings.Split(b.nameVersion, "/")
 	name := nameVersionParts[0]
 	version := "env"
@@ -182,7 +184,7 @@ func (b *BuildObject) buildExecOpts() (execpkg.Options, error) {
 	} else {
 		if isRef {
 			if err := os.MkdirAll(b.cntDirPath, utils.PermDir); err != nil {
-				return execpkg.Options{}, fmt.Errorf("failed to create cnt_dir %s: %w", b.cntDirPath, err)
+				return execpkg.Options{}, execpkg.IO{}, fmt.Errorf("failed to create cnt_dir %s: %w", b.cntDirPath, err)
 			}
 			targetDir := filepath.Join(b.cntDirPath, b.nameVersion)
 			envSettings = append(envSettings, fmt.Sprintf("target_dir=%s", targetDir))
@@ -204,7 +206,7 @@ fi
 
 	overlayArgs, err := GetOverlayArgsFromDependencies(b.dependencies)
 	if err != nil {
-		utils.PrintWarning("Failed to get overlay args from dependencies: %v", err)
+		slog.Default().Warn("failed to get overlay args from dependencies", "err", err)
 	}
 
 	var overlays []string
@@ -241,15 +243,16 @@ fi
 		opts.ApptainerFlags = []string{"--writable-tmpfs"}
 	}
 
+	var ioStreams execpkg.IO
 	if len(b.interactiveInputs) > 0 {
 		inputStr := strings.Join(b.interactiveInputs, "\n") + "\n"
 		opts.PassThruStdin = true
-		opts.Stdin = strings.NewReader(inputStr)
+		ioStreams.Stdin = strings.NewReader(inputStr)
 	} else {
 		opts.PassThruStdin = true
 	}
 
-	return opts, nil
+	return opts, ioStreams, nil
 }
 
 // runBuildScript sets up a context watcher and runs the build script.
@@ -270,18 +273,21 @@ func (b *BuildObject) runBuildScript(ctx context.Context) error {
 		b.buildSource = subPath
 	}
 
-	opts, err := b.buildExecOpts()
+	opts, ioStreams, err := b.buildExecOpts()
 	if err != nil {
 		return err
 	}
 
-	utils.PrintDebug("[BUILD] Running build script for %s with options: overlays=%v, bindPaths=%v, passThruStdin=%v",
-		b.nameVersion, opts.Overlays, opts.BindPaths, opts.PassThruStdin)
+	logging.FromContext(ctx).Debug("running build script",
+		"name", b.nameVersion, "overlays", opts.Overlays, "bindPaths", opts.BindPaths, "passThruStdin", opts.PassThruStdin)
 
 	done := watchContext(ctx, "build script")
 	defer close(done)
 
-	if err := execpkg.Run(ctx, opts); err != nil {
+	if ioStreams.IsZero() {
+		ioStreams = execpkg.IOFromContext(ctx)
+	}
+	if err := execpkg.Run(ctx, opts, ioStreams); err != nil {
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
 		}
@@ -299,7 +305,7 @@ func (b *BuildObject) packOutput(ctx context.Context, finalPath string) error {
 		targetDir = filepath.Join(b.cntDirPath, b.nameVersion)
 	}
 
-	styledOverlay := utils.StyleName(filepath.Base(b.targetOverlayPath))
+	log := logging.FromContext(ctx)
 
 	if !config.Global.Build.UseTmpOverlay {
 		checkDir := b.cntDirPath
@@ -310,7 +316,7 @@ func (b *BuildObject) packOutput(ctx context.Context, finalPath string) error {
 			b.Cleanup(true)
 			return fmt.Errorf("build script did not create any files in %s", checkDir)
 		}
-		utils.PrintMessage("Creating SquashFS from %s for overlay %s", utils.StylePath(b.cntDirPath), styledOverlay)
+		log.Info("creating SquashFS", "source", b.cntDirPath, "overlay", filepath.Base(b.targetOverlayPath))
 		if err := createSquashfs(ctx, b, isRef, b.cntDirPath, finalPath); err != nil {
 			b.Cleanup(true)
 			return err
@@ -320,13 +326,13 @@ func (b *BuildObject) packOutput(ctx context.Context, finalPath string) error {
 			b.Cleanup(true)
 			return fmt.Errorf("overlay build script did not create any files in %s", targetDir)
 		}
-		utils.PrintMessage("Creating SquashFS from %s for overlay %s", utils.StylePath(b.cntDirPath), styledOverlay)
+		log.Info("creating SquashFS", "source", b.cntDirPath, "overlay", filepath.Base(b.targetOverlayPath))
 		if err := createSquashfs(ctx, b, isRef, b.cntDirPath, finalPath); err != nil {
 			b.Cleanup(true)
 			return err
 		}
 	} else {
-		utils.PrintMessage("Preparing SquashFS from /cnt for overlay %s", styledOverlay)
+		log.Info("preparing SquashFS from /cnt", "overlay", filepath.Base(b.targetOverlayPath))
 		if err := createSquashfs(ctx, b, isRef, "/cnt", finalPath); err != nil {
 			b.Cleanup(true)
 			return err
@@ -340,7 +346,7 @@ func (b *BuildObject) packOutput(ctx context.Context, finalPath string) error {
 func (b *BuildObject) saveEnvFile(targetPath string) {
 	envDict, err := GetEnvDictFromBuildScript(b.buildSource)
 	if err != nil {
-		utils.PrintWarning("Failed to extract ENV from build script: %v", err)
+		slog.Default().Warn("failed to extract ENV from build script", "err", err)
 		return
 	}
 	whatis := utils.GetWhatIsFromScript(b.buildSource)
@@ -353,7 +359,7 @@ func (b *BuildObject) saveEnvFile(targetPath string) {
 		}
 	}
 	if err := SaveEnvFile(targetPath, envDict, b.nameVersion, whatis); err != nil {
-		utils.PrintWarning("Failed to save ENV file: %v", err)
+		slog.Default().Warn("failed to save ENV file", "err", err)
 	}
 }
 
@@ -365,6 +371,6 @@ func (b *BuildObject) saveCondaEnvFile(targetPath string) {
 	}
 	whatis := utils.FetchCondaSummary(b.packageName, config.Global.Build.Channels)
 	if err := SaveEnvFile(targetPath, map[string]EnvEntry{}, b.nameVersion, whatis); err != nil {
-		utils.PrintWarning("Failed to save ENV file: %v", err)
+		slog.Default().Warn("failed to save ENV file", "err", err)
 	}
 }

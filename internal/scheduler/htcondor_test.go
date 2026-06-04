@@ -451,7 +451,7 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"queue",
 			},
 			wantCpus:  16,
-			wantMemMB: 1024, // default
+			wantMemMB: 2048, // default
 			wantGpus:  0,
 			wantTime:  2 * time.Hour, // default
 		},
@@ -463,7 +463,7 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"queue",
 			},
 			wantCpus:  1,    // default
-			wantMemMB: 1024, // default
+			wantMemMB: 2048, // default
 			wantGpus:  4,
 			wantTime:  2 * time.Hour, // default
 		},
@@ -475,7 +475,7 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"queue",
 			},
 			wantCpus:  1,    // default
-			wantMemMB: 1024, // default
+			wantMemMB: 2048, // default
 			wantGpus:  0,
 			wantTime:  24 * time.Hour,
 		},
@@ -486,7 +486,7 @@ func TestHTCondorResourceParsing(t *testing.T) {
 				"# Just a comment",
 			},
 			wantCpus:  1,    // default
-			wantMemMB: 1024, // default
+			wantMemMB: 2048, // default
 			wantGpus:  0,
 			wantTime:  2 * time.Hour, // default
 		},

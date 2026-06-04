@@ -8,6 +8,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -21,7 +22,7 @@ import (
 //  6. Cleanup
 func (b *BuildObject) buildDef(ctx context.Context) error {
 	targetPath, finalPath := buildOverlayPaths(b)
-	styledOverlay := utils.StyleName(filepath.Base(targetPath))
+	log := logging.FromContext(ctx)
 
 	if skip, err := checkShouldBuild(b); skip || err != nil {
 		return err
@@ -32,7 +33,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	}
 	defer b.removeBuildLock()
 
-	utils.PrintMessage("Building overlay %s (%s build) from %s", styledOverlay, utils.StyleAction(buildModeLabel(b)), utils.StylePath(b.buildSource))
+	log.Info("building overlay", "overlay", filepath.Base(targetPath), "mode", buildModeLabel(b), "source", b.buildSource)
 
 	done := watchContext(ctx, "def build")
 	defer close(done)
@@ -74,7 +75,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 		defSource = subPath
 	}
 
-	utils.PrintMessage("Running apptainer build from %s", utils.StylePath(b.buildSource))
+	log.Info("running apptainer build", "source", b.buildSource)
 
 	buildOpts := &apptainer.BuildOptions{
 		Force:     false,
@@ -84,33 +85,33 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	if err := apptainer.Build(ctx, b.tmpOverlayPath, defSource, buildOpts); err != nil {
 		b.Cleanup(true)
 		if apptainer.IsBuildCancelled(err) {
-			utils.PrintMessage("Build cancelled for %s. Overlay unchanged.", styledOverlay)
+			log.Info("build cancelled, overlay unchanged", "overlay", filepath.Base(targetPath))
 			return ErrBuildCancelled
 		}
 		return fmt.Errorf("failed to build SIF from %s: %w", b.buildSource, err)
 	}
 
-	utils.PrintMessage("Extracting SquashFS to %s", utils.StylePath(finalPath))
+	log.Info("extracting SquashFS", "path", finalPath)
 
 	if err := apptainer.DumpSifToSquashfs(ctx, b.tmpOverlayPath, finalPath); err != nil {
 		os.Remove(finalPath) //nolint:errcheck
 		b.Cleanup(true)
 		if apptainer.IsBuildCancelled(err) {
-			utils.PrintMessage("Build cancelled for %s. Overlay unchanged.", styledOverlay)
+			log.Info("build cancelled, overlay unchanged", "overlay", filepath.Base(targetPath))
 			return ErrBuildCancelled
 		}
 		return fmt.Errorf("failed to dump SquashFS from SIF: %w", err)
 	}
 
 	if err := os.Chmod(finalPath, utils.PermFile); err != nil {
-		utils.PrintDebug("Failed to set permissions on %s: %v", finalPath, err)
+		log.Debug("failed to set permissions", "path", finalPath, "err", err)
 	}
 
 	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
 		return err
 	}
 
-	utils.PrintSuccess("Finished overlay %s", utils.StylePath(targetPath))
+	log.Info("overlay ready", "kind", "success", "path", targetPath)
 	b.Cleanup(false)
 	return nil
 }

@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"log/slog"
+
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -66,7 +68,7 @@ func saveState(state *State) error {
 		return fmt.Errorf("failed to write state file: %w", err)
 	}
 
-	utils.PrintDebug("[INSTANCE]Saved state to %s", statePath)
+	slog.Default().Debug("instance state saved", "path", statePath)
 	return nil
 }
 
@@ -90,7 +92,7 @@ func loadState(name string) (*State, error) {
 		return nil, fmt.Errorf("failed to unmarshal state: %w", err)
 	}
 
-	utils.PrintDebug("[INSTANCE]Loaded state from %s", statePath)
+	slog.Default().Debug("instance state loaded", "path", statePath)
 	return &state, nil
 }
 
@@ -105,7 +107,7 @@ func deleteState(name string) error {
 		return fmt.Errorf("failed to remove state file: %w", err)
 	}
 
-	utils.PrintDebug("[INSTANCE]Deleted state file %s", statePath)
+	slog.Default().Debug("instance state deleted", "path", statePath)
 	return nil
 }
 
@@ -133,9 +135,9 @@ func deleteAllStates() error {
 		if filepath.Ext(entry.Name()) == ".json" {
 			statePath := filepath.Join(stateDir, entry.Name())
 			if err := os.Remove(statePath); err != nil {
-				utils.PrintDebug("[INSTANCE]Failed to delete state file %s: %v", statePath, err)
+				slog.Default().Debug("instance state delete failed", "path", statePath, "err", err)
 			} else {
-				utils.PrintDebug("[INSTANCE]Deleted state file %s", statePath)
+				slog.Default().Debug("instance state deleted", "path", statePath)
 			}
 		}
 	}
@@ -174,16 +176,16 @@ func deleteStatesMatching(pattern string) error {
 		// Check if instance name matches the pattern
 		matched, err := filepath.Match(pattern, instanceName)
 		if err != nil {
-			utils.PrintDebug("[INSTANCE]Invalid pattern %s: %v", pattern, err)
+			slog.Default().Debug("instance state: invalid pattern", "pattern", pattern, "err", err)
 			continue
 		}
 
 		if matched {
 			statePath := filepath.Join(stateDir, entry.Name())
 			if err := os.Remove(statePath); err != nil {
-				utils.PrintDebug("[INSTANCE]Failed to delete state file %s: %v", statePath, err)
+				slog.Default().Debug("instance state delete failed", "path", statePath, "err", err)
 			} else {
-				utils.PrintDebug("[INSTANCE]Deleted state file %s", statePath)
+				slog.Default().Debug("instance state deleted", "path", statePath)
 			}
 		}
 	}

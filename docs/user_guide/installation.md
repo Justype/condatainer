@@ -48,7 +48,7 @@ The installation script will also run `condatainer config init` for you. If you 
 condatainer config init
 ```
 
-**CondaTainer** will automatically search for Apptainer/Singularity in your `PATH` and via `module avail`. If you want to use a specific Apptainer/Singularity module:
+**CondaTainer** will automatically search for Apptainer/Singularity in your `PATH` or via `module avail`. If you want to use a specific Apptainer/Singularity module, please run:
 
 ```bash
 module load apptainer/1.4
@@ -64,7 +64,7 @@ Compression is chosen automatically based on the runtime:
 
 CondaTainer supports shell completion for **Bash** and **Zsh**. The installation script will automatically add the necessary lines to your shell configuration file:
 
-- **Bash** (`~/.bashrc`): (must have `bash-completion` installed)
+- **Bash** (`~/.bashrc`):
 - **Zsh** (`~/.zshrc`):
 
 ```bash
@@ -74,8 +74,7 @@ source <(condatainer completion)
 ## 🗺️ Next Steps
 
 - [Concepts: Overlays](./concepts.md) — Understand the overlay model before proceeding
-- [Helpers on HPC](../tutorials/helpers_on_HPC.md) — Running Applications (e.g. VS Code, RStudio, IGV) with CondaTainer on HPC
-- [Helpers on headless servers](../tutorials/helpers_on_server.md) — Running Applications without a scheduler
+- [Helper Scripts](../tutorials/helpers.md) — Running Applications (VS Code, RStudio, IGV, etc.) on HPC or headless servers
 
 ## 🗑️ Uninstallation
 

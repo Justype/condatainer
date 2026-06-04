@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CondaTainer</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<!-- ── Sidebar ───────────────────────────── -->
+<div id="sidebar-wrap">
+<aside id="sidebar">
+  <div class="sb-logo">
+    <img class="sb-logo-icon" src="/static/favicon.svg" alt="CondaTainer">
+    <span class="sb-logo-text"><span class="sb-logo-conda">onda</span><span class="sb-logo-tainer">Tainer</span></span>
+    <button id="collapse-tab" title="Toggle sidebar"></button>
+  </div>
+  <ul class="nav">
+    <li class="nav-item active" data-section="jobs">
+      <svg class="icon nav-icon"><use href="#i-play_circle"></use></svg><span class="nav-label">Jobs</span>
+    </li>
+    <li class="nav-item" data-section="start">
+      <svg class="icon nav-icon"><use href="#i-add_2"></use></svg><span class="nav-label">Start</span>
+    </li>
+    <li class="nav-item" data-section="history">
+      <svg class="icon nav-icon"><use href="#i-history_2"></use></svg><span class="nav-label">History</span>
+    </li>
+    <li class="nav-item" data-section="overlays">
+      <svg class="icon nav-icon"><use href="#i-hexagon"></use></svg><span class="nav-label">Overlay</span>
+    </li>
+    <li class="nav-item" data-section="files">
+      <svg class="icon nav-icon"><use href="#i-files"></use></svg><span class="nav-label">Files</span>
+    </li>
+  </ul>
+  <div class="sb-bottom">
+    <div class="sb-status">
+      <span id="status-dot"></span>
+      <span id="status-text" class="sb-btn-label">Connecting…</span>
+    </div>
+    <button class="sb-btn" id="theme-toggle">
+      <span class="nav-icon" id="theme-icon"><svg class="icon"><use href="#i-light_mode"></use></svg></span>
+      <span class="sb-btn-label">Light Mode</span>
+    </button>
+    <button class="sb-btn" data-section="settings" onclick="navigate('settings')">
+      <svg class="icon nav-icon"><use href="#i-settings"></use></svg>
+      <span class="sb-btn-label">Settings</span>
+    </button>
+  </div>
+</aside>
+</div>
+
+<!-- ── Main content ──────────────────────── -->
+<div id="app">
+  <div id="content">
+
+    <!-- ─ Jobs ─────────────────────────────── -->
+    <section class="section active" id="sec-jobs">
+      <div class="s-header">
+        <div>
+          <div class="s-title">Running Jobs</div>
+          <div class="s-sub">Active helpers on compute nodes</div>
+        </div>
+        <button class="btn btn-sm" onclick="loadJobs()"><svg class="icon"><use href="#i-refresh"></use></svg>Refresh</button>
+      </div>
+      <div id="job-list-wrap"><div class="empty"><div>Loading…</div></div></div>
+    </section>
+
+    <!-- ─ Start ─────────────────────────────── -->
+    <section class="section" id="sec-start">
+      <div class="s-header">
+        <div>
+          <div class="s-title">Start Helper</div>
+          <div class="s-sub">Launch a new helper on a compute node</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-sm" id="start-update-btn" onclick="updateHelperScripts()" title="Download remote helper scripts"><svg class="icon"><use href="#i-download"></use></svg>Update</button>
+          <button class="btn btn-sm" id="start-refresh-btn" onclick="refreshStartHelpers()" title="Reload helper list"><svg class="icon"><use href="#i-refresh"></use></svg>Refresh</button>
+        </div>
+      </div>
+      <div class="start-layout">
+        <div class="helper-list" id="helper-list-wrap">
+          <div class="h-search-bar">
+            <input class="h-search" id="h-search" placeholder="Search helpers…" oninput="renderHelperList(this.value)">
+          </div>
+          <div id="helper-list">
+            <div class="modal-empty">Loading…</div>
+          </div>
+        </div>
+        <div class="config-placeholder" id="config-placeholder">← Select a helper to configure</div>
+        <div class="config-panel" id="config-panel" spellcheck="false">
+          <div class="f-divider">Resources</div>
+          <div class="form-grid">
+            <div class="field">
+              <label class="field-label">CPUs</label>
+              <input class="field-input" id="cfg-cpus">
+            </div>
+            <div class="field">
+              <label class="field-label">Memory (GB)</label>
+              <input class="field-input" id="cfg-mem">
+            </div>
+            <div class="field">
+              <label class="field-label">Walltime (hours)</label>
+              <input class="field-input" id="cfg-wall">
+            </div>
+            <div class="field">
+              <label class="field-label">GPU (optional)</label>
+              <div class="combo-wrap" id="combo-cfg-gpu">
+                <input class="field-input combo-input" id="cfg-gpu" autocomplete="off">
+                <div class="combo-list" id="combo-list-cfg-gpu"></div>
+              </div>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label">Working Directory</label>
+            <div class="field-row">
+              <input class="field-input" id="cfg-cwd" placeholder="Working directory (default: current)">
+              <button class="btn btn-sm" id="cfg-cwd-browse-btn" onclick="openFilePicker('cfg-cwd','dir')">Browse</button>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label">Env Overlay (.img)</label>
+            <div class="field-row">
+              <input class="field-input" id="cfg-overlay" placeholder="optional — path to env .img">
+              <button class="btn btn-sm btn-ghost" id="ov-clear-btn" disabled onclick="clearEnvOverlay()">Clear</button>
+              <button class="btn btn-sm" id="cfg-overlay-browse-btn" onclick="openFilePicker('cfg-overlay','file','cfg-cwd','.img')">Browse</button>
+              <button class="btn btn-sm" id="ov-new-btn" onclick="toggleOverlayCreate()">New</button>
+            </div>
+            <div class="ov-notice" id="ov-notice">
+              <svg class="icon"><use id="ov-notice-icon" href="#i-info"></use></svg>
+              <span id="ov-notice-text"></span>
+            </div>
+            <div class="ov-create" id="ov-edit-form">
+              <div class="f-divider">Edit env overlay</div>
+              <div class="form-grid">
+                <div class="field">
+                  <label class="field-label">New size <span id="ov-edit-cur-size" style="font-weight:400;color:var(--muted)"></span></label>
+                  <input class="field-input" id="ov-edit-size" placeholder="e.g. 30G">
+                </div>
+              </div>
+              <div class="field" id="ov-edit-pkgs-wrap" style="display:none">
+                <div class="field-label">Installed packages</div>
+                <div id="ov-edit-pkg-list" style="font-size:12px;font-family:var(--mono);color:var(--muted);max-height:72px;overflow-y:auto;line-height:1.8;word-break:break-all;"></div>
+              </div>
+              <div class="field">
+                <label class="field-label">Remove packages</label>
+                <input class="field-input mono" id="ov-edit-remove" placeholder="space-separated package names">
+              </div>
+              <div class="field">
+                <label class="field-label">Add packages</label>
+                <input class="field-input mono" id="ov-edit-add" placeholder="space-separated package names">
+              </div>
+              <div>
+                <button class="btn btn-primary btn-sm" id="ov-edit-btn" onclick="editOverlay()">Update</button>
+              </div>
+            </div>
+            <div class="ov-create" id="ov-create-form">
+              <div class="f-divider">Create env overlay</div>
+              <div class="form-grid">
+                <div class="field">
+                  <label class="field-label">Path</label>
+                  <input class="field-input" id="ov-name" placeholder="env.img or /full/path/to/env.img" oninput="gid('ov-create-btn').disabled=!this.value.trim()">
+                </div>
+                <div class="field">
+                  <label class="field-label">Size</label>
+                  <input class="field-input" id="ov-size" placeholder="20G">
+                </div>
+              </div>
+              <div id="ov-token-wrap"></div>
+              <div class="field">
+                <label class="field-label">Extra packages</label>
+                <input class="field-input" id="ov-pkgs" placeholder="additional packages">
+              </div>
+              <div id="ov-pkg-preview-wrap">
+                <div class="field-label">Package review</div>
+                <div id="ov-pkg-preview"></div>
+              </div>
+              <div>
+                <button class="btn btn-primary btn-sm" id="ov-create-btn" disabled onclick="createOverlay()">Create &amp; Use</button>
+              </div>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label">Module Overlays (.sqf)</label>
+            <div id="cfg-modules-list"></div>
+            <button class="btn btn-sm btn-start" onclick="openOverlayPicker('module')"><svg class="icon"><use href="#i-add_2"></use></svg>Add overlay</button>
+          </div>
+          <div id="helper-params-wrap"></div>
+          <div class="form-actions">
+            <div id="helper-config-wrap"></div>
+            <button class="btn btn-success" id="start-btn" onclick="startHelper()"><svg class="icon"><use href="#i-play_arrow"></use></svg>Start</button>
+          </div>
+          <div class="term-box" id="start-term"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─ Overlays ──────────────────────────── -->
+    <section class="section" id="sec-overlays">
+      <div class="s-header">
+        <div>
+          <div class="s-title">Overlays</div>
+          <div class="s-sub">Module (.sqf) overlays</div>
+        </div>
+        <input class="search" id="ov-search" placeholder="Search by name or type…"
+               oninput="renderOverlays(this.value)">
+        <button class="btn btn-sm" onclick="loadOverlays()"><svg class="icon"><use href="#i-refresh"></use></svg>Refresh</button>
+      </div>
+      <div class="tbl-wrap">
+        <table class="data-table">
+          <thead><tr><th>Name</th><th>Size</th><th>Path</th><th>Actions</th></tr></thead>
+          <tbody id="ov-tbody">
+            <tr><td colspan="4" class="td-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ─ Files ─────────────────────────────── -->
+    <section class="section" id="sec-files">
+      <div class="s-header">
+        <div>
+          <div class="s-title">Files</div>
+          <div class="s-sub">Browse and navigate the filesystem</div>
+        </div>
+        <label class="toggle-lbl">
+          <input type="checkbox" id="show-hidden-files" onchange="setShowHidden(this.checked, true)"> Show hidden
+        </label>
+      </div>
+      <div class="files-layout">
+        <div class="file-tree" id="file-tree"></div>
+        <div class="file-main">
+          <div class="breadcrumb" id="bc"></div>
+          <div class="file-toolbar">
+            <input class="field-input" id="path-input"
+                   placeholder="Type a path and press Enter" spellcheck="false">
+          </div>
+          <div class="file-list-wrap">
+            <table class="data-table">
+              <thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead>
+              <tbody id="file-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─ History ───────────────────────────── -->
+    <section class="section" id="sec-history">
+      <div class="s-header">
+        <div>
+          <div class="s-title">History</div>
+          <div class="s-sub">Past helper runs</div>
+        </div>
+        <input class="search" id="hist-search" placeholder="Filter by name, status, node…"
+               oninput="filterHistory(this.value)">
+        <button class="btn btn-sm" onclick="loadHistory()"><svg class="icon"><use href="#i-refresh"></use></svg>Refresh</button>
+      </div>
+      <div class="tbl-wrap">
+        <table class="data-table">
+          <thead><tr><th>Name</th><th>Status</th><th>Node</th><th>CWD</th><th>Ended</th><th>Actions</th></tr></thead>
+          <tbody id="hist-tbody">
+            <tr><td colspan="6" class="td-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ─ Settings ──────────────────────────── -->
+    <section class="section" id="sec-settings">
+      <div class="s-header"><div><div class="s-title">Settings &amp; Info</div></div></div>
+      <div class="settings-card">
+        <div class="sc-title">Server</div>
+        <div class="info-row">
+          <div class="info-item"><span class="info-k">Port</span><span class="info-v" id="srv-port">—</span></div>
+          <div class="info-item"><span class="info-k">PID</span><span class="info-v" id="srv-pid">—</span></div>
+          <div class="info-item"><span class="info-k">Uptime</span><span class="info-v" id="srv-uptime">—</span></div>
+          <div class="info-item"><span class="info-k">Version</span><span class="info-v" id="srv-version">—</span></div>
+        </div>
+      </div>
+      <div class="settings-card" id="notif-card" style="display:none">
+        <div class="sc-title">Notifications</div>
+        <p class="settings-p" id="notif-status"></p>
+        <button class="btn btn-sm" id="notif-btn" onclick="requestNotifPermission()" style="display:none">Enable browser notifications</button>
+      </div>
+      <div class="settings-card">
+        <div class="sc-title">SSH Config</div>
+        <p class="settings-p">Add to <code>~/.ssh/config</code> for a persistent tunnel:</p>
+        <div class="code-block">
+          <span id="ssh-hint">LocalForward … localhost:…</span>
+        </div>
+        <p class="settings-p">To keep connections alive:</p>
+        <div class="code-block pre"><span id="ssh-keepalive">Host *
+  ServerAliveInterval 60
+  ServerAliveCountMax 3</span></div>
+      </div>
+      <div class="settings-card">
+        <div class="sc-title">Links</div>
+        <div class="links-list">
+          <a href="https://condatainer.readthedocs.io" target="_blank">📖 Read the Docs ↗</a>
+          <a href="https://github.com/Justype/condatainer" target="_blank">📖 GitHub Repo ↗</a>
+          <a href="https://github.com/Justype/condatainer/issues" target="_blank">🐛 Report Issue ↗</a>
+        </div>
+      </div>
+    </section>
+
+  </div><!-- /#content -->
+
+  <!-- ── Detail panel ──────────────────────── -->
+  <div id="detail" inert aria-hidden="true">
+    <div class="d-header">
+      <span class="d-title" id="d-title">—</span>
+      <span id="d-badge"></span>
+      <button class="btn btn-ghost btn-sm" onclick="closeDetail()"><svg class="icon"><use href="#i-close"></use></svg></button>
+    </div>
+    <div class="d-meta" id="d-meta"></div>
+    <div class="d-resources" id="d-resources"></div>
+    <div class="d-params" id="d-params"></div>
+    <div class="d-tabs">
+      <div class="d-tab active" data-dtab="messages" onclick="switchDetailTab('messages')">Messages</div>
+      <div class="d-tab" data-dtab="log" onclick="switchDetailTab('log')">Job Log</div>
+    </div>
+    <div class="d-tab-content" id="d-tab-content"></div>
+    <div class="d-footer">
+      <button class="btn btn-sm" id="d-rerun" onclick="rerunJob()"><svg class="icon"><use href="#i-replay"></use></svg>Rerun</button>
+      <div class="btn-row">
+        <a class="btn btn-ghost btn-sm" id="d-log-link" href="#" target="_blank">Full log ↗</a>
+        <button class="btn btn-danger btn-sm" id="d-stop" onclick="detailStop()">Stop</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /#app -->
+
+<!-- ── File Picker Modal ─────────────────── -->
+<div class="modal-backdrop" id="fp-modal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <span id="fp-title">Browse</span>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('fp-modal')"><svg class="icon"><use href="#i-close"></use></svg></button>
+    </div>
+    <div class="modal-bc" id="fp-bc"></div>
+    <div class="modal-body" id="fp-body"></div>
+    <div class="modal-ftr">
+      <label class="toggle-lbl">
+        <input type="checkbox" id="fp-show-hidden" onchange="setShowHidden(this.checked)"> Show hidden
+      </label>
+      <div class="btn-row">
+        <button class="btn btn-sm" onclick="closeModal('fp-modal')">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="fp-select-dir-btn" onclick="fpSelect()">Select This Dir</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Overlay Picker Modal ──────────────── -->
+<div class="modal-backdrop" id="op-modal">
+  <div class="modal modal-lg">
+    <div class="modal-hdr">
+      <span>Add Overlay</span>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('op-modal')"><svg class="icon"><use href="#i-close"></use></svg></button>
+    </div>
+    <div class="modal-tabs">
+      <button class="modal-tab active" id="op-tab-module-btn" onclick="opSwitchTab('module')">Module overlay</button>
+      <button class="modal-tab" id="op-tab-file-btn" onclick="opSwitchTab('file')">File (.sqf)</button>
+    </div>
+    <div class="modal-tab-body active" id="op-tab-app">
+      <div class="modal-search">
+        <input id="op-app-search" placeholder="Search module overlays…" oninput="filterAppOverlays(this.value)">
+      </div>
+      <div id="op-app-list"></div>
+    </div>
+    <div class="modal-tab-body" id="op-tab-file">
+      <div class="modal-bc" id="op-file-bc"></div>
+      <div class="modal-body" id="op-file-list"></div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-sm" onclick="closeModal('op-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Helper Config Modal ───────────────── -->
+<div class="modal-backdrop" id="hcfg-modal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <span id="hcfg-title">Saved Defaults</span>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('hcfg-modal')"><svg class="icon"><use href="#i-close"></use></svg></button>
+    </div>
+    <div class="modal-body" id="hcfg-body"></div>
+    <div class="modal-ftr">
+      <button class="btn btn-sm" onclick="closeModal('hcfg-modal')">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveHelperConfigModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Scripts (order matters) ───────────── -->
+<script src="/static/icons.js"></script>
+<script src="/static/app.js"></script>
+<script src="/static/jobs.js"></script>
+<script src="/static/helpers.js"></script>
+<script src="/static/overlays.js"></script>
+<script src="/static/history.js"></script>
+<script src="/static/files.js"></script>
+<script>
+  /* init — runs after all modules are loaded */
+  pollStatus();
+  setInterval(pollStatus, 10000);
+  loadJobs();
+  setInterval(loadJobs, 5000);
+  loadOverlays();
+</script>
+
+<!-- ─ Global progress window ──────────── -->
+<div class="prog-window" id="prog-window">
+  <div class="prog-win-hdr">
+    <span class="prog-win-title" id="prog-win-title"></span>
+    <span class="prog-win-status" id="prog-win-status"></span>
+    <button class="btn btn-ghost btn-sm" id="prog-win-toggle" onclick="toggleMinimizeProgressWindow()" title="Minimize"><svg class="icon" aria-hidden="true"><use href="#i-expand_circle_down"></use></svg></button>
+    <button class="btn btn-ghost btn-sm prog-win-close" id="prog-win-close" disabled onclick="closeProgressWindow()"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button>
+  </div>
+  <div class="prog-win-body" id="prog-win-body"></div>
+</div>
+</body>
+</html>

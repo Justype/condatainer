@@ -2,6 +2,7 @@ package container
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,13 +27,13 @@ func InstalledOverlays() (map[string]string, error) {
 	}
 	overlays := map[string]string{}
 	dirs := config.GetImageSearchPaths()
-	utils.PrintDebug("[RESOLVE] Scanning for installed overlays in: %v", dirs)
+	slog.Default().Debug("scanning for installed overlays", "dirs", dirs)
 	for _, dir := range dirs {
 		if err := populateOverlays(dir, overlays); err != nil {
 			return nil, err
 		}
 	}
-	utils.PrintDebug("[RESOLVE] Found %d installed overlays", len(overlays))
+	slog.Default().Debug("found installed overlays", "count", len(overlays))
 	cachedInstalledOverlays = overlays
 	return overlays, nil
 }
@@ -62,7 +63,21 @@ func populateOverlays(dir string, store map[string]string) error {
 		}
 		normalized := strings.TrimSuffix(name, filepath.Ext(name))
 		normalized = strings.ReplaceAll(normalized, "--", "/")
-		store[normalized] = filepath.Join(dir, name)
+		path := filepath.Join(dir, name)
+		if _, exists := store[normalized]; !exists {
+			store[normalized] = path
+		}
+
+		// Default distro overlays can also be addressed by their bare name.
+		// Keep first-match-wins semantics and never override a real bare overlay.
+		if prefix := config.Global.DefaultDistro + "/"; prefix != "/" && strings.HasPrefix(normalized, prefix) {
+			alias := strings.TrimPrefix(normalized, prefix)
+			if alias != "" {
+				if _, exists := store[alias]; !exists {
+					store[alias] = path
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -145,21 +160,21 @@ func ResolveOverlayPaths(inputs []string) ([]string, error) {
 				}
 			}
 			if bestPath != "" {
-				utils.PrintDebug("[RESOLVE] Constraint %s%s%s satisfied by %s/%s", normalized, op, minVersion, name, bestVer)
+				slog.Default().Debug("constraint satisfied", "spec", normalized+op+minVersion, "by", name+"/"+bestVer)
 				resolved = append(resolved, bestPath+suffix)
 				continue
 			}
 			// No satisfying version installed — fall through to exact preferred version.
 		}
 
-		utils.PrintDebug("[RESOLVE] Looking up overlay %s in installed map", normalized)
+		slog.Default().Debug("looking up overlay", "name", normalized)
 		if mapped, ok := installed[normalized]; ok {
-			utils.PrintDebug("[RESOLVE] Found overlay %s -> %s", normalized, mapped)
+			slog.Default().Debug("found overlay", "name", normalized, "path", mapped)
 			resolved = append(resolved, mapped+suffix)
 			continue
 		}
 
-		utils.PrintDebug("[RESOLVE] Overlay %s not in installed map, trying buildOverlayPathFromSpec", normalized)
+		slog.Default().Debug("overlay not in installed map, trying buildOverlayPathFromSpec", "name", normalized)
 		pathFromSpec, err := buildOverlayPathFromSpec(normalized)
 		if err != nil {
 			return nil, err
@@ -187,7 +202,7 @@ func buildOverlayPathFromSpec(normalized string) (string, error) {
 		for _, dir := range config.GetImageSearchPaths() {
 			path := filepath.Join(dir, prefixed)
 			if utils.FileExists(path) {
-				utils.PrintDebug("[RESOLVE] Found overlay via OS-prefix fallback: %s", path)
+				slog.Default().Debug("found overlay via OS-prefix fallback", "path", path)
 				return path, nil
 			}
 		}

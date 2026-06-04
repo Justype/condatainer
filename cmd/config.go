@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/apptainer"
@@ -42,6 +43,7 @@ var configKeyDefs = map[string]bool{
 	"notification":           false,
 	"metadata_cache_ttl":     false,
 	"proxy_perjob":           false,
+	"helper_bind_all":        false,
 	"build.ncpus":            false,
 	"build.mem":              false,
 	"build.time":             false,
@@ -55,6 +57,16 @@ var configKeyDefs = map[string]bool{
 }
 
 func isArrayKey(key string) bool { return configKeyDefs[key] }
+
+func isBoolKey(key string) bool {
+	switch key {
+	case "submit_job", "proxy_perjob", "helper_bind_all",
+		"prefer_remote", "parse_module_load",
+		"build.use_tmp_overlay", "build.always_submit":
+		return true
+	}
+	return false
+}
 
 // modifyArrayConfig reads the current slice for key from the target config file,
 // applies modify, and writes the result back. Returns the config path written.
@@ -190,7 +202,7 @@ func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) 
 // configValueCompletion returns suggested values for a config key
 func configValueCompletion(key string) []string {
 	switch key {
-	case "submit_job", "proxy_perjob":
+	case "submit_job", "proxy_perjob", "helper_bind_all":
 		return []string{"true", "false"}
 	case "prefer_remote", "parse_module_load":
 		return []string{"true", "false"}
@@ -211,7 +223,7 @@ func configValueCompletion(key string) []string {
 	case "build.tmp_overlay_size":
 		return []string{"10g", "20g", "40g"}
 	case "notification":
-		return []string{"none", "bell", "email"}
+		return []string{"none", "terminal", "web", "both"}
 	case "metadata_cache_ttl":
 		return []string{"1", "3", "7", "14", "0"}
 	default:
@@ -401,9 +413,9 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 		// Show all settings
 		// Paths: binaries then directories
 		fmt.Println(utils.StyleTitle("Paths:"))
-		fmt.Printf("  apptainer_bin: %s%s\n", viper.GetString("apptainer_bin"), srcTag("apptainer_bin"))
+		fmt.Printf("  apptainer_bin: %s%s\n", config.Global.ApptainerBin, srcTag("apptainer_bin"))
 		printOverridden("                 ", "apptainer_bin")
-		schedulerBin := viper.GetString("scheduler_bin")
+		schedulerBin := config.Global.SchedulerBin
 		schedulerType := config.GetSchedulerTypeFromBin(schedulerBin)
 		if schedulerBin != "" {
 			fmt.Printf("  scheduler_bin: %s (%s)%s\n", schedulerBin, schedulerType, srcTag("scheduler_bin"))
@@ -411,11 +423,7 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 			fmt.Printf("  scheduler_bin: %s%s\n", schedulerBin, srcTag("scheduler_bin"))
 		}
 		printOverridden("                 ", "scheduler_bin")
-		logsDir := viper.GetString("logs_dir")
-		if logsDir == "" {
-			logsDir = config.Global.LogsDir + " (default)"
-		}
-		fmt.Printf("  logs_dir:      %s%s\n", logsDir, srcTag("logs_dir"))
+		fmt.Printf("  logs_dir:      %s%s\n", config.Global.LogsDir, srcTag("logs_dir"))
 		printOverridden("                 ", "logs_dir")
 		extraBuildDirs := config.GetExtraBuildDirs()
 		if len(extraBuildDirs) > 0 {
@@ -488,12 +496,6 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 		printOverridden("                      ", "scheduler_timeout")
 		fmt.Printf("  %-19s %v%s\n", "parse_module_load:", config.Global.ParseModuleLoad, srcTag("parse_module_load"))
 		printOverridden("                      ", "parse_module_load")
-		notif := config.Global.Notification
-		if notif == "" {
-			notif = "none"
-		}
-		fmt.Printf("  %-19s %s%s\n", "notification:", notif, srcTag("notification"))
-		printOverridden("                      ", "notification")
 		if config.Global.MetadataCacheTTL == 0 {
 			fmt.Printf("  %-19s 0 (disabled)%s\n", "metadata_cache_ttl:", srcTag("metadata_cache_ttl"))
 		} else {
@@ -511,6 +513,17 @@ Use --sources (-s) to annotate each value with which config layer provides it.`,
 		} else {
 			fmt.Printf("  %-19s %s\n", "channels:", utils.StyleInfo("none"))
 		}
+		fmt.Println()
+
+		fmt.Println(utils.StyleTitle("Helper:"))
+		fmt.Printf("  %-19s %v%s\n", "helper_bind_all:", config.Global.HelperBindAll, srcTag("helper_bind_all"))
+		printOverridden("                       ", "helper_bind_all")
+		notif := config.Global.Notification
+		if notif == "" {
+			notif = "none"
+		}
+		fmt.Printf("  %-19s %s%s\n", "notification:", notif, srcTag("notification"))
+		printOverridden("                       ", "notification")
 		fmt.Println()
 
 		// Build settings (longest key: tmp_overlay_size = 16 chars)
@@ -599,7 +612,7 @@ With -l, reads only the specified config layer file.`,
 
 		// Merged effective value: env > layers in priority order > viper default
 		if _, known := configKeyDefs[key]; !known {
-			ExitWithUsageError("Unknown config key: %s", key)
+			ExitWithError("Unknown config key: %s", key)
 		}
 		if isArrayKey(key) {
 			for _, v := range viper.GetStringSlice(key) {
@@ -613,13 +626,21 @@ With -l, reads only the specified config layer file.`,
 				found := false
 				for _, layer := range config.GetConfigLayerInfos() {
 					if layer.InConfig(key) {
-						fmt.Println(layer.GetString(key))
+						if isBoolKey(key) {
+							fmt.Println(layer.GetBool(key))
+						} else {
+							fmt.Println(layer.GetString(key))
+						}
 						found = true
 						break
 					}
 				}
 				if !found {
-					fmt.Println(viper.GetString(key)) // default
+					if isBoolKey(key) {
+						fmt.Println(viper.GetBool(key))
+					} else {
+						fmt.Println(viper.GetString(key)) // default
+					}
 				}
 			}
 		}
@@ -654,7 +675,7 @@ Time duration format (for build.time):
 		if key == "default_distro" {
 			if !config.IsValidDistro(value) {
 				utils.PrintError("Unknown distro '%s'. Available: %s", value, strings.Join(config.GetAvailableDistros(), ", "))
-				os.Exit(ExitCodeUsage)
+				os.Exit(ExitCodeError)
 			}
 		}
 
@@ -662,7 +683,7 @@ Time duration format (for build.time):
 		if isArrayKey(key) {
 			utils.PrintError("'%s' is an array setting. Use append/prepend/remove subcommands.", key)
 			utils.PrintHint("  condatainer config append  %s <value>\n  condatainer config prepend %s <value>\n  condatainer config remove  %s <value>", key, key, key)
-			os.Exit(ExitCodeUsage)
+			os.Exit(ExitCodeError)
 		}
 
 		if _, known := knownKeys[key]; !known {
@@ -674,15 +695,15 @@ Time duration format (for build.time):
 			var n int
 			if _, err := fmt.Sscan(value, &n); err != nil || n < 0 {
 				utils.PrintError("Invalid value for scheduler_timeout: %s (must be a non-negative integer; 0 disables the timeout)", value)
-				os.Exit(ExitCodeUsage)
+				os.Exit(ExitCodeError)
 			}
 		}
 
 		if key == "notification" {
 			v := strings.ToLower(value)
-			if v != "" && v != "none" && v != "bell" && v != "email" && len(value) < 5 {
-				utils.PrintError("Invalid value for notification: %q (use 'none', 'bell', 'email', or an ntfy.sh topic of at least 5 characters)", value)
-				os.Exit(ExitCodeUsage)
+			if v != "" && v != "none" && v != "terminal" && v != "web" && v != "both" {
+				utils.PrintError("Invalid value for notification: %q (valid values: none, terminal, web, both)", value)
+				os.Exit(ExitCodeError)
 			}
 		}
 
@@ -690,7 +711,7 @@ Time duration format (for build.time):
 			var n int
 			if _, err := fmt.Sscan(value, &n); err != nil || n < 0 {
 				utils.PrintError("Invalid value for metadata_cache_ttl: %s (must be a non-negative integer in days; 0 disables the cache)", value)
-				os.Exit(ExitCodeUsage)
+				os.Exit(ExitCodeError)
 			}
 		}
 
@@ -698,7 +719,7 @@ Time duration format (for build.time):
 			if _, err := utils.ParseWalltime(value); err != nil {
 				utils.PrintError("Invalid duration format: %s", value)
 				utils.PrintHint("Use format like: 4d12h, 2h30m, 1:30, or 01:30:00")
-				os.Exit(ExitCodeUsage)
+				os.Exit(ExitCodeError)
 			}
 		}
 
@@ -706,7 +727,7 @@ Time duration format (for build.time):
 			if mb, err := utils.ParseMemoryMB(value); err != nil || mb <= 0 {
 				utils.PrintError("Invalid memory format: %s", value)
 				utils.PrintHint("Use format like: 8GB, 16384MB, 8192")
-				os.Exit(ExitCodeUsage)
+				os.Exit(ExitCodeError)
 			} else {
 				value = fmt.Sprintf("%d", mb)
 			}
@@ -716,7 +737,7 @@ Time duration format (for build.time):
 			if mb, err := utils.ParseMemoryMB(value); err != nil || mb <= 0 {
 				utils.PrintError("Invalid memory format: %s", value)
 				utils.PrintHint("Use format like: 10g, 20480m, 20480, 1t")
-				os.Exit(ExitCodeUsage)
+				os.Exit(ExitCodeError)
 			} else {
 				value = fmt.Sprintf("%d", mb)
 			}
@@ -724,6 +745,15 @@ Time duration format (for build.time):
 
 		if key == "build.compress_args" {
 			value = config.NormalizeCompressArgs(value)
+		}
+
+		if isBoolKey(key) {
+			b, err := strconv.ParseBool(value)
+			if err != nil {
+				utils.PrintError("Invalid value for %s: %q (use true or false)", key, value)
+				os.Exit(ExitCodeError)
+			}
+			value = strconv.FormatBool(b)
 		}
 
 		configPath, locationType, err := config.ResolveWritableConfigPath(setLocation)

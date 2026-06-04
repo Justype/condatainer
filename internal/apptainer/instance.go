@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 )
 
 // InstanceStartOptions contains options for starting an instance
@@ -38,7 +39,7 @@ func InstanceStart(ctx context.Context, baseImage string, instanceName string, o
 	// Add base image and instance name
 	args = append(args, baseImage, instanceName)
 
-	return runApptainer(ctx, "instance start", baseImage, false, args...)
+	return runApptainerWithOutput(ctx, "instance start", baseImage, false, nil, os.Stdout, os.Stderr, args...)
 }
 
 // InstanceStop stops a running instance
@@ -54,19 +55,19 @@ func InstanceStop(ctx context.Context, name string, additionalFlags []string) er
 		args = append(args, name)
 	}
 
-	return runApptainer(ctx, "instance stop", "", false, args...)
+	return runApptainerWithOutput(ctx, "instance stop", "", false, nil, os.Stdout, os.Stderr, args...)
 }
 
 // InstanceList lists all running instances
 func InstanceList(ctx context.Context) error {
 	args := []string{"instance", "list"}
-	return runApptainer(ctx, "instance list", "", false, args...)
+	return runApptainerWithOutput(ctx, "instance list", "", false, nil, os.Stdout, os.Stderr, args...)
 }
 
 // InstanceStats shows statistics for a running instance
 func InstanceStats(ctx context.Context, name string) error {
 	args := []string{"instance", "stats", name}
-	return runApptainer(ctx, "instance stats", "", false, args...)
+	return runApptainerWithOutput(ctx, "instance stats", "", false, nil, os.Stdout, os.Stderr, args...)
 }
 
 // InstanceExecOptions contains options for executing commands in an instance
@@ -99,5 +100,9 @@ func InstanceExec(ctx context.Context, instanceName string, command []string, op
 	// Add command
 	args = append(args, command...)
 
-	return runApptainerWithOutput(ctx, "instance exec", instanceURI, false, opts.Stdin, nil, nil, args...)
+	stdin := opts.Stdin
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	return runApptainerWithOutput(ctx, "instance exec", instanceURI, false, stdin, os.Stdout, os.Stderr, args...)
 }

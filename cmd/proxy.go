@@ -93,7 +93,7 @@ var proxyStartCmd = &cobra.Command{
 		} else {
 			// ── Compute node (inside job) ────────────────────────────────────
 			// Check if already running (local or shared)
-			if url, ok := proxy.FindActiveProxy(false); ok {
+			if url, ok := proxy.FindActiveProxy(); ok {
 				utils.PrintMessage("Proxy already active: %s", url)
 				return nil
 			}
@@ -245,7 +245,7 @@ Suitable for: eval $(condatainer proxy show --export)
 
 If no proxy is active, prints nothing.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		httpURL, ok := proxy.FindActiveProxy(false)
+		httpURL, ok := proxy.FindActiveProxy()
 		if !ok {
 			return
 		}
@@ -322,7 +322,7 @@ var proxyDaemonCmd = &cobra.Command{
 
 func init() {
 	proxyStartCmd.Flags().StringVar(&proxyStartHost, "host", "", "Node to run the daemon on — delegates via SSH if different from current node (login node only)")
-	proxyStartCmd.Flags().StringVar(&proxyStartVia, "via", "", "SSH server to tunnel through (default: current node for shared; auto-detected via CNT_PROXY_VIA for per-job)")
+	proxyStartCmd.Flags().StringVar(&proxyStartVia, "via", "", "SSH server to tunnel through (default: current node for shared mode; required for per-job mode inside a job)")
 	proxyStartCmd.Flags().IntVar(&proxyStartPort, "port", 0, "Local port to listen on (default: OS-assigned free port)")
 
 	proxyShowCmd.Flags().BoolVar(&proxyShowExport, "export", false, "Print shell export statements for all proxy env vars (eval-friendly)")
