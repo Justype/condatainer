@@ -94,7 +94,7 @@ async function opFileNavigate(path) {
     gid('op-file-list').innerHTML =
       dirs.map(d =>
         '<div class="modal-row" onclick="opFileNavigate(\'' + escHtml(d.path) + '\')">' +
-          '<span class="modal-row-icon">' + iconSvg('folder') + '</span>' +
+          '<span class="modal-row-icon">' + iconSvg('folder', 'icon-folder', true) + '</span>' +
           '<span class="modal-row-name">' + escHtml(d.name) + '</span>' +
           '<span class="modal-row-sel">' + iconSvg('chevron_right') + '</span>' +
         '</div>'

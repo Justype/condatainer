@@ -30,6 +30,7 @@ func registerRoutes(mux *http.ServeMux, s *srv) {
 	mux.HandleFunc("/api/env/check", s.handleEnvCheck)
 	mux.HandleFunc("/api/helpers/available", s.handleHelpersAvailable)
 	mux.HandleFunc("/api/helpers/update", s.handleHelpersUpdate)
+	mux.HandleFunc("/api/helpers/bookmarks", s.handleHelperBookmarks)
 	mux.HandleFunc("/api/helpers/", s.handleHelpersSub) // /api/helpers/{id}/...
 	mux.HandleFunc("/api/helpers", s.handleHelpersList)
 	mux.HandleFunc("/api/overlay/create", s.handleOverlayCreate)
@@ -38,6 +39,10 @@ func registerRoutes(mux *http.ServeMux, s *srv) {
 	mux.HandleFunc("/api/tasks/", s.handleTaskSub)
 	mux.HandleFunc("/api/overlays", s.handleOverlaysList)
 	mux.HandleFunc("/api/fs", s.handleFS)
+	mux.HandleFunc("/api/fs/download", s.handleFSDownload)
+	mux.HandleFunc("/api/fs/upload/check", s.handleFSUploadCheck)
+	mux.HandleFunc("/api/fs/upload", s.handleFSUpload)
+	mux.HandleFunc("/api/fs/bookmarks", s.handleFSBookmarks)
 	mux.HandleFunc("/api/gpu-options", s.handleGpuOptions)
 
 }

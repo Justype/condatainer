@@ -161,7 +161,7 @@ function navigate(id) {
   else if (id === 'start')    loadHelpers();
   else if (id === 'overlays') loadOverlays();
   else if (id === 'history')  loadHistory();
-  else if (id === 'files')    { renderFileTree(); navigateFiles(currentPath); }
+  else if (id === 'files')    { renderFileTree(); loadFileBookmarks(); navigateFiles(currentPath); }
 }
 
 /* ── Status polling ──────────────────────── */
@@ -235,6 +235,36 @@ function requestNotifPermission() {
 function closeModal(id) { gid(id).classList.remove('open'); }
 document.querySelectorAll('.modal-backdrop').forEach(el => {
   el.addEventListener('click', e => { if (e.target === el) closeModal(el.id); });
+});
+
+/* ── Generic confirm modal ───────────────── */
+// Reusable Cancel/OK confirm dialog, replacing window.confirm() so prompts
+// stay visually consistent with the rest of the app. Returns a Promise
+// resolving true (OK) or false (Cancel/close/backdrop click).
+let _confirmResolve = null;
+
+function askConfirm(message, opts) {
+  opts = opts || {};
+  gid('confirm-modal-title').textContent = opts.title || 'Confirm';
+  gid('confirm-modal-message').textContent = message;
+  gid('confirm-modal-ok-btn').textContent = opts.okLabel || 'OK';
+  gid('confirm-modal').classList.add('open');
+  return new Promise(resolve => { _confirmResolve = resolve; });
+}
+
+function resolveConfirmModal(ok) {
+  gid('confirm-modal').classList.remove('open');
+  if (_confirmResolve) {
+    const resolve = _confirmResolve;
+    _confirmResolve = null;
+    resolve(ok);
+  }
+}
+// The generic backdrop-click handler above only hides the modal — it
+// doesn't resolve the pending promise, which would leave any `await
+// askConfirm(...)` call hanging forever. Resolve it explicitly as a cancel.
+gid('confirm-modal').addEventListener('click', e => {
+  if (e.target.id === 'confirm-modal') resolveConfirmModal(false);
 });
 
 /* ── Keyboard shortcuts ──────────────────── */

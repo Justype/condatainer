@@ -164,6 +164,7 @@ async function loadGpuOptions(force) {
 }
 
 async function loadHelpers(force) {
+  loadHelperBookmarks();
   if (!force && _helpersLoading) {
     await _helpersLoading;
     return;
@@ -487,32 +488,53 @@ function resetStartForm(helper) {
   updateOvPreview();
 }
 
-/* ── Helper pin state ────────────────────── */
-const _pinnedKey = 'cnt_pinned_helpers';
-function _getPinned() {
-  try { return new Set(JSON.parse(localStorage.getItem(_pinnedKey) || '[]')); } catch { return new Set(); }
+/* ── Helper bookmark state (server-persisted, not localStorage) ── */
+let helperBookmarks       = new Set();
+let _helperBookmarksLoaded = false;
+
+async function loadHelperBookmarks() {
+  if (_helperBookmarksLoaded) return;
+  _helperBookmarksLoaded = true;
+  try {
+    const list = (await (await fetch('/api/helpers/bookmarks')).json()) || [];
+    helperBookmarks = new Set(list);
+  } catch { helperBookmarks = new Set(); }
+  renderHelperList(gid('h-search')?.value);
 }
-function togglePin(name, e) {
+
+async function toggleHelperBookmark(name, e) {
   e.stopPropagation();
-  const pinned = _getPinned();
-  if (pinned.has(name)) pinned.delete(name); else pinned.add(name);
-  localStorage.setItem(_pinnedKey, JSON.stringify([...pinned]));
+  const isBookmarked = helperBookmarks.has(name);
+  try {
+    const r = isBookmarked
+      ? await fetch('/api/helpers/bookmarks?name=' + encodeURIComponent(name), { method: 'DELETE' })
+      : await fetch('/api/helpers/bookmarks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+    if (!r.ok) { alert('Could not update bookmark: ' + (await r.text())); return; }
+    helperBookmarks = new Set((await r.json()) || []);
+  } catch (err) {
+    alert('Could not update bookmark: ' + err);
+    return;
+  }
   renderHelperList(gid('h-search')?.value);
 }
 
 function renderHelperList(filter) {
-  const list   = gid('helper-list');
-  const q      = (filter || '').toLowerCase().trim();
-  const pinned = _getPinned();
+  const list      = gid('helper-list');
+  const q         = (filter || '').toLowerCase().trim();
+  const bookmarked = helperBookmarks;
   let helpers  = q
     ? allHelpers.filter(h =>
         h.name.toLowerCase().includes(q) ||
         (h.whatis || '').toLowerCase().includes(q))
     : allHelpers;
-  // Pinned items float to the top
+  // Bookmarked items float to the top
   helpers = [
-    ...helpers.filter(h => pinned.has(h.name)),
-    ...helpers.filter(h => !pinned.has(h.name)),
+    ...helpers.filter(h => bookmarked.has(h.name)),
+    ...helpers.filter(h => !bookmarked.has(h.name)),
   ];
   if (!helpers.length) {
     list.innerHTML = '<div class="modal-empty">' +
@@ -520,14 +542,14 @@ function renderHelperList(filter) {
     return;
   }
   list.innerHTML = helpers.map(h => {
-    const isPinned = pinned.has(h.name);
+    const isBookmarked = bookmarked.has(h.name);
     return '<div class="h-item" data-name="' + escHtml(h.name) + '" onclick="selectHelper(\'' + escHtml(h.name) + '\')">' +
       '<div class="h-item-content">' +
         '<div class="h-item-name">' + escHtml(h.name) + '</div>' +
         '<div class="h-item-desc">'  + escHtml(h.whatis || '') + '</div>' +
       '</div>' +
-      '<button class="h-pin-btn' + (isPinned ? ' pinned' : '') + '" onclick="togglePin(\'' + escHtml(h.name) + '\',event)" title="' + (isPinned ? 'Unpin' : 'Pin') + '">' +
-        iconSvg('star', null, isPinned) +
+      '<button class="btn btn-sm btn-ghost h-item-star' + (isBookmarked ? ' starred' : '') + '" onclick="toggleHelperBookmark(\'' + escHtml(h.name) + '\',event)" title="' + (isBookmarked ? 'Remove bookmark' : 'Bookmark') + '">' +
+        iconSvg('star', null, isBookmarked) +
       '</button>' +
     '</div>';
   }).join('');

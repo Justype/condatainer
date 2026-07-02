@@ -234,10 +234,19 @@
           <div class="file-toolbar">
             <input class="field-input" id="path-input"
                    placeholder="Type a path and press Enter" spellcheck="false">
+            <button class="btn btn-sm btn-ghost" id="bookmark-star-btn" onclick="toggleBookmark(currentPath)" title="Bookmark this folder"></button>
+            <input type="file" id="upload-file-input" multiple hidden onchange="handleUploadInputChange(this,false)">
+            <input type="file" id="upload-dir-input" webkitdirectory multiple hidden onchange="handleUploadInputChange(this,true)">
+            <button class="btn btn-sm" id="upload-file-btn" onclick="gid('upload-file-input').click()"><svg class="icon"><use href="#i-upload"></use></svg>file</button>
+            <button class="btn btn-sm" id="upload-dir-btn" onclick="gid('upload-dir-input').click()"><svg class="icon"><use href="#i-upload"></use></svg>folder</button>
+          </div>
+          <div class="upload-progress-bar" id="upload-progress-bar" hidden>
+            <div class="upload-progress-track"><div class="upload-progress-fill" id="upload-progress-fill"></div></div>
+            <span class="upload-progress-label" id="upload-progress-label"></span>
           </div>
           <div class="file-list-wrap">
             <table class="data-table">
-              <thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead>
+              <thead><tr><th>Name</th><th>Size</th><th>Modified</th><th class="file-actions-cell">Actions</th></tr></thead>
               <tbody id="file-tbody"></tbody>
             </table>
           </div>
@@ -376,6 +385,60 @@
     </div>
     <div class="modal-ftr">
       <button class="btn btn-sm" onclick="closeModal('op-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Upload Conflict Modal ──────────────── -->
+<div class="modal-backdrop" id="upload-conflict-modal">
+  <div class="modal modal-sm">
+    <div class="modal-hdr">
+      <span>File already exists</span>
+      <button class="btn btn-ghost btn-sm" onclick="resolveUploadConflict('cancel')"><svg class="icon"><use href="#i-close"></use></svg></button>
+    </div>
+    <div class="modal-body modal-body-pad">
+      <p class="modal-question">"<strong id="upload-conflict-path"></strong>" already exists at the destination. Overwrite it?</p>
+    </div>
+    <div class="modal-ftr modal-ftr-end">
+      <button class="btn btn-sm" onclick="resolveUploadConflict('cancel')">Cancel</button>
+      <button class="btn btn-sm" id="upload-conflict-no-all-btn" onclick="resolveUploadConflict('no-all')">No to All</button>
+      <button class="btn btn-sm" onclick="resolveUploadConflict('no')">No</button>
+      <button class="btn btn-sm" id="upload-conflict-yes-all-btn" onclick="resolveUploadConflict('yes-all')">Yes to All</button>
+      <button class="btn btn-sm btn-primary" onclick="resolveUploadConflict('yes')">Yes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Delete Confirm Modal ───────────────── -->
+<div class="modal-backdrop" id="delete-confirm-modal">
+  <div class="modal modal-sm">
+    <div class="modal-hdr">
+      <span>Delete</span>
+      <button class="btn btn-ghost btn-sm" onclick="confirmDelete('cancel')"><svg class="icon"><use href="#i-close"></use></svg></button>
+    </div>
+    <div class="modal-body modal-body-pad">
+      <p class="modal-question">Delete "<strong id="delete-confirm-name"></strong>"? This cannot be undone.</p>
+    </div>
+    <div class="modal-ftr modal-ftr-end">
+      <button class="btn btn-sm" onclick="confirmDelete('cancel')">Cancel</button>
+      <button class="btn btn-sm btn-danger" onclick="confirmDelete('yes')">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Generic Confirm Modal ──────────────── -->
+<div class="modal-backdrop" id="confirm-modal">
+  <div class="modal modal-sm">
+    <div class="modal-hdr">
+      <span id="confirm-modal-title">Confirm</span>
+      <button class="btn btn-ghost btn-sm" onclick="resolveConfirmModal(false)"><svg class="icon"><use href="#i-close"></use></svg></button>
+    </div>
+    <div class="modal-body modal-body-pad">
+      <p class="modal-question" id="confirm-modal-message"></p>
+    </div>
+    <div class="modal-ftr modal-ftr-end">
+      <button class="btn btn-sm" onclick="resolveConfirmModal(false)">Cancel</button>
+      <button class="btn btn-sm btn-primary" id="confirm-modal-ok-btn" onclick="resolveConfirmModal(true)">OK</button>
     </div>
   </div>
 </div>
