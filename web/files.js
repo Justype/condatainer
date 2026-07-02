@@ -126,9 +126,7 @@ function confirmDelete(mode) {
 }
 // Clicking the backdrop cancels, matching the "cancel" button (the generic
 // .modal-backdrop click handler in app.js only hides the modal).
-gid('delete-confirm-modal').addEventListener('click', e => {
-  if (e.target.id === 'delete-confirm-modal') confirmDelete('cancel');
-});
+onBackdropClick(gid('delete-confirm-modal'), () => confirmDelete('cancel'));
 
 async function doDelete(path) {
   try {
@@ -416,9 +414,7 @@ function resolveUploadConflict(mode) {
 }
 // Clicking the backdrop cancels the conflict flow (the generic .modal-backdrop
 // click handler in app.js only hides the modal — it doesn't resolve our promise).
-gid('upload-conflict-modal').addEventListener('click', e => {
-  if (e.target.id === 'upload-conflict-modal') resolveUploadConflict('cancel');
-});
+onBackdropClick(gid('upload-conflict-modal'), () => resolveUploadConflict('cancel'));
 
 function doUpload(skipSet) {
   const items = _pendingUpload.filter(p => !skipSet.has(p.relPath));
@@ -472,9 +468,42 @@ function openFilePicker(targetId, mode, fallbackId, suffix) {
   gid('fp-title').textContent = mode === 'dir' ? 'Select Directory' : 'Select File';
   const selDirBtn = gid('fp-select-dir-btn');
   if (selDirBtn) selDirBtn.style.display = mode === 'file' ? 'none' : '';
+  _renderFpBookmarkSelect();
+  loadFileBookmarks().then(_renderFpBookmarkSelect); // picks up bookmarks even if the Files tab was never visited this session
   fpNavigate(fpPath);
   gid('fp-modal').classList.add('open');
 }
+
+// Populates the "Go to…" bookmark dropdown in the file picker with the
+// same permanent shortcuts (Root/$HOME/$SCRATCH) and server-persisted
+// bookmarks shown in the Files tab's sidebar tree.
+function _renderFpBookmarkSelect() {
+  const sel = gid('fp-bookmark-select');
+  if (!sel) return;
+  const permanent = [['/', '/ Root']];
+  if (srvHome)    permanent.push([srvHome,    '$HOME']);
+  if (srvScratch) permanent.push([srvScratch, '$SCRATCH']);
+  let html = '<option value="">Go to…</option>' +
+    '<optgroup label="Shortcuts">' +
+      permanent.map(([p, label]) => '<option value="' + escHtml(p) + '">' + escHtml(label) + '</option>').join('') +
+    '</optgroup>';
+  if (fileBookmarks.length) {
+    html += '<optgroup label="Bookmarks">' +
+      fileBookmarks.map(b => '<option value="' + escHtml(b.path) + '">' + escHtml(b.label || b.path) + '</option>').join('') +
+      '</optgroup>';
+  }
+  sel.innerHTML = html;
+}
+
+function fpJumpToBookmark(selectEl) {
+  const path = selectEl.value;
+  selectEl.value = '';
+  if (path) fpNavigate(path);
+}
+
+gid('fp-path-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') fpNavigate(e.target.value.trim() || '/');
+});
 
 function _renderFpBreadcrumb(path) { _renderBreadcrumb('fp-bc', path, 'fpNavigate'); }
 
@@ -493,6 +522,7 @@ async function fpNavigate(path) {
       fpPath = entries[0].path.replace(/\/[^/]+$/, '') || '/';
     }
     _renderFpBreadcrumb(fpPath);
+    _setVal('fp-path-input', fpPath);
     const dirs  = entries.filter(e =>  e.is_dir && (showHiddenFiles || !e.name.startsWith('.')));
     const files = fpMode !== 'dir' ? entries.filter(e => !e.is_dir && (showHiddenFiles || !e.name.startsWith('.')) && (!fpSuffix || e.name.endsWith(fpSuffix))) : [];
     gid('fp-body').innerHTML =

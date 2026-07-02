@@ -233,8 +233,26 @@ function requestNotifPermission() {
 
 /* ── Modal helpers ───────────────────────── */
 function closeModal(id) { gid(id).classList.remove('open'); }
+
+// Fires handler on a genuine click on the backdrop itself (i.e. outside the
+// modal content) — but NOT when the user starts a text selection by
+// mousedown-ing inside an input/content and drags past the modal edge
+// before releasing. A plain `click` listener checking e.target === el gets
+// that wrong: browsers still fire `click` on the backdrop when mouseup
+// lands there even if mousedown started elsewhere, since click doesn't
+// require mousedown/mouseup to share a target. Requiring mousedown to
+// *also* have started on the backdrop fixes it.
+function onBackdropClick(el, handler) {
+  let downOnBackdrop = false;
+  el.addEventListener('mousedown', e => { downOnBackdrop = (e.target === el); });
+  el.addEventListener('click', e => {
+    if (downOnBackdrop && e.target === el) handler();
+    downOnBackdrop = false;
+  });
+}
+
 document.querySelectorAll('.modal-backdrop').forEach(el => {
-  el.addEventListener('click', e => { if (e.target === el) closeModal(el.id); });
+  onBackdropClick(el, () => closeModal(el.id));
 });
 
 /* ── Generic confirm modal ───────────────── */
@@ -263,9 +281,7 @@ function resolveConfirmModal(ok) {
 // The generic backdrop-click handler above only hides the modal — it
 // doesn't resolve the pending promise, which would leave any `await
 // askConfirm(...)` call hanging forever. Resolve it explicitly as a cancel.
-gid('confirm-modal').addEventListener('click', e => {
-  if (e.target.id === 'confirm-modal') resolveConfirmModal(false);
-});
+onBackdropClick(gid('confirm-modal'), () => resolveConfirmModal(false));
 
 /* ── Keyboard shortcuts ──────────────────── */
 document.addEventListener('keydown', e => {

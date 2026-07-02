@@ -343,12 +343,18 @@
 
 <!-- ── File Picker Modal ─────────────────── -->
 <div class="modal-backdrop" id="fp-modal">
-  <div class="modal">
+  <div class="modal modal-lg">
     <div class="modal-hdr">
       <span id="fp-title">Browse</span>
       <button class="btn btn-ghost btn-sm" onclick="closeModal('fp-modal')"><svg class="icon"><use href="#i-close"></use></svg></button>
     </div>
     <div class="modal-bc" id="fp-bc"></div>
+    <div class="modal-toolbar">
+      <select class="field-input" id="fp-bookmark-select" onchange="fpJumpToBookmark(this)">
+        <option value="">Go to…</option>
+      </select>
+      <input class="field-input" id="fp-path-input" placeholder="Type a path and press Enter" spellcheck="false">
+    </div>
     <div class="modal-body" id="fp-body"></div>
     <div class="modal-ftr">
       <label class="toggle-lbl">

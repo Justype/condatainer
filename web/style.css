@@ -342,7 +342,7 @@ input,button,select{font-family:inherit;font-size:inherit;}
 .tree-item:hover{background:var(--surface2);}
 .tree-item.active{background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--accent);}
 .tree-sep{border-top:1px solid var(--border);margin:6px 2px;}
-.tree-item-bm{justify-content:space-between;}
+.tree-item-bm{justify-content:space-between;padding-top:2px;padding-bottom:2px;}
 .tree-item-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
 .tree-item-remove{padding:2px;opacity:0;flex-shrink:0;}
 .tree-item-bm:hover .tree-item-remove{opacity:1;}
@@ -367,6 +367,9 @@ input,button,select{font-family:inherit;font-size:inherit;}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);width:520px;max-height:72vh;display:flex;flex-direction:column;overflow:hidden;}
 .modal-hdr{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:14px;flex-shrink:0;}
 .modal-bc{display:flex;align-items:center;gap:4px;padding:8px 16px;border-bottom:1px solid var(--border);font-size:13px;flex-shrink:0;}
+.modal-toolbar{display:flex;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.modal-toolbar .field-input{flex:1;width:auto;}
+.modal-toolbar select.field-input{flex:0 0 85px;min-width:0;}
 .modal-body{flex:1;overflow-y:auto;}
 .modal-ftr{padding:10px 16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;flex-shrink:0;}
 .toggle-lbl{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer;user-select:none;}
@@ -436,7 +439,7 @@ code{font-family:var(--mono);}
 .btn-start{align-self:flex-start;}
 .btn-row{display:flex;gap:8px;align-items:center;}
 .modal-lg{width:560px;}
-.modal-sm{width:380px;}
+.modal-sm{width:420px;}
 .modal-body-pad{padding:16px;}
 .modal-question{font-size:14px;color:var(--text);line-height:1.5;margin:0;word-break:break-word;}
 .modal-ftr-end{justify-content:flex-end;}
