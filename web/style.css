@@ -336,7 +336,8 @@ input,button,select{font-family:inherit;font-size:inherit;}
 .upload-progress-track{flex:1;height:6px;border-radius:3px;background:var(--surface2);overflow:hidden;}
 .upload-progress-fill{height:100%;width:0%;background:var(--accent);transition:width 120ms linear;}
 .upload-progress-label{flex-shrink:0;font-size:12px;font-family:var(--mono);color:var(--muted);white-space:nowrap;}
-.file-list-wrap{flex:1;overflow-y:auto;}
+.file-list-wrap{flex:1;overflow-y:auto;border:2px dashed transparent;transition:background 120ms,border-color 120ms;}
+.file-list-wrap.drag-over{background:color-mix(in srgb,var(--accent) 8%,transparent);border-color:var(--accent);}
 .tree-item{display:flex;align-items:center;gap:5px;padding:5px 8px;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;}
 .tree-item:hover{background:var(--surface2);}
 .tree-item.active{background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--accent);}

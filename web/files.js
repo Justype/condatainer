@@ -267,10 +267,94 @@ function handleUploadInputChange(inputEl, isDir) {
   const files = Array.from(inputEl.files || []);
   inputEl.value = ''; // allow re-selecting the same file(s) later
   if (!files.length) return;
-  _pendingUpload = files.map(f => ({ file: f, relPath: f.webkitRelativePath || f.name }));
+  startUpload(files.map(f => ({ file: f, relPath: f.webkitRelativePath || f.name })));
+}
+
+// startUpload is the single entry point into the upload flow (conflict
+// check → resolution → XHR), shared by the file/folder <input> pickers and
+// the drag-and-drop zone below. items is [{file, relPath}].
+function startUpload(items) {
+  if (_uploadBusy || !items.length) return;
+  _pendingUpload = items;
   _setUploadBusy(true);
   checkUploadConflicts();
 }
+
+/* ── Drag-and-drop upload ─────────────────── */
+// Reads all entries out of a DirectoryReader — Chrome caps each readEntries()
+// call at ~100 results, so it must be called repeatedly until it returns an
+// empty batch, not just once.
+function _readAllDirEntries(reader) {
+  return new Promise((resolve, reject) => {
+    let all = [];
+    (function readBatch() {
+      reader.readEntries(entries => {
+        if (!entries.length) { resolve(all); return; }
+        all = all.concat(entries);
+        readBatch();
+      }, reject);
+    })();
+  });
+}
+
+function _fileFromEntry(entry) {
+  return new Promise((resolve, reject) => entry.file(resolve, reject));
+}
+
+// Recursively walks a FileSystemEntry (from DataTransferItem.webkitGetAsEntry),
+// appending {file, relPath} pairs to out — same shape handleUploadInputChange
+// builds from an <input> selection, so both feed into startUpload identically.
+async function _walkDroppedEntry(entry, basePath, out) {
+  if (entry.isFile) {
+    const file = await _fileFromEntry(entry);
+    out.push({ file, relPath: basePath + entry.name });
+  } else if (entry.isDirectory) {
+    const entries = await _readAllDirEntries(entry.createReader());
+    for (const child of entries) {
+      await _walkDroppedEntry(child, basePath + entry.name + '/', out);
+    }
+  }
+}
+
+const _dropZone = gid('file-list-wrap');
+let _dragDepth = 0; // counts nested dragenter/dragleave so the highlight doesn't flicker over child rows
+
+_dropZone.addEventListener('dragover', e => {
+  if (_uploadBusy || !e.dataTransfer.types.includes('Files')) return;
+  e.preventDefault(); // required to allow a drop
+});
+
+_dropZone.addEventListener('dragenter', e => {
+  if (_uploadBusy || !e.dataTransfer.types.includes('Files')) return;
+  e.preventDefault();
+  _dragDepth++;
+  _dropZone.classList.add('drag-over');
+});
+
+_dropZone.addEventListener('dragleave', () => {
+  _dragDepth = Math.max(0, _dragDepth - 1);
+  if (_dragDepth === 0) _dropZone.classList.remove('drag-over');
+});
+
+_dropZone.addEventListener('drop', async e => {
+  e.preventDefault();
+  _dragDepth = 0;
+  _dropZone.classList.remove('drag-over');
+  if (_uploadBusy) return;
+
+  const dtItems = e.dataTransfer.items;
+  if (!dtItems || !dtItems.length) return;
+  const entries = Array.from(dtItems)
+    .map(it => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null))
+    .filter(Boolean);
+  if (!entries.length) return;
+
+  const items = [];
+  for (const entry of entries) {
+    await _walkDroppedEntry(entry, '', items);
+  }
+  startUpload(items);
+});
 
 async function checkUploadConflicts() {
   try {
