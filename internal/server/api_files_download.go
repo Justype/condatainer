@@ -2,6 +2,7 @@ package server
 
 import (
 	"archive/zip"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"io/fs"
@@ -19,24 +20,13 @@ const (
 	maxDownloadBytes = 5 << 30 // 5 GiB
 )
 
-// handleFSDownload serves GET /api/fs/download?path=...&inline=1 — serves a
-// single file as-is (following symlinks, matching handleFS's listing
-// behavior), or a directory as a streamed zip archive.
-//
-// By default a file is served with Content-Disposition: attachment, forcing
-// a save-as download (the dashboard's explicit Download button always uses
-// this). Passing inline=1 serves it with Content-Disposition: inline
-// instead, so the browser renders it directly — used when a file row in
-// the listing is clicked directly, as opposed to the Download button.
-// inline is ignored for directories, which always download as a zip.
-//
-// Directory downloads do NOT follow symlinks (unlike the file case and
-// unlike handleFS's listing): the zip walk uses Lstat-based traversal and
-// skips symlink entries entirely, to avoid symlink loops or a link pointing
-// outside the intended subtree silently ballooning the archive. Before
-// streaming begins, the directory is pre-walked to check it doesn't exceed
-// maxDownloadEntries/maxDownloadBytes; oversized directories are rejected
-// with 413 rather than truncating an in-progress response.
+// handleFSDownload serves GET /api/fs/download?path=... — a single file
+// as-is (following symlinks), or a directory as a streamed zip archive
+// (symlinks inside skipped, not followed; oversized directories rejected
+// with 413). File-only query params: inline=1 serves with
+// Content-Disposition: inline instead of attachment; gz=1 streams the file
+// gzip-compressed as <name>.gz and takes precedence over inline. check=1
+// only validates the download (200 or 413), streaming nothing.
 func (s *srv) handleFSDownload(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -49,8 +39,30 @@ func (s *srv) handleFSDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// FIFOs/sockets/devices are not downloadable — opening one can block forever.
+	if !info.IsDir() && !info.Mode().IsRegular() {
+		http.Error(w, "not a regular file", http.StatusBadRequest)
+		return
+	}
+
+	// the dashboard pre-checks with check=1 because its <a download>
+	// trigger gets no error feedback from a failed real download
+	if r.URL.Query().Get("check") == "1" {
+		if info.IsDir() {
+			if err := checkDirDownload(path); err != nil {
+				http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+				return
+			}
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+		return
+	}
 
 	if !info.IsDir() {
+		if r.URL.Query().Get("gz") == "1" {
+			downloadFileGz(w, path, info)
+			return
+		}
 		inline := r.URL.Query().Get("inline") == "1"
 		downloadFile(w, r, path, info, inline)
 		return
@@ -59,13 +71,9 @@ func (s *srv) handleFSDownload(w http.ResponseWriter, r *http.Request) {
 	downloadDir(w, path)
 }
 
-// downloadFile streams a single file, following symlinks transparently
-// (path/info are already resolved by the caller's os.Stat). disposition is
-// "inline" when inline is true, "attachment" otherwise; the browser decides
-// whether it can actually render an inline response based on the detected
-// Content-Type (set by http.ServeContent from the extension or content
-// sniffing) — unrenderable types still fall back to a download prompt even
-// with inline set.
+// downloadFile streams a single file, following symlinks. Served inline
+// (the browser renders it if it can) when inline is true, as an attachment
+// otherwise.
 func downloadFile(w http.ResponseWriter, r *http.Request, path string, info os.FileInfo, inline bool) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -82,21 +90,44 @@ func downloadFile(w http.ResponseWriter, r *http.Request, path string, info os.F
 	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), f)
 }
 
-// downloadDir zips dirPath and streams the archive with a Content-Disposition
-// attachment header. Symlinks inside the tree are skipped, not followed.
-func downloadDir(w http.ResponseWriter, dirPath string) {
+// downloadFileGz streams a single file gzip-compressed, as an attachment
+// named <base>.gz. The gzip header carries the original name and mtime, so
+// gunzip restores them.
+func downloadFileGz(w http.ResponseWriter, path string, info os.FileInfo) {
+	f, err := os.Open(path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer f.Close()
+
+	base := filepath.Base(path)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", base+".gz"))
+	w.Header().Set("Content-Type", "application/gzip")
+
+	gz := gzip.NewWriter(w)
+	gz.Name = base
+	gz.ModTime = info.ModTime()
+	defer gz.Close()
+	io.Copy(gz, f) //nolint:errcheck
+}
+
+// checkDirDownload pre-walks dirPath and returns an error if it exceeds
+// maxDownloadEntries or maxDownloadBytes (symlinks and other non-regular
+// files skipped, matching the zip walk).
+func checkDirDownload(dirPath string) error {
 	var entryCount int
 	var totalBytes int64
-	walkErr := filepath.WalkDir(dirPath, func(p string, d fs.DirEntry, err error) error {
+	return filepath.WalkDir(dirPath, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || d.Type()&os.ModeSymlink != 0 {
+		if d.IsDir() || !d.Type().IsRegular() {
 			return nil
 		}
 		entryCount++
 		if entryCount > maxDownloadEntries {
-			return fmt.Errorf("directory contains more than %d entries", maxDownloadEntries)
+			return fmt.Errorf("folder is too large to download as zip: more than %d files", maxDownloadEntries)
 		}
 		info, err := d.Info()
 		if err != nil {
@@ -104,12 +135,18 @@ func downloadDir(w http.ResponseWriter, dirPath string) {
 		}
 		totalBytes += info.Size()
 		if totalBytes > maxDownloadBytes {
-			return fmt.Errorf("directory exceeds %d bytes", maxDownloadBytes)
+			return fmt.Errorf("folder is too large to download as zip: over %d GiB in total", maxDownloadBytes>>30)
 		}
 		return nil
 	})
-	if walkErr != nil {
-		http.Error(w, "directory too large to download: "+walkErr.Error(), http.StatusRequestEntityTooLarge)
+}
+
+// downloadDir zips dirPath and streams the archive with a Content-Disposition
+// attachment header. Symlinks and other non-regular files inside the tree
+// are skipped (symlinks are not followed).
+func downloadDir(w http.ResponseWriter, dirPath string) {
+	if err := checkDirDownload(dirPath); err != nil {
+		http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
 		return
 	}
 
@@ -121,7 +158,7 @@ func downloadDir(w http.ResponseWriter, dirPath string) {
 	defer zw.Close()
 
 	filepath.WalkDir(dirPath, func(p string, d fs.DirEntry, err error) error { //nolint:errcheck
-		if err != nil || d.IsDir() || d.Type()&os.ModeSymlink != 0 {
+		if err != nil || d.IsDir() || !d.Type().IsRegular() {
 			return nil
 		}
 		rel, err := filepath.Rel(dirPath, p)

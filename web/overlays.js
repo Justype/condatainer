@@ -24,7 +24,7 @@ function renderOverlays(filter) {
       '<td class="mono path-cell td-muted">' + pathTailHtml(o.path) + '</td>' +
       '<td><div class="td-actions">' +
         '<button class="btn btn-sm" onclick="pickOverlay(\'' + escHtml(o.path) + '\')">Use</button>' +
-        '<button class="btn btn-sm btn-ghost" onclick="copyStr(\'' + escHtml(o.path) + '\',this)" title="Copy path">' + iconSvg('content_copy') + '</button>' +
+        '<button class="btn btn-sm btn-ghost btn-icon" onclick="copyStr(\'' + escHtml(o.path) + '\',this)" title="Copy path">' + iconSvg('content_copy') + '</button>' +
       '</div></td>' +
     '</tr>'
   ).join('');

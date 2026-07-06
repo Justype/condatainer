@@ -43,6 +43,7 @@ func registerRoutes(mux *http.ServeMux, s *srv) {
 	mux.HandleFunc("/api/fs/upload/check", s.handleFSUploadCheck)
 	mux.HandleFunc("/api/fs/upload", s.handleFSUpload)
 	mux.HandleFunc("/api/fs/bookmarks", s.handleFSBookmarks)
+	mux.HandleFunc("/api/fs/copy", s.handleFSCopy)
 	mux.HandleFunc("/api/gpu-options", s.handleGpuOptions)
 
 }

@@ -14,7 +14,7 @@
 }
 [data-theme="dark"] {
   --bg: #0d1117; --surface: #161b22; --surface2: #1c2128;
-  --border: #30363d; --text: #c9d1d9; --muted: #7d8590;
+  --border: #30363d; --text: #c9d1d9; --muted: #99a1ab;
   --accent: #58a6ff; --success: #2ea043; --warn: #d29922;
   --danger: #c0392b; --term-bg: #282c34; --term-fg: #dcdfe4; --term-err: #e06c75; --term-warn: #e5c07b;
 }
@@ -42,7 +42,8 @@ input,button,select{font-family:inherit;font-size:inherit;}
   fill:currentColor;stroke:none;
   flex-shrink:0;
 }
-.icon-folder{color:var(--warn);}
+.icon-folder{color:#e8a020;}
+.icon-danger{color:var(--danger);}
 
 /* ── Sidebar ─────────────────────────────── */
 #sidebar-wrap{position:relative;display:flex;flex-shrink:0;}
@@ -142,6 +143,7 @@ input,button,select{font-family:inherit;font-size:inherit;}
 .btn-ghost{background:transparent;border-color:transparent;color:var(--muted);padding:4px 8px;}
 .btn-ghost:hover{color:var(--text);background:var(--surface2);border-color:var(--border);}
 .btn-sm{padding:3px 8px;font-size:12px;}
+.btn-icon{padding:3px;} /* icon-only buttons: square around the icon; text buttons keep 3px 8px */
 .btn[disabled]{opacity:.4;cursor:not-allowed;pointer-events:none;}
 .btn-success{background:var(--success);color:#fff;border-color:var(--success);}
 .btn-success:hover{opacity:.88;}
@@ -247,18 +249,33 @@ input,button,select{font-family:inherit;font-size:inherit;}
 .combo-empty{color:var(--muted);cursor:default;}
 .combo-input.combo-invalid,.field-input.combo-invalid{border-color:var(--danger);}
 
-/* ── Progress window ─────────────────────── */
-.prog-window{display:none;position:fixed;bottom:20px;right:20px;width:min(520px,calc(100vw - 40px));max-height:min(380px,calc(100vh - 40px));background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 8px 32px rgba(0,0,0,.3);flex-direction:column;z-index:20;}
-.prog-window.visible{display:flex;}
-.prog-window.minimized{width:min(340px,calc(100vw - 40px));max-height:none;}
-.prog-window.minimized .prog-win-body{display:none;}
-.prog-window.minimized .prog-win-hdr{border-bottom:none;}
+/* ── Progress stack ──────────────────────── */
+/* Anchored bottom-LEFT of the content area (inside #app): the app's
+   primary actions — helper Start, file row buttons — cluster bottom-right,
+   so pills there would sit on top of them. */
+.prog-stack{
+  position:absolute;bottom:20px;left:20px;z-index:20;
+  display:flex;flex-direction:column-reverse;gap:8px;
+  max-height:calc(100% - 40px);overflow-y:auto;
+  width:min(360px,calc(100% - 40px));
+  pointer-events:none; /* empty space in the stack shouldn't block clicks; pills opt back in below */
+}
+.prog-pill{pointer-events:auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,.3);flex-shrink:0;overflow:hidden;}
 @keyframes spin{to{transform:rotate(360deg)}}
 .spin{animation:spin 2s linear infinite;display:inline-block;}
-.prog-win-hdr{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;}
-.prog-win-title{font-size:13px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.prog-win-status{font-size:14px;flex-shrink:0;}
-.prog-win-body{flex:1;overflow-y:auto;padding:8px 10px;min-height:60px;background:var(--term-bg);}
+.prog-pill-hdr{display:flex;align-items:center;gap:8px;padding:8px 10px;}
+.log-type .prog-pill-hdr{cursor:pointer;}
+.prog-pill-title{font-size:13px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.prog-pill-status{font-size:14px;flex-shrink:0;}
+.prog-pill-chevron{flex-shrink:0;display:flex;color:var(--muted);}
+.prog-pill-chevron .icon{width:18px;height:18px;}
+.prog-pill-close{flex-shrink:0;}
+.prog-pill-log{display:none;max-height:220px;overflow-y:auto;padding:8px 10px;background:var(--term-bg);}
+.prog-pill.expanded .prog-pill-log{display:block;}
+.prog-pill-bar-wrap{padding:0 10px 10px;}
+.prog-pill-track{height:6px;border-radius:3px;background:var(--surface2);overflow:hidden;}
+.prog-pill-fill{height:100%;width:0%;background:var(--accent);transition:width 120ms linear;}
+.prog-pill-label{margin-top:5px;font-size:11px;font-family:var(--mono);color:var(--muted);}
 
 /* ── TermView pre ────────────────────────── */
 .tv-pre{margin:0;font-family:var(--mono);font-size:12px;color:var(--term-fg);white-space:pre-wrap;word-break:break-all;line-height:1.55;}
@@ -321,9 +338,15 @@ input,button,select{font-family:inherit;font-size:inherit;}
 
 /* ── Files ────────────────────────────────── */
 .files-layout{display:flex;flex:1;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;min-height:0;}
-.file-tree{width:25%;max-width:300px;border-right:1px solid var(--border);background:var(--surface);overflow-y:auto;padding:6px;}
+.file-tree{width:20%;max-width:175px;border-right:1px solid var(--border);background:var(--surface);overflow-y:auto;padding:6px;}
 .file-main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
-.breadcrumb{display:flex;align-items:center;gap:4px;padding:8px 12px;border-bottom:1px solid var(--border);font-size:13px;flex-shrink:0;}
+/* Windows-style path control: breadcrumb that swaps to an input on click */
+.path-box{flex:1;min-width:0;display:flex;align-items:center;height:30px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;}
+.path-box:focus-within{border-color:var(--accent);}
+.path-box-crumbs{flex:1;min-width:0;height:100%;display:flex;align-items:center;gap:4px;padding:0 10px;font-size:13px;white-space:nowrap;overflow-x:auto;scrollbar-width:none;cursor:text;}
+.path-box-crumbs::-webkit-scrollbar{display:none;}
+.path-box-input{flex:1;min-width:0;height:100%;padding:0 10px;background:transparent;border:none;outline:none;color:var(--text);font-family:var(--mono);font-size:13px;}
+.path-box-crumbs[hidden],.path-box-input[hidden]{display:none;}
 .bc-seg{color:var(--accent);cursor:pointer;}
 .bc-seg:hover{text-decoration:underline;}
 .bc-sep{color:var(--text);}
@@ -331,23 +354,45 @@ input,button,select{font-family:inherit;font-size:inherit;}
 .file-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;}
 .file-toolbar .field-input{flex:1;width:auto;}
 .file-toolbar .btn{flex-shrink:0;}
-.upload-progress-bar{display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--border);flex-shrink:0;}
-.upload-progress-bar[hidden]{display:none;}
-.upload-progress-track{flex:1;height:6px;border-radius:3px;background:var(--surface2);overflow:hidden;}
-.upload-progress-fill{height:100%;width:0%;background:var(--accent);transition:width 120ms linear;}
-.upload-progress-label{flex-shrink:0;font-size:12px;font-family:var(--mono);color:var(--muted);white-space:nowrap;}
-.file-list-wrap{flex:1;overflow-y:auto;border:2px dashed transparent;transition:background 120ms,border-color 120ms;}
+.file-list-wrap{position:relative;flex:1;overflow:auto;border:2px dashed transparent;transition:background 120ms,border-color 120ms;}
+.marquee{position:absolute;z-index:0;border:1px solid var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);pointer-events:none;} /* z-index 0: above rows, below the sticky thead (z-index 1) */
 .file-list-wrap.drag-over{background:color-mix(in srgb,var(--accent) 8%,transparent);border-color:var(--accent);}
 .tree-item{display:flex;align-items:center;gap:5px;padding:5px 8px;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;}
 .tree-item:hover{background:var(--surface2);}
 .tree-item.active{background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--accent);}
 .tree-sep{border-top:1px solid var(--border);margin:6px 2px;}
-.tree-item-bm{justify-content:space-between;padding-top:2px;padding-bottom:2px;}
+/* min-height fits the hover-only ✕ button, so the row doesn't grow on hover */
+.tree-item-bm{justify-content:space-between;padding-top:2px;padding-bottom:2px;min-height:28px;}
 .tree-item-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
-.tree-item-remove{padding:2px;opacity:0;flex-shrink:0;}
-.tree-item-bm:hover .tree-item-remove{opacity:1;}
-.file-actions-cell{width:1%;white-space:nowrap;text-align:right;}
+.tree-item-remove{display:none;padding:2px;flex-shrink:0;}
+.tree-item-remove .icon{width:14px;height:14px;}
+.tree-item-bm:hover .tree-item-remove{display:inline-flex;}
+.file-actions-cell{white-space:nowrap;text-align:right;}
+/* Fixed layout so narrow windows truncate the name with an ellipsis
+   instead of wrapping rows onto multiple lines. */
+.file-list-wrap .data-table{table-layout:fixed;min-width:560px;} /* keeps ~200px for Name; below that the wrap scrolls horizontally */
+.file-list-wrap .data-table th{user-select:none;}
+#th-size{width:80px;}
+#th-modified{width:160px;} /* "YYYY-MM-DD HH:MM" with headroom for wider platform fonts (macOS) */
+th.file-actions-cell{width:112px;} /* fits the 3 buttons of a folder row (star, download, ⋮) */
+#file-tbody td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.th-sort{cursor:pointer;user-select:none;}
+.th-sort:hover{color:var(--text);}
+/* Rows are click-to-select targets; text selection would fight shift-click range select. */
+#file-tbody{user-select:none;}
+#file-tbody tr.selected:hover{background:color-mix(in srgb,var(--accent) 12%,var(--surface));}
+#file-tbody tr.cut{opacity:.5;} /* on the internal clipboard, pending a cut-paste */
+.file-name{cursor:pointer;}
+.file-name:hover{text-decoration:underline;}
 .btn-ghost.starred{color:#e8a020;}
+.row-menu{position:fixed;z-index:50;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,.25);min-width:160px;padding:4px;}
+.row-menu-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;white-space:nowrap;}
+.row-menu-item:hover{background:var(--surface2);}
+.row-menu-item .icon{width:16px;height:16px;}
+.row-menu-hdr{padding:5px 10px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+.row-menu-sep{border-top:1px solid var(--border);margin:4px 2px;}
+.row-menu-danger{background:var(--danger);color:#fff;margin-top:2px;}
+.row-menu-danger:hover{opacity:.88;background:var(--danger);}
 
 /* ── Settings ─────────────────────────────── */
 .settings-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;max-width:580px;margin-bottom:14px;}
@@ -371,6 +416,9 @@ input,button,select{font-family:inherit;font-size:inherit;}
 .modal-toolbar .field-input{flex:1;width:auto;}
 .modal-toolbar select.field-input{flex:0 0 85px;min-width:0;}
 .modal-body{flex:1;overflow-y:auto;}
+.modal-name-row{display:flex;align-items:center;gap:8px;flex:1;min-width:140px;margin:0 16px;}
+.modal-name-row[hidden]{display:none;} /* the class's display:flex would otherwise override the hidden attribute */
+.modal-name-row label{font-size:12px;color:var(--muted);}
 .modal-ftr{padding:10px 16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;flex-shrink:0;}
 .toggle-lbl{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer;user-select:none;}
 .modal-row{display:flex;align-items:center;gap:8px;padding:7px 16px;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer;}
@@ -430,7 +478,6 @@ td:has(.td-actions){width:1%;white-space:nowrap;}
 #ov-pkg-preview-wrap .field-label{margin-bottom:3px;}
 #ov-pkg-preview{font-family:var(--mono);font-size:12px;color:var(--muted);word-break:break-all;}
 #cfg-modules-list{display:flex;flex-direction:column;gap:4px;margin-bottom:4px;}
-#path-input{flex:1;}
 #d-params{display:none;}
 
 /* ── Layout utilities ────────────────────── */

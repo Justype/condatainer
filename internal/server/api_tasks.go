@@ -4,7 +4,19 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
+
+// taskCleanupGrace is how long a finished task stays in s.tasks before
+// being removed, so a client that connects after the task finished can
+// still fetch the cached final result instead of a 404.
+const taskCleanupGrace = 30 * time.Second
+
+// scheduleTaskCleanup removes taskID from s.tasks after taskCleanupGrace,
+// instead of deleting it immediately when the task's goroutine finishes.
+func (s *srv) scheduleTaskCleanup(taskID string) {
+	time.AfterFunc(taskCleanupGrace, func() { s.tasks.Delete(taskID) })
+}
 
 // handleTaskSub routes GET /api/tasks/{id}/stream and POST /api/tasks/{id}/cancel.
 func (s *srv) handleTaskSub(w http.ResponseWriter, r *http.Request) {

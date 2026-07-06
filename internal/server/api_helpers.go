@@ -153,10 +153,10 @@ func (s *srv) handleHelpersUpdate(w http.ResponseWriter, r *http.Request) {
 	bw := &brokerWriter{broker}
 	go func() {
 		defer cancel()
-		defer s.tasks.Delete(taskID)
+		defer s.scheduleTaskCleanup(taskID)
 
 		if err := helper.UpdateRemoteScripts(ctx, req.Name, false, bw); err != nil {
-			broadcastDone(broker, err)
+			broadcastResult(broker, ctx, err)
 			return
 		}
 		invalidateHelperAvailableCache()
@@ -582,7 +582,7 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 	ctx = logging.WithWriter(ctx, bw)
 	go func() {
 		defer cancel()
-		defer s.tasks.Delete(taskID)
+		defer s.scheduleTaskCleanup(taskID)
 
 		fmt.Fprintf(bw, "Creating overlay at %s (%s)...\n", imgPath, sizeStr)
 		if err := os.MkdirAll(filepath.Dir(imgPath), utils.PermDir); err != nil {
@@ -597,7 +597,7 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 		io := cntexec.IO{Stdout: bw, Stderr: bw}
 		fmt.Fprintf(bw, "Installing packages: %s\n", cntexec.DescribeInitialCondaPackages(allPkgs))
 		if err := cntexec.CreateCondaOverlay(ctx, opts, allPkgs, req.PostInstall, false, io); err != nil {
-			broadcastDone(broker, fmt.Errorf("create overlay: %w", err))
+			broadcastResult(broker, ctx, fmt.Errorf("create overlay: %w", err))
 			return
 		}
 
@@ -605,7 +605,7 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(bw, "Done. Overlay ready at: %s\n", imgPath)
 		// Signal completion with the result path so the client can populate cfg-overlay.
 		result, _ := json.Marshal(map[string]interface{}{"t": "done", "ok": true, "path": imgPath})
-		broker.publish(result)
+		broker.publishFinal(result)
 	}()
 }
 

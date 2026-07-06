@@ -230,23 +230,26 @@
       <div class="files-layout">
         <div class="file-tree" id="file-tree"></div>
         <div class="file-main">
-          <div class="breadcrumb" id="bc"></div>
           <div class="file-toolbar">
-            <input class="field-input" id="path-input"
-                   placeholder="Type a path and press Enter" spellcheck="false">
-            <button class="btn btn-sm btn-ghost" id="bookmark-star-btn" onclick="toggleBookmark(currentPath)" title="Bookmark this folder"></button>
+            <div class="path-box">
+              <div class="path-box-crumbs" id="bc" title="Click to edit the path"></div>
+              <input class="path-box-input" id="path-input"
+                     placeholder="Type a path and press Enter" spellcheck="false" hidden>
+            </div>
+            <button class="btn btn-sm btn-ghost btn-icon" id="bookmark-star-btn" onclick="toggleBookmark(currentPath)" title="Bookmark this folder"></button>
             <input type="file" id="upload-file-input" multiple hidden onchange="handleUploadInputChange(this,false)">
             <input type="file" id="upload-dir-input" webkitdirectory multiple hidden onchange="handleUploadInputChange(this,true)">
             <button class="btn btn-sm" id="upload-file-btn" onclick="gid('upload-file-input').click()"><svg class="icon"><use href="#i-upload"></use></svg>file</button>
             <button class="btn btn-sm" id="upload-dir-btn" onclick="gid('upload-dir-input').click()"><svg class="icon"><use href="#i-upload"></use></svg>folder</button>
           </div>
-          <div class="upload-progress-bar" id="upload-progress-bar" hidden>
-            <div class="upload-progress-track"><div class="upload-progress-fill" id="upload-progress-fill"></div></div>
-            <span class="upload-progress-label" id="upload-progress-label"></span>
-          </div>
           <div class="file-list-wrap" id="file-list-wrap">
             <table class="data-table">
-              <thead><tr><th>Name</th><th>Size</th><th>Modified</th><th class="file-actions-cell">Actions</th></tr></thead>
+              <thead><tr>
+                <th class="th-sort" id="th-name" onclick="setFileSort('name')">Name</th>
+                <th class="th-sort" id="th-size" onclick="setFileSort('size')">Size</th>
+                <th class="th-sort" id="th-modified" onclick="setFileSort('modified')">Modified</th>
+                <th class="file-actions-cell">Actions</th>
+              </tr></thead>
               <tbody id="file-tbody"></tbody>
             </table>
           </div>
@@ -320,7 +323,7 @@
     <div class="d-header">
       <span class="d-title" id="d-title">—</span>
       <span id="d-badge"></span>
-      <button class="btn btn-ghost btn-sm" onclick="closeDetail()"><svg class="icon"><use href="#i-close"></use></svg></button>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="closeDetail()"><svg class="icon"><use href="#i-close"></use></svg></button>
     </div>
     <div class="d-meta" id="d-meta"></div>
     <div class="d-resources" id="d-resources"></div>
@@ -339,6 +342,9 @@
     </div>
   </div>
 
+  <!-- ─ Progress stack — one pill per concurrent operation ─ -->
+  <div class="prog-stack" id="prog-stack"></div>
+
 </div><!-- /#app -->
 
 <!-- ── File Picker Modal ─────────────────── -->
@@ -346,20 +352,26 @@
   <div class="modal modal-lg">
     <div class="modal-hdr">
       <span id="fp-title">Browse</span>
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('fp-modal')"><svg class="icon"><use href="#i-close"></use></svg></button>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="closeModal('fp-modal')"><svg class="icon"><use href="#i-close"></use></svg></button>
     </div>
-    <div class="modal-bc" id="fp-bc"></div>
     <div class="modal-toolbar">
       <select class="field-input" id="fp-bookmark-select" onchange="fpJumpToBookmark(this)">
         <option value="">Go to…</option>
       </select>
-      <input class="field-input" id="fp-path-input" placeholder="Type a path and press Enter" spellcheck="false">
+      <div class="path-box">
+        <div class="path-box-crumbs" id="fp-bc" title="Click to edit the path"></div>
+        <input class="path-box-input" id="fp-path-input" placeholder="Type a path and press Enter" spellcheck="false" hidden>
+      </div>
     </div>
     <div class="modal-body" id="fp-body"></div>
     <div class="modal-ftr">
       <label class="toggle-lbl">
         <input type="checkbox" id="fp-show-hidden" onchange="setShowHidden(this.checked)"> Show hidden
       </label>
+      <div class="modal-name-row" id="fp-name-row" hidden>
+        <label for="fp-name-input">Name</label>
+        <input class="field-input" id="fp-name-input" spellcheck="false">
+      </div>
       <div class="btn-row">
         <button class="btn btn-sm" onclick="closeModal('fp-modal')">Cancel</button>
         <button class="btn btn-primary btn-sm" id="fp-select-dir-btn" onclick="fpSelect()">Select This Dir</button>
@@ -373,7 +385,7 @@
   <div class="modal modal-lg">
     <div class="modal-hdr">
       <span>Add Overlay</span>
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('op-modal')"><svg class="icon"><use href="#i-close"></use></svg></button>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="closeModal('op-modal')"><svg class="icon"><use href="#i-close"></use></svg></button>
     </div>
     <div class="modal-tabs">
       <button class="modal-tab active" id="op-tab-module-btn" onclick="opSwitchTab('module')">Module overlay</button>
@@ -400,7 +412,7 @@
   <div class="modal modal-sm">
     <div class="modal-hdr">
       <span>File already exists</span>
-      <button class="btn btn-ghost btn-sm" onclick="resolveUploadConflict('cancel')"><svg class="icon"><use href="#i-close"></use></svg></button>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="resolveUploadConflict('cancel')"><svg class="icon"><use href="#i-close"></use></svg></button>
     </div>
     <div class="modal-body modal-body-pad">
       <p class="modal-question">"<strong id="upload-conflict-path"></strong>" already exists at the destination. Overwrite it?</p>
@@ -420,7 +432,7 @@
   <div class="modal modal-sm">
     <div class="modal-hdr">
       <span>Delete</span>
-      <button class="btn btn-ghost btn-sm" onclick="confirmDelete('cancel')"><svg class="icon"><use href="#i-close"></use></svg></button>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="confirmDelete('cancel')"><svg class="icon"><use href="#i-close"></use></svg></button>
     </div>
     <div class="modal-body modal-body-pad">
       <p class="modal-question">Delete "<strong id="delete-confirm-name"></strong>"? This cannot be undone.</p>
@@ -437,7 +449,7 @@
   <div class="modal modal-sm">
     <div class="modal-hdr">
       <span id="confirm-modal-title">Confirm</span>
-      <button class="btn btn-ghost btn-sm" onclick="resolveConfirmModal(false)"><svg class="icon"><use href="#i-close"></use></svg></button>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="resolveConfirmModal(false)"><svg class="icon"><use href="#i-close"></use></svg></button>
     </div>
     <div class="modal-body modal-body-pad">
       <p class="modal-question" id="confirm-modal-message"></p>
@@ -449,12 +461,29 @@
   </div>
 </div>
 
+<!-- ── Rename Modal ───────────────────────── -->
+<div class="modal-backdrop" id="rename-modal">
+  <div class="modal modal-sm">
+    <div class="modal-hdr">
+      <span>Rename</span>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="confirmRename('cancel')"><svg class="icon"><use href="#i-close"></use></svg></button>
+    </div>
+    <div class="modal-body modal-body-pad">
+      <input class="field-input" id="rename-input" spellcheck="false">
+    </div>
+    <div class="modal-ftr modal-ftr-end">
+      <button class="btn btn-sm" onclick="confirmRename('cancel')">Cancel</button>
+      <button class="btn btn-sm btn-primary" onclick="confirmRename('yes')">Rename</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Helper Config Modal ───────────────── -->
 <div class="modal-backdrop" id="hcfg-modal">
   <div class="modal">
     <div class="modal-hdr">
       <span id="hcfg-title">Saved Defaults</span>
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('hcfg-modal')"><svg class="icon"><use href="#i-close"></use></svg></button>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="closeModal('hcfg-modal')"><svg class="icon"><use href="#i-close"></use></svg></button>
     </div>
     <div class="modal-body" id="hcfg-body"></div>
     <div class="modal-ftr">
@@ -481,15 +510,5 @@
   loadOverlays();
 </script>
 
-<!-- ─ Global progress window ──────────── -->
-<div class="prog-window" id="prog-window">
-  <div class="prog-win-hdr">
-    <span class="prog-win-title" id="prog-win-title"></span>
-    <span class="prog-win-status" id="prog-win-status"></span>
-    <button class="btn btn-ghost btn-sm" id="prog-win-toggle" onclick="toggleMinimizeProgressWindow()" title="Minimize"><svg class="icon" aria-hidden="true"><use href="#i-expand_circle_down"></use></svg></button>
-    <button class="btn btn-ghost btn-sm prog-win-close" id="prog-win-close" disabled onclick="closeProgressWindow()"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button>
-  </div>
-  <div class="prog-win-body" id="prog-win-body"></div>
-</div>
 </body>
 </html>

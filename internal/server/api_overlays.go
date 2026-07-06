@@ -79,32 +79,32 @@ func (s *srv) handleOverlayEdit(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer cancel()
-		defer s.tasks.Delete(taskID)
+		defer s.scheduleTaskCleanup(taskID)
 
 		if newSizeMB > 0 {
 			fmt.Fprintf(bw, "Resizing %s to %s...\n", req.Path, req.Size)
 			if err := overlay.Resize(ctx, req.Path, newSizeMB); err != nil {
-				broadcastDone(broker, fmt.Errorf("resize: %w", err))
+				broadcastResult(broker, ctx, fmt.Errorf("resize: %w", err))
 				return
 			}
 		}
 		if len(removePkgs) > 0 {
 			fmt.Fprintf(bw, "Removing packages: %s\n", strings.Join(removePkgs, " "))
 			if err := cntexec.RemovePackages(ctx, req.Path, removePkgs, false, io); err != nil {
-				broadcastDone(broker, fmt.Errorf("remove packages: %w", err))
+				broadcastResult(broker, ctx, fmt.Errorf("remove packages: %w", err))
 				return
 			}
 		}
 		if len(addPkgs) > 0 {
 			fmt.Fprintf(bw, "Installing packages: %s\n", strings.Join(addPkgs, " "))
 			if err := cntexec.InstallPackages(ctx, req.Path, addPkgs, false, io); err != nil {
-				broadcastDone(broker, fmt.Errorf("add packages: %w", err))
+				broadcastResult(broker, ctx, fmt.Errorf("add packages: %w", err))
 				return
 			}
 		}
 		fmt.Fprintf(bw, "Done.\n")
 		result, _ := json.Marshal(map[string]interface{}{"t": "done", "ok": true, "path": req.Path})
-		broker.publish(result)
+		broker.publishFinal(result)
 	}()
 }
 

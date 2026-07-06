@@ -103,6 +103,10 @@ func (s *srv) handleFSUploadCheck(w http.ResponseWriter, r *http.Request) {
 // part directly to disk via io.Copy (no ParseMultipartForm buffering) so
 // large files aren't spooled in memory.
 //
+// A part whose copy fails mid-file (e.g. the client aborted the upload) is
+// removed rather than left truncated on disk; fully-written earlier parts
+// are kept.
+//
 // When overwrite=false, parts whose target already exists are skipped
 // (recorded in the "skipped" response field) rather than overwritten; the
 // dashboard's own upload UI always resolves conflicts client-side first
@@ -169,6 +173,7 @@ func (s *srv) handleFSUpload(w http.ResponseWriter, r *http.Request) {
 		out.Close()
 		part.Close()
 		if copyErr != nil {
+			os.Remove(target) // drop the partial file rather than leaving it truncated
 			http.Error(w, copyErr.Error(), http.StatusInternalServerError)
 			return
 		}

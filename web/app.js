@@ -4,16 +4,23 @@ function escHtml(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+// fmtSize follows the ls -h convention: one decimal below 10 (9.6 MB),
+// whole numbers from 10 up (96 MB), bytes always whole.
 function fmtSize(bytes) {
   if (!bytes) return '—';
   const u = ['B', 'KB', 'MB', 'GB', 'TB'];
   let i = 0, b = bytes;
   while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
-  return b.toFixed(1) + ' ' + u[i];
+  return (i > 0 && b < 10 ? b.toFixed(1) : Math.round(b)) + ' ' + u[i];
 }
+// fmtDate formats a timestamp as unambiguous local "YYYY-MM-DD HH:MM".
 function fmtDate(iso) {
   if (!iso) return '—';
-  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+    ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
 }
 function fmtRelTime(iso) {
   if (!iso) return '—';
@@ -92,6 +99,7 @@ let srvNotification = '';
 
 // file picker modal
 let fpTargetId = '', fpMode = 'dir', fpPath = '', fpSuffix = '';
+let _fpOnSelect = null; // when set, picker selection calls this instead of filling fpTargetId (see openFilePickerForCallback)
 
 // overlay picker modal
 let opTargetType  = 'module';
