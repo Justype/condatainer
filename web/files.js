@@ -241,23 +241,26 @@ function _menuTargetRow(i) {
   return e;
 }
 
-function toggleRowMenu(ev, i) {
+async function toggleRowMenu(ev, i) {
   ev.stopPropagation();
   const e = _visEntries[i];
   const reopening = _rowMenuEl && e && _rowMenuEl.dataset.path === e.path;
   closeRowMenu();
   if (reopening || !_menuTargetRow(i)) return; // clicking the same row's button again just closes it
-  const rect = ev.currentTarget.getBoundingClientRect();
+  const rect = ev.currentTarget.getBoundingClientRect(); // before await: currentTarget nulls after the handler returns
+  await _validateClipboard();
   _openRowMenu({ top: rect.bottom + 4, right: window.innerWidth - rect.right }, e.path);
 }
 
-function onRowContext(ev, i) {
+async function onRowContext(ev, i) {
   ev.preventDefault();
   ev.stopPropagation();
   closeRowMenu();
   const e = _menuTargetRow(i);
   if (!e) return;
-  _openRowMenu({ top: ev.clientY, left: ev.clientX }, e.path);
+  const pos = { top: ev.clientY, left: ev.clientX };
+  await _validateClipboard();
+  _openRowMenu(pos, e.path);
 }
 
 /* ── Context-menu actions (operate on the selection) ── */
@@ -343,6 +346,20 @@ function _setClipboard(mode) {
   _renderCutMarks();
 }
 
+// _validateClipboard drops a stale internal clipboard before a menu shows
+// Paste: stale when the OS clipboard no longer holds what cut/copy
+// mirrored there (the user copied something else since). Reading the OS
+// clipboard needs a permission the browser may deny — then the internal
+// clipboard is trusted as-is.
+async function _validateClipboard() {
+  if (!_clipboard || _clipboard.osText == null) return;
+  if (!(navigator.clipboard && navigator.clipboard.readText)) return;
+  try {
+    const txt = await navigator.clipboard.readText();
+    if (txt !== _clipboard.osText) { _clipboard = null; _renderCutMarks(); }
+  } catch { /* permission denied — keep internal-only behavior */ }
+}
+
 // ctxPaste moves (cut) or copies (copy) the clipboard entries into the
 // current directory. Cut entries already in this directory are skipped;
 // a cut clipboard is one-shot, a copy clipboard can be pasted again.
@@ -383,18 +400,29 @@ gid('file-list-wrap').addEventListener('click', e => {
 });
 
 // Right-clicking the blank area shows a menu for the directory itself:
-// Paste (when the clipboard is non-empty), Select all, Refresh.
-gid('file-list-wrap').addEventListener('contextmenu', e => {
+// Paste (when the clipboard is non-empty), Copy path, Select all, Refresh.
+gid('file-list-wrap').addEventListener('contextmenu', async e => {
   if (e.target.closest('tr[data-idx]')) return; // rows have their own menu
   e.preventDefault();
   closeRowMenu();
+  const pos = { top: e.clientY, left: e.clientX };
+  await _validateClipboard();
   const mi = (icon, label, fn) =>
     '<div class="row-menu-item" onclick="closeRowMenu();' + fn + '">' + iconSvg(icon) + ' ' + label + '</div>';
-  _openMenuAt({ top: e.clientY, left: e.clientX },
+  _openMenuAt(pos,
     (_clipboard ? mi('content_paste', 'Paste (' + _clipboard.entries.length + ')', 'ctxPaste()') : '') +
+    mi('content_copy', 'Copy path', 'ctxCopyPath()') +
     mi('check', 'Select all', 'ctxSelectAll()') +
     mi('refresh', 'Refresh', 'navigateFiles(currentPath)'));
 });
+
+// ctxCopyPath copies the current directory's path to the OS clipboard.
+// This also supersedes any internal file clipboard, like any text copy.
+function ctxCopyPath() {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(currentPath).catch(() => {});
+  }
+}
 
 function ctxSelectAll() {
   _selected = new Set(_visEntries.map(en => en.path));
