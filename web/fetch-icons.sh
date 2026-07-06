@@ -15,7 +15,7 @@ ICONS=(
   # navigation
   chevron_left chevron_right close expand_circle_down expand_circle_up
   # actions
-  add_2 content_copy delete download link_2 play_arrow play_circle refresh replay star
+  add_2 content_copy content_cut content_paste delete download edit more_vert upload link_2 play_arrow play_circle refresh replay star
   # status / feedback
   check error info progress_activity question_mark warning
   # files
@@ -27,7 +27,7 @@ mapfile -t ICONS < <(printf '%s\n' "${ICONS[@]}" | sort)
 
 # Filled (fill=1) icons — fetched from materialsymbolsoutlined with fill1 suffix
 FILL1_ICONS=(
-  star
+  folder star
 )
 
 if [[ "$WEIGHT" == "400" ]]; then

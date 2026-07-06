@@ -11,9 +11,22 @@ import (
 // Prevents loading thousands of entries from large shared dirs like /home or /scratch.
 const maxFSEntries = 500
 
-// handleFS serves GET /api/fs?path= — directory listing for the file browser.
-// Sets X-FS-Truncated: true when the directory exceeds maxFSEntries entries.
+// handleFS serves GET /api/fs?path= — directory listing for the file
+// browser — DELETE /api/fs?path= — deleting a file or directory (see
+// handleFSDelete in api_files_delete.go) — and PATCH /api/fs?path= —
+// renaming or moving a file or directory (see handleFSRename in
+// api_files_move.go). Sets X-FS-Truncated: true when the directory
+// exceeds maxFSEntries entries.
 func (s *srv) handleFS(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodDelete:
+		s.handleFSDelete(w, r)
+		return
+	case http.MethodPatch:
+		s.handleFSRename(w, r)
+		return
+	}
+
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		if home, err := os.UserHomeDir(); err == nil {

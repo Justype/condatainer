@@ -121,7 +121,7 @@ func (s *srv) handleHelperLogs(w http.ResponseWriter, r *http.Request, id string
 	}
 	flusher.Flush()
 
-	ch := broker.subscribe()
+	ch, _, _ := broker.subscribe() // job-log broker has no "finished" concept, unlike task brokers
 	defer broker.unsubscribe(ch)
 	ticker := time.NewTicker(25 * time.Second)
 	defer ticker.Stop()

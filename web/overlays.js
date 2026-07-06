@@ -24,7 +24,7 @@ function renderOverlays(filter) {
       '<td class="mono path-cell td-muted">' + pathTailHtml(o.path) + '</td>' +
       '<td><div class="td-actions">' +
         '<button class="btn btn-sm" onclick="pickOverlay(\'' + escHtml(o.path) + '\')">Use</button>' +
-        '<button class="btn btn-sm btn-ghost" onclick="copyStr(\'' + escHtml(o.path) + '\',this)" title="Copy path">' + iconSvg('content_copy') + '</button>' +
+        '<button class="btn btn-sm btn-ghost btn-icon" onclick="copyStr(\'' + escHtml(o.path) + '\',this)" title="Copy path">' + iconSvg('content_copy') + '</button>' +
       '</div></td>' +
     '</tr>'
   ).join('');
@@ -94,7 +94,7 @@ async function opFileNavigate(path) {
     gid('op-file-list').innerHTML =
       dirs.map(d =>
         '<div class="modal-row" onclick="opFileNavigate(\'' + escHtml(d.path) + '\')">' +
-          '<span class="modal-row-icon">' + iconSvg('folder') + '</span>' +
+          '<span class="modal-row-icon">' + iconSvg('folder', 'icon-folder', true) + '</span>' +
           '<span class="modal-row-name">' + escHtml(d.name) + '</span>' +
           '<span class="modal-row-sel">' + iconSvg('chevron_right') + '</span>' +
         '</div>'

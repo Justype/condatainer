@@ -693,6 +693,28 @@ func GetHelperHistoryPath() string {
 	return filepath.Join(stateDir, "helper-history.jsonl")
 }
 
+// GetFileBookmarksPath returns the path to the JSON file storing the dashboard's
+// file-browser bookmarks.
+// Path: ~/.local/state/condatainer/file-bookmarks.json
+func GetFileBookmarksPath() string {
+	stateDir := GetUserStateDir()
+	if stateDir == "" {
+		return ""
+	}
+	return filepath.Join(stateDir, "file-bookmarks.json")
+}
+
+// GetHelperBookmarksPath returns the path to the JSON file storing the
+// dashboard's bookmarked (starred) helper names.
+// Path: ~/.local/state/condatainer/helper-bookmarks.json
+func GetHelperBookmarksPath() string {
+	stateDir := GetUserStateDir()
+	if stateDir == "" {
+		return ""
+	}
+	return filepath.Join(stateDir, "helper-bookmarks.json")
+}
+
 // ServerState is the JSON written to the server PID file (NFS-visible).
 type ServerState struct {
 	Host  string `json:"host"`

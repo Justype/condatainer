@@ -1,75 +1,104 @@
-/* ── Progress window ─────────────────────── */
-let _progES        = null;
-let _progAutoClose = null;
+/* ── Progress stack ──────────────────────── */
+// A stack of independent floating progress "pills" in #prog-stack, one per
+// operation. Two kinds:
+//   'log' — a collapsible scrolling TermView, for operations with text
+//           output (helper starts, overlay create/edit, script updates).
+//   'bar' — a compact percentage bar, for "N of M" operations (delete,
+//           move, upload).
+let _progPillSeq = 0;
 
-function _scheduleAutoHide() {
-  if (_progAutoClose) clearTimeout(_progAutoClose);
-  _progAutoClose = setTimeout(() => {
-    gid('prog-window').classList.add('minimized');
-    gid('prog-win-toggle').innerHTML = iconSvg('expand_circle_up');
-  }, 3000);
+// _createPill builds a pill. Its close button is a Cancel button while the
+// task runs (calls onCancel once, then disables) and becomes a plain
+// dismiss action once the pill finishes; pass onCancel=null for a pill
+// with nothing to cancel.
+function _createPill(title, kind, onCancel) {
+  const el = document.createElement('div');
+  el.className = 'prog-pill ' + kind + '-type';
+  el.id = 'prog-pill-' + (++_progPillSeq);
+  el.innerHTML =
+    '<div class="prog-pill-hdr">' +
+      '<span class="prog-pill-status"></span>' +
+      '<span class="prog-pill-title"></span>' +
+      (kind === 'log' ? '<span class="prog-pill-chevron">' + iconSvg('expand_circle_down') + '</span>' : '') +
+      '<button class="btn btn-ghost btn-sm btn-icon prog-pill-close" title="' + (onCancel ? 'Cancel' : 'Close') + '"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button>' +
+    '</div>' +
+    (kind === 'bar'
+      ? '<div class="prog-pill-bar-wrap"><div class="prog-pill-track"><div class="prog-pill-fill"></div></div><div class="prog-pill-label"></div></div>'
+      : '<div class="prog-pill-log"></div>');
+  gid('prog-stack').appendChild(el);
+
+  el.querySelector('.prog-pill-title').textContent = title;
+  el.querySelector('.prog-pill-status').innerHTML = iconSvg('progress_activity', 'spin');
+
+  const closeBtn = el.querySelector('.prog-pill-close');
+  closeBtn.disabled = !onCancel;
+  closeBtn.onclick = () => {
+    if (el.classList.contains('finished')) { el.remove(); return; }
+    if (onCancel) { closeBtn.disabled = true; onCancel(); }
+  };
+
+  if (kind === 'log') {
+    el.classList.add('expanded'); // show the log by default while actively running
+    el.querySelector('.prog-pill-hdr').addEventListener('click', e => {
+      if (e.target.closest('.prog-pill-close')) return;
+      const expanded = el.classList.toggle('expanded');
+      el.querySelector('.prog-pill-chevron').innerHTML = iconSvg(expanded ? 'expand_circle_down' : 'expand_circle_up');
+    });
+  }
+  return el;
 }
 
-function toggleMinimizeProgressWindow() {
-  const minimized = gid('prog-window').classList.toggle('minimized');
-  gid('prog-win-toggle').innerHTML = iconSvg(minimized ? 'expand_circle_up' : 'expand_circle_down');
+// _pillFinish sets a pill's terminal visual state. Successful pills
+// auto-remove after a short delay; failures and cancellations stay until
+// dismissed.
+function _pillFinish(el, ok) {
+  el.classList.add('finished');
+  el.querySelector('.prog-pill-status').innerHTML = ok ? iconSvg('check') : iconSvg('close', 'icon-danger');
+  const closeBtn = el.querySelector('.prog-pill-close');
+  closeBtn.disabled = false;
+  closeBtn.title = 'Close';
+  if (ok) setTimeout(() => el.remove(), 2500);
 }
 
-function openProgressWindow(title, taskId, onDone) {
-  if (_progAutoClose) { clearTimeout(_progAutoClose); _progAutoClose = null; }
-  gid('prog-win-title').textContent = title;
-  gid('prog-win-status').innerHTML = iconSvg('progress_activity', 'spin');
-  gid('prog-window').classList.remove('minimized');
-  gid('prog-win-toggle').innerHTML = iconSvg('expand_circle_down');
-  gid('prog-win-close').disabled = true;
-  gid('prog-window').classList.add('visible');
+// cancelTask POSTs /api/tasks/{id}/cancel.
+function cancelTask(taskId) {
+  fetch('/api/tasks/' + encodeURIComponent(taskId) + '/cancel', { method: 'POST' }); //nolint
+}
 
-  const body = gid('prog-win-body');
-  body.innerHTML = '';
-  const tv = new TermView(body);
+// openLogProgress opens a 'log' pill driven by a server task's SSE stream
+// (GET /api/tasks/{id}/stream, {"t":"out"|"done"} events).
+function openLogProgress(title, taskId, onDone) {
+  const el = _createPill(title, 'log', () => cancelTask(taskId));
+  const tv = new TermView(el.querySelector('.prog-pill-log'));
 
-  if (_progES) { _progES.close(); _progES = null; }
   const es = new EventSource('/api/tasks/' + encodeURIComponent(taskId) + '/stream');
-  _progES = es;
-
   es.onmessage = e => {
     try {
       const msg = JSON.parse(e.data);
       if (msg.t === 'out') {
         tv.write(msg.d);
       } else if (msg.t === 'done') {
-        tv.done(msg.ok, msg.err);
-        gid('prog-win-status').innerHTML = iconSvg(msg.ok ? 'check' : 'close');
-        gid('prog-win-close').disabled = false;
-        es.close(); _progES = null;
+        tv.done(msg.cancelled ? true : msg.ok, msg.cancelled ? 'Cancelled' : msg.err);
+        _pillFinish(el, msg.ok);
+        es.close();
         if (onDone) onDone(msg);
-        if (msg.ok) _scheduleAutoHide();
       }
     } catch {}
   };
   es.onerror = () => {
     tv.done(false, 'Connection lost');
-    gid('prog-win-status').innerHTML = iconSvg('close');
-    gid('prog-win-close').disabled = false;
-    es.close(); _progES = null;
+    _pillFinish(el, false);
+    es.close();
     if (onDone) onDone({ ok: false, err: 'Connection lost' });
   };
+  return el;
 }
 
-function openStreamProgressWindow(title) {
-  if (_progAutoClose) { clearTimeout(_progAutoClose); _progAutoClose = null; }
-  gid('prog-win-title').textContent = title;
-  gid('prog-win-status').innerHTML = iconSvg('progress_activity', 'spin');
-  gid('prog-window').classList.remove('minimized');
-  gid('prog-win-toggle').innerHTML = iconSvg('expand_circle_down');
-  gid('prog-win-close').disabled = true;
-  gid('prog-window').classList.add('visible');
-
-  const body = gid('prog-win-body');
-  body.innerHTML = '';
-  const tv = new TermView(body);
-
-  if (_progES) { _progES.close(); _progES = null; }
+// openStreamLogProgress opens a 'log' pill the caller feeds directly.
+// Returns {write(chunk), done(ok, errMsg)}.
+function openStreamLogProgress(title) {
+  const el = _createPill(title, 'log', null);
+  const tv = new TermView(el.querySelector('.prog-pill-log'));
   let finished = false;
   return {
     write(chunk) {
@@ -79,31 +108,58 @@ function openStreamProgressWindow(title) {
       if (finished) return;
       finished = true;
       tv.done(ok, errMsg);
-      gid('prog-win-status').innerHTML = iconSvg(ok ? 'check' : 'close');
-      gid('prog-win-close').disabled = false;
-      if (ok) _scheduleAutoHide();
+      _pillFinish(el, ok);
     },
   };
 }
 
-function closeProgressWindow() {
-  if (_progAutoClose) { clearTimeout(_progAutoClose); _progAutoClose = null; }
-  if (_progES) { _progES.close(); _progES = null; }
-  gid('prog-window').classList.remove('visible');
+// openBarProgress opens a 'bar' pill. With taskId it follows the task's
+// SSE stream ({"t":"progress"|"done"} events) and its close button cancels
+// the task; without taskId the caller drives it via the returned
+// .update(current,total) / .done(ok,errMsg), and may pass opts.onCancel.
+// opts.formatLabel(current,total) customizes the label text (default
+// "current / total"). Returns {update, done, el}.
+function openBarProgress(title, taskId, onDone, opts) {
+  opts = opts || {};
+  const formatLabel = opts.formatLabel || ((cur, tot) => cur + ' / ' + tot);
+  const el = _createPill(title, 'bar', taskId ? () => cancelTask(taskId) : (opts.onCancel || null));
+  const fill  = el.querySelector('.prog-pill-fill');
+  const label = el.querySelector('.prog-pill-label');
+  label.textContent = 'Starting…';
+
+  function update(current, total) {
+    const pct = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
+    fill.style.width = pct + '%';
+    label.textContent = formatLabel(current, total) + ' (' + pct + '%)';
+  }
+  function done(ok, errMsg, cancelled) {
+    if (ok) fill.style.width = '100%';
+    label.textContent = ok ? 'Done' : (cancelled ? 'Cancelled' : (errMsg || 'Failed'));
+    _pillFinish(el, ok);
+  }
+
+  if (taskId) {
+    const es = new EventSource('/api/tasks/' + encodeURIComponent(taskId) + '/stream');
+    es.onmessage = e => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.t === 'progress') update(msg.current, msg.total);
+        else if (msg.t === 'done') { done(msg.ok, msg.err, msg.cancelled); es.close(); if (onDone) onDone(msg); }
+      } catch {}
+    };
+    es.onerror = () => { done(false, 'Connection lost'); es.close(); if (onDone) onDone({ ok: false, err: 'Connection lost' }); };
+  }
+
+  return { update, done, el };
 }
 
+// showProgressError opens an already-failed 'log' pill, for errors that
+// happen before a server-side task exists.
 function showProgressError(title, msg) {
-  if (_progES) { _progES.close(); _progES = null; }
-  gid('prog-win-title').textContent = title;
-  gid('prog-win-status').innerHTML = iconSvg('close');
-  gid('prog-window').classList.remove('minimized');
-  gid('prog-win-toggle').innerHTML = iconSvg('expand_circle_down');
-  gid('prog-win-close').disabled = false;
-  gid('prog-window').classList.add('visible');
-  const body = gid('prog-win-body');
-  body.innerHTML = '';
-  const tv = new TermView(body);
+  const el = _createPill(title, 'log');
+  const tv = new TermView(el.querySelector('.prog-pill-log'));
   tv.done(false, msg);
+  _pillFinish(el, false);
 }
 
 /* ── TermView — terminal renderer ────────── */
@@ -164,6 +220,7 @@ async function loadGpuOptions(force) {
 }
 
 async function loadHelpers(force) {
+  loadHelperBookmarks();
   if (!force && _helpersLoading) {
     await _helpersLoading;
     return;
@@ -242,7 +299,7 @@ async function updateHelperScripts() {
       return;
     }
     const { id } = await r.json();
-    openProgressWindow('Updating helpers', id, async msg => {
+    openLogProgress('Updating helpers', id, async msg => {
       if (btn) btn.disabled = false;
       _opRunning = false;
       if (msg.ok) await refreshStartHelpers();
@@ -487,32 +544,53 @@ function resetStartForm(helper) {
   updateOvPreview();
 }
 
-/* ── Helper pin state ────────────────────── */
-const _pinnedKey = 'cnt_pinned_helpers';
-function _getPinned() {
-  try { return new Set(JSON.parse(localStorage.getItem(_pinnedKey) || '[]')); } catch { return new Set(); }
+/* ── Helper bookmark state (server-persisted, not localStorage) ── */
+let helperBookmarks       = new Set();
+let _helperBookmarksLoaded = false;
+
+async function loadHelperBookmarks() {
+  if (_helperBookmarksLoaded) return;
+  _helperBookmarksLoaded = true;
+  try {
+    const list = (await (await fetch('/api/helpers/bookmarks')).json()) || [];
+    helperBookmarks = new Set(list);
+  } catch { helperBookmarks = new Set(); }
+  renderHelperList(gid('h-search')?.value);
 }
-function togglePin(name, e) {
+
+async function toggleHelperBookmark(name, e) {
   e.stopPropagation();
-  const pinned = _getPinned();
-  if (pinned.has(name)) pinned.delete(name); else pinned.add(name);
-  localStorage.setItem(_pinnedKey, JSON.stringify([...pinned]));
+  const isBookmarked = helperBookmarks.has(name);
+  try {
+    const r = isBookmarked
+      ? await fetch('/api/helpers/bookmarks?name=' + encodeURIComponent(name), { method: 'DELETE' })
+      : await fetch('/api/helpers/bookmarks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+    if (!r.ok) { alert('Could not update bookmark: ' + (await r.text())); return; }
+    helperBookmarks = new Set((await r.json()) || []);
+  } catch (err) {
+    alert('Could not update bookmark: ' + err);
+    return;
+  }
   renderHelperList(gid('h-search')?.value);
 }
 
 function renderHelperList(filter) {
-  const list   = gid('helper-list');
-  const q      = (filter || '').toLowerCase().trim();
-  const pinned = _getPinned();
+  const list      = gid('helper-list');
+  const q         = (filter || '').toLowerCase().trim();
+  const bookmarked = helperBookmarks;
   let helpers  = q
     ? allHelpers.filter(h =>
         h.name.toLowerCase().includes(q) ||
         (h.whatis || '').toLowerCase().includes(q))
     : allHelpers;
-  // Pinned items float to the top
+  // Bookmarked items float to the top
   helpers = [
-    ...helpers.filter(h => pinned.has(h.name)),
-    ...helpers.filter(h => !pinned.has(h.name)),
+    ...helpers.filter(h => bookmarked.has(h.name)),
+    ...helpers.filter(h => !bookmarked.has(h.name)),
   ];
   if (!helpers.length) {
     list.innerHTML = '<div class="modal-empty">' +
@@ -520,14 +598,14 @@ function renderHelperList(filter) {
     return;
   }
   list.innerHTML = helpers.map(h => {
-    const isPinned = pinned.has(h.name);
+    const isBookmarked = bookmarked.has(h.name);
     return '<div class="h-item" data-name="' + escHtml(h.name) + '" onclick="selectHelper(\'' + escHtml(h.name) + '\')">' +
       '<div class="h-item-content">' +
         '<div class="h-item-name">' + escHtml(h.name) + '</div>' +
         '<div class="h-item-desc">'  + escHtml(h.whatis || '') + '</div>' +
       '</div>' +
-      '<button class="h-pin-btn' + (isPinned ? ' pinned' : '') + '" onclick="togglePin(\'' + escHtml(h.name) + '\',event)" title="' + (isPinned ? 'Unpin' : 'Pin') + '">' +
-        iconSvg('star', null, isPinned) +
+      '<button class="btn btn-sm btn-ghost h-item-star' + (isBookmarked ? ' starred' : '') + '" onclick="toggleHelperBookmark(\'' + escHtml(h.name) + '\',event)" title="' + (isBookmarked ? 'Remove bookmark' : 'Bookmark') + '">' +
+        iconSvg('star', null, isBookmarked) +
       '</button>' +
     '</div>';
   }).join('');
@@ -542,6 +620,7 @@ function selectHelper(name, overrides) {
   if ((_formOpen || _opRunning) && selectedHelper && selectedHelper.name !== name) return;
   selectedHelper = allHelpers.find(h => h.name === name);
   if (!selectedHelper) return;
+  setHash('#start/' + encodeURIComponent(name), false);
   if (!overrides) localStorage.setItem(_selKey, JSON.stringify({ name, params: {} }));
   selectedModules          = overrides?.modules   ?? [];
   selectedExternalOverlays = overrides?.externals ?? [];
@@ -875,7 +954,7 @@ async function editOverlay() {
       return;
     }
     const { id } = await r.json();
-    openProgressWindow(title, id, async msg => {
+    openLogProgress(title, id, async msg => {
       _opRunning = false;
       _applyStartLock();
       editBtn.disabled = false;
@@ -1184,7 +1263,7 @@ async function createOverlay() {
       return;
     }
     const { id } = await r.json();
-    openProgressWindow(createTitle, id, async msg => {
+    openLogProgress(createTitle, id, async msg => {
       _setBusy(false);
       if (msg.ok && msg.path) {
         _setVal('cfg-overlay', msg.path);
@@ -1229,7 +1308,7 @@ async function startHelper() {
     params:  _collectParams(),
   };
 
-  const term = openStreamProgressWindow('Starting ' + selectedHelper.name);
+  const term = openStreamLogProgress('Starting ' + selectedHelper.name);
   _opRunning = true;
   _startRunHelperName = selectedHelper.name;
   _setStartBusy(true, iconSvg('play_arrow') + ' Starting…');
@@ -1319,7 +1398,7 @@ function renderModuleChips() {
   const userChips = selectedModules.map((m, i) =>
     '<div class="module-chip">' +
       '<span class="module-chip-name">' + escHtml(m.name) + '</span>' +
-      '<button class="btn btn-ghost btn-sm" onclick="removeModule(' + i + ')">' + iconSvg('close') + '</button>' +
+      '<button class="btn btn-ghost btn-sm btn-icon" onclick="removeModule(' + i + ')">' + iconSvg('close') + '</button>' +
     '</div>'
   ).join('');
 
@@ -1328,7 +1407,7 @@ function renderModuleChips() {
     return '<div class="module-chip" title="' + escHtml(p) + '">' +
       iconSvg('draft') +
       '<span class="module-chip-name">' + escHtml(label) + '</span>' +
-      '<button class="btn btn-ghost btn-sm" onclick="removeExternalOverlay(' + i + ')">' + iconSvg('close') + '</button>' +
+      '<button class="btn btn-ghost btn-sm btn-icon" onclick="removeExternalOverlay(' + i + ')">' + iconSvg('close') + '</button>' +
     '</div>';
   }).join('');
 

@@ -12,7 +12,7 @@ func TestParsePostScriptHelperFlags(t *testing.T) {
 		"-eenv.img",
 		"-o", "one.sqfs",
 		"--overlay=two.sqfs",
-		"-w",
+		"-w", "work/dir",
 		"--new",
 		"-p", "11908",
 	})
@@ -37,8 +37,11 @@ func TestParsePostScriptHelperFlags(t *testing.T) {
 	if !flags.envSet || flags.env != "env.img" {
 		t.Fatalf("env flag = (%v, %q), want (true, env.img)", flags.envSet, flags.env)
 	}
-	if !flags.cwdSet || !flags.newSet {
-		t.Fatalf("cwd/new flags = (%v, %v), want both true", flags.cwdSet, flags.newSet)
+	if !flags.cwdSet || flags.cwd != "work/dir" {
+		t.Fatalf("cwd flag = (%v, %q), want (true, work/dir)", flags.cwdSet, flags.cwd)
+	}
+	if !flags.newSet {
+		t.Fatalf("new flag = %v, want true", flags.newSet)
 	}
 	if len(flags.overlays) != 2 || flags.overlays[0] != "one.sqfs" || flags.overlays[1] != "two.sqfs" {
 		t.Fatalf("overlays = %#v, want [one.sqfs two.sqfs]", flags.overlays)
