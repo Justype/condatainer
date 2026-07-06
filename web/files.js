@@ -15,10 +15,14 @@ async function navigateFiles(path) {
     const resolved = entries.length > 0
       ? entries[0].path.replace(/\/[^/]+$/, '') || '/'
       : (path || '/');
-    if (resolved !== currentPath) { _selected.clear(); _selAnchor = -1; }
+    const pathChanged = resolved !== currentPath;
+    if (pathChanged) { _selected.clear(); _selAnchor = -1; }
     currentPath = resolved;
     renderFileBreadcrumb(resolved);
     _setVal('path-input', resolved);
+    // real directory changes push a history entry so Back/Forward walk the
+    // directory trail; refreshes just canonicalize the current one
+    setHash('#files' + encodeURI(resolved), pathChanged);
     renderFileListing(entries, truncated);
   } catch(err) {
     if (err.name === 'AbortError') return;

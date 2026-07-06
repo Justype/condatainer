@@ -620,6 +620,7 @@ function selectHelper(name, overrides) {
   if ((_formOpen || _opRunning) && selectedHelper && selectedHelper.name !== name) return;
   selectedHelper = allHelpers.find(h => h.name === name);
   if (!selectedHelper) return;
+  setHash('#start/' + encodeURIComponent(name), false);
   if (!overrides) localStorage.setItem(_selKey, JSON.stringify({ name, params: {} }));
   selectedModules          = overrides?.modules   ?? [];
   selectedExternalOverlays = overrides?.externals ?? [];

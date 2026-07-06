@@ -165,12 +165,88 @@ function navigate(id) {
   document.querySelectorAll('.sb-btn[data-section]').forEach(b =>
     b.classList.toggle('active-section', b.dataset.section === id));
   closeDetail();
+  if (id !== 'files') setHash('#' + id, false); // files: navigateFiles writes the full #files/<path> itself
   if      (id === 'jobs')     loadJobs();
   else if (id === 'start')    loadHelpers();
   else if (id === 'overlays') loadOverlays();
   else if (id === 'history')  loadHistory();
   else if (id === 'files')    { renderFileTree(); loadFileBookmarks(); navigateFiles(currentPath); }
 }
+
+/* ── URL hash routing ────────────────────── */
+// #<section>[/<arg>] — arg is a directory path for #files, a job id for
+// #jobs/#history (open detail panel), a helper name for #start. The UI
+// writes the hash as the user acts and the hash is applied on page load,
+// so a reload (e.g. after a tunnel reconnect) restores the place and any
+// state is bookmarkable. Everything replaces the current history entry —
+// except Files directory changes, which push, so Back/Forward walk the
+// directory trail and nothing else.
+let _applyingHash = false; // applying the hash must not write it back
+let _selfHash     = null;  // hash we pushed ourselves — skip re-applying it
+
+// setHash writes the canonical hash for the current UI state; push adds a
+// history entry, otherwise the current one is replaced.
+function setHash(hash, push) {
+  if (_applyingHash || location.hash === hash) return;
+  if (push) { _selfHash = hash; location.hash = hash; }
+  else history.replaceState(null, '', hash);
+}
+
+function _applyHash() {
+  const h = location.hash.slice(1);
+  if (!h) return;
+  const slash   = h.indexOf('/');
+  const section = slash < 0 ? h : h.slice(0, slash);
+  const rawArg  = slash < 0 ? '' : h.slice(slash + 1);
+  if (!['jobs', 'start', 'history', 'overlays', 'files', 'settings'].includes(section)) return;
+  _applyingHash = true;
+  try {
+    if (section === 'files') {
+      if (rawArg !== '') {
+        let p = '/' + rawArg;
+        try { p = decodeURI(p); } catch { /* keep raw */ }
+        currentPath = p;
+      }
+      navigate('files');
+      return;
+    }
+    navigate(section);
+    let arg = rawArg;
+    try { arg = decodeURIComponent(arg); } catch { /* keep raw */ }
+    if (!arg) return;
+    // The lists these act on load asynchronously — retry briefly.
+    if (section === 'jobs' || section === 'history') {
+      _tryUntil(() => {
+        if (!allJobs.some(j => j.id === arg) && !allHistory.some(j => j.id === arg)) return false;
+        openDetail(arg);
+        return true;
+      });
+    } else if (section === 'start') {
+      _tryUntil(() => {
+        if (!allHelpers.some(x => x.name === arg)) return false;
+        selectHelper(arg);
+        return true;
+      });
+    }
+  } finally { _applyingHash = false; }
+}
+
+function _tryUntil(fn, tries) {
+  tries = tries == null ? 15 : tries;
+  if (!fn() && tries > 0) setTimeout(() => _tryUntil(fn, tries - 1), 300);
+}
+
+// Only Files pushes entries, so back/forward land on #files/<path> hashes
+// (or the entry the page was opened with).
+window.addEventListener('hashchange', () => {
+  if (location.hash === _selfHash) { _selfHash = null; return; }
+  _selfHash = null;
+  _applyHash();
+});
+document.addEventListener('DOMContentLoaded', () => {
+  if (location.hash) _applyHash();
+  else history.replaceState(null, '', '#jobs'); // canonical hash for the default section
+});
 
 /* ── Status polling ──────────────────────── */
 async function pollStatus() {

@@ -207,6 +207,9 @@ function openDetail(id) {
     return;
   }
   detailJobId = id;
+  const activeSec = document.querySelector('.section.active');
+  const secId = activeSec ? activeSec.id.slice(4) : '';
+  if (secId === 'jobs' || secId === 'history') setHash('#' + secId + '/' + id, false);
   const isRunning = job.status === 'running' || job.status === 'pending' || job.status === 'starting';
 
   document.querySelectorAll('.job-card,.data-table tbody tr').forEach(e => e.classList.remove('selected'));
@@ -356,6 +359,7 @@ function closeDetail() {
   document.querySelectorAll('.job-card,.data-table tbody tr').forEach(e => e.classList.remove('selected'));
   if (detailSSE) { detailSSE.close(); detailSSE = null; }
   detailJobId = null;
+  if (/^#(jobs|history)\/./.test(location.hash)) setHash(location.hash.split('/')[0], false);
 }
 
 function detailStop() {
