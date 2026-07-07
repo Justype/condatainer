@@ -108,6 +108,68 @@ func (s *srv) handleOverlayEdit(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+// handleRemove serves POST /api/remove — deletes an installed .sqf module
+// overlay and its .env sidecar (mirrors `condatainer remove`). The path must
+// be one of the currently installed overlays. Returns 403 when the overlay's
+// directory is read-only and 409 when the overlay is in use (lock held).
+func (s *srv) handleRemove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	type removeReq struct {
+		Path string `json:"path"`
+	}
+	var req removeReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request body", http.StatusBadRequest)
+		return
+	}
+	if req.Path == "" || !utils.IsSqf(req.Path) {
+		http.Error(w, "path of an installed .sqf overlay required", http.StatusBadRequest)
+		return
+	}
+
+	// Only allow deleting overlays known to the installed-overlay map, not arbitrary files.
+	installed, err := container.InstalledOverlays()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	known := false
+	for _, p := range installed {
+		if p == req.Path {
+			known = true
+			break
+		}
+	}
+	if !known {
+		http.Error(w, "not an installed overlay: "+req.Path, http.StatusBadRequest)
+		return
+	}
+
+	if !utils.CanWriteToDir(filepath.Dir(req.Path)) {
+		http.Error(w, "overlay directory is read-only", http.StatusForbidden)
+		return
+	}
+	if lock, err := overlay.AcquireLock(req.Path, true); err != nil {
+		http.Error(w, "overlay is currently in use", http.StatusConflict)
+		return
+	} else {
+		lock.Close()
+	}
+	if err := os.Remove(req.Path); err != nil {
+		http.Error(w, "failed to remove overlay: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	envPath := req.Path + ".env"
+	if utils.FileExists(envPath) {
+		os.Remove(envPath) //nolint:errcheck
+	}
+	container.InvalidateInstalledOverlaysCache()
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
 // handleOverlaysList serves GET /api/overlays — lists module (.sqf) overlays.
 func (s *srv) handleOverlaysList(w http.ResponseWriter, r *http.Request) {
 	container.InvalidateInstalledOverlaysCache()
