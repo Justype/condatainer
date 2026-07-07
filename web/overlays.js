@@ -23,8 +23,7 @@ function renderOverlays(filter) {
       '<td class="mono td-muted td-fit">' + fmtSize(o.size) + '</td>' +
       '<td class="mono path-cell td-muted">' + pathTailHtml(o.path) + '</td>' +
       '<td class="td-nowrap td-fit">' +
-        '<button class="btn btn-sm btn-flat btn-icon" onclick="pickOverlay(\'' + escHtml(o.path) + '\')" title="Use in Start form">' + iconSvg('add_2') + '</button>' +
-        ' <button class="btn btn-sm btn-flat btn-icon" onclick="copyStr(\'' + escHtml(o.path) + '\',this)" title="Copy path">' + iconSvg('content_copy') + '</button>' +
+        '<button class="btn btn-sm btn-flat btn-icon" onclick="copyStr(\'' + escHtml(o.path) + '\',this)" title="Copy path">' + iconSvg('content_copy') + '</button>' +
         ' <button class="btn btn-sm btn-flat btn-icon btn-icon-danger" onclick="deleteOverlay(\'' + escHtml(o.path) + '\',\'' + escHtml(o.name) + '\')" title="Delete overlay">' + iconSvg('delete') + '</button>' +
       '</td>' +
     '</tr>'
@@ -54,11 +53,6 @@ function _addModuleOverlay(path) {
     selectedModules.push(entry);
     renderModuleChips();
   }
-}
-
-function pickOverlay(path) {
-  _addModuleOverlay(path);
-  navigate('start');
 }
 
 /* ── Overlay Picker Modal ────────────────── */
