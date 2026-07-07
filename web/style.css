@@ -11,6 +11,8 @@
   --mono: 'SF Mono','Cascadia Code','Consolas','Liberation Mono',monospace;
   --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
   --transition-panel: 200ms ease;
+  /* Border for hovered borderless buttons — --border alone is invisible in dark. */
+  --border-hover: color-mix(in srgb, var(--border) 45%, var(--muted));
 }
 /* --hover is the shared background for interactive hover states (nav, rows,
    tree, combo, modal rows, ghost/plain buttons). It is deliberately separate
@@ -32,7 +34,15 @@
 /* ── Reset ──────────────────────────────── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 html,body{height:100%;overflow:hidden;}
-body{font-family:var(--sans);font-size:14px;color:var(--text);background:var(--bg);display:flex;}
+body{font-family:var(--sans);font-size:14px;color:var(--text);background:var(--bg);display:flex;-webkit-user-select:none;user-select:none;}
+/* App-like default: chrome text isn't selectable. Re-enable where users copy:
+   form fields, terminal/log output, status messages, and anything .selectable.
+   The -webkit- prefix is required — Safari won't let an unprefixed user-select
+   override the inherited -webkit-user-select:none from body. */
+input,textarea,select,.selectable,
+.tv-pre,.tv-err,.term-box,.prog-pill-log,
+.log-line,.log-pre,.d-val,.d-val-col,
+.jc-lastmsg,.ov-notice,.oc-note,.modal-question,.modal-error,.modal-empty{-webkit-user-select:text;user-select:text;}
 a{color:var(--accent);text-decoration:none;}
 a:hover{text-decoration:underline;}
 input,button,select{font-family:inherit;font-size:inherit;}
@@ -152,14 +162,13 @@ input,button,select{font-family:inherit;font-size:inherit;}
 .btn-danger{background:var(--danger);color:#fff;border-color:var(--danger);}
 .btn-danger:hover{background:color-mix(in srgb,var(--danger) 86%,#000);border-color:color-mix(in srgb,var(--danger) 86%,#000);}
 .btn-ghost{background:transparent;border-color:transparent;color:var(--muted);padding:4px 8px;}
-.btn-ghost:hover{color:var(--text);background:var(--hover);border-color:var(--border);}
+.btn-ghost:hover{color:var(--text);background:var(--hover);border-color:var(--border-hover);}
 .btn-sm{padding:3px 8px;font-size:12px;}
 .btn-icon{padding:3px;} /* icon-only buttons: square around the icon; text buttons keep 3px 8px */
-/* Borderless list-row action buttons: full-strength icon (readable in dark
-   mode), hover tints only the background — no text-color or opacity change,
-   so nothing washes out and Safari doesn't pixel-snap the icon. */
-.btn-flat{background:transparent;border-color:transparent;color:var(--text);}
-.btn-flat:hover{color:var(--text);background:var(--hover);border-color:color-mix(in srgb,var(--border) 45%,var(--muted));}
+/* Borderless list-row action buttons: muted icon at rest, brightening to full
+   text color on hover (plus a background/border tint for clear feedback). */
+.btn-flat{background:transparent;border-color:transparent;color:var(--muted);}
+.btn-flat:hover{color:var(--text);background:var(--hover);border-color:var(--border-hover);}
 .btn-flat.btn-icon-danger,
 .btn-flat.btn-icon-danger:hover{color:var(--danger);}
 .btn-flat.btn-icon-danger:hover{background:color-mix(in srgb,var(--danger) 14%,transparent);border-color:color-mix(in srgb,var(--danger) 40%,transparent);}
@@ -480,7 +489,7 @@ th.file-actions-cell{width:112px;} /* fits the 3 buttons of a folder row (star, 
 .fw-bold{font-weight:600;}
 .empty-link{margin-top:4px;}
 .d-val-col{display:flex;flex-direction:column;gap:2px;}
-.log-ts{color:var(--muted);margin-right:8px;}
+.log-ts{color:var(--muted);margin-right:8px;-webkit-user-select:none;user-select:none;} /* excluded from message text selection */
 .log-notice{padding-top:4px;padding-bottom:4px;}
 .log-pre{margin:0;padding:4px 0;color:var(--text);white-space:pre-wrap;word-break:break-all;}
 .state-muted{color:var(--muted);}
@@ -502,7 +511,7 @@ code{font-family:var(--mono);}
 .form-actions{display:flex;justify-content:space-between;align-items:center;margin-top:4px;}
 .btn-start{align-self:flex-start;}
 .btn-row{display:flex;gap:8px;align-items:center;}
-.modal-lg{width:560px;}
+.modal-lg{width:560px;min-height:min(480px,72vh);} /* browse dialogs: stable height for variable-length lists */
 .modal-sm{width:420px;}
 .modal-body-pad{padding:16px;}
 .modal-question{font-size:14px;color:var(--text);line-height:1.5;margin:0;word-break:break-word;}
@@ -528,8 +537,6 @@ code{font-family:var(--mono);}
 .oc-ftr{justify-content:space-between;align-items:center;}
 .oc-anaconda-link{font-size:12.5px;color:var(--muted);}
 .oc-anaconda-link:hover{color:var(--accent);}
-/* Fixed floor so the dialog doesn't resize between browse/detail/loading states. */
-#oc-modal .modal{min-height:min(480px,72vh);}
 /* Room for the absolutely-positioned combo dropdowns (max-height 160px). */
 #oc-detail{min-height:340px;}
 #oc-detail .field{margin-bottom:12px;}

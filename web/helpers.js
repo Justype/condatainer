@@ -604,7 +604,7 @@ function renderHelperList(filter) {
         '<div class="h-item-name">' + escHtml(h.name) + '</div>' +
         '<div class="h-item-desc">'  + escHtml(h.whatis || '') + '</div>' +
       '</div>' +
-      '<button class="btn btn-sm btn-ghost h-item-star' + (isBookmarked ? ' starred' : '') + '" onclick="toggleHelperBookmark(\'' + escHtml(h.name) + '\',event)" title="' + (isBookmarked ? 'Remove bookmark' : 'Bookmark') + '">' +
+      '<button class="btn btn-icon btn-ghost h-item-star' + (isBookmarked ? ' starred' : '') + '" onclick="toggleHelperBookmark(\'' + escHtml(h.name) + '\',event)" title="' + (isBookmarked ? 'Remove bookmark' : 'Bookmark') + '">' +
         iconSvg('star', null, isBookmarked) +
       '</button>' +
     '</div>';
