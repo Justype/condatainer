@@ -12,14 +12,18 @@
   --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
   --transition-panel: 200ms ease;
 }
+/* --hover is the shared background for interactive hover states (nav, rows,
+   tree, combo, modal rows, ghost/plain buttons). It is deliberately separate
+   from --surface2 (a *resting* surface for chips/badges/tracks) and tuned for
+   clear contrast — in dark mode --surface and --surface2 are nearly identical. */
 [data-theme="dark"] {
-  --bg: #0d1117; --surface: #161b22; --surface2: #1c2128;
+  --bg: #0d1117; --surface: #161b22; --surface2: #1c2128; --hover: #262c36;
   --border: #30363d; --text: #c9d1d9; --muted: #99a1ab;
   --accent: #58a6ff; --success: #2ea043; --warn: #d29922;
   --danger: #c0392b; --term-bg: #282c34; --term-fg: #dcdfe4; --term-err: #e06c75; --term-warn: #e5c07b;
 }
 [data-theme="light"] {
-  --bg: #ffffff; --surface: #f6f8fa; --surface2: #eaeef2;
+  --bg: #ffffff; --surface: #f6f8fa; --surface2: #eaeef2; --hover: #e3e8ee;
   --border: #d0d7de; --text: #1f2328; --muted: #656d76;
   --accent: #0969da; --success: #1a7f37; --warn: #9a6700;
   --danger: #cf222e; --term-bg: #fafafa; --term-fg: #383a42; --term-err: #e45649; --term-warn: #c18401;
@@ -88,7 +92,7 @@ input,button,select{font-family:inherit;font-size:inherit;}
   border-left:3px solid transparent;
   transition:background 120ms,color 120ms,border-color 120ms;user-select:none;
 }
-.nav-item:hover{background:var(--surface2);color:var(--text);}
+.nav-item:hover{background:var(--hover);color:var(--text);}
 .nav-item.active{
   color:var(--accent);border-left-color:var(--accent);
   background:color-mix(in srgb,var(--accent) 8%,transparent);
@@ -133,20 +137,35 @@ input,button,select{font-family:inherit;font-size:inherit;}
   font-size:13px;font-weight:500;border:1px solid var(--border);
   border-radius:var(--radius-sm);background:var(--surface);color:var(--text);
   cursor:pointer;white-space:nowrap;line-height:1.4;
+  vertical-align:middle; /* pin inline-flex to the line's middle rather than a content-derived baseline */
   transition:background 120ms,border-color 120ms,opacity 120ms;
 }
-.btn:hover{background:var(--surface2);}
+.btn:hover{background:var(--hover);}
+/* Dim filled buttons on hover by darkening the background, not via opacity —
+   an opacity transition promotes a compositing layer that Safari pixel-snaps,
+   making the icon jitter on hover. */
 .btn-primary{background:var(--accent);color:#fff;border-color:var(--accent);}
-.btn-primary:hover{background:var(--accent);opacity:.88;}
+.btn-primary:hover{background:color-mix(in srgb,var(--accent) 86%,#000);border-color:color-mix(in srgb,var(--accent) 86%,#000);}
+/* The dark-mode accent is a bright blue — tone the filled primary down as a fill. */
+[data-theme="dark"] .btn-primary{background:color-mix(in srgb,var(--accent) 82%,#000);border-color:color-mix(in srgb,var(--accent) 82%,#000);}
+[data-theme="dark"] .btn-primary:hover{background:color-mix(in srgb,var(--accent) 70%,#000);border-color:color-mix(in srgb,var(--accent) 70%,#000);}
 .btn-danger{background:var(--danger);color:#fff;border-color:var(--danger);}
-.btn-danger:hover{background:var(--danger);opacity:.88;}
+.btn-danger:hover{background:color-mix(in srgb,var(--danger) 86%,#000);border-color:color-mix(in srgb,var(--danger) 86%,#000);}
 .btn-ghost{background:transparent;border-color:transparent;color:var(--muted);padding:4px 8px;}
-.btn-ghost:hover{color:var(--text);background:var(--surface2);border-color:var(--border);}
+.btn-ghost:hover{color:var(--text);background:var(--hover);border-color:var(--border);}
 .btn-sm{padding:3px 8px;font-size:12px;}
 .btn-icon{padding:3px;} /* icon-only buttons: square around the icon; text buttons keep 3px 8px */
+/* Borderless list-row action buttons: full-strength icon (readable in dark
+   mode), hover tints only the background — no text-color or opacity change,
+   so nothing washes out and Safari doesn't pixel-snap the icon. */
+.btn-flat{background:transparent;border-color:transparent;color:var(--text);}
+.btn-flat:hover{color:var(--text);background:var(--hover);border-color:color-mix(in srgb,var(--border) 45%,var(--muted));}
+.btn-flat.btn-icon-danger,
+.btn-flat.btn-icon-danger:hover{color:var(--danger);}
+.btn-flat.btn-icon-danger:hover{background:color-mix(in srgb,var(--danger) 14%,transparent);border-color:color-mix(in srgb,var(--danger) 40%,transparent);}
 .btn[disabled]{opacity:.4;cursor:not-allowed;pointer-events:none;}
 .btn-success{background:var(--success);color:#fff;border-color:var(--success);}
-.btn-success:hover{opacity:.88;}
+.btn-success:hover{background:color-mix(in srgb,var(--success) 86%,#000);border-color:color-mix(in srgb,var(--success) 86%,#000);}
 
 /* ── Badges ──────────────────────────────── */
 .badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;line-height:1.5;}
@@ -204,7 +223,7 @@ input,button,select{font-family:inherit;font-size:inherit;}
 .h-search:focus{border-color:var(--accent);}
 .h-item{padding:9px 10px 9px 14px;cursor:pointer;border-bottom:1px solid var(--border);border-left:3px solid transparent;transition:background 120ms;display:flex;align-items:flex-start;gap:4px;}
 .h-item:last-child{border-bottom:none;}
-.h-item:hover{background:var(--surface2);}
+.h-item:hover{background:var(--hover);}
 .h-item.active{background:color-mix(in srgb,var(--accent) 8%,transparent);border-left-color:var(--accent);padding-left:11px;}
 .h-item-content{flex:1;min-width:0;}
 .h-item-name{font-weight:600;font-size:14px;}
@@ -245,7 +264,7 @@ input,button,select{font-family:inherit;font-size:inherit;}
 .combo-list{display:none;position:absolute;top:100%;left:0;right:0;z-index:10;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:0 4px 12px rgba(0,0,0,.2);max-height:160px;overflow-y:auto;margin-top:2px;}
 .combo-list.open{display:block;}
 .combo-item{padding:5px 10px;font-family:var(--mono);font-size:13px;cursor:pointer;}
-.combo-item:hover{background:var(--surface2);}
+.combo-item:hover{background:var(--hover);}
 .combo-empty{color:var(--muted);cursor:default;}
 .combo-input.combo-invalid,.field-input.combo-invalid{border-color:var(--danger);}
 
@@ -332,7 +351,7 @@ input,button,select{font-family:inherit;font-size:inherit;}
 .data-table td{padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:middle;}
 .data-table tbody tr:last-child td{border-bottom:none;}
 .data-table tbody tr{cursor:pointer;transition:background 100ms;}
-.data-table tbody tr:hover{background:var(--surface2);}
+.data-table tbody tr:hover{background:var(--hover);}
 .data-table tbody tr.selected{background:color-mix(in srgb,var(--accent) 7%,var(--surface));}
 .tbl-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:auto;flex:1;}
 
@@ -358,7 +377,7 @@ input,button,select{font-family:inherit;font-size:inherit;}
 .marquee{position:absolute;z-index:0;border:1px solid var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);pointer-events:none;} /* z-index 0: above rows, below the sticky thead (z-index 1) */
 .file-list-wrap.drag-over{background:color-mix(in srgb,var(--accent) 8%,transparent);border-color:var(--accent);}
 .tree-item{display:flex;align-items:center;gap:5px;padding:5px 8px;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;}
-.tree-item:hover{background:var(--surface2);}
+.tree-item:hover{background:var(--hover);}
 .tree-item.active{background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--accent);}
 .tree-sep{border-top:1px solid var(--border);margin:6px 2px;}
 /* min-height fits the hover-only ✕ button, so the row doesn't grow on hover */
@@ -387,7 +406,7 @@ th.file-actions-cell{width:112px;} /* fits the 3 buttons of a folder row (star, 
 .btn-ghost.starred{color:#e8a020;}
 .row-menu{position:fixed;z-index:50;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,.25);min-width:160px;padding:4px;}
 .row-menu-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;white-space:nowrap;}
-.row-menu-item:hover{background:var(--surface2);}
+.row-menu-item:hover{background:var(--hover);}
 .row-menu-item .icon{width:16px;height:16px;}
 .row-menu-hdr{padding:5px 10px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
 .row-menu-sep{border-top:1px solid var(--border);margin:4px 2px;}
@@ -423,7 +442,7 @@ th.file-actions-cell{width:112px;} /* fits the 3 buttons of a folder row (star, 
 .toggle-lbl{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer;user-select:none;}
 .modal-row{display:flex;align-items:center;gap:8px;padding:7px 16px;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer;}
 .modal-row:last-child{border-bottom:none;}
-.modal-row:hover{background:var(--surface2);}
+.modal-row:hover{background:var(--hover);}
 .modal-row-icon{color:var(--muted);width:16px;text-align:center;}
 .modal-row-name{flex:1;}
 .modal-row-size{color:var(--muted);font-family:var(--mono);font-size:12px;}
@@ -449,8 +468,6 @@ th.file-actions-cell{width:112px;} /* fits the 3 buttons of a folder row (star, 
 .td-muted{color:var(--muted);}
 .td-nowrap{white-space:nowrap;}
 .td-node{width:1%;white-space:nowrap;}
-.td-actions{display:flex;gap:6px;}
-td:has(.td-actions){width:1%;white-space:nowrap;}
 
 /* ── Module chips ────────────────────────── */
 .module-chip{display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);}
@@ -492,3 +509,27 @@ code{font-family:var(--mono);}
 .modal-ftr-end{justify-content:flex-end;}
 .settings-p{font-size:12px;color:var(--muted);margin-bottom:8px;}
 .links-list{display:flex;flex-direction:column;gap:6px;}
+
+/* ── Overlay Create modal ───────────────── */
+/* Interactive prompts may contain URLs — uppercasing would break them. */
+.field-label.oc-prompt{text-transform:none;letter-spacing:normal;word-break:break-word;}
+.oc-row-name{font-size:14px;font-weight:600;}
+.oc-alias{font-family:var(--mono);font-size:12px;color:var(--accent);}
+.oc-whatis{display:block;font-size:12px;color:var(--muted);font-weight:400;}
+.oc-hdr{margin-bottom:6px;}
+.oc-title{font-size:16px;font-weight:700;line-height:1.4;word-break:break-all;}
+.oc-title .badge{vertical-align:2px;margin-left:2px;}
+.oc-title .td-muted{font-size:13px;font-weight:500;}
+#oc-detail .f-divider{margin:16px 0 10px;}
+.oc-concrete{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--accent);word-break:break-all;}
+.oc-note{display:flex;gap:6px;align-items:flex-start;font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.5;}
+.oc-note .icon{flex-shrink:0;margin-top:1px;}
+.oc-group-hdr{padding:10px 12px 4px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+.oc-ftr{justify-content:space-between;align-items:center;}
+.oc-anaconda-link{font-size:12.5px;color:var(--muted);}
+.oc-anaconda-link:hover{color:var(--accent);}
+/* Fixed floor so the dialog doesn't resize between browse/detail/loading states. */
+#oc-modal .modal{min-height:min(480px,72vh);}
+/* Room for the absolutely-positioned combo dropdowns (max-height 160px). */
+#oc-detail{min-height:340px;}
+#oc-detail .field{margin-bottom:12px;}

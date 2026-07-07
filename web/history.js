@@ -38,11 +38,11 @@ function renderHistory(filter) {
         '<td class="td-muted td-fit">' + (h.ended_at ? fmtRelTime(h.ended_at) : '—') + '</td>' +
         '<td class="td-nowrap td-fit">' +
           (isActiveHistoryStatus(h.status)
-            ? '<button class="btn btn-sm btn-icon" disabled title="Job is still active">' + iconSvg('replay') + '</button>'
-            : '<button class="btn btn-sm btn-icon" onclick="rerunHistoryJob(event,\'' + id + '\')" title="Rerun">' + iconSvg('replay') + '</button>') +
+            ? '<button class="btn btn-sm btn-flat btn-icon" disabled title="Job is still active">' + iconSvg('replay') + '</button>'
+            : '<button class="btn btn-sm btn-flat btn-icon" onclick="rerunHistoryJob(event,\'' + id + '\')" title="Rerun">' + iconSvg('replay') + '</button>') +
           ' ' + (isActiveHistoryStatus(h.status)
-            ? '<button class="btn btn-sm btn-danger btn-icon" disabled title="Stop the job before removing it">' + iconSvg('delete') + '</button>'
-            : '<button class="btn btn-sm btn-danger btn-icon" onclick="removeHistoryEntry(event,\'' + id + '\',this)" title="Remove entry">' + iconSvg('delete') + '</button>') +
+            ? '<button class="btn btn-sm btn-flat btn-icon btn-icon-danger" disabled title="Stop the job before removing it">' + iconSvg('delete') + '</button>'
+            : '<button class="btn btn-sm btn-flat btn-icon btn-icon-danger" onclick="removeHistoryEntry(event,\'' + id + '\',this)" title="Remove entry">' + iconSvg('delete') + '</button>') +
         '</td>' +
       '</tr>'
     );

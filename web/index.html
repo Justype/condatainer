@@ -204,7 +204,10 @@
         </div>
         <input class="search" id="ov-search" placeholder="Search by name or type…"
                oninput="renderOverlays(this.value)">
-        <button class="btn btn-sm" onclick="loadOverlays()"><svg class="icon"><use href="#i-refresh"></use></svg>Refresh</button>
+        <div class="btn-row">
+          <button class="btn btn-sm btn-primary" onclick="openOverlayCreate()"><svg class="icon"><use href="#i-add_2"></use></svg>Create</button>
+          <button class="btn btn-sm" onclick="loadOverlays()"><svg class="icon"><use href="#i-refresh"></use></svg>Refresh</button>
+        </div>
       </div>
       <div class="tbl-wrap">
         <table class="data-table">
@@ -403,6 +406,33 @@
     </div>
     <div class="modal-ftr">
       <button class="btn btn-sm" onclick="closeModal('op-modal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Overlay Create Modal ─────────────── -->
+<div class="modal-backdrop" id="oc-modal">
+  <div class="modal modal-lg">
+    <div class="modal-hdr">
+      <span>Create Overlay</span>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="closeModal('oc-modal')"><svg class="icon"><use href="#i-close"></use></svg></button>
+    </div>
+    <div class="modal-tab-body active" id="oc-browse">
+      <div class="modal-search">
+        <input id="oc-search" placeholder="Search available overlays… (checks conda by exact name)" oninput="ocFilter(this.value)">
+      </div>
+      <div class="modal-body" id="oc-list"></div>
+    </div>
+    <div class="modal-tab-body" id="oc-detail-wrap">
+      <div class="modal-body modal-body-pad" id="oc-detail"></div>
+    </div>
+    <div class="modal-ftr oc-ftr">
+      <a class="oc-anaconda-link" id="oc-anaconda-link" href="https://anaconda.org/search" target="_blank" rel="noopener" title="Fuzzy package discovery on anaconda.org">Search anaconda.org →</a>
+      <div class="btn-row">
+        <button class="btn btn-sm" id="oc-back-btn" onclick="ocShowBrowse()" hidden>Back</button>
+        <button class="btn btn-sm" onclick="closeModal('oc-modal')">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="oc-create-btn" onclick="ocCreate()" hidden>Create</button>
+      </div>
     </div>
   </div>
 </div>
