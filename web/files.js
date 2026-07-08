@@ -7,9 +7,15 @@ async function navigateFiles(path) {
   if (_navController) _navController.abort();
   _navController = new AbortController();
   const url = path ? '/api/fs?path=' + encodeURIComponent(path) : '/api/fs';
+  // listing a big directory on a network filesystem can take a while —
+  // show feedback instead of a frozen listing (only when it's actually slow)
+  const slowTimer = setTimeout(() => {
+    gid('file-tbody').innerHTML = '<tr><td colspan="4" class="td-empty">Loading…</td></tr>';
+  }, 300);
   try {
     const r       = await fetch(url, { signal: _navController.signal });
     const entries = (await r.json()) || [];
+    clearTimeout(slowTimer);
     const truncated = r.headers.get('X-FS-Truncated') === 'true';
     // Resolve actual path from first entry's parent (API returns full paths)
     const resolved = entries.length > 0
@@ -25,6 +31,7 @@ async function navigateFiles(path) {
     setHash('#files' + encodeURI(resolved), pathChanged);
     renderFileListing(entries, truncated);
   } catch(err) {
+    clearTimeout(slowTimer);
     if (err.name === 'AbortError') return;
     gid('file-tbody').innerHTML =
       '<tr><td colspan="4" class="td-error">Error loading path.</td></tr>';
@@ -579,7 +586,7 @@ function renderFileListing(entries, truncated) {
   }
   const truncRow = truncated
     ? '<tr><td colspan="4" class="td-warn">' +
-      iconSvg('warning') + ' Showing first 500 entries — use the path bar to navigate deeper.</td></tr>'
+      iconSvg('warning') + ' Showing first 2000 entries — use the path bar to navigate deeper.</td></tr>'
     : '';
   tbody.innerHTML = truncRow + vis.map((e, i) => {
     const rowAttrs = ' data-idx="' + i + '"' + (_selected.has(e.path) ? ' class="selected"' : '') +
