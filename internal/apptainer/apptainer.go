@@ -135,7 +135,7 @@ func CheckZstdSupport(currentVersion string) bool {
 
 // runApptainerWithOutput executes an apptainer command with control over output handling.
 //
-// op: "exec", "pull", "build", "instance start", etc.
+// op: "exec", "pull", "build", etc.
 // imagePath: optional, helpful for logging which container failed
 // capture: whether to capture stdout/stderr for storing on the error.
 // stdin: custom stdin reader (optional; nil means no stdin)
