@@ -13,7 +13,16 @@ async function navigateFiles(path) {
     gid('file-tbody').innerHTML = '<tr><td colspan="4" class="td-empty">Loading…</td></tr>';
   }, 300);
   try {
-    const r       = await fetch(url, { signal: _navController.signal });
+    const r = await fetch(url, { signal: _navController.signal });
+    if (!r.ok) {
+      clearTimeout(slowTimer);
+      const msg = (await r.text()).trim();
+      gid('file-tbody').innerHTML =
+        '<tr><td colspan="4" class="td-error">' + escHtml(msg || 'Error loading path.') + '</td></tr>';
+      renderFileTree();
+      updateBookmarkStarBtn();
+      return;
+    }
     const entries = (await r.json()) || [];
     clearTimeout(slowTimer);
     const truncated = r.headers.get('X-FS-Truncated') === 'true';
@@ -1203,7 +1212,13 @@ async function fpNavigate(path) {
   fpPath = path;
   const url = path ? '/api/fs?path=' + encodeURIComponent(path) : '/api/fs';
   try {
-    const r       = await fetch(url, { signal: _fpController.signal });
+    const r = await fetch(url, { signal: _fpController.signal });
+    if (!r.ok) {
+      const msg = (await r.text()).trim();
+      gid('fp-body').innerHTML =
+        '<div class="modal-error">' + escHtml(msg || 'Error loading directory') + '</div>';
+      return;
+    }
     const entries = (await r.json()) || [];
     // Resolve actual path from API response
     if (entries.length > 0) {

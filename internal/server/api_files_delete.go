@@ -23,7 +23,7 @@ func (s *srv) handleFSDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := os.Lstat(path); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fsErrorResponse(w, path, err)
 		return
 	}
 

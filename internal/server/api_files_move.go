@@ -43,7 +43,7 @@ func (s *srv) handleFSRename(w http.ResponseWriter, r *http.Request) {
 
 	srcInfo, err := os.Lstat(path)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fsErrorResponse(w, path, err)
 		return
 	}
 
@@ -58,7 +58,7 @@ func (s *srv) handleFSRename(w http.ResponseWriter, r *http.Request) {
 	case destDir != "":
 		info, err := os.Stat(destDir)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			fsErrorResponse(w, destDir, err)
 			return
 		}
 		if !info.IsDir() {

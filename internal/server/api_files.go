@@ -1,12 +1,29 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 )
+
+// fsErrorResponse writes err for path as a human-readable message with a
+// fitting status (403 permission, 404 missing, 400 otherwise).
+func fsErrorResponse(w http.ResponseWriter, path string, err error) {
+	switch {
+	case os.IsPermission(err):
+		http.Error(w, "no permission to access "+path, http.StatusForbidden)
+	case os.IsNotExist(err):
+		http.Error(w, path+" does not exist", http.StatusNotFound)
+	case errors.Is(err, syscall.ENOTDIR):
+		http.Error(w, path+" is not a directory", http.StatusBadRequest)
+	default:
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+}
 
 // maxFSEntries is the maximum number of directory entries returned per request.
 // Prevents loading thousands of entries from large shared dirs like /home or /scratch.
@@ -39,7 +56,7 @@ func (s *srv) handleFS(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fsErrorResponse(w, path, err)
 		return
 	}
 

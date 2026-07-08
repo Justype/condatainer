@@ -36,7 +36,7 @@ func (s *srv) handleFSDownload(w http.ResponseWriter, r *http.Request) {
 
 	info, err := os.Stat(path)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fsErrorResponse(w, path, err)
 		return
 	}
 	// FIFOs/sockets/devices are not downloadable — opening one can block forever.
@@ -77,7 +77,7 @@ func (s *srv) handleFSDownload(w http.ResponseWriter, r *http.Request) {
 func downloadFile(w http.ResponseWriter, r *http.Request, path string, info os.FileInfo, inline bool) {
 	f, err := os.Open(path)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fsErrorResponse(w, path, err)
 		return
 	}
 	defer f.Close()
@@ -96,7 +96,7 @@ func downloadFile(w http.ResponseWriter, r *http.Request, path string, info os.F
 func downloadFileGz(w http.ResponseWriter, path string, info os.FileInfo) {
 	f, err := os.Open(path)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fsErrorResponse(w, path, err)
 		return
 	}
 	defer f.Close()
