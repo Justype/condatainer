@@ -264,6 +264,7 @@ function _setStatus(alive, d) {
   if (dot)  dot.classList.toggle('dead', !alive);
   if (text) text.textContent = alive ? (d.running || 0) + ' running' : 'unreachable';
   if (d) {
+    if (d.hostname) document.title = d.hostname + ' - CondaTainer';
     _setText('srv-port',    d.port);
     _setText('srv-pid',     d.pid);
     _setText('srv-uptime',  d.uptime);
