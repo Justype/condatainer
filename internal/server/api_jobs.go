@@ -268,6 +268,23 @@ func (s *srv) handleHelperDelete(w http.ResponseWriter, r *http.Request, id stri
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
+// handleHelpersClearFinished serves DELETE /api/helpers/finished — removes all
+// finished (non-active) history entries and their state directories. Returns
+// {"removed": n}.
+func (s *srv) handleHelpersClearFinished(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "DELETE required", http.StatusMethodNotAllowed)
+		return
+	}
+	n, err := helper.DeleteFinishedHistory()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	invalidateHistoryCache()
+	writeJSON(w, map[string]int{"removed": n})
+}
+
 // handleGpuOptions serves GET /api/gpu-options — returns unique GPU type names from the active scheduler.
 func (s *srv) handleGpuOptions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")

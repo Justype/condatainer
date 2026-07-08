@@ -373,7 +373,6 @@ function rerunJob(jobOrId) {
     ? jobOrId
     : allJobs.find(j => j.id === id) || allHistory.find(j => j.id === id);
   if (!job) return;
-  navigate('start');
   queueStartSelection(job.name, {
     cpus:    job.cpus,
     mem:     job.mem,
@@ -385,4 +384,5 @@ function rerunJob(jobOrId) {
     externals: (job.overlays || []).filter(p => !allOverlays.find(o => o.name === p || o.path === p)),
     params:  job.params  || {},
   });
+  navigate('start');
 }

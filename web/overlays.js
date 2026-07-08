@@ -7,10 +7,13 @@ async function loadOverlays() {
   renderOverlays();
 }
 
+// renderOverlays renders the .sqf overlay table, keeping only entries whose
+// name matches every whitespace-separated term of filter.
 function renderOverlays(filter) {
-  const q    = (filter || '').toLowerCase();
-  const sqfs = allOverlays.filter(o => o.type === 'sqf');
-  const rows = q ? sqfs.filter(o => o.name.toLowerCase().includes(q)) : sqfs;
+  const terms = searchTerms(filter);
+  const q     = terms.length;
+  const sqfs  = allOverlays.filter(o => o.type === 'sqf');
+  const rows  = q ? sqfs.filter(o => matchesAllTerms(o.name, terms)) : sqfs;
   const tbody = gid('ov-tbody');
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="4" class="td-empty">' +
@@ -77,8 +80,8 @@ function opSwitchTab(tab) {
 
 function filterAppOverlays(q) {
   const sqfOvs = allOverlays.filter(o => o.type === 'sqf');
-  const lower  = q.toLowerCase();
-  const hits   = lower ? sqfOvs.filter(o => o.name.toLowerCase().includes(lower)) : sqfOvs;
+  const terms  = searchTerms(q);
+  const hits   = terms.length ? sqfOvs.filter(o => matchesAllTerms(o.name, terms)) : sqfOvs;
   gid('op-app-list').innerHTML = hits.length
     ? hits.map(o =>
         '<div class="modal-row" onclick="selectOverlay(\'' + escHtml(o.path) + '\')">' +
@@ -172,33 +175,36 @@ function ocShowBrowse() {
   clearTimeout(_ocInspectTimer);
 }
 
+// ocFilter filters the avail list: entries must match every whitespace-
+// separated term of q (across name/alias/whatis/target).
 function ocFilter(q) {
   if (_ocAvail === null) return;
   const lower = (q || '').toLowerCase().trim();
-  let hits = lower
+  const terms = searchTerms(lower);
+  let hits = terms.length
     ? _ocAvail.filter(e =>
-        e.name.toLowerCase().includes(lower) ||
-        (e.alias || '').toLowerCase().includes(lower) ||
-        (e.whatis || '').toLowerCase().includes(lower) ||
-        (e.target_template || '').toLowerCase().includes(lower))
+        matchesAllTerms([e.name, e.alias, e.whatis, e.target_template].join(' '), terms))
     : _ocAvail;
-  if (lower) {
+  if (terms.length) {
     // Exact-first ordering (mirrors the CLI's exact-first search): full-name or
-    // alias match, then path-segment match, then name prefix/substring.
+    // alias match, then path-segment match, then name prefix/substring. Ranked
+    // by the first term when the query has several.
+    const key = terms[0];
     const rank = e => {
       const n = e.name.toLowerCase();
-      if (n === lower || (e.alias || '').toLowerCase() === lower) return 0;
-      if (n.split('/').includes(lower)) return 1;
-      if (n.startsWith(lower)) return 2;
-      if (n.includes(lower)) return 3;
+      if (n === key || (e.alias || '').toLowerCase() === key) return 0;
+      if (n.split('/').includes(key)) return 1;
+      if (n.startsWith(key)) return 2;
+      if (n.includes(key)) return 3;
       return 4; // matched via whatis/target only
     };
     hits = hits.slice().sort((a, b) => rank(a) - rank(b));
   }
   // Always check conda by exact name (debounced) so its result shows alongside
-  // build scripts — unless a script already owns that exact name (shadowed below).
+  // build scripts — unless a script already owns that exact name (shadowed
+  // below). A multi-term query is never a package name, so it skips conda.
   clearTimeout(_ocCondaTimer);
-  if (lower.length >= 2 && lower !== _ocCondaQuery && !_ocNameOwnedByScript(lower)) {
+  if (terms.length === 1 && lower.length >= 2 && lower !== _ocCondaQuery && !_ocNameOwnedByScript(lower)) {
     _ocCondaTimer = setTimeout(() => _ocCondaSearch(lower), 400);
   }
   _ocUpdateAnacondaLink(lower);
@@ -266,8 +272,11 @@ function _ocRenderList(hits, q) {
   ).join('');
 
   // A script owning the exact name shadows the conda result (e.g. cytoscape).
-  const shadowed   = q.length >= 2 && _ocNameOwnedByScript(q);
-  const condaReady = q.length >= 2 && !shadowed && q === _ocCondaQuery;
+  // Multi-term queries never hit conda (see ocFilter), so they get plain
+  // "No matches." instead of the conda messaging.
+  const condaable  = q.length >= 2 && !/\s/.test(q);
+  const shadowed   = condaable && _ocNameOwnedByScript(q);
+  const condaReady = condaable && !shadowed && q === _ocCondaQuery;
   const condaHdr   = '<div class="oc-group-hdr">Conda package (anaconda.org)</div>';
   const condaRows  = condaReady && _ocConda.length ? condaHdr + _ocCondaRowsHtml() : '';
 
@@ -276,7 +285,7 @@ function _ocRenderList(hits, q) {
       html = condaRows;
     } else if (condaReady) {
       html = '<div class="modal-empty">No build script or conda package named “' + escHtml(q) + '”.</div>';
-    } else if (q.length >= 2) {
+    } else if (condaable) {
       html = '<div class="modal-empty">No build scripts match. Checking conda…</div>';
     } else {
       html = '<div class="modal-empty">' + (q ? 'No matches.' : 'No build scripts found.') + '</div>';

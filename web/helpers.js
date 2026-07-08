@@ -580,12 +580,12 @@ async function toggleHelperBookmark(name, e) {
 
 function renderHelperList(filter) {
   const list      = gid('helper-list');
-  const q         = (filter || '').toLowerCase().trim();
+  const terms     = searchTerms(filter);
+  const q         = terms.length;
   const bookmarked = helperBookmarks;
   let helpers  = q
     ? allHelpers.filter(h =>
-        h.name.toLowerCase().includes(q) ||
-        (h.whatis || '').toLowerCase().includes(q))
+        matchesAllTerms(h.name + ' ' + (h.whatis || ''), terms))
     : allHelpers;
   // Bookmarked items float to the top
   helpers = [
@@ -765,11 +765,16 @@ async function refreshEnvOverlayFromCWD() {
   const cwd = gid('cfg-cwd').value || '';
   const url = '/api/helpers/' + encodeURIComponent(helperName) +
     '/find-env?cwd=' + encodeURIComponent(cwd);
+  // The overlay may get set (e.g. by a rerun) or the cwd may change while the
+  // fetch is in flight — a stale result must not overwrite the newer state.
+  const stale = () => !selectedHelper || selectedHelper.name !== helperName ||
+    gid('cfg-overlay').value || (gid('cfg-cwd').value || '') !== cwd;
   try {
     const d = await fetch(url).then(r => r.json());
-    if (!selectedHelper || selectedHelper.name !== helperName) return;
+    if (stale()) return;
     _setVal('cfg-overlay', d.path || '');
   } catch {
+    if (stale()) return;
     _setVal('cfg-overlay', '');
   }
   gid('cfg-overlay').dispatchEvent(new Event('input'));

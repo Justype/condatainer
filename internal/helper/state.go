@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -462,6 +463,81 @@ func DeleteHistoryEntry(id string) error {
 		os.RemoveAll(stateDir) //nolint:errcheck
 	}
 	return nil
+}
+
+// DeleteHistoryEntries removes the entries with the given IDs from the JSONL
+// history file in a single rewrite, then deletes their state directories in
+// parallel. IDs not present in the history are ignored. Returns the number of
+// entries removed.
+func DeleteHistoryEntries(ids []string) (int, error) {
+	idSet := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		idSet[id] = true
+	}
+	return deleteHistoryMatching(func(r *HelperRun) bool { return idSet[r.ID] })
+}
+
+// DeleteFinishedHistory removes every finished (non-active) entry from the
+// JSONL history file along with its state directory, and returns the number
+// of entries removed. Active (pending/starting/running) entries are kept.
+func DeleteFinishedHistory() (int, error) {
+	return deleteHistoryMatching(func(r *HelperRun) bool { return !isActiveStatus(r.Status) })
+}
+
+// deleteHistoryMatching removes all history entries for which match returns
+// true (single locked rewrite), then removes their state directories in
+// parallel. Returns the number of entries removed.
+func deleteHistoryMatching(match func(*HelperRun) bool) (int, error) {
+	path := HistoryPath()
+	if path == "" {
+		return 0, fmt.Errorf("cannot determine history path")
+	}
+	var removed []string
+	if err := withHistoryLock(path, func() error {
+		runs, err := LoadHistory()
+		if err != nil {
+			return err
+		}
+		kept := runs[:0]
+		for _, r := range runs {
+			if match(r) {
+				removed = append(removed, r.ID)
+			} else {
+				kept = append(kept, r)
+			}
+		}
+		if len(removed) == 0 {
+			return nil
+		}
+		return rewriteHistory(path, kept)
+	}); err != nil {
+		return 0, err
+	}
+	removeStateDirs(removed)
+	return len(removed), nil
+}
+
+// removeStateDirs deletes the per-run state directories (events, job.log, …)
+// for the given run IDs with a bounded pool of goroutines — unlinks on network
+// filesystems are latency-bound, so parallelism cuts the wall time. Best-effort.
+func removeStateDirs(ids []string) {
+	const workers = 8
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for _, id := range ids {
+		stateDir := config.GetHelperStateDir(id)
+		if stateDir == "" {
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(dir string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			os.RemoveAll(dir) //nolint:errcheck
+		}(stateDir)
+	}
+	wg.Wait()
 }
 
 // rewriteHistory writes all runs back to the JSONL file atomically (tmp then rename).

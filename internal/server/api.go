@@ -68,8 +68,10 @@ func isActiveRunStatus(status string) bool {
 func (s *srv) handleStatus(w http.ResponseWriter, r *http.Request) {
 	home, _ := os.UserHomeDir()
 	scratch := os.Getenv("SCRATCH")
+	hostname, _ := os.Hostname()
 	writeJSON(w, map[string]interface{}{
 		"port":         s.port,
+		"hostname":     hostname,
 		"pid":          os.Getpid(),
 		"running":      s.watcher.RunningCount(),
 		"uptime":       fmtUptime(s.startTime),

@@ -464,6 +464,19 @@ th.file-actions-cell{width:112px;} /* fits the 3 buttons of a folder row (star, 
 .modal-search{padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;}
 .modal-search input{width:100%;padding:5px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:13px;outline:none;font-family:var(--mono);}
 .modal-search input:focus{border-color:var(--accent);}
+/* ── Search clear button ─────────────────── */
+/* search-wrap wraps a search input with a × clear button, shown only while
+   the input is non-empty (:placeholder-shown requires the input to have a
+   placeholder). Must come after .search/.h-search/.modal-search input so the
+   padding-right override wins. */
+.search-wrap{position:relative;display:flex;align-items:center;min-width:0;}
+.s-header .search-wrap{flex:1;max-width:480px;}
+.h-search-bar .search-wrap,.modal-search .search-wrap{width:100%;}
+.search-wrap>input{width:100%;max-width:none;padding-right:28px;}
+.search-clear{position:absolute;right:4px;display:none;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:none;background:none;color:var(--muted);cursor:pointer;border-radius:var(--radius-sm);}
+.search-clear:hover{color:var(--text);}
+.search-clear .icon{width:14px;height:14px;}
+.search-wrap>input:not(:placeholder-shown)+.search-clear{display:flex;}
 .modal-tab-body{display:none;flex:1;min-height:0;}
 .modal-tab-body.active{display:flex;flex-direction:column;}
 #op-app-list{flex:1;overflow-y:auto;}
