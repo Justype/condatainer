@@ -159,18 +159,15 @@ func postProcessBashCompletion(script string) string {
 
 	script = strings.Replace(script, oldCode, newCode, 1)
 
-	// 2. Add fzf support if available for 'e/exec/instance start'
+	// 2. Add fzf support if available for 'e/exec'
 	fzfInject := `    __condatainer_debug "The completions are: ${out}"
 
-    # Use fzf if available and we're completing for 'e/exec/instance start'
+    # Use fzf if available and we're completing for 'e/exec'
     if command -v fzf >/dev/null 2>&1 && [[ -n "$out" ]]; then
         local is_overlay_cmd=false
         for i in "${!words[@]}"; do
             word="${words[$i]}"
             if [[ "$word" == "e" || "$word" == "exec" ]]; then
-                is_overlay_cmd=true
-                break
-            elif [[ "$word" == "instance" && "${words[$((i+1))]}" == "start" ]]; then
                 is_overlay_cmd=true
                 break
             fi
@@ -199,22 +196,18 @@ func postProcessBashCompletion(script string) string {
 // postProcessZshCompletion modifies the generated zsh completion script
 // EXPERIMENTAL: zsh completion is not tested and may have edge cases. Feedback welcome.
 func postProcessZshCompletion(script string) string {
-	// Add fzf support if available for 'e/exec/instance start'
+	// Add fzf support if available for 'e/exec'
 	fzfInject := `    __condatainer_debug "completions: ${out}"
 
-    # Use fzf if available and we're completing for 'e/exec/instance start'
+    # Use fzf if available and we're completing for 'e/exec'
     if command -v fzf >/dev/null 2>&1 && [[ -n "$out" ]]; then
         local is_overlay_cmd=false
-        local _prev="" _word
+        local _word
         for _word in "${words[@]}"; do
             if [[ "$_word" == "e" || "$_word" == "exec" ]]; then
                 is_overlay_cmd=true
                 break
-            elif [[ "$_prev" == "instance" && "$_word" == "start" ]]; then
-                is_overlay_cmd=true
-                break
             fi
-            _prev="$_word"
         done
 
         if [[ "${words[$CURRENT]}" == -* ]]; then
@@ -243,7 +236,7 @@ func postProcessZshCompletion(script string) string {
 // postProcessFishCompletion modifies the generated fish completion script
 // EXPERIMENTAL: fish completion is not tested and may have edge cases. Feedback welcome.
 func postProcessFishCompletion(script string) string {
-	// Add fzf support if available for 'e/exec/instance start'
+	// Add fzf support if available for 'e/exec'
 	// Note: We try to match the line where results are captured.
 	// Cobra sometimes generates 'eval' and sometimes not depending on version.
 	// We handle the standard pattern found in recent versions.
@@ -256,12 +249,10 @@ func postProcessFishCompletion(script string) string {
 
 	fzfInject := target + `
 
-    # Use fzf if available and we're completing for 'e/exec/instance start'
+    # Use fzf if available and we're completing for 'e/exec'
     if type -q fzf
         set -l _is_overlay_cmd false
         if contains "e" $words; or contains "exec" $words
-            set _is_overlay_cmd true
-        else if contains "instance" $words; and contains "start" $words
             set _is_overlay_cmd true
         end
         if test $_is_overlay_cmd = true

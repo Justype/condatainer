@@ -1,6 +1,6 @@
 # apptainer
 
-Go wrapper for Apptainer (formerly Singularity) container runtime providing binary management, ephemeral execution, persistent instances, and image building.
+Go wrapper for Apptainer (formerly Singularity) container runtime providing binary management, ephemeral execution, and image building.
 
 ## Architecture
 
@@ -8,7 +8,6 @@ Go wrapper for Apptainer (formerly Singularity) container runtime providing bina
 apptainer.go    Binary setup, version detection, command execution
 error.go        Structured error types with exit codes and hints
 exec.go         Ephemeral container execution (exec)
-instance.go     Persistent instance management (start/stop/exec)
 build.go        Image building and SIF-to-SquashFS conversion
 ```
 
@@ -20,8 +19,6 @@ build.go        Image building and SIF-to-SquashFS conversion
 
 **BuildOptions** - `Force`, `NoCleanup`, `Additional`
 **ExecOptions** - `Bind`, `Overlay`, `Fakeroot`, `Env`, `HideOutput`, `Additional`, `Stdin`
-**InstanceStartOptions** - `Bind`, `Overlay`, `Fakeroot`, `Additional`
-**InstanceExecOptions** - `Env`, `Additional`, `Stdin`
 
 ## Usage
 
@@ -36,12 +33,6 @@ apptainer.Exec(ctx, "image.sif", []string{"cmd"}, &apptainer.ExecOptions{
     Overlay:  []string{"overlay.sqf"},
     Fakeroot: true,
 })
-
-// Persistent instance
-apptainer.InstanceStart(ctx, "base.sif", "name", startOpts)
-apptainer.InstanceExec(ctx, "name", []string{"cmd"}, execOpts)
-apptainer.InstanceStop(ctx, "name", nil)
-apptainer.InstanceList(ctx)
 
 // Building
 apptainer.Build(ctx, "out.sif", "def.def", opts)

@@ -197,7 +197,7 @@ func normalizeFilters(filters []string) []string {
 	return normalized
 }
 
-// CommonFlags holds the common flags used by exec, instance start, and instance exec
+// CommonFlags holds the common flags used by exec
 type CommonFlags struct {
 	Overlays    []string
 	WritableImg bool
@@ -321,57 +321,6 @@ func ParseCommandArgs(subcommand string) ([]string, []string) {
 	}
 
 	return commands, apptainerFlags
-}
-
-// ParseInstanceArgs parses arguments for instance start/run commands
-// Returns: instanceName, apptainerFlags
-func ParseInstanceArgs(subcommand string) (string, []string) {
-	var instanceName string
-	var apptainerFlags []string
-
-	// Find where "instance <subcommand>" appears in os.Args
-	cmdIdx := -1
-	for i := 0; i < len(os.Args)-1; i++ {
-		if os.Args[i] == "instance" && os.Args[i+1] == subcommand {
-			cmdIdx = i + 1 // Point to the subcommand
-			break
-		}
-	}
-
-	if cmdIdx == -1 {
-		// Fallback: no args found
-		return instanceName, apptainerFlags
-	}
-
-	knownFlags := KnownFlags()
-
-	// Parse from after subcommand in os.Args
-	for i := cmdIdx + 1; i < len(os.Args); i++ {
-		arg := os.Args[i]
-
-		// Skip known flags (already handled by cobra)
-		if knownFlags[arg] || isKnownFlagWithEquals(knownFlags, arg) {
-			// Value flags (space-separated)
-			if knownFlags[arg] && needsValue(arg) && i+1 < len(os.Args) {
-				i++ // Skip value
-			}
-			continue
-		}
-
-		// Unknown flag → pass through to apptainer
-		if strings.HasPrefix(arg, "-") {
-			apptainerFlags = append(apptainerFlags, arg)
-			continue
-		}
-
-		// First (and only) non-flag argument is the instance name
-		if instanceName == "" {
-			instanceName = arg
-		}
-		// Ignore any additional positional arguments - overlays must use -o flag
-	}
-
-	return instanceName, apptainerFlags
 }
 
 func isKnownFlagWithEquals(knownFlags map[string]bool, arg string) bool {
