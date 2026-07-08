@@ -58,6 +58,27 @@ function isActiveHistoryStatus(status) {
   return status === 'pending' || status === 'starting' || status === 'running';
 }
 
+// clearFinishedHistory removes every finished (non-active) history entry
+// after confirmation (DELETE /api/helpers/finished).
+async function clearFinishedHistory() {
+  const finished = allHistory.filter(h => !isActiveHistoryStatus(h.status));
+  if (!finished.length) return;
+  const ok = await askConfirm('Remove ' + finished.length + ' finished ' +
+    (finished.length === 1 ? 'entry' : 'entries') + ' from history? ' +
+    'This cannot be undone.',
+    { title: 'Clear finished history', okLabel: 'Clear' });
+  if (!ok) return;
+  try {
+    const r = await fetch('/api/helpers/finished', { method: 'DELETE' });
+    if (!r.ok) { alert('Could not clear history: ' + await r.text()); return; }
+  } catch (e) {
+    alert('Could not clear history: ' + e);
+    return;
+  }
+  if (detailJobId && finished.some(h => h.id === detailJobId)) closeDetail();
+  loadHistory();
+}
+
 function rerunHistoryJob(ev, id) {
   if (ev) {
     ev.preventDefault();

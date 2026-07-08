@@ -206,7 +206,7 @@
           <div class="s-sub">Module (.sqf) overlays</div>
         </div>
         <div class="search-wrap">
-          <input class="search" id="ov-search" placeholder="Search by name or type…"
+          <input class="search" id="ov-search" placeholder="Search by name…"
                  title="Space-separated terms must all match" oninput="renderOverlays(this.value)">
           <button class="search-clear" type="button" tabindex="-1" title="Clear" onclick="clearSearchInput(this)"><svg class="icon"><use href="#i-close"></use></svg></button>
         </div>
@@ -283,7 +283,10 @@
                  title="Space-separated terms must all match" oninput="filterHistory(this.value)">
           <button class="search-clear" type="button" tabindex="-1" title="Clear" onclick="clearSearchInput(this)"><svg class="icon"><use href="#i-close"></use></svg></button>
         </div>
-        <button class="btn btn-sm" onclick="loadHistory()"><svg class="icon"><use href="#i-refresh"></use></svg>Refresh</button>
+        <div class="btn-row">
+          <button class="btn btn-sm btn-danger" onclick="clearFinishedHistory()" title="Remove all finished entries from history"><svg class="icon"><use href="#i-delete"></use></svg>Clear finished</button>
+          <button class="btn btn-sm" onclick="loadHistory()"><svg class="icon"><use href="#i-refresh"></use></svg>Refresh</button>
+        </div>
       </div>
       <div class="tbl-wrap">
         <table class="data-table">
