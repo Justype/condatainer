@@ -31,7 +31,12 @@ async function navigateFiles(path) {
       ? entries[0].path.replace(/\/[^/]+$/, '') || '/'
       : (path || '/');
     const pathChanged = resolved !== currentPath;
-    if (pathChanged) { _selected.clear(); _selAnchor = -1; }
+    if (pathChanged) {
+      _selected.clear();
+      _selAnchor = -1;
+      _fileFilter = ''; // the filter applies to one directory; entering another starts fresh
+      _setVal('file-search', '');
+    }
     currentPath = resolved;
     renderFileBreadcrumb(resolved);
     _setVal('path-input', resolved);
@@ -93,6 +98,26 @@ _setupPathBox('fp-bc', 'fp-path-input', p => fpNavigate(p));
 let _lastEntries   = [];
 let _lastTruncated = false;
 let _visEntries    = []; // entries as currently rendered (filtered + sorted); row handlers index into this
+
+/* ── Name filter (search bar) ────────────── */
+let _fileFilter = ''; // current search-bar query; cleared when the directory changes
+
+// filterFiles re-renders the listing showing only entries whose name
+// contains every whitespace-separated term of q.
+function filterFiles(q) {
+  _fileFilter = q;
+  renderFileListing(_lastEntries, _lastTruncated);
+}
+
+// Escape clears the filter without bubbling up to the listing-wide Escape
+// handler (which clears the selection).
+gid('file-search').addEventListener('keydown', e => {
+  if (e.key === 'Escape' && e.target.value) {
+    e.stopPropagation();
+    e.target.value = '';
+    filterFiles('');
+  }
+});
 
 /* ── Sorting ─────────────────────────────── */
 let fileSortKey = localStorage.getItem('fileSortKey') || 'name';
@@ -585,12 +610,16 @@ function renderFileListing(entries, truncated) {
   _updateSortHeaders();
   closeRowMenu();
   const tbody = gid('file-tbody');
-  const vis = _sortEntries(showHiddenFiles ? entries : entries.filter(e => !e.name.startsWith('.')));
+  let shown = showHiddenFiles ? entries : entries.filter(e => !e.name.startsWith('.'));
+  const terms = searchTerms(_fileFilter);
+  if (terms.length) shown = shown.filter(e => matchesAllTerms(e.name, terms));
+  const vis = _sortEntries(shown);
   _visEntries = vis;
   // drop selected paths no longer listed (deleted, renamed, or hidden)
   _selected = new Set(vis.filter(e => _selected.has(e.path)).map(e => e.path));
   if (!vis.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="td-empty">Empty directory</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="td-empty">' +
+      (terms.length ? 'No matches.' : 'Empty directory') + '</td></tr>';
     return;
   }
   const truncRow = truncated

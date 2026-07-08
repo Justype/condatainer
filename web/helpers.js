@@ -580,12 +580,12 @@ async function toggleHelperBookmark(name, e) {
 
 function renderHelperList(filter) {
   const list      = gid('helper-list');
-  const q         = (filter || '').toLowerCase().trim();
+  const terms     = searchTerms(filter);
+  const q         = terms.length;
   const bookmarked = helperBookmarks;
   let helpers  = q
     ? allHelpers.filter(h =>
-        h.name.toLowerCase().includes(q) ||
-        (h.whatis || '').toLowerCase().includes(q))
+        matchesAllTerms(h.name + ' ' + (h.whatis || ''), terms))
     : allHelpers;
   // Bookmarked items float to the top
   helpers = [

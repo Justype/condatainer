@@ -56,6 +56,24 @@ function badgeClass(status) {
   if (status === 'failed')  return 'badge-red';
   return 'badge-grey';
 }
+// searchTerms splits a search query into lowercase whitespace-separated terms.
+function searchTerms(query) {
+  return (query || '').toLowerCase().split(/\s+/).filter(Boolean);
+}
+// matchesAllTerms reports whether text contains every term (AND match).
+function matchesAllTerms(text, terms) {
+  const t = text.toLowerCase();
+  return terms.every(term => t.includes(term));
+}
+// clearSearchInput (the × button in a .search-wrap) empties the adjacent
+// input and re-fires its input handler.
+function clearSearchInput(btn) {
+  const input = btn.parentElement.querySelector('input');
+  if (!input) return;
+  input.value = '';
+  input.dispatchEvent(new Event('input'));
+  input.focus();
+}
 function gid(id) { return document.getElementById(id); }
 function _setText(id, val) { const e = gid(id); if (e) e.textContent = val || '—'; }
 function _setVal(id, val)  { const e = gid(id); if (e) e.value = val; }

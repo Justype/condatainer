@@ -7,11 +7,14 @@ async function loadHistory() {
   if (!document.querySelector('#hist-tbody [data-confirm="1"]')) renderHistory();
 }
 
+// renderHistory renders the history table, keeping only entries that match
+// every whitespace-separated term of filter (across name/label/status/node/cwd).
 function renderHistory(filter) {
-  const q    = (filter || '').toLowerCase();
+  const terms = searchTerms(filter);
+  const q = terms.length;
   let rows = q
     ? allHistory.filter(h =>
-        [h.name, h.label, h.status, h.node, h.cwd].join(' ').toLowerCase().includes(q))
+        matchesAllTerms([h.name, h.label, h.status, h.node, h.cwd].join(' '), terms))
     : allHistory.slice();
   rows.sort((a, b) => {
     const aActive = isActiveHistoryStatus(a.status) ? 1 : 0;

@@ -81,7 +81,10 @@
       <div class="start-layout">
         <div class="helper-list" id="helper-list-wrap">
           <div class="h-search-bar">
-            <input class="h-search" id="h-search" placeholder="Search helpers…" oninput="renderHelperList(this.value)">
+            <div class="search-wrap">
+              <input class="h-search" id="h-search" placeholder="Search helpers…" title="Space-separated terms must all match" oninput="renderHelperList(this.value)">
+              <button class="search-clear" type="button" tabindex="-1" title="Clear" onclick="clearSearchInput(this)"><svg class="icon"><use href="#i-close"></use></svg></button>
+            </div>
           </div>
           <div id="helper-list">
             <div class="modal-empty">Loading…</div>
@@ -202,8 +205,11 @@
           <div class="s-title">Overlays</div>
           <div class="s-sub">Module (.sqf) overlays</div>
         </div>
-        <input class="search" id="ov-search" placeholder="Search by name or type…"
-               oninput="renderOverlays(this.value)">
+        <div class="search-wrap">
+          <input class="search" id="ov-search" placeholder="Search by name or type…"
+                 title="Space-separated terms must all match" oninput="renderOverlays(this.value)">
+          <button class="search-clear" type="button" tabindex="-1" title="Clear" onclick="clearSearchInput(this)"><svg class="icon"><use href="#i-close"></use></svg></button>
+        </div>
         <div class="btn-row">
           <button class="btn btn-sm btn-primary" onclick="openOverlayCreate()"><svg class="icon"><use href="#i-add_2"></use></svg>Create</button>
           <button class="btn btn-sm" onclick="loadOverlays()"><svg class="icon"><use href="#i-refresh"></use></svg>Refresh</button>
@@ -225,6 +231,11 @@
         <div>
           <div class="s-title">Files</div>
           <div class="s-sub">Browse and navigate the filesystem</div>
+        </div>
+        <div class="search-wrap">
+          <input class="search" id="file-search" placeholder="Filter current directory…"
+                 title="Space-separated terms must all match" oninput="filterFiles(this.value)">
+          <button class="search-clear" type="button" tabindex="-1" title="Clear" onclick="clearSearchInput(this)"><svg class="icon"><use href="#i-close"></use></svg></button>
         </div>
         <label class="toggle-lbl">
           <input type="checkbox" id="show-hidden-files" onchange="setShowHidden(this.checked, true)"> Show hidden
@@ -267,8 +278,11 @@
           <div class="s-title">History</div>
           <div class="s-sub">Past helper runs</div>
         </div>
-        <input class="search" id="hist-search" placeholder="Filter by name, status, node…"
-               oninput="filterHistory(this.value)">
+        <div class="search-wrap">
+          <input class="search" id="hist-search" placeholder="Filter by name, status, node…"
+                 title="Space-separated terms must all match" oninput="filterHistory(this.value)">
+          <button class="search-clear" type="button" tabindex="-1" title="Clear" onclick="clearSearchInput(this)"><svg class="icon"><use href="#i-close"></use></svg></button>
+        </div>
         <button class="btn btn-sm" onclick="loadHistory()"><svg class="icon"><use href="#i-refresh"></use></svg>Refresh</button>
       </div>
       <div class="tbl-wrap">
@@ -396,7 +410,10 @@
     </div>
     <div class="modal-tab-body active" id="op-tab-app">
       <div class="modal-search">
-        <input id="op-app-search" placeholder="Search module overlays…" oninput="filterAppOverlays(this.value)">
+        <div class="search-wrap">
+          <input id="op-app-search" placeholder="Search module overlays…" title="Space-separated terms must all match" oninput="filterAppOverlays(this.value)">
+          <button class="search-clear" type="button" tabindex="-1" title="Clear" onclick="clearSearchInput(this)"><svg class="icon"><use href="#i-close"></use></svg></button>
+        </div>
       </div>
       <div id="op-app-list"></div>
     </div>
@@ -419,7 +436,10 @@
     </div>
     <div class="modal-tab-body active" id="oc-browse">
       <div class="modal-search">
-        <input id="oc-search" placeholder="Search available overlays… (checks conda by exact name)" oninput="ocFilter(this.value)">
+        <div class="search-wrap">
+          <input id="oc-search" placeholder="Search available overlays… (checks conda by exact name)" title="Space-separated terms must all match; conda lookup needs a single term" oninput="ocFilter(this.value)">
+          <button class="search-clear" type="button" tabindex="-1" title="Clear" onclick="clearSearchInput(this)"><svg class="icon"><use href="#i-close"></use></svg></button>
+        </div>
       </div>
       <div class="modal-body" id="oc-list"></div>
     </div>
