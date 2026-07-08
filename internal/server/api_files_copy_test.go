@@ -50,6 +50,41 @@ func TestCopyWithNewName(t *testing.T) {
 	}
 }
 
+// TestCopyAutoRename checks that copying without new_name into a directory
+// where the name exists auto-renames to "name_copy" / "name_copyN" instead
+// of erroring — including copying a file into its own directory (duplicate).
+func TestCopyAutoRename(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(src, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &srv{ctx: context.Background()}
+	for _, want := range []string{"notes_copy.txt", "notes_copy2.txt"} {
+		r := httptest.NewRequest(http.MethodPost,
+			"/api/fs/copy?path="+url.QueryEscape(src),
+			strings.NewReader(`{"dest_dir":"`+dir+`"}`))
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.handleFSCopy(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, body: %s", w.Code, w.Body.String())
+		}
+		target := filepath.Join(dir, want)
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if got, err := os.ReadFile(target); err == nil && string(got) == "data" {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s not created within deadline", target)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
 // TestCopyIntoItselfRejected checks that copying a directory into itself
 // (or its own subtree) is rejected instead of starting a runaway copy —
 // including when the destination reaches the subtree through a symlink.

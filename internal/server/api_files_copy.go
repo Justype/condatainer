@@ -12,13 +12,14 @@ import (
 )
 
 // handleFSCopy serves POST /api/fs/copy?path=... — copies a file or
-// directory to a different (existing) directory. Body:
+// directory to an existing directory. Body:
 // {"dest_dir": "...", "new_name": "..."} — new_name is optional (must be a
-// bare file name); the source base name is kept when it's omitted.
-// Runs as a background task: returns a
-// task ID immediately and streams {"t":"progress","current":n,"total":n}
-// events via GET /api/tasks/{id}/stream. Rejects with 409 if the
-// destination already exists. On failure or cancellation the partial
+// bare file name). Without new_name a conflicting destination auto-renames
+// to "name_copy" / "name_copyN"; with new_name a conflict is rejected with
+// 409. Runs as a
+// background task: returns a task ID immediately and streams
+// {"t":"progress","current":n,"total":n} events via
+// GET /api/tasks/{id}/stream. On failure or cancellation the partial
 // destination is removed; the source is never touched.
 func (s *srv) handleFSCopy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -64,24 +65,31 @@ func (s *srv) handleFSCopy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	base := filepath.Base(path)
-	if newName != "" {
-		base = newName
-	}
-	newPath := filepath.Join(destDir, base)
-	if newPath == path {
-		http.Error(w, "source and destination are the same", http.StatusBadRequest)
-		return
-	}
 	// Reject copying a directory into itself or its own subtree — copyTree
 	// would otherwise walk the source while writing into it.
 	if srcInfo.IsDir() && destInsideSource(path, destDir) {
 		http.Error(w, "cannot copy a directory into itself", http.StatusBadRequest)
 		return
 	}
-	if _, err := os.Lstat(newPath); err == nil {
-		http.Error(w, fmt.Sprintf("%q already exists", filepath.Base(newPath)), http.StatusConflict)
-		return
+
+	base := filepath.Base(path)
+	if newName != "" {
+		base = newName
+	}
+	newPath := filepath.Join(destDir, base)
+	if newName == "" {
+		// no explicit name: a conflict (including copying into the source's
+		// own directory) auto-renames to "name_copy" instead of erroring
+		newPath = uniquePath(newPath, srcInfo.IsDir())
+	} else {
+		if newPath == path {
+			http.Error(w, "source and destination are the same", http.StatusBadRequest)
+			return
+		}
+		if _, err := os.Lstat(newPath); err == nil {
+			http.Error(w, fmt.Sprintf("%q already exists", filepath.Base(newPath)), http.StatusConflict)
+			return
+		}
 	}
 
 	taskID := fmt.Sprintf("copy-%d", time.Now().UnixNano())

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -179,6 +180,32 @@ func removeTree(ctx context.Context, path string, onEntry func()) error {
 	}
 	onEntry()
 	return nil
+}
+
+// uniquePath returns path if nothing exists there, otherwise the first
+// free "name_copy" / "name_copyN" variant (inserted before the extension
+// for files; appended to the whole name for directories and dotfiles).
+func uniquePath(path string, isDir bool) string {
+	if _, err := os.Lstat(path); err != nil {
+		return path
+	}
+	dir := filepath.Dir(path)
+	name := filepath.Base(path)
+	ext := ""
+	if dot := strings.LastIndex(name, "."); !isDir && dot > 0 {
+		ext = name[dot:]
+		name = name[:dot]
+	}
+	for n := 1; ; n++ {
+		suffix := "_copy"
+		if n > 1 {
+			suffix = fmt.Sprintf("_copy%d", n)
+		}
+		p := filepath.Join(dir, name+suffix+ext)
+		if _, err := os.Lstat(p); err != nil {
+			return p
+		}
+	}
 }
 
 // destInsideSource reports whether destDir is srcDir itself or inside its
