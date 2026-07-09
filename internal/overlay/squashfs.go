@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"bufio"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,13 +15,21 @@ import (
 // Low-level SquashFS operations
 // ============================================================================
 
-// sqfPathExists checks whether `entry` exists at the top-level of a SquashFS archive.
-// It uses `unsquashfs -lc` and returns true when the entry is present.
+// sqfPathExists reports whether `entry` exists in a SquashFS archive.
+//
+// It lists the archive with `unsquashfs -lc -d ''` and looks for a line equal to
+// "/entry" or starting with "/entry/". Notes on the flags and matching:
+//   - -d '' lists matches as "/entry" instead of the default "squashfs-root/entry".
+//   - -lc lists only files and empty dirs, so a populated dir shows up via its
+//     children ("/entry/...") rather than "/entry" itself.
+//   - unsquashfs 4.4 (Ubuntu 20.04) prints banner lines even when nothing matches,
+//     so the exact line match is required — any output is not a reliable signal.
 func sqfPathExists(sqfPath, entry string) bool {
 	// Normalize entry (strip leading slash)
 	entry = strings.TrimPrefix(entry, "/")
+	want := "/" + entry
 
-	cmd := exec.Command("unsquashfs", "-lc", sqfPath, entry)
+	cmd := exec.Command("unsquashfs", "-lc", "-d", "", sqfPath, entry)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -29,40 +38,82 @@ func sqfPathExists(sqfPath, entry string) bool {
 	if err := cmd.Start(); err != nil {
 		return false
 	}
-	defer cmd.Process.Kill() //nolint:errcheck
+	defer func() {
+		cmd.Process.Kill() //nolint:errcheck
+		cmd.Wait()         //nolint:errcheck
+	}()
 
-	buf := make([]byte, 4096)
-	count := 0
 	found := false
-	for {
-		n, err := pipe.Read(buf)
-		for _, b := range buf[:n] {
-			if b == '\n' {
-				count++
-				if count >= 1 {
-					found = true
-					goto done
-				}
-			}
-		}
-		if err != nil {
+	scanner := bufio.NewScanner(pipe)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == want || strings.HasPrefix(line, want+"/") {
+			found = true
 			break
 		}
 	}
-done:
+	if scanner.Err() != nil {
+		return false
+	}
 	return found
 }
 
 // Cat reads a file from a SquashFS archive using unsquashfs -cat.
+// unsquashfs older than 4.5 (e.g. 4.4 on Ubuntu 20.04) has no -cat, so on
+// failure fall back to extracting the file into a temp dir.
 // Returns nil if the file cannot be read.
 func Cat(sqfPath, filePath string) []byte {
+	filePath = strings.TrimPrefix(filePath, "/")
+
 	cmd := exec.Command("unsquashfs", "-cat", sqfPath, filePath)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	out, err := cmd.Output()
+	if err == nil {
+		return out
+	}
+	return catExtract(sqfPath, filePath)
+}
+
+// catExtract reads a file from a SquashFS archive by extracting it into a
+// temp dir. In-archive symlinks are resolved manually (single-file extraction
+// yields a dangling link, while -cat follows links itself).
+func catExtract(sqfPath, filePath string) []byte {
+	tmpDir, err := os.MkdirTemp("", "cnt-sqf-cat-")
 	if err != nil {
 		return nil
 	}
-	return out
+	defer os.RemoveAll(tmpDir) //nolint:errcheck
+
+	for hop := 0; hop < 4; hop++ {
+		dest := filepath.Join(tmpDir, strconv.Itoa(hop))
+		cmd := exec.Command("unsquashfs", "-q", "-n", "-d", dest, sqfPath, filePath)
+		cmd.Env = append(os.Environ(), "LC_ALL=C")
+		if err := cmd.Run(); err != nil {
+			return nil
+		}
+		extracted := filepath.Join(dest, filePath)
+		fi, err := os.Lstat(extracted)
+		if err != nil {
+			return nil
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			data, err := os.ReadFile(extracted)
+			if err != nil {
+				return nil
+			}
+			return data
+		}
+		target, err := os.Readlink(extracted)
+		if err != nil {
+			return nil
+		}
+		if filepath.IsAbs(target) {
+			filePath = strings.TrimPrefix(filepath.Clean(target), "/")
+		} else {
+			filePath = filepath.Clean(filepath.Join(filepath.Dir(filePath), target))
+		}
+	}
+	return nil
 }
 
 // IsOSType returns true if the SquashFS archive is an Apptainer OS image,
