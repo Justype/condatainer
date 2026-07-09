@@ -21,11 +21,13 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// OfferRecentSessions shows a combined list of running instances and recent history,
-// deduplicated by CWD. Running entries are marked [RUNNING] with their access URL.
+// OfferRecentSessions shows a combined list of active instances and recent history,
+// deduplicated by CWD. Active entries are tagged with their actual status
+// ([PENDING]/[STARTING]/[RUNNING]) and, when available, their access URL.
 //
 // Return values:
-//   - chosen != nil, isRunning=true  → caller should print URL and exit (no new launch)
+//   - chosen != nil, isRunning=true  → caller should print URL (or wait for a
+//     pending/starting job) and exit (no new launch)
 //   - chosen != nil, isRunning=false → caller should call ApplyHistoryRun then continue
 //   - startNew=true                  → caller continues with defaults
 func OfferRecentSessions(ctx context.Context, name string,
@@ -77,10 +79,11 @@ func OfferRecentSessions(ctx context.Context, name string,
 		if res == "" {
 			res = "default resources"
 		}
-		age := time.Since(r.StartedAt).Round(time.Minute)
+		age := FormatAge(time.Since(r.StartedAt))
 		if e.isRunning {
 			url := r.AccessURL(serverPort)
-			fmt.Printf("  %d. %-36s  %-14s  [RUNNING] started %s ago\n", i+1, cwd, res, age)
+			tag, verb := RunStatusTag(r)
+			fmt.Printf("  %d. %-36s  %-14s  %s %s %s ago\n", i+1, cwd, res, tag, verb, age)
 			if url != "" {
 				fmt.Printf("     %s\n", utils.StyleDebug("→ "+url))
 			}
@@ -156,11 +159,12 @@ func ApplyHistoryRun(opts *helper.RunOptions, r *helper.HelperRun) {
 // OfferSingletonBlocked prints an informative message and returns a non-nil error
 // when a singleton helper is already running.
 func OfferSingletonBlocked(name string, running []*helper.HelperRun, serverPort int) error {
-	utils.PrintMessage("%s is a singleton helper and is already running:", utils.StyleName(name))
+	utils.PrintMessage("%s is a singleton helper and already has an active session:", utils.StyleName(name))
 	for _, r := range running {
-		age := time.Since(r.StartedAt).Round(time.Minute)
+		age := FormatAge(time.Since(r.StartedAt))
 		url := r.AccessURL(serverPort)
-		utils.PrintMessage("  %s  %s  Started %s ago", r.ID, r.Node, age)
+		tag, verb := RunStatusTag(r)
+		utils.PrintMessage("  %s  %s  %s %s %s ago", r.ID, r.Node, tag, verb, age)
 		if url != "" {
 			utils.PrintMessage("  Access: %s", url)
 		}
@@ -759,6 +763,43 @@ func MonitorHelper(ctx context.Context, id string) error {
 	}
 }
 
+// FormatAge formats an elapsed duration as a compact human-readable string
+// (e.g. "6h11m", "2d3h", "45m", "<1m") suitable for "... %s ago" displays.
+func FormatAge(d time.Duration) string {
+	d = d.Round(time.Minute)
+	if d < time.Minute {
+		return "<1m"
+	}
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	mins := int(d.Minutes()) % 60
+	switch {
+	case days > 0 && hours > 0:
+		return fmt.Sprintf("%dd%dh", days, hours)
+	case days > 0:
+		return fmt.Sprintf("%dd", days)
+	case hours > 0 && mins > 0:
+		return fmt.Sprintf("%dh%dm", hours, mins)
+	case hours > 0:
+		return fmt.Sprintf("%dh", hours)
+	default:
+		return fmt.Sprintf("%dm", mins)
+	}
+}
+
+// RunStatusTag returns the bracketed status tag and verb for an active run,
+// e.g. ("[PENDING]", "submitted") or ("[RUNNING]", "started").
+func RunStatusTag(r *helper.HelperRun) (tag, verb string) {
+	switch r.Status {
+	case "pending":
+		return "[PENDING]", "submitted"
+	case "starting":
+		return "[STARTING]", "started"
+	default:
+		return "[RUNNING]", "started"
+	}
+}
+
 // FormatRunResources returns a compact resource summary like "4c/16GB/12h/a100:1".
 func FormatRunResources(r *helper.HelperRun) string { return formatRunResources(r) }
 
@@ -835,16 +876,17 @@ func OfferStopPicker(ctx context.Context, name string, running []*helper.HelperR
 		fmt.Printf("Multiple %s instances running:\n", utils.StyleName(name))
 	}
 	for i, r := range running {
-		age := time.Since(r.StartedAt).Round(time.Minute)
+		age := FormatAge(time.Since(r.StartedAt))
 		cwd := r.CWD
 		if cwd == "" {
 			cwd = "(no cwd)"
 		}
 		res := formatRunResources(r)
+		tag, verb := RunStatusTag(r)
 		if name == "" {
-			fmt.Printf("  %d. %-20s  %-36s  %-14s  started %s ago\n", i+1, utils.StyleName(r.Name), cwd, res, age)
+			fmt.Printf("  %d. %-20s  %-36s  %-14s  %s %s %s ago\n", i+1, utils.StyleName(r.Name), cwd, res, tag, verb, age)
 		} else {
-			fmt.Printf("  %d. %-36s  %-14s  started %s ago\n", i+1, cwd, res, age)
+			fmt.Printf("  %d. %-36s  %-14s  %s %s %s ago\n", i+1, cwd, res, tag, verb, age)
 		}
 	}
 	fmt.Print("  a. Stop all\n  n. None\n\n[?] Which to stop [")

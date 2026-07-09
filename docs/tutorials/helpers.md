@@ -187,14 +187,21 @@ When you run a helper, CondaTainer shows your recent sessions (up to 5, deduplic
 Recent vscode-server sessions:
   1. /scratch/user/project-a   4c 32G        [RUNNING] started 2h ago
      → http://<id>.localhost:13182/...
-  2. /scratch/user/project-b   4c 16G        last used 1d ago
+  2. /scratch/user/project-b   4c 16G        [PENDING] submitted 5m ago
   3. /scratch/user/project-c   8c 64G        last used 3d ago
   n. Start new
 
 [?] Choose [1/2/3/n]:
 ```
 
-Picking a **running** session prints its access URL and exits. Picking a **past** session reuses its settings (working directory, resources, overlays) for the new job. Choose `n` to start fresh with config defaults and the current directory.
+- Active sessions are tagged with their scheduler state: 
+  - `[PENDING]` (queued, no URL yet);
+  - `[STARTING]` (job started, service coming up)
+  - `[RUNNING]` (ready, URL shown). 
+- Picking
+  - Pick a **running** session prints its access URL and exits; picking a **pending/starting** one waits for the service and prints the URL once it is ready.
+  - Pick a **past** session reuses its settings (working directory, resources, overlays) for the new job.
+  - Choose `n` to start fresh with config defaults and the current directory.
 
 Pass `--new` to skip the session picker and go straight to this prompt with fresh defaults.
 
