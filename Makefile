@@ -4,11 +4,12 @@
 BINARY_NAME=condatainer_go
 BINARY_PATH=bin/$(BINARY_NAME)
 
-# Build the binary
+# Build the binary. CGO_ENABLED=0 keeps it statically linked: the binary is
+# bind-mounted into containers whose glibc may be older than the build host's.
 build:
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p bin
-	@go build -o $(BINARY_PATH) .
+	@CGO_ENABLED=0 go build -o $(BINARY_PATH) .
 	@echo "Built successfully: $(BINARY_PATH)"
 
 # Clean build artifacts
