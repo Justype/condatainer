@@ -465,18 +465,6 @@ func DeleteHistoryEntry(id string) error {
 	return nil
 }
 
-// DeleteHistoryEntries removes the entries with the given IDs from the JSONL
-// history file in a single rewrite, then deletes their state directories in
-// parallel. IDs not present in the history are ignored. Returns the number of
-// entries removed.
-func DeleteHistoryEntries(ids []string) (int, error) {
-	idSet := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		idSet[id] = true
-	}
-	return deleteHistoryMatching(func(r *HelperRun) bool { return idSet[r.ID] })
-}
-
 // DeleteFinishedHistory removes every finished (non-active) entry from the
 // JSONL history file along with its state directory, and returns the number
 // of entries removed. Active (pending/starting/running) entries are kept.

@@ -65,11 +65,6 @@ func EnsureApptainer() error {
 	return SetBin(config.Global.ApptainerBin)
 }
 
-// Which returns the currently configured Apptainer executable path.
-func Which() string {
-	return apptainerCmd
-}
-
 // IsSingularity returns true if the configured binary is Singularity (not Apptainer).
 // Singularity defaults to gzip compression for SquashFS images.
 func IsSingularity() bool {

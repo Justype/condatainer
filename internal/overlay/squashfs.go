@@ -328,23 +328,3 @@ func (o *OSInfo) String() string {
 	}
 	return result
 }
-
-// MajorVersion returns the major component of VersionID (e.g., "24" from "24.04", "9" from "9.3").
-func (o *OSInfo) MajorVersion() string {
-	if o == nil || o.VersionID == "" {
-		return ""
-	}
-	if i := strings.Index(o.VersionID, "."); i >= 0 {
-		return o.VersionID[:i]
-	}
-	return o.VersionID
-}
-
-// SameIDMajorVersion returns true if both OSInfo values share the same id and major version.
-func (o *OSInfo) SameIDMajorVersion(other *OSInfo) bool {
-	if o == nil || other == nil {
-		return false
-	}
-	mv := o.MajorVersion()
-	return mv != "" && o.ID == other.ID && mv == other.MajorVersion()
-}
