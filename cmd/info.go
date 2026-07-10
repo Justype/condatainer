@@ -191,9 +191,9 @@ func displayImgInfo(overlayPath string) error {
 	fmt.Printf("  %-14s %s\n", "Path:", utils.StylePath(overlayPath))
 	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatBytes(stats.FileSizeBytes))
 	if stats.IsSparse {
-		fmt.Printf("  %-14s %s (Writable; %s on disk)\n", "Type:", utils.StyleInfo("Workspace Overlay"), utils.FormatBytes(stats.FileBlocksUsed))
+		fmt.Printf("  %-14s %s (Writable; %s on disk)\n", "Type:", utils.StyleInfo("Environment Overlay"), utils.FormatBytes(stats.FileBlocksUsed))
 	} else {
-		fmt.Printf("  %-14s %s (Writable)\n", "Type:", utils.StyleInfo("Workspace Overlay"))
+		fmt.Printf("  %-14s %s (Writable)\n", "Type:", utils.StyleInfo("Environment Overlay"))
 	}
 	// Filesystem section
 	fmt.Println(utils.StyleTitle("Filesystem"))

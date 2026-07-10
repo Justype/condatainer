@@ -65,18 +65,10 @@ var runCmd = &cobra.Command{
 	Long: `Execute a script with automatic dependency resolution.
 
 The script can contain special comment tags:
-  #DEP: package/version   - Declares a dependency
+  #DEP: package/version   - Declares a dependency (auto-loaded)
   #DEP: /path/overlay.img - Declares an overlay dependency (.sqf and .img)
-  #CNT args               - Additional arguments to pass to condatainer
-
-Supported #CNT arguments (also available as CLI flags):
-  -w, --writable         Make .img overlays writable
-  -b, --base-image PATH  Use custom base image
-  --env KEY=VALUE        Set environment variable (repeatable)
-  --bind HOST:CONTAINER  Bind mount path (repeatable)
-  -f, --fakeroot         Run with fakeroot privileges
-
-Dependencies will be automatically loaded.`,
+  #CNT args               - Extra condatainer arguments; accepts the
+                            Container Flags listed below`,
 	Example: `  condatainer run script.sh                         # Run with dependency check
   condatainer run script.sh arg1 arg2               # Pass arguments to the script
   condatainer run -o log/tool1_s1.out run_tool1.sh sample1 # Override stdout

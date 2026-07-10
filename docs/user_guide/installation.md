@@ -1,6 +1,6 @@
 # CondaTainer Installation
 
-📦 **CondaTainer** is designed to manage tools/data/env on HPC systems by wrapping Conda environments into efficient SquashFS files or ext3 OverlayFS. It can:
+📦 **CondaTainer** manages tools, data, and Conda environments on HPC systems by wrapping them into single image files (SquashFS or ext3 overlays). It can:
 
 - Pack tools into highly-compressed, read-only SquashFS overlays. e.g. `cellranger/9.0.1`
 - Run rstudio-server, code-server, and other web tools on HPC.

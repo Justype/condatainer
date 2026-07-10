@@ -20,6 +20,15 @@ import (
 // Search / filter helpers shared by avail, list, and remove
 // ============================================================================
 
+// searchManualURL points to the CLI manual page with the full search rules.
+const searchManualURL = "https://condatainer.readthedocs.io/en/latest/manuals/condatainer.html"
+
+// searchSyntaxHint is the concise search-syntax note shared by the avail and
+// list help text. The full matching rules live in the online manual.
+const searchSyntaxHint = `Search terms match by substring; multiple terms must all match (AND).
+Wildcards (*, ?) and regex also work — full rules:
+` + searchManualURL
+
 // SearchMode describes how a SearchQuery matches candidate names.
 type SearchMode int
 
@@ -160,28 +169,6 @@ func (q *SearchQuery) MatchesOrAlias(name, alias string) bool {
 		return q.Matches(alias)
 	}
 	return false
-}
-
-// HighlightRegexp returns a compiled regex suitable for single-pass term highlighting.
-// Returns nil when there are no terms.
-// In pattern mode the match regex itself is reused.
-// In and/exact modes every raw term is highlighted literally.
-func (q *SearchQuery) HighlightRegexp() *regexp.Regexp {
-	if len(q.Raw) == 0 {
-		return nil
-	}
-	if q.Mode == SearchModePattern {
-		return q.pattern
-	}
-	sorted := make([]string, len(q.Raw))
-	copy(sorted, q.Raw)
-	sort.Slice(sorted, func(i, j int) bool { return len(sorted[i]) > len(sorted[j]) })
-	parts := make([]string, len(sorted))
-	for i, t := range sorted {
-		parts[i] = regexp.QuoteMeta(t)
-	}
-	re, _ := regexp.Compile("(?i)(" + strings.Join(parts, "|") + ")")
-	return re
 }
 
 // normalizeFilters lowercases and normalises a slice of raw user-supplied filter strings.

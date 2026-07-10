@@ -53,12 +53,12 @@ This is useful when you need to modify existing images/overlays (like installing
 The common ways to install missing system libraries:
 
 - [Custom OS Overlays](../advanced_usage/custom_os.md) to create a new `.sqf` with missing libraries.
-- Only mount the workspace overlay with `fakeroot` and install missing libraries.
+- Only mount the environment overlay with `fakeroot` and install missing libraries.
 
 In the example below, we try the second approach:
 
 ```bash
-condatainer o  # create a workspace overlay named `env.img`
+condatainer o  # create an environment overlay named `env.img`
 condatainer e r4.4.3 build-essential -- R
 ```
 
@@ -69,7 +69,7 @@ condatainer overlay chown --root env.img
 # load env.img with fakeroot (autodetects the upper ownership)
 condatainer e r4.4.3 build-essential
 
-# If apt install failed, try only loading the workspace overlay without sqfs:
+# If apt install failed, try only loading the environment overlay without sqfs:
 condatainer e
 ```
 
@@ -93,7 +93,7 @@ install.packages("orderanalyzer") # required tesseract-ocr-eng
 ```
 
 ```{warning}
-I don't recommend this path. IO performance of workspace overlays is bad. Try [custom OS overlays](../advanced_usage/custom_os.md) instead.
+I don't recommend this path. IO performance of ext3 is bad. Try [custom OS overlays](../advanced_usage/custom_os.md) instead.
 ```
 
 ### Changing Overlay Ownership

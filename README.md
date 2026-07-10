@@ -60,7 +60,7 @@ condatainer exec -o my_analysis.sqf bash
 
 ### Writable Environments (Development)
 
-Manage a writable workspace overlay for development and testing:
+Manage a writable environment (env) overlay for development and testing:
 
 ```bash
 condatainer overlay create -s 5G env.img   # Create a 5G overlay
@@ -84,17 +84,17 @@ mm-export             # Export environment to YAML
 
 ## 🐕‍🦺 Web Apps & GUI Helpers
 
-**CondaTainer** includes built-in helpers to launch apps (like RStudio, XFCE4 noVNC) directly on compute nodes.
+**CondaTainer** includes built-in helpers to launch apps (like RStudio, XFCE4 VNC) directly on compute nodes.
 
 ```bash
 condatainer helper --update       # Fetch the latest helper scripts
 condatainer helper --list         # View all available apps
 
 condatainer helper vscode-tunnel  # Start a VS Code tunnel
-condatainer helper igv -p 10212   # Start IGV via noVNC on port 10212
+condatainer helper igv            # Start IGV via VNC
 ```
 
-Please check out [ReadTheDocs - Helpers HPC](https://condatainer.readthedocs.io/en/latest/tutorials/helpers_on_HPC.html) for more details and examples.
+Please check out [ReadTheDocs - Helpers HPC](https://condatainer.readthedocs.io/en/latest/tutorials/helpers.html) for more details and examples.
 
 ## 🚀 Automation
 

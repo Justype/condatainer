@@ -23,13 +23,13 @@
 ## Overall Command Structure
 
 ```
-CondaTainer: Use Apptainer/Conda/Overlays/SquashFS to manage tools/data/env for HPC users.
+Single-file Conda env, tools, and data for HPC — plus app helpers to run RStudio and more.
 
 Usage:
   condatainer [command]
 
 Available Commands:
-  avail       Check available build scripts (local and remote)
+  avail       List available build scripts (local and remote)
   check       Check if the dependencies of a script are installed
   completion  Generate shell completion script
   config      Manage condatainer configuration
@@ -78,7 +78,7 @@ Like text editors, IDEs, build-essential tools, etc.
 
 You can also create these system apps using the `-n, --name` flag with the `create` command.
 
-### Custom Environments (Bundle/Workspace)
+### Custom Environments (Bundle/Environment)
 
 Used when creating a custom environment with a user-defined name (`create -p`, or `overlay` action).
 
@@ -140,7 +140,7 @@ For `.img` files, the mount point is always `/ext3/env`, so renaming is allowed.
 | OS | `.sqf` | R/O | `/bin`, `/lib`, `/usr` | System Foundation — minimal system root that can run standalone or serve as a base for Modules/Bundles. |
 | Module | `.sqf` | R/O | `/cnt/<name>/<version>` | Individual tool overlay (single package) mounted under `/cnt` and layered on top of an OS or Bundle. |
 | Bundle | `.sqf` | R/O | `/cnt/<env_name>` | Frozen Conda environment (prebuilt collection of packages) mounted under `/cnt` as a named environment. |
-| Workspace | `.img` | R/W | `/ext3/env` | Writable Conda environment (ext3 image) for interactive work and runtime package changes. |
+| Environment | `.img` | R/W | `/ext3/env` | Writable Conda environment (ext3 image) for interactive work and runtime package changes. |
 
 Read-only `.sqf` overlays are ideal for distributing immutable software and reference data. Writable `.img` overlays are for live development or when packages must be changed at runtime.
 
@@ -178,10 +178,10 @@ condatainer overlay create [OPTIONS] [NAME]
 **Options:**
 
 * `-s`, `--size [SIZE]`: Size of the overlay image (default: 10G). Supports units like `20G`, `2048M`.
-* `-t`, `--type [TYPE]`: Overlay profile: `small`, `balanced`, or `large` (default: balanced).
+* `-t`, `--type [TYPE]`: Overlay profile: `small`, `balanced`, or `large` (default: balanced). Aliases: `conda`/`python` = `small`; `data`/`genome` = `large`.
 * `-f`, `--file [FILE]`: Initialize with a Conda environment file (.yml or .yaml).
 * `--fakeroot`: Create image compatible with fakeroot (owned by root, must use with `--fakeroot` later).
-* `--sparse`: Create a sparse image file (no pre-allocation). (Short form: `-S` available on the `o` shortcut only.)
+* `-S`, `--sparse`: Create a sparse image file (no pre-allocation).
 * `--no-tmp`: Create the overlay directly at the target path instead of staging at a local tmp directory first. By default CondaTainer creates the image on a fast local filesystem (e.g. `/tmp`) and moves it to the destination once ready — this is significantly faster on HPC network filesystems (LustreFS). Use `--no-tmp` only when the target is already on local storage.
 * `-- [packages...] [-c channel...]`: Initialize with inline conda packages instead of a YAML file. Mutually exclusive with `-f`. Channels passed with `-c` are saved in `.condarc` inside the overlay for reuse by `mm-install`, `mm-update`, and `mm-search`. Default channels when no `-c` is given: `conda-forge` + `bioconda`. `conda-forge` is always appended if not explicitly listed.
 * NAME: Name of the overlay image (`env.img` by default if not specified).
@@ -347,8 +347,8 @@ condatainer overlay resize -s 20G env.img
 
 Export a Micromamba/Conda environment spec from an overlay. The output is printed to stdout and can be redirected to a YAML or text file.
 
-- For `.img` workspace overlays the environment prefix is `/ext3/env`.
-- For `.sqf` module overlays the environment prefix is `/cnt/<name>/<version>`.
+- For `.img` environment overlays, the environment prefix is `/ext3/env`.
+- For `.sqf` module overlays, the environment prefix is `/cnt/<name>/<version>`.
 
 Requires `conda-meta` to be present at the expected prefix — i.e., the overlay must contain an actual conda environment.
 
@@ -370,7 +370,7 @@ condatainer overlay export [OPTIONS] [overlay_path]
 **Examples:**
 
 ```bash
-# Export environment from a workspace overlay
+# Export environment from an environment overlay
 condatainer overlay export env.img > environment.yml
 
 # Export from a module overlay (sqf)
@@ -909,7 +909,7 @@ Parses scripts for `#DEP:` tags and checks if the required overlays are installe
 **Usage:**
 
 ```
-condatainer check <script|dir> [script|dir ...] [-a] [--module] [--remote]
+condatainer check <script|dir|name> [script|dir|name ...] [-a] [--module] [--remote]
 ```
 
 Each argument can be:
@@ -1325,7 +1325,7 @@ condatainer info ./ubuntu--22.04.sqf
 
 | Section | Fields |
 |---------|--------|
-| **File** | Name, Path, file Size, Type (`Workspace Overlay`, Writable; sparse images also show actual on-disk size) |
+| **File** | Name, Path, file Size, Type (`Environment Overlay`, Writable; sparse images also show actual on-disk size) |
 | **Filesystem** | Format, State, Block Size, Created, Modified, Last Mounted |
 | **Ownership** | Inner UID/GID of files inside the image (or `root` for fakeroot-compatible images) |
 | **Disk Usage** | Used / Total (%), Reserved blocks, Free |
@@ -1723,14 +1723,17 @@ condatainer proxy start --via gateway   # shared, custom SSH gateway
 condatainer proxy start --via login01   # per-job (inside a job)
 ```
 
-### proxy stop / status / show
+### proxy stop / status / show / export
 
 ```bash
 condatainer proxy stop      # kill shared proxy (SSH to other login node if needed)
 condatainer proxy status    # check per-job then shared; clean stale PID files
 condatainer proxy show      # print active URL (per-job first); empty if none
+condatainer proxy export    # print export statements for all proxy env vars
 
-export ALL_PROXY=$(condatainer proxy show)
+# Export all proxy env vars (http_proxy, https_proxy, all_proxy, no_proxy)
+# into the current shell; no-op when no proxy is active:
+source <(condatainer proxy export)
 ```
 
 ### Automatic injection (inside jobs)

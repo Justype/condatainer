@@ -25,30 +25,19 @@ var (
 var availCmd = &cobra.Command{
 	Use:     "avail [terms...]",
 	Aliases: []string{"av"},
-	Short:   "Check available build scripts (local and remote)",
+	Short:   "List available build scripts (local and remote)",
 	Long: `List available build scripts (local and remote).
 
-By default, shows both local and remote build scripts.
 When duplicates exist, local scripts take precedence.
-Use --remote to make remote scripts take precedence over local.
 
-Search rules (single term):
-  Plain string  substring match
-  cell*         wildcard (* and ?)
-  ^cell.*9\.0   regex (any of ^ $ ( [ + { |)
-
-Search rules (multiple terms, space-separated):
-  First term is an exact name  → all terms treated as exact names
-  First term not found         → AND substring match
+` + searchSyntaxHint + `
 
 Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
-	Example: `  condatainer avail                          # List all
-  condatainer avail --remote                 # Remote takes precedence on duplicates
-  condatainer avail cellranger               # Substring match
-  condatainer avail 'cell*'                  # Wildcard
-  condatainer avail 'cellranger|spaceranger' # Regex
-  condatainer avail cellranger 9             # AND search (multiple terms)
-  condatainer avail cellranger/9.0.1 -i      # Install exact version`,
+	Example: `  condatainer avail                     # List all
+  condatainer avail cellranger          # Substring match
+  condatainer avail 'cell*'             # Wildcard
+  condatainer avail cellranger 9        # AND search (multiple terms)
+  condatainer avail cellranger/9.0.1 -i # Install exact version`,
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runAvail,
 }
@@ -58,7 +47,7 @@ func init() {
 	availCmd.Flags().BoolVar(&availRemote, "remote", false, "Remote build scripts take precedence over local")
 	availCmd.Flags().BoolVarP(&availInstall, "install", "i", false, "Install the selected build scripts (used with search terms)")
 	availCmd.Flags().BoolP("add", "a", false, "Alias for --install")
-	availCmd.Flags().BoolVarP(&availExpand, "expand", "e", false, "Expand template groups to show individual entries")
+	availCmd.Flags().BoolVarP(&availExpand, "expand", "e", false, "Expand templated script groups into individual entries (one per placeholder value)")
 	availCmd.Flags().BoolVarP(&availWhatis, "whatis", "w", false, "Show description for each build script")
 }
 

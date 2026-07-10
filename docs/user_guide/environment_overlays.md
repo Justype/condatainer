@@ -1,21 +1,21 @@
-# Creating and Using Workspace Overlays
+# Creating and Using Environment Overlays
 
-📦 **CondaTainer** allows you to create [workspace overlays](./concepts.md#-overlay-types) for your project.
+📦 **CondaTainer** allows you to create [environment overlays](./concepts.md#-overlay-types) for your project.
 
 The main advantage of **CondaTainer** is that it packs a Conda environment inside a writable ext3 overlay for development, which significantly reduces inode usage.
 
 ## Table of Contents
 
-- [Create a Workspace Overlay](#create-a-workspace-overlay)
-- [Launch a Shell within the Workspace Overlay](#launch-a-shell-within-the-workspace-overlay)
+- [Create an Environment Overlay](#create-an-environment-overlay)
+- [Launch a Shell within the Environment Overlay](#launch-a-shell-within-the-environment-overlay)
 - [Writable or Read-Only](#writable-or-read-only)
-- [Use Workspace Overlay in a Script](#use-workspace-overlay-in-a-script)
+- [Use Environment Overlay in a Script](#use-environment-overlay-in-a-script)
 - [Set Environment Variables for the Overlay](#set-environment-variables-for-the-overlay)
 - [Export the Conda Environment](#export-the-conda-environment)
 - [Share the Overlay with Others](#share-the-overlay-with-others)
 - [Common Issues](#common-issues)
 
-## Create a Workspace Overlay
+## Create an Environment Overlay
 
 By default, CondaTainer will create a 10GiB ext3 overlay named `env.img` in the current working directory.
 
@@ -68,7 +68,7 @@ Use `--no-tmp` to skip this and write directly to the target path, if the tmp si
 ```
 
 ```{note}
-Only one workspace overlay can be mounted at a time, regardless of writable or read-only mode.
+Only one environment overlay can be mounted at a time, regardless of writable or read-only mode.
 
 The mounting path is `/ext3/env`. So the img name does not matter.
 ```
@@ -87,9 +87,9 @@ Or you can shrink it as well:
 condatainer overlay resize env.img -s 5g
 ```
 
-## Launch a Shell within the Workspace Overlay
+## Launch a Shell within the Environment Overlay
 
-To activate the workspace overlay, simply run the following command under the directory where the overlay image is created:
+To activate the environment overlay, simply run the following command under the directory where the overlay image is created:
 
 ```bash
 condatainer e
@@ -135,7 +135,7 @@ You don't need to activate the environment because the **CondaTainer** sets the 
 
 ## Writable or Read-Only
 
-Two commands can enter a container with a workspace overlay, and they have different defaults:
+Two commands can enter a container with an environment overlay, and they have different defaults:
 
 | Command | Default mode | Auto-loads `env.img` | Best for |
 |---------|-------------|----------------------|----------|
@@ -173,7 +173,7 @@ Then when you run `e` or `exec`, these environment variables will be set automat
 
 ```bash
 $ condatainer e
-[CNT◇] Autoload workspace overlay at /path/condatainer/env.img
+[CNT◇] Autoload environment overlay at /path/condatainer/env.img
 [CNT] Overlay envs:
   GOROOT: /ext3/env/go
   GOPATH: /ext3/home/go
@@ -193,16 +193,16 @@ Then when you run `e` or `exec`, the notes will be displayed:
 
 ```bash
 $ condatainer e
-[CNT◇] Autoload workspace overlay at /path/condatainer/env.img
+[CNT◇] Autoload environment overlay at /path/condatainer/env.img
 [CNT] Overlay envs:
   GOROOT: Go Installation Path
   GOPATH: Go Workspace Path
   CNT_CONDA_PREFIX: /ext3/env
 ```
 
-## Use Workspace Overlay in a Script
+## Use Environment Overlay in a Script
 
-You can use the workspace overlay in your job scripts as follows:
+You can use the environment overlay in your job scripts as follows:
 
 For example, you have the following project structure:
 
@@ -252,7 +252,7 @@ The `run` will check the `img` file lock, before submission:
 
 ## Export the Conda Environment
 
-To export a reproducible environment spec from a workspace overlay (without entering it interactively), use:
+To export a reproducible environment spec from an environment overlay (without entering it interactively), use:
 
 ```bash
 condatainer overlay export env.img > environment.yml

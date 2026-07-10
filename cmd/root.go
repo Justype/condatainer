@@ -31,7 +31,7 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:           "condatainer",
-	Short:         "CondaTainer: Use Apptainer/Conda/OverlayFS/SquashFS to manage tools/data/env for HPC users.",
+	Short:         "Single-file Conda env, tools, and data for HPC — plus app helpers to run RStudio and more.",
 	Version:       config.VERSION,
 	SilenceErrors: true,
 

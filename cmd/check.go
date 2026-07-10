@@ -22,8 +22,8 @@ var (
 )
 
 var scriptCheckCmd = &cobra.Command{
-	Use:   "check <script|dir> [script|dir ...]",
-	Short: "Check if the dependencies of a script are installed",
+	Use:   "check <script|dir|name> [script|dir|name ...]",
+	Short: "Check if the dependencies of script(s) are installed",
 	Long: `Check dependencies declared in build scripts using #DEP: tags.
 
 Each argument can be:
@@ -31,7 +31,7 @@ Each argument can be:
   - A directory (all .sh files under it are checked recursively)
   - A package name (e.g., samtools/1.22) resolved from local or remote build scripts
 
-Dependencies from all scripts are deduplicated and checked together.
+Dependencies from all scripts are checked together.
 
 Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 	Example: `  condatainer check script.sh             # Check single local script

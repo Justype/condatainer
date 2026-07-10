@@ -16,7 +16,7 @@ CondaTainer
   Installation <user_guide/installation>
   Concepts: Overlays <user_guide/concepts>
   Module Overlays <user_guide/module_overlays>
-  Writable Workspace Overlays <user_guide/workspace_overlays>
+  Writable Environment Overlays <user_guide/environment_overlays>
   Read-Only Bundle Overlays <user_guide/bundle_overlays>
 
 .. toctree::

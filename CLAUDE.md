@@ -19,14 +19,16 @@ go test -v ./internal/scheduler/...                       # Package tests
 - **cmd/**: One file per subcommand, delegates to internal packages
 
 **internal/** packages:
-- `apptainer/` - Apptainer binary wrapper (exec, build, instance management)
+- `apptainer/` - Apptainer binary wrapper (exec, build, version detection)
 - `build/` - Build system: resolves name/version → Conda, Script, or Def build type; dependency graphs; remote script fetching
 - `config/` - Multi-level config (flags > env > user > extra-root > app-root > system > defaults), data directory search
 - `container/` - Container setup pipeline: overlay resolution, bind dedup, env collection, GPU detection
 - `exec/` - Ephemeral container execution
-- `instance/` - Persistent instance management (start/exec/stop) with state persistence
+- `helper/` - Helper service job lifecycle: resolve params, submit to scheduler (or run headless), monitor state, JSONL run history
 - `overlay/` - Overlay image CRUD (ext3/SquashFS), resize, chown, locking
+- `proxy/` - SSH tunnel + dual-protocol proxy management for HPC compute nodes
 - `scheduler/` - HPC scheduler abstraction (SLURM, PBS, LSF, HTCondor); auto-detection, directive parsing, cross-scheduler translation
+- `server/` - Dashboard HTTP server (web UI + REST API, SSE log streaming)
 - `utils/` - Console output (`Print*`), file ops, downloads, script parsing
 
 ## Build Scripts

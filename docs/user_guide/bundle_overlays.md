@@ -27,7 +27,7 @@ CondaTainer uses the name to locate resources inside the overlay. The bundle ove
 ```{note}
 If your environment uses packages not available in conda, like using `pip` or `remotes::install_github()`, check [Custom OS Overlays](../advanced_usage/custom_os.md) for more details.
 
-But you can also [share the writable workspace overlay with others](./workspace_overlays.md#share-the-overlay-with-others).
+But you can also [share the writable environment overlay with others](./environment_overlays.md#share-the-overlay-with-others).
 ```
 
 ```{note}

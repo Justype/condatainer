@@ -34,24 +34,16 @@ var eCmd = &cobra.Command{
 	Long: `Quick shortcut for executing commands with overlays.
 
 Overlays and flags go before --, commands go after --.
-If no -- is provided, all positional arguments are treated as overlays.
-- Writable by default (use -r for read-only)
-- Auto-loads the first env.img found in (unless a different .img is provided or -n is specified):
+- Writable by default
+- Auto-loads the first env.img found (unless a .img is provided or -n):
     env.img → overlay/env.img → src/overlay/env.img
-- Defaults to bash if no command specified
 
 Note: Additional Apptainer flags must use --flag=value format (no space)`,
-	Example: `  condatainer e             # Auto-load env.img if present, run bash
-  condatainer e testing.img  # Use a specific writable overlay
-
-  # Multiple overlays, run bash (auto loads env.img)
-  condatainer e samtools/1.22 bcftools/1.20
-
-  # Run specific command (requires --)
-  condatainer e samtools/1.22 -- samtools view file.bam
-
-  # Pass apptainer flags
-  condatainer e --home=/custom samtools/1.22`,
+	Example: `  condatainer e                # Auto-load env.img if present, run bash
+  condatainer e testing.img    # Use a specific writable overlay
+  condatainer e samtools/1.22 bcftools/1.20   # Multiple Overlay
+  condatainer e samtools/1.22 -- samtools     # Run command
+  condatainer e --home=/custom samtools/1.22  # Pass apptainer flags`,
 	SilenceUsage: true,
 	RunE:         runE,
 }
@@ -106,7 +98,7 @@ func runE(cmd *cobra.Command, args []string) error {
 					if err := overlay.CheckAvailable(candidate, false); err != nil {
 						utils.PrintWarning("%s is in use, running without it", filepath.Base(candidate))
 					} else {
-						utils.PrintNote("Autoload workspace overlay at %s", utils.StylePath(candidate))
+						utils.PrintNote("Autoload environment overlay at %s", utils.StylePath(candidate))
 						overlays = append(overlays, candidate)
 					}
 				}

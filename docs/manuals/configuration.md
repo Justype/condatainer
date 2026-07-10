@@ -93,7 +93,6 @@ condatainer config init -l system
 |-----|---------|-------------|
 | `scripts_link` | `https://raw.githubusercontent.com/Justype/cnt-scripts/main` | Base URL for remote build and helper scripts (lowest-priority remote) |
 | `extra_scripts_links` | `[]` | Additional remote URLs prepended before `scripts_link` (first entry = highest priority); array, set via `config append/prepend` or `CNT_EXTRA_SCRIPTS_LINKS` |
-| `prebuilt_link` | `https://github.com/Justype/cnt-scripts/releases/download` | Base URL for downloading prebuilt overlays |
 | `prefer_remote` | `false` | Remote build scripts take precedence over local |
 
 ### Options
@@ -204,7 +203,7 @@ upper‑casing, replacing `.` with `_`, and prefixing with
 `CNT_`.  For example:
 
 * `logs_dir` → `CNT_LOGS_DIR`
-* `scheduler.time` → `CNT_SCHEDULER_TIME`
+* `build.mem` → `CNT_BUILD_MEM`
 * `build.tmp_overlay_size` → `CNT_BUILD_TMP_OVERLAY_SIZE`
 
 You can list the supported variables with
@@ -224,9 +223,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_APPTAINER_BIN`        | `apptainer_bin`        |
 | `CNT_SUBMIT_JOB`           | `submit_job`           |
 | `CNT_SCRIPTS_LINK`         | `scripts_link`         |
-| `CNT_PREBUILT_LINK`        | `prebuilt_link`        |
 | `CNT_PREFER_REMOTE`        | `prefer_remote`        |
-| `CNT_SCHEDULER_NODES`      | `scheduler.nodes`      |
 | `CNT_BUILD_MEM`            | `build.mem`            |
 | `CNT_BUILD_ALWAYS_SUBMIT`  | `build.always_submit`  |
 | `CNT_BUILD_BLOCK_SIZE`     | `build.block_size`     |
@@ -323,9 +320,6 @@ scripts_link: https://raw.githubusercontent.com/Justype/cnt-scripts/main
 # Additional remote sources (higher priority than scripts_link; first entry wins on conflict)
 # extra_scripts_links:
 #   - https://raw.githubusercontent.com/MyOrg/my-scripts/main
-
-# Base URL for downloading prebuilt images and overlays
-prebuilt_link: https://github.com/Justype/cnt-scripts/releases/download
 
 # Remote build scripts take precedence over local
 prefer_remote: false

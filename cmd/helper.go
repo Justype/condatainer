@@ -51,9 +51,6 @@ var helperCmd = &cobra.Command{
 	Short: "Manage and run helper scripts",
 	Long: `Manage helper scripts for running services inside CondaTainer on HPC.
 
-Use --list to see available helper scripts.
-Use --update to download or refresh helper scripts from remote.
-
 Note: Helper is not available inside a container or a scheduler job.`,
 	Example: `  condatainer helper                 # Show running helpers
   condatainer helper code-server     # Run code-server

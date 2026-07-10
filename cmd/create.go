@@ -235,7 +235,7 @@ func init() {
 	createCmd.SetUsageFunc(func(cmd *cobra.Command) error {
 		fmt.Fprintf(cmd.OutOrStderr(), "Usage:\n  %s\n", cmd.UseLine())
 		if len(cmd.Aliases) > 0 {
-			fmt.Fprintf(cmd.OutOrStderr(), "\nAliases:\n  %s\n", strings.Join(cmd.Aliases, ", "))
+			fmt.Fprintf(cmd.OutOrStderr(), "\nAliases:\n  %s\n", cmd.NameAndAliases())
 		}
 		if cmd.HasExample() {
 			fmt.Fprintf(cmd.OutOrStderr(), "\nExamples:\n%s\n", cmd.Example)
