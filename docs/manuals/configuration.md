@@ -294,7 +294,6 @@ Each base directory follows this structure:
   images/           # Container images and overlays
   build-scripts/    # Build recipes
   helper-scripts/   # Runtime helpers
-  cache/            # Cached remote metadata (remote-scripts-<hash>.json, helper-scripts-<hash>.json)
   tmp/              # Temporary files during builds
 ```
 

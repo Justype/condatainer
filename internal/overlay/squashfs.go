@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -116,10 +117,37 @@ func catExtract(sqfPath, filePath string) []byte {
 	return nil
 }
 
+// unsquashfsAvailable reports whether unsquashfs is on PATH, checked once per process.
+var unsquashfsAvailable = sync.OnceValue(func() bool {
+	_, err := exec.LookPath("unsquashfs")
+	return err == nil
+})
+
 // IsOSType returns true if the SquashFS archive is an Apptainer OS image,
 // identified by the presence of .singularity.d at the archive root.
+// Verdicts are cached across processes keyed by path, size, and mtime, so
+// repeated checks (e.g. shell completion) skip the unsquashfs probe.
 func IsOSType(sqfPath string) bool {
-	return strings.HasSuffix(sqfPath, ".sqf") && sqfPathExists(sqfPath, ".singularity.d")
+	if !strings.HasSuffix(sqfPath, ".sqf") {
+		return false
+	}
+	if abs, err := filepath.Abs(sqfPath); err == nil {
+		sqfPath = abs
+	}
+	fi, err := os.Stat(sqfPath)
+	if err != nil {
+		globalOSTypeCache.forget(sqfPath)
+		return false
+	}
+	if verdict, ok := globalOSTypeCache.lookup(sqfPath, fi); ok {
+		return verdict
+	}
+	isOS := sqfPathExists(sqfPath, ".singularity.d")
+	// Without unsquashfs the probe always fails; don't persist false negatives.
+	if unsquashfsAvailable() {
+		globalOSTypeCache.store(sqfPath, fi, isOS)
+	}
+	return isOS
 }
 
 // HasCntBin returns true if the SquashFS archive contains a bin directory at

@@ -270,6 +270,7 @@ func performDelete(cmd *cobra.Command, names []string, showListing ...bool) erro
 			utils.PrintError("Failed to remove overlay %s: %v", utils.StyleName(name), err)
 			continue
 		}
+		overlay.ForgetOSType(overlayPath)
 		utils.PrintSuccess("Overlay %s removed.", utils.StyleName(name))
 		envPath := overlayPath + ".env"
 		if utils.FileExists(envPath) {
@@ -334,6 +335,7 @@ func removeExternalOverlays(cmd *cobra.Command, paths []string) error {
 			utils.PrintError("Failed to remove %s: %v", utils.StyleName(filepath.Base(p)), err)
 			continue
 		}
+		overlay.ForgetOSType(p)
 		utils.PrintSuccess("Overlay %s removed.", utils.StyleName(filepath.Base(p)))
 		envPath := p + ".env"
 		if utils.FileExists(envPath) {

@@ -562,7 +562,8 @@ func addDistroAliasChoices(installed map[string]string, choices map[string]struc
 }
 
 // isOSOverlay reports whether a SquashFS overlay is an OS overlay.
-// Delegates to overlay.IsOSType which checks for .singularity.d in the archive.
+// Delegates to overlay.IsOSType which checks for .singularity.d in the
+// archive (cached by path/size/mtime across processes).
 func isOSOverlay(overlayPath string) bool {
 	return overlay.IsOSType(overlayPath)
 }
