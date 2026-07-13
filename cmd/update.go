@@ -28,6 +28,7 @@ var (
 	updateBase        bool
 	updateHelpScripts bool
 	updateRemote      bool
+	updateNoPrebuilt  bool
 )
 
 var updateCmd = &cobra.Command{
@@ -40,7 +41,8 @@ With no flags, refreshes both the build and helper script metadata caches.`,
   condatainer update --build         # Build script metadata only
   condatainer update --helper        # Helper script metadata only
   condatainer update --base          # Update the base image only
-  condatainer update --base --remote # Update the base image using remote script`,
+  condatainer update --base --remote # Update the base image using remote script
+  condatainer update --base --remote --no-prebuilt # Rebuild locally from remote .def`,
 	SilenceUsage: true,
 	RunE:         runUpdate,
 }
@@ -51,6 +53,7 @@ func init() {
 	updateCmd.Flags().BoolVar(&updateHelpScripts, "helper", false, "Refresh helper script metadata cache")
 	updateCmd.Flags().BoolVar(&updateBase, "base", false, "Update the base image")
 	updateCmd.Flags().BoolVar(&updateRemote, "remote", false, "Remote build script takes precedence over local (used with --base)")
+	updateCmd.Flags().BoolVar(&updateNoPrebuilt, "no-prebuilt", false, "Skip prebuilt image download; build locally (used with --base)")
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
@@ -101,6 +104,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 			}
 		}
 		build.PreferRemote = updateRemote || config.Global.PreferRemote
+		build.SkipPrebuilt = updateNoPrebuilt
 		utils.PrintMessage("Updating base image...")
 		if err := build.EnsureBaseImage(cmd.Context(), true); err != nil {
 			return fmt.Errorf("failed to update base image: %w", err)

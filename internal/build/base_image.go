@@ -65,8 +65,9 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 	done := watchContext(ctx, "base image build")
 	defer close(done)
 
-	// Try to download prebuilt .sif from GitHub releases if build source is remote.
-	if b.isRemote {
+	// Try to download prebuilt .sif from GitHub releases if build source is remote
+	// (skipped with --no-prebuilt).
+	if b.isRemote && !SkipPrebuilt {
 		if writableDir, err := config.GetWritableImagesDir(); err == nil {
 			if filepath.Dir(targetPath) == writableDir {
 				downloadPath := buildFinalPath(targetPath, b.update)
@@ -157,11 +158,15 @@ func NewBaseImageBuildObject(update bool) (*BaseImageBuildObject, error) {
 	}
 
 	tmpDir := resolveTmpDirForDef()
+	if absDir, err := filepath.Abs(tmpDir); err == nil {
+		tmpDir = absDir
+	}
 	tmpOverlayPath, _ := buildTmpPaths(nameVersion, tmpDir, ".img")
 
 	base := &BuildObject{
 		nameVersion:       nameVersion,
 		submitJob:         false, // base image is always built locally
+		tmpDir:            tmpDir,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetOverlayPath,
 		update:            update,

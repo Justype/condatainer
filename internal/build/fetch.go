@@ -258,6 +258,11 @@ func PruneOrphanedCaches() {
 // Set by CLI commands (--remote flag) or config (prefer_remote: true).
 var PreferRemote bool
 
+// SkipPrebuilt disables downloading prebuilt artifacts (.sif/.sqf) for remote
+// def builds, forcing a local apptainer build from the .def file.
+// Set by CLI commands (--no-prebuilt flag).
+var SkipPrebuilt bool
+
 // in-process caches — valid for the lifetime of one CLI invocation
 var (
 	cachedLocalScripts       map[string]ScriptInfo

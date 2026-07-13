@@ -30,6 +30,7 @@ var (
 	createDataBlockSize string
 	createChannels      []string
 	createRemote        bool
+	createNoPrebuilt    bool
 	createUpdate        bool
 	createUseTmpOverlay bool
 	createAlwaysSubmit  bool
@@ -41,7 +42,7 @@ var (
 	// buildFlagNames is the set of flags shown under "Build Flags:" in help.
 	buildFlagNames = map[string]bool{
 		"temp-size": true, "block-size": true, "data-block-size": true, "use-tmp-overlay": true,
-		"always-submit": true,
+		"always-submit": true, "remote": true, "no-prebuilt": true,
 	}
 )
 
@@ -161,8 +162,9 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
 			}
 		}
 
-		// 7. Handle --remote flag (CLI flag or config)
+		// 7. Handle --remote and --no-prebuilt flags (CLI flag or config)
 		build.PreferRemote = createRemote || config.Global.PreferRemote
+		build.SkipPrebuilt = createNoPrebuilt
 
 		// 7b. Handle --always-submit flag
 		if createAlwaysSubmit {
@@ -209,6 +211,7 @@ func init() {
 	f.StringVar(&createDataBlockSize, "data-block-size", "", "SquashFS block size for data overlays (e.g. 512k, 1m)")
 	f.StringArrayVarP(&createChannels, "channel", "c", nil, "Conda channel to use (overrides config; repeatable)")
 	f.BoolVar(&createRemote, "remote", false, "Remote build scripts take precedence over local")
+	f.BoolVar(&createNoPrebuilt, "no-prebuilt", false, "Skip prebuilt artifact download; build .def files locally")
 	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist (atomic .new swap)")
 	f.BoolVar(&createUseTmpOverlay, "use-tmp-overlay", false, "Use a temporary overlay instead of a temp directory")
 	f.BoolVar(&createAlwaysSubmit, "always-submit", false, "Submit all builds as scheduler jobs even without scheduler directives")

@@ -411,6 +411,7 @@ condatainer create [OPTIONS] [packages...]
 * `--use-tmp-overlay`: Use a temporary ext3 overlay during builds instead of host directories. Equivalent to setting `build.use_tmp_overlay = true` in config.
 * `-u`, `--update`: Rebuild overlays even if they already exist (atomic `.new` swap). Useful for refreshing a package to the latest version.
 * `--remote`: Remote build scripts take precedence over local.
+* `--no-prebuilt`: Skip the prebuilt artifact download for remote `.def` builds and build locally with Apptainer instead.
 * `packages`: List of packages to install (e.g., `bcftools/1.22` or `samtools=1.10` or `grch38/genome/gencode`). Supports conda channel annotations: `bioconda::star=2.7.11b` (version required in default mode; optional with `-n`/`-p`).
 
 **Compression Options:**
@@ -1605,6 +1606,8 @@ condatainer update [FLAGS]
 * `--build`: Refresh the build script metadata cache.
 * `--helper`: Refresh the helper script metadata cache.
 * `--base`: Update the base Apptainer image only.
+* `--remote`: Remote build script takes precedence over local (used with `--base`).
+* `--no-prebuilt`: Skip the prebuilt image download and build locally from the `.def` file (used with `--base`).
 
 By default (no flags), both `--build` and `--helper` are enabled.
 
@@ -1630,6 +1633,9 @@ condatainer update --helper
 
 # Update the base image only
 condatainer update --base
+
+# Rebuild the base image locally from the remote .def (skip prebuilt download)
+condatainer update --base --remote --no-prebuilt
 ```
 
 ## Self-Update
