@@ -3,7 +3,7 @@ channels:
   - conda-forge
 dependencies:
   - gcc
-  - go
+  - go=1.26.4
   - myst-parser
   - pandoc
   - python=3.10
@@ -12,5 +12,6 @@ dependencies:
   - sphinx-autobuild
   - sphinx-copybutton
   - sphinx-rtd-theme
+  - nodejs
 
 prefix: "/ext3/env"
