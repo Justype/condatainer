@@ -61,7 +61,7 @@ def main():
         epilog=f"For full manual, see https://github.com/{Config.GITHUB_REPO}/blob/main/assets/modgen/manual.md")
     parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of ModGen", default=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
-    parser.add_argument("--local", dest="local", action="store_true", help="Disable job submission")
+    parser.add_argument("--no-submit", dest="no_submit", action="store_true", help="Disable job submission (run locally)")
     subparsers = parser.add_subparsers(dest="action", metavar="COMMAND", required=True, help="Available actions")
 
     ModGen_Init.add_parser_arguments(subparsers)
@@ -85,9 +85,9 @@ def main():
         Utils.print_debug("Debug mode enabled")
         Utils.print_debug(f"ModGen Version: {Config.VERSION}")
         Utils.print_debug(f"MODULE SYSTEM: {'Lmod' if Config.IS_LMOD else 'Environment-Modules'}")
-    if args.local:
+    if args.no_submit:
         Config.submit_job = False
-        Utils.print_debug("Local mode enabled (job submission disabled)")
+        Utils.print_debug("Job submission disabled (--no-submit)")
 
     if args.action in ("create", "install", "i"):
         ModGen_Create.parse_create_args(args)
@@ -1580,6 +1580,10 @@ class ModGen_Create:
             nargs="*",
             help="Name/Version or Name=Version or Name@Version to create (e.g., bcftools/1.22)"
         )
+        ModGen_Create.parser_create.add_argument(
+            "--no-submit", dest="no_submit", action="store_true", default=argparse.SUPPRESS,
+            help="Disable job submission (build locally)"
+        )
 
     @staticmethod
     def parse_create_args(args):
@@ -1834,6 +1838,10 @@ class ModGen_Avail:
             dest="expand",
             action="store_true",
             help="Expand template entries to all concrete combinations"
+        )
+        ModGen_Avail.parser_avail.add_argument(
+            "--no-submit", dest="no_submit", action="store_true", default=argparse.SUPPRESS,
+            help="Disable job submission; build locally (used with --install)"
         )
 
     @staticmethod
@@ -2092,6 +2100,10 @@ class ModGen_Check:
             action="store_true",
             help="Automatically install missing dependencies"
         )
+        ModGen_Check.parser_check.add_argument(
+            "--no-submit", dest="no_submit", action="store_true", default=argparse.SUPPRESS,
+            help="Disable job submission; build missing dependencies locally"
+        )
 
     @staticmethod
     def _resolve_script_paths(args_list):
@@ -2275,6 +2287,9 @@ class ModGen_Run:
             "--array-limit",
             type=int, default=0, metavar="N",
             help="Max concurrent array subjobs (0 = unlimited)")
+        ModGen_Run.parser_run.add_argument(
+            "--no-submit", dest="no_submit", action="store_true", default=argparse.SUPPRESS,
+            help="Disable job submission (run locally)")
         ModGen_Run.parser_run.add_argument(
             "script_args",
             nargs=argparse.REMAINDER,
@@ -2584,7 +2599,7 @@ class ModGen_Run:
                 print(job_id)
         else:
             if sbatch_flags and not Config.submit_job:
-                Utils.print_note("Script has #SBATCH specs but --local mode is enabled. Running locally.")
+                Utils.print_note("Script has #SBATCH specs but --no-submit is enabled. Running locally.")
             elif sbatch_flags and not Utils.is_sbatch_available():
                 Utils.print_note("Script has #SBATCH specs but no SLURM scheduler is available. Running locally.")
             execution_command_list = ([script_path] if os.access(script_path, os.X_OK) else ["bash", script_path]) + script_args

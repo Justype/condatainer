@@ -224,9 +224,10 @@ func KnownFlags() map[string]bool {
 		"--bind":       true,
 		"--base-image": true, "-b": true,
 		"--fakeroot": true, "-f": true,
-		"--debug": true,
-		"--local": true,
-		"--quiet": true, "-q": true,
+		"--debug":     true,
+		"--local":     true, // deprecated alias for --no-submit
+		"--no-submit": true,
+		"--quiet":     true, "-q": true,
 		"--yes": true, "-y": true,
 	}
 }

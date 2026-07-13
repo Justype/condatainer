@@ -53,6 +53,7 @@ var runJobFlagNames = map[string]bool{
 	"afterok": true, "afternotok": true, "afterany": true,
 	"cpu": true, "mem": true, "time": true, "gpu": true,
 	"dry-run": true, "name": true, "array": true, "array-limit": true,
+	"no-submit": true,
 }
 
 // jobIDRe matches a single scheduler job ID.
@@ -102,6 +103,7 @@ func init() {
 	runCmd.Flags().StringVarP(&runTime, "time", "t", "", "Override walltime (e.g. 4d12h, 2h30m, 01:30:00)")
 	runCmd.Flags().StringVarP(&runGPU, "gpu", "g", "", "Override GPUs per node (e.g. 1, a100:2, a100)")
 	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Preview what would happen without executing")
+	runCmd.Flags().BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (run locally)")
 	runCmd.Flags().StringVarP(&runName, "name", "n", "", "Override job name")
 	runCmd.Flags().StringVar(&runArray, "array", "", "Input file for array job (one entry per line)")
 	runCmd.Flags().IntVar(&runArrayLimit, "array-limit", 0, "Max concurrent array subjobs (0 = unlimited)")

@@ -9,8 +9,8 @@ Two variants are available depending on how R is installed:
 
 ```bash
 condatainer helper -u
-condatainer helper rstudio-server -w         # Posit R
-condatainer helper rstudio-server-conda -w   # Conda R
+condatainer helper rstudio-server         # Posit R
+condatainer helper rstudio-server-conda   # Conda R
 ```
 
 See [Helper Scripts](./helpers.md) for SSH port forwarding setup, resource flags, configuration, and reuse mode.

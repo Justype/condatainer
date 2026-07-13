@@ -50,6 +50,7 @@ func init() {
 	scriptCheckCmd.Flags().BoolP("install", "i", false, "Alias for --auto-install")
 	scriptCheckCmd.Flags().BoolVar(&checkParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
 	scriptCheckCmd.Flags().BoolVar(&checkRemote, "remote", false, "Remote build scripts take precedence over local")
+	scriptCheckCmd.Flags().BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (build locally)")
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {

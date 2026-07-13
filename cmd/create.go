@@ -42,7 +42,7 @@ var (
 	// buildFlagNames is the set of flags shown under "Build Flags:" in help.
 	buildFlagNames = map[string]bool{
 		"temp-size": true, "block-size": true, "data-block-size": true, "use-tmp-overlay": true,
-		"always-submit": true, "remote": true, "no-prebuilt": true,
+		"always-submit": true, "no-submit": true, "remote": true, "no-prebuilt": true,
 	}
 )
 
@@ -215,6 +215,7 @@ func init() {
 	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist (atomic .new swap)")
 	f.BoolVar(&createUseTmpOverlay, "use-tmp-overlay", false, "Use a temporary overlay instead of a temp directory")
 	f.BoolVar(&createAlwaysSubmit, "always-submit", false, "Submit all builds as scheduler jobs even without scheduler directives")
+	f.BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (build locally)")
 
 	// Compression flags: create a bool flag for each known option
 	compFlags = make(map[string]*bool)

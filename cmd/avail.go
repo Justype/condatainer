@@ -49,6 +49,7 @@ func init() {
 	availCmd.Flags().BoolP("add", "a", false, "Alias for --install")
 	availCmd.Flags().BoolVarP(&availExpand, "expand", "e", false, "Expand templated script groups into individual entries (one per placeholder value)")
 	availCmd.Flags().BoolVarP(&availWhatis, "whatis", "w", false, "Show description for each build script")
+	availCmd.Flags().BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (build locally; used with --install)")
 }
 
 // PackageInfo holds information about a build script

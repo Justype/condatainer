@@ -112,11 +112,11 @@ condatainer helper -u
 condatainer helper vscode-server
 ```
 
-On a headless server without a scheduler, use `--local`:
+On a headless server without a scheduler, use `--no-submit` to run the helper directly instead of submitting a job:
 
 ```bash
-condatainer --local helper -u
-condatainer --local helper vscode-server
+condatainer helper -u
+condatainer helper --no-submit vscode-server
 ```
 
 Or set `submit_job: false` in your CondaTainer config to make headless mode permanent.

@@ -52,7 +52,6 @@ Available Commands:
 Flags:
       --debug     Enable debug mode with verbose output
   -h, --help      help for condatainer
-      --local     Disable job submission (run locally)
   -q, --quiet     Suppress messages (warnings/errors are still shown)
   -v, --version   version for condatainer
   -y, --yes       Automatically answer yes to all prompts
@@ -412,6 +411,7 @@ condatainer create [OPTIONS] [packages...]
 * `-u`, `--update`: Rebuild overlays even if they already exist (atomic `.new` swap). Useful for refreshing a package to the latest version.
 * `--remote`: Remote build scripts take precedence over local.
 * `--no-prebuilt`: Skip the prebuilt artifact download for remote `.def` builds and build locally with Apptainer instead.
+* `--no-submit`: Disable job submission; build locally even if the build script has scheduler directives.
 * `packages`: List of packages to install (e.g., `bcftools/1.22` or `samtools=1.10` or `grch38/genome/gencode`). Supports conda channel annotations: `bioconda::star=2.7.11b` (version required in default mode; optional with `-n`/`-p`).
 
 **Compression Options:**
@@ -533,8 +533,7 @@ condatainer create -f install_packages.sh
 CondaTainer uses specific exit codes so automation and downstream tooling can detect special states:
 
 - `0` — Success (all requested builds completed locally or nothing to do)
-- `1` — Generic error (build failures, runtime errors, or other fatal errors)
-- `2` — Wrong or missing arguments (misuse of command, invalid flag values)
+- `1` — Generic error (build failures, runtime errors, invalid arguments, or other fatal errors)
 - `3` — **Jobs submitted to scheduler** — overlays will be created asynchronously by scheduler jobs
 
 Commands that may return exit code `3` when scheduler jobs were submitted include:
@@ -559,7 +558,7 @@ Note: When exit code `3` is returned, CondaTainer prints a message showing the n
 
 ```bash
 # Run locally even with scheduler specs
-condatainer --local run analysis.sh
+condatainer run --no-submit analysis.sh
 
 # Or set in config
 condatainer config set submit_job false
@@ -586,6 +585,7 @@ condatainer avail [search_terms...] [flags]
 * `-w`, `--whatis`: Show the description (`#WHATIS:`) for each build script.
 * `-i`, `--install`: Install any found packages that are not currently installed.
 * `-a`, `--add`: Alias for `--install`.
+* `--no-submit`: Disable job submission; build locally (used with `--install`).
 
 **Search rules:**
 
@@ -924,6 +924,7 @@ Each argument can be:
 * `-i`, `--install`: Alias for `--auto-install`.
 * `--module`: Also parse `module load` / `ml` lines as dependencies.
 * `--remote`: Remote build scripts take precedence over local when resolving package names.
+* `--no-submit`: Disable job submission; build missing dependencies locally.
 
 **Output:**
 
@@ -973,6 +974,7 @@ condatainer run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
 * `--bind HOST:CONTAINER`: Bind mount a path into the container (repeatable).
 * `--env KEY=VALUE`: Set an environment variable inside the container (repeatable).
 * `--dry-run`: Preview what would be submitted without executing anything.
+* `--no-submit`: Disable job submission; run the script locally even if it has scheduler directives.
 * `--array FILE`: Input file for an array job — one subjob per line, tokens become positional args.
 * `--array-limit N`: Max concurrently running subjobs (0 = unlimited).
 
@@ -1022,7 +1024,7 @@ If your script contains scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`), `c
 | Condition | Behavior |
 |-----------|----------|
 | Already inside a running job or container | Always runs locally (no nested submission) |
-| `--local` flag or `submit_job: false` in config | Always runs locally |
+| `--no-submit` flag or `submit_job: false` in config | Always runs locally |
 | Script has no scheduler specs | Runs locally (prints a note) |
 | Script has `#SBATCH`/`#PBS`/`#BSUB` + scheduler available | Submits as a scheduler job |
 | Script has scheduler specs but scheduler not found/available | Runs locally (prints a note) |
@@ -1351,8 +1353,9 @@ condatainer helper [FLAGS] [SCRIPT_NAME] [SCRIPT_ARGS...]
 Options:
 
 * `-u`, `--update`: Update helper scripts from remote metadata.
-* `-p`, `--path`: Show all helper script search paths and the writable directory. If a `SCRIPT_NAME` is given, print the absolute path of that specific helper script and exit.
+* `--path`: Show all helper script search paths and the writable directory. If a `SCRIPT_NAME` is given, print the absolute path of that specific helper script and exit.
 * `-l`, `--list`: List available helper scripts with their descriptions (from `#WHATIS` tags).
+* `--no-submit`: Disable job submission; run the helper headless on the current machine.
 * `SCRIPT_NAME`: Name of the helper script to run (optional).
 * `SCRIPT_ARGS...`: Remaining arguments are passed directly to the helper script when running it.
 
@@ -1368,13 +1371,14 @@ condatainer helper --path
 # Print path to a specific helper script
 condatainer helper --path code-server
 
-# Download/Update all helper scripts (auto selects sbatch or headless based on availability)
+# Download/Update all helper scripts
 condatainer helper --update
-# Force update headless scripts version
-condatainer --local helper --update
 
-# Run a helper script with arguments
-condatainer helper code-server -p 18230
+# Run a helper script with arguments (e.g. request 4 CPUs)
+condatainer helper code-server -c 4
+
+# Run a helper headless (no scheduler submission)
+condatainer helper --no-submit code-server
 ```
 
 ## Config
