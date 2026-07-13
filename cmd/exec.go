@@ -21,14 +21,15 @@ var execFlags CommonFlags
 
 var execCmd = &execCommand{
 	Command: cobra.Command{
-		Use:          "exec [flags] [overlays...] [command...]",
+		Use:          "exec [flags] [command...]",
 		Short:        "Execute a command using overlays",
 		SilenceUsage: true,
 		Long: `Execute a command inside a container with specified overlays.
 
-- Use -o/--overlay to explicitly specify overlays. All positional arguments are treated as commands.
-- If command is omitted, it defaults to bash.
-- Additional Apptainer flags can be passed using --flag=value format (no space)`,
+Overlays are given with -o/--overlay; all positional arguments form
+the command (default: bash).
+
+Note: Additional Apptainer flags must use --flag=value format (no space)`,
 		Example: `  # Run samtools command with overlay
   condatainer exec -o samtools/1.22 samtools view file.bam
 

@@ -28,6 +28,7 @@ var (
 	updateBase        bool
 	updateHelpScripts bool
 	updateRemote      bool
+	updateNoPrebuilt  bool
 )
 
 var updateCmd = &cobra.Command{
@@ -35,13 +36,13 @@ var updateCmd = &cobra.Command{
 	Short: "Update build script metadata cache or the base image",
 	Long: `Update build script metadata or the base image.
 
-By default (no flags), refreshes both the build script and helper script
-metadata caches. Use --base to update the base Apptainer image instead.`,
-	Example: `  condatainer update            # Refresh build + helper metadata (default)
+With no flags, refreshes both the build and helper script metadata caches.`,
+	Example: `  condatainer update                 # Refresh build + helper metadata (default)
   condatainer update --build         # Build script metadata only
   condatainer update --helper        # Helper script metadata only
   condatainer update --base          # Update the base image only
-  condatainer update --base --remote # Update the base image using remote script`,
+  condatainer update --base --remote # Update the base image using remote script
+  condatainer update --base --remote --no-prebuilt # Rebuild locally from remote .def`,
 	SilenceUsage: true,
 	RunE:         runUpdate,
 }
@@ -52,6 +53,7 @@ func init() {
 	updateCmd.Flags().BoolVar(&updateHelpScripts, "helper", false, "Refresh helper script metadata cache")
 	updateCmd.Flags().BoolVar(&updateBase, "base", false, "Update the base image")
 	updateCmd.Flags().BoolVar(&updateRemote, "remote", false, "Remote build script takes precedence over local (used with --base)")
+	updateCmd.Flags().BoolVar(&updateNoPrebuilt, "no-prebuilt", false, "Skip prebuilt image download; build locally (used with --base)")
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
@@ -102,6 +104,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 			}
 		}
 		build.PreferRemote = updateRemote || config.Global.PreferRemote
+		build.SkipPrebuilt = updateNoPrebuilt
 		utils.PrintMessage("Updating base image...")
 		if err := build.EnsureBaseImage(cmd.Context(), true); err != nil {
 			return fmt.Errorf("failed to update base image: %w", err)
@@ -123,11 +126,9 @@ var (
 var selfUpdateCmd = &cobra.Command{
 	Use:   "self-update",
 	Short: "Update condatainer to the latest version from GitHub",
-	Long: `Download and replace the current condatainer binary with the latest version from GitHub.
-
-This command downloads the latest binary from the GitHub repository
-and replaces the current executable. A backup of the current version is not created.`,
-	Example: `  condatainer self-update       # Update to latest stable version
+	Long: `Download and replace the current condatainer binary with the latest
+version from GitHub. No backup of the current version is kept.`,
+	Example: `  condatainer self-update        # Update to latest stable version
   condatainer self-update --yes  # Update without confirmation
   condatainer self-update -f     # Force update even if already on latest version
   condatainer self-update --dev  # Include pre-release versions

@@ -15,7 +15,7 @@
 ## Overall Command Structure
 
 ```
-usage: modgen [-h] [-v] [--debug] [--local] COMMAND ...
+usage: modgen [-h] [-v] [--debug] [--no-submit] COMMAND ...
 
 ModGen: Use conda and build scripts to create environment-modules or Lmod modules.
 
@@ -37,7 +37,7 @@ options:
   -h, --help            show this help message and exit
   -v, --version         Show the version of ModGen
   --debug               Enable debug mode with verbose output
-  --local               Disable job submission
+  --no-submit           Disable job submission (run locally)
 ```
 
 ## Initialization
@@ -94,6 +94,10 @@ modgen create [OPTIONS] [NAME_VERSIONS...]
 
 - `NAME_VERSIONS`: List of modules to create (e.g., `bcftools/1.22` or `grch38/genome/gencode`).
 
+**Options**:
+
+- `--no-submit`: Disable job submission; build locally even if the build script has `#SBATCH` specs.
+
 **Features**:
 
 - Automatic Fetching: If a build script is not found locally, **ModGen** attempts to fetch it from the remote repository.
@@ -109,12 +113,13 @@ Manage the library of installed modules and available recipes.
 Search for available build scripts (both local scripts in build-scripts/ and remote metadata). Search terms are combined using **AND** logic (all terms must be present).
 
 ```
-modgen avail [search_terms...] [-i|--install] [-e|--expand]
+modgen avail [search_terms...] [-i|--install] [-e|--expand] [--no-submit]
 ```
 
 * `-i`, `--install`: Automatically install any found packages that are not currently installed. For template entries this prompts for placeholder values interactively; default values prefer the latest already-installed version of each dependency.
 * `-a`, `--add`: Alias for `--install`.
 * `-e`, `--expand`: Show all concrete combinations of a template instead of the collapsed `[template]` entry.
+* `--no-submit`: Disable job submission; build locally (used with `--install`).
 
 **Examples:**
 
@@ -216,6 +221,7 @@ Each argument can be:
 
 * `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies found in the script.
 * `-i`, `--install`: Alias for `--auto-install`.
+* `--no-submit`: Disable job submission; build missing dependencies locally.
 
 **Output:** Installed and missing dependencies are shown in grouped ✓/✗ sections.
 
@@ -254,12 +260,13 @@ modgen run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
 * `--afterany JOB_IDS`: Submit after jobs finish regardless of outcome.
 * `--array FILE`: Submit as an array job; `FILE` contains one set of arguments per line.
 * `--array-limit N`: Max concurrent array subjobs (default: unlimited).
+* `--no-submit`: Disable job submission; run the script locally even if it has `#SBATCH` specs.
 * `-w`, `--writable`: Placeholder for CondaTainer compatibility (no effect).
 
 **Execution behavior:**
 
 1. If already inside a SLURM job, run locally immediately.
-2. If `#SBATCH` is found and SLURM is available, submit a job that re-invokes `modgen run <script>`. (unless `--local` is set)
+2. If `#SBATCH` is found and SLURM is available, submit a job that re-invokes `modgen run <script>`. (unless `--no-submit` is set)
 3. Otherwise, run the script directly with modules pre-loaded. `module` and `ml` are stubbed as no-ops to prevent accidental `module purge`.
 
 **`#SBATCH` directives** are passed through verbatim to the generated batch script. Only `--output`/`--error` are overridden by modgen's own log path.

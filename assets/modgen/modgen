@@ -61,7 +61,7 @@ def main():
         epilog=f"For full manual, see https://github.com/{Config.GITHUB_REPO}/blob/main/assets/modgen/manual.md")
     parser.add_argument("-v", "--version", action="version", version=Config.VERSION, help="Show the version of ModGen", default=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
-    parser.add_argument("--local", dest="local", action="store_true", help="Disable job submission")
+    parser.add_argument("--no-submit", dest="no_submit", action="store_true", help="Disable job submission (run locally)")
     subparsers = parser.add_subparsers(dest="action", metavar="COMMAND", required=True, help="Available actions")
 
     ModGen_Init.add_parser_arguments(subparsers)
@@ -85,9 +85,9 @@ def main():
         Utils.print_debug("Debug mode enabled")
         Utils.print_debug(f"ModGen Version: {Config.VERSION}")
         Utils.print_debug(f"MODULE SYSTEM: {'Lmod' if Config.IS_LMOD else 'Environment-Modules'}")
-    if args.local:
+    if args.no_submit:
         Config.submit_job = False
-        Utils.print_debug("Local mode enabled (job submission disabled)")
+        Utils.print_debug("Job submission disabled (--no-submit)")
 
     if args.action in ("create", "install", "i"):
         ModGen_Create.parse_create_args(args)
@@ -133,16 +133,16 @@ class Utils:
     @staticmethod
     def print_debug(debug_object, end="\n", flush=True):
         if Config.debug:
-            print(f"[MG][{Utils.yellow_text('DEBUG')}]", end=" ", flush=True, file=sys.stderr)
+            print(f"{Utils.gray_text('[MG…]')}", end=" ", flush=True, file=sys.stderr)
             print(debug_object, end=end, flush=flush, file=sys.stderr)
     @staticmethod
-    def print_note(message, end="\n", flush=True): print(f"[MG][{Utils.blue_text('NOTE')}] {message}", end=end, flush=flush, file=sys.stderr)
+    def print_note(message, end="\n", flush=True): print(f"{Utils.magenta_text('[MG◇]')} {message}", end=end, flush=flush, file=sys.stderr)
     @staticmethod
-    def print_warning(message, end="\n", flush=True): print(f"[MG][{Utils.yellow_text('WARNING')}] {message}", file=sys.stderr, end=end, flush=flush)
+    def print_warning(message, end="\n", flush=True): print(f"{Utils.yellow_text('[MG!]')} {message}", file=sys.stderr, end=end, flush=flush)
     @staticmethod
-    def print_error(message, end="\n", flush=True): print(f"[MG][{Utils.red_text('ERROR')}] {message}", file=sys.stderr, end=end, flush=flush)
+    def print_error(message, end="\n", flush=True): print(f"{Utils.red_text('[MG✗]')} {message}", file=sys.stderr, end=end, flush=flush)
     @staticmethod
-    def print_success(message, end="\n", flush=True): print(f"[MG][{Utils.green_text('SUCCESS')}] {message}", end=end, flush=flush, file=sys.stderr)
+    def print_success(message, end="\n", flush=True): print(f"{Utils.green_text('[MG✓]')} {message}", end=end, flush=flush, file=sys.stderr)
 
     @staticmethod
     def split_dep_constraint(raw: str):
@@ -204,13 +204,19 @@ class Utils:
 
     @staticmethod
     def sort_versions_descending(values: list) -> list:
-        """Natural version sort, highest first. Splits on '.', '-', '_'; numeric parts sorted numerically."""
+        """Natural version sort, highest first. Splits on '.', '-', '_'; each part is a
+        numeric prefix (sorted numerically, highest first) plus an optional trailing
+        letter suffix (sorted highest-letter first, e.g. '11b' > '11a' > '11')."""
+        def segment_key(s):
+            m = re.match(r'^(\d+)(.*)$', s)
+            if not m:
+                return (1, 0, s)
+            num = int(m.group(1))
+            suffix = m.group(2)
+            return (0, -num, tuple(-ord(c) for c in suffix))
+
         def key(v):
-            result = []
-            for s in re.split(r'[.\-_]', v):
-                try: result.append((0, -int(s), ''))
-                except ValueError: result.append((1, 0, s))
-            return result
+            return [segment_key(s) for s in re.split(r'[.\-_]', v)]
         return sorted(values, key=key)
 
     @staticmethod
@@ -1104,6 +1110,52 @@ class ModGen:
         return ModGen.is_module_installed(dep) or ModGen.is_module_available(dep)
 
     @staticmethod
+    def resolve_dep_module(raw: str) -> str:
+        """
+        Resolve a dep spec (e.g. 'samtools/1.23.1>=1.10') to a concrete 'name/version'
+        that `module load` accepts. Unconstrained deps are returned unchanged.
+        For constrained deps, prefers the highest satisfying modgen-managed (installed)
+        version, then the highest satisfying system (module avail) version, and only
+        falls back to the preferred version with the constraint stripped if nothing
+        satisfying was found.
+        """
+        nv, op, min_ver = Utils.split_dep_constraint(raw)
+        if not op:
+            return nv
+
+        parts = nv.rsplit('/', 1)
+        name = parts[0] if len(parts) == 2 else nv
+        preferred_ver = parts[1] if len(parts) == 2 else ""
+
+        def _sort_key(ver: str):
+            return [int(x) if x.isdigit() else x for x in ver.split('.')]
+
+        installed_modules = ModGen.get_installed_modules()
+        prefix = name + "/"
+        installed_candidates = [
+            key[len(prefix):] for key in installed_modules
+            if key.startswith(prefix) and Utils.dep_satisfied_by_version(key[len(prefix):], op, min_ver, preferred_ver)
+        ]
+        if installed_candidates:
+            installed_candidates.sort(key=_sort_key)
+            return f"{name}/{installed_candidates[-1]}"
+
+        try:
+            result = subprocess.run(["bash", "-c", f"module avail {name}/"], capture_output=True, text=True)
+            output = result.stdout + result.stderr
+            avail_candidates = [
+                m.group(1) for m in re.finditer(rf'{re.escape(name)}/([^\s(/]+)', output)
+                if Utils.dep_satisfied_by_version(m.group(1), op, min_ver, preferred_ver)
+            ]
+            if avail_candidates:
+                avail_candidates.sort(key=_sort_key)
+                return f"{name}/{avail_candidates[-1]}"
+        except Exception:
+            pass
+
+        return nv
+
+    @staticmethod
     def get_missing_modules(required_modules: List[str]) -> List[str]:
         return [mod for mod in required_modules if not ModGen.is_dep_satisfied(mod)]
 
@@ -1325,7 +1377,8 @@ class BuildObject:
         running_env["NCPUS"] = str(self.ncpus)
 
         if deps:
-            ml_commands = "module purge && module load " + " ".join(deps)
+            resolved_deps = [ModGen.resolve_dep_module(dep) for dep in deps]
+            ml_commands = "module purge && module load " + " ".join(resolved_deps)
             cmd_create = ["bash", "-c", f"{ml_commands} && bash {self.build_script_path}"]
         else:
             cmd_create = ["bash", self.build_script_path]
@@ -1526,6 +1579,10 @@ class ModGen_Create:
             "name_versions",
             nargs="*",
             help="Name/Version or Name=Version or Name@Version to create (e.g., bcftools/1.22)"
+        )
+        ModGen_Create.parser_create.add_argument(
+            "--no-submit", dest="no_submit", action="store_true", default=argparse.SUPPRESS,
+            help="Disable job submission (build locally)"
         )
 
     @staticmethod
@@ -1781,6 +1838,10 @@ class ModGen_Avail:
             dest="expand",
             action="store_true",
             help="Expand template entries to all concrete combinations"
+        )
+        ModGen_Avail.parser_avail.add_argument(
+            "--no-submit", dest="no_submit", action="store_true", default=argparse.SUPPRESS,
+            help="Disable job submission; build locally (used with --install)"
         )
 
     @staticmethod
@@ -2039,6 +2100,10 @@ class ModGen_Check:
             action="store_true",
             help="Automatically install missing dependencies"
         )
+        ModGen_Check.parser_check.add_argument(
+            "--no-submit", dest="no_submit", action="store_true", default=argparse.SUPPRESS,
+            help="Disable job submission; build missing dependencies locally"
+        )
 
     @staticmethod
     def _resolve_script_paths(args_list):
@@ -2223,6 +2288,9 @@ class ModGen_Run:
             type=int, default=0, metavar="N",
             help="Max concurrent array subjobs (0 = unlimited)")
         ModGen_Run.parser_run.add_argument(
+            "--no-submit", dest="no_submit", action="store_true", default=argparse.SUPPRESS,
+            help="Disable job submission (run locally)")
+        ModGen_Run.parser_run.add_argument(
             "script_args",
             nargs=argparse.REMAINDER,
             help="Arguments to pass to the script")
@@ -2361,6 +2429,8 @@ class ModGen_Run:
             args_str = (" " + " ".join(shlex.quote(a) for a in script_args)) if script_args else ""
 
             # Array job: compute log prefix and pad width
+            array_log_base = ""
+            pad_width = 0
             if array_spec:
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
                 array_log_base = f"{script_name}_{timestamp}"
@@ -2529,7 +2599,7 @@ class ModGen_Run:
                 print(job_id)
         else:
             if sbatch_flags and not Config.submit_job:
-                Utils.print_note("Script has #SBATCH specs but --local mode is enabled. Running locally.")
+                Utils.print_note("Script has #SBATCH specs but --no-submit is enabled. Running locally.")
             elif sbatch_flags and not Utils.is_sbatch_available():
                 Utils.print_note("Script has #SBATCH specs but no SLURM scheduler is available. Running locally.")
             execution_command_list = ([script_path] if os.access(script_path, os.X_OK) else ["bash", script_path]) + script_args

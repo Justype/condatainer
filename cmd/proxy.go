@@ -18,8 +18,8 @@ import (
 
 var proxyCmd = &cobra.Command{
 	Use:   "proxy",
-	Short: "Manage SOCKS5 proxy tunnels for compute nodes",
-	Long: `Start and manage SSH SOCKS5 proxy tunnels so that compute node jobs
+	Short: "Manage proxy tunnels for compute nodes",
+	Long: `Start and manage SSH proxy tunnels so that compute node jobs
 can reach the internet through the login node.
 
 Shared mode (login node): run "condatainer proxy start" once on the login node.
@@ -231,32 +231,51 @@ var proxyStopCmd = &cobra.Command{
 	},
 }
 
+// proxyShowExport is a hidden compatibility alias for 'proxy export', kept so
+// helper scripts published against v1.5.0 keep working. Not shown in help.
 var proxyShowExport bool
 
 var proxyShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Print the proxy URL for use by other programs",
-	Long: `Print the active proxy URL.
+	Long: `Print the active proxy URL (http://host:PORT), or nothing if no proxy is active.
 
-Without flags: prints the HTTP CONNECT URL (http://host:PORT).
-
-With --export: prints shell export statements for all proxy env vars.
-Suitable for: eval $(condatainer proxy show --export)
-
-If no proxy is active, prints nothing.`,
+To load all proxy env vars into the shell, use 'condatainer proxy export'.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		httpURL, ok := proxy.FindActiveProxy()
-		if !ok {
+		if proxyShowExport {
+			printProxyExports()
 			return
 		}
-		if !proxyShowExport {
+		if httpURL, ok := proxy.FindActiveProxy(); ok {
 			fmt.Println(httpURL)
-			return
-		}
-		for _, kv := range proxy.ProxyEnvList(httpURL) {
-			fmt.Printf("export %s\n", kv)
 		}
 	},
+}
+
+var proxyExportCmd = &cobra.Command{
+	Use:   "export",
+	Short: "Print export statements for all proxy env vars",
+	Long: `Print export statements for all proxy env vars
+(http_proxy, https_proxy, all_proxy, no_proxy and uppercase variants),
+or nothing if no proxy is active.
+
+Load them into the current shell:
+  source <(condatainer proxy export)`,
+	Run: func(cmd *cobra.Command, args []string) {
+		printProxyExports()
+	},
+}
+
+// printProxyExports prints shell export statements for all proxy env vars.
+// Prints nothing when no proxy is active, so sourcing the output is a no-op.
+func printProxyExports() {
+	httpURL, ok := proxy.FindActiveProxy()
+	if !ok {
+		return
+	}
+	for _, kv := range proxy.ProxyEnvList(httpURL) {
+		fmt.Printf("export %s\n", kv)
+	}
 }
 
 var proxyStatusCmd = &cobra.Command{
@@ -325,7 +344,8 @@ func init() {
 	proxyStartCmd.Flags().StringVar(&proxyStartVia, "via", "", "SSH server to tunnel through (default: current node for shared mode; required for per-job mode inside a job)")
 	proxyStartCmd.Flags().IntVar(&proxyStartPort, "port", 0, "Local port to listen on (default: OS-assigned free port)")
 
-	proxyShowCmd.Flags().BoolVar(&proxyShowExport, "export", false, "Print shell export statements for all proxy env vars (eval-friendly)")
+	proxyShowCmd.Flags().BoolVar(&proxyShowExport, "export", false, "Alias for 'proxy export'")
+	proxyShowCmd.Flags().MarkHidden("export") //nolint:errcheck
 	proxyDaemonCmd.Flags().BoolVar(&proxyDaemonLocalMode, "local", false, "Per-job mode: bind 127.0.0.1 and write node-local PID file")
 	proxyDaemonCmd.Flags().IntVar(&proxyDaemonReportFd, "report-fd", 0, "File descriptor to report startup result to parent")
 
@@ -333,6 +353,7 @@ func init() {
 	proxyCmd.AddCommand(proxyStopCmd)
 	proxyCmd.AddCommand(proxyStatusCmd)
 	proxyCmd.AddCommand(proxyShowCmd)
+	proxyCmd.AddCommand(proxyExportCmd)
 
 	rootCmd.AddCommand(proxyCmd)
 	rootCmd.AddCommand(proxyDaemonCmd)

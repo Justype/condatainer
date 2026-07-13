@@ -138,16 +138,11 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenInstalled(t *testing.T) {
 	imagesDir := t.TempDir()
 	tmpDir := t.TempDir()
 
-	// Create a temporary base dir and add it to extra base dirs so it is searched first
-	baseDir := t.TempDir()
-	defer os.RemoveAll(baseDir)
-	if err := os.Setenv("CNT_EXTRA_BASE_DIRS", baseDir); err != nil {
-		t.Fatalf("failed to set env: %v", err)
-	}
-	defer os.Unsetenv("CNT_EXTRA_BASE_DIRS")
+	// Create a temporary build-scripts dir and add it to extra build dirs so it is searched first
+	scriptsDir := filepath.Join(t.TempDir(), "build-scripts")
+	t.Setenv("CNT_EXTRA_BUILD_DIRS", scriptsDir)
 
 	// Create a build-scripts entry with an INTERACTIVE prompt to trigger parsing if it were called
-	scriptsDir := filepath.Join(baseDir, "build-scripts")
 	if err := os.MkdirAll(filepath.Join(scriptsDir, "cellranger"), 0o775); err != nil {
 		t.Fatalf("failed to create scripts dir: %v", err)
 	}
@@ -182,16 +177,11 @@ func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 	imagesDir := t.TempDir()
 	tmpDir := t.TempDir()
 
-	// Create a temporary base dir and add it to extra base dirs so it is searched first
-	baseDir := t.TempDir()
-	defer os.RemoveAll(baseDir)
-	if err := os.Setenv("CNT_EXTRA_BASE_DIRS", baseDir); err != nil {
-		t.Fatalf("failed to set env: %v", err)
-	}
-	defer os.Unsetenv("CNT_EXTRA_BASE_DIRS")
+	// Create a temporary build-scripts dir and add it to extra build dirs so it is searched first
+	scriptsDir := filepath.Join(t.TempDir(), "build-scripts")
+	t.Setenv("CNT_EXTRA_BUILD_DIRS", scriptsDir)
 
 	// Create a build-scripts entry with an INTERACTIVE prompt to trigger parsing if it were called
-	scriptsDir := filepath.Join(baseDir, "build-scripts")
 	if err := os.MkdirAll(filepath.Join(scriptsDir, "cellranger"), 0o775); err != nil {
 		t.Fatalf("failed to create scripts dir: %v", err)
 	}

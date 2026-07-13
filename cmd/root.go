@@ -23,15 +23,15 @@ import (
 )
 
 var (
-	debugMode bool
-	localMode bool
-	quietMode bool
-	yesMode   bool
+	debugMode    bool
+	noSubmitMode bool
+	quietMode    bool
+	yesMode      bool
 )
 
 var rootCmd = &cobra.Command{
 	Use:           "condatainer",
-	Short:         "CondaTainer: Use Apptainer/Conda/OverlayFS/SquashFS to manage tools/data/env for HPC users.",
+	Short:         "Single-file Conda env, tools, and data for HPC — plus app helpers to run RStudio and more.",
 	Version:       config.VERSION,
 	SilenceErrors: true,
 
@@ -89,9 +89,9 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
-		if localMode {
+		if noSubmitMode {
 			config.Global.SubmitJob = false
-			utils.PrintDebug("Local mode enabled (job submission disabled)")
+			utils.PrintDebug("Job submission disabled (--no-submit)")
 		}
 
 		if quietMode {
@@ -186,7 +186,9 @@ func Execute() {
 func init() {
 	// Subcommands are attached to rootCmd in their respective init() functions
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debug mode with verbose output")
-	rootCmd.PersistentFlags().BoolVar(&localMode, "local", false, "Disable job submission (run locally)")
+	// Deprecated alias for the per-command --no-submit flag (kept global for old scripts).
+	rootCmd.PersistentFlags().BoolVar(&noSubmitMode, "local", false, "Disable job submission (run locally)")
+	rootCmd.PersistentFlags().MarkDeprecated("local", "use --no-submit instead") //nolint:errcheck
 	rootCmd.PersistentFlags().BoolVarP(&quietMode, "quiet", "q", false, "Suppress messages (warnings/errors are still shown)")
 	rootCmd.PersistentFlags().BoolVarP(&yesMode, "yes", "y", false, "Automatically answer yes to all prompts")
 

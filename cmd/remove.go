@@ -19,14 +19,9 @@ var removeCmd = &cobra.Command{
 	Short:   "Remove installed overlays matching search terms",
 	Long: `Remove installed overlays by name, alias, or search terms.
 
-Search rules (single term):
-  Plain string  exact match (including distro-prefix alias)
-  cell*         wildcard (* and ?)
-  ^cell.*9\.0   regex (any of ^ $ ( [ + { |)
-
-Search rules (multiple terms, space-separated):
-  First term is an exact name  → all terms treated as exact names
-  First term not found         → AND substring match
+Unlike list/avail, a single plain term must match a name exactly
+(safer for deletion). Wildcards (*, ?) and regex also work — full rules:
+` + searchManualURL + `
 
 The command will ask for confirmation before removing overlays.`,
 	Example: `  condatainer rm cellranger/9.0.1                   # Remove exact version
@@ -275,6 +270,7 @@ func performDelete(cmd *cobra.Command, names []string, showListing ...bool) erro
 			utils.PrintError("Failed to remove overlay %s: %v", utils.StyleName(name), err)
 			continue
 		}
+		overlay.ForgetOSType(overlayPath)
 		utils.PrintSuccess("Overlay %s removed.", utils.StyleName(name))
 		envPath := overlayPath + ".env"
 		if utils.FileExists(envPath) {
@@ -339,6 +335,7 @@ func removeExternalOverlays(cmd *cobra.Command, paths []string) error {
 			utils.PrintError("Failed to remove %s: %v", utils.StyleName(filepath.Base(p)), err)
 			continue
 		}
+		overlay.ForgetOSType(p)
 		utils.PrintSuccess("Overlay %s removed.", utils.StyleName(filepath.Base(p)))
 		envPath := p + ".env"
 		if utils.FileExists(envPath) {

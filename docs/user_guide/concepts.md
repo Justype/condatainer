@@ -15,7 +15,7 @@ Overlays are stackable, self-contained files that encapsulate executables and da
 | OS | `.sqf` | R/O | `/bin`, `/lib` etc. | System Foundation - Run standalone. |
 | Module | `.sqf` | R/O | `/cnt/name/version` | Individual Tool - Run on top of OS. |
 | Bundle | `.sqf` | R/O | `/cnt/<env_name>` | Frozen Conda Env - Run on top of OS. |
-| Workspace | `.img` | R/W | `/ext3/env` | Writable Conda Env - Run on top of OS. |
+| Environment | `.img` | R/W | `/ext3/env` | Writable Conda Env - Run on top of OS. |
 
 ```{note}
 - `sqf` cannot be renamed. The name is used for the mount path.
@@ -70,12 +70,12 @@ Overlays can be stacked in a specific order to create a layered environment.
 - **OS Overlay**: Provides system-level libraries and tools (should have the same distro version as the base image)
 - **Module Overlays**: Individual software packages and data (e.g. `cellranger/9.0.1`, `grch38/cellranger/2024-A`)
 - **Bundle Overlay**: Frozen conda environment (e.g. `env.sqf`)
-- **Workspace Overlay**: Writable conda environment (e.g. `env.img`)
+- **Environment Overlay**: Writable conda environment (e.g. `env.img`)
 
 ```{note}
 The later overlays will overwrite the previous ones if there are conflicts. For example, if both the base image and an OS overlay contain `/bin/bash`, the one from the OS overlay will be used.
 
-**CondaTiainer** will always put workspace overlays on the top.
+**CondaTiainer** will always put environment overlays on the top.
 ```
 
 ```{note}
@@ -126,5 +126,5 @@ For software unavailable through conda, custom build scripts can be created to d
 
 - [Manage Module Overlays](./module_overlays.md)
 - [Bundle Overlays: Read-only project environment](./bundle_overlays.md)
-- [Workspace Overlays: Writable project environment](./workspace_overlays.md)
+- [Environment Overlays: Writable project environment](./environment_overlays.md)
 - [Fakeroot](../qa/overlayfs.md#fakeroot)

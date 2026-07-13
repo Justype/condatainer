@@ -264,10 +264,7 @@ var chownCmd = &cobra.Command{
 	Short: "Recursively set internal files to specific UID/GID",
 	Long: `Walks the overlay filesystem (without mounting) and updates the UID/GID.
 
-Defaults to the current user and paths '/' inside the image.
-Use --root to force ownership to 0:0.
-
-Multiple paths can be specified using multiple -p flags.`,
+Defaults to the current user and path '/' inside the image.`,
 	Example: `
   condatainer overlay chown env.img                   # Set entire image to current user
   condatainer overlay chown env.img --root            # Set entire image to root
@@ -326,7 +323,7 @@ Multiple paths can be specified using multiple -p flags.`,
 var exportCmd = &cobra.Command{
 	Use:   "export [flags] [overlay_path]",
 	Short: "Export a conda environment from an overlay",
-	Long: `Export a Conda environment from a overlay.
+	Long: `Export a Conda environment from an overlay.
 
 For .img overlays the environment prefix is /ext3/env.
 For .sqf module overlays the environment prefix is /cnt/<name>/<version>.`,
@@ -368,9 +365,9 @@ func init() {
 
 	// --- Create ---
 	overlayCreateCmd.Flags().StringP("size", "s", "10G", "Set overlay size (e.g., 500M, 10G)")
-	overlayCreateCmd.Flags().StringP("type", "t", "balanced", "Overlay profile: small/balanced/large files")
+	overlayCreateCmd.Flags().StringP("type", "t", "balanced", "Overlay profile: small/balanced/large files (aliases: conda, python = small; data, genome = large)")
 	overlayCreateCmd.Flags().Bool("fakeroot", false, "Create a fakeroot-compatible overlay (owned by root)")
-	overlayCreateCmd.Flags().Bool("sparse", false, "Create a sparse overlay image (no pre-allocation)")
+	overlayCreateCmd.Flags().BoolP("sparse", "S", false, "Create a sparse overlay image (no pre-allocation)")
 	overlayCreateCmd.Flags().StringP("file", "f", "", "Initialize with Conda environment file (.yml or .yaml)")
 	overlayCreateCmd.Flags().Bool("no-tmp", false, "Create directly at target path instead of local tmp (slower on network filesystems)")
 

@@ -23,13 +23,13 @@
 ## Overall Command Structure
 
 ```
-CondaTainer: Use Apptainer/Conda/Overlays/SquashFS to manage tools/data/env for HPC users.
+Single-file Conda env, tools, and data for HPC — plus app helpers to run RStudio and more.
 
 Usage:
   condatainer [command]
 
 Available Commands:
-  avail       Check available build scripts (local and remote)
+  avail       List available build scripts (local and remote)
   check       Check if the dependencies of a script are installed
   completion  Generate shell completion script
   config      Manage condatainer configuration
@@ -52,7 +52,6 @@ Available Commands:
 Flags:
       --debug     Enable debug mode with verbose output
   -h, --help      help for condatainer
-      --local     Disable job submission (run locally)
   -q, --quiet     Suppress messages (warnings/errors are still shown)
   -v, --version   version for condatainer
   -y, --yes       Automatically answer yes to all prompts
@@ -78,7 +77,7 @@ Like text editors, IDEs, build-essential tools, etc.
 
 You can also create these system apps using the `-n, --name` flag with the `create` command.
 
-### Custom Environments (Bundle/Workspace)
+### Custom Environments (Bundle/Environment)
 
 Used when creating a custom environment with a user-defined name (`create -p`, or `overlay` action).
 
@@ -140,7 +139,7 @@ For `.img` files, the mount point is always `/ext3/env`, so renaming is allowed.
 | OS | `.sqf` | R/O | `/bin`, `/lib`, `/usr` | System Foundation — minimal system root that can run standalone or serve as a base for Modules/Bundles. |
 | Module | `.sqf` | R/O | `/cnt/<name>/<version>` | Individual tool overlay (single package) mounted under `/cnt` and layered on top of an OS or Bundle. |
 | Bundle | `.sqf` | R/O | `/cnt/<env_name>` | Frozen Conda environment (prebuilt collection of packages) mounted under `/cnt` as a named environment. |
-| Workspace | `.img` | R/W | `/ext3/env` | Writable Conda environment (ext3 image) for interactive work and runtime package changes. |
+| Environment | `.img` | R/W | `/ext3/env` | Writable Conda environment (ext3 image) for interactive work and runtime package changes. |
 
 Read-only `.sqf` overlays are ideal for distributing immutable software and reference data. Writable `.img` overlays are for live development or when packages must be changed at runtime.
 
@@ -178,10 +177,10 @@ condatainer overlay create [OPTIONS] [NAME]
 **Options:**
 
 * `-s`, `--size [SIZE]`: Size of the overlay image (default: 10G). Supports units like `20G`, `2048M`.
-* `-t`, `--type [TYPE]`: Overlay profile: `small`, `balanced`, or `large` (default: balanced).
+* `-t`, `--type [TYPE]`: Overlay profile: `small`, `balanced`, or `large` (default: balanced). Aliases: `conda`/`python` = `small`; `data`/`genome` = `large`.
 * `-f`, `--file [FILE]`: Initialize with a Conda environment file (.yml or .yaml).
 * `--fakeroot`: Create image compatible with fakeroot (owned by root, must use with `--fakeroot` later).
-* `--sparse`: Create a sparse image file (no pre-allocation). (Short form: `-S` available on the `o` shortcut only.)
+* `-S`, `--sparse`: Create a sparse image file (no pre-allocation).
 * `--no-tmp`: Create the overlay directly at the target path instead of staging at a local tmp directory first. By default CondaTainer creates the image on a fast local filesystem (e.g. `/tmp`) and moves it to the destination once ready — this is significantly faster on HPC network filesystems (LustreFS). Use `--no-tmp` only when the target is already on local storage.
 * `-- [packages...] [-c channel...]`: Initialize with inline conda packages instead of a YAML file. Mutually exclusive with `-f`. Channels passed with `-c` are saved in `.condarc` inside the overlay for reuse by `mm-install`, `mm-update`, and `mm-search`. Default channels when no `-c` is given: `conda-forge` + `bioconda`. `conda-forge` is always appended if not explicitly listed.
 * NAME: Name of the overlay image (`env.img` by default if not specified).
@@ -347,8 +346,8 @@ condatainer overlay resize -s 20G env.img
 
 Export a Micromamba/Conda environment spec from an overlay. The output is printed to stdout and can be redirected to a YAML or text file.
 
-- For `.img` workspace overlays the environment prefix is `/ext3/env`.
-- For `.sqf` module overlays the environment prefix is `/cnt/<name>/<version>`.
+- For `.img` environment overlays, the environment prefix is `/ext3/env`.
+- For `.sqf` module overlays, the environment prefix is `/cnt/<name>/<version>`.
 
 Requires `conda-meta` to be present at the expected prefix — i.e., the overlay must contain an actual conda environment.
 
@@ -370,7 +369,7 @@ condatainer overlay export [OPTIONS] [overlay_path]
 **Examples:**
 
 ```bash
-# Export environment from a workspace overlay
+# Export environment from an environment overlay
 condatainer overlay export env.img > environment.yml
 
 # Export from a module overlay (sqf)
@@ -411,6 +410,8 @@ condatainer create [OPTIONS] [packages...]
 * `--use-tmp-overlay`: Use a temporary ext3 overlay during builds instead of host directories. Equivalent to setting `build.use_tmp_overlay = true` in config.
 * `-u`, `--update`: Rebuild overlays even if they already exist (atomic `.new` swap). Useful for refreshing a package to the latest version.
 * `--remote`: Remote build scripts take precedence over local.
+* `--no-prebuilt`: Skip the prebuilt artifact download for remote `.def` builds and build locally with Apptainer instead.
+* `--no-submit`: Disable job submission; build locally even if the build script has scheduler directives.
 * `packages`: List of packages to install (e.g., `bcftools/1.22` or `samtools=1.10` or `grch38/genome/gencode`). Supports conda channel annotations: `bioconda::star=2.7.11b` (version required in default mode; optional with `-n`/`-p`).
 
 **Compression Options:**
@@ -532,8 +533,7 @@ condatainer create -f install_packages.sh
 CondaTainer uses specific exit codes so automation and downstream tooling can detect special states:
 
 - `0` — Success (all requested builds completed locally or nothing to do)
-- `1` — Generic error (build failures, runtime errors, or other fatal errors)
-- `2` — Wrong or missing arguments (misuse of command, invalid flag values)
+- `1` — Generic error (build failures, runtime errors, invalid arguments, or other fatal errors)
 - `3` — **Jobs submitted to scheduler** — overlays will be created asynchronously by scheduler jobs
 
 Commands that may return exit code `3` when scheduler jobs were submitted include:
@@ -558,7 +558,7 @@ Note: When exit code `3` is returned, CondaTainer prints a message showing the n
 
 ```bash
 # Run locally even with scheduler specs
-condatainer --local run analysis.sh
+condatainer run --no-submit analysis.sh
 
 # Or set in config
 condatainer config set submit_job false
@@ -585,6 +585,7 @@ condatainer avail [search_terms...] [flags]
 * `-w`, `--whatis`: Show the description (`#WHATIS:`) for each build script.
 * `-i`, `--install`: Install any found packages that are not currently installed.
 * `-a`, `--add`: Alias for `--install`.
+* `--no-submit`: Disable job submission; build locally (used with `--install`).
 
 **Search rules:**
 
@@ -909,7 +910,7 @@ Parses scripts for `#DEP:` tags and checks if the required overlays are installe
 **Usage:**
 
 ```
-condatainer check <script|dir> [script|dir ...] [-a] [--module] [--remote]
+condatainer check <script|dir|name> [script|dir|name ...] [-a] [--module] [--remote]
 ```
 
 Each argument can be:
@@ -923,6 +924,7 @@ Each argument can be:
 * `-i`, `--install`: Alias for `--auto-install`.
 * `--module`: Also parse `module load` / `ml` lines as dependencies.
 * `--remote`: Remote build scripts take precedence over local when resolving package names.
+* `--no-submit`: Disable job submission; build missing dependencies locally.
 
 **Output:**
 
@@ -972,6 +974,7 @@ condatainer run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
 * `--bind HOST:CONTAINER`: Bind mount a path into the container (repeatable).
 * `--env KEY=VALUE`: Set an environment variable inside the container (repeatable).
 * `--dry-run`: Preview what would be submitted without executing anything.
+* `--no-submit`: Disable job submission; run the script locally even if it has scheduler directives.
 * `--array FILE`: Input file for an array job — one subjob per line, tokens become positional args.
 * `--array-limit N`: Max concurrently running subjobs (0 = unlimited).
 
@@ -1021,7 +1024,7 @@ If your script contains scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`), `c
 | Condition | Behavior |
 |-----------|----------|
 | Already inside a running job or container | Always runs locally (no nested submission) |
-| `--local` flag or `submit_job: false` in config | Always runs locally |
+| `--no-submit` flag or `submit_job: false` in config | Always runs locally |
 | Script has no scheduler specs | Runs locally (prints a note) |
 | Script has `#SBATCH`/`#PBS`/`#BSUB` + scheduler available | Submits as a scheduler job |
 | Script has scheduler specs but scheduler not found/available | Runs locally (prints a note) |
@@ -1325,7 +1328,7 @@ condatainer info ./ubuntu--22.04.sqf
 
 | Section | Fields |
 |---------|--------|
-| **File** | Name, Path, file Size, Type (`Workspace Overlay`, Writable; sparse images also show actual on-disk size) |
+| **File** | Name, Path, file Size, Type (`Environment Overlay`, Writable; sparse images also show actual on-disk size) |
 | **Filesystem** | Format, State, Block Size, Created, Modified, Last Mounted |
 | **Ownership** | Inner UID/GID of files inside the image (or `root` for fakeroot-compatible images) |
 | **Disk Usage** | Used / Total (%), Reserved blocks, Free |
@@ -1350,8 +1353,9 @@ condatainer helper [FLAGS] [SCRIPT_NAME] [SCRIPT_ARGS...]
 Options:
 
 * `-u`, `--update`: Update helper scripts from remote metadata.
-* `-p`, `--path`: Show all helper script search paths and the writable directory. If a `SCRIPT_NAME` is given, print the absolute path of that specific helper script and exit.
+* `--path`: Show all helper script search paths and the writable directory. If a `SCRIPT_NAME` is given, print the absolute path of that specific helper script and exit.
 * `-l`, `--list`: List available helper scripts with their descriptions (from `#WHATIS` tags).
+* `--no-submit`: Disable job submission; run the helper headless on the current machine.
 * `SCRIPT_NAME`: Name of the helper script to run (optional).
 * `SCRIPT_ARGS...`: Remaining arguments are passed directly to the helper script when running it.
 
@@ -1367,13 +1371,14 @@ condatainer helper --path
 # Print path to a specific helper script
 condatainer helper --path code-server
 
-# Download/Update all helper scripts (auto selects sbatch or headless based on availability)
+# Download/Update all helper scripts
 condatainer helper --update
-# Force update headless scripts version
-condatainer --local helper --update
 
-# Run a helper script with arguments
-condatainer helper code-server -p 18230
+# Run a helper script with arguments (e.g. request 4 CPUs)
+condatainer helper code-server -c 4
+
+# Run a helper headless (no scheduler submission)
+condatainer helper --no-submit code-server
 ```
 
 ## Config
@@ -1605,6 +1610,8 @@ condatainer update [FLAGS]
 * `--build`: Refresh the build script metadata cache.
 * `--helper`: Refresh the helper script metadata cache.
 * `--base`: Update the base Apptainer image only.
+* `--remote`: Remote build script takes precedence over local (used with `--base`).
+* `--no-prebuilt`: Skip the prebuilt image download and build locally from the `.def` file (used with `--base`).
 
 By default (no flags), both `--build` and `--helper` are enabled.
 
@@ -1630,6 +1637,9 @@ condatainer update --helper
 
 # Update the base image only
 condatainer update --base
+
+# Rebuild the base image locally from the remote .def (skip prebuilt download)
+condatainer update --base --remote --no-prebuilt
 ```
 
 ## Self-Update
@@ -1723,14 +1733,17 @@ condatainer proxy start --via gateway   # shared, custom SSH gateway
 condatainer proxy start --via login01   # per-job (inside a job)
 ```
 
-### proxy stop / status / show
+### proxy stop / status / show / export
 
 ```bash
 condatainer proxy stop      # kill shared proxy (SSH to other login node if needed)
 condatainer proxy status    # check per-job then shared; clean stale PID files
 condatainer proxy show      # print active URL (per-job first); empty if none
+condatainer proxy export    # print export statements for all proxy env vars
 
-export ALL_PROXY=$(condatainer proxy show)
+# Export all proxy env vars (http_proxy, https_proxy, all_proxy, no_proxy)
+# into the current shell; no-op when no proxy is active:
+source <(condatainer proxy export)
 ```
 
 ### Automatic injection (inside jobs)

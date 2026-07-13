@@ -3,8 +3,6 @@ package utils
 import (
 	"compress/gzip"
 	"encoding/json"
-	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,66 +19,6 @@ const PermDir os.FileMode = 0775
 
 // Exec: u=rwx, g=rwx, o=rx (Executable files with group write access)
 const PermExec os.FileMode = 0775
-
-// FixPermissionsDefault is a helper that applies standard permissions (0664/0775).
-// It is a shorthand for FixPermissions(path, PermFile, PermDir).
-func FixPermissionsDefault(path string) error {
-	return FixPermissions(path, PermFile, PermDir)
-}
-
-// FixPermissions automatically adjusts permissions for a path using the provided modes.
-// If 'path' is a file, it sets it to 'filePerm'.
-// If 'path' is a directory, it recursively sets files to 'filePerm' and subdirs to 'dirPerm'.
-func FixPermissions(path string, filePerm, dirPerm os.FileMode) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("could not stat path %s: %w", path, err)
-	}
-
-	// 1. Handle Single File
-	if !info.IsDir() {
-		PrintDebug("Fixing permissions for file: %s [%v]", StylePath(path), filePerm)
-		if err := os.Chmod(path, filePerm); err != nil {
-			return fmt.Errorf("failed to chmod file %s: %w", path, err)
-		}
-		return nil
-	}
-
-	// 2. Handle Directory (Recursive Walk)
-	PrintDebug("Recursively fixing permissions for directory: %s [Dirs:%v, Files:%v]",
-		StylePath(path), dirPerm, filePerm)
-
-	// First, fix the root directory itself
-	if err := os.Chmod(path, dirPerm); err != nil {
-		return fmt.Errorf("failed to chmod root dir %s: %w", path, err)
-	}
-
-	// Then walk the contents
-	return filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			PrintWarning("Skipping inaccessible path during permission fix: %s", StylePath(p))
-			return nil // Skip this file/dir but continue walking
-		}
-
-		// Calculate target mode based on the input parameters
-		var targetMode os.FileMode
-		if d.IsDir() {
-			targetMode = dirPerm
-		} else {
-			targetMode = filePerm
-		}
-
-		// Optimization: Only run Chmod if permissions actually differ
-		info, err := d.Info()
-		if err == nil && info.Mode().Perm() != targetMode {
-			if err := os.Chmod(p, targetMode); err != nil {
-				PrintWarning("Could not chmod %s: %v", StylePath(p), err)
-			}
-		}
-
-		return nil
-	})
-}
 
 // --- Extension Checks (String-based) ---
 

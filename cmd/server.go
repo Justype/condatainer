@@ -41,8 +41,7 @@ var serverStartCmd = &cobra.Command{
 	Short: "Start the dashboard server in the background",
 	Long: `Start the dashboard server in the background.
 
-By default the server exits when your SSH session ends.
-Use --daemon to survive logout (useful with a permanent SSH LocalForward).`,
+By default the server exits when your SSH session ends.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
@@ -87,9 +86,9 @@ Without arguments, stops the server on the current login node.
 Pass a node name (or partial match) to stop a server on another login node.
 
 Example:
-  condatainer server stop          # stop local server
-  condatainer server stop l5       # stop server on l5.nibi.sharcnet (partial match)
-  condatainer server stop --node l5`,
+  condatainer server stop              # stop local server
+  condatainer server stop login2       # stop server on the login node matching "login2"
+  condatainer server stop --node login2`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
@@ -255,7 +254,7 @@ func init() {
 
 	serverStartCmd.Flags().IntVarP(&serverStartPort, "port", "p", 0, "Port to listen on (saved to config for reuse)")
 	serverStartCmd.Flags().BoolVar(&serverStartDaemon, "daemon", false, "Survive SSH logout (useful with a permanent SSH LocalForward)")
-	serverStopCmd.Flags().StringVarP(&serverStopNodeFlag, "node", "n", "", "Login node to stop (partial match, e.g. l5)")
+	serverStopCmd.Flags().StringVarP(&serverStopNodeFlag, "node", "n", "", "Login node to stop (partial match, e.g. login2)")
 	serverRestartCmd.Flags().IntVarP(&serverRestartPort, "port", "p", 0, "Restart on a different port (saved to config for reuse)")
 	serverRestartCmd.Flags().BoolVar(&serverStartDaemon, "daemon", false, "Survive SSH logout")
 }

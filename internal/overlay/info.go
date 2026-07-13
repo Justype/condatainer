@@ -187,19 +187,6 @@ const (
 	UIDStatusDifferentUser
 )
 
-func (s UIDStatus) String() string {
-	switch s {
-	case UIDStatusRoot:
-		return "root"
-	case UIDStatusCurrentUser:
-		return "current user"
-	case UIDStatusDifferentUser:
-		return "different user"
-	default:
-		return "unknown"
-	}
-}
-
 // InspectImageUIDStatus checks the ownership of the 'upper' directory inside an ext3/4 image.
 // Returns:
 //   - UIDStatusRoot: owned by root (UID 0)

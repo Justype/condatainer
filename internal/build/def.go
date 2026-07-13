@@ -15,7 +15,7 @@ import (
 // buildDef implements the Apptainer .def build workflow on BuildObject.
 // Workflow:
 //  1. Check if overlay already exists (skip if yes)
-//  2. Try downloading prebuilt overlay if available
+//  2. Try downloading prebuilt overlay if available (unless SkipPrebuilt)
 //  3. Build SIF from .def file using apptainer build --fakeroot
 //  4. Extract SquashFS partition from SIF
 //  5. Set permissions
@@ -39,8 +39,8 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	defer close(done)
 
 	// Try to download prebuilt overlay first, fall back to building if not available.
-	// Only attempt download if the build script source is remote.
-	if b.isRemote {
+	// Only attempt download if the build script source is remote (skipped with --no-prebuilt).
+	if b.isRemote && !SkipPrebuilt {
 		if writableDir, err := config.GetWritableImagesDir(); err == nil {
 			if filepath.Dir(targetPath) == writableDir {
 				downloadPath := buildFinalPath(targetPath, b.update)

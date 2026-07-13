@@ -246,7 +246,7 @@ Configuration file priority (highest to lowest):
   7. Defaults
 
 Data directory priority (for read/write operations):
-  1. Extra base directories (CNT_EXTRA_BASE_DIRS or config)
+  1. Extra directories (extra_image_dirs / extra_build_dirs / extra_helper_dirs)
   2. Extra-root directory ($CNT_EXTRA_ROOT, group/lab layer)
   3. App-root directory (auto-detected or CNT_ROOT)
   4. User scratch directory ($SCRATCH/condatainer, HPC systems)
@@ -256,15 +256,9 @@ Data directory priority (for read/write operations):
 var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show current configuration",
-	Long: `Display current configuration values and their sources.
-
-Shows:
-  - Config file search paths and which one is in use
-  - Base directory search paths with writable status
-  - All configuration settings (directories, binaries, build config)
-  - Environment variable overrides
-
-Use --sources (-s) to annotate each value with which config layer provides it.`,
+	Long: `Display current configuration values and their sources:
+config file and data directory search paths, all settings, and
+environment variable overrides.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if showPath {
 			configPath, err := config.GetUserConfigPath()
@@ -914,7 +908,7 @@ var configPathsCmd = &cobra.Command{
 	Long: `Show all search paths for images, build-scripts, and helper-scripts.
 
 Search paths are checked in priority order (first match wins for reads):
-  1. Extra base directories (highest priority)
+  1. Extra directories (extra_image_dirs / extra_build_dirs / extra_helper_dirs)
   2. Extra-root ($CNT_EXTRA_ROOT, group/lab layer)
   3. App-root (auto-detected or $CNT_ROOT)
   4. Scratch (user HPC large storage, $SCRATCH/condatainer)

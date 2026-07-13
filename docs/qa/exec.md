@@ -5,7 +5,7 @@ If you cannot mount the writable overlay, it commonly means:
 - [Other process is using the image](#used-by-another-process)
 - [You do not have permissions to access the image](#permission-denied-errors)
 
-If you cannot write to an workspace overlay, it may be caused by the following reasons:
+If you cannot write to an environment overlay, it may be caused by the following reasons:
 
 - [Used in read-only mode](#read-only-file-system)
 - [Overlay is full](#overlay-is-full)

@@ -427,7 +427,7 @@ func GetHelperScriptSearchPaths() []string {
 }
 
 // GetCacheSearchPaths returns all personal cache directories to search.
-// Cache is always personal (scratch → user) to avoid cross-user pollution.
+// Cache is always the personal XDG cache dir to avoid cross-user pollution.
 func GetCacheSearchPaths() []string {
 	dirs := cacheWriteDirs()
 	paths := make([]string, len(dirs))
@@ -540,17 +540,14 @@ func helperWriteDirs() []SearchDir {
 	return deduplicateWriteDirs(dirs)
 }
 
-// cacheWriteDirs returns the ordered write candidates for cache directories.
-// Cache is always personal to avoid cross-user pollution.
+// cacheWriteDirs returns the write candidates for cache directories.
+// Cache always lives in the personal XDG cache dir ($XDG_CACHE_HOME/condatainer
+// or ~/.cache/condatainer) — never in data directories or shared roots.
 func cacheWriteDirs() []SearchDir {
-	var dirs []SearchDir
-	if s := GetScratchDataDir(); s != "" {
-		dirs = append(dirs, SearchDir{Path: filepath.Join(s, "cache"), Personal: true})
-	}
 	if u := GetUserCacheDir(); u != "" {
-		dirs = append(dirs, SearchDir{Path: u, Personal: true})
+		return []SearchDir{{Path: u, Personal: true}}
 	}
-	return dirs
+	return nil
 }
 
 // =============================================================================
@@ -589,8 +586,8 @@ func GetWritableHelperScriptsDir() (string, error) {
 	return "", fmt.Errorf("no writable helper scripts directory found (searched: %v)", paths)
 }
 
-// GetWritableCacheDir returns the first writable personal cache directory.
-// Always personal (scratch → user cache) — never writes to shared dirs.
+// GetWritableCacheDir returns the writable personal cache directory
+// ($XDG_CACHE_HOME/condatainer or ~/.cache/condatainer) — never a shared dir.
 func GetWritableCacheDir() (string, error) {
 	dirs := cacheWriteDirs()
 	if dir := firstWritableDir(dirs); dir != "" {

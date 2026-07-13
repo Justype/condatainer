@@ -26,15 +26,7 @@ var listCmd = &cobra.Command{
 	Short:   "List installed overlays matching search terms",
 	Long: `List installed overlays grouped by directory, with optional search filtering.
 
-Search rules (single term):
-  Plain string  substring match
-  cell*         wildcard (* and ?)
-  ^cell.*9\.0   regex (any of ^ $ ( [ + { |)
-  -e/--exact    force exact full-name match
-
-Search rules (multiple terms, space-separated):
-  First term is an exact name  → all terms treated as exact names
-  First term not found         → AND substring match`,
+` + searchSyntaxHint,
 	Example: `  condatainer list                     # List all
   condatainer list cellranger          # Substring match
   condatainer list 'cell*'             # Wildcard
@@ -378,16 +370,6 @@ func sortedKeys(m map[string][]string) []string {
 	return keys
 }
 
-func maxWidth(names []string) int {
-	width := 0
-	for _, name := range names {
-		if len(name) > width {
-			width = len(name)
-		}
-	}
-	return width
-}
-
 // printColumns prints items in a newspaper-style multi-column layout.
 // plain[i] is used for width calculation; styled[i] is what gets printed.
 // indent is the number of leading spaces per row.
@@ -402,7 +384,7 @@ func printColumns(plain, styled []string, indent, termWidth int) {
 		}
 	}
 	colWidth := maxW + 2
-	numCols := max((termWidth - indent) / colWidth, 1)
+	numCols := max((termWidth-indent)/colWidth, 1)
 	numRows := (len(plain) + numCols - 1) / numCols
 	prefix := strings.Repeat(" ", indent)
 	for row := range numRows {

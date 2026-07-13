@@ -10,9 +10,9 @@ Three variants are available:
 
 ```bash
 condatainer helper -u
-condatainer helper code-server -w      # open-source
-condatainer helper vscode-server -w    # full VS Code
-condatainer helper vscode-tunnel -w    # no port forwarding
+condatainer helper code-server      # open-source
+condatainer helper vscode-server    # full VS Code
+condatainer helper vscode-tunnel    # no port forwarding
 ```
 
 See [Helper Scripts](./helpers.md) for SSH port forwarding setup, resource flags, configuration, and reuse mode.
@@ -32,6 +32,10 @@ condatainer helper code-server --help
 | `--password,-p` | Browser password (empty = no auth) | (empty) |
 
 See [Helper Scripts](./helpers.md#flags) for resource and overlay flags.
+
+### Issues
+
+**Some extensions may not render correctly in Firefox** — if an extension's webview Content Security Policy omits the webview resource origin from `style-src`, Firefox blocks external stylesheets while Chromium silently exempts `vscode-cdn.net` URLs from CSP. Use Chromium/Chrome for affected extensions.
 
 ## vscode-server
 

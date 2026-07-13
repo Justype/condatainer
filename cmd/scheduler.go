@@ -43,11 +43,8 @@ var schedulerShowGpuOnly bool
 var schedulerCmd = &cobra.Command{
 	Use:   "scheduler",
 	Short: "Display scheduler information",
-	Long: `Display information about the detected job scheduler.
-
-Shows scheduler type (SLURM, PBS, etc.), binary path, version, and availability status.
-Use -p to show per-partition resource limits.
-Use --cpu or --gpu to filter by node type.`,
+	Long: `Display information about the detected job scheduler:
+type (SLURM, PBS, etc.), binary path, version, and availability status.`,
 	Example: `  condatainer scheduler          # Show scheduler information
   condatainer scheduler -p       # Show per-partition/queue limits
   condatainer scheduler --gpu    # Show only GPU partitions

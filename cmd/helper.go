@@ -51,9 +51,6 @@ var helperCmd = &cobra.Command{
 	Short: "Manage and run helper scripts",
 	Long: `Manage helper scripts for running services inside CondaTainer on HPC.
 
-Use --list to see available helper scripts.
-Use --update to download or refresh helper scripts from remote.
-
 Note: Helper is not available inside a container or a scheduler job.`,
 	Example: `  condatainer helper                 # Show running helpers
   condatainer helper code-server     # Run code-server
@@ -72,6 +69,7 @@ func init() {
 	helperCmd.Flags().BoolVarP(&helperUpdate, "update", "u", false, "Update helper scripts from remote")
 	helperCmd.Flags().BoolVar(&helperStatus, "status", false, "Show status of running helpers")
 	helperCmd.Flags().MarkHidden("status") //nolint:errcheck
+	helperCmd.Flags().BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (run helper headless)")
 
 	// Stop flag parsing after the first positional argument so helper-specific flags
 	// (e.g. -c/--cpus) are passed through to parsePostScriptHelperFlags rather than cobra.
@@ -551,6 +549,10 @@ func runHelper(cmd *cobra.Command, args []string) error {
 				return sesErr
 			}
 			if isRunning && chosen != nil {
+				if chosen.Status == "pending" || chosen.Status == "starting" {
+					// Not up yet — re-attach and wait for the service URL.
+					return ui.MonitorHelper(ctx, chosen.ID)
+				}
 				if url := chosen.AccessURL(serverPort); url != "" {
 					utils.PrintSuccess("Access at: %s", url)
 				}
@@ -565,6 +567,9 @@ func runHelper(cmd *cobra.Command, args []string) error {
 			for _, r := range running {
 				if url := r.AccessURL(serverPort); url != "" {
 					fmt.Printf("%s already running: %s\n", utils.StyleName(opts.ScriptName), url)
+				} else if r.Status == "pending" || r.Status == "starting" {
+					fmt.Printf("%s already submitted (%s); check with 'condatainer helper --status'\n",
+						utils.StyleName(opts.ScriptName), r.Status)
 				}
 			}
 		}
@@ -696,41 +701,19 @@ func showHelperStatus(name string) error {
 	serverPort := config.GetRunningServerPort()
 	for _, r := range running {
 		url := r.AccessURL(serverPort)
-		age := formatAge(time.Since(r.StartedAt))
+		age := ui.FormatAge(time.Since(r.StartedAt))
 		res := ui.FormatRunResources(r)
 		cwd := r.CWD
 		if cwd == "" {
 			cwd = "(no cwd)"
 		}
-		fmt.Printf("  %-14s  %-14s  %-40s  %s ago\n", r.Name, res, cwd, age)
+		tag, verb := ui.RunStatusTag(r)
+		fmt.Printf("  %-14s  %-14s  %-40s  %s %s %s ago\n", r.Name, res, cwd, tag, verb, age)
 		if url != "" {
 			fmt.Printf("    %s\n", utils.StyleDebug("→ "+url))
 		}
 	}
 	return nil
-}
-
-// formatAge formats an elapsed duration as a compact human-readable string (e.g. "6h11m", "2d3h", "45m").
-func formatAge(d time.Duration) string {
-	d = d.Round(time.Minute)
-	if d < time.Minute {
-		return "just now"
-	}
-	days := int(d.Hours()) / 24
-	hours := int(d.Hours()) % 24
-	mins := int(d.Minutes()) % 60
-	switch {
-	case days > 0 && hours > 0:
-		return fmt.Sprintf("%dd%dh", days, hours)
-	case days > 0:
-		return fmt.Sprintf("%dd", days)
-	case hours > 0 && mins > 0:
-		return fmt.Sprintf("%dh%dm", hours, mins)
-	case hours > 0:
-		return fmt.Sprintf("%dh", hours)
-	default:
-		return fmt.Sprintf("%dm", mins)
-	}
 }
 
 // runHelperConfig handles: condatainer helper <name> config [show|get <key>|set <key> <val>|path|-h]

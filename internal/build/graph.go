@@ -348,7 +348,7 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 }
 
 // buildSchedulerCreateCommand returns the condatainer create command for scheduler jobs,
-// propagating the --remote and --update flags if active.
+// propagating the --remote, --no-prebuilt and --update flags if active.
 // If interactiveInputs is non-empty, the inputs are embedded as a heredoc so the
 // scheduler node does not need a TTY.
 func buildSchedulerCreateCommand(nameVersion string, update bool, interactiveInputs []string) string {
@@ -356,6 +356,9 @@ func buildSchedulerCreateCommand(nameVersion string, update bool, interactiveInp
 	cmd.WriteString("condatainer create")
 	if PreferRemote {
 		cmd.WriteString(" --remote")
+	}
+	if SkipPrebuilt {
+		cmd.WriteString(" --no-prebuilt")
 	}
 	if update {
 		cmd.WriteString(" --update")
