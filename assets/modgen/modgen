@@ -133,16 +133,16 @@ class Utils:
     @staticmethod
     def print_debug(debug_object, end="\n", flush=True):
         if Config.debug:
-            print(f"[MG][{Utils.yellow_text('DEBUG')}]", end=" ", flush=True, file=sys.stderr)
+            print(f"{Utils.gray_text('[MG…]')}", end=" ", flush=True, file=sys.stderr)
             print(debug_object, end=end, flush=flush, file=sys.stderr)
     @staticmethod
-    def print_note(message, end="\n", flush=True): print(f"[MG][{Utils.blue_text('NOTE')}] {message}", end=end, flush=flush, file=sys.stderr)
+    def print_note(message, end="\n", flush=True): print(f"{Utils.magenta_text('[MG◇]')} {message}", end=end, flush=flush, file=sys.stderr)
     @staticmethod
-    def print_warning(message, end="\n", flush=True): print(f"[MG][{Utils.yellow_text('WARNING')}] {message}", file=sys.stderr, end=end, flush=flush)
+    def print_warning(message, end="\n", flush=True): print(f"{Utils.yellow_text('[MG!]')} {message}", file=sys.stderr, end=end, flush=flush)
     @staticmethod
-    def print_error(message, end="\n", flush=True): print(f"[MG][{Utils.red_text('ERROR')}] {message}", file=sys.stderr, end=end, flush=flush)
+    def print_error(message, end="\n", flush=True): print(f"{Utils.red_text('[MG✗]')} {message}", file=sys.stderr, end=end, flush=flush)
     @staticmethod
-    def print_success(message, end="\n", flush=True): print(f"[MG][{Utils.green_text('SUCCESS')}] {message}", end=end, flush=flush, file=sys.stderr)
+    def print_success(message, end="\n", flush=True): print(f"{Utils.green_text('[MG✓]')} {message}", end=end, flush=flush, file=sys.stderr)
 
     @staticmethod
     def split_dep_constraint(raw: str):
