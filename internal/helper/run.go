@@ -460,7 +460,7 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	if sched == nil {
 		parentDir := utils.GetTmpDir()
 		jobTmpDir := filepath.Join(parentDir, id)
-		cleanupTrap += `; kill -KILL $_cnt_watchdog_pid 2>/dev/null`
+		cleanupTrap += `; kill -KILL -$_cnt_watchdog_pid 2>/dev/null`
 		cleanupTrap += fmt.Sprintf(`; rm -rf %s; rmdir %s 2>/dev/null || true`,
 			shellQuote(jobTmpDir), shellQuote(parentDir))
 	} else {
@@ -470,12 +470,18 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 
 	// Headless walltime watchdog: background subshell that ignores TERM/INT so it
 	// survives the group SIGTERM it sends, then SIGKILLs after a 2-minute grace period.
+	// set -m puts it in its OWN process group so it can be torn down with a group kill
+	// (kill -KILL -$_cnt_watchdog_pid) that also reaps its sleep child; disown then
+	// drops it from the job table so bash prints no "Killed" notice into job.log.
 	if sched == nil {
 		fmt.Fprintln(&sb, `_cnt_main_pid=$$`)
+		fmt.Fprintln(&sb, `set -m`)
 		fmt.Fprintf(&sb,
 			"( trap '' TERM INT; sleep %d; kill -TERM -$_cnt_main_pid 2>/dev/null; sleep 120; kill -KILL -$_cnt_main_pid 2>/dev/null ) &\n",
 			int64(walltime.Seconds()))
 		fmt.Fprintln(&sb, `_cnt_watchdog_pid=$!`)
+		fmt.Fprintln(&sb, `disown`)
+		fmt.Fprintln(&sb, `set +m`)
 	}
 	fmt.Fprintln(&sb)
 
@@ -492,7 +498,7 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	fmt.Fprintln(&sb, `_cnt_exit=$?`)
 	fmt.Fprintln(&sb, `trap - TERM INT`)
 	if sched == nil {
-		fmt.Fprintln(&sb, `kill -KILL $_cnt_watchdog_pid 2>/dev/null`)
+		fmt.Fprintln(&sb, `kill -KILL -$_cnt_watchdog_pid 2>/dev/null`)
 	}
 	fmt.Fprintln(&sb, `condatainer _server_done --exit-code $_cnt_exit`)
 	if sched == nil {

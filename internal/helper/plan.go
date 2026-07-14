@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,14 +15,6 @@ import (
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
-
-// IO carries explicit streams for ExecutePlan. The CLI passes os.Stdout/os.Stderr;
-// the server passes an HTTP response writer so install/post-install subprocess
-// output reaches the browser instead of the daemon log.
-type IO struct {
-	Stdout io.Writer
-	Stderr io.Writer
-}
 
 // RunPlan is the resolved, validated state of a helper invocation.
 // PlanRun produces it; ExecutePlan consumes it.
@@ -232,24 +223,19 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 	}, nil
 }
 
-// ExecutePlan submits the helper job (or runs it headless) using the supplied
-// IO for any subprocess output. Writes a "pending"/"starting" history record
-// and returns the helperID. Subprocess stdout/stderr go through io.Stdout/
-// io.Stderr; status messages go through logging.FromContext(ctx).
+// ExecutePlan submits the helper job (or runs it headless). Writes a
+// "pending"/"starting" history record and returns the helperID. Status messages
+// go through logging.FromContext(ctx); the job's own output goes to the state
+// dir's job.log, which the CLI and dashboard tail. ctx bounds only the
+// submission/setup — the launched job is detached and outlives the caller.
 //
 // Does not poll — call helper.Monitor (CLI) or rely on the server watcher to
 // observe ready/done events.
-func ExecutePlan(ctx context.Context, plan *RunPlan, io IO) (string, error) {
+func ExecutePlan(ctx context.Context, plan *RunPlan) (string, error) {
 	if plan == nil {
 		return "", errors.New("nil plan")
 	}
 	logger := logging.FromContext(ctx)
-	if io.Stdout == nil {
-		io.Stdout = os.Stdout
-	}
-	if io.Stderr == nil {
-		io.Stderr = os.Stderr
-	}
 
 	cwd := plan.Options.CWD
 	if cwd == "" {
@@ -297,22 +283,28 @@ func ExecutePlan(ctx context.Context, plan *RunPlan, io IO) (string, error) {
 
 	logger.Info("Starting helper headless", "name", plan.Options.ScriptName)
 	go pruneStaleTmpdirs()
-	cmd := exec.CommandContext(ctx, "bash", wrapperPath)
+	// Run detached, like a scheduler job: a new session (Setsid) not tied to ctx,
+	// so it outlives the server. The job ends only via `helper stop`
+	// (KillHeadlessProcess) or the wrapper's walltime watchdog. Output goes to
+	// job.log, so stdout/stderr are discarded (nil -> /dev/null).
+	cmd := exec.Command("bash", wrapperPath)
 	cmd.Stdin = nil
-	cmd.Stdout = io.Stdout
-	cmd.Stderr = io.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		os.RemoveAll(stateDir)
 		return "", fmt.Errorf("starting helper: %w", err)
 	}
-	// Write the wrapper PID so handleHelperStop can kill the process group.
-	// Non-fatal: if this fails, stop degrades gracefully (history still marked done).
+	// PID == process-group ID (Setsid), so KillHeadlessProcess can signal the
+	// whole group. Non-fatal on write error: stop then degrades gracefully
+	// (history still marked done by the watcher).
 	if err := WriteHelperPid(helperID, cmd.Process.Pid); err != nil {
 		logger.Debug("helper: failed to write pid file", "id", helperID, "err", err)
 	}
 	_ = AppendHistory(newHelperRun(helperID, plan.Options.ScriptName, "", cwd, plan.Spec.Time,
 		plan.Options, plan.UserOverlays, plan.Spec, plan.Params, "starting"))
+	// Reap the child while the caller lives; init reaps it afterwards.
 	go func() { _ = cmd.Wait() }()
 	return helperID, nil
 }

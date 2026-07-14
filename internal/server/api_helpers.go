@@ -497,7 +497,7 @@ func (s *srv) handleHelperStart(w http.ResponseWriter, r *http.Request, name str
 		return
 	}
 
-	id, err := helper.ExecutePlan(s.ctx, plan, helper.IO{Stdout: w, Stderr: w})
+	id, err := helper.ExecutePlan(s.ctx, plan)
 	if err != nil {
 		fmt.Fprintf(w, "ERROR: %v\n", err)
 		flush()
