@@ -666,7 +666,7 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute: submit to scheduler or run headless.
-	helperID, err := helper.ExecutePlan(ctx, plan, helper.IO{Stdout: os.Stdout, Stderr: os.Stderr})
+	helperID, err := helper.ExecutePlan(ctx, plan)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return nil
