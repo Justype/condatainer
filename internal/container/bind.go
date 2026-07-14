@@ -112,6 +112,13 @@ func BindPaths(paths ...string) []string {
 		bindPaths = append(bindPaths, scratch)
 	}
 
+	// Add $TMPDIR if it points outside the paths Apptainer binds by default (/tmp).
+	if tmpDir := os.Getenv("TMPDIR"); tmpDir != "" {
+		if _, err := os.Stat(tmpDir); err == nil {
+			bindPaths = append(bindPaths, tmpDir)
+		}
+	}
+
 	// Add scheduler-assigned node-local tmp (fast SSD scratch, not bound by Apptainer automatically).
 	if tmpDir := scheduler.ActiveTmpDir(); tmpDir != "" {
 		bindPaths = append(bindPaths, tmpDir)
