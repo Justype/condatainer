@@ -449,13 +449,14 @@ func (s *srv) handleHelperStart(w http.ResponseWriter, r *http.Request, name str
 		if params == nil {
 			params = make(map[string]string)
 		}
-		for k, v := range saved {
-			switch k {
-			case "cpus", "mem", "time", "gpu":
-				// resources handled via ResourceSpec
-			default:
-				if _, exists := params[k]; !exists {
-					params[k] = v
+		// Saved-config keys are lowercased; param keys keep their original case
+		// and PlanRun matches case-sensitively. Map each saved value onto the
+		// actual param key so set defaults aren't lost to the case mismatch.
+		scriptParams, _ := helper.ParseHelperParams(scriptPath)
+		for _, p := range scriptParams {
+			if v, ok := saved[strings.ToLower(p.Key)]; ok && v != "" {
+				if _, exists := params[p.Key]; !exists {
+					params[p.Key] = v
 				}
 			}
 		}
