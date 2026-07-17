@@ -591,9 +591,19 @@ func setRemoteFields(scripts map[string]ScriptInfo, sourceURL, prebuiltLink stri
 
 // expandTemplates expands PL template entries into per-combination entries.
 // Remote metadata only stores templates; this mirrors what GetLocalBuildScripts does locally.
+//
+// Templates whose #PL: declarations and #TARGET: pattern disagree are reported
+// and left unexpanded: expanding them would silently register wrong entries.
 func expandTemplates(scripts map[string]ScriptInfo) {
 	for _, info := range scripts {
 		if !info.IsTemplate || info.TargetTemplate == "" || len(info.PLOrder) == 0 {
+			continue
+		}
+		if problems := utils.ValidateTemplatePlaceholders(info.TargetTemplate, info.PLOrder); len(problems) > 0 {
+			for _, problem := range problems {
+				utils.PrintWarning("build script %s: %s", info.Name, problem)
+			}
+			utils.PrintWarning("build script %s: skipping template expansion until #PL:/#TARGET: agree", info.Name)
 			continue
 		}
 		pls := make([]utils.PlaceholderDef, 0, len(info.PLOrder))
