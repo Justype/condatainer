@@ -563,53 +563,77 @@ func splitVersionSegments(v string) []string {
 	return result
 }
 
-// parsePLValues parses the raw value string from a #PL: line.
-// Handles comma lists, integer ranges (a-b), and the "*" open-ended marker.
-// Returns sorted-desc concrete values (with "*" appended at end if open).
-func parsePLValues(raw string) ([]string, bool, error) {
-	tokens := strings.Split(raw, ",")
+// valueRangeRe matches an integer range token ("22-49"). Deliberately digits-only
+// so literal values such as "2024-A" are not mistaken for ranges.
+var valueRangeRe = regexp.MustCompile(`^(\d+)-(\d+)$`)
+
+// ParseValueList parses a value specification. It backs both build script #PL:
+// headers and helper #VALUE: headers so the two share one dialect.
+//
+// The separator selects the ordering:
+//
+//	"3.10,3.9,3.8"   comma → sorted descending (version lists)
+//	"kasm | turbo"   pipe  → author's order preserved (labels)
+//
+// In either form:
+//   - "a-b" expands to every integer in [a, b].
+//   - "*" marks the list open-ended (any value accepted). It is reported via the
+//     returned bool and appended as the final element, so index 0 stays the default.
+//   - Duplicates are dropped and surrounding whitespace trimmed.
+//
+// An "EXPR:..." spec is returned verbatim as a single element.
+// Returns an error when the list ends up with no values and is not open-ended.
+func ParseValueList(raw string) ([]string, bool, error) {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "EXPR:") {
+		return []string{raw}, false, nil
+	}
+
+	// A pipe anywhere selects the order-preserving form.
+	sep, sortDesc := ",", true
+	if strings.Contains(raw, "|") {
+		sep, sortDesc = "|", false
+	}
+
 	var concrete []string
 	open := false
 	seen := make(map[string]bool)
+	add := func(s string) {
+		if !seen[s] {
+			concrete = append(concrete, s)
+			seen[s] = true
+		}
+	}
 
-	rangeRe := regexp.MustCompile(`^(\d+)-(\d+)$`)
-
-	for _, tok := range tokens {
+	for tok := range strings.SplitSeq(raw, sep) {
 		tok = strings.TrimSpace(tok)
-		if tok == "" {
+		switch tok {
+		case "":
 			continue
-		}
-		if tok == "*" {
+		case "*":
 			open = true
-			continue
-		}
-		if m := rangeRe.FindStringSubmatch(tok); m != nil {
-			a, _ := strconv.ParseInt(m[1], 10, 64)
-			b, _ := strconv.ParseInt(m[2], 10, 64)
-			lo, hi := a, b
-			if lo > hi {
-				lo, hi = hi, lo
-			}
-			for v := lo; v <= hi; v++ {
-				s := strconv.FormatInt(v, 10)
-				if !seen[s] {
-					concrete = append(concrete, s)
-					seen[s] = true
+		default:
+			if m := valueRangeRe.FindStringSubmatch(tok); m != nil {
+				lo, _ := strconv.ParseInt(m[1], 10, 64)
+				hi, _ := strconv.ParseInt(m[2], 10, 64)
+				if lo > hi {
+					lo, hi = hi, lo
 				}
+				for v := lo; v <= hi; v++ {
+					add(strconv.FormatInt(v, 10))
+				}
+				continue
 			}
-		} else {
-			if !seen[tok] {
-				concrete = append(concrete, tok)
-				seen[tok] = true
-			}
+			add(tok)
 		}
 	}
 
 	if len(concrete) == 0 && !open {
 		return nil, false, fmt.Errorf("empty value list")
 	}
-
-	concrete = SortVersionsDescending(concrete)
+	if sortDesc {
+		concrete = SortVersionsDescending(concrete)
+	}
 	if open {
 		concrete = append(concrete, "*")
 	}
@@ -656,7 +680,7 @@ func GetPlaceholdersFromScript(scriptPath string) ([]PlaceholderDef, error) {
 		}
 		seenNames[name] = true
 
-		values, open, err := parsePLValues(rawValues)
+		values, open, err := ParseValueList(rawValues)
 		if err != nil {
 			return nil, fmt.Errorf("invalid #PL: values for %q: %w", name, err)
 		}
@@ -701,6 +725,45 @@ func GetTargetFromScript(scriptPath string) (string, error) {
 
 // plTokenRe matches {varname} placeholder tokens.
 var plTokenRe = regexp.MustCompile(`\{(\w+)\}`)
+
+// ValidateTemplatePlaceholders checks that a #TARGET: pattern and the #PL:
+// declarations of a build script agree with each other. Every declared
+// placeholder must appear as a {name} token in target, and every {name} token in
+// target must have a matching declaration.
+//
+// A declared placeholder missing from target would make every one of its values
+// interpolate to the same name, silently collapsing the expansion to one entry;
+// a token with no declaration would be left uninterpolated in the entry name.
+// Returns one human-readable message per problem, or nil when the template is valid.
+func ValidateTemplatePlaceholders(target string, plNames []string) []string {
+	inTarget := make(map[string]bool)
+	for _, m := range plTokenRe.FindAllStringSubmatch(target, -1) {
+		inTarget[m[1]] = true
+	}
+	declared := make(map[string]bool, len(plNames))
+	for _, name := range plNames {
+		declared[name] = true
+	}
+
+	var problems []string
+	for _, name := range plNames {
+		if !inTarget[name] {
+			problems = append(problems, fmt.Sprintf("#PL:%s is declared but {%s} is missing from #TARGET:", name, name))
+		}
+	}
+	// Sort for deterministic output: map iteration order is random.
+	tokens := make([]string, 0, len(inTarget))
+	for token := range inTarget {
+		tokens = append(tokens, token)
+	}
+	sort.Strings(tokens)
+	for _, token := range tokens {
+		if !declared[token] {
+			problems = append(problems, fmt.Sprintf("#TARGET: uses {%s} but there is no #PL:%s declaration", token, token))
+		}
+	}
+	return problems
+}
 
 // MatchTemplateTarget extracts placeholder values from a concrete name by matching
 // it against a template pattern (e.g. a #TARGET: or #DEP: line containing {var} tokens).
