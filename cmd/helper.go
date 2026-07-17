@@ -578,10 +578,10 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	// Ensure server is running.
 	helper.EnsureServer()
 
-	// Resolve env.img from cwd before PromptSettings so the settings table
-	// shows the found overlay and the guided creation check below sees it.
-	// Skip when -e - was passed (user explicitly opted out).
-	if !noEnv && (opts.EnvImg == "" || opts.EnvImg == "env.img") {
+	// When -e is unset, search cwd → overlay/ → src/overlay/ (preferring
+	// env-$USER.img) and use the first overlay found. An explicit -e value is
+	// used literally; -e - opts out.
+	if !noEnv && !postFlags.envSet && (opts.EnvImg == "" || opts.EnvImg == "env.img") {
 		resolvedCwd := cwd
 		if resolvedCwd == "" {
 			resolvedCwd, _ = os.Getwd()
