@@ -79,7 +79,25 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		}
 		archSuffix := ""
 		if currentPlatform != "" && len(r.Platforms) > 0 {
-			archSuffix = " " + utils.StyleHint("["+currentPlatform+"]")
+			hasPlatform, hasNoarch := false, false
+			for _, p := range r.Platforms {
+				switch p {
+				case currentPlatform:
+					hasPlatform = true
+				case "noarch":
+					hasNoarch = true
+				}
+			}
+			var parts []string
+			if hasPlatform {
+				parts = append(parts, currentPlatform)
+			}
+			if hasNoarch {
+				parts = append(parts, "noarch")
+			}
+			if len(parts) > 0 {
+				archSuffix = " " + utils.StyleHint("["+strings.Join(parts, "/")+"]")
+			}
 		}
 		fmt.Printf("%s (%s)%s\n", utils.StyleName(r.Name), utils.StyleHint(r.Channel), archSuffix)
 		if r.Summary != "" {
