@@ -171,6 +171,33 @@ func (q *SearchQuery) MatchesOrAlias(name, alias string) bool {
 	return false
 }
 
+// MatchesOrAliasWithText is MatchesOrAlias extended to a secondary field such as a
+// description. Pass an empty text to skip it.
+//
+// In AND mode each term may be satisfied by either field, so "cellranger index"
+// matches an entry named for the tool and described as an index. Other modes test
+// each field on its own rather than a concatenation, which would break anchored
+// patterns like "*server".
+func (q *SearchQuery) MatchesOrAliasWithText(name, alias, text string) bool {
+	if q.MatchesOrAlias(name, alias) {
+		return true
+	}
+	if text == "" {
+		return false
+	}
+	if q.Mode != SearchModeAnd {
+		return q.Matches(text)
+	}
+	nameLower := strings.ToLower(name)
+	textLower := strings.ToLower(text)
+	for _, term := range q.Raw {
+		if !strings.Contains(nameLower, term) && !strings.Contains(textLower, term) {
+			return false
+		}
+	}
+	return true
+}
+
 // normalizeFilters lowercases and normalises a slice of raw user-supplied filter strings.
 func normalizeFilters(filters []string) []string {
 	normalized := make([]string, 0, len(filters))

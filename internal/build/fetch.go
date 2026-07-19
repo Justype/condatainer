@@ -325,6 +325,10 @@ func (s ScriptInfo) CurrentVars() map[string]string {
 // GetLocalBuildScripts scans all build-scripts directories and returns a map of name -> ScriptInfo.
 // Searches user → scratch → legacy → system directories.
 // First match wins (user scripts shadow system ones).
+//
+// PL templates are returned unexpanded — the map holds the template entry, not its
+// variants. Use ExpandTemplate for one template's variants; FindBuildScript resolves
+// concrete names without expanding.
 func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 	if ForceRefresh {
 		cachedLocalScripts = nil
@@ -454,11 +458,6 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 		}
 	}
 
-	// Expand all local PL template entries into per-combination entries.
-	// Reuses the same logic as the remote path (expandTemplates).
-	expandTemplates(scripts)
-
-	cachedLocalScripts = scripts
 	if cachePath, err := localScriptsCachePath(); err == nil {
 		envelope := &LocalScriptsCache{
 			FetchedAt:    time.Now(),
@@ -470,6 +469,8 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 			slog.Default().Debug("failed to write local scripts cache", "err", writeErr)
 		}
 	}
+
+	cachedLocalScripts = scripts
 	return scripts, nil
 }
 
@@ -488,7 +489,6 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 		if cache, err := loadRemoteMetadataCache(cachePath, baseURL, ttl); err == nil {
 			slog.Default().Debug("using cached remote metadata", "url", baseURL, "age", time.Since(cache.FetchedAt).Round(time.Minute))
 			setRemoteFields(cache.Metadata, baseURL, cache.PrebuiltLink)
-			expandTemplates(cache.Metadata)
 			cachedRemoteScriptsByURL[baseURL] = cache.Metadata
 			return cache.Metadata, nil
 		}
@@ -504,7 +504,6 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 				slog.Default().Warn("network unavailable, using cached metadata",
 					"url", metaURL, "age", time.Since(cache.FetchedAt).Round(time.Minute))
 				setRemoteFields(cache.Metadata, baseURL, cache.PrebuiltLink)
-				expandTemplates(cache.Metadata)
 				cachedRemoteScriptsByURL[baseURL] = cache.Metadata
 				return cache.Metadata, nil
 			}
@@ -516,7 +515,6 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 	// Fetch per-source prebuilt base URL (non-fatal; empty = no prebuilt for this source)
 	prebuiltLink := fetchPrebuiltLink(baseURL)
 	setRemoteFields(metadata, baseURL, prebuiltLink)
-	expandTemplates(metadata)
 
 	// Persist to disk (non-fatal)
 	if cacheErr == nil && ttl > 0 {
@@ -537,6 +535,8 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 
 // GetRemoteBuildScripts fetches and merges build script metadata from all configured remote URLs.
 // Earlier URLs in ScriptsLinks take precedence (first match wins).
+//
+// As with GetLocalBuildScripts, PL templates are returned unexpanded.
 func GetRemoteBuildScripts() (map[string]ScriptInfo, error) {
 	// In-process merged cache
 	if cachedMergedRemote != nil {
@@ -589,59 +589,72 @@ func setRemoteFields(scripts map[string]ScriptInfo, sourceURL, prebuiltLink stri
 	}
 }
 
-// expandTemplates expands PL template entries into per-combination entries.
-// Remote metadata only stores templates; this mirrors what GetLocalBuildScripts does locally.
-//
-// Templates whose #PL: declarations and #TARGET: pattern disagree are reported
-// and left unexpanded: expanding them would silently register wrong entries.
+// expandTemplates adds every template's variants to scripts, without overwriting
+// existing keys. Expands the whole map — for a single template use ExpandTemplate.
 func expandTemplates(scripts map[string]ScriptInfo) {
 	for _, info := range scripts {
-		if !info.IsTemplate || info.TargetTemplate == "" || len(info.PLOrder) == 0 {
-			continue
-		}
-		if problems := utils.ValidateTemplatePlaceholders(info.TargetTemplate, info.PLOrder); len(problems) > 0 {
-			for _, problem := range problems {
-				utils.PrintWarning("build script %s: %s", info.Name, problem)
-			}
-			utils.PrintWarning("build script %s: skipping template expansion until #PL:/#TARGET: agree", info.Name)
-			continue
-		}
-		pls := make([]utils.PlaceholderDef, 0, len(info.PLOrder))
-		for _, key := range info.PLOrder {
-			vals := info.PL[key]
-			open := len(vals) > 0 && vals[len(vals)-1] == "*"
-			pls = append(pls, utils.PlaceholderDef{Name: key, Values: vals, Open: open})
-		}
-		for _, combo := range utils.ExpandPlaceholders(pls) {
-			expandedName := utils.InterpolateVars(info.TargetTemplate, combo)
-			if expandedName == "" || expandedName == info.Name {
-				continue
-			}
-			if _, exists := scripts[expandedName]; exists {
-				continue
-			}
-			expandedPL := make(map[string][]string, len(combo))
-			for k, v := range combo {
-				expandedPL[k] = []string{v}
-			}
-			expandedDeps := make([]string, len(info.Deps))
-			for i, dep := range info.Deps {
-				expandedDeps[i] = utils.InterpolateVars(dep, combo)
-			}
-			scripts[expandedName] = ScriptInfo{
-				Name:         expandedName,
-				Path:         info.Path,
-				IsContainer:  info.IsContainer,
-				IsRemote:     info.IsRemote,
-				SourceURL:    info.SourceURL,
-				PrebuiltLink: info.PrebuiltLink,
-				Deps:         expandedDeps,
-				PL:           expandedPL,
-				PLOrder:      info.PLOrder,
-				Whatis:       utils.InterpolateVars(info.Whatis, combo),
+		for name, expanded := range ExpandTemplate(info) {
+			if _, exists := scripts[name]; !exists {
+				scripts[name] = expanded
 			}
 		}
 	}
+}
+
+// ExpandTemplate returns a single PL template's variants, keyed by interpolated name.
+// Returns nil if info is not a template, or if its #PL: and #TARGET: disagree — those
+// are reported and skipped rather than expanded into wrong entries.
+func ExpandTemplate(info ScriptInfo) map[string]ScriptInfo {
+	if !info.IsTemplate || info.TargetTemplate == "" || len(info.PLOrder) == 0 {
+		return nil
+	}
+	if problems := utils.ValidateTemplatePlaceholders(info.TargetTemplate, info.PLOrder); len(problems) > 0 {
+		for _, problem := range problems {
+			utils.PrintWarning("build script %s: %s", info.Name, problem)
+		}
+		utils.PrintWarning("build script %s: skipping template expansion until #PL:/#TARGET: agree", info.Name)
+		return nil
+	}
+
+	pls := make([]utils.PlaceholderDef, 0, len(info.PLOrder))
+	for _, key := range info.PLOrder {
+		vals := info.PL[key]
+		open := len(vals) > 0 && vals[len(vals)-1] == "*"
+		pls = append(pls, utils.PlaceholderDef{Name: key, Values: vals, Open: open})
+	}
+
+	combos := utils.ExpandPlaceholders(pls)
+	out := make(map[string]ScriptInfo, len(combos))
+	for _, combo := range combos {
+		expandedName := utils.InterpolateVars(info.TargetTemplate, combo)
+		if expandedName == "" || expandedName == info.Name {
+			continue
+		}
+		if _, exists := out[expandedName]; exists {
+			continue
+		}
+		expandedPL := make(map[string][]string, len(combo))
+		for k, v := range combo {
+			expandedPL[k] = []string{v}
+		}
+		expandedDeps := make([]string, len(info.Deps))
+		for i, dep := range info.Deps {
+			expandedDeps[i] = utils.InterpolateVars(dep, combo)
+		}
+		out[expandedName] = ScriptInfo{
+			Name:         expandedName,
+			Path:         info.Path,
+			IsContainer:  info.IsContainer,
+			IsRemote:     info.IsRemote,
+			SourceURL:    info.SourceURL,
+			PrebuiltLink: info.PrebuiltLink,
+			Deps:         expandedDeps,
+			PL:           expandedPL,
+			PLOrder:      info.PLOrder,
+			Whatis:       utils.InterpolateVars(info.Whatis, combo),
+		}
+	}
+	return out
 }
 
 // FindBuildScript looks for a build script by name/version.

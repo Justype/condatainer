@@ -540,7 +540,6 @@ Commands that may return exit code `3` when scheduler jobs were submitted includ
 
 - `condatainer create ...`
 - `condatainer check -a ...` (auto-install missing deps)
-- `condatainer avail -i ...` (install from search results)
 
 Quick example for shell scripts that detect the job-submitted state:
 
@@ -582,10 +581,7 @@ condatainer avail [search_terms...] [flags]
 
 * `--remote`: Remote build scripts take precedence over local (on duplicates).
 * `-e`, `--expand`: Expand template groups to show individual concrete entries instead of the collapsed template header.
-* `-w`, `--whatis`: Show the description (`#WHATIS:`) for each build script.
-* `-i`, `--install`: Install any found packages that are not currently installed.
-* `-a`, `--add`: Alias for `--install`.
-* `--no-submit`: Disable job submission; build locally (used with `--install`).
+* `-w`, `--whatis`: Show the description (`#WHATIS:`) for each entry.
 
 **Search rules:**
 
@@ -607,10 +603,53 @@ grcm39/salmon-gencode  [34 variants, remote]
   gencode_version (8 values)  M37-M25, *
 ```
 
-**Install behavior with `-i`:**
+**What a search term matches:**
 
-- **Concrete entry** (e.g. `grch38/gtf-gencode/47`): queued directly.
-- **Template entry** (e.g. `grch38/star-gencode`): prompts for each placeholder interactively, then queues the resolved concrete name. Default values prefer the latest already-installed version of each dependency, falling back to the latest available.
+Terms match entry **names**, plus **descriptions** while those are shown. You can search whatever is displayed:
+
+| Invocation | Descriptions shown | Searched |
+|---|---|---|
+| `avail <term>` | yes | name + description |
+| `avail -e <term>` | no | name only |
+| `avail -e -w <term>` | yes | name + description |
+| `avail --whatis=false <term>` | no | name only |
+
+Without `-e`, only templates and plain entries are searched, so templates stay collapsed no matter how many variants they have:
+
+```bash
+$ condatainer avail grch star gencode
+grch38/star-gencode  [1176 variants]
+  → grch38/star/{star_version}/gencode{gencode_version}-{read_length}
+  - star_version:     2.7.0b-2.7.11b  (21 values)
+  ...
+```
+
+Read the values you need from the header, then pass the assembled name to `install`.
+
+Use `-e` to match variant names, including version strings:
+
+```bash
+$ condatainer avail gencode47-101
+[CNT!] No matching build scripts found.
+[CNT◇] Templates are listed collapsed — use -e to search individual variants.
+
+$ condatainer avail -e gencode47-101
+grch38/star/2.7.0b/gencode47-101
+grch38/star/2.7.0d/gencode47-101
+...
+```
+
+Under `-e`, a template matched by name contributes all of its variants; otherwise each variant must match on its own.
+
+**Installing what you find:**
+
+Pass any name from the listing to `condatainer install`:
+
+- **Concrete entry** (e.g. `grch38/genome/gencode`): built directly.
+- **Template entry** (e.g. `grch38/star-gencode`): prompts for each placeholder, then builds the resolved name. Defaults prefer the latest already-installed version of each dependency, falling back to the latest available.
+- **Filled-in template name** (e.g. `grch38/star/2.7.11b/gencode47-101`): already concrete, built with no prompting.
+
+> Values for open-ended (`*`) placeholders cannot be enumerated, so they never appear in `avail -e` output — but `install` still accepts them, e.g. `condatainer install grch38/star/2.7.11b/gencode47-75`.
 
 **Examples:**
 
@@ -624,17 +663,22 @@ $ condatainer avail 'cell*'
 # AND search with multiple terms
 $ condatainer avail cellranger 9
 
-# Install exact version
-$ condatainer avail cellranger/9.0.1 -i
+# Install one of the results
+$ condatainer install cellranger/9.0.1
 
-# Search for all resources matching 'grcm' and 'M33'
-$ condatainer avail grcm M33
+# Search variants for all resources matching 'grcm' and 'M33' (-e required:
+# 'M33' spans the literal 'M' and the placeholder value '33')
+$ condatainer avail -e grcm M33
 grcm39/gtf-gencode/M33
-grcm39/salmon/1.10.2/gencodeM33
-grcm39/star-2.7.11b/gencodeM33-101
+grcm39/salmon/1.0.0/gencodeM33
+grcm39/salmon/1.1.0/gencodeM33
+...
 
-# Show with descriptions
-$ condatainer avail star -w
+# Search descriptions too (shown by default, so this needs no flag)
+$ condatainer avail java
+
+# Hide descriptions (and stop matching against them)
+$ condatainer avail star --whatis=false
 
 # Expand all template combinations
 $ condatainer avail star -e

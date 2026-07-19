@@ -304,3 +304,54 @@ func TestMatchTemplateTarget(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// ExpandTemplate
+// ---------------------------------------------------------------------------
+
+// ExpandTemplate returns a template's variants and leaves the template itself alone.
+func TestExpandTemplate_LeavesSourceUntouched(t *testing.T) {
+	tmpl := ScriptInfo{
+		Name:           "grch38/star-gencode",
+		Path:           "/scripts/grch38/star-gencode",
+		IsTemplate:     true,
+		TargetTemplate: "grch38/star/{star_version}/gencode{gencode_version}",
+		PLOrder:        []string{"star_version", "gencode_version"},
+		Deps:           []string{"star/{star_version}"},
+		PL: map[string][]string{
+			"star_version":    {"2.7.11b", "2.7.11a"},
+			"gencode_version": {"47", "46"},
+		},
+	}
+
+	got := ExpandTemplate(tmpl)
+	if len(got) != 4 {
+		t.Fatalf("got %d variants, want 4 (2 star_version x 2 gencode_version)", len(got))
+	}
+
+	entry, ok := got["grch38/star/2.7.11b/gencode47"]
+	if !ok {
+		t.Fatal("variant grch38/star/2.7.11b/gencode47 not found")
+	}
+	if entry.IsTemplate {
+		t.Error("expanded variant should not be marked IsTemplate")
+	}
+	if entry.Path != tmpl.Path {
+		t.Errorf("Path = %q, want %q (variants share their template's script)", entry.Path, tmpl.Path)
+	}
+	if want := []string{"star/2.7.11b"}; !reflect.DeepEqual(entry.Deps, want) {
+		t.Errorf("Deps = %v, want %v", entry.Deps, want)
+	}
+
+	// The template itself must be unchanged — ExpandTemplate takes it by value.
+	if len(tmpl.PL["star_version"]) != 2 {
+		t.Errorf("template PL was mutated: %v", tmpl.PL)
+	}
+}
+
+// A non-template entry has nothing to expand.
+func TestExpandTemplate_NonTemplateReturnsNil(t *testing.T) {
+	if got := ExpandTemplate(ScriptInfo{Name: "samtools/1.22", Path: "/s/samtools/1.22"}); got != nil {
+		t.Errorf("ExpandTemplate(non-template) = %v, want nil", got)
+	}
+}
