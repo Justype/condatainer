@@ -49,10 +49,8 @@ func init() {
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
-	// Check if -i flag was used (alias for -a)
-	if installFlag, _ := cmd.Flags().GetBool("install"); installFlag {
-		checkAutoInstall = true
-	}
+	ResolveFlagAlias(cmd, "auto-install", "install")
+
 	build.PreferRemote = checkRemote || config.Global.PreferRemote
 
 	// Resolve all args to concrete script paths and metadata deps

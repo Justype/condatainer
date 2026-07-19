@@ -55,6 +55,8 @@ type DirOverlays struct {
 }
 
 func runList(cmd *cobra.Command, args []string) error {
+	ResolveFlagAlias(cmd, "delete", "remove")
+
 	filters := normalizeFilters(args)
 	filterActive := len(filters) > 0
 
@@ -222,11 +224,6 @@ func runList(cmd *cobra.Command, args []string) error {
 	if !hasAnyMatch && filterActive {
 		utils.PrintWarning("No installed overlays match the provided search terms.")
 		os.Exit(ExitCodeError)
-	}
-
-	// Handle delete if requested
-	if removeFlag, _ := cmd.Flags().GetBool("remove"); removeFlag {
-		listDelete = true
 	}
 
 	if listDelete && filterActive && hasAnyMatch {

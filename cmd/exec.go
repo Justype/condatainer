@@ -62,6 +62,8 @@ func runExec(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	}
 
+	ResolveFlagAlias(cmd, "writable", "writable-img")
+
 	if err := ensureBaseImage(cmd.Context()); err != nil {
 		return err
 	}

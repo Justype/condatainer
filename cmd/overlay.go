@@ -456,12 +456,13 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("overlay %s not found", overlayPath)
 	}
 
+	ResolveFlagAlias(cmd, "no-build", "no-builds")
+
 	// Build micromamba export args
 	flagsArgs := []string{}
 	explicit, _ := cmd.Flags().GetBool("explicit")
 	noMD5, _ := cmd.Flags().GetBool("no-md5")
 	noBuild, _ := cmd.Flags().GetBool("no-build")
-	noBuilds, _ := cmd.Flags().GetBool("no-builds")
 	channelSubdir, _ := cmd.Flags().GetBool("channel-subdir")
 	fromHistory, _ := cmd.Flags().GetBool("from-history")
 	jsonOut, _ := cmd.Flags().GetBool("json")
@@ -472,7 +473,7 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 	if noMD5 {
 		flagsArgs = append(flagsArgs, "--no-md5")
 	}
-	if noBuild || noBuilds {
+	if noBuild {
 		flagsArgs = append(flagsArgs, "--no-builds")
 	}
 	if channelSubdir {

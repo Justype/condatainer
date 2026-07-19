@@ -221,11 +221,25 @@ type CommonFlags struct {
 	Fakeroot    bool
 }
 
+// ResolveFlagAlias copies the value of an alias flag onto its canonical flag when
+// the user set the alias but not the canonical name. Both flags must be registered
+// against separate variables so that an explicit `--alias=false` is honoured; when
+// both are given, the canonical flag wins. Call it before reading the bound value.
+func ResolveFlagAlias(cmd *cobra.Command, canonical, alias string) {
+	f := cmd.Flags()
+	if !f.Changed(alias) || f.Changed(canonical) {
+		return
+	}
+	if aliasFlag := f.Lookup(alias); aliasFlag != nil {
+		f.Set(canonical, aliasFlag.Value.String()) //nolint:errcheck
+	}
+}
+
 // RegisterCommonFlags registers common flags on a cobra command
 func RegisterCommonFlags(cmd *cobra.Command, flags *CommonFlags) {
 	cmd.Flags().StringSliceVarP(&flags.Overlays, "overlay", "o", nil, "Overlay file to mount (repeatable)")
 	cmd.Flags().BoolVarP(&flags.WritableImg, "writable", "w", false, "Mount .img overlays as writable (default: read-only)")
-	cmd.Flags().BoolVar(&flags.WritableImg, "writable-img", false, "Alias for --writable")
+	cmd.Flags().Bool("writable-img", false, "Alias for --writable")
 	cmd.Flags().StringSliceVar(&flags.EnvSettings, "env", nil, "Set environment variable 'KEY=VALUE' (repeatable)")
 	cmd.Flags().StringVarP(&flags.BaseImage, "base-image", "b", "", "Base image to use instead of default")
 	cmd.Flags().StringSliceVar(&flags.BindPaths, "bind", nil, "Bind path 'HOST:CONTAINER' (repeatable)")

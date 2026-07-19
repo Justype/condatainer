@@ -86,7 +86,7 @@ The script can contain special comment tags:
 func init() {
 	rootCmd.AddCommand(runCmd)
 	runCmd.Flags().BoolVarP(&runWritableImg, "writable", "w", false, "Make .img overlays writable (default: read-only)")
-	runCmd.Flags().BoolVar(&runWritableImg, "writable-img", false, "Alias for --writable")
+	runCmd.Flags().Bool("writable-img", false, "Alias for --writable")
 	runCmd.Flags().StringVarP(&runBaseImage, "base-image", "b", "", "Base image to use instead of default")
 	runCmd.Flags().BoolVar(&runParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
 	runCmd.Flags().StringVarP(&runStdout, "output", "o", "", "Override job stdout path (creates parent dir if needed)")
@@ -137,6 +137,8 @@ func init() {
 }
 
 func runScript(cmd *cobra.Command, args []string) error {
+	ResolveFlagAlias(cmd, "writable", "writable-img")
+
 	for _, flagInfo := range []struct{ name, val string }{
 		{"afterok", runAfterOK},
 		{"afternotok", runAfterNotOK},
