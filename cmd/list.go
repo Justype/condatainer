@@ -23,7 +23,7 @@ var listWhatis bool
 var listCmd = &cobra.Command{
 	Use:     "list [terms...]",
 	Aliases: []string{"ls"},
-	Short:   "List installed overlays matching search terms",
+	Short:   "List installed overlays",
 	Long: `List installed overlays grouped by directory, with optional search filtering.
 
 ` + searchSyntaxHint,

@@ -1,10 +1,10 @@
 # CondaTainer Installation
 
-📦 **CondaTainer** manages tools, data, and Conda environments on HPC systems by wrapping them into single image files (SquashFS or ext3 overlays). It can:
+📦 **CondaTainer** is a rootless CLI for managing *tools* / *data* / *project environments* and launching apps on HPC. It can:
 
 - Pack tools into highly-compressed, read-only SquashFS overlays. e.g. `cellranger/9.0.1`
+- Generate writable environment overlay for development. e.g. `env.img`
 - Run rstudio-server, code-server, and other web tools on HPC.
-- Generate project-wide writable images for development. e.g. `env.img`
 
 ## 📋 Prerequisites
 
@@ -16,14 +16,14 @@ Most HPC systems have already met these requirements. If not, please contact you
 
 ## 🛠️ Quick Installation
 
-To install **CondaTainer**, run the following interactive script in your terminal:
+To install **CondaTainer**, run the command in your terminal:
 
 ```bash
 curl -fsSL https://get-condatainer.justype.net | bash
 ```
 
-The installation script is **interactive** and will guide you through the following:
-- **Installation Path**: You will be asked to confirm or set the installation path (defaults to `$SCRATCH/condatainer/` or `$HOME/condatainer/`).
+The installation script will guide you through the following:
+- **Installation Path**: You will be asked to confirm or set the path (defaults to `$SCRATCH/condatainer/` or `$HOME/condatainer/`).
 - **Shell Configuration**: The script will automatically **edit your shell configuration** (e.g., `.bashrc`) so that the `condatainer` command is ready to use.
 
 ## ✅ Verify Installation
@@ -42,16 +42,16 @@ condatainer avail
 
 ## ⚙️ Initialize Configuration
 
-The installation script will also run `condatainer config init` for you. If you want to re-run it or customize the configuration, simply run:
+The installation script will also run `condatainer config init` for you. If you want to re-run it or customize the configuration, run:
 
 ```bash
 condatainer config init
 ```
 
-**CondaTainer** will automatically search for Apptainer/Singularity in your `PATH` or via `module avail`. If you want to use a specific Apptainer/Singularity module, please run:
+**CondaTainer** will search for Apptainer/Singularity in your `PATH` and via `module avail`. If you want to use a specific Apptainer/Singularity module, please run:
 
 ```bash
-module load apptainer/1.4
+module load apptainer/1.4.5 # or the version you want
 condatainer config init
 ```
 
@@ -88,25 +88,29 @@ condatainer settings
 # <<< CONDATAINER <<<
 ```
 
-2. **Remove Data Directories**: CondaTainer stores images and scripts in one or more of the following locations. Check which exist and remove them:
+2. **Remove Data Directories**: CondaTainer stores images and scripts in one or more of the following locations. Check which exist and remove them in the following order:
 
-| Type | Path | Condition |
+| Type | Path | Descripton |
 |----|----|----|
 | Standalone | `<install-dir>/` | Install directory containing `bin/condatainer`|
 | User Scratch | `$SCRATCH/condatainer/` | If `$SCRATCH` is set (most HPC systems) |
-| User Data | `~/.local/share/condatainer/` | Default user data dir (XDG: `$XDG_DATA_HOME/condatainer/`) |
+| XDG Data | `~/.local/share/condatainer/` | or `$XDG_DATA_HOME/condatainer/`  |
 
-4. **Remove Config File**: The config file is stored at one of the following locations:
+3. **Remove Config File**: The config file is stored at one of the following locations:
 
-
-| Type | Path | Condition |
+| Type | Path | Descripton |
 |----|----|----|
 | Standalone | `<install-dir>/config.yaml` | Same directory as `bin/` |
-| User Config | `~/.config/condatainer/config.yaml` | Default user config (XDG: `$XDG_CONFIG_HOME/condatainer/`) |
+| XDG Config | `~/.config/condatainer/config.yaml` | or `$XDG_CONFIG_HOME/condatainer/` |
 
-5. **Remove State Files**: Instance state and helper state files are stored at one of the following locations:
+4. **Remove State Files**: Server and helper state files are stored at:
 
 ```
-~/.local/state/condatainer/    (XDG: $XDG_STATE_HOME/condatainer/)
+~/.local/state/condatainer/  (or $XDG_STATE_HOME/condatainer/)
 ```
 
+5. **Remove Cache Files**: Available build scripts and installed OS overlays.
+
+```
+~/.cache/condatainer/        (or $XDG_CACHE_HOME/condatainer/)
+```

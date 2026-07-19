@@ -24,10 +24,10 @@ var searchCmd = &cobra.Command{
 Results are filtered to the configured channels (or --channel overrides).`,
 	Example: `  condatainer search samtools             # Exact match (first channel that has it)
   condatainer search samtools --json      # JSON output
-  condatainer search -f samtool           # Fuzzy/substring match
+  condatainer search -f samtool           # Fuzzy match (via anaconda search)
   condatainer search -f samtool -l 200    # Fuzzy with higher result limit
   condatainer search samtools -c bioconda # Search specific channel`,
-	Args:         cobra.MinimumNArgs(1),
+	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE:         runSearch,
 }
@@ -35,9 +35,9 @@ Results are filtered to the configured channels (or --channel overrides).`,
 func init() {
 	rootCmd.AddCommand(searchCmd)
 	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "Output results in JSON format")
-	searchCmd.Flags().BoolVarP(&searchFuzzy, "fuzzy", "f", false, "Substring match instead of exact name match")
+	searchCmd.Flags().BoolVarP(&searchFuzzy, "fuzzy", "f", false, "Search package via api.anaconda.org/search")
 	searchCmd.Flags().StringArrayVarP(&searchChannels, "channel", "c", nil, "Conda channel to search (overrides config; repeatable)")
-	searchCmd.Flags().IntVarP(&searchLimit, "limit", "l", 100, "Maximum number of fuzzy search results")
+	searchCmd.Flags().IntVarP(&searchLimit, "limit", "l", 100, "Number of fuzzy search results before filter")
 }
 
 func platformSupported(platform string, platforms []string) bool {
@@ -50,7 +50,7 @@ func platformSupported(platform string, platforms []string) bool {
 }
 
 func runSearch(cmd *cobra.Command, args []string) error {
-	query := strings.Join(args, " ")
+	query := args[0]
 	channels := config.Global.Build.Channels
 	if len(searchChannels) > 0 {
 		channels = searchChannels

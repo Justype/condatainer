@@ -33,7 +33,7 @@ var (
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update build script metadata cache or the base image",
+	Short: "Update script metadata caches or the base image",
 	Long: `Update build script metadata or the base image.
 
 With no flags, refreshes both the build and helper script metadata caches.`,
@@ -43,6 +43,7 @@ With no flags, refreshes both the build and helper script metadata caches.`,
   condatainer update --base          # Update the base image only
   condatainer update --base --remote # Update the base image using remote script
   condatainer update --base --remote --no-prebuilt # Rebuild locally from remote .def`,
+	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE:         runUpdate,
 }
@@ -125,14 +126,16 @@ var (
 
 var selfUpdateCmd = &cobra.Command{
 	Use:   "self-update",
-	Short: "Update condatainer to the latest version from GitHub",
-	Long: `Download and replace the current condatainer binary with the latest
-version from GitHub. No backup of the current version is kept.`,
+	Short: "Update condatainer to the latest version",
+	Long: `Download the latest condatainer from GitHub and replace the current binary.
+
+Note: No backup of the current version is kept.`,
 	Example: `  condatainer self-update        # Update to latest stable version
   condatainer self-update --yes  # Update without confirmation
   condatainer self-update -f     # Force update even if already on latest version
   condatainer self-update --dev  # Include pre-release versions
   condatainer self-update --base # Update the base image only`,
+	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE:         runSelfUpdate,
 }

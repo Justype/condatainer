@@ -19,14 +19,15 @@ import (
 var proxyCmd = &cobra.Command{
 	Use:   "proxy",
 	Short: "Manage proxy tunnels for compute nodes",
-	Long: `Start and manage SSH proxy tunnels so that compute node jobs
-can reach the internet through the login node.
+	Long: `Start and manage SSH proxy tunnels so compute-node jobs can reach the internet.
 
-Shared mode (login node): run "condatainer proxy start" once on the login node.
-All condatainer commands running inside jobs automatically use the tunnel.
+Shared mode (login node):
+  Run "condatainer proxy start" once on the login node.
+  All condatainer commands inside jobs then use the tunnel automatically.
 
-Per-job mode (compute node): run "condatainer proxy start --via <login-node>" inside
-a job, or set proxy_perjob=true in config for automatic per-job proxy startup.`,
+Per-job mode (compute node):
+  Run "condatainer proxy start --via <login-node>" inside a job,
+  or set proxy_perjob=true in config to start one automatically.`,
 }
 
 // proxy start flags
@@ -37,8 +38,13 @@ var (
 )
 
 var proxyStartCmd = &cobra.Command{
-	Use:          "start",
-	Short:        "Start a SOCKS5 proxy tunnel",
+	Use:   "start",
+	Args:  cobra.NoArgs,
+	Short: "Start the proxy",
+	Long: `Start a SOCKS5 proxy so compute-node jobs can reach the internet via the login node.
+
+  --host  run the daemon on another login node instead (delegates over SSH)
+  --via   tunnel through this SSH server; required for per-job mode inside a job`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if config.IsInsideContainer() {
@@ -191,7 +197,8 @@ func startProxyDaemon(sshDest string, port int, localOnly bool) error {
 
 var proxyStopCmd = &cobra.Command{
 	Use:          "stop",
-	Short:        "Stop the shared SOCKS5 proxy tunnel (works from any login node)",
+	Args:         cobra.NoArgs,
+	Short:        "Stop the proxy",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ps, err := proxy.ReadPidFile()
@@ -237,7 +244,8 @@ var proxyShowExport bool
 
 var proxyShowCmd = &cobra.Command{
 	Use:   "show",
-	Short: "Print the proxy URL for use by other programs",
+	Args:  cobra.NoArgs,
+	Short: "Print the proxy URL",
 	Long: `Print the active proxy URL (http://host:PORT), or nothing if no proxy is active.
 
 To load all proxy env vars into the shell, use 'condatainer proxy export'.`,
@@ -254,6 +262,7 @@ To load all proxy env vars into the shell, use 'condatainer proxy export'.`,
 
 var proxyExportCmd = &cobra.Command{
 	Use:   "export",
+	Args:  cobra.NoArgs,
 	Short: "Print export statements for all proxy env vars",
 	Long: `Print export statements for all proxy env vars
 (http_proxy, https_proxy, all_proxy, no_proxy and uppercase variants),
@@ -280,7 +289,8 @@ func printProxyExports() {
 
 var proxyStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show the status of the SOCKS5 proxy tunnel",
+	Args:  cobra.NoArgs,
+	Short: "Show proxy status",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Per-job local proxy
 		if ps, err := proxy.ReadLocalPidFile(); err == nil {
@@ -340,8 +350,8 @@ var proxyDaemonCmd = &cobra.Command{
 }
 
 func init() {
-	proxyStartCmd.Flags().StringVar(&proxyStartHost, "host", "", "Node to run the daemon on — delegates via SSH if different from current node (login node only)")
-	proxyStartCmd.Flags().StringVar(&proxyStartVia, "via", "", "SSH server to tunnel through (default: current node for shared mode; required for per-job mode inside a job)")
+	proxyStartCmd.Flags().StringVar(&proxyStartHost, "host", "", "Login node to run the daemon on (delegates via SSH if not current)")
+	proxyStartCmd.Flags().StringVar(&proxyStartVia, "via", "", "SSH server to tunnel through (default: current node)")
 	proxyStartCmd.Flags().IntVar(&proxyStartPort, "port", 0, "Local port to listen on (default: OS-assigned free port)")
 
 	proxyShowCmd.Flags().BoolVar(&proxyShowExport, "export", false, "Alias for 'proxy export'")

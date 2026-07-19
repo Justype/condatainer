@@ -68,8 +68,7 @@ var runCmd = &cobra.Command{
 The script can contain special comment tags:
   #DEP: package/version   - Declares a dependency (auto-loaded)
   #DEP: /path/overlay.img - Declares an overlay dependency (.sqf and .img)
-  #CNT args               - Extra condatainer arguments; accepts the
-                            Container Flags listed below`,
+  #CNT args               - Extra condatainer args (see Container Flags below)`,
 	Example: `  condatainer run script.sh                         # Run with dependency check
   condatainer run script.sh arg1 arg2               # Pass arguments to the script
   condatainer run -o log/tool1_s1.out run_tool1.sh sample1 # Override stdout
@@ -94,7 +93,7 @@ func init() {
 	runCmd.Flags().StringVarP(&runStderr, "error", "e", "", "Override job stderr path")
 	runCmd.Flags().StringVar(&runAfterOK, "afterok", "", "Run after jobs succeed (colon-separated IDs, e.g. 123:456)")
 	runCmd.Flags().StringVar(&runAfterNotOK, "afternotok", "", "Run after jobs fail (colon-separated IDs)")
-	runCmd.Flags().StringVar(&runAfterAny, "afterany", "", "Run after jobs finish regardless of outcome (colon-separated IDs)")
+	runCmd.Flags().StringVar(&runAfterAny, "afterany", "", "Run after jobs finish, any outcome (colon-separated IDs)")
 	runCmd.Flags().StringArrayVar(&runEnvSettings, "env", nil, "Set environment variable KEY=VALUE (repeatable)")
 	runCmd.Flags().StringArrayVar(&runBindPaths, "bind", nil, "Bind mount HOST:CONTAINER (repeatable)")
 	runCmd.Flags().BoolVarP(&runFakeroot, "fakeroot", "f", false, "Run with fakeroot privileges")

@@ -61,8 +61,6 @@ If no shell is specified, the current shell will be auto-detected.`,
   source <(condatainer completion zsh)
   # All sessions (install once)
   condatainer completion zsh > "${fpath[1]}/_condatainer"
-  # Note: If compinit is not enabled, add to ~/.zshrc:
-  # autoload -U compinit; compinit
 
   Fish:
   # Current session
@@ -159,8 +157,16 @@ func postProcessBashCompletion(script string) string {
 
 	script = strings.Replace(script, oldCode, newCode, 1)
 
-	// 2. Add fzf support if available for 'e/exec'
-	fzfInject := `    __condatainer_debug "The completions are: ${out}"
+	// 2. Hide short flags, then add fzf support if available for 'e/exec'.
+	// Both are injected at the same anchor so there is only one replacement to keep
+	// in sync: the line where 'out' holds the candidates with the directive removed.
+	fzfInject := `# Bash lists short and long flags on separate lines, doubling the candidate
+    # list. Drop the short forms when completing a flag.
+    if [[ -n ${out} && ${cur} == -* ]]; then
+        out=$(printf '%s\n' "${out}" | grep -vE '^-[a-zA-Z0-9]([[:space:]]|$)')
+    fi
+
+    __condatainer_debug "The completions are: ${out}"
 
     # Use fzf if available and we're completing for 'e/exec'
     if command -v fzf >/dev/null 2>&1 && [[ -n "$out" ]]; then

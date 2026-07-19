@@ -26,11 +26,6 @@ var scriptCheckCmd = &cobra.Command{
 	Short: "Check if the dependencies of script(s) are installed",
 	Long: `Check dependencies declared in build scripts using #DEP: tags.
 
-Each argument can be:
-  - A local .sh file path
-  - A directory (all .sh files under it are checked recursively)
-  - A package name (e.g., samtools/1.22) resolved from local or remote build scripts
-
 Dependencies from all scripts are checked together.
 
 Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
@@ -38,7 +33,7 @@ Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
   condatainer check samtools/1.22         # Check build script by name
   condatainer check script1.sh script2.sh # Check multiple scripts
   condatainer check ./my-scripts/         # Check all .sh files in a directory
-  condatainer check -a ./src/*sh          # Check and auto-install missing dependencies from multiple scripts`,
+  condatainer check -a ./src/*sh          # Check auto-install missing dependencies`,
 	Args:         cobra.MinimumNArgs(1),
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runCheck,
@@ -378,7 +373,7 @@ func findScriptsInDir(dir string) ([]string, error) {
 }
 
 // resolveAllScriptPaths resolves all positional arguments to concrete file paths.
-// Directories are expanded to all .sh files found recursively.
+// Directories are expanded to all .sh files directly inside them (not recursive).
 // Other args are resolved via resolveScriptPath (file, local build script, or remote download).
 // Returns scriptPaths (deduplicated), remotePaths (to defer-remove), metaDeps (deps from
 // remote metadata, returned directly without downloading the script), and any error.

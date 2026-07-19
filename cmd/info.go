@@ -13,15 +13,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var infoOverlayCmd = &cobra.Command{
-	Use:   "info [overlay]",
-	Short: "Show information about a specific overlay",
-	Long: `Display detailed information about an installed overlay or external overlay file.
+// overlayInfoHelp is shared by 'info' and 'overlay info', which run the same command.
+const overlayInfoHelp = `Show details about an installed overlay or a local overlay file.
 
-For SquashFS (.sqf) overlays: shows compression details, inode count, block size, and mount path.
-For ext3 (.img) overlays: shows filesystem stats, disk/inode usage, block size, and ownership.`,
-	Example: `  condatainer info samtools/1.22 # Show info for installed overlay
-  condatainer info env.img       # Show info for local overlay file`,
+- SquashFS (.sqf): compression details, inode count, block size, mount path
+- ext3 (.img): filesystem stats, disk/inode usage, block size, ownership`
+
+// overlayInfoExample is shared by 'info' and 'overlay info'.
+const overlayInfoExample = `  condatainer info samtools/1.22 # Show info for installed overlay
+  condatainer info env.img       # Show info for local overlay file`
+
+var infoOverlayCmd = &cobra.Command{
+	Use:               "info [overlay]",
+	Short:             "Show details about an overlay",
+	Long:              overlayInfoHelp,
+	Example:           overlayInfoExample,
 	Args:              cobra.ExactArgs(1),
 	SilenceUsage:      true,
 	ValidArgsFunction: completeInfoArgs,

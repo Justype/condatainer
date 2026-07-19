@@ -196,13 +196,13 @@ type CommonFlags struct {
 
 // RegisterCommonFlags registers common flags on a cobra command
 func RegisterCommonFlags(cmd *cobra.Command, flags *CommonFlags) {
-	cmd.Flags().StringSliceVarP(&flags.Overlays, "overlay", "o", nil, "overlay file to mount (can be used multiple times)")
-	cmd.Flags().BoolVarP(&flags.WritableImg, "writable", "w", false, "mount .img overlays as writable (default: read-only)")
+	cmd.Flags().StringSliceVarP(&flags.Overlays, "overlay", "o", nil, "Overlay file to mount (repeatable)")
+	cmd.Flags().BoolVarP(&flags.WritableImg, "writable", "w", false, "Mount .img overlays as writable (default: read-only)")
 	cmd.Flags().BoolVar(&flags.WritableImg, "writable-img", false, "Alias for --writable")
-	cmd.Flags().StringSliceVar(&flags.EnvSettings, "env", nil, "set environment variable 'KEY=VALUE' (can be used multiple times)")
-	cmd.Flags().StringVarP(&flags.BaseImage, "base-image", "b", "", "base image to use instead of default")
-	cmd.Flags().StringSliceVar(&flags.BindPaths, "bind", nil, "bind path 'HOST:CONTAINER' (can be used multiple times)")
-	cmd.Flags().BoolVarP(&flags.Fakeroot, "fakeroot", "f", false, "run container with fakeroot privileges")
+	cmd.Flags().StringSliceVar(&flags.EnvSettings, "env", nil, "Set environment variable 'KEY=VALUE' (repeatable)")
+	cmd.Flags().StringVarP(&flags.BaseImage, "base-image", "b", "", "Base image to use instead of default")
+	cmd.Flags().StringSliceVar(&flags.BindPaths, "bind", nil, "Bind path 'HOST:CONTAINER' (repeatable)")
+	cmd.Flags().BoolVarP(&flags.Fakeroot, "fakeroot", "f", false, "Run container with fakeroot privileges")
 
 	// Register completions
 	cmd.RegisterFlagCompletionFunc("overlay", overlayFlagCompletion(true, true))

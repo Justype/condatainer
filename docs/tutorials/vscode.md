@@ -2,11 +2,11 @@
 
 Three variants are available:
 
-| Variant | Port Forwarding | Extensions | Best For |
-|---------|-----------------|------------|----------|
-| `code-server` | Required | Open VSX only | Open-source alternative, no Microsoft account |
-| `vscode-server` | Required | All (Copilot, Pylance) | Full VS Code, direct connection |
-| `vscode-tunnel` | Not required | All (Copilot, Pylance) | When port forwarding is difficult |
+| Variant | Port Forwarding | Extensions |
+|---------|-----------------|------------|
+| `code-server` | Required | Open VSX only |
+| `vscode-server` | Required | All (Copilot, Pylance) |
+| `vscode-tunnel` | Not required | All (Copilot, Pylance) |
 
 ```bash
 condatainer helper -u
@@ -15,7 +15,7 @@ condatainer helper vscode-server    # full VS Code
 condatainer helper vscode-tunnel    # no port forwarding
 ```
 
-See [Helper Scripts](./helpers.md) for SSH port forwarding setup, resource flags, configuration, and reuse mode.
+See [Helper Scripts](./helpers.md) for SSH port forwarding setup, resource flags, and configuration.
 
 ## code-server
 
@@ -31,7 +31,7 @@ condatainer helper code-server --help
 |------|-------------|---------|
 | `--password,-p` | Browser password (empty = no auth) | (empty) |
 
-See [Helper Scripts](./helpers.md#flags) for resource and overlay flags.
+See [Helper Scripts](./helpers.md#from-the-cli) for resource and overlay flags.
 
 ### Issues
 
@@ -40,6 +40,10 @@ See [Helper Scripts](./helpers.md#flags) for resource and overlay flags.
 ## vscode-server
 
 Uses the official VS Code CLI (`code`) to serve a full VS Code instance in your browser. All extensions — including Microsoft-proprietary ones (Copilot, Pylance, Remote, etc.) — are available.
+
+```{note}
+The `code` CLI creates two directories in your home: `$HOME/.vscode` and `$HOME/.vscode-server` (which holds the server and extensions). Together they can easily reach **4 GB and 50k inodes**, which may exhaust your home directory quota on HPC systems. Check [inode quota issues](#inode-quota-issues)
+```
 
 ### Flags
 
@@ -51,7 +55,7 @@ condatainer helper vscode-server --help
 |------|-------------|---------|
 | `--token,-a` | Connection token for the web UI | (auto-generated) |
 
-See [Helper Scripts](./helpers.md#flags) for resource and overlay flags.
+See [Helper Scripts](./helpers.md#from-the-cli) for resource and overlay flags.
 
 ## vscode-tunnel
 
@@ -76,11 +80,11 @@ condatainer helper vscode-tunnel --help
 | `--auth,-a` | Auth provider: `github` or `microsoft` | `github` |
 | `--name,-n` | Tunnel machine name | `<username>-<hostname>` |
 
-See [Helper Scripts](./helpers.md#flags) for resource and overlay flags.
+See [Helper Scripts](./helpers.md#from-the-cli) for resource and overlay flags.
 
 ### Authentication
 
-On first run (or after token expiry):
+On each run (or after token expiry):
 
 ```
 To sign in, use a web browser to open the page https://microsoft.com/devicelogin

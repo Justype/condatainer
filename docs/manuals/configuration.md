@@ -101,11 +101,12 @@ condatainer config init -l system
 |-----|---------|-------------|
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
 | `parse_module_load` | `false` | Parse `module load` / `ml` lines as dependencies in `check` and `run` |
-| `scheduler_timeout` | `5` | Seconds to wait for a scheduler command (sbatch, qsub, etc.) before returning an error. Set to `0` to disable the timeout. |
-| `notification` | `` | Notification when a helper job starts running. `terminal` = terminal bell ×2 (1.1 s apart, CLI only); `web` = browser notification via the dashboard; `both` = terminal + web; `none` or empty = silent (default). |
+| `scheduler_timeout` | `0` | Seconds to wait for a scheduler command (sbatch, qsub, etc.) before returning an error. `0` (default) disables the timeout. |
+| `notification` | `web` | Notification when a helper job starts running. `web` (default) = browser notification via the dashboard; `terminal` = terminal bell ×2 (CLI only); `both` = terminal + web; `none` or empty = silent. |
 | `metadata_cache_ttl` | `7` | Days to keep the cached remote build script metadata (default: 7 days = 1 week). Set to `0` to disable caching and always fetch from the network. |
-| `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filename (e.g. `ubuntu24--base_image.sif`) and the distro prefix added to bare package names (e.g. `igv` → `ubuntu24/igv`). |
+| `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filen and the distro prefix added to bare package names (e.g. `igv` → `ubuntu24/igv`). |
 | `proxy_perjob` | `false` | Auto-start a per-job SOCKS5 proxy inside submitted jobs. See [Proxy](condatainer.md#proxy). |
+| `helper_bind_all` | `false` | Bind helper services to `0.0.0.0` so the dashboard server reaches them via direct TCP instead of an SSH tunnel. |
 
 ### Build Configuration
 
@@ -116,7 +117,7 @@ condatainer config init -l system
 | `build.time` | `2h` | Time limit for builds |
 | `build.compress_args` | Auto-detected | mksquashfs compression arguments (gzip for singularity; zstd-medium for apptainer≥1.4; lz4 otherwise) |
 | `build.block_size` | `128k` | mksquashfs block size for app/env/external overlays (e.g. `128k`, `512k`) |
-| `build.data_block_size` | `1m` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
+| `build.data_block_size` | `512k` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
 | `build.use_tmp_overlay` | `false` | Use a temporary ext3 overlay during builds instead of host directories |
 | `build.always_submit` | `false` | Always submit builds as scheduler jobs even if the script has no scheduler directives |
 | `build.tmp_overlay_size` | `20480` | Temporary ext3 overlay size (supports units: `20g`, `20480`); only used when `use_tmp_overlay` is `true` |
@@ -239,6 +240,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_NOTIFICATION`         | `notification`         |
 | `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
 | `CNT_PROXY_PERJOB`         | `proxy_perjob`         |
+| `CNT_HELPER_BIND_ALL`      | `helper_bind_all`      |
 | `CNT_TMPDIR`               | (special override)     |
 
 Example:
@@ -364,12 +366,12 @@ build:
   time: 2h
   compress_args: -comp zstd -Xcompression-level 8
   block_size: 128k       # SquashFS block size for app/env/external overlays
-  data_block_size: 1m    # SquashFS block size for data overlays
+  data_block_size: 512k  # SquashFS block size for data overlays
   use_tmp_overlay: false  # Use ext3 tmp overlay instead of host directories
   always_submit: false    # Always submit as scheduler jobs even without directives
   tmp_overlay_size: 20g  # Only used when use_tmp_overlay is true
 
-# proxy_perjob: true   # auto-start per-job SOCKS5 proxy inside submitted jobs
+# proxy_perjob: true   # auto-start per-job proxy inside submitted jobs
 
 # Default: conda-forge then bioconda
 channels:
@@ -514,11 +516,11 @@ The SquashFS block size controls how data is chunked during compression. Two sep
 | Overlay type | Config key | Default | CLI flag |
 |---|---|---|---|
 | App / Env / External | `build.block_size` | `128k` | `--block-size` |
-| Data / Reference | `build.data_block_size` | `1m` | `--data-block-size` |
+| Data / Reference | `build.data_block_size` | `512k` | `--data-block-size` |
 
 - Valid values: power of two between `4k` and `1m` (mksquashfs constraint). Common choices: `4k`, `8k`, `16k`, `32k`, `64k`, `128k`, `256k`, `512k`, `1m`.
-- Smaller blocks (`128k`) give better random-read performance — ideal for executables loaded at runtime.
-- Larger blocks (`1m`) give better compression ratios — ideal for large reference files that are read sequentially.
+- Smaller blocks (`128k`) give better random-read performance.
+- Larger blocks (`1m`) give better compression ratios and sequential read.
 
 To override per-build via CLI:
 

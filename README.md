@@ -12,10 +12,10 @@
 * **Unified Management:** Centralize group resources and easily isolate project environments.
 * **Inode Saver:** Packing 30k+ Conda files into a single portable image.
 * **LustreFS Friendly:** Stages conda creation on node-local SSD to reduce network filesystem load.
-* **Scheduler Native:** Out-of-the-box integration with *Slurm*, *PBS*, *LSF*, and *HTCondor*.
+* **Scheduler Native:** Out-of-the-box integration with HPC scheduler, like *Slurm*.
 
 > [!NOTE]
-> Slurm is the primary, tested scheduler. Others are experimental, bug reports are welcome!
+> *Slurm* is the primary, tested scheduler. *PBS*, *LSF*, *HTCondor* are experimental, bug reports are welcome!
 >
 > For `qsub`, only **PBS Pro** (OpenPBS) is supported. Torque and SGE are not supported.
 
@@ -64,7 +64,7 @@ Manage a writable environment (env) overlay for development and testing:
 
 ```bash
 condatainer overlay create -s 5G env.img   # Create a 5G overlay
-condatainer overlay resize -s 10G env.img  # Resize an overlay to 10G
+condatainer overlay resize -s 10g env.img  # Resize an overlay to 10G
 condatainer overlay chown --root env.img   # Make it compatible with --fakeroot
 
 condatainer exec -w -o env.img bash  # Launch a shell in writable mode
@@ -85,7 +85,7 @@ mm-export             # Export environment to YAML
 ## 🐕‍🦺 Web Apps & GUI Helpers
 
 **CondaTainer** includes built-in helpers to launch apps (like RStudio, XFCE4 VNC) directly on compute nodes.
-
+****
 ```bash
 condatainer helper --update       # Fetch the latest helper scripts
 condatainer helper --list         # View all available apps

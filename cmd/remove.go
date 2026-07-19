@@ -19,8 +19,8 @@ var removeCmd = &cobra.Command{
 	Short:   "Remove installed overlays matching search terms",
 	Long: `Remove installed overlays by name, alias, or search terms.
 
-Unlike list/avail, a single plain term must match a name exactly
-(safer for deletion). Wildcards (*, ?) and regex also work — full rules:
+Unlike list/avail, a single plain term must match a name exactly (safer for deletion).
+Wildcards (*, ?) and regex also work — full rules:
 ` + searchManualURL + `
 
 The command will ask for confirmation before removing overlays.`,

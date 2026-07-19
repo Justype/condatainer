@@ -78,11 +78,11 @@ type Config struct {
 	// Dependency parsing
 	ParseModuleLoad bool // Parse "module load" / "ml" lines as dependencies (default: false)
 
-	// Scheduler command timeout in seconds (default: 5)
+	// Scheduler command timeout (default: 0 = no timeout).
 	SchedulerTimeout time.Duration
 
-	// Notification method when a helper job starts running (default: "" = none).
-	// Values: "terminal" (bell ×2, 1.1 s apart), "web" (browser notification via dashboard),
+	// Notification method when a helper job starts running (default: "web").
+	// Values: "web" (browser notification via dashboard), "terminal" (bell ×2, 1.1 s apart),
 	// "both" (terminal + web), "" or "none" (silent).
 	Notification string
 
@@ -188,7 +188,7 @@ func LoadDefaults(executablePath string) {
 
 		ScriptsLink:      DefaultScriptsLink,
 		ScriptsLinks:     []string{DefaultScriptsLink}, // overwritten in LoadFromViper
-		SchedulerTimeout: 5 * time.Second,
+		SchedulerTimeout: 0,                            // no timeout by default
 		Notification:     "web",
 		MetadataCacheTTL: 7 * 24 * time.Hour, // 1 week
 

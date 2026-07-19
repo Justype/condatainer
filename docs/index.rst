@@ -7,7 +7,7 @@ CondaTainer
 * **Unified Management:** Easily organize group-level tools/data and isolate project environments.
 * **Inode Saver:** Packing 30k+ Conda files into a single portable image to bypass quota limits.
 * **LustreFS Friendly:** Stages conda creation on node-local SSD to reduce network filesystem load.
-* **Scheduler Native:** Out-of-the-box integration with *Slurm*, *PBS*, *LSF*, and *HTCondor*.
+* **Scheduler Native:** Out-of-the-box integration with HPC scheduler, like *Slurm*.
 
 .. toctree::
   :caption: User Guide:
@@ -38,6 +38,7 @@ CondaTainer
 .. toctree::
   :caption: Advanced Usage:
   :maxdepth: 1
+  :glob:
 
   advanced_usage/*
 

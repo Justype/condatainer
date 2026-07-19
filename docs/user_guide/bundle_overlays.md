@@ -36,13 +36,18 @@ If you only need a slight modification of a conda env, like editing Python packa
 
 ## Launch a Shell within the Bundle Overlay
 
-To activate the bundle overlay, run the following command:
+To use the bundle overlay, run the following command:
 
 ```bash
-condatainer exec -o prefix_name.sqf
+$ condatainer exec -o prefix_name.sqf bash
+# or condatainer e prefix_name.sqf
 ```
 
 Then you can use the applications installed in the overlay.
+
+```
+CNT> <command>
+```
 
 Bundle overlays are read-only and stackable. You can mount multiple overlays together:
 

@@ -231,6 +231,14 @@ func configValueCompletion(key string) []string {
 	}
 }
 
+// configLocationsHelp documents the -l/--location values. Shared by every config
+// subcommand that accepts --location so the list stays consistent, not copy-pasted.
+const configLocationsHelp = `Config file locations (-l, --location):
+  u, user        ~/.config/condatainer/config.yaml (standard/home install)
+  r, app-root    <install-dir>/config.yaml         (dedicated install, or CNT_ROOT)
+  e, extra-root  $CNT_EXTRA_ROOT/config.yaml       (group, needs CNT_EXTRA_ROOT)
+  s, system      /etc/condatainer/config.yaml`
+
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage condatainer configuration",
@@ -240,14 +248,14 @@ Configuration file priority (highest to lowest):
   1. Command-line flags
   2. Environment variables (CNT_*)
   3. User config file (~/.config/condatainer/config.yaml)
-  4. Extra-root config ($CNT_EXTRA_ROOT/config.yaml, group/lab layer)
-  5. App-root config (<install-dir>/config.yaml, if in dedicated folder or CNT_ROOT set)
+  4. Extra-root config ($CNT_EXTRA_ROOT/config.yaml, group layer)
+  5. App-root config (<install-dir>/config.yaml, in dedicated folder or CNT_ROOT set)
   6. System config file (/etc/condatainer/config.yaml)
   7. Defaults
 
 Data directory priority (for read/write operations):
   1. Extra directories (extra_image_dirs / extra_build_dirs / extra_helper_dirs)
-  2. Extra-root directory ($CNT_EXTRA_ROOT, group/lab layer)
+  2. Extra-root directory ($CNT_EXTRA_ROOT, group layer)
   3. App-root directory (auto-detected or CNT_ROOT)
   4. User scratch directory ($SCRATCH/condatainer, HPC systems)
   5. User XDG directory (~/.local/share/condatainer)`,
@@ -255,10 +263,11 @@ Data directory priority (for read/write operations):
 
 var configShowCmd = &cobra.Command{
 	Use:   "show",
+	Args:  cobra.NoArgs,
 	Short: "Show current configuration",
-	Long: `Display current configuration values and their sources:
-config file and data directory search paths, all settings, and
-environment variable overrides.`,
+	Long: `Show current settings and where each comes from:
+  search paths, all values, and environment-variable overrides.
+`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if showPath {
 			configPath, err := config.GetUserConfigPath()
@@ -577,8 +586,10 @@ var configGetCmd = &cobra.Command{
 	Short: "Get a configuration value",
 	Long: `Get a specific configuration value.
 
-Without -l, returns the effective merged value (env overrides + all config layers).
-With -l, reads only the specified config layer file.`,
+Without -l, returns the effective merged value (env + all config layers).
+With -l, reads only that config layer file.
+
+` + configLocationsHelp,
 	Example: `  condatainer config get apptainer_bin
   condatainer config get build.ncpus
   condatainer config get extra_image_dirs
@@ -648,7 +659,9 @@ var configSetCmd = &cobra.Command{
 
 Time duration format (for build.time):
   Go style:  2h, 30m, 1h30m, 90s
-  HPC style: 02:00:00, 2:30:00, 1:30 (HH:MM:SS or HH:MM)`,
+  HPC style: 02:00:00, 2:30:00, 1:30 (HH:MM:SS or HH:MM)
+
+` + configLocationsHelp,
 	Example: `  condatainer config set apptainer_bin /usr/bin/apptainer
   condatainer config set build.ncpus 8
   condatainer config set build.time 02:00:00
@@ -765,24 +778,17 @@ Time duration format (for build.time):
 
 var configInitCmd = &cobra.Command{
 	Use:   "init",
+	Args:  cobra.NoArgs,
 	Short: "Create a config file with defaults",
 	Long: `Create a configuration file with default values and auto-detected settings.
 
-Config location options (-l, --location):
-  u, user        ~/.config/condatainer/config.yaml (default for standard installations)
-  r, app-root    <install-dir>/config.yaml (default if installed in a dedicated folder, or CNT_ROOT set)
-  e, extra-root  $CNT_EXTRA_ROOT/config.yaml (group/lab layer, requires CNT_EXTRA_ROOT)
-  s, system      /etc/condatainer/config.yaml (requires appropriate permissions)
+` + configLocationsHelp + `
 
-By default, the location is chosen based on the installation:
-  - If the executable is in a dedicated folder (e.g., /apps/condatainer/bin/),
-    the config is created in the parent folder (standalone layout, -l app-root).
-  - Otherwise, it uses the user's config directory.`,
-	Example: `  condatainer config init              # Create config with smart default location
-  condatainer config init -l user      # Force user config location
-  condatainer config init -l app-root  # Force app-root config location
-  condatainer config init -l r         # Same as -l app-root
-  CNT_EXTRA_ROOT=/lab condatainer config init -l extra-root  # Group/lab layer`,
+Without -l, the location is chosen from the install layout:
+  - Executable in a dedicated folder (e.g. /apps/condatainer/bin/) -> parent folder.
+  - Otherwise -> the user config directory.`,
+	Example: `  condatainer config init -l app-root  # write to a specific layer
+  condatainer config init -l r         # via shortcut (r = app-root)`,
 	Run: func(cmd *cobra.Command, args []string) {
 		var configPath string
 		var err error
@@ -904,12 +910,13 @@ By default, the location is chosen based on the installation:
 
 var configPathsCmd = &cobra.Command{
 	Use:   "paths",
+	Args:  cobra.NoArgs,
 	Short: "Show data search paths",
 	Long: `Show all search paths for images, build-scripts, and helper-scripts.
 
 Search paths are checked in priority order (first match wins for reads):
   1. Extra directories (extra_image_dirs / extra_build_dirs / extra_helper_dirs)
-  2. Extra-root ($CNT_EXTRA_ROOT, group/lab layer)
+  2. Extra-root ($CNT_EXTRA_ROOT, group layer)
   3. App-root (auto-detected or $CNT_ROOT)
   4. Scratch (user HPC large storage, $SCRATCH/condatainer)
   5. User XDG directory (~/.local/share/condatainer)
@@ -999,6 +1006,7 @@ App-root is preferred for group/shared use, user is the fallback.`,
 
 var configValidateCmd = &cobra.Command{
 	Use:   "validate",
+	Args:  cobra.NoArgs,
 	Short: "Validate configuration",
 	Long:  "Check if the current configuration is valid and all binaries are accessible",
 	Run: func(cmd *cobra.Command, args []string) {
@@ -1085,6 +1093,9 @@ var configValidateCmd = &cobra.Command{
 var configAppendCmd = &cobra.Command{
 	Use:   "append <key> <value>",
 	Short: "Append a value to an array config key",
+	Long: `Append a value to an array config key (lowest search priority).
+
+` + configLocationsHelp,
 	Example: `  condatainer config append extra_image_dirs /shared/lab/images:ro
   condatainer config append extra_scripts_links https://example.com/scripts`,
 	Args:              cobra.ExactArgs(2),
@@ -1122,6 +1133,9 @@ var configAppendCmd = &cobra.Command{
 var configPrependCmd = &cobra.Command{
 	Use:   "prepend <key> <value>",
 	Short: "Prepend a value to an array config key (highest priority)",
+	Long: `Prepend a value to an array config key (highest search priority).
+
+` + configLocationsHelp,
 	Example: `  condatainer config prepend extra_image_dirs /fast/images
   condatainer config prepend extra_scripts_links https://myorg.com/scripts`,
 	Args:              cobra.ExactArgs(2),
@@ -1159,6 +1173,9 @@ var configPrependCmd = &cobra.Command{
 var configRemoveCmd = &cobra.Command{
 	Use:   "remove <key> [value]",
 	Short: "Remove a config key or a value from an array key",
+	Long: `Remove a config key entirely, or one value from an array config key.
+
+` + configLocationsHelp,
 	Example: `  condatainer config remove apptainer_bin
   condatainer config remove extra_image_dirs /shared/lab/images:ro`,
 	Args:              cobra.RangeArgs(1, 2),
@@ -1216,12 +1233,12 @@ func init() {
 	// Add flags
 	configShowCmd.Flags().BoolVar(&showPath, "path", false, "Show only the config file path")
 	configShowCmd.Flags().BoolVarP(&showSources, "sources", "s", false, "Show which config layer provides each value")
-	configInitCmd.Flags().StringVarP(&initLocation, "location", "l", "", "Config location: user (u), app-root (r), extra-root (e), or system (s)")
-	configGetCmd.Flags().StringVarP(&getLocation, "location", "l", "", "Read from a specific config layer: user (u), app-root (r), extra-root (e), or system (s)")
-	configSetCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), app-root (r), extra-root (e), or system (s)")
-	configAppendCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), app-root (r), extra-root (e), or system (s)")
-	configPrependCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), app-root (r), extra-root (e), or system (s)")
-	configRemoveCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config location to write: user (u), app-root (r), extra-root (e), or system (s)")
+	configInitCmd.Flags().StringVarP(&initLocation, "location", "l", "", "Config layer to create in (u/r/e/s; see help)")
+	configGetCmd.Flags().StringVarP(&getLocation, "location", "l", "", "Read from one config layer (u/r/e/s; see help)")
+	configSetCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config layer to write (u/r/e/s; see help)")
+	configAppendCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config layer to write (u/r/e/s; see help)")
+	configPrependCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config layer to write (u/r/e/s; see help)")
+	configRemoveCmd.Flags().StringVarP(&setLocation, "location", "l", "", "Config layer to write (u/r/e/s; see help)")
 
 	// Add subcommands
 	configCmd.AddCommand(configShowCmd)

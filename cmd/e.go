@@ -41,7 +41,7 @@ Overlays and flags go before --, commands go after --.
 Note: Additional Apptainer flags must use --flag=value format (no space)`,
 	Example: `  condatainer e                # Auto-load env.img if present, run bash
   condatainer e testing.img    # Use a specific writable overlay
-  condatainer e samtools/1.22 bcftools/1.20   # Multiple Overlay
+  condatainer e samtools/1.22 bcftools/1.20   # Multiple overlays
   condatainer e samtools/1.22 -- samtools     # Run command
   condatainer e --home=/custom samtools/1.22  # Pass apptainer flags`,
 	SilenceUsage: true,
@@ -55,8 +55,8 @@ func init() {
 	eCmd.Flags().BoolVarP(&eNoAutoload, "no-autoload", "n", false, "Disable auto-loading env.img from current directory")
 	eCmd.Flags().StringVarP(&eBaseImage, "base-image", "b", "", "Base image to use instead of default")
 	eCmd.Flags().BoolVarP(&eFakeroot, "fakeroot", "f", false, "Run container with fakeroot privileges")
-	eCmd.Flags().StringSliceVar(&eEnvSettings, "env", nil, "Set environment variable 'KEY=VALUE' (can be used multiple times)")
-	eCmd.Flags().StringSliceVar(&eBindPaths, "bind", nil, "Bind path 'HOST:CONTAINER' (can be used multiple times)")
+	eCmd.Flags().StringSliceVar(&eEnvSettings, "env", nil, "Set environment variable 'KEY=VALUE' (repeatable)")
+	eCmd.Flags().StringSliceVar(&eBindPaths, "bind", nil, "Bind path 'HOST:CONTAINER' (repeatable)")
 
 	// Allow flags to be interspersed with overlays
 	eCmd.Flags().SetInterspersed(true)

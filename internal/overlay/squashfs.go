@@ -18,9 +18,9 @@ import (
 
 // sqfPathExists reports whether `entry` exists in a SquashFS archive.
 //
-// It lists the archive with `unsquashfs -lc -d ''` and looks for a line equal to
+// It lists the archive with `unsquashfs -lc -d ""` and looks for a line equal to
 // "/entry" or starting with "/entry/". Notes on the flags and matching:
-//   - -d '' lists matches as "/entry" instead of the default "squashfs-root/entry".
+//   - -d "" lists matches as "/entry" instead of the default "squashfs-root/entry".
 //   - -lc lists only files and empty dirs, so a populated dir shows up via its
 //     children ("/entry/...") rather than "/entry" itself.
 //   - unsquashfs 4.4 (Ubuntu 20.04) prints banner lines even when nothing matches,

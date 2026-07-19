@@ -2,7 +2,7 @@
 
 📦 **CondaTainer** allows you to create [module overlays](./concepts.md#-overlay-types) for your project.
 
-They are stackable, read-only, and highly compressed overlays that contain app or reference data, which is ideal for HPC environments where inode usage is a concern.
+They are stackable, read-only, and highly compressed overlays that contain app or data.
 
 Please read [Concepts](concepts.md) before proceeding.
 
@@ -16,7 +16,7 @@ condatainer list  # List installed
 condatainer create samtools/1.16
 condatainer exec -o samtools/1.16 samtools --version
 
-# Create a read-only project overlay from a YAML file
+# Create a read-only overlay from a YAML file
 condatainer create -f environment.yml -p my_analysis
 condatainer exec -o my_analysis.sqf bash
 
@@ -36,7 +36,7 @@ condatainer exec -o grch38/cellranger/2024-A bash
 
 Use `condatainer avail` to browse available build scripts, then `condatainer create` to install.
 
-### Normal Build Script Module
+### Normal Build Script
 
 A normal build script targets a fixed name and version. Install it directly:
 
@@ -46,7 +46,7 @@ condatainer create cellranger/9.0.1    # app module
 condatainer create grch38/genome/gencode  # data module
 ```
 
-### Template Script Module
+### Template Script
 
 A template script covers many versions through placeholders. It appears in `avail` output as a collapsed group:
 
@@ -87,8 +87,8 @@ When entering placeholder values, you can hit <Tab> to see the available options
 
 To Install a Salmon Index Overlay. You don't need to:
 
-- Load modules or install Salmon manually.
-- Manually download genome FASTA and transcript FASTA files.
+- Load modules or install Salmon.
+- Download genome FASTA and transcript FASTA files.
 - Create decoy FASTA.
 - Build the Salmon index and submit scheduler jobs.
 
@@ -97,9 +97,9 @@ To Install a Salmon Index Overlay. You don't need to:
 ```bash
 condatainer create grch38/salmon/1.10.2/gencode47
 # This command will:
-# - Create Salmon 1.10.2 module overlay
-# - Download GRCh38 genome FASTA as overlay
-# - Download Gencode 47 transcript FASTA as another overlay
+# - Create Salmon 1.10.2 module overlay (salmon/1.10.2)
+# - Download GRCh38 genome FASTA as overlay (grch38/genome/gencode)
+# - Download Gencode 47 transcript FASTA as overlay (grch38/transcript-gencode/47)
 # - Submit scheduler jobs to build the Salmon index using these overlays
 ```
 
@@ -120,7 +120,7 @@ salmon quant -i $SALMON_INDEX_DIR ...
 ````{note}
 **CondaTainer** will automatically set environment variables like `SALMON_INDEX_DIR`.
 
-If you don't know the variable names, you can use `info` to check:
+If you don't know the variable names, use `info` to check:
 
 ```bash
 condatainer info grcm39/transcript-gencode/M9
@@ -149,7 +149,7 @@ condatainer run analysis.sh
 
 ## 🤖 Scheduler Automation
 
-When you request a reference or an environment that requires significant computation to prepare, **CondaTainer will automatically submit scheduler jobs** (SLURM, PBS, LSF, or HTCondor) to handle the heavy lifting for you.
+If a script contains scheduler directives (e.g. `#SBATCH`), **CondaTainer will automatically submit scheduler jobs** to handle the heavy lifting for you.
 
 Example Script (`analysis.sh`):
 
@@ -237,11 +237,6 @@ condatainer run cellranger_quant.sh
 ## 🔗 Related Resources
 
 - [CondaTainer Manual](../manuals/condatainer.md)
-- [Workspace Overlays: Writable Project-Level](./workspace_overlays.md)
+- [Environement Overlays: Writable Project-Level](./environment_overlays.md)
 - [Bundle Overlays: Read-Only Project-Level](./bundle_overlays.md)
 - [Scheduler Integration](../qa/scheduler.md)
-
-Tutorials using CondaTainer:
-
-- [RStudio Server](../tutorials/rstudio-server.md)
-- [VS Code](../tutorials/vscode.md)

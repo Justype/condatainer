@@ -25,19 +25,16 @@ var (
 var availCmd = &cobra.Command{
 	Use:     "avail [terms...]",
 	Aliases: []string{"av"},
-	Short:   "List available build scripts (local and remote)",
+	Short:   "List available build scripts",
 	Long: `List available build scripts (local and remote).
 
 When duplicates exist, local scripts take precedence.
 
-` + searchSyntaxHint + `
-
-Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
-	Example: `  condatainer avail                     # List all
-  condatainer avail cellranger          # Substring match
-  condatainer avail 'cell*'             # Wildcard
-  condatainer avail cellranger 9        # AND search (multiple terms)
-  condatainer avail cellranger/9.0.1 -i # Install exact version`,
+` + searchSyntaxHint,
+	Example: `  condatainer avail                   # List all
+  condatainer avail cellranger        # Substring match
+  condatainer avail cellranger 9      # AND search (multiple terms)
+  condatainer avail 'cell*'           # Wildcard`,
 	SilenceUsage: true, // Runtime errors should not show usage
 	RunE:         runAvail,
 }
@@ -47,9 +44,9 @@ func init() {
 	availCmd.Flags().BoolVar(&availRemote, "remote", false, "Remote build scripts take precedence over local")
 	availCmd.Flags().BoolVarP(&availInstall, "install", "i", false, "Install the selected build scripts (used with search terms)")
 	availCmd.Flags().BoolP("add", "a", false, "Alias for --install")
-	availCmd.Flags().BoolVarP(&availExpand, "expand", "e", false, "Expand templated script groups into individual entries (one per placeholder value)")
+	availCmd.Flags().BoolVarP(&availExpand, "expand", "e", false, "Expand templated script groups into individual entries")
 	availCmd.Flags().BoolVarP(&availWhatis, "whatis", "w", false, "Show description for each build script")
-	availCmd.Flags().BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (build locally; used with --install)")
+	availCmd.Flags().BoolVar(&noSubmitMode, "no-submit", false, "Disable build job submission (used with --install)")
 }
 
 // PackageInfo holds information about a build script

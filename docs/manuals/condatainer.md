@@ -30,24 +30,25 @@ Usage:
 
 Available Commands:
   avail       List available build scripts (local and remote)
-  check       Check if the dependencies of a script are installed
+  check       Check if the dependencies of script(s) are installed
   completion  Generate shell completion script
   config      Manage condatainer configuration
   create      Create a new SquashFS overlay
-  e           Quick shortcut for executing commands with overlays
-  exec        Execute a command using overlays (explicit -o flag)
-  helper      Manage and run helper scripts
-  info        Show information about a specific overlay
-  list        List installed overlays matching search terms
+  e           Shortcut for exec with overlays, writable by default
+  exec        Execute a command with overlays
+  helper      Run web apps like RStudio on HPC
+  info        Show details about an overlay
+  list        List installed overlays
   o           Shortcut for 'overlay create'
-  overlay     Manage persistent overlay images (create, resize, check, info)
+  overlay     Manage ext3 overlays (create, resize, check, info)
+  proxy       Manage proxy tunnels for compute nodes
   remove      Remove installed overlays matching search terms
-  proxy       Manage the shared SOCKS5 proxy tunnel for compute nodes
   run         Run a script and auto-solve the dependencies by #DEP tags
   scheduler   Display scheduler information
-  search      Search conda packages via anaconda.org API
-  self-update Update condatainer to the latest version from GitHub
-  update      Update build script metadata cache or the base image
+  search      Search conda packages via anaconda.org
+  self-update Update condatainer to the latest version
+  server      Manage the condatainer dashboard server
+  update      Update script metadata caches or the base image
 
 Flags:
       --debug     Enable debug mode with verbose output
@@ -69,36 +70,34 @@ Used for system-level applications that do not follow the standard application o
 
 Like text editors, IDEs, build-essential tools, etc.
 
-* **Format:** `name`
-* **Constraints:**
-  * Must **not** contain slashes (`/`) or double-dash sequences (`--`).
-  * Unless `<distro>/<application>`
-* **Example:** `rstudio-server`, `texlive`, `code-server`
-
-You can also create these system apps using the `-n, --name` flag with the `create` command.
+* **Format:** `<distro>/<name>`
+* **Example:** `ubuntu22/rstudio-server`, `ubuntu24/code-server`
+* **Shortcut:** when `<distro>` is the configured `default_distro` (`ubuntu24`), it can be omitted — `code-server` resolves to `ubuntu24/code-server`.
 
 ### Custom Environments (Bundle/Environment)
 
-Used when creating a custom environment with a user-defined name (`create -p`, or `overlay` action).
+Used when creating a custom environment with a user-defined name (`create -p`, or `overlay`).
 
 * **Format:** `custom_name`
-* **Constraints:**
-  * Must **not** contain the double-dash sequence (`--`).
-  * Should **not** conflict with common application names (to avoid ambiguity with app overlays).
+* **Constraints:** Must **not** contain the double-dash sequence (`--`).
 * **Example:** `my_analysis_env`, `project_x_utils`
-
-> [!NOTE]
-> Use `-n` to install system apps only (e.g., `nvim`). To create an environment `.sqf`, use `-p` to specify a prefix/path.
 
 ### Application Overlays (Module)
 
-Used for standard software packages and tools managed by **CondaTainer** build scripts.
+Used for standard software packages managed by **CondaTainer** build scripts or from conda.
 
 * **Format:** `name/version`
 * **Structure:**
   * **name**: The software package or tool name (e.g., `bcftools`).
   * **version**: The specific version of the software (e.g., `1.22`).
 * **Example:** `cellranger/9.0.1`
+
+If you want a fixed combination of conda packages for everyday use (e.g. an editor), use `-n <name> <conda packages>` to bundle them into a single overlay:
+
+```bash
+condatainer create -n nvim nvim nodejs  # → nvim.sqf (Neovim + Node.js for plugins)
+condatainer exec -o nvim nvim           # run it
+```
 
 ### Reference Overlays (Module)
 
@@ -111,8 +110,9 @@ Used for reference datasets, genome assemblies, or indices.
   * **version**: The release or build version (e.g., `47`).
 * **Example:** `grch38/gtf-gencode/47`
 
-> [!NOTE]
-> `--` is reserved for separating components in overlays. For example, `bcftools/1.22` overlay will be located at `images/bcftools--1.22.sqf`.
+```{note}
+`--` is reserved for separating components in overlays. For example, `bcftools/1.22` overlay will be located at `images/bcftools--1.22.sqf`.
+```
 
 ### Rename or not to Rename?
 
@@ -155,13 +155,13 @@ Writability: `.sqf` overlays are read-only. To enable write access for a `.img` 
 
 ## Overlay
 
-Manage overlay writable ext3 images:
+Manage overlay writable ext3 overlay images:
 
-- **create**: Create an image with a conda environment inside.
+- **create**: Create an overlay with a conda environment inside.
 - **info**: Display disk usage and filesystem statistics.
 - **check**: Verify filesystem integrity.
-- **chown**: Change ownership of files inside the image.
-- **resize**: Resize the image file.
+- **chown**: Change ownership of files inside the overlay.
+- **resize**: Resize the overlay file.
 - **export**: Export a conda environment spec from an overlay.
 
 ### Overlay Create
@@ -177,22 +177,22 @@ condatainer overlay create [OPTIONS] [NAME]
 **Options:**
 
 * `-s`, `--size [SIZE]`: Size of the overlay image (default: 10G). Supports units like `20G`, `2048M`.
-* `-t`, `--type [TYPE]`: Overlay profile: `small`, `balanced`, or `large` (default: balanced). Aliases: `conda`/`python` = `small`; `data`/`genome` = `large`.
+* `-p`, `--profile [PROFILE]`: Overlay profile: `small`, `balanced`, or `large` (default: balanced). Aliases: `conda`/`python` = `small`; `data`/`genome` = `large`. (`-t`/`--type` is a deprecated alias.)
 * `-f`, `--file [FILE]`: Initialize with a Conda environment file (.yml or .yaml).
 * `--fakeroot`: Create image compatible with fakeroot (owned by root, must use with `--fakeroot` later).
 * `-S`, `--sparse`: Create a sparse image file (no pre-allocation).
-* `--no-tmp`: Create the overlay directly at the target path instead of staging at a local tmp directory first. By default CondaTainer creates the image on a fast local filesystem (e.g. `/tmp`) and moves it to the destination once ready — this is significantly faster on HPC network filesystems (LustreFS). Use `--no-tmp` only when the target is already on local storage.
-* `-- [packages...] [-c channel...]`: Initialize with inline conda packages instead of a YAML file. Mutually exclusive with `-f`. Channels passed with `-c` are saved in `.condarc` inside the overlay for reuse by `mm-install`, `mm-update`, and `mm-search`. Default channels when no `-c` is given: `conda-forge` + `bioconda`. `conda-forge` is always appended if not explicitly listed.
-* NAME: Name of the overlay image (`env.img` by default if not specified).
+* `--no-tmp`: Create the overlay directly at the target path instead of staging at a local tmp directory first.
+* `-- [packages...] [-c channel...]`: Initialize with inline conda packages instead of a YAML file. Mutually exclusive with `-f`. (`conda-forge` will be appended if missing)
+* NAME: Name of the overlay image (`env.img` if not specified).
 
 **Examples:**
 
 ```bash
 # Create a 20GB overlay img with a custom name
-condatainer overlay create -s 20G my_analysis_env
+condatainer overlay create -s 20g my_analysis_env
 
 # Create with a specific profile (small/balanced/large)
-condatainer overlay create -t large data_env.img
+condatainer overlay create -p large data_env.img
 
 # o is a shortcut for 'overlay create'
 condatainer o -f environment.yml project_env.img
@@ -215,7 +215,7 @@ Then you can use the `mm-<operation>` helper commands to create/install/update/r
 mm-install numpy pandas
 mm-install pytorch-cuda=12.4 -c pytorch -c nvidia  # extra channels merged with saved ones
 
-# manage channels
+# manage channels (/ext3/env/.condarc)
 mm-channels get              # show configured channels
 mm-channels prepend pytorch  # move/add channel to highest priority
 mm-channels append bioconda  # move/add channel to lowest priority
@@ -250,7 +250,7 @@ mm-export --no-builds > my_env.yaml
 Alias for [`condatainer info`](#info) scoped to ext3 `.img` overlays. Produces identical output.
 
 ```
-condatainer overlay info [image_path]
+condatainer overlay info <path>
 ```
 
 ```bash
@@ -266,7 +266,7 @@ Verify filesystem integrity of an ext3 `.img` overlay.
 **Usage:**
 
 ```
-condatainer overlay check [image_path]
+condatainer overlay check <path>
 ```
 
 **Options:**
@@ -287,7 +287,7 @@ Change the ownership of files inside an ext3 `.img` overlay. This is useful when
 **Usage:**
 
 ```
-condatainer overlay chown [OPTIONS] [image]
+condatainer overlay chown [OPTIONS] <path>
 ```
 
 **Options:**
@@ -295,8 +295,8 @@ condatainer overlay chown [OPTIONS] [image]
 * `-u`, `--uid UID`    : Set the owner UID (default: current user's UID).
 * `-g`, `--gid GID`    : Set the group GID (default: current user's GID).
 * `--root`             : Set UID/GID to 0 (root); overrides `-u` and `-g`.
-* `-p`, `--path PATH`  : Path inside the overlay to change (can specify multiple, default: `/`).
-* `image`              : Path to the overlay `img` file.
+* `-p`, `--path PATH`  : Path inside the overlay to change (repeatable, default: `/`).
+* `path`               : Path to the ext3 overlay file.
 
 **Examples:**
 
@@ -309,9 +309,6 @@ condatainer overlay chown -u 1001 -g 1001 env.img
 
 # Set ownership to root
 condatainer overlay chown --root env.img
-
-# Set entire image to root
-condatainer overlay chown --root -p / env.img
 
 # Chown only /ext3 path
 condatainer overlay chown -p /ext3 env.img
@@ -327,19 +324,19 @@ Resize an ext3 `.img` overlay to a new size. Supports both expanding and shrinki
 **Usage:**
 
 ```
-condatainer overlay resize -s SIZE [image]
+condatainer overlay resize -s SIZE <path>
 ```
 
 **Options:**
 
-* `-s`, `--size SIZE`  : New size for the overlay image (e.g., `20G`, `2048M`). **Required.**
-* `image`              : Path to the overlay `img` file.
+* `-s`, `--size SIZE`  : New size for the overlay (e.g., `20g`, `2048M`). **Required.** Case insensitive
+* `path`               : Path to the ext3 overlay file.
 
 **Examples:**
 
 ```bash
 # Resize env.img to 20GB
-condatainer overlay resize -s 20G env.img
+condatainer overlay resize -s 20g env.img
 ```
 
 ### Overlay Export
@@ -397,22 +394,29 @@ condatainer create [OPTIONS] [packages...]
 
 **Aliases:** `install`, `i`
 
-**Options:**
+**Arguments:**
+
+* `packages`: List of packages to install (e.g., `bcftools/1.22` or `samtools=1.10` or `grch38/genome/gencode`). Supports conda channel annotations: `bioconda::star=2.7.11b` (version required in default mode; optional with `-n`/`-p`).
+
+**Flags:**
 
 * `-n`, `--name [NAME]`: Custom name for the resulting overlay file. If used, all specified packages are bundled into one overlay.
 * `-p`, `--prefix [PATH]`: Custom prefix path for the overlay file. When `-f` is used, this can be omitted — the prefix is inferred from the file name.
 * `-f`, `--file [FILE]`: Path to definition file (.yaml, .sh, .def).
 * `-s`, `--source [URI]`: Remote source URI (e.g., `docker://ubuntu:22.04`).
-* `-c`, `--channel [CHANNEL]`: Conda channel to use, overriding config channels. Repeatable: `-c conda-forge -c bioconda`. Also accepts channel-annotated packages like `bioconda::star=2.7.11b` directly as package arguments (see below).
-* `--temp-size [SIZE]`: Size of temporary overlay (default: 20G).
-* `--block-size [SIZE]`: SquashFS block size for app/env/external overlays (e.g. `128k`, `512k`; default: `128k`). Must be a power of two between `4k` and `1m`.
-* `--data-block-size [SIZE]`: SquashFS block size for data/reference overlays (e.g. `512k`, `1m`; default: `1m`). Must be a power of two between `4k` and `1m`.
-* `--use-tmp-overlay`: Use a temporary ext3 overlay during builds instead of host directories. Equivalent to setting `build.use_tmp_overlay = true` in config.
+* `-c`, `--channel [CHANNEL]`: Conda channel to use, overriding config channels. Repeatable: `-c conda-forge -c bioconda`.
 * `-u`, `--update`: Rebuild overlays even if they already exist (atomic `.new` swap). Useful for refreshing a package to the latest version.
+
+**Build Flags:**
+
+* `--temp-size [SIZE]`: Size of temporary overlay (default: 20G). Only used when `--use-tmp-overlay` is active.
+* `--block-size [SIZE]`: SquashFS block size for app/env/external overlays (e.g. `128k`, `512k`; default: `128k`). Must be a power of two between `4k` and `1m`.
+* `--data-block-size [SIZE]`: SquashFS block size for data/reference overlays (e.g. `512k`, `1m`; default: `512k`). Must be a power of two between `4k` and `1m`.
+* `--use-tmp-overlay`: Use a temporary ext3 overlay during builds instead of host directories. Equivalent to setting `build.use_tmp_overlay = true` in config. Can be substantially faster when the build tmp directory is on a network filesystem.
+* `--always-submit`: Submit all builds as scheduler jobs, even when the build script has no scheduler directives.
+* `--no-submit`: Disable job submission; build locally even if the build script has scheduler directives.
 * `--remote`: Remote build scripts take precedence over local.
 * `--no-prebuilt`: Skip the prebuilt artifact download for remote `.def` builds and build locally with Apptainer instead.
-* `--no-submit`: Disable job submission; build locally even if the build script has scheduler directives.
-* `packages`: List of packages to install (e.g., `bcftools/1.22` or `samtools=1.10` or `grch38/genome/gencode`). Supports conda channel annotations: `bioconda::star=2.7.11b` (version required in default mode; optional with `-n`/`-p`).
 
 **Compression Options:**
 
@@ -448,12 +452,8 @@ condatainer create python=3.11 numpy -p /scratch/myenv
 
 # Create from a yaml file (prefix inferred from filename)
 condatainer create -f environment.yml
-
 # Create from a yaml file with a custom prefix
 condatainer create -p my_analysis_env -f environment.yml
-
-# Create a custom env with multiple packages bundled together
-condatainer create -n tools samtools=1.16 bcftools=1.15
 
 # Rebuild an existing conda overlay (force update)
 condatainer create -n nvim nvim nodejs -u
@@ -465,8 +465,8 @@ condatainer create python=3.11 -n myenv -c conda-forge -c bioconda
 # (version required in default mode)
 condatainer create bioconda::star=2.7.11b
 
-# Channel annotation in bundled env (version optional with -n/-p)
-condatainer create -n rnaseq bioconda::star bioconda::salmon=1.10.0
+# Channel annotation in bundled env
+condatainer create -p rnaseq bioconda::star bioconda::salmon=1.10.0
 ```
 
 **Build script:**
@@ -545,19 +545,19 @@ Commands that may return exit code `3` when scheduler jobs were submitted includ
 Quick example for shell scripts that detect the job-submitted state:
 
 ```bash
-condatainer create samtools/1.22
+condatainer create grch38/salmon/1.10.2/gencode49
 if [ $? -eq 3 ]; then
   echo "Jobs submitted to scheduler — overlays will be created asynchronously"
   # Optionally: exit 0 or wait/monitor jobs here
 fi
 ```
 
-Note: When exit code `3` is returned, CondaTainer prints a message showing the number of jobs submitted (and can be extended to emit JSON or write job metadata for automation).
+Note: When exit code `3` is returned, CondaTainer prints a message showing the number of jobs submitted.
 
 **Disabling Job Submission:**
 
 ```bash
-# Run locally even with scheduler specs
+# Run locally with scheduler specs
 condatainer run --no-submit analysis.sh
 
 # Or set in config
@@ -663,7 +663,7 @@ Same as `avail` (single term: substring/wildcard/regex; multiple terms: exact-fi
 **Features:**
 
 * Output is grouped by image directory with a full-width header per directory.
-* Lists app overlays (with versions), OS overlays, and data overlays.
+* Lists OS overlays, app overlays, and data overlays.
 * Missing directories are skipped; existing but empty directories show a `(no overlays)` line.
 * Exits with code `1` if search terms are given but no overlays match.
 
@@ -750,8 +750,8 @@ condatainer search <package> [flags]
 **Options:**
 
 * `--json`: Output results in JSON format.
-* `-f`, `--fuzzy`: Substring match instead of exact name match.
-* `-l`, `--limit N`: Maximum number of fuzzy search results (default: 100).
+* `-f`, `--fuzzy`: Search package via api.anaconda.org.
+* `-l`, `--limit N`: Number of fuzzy search results before filter (default: 100).
 * `-c`, `--channel [CHANNEL]`: Channel to search, overriding config channels. Repeatable: `-c bioconda -c conda-forge`.
 
 **Notes:**
@@ -784,12 +784,12 @@ condatainer exec [flags] [command...]
 
 **Options:**
 
-* `-o`, `--overlay [OVERLAY]`: Overlay file to mount (can be used multiple times).
+* `-o`, `--overlay [OVERLAY]`: Overlay file to mount (repeatable).
 * `-w`, `--writable`: Mount `.img` overlays as writable (default: read-only).
 * `-b`, `--base-image [PATH]`: Base image to use instead of default.
 * `-f`, `--fakeroot`: Run container with fakeroot privileges.
-* `--env [KEY=VALUE]`: Set environment variable inside the container (can be used multiple times).
-* `--bind [HOST:CONTAINER]`: Bind mount path into the container (can be used multiple times).
+* `--env [KEY=VALUE]`: Set environment variable inside the container (repeatable).
+* `--bind [HOST:CONTAINER]`: Bind mount path into the container (repeatable).
 
 **Features:**
 
@@ -847,8 +847,8 @@ condatainer e [flags] [overlays...] [--] [command...]
 * `-n`, `--no-autoload`: Disable autoloading `env.img` from current directory.
 * `-b`, `--base-image [PATH]`: Base image to use instead of default.
 * `-f`, `--fakeroot`: Run container with fakeroot privileges.
-* `--env [KEY=VALUE]`: Set environment variable inside the container (can be used multiple times).
-* `--bind [HOST:CONTAINER]`: Bind mount path into the container (can be used multiple times).
+* `--env [KEY=VALUE]`: Set environment variable inside the container (repeatable).
+* `--bind [HOST:CONTAINER]`: Bind mount path into the container (repeatable).
 
 **Key Differences from `exec`:**
 
@@ -856,6 +856,8 @@ condatainer e [flags] [overlays...] [--] [command...]
 * Commands go after `--`.
 * Writable by default (use `-r` for read-only).
 * Auto-loads `env.img` unless `-n` is specified.
+  * search path `./` > `./overlay/` > `./src/overlay/`
+  * `env-$USER.img` > `env.img`
 * Defaults to bash if no command specified.
 
 **Environment Variables (inside container):**
@@ -957,33 +959,40 @@ Executes a script inside the **CondaTainer** environment, mounting dependencies 
 condatainer run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
 ```
 
-> **Note:** All options (`-a`, `-o`, `--afterok`, etc.) must appear **before** `SCRIPT`. Arguments after the script name are forwarded to the script.
+```{note}
+All options (`-a`, `-o`, `--afterok`, etc.) must appear **before** `SCRIPT`. Arguments after the script name are forwarded to the script.
+```
 
-**Options:**
+**Container Flags:**
 
 * `-w`, `--writable`, `--writable-img`: Make `.img` overlays writable (default: read-only).
 * `-b`, `--base-image [PATH]`: Use custom base image.
 * `--module`: Also parse `module load` / `ml` lines as dependencies.
+* `-f`, `--fakeroot`: Run with fakeroot privileges.
+* `--bind HOST:CONTAINER`: Bind mount a path into the container (repeatable).
+* `--env KEY=VALUE`: Set an environment variable inside the container (repeatable).
+
+**Resource Override Flags:**
+
+These override the script's scheduler directives (`#SBATCH`, `#PBS`, `#BSUB`) for this run.
+
+* `-c`, `--cpu INT`: Override CPUs per task (e.g. `4`).
+* `-m`, `--mem STRING`: Override memory per task (e.g. `4G`, `8192M`).
+* `-t`, `--time STRING`: Override walltime (e.g. `4d12h`, `2h30m`, `01:30:00`).
+* `-g`, `--gpu SPEC`: Override GPUs per node. Formats: `N` (any type), `TYPE:N`, or `TYPE` (count=1). E.g. `1`, `a100:2`, `a100`.
+
+**Job Flags:**
+
 * `-n`, `--name NAME`: Override the job name shown in the scheduler queue (e.g. `squeue`). Takes priority over `#SBATCH --job-name` and similar directives.
 * `-o`, `--output PATH`: Override the job stdout path (creates parent directory if needed). Takes priority over scheduler stdout settings.
 * `-e`, `--error PATH`: Override the job stderr path. Takes priority over scheduler stderr settings.
 * `--afterok IDS`: Submit job that runs only if all listed jobs **succeed**. Colon-separated IDs: `123:456:789`.
 * `--afternotok IDS`: Submit job that runs only if any listed job **fails**. Colon-separated IDs.
 * `--afterany IDS`: Submit job that runs after all listed jobs finish **regardless of outcome**. Colon-separated IDs.
-* `-f`, `--fakeroot`: Run with fakeroot privileges.
-* `--bind HOST:CONTAINER`: Bind mount a path into the container (repeatable).
-* `--env KEY=VALUE`: Set an environment variable inside the container (repeatable).
-* `--dry-run`: Preview what would be submitted without executing anything.
-* `--no-submit`: Disable job submission; run the script locally even if it has scheduler directives.
 * `--array FILE`: Input file for an array job — one subjob per line, tokens become positional args.
 * `--array-limit N`: Max concurrently running subjobs (0 = unlimited).
-
-**Resource override flags** (apply on top of script scheduler directives; highest priority):
-
-* `-c`, `--cpu INT`: Override CPUs per task (e.g. `4`).
-* `-m`, `--mem STRING`: Override memory per task (e.g. `4G`, `8192M`).
-* `-t`, `--time STRING`: Override walltime (e.g. `4d12h`, `2h30m`, `01:30:00`).
-* `-g`, `--gpu SPEC`: Override GPUs per node. Formats: `N` (any type), `TYPE:N`, or `TYPE` (count=1). E.g. `1`, `a100:2`, `a100`.
+* `--dry-run`: Preview what would be submitted without executing anything.
+* `--no-submit`: Disable job submission; run the script locally even if it has scheduler directives.
 
 **Script Tags:**
 
@@ -1039,7 +1048,7 @@ If your script contains scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`), `c
 #DEP: samtools/1.22
 #DEP: bcftools/1.22
 
-samtools view -@ 4 input.bam | bcftools call -mv -o output.vcf
+samtools view -@ $NCPUS input.bam | bcftools call -mv -o output.vcf
 ```
 
 Install missing dependencies first:
@@ -1355,7 +1364,6 @@ Options:
 * `-u`, `--update`: Update helper scripts from remote metadata.
 * `--path`: Show all helper script search paths and the writable directory. If a `SCRIPT_NAME` is given, print the absolute path of that specific helper script and exit.
 * `-l`, `--list`: List available helper scripts with their descriptions (from `#WHATIS` tags).
-* `--no-submit`: Disable job submission; run the helper headless on the current machine.
 * `SCRIPT_NAME`: Name of the helper script to run (optional).
 * `SCRIPT_ARGS...`: Remaining arguments are passed directly to the helper script when running it.
 
@@ -1376,10 +1384,11 @@ condatainer helper --update
 
 # Run a helper script with arguments (e.g. request 4 CPUs)
 condatainer helper code-server -c 4
-
-# Run a helper headless (no scheduler submission)
-condatainer helper --no-submit code-server
 ```
+
+To run a helper without submitting a job, set `submit_job: false` in the config
+(`condatainer config set submit_job false`). There is no per-run flag — helper jobs
+follow the global setting.
 
 ## Config
 

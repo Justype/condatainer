@@ -48,15 +48,18 @@ var (
 	ProfileLarge = Profile{InodeRatio: 1048576, ReservedPerc: 3}
 )
 
-// GetProfile returns the Profile struct for a simple string name.
-func GetProfile(name string) Profile {
+// GetProfile returns the Profile for a name (small/balanced/large, or an alias),
+// or nil if the name is not found.
+func GetProfile(name string) *Profile {
 	switch strings.ToLower(name) {
 	case "small", "conda", "python":
-		return ProfileSmall
+		return &ProfileSmall
 	case "large", "data", "genome":
-		return ProfileLarge
+		return &ProfileLarge
+	case "balanced", "default", "":
+		return &ProfileDefault
 	default:
-		return ProfileDefault
+		return nil
 	}
 }
 

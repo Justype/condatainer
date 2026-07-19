@@ -71,12 +71,12 @@ var createCmd = &cobra.Command{
 	Short:   "Create a new SquashFS overlay",
 	Long: `Create a new SquashFS overlay using available build scripts or Conda packages.
 
-Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
-	Example: `  condatainer create samtools/1.22                       # Create from build script
-  condatainer create python=3.11 numpy -n myenv          # Create conda environment
-  condatainer create python=3.11 numpy -p /scratch/myenv # Create conda env at custom path
-  condatainer create -f environment.yml -p myenv         # Create from conda file with prefix
-  condatainer create --source /data -p dataset           # Convert directory to overlay`,
+Submitted build jobs exit with code 3 (useful for scripts).`,
+	Example: `  condatainer create orad/2.7.0                   # Create from build script
+  condatainer create -n nvim nvim nodejs          # Create conda env
+  condatainer create matplotlib pandas  -p /path  # Create conda env at custom path
+  condatainer create -f environment.yml -p myenv  # Create from conda file with prefix
+  condatainer create -s docker://ubuntu:22.04 -p ubuntu  # Build from a container image`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
 		// 1. Validation Logic
@@ -202,19 +202,19 @@ func init() {
 
 	// Register Flags
 	f := createCmd.Flags()
-	f.StringVarP(&createName, "name", "n", "", "Custom name for the resulting overlay file")
-	f.StringVarP(&createPrefix, "prefix", "p", "", "Custom prefix path for the overlay file")
+	f.StringVarP(&createName, "name", "n", "", "Custom name for the overlay")
+	f.StringVarP(&createPrefix, "prefix", "p", "", "Custom prefix path for the overlay")
 	f.StringVarP(&createFile, "file", "f", "", "Path to definition file (.yaml, .sh, .def)")
 	f.StringVarP(&createSource, "source", "s", "", "Remote source URI (e.g., docker://ubuntu:22.04)")
 	f.StringVar(&createTempSize, "temp-size", "20G", "Size of temporary overlay")
-	f.StringVar(&createBlockSize, "block-size", "", "SquashFS block size for app/env/external overlays (e.g. 128k, 512k)")
-	f.StringVar(&createDataBlockSize, "data-block-size", "", "SquashFS block size for data overlays (e.g. 512k, 1m)")
+	f.StringVar(&createBlockSize, "block-size", "", "SquashFS block size of app/external overlays (e.g. 256k)")
+	f.StringVar(&createDataBlockSize, "data-block-size", "", "SquashFS block size of data overlays (e.g. 512k, 1m)")
 	f.StringArrayVarP(&createChannels, "channel", "c", nil, "Conda channel to use (overrides config; repeatable)")
 	f.BoolVar(&createRemote, "remote", false, "Remote build scripts take precedence over local")
-	f.BoolVar(&createNoPrebuilt, "no-prebuilt", false, "Skip prebuilt artifact download; build .def files locally")
-	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist (atomic .new swap)")
+	f.BoolVar(&createNoPrebuilt, "no-prebuilt", false, "Skip prebuilt artifact download; build overlays locally")
+	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist")
 	f.BoolVar(&createUseTmpOverlay, "use-tmp-overlay", false, "Use a temporary overlay instead of a temp directory")
-	f.BoolVar(&createAlwaysSubmit, "always-submit", false, "Submit all builds as scheduler jobs even without scheduler directives")
+	f.BoolVar(&createAlwaysSubmit, "always-submit", false, "Submit all builds as scheduler jobs, even no directives")
 	f.BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (build locally)")
 
 	// Compression flags: create a bool flag for each known option
@@ -257,13 +257,13 @@ func init() {
 			}
 		})
 		if general.HasFlags() {
-			fmt.Fprintf(cmd.OutOrStderr(), "\nFlags:\n%s", general.FlagUsages())
+			fmt.Fprintf(cmd.OutOrStderr(), "\nFlags:\n%s", flagUsages(general))
 		}
 		if build.HasFlags() {
-			fmt.Fprintf(cmd.OutOrStderr(), "\nBuild Flags:\n%s", build.FlagUsages())
+			fmt.Fprintf(cmd.OutOrStderr(), "\nBuild Flags:\n%s", flagUsages(build))
 		}
 		if compress.HasFlags() {
-			fmt.Fprintf(cmd.OutOrStderr(), "\nCompression Flags:\n%s", compress.FlagUsages())
+			fmt.Fprintf(cmd.OutOrStderr(), "\nCompression Flags:\n%s", flagUsages(compress))
 		}
 		if cmd.HasAvailableInheritedFlags() {
 			fmt.Fprintf(cmd.OutOrStderr(), "\nGlobal Flags:\n%s", cmd.InheritedFlags().FlagUsages())
