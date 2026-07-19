@@ -4,10 +4,19 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
+
+// completionAlias is an extra command name to register completion for (--alias).
+var completionAlias string
+
+// aliasNamePattern restricts --alias to a plain shell word: the value is
+// interpolated into the generated script, so spaces or quotes would silently
+// produce a broken completion file.
+var aliasNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // detectLoginShell reads $SHELL (the user's configured login shell).
 func detectLoginShell() string {
@@ -49,12 +58,12 @@ var completionCmd = &cobra.Command{
 	Short: "Generate shell completion script",
 	Long: `Generate shell completion script for condatainer.
 
-If no shell is specified, the current shell will be auto-detected.`,
+If no shell is specified, the current shell will be auto-detected.
+Use --alias to define a shorter name, e.g. --alias cnt lets you type 'cnt avail'.
+An alias only takes effect when the script is sourced from shell rc file.`,
 	Example: `  Bash:
   # Current session
   source <(condatainer completion bash)
-  # All sessions (install once)
-  condatainer completion bash > /etc/bash_completion.d/condatainer
 
   Zsh:
   # Current session
@@ -76,6 +85,11 @@ If no shell is specified, the current shell will be auto-detected.`,
 			shell = args[0]
 		}
 
+		if completionAlias != "" && !aliasNamePattern.MatchString(completionAlias) {
+			ExitWithError("Invalid --alias %q: use letters, digits, '-' or '_' only.", completionAlias)
+		}
+		name := cmd.Root().Name()
+
 		switch shell {
 		case "bash":
 			// Generate to buffer so we can post-process
@@ -85,25 +99,70 @@ If no shell is specified, the current shell will be auto-detected.`,
 			}
 			// Post-process to handle -- and add overlay fzf support
 			script := postProcessBashCompletion(buf.String())
-			os.Stdout.WriteString(script)
+			os.Stdout.WriteString(script + bashAliasBinding(name, completionAlias))
 		case "zsh":
 			// Generate to buffer so we can post-process
 			var buf bytes.Buffer
 			cmd.Root().GenZshCompletion(&buf)
 			script := postProcessZshCompletion(buf.String())
-			os.Stdout.WriteString(script)
+			os.Stdout.WriteString(script + zshAliasBinding(name, completionAlias))
 		case "fish":
 			// Generate to buffer so we can post-process
 			var buf bytes.Buffer
 			cmd.Root().GenFishCompletion(&buf, true)
 			script := postProcessFishCompletion(buf.String())
-			os.Stdout.WriteString(script)
+			os.Stdout.WriteString(script + fishAliasBinding(script, name, completionAlias))
 		}
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(completionCmd)
+	completionCmd.Flags().StringVar(&completionAlias, "alias", "",
+		"Define a short alias (e.g. cnt) and complete it too")
+}
+
+// bashAliasBinding defines the alias and binds it to the generated completion
+// function. Empty when no alias was requested.
+func bashAliasBinding(name, alias string) string {
+	if alias == "" {
+		return ""
+	}
+	return fmt.Sprintf(`
+alias %[2]s=%[1]s
+if [[ $(type -t compopt) = "builtin" ]]; then
+    complete -o default -F __start_%[1]s %[2]s
+else
+    complete -o default -o nospace -F __start_%[1]s %[2]s
+fi
+`, name, alias)
+}
+
+// zshAliasBinding defines the alias and binds it to the generated completion
+// function. Empty when no alias was requested.
+func zshAliasBinding(name, alias string) string {
+	if alias == "" {
+		return ""
+	}
+	return fmt.Sprintf("\nalias %[2]s=%[1]s\ncompdef _%[1]s %[2]s\n", name, alias)
+}
+
+// fishAliasBinding mirrors the script's 'complete -c <name>' lines onto alias.
+// Fish binds each command separately, so the lines are duplicated verbatim.
+// Empty when no alias was requested.
+func fishAliasBinding(script, name, alias string) string {
+	if alias == "" {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nalias %s %s\n", alias, name)
+	prefix := "complete -c " + name + " "
+	for _, line := range strings.Split(script, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			fmt.Fprintf(&b, "complete -c %s %s\n", alias, strings.TrimPrefix(line, prefix))
+		}
+	}
+	return b.String()
 }
 
 // bashCompletionFallback defines minimal stubs for _get_comp_words_by_ref and
