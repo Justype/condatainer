@@ -714,10 +714,11 @@ func GetHelperBookmarksPath() string {
 
 // ServerState is the JSON written to the server PID file (NFS-visible).
 type ServerState struct {
-	Host  string `json:"host"`
-	Port  int    `json:"port"`
-	Token string `json:"token"`
-	PID   int    `json:"pid"`
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Token  string `json:"token"`
+	PID    int    `json:"pid"`
+	Daemon bool   `json:"daemon"` // Saved for 'server restart' using same daemon mode.
 }
 
 // GetServerPidFilePath returns the path to the server PID/state file for the current host.

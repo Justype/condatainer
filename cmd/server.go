@@ -24,11 +24,10 @@ var serverCmd = &cobra.Command{
 
 The server runs on the login node and provides:
   - Web dashboard at http://localhost:{port}/
-  - Reverse proxy to helper services on compute nodes via SSH tunnels
-  - Live SSE log streaming
+  - Reverse proxy to helper apps running on compute nodes 
+  - Live log streaming
 
-The port is persisted after the first start. Set up SSH once:
-  LocalForward {port} localhost:{port}`,
+The port is persisted after the first start.`,
 }
 
 var (
@@ -38,10 +37,11 @@ var (
 
 var serverStartCmd = &cobra.Command{
 	Use:   "start",
+	Args:  cobra.NoArgs,
 	Short: "Start the dashboard server in the background",
 	Long: `Start the dashboard server in the background.
 
-By default the server exits when your SSH session ends.`,
+By default the server exits when your SSH session ends; use --daemon to keep it running.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
@@ -83,12 +83,10 @@ var serverStopCmd = &cobra.Command{
 	Long: `Stop the dashboard server.
 
 Without arguments, stops the server on the current login node.
-Pass a node name (or partial match) to stop a server on another login node.
-
-Example:
-  condatainer server stop              # stop local server
-  condatainer server stop login2       # stop server on the login node matching "login2"
-  condatainer server stop --node login2`,
+Pass a node name (or partial match) to stop a server on another login node.`,
+	Example: `  condatainer server stop               # Stop the local server
+  condatainer server stop login2        # Stop the server on the node matching "login2"
+  condatainer server stop --node login2 # Same, using the flag`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
@@ -161,6 +159,7 @@ func stopRemoteServer(ss *config.ServerState) error {
 
 var serverStatusCmd = &cobra.Command{
 	Use:   "status",
+	Args:  cobra.NoArgs,
 	Short: "Show dashboard server status across all login nodes",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
@@ -197,16 +196,26 @@ var serverStatusCmd = &cobra.Command{
 	},
 }
 
-var serverRestartPort int
+var (
+	serverRestartPort   int
+	serverRestartDaemon bool
+)
 
 var serverRestartCmd = &cobra.Command{
 	Use:   "restart",
+	Args:  cobra.NoArgs,
 	Short: "Restart the dashboard server (stop + start)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
 		pidFile := config.GetServerPidFilePath()
 		ss, err := server.ReadState(pidFile)
+
+		// Keep the running server's daemon mode unless --daemon was given.
+		daemon := serverRestartDaemon
+		if !cmd.Flags().Changed("daemon") && ss != nil {
+			daemon = ss.Daemon
+		}
 
 		// Determine target port: flag > saved state > saved config > free port.
 		port := serverRestartPort
@@ -222,13 +231,13 @@ var serverRestartCmd = &cobra.Command{
 
 		if err != nil || ss == nil {
 			utils.PrintMessage("Server is not running, starting fresh.")
-			return startServerDaemon(port, serverStartDaemon)
+			return startServerDaemon(port, daemon)
 		}
 
 		p, err := os.FindProcess(ss.PID)
 		if err != nil || p.Signal(syscall.Signal(0)) != nil {
 			utils.PrintMessage("Server process not found, starting fresh.")
-			return startServerDaemon(port, serverStartDaemon)
+			return startServerDaemon(port, daemon)
 		}
 		if err := p.Signal(syscall.SIGTERM); err != nil {
 			return fmt.Errorf("sending SIGTERM to PID %d: %w", ss.PID, err)
@@ -244,7 +253,7 @@ var serverRestartCmd = &cobra.Command{
 		}
 
 		utils.PrintMessage("Starting server on port %d…", port)
-		return startServerDaemon(port, serverStartDaemon)
+		return startServerDaemon(port, daemon)
 	},
 }
 
@@ -253,10 +262,10 @@ func init() {
 	serverCmd.AddCommand(serverStartCmd, serverStopCmd, serverStatusCmd, serverRestartCmd)
 
 	serverStartCmd.Flags().IntVarP(&serverStartPort, "port", "p", 0, "Port to listen on (saved to config for reuse)")
-	serverStartCmd.Flags().BoolVar(&serverStartDaemon, "daemon", false, "Survive SSH logout (useful with a permanent SSH LocalForward)")
+	serverStartCmd.Flags().BoolVar(&serverStartDaemon, "daemon", false, "Keep running after SSH logout")
 	serverStopCmd.Flags().StringVarP(&serverStopNodeFlag, "node", "n", "", "Login node to stop (partial match, e.g. login2)")
 	serverRestartCmd.Flags().IntVarP(&serverRestartPort, "port", "p", 0, "Restart on a different port (saved to config for reuse)")
-	serverRestartCmd.Flags().BoolVar(&serverStartDaemon, "daemon", false, "Survive SSH logout")
+	serverRestartCmd.Flags().BoolVar(&serverRestartDaemon, "daemon", false, "Keep running after SSH logout (default: keep current mode)")
 }
 
 // startServerDaemon forks the server using the pipe-readiness protocol.
