@@ -347,8 +347,16 @@ func (b *BuildObject) CreateBuildDirs(ctx context.Context, force bool) error {
 	return nil
 }
 
+// Cleanup removes the build workspace (remote source, tmp overlay, build dir), plus
+// the partial target overlay on failure. Announces the work when there is something
+// to remove; a no-op cleanup stays silent.
 func (b *BuildObject) Cleanup(failed bool) error {
 	log := slog.Default()
+
+	willClean := (b.isRemote && b.buildSource != "") || b.tmpOverlayPath != "" || b.cntDirPath != ""
+	if willClean {
+		log.Info("cleaning up temporary files")
+	}
 
 	// Remove remote build source if downloaded
 	if b.isRemote && b.buildSource != "" {
@@ -394,6 +402,10 @@ func (b *BuildObject) Cleanup(failed bool) error {
 				log.Warn("failed to remove target overlay", "path", b.targetOverlayPath, "err", err)
 			}
 		}
+	}
+
+	if willClean {
+		log.Info("temporary files cleaned", "kind", "success")
 	}
 
 	return nil
