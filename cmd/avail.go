@@ -307,6 +307,11 @@ func getInstalledOverlays() map[string]bool {
 	return installed
 }
 
+// maxInlinePLValues is the largest number of concrete placeholder values listed
+// inline. Longer lists collapse to a "first-last  (n values)" range summary;
+// users can <Tab>-complete the individual values when prompted.
+const maxInlinePLValues = 5
+
 // formatTemplateLine formats a template (PL) package as a collapsed group header.
 // Shows placeholders and their value lists, plus a variant count.
 //
@@ -376,7 +381,7 @@ func formatTemplateLine(pkg PackageInfo, showWhatis bool) string {
 		}
 		n := len(concrete)
 		var display string
-		if n > 8 {
+		if n > maxInlinePLValues {
 			display = fmt.Sprintf("%s-%s  %s", concrete[n-1], concrete[0], utils.StyleDebug(fmt.Sprintf("(%d values)", n)))
 		} else {
 			display = strings.Join(concrete, ", ")
