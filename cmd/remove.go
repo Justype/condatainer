@@ -37,6 +37,48 @@ The command will ask for confirmation before removing overlays.`,
 func init() {
 	rootCmd.AddCommand(removeCmd)
 	removeCmd.Flags().StringP("dir", "D", "", "Limit to a specific image directory (substring match)")
+	removeCmd.Flags().StringP("layer", "l", "", "Limit to a data layer: u/user, r/app-root, e/extra-root")
+	removeCmd.RegisterFlagCompletionFunc("layer", //nolint:errcheck
+		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+			return []string{"user", "app-root", "extra-root"}, cobra.ShellCompDirectiveNoFileComp
+		})
+}
+
+// scopedImageDirs applies --layer and --dir to the image search paths.
+// Both are optional and compose: --layer picks a layer, --dir narrows by substring.
+// Exits with an error when a filter matches nothing, so an empty result never reads
+// as "no overlays installed".
+func scopedImageDirs(cmd *cobra.Command) []string {
+	dirs := config.GetImageSearchPaths()
+
+	if loc, _ := cmd.Flags().GetString("layer"); loc != "" {
+		layer, err := config.ParseDataLayer(loc)
+		if err != nil {
+			ExitWithError("%v", err)
+		}
+		dirs = config.FilterDirsByLayer(dirs, layer)
+		if len(dirs) == 0 {
+			utils.PrintWarning("No image directory in the %s layer.", layer)
+			os.Exit(ExitCodeError)
+		}
+	}
+
+	if dirFilter, _ := cmd.Flags().GetString("dir"); dirFilter != "" {
+		dirs = filterImageDirs(dirs, dirFilter)
+		if len(dirs) == 0 {
+			utils.PrintWarning("No image directory matching %q found.", dirFilter)
+			os.Exit(ExitCodeError)
+		}
+	}
+
+	return dirs
+}
+
+// isScoped reports whether the user restricted the operation to specific directories.
+func isScoped(cmd *cobra.Command) bool {
+	loc, _ := cmd.Flags().GetString("layer")
+	dir, _ := cmd.Flags().GetString("dir")
+	return loc != "" || dir != ""
 }
 
 func runRemove(cmd *cobra.Command, args []string) error {
@@ -59,27 +101,11 @@ func runRemove(cmd *cobra.Command, args []string) error {
 
 	terms := normalizeFilters(searchArgs)
 
-	// Get installed overlays, optionally scoped to a specific dir
-	installedOverlays, err := getInstalledOverlaysMap()
+	// Resolve names within the scoped directories, so a copy shadowed by a
+	// higher-priority layer is reachable via --layer / --dir.
+	installedOverlays, err := getInstalledOverlaysMapIn(scopedImageDirs(cmd))
 	if err != nil {
 		return err
-	}
-	dirFilter, _ := cmd.Flags().GetString("dir")
-	if dirFilter != "" {
-		known := filterImageDirs(config.GetImageSearchPaths(), dirFilter)
-		if len(known) == 0 {
-			utils.PrintWarning("No image directory matching %q found.", dirFilter)
-			os.Exit(ExitCodeError)
-		}
-		knownSet := make(map[string]bool, len(known))
-		for _, d := range known {
-			knownSet[d] = true
-		}
-		for name, path := range installedOverlays {
-			if !knownSet[filepath.Dir(path)] {
-				delete(installedOverlays, name)
-			}
-		}
 	}
 
 	if len(installedOverlays) == 0 {
@@ -151,34 +177,19 @@ func runRemove(cmd *cobra.Command, args []string) error {
 // Pass showListing=false to skip reprinting the overlay list (e.g. when list -d already showed it).
 func performDelete(cmd *cobra.Command, names []string, showListing ...bool) error {
 	printListing := len(showListing) == 0 || showListing[0]
-	dirFilter, _ := cmd.Flags().GetString("dir")
+	scoped := isScoped(cmd)
 
 	allCopies, err := getAllOverlayCopies()
 	if err != nil {
 		return err
 	}
 
-	installedOverlays, err := getInstalledOverlaysMap()
+	// Resolve within the scoped dirs rather than filtering the full map: the map
+	// keeps only the highest-priority path per name, so filtering it would drop
+	// shadowed copies instead of selecting them.
+	installedOverlays, err := getInstalledOverlaysMapIn(scopedImageDirs(cmd))
 	if err != nil {
 		return err
-	}
-
-	// Apply --dir filter
-	if dirFilter != "" {
-		known := filterImageDirs(config.GetImageSearchPaths(), dirFilter)
-		if len(known) == 0 {
-			utils.PrintWarning("No image directory matching %q found.", dirFilter)
-			os.Exit(ExitCodeError)
-		}
-		knownSet := make(map[string]bool, len(known))
-		for _, d := range known {
-			knownSet[d] = true
-		}
-		for name, path := range installedOverlays {
-			if !knownSet[filepath.Dir(path)] {
-				delete(installedOverlays, name)
-			}
-		}
 	}
 
 	// Normalize and deduplicate; keep only names present in the (filtered) installed set
@@ -199,8 +210,8 @@ func performDelete(cmd *cobra.Command, names []string, showListing ...bool) erro
 	}
 	sort.Strings(valid)
 
-	// When not scoped to a specific dir, refuse to remove overlays present in multiple dirs
-	if dirFilter == "" {
+	// When not scoped, refuse to remove overlays present in multiple dirs
+	if !scoped {
 		var ambiguous []string
 		for _, name := range valid {
 			if len(allCopies[name]) > 1 {
@@ -208,11 +219,12 @@ func performDelete(cmd *cobra.Command, names []string, showListing ...bool) erro
 			}
 		}
 		if len(ambiguous) > 0 {
-			utils.PrintWarning("The following overlays exist in multiple directories. Use --dir to specify which copy to remove:")
+			utils.PrintWarning("The following overlays exist in multiple layers. Use --layer (or --dir) to pick one:")
 			for _, name := range ambiguous {
 				fmt.Printf("  %s\n", utils.StyleName(name))
 				for _, p := range allCopies[name] {
-					fmt.Printf("    %s\n", filepath.Dir(p))
+					dir := filepath.Dir(p)
+					fmt.Printf("    %s %s\n", dir, utils.StyleDebug("("+string(config.ClassifyDataDir(dir))+")"))
 				}
 			}
 			return nil
@@ -374,8 +386,16 @@ func getAllOverlayCopies() (map[string][]string, error) {
 // getInstalledOverlaysMap returns a map of overlay name to path from all search paths.
 // Only the highest-priority (first found) copy per name is kept.
 func getInstalledOverlaysMap() (map[string]string, error) {
+	return getInstalledOverlaysMapIn(config.GetImageSearchPaths())
+}
+
+// getInstalledOverlaysMapIn is getInstalledOverlaysMap scoped to specific directories.
+// Names resolve within dirs only, so a copy shadowed by a higher-priority layer is
+// still reachable when dirs names its own layer — filtering the full map instead would
+// drop the entry entirely, since the map stores only the highest-priority path.
+func getInstalledOverlaysMapIn(dirs []string) (map[string]string, error) {
 	overlays := make(map[string]string)
-	for _, imagesDir := range config.GetImageSearchPaths() {
+	for _, imagesDir := range dirs {
 		if !utils.DirExists(imagesDir) {
 			continue
 		}

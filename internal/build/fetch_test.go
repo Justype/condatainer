@@ -7,28 +7,26 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// expandTemplates
+// ExpandTemplate (variant generation)
 // ---------------------------------------------------------------------------
 
-func TestExpandTemplates_DepsInterpolated(t *testing.T) {
-	scripts := map[string]ScriptInfo{
-		"grch38/star-gencode": {
-			IsTemplate:     true,
-			TargetTemplate: "grch38/star/{star_version}/gencode{gencode_version}-{read_length}",
-			PLOrder:        []string{"star_version", "gencode_version", "read_length"},
-			Deps:           []string{"grch38/genome/gencode", "grch38/gtf-gencode/{gencode_version}", "star/{star_version}"},
-			Whatis:         "STAR index GENCODE{gencode_version} read length {read_length}",
-			PL: map[string][]string{
-				"star_version":    {"2.7.11b"},
-				"gencode_version": {"47"},
-				"read_length":     {"101"},
-			},
+func TestExpandTemplate_DepsInterpolated(t *testing.T) {
+	tmpl := ScriptInfo{
+		IsTemplate:     true,
+		TargetTemplate: "grch38/star/{star_version}/gencode{gencode_version}-{read_length}",
+		PLOrder:        []string{"star_version", "gencode_version", "read_length"},
+		Deps:           []string{"grch38/genome/gencode", "grch38/gtf-gencode/{gencode_version}", "star/{star_version}"},
+		Whatis:         "STAR index GENCODE{gencode_version} read length {read_length}",
+		PL: map[string][]string{
+			"star_version":    {"2.7.11b"},
+			"gencode_version": {"47"},
+			"read_length":     {"101"},
 		},
 	}
 
-	expandTemplates(scripts)
+	got := ExpandTemplate(tmpl)
 
-	entry, ok := scripts["grch38/star/2.7.11b/gencode47-101"]
+	entry, ok := got["grch38/star/2.7.11b/gencode47-101"]
 	if !ok {
 		t.Fatal("expanded entry grch38/star/2.7.11b/gencode47-101 not found")
 	}
@@ -44,20 +42,18 @@ func TestExpandTemplates_DepsInterpolated(t *testing.T) {
 	}
 }
 
-func TestExpandTemplates_EmptyDeps(t *testing.T) {
-	scripts := map[string]ScriptInfo{
-		"grch38/gtf-gencode": {
-			IsTemplate:     true,
-			TargetTemplate: "grch38/gtf-gencode/{gencode_version}",
-			PLOrder:        []string{"gencode_version"},
-			Deps:           []string{}, // no deps — stored as empty, not nil
-			PL:             map[string][]string{"gencode_version": {"47"}},
-		},
+func TestExpandTemplate_EmptyDeps(t *testing.T) {
+	tmpl := ScriptInfo{
+		IsTemplate:     true,
+		TargetTemplate: "grch38/gtf-gencode/{gencode_version}",
+		PLOrder:        []string{"gencode_version"},
+		Deps:           []string{}, // no deps — stored as empty, not nil
+		PL:             map[string][]string{"gencode_version": {"47"}},
 	}
 
-	expandTemplates(scripts)
+	got := ExpandTemplate(tmpl)
 
-	entry, ok := scripts["grch38/gtf-gencode/47"]
+	entry, ok := got["grch38/gtf-gencode/47"]
 	if !ok {
 		t.Fatal("expanded entry grch38/gtf-gencode/47 not found")
 	}
@@ -68,32 +64,30 @@ func TestExpandTemplates_EmptyDeps(t *testing.T) {
 	}
 }
 
-func TestExpandTemplates_OpenEndedSkipped(t *testing.T) {
+func TestExpandTemplate_OpenEndedSkipped(t *testing.T) {
 	// read_length has "*" — only concrete values (101, 151) should be expanded.
-	scripts := map[string]ScriptInfo{
-		"grch38/star-gencode": {
-			IsTemplate:     true,
-			TargetTemplate: "grch38/star/{star_version}/gencode{gencode_version}-{read_length}",
-			PLOrder:        []string{"star_version", "gencode_version", "read_length"},
-			Deps:           []string{"grch38/gtf-gencode/{gencode_version}", "star/{star_version}"},
-			PL: map[string][]string{
-				"star_version":    {"2.7.11b"},
-				"gencode_version": {"47"},
-				"read_length":     {"151", "101", "*"},
-			},
+	tmpl := ScriptInfo{
+		IsTemplate:     true,
+		TargetTemplate: "grch38/star/{star_version}/gencode{gencode_version}-{read_length}",
+		PLOrder:        []string{"star_version", "gencode_version", "read_length"},
+		Deps:           []string{"grch38/gtf-gencode/{gencode_version}", "star/{star_version}"},
+		PL: map[string][]string{
+			"star_version":    {"2.7.11b"},
+			"gencode_version": {"47"},
+			"read_length":     {"151", "101", "*"},
 		},
 	}
 
-	expandTemplates(scripts)
+	got := ExpandTemplate(tmpl)
 
-	if _, ok := scripts["grch38/star/2.7.11b/gencode47-151"]; !ok {
+	if _, ok := got["grch38/star/2.7.11b/gencode47-151"]; !ok {
 		t.Error("expected expanded entry for read_length=151")
 	}
-	if _, ok := scripts["grch38/star/2.7.11b/gencode47-101"]; !ok {
+	if _, ok := got["grch38/star/2.7.11b/gencode47-101"]; !ok {
 		t.Error("expected expanded entry for read_length=101")
 	}
 	// "*" itself should never appear as a concrete value in a target name
-	for name := range scripts {
+	for name := range got {
 		if strings.Contains(name, "*") {
 			t.Errorf("unexpected entry with literal '*' in name: %s", name)
 		}

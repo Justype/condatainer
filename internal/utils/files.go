@@ -149,6 +149,17 @@ func CanWriteToDir(dir string) bool {
 	return unix.Access(dir, unix.W_OK|unix.X_OK) == nil
 }
 
+// CanWriteToFile reports whether path can be written to. An existing file must
+// itself be writable — a writable parent directory is not enough, since a
+// read-only file (e.g. a frozen shared config) cannot be opened for writing.
+// A file that does not exist yet only needs a writable ancestor directory.
+func CanWriteToFile(path string) bool {
+	if _, err := os.Stat(path); err == nil {
+		return unix.Access(path, unix.W_OK) == nil
+	}
+	return CanWriteToExistingAncestor(filepath.Dir(path))
+}
+
 // CanWriteToExistingAncestor walks up the path until it finds an existing
 // directory and checks whether it is writable. Use this when dir may not exist
 // yet but will be created by MkdirAll — a non-existent dir is not read-only,

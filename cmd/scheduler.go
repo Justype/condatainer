@@ -176,11 +176,12 @@ func runScheduler(cmd *cobra.Command, args []string) {
 
 			if len(filteredLimits) > 0 {
 				fmt.Println()
-				if schedulerGpuFilter == schedulerGpuFilterCpuOnly {
+				switch schedulerGpuFilter {
+				case schedulerGpuFilterCpuOnly:
 					fmt.Println("Partition Resource Limits (CPU-only):")
-				} else if schedulerGpuFilter == schedulerGpuFilterGpuOnly {
+				case schedulerGpuFilterGpuOnly:
 					fmt.Println("Partition Resource Limits (GPU):")
-				} else {
+				default:
 					fmt.Println("Partition Resource Limits:")
 				}
 				fmt.Println()
@@ -275,9 +276,10 @@ func runScheduler(cmd *cobra.Command, args []string) {
 
 			// No partitions match the filter
 			fmt.Println()
-			if schedulerGpuFilter == schedulerGpuFilterGpuOnly {
+			switch schedulerGpuFilter {
+			case schedulerGpuFilterGpuOnly:
 				utils.PrintWarning("No GPU partitions available")
-			} else if schedulerGpuFilter == schedulerGpuFilterCpuOnly {
+			case schedulerGpuFilterCpuOnly:
 				utils.PrintWarning("No CPU-only partitions available")
 			}
 			return

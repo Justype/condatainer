@@ -48,18 +48,18 @@ var (
 	ProfileLarge = Profile{InodeRatio: 1048576, ReservedPerc: 3}
 )
 
-// GetProfile returns the Profile for a name (small/balanced/large, or an alias),
-// or nil if the name is not found.
-func GetProfile(name string) *Profile {
+// ParseProfile resolves a profile name (small/balanced/large, or an alias) to its
+// Profile. An empty name selects the default; an unrecognized name is an error.
+func ParseProfile(name string) (Profile, error) {
 	switch strings.ToLower(name) {
 	case "small", "conda", "python":
-		return &ProfileSmall
+		return ProfileSmall, nil
 	case "large", "data", "genome":
-		return &ProfileLarge
+		return ProfileLarge, nil
 	case "balanced", "default", "":
-		return &ProfileDefault
+		return ProfileDefault, nil
 	default:
-		return nil
+		return Profile{}, fmt.Errorf("unknown profile %q (want: small/conda/python, balanced/default, large/data/genome)", name)
 	}
 }
 

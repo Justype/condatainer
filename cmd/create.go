@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
@@ -272,12 +273,22 @@ func init() {
 	})
 }
 
-// getWritableImagesDir returns the writable images directory or exits with an error
+// imagesDirNoteOnce keeps the destination note to one line per command, since the
+// three create paths each resolve the directory independently.
+var imagesDirNoteOnce sync.Once
+
+// getWritableImagesDir returns the writable images directory or exits with an error.
+// The destination and its data layer are reported once: the target depends on which
+// directories happen to be writable, so "(app-root)" vs "(user)" is the difference
+// between installing for everyone and installing only for yourself.
 func getWritableImagesDir() string {
 	dir, err := config.GetWritableImagesDir()
 	if err != nil {
 		ExitWithError("No writable images directory found: %v", err)
 	}
+	imagesDirNoteOnce.Do(func() {
+		utils.PrintNote("Installing to %s (%s)", dir, config.ClassifyDataDir(dir))
+	})
 	return dir
 }
 

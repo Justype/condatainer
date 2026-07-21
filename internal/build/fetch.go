@@ -589,18 +589,6 @@ func setRemoteFields(scripts map[string]ScriptInfo, sourceURL, prebuiltLink stri
 	}
 }
 
-// expandTemplates adds every template's variants to scripts, without overwriting
-// existing keys. Expands the whole map — for a single template use ExpandTemplate.
-func expandTemplates(scripts map[string]ScriptInfo) {
-	for _, info := range scripts {
-		for name, expanded := range ExpandTemplate(info) {
-			if _, exists := scripts[name]; !exists {
-				scripts[name] = expanded
-			}
-		}
-	}
-}
-
 // ExpandTemplate returns a single PL template's variants, keyed by interpolated name.
 // Returns nil if info is not a template, or if its #PL: and #TARGET: disagree — those
 // are reported and skipped rather than expanded into wrong entries.

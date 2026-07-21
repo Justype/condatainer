@@ -136,11 +136,11 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 	}
 
 	// Unknown profile names fall back to balanced, but warn so a typo is visible.
-	resolvedProfile := overlay.GetProfile(profile)
-	if resolvedProfile == nil {
+	resolvedProfile, err := overlay.ParseProfile(profile)
+	if err != nil {
 		utils.PrintWarning("Unknown profile %q, using 'balanced'. Valid: %s",
 			profile, strings.Join(overlayProfiles, ", "))
-		resolvedProfile = &overlay.ProfileDefault
+		resolvedProfile = overlay.ProfileDefault
 	}
 
 	uid, gid := os.Getuid(), os.Getgid()
@@ -152,7 +152,7 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 		SizeMB:         sizeMB,
 		UID:            uid,
 		GID:            gid,
-		Profile:        *resolvedProfile,
+		Profile:        resolvedProfile,
 		Sparse:         sparse,
 		FilesystemType: "ext3",
 	}
