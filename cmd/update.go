@@ -312,7 +312,7 @@ func runSelfUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Make executable
-	if err := os.Chmod(tempPath, utils.PermExec); err != nil {
+	if err := utils.MakeExecutable(tempPath); err != nil {
 		os.Remove(tempPath)
 		return fmt.Errorf("failed to set executable permissions: %w", err)
 	}
@@ -408,7 +408,7 @@ func downloadFile(url, destPath string) error {
 	}
 
 	// Create parent directory
-	if err := os.MkdirAll(filepath.Dir(destPath), utils.PermDir); err != nil {
+	if err := utils.MkdirAllShared(filepath.Dir(destPath)); err != nil {
 		return err
 	}
 
@@ -419,10 +419,8 @@ func downloadFile(url, destPath string) error {
 	}
 	defer out.Close()
 
-	// Copy data
+	// Copy data. Permissions were already set by CreateFileWritable (umask-subject,
+	// shared with the parent group); io.Copy only writes content.
 	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		return err
-	}
-	return os.Chmod(destPath, utils.PermFile)
+	return err
 }

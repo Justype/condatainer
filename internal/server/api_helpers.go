@@ -586,7 +586,7 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 		defer s.scheduleTaskCleanup(taskID)
 
 		fmt.Fprintf(bw, "Creating overlay at %s (%s)...\n", imgPath, sizeStr)
-		if err := os.MkdirAll(filepath.Dir(imgPath), utils.PermDir); err != nil {
+		if err := utils.MkdirAllShared(filepath.Dir(imgPath)); err != nil {
 			broadcastDone(broker, fmt.Errorf("mkdir: %w", err))
 			return
 		}

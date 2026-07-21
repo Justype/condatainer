@@ -1101,8 +1101,9 @@ func submitRunJob(ctx context.Context, sched scheduler.Scheduler, originScriptPa
 		}
 	}
 
-	// Ensure logs directory exists
-	if err := os.MkdirAll(logsDir, utils.PermDir); err != nil {
+	// Ensure logs directory exists. MkdirAllShared so a group-shared logs dir (2775,
+	// e.g. set via config for a lab-wide run) is group-readable/writable for reviewers.
+	if err := utils.MkdirAllShared(logsDir); err != nil {
 		return fmt.Errorf("failed to create logs directory %s: %w", logsDir, err)
 	}
 

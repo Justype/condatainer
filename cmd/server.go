@@ -283,7 +283,7 @@ func startServerDaemon(port int, daemon bool) error {
 	var logFile *os.File
 	if logPath != "" {
 		if utils.EnsureWritableDir(config.GetUserStateDir()) {
-			logFile, _ = os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0664)
+			logFile, _ = os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, utils.PermFile)
 		}
 	}
 

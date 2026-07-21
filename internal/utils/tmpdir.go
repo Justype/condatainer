@@ -7,21 +7,25 @@ import (
 
 // EnsureTmpSubdir creates the leaf directory dir with permissions based on the parent:
 //   - Parent world-writable (o+w, e.g. /tmp with mode 1777): use 0700 so other users
-//     on the same node cannot read or list the contents.
-//   - Parent private (scheduler job dir, user-controlled path): use PermDir (0775).
+//     on the same node cannot read or list the contents; not group-shared.
+//   - Otherwise (private path, or a group-shared scratch): use PermDir and
+//     ShareWithParentGroup, so a group-writable (2775) parent propagates group-write
+//     down into the workspace built underneath.
 //
 // Only the leaf is created; the parent must already exist.
 // An already-existing directory is accepted silently (safe for concurrent builds).
 func EnsureTmpSubdir(dir string) error {
-	perm := os.FileMode(PermDir)
-	if info, err := os.Stat(filepath.Dir(dir)); err == nil {
-		if info.Mode()&0002 != 0 { // parent has o+w → shared/world-writable
-			perm = 0700
+	if info, err := os.Stat(filepath.Dir(dir)); err == nil && info.Mode()&0002 != 0 {
+		// Parent world-writable: keep the scratch private, don't share.
+		if err := os.Mkdir(dir, 0700); err != nil && !os.IsExist(err) {
+			return err
 		}
+		return nil
 	}
-	if err := os.Mkdir(dir, perm); err != nil && !os.IsExist(err) {
+	if err := os.Mkdir(dir, PermDir); err != nil && !os.IsExist(err) {
 		return err
 	}
+	ShareWithParentGroup(dir)
 	return nil
 }
 

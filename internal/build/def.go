@@ -103,9 +103,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 		return fmt.Errorf("failed to dump SquashFS from SIF: %w", err)
 	}
 
-	if err := os.Chmod(finalPath, utils.PermFile); err != nil {
-		log.Debug("failed to set permissions", "path", finalPath, "err", err)
-	}
+	utils.ShareWithParentGroup(finalPath)
 
 	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
 		return err

@@ -469,7 +469,7 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ensure executable.
-	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {
+	if err := utils.MakeExecutable(scriptPath); err != nil {
 		utils.PrintDebug("Failed to chmod helper script: %v", err)
 	}
 

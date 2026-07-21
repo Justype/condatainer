@@ -3,7 +3,6 @@ package build
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -44,9 +43,7 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 		return err
 	}
 
-	if err := os.Chmod(finalPath, utils.PermFile); err != nil {
-		log.Debug("failed to set permissions", "path", finalPath, "err", err)
-	}
+	utils.ShareWithParentGroup(finalPath)
 
 	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
 		return err

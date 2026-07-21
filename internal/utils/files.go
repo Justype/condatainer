@@ -121,7 +121,89 @@ func RemoveDirIfEmpty(dir string) {
 
 // CreateFileWritable creates or truncates a file using standard writable file permissions.
 func CreateFileWritable(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, PermFile)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, PermFile)
+	if err == nil {
+		ShareWithParentGroup(path)
+	}
+	return f, err
+}
+
+// ShareWithParentGroup grants the group g+rw (plus g+x on dirs and executables) when
+// path's parent is group-writable, and does nothing otherwise — so files land
+// group-writable in a shared "2775" install and untouched in a personal one.
+// Best-effort: errors are ignored (path may be on another owner's dir).
+func ShareWithParentGroup(path string) {
+	pi, err := os.Stat(filepath.Dir(path))
+	if err != nil || pi.Mode()&0020 == 0 { // parent not group-writable
+		return
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	mode := fi.Mode().Perm()
+	if fi.IsDir() {
+		mode |= 0070 // g+rwx
+	} else {
+		mode |= 0060 // g+rw
+		if mode&0100 != 0 {
+			mode |= 0010 // g+x when u+x (executables)
+		}
+	}
+	_ = os.Chmod(path, mode)
+}
+
+// MakeExecutable adds an execute bit wherever the matching read bit is set (x where r),
+// then shares with the parent group. Mirroring the read bits keeps it umask-respecting,
+// unlike os.Chmod(path, PermExec) which forces 0775 and leaks group/other-write into
+// personal installs — so prefer this whenever a created file must be made executable.
+func MakeExecutable(path string) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	mode := fi.Mode().Perm()
+	if mode&0400 != 0 {
+		mode |= 0100 // u+x when u+r
+	}
+	if mode&0040 != 0 {
+		mode |= 0010 // g+x when g+r
+	}
+	if mode&0004 != 0 {
+		mode |= 0001 // o+x when o+r
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		return err
+	}
+	ShareWithParentGroup(path)
+	return nil
+}
+
+// MkdirAllShared is os.MkdirAll plus ShareWithParentGroup on every level it creates, so
+// nested dirs under a shared "2775" tree all become group-writable. Pre-existing dirs
+// are left untouched. Prefer this over os.MkdirAll for data/state directories.
+func MkdirAllShared(dir string) error {
+	// Collect the missing levels first, so we only share the ones we create.
+	var created []string // deepest first
+	for p := filepath.Clean(dir); ; {
+		if DirExists(p) {
+			break
+		}
+		created = append(created, p)
+		parent := filepath.Dir(p)
+		if parent == p { // reached filesystem root
+			break
+		}
+		p = parent
+	}
+	if err := os.MkdirAll(dir, PermDir); err != nil {
+		return err
+	}
+	// Shallowest-first, so each level's parent is already shared when we reach it.
+	for i := len(created) - 1; i >= 0; i-- {
+		ShareWithParentGroup(created[i])
+	}
+	return nil
 }
 
 // EnsureWritableDir creates dir if it does not exist, then checks it is writable.
@@ -132,7 +214,7 @@ func EnsureWritableDir(dir string) bool {
 		if err := os.MkdirAll(dir, PermDir); err != nil {
 			return false
 		}
-		_ = os.Chmod(dir, PermDir)
+		ShareWithParentGroup(dir)
 	}
 	return CanWriteToDir(dir)
 }
@@ -223,8 +305,6 @@ func WriteGzipJSONFileAtomic(path string, value any) error {
 	if err := os.Rename(tmp, path); err != nil {
 		return err
 	}
-	if err := os.Chmod(path, PermFile); err != nil {
-		return err
-	}
+	ShareWithParentGroup(path)
 	return nil
 }

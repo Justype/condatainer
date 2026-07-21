@@ -95,7 +95,6 @@ func typeLabel(opts *CreateOptions) string {
 // createOverlayFile runs dd + mke2fs + debugfs to build a raw overlay at filePath.
 // sparse controls whether dd creates a sparse file (fast, saves local space) or a fully-allocated one.
 func createOverlayFile(ctx context.Context, opts *CreateOptions, filePath string, sparse bool) error {
-	log := logging.FromContext(ctx)
 	cleanup := func() { os.Remove(filePath) }
 
 	// 1. Create raw file (dd)
@@ -152,9 +151,7 @@ func createOverlayFile(ctx context.Context, opts *CreateOptions, filePath string
 	}
 
 	// 4. Set permissions
-	if err := os.Chmod(filePath, utils.PermFile); err != nil {
-		log.Debug(fmt.Sprintf("failed to set permissions on overlay: %v", err))
-	}
+	utils.ShareWithParentGroup(filePath)
 
 	return nil
 }
@@ -197,9 +194,7 @@ func crossFsCopy(ctx context.Context, src, dst string, sparse bool) error {
 		return ctx.Err()
 	}
 
-	if err := os.Chmod(dst, utils.PermFile); err != nil {
-		logging.FromContext(ctx).Debug(fmt.Sprintf("failed to set permissions on overlay: %v", err))
-	}
+	utils.ShareWithParentGroup(dst)
 	return nil
 }
 
@@ -208,7 +203,8 @@ func crossFsCopy(ctx context.Context, src, dst string, sparse bool) error {
 // back to crossFsCopy which uses cp and is context-cancellable (Ctrl+C works).
 // Returns (copied=true) when a copy was performed, (copied=false) when renamed.
 func moveFile(ctx context.Context, src, dst string, sparse bool) (copied bool, err error) {
-	if err := os.MkdirAll(filepath.Dir(dst), utils.PermDir); err != nil {
+	dstDir := filepath.Dir(dst)
+	if err := utils.MkdirAllShared(dstDir); err != nil {
 		return false, fmt.Errorf("create destination directory: %w", err)
 	}
 
@@ -298,7 +294,8 @@ func CreateDirectly(ctx context.Context, opts *CreateOptions) error {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(opts.Path), utils.PermDir); err != nil {
+	destDir := filepath.Dir(opts.Path)
+	if err := utils.MkdirAllShared(destDir); err != nil {
 		return fmt.Errorf("create destination directory: %w", err)
 	}
 

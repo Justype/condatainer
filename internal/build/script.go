@@ -90,9 +90,7 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 
 	b.saveEnvFile(targetPath)
 
-	if err := os.Chmod(finalPath, utils.PermFile); err != nil {
-		log.Debug("failed to set permissions", "path", finalPath, "err", err)
-	}
+	utils.ShareWithParentGroup(finalPath)
 
 	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
 		return err
@@ -183,7 +181,7 @@ func (b *BuildObject) buildExecOpts() (execpkg.Options, execpkg.IO, error) {
 		}
 	} else {
 		if isRef {
-			if err := os.MkdirAll(b.cntDirPath, utils.PermDir); err != nil {
+			if err := utils.MkdirAllShared(b.cntDirPath); err != nil {
 				return execpkg.Options{}, execpkg.IO{}, fmt.Errorf("failed to create cnt_dir %s: %w", b.cntDirPath, err)
 			}
 			targetDir := filepath.Join(b.cntDirPath, b.nameVersion)

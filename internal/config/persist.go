@@ -420,7 +420,8 @@ func ReadConfigSliceKey(configPath, key string) []string {
 // and writes the result back to path. No global viper state is affected.
 // Creates the directory and file if needed (first-use creation).
 func UpdateConfigKey(path, key string, value any) error {
-	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+	dir := filepath.Dir(path)
+	if err := utils.MkdirAllShared(dir); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 	v := viper.New()
@@ -431,7 +432,8 @@ func UpdateConfigKey(path, key string, value any) error {
 	if err := v.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("failed to write config to %s: %w", path, err)
 	}
-	return os.Chmod(path, utils.PermFile)
+	utils.ShareWithParentGroup(path)
+	return nil
 }
 
 // ReadConfigAllKeys returns all keys explicitly set in the config file at path.
@@ -462,7 +464,8 @@ func ReadConfigKey(configPath, key string) string {
 // SaveMinimalConfigTo writes only detected keys to path using a fresh viper instance,
 // so no default values bleed in. Keys already provided by lowerLayers are skipped.
 func SaveMinimalConfigTo(path, apptainerBin, schedulerBin, compressArgs string, lowerLayers []ConfigLayerInfo) error {
-	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+	dir := filepath.Dir(path)
+	if err := utils.MkdirAllShared(dir); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 	alreadySet := func(key string) bool {
@@ -487,7 +490,8 @@ func SaveMinimalConfigTo(path, apptainerBin, schedulerBin, compressArgs string, 
 	if err := v.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("failed to write config to %s: %w", path, err)
 	}
-	return os.Chmod(path, utils.PermFile)
+	utils.ShareWithParentGroup(path)
+	return nil
 }
 
 // SetConfigKey sets a single key in the config file at path, creating it if needed.
@@ -503,13 +507,15 @@ func SetConfigKey(path, key, value string) error {
 		return nil // already set to this value
 	}
 	v.Set(key, value)
-	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+	dir := filepath.Dir(path)
+	if err := utils.MkdirAllShared(dir); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 	if err := v.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("failed to write config %s: %w", path, err)
 	}
-	return os.Chmod(path, utils.PermFile)
+	utils.ShareWithParentGroup(path)
+	return nil
 }
 
 // DeleteConfigKey removes a key from the config file at path.
@@ -535,7 +541,8 @@ func DeleteConfigKey(path, key string) error {
 	if err := v2.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("failed to write config %s: %w", path, err)
 	}
-	return os.Chmod(path, utils.PermFile)
+	utils.ShareWithParentGroup(path)
+	return nil
 }
 
 func deleteNestedKey(m map[string]any, parts []string) {

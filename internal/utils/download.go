@@ -52,10 +52,7 @@ func DownloadFile(ctx context.Context, url, destPath string) error {
 		return fmt.Errorf("failed to rename file: %w", err)
 	}
 
-	// Set permissions for downloaded file (664 for group-writable)
-	if err := os.Chmod(destPath, PermFile); err != nil {
-		return fmt.Errorf("failed to set file permissions: %w", err)
-	}
+	ShareWithParentGroup(destPath)
 
 	return nil
 }
@@ -327,7 +324,7 @@ func DownloadExecutable(ctx context.Context, url, destPath string) error {
 		return err
 	}
 
-	if err := os.Chmod(destPath, PermExec); err != nil {
+	if err := MakeExecutable(destPath); err != nil {
 		return fmt.Errorf("failed to set executable permissions: %w", err)
 	}
 

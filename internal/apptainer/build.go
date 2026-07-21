@@ -131,10 +131,7 @@ func DumpSifToSquashfs(ctx context.Context, sifPath, outputPath string) error {
 		}
 	}
 
-	// Set permissions to 0664 (rw-rw-r--)
-	if err := os.Chmod(outputPath, utils.PermFile); err != nil {
-		return fmt.Errorf("failed to set permissions on %s: %w", outputPath, err)
-	}
+	utils.ShareWithParentGroup(outputPath)
 
 	logging.FromContext(ctx).Debug("dumped SquashFS", "output", outputPath)
 	return nil

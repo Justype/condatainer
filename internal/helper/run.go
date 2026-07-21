@@ -592,7 +592,7 @@ func generateWrapper(id, name, cwd, scriptDir, stateDir string, walltime time.Du
 
 	body := buildHelperCommandBody(id, name, cwd, scriptDir, stateDir, walltime, params, sched, containerCmd, config.Global.HelperBindAll)
 
-	if err := os.MkdirAll(stateDir, utils.PermDir); err != nil {
+	if err := utils.MkdirAllShared(stateDir); err != nil {
 		return "", fmt.Errorf("creating state dir: %w", err)
 	}
 
@@ -606,7 +606,7 @@ func generateWrapper(id, name, cwd, scriptDir, stateDir string, walltime time.Du
 		fmt.Fprintln(f, "#!/bin/bash")
 		fmt.Fprint(f, body)
 		f.Close()
-		if err := os.Chmod(shPath, utils.PermExec); err != nil {
+		if err := utils.MakeExecutable(shPath); err != nil {
 			return "", err
 		}
 		return shPath, nil

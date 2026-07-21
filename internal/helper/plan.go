@@ -255,7 +255,7 @@ func ExecutePlan(ctx context.Context, plan *RunPlan) (string, error) {
 		src, _, _ := strings.Cut(b, ":")
 		src = strings.ReplaceAll(src, "$CNT_HELPER_STATE_DIR", stateDir)
 		if filepath.IsAbs(src) {
-			_ = os.MkdirAll(src, utils.PermDir)
+			_ = utils.MkdirAllShared(src)
 		}
 	}
 

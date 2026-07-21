@@ -833,7 +833,7 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 	}
 
 	// Ensure tmp directory exists
-	if err := os.MkdirAll(tmpDir, utils.PermDir); err != nil {
+	if err := utils.MkdirAllShared(tmpDir); err != nil {
 		return "", fmt.Errorf("failed to create tmp directory: %w", err)
 	}
 
@@ -848,10 +848,7 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 		return "", fmt.Errorf("failed to write script: %w", err)
 	}
 
-	// Set permissions for downloaded script (664 for group-writable)
-	if err := os.Chmod(localPath, utils.PermFile); err != nil {
-		slog.Default().Debug("failed to set permissions on downloaded script", "path", localPath, "err", err)
-	}
+	utils.ShareWithParentGroup(localPath)
 
 	return localPath, nil
 }

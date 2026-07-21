@@ -264,8 +264,13 @@ func acquireBuildLockFile(path string, info BuildLockInfo) error {
 		return err // caller checks os.IsExist
 	}
 	defer f.Close()
-	_, err = f.Write(data)
-	return err
+	if _, err = f.Write(data); err != nil {
+		return err
+	}
+	// Lives next to the image in the images/ data dir, which may be a shared install;
+	// share with the parent group so other members can clear a stale lock.
+	utils.ShareWithParentGroup(path)
+	return nil
 }
 
 // overwriteBuildLockFile overwrites an existing lock file with new JSON metadata.

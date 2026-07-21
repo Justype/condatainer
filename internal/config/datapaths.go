@@ -872,10 +872,15 @@ func SaveServerPort(port int) error {
 	if path == "" {
 		return fmt.Errorf("cannot determine state directory")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+	dir := filepath.Dir(path)
+	if err := utils.MkdirAllShared(dir); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(strconv.Itoa(port)+"\n"), utils.PermFile)
+	if err := os.WriteFile(path, []byte(strconv.Itoa(port)+"\n"), utils.PermFile); err != nil {
+		return err
+	}
+	utils.ShareWithParentGroup(path)
+	return nil
 }
 
 // ListServerPidFiles returns paths to all server-*.pid files in the user state directory.

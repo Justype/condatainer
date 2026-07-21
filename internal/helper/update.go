@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -94,7 +93,7 @@ func UpdateRemoteScripts(ctx context.Context, name string, forceMetadata bool, w
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(helperScriptsDir, utils.PermDir); err != nil {
+	if err := utils.MkdirAllShared(helperScriptsDir); err != nil {
 		return fmt.Errorf("failed to create helper scripts directory: %w", err)
 	}
 
@@ -264,7 +263,8 @@ func downloadRemoteExecutable(ctx context.Context, url, destPath string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	if err := os.MkdirAll(filepath.Dir(destPath), utils.PermDir); err != nil {
+	destDir := filepath.Dir(destPath)
+	if err := utils.MkdirAllShared(destDir); err != nil {
 		return err
 	}
 	out, err := utils.CreateFileWritable(destPath)
@@ -276,5 +276,8 @@ func downloadRemoteExecutable(ctx context.Context, url, destPath string) error {
 	if _, err := io.Copy(out, resp.Body); err != nil {
 		return err
 	}
-	return os.Chmod(destPath, utils.PermExec)
+	if err := utils.MakeExecutable(destPath); err != nil {
+		return err
+	}
+	return nil
 }

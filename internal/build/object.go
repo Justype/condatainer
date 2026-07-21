@@ -292,7 +292,7 @@ func (b *BuildObject) CreateTmpOverlay(ctx context.Context, force bool) error {
 	// Ensure parent directory for tmp overlay exists (mkdir -p)
 	parentDir := filepath.Dir(b.tmpOverlayPath)
 	if parentDir != "" {
-		if err := os.MkdirAll(parentDir, utils.PermDir); err != nil {
+		if err := utils.MkdirAllShared(parentDir); err != nil {
 			return fmt.Errorf("failed to create tmp overlay parent dir %s: %w", parentDir, err)
 		}
 	}
@@ -337,10 +337,11 @@ func (b *BuildObject) CreateBuildDirs(ctx context.Context, force bool) error {
 	if err := utils.EnsureTmpSubdir(tmpBase); err != nil {
 		return fmt.Errorf("failed to create tmp dir %s: %w", tmpBase, err)
 	}
-	if err := os.MkdirAll(b.cntDirPath, utils.PermDir); err != nil {
+	if err := utils.MkdirAllShared(b.cntDirPath); err != nil {
 		return fmt.Errorf("failed to create build cnt dir %s: %w", b.cntDirPath, err)
 	}
-	if err := os.MkdirAll(filepath.Join(buildDir, "tmp"), utils.PermDir); err != nil {
+	buildTmpDir := filepath.Join(buildDir, "tmp")
+	if err := utils.MkdirAllShared(buildTmpDir); err != nil {
 		return fmt.Errorf("failed to create build tmp dir: %w", err)
 	}
 	logging.FromContext(ctx).Info("build dir created", "path", buildDir)
