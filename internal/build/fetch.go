@@ -35,9 +35,11 @@ type RemoteMetadataCache struct {
 }
 
 type localScriptsDirFingerprint struct {
-	Exists        bool           `json:"exists"`
-	ModTimeUnix   int64          `json:"mod_time_unix"`
-	ImmediateDirs map[string]int `json:"immediate_dirs,omitempty"`
+	Exists      bool  `json:"exists"`
+	ModTimeUnix int64 `json:"mod_time_unix"`
+	// Dirs maps every descendant directory (relative path) to its mtime in ns,
+	// so a new leaf deep under an existing path invalidates the cache.
+	Dirs map[string]int64 `json:"dirs,omitempty"`
 }
 
 type LocalScriptsCache struct {
@@ -67,6 +69,10 @@ func localScriptsCachePath() (string, error) {
 	return filepath.Join(cacheDir, "local-scripts-cache.json.gz"), nil
 }
 
+// collectLocalScriptsFingerprints records the mtime of every directory under each
+// search path. Walking dirs only (not parsing files) stays far cheaper than a full
+// scan, while catching additions at any depth — including new data-script version
+// dirs nested under an unchanged top-level path.
 func collectLocalScriptsFingerprints(paths []string) map[string]localScriptsDirFingerprint {
 	out := make(map[string]localScriptsDirFingerprint, len(paths))
 	for _, dir := range paths {
@@ -79,22 +85,23 @@ func collectLocalScriptsFingerprints(paths []string) map[string]localScriptsDirF
 
 		fp.Exists = true
 		fp.ModTimeUnix = info.ModTime().UnixNano()
-		fp.ImmediateDirs = map[string]int{}
+		fp.Dirs = map[string]int64{}
 
-		entries, err := os.ReadDir(dir)
-		if err == nil {
-			for _, entry := range entries {
-				if !entry.IsDir() {
-					continue
-				}
-				subPath := filepath.Join(dir, entry.Name())
-				subInfo, statErr := os.Stat(subPath)
-				if statErr != nil {
-					continue
-				}
-				fp.ImmediateDirs[entry.Name()] = int(subInfo.ModTime().Unix())
+		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil || !d.IsDir() || path == dir {
+				return nil
 			}
-		}
+			subInfo, statErr := d.Info()
+			if statErr != nil {
+				return nil
+			}
+			rel, relErr := filepath.Rel(dir, path)
+			if relErr != nil {
+				return nil
+			}
+			fp.Dirs[rel] = subInfo.ModTime().UnixNano()
+			return nil
+		})
 
 		out[dir] = fp
 	}

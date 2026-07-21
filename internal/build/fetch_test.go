@@ -1,6 +1,8 @@
 package build
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -347,5 +349,32 @@ func TestExpandTemplate_LeavesSourceUntouched(t *testing.T) {
 func TestExpandTemplate_NonTemplateReturnsNil(t *testing.T) {
 	if got := ExpandTemplate(ScriptInfo{Name: "samtools/1.22", Path: "/s/samtools/1.22"}); got != nil {
 		t.Errorf("ExpandTemplate(non-template) = %v, want nil", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// collectLocalScriptsFingerprints (cache invalidation)
+// ---------------------------------------------------------------------------
+
+// A new dir nested deep under an existing top-level path must change the
+// fingerprint — this is the data-script "new version" case the cache used to miss.
+func TestCollectLocalScriptsFingerprints_DetectsDeepAddition(t *testing.T) {
+	root := t.TempDir()
+	deep := filepath.Join(root, "grch38", "star", "2.7.11b")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	before := collectLocalScriptsFingerprints([]string{root})
+
+	// Add a new version dir under the existing (unchanged) grch38/star path.
+	if err := os.MkdirAll(filepath.Join(root, "grch38", "star", "2.7.11c"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	after := collectLocalScriptsFingerprints([]string{root})
+
+	if reflect.DeepEqual(before, after) {
+		t.Error("fingerprint unchanged after deep dir addition; cache would go stale")
 	}
 }
