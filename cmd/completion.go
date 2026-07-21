@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -18,39 +19,39 @@ var completionAlias string
 // produce a broken completion file.
 var aliasNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// detectLoginShell reads $SHELL (the user's configured login shell).
-func detectLoginShell() string {
-	shell := os.Getenv("SHELL")
-	shellLower := strings.ToLower(shell)
-
-	// Check for specific shells
-	if strings.Contains(shellLower, "fish") {
+// shellFromPath maps an executable path to a supported shell name, matching on
+// the base name so a path like /home/zsh-fan/bin/foo does not match.
+// Returns "" for anything else.
+func shellFromPath(path string) string {
+	base := strings.ToLower(filepath.Base(path))
+	switch {
+	case strings.Contains(base, "fish"):
 		return "fish"
-	}
-	if strings.Contains(shellLower, "zsh") {
+	case strings.Contains(base, "zsh"):
 		return "zsh"
+	case strings.Contains(base, "bash"):
+		return "bash"
 	}
-
-	// Default to bash
-	return "bash"
+	return ""
 }
 
-// detectCompletionShell detects which shell is requesting completions by
-// inspecting the parent process via /proc (Linux/HPC). Falls back to $SHELL.
-func detectCompletionShell() string {
-	ppid := os.Getppid()
-	if exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", ppid)); err == nil {
-		exe = strings.ToLower(exe)
-		switch {
-		case strings.Contains(exe, "fish"):
-			return "fish"
-		case strings.Contains(exe, "zsh"):
-			return "zsh"
-		case strings.Contains(exe, "bash"):
-			return "bash"
+// detectCompletionShell detects which shell is requesting completions from the
+// parent process via /proc, falling back to $SHELL only when /proc is unreadable.
+//
+// An unrecognized parent is reported as unsupported rather than guessed at: the
+// output is meant to be sourced, so emitting the wrong shell's script turns a
+// clear error into a screenful of syntax errors in the user's login.
+func detectCompletionShell() (string, error) {
+	if exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", os.Getppid())); err == nil {
+		if shell := shellFromPath(exe); shell != "" {
+			return shell, nil
 		}
+		return "", fmt.Errorf("no supported shell detected (parent process: %s)", filepath.Base(exe))
 	}
-	return detectLoginShell() // fallback to $SHELL on non-Linux or unrecognized parent
+	if shell := shellFromPath(os.Getenv("SHELL")); shell != "" {
+		return shell, nil
+	}
+	return "", fmt.Errorf("could not detect the current shell")
 }
 
 var completionCmd = &cobra.Command{
@@ -80,9 +81,15 @@ An alias only takes effect when the script is sourced from shell rc file.`,
 	ValidArgs:             []string{"bash", "zsh", "fish"},
 	Args:                  cobra.MatchAll(cobra.MaximumNArgs(1), cobra.OnlyValidArgs),
 	Run: func(cmd *cobra.Command, args []string) {
-		shell := detectCompletionShell()
+		var shell string
 		if len(args) > 0 {
 			shell = args[0]
+		} else {
+			detected, err := detectCompletionShell()
+			if err != nil {
+				ExitWithError("%v.\nSpecify it explicitly: condatainer completion bash|zsh|fish", err)
+			}
+			shell = detected
 		}
 
 		if completionAlias != "" && !aliasNamePattern.MatchString(completionAlias) {
