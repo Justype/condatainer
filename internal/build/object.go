@@ -863,17 +863,34 @@ func resolveBuildSource(base *BuildObject, tmpDir string) (isConda bool, isConta
 }
 
 // substituteTemplateFile reads srcPath, replaces all {key} tokens using vars,
-// writes the result to a temp file in tmpDir, and returns the temp path.
-// The caller is responsible for removing the temp file when done.
+// comments out the #PL:/#TARGET: template directives, writes the result to a
+// temp file in tmpDir, and returns the temp path. The caller is responsible for
+// removing the temp file when done.
+//
+// The directives are neutralized so that once this substituted script is
+// embedded in the overlay, exporting and rebuilding it does not re-detect it as
+// a template (which would fail — its {placeholders} are already resolved).
 func substituteTemplateFile(srcPath string, vars map[string]string, tmpDir string) (string, error) {
 	data, err := os.ReadFile(srcPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read template file: %w", err)
 	}
-	content := utils.InterpolateVars(string(data), vars)
+	content := deTemplateDirectives(utils.InterpolateVars(string(data), vars))
 	tmpPath := filepath.Join(tmpDir, "pl-"+filepath.Base(srcPath))
 	if err := os.WriteFile(tmpPath, []byte(content), utils.PermFile); err != nil {
 		return "", fmt.Errorf("failed to write substituted file: %w", err)
 	}
 	return tmpPath, nil
+}
+
+// deTemplateDirectives comments out the #PL:/#TARGET: header lines (#PL: -> ##PL:)
+// so the substituted script is no longer recognized as a template.
+func deTemplateDirectives(content string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "#PL:") || strings.HasPrefix(line, "#TARGET:") {
+			lines[i] = "#" + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }

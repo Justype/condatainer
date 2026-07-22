@@ -226,3 +226,21 @@ func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }
+
+func TestDeTemplateDirectives(t *testing.T) {
+	in := "#PL:star_version:2.7.11b\n" +
+		"#TARGET: grch38/star/2.7.11b\n" +
+		"#DEP:samtools/1.22\n" +
+		"install() {\n" +
+		"  #PL:indented stays\n" + // not column 0 -> not a directive, left as-is
+		"}\n"
+	want := "##PL:star_version:2.7.11b\n" +
+		"##TARGET: grch38/star/2.7.11b\n" +
+		"#DEP:samtools/1.22\n" +
+		"install() {\n" +
+		"  #PL:indented stays\n" +
+		"}\n"
+	if got := deTemplateDirectives(in); got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
