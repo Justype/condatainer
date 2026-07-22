@@ -74,8 +74,8 @@ func (b *BuildObject) buildInstallCmd() (cmd string, extraBindPaths []string, er
 	}
 	channelFlags := buildChannelFlags()
 
-	if utils.IsYaml(b.buildSource) {
-		// Mode 3: YAML file (-p prefix -f environment.yml)
+	if utils.IsCondaFile(b.buildSource) {
+		// Mode 3: env/spec file (-p prefix -f environment.yml or explicit .txt)
 		absFilePath, err := filepath.Abs(b.buildSource)
 		if err != nil {
 			return "", nil, fmt.Errorf("failed to get absolute path for %s: %w", b.buildSource, err)

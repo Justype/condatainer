@@ -1,13 +1,16 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
@@ -51,7 +54,7 @@ func registerOverlayCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().MarkDeprecated("type", "use --profile instead") //nolint:errcheck
 	cmd.Flags().Bool("fakeroot", false, "Create a fakeroot-compatible overlay (owned by root)")
 	cmd.Flags().BoolP("sparse", "S", false, "Create a sparse overlay image (no pre-allocation)")
-	cmd.Flags().StringP("file", "f", "", "Initialize with Conda environment file (.yml or .yaml)")
+	cmd.Flags().StringP("file", "f", "", "Initialize with a Conda environment file (.yml/.yaml) or explicit spec (.txt)")
 	cmd.Flags().Bool("no-tmp", false, "Create directly at target path (slower on network filesystems)")
 
 	cmd.RegisterFlagCompletionFunc("profile", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -102,7 +105,7 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 	// Auto-append .img extension if not present and path doesn't have an extension
 	if !utils.IsImg(path) {
 		if strings.Contains(filepath.Base(path), ".") {
-			ExitWithError("Overlay image must have a .img extension.")
+			ExitWithError("Overlay image must have a .img or .ext3 extension.")
 		}
 		path += ".img"
 	}
@@ -234,7 +237,7 @@ var overlayCreateCmd = &cobra.Command{
 // ---------------------------------------------------------
 
 var resizeCmd = &cobra.Command{
-	Use:   "resize [flags] <path>",
+	Use:   "resize [flags] <overlay>",
 	Short: "Expand or shrink an overlay",
 	Example: `  condatainer overlay resize env.img -s 20g
   condatainer overlay resize data.img --size 512M`,
@@ -280,7 +283,7 @@ var resizeCmd = &cobra.Command{
 // ---------------------------------------------------------
 
 var infoCmd = &cobra.Command{
-	Use:          "info [overlay]",
+	Use:          "info [flags] <overlay>",
 	Short:        "Show details about an overlay",
 	Long:         overlayInfoHelp,
 	Example:      overlayInfoExample,
@@ -298,7 +301,7 @@ var infoCmd = &cobra.Command{
 // ---------------------------------------------------------
 
 var checkCmd = &cobra.Command{
-	Use:   "check [flags] <path>",
+	Use:   "check [flags] <overlay>",
 	Short: "Verify filesystem integrity (e2fsck)",
 	Example: `  condatainer overlay check env.img      # Check and repair automatically
   condatainer overlay check env.img -f  # Force a check even if marked clean`,
@@ -322,7 +325,7 @@ var checkCmd = &cobra.Command{
 // ---------------------------------------------------------
 
 var chownCmd = &cobra.Command{
-	Use:   "chown [flags] <path>",
+	Use:   "chown [flags] <overlay>",
 	Short: "Change file ownership inside an overlay",
 	Long: `Walks the overlay and updates the UID/GID wihtout mounting.
 
@@ -382,26 +385,24 @@ Defaults to the current user and path '/' inside the image.`,
 // ---------------------------------------------------------
 
 var exportCmd = &cobra.Command{
-	Use:   "export [flags] [overlay_path]",
-	Short: "Export a conda environment from an overlay",
-	Long: `Export a Conda environment from an overlay.
-
-For .img overlays the environment prefix is /ext3/env.
-For .sqf module overlays the environment prefix is /cnt/<name>/<version>.`,
-	Example: `  condatainer overlay export env.img > environment.yml  # Save to a file
-  condatainer overlay export env.img --from-history     # Only explicitly installed
-  condatainer overlay export env.img -e                 # Explicit URLs (exact rebuild)`,
-	Args: cobra.ExactArgs(1),
-	RunE: runExportOverlay,
+	Use:   "export [flags] <overlay>",
+	Short: "Export the recipe that produced an overlay",
+	Long:  overlayExportHelp,
+	Example: `  condatainer overlay export env.img > environment.yml
+  condatainer overlay export samtools/1.22 -p ./env     # write ./env.yml`,
+	Args:              cobra.ExactArgs(1),
+	SilenceUsage:      true,
+	ValidArgsFunction: completeInfoArgs,
+	RunE:              runExportOverlay,
 }
 
 // ---------------------------------------------------------
 // Helper: Shell Completion
 // ---------------------------------------------------------
 
-// completeImages tells the shell to only suggest file extensions ending in "img".
+// completeImages tells the shell to suggest ext3 overlay files (.img, .ext3).
 func completeImages(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	return []string{"img"}, cobra.ShellCompDirectiveFilterFileExt
+	return []string{"img", "ext3"}, cobra.ShellCompDirectiveFilterFileExt
 }
 
 // ---------------------------------------------------------
@@ -439,21 +440,160 @@ func init() {
 	chownCmd.Flags().StringArrayP("path", "p", []string{"/"}, "Path inside the overlay (repeatable)")
 
 	// --- Export ---
-	exportCmd.Flags().BoolP("explicit", "e", false, "Use explicit format")
-	exportCmd.Flags().Bool("no-md5", false, "Disable md5")
-	exportCmd.Flags().Bool("no-build", false, "Disable the build string in spec")
-	exportCmd.Flags().Bool("no-builds", false, "Disable the build string in spec (alias)")
-	exportCmd.Flags().Bool("channel-subdir", false, "Enable channel/subdir in spec")
-	exportCmd.Flags().Bool("from-history", false, "Build environment spec from history")
-	exportCmd.Flags().Bool("json", false, "Report all output as json")
+	registerExportFlags(exportCmd)
 }
 
-// runExportOverlay runs mm-export (micromamba env export) inside a mounted overlay.
-func runExportOverlay(cmd *cobra.Command, args []string) error {
-	overlayPath := args[0]
+// resolveOverlayArg resolves an overlay argument to an absolute path. It first
+// tries an installed overlay by name (with the <default_distro>/<name> fallback
+// for a bare name), then falls back to treating the argument as a file or
+// directory path. Mirrors the resolution used by `overlay info`.
+func resolveOverlayArg(arg string) (string, error) {
+	normalized := utils.NormalizeNameVersion(arg)
+	installed, err := getInstalledOverlaysMap()
+	if err != nil {
+		return "", err
+	}
+	if path, ok := installed[normalized]; ok {
+		return path, nil
+	}
+	if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
+		if path, ok := installed[config.Global.DefaultDistro+"/"+normalized]; ok {
+			return path, nil
+		}
+	}
+	abs, _ := filepath.Abs(arg)
+	if !utils.FileExists(abs) && !utils.DirExists(abs) {
+		return "", fmt.Errorf("overlay %s not found", utils.StylePath(abs))
+	}
+	return abs, nil
+}
 
-	if !utils.FileExists(overlayPath) && !utils.DirExists(overlayPath) {
-		return fmt.Errorf("overlay %s not found", overlayPath)
+// detectEmbeddedRecipe returns an overlay's embedded build recipe with its file
+// extension and type label: a definition at the root (def / docker:// builds) or
+// a build script under the payload dir. Returns nil data if none is embedded.
+func detectEmbeddedRecipe(overlayPath string) (data []byte, ext, label string) {
+	if d := overlay.ReadFile(overlayPath, "/"+utils.BuildScriptDefName); d != nil {
+		return d, ".def", "definition"
+	}
+	if utils.IsSqf(overlayPath) {
+		base := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
+		nv := utils.NormalizeNameVersion(base)
+		inner := "/cnt/" + nv + "/" + utils.BuildScriptName
+		if d := overlay.ReadFile(overlayPath, inner); d != nil {
+			return d, ".sh", "build script"
+		}
+	}
+	return nil, "", ""
+}
+
+// openExportOutput returns a writer, a close func, and a destination label.
+// Empty prefix writes to stdout; otherwise to <prefix><ext>.
+func openExportOutput(prefix, ext string) (io.Writer, func() error, string, error) {
+	if prefix == "" {
+		return os.Stdout, func() error { return nil }, "stdout", nil
+	}
+	path := prefix + ext
+	f, err := utils.CreateFileWritable(path)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("failed to create %s: %w", path, err)
+	}
+	return f, f.Close, path, nil
+}
+
+// reorderChannelBlock rewrites a conda env YAML's `channels:` block into the
+// given priority order, fixing micromamba's alphabetical sort which can break
+// re-solve.
+//
+// Channels not in priority are prepended, matching conda's from_environment.
+// Returns the input unchanged if there is no channels block to reorder.
+func reorderChannelBlock(yaml []byte, priority []string) []byte {
+	lines := strings.Split(string(yaml), "\n")
+	start := -1
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "channels:" {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return yaml
+	}
+	end := start + 1
+	lineOf := map[string]string{}
+	var names []string
+	for end < len(lines) {
+		t := strings.TrimSpace(lines[end])
+		if !strings.HasPrefix(t, "- ") {
+			break
+		}
+		name := strings.Trim(strings.TrimSpace(t[2:]), `"'`)
+		lineOf[name] = lines[end]
+		names = append(names, name)
+		end++
+	}
+	if len(names) < 2 {
+		return yaml
+	}
+
+	seen := map[string]bool{}
+	known := make([]string, 0, len(names))
+	for _, p := range priority {
+		if l, ok := lineOf[p]; ok && !seen[p] {
+			known = append(known, l)
+			seen[p] = true
+		}
+	}
+	// Channels not in .condarc are prepended, matching conda's
+	// channels.insert(0, …), so a directly `-c`-installed channel keeps priority.
+	ordered := make([]string, 0, len(names))
+	for _, n := range names {
+		if !seen[n] {
+			ordered = append(ordered, lineOf[n])
+			seen[n] = true
+		}
+	}
+	ordered = append(ordered, known...)
+
+	out := append([]string{}, lines[:start+1]...)
+	out = append(out, ordered...)
+	out = append(out, lines[end:]...)
+	return []byte(strings.Join(out, "\n"))
+}
+
+// runExportOverlay exports an overlay's recipe: an embedded definition or build
+// script if present, otherwise the conda environment via micromamba env export.
+func runExportOverlay(cmd *cobra.Command, args []string) error {
+	overlayPath, err := resolveOverlayArg(args[0])
+	if err != nil {
+		return err
+	}
+	prefix, _ := cmd.Flags().GetString("prefix")
+
+	// Announce the recipe type unless it's already visible: writing to a live
+	// terminal (no --prefix, stdout not redirected) shows the recipe directly.
+	announce := prefix != "" || !utils.IsInteractiveShell()
+
+	// Reading an .img read-only does not trip Apptainer's ext3 lock, so probe it
+	// to fail on a concurrent writable session instead of exporting stale data.
+	if utils.IsImg(overlayPath) {
+		if err := overlay.CheckAvailable(overlayPath, false); err != nil {
+			cmd.SilenceUsage = true
+			return err
+		}
+	}
+
+	// An embedded recipe is the exact source, so it wins over conda export.
+	if data, ext, label := detectEmbeddedRecipe(overlayPath); data != nil {
+		out, closeOut, dest, err := openExportOutput(prefix, ext)
+		if err != nil {
+			return err
+		}
+		defer closeOut() //nolint:errcheck
+		if announce {
+			utils.PrintMessage("Exporting embedded %s to %s", label, dest)
+		}
+		_, err = out.Write(data)
+		return err
 	}
 
 	ResolveFlagAlias(cmd, "no-build", "no-builds")
@@ -465,7 +605,6 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 	noBuild, _ := cmd.Flags().GetBool("no-build")
 	channelSubdir, _ := cmd.Flags().GetBool("channel-subdir")
 	fromHistory, _ := cmd.Flags().GetBool("from-history")
-	jsonOut, _ := cmd.Flags().GetBool("json")
 
 	if explicit {
 		flagsArgs = append(flagsArgs, "-e")
@@ -482,9 +621,6 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 	if fromHistory {
 		flagsArgs = append(flagsArgs, "--from-history")
 	}
-	if jsonOut {
-		flagsArgs = append(flagsArgs, "--json")
-	}
 
 	// Determine internal prefix to export from
 	envPrefix := ""
@@ -500,13 +636,28 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 		base := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
 		nv := utils.NormalizeNameVersion(base)
 		if !overlay.PathExists(overlayPath, "/cnt/"+nv+"/conda-meta") {
+			// No embedded recipe (checked earlier) and no conda env.
 			cmd.SilenceUsage = true
-			return fmt.Errorf("overlay %s does not contain a conda environment at /cnt/%s (missing conda-meta)", overlayPath, nv)
+			return fmt.Errorf("overlay %s: cannot determine an exportable type (no build script, definition, or conda environment)", overlayPath)
 		}
 		envPrefix = "/cnt/" + nv
 	} else {
 		cmd.SilenceUsage = true
 		return fmt.Errorf("unsupported overlay type: %s", overlayPath)
+	}
+
+	// Extension follows the export format: an explicit spec (.txt) or YAML.
+	ext := ".yml"
+	if explicit {
+		ext = ".txt"
+	}
+	out, closeOut, dest, err := openExportOutput(prefix, ext)
+	if err != nil {
+		return err
+	}
+	defer closeOut() //nolint:errcheck
+	if announce {
+		utils.PrintMessage("Exporting conda environment from %s to %s", envPrefix, dest)
 	}
 
 	// Build final command: micromamba -p <prefix> env export [flags]
@@ -523,7 +674,20 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 		HidePrompt:  true,
 	}
 
-	if err := exec.Run(cmd.Context(), opts, exec.IO{Stdout: os.Stdout, Stderr: os.Stderr}); err != nil {
+	// micromamba sorts the channels: block alphabetically, which can break
+	// re-solve. When the overlay pins channel priority in its .condarc, capture
+	// the YAML and reorder to match. The explicit (.txt) format has no channels
+	// block, so stream it straight through.
+	if priority := overlay.CondarcChannels(overlayPath, envPrefix); len(priority) > 0 && !explicit {
+		var buf bytes.Buffer
+		if err := exec.Run(cmd.Context(), opts, exec.IO{Stdout: &buf, Stderr: os.Stderr}); err != nil {
+			return fmt.Errorf("failed to export environment: %w", err)
+		}
+		_, err := out.Write(reorderChannelBlock(buf.Bytes(), priority))
+		return err
+	}
+
+	if err := exec.Run(cmd.Context(), opts, exec.IO{Stdout: out, Stderr: os.Stderr}); err != nil {
 		return fmt.Errorf("failed to export environment: %w", err)
 	}
 	return nil
@@ -542,8 +706,8 @@ func initCondaInOverlay(ctx context.Context, overlayPath, envFile string, packag
 		if !utils.FileExists(envFile) {
 			return fmt.Errorf("environment file %s not found", envFile)
 		}
-		if !utils.IsYaml(envFile) {
-			return fmt.Errorf("environment file must be .yml or .yaml")
+		if !utils.IsCondaFile(envFile) {
+			return fmt.Errorf("environment file must be .yml/.yaml or an explicit spec file (.txt)")
 		}
 	}
 

@@ -67,7 +67,7 @@ func compressArgsFromFlags(flags map[string]*bool) (string, error) {
 }
 
 var createCmd = &cobra.Command{
-	Use:     "create [packages...]",
+	Use:     "create [flags] [packages...]",
 	Aliases: []string{"install", "i", "build"},
 	Short:   "Create a new SquashFS overlay",
 	Long: `Create a new SquashFS overlay using available build scripts or Conda packages.
@@ -205,7 +205,7 @@ func init() {
 	f := createCmd.Flags()
 	f.StringVarP(&createName, "name", "n", "", "Custom name for the overlay")
 	f.StringVarP(&createPrefix, "prefix", "p", "", "Custom prefix path for the overlay")
-	f.StringVarP(&createFile, "file", "f", "", "Path to definition file (.yaml, .sh, .def)")
+	f.StringVarP(&createFile, "file", "f", "", "Path to definition file (.yaml, .txt, .sh, .def)")
 	f.StringVarP(&createSource, "source", "s", "", "Remote source URI (e.g., docker://ubuntu:22.04)")
 	f.StringVar(&createTempSize, "temp-size", "20G", "Size of temporary overlay")
 	f.StringVar(&createBlockSize, "block-size", "", "SquashFS block size of app/external overlays (e.g. 256k)")
@@ -531,9 +531,9 @@ func runCreateWithName(ctx context.Context, packages []string) {
 	// - Comma-separated package list (if packages provided)
 	var buildSource string
 	if createFile != "" {
-		// YAML file mode
-		if !utils.IsYaml(createFile) {
-			ExitWithError("File must be .yml or .yaml for conda environments")
+		// Conda env/spec file mode
+		if !utils.IsCondaFile(createFile) {
+			ExitWithError("File must be .yml/.yaml or an explicit spec (.txt) for conda environments")
 		}
 		buildSource, _ = filepath.Abs(createFile)
 	} else if len(packages) > 0 {
@@ -567,8 +567,8 @@ func runCreateWithPrefix(ctx context.Context) {
 	utils.PrintDebug("[CREATE] Creating overlay with prefix: %s", createPrefix)
 
 	// Determine file type and create appropriate BuildObject
-	if utils.IsYaml(createFile) {
-		// YAML conda environment - use NewCondaObjectWithSource
+	if utils.IsCondaFile(createFile) {
+		// Conda env/spec file - use NewCondaObjectWithSource
 		absFile, _ := filepath.Abs(createFile)
 		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, outputDir, createUpdate)
 		if err != nil {
@@ -599,7 +599,7 @@ func runCreateWithPrefix(ctx context.Context) {
 		// can detect that overlays will be created asynchronously by scheduler jobs.
 		ExitIfJobsSubmitted(graph)
 	} else {
-		ExitWithError("File must be .yml, .yaml, .sh, .bash, or .def")
+		ExitWithError("File must be .yml, .yaml, .txt, .sh, .bash, or .def")
 	}
 }
 

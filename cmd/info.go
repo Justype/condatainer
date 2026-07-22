@@ -24,13 +24,13 @@ const overlayInfoExample = `  condatainer info samtools/1.22 # Show info for ins
   condatainer info env.img       # Show info for local overlay file`
 
 var infoOverlayCmd = &cobra.Command{
-	Use:               "info [overlay]",
+	Use:               "info [flags] <overlay>",
 	Short:             "Show details about an overlay",
 	Long:              overlayInfoHelp,
 	Example:           overlayInfoExample,
 	Args:              cobra.ExactArgs(1),
 	SilenceUsage:      true,
-	ValidArgsFunction: completeInfoArgs,
+	ValidArgsFunction: completeOverlayArg,
 	RunE:              runInfoOverlay,
 }
 
@@ -43,7 +43,7 @@ func completeInfoArgs(cmd *cobra.Command, args []string, toComplete string) ([]s
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return []string{"sqf", "img"}, cobra.ShellCompDirectiveFilterFileExt
+	return []string{"sqf", "img", "ext3"}, cobra.ShellCompDirectiveFilterFileExt
 }
 
 func runInfoOverlay(cmd *cobra.Command, args []string) error {
@@ -60,7 +60,7 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 	if path, ok := installedOverlays[normalized]; ok {
 		overlayPath = path
 	} else if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
-		// Bare name not found: try <default_distro>/<name> (e.g. "igv" → "ubuntu24/igv", "base_image" → "ubuntu24/base_image")
+		// Bare name not found: try <default_distro>/<name> (e.g. "build-essential" → "ubuntu24/build-essential", "base_image" → "ubuntu24/base_image")
 		if path, ok := installedOverlays[config.Global.DefaultDistro+"/"+normalized]; ok {
 			overlayPath = path
 		}

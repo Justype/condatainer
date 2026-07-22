@@ -20,13 +20,21 @@ const PermDir os.FileMode = 0775
 // Exec: u=rwx, g=rwx, o=rx (Executable files with group write access)
 const PermExec os.FileMode = 0775
 
+// BuildScriptName is the file a script/ref build embeds under its payload dir
+// (/cnt/<name>/<version>/) to record the recipe that produced the overlay.
+const BuildScriptName = ".cnt-build-script"
+
+// BuildScriptDefName is the file a def or scheme:// (docker://) build embeds at
+// the overlay root to record the definition that produced the overlay.
+const BuildScriptDefName = ".cnt-build-script.def"
+
 // --- Extension Checks (String-based) ---
 
-// IsImg checks if the path has an ext3 overlay extension (.img).
-// Note: In Apptainer context, .img usually implies a writable ext3 overlay.
+// IsImg checks if the path has an ext3 overlay extension (.img, .ext3).
+// Note: In Apptainer context, these imply a writable ext3 overlay.
 func IsImg(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
-	return ext == ".img"
+	return ext == ".img" || ext == ".ext3"
 }
 
 // IsSqf checks if the path has a SquashFS extension (.sqf, .sqsh, .squashfs).
@@ -49,11 +57,13 @@ func IsOverlay(path string) bool {
 	return IsImg(path) || IsSqf(path)
 }
 
-// IsYaml checks if the path has a YAML extension (.yaml, .yml).
-// Useful for Conda environment definition files.
-func IsYaml(path string) bool {
+// IsCondaFile reports whether path is a Conda environment input file:
+// a YAML environment file (.yaml/.yml) or an explicit/spec text file (.txt,
+// e.g. the @EXPLICIT output of `export -e`). All are accepted by
+// `micromamba create -f`.
+func IsCondaFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
-	return ext == ".yaml" || ext == ".yml"
+	return ext == ".yaml" || ext == ".yml" || ext == ".txt"
 }
 
 // --- Filesystem Checks (OS-based) ---

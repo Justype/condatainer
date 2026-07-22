@@ -221,3 +221,20 @@ func statMode(t *testing.T, path string) os.FileMode {
 	}
 	return info.Mode().Perm()
 }
+
+func TestIsImg(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{"env.img", true},
+		{"env.ext3", true},
+		{"ENV.EXT3", true}, // case-insensitive
+		{"env.sqf", false},
+		{"env", false},
+	} {
+		if got := IsImg(tc.path); got != tc.want {
+			t.Errorf("IsImg(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}

@@ -6,7 +6,7 @@ import (
 
 // oCmd is a shortcut for "overlay create"
 var oCmd = &cobra.Command{
-	Use:   "o [flags] [image_path] [-- packages...]",
+	Use:   "o [flags] [path] [-- packages...]",
 	Short: "Shortcut for 'overlay create'",
 	Long: overlayCreateHelp + `
 

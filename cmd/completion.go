@@ -234,18 +234,16 @@ func postProcessBashCompletion(script string) string {
 
     __condatainer_debug "The completions are: ${out}"
 
-    # Use fzf if available and we're completing for 'e/exec'
+    # fzf-pick an overlay for 'e/exec/info/export' (not 'overlay ...'). words[0] is the binary.
     if command -v fzf >/dev/null 2>&1 && [[ -n "$out" ]]; then
+        local sub="${words[1]}"
         local is_overlay_cmd=false
-        for i in "${!words[@]}"; do
-            word="${words[$i]}"
-            if [[ "$word" == "e" || "$word" == "exec" ]]; then
-                is_overlay_cmd=true
-                break
-            fi
-        done
+        if [[ "$sub" == "e" || "$sub" == "exec" || "$sub" == "info" || "$sub" == "export" ]]; then
+            is_overlay_cmd=true
+        fi
 
-        if [[ "$cur" == -* ]]; then
+        # Only on an argument, not while the subcommand itself is being typed.
+        if [[ "$cur" == -* ]] || (( COMP_CWORD <= 1 )); then
             is_overlay_cmd=false
         fi
 
@@ -271,18 +269,16 @@ func postProcessZshCompletion(script string) string {
 	// Add fzf support if available for 'e/exec'
 	fzfInject := `    __condatainer_debug "completions: ${out}"
 
-    # Use fzf if available and we're completing for 'e/exec'
+    # fzf-pick an overlay for 'e/exec/info/export' (not 'overlay ...'). words[1] is the binary in zsh.
     if command -v fzf >/dev/null 2>&1 && [[ -n "$out" ]]; then
+        local sub="${words[2]}"
         local is_overlay_cmd=false
-        local _word
-        for _word in "${words[@]}"; do
-            if [[ "$_word" == "e" || "$_word" == "exec" ]]; then
-                is_overlay_cmd=true
-                break
-            fi
-        done
+        if [[ "$sub" == "e" || "$sub" == "exec" || "$sub" == "info" || "$sub" == "export" ]]; then
+            is_overlay_cmd=true
+        fi
 
-        if [[ "${words[$CURRENT]}" == -* ]]; then
+        # Only on an argument, not while the subcommand itself is being typed.
+        if [[ "${words[$CURRENT]}" == -* ]] || (( CURRENT <= 2 )); then
             is_overlay_cmd=false
         fi
 
@@ -321,16 +317,16 @@ func postProcessFishCompletion(script string) string {
 
 	fzfInject := target + `
 
-    # Use fzf if available and we're completing for 'e/exec'
+    # fzf-pick an overlay for 'e/exec/info/export' (not 'overlay ...'). args[1] is the binary in fish.
     if type -q fzf
         set -l _is_overlay_cmd false
-        if contains "e" $words; or contains "exec" $words
+        if contains -- "$args[2]" e exec info export
             set _is_overlay_cmd true
         end
         if test $_is_overlay_cmd = true
             if not string match -q -- "-*" (commandline -t)
                 # Check if -- is in the command line; if so, skip fzf and use default results
-                if not contains -- "--" $words
+                if not contains -- "--" $args
                     set -l candidates $results[1..-2]
                     if test (count $candidates) -gt 1
                         set -l selection (string join \n $candidates | fzf --height 40% --reverse --select-1 --exit-0 --query (commandline -t) --header "Select overlay")

@@ -47,6 +47,45 @@ func imgCat(imgPath, innerPath string) []byte {
 	return out
 }
 
+// CondarcChannels reads the channels list (in priority order) from the .condarc
+// at envPrefix inside the overlay. This is what conda reads as context.channels
+// and orders `env export` by; micromamba ignores it and sorts alphabetically.
+// Returns nil if the file is absent or lists no channels.
+func CondarcChannels(overlayPath, envPrefix string) []string {
+	data := ReadFile(overlayPath, strings.TrimSuffix(envPrefix, "/")+"/.condarc")
+	if data == nil {
+		return nil
+	}
+	return parseCondarcChannels(string(data))
+}
+
+// parseCondarcChannels extracts the block-list under a top-level `channels:` key
+// from .condarc YAML, preserving order and stopping at the next top-level key.
+func parseCondarcChannels(content string) []string {
+	var channels []string
+	inBlock := false
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !inBlock {
+			if trimmed == "channels:" {
+				inBlock = true
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- ") {
+			if ch := strings.Trim(strings.TrimSpace(trimmed[2:]), `"'`); ch != "" {
+				channels = append(channels, ch)
+			}
+			continue
+		}
+		if trimmed == "" {
+			continue
+		}
+		break // a non-list, non-empty line ends the channels block
+	}
+	return channels
+}
+
 // ReadCondaInfo reads conda-meta/history from envPrefix inside the overlay
 // and returns the channels and explicitly-installed package specs.
 // Returns nil if the history file is absent or contains no specs.

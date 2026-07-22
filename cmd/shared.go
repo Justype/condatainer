@@ -468,6 +468,16 @@ func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirec
 	return suggestions, cobra.ShellCompDirectiveNoFileComp
 }
 
+// completeOverlayArg completes the overlay argument of top-level info/export
+// with installed overlay names and local .sqf/.img files. The 'overlay *'
+// subcommands use completeInfoArgs (files only).
+func completeOverlayArg(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return overlaySuggestions(true, true, toComplete)
+}
+
 // overlaySuggestions returns overlay suggestions including installed overlays and local files
 func overlaySuggestions(includeData bool, includeImg bool, toComplete string) ([]string, cobra.ShellCompDirective) {
 	installed, err := container.InstalledOverlays()

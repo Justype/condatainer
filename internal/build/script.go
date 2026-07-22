@@ -200,7 +200,12 @@ if [ $? -ne 0 ]; then
     echo "Build script %s failed."
     exit 1
 fi
-`, b.buildSource, b.buildSource)
+# Embed the build script next to the payload for provenance (skipped if the
+# script populated nothing — packOutput reports that as a build failure).
+if [ -d "$target_dir" ]; then
+    cp %s "$target_dir/%s" 2>/dev/null || true
+fi
+`, b.buildSource, b.buildSource, b.buildSource, utils.BuildScriptName)
 
 	overlayArgs, err := GetOverlayArgsFromDependencies(b.dependencies)
 	if err != nil {
