@@ -78,7 +78,7 @@ By default the server exits when your SSH session ends; use --daemon to keep it 
 var serverStopNodeFlag string
 
 var serverStopCmd = &cobra.Command{
-	Use:   "stop [node]",
+	Use:   "stop [flags] [node]",
 	Short: "Stop the dashboard server",
 	Long: `Stop the dashboard server.
 

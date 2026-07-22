@@ -35,7 +35,7 @@ go test -v ./internal/scheduler/...                       # Package tests
 
 Build scripts live in the [`cnt-scripts`](https://github.com/Justype/cnt-scripts) repo (fetched remotely via `scripts_link` config, or auto-detected from a local `cnt-scripts/` clone next to the binary). Three categories:
 
-- **OS**: `<distro>/<name>` (e.g., `ubuntu24/igv`) — Apptainer definition files for distro system tools
+- **OS**: `<distro>/<name>` (e.g., `ubuntu24/build-essential`) — Apptainer definition files for distro system tools
 - **Apps**: `<name>/<version>` (e.g., `cellranger/9.0.1`) — Apps that not available as conda packages, or specific versions not in conda
 - **Data**: `<assembly|project>/<datatype>/<version>` (e.g., `grch38/star/2.7.11b/gencode47-101`) — any data, including genome reference indexes
 
@@ -65,8 +65,8 @@ Bash scripts in [`cnt-scripts/helpers/`](https://github.com/Justype/cnt-scripts)
 
 ## Coding Rules
 
-- When editing a function's behaviour, also update its doc comment to match.
-- When changing UX (flags, output format, command behaviour), also update `docs/manuals/condatainer.md` and any relevant `docs/` pages.
+- When editing a function, update its doc comment to match. Keep comments concise and behavior-first — say what it does; give a reason only when the behavior is surprising.
+- When editing code, check whether the change is reflected in docs and README files, and update them when needed: `docs/manuals/condatainer.md` and relevant `docs/` pages for UX changes (flags, output format, command behaviour), and the nearest `README.md` (e.g. `internal/helper/README.md`) for package-level changes.
 
 ## Key Patterns
 
@@ -74,5 +74,4 @@ Bash scripts in [`cnt-scripts/helpers/`](https://github.com/Justype/cnt-scripts)
 - Error types: `ApptainerError`, `ValidationError` with structured fields
 - Console output: `utils.PrintMessage`, `PrintWarning`, `PrintError`, `PrintDebug`
 - Always use absolute paths; `config.Get*Dir()` for standard locations
-- File permissions: `utils.PermFile` (0664), `utils.PermDir` (0775), `utils.PermExec` (0775)
-- Prefer `utils.CreateFileWritable(path)` for runtime file creation so new files consistently use `utils.PermFile`.
+- File/dir creation: use the wired helpers — `utils.CreateFileWritable` (files), `utils.MkdirAllShared` (dirs), `utils.MakeExecutable` (make a file executable). They apply `utils.PermFile`/`PermDir` (umask-subject) and call `ShareWithParentGroup` so children inherit group-write inside a shared `2775` install while personal installs stay umask-default. Never force perms with a bare `os.Chmod(path, utils.Perm*)` — see `internal/utils/files.go`.

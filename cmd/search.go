@@ -18,7 +18,7 @@ var searchChannels []string
 var searchLimit int
 
 var searchCmd = &cobra.Command{
-	Use:   "search <package>",
+	Use:   "search [flags] <package>",
 	Short: "Search conda packages via anaconda.org",
 	Long: `Search conda packages using the anaconda.org API.
 Results are filtered to the configured channels (or --channel overrides).`,

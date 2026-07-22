@@ -21,7 +21,7 @@ var listOne bool
 var listWhatis bool
 
 var listCmd = &cobra.Command{
-	Use:     "list [terms...]",
+	Use:     "list [flags] [terms...]",
 	Aliases: []string{"ls"},
 	Short:   "List installed overlays",
 	Long: `List installed overlays grouped by directory, with optional search filtering.

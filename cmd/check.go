@@ -22,7 +22,7 @@ var (
 )
 
 var scriptCheckCmd = &cobra.Command{
-	Use:   "check <script|dir|name> [script|dir|name ...]",
+	Use:   "check [flags] <script|dir|name> [script|dir|name ...]",
 	Short: "Check if the dependencies of script(s) are installed",
 	Long: `Check dependencies declared in build scripts using #DEP: tags.
 
@@ -270,7 +270,7 @@ func autoCreateExternalOverlay(ctx context.Context, dep string) bool {
 
 	utils.PrintMessage("Auto-creating %s from %s...", utils.StyleName(filepath.Base(dep)), utils.StylePath(sibling))
 
-	if utils.IsYaml(sibling) {
+	if utils.IsCondaFile(sibling) {
 		bo, err := build.NewCondaObjectWithSource(baseName, absFile, outputDir, outputDir, false)
 		if err != nil {
 			utils.PrintError("Failed to create build object for %s: %v", dep, err)

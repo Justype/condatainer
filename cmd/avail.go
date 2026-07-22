@@ -20,7 +20,7 @@ var (
 )
 
 var availCmd = &cobra.Command{
-	Use:     "avail [terms...]",
+	Use:     "avail [flags] [terms...]",
 	Aliases: []string{"av"},
 	Short:   "List available build scripts",
 	Long: `List available build scripts (local and remote).
@@ -401,7 +401,7 @@ func formatTemplateLine(pkg PackageInfo, showWhatis bool) string {
 func formatPackageLine(pkg PackageInfo, showWhatis bool) string {
 	line := utils.StyleName(pkg.Name)
 
-	// Compute alias before highlighting (e.g. "ubuntu24/igv" → "[igv]")
+	// Compute alias before highlighting (e.g. "ubuntu24/build-essential" → "[build-essential]")
 	var alias string
 	if distro := config.Global.DefaultDistro; distro != "" {
 		if a, ok := strings.CutPrefix(pkg.Name, distro+"/"); ok {

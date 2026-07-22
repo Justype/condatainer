@@ -585,7 +585,7 @@ var configShowCmd = &cobra.Command{
 }
 
 var configGetCmd = &cobra.Command{
-	Use:   "get <key>",
+	Use:   "get [flags] <key>",
 	Short: "Get a configuration value",
 	Long: `Get a specific configuration value.
 
@@ -656,7 +656,7 @@ With -l, reads only that config layer file.
 }
 
 var configSetCmd = &cobra.Command{
-	Use:   "set <key> <value>",
+	Use:   "set [flags] <key> <value>",
 	Short: "Set a configuration value",
 	Long: `Set a configuration value and save to config file.
 
@@ -1103,7 +1103,7 @@ var configValidateCmd = &cobra.Command{
 }
 
 var configAppendCmd = &cobra.Command{
-	Use:   "append <key> <value>",
+	Use:   "append [flags] <key> <value>",
 	Short: "Append a value to an array config key",
 	Long: `Append a value to an array config key (lowest search priority).
 
@@ -1143,7 +1143,7 @@ var configAppendCmd = &cobra.Command{
 }
 
 var configPrependCmd = &cobra.Command{
-	Use:   "prepend <key> <value>",
+	Use:   "prepend [flags] <key> <value>",
 	Short: "Prepend a value to an array config key (highest priority)",
 	Long: `Prepend a value to an array config key (highest search priority).
 
@@ -1183,7 +1183,7 @@ var configPrependCmd = &cobra.Command{
 }
 
 var configRemoveCmd = &cobra.Command{
-	Use:   "remove <key> [value]",
+	Use:   "remove [flags] <key> [value]",
 	Short: "Remove a config key or a value from an array key",
 	Long: `Remove a config key entirely, or one value from an array config key.
 
