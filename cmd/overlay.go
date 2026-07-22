@@ -469,19 +469,24 @@ func resolveOverlayArg(arg string) (string, error) {
 }
 
 // detectEmbeddedRecipe returns an overlay's embedded build recipe with its file
-// extension and type label: a definition at the root (def / docker:// builds) or
-// a build script under the payload dir. Returns nil data if none is embedded.
+// extension and type label. Only .sqf overlays carry one:
+//   - a definition at the root (.def / docker:// builds)
+//   - a build script under the payload dir
+//
+// An .img overlay only ever holds a conda environment, so it has no recipe.
+// Returns nil data if none is embedded.
 func detectEmbeddedRecipe(overlayPath string) (data []byte, ext, label string) {
+	if !utils.IsSqf(overlayPath) {
+		return nil, "", ""
+	}
 	if d := overlay.ReadFile(overlayPath, "/"+utils.BuildScriptDefName); d != nil {
 		return d, ".def", "definition"
 	}
-	if utils.IsSqf(overlayPath) {
-		base := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
-		nv := utils.NormalizeNameVersion(base)
-		inner := "/cnt/" + nv + "/" + utils.BuildScriptName
-		if d := overlay.ReadFile(overlayPath, inner); d != nil {
-			return d, ".sh", "build script"
-		}
+	base := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
+	nv := utils.NormalizeNameVersion(base)
+	inner := "/cnt/" + nv + "/" + utils.BuildScriptName
+	if d := overlay.ReadFile(overlayPath, inner); d != nil {
+		return d, ".sh", "build script"
 	}
 	return nil, "", ""
 }
@@ -674,20 +679,25 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 		HidePrompt:  true,
 	}
 
+	// Drop Apptainer's non-error log lines from stderr so they don't pollute
+	// the export; ERROR:/FATAL: and any real errors still pass through.
+	stderr := utils.NewApptainerFilter(os.Stderr, utils.ApptainerNonError...)
+	defer stderr.Flush() //nolint:errcheck
+
 	// micromamba sorts the channels: block alphabetically, which can break
 	// re-solve. When the overlay pins channel priority in its .condarc, capture
 	// the YAML and reorder to match. The explicit (.txt) format has no channels
 	// block, so stream it straight through.
 	if priority := overlay.CondarcChannels(overlayPath, envPrefix); len(priority) > 0 && !explicit {
 		var buf bytes.Buffer
-		if err := exec.Run(cmd.Context(), opts, exec.IO{Stdout: &buf, Stderr: os.Stderr}); err != nil {
+		if err := exec.Run(cmd.Context(), opts, exec.IO{Stdout: &buf, Stderr: stderr}); err != nil {
 			return fmt.Errorf("failed to export environment: %w", err)
 		}
 		_, err := out.Write(reorderChannelBlock(buf.Bytes(), priority))
 		return err
 	}
 
-	if err := exec.Run(cmd.Context(), opts, exec.IO{Stdout: out, Stderr: os.Stderr}); err != nil {
+	if err := exec.Run(cmd.Context(), opts, exec.IO{Stdout: out, Stderr: stderr}); err != nil {
 		return fmt.Errorf("failed to export environment: %w", err)
 	}
 	return nil

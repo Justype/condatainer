@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"bytes"
 	"encoding/json"
 	"os/exec"
 	"strings"
@@ -29,9 +30,9 @@ func ReadFile(overlayPath, innerPath string) []byte {
 }
 
 // imgCat reads a file from inside an ext3 overlay image using debugfs.
-// The overlay stores writable content under the "upper/" directory,
-// so innerPath (e.g. "/ext3/env/conda-meta/history") is resolved as
-// "upper/ext3/env/conda-meta/history" in the debugfs filesystem.
+// Writable content lives under "upper/", so "/ext3/env/conda-meta/history"
+// is read as "upper/ext3/env/conda-meta/history". Returns nil if absent —
+// debugfs exits 0 for a missing file, so we catch it from its stderr.
 func imgCat(imgPath, innerPath string) []byte {
 	dbg, err := exec.LookPath("debugfs")
 	if err != nil {
@@ -40,8 +41,15 @@ func imgCat(imgPath, innerPath string) []byte {
 	inner := strings.TrimPrefix(innerPath, "/")
 	catArg := "cat upper/" + inner
 	cmd := exec.Command(dbg, "-R", catArg, imgPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		return nil
+	}
+	// debugfs reports a missing path on stderr while still exiting 0, so an
+	// empty read paired with that diagnostic is a missing file, not an empty one.
+	if len(out) == 0 && strings.Contains(stderr.String(), "File not found") {
 		return nil
 	}
 	return out
