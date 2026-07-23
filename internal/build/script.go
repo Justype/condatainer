@@ -88,8 +88,6 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 		return err
 	}
 
-	b.saveEnvFile(targetPath)
-
 	utils.ShareWithParentGroup(finalPath)
 
 	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
@@ -266,9 +264,8 @@ func (b *BuildObject) runBuildScript(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to substitute placeholders in build script: %w", err)
 		}
-		// Keep origSource alive so saveEnvFile can read #ENV: from it after this
-		// function returns. Cleanup() will remove it via isRemote. Only the
-		// substituted tmp script (subPath) needs to be removed here.
+		// Restore origSource so Cleanup() removes the real (possibly remote) source
+		// via isRemote. Only the substituted tmp script (subPath) is removed here.
 		defer func() {
 			os.Remove(subPath) //nolint:errcheck
 			b.buildSource = origSource
@@ -343,27 +340,6 @@ func (b *BuildObject) packOutput(ctx context.Context, finalPath string) error {
 	}
 
 	return nil
-}
-
-// saveEnvFile extracts #ENV: declarations and #WHATIS: from the build script and writes the .env file.
-func (b *BuildObject) saveEnvFile(targetPath string) {
-	envDict, err := GetEnvDictFromBuildScript(b.buildSource)
-	if err != nil {
-		slog.Default().Warn("failed to extract ENV from build script", "err", err)
-		return
-	}
-	whatis := utils.GetWhatIsFromScript(b.buildSource)
-	if len(b.vars) > 0 {
-		whatis = utils.InterpolateVars(whatis, b.vars)
-		for key, entry := range envDict {
-			entry.Value = utils.InterpolateVars(entry.Value, b.vars)
-			entry.Note = utils.InterpolateVars(entry.Note, b.vars)
-			envDict[key] = entry
-		}
-	}
-	if err := SaveEnvFile(targetPath, envDict, b.nameVersion, whatis); err != nil {
-		slog.Default().Warn("failed to save ENV file", "err", err)
-	}
 }
 
 // saveCondaEnvFile fetches a package description from anaconda.org and writes the .env file.

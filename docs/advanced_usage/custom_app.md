@@ -117,7 +117,7 @@ Then fix up whatever the archive got wrong — `orad` ships its binary at the ro
 #ENVNOTE:Illumina ORA decompressor reference search path
 ```
 
-- `$app_root` is replaced at install time with the overlay's path (`/cnt/orad/2.7.0`). The variable is then set whenever the overlay is loaded.
+- `$app_root` is replaced at load time with the overlay's mount path (`/cnt/orad/2.7.0`) whenever the overlay is loaded.
 - `#ENVNOTE:` must directly follow its `#ENV:` line; it becomes the description shown by `condatainer info`.
 
 ### Build and Verify

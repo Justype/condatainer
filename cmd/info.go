@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
-	"time"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/container"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -87,23 +88,8 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 // (both run with LC_ALL=C) and reformats them as "2006-01-02 15:04:05".
 // Falls back to the original string if parsing fails.
 func normalizeTime(s string) string {
-	// Already ISO — pass through immediately.
-	if len(s) >= 19 && s[4] == '-' && s[7] == '-' {
-		return s[:19]
-	}
-
-	// C-locale ctime() format: "Mon Jan _2 15:04:05 2006"
-	// The day field is space-padded for single-digit days.
-	formats := []string{
-		"Mon Jan _2 15:04:05 2006", // space-padded day (canonical C locale)
-		"Mon Jan  2 15:04:05 2006", // two-space pad (explicit match)
-		"Mon Jan 02 15:04:05 2006", // zero-padded day
-		"Mon Jan 2 15:04:05 2006",  // bare single digit
-	}
-	for _, f := range formats {
-		if t, err := time.Parse(f, s); err == nil {
-			return t.Format("2006-01-02 15:04:05")
-		}
+	if t, ok := overlay.ParseStatTime(s); ok {
+		return t.Format("2006-01-02 15:04:05")
 	}
 	return s
 }
@@ -136,6 +122,13 @@ func displaySqfInfo(overlayPath string) error {
 		fmt.Printf("  %-14s %s\n", "Created:", normalizeTime(sqStats.CreatedTime))
 	} else {
 		fmt.Printf("  %-14s %s\n", "Modified:", fileInfo.ModTime().Format("2006-01-02 15:04:05"))
+	}
+	// OS overlays carry no version in their name, so their distribution tag is the
+	// build date (mksquashfs creation time).
+	if overlayType == "OS Overlay" && sqStats != nil && sqStats.CreatedTime != "" {
+		if t, ok := overlay.ParseStatTime(sqStats.CreatedTime); ok {
+			fmt.Printf("  %-14s %s\n", "Build Tag:", t.Format("2006.01.02"))
+		}
 	}
 
 	// SquashFS section
@@ -258,29 +251,20 @@ func displayImgInfo(overlayPath string) error {
 	return nil
 }
 
-// readEnvFile parses the .env sidecar and returns whatis, notes, and var lines.
+// readEnvFile resolves an overlay's whatis, notes, and var lines. The embedded
+// build script is the source of truth (.sqf); a sidecar <overlay>.env shadows it.
+// $app_root is resolved to the overlay's mount root. Var lines are sorted KEY=VALUE.
 func readEnvFile(overlayPath string) (whatis string, notes map[string]string, varLines []string) {
-	notes = map[string]string{}
-	data, err := os.ReadFile(overlayPath + ".env")
-	if err != nil {
-		return
+	whatis, configs, notes := container.ResolveOverlayEnv(overlayPath)
+	keys := make([]string, 0, len(configs))
+	for k := range configs {
+		keys = append(keys, k)
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if after, ok := strings.CutPrefix(line, "#WHATIS:"); ok {
-			whatis = strings.TrimSpace(after)
-		} else if after, ok := strings.CutPrefix(line, "#ENVNOTE:"); ok {
-			if k, v, found := strings.Cut(after, "="); found {
-				notes[strings.TrimSpace(k)] = strings.TrimSpace(v)
-			}
-		} else {
-			varLines = append(varLines, line)
-		}
+	sort.Strings(keys)
+	for _, k := range keys {
+		varLines = append(varLines, k+"="+configs[k])
 	}
-	return
+	return whatis, notes, varLines
 }
 
 // displayWhatis prints the Whatis line from the .env sidecar in the File section.
