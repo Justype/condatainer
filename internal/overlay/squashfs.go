@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -233,6 +234,46 @@ func GetSquashFSStats(path string) (*SquashFSStats, error) {
 	}
 
 	return stats, nil
+}
+
+// ParseStatTime parses a timestamp string from `unsquashfs -stat` / `tune2fs`
+// output (run with LC_ALL=C). It accepts both ISO ("2006-01-02 15:04:05") and
+// C-locale ctime() ("Mon Jan _2 15:04:05 2006") forms. Returns false if neither
+// parses.
+func ParseStatTime(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+
+	// Already ISO — parse the leading "2006-01-02 15:04:05".
+	if len(s) >= 19 && s[4] == '-' && s[7] == '-' {
+		if t, err := time.Parse("2006-01-02 15:04:05", s[:19]); err == nil {
+			return t, true
+		}
+	}
+
+	// C-locale ctime(): the day field is space-padded for single-digit days.
+	for _, f := range []string{
+		"Mon Jan _2 15:04:05 2006",
+		"Mon Jan  2 15:04:05 2006",
+		"Mon Jan 02 15:04:05 2006",
+		"Mon Jan 2 15:04:05 2006",
+	} {
+		if t, err := time.Parse(f, s); err == nil {
+			return t, true
+		}
+	}
+
+	return time.Time{}, false
+}
+
+// BuildTime returns the SquashFS creation time, which mksquashfs sets at build
+// time, so for CondaTainer overlays it is the build timestamp. Returns false when
+// the archive has no readable creation time (e.g. unsquashfs unavailable).
+func BuildTime(path string) (time.Time, bool) {
+	stats, err := GetSquashFSStats(path)
+	if err != nil || stats == nil || stats.CreatedTime == "" {
+		return time.Time{}, false
+	}
+	return ParseStatTime(stats.CreatedTime)
 }
 
 // GetOverlayType classifies a SquashFS overlay based on its contents and filename:

@@ -147,8 +147,9 @@ Each build target has a lock file at `<targetOverlayPath>.lock` containing `Buil
 5. Run script inside container with overlays
 6. For ref: verify files, create SquashFS from `$cnt_dir`
 7. For apps: create SquashFS from `/cnt`
-8. Extract and save ENV variables
-9. Atomic rename `.new` → target; remove lock
+8. Atomic rename `.new` → target; remove lock
+
+The build script (with its `#ENV:` directives) is embedded inside the overlay at `/cnt/<name>/<version>/.cnt-build-script`, so the overlay is self-contained; env is resolved from it at load time rather than written to a sidecar `.env` at build time.
 
 **Def:**
 1. Check if overlay exists (skip if not updating)
@@ -182,7 +183,7 @@ Overlays can export environment variables via `#ENV:` directives:
 #ENV:PATH=$app_root/bin:$PATH
 ```
 
-Extracted to `.env` file alongside overlay, loaded at runtime.
+These live in the build script embedded inside the overlay. `$app_root` is resolved to the overlay's mount root at load time (see `internal/container` env handling).
 
 ## Tmp Directory Strategy
 

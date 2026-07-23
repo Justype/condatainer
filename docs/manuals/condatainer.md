@@ -1372,10 +1372,12 @@ condatainer info ./ubuntu--22.04.sqf
 
 | Section | Fields |
 |---------|--------|
-| **File** | Name, Path, file Size, Type (`OS Overlay` / `Module Overlay` / `Bundle Overlay`, Read-Only), Created timestamp |
+| **File** | Name, Path, file Size, Type (`OS Overlay` / `Module Overlay` / `Bundle Overlay`, Read-Only), Created timestamp, and a `Build Tag` for OS Overlays |
 | **SquashFS** | Compression algorithm (with level if set), Block Size, Inode count, Fragment count, Deduplication flag |
 | **Mount** | `/cnt/<name>/<version>` — shown for Module and Bundle Overlays |
-| **Environment** | Variables from the `.env` sidecar file, with inline `#ENVNOTE` annotations |
+| **Environment** | Variables from the embedded build script (a sidecar `.env` overrides it), with inline `#ENVNOTE` annotations |
+
+`Build Tag` is the build date (`YYYY.MM.DD`), used as the distribution tag for OS overlays since they carry no version in their name.
 
 ### ext3 (`.img`) output
 

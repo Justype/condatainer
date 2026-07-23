@@ -106,7 +106,7 @@ fakeroot := container.AutoEnableFakeroot(
 3. **Order** - Place .img last (required for writable overlay layer)
 4. **Lock check** - Verify .img availability (exclusive lock if writable)
 5. **Build overlay args** - Add `:ro/:rw` suffixes
-6. **Collect environment** - Load `.env` files for each overlay
+6. **Collect environment** - Resolve `#ENV:` for each overlay (embedded build script, sidecar `.env` overrides)
 7. **Deduplicate binds** - Remove conflicting bind paths
 8. **Detect GPU** - Add `--nv` or `--rocm` if available
 9. **Return result** - Ready-to-use configuration
@@ -119,13 +119,17 @@ fakeroot := container.AutoEnableFakeroot(
 
 ## Environment Variables
 
-Each overlay can have an associated `.env` file (e.g., `cellranger--9.0.1.sqf.env`):
+Each overlay's environment comes from the `#ENV:`/`#ENVNOTE:` directives in the build script embedded inside it (`/cnt/<name>/<version>/.cnt-build-script`), read directly from the `.sqf` via `unsquashfs -cat` — no mount, no sidecar required. `$app_root` is resolved to the overlay's mount root (`/cnt/<name>/<version>`) at load time.
+
+A sidecar `<overlay>.env` (e.g. `cellranger--9.0.1.sqf.env`) is optional and, when present, **shadows** the embedded values for local overrides:
+
 ```bash
-CELLRANGER_ROOT=/ext3/cnt/cellranger/9.0.1
-PATH=/ext3/cnt/cellranger/9.0.1/bin:$PATH
+CELLRANGER_ROOT=/cnt/cellranger/9.0.1
+PATH=/cnt/cellranger/9.0.1/bin:$PATH
 ```
 
-Loaded automatically and merged into final environment list.
+`CollectOverlayEnv` merges every overlay's resolved env into the final list;
+`ResolveOverlayEnv` returns a single overlay's whatis/env/notes for `info`.
 
 **Common Environment:**
 - `LC_ALL=C.UTF-8`, `LANG=C.UTF-8`
