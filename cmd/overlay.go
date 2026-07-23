@@ -263,16 +263,9 @@ var resizeCmd = &cobra.Command{
 			ExitWithError("Invalid size format '%s': %v", sizeStr, err)
 		}
 
-		// 3. Execute
-		absPath, _ := filepath.Abs(path)
-		lock, err := overlay.AcquireLock(absPath, true)
-		if err != nil {
-			ExitWithError("%v", err)
-		}
-		defer lock.Close()
-
-		err = overlay.Resize(cmd.Context(), path, sizeMB)
-		if err != nil {
+		// 3. Execute — Resize detects the lock itself via CheckIntegrity, so
+		// don't hold a separate LOCK_EX here (it would collide with that probe).
+		if err := overlay.Resize(cmd.Context(), path, sizeMB); err != nil {
 			ExitWithError("%v", err)
 		}
 	},

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/logging"
@@ -29,7 +30,7 @@ func CheckIntegrity(ctx context.Context, path string, force bool) error {
 	args = append(args, path)
 
 	log := logging.FromContext(ctx)
-	log.Info(fmt.Sprintf("checking integrity of %s", path))
+	log.Info(fmt.Sprintf("checking integrity of %s", utils.StylePath(filepath.Base(path))))
 	log.Debug("e2fsck " + strings.Join(args, " "))
 
 	cmd := exec.CommandContext(ctx, "e2fsck", args...)
@@ -53,7 +54,7 @@ func CheckIntegrity(ctx context.Context, path string, force bool) error {
 		log.Debug("e2fsck output: " + string(out))
 	}
 
-	log.Info(fmt.Sprintf("filesystem check completed for %s", path), "kind", "success")
+	log.Info(fmt.Sprintf("filesystem check completed for %s", utils.StylePath(filepath.Base(path))), "kind", "success")
 	return nil
 }
 

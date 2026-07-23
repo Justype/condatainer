@@ -233,7 +233,8 @@ func MoveOverlayCopied(ctx context.Context, src, dst string, sparse bool) (copie
 // AllocateOverlay pre-allocates disk blocks for a sparse overlay file using fallocate.
 func AllocateOverlay(ctx context.Context, path string, sizeMB int) {
 	log := logging.FromContext(ctx)
-	log.Info(fmt.Sprintf("allocating %d MiB at %s", sizeMB, path))
+	log.Info(fmt.Sprintf("allocating %s at %s",
+		utils.StyleNumber(fmt.Sprintf("%d MiB", sizeMB)), utils.StylePath(filepath.Base(path))))
 	cmd := exec.CommandContext(ctx, "fallocate", "-l", fmt.Sprintf("%dM", sizeMB), path)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		log.Warn(fmt.Sprintf("fallocate failed, overlay may be sparse: %s", strings.TrimSpace(string(output))))
@@ -270,10 +271,11 @@ func createAtTmp(ctx context.Context, opts *CreateOptions) (tmpPath string, err 
 	tmpPath = filepath.Join(tmpDir, filepath.Base(opts.Path))
 
 	if !opts.Quiet {
-		log.Info(fmt.Sprintf("creating %soverlay %s", label, opts.Path))
-		log.Info(fmt.Sprintf("size %d MiB | filesystem %s | inode ratio %d | reserved %d%%",
-			opts.SizeMB, opts.FilesystemType, opts.Profile.InodeRatio, opts.Profile.ReservedPerc))
-		log.Info(fmt.Sprintf("building at local tmp: %s", tmpPath))
+		log.Info(fmt.Sprintf("creating %soverlay %s", label, utils.StylePath(filepath.Base(opts.Path))))
+		log.Info(fmt.Sprintf("size %s | filesystem %s | inode ratio %s | reserved %s",
+			utils.StyleNumber(fmt.Sprintf("%d MiB", opts.SizeMB)), utils.StyleName(opts.FilesystemType),
+			utils.StyleNumber(opts.Profile.InodeRatio), utils.StyleNumber(fmt.Sprintf("%d%%", opts.Profile.ReservedPerc))))
+		log.Info(fmt.Sprintf("building at local tmp: %s", utils.StylePath(tmpPath)))
 	}
 
 	if err := createOverlayFile(ctx, opts, tmpPath, true); err != nil {
@@ -303,16 +305,17 @@ func CreateDirectly(ctx context.Context, opts *CreateOptions) error {
 	log := logging.FromContext(ctx)
 
 	if !opts.Quiet {
-		log.Info(fmt.Sprintf("creating %soverlay %s", label, opts.Path))
-		log.Info(fmt.Sprintf("size %d MiB | filesystem %s | inode ratio %d | reserved %d%%",
-			opts.SizeMB, opts.FilesystemType, opts.Profile.InodeRatio, opts.Profile.ReservedPerc))
+		log.Info(fmt.Sprintf("creating %soverlay %s", label, utils.StylePath(filepath.Base(opts.Path))))
+		log.Info(fmt.Sprintf("size %s | filesystem %s | inode ratio %s | reserved %s",
+			utils.StyleNumber(fmt.Sprintf("%d MiB", opts.SizeMB)), utils.StyleName(opts.FilesystemType),
+			utils.StyleNumber(opts.Profile.InodeRatio), utils.StyleNumber(fmt.Sprintf("%d%%", opts.Profile.ReservedPerc))))
 	}
 
 	if err := createOverlayFile(ctx, opts, opts.Path, opts.Sparse); err != nil {
 		return err
 	}
 
-	log.Info(fmt.Sprintf("created %soverlay %s", label, opts.Path), "kind", "success")
+	log.Info(fmt.Sprintf("created %soverlay %s", label, utils.StylePath(opts.Path)), "kind", "success")
 	return nil
 }
 
@@ -336,7 +339,7 @@ func CreateWithOptions(ctx context.Context, opts *CreateOptions) error {
 		}()
 
 		if !opts.Quiet {
-			log.Info(fmt.Sprintf("moving overlay to %s", opts.Path))
+			log.Info(fmt.Sprintf("moving overlay to %s", utils.StylePath(opts.Path)))
 		}
 		copied, err := moveFile(ctx, tmpPath, opts.Path, opts.Sparse)
 		if err != nil {
@@ -348,6 +351,6 @@ func CreateWithOptions(ctx context.Context, opts *CreateOptions) error {
 		}
 	}
 
-	log.Info(fmt.Sprintf("created %soverlay %s", label, opts.Path), "kind", "success")
+	log.Info(fmt.Sprintf("created %soverlay %s", label, utils.StylePath(opts.Path)), "kind", "success")
 	return nil
 }

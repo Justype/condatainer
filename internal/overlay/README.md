@@ -110,6 +110,7 @@ Locks use `syscall.Flock` on the image file itself (no separate `.lock` file), n
 
 **Who holds locks:**
 - `exec`/`run`: acquire and hold shared read locks on all `.sqf` overlays and the base `.sif` for the entire duration of `apptainer exec`. `.img` overlays are skipped — Apptainer flocks them itself; acquiring our own lock conflicts with Apptainer's locking.
-- `overlay resize/check/chown`: acquire and hold an exclusive lock for the duration of the operation.
+- `overlay chown`: acquires and holds an exclusive lock for the duration of the operation.
+- `overlay resize/check`: probe-and-release exclusive lock (via `CheckIntegrity` → `CheckAvailable`) — no lock is held across the resize2fs/e2fsck run, so the caller must not pre-acquire one (a held lock collides with the probe).
 - `remove`: probe-and-release exclusive lock before `os.Remove()` — fails if shared lock is held.
 - `build --update`: probe-and-release exclusive lock before starting any build work — fails if shared lock is held.

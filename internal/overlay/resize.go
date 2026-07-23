@@ -7,9 +7,14 @@ import (
 	"path/filepath"
 
 	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/utils"
 )
 
-// Resize adjusts the size of an existing ext3 overlay image.
+// Resize adjusts the size of an existing ext3 overlay image to newSizeMB.
+//
+// Flow: fsck → grow the file (if growing) → resize2fs to the exact target →
+// shrink the file (if shrinking) → fsck. Sizes are compared against the ext3
+// filesystem, not the container file's byte size, since the two can diverge.
 func Resize(ctx context.Context, imagePath string, newSizeMB int) error {
 	if err := checkDependencies([]string{"resize2fs"}); err != nil {
 		return err
@@ -24,39 +29,74 @@ func Resize(ctx context.Context, imagePath string, newSizeMB int) error {
 	if os.IsNotExist(err) {
 		return fmt.Errorf("overlay image not found: %s", absPath)
 	}
+	if err != nil {
+		return fmt.Errorf("failed to stat %s: %w", absPath, err)
+	}
 
-	currentSizeBytes := info.Size()
+	currentFileBytes := info.Size()
 	newSizeBytes := int64(newSizeMB) * 1024 * 1024
+
+	// Current filesystem size from the superblock (block count × block size).
+	stats, err := GetStats(absPath)
+	if err != nil {
+		return err
+	}
+	fsBytes := stats.TotalBlocks * stats.BlockSize
 
 	log := logging.FromContext(ctx)
 
-	if currentSizeBytes == newSizeBytes {
-		log.Info(fmt.Sprintf("size unchanged (%d MiB) for %s", newSizeMB, absPath))
+	name := filepath.Base(absPath)
+
+	// No-op only when both filesystem and file already match the target.
+	if fsBytes == newSizeBytes && currentFileBytes == newSizeBytes {
+		log.Info(fmt.Sprintf("size unchanged (%s) for %s",
+			utils.StyleNumber(fmt.Sprintf("%d MiB", newSizeMB)), utils.StylePath(name)))
 		return nil
 	}
 
-	log.Info(fmt.Sprintf("resizing %s to %d MiB", absPath, newSizeMB))
+	// Reject a shrink below current usage up front — cheap, works on a dirty fs
+	// (no fsck). resize2fs still enforces the exact minimum later.
+	if newSizeBytes < fsBytes {
+		if usedBytes, _ := stats.Usage(); newSizeBytes < usedBytes {
+			return fmt.Errorf("cannot shrink %s to %s: filesystem already uses %s",
+				utils.StylePath(name),
+				utils.StyleNumber(fmt.Sprintf("%d MiB", newSizeMB)),
+				utils.StyleNumber(fmt.Sprintf("%d MiB", (usedBytes+1024*1024-1)/(1024*1024))))
+		}
+	}
 
-	if err := CheckIntegrity(ctx, absPath, false); err != nil {
+	log.Info(fmt.Sprintf("resizing %s to %s (filesystem currently %s)",
+		utils.StylePath(name),
+		utils.StyleNumber(fmt.Sprintf("%d MiB", newSizeMB)),
+		utils.StyleNumber(fmt.Sprintf("%d MiB", fsBytes/(1024*1024)))))
+
+	// resize2fs refuses to run unless the filesystem was force-checked first.
+	if err := CheckIntegrity(ctx, absPath, true); err != nil {
 		return err
 	}
 
-	if newSizeBytes < currentSizeBytes {
-		log.Info(fmt.Sprintf("shrinking overlay image to %d MiB", newSizeMB))
-		sizeArg := fmt.Sprintf("%dM", newSizeMB)
-		if err := runCommand(ctx, "shrink filesystem", absPath, "resize2fs", "-p", absPath, sizeArg); err != nil {
-			return err
-		}
-		if err := os.Truncate(absPath, newSizeBytes); err != nil {
-			return fmt.Errorf("failed to truncate file: %w", err)
-		}
-	} else {
-		log.Info(fmt.Sprintf("expanding overlay image to %d MiB", newSizeMB))
+	// Grow the file first so resize2fs has room to expand into.
+	if newSizeBytes > currentFileBytes {
 		if err := os.Truncate(absPath, newSizeBytes); err != nil {
 			return fmt.Errorf("failed to expand file: %w", err)
 		}
-		if err := runCommand(ctx, "expand filesystem", absPath, "resize2fs", "-p", absPath); err != nil {
-			return err
+	}
+
+	// Resize the filesystem to the exact target (handles grow and shrink).
+	action := "expand filesystem"
+	if newSizeBytes < fsBytes {
+		action = "shrink filesystem"
+	}
+	log.Info(fmt.Sprintf("%s to %s", action, utils.StyleNumber(fmt.Sprintf("%d MiB", newSizeMB))))
+	sizeArg := fmt.Sprintf("%dM", newSizeMB)
+	if err := runCommand(ctx, action, absPath, "resize2fs", "-p", absPath, sizeArg); err != nil {
+		return err
+	}
+
+	// Shrink the file down to reclaim the freed space.
+	if newSizeBytes < currentFileBytes {
+		if err := os.Truncate(absPath, newSizeBytes); err != nil {
+			return fmt.Errorf("failed to truncate file: %w", err)
 		}
 	}
 
@@ -64,6 +104,7 @@ func Resize(ctx context.Context, imagePath string, newSizeMB int) error {
 		return err
 	}
 
-	log.Info(fmt.Sprintf("overlay image resized to %d MiB: %s", newSizeMB, absPath), "kind", "success")
+	log.Info(fmt.Sprintf("overlay image resized to %s: %s",
+		utils.StyleNumber(fmt.Sprintf("%d MiB", newSizeMB)), utils.StylePath(name)), "kind", "success")
 	return nil
 }
