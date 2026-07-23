@@ -22,11 +22,10 @@ CondaTainer
 .. toctree::
   :caption: Helpers:
   :maxdepth: 1
+  :glob:
 
-  Helper Scripts <tutorials/helpers>
-  RStudio Server <tutorials/rstudio-server>
-  VS Code <tutorials/vscode>
-  XFCE4 Desktop <tutorials/xfce4>
+  Helper Scripts <helpers/helpers>
+  helpers/*
 
 .. toctree::
   :caption: FAQ:
@@ -41,6 +40,13 @@ CondaTainer
   :glob:
 
   advanced_usage/*
+
+.. toctree::
+  :caption: Deployment:
+  :maxdepth: 1
+  :glob:
+
+  deployment/*
 
 .. toctree::
   :caption: Manuals:

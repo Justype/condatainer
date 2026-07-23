@@ -6,6 +6,13 @@
 - Generate writable environment overlay for development. e.g. `env.img`
 - Run rstudio-server, code-server, and other web tools on HPC.
 
+```{note}
+This page covers installing CondaTainer for personal use. Installing it for others instead?
+
+- a lab or group → [Shared Group Installation](../deployment/group_install.md)
+- a cluster or server → [System-Wide Installation](../deployment/system_install.md)
+```
+
 ## 📋 Prerequisites
 
 - **Linux (x86_64 only)**: AArch64 is not supported yet.
@@ -48,7 +55,7 @@ The installation script will also run `condatainer config init` for you. If you 
 condatainer config init
 ```
 
-**CondaTainer** will search for Apptainer/Singularity in your `PATH` and via `module avail`. If you want to use a specific Apptainer/Singularity module, please run:
+**CondaTainer** will search for Apptainer/Singularity in your `$PATH` and via `module avail`. If you want to use a specific Apptainer/Singularity module, please run:
 
 ```bash
 module load apptainer/1.4.5 # or the version you want
@@ -64,9 +71,6 @@ Compression is chosen automatically based on the runtime:
 
 CondaTainer supports shell completion for **Bash** and **Zsh**. The installation script will automatically add the necessary lines to your shell configuration file:
 
-- **Bash** (`~/.bashrc`):
-- **Zsh** (`~/.zshrc`):
-
 ```bash
 source <(condatainer completion)
 ```
@@ -74,7 +78,7 @@ source <(condatainer completion)
 ## 🗺️ Next Steps
 
 - [Concepts: Overlays](./concepts.md) — Understand the overlay model before proceeding
-- [Helper Scripts](../tutorials/helpers.md) — Running Applications (VS Code, RStudio, IGV, etc.) on HPC or headless servers
+- [Helper Scripts](../helpers/helpers.md) — Running Applications (VS Code, RStudio, IGV, etc.) on HPC or headless servers
 
 ## 🗑️ Uninstallation
 

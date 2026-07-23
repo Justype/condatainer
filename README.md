@@ -43,7 +43,7 @@ condatainer exec -o grch38/cellranger/2024-A bash
 #   CELLRANGER_REF_DIR: cellranger reference dir
 ```
 
-**CondaTainer** will set `PATH` and other environment variables for you.
+**CondaTainer** will set `$PATH` and other environment variables for you.
 
 ## 📦 Project Environment Management
 
@@ -94,7 +94,7 @@ condatainer helper vscode-tunnel  # Start a VS Code tunnel
 condatainer helper igv            # Start IGV via VNC
 ```
 
-Please check out [ReadTheDocs - Helpers HPC](https://condatainer.readthedocs.io/en/latest/tutorials/helpers.html) for more details and examples.
+Please check out [ReadTheDocs - Helpers HPC](https://condatainer.readthedocs.io/en/latest/helpers/helpers.html) for more details and examples.
 
 ## 🚀 Automation
 

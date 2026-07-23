@@ -25,7 +25,7 @@ All three config files are loaded and merged when they exist:
 
 **Scalar keys** (`apptainer_bin`, `default_distro`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
 
-**Directory and source array keys** (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`): **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, app-root, then system. This lets a sysadmin publish shared directories in an app-root or system config without requiring every user to copy them into their own config.
+**Directory and source array keys** (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`): **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, app-root, then system. This lets a sysadmin publish shared directories in an app-root or system config without requiring every user to copy them into their own config. See [How Array Settings Merge](#how-array-settings-merge) for a worked example.
 
 **`channels`**: overwrite — the highest-priority config file that sets it wins (not merged), since channel order controls conda package resolution priority.
 
@@ -48,11 +48,11 @@ condatainer config show
 | Type | Path | Use Case |
 |------|------|----------|
 | User | `~/.config/condatainer/config.yaml` | Personal settings |
-| Extra-root | `$CNT_EXTRA_ROOT/config.yaml` | Group/lab layer (requires `CNT_EXTRA_ROOT`) |
+| Extra-root | `$CNT_EXTRA_ROOT/config.yaml` | Group/lab layer (requires `$CNT_EXTRA_ROOT`) |
 | App-root | `$CNT_ROOT/config.yaml` or `<install-dir>/config.yaml` | Shared cluster/group installation |
 | System | `/etc/condatainer/config.yaml` | System-wide defaults |
 
-To create a config file at a specific location:
+To create a config file at a specific layer:
 
 ```bash
 # User config (default for home installations)
@@ -67,6 +67,18 @@ CNT_EXTRA_ROOT=/shared/labA/condatainer condatainer config init -l extra-root
 # System config (requires appropriate permissions)
 condatainer config init -l system
 ```
+
+### Where Writes Go
+
+Without `-l`, `config set` / `append` / `prepend` / `remove` write to the highest-priority config file that **exists** — your user config if you have one, otherwise the next layer down.
+
+If that file is read-only, the write goes to your user config instead (created if needed), with a warning:
+
+```
+[CNT!] app-root config is read-only; saving to your user config instead (applies only to you).
+```
+
+With `-l`, a read-only target is an error instead — an explicit layer is never silently retargeted.
 
 ## Configuration Options
 
@@ -104,7 +116,7 @@ condatainer config init -l system
 | `scheduler_timeout` | `0` | Seconds to wait for a scheduler command (sbatch, qsub, etc.) before returning an error. `0` (default) disables the timeout. |
 | `notification` | `web` | Notification when a helper job starts running. `web` (default) = browser notification via the dashboard; `terminal` = terminal bell ×2 (CLI only); `both` = terminal + web; `none` or empty = silent. |
 | `metadata_cache_ttl` | `7` | Days to keep the cached remote build script metadata (default: 7 days = 1 week). Set to `0` to disable caching and always fetch from the network. |
-| `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filen and the distro prefix added to bare package names (e.g. `igv` → `ubuntu24/igv`). |
+| `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filen and the distro prefix added to bare package names (e.g. `build-essential` → `ubuntu24/build-essential`). |
 | `proxy_perjob` | `false` | Auto-start a per-job SOCKS5 proxy inside submitted jobs. See [Proxy](condatainer.md#proxy). |
 | `helper_bind_all` | `false` | Bind helper services to `0.0.0.0` so the dashboard server reaches them via direct TCP instead of an SSH tunnel. |
 
@@ -210,7 +222,7 @@ upper‑casing, replacing `.` with `_`, and prefixing with
 You can list the supported variables with
 `condatainer config show` (it prints any that are currently set).
 
-`CNT_TMPDIR` is a special override used by the build system to select
+`$CNT_TMPDIR` is a special override used by the build system to select
 temporary directories across build types. If set, it takes precedence over
 scheduler-provided scratch, writable tmp auto-detection, and
 `TMPDIR`/`TEMP`/`TMP`. CondaTainer will append `cnt-$USER` to the path to avoid
@@ -256,25 +268,27 @@ export CNT_EXTRA_IMAGE_DIRS="/shared/lab/images:ro|/fast/scratch/images"
 
 ## Data Directory Search Paths
 
-**CondaTainer** searches multiple directories for images, build scripts, and helper scripts. The search order determines which files are used when duplicates exist.
+**CondaTainer** searches multiple directories for images, build scripts, and helper scripts. The search order determines which files are used when duplicates exist. See [Data Layers](../deployment/data_layers.md) for how this interacts with shared installations.
 
 ### Search Priority
 
 **Images:**
-1. `extra_image_dirs` — explicit image directories (`:ro` entries skipped for writes)
-2. **Extra-root** → `$CNT_EXTRA_ROOT/images/` (group/lab layer)
-3. **App-root** → `$CNT_ROOT/images/` or `<install>/images/`
-4. **Scratch** → `$SCRATCH/condatainer/images/`
-5. **User** → `~/.local/share/condatainer/images/`
 
-**Build / Helper Scripts:**
-**Build scripts:**
-1. `extra_build_dirs` — explicit build-scripts directories
-2. **Extra-root**, **App-root**, **Scratch**, **User** (same pattern)
+| # | Directory | Layer |
+|---|---|---|
+| 1 | `extra_image_dirs` — explicit directories (`:ro` entries skipped for writes) | `extra` |
+| 2 | `$CNT_EXTRA_ROOT/images/` (group/lab) | `extra-root` |
+| 3 | `$CNT_ROOT/images/` or `<install>/images/` | `app-root` |
+| 4 | `$SCRATCH/condatainer/images/` | `user` |
+| 5 | `~/.local/share/condatainer/images/` | `user` |
 
-**Helper scripts:**
-1. `extra_helper_dirs` — explicit helper-scripts directories
-2. **Extra-root**, **App-root**, **Scratch**, **User** (same pattern)
+Scratch and the XDG data directory are **two directories in one `user` layer** — scratch is preferred when `$SCRATCH` is set, and `-l u` selects both.
+
+**Build scripts:** `extra_build_dirs`, then the same layers with `build-scripts/`.
+
+**Helper scripts:** `extra_helper_dirs`, then the same layers with `helper-scripts/`.
+
+These layer names are what `condatainer list` tags each directory with, and what `condatainer remove -l` accepts (`u`, `r`, `e`).
 
 ### View Search Paths
 
@@ -286,6 +300,8 @@ This shows all search paths for:
 - **Images**: `.sif` and `.sqf` files
 - **Build scripts**: Build recipe files
 - **Helper scripts**: Runtime helper scripts
+
+Each path is tagged with its layer — `(extra)`, `(extra-root)`, `(app-root)`, `(user)` — plus whether it exists, is writable, and is the write target.
 
 ### Directory Structure
 
@@ -411,14 +427,14 @@ All config files (user, extra-root, app-root, system) are loaded simultaneously.
 
 For scalar keys like `apptainer_bin`, the user config takes priority; users can override app-root/system defaults in their own config without affecting other users.
 
-**Explicit root via `CNT_ROOT`:** Instead of relying on the `bin/` layout detection, set `CNT_ROOT` to point directly to the installation directory. This is useful when the binary is installed to a standard location (e.g. `/usr/local/bin`) but the data lives elsewhere:
+**Explicit root via `$CNT_ROOT`:** Instead of relying on the `bin/` layout detection, set `$CNT_ROOT` to point directly to the installation directory. This is useful when the binary is installed to a standard location (e.g. `/usr/local/bin`) but the data lives elsewhere:
 
 ```bash
 # In a module file:
 export CNT_ROOT=/shared/cluster/condatainer
 ```
 
-`CNT_ROOT` takes priority over the executable-location heuristic. The directory does not need a `bin/` subdirectory.
+`$CNT_ROOT` takes priority over the executable-location heuristic. The directory does not need a `bin/` subdirectory.
 
 To set up an app-root config for a shared installation:
 
@@ -428,13 +444,13 @@ condatainer config init -l app-root
 
 ## Multi-Tier Setup (System → Group → User)
 
-On HPC systems, configuration is typically layered across three scopes. CondaTainer supports this natively — all config files are loaded and merged simultaneously.
+On HPC systems, configuration is typically layered across three scopes. CondaTainer supports this natively — all config files are loaded and merged simultaneously. For the deployment guides that set these up, see [Data Layers](../deployment/data_layers.md).
 
-| Tier | Scope | Sets |
-|---|---|---|
-| System / cluster | Sysadmin | `apptainer_bin`, `scheduler_bin`, shared images, `channels` |
-| Group / lab | Lab admin | Lab-specific images, build scripts, helper scripts |
-| User | Individual | Personal overrides, personal scratch dirs |
+| Tier | Data layer | Scope | Sets |
+|---|---|---|---|
+| System / cluster | `app-root` | Sysadmin | `apptainer_bin`, `scheduler_bin`, shared images, `channels` |
+| Group / lab | `extra-root` | Lab admin | Lab-specific images, build scripts, helper scripts |
+| User | `user` | Individual | Personal overrides, personal scratch dirs |
 
 Priority: **user > group > system > defaults**
 
@@ -487,6 +503,43 @@ CNT_EXTRA_ROOT=/shared/labA/condatainer condatainer config init -l extra-root
 ```
 
 > **Environment variables are always the highest priority.** Any `CNT_*` variable set in the shell overrides the corresponding key from all config files. This is useful for one-off overrides or admin control via module files — e.g. `export CNT_BUILD_NCPUS=16` overrides `build.ncpus` from every config layer.
+
+### How Array Settings Merge
+
+Scalar keys (like `build.ncpus`) are *overridden* — the highest tier that sets one wins. Most array keys instead **merge: their entries are concatenated across every tier, user entries first** (like `extra_image_dirs` or `extra_scripts_links`). A user adds to the merged list; they never replace what an admin published. (`channels` is the exception — an array that *overwrites*, since channel order decides package resolution.)
+
+Say each tier contributes one image directory:
+
+```yaml
+# System config  (/cluster/condatainer/config.yaml)
+extra_image_dirs:
+  - /cluster/shared/images
+
+# Group config   (/shared/labA/condatainer/config.yaml)
+extra_image_dirs:
+  - /shared/labA/condatainer/images
+```
+
+The user prepends their own fast scratch, so it is checked first:
+
+```bash
+condatainer config prepend extra_image_dirs /scratch/myuser/images
+```
+```yaml
+# User config    (~/.config/condatainer/config.yaml)
+extra_image_dirs:
+  - /scratch/myuser/images
+```
+
+The effective `extra_image_dirs` every lookup sees is all three, in **user → group → system** order:
+
+```
+1. /scratch/myuser/images           (user)     ← create writes here (first writable)
+2. /shared/labA/condatainer/images  (group)
+3. /cluster/shared/images           (system)
+```
+
+`condatainer list` and friends read all three merged into one view; `condatainer create` writes to the first entry it can write — the user's own. The user was able to *prepend* their directory but cannot remove the group's or system's, so the shared sources stay in every user's search path. `extra_scripts_links` follows the same rule — a user's prepended URL is consulted before the group's and system's remote sources. Confirm the resolved order any time with `condatainer config paths`.
 
 ---
 
@@ -544,7 +597,7 @@ Run `condatainer config init` to create a config file with auto-detected setting
 
 ### Apptainer/Singularity not found
 
-Run `condatainer config init` — it will automatically search environment modules via `module avail` if no binary is found in `PATH`. If detection still fails, verify the module name with `module avail apptainer` and set the path manually:
+Run `condatainer config init` — it will automatically search environment modules via `module avail` if no binary is found in `$PATH`. If detection still fails, verify the module name with `module avail apptainer` and set the path manually:
 
 ```bash
 condatainer config set apptainer_bin /path/to/apptainer

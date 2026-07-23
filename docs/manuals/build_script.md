@@ -34,8 +34,8 @@ Apptainer definition files for distro-level system tools.
 * **Format:** `<distro>/<name>`
 * **Structure:**
   * **distro**: The base OS distribution (e.g., `ubuntu24`).
-  * **name**: The tool name (e.g., `igv`, `r4.4.3`).
-* **Example:** `ubuntu24/igv`
+  * **name**: The tool name (e.g., `build-essential`, `r4.4.3`).
+* **Example:** `ubuntu24/build-essential`
 
 ### Apps
 
@@ -94,7 +94,7 @@ Any data, including genome reference indexes.
 > - For app module: use  scheduler tmp/`$TMPDIR`/`/tmp`
 > - For data module: use condatainer root tmp
 > - For external script: determined by `#TYPE:` tag, if app(default) use tmp, if data use target dir
-> - if `CNT_TMPDIR` is set, it overrides all tmp behaviors.
+> - if `$CNT_TMPDIR` is set, it overrides all tmp behaviors.
 
 | Function | Description |
 | -------- | ----------- |
@@ -222,10 +222,10 @@ If a supported scheduler is available, **CondaTainer** will submit the build job
 
 `#TYPE:` only controls temporary build path behavior for **external** `.sh`/`.bash` builds.
 
-- `#TYPE:app` (default): build in scratch tmp (`utils.GetTmpDir()`, affected by `CNT_TMPDIR`).
+- `#TYPE:app` (default): build in scratch tmp (`utils.GetTmpDir()`, affected by `$CNT_TMPDIR`).
 - `#TYPE:data`: build alongside the target prefix directory.
 
-If `CNT_TMPDIR` is set, it overrides both `#TYPE:app` and `#TYPE:data` behavior and forces scratch tmp resolution under `CNT_TMPDIR/cnt-$USER`.
+If `$CNT_TMPDIR` is set, it overrides both `#TYPE:app` and `#TYPE:data` behavior and forces scratch tmp resolution under `$CNT_TMPDIR/cnt-$USER`.
 
 Accepted aliases (case-insensitive):
 
@@ -365,7 +365,7 @@ Place `#AUTOUPDATE:` immediately after the `#PL:` or `#DEP:` line it manages.
   - `#ENVNOTE:` must directly follow its corresponding `#ENV:` line.
   - Only one `#ENVNOTE:` line is allowed per `#ENV:` variable.
 
-`$app_root` is a special placeholder that will be replaced with the actual installation path of the overlay when loaded.
+`$app_root` is a special placeholder that is replaced at install time with the overlay's path (e.g. `/cnt/orad/2.7.0`). The resolved value is written to the overlay's `.env` sidecar and set whenever the overlay is loaded.
 
 **Example:**
 
@@ -458,7 +458,7 @@ You can use `tar_xf_pigz` and `pigz_or_gunzip` functions to speed up decompressi
 
 ## OS
 
-OS scripts are Apptainer definition files (`.def`) for distro-level system tools, built into a `.sif` image. The `.def` suffix is not part of the overlay name — `ubuntu24/igv.def` is referred to as `ubuntu24/igv`.
+OS scripts are Apptainer definition files (`.def`) for distro-level system tools, built into a `.sif` image. The `.def` suffix is not part of the overlay name — `ubuntu24/build-essential.def` is referred to as `ubuntu24/build-essential`.
 
 - Use these for tools that are not available as conda packages and need a full distro environment.
 - Prefer an existing upstream container image (via `Bootstrap: docker`) over building from source.

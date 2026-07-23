@@ -21,17 +21,17 @@ Understanding the difference between **nodes**, **tasks**, and **CPUs** helps yo
 
 ### Clusters and Schedulers
 
-An **HPC cluster** is a large collection of compute machines managed as a single system. You do not run heavy work on the machine you log in to (the **login node**, which everyone shares). Instead you describe the resources your job needs and submit it to a **scheduler** — SLURM, PBS, LSF, or HTCondor — which queues the request and dispatches it to one or more **compute nodes** once those resources are free.
+An **HPC cluster** is a large collection of compute machines managed as a single system. You do not run heavy work on the machine you log in to (the **login node**, which everyone shares). Instead you describe the resources your job needs and submit it to a **scheduler** (SLURM, PBS, LSF, ...) which queues the request and dispatches it to one or more **compute nodes** once those resources are free.
 
 A job is therefore a *resource request*, and sizing it correctly is up to you.
 
 ### Threads and MPI
 
-**Most jobs need one machine and several threads.** A typical Python, R, or bash script is a single program. It can often go faster by using more CPU cores — via NumPy, BLAS, or a `--threads` flag — but those cores are all threads sharing one machine's memory.
+**Most jobs need one machine and several threads.** A typical Python, R, or bash script is a single program. It can often go faster by using more CPU cores (e.g. `--threads` flag).
 
 **Some jobs are too big for one machine.** If a problem needs more memory than any single node has, or is still too slow using every core on one node, it must be spread across several machines. Separate machines cannot share memory, so the program has to run as several processes that **exchange messages over the network** to coordinate.
 
-**MPI** (Message Passing Interface) is the standard for doing that. It runs one program as many cooperating processes — called **ranks**, or **tasks** in scheduler terms — spread across nodes. Only programs explicitly written against an MPI library (e.g. `mpi4py`) can use it.
+**MPI** (Message Passing Interface) is the standard for doing that. It runs one program as many cooperating processes (called **ranks**, or **tasks** in scheduler terms) spread across nodes. Only programs explicitly written against an MPI library (e.g. `mpi4py`) can use it.
 
 ### Nodes, Tasks, and CPUs
 
@@ -261,7 +261,7 @@ When CondaTainer detects `ntasks > 1`, it **automatically wraps the command with
 mpiexec condatainer run mpi_job.sh
 ```
 
-`mpiexec` must be available in `PATH` at submission time (e.g. load your MPI module before calling `condatainer run`). If it is not found, submission fails with an error.
+`mpiexec` must be available in `$PATH` at submission time (e.g. load your MPI module before calling `condatainer run`). If it is not found, submission fails with an error.
 
 Each MPI rank launches its own container, all sharing the same MPI communicator via the scheduler's process management interface.
 

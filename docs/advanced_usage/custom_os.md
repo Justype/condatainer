@@ -40,8 +40,8 @@ Example output:
 
 ```
 File
-  Name:          ubuntu22--igv.sqf
-  Path:          path/images/ubuntu22--igv.sqf
+  Name:          ubuntu22--build-essential.sqf
+  Path:          path/images/ubuntu22--build-essential.sqf
   Size:          271.91 MB
   Type:          OS Overlay (Read-Only)
   Distro:        Ubuntu 22.04 (Jammy)
@@ -190,9 +190,9 @@ condatainer helper rstudio-server -o r-deps.sqf
 
 ### 4. Share the File
 
-Share the `r-deps.def` file with your team or include it in your project repository. This allows others to build the same overlay and ensures consistency across different environments.
+Sharing the `r-deps.sqf` overlay is self-contained: the definition is embedded inside it, so collaborators can use it immediately **and** recover the exact recipe with `condatainer export r-deps.sqf`. There is no longer a need to hand over the `.def` separately.
 
-Or you can directly share the `r-deps.sqf` overlay file for immediate use.
+You can still share (or version-control) the `r-deps.def` file if you prefer others rebuild from source rather than copy the image.
 
 ## Example: Read-only R Package Environment
 

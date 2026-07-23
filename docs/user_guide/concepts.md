@@ -6,7 +6,7 @@ Reproducible analyses require careful management of both software tools and refe
 
 ## 💡 The Main Idea
 
-Overlays are stackable, self-contained files that encapsulate executables and data. **CondaTainer** mounts overlays and modifies environment variables (such as `PATH`) to make software and data accessible.
+Overlays are stackable, self-contained files that encapsulate executables and data. **CondaTainer** mounts overlays and modifies environment variables (such as `$PATH`) to make software and data accessible.
 
 ## 📦 Overlay Types
 
@@ -38,18 +38,14 @@ OS overlays are built from Apptainer definition files. They expose system-level 
 
 ### 🧩 Module Overlays
 
-Module overlays are categorized into two types: **Apps** and **Data**.
+Module overlays are categorized into different types:
 
-- **Apps**: Software packages, binaries, pipelines. Mount at `/cnt/<name>/<version>`.
-- **Data**: Project data, genome indices, annotations. Mount at `/cnt/<assembly|project>/<datatype>/...`.
-
-Examples:
-- App: `cellranger/9.0.1`
-- Data: `grch38/salmon/1.10.2/gencode47`
+- **Apps**: Software packages, binaries, pipelines. (e.g. cellranger)
+- **Data**: Project data, genome indices, annotations. (e.g. salmon index)
 
 ### 📂 Naming Convention
 
-- OS: `<distro>/<name>` (e.g., `ubuntu24/igv`)
+- OS: `<distro>/<name>` (e.g., `ubuntu24/build-essential`)
 - Bundle / Env: `<name>` — no slash (e.g., `env`, `sci_rna`)
 - App (Module): `<name>/<version>` (e.g., `cellranger/9.0.1`)
 - Data (Module): `<assembly|project>/<datatype>/<version>`
@@ -60,7 +56,7 @@ Examples:
 
 The following delimiters are accepted for version specification: `/`, `--`, `=`, `@`
 
-**Important**: Because `--` serves as a delimiter, it should not be used within overlay names themselves.
+**Important**: Because `--` serves as a delimiter, it should not be used within names.
 
 ## 🧱 Stacking Overlays
 
@@ -122,7 +118,7 @@ For software unavailable through conda, custom build scripts can be created to d
 
 **Examples**: 10X [cellranger/9.0.1](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cellranger/9.0.1) and Illumina [orad/2.7.0](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/orad/2.7.0)
 
-## 🔄 Module Workflow
+## 🔗 Related
 
 - [Manage Module Overlays](./module_overlays.md)
 - [Bundle Overlays: Read-only project environment](./bundle_overlays.md)

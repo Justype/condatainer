@@ -156,6 +156,24 @@ Each card shows the helper name and status, node, working directory, env overlay
 :width: 100%
 ```
 
+Each job is reachable through two URLs:
+
+- `<id>.localhost` — points to that **specific** helper job (the full unique id).
+- `<helper-name>.localhost` — the 🔗 button opens this **stable** URL, which always points to the *first running* helper job of that name.
+
+E.g. with these jobs running:
+
+```
+# <name>-YYYYMMDD-HHMMSS
+myapp-20260722-143015     <- myapp.localhost resolves here (first running "myapp")
+another-20260722-150458   <- another.localhost resolves here
+myapp-20260722-161032
+```
+
+Here `myapp.localhost` points to `myapp-20260722-143015` (the earliest still-running one).
+
+**Why the stable `<helper-name>.localhost` URL matters:** browser-based apps like code-server (VS Code) persist some of their data (settings, layout, ...) in the browser keyed by **origin (the hostname)**. If you connect through the per-id URL, each new session gets a fresh hostname and therefore a fresh workspace. Using the stable `<helper-name>.localhost` hostname keeps the same origin across sessions, so your app state carries over from one run to the next.
+
 #### Web History
 
 Review and rerun past sessions.

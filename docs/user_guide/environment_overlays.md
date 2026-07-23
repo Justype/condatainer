@@ -34,40 +34,10 @@ condatainer o myenv.img -- python=3.11 r-base
 condatainer o -- pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
 ```
 
-Full command with options:
-
-```
-Usage:
-  condatainer o [flags] [path] [-- packages...]
-
-Examples:
-  condatainer o # 10G with default inode ratio
-  condatainer o my_data.img -s 50g -p large
-  condatainer o --fakeroot --sparse
-  condatainer o -f environment.yml
-  condatainer o myenv.img -- python=3.11
-
-Flags:
-      --fakeroot         Create a fakeroot-compatible overlay (owned by root)
-  -f, --file string      Initialize with Conda environment file (.yml or .yaml)
-      --no-tmp           Create directly at target path (slower on network filesystems)
-  -p, --profile string   Overlay profile: small/balanced/large files (default "balanced")
-  -s, --size string      Set overlay size (e.g., 500M, 10g) (default "10G")
-  -S, --sparse           Create a sparse overlay image (no pre-allocation)
-```
-
 Default channels: `conda-forge` + `bioconda`. When `-c` is given, `conda-forge` is appended automatically if not already listed. The resolved channels are saved in `.condarc` inside the overlay and reused by `mm-install`, `mm-update`, and `mm-search`.
 
 - For Python projects, 10GiB is usually sufficient.
 - For R projects, you may want to increase the size to 20GiB or more, especially if you are working with bioconductor packages.
-
-```{note}
-By default, CondaTainer stages the overlay at a fast local tmp directory (e.g. `/tmp`) and moves it to the target path once ready.
-
-This avoids slow random I/O on HPC network filesystems during creation and conda initialization.
-
-Use `--no-tmp` to skip this and write directly to the target path, if the tmp directory size is limited.
-```
 
 ```{note}
 Only one environment overlay can be mounted at a time, regardless of writable or read-only mode.
@@ -109,7 +79,7 @@ Flags:
   -r, --read-only           Mount .img overlays as read-only (default: writable)
 ```
 
-This command will mount the overlay and set the `PATH` and `CONDA_PREFIX` variables accordingly.
+This command will mount the overlay and set the `$PATH` and `$CONDA_PREFIX` variables accordingly.
 
 Then you can use `mm-*` commands to manage your project environment.
 
@@ -131,7 +101,7 @@ mm-channels append bioconda  # Move/add channel to lowest priority
 mm-channels remove nvidia    # Remove a channel
 ```
 
-You don't need to activate the environment because the **CondaTainer** sets the `CONDA_PREFIX` and `PATH` for you.
+You don't need to activate the environment because the **CondaTainer** sets the `$CONDA_PREFIX` and `$PATH` for you.
 
 ## Writable or Read-Only
 
@@ -256,12 +226,6 @@ To export a reproducible environment spec from an environment overlay, use:
 
 ```bash
 condatainer overlay export env.img > environment.yml
-```
-
-Or mount the overlay and run `mm-export` directly:
-
-```bash
-condatainer e -- mm-export --no-builds > environment.yml
 ```
 
 ## Share the Overlay with Others

@@ -52,6 +52,7 @@ A template script covers many versions through placeholders. It appears in `avai
 
 ```
 grch38/salmon-gencode  [486 variants]
+  Salmon GRCh38 GENCODE{gencode_version} index for transcript quantification
   → grch38/salmon/{salmon_version}/gencode{gencode_version}
   - salmon_version:   1.0.0-1.11.4  (18 values)
   - gencode_version:  23-49  (27 values)
@@ -78,7 +79,69 @@ condatainer create grch38/salmon/1.10.2/gencode47
 ```
 
 ```{tip}
-When entering placeholder values, you can hit <Tab> to see the available options and autocomplete.
+When entering placeholder values, you can hit <kbd>Tab</kbd> for autocomplete.
+```
+
+## 🧪 Using Module Overlays via Command
+
+Before wiring an overlay into a job script, it's worth loading it directly on the command line to make sure the tool works and to discover the environment variables it exposes. 
+
+Use `condatainer exec -o <name> [command]` (module overlays are read-only).
+
+### Run a one-off command
+
+Pass the overlay with `-o` and the command to run after it:
+
+```bash
+$ condatainer exec -o samtools/1.16 samtools --version
+$ condatainer exec -o cellranger/9.0.1 cellranger --version
+```
+
+### Launch an interactive shell
+
+Omit the command (or pass `bash`) to drop into a shell with the overlay mounted. This is handy for exploring what the overlay provides:
+
+```bash
+$ condatainer exec -o grch38/cellranger/2024-A
+[CNT] Overlay envs:
+  CELLRANGER_REF_DIR: cellranger reference dir
+  GENOME_FASTA      : genome fasta
+  ANNOTATION_GTF_GZ : 10X modified gtf
+  STAR_INDEX_DIR    : STAR index dir
+
+# Inside the container, the injected variables are ready to use:
+CNT> echo $CELLRANGER_REF_DIR
+CNT> ls $STAR_INDEX_DIR
+CNT> exit
+```
+
+When you enter the container, **CondaTainer** prints an `Overlay envs` summary listing every variable the overlay sets. These are exactly the variables you can reference later in a script.
+
+### Stack multiple overlays
+
+Repeat `-o` to mount several overlays at once — an app plus its data, for example. This mirrors what you would later declare with `#DEP:` in a script:
+
+```bash
+$ condatainer exec -o cellranger/9.0.1 -o grch38/cellranger/2024-A bash
+# both the cellranger tool and its reference are now available
+CNT> cellranger count --transcriptome=$CELLRANGER_REF_DIR ...
+```
+
+### Inspect variables without launching
+
+If you just want to know which variables an overlay sets (without entering it), use `info`:
+
+```bash
+$ condatainer info grch38/cellranger/2024-A
+Environment
+ - CELLRANGER_REF_DIR=/cnt/grch38/cellranger/2024-A/refdata-...
+   # cellranger reference dir
+```
+
+```{tip}
+Once a command works interactively with `exec -o`, you can turn it into a
+reproducible job by declaring the same overlays as `#DEP:` tags and running it
+with `condatainer run` — see [Declaring Dependencies in Scripts](#-declaring-dependencies-in-scripts) below.
 ```
 
 ## 🚀 Dependencies Automation
