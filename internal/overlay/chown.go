@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/utils"
 )
 
 // ChownRecursively changes the UID/GID of files inside an unmounted overlay image.
@@ -27,9 +28,11 @@ func ChownRecursively(ctx context.Context, imagePath string, uid, gid int, inter
 	}
 
 	targetPath := filepath.Join("/upper", strings.TrimPrefix(internalPath, "/"))
+	name := filepath.Base(absPath)
 	log := logging.FromContext(ctx)
 
-	log.Info(fmt.Sprintf("scanning %s inside %s (uid=%d gid=%d)", targetPath, absPath, uid, gid))
+	log.Info(fmt.Sprintf("scanning %s inside %s (uid=%s gid=%s)",
+		targetPath, utils.StylePath(name), utils.StyleNumber(uid), utils.StyleNumber(gid)))
 
 	inodes, err := scanInodes(ctx, absPath, targetPath)
 	if err != nil {
@@ -53,7 +56,8 @@ func ChownRecursively(ctx context.Context, imagePath string, uid, gid int, inter
 		log.Debug(fmt.Sprintf("no inodes found to modify at %s", targetPath))
 	}
 
-	log.Info(fmt.Sprintf("updating %d inodes (uid=%d gid=%d) in %s", len(uniqueInodes), uid, gid, absPath))
+	log.Info(fmt.Sprintf("updating %s inodes (uid=%s gid=%s) in %s",
+		utils.StyleNumber(len(uniqueInodes)), utils.StyleNumber(uid), utils.StyleNumber(gid), utils.StylePath(name)))
 
 	var cmds []string
 
@@ -82,7 +86,7 @@ func ChownRecursively(ctx context.Context, imagePath string, uid, gid int, inter
 		}
 	}
 
-	log.Info(fmt.Sprintf("permissions updated for %s", absPath), "kind", "success")
+	log.Info(fmt.Sprintf("permissions updated for %s", utils.StylePath(name)), "kind", "success")
 	return nil
 }
 
