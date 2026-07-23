@@ -2,7 +2,7 @@
 
 📦 **CondaTainer** allows you to create [module overlays](./concepts.md#-overlay-types) for your project.
 
-They are stackable, read-only, and highly compressed overlays that contain app or reference data, which is ideal for HPC environments where inode usage is a concern.
+They are stackable, read-only, and highly compressed overlays that contain app or data.
 
 Please read [Concepts](concepts.md) before proceeding.
 
@@ -16,7 +16,7 @@ condatainer list  # List installed
 condatainer create samtools/1.16
 condatainer exec -o samtools/1.16 samtools --version
 
-# Create a read-only project overlay from a YAML file
+# Create a read-only overlay from a YAML file
 condatainer create -f environment.yml -p my_analysis
 condatainer exec -o my_analysis.sqf bash
 
@@ -36,7 +36,7 @@ condatainer exec -o grch38/cellranger/2024-A bash
 
 Use `condatainer avail` to browse available build scripts, then `condatainer create` to install.
 
-### Normal Build Script Module
+### Normal Build Script
 
 A normal build script targets a fixed name and version. Install it directly:
 
@@ -46,12 +46,13 @@ condatainer create cellranger/9.0.1    # app module
 condatainer create grch38/genome/gencode  # data module
 ```
 
-### Template Script Module
+### Template Script
 
 A template script covers many versions through placeholders. It appears in `avail` output as a collapsed group:
 
 ```
 grch38/salmon-gencode  [486 variants]
+  Salmon GRCh38 GENCODE{gencode_version} index for transcript quantification
   → grch38/salmon/{salmon_version}/gencode{gencode_version}
   - salmon_version:   1.0.0-1.11.4  (18 values)
   - gencode_version:  23-49  (27 values)
@@ -78,7 +79,69 @@ condatainer create grch38/salmon/1.10.2/gencode47
 ```
 
 ```{tip}
-When entering placeholder values, you can hit <Tab> to see the available options and autocomplete.
+When entering placeholder values, you can hit <kbd>Tab</kbd> for autocomplete.
+```
+
+## 🧪 Using Module Overlays via Command
+
+Before wiring an overlay into a job script, it's worth loading it directly on the command line to make sure the tool works and to discover the environment variables it exposes. 
+
+Use `condatainer exec -o <name> [command]` (module overlays are read-only).
+
+### Run a one-off command
+
+Pass the overlay with `-o` and the command to run after it:
+
+```bash
+$ condatainer exec -o samtools/1.16 samtools --version
+$ condatainer exec -o cellranger/9.0.1 cellranger --version
+```
+
+### Launch an interactive shell
+
+Omit the command (or pass `bash`) to drop into a shell with the overlay mounted. This is handy for exploring what the overlay provides:
+
+```bash
+$ condatainer exec -o grch38/cellranger/2024-A
+[CNT] Overlay envs:
+  CELLRANGER_REF_DIR: cellranger reference dir
+  GENOME_FASTA      : genome fasta
+  ANNOTATION_GTF_GZ : 10X modified gtf
+  STAR_INDEX_DIR    : STAR index dir
+
+# Inside the container, the injected variables are ready to use:
+CNT> echo $CELLRANGER_REF_DIR
+CNT> ls $STAR_INDEX_DIR
+CNT> exit
+```
+
+When you enter the container, **CondaTainer** prints an `Overlay envs` summary listing every variable the overlay sets. These are exactly the variables you can reference later in a script.
+
+### Stack multiple overlays
+
+Repeat `-o` to mount several overlays at once — an app plus its data, for example. This mirrors what you would later declare with `#DEP:` in a script:
+
+```bash
+$ condatainer exec -o cellranger/9.0.1 -o grch38/cellranger/2024-A bash
+# both the cellranger tool and its reference are now available
+CNT> cellranger count --transcriptome=$CELLRANGER_REF_DIR ...
+```
+
+### Inspect variables without launching
+
+If you just want to know which variables an overlay sets (without entering it), use `info`:
+
+```bash
+$ condatainer info grch38/cellranger/2024-A
+Environment
+ - CELLRANGER_REF_DIR=/cnt/grch38/cellranger/2024-A/refdata-...
+   # cellranger reference dir
+```
+
+```{tip}
+Once a command works interactively with `exec -o`, you can turn it into a
+reproducible job by declaring the same overlays as `#DEP:` tags and running it
+with `condatainer run` — see [Declaring Dependencies in Scripts](#-declaring-dependencies-in-scripts) below.
 ```
 
 ## 🚀 Dependencies Automation
@@ -87,8 +150,8 @@ When entering placeholder values, you can hit <Tab> to see the available options
 
 To Install a Salmon Index Overlay. You don't need to:
 
-- Load modules or install Salmon manually.
-- Manually download genome FASTA and transcript FASTA files.
+- Load modules or install Salmon.
+- Download genome FASTA and transcript FASTA files.
 - Create decoy FASTA.
 - Build the Salmon index and submit scheduler jobs.
 
@@ -97,9 +160,9 @@ To Install a Salmon Index Overlay. You don't need to:
 ```bash
 condatainer create grch38/salmon/1.10.2/gencode47
 # This command will:
-# - Create Salmon 1.10.2 module overlay
-# - Download GRCh38 genome FASTA as overlay
-# - Download Gencode 47 transcript FASTA as another overlay
+# - Create Salmon 1.10.2 module overlay (salmon/1.10.2)
+# - Download GRCh38 genome FASTA as overlay (grch38/genome/gencode)
+# - Download Gencode 47 transcript FASTA as overlay (grch38/transcript-gencode/47)
 # - Submit scheduler jobs to build the Salmon index using these overlays
 ```
 
@@ -120,7 +183,7 @@ salmon quant -i $SALMON_INDEX_DIR ...
 ````{note}
 **CondaTainer** will automatically set environment variables like `SALMON_INDEX_DIR`.
 
-If you don't know the variable names, you can use `info` to check:
+If you don't know the variable names, use `info` to check:
 
 ```bash
 condatainer info grcm39/transcript-gencode/M9
@@ -149,7 +212,7 @@ condatainer run analysis.sh
 
 ## 🤖 Scheduler Automation
 
-When you request a reference or an environment that requires significant computation to prepare, **CondaTainer will automatically submit scheduler jobs** (SLURM, PBS, LSF, or HTCondor) to handle the heavy lifting for you.
+If a script contains scheduler directives (e.g. `#SBATCH`), **CondaTainer will automatically submit scheduler jobs** to handle the heavy lifting for you.
 
 Example Script (`analysis.sh`):
 
@@ -237,11 +300,6 @@ condatainer run cellranger_quant.sh
 ## 🔗 Related Resources
 
 - [CondaTainer Manual](../manuals/condatainer.md)
-- [Workspace Overlays: Writable Project-Level](./workspace_overlays.md)
+- [Environement Overlays: Writable Project-Level](./environment_overlays.md)
 - [Bundle Overlays: Read-Only Project-Level](./bundle_overlays.md)
 - [Scheduler Integration](../qa/scheduler.md)
-
-Tutorials using CondaTainer:
-
-- [RStudio Server](../tutorials/rstudio-server.md)
-- [VS Code](../tutorials/vscode.md)

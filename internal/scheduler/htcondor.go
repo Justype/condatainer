@@ -372,7 +372,7 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 
 	// Create output directory if specified
 	if outputDir != "" {
-		if err := os.MkdirAll(outputDir, utils.PermDir); err != nil {
+		if err := utils.MkdirAllShared(outputDir); err != nil {
 			return "", NewScriptCreationError(jobSpec.Name, outputDir, err)
 		}
 	}
@@ -443,7 +443,7 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	shWriter.Flush()
 	shFile.Close()
 
-	if err := os.Chmod(shPath, utils.PermExec); err != nil {
+	if err := utils.MakeExecutable(shPath); err != nil {
 		return "", NewScriptCreationError(jobSpec.Name, shPath, err)
 	}
 

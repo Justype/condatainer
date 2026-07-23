@@ -36,15 +36,26 @@ func formatDuration(d time.Duration) string {
 }
 
 var schedulerShowPartitions bool
-var schedulerShowQueues bool
-var schedulerShowCpuOnly bool
-var schedulerShowGpuOnly bool
+
+// schedulerGpuFilter is a tri-state set from the mutually exclusive --cpu/--gpu
+// flags: unset means show every partition.
+type schedulerGpuFilterMode int
+
+const (
+	schedulerGpuFilterNone schedulerGpuFilterMode = iota
+	schedulerGpuFilterCpuOnly
+	schedulerGpuFilterGpuOnly
+)
+
+var schedulerGpuFilter schedulerGpuFilterMode
 
 var schedulerCmd = &cobra.Command{
 	Use:   "scheduler",
+	Args:  cobra.NoArgs,
 	Short: "Display scheduler information",
-	Long: `Display information about the detected job scheduler:
-type (SLURM, PBS, etc.), binary path, version, and availability status.`,
+	Long: `Show the detected job scheduler: type, binary path, version, and availability.
+
+Add -p to also show per-partition (or per-queue) resource limits.`,
 	Example: `  condatainer scheduler          # Show scheduler information
   condatainer scheduler -p       # Show per-partition/queue limits
   condatainer scheduler --gpu    # Show only GPU partitions
@@ -55,14 +66,27 @@ type (SLURM, PBS, etc.), binary path, version, and availability status.`,
 func init() {
 	rootCmd.AddCommand(schedulerCmd)
 	schedulerCmd.Flags().BoolVarP(&schedulerShowPartitions, "partitions", "p", false, "Show per-partition resource limits")
-	schedulerCmd.Flags().BoolVarP(&schedulerShowQueues, "queue", "Q", false, "Show per-queue resource limits (alias for -p)")
-	schedulerCmd.Flags().BoolVar(&schedulerShowCpuOnly, "cpu", false, "Show only CPU-only partitions (no GPUs)")
-	schedulerCmd.Flags().BoolVar(&schedulerShowGpuOnly, "gpu", false, "Show only GPU partitions")
+	schedulerCmd.Flags().BoolP("queue", "Q", false, "Show per-queue resource limits (alias for -p)")
+	schedulerCmd.Flags().Bool("cpu", false, "Show only CPU-only partitions (no GPUs)")
+	schedulerCmd.Flags().Bool("gpu", false, "Show only GPU partitions")
+	schedulerCmd.MarkFlagsMutuallyExclusive("cpu", "gpu")
 }
 
 func runScheduler(cmd *cobra.Command, args []string) {
-	// Auto-enable -p if --cpu or --gpu is set, or if -q is used
-	if schedulerShowCpuOnly || schedulerShowGpuOnly || schedulerShowQueues {
+	ResolveFlagAlias(cmd, "partitions", "queue")
+
+	// --cpu and --gpu are mutually exclusive, so at most one can be set here.
+	cpuOnly, _ := cmd.Flags().GetBool("cpu")
+	gpuOnly, _ := cmd.Flags().GetBool("gpu")
+	switch {
+	case cpuOnly:
+		schedulerGpuFilter = schedulerGpuFilterCpuOnly
+	case gpuOnly:
+		schedulerGpuFilter = schedulerGpuFilterGpuOnly
+	}
+
+	// Filtering only makes sense in the per-partition view, so imply -p
+	if schedulerGpuFilter != schedulerGpuFilterNone {
 		schedulerShowPartitions = true
 	}
 
@@ -140,10 +164,10 @@ func runScheduler(cmd *cobra.Command, args []string) {
 				hasGpu := len(gpusByPartition[partitionName]) > 0
 
 				// Apply filters only if --cpu or --gpu is set
-				if schedulerShowCpuOnly && hasGpu {
+				if schedulerGpuFilter == schedulerGpuFilterCpuOnly && hasGpu {
 					continue // Skip GPU partitions when --cpu is set
 				}
-				if schedulerShowGpuOnly && !hasGpu {
+				if schedulerGpuFilter == schedulerGpuFilterGpuOnly && !hasGpu {
 					continue // Skip CPU-only partitions when --gpu is set
 				}
 
@@ -152,11 +176,12 @@ func runScheduler(cmd *cobra.Command, args []string) {
 
 			if len(filteredLimits) > 0 {
 				fmt.Println()
-				if schedulerShowCpuOnly {
+				switch schedulerGpuFilter {
+				case schedulerGpuFilterCpuOnly:
 					fmt.Println("Partition Resource Limits (CPU-only):")
-				} else if schedulerShowGpuOnly {
+				case schedulerGpuFilterGpuOnly:
 					fmt.Println("Partition Resource Limits (GPU):")
-				} else {
+				default:
 					fmt.Println("Partition Resource Limits:")
 				}
 				fmt.Println()
@@ -251,9 +276,10 @@ func runScheduler(cmd *cobra.Command, args []string) {
 
 			// No partitions match the filter
 			fmt.Println()
-			if schedulerShowGpuOnly {
+			switch schedulerGpuFilter {
+			case schedulerGpuFilterGpuOnly:
 				utils.PrintWarning("No GPU partitions available")
-			} else if schedulerShowCpuOnly {
+			case schedulerGpuFilterCpuOnly:
 				utils.PrintWarning("No CPU-only partitions available")
 			}
 			return

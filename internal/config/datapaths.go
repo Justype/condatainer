@@ -399,6 +399,66 @@ func buildScriptSearchPaths(subdir string) []string {
 }
 
 // =============================================================================
+// Data Layers
+// =============================================================================
+
+// DataLayer identifies which tier a data directory belongs to. The short forms
+// (u/r/e) match the -l/--layer vocabulary used by the config commands, so a
+// single mental model covers both config files and data directories.
+type DataLayer string
+
+const (
+	LayerExtra     DataLayer = "extra"      // extra_*_dirs config keys (no short form)
+	LayerExtraRoot DataLayer = "extra-root" // $CNT_EXTRA_ROOT           (e)
+	LayerAppRoot   DataLayer = "app-root"   // $CNT_ROOT or <install-dir> (r)
+	LayerUser      DataLayer = "user"       // $SCRATCH, else XDG data dir (u)
+)
+
+// ParseDataLayer resolves a user-supplied layer name or its short form.
+func ParseDataLayer(s string) (DataLayer, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "u", "user":
+		return LayerUser, nil
+	case "r", "app-root", "approot", "root":
+		return LayerAppRoot, nil
+	case "e", "extra-root", "extraroot", "extra":
+		return LayerExtraRoot, nil
+	}
+	return "", fmt.Errorf("unknown layer %q (want: u/user, r/app-root, e/extra-root)", s)
+}
+
+// ClassifyDataDir reports which layer a data directory belongs to, by comparing
+// its parent against each tier root. Tiers are checked in search-path order, so a
+// directory shared by two tiers (e.g. CNT_ROOT == $SCRATCH/condatainer) is
+// labelled with the higher-priority one, matching how lookups resolve it.
+func ClassifyDataDir(path string) DataLayer {
+	parent := filepath.Clean(filepath.Dir(filepath.Clean(path)))
+	match := func(root string) bool {
+		return root != "" && filepath.Clean(root) == parent
+	}
+	switch {
+	case match(GetExtraRootDir()):
+		return LayerExtraRoot
+	case match(GetRootDir()):
+		return LayerAppRoot
+	case match(GetScratchDataDir()), match(GetUserDataDir()):
+		return LayerUser
+	}
+	return LayerExtra
+}
+
+// FilterDirsByLayer returns the subset of dirs belonging to layer, preserving order.
+func FilterDirsByLayer(dirs []string, layer DataLayer) []string {
+	var out []string
+	for _, d := range dirs {
+		if ClassifyDataDir(d) == layer {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// =============================================================================
 // Search Path Getters (public, read)
 // =============================================================================
 
@@ -714,10 +774,11 @@ func GetHelperBookmarksPath() string {
 
 // ServerState is the JSON written to the server PID file (NFS-visible).
 type ServerState struct {
-	Host  string `json:"host"`
-	Port  int    `json:"port"`
-	Token string `json:"token"`
-	PID   int    `json:"pid"`
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Token  string `json:"token"`
+	PID    int    `json:"pid"`
+	Daemon bool   `json:"daemon"` // Saved for 'server restart' using same daemon mode.
 }
 
 // GetServerPidFilePath returns the path to the server PID/state file for the current host.
@@ -811,10 +872,15 @@ func SaveServerPort(port int) error {
 	if path == "" {
 		return fmt.Errorf("cannot determine state directory")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+	dir := filepath.Dir(path)
+	if err := utils.MkdirAllShared(dir); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(strconv.Itoa(port)+"\n"), utils.PermFile)
+	if err := os.WriteFile(path, []byte(strconv.Itoa(port)+"\n"), utils.PermFile); err != nil {
+		return err
+	}
+	utils.ShareWithParentGroup(path)
+	return nil
 }
 
 // ListServerPidFiles returns paths to all server-*.pid files in the user state directory.

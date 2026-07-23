@@ -90,9 +90,7 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 
 	b.saveEnvFile(targetPath)
 
-	if err := os.Chmod(finalPath, utils.PermFile); err != nil {
-		log.Debug("failed to set permissions", "path", finalPath, "err", err)
-	}
+	utils.ShareWithParentGroup(finalPath)
 
 	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
 		return err
@@ -183,7 +181,7 @@ func (b *BuildObject) buildExecOpts() (execpkg.Options, execpkg.IO, error) {
 		}
 	} else {
 		if isRef {
-			if err := os.MkdirAll(b.cntDirPath, utils.PermDir); err != nil {
+			if err := utils.MkdirAllShared(b.cntDirPath); err != nil {
 				return execpkg.Options{}, execpkg.IO{}, fmt.Errorf("failed to create cnt_dir %s: %w", b.cntDirPath, err)
 			}
 			targetDir := filepath.Join(b.cntDirPath, b.nameVersion)
@@ -202,7 +200,12 @@ if [ $? -ne 0 ]; then
     echo "Build script %s failed."
     exit 1
 fi
-`, b.buildSource, b.buildSource)
+# Embed the build script next to the payload for provenance (skipped if the
+# script populated nothing — packOutput reports that as a build failure).
+if [ -d "$target_dir" ]; then
+    cp %s "$target_dir/%s" 2>/dev/null || true
+fi
+`, b.buildSource, b.buildSource, b.buildSource, utils.BuildScriptName)
 
 	overlayArgs, err := GetOverlayArgsFromDependencies(b.dependencies)
 	if err != nil {

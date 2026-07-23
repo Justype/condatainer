@@ -113,7 +113,7 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 		return fmt.Errorf("failed to move SIF to %s: %w", finalPath, err)
 	}
 
-	if err := os.Chmod(finalPath, utils.PermExec); err != nil {
+	if err := utils.MakeExecutable(finalPath); err != nil {
 		log.Debug("failed to set permissions", "path", finalPath, "err", err)
 	}
 
@@ -148,7 +148,7 @@ func NewBaseImageBuildObject(update bool) (*BaseImageBuildObject, error) {
 		return nil, fmt.Errorf("no writable directory for base image: %w", err)
 	}
 
-	if err := os.MkdirAll(imagesDir, utils.PermDir); err != nil {
+	if err := utils.MkdirAllShared(imagesDir); err != nil {
 		return nil, fmt.Errorf("failed to create images directory: %w", err)
 	}
 

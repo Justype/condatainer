@@ -53,7 +53,7 @@ func TestHandleAvail(t *testing.T) {
 	writeScript(t, scriptsDir, "foo/1.0", "#!/usr/bin/bash\n#WHATIS:Test tool\ninstall_app() { :; }\n")
 	writeScript(t, scriptsDir, "bar/gen",
 		"#!/usr/bin/bash\n#PL:ver:2.0,1.0\n#TARGET:bar/{ver}\ninstall_app() { :; }\n")
-	writeScript(t, scriptsDir, "ubuntu24/igv",
+	writeScript(t, scriptsDir, "ubuntu24/build-essential",
 		"#!/usr/bin/bash\ninstall_app() { :; }\n")
 	setTestBuildScripts(t, scriptsDir) // sets DefaultDistro=ubuntu24
 
@@ -108,13 +108,13 @@ func TestHandleAvail(t *testing.T) {
 			t.Errorf("expanded variant %s should be suppressed", v)
 		}
 	}
-	// Default-distro scripts expose a bare-name alias (ubuntu24/igv → igv).
-	igv, ok := byName["ubuntu24/igv"]
+	// Default-distro scripts expose a bare-name alias (ubuntu24/build-essential → build-essential).
+	osEntry, ok := byName["ubuntu24/build-essential"]
 	if !ok {
-		t.Fatalf("ubuntu24/igv missing from %v", byName)
+		t.Fatalf("ubuntu24/build-essential missing from %v", byName)
 	}
-	if igv.Alias != "igv" {
-		t.Errorf("alias = %q, want %q", igv.Alias, "igv")
+	if osEntry.Alias != "build-essential" {
+		t.Errorf("alias = %q, want %q", osEntry.Alias, "build-essential")
 	}
 }
 

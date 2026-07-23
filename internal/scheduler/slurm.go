@@ -506,7 +506,7 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 
 	// Create output directory if specified (scripts still live in outputDir)
 	if outputDir != "" {
-		if err := os.MkdirAll(outputDir, utils.PermDir); err != nil {
+		if err := utils.MkdirAllShared(outputDir); err != nil {
 			return "", NewScriptCreationError(jobSpec.Name, outputDir, err)
 		}
 	}
@@ -687,7 +687,7 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	fmt.Fprintln(writer, "exit $_EXIT_CODE")
 
 	// Make executable
-	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {
+	if err := utils.MakeExecutable(scriptPath); err != nil {
 		return "", NewScriptCreationError(jobSpec.Name, scriptPath, err)
 	}
 

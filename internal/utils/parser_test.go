@@ -3,6 +3,7 @@ package utils
 import (
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -350,7 +351,7 @@ func TestParsePLValues(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, open, err := parsePLValues(tt.raw)
+			got, open, err := ParseValueList(tt.raw)
 			if tt.wantError {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -361,10 +362,10 @@ func TestParsePLValues(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if !reflect.DeepEqual(got, tt.wantVals) {
-				t.Errorf("parsePLValues(%q) values = %v; want %v", tt.raw, got, tt.wantVals)
+				t.Errorf("ParseValueList(%q) values = %v; want %v", tt.raw, got, tt.wantVals)
 			}
 			if open != tt.wantOpen {
-				t.Errorf("parsePLValues(%q) open = %v; want %v", tt.raw, open, tt.wantOpen)
+				t.Errorf("ParseValueList(%q) open = %v; want %v", tt.raw, open, tt.wantOpen)
 			}
 		})
 	}
@@ -492,5 +493,104 @@ func TestExpandPlaceholders_Empty(t *testing.T) {
 	combos := ExpandPlaceholders(nil)
 	if len(combos) != 1 {
 		t.Fatalf("expected [{}], got %v", combos)
+	}
+}
+
+func TestValidateTemplatePlaceholders(t *testing.T) {
+	tests := []struct {
+		name    string
+		target  string
+		plNames []string
+		wantN   int
+		wantSub string
+	}{
+		{
+			name:    "valid: all placeholders used and declared",
+			target:  "grch38/star/{star_version}/gencode{gencode_version}-{read_length}",
+			plNames: []string{"star_version", "gencode_version", "read_length"},
+			wantN:   0,
+		},
+		{
+			name:    "declared but missing from target",
+			target:  "grch38/star/{gencode_version}",
+			plNames: []string{"gencode_version", "read_length"},
+			wantN:   1,
+			wantSub: "#PL:read_length is declared but {read_length} is missing",
+		},
+		{
+			name:    "token in target with no declaration",
+			target:  "grch38/star/{gencode_version}-{read_length}",
+			plNames: []string{"gencode_version"},
+			wantN:   1,
+			wantSub: "#TARGET: uses {read_length} but there is no #PL:read_length",
+		},
+		{
+			name:    "both directions wrong",
+			target:  "grch38/star/{foo}",
+			plNames: []string{"bar"},
+			wantN:   2,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ValidateTemplatePlaceholders(tt.target, tt.plNames)
+			if len(got) != tt.wantN {
+				t.Errorf("got %d problems %v, want %d", len(got), got, tt.wantN)
+			}
+			if tt.wantSub != "" && (len(got) == 0 || !strings.Contains(got[0], tt.wantSub)) {
+				t.Errorf("got %v, want containing %q", got, tt.wantSub)
+			}
+		})
+	}
+}
+
+func TestParseValueList(t *testing.T) {
+	tests := []struct {
+		raw      string
+		want     []string
+		wantOpen bool
+		wantErr  bool
+	}{
+		// comma → sorted descending
+		{raw: "4.4.3,4.5.0,4.5.1", want: []string{"4.5.1", "4.5.0", "4.4.3"}},
+		// pipe → author order preserved
+		{raw: "kasm | turbo", want: []string{"kasm", "turbo"}},
+		{raw: "github|microsoft", want: []string{"github", "microsoft"}},
+		// "*" is open-ended in both forms, always last
+		{raw: "101,151,*", want: []string{"151", "101", "*"}, wantOpen: true},
+		{raw: "kasm | turbo | *", want: []string{"kasm", "turbo", "*"}, wantOpen: true},
+		{raw: "*", want: []string{"*"}, wantOpen: true},
+		// integer ranges expand in both forms
+		{raw: "22-25", want: []string{"25", "24", "23", "22"}},
+		{raw: "a | 1-3", want: []string{"a", "1", "2", "3"}},
+		// digits-only: literals with a suffix are not ranges
+		{raw: "2024-A", want: []string{"2024-A"}},
+		// duplicates dropped, whitespace trimmed
+		{raw: "1.0, 1.0 , 2.0", want: []string{"2.0", "1.0"}},
+		// expression passthrough
+		{raw: "EXPR:range:1-41", want: []string{"EXPR:range:1-41"}},
+		// empty
+		{raw: "", wantErr: true},
+		{raw: "  ,  ", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			got, open, err := ParseValueList(tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ParseValueList(%q) = %v; want error", tt.raw, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseValueList(%q) unexpected error: %v", tt.raw, err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ParseValueList(%q) = %v; want %v", tt.raw, got, tt.want)
+			}
+			if open != tt.wantOpen {
+				t.Errorf("ParseValueList(%q) open = %v; want %v", tt.raw, open, tt.wantOpen)
+			}
+		})
 	}
 }

@@ -53,7 +53,7 @@ type ProxyState struct {
 
 // WritePidFileAt writes proxy state to an arbitrary PID file path as JSON.
 func WritePidFileAt(path string, ps ProxyState) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0775); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
 		return err
 	}
 	data, err := json.Marshal(ps)

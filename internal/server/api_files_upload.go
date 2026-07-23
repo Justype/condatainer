@@ -158,7 +158,7 @@ func (s *srv) handleFSUpload(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if err := os.MkdirAll(filepath.Dir(target), utils.PermDir); err != nil {
+		if err := utils.MkdirAllShared(filepath.Dir(target)); err != nil {
 			part.Close()
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

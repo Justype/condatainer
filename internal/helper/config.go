@@ -82,7 +82,8 @@ func SaveHelperConfig(name string, cfg map[string]string) error {
 	if path == "" {
 		return fmt.Errorf("cannot determine helper config path")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+	dir := filepath.Dir(path)
+	if err := utils.MkdirAllShared(dir); err != nil {
 		return err
 	}
 	f, err := utils.CreateFileWritable(path)

@@ -13,18 +13,24 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var infoOverlayCmd = &cobra.Command{
-	Use:   "info [overlay]",
-	Short: "Show information about a specific overlay",
-	Long: `Display detailed information about an installed overlay or external overlay file.
+// overlayInfoHelp is shared by 'info' and 'overlay info', which run the same command.
+const overlayInfoHelp = `Show details about an installed overlay or a local overlay file.
 
-For SquashFS (.sqf) overlays: shows compression details, inode count, block size, and mount path.
-For ext3 (.img) overlays: shows filesystem stats, disk/inode usage, block size, and ownership.`,
-	Example: `  condatainer info samtools/1.22 # Show info for installed overlay
-  condatainer info env.img       # Show info for local overlay file`,
+- SquashFS (.sqf): compression details, inode count, block size, mount path
+- ext3 (.img): filesystem stats, disk/inode usage, block size, ownership`
+
+// overlayInfoExample is shared by 'info' and 'overlay info'.
+const overlayInfoExample = `  condatainer info samtools/1.22 # Show info for installed overlay
+  condatainer info env.img       # Show info for local overlay file`
+
+var infoOverlayCmd = &cobra.Command{
+	Use:               "info [flags] <overlay>",
+	Short:             "Show details about an overlay",
+	Long:              overlayInfoHelp,
+	Example:           overlayInfoExample,
 	Args:              cobra.ExactArgs(1),
 	SilenceUsage:      true,
-	ValidArgsFunction: completeInfoArgs,
+	ValidArgsFunction: completeOverlayArg,
 	RunE:              runInfoOverlay,
 }
 
@@ -37,7 +43,7 @@ func completeInfoArgs(cmd *cobra.Command, args []string, toComplete string) ([]s
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return []string{"sqf", "img"}, cobra.ShellCompDirectiveFilterFileExt
+	return []string{"sqf", "img", "ext3"}, cobra.ShellCompDirectiveFilterFileExt
 }
 
 func runInfoOverlay(cmd *cobra.Command, args []string) error {
@@ -54,7 +60,7 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 	if path, ok := installedOverlays[normalized]; ok {
 		overlayPath = path
 	} else if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
-		// Bare name not found: try <default_distro>/<name> (e.g. "igv" → "ubuntu24/igv", "base_image" → "ubuntu24/base_image")
+		// Bare name not found: try <default_distro>/<name> (e.g. "build-essential" → "ubuntu24/build-essential", "base_image" → "ubuntu24/base_image")
 		if path, ok := installedOverlays[config.Global.DefaultDistro+"/"+normalized]; ok {
 			overlayPath = path
 		}

@@ -411,7 +411,8 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	fmt.Fprintf(&sb, "export CNT_HELPER_CWD=%s\n", shellQuote(cwd))
 	fmt.Fprintf(&sb, "export CNT_HELPER_WALLTIME_SECS=%d\n", int64(walltime.Seconds()))
 	fmt.Fprintf(&sb, "export CNT_HELPER_SCRIPT_DIR=%s\n", shellQuote(scriptDir))
-	fmt.Fprintln(&sb, `export SCRATCH="${SCRATCH:-$HOME}"`)
+	// SCRATCH is not exported: it would leak into nested condatainer calls, where it
+	// selects a data layer. Helper scripts use "${SCRATCH:-$HOME}" themselves.
 
 	// CNT_JOB_TMPDIR: per-job node-local scratch dir. Unix sockets (dbus, X11, PulseAudio,
 	// rserver RPC) require local storage and do not work over NFS.
@@ -591,7 +592,7 @@ func generateWrapper(id, name, cwd, scriptDir, stateDir string, walltime time.Du
 
 	body := buildHelperCommandBody(id, name, cwd, scriptDir, stateDir, walltime, params, sched, containerCmd, config.Global.HelperBindAll)
 
-	if err := os.MkdirAll(stateDir, utils.PermDir); err != nil {
+	if err := utils.MkdirAllShared(stateDir); err != nil {
 		return "", fmt.Errorf("creating state dir: %w", err)
 	}
 
@@ -605,7 +606,7 @@ func generateWrapper(id, name, cwd, scriptDir, stateDir string, walltime time.Du
 		fmt.Fprintln(f, "#!/bin/bash")
 		fmt.Fprint(f, body)
 		f.Close()
-		if err := os.Chmod(shPath, utils.PermExec); err != nil {
+		if err := utils.MakeExecutable(shPath); err != nil {
 			return "", err
 		}
 		return shPath, nil

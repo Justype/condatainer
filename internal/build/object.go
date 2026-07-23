@@ -292,7 +292,7 @@ func (b *BuildObject) CreateTmpOverlay(ctx context.Context, force bool) error {
 	// Ensure parent directory for tmp overlay exists (mkdir -p)
 	parentDir := filepath.Dir(b.tmpOverlayPath)
 	if parentDir != "" {
-		if err := os.MkdirAll(parentDir, utils.PermDir); err != nil {
+		if err := utils.MkdirAllShared(parentDir); err != nil {
 			return fmt.Errorf("failed to create tmp overlay parent dir %s: %w", parentDir, err)
 		}
 	}
@@ -337,18 +337,27 @@ func (b *BuildObject) CreateBuildDirs(ctx context.Context, force bool) error {
 	if err := utils.EnsureTmpSubdir(tmpBase); err != nil {
 		return fmt.Errorf("failed to create tmp dir %s: %w", tmpBase, err)
 	}
-	if err := os.MkdirAll(b.cntDirPath, utils.PermDir); err != nil {
+	if err := utils.MkdirAllShared(b.cntDirPath); err != nil {
 		return fmt.Errorf("failed to create build cnt dir %s: %w", b.cntDirPath, err)
 	}
-	if err := os.MkdirAll(filepath.Join(buildDir, "tmp"), utils.PermDir); err != nil {
+	buildTmpDir := filepath.Join(buildDir, "tmp")
+	if err := utils.MkdirAllShared(buildTmpDir); err != nil {
 		return fmt.Errorf("failed to create build tmp dir: %w", err)
 	}
 	logging.FromContext(ctx).Info("build dir created", "path", buildDir)
 	return nil
 }
 
+// Cleanup removes the build workspace (remote source, tmp overlay, build dir), plus
+// the partial target overlay on failure. Announces the work when there is something
+// to remove; a no-op cleanup stays silent.
 func (b *BuildObject) Cleanup(failed bool) error {
 	log := slog.Default()
+
+	willClean := (b.isRemote && b.buildSource != "") || b.tmpOverlayPath != "" || b.cntDirPath != ""
+	if willClean {
+		log.Info("cleaning up temporary files")
+	}
 
 	// Remove remote build source if downloaded
 	if b.isRemote && b.buildSource != "" {
@@ -394,6 +403,10 @@ func (b *BuildObject) Cleanup(failed bool) error {
 				log.Warn("failed to remove target overlay", "path", b.targetOverlayPath, "err", err)
 			}
 		}
+	}
+
+	if willClean {
+		log.Info("temporary files cleaned", "kind", "success")
 	}
 
 	return nil
@@ -850,17 +863,34 @@ func resolveBuildSource(base *BuildObject, tmpDir string) (isConda bool, isConta
 }
 
 // substituteTemplateFile reads srcPath, replaces all {key} tokens using vars,
-// writes the result to a temp file in tmpDir, and returns the temp path.
-// The caller is responsible for removing the temp file when done.
+// comments out the #PL:/#TARGET: template directives, writes the result to a
+// temp file in tmpDir, and returns the temp path. The caller is responsible for
+// removing the temp file when done.
+//
+// The directives are neutralized so that once this substituted script is
+// embedded in the overlay, exporting and rebuilding it does not re-detect it as
+// a template (which would fail — its {placeholders} are already resolved).
 func substituteTemplateFile(srcPath string, vars map[string]string, tmpDir string) (string, error) {
 	data, err := os.ReadFile(srcPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read template file: %w", err)
 	}
-	content := utils.InterpolateVars(string(data), vars)
+	content := deTemplateDirectives(utils.InterpolateVars(string(data), vars))
 	tmpPath := filepath.Join(tmpDir, "pl-"+filepath.Base(srcPath))
 	if err := os.WriteFile(tmpPath, []byte(content), utils.PermFile); err != nil {
 		return "", fmt.Errorf("failed to write substituted file: %w", err)
 	}
 	return tmpPath, nil
+}
+
+// deTemplateDirectives comments out the #PL:/#TARGET: header lines (#PL: -> ##PL:)
+// so the substituted script is no longer recognized as a template.
+func deTemplateDirectives(content string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "#PL:") || strings.HasPrefix(line, "#TARGET:") {
+			lines[i] = "#" + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }

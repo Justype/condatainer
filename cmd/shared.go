@@ -171,6 +171,33 @@ func (q *SearchQuery) MatchesOrAlias(name, alias string) bool {
 	return false
 }
 
+// MatchesOrAliasWithText is MatchesOrAlias extended to a secondary field such as a
+// description. Pass an empty text to skip it.
+//
+// In AND mode each term may be satisfied by either field, so "cellranger index"
+// matches an entry named for the tool and described as an index. Other modes test
+// each field on its own rather than a concatenation, which would break anchored
+// patterns like "*server".
+func (q *SearchQuery) MatchesOrAliasWithText(name, alias, text string) bool {
+	if q.MatchesOrAlias(name, alias) {
+		return true
+	}
+	if text == "" {
+		return false
+	}
+	if q.Mode != SearchModeAnd {
+		return q.Matches(text)
+	}
+	nameLower := strings.ToLower(name)
+	textLower := strings.ToLower(text)
+	for _, term := range q.Raw {
+		if !strings.Contains(nameLower, term) && !strings.Contains(textLower, term) {
+			return false
+		}
+	}
+	return true
+}
+
 // normalizeFilters lowercases and normalises a slice of raw user-supplied filter strings.
 func normalizeFilters(filters []string) []string {
 	normalized := make([]string, 0, len(filters))
@@ -194,15 +221,29 @@ type CommonFlags struct {
 	Fakeroot    bool
 }
 
+// ResolveFlagAlias copies the value of an alias flag onto its canonical flag when
+// the user set the alias but not the canonical name. Both flags must be registered
+// against separate variables so that an explicit `--alias=false` is honoured; when
+// both are given, the canonical flag wins. Call it before reading the bound value.
+func ResolveFlagAlias(cmd *cobra.Command, canonical, alias string) {
+	f := cmd.Flags()
+	if !f.Changed(alias) || f.Changed(canonical) {
+		return
+	}
+	if aliasFlag := f.Lookup(alias); aliasFlag != nil {
+		f.Set(canonical, aliasFlag.Value.String()) //nolint:errcheck
+	}
+}
+
 // RegisterCommonFlags registers common flags on a cobra command
 func RegisterCommonFlags(cmd *cobra.Command, flags *CommonFlags) {
-	cmd.Flags().StringSliceVarP(&flags.Overlays, "overlay", "o", nil, "overlay file to mount (can be used multiple times)")
-	cmd.Flags().BoolVarP(&flags.WritableImg, "writable", "w", false, "mount .img overlays as writable (default: read-only)")
-	cmd.Flags().BoolVar(&flags.WritableImg, "writable-img", false, "Alias for --writable")
-	cmd.Flags().StringSliceVar(&flags.EnvSettings, "env", nil, "set environment variable 'KEY=VALUE' (can be used multiple times)")
-	cmd.Flags().StringVarP(&flags.BaseImage, "base-image", "b", "", "base image to use instead of default")
-	cmd.Flags().StringSliceVar(&flags.BindPaths, "bind", nil, "bind path 'HOST:CONTAINER' (can be used multiple times)")
-	cmd.Flags().BoolVarP(&flags.Fakeroot, "fakeroot", "f", false, "run container with fakeroot privileges")
+	cmd.Flags().StringSliceVarP(&flags.Overlays, "overlay", "o", nil, "Overlay file to mount (repeatable)")
+	cmd.Flags().BoolVarP(&flags.WritableImg, "writable", "w", false, "Mount .img overlays as writable (default: read-only)")
+	cmd.Flags().Bool("writable-img", false, "Alias for --writable")
+	cmd.Flags().StringSliceVar(&flags.EnvSettings, "env", nil, "Set environment variable 'KEY=VALUE' (repeatable)")
+	cmd.Flags().StringVarP(&flags.BaseImage, "base-image", "b", "", "Base image to use instead of default")
+	cmd.Flags().StringSliceVar(&flags.BindPaths, "bind", nil, "Bind path 'HOST:CONTAINER' (repeatable)")
+	cmd.Flags().BoolVarP(&flags.Fakeroot, "fakeroot", "f", false, "Run container with fakeroot privileges")
 
 	// Register completions
 	cmd.RegisterFlagCompletionFunc("overlay", overlayFlagCompletion(true, true))
@@ -425,6 +466,16 @@ func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirec
 	sort.Strings(suggestions)
 
 	return suggestions, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeOverlayArg completes the overlay argument of top-level info/export
+// with installed overlay names and local .sqf/.img files. The 'overlay *'
+// subcommands use completeInfoArgs (files only).
+func completeOverlayArg(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return overlaySuggestions(true, true, toComplete)
 }
 
 // overlaySuggestions returns overlay suggestions including installed overlays and local files

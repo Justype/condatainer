@@ -18,16 +18,16 @@ var searchChannels []string
 var searchLimit int
 
 var searchCmd = &cobra.Command{
-	Use:   "search <package>",
+	Use:   "search [flags] <package>",
 	Short: "Search conda packages via anaconda.org",
 	Long: `Search conda packages using the anaconda.org API.
 Results are filtered to the configured channels (or --channel overrides).`,
 	Example: `  condatainer search samtools             # Exact match (first channel that has it)
   condatainer search samtools --json      # JSON output
-  condatainer search -f samtool           # Fuzzy/substring match
+  condatainer search -f samtool           # Fuzzy match (via anaconda search)
   condatainer search -f samtool -l 200    # Fuzzy with higher result limit
   condatainer search samtools -c bioconda # Search specific channel`,
-	Args:         cobra.MinimumNArgs(1),
+	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE:         runSearch,
 }
@@ -35,9 +35,9 @@ Results are filtered to the configured channels (or --channel overrides).`,
 func init() {
 	rootCmd.AddCommand(searchCmd)
 	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "Output results in JSON format")
-	searchCmd.Flags().BoolVarP(&searchFuzzy, "fuzzy", "f", false, "Substring match instead of exact name match")
+	searchCmd.Flags().BoolVarP(&searchFuzzy, "fuzzy", "f", false, "Search package via api.anaconda.org/search")
 	searchCmd.Flags().StringArrayVarP(&searchChannels, "channel", "c", nil, "Conda channel to search (overrides config; repeatable)")
-	searchCmd.Flags().IntVarP(&searchLimit, "limit", "l", 100, "Maximum number of fuzzy search results")
+	searchCmd.Flags().IntVarP(&searchLimit, "limit", "l", 100, "Number of fuzzy search results before filter")
 }
 
 func platformSupported(platform string, platforms []string) bool {
@@ -50,7 +50,7 @@ func platformSupported(platform string, platforms []string) bool {
 }
 
 func runSearch(cmd *cobra.Command, args []string) error {
-	query := strings.Join(args, " ")
+	query := args[0]
 	channels := config.Global.Build.Channels
 	if len(searchChannels) > 0 {
 		channels = searchChannels
@@ -79,7 +79,25 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		}
 		archSuffix := ""
 		if currentPlatform != "" && len(r.Platforms) > 0 {
-			archSuffix = " " + utils.StyleHint("["+currentPlatform+"]")
+			hasPlatform, hasNoarch := false, false
+			for _, p := range r.Platforms {
+				switch p {
+				case currentPlatform:
+					hasPlatform = true
+				case "noarch":
+					hasNoarch = true
+				}
+			}
+			var parts []string
+			if hasPlatform {
+				parts = append(parts, currentPlatform)
+			}
+			if hasNoarch {
+				parts = append(parts, "noarch")
+			}
+			if len(parts) > 0 {
+				archSuffix = " " + utils.StyleHint("["+strings.Join(parts, "/")+"]")
+			}
 		}
 		fmt.Printf("%s (%s)%s\n", utils.StyleName(r.Name), utils.StyleHint(r.Channel), archSuffix)
 		if r.Summary != "" {

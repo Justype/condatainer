@@ -35,9 +35,11 @@ type RemoteMetadataCache struct {
 }
 
 type localScriptsDirFingerprint struct {
-	Exists        bool           `json:"exists"`
-	ModTimeUnix   int64          `json:"mod_time_unix"`
-	ImmediateDirs map[string]int `json:"immediate_dirs,omitempty"`
+	Exists      bool  `json:"exists"`
+	ModTimeUnix int64 `json:"mod_time_unix"`
+	// Dirs maps every descendant directory (relative path) to its mtime in ns,
+	// so a new leaf deep under an existing path invalidates the cache.
+	Dirs map[string]int64 `json:"dirs,omitempty"`
 }
 
 type LocalScriptsCache struct {
@@ -67,6 +69,10 @@ func localScriptsCachePath() (string, error) {
 	return filepath.Join(cacheDir, "local-scripts-cache.json.gz"), nil
 }
 
+// collectLocalScriptsFingerprints records the mtime of every directory under each
+// search path. Walking dirs only (not parsing files) stays far cheaper than a full
+// scan, while catching additions at any depth — including new data-script version
+// dirs nested under an unchanged top-level path.
 func collectLocalScriptsFingerprints(paths []string) map[string]localScriptsDirFingerprint {
 	out := make(map[string]localScriptsDirFingerprint, len(paths))
 	for _, dir := range paths {
@@ -79,22 +85,23 @@ func collectLocalScriptsFingerprints(paths []string) map[string]localScriptsDirF
 
 		fp.Exists = true
 		fp.ModTimeUnix = info.ModTime().UnixNano()
-		fp.ImmediateDirs = map[string]int{}
+		fp.Dirs = map[string]int64{}
 
-		entries, err := os.ReadDir(dir)
-		if err == nil {
-			for _, entry := range entries {
-				if !entry.IsDir() {
-					continue
-				}
-				subPath := filepath.Join(dir, entry.Name())
-				subInfo, statErr := os.Stat(subPath)
-				if statErr != nil {
-					continue
-				}
-				fp.ImmediateDirs[entry.Name()] = int(subInfo.ModTime().Unix())
+		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil || !d.IsDir() || path == dir {
+				return nil
 			}
-		}
+			subInfo, statErr := d.Info()
+			if statErr != nil {
+				return nil
+			}
+			rel, relErr := filepath.Rel(dir, path)
+			if relErr != nil {
+				return nil
+			}
+			fp.Dirs[rel] = subInfo.ModTime().UnixNano()
+			return nil
+		})
 
 		out[dir] = fp
 	}
@@ -325,6 +332,10 @@ func (s ScriptInfo) CurrentVars() map[string]string {
 // GetLocalBuildScripts scans all build-scripts directories and returns a map of name -> ScriptInfo.
 // Searches user → scratch → legacy → system directories.
 // First match wins (user scripts shadow system ones).
+//
+// PL templates are returned unexpanded — the map holds the template entry, not its
+// variants. Use ExpandTemplate for one template's variants; FindBuildScript resolves
+// concrete names without expanding.
 func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 	if ForceRefresh {
 		cachedLocalScripts = nil
@@ -454,11 +465,6 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 		}
 	}
 
-	// Expand all local PL template entries into per-combination entries.
-	// Reuses the same logic as the remote path (expandTemplates).
-	expandTemplates(scripts)
-
-	cachedLocalScripts = scripts
 	if cachePath, err := localScriptsCachePath(); err == nil {
 		envelope := &LocalScriptsCache{
 			FetchedAt:    time.Now(),
@@ -470,6 +476,8 @@ func GetLocalBuildScripts() (map[string]ScriptInfo, error) {
 			slog.Default().Debug("failed to write local scripts cache", "err", writeErr)
 		}
 	}
+
+	cachedLocalScripts = scripts
 	return scripts, nil
 }
 
@@ -488,7 +496,6 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 		if cache, err := loadRemoteMetadataCache(cachePath, baseURL, ttl); err == nil {
 			slog.Default().Debug("using cached remote metadata", "url", baseURL, "age", time.Since(cache.FetchedAt).Round(time.Minute))
 			setRemoteFields(cache.Metadata, baseURL, cache.PrebuiltLink)
-			expandTemplates(cache.Metadata)
 			cachedRemoteScriptsByURL[baseURL] = cache.Metadata
 			return cache.Metadata, nil
 		}
@@ -504,7 +511,6 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 				slog.Default().Warn("network unavailable, using cached metadata",
 					"url", metaURL, "age", time.Since(cache.FetchedAt).Round(time.Minute))
 				setRemoteFields(cache.Metadata, baseURL, cache.PrebuiltLink)
-				expandTemplates(cache.Metadata)
 				cachedRemoteScriptsByURL[baseURL] = cache.Metadata
 				return cache.Metadata, nil
 			}
@@ -516,7 +522,6 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 	// Fetch per-source prebuilt base URL (non-fatal; empty = no prebuilt for this source)
 	prebuiltLink := fetchPrebuiltLink(baseURL)
 	setRemoteFields(metadata, baseURL, prebuiltLink)
-	expandTemplates(metadata)
 
 	// Persist to disk (non-fatal)
 	if cacheErr == nil && ttl > 0 {
@@ -537,6 +542,8 @@ func getRemoteBuildScriptsForURL(baseURL string) (map[string]ScriptInfo, error) 
 
 // GetRemoteBuildScripts fetches and merges build script metadata from all configured remote URLs.
 // Earlier URLs in ScriptsLinks take precedence (first match wins).
+//
+// As with GetLocalBuildScripts, PL templates are returned unexpanded.
 func GetRemoteBuildScripts() (map[string]ScriptInfo, error) {
 	// In-process merged cache
 	if cachedMergedRemote != nil {
@@ -589,49 +596,60 @@ func setRemoteFields(scripts map[string]ScriptInfo, sourceURL, prebuiltLink stri
 	}
 }
 
-// expandTemplates expands PL template entries into per-combination entries.
-// Remote metadata only stores templates; this mirrors what GetLocalBuildScripts does locally.
-func expandTemplates(scripts map[string]ScriptInfo) {
-	for _, info := range scripts {
-		if !info.IsTemplate || info.TargetTemplate == "" || len(info.PLOrder) == 0 {
+// ExpandTemplate returns a single PL template's variants, keyed by interpolated name.
+// Returns nil if info is not a template, or if its #PL: and #TARGET: disagree — those
+// are reported and skipped rather than expanded into wrong entries.
+func ExpandTemplate(info ScriptInfo) map[string]ScriptInfo {
+	if !info.IsTemplate || info.TargetTemplate == "" || len(info.PLOrder) == 0 {
+		return nil
+	}
+	if problems := utils.ValidateTemplatePlaceholders(info.TargetTemplate, info.PLOrder); len(problems) > 0 {
+		for _, problem := range problems {
+			utils.PrintWarning("build script %s: %s", info.Name, problem)
+		}
+		utils.PrintWarning("build script %s: skipping template expansion until #PL:/#TARGET: agree", info.Name)
+		return nil
+	}
+
+	pls := make([]utils.PlaceholderDef, 0, len(info.PLOrder))
+	for _, key := range info.PLOrder {
+		vals := info.PL[key]
+		open := len(vals) > 0 && vals[len(vals)-1] == "*"
+		pls = append(pls, utils.PlaceholderDef{Name: key, Values: vals, Open: open})
+	}
+
+	combos := utils.ExpandPlaceholders(pls)
+	out := make(map[string]ScriptInfo, len(combos))
+	for _, combo := range combos {
+		expandedName := utils.InterpolateVars(info.TargetTemplate, combo)
+		if expandedName == "" || expandedName == info.Name {
 			continue
 		}
-		pls := make([]utils.PlaceholderDef, 0, len(info.PLOrder))
-		for _, key := range info.PLOrder {
-			vals := info.PL[key]
-			open := len(vals) > 0 && vals[len(vals)-1] == "*"
-			pls = append(pls, utils.PlaceholderDef{Name: key, Values: vals, Open: open})
+		if _, exists := out[expandedName]; exists {
+			continue
 		}
-		for _, combo := range utils.ExpandPlaceholders(pls) {
-			expandedName := utils.InterpolateVars(info.TargetTemplate, combo)
-			if expandedName == "" || expandedName == info.Name {
-				continue
-			}
-			if _, exists := scripts[expandedName]; exists {
-				continue
-			}
-			expandedPL := make(map[string][]string, len(combo))
-			for k, v := range combo {
-				expandedPL[k] = []string{v}
-			}
-			expandedDeps := make([]string, len(info.Deps))
-			for i, dep := range info.Deps {
-				expandedDeps[i] = utils.InterpolateVars(dep, combo)
-			}
-			scripts[expandedName] = ScriptInfo{
-				Name:         expandedName,
-				Path:         info.Path,
-				IsContainer:  info.IsContainer,
-				IsRemote:     info.IsRemote,
-				SourceURL:    info.SourceURL,
-				PrebuiltLink: info.PrebuiltLink,
-				Deps:         expandedDeps,
-				PL:           expandedPL,
-				PLOrder:      info.PLOrder,
-				Whatis:       utils.InterpolateVars(info.Whatis, combo),
-			}
+		expandedPL := make(map[string][]string, len(combo))
+		for k, v := range combo {
+			expandedPL[k] = []string{v}
+		}
+		expandedDeps := make([]string, len(info.Deps))
+		for i, dep := range info.Deps {
+			expandedDeps[i] = utils.InterpolateVars(dep, combo)
+		}
+		out[expandedName] = ScriptInfo{
+			Name:         expandedName,
+			Path:         info.Path,
+			IsContainer:  info.IsContainer,
+			IsRemote:     info.IsRemote,
+			SourceURL:    info.SourceURL,
+			PrebuiltLink: info.PrebuiltLink,
+			Deps:         expandedDeps,
+			PL:           expandedPL,
+			PLOrder:      info.PLOrder,
+			Whatis:       utils.InterpolateVars(info.Whatis, combo),
 		}
 	}
+	return out
 }
 
 // FindBuildScript looks for a build script by name/version.
@@ -822,7 +840,7 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 	}
 
 	// Ensure tmp directory exists
-	if err := os.MkdirAll(tmpDir, utils.PermDir); err != nil {
+	if err := utils.MkdirAllShared(tmpDir); err != nil {
 		return "", fmt.Errorf("failed to create tmp directory: %w", err)
 	}
 
@@ -837,10 +855,7 @@ func DownloadRemoteScript(info ScriptInfo, tmpDir string) (string, error) {
 		return "", fmt.Errorf("failed to write script: %w", err)
 	}
 
-	// Set permissions for downloaded script (664 for group-writable)
-	if err := os.Chmod(localPath, utils.PermFile); err != nil {
-		slog.Default().Debug("failed to set permissions on downloaded script", "path", localPath, "err", err)
-	}
+	utils.ShareWithParentGroup(localPath)
 
 	return localPath, nil
 }

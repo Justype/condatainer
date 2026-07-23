@@ -48,15 +48,21 @@ var (
 
 var helperCmd = &cobra.Command{
 	Use:   "helper [flags] [script-name] [script-args...]",
-	Short: "Manage and run helper scripts",
-	Long: `Manage helper scripts for running services inside CondaTainer on HPC.
+	Short: "Run web apps like RStudio on HPC",
+	Long: `Run web apps inside CondaTainer on HPC.
 
-Note: Helper is not available inside a container or a scheduler job.`,
-	Example: `  condatainer helper                 # Show running helpers
-  condatainer helper code-server     # Run code-server
-  condatainer helper code-server -h  # Show code-server flags and options
-  condatainer helper --update        # Update all helper scripts
-  condatainer helper --list          # List available helper scripts`,
+A helper script submits a job, starts the app, and opens an SSH tunnel to your browser.
+  - With no arguments, shows the apps you have running.
+  - Every helper has its own flags: condatainer helper <name> -h
+  - Resources (cpus, mem, time, gpu) can be set per run or saved as defaults.
+
+Note: not available inside a container or a scheduler job.`,
+	Example: `  condatainer helper                          # Show running apps
+  condatainer helper code-server              # Start code-server
+  condatainer helper code-server -h           # Show its flags and defaults
+  condatainer helper code-server config       # Show or save its defaults
+  condatainer helper stop                     # Stop a running app
+  condatainer helper --update                 # Update helper scripts from remote`,
 	SilenceUsage:      true,
 	RunE:              runHelper,
 	ValidArgsFunction: completeHelperScripts,
@@ -69,7 +75,6 @@ func init() {
 	helperCmd.Flags().BoolVarP(&helperUpdate, "update", "u", false, "Update helper scripts from remote")
 	helperCmd.Flags().BoolVar(&helperStatus, "status", false, "Show status of running helpers")
 	helperCmd.Flags().MarkHidden("status") //nolint:errcheck
-	helperCmd.Flags().BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (run helper headless)")
 
 	// Stop flag parsing after the first positional argument so helper-specific flags
 	// (e.g. -c/--cpus) are passed through to parsePostScriptHelperFlags rather than cobra.
@@ -310,7 +315,8 @@ func runHelper(cmd *cobra.Command, args []string) error {
 			scriptPath, err := config.FindHelperScript(scriptName)
 			if err != nil {
 				cmd.SilenceUsage = true
-				ExitWithError("helper script '%s' not found (searched: %v)", scriptName, config.GetHelperScriptSearchPaths())
+				ExitWithError("helper script '%s' not found (searched: %s)",
+					scriptName, strings.Join(config.GetHelperScriptSearchPaths(), ", "))
 			}
 			fmt.Println(scriptPath)
 			return nil
@@ -457,12 +463,13 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	scriptPath, err := config.FindHelperScript(scriptName)
 	if err != nil {
 		cmd.SilenceUsage = true
-		ExitWithError("helper script '%s' not found\nSearched: %v\nRun '%s' to fetch available helper scripts",
-			scriptName, config.GetHelperScriptSearchPaths(), utils.StyleAction("condatainer helper --update"))
+		ExitWithError("helper script '%s' not found\nSearched: %s\nRun '%s' to fetch available helper scripts",
+			scriptName, strings.Join(config.GetHelperScriptSearchPaths(), ", "),
+			utils.StyleAction("condatainer helper --update"))
 	}
 
 	// Ensure executable.
-	if err := os.Chmod(scriptPath, utils.PermExec); err != nil {
+	if err := utils.MakeExecutable(scriptPath); err != nil {
 		utils.PrintDebug("Failed to chmod helper script: %v", err)
 	}
 
@@ -578,10 +585,10 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	// Ensure server is running.
 	helper.EnsureServer()
 
-	// Resolve env.img from cwd before PromptSettings so the settings table
-	// shows the found overlay and the guided creation check below sees it.
-	// Skip when -e - was passed (user explicitly opted out).
-	if !noEnv && (opts.EnvImg == "" || opts.EnvImg == "env.img") {
+	// When -e is unset, search cwd → overlay/ → src/overlay/ (preferring
+	// env-$USER.img) and use the first overlay found. An explicit -e value is
+	// used literally; -e - opts out.
+	if !noEnv && !postFlags.envSet && (opts.EnvImg == "" || opts.EnvImg == "env.img") {
 		resolvedCwd := cwd
 		if resolvedCwd == "" {
 			resolvedCwd, _ = os.Getwd()
@@ -737,11 +744,19 @@ func runHelperConfig(name, scriptPath string, args []string) error {
 		for _, p := range params {
 			keys = append(keys, p.Key)
 		}
-		fmt.Printf("Usage: condatainer helper %s config <command>\n\n", name)
-		fmt.Println("  show              Show saved defaults")
-		fmt.Println("  get <KEY>         Print a single saved value")
-		fmt.Println("  set <KEY> <VALUE> Save a default value")
-		fmt.Println("  path              Print config file path")
+		// Laid out to match cobra's help format; this cannot be a real cobra
+		// command because the helper name is only known at runtime.
+		fmt.Printf("Show or save default settings for the %s helper.\n\n", name)
+		fmt.Printf("Usage:\n  condatainer helper %s config <command>\n\n", name)
+		fmt.Println("Available Commands:")
+		fmt.Println("  get         Print a single saved value")
+		fmt.Println("  path        Print the config file path")
+		fmt.Println("  set         Save a default value")
+		fmt.Println("  show        Show saved defaults")
+		fmt.Printf("\nExamples:\n")
+		fmt.Printf("  condatainer helper %s config show\n", name)
+		fmt.Printf("  condatainer helper %s config set cpus 4\n", name)
+		fmt.Printf("  condatainer helper %s config get cpus\n", name)
 		fmt.Printf("\nSaveable keys: %s\n", strings.Join(keys, ", "))
 
 	case "path":

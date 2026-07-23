@@ -6,7 +6,7 @@ Reproducible analyses require careful management of both software tools and refe
 
 ## 💡 The Main Idea
 
-Overlays are stackable, self-contained files that encapsulate executables and data. When loaded, **CondaTainer** modifies environment variables (such as `PATH`) and establishes path bindings to make software and data accessible.
+Overlays are stackable, self-contained files that encapsulate executables and data. **CondaTainer** mounts overlays and modifies environment variables (such as `$PATH`) to make software and data accessible.
 
 ## 📦 Overlay Types
 
@@ -38,18 +38,14 @@ OS overlays are built from Apptainer definition files. They expose system-level 
 
 ### 🧩 Module Overlays
 
-Module overlays are categorized into two types: **Apps** and **Data**.
+Module overlays are categorized into different types:
 
-- **Apps**: Software packages, binaries, pipelines. Mount at `/cnt/<name>/<version>`.
-- **Data**: Project data, genome indices, annotations. Mount at `/cnt/<assembly|project>/<datatype>/...`.
-
-Examples:
-- App: `cellranger/9.0.1`
-- Data: `grch38/salmon/1.10.2/gencode47`
+- **Apps**: Software packages, binaries, pipelines. (e.g. cellranger)
+- **Data**: Project data, genome indices, annotations. (e.g. salmon index)
 
 ### 📂 Naming Convention
 
-- OS: `<distro>/<name>` (e.g., `ubuntu24/igv`)
+- OS: `<distro>/<name>` (e.g., `ubuntu24/build-essential`)
 - Bundle / Env: `<name>` — no slash (e.g., `env`, `sci_rna`)
 - App (Module): `<name>/<version>` (e.g., `cellranger/9.0.1`)
 - Data (Module): `<assembly|project>/<datatype>/<version>`
@@ -60,7 +56,7 @@ Examples:
 
 The following delimiters are accepted for version specification: `/`, `--`, `=`, `@`
 
-**Important**: Because `--` serves as a delimiter, it should not be used within overlay names themselves.
+**Important**: Because `--` serves as a delimiter, it should not be used within names.
 
 ## 🧱 Stacking Overlays
 
@@ -68,7 +64,7 @@ Overlays can be stacked in a specific order to create a layered environment.
 
 - **Base Image**: Apptainer image (e.g. `ubuntu24--base_image.sif`) or OS overlay
 - **OS Overlay**: Provides system-level libraries and tools (should have the same distro version as the base image)
-- **Module Overlays**: Individual software packages and data (e.g. `cellranger/9.0.1`, `grch38/cellranger/2024-A`)
+- **Module Overlays**: Individual software or data (e.g. `cellranger/9.0.1`, `grch38/cellranger/2024-A`)
 - **Bundle Overlay**: Frozen conda environment (e.g. `env.sqf`)
 - **Environment Overlay**: Writable conda environment (e.g. `env.img`)
 
@@ -81,14 +77,14 @@ The later overlays will overwrite the previous ones if there are conflicts. For 
 ```{note}
 Module and bundle overlays mounted later will appear earlier in the `$PATH` (i.e., be prepended).
 
-Data overlays will not be added to the `$PATH`, but you can access them through the mount path (e.g., `/cnt/grch38/salmon/1.10.2/gencode47`). They have custom environment variables as well, use `info <overlay>` to check.
+Data overlays has custom variables which point to the data (e.g., `/cnt/grch38/salmon/1.10.2/gencode47`). You can use `info <overlay>` to check available variables.
 ```
 
 ### Stacking Example: Override cutadapt version in trim-galore
 
 By default `trim_galore` will come with the latest version of `cutadapt`, (5.2 as of Feb 2026). But you want to use `cutadapt` 5.0, to replicate a previous analysis.
 
-By stacking the `cutadapt/5.0` module overlay on top of the `trim_galore` module overlay, you can easily override the version of `cutadapt` without rebuilding the entire `trim_galore` conda environment.
+By stacking the `cutadapt/5.0` module overlay on top of the `trim_galore` module overlay, you can override the version of `cutadapt` without rebuilding the entire `trim_galore` conda environment.
 
 ```bash
 condatainer e trim-galore/0.6.11 -- trim_galore
@@ -122,7 +118,7 @@ For software unavailable through conda, custom build scripts can be created to d
 
 **Examples**: 10X [cellranger/9.0.1](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cellranger/9.0.1) and Illumina [orad/2.7.0](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/orad/2.7.0)
 
-## 🔄 Module Workflow
+## 🔗 Related
 
 - [Manage Module Overlays](./module_overlays.md)
 - [Bundle Overlays: Read-only project environment](./bundle_overlays.md)

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
@@ -66,17 +67,17 @@ func compressArgsFromFlags(flags map[string]*bool) (string, error) {
 }
 
 var createCmd = &cobra.Command{
-	Use:     "create [packages...]",
+	Use:     "create [flags] [packages...]",
 	Aliases: []string{"install", "i", "build"},
 	Short:   "Create a new SquashFS overlay",
 	Long: `Create a new SquashFS overlay using available build scripts or Conda packages.
 
-Note: If creation jobs are submitted to a scheduler, exits with code 3.`,
-	Example: `  condatainer create samtools/1.22                       # Create from build script
-  condatainer create python=3.11 numpy -n myenv          # Create conda environment
-  condatainer create python=3.11 numpy -p /scratch/myenv # Create conda env at custom path
-  condatainer create -f environment.yml -p myenv         # Create from conda file with prefix
-  condatainer create --source /data -p dataset           # Convert directory to overlay`,
+Submitted build jobs exit with code 3 (useful for scripts).`,
+	Example: `  condatainer create orad/2.7.0                   # Create from build script
+  condatainer create -n nvim nvim nodejs          # Create conda env
+  condatainer create matplotlib pandas  -p /path  # Create conda env at custom path
+  condatainer create -f environment.yml -p myenv  # Create from conda file with prefix
+  condatainer create -s docker://ubuntu:22.04 -p ubuntu  # Build from a container image`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
 		// 1. Validation Logic
@@ -202,19 +203,19 @@ func init() {
 
 	// Register Flags
 	f := createCmd.Flags()
-	f.StringVarP(&createName, "name", "n", "", "Custom name for the resulting overlay file")
-	f.StringVarP(&createPrefix, "prefix", "p", "", "Custom prefix path for the overlay file")
-	f.StringVarP(&createFile, "file", "f", "", "Path to definition file (.yaml, .sh, .def)")
+	f.StringVarP(&createName, "name", "n", "", "Custom name for the overlay")
+	f.StringVarP(&createPrefix, "prefix", "p", "", "Custom prefix path for the overlay")
+	f.StringVarP(&createFile, "file", "f", "", "Path to definition file (.yaml, .txt, .sh, .def)")
 	f.StringVarP(&createSource, "source", "s", "", "Remote source URI (e.g., docker://ubuntu:22.04)")
 	f.StringVar(&createTempSize, "temp-size", "20G", "Size of temporary overlay")
-	f.StringVar(&createBlockSize, "block-size", "", "SquashFS block size for app/env/external overlays (e.g. 128k, 512k)")
-	f.StringVar(&createDataBlockSize, "data-block-size", "", "SquashFS block size for data overlays (e.g. 512k, 1m)")
+	f.StringVar(&createBlockSize, "block-size", "", "SquashFS block size of app/external overlays (e.g. 256k)")
+	f.StringVar(&createDataBlockSize, "data-block-size", "", "SquashFS block size of data overlays (e.g. 512k, 1m)")
 	f.StringArrayVarP(&createChannels, "channel", "c", nil, "Conda channel to use (overrides config; repeatable)")
 	f.BoolVar(&createRemote, "remote", false, "Remote build scripts take precedence over local")
-	f.BoolVar(&createNoPrebuilt, "no-prebuilt", false, "Skip prebuilt artifact download; build .def files locally")
-	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist (atomic .new swap)")
+	f.BoolVar(&createNoPrebuilt, "no-prebuilt", false, "Skip prebuilt artifact download; build overlays locally")
+	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist")
 	f.BoolVar(&createUseTmpOverlay, "use-tmp-overlay", false, "Use a temporary overlay instead of a temp directory")
-	f.BoolVar(&createAlwaysSubmit, "always-submit", false, "Submit all builds as scheduler jobs even without scheduler directives")
+	f.BoolVar(&createAlwaysSubmit, "always-submit", false, "Submit all builds as scheduler jobs, even no directives")
 	f.BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (build locally)")
 
 	// Compression flags: create a bool flag for each known option
@@ -257,13 +258,13 @@ func init() {
 			}
 		})
 		if general.HasFlags() {
-			fmt.Fprintf(cmd.OutOrStderr(), "\nFlags:\n%s", general.FlagUsages())
+			fmt.Fprintf(cmd.OutOrStderr(), "\nFlags:\n%s", flagUsages(general))
 		}
 		if build.HasFlags() {
-			fmt.Fprintf(cmd.OutOrStderr(), "\nBuild Flags:\n%s", build.FlagUsages())
+			fmt.Fprintf(cmd.OutOrStderr(), "\nBuild Flags:\n%s", flagUsages(build))
 		}
 		if compress.HasFlags() {
-			fmt.Fprintf(cmd.OutOrStderr(), "\nCompression Flags:\n%s", compress.FlagUsages())
+			fmt.Fprintf(cmd.OutOrStderr(), "\nCompression Flags:\n%s", flagUsages(compress))
 		}
 		if cmd.HasAvailableInheritedFlags() {
 			fmt.Fprintf(cmd.OutOrStderr(), "\nGlobal Flags:\n%s", cmd.InheritedFlags().FlagUsages())
@@ -272,12 +273,22 @@ func init() {
 	})
 }
 
-// getWritableImagesDir returns the writable images directory or exits with an error
+// imagesDirNoteOnce keeps the destination note to one line per command, since the
+// three create paths each resolve the directory independently.
+var imagesDirNoteOnce sync.Once
+
+// getWritableImagesDir returns the writable images directory or exits with an error.
+// The destination and its data layer are reported once: the target depends on which
+// directories happen to be writable, so "(app-root)" vs "(user)" is the difference
+// between installing for everyone and installing only for yourself.
 func getWritableImagesDir() string {
 	dir, err := config.GetWritableImagesDir()
 	if err != nil {
 		ExitWithError("No writable images directory found: %v", err)
 	}
+	imagesDirNoteOnce.Do(func() {
+		utils.PrintNote("Installing to %s (%s)", dir, config.ClassifyDataDir(dir))
+	})
 	return dir
 }
 
@@ -520,9 +531,9 @@ func runCreateWithName(ctx context.Context, packages []string) {
 	// - Comma-separated package list (if packages provided)
 	var buildSource string
 	if createFile != "" {
-		// YAML file mode
-		if !utils.IsYaml(createFile) {
-			ExitWithError("File must be .yml or .yaml for conda environments")
+		// Conda env/spec file mode
+		if !utils.IsCondaFile(createFile) {
+			ExitWithError("File must be .yml/.yaml or an explicit spec (.txt) for conda environments")
 		}
 		buildSource, _ = filepath.Abs(createFile)
 	} else if len(packages) > 0 {
@@ -556,8 +567,8 @@ func runCreateWithPrefix(ctx context.Context) {
 	utils.PrintDebug("[CREATE] Creating overlay with prefix: %s", createPrefix)
 
 	// Determine file type and create appropriate BuildObject
-	if utils.IsYaml(createFile) {
-		// YAML conda environment - use NewCondaObjectWithSource
+	if utils.IsCondaFile(createFile) {
+		// Conda env/spec file - use NewCondaObjectWithSource
 		absFile, _ := filepath.Abs(createFile)
 		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, outputDir, createUpdate)
 		if err != nil {
@@ -588,7 +599,7 @@ func runCreateWithPrefix(ctx context.Context) {
 		// can detect that overlays will be created asynchronously by scheduler jobs.
 		ExitIfJobsSubmitted(graph)
 	} else {
-		ExitWithError("File must be .yml, .yaml, .sh, .bash, or .def")
+		ExitWithError("File must be .yml, .yaml, .txt, .sh, .bash, or .def")
 	}
 }
 

@@ -20,7 +20,8 @@ The main advantage of **CondaTainer** is that it packs a Conda environment insid
 By default, CondaTainer will create a 10GiB ext3 overlay named `env.img` in the current working directory.
 
 ```bash
-condatainer o
+condatainer overlay create
+condatainer o               # short cut
 ```
 
 Initialize with specific packages directly (no YAML file needed):
@@ -33,39 +34,10 @@ condatainer o myenv.img -- python=3.11 r-base
 condatainer o -- pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
 ```
 
-Full command with options:
-
-```
-Usage:
-  condatainer o [flags] [image_path] [-- packages...]
-
-Examples:
-  condatainer o # 10G with default inode ratio
-  condatainer o my_data.img -s 50G -t data
-  condatainer o --fakeroot --sparse
-  condatainer o -f environment.yml
-  condatainer o myenv.img -- python=3.11
-
-Flags:
-      --fakeroot      Create a fakeroot-compatible overlay (owned by root)
-  -f, --file string   Initialize with Conda environment file (.yml or .yaml)
-      --no-tmp        Create directly at target path instead of local tmp (slower on network filesystems)
-  -s, --size string   Set overlay size (e.g., 500M, 10G) (default "10G")
-  -S, --sparse        Create a sparse overlay image (no pre-allocation)
-  -t, --type string   Overlay profile: small/balanced/large files (default "balanced")
-```
-
-Default channels when no `-c` is given: `conda-forge` + `bioconda`. When `-c` is given, `conda-forge` is appended automatically if not already listed. The resolved channels are saved in `.condarc` inside the overlay and reused by `mm-install`, `mm-update`, and `mm-search`.
+Default channels: `conda-forge` + `bioconda`. When `-c` is given, `conda-forge` is appended automatically if not already listed. The resolved channels are saved in `.condarc` inside the overlay and reused by `mm-install`, `mm-update`, and `mm-search`.
 
 - For Python projects, 10GiB is usually sufficient.
 - For R projects, you may want to increase the size to 20GiB or more, especially if you are working with bioconductor packages.
-
-```{note}
-By default, CondaTainer stages the overlay at a fast local tmp directory (e.g. `/tmp`) and moves it to the target path once ready.
-This avoids slow random I/O on HPC network filesystems (LustreFS) during image creation and conda initialization.
-
-Use `--no-tmp` to skip this and write directly to the target path, if the tmp size is limited.
-```
 
 ```{note}
 Only one environment overlay can be mounted at a time, regardless of writable or read-only mode.
@@ -101,15 +73,13 @@ Usage:
 
 Flags:
   -b, --base-image string   Base image to use instead of default
-      --bind strings        Bind path 'HOST:CONTAINER' (can be used multiple times)
-      --env strings         Set environment variable 'KEY=VALUE' (can be used multiple times)
+      --bind strings        Bind path 'HOST:CONTAINER' (repeatable)
   -f, --fakeroot            Run container with fakeroot privileges
-  -h, --help                help for e
   -n, --no-autoload         Disable auto-loading env.img from current directory
   -r, --read-only           Mount .img overlays as read-only (default: writable)
 ```
 
-This command will mount the overlay and set the `PATH` and `CONDA_PREFIX` variables accordingly.
+This command will mount the overlay and set the `$PATH` and `$CONDA_PREFIX` variables accordingly.
 
 Then you can use `mm-*` commands to manage your project environment.
 
@@ -125,13 +95,13 @@ mm-update               # Update packages
 mm-clean -a             # Clean the cache and unused
 mm-export               # Export environment
 
-mm-channels get          # Show configured channels
+mm-channels get         # Show configured channels (/ext3/env/.condarc)
 mm-channels prepend pytorch  # Move/add channel to highest priority
 mm-channels append bioconda  # Move/add channel to lowest priority
 mm-channels remove nvidia    # Remove a channel
 ```
 
-You don't need to activate the environment because the **CondaTainer** sets the `CONDA_PREFIX` and `PATH` for you.
+You don't need to activate the environment because the **CondaTainer** sets the `$CONDA_PREFIX` and `$PATH` for you.
 
 ## Writable or Read-Only
 
@@ -140,11 +110,13 @@ Two commands can enter a container with an environment overlay, and they have di
 | Command | Default mode | Auto-loads `env.img` | Best for |
 |---------|-------------|----------------------|----------|
 | `condatainer e` | **Writable** | Yes | Interactive development |
-| `condatainer exec -o env.img` | **Read-only** | No (must specify `-o`) | Scripts and parallel jobs |
+| `condatainer exec -o env.img` | **Read-only** | No | Scripts and parallel jobs |
 
-**Writable mode** (`condatainer e`) lets you install Conda packages and modify files inside the overlay, but it exclusively locks the image — only one process can mount it writable at a time.
+**Writable mode** (`condatainer e`) lets you install Conda packages and modify files inside the overlay, but it exclusively locks the image — other process cannot mount it.
 
-**Read-only mode** allows multiple processes to mount the same overlay simultaneously, which is required for parallel job execution. Use `condatainer exec` with an explicit overlay path:
+**Read-only mode** allows multiple processes to mount the same overlay simultaneously, which is required for parallel job execution. 
+
+Use `condatainer exec` with an explicit overlay path:
 
 ```bash
 condatainer exec -o env.img <command>
@@ -173,11 +145,11 @@ Then when you run `e` or `exec`, these environment variables will be set automat
 
 ```bash
 $ condatainer e
-[CNT◇] Autoload environment overlay at /path/condatainer/env.img
+[CNT◇] Autoload environment overlay at /path/env.img
 [CNT] Overlay envs:
+  CNT_CONDA_PREFIX: /ext3/env
   GOROOT: /ext3/env/go
   GOPATH: /ext3/home/go
-  CNT_CONDA_PREFIX: /ext3/env
 ```
 
 You can add note to the `env.img.env` file as well:
@@ -193,11 +165,11 @@ Then when you run `e` or `exec`, the notes will be displayed:
 
 ```bash
 $ condatainer e
-[CNT◇] Autoload environment overlay at /path/condatainer/env.img
+[CNT◇] Autoload environment overlay at /path/env.img
 [CNT] Overlay envs:
+  CNT_CONDA_PREFIX: /ext3/env
   GOROOT: Go Installation Path
   GOPATH: Go Workspace Path
-  CNT_CONDA_PREFIX: /ext3/env
 ```
 
 ## Use Environment Overlay in a Script
@@ -239,8 +211,6 @@ But I recommend using `condatainer run` to let **CondaTainer** check the overlay
 python src/test.py
 ```
 
-You should run this from the project directory:
-
 ```bash
 # under project/ directory
 condatainer run src/run_job.sh
@@ -252,21 +222,15 @@ The `run` will check the `img` file lock, before submission:
 
 ## Export the Conda Environment
 
-To export a reproducible environment spec from an environment overlay (without entering it interactively), use:
+To export a reproducible environment spec from an environment overlay, use:
 
 ```bash
 condatainer overlay export env.img > environment.yml
 ```
 
-Or mount the overlay and run `mm-export` directly:
-
-```bash
-condatainer e -- mm-export --no-builds > environment.yml
-```
-
 ## Share the Overlay with Others
 
-You can share the `env.img` overlay image with your collaborators or other researchers who want to reproduce your analysis environment.
+You can share the `env.img` overlay image with your collaborators who want to reproduce your environment.
 
 Please compress the `env.img` file to reduce the file size before sharing.
 
@@ -301,7 +265,7 @@ Or they can use `--fakeroot` when running `condatainer exec` to avoid permission
 condatainer exec --fakeroot -o env.img <command>
 ```
 
-See [Fakeroot](../qa/overlayfs.md#fakeroot) for details on when and how fakeroot works.
+See [Fakeroot](../qa/overlayfs.md#fakeroot) for details on when to use and how fakeroot works.
 
 ## Common Issues
 
@@ -309,7 +273,7 @@ See [Fakeroot](../qa/overlayfs.md#fakeroot) for details on when and how fakeroot
 
 If you see "Read-only file system" errors when trying to write to the overlay, it means the overlay is used in read-only mode.
 
-You need to exit the current shell and run it in writable mode:
+You need to exit the current shell (container) and run it in writable mode:
 
 ```bash
 condatainer e <name>.img
@@ -321,7 +285,7 @@ condatainer e <name>.img
 It means the overlay image is full. You can try to:
 
 - run `mm-clean -a` to clean up unused packages and caches.
-- increase the size of the overlay image by running:
+- exit and increase the size of the overlay image by running:
 
 ```bash
 condatainer overlay resize env.img -s 30G
@@ -342,6 +306,7 @@ Cancel the job holding the lock (check `squeue`, `qstat`, `bjobs`, or `condor_q`
 
 ```bash
 e2fsck -p env.img
+# or condatainer overlay check env.img
 ```
 
 See [Exec Troubleshooting](../qa/exec.md) for full instructions including per-scheduler commands and local server steps.

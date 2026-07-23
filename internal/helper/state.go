@@ -299,7 +299,8 @@ func AppendHistory(run *HelperRun) error {
 	if path == "" {
 		return fmt.Errorf("cannot determine history path")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+	dir := filepath.Dir(path)
+	if err := utils.MkdirAllShared(dir); err != nil {
 		return err
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, utils.PermFile)

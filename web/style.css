@@ -41,7 +41,7 @@ body{font-family:var(--sans);font-size:14px;color:var(--text);background:var(--b
    override the inherited -webkit-user-select:none from body. */
 input,textarea,select,.selectable,
 .tv-pre,.tv-err,.term-box,.prog-pill-log,
-.log-line,.log-pre,.d-val,.d-val-col,
+.log-line,.log-pre,.d-val,.d-val-col,.code-block>:not(button),
 .jc-lastmsg,.ov-notice,.oc-note,.modal-question,.modal-error,.modal-empty{-webkit-user-select:text;user-select:text;}
 a{color:var(--accent);text-decoration:none;}
 a:hover{text-decoration:underline;}

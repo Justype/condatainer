@@ -25,7 +25,7 @@ The `--fakeroot` flag allows an unprivileged user to appear as the **root user (
 Fakeroot makes you appear as root, but it **cannot make read-only filesystems writable**. A writable `.img` overlay is required for any writes inside the container.
 ```
 
-### Build the image with fakeroot
+### Build the overlay with fakeroot
 
 On HPC systems, you don't have root privileges. Using `--fakeroot` allows you to create an overlay image that behaves like root inside the container.
 
@@ -93,7 +93,7 @@ install.packages("orderanalyzer") # required tesseract-ocr-eng
 ```
 
 ```{warning}
-I don't recommend this path. IO performance of ext3 is bad. Try [custom OS overlays](../advanced_usage/custom_os.md) instead.
+I don't recommend this path. IO performance of ext3 is poor. Try [custom OS overlays](../advanced_usage/custom_os.md) instead.
 ```
 
 ### Changing Overlay Ownership

@@ -1,9 +1,9 @@
 # Exec Troubleshooting
 
-If you cannot mount the writable overlay, it commonly means:
+If you cannot mount the writable env overlay, it commonly means:
 
-- [Other process is using the image](#used-by-another-process)
-- [You do not have permissions to access the image](#permission-denied-errors)
+- [Other process is using the overlay](#used-by-another-process)
+- [You do not have permissions to access the overlay](#permission-denied-errors)
 
 If you cannot write to an environment overlay, it may be caused by the following reasons:
 
@@ -11,11 +11,11 @@ If you cannot write to an environment overlay, it may be caused by the following
 - [Overlay is full](#overlay-is-full)
 - [Permission denied errors](#permission-denied-errors-in-container)
 
-## If an overlay image cannot be mounted
+## If an overlay cannot be mounted
 
 ### Used by another process
 
-If another process is already using the image, you cannot mount it as writable.
+If another process is already using the overlay, you cannot mount it as writable.
 
 #### On a Headless Server
 
@@ -27,12 +27,12 @@ lsof /path/to/my_env.img
 # Then use `kill <PID>` to terminate the process(es) listed.
 
 # Option 2: Kill all processes accessing the file (Use with caution!)
-fuser -k -9 /path/to/my_env.img
+fuser -k /path/to/my_env.img
 ```
 
 #### On an HPC Cluster
 
-On a cluster, the image might be locked by a running job on a different node. `lsof` will not show processes running on other nodes.
+On a cluster, the overlay might be locked by a running job on a different node. `lsof` will not show processes running on other nodes.
 
 Check your running jobs and cancel if needed:
 
@@ -56,13 +56,14 @@ condor_rm <job_id>
 
 #### After killing
 
-If a job crashed or was killed forcibly while writing to the image, the overlay filesystem might be marked as "dirty." You should run a filesystem check to repair it.
+If a job crashed or was killed forcibly while writing to the overlay, the overlay filesystem might be marked as "dirty." You should run a filesystem check to repair it.
 
 ```bash
-e2fsck -p /path/to/my_env.img
+condatainer overlay check /path/to/my_env.img
+# e2fsck -p /path/to/my_env.img
 ```
 
-If `-p` does not fix all issues, you can run it without `-p` to enter interactive mode.
+If previous command does not fix all issues, you can run `e2fsck` without `-p` to enter interactive mode.
 
 ```bash
 e2fsck /path/to/my_env.img
@@ -70,7 +71,7 @@ e2fsck /path/to/my_env.img
 
 ### Permission Denied Errors
 
-#### Level 1: The Image File (Host)
+#### Level 1: The Overlay File (Host)
 
 Ensure you have read and write permissions on the overlay image file itself.
 
@@ -93,7 +94,7 @@ condatainer overlay chown /path/to/my_env.img
 condatainer overlay chown --root /path/to/my_env.img
 ```
 
-## If cannot write to an overlay image
+## If you cannot write to an overlay
 
 ### Read-only File System
 

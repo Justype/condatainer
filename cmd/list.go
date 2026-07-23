@@ -21,9 +21,9 @@ var listOne bool
 var listWhatis bool
 
 var listCmd = &cobra.Command{
-	Use:     "list [terms...]",
+	Use:     "list [flags] [terms...]",
 	Aliases: []string{"ls"},
-	Short:   "List installed overlays matching search terms",
+	Short:   "List installed overlays",
 	Long: `List installed overlays grouped by directory, with optional search filtering.
 
 ` + searchSyntaxHint,
@@ -42,6 +42,11 @@ func init() {
 	listCmd.Flags().BoolP("remove", "r", false, "Alias for --delete")
 	listCmd.Flags().BoolVarP(&listExact, "exact", "e", false, "Force exact full-name match even for a single term")
 	listCmd.Flags().StringP("dir", "D", "", "Limit to a specific image directory (substring match)")
+	listCmd.Flags().StringP("layer", "l", "", "Limit to a data layer: u/user, r/app-root, e/extra-root")
+	listCmd.RegisterFlagCompletionFunc("layer", //nolint:errcheck
+		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+			return []string{"user", "app-root", "extra-root"}, cobra.ShellCompDirectiveNoFileComp
+		})
 	listCmd.Flags().BoolVarP(&listOne, "one", "1", false, "One entry per line (disable multi-column layout)")
 	listCmd.Flags().BoolVarP(&listWhatis, "whatis", "w", false, "Show description for each overlay")
 }
@@ -55,6 +60,8 @@ type DirOverlays struct {
 }
 
 func runList(cmd *cobra.Command, args []string) error {
+	ResolveFlagAlias(cmd, "delete", "remove")
+
 	filters := normalizeFilters(args)
 	filterActive := len(filters) > 0
 
@@ -82,13 +89,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 	query := NewSearchQuery(filters, listExactLookup)
 
-	dirFilter, _ := cmd.Flags().GetString("dir")
-	dirs := filterImageDirs(config.GetImageSearchPaths(), dirFilter)
-	if dirFilter != "" && len(dirs) == 0 {
-		utils.PrintWarning("No image directory matching %q found.", dirFilter)
-		os.Exit(ExitCodeError)
-	}
-	results := scanOverlaysByDir(dirs, query)
+	results := scanOverlaysByDir(scopedImageDirs(cmd), query)
 
 	hasAnyMatch := false
 	firstSection := true
@@ -224,11 +225,6 @@ func runList(cmd *cobra.Command, args []string) error {
 		os.Exit(ExitCodeError)
 	}
 
-	// Handle delete if requested
-	if removeFlag, _ := cmd.Flags().GetBool("remove"); removeFlag {
-		listDelete = true
-	}
-
 	if listDelete && filterActive && hasAnyMatch {
 		var allMatching []string
 		for _, d := range results {
@@ -332,11 +328,15 @@ func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 	return result
 }
 
-// dirHeader returns a full-width separator line with the directory path centered.
+// dirHeader returns a full-width separator line with the directory path and its
+// data layer centered. Padding is measured on the unstyled text, since the styled
+// form carries ANSI escapes that occupy no display width.
 func dirHeader(path string) string {
 	w := terminalWidth()
-	inner := " " + path + " "
-	pad := w - len(inner)
+	layer := "(" + string(config.ClassifyDataDir(path)) + ")"
+	plain := " " + path + " " + layer + " "
+	inner := " " + path + " " + utils.StyleDebug(layer) + " "
+	pad := w - len(plain)
 	if pad < 2 {
 		return inner
 	}

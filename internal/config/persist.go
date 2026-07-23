@@ -272,11 +272,11 @@ func GetConfigSearchPaths() []ConfigSearchPath {
 	return paths
 }
 
-// NormalizeConfigLocation expands location shorthand to its full name.
+// NormalizeConfigLayer expands a config layer shorthand to its full name.
 // Returns the full name ("user", "app-root", "extra-root", "system") or the input unchanged.
 // "root" and "r" are accepted as aliases for "app-root".
-func NormalizeConfigLocation(location string) string {
-	switch location {
+func NormalizeConfigLayer(layer string) string {
+	switch layer {
 	case "u":
 		return "user"
 	case "r", "root":
@@ -286,14 +286,14 @@ func NormalizeConfigLocation(location string) string {
 	case "s":
 		return "system"
 	default:
-		return location
+		return layer
 	}
 }
 
-// GetConfigPathByLocation returns the config path for the specified location type.
-// Supported locations: "user"/"u", "app-root"/"root"/"r", "extra-root"/"e", "system"/"s"
-func GetConfigPathByLocation(location string) (string, error) {
-	switch location {
+// GetConfigPathByLayer returns the config path for the specified config layer.
+// Supported layers: "user"/"u", "app-root"/"root"/"r", "extra-root"/"e", "system"/"s"
+func GetConfigPathByLayer(layer string) (string, error) {
+	switch layer {
 	case "user", "u":
 		return GetUserConfigPath()
 	case "app-root", "root", "r":
@@ -309,13 +309,13 @@ func GetConfigPathByLocation(location string) (string, error) {
 	case "system", "s":
 		return GetSystemConfigPath(), nil
 	default:
-		return "", fmt.Errorf("invalid location '%s': use 'user' (u), 'app-root' (r), 'extra-root' (e), or 'system' (s)", location)
+		return "", fmt.Errorf("invalid layer '%s': use 'user' (u), 'app-root' (r), 'extra-root' (e), or 'system' (s)", layer)
 	}
 }
 
-// inferLocationType returns "root", "extra-root", "system", or "user" by comparing path
+// inferConfigLayer returns "app-root", "extra-root", "system", or "user" by comparing path
 // against known config file paths. Returns "user" for any unrecognised path.
-func inferLocationType(path string) string {
+func inferConfigLayer(path string) string {
 	if p := GetExtraRootConfigPath(); p != "" && path == p {
 		return "extra-root"
 	}
@@ -329,53 +329,77 @@ func inferLocationType(path string) string {
 }
 
 // ResolveWritableConfigPath determines where a config-mutating command should write.
-// If location is non-empty it is resolved and checked for writability.
-// If location is empty the active config file is used when writable; otherwise falls back
+// If layer is non-empty it is resolved and checked for writability.
+// If layer is empty the active config file is used when writable; otherwise falls back
 // to the user config path, mirroring the config init smart-default behaviour.
-func ResolveWritableConfigPath(location string) (path, locationType string, err error) {
-	if location != "" {
-		path, err = GetConfigPathByLocation(location)
+//
+// Writability is checked on the config file itself, not just its directory: a
+// read-only file in a writable directory (a frozen shared config) must not be
+// treated as a valid write target.
+func ResolveWritableConfigPath(layer string) (path, layerType string, err error) {
+	path, layerType, _, err = resolveWritableConfigPath(layer)
+	return path, layerType, err
+}
+
+// ResolveWritableConfigPathVerbose is ResolveWritableConfigPath plus the layer it
+// fell back from. fellBackFrom is empty unless an active config existed but was
+// read-only, forcing the write down to the user layer — callers report that, since
+// the change then applies only to the current user.
+func ResolveWritableConfigPathVerbose(layer string) (path, layerType, fellBackFrom string, err error) {
+	return resolveWritableConfigPath(layer)
+}
+
+func resolveWritableConfigPath(layer string) (path, layerType, fellBackFrom string, err error) {
+	if layer != "" {
+		path, err = GetConfigPathByLayer(layer)
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
-		locationType = NormalizeConfigLocation(location)
-		if !utils.CanWriteToExistingAncestor(filepath.Dir(path)) {
-			return "", "", fmt.Errorf(
-				"config location '%s' is read-only: %s\nUse a different location or run with appropriate permissions.",
-				locationType, filepath.Dir(path),
+		layerType = NormalizeConfigLayer(layer)
+		if !utils.CanWriteToFile(path) {
+			return "", "", "", fmt.Errorf(
+				"config layer '%s' is read-only: %s\nUse a different layer or run with appropriate permissions.",
+				layerType, path,
 			)
 		}
-		return path, locationType, nil
+		return path, layerType, "", nil
 	}
 
 	// Auto-detect: active config file when writable, else user config
 	if active := viper.ConfigFileUsed(); active != "" {
-		if utils.CanWriteToDir(filepath.Dir(active)) {
-			return active, inferLocationType(active), nil
+		if utils.CanWriteToFile(active) {
+			return active, inferConfigLayer(active), "", nil
 		}
+		fellBackFrom = inferConfigLayer(active)
 	}
 	path, err = GetUserConfigPath()
 	if err != nil {
-		return "", "", fmt.Errorf("failed to determine user config path: %w", err)
+		return "", "", "", fmt.Errorf("failed to determine user config path: %w", err)
 	}
-	return path, "user", nil
+	if fellBackFrom == "user" {
+		// The user's own config is unwritable; falling back to itself would loop.
+		return "", "", "", fmt.Errorf(
+			"user config is read-only: %s\nFix its permissions to change settings.", path,
+		)
+	}
+	return path, "user", fellBackFrom, nil
 }
 
-// ResolveReadableConfigPath resolves a location string to a config file path for reading.
+// ResolveReadableConfigPath resolves a config layer name to a config file path for reading.
 // Unlike ResolveWritableConfigPath it does not check write permissions.
-func ResolveReadableConfigPath(location string) (path, locationType string, err error) {
-	if location == "" {
+func ResolveReadableConfigPath(layer string) (path, layerType string, err error) {
+	if layer == "" {
 		path, err = GetUserConfigPath()
 		if err != nil {
 			return "", "", fmt.Errorf("failed to determine user config path: %w", err)
 		}
 		return path, "user", nil
 	}
-	path, err = GetConfigPathByLocation(location)
+	path, err = GetConfigPathByLayer(layer)
 	if err != nil {
 		return "", "", err
 	}
-	return path, NormalizeConfigLocation(location), nil
+	return path, NormalizeConfigLayer(layer), nil
 }
 
 // ReadConfigSliceKey reads a string-slice key from a config file without touching
@@ -396,7 +420,8 @@ func ReadConfigSliceKey(configPath, key string) []string {
 // and writes the result back to path. No global viper state is affected.
 // Creates the directory and file if needed (first-use creation).
 func UpdateConfigKey(path, key string, value any) error {
-	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+	dir := filepath.Dir(path)
+	if err := utils.MkdirAllShared(dir); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 	v := viper.New()
@@ -407,7 +432,8 @@ func UpdateConfigKey(path, key string, value any) error {
 	if err := v.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("failed to write config to %s: %w", path, err)
 	}
-	return os.Chmod(path, utils.PermFile)
+	utils.ShareWithParentGroup(path)
+	return nil
 }
 
 // ReadConfigAllKeys returns all keys explicitly set in the config file at path.
@@ -438,7 +464,8 @@ func ReadConfigKey(configPath, key string) string {
 // SaveMinimalConfigTo writes only detected keys to path using a fresh viper instance,
 // so no default values bleed in. Keys already provided by lowerLayers are skipped.
 func SaveMinimalConfigTo(path, apptainerBin, schedulerBin, compressArgs string, lowerLayers []ConfigLayerInfo) error {
-	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+	dir := filepath.Dir(path)
+	if err := utils.MkdirAllShared(dir); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 	alreadySet := func(key string) bool {
@@ -463,7 +490,8 @@ func SaveMinimalConfigTo(path, apptainerBin, schedulerBin, compressArgs string, 
 	if err := v.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("failed to write config to %s: %w", path, err)
 	}
-	return os.Chmod(path, utils.PermFile)
+	utils.ShareWithParentGroup(path)
+	return nil
 }
 
 // SetConfigKey sets a single key in the config file at path, creating it if needed.
@@ -479,13 +507,15 @@ func SetConfigKey(path, key, value string) error {
 		return nil // already set to this value
 	}
 	v.Set(key, value)
-	if err := os.MkdirAll(filepath.Dir(path), utils.PermDir); err != nil {
+	dir := filepath.Dir(path)
+	if err := utils.MkdirAllShared(dir); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 	if err := v.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("failed to write config %s: %w", path, err)
 	}
-	return os.Chmod(path, utils.PermFile)
+	utils.ShareWithParentGroup(path)
+	return nil
 }
 
 // DeleteConfigKey removes a key from the config file at path.
@@ -511,7 +541,8 @@ func DeleteConfigKey(path, key string) error {
 	if err := v2.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("failed to write config %s: %w", path, err)
 	}
-	return os.Chmod(path, utils.PermFile)
+	utils.ShareWithParentGroup(path)
+	return nil
 }
 
 func deleteNestedKey(m map[string]any, parts []string) {

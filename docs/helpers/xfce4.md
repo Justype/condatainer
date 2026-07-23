@@ -7,7 +7,7 @@ condatainer helper -u
 condatainer helper xfce4
 ```
 
-See [Helper Scripts](./helpers.md) for SSH port forwarding setup, resource flags, configuration, and reuse mode.
+See [Helper Scripts](./helpers.md) for SSH port forwarding setup, resource flags, and configuration.
 
 ## VNC Provider
 
@@ -78,7 +78,7 @@ condatainer helper xfce4 --help
 |------|-------------|---------|
 | `--vnc,-v` | VNC provider: `kasm` or `turbo` | `kasm` |
 
-See [Helper Scripts](./helpers.md#flags) for resource and overlay flags.
+See [Helper Scripts](./helpers.md#from-the-cli) for resource and overlay flags.
 
 ## IGV
 
@@ -93,7 +93,7 @@ condatainer helper igv --igv 2.19.7
 | `--igv,-i` | IGV version | lastest conda IGV version |
 | `--vnc,-v` | VNC provider: `kasm` or `turbo` | `kasm` |
 
-See [Helper Scripts](./helpers.md#flags) for resource and overlay flags.
+See [Helper Scripts](./helpers.md#from-the-cli) for resource and overlay flags.
 
 ## Cytoscape
 
@@ -109,7 +109,7 @@ condatainer helper cytoscape --cytoscape 3.10.4 --openjdk 17.0.18
 | `--openjdk,-j` | OpenJDK version (must be 17.x) | latest 17.x |
 | `--vnc,-v` | VNC provider: `kasm` or `turbo` | `kasm` |
 
-See [Helper Scripts](./helpers.md#flags) for resource and overlay flags.
+See [Helper Scripts](./helpers.md#from-the-cli) for resource and overlay flags.
 
 ### Java version
 
@@ -126,14 +126,3 @@ ln -s $SCRATCH/CytoscapeConfiguration ~/CytoscapeConfiguration
 ## Desktop Home Directory
 
 XDG directories (Desktop, Documents, Downloads, etc.) are redirected to `$SCRATCH/desktop-home/` by default. This avoids filling your `$HOME` quota with desktop files across sessions.
-
-## Common Issues
-
-### Screen resolution
-
-The default geometry is 1600×900. For TurboVNC, the noVNC URL includes `resize=remote` so the desktop scales to your browser window. For KasmVNC, scaling is handled natively.
-
-### Audio not working (KasmVNC)
-
-PulseAudio must be installed in the `xfce4` overlay. If the null sink fails to load, a warning is printed and audio is unavailable for that session.
-

@@ -612,7 +612,7 @@ func GuidedOverlayCreate(ctx context.Context, helperName string, meta helper.Hel
 		allPkgs = append(allPkgs, strings.Fields(extraPkgs)...)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(imgPath), utils.PermDir); err != nil {
+	if err := utils.MkdirAllShared(filepath.Dir(imgPath)); err != nil {
 		return "", fmt.Errorf("creating overlay directory: %w", err)
 	}
 

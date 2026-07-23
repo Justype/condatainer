@@ -68,8 +68,7 @@ var runCmd = &cobra.Command{
 The script can contain special comment tags:
   #DEP: package/version   - Declares a dependency (auto-loaded)
   #DEP: /path/overlay.img - Declares an overlay dependency (.sqf and .img)
-  #CNT args               - Extra condatainer arguments; accepts the
-                            Container Flags listed below`,
+  #CNT args               - Extra condatainer args (see Container Flags below)`,
 	Example: `  condatainer run script.sh                         # Run with dependency check
   condatainer run script.sh arg1 arg2               # Pass arguments to the script
   condatainer run -o log/tool1_s1.out run_tool1.sh sample1 # Override stdout
@@ -87,14 +86,14 @@ The script can contain special comment tags:
 func init() {
 	rootCmd.AddCommand(runCmd)
 	runCmd.Flags().BoolVarP(&runWritableImg, "writable", "w", false, "Make .img overlays writable (default: read-only)")
-	runCmd.Flags().BoolVar(&runWritableImg, "writable-img", false, "Alias for --writable")
+	runCmd.Flags().Bool("writable-img", false, "Alias for --writable")
 	runCmd.Flags().StringVarP(&runBaseImage, "base-image", "b", "", "Base image to use instead of default")
 	runCmd.Flags().BoolVar(&runParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
 	runCmd.Flags().StringVarP(&runStdout, "output", "o", "", "Override job stdout path (creates parent dir if needed)")
 	runCmd.Flags().StringVarP(&runStderr, "error", "e", "", "Override job stderr path")
 	runCmd.Flags().StringVar(&runAfterOK, "afterok", "", "Run after jobs succeed (colon-separated IDs, e.g. 123:456)")
 	runCmd.Flags().StringVar(&runAfterNotOK, "afternotok", "", "Run after jobs fail (colon-separated IDs)")
-	runCmd.Flags().StringVar(&runAfterAny, "afterany", "", "Run after jobs finish regardless of outcome (colon-separated IDs)")
+	runCmd.Flags().StringVar(&runAfterAny, "afterany", "", "Run after jobs finish, any outcome (colon-separated IDs)")
 	runCmd.Flags().StringArrayVar(&runEnvSettings, "env", nil, "Set environment variable KEY=VALUE (repeatable)")
 	runCmd.Flags().StringArrayVar(&runBindPaths, "bind", nil, "Bind mount HOST:CONTAINER (repeatable)")
 	runCmd.Flags().BoolVarP(&runFakeroot, "fakeroot", "f", false, "Run with fakeroot privileges")
@@ -138,6 +137,8 @@ func init() {
 }
 
 func runScript(cmd *cobra.Command, args []string) error {
+	ResolveFlagAlias(cmd, "writable", "writable-img")
+
 	for _, flagInfo := range []struct{ name, val string }{
 		{"afterok", runAfterOK},
 		{"afternotok", runAfterNotOK},
@@ -1100,8 +1101,9 @@ func submitRunJob(ctx context.Context, sched scheduler.Scheduler, originScriptPa
 		}
 	}
 
-	// Ensure logs directory exists
-	if err := os.MkdirAll(logsDir, utils.PermDir); err != nil {
+	// Ensure logs directory exists. MkdirAllShared so a group-shared logs dir (2775,
+	// e.g. set via config for a lab-wide run) is group-readable/writable for reviewers.
+	if err := utils.MkdirAllShared(logsDir); err != nil {
 		return fmt.Errorf("failed to create logs directory %s: %w", logsDir, err)
 	}
 

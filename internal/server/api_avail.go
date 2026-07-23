@@ -19,7 +19,7 @@ import (
 func (s *srv) handleAvail(w http.ResponseWriter, r *http.Request) {
 	type availEntry struct {
 		Name           string              `json:"name"`
-		Alias          string              `json:"alias,omitempty"` // bare name for default-distro scripts (ubuntu24/igv → igv)
+		Alias          string              `json:"alias,omitempty"` // bare name for default-distro scripts (ubuntu24/build-essential → build-essential)
 		Whatis         string              `json:"whatis,omitempty"`
 		Remote         bool                `json:"remote,omitempty"`
 		Container      bool                `json:"container,omitempty"`
@@ -36,7 +36,7 @@ func (s *srv) handleAvail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Scripts under the default distro can be addressed by their bare name
-	// (e.g. ubuntu24/igv → igv), matching `condatainer avail`.
+	// (e.g. ubuntu24/build-essential → build-essential), matching `condatainer avail`.
 	distroPrefix := ""
 	if d := config.Global.DefaultDistro; d != "" {
 		distroPrefix = d + "/"

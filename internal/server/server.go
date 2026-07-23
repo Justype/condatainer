@@ -86,9 +86,10 @@ func RunDaemon(port int, reportPipe *os.File, watchPID int) error {
 	pidFile := config.GetServerPidFilePath()
 	if pidFile != "" {
 		if err := writeState(pidFile, config.ServerState{
-			Host: host,
-			Port: actualPort,
-			PID:  os.Getpid(),
+			Host:   host,
+			Port:   actualPort,
+			PID:    os.Getpid(),
+			Daemon: watchPID == 0,
 		}); err != nil {
 			report(fmt.Sprintf("writing PID file: %v", err))
 			return err

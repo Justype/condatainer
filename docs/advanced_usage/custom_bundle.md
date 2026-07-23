@@ -10,6 +10,8 @@ condatainer create -p <prefix> -f <conda_yaml>
 
 ```{warning}
 If you have packages not available via Conda, please directly build a os overlay instead. See the [Read-only R Package Environment](./custom_os.md#example-read-only-r-package-environment).
+
+For a single app shipped as a vendor tarball or installer, write an [app build script](./custom_app.md) instead.
 ```
 
 See [Build Scripts Manual](../manuals/build_script.md) for more details about writing build scripts.
@@ -21,9 +23,9 @@ In the following steps, we will:
 1. Use conda to install `pySCENIC`.
 2. Fix the [issue 475](https://github.com/aertslab/pySCENIC/issues/475) by editing `pySCENIC` files.
 
-### Pause a Moment: Why Not Just Build an OS Overlay or Apptainer Image?
+### Pause a Moment: Why Not Build an OS Overlay or Apptainer Image?
 
-**CondaTainer** is good for managing writable environments during development. If you have already developed a pipeline and fixed package versions, you should directly build a read-only Apptainer image or OS overlay with all dependencies included.
+**CondaTainer** is good for managing writable environments during development. But if you have already developed a pipeline and fixed package versions, you can also directly build a read-only Apptainer image or OS overlay with all dependencies included.
 
 If target app already has docker or singularity images, consider using them as base instead. See [Custom System Overlays](./custom_os.md#example-pulling-pytorch-docker-image) for details.
 
@@ -64,6 +66,6 @@ condatainer exec -o pyscenic.sqf \
 
 ### 4. Share the File
 
-Share the `pyscenic.sh` file with your team or include it in your project repository. This allows others to build the same overlay and ensures consistency across different environments.
+Sharing the `pyscenic.sqf` overlay is self-contained: the build script is embedded inside it, so collaborators can use it immediately **and** recover the exact recipe with `condatainer export pyscenic.sqf`. There is no longer a need to hand over the `.sh` separately.
 
-Or you can directly share the `pyscenic.sqf` overlay file for immediate use.
+You can still share (or version-control) the `pyscenic.sh` script if you prefer others rebuild from source rather than copy the image.

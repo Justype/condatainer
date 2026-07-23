@@ -135,9 +135,7 @@ func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath s
 		}
 	}
 
-	if err := os.Chmod(envFilePath, utils.PermFile); err != nil {
-		slog.Default().Debug("failed to set permissions on env file", "path", envFilePath, "err", err)
-	}
+	utils.ShareWithParentGroup(envFilePath)
 
 	slog.Default().Info("ENV file created", "path", envFilePath)
 	return nil

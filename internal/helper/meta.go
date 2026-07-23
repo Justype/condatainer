@@ -59,40 +59,6 @@ type HelperScriptMeta struct {
 	GPU string
 }
 
-// ParseValueSpec parses a #VALUE: value specification into a string slice.
-// Formats:
-//
-//	"opt1 | opt2 | opt3"     → pipe-separated option list (spaces allowed in labels)
-//	"1.0,2.0,3.0"            → comma-separated version list
-//	"EXPR:range:1-41"        → expression (stored as single-element slice for future use)
-func ParseValueSpec(spec string) []string {
-	spec = strings.TrimSpace(spec)
-	if spec == "" {
-		return nil
-	}
-	if strings.HasPrefix(spec, "EXPR:") {
-		return []string{spec}
-	}
-	if strings.Contains(spec, "|") {
-		parts := strings.Split(spec, "|")
-		result := make([]string, 0, len(parts))
-		for _, p := range parts {
-			if t := strings.TrimSpace(p); t != "" {
-				result = append(result, t)
-			}
-		}
-		return result
-	}
-	parts := strings.Split(spec, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if t := strings.TrimSpace(p); t != "" {
-			result = append(result, t)
-		}
-	}
-	return utils.SortVersionsDescending(result)
-}
-
 // ParseHelperParams extracts #PARAM: declarations from a helper script.
 // Format per line: #PARAM: KEY=default --long-flag,-s "Description"
 // - KEY=default: variable name and default value (empty after = means required)
@@ -271,7 +237,9 @@ func ParseHelperScriptMeta(scriptPath string) (HelperScriptMeta, error) {
 			rest := stripInlineComment(strings.TrimSpace(line[len("#VALUE:"):]))
 			key, spec, ok := strings.Cut(rest, "=")
 			if ok && strings.TrimSpace(key) != "" {
-				meta.ParamValues[strings.TrimSpace(key)] = ParseValueSpec(spec)
+				// An unparseable spec yields a nil list: the param simply has no choices.
+				values, _, _ := utils.ParseValueList(spec)
+				meta.ParamValues[strings.TrimSpace(key)] = values
 			}
 		}
 	}
