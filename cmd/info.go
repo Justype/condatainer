@@ -240,10 +240,10 @@ func displayImgInfo(overlayPath string) error {
 
 	// Mount path section
 	fmt.Println(utils.StyleTitle("Mount"))
-	fmt.Printf("  %-14s %s\n", "Path:", "/ext3/env")
+	fmt.Printf("  %-14s %s\n", "Path:", "/cnt_env")
 
-	// Conda environment section (img overlays always use /ext3/env)
-	displayCondaEnv(overlayPath, "/ext3/env")
+	// Conda environment section (img overlays always use /cnt_env)
+	displayCondaEnv(overlayPath, "/cnt_env")
 
 	// Environment variables section
 	displayEnvVars(overlayPath)

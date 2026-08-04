@@ -271,7 +271,7 @@ The OpenMPI version inside the container must match the major and minor version 
 ```bash
 ml av openmpi
 # openmpi/4.1.5
-condatainer e mpi.img -- mm-install mpi4py openmpi=4.1 -y
+condatainer e mpi.img -- mm install mpi4py openmpi=4.1 -y
 ```
 ````
 

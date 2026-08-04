@@ -5,7 +5,7 @@ Two variants are available depending on how R is installed:
 | Variant | R Installation | Best For |
 |---------|----------------|----------|
 | `rstudio-server` | Posit R image overlays | Install packages and build from source |
-| `rstudio-server-conda` | Conda (`mm-install r-base`) | All packages via conda, export env |
+| `rstudio-server-conda` | Conda (`mm install r-base`) | All packages via conda, export env |
 
 ```bash
 condatainer helper -u
@@ -90,10 +90,10 @@ condatainer exec -o r4.4.3 -o build-essential -o r-deps.sqf -o env.img Rscript s
 
 ## rstudio-server-conda (Conda R)
 
-R is installed in the writable env overlay via `mm-install r-base`. No separate R overlay is needed.
+R is installed in the writable env overlay via `mm install r-base`. No separate R overlay is needed.
 
 ```{note}
-Always use `mm-install` (Conda) to install R packages in this variant. Do not use `install.packages()` — it may conflict with the Conda-managed environment.
+Always use `mm install` (Conda) to install R packages in this variant. Do not use `install.packages()` — it may conflict with the Conda-managed environment.
 ```
 
 ### Writable Overlay with R
@@ -106,12 +106,12 @@ condatainer o -s 30g -- r-base=4.4 r-tidyverse
 condatainer e
 ```
 
-Inside the overlay, you can install packages using mm-* helpers:
+Inside the overlay, you can install packages using `mm` commands:
 
 ```bash
-mm-pin r-base   # pin R version to prevent accidental updates
-mm-install r-seurat r-patchwork bioconductor-clusterprofiler
-mm-install python=3.11 conda r-reticulate   # Conda is needed for reticulate
+mm pin add r-base   # pin R version to prevent accidental updates
+mm install r-seurat r-patchwork bioconductor-clusterprofiler
+mm install python=3.11 conda r-reticulate   # Conda is needed for reticulate
 ```
 
 ### Package Management
@@ -121,9 +121,9 @@ Conda naming conventions:
 - Bioconductor: `bioconductor-<name>` (e.g. `bioconductor-deseq2`)
 
 ```bash
-mm-search r-presto
-mm-install r-ggplot2 bioconductor-deseq2
-mm-export --no-builds > conda-env.yml   # export full environment
+mm search r-presto
+mm install r-ggplot2 bioconductor-deseq2
+mm export --no-builds > conda-env.yml   # export full environment
 ```
 
 ### Run R Without RStudio

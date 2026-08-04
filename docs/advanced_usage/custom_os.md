@@ -83,12 +83,13 @@ CNT_DEFAULT_DISTRO=ubuntu22 condatainer exec -o myoverlay.sqf bash
 
 A base image typically includes:
 
-- `micromamba` and `mm-*` scripts for managing conda environments.
+- `micromamba` for managing conda environments, plus an `mm` script that forwards to the
+  CondaTainer executable bound into the container at runtime.
 - `apptainer` for nested container support.
 
 For example, you have already launched the `code-server`. The base image allows you to:
 
-1. Directly manage conda env under the `/ext3/env` directory. (if in writable mode)
+1. Directly manage conda env under the `/cnt_env` directory. (if in writable mode)
 2. Launch nested containers (like read module sqf like `grch38/gtf-gencode/47`)
 
 If you are not using one of the features above, you can directly use another os overlay as the base image.

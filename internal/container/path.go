@@ -51,7 +51,7 @@ func BuildPathEnv(overlays []string) string {
 		}
 		var relative string
 		if utils.IsImg(cleanOverlay) {
-			relative = "/ext3/env/bin"
+			relative = "/cnt_env/bin"
 		} else if utils.IsSqf(cleanOverlay) {
 			if !overlay.HasCntBin(cleanOverlay, normalized) {
 				continue

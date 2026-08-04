@@ -622,7 +622,11 @@ func GuidedOverlayCreate(ctx context.Context, helperName string, meta helper.Hel
 		Profile: overlay.ProfileSmall,
 	}
 	io := cntexec.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
-	utils.PrintMessage("Creating overlay and installing packages: %s", cntexec.DescribeInitialCondaPackages(allPkgs))
+	if len(allPkgs) > 0 {
+		utils.PrintMessage("Creating overlay and installing packages: %s", cntexec.DescribeInitialCondaPackages(allPkgs))
+	} else {
+		utils.PrintMessage("Creating overlay; conda initialization will happen on first install")
+	}
 	if err := cntexec.CreateCondaOverlay(ctx, opts, allPkgs, meta.PostInstallCmd, false, io); err != nil {
 		return "", fmt.Errorf("overlay creation failed: %w", err)
 	}

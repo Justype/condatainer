@@ -80,13 +80,13 @@ condatainer overlay chown --root src/test.img
 debugfs -R 'stat /upper' src/test.img | head
 
 ## Using img overlay (current uid)
-condatainer exec -o test.img ls /ext3/env
+condatainer exec -o test.img ls /cnt_env
 condatainer e test.img # Should open bash shell
-condatainer e test.img -- mm-install python=3.9 -y
-condatainer e -r test.img -- mm-install r-base=4.2 -y # Should fail (not writable)
-condatainer e -r test.img -- touch /ext3/env/testfile.txt # Should fail (not writable)
-condatainer exec -o test.img mm-install r-base=4.2 -y # Should fail (not writable)
-condatainer e test.img -r -- mm-list # CNT_CONDA_PREFIX is not set! cannot work
+condatainer e test.img -- mm install python=3.9 -y
+condatainer e -r test.img -- mm install r-base=4.2 -y # Should fail (not writable)
+condatainer e -r test.img -- touch /cnt_env/testfile.txt # Should fail (not writable)
+condatainer exec -o test.img mm install r-base=4.2 -y # Should fail (not writable)
+condatainer e test.img -r -- mm list # Read-only operation should work
 condatainer exec -o test.img micromamba list | head -5 # should work
 
 ## Using img overlay (root uid)
@@ -105,7 +105,7 @@ condatainer instance -h
 condatainer instance start -o test.img -w test_instance
 condatainer instance list
 condatainer instance exec test_instance python --version # should show 3.9.*
-condatainer instance exec test_instance mm-update python=3.10 -y
+condatainer instance exec test_instance mm update python=3.10 -y
 condatainer instance exec test_instance python --version # should show 3.10.*
 timeout 3 condatainer instance stats test_instance | head
 condatainer instance stop test_instance

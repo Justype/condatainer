@@ -11,29 +11,17 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-const minimalCondaPackage = "zlib"
-
-// ResolveInitialCondaPackages returns the package list used to initialize a
-// fresh conda overlay. An empty list gets a tiny package so mm-create creates
-// the environment instead of receiving no specs.
-func ResolveInitialCondaPackages(pkgs []string) []string {
-	if len(pkgs) == 0 {
-		return []string{minimalCondaPackage}
-	}
-	return pkgs
-}
-
-// DescribeInitialCondaPackages returns user-facing text for the resolved initial package list.
+// DescribeInitialCondaPackages returns user-facing text for the initial package list.
 func DescribeInitialCondaPackages(pkgs []string) string {
 	if len(pkgs) == 0 {
-		return "minimal conda environment with small package (" + minimalCondaPackage + ")"
+		return "empty conda environment"
 	}
 	return strings.Join(pkgs, " ")
 }
 
-// CreateCondaOverlay creates a new user-owned ext3 overlay at opts.Path,
-// initializes a conda environment with pkgs using mm-create, then moves and
-// allocates the final file. This mirrors the `condatainer overlay create -- <pkgs>` flow.
+// CreateCondaOverlay creates a new user-owned ext3 overlay at opts.Path. When
+// pkgs is non-empty it initializes the conda environment before moving and
+// allocating the final file; otherwise initialization remains lazy.
 //
 // postInstallCmd is run inside the overlay after conda init (empty = skip).
 // fakeroot should be false for normal user-owned overlays.
@@ -42,8 +30,6 @@ func CreateCondaOverlay(ctx context.Context, opts *overlay.CreateOptions, pkgs [
 		opts.UID = os.Getuid()
 		opts.GID = os.Getgid()
 	}
-	pkgs = ResolveInitialCondaPackages(pkgs)
-
 	tmpPath, err := overlay.CreateInTmp(ctx, opts)
 	if err != nil {
 		return err
@@ -77,13 +63,15 @@ func CreateCondaOverlay(ctx context.Context, opts *overlay.CreateOptions, pkgs [
 	return nil
 }
 
-// InitCondaEnv creates a new conda environment inside imgPath using mm-create,
+// InitCondaEnv creates a new conda environment inside imgPath using `condatainer env install`,
 // then cleans the micromamba package cache to reduce overlay size.
 // Use for initial environment creation on a fresh overlay.
 // For adding packages to an existing environment, use InstallPackages.
 func InitCondaEnv(ctx context.Context, imgPath string, pkgs []string, fakeroot bool, io IO) error {
-	pkgs = ResolveInitialCondaPackages(pkgs)
-	cmd := append([]string{"mm-create", "-y"}, pkgs...)
+	if len(pkgs) == 0 {
+		return nil
+	}
+	cmd := append([]string{"/usr/bin/condatainer", "env", "install", "-y"}, pkgs...)
 	if err := Run(ctx, Options{
 		Overlays:    []string{imgPath},
 		WritableImg: true,
@@ -98,20 +86,20 @@ func InitCondaEnv(ctx context.Context, imgPath string, pkgs []string, fakeroot b
 		Overlays:    []string{imgPath},
 		WritableImg: true,
 		Fakeroot:    fakeroot,
-		Command:     []string{"mm-clean", "-a", "-y", "-q"},
+		Command:     []string{"/usr/bin/condatainer", "env", "clean", "-a", "-y", "-q"},
 		HidePrompt:  true,
 	}, IO{})
 	return nil
 }
 
 // InstallPackages installs additional conda packages into an existing base
-// environment inside imgPath using mm-install (respects overlay's .condarc channels).
+// environment inside imgPath using `condatainer env install` (respects the overlay's .condarc channels).
 func InstallPackages(ctx context.Context, imgPath string, pkgs []string, fakeroot bool, io IO) error {
 	return Run(ctx, Options{
 		Overlays:    []string{imgPath},
 		WritableImg: true,
 		Fakeroot:    fakeroot,
-		Command:     append([]string{"mm-install", "-y"}, pkgs...),
+		Command:     append([]string{"/usr/bin/condatainer", "env", "install", "-y"}, pkgs...),
 		HidePrompt:  true,
 	}, io)
 }
@@ -122,7 +110,7 @@ func RemovePackages(ctx context.Context, imgPath string, pkgs []string, fakeroot
 		Overlays:    []string{imgPath},
 		WritableImg: true,
 		Fakeroot:    fakeroot,
-		Command:     append([]string{"mm-remove", "-y"}, pkgs...),
+		Command:     append([]string{"/usr/bin/condatainer", "env", "remove", "-y"}, pkgs...),
 		HidePrompt:  true,
 	}, io)
 }

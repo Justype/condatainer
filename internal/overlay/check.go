@@ -92,8 +92,8 @@ func PathExists(overlayPath, entry string) bool {
 
 // ListCondaPackages reads the conda-meta directory from a writable ext3 overlay
 // image and returns a map of package name → installed version for every conda
-// package found. The conda environment is expected at /ext3/env inside the
-// container, which maps to upper/ext3/env/conda-meta inside the .img file.
+// package found. The conda environment is expected at /cnt_env inside the
+// container, which maps to upper/cnt_env/conda-meta inside the .img file.
 //
 // Returns (nil, nil) for non-.img files or when no conda-meta directory exists.
 func ListCondaPackages(imgPath string) (map[string]string, error) {
@@ -104,7 +104,7 @@ func ListCondaPackages(imgPath string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("debugfs not found: %w", err)
 	}
-	cmd := exec.Command(dbg, "-R", "ls -p upper/ext3/env/conda-meta", imgPath)
+	cmd := exec.Command(dbg, "-R", "ls -p upper/cnt_env/conda-meta", imgPath)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, nil

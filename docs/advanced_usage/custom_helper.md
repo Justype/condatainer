@@ -136,7 +136,7 @@ If the user runs the helper without `-e`, CondaTainer offers to create the overl
 One shell command run inside the container after guided overlay creation, for pinning or setup:
 
 ```bash
-#POST_INSTALL_CMD: mm-pin r-base
+#POST_INSTALL_CMD: mm pin add r-base
 ```
 
 ### `#CHECK_PATH:` — pre-submission binary check
@@ -144,7 +144,7 @@ One shell command run inside the container after guided overlay creation, for pi
 Verifies the binary exists *before* burning queue time. Fatal when `#IMG_PACKAGES:` is set, a warning otherwise. One path per line, with an optional message:
 
 ```bash
-#CHECK_PATH: /ext3/env/bin/jupyter-lab "Jupyter Lab not found — install with: mm-install jupyterlab"
+#CHECK_PATH: /cnt_env/bin/jupyter-lab "Jupyter Lab not found — install with: mm install jupyterlab"
 ```
 
 ### `#BIND:` — extra bind mounts
@@ -286,7 +286,7 @@ condatainer helper jupyterlab       # first run: offers to create env.img with j
 Then, from a terminal inside JupyterLab (or `condatainer exec -w -o env.img bash`):
 
 ```bash
-mm-install scanpy leidenalg
+mm install scanpy leidenalg
 ```
 
 ---

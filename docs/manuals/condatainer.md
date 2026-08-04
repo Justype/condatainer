@@ -130,7 +130,7 @@ e.g.
 - `grch38/gtf-gencode/47` is mounted at `/cnt/grch38/gtf-gencode/47`
 - `my_analysis_env.sqf` is mounted at `/cnt/my_analysis_env`
 
-For `.img` files, the mount point is always `/ext3/env`, so renaming is allowed.
+For `.img` files, the mount point is always `/cnt_env`, so renaming is allowed.
 
 ## Mount Points
 
@@ -143,7 +143,7 @@ For `.img` files, the mount point is always `/ext3/env`, so renaming is allowed.
 | OS | `.sqf` | R/O | `/bin`, `/lib`, `/usr` | System Foundation — minimal system root that can run standalone or serve as a base for Modules/Bundles. |
 | Module | `.sqf` | R/O | `/cnt/<name>/<version>` | Individual tool overlay (single package) mounted under `/cnt` and layered on top of an OS or Bundle. |
 | Bundle | `.sqf` | R/O | `/cnt/<env_name>` | Frozen Conda environment (prebuilt collection of packages) mounted under `/cnt` as a named environment. |
-| Environment | `.img` | R/W | `/ext3/env` | Writable Conda environment (ext3 image) for interactive work and runtime package changes. |
+| Environment | `.img` | R/W | `/cnt_env` | Writable Conda environment (ext3 image) for interactive work and runtime package changes. |
 
 Read-only `.sqf` overlays are ideal for distributing immutable software and reference data. Writable `.img` overlays are for live development or when packages must be changed at runtime.
 
@@ -153,7 +153,7 @@ Mount points and examples
   - Module example: `bcftools/1.22` → mounted at `/cnt/bcftools/1.22`.
   - Bundle example: `my_project_env.sqf` → mounted at `/cnt/my_project_env`.
   - OS overlays present system directories (e.g., binaries under `/bin`) inside the container filesystem exposed by the overlay.
-- Writable images (`.img`) mount at `/ext3/env` and expose a full ext3 filesystem where packages may be installed or modified.
+- Writable images (`.img`) expose the Conda environment at `/cnt_env`, where packages may be installed or modified.
 
 Writability: `.sqf` overlays are read-only. To enable write access for a `.img` overlay use the `-w` / `--writable` flag with `exec` or `run`.
 
@@ -212,41 +212,45 @@ condatainer o myenv.img -- python=3.11
 condatainer o -- pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
 ```
 
-Then you can use the `mm-<operation>` helper commands to create/install/update/remove conda packages inside the writable container.
+When neither packages nor `--file` are supplied, overlay creation skips conda initialization. The
+first `mm install` inside the writable container creates the project conda environment.
+
+Inside the writable container, use `mm` to install, update, and remove conda packages. It forwards
+to the container-bound `condatainer env` command.
 
 ```bash
 # install more packages (uses channels saved during creation)
-mm-install numpy pandas
-mm-install pytorch-cuda=12.4 -c pytorch -c nvidia  # extra channels merged with saved ones
+mm install numpy pandas
+mm install pytorch-cuda=12.4 -c pytorch -c nvidia  # extra channels merged with saved ones
 
-# manage channels (/ext3/env/.condarc)
-mm-channels get              # show configured channels
-mm-channels prepend pytorch  # move/add channel to highest priority
-mm-channels append bioconda  # move/add channel to lowest priority
-mm-channels remove nvidia    # remove a channel
+# manage channels (/cnt_env/.condarc)
+mm channels list              # show configured channels
+mm channels prepend pytorch  # move/add channel to highest priority
+mm channels append bioconda  # move/add channel to lowest priority
+mm channels remove nvidia    # remove a channel
 
 # search for packages (uses saved channels)
-mm-search pytorch-cuda
+mm search pytorch-cuda
 
 # pin the package version
-mm-pin numpy # after installation
-mm-pin -d numpy # to unpin
-mm-pin -l # list pinned packages
+mm pin add numpy # after installation
+mm pin remove numpy # to unpin
+mm pin list # list pinned packages
 
 # update packages
-mm-update
+mm update --all
 
 # remove packages
-mm-remove pandas
+mm remove pandas
 
 # list installed packages
-mm-list
+mm list
 
 # clean all conda cache
-mm-clean -ay
+mm clean -ay
 
 # export the env
-mm-export --no-builds > my_env.yaml
+mm export --no-builds > my_env.yaml
 ```
 
 ### Overlay Info
@@ -845,7 +849,8 @@ condatainer exec [flags] [command...]
 **Environment Variables (inside container):**
 
 * `IN_CONDATAINER=1`: Set inside the container.
-* `CNT_CONDA_PREFIX`: Path to the `.img` default conda path, if `-w/--writable` is used.
+* `CNT_CONDA_ROOT`: Path to the mounted project conda environment.
+* `CNT_CONDA_WRITABLE`: `1` when the `.img` is writable, otherwise `0`.
 
 **Examples:**
 
@@ -907,7 +912,8 @@ condatainer e [flags] [overlays...] [--] [command...]
 **Environment Variables (inside container):**
 
 * `IN_CONDATAINER=1`: Set inside the container.
-* `CNT_CONDA_PREFIX`: Path to the `.img` default conda path (writable by default).
+* `CNT_CONDA_ROOT`: Path to the mounted project conda environment.
+* `CNT_CONDA_WRITABLE`: `1` when the `.img` is writable, otherwise `0`.
 
 **Examples:**
 
@@ -1318,7 +1324,7 @@ You need to have the same major and minor version of OpenMPI installed inside th
 ```bash
 ml av openmpi
 # openmpi/4.1.5
-condatainer e mpi.img -- mm-install mpi4py openmpi=4.1 -y
+condatainer e mpi.img -- mm install mpi4py openmpi=4.1 -y
 ```
 ````
 
@@ -1388,7 +1394,7 @@ condatainer info ./ubuntu--22.04.sqf
 | **Ownership** | Inner UID/GID of files inside the image (or `root` for fakeroot-compatible images) |
 | **Disk Usage** | Used / Total (%), Reserved blocks, Free |
 | **Inode Usage** | Used / Total (%), Free |
-| **Mount** | `/ext3/env` |
+| **Mount** | `/cnt_env` |
 | **Environment** | Variables from the `.env` sidecar file, with inline `#ENVNOTE` annotations |
 
 ## Export
@@ -1425,7 +1431,7 @@ Conda-only (ignored for definition / build-script overlays):
 
 **Channel order:** `micromamba env export` sorts the `channels:` block alphabetically, which can break re-solve. When a conda overlay carries a `.condarc`, its channel priority is used to reorder the block (matching `conda env export`); channels not listed there are prepended.
 
-**In-use overlays:** exporting an ext3 `.img` while a writable session holds it fails with a clear "currently in use for writing" error. (If you are in an ext3 overlay, use `mm-export`)
+**In-use overlays:** exporting an ext3 `.img` while a writable session holds it fails with a clear "currently in use for writing" error. (If you are in an ext3 overlay, use `mm export`)
 
 **Examples:**
 

@@ -24,17 +24,23 @@ condatainer overlay create
 condatainer o               # short cut
 ```
 
+Without packages or `--file`, this creates only the overlay filesystem. Conda initialization is
+deferred until the first `mm install` inside the writable container.
+
 Initialize with specific packages directly (no YAML file needed):
 
 ```bash
 condatainer o -- python=3.11 numpy
 condatainer o myenv.img -- python=3.11 r-base
 
-# Add extra channels with -c; conda-forge is always appended if not listed
+# Add extra channels with Micromamba's -c option
 condatainer o -- pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
 ```
 
-Default channels: `conda-forge` + `bioconda`. When `-c` is given, `conda-forge` is appended automatically if not already listed. The resolved channels are saved in `.condarc` inside the overlay and reused by `mm-install`, `mm-update`, and `mm-search`.
+The project channels are stored in the overlay's `.condarc`. Creation takes them from an environment
+file or `-c`; otherwise it uses CondaTainer's configured `channels`. Explicit `-c` values precede the
+configured defaults. The original user arguments are passed to Micromamba unchanged, while later
+package commands read only this project `.condarc`. Use `mm channels` for persistent changes.
 
 - For Python projects, 10GiB is usually sufficient.
 - For R projects, you may want to increase the size to 20GiB or more, especially if you are working with bioconductor packages.
@@ -42,7 +48,7 @@ Default channels: `conda-forge` + `bioconda`. When `-c` is given, `conda-forge` 
 ```{note}
 Only one environment overlay can be mounted at a time, regardless of writable or read-only mode.
 
-The mounting path is `/ext3/env`. So the img name does not matter.
+The mounting path is `/cnt_env`. So the img name does not matter.
 ```
 
 ### Change the Overlay Size
@@ -81,24 +87,25 @@ Flags:
 
 This command will mount the overlay and set the `$PATH` and `$CONDA_PREFIX` variables accordingly.
 
-Then you can use `mm-*` commands to manage your project environment.
+Inside the container, use `mm` to manage your project environment. It forwards to the
+container-bound `condatainer env` command.
 
 ```bash
-mm-install r-base=4.4 r-tidyverse  # Install packages
-mm-install pytorch-cuda=12.4 -c pytorch -c nvidia  # Install with extra channels
-mm-pin r-base           # Pin a package version
-mm-pin -r r-base        # Unpin a package
-mm-list                 # List installed packages
-mm-search r-ggplot2     # Search for a package (uses saved channels)
-mm-remove r-tidyverse   # Remove a package
-mm-update               # Update packages
-mm-clean -a             # Clean the cache and unused
-mm-export               # Export environment
+mm install r-base=4.4 r-tidyverse  # Install packages
+mm install pytorch-cuda=12.4 -c pytorch -c nvidia  # Install with extra channels
+mm pin add r-base           # Pin a package version
+mm pin remove r-base        # Unpin a package
+mm list                 # List installed packages
+mm search r-ggplot2     # Search for a package (uses saved channels)
+mm remove r-tidyverse   # Remove a package
+mm update --all         # Update all packages
+mm clean -a             # Clean the cache and unused
+mm export               # Export environment
 
-mm-channels get         # Show configured channels (/ext3/env/.condarc)
-mm-channels prepend pytorch  # Move/add channel to highest priority
-mm-channels append bioconda  # Move/add channel to lowest priority
-mm-channels remove nvidia    # Remove a channel
+mm channels list         # Show configured channels (/cnt_env/.condarc)
+mm channels prepend pytorch  # Move/add channel to highest priority
+mm channels append bioconda  # Move/add channel to lowest priority
+mm channels remove nvidia    # Remove a channel
 ```
 
 You don't need to activate the environment because the **CondaTainer** sets the `$CONDA_PREFIX` and `$PATH` for you.
@@ -137,7 +144,7 @@ For example, you may need to set `GOROOT` and `GOPATH` for Go projects.
 Create `env.img.env` and add the following lines:
 
 ```
-GOROOT=/ext3/env/go
+GOROOT=/cnt_env/go
 GOPATH=/ext3/home/go
 ```
 
@@ -147,15 +154,16 @@ Then when you run `e` or `exec`, these environment variables will be set automat
 $ condatainer e
 [CNT◇] Autoload environment overlay at /path/env.img
 [CNT] Overlay envs:
-  CNT_CONDA_PREFIX: /ext3/env
-  GOROOT: /ext3/env/go
+  CNT_CONDA_ROOT: /cnt_env
+  CNT_CONDA_WRITABLE: 1
+  GOROOT: /cnt_env/go
   GOPATH: /ext3/home/go
 ```
 
 You can add note to the `env.img.env` file as well:
 
 ```
-GOROOT=/ext3/env/go
+GOROOT=/cnt_env/go
 #ENVNOTE:GOROOT=Go Installation Path
 GOPATH=/ext3/home/go
 #ENVNOTE:GOPATH=Go Workspace Path
@@ -167,7 +175,8 @@ Then when you run `e` or `exec`, the notes will be displayed:
 $ condatainer e
 [CNT◇] Autoload environment overlay at /path/env.img
 [CNT] Overlay envs:
-  CNT_CONDA_PREFIX: /ext3/env
+  CNT_CONDA_ROOT: /cnt_env
+  CNT_CONDA_WRITABLE: 1
   GOROOT: Go Installation Path
   GOPATH: Go Workspace Path
 ```
@@ -284,7 +293,7 @@ condatainer e <name>.img
 
 It means the overlay image is full. You can try to:
 
-- run `mm-clean -a` to clean up unused packages and caches.
+- run `mm clean -a` to clean up unused packages and caches.
 - exit and increase the size of the overlay image by running:
 
 ```bash

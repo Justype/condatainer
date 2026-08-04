@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
+	condapkg "github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -30,8 +31,8 @@ func ReadFile(overlayPath, innerPath string) []byte {
 }
 
 // imgCat reads a file from inside an ext3 overlay image using debugfs.
-// Writable content lives under "upper/", so "/ext3/env/conda-meta/history"
-// is read as "upper/ext3/env/conda-meta/history". Returns nil if absent —
+// Writable content lives under "upper/", so "/cnt_env/conda-meta/history"
+// is read as "upper/cnt_env/conda-meta/history". Returns nil if absent —
 // debugfs exits 0 for a missing file, so we catch it from its stderr.
 func imgCat(imgPath, innerPath string) []byte {
 	dbg, err := exec.LookPath("debugfs")
@@ -70,26 +71,9 @@ func CondarcChannels(overlayPath, envPrefix string) []string {
 // parseCondarcChannels extracts the block-list under a top-level `channels:` key
 // from .condarc YAML, preserving order and stopping at the next top-level key.
 func parseCondarcChannels(content string) []string {
-	var channels []string
-	inBlock := false
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if !inBlock {
-			if trimmed == "channels:" {
-				inBlock = true
-			}
-			continue
-		}
-		if strings.HasPrefix(trimmed, "- ") {
-			if ch := strings.Trim(strings.TrimSpace(trimmed[2:]), `"'`); ch != "" {
-				channels = append(channels, ch)
-			}
-			continue
-		}
-		if trimmed == "" {
-			continue
-		}
-		break // a non-list, non-empty line ends the channels block
+	channels, err := condapkg.ParseChannels([]byte(content))
+	if err != nil {
+		return nil
 	}
 	return channels
 }

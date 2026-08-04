@@ -36,7 +36,8 @@ var overlayCmd = &cobra.Command{
 const overlayCreateHelp = `Create an ext3 overlay, sized and tuned by profile (-p).
 
 If no image path is given, defaults to 'env.img'.
-Conda packages listed after -- initialize the environment inline.`
+Conda packages listed after -- or an environment file initialize conda inline.
+Without either, conda initialization is deferred until the first install.`
 
 // overlayProfiles are the selectable filesystem tuning profiles for a new overlay.
 var overlayProfiles = []string{"small", "balanced", "large"}
@@ -623,11 +624,11 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 	// Determine internal prefix to export from
 	envPrefix := ""
 	if utils.IsImg(overlayPath) {
-		// For .img overlays export from /ext3/env (standard location)
-		envPrefix = "/ext3/env"
-		if !overlay.PathExists(overlayPath, "/ext3/env/conda-meta") {
+		// For .img overlays export from /cnt_env (standard location)
+		envPrefix = "/cnt_env"
+		if !overlay.PathExists(overlayPath, "/cnt_env/conda-meta") {
 			cmd.SilenceUsage = true
-			return fmt.Errorf("overlay %s does not contain a conda environment at /ext3/env (missing conda-meta)", overlayPath)
+			return fmt.Errorf("overlay %s does not contain a conda environment at /cnt_env (missing conda-meta)", overlayPath)
 		}
 	} else if utils.IsSqf(overlayPath) {
 		// For .sqf overlays: derive name/version from filename
@@ -696,10 +697,15 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// initCondaInOverlay initializes a conda environment in an existing overlay.
-// Priority: envFile (-f flag) > packages (-- args) > minimal (zlib).
+// initCondaInOverlay initializes a conda environment in an existing overlay
+// when an environment file or package specs were requested. A blank overlay is
+// initialized lazily by the first `condatainer env install`/`mm install`.
 // envFile and packages are mutually exclusive and validated before this call.
 func initCondaInOverlay(ctx context.Context, overlayPath, envFile string, packages []string, fakeroot bool, io exec.IO) error {
+	if envFile == "" && len(packages) == 0 {
+		return nil
+	}
+
 	if envFile != "" {
 		absEnvFile, err := filepath.Abs(envFile)
 		if err != nil {
@@ -727,8 +733,6 @@ func initCondaInOverlay(ctx context.Context, overlayPath, envFile string, packag
 		utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(envFile))
 	} else if len(packages) > 0 {
 		utils.PrintMessage("Initializing conda environment with: %s...", strings.Join(packages, " "))
-	} else {
-		utils.PrintMessage("Initializing %s...", exec.DescribeInitialCondaPackages(nil))
 	}
 
 	pkgs := packages
@@ -736,7 +740,7 @@ func initCondaInOverlay(ctx context.Context, overlayPath, envFile string, packag
 		pkgs = []string{"-f", envFile}
 	}
 	if err := exec.InitCondaEnv(ctx, absOverlayPath, pkgs, fakeroot, io); err != nil {
-		return fmt.Errorf("failed to run mm-create: %w", err)
+		return fmt.Errorf("failed to initialize conda environment: %w", err)
 	}
 
 	utils.PrintSuccess("Conda env is created inside %s.", utils.StylePath(overlayPath))

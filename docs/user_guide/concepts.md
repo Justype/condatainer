@@ -15,7 +15,7 @@ Overlays are stackable, self-contained files that encapsulate executables and da
 | OS | `.sqf` | R/O | `/bin`, `/lib` etc. | System Foundation - Run standalone. |
 | Module | `.sqf` | R/O | `/cnt/name/version` | Individual Tool - Run on top of OS. |
 | Bundle | `.sqf` | R/O | `/cnt/<env_name>` | Frozen Conda Env - Run on top of OS. |
-| Environment | `.img` | R/W | `/ext3/env` | Writable Conda Env - Run on top of OS. |
+| Environment | `.img` | R/W | `/cnt_env` | Writable Conda Env - Run on top of OS. |
 
 ```{note}
 - `sqf` cannot be renamed. The name is used for the mount path.

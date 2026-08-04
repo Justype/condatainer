@@ -49,6 +49,14 @@ var rootCmd = &cobra.Command{
 			utils.QuietMode = true
 		}
 
+		// Environment management runs through this same binary inside the
+		// container. It needs command IO and cancellation, but none of the host
+		// build, scheduler, Apptainer, or persisted-config initialization below.
+		if strings.HasPrefix(cmd.CommandPath(), "condatainer env") {
+			initializeLightweightCommand(cmd)
+			return
+		}
+
 		exe, err := os.Executable()
 		if err != nil {
 			ExitWithError("Failed to determine executable path: %v", err)
@@ -178,8 +186,33 @@ func Execute() {
 			}
 			os.Exit(ExitCodeError)
 		}
+		if exitErr, ok := err.(interface{ ExitCode() int }); ok {
+			if code := exitErr.ExitCode(); code >= 0 {
+				os.Exit(code)
+			}
+		}
 		ExitWithError("%v", err)
 	}
+}
+
+func initializeLightweightCommand(cmd *cobra.Command) {
+	if debugMode {
+		utils.DebugMode = true
+	}
+	if quietMode {
+		utils.QuietMode = true
+	}
+	if yesMode {
+		utils.YesMode = true
+	}
+	cliHandler := slog.New(clilog.New())
+	slog.SetDefault(cliHandler)
+	cmd.SetContext(logging.WithLogger(cmd.Context(), cliHandler))
+	cmd.SetContext(execpkg.WithIO(cmd.Context(), execpkg.IO{
+		Stdin:  os.Stdin,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+	}))
 }
 
 func init() {

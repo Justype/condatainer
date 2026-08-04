@@ -107,7 +107,7 @@ Presence signals that a writable conda-env overlay is required. Value is the def
 A single shell command run inside the container after guided overlay creation installs the packages. Used to pin package versions or run setup steps.
 
 ```bash
-#POST_INSTALL_CMD: mm-pin r-base
+#POST_INSTALL_CMD: mm pin add r-base
 ```
 
 ### `#CHECK_PATH:` — pre-submission binary check
@@ -115,8 +115,8 @@ A single shell command run inside the container after guided overlay creation in
 One path per line. Checked inside the overlay (fatal) when `#IMG_PACKAGES:` is set, or in the base image (non-fatal warning) otherwise. Optional quoted message shown when the path is missing.
 
 ```bash
-#CHECK_PATH: /ext3/env/bin/jupyter-lab "Jupyter Lab not found — install with: mm-install jupyterlab"
-#CHECK_PATH: /ext3/env/bin/R "Conda R not found — install with: mm-install r-base=<version>"
+#CHECK_PATH: /cnt_env/bin/jupyter-lab "Jupyter Lab not found — install with: mm install jupyterlab"
+#CHECK_PATH: /cnt_env/bin/R "Conda R not found — install with: mm install r-base=<version>"
 ```
 
 Multiple lines accumulate independently (one path checked per line).
@@ -289,7 +289,7 @@ wait $PID
 #!/bin/bash
 #WHATIS: My App (conda)
 #IMG_PACKAGES: my-app={VERSION}
-#CHECK_PATH: /ext3/env/bin/my-app "my-app not found — install with: mm-install my-app"
+#CHECK_PATH: /cnt_env/bin/my-app "my-app not found — install with: mm install my-app"
 #NCPUS: 4
 #MEM: 16G
 #TIME: 12:00:00

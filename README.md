@@ -63,7 +63,7 @@ condatainer exec -o my_analysis.sqf bash
 Manage a writable environment (env) overlay for development and testing:
 
 ```bash
-condatainer overlay create -s 5G env.img   # Create a 5G overlay
+condatainer overlay create -s 5G env.img   # Create a 5G overlay; conda initializes on first install
 condatainer overlay resize -s 10g env.img  # Resize an overlay to 10G
 condatainer overlay chown --root env.img   # Make it compatible with --fakeroot
 
@@ -71,15 +71,15 @@ condatainer exec -w -o env.img bash  # Launch a shell in writable mode
 condatainer e                        # Quick shortcut for the above command
 ```
 
-Inside a writable mode, use `mm-*` Micromamba wrappers to manage packages
+Inside a writable container, use `mm` to manage packages. (shortcut for `condatainer env`)
 
 ```bash
-mm-install r-base=4.4 r-tidyverse  # Install packages
-mm-pin r-base         # Pin a package version
-mm-pin -r r-base      # Unpin a package
-mm-remove r-tidyverse # Remove a package
-mm-update             # Update packages
-mm-export             # Export environment to YAML
+mm install r-base=4.4 r-tidyverse  # Install packages
+mm pin add r-base            # Pin a package version
+mm pin remove r-base         # Unpin a package
+mm remove r-tidyverse        # Remove a package
+mm update --all              # Update all packages
+mm export                    # Export environment to YAML
 ```
 
 ## 🐕‍🦺 Web Apps & GUI Helpers

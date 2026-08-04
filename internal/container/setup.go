@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -169,15 +170,10 @@ func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]str
 		}
 
 		envList = append(envList,
-			"MAMBA_ROOT_PREFIX=/ext3/env",
-			"CONDA_PREFIX=/ext3/env",
 			"CONDA_DEFINE_ENV=env",
-			"RETICULATE_PYTHON=/ext3/env/bin/python",
+			"RETICULATE_PYTHON=/cnt_env/bin/python",
 		)
 
-		if cfg.WritableImg {
-			envList = append(envList, "CNT_CONDA_PREFIX=/ext3/env")
-		}
 	}
 
 	// Add user-specified environment variables (with validation)
@@ -196,6 +192,24 @@ func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]str
 		envList = append(envList, setting)
 	}
 
+	// Runtime-owned markers go last so user-provided environment settings
+	// cannot redirect management commands away from the mounted overlay.
+	if lastImg != "" {
+		writable := "0"
+		if cfg.WritableImg {
+			writable = "1"
+		}
+		if len(config.Global.Build.Channels) > 0 {
+			envList = append(envList, "CNT_CONDA_CHANNELS="+strings.Join(config.Global.Build.Channels, "|"))
+		}
+		envList = append(envList,
+			"CNT_CONDA_ROOT=/cnt_env",
+			"CONDA_PREFIX=/cnt_env",
+			"MAMBA_ROOT_PREFIX=/cnt_env",
+			"CNT_CONDA_WRITABLE="+writable,
+		)
+	}
+
 	// Prepare environment notes for display
 	envNotes := make(map[string]string)
 	for key, value := range configs {
@@ -205,8 +219,13 @@ func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]str
 		}
 		envNotes[key] = note
 	}
-	if lastImg != "" && cfg.WritableImg {
-		envNotes["CNT_CONDA_PREFIX"] = "/ext3/env"
+	if lastImg != "" {
+		envNotes["CNT_CONDA_ROOT"] = "/cnt_env"
+		if cfg.WritableImg {
+			envNotes["CNT_CONDA_WRITABLE"] = "1"
+		} else {
+			envNotes["CNT_CONDA_WRITABLE"] = "0"
+		}
 	}
 
 	return envList, envNotes, diagnostics

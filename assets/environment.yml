@@ -14,4 +14,4 @@ dependencies:
   - sphinx-rtd-theme
   - nodejs
 
-prefix: "/ext3/env"
+prefix: "/cnt_env"

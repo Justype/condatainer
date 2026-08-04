@@ -219,7 +219,7 @@ func (s *srv) handleEnvInfo(w http.ResponseWriter, r *http.Request) {
 	if info, err := os.Stat(path); err == nil {
 		resp.SizeMB = info.Size() / (1024 * 1024)
 	}
-	if ci := overlay.ReadCondaInfo(path, "/ext3/env"); ci != nil {
+	if ci := overlay.ReadCondaInfo(path, "/cnt_env"); ci != nil {
 		resp.Channels = ci.Channels
 		resp.Specs = ci.Specs
 	}
@@ -596,7 +596,11 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 			Profile: overlay.ProfileSmall,
 		}
 		io := cntexec.IO{Stdout: bw, Stderr: bw}
-		fmt.Fprintf(bw, "Installing packages: %s\n", cntexec.DescribeInitialCondaPackages(allPkgs))
+		if len(allPkgs) > 0 {
+			fmt.Fprintf(bw, "Installing packages: %s\n", cntexec.DescribeInitialCondaPackages(allPkgs))
+		} else {
+			fmt.Fprintln(bw, "Skipping conda initialization; no packages were requested")
+		}
 		if err := cntexec.CreateCondaOverlay(ctx, opts, allPkgs, req.PostInstall, false, io); err != nil {
 			broadcastResult(broker, ctx, fmt.Errorf("create overlay: %w", err))
 			return
