@@ -5,9 +5,20 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
+
+// tmpRootForKind picks where a build does its work: data keeps a stable, shared
+// path because the payload is large and the build is long, everything else uses
+// fast local scratch.
+func tmpRootForKind(kind catalog.Kind) string {
+	if kind == catalog.KindData {
+		return resolveTmpDirForRef()
+	}
+	return resolveTmpDirForConda()
+}
 
 // resolveTmpDirForConda returns the tmp directory for conda/app builds.
 // If CNT_TMPDIR is set, it takes precedence over scheduler-assigned scratch and TMPDIR.

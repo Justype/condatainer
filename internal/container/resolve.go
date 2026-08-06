@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -70,7 +71,7 @@ func populateOverlays(dir string, store map[string]string) error {
 
 		// Default distro overlays can also be addressed by their bare name.
 		// Keep first-match-wins semantics and never override a real bare overlay.
-		if prefix := config.Global.DefaultDistro + "/"; prefix != "/" && strings.HasPrefix(normalized, prefix) {
+		if prefix := config.ResolvedBase() + "/"; prefix != "/" && strings.HasPrefix(normalized, prefix) {
 			alias := strings.TrimPrefix(normalized, prefix)
 			if alias != "" {
 				if _, exists := store[alias]; !exists {
@@ -128,31 +129,23 @@ func ResolveOverlayPaths(inputs []string) ([]string, error) {
 			continue
 		}
 
-		// Split version constraint (e.g. "samtools/1.21>=1.16") before normalizing
-		// so that "=" in ">=" is not mangled by NormalizeNameVersion.
-		rawNV, op, minVersion := utils.SplitDepConstraint(pathToResolve)
-		normalized := utils.NormalizeNameVersion(rawNV)
-		if normalized == "" {
+		dep, err := catalog.ParseDep(pathToResolve)
+		if err != nil {
 			return nil, fmt.Errorf("invalid overlay specification %q", entry)
 		}
+		normalized := dep.NameVersion()
 
 		// With a constraint: pick the highest installed version that satisfies it,
 		// up to and including the preferred version (upper bound).
-		if op != "" {
-			name := normalized
-			preferredVer := ""
-			if idx := strings.LastIndex(normalized, "/"); idx >= 0 {
-				name = normalized[:idx]
-				preferredVer = normalized[idx+1:]
-			}
-			prefix := name + "/"
+		if dep.Op != "" {
+			prefix := dep.Name + "/"
 			bestVer := ""
 			bestPath := ""
 			for key, path := range installed {
 				if strings.HasPrefix(key, prefix) {
 					ver := strings.TrimPrefix(key, prefix)
-					if utils.DepSatisfiedByVersion(ver, op, minVersion, preferredVer) {
-						if bestVer == "" || utils.CompareVersions(ver, bestVer) > 0 {
+					if dep.Satisfies(ver) {
+						if bestVer == "" || catalog.CompareVersions(ver, bestVer) > 0 {
 							bestVer = ver
 							bestPath = path
 						}
@@ -160,7 +153,7 @@ func ResolveOverlayPaths(inputs []string) ([]string, error) {
 				}
 			}
 			if bestPath != "" {
-				slog.Default().Debug("constraint satisfied", "spec", normalized+op+minVersion, "by", name+"/"+bestVer)
+				slog.Default().Debug("constraint satisfied", "spec", dep.String(), "by", dep.Name+"/"+bestVer)
 				resolved = append(resolved, bestPath+suffix)
 				continue
 			}
@@ -196,9 +189,9 @@ func buildOverlayPathFromSpec(normalized string) (string, error) {
 		}
 	}
 
-	// Fallback: bare name (no "/") → try <default_distro>--<name>.sqf
-	if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
-		prefixed := config.Global.DefaultDistro + "--" + normalized + ".sqf"
+	// Fallback: bare name (no "/") → try <base>--<name>.sqf
+	if !strings.Contains(normalized, "/") && config.ResolvedBase() != "" {
+		prefixed := config.ResolvedBase() + "--" + normalized + ".sqf"
 		for _, dir := range config.GetImageSearchPaths() {
 			path := filepath.Join(dir, prefixed)
 			if utils.FileExists(path) {

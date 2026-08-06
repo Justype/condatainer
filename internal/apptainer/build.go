@@ -48,7 +48,7 @@ func Build(ctx context.Context, imagePath, defFile string, opts *BuildOptions) e
 
 	logging.FromContext(ctx).Debug("building container", "image", imagePath, "definition", defFile)
 
-	return runApptainerWithOutput(ctx, "build", imagePath, false, os.Stdin, os.Stdout, os.Stderr, args...)
+	return runApptainerWithOutput(ctx, "build", imagePath, false, os.Stdin, os.Stdout, os.Stderr, nil, args...)
 }
 
 // DumpSifToSquashfs extracts the SquashFS partition from a SIF image to a .sqfs file

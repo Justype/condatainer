@@ -218,9 +218,6 @@ func initializeLightweightCommand(cmd *cobra.Command) {
 func init() {
 	// Subcommands are attached to rootCmd in their respective init() functions
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debug mode with verbose output")
-	// Deprecated alias for the per-command --no-submit flag (kept global for old scripts).
-	rootCmd.PersistentFlags().BoolVar(&noSubmitMode, "local", false, "Disable job submission (run locally)")
-	rootCmd.PersistentFlags().MarkDeprecated("local", "use --no-submit instead") //nolint:errcheck
 	rootCmd.PersistentFlags().BoolVarP(&quietMode, "quiet", "q", false, "Suppress messages (warnings/errors are still shown)")
 	rootCmd.PersistentFlags().BoolVarP(&yesMode, "yes", "y", false, "Automatically answer yes to all prompts")
 

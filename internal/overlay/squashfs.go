@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Justype/condatainer/internal/utils"
+	"github.com/Justype/condatainer/catalog"
 )
 
 // ============================================================================
@@ -155,7 +155,7 @@ func IsOSType(sqfPath string) bool {
 // cnt/<name>/<version>/bin. nameVersion accepts both slash form ("samtools/1.22")
 // and the normalized double-dash form ("samtools--1.22").
 func HasCntBin(sqfPath, nameVersion string) bool {
-	nv := utils.NormalizeNameVersion(nameVersion)
+	nv := catalog.Normalize(nameVersion)
 	return sqfPathExists(sqfPath, "cnt/"+nv+"/bin")
 }
 

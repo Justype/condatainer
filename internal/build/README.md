@@ -2,24 +2,36 @@
 
 Build system for creating overlay images from Conda packages, shell scripts, or Apptainer definition files with dependency resolution and scheduler integration.
 
-## Build Types
+## Two axes
 
-| Type | Source | Description |
+`BuildType` is **how** a target is built. `catalog.Kind` is **what** the payload is.
+They are independent — a script build can be any kind.
+
+| BuildType | Source | Builder |
 |------|--------|-------------|
 | Conda | Package spec, YAML, or `channel::pkg/version` | Micromamba environment |
-| Shell | Build script (`#DEP`, `#SBATCH`, `#ENV`, `#INTERACTIVE`) | Custom installation |
 | Def | Apptainer `.def` file | Apptainer build |
-| Ref | Shell script (large datasets) | Reference data (genomes, indices) |
+| Script | Recipe (`#DEP`, `#SBATCH`, `#ENV`, `#INPUT`) | Recipe run as a shell script |
+
+| Kind | Comes from | Decides |
+|---|---|---|
+| `base` / `os` | a `.def` recipe | — |
+| `app` | `#TYPE:app`, else a one-component name | fast scratch tmp root, `BlockSize` |
+| `data` | `#TYPE:data`, else 2+ components | stable tmp root, `DataBlockSize` |
+
+Kind affects **only** where the build works and how the archive is compressed.
+Every build writes to `$CNT_PREFIX` = `/cnt/<name>/<version>` — the path the
+artifact is mounted at, so anything baked into the payload stays valid at run time.
 
 ## Architecture
 
 ```
 object.go       BuildObject interface, base implementation
 conda.go        Conda package builds via micromamba
-script.go       Shell script builds (apps and ref data)
+script.go       Recipe (script) builds, any kind
 def.go          Apptainer definition file builds
 base_image.go   Base image provisioning (download/build)
-graph.go        Dependency graph, topological sort, parallel execution
+graph.go        Build planning from a solved catalog plan, parallel execution
 fetch.go        Remote build script downloading
 env.go          Environment variable extraction from overlays
 ```
@@ -41,9 +53,9 @@ env.go          Environment variable extraction from overlays
 - `PID` - OS process ID for local builds; 0 for scheduler builds
 - `CreatedAt` - RFC3339 timestamp
 
-**BuildType** - `IsConda`, `IsDef`, `IsShell`, `IsRef`
+**BuildType** - `BuildTypeConda`, `BuildTypeDef`, `BuildTypeScript`
 
-**BuildGraph** - Dependency graph with topological sort, cycle detection, and parallel execution (local worker pool + scheduler job submission).
+**BuildGraph** - Turns a solved `catalog.Plan` into build work: a BuildObject per missing node, then parallel execution (local worker pool + scheduler job submission).
 
 **ScriptSpecs** - Build resource requirements (alias to `scheduler.ScriptSpecs`)
 
@@ -73,23 +85,35 @@ graph.Run(ctx)
 // Base image
 build.EnsureBaseImage(ctx, false) // download prebuilt or build from def
 
-// Script lookup
-info, found := build.FindBuildScript("cellranger/9.0.1")
+// Recipe lookup goes through the catalog
+cat, err := config.OpenCatalog(ctx)
+match, found, err := cat.Lookup(ctx, "cellranger/9.0.1")
 ```
 
-## Build Scripts
+## Recipes
 
-Shell scripts support metadata headers:
+Recipes support metadata headers:
 - `#DEP:name/version` - Exact dependency
 - `#DEP:name/version>=min` - Dependency with version constraint (range `[min, version]`)
 - `#SBATCH` / `#PBS` / `#BSUB` - Scheduler directives (HTCondor uses native `.sub` files)
-- `#ENV:VAR=$app_root` - Environment variables to export
-- `#INTERACTIVE:prompt` - User input prompts (collected locally before scheduler submission; embedded as a heredoc in the job script)
+- `#ENV:VAR={prefix}/sub` - Environment variables to export; `{prefix}` is filled with the mount root at load time
+- `#INPUT:prompt` - User input, fed to the recipe on stdin in declaration order — read it with `IFS= read -r VAR` (collected locally before scheduler submission; embedded as a heredoc in the job script)
 
-Available variables: `$NCPUS`, `$target_dir`, `$tmp_dir`, `$app_name`, `$version`
-Required function: `install()`
+Available variables: `$CNT_NAME`, `$CNT_VERSION`, `$CNT_KIND`, `$CNT_PREFIX`, `$CNT_TMP` (also `$TMPDIR`),
+plus the scheduler's normalized `$NCPUS`, `$MEM`, `$MEM_GB`.
+Run as `bash -euo pipefail <recipe>` top to bottom — no `install()` wrapper.
 
 ### Dependency Resolution
+
+**`#DEP:` is a build dependency and nothing else.** It names what must be mounted
+*while this recipe runs* — a tool that unpacks, validates or indexes the payload.
+It is not recorded in the artifact and is not re-expanded when the artifact is
+mounted later: there is no runtime dependency tree. What an overlay needs at run
+time is whatever the caller names on the command line.
+
+That is why an `app` is **self-contained** — a conda environment or a prebuilt
+package that carries its own libraries — while `data` is the kind that normally
+has deps, because producing an index needs the tool that produces it.
 
 `#DEP:samtools/1.22.1>=1.10` — accepts any installed version in `[1.10, 1.22.1]`:
 - If a satisfying version is installed → skip build, mount the latest satisfying version
@@ -97,16 +121,7 @@ Required function: `install()`
 - Versions above preferred (`2.0`) are rejected (implicit upper bound)
 - Operators: `>=` (inclusive lower bound) and `>` (exclusive lower bound)
 
-```go
-// Check missing dependencies
-missing, err := obj.GetMissingDependencies()
-
-// Find and download remote build script
-info, found := build.FindBuildScript("cellranger/9.0.1")
-if found && info.IsRemote {
-    localPath, err := build.DownloadRemoteScript(info, tmpDir)
-}
-```
+Resolution itself lives in `catalog.Resolve`; see **BuildGraph Execution** below.
 
 ## Build Lock
 
@@ -144,10 +159,14 @@ Each build target has a lock file at `<targetOverlayPath>.lock` containing `Buil
 2. If updating existing overlay: probe exclusive lock — fail immediately if in use
 3. Create build lock (local, or adopt scheduler lock); create temporary overlay
 4. Build missing dependencies (if enabled)
-5. Run script inside container with overlays
-6. For ref: verify files, create SquashFS from `$cnt_dir`
-7. For apps: create SquashFS from `/cnt`
-8. Atomic rename `.new` → target; remove lock
+5. Run recipe inside container. The payload directory is bound at
+   `/cnt/<name>/<version>` — the leaf, not `/cnt`, so dependency overlays
+   mounted beside it stay visible
+6. Pack, as a separate container run: verify the payload directory is non-empty,
+   then `mksquashfs` the host build dir (basename `cnt`, so the archive is
+   exactly `cnt/<name>/<version>/…` — the build's `tmp/` is a sibling and never
+   enters it)
+7. Atomic rename `.new` → target; remove lock
 
 The build script (with its `#ENV:` directives) is embedded inside the overlay at `/cnt/<name>/<version>/.cnt-build-script`, so the overlay is self-contained; env is resolved from it at load time rather than written to a sidecar `.env` at build time.
 
@@ -167,11 +186,13 @@ The build script (with its `#ENV:` directives) is embedded inside the overlay at
 
 ## BuildGraph Execution
 
-1. **Expand dependencies** - Resolve all transitive deps
-2. **Detect cycles** - Fail on circular dependencies
-3. **Topological sort** - Order by dependencies
-4. **Separate local/scheduler** - Based on resource requirements
-5. **Parallel execution:**
+1. **Solve** - `catalog.Resolve` walks the graph from the index alone: transitive
+   deps, cycle detection and dependency-first order, without fetching a recipe.
+   Installed versions come from the `Have` callback, so an installed dep is a map
+   lookup rather than a build object.
+2. **Plan** - Create a BuildObject per missing node, in the solved order
+3. **Separate local/scheduler** - Based on resource requirements
+4. **Parallel execution:**
    - Local builds: Run concurrently with worker pool
    - Scheduler builds: Submit with dependency chains
 
@@ -192,8 +213,8 @@ Each build type uses a different base directory for build artifacts (`$TMPDIR`, 
 | Build path | `tmpDir` source | Rationale |
 |---|---|---|
 | Conda (`name/version`) | `utils.GetTmpDir()` | Fast local node storage (scheduler TMPDIR → TMPDIR → `/tmp/cnt-$USER`) |
-| App script (`name/version`) | `utils.GetTmpDir()` | Fast local node storage |
-| Ref script (`a/b/c`, 2+ slashes) | `config.GetWritableTmpDir()` | Stable condatainer data path (large datasets) |
+| Script, kind `app` | `utils.GetTmpDir()` | Fast local node storage |
+| Script, kind `data` | `config.GetWritableTmpDir()` | Stable condatainer data path (large datasets) |
 | Def (internal) | `config.GetWritableTmpDir()` | Stable path; set in `createConcreteType` after type is resolved |
 | External sh | `filepath.Dir(targetPrefix)` | Next to output target (user controls location) |
 | External def | `filepath.Dir(targetPrefix)` | Next to output target (user controls location) |

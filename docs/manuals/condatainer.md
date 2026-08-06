@@ -386,7 +386,7 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
 * `-n`, `--name [NAME]`: Custom name for the resulting overlay file. If used, all specified packages are bundled into one overlay.
 * `-p`, `--prefix [PATH]`: Custom prefix path for the overlay file. When `-f` is used, this can be omitted — the prefix is inferred from the file name.
 * `-f`, `--file [FILE]`: Path to definition file (.yaml, .sh, .def).
-* `-s`, `--source [URI]`: Remote source URI (e.g., `docker://ubuntu:22.04`).
+* `--from [URI]`: Build from an external image URI (e.g., `docker://ubuntu:22.04`).
 * `-c`, `--channel [CHANNEL]`: Conda channel to use, overriding config channels. Repeatable: `-c conda-forge -c bioconda`.
 * `-u`, `--update`: Rebuild overlays even if they already exist (atomic `.new` swap). Useful for refreshing a package to the latest version.
 
@@ -417,7 +417,7 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
 * **`--prefix` + packages:** Create a conda env `.sqf` at a custom path, like `conda create -p`.
 * **`--file` only:** Create `.sqf` from external source file; prefix inferred from file name (e.g. `condatainer create -f r-collect.sh` → `r-collect.sqf`).
 * **`--prefix` + `--file`:** Create `.sqf` from external source file at a custom path.
-* **`--source`:** Create `.sqf` from a remote container source URI.
+* **`--from`:** Create `.sqf` from an external container image URI.
 
 ### System level Examples
 
@@ -465,7 +465,7 @@ condatainer create build-essential
 condatainer create grch38/gtf-gencode/47
 
 # From a remote container source
-condatainer create --source docker://ubuntu:22.04 -n myubuntu
+condatainer create --from docker://ubuntu:22.04 -n myubuntu
 
 # Template script — prompts for each placeholder interactively
 condatainer create grch38/salmon-gencode
@@ -485,7 +485,7 @@ condatainer create grch38/salmon/1.10.2/gencode49
 - Automatic Fetching: If a build script is not found locally, **CondaTainer** attempts to fetch it from the remote repository.
 - Conda Fallback: If no build script exists, **CondaTainer** attempts to create the module by installing the package with the requested name and version from conda-forge or bioconda.
 - Metadata Parsing: Parses `#ENV` and `#ENVNOTE` tags from build scripts to inject environment variables and help text into the generated modulefile.
-- Template Resolution: If the name matches a template script (`#PL:` / `#TARGET:`), **CondaTainer** prompts for each placeholder interactively, then builds the resolved concrete overlay. You can also bypass prompts by specifying the resolved target name directly.
+- Template Resolution: If the name matches a template script (`#PH:` / `#TARGET:`), **CondaTainer** prompts for each placeholder interactively, then builds the resolved concrete overlay. You can also bypass prompts by specifying the resolved target name directly.
 
 ### Project level Examples
 
@@ -578,7 +578,7 @@ condatainer avail [search_terms...] [flags]
 
 **Template display:**
 
-Template scripts (`#PL:` / `#TARGET:`) are shown collapsed by default as a group header with variant count and placeholder value summaries. Use `-e` to expand all concrete combinations instead.
+Template scripts (`#PH:` / `#TARGET:`) are shown collapsed by default as a group header with variant count and placeholder value summaries. Use `-e` to expand all concrete combinations instead.
 
 ```
 grcm39/salmon-gencode  [594 variants]
@@ -1004,6 +1004,8 @@ External Overlays:
 ### Run
 
 Executes a script inside the **CondaTainer** environment, mounting dependencies defined in the script. Autosolves dependencies based on `#DEP:` tags within the script.
+
+The `#DEP:` tags read here are **your script's** — they name the overlays to mount for this run. An overlay does not carry dependencies of its own: a recipe's `#DEP:` is a build-time edge and is never re-expanded at run time.
 
 ```
 condatainer run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
@@ -1557,7 +1559,7 @@ Pass `-l/--layer` to target a layer explicitly (`user`, `app-root`, `extra-root`
 
 ### Config Append / Prepend / Remove
 
-Manage array config keys (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`, `channels`) from the CLI.
+Manage array config keys (`sources`, `extra_image_dirs`, `extra_helper_dirs`, `channels`) from the CLI.
 
 ```
 condatainer config append  <key> <value>

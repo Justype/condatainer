@@ -29,7 +29,7 @@ func EnsureBaseImage(ctx context.Context, update bool) error {
 	if !update && config.FindBaseImage() != "" {
 		return nil
 	}
-	obj, err := NewBaseImageBuildObject(update)
+	obj, err := NewBaseImageBuildObject(ctx, update)
 	if err != nil {
 		return err
 	}
@@ -64,26 +64,6 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 
 	done := watchContext(ctx, "base image build")
 	defer close(done)
-
-	// Try to download prebuilt .sif from GitHub releases if build source is remote
-	// (skipped with --no-prebuilt).
-	if b.isRemote && !SkipPrebuilt {
-		if writableDir, err := config.GetWritableImagesDir(); err == nil {
-			if filepath.Dir(targetPath) == writableDir {
-				downloadPath := buildFinalPath(targetPath, b.update)
-				if tryDownloadPrebuiltSif(ctx, b.nameVersion, downloadPath, b.prebuiltLink) {
-					if err := atomicInstall(downloadPath, targetPath, b.update); err != nil {
-						return err
-					}
-					b.Cleanup(false)
-					return nil
-				}
-				if b.update {
-					os.Remove(downloadPath) //nolint:errcheck
-				}
-			}
-		}
-	}
 
 	log.Info("running apptainer build", "source", b.buildSource)
 
@@ -127,21 +107,29 @@ func (b *BaseImageBuildObject) Build(ctx context.Context, buildDeps bool) error 
 }
 
 // NewBaseImageBuildObject creates a BuildObject for the base image using the same
-// path resolution as regular build objects. base_image.def is searched in the
-// build-scripts directories (same structure as any other build script) and downloaded
-// from GitHub if not found locally. When the def comes from GitHub, BaseImageBuildObject
-// also tries to download a prebuilt .sif before falling back to a local build.
+// path resolution as regular build objects. The base recipe is resolved through
+// the catalog like any other module.
 //
 // When update=false the build is skipped if the image already exists anywhere in
 // the configured search paths. When update=true the image is always rebuilt
 // (written to .new then atomically renamed).
-func NewBaseImageBuildObject(update bool) (*BaseImageBuildObject, error) {
+func NewBaseImageBuildObject(ctx context.Context, update bool) (*BaseImageBuildObject, error) {
 	if err := apptainer.EnsureApptainer(); err != nil {
 		return nil, err
 	}
 
-	// nameVersion mirrors the .sif filename convention, e.g. "ubuntu24/base_image"
-	nameVersion := config.Global.DefaultDistro + "/base_image"
+	// The base recipe is resolved through the catalog like any other name.
+	// Config `base` wins; a source's default_base fills in when it is unset,
+	// which is safe here because the catalog is open either way.
+	cat, err := config.OpenCatalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	config.EnsureBase(cat)
+	nameVersion := config.BaseRecipeNameFrom(cat)
+	if nameVersion == "" {
+		return nil, fmt.Errorf("no base configured: set `base`, or configure a source declaring default_base")
+	}
 
 	imagesDir, err := config.GetWritableImagesDir()
 	if err != nil {
@@ -173,8 +161,7 @@ func NewBaseImageBuildObject(update bool) (*BaseImageBuildObject, error) {
 	}
 
 	// Resolve build source using the same mechanism as regular build objects.
-	// Finds base_image.def in local build-scripts dirs, or downloads from GitHub.
-	_, isContainer, err := resolveBuildSource(base, tmpDir)
+	_, isContainer, err := resolveBuildSource(ctx, base, tmpDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve base image build source: %w", err)
 	}
@@ -184,9 +171,4 @@ func NewBaseImageBuildObject(update bool) (*BaseImageBuildObject, error) {
 
 	base.buildType = BuildTypeDef
 	return &BaseImageBuildObject{BuildObject: base}, nil
-}
-
-// tryDownloadPrebuiltSif attempts to download a prebuilt .sif base image from the given prebuiltLink base URL.
-func tryDownloadPrebuiltSif(ctx context.Context, nameVersion, destPath, prebuiltLink string) bool {
-	return tryDownloadPrebuilt(ctx, nameVersion, destPath, "sif", prebuiltLink, utils.DownloadExecutable)
 }

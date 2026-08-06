@@ -138,23 +138,29 @@ func CheckZstdSupport(currentVersion string) bool {
 //
 //	Both are always teed with an internal buffer so ApptainerError.Output is
 //	populated on failure regardless of redirection.
-func runApptainerWithOutput(ctx context.Context, op string, imagePath string, capture bool, stdin io.Reader, stdout, stderr io.Writer, args ...string) error {
+//
+// procEnv: extra KEY=VALUE settings for apptainer's own environment, on top of
+// the parent's. This is how APPTAINERENV_* vars reach the container.
+func runApptainerWithOutput(ctx context.Context, op string, imagePath string, capture bool, stdin io.Reader, stdout, stderr io.Writer, procEnv []string, args ...string) error {
 	cmd := exec.CommandContext(ctx, apptainerCmd, args...)
 
 	cmd.Stdin = stdin
 
+	env := os.Environ()
+
 	// For build operations, unset SINGULARITY_BIND and APPTAINER_BIND to prevent
 	// mount conflicts during container build (e.g., when %post tries to access bound paths)
 	if op == "build" {
-		env := os.Environ()
 		filteredEnv := make([]string, 0, len(env))
 		for _, e := range env {
 			if !strings.HasPrefix(e, "SINGULARITY_BIND=") && !strings.HasPrefix(e, "APPTAINER_BIND=") {
 				filteredEnv = append(filteredEnv, e)
 			}
 		}
-		cmd.Env = filteredEnv
+		env = filteredEnv
 	}
+
+	cmd.Env = append(env, procEnv...)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	var stdoutWriter, stderrWriter io.Writer

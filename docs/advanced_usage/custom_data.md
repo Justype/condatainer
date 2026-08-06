@@ -79,10 +79,10 @@ Source: [`grch38/star-gencode`](https://github.com/Justype/cnt-scripts/blob/main
 
 ```bash
 #!/usr/bin/bash
-#PL:star_version:2.7.0b,...,2.7.11a,2.7.11b
+#PH:star_version:2.7.0b,...,2.7.11a,2.7.11b
 #AUTOUPDATE:star_version:bioconda:star>=2.7.0b
-#PL:gencode_version:22-49
-#PL:read_length:101,151,*
+#PH:gencode_version:22-49
+#PH:read_length:101,151,*
 #TARGET:grch38/star/{star_version}/gencode{gencode_version}-{read_length}
 
 #DEP:grch38/genome/gencode

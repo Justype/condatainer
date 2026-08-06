@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
@@ -206,7 +207,7 @@ func normalizeFilters(filters []string) []string {
 		if trimmed == "" {
 			continue
 		}
-		normalized = append(normalized, strings.ToLower(utils.NormalizeNameVersion(trimmed)))
+		normalized = append(normalized, strings.ToLower(catalog.Normalize(trimmed)))
 	}
 	return normalized
 }
@@ -266,7 +267,6 @@ func KnownFlags() map[string]bool {
 		"--base-image": true, "-b": true,
 		"--fakeroot": true, "-f": true,
 		"--debug":     true,
-		"--local":     true, // deprecated alias for --no-submit
 		"--no-submit": true,
 		"--quiet":     true, "-q": true,
 		"--yes": true, "-y": true,
@@ -597,7 +597,7 @@ func localOverlaySuggestions(toComplete string, includeImg bool) []string {
 // addDistroAliasChoices adds shorthand aliases for OS overlays matching the default distro.
 // For each installed OS overlay named "<distro>/<name>", also suggests "<name>".
 func addDistroAliasChoices(installed map[string]string, choices map[string]struct{}, toComplete string) {
-	distro := config.Global.DefaultDistro
+	distro := config.ResolvedBase()
 	if distro == "" {
 		return
 	}

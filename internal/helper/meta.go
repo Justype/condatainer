@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -237,9 +238,8 @@ func ParseHelperScriptMeta(scriptPath string) (HelperScriptMeta, error) {
 			rest := stripInlineComment(strings.TrimSpace(line[len("#VALUE:"):]))
 			key, spec, ok := strings.Cut(rest, "=")
 			if ok && strings.TrimSpace(key) != "" {
-				// An unparseable spec yields a nil list: the param simply has no choices.
-				values, _, _ := utils.ParseValueList(spec)
-				meta.ParamValues[strings.TrimSpace(key)] = values
+				// An empty spec yields a nil list: the param simply has no choices.
+				meta.ParamValues[strings.TrimSpace(key)] = catalog.ParseValues(spec)
 			}
 		}
 	}

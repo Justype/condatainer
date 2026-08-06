@@ -90,6 +90,8 @@ Two formats:
 - **Comma-separated** `KEY=val1,val2,...` — version list, **sorted descending** automatically (newest first). Order in the script doesn't matter.
 - **Pipe-separated** `KEY=opt1 | opt2 | opt3` — ordered option labels, **not sorted**. Order in the script is preserved.
 
+In both, `a-b` expands to every integer in the range and `*` marks the list open-ended (sorted last, so index 0 stays the default). Parsed by `catalog.ParseValues`, which recipe `#PH:` lists also use — the two headers are one dialect.
+
 ### `#IMG_PACKAGES:` — conda packages for guided overlay creation
 
 Presence signals that a writable conda-env overlay is required. Value is the default package list for guided creation; `{KEY}` tokens are substituted from resolved `#PARAM:` values.

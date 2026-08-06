@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/overlay"
@@ -438,11 +439,11 @@ func init() {
 }
 
 // resolveOverlayArg resolves an overlay argument to an absolute path. It first
-// tries an installed overlay by name (with the <default_distro>/<name> fallback
+// tries an installed overlay by name (with the <base>/<name> fallback
 // for a bare name), then falls back to treating the argument as a file or
 // directory path. Mirrors the resolution used by `overlay info`.
 func resolveOverlayArg(arg string) (string, error) {
-	normalized := utils.NormalizeNameVersion(arg)
+	normalized := catalog.Normalize(arg)
 	installed, err := getInstalledOverlaysMap()
 	if err != nil {
 		return "", err
@@ -450,8 +451,8 @@ func resolveOverlayArg(arg string) (string, error) {
 	if path, ok := installed[normalized]; ok {
 		return path, nil
 	}
-	if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
-		if path, ok := installed[config.Global.DefaultDistro+"/"+normalized]; ok {
+	if !strings.Contains(normalized, "/") && config.ResolvedBase() != "" {
+		if path, ok := installed[config.ResolvedBase()+"/"+normalized]; ok {
 			return path, nil
 		}
 	}
@@ -477,7 +478,7 @@ func detectEmbeddedRecipe(overlayPath string) (data []byte, ext, label string) {
 		return d, ".def", "definition"
 	}
 	base := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
-	nv := utils.NormalizeNameVersion(base)
+	nv := catalog.Normalize(base)
 	inner := "/cnt/" + nv + "/" + utils.BuildScriptName
 	if d := overlay.ReadFile(overlayPath, inner); d != nil {
 		return d, ".sh", "build script"
@@ -633,7 +634,7 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 	} else if utils.IsSqf(overlayPath) {
 		// For .sqf overlays: derive name/version from filename
 		base := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
-		nv := utils.NormalizeNameVersion(base)
+		nv := catalog.Normalize(base)
 		if !overlay.PathExists(overlayPath, "/cnt/"+nv+"/conda-meta") {
 			// No embedded recipe (checked earlier) and no conda env.
 			cmd.SilenceUsage = true

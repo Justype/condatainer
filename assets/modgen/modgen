@@ -189,13 +189,13 @@ class Utils:
 
     @staticmethod
     def get_placeholders_from_script(script_path: str) -> dict:
-        """Return {key: values_str} for #PL:KEY:values lines, or {} if none."""
+        """Return {key: values_str} for #PH:KEY:values lines, or {} if none."""
         pl = {}
         if not os.path.isfile(script_path):
             return pl
         with open(script_path) as f:
             for line in f:
-                if line.startswith("#PL:"):
+                if line.startswith("#PH:"):
                     rest = line[4:].strip()
                     if ':' in rest:
                         key, _, vals = rest.partition(':')
@@ -221,7 +221,7 @@ class Utils:
 
     @staticmethod
     def parse_pl_values(raw: str):
-        """Parse a #PL: value string into (concrete_values, is_open).
+        """Parse a #PH: value string into (concrete_values, is_open).
         Supports comma lists, integer ranges (a-b), and '*' for open-ended."""
         range_re = re.compile(r'^(\d+)-(\d+)$')
         concrete = []
@@ -257,13 +257,13 @@ class Utils:
 
     @staticmethod
     def resolve_template_interactively(name_version: str, script_path: str):
-        """Parse #PL:/#TARGET: from a template script, prompt for each placeholder.
+        """Parse #PH:/#TARGET: from a template script, prompt for each placeholder.
         Returns (concrete_name, vars_dict)."""
         placeholders = []
         target = ""
         with open(script_path) as f:
             for line in f:
-                if line.startswith("#PL:"):
+                if line.startswith("#PH:"):
                     rest = line[4:].strip()
                     idx = rest.find(':')
                     if idx < 0: continue
@@ -277,7 +277,7 @@ class Utils:
                     target = line[8:].strip()
 
         if not target:
-            raise RuntimeError(f"Template {name_version} has #PL: but no #TARGET: line.")
+            raise RuntimeError(f"Template {name_version} has #PH: but no #TARGET: line.")
 
         Utils.print_message(f"Placeholder template: {name_version}")
         print(f"Target: {target}")
@@ -408,7 +408,7 @@ class Utils:
           whatis        - description string (interpolated for expanded entries)
           is_template   - True only for template (collapsed) entries
           pl            - {name: [values]} — full list for templates, [current_val] for expanded
-          pl_order      - list of placeholder names in declaration order
+          ph_order      - list of placeholder names in declaration order
           target_template - raw #TARGET: string (template entries only)
 
         Template entries and all their Cartesian-product expansions are included.
@@ -450,7 +450,7 @@ class Utils:
             is_template = bool(v.get("is_template", False))
             target_template = v.get("target_template", "")
             pl = v.get("pl", {})
-            pl_order = v.get("pl_order", [])
+            ph_order = v.get("ph_order", [])
 
             result[key] = {
                 "url": script_url,
@@ -458,13 +458,13 @@ class Utils:
                 "whatis": whatis,
                 "is_template": is_template,
                 "pl": pl,
-                "pl_order": pl_order,
+                "ph_order": ph_order,
                 "target_template": target_template,
             }
 
             # Expand template into concrete per-combination entries
-            if is_template and target_template and pl_order:
-                defs = [(name, pl[name]) for name in pl_order if name in pl]
+            if is_template and target_template and ph_order:
+                defs = [(name, pl[name]) for name in ph_order if name in pl]
                 combos = [{}]
                 for pl_name, values in defs:
                     concrete_vals = [val for val in values if val != "*"]
@@ -480,7 +480,7 @@ class Utils:
                         "whatis": Utils.interpolate_vars(whatis, combo),
                         "is_template": False,
                         "pl": expanded_pl,
-                        "pl_order": pl_order,
+                        "ph_order": ph_order,
                         "target_template": "",
                     }
 
@@ -540,7 +540,7 @@ class Utils:
             defs = []
             with open(path) as f:
                 for line in f:
-                    if line.startswith("#PL:"):
+                    if line.startswith("#PH:"):
                         rest = line[4:].strip()
                         idx = rest.find(':')
                         if idx < 0: continue

@@ -38,9 +38,6 @@ func Exec(ctx context.Context, imagePath string, command []string, opts *ExecOpt
 	if opts.Fakeroot {
 		args = append(args, "--fakeroot")
 	}
-	for _, env := range opts.Env {
-		args = append(args, "--env", env)
-	}
 
 	// Add additional flags (caller should have already included GPU flags if needed)
 	args = append(args, opts.Additional...)
@@ -50,5 +47,31 @@ func Exec(ctx context.Context, imagePath string, command []string, opts *ExecOpt
 
 	logging.FromContext(ctx).Debug("executing in container", "image", imagePath, "command", strings.Join(command, " "))
 
-	return runApptainerWithOutput(ctx, "exec", imagePath, false, opts.Stdin, opts.Stdout, opts.Stderr, args...)
+	return runApptainerWithOutput(ctx, "exec", imagePath, false, opts.Stdin, opts.Stdout, opts.Stderr, envPrefixed(opts.Env), args...)
+}
+
+// envPrefixed rewrites KEY=VALUE settings as APPTAINERENV_KEY=VALUE for the
+// apptainer process's own environment.
+//
+// Not --env: that flag is parsed with CSV rules, so a comma or a quote in a
+// value — routine in the signed download URL an #INPUT: asks for — fails the
+// launch outright. The prefixed form passes values through verbatim, and keeps
+// them out of the command line where any user's ps would see them.
+func envPrefixed(settings []string) []string {
+	if len(settings) == 0 {
+		return nil
+	}
+	prefix := "APPTAINERENV_"
+	if IsSingularity() {
+		prefix = "SINGULARITYENV_"
+	}
+	out := make([]string, 0, len(settings))
+	for _, setting := range settings {
+		key, value, ok := strings.Cut(setting, "=")
+		if !ok || key == "" {
+			continue
+		}
+		out = append(out, prefix+key+"="+value)
+	}
+	return out
 }

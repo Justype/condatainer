@@ -137,14 +137,6 @@ func BindPaths(paths ...string) []string {
 		}
 	}
 
-	// Bind explicit extra build-scripts dirs (always read-only — condatainer never writes there)
-	for _, path := range config.GetExtraBuildDirs() {
-		if _, err := os.Stat(path); err != nil {
-			continue
-		}
-		bindPaths = append(bindPaths, path+":"+path+":ro")
-	}
-
 	// Collect all base directories
 	baseDirs := []string{}
 

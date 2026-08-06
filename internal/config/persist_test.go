@@ -23,17 +23,6 @@ func TestNormalizeCompressArgs(t *testing.T) {
 	}
 }
 
-func TestIsValidDistro(t *testing.T) {
-	for _, d := range GetAvailableDistros() {
-		if !IsValidDistro(d) {
-			t.Errorf("expected distro %q to be valid", d)
-		}
-	}
-	if IsValidDistro("not-a-distro") {
-		t.Errorf("unexpectedly accepted invalid distro")
-	}
-}
-
 func TestArgsForCompressAndNames(t *testing.T) {
 	names := CompressNames()
 	if len(names) == 0 {

@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -63,7 +62,7 @@ func GetConfigLayerInfos() []ConfigLayerInfo { return loadedLayers }
 // 7. Defaults
 //
 // Scalar keys: highest-priority config file that sets the key wins.
-// Array keys (extra_*_dirs, extra_scripts_links): merged across all config layers
+// Array keys (extra_*_dirs, sources): merged across all config layers
 // so that e.g. a sysadmin's extra_image_dirs in system config are visible to users
 // who also have their own config. channels is an exception — overwrite, not merge.
 func InitViper() error {
@@ -130,14 +129,11 @@ func setDefaults() {
 	viper.SetDefault("scheduler_bin", "")
 	viper.SetDefault("submit_job", true)
 	viper.SetDefault("logs_dir", filepath.Join(os.Getenv("HOME"), "logs"))
-	viper.SetDefault("scripts_link", DefaultScriptsLink)
-	viper.SetDefault("prefer_remote", false)
 
 	// Explicit extra image directories (direct paths); entries may end with ":ro" (search-only)
 	// or ":rw" (explicit writable, same as no marker).
 	viper.SetDefault("extra_image_dirs", []string{})
-	// Explicit extra build/helper-scripts directories (direct paths, plain paths only).
-	viper.SetDefault("extra_build_dirs", []string{})
+	// Explicit extra helper-scripts directories (direct paths, plain paths only).
 	viper.SetDefault("extra_helper_dirs", []string{})
 
 	// Build config defaults
@@ -152,8 +148,6 @@ func setDefaults() {
 	viper.SetDefault("build.tmp_overlay_size", 20480)
 
 	viper.SetDefault("channels", []string{"conda-forge", "bioconda"})
-	viper.SetDefault("default_distro", DEFAULT_DISTRO)
-	viper.SetDefault("extra_scripts_links", []string{})
 	viper.SetDefault("parse_module_load", false)
 	viper.SetDefault("scheduler_timeout", 0)  // seconds; 0 = no timeout
 	viper.SetDefault("notification", "web")   // "web" = browser notification via dashboard; "terminal" = bell; "both" = terminal + web; "" or "none" = silent
@@ -928,35 +922,9 @@ func LoadFromViper() {
 		Global.LogsDir = logsDir
 	}
 
-	// Load scripts_link from config (base URL for remote build scripts and helpers)
-	if link := layerString("scripts_link"); link != "" {
-		Global.ScriptsLink = strings.TrimRight(link, "/")
-	}
-
-	// Build effective ScriptsLinks: [extra_scripts_links..., scripts_link]
-	extras := GetExtraScriptsLinks()
-	trimmed := make([]string, 0, len(extras))
-	for _, l := range extras {
-		if l = strings.TrimRight(l, "/"); l != "" {
-			trimmed = append(trimmed, l)
-		}
-	}
-	Global.ScriptsLinks = append(trimmed, Global.ScriptsLink)
-
-	// Load prefer_remote from config
-	if preferRemote, ok := layerBool("prefer_remote"); ok && preferRemote {
-		Global.PreferRemote = true
-	}
-
-	// Load default_distro from config
-	if distro := layerString("default_distro"); distro != "" {
-		if !slices.Contains(GetAvailableDistros(), distro) {
-			slog.Default().Warn("config distro not available, falling back to default", "distro", distro, "fallback", DEFAULT_DISTRO)
-			viper.Set("default_distro", DEFAULT_DISTRO)
-			distro = DEFAULT_DISTRO
-		}
-		Global.DefaultDistro = distro
-	}
+	// Recipe collections, in order; earlier entries shadow later ones.
+	Global.Sources = layerSources()
+	Global.Base = layerString("base")
 
 	// Load build config from Viper
 	if ncpus, ok := layerInt("build.ncpus"); ok && ncpus > 0 {

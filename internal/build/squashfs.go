@@ -18,7 +18,7 @@ import (
 //   - Ext3 ref mode (useTmpOverlay, other sourceDir): pack from a host path with no overlay.
 //
 // The caller is responsible for calling b.Cleanup(true) if an error is returned.
-func createSquashfs(ctx context.Context, b *BuildObject, isRef bool, sourceDir, targetPath string) error {
+func createSquashfs(ctx context.Context, b *BuildObject, isData bool, sourceDir, targetPath string) error {
 	if absTarget, err := filepath.Abs(targetPath); err == nil {
 		targetPath = absTarget
 	}
@@ -26,7 +26,7 @@ func createSquashfs(ctx context.Context, b *BuildObject, isRef bool, sourceDir, 
 	done := watchContext(ctx, "SquashFS creation")
 	defer close(done)
 
-	bashScript, packOverlays, packBindDirs := buildSquashfsOpts(b, isRef, sourceDir, targetPath)
+	bashScript, packOverlays, packBindDirs := buildSquashfsOpts(b, isData, sourceDir, targetPath)
 
 	opts := execpkg.Options{
 		BaseImage:    config.GetBaseImage(),
@@ -56,14 +56,14 @@ func createSquashfs(ctx context.Context, b *BuildObject, isRef bool, sourceDir, 
 }
 
 // buildSquashfsOpts constructs the bash script, overlay list, and bind dirs for mksquashfs.
-func buildSquashfsOpts(b *BuildObject, isRef bool, sourceDir, targetPath string) (bashScript string, overlays, bindDirs []string) {
+func buildSquashfsOpts(b *BuildObject, isData bool, sourceDir, targetPath string) (bashScript string, overlays, bindDirs []string) {
 	ncpus := b.effectiveNcpus()
 	compressArgs := config.Global.Build.CompressArgs
 
 	if !config.Global.Build.UseTmpOverlay {
 		// Dir mode: sourceDir is a host path; bind it and the output dir.
 		blockSize := config.Global.Build.BlockSize
-		if isRef {
+		if isData {
 			blockSize = config.Global.Build.DataBlockSize
 		}
 		bashScript = fmt.Sprintf(`
@@ -83,7 +83,7 @@ mksquashfs /cnt %s -processors %d -b %s -keep-as-directory -all-root %s
 		overlays = []string{b.tmpOverlayPath}
 		bindDirs = container.DeduplicateBindPaths(getAllBaseDirs())
 	} else {
-		// Ext3 mode, ref overlays: pack from host path (no overlay needed).
+		// Ext3 mode, host payload: pack from the host path (no overlay needed).
 		bashScript = fmt.Sprintf(`
 trap 'exit 130' INT TERM
 echo "Packing overlay to SquashFS..."

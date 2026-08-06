@@ -48,7 +48,7 @@ Apps not available as conda packages, or specific versions not in conda.
 
 **Template (multiple versions, one file):**
 
-* **Format:** `<name>` (a single file with `#PL:` and `#TARGET:` headers)
+* **Format:** `<name>` (a single file with `#PH:` and `#TARGET:` headers)
 * **Example:** `cytoscape` → expands to `cytoscape/3.10.3`, `cytoscape/3.10.4`, etc.
 * Use this when the install logic is identical across versions and only the download URL changes.
 
@@ -65,7 +65,7 @@ Any data, including genome reference indexes.
 
 **Template (multiple versions, one file):**
 
-* **Format:** `<assembly|project>/<datatype>` (a single file with `#PL:` and `#TARGET:` headers)
+* **Format:** `<assembly|project>/<datatype>` (a single file with `#PH:` and `#TARGET:` headers)
 * **Example:** `grch38/star-gencode` → expands to `grch38/star/2.7.11b/gencode47-101`, `grch38/star/2.7.11b/gencode50-151`, etc.
 * Use this when the install/create logic is identical across versions.
 
@@ -242,9 +242,9 @@ Examples:
 
 ### Template Tags
 
-`#PL:` and `#TARGET:` turn a single script into a parameterized **template**. Running `condatainer create <template-path>` prompts the user for each placeholder value and then creates the concrete overlay.
+`#PH:` and `#TARGET:` turn a single script into a parameterized **template**. Running `condatainer create <template-path>` prompts the user for each placeholder value and then creates the concrete overlay.
 
-- `#PL:<name>:<values>` — declares a placeholder. The separator sets the ordering:
+- `#PH:<name>:<values>` — declares a placeholder. The separator sets the ordering:
   - `,` — comma list, **sorted descending** (use for versions): `3.10,3.9,3.8`
   - `|` — pipe list, **author's order preserved** (use for labels): `kasm | turbo`
 
@@ -253,18 +253,18 @@ Examples:
   - A `*` entry makes the list open-ended (any value accepted); it is always listed last.
   - Duplicates are dropped and whitespace around entries is ignored.
 - `#TARGET:<pattern>` — the **module path** of the resulting overlay, once the placeholders are filled.
-  Use `{name}` tokens matching the `#PL:` names.
+  Use `{name}` tokens matching the `#PH:` names.
   This is the name users refer to from then on — what they pass to `condatainer create`/`build`, what `#DEP:` lines point at, and the modulefile path [ModGen](https://github.com/Justype/condatainer/blob/main/assets/modgen/manual.md) generates. It is independent of the script's own file name.
 
-Every `#PL:` name must appear as a `{name}` token in `#TARGET:`, and every token must have a matching `#PL:`. Otherwise **CondaTainer** warns and skips the expansion, because unused placeholders would silently collapse every value onto the same target.
+Every `#PH:` name must appear as a `{name}` token in `#TARGET:`, and every token must have a matching `#PH:`. Otherwise **CondaTainer** warns and skips the expansion, because unused placeholders would silently collapse every value onto the same target.
 
 **Example** — STAR index template [grch38/star-gencode](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/star-gencode):
 
 ```bash
 #!/usr/bin/bash
-#PL:star_version:2.7.0b,...,2.7.11a,2.7.11b
-#PL:gencode_version:22-49
-#PL:read_length:101,151,*
+#PH:star_version:2.7.0b,...,2.7.11a,2.7.11b
+#PH:gencode_version:22-49
+#PH:read_length:101,151,*
 #TARGET:grch38/star/{star_version}/gencode{gencode_version}-{read_length}
 
 #DEP:grch38/genome/gencode
@@ -321,11 +321,11 @@ condatainer create grch38/star/2.7.11b/gencode47-101
 #AUTOUPDATE:{key}:{source}:{identifier}[>={min}][<{max}|<={max}]
 ```
 
-`{key}` must match an existing `#PL:`, `#DEP:`, or (in helpers) `#VALUE:` header in the same file. The target type is detected automatically:
+`{key}` must match an existing `#PH:`, `#DEP:`, or (in helpers) `#VALUE:` header in the same file. The target type is detected automatically:
 
 | Header matched | Behavior |
 |---|---|
-| `#PL:key:` | Rewrites the full version list (all versions ≥ min) |
+| `#PH:key:` | Rewrites the full version list (all versions ≥ min) |
 | `#DEP:key/` | Rewrites the pinned version to latest only; preserves `>=constraint` |
 
 **Supported sources:**
@@ -342,8 +342,8 @@ The `docker` source requires a full capture-group regex as the tag pattern — t
 **Examples:**
 
 ```bash
-# PL template — full version list, all 3.9+
-#PL:cytoscape_version:3.9.0,3.9.1,3.10.0,3.10.3,3.10.4
+# PH template — full version list, all 3.9+
+#PH:cytoscape_version:3.9.0,3.9.1,3.10.0,3.10.3,3.10.4
 #AUTOUPDATE:cytoscape_version:github:cytoscape/cytoscape>=3.9.0
 #TARGET:cytoscape/{cytoscape_version}
 
@@ -356,7 +356,7 @@ The `docker` source requires a full capture-group regex as the tag pattern — t
 #AUTOUPDATE:openjdk:bioconda:openjdk>=17<18
 ```
 
-Place `#AUTOUPDATE:` immediately after the `#PL:` or `#DEP:` line it manages.
+Place `#AUTOUPDATE:` immediately after the `#PH:` or `#DEP:` line it manages.
 
 ### Environment Variables
 
@@ -472,7 +472,7 @@ OS scripts are Apptainer definition files (`.def`) for distro-level system tools
 [ubuntu24/posit-r.def](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/ubuntu24/posit-r.def) builds every R version from a single definition:
 
 ```
-#PL:version:4.4.3,4.5.0,4.5.1
+#PH:version:4.4.3,4.5.0,4.5.1
 #AUTOUPDATE:version:docker:posit/r-base:^(\d+\.\d+\.\d+)-noble(?:-[^-]+)?$>=3.1.3
 
 #TARGET:ubuntu24/r{version}
@@ -484,7 +484,7 @@ From: posit/r-base:{version}-noble
 
 - `#TARGET:ubuntu24/r{version}` expands to `ubuntu24/r4.4.3`, `ubuntu24/r4.5.0`, …
 - `{version}` in `From:` is substituted at build time, so each expansion pulls its own upstream tag.
-- `#AUTOUPDATE:` can track a Docker tag to keep the `#PL:` list current. See [Auto-Update Tag](#auto-update-tag).
+- `#AUTOUPDATE:` can track a Docker tag to keep the `#PH:` list current. See [Auto-Update Tag](#auto-update-tag).
 
 ### Examples
 

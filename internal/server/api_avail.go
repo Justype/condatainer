@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/build"
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
 	"github.com/Justype/condatainer/internal/scheduler"
@@ -21,12 +21,12 @@ func (s *srv) handleAvail(w http.ResponseWriter, r *http.Request) {
 		Name           string              `json:"name"`
 		Alias          string              `json:"alias,omitempty"` // bare name for default-distro scripts (ubuntu24/build-essential → build-essential)
 		Whatis         string              `json:"whatis,omitempty"`
-		Remote         bool                `json:"remote,omitempty"`
+		Source         string              `json:"source,omitempty"`
 		Container      bool                `json:"container,omitempty"`
 		IsTemplate     bool                `json:"is_template,omitempty"`
 		TargetTemplate string              `json:"target_template,omitempty"`
-		PL             map[string][]string `json:"pl,omitempty"`
-		PLOrder        []string            `json:"pl_order,omitempty"`
+		PH             map[string][]string `json:"ph,omitempty"`
+		PHNames        []string            `json:"ph_names,omitempty"`
 		Installed      bool                `json:"installed,omitempty"`
 	}
 
@@ -38,23 +38,27 @@ func (s *srv) handleAvail(w http.ResponseWriter, r *http.Request) {
 	// Scripts under the default distro can be addressed by their bare name
 	// (e.g. ubuntu24/build-essential → build-essential), matching `condatainer avail`.
 	distroPrefix := ""
-	if d := config.Global.DefaultDistro; d != "" {
+	if d := config.ResolvedBase(); d != "" {
 		distroPrefix = d + "/"
 	}
 
 	entries := []availEntry{}
+	cat, err := config.OpenCatalog(r.Context())
+	if err != nil {
+		http.Error(w, "failed to open recipe sources: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	seen := make(map[string]bool)
-	add := func(scripts map[string]build.ScriptInfo, remote bool) {
-		for name, info := range scripts {
+	for _, src := range cat {
+		found, err := src.Entries(r.Context())
+		if err != nil {
+			continue
+		}
+		for name, e := range found {
 			if seen[name] {
 				continue
 			}
 			seen[name] = true
-			// Suppress expanded template variants: the collapsed template entry
-			// carries the full placeholder metadata instead.
-			if !info.IsTemplate && len(info.PLOrder) > 0 {
-				continue
-			}
 			_, isInstalled := installed[name]
 			alias := ""
 			if distroPrefix != "" {
@@ -62,26 +66,23 @@ func (s *srv) handleAvail(w http.ResponseWriter, r *http.Request) {
 					alias = a
 				}
 			}
+			var phNames []string
+			if e.IsTemplate {
+				phNames = catalog.NewTemplate(e.TargetTemplate).Names()
+			}
 			entries = append(entries, availEntry{
 				Name:           name,
 				Alias:          alias,
-				Whatis:         info.Whatis,
-				Remote:         remote,
-				Container:      info.IsContainer,
-				IsTemplate:     info.IsTemplate,
-				TargetTemplate: info.TargetTemplate,
-				PL:             info.PL,
-				PLOrder:        info.PLOrder,
+				Whatis:         e.Whatis,
+				Source:         src.Name,
+				Container:      strings.HasSuffix(e.Path, ".def"),
+				IsTemplate:     e.IsTemplate,
+				TargetTemplate: e.TargetTemplate,
+				PH:             e.PH,
+				PHNames:        phNames,
 				Installed:      isInstalled,
 			})
 		}
-	}
-
-	if local, err := build.GetLocalBuildScripts(); err == nil {
-		add(local, false)
-	}
-	if remote, err := build.GetRemoteBuildScripts(); err == nil {
-		add(remote, true)
 	}
 
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
@@ -89,11 +90,10 @@ func (s *srv) handleAvail(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAvailInspect serves GET /api/avail/inspect?name=<name/version> —
-// pre-install info for one build script: interactive prompts, scheduler
-// directives, and whether the name would fall back to a conda install.
-// Remote scripts are downloaded to the tmp dir so their content can be parsed.
+// pre-install info for one recipe: interactive prompts, scheduler directives,
+// and whether the name would fall back to a conda install.
 func (s *srv) handleAvailInspect(w http.ResponseWriter, r *http.Request) {
-	name := utils.NormalizeNameVersion(r.URL.Query().Get("name"))
+	name := catalog.Normalize(r.URL.Query().Get("name"))
 	if name == "" {
 		http.Error(w, "name required", http.StatusBadRequest)
 		return
@@ -110,7 +110,16 @@ func (s *srv) handleAvailInspect(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := inspectResp{Name: name}
 
-	info, found := build.FindBuildScript(name)
+	cat, err := config.OpenCatalog(r.Context())
+	if err != nil {
+		http.Error(w, "failed to open recipe sources: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_, found, err := cat.Lookup(r.Context(), name)
+	if err != nil {
+		http.Error(w, "lookup failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
 	resp.Found = found
 	resp.CondaFallback = !found
 	if !found {
@@ -118,29 +127,14 @@ func (s *srv) handleAvailInspect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scriptPath := info.Path
-	if info.IsRemote {
-		p, err := build.DownloadRemoteScript(info, config.GetWritableTmpDir())
-		if err != nil {
-			http.Error(w, "failed to download remote script: "+err.Error(), http.StatusBadGateway)
-			return
-		}
-		scriptPath = p
+	// The recipe arrives expanded, so prompts and directives read straight off it.
+	recipe, err := cat.Open(r.Context(), name, nil)
+	if err != nil {
+		http.Error(w, "failed to read recipe: "+err.Error(), http.StatusBadGateway)
+		return
 	}
-
-	if prompts, err := utils.GetInteractivePromptsFromScript(scriptPath); err == nil {
-		vars := info.CurrentVars()
-		for _, p := range prompts {
-			if len(vars) > 0 {
-				p = utils.InterpolateVars(p, vars)
-			}
-			resp.Prompts = append(resp.Prompts, p)
-		}
-	}
-
-	if specs, err := scheduler.ReadScriptSpecsFromPath(scriptPath); err == nil && specs != nil {
-		resp.SchedulerDirectives = specs.HasDirectives
-	}
+	resp.Prompts = append(resp.Prompts, recipe.Inputs...)
+	resp.SchedulerDirectives = len(recipe.Directives) > 0
 	if sched := scheduler.ActiveScheduler(); sched != nil {
 		resp.Scheduler = string(sched.GetType())
 	}

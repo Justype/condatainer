@@ -170,7 +170,6 @@ func parseEArgs(args []string) (overlays, commands, apptainerFlags []string, err
 		"--base-image": true, "-b": true,
 		"--fakeroot": true, "-f": true,
 		"--debug": true,
-		"--local": true,
 		"--quiet": true, "-q": true,
 		"--yes": true, "-y": true,
 	}

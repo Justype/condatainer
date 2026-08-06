@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,13 +31,10 @@ var configKeyDefs = map[string]bool{
 	"logs_dir":               false,
 	"apptainer_bin":          false,
 	"scheduler_bin":          false,
-	"default_distro":         false,
+	"base":                   false,
 	"submit_job":             false,
-	"scripts_link":           false,
-	"extra_scripts_links":    true,
-	"prefer_remote":          false,
+	"sources":                true,
 	"extra_image_dirs":       true,
-	"extra_build_dirs":       true,
 	"extra_helper_dirs":      true,
 	"parse_module_load":      false,
 	"scheduler_timeout":      false,
@@ -61,7 +59,7 @@ func isArrayKey(key string) bool { return configKeyDefs[key] }
 func isBoolKey(key string) bool {
 	switch key {
 	case "submit_job", "proxy_perjob", "helper_bind_all",
-		"prefer_remote", "parse_module_load",
+		"parse_module_load",
 		"build.use_tmp_overlay", "build.always_submit":
 		return true
 	}
@@ -109,7 +107,7 @@ func arrayKeyCompletion(cmd *cobra.Command, args []string, toComplete string) ([
 	}
 	if len(args) == 1 {
 		switch args[0] {
-		case "extra_scripts_links":
+		case "sources":
 			return nil, cobra.ShellCompDirectiveDefault
 		}
 	}
@@ -189,12 +187,12 @@ func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) 
 	}
 	if len(args) == 1 {
 		// Second arg: complete values based on the key
-		//  extra_image_dirs / extra_build_dirs / extra_helper_dirs should only complete directories
-		if args[0] == "extra_image_dirs" || args[0] == "extra_build_dirs" || args[0] == "extra_helper_dirs" {
+		//  extra_image_dirs / extra_helper_dirs should only complete directories
+		if args[0] == "extra_image_dirs" || args[0] == "extra_helper_dirs" {
 			return nil, cobra.ShellCompDirectiveFilterDirs
 		}
-		// extra_scripts_links is an array setting; allow free-form input
-		if args[0] == "extra_scripts_links" {
+		// sources entries are name=base pairs; allow free-form input
+		if args[0] == "sources" {
 			return nil, cobra.ShellCompDirectiveDefault
 		}
 		return configValueCompletion(args[0]), cobra.ShellCompDirectiveNoFileComp
@@ -202,15 +200,23 @@ func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) 
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
+// recipeExists reports whether a module name resolves in any configured source.
+func recipeExists(ctx context.Context, name string) bool {
+	cat, err := config.OpenCatalog(ctx)
+	if err != nil {
+		return false
+	}
+	_, found, err := cat.Lookup(ctx, name)
+	return err == nil && found
+}
+
 // configValueCompletion returns suggested values for a config key
 func configValueCompletion(key string) []string {
 	switch key {
 	case "submit_job", "proxy_perjob", "helper_bind_all":
 		return []string{"true", "false"}
-	case "prefer_remote", "parse_module_load":
+	case "parse_module_load":
 		return []string{"true", "false"}
-	case "default_distro":
-		return config.GetAvailableDistros()
 	case "build.ncpus":
 		return []string{"4", "8", "16", "32"}
 	case "build.mem":
@@ -257,7 +263,7 @@ Configuration file priority (highest to lowest):
   7. Defaults
 
 Data directory priority (for read/write operations):
-  1. Extra directories (extra_image_dirs / extra_build_dirs / extra_helper_dirs)
+  1. Extra directories (extra_image_dirs / extra_helper_dirs)
   2. Extra-root directory ($CNT_EXTRA_ROOT, group layer)
   3. App-root directory (auto-detected or CNT_ROOT)
   4. User scratch directory ($SCRATCH/condatainer, HPC systems)
@@ -395,10 +401,7 @@ var configShowCmd = &cobra.Command{
 			pathIndex++
 		}
 
-		// Explicit extra build/image/helper directories
-		for _, path := range config.GetExtraBuildDirs() {
-			addBaseDir("extra-build", path, false)
-		}
+		// Explicit extra image/helper directories
 		for _, entry := range config.GetExtraImageDirs() {
 			path, ro := config.ParseDirEntry(entry)
 			addBaseDir("extra-images", path, ro)
@@ -431,15 +434,6 @@ var configShowCmd = &cobra.Command{
 		printOverridden("                 ", "scheduler_bin")
 		fmt.Printf("  logs_dir:      %s%s\n", config.Global.LogsDir, srcTag("logs_dir"))
 		printOverridden("                 ", "logs_dir")
-		extraBuildDirs := config.GetExtraBuildDirs()
-		if len(extraBuildDirs) > 0 {
-			fmt.Printf("  extra_build_dirs:\n")
-			for _, path := range extraBuildDirs {
-				fmt.Printf("    - %s%s\n", path, srcEntryTag("extra_build_dirs", path))
-			}
-		} else {
-			fmt.Printf("  extra_build_dirs: %s\n", utils.StyleInfo("none"))
-		}
 		extraImageDirs := config.GetExtraImageDirs()
 		if len(extraImageDirs) > 0 {
 			fmt.Printf("  extra_image_dirs:\n")
@@ -467,25 +461,26 @@ var configShowCmd = &cobra.Command{
 
 		// Remote sources
 		fmt.Println(utils.StyleTitle("Remote Sources:"))
-		fmt.Printf("  scripts_link:  %s%s\n", config.Global.ScriptsLink, srcTag("scripts_link"))
-		printOverridden("                 ", "scripts_link")
-		extraScriptsLinks := config.GetExtraScriptsLinks()
-		if len(extraScriptsLinks) > 0 {
-			fmt.Printf("  extra_scripts_links:\n")
-			for _, l := range extraScriptsLinks {
-				fmt.Printf("    - %s%s\n", l, srcEntryTag("extra_scripts_links", l))
+		if len(config.Global.Sources) > 0 {
+			fmt.Printf("  sources:\n")
+			for _, src := range config.Global.Sources {
+				fmt.Printf("    - %s: %s\n", src.Name, src.Base)
 			}
 		} else {
-			fmt.Printf("  extra_scripts_links: %s\n", utils.StyleInfo("none"))
+			fmt.Printf("  sources: %s\n", utils.StyleInfo("none configured"))
 		}
-		fmt.Printf("  prefer_remote: %v%s\n", config.Global.PreferRemote, srcTag("prefer_remote"))
-		printOverridden("                 ", "prefer_remote")
 		fmt.Println()
 
 		// Options (longest key: metadata_cache_ttl = 18 chars)
 		fmt.Println(utils.StyleTitle("Options:"))
-		fmt.Printf("  %-19s %s%s\n", "default_distro:", config.Global.DefaultDistro, srcTag("default_distro"))
-		printOverridden("                      ", "default_distro")
+		fmt.Printf("  %-19s %s%s\n", "base:", config.ResolvedBase(), srcTag("base"))
+		printOverridden("                      ", "base")
+		if cat, err := config.OpenCatalog(cmd.Context()); err == nil {
+			if def := config.SourceDefaultBase(cat); def != "" && def != config.ResolvedBase() {
+				fmt.Printf("                      %s\n",
+					utils.StyleHint(fmt.Sprintf("sources now recommend %s — `config set base %s` to switch", def, def)))
+			}
+		}
 		submitJobConfig := viper.GetBool("submit_job")
 		submitJobActual := config.Global.SubmitJob
 		if submitJobConfig && !submitJobActual {
@@ -681,10 +676,10 @@ Time duration format (for build.time):
 		// configKeyDefs is the single source of truth for known keys
 		knownKeys := configKeyDefs
 
-		// Validate default_distro against known distros
-		if key == "default_distro" {
-			if !config.IsValidDistro(value) {
-				utils.PrintError("Unknown distro '%s'. Available: %s", value, strings.Join(config.GetAvailableDistros(), ", "))
+		// A base must name a recipe that some source actually provides.
+		if key == "base" {
+			if !recipeExists(cmd.Context(), value+"/base") {
+				utils.PrintError("No recipe %s/base in any configured source", value)
 				os.Exit(ExitCodeError)
 			}
 		}
@@ -901,6 +896,14 @@ Without -l, the layer is chosen from the install layout:
 		utils.PrintSuccess("Config file created")
 		fmt.Printf("  Location: %s (%s)\n", utils.StylePath(configPath), layerType)
 
+		// Record the base now, from whichever source recommends one. It is
+		// written once and never revised, so the container root stays put.
+		if cat, err := config.OpenCatalog(cmd.Context()); err == nil {
+			if base := config.EnsureBase(cat); base != "" {
+				fmt.Printf("  Base:     %s (from %s)\n", utils.StyleInfo(base), utils.StyleInfo("default_base"))
+			}
+		}
+
 		// Show what was detected
 		fmt.Println()
 		fmt.Println(utils.StyleTitle("Detected settings:"))
@@ -918,10 +921,10 @@ var configPathsCmd = &cobra.Command{
 	Use:   "paths",
 	Args:  cobra.NoArgs,
 	Short: "Show data search paths",
-	Long: `Show all search paths for images, build-scripts, and helper-scripts.
+	Long: `Show all search paths for images and helper-scripts.
 
 Search paths are checked in priority order (first match wins for reads):
-  1. Extra directories (extra_image_dirs / extra_build_dirs / extra_helper_dirs)
+  1. Extra directories (extra_image_dirs / extra_helper_dirs)
   2. Extra-root ($CNT_EXTRA_ROOT, group layer)
   3. App-root (auto-detected or $CNT_ROOT)
   4. Scratch (user HPC large storage, $SCRATCH/condatainer)
@@ -959,10 +962,19 @@ App-root is preferred for group/shared use, user is the fallback.`,
 			return dir + " " + utils.StyleDebug("("+string(config.ClassifyDataDir(dir))+")")
 		}
 
-		// Build scripts (read-only search — nothing writes here)
-		fmt.Println(utils.StyleTitle("Build Scripts:"))
-		for i, dir := range config.GetBuildScriptSearchPaths() {
-			fmt.Printf("  %d. %s%s\n", i+1, withLayer(dir), pathStatus(dir, ""))
+		// Recipe sources, in resolution order (first match wins)
+		fmt.Println(utils.StyleTitle("Sources:"))
+		if len(config.Global.Sources) == 0 {
+			fmt.Println("  (none configured)")
+		}
+		for i, src := range config.Global.Sources {
+			// A source is read-only, so writability says nothing; only whether a
+			// local one is actually there.
+			status := ""
+			if !strings.HasPrefix(src.Base, "http") && !config.DirExists(src.Base) {
+				status = " " + utils.StyleWarning("(not found)")
+			}
+			fmt.Printf("  %d. %s %s%s\n", i+1, src.Name, src.Base, status)
 		}
 		fmt.Println()
 
@@ -1078,14 +1090,27 @@ var configValidateCmd = &cobra.Command{
 			valid = false
 		}
 
-		// Check default distro validity
-		distro := config.Global.DefaultDistro
-		if !config.IsValidDistro(distro) {
-			fmt.Printf("%s Default distro invalid: %s\n", utils.StyleError("✗"), distro)
+		// Check that a base recipe resolves. Unlike the name-expansion paths,
+		// validate may open the catalog, so a source's default_base counts.
+		cat, catErr := config.OpenCatalog(cmd.Context())
+		baseRecipe := ""
+		if catErr == nil {
+			baseRecipe = config.BaseRecipeNameFrom(cat)
+		}
+		switch {
+		case baseRecipe == "":
+			fmt.Printf("%s No base configured and no source declares default_base\n", utils.StyleError("✗"))
 			valid = false
-		} else {
+		case !recipeExists(cmd.Context(), baseRecipe):
+			fmt.Printf("%s No %s recipe in any configured source\n", utils.StyleError("✗"), baseRecipe)
+			valid = false
+		default:
 			if !utils.QuietMode {
-				fmt.Printf("%s Default distro: %s\n", utils.StyleSuccess("✓"), distro)
+				fmt.Printf("%s Base recipe: %s\n", utils.StyleSuccess("✓"), baseRecipe)
+				if def := config.SourceDefaultBase(cat); def != "" && def+"/base" != baseRecipe {
+					fmt.Printf("  %s\n", utils.StyleHint(
+						fmt.Sprintf("sources now recommend %s; run `condatainer config set base %s` to switch", def, def)))
+				}
 			}
 		}
 
@@ -1109,7 +1134,7 @@ var configAppendCmd = &cobra.Command{
 
 ` + configLayersHelp,
 	Example: `  condatainer config append extra_image_dirs /shared/lab/images:ro
-  condatainer config append extra_scripts_links https://example.com/scripts`,
+  condatainer config append sources lab=/shared/lab/recipes`,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: arrayKeyCompletion,
 	SilenceUsage:      true,
@@ -1149,7 +1174,7 @@ var configPrependCmd = &cobra.Command{
 
 ` + configLayersHelp,
 	Example: `  condatainer config prepend extra_image_dirs /fast/images
-  condatainer config prepend extra_scripts_links https://myorg.com/scripts`,
+  condatainer config prepend sources lab=/shared/lab/recipes`,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: arrayKeyCompletion,
 	SilenceUsage:      true,

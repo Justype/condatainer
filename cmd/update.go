@@ -27,8 +27,6 @@ var (
 	updateBuild       bool
 	updateBase        bool
 	updateHelpScripts bool
-	updateRemote      bool
-	updateNoPrebuilt  bool
 )
 
 var updateCmd = &cobra.Command{
@@ -42,7 +40,7 @@ With no flags, refreshes both the build and helper script metadata caches.`,
   condatainer update --helper        # Helper script metadata only
   condatainer update --base          # Update the base image only
   condatainer update --base --remote # Update the base image using remote script
-  condatainer update --base --remote --no-prebuilt # Rebuild locally from remote .def`,
+  condatainer update --base --remote # Rebuild the base image from the remote .def`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE:         runUpdate,
@@ -53,8 +51,6 @@ func init() {
 	updateCmd.Flags().BoolVar(&updateBuild, "build", false, "Refresh build script metadata cache")
 	updateCmd.Flags().BoolVar(&updateHelpScripts, "helper", false, "Refresh helper script metadata cache")
 	updateCmd.Flags().BoolVar(&updateBase, "base", false, "Update the base image")
-	updateCmd.Flags().BoolVar(&updateRemote, "remote", false, "Remote build script takes precedence over local (used with --base)")
-	updateCmd.Flags().BoolVar(&updateNoPrebuilt, "no-prebuilt", false, "Skip prebuilt image download; build locally (used with --base)")
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
@@ -64,24 +60,20 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		updateHelpScripts = true
 	}
 
-	buildRefreshed := false
 	if updateBuild {
-		utils.PrintMessage("Refreshing local build script metadata cache ...")
-		build.ForceRefresh = true
-		if _, err := build.GetLocalBuildScripts(); err != nil {
-			return fmt.Errorf("failed to update local build script metadata: %w", err)
+		if err := config.RefreshCatalogCache(); err != nil {
+			return fmt.Errorf("failed to clear the recipe cache: %w", err)
 		}
-		utils.PrintSuccess("Local build script metadata updated.")
-
-		for _, url := range config.Global.ScriptsLinks {
-			utils.PrintMessage("Fetching build script metadata from %s ...", url+"/metadata/build-scripts.json.gz")
+		cat, err := config.OpenCatalog(cmd.Context())
+		if err != nil {
+			return fmt.Errorf("failed to open recipe sources: %w", err)
 		}
-		build.ForceRefresh = true
-		if _, err := build.GetRemoteBuildScripts(); err != nil {
-			return fmt.Errorf("failed to update build script metadata: %w", err)
+		for _, src := range cat {
+			utils.PrintMessage("Fetching recipes from %s (%s) ...", src.Name, src.Base)
 		}
-		utils.PrintSuccess("Build script metadata updated.")
-		buildRefreshed = true
+		entries := cat.Entries(cmd.Context())
+		config.WarnUnreachableSources(cmd.Context(), cat)
+		utils.PrintSuccess("%d recipes available.", len(entries))
 	}
 
 	if updateHelpScripts {
@@ -92,11 +84,6 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Prune cache files for URLs no longer in ScriptsLinks
-	if buildRefreshed {
-		build.PruneOrphanedCaches()
-	}
-
 	if updateBase {
 		// Bail out early if the base image is currently in use
 		if baseImagePath := config.FindBaseImage(); baseImagePath != "" {
@@ -104,8 +91,6 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("condatainer is currently running (base image is locked); stop all running condatainer sessions before updating")
 			}
 		}
-		build.PreferRemote = updateRemote || config.Global.PreferRemote
-		build.SkipPrebuilt = updateNoPrebuilt
 		utils.PrintMessage("Updating base image...")
 		if err := build.EnsureBaseImage(cmd.Context(), true); err != nil {
 			return fmt.Errorf("failed to update base image: %w", err)
@@ -201,10 +186,10 @@ func runSelfUpdate(cmd *cobra.Command, args []string) error {
 	var releaseURL string
 	if selfUpdateDev {
 		// Fetch all releases to find the latest (including pre-releases)
-		releaseURL = fmt.Sprintf("https://api.github.com/repos/%s/releases", config.GITHUB_REPO)
+		releaseURL = fmt.Sprintf("https://api.github.com/repos/%s/releases", config.GitHubRepo)
 	} else {
 		// Fetch only the latest stable release
-		releaseURL = fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", config.GITHUB_REPO)
+		releaseURL = fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", config.GitHubRepo)
 	}
 
 	resp, err := http.Get(releaseURL)

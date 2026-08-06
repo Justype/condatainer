@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -162,40 +161,6 @@ func buildOverlayPaths(b *BuildObject) (targetPath, finalPath string) {
 	}
 	finalPath = buildFinalPath(targetPath, b.update)
 	return
-}
-
-// tryDownloadPrebuilt attempts to download a prebuilt asset from the given prebuiltLink base URL.
-// ext is the file extension without a dot (e.g. "sif", "sqf").
-// downloadFn is called with (ctx, url, destPath) and should return an error on failure.
-// Returns false immediately if prebuiltLink is empty (no prebuilt source for this script).
-func tryDownloadPrebuilt(ctx context.Context, nameVersion, destPath, ext, prebuiltLink string, downloadFn func(context.Context, string, string) error) bool {
-	if prebuiltLink == "" {
-		return false
-	}
-	archMap := map[string]string{
-		"amd64": "x86_64",
-		"arm64": "aarch64",
-	}
-	archName, ok := archMap[runtime.GOARCH]
-	if !ok {
-		return false
-	}
-	normalized := utils.NormalizeNameVersion(nameVersion)
-	parts := strings.SplitN(normalized, "/", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	url := fmt.Sprintf("%s/%s/%s_%s.%s", prebuiltLink, parts[0], parts[1], archName, ext)
-	if !utils.URLExists(ctx, url) {
-		return false
-	}
-	logging.FromContext(ctx).Info("found pre-built, downloading", "name", normalized)
-	if err := downloadFn(ctx, url, destPath); err != nil {
-		logging.FromContext(ctx).Warn("pre-built download failed, falling back to local build", "err", err)
-		return false
-	}
-	logging.FromContext(ctx).Info("pre-built downloaded", "kind", "success", "name", normalized)
-	return true
 }
 
 // isCancelledByUser checks if the error is due to user cancellation (Ctrl+C)

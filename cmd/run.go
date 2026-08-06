@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/apptainer"
 	"github.com/Justype/condatainer/internal/config"
 	execpkg "github.com/Justype/condatainer/internal/exec"
@@ -376,7 +377,7 @@ func resolveDeps(contentScript, originScriptPath string) (overlays []string, err
 				missingDeps = append(missingDeps, dep)
 			}
 		} else {
-			normalized := utils.NormalizeNameVersion(dep)
+			normalized := catalog.Normalize(dep)
 			if _, ok := installedOverlays[normalized]; !ok {
 				missingDeps = append(missingDeps, dep)
 			}
@@ -409,7 +410,7 @@ func resolveDeps(contentScript, originScriptPath string) (overlays []string, err
 		if utils.IsOverlay(dep) {
 			overlays[i] = dep
 		} else {
-			normalized := utils.NormalizeNameVersion(dep)
+			normalized := catalog.Normalize(dep)
 			if path, ok := installedOverlays[normalized]; ok {
 				overlays[i] = path
 			} else {
@@ -560,7 +561,7 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 				entry.ok = utils.FileExists(p)
 				entry.path = p
 			} else {
-				normalized := utils.NormalizeNameVersion(dep)
+				normalized := catalog.Normalize(dep)
 				entry.path, entry.ok = installedOverlays[normalized]
 			}
 			entries = append(entries, entry)

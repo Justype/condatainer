@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
@@ -25,13 +26,11 @@ var (
 	createName          string
 	createPrefix        string
 	createFile          string
-	createSource        string
+	createFrom          string
 	createTempSize      string
 	createBlockSize     string
 	createDataBlockSize string
 	createChannels      []string
-	createRemote        bool
-	createNoPrebuilt    bool
 	createUpdate        bool
 	createUseTmpOverlay bool
 	createAlwaysSubmit  bool
@@ -43,7 +42,7 @@ var (
 	// buildFlagNames is the set of flags shown under "Build Flags:" in help.
 	buildFlagNames = map[string]bool{
 		"temp-size": true, "block-size": true, "data-block-size": true, "use-tmp-overlay": true,
-		"always-submit": true, "no-submit": true, "remote": true, "no-prebuilt": true,
+		"always-submit": true, "no-submit": true,
 	}
 )
 
@@ -77,12 +76,12 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
   condatainer create -n nvim nvim nodejs          # Create conda env
   condatainer create matplotlib pandas  -p /path  # Create conda env at custom path
   condatainer create -f environment.yml -p myenv  # Create from conda file with prefix
-  condatainer create -s docker://ubuntu:22.04 -p ubuntu  # Build from a container image`,
+  condatainer create --from docker://ubuntu:22.04 -p ubuntu  # Build from a container image`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
 		// 1. Validation Logic
-		if len(args) == 0 && createFile == "" && createSource == "" {
-			ExitWithError("At least one of [packages], --file, or --source must be provided.")
+		if len(args) == 0 && createFile == "" && createFrom == "" {
+			ExitWithError("At least one of [packages], --file, or --from must be provided.")
 		}
 		if createPrefix != "" && createName != "" {
 			ExitWithError("Cannot use both --prefix and --name at the same time.")
@@ -93,14 +92,14 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 				ExitWithError("--prefix name cannot contain '--' (reserved name/version separator)")
 			}
 		}
-		if createSource != "" && createName == "" && createPrefix == "" {
-			ExitWithError("When using --source, either --name or --prefix must be provided.")
+		if createFrom != "" && createName == "" && createPrefix == "" {
+			ExitWithError("When using --from, either --name or --prefix must be provided.")
 		}
 		if createFile != "" && createPrefix == "" {
 			createPrefix = createFile[:len(createFile)-len(filepath.Ext(createFile))]
 		}
-		if createPrefix != "" && createFile == "" && len(args) == 0 && createSource == "" {
-			ExitWithError("--prefix requires either packages, --file, or --source to be specified.")
+		if createPrefix != "" && createFile == "" && len(args) == 0 && createFrom == "" {
+			ExitWithError("--prefix requires either packages, --file, or --from to be specified.")
 		}
 
 		// 2. Ensure base image exists (also checks for apptainer)
@@ -152,20 +151,16 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 
 		// 6. Normalize package names (only for build-script mode, not for conda/prefix/source modes)
 		normalizedArgs := args
-		if createName == "" && createPrefix == "" && createSource == "" {
+		if createName == "" && createPrefix == "" && createFrom == "" {
 			normalizedArgs = make([]string, len(args))
 			for i, arg := range args {
-				normalized, expanded := build.ExpandDefaultDistroName(arg)
+				normalized, expanded := expandBareName(cmd.Context(), arg)
 				if expanded {
-					utils.PrintNote("Expanding '%s' to '%s'", utils.NormalizeNameVersion(arg), normalized)
+					utils.PrintNote("Expanding '%s' to '%s'", catalog.Normalize(arg), normalized)
 				}
 				normalizedArgs[i] = normalized
 			}
 		}
-
-		// 7. Handle --remote and --no-prebuilt flags (CLI flag or config)
-		build.PreferRemote = createRemote || config.Global.PreferRemote
-		build.SkipPrebuilt = createNoPrebuilt
 
 		// 7b. Handle --always-submit flag
 		if createAlwaysSubmit {
@@ -178,8 +173,8 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 		}
 
 		// 9. Execute create based on mode
-		if createSource != "" {
-			// Mode: --source (external image like docker://ubuntu)
+		if createFrom != "" {
+			// Mode: --from (external image like docker://ubuntu)
 			runCreateFromSource(ctx)
 		} else if createPrefix != "" && len(args) > 0 {
 			// Mode: --prefix + packages (conda env at custom path, like conda create -p)
@@ -206,13 +201,11 @@ func init() {
 	f.StringVarP(&createName, "name", "n", "", "Custom name for the overlay")
 	f.StringVarP(&createPrefix, "prefix", "p", "", "Custom prefix path for the overlay")
 	f.StringVarP(&createFile, "file", "f", "", "Path to definition file (.yaml, .txt, .sh, .def)")
-	f.StringVarP(&createSource, "source", "s", "", "Remote source URI (e.g., docker://ubuntu:22.04)")
+	f.StringVar(&createFrom, "from", "", "Build from an external image URI (e.g., docker://ubuntu:22.04)")
 	f.StringVar(&createTempSize, "temp-size", "20G", "Size of temporary overlay")
 	f.StringVar(&createBlockSize, "block-size", "", "SquashFS block size of app/external overlays (e.g. 256k)")
 	f.StringVar(&createDataBlockSize, "data-block-size", "", "SquashFS block size of data overlays (e.g. 512k, 1m)")
 	f.StringArrayVarP(&createChannels, "channel", "c", nil, "Conda channel to use (overrides config; repeatable)")
-	f.BoolVar(&createRemote, "remote", false, "Remote build scripts take precedence over local")
-	f.BoolVar(&createNoPrebuilt, "no-prebuilt", false, "Skip prebuilt artifact download; build overlays locally")
 	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist")
 	f.BoolVar(&createUseTmpOverlay, "use-tmp-overlay", false, "Use a temporary overlay instead of a temp directory")
 	f.BoolVar(&createAlwaysSubmit, "always-submit", false, "Submit all builds as scheduler jobs, even no directives")
@@ -331,9 +324,9 @@ func readLineWithCompletion(ctx context.Context, prompt string, completions []st
 }
 
 // resolveTemplateInteractively prompts the user to choose a value for each placeholder
-// in a PL template script and returns the interpolated concrete name (from #TARGET:).
+// in a PH template script and returns the interpolated concrete name (from #TARGET:).
 // When --yes is set, defaults are used without prompting.
-func resolveTemplateInteractively(ctx context.Context, info build.ScriptInfo) (string, error) {
+func resolveTemplateInteractively(ctx context.Context, info *catalog.Entry) (string, error) {
 	utils.PrintMessage("Placeholder template: %s", info.Name)
 	if info.Whatis != "" {
 		utils.PrintMessage("%s", utils.StyleHint(info.Whatis))
@@ -341,7 +334,9 @@ func resolveTemplateInteractively(ctx context.Context, info build.ScriptInfo) (s
 	if info.TargetTemplate != "" {
 		fmt.Fprintf(os.Stdout, "Target: %s\n", utils.HighlightTemplatePlaceholders(info.TargetTemplate))
 	}
-	chosenVars := make(map[string]string, len(info.PLOrder))
+	tmpl := catalog.NewTemplate(info.TargetTemplate)
+	names := tmpl.Names()
+	chosenVars := make(map[string]string, len(names))
 
 	// Build per-placeholder installed defaults from single-slash tool #DEP: patterns.
 	installedDefaults := map[string]string{}
@@ -351,8 +346,11 @@ func resolveTemplateInteractively(ctx context.Context, info build.ScriptInfo) (s
 			if !strings.Contains(dep, "{") || strings.Count(dep, "/") != 1 {
 				continue
 			}
+			depTmpl := catalog.NewTemplate(dep)
 			for name := range overlays {
-				if vars, ok := utils.MatchTemplateTarget(dep, name); ok {
+				// The dep's tokens are the parent's placeholders, so its declared
+				// values are what an installed name has to be one of.
+				if vars, ok := depTmpl.Match(name, info.PH); ok {
 					for k, v := range vars {
 						installedVals[k] = append(installedVals[k], v)
 					}
@@ -364,8 +362,8 @@ func resolveTemplateInteractively(ctx context.Context, info build.ScriptInfo) (s
 		}
 	}
 
-	for _, key := range info.PLOrder {
-		vals, ok := info.PL[key]
+	for _, key := range names {
+		vals, ok := info.PH[key]
 		if !ok {
 			continue
 		}
@@ -459,9 +457,34 @@ func resolveTemplateInteractively(ctx context.Context, info build.ScriptInfo) (s
 		}
 	}
 
-	concrete := utils.InterpolateVars(info.TargetTemplate, chosenVars)
+	concrete, err := tmpl.Fill(chosenVars)
+	if err != nil {
+		return "", err
+	}
 	fmt.Fprintf(os.Stdout, "  → Creating %s\n", concrete)
 	return concrete, nil
+}
+
+// expandBareName turns a bare name into <base>/<name> when that resolves,
+// so "r/4.5.3" finds ubuntu24/r/4.5.3 without the user spelling out the base.
+func expandBareName(ctx context.Context, nameVersion string) (string, bool) {
+	normalized := catalog.Normalize(nameVersion)
+	if strings.Contains(normalized, "/") || strings.Contains(normalized, "::") {
+		return normalized, false
+	}
+	base := config.ResolvedBase()
+	if base == "" {
+		return normalized, false
+	}
+	cat, err := config.OpenCatalog(ctx)
+	if err != nil {
+		return normalized, false
+	}
+	candidate := base + "/" + normalized
+	if _, found, err := cat.Lookup(ctx, candidate); err == nil && found {
+		return candidate, true
+	}
+	return normalized, false
 }
 
 // runCreatePackages creates separate sqf files for each package using BuildGraph
@@ -471,13 +494,16 @@ func runCreatePackages(ctx context.Context, packages []string) {
 
 	buildObjects := make([]*build.BuildObject, 0, len(packages))
 	for _, pkg := range packages {
-		// Resolve template scripts interactively before building
-		if info, found := build.FindBuildScript(pkg); found && info.IsTemplate {
-			resolved, err := resolveTemplateInteractively(ctx, info)
-			if err != nil {
-				ExitWithError("Template resolution cancelled for %s: %v", pkg, err)
+		// A bare template name does not identify an artifact; ask which member.
+		if cat, err := config.OpenCatalog(ctx); err == nil {
+			if m, found, err := cat.Lookup(ctx, pkg); err == nil && found &&
+				m.Entry.IsTemplate && len(m.Vars) == 0 {
+				resolved, err := resolveTemplateInteractively(ctx, m.Entry)
+				if err != nil {
+					ExitWithError("Template resolution cancelled for %s: %v", pkg, err)
+				}
+				pkg = resolved
 			}
-			pkg = resolved
 		}
 
 		bo, err := build.NewBuildObject(ctx, pkg, false, imagesDir, config.GetWritableTmpDir(), createUpdate)
@@ -507,7 +533,7 @@ func runCreatePackages(ctx context.Context, packages []string) {
 func runCreateWithName(ctx context.Context, packages []string) {
 	imagesDir := getWritableImagesDir()
 
-	normalizedName := utils.NormalizeNameVersion(createName)
+	normalizedName := catalog.Normalize(createName)
 	slashCount := strings.Count(normalizedName, "/")
 	if slashCount > 1 {
 		ExitWithError("--name cannot contain more than one '/'")
@@ -621,19 +647,19 @@ func runCreateWithPrefixAndPackages(ctx context.Context, packages []string) {
 }
 
 // runCreateFromSource creates a sqf from an external source (def file or remote URI)
-// Example: condatainer create --source docker://ubuntu:22.04 -n myubuntu
+// Example: condatainer create --from docker://ubuntu:22.04 -n myubuntu
 func runCreateFromSource(ctx context.Context) {
 	imagesDir := getWritableImagesDir()
 
 	if createPrefix == "" && createName == "" {
-		ExitWithError("--source requires either --name or --prefix")
+		ExitWithError("--from requires either --name or --prefix")
 	}
 
 	var targetPrefix string
 	if createPrefix != "" {
 		targetPrefix, _ = filepath.Abs(createPrefix)
 	} else {
-		normalizedName := utils.NormalizeNameVersion(createName)
+		normalizedName := catalog.Normalize(createName)
 		if strings.Count(normalizedName, "/") > 1 {
 			ExitWithError("--name cannot contain more than one '/'")
 		}
@@ -641,7 +667,7 @@ func runCreateFromSource(ctx context.Context) {
 		targetPrefix = filepath.Join(imagesDir, fileName)
 	}
 
-	source := createSource
+	source := createFrom
 	isRemote := strings.Contains(source, "://")
 	if !isRemote {
 		source, _ = filepath.Abs(source)

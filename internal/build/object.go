@@ -11,6 +11,7 @@ import (
 
 	"log/slog"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/overlay"
@@ -21,15 +22,15 @@ import (
 var ErrTmpOverlayExists = errors.New("temporary overlay already exists")
 var ErrBuildCancelled = errors.New("build cancelled by user")
 
-// BuildType represents the type of build target.
+// BuildType is how a target is built — the shape of its source, nothing more.
+// What the payload *is* (base, os, app, data) is its catalog.Kind.
 type BuildType int
 
 // Predefined build types.
 const (
-	BuildTypeConda BuildType = iota + 1
-	BuildTypeDef
-	BuildTypeShell
-	BuildTypeRef
+	BuildTypeConda  BuildType = iota + 1 // micromamba
+	BuildTypeDef                         // apptainer definition file
+	BuildTypeScript                      // recipe run as a shell script
 )
 
 // String implements fmt.Stringer for BuildType.
@@ -39,10 +40,8 @@ func (bt BuildType) String() string {
 		return "conda"
 	case BuildTypeDef:
 		return "def"
-	case BuildTypeShell:
-		return "shell"
-	case BuildTypeRef:
-		return "ref"
+	case BuildTypeScript:
+		return "script"
 	}
 	return "unknown"
 }
@@ -59,18 +58,23 @@ type BuildObject struct {
 	tmpOverlayPath    string
 	targetOverlayPath string
 	cntDirPath        string
-	submitJob         bool   // Whether to submit to scheduler (from config at construction time)
-	isRemote          bool   // Whether build source was downloaded
-	prebuiltLink      string // per-source prebuilt base URL (from metadata/prebuilt_link); empty = no prebuilt
-	update            bool   // If true, rebuild even if overlay already exists (atomic .new swap)
+	submitJob         bool // Whether to submit to scheduler (from config at construction time)
+	tempSource        bool // Whether buildSource is a temp file this object wrote
+	update            bool // If true, rebuild even if overlay already exists (atomic .new swap)
 	scriptSpecs       *scheduler.ScriptSpecs
 	condaChannelPkg   string // channel-annotated package spec, e.g. "bioconda::star"; set when input uses "::" notation
 
-	// Interactive inputs for shell scripts
+	// What the payload is. Decides the tmp root and the pack block size, and is
+	// exported to the build as CNT_KIND. Authoritative from the recipe's entry;
+	// derived from the name shape when no source provides one.
+	kind catalog.Kind
+
+	// #INPUT: prompts and the answers collected for them, same order.
+	inputs            []string
 	interactiveInputs []string
 
-	// Placeholder variable values for PL (template) scripts, e.g. {"star_version": "2.7.11b"}.
-	// Injected as env vars at build time and interpolated into dependency names.
+	// Placeholder values for a template recipe, e.g. {"star_version": "2.7.11b"}.
+	// Handed to the catalog, which expands the recipe before it is written out.
 	vars map[string]string
 
 	// Build type and conda-specific fields
@@ -116,7 +120,7 @@ func (b *BuildObject) Build(ctx context.Context, buildDeps bool) error {
 		return b.buildConda(ctx)
 	case BuildTypeDef:
 		return b.buildDef(ctx)
-	default: // BuildTypeShell, BuildTypeRef
+	default: // BuildTypeScript
 		return b.buildScript(ctx, buildDeps)
 	}
 }
@@ -241,35 +245,30 @@ func (b *BuildObject) GetMissingDependencies() ([]string, error) {
 	installed := getInstalledOverlays()
 	var missing []string
 	for _, dep := range b.dependencies {
-		nameVersion, op, minVersion := utils.SplitDepConstraint(dep)
-		if op == "" {
+		parsed, err := catalog.ParseDep(dep)
+		if err != nil {
+			continue
+		}
+		if parsed.Op == "" {
 			// Exact match (existing behaviour).
-			if !installed[nameVersion] {
+			if !installed[parsed.NameVersion()] {
 				missing = append(missing, dep)
 			}
 			continue
 		}
 		// Constraint present: accept any installed version of the same package
-		// that satisfies op+minVersion and does not exceed the preferred version.
-		name := nameVersion
-		preferredVer := ""
-		if idx := strings.LastIndex(nameVersion, "/"); idx >= 0 {
-			name = nameVersion[:idx]
-			preferredVer = nameVersion[idx+1:]
-		}
-		prefix := name + "/"
+		// that the dep admits — at or above the minimum, never above the
+		// preferred version.
+		prefix := parsed.Name + "/"
 		satisfied := false
 		for key := range installed {
-			if after, ok := strings.CutPrefix(key, prefix); ok {
-				installedVer := after
-				if utils.DepSatisfiedByVersion(installedVer, op, minVersion, preferredVer) {
-					satisfied = true
-					break
-				}
+			if version, ok := strings.CutPrefix(key, prefix); ok && parsed.Satisfies(version) {
+				satisfied = true
+				break
 			}
 		}
 		if !satisfied {
-			missing = append(missing, nameVersion) // build the preferred version
+			missing = append(missing, parsed.NameVersion()) // build the preferred version
 		}
 	}
 	return missing, nil
@@ -348,23 +347,38 @@ func (b *BuildObject) CreateBuildDirs(ctx context.Context, force bool) error {
 	return nil
 }
 
-// Cleanup removes the build workspace (remote source, tmp overlay, build dir), plus
+// retargetWorkspace re-sites the build workspace when the recipe's kind implies
+// a different tmp root than the name shape did. A no-op unless the recipe
+// declared #TYPE:, which is the only way the two disagree.
+func (b *BuildObject) retargetWorkspace() {
+	root := tmpRootForKind(b.kind)
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	if root == b.tmpDir {
+		return
+	}
+	b.tmpDir = root
+	b.tmpOverlayPath, b.cntDirPath = buildTmpPaths(b.nameVersion, root, ".img")
+}
+
+// Cleanup removes the build workspace (materialized recipe, tmp overlay, build dir), plus
 // the partial target overlay on failure. Announces the work when there is something
 // to remove; a no-op cleanup stays silent.
 func (b *BuildObject) Cleanup(failed bool) error {
 	log := slog.Default()
 
-	willClean := (b.isRemote && b.buildSource != "") || b.tmpOverlayPath != "" || b.cntDirPath != ""
+	willClean := (b.tempSource && b.buildSource != "") || b.tmpOverlayPath != "" || b.cntDirPath != ""
 	if willClean {
 		log.Info("cleaning up temporary files")
 	}
 
-	// Remove remote build source if downloaded
-	if b.isRemote && b.buildSource != "" {
+	// Remove the materialized recipe
+	if b.tempSource && b.buildSource != "" {
 		if err := os.Remove(b.buildSource); err != nil && !os.IsNotExist(err) {
-			log.Warn("failed to remove remote build source", "path", b.buildSource, "err", err)
+			log.Warn("failed to remove materialized recipe", "path", b.buildSource, "err", err)
 		} else {
-			log.Debug("removed remote build source", "path", b.buildSource)
+			log.Debug("removed materialized recipe", "path", b.buildSource)
 		}
 	}
 
@@ -420,6 +434,9 @@ func (b *BuildObject) parseScriptMetadata(ctx context.Context) error {
 	if err := b.parseDependencies(); err != nil {
 		return err
 	}
+	if err := b.parseInputs(); err != nil {
+		return err
+	}
 	if err := b.collectInteractiveInputs(ctx); err != nil {
 		return err
 	}
@@ -427,60 +444,66 @@ func (b *BuildObject) parseScriptMetadata(ctx context.Context) error {
 }
 
 // parseDependencies reads #DEP: lines from the build script and sets b.dependencies.
-// Skips parsing if dependencies were already populated from remote metadata.
+// Skips parsing when the catalog already materialized the recipe, whose deps
+// arrive expanded.
 func (b *BuildObject) parseDependencies() error {
 	if b.dependencies != nil {
-		// Dependencies were pre-populated from metadata; apply var interpolation if needed.
-		if len(b.vars) > 0 {
-			for i, dep := range b.dependencies {
-				b.dependencies[i] = utils.InterpolateVars(dep, b.vars)
-			}
-		}
 		return nil
 	}
 	deps, err := utils.GetDependenciesFromScript(b.buildSource, config.Global.ParseModuleLoad)
 	if err != nil {
 		return fmt.Errorf("failed to parse dependencies: %w", err)
 	}
-	if len(b.vars) > 0 {
-		for i, dep := range deps {
-			deps[i] = utils.InterpolateVars(dep, b.vars)
-		}
-	}
 	b.dependencies = deps
 	return nil
 }
 
-// collectInteractiveInputs handles #INTERACTIVE: prompts — checks TTY, supports --yes shortcut,
-// and reads user input from stdin. Sets b.interactiveInputs.
-func (b *BuildObject) collectInteractiveInputs(ctx context.Context) error {
-	prompts, err := utils.GetInteractivePromptsFromScript(b.buildSource)
-	if err != nil {
-		return fmt.Errorf("failed to parse interactive prompts: %w", err)
+// parseInputs reads #INPUT: lines from the build source and sets b.inputs.
+// Skips parsing when the catalog already materialized the recipe.
+func (b *BuildObject) parseInputs() error {
+	if b.inputs != nil || b.tempSource {
+		return nil
 	}
+	file, err := os.Open(b.buildSource)
+	if err != nil {
+		return fmt.Errorf("failed to open %s: %w", b.buildSource, err)
+	}
+	defer file.Close()
+	recipe, err := catalog.ParseRecipe(b.buildSource, file)
+	if err != nil {
+		return fmt.Errorf("failed to parse inputs: %w", err)
+	}
+	b.inputs = recipe.Inputs
+	return nil
+}
+
+// collectInteractiveInputs asks for every #INPUT: the recipe declares — checks
+// TTY, supports the --yes shortcut, and reads answers from stdin.
+//
+// Answers stay in declaration order and are fed to the recipe on stdin, which
+// is the only channel that carries them literally: apptainer shell-evaluates
+// env values, so a $ or a backtick in a pasted URL would be mangled or run.
+func (b *BuildObject) collectInteractiveInputs(ctx context.Context) error {
 	b.interactiveInputs = []string{}
-	if len(prompts) == 0 {
+	if len(b.inputs) == 0 {
 		return nil
 	}
 
 	// If --yes flag is set, automatically provide empty responses
 	if utils.ShouldAnswerYes() {
-		for range prompts {
+		for range b.inputs {
 			b.interactiveInputs = append(b.interactiveInputs, "")
 		}
 		return nil
 	}
 
-	// Interactive prompts require a TTY or piped stdin (e.g. scheduler job with embedded heredoc)
+	// Prompts require a TTY or piped stdin (e.g. scheduler job with embedded heredoc)
 	if !utils.IsInteractiveShell() && !utils.IsStdinPiped() {
-		return fmt.Errorf("build script for %s requires interactive input, but no TTY is available", b.nameVersion)
+		return fmt.Errorf("recipe for %s requires input, but no TTY is available", b.nameVersion)
 	}
 
 	log := logging.FromContext(ctx)
-	for _, prompt := range prompts {
-		if len(b.vars) > 0 {
-			prompt = utils.InterpolateVars(prompt, b.vars)
-		}
+	for _, prompt := range b.inputs {
 		msg := strings.ReplaceAll(prompt, `\\n`, "\n")
 		msg = strings.ReplaceAll(msg, "\\n", "\n")
 		for _, line := range strings.Split(msg, "\n") {
@@ -520,7 +543,7 @@ func (b *BuildObject) resolveResourceSpec() error {
 // Format: "name/version" for conda/shell, "name" for def, "prefix/name/version" for ref
 // All overlays are stored in imagesDir regardless of type
 func NewBuildObject(ctx context.Context, nameVersion string, external bool, imagesDir, tmpDir string, update bool) (*BuildObject, error) {
-	normalized := utils.NormalizeNameVersion(nameVersion)
+	normalized := catalog.Normalize(nameVersion)
 
 	// Handle channel annotation (e.g. "bioconda::star/2.7.11b"):
 	// strip the channel prefix for path/naming; keep it for the micromamba spec.
@@ -536,21 +559,14 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 		normalized = rest // strip channel prefix for sqf naming and env path
 	}
 
-	slashCount := strings.Count(normalized, "/")
+	// Provisional kind from the name shape. The recipe's entry is authoritative
+	// and may override it via #TYPE:, but the workspace has to be sited before
+	// anything is looked up — createConcreteType re-points it if the kind moves.
+	kind := catalog.DeriveKind(normalized, "", false, "")
 
-	// Determine build type based on slash count
-	// 0 slashes: system (def is not defined here)
-	// 1 slash: conda or shell (e.g., "numpy/1.24")
-	// 2+ slashes: ref shell script (e.g., "genomes/hg38/full")
-	isRef := slashCount > 1
-
-	// Use fast local storage for conda/app builds; keep stable path for ref/data.
+	// Use fast local storage for app builds; keep a stable path for data.
 	// Def builds will override this in createConcreteType via resolveTmpDirForDef.
-	if isRef {
-		tmpDir = resolveTmpDirForRef()
-	} else {
-		tmpDir = resolveTmpDirForConda()
-	}
+	tmpDir = tmpRootForKind(kind)
 
 	// Make tmpDir absolute
 	if absDir, err := filepath.Abs(tmpDir); err == nil {
@@ -582,22 +598,19 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 		targetOverlayPath: targetOverlay,
 		update:            update,
 		condaChannelPkg:   condaChannelPkg,
+		kind:              kind,
 	}
 
 	if external {
 		// External builds don't need to resolve build source
-		return createConcreteType(ctx, base, isRef, tmpDir)
+		return createConcreteType(ctx, base, tmpDir)
 	}
 
 	// Check if already installed or a build is currently in progress (lock file exists).
 	// Skip this optimisation in update mode so the correct concrete type is resolved.
 	if !update {
 		if base.IsInstalled() {
-			if isRef {
-				base.buildType = BuildTypeRef
-			} else {
-				base.buildType = BuildTypeShell
-			}
+			base.buildType = BuildTypeScript
 			return base, nil
 		}
 		if utils.FileExists(base.buildLockPath()) {
@@ -636,7 +649,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 	}
 
 	// Resolve build source and determine concrete type
-	return createConcreteType(ctx, base, isRef, tmpDir)
+	return createConcreteType(ctx, base, tmpDir)
 }
 
 // NewCondaObjectWithSource creates a CondaBuildObject with custom buildSource
@@ -645,7 +658,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 //   - Path to YAML file (e.g., "/path/to/environment.yml")
 //   - Comma-separated package list (e.g., "nvim,nodejs,samtools/1.16")
 func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir string, update bool) (*BuildObject, error) {
-	normalized := utils.NormalizeNameVersion(nameVersion)
+	normalized := catalog.Normalize(nameVersion)
 
 	// Conda builds always use fast local storage
 	tmpDir = resolveTmpDirForConda()
@@ -675,6 +688,7 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetOverlay,
 		update:            update,
+		kind:              catalog.KindApp,
 	}
 
 	if err := base.setupCondaFields(); err != nil {
@@ -688,7 +702,7 @@ func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir
 // All overlays are stored in imagesDir regardless of type
 func FromExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, imagesDir string) (*BuildObject, error) {
 	nameVersion := filepath.Base(targetPrefix)
-	nameVersion = utils.NormalizeNameVersion(nameVersion)
+	nameVersion = catalog.Normalize(nameVersion)
 
 	// Determine build type from source file extension
 	isDef := isApptainer || strings.HasSuffix(source, ".def")
@@ -728,6 +742,7 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 		cntDirPath:        cntDirPath,
 		tmpOverlayPath:    tmpOverlayPath,
 		targetOverlayPath: targetPrefix + ".sqf",
+		kind:              catalog.DeriveKind(nameVersion, "", isDef, externalType),
 	}
 
 	// Parse script metadata if it's a shell script
@@ -740,7 +755,7 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 	if isDef {
 		base.buildType = BuildTypeDef
 	} else if isShell {
-		base.buildType = BuildTypeShell // External sources are not ref overlays
+		base.buildType = BuildTypeScript
 	} else {
 		return nil, fmt.Errorf("unknown source type for %s", source)
 	}
@@ -751,11 +766,10 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 
 // createConcreteType creates the appropriate concrete BuildObject type
 // It determines whether to create a conda, def, or script build based on:
-// - isRef flag (from slash count > 1)
-// - build source resolution: .def -> BuildTypeDef, shell script -> BuildTypeShell/Ref, not found -> conda
-func createConcreteType(ctx context.Context, base *BuildObject, isRef bool, tmpDir string) (*BuildObject, error) {
+// - build source resolution: .def -> BuildTypeDef, shell script -> BuildTypeScript, not found -> conda
+func createConcreteType(ctx context.Context, base *BuildObject, tmpDir string) (*BuildObject, error) {
 	// Resolve build source - this determines the actual type based on file extension
-	isConda, isContainer, err := resolveBuildSource(base, tmpDir)
+	isConda, isContainer, err := resolveBuildSource(ctx, base, tmpDir)
 	if err != nil {
 		return nil, err
 	}
@@ -764,6 +778,8 @@ func createConcreteType(ctx context.Context, base *BuildObject, isRef bool, tmpD
 		if err := base.setupCondaFields(); err != nil {
 			return nil, err
 		}
+		// A conda environment is self-contained software, whatever its name shape.
+		base.kind = catalog.KindApp
 		base.buildType = BuildTypeConda
 		return base, nil
 	}
@@ -780,117 +796,106 @@ func createConcreteType(ctx context.Context, base *BuildObject, isRef bool, tmpD
 		return base, nil
 	}
 
+	// The entry may have declared a kind the name shape does not imply, which
+	// moves where the build works.
+	base.retargetWorkspace()
+
 	// It's a shell script (no extension or .sh/.bash)
 	if err := base.parseScriptMetadata(ctx); err != nil {
 		return nil, err
 	}
-	if isRef {
-		base.buildType = BuildTypeRef
-	} else {
-		base.buildType = BuildTypeShell
-	}
+	base.buildType = BuildTypeScript
 	return base, nil
 }
 
-// resolveBuildSource finds the build script and determines the build type
-// Returns (isConda, isContainer, error):
-// - isConda=true: no build script found, use conda
-// - isContainer=true: found .def file
-// - both false: found shell script (no extension)
-// First checks local and remote build scripts, falls back to conda if not found
-func resolveBuildSource(base *BuildObject, tmpDir string) (isConda bool, isContainer bool, err error) {
+// resolveBuildSource resolves the module through the catalog and materializes
+// its recipe. Returns (isConda, isContainer, error).
+//
+// A name no source provides is conda's — the normal path for a package with no
+// recipe anywhere, not a failure. Everything else is written to a temp file:
+// the catalog hands back recipe text already expanded, so a template needs no
+// separate substitution pass and a remote source no separate download.
+func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (isConda bool, isContainer bool, err error) {
 	// Channel-annotated packages (e.g. "bioconda::star") always go through conda.
 	if base.condaChannelPkg != "" {
 		return true, false, nil
 	}
 
-	// Check if already has a build source
+	// An explicit build source (a path or docker:// URI) bypasses resolution.
 	if base.buildSource != "" {
-		// Determine type from extension
-		isContainer = strings.HasSuffix(base.buildSource, ".def")
+		return false, strings.HasSuffix(base.buildSource, ".def"), nil
+	}
+
+	cat, err := config.OpenCatalog(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	match, found, err := cat.Lookup(ctx, base.nameVersion)
+	if err != nil {
+		return false, false, err
+	}
+	// After the lookup, which is what populates Err: an unreachable source is
+	// skipped, and the next one — or conda — answers in its place.
+	config.WarnUnreachableSources(ctx, cat)
+	if !found {
+		slog.Default().Debug("no recipe found, using conda", "name", base.nameVersion)
+		return true, false, nil
+	}
+	isContainer = strings.HasSuffix(match.Entry.Path, ".def")
+	base.vars = match.Vars
+	base.kind = match.Entry.Kind
+
+	// Nothing to materialize for an overlay that already exists and is not
+	// being updated — dependency walks reach installed nodes routinely.
+	if !base.update && base.IsInstalled() {
+		slog.Default().Debug("target already exists, skipping recipe fetch", "name", base.nameVersion)
 		return false, isContainer, nil
 	}
 
-	// Look for build script (local first, then remote)
-	info, found := FindBuildScript(base.nameVersion)
-	if !found {
-		// No build script found, use conda
-		slog.Default().Debug("no build script found, using conda", "name", base.nameVersion)
-		return true, false, nil
-	}
-
-	// If remote, skip download when target already exists and we're not updating.
-	// This avoids unnecessary network requests for installed overlays (e.g. dep
-	// graph traversal where bg.update is propagated to already-installed nodes).
-	if info.IsRemote && !base.update && base.IsInstalled() {
-		slog.Default().Debug("skipping remote download, target already exists", "name", base.nameVersion)
-		return false, info.IsContainer, nil
-	}
-
-	// If remote, download to tmp directory
-	if info.IsRemote {
-		dlDir := tmpDir
-		if info.IsContainer {
-			// Def builds use GetWritableTmpDir; download there so buildSource
-			// and tmpOverlayPath (SIF) are in the same directory.
-			dlDir = resolveTmpDirForDef()
-		}
-		localPath, err := DownloadRemoteScript(info, dlDir)
-		if err != nil {
-			return false, false, fmt.Errorf("failed to download remote build script: %w", err)
-		}
-		base.buildSource = localPath
-		base.isRemote = true
-		base.prebuiltLink = info.PrebuiltLink
-		slog.Default().Debug("downloaded remote build script", "path", localPath)
-	} else {
-		base.buildSource = info.Path
-		slog.Default().Debug("using local build script", "path", info.Path)
-	}
-
-	// Pre-populate dependencies from metadata when available (avoids re-parsing the script file).
-	// nil means "not set" (local script or metadata without deps field); []string{} means "no deps".
-	if info.Deps != nil {
-		base.dependencies = info.Deps
-	}
-
-	// Capture placeholder variable values for PL scripts.
-	if vars := info.CurrentVars(); len(vars) > 0 {
-		base.vars = vars
-	}
-
-	return false, info.IsContainer, nil
-}
-
-// substituteTemplateFile reads srcPath, replaces all {key} tokens using vars,
-// comments out the #PL:/#TARGET: template directives, writes the result to a
-// temp file in tmpDir, and returns the temp path. The caller is responsible for
-// removing the temp file when done.
-//
-// The directives are neutralized so that once this substituted script is
-// embedded in the overlay, exporting and rebuilding it does not re-detect it as
-// a template (which would fail — its {placeholders} are already resolved).
-func substituteTemplateFile(srcPath string, vars map[string]string, tmpDir string) (string, error) {
-	data, err := os.ReadFile(srcPath)
+	recipe, err := cat.Open(ctx, base.nameVersion, base.vars)
 	if err != nil {
-		return "", fmt.Errorf("failed to read template file: %w", err)
+		return false, false, fmt.Errorf("failed to read recipe for %s: %w", base.nameVersion, err)
 	}
-	content := deTemplateDirectives(utils.InterpolateVars(string(data), vars))
-	tmpPath := filepath.Join(tmpDir, "pl-"+filepath.Base(srcPath))
-	if err := os.WriteFile(tmpPath, []byte(content), utils.PermFile); err != nil {
-		return "", fmt.Errorf("failed to write substituted file: %w", err)
+
+	dir := tmpDir
+	if isContainer {
+		// Def builds keep buildSource and the SIF in one directory.
+		dir = resolveTmpDirForDef()
 	}
-	return tmpPath, nil
+	path, err := writeRecipeFile(recipe, dir, isContainer)
+	if err != nil {
+		return false, false, err
+	}
+	base.buildSource = path
+	base.tempSource = true
+	base.dependencies = recipe.Deps
+	base.inputs = recipe.Inputs
+	slog.Default().Debug("materialized recipe", "path", path, "source", match.Source.Name)
+
+	return false, isContainer, nil
 }
 
-// deTemplateDirectives comments out the #PL:/#TARGET: header lines (#PL: -> ##PL:)
-// so the substituted script is no longer recognized as a template.
-func deTemplateDirectives(content string) string {
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		if strings.HasPrefix(line, "#PL:") || strings.HasPrefix(line, "#TARGET:") {
-			lines[i] = "#" + line
-		}
+// writeRecipeFile writes an expanded recipe to a temp file the build can run.
+func writeRecipeFile(recipe *catalog.Recipe, dir string, isContainer bool) (string, error) {
+	if err := utils.MkdirAllShared(dir); err != nil {
+		return "", fmt.Errorf("failed to create tmp directory: %w", err)
 	}
-	return strings.Join(lines, "\n")
+	name := "cnt--" + strings.ReplaceAll(recipe.Name, "/", "--")
+	if isContainer {
+		name += ".def"
+	} else {
+		name += ".sh"
+	}
+	path := filepath.Join(dir, name)
+
+	file, err := utils.CreateFileWritable(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to create %s: %w", path, err)
+	}
+	defer file.Close()
+	if _, err := file.Write(recipe.Text); err != nil {
+		return "", fmt.Errorf("failed to write %s: %w", path, err)
+	}
+	utils.ShareWithParentGroup(path)
+	return path, nil
 }

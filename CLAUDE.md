@@ -31,29 +31,40 @@ go test -v ./internal/scheduler/...                       # Package tests
 - `server/` - Dashboard HTTP server (web UI + REST API, SSE log streaming)
 - `utils/` - Console output (`Print*`), file ops, downloads, script parsing
 
-## Build Scripts
+## Recipes
 
-Build scripts live in the [`cnt-scripts`](https://github.com/Justype/cnt-scripts) repo (fetched remotely via `scripts_link` config, or auto-detected from a local `cnt-scripts/` clone next to the binary). Three categories:
+Recipes live in collections listed in the ordered `sources` config (first match wins, like `PATH`);
+`catalog/` resolves a name to a recipe and walks its dependency graph. A recipe is `<name>/<version>`,
+where the name may carry slashes (`grch38/genome/gencode` is name `grch38/genome`, version `gencode`).
+Four kinds: `base` (produces the container root), `os`, `app` (contributes to `PATH`), `data`.
 
-- **OS**: `<distro>/<name>` (e.g., `ubuntu24/build-essential`) — Apptainer definition files for distro system tools
-- **Apps**: `<name>/<version>` (e.g., `cellranger/9.0.1`) — Apps that not available as conda packages, or specific versions not in conda
-- **Data**: `<assembly|project>/<datatype>/<version>` (e.g., `grch38/star/2.7.11b/gencode47-101`) — any data, including genome reference indexes
+A recipe runs top to bottom as `bash -euo pipefail <recipe>` — no `install()` wrapper.
+Available vars: `$CNT_NAME`, `$CNT_VERSION`, `$CNT_KIND`, `$CNT_PREFIX` (where the payload goes),
+`$CNT_TMP` (also `$TMPDIR`), plus the scheduler's normalized `$NCPUS`, `$MEM`, `$MEM_GB`.
 
-Must define an `install()` function. Available vars: `$NCPUS`, `$target_dir`, `$tmp_dir`, `$app_name`, `$version`.
+`#DEP:` is a **build** dependency only — what must be mounted while the recipe runs. It is not
+recorded in the artifact and never re-expanded at run time; there is no runtime dependency tree.
+So an `app` is self-contained (a conda env or a prebuilt package carrying its own libraries), and
+`data` is the kind that normally has deps, since producing an index needs the producing tool.
 
-Metadata headers: `#DEP:name/version` or `#DEP:name/version>=min` (deps; preferred version is implicit upper bound, so valid range is `[min, version]`), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params), `#ENV:VAR=$app_root` (env vars), `#INTERACTIVE:prompt` (user input).
+Metadata headers: `#DEP:name/version` or `#DEP:name/version>=min` (build deps; preferred version is
+implicit upper bound, so valid range is `[min, version]`), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params),
+`#ENV:VAR={prefix}/sub  ## note` (env vars; `{prefix}` is filled with the mount root at load time),
+`#INPUT:prompt` (user input, fed on stdin in order — read with `IFS= read -r VAR`), `#PH:`/`#TARGET:` (templates),
+`#WHATIS:`, `#URL:`, `#TYPE:`.
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 
 ## Data Directory Search Order
 
-1. `extra_image_dirs` / `extra_build_dirs` / `extra_helper_dirs` (config keys)
+1. `extra_image_dirs` / `extra_helper_dirs` (config keys)
 2. `CNT_EXTRA_ROOT` (group/lab root, env only)
 3. `CNT_ROOT` / `<install-dir>/` (app-root, auto-detected)
 4. `$SCRATCH/condatainer/`
 5. `~/.local/share/condatainer/`
 
-Each contains `images/`, `build-scripts/`, `helper-scripts/`. Writes go to first writable dir.
+Each contains `images/` and `helper-scripts/`. Writes go to first writable dir.
+Recipes are not searched here — they come from the ordered `sources` list.
 
 ## Helper Scripts
 

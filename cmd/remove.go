@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
@@ -114,7 +115,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build search query (exact match for single term; exact-first for multiple)
-	distroLower := strings.ToLower(config.Global.DefaultDistro)
+	distroLower := strings.ToLower(config.ResolvedBase())
 	distroPrefix := distroLower + "/"
 	installedLower := make(map[string]bool, len(installedOverlays))
 	for name := range installedOverlays {
@@ -196,7 +197,7 @@ func performDelete(cmd *cobra.Command, names []string, showListing ...bool) erro
 	seen := make(map[string]bool)
 	var valid []string
 	for _, name := range names {
-		norm := utils.NormalizeNameVersion(name)
+		norm := catalog.Normalize(name)
 		if seen[norm] {
 			continue
 		}

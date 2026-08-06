@@ -4,11 +4,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -20,24 +20,6 @@ const ExitCodeJobsSubmitted = 3
 
 const VERSION = "1.4.1"
 const GitHubRepo = "Justype/condatainer"
-const GITHUB_REPO = GitHubRepo // Exported constant for compatibility
-const DEFAULT_DISTRO = "ubuntu24"
-
-func GetAvailableDistros() []string {
-	return []string{
-		"ubuntu20",
-		"ubuntu22",
-		"ubuntu24",
-	}
-}
-
-// IsValidDistro returns true if the provided name matches one of the known distro slugs.
-func IsValidDistro(distro string) bool {
-	return slices.Contains(GetAvailableDistros(), distro)
-}
-
-// DefaultScriptsLink is the base URL for remote build scripts and helpers
-const DefaultScriptsLink = "https://raw.githubusercontent.com/Justype/cnt-scripts/main"
 
 // BuildConfig holds default settings for build operations
 type BuildConfig struct {
@@ -66,14 +48,12 @@ type Config struct {
 	ApptainerBin string
 	SchedulerBin string // Optional: path to sbatch/scheduler binary (auto-detected if empty)
 
-	// Base OS overlay slug (e.g. "ubuntu24"). Determines the base image filename:
-	// "ubuntu24" → "ubuntu24--base_image.sif". Defaults to "ubuntu24".
-	DefaultDistro string
+	// Recipe collections, in order. Earlier entries shadow later ones.
+	Sources []catalog.Spec
 
-	// Remote repository settings
-	ScriptsLink  string   // Base remote URL (scripts_link config key; lowest priority)
-	ScriptsLinks []string // Effective ordered list: [extra_scripts_links..., scripts_link]
-	PreferRemote bool     // Remote build scripts take precedence over local
+	// Base recipe for the container root, e.g. "ubuntu24" -> recipes/ubuntu24/base.def.
+	// Empty falls back to the first source declaring a default_base.
+	Base string
 
 	// Dependency parsing
 	ParseModuleLoad bool // Parse "module load" / "ml" lines as dependencies (default: false)
@@ -182,13 +162,10 @@ func LoadDefaults(executablePath string) {
 		ProgramDir: programDir,
 		LogsDir:    filepath.Join(os.Getenv("HOME"), "logs"),
 
-		ApptainerBin:  detectApptainerBin(),
-		SchedulerBin:  "", // Auto-detect scheduler binary (empty = search PATH)
-		DefaultDistro: DEFAULT_DISTRO,
+		ApptainerBin: detectApptainerBin(),
+		SchedulerBin: "", // Auto-detect scheduler binary (empty = search PATH)
 
-		ScriptsLink:      DefaultScriptsLink,
-		ScriptsLinks:     []string{DefaultScriptsLink}, // overwritten in LoadFromViper
-		SchedulerTimeout: 0,                            // no timeout by default
+		SchedulerTimeout: 0, // no timeout by default
 		Notification:     "web",
 		MetadataCacheTTL: 7 * 24 * time.Hour, // 1 week
 
@@ -261,10 +238,15 @@ func detectApptainerBin() string {
 	return ""
 }
 
-// BaseImageSifName returns the expected .sif filename for the configured DefaultDistro.
-// e.g. "ubuntu24" → "ubuntu24--base_image.sif"
+// BaseImageSifName returns the expected .sif filename for the configured base,
+// e.g. "ubuntu24" → "ubuntu24--base.sif". Empty when no base is configured, so
+// callers do not go looking for a file called ".sif".
 func BaseImageSifName() string {
-	return Global.DefaultDistro + "--base_image.sif"
+	name := BaseRecipeName()
+	if name == "" {
+		return ""
+	}
+	return strings.ReplaceAll(name, "/", "--") + ".sif"
 }
 
 // GetBaseImage returns the path to base_image.sif, searching all image directories.

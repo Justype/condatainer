@@ -7,17 +7,15 @@ import (
 	"strings"
 	"time"
 
-	"log/slog"
-
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/scheduler"
-	"github.com/Justype/condatainer/internal/utils"
 )
 
-// BuildGraph manages dependency resolution and build ordering
-// It expands BuildObject items to include all transitive dependencies,
-// detects cycles, produces a topologically-sorted order (dependencies before dependents),
+// BuildGraph turns a solved dependency plan into build work.
+// The catalog resolves the graph and detects cycles; this type creates a
+// BuildObject per missing node, in dependency-first order,
 // and separates items into two ordered lists:
 //   - localBuilds: BuildObjects without scheduler requirements (build locally)
 //   - schedulerBuilds: BuildObjects that require scheduler submission
@@ -66,89 +64,90 @@ func NewBuildGraph(ctx context.Context, buildObjects []*BuildObject, imagesDir, 
 	}
 
 	// Seed graph with provided build objects
+	roots := make([]string, 0, len(buildObjects))
+	hidden := map[string]bool{}
 	for _, obj := range buildObjects {
 		bg.graph[obj.NameVersion()] = obj
-		if !update && obj.IsInstalled() {
+		roots = append(roots, obj.NameVersion())
+		if update {
+			// A root being rebuilt must resolve as missing, or the walk stops
+			// at it and never reaches what it needs.
+			hidden[obj.NameVersion()] = true
+		} else if obj.IsInstalled() {
 			log.Info("overlay already installed, skipping", "name", obj.NameVersion())
 		}
 	}
 
-	// Topologically sort the graph
-	if err := bg.topologicalSort(); err != nil {
+	if err := bg.resolvePlan(ctx, roots, hidden); err != nil {
 		return nil, err
 	}
 
 	return bg, nil
 }
 
-// topologicalSort performs topological sort with cycle detection
-// and separates builds into local and sbatch lists
-func (bg *BuildGraph) topologicalSort() error {
-	visiting := make(map[string]bool)
-	visited := make(map[string]bool)
-	order := []string{}
-
-	var visit func(string) error
-	visit = func(node string) error {
-		if visited[node] {
-			return nil
-		}
-		if visiting[node] {
-			return fmt.Errorf("circular dependency detected involving '%s'", node)
-		}
-
-		visiting[node] = true
-		nodeMeta, exists := bg.graph[node]
-		if !exists {
-			// Expand on-the-fly if needed
-			newObj, err := NewBuildObject(bg.ctx, node, false, bg.imagesDir, bg.tmpDir, bg.update)
-			if err != nil {
-				delete(visiting, node)
-				return fmt.Errorf("failed to create BuildObject for dependency '%s': %w", node, err)
-			}
-			bg.graph[node] = newObj
-			nodeMeta = newObj
-		}
-
-		// Visit dependencies first — strip any version constraint before graph lookup.
-		for _, rawDep := range nodeMeta.Dependencies() {
-			dep, op, minVer := utils.SplitDepConstraint(rawDep)
-			// If a constraint is present and an installed version already satisfies it,
-			// skip this dep entirely — the overlay resolver will pick the best installed version.
-			if op != "" && constraintAlreadySatisfied(dep, op, minVer) {
-				slog.Default().Debug("skipping dep, constraint satisfied by installed version", "dep", dep, "op", op, "minVer", minVer)
+// installedVersions reports the versions of name already built, as the Have the
+// catalog resolver asks with. Names carry slashes, so the version is the last
+// segment and nothing deeper counts.
+//
+// hidden drops entries the graph intends to rebuild, which is how --update
+// reaches past a root that is technically installed.
+func installedVersions(hidden map[string]bool) catalog.Have {
+	return func(name string) []string {
+		prefix := name + "/"
+		var out []string
+		for key := range getInstalledOverlays() {
+			version, ok := strings.CutPrefix(key, prefix)
+			if !ok || version == "" || strings.Contains(version, "/") || hidden[key] {
 				continue
 			}
-			if err := visit(dep); err != nil {
-				return err
-			}
+			out = append(out, version)
 		}
+		return out
+	}
+}
 
-		delete(visiting, node)
-		visited[node] = true
-		order = append(order, node)
-		return nil
+// resolvePlan expands the seeded roots into a dependency-first build order and
+// splits it into local and scheduler work.
+//
+// Resolution runs over the catalog index alone, so a cycle or an unresolvable
+// name fails before any recipe is fetched or any temp file written, and an
+// already-installed dependency costs a map lookup instead of a build object.
+func (bg *BuildGraph) resolvePlan(ctx context.Context, roots []string, hidden map[string]bool) error {
+	cat, err := config.OpenCatalog(ctx)
+	if err != nil {
+		return err
+	}
+	plan, err := cat.Resolve(ctx, roots, installedVersions(hidden))
+	if err != nil {
+		return err
 	}
 
-	// Visit all nodes in graph
-	for node := range bg.graph {
-		if !visited[node] {
-			if err := visit(node); err != nil {
-				return err
+	order := make([]*BuildObject, 0, len(plan.Order))
+	for _, node := range plan.Order {
+		name := node.Name()
+		obj, seeded := bg.graph[name]
+		if !seeded {
+			// Installed and not a root: nothing to build. It is mounted into
+			// the dependent's build, which is the only thing a #DEP: does.
+			if node.Installed != "" {
+				continue
 			}
+			obj, err = NewBuildObject(ctx, name, false, bg.imagesDir, bg.tmpDir, false)
+			if err != nil {
+				return fmt.Errorf("failed to create BuildObject for dependency '%s': %w", name, err)
+			}
+			bg.graph[name] = obj
 		}
+		order = append(order, obj)
 	}
 
-	// Separate into local and scheduler builds based on sorted order
-	for _, nameVersion := range order {
-		meta := bg.graph[nameVersion]
-		if bg.submitJobs && bg.scheduler != nil && meta.RequiresScheduler() {
-			bg.schedulerBuilds = append(bg.schedulerBuilds, meta)
+	for _, obj := range order {
+		if bg.submitJobs && bg.scheduler != nil && obj.RequiresScheduler() {
+			bg.schedulerBuilds = append(bg.schedulerBuilds, obj)
 		} else {
-			bg.localBuilds = append(bg.localBuilds, meta)
+			bg.localBuilds = append(bg.localBuilds, obj)
 		}
 	}
-
 	return nil
 }
 
@@ -215,9 +214,13 @@ func (bg *BuildGraph) runSchedulerStep() error {
 		// Collect dependency job IDs
 		depIDs := []string{}
 		for _, rawDep := range meta.Dependencies() {
-			dep, op, minVer := utils.SplitDepConstraint(rawDep)
-			// If a constraint is present and already satisfied, skip — same logic as topologicalSort
-			if op != "" && constraintAlreadySatisfied(dep, op, minVer) {
+			dep := rawDep
+			if parsed, err := catalog.ParseDep(rawDep); err == nil {
+				dep = parsed.NameVersion()
+			}
+			// Absent from the graph means the resolver satisfied it with an
+			// installed version, so there is no job to wait on.
+			if _, inGraph := bg.graph[dep]; !inGraph {
 				continue
 			}
 			if jobID, exists := bg.jobIDs[dep]; exists {
@@ -244,28 +247,6 @@ func (bg *BuildGraph) runSchedulerStep() error {
 		bg.jobIDs[meta.NameVersion()] = jobID
 	}
 	return nil
-}
-
-// constraintAlreadySatisfied returns true if any installed overlay for the same package
-// name satisfies op+minVer and does not exceed the preferred version in dep.
-// dep is the preferred nameVersion, e.g. "samtools/1.22.1".
-func constraintAlreadySatisfied(dep, op, minVer string) bool {
-	name := dep
-	preferredVer := ""
-	if idx := strings.LastIndex(dep, "/"); idx >= 0 {
-		name = dep[:idx]
-		preferredVer = dep[idx+1:]
-	}
-	prefix := name + "/"
-	for key := range getInstalledOverlays() {
-		if strings.HasPrefix(key, prefix) {
-			ver := strings.TrimPrefix(key, prefix)
-			if utils.DepSatisfiedByVersion(ver, op, minVer, preferredVer) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // submitJob creates and submits a scheduler job for the build
@@ -348,18 +329,12 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 }
 
 // buildSchedulerCreateCommand returns the condatainer create command for scheduler jobs,
-// propagating the --remote, --no-prebuilt and --update flags if active.
+// propagating the --update flag if active.
 // If interactiveInputs is non-empty, the inputs are embedded as a heredoc so the
 // scheduler node does not need a TTY.
 func buildSchedulerCreateCommand(nameVersion string, update bool, interactiveInputs []string) string {
 	var cmd strings.Builder
 	cmd.WriteString("condatainer create")
-	if PreferRemote {
-		cmd.WriteString(" --remote")
-	}
-	if SkipPrebuilt {
-		cmd.WriteString(" --no-prebuilt")
-	}
 	if update {
 		cmd.WriteString(" --update")
 	}

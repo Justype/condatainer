@@ -7,153 +7,21 @@ import (
 	"testing"
 )
 
-func TestGetEnvDictFromBuildScript(t *testing.T) {
-	// Create a temporary build script
-	tmpDir := t.TempDir()
-	scriptPath := filepath.Join(tmpDir, "test.sh")
-
-	scriptContent := `#!/bin/bash
-#ENV:STAR_INDEX_DIR=$app_root/star
-#ENVNOTE:STAR_INDEX_DIR STAR index directory
-#ENV:GENOME_FASTA=$app_root/fasta/genome.fa
-#ENVNOTE:GENOME_FASTA genome fasta file
-#ENV:NO_NOTE=$app_root/data
-#ENV:INVALID_LINE
-echo "Build script"
-`
-
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o644); err != nil {
-		t.Fatalf("Failed to create test script: %v", err)
-	}
-
-	// Test parsing
-	envDict, err := GetEnvDictFromBuildScript(scriptPath)
-	if err != nil {
-		t.Fatalf("GetEnvDictFromBuildScript failed: %v", err)
-	}
-
-	// Verify results
-	expectedCount := 3 // STAR_INDEX_DIR, GENOME_FASTA, NO_NOTE (INVALID_LINE should be skipped)
-	if len(envDict) != expectedCount {
-		t.Errorf("Expected %d env entries, got %d", expectedCount, len(envDict))
-	}
-
-	// Check STAR_INDEX_DIR
-	if entry, ok := envDict["STAR_INDEX_DIR"]; !ok {
-		t.Error("STAR_INDEX_DIR not found in envDict")
-	} else {
-		if entry.Value != "$app_root/star" {
-			t.Errorf("STAR_INDEX_DIR value = %q, want %q", entry.Value, "$app_root/star")
-		}
-		if entry.Note != "STAR_INDEX_DIR STAR index directory" {
-			t.Errorf("STAR_INDEX_DIR note = %q, want %q", entry.Note, "STAR_INDEX_DIR STAR index directory")
-		}
-	}
-
-	// Check GENOME_FASTA
-	if entry, ok := envDict["GENOME_FASTA"]; !ok {
-		t.Error("GENOME_FASTA not found in envDict")
-	} else {
-		if entry.Value != "$app_root/fasta/genome.fa" {
-			t.Errorf("GENOME_FASTA value = %q, want %q", entry.Value, "$app_root/fasta/genome.fa")
-		}
-		if entry.Note != "GENOME_FASTA genome fasta file" {
-			t.Errorf("GENOME_FASTA note = %q, want %q", entry.Note, "GENOME_FASTA genome fasta file")
-		}
-	}
-
-	// Check NO_NOTE
-	if entry, ok := envDict["NO_NOTE"]; !ok {
-		t.Error("NO_NOTE not found in envDict")
-	} else {
-		if entry.Value != "$app_root/data" {
-			t.Errorf("NO_NOTE value = %q, want %q", entry.Value, "$app_root/data")
-		}
-		if entry.Note != "" {
-			t.Errorf("NO_NOTE note = %q, want empty string", entry.Note)
-		}
-	}
-}
-
-func TestGetEnvDictFromBuildScript_WithComments(t *testing.T) {
-	tmpDir := t.TempDir()
-	scriptPath := filepath.Join(tmpDir, "test_comments.sh")
-
-	scriptContent := `#!/bin/bash
-#ENV:STAR_INDEX_DIR=$app_root/star  # STAR index directory
-#ENV:GENOME_FASTA=$app_root/fasta/genome.fa # genome fasta file
-#ENV:NO_COMMENT=$app_root/data
-#ENV:HASH_NO_SPACE=$app_root/test#comment without space
-echo "Build script"
-`
-
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o644); err != nil {
-		t.Fatalf("Failed to create test script: %v", err)
-	}
-
-	envDict, err := GetEnvDictFromBuildScript(scriptPath)
-	if err != nil {
-		t.Fatalf("GetEnvDictFromBuildScript failed: %v", err)
-	}
-
-	// Verify results - comments should be stripped
-	expectedCount := 4
-	if len(envDict) != expectedCount {
-		t.Errorf("Expected %d env entries, got %d", expectedCount, len(envDict))
-	}
-
-	// Check STAR_INDEX_DIR - comment should be stripped
-	if entry, ok := envDict["STAR_INDEX_DIR"]; !ok {
-		t.Error("STAR_INDEX_DIR not found in envDict")
-	} else {
-		if entry.Value != "$app_root/star" {
-			t.Errorf("STAR_INDEX_DIR value = %q, want %q (comment should be stripped)", entry.Value, "$app_root/star")
-		}
-	}
-
-	// Check GENOME_FASTA - comment should be stripped
-	if entry, ok := envDict["GENOME_FASTA"]; !ok {
-		t.Error("GENOME_FASTA not found in envDict")
-	} else {
-		if entry.Value != "$app_root/fasta/genome.fa" {
-			t.Errorf("GENOME_FASTA value = %q, want %q (comment should be stripped)", entry.Value, "$app_root/fasta/genome.fa")
-		}
-	}
-
-	// Check NO_COMMENT - should work as before
-	if entry, ok := envDict["NO_COMMENT"]; !ok {
-		t.Error("NO_COMMENT not found in envDict")
-	} else {
-		if entry.Value != "$app_root/data" {
-			t.Errorf("NO_COMMENT value = %q, want %q", entry.Value, "$app_root/data")
-		}
-	}
-
-	// Check HASH_NO_SPACE - comment should be stripped even without space
-	if entry, ok := envDict["HASH_NO_SPACE"]; !ok {
-		t.Error("HASH_NO_SPACE not found in envDict")
-	} else {
-		if entry.Value != "$app_root/test" {
-			t.Errorf("HASH_NO_SPACE value = %q, want %q (comment should be stripped)", entry.Value, "$app_root/test")
-		}
-	}
-}
-
 func TestSaveEnvFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	overlayPath := filepath.Join(tmpDir, "test.sqf")
 
 	envDict := map[string]EnvEntry{
 		"STAR_INDEX_DIR": {
-			Value: "$app_root/star",
+			Value: "{prefix}/star",
 			Note:  "STAR index directory",
 		},
 		"GENOME_FASTA": {
-			Value: "$app_root/fasta/genome.fa",
+			Value: "{prefix}/fasta/genome.fa",
 			Note:  "genome fasta file",
 		},
 		"NO_NOTE": {
-			Value: "$app_root/data",
+			Value: "{prefix}/data",
 			Note:  "",
 		},
 	}
@@ -178,9 +46,9 @@ func TestSaveEnvFile(t *testing.T) {
 
 	contentStr := string(content)
 
-	// Check that $app_root was replaced
-	if contains(contentStr, "$app_root") {
-		t.Error("$app_root placeholder was not replaced in ENV file")
+	// Check that {prefix} was replaced
+	if contains(contentStr, "{prefix}") {
+		t.Error("{prefix} placeholder was not replaced in ENV file")
 	}
 
 	// Check for expected content
@@ -216,7 +84,7 @@ func TestSaveEnvFileWhatis(t *testing.T) {
 
 	t.Run("whatis with env", func(t *testing.T) {
 		overlayPath := filepath.Join(tmpDir, "whatis_env.sqf")
-		envDict := map[string]EnvEntry{"BIN": {Value: "$app_root/bin", Note: "binary dir"}}
+		envDict := map[string]EnvEntry{"BIN": {Value: "{prefix}/bin", Note: "binary dir"}}
 		err := SaveEnvFile(overlayPath, envDict, "tool/1.0", "My Tool")
 		if err != nil {
 			t.Fatalf("SaveEnvFile failed: %v", err)

@@ -23,7 +23,6 @@ import (
 // Write operations go to the first writable path in the same order.
 type DataPaths struct {
 	ImagesDirs        []string // Search paths for images
-	BuildScriptsDirs  []string // Search paths for build scripts
 	HelperScriptsDirs []string // Search paths for helper scripts
 }
 
@@ -142,17 +141,9 @@ func GetExtraRootDir() string {
 // CNT_EXTRA_IMAGE_DIRS uses "|" as separator; entries support ":ro"/":rw" markers.
 func GetExtraImageDirs() []string { return getEnvSlice("extra_image_dirs", splitPipe, true) }
 
-// GetExtraBuildDirs returns explicit extra build-scripts directories from config or environment.
-// CNT_EXTRA_BUILD_DIRS supports "|" and ":" as separators ("|" takes precedence).
-func GetExtraBuildDirs() []string { return getEnvSlice("extra_build_dirs", splitPipeOrColon, true) }
-
 // GetExtraHelperDirs returns explicit extra helper-scripts directories from config or environment.
 // CNT_EXTRA_HELPER_DIRS uses "|" as separator; entries support ":ro"/":rw" markers.
 func GetExtraHelperDirs() []string { return getEnvSlice("extra_helper_dirs", splitPipe, true) }
-
-// GetExtraScriptsLinks returns extra remote build script source URLs.
-// CNT_EXTRA_SCRIPTS_LINKS uses "|" as separator (URLs contain "://").
-func GetExtraScriptsLinks() []string { return getEnvSlice("extra_scripts_links", splitPipe, true) }
 
 // =============================================================================
 // Dir Getters (single path, no IO)
@@ -283,6 +274,7 @@ func isNonRootParent(dir string) bool {
 		"/usr",
 		"/usr/local",
 		"/opt",
+		"/",
 	}
 	return slices.Contains(excludedParents, dir)
 }
@@ -296,8 +288,7 @@ func isNonRootParent(dir string) bool {
 func InitDataPaths() {
 	GlobalDataPaths = DataPaths{
 		ImagesDirs:        buildImageSearchPaths(),
-		BuildScriptsDirs:  buildScriptSearchPaths("build-scripts"),
-		HelperScriptsDirs: buildScriptSearchPaths("helper-scripts"),
+		HelperScriptsDirs: helperScriptSearchPaths(),
 	}
 }
 
@@ -346,9 +337,13 @@ func buildImageSearchPaths() []string {
 	return paths
 }
 
-// buildScriptSearchPaths builds the search paths for scripts (build-scripts or helper-scripts).
-// Priority: extra_build_dirs (build-scripts only) → CNT_EXTRA_ROOT → root → scratch → user
-func buildScriptSearchPaths(subdir string) []string {
+// helperScriptSearchPaths builds the search paths for helper scripts.
+// Priority: extra_helper_dirs → CNT_EXTRA_ROOT → root → scratch → user
+//
+// Recipes have no equivalent: they come from the catalog's `sources`, not from a
+// data directory.
+func helperScriptSearchPaths() []string {
+	const subdir = "helper-scripts"
 	var paths []string
 	seen := make(map[string]bool)
 
@@ -367,26 +362,15 @@ func buildScriptSearchPaths(subdir string) []string {
 		}
 	}
 
-	switch subdir {
-	case "build-scripts":
-		for _, path := range GetExtraBuildDirs() {
-			addPath(path)
-		}
-	case "helper-scripts":
-		for _, entry := range GetExtraHelperDirs() {
-			path, _ := ParseDirEntry(entry)
-			addPath(path)
-		}
+	for _, entry := range GetExtraHelperDirs() {
+		path, _ := ParseDirEntry(entry)
+		addPath(path)
 	}
 	if extraRoot := GetExtraRootDir(); extraRoot != "" {
 		addPath(filepath.Join(extraRoot, subdir))
 	}
 	if rootDir := GetRootDir(); rootDir != "" {
 		addPath(filepath.Join(rootDir, subdir))
-		// Auto-detect cnt-scripts subdir for build-scripts (split-repo layout)
-		if subdir == "build-scripts" && DirExists(filepath.Join(rootDir, "cnt-scripts")) {
-			addPath(filepath.Join(rootDir, "cnt-scripts", subdir))
-		}
 	}
 	if scratchDir := GetScratchDataDir(); scratchDir != "" {
 		addPath(filepath.Join(scratchDir, subdir))
@@ -470,14 +454,6 @@ func GetImageSearchPaths() []string {
 	return GlobalDataPaths.ImagesDirs
 }
 
-// GetBuildScriptSearchPaths returns all paths to search for build scripts.
-func GetBuildScriptSearchPaths() []string {
-	if len(GlobalDataPaths.BuildScriptsDirs) == 0 {
-		InitDataPaths()
-	}
-	return GlobalDataPaths.BuildScriptsDirs
-}
-
 // GetHelperScriptSearchPaths returns all paths to search for helper scripts.
 func GetHelperScriptSearchPaths() []string {
 	if len(GlobalDataPaths.HelperScriptsDirs) == 0 {
@@ -532,7 +508,7 @@ func deduplicateWriteDirs(dirs []SearchDir) []SearchDir {
 // firstWritableDir returns the first writable path from the slice.
 // Personal dirs are always created on first use (EnsureWritableDir).
 // Shared dirs are created only if the parent directory already exists — the parent
-// itself is never auto-created, but subdirs (images/, build-scripts/, etc.) are.
+// itself is never auto-created, but subdirs (images/, helper-scripts/) are.
 func firstWritableDir(dirs []SearchDir) string {
 	for _, d := range dirs {
 		if d.Personal {
@@ -658,11 +634,15 @@ func GetWritableCacheDir() (string, error) {
 
 // GetBaseImageWritePath returns the path where a new base image should be written.
 func GetBaseImageWritePath() (string, error) {
+	sifName := BaseImageSifName()
+	if sifName == "" {
+		return "", fmt.Errorf("no base configured: set `base` in config")
+	}
 	dir, err := GetWritableImagesDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, BaseImageSifName()), nil
+	return filepath.Join(dir, sifName), nil
 }
 
 // =============================================================================
@@ -708,6 +688,9 @@ func FindHelperScript(name string) (string, error) {
 // Returns the full path if found, empty string otherwise.
 func FindBaseImage() string {
 	sifName := BaseImageSifName()
+	if sifName == "" {
+		return ""
+	}
 	for _, dir := range GetImageSearchPaths() {
 		if candidate := filepath.Join(dir, sifName); fileExists(candidate) {
 			return candidate

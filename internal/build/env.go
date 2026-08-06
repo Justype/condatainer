@@ -1,9 +1,7 @@
 package build
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 	"strings"
 
 	"log/slog"
@@ -12,84 +10,9 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// env.go provides functionality for reading and managing environment variables
-// from build scripts and dependencies.
-//
-// Key features:
-// - Parse #ENV: and #ENVNOTE: directives from build scripts
-// - Generate PATH environment from dependencies
-// - Collect overlay mount arguments from dependencies
-// - Load .env files from dependency overlays
-// - Save environment variables to .env files for overlays
-//
-// This mirrors the Python version's behavior for dependency and ENV handling.
-
-// GetEnvDictFromBuildScript parses #ENV:KEY=VALUE and #ENVNOTE:KEY description lines from build script.
-// Returns a map of environment variables with their values and notes.
-//
-// Example lines in script:
-//
-//	#ENV:STAR_INDEX_DIR=$app_root/star
-//	#ENVNOTE:STAR_INDEX_DIR STAR index dir
-func GetEnvDictFromBuildScript(scriptPath string) (map[string]EnvEntry, error) {
-	envDict := make(map[string]EnvEntry)
-
-	if !utils.FileExists(scriptPath) {
-		return envDict, fmt.Errorf("build script not found at %s", scriptPath)
-	}
-
-	file, err := os.Open(scriptPath)
-	if err != nil {
-		return envDict, fmt.Errorf("failed to open build script: %w", err)
-	}
-	defer file.Close()
-
-	// Read all lines into memory for lookahead
-	var lines []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		return envDict, fmt.Errorf("failed to read build script: %w", err)
-	}
-
-	// Find all #ENV: lines
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "#ENV:") {
-			continue
-		}
-
-		// Parse KEY=VALUE (strip inline comments)
-		content := utils.StripInlineComment(line[len("#ENV:"):])
-		if !strings.Contains(content, "=") {
-			continue
-		}
-
-		parts := strings.SplitN(content, "=", 2)
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-
-		entry := EnvEntry{
-			Value: value,
-			Note:  "",
-		}
-
-		// Check if the next line is an #ENVNOTE:
-		if i+1 < len(lines) {
-			nextLine := strings.TrimSpace(lines[i+1])
-			if strings.HasPrefix(nextLine, "#ENVNOTE:") {
-				note := strings.TrimSpace(nextLine[len("#ENVNOTE:"):])
-				entry.Note = note
-			}
-		}
-
-		envDict[key] = entry
-	}
-
-	return envDict, nil
-}
+// env.go writes the sidecar .env file and collects overlay mount arguments from
+// dependencies. Recipe #ENV: declarations are read from the embedded build
+// script at load time — see internal/container/env.go.
 
 // EnvEntry holds an environment variable value and its note
 type EnvEntry struct {
@@ -98,7 +21,7 @@ type EnvEntry struct {
 }
 
 // SaveEnvFile saves environment variables to a .env file next to the overlay.
-// The $app_root placeholder is replaced with the actual overlay path.
+// The {prefix} placeholder is replaced with the overlay's mount root.
 // whatis is written as a #WHATIS: comment at the top if non-empty.
 func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath string, whatis string) error {
 	if len(envDict) == 0 && whatis == "" {
@@ -119,8 +42,8 @@ func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath s
 	}
 
 	for key, entry := range envDict {
-		// Replace $app_root placeholder with actual path
-		value := strings.ReplaceAll(entry.Value, "$app_root", fmt.Sprintf("/cnt/%s", relativePath))
+		// Replace {prefix} placeholder with actual path
+		value := strings.ReplaceAll(entry.Value, "{prefix}", fmt.Sprintf("/cnt/%s", relativePath))
 
 		// Write KEY=VALUE
 		if _, err := fmt.Fprintf(file, "%s=%s\n", key, value); err != nil {

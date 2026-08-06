@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/scheduler"
@@ -18,7 +19,6 @@ import (
 var (
 	checkAutoInstall     bool
 	checkParseModuleLoad bool
-	checkRemote          bool
 )
 
 var scriptCheckCmd = &cobra.Command{
@@ -44,17 +44,14 @@ func init() {
 	scriptCheckCmd.Flags().BoolVarP(&checkAutoInstall, "auto-install", "a", false, "Automatically install missing dependencies")
 	scriptCheckCmd.Flags().BoolP("install", "i", false, "Alias for --auto-install")
 	scriptCheckCmd.Flags().BoolVar(&checkParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
-	scriptCheckCmd.Flags().BoolVar(&checkRemote, "remote", false, "Remote build scripts take precedence over local")
 	scriptCheckCmd.Flags().BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (build locally)")
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
 	ResolveFlagAlias(cmd, "auto-install", "install")
 
-	build.PreferRemote = checkRemote || config.Global.PreferRemote
-
 	// Resolve all args to concrete script paths and metadata deps
-	scriptPaths, remotePaths, metaDeps, err := resolveAllScriptPaths(args)
+	scriptPaths, remotePaths, metaDeps, err := resolveAllScriptPaths(cmd.Context(), args)
 	if err != nil {
 		return err
 	}
@@ -138,7 +135,7 @@ func collectDeps(scriptPaths []string, preSeededDeps []string, parseModuleLoad b
 
 	// Pre-seed with metadata deps (name/version strings, never overlay paths)
 	for _, dep := range preSeededDeps {
-		key := utils.NormalizeNameVersion(dep)
+		key := catalog.Normalize(dep)
 		if !seen[key] {
 			seen[key] = true
 			deps = append(deps, dep)
@@ -168,7 +165,7 @@ func collectDeps(scriptPaths []string, preSeededDeps []string, parseModuleLoad b
 				}
 				key = dep
 			} else {
-				key = utils.NormalizeNameVersion(dep)
+				key = catalog.Normalize(dep)
 			}
 			if !seen[key] {
 				seen[key] = true
@@ -207,7 +204,7 @@ func checkDeps(deps []string, installedOverlays map[string]string) []string {
 	if len(packages) > 0 {
 		fmt.Fprintf(os.Stdout, "%s\n", utils.StyleTitle("Module Overlays:"))
 		for _, dep := range packages {
-			normalized := utils.NormalizeNameVersion(dep)
+			normalized := catalog.Normalize(dep)
 			if _, ok := installedOverlays[normalized]; ok {
 				fmt.Fprintf(os.Stdout, "  %s %s\n", check, dep)
 			} else {
@@ -372,10 +369,10 @@ func findScriptsInDir(dir string) ([]string, error) {
 
 // resolveAllScriptPaths resolves all positional arguments to concrete file paths.
 // Directories are expanded to all .sh files directly inside them (not recursive).
-// Other args are resolved via resolveScriptPath (file, local build script, or remote download).
-// Returns scriptPaths (deduplicated), remotePaths (to defer-remove), metaDeps (deps from
-// remote metadata, returned directly without downloading the script), and any error.
-func resolveAllScriptPaths(args []string) (scriptPaths []string, remotePaths []string, metaDeps []string, err error) {
+// Other args are resolved via resolveScriptPath (a file, or a recipe).
+// Returns scriptPaths (deduplicated), tempPaths (to defer-remove), metaDeps (deps
+// taken from the index without reading a recipe), and any error.
+func resolveAllScriptPaths(ctx context.Context, args []string) (scriptPaths []string, remotePaths []string, metaDeps []string, err error) {
 	seen := make(map[string]bool)
 
 	for _, arg := range args {
@@ -393,16 +390,16 @@ func resolveAllScriptPaths(args []string) (scriptPaths []string, remotePaths []s
 			continue
 		}
 
-		resolved, isRemote, argMetaDeps, resolveErr := resolveScriptPath(arg)
+		resolved, isTemp, argMetaDeps, resolveErr := resolveScriptPath(ctx, arg)
 		if resolveErr != nil {
 			return nil, remotePaths, metaDeps, resolveErr
 		}
 		if argMetaDeps != nil {
-			// Metadata deps available — no script to download
+			// Indexed deps available — no recipe to read
 			metaDeps = append(metaDeps, argMetaDeps...)
 			continue
 		}
-		if isRemote {
+		if isTemp {
 			remotePaths = append(remotePaths, resolved)
 		}
 		if !seen[resolved] {
@@ -415,42 +412,44 @@ func resolveAllScriptPaths(args []string) (scriptPaths []string, remotePaths []s
 }
 
 // resolveScriptPath resolves a script path or name to an actual file path.
-// Returns (path, isRemote, metaDeps, error).
-// When metaDeps is non-nil, deps were obtained directly from remote metadata —
-// no script was downloaded and path will be empty.
-func resolveScriptPath(scriptPathOrName string) (string, bool, []string, error) {
+// Returns (path, isTemp, metaDeps, error).
+// When metaDeps is non-nil, deps came from the index — no recipe was read and
+// path will be empty.
+func resolveScriptPath(ctx context.Context, scriptPathOrName string) (string, bool, []string, error) {
 	// If it's a file, use it directly
 	if utils.FileExists(scriptPathOrName) {
 		return scriptPathOrName, false, nil, nil
 	}
 
-	// Try to find as build script (respects build.PreferRemote / --remote flag)
-	normalized := utils.NormalizeNameVersion(scriptPathOrName)
-	utils.PrintDebug("[CHECK] Checking for build script %s...", normalized)
+	normalized := catalog.Normalize(scriptPathOrName)
+	utils.PrintDebug("[CHECK] Checking for recipe %s...", normalized)
 
-	info, found := build.FindBuildScript(normalized)
+	cat, err := config.OpenCatalog(ctx)
+	if err != nil {
+		return "", false, nil, err
+	}
+	match, found, err := cat.Lookup(ctx, normalized)
+	if err != nil {
+		return "", false, nil, err
+	}
 	if !found {
-		return "", false, nil, fmt.Errorf("build script for %s not found", normalized)
+		return "", false, nil, fmt.Errorf("no recipe for %s in any source", normalized)
 	}
 
-	if info.IsRemote {
-		// If metadata provides deps, use them directly — no download needed.
-		if info.Deps != nil {
-			utils.PrintDebug("[CHECK] Using metadata deps for %s (no download)", normalized)
-			return "", false, info.Deps, nil
-		}
-
-		utils.PrintMessage("Downloading build script for %s from remote metadata...", normalized)
-		tmpDir := config.GetWritableTmpDir()
-		tempPath, err := build.DownloadRemoteScript(info, tmpDir)
-		if err != nil {
-			return "", false, nil, fmt.Errorf("failed to download build script: %w", err)
-		}
-		utils.PrintMessage("Downloaded build script to %s", utils.StylePath(tempPath))
-		return tempPath, true, nil, nil
+	// The index carries deps, so the common case needs no recipe at all.
+	if match.Entry.Deps != nil {
+		utils.PrintDebug("[CHECK] Using indexed deps for %s (no fetch)", normalized)
+		return "", false, match.Entry.Deps, nil
 	}
 
-	// Local script
-	utils.PrintDebug("[CHECK] Found local build script %s", utils.StylePath(info.Path))
-	return info.Path, false, nil, nil
+	recipe, err := cat.Open(ctx, normalized, nil)
+	if err != nil {
+		return "", false, nil, fmt.Errorf("failed to read recipe: %w", err)
+	}
+	tmpPath := filepath.Join(config.GetWritableTmpDir(), "check--"+strings.ReplaceAll(recipe.Name, "/", "--"))
+	if err := os.WriteFile(tmpPath, recipe.Text, utils.PermFile); err != nil {
+		return "", false, nil, fmt.Errorf("failed to write recipe: %w", err)
+	}
+	utils.PrintDebug("[CHECK] Wrote recipe to %s", utils.StylePath(tmpPath))
+	return tmpPath, true, nil, nil
 }

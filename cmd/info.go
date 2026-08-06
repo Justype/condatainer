@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
 	"github.com/Justype/condatainer/internal/overlay"
@@ -49,7 +50,7 @@ func completeInfoArgs(cmd *cobra.Command, args []string, toComplete string) ([]s
 
 func runInfoOverlay(cmd *cobra.Command, args []string) error {
 	overlayArg := args[0]
-	normalized := utils.NormalizeNameVersion(overlayArg)
+	normalized := catalog.Normalize(overlayArg)
 
 	// Try to find as installed overlay first
 	installedOverlays, err := getInstalledOverlaysMap()
@@ -60,9 +61,9 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 	var overlayPath string
 	if path, ok := installedOverlays[normalized]; ok {
 		overlayPath = path
-	} else if !strings.Contains(normalized, "/") && config.Global.DefaultDistro != "" {
-		// Bare name not found: try <default_distro>/<name> (e.g. "build-essential" → "ubuntu24/build-essential", "base_image" → "ubuntu24/base_image")
-		if path, ok := installedOverlays[config.Global.DefaultDistro+"/"+normalized]; ok {
+	} else if !strings.Contains(normalized, "/") && config.ResolvedBase() != "" {
+		// Bare name not found: try <base>/<name> (e.g. "build-essential" → "ubuntu24/build-essential", "base_image" → "ubuntu24/base_image")
+		if path, ok := installedOverlays[config.ResolvedBase()+"/"+normalized]; ok {
 			overlayPath = path
 		}
 	}

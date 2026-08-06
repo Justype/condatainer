@@ -25,7 +25,7 @@ All three config files are loaded and merged when they exist:
 
 **Scalar keys** (`apptainer_bin`, `default_distro`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
 
-**Directory and source array keys** (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`): **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, app-root, then system. This lets a sysadmin publish shared directories in an app-root or system config without requiring every user to copy them into their own config. See [How Array Settings Merge](#how-array-settings-merge) for a worked example.
+**Directory and source array keys** (`extra_image_dirs`, `extra_helper_dirs`, `extra_scripts_links`): **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, app-root, then system. This lets a sysadmin publish shared directories in an app-root or system config without requiring every user to copy them into their own config. See [How Array Settings Merge](#how-array-settings-merge) for a worked example.
 
 **`channels`**: overwrite — the highest-priority config file that sets it wins (not merged), since channel order controls conda package resolution priority.
 
@@ -88,7 +88,6 @@ With `-l`, a read-only target is an error instead — an explicit layer is never
 |-----|---------|-------------|
 | `logs_dir` | `$HOME/logs` | Directory for build job logs |
 | `extra_image_dirs` | `[]` | Explicit image directories (direct paths). Entries support `:ro` (search-only) or `:rw` (writable, default) markers. |
-| `extra_build_dirs` | `[]` | Explicit build-scripts directories (direct paths). |
 | `extra_helper_dirs` | `[]` | Explicit helper-scripts target directories (direct paths). Entries support `:ro` (search-only) or `:rw` (writable, default) markers. |
 | `extra_image_dirs` entries with `:ro` | — | Search-only image dirs (no writes) |
 
@@ -180,13 +179,12 @@ condatainer config set scheduler_timeout 10
 
 ### Manage Array Config Values
 
-Array keys (`extra_image_dirs`, `extra_build_dirs`, `extra_helper_dirs`, `extra_scripts_links`, `channels`) use dedicated subcommands:
+Array keys (`extra_image_dirs`, `extra_helper_dirs`, `extra_scripts_links`, `channels`) use dedicated subcommands:
 
 ```bash
 # Explicit image/scripts directories
 condatainer config append extra_image_dirs /shared/lab/images:ro   # search-only
 condatainer config append extra_image_dirs /fast/scratch/images    # writable
-condatainer config append extra_build_dirs /shared/lab/scripts
 
 # Prepend (higher priority — checked first)
 condatainer config prepend extra_image_dirs /fast/images
@@ -244,7 +242,6 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_ROOT`                 | Cluster/system root dir (loads `config.yaml` + data dirs; replaces bin/ heuristic) |
 | `CNT_EXTRA_ROOT`           | Group/lab root dir — single path, loads `config.yaml` + data dirs |
 | `CNT_EXTRA_IMAGE_DIRS`     | `extra_image_dirs` (pipe-separated; entries support `:ro`/`:rw`) |
-| `CNT_EXTRA_BUILD_DIRS`     | `extra_build_dirs` (pipe or colon-separated; plain paths) |
 | `CNT_EXTRA_HELPER_DIRS`    | `extra_helper_dirs` (pipe-separated; entries support `:ro`/`:rw`) |
 | `CNT_EXTRA_SCRIPTS_LINKS`  | `extra_scripts_links` (pipe-separated) |
 | `CNT_CHANNELS`             | `channels` (pipe or colon-separated) |
@@ -284,7 +281,7 @@ export CNT_EXTRA_IMAGE_DIRS="/shared/lab/images:ro|/fast/scratch/images"
 
 Scratch and the XDG data directory are **two directories in one `user` layer** — scratch is preferred when `$SCRATCH` is set, and `-l u` selects both.
 
-**Build scripts:** `extra_build_dirs`, then the same layers with `build-scripts/`.
+Recipes have no directory layer — they come from the `sources` list, which is ordered on its own.
 
 **Helper scripts:** `extra_helper_dirs`, then the same layers with `helper-scripts/`.
 
@@ -363,15 +360,11 @@ extra_image_dirs:
   - /shared/lab/images:ro        # shared read-only store
   - /fast/scratch/images         # writable personal store
 
-# Explicit build-scripts directories
-# extra_build_dirs:
-#   - /shared/lab/scripts
-
 # Explicit helper-scripts directories
 # extra_helper_dirs:
 #   - /shared/lab/helpers
 
-# Extra base directories (standard layout: images/, build-scripts/, etc.)
+# Extra base directories (standard layout: images/, helper-scripts/)
 # For a group/lab root with standard layout, set in module file:
 # export CNT_EXTRA_ROOT=/project/shared/condatainer
 
@@ -464,9 +457,9 @@ Priority: **user > group > system > defaults**
   images/                      ← cluster-wide base images
 
 /shared/labA/condatainer/      ← group tier (CNT_EXTRA_ROOT)
-  config.yaml                  ← extra_image_dirs, extra_build_dirs
+  config.yaml                  ← extra_image_dirs, sources
   images/                      ← lab-specific images
-  build-scripts/               ← lab-specific build recipes
+  recipes/                     ← lab-specific recipes (as a `sources` entry)
 
 ~/.config/condatainer/config.yaml   ← user tier (auto-loaded)
 ```
@@ -484,8 +477,6 @@ channels:
 ```yaml
 extra_image_dirs:
   - /shared/labA/condatainer/images
-extra_build_dirs:
-  - /shared/labA/condatainer/build-scripts
 scripts_link: https://raw.githubusercontent.com/LabA/cnt-scripts/main
 ```
 

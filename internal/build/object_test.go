@@ -9,19 +9,45 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/utils"
 )
 
+// writeRecipe creates a one-recipe collection and returns its root.
+func writeRecipe(t *testing.T, nameVersion, content string) string {
+	t.Helper()
+	root := t.TempDir()
+	path := filepath.Join(root, "recipes", filepath.FromSlash(nameVersion))
+	if err := os.MkdirAll(filepath.Dir(path), 0o775); err != nil {
+		t.Fatalf("failed to create recipes dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o664); err != nil {
+		t.Fatalf("failed to write recipe: %v", err)
+	}
+	return root
+}
+
+// setTestSource points the catalog at a single filesystem collection.
+func setTestSource(t *testing.T, root string) {
+	t.Helper()
+	oldSources := config.Global.Sources
+	config.Global.Sources = []catalog.Spec{{Name: "test", Base: root}}
+	config.ResetCatalog()
+	t.Cleanup(func() {
+		config.Global.Sources = oldSources
+		config.ResetCatalog()
+	})
+}
+
 func TestParseScriptMetadata_RequiresTTY(t *testing.T) {
-	// Create a temp script with INTERACTIVE tag
+	// Create a temp script with an #INPUT: declaration
 	tmp, err := os.CreateTemp("", "script-*.sh")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
 	defer os.Remove(tmp.Name())
 
-	content := "#INTERACTIVE:Please enter something\n"
+	content := "#INPUT:Please enter something\n"
 	if _, err := tmp.WriteString(content); err != nil {
 		t.Fatalf("failed to write to temp file: %v", err)
 	}
@@ -42,7 +68,7 @@ func TestParseScriptMetadata_RequiresTTY(t *testing.T) {
 }
 
 func TestParseScriptMetadata_NoInteractive(t *testing.T) {
-	// Create a temp script without INTERACTIVE tag
+	// Create a temp script with no #INPUT: declaration
 	tmp, err := os.CreateTemp("", "script-*.sh")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -138,23 +164,14 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenInstalled(t *testing.T) {
 	imagesDir := t.TempDir()
 	tmpDir := t.TempDir()
 
-	// Create a temporary build-scripts dir and add it to extra build dirs so it is searched first
-	scriptsDir := filepath.Join(t.TempDir(), "build-scripts")
-	t.Setenv("CNT_EXTRA_BUILD_DIRS", scriptsDir)
-
-	// Create a build-scripts entry with an INTERACTIVE prompt to trigger parsing if it were called
-	if err := os.MkdirAll(filepath.Join(scriptsDir, "cellranger"), 0o775); err != nil {
-		t.Fatalf("failed to create scripts dir: %v", err)
-	}
-	scriptPath := filepath.Join(scriptsDir, "cellranger", "8.0.1")
-	scriptContent := "#!/bin/bash\n#INTERACTIVE:Please enter the license key\n"
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o664); err != nil {
-		t.Fatalf("failed to write script: %v", err)
-	}
+	// Point the catalog at a collection providing a recipe with an #INPUT:
+	// prompt, so parsing it would block on a prompt if it were attempted.
+	setTestSource(t, writeRecipe(t, "cellranger/8.0.1",
+		"#!/bin/bash\n#INPUT:Please enter the license key\n"))
 
 	// Create an overlay file in imagesDir to simulate already-installed overlay
 	nameVersion := "cellranger/8.0.1"
-	fileName := strings.ReplaceAll(utils.NormalizeNameVersion(nameVersion), "/", "--") + ".sqf"
+	fileName := strings.ReplaceAll(catalog.Normalize(nameVersion), "/", "--") + ".sqf"
 	overlayPath := filepath.Join(imagesDir, fileName)
 	if err := os.WriteFile(overlayPath, []byte{}, 0o664); err != nil {
 		t.Fatalf("failed to create overlay file: %v", err)
@@ -163,7 +180,7 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenInstalled(t *testing.T) {
 	// Re-init data paths so the test's extra base dir is picked up
 	config.InitDataPaths()
 
-	// Call NewBuildObject: should return without attempting to parse the interactive script
+	// Call NewBuildObject: should return without attempting to parse the recipe inputs
 	bo, err := NewBuildObject(context.Background(), nameVersion, false, imagesDir, tmpDir, false)
 	if err != nil {
 		t.Fatalf("NewBuildObject returned error: %v", err)
@@ -177,19 +194,10 @@ func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 	imagesDir := t.TempDir()
 	tmpDir := t.TempDir()
 
-	// Create a temporary build-scripts dir and add it to extra build dirs so it is searched first
-	scriptsDir := filepath.Join(t.TempDir(), "build-scripts")
-	t.Setenv("CNT_EXTRA_BUILD_DIRS", scriptsDir)
-
-	// Create a build-scripts entry with an INTERACTIVE prompt to trigger parsing if it were called
-	if err := os.MkdirAll(filepath.Join(scriptsDir, "cellranger"), 0o775); err != nil {
-		t.Fatalf("failed to create scripts dir: %v", err)
-	}
-	scriptPath := filepath.Join(scriptsDir, "cellranger", "8.0.1")
-	scriptContent := "#!/bin/bash\n#INTERACTIVE:Please enter the license key\n"
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o664); err != nil {
-		t.Fatalf("failed to write script: %v", err)
-	}
+	// Point the catalog at a collection providing a recipe with an #INPUT:
+	// prompt, so parsing it would block on a prompt if it were attempted.
+	setTestSource(t, writeRecipe(t, "cellranger/8.0.1",
+		"#!/bin/bash\n#INPUT:Please enter the license key\n"))
 
 	// Simulate a build in progress: create a live JSON lock file next to the target overlay.
 	// Use the current process PID and hostname so isBuildLockStale() treats it as active.
@@ -197,7 +205,7 @@ func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 	// in the caller-supplied tmpDir are invisible to it. The build-in-progress guard
 	// checks base.buildLockPath() = targetOverlayPath + ".lock" (lives in imagesDir).
 	nameVersion := "cellranger/8.0.1"
-	sqfName := strings.ReplaceAll(utils.NormalizeNameVersion(nameVersion), "/", "--") + ".sqf"
+	sqfName := strings.ReplaceAll(catalog.Normalize(nameVersion), "/", "--") + ".sqf"
 	lockPath := filepath.Join(imagesDir, sqfName+".lock")
 	liveLock := BuildLockInfo{
 		Type:      "local",
@@ -224,23 +232,5 @@ func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "build lock found") {
 		t.Fatalf("unexpected error message: %v", err)
-	}
-}
-
-func TestDeTemplateDirectives(t *testing.T) {
-	in := "#PL:star_version:2.7.11b\n" +
-		"#TARGET: grch38/star/2.7.11b\n" +
-		"#DEP:samtools/1.22\n" +
-		"install() {\n" +
-		"  #PL:indented stays\n" + // not column 0 -> not a directive, left as-is
-		"}\n"
-	want := "##PL:star_version:2.7.11b\n" +
-		"##TARGET: grch38/star/2.7.11b\n" +
-		"#DEP:samtools/1.22\n" +
-		"install() {\n" +
-		"  #PL:indented stays\n" +
-		"}\n"
-	if got := deTemplateDirectives(in); got != want {
-		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}
 }

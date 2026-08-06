@@ -35,7 +35,7 @@ Drop your script into the first writable `build-scripts/` directory (no `.sh` su
 | | Single-version | Template |
 |---|---|---|
 | **File path** | `<name>/<version>` | `<name>` |
-| **Headers** | none required | `#PL:` + `#TARGET:` |
+| **Headers** | none required | `#PH:` + `#TARGET:` |
 | **Write it when** | install differs between versions,<br/> or you only need one | the logic is identical |
 | **Example** | [`orad/2.7.0`](#example-1-orad--a-single-version-script) | [`cytoscape`](#example-2-cytoscape--a-version-template) |
 
@@ -152,7 +152,7 @@ Cytoscape publishes a pre-built Linux tarball for every release at a predictable
 
 ```bash
 #!/usr/bin/bash
-#PL:cytoscape_version:3.9.0,3.9.1,3.10.0,3.10.1,3.10.2,3.10.3,3.10.4
+#PH:cytoscape_version:3.9.0,3.9.1,3.10.0,3.10.1,3.10.2,3.10.3,3.10.4
 #AUTOUPDATE:cytoscape_version:github:cytoscape/cytoscape>=3.9.0
 
 #TARGET:cytoscape/{cytoscape_version}
@@ -162,12 +162,12 @@ Cytoscape publishes a pre-built Linux tarball for every release at a predictable
 
 | Header | Role |
 |---|---|
-| `#PL:` | Declares the `cytoscape_version` placeholder and its allowed values |
+| `#PH:` | Declares the `cytoscape_version` placeholder and its allowed values |
 | `#TARGET:` | Module name pattern — expands to `cytoscape/3.10.4`, `cytoscape/3.9.1`, … |
-| `#AUTOUPDATE:` | Lets CI refresh the `#PL:` list from GitHub releases (`>=3.9.0` is the floor) |
+| `#AUTOUPDATE:` | Lets CI refresh the `#PH:` list from GitHub releases (`>=3.9.0` is the floor) |
 | `#WHATIS:` | Shown in `condatainer avail` and `condatainer info` |
 
-Every `#PL:` name must appear as a `{name}` token in `#TARGET:` and vice versa — otherwise every value would collapse onto the same target, so CondaTainer warns and skips the expansion.
+Every `#PH:` name must appear as a `{name}` token in `#TARGET:` and vice versa — otherwise every value would collapse onto the same target, so CondaTainer warns and skips the expansion.
 
 `{cytoscape_version}` tokens are substituted **before** the script runs — in the headers *and* in the body. (It is not a bash variable, make sure no `${cytoscape_version}` in the script)
 

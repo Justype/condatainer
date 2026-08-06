@@ -3,13 +3,14 @@ package utils
 import (
 	"bufio"
 	"fmt"
-	"maps"
 	"os"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Justype/condatainer/catalog"
 )
 
 // StripInlineComment removes everything after the first '#' character (inline comment).
@@ -104,93 +105,6 @@ func ParseSizeToMB(sizeStr string) (int, error) {
 		return 0, fmt.Errorf("invalid size format: %s (expected '10G', '500M', etc.)", sizeStr)
 	}
 	return int(mb), nil
-}
-
-// SplitDepConstraint splits a raw dep string into its nameVersion and optional
-// version constraint. Supports ">=" and ">" operators.
-// Example: "samtools/1.21>=1.16" → ("samtools/1.21", ">=", "1.16")
-// Example: "samtools/1.21" → ("samtools/1.21", "", "")
-func SplitDepConstraint(raw string) (nameVersion, op, minVersion string) {
-	for _, sep := range []string{">=", ">"} {
-		if before, after, ok := strings.Cut(raw, sep); ok {
-			return before, sep, after
-		}
-	}
-	return raw, "", ""
-}
-
-// versionParts splits a version string like "1.21.3" into integer components.
-// Stops at the first non-numeric segment (e.g. "1.16rc1" → [1, 16]).
-func versionParts(v string) []int {
-	var parts []int
-	for s := range strings.SplitSeq(v, ".") {
-		n, err := strconv.Atoi(s)
-		if err != nil {
-			break
-		}
-		parts = append(parts, n)
-	}
-	return parts
-}
-
-// CompareVersions compares two partial version strings component by component.
-// Missing trailing components are treated as 0 (so "1.16" == "1.16.0").
-// Returns -1 if a < b, 0 if equal, 1 if a > b.
-func CompareVersions(a, b string) int {
-	ap, bp := versionParts(a), versionParts(b)
-	n := max(len(bp), len(ap))
-	for i := 0; i < n; i++ {
-		av, bv := 0, 0
-		if i < len(ap) {
-			av = ap[i]
-		}
-		if i < len(bp) {
-			bv = bp[i]
-		}
-		if av < bv {
-			return -1
-		}
-		if av > bv {
-			return 1
-		}
-	}
-	return 0
-}
-
-// DepSatisfiedByVersion returns true if installedVersion satisfies the constraint
-// (op + minVersion) and does not exceed preferredVersion (upper bound).
-// op must be ">=" or ">". preferredVersion may be empty to skip the upper bound check.
-func DepSatisfiedByVersion(installedVersion, op, minVersion, preferredVersion string) bool {
-	cmp := CompareVersions(installedVersion, minVersion)
-	var lower bool
-	switch op {
-	case ">=":
-		lower = cmp >= 0
-	case ">":
-		lower = cmp > 0
-	default:
-		return false
-	}
-	if !lower {
-		return false
-	}
-	// Upper bound: installed must not exceed the preferred version.
-	if preferredVersion != "" && CompareVersions(installedVersion, preferredVersion) > 0 {
-		return false
-	}
-	return true
-}
-
-// NormalizeNameVersion normalizes package spec formats so that
-// "name/version", "name=version", "name@version" are treated the same.
-// Converts = and @ to /, and -- to /, then strips whitespace.
-// Any version constraint suffix (e.g. ">=1.10") is preserved as-is.
-func NormalizeNameVersion(nameVersion string) string {
-	nv, op, minVer := SplitDepConstraint(strings.TrimSpace(nameVersion))
-	s := strings.ReplaceAll(nv, "=", "/")
-	s = strings.ReplaceAll(s, "@", "/")
-	s = strings.ReplaceAll(s, "--", "/")
-	return s + op + minVer
 }
 
 // ParseHMSTime parses colon-separated walltime "HH:MM:SS", "HH:MM", or "MM" (bare minutes).
@@ -339,9 +253,7 @@ func GetDependenciesFromScript(scriptPath string, parseModuleLoad bool) ([]strin
 						seen[depLine] = true
 					}
 				} else {
-					// Split constraint before normalizing so "=" in ">=" isn't mangled.
-					nv, op, minVer := SplitDepConstraint(depLine)
-					normalized := NormalizeNameVersion(nv) + op + minVer
+					normalized := catalog.Normalize(depLine)
 					if !seen[normalized] {
 						dependencies = append(dependencies, normalized)
 						seen[normalized] = true
@@ -358,7 +270,7 @@ func GetDependenciesFromScript(scriptPath string, parseModuleLoad bool) ([]strin
 				parts := strings.Fields(line)
 				if len(parts) >= 3 {
 					for _, mod := range parts[2:] {
-						normalized := NormalizeNameVersion(mod)
+						normalized := catalog.Normalize(mod)
 						if !seen[normalized] {
 							dependencies = append(dependencies, normalized)
 							seen[normalized] = true
@@ -377,7 +289,7 @@ func GetDependenciesFromScript(scriptPath string, parseModuleLoad bool) ([]strin
 						if mod == "load" {
 							continue
 						}
-						normalized := NormalizeNameVersion(mod)
+						normalized := catalog.Normalize(mod)
 						if !seen[normalized] {
 							dependencies = append(dependencies, normalized)
 							seen[normalized] = true
@@ -451,48 +363,6 @@ func GetExternalBuildTypeFromScript(scriptPath string) (string, error) {
 	return "app", nil
 }
 
-// GetInteractivePromptsFromScript parses a build script and extracts interactive
-// prompt lines beginning with "#INTERACTIVE:". Returns a list of prompt
-// strings (without the prefix) or an error if the file cannot be read.
-func GetInteractivePromptsFromScript(scriptPath string) ([]string, error) {
-	if !FileExists(scriptPath) {
-		return nil, fmt.Errorf("build script not found at %s", scriptPath)
-	}
-
-	file, err := os.Open(scriptPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open script: %w", err)
-	}
-	defer file.Close()
-
-	prompts := []string{}
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "#INTERACTIVE:") {
-			content := strings.TrimSpace(line[len("#INTERACTIVE:"):])
-			if content != "" {
-				prompts = append(prompts, content)
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading script: %w", err)
-	}
-
-	return prompts, nil
-}
-
-// PlaceholderDef holds a single #PL: declaration from a build script.
-// Values are sorted descending (natural version sort); if Open is true,
-// the last element of Values is "*" indicating any input is accepted.
-type PlaceholderDef struct {
-	Name   string
-	Values []string // sorted desc concrete values; last element is "*" if Open
-	Open   bool     // true if * was present in the original list
-}
-
 // SortVersionsDescending sorts version strings in descending natural order.
 // Segments are split on ".", "-", or "_" and compared numerically when both
 // segments are integers, otherwise lexicographically. The highest version
@@ -501,342 +371,15 @@ func SortVersionsDescending(values []string) []string {
 	result := make([]string, len(values))
 	copy(result, values)
 	sort.Slice(result, func(i, j int) bool {
-		return naturalVersionGreater(result[i], result[j])
+		return catalog.CompareVersions(result[i], result[j]) > 0
 	})
 	return result
 }
 
-// naturalVersionGreater returns true if a > b in natural version order.
-func naturalVersionGreater(a, b string) bool {
-	segsA := splitVersionSegments(a)
-	segsB := splitVersionSegments(b)
-	n := min(len(segsB), len(segsA))
-	for i := range n {
-		ia, aAlpha, aHasNum := parseVersionSegment(segsA[i])
-		ib, bAlpha, bHasNum := parseVersionSegment(segsB[i])
-		if aHasNum && bHasNum {
-			// Both start with a numeric prefix: compare numeric part first, then alpha suffix.
-			if ia != ib {
-				return ia > ib
-			}
-			if aAlpha != bAlpha {
-				return aAlpha > bAlpha
-			}
-		} else {
-			// Pure alpha vs pure alpha: lexicographic.
-			if segsA[i] != segsB[i] {
-				return segsA[i] > segsB[i]
-			}
-		}
-	}
-	return len(segsA) > len(segsB)
-}
+// phTokenRe matches {varname} placeholder tokens.
+var phTokenRe = regexp.MustCompile(`\{(\w+)\}`)
 
-// parseVersionSegment splits a segment into its leading numeric value and
-// remaining alpha suffix. "11b" → (11, "b", true), "10" → (10, "", true),
-// "abc" → (0, "abc", false).
-func parseVersionSegment(seg string) (int64, string, bool) {
-	i := 0
-	for i < len(seg) && seg[i] >= '0' && seg[i] <= '9' {
-		i++
-	}
-	if i == 0 {
-		return 0, seg, false // pure alpha
-	}
-	n, err := strconv.ParseInt(seg[:i], 10, 64)
-	if err != nil {
-		return 0, seg, false
-	}
-	return n, seg[i:], true
-}
-
-var versionSplitRe = regexp.MustCompile(`[.\-_]`)
-
-func splitVersionSegments(v string) []string {
-	segs := versionSplitRe.Split(v, -1)
-	result := make([]string, 0, len(segs))
-	for _, s := range segs {
-		if s != "" {
-			result = append(result, s)
-		}
-	}
-	return result
-}
-
-// valueRangeRe matches an integer range token ("22-49"). Deliberately digits-only
-// so literal values such as "2024-A" are not mistaken for ranges.
-var valueRangeRe = regexp.MustCompile(`^(\d+)-(\d+)$`)
-
-// ParseValueList parses a value specification. It backs both build script #PL:
-// headers and helper #VALUE: headers so the two share one dialect.
-//
-// The separator selects the ordering:
-//
-//	"3.10,3.9,3.8"   comma → sorted descending (version lists)
-//	"kasm | turbo"   pipe  → author's order preserved (labels)
-//
-// In either form:
-//   - "a-b" expands to every integer in [a, b].
-//   - "*" marks the list open-ended (any value accepted). It is reported via the
-//     returned bool and appended as the final element, so index 0 stays the default.
-//   - Duplicates are dropped and surrounding whitespace trimmed.
-//
-// An "EXPR:..." spec is returned verbatim as a single element.
-// Returns an error when the list ends up with no values and is not open-ended.
-func ParseValueList(raw string) ([]string, bool, error) {
-	raw = strings.TrimSpace(raw)
-	if strings.HasPrefix(raw, "EXPR:") {
-		return []string{raw}, false, nil
-	}
-
-	// A pipe anywhere selects the order-preserving form.
-	sep, sortDesc := ",", true
-	if strings.Contains(raw, "|") {
-		sep, sortDesc = "|", false
-	}
-
-	var concrete []string
-	open := false
-	seen := make(map[string]bool)
-	add := func(s string) {
-		if !seen[s] {
-			concrete = append(concrete, s)
-			seen[s] = true
-		}
-	}
-
-	for tok := range strings.SplitSeq(raw, sep) {
-		tok = strings.TrimSpace(tok)
-		switch tok {
-		case "":
-			continue
-		case "*":
-			open = true
-		default:
-			if m := valueRangeRe.FindStringSubmatch(tok); m != nil {
-				lo, _ := strconv.ParseInt(m[1], 10, 64)
-				hi, _ := strconv.ParseInt(m[2], 10, 64)
-				if lo > hi {
-					lo, hi = hi, lo
-				}
-				for v := lo; v <= hi; v++ {
-					add(strconv.FormatInt(v, 10))
-				}
-				continue
-			}
-			add(tok)
-		}
-	}
-
-	if len(concrete) == 0 && !open {
-		return nil, false, fmt.Errorf("empty value list")
-	}
-	if sortDesc {
-		concrete = SortVersionsDescending(concrete)
-	}
-	if open {
-		concrete = append(concrete, "*")
-	}
-	return concrete, open, nil
-}
-
-// GetPlaceholdersFromScript parses a build script and returns all #PL:
-// declarations in declaration order. Values are sorted descending; if the
-// list contained "*" the last element is "*" and Open is true.
-func GetPlaceholdersFromScript(scriptPath string) ([]PlaceholderDef, error) {
-	if !FileExists(scriptPath) {
-		return nil, fmt.Errorf("build script not found at %s", scriptPath)
-	}
-
-	file, err := os.Open(scriptPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open script: %w", err)
-	}
-	defer file.Close()
-
-	var defs []PlaceholderDef
-	seenNames := make(map[string]bool)
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "#PL:") {
-			continue
-		}
-		rest := line[len("#PL:"):]
-		// Split on first ":" to get name and raw values
-		idx := strings.Index(rest, ":")
-		if idx < 0 {
-			return nil, fmt.Errorf("invalid #PL: line (missing second ':'): %s", line)
-		}
-		name := strings.TrimSpace(rest[:idx])
-		rawValues := StripInlineComment(rest[idx+1:])
-
-		if name == "" {
-			return nil, fmt.Errorf("empty placeholder name in: %s", line)
-		}
-		if seenNames[name] {
-			return nil, fmt.Errorf("duplicate placeholder name %q", name)
-		}
-		seenNames[name] = true
-
-		values, open, err := ParseValueList(rawValues)
-		if err != nil {
-			return nil, fmt.Errorf("invalid #PL: values for %q: %w", name, err)
-		}
-
-		defs = append(defs, PlaceholderDef{Name: name, Values: values, Open: open})
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading script: %w", err)
-	}
-
-	return defs, nil
-}
-
-// GetTargetFromScript reads a build script and returns the value of the first
-// #TARGET: line (trimmed). Returns "" if no #TARGET: line is present.
-func GetTargetFromScript(scriptPath string) (string, error) {
-	if !FileExists(scriptPath) {
-		return "", fmt.Errorf("build script not found at %s", scriptPath)
-	}
-
-	file, err := os.Open(scriptPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to open script: %w", err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "#TARGET:") {
-			return strings.TrimSpace(line[len("#TARGET:"):]), nil
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("error reading script: %w", err)
-	}
-
-	return "", nil
-}
-
-// plTokenRe matches {varname} placeholder tokens.
-var plTokenRe = regexp.MustCompile(`\{(\w+)\}`)
-
-// ValidateTemplatePlaceholders checks that a #TARGET: pattern and the #PL:
-// declarations of a build script agree with each other. Every declared
-// placeholder must appear as a {name} token in target, and every {name} token in
-// target must have a matching declaration.
-//
-// A declared placeholder missing from target would make every one of its values
-// interpolate to the same name, silently collapsing the expansion to one entry;
-// a token with no declaration would be left uninterpolated in the entry name.
-// Returns one human-readable message per problem, or nil when the template is valid.
-func ValidateTemplatePlaceholders(target string, plNames []string) []string {
-	inTarget := make(map[string]bool)
-	for _, m := range plTokenRe.FindAllStringSubmatch(target, -1) {
-		inTarget[m[1]] = true
-	}
-	declared := make(map[string]bool, len(plNames))
-	for _, name := range plNames {
-		declared[name] = true
-	}
-
-	var problems []string
-	for _, name := range plNames {
-		if !inTarget[name] {
-			problems = append(problems, fmt.Sprintf("#PL:%s is declared but {%s} is missing from #TARGET:", name, name))
-		}
-	}
-	// Sort for deterministic output: map iteration order is random.
-	tokens := make([]string, 0, len(inTarget))
-	for token := range inTarget {
-		tokens = append(tokens, token)
-	}
-	sort.Strings(tokens)
-	for _, token := range tokens {
-		if !declared[token] {
-			problems = append(problems, fmt.Sprintf("#TARGET: uses {%s} but there is no #PL:%s declaration", token, token))
-		}
-	}
-	return problems
-}
-
-// MatchTemplateTarget extracts placeholder values from a concrete name by matching
-// it against a template pattern (e.g. a #TARGET: or #DEP: line containing {var} tokens).
-// Returns the vars map and true on a full match, or nil and false otherwise.
-func MatchTemplateTarget(pattern, concrete string) (map[string]string, bool) {
-	varNames := plTokenRe.FindAllStringSubmatch(pattern, -1)
-	regex := regexp.QuoteMeta(pattern)
-	for _, m := range varNames {
-		regex = strings.ReplaceAll(regex, regexp.QuoteMeta("{"+m[1]+"}"), `([^/]+)`)
-	}
-	re, err := regexp.Compile("^" + regex + "$")
-	if err != nil {
-		return nil, false
-	}
-	matches := re.FindStringSubmatch(concrete)
-	if matches == nil {
-		return nil, false
-	}
-	result := make(map[string]string, len(varNames))
-	for i, m := range varNames {
-		result[m[1]] = matches[i+1]
-	}
-	return result, true
-}
-
-// InterpolateVars replaces {varname} occurrences in s with the corresponding
-// value from vars. Unknown keys are left unchanged.
-func InterpolateVars(s string, vars map[string]string) string {
-	if len(vars) == 0 {
-		return s
-	}
-	pairs := make([]string, 0, len(vars)*2)
-	for k, v := range vars {
-		pairs = append(pairs, "{"+k+"}", v)
-	}
-	return strings.NewReplacer(pairs...).Replace(s)
-}
-
-// ExpandPlaceholders returns the Cartesian product of all placeholder value
-// combinations. "*" is never used as a concrete iteration value. Returns
-// [{}] (a slice with one empty map) when defs is empty.
-func ExpandPlaceholders(defs []PlaceholderDef) []map[string]string {
-	result := []map[string]string{{}}
-
-	for _, def := range defs {
-		// Collect only concrete (non-"*") values for iteration
-		var concreteVals []string
-		for _, v := range def.Values {
-			if v != "*" {
-				concreteVals = append(concreteVals, v)
-			}
-		}
-		if len(concreteVals) == 0 {
-			// Open-only placeholder with no suggestions — skip expansion
-			continue
-		}
-
-		var next []map[string]string
-		for _, existing := range result {
-			for _, val := range concreteVals {
-				combo := make(map[string]string, len(existing)+1)
-				maps.Copy(combo, existing)
-				combo[def.Name] = val
-				next = append(next, combo)
-			}
-		}
-		result = next
-	}
-
-	return result
-}
-
-// imgPackageTokenRe matches {UPPER_CASE} tokens in #IMG_PACKAGES: templates.
+// imgPackageTokenRe matches {KEY} tokens in an #IMG_PACKAGES: template.
 var imgPackageTokenRe = regexp.MustCompile(`\{([A-Z][A-Z0-9_]*)\}`)
 
 // ExtractImgPackageTokens returns the unique {KEY} token names from an #IMG_PACKAGES: template.

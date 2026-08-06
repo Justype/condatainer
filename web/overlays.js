@@ -309,8 +309,8 @@ function ocSelect(i) {
   // vars hold user-entered values; empty means "use the default (latest)".
   _ocSel = { kind: 'script', entry: e, vars: {}, defaults: {} };
   if (e.is_template) {
-    for (const k of (e.pl_order || [])) {
-      const vals = (e.pl || {})[k] || [];
+    for (const k of (e.ph_names || [])) {
+      const vals = (e.ph || {})[k] || [];
       _ocSel.defaults[k] = vals.find(v => v !== '*') || '';
       _ocSel.vars[k] = '';
     }
@@ -365,10 +365,10 @@ function _ocRenderDetail() {
       (e.whatis ? '<div class="oc-whatis">' + escHtml(e.whatis) + '</div>' : '') + '</div>';
     if (e.is_template) {
       html += '<div class="f-divider">Placeholders</div>';
-      for (const k of (e.pl_order || [])) {
+      for (const k of (e.ph_names || [])) {
         const dflt = _ocSel.defaults[k];
         html += '<div class="field"><label class="field-label">' + escHtml(k) + '</label>' +
-          makeComboboxHtml('oc-pl-' + k, '', dflt ? dflt + ' (default)' : 'value') +
+          makeComboboxHtml('oc-ph-' + k, '', dflt ? dflt + ' (default)' : 'value') +
           '</div>';
       }
     }
@@ -386,12 +386,12 @@ function _ocRenderDetail() {
     });
   } else if (_ocSel.entry.is_template) {
     const e = _ocSel.entry;
-    for (const k of (e.pl_order || [])) {
-      const all  = (e.pl || {})[k] || [];
+    for (const k of (e.ph_names || [])) {
+      const all  = (e.ph || {})[k] || [];
       const vals = all.filter(v => v !== '*');
       const open = all.includes('*'); // '*' = free-form values allowed
-      initCombobox('oc-pl-' + k, vals, open,
-        () => ocSetVar(k, gid('oc-pl-' + k).value.trim()));
+      initCombobox('oc-ph-' + k, vals, open,
+        () => ocSetVar(k, gid('oc-ph-' + k).value.trim()));
     }
   }
 }

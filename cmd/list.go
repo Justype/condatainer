@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -70,7 +71,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	distroLower := strings.ToLower(config.Global.DefaultDistro)
+	distroLower := strings.ToLower(config.ResolvedBase())
 	installedLower := make(map[string]bool, len(installedMap))
 	for name := range installedMap {
 		lower := strings.ToLower(name)
@@ -248,7 +249,7 @@ func runList(cmd *cobra.Command, args []string) error {
 // scanOverlaysByDir scans each image directory independently and returns per-dir results.
 // Missing directories are skipped; empty directories are included with empty groups.
 func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
-	distroPrefix := strings.ToLower(config.Global.DefaultDistro) + "/"
+	distroPrefix := strings.ToLower(config.ResolvedBase()) + "/"
 	var result []DirOverlays
 
 	for _, imageDir := range dirs {
@@ -269,7 +270,7 @@ func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 				continue
 			}
 			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			normalized := strings.ToLower(utils.NormalizeNameVersion(nameVersion))
+			normalized := strings.ToLower(catalog.Normalize(nameVersion))
 			overlayPath := filepath.Join(imageDir, entry.Name())
 			delimCount := strings.Count(entry.Name(), "--")
 			osOverlay := isOSOverlay(overlayPath)

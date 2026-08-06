@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/fatih/color"
 	"golang.org/x/term"
@@ -99,7 +100,7 @@ func StyleHighlight(text string) string { return bold(yellow(text)) }
 // HighlightTemplatePlaceholders renders a #TARGET: pattern with {var} tokens in
 // yellow-bold and the surrounding literal path segments in default color.
 func HighlightTemplatePlaceholders(pattern string) string {
-	return plTokenRe.ReplaceAllStringFunc(pattern, StyleHighlight)
+	return phTokenRe.ReplaceAllStringFunc(pattern, StyleHighlight)
 }
 
 // FormatBytes formats bytes into human-readable format (e.g., "1.50 GB").
@@ -218,13 +219,22 @@ func ShouldAnswerYes() bool {
 	return YesMode
 }
 
+// stdinReader buffers os.Stdin for the life of the process. It has to be shared:
+// a fresh bufio.Reader per call reads ahead into its buffer and then discards it,
+// so every line after the first is lost whenever stdin is a pipe rather than a
+// TTY — which is how a scheduler job replays answers.
+var (
+	stdinReader     *bufio.Reader
+	stdinReaderOnce sync.Once
+)
+
 // ReadLineContext reads a trimmed line from stdin, preserving case.
 // Returns context.Canceled if ctx is done before input arrives.
 func ReadLineContext(ctx context.Context) (string, error) {
+	stdinReaderOnce.Do(func() { stdinReader = bufio.NewReader(os.Stdin) })
 	ch := make(chan string, 1)
 	go func() {
-		reader := bufio.NewReader(os.Stdin)
-		s, _ := reader.ReadString('\n')
+		s, _ := stdinReader.ReadString('\n')
 		ch <- strings.TrimSpace(s)
 	}()
 	select {

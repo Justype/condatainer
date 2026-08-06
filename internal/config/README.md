@@ -59,22 +59,30 @@ config.Global  // Singleton instance
 5. User dir → `$XDG_DATA_HOME/condatainer/images/` or `~/.local/share/condatainer/images/`
 
 **Search order for scripts:**
-**Build scripts:**
-1. `extra_build_dirs` — explicit build-scripts directories (direct paths)
-2. `CNT_EXTRA_ROOT`, Root dir, Scratch dir, User dir (same pattern)
+
+Recipes are not searched for on disk — they come from the catalog's `sources`
+(see [sources.go](sources.go)), which is an ordered list of collections, not a
+data directory.
+
+The default collection is always reachable: unless something already answers to
+the handle `cnt`, `https://raw.githubusercontent.com/condatainer/recipes/main` is
+**appended** to whatever the config lists. Appended, never prepended, so every
+configured entry outranks it — and defining your own `cnt` replaces it, which is
+how a site points the handle elsewhere without rewriting the `#DEP:` lines that
+name it.
 
 **Helper scripts:**
 1. `extra_helper_dirs` — explicit helper-scripts directories (direct paths)
 2. `CNT_EXTRA_ROOT`, Root dir, Scratch dir, User dir (same pattern)
 
 **Write operations:**
-- **Images / helpers**: first writable directory in search order. `:ro` entries and `extra_build_dirs` are always skipped. Personal dirs (scratch, user) are always created on first use. Shared dirs (extra-root, root): subdirs (`images/`, `build-scripts/`, etc.) are auto-created if the parent directory already exists — the parent itself is never auto-created.
+- **Images / helpers**: first writable directory in search order. `:ro` entries are always skipped. Personal dirs (scratch, user) are always created on first use. Shared dirs (extra-root, root): subdirs (`images/`, `helper-scripts/`) are auto-created if the parent directory already exists — the parent itself is never auto-created.
 - **Cache**: always written to a personal directory (scratch → user cache) to avoid cross-user pollution. Shared dirs are never written to.
 
 **`:ro` / `:rw` markers** (image and helper dirs, config file only):
 - `:ro` — search-only; condatainer never writes here even if filesystem allows it
 - `:rw` — explicit writable annotation (same as no marker; for documentation clarity)
-- Only applies to `extra_image_dirs` and `extra_helper_dirs`; `extra_build_dirs` entries are plain paths
+- Only applies to `extra_image_dirs` and `extra_helper_dirs`
 
 ## Usage
 
@@ -96,16 +104,15 @@ config.GetCacheSearchPaths()                // personal cache search paths
 
 ## Environment Variables
 
-All multi-value env vars use `|` as separator. `CNT_EXTRA_BUILD_DIRS` also accepts `:`.
+All multi-value env vars use `|` as separator.
 
 | Variable | Separator | Description |
 |---|---|---|
 | `CNT_ROOT` | — | Cluster/system root dir (loads `config.yaml` + data dirs; replaces bin/ heuristic) |
 | `CNT_EXTRA_ROOT` | — | Group/lab root dir (single path; loads `config.yaml` + data dirs) |
 | `CNT_EXTRA_IMAGE_DIRS` | `\|` | Extra image directories; entries support `:ro`/`:rw` |
-| `CNT_EXTRA_BUILD_DIRS` | `\|` or `:` | Extra build-scripts directories |
 | `CNT_EXTRA_HELPER_DIRS` | `\|` | Extra helper-scripts directories; entries support `:ro`/`:rw` |
-| `CNT_EXTRA_SCRIPTS_LINKS` | `\|` | Extra remote build script source URLs |
+| `CNT_SOURCES` | `\|` | Recipe collections as `name=base` pairs; overrides the `sources` config key |
 | `CNT_CHANNELS` | `\|` or `:`  | Conda channels |
 | `CNT_NOTIFICATION` | — | Override `notification` for the current session (e.g. `bell`, `email`, ntfy.sh topic) |
 | `CNT_PROXY_PERJOB` | — | Override `proxy_perjob` for the current invocation (`1` = enable) |
@@ -121,19 +128,21 @@ Location: `~/.config/condatainer/config.yaml`
 apptainer_bin: "apptainer"
 scheduler_bin: ""         # auto-detect if empty
 
-prefer_remote: false
-default_distro: "ubuntu24"
+base: "ubuntu24"
 parse_module_load: false
+
+# Recipe collections, in order — first match wins, like PATH.
+# `cnt` is appended automatically; list it yourself only to point it elsewhere.
+sources:
+  - lab: "/shared/lab/recipes"
 
 # Extra directories — team/lab use via module file or config
 extra_image_dirs:
   - "/shared/lab/images:ro"   # search-only shared store
   - "/fast/scratch/images"    # writable personal store
-extra_build_dirs:
-  - "/shared/lab/scripts"
 extra_helper_dirs:
   - "/shared/lab/helpers"
-# For a group/lab root with standard layout (images/, build-scripts/, etc.),
+# For a group/lab root with standard layout (images/, helper-scripts/),
 # set CNT_EXTRA_ROOT=/proj/condatainer in the module file instead.
 
 channels:

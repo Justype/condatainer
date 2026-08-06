@@ -1,68 +1,66 @@
 package helper
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
-	"sync"
-	"time"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// RemoteScriptEntry represents a helper script entry from remote metadata.
+// helperIndexPath is where a collection publishes its helper listing.
+const helperIndexPath = "index/helpers.json"
+
+// RemoteScriptEntry is one helper a source offers.
 type RemoteScriptEntry struct {
-	Path      string `json:"path"`
-	SourceURL string `json:"-"`
+	Path   string `json:"path"`
+	Source string `json:"-"` // the source base it came from
 }
 
-type remoteHelperEntry struct {
-	Path string `json:"path"`
-}
-
-// RemoteMetadataCache is the on-disk envelope for cached helper script metadata.
-type RemoteMetadataCache struct {
-	FetchedAt time.Time                    `json:"fetched_at"`
-	SourceURL string                       `json:"source_url"`
-	Metadata  map[string]remoteHelperEntry `json:"metadata"`
-}
-
-var (
-	remoteMetadataMu       sync.Mutex
-	remoteMetadataBySource = map[string]map[string]RemoteScriptEntry{}
-)
-
-// RefreshRemoteMetadata refreshes or loads remote helper script metadata.
-// Earlier URLs in ScriptsLinks take precedence.
+// RefreshRemoteMetadata reads the helper index from every configured source,
+// merged with earlier sources winning.
+//
+// Fetching and caching belong to the catalog, which already bounds staleness and
+// serves a cached copy when a source is unreachable. A source with no helper
+// index simply contributes nothing.
 func RefreshRemoteMetadata(ctx context.Context, force bool, w io.Writer) (map[string]RemoteScriptEntry, error) {
 	if force {
-		remoteMetadataMu.Lock()
-		remoteMetadataBySource = map[string]map[string]RemoteScriptEntry{}
-		remoteMetadataMu.Unlock()
+		if err := config.RefreshCatalogCache(); err != nil && w != nil {
+			fmt.Fprintf(w, "WARN: failed to clear the source cache: %v\n", err)
+		}
+	}
+
+	cat, err := config.OpenCatalog(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	merged := map[string]RemoteScriptEntry{}
 	var firstErr error
-
-	for _, baseURL := range config.Global.ScriptsLinks {
-		meta, err := fetchRemoteMetadataForSource(ctx, baseURL, force, w)
+	for _, src := range cat {
+		meta, err := readHelperIndex(ctx, cat, src, w)
 		if err != nil {
 			if w != nil {
-				fmt.Fprintf(w, "WARN: failed to fetch helper metadata from %s: %v\n", baseURL, err)
+				fmt.Fprintf(w, "WARN: no helper index in %s: %v\n", src.Name, err)
 			}
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
+		if src.Stale && w != nil {
+			fmt.Fprintf(w, "WARN: %s was unreachable; using its cached helper index\n", src.Name)
+		}
 		for name, entry := range meta {
 			if _, exists := merged[name]; !exists {
+				entry.Source = src.Base
 				merged[name] = entry
 			}
 		}
@@ -74,17 +72,48 @@ func RefreshRemoteMetadata(ctx context.Context, force bool, w io.Writer) (map[st
 	return merged, nil
 }
 
-// UpdateRemoteScripts syncs helper scripts from the configured remote script URLs.
+// readHelperIndex reads index/helpers.json.gz, falling back to the plain file.
+func readHelperIndex(ctx context.Context, cat catalog.Catalog, src *catalog.Source, w io.Writer) (map[string]RemoteScriptEntry, error) {
+	if data, err := cat.ReadPath(ctx, src, helperIndexPath+".gz"); err == nil {
+		if plain, err := gunzip(data); err == nil {
+			return decodeHelperIndex(plain)
+		}
+	}
+	data, err := cat.ReadPath(ctx, src, helperIndexPath)
+	if err != nil {
+		return nil, err
+	}
+	return decodeHelperIndex(data)
+}
+
+func decodeHelperIndex(data []byte) (map[string]RemoteScriptEntry, error) {
+	var meta map[string]RemoteScriptEntry
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, fmt.Errorf("failed to parse helper index: %w", err)
+	}
+	return meta, nil
+}
+
+func gunzip(data []byte) ([]byte, error) {
+	zr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+	return io.ReadAll(zr)
+}
+
+// UpdateRemoteScripts syncs helper scripts from the configured sources.
 // When name is non-empty, only that helper is updated.
 func UpdateRemoteScripts(ctx context.Context, name string, forceMetadata bool, w io.Writer) error {
 	entries, err := RefreshRemoteMetadata(ctx, forceMetadata, w)
 	if err != nil {
-		return fmt.Errorf("failed to fetch remote helper metadata: %w", err)
+		return fmt.Errorf("failed to read helper indexes: %w", err)
 	}
 	if name != "" {
 		entry, ok := entries[name]
 		if !ok {
-			return fmt.Errorf("helper script %q not found in remote metadata", name)
+			return fmt.Errorf("helper script %q not found in any source", name)
 		}
 		entries = map[string]RemoteScriptEntry{name: entry}
 	}
@@ -101,14 +130,10 @@ func UpdateRemoteScripts(ctx context.Context, name string, forceMetadata bool, w
 		fmt.Fprintln(w, "Updating all helper scripts...")
 	}
 	for scriptName, entry := range entries {
-		if entry.Path == "" {
+		if entry.Path == "" || entry.Source == "" {
 			continue
 		}
-		sourceURL := entry.SourceURL
-		if sourceURL == "" {
-			sourceURL = config.Global.ScriptsLink
-		}
-		url := fmt.Sprintf("%s/%s", sourceURL, entry.Path)
+		url := fmt.Sprintf("%s/%s", entry.Source, entry.Path)
 		dest := filepath.Join(helperScriptsDir, filepath.Base(entry.Path))
 		if w != nil {
 			fmt.Fprintf(w, "Updating %s\n", scriptName)
@@ -124,129 +149,6 @@ func UpdateRemoteScripts(ctx context.Context, name string, forceMetadata bool, w
 		fmt.Fprintln(w, "Helper update finished.")
 	}
 	return nil
-}
-
-func fetchRemoteMetadataForSource(ctx context.Context, baseURL string, force bool, w io.Writer) (map[string]RemoteScriptEntry, error) {
-	remoteMetadataMu.Lock()
-	if cached, ok := remoteMetadataBySource[baseURL]; ok {
-		remoteMetadataMu.Unlock()
-		return cached, nil
-	}
-	remoteMetadataMu.Unlock()
-
-	metaURL := baseURL + "/metadata/helper-scripts.json.gz"
-	cachePath, cacheErr := remoteMetadataCachePathForSource(baseURL)
-	ttl := config.Global.MetadataCacheTTL
-
-	if !force && cacheErr == nil && ttl > 0 {
-		if cache, err := loadRemoteMetadataCache(cachePath, baseURL, ttl, true); err == nil {
-			if w != nil {
-				fmt.Fprintf(w, "Using cached helper metadata for %s (fetched %s ago)\n", baseURL, time.Since(cache.FetchedAt).Round(time.Minute))
-			}
-			result := injectRemoteSource(cache.Metadata, baseURL)
-			remoteMetadataMu.Lock()
-			remoteMetadataBySource[baseURL] = result
-			remoteMetadataMu.Unlock()
-			return result, nil
-		}
-	}
-
-	if w != nil {
-		fmt.Fprintf(w, "Fetching helper metadata from %s ...\n", metaURL)
-	}
-	rawMeta, err := fetchRawRemoteMetadata(ctx, metaURL)
-	if err != nil {
-		if cacheErr == nil {
-			if cache, staleErr := loadRemoteMetadataCache(cachePath, baseURL, 0, false); staleErr == nil {
-				if w != nil {
-					fmt.Fprintf(w, "WARN: network unavailable for %s; using cached helper metadata (fetched %s ago)\n",
-						metaURL, time.Since(cache.FetchedAt).Round(time.Minute))
-				}
-				result := injectRemoteSource(cache.Metadata, baseURL)
-				remoteMetadataMu.Lock()
-				remoteMetadataBySource[baseURL] = result
-				remoteMetadataMu.Unlock()
-				return result, nil
-			}
-		}
-		return nil, err
-	}
-
-	if cacheErr == nil && ttl > 0 {
-		envelope := RemoteMetadataCache{
-			FetchedAt: time.Now(),
-			SourceURL: baseURL,
-			Metadata:  rawMeta,
-		}
-		if err := utils.WriteGzipJSONFileAtomic(cachePath, envelope); err != nil && w != nil {
-			fmt.Fprintf(w, "WARN: failed to write helper metadata cache for %s: %v\n", baseURL, err)
-		}
-	}
-
-	result := injectRemoteSource(rawMeta, baseURL)
-	remoteMetadataMu.Lock()
-	remoteMetadataBySource[baseURL] = result
-	remoteMetadataMu.Unlock()
-	return result, nil
-}
-
-func remoteMetadataCachePathForSource(baseURL string) (string, error) {
-	cacheDir, err := config.GetWritableCacheDir()
-	if err != nil {
-		return "", err
-	}
-	h := sha256.Sum256([]byte(baseURL))
-	name := fmt.Sprintf("helper-scripts-%x.json.gz", h[:6])
-	return filepath.Join(cacheDir, name), nil
-}
-
-func loadRemoteMetadataCache(path, baseURL string, ttl time.Duration, checkTTL bool) (*RemoteMetadataCache, error) {
-	var cache RemoteMetadataCache
-	if err := utils.ReadGzipJSONFile(path, &cache); err != nil {
-		return nil, err
-	}
-	if cache.SourceURL != baseURL {
-		return nil, fmt.Errorf("source URL changed")
-	}
-	if checkTTL && time.Since(cache.FetchedAt) > ttl {
-		return nil, fmt.Errorf("cache expired")
-	}
-	return &cache, nil
-}
-
-func injectRemoteSource(raw map[string]remoteHelperEntry, baseURL string) map[string]RemoteScriptEntry {
-	out := make(map[string]RemoteScriptEntry, len(raw))
-	for name, entry := range raw {
-		out[name] = RemoteScriptEntry{Path: entry.Path, SourceURL: baseURL}
-	}
-	return out
-}
-
-func fetchRawRemoteMetadata(ctx context.Context, url string) (map[string]remoteHelperEntry, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch metadata: HTTP %d", resp.StatusCode)
-	}
-	gzReader, err := gzip.NewReader(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decompress metadata: %w", err)
-	}
-	defer gzReader.Close()
-
-	var metadata map[string]remoteHelperEntry
-	if err := json.NewDecoder(gzReader).Decode(&metadata); err != nil {
-		return nil, err
-	}
-	return metadata, nil
 }
 
 func downloadRemoteExecutable(ctx context.Context, url, destPath string) error {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -42,7 +43,7 @@ func BuildPathEnv(overlays []string) string {
 		// Strip :ro or :rw suffix for path checking
 		cleanOverlay := strings.TrimSuffix(strings.TrimSuffix(ov, ":ro"), ":rw")
 		name := strings.TrimSuffix(filepath.Base(cleanOverlay), filepath.Ext(cleanOverlay))
-		normalized := utils.NormalizeNameVersion(name)
+		normalized := catalog.Normalize(name)
 		if normalized == "" {
 			continue
 		}

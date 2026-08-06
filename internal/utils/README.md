@@ -41,26 +41,25 @@ utils.DownloadExecutable(url, destPath) // sets exec permissions
 
 ## Script Parsing
 
+These read *user* scripts and helper scripts, not recipes — a recipe is parsed by
+`catalog.ParseRecipe`.
+
 ```go
 // parseModuleLoad: also extract "module load" / "ml" lines as deps
 deps, err := utils.GetDependenciesFromScript(scriptPath, parseModuleLoad)
 
-prompts, err := utils.GetInteractivePromptsFromScript(scriptPath)
+whatis := utils.GetWhatIsFromScript(scriptPath)
+
+// #TYPE: from an external build script, defaulting to "app"
+kind, err := utils.GetExternalBuildTypeFromScript(scriptPath)
 
 // extract scheduler directives and apply defaults (scheduler package)
 specs, err := scheduler.ReadScriptSpecsFromPath(scriptPath)
 ```
 
-### Template Helpers
+### Version Helpers
 
 ```go
-// Extract {var} → value from a concrete name matched against a #TARGET: pattern.
-// E.g. MatchTemplateTarget("salmon/{ver}", "salmon/1.10.2") → {"ver":"1.10.2"}, true
-vars, ok := utils.MatchTemplateTarget(pattern, concrete)
-
-// Interpolate {key} tokens in a string from a vars map.
-result := utils.InterpolateVars(template, vars)
-
 // Sort version strings descending (newest first). Returns a new slice.
 sorted := utils.SortVersionsDescending(versions)
 
@@ -68,18 +67,7 @@ sorted := utils.SortVersionsDescending(versions)
 styled := utils.HighlightTemplatePlaceholders(pattern)
 ```
 
-### Version Constraint Helpers
-
-```go
-// Split "samtools/1.22.1>=1.10" → ("samtools/1.22.1", ">=", "1.10")
-nv, op, minVer := utils.SplitDepConstraint(raw)
-
-// Compare partial version strings ("1.10" == "1.10.0"). Returns -1/0/1.
-cmp := utils.CompareVersions(a, b)
-
-// True if installedVersion satisfies op+minVersion and does not exceed preferredVersion.
-// preferredVersion="" skips the upper bound check.
-ok := utils.DepSatisfiedByVersion(installed, op, minVersion, preferredVersion)
-```
-
-`#DEP:name/version>=min` semantics: the preferred version is the implicit upper bound. An installed version is accepted if `min <= installed <= preferred`.
+Names, versions and dependency constraints live in `catalog`, so one string
+resolves one way everywhere: `catalog.Normalize`, `catalog.CompareVersions`,
+`catalog.ParseDep` and `Dep.Satisfies`. Template matching and `#PH:`/`#VALUE:`
+value lists likewise: `catalog.NewTemplate` and `catalog.ParseValues`.

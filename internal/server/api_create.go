@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
-	"github.com/Justype/condatainer/internal/utils"
 )
 
 // createExecutable returns the binary to run for install tasks.
@@ -28,7 +28,7 @@ var createExecutable = os.Executable
 // task ID immediately; progress is streamed via GET /api/tasks/{id}/stream.
 //
 // Request: {"name":"cellranger/9.0.1","answers":["..."]} — answers are piped
-// to the CLI's stdin, one per #INTERACTIVE prompt; without answers the CLI
+// to the CLI's stdin, one per #INPUT: declaration; without answers the CLI
 // runs with --yes (empty responses).
 func (s *srv) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -54,7 +54,7 @@ func (s *srv) handleCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid name", http.StatusBadRequest)
 		return
 	}
-	name := utils.NormalizeNameVersion(raw)
+	name := catalog.Normalize(raw)
 
 	exe, err := createExecutable()
 	if err != nil {

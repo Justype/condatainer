@@ -9,6 +9,7 @@ import (
 
 	"log/slog"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/container"
 	execpkg "github.com/Justype/condatainer/internal/exec"
@@ -32,9 +33,6 @@ func getAllBaseDirs() []string {
 
 	for _, entry := range config.GetExtraImageDirs() {
 		path, _ := config.ParseDirEntry(entry)
-		addIfExists(path)
-	}
-	for _, path := range config.GetExtraBuildDirs() {
 		addIfExists(path)
 	}
 	addIfExists(config.GetExtraRootDir())
@@ -126,7 +124,10 @@ func (b *BuildObject) buildDependencies(ctx context.Context, buildDeps bool) err
 	for _, dep := range missingDeps {
 		// Strip any version constraint (e.g. "samtools/1.21>=1.16" → "samtools/1.21")
 		// before passing to NewBuildObject, which expects a plain name/version.
-		preferredNV, _, _ := utils.SplitDepConstraint(dep)
+		preferredNV := dep
+		if parsed, err := catalog.ParseDep(dep); err == nil {
+			preferredNV = parsed.NameVersion()
+		}
 		depObj, err := NewBuildObject(ctx, preferredNV, false, writableImagesDir, config.GetWritableTmpDir(), false)
 		if err != nil {
 			return fmt.Errorf("failed to create build object for dependency %s: %w", preferredNV, err)
@@ -140,13 +141,21 @@ func (b *BuildObject) buildDependencies(ctx context.Context, buildDeps bool) err
 	return nil
 }
 
-// buildExecOpts constructs the exec.Options for running the build script inside the container.
+// hostPayload reports whether the payload is written to a host directory bound
+// into the container rather than into the tmp ext3 overlay. Dir mode always is;
+// with a tmp overlay only data is, since a 20GB ext3 cannot hold a genome index.
+func hostPayload(b *BuildObject) bool {
+	return !config.Global.Build.UseTmpOverlay || b.kind == catalog.KindData
+}
+
+// buildExecOpts constructs the exec.Options for running the build script inside
+// the container, plus the IO carrying any #INPUT: answers on stdin.
 func (b *BuildObject) buildExecOpts() (execpkg.Options, execpkg.IO, error) {
-	nameVersionParts := strings.Split(b.nameVersion, "/")
-	name := nameVersionParts[0]
-	version := "env"
-	if len(nameVersionParts) >= 2 {
-		version = nameVersionParts[1]
+	// Same splitter the catalog resolves with, so the two cannot disagree on
+	// where the name ends and the version begins (data names carry slashes).
+	dep, err := catalog.ParseDep(b.nameVersion)
+	if err != nil {
+		return execpkg.Options{}, execpkg.IO{}, err
 	}
 
 	effRS := buildEffectiveResourceSpec(b.scriptSpecs)
@@ -158,50 +167,40 @@ func (b *BuildObject) buildExecOpts() (execpkg.Options, execpkg.IO, error) {
 		MemPerNodeMB: effRS.MemPerNodeMB,
 	}
 
+	// Every build writes to /cnt/<name>/<version> — the path the artifact will be
+	// mounted at, so anything the payload bakes in stays valid at run time.
+	prefix := "/cnt/" + b.nameVersion
+
+	kind := b.kind
+	if kind == "" {
+		kind = catalog.KindApp
+	}
+
+	// NCPUS/MEM/... come from the scheduler, already normalized across SLURM,
+	// PBS and LSF, so this contract does not mint CNT_ spellings beside them.
 	envSettings := append(
 		scheduler.ResourceEnvVars(buildRS),
-		fmt.Sprintf("app_name=%s", name),
-		fmt.Sprintf("version=%s", version),
-		fmt.Sprintf("app_name_version=%s", b.nameVersion),
-		"tmp_dir=/ext3/tmp",
+		"CNT_NAME="+dep.Name,
+		"CNT_VERSION="+dep.Version,
+		"CNT_KIND="+string(kind),
+		"CNT_PREFIX="+prefix,
+		"CNT_TMP=/ext3/tmp",
 		"TMPDIR=/ext3/tmp",
 		"IN_CONDATAINER=1",
 	)
-
-	isRef := b.buildType == BuildTypeRef
-
-	if !config.Global.Build.UseTmpOverlay {
-		if isRef {
-			targetDir := filepath.Join(b.cntDirPath, b.nameVersion)
-			envSettings = append(envSettings, fmt.Sprintf("target_dir=%s", targetDir))
-		} else {
-			envSettings = append(envSettings, fmt.Sprintf("target_dir=/cnt/%s", b.nameVersion))
-		}
-	} else {
-		if isRef {
-			if err := utils.MkdirAllShared(b.cntDirPath); err != nil {
-				return execpkg.Options{}, execpkg.IO{}, fmt.Errorf("failed to create cnt_dir %s: %w", b.cntDirPath, err)
-			}
-			targetDir := filepath.Join(b.cntDirPath, b.nameVersion)
-			envSettings = append(envSettings, fmt.Sprintf("target_dir=%s", targetDir))
-		} else {
-			envSettings = append(envSettings, fmt.Sprintf("target_dir=/cnt/%s", b.nameVersion))
-		}
-	}
-
 	bashScript := fmt.Sprintf(`
 trap 'exit 130' INT TERM
 
 mkdir -p $TMPDIR
-bash %s
+bash -euo pipefail %s
 if [ $? -ne 0 ]; then
     echo "Build script %s failed."
     exit 1
 fi
 # Embed the build script next to the payload for provenance (skipped if the
 # script populated nothing — packOutput reports that as a build failure).
-if [ -d "$target_dir" ]; then
-    cp %s "$target_dir/%s" 2>/dev/null || true
+if [ -d "$CNT_PREFIX" ]; then
+    cp %s "$CNT_PREFIX/%s" 2>/dev/null || true
 fi
 `, b.buildSource, b.buildSource, b.buildSource, utils.BuildScriptName)
 
@@ -221,13 +220,17 @@ fi
 	}
 
 	bindDirs := container.DeduplicateBindPaths(getAllBaseDirs())
-	if !config.Global.Build.UseTmpOverlay {
-		buildTmpDir := getBuildTmpDir(b)
-		if isRef {
-			bindDirs = append(bindDirs, buildTmpDir+":/ext3/tmp", b.cntDirPath+":"+b.cntDirPath)
-		} else {
-			bindDirs = append(bindDirs, buildTmpDir+":/ext3/tmp", b.cntDirPath+":/cnt")
+	if hostPayload(b) {
+		// Bind the leaf, not /cnt: covering /cnt would hide every dependency
+		// overlay mounted beside it.
+		payloadDir := filepath.Join(b.cntDirPath, b.nameVersion)
+		if err := utils.MkdirAllShared(payloadDir); err != nil {
+			return execpkg.Options{}, execpkg.IO{}, fmt.Errorf("failed to create payload dir %s: %w", payloadDir, err)
 		}
+		bindDirs = append(bindDirs, payloadDir+":"+prefix)
+	}
+	if !config.Global.Build.UseTmpOverlay {
+		bindDirs = append(bindDirs, getBuildTmpDir(b)+":/ext3/tmp")
 	}
 
 	opts := execpkg.Options{
@@ -244,13 +247,13 @@ fi
 		opts.ApptainerFlags = []string{"--writable-tmpfs"}
 	}
 
+	// #INPUT: answers go in on stdin, one line each, for the recipe to `read`.
+	// Not an env var: apptainer shell-evaluates env values, so a $ or backtick
+	// in a pasted URL would be mangled or executed.
+	opts.PassThruStdin = true
 	var ioStreams execpkg.IO
 	if len(b.interactiveInputs) > 0 {
-		inputStr := strings.Join(b.interactiveInputs, "\n") + "\n"
-		opts.PassThruStdin = true
-		ioStreams.Stdin = strings.NewReader(inputStr)
-	} else {
-		opts.PassThruStdin = true
+		ioStreams.Stdin = strings.NewReader(strings.Join(b.interactiveInputs, "\n") + "\n")
 	}
 
 	return opts, ioStreams, nil
@@ -258,21 +261,6 @@ fi
 
 // runBuildScript sets up a context watcher and runs the build script.
 func (b *BuildObject) runBuildScript(ctx context.Context) error {
-	if len(b.vars) > 0 {
-		origSource := b.buildSource
-		subPath, err := substituteTemplateFile(origSource, b.vars, b.tmpDir)
-		if err != nil {
-			return fmt.Errorf("failed to substitute placeholders in build script: %w", err)
-		}
-		// Restore origSource so Cleanup() removes the real (possibly remote) source
-		// via isRemote. Only the substituted tmp script (subPath) is removed here.
-		defer func() {
-			os.Remove(subPath) //nolint:errcheck
-			b.buildSource = origSource
-		}()
-		b.buildSource = subPath
-	}
-
 	opts, ioStreams, err := b.buildExecOpts()
 	if err != nil {
 		return err
@@ -297,48 +285,34 @@ func (b *BuildObject) runBuildScript(ctx context.Context) error {
 	return nil
 }
 
-// packOutput determines the squashfs source directory and creates the SquashFS file.
+// packOutput squashes the payload into the target overlay.
+//
+// A host payload is packed from its build directory, whose basename is cnt, so
+// mksquashfs -keep-as-directory yields exactly cnt/<name>/<version>/... and
+// nothing else — the build's tmp/ is a sibling and never enters the archive.
 func (b *BuildObject) packOutput(ctx context.Context, finalPath string) error {
-	isRef := b.buildType == BuildTypeRef
-	var targetDir string
-	if isRef {
-		targetDir = filepath.Join(b.cntDirPath, b.nameVersion)
-	}
-
 	log := logging.FromContext(ctx)
+	isData := b.kind == catalog.KindData
 
-	if !config.Global.Build.UseTmpOverlay {
-		checkDir := b.cntDirPath
-		if isRef && targetDir != "" {
-			checkDir = targetDir
-		}
-		if entries, err := os.ReadDir(checkDir); err != nil || len(entries) == 0 {
+	if hostPayload(b) {
+		payloadDir := filepath.Join(b.cntDirPath, b.nameVersion)
+		if entries, err := os.ReadDir(payloadDir); err != nil || len(entries) == 0 {
 			b.Cleanup(true)
-			return fmt.Errorf("build script did not create any files in %s", checkDir)
+			return fmt.Errorf("build script did not create any files in %s", payloadDir)
 		}
 		log.Info("creating SquashFS", "source", b.cntDirPath, "overlay", filepath.Base(b.targetOverlayPath))
-		if err := createSquashfs(ctx, b, isRef, b.cntDirPath, finalPath); err != nil {
+		if err := createSquashfs(ctx, b, isData, b.cntDirPath, finalPath); err != nil {
 			b.Cleanup(true)
 			return err
 		}
-	} else if isRef {
-		if entries, err := os.ReadDir(targetDir); err != nil || len(entries) == 0 {
-			b.Cleanup(true)
-			return fmt.Errorf("overlay build script did not create any files in %s", targetDir)
-		}
-		log.Info("creating SquashFS", "source", b.cntDirPath, "overlay", filepath.Base(b.targetOverlayPath))
-		if err := createSquashfs(ctx, b, isRef, b.cntDirPath, finalPath); err != nil {
-			b.Cleanup(true)
-			return err
-		}
-	} else {
-		log.Info("preparing SquashFS from /cnt", "overlay", filepath.Base(b.targetOverlayPath))
-		if err := createSquashfs(ctx, b, isRef, "/cnt", finalPath); err != nil {
-			b.Cleanup(true)
-			return err
-		}
+		return nil
 	}
 
+	log.Info("preparing SquashFS from /cnt", "overlay", filepath.Base(b.targetOverlayPath))
+	if err := createSquashfs(ctx, b, isData, "/cnt", finalPath); err != nil {
+		b.Cleanup(true)
+		return err
+	}
 	return nil
 }
 

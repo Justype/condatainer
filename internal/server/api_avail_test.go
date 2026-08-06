@@ -9,35 +9,29 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Justype/condatainer/internal/build"
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 )
 
-// setTestBuildScripts points the build-script scan at dir (remote disabled)
-// and disables the on-disk scripts cache for the test.
-func setTestBuildScripts(t *testing.T, dir string) {
+// setTestSource points the catalog at a single filesystem collection.
+func setTestSource(t *testing.T, root string) {
 	t.Helper()
-	oldDirs := config.GlobalDataPaths.BuildScriptsDirs
-	oldLinks := config.Global.ScriptsLinks
-	oldRefresh := build.ForceRefresh
-	oldDistro := config.Global.DefaultDistro
-	config.GlobalDataPaths.BuildScriptsDirs = []string{dir}
-	config.Global.ScriptsLinks = nil
-	build.ForceRefresh = true
-	if config.Global.DefaultDistro == "" {
-		config.Global.DefaultDistro = "ubuntu24"
-	}
+	oldSources := config.Global.Sources
+	oldBase := config.Global.Base
+	config.Global.Sources = []catalog.Spec{{Name: "test", Base: root}}
+	config.Global.Base = "ubuntu24"
+	config.ResetCatalog()
 	t.Cleanup(func() {
-		config.GlobalDataPaths.BuildScriptsDirs = oldDirs
-		config.Global.ScriptsLinks = oldLinks
-		build.ForceRefresh = oldRefresh
-		config.Global.DefaultDistro = oldDistro
+		config.Global.Sources = oldSources
+		config.Global.Base = oldBase
+		config.ResetCatalog()
 	})
 }
 
+// writeScript writes a recipe into a collection's recipes/ tree.
 func writeScript(t *testing.T, dir, relPath, content string) {
 	t.Helper()
-	p := filepath.Join(dir, relPath)
+	p := filepath.Join(dir, "recipes", relPath)
 	if err := os.MkdirAll(filepath.Dir(p), 0o775); err != nil {
 		t.Fatal(err)
 	}
@@ -50,12 +44,12 @@ func writeScript(t *testing.T, dir, relPath, content string) {
 // marked, and template scripts appear collapsed (variants suppressed).
 func TestHandleAvail(t *testing.T) {
 	scriptsDir := t.TempDir()
-	writeScript(t, scriptsDir, "foo/1.0", "#!/usr/bin/bash\n#WHATIS:Test tool\ninstall_app() { :; }\n")
+	writeScript(t, scriptsDir, "foo/1.0", "#!/usr/bin/bash\n#WHATIS:Test tool\necho hi\n")
 	writeScript(t, scriptsDir, "bar/gen",
-		"#!/usr/bin/bash\n#PL:ver:2.0,1.0\n#TARGET:bar/{ver}\ninstall_app() { :; }\n")
+		"#!/usr/bin/bash\n#PH:ver:2.0,1.0\n#TARGET:bar/{ver}\necho hi\n")
 	writeScript(t, scriptsDir, "ubuntu24/build-essential",
-		"#!/usr/bin/bash\ninstall_app() { :; }\n")
-	setTestBuildScripts(t, scriptsDir) // sets DefaultDistro=ubuntu24
+		"#!/usr/bin/bash\necho hi\n")
+	setTestSource(t, scriptsDir)
 
 	imgDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(imgDir, "foo--1.0.sqf"), []byte("x"), 0o664); err != nil {
@@ -75,8 +69,8 @@ func TestHandleAvail(t *testing.T) {
 		Alias      string              `json:"alias"`
 		Whatis     string              `json:"whatis"`
 		IsTemplate bool                `json:"is_template"`
-		PL         map[string][]string `json:"pl"`
-		PLOrder    []string            `json:"pl_order"`
+		PH         map[string][]string `json:"ph"`
+		PHNames    []string            `json:"ph_names"`
 		Installed  bool                `json:"installed"`
 	}
 	var entries []entry
@@ -99,8 +93,8 @@ func TestHandleAvail(t *testing.T) {
 	if !ok {
 		t.Fatalf("template bar/gen missing from %v", byName)
 	}
-	if !tmpl.IsTemplate || len(tmpl.PLOrder) != 1 || tmpl.PLOrder[0] != "ver" || len(tmpl.PL["ver"]) != 2 {
-		t.Errorf("template entry = %+v, want is_template with pl ver:[2.0 1.0]", tmpl)
+	if !tmpl.IsTemplate || len(tmpl.PHNames) != 1 || tmpl.PHNames[0] != "ver" || len(tmpl.PH["ver"]) != 2 {
+		t.Errorf("template entry = %+v, want is_template with ph ver:[2.0 1.0]", tmpl)
 	}
 	// Expanded variants must be suppressed (collapsed view).
 	for _, v := range []string{"bar/2.0", "bar/1.0"} {
@@ -122,8 +116,8 @@ func TestHandleAvail(t *testing.T) {
 func TestHandleAvailInspect(t *testing.T) {
 	scriptsDir := t.TempDir()
 	writeScript(t, scriptsDir, "baz/1.0",
-		"#!/usr/bin/bash\n#INTERACTIVE:Enter download URL\ninstall_app() { :; }\n")
-	setTestBuildScripts(t, scriptsDir)
+		"#!/usr/bin/bash\n#INPUT:Enter download URL\necho hi\n")
+	setTestSource(t, scriptsDir)
 	setTestImagesDir(t, t.TempDir())
 
 	get := func(name string) map[string]interface{} {
