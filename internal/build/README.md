@@ -204,7 +204,7 @@ Overlays can export environment variables via `#ENV:` directives:
 #ENV:PATH=$app_root/bin:$PATH
 ```
 
-These live in the build script embedded inside the overlay. `$app_root` is resolved to the overlay's mount root at load time (see `internal/container` env handling).
+These live in the build script embedded inside the overlay. `$app_root` is resolved to the overlay's mount root at load time (see `internal/runtime/container` env handling).
 
 ## Tmp Directory Strategy
 

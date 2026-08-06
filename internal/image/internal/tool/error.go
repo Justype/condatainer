@@ -1,4 +1,4 @@
-package overlay
+package tool
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 )
 
 // Error represents a failure in filesystem tools (dd, mkfs, debugfs, etc.).
-// Usage: if err, ok := err.(*overlay.Error); ok { ... }
+// It is shared by the image format implementations.
 type Error struct {
 	Op      string // high level intent: "create", "resize"
 	Tool    string // low level tool: "mke2fs", "dd", "debugfs"

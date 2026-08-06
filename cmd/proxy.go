@@ -10,7 +10,7 @@ import (
 	"syscall"
 
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/proxy"
+	"github.com/Justype/condatainer/internal/runtime/proxy"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"

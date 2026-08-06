@@ -1,4 +1,4 @@
-package utils
+package apptainer
 
 import (
 	"bytes"
@@ -8,17 +8,22 @@ import (
 
 // Apptainer log-line prefixes, for selecting which lines to drop.
 const (
-	ApptainerWarning = "WARNING:"
-	ApptainerInfo    = "INFO:"
-	ApptainerDebug   = "DEBUG:"
-	ApptainerVerbose = "VERBOSE:"
-	ApptainerError   = "ERROR:"
-	ApptainerFatal   = "FATAL:"
+	ApptainerMessageWarning = "WARNING:"
+	ApptainerMessageInfo    = "INFO:"
+	ApptainerMessageDebug   = "DEBUG:"
+	ApptainerMessageVerbose = "VERBOSE:"
+	ApptainerMessageError   = "ERROR:"
+	ApptainerMessageFatal   = "FATAL:"
 )
 
-// ApptainerNonError lists the non-error log prefixes; dropping these keeps only
-// ERROR:/FATAL: and non-Apptainer output.
-var ApptainerNonError = []string{ApptainerWarning, ApptainerInfo, ApptainerDebug, ApptainerVerbose}
+// ApptainerMessageNonErrorPrefixes lists the non-error log prefixes; dropping
+// these keeps only ERROR:/FATAL: and non-Apptainer output.
+var ApptainerMessageNonErrorPrefixes = []string{
+	ApptainerMessageWarning,
+	ApptainerMessageInfo,
+	ApptainerMessageDebug,
+	ApptainerMessageVerbose,
+}
 
 // ApptainerFilter is an io.Writer that drops Apptainer log lines whose prefix is
 // in drop (e.g. noisy bind-mount warnings) and forwards the rest. Partial lines

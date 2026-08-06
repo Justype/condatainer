@@ -40,9 +40,6 @@ func fakeSource(t *testing.T) string {
 		t.Fatal(err)
 	}
 	entries := cat.Entries(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
 	data, err := json.Marshal(entries)
 	if err != nil {
 		t.Fatal(err)
@@ -66,9 +63,6 @@ func TestOpenDirSource(t *testing.T) {
 	}
 
 	entries := cat.Entries(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
 	want := []string{"cellranger/9.0.1", "grch38/star-gencode", "ubuntu24/base"}
 	if got := slices.Sorted(maps.Keys(entries)); !slices.Equal(got, want) {
 		t.Errorf("entries = %v, want %v (README.md skipped)", got, want)
@@ -149,9 +143,6 @@ func TestUnreachableSourceKeepsItsPlace(t *testing.T) {
 		t.Fatalf("catalog = %v", cat)
 	}
 	entries := cat.Entries(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
 	if cat[0].Err == nil {
 		t.Error("unreachable source should carry its error")
 	}

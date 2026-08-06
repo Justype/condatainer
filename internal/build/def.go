@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Justype/condatainer/internal/apptainer"
+	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )

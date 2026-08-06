@@ -11,8 +11,8 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/container"
-	execpkg "github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/runtime/container"
+	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
@@ -142,7 +142,7 @@ func (b *BuildObject) buildDependencies(ctx context.Context, buildDeps bool) err
 }
 
 // hostPayload reports whether the payload is written to a host directory bound
-// into the container rather than into the tmp ext3 overlay. Dir mode always is;
+// into the container rather than into the tmp ext3 image. Dir mode always is;
 // with a tmp overlay only data is, since a 20GB ext3 cannot hold a genome index.
 func hostPayload(b *BuildObject) bool {
 	return !config.Global.Build.UseTmpOverlay || b.kind == catalog.KindData
@@ -285,7 +285,7 @@ func (b *BuildObject) runBuildScript(ctx context.Context) error {
 	return nil
 }
 
-// packOutput squashes the payload into the target overlay.
+// packOutput squashes the payload into the target image.
 //
 // A host payload is packed from its build directory, whose basename is cnt, so
 // mksquashfs -keep-as-directory yields exactly cnt/<name>/<version>/... and

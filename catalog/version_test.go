@@ -1,7 +1,10 @@
 package catalog
 
 import (
+	"os"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -88,4 +91,42 @@ func TestPreReleaseLadder(t *testing.T) {
 	if !slices.Equal(shuffled, ladder) {
 		t.Errorf("ascending = %v, want %v", shuffled, ladder)
 	}
+}
+
+// TestSharedVersionCases pins CompareVersions to the same table the recipe
+// collection's generator is checked against.
+//
+// The index a collection publishes is consumed verbatim over HTTP while a local
+// checkout is parsed and sorted here, so a disagreement between the two would
+// make ph[0] — the default version offered to users — depend on how the
+// collection was read. Skips when no collection is checked out beside the repo.
+func TestSharedVersionCases(t *testing.T) {
+	const cases = "../recipe/scripts/version_cases.txt"
+	data, err := os.ReadFile(cases)
+	if err != nil {
+		t.Skip("no recipe collection checked out")
+	}
+	checked := 0
+	for i, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.Split(line, "|")
+		if len(parts) != 3 {
+			t.Errorf("%s:%d: malformed case %q", cases, i+1, line)
+			continue
+		}
+		want, err := strconv.Atoi(parts[2])
+		if err != nil {
+			t.Errorf("%s:%d: %v", cases, i+1, err)
+			continue
+		}
+		if got := CompareVersions(parts[0], parts[1]); got != want {
+			t.Errorf("%s:%d: CompareVersions(%q, %q) = %d, want %d",
+				cases, i+1, parts[0], parts[1], got, want)
+		}
+		checked++
+	}
+	t.Logf("%d shared cases agree", checked)
 }

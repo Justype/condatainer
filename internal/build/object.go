@@ -13,8 +13,8 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/logging"
-	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -298,14 +298,14 @@ func (b *BuildObject) CreateTmpOverlay(ctx context.Context, force bool) error {
 
 	logging.FromContext(ctx).Debug("creating temporary overlay", "path", b.tmpOverlayPath)
 
-	// Use overlay package to create ext3 overlay.
+	// Use overlay package to create ext3 image.
 	// For build overlays, we use a temporary size from config (default 20GB).
 	// Use "default" profile, sparse=true for faster creation.
 	// quiet=true suppresses detailed specs output since users don't need to see those for temp overlays.
-	if err := overlay.CreateWithOptions(ctx, &overlay.CreateOptions{
+	if err := ext3.CreateWithOptions(ctx, &ext3.CreateOptions{
 		Path: b.tmpOverlayPath, SizeMB: config.Global.Build.TmpSizeMB,
 		UID: os.Getuid(), GID: os.Getgid(),
-		Profile: overlay.ProfileDefault, Sparse: true, FilesystemType: "ext3", Quiet: true,
+		Profile: ext3.ProfileDefault, Sparse: true, FilesystemType: "ext3", Quiet: true,
 	}); err != nil {
 		return fmt.Errorf("failed to create temporary overlay: %w", err)
 	}
@@ -407,7 +407,7 @@ func (b *BuildObject) Cleanup(failed bool) error {
 	if failed && b.targetOverlayPath != "" {
 		if b.update {
 			// In update mode the build writes to targetOverlayPath+".new"; preserve the
-			// existing target so a failed update doesn't destroy the installed overlay.
+			// existing target so a failed update doesn't destroy the installed image.
 			newPath := b.targetOverlayPath + ".new"
 			if err := os.Remove(newPath); err != nil && !os.IsNotExist(err) {
 				log.Warn("failed to remove partial new overlay", "path", newPath, "err", err)
@@ -542,7 +542,7 @@ func (b *BuildObject) resolveResourceSpec() error {
 // NewBuildObject creates a BuildObject from a name/version string
 // Format: "name/version" for conda/shell, "name" for def, "prefix/name/version" for ref
 // All overlays are stored in imagesDir regardless of type
-func NewBuildObject(ctx context.Context, nameVersion string, external bool, imagesDir, tmpDir string, update bool) (*BuildObject, error) {
+func NewBuildObject(ctx context.Context, nameVersion string, external bool, imagesDir string, _ string, update bool) (*BuildObject, error) {
 	normalized := catalog.Normalize(nameVersion)
 
 	// Handle channel annotation (e.g. "bioconda::star/2.7.11b"):
@@ -566,7 +566,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 
 	// Use fast local storage for app builds; keep a stable path for data.
 	// Def builds will override this in createConcreteType via resolveTmpDirForDef.
-	tmpDir = tmpRootForKind(kind)
+	tmpDir := tmpRootForKind(kind)
 
 	// Make tmpDir absolute
 	if absDir, err := filepath.Abs(tmpDir); err == nil {
@@ -657,11 +657,11 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 // buildSource can be:
 //   - Path to YAML file (e.g., "/path/to/environment.yml")
 //   - Comma-separated package list (e.g., "nvim,nodejs,samtools/1.16")
-func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, tmpDir string, update bool) (*BuildObject, error) {
+func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, _ string, update bool) (*BuildObject, error) {
 	normalized := catalog.Normalize(nameVersion)
 
 	// Conda builds always use fast local storage
-	tmpDir = resolveTmpDirForConda()
+	tmpDir := resolveTmpDirForConda()
 
 	// Make tmpDir absolute
 	if absDir, err := filepath.Abs(tmpDir); err == nil {

@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/image/squashfs"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -99,7 +99,7 @@ func readEmbeddedEnv(overlayPath, prefix string) (whatis string, configs, notes 
 	// The payload (and its embedded script) lives at cnt/<name>/<version>/ inside
 	// the archive, mirroring the /cnt/<name>/<version> mount root.
 	scriptPath := strings.TrimPrefix(prefix, "/") + "/" + utils.BuildScriptName
-	data := overlay.Cat(overlayPath, scriptPath)
+	data := squashfs.Cat(overlayPath, scriptPath)
 	if len(data) == 0 {
 		return whatis, configs, notes
 	}

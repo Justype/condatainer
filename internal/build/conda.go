@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -119,7 +119,7 @@ trap 'exit 130' INT TERM
 set -e
 
 mkdir -p $TMPDIR
-%[1]s "Creating conda environment in overlay..."
+%[1]s "Creating conda environment in image..."
 %[2]s
 
 if [ -z "$(ls -A /cnt 2>/dev/null)" ]; then

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/image/squashfs"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -54,7 +54,7 @@ func BuildPathEnv(overlays []string) string {
 		if utils.IsImg(cleanOverlay) {
 			relative = "/cnt_env/bin"
 		} else if utils.IsSqf(cleanOverlay) {
-			if !overlay.HasCntBin(cleanOverlay, normalized) {
+			if !squashfs.HasCntBin(cleanOverlay, normalized) {
 				continue
 			}
 			relative = fmt.Sprintf("/cnt/%s/bin", normalized)

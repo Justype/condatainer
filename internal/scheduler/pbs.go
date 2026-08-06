@@ -401,7 +401,7 @@ func (p *PbsScheduler) parseResourceList(resourceStr string, rs *ResourceSpec) e
 
 		// Reject legacy nodes=N:ppn=M format to induce passthrough
 		if strings.HasPrefix(res, "nodes=") {
-			return fmt.Errorf("Old style nodes=... directives are not supported; please use select=... syntax")
+			return fmt.Errorf("old style nodes=... directives are not supported; please use select=... syntax")
 		}
 
 		if err := p.parseSingleResource(res, rs); err != nil {

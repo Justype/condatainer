@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/apptainer"
+	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/config"
-	execpkg "github.com/Justype/condatainer/internal/exec"
-	"github.com/Justype/condatainer/internal/overlay"
+	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
+	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -68,7 +68,7 @@ var runCmd = &cobra.Command{
 
 The script can contain special comment tags:
   #DEP: package/version   - Declares a dependency (auto-loaded)
-  #DEP: /path/overlay.img - Declares an overlay dependency (.sqf and .img)
+  #DEP: /path/image.img - Declares an overlay dependency (.sqf and .img)
   #CNT args               - Extra condatainer args (see Container Flags below)`,
 	Example: `  condatainer run script.sh                         # Run with dependency check
   condatainer run script.sh arg1 arg2               # Pass arguments to the script
@@ -422,7 +422,7 @@ func resolveDeps(contentScript, originScriptPath string) (overlays []string, err
 	// Check .img availability before submitting or running locally
 	for _, ol := range overlays {
 		if utils.IsImg(ol) && utils.FileExists(ol) {
-			if err := overlay.CheckAvailable(ol, runWritableImg); err != nil {
+			if err := image.CheckAvailable(ol, runWritableImg); err != nil {
 				return nil, err
 			}
 		}

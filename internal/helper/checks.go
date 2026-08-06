@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -47,7 +47,7 @@ func CheckEnv(ctx context.Context, path string) (EnvStatus, error) {
 	st.SizeMB = info.Size() / (1024 * 1024)
 	st.Writable = utils.IsImg(path)
 
-	if err := overlay.CheckAvailable(path, st.Writable); err != nil {
+	if err := image.CheckAvailable(path, st.Writable); err != nil {
 		st.InUse = true
 	}
 	return st, nil

@@ -1,4 +1,4 @@
-package overlay
+package image
 
 import (
 	"fmt"
@@ -34,23 +34,23 @@ func AcquireLock(path string, write bool) (*Lock, error) {
 	if write {
 		f, err := os.OpenFile(path, os.O_RDWR, 0)
 		if err != nil {
-			return nil, fmt.Errorf("Can't open %s for writing, currently in use", utils.StylePath(path))
+			return nil, fmt.Errorf("can't open %s for writing, currently in use", utils.StylePath(path))
 		}
 		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err != nil {
 			f.Close()
-			return nil, fmt.Errorf("Can't open %s for writing, currently in use", utils.StylePath(path))
+			return nil, fmt.Errorf("can't open %s for writing, currently in use", utils.StylePath(path))
 		}
 		return &Lock{file: f, path: path, write: true}, nil
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("Can't open %s for reading, currently in use for writing", utils.StylePath(path))
+		return nil, fmt.Errorf("can't open %s for reading, currently in use for writing", utils.StylePath(path))
 	}
 	err = syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB)
 	if err != nil {
 		f.Close()
-		return nil, fmt.Errorf("Can't open %s for reading, currently in use for writing", utils.StylePath(path))
+		return nil, fmt.Errorf("can't open %s for reading, currently in use for writing", utils.StylePath(path))
 	}
 	return &Lock{file: f, path: path, write: false}, nil
 }

@@ -9,7 +9,8 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/image/squashfs"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -273,7 +274,7 @@ func performDelete(cmd *cobra.Command, names []string, showListing ...bool) erro
 			utils.PrintWarning("Overlay %s is in a read-only directory and cannot be removed.", utils.StyleName(name))
 			continue
 		}
-		if lock, err := overlay.AcquireLock(overlayPath, true); err != nil {
+		if lock, err := image.AcquireLock(overlayPath, true); err != nil {
 			utils.PrintError("Cannot remove %s: overlay is currently in use", utils.StyleName(name))
 			continue
 		} else {
@@ -283,7 +284,7 @@ func performDelete(cmd *cobra.Command, names []string, showListing ...bool) erro
 			utils.PrintError("Failed to remove overlay %s: %v", utils.StyleName(name), err)
 			continue
 		}
-		overlay.ForgetOSType(overlayPath)
+		squashfs.ForgetOSType(overlayPath)
 		utils.PrintSuccess("Overlay %s removed.", utils.StyleName(name))
 		envPath := overlayPath + ".env"
 		if utils.FileExists(envPath) {
@@ -338,7 +339,7 @@ func removeExternalOverlays(cmd *cobra.Command, paths []string) error {
 			utils.PrintWarning("Overlay %s is in a read-only directory and cannot be removed.", utils.StyleName(filepath.Base(p)))
 			continue
 		}
-		if lock, err := overlay.AcquireLock(p, true); err != nil {
+		if lock, err := image.AcquireLock(p, true); err != nil {
 			utils.PrintError("Cannot remove %s: overlay is currently in use", utils.StyleName(filepath.Base(p)))
 			continue
 		} else {
@@ -348,7 +349,7 @@ func removeExternalOverlays(cmd *cobra.Command, paths []string) error {
 			utils.PrintError("Failed to remove %s: %v", utils.StyleName(filepath.Base(p)), err)
 			continue
 		}
-		overlay.ForgetOSType(p)
+		squashfs.ForgetOSType(p)
 		utils.PrintSuccess("Overlay %s removed.", utils.StyleName(filepath.Base(p)))
 		envPath := p + ".env"
 		if utils.FileExists(envPath) {

@@ -66,7 +66,7 @@ proxy.DialGoSSH(sshDest string) (DialFunc, func(), <-chan struct{}, error)
 ## Usage
 
 `proxy.GetJobProxy()` is the call site for injection — resolves once per process via `sync.Once`,
-no-ops on login nodes. Used by `internal/exec/run.go` (container env vars) and
+no-ops on login nodes. Used by `internal/runtime/exec/run.go` (container env vars) and
 `internal/build/fetch.go` (HTTP transport).
 
 ## Daemon Readiness Protocol
@@ -77,4 +77,3 @@ no-ops on login nodes. Used by `internal/exec/run.go` (container env vars) and
 2. Daemon closes `pw` (EOF) once tunnel is up and PID file is written → success
 3. Daemon writes an error message before closing → startup failed, surfaced to user
 4. Parent blocks on `io.ReadAll(pr)` — no polling needed
-

@@ -199,7 +199,7 @@ func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 	setTestSource(t, writeRecipe(t, "cellranger/8.0.1",
 		"#!/bin/bash\n#INPUT:Please enter the license key\n"))
 
-	// Simulate a build in progress: create a live JSON lock file next to the target overlay.
+	// Simulate a build in progress: create a live JSON lock file next to the target image.
 	// Use the current process PID and hostname so isBuildLockStale() treats it as active.
 	// NewBuildObject overrides tmpDir via resolveTmpDirForConda(), so tmp artifacts
 	// in the caller-supplied tmpDir are invisible to it. The build-in-progress guard

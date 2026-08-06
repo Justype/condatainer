@@ -1,4 +1,4 @@
-package overlay
+package ext3
 
 import (
 	"bytes"
@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/Justype/condatainer/internal/image/internal/tool"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -104,13 +105,13 @@ func createOverlayFile(ctx context.Context, opts *CreateOptions, filePath string
 	} else {
 		ddArgs = append(ddArgs, fmt.Sprintf("count=%d", opts.SizeMB), "status=progress")
 	}
-	if err := runCommand(ctx, "create_file", opts.Path, "dd", ddArgs...); err != nil {
+	if err := tool.RunCommand(ctx, "create_file", opts.Path, "dd", ddArgs...); err != nil {
 		cleanup()
 		return err
 	}
 
 	// 2. Format filesystem (mke2fs)
-	if err := runCommand(ctx, "format", opts.Path, "mke2fs",
+	if err := tool.RunCommand(ctx, "format", opts.Path, "mke2fs",
 		"-t", opts.FilesystemType,
 		"-i", fmt.Sprintf("%d", opts.Profile.InodeRatio),
 		"-m", fmt.Sprintf("%d", opts.Profile.ReservedPerc),
@@ -141,7 +142,7 @@ func createOverlayFile(ctx context.Context, opts *CreateOptions, filePath string
 	}
 	if execErr := cmd.Run(); execErr != nil {
 		cleanup()
-		return &Error{
+		return &tool.Error{
 			Op:      "inject structure",
 			Path:    opts.Path,
 			Tool:    "debugfs",
@@ -257,7 +258,7 @@ func createAtTmp(ctx context.Context, opts *CreateOptions) (tmpPath string, err 
 		return "", err
 	}
 
-	if err := checkDependencies([]string{"dd", "mke2fs", "debugfs"}); err != nil {
+	if err := tool.CheckDependencies([]string{"dd", "mke2fs", "debugfs"}); err != nil {
 		return "", err
 	}
 
@@ -292,7 +293,7 @@ func CreateDirectly(ctx context.Context, opts *CreateOptions) error {
 		return err
 	}
 
-	if err := checkDependencies([]string{"dd", "mke2fs", "debugfs"}); err != nil {
+	if err := tool.CheckDependencies([]string{"dd", "mke2fs", "debugfs"}); err != nil {
 		return err
 	}
 

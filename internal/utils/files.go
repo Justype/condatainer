@@ -21,17 +21,17 @@ const PermDir os.FileMode = 0775
 const PermExec os.FileMode = 0775
 
 // BuildScriptName is the file a script/ref build embeds under its payload dir
-// (/cnt/<name>/<version>/) to record the recipe that produced the overlay.
+// (/cnt/<name>/<version>/) to record the recipe that produced the image.
 const BuildScriptName = ".cnt-build-script"
 
 // BuildScriptDefName is the file a def or scheme:// (docker://) build embeds at
-// the overlay root to record the definition that produced the overlay.
+// the overlay root to record the definition that produced the image.
 const BuildScriptDefName = ".cnt-build-script.def"
 
 // --- Extension Checks (String-based) ---
 
 // IsImg checks if the path has an ext3 overlay extension (.img, .ext3).
-// Note: In Apptainer context, these imply a writable ext3 overlay.
+// Note: In Apptainer context, these imply a writable ext3 image.
 func IsImg(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	return ext == ".img" || ext == ".ext3"

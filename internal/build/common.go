@@ -15,9 +15,9 @@ import (
 	"log/slog"
 
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/container"
+	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/logging"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -65,7 +65,7 @@ func checkShouldBuild(b *BuildObject) (skip bool, err error) {
 		}
 	}
 	if b.update && utils.FileExists(b.targetOverlayPath) {
-		if lock, err := overlay.AcquireLock(b.targetOverlayPath, true); err != nil {
+		if lock, err := image.AcquireLock(b.targetOverlayPath, true); err != nil {
 			return false, fmt.Errorf("cannot update %s: %w", b.nameVersion, err)
 		} else {
 			lock.Close()

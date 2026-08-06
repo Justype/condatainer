@@ -1,4 +1,4 @@
-package overlay
+package ext3
 
 import (
 	"os"
@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/Justype/condatainer/internal/image/internal/tool"
 )
 
 // Stats holds metadata about the overlay filesystem.
@@ -37,7 +39,7 @@ type Stats struct {
 
 // GetStats reads the filesystem superblock to calculate usage without mounting.
 func GetStats(path string) (*Stats, error) {
-	if err := checkDependencies([]string{"tune2fs"}); err != nil {
+	if err := tool.CheckDependencies([]string{"tune2fs"}); err != nil {
 		return nil, err
 	}
 
@@ -46,7 +48,7 @@ func GetStats(path string) (*Stats, error) {
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LC_TIME=C")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, &Error{Op: "read stats", Path: path, Tool: "tune2fs", BaseErr: err}
+		return nil, &tool.Error{Op: "read stats", Path: path, Tool: "tune2fs", BaseErr: err}
 	}
 
 	stats := &Stats{

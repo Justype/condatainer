@@ -8,9 +8,11 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/container"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/image/ext3"
+	"github.com/Justype/condatainer/internal/image/squashfs"
+	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -89,21 +91,21 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 // (both run with LC_ALL=C) and reformats them as "2006-01-02 15:04:05".
 // Falls back to the original string if parsing fails.
 func normalizeTime(s string) string {
-	if t, ok := overlay.ParseStatTime(s); ok {
+	if t, ok := squashfs.ParseStatTime(s); ok {
 		return t.Format("2006-01-02 15:04:05")
 	}
 	return s
 }
 
-// displaySqfInfo prints rich info for a SquashFS overlay.
+// displaySqfInfo prints rich info for a SquashFS image.
 func displaySqfInfo(overlayPath string) error {
 	fileInfo, err := os.Stat(overlayPath)
 	if err != nil {
 		return fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	sqStats, unsquashfsErr := overlay.GetSquashFSStats(overlayPath)
-	overlayType := overlay.GetOverlayType(overlayPath)
+	sqStats, unsquashfsErr := squashfs.GetSquashFSStats(overlayPath)
+	overlayType := squashfs.GetOverlayType(overlayPath)
 
 	// File section
 	fmt.Println(utils.StyleTitle("File"))
@@ -115,7 +117,7 @@ func displaySqfInfo(overlayPath string) error {
 		fmt.Printf("  %-14s %s (Read-Only)\n", "Type:", utils.StyleInfo(overlayType))
 	}
 	if overlayType == "OS Overlay" {
-		if osInfo := overlay.GetOSInfo(overlayPath); osInfo != nil {
+		if osInfo := squashfs.GetOSInfo(overlayPath); osInfo != nil {
 			fmt.Printf("  %-14s %s\n", "Distro:", osInfo.String())
 		}
 	}
@@ -127,7 +129,7 @@ func displaySqfInfo(overlayPath string) error {
 	// OS overlays carry no version in their name, so their distribution tag is the
 	// build date (mksquashfs creation time).
 	if overlayType == "OS Overlay" && sqStats != nil && sqStats.CreatedTime != "" {
-		if t, ok := overlay.ParseStatTime(sqStats.CreatedTime); ok {
+		if t, ok := squashfs.ParseStatTime(sqStats.CreatedTime); ok {
 			fmt.Printf("  %-14s %s\n", "Build Tag:", t.Format("2006.01.02"))
 		}
 	}
@@ -171,7 +173,7 @@ func displaySqfInfo(overlayPath string) error {
 // displayImgInfo prints rich info for an ext3 overlay image,
 // identical to what `condatainer overlay info` shows.
 func displayImgInfo(overlayPath string) error {
-	stats, err := overlay.GetStats(overlayPath)
+	stats, err := ext3.GetStats(overlayPath)
 	if err != nil {
 		return fmt.Errorf("failed to get stats: %w", err)
 	}
@@ -280,7 +282,7 @@ func displayWhatis(overlayPath string) {
 // a "Conda Env" section with the channels and explicitly-installed packages.
 // Silently does nothing if the history file is absent or unreadable.
 func displayCondaEnv(overlayPath, envPrefix string) {
-	info := overlay.ReadCondaInfo(overlayPath, envPrefix)
+	info := conda.ReadCondaInfo(overlayPath, envPrefix)
 	if info == nil {
 		return
 	}

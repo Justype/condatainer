@@ -15,10 +15,11 @@ import (
 	"time"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/container"
+	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/logging"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -209,9 +210,9 @@ func ResolveEnvOverlayInDir(envImg, cwd string) string {
 	return utils.FindEnvOverlay(envImg, cwd)
 }
 
-// checkOverlayIntegrity calls overlay.CheckIntegrity on the given image file.
+// checkOverlayIntegrity calls ext3.CheckIntegrity on the given image file.
 func checkOverlayIntegrity(ctx context.Context, imgPath string) error {
-	return overlay.CheckIntegrity(ctx, imgPath, false)
+	return ext3.CheckIntegrity(ctx, imgPath, false)
 }
 
 // resolveOverlayTemplate substitutes {KEY} tokens in the #REQUIRED_OVERLAYS: template
@@ -292,7 +293,7 @@ func checkAndInstallNamedOverlays(ctx context.Context, names []string) ([]string
 // are first substituted from params.
 //
 // Skipped (returns nil) when ImgPackages is empty or envImg is empty.
-// Uses overlay.ListCondaPackages (debugfs) — no container launch required.
+// Uses conda.ListCondaPackages (debugfs) — no container launch required.
 // Supports conda-style version constraints: =, ==, >=, <=, >, <, !=.
 func checkPackages(meta HelperScriptMeta, envImg string, params map[string]string) error {
 	if meta.ImgPackages == "" || envImg == "" {
@@ -305,7 +306,7 @@ func checkPackages(meta HelperScriptMeta, envImg string, params map[string]strin
 		resolved = strings.ReplaceAll(resolved, "{"+k+"}", v)
 	}
 
-	installed, err := overlay.ListCondaPackages(envImg)
+	installed, err := conda.ListCondaPackages(envImg)
 	if err != nil {
 		return fmt.Errorf("reading conda packages from %s: %w", envImg, err)
 	}

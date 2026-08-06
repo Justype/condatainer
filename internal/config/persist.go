@@ -352,7 +352,7 @@ func resolveWritableConfigPath(layer string) (path, layerType, fellBackFrom stri
 		layerType = NormalizeConfigLayer(layer)
 		if !utils.CanWriteToFile(path) {
 			return "", "", "", fmt.Errorf(
-				"config layer '%s' is read-only: %s\nUse a different layer or run with appropriate permissions.",
+				"config layer '%s' is read-only: %s\nuse a different layer or run with appropriate permissions",
 				layerType, path,
 			)
 		}
@@ -373,7 +373,7 @@ func resolveWritableConfigPath(layer string) (path, layerType, fellBackFrom stri
 	if fellBackFrom == "user" {
 		// The user's own config is unwritable; falling back to itself would loop.
 		return "", "", "", fmt.Errorf(
-			"user config is read-only: %s\nFix its permissions to change settings.", path,
+			"user config is read-only: %s\nfix its permissions to change settings", path,
 		)
 	}
 	return path, "user", fellBackFrom, nil

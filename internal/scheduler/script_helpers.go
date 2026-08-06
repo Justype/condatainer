@@ -232,7 +232,11 @@ func writeJobHeader(w io.Writer, jobIDVar string, specs *ScriptSpecs, formatTime
 	fmt.Fprintln(w, "_format_time() { local s=$1; printf '%02d:%02d:%02d' $((s/3600)) $((s%3600/60)) $((s%60)); }")
 	fmt.Fprintln(w, "echo \"========================================\"")
 	fmt.Fprintf(w, "echo \"Job ID:     %s\"\n", jobIDVar)
-	fmt.Fprintf(w, "echo \"Job Name:   %s\"\n", specs.Control.JobName)
+	jobName := ""
+	if specs != nil {
+		jobName = specs.Control.JobName
+	}
+	fmt.Fprintf(w, "echo \"Job Name:   %s\"\n", jobName)
 	if specs != nil && specs.ScriptPath != "" {
 		fmt.Fprintf(w, "echo \"Script:     %s\"\n", specs.ScriptPath)
 	}

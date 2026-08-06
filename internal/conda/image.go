@@ -1,67 +1,25 @@
-package overlay
+package conda
 
 import (
-	"bytes"
 	"encoding/json"
-	"os/exec"
 	"strings"
 
-	condapkg "github.com/Justype/condatainer/internal/conda"
-	"github.com/Justype/condatainer/internal/utils"
+	"github.com/Justype/condatainer/internal/image"
 )
 
 // CondaInfo holds the channels and explicitly-requested packages parsed
-// from a conda-meta/history file inside an overlay.
+// from a conda-meta/history file inside an image.
 type CondaInfo struct {
 	Channels []string
 	Specs    []string
 }
 
-// ReadFile reads a file at innerPath from inside an overlay image.
-// For .sqf overlays it uses unsquashfs -cat; for .img overlays it uses debugfs.
-// Returns nil if the file cannot be read.
-func ReadFile(overlayPath, innerPath string) []byte {
-	if utils.IsSqf(overlayPath) {
-		return Cat(overlayPath, innerPath)
-	}
-	if utils.IsImg(overlayPath) {
-		return imgCat(overlayPath, innerPath)
-	}
-	return nil
-}
-
-// imgCat reads a file from inside an ext3 overlay image using debugfs.
-// Writable content lives under "upper/", so "/cnt_env/conda-meta/history"
-// is read as "upper/cnt_env/conda-meta/history". Returns nil if absent —
-// debugfs exits 0 for a missing file, so we catch it from its stderr.
-func imgCat(imgPath, innerPath string) []byte {
-	dbg, err := exec.LookPath("debugfs")
-	if err != nil {
-		return nil
-	}
-	inner := strings.TrimPrefix(innerPath, "/")
-	catArg := "cat upper/" + inner
-	cmd := exec.Command(dbg, "-R", catArg, imgPath)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return nil
-	}
-	// debugfs reports a missing path on stderr while still exiting 0, so an
-	// empty read paired with that diagnostic is a missing file, not an empty one.
-	if len(out) == 0 && strings.Contains(stderr.String(), "File not found") {
-		return nil
-	}
-	return out
-}
-
 // CondarcChannels reads the channels list (in priority order) from the .condarc
-// at envPrefix inside the overlay. This is what conda reads as context.channels
+// at envPrefix inside the image. This is what conda reads as context.channels
 // and orders `env export` by; micromamba ignores it and sorts alphabetically.
 // Returns nil if the file is absent or lists no channels.
 func CondarcChannels(overlayPath, envPrefix string) []string {
-	data := ReadFile(overlayPath, strings.TrimSuffix(envPrefix, "/")+"/.condarc")
+	data := image.ReadFile(overlayPath, strings.TrimSuffix(envPrefix, "/")+"/.condarc")
 	if data == nil {
 		return nil
 	}
@@ -71,7 +29,7 @@ func CondarcChannels(overlayPath, envPrefix string) []string {
 // parseCondarcChannels extracts the block-list under a top-level `channels:` key
 // from .condarc YAML, preserving order and stopping at the next top-level key.
 func parseCondarcChannels(content string) []string {
-	channels, err := condapkg.ParseChannels([]byte(content))
+	channels, err := ParseChannels([]byte(content))
 	if err != nil {
 		return nil
 	}
@@ -83,7 +41,7 @@ func parseCondarcChannels(content string) []string {
 // Returns nil if the history file is absent or contains no specs.
 func ReadCondaInfo(overlayPath, envPrefix string) *CondaInfo {
 	histPath := strings.TrimSuffix(envPrefix, "/") + "/conda-meta/history"
-	data := ReadFile(overlayPath, histPath)
+	data := image.ReadFile(overlayPath, histPath)
 	if data == nil {
 		return nil
 	}

@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/logging"
-	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -25,12 +25,12 @@ func DescribeInitialCondaPackages(pkgs []string) string {
 //
 // postInstallCmd is run inside the overlay after conda init (empty = skip).
 // fakeroot should be false for normal user-owned overlays.
-func CreateCondaOverlay(ctx context.Context, opts *overlay.CreateOptions, pkgs []string, postInstallCmd string, fakeroot bool, io IO) error {
+func CreateCondaOverlay(ctx context.Context, opts *ext3.CreateOptions, pkgs []string, postInstallCmd string, fakeroot bool, io IO) error {
 	if opts.UID == 0 && opts.GID == 0 {
 		opts.UID = os.Getuid()
 		opts.GID = os.Getgid()
 	}
-	tmpPath, err := overlay.CreateInTmp(ctx, opts)
+	tmpPath, err := ext3.CreateInTmp(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -52,20 +52,20 @@ func CreateCondaOverlay(ctx context.Context, opts *overlay.CreateOptions, pkgs [
 	}
 
 	logging.FromContext(ctx).Info(fmt.Sprintf("moving overlay to %s", opts.Path))
-	copied, err := overlay.MoveOverlayCopied(ctx, tmpPath, opts.Path, opts.Sparse)
+	copied, err := ext3.MoveOverlayCopied(ctx, tmpPath, opts.Path, opts.Sparse)
 	if err != nil {
 		cleanup()
 		return err
 	}
 	if !opts.Sparse && !copied {
-		overlay.AllocateOverlay(ctx, opts.Path, opts.SizeMB)
+		ext3.AllocateOverlay(ctx, opts.Path, opts.SizeMB)
 	}
 	return nil
 }
 
 // InitCondaEnv creates a new conda environment inside imgPath using `condatainer env install`,
 // then cleans the micromamba package cache to reduce overlay size.
-// Use for initial environment creation on a fresh overlay.
+// Use for initial environment creation on a fresh image.
 // For adding packages to an existing environment, use InstallPackages.
 func InitCondaEnv(ctx context.Context, imgPath string, pkgs []string, fakeroot bool, io IO) error {
 	if len(pkgs) == 0 {

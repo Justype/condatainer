@@ -9,7 +9,8 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -84,7 +85,7 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 				isPrincipalImg := (ol == overlays[len(overlays)-1])
 				writeLock := isPrincipalImg && cfg.WritableImg
 
-				if err := overlay.CheckAvailable(ol, writeLock); err != nil {
+				if err := image.CheckAvailable(ol, writeLock); err != nil {
 					return nil, err
 				}
 			}
@@ -193,7 +194,7 @@ func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]str
 	}
 
 	// Runtime-owned markers go last so user-provided environment settings
-	// cannot redirect management commands away from the mounted overlay.
+	// cannot redirect management commands away from the mounted image.
 	if lastImg != "" {
 		writable := "0"
 		if cfg.WritableImg {
@@ -239,12 +240,12 @@ func AutoEnableFakeroot(lastImg string, writable bool, currentFakeroot bool) (bo
 	}
 
 	// Check UID status and auto-enable fakeroot if needed
-	if status := overlay.InspectImageUIDStatus(lastImg); status == overlay.UIDStatusRoot {
+	if status := ext3.InspectImageUIDStatus(lastImg); status == ext3.UIDStatusRoot {
 		return true, []Diagnostic{{
 			Level:   "note",
 			Message: fmt.Sprintf("Root overlay %s detected. --fakeroot enabled automatically.", filepath.Base(lastImg)),
 		}}
-	} else if status == overlay.UIDStatusDifferentUser {
+	} else if status == ext3.UIDStatusDifferentUser {
 		return true, []Diagnostic{{
 			Level:   "warn",
 			Message: fmt.Sprintf("%s's inner UID differs from current user. --fakeroot enabled automatically.", filepath.Base(lastImg)),

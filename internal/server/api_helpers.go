@@ -15,15 +15,16 @@ import (
 
 	"log/slog"
 
+	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/container"
-	cntexec "github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/helper"
+	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/logging"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/logging/weblog"
+	"github.com/Justype/condatainer/internal/runtime/container"
+	cntexec "github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
-	"github.com/Justype/condatainer/internal/weblog"
 )
 
 const helperAvailableCacheTTL = 30 * time.Second
@@ -219,7 +220,7 @@ func (s *srv) handleEnvInfo(w http.ResponseWriter, r *http.Request) {
 	if info, err := os.Stat(path); err == nil {
 		resp.SizeMB = info.Size() / (1024 * 1024)
 	}
-	if ci := overlay.ReadCondaInfo(path, "/cnt_env"); ci != nil {
+	if ci := conda.ReadCondaInfo(path, "/cnt_env"); ci != nil {
 		resp.Channels = ci.Channels
 		resp.Specs = ci.Specs
 	}
@@ -590,10 +591,10 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 			broadcastDone(broker, fmt.Errorf("mkdir: %w", err))
 			return
 		}
-		opts := &overlay.CreateOptions{
+		opts := &ext3.CreateOptions{
 			Path:    imgPath,
 			SizeMB:  sizeMB,
-			Profile: overlay.ProfileSmall,
+			Profile: ext3.ProfileSmall,
 		}
 		io := cntexec.IO{Stdout: bw, Stderr: bw}
 		if len(allPkgs) > 0 {
@@ -608,7 +609,7 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 
 		container.InvalidateInstalledOverlaysCache()
 		fmt.Fprintf(bw, "Done. Overlay ready at: %s\n", imgPath)
-		// Signal completion with the result path so the client can populate cfg-overlay.
+		// Signal completion with the result path so the client can populate cfg-image.
 		result, _ := json.Marshal(map[string]interface{}{"t": "done", "ok": true, "path": imgPath})
 		broker.publishFinal(result)
 	}()

@@ -6,16 +6,16 @@ import (
 	"path/filepath"
 
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/container"
-	execpkg "github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/runtime/container"
+	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/logging"
 )
 
 // createSquashfs runs mksquashfs inside a container to pack sourceDir into targetPath.
 // It handles three modes depending on useTmpOverlay and sourceDir:
 //   - Dir mode (!useTmpOverlay): sourceDir is a host path; no overlay needed.
-//   - Ext3 app mode (useTmpOverlay, sourceDir=="/cnt"): pack from /cnt inside the overlay.
-//   - Ext3 ref mode (useTmpOverlay, other sourceDir): pack from a host path with no overlay.
+//   - Ext3 app mode (useTmpOverlay, sourceDir=="/cnt"): pack from /cnt inside the image.
+//   - Ext3 ref mode (useTmpOverlay, other sourceDir): pack from a host path with no image.
 //
 // The caller is responsible for calling b.Cleanup(true) if an error is returned.
 func createSquashfs(ctx context.Context, b *BuildObject, isData bool, sourceDir, targetPath string) error {
@@ -74,7 +74,7 @@ mksquashfs %s %s -processors %d -b %s -keep-as-directory -all-root %s
 		overlays = []string{}
 		bindDirs = append(container.DeduplicateBindPaths(getAllBaseDirs()), sourceDir, filepath.Dir(targetPath))
 	} else if sourceDir == "/cnt" {
-		// Ext3 mode, app overlays: pack from /cnt inside the overlay.
+		// Ext3 mode, app overlays: pack from /cnt inside the image.
 		bashScript = fmt.Sprintf(`
 trap 'exit 130' INT TERM
 echo "Packing overlay to SquashFS..."

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	execpkg "github.com/Justype/condatainer/internal/exec"
+	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/utils"
 )
 

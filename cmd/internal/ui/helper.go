@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/Justype/condatainer/internal/config"
-	cntexec "github.com/Justype/condatainer/internal/exec"
 	"github.com/Justype/condatainer/internal/helper"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/image/ext3"
+	cntexec "github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -568,7 +568,7 @@ func WaitBeforeStart(ctx context.Context, d time.Duration) error {
 // overlay and installing the packages specified by meta.ImgPackages.
 // cwd is the working directory used to compute the default overlay path (env.img
 // lives next to the project so FindEnvOverlay can auto-detect it on later runs).
-// Returns the path of the created overlay.
+// Returns the path of the created image.
 func GuidedOverlayCreate(ctx context.Context, helperName string, meta helper.HelperScriptMeta, params map[string]string, versions map[string][]string, cwd string) (string, error) {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
@@ -616,10 +616,10 @@ func GuidedOverlayCreate(ctx context.Context, helperName string, meta helper.Hel
 		return "", fmt.Errorf("creating overlay directory: %w", err)
 	}
 
-	opts := &overlay.CreateOptions{
+	opts := &ext3.CreateOptions{
 		Path:    imgPath,
 		SizeMB:  sizeMB,
-		Profile: overlay.ProfileSmall,
+		Profile: ext3.ProfileSmall,
 	}
 	io := cntexec.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 	if len(allPkgs) > 0 {

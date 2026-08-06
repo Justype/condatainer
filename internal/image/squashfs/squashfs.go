@@ -1,4 +1,4 @@
-package overlay
+package squashfs
 
 import (
 	"bufio"
@@ -11,13 +11,14 @@ import (
 	"time"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/image/internal/tool"
 )
 
 // ============================================================================
 // Low-level SquashFS operations
 // ============================================================================
 
-// sqfPathExists reports whether `entry` exists in a SquashFS archive.
+// PathExists reports whether `entry` exists in a SquashFS archive.
 //
 // It lists the archive with `unsquashfs -lc -d ""` and looks for a line equal to
 // "/entry" or starting with "/entry/". Notes on the flags and matching:
@@ -26,7 +27,7 @@ import (
 //     children ("/entry/...") rather than "/entry" itself.
 //   - unsquashfs 4.4 (Ubuntu 20.04) prints banner lines even when nothing matches,
 //     so the exact line match is required — any output is not a reliable signal.
-func sqfPathExists(sqfPath, entry string) bool {
+func PathExists(sqfPath, entry string) bool {
 	// Normalize entry (strip leading slash)
 	entry = strings.TrimPrefix(entry, "/")
 	want := "/" + entry
@@ -143,7 +144,7 @@ func IsOSType(sqfPath string) bool {
 	if verdict, ok := globalOSTypeCache.lookup(sqfPath, fi); ok {
 		return verdict
 	}
-	isOS := sqfPathExists(sqfPath, ".singularity.d")
+	isOS := PathExists(sqfPath, ".singularity.d")
 	// Without unsquashfs the probe always fails; don't persist false negatives.
 	if unsquashfsAvailable() {
 		globalOSTypeCache.store(sqfPath, fi, isOS)
@@ -156,7 +157,7 @@ func IsOSType(sqfPath string) bool {
 // and the normalized double-dash form ("samtools--1.22").
 func HasCntBin(sqfPath, nameVersion string) bool {
 	nv := catalog.Normalize(nameVersion)
-	return sqfPathExists(sqfPath, "cnt/"+nv+"/bin")
+	return PathExists(sqfPath, "cnt/"+nv+"/bin")
 }
 
 // ============================================================================
@@ -183,7 +184,7 @@ func GetSquashFSStats(path string) (*SquashFSStats, error) {
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LC_TIME=C")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, &Error{Op: "stat", Path: path, Tool: "unsquashfs", BaseErr: err}
+		return nil, &tool.Error{Op: "stat", Path: path, Tool: "unsquashfs", BaseErr: err}
 	}
 
 	stats := &SquashFSStats{}
@@ -282,10 +283,10 @@ func BuildTime(path string) (time.Time, bool) {
 //   - "Bundle Overlay" : contains cnt/ but filename has no --
 //   - ""               : unrecognized
 func GetOverlayType(sqfPath string) string {
-	if sqfPathExists(sqfPath, ".singularity.d") {
+	if PathExists(sqfPath, ".singularity.d") {
 		return "OS Overlay"
 	}
-	if sqfPathExists(sqfPath, "cnt") {
+	if PathExists(sqfPath, "cnt") {
 		base := strings.TrimSuffix(filepath.Base(sqfPath), filepath.Ext(sqfPath))
 		if strings.Contains(base, "--") {
 			return "Module Overlay"

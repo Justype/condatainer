@@ -1,4 +1,4 @@
-package overlay
+package ext3
 
 import (
 	"bufio"
@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/image/internal/tool"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -18,7 +19,7 @@ import (
 // ChownRecursively changes the UID/GID of files inside an unmounted overlay image.
 // It maps the provided internalPath (e.g., "/") to the overlay's "/upper" structure.
 func ChownRecursively(ctx context.Context, imagePath string, uid, gid int, internalPath string) error {
-	if err := checkDependencies([]string{"debugfs"}); err != nil {
+	if err := tool.CheckDependencies([]string{"debugfs"}); err != nil {
 		return err
 	}
 
@@ -36,7 +37,7 @@ func ChownRecursively(ctx context.Context, imagePath string, uid, gid int, inter
 
 	inodes, err := scanInodes(ctx, absPath, targetPath)
 	if err != nil {
-		return &Error{
+		return &tool.Error{
 			Op:      "scan inodes",
 			Path:    absPath,
 			Tool:    "debugfs",
@@ -77,7 +78,7 @@ func ChownRecursively(ctx context.Context, imagePath string, uid, gid int, inter
 	cmd.Stdin = strings.NewReader(script)
 
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return &Error{
+		return &tool.Error{
 			Op:      "chown inodes",
 			Path:    absPath,
 			Tool:    "debugfs",

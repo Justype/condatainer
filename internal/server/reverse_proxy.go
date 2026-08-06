@@ -13,11 +13,11 @@ import (
 	"strings"
 	"sync"
 
-	internalproxy "github.com/Justype/condatainer/internal/proxy"
+	internalproxy "github.com/Justype/condatainer/internal/runtime/proxy"
 )
 
 // origHostKey is the context key for passing the original frontend Host header
-// through the proxy Director so ModifyResponse can rewrite Location headers.
+// through the proxy rewrite hook so ModifyResponse can rewrite Location headers.
 type origHostKey struct{}
 
 // rewriteLocationResponse returns a ModifyResponse func that rewrites absolute
@@ -45,8 +45,7 @@ func rewriteLocationResponse(target *url.URL) func(*http.Response) error {
 // closeFunc is called on backend transport errors so the caller can evict the
 // stale entry from the registry; the watcher will then attempt to reopen it.
 func newReverseProxy(target *url.URL, transport http.RoundTripper, closeFunc func()) *httputil.ReverseProxy {
-	rp := httputil.NewSingleHostReverseProxy(target)
-	rp.Director = hostRewriteDirector(target)
+	rp := &httputil.ReverseProxy{Rewrite: hostRewrite(target)}
 	rp.ModifyResponse = rewriteLocationResponse(target)
 	rp.FlushInterval = -1 // flush immediately for streaming (R console, terminal)
 
@@ -265,33 +264,24 @@ func isWebSocketUpgrade(req *http.Request) bool {
 	return strings.EqualFold(req.Header.Get("Upgrade"), "websocket")
 }
 
-// hostRewriteDirector returns a director func that rewrites req.Host and the
+// hostRewrite returns a rewrite func that rewrites req.Host and the
 // Origin header to the backend address. This prevents host-header and
 // WebSocket origin checks in apps like JupyterLab and code-server (which
 // reject requests whose Host/Origin doesn't match their bound address) from
 // blocking proxied requests that arrive with a subdomain Host header.
-func hostRewriteDirector(target *url.URL) func(*http.Request) {
-	std := httputil.NewSingleHostReverseProxy(target).Director
+func hostRewrite(target *url.URL) func(*httputil.ProxyRequest) {
 	origin := "http://" + target.Host
-	return func(req *http.Request) {
-		originalHost := req.Host
-		// Run standard director (modifies req.URL, etc.)
-		std(req)
+	return func(proxyReq *httputil.ProxyRequest) {
+		req := proxyReq.Out
+		originalHost := proxyReq.In.Host
+		proxyReq.SetURL(target)
 		// X-Forwarded headers should be injected ONLY for normal HTTP requests.
 		// These are required by vscode-server on initial load so the correct client UI can be built.
 		// However, during WebSocket upgrades, the match between Origin and X-Forwarded-Host is strictly verified by code-server.
 		// Since the Origin is spoofed to 127.0.0.1 below, a mismatch and a 403/1006 error are caused if the real X-Forwarded-Host is passed.
 		if !isWebSocketUpgrade(req) {
+			proxyReq.SetXForwarded()
 			req.Header.Set("X-Forwarded-Host", originalHost)
-			proto := req.Header.Get("X-Forwarded-Proto")
-			if proto == "" {
-				if req.TLS != nil {
-					proto = "https"
-				} else {
-					proto = "http"
-				}
-			}
-			req.Header.Set("X-Forwarded-Proto", proto)
 		}
 		// Overwrite the primary Host/Origin headers to satisfy backend binding checks.
 		req.Host = target.Host

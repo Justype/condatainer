@@ -11,8 +11,8 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/container"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/image/squashfs"
+	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -613,11 +613,11 @@ func addDistroAliasChoices(installed map[string]string, choices map[string]struc
 	}
 }
 
-// isOSOverlay reports whether a SquashFS overlay is an OS overlay.
-// Delegates to overlay.IsOSType which checks for .singularity.d in the
+// isOSOverlay reports whether a SquashFS overlay is an OS image.
+// Delegates to squashfs.IsOSType which checks for .singularity.d in the
 // archive (cached by path/size/mtime across processes).
 func isOSOverlay(overlayPath string) bool {
-	return overlay.IsOSType(overlayPath)
+	return squashfs.IsOSType(overlayPath)
 }
 
 // isAppOverlay checks if an overlay path is considered an "app" overlay

@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/container"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/runtime/container"
+	"github.com/Justype/condatainer/internal/image"
 )
 
 // setTestImagesDir points the installed-overlay scan at dir for the test.
@@ -91,7 +91,7 @@ func TestRemoveOverlayInUse(t *testing.T) {
 	}
 	setTestImagesDir(t, root)
 
-	lock, err := overlay.AcquireLock(ovPath, false)
+	lock, err := image.AcquireLock(ovPath, false)
 	if err != nil {
 		t.Fatal(err)
 	}

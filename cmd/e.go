@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/cmd/internal/ui"
-	"github.com/Justype/condatainer/internal/apptainer"
+	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/container"
-	"github.com/Justype/condatainer/internal/exec"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/runtime/container"
+	"github.com/Justype/condatainer/internal/runtime/exec"
+	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -95,7 +95,7 @@ func runE(cmd *cobra.Command, args []string) error {
 		if !hasImgOverlay {
 			if pwd, err := os.Getwd(); err == nil {
 				if candidate := utils.FindEnvOverlay("", pwd); candidate != "" {
-					if err := overlay.CheckAvailable(candidate, false); err != nil {
+					if err := image.CheckAvailable(candidate, false); err != nil {
 						utils.PrintWarning("%s is in use, running without it", filepath.Base(candidate))
 					} else {
 						utils.PrintNote("Autoload environment overlay at %s", utils.StylePath(candidate))

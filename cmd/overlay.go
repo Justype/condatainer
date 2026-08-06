@@ -11,9 +11,12 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/exec"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/image/ext3"
+	"github.com/Justype/condatainer/internal/runtime/apptainer"
+	"github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -40,13 +43,13 @@ If no image path is given, defaults to 'env.img'.
 Conda packages listed after -- or an environment file initialize conda inline.
 Without either, conda initialization is deferred until the first install.`
 
-// overlayProfiles are the selectable filesystem tuning profiles for a new overlay.
+// overlayProfiles are the selectable filesystem tuning profiles for a new image.
 var overlayProfiles = []string{"small", "balanced", "large"}
 
 // registerOverlayCreateFlags registers the full flag set for creating an overlay,
 // shared by 'overlay create' and its 'o' shortcut so the two cannot drift apart.
 //
-// --profile matches internal/overlay's Profile vocabulary; the old --type spelling
+// --profile matches image/ext3's Profile vocabulary; the old --type spelling
 // was ambiguous with the overlay file type (.img vs .sqf) and is kept, deprecated,
 // on -t so existing invocations keep working.
 func registerOverlayCreateFlags(cmd *cobra.Command) {
@@ -141,18 +144,18 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 	}
 
 	// Unknown profile names fall back to balanced, but warn so a typo is visible.
-	resolvedProfile, err := overlay.ParseProfile(profile)
+	resolvedProfile, err := ext3.ParseProfile(profile)
 	if err != nil {
 		utils.PrintWarning("Unknown profile %q, using 'balanced'. Valid: %s",
 			profile, strings.Join(overlayProfiles, ", "))
-		resolvedProfile = overlay.ProfileDefault
+		resolvedProfile = ext3.ProfileDefault
 	}
 
 	uid, gid := os.Getuid(), os.Getgid()
 	if fakeroot {
 		uid, gid = 0, 0
 	}
-	opts := &overlay.CreateOptions{
+	opts := &ext3.CreateOptions{
 		Path:           path,
 		SizeMB:         sizeMB,
 		UID:            uid,
@@ -165,7 +168,7 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 	condaIO := exec.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 	if noTmp {
 		// 3a. Create directly at target path (no tmp), then conda init there.
-		if err := overlay.CreateDirectly(cmd.Context(), opts); err != nil {
+		if err := ext3.CreateDirectly(cmd.Context(), opts); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 				utils.PrintWarning("Overlay creation cancelled.")
 				return
@@ -182,7 +185,7 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 		}
 	} else {
 		// 3b. Create sparse at local tmp (fast I/O), conda init there, then move + allocate.
-		tmpPath, err := overlay.CreateInTmp(cmd.Context(), opts)
+		tmpPath, err := ext3.CreateInTmp(cmd.Context(), opts)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 				utils.PrintWarning("Overlay creation cancelled.")
@@ -202,7 +205,7 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 		}
 
 		utils.PrintMessage("Moving overlay to %s", utils.StylePath(path))
-		copied, err := overlay.MoveOverlayCopied(cmd.Context(), tmpPath, path, sparse)
+		copied, err := ext3.MoveOverlayCopied(cmd.Context(), tmpPath, path, sparse)
 		if err != nil {
 			os.Remove(tmpPath)
 			utils.RemoveDirIfEmpty(filepath.Dir(tmpPath))
@@ -212,7 +215,7 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 
 		// Skip AllocateOverlay when io.Copy was used: zeros already written physically.
 		if !sparse && !copied {
-			overlay.AllocateOverlay(cmd.Context(), path, sizeMB)
+			ext3.AllocateOverlay(cmd.Context(), path, sizeMB)
 		}
 	}
 
@@ -267,7 +270,7 @@ var resizeCmd = &cobra.Command{
 
 		// 3. Execute — Resize detects the lock itself via CheckIntegrity, so
 		// don't hold a separate LOCK_EX here (it would collide with that probe).
-		if err := overlay.Resize(cmd.Context(), path, sizeMB); err != nil {
+		if err := ext3.Resize(cmd.Context(), path, sizeMB); err != nil {
 			ExitWithError("%v", err)
 		}
 	},
@@ -309,7 +312,7 @@ var checkCmd = &cobra.Command{
 		path := args[0]
 		force, _ := cmd.Flags().GetBool("force")
 
-		if err := overlay.CheckIntegrity(cmd.Context(), path, force); err != nil {
+		if err := ext3.CheckIntegrity(cmd.Context(), path, force); err != nil {
 			ExitWithError("%v", err)
 		}
 	},
@@ -355,7 +358,7 @@ Defaults to the current user and path '/' inside the image.`,
 		utils.PrintDebug("New Owner:     UID=%d GID=%d", targetUID, targetGID)
 
 		absPath, _ := filepath.Abs(path)
-		lock, err := overlay.AcquireLock(absPath, true)
+		lock, err := image.AcquireLock(absPath, true)
 		if err != nil {
 			ExitWithError("%v", err)
 		}
@@ -363,7 +366,7 @@ Defaults to the current user and path '/' inside the image.`,
 
 		// Perform the recursive chown for each path
 		for _, internalPath := range internalPaths {
-			err = overlay.ChownRecursively(cmd.Context(), path, targetUID, targetGID, internalPath)
+			err = ext3.ChownRecursively(cmd.Context(), path, targetUID, targetGID, internalPath)
 			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 					utils.PrintWarning("Operation cancelled.")
@@ -474,13 +477,13 @@ func detectEmbeddedRecipe(overlayPath string) (data []byte, ext, label string) {
 	if !utils.IsSqf(overlayPath) {
 		return nil, "", ""
 	}
-	if d := overlay.ReadFile(overlayPath, "/"+utils.BuildScriptDefName); d != nil {
+	if d := image.ReadFile(overlayPath, "/"+utils.BuildScriptDefName); d != nil {
 		return d, ".def", "definition"
 	}
 	base := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
 	nv := catalog.Normalize(base)
 	inner := "/cnt/" + nv + "/" + utils.BuildScriptName
-	if d := overlay.ReadFile(overlayPath, inner); d != nil {
+	if d := image.ReadFile(overlayPath, inner); d != nil {
 		return d, ".sh", "build script"
 	}
 	return nil, "", ""
@@ -576,7 +579,7 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 	// Reading an .img read-only does not trip Apptainer's ext3 lock, so probe it
 	// to fail on a concurrent writable session instead of exporting stale data.
 	if utils.IsImg(overlayPath) {
-		if err := overlay.CheckAvailable(overlayPath, false); err != nil {
+		if err := image.CheckAvailable(overlayPath, false); err != nil {
 			cmd.SilenceUsage = true
 			return err
 		}
@@ -627,7 +630,7 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 	if utils.IsImg(overlayPath) {
 		// For .img overlays export from /cnt_env (standard location)
 		envPrefix = "/cnt_env"
-		if !overlay.PathExists(overlayPath, "/cnt_env/conda-meta") {
+		if !image.PathExists(overlayPath, "/cnt_env/conda-meta") {
 			cmd.SilenceUsage = true
 			return fmt.Errorf("overlay %s does not contain a conda environment at /cnt_env (missing conda-meta)", overlayPath)
 		}
@@ -635,7 +638,7 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 		// For .sqf overlays: derive name/version from filename
 		base := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
 		nv := catalog.Normalize(base)
-		if !overlay.PathExists(overlayPath, "/cnt/"+nv+"/conda-meta") {
+		if !image.PathExists(overlayPath, "/cnt/"+nv+"/conda-meta") {
 			// No embedded recipe (checked earlier) and no conda env.
 			cmd.SilenceUsage = true
 			return fmt.Errorf("overlay %s: cannot determine an exportable type (no build script, definition, or conda environment)", overlayPath)
@@ -676,14 +679,14 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 
 	// Drop Apptainer's non-error log lines from stderr so they don't pollute
 	// the export; ERROR:/FATAL: and any real errors still pass through.
-	stderr := utils.NewApptainerFilter(os.Stderr, utils.ApptainerNonError...)
+	stderr := apptainer.NewApptainerFilter(os.Stderr, apptainer.ApptainerMessageNonErrorPrefixes...)
 	defer stderr.Flush() //nolint:errcheck
 
 	// micromamba sorts the channels: block alphabetically, which can break
 	// re-solve. When the overlay pins channel priority in its .condarc, capture
 	// the YAML and reorder to match. The explicit (.txt) format has no channels
 	// block, so stream it straight through.
-	if priority := overlay.CondarcChannels(overlayPath, envPrefix); len(priority) > 0 && !explicit {
+	if priority := conda.CondarcChannels(overlayPath, envPrefix); len(priority) > 0 && !explicit {
 		var buf bytes.Buffer
 		if err := exec.Run(cmd.Context(), opts, exec.IO{Stdout: &buf, Stderr: stderr}); err != nil {
 			return fmt.Errorf("failed to export environment: %w", err)

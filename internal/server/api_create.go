@@ -14,7 +14,7 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/container"
+	"github.com/Justype/condatainer/internal/runtime/container"
 )
 
 // createExecutable returns the binary to run for install tasks.

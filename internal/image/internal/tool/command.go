@@ -1,4 +1,4 @@
-package overlay
+package tool
 
 import (
 	"bytes"
@@ -12,9 +12,9 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// checkDependencies verifies that all tools in the provided list are available in the system PATH.
+// CheckDependencies verifies that all tools in the provided list are available in the system PATH.
 // It returns a consolidated error listing all missing tools, or nil if all are present.
-func checkDependencies(tools []string) error {
+func CheckDependencies(tools []string) error {
 	var missing []string
 
 	for _, tool := range tools {
@@ -31,11 +31,11 @@ func checkDependencies(tools []string) error {
 	return nil
 }
 
-// runCommand executes a shell command and wraps failures in overlay.Error.
+// RunCommand executes a shell command and wraps failures in image.Error.
 // When ctx carries a writer (via logging.WithWriter), stdout/stderr are streamed
 // there in real time (web terminal). Otherwise output is buffered and only
 // surfaced on error (CLI behaviour unchanged).
-func runCommand(ctx context.Context, op, path, tool string, args ...string) error {
+func RunCommand(ctx context.Context, op, path, tool string, args ...string) error {
 	cmd := exec.CommandContext(ctx, tool, args...)
 	logging.FromContext(ctx).Debug("running "+tool, "op", op, "args", strings.Join(args, " "))
 

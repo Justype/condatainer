@@ -72,7 +72,7 @@ Bash scripts in [`cnt-scripts/helpers/`](https://github.com/Justype/cnt-scripts)
 
 ## File Locking
 
-`exec`/`run` hold `LOCK_SH` on `.sqf`/`.sif` files during execution (`.img` skipped — Apptainer flocks those itself); `remove` and `build --update` probe `LOCK_EX` before modifying. See `internal/overlay/lock.go`.
+`exec`/`run` hold `LOCK_SH` on `.sqf`/`.sif` files during execution (`.img` skipped — Apptainer flocks those itself); `remove` and `build --update` probe `LOCK_EX` before modifying. See `internal/image/lock.go`.
 
 ## Coding Rules
 

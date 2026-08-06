@@ -4,11 +4,11 @@ import (
 	"context"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/apptainer"
-	"github.com/Justype/condatainer/internal/container"
+	"github.com/Justype/condatainer/internal/runtime/apptainer"
+	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/logging"
-	"github.com/Justype/condatainer/internal/overlay"
-	"github.com/Justype/condatainer/internal/proxy"
+	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/runtime/proxy"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -26,7 +26,7 @@ type Plan struct {
 	EnvList      []string
 	Diagnostics  []Diagnostic
 	ExecOptions  *apptainer.ExecOptions
-	OverlayLocks []*overlay.Lock
+	OverlayLocks []*image.Lock
 }
 
 // Close releases resources acquired during Prepare.
@@ -84,7 +84,7 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 
 	// Acquire read locks on all overlay files for the duration of exec.
 	// This prevents concurrent remove/update from deleting files in use.
-	var execLocks []*overlay.Lock
+	var execLocks []*image.Lock
 	releaseLocks := func() {
 		for _, l := range execLocks {
 			l.Close()
@@ -100,7 +100,7 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 		if utils.IsImg(ol) {
 			continue
 		}
-		lock, err := overlay.AcquireLock(ol, false) // .sqf: always read-only
+		lock, err := image.AcquireLock(ol, false) // .sqf: always read-only
 		if err != nil {
 			releaseLocks()
 			return nil, err
@@ -108,7 +108,7 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 		execLocks = append(execLocks, lock)
 	}
 	if utils.FileExists(options.BaseImage) {
-		lock, err := overlay.AcquireLock(options.BaseImage, false)
+		lock, err := image.AcquireLock(options.BaseImage, false)
 		if err != nil {
 			releaseLocks()
 			return nil, err

@@ -1,4 +1,4 @@
-package overlay
+package ext3
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Justype/condatainer/internal/image/internal/tool"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -16,7 +17,7 @@ import (
 // shrink the file (if shrinking) → fsck. Sizes are compared against the ext3
 // filesystem, not the container file's byte size, since the two can diverge.
 func Resize(ctx context.Context, imagePath string, newSizeMB int) error {
-	if err := checkDependencies([]string{"resize2fs"}); err != nil {
+	if err := tool.CheckDependencies([]string{"resize2fs"}); err != nil {
 		return err
 	}
 
@@ -89,7 +90,7 @@ func Resize(ctx context.Context, imagePath string, newSizeMB int) error {
 	}
 	log.Info(fmt.Sprintf("%s to %s", action, utils.StyleNumber(fmt.Sprintf("%d MiB", newSizeMB))))
 	sizeArg := fmt.Sprintf("%dM", newSizeMB)
-	if err := runCommand(ctx, action, absPath, "resize2fs", "-p", absPath, sizeArg); err != nil {
+	if err := tool.RunCommand(ctx, action, absPath, "resize2fs", "-p", absPath, sizeArg); err != nil {
 		return err
 	}
 

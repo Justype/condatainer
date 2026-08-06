@@ -151,10 +151,6 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 	}
 	params := flagValues
 
-	cwd := opts.CWD
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
 	if opts.EnvImg != "" {
 		logger.Info("Checking env overlay", "path", opts.EnvImg)
 		st, err := CheckEnv(ctx, opts.EnvImg)

@@ -30,7 +30,7 @@ run.go       Main Run() execution function
 ### Basic Execution
 
 ```go
-import "github.com/Justype/condatainer/internal/exec"
+import "github.com/Justype/condatainer/internal/runtime/exec"
 
 ctx := context.Background()
 opts := exec.Options{

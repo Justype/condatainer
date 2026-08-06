@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	execpkg "github.com/Justype/condatainer/internal/exec"
+	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
 )
 
 func TestInitCondaInOverlaySkipsBlankOverlay(t *testing.T) {

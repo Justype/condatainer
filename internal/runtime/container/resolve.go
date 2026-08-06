@@ -21,7 +21,7 @@ var cachedInstalledOverlays map[string]string
 // Searches user → scratch → legacy → system directories.
 // First match wins (user overlays shadow system ones).
 // Result is cached for the lifetime of the process; call InvalidateInstalledOverlaysCache
-// after installing a new overlay.
+// after installing a new image.
 func InstalledOverlays() (map[string]string, error) {
 	if cachedInstalledOverlays != nil {
 		return cachedInstalledOverlays, nil
@@ -70,7 +70,7 @@ func populateOverlays(dir string, store map[string]string) error {
 		}
 
 		// Default distro overlays can also be addressed by their bare name.
-		// Keep first-match-wins semantics and never override a real bare overlay.
+		// Keep first-match-wins semantics and never override a real bare image.
 		if prefix := config.ResolvedBase() + "/"; prefix != "/" && strings.HasPrefix(normalized, prefix) {
 			alias := strings.TrimPrefix(normalized, prefix)
 			if alias != "" {

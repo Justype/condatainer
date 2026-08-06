@@ -6,13 +6,13 @@ import (
 
 	"log/slog"
 
-	"github.com/Justype/condatainer/internal/container"
+	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
 // env.go writes the sidecar .env file and collects overlay mount arguments from
 // dependencies. Recipe #ENV: declarations are read from the embedded build
-// script at load time — see internal/container/env.go.
+// script at load time — see internal/runtime/container/env.go.
 
 // EnvEntry holds an environment variable value and its note
 type EnvEntry struct {
@@ -20,7 +20,7 @@ type EnvEntry struct {
 	Note  string
 }
 
-// SaveEnvFile saves environment variables to a .env file next to the overlay.
+// SaveEnvFile saves environment variables to a .env file next to the image.
 // The {prefix} placeholder is replaced with the overlay's mount root.
 // whatis is written as a #WHATIS: comment at the top if non-empty.
 func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath string, whatis string) error {

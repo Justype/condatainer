@@ -13,16 +13,17 @@ import (
 
 	"log/slog"
 
-	"github.com/Justype/condatainer/internal/container"
-	cntexec "github.com/Justype/condatainer/internal/exec"
+	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/logging"
-	"github.com/Justype/condatainer/internal/overlay"
+	"github.com/Justype/condatainer/internal/logging/weblog"
+	"github.com/Justype/condatainer/internal/runtime/container"
+	cntexec "github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/utils"
-	"github.com/Justype/condatainer/internal/weblog"
 )
 
 // handleOverlayEdit serves POST /api/overlay/edit — resize, remove, or add packages
-// on an existing writable .img overlay. Returns a task ID immediately; progress is
+// on an existing writable .img image. Returns a task ID immediately; progress is
 // streamed via GET /api/tasks/{id}/stream.
 func (s *srv) handleOverlayEdit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -83,7 +84,7 @@ func (s *srv) handleOverlayEdit(w http.ResponseWriter, r *http.Request) {
 
 		if newSizeMB > 0 {
 			fmt.Fprintf(bw, "Resizing %s to %s...\n", req.Path, req.Size)
-			if err := overlay.Resize(ctx, req.Path, newSizeMB); err != nil {
+			if err := ext3.Resize(ctx, req.Path, newSizeMB); err != nil {
 				broadcastResult(broker, ctx, fmt.Errorf("resize: %w", err))
 				return
 			}
@@ -152,7 +153,7 @@ func (s *srv) handleRemove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "overlay directory is read-only", http.StatusForbidden)
 		return
 	}
-	if lock, err := overlay.AcquireLock(req.Path, true); err != nil {
+	if lock, err := image.AcquireLock(req.Path, true); err != nil {
 		http.Error(w, "overlay is currently in use", http.StatusConflict)
 		return
 	} else {

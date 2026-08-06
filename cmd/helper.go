@@ -11,7 +11,7 @@ import (
 	"time"
 
 	ui "github.com/Justype/condatainer/cmd/internal/ui"
-	"github.com/Justype/condatainer/internal/apptainer"
+	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/helper"
 	"github.com/Justype/condatainer/internal/scheduler"

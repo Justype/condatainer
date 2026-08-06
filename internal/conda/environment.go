@@ -27,7 +27,7 @@ func ResolveEnvironment(requireWritable bool) (*Environment, error) {
 }
 
 // ResolveInstallEnvironment allows install to create the project root in a
-// writable blank overlay. No other command may initialize the environment as
+// writable blank image. No other command may initialize the environment as
 // a side effect.
 func ResolveInstallEnvironment() (*Environment, error) {
 	return resolveEnvironment(true, true)
