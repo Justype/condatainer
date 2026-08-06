@@ -196,9 +196,9 @@ func ParseWalltime(timeStr string) (time.Duration, error) {
 	return ParseDHMSTime(timeStr)
 }
 
-// GetWhatIsFromScript reads a script and extracts the first #WHATIS: line.
+// GetDescriptionFromScript reads a script and extracts the first #DESCRIPTION: line.
 // Returns the trimmed description string, or empty string if not found.
-func GetWhatIsFromScript(scriptPath string) string {
+func GetDescriptionFromScript(scriptPath string) string {
 	file, err := os.Open(scriptPath)
 	if err != nil {
 		return ""
@@ -208,8 +208,8 @@ func GetWhatIsFromScript(scriptPath string) string {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "#WHATIS:") {
-			return strings.TrimSpace(line[len("#WHATIS:"):])
+		if strings.HasPrefix(line, "#DESCRIPTION:") {
+			return strings.TrimSpace(line[len("#DESCRIPTION:"):])
 		}
 	}
 	_ = scanner.Err()

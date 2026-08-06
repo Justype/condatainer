@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	availExpand bool
-	availWhatis bool
+	availExpand      bool
+	availDescription bool
 )
 
 var availCmd = &cobra.Command{
@@ -41,7 +41,7 @@ To install something you find here, use 'condatainer install <name>'.
 func init() {
 	rootCmd.AddCommand(availCmd)
 	availCmd.Flags().BoolVarP(&availExpand, "expand", "e", false, "Expand templated script groups into individual entries")
-	availCmd.Flags().BoolVarP(&availWhatis, "whatis", "w", false,
+	availCmd.Flags().BoolVar(&availDescription, "description", false,
 		"Show description for each build script (default true, false with --expand); descriptions are searched when shown")
 }
 
@@ -53,7 +53,7 @@ type PackageInfo struct {
 	IsInstalled    bool                // true if overlay exists
 	Source         string              // the handle of the source it came from
 	IsTemplate     bool                // true if the recipe has #PH: placeholders
-	Whatis         string              // description string
+	Description    string              // description string
 	TargetTemplate string              // raw #TARGET: pattern (e.g. "grch38/star/{star_version}/gencode{gencode_version}-{read_length}")
 	PH             map[string][]string // placeholder values (all values for templates; single-element for expanded)
 	PHNames        []string            // placeholders in target order
@@ -99,7 +99,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 			IsInstalled:    installedOverlays[name],
 			Source:         sourceOf[e.Name],
 			IsTemplate:     e.IsTemplate,
-			Whatis:         e.Whatis,
+			Description:    e.Description,
 			TargetTemplate: e.TargetTemplate,
 			PH:             e.PH,
 			PHNames:        phNames,
@@ -135,10 +135,10 @@ func runAvail(cmd *cobra.Command, args []string) error {
 	query := NewSearchQuery(filters, availExactLookup)
 
 	// Descriptions are shown by default, but not under --expand where they would repeat
-	// on every variant. An explicit -w/--whatis=false overrides either default.
-	showWhatis := !availExpand
-	if cmd.Flags().Changed("whatis") {
-		showWhatis = availWhatis
+	// on every variant. An explicit --description=false overrides either default.
+	showDescription := !availExpand
+	if cmd.Flags().Changed("description") {
+		showDescription = availDescription
 	}
 
 	// Match names always, descriptions only while they are shown, so every hit is
@@ -146,11 +146,11 @@ func runAvail(cmd *cobra.Command, args []string) error {
 	matches := func(name string) bool {
 		return query.MatchesOrAlias(name, aliasOf(name))
 	}
-	matchesEntry := func(name, whatis string) bool {
-		if !showWhatis {
+	matchesEntry := func(name, description string) bool {
+		if !showDescription {
 			return matches(name)
 		}
-		return query.MatchesOrAliasWithText(name, aliasOf(name), whatis)
+		return query.MatchesOrAliasWithText(name, aliasOf(name), description)
 	}
 
 	// Collect matches. Without --expand only templates and plain entries are considered,
@@ -163,7 +163,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		seen[name] = true
-		if matchesEntry(name, e.Whatis) {
+		if matchesEntry(name, e.Description) {
 			filtered = append(filtered, entryToPackageInfo(name, e))
 		}
 	}
@@ -175,16 +175,16 @@ func runAvail(cmd *cobra.Command, args []string) error {
 			if !e.IsTemplate {
 				continue
 			}
-			templateMatched := matchesEntry(e.Name, e.Whatis)
+			templateMatched := matchesEntry(e.Name, e.Description)
 			for _, variant := range catalog.NewTemplate(e.TargetTemplate).Enumerate(e.PH) {
 				if seen[variant.Name] {
 					continue
 				}
 				seen[variant.Name] = true
-				whatis := interpolate(e.Whatis, variant.Vars)
-				if templateMatched || matchesEntry(variant.Name, whatis) {
+				description := interpolate(e.Description, variant.Vars)
+				if templateMatched || matchesEntry(variant.Name, description) {
 					pi := entryToPackageInfo(variant.Name, e)
-					pi.Whatis = whatis
+					pi.Description = description
 					pi.IsTemplate = false
 					pi.PH = singleValues(variant.Vars)
 					filtered = append(filtered, pi)
@@ -221,15 +221,15 @@ func runAvail(cmd *cobra.Command, args []string) error {
 	if availExpand {
 		for _, pkg := range filtered {
 			if !pkg.IsTemplate {
-				fmt.Println(formatPackageLine(pkg, showWhatis))
+				fmt.Println(formatPackageLine(pkg, showDescription))
 			}
 		}
 	} else {
 		for _, pkg := range filtered {
 			if pkg.IsTemplate {
-				fmt.Println(formatTemplateLine(pkg, showWhatis))
+				fmt.Println(formatTemplateLine(pkg, showDescription))
 			} else {
-				fmt.Println(formatPackageLine(pkg, showWhatis))
+				fmt.Println(formatPackageLine(pkg, showDescription))
 			}
 		}
 	}
@@ -319,7 +319,7 @@ const maxInlinePLValues = 5
 //	    star_version:    2.7.11b, 2.7.11a
 //	    gencode_version: 22-49  (28 values)
 //	    read_length:     151, 101, *
-func formatTemplateLine(pkg PackageInfo, showWhatis bool) string {
+func formatTemplateLine(pkg PackageInfo, showDescription bool) string {
 	// Compute variant count as the Cartesian product of concrete (non-*) values.
 	variantCount := 1
 	for _, vals := range pkg.PH {
@@ -349,8 +349,8 @@ func formatTemplateLine(pkg PackageInfo, showWhatis bool) string {
 
 	line := fmt.Sprintf("%s  %s%s%s", utils.StyleName(pkg.Name),
 		utils.StyleDebug("["), strings.Join(labelParts, utils.StyleDebug(", ")), utils.StyleDebug("]"))
-	if showWhatis && pkg.Whatis != "" {
-		line += "\n  " + pkg.Whatis
+	if showDescription && pkg.Description != "" {
+		line += "\n  " + pkg.Description
 	}
 	if pkg.TargetTemplate != "" {
 		line += "\n  " + utils.StyleHint("→ "+pkg.TargetTemplate)
@@ -397,7 +397,7 @@ func formatTemplateLine(pkg PackageInfo, showWhatis bool) string {
 }
 
 // formatPackageLine formats a package for display.
-func formatPackageLine(pkg PackageInfo, showWhatis bool) string {
+func formatPackageLine(pkg PackageInfo, showDescription bool) string {
 	line := utils.StyleName(pkg.Name)
 
 	// Compute alias before highlighting (e.g. "ubuntu24/build-essential" → "[build-essential]")
@@ -428,8 +428,8 @@ func formatPackageLine(pkg PackageInfo, showWhatis bool) string {
 		line += "  " + utils.StyleInfo("["+alias+"]")
 	}
 
-	if showWhatis && pkg.Whatis != "" {
-		line += "  " + pkg.Whatis
+	if showDescription && pkg.Description != "" {
+		line += "  " + pkg.Description
 	}
 
 	return line

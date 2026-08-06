@@ -51,7 +51,7 @@ Metadata headers: `#DEP:name/version` or `#DEP:name/version>=min` (build deps; p
 implicit upper bound, so valid range is `[min, version]`), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params),
 `#ENV:VAR={prefix}/sub  ## note` (env vars; `{prefix}` is filled with the mount root at load time),
 `#INPUT:prompt` (user input, fed on stdin in order — read with `IFS= read -r VAR`), `#PH:`/`#TARGET:` (templates),
-`#WHATIS:`, `#URL:`, `#TYPE:`.
+`#DESCRIPTION:`, `#URL:`, `#TYPE:`.
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 

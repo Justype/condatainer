@@ -129,7 +129,7 @@ PATH=/cnt/cellranger/9.0.1/bin:$PATH
 ```
 
 `CollectOverlayEnv` merges every overlay's resolved env into the final list;
-`ResolveOverlayEnv` returns a single overlay's whatis/env/notes for `info`.
+`ResolveOverlayEnv` returns a single overlay's description/env/notes for `info`.
 
 **Common Environment:**
 - `LC_ALL=C.UTF-8`, `LANG=C.UTF-8`

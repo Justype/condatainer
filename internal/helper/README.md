@@ -30,12 +30,12 @@ Parsed by `scheduler.ReadScriptSpecs()`. Standard scheduler directives also work
 #GPU:   a100:1     # optional GPU spec (type:count)
 ```
 
-### `#WHATIS:` — short description
+### `#DESCRIPTION:` — short description
 
 Shown in `condatainer helper --list` and the server dashboard.
 
 ```bash
-#WHATIS: Jupyter Lab
+#DESCRIPTION: Jupyter Lab
 ```
 
 ### `#PARAM:` — helper-specific parameters
@@ -267,7 +267,7 @@ condatainer helper "$CNT_HELPER_NAME" config path   # config file path
 
 ```bash
 #!/bin/bash
-#WHATIS: My Custom Service
+#DESCRIPTION: My Custom Service
 #NCPUS: 2
 #MEM: 8G
 #TIME: 4:00:00
@@ -289,7 +289,7 @@ wait $PID
 
 ```bash
 #!/bin/bash
-#WHATIS: My App (conda)
+#DESCRIPTION: My App (conda)
 #IMG_PACKAGES: my-app={VERSION}
 #CHECK_PATH: /cnt_env/bin/my-app "my-app not found — install with: mm install my-app"
 #NCPUS: 4
@@ -308,7 +308,7 @@ wait $PID
 
 ```bash
 #!/bin/bash
-#WHATIS: My Tunnel Service
+#DESCRIPTION: My Tunnel Service
 #SINGLETON: true
 #NCPUS: 2
 #MEM: 4G

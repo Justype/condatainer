@@ -328,8 +328,8 @@ func readLineWithCompletion(ctx context.Context, prompt string, completions []st
 // When --yes is set, defaults are used without prompting.
 func resolveTemplateInteractively(ctx context.Context, info *catalog.Entry) (string, error) {
 	utils.PrintMessage("Placeholder template: %s", info.Name)
-	if info.Whatis != "" {
-		utils.PrintMessage("%s", utils.StyleHint(info.Whatis))
+	if info.Description != "" {
+		utils.PrintMessage("%s", utils.StyleHint(info.Description))
 	}
 	if info.TargetTemplate != "" {
 		fmt.Fprintf(os.Stdout, "Target: %s\n", utils.HighlightTemplatePlaceholders(info.TargetTemplate))

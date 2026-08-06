@@ -43,7 +43,7 @@ func (fw flushWriter) Write(p []byte) (int, error) {
 
 type helperAvailableEntry struct {
 	Name             string               `json:"name"`
-	Whatis           string               `json:"whatis,omitempty"`
+	Description      string               `json:"description,omitempty"`
 	ImgRequired      bool                 `json:"img_required,omitempty"`
 	ImgPackages      string               `json:"img_packages,omitempty"`
 	PostInstallCmd   string               `json:"post_install_cmd,omitempty"`
@@ -81,11 +81,11 @@ func cachedAvailableHelpers() []helperAvailableEntry {
 			}
 			seen[name] = true
 			scriptPath := filepath.Join(dir, name)
-			whatis := ""
+			description := ""
 			if data, err := os.ReadFile(scriptPath); err == nil {
 				for _, line := range strings.Split(string(data), "\n") {
-					if strings.HasPrefix(line, "#WHATIS:") {
-						whatis = strings.TrimSpace(line[8:])
+					if value, ok := strings.CutPrefix(line, "#DESCRIPTION:"); ok {
+						description = strings.TrimSpace(value)
 						break
 					}
 				}
@@ -94,7 +94,7 @@ func cachedAvailableHelpers() []helperAvailableEntry {
 			params, _ := helper.ParseHelperParams(scriptPath)
 			ent := helperAvailableEntry{
 				Name:           name,
-				Whatis:         whatis,
+				Description:    description,
 				ImgRequired:    meta.ImgRequired,
 				ImgPackages:    meta.ImgPackages,
 				PostInstallCmd: meta.PostInstallCmd,

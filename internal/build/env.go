@@ -22,9 +22,9 @@ type EnvEntry struct {
 
 // SaveEnvFile saves environment variables to a .env file next to the image.
 // The {prefix} placeholder is replaced with the overlay's mount root.
-// whatis is written as a #WHATIS: comment at the top if non-empty.
-func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath string, whatis string) error {
-	if len(envDict) == 0 && whatis == "" {
+// description is written as a #DESCRIPTION: comment at the top if non-empty.
+func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath string, description string) error {
+	if len(envDict) == 0 && description == "" {
 		return nil
 	}
 
@@ -35,9 +35,9 @@ func SaveEnvFile(overlayPath string, envDict map[string]EnvEntry, relativePath s
 	}
 	defer file.Close()
 
-	if whatis != "" {
-		if _, err := fmt.Fprintf(file, "#WHATIS:%s\n", whatis); err != nil {
-			return fmt.Errorf("failed to write whatis: %w", err)
+	if description != "" {
+		if _, err := fmt.Fprintf(file, "#DESCRIPTION:%s\n", description); err != nil {
+			return fmt.Errorf("failed to write description: %w", err)
 		}
 	}
 

@@ -89,8 +89,8 @@ func TestVersions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("recipes/cellranger/10.0.0", "#WHATIS:newer\n")
-	write("recipes/ubuntu24/r.def", "#WHATIS:R {version}\n#TARGET:ubuntu24/r/{version}\n#PH:version:4.5.3,4.6.1,4.4.0\n")
+	write("recipes/cellranger/10.0.0", "#DESCRIPTION:newer\n")
+	write("recipes/ubuntu24/r.def", "#DESCRIPTION:R {version}\n#TARGET:ubuntu24/r/{version}\n#PH:version:4.5.3,4.6.1,4.4.0\n")
 
 	cat, err := Open(t.Context(), []Spec{{Name: "local", Base: root}}, Cache{})
 	if err != nil {
@@ -132,7 +132,7 @@ func TestCatalogOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Name != "cellranger/9.0.1" || rec.Whatis != "cellranger" {
+	if rec.Name != "cellranger/9.0.1" || rec.Description != "cellranger" {
 		t.Errorf("recipe = %+v", rec.Entry)
 	}
 
@@ -144,8 +144,8 @@ func TestCatalogOpen(t *testing.T) {
 	if rec.Name != "grch38/star/2.7.11b/gencode47-101" || rec.IsTemplate {
 		t.Errorf("expanded = %+v", rec.Entry)
 	}
-	if want := "STAR 2.7.11b index for GENCODE 47"; rec.Whatis != want {
-		t.Errorf("Whatis = %q, want %q", rec.Whatis, want)
+	if want := "STAR 2.7.11b index for GENCODE 47"; rec.Description != want {
+		t.Errorf("Description = %q, want %q", rec.Description, want)
 	}
 
 	// A bare template name needs the caller's choice, and says so without it.
@@ -174,7 +174,7 @@ func TestReadPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "#WHATIS:cellranger") {
+	if !strings.Contains(string(data), "#DESCRIPTION:cellranger") {
 		t.Errorf("ReadPath returned %q", data)
 	}
 }
@@ -186,7 +186,7 @@ func TestLookupFirstSourceWins(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(p, []byte("#WHATIS:lab build\n"), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte("#DESCRIPTION:lab build\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -202,8 +202,8 @@ func TestLookupFirstSourceWins(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("found=%v err=%v", found, err)
 	}
-	if m.Source.Name != "lab" || m.Entry.Whatis != "lab build" {
-		t.Errorf("match came from %q (%q), want lab", m.Source.Name, m.Entry.Whatis)
+	if m.Source.Name != "lab" || m.Entry.Description != "lab build" {
+		t.Errorf("match came from %q (%q), want lab", m.Source.Name, m.Entry.Description)
 	}
 	// Shadowing is per item: what only the later source has still resolves.
 	if _, ok, _ := cat.Lookup(t.Context(), "ubuntu24/base"); !ok {

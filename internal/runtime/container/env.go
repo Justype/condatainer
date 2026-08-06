@@ -83,17 +83,17 @@ func CollectOverlayEnv(paths []string) (map[string]string, map[string]string, []
 	return configs, notes, diagnostics
 }
 
-// readEmbeddedEnv reads #WHATIS:/#ENV: from the .cnt-build-script embedded in a
+// readEmbeddedEnv reads #DESCRIPTION:/#ENV: from the .cnt-build-script embedded in a
 // .sqf overlay and returns the description, resolved env values, and notes, with
 // {prefix} filled in. Non-.sqf overlays and overlays without an embedded script
 // yield empty results. The script is read straight out of the archive via
 // unsquashfs -cat, so no mount is needed.
-func readEmbeddedEnv(overlayPath, prefix string) (whatis string, configs, notes map[string]string) {
+func readEmbeddedEnv(overlayPath, prefix string) (description string, configs, notes map[string]string) {
 	configs = map[string]string{}
 	notes = map[string]string{}
 
 	if !strings.HasSuffix(overlayPath, ".sqf") {
-		return whatis, configs, notes
+		return description, configs, notes
 	}
 
 	// The payload (and its embedded script) lives at cnt/<name>/<version>/ inside
@@ -101,17 +101,17 @@ func readEmbeddedEnv(overlayPath, prefix string) (whatis string, configs, notes 
 	scriptPath := strings.TrimPrefix(prefix, "/") + "/" + utils.BuildScriptName
 	data := squashfs.Cat(overlayPath, scriptPath)
 	if len(data) == 0 {
-		return whatis, configs, notes
+		return description, configs, notes
 	}
 
 	// Parsed by the same reader the catalog uses, so a recipe cannot mean one
 	// thing when it is resolved and another when its artifact is loaded.
 	recipe, err := catalog.ParseRecipe(strings.TrimPrefix(prefix, "/cnt/"), bytes.NewReader(data))
 	if err != nil {
-		return whatis, configs, notes
+		return description, configs, notes
 	}
 	vars := map[string]string{"prefix": prefix}
-	whatis = recipe.Whatis
+	description = recipe.Description
 	for _, env := range recipe.Env {
 		configs[env.Key] = env.Value(vars)
 		if env.Note != "" {
@@ -119,14 +119,14 @@ func readEmbeddedEnv(overlayPath, prefix string) (whatis string, configs, notes 
 		}
 	}
 
-	return whatis, configs, notes
+	return description, configs, notes
 }
 
 // readSidecarEnv overlays a sidecar <overlay>.env file on top of configs/notes,
 // shadowing the embedded build-script env for local overrides. {prefix} is
-// substituted with the mount root. Returns the sidecar's #WHATIS: (empty if none) and
+// substituted with the mount root. Returns the sidecar's #DESCRIPTION: (empty if none) and
 // non-fatal diagnostics. A missing sidecar is not an error.
-func readSidecarEnv(cleanOverlay, prefix string, configs, notes map[string]string) (whatis string, diagnostics []Diagnostic) {
+func readSidecarEnv(cleanOverlay, prefix string, configs, notes map[string]string) (description string, diagnostics []Diagnostic) {
 	envPath := cleanOverlay + ".env"
 	file, err := os.Open(envPath)
 	if err != nil {
@@ -136,7 +136,7 @@ func readSidecarEnv(cleanOverlay, prefix string, configs, notes map[string]strin
 				Message: fmt.Sprintf("Unable to read overlay env %s: %v", envPath, err),
 			})
 		}
-		return whatis, diagnostics
+		return description, diagnostics
 	}
 	defer file.Close()
 
@@ -146,8 +146,8 @@ func readSidecarEnv(cleanOverlay, prefix string, configs, notes map[string]strin
 		if line == "" {
 			continue
 		}
-		if after, ok := strings.CutPrefix(line, "#WHATIS:"); ok {
-			whatis = strings.TrimSpace(after)
+		if after, ok := strings.CutPrefix(line, "#DESCRIPTION:"); ok {
+			description = strings.TrimSpace(after)
 			continue
 		}
 		if strings.HasPrefix(line, "#ENVNOTE:") {
@@ -178,21 +178,21 @@ func readSidecarEnv(cleanOverlay, prefix string, configs, notes map[string]strin
 		})
 	}
 
-	return whatis, diagnostics
+	return description, diagnostics
 }
 
-// ResolveOverlayEnv resolves a single overlay's description (#WHATIS:), env vars,
+// ResolveOverlayEnv resolves a single overlay's description (#DESCRIPTION:), env vars,
 // and notes for display. The embedded build script is the source of truth (.sqf);
 // a sidecar <overlay>.env shadows it. {prefix} is substituted with the overlay's
 // mount root. A :ro/:rw suffix on the path is ignored.
-func ResolveOverlayEnv(overlayPath string) (whatis string, configs, notes map[string]string) {
+func ResolveOverlayEnv(overlayPath string) (description string, configs, notes map[string]string) {
 	cleanOverlay := strings.TrimSuffix(strings.TrimSuffix(overlayPath, ":ro"), ":rw")
 	prefix := overlayPrefix(cleanOverlay)
 
-	whatis, configs, notes = readEmbeddedEnv(cleanOverlay, prefix)
-	sidecarWhatis, _ := readSidecarEnv(cleanOverlay, prefix, configs, notes)
-	if sidecarWhatis != "" {
-		whatis = sidecarWhatis
+	description, configs, notes = readEmbeddedEnv(cleanOverlay, prefix)
+	sidecarDescription, _ := readSidecarEnv(cleanOverlay, prefix, configs, notes)
+	if sidecarDescription != "" {
+		description = sidecarDescription
 	}
-	return whatis, configs, notes
+	return description, configs, notes
 }

@@ -44,7 +44,7 @@ func writeScript(t *testing.T, dir, relPath, content string) {
 // marked, and template scripts appear collapsed (variants suppressed).
 func TestHandleAvail(t *testing.T) {
 	scriptsDir := t.TempDir()
-	writeScript(t, scriptsDir, "foo/1.0", "#!/usr/bin/bash\n#WHATIS:Test tool\necho hi\n")
+	writeScript(t, scriptsDir, "foo/1.0", "#!/usr/bin/bash\n#DESCRIPTION:Test tool\necho hi\n")
 	writeScript(t, scriptsDir, "bar/gen",
 		"#!/usr/bin/bash\n#PH:ver:2.0,1.0\n#TARGET:bar/{ver}\necho hi\n")
 	writeScript(t, scriptsDir, "ubuntu24/build-essential",
@@ -65,13 +65,13 @@ func TestHandleAvail(t *testing.T) {
 	}
 
 	type entry struct {
-		Name       string              `json:"name"`
-		Alias      string              `json:"alias"`
-		Whatis     string              `json:"whatis"`
-		IsTemplate bool                `json:"is_template"`
-		PH         map[string][]string `json:"ph"`
-		PHNames    []string            `json:"ph_names"`
-		Installed  bool                `json:"installed"`
+		Name        string              `json:"name"`
+		Alias       string              `json:"alias"`
+		Description string              `json:"description"`
+		IsTemplate  bool                `json:"is_template"`
+		PH          map[string][]string `json:"ph"`
+		PHNames     []string            `json:"ph_names"`
+		Installed   bool                `json:"installed"`
 	}
 	var entries []entry
 	if err := json.Unmarshal(w.Body.Bytes(), &entries); err != nil {
@@ -86,8 +86,8 @@ func TestHandleAvail(t *testing.T) {
 	if !ok {
 		t.Fatalf("foo/1.0 missing from %v", byName)
 	}
-	if !foo.Installed || foo.Whatis != "Test tool" {
-		t.Errorf("foo/1.0 = %+v, want installed with whatis", foo)
+	if !foo.Installed || foo.Description != "Test tool" {
+		t.Errorf("foo/1.0 = %+v, want installed with description", foo)
 	}
 	tmpl, ok := byName["bar/gen"]
 	if !ok {

@@ -42,7 +42,7 @@ Source: [`grch38/genome/gencode`](https://github.com/Justype/cnt-scripts/blob/ma
 #!/usr/bin/bash
 #DEP:samtools/1.23.1>=1.10
 #AUTOUPDATE:samtools:bioconda:samtools
-#WHATIS:GRCh38 reference genome FASTA
+#DESCRIPTION:GRCh38 reference genome FASTA
 #URL:https://www.gencodegenes.org/human/
 #ENV:GENOME_FASTA=$app_root/GRCh38.primary_assembly.genome.fa
 #ENVNOTE:GRCh38 reference genome
@@ -89,7 +89,7 @@ Source: [`grch38/star-gencode`](https://github.com/Justype/cnt-scripts/blob/main
 #DEP:grch38/gtf-gencode/{gencode_version}
 #DEP:star/{star_version}
 
-#WHATIS:STAR GRCh38 GENCODE{gencode_version} index for read length {read_length}
+#DESCRIPTION:STAR GRCh38 GENCODE{gencode_version} index for read length {read_length}
 #URL:https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf
 #ENV:STAR_INDEX_DIR=$app_root
 #ENVNOTE:STAR index for GRCh38 GENCODE v{gencode_version} with read length {read_length}

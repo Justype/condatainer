@@ -20,7 +20,7 @@ func (s *srv) handleAvail(w http.ResponseWriter, r *http.Request) {
 	type availEntry struct {
 		Name           string              `json:"name"`
 		Alias          string              `json:"alias,omitempty"` // bare name for default-distro scripts (ubuntu24/build-essential → build-essential)
-		Whatis         string              `json:"whatis,omitempty"`
+		Description    string              `json:"description,omitempty"`
 		Source         string              `json:"source,omitempty"`
 		Container      bool                `json:"container,omitempty"`
 		IsTemplate     bool                `json:"is_template,omitempty"`
@@ -73,7 +73,7 @@ func (s *srv) handleAvail(w http.ResponseWriter, r *http.Request) {
 			entries = append(entries, availEntry{
 				Name:           name,
 				Alias:          alias,
-				Whatis:         e.Whatis,
+				Description:    e.Description,
 				Source:         src.Name,
 				Container:      strings.HasSuffix(e.Path, ".def"),
 				IsTemplate:     e.IsTemplate,

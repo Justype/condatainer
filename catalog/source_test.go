@@ -29,8 +29,8 @@ func fakeSource(t *testing.T) string {
 	}
 
 	write("source.json", `{"schema":1,"repository":"https://example.invalid/r","default_base":"ubuntu24"}`)
-	write("recipes/cellranger/9.0.1", "#WHATIS:cellranger\n#URL:https://example.invalid\n")
-	write("recipes/ubuntu24/base.def", "#WHATIS:base\n\nBootstrap: docker\n")
+	write("recipes/cellranger/9.0.1", "#DESCRIPTION:cellranger\n#URL:https://example.invalid\n")
+	write("recipes/ubuntu24/base.def", "#DESCRIPTION:base\n\nBootstrap: docker\n")
 	write("recipes/grch38/star-gencode", starRecipe)
 	write("recipes/README.md", "not a recipe")
 
@@ -106,7 +106,7 @@ func TestBackendsAgree(t *testing.T) {
 			t.Errorf("%s: missing from the index", name)
 			continue
 		}
-		if l.Kind != r.Kind || l.Path != r.Path || l.Whatis != r.Whatis || l.URL != r.URL ||
+		if l.Kind != r.Kind || l.Path != r.Path || l.Description != r.Description || l.URL != r.URL ||
 			l.IsTemplate != r.IsTemplate || l.TargetTemplate != r.TargetTemplate ||
 			!slices.Equal(l.Deps, r.Deps) {
 			t.Errorf("%s:\n walk  %+v\n index %+v", name, l, r)

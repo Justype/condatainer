@@ -27,7 +27,7 @@ condatainer helper --path      # writable helper-scripts/ directory
 Drop the file there (executable, no extension) and it becomes a helper immediately:
 
 ```bash
-condatainer helper --list      # your script now appears, with its #WHATIS: text
+condatainer helper --list      # your script now appears, with its #DESCRIPTION: text
 condatainer helper my-service
 ```
 
@@ -45,7 +45,7 @@ Understanding what runs where explains most of the rules below:
 
 ```bash
 #!/bin/bash
-#WHATIS: My Custom Service
+#DESCRIPTION: My Custom Service
 #NCPUS: 2
 #MEM: 8G
 #TIME: 4:00:00
@@ -79,12 +79,12 @@ Three rules this illustrates:
 
 These are defaults only — users override them with `-c/-m/-t/-g` or in the settings prompt.
 
-### `#WHATIS:` — description
+### `#DESCRIPTION:` — description
 
 Shown in `condatainer helper --list` and the dashboard.
 
 ```bash
-#WHATIS: Jupyter Lab
+#DESCRIPTION: Jupyter Lab
 ```
 
 ### `#PARAM:` — script-specific flags
@@ -228,7 +228,7 @@ Source: [helpers/jupyterlab](https://github.com/Justype/cnt-scripts/blob/main/he
 
 ```bash
 #!/bin/bash
-#WHATIS: Jupyter Lab
+#DESCRIPTION: Jupyter Lab
 #NCPUS: 4
 #MEM: 16G
 #TIME: 12:00:00

@@ -27,7 +27,7 @@ func Expand(r *Recipe, vars map[string]string) (*Recipe, error) {
 	out.Name = name
 	out.IsTemplate = false
 	out.TargetTemplate = ""
-	out.Whatis = replaceVars(r.Whatis, vars)
+	out.Description = replaceVars(r.Description, vars)
 	out.Text = []byte(replaceVars(string(r.Text), vars))
 
 	// PH keeps the chosen value per placeholder: what the artifact records as

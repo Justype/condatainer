@@ -19,7 +19,7 @@ import (
 var listDelete bool
 var listExact bool
 var listOne bool
-var listWhatis bool
+var listDescription bool
 
 var listCmd = &cobra.Command{
 	Use:     "list [flags] [terms...]",
@@ -49,7 +49,7 @@ func init() {
 			return []string{"user", "app-root", "extra-root"}, cobra.ShellCompDirectiveNoFileComp
 		})
 	listCmd.Flags().BoolVarP(&listOne, "one", "1", false, "One entry per line (disable multi-column layout)")
-	listCmd.Flags().BoolVarP(&listWhatis, "whatis", "w", false, "Show description for each overlay")
+	listCmd.Flags().BoolVar(&listDescription, "description", false, "Show description for each overlay")
 }
 
 // DirOverlays holds the scan results for a single image directory.
@@ -149,9 +149,9 @@ func runList(cmd *cobra.Command, args []string) error {
 					}
 				}
 			}
-			if listWhatis {
+			if listDescription {
 				for i, name := range names {
-					w := readOverlayWhatis(d.Paths[name+"/(system app)"])
+					w := readOverlayDescription(d.Paths[name+"/(system app)"])
 					if w != "" {
 						fmt.Printf(" %s: %s\n", styled[i], w)
 					} else {
@@ -180,9 +180,9 @@ func runList(cmd *cobra.Command, args []string) error {
 					}
 				}
 			}
-			if listWhatis {
+			if listDescription {
 				for i := range plain {
-					w := readOverlayWhatis(d.Paths[keys[i]])
+					w := readOverlayDescription(d.Paths[keys[i]])
 					if w != "" {
 						fmt.Printf(" %s: %s\n", styled[i], w)
 					} else {
@@ -206,9 +206,9 @@ func runList(cmd *cobra.Command, args []string) error {
 				}
 				styled[i] = strings.Join(parts, "/")
 			}
-			if listWhatis {
+			if listDescription {
 				for i, data := range d.DataList {
-					w := readOverlayWhatis(d.Paths[data])
+					w := readOverlayDescription(d.Paths[data])
 					if w != "" {
 						fmt.Printf(" %s: %s\n", styled[i], w)
 					} else {
@@ -354,9 +354,9 @@ func terminalWidth() int {
 	return 80
 }
 
-// listTermWidth returns 0 (single column) when -1 or --whatis is set, otherwise the terminal width.
+// listTermWidth returns 0 (single column) when -1 or --description is set, otherwise the terminal width.
 func listTermWidth() int {
-	if listOne || listWhatis {
+	if listOne || listDescription {
 		return 0
 	}
 	return terminalWidth()
@@ -406,15 +406,15 @@ func printColumns(plain, styled []string, indent, termWidth int) {
 	}
 }
 
-// readOverlayWhatis reads the #WHATIS: line from the overlay's .env sidecar file.
-// Returns an empty string if the file is absent or has no #WHATIS: line.
-func readOverlayWhatis(overlayPath string) string {
+// readOverlayDescription reads the #DESCRIPTION: line from the overlay's .env sidecar file.
+// Returns an empty string if the file is absent or has no #DESCRIPTION: line.
+func readOverlayDescription(overlayPath string) string {
 	data, err := os.ReadFile(overlayPath + ".env")
 	if err != nil {
 		return ""
 	}
 	for line := range strings.SplitSeq(string(data), "\n") {
-		if after, ok := strings.CutPrefix(strings.TrimSpace(line), "#WHATIS:"); ok {
+		if after, ok := strings.CutPrefix(strings.TrimSpace(line), "#DESCRIPTION:"); ok {
 			return strings.TrimSpace(after)
 		}
 	}

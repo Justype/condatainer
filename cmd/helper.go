@@ -11,9 +11,9 @@ import (
 	"time"
 
 	ui "github.com/Justype/condatainer/cmd/internal/ui"
-	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/helper"
+	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -342,8 +342,8 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	// --- List Mode ---
 	if helperList {
 		type scriptInfo struct {
-			name   string
-			whatis string
+			name        string
+			description string
 		}
 		seen := make(map[string]bool)
 		var scripts []scriptInfo
@@ -358,8 +358,8 @@ func runHelper(cmd *cobra.Command, args []string) error {
 				name := entry.Name()
 				if !entry.IsDir() && !strings.HasPrefix(name, ".") && !seen[name] {
 					seen[name] = true
-					whatis := utils.GetWhatIsFromScript(filepath.Join(dir, name))
-					scripts = append(scripts, scriptInfo{name, whatis})
+					description := utils.GetDescriptionFromScript(filepath.Join(dir, name))
+					scripts = append(scripts, scriptInfo{name, description})
 					if len(name) > maxNameLen {
 						maxNameLen = len(name)
 					}
@@ -368,8 +368,8 @@ func runHelper(cmd *cobra.Command, args []string) error {
 		}
 
 		for _, s := range scripts {
-			if s.whatis != "" {
-				fmt.Printf("  %-*s  %s\n", maxNameLen, s.name, s.whatis)
+			if s.description != "" {
+				fmt.Printf("  %-*s  %s\n", maxNameLen, s.name, s.description)
 			} else {
 				fmt.Printf("  %s\n", s.name)
 			}

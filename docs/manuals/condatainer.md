@@ -564,7 +564,7 @@ condatainer avail [search_terms...] [flags]
 
 * `--remote`: Remote build scripts take precedence over local (on duplicates).
 * `-e`, `--expand`: Expand template groups to show individual concrete entries instead of the collapsed template header.
-* `-w`, `--whatis`: Show the description (`#WHATIS:`) for each entry.
+* `--description`: Show the description (`#DESCRIPTION:`) for each entry.
 
 **Search rules:**
 
@@ -598,8 +598,8 @@ Terms match entry **names**, plus **descriptions** while those are shown. You ca
 |---|---|---|
 | `avail <term>` | yes | name + description |
 | `avail -e <term>` | no | name only |
-| `avail -e -w <term>` | yes | name + description |
-| `avail --whatis=false <term>` | no | name only |
+| `avail -e --description <term>` | yes | name + description |
+| `avail --description=false <term>` | no | name only |
 
 Without `-e`, only templates and plain entries are searched, so templates stay collapsed no matter how many variants they have:
 
@@ -665,7 +665,7 @@ grcm39/salmon/1.1.0/gencodeM33
 $ condatainer avail java
 
 # Hide descriptions (and stop matching against them)
-$ condatainer avail star --whatis=false
+$ condatainer avail star --description=false
 
 # Expand all template combinations
 $ condatainer avail star -e
@@ -1473,7 +1473,7 @@ Options:
 
 * `-u`, `--update`: Update helper scripts from remote metadata.
 * `--path`: Show all helper script search paths and the writable directory. If a `SCRIPT_NAME` is given, print the absolute path of that specific helper script and exit.
-* `-l`, `--list`: List available helper scripts with their descriptions (from `#WHATIS` tags).
+* `-l`, `--list`: List available helper scripts with their descriptions (from `#DESCRIPTION` tags).
 * `SCRIPT_NAME`: Name of the helper script to run (optional).
 * `SCRIPT_ARGS...`: Remaining arguments are passed directly to the helper script when running it.
 

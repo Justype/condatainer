@@ -11,9 +11,9 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
-	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -322,8 +322,8 @@ func (b *BuildObject) saveCondaEnvFile(targetPath string) {
 	if b.packageName == "" || b.buildSource != "" {
 		return
 	}
-	whatis := utils.FetchCondaSummary(b.packageName, config.Global.Build.Channels)
-	if err := SaveEnvFile(targetPath, map[string]EnvEntry{}, b.nameVersion, whatis); err != nil {
+	description := utils.FetchCondaSummary(b.packageName, config.Global.Build.Channels)
+	if err := SaveEnvFile(targetPath, map[string]EnvEntry{}, b.nameVersion, description); err != nil {
 		slog.Default().Warn("failed to save ENV file", "err", err)
 	}
 }

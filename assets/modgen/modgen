@@ -405,7 +405,7 @@ class Utils:
         Returns a dict mapping normalized name → info dict with keys:
           url           - full raw-content download URL for the script
           deps          - list of dep strings (interpolated for expanded entries)
-          whatis        - description string (interpolated for expanded entries)
+          description        - description string (interpolated for expanded entries)
           is_template   - True only for template (collapsed) entries
           pl            - {name: [values]} — full list for templates, [current_val] for expanded
           ph_order      - list of placeholder names in declaration order
@@ -446,7 +446,7 @@ class Utils:
 
             script_url = f"{Config.GIT_RAW_URL_PREFIX}build-scripts/{path}"
             deps = list(v.get("deps", []))
-            whatis = v.get("whatis", "")
+            description = v.get("description", "")
             is_template = bool(v.get("is_template", False))
             target_template = v.get("target_template", "")
             pl = v.get("pl", {})
@@ -455,7 +455,7 @@ class Utils:
             result[key] = {
                 "url": script_url,
                 "deps": deps,
-                "whatis": whatis,
+                "description": description,
                 "is_template": is_template,
                 "pl": pl,
                 "ph_order": ph_order,
@@ -477,7 +477,7 @@ class Utils:
                     result[concrete_key] = {
                         "url": script_url,
                         "deps": [Utils.interpolate_vars(d, combo) for d in deps],
-                        "whatis": Utils.interpolate_vars(whatis, combo),
+                        "description": Utils.interpolate_vars(description, combo),
                         "is_template": False,
                         "pl": expanded_pl,
                         "ph_order": ph_order,
@@ -636,38 +636,38 @@ class Utils:
         return dependencies
 
     @staticmethod
-    def get_whatis_url_from_build_script(script_path: str, normalized_name_version: str) -> Tuple[str, str]:
+    def get_description_url_from_build_script(script_path: str, normalized_name_version: str) -> Tuple[str, str]:
         """
-        Parse #WHATIS and #URL lines from a build script.
+        Parse #DESCRIPTION and #URL lines from a build script.
 
         Example lines in script:
-            #WHATIS:Cell Ranger GRCh38 2024-A index
+            #DESCRIPTION:Cell Ranger GRCh38 2024-A index
             #URL:https://www.10xgenomics.com/support/software/cell-ranger/downloads#reference-downloads
 
         Returns:
-            (whatis_text, url_text)
+            (description_text, url_text)
             If not found, empty strings are returned.
         """
         package_name, version = normalized_name_version.split('/', 1)
-        whatis = f"Load module {package_name} version {version}"
+        description = f"Load module {package_name} version {version}"
         url = "Not available"
 
         if not os.path.isfile(script_path):
             Utils.print_error(f"Build script not found at {script_path}.")
-            return whatis, url
+            return description, url
 
         with open(script_path, "r") as f:
             for line in f:
                 line = line.strip()
-                if line.startswith("#WHATIS:"):
-                    whatis = line[len("#WHATIS:"):].strip()
+                if line.startswith("#DESCRIPTION:"):
+                    description = line[len("#DESCRIPTION:"):].strip()
                 elif line.startswith("#URL:"):
                     url = line[len("#URL:"):].strip()
 
-                if whatis and url:
+                if description and url:
                     break
 
-        return whatis, url
+        return description, url
 
     @staticmethod
     def get_env_dict_from_build_script(script_path) -> Dict[str, Dict[str, str]]:
@@ -1328,9 +1328,9 @@ class BuildObject:
             self.create_cleanup(failed=True)
             return False
 
-        whatis_url = ModGen_Create.fetch_whatis_url_from_anaconda(self.name_version)
+        description_url = ModGen_Create.fetch_description_url_from_anaconda(self.name_version)
         os.makedirs(os.path.dirname(self.target_modulefile_path), mode=0o775, exist_ok=True)
-        if not ModGen_Create.create_target_modulefile(self.name_version, whatis_url):
+        if not ModGen_Create.create_target_modulefile(self.name_version, description_url):
             Utils.print_error(f"Failed to generate modulefile for {Utils.yellow_text(self.name_version)}.")
             self.create_cleanup(failed=True)
             return False
@@ -1393,12 +1393,12 @@ class BuildObject:
             self.create_cleanup(failed=True)
             return False
 
-        whatis_url = Utils.get_whatis_url_from_build_script(self.build_script_path, self.name_version)
+        description_url = Utils.get_description_url_from_build_script(self.build_script_path, self.name_version)
         env_dict = Utils.get_env_dict_from_build_script(self.build_script_path)
 
         Utils.print_debug(f"Creating modulefile at {self.target_modulefile_path}...")
         os.makedirs(os.path.dirname(self.target_modulefile_path), mode=0o775, exist_ok=True)
-        if not ModGen_Create.create_target_modulefile(self.name_version, whatis_url, self.is_ref, env_dict):
+        if not ModGen_Create.create_target_modulefile(self.name_version, description_url, self.is_ref, env_dict):
             Utils.print_error(f"Failed to generate modulefile for {Utils.yellow_text(self.name_version)}.")
             self.create_cleanup(failed=True)
             return False
@@ -1620,14 +1620,16 @@ class ModGen_Create:
             return False
 
     @staticmethod
-    def create_target_lmod_modulefile(normalized_name_version: str, whatis_url: Tuple[str, str], is_ref: bool = False, env_dict: Optional[Dict[str, Dict[str, str]]] = None) -> bool:
+    def create_target_lmod_modulefile(normalized_name_version: str, description_url: Tuple[str, str], is_ref: bool = False, env_dict: Optional[Dict[str, Dict[str, str]]] = None) -> bool:
         template_path = Config.REF_LMOD_TEMPLATE if is_ref else Config.APPS_LMOD_TEMPLATE
         target_modulefile_path = ModGen.get_modulefile_path(normalized_name_version)
 
         try:
             content = open(template_path, "r").read()
-            content = content.replace("{WHATIS}", whatis_url[0])
-            content = content.replace("{HELP}", f"Website: {whatis_url[1]}")
+            # The recipe header is #DESCRIPTION; {WHATIS} is retained here because
+            # it is the placeholder used by the existing Lmod template itself.
+            content = content.replace("{WHATIS}", description_url[0])
+            content = content.replace("{HELP}", f"Website: {description_url[1]}")
 
             if env_dict:
                 env_setting_lines = []
@@ -1668,14 +1670,14 @@ class ModGen_Create:
         return True
 
     @staticmethod
-    def create_target_em_modulefile(normalized_name_version: str, whatis_url: Tuple[str, str], is_ref: bool = False, env_dict: Optional[Dict[str, Dict[str, str]]] = None) -> bool:
+    def create_target_em_modulefile(normalized_name_version: str, description_url: Tuple[str, str], is_ref: bool = False, env_dict: Optional[Dict[str, Dict[str, str]]] = None) -> bool:
         template_path = Config.REF_EM_TEMPLATE if is_ref else Config.APPS_EM_TEMPLATE
         target_modulefile_path = ModGen.get_modulefile_path(normalized_name_version)
         Utils.print_debug("[CREATE] module type: " + ("ref" if is_ref else "apps") + normalized_name_version + "|" + target_modulefile_path)
         try:
             content = open(template_path, 'r').read()
-            content = content.replace("{WHATIS}", whatis_url[0])
-            content = content.replace("{HELP}", f"Website: {whatis_url[1]}")
+            content = content.replace("{WHATIS}", description_url[0])
+            content = content.replace("{HELP}", f"Website: {description_url[1]}")
 
             if env_dict:
                 env_setting_lines = []
@@ -1707,21 +1709,21 @@ class ModGen_Create:
         return True
 
     @staticmethod
-    def create_target_modulefile(normalized_name_version: str, whatis_url: Tuple[str, str], is_ref: bool = False, env_dict: Optional[Dict[str, Dict[str, str]]] = None) -> bool:
+    def create_target_modulefile(normalized_name_version: str, description_url: Tuple[str, str], is_ref: bool = False, env_dict: Optional[Dict[str, Dict[str, str]]] = None) -> bool:
         Utils.print_debug(f"[CREATE] Creating modulefile for {normalized_name_version} (is_ref={is_ref}) (is_lmod={Config.IS_LMOD})")
         if Config.IS_LMOD:
-            return ModGen_Create.create_target_lmod_modulefile(normalized_name_version, whatis_url, is_ref, env_dict)
+            return ModGen_Create.create_target_lmod_modulefile(normalized_name_version, description_url, is_ref, env_dict)
         else:
-            return ModGen_Create.create_target_em_modulefile(normalized_name_version, whatis_url, is_ref, env_dict)
+            return ModGen_Create.create_target_em_modulefile(normalized_name_version, description_url, is_ref, env_dict)
 
     @staticmethod
-    def fetch_whatis_url_from_anaconda(normalized_name_version: str) -> Tuple[str, str]:
+    def fetch_description_url_from_anaconda(normalized_name_version: str) -> Tuple[str, str]:
         """
-        Fetch the whatis and URL from the anaconda.org JSON API.
+        Fetch the description and URL from the anaconda.org JSON API.
         Tries bioconda first, then conda-forge. Falls back to defaults on error.
         """
         package_name, version = normalized_name_version.split('/', 1)
-        default_whatis_url = (f"Load module {package_name} version {version}", f"https://anaconda.org/search?q={package_name}")
+        default_description_url = (f"Load module {package_name} version {version}", f"https://anaconda.org/search?q={package_name}")
 
         for channel in ("bioconda", "conda-forge"):
             api_url = f"https://api.anaconda.org/package/{channel}/{package_name}"
@@ -1743,7 +1745,7 @@ class ModGen_Create:
             except Exception:
                 continue
 
-        return default_whatis_url
+        return default_description_url
 
 class ModGen_Exec:
     @staticmethod

@@ -21,8 +21,8 @@ func TestExpand(t *testing.T) {
 	if got.IsTemplate || got.TargetTemplate != "" {
 		t.Error("expanded recipe is still marked a template")
 	}
-	if want := "STAR 2.7.11b index for GENCODE 47"; got.Whatis != want {
-		t.Errorf("Whatis = %q, want %q", got.Whatis, want)
+	if want := "STAR 2.7.11b index for GENCODE 47"; got.Description != want {
+		t.Errorf("Description = %q, want %q", got.Description, want)
 	}
 	if want := []string{"star/2.7.11b", "samtools/1.23.1>=1.10"}; !slices.Equal(got.Deps, want) {
 		t.Errorf("Deps = %v, want %v", got.Deps, want)
@@ -60,7 +60,7 @@ func TestExpandRequiresEveryVar(t *testing.T) {
 	if _, err := Expand(r, map[string]string{"star_version": "2.7.11b"}); err == nil {
 		t.Error("Expand with an incomplete var set should fail")
 	}
-	plain := parse(t, "cellranger/9.0.1", "#WHATIS:cellranger\n")
+	plain := parse(t, "cellranger/9.0.1", "#DESCRIPTION:cellranger\n")
 	if _, err := Expand(plain, nil); err == nil {
 		t.Error("Expand on a non-template should fail")
 	}

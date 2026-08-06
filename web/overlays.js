@@ -176,14 +176,14 @@ function ocShowBrowse() {
 }
 
 // ocFilter filters the avail list: entries must match every whitespace-
-// separated term of q (across name/alias/whatis/target).
+// separated term of q (across name/alias/description/target).
 function ocFilter(q) {
   if (_ocAvail === null) return;
   const lower = (q || '').toLowerCase().trim();
   const terms = searchTerms(lower);
   let hits = terms.length
     ? _ocAvail.filter(e =>
-        matchesAllTerms([e.name, e.alias, e.whatis, e.target_template].join(' '), terms))
+        matchesAllTerms([e.name, e.alias, e.description, e.target_template].join(' '), terms))
     : _ocAvail;
   if (terms.length) {
     // Exact-first ordering (mirrors the CLI's exact-first search): full-name or
@@ -196,7 +196,7 @@ function ocFilter(q) {
       if (n.split('/').includes(key)) return 1;
       if (n.startsWith(key)) return 2;
       if (n.includes(key)) return 3;
-      return 4; // matched via whatis/target only
+      return 4; // matched via description/target only
     };
     hits = hits.slice().sort((a, b) => rank(a) - rank(b));
   }
@@ -246,7 +246,7 @@ function _ocCondaRowsHtml() {
       '<span class="modal-row-icon">' + iconSvg('draft') + '</span>' +
       '<span class="modal-row-name"><span class="oc-row-name">' + escHtml(r.name) +
         ' <span class="td-muted">(' + escHtml(r.owner) + ')</span></span>' +
-        (r.summary ? '<span class="oc-whatis">' + escHtml(r.summary) + '</span>' : '') + '</span>' +
+        (r.summary ? '<span class="oc-description">' + escHtml(r.summary) + '</span>' : '') + '</span>' +
     '</div>').join('');
 }
 
@@ -266,7 +266,7 @@ function _ocRenderList(hits, q) {
       '<span class="modal-row-icon">' + iconSvg('hexagon') + '</span>' +
       '<span class="modal-row-name"><span class="oc-row-name">' + escHtml(e.name) + '</span>' +
         (e.alias ? ' <span class="oc-alias">[' + escHtml(e.alias) + ']</span>' : '') +
-        (e.whatis ? '<span class="oc-whatis">' + escHtml(e.whatis) + '</span>' : '') + '</span>' +
+        (e.description ? '<span class="oc-description">' + escHtml(e.description) + '</span>' : '') + '</span>' +
       '<span class="modal-row-size">' + _ocBadges(e) + '</span>' +
     '</div>'
   ).join('');
@@ -353,7 +353,7 @@ function _ocRenderDetail() {
     html += '<div class="oc-hdr"><div class="oc-title">' + escHtml(c.name) +
       ' <span class="td-muted">(' + escHtml(c.owner) + ')</span>' +
       ' <span class="badge badge-grey">conda</span></div>' +
-      (c.summary ? '<div class="oc-whatis">' + escHtml(c.summary) + '</div>' : '') + '</div>';
+      (c.summary ? '<div class="oc-description">' + escHtml(c.summary) + '</div>' : '') + '</div>';
     html += '<div class="field"><label class="field-label">Version</label>' +
       makeComboboxHtml('oc-conda-ver', '', _ocSel.latest ? _ocSel.latest + ' (default)' : 'version') +
       '</div>';
@@ -362,7 +362,7 @@ function _ocRenderDetail() {
     html += '<div class="oc-hdr"><div class="oc-title">' + escHtml(e.name) +
       (e.alias ? ' <span class="oc-alias">[' + escHtml(e.alias) + ']</span>' : '') +
       ' ' + _ocBadges(e) + '</div>' +
-      (e.whatis ? '<div class="oc-whatis">' + escHtml(e.whatis) + '</div>' : '') + '</div>';
+      (e.description ? '<div class="oc-description">' + escHtml(e.description) + '</div>' : '') + '</div>';
     if (e.is_template) {
       html += '<div class="f-divider">Placeholders</div>';
       for (const k of (e.ph_names || [])) {

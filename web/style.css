@@ -537,7 +537,7 @@ code{font-family:var(--mono);}
 .field-label.oc-prompt{text-transform:none;letter-spacing:normal;word-break:break-word;}
 .oc-row-name{font-size:14px;font-weight:600;}
 .oc-alias{font-family:var(--mono);font-size:12px;color:var(--accent);}
-.oc-whatis{display:block;font-size:12px;color:var(--muted);font-weight:400;}
+.oc-description{display:block;font-size:12px;color:var(--muted);font-weight:400;}
 .oc-hdr{margin-bottom:6px;}
 .oc-title{font-size:16px;font-weight:700;line-height:1.4;word-break:break-all;}
 .oc-title .badge{vertical-align:2px;margin-left:2px;}

@@ -48,7 +48,7 @@ These read *user* scripts and helper scripts, not recipes — a recipe is parsed
 // parseModuleLoad: also extract "module load" / "ml" lines as deps
 deps, err := utils.GetDependenciesFromScript(scriptPath, parseModuleLoad)
 
-whatis := utils.GetWhatIsFromScript(scriptPath)
+description := utils.GetDescriptionFromScript(scriptPath)
 
 // #TYPE: from an external build script, defaulting to "app"
 kind, err := utils.GetExternalBuildTypeFromScript(scriptPath)

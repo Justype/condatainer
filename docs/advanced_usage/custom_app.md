@@ -53,14 +53,14 @@ Illumina's ORA decompressor is a vendor tarball behind a download page (never go
 
 ```bash
 #!/usr/bin/bash
-#WHATIS:Illumina ORA Decompressor
+#DESCRIPTION:Illumina ORA Decompressor
 #URL:https://support.illumina.com/sequencing/sequencing_software/DRAGENORA/software-downloads.html
 
 #ENV:ORA_REF_PATH=$app_root/oradata
 #ENVNOTE:Illumina ORA decompressor reference search path
 ```
 
-`#WHATIS:` is what users see in `condatainer avail` and `condatainer info` — always write them.
+`#DESCRIPTION:` is what users see in `condatainer avail` and `condatainer info` — always write them.
 
 The `#ENV:` pair is app-specific, covered [below](#setting-variables-the-app-needs).
 
@@ -156,7 +156,7 @@ Cytoscape publishes a pre-built Linux tarball for every release at a predictable
 #AUTOUPDATE:cytoscape_version:github:cytoscape/cytoscape>=3.9.0
 
 #TARGET:cytoscape/{cytoscape_version}
-#WHATIS:Cytoscape {cytoscape_version} — network biology visualization platform (needs Java)
+#DESCRIPTION:Cytoscape {cytoscape_version} — network biology visualization platform (needs Java)
 #URL:https://github.com/cytoscape/cytoscape/releases
 ```
 
@@ -165,7 +165,7 @@ Cytoscape publishes a pre-built Linux tarball for every release at a predictable
 | `#PH:` | Declares the `cytoscape_version` placeholder and its allowed values |
 | `#TARGET:` | Module name pattern — expands to `cytoscape/3.10.4`, `cytoscape/3.9.1`, … |
 | `#AUTOUPDATE:` | Lets CI refresh the `#PH:` list from GitHub releases (`>=3.9.0` is the floor) |
-| `#WHATIS:` | Shown in `condatainer avail` and `condatainer info` |
+| `#DESCRIPTION:` | Shown in `condatainer avail` and `condatainer info` |
 
 Every `#PH:` name must appear as a `{name}` token in `#TARGET:` and vice versa — otherwise every value would collapse onto the same target, so CondaTainer warns and skips the expansion.
 

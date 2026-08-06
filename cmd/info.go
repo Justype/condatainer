@@ -110,7 +110,7 @@ func displaySqfInfo(overlayPath string) error {
 	// File section
 	fmt.Println(utils.StyleTitle("File"))
 	fmt.Printf("  %-14s %s\n", "Name:", utils.StyleName(filepath.Base(overlayPath)))
-	displayWhatis(overlayPath)
+	displayDescription(overlayPath)
 	fmt.Printf("  %-14s %s\n", "Path:", utils.StylePath(overlayPath))
 	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatBytes(fileInfo.Size()))
 	if overlayType != "" {
@@ -189,7 +189,7 @@ func displayImgInfo(overlayPath string) error {
 	// File section
 	fmt.Println(utils.StyleTitle("File"))
 	fmt.Printf("  %-14s %s\n", "Name:", utils.StyleName(filepath.Base(overlayPath)))
-	displayWhatis(overlayPath)
+	displayDescription(overlayPath)
 	fmt.Printf("  %-14s %s\n", "Path:", utils.StylePath(overlayPath))
 	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatBytes(stats.FileSizeBytes))
 	if stats.IsSparse {
@@ -254,11 +254,11 @@ func displayImgInfo(overlayPath string) error {
 	return nil
 }
 
-// readEnvFile resolves an overlay's whatis, notes, and var lines. The embedded
+// readEnvFile resolves an overlay's description, notes, and var lines. The embedded
 // build script is the source of truth (.sqf); a sidecar <overlay>.env shadows it.
 // $app_root is resolved to the overlay's mount root. Var lines are sorted KEY=VALUE.
-func readEnvFile(overlayPath string) (whatis string, notes map[string]string, varLines []string) {
-	whatis, configs, notes := container.ResolveOverlayEnv(overlayPath)
+func readEnvFile(overlayPath string) (description string, notes map[string]string, varLines []string) {
+	description, configs, notes := container.ResolveOverlayEnv(overlayPath)
 	keys := make([]string, 0, len(configs))
 	for k := range configs {
 		keys = append(keys, k)
@@ -267,14 +267,14 @@ func readEnvFile(overlayPath string) (whatis string, notes map[string]string, va
 	for _, k := range keys {
 		varLines = append(varLines, k+"="+configs[k])
 	}
-	return whatis, notes, varLines
+	return description, notes, varLines
 }
 
-// displayWhatis prints the Whatis line from the .env sidecar in the File section.
-func displayWhatis(overlayPath string) {
-	whatis, _, _ := readEnvFile(overlayPath)
-	if whatis != "" {
-		fmt.Printf("  %-14s %s\n", "Whatis:", whatis)
+// displayDescription prints the Description line from the .env sidecar in the File section.
+func displayDescription(overlayPath string) {
+	description, _, _ := readEnvFile(overlayPath)
+	if description != "" {
+		fmt.Printf("  %-14s %s\n", "Description:", description)
 	}
 }
 

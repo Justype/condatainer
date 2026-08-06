@@ -6,23 +6,23 @@ import "testing"
 // split across the two, while anchored patterns still match the name on its own.
 func TestMatchesOrAliasWithText(t *testing.T) {
 	const (
-		name   = "grch38/cellranger/2024-A"
-		whatis = "Cell Ranger GRCh38 2024-A index"
+		name        = "grch38/cellranger/2024-A"
+		description = "Cell Ranger GRCh38 2024-A index"
 	)
 
 	cases := []struct {
-		desc   string
-		terms  []string
-		name   string
-		whatis string
-		want   bool
+		desc        string
+		terms       []string
+		name        string
+		description string
+		want        bool
 	}{
-		{"term in name only", []string{"cellranger"}, name, whatis, true},
-		{"term in description only", []string{"index"}, name, whatis, true},
-		{"AND split across both fields", []string{"cellranger", "index"}, name, whatis, true},
-		{"AND with one term absent", []string{"cellranger", "bowtie"}, name, whatis, false},
-		{"AND both terms in description", []string{"cell", "ranger"}, name, whatis, true},
-		{"no term matches", []string{"salmon"}, name, whatis, false},
+		{"term in name only", []string{"cellranger"}, name, description, true},
+		{"term in description only", []string{"index"}, name, description, true},
+		{"AND split across both fields", []string{"cellranger", "index"}, name, description, true},
+		{"AND with one term absent", []string{"cellranger", "bowtie"}, name, description, false},
+		{"AND both terms in description", []string{"cell", "ranger"}, name, description, true},
+		{"no term matches", []string{"salmon"}, name, description, false},
 		{"empty description falls back to name", []string{"index"}, name, "", false},
 		{"empty description still matches name", []string{"cellranger"}, name, "", true},
 		// "*server" compiles to ^.*server$, which a name+description concatenation
@@ -33,9 +33,9 @@ func TestMatchesOrAliasWithText(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.desc, func(t *testing.T) {
 			q := NewSearchQuery(normalizeFilters(tc.terms), nil)
-			if got := q.MatchesOrAliasWithText(tc.name, "", tc.whatis); got != tc.want {
+			if got := q.MatchesOrAliasWithText(tc.name, "", tc.description); got != tc.want {
 				t.Errorf("MatchesOrAliasWithText(%q, \"\", %q) with terms %v = %v, want %v",
-					tc.name, tc.whatis, tc.terms, got, tc.want)
+					tc.name, tc.description, tc.terms, got, tc.want)
 			}
 		})
 	}

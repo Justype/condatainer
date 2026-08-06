@@ -11,7 +11,7 @@ type Entry struct {
 	Name           string              `json:"-"` // the index key
 	Path           string              `json:"path"`
 	Kind           Kind                `json:"kind"`
-	Whatis         string              `json:"whatis,omitempty"`
+	Description    string              `json:"description,omitempty"`
 	URL            string              `json:"url,omitempty"`
 	Deps           []string            `json:"deps,omitempty"` // #DEP: order, as written
 	IsTemplate     bool                `json:"is_template,omitempty"`
@@ -95,8 +95,8 @@ func ParseRecipe(path string, r io.Reader) (*Recipe, error) {
 		switch key {
 		case "#TYPE":
 			declared = strings.ToLower(value)
-		case "#WHATIS":
-			rec.Whatis = firstOf(rec.Whatis, value)
+		case "#DESCRIPTION":
+			rec.Description = firstOf(rec.Description, value)
 		case "#URL":
 			rec.URL = firstOf(rec.URL, value)
 		case "#TARGET":

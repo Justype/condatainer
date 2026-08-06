@@ -8,7 +8,7 @@ import (
 
 const starRecipe = `#!/usr/bin/env bash
 # Build a STAR index. This comment must not end the header block.
-#WHATIS:STAR {star_version} index for GENCODE {gencode_version}
+#DESCRIPTION:STAR {star_version} index for GENCODE {gencode_version}
 #URL:https://github.com/alexdobin/STAR
 
 #TARGET:grch38/star/{star_version}/gencode{gencode_version}-{read_length}
@@ -53,8 +53,8 @@ func TestParseRecipe(t *testing.T) {
 	if !r.IsTemplate {
 		t.Error("IsTemplate = false")
 	}
-	if r.Whatis != "STAR {star_version} index for GENCODE {gencode_version}" {
-		t.Errorf("Whatis = %q", r.Whatis)
+	if r.Description != "STAR {star_version} index for GENCODE {gencode_version}" {
+		t.Errorf("Description = %q", r.Description)
 	}
 	if r.URL != "https://github.com/alexdobin/STAR" {
 		t.Errorf("URL = %q", r.URL)
@@ -92,15 +92,15 @@ func TestParseRecipeHeaderBlock(t *testing.T) {
 	}
 
 	// The block ends at the first line that is neither comment nor blank.
-	below := parse(t, "x/y", "#WHATIS:kept\nBootstrap: docker\n#URL:below the block\n")
-	if below.Whatis != "kept" || below.URL != "" {
-		t.Errorf("whatis=%q url=%q, want the header below Bootstrap ignored", below.Whatis, below.URL)
+	below := parse(t, "x/y", "#DESCRIPTION:kept\nBootstrap: docker\n#URL:below the block\n")
+	if below.Description != "kept" || below.URL != "" {
+		t.Errorf("description=%q url=%q, want the header below Bootstrap ignored", below.Description, below.URL)
 	}
 
 	// A .def has no shebang and needs no exception.
-	def := parse(t, "ubuntu24/base.def", "#WHATIS:base\n\nBootstrap: docker\n")
-	if def.Name != "ubuntu24/base" || def.Kind != KindBase || def.Whatis != "base" {
-		t.Errorf("def = %q/%q/%q", def.Name, def.Kind, def.Whatis)
+	def := parse(t, "ubuntu24/base.def", "#DESCRIPTION:base\n\nBootstrap: docker\n")
+	if def.Name != "ubuntu24/base" || def.Kind != KindBase || def.Description != "base" {
+		t.Errorf("def = %q/%q/%q", def.Name, def.Kind, def.Description)
 	}
 }
 

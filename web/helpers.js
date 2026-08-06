@@ -585,7 +585,7 @@ function renderHelperList(filter) {
   const bookmarked = helperBookmarks;
   let helpers  = q
     ? allHelpers.filter(h =>
-        matchesAllTerms(h.name + ' ' + (h.whatis || ''), terms))
+        matchesAllTerms(h.name + ' ' + (h.description || ''), terms))
     : allHelpers;
   // Bookmarked items float to the top
   helpers = [
@@ -602,7 +602,7 @@ function renderHelperList(filter) {
     return '<div class="h-item" data-name="' + escHtml(h.name) + '" onclick="selectHelper(\'' + escHtml(h.name) + '\')">' +
       '<div class="h-item-content">' +
         '<div class="h-item-name">' + escHtml(h.name) + '</div>' +
-        '<div class="h-item-desc">'  + escHtml(h.whatis || '') + '</div>' +
+        '<div class="h-item-desc">'  + escHtml(h.description || '') + '</div>' +
       '</div>' +
       '<button class="btn btn-icon btn-ghost h-item-star' + (isBookmarked ? ' starred' : '') + '" onclick="toggleHelperBookmark(\'' + escHtml(h.name) + '\',event)" title="' + (isBookmarked ? 'Remove bookmark' : 'Bookmark') + '">' +
         iconSvg('star', null, isBookmarked) +
