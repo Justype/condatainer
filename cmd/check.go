@@ -95,9 +95,6 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	// Auto-install missing dependencies
 	utils.PrintMessage("Attempting to auto-install missing dependencies...")
-	if err := ensureBaseImage(cmd.Context()); err != nil {
-		return err
-	}
 
 	hasUnresolvable := false
 	var packageDeps []string
@@ -282,7 +279,7 @@ func autoCreateExternalOverlay(ctx context.Context, dep string) bool {
 
 	// .def or .sh
 	isApptainer := strings.HasSuffix(sibling, ".def")
-	bo, err := build.FromExternalSource(ctx, absPrefix, absFile, isApptainer, outputDir)
+	bo, err := build.FromExternalSource(ctx, absPrefix, absFile, isApptainer, outputDir, false)
 	if err != nil {
 		utils.PrintError("Failed to create build object for %s: %v", dep, err)
 		return false

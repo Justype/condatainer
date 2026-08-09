@@ -43,7 +43,7 @@ File
   Name:          ubuntu22--build-essential.sqf
   Path:          path/images/ubuntu22--build-essential.sqf
   Size:          271.91 MB
-  Type:          OS Overlay (Read-Only)
+  Type:          os (Read-Only)
   Distro:        Ubuntu 22.04 (Jammy)
 ...
 ```
@@ -51,7 +51,7 @@ File
 To get the base image distro version:
 
 ```bash
-condatainer config get default_distro   # e.g. ubuntu24  → Ubuntu 24.04
+condatainer config get base   # e.g. ubuntu24  → Ubuntu 24.04
 ```
 
 The output is `ubuntu24`, which is different from the overlay's distro version `ubuntu22`. This means you cannot load this overlay together with other overlays built on `ubuntu24` base image.
@@ -63,7 +63,7 @@ The output is `ubuntu24`, which is different from the overlay's distro version `
 If you want to permanently switch the default distro (e.g. to Ubuntu 22), run:
 
 ```bash
-condatainer config set default_distro ubuntu22
+condatainer config set base ubuntu22
 ```
 
 This often happens when:
@@ -113,7 +113,7 @@ In the inner shell, you can see the OS version with:
 cat /etc/os-release
 ```
 
-It is Ubuntu 22.04, which differs from the default base image (Ubuntu 24.04 when `default_distro: ubuntu24`).
+It is Ubuntu 22.04, which differs from the default base image (Ubuntu 24.04 when `base: ubuntu24`).
 
 You can either:
 - Use the PyTorch image as the base image
@@ -162,7 +162,7 @@ From: ubuntu:24.04
 ```
 
 ```{note}
-For the `From` line, make sure to specify the same distro version as your base image (e.g., `ubuntu:24.04` if your `default_distro` is `ubuntu24`). Otherwise, you may encounter compatibility issues when loading the overlay.
+For the `From` line, make sure to specify the same distro version as your base image (e.g., `ubuntu:24.04` if your `base` is `ubuntu24`). Otherwise, you may encounter compatibility issues when loading the overlay.
 ```
 
 ### 2. Build the Overlay
@@ -191,7 +191,7 @@ condatainer helper rstudio-server -o r-deps.sqf
 
 ### 4. Share the File
 
-Sharing the `r-deps.sqf` overlay is self-contained: the definition is embedded inside it, so collaborators can use it immediately **and** recover the exact recipe with `condatainer export r-deps.sqf`. There is no longer a need to hand over the `.def` separately.
+Sharing the `r-deps.sqf` overlay is self-contained: Apptainer records the definition in the image at `/.singularity.d/Singularity`, so collaborators can use it immediately **and** still see what produced it. There is no need to hand over the `.def` separately.
 
 You can still share (or version-control) the `r-deps.def` file if you prefer others rebuild from source rather than copy the image.
 

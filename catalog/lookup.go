@@ -16,15 +16,9 @@ type Match struct {
 	Vars   map[string]string // empty unless the name matched a template target
 }
 
-// Lookup resolves a name against the catalog, earlier sources winning.
-//
-// A name is either an index key or a full target match, and there is no third
-// form: a partially filled name does not determine its remaining values. The
-// index-key path hands back the template itself and fills nothing in, since
-// choosing which member of a family to build is the caller's.
-//
-// Not found is an outcome rather than an error — every conda package takes that
-// path — so it is reported by the bool.
+// Lookup resolves a name against the catalog, earlier sources winning. A name is
+// either an index key or a full target match, and not found is an outcome rather
+// than an error. See the README's What may surprise you.
 func (c Catalog) Lookup(ctx context.Context, name string) (*Match, bool, error) {
 	name = Normalize(name)
 	if name == "" {

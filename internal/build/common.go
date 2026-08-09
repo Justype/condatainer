@@ -8,16 +8,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"log/slog"
 
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/runtime/container"
-	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -32,41 +32,30 @@ func getInstalledOverlays() map[string]bool {
 	if cachedInstalledOverlays != nil {
 		return cachedInstalledOverlays
 	}
-	installed := make(map[string]bool)
-	for _, imagesDir := range config.GetImageSearchPaths() {
-		if !utils.DirExists(imagesDir) {
-			continue
-		}
-		entries, err := os.ReadDir(imagesDir)
-		if err != nil {
-			slog.Default().Warn("failed to read image directory", "dir", imagesDir, "err", err)
-			continue
-		}
-		for _, entry := range entries {
-			if entry.IsDir() || !utils.IsOverlay(entry.Name()) {
-				continue
-			}
-			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			installed[strings.ReplaceAll(nameVersion, "--", "/")] = true
-		}
+	// No aliases: a #DEP: names an image exactly, so a bare name must not be
+	// satisfied by the distro overlay that happens to share it.
+	scan, err := image.ScanOverlays(image.ScanOptions{})
+	if err != nil {
+		slog.Default().Warn("failed to read image directory", "err", err)
 	}
-	cachedInstalledOverlays = installed
-	return installed
+	cachedInstalledOverlays = image.Names(scan)
+	return cachedInstalledOverlays
 }
 
 // checkShouldBuild returns (skip=true, nil) if the overlay already exists and update=false.
 // In update mode, if the overlay is locked by a running container, returns an error.
 func checkShouldBuild(b *BuildObject) (skip bool, err error) {
-	if !b.update {
-		if _, err := os.Stat(b.targetOverlayPath); err == nil {
-			slog.Default().Info("overlay already exists, skipping",
-				"overlay", filepath.Base(b.targetOverlayPath), "path", b.targetOverlayPath)
-			return true, nil
-		}
+	// IsInstalled, not a stat of the target: for a base that means every image
+	// search path, so one supplied by a shared install is not rebuilt into the
+	// user's own directory. Identical to a stat for every other type.
+	if !b.update && b.IsInstalled() {
+		slog.Default().Info("overlay already exists, skipping",
+			"overlay", filepath.Base(b.tgt.Path), "path", b.tgt.Path)
+		return true, nil
 	}
-	if b.update && utils.FileExists(b.targetOverlayPath) {
-		if lock, err := image.AcquireLock(b.targetOverlayPath, true); err != nil {
-			return false, fmt.Errorf("cannot update %s: %w", b.nameVersion, err)
+	if b.update && utils.FileExists(b.tgt.Path) {
+		if lock, err := image.AcquireLock(b.tgt.Path, true); err != nil {
+			return false, fmt.Errorf("cannot update %s: %w", b.spec.Image.Name, err)
 		} else {
 			lock.Close()
 		}
@@ -90,24 +79,46 @@ func watchContext(ctx context.Context, label string) (done chan struct{}) {
 	return done
 }
 
-// buildFinalPath returns targetPath+".new" if update=true, else targetPath.
-// In update mode, builds write to a .new file for atomic replacement on success.
-func buildFinalPath(targetPath string, update bool) string {
-	if update {
-		return targetPath + ".new"
+// preparedSuffix marks a build's in-progress output.
+const preparedSuffix = ".part"
+
+// preparedPathFor derives where a build writes its output: beside the target,
+// tagged with the lock owner so stale-lock cleanup can recompute it.
+// See the README's Prepared output.
+func preparedPathFor(targetPath string, info BuildLockInfo) string {
+	owner := info.Runner
+	if owner == "" {
+		owner = "local"
 	}
-	return targetPath
+	tag := owner
+	if info.JobID != "" {
+		tag += "-" + info.JobID
+	} else {
+		tag += "-" + info.Node + "-" + strconv.Itoa(info.PID)
+	}
+	return targetPath + "." + sanitizeTag(tag) + preparedSuffix
 }
 
-// atomicInstall atomically installs finalPath as targetPath.
-// In update mode: removes old target, renames finalPath → targetPath.
-// In non-update mode: finalPath == targetPath already; only invalidates caches.
-func atomicInstall(finalPath, targetPath string, update bool) error {
-	if update {
-		os.Remove(targetPath) //nolint:errcheck
-		if err := os.Rename(finalPath, targetPath); err != nil {
-			os.Remove(finalPath) //nolint:errcheck
-			return fmt.Errorf("failed to replace overlay %s: %w", targetPath, err)
+// sanitizeTag keeps a lock owner usable as a filename component.
+func sanitizeTag(tag string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		default:
+			return '-'
+		}
+	}, tag)
+}
+
+// atomicInstall renames preparedPath over targetPath and invalidates the
+// installed-overlay caches. The installed image is never removed first — see
+// the README's Prepared output.
+func atomicInstall(preparedPath, targetPath string) error {
+	if preparedPath != targetPath {
+		if err := os.Rename(preparedPath, targetPath); err != nil {
+			os.Remove(preparedPath) //nolint:errcheck
+			return fmt.Errorf("failed to install overlay %s: %w", targetPath, err)
 		}
 	}
 	cachedInstalledOverlays = nil                // invalidate so next dep-check sees the new overlay
@@ -115,17 +126,16 @@ func atomicInstall(finalPath, targetPath string, update bool) error {
 	return nil
 }
 
-// prepareBuildWorkspace creates the build workspace (tmp overlay or host dirs).
-// Stale artifacts are detected by Create*; on detection a warning is printed and
-// the workspace is re-created with force=true, which removes only build dirs/overlays
-// and leaves the remote build source intact.
-func prepareBuildWorkspace(ctx context.Context, b *BuildObject, useTmpOverlay bool) error {
-	if !useTmpOverlay {
+// prepareBuildWorkspace creates the build workspace: an ext3 scratch image, or
+// host directories. Script and Conda builds only. A stale workspace is warned
+// about and re-created, leaving a fetched build source intact.
+func prepareBuildWorkspace(ctx context.Context, b *BuildObject) error {
+	if !b.ws.UsesImage() {
 		if err := b.CreateBuildDirs(ctx, false); err != nil {
 			if !errors.Is(err, ErrTmpOverlayExists) {
 				return fmt.Errorf("failed to create build dirs: %w", err)
 			}
-			logging.FromContext(ctx).Warn("stale build directory found, cleaning up", "name", b.nameVersion)
+			logging.FromContext(ctx).Warn("stale build directory found, cleaning up", "name", b.spec.Image.Name)
 			if err := b.CreateBuildDirs(ctx, true); err != nil {
 				return fmt.Errorf("failed to create build dirs: %w", err)
 			}
@@ -135,10 +145,20 @@ func prepareBuildWorkspace(ctx context.Context, b *BuildObject, useTmpOverlay bo
 			if !errors.Is(err, ErrTmpOverlayExists) {
 				return fmt.Errorf("failed to create temporary overlay: %w", err)
 			}
-			logging.FromContext(ctx).Warn("stale temporary overlay found, cleaning up", "name", b.nameVersion)
+			logging.FromContext(ctx).Warn("stale temporary overlay found, cleaning up", "name", b.spec.Image.Name)
 			if err := b.CreateTmpOverlay(ctx, true); err != nil {
 				return fmt.Errorf("failed to create temporary overlay: %w", err)
 			}
+		}
+	}
+
+	// A host payload is bound over the install prefix, so its leaf has to exist
+	// before the container starts. In ext3 mode CreateTmpOverlay makes no host
+	// directories at all, which is why this is here and not in either branch.
+	if b.ws.HostPayload() {
+		payloadDir := filepath.Join(b.ws.CntDir, b.spec.Image.Name)
+		if err := utils.MkdirAllShared(payloadDir); err != nil {
+			return fmt.Errorf("failed to create payload dir %s: %w", payloadDir, err)
 		}
 	}
 	return nil
@@ -150,17 +170,6 @@ func buildModeLabel(b *BuildObject) string {
 		return "sbatch"
 	}
 	return "local"
-}
-
-// buildOverlayPaths returns (targetPath, finalPath) where finalPath is the atomic-write
-// destination (.new suffix in update mode).
-func buildOverlayPaths(b *BuildObject) (targetPath, finalPath string) {
-	targetPath = b.targetOverlayPath
-	if abs, err := filepath.Abs(targetPath); err == nil {
-		targetPath = abs
-	}
-	finalPath = buildFinalPath(targetPath, b.update)
-	return
 }
 
 // isCancelledByUser checks if the error is due to user cancellation (Ctrl+C)
@@ -192,14 +201,15 @@ func shortHostname() string {
 	return h
 }
 
-// buildDefaults holds resource defaults for build operations.
-// Set from config at CLI startup via SetBuildDefaults.
+// buildDefaults holds resource defaults for build operations. Set from config at
+// CLI startup via SetBuildDefaults; these values are what a caller that skips the
+// CLI sees, so they track the config defaults rather than restating them.
 var buildDefaults = scheduler.ResourceSpec{
 	Nodes:        1,
 	TasksPerNode: 1,
-	CpusPerTask:  4, // conservative default for local builds
-	MemPerNodeMB: 8192,
-	Time:         2 * time.Hour,
+	CpusPerTask:  config.DefaultNcpus,
+	MemPerNodeMB: config.DefaultMemMB,
+	Time:         config.DefaultBuildDuration,
 }
 
 // SetBuildDefaults sets the resource defaults used for build job submissions.
@@ -270,11 +280,11 @@ func readBuildLockFile(path string) (BuildLockInfo, error) {
 // when definitely alive, or (false, Unknown, err) when the state cannot be verified.
 func isBuildLockStale(info BuildLockInfo) (stale bool, status scheduler.JobStatus, err error) {
 	// Empty type means old empty-lock format → treat as stale for backward compat.
-	if info.Type == "" {
+	if info.Runner == "" {
 		return true, scheduler.JobStatusUnknown, nil
 	}
 
-	if info.Type != "local" {
+	if info.Runner != "local" {
 		if info.JobID == "" {
 			// Lock was written before submit returned — treat as stale.
 			return true, scheduler.JobStatusUnknown, nil

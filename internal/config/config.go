@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,8 +27,8 @@ type BuildConfig struct {
 	Defaults      scheduler.ResourceSpec // Default resource spec for build job submissions
 	TmpSizeMB     int                    // Size of temporary overlay in MB
 	CompressArgs  string                 // mksquashfs compression arguments
-	BlockSize     string                 // mksquashfs block size for app/env/external overlays (default: 128k)
-	DataBlockSize string                 // mksquashfs block size for data/ref overlays (default: 1m)
+	BlockSize     string                 // mksquashfs block size for app/env/external overlays (DefaultBlockSize)
+	DataBlockSize string                 // mksquashfs block size for data/ref overlays (DefaultDataBlockSize)
 	UseTmpOverlay bool                   // Use a temporary overlay instead of a temp directory (default: false)
 	AlwaysSubmit  bool                   // Always submit builds as scheduler jobs even without script directives (default: false)
 	Channels      []string               // conda channels in priority order (default: [conda-forge, bioconda])
@@ -57,6 +58,11 @@ type Config struct {
 
 	// Dependency parsing
 	ParseModuleLoad bool // Parse "module load" / "ml" lines as dependencies (default: false)
+
+	// Pass --nv / --rocm when the host has the matching device nodes (default: true).
+	// Turn off on a node whose driver is present but unusable: the device nodes
+	// still exist, so detection fires and the container then fails to start.
+	AutoloadGPU bool
 
 	// Scheduler command timeout (default: 0 = no timeout).
 	SchedulerTimeout time.Duration
@@ -118,6 +124,34 @@ func CompressNames() []string {
 	return names
 }
 
+// Compiled-in defaults for the scalar config keys.
+//
+// Named because each is needed both in LoadDefaults, which sets what the program
+// runs on, and in setDefaults, which is what `config get` reports for an unset
+// key. Two literals drift and the two commands then disagree.
+const (
+	// Data is large and read sequentially, so it takes the bigger block; an app
+	// is many small files where a big block wastes read bandwidth.
+	DefaultBlockSize     = "128k"
+	DefaultDataBlockSize = "512k"
+
+	DefaultNcpus        = 4     // CPUs for a build job
+	DefaultMemMB        = 8192  // memory for a build job
+	DefaultBuildTime    = "2h"  // walltime for a build job
+	DefaultTmpSizeMB    = 20480 // temporary ext3 overlay, 20GB
+	DefaultCacheTTLDay  = 7     // remote recipe metadata cache, 1 week
+	DefaultNotification = "web"
+)
+
+// DefaultBuildDuration is DefaultBuildTime as a duration, so the two cannot disagree.
+var DefaultBuildDuration = 2 * time.Hour
+
+// DefaultChannels are the conda channels micromamba gets, highest priority first.
+func DefaultChannels() []string { return []string{"conda-forge", "bioconda"} }
+
+// DefaultLogsDir is where job logs land when nothing configures it.
+func DefaultLogsDir() string { return filepath.Join(os.Getenv("HOME"), "logs") }
+
 // BlockSizeCompletions lists common mksquashfs block sizes for shell completion
 var BlockSizeCompletions = []string{"64k", "128k", "256k", "512k", "1m"}
 
@@ -155,31 +189,32 @@ func LoadDefaults(executablePath string) {
 	}
 
 	Global = Config{
-		Debug:     false,
-		SubmitJob: true,
-		Version:   VERSION,
+		Debug:       false,
+		SubmitJob:   true,
+		AutoloadGPU: true,
+		Version:     VERSION,
 
 		ProgramDir: programDir,
-		LogsDir:    filepath.Join(os.Getenv("HOME"), "logs"),
+		LogsDir:    DefaultLogsDir(),
 
 		ApptainerBin: detectApptainerBin(),
 		SchedulerBin: "", // Auto-detect scheduler binary (empty = search PATH)
 
 		SchedulerTimeout: 0, // no timeout by default
-		Notification:     "web",
-		MetadataCacheTTL: 7 * 24 * time.Hour, // 1 week
+		Notification:     DefaultNotification,
+		MetadataCacheTTL: DefaultCacheTTLDay * 24 * time.Hour,
 
 		Build: BuildConfig{
 			Defaults: scheduler.ResourceSpec{
-				CpusPerTask:  4,             // 4 CPUs default
-				MemPerNodeMB: 8192,          // 8GB default memory
-				Time:         2 * time.Hour, // 2 hour default time limit
+				CpusPerTask:  DefaultNcpus,
+				MemPerNodeMB: DefaultMemMB,
+				Time:         DefaultBuildDuration,
 			},
-			TmpSizeMB:     20480,                               // 20GB temporary overlay
-			CompressArgs:  "-comp lz4",                         // zstd only compatible with apptainer version > 1.4
-			BlockSize:     "128k",                              // mksquashfs block size for app/env/external overlays
-			DataBlockSize: "512k",                              // mksquashfs block size for data/ref overlays
-			Channels:      []string{"conda-forge", "bioconda"}, // default conda channels
+			TmpSizeMB:     DefaultTmpSizeMB,
+			CompressArgs:  ArgsForCompress("lz4"), // zstd only compatible with apptainer version > 1.4
+			BlockSize:     DefaultBlockSize,
+			DataBlockSize: DefaultDataBlockSize,
+			Channels:      DefaultChannels(),
 		},
 	}
 }
@@ -249,25 +284,21 @@ func BaseImageSifName() string {
 	return strings.ReplaceAll(name, "/", "--") + ".sif"
 }
 
-// GetBaseImage returns the path to base_image.sif, searching all image directories.
-// Searches all directories and returns the first found, or falls back to first writable path.
-func GetBaseImage() string {
-	// Search all image directories
+// GetBaseImage returns the installed base image, searching every image directory.
+//
+// It only ever returns a file that exists. Somewhere a base could be written is
+// a different question, answered by GetBaseImageWritePath — conflating the two
+// used to hand callers a path to a nonexistent SIF and let Apptainer report it.
+func GetBaseImage() (string, error) {
 	if found := FindBaseImage(); found != "" {
-		return found
+		return found, nil
 	}
-
-	// Fall back to first writable path (where base image would be downloaded/created)
-	if writePath, err := GetBaseImageWritePath(); err == nil {
-		return writePath
+	name := BaseRecipeName()
+	if name == "" {
+		return "", fmt.Errorf("no base configured: set `base`, or configure a source declaring default_base")
 	}
-
-	// Last resort: use user data dir (backward compatibility)
-	if userDir := GetUserDataDir(); userDir != "" {
-		return filepath.Join(userDir, "images", "base_image.sif")
-	}
-
-	return "base_image.sif"
+	return "", fmt.Errorf("base image %s is not installed (searched %s)",
+		name, strings.Join(GetImageSearchPaths(), ", "))
 }
 
 // GetWritableTmpDir returns the first writable tmp directory.

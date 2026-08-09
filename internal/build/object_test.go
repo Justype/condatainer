@@ -54,11 +54,8 @@ func TestParseScriptMetadata_RequiresTTY(t *testing.T) {
 	tmp.Close()
 
 	base := &BuildObject{
-		nameVersion:       "foo/bar",
-		buildSource:       tmp.Name(),
-		cntDirPath:        "",
-		tmpOverlayPath:    "",
-		targetOverlayPath: "",
+		spec:        Spec{Image: ImageSpec{Name: "foo/bar"}},
+		buildSource: tmp.Name(),
 	}
 
 	err = base.parseScriptMetadata(context.Background())
@@ -82,18 +79,15 @@ func TestParseScriptMetadata_NoInteractive(t *testing.T) {
 	tmp.Close()
 
 	base := &BuildObject{
-		nameVersion:       "foo/bar",
-		buildSource:       tmp.Name(),
-		cntDirPath:        "",
-		tmpOverlayPath:    "",
-		targetOverlayPath: "",
+		spec:        Spec{Image: ImageSpec{Name: "foo/bar"}},
+		buildSource: tmp.Name(),
 	}
 
 	err = base.parseScriptMetadata(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(base.dependencies) == 0 {
+	if len(base.spec.Dependencies) == 0 {
 		t.Fatalf("expected dependencies to be parsed")
 	}
 }
@@ -113,11 +107,8 @@ func TestParseScriptMetadata_NcpusFromSlurm(t *testing.T) {
 	tmp.Close()
 
 	base := &BuildObject{
-		nameVersion:       "foo/bar",
-		buildSource:       tmp.Name(),
-		cntDirPath:        "",
-		tmpOverlayPath:    "",
-		targetOverlayPath: "",
+		spec:        Spec{Image: ImageSpec{Name: "foo/bar"}},
+		buildSource: tmp.Name(),
 	}
 
 	err = base.parseScriptMetadata(context.Background())
@@ -144,11 +135,8 @@ func TestParseScriptMetadata_NcpusFromPBS(t *testing.T) {
 	tmp.Close()
 
 	base := &BuildObject{
-		nameVersion:       "foo/bar",
-		buildSource:       tmp.Name(),
-		cntDirPath:        "",
-		tmpOverlayPath:    "",
-		targetOverlayPath: "",
+		spec:        Spec{Image: ImageSpec{Name: "foo/bar"}},
+		buildSource: tmp.Name(),
 	}
 
 	err = base.parseScriptMetadata(context.Background())
@@ -203,12 +191,12 @@ func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 	// Use the current process PID and hostname so isBuildLockStale() treats it as active.
 	// NewBuildObject overrides tmpDir via resolveTmpDirForConda(), so tmp artifacts
 	// in the caller-supplied tmpDir are invisible to it. The build-in-progress guard
-	// checks base.buildLockPath() = targetOverlayPath + ".lock" (lives in imagesDir).
+	// checks base.tgt.Lock = target path + ".lock" (lives in imagesDir).
 	nameVersion := "cellranger/8.0.1"
 	sqfName := strings.ReplaceAll(catalog.Normalize(nameVersion), "/", "--") + ".sqf"
 	lockPath := filepath.Join(imagesDir, sqfName+".lock")
 	liveLock := BuildLockInfo{
-		Type:      "local",
+		Runner:    "local",
 		Node:      shortHostname(),
 		PID:       os.Getpid(), // this process is definitely alive
 		CreatedAt: time.Now().Format(time.RFC3339),

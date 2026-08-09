@@ -14,6 +14,7 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/chzyer/readline"
@@ -95,16 +96,18 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 		if createFrom != "" && createName == "" && createPrefix == "" {
 			ExitWithError("When using --from, either --name or --prefix must be provided.")
 		}
-		if createFile != "" && createPrefix == "" {
-			createPrefix = createFile[:len(createFile)-len(filepath.Ext(createFile))]
+		if derived := derivePrefixFromFile(createFile, createPrefix, createName); derived != "" {
+			createPrefix = derived
 		}
 		if createPrefix != "" && createFile == "" && len(args) == 0 && createFrom == "" {
 			ExitWithError("--prefix requires either packages, --file, or --from to be specified.")
 		}
 
-		// 2. Ensure base image exists (also checks for apptainer)
-		if err := build.EnsureBaseImage(ctx, false); err != nil {
-			ExitWithError("Failed to ensure base image: %v", err)
+		// 2. Apptainer runs every build, so fail here rather than after
+		// resolution has already fetched recipes. The base image is not checked:
+		// it is an implicit prerequisite of the plan, built with everything else.
+		if err := apptainer.EnsureApptainer(); err != nil {
+			ExitWithError("%v", err)
 		}
 
 		// 3. Handle Compression Config – consult helper that respects available
@@ -527,17 +530,65 @@ func runCreatePackages(ctx context.Context, packages []string) {
 	ExitIfJobsSubmitted(graph)
 }
 
-// runCreateWithName creates a single sqf with multiple packages or from YAML
+// derivePrefixFromFile returns the prefix --file implies, or "" when the user
+// already named a target. The mode dispatch tests --prefix before --name, so a
+// prefix derived while --name is set would silently win over it.
+func derivePrefixFromFile(file, prefix, name string) string {
+	if file == "" || prefix != "" || name != "" {
+		return ""
+	}
+	return file[:len(file)-len(filepath.Ext(file))]
+}
+
+// normalizedTargetName returns --name in catalog form.
+//
+// Any depth is allowed. Restoring a project from a lockfile has to recreate the
+// names the catalog itself uses, and a data image is several levels deep
+// (grch38/star/2.7.11b/gencode47-101). The name survives the round trip through
+// the filename either way: / becomes -- on the way out, and Normalize turns it
+// back on the way in.
+func normalizedTargetName() string {
+	return catalog.Normalize(createName)
+}
+
+// isExternalBuildFile reports whether a file builds through the external-source
+// path: a shell recipe or an Apptainer definition.
+func isExternalBuildFile(path string) bool {
+	return strings.HasSuffix(path, ".sh") ||
+		strings.HasSuffix(path, ".bash") ||
+		strings.HasSuffix(path, ".def")
+}
+
+// buildExternalSource builds one script or definition into targetPrefix, exiting
+// on failure. outputDir holds the image and its scratch space.
+func buildExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, outputDir string) {
+	bo, err := build.FromExternalSource(ctx, targetPrefix, source, isApptainer, outputDir, createUpdate)
+	if err != nil {
+		ExitWithError("Failed to create build object from %s: %v", source, err)
+	}
+
+	graph, err := build.NewBuildGraph(ctx, []*build.BuildObject{bo}, outputDir,
+		config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
+	if err != nil {
+		ExitWithError("Failed to create build graph: %v", err)
+	}
+
+	if err := graph.Run(ctx); err != nil {
+		exitOnBuildError(err)
+	}
+	// If jobs were submitted to the scheduler, exit with a distinct code so downstream tooling
+	// can detect that overlays will be created asynchronously by scheduler jobs.
+	ExitIfJobsSubmitted(graph)
+}
+
+// runCreateWithName creates a single sqf with multiple packages or from a file
 // Example: condatainer create -n myenv nvim nodejs
 // Example: condatainer create -n myenv -f environment.yml
+// Example: condatainer create -n myenv -f build.sh
 func runCreateWithName(ctx context.Context, packages []string) {
 	imagesDir := getWritableImagesDir()
 
-	normalizedName := catalog.Normalize(createName)
-	slashCount := strings.Count(normalizedName, "/")
-	if slashCount > 1 {
-		ExitWithError("--name cannot contain more than one '/'")
-	}
+	normalizedName := normalizedTargetName()
 
 	// Check if already exists (search all paths), skip only when not updating
 	if !createUpdate {
@@ -551,16 +602,24 @@ func runCreateWithName(ctx context.Context, packages []string) {
 
 	utils.PrintDebug("[CREATE] Creating overlay with name: %s", createName)
 
+	// A script or definition is not a conda input. It builds the same way --prefix
+	// builds one, targeting the managed images dir instead of a path the user typed.
+	if createFile != "" && !utils.IsCondaFile(createFile) {
+		if !isExternalBuildFile(createFile) {
+			ExitWithError("File must be .yml, .yaml, .txt, .sh, .bash, or .def")
+		}
+		absFile, _ := filepath.Abs(createFile)
+		targetPrefix := filepath.Join(imagesDir, strings.ReplaceAll(normalizedName, "/", "--"))
+		buildExternalSource(ctx, targetPrefix, absFile, strings.HasSuffix(createFile, ".def"), imagesDir)
+		return
+	}
+
 	// Create a conda BuildObject with buildSource set appropriately
 	// The buildSource field will contain either:
 	// - Path to YAML file (if -f flag used)
 	// - Comma-separated package list (if packages provided)
 	var buildSource string
 	if createFile != "" {
-		// Conda env/spec file mode
-		if !utils.IsCondaFile(createFile) {
-			ExitWithError("File must be .yml/.yaml or an explicit spec (.txt) for conda environments")
-		}
 		buildSource, _ = filepath.Abs(createFile)
 	} else if len(packages) > 0 {
 		// Multiple packages mode - join with commas
@@ -603,27 +662,10 @@ func runCreateWithPrefix(ctx context.Context) {
 		if err := bo.Build(ctx, false); err != nil {
 			ExitWithError("Build failed: %v", err)
 		}
-	} else if strings.HasSuffix(createFile, ".sh") || strings.HasSuffix(createFile, ".bash") || strings.HasSuffix(createFile, ".def") {
+	} else if isExternalBuildFile(createFile) {
 		// Shell script or apptainer def file
-		isApptainer := strings.HasSuffix(createFile, ".def")
 		absFile, _ := filepath.Abs(createFile)
-		bo, err := build.FromExternalSource(ctx, absPrefix, absFile, isApptainer, outputDir)
-		if err != nil {
-			ExitWithError("Failed to create build object from %s: %v", createFile, err)
-		}
-
-		buildObjects := []*build.BuildObject{bo}
-		graph, err := build.NewBuildGraph(ctx, buildObjects, outputDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
-		if err != nil {
-			ExitWithError("Failed to create build graph: %v", err)
-		}
-
-		if err := graph.Run(ctx); err != nil {
-			exitOnBuildError(err)
-		}
-		// If jobs were submitted to the scheduler, exit with a distinct code so downstream tooling
-		// can detect that overlays will be created asynchronously by scheduler jobs.
-		ExitIfJobsSubmitted(graph)
+		buildExternalSource(ctx, absPrefix, absFile, strings.HasSuffix(createFile, ".def"), outputDir)
 	} else {
 		ExitWithError("File must be .yml, .yaml, .txt, .sh, .bash, or .def")
 	}
@@ -659,11 +701,7 @@ func runCreateFromSource(ctx context.Context) {
 	if createPrefix != "" {
 		targetPrefix, _ = filepath.Abs(createPrefix)
 	} else {
-		normalizedName := catalog.Normalize(createName)
-		if strings.Count(normalizedName, "/") > 1 {
-			ExitWithError("--name cannot contain more than one '/'")
-		}
-		fileName := strings.ReplaceAll(normalizedName, "/", "--")
+		fileName := strings.ReplaceAll(normalizedTargetName(), "/", "--")
 		targetPrefix = filepath.Join(imagesDir, fileName)
 	}
 
@@ -681,23 +719,7 @@ func runCreateFromSource(ctx context.Context) {
 
 	utils.PrintMessage("Creating overlay %s from %s", filepath.Base(targetOverlayPath), utils.StylePath(source))
 
-	bo, err := build.FromExternalSource(ctx, targetPrefix, source, isApptainer, imagesDir)
-	if err != nil {
-		ExitWithError("Failed to create build object from %s: %v", source, err)
-	}
-
-	buildObjects := []*build.BuildObject{bo}
-	graph, err := build.NewBuildGraph(ctx, buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
-	if err != nil {
-		ExitWithError("Failed to create build graph: %v", err)
-	}
-
-	if err := graph.Run(ctx); err != nil {
-		exitOnBuildError(err)
-	}
-	// If jobs were submitted to the scheduler, exit with a distinct code so downstream tooling
-	// can detect that overlays will be created asynchronously by scheduler jobs.
-	ExitIfJobsSubmitted(graph)
+	buildExternalSource(ctx, targetPrefix, source, isApptainer, imagesDir)
 }
 
 func exitOnBuildError(err error) {

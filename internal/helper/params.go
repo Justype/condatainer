@@ -139,9 +139,9 @@ func PrintHelperUsage(scriptName string, params []HelperParam, spec *scheduler.R
 				}
 			}
 			if flags != "" {
-				fmt.Printf("  %-18s%s%s%s\n", flags, p.Desc, defStr, choicesStr)
+				fmt.Printf("  %-18s%s%s%s\n", flags, p.Description, defStr, choicesStr)
 			} else {
-				fmt.Printf("  %-18s%s%s%s  [prompt-only]\n", p.Key, p.Desc, defStr, choicesStr)
+				fmt.Printf("  %-18s%s%s%s  [prompt-only]\n", p.Key, p.Description, defStr, choicesStr)
 			}
 		}
 	}

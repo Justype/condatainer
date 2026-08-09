@@ -9,20 +9,24 @@ async function loadOverlays() {
 
 // renderOverlays renders the .sqf overlay table, keeping only entries whose
 // name matches every whitespace-separated term of filter.
+//
+// The filter is on format, the file's container format. type is what the payload
+// is — app, data, os — and is shown as its own column.
 function renderOverlays(filter) {
   const terms = searchTerms(filter);
   const q     = terms.length;
-  const sqfs  = allOverlays.filter(o => o.type === 'sqf');
+  const sqfs  = allOverlays.filter(o => o.format === 'sqf');
   const rows  = q ? sqfs.filter(o => matchesAllTerms(o.name, terms)) : sqfs;
   const tbody = gid('ov-tbody');
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="td-empty">' +
+    tbody.innerHTML = '<tr><td colspan="5" class="td-empty">' +
       (q ? 'No matches.' : 'No module overlays found.') + '</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map(o =>
-    '<tr>' +
+    '<tr' + (o.description ? ' title="' + escHtml(o.description) + '"' : '') + '>' +
       '<td class="td-name">' + escHtml(o.name) + '</td>' +
+      '<td class="td-muted td-fit">' + escHtml(o.type || '') + '</td>' +
       '<td class="mono td-muted td-fit">' + fmtSize(o.size) + '</td>' +
       '<td class="mono path-cell td-muted">' + pathTailHtml(o.path) + '</td>' +
       '<td class="td-nowrap td-fit">' +

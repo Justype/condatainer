@@ -11,6 +11,8 @@ import (
 	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image/ext3"
+	"github.com/Justype/condatainer/internal/image/meta"
+	"github.com/Justype/condatainer/internal/image/sif"
 	"github.com/Justype/condatainer/internal/image/squashfs"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
@@ -70,6 +72,12 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// The base is not in the installed-overlay map — that map drives `remove`, and
+	// the container root is not something to delete by name. Resolve it here only.
+	if overlayPath == "" && normalized == config.BaseRecipeName() {
+		overlayPath = config.FindBaseImage()
+	}
+
 	if overlayPath == "" {
 		// Try as external file path
 		overlayPath, _ = filepath.Abs(overlayArg)
@@ -78,13 +86,27 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if utils.IsSqf(overlayPath) {
-		return displaySqfInfo(overlayPath)
-	} else if utils.IsImg(overlayPath) {
+	switch {
+	case utils.IsSqf(overlayPath), utils.IsSif(overlayPath):
+		return displayImageInfo(overlayPath)
+	case utils.IsImg(overlayPath):
 		return displayImgInfo(overlayPath)
 	}
 
 	return fmt.Errorf("unsupported file type: %s", filepath.Ext(overlayPath))
+}
+
+// imageType reports the recipe type the image was built as — app, base, os or
+// data — taken from its manifest. An image built before the manifest has none,
+// and its layout cannot tell app from data, so that reports "" for unknown.
+func imageType(imagePath string) catalog.Type {
+	if manifest, err := meta.Read(imagePath); err == nil {
+		switch manifest.Type {
+		case catalog.TypeBase, catalog.TypeOS, catalog.TypeApp, catalog.TypeData:
+			return manifest.Type
+		}
+	}
+	return ""
 }
 
 // normalizeTime parses ctime()-style timestamps produced by tune2fs and unsquashfs
@@ -97,15 +119,26 @@ func normalizeTime(s string) string {
 	return s
 }
 
-// displaySqfInfo prints rich info for a SquashFS image.
-func displaySqfInfo(overlayPath string) error {
+// displayImageInfo prints rich info for an immutable image, .sqf or .sif. A
+// SIF's payload starts partway into the file, so its archive reads take that
+// offset; a .sqf is the same reads at 0.
+func displayImageInfo(overlayPath string) error {
 	fileInfo, err := os.Stat(overlayPath)
 	if err != nil {
 		return fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	sqStats, unsquashfsErr := squashfs.GetSquashFSStats(overlayPath)
-	overlayType := squashfs.GetOverlayType(overlayPath)
+	var offset int64
+	if utils.IsSif(overlayPath) {
+		part, err := sif.PrimarySystemPartition(overlayPath)
+		if err != nil {
+			return fmt.Errorf("not a readable SIF: %w", err)
+		}
+		offset = part.Offset
+	}
+
+	sqStats, unsquashfsErr := squashfs.GetSquashFSStatsAt(overlayPath, offset)
+	typ := imageType(overlayPath)
 
 	// File section
 	fmt.Println(utils.StyleTitle("File"))
@@ -113,11 +146,13 @@ func displaySqfInfo(overlayPath string) error {
 	displayDescription(overlayPath)
 	fmt.Printf("  %-14s %s\n", "Path:", utils.StylePath(overlayPath))
 	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatBytes(fileInfo.Size()))
-	if overlayType != "" {
-		fmt.Printf("  %-14s %s (Read-Only)\n", "Type:", utils.StyleInfo(overlayType))
+	typeLabel := string(typ)
+	if typeLabel == "" {
+		typeLabel = "unknown"
 	}
-	if overlayType == "OS Overlay" {
-		if osInfo := squashfs.GetOSInfo(overlayPath); osInfo != nil {
+	fmt.Printf("  %-14s %s (Read-Only)\n", "Type:", utils.StyleInfo(typeLabel))
+	if typ == catalog.TypeOS || typ == catalog.TypeBase {
+		if osInfo := squashfs.GetOSInfoAt(overlayPath, offset); osInfo != nil {
 			fmt.Printf("  %-14s %s\n", "Distro:", osInfo.String())
 		}
 	}
@@ -128,7 +163,7 @@ func displaySqfInfo(overlayPath string) error {
 	}
 	// OS overlays carry no version in their name, so their distribution tag is the
 	// build date (mksquashfs creation time).
-	if overlayType == "OS Overlay" && sqStats != nil && sqStats.CreatedTime != "" {
+	if typ == catalog.TypeOS && sqStats != nil && sqStats.CreatedTime != "" {
 		if t, ok := squashfs.ParseStatTime(sqStats.CreatedTime); ok {
 			fmt.Printf("  %-14s %s\n", "Build Tag:", t.Format("2006.01.02"))
 		}
@@ -156,7 +191,7 @@ func displaySqfInfo(overlayPath string) error {
 	name := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
 	name = strings.ReplaceAll(name, "--", "/")
 	name = strings.ReplaceAll(name, "=", "/")
-	if overlayType == "Module Overlay" || overlayType == "Bundle Overlay" {
+	if typ == catalog.TypeApp || typ == catalog.TypeData {
 		fmt.Println(utils.StyleTitle("Mount"))
 		fmt.Printf("  %-14s /cnt/%s\n", "Path:", name)
 	}
@@ -192,10 +227,12 @@ func displayImgInfo(overlayPath string) error {
 	displayDescription(overlayPath)
 	fmt.Printf("  %-14s %s\n", "Path:", utils.StylePath(overlayPath))
 	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatBytes(stats.FileSizeBytes))
+	// Not a recipe type: an .img is a mutable working overlay, never built from a
+	// recipe, so it carries no manifest to take a type from.
 	if stats.IsSparse {
-		fmt.Printf("  %-14s %s (Writable; %s on disk)\n", "Type:", utils.StyleInfo("Environment Overlay"), utils.FormatBytes(stats.FileBlocksUsed))
+		fmt.Printf("  %-14s %s (Writable; %s on disk)\n", "Type:", utils.StyleInfo("environment"), utils.FormatBytes(stats.FileBlocksUsed))
 	} else {
-		fmt.Printf("  %-14s %s (Writable)\n", "Type:", utils.StyleInfo("Environment Overlay"))
+		fmt.Printf("  %-14s %s (Writable)\n", "Type:", utils.StyleInfo("environment"))
 	}
 	// Filesystem section
 	fmt.Println(utils.StyleTitle("Filesystem"))
@@ -254,9 +291,9 @@ func displayImgInfo(overlayPath string) error {
 	return nil
 }
 
-// readEnvFile resolves an overlay's description, notes, and var lines. The embedded
-// build script is the source of truth (.sqf); a sidecar <overlay>.env shadows it.
-// $app_root is resolved to the overlay's mount root. Var lines are sorted KEY=VALUE.
+// readEnvFile resolves an image's description, notes, and var lines from its
+// manifest, with {prefix} resolved to the install prefix. A writable .img reads
+// its .env sidecar instead. Var lines are sorted KEY=VALUE.
 func readEnvFile(overlayPath string) (description string, notes map[string]string, varLines []string) {
 	description, configs, notes := container.ResolveOverlayEnv(overlayPath)
 	keys := make([]string, 0, len(configs))
@@ -270,7 +307,7 @@ func readEnvFile(overlayPath string) (description string, notes map[string]strin
 	return description, notes, varLines
 }
 
-// displayDescription prints the Description line from the .env sidecar in the File section.
+// displayDescription prints the Description line in the File section.
 func displayDescription(overlayPath string) {
 	description, _, _ := readEnvFile(overlayPath)
 	if description != "" {

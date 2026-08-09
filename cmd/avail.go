@@ -2,13 +2,12 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -274,36 +273,11 @@ func singleValues(vars map[string]string) map[string][]string {
 
 // getInstalledOverlays returns a set of installed overlay names from all search paths
 func getInstalledOverlays() map[string]bool {
-	installed := make(map[string]bool)
-
-	// Check all image search paths
-	for _, imagesDir := range config.GetImageSearchPaths() {
-		if !utils.DirExists(imagesDir) {
-			continue
-		}
-
-		entries, err := os.ReadDir(imagesDir)
-		if err != nil {
-			utils.PrintWarning("Failed to read directory %s: %v", imagesDir, err)
-			continue
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			if !utils.IsOverlay(entry.Name()) {
-				continue
-			}
-			// Convert filename to name/version format
-			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			// Convert samtools--1.21 to samtools/1.21
-			normalized := strings.ReplaceAll(nameVersion, "--", "/")
-			installed[normalized] = true
-		}
+	scan, err := image.ScanOverlays(image.ScanOptions{})
+	if err != nil {
+		utils.PrintWarning("%v", err)
 	}
-
-	return installed
+	return image.Names(scan)
 }
 
 // maxInlinePLValues is the largest number of concrete placeholder values listed

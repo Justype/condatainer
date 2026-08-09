@@ -16,6 +16,7 @@ import (
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
+	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -383,14 +384,13 @@ Defaults to the current user and path '/' inside the image.`,
 // ---------------------------------------------------------
 
 var exportCmd = &cobra.Command{
-	Use:   "export [flags] <overlay>",
-	Short: "Export the recipe that produced an overlay",
-	Long:  overlayExportHelp,
-	Example: `  condatainer overlay export env.img > environment.yml
-  condatainer overlay export samtools/1.22 -p ./env     # write ./env.yml`,
+	Use:               "export [flags] <overlay.img>",
+	Short:             "Export the Conda environment in a writable .img overlay",
+	Long:              overlayExportHelp,
+	Example:           overlayExportExample,
 	Args:              cobra.ExactArgs(1),
 	SilenceUsage:      true,
-	ValidArgsFunction: completeInfoArgs,
+	ValidArgsFunction: completeImages,
 	RunE:              runExportOverlay,
 }
 
@@ -464,29 +464,6 @@ func resolveOverlayArg(arg string) (string, error) {
 		return "", fmt.Errorf("overlay %s not found", utils.StylePath(abs))
 	}
 	return abs, nil
-}
-
-// detectEmbeddedRecipe returns an overlay's embedded build recipe with its file
-// extension and type label. Only .sqf overlays carry one:
-//   - a definition at the root (.def / docker:// builds)
-//   - a build script under the payload dir
-//
-// An .img overlay only ever holds a conda environment, so it has no recipe.
-// Returns nil data if none is embedded.
-func detectEmbeddedRecipe(overlayPath string) (data []byte, ext, label string) {
-	if !utils.IsSqf(overlayPath) {
-		return nil, "", ""
-	}
-	if d := image.ReadFile(overlayPath, "/"+utils.BuildScriptDefName); d != nil {
-		return d, ".def", "definition"
-	}
-	base := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
-	nv := catalog.Normalize(base)
-	inner := "/cnt/" + nv + "/" + utils.BuildScriptName
-	if d := image.ReadFile(overlayPath, inner); d != nil {
-		return d, ".sh", "build script"
-	}
-	return nil, "", ""
 }
 
 // openExportOutput returns a writer, a close func, and a destination label.
@@ -563,8 +540,12 @@ func reorderChannelBlock(yaml []byte, priority []string) []byte {
 	return []byte(strings.Join(out, "\n"))
 }
 
-// runExportOverlay exports an overlay's recipe: an embedded definition or build
-// script if present, otherwise the conda environment via micromamba env export.
+// runExportOverlay exports the live Conda environment in a writable .img.
+//
+// Only an .img: it is mutable working state, so exporting its current packages
+// is the only way to capture what it has become. An installed .sqf or .sif is
+// immutable and carries a manifest, and is reproduced by rebuilding from its
+// recipe rather than by recovering one from the image.
 func runExportOverlay(cmd *cobra.Command, args []string) error {
 	overlayPath, err := resolveOverlayArg(args[0])
 	if err != nil {
@@ -572,30 +553,21 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 	}
 	prefix, _ := cmd.Flags().GetString("prefix")
 
-	// Announce the recipe type unless it's already visible: writing to a live
-	// terminal (no --prefix, stdout not redirected) shows the recipe directly.
+	// Announce the destination unless it is already visible: writing to a live
+	// terminal (no --prefix, stdout not redirected) shows the export directly.
 	announce := prefix != "" || !utils.IsInteractiveShell()
+
+	if !utils.IsImg(overlayPath) {
+		cmd.SilenceUsage = true
+		return fmt.Errorf("export needs a writable .img overlay; %s is an installed image.\n"+
+			"Rebuild it from its recipe instead: condatainer info %s shows what it is",
+			overlayPath, filepath.Base(overlayPath))
+	}
 
 	// Reading an .img read-only does not trip Apptainer's ext3 lock, so probe it
 	// to fail on a concurrent writable session instead of exporting stale data.
-	if utils.IsImg(overlayPath) {
-		if err := image.CheckAvailable(overlayPath, false); err != nil {
-			cmd.SilenceUsage = true
-			return err
-		}
-	}
-
-	// An embedded recipe is the exact source, so it wins over conda export.
-	if data, ext, label := detectEmbeddedRecipe(overlayPath); data != nil {
-		out, closeOut, dest, err := openExportOutput(prefix, ext)
-		if err != nil {
-			return err
-		}
-		defer closeOut() //nolint:errcheck
-		if announce {
-			utils.PrintMessage("Exporting embedded %s to %s", label, dest)
-		}
-		_, err = out.Write(data)
+	if err := image.CheckAvailable(overlayPath, false); err != nil {
+		cmd.SilenceUsage = true
 		return err
 	}
 
@@ -625,28 +597,11 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 		flagsArgs = append(flagsArgs, "--from-history")
 	}
 
-	// Determine internal prefix to export from
-	envPrefix := ""
-	if utils.IsImg(overlayPath) {
-		// For .img overlays export from /cnt_env (standard location)
-		envPrefix = "/cnt_env"
-		if !image.PathExists(overlayPath, "/cnt_env/conda-meta") {
-			cmd.SilenceUsage = true
-			return fmt.Errorf("overlay %s does not contain a conda environment at /cnt_env (missing conda-meta)", overlayPath)
-		}
-	} else if utils.IsSqf(overlayPath) {
-		// For .sqf overlays: derive name/version from filename
-		base := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
-		nv := catalog.Normalize(base)
-		if !image.PathExists(overlayPath, "/cnt/"+nv+"/conda-meta") {
-			// No embedded recipe (checked earlier) and no conda env.
-			cmd.SilenceUsage = true
-			return fmt.Errorf("overlay %s: cannot determine an exportable type (no build script, definition, or conda environment)", overlayPath)
-		}
-		envPrefix = "/cnt/" + nv
-	} else {
+	// A writable .img keeps its environment at the one fixed location.
+	envPrefix := container.EnvPrefix
+	if !image.PathExists(overlayPath, envPrefix+"/conda-meta") {
 		cmd.SilenceUsage = true
-		return fmt.Errorf("unsupported overlay type: %s", overlayPath)
+		return fmt.Errorf("overlay %s does not contain a conda environment at %s (missing conda-meta)", overlayPath, envPrefix)
 	}
 
 	// Extension follows the export format: an explicit spec (.txt) or YAML.
@@ -724,7 +679,9 @@ func initCondaInOverlay(ctx context.Context, overlayPath, envFile string, packag
 		}
 	}
 
-	if err := ensureBaseImage(ctx); err != nil {
+	// The conda install runs inside the base image. exec finds it on its own but
+	// cannot build one, so a missing base is resolved here.
+	if _, err := resolveBaseImage(ctx, ""); err != nil {
 		return err
 	}
 

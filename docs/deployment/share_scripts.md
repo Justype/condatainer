@@ -1,5 +1,13 @@
 # Sharing Your Scripts
 
+```{warning}
+**This page is out of date.** It describes the `scripts_link` / `extra_scripts_links`
+model, which recipe collections replaced. Recipes now come from the ordered
+`sources` list — see [Recipe Sources](../manuals/configuration.md#recipe-sources).
+The general advice below still holds; the specific keys, layout, and metadata
+generators do not.
+```
+
 Once a [build script](../advanced_usage/custom_app.md), [data script](../advanced_usage/custom_data.md), or [helper script](../advanced_usage/custom_helper.md) works, it's worth sharing — a script in a shared source is one build that serves everyone, instead of each person rediscovering the same vendor tarball.
 
 Three ways to do it:

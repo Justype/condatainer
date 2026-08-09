@@ -10,7 +10,7 @@ import (
 type Entry struct {
 	Name           string              `json:"-"` // the index key
 	Path           string              `json:"path"`
-	Kind           Kind                `json:"kind"`
+	Type           Type                `json:"type"`
 	Description    string              `json:"description,omitempty"`
 	URL            string              `json:"url,omitempty"`
 	Deps           []string            `json:"deps,omitempty"` // #DEP: order, as written
@@ -95,7 +95,7 @@ func ParseRecipe(path string, r io.Reader) (*Recipe, error) {
 		switch key {
 		case "#TYPE":
 			declared = strings.ToLower(value)
-		case "#DESCRIPTION":
+		case "#DESC":
 			rec.Description = firstOf(rec.Description, value)
 		case "#URL":
 			rec.URL = firstOf(rec.URL, value)
@@ -128,7 +128,7 @@ func ParseRecipe(path string, r io.Reader) (*Recipe, error) {
 	}
 
 	rec.IsTemplate = len(rec.PH) > 0 && rec.TargetTemplate != ""
-	rec.Kind = DeriveKind(rec.Name, rec.TargetTemplate, isDef, declared)
+	rec.Type = DeriveType(rec.Name, rec.TargetTemplate, isDef, declared)
 	return rec, nil
 }
 

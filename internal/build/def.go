@@ -2,34 +2,28 @@ package build
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/Justype/condatainer/internal/runtime/apptainer"
+	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/image/meta"
+	"github.com/Justype/condatainer/internal/image/sif"
 	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// recordedDefPath is where the build definition is embedded inside every
-// def-built overlay, so the overlay carries the recipe that produced it.
-var recordedDefPath = "/" + utils.BuildScriptDefName
-
-// buildDef implements the Apptainer .def build workflow on BuildObject.
-// Workflow:
-//  1. Check if overlay already exists (skip if yes)
-//  3. Resolve the definition: a real .def file, or one synthesized from a
-//     scheme:// source URI (e.g. docker://ubuntu:22.04)
-//  4. Embed a copy of that definition at /.cnt-build-script.def for provenance
-//  5. Build SIF from the definition using apptainer build --fakeroot
-//  6. Extract SquashFS partition from SIF
-//  7. Set permissions
-//  8. Cleanup
+// buildDef builds an image from an Apptainer definition, real or synthesized
+// from a scheme:// URI. A base keeps the .sif Apptainer produced; every other
+// type is extracted to .sqf, manifest and all.
 func (b *BuildObject) buildDef(ctx context.Context) error {
-	targetPath, finalPath := buildOverlayPaths(b)
+	targetPath := b.tgt.Path
 	log := logging.FromContext(ctx)
+	isBase := b.spec.Image.Type == catalog.TypeBase
 
 	if skip, err := checkShouldBuild(b); skip || err != nil {
 		return err
@@ -39,15 +33,16 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 		return err
 	}
 	defer b.removeBuildLock()
+	preparedPath := b.tgt.Prepared
 
-	log.Info("building overlay", "overlay", filepath.Base(targetPath), "mode", buildModeLabel(b), "source", b.buildSource)
+	log.Info("building image", "image", filepath.Base(targetPath), "mode", buildModeLabel(b), "source", b.buildSource)
 
 	done := watchContext(ctx, "def build")
 	defer close(done)
 
 	// Ensure the tmp directory exists before apptainer tries to write the SIF there.
-	if err := utils.EnsureTmpSubdir(b.tmpDir); err != nil {
-		return fmt.Errorf("failed to create tmp dir %s: %w", b.tmpDir, err)
+	if err := utils.EnsureTmpSubdir(b.ws.Root); err != nil {
+		return fmt.Errorf("failed to create tmp dir %s: %w", b.ws.Root, err)
 	}
 
 	// Resolve the definition source. A scheme:// source (docker://ubuntu:22.04)
@@ -55,15 +50,21 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	// placeholders substituted (Apptainer reads directives like From: verbatim).
 	defSource := b.buildSource
 	if strings.Contains(b.buildSource, "://") {
-		synthPath, err := synthesizeDefFromURI(b.buildSource, b.tmpDir)
+		synthPath, err := synthesizeDefFromURI(b.buildSource, b.ws.Root)
 		if err != nil {
 			return fmt.Errorf("failed to synthesize def from %s: %w", b.buildSource, err)
 		}
 		defSource = synthPath
 	}
 
-	// Embed a copy of the definition inside the overlay for provenance.
-	buildDefSource, err := writeRecordingDef(defSource, b.tmpDir)
+	metaDir, err := stageMetadata(ctx, b)
+	if err != nil {
+		b.Cleanup(true)
+		return err
+	}
+
+	// Embed the definition and the manifest inside the image.
+	buildDefSource, err := writeRecordingDef(defSource, filepath.Join(metaDir, meta.FileName), b.ws.Root)
 	if err != nil {
 		return fmt.Errorf("failed to prepare recording def: %w", err)
 	}
@@ -75,54 +76,63 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 		NoCleanup: false,
 	}
 
-	if err := apptainer.Build(ctx, b.tmpOverlayPath, buildDefSource, buildOpts); err != nil {
+	if err := apptainer.Build(ctx, b.ws.Overlay, buildDefSource, buildOpts); err != nil {
 		b.Cleanup(true)
 		if apptainer.IsBuildCancelled(err) {
-			log.Info("build cancelled, overlay unchanged", "overlay", filepath.Base(targetPath))
+			log.Info("build cancelled, image unchanged", "image", filepath.Base(targetPath))
 			return ErrBuildCancelled
 		}
 		return fmt.Errorf("failed to build SIF from %s: %w", b.buildSource, err)
 	}
 
-	log.Info("extracting SquashFS", "path", finalPath)
-
-	if err := apptainer.DumpSifToSquashfs(ctx, b.tmpOverlayPath, finalPath); err != nil {
-		os.Remove(finalPath) //nolint:errcheck
-		b.Cleanup(true)
-		if apptainer.IsBuildCancelled(err) {
-			log.Info("build cancelled, overlay unchanged", "overlay", filepath.Base(targetPath))
-			return ErrBuildCancelled
+	if isBase {
+		// The container root is executed directly, so the SIF is the product.
+		if err := os.Rename(b.ws.Overlay, preparedPath); err != nil {
+			os.Remove(preparedPath) //nolint:errcheck
+			b.Cleanup(true)
+			return fmt.Errorf("failed to move SIF to %s: %w", preparedPath, err)
 		}
-		return fmt.Errorf("failed to dump SquashFS from SIF: %w", err)
+		if err := utils.MakeExecutable(preparedPath); err != nil {
+			log.Debug("failed to set permissions", "path", preparedPath, "err", err)
+		}
+	} else {
+		log.Info("extracting SquashFS", "path", preparedPath)
+		if err := sif.ExtractPartition(ctx, b.ws.Overlay, preparedPath); err != nil {
+			os.Remove(preparedPath) //nolint:errcheck
+			b.Cleanup(true)
+			if errors.Is(err, context.Canceled) || apptainer.IsBuildCancelled(err) {
+				log.Info("build cancelled, image unchanged", "image", filepath.Base(targetPath))
+				return ErrBuildCancelled
+			}
+			return fmt.Errorf("failed to extract SquashFS from SIF: %w", err)
+		}
+		utils.ShareWithParentGroup(preparedPath)
 	}
 
-	utils.ShareWithParentGroup(finalPath)
-
-	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
+	if err := atomicInstall(preparedPath, targetPath); err != nil {
 		return err
 	}
 
-	log.Info("overlay ready", "kind", "success", "path", targetPath)
+	log.Info("image ready", "kind", "success", "path", targetPath)
 	b.Cleanup(false)
 	return nil
 }
 
-// synthesizeDefFromURI generates an Apptainer definition file from a scheme://
-// source URI (e.g. docker://ubuntu:22.04). The scheme becomes the Bootstrap
-// agent and the remainder becomes From. A header comment records the original
-// URI and date so the generated def is self-describing once embedded. Returns
-// the path to the generated def file in tmpDir.
+// synthesizeDefFromURI generates a definition from a scheme:// URI such as
+// docker://ubuntu:22.04 — the scheme becomes Bootstrap, the rest becomes From,
+// and the URI is written as #DESC:/#URL: headers so it reaches the manifest.
 func synthesizeDefFromURI(uri, tmpDir string) (string, error) {
 	scheme, from, ok := strings.Cut(uri, "://")
 	if !ok || scheme == "" || from == "" {
 		return "", fmt.Errorf("not a valid source URI: %s", uri)
 	}
 	content := fmt.Sprintf(
-		"# Auto-generated by CondaTainer from %s\n"+
-			"# date: %s\n"+
+		"#DESC:Built from %s\n"+
+			"#URL:%s\n"+
+			"# Auto-generated by CondaTainer on %s\n"+
 			"Bootstrap: %s\n"+
 			"From: %s\n",
-		uri, time.Now().Format("2006-01-02"), scheme, from,
+		uri, uri, time.Now().Format("2006-01-02"), scheme, from,
 	)
 	tmpPath := filepath.Join(tmpDir, "cnt-synth.def")
 	if err := os.WriteFile(tmpPath, []byte(content), utils.PermFile); err != nil {
@@ -131,12 +141,10 @@ func synthesizeDefFromURI(uri, tmpDir string) (string, error) {
 	return tmpPath, nil
 }
 
-// writeRecordingDef returns the path to a definition file that builds from
-// cleanDefPath and additionally embeds a copy of that definition inside the
-// image at recordedDefPath (via an appended %files section), so every def-built
-// overlay carries the recipe that produced it. The embedded copy is the clean
-// definition — the appended %files section is not part of what gets recorded.
-func writeRecordingDef(cleanDefPath, tmpDir string) (string, error) {
+// writeRecordingDef returns a definition that builds from cleanDefPath and
+// embeds the staged manifest at meta.Path via an appended %files section.
+// An empty manifestPath builds the definition as-is.
+func writeRecordingDef(cleanDefPath, manifestPath, tmpDir string) (string, error) {
 	absClean, err := filepath.Abs(cleanDefPath)
 	if err != nil {
 		return "", err
@@ -145,13 +153,20 @@ func writeRecordingDef(cleanDefPath, tmpDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read def file: %w", err)
 	}
+	if manifestPath == "" {
+		return absClean, nil
+	}
+	absManifest, err := filepath.Abs(manifestPath)
+	if err != nil {
+		return "", err
+	}
 
 	var sb strings.Builder
 	sb.Write(data)
 	if len(data) > 0 && data[len(data)-1] != '\n' {
 		sb.WriteByte('\n')
 	}
-	fmt.Fprintf(&sb, "\n%%files\n    %s %s\n", absClean, recordedDefPath)
+	fmt.Fprintf(&sb, "\n%%files\n    %s %s\n", absManifest, meta.Path)
 
 	tmpPath := filepath.Join(tmpDir, "cnt-record.def")
 	if err := os.WriteFile(tmpPath, []byte(sb.String()), utils.PermFile); err != nil {

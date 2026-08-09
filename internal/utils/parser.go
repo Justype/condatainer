@@ -196,7 +196,7 @@ func ParseWalltime(timeStr string) (time.Duration, error) {
 	return ParseDHMSTime(timeStr)
 }
 
-// GetDescriptionFromScript reads a script and extracts the first #DESCRIPTION: line.
+// GetDescriptionFromScript reads a script and extracts the first #DESC: line.
 // Returns the trimmed description string, or empty string if not found.
 func GetDescriptionFromScript(scriptPath string) string {
 	file, err := os.Open(scriptPath)
@@ -208,8 +208,8 @@ func GetDescriptionFromScript(scriptPath string) string {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "#DESCRIPTION:") {
-			return strings.TrimSpace(line[len("#DESCRIPTION:"):])
+		if strings.HasPrefix(line, "#DESC:") {
+			return strings.TrimSpace(line[len("#DESC:"):])
 		}
 	}
 	_ = scanner.Err()
@@ -307,16 +307,15 @@ func GetDependenciesFromScript(scriptPath string, parseModuleLoad bool) ([]strin
 	return dependencies, nil
 }
 
-// GetExternalBuildTypeFromScript parses external build script TYPE metadata.
-// Supported tag forms:
-//   - #TYPE:<value>
-//   - TYPE:<value>
+// GetTypeFromScript reads an external build script's #TYPE: header and returns
+// the payload type it declares. This is the same axis catalog.DeriveType
+// resolves — what the payload is — not how it is built.
 //
-// If TYPE is not present, it defaults to "app".
-// Supported values (case-insensitive):
-//   - app aliases: app, env, tool, conda, small
-//   - data aliases: data, ref, large
-func GetExternalBuildTypeFromScript(scriptPath string) (string, error) {
+// Only "app" and "data" are accepted, matching catalog.DeriveType exactly, so
+// #TYPE: cannot mean one thing to a recipe and another to an external script.
+// A missing header defaults to "app". A bare "TYPE:" is accepted alongside
+// "#TYPE:" because an external script is not required to be comment-only.
+func GetTypeFromScript(scriptPath string) (string, error) {
 	if !FileExists(scriptPath) {
 		return "", fmt.Errorf("build script not found at %s", scriptPath)
 	}
@@ -347,10 +346,8 @@ func GetExternalBuildTypeFromScript(scriptPath string) (string, error) {
 		}
 
 		switch value {
-		case "app", "env", "tool", "conda", "small":
-			return "app", nil
-		case "data", "ref", "large":
-			return "data", nil
+		case "app", "data":
+			return value, nil
 		default:
 			return "", fmt.Errorf("invalid TYPE value %q: valid values are app or data", value)
 		}

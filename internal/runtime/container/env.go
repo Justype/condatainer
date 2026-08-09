@@ -2,49 +2,165 @@ package container
 
 import (
 	"bufio"
-	"bytes"
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/image/squashfs"
+	"github.com/Justype/condatainer/internal/image/meta"
+	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-func splitKeyNote(content string) (string, string) {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return "", ""
-	}
-	if idx := strings.Index(content, "="); idx >= 0 {
-		key := strings.TrimSpace(content[:idx])
-		note := strings.TrimSpace(content[idx+1:])
-		return key, note
-	}
-	return content, ""
-}
+// EnvPrefix is where a writable .img's payload lives inside the container.
+// An .img is a working image with no manifest, so it has no recorded prefix.
+const EnvPrefix = "/cnt_env"
 
-// overlayPrefix derives an overlay's in-container mount root (/cnt/<name>/<version>)
-// from its filename, e.g. images/orad--2.7.0.sqf -> /cnt/orad/2.7.0. This is the
-// value {prefix} takes in the overlay's #ENV: declarations — the same location
-// the recipe wrote to as $CNT_PREFIX, seen at load time.
-func overlayPrefix(overlayPath string) string {
-	base := filepath.Base(overlayPath)
-	base = strings.TrimSuffix(strings.TrimSuffix(base, ".sqf"), ".img")
-	return "/cnt/" + strings.ReplaceAll(base, "--", "/")
-}
-
-// CollectOverlayEnv resolves environment variables for the given overlay paths and
-// returns environment configs, notes, and non-fatal diagnostics for callers to
-// present or log.
+// Contribution is what one image adds to the container at load time.
 //
-// For each overlay the embedded build script (/cnt/<name>/<version>/.cnt-build-script)
-// is the source of truth, keeping the .sqf self-contained; a sidecar <overlay>.env,
-// if present, shadows it for local overrides. $app_root is substituted with the
-// overlay's mount root at load time. When the same variable is set by more than one
-// overlay, the later overlay wins and a diagnostic is recorded.
+// An image with no usable metadata yields the zero value and contributes
+// nothing — no variables, no PATH entry, no description. It still mounts.
+type Contribution struct {
+	Name        string
+	Type        catalog.Type
+	Description string
+	Prefix      string
+	Configs     map[string]string
+	Notes       map[string]string
+}
+
+// resolveImage reads what one image contributes, plus a diagnostic when it
+// contributes nothing.
+//
+// The manifest is the only source for a .sqf or .sif; an adjacent .env sidecar
+// is ignored for those, because an installed image is immutable and its metadata
+// travels inside it. A writable .img is the exception and reads its sidecar.
+func resolveImage(cleanPath string) (Contribution, *Diagnostic) {
+	if utils.IsImg(cleanPath) {
+		return imgContribution(cleanPath)
+	}
+
+	manifest, err := meta.Read(cleanPath)
+	if err != nil {
+		return Contribution{}, degradeDiagnostic(cleanPath, err)
+	}
+
+	c := Contribution{
+		Name:        manifest.Name,
+		Type:        manifest.Type,
+		Description: manifest.Description,
+		Prefix:      manifest.Runtime.Prefix,
+		Configs:     map[string]string{},
+		Notes:       map[string]string{},
+	}
+	for _, env := range manifest.Runtime.Env {
+		c.Configs[env.Key] = env.Resolved(manifest.Runtime.Prefix)
+		if env.Note != "" {
+			c.Notes[env.Key] = strings.ReplaceAll(env.Note, "{prefix}", manifest.Runtime.Prefix)
+		}
+	}
+	return c, nil
+}
+
+// degradeDiagnostic turns a failed manifest read into the message the user sees.
+//
+// The three cases are kept apart so a broken host never reads as a broken image:
+// an absent manifest is expected for anything built before manifests existed and
+// for a plain Apptainer .sif, while a present-but-unreadable one, or a missing
+// tool, is something the user can act on.
+func degradeDiagnostic(path string, err error) *Diagnostic {
+	name := utils.StylePath(path)
+	switch {
+	case errors.Is(err, meta.ErrNoManifest):
+		return &Diagnostic{
+			Level:   "info",
+			Message: fmt.Sprintf("%s has no CondaTainer metadata; mounted, but contributes no environment. Rebuild to add it.", name),
+		}
+	case errors.Is(err, meta.ErrInvalid), errors.Is(err, meta.ErrUnsupportedSchema):
+		return &Diagnostic{
+			Level:   "warn",
+			Message: fmt.Sprintf("%s has unreadable CondaTainer metadata: %v. Mounted, but contributes no environment.", name, err),
+		}
+	case errors.Is(err, tool.ErrToolMissing):
+		return &Diagnostic{
+			Level:   "warn",
+			Message: fmt.Sprintf("cannot read metadata from %s: %v. Install squashfs-tools to restore environment setup.", name, err),
+		}
+	default:
+		return &Diagnostic{
+			Level:   "warn",
+			Message: fmt.Sprintf("cannot read metadata from %s: %v. Mounted, but contributes no environment.", name, err),
+		}
+	}
+}
+
+// imgContribution reads a writable .img's sidecar.
+//
+// An .img is mutable working state, so its environment lives beside it rather
+// than inside it and can be edited without a rebuild.
+func imgContribution(imgPath string) (Contribution, *Diagnostic) {
+	c := Contribution{
+		Type:    catalog.TypeApp,
+		Prefix:  EnvPrefix,
+		Configs: map[string]string{},
+		Notes:   map[string]string{},
+	}
+
+	file, err := os.Open(imgPath + ".env")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return c, nil // no sidecar is normal; the .img still gets its bin/ on PATH
+		}
+		return c, &Diagnostic{
+			Level:   "warn",
+			Message: fmt.Sprintf("Unable to read overlay env %s.env: %v", imgPath, err),
+		}
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		key, value, note, ok := parseEnvLine(scanner.Text())
+		if !ok {
+			continue
+		}
+		c.Configs[key] = strings.ReplaceAll(value, "{prefix}", EnvPrefix)
+		if note != "" {
+			c.Notes[key] = strings.ReplaceAll(note, "{prefix}", EnvPrefix)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return c, &Diagnostic{
+			Level:   "warn",
+			Message: fmt.Sprintf("Failed to scan %s.env: %v", imgPath, err),
+		}
+	}
+	return c, nil
+}
+
+// parseEnvLine parses one `KEY=value ## note` sidecar line. Blank lines and
+// lines starting with # are skipped, as is anything without a valid key.
+func parseEnvLine(line string) (key, value, note string, ok bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", "", "", false
+	}
+	key, rest, found := strings.Cut(line, "=")
+	key = strings.TrimSpace(key)
+	if !found || key == "" {
+		return "", "", "", false
+	}
+	// The value may itself contain '=', so only the first one separates.
+	if v, n, hasNote := strings.Cut(rest, "##"); hasNote {
+		return key, strings.TrimSpace(v), strings.TrimSpace(n), true
+	}
+	return key, strings.TrimSpace(rest), "", true
+}
+
+// CollectOverlayEnv resolves environment variables for the given overlay paths,
+// returning configs, notes, and non-fatal diagnostics to present or log. It is
+// the one place degradation is reported. See the README's Environment Variables.
 func CollectOverlayEnv(paths []string) (map[string]string, map[string]string, []Diagnostic) {
 	configs := map[string]string{}
 	notes := map[string]string{}
@@ -54,19 +170,12 @@ func CollectOverlayEnv(paths []string) (map[string]string, map[string]string, []
 		if overlay == "" {
 			continue
 		}
-		// Strip :ro/:rw suffix — ResolveOverlayPaths preserves it but the embedded
-		// script and .env file live at the bare path (e.g. dep.sqf, not dep.sqf:ro).
-		cleanOverlay := strings.TrimSuffix(strings.TrimSuffix(overlay, ":ro"), ":rw")
-		prefix := overlayPrefix(cleanOverlay)
+		contribution, diag := resolveImage(cleanOverlayPath(overlay))
+		if diag != nil {
+			diagnostics = append(diagnostics, *diag)
+		}
 
-		// Embedded build-script env first, then let the sidecar shadow it. Both are
-		// merged per-overlay so a sidecar overriding the embedded value is not
-		// reported as a cross-overlay conflict below.
-		_, ovConfigs, ovNotes := readEmbeddedEnv(cleanOverlay, prefix)
-		_, diags := readSidecarEnv(cleanOverlay, prefix, ovConfigs, ovNotes)
-		diagnostics = append(diagnostics, diags...)
-
-		for key, value := range ovConfigs {
+		for key, value := range contribution.Configs {
 			if _, exists := configs[key]; exists {
 				diagnostics = append(diagnostics, Diagnostic{
 					Level:   "info",
@@ -75,7 +184,7 @@ func CollectOverlayEnv(paths []string) (map[string]string, map[string]string, []
 			}
 			configs[key] = value
 		}
-		for key, note := range ovNotes {
+		for key, note := range contribution.Notes {
 			notes[key] = note
 		}
 	}
@@ -83,116 +192,28 @@ func CollectOverlayEnv(paths []string) (map[string]string, map[string]string, []
 	return configs, notes, diagnostics
 }
 
-// readEmbeddedEnv reads #DESCRIPTION:/#ENV: from the .cnt-build-script embedded in a
-// .sqf overlay and returns the description, resolved env values, and notes, with
-// {prefix} filled in. Non-.sqf overlays and overlays without an embedded script
-// yield empty results. The script is read straight out of the archive via
-// unsquashfs -cat, so no mount is needed.
-func readEmbeddedEnv(overlayPath, prefix string) (description string, configs, notes map[string]string) {
-	configs = map[string]string{}
-	notes = map[string]string{}
-
-	if !strings.HasSuffix(overlayPath, ".sqf") {
-		return description, configs, notes
-	}
-
-	// The payload (and its embedded script) lives at cnt/<name>/<version>/ inside
-	// the archive, mirroring the /cnt/<name>/<version> mount root.
-	scriptPath := strings.TrimPrefix(prefix, "/") + "/" + utils.BuildScriptName
-	data := squashfs.Cat(overlayPath, scriptPath)
-	if len(data) == 0 {
-		return description, configs, notes
-	}
-
-	// Parsed by the same reader the catalog uses, so a recipe cannot mean one
-	// thing when it is resolved and another when its artifact is loaded.
-	recipe, err := catalog.ParseRecipe(strings.TrimPrefix(prefix, "/cnt/"), bytes.NewReader(data))
-	if err != nil {
-		return description, configs, notes
-	}
-	vars := map[string]string{"prefix": prefix}
-	description = recipe.Description
-	for _, env := range recipe.Env {
-		configs[env.Key] = env.Value(vars)
-		if env.Note != "" {
-			notes[env.Key] = env.Note
-		}
-	}
-
-	return description, configs, notes
+// cleanOverlayPath strips the :ro/:rw suffix ResolveOverlayPaths preserves; the
+// image and its sidecar live at the bare path.
+func cleanOverlayPath(overlay string) string {
+	return strings.TrimSuffix(strings.TrimSuffix(overlay, ":ro"), ":rw")
 }
 
-// readSidecarEnv overlays a sidecar <overlay>.env file on top of configs/notes,
-// shadowing the embedded build-script env for local overrides. {prefix} is
-// substituted with the mount root. Returns the sidecar's #DESCRIPTION: (empty if none) and
-// non-fatal diagnostics. A missing sidecar is not an error.
-func readSidecarEnv(cleanOverlay, prefix string, configs, notes map[string]string) (description string, diagnostics []Diagnostic) {
-	envPath := cleanOverlay + ".env"
-	file, err := os.Open(envPath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			diagnostics = append(diagnostics, Diagnostic{
-				Level:   "warn",
-				Message: fmt.Sprintf("Unable to read overlay env %s: %v", envPath, err),
-			})
-		}
-		return description, diagnostics
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		if after, ok := strings.CutPrefix(line, "#DESCRIPTION:"); ok {
-			description = strings.TrimSpace(after)
-			continue
-		}
-		if strings.HasPrefix(line, "#ENVNOTE:") {
-			key, note := splitKeyNote(line[len("#ENVNOTE:"):])
-			if key != "" {
-				notes[key] = note
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-		pair := strings.SplitN(line, "=", 2)
-		if len(pair) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(pair[0])
-		value := strings.TrimSpace(pair[1])
-		if key == "" {
-			continue
-		}
-		configs[key] = strings.ReplaceAll(value, "{prefix}", prefix)
-	}
-	if err := scanner.Err(); err != nil {
-		diagnostics = append(diagnostics, Diagnostic{
-			Level:   "warn",
-			Message: fmt.Sprintf("Failed to scan %s: %v", envPath, err),
-		})
-	}
-
-	return description, diagnostics
-}
-
-// ResolveOverlayEnv resolves a single overlay's description (#DESCRIPTION:), env vars,
-// and notes for display. The embedded build script is the source of truth (.sqf);
-// a sidecar <overlay>.env shadows it. {prefix} is substituted with the overlay's
-// mount root. A :ro/:rw suffix on the path is ignored.
+// ResolveOverlayEnv resolves a single image's description, env vars, and notes
+// for display. A :ro/:rw suffix on the path is ignored.
 func ResolveOverlayEnv(overlayPath string) (description string, configs, notes map[string]string) {
-	cleanOverlay := strings.TrimSuffix(strings.TrimSuffix(overlayPath, ":ro"), ":rw")
-	prefix := overlayPrefix(cleanOverlay)
-
-	description, configs, notes = readEmbeddedEnv(cleanOverlay, prefix)
-	sidecarDescription, _ := readSidecarEnv(cleanOverlay, prefix, configs, notes)
-	if sidecarDescription != "" {
-		description = sidecarDescription
+	contribution, _ := resolveImage(cleanOverlayPath(overlayPath))
+	if contribution.Configs == nil {
+		contribution.Configs = map[string]string{}
 	}
-	return description, configs, notes
+	if contribution.Notes == nil {
+		contribution.Notes = map[string]string{}
+	}
+	return contribution.Description, contribution.Configs, contribution.Notes
+}
+
+// ResolveOverlayInfo returns an image's recorded identity for display, and
+// whether it had usable metadata.
+func ResolveOverlayInfo(overlayPath string) (Contribution, bool) {
+	contribution, diag := resolveImage(cleanOverlayPath(overlayPath))
+	return contribution, diag == nil
 }

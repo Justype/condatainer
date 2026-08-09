@@ -36,22 +36,24 @@ go test -v ./internal/scheduler/...                       # Package tests
 Recipes live in collections listed in the ordered `sources` config (first match wins, like `PATH`);
 `catalog/` resolves a name to a recipe and walks its dependency graph. A recipe is `<name>/<version>`,
 where the name may carry slashes (`grch38/genome/gencode` is name `grch38/genome`, version `gencode`).
-Four kinds: `base` (produces the container root), `os`, `app` (contributes to `PATH`), `data`.
+Four types: `base` (produces the container root), `os`, `app` (contributes to `PATH`), `data`.
 
 A recipe runs top to bottom as `bash -euo pipefail <recipe>` — no `install()` wrapper.
-Available vars: `$CNT_NAME`, `$CNT_VERSION`, `$CNT_KIND`, `$CNT_PREFIX` (where the payload goes),
-`$CNT_TMP` (also `$TMPDIR`), plus the scheduler's normalized `$NCPUS`, `$MEM`, `$MEM_GB`.
+Available vars: `$CNT_NAME` (the complete name, e.g. `samtools/1.23.1`), `$CNT_TYPE`,
+`$CNT_PREFIX` (where the payload goes), `$CNT_TMP` (also `$TMPDIR`, both `/cnt_tmp`), plus the
+scheduler's normalized `$NCPUS`, `$MEM`, `$MEM_GB`. There is no `$CNT_VERSION`: a recipe that
+varies by version uses a `#PH:` placeholder, and one pinned to a version writes it literally.
 
 `#DEP:` is a **build** dependency only — what must be mounted while the recipe runs. It is not
-recorded in the artifact and never re-expanded at run time; there is no runtime dependency tree.
+recorded in the image and never re-expanded at run time; there is no runtime dependency tree.
 So an `app` is self-contained (a conda env or a prebuilt package carrying its own libraries), and
-`data` is the kind that normally has deps, since producing an index needs the producing tool.
+`data` is the type that normally has deps, since producing an index needs the producing tool.
 
 Metadata headers: `#DEP:name/version` or `#DEP:name/version>=min` (build deps; preferred version is
 implicit upper bound, so valid range is `[min, version]`), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params),
-`#ENV:VAR={prefix}/sub  ## note` (env vars; `{prefix}` is filled with the mount root at load time),
+`#ENV:VAR={prefix}/sub  ## note` (env vars; `{prefix}` is filled with the install prefix at load time),
 `#INPUT:prompt` (user input, fed on stdin in order — read with `IFS= read -r VAR`), `#PH:`/`#TARGET:` (templates),
-`#DESCRIPTION:`, `#URL:`, `#TYPE:`.
+`#DESC:`, `#URL:`, `#TYPE:`.
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 

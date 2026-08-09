@@ -42,7 +42,10 @@ func (p *Plan) Close() {
 
 // Prepare resolves and validates container execution inputs without printing.
 func Prepare(ctx context.Context, options Options) (*Plan, error) {
-	options = options.ensureDefaults()
+	options, err := options.ensureDefaults()
+	if err != nil {
+		return nil, err
+	}
 
 	if err := apptainer.SetBin(options.ApptainerBin); err != nil {
 		return nil, err

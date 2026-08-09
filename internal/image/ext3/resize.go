@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Justype/condatainer/internal/image/internal/tool"
+	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )

@@ -917,7 +917,7 @@ func TestHTCondorFalsePositiveBashScript(t *testing.T) {
 	// but no valid HTCondor directives.
 	script := `#!/usr/bin/bash
 #DEP:samtools/1.22.1
-#DESCRIPTION:GRCm39 GENCODE M6 transcript FASTA
+#DESC:GRCm39 GENCODE M6 transcript FASTA
 #ENV:TRANSCRIPT_FASTA=$app_root/gencode.vM6.transcripts.fa
 
 gencode_version=M6

@@ -1,19 +1,80 @@
-# overlay
+# image
 
-Overlay image file operations providing creation, resizing, ownership changes, integrity checking, and locking for ext3/SquashFS images.
+Image file operations: creation, resizing, ownership changes, integrity
+checking, locking, embedded metadata, and finding what is installed.
 
 ## Architecture
 
 ```
-create.go   Image creation with filesystem profiles
-resize.go   ext3 image resizing (grow/shrink)
-chown.go    Ownership changes (requires fakeroot)
-check.go    Integrity checking and repair
 lock.go     File locking (shared/exclusive)
-info.go     Image information queries
-squashfs.go SquashFS packing operations
-error.go    Structured error types
+path.go     PathExists inside an image, .sqf or .img
+read.go     ReadFile from inside an image, .sqf or .img
+scan.go     ScanOverlays: what is installed, across the image search paths
+ext3/       Writable .img: create, resize, chown, check, info
+squashfs/   Read-only .sqf: stat, cat, pack
+sif/        .sif headers and partition offsets
+meta/       The embedded manifest: stage, read, validate
+tool/       Shared external-tool invocation and structured errors
 ```
+
+## The overlay index
+
+`ScanOverlays` is the single walk of the image search paths. It keys every
+overlay by normalized name (`samtools--1.21.sqf` → `samtools/1.21`) and keeps
+*every* copy in search order, so the first is the highest-priority one and the
+shadowed ones stay reachable — `remove --layer` needs a copy the priority map
+would have hidden. `FirstPaths` and `Names` reduce a scan for callers that want
+one path or just the set.
+
+Two things vary by caller, so they are options rather than separate scanners:
+
+- **`Aliases`** adds a bare-name key for each `<base>/<name>` image, which is
+  what lets `run -o build-essential` find `ubuntu24/build-essential`. Runtime
+  resolution wants it; a `#DEP:` or a `remove` names an image exactly and must
+  not hit it.
+- **An unreadable directory** comes back as an error *alongside* a usable map.
+  Container launch treats it as fatal, since resolving to a shorter list would
+  silently drop an overlay; the CLI listings warn and carry on.
+
+A `.sif` is not an overlay and never appears: it is the container root.
+
+## Manifests
+
+`meta` handles `/.cnt/manifest.json`, written at build time and read back from
+the packed image. It is **trusted, not verified**: nothing compares it against
+the payload beside it or the build that produced it, and `Validate` checks
+structure rather than truth — a known schema, a name and install prefix where
+they are load-bearing, and an environment that applies without collisions.
+
+`Runtime.Prefix` is not a mount point. An overlay is applied over the container
+root, so the payload appears at `/cnt/<name>` because that is where it sits in
+the archive, not because anything is mounted there. `Runtime.Env` keeps
+`{prefix}` intact and substitutes it at load time, since the install prefix is
+not known when the image is built.
+
+`Read` distinguishes *no manifest* from *could not look*: only a genuinely
+absent one is `ErrNoManifest`, so a caller never reports a missing `unsquashfs`
+or a corrupt archive as "this image has no metadata" — those keep
+`tool.ErrToolMissing`, `tool.ErrUnreadable` or `tool.ErrCorrupt`. An unknown
+`SchemaVersion` joins them as `ErrUnsupportedSchema`, handled exactly like a
+missing manifest; a reader ignores unknown fields, so a later schema that only
+adds fields stays readable here.
+
+Reads are cached **across processes**, keyed by absolute path and validated
+against size and mtime. Repeated scans — `list`, `avail`, PATH construction, and
+shell completion, which runs one process per keystroke — would otherwise spawn
+one `unsquashfs` per image every time. Negative verdicts are cached too, or an
+image predating the format would be re-probed on every listing, which is the
+cost the cache exists to avoid.
+
+Degradation is deliberate and asymmetric, because most images in the wild predate
+the format. `CheckBase` accepts an image with no manifest, warns and accepts one
+that is present but unreadable — rejecting it would strand every build behind a
+base that is most likely fine — and rejects only a manifest that reads and says
+it is not a base.
+
+A writable `.img` is not handled at all. It is a mutable working overlay rather
+than a built image, and its environment comes from its `.env` sidecar.
 
 ## Key Types
 
@@ -48,46 +109,22 @@ There are three creation paths depending on the caller's needs:
 
 Override the tmp location with `CNT_TMPDIR` (takes priority over `SLURM_TMPDIR`, `TMPDIR`, `/tmp`).
 
-## Usage
+## External tools
 
-```go
-// --- Simple create (internal/build) ---
-overlay.CreateWithOptions(ctx, &overlay.CreateOptions{
-    Path: "env.img", SizeMB: 3000,
-    UID: os.Getuid(), GID: os.Getgid(),
-    Profile: overlay.ProfileDefault, Sparse: true, FilesystemType: "ext3", Quiet: true,
-})
+Every archive read shells out, and two of those calls have non-obvious shapes.
 
-// --- Create at tmp, do work, then move (cmd/overlay) ---
-opts := &overlay.CreateOptions{Path: "env.img", SizeMB: 10240, ...}
-tmpPath, err := overlay.CreateInTmp(ctx, opts)
-// ... run conda init on tmpPath ...
-copied, err := overlay.MoveOverlayCopied(tmpPath, opts.Path, opts.Sparse)
-if !opts.Sparse && !copied {
-    overlay.AllocateOverlay(ctx, opts.Path, opts.SizeMB)
-}
+`squashfs.PathExists` lists the archive with `unsquashfs -lc -d ""` and requires
+an *exact* line match on `/entry` or a prefix match on `/entry/`. `-d ""` lists
+matches as `/entry` rather than `squashfs-root/entry`; `-lc` lists only files and
+empty directories, so a populated directory shows up through its children; and
+unsquashfs 4.4 (Ubuntu 20.04) prints banner lines even when nothing matches, so
+"there was output" is not a usable signal.
 
-// Resize (grow or shrink)
-overlay.Resize(ctx, "env.img", 5000)
-
-// Ownership (requires fakeroot; internalPath = path inside overlay)
-overlay.ChownRecursively(ctx, "env.img", 0, 0, "/ext3")       // → root
-overlay.ChownRecursively(ctx, "env.img", 1000, 1000, "/ext3")  // → user
-
-// Integrity
-overlay.CheckIntegrity(ctx, "env.img", false) // check
-overlay.CheckIntegrity(ctx, "env.img", true)  // check and repair
-overlay.CheckAvailable("env.img", false)      // shared lock check
-overlay.CheckAvailable("env.img", true)       // exclusive lock check
-
-// Stats
-stats, err := overlay.GetStats("env.img")
-
-// Locking
-lock, err := overlay.AcquireLock("env.img", false) // shared
-lock, err := overlay.AcquireLock("env.img", true)  // exclusive
-defer lock.Close()
-```
+`ext3.crossFsCopy` shells out to `cp` so a long copy stays cancellable, and uses
+`cmd.Start` with a Wait goroutine rather than `CombinedOutput`. On Lustre/NFS a
+`cp` in uninterruptible I/O sleep does not honour SIGKILL until the I/O resolves,
+and `CombinedOutput` would block in `cmd.Wait` behind it; the goroutine cleans up
+whenever the process finally exits.
 
 ## Error Types
 

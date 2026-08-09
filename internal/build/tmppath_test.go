@@ -13,14 +13,12 @@ import (
 // even if overlay creation fails (system tools may not be present in test env).
 func TestCreateTmpOverlay_CreatesParentDir(t *testing.T) {
 	base := &BuildObject{
-		nameVersion:       "foo/bar",
-		tmpOverlayPath:    filepath.Join(t.TempDir(), "nonexistent", "foo.img"),
-		targetOverlayPath: "",
-		cntDirPath:        "",
+		spec: Spec{Image: ImageSpec{Name: "foo/bar"}},
+		ws:   Workspace{Overlay: filepath.Join(t.TempDir(), "nonexistent", "foo.img")},
 	}
 
 	// Ensure parent dir does not exist initially
-	parent := filepath.Dir(base.tmpOverlayPath)
+	parent := filepath.Dir(base.ws.Overlay)
 	if _, err := os.Stat(parent); !os.IsNotExist(err) {
 		// If it exists, remove to ensure test validity
 		_ = os.RemoveAll(parent)
@@ -30,7 +28,7 @@ func TestCreateTmpOverlay_CreatesParentDir(t *testing.T) {
 	// We expect an error from overlay creation in CI environments where dd/mke2fs/debugfs might be missing
 	if err == nil {
 		// If overlay creation succeeded unexpectedly, cleanup the file and return success
-		_ = os.Remove(base.tmpOverlayPath)
+		_ = os.Remove(base.ws.Overlay)
 		return
 	}
 
@@ -47,15 +45,15 @@ func TestCreateTmpOverlay_CreatesParentDir(t *testing.T) {
 func TestCreateBuildDirs_CreatesDirs(t *testing.T) {
 	tmpDir := t.TempDir()
 	base := &BuildObject{
-		nameVersion: "foo/bar",
-		cntDirPath:  filepath.Join(tmpDir, "build_foo_bar", "cnt"),
+		spec: Spec{Image: ImageSpec{Name: "foo/bar"}},
+		ws:   workspaceFor("foo/bar", tmpDir, ""),
 	}
 
 	if err := base.CreateBuildDirs(context.Background(), false); err != nil {
 		t.Fatalf("CreateBuildDirs failed: %v", err)
 	}
 
-	buildDir := filepath.Dir(base.cntDirPath)
+	buildDir := base.ws.BuildDir
 	for _, sub := range []string{"cnt", "tmp"} {
 		info, err := os.Stat(filepath.Join(buildDir, sub))
 		if err != nil {
@@ -70,14 +68,13 @@ func TestCreateBuildDirs_CreatesDirs(t *testing.T) {
 // TestCreateBuildDirs_StaleDir detects existing buildDir as stale.
 func TestCreateBuildDirs_StaleDir(t *testing.T) {
 	tmpDir := t.TempDir()
-	cntDir := filepath.Join(tmpDir, "build_foo_bar", "cnt")
 	base := &BuildObject{
-		nameVersion: "foo/bar",
-		cntDirPath:  cntDir,
+		spec: Spec{Image: ImageSpec{Name: "foo/bar"}},
+		ws:   workspaceFor("foo/bar", tmpDir, ""),
 	}
 
 	// Pre-create the build dir to simulate a stale build
-	_ = os.MkdirAll(filepath.Dir(cntDir), 0o775)
+	_ = os.MkdirAll(base.ws.BuildDir, 0o775)
 
 	err := base.CreateBuildDirs(context.Background(), false)
 	if err == nil {
@@ -88,15 +85,14 @@ func TestCreateBuildDirs_StaleDir(t *testing.T) {
 // TestCreateBuildDirs_ForceRemovesStale verifies force=true cleans stale build dir.
 func TestCreateBuildDirs_ForceRemovesStale(t *testing.T) {
 	tmpDir := t.TempDir()
-	cntDir := filepath.Join(tmpDir, "build_foo_bar", "cnt")
 	base := &BuildObject{
-		nameVersion: "foo/bar",
-		cntDirPath:  cntDir,
+		spec: Spec{Image: ImageSpec{Name: "foo/bar"}},
+		ws:   workspaceFor("foo/bar", tmpDir, ""),
 	}
 
 	// Pre-create the build dir with a marker file to simulate stale state
-	_ = os.MkdirAll(filepath.Dir(cntDir), 0o775)
-	markerFile := filepath.Join(filepath.Dir(cntDir), "stale_marker")
+	_ = os.MkdirAll(base.ws.BuildDir, 0o775)
+	markerFile := filepath.Join(base.ws.BuildDir, "stale_marker")
 	_ = os.WriteFile(markerFile, []byte{}, 0o664)
 
 	if err := base.CreateBuildDirs(context.Background(), true); err != nil {

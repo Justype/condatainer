@@ -13,6 +13,7 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image/meta"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -406,19 +407,15 @@ func printColumns(plain, styled []string, indent, termWidth int) {
 	}
 }
 
-// readOverlayDescription reads the #DESCRIPTION: line from the overlay's .env sidecar file.
-// Returns an empty string if the file is absent or has no #DESCRIPTION: line.
+// readOverlayDescription returns an image's recorded description, or empty when
+// it has no readable metadata. Listing must not fail on such an image, so the
+// read error is dropped: the row still appears, just without a description.
 func readOverlayDescription(overlayPath string) string {
-	data, err := os.ReadFile(overlayPath + ".env")
+	manifest, err := meta.Read(overlayPath)
 	if err != nil {
 		return ""
 	}
-	for line := range strings.SplitSeq(string(data), "\n") {
-		if after, ok := strings.CutPrefix(strings.TrimSpace(line), "#DESCRIPTION:"); ok {
-			return strings.TrimSpace(after)
-		}
-	}
-	return ""
+	return manifest.Description
 }
 
 // filterImageDirs filters dirs according to dirFilter:

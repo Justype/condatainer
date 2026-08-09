@@ -119,17 +119,37 @@ fakeroot := container.AutoEnableFakeroot(
 
 ## Environment Variables
 
-Each overlay's environment comes from the `#ENV:`/`#ENVNOTE:` directives in the build script embedded inside it (`/cnt/<name>/<version>/.cnt-build-script`), read directly from the `.sqf` via `unsquashfs -cat` — no mount, no sidecar required. `$app_root` is resolved to the overlay's mount root (`/cnt/<name>/<version>`) at load time.
+Each image's environment comes from its embedded manifest (`/.cnt/manifest.json`),
+with `{prefix}` resolved to the image's install prefix at load time. Nothing is
+mounted and no sidecar travels with the image.
 
-A sidecar `<overlay>.env` (e.g. `cellranger--9.0.1.sqf.env`) is optional and, when present, **shadows** the embedded values for local overrides:
+An image with no readable manifest still mounts and contributes nothing — no
+variables, no `PATH` entry, no description. `resolveImage` reports that once per
+invocation: informational when the manifest is simply absent (an image built
+before the format, or a plain Apptainer `.sif`), a warning when one is present
+but unreadable, or when the host is missing `unsquashfs`.
+
+A writable `.img` is the exception. It has no manifest, so it reads a
+`<overlay>.env` sidecar instead — one `KEY=value` per line, with an optional
+`##` note, and `{prefix}` resolved to `/cnt_env`:
 
 ```bash
-CELLRANGER_ROOT=/cnt/cellranger/9.0.1
-PATH=/cnt/cellranger/9.0.1/bin:$PATH
+GOROOT=/cnt_env/go   ## Go Installation path
+PATH={prefix}/bin:$PATH
 ```
 
 `CollectOverlayEnv` merges every overlay's resolved env into the final list;
 `ResolveOverlayEnv` returns a single overlay's description/env/notes for `info`.
+When the same variable is set by more than one overlay the later one wins and a
+diagnostic is recorded. `CollectOverlayEnv` is the one place degradation is
+reported, so an image with no readable metadata is announced once per invocation
+rather than once per consumer.
+
+`BuildPathEnv` is silent for the same reason. Only an `app` contributes, and it
+contributes `<prefix>/bin` unconditionally — `data`, `os` and `base` put nothing
+on `PATH`, and an image with no readable metadata contributes nothing at all.
+There is no check that the directory exists: a nonexistent `PATH` entry is
+harmless, while the check would cost one archive read per image per invocation.
 
 **Common Environment:**
 - `LC_ALL=C.UTF-8`, `LANG=C.UTF-8`
@@ -155,10 +175,23 @@ After collection, `DeduplicateBindPaths()` removes conflicting bind paths:
 
 ## GPU Detection
 
-Auto add flags based on available devices:
+Flags are added from the one device node unique to each vendor:
 
-- **NVIDIA**: Checks for `/dev/nvidia*`, adds `--nv`
-- **AMD**: Checks for `/dev/kfd`, adds `--rocm`
+- **NVIDIA**: `/dev/nvidiactl` → `--nv`
+- **AMD**: `/dev/kfd` → `--rocm`
+
+`/dev/nvidiactl` rather than `/dev/nvidia0`, which is absent on MIG nodes and
+whenever the allocated GPU index is not 0. `/dev/kfd` rather than `/dev/dri`,
+which is DRM and present for any vendor — an NVIDIA-only node has a populated
+`/dev/dri` too, so it would not tell AMD apart from anything else.
+
+A stat says a driver is installed, not that it works. On a node where the
+driver is loaded but a GPU is unusable, the node is still there, so detection
+fires and `--nv` then fails at container creation — `nvidia-container-cli`
+enumerates every visible GPU through NVML before the container exists, and one
+bad handle aborts the whole thing. `autoload_gpu: false` skips detection
+entirely for that case. `--rocm` has no equivalent helper: it binds libraries
+and devices, so a sick AMD GPU surfaces inside the program instead.
 
 ## Error Handling
 

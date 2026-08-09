@@ -16,12 +16,12 @@ import (
 // Format: #PARAM: KEY=default --long-flag,-s "Description"
 // Use KEY=? to mark the param as optional (passes through empty; script handles it).
 type HelperParam struct {
-	Key       string `json:"key"`
-	Default   string `json:"default,omitempty"`
-	Optional  bool   `json:"optional,omitempty"` // true when declared as KEY=?
-	LongFlag  string `json:"long_flag,omitempty"`
-	ShortFlag string `json:"short_flag,omitempty"`
-	Desc      string `json:"desc,omitempty"`
+	Key         string `json:"key"`
+	Default     string `json:"default,omitempty"`
+	Optional    bool   `json:"optional,omitempty"` // true when declared as KEY=?
+	LongFlag    string `json:"long_flag,omitempty"`
+	ShortFlag   string `json:"short_flag,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // HelperScriptMeta holds overlay and singleton metadata extracted from a helper script.
@@ -145,12 +145,12 @@ func parseHelperParamLine(s string) (HelperParam, error) {
 	}
 
 	return HelperParam{
-		Key:       key,
-		Default:   def,
-		Optional:  optional,
-		LongFlag:  longFlag,
-		ShortFlag: shortFlag,
-		Desc:      desc,
+		Key:         key,
+		Default:     def,
+		Optional:    optional,
+		LongFlag:    longFlag,
+		ShortFlag:   shortFlag,
+		Description: desc,
 	}, nil
 }
 

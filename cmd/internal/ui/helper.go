@@ -361,7 +361,7 @@ func PromptSettings(ctx context.Context,
 		if len(e.versionList) > 0 {
 			choices = utils.FormatChoicesInline(e.versionList)
 		}
-		printRow(e.displayKey, rawVal, e.p.Desc, choices)
+		printRow(e.displayKey, rawVal, e.p.Description, choices)
 	}
 
 	// ── build param key lookup ────────────────────────────────────────────────
@@ -526,13 +526,18 @@ func PrintLaunchSpec(plan *helper.RunPlan) {
 	if gpu := helper.FormatGpuSpec(plan.Spec); gpu != "" {
 		utils.PrintMessage("  GPU:      %s", gpu)
 	}
+	// A summary, so a base that is not installed yet is reported rather than
+	// resolved: the launch that follows is what has to succeed or fail.
 	base := opts.BaseImage
 	if base == "" {
-		base = config.GetBaseImage()
+		resolved, err := config.GetBaseImage()
+		if err != nil {
+			base = "(" + err.Error() + ")"
+		} else {
+			base = resolved
+		}
 	}
-	if base != "" {
-		utils.PrintMessage("  Base:     %s", base)
-	}
+	utils.PrintMessage("  Base:     %s", base)
 	if opts.EnvImg != "" {
 		utils.PrintMessage("  Env:      %s", opts.EnvImg)
 	}

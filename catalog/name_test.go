@@ -78,31 +78,31 @@ func TestDepSatisfies(t *testing.T) {
 	}
 }
 
-func TestDeriveKind(t *testing.T) {
+func TestDeriveType(t *testing.T) {
 	tests := []struct {
 		name, target string
 		isDef        bool
 		declared     string
-		want         Kind
+		want         Type
 	}{
-		{name: "ubuntu24/base", isDef: true, want: KindBase},
-		{name: "ubuntu24/build-essential", isDef: true, want: KindOS},
-		{name: "ubuntu24/r", target: "ubuntu24/r/{version}", isDef: true, want: KindOS},
-		{name: "cellranger/9.0.1", want: KindApp},
-		{name: "cytoscape", want: KindApp},
-		{name: "grch38/genome/gencode", want: KindData},
+		{name: "ubuntu24/base", isDef: true, want: TypeBase},
+		{name: "ubuntu24/build-essential", isDef: true, want: TypeOS},
+		{name: "ubuntu24/r", target: "ubuntu24/r/{version}", isDef: true, want: TypeOS},
+		{name: "cellranger/9.0.1", want: TypeApp},
+		{name: "cytoscape", want: TypeApp},
+		{name: "grch38/genome/gencode", want: TypeData},
 		// A template's kind comes from its target: one slash as a filename,
 		// three as the module path it builds.
-		{name: "grch38/star-gencode", target: "grch38/star/{star_version}/gencode{gencode_version}-{read_length}", want: KindData},
+		{name: "grch38/star-gencode", target: "grch38/star/{star_version}/gencode{gencode_version}-{read_length}", want: TypeData},
 		// #TYPE: overrides app/data only.
-		{name: "cellranger/9.0.1", declared: "data", want: KindData},
-		{name: "grch38/genome/gencode", declared: "app", want: KindApp},
-		{name: "ubuntu24/base", isDef: true, declared: "app", want: KindBase},
-		{name: "cellranger/9.0.1", declared: "nonsense", want: KindApp},
+		{name: "cellranger/9.0.1", declared: "data", want: TypeData},
+		{name: "grch38/genome/gencode", declared: "app", want: TypeApp},
+		{name: "ubuntu24/base", isDef: true, declared: "app", want: TypeBase},
+		{name: "cellranger/9.0.1", declared: "nonsense", want: TypeApp},
 	}
 	for _, tt := range tests {
-		if got := DeriveKind(tt.name, tt.target, tt.isDef, tt.declared); got != tt.want {
-			t.Errorf("DeriveKind(%q, %q, %v, %q) = %q, want %q",
+		if got := DeriveType(tt.name, tt.target, tt.isDef, tt.declared); got != tt.want {
+			t.Errorf("DeriveType(%q, %q, %v, %q) = %q, want %q",
 				tt.name, tt.target, tt.isDef, tt.declared, got, tt.want)
 		}
 	}

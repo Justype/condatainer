@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,7 +12,7 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/image/squashfs"
+	"github.com/Justype/condatainer/internal/image/meta"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -370,9 +371,22 @@ func needsValue(flag string) bool {
 	return valueFlags[flag]
 }
 
-// ensureBaseImage ensures the base image exists
-func ensureBaseImage(ctx context.Context) error {
-	return build.EnsureBaseImage(ctx, false)
+// resolveBaseImage returns the container root to execute in: the explicit -b
+// choice, or the configured base, built first when none is installed.
+//
+// Every execution needs one — there is no overlay-only container — so this
+// resolves before the command runs rather than letting Apptainer report a
+// missing file. An explicit choice is never built: it names a file the user
+// already has.
+func resolveBaseImage(ctx context.Context, explicit string) (string, error) {
+	if explicit == "" {
+		return build.ResolveBase(ctx)
+	}
+	path := ResolveBaseImage(explicit)
+	if !utils.FileExists(path) {
+		return "", fmt.Errorf("base image not found: %s", explicit)
+	}
+	return path, nil
 }
 
 // ResolveBaseImage resolves a base image path to an absolute path
@@ -613,11 +627,14 @@ func addDistroAliasChoices(installed map[string]string, choices map[string]struc
 	}
 }
 
-// isOSOverlay reports whether a SquashFS overlay is an OS image.
-// Delegates to squashfs.IsOSType which checks for .singularity.d in the
-// archive (cached by path/size/mtime across processes).
+// isOSOverlay reports whether an image is an OS layer, from its recorded type.
+//
+// An image with no readable metadata is not an OS layer: it degrades to app, so
+// it stays listed and mountable rather than being misfiled under a category it
+// never claimed.
 func isOSOverlay(overlayPath string) bool {
-	return squashfs.IsOSType(overlayPath)
+	manifest, err := meta.Read(overlayPath)
+	return err == nil && manifest.Type == catalog.TypeOS
 }
 
 // isAppOverlay checks if an overlay path is considered an "app" overlay

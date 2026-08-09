@@ -10,23 +10,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/image/internal/tool"
+	"github.com/Justype/condatainer/internal/image/tool"
 )
 
 // ============================================================================
 // Low-level SquashFS operations
 // ============================================================================
 
-// PathExists reports whether `entry` exists in a SquashFS archive.
-//
-// It lists the archive with `unsquashfs -lc -d ""` and looks for a line equal to
-// "/entry" or starting with "/entry/". Notes on the flags and matching:
-//   - -d "" lists matches as "/entry" instead of the default "squashfs-root/entry".
-//   - -lc lists only files and empty dirs, so a populated dir shows up via its
-//     children ("/entry/...") rather than "/entry" itself.
-//   - unsquashfs 4.4 (Ubuntu 20.04) prints banner lines even when nothing matches,
-//     so the exact line match is required — any output is not a reliable signal.
+// PathExists reports whether `entry` exists in a SquashFS archive, by listing it
+// with `unsquashfs -lc -d ""` and matching "/entry" or "/entry/" exactly.
+// See the README's External tools.
 func PathExists(sqfPath, entry string) bool {
 	// Normalize entry (strip leading slash)
 	entry = strings.TrimPrefix(entry, "/")
@@ -125,41 +118,6 @@ var unsquashfsAvailable = sync.OnceValue(func() bool {
 	return err == nil
 })
 
-// IsOSType returns true if the SquashFS archive is an Apptainer OS image,
-// identified by the presence of .singularity.d at the archive root.
-// Verdicts are cached across processes keyed by path, size, and mtime, so
-// repeated checks (e.g. shell completion) skip the unsquashfs probe.
-func IsOSType(sqfPath string) bool {
-	if !strings.HasSuffix(sqfPath, ".sqf") {
-		return false
-	}
-	if abs, err := filepath.Abs(sqfPath); err == nil {
-		sqfPath = abs
-	}
-	fi, err := os.Stat(sqfPath)
-	if err != nil {
-		globalOSTypeCache.forget(sqfPath)
-		return false
-	}
-	if verdict, ok := globalOSTypeCache.lookup(sqfPath, fi); ok {
-		return verdict
-	}
-	isOS := PathExists(sqfPath, ".singularity.d")
-	// Without unsquashfs the probe always fails; don't persist false negatives.
-	if unsquashfsAvailable() {
-		globalOSTypeCache.store(sqfPath, fi, isOS)
-	}
-	return isOS
-}
-
-// HasCntBin returns true if the SquashFS archive contains a bin directory at
-// cnt/<name>/<version>/bin. nameVersion accepts both slash form ("samtools/1.22")
-// and the normalized double-dash form ("samtools--1.22").
-func HasCntBin(sqfPath, nameVersion string) bool {
-	nv := catalog.Normalize(nameVersion)
-	return PathExists(sqfPath, "cnt/"+nv+"/bin")
-}
-
 // ============================================================================
 // SquashFS stats
 // ============================================================================
@@ -180,7 +138,17 @@ type SquashFSStats struct {
 
 // GetSquashFSStats runs `unsquashfs -stat` on the given path and parses its output.
 func GetSquashFSStats(path string) (*SquashFSStats, error) {
-	cmd := exec.Command("unsquashfs", "-stat", path)
+	return GetSquashFSStatsAt(path, 0)
+}
+
+// GetSquashFSStatsAt is GetSquashFSStats for an archive that starts partway into
+// the file, as a SIF's system partition does.
+func GetSquashFSStatsAt(path string, offset int64) (*SquashFSStats, error) {
+	args := []string{"-stat"}
+	if offset > 0 {
+		args = append(args, "-offset", strconv.FormatInt(offset, 10))
+	}
+	cmd := exec.Command("unsquashfs", append(args, path)...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LC_TIME=C")
 	out, err := cmd.Output()
 	if err != nil {
@@ -277,25 +245,6 @@ func BuildTime(path string) (time.Time, bool) {
 	return ParseStatTime(stats.CreatedTime)
 }
 
-// GetOverlayType classifies a SquashFS overlay based on its contents and filename:
-//   - "OS Overlay"     : contains .singularity.d (Apptainer-built)
-//   - "Module Overlay" : contains cnt/ and filename uses -- name/version separator
-//   - "Bundle Overlay" : contains cnt/ but filename has no --
-//   - ""               : unrecognized
-func GetOverlayType(sqfPath string) string {
-	if PathExists(sqfPath, ".singularity.d") {
-		return "OS Overlay"
-	}
-	if PathExists(sqfPath, "cnt") {
-		base := strings.TrimSuffix(filepath.Base(sqfPath), filepath.Ext(sqfPath))
-		if strings.Contains(base, "--") {
-			return "Module Overlay"
-		}
-		return "Bundle Overlay"
-	}
-	return ""
-}
-
 // ============================================================================
 // OS release info
 // ============================================================================
@@ -312,8 +261,13 @@ type OSInfo struct {
 // GetOSInfo reads /etc/os-release from a SquashFS archive and returns an OSInfo.
 // Returns nil if the file cannot be read or parsed.
 func GetOSInfo(sqfPath string) *OSInfo {
-	data := Cat(sqfPath, "etc/os-release")
-	if data == nil {
+	return GetOSInfoAt(sqfPath, 0)
+}
+
+// GetOSInfoAt is GetOSInfo for an archive at an offset, as inside a SIF.
+func GetOSInfoAt(sqfPath string, offset int64) *OSInfo {
+	data, err := CatFile(sqfPath, "etc/os-release", offset)
+	if err != nil {
 		return nil
 	}
 	m := parseOSRelease(string(data))

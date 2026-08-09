@@ -13,12 +13,9 @@ import (
 	"github.com/Justype/condatainer/internal/scheduler"
 )
 
-// BuildGraph turns a solved dependency plan into build work.
-// The catalog resolves the graph and detects cycles; this type creates a
-// BuildObject per missing node, in dependency-first order,
-// and separates items into two ordered lists:
-//   - localBuilds: BuildObjects without scheduler requirements (build locally)
-//   - schedulerBuilds: BuildObjects that require scheduler submission
+// BuildGraph turns a solved dependency plan into build work: a BuildObject per
+// missing node, in dependency-first order, split into localBuilds and
+// schedulerBuilds.
 type BuildGraph struct {
 	graph           map[string]*BuildObject // All build objects by name/version
 	localBuilds     []*BuildObject          // Builds to run locally (no scheduler)
@@ -86,11 +83,8 @@ func NewBuildGraph(ctx context.Context, buildObjects []*BuildObject, imagesDir, 
 }
 
 // installedVersions reports the versions of name already built, as the Have the
-// catalog resolver asks with. Names carry slashes, so the version is the last
-// segment and nothing deeper counts.
-//
-// hidden drops entries the graph intends to rebuild, which is how --update
-// reaches past a root that is technically installed.
+// catalog resolver asks with. The version is the last segment and nothing deeper
+// counts. hidden drops entries the graph intends to rebuild, as --update does.
 func installedVersions(hidden map[string]bool) catalog.Have {
 	return func(name string) []string {
 		prefix := name + "/"
@@ -107,11 +101,8 @@ func installedVersions(hidden map[string]bool) catalog.Have {
 }
 
 // resolvePlan expands the seeded roots into a dependency-first build order and
-// splits it into local and scheduler work.
-//
-// Resolution runs over the catalog index alone, so a cycle or an unresolvable
-// name fails before any recipe is fetched or any temp file written, and an
-// already-installed dependency costs a map lookup instead of a build object.
+// splits it into local and scheduler work. Resolution runs over the catalog
+// index alone, before any recipe is fetched or temp file written.
 func (bg *BuildGraph) resolvePlan(ctx context.Context, roots []string, hidden map[string]bool) error {
 	cat, err := config.OpenCatalog(ctx)
 	if err != nil {
@@ -151,9 +142,36 @@ func (bg *BuildGraph) resolvePlan(ctx context.Context, roots []string, hidden ma
 	return nil
 }
 
+// resolveBase satisfies the implicit edge from every script and Conda build to
+// the base image it runs inside, building it first if missing. Runs before any
+// node; a definition-only plan resolves nothing here.
+func (bg *BuildGraph) resolveBase(ctx context.Context) error {
+	var dependents []*BuildObject
+	for _, obj := range bg.graph {
+		if obj.BuildType() != BuildTypeDef && (bg.update || !obj.IsInstalled()) {
+			dependents = append(dependents, obj)
+		}
+	}
+	if len(dependents) == 0 {
+		return nil
+	}
+
+	base, err := ResolveBase(ctx)
+	if err != nil {
+		return err
+	}
+	for _, obj := range dependents {
+		obj.spec.Base = base
+	}
+	return nil
+}
+
 // Run executes the build graph
 // First runs local builds, then submits scheduler jobs
 func (bg *BuildGraph) Run(ctx context.Context) error {
+	if err := bg.resolveBase(ctx); err != nil {
+		return err
+	}
 	if err := bg.runLocalStep(ctx); err != nil {
 		return err
 	}
@@ -164,14 +182,14 @@ func (bg *BuildGraph) Run(ctx context.Context) error {
 	// Check if any apptainer jobs were run
 	hasDefBuilds := false
 	for _, obj := range bg.schedulerBuilds {
-		if obj.Type() == BuildTypeDef {
+		if obj.BuildType() == BuildTypeDef {
 			hasDefBuilds = true
 			break
 		}
 	}
 	if !hasDefBuilds {
 		for _, obj := range bg.localBuilds {
-			if obj.Type() == BuildTypeDef {
+			if obj.BuildType() == BuildTypeDef {
 				hasDefBuilds = true
 				break
 			}
@@ -187,13 +205,13 @@ func (bg *BuildGraph) Run(ctx context.Context) error {
 
 // runLocalStep executes builds that don't require scheduler
 func (bg *BuildGraph) runLocalStep(ctx context.Context) error {
-	for _, meta := range bg.localBuilds {
-		if !bg.update && meta.IsInstalled() {
+	for _, obj := range bg.localBuilds {
+		if !bg.update && obj.IsInstalled() {
 			continue
 		}
-		logging.FromContext(ctx).Debug("processing overlay (local build)", "name", meta.NameVersion())
-		if err := meta.Build(ctx, false); err != nil {
-			return fmt.Errorf("failed to build %s: %w", meta.NameVersion(), err)
+		logging.FromContext(ctx).Debug("processing overlay (local build)", "name", obj.NameVersion())
+		if err := obj.Build(ctx, false); err != nil {
+			return fmt.Errorf("failed to build %s: %w", obj.NameVersion(), err)
 		}
 	}
 	return nil
@@ -205,15 +223,15 @@ func (bg *BuildGraph) runSchedulerStep() error {
 		return nil
 	}
 
-	for _, meta := range bg.schedulerBuilds {
-		if !bg.update && meta.IsInstalled() {
+	for _, obj := range bg.schedulerBuilds {
+		if !bg.update && obj.IsInstalled() {
 			continue
 		}
-		logging.FromContext(bg.ctx).Debug("processing overlay (scheduler job)", "name", meta.NameVersion())
+		logging.FromContext(bg.ctx).Debug("processing overlay (scheduler job)", "name", obj.NameVersion())
 
 		// Collect dependency job IDs
 		depIDs := []string{}
-		for _, rawDep := range meta.Dependencies() {
+		for _, rawDep := range obj.Dependencies() {
 			dep := rawDep
 			if parsed, err := catalog.ParseDep(rawDep); err == nil {
 				dep = parsed.NameVersion()
@@ -232,45 +250,45 @@ func (bg *BuildGraph) runSchedulerStep() error {
 				if !exists || !depObj.IsInstalled() {
 					// Dependency should either be installed or have a job ID
 					return fmt.Errorf("dependency %s for %s is not installed and was not submitted via scheduler",
-						dep, meta.NameVersion())
+						dep, obj.NameVersion())
 				}
 				// Dependency is installed, no need to add to depIDs
 			}
 		}
 
 		// Submit scheduler job
-		jobID, err := bg.submitJob(meta, depIDs)
+		jobID, err := bg.submitJob(obj, depIDs)
 		if err != nil {
-			return fmt.Errorf("failed to submit job for %s: %w", meta.NameVersion(), err)
+			return fmt.Errorf("failed to submit job for %s: %w", obj.NameVersion(), err)
 		}
 
-		bg.jobIDs[meta.NameVersion()] = jobID
+		bg.jobIDs[obj.NameVersion()] = jobID
 	}
 	return nil
 }
 
 // submitJob creates and submits a scheduler job for the build
-func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, error) {
+func (bg *BuildGraph) submitJob(obj *BuildObject, depIDs []string) (string, error) {
 	log := logging.FromContext(bg.ctx)
-	log.Debug("submitting scheduler job", "type", bg.scheduler.GetType(), "name", meta.NameVersion(), "deps", depIDs)
+	log.Debug("submitting scheduler job", "type", bg.scheduler.GetType(), "name", obj.NameVersion(), "deps", depIDs)
 
 	// Acquire lock before submitting to prevent duplicate scheduler submissions.
 	// The lock is created with an empty job_id and updated after Submit() returns.
-	lockPath := meta.LockPath()
+	lockPath := obj.LockPath()
 	pendingLock := BuildLockInfo{
-		Type:      string(bg.scheduler.GetType()), // e.g. "slurm", "pbs", "lsf", "htcondor"
+		Runner:    string(bg.scheduler.GetType()), // e.g. "slurm", "pbs", "lsf", "htcondor"
 		CreatedAt: time.Now().Format(time.RFC3339),
 	}
 	if err := acquireBuildLockFile(lockPath, pendingLock); err != nil {
 		if os.IsExist(err) {
 			return "", fmt.Errorf("build already queued or running for %s (lock exists at %s)",
-				meta.NameVersion(), lockPath)
+				obj.NameVersion(), lockPath)
 		}
-		return "", fmt.Errorf("failed to create build lock for %s: %w", meta.NameVersion(), err)
+		return "", fmt.Errorf("failed to create build lock for %s: %w", obj.NameVersion(), err)
 	}
 
 	// Get script specs; when always_submit forces submission without directives, synthesize empty specs
-	specs := meta.ScriptSpecs()
+	specs := obj.ScriptSpecs()
 	if specs == nil {
 		effRS := buildEffectiveResourceSpec(nil)
 		specs = &scheduler.ScriptSpecs{Spec: effRS}
@@ -283,7 +301,7 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 
 	// Derive job name from name/version if not set in script
 	if specs.Control.JobName == "" {
-		name := meta.NameVersion()
+		name := obj.NameVersion()
 		if idx := strings.LastIndex(name, "/"); idx != -1 {
 			name = name[:idx]
 		}
@@ -292,14 +310,14 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 
 	// Create job specification
 	jobSpec := &scheduler.JobSpec{
-		Name:           meta.NameVersion(),
-		Command:        buildSchedulerCreateCommand(meta.NameVersion(), bg.update, meta.InteractiveInputs()),
+		Name:           obj.NameVersion(),
+		Command:        buildSchedulerCreateCommand(obj.NameVersion(), bg.update, obj.InputAnswers()),
 		Specs:          specs,
 		DepJobIDs:      depIDs,
 		OverrideOutput: true,
 		Metadata: map[string]string{
-			"Target": meta.NameVersion(),
-			"Type":   meta.Type().String(),
+			"Target":     obj.NameVersion(),
+			"Build Type": obj.BuildType().String(),
 		},
 	}
 
@@ -324,15 +342,14 @@ func (bg *BuildGraph) submitJob(meta *BuildObject, depIDs []string) (string, err
 	pendingLock.JobID = jobID
 	_ = overwriteBuildLockFile(lockPath, pendingLock) // best-effort; we already hold the lock
 
-	log.Info("submitted scheduler job", "type", bg.scheduler.GetType(), "jobID", jobID, "name", meta.NameVersion())
+	log.Info("submitted scheduler job", "type", bg.scheduler.GetType(), "jobID", jobID, "name", obj.NameVersion())
 	return jobID, nil
 }
 
-// buildSchedulerCreateCommand returns the condatainer create command for scheduler jobs,
-// propagating the --update flag if active.
-// If interactiveInputs is non-empty, the inputs are embedded as a heredoc so the
-// scheduler node does not need a TTY.
-func buildSchedulerCreateCommand(nameVersion string, update bool, interactiveInputs []string) string {
+// buildSchedulerCreateCommand returns the condatainer create command for a
+// scheduler job, propagating --update and embedding any input answers as a
+// heredoc so the node needs no TTY.
+func buildSchedulerCreateCommand(nameVersion string, update bool, inputAnswers []string) string {
 	var cmd strings.Builder
 	cmd.WriteString("condatainer create")
 	if update {
@@ -340,9 +357,9 @@ func buildSchedulerCreateCommand(nameVersion string, update bool, interactiveInp
 	}
 	cmd.WriteString(" ")
 	cmd.WriteString(nameVersion)
-	if len(interactiveInputs) > 0 {
+	if len(inputAnswers) > 0 {
 		cmd.WriteString(" << 'CNT_INPUTS_EOF'")
-		for _, input := range interactiveInputs {
+		for _, input := range inputAnswers {
 			cmd.WriteString("\n")
 			cmd.WriteString(input)
 		}

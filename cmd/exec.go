@@ -64,7 +64,8 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	ResolveFlagAlias(cmd, "writable", "writable-img")
 
-	if err := ensureBaseImage(cmd.Context()); err != nil {
+	baseImageResolved, err := resolveBaseImage(cmd.Context(), execFlags.BaseImage)
+	if err != nil {
 		return err
 	}
 
@@ -76,9 +77,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	// Prepare command and determine if prompt should be hidden
 	commandFinal, hidePrompt := PrepareCommandAndHidePrompt(commandFinal)
-
-	// Resolve user-specified base image if provided
-	baseImageResolved := ResolveBaseImage(execFlags.BaseImage)
 
 	resolvedOverlays, err := container.ResolveOverlayPaths(overlayFinal)
 	if err != nil {

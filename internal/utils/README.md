@@ -51,7 +51,7 @@ deps, err := utils.GetDependenciesFromScript(scriptPath, parseModuleLoad)
 description := utils.GetDescriptionFromScript(scriptPath)
 
 // #TYPE: from an external build script, defaulting to "app"
-kind, err := utils.GetExternalBuildTypeFromScript(scriptPath)
+typ, err := utils.GetTypeFromScript(scriptPath)
 
 // extract scheduler directives and apply defaults (scheduler package)
 specs, err := scheduler.ReadScriptSpecsFromPath(scriptPath)

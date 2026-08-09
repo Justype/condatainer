@@ -26,7 +26,7 @@ func TestLookup(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("found=%v err=%v", found, err)
 	}
-	if m.Entry.Kind != KindApp || m.Source.Name != "local" || len(m.Vars) != 0 {
+	if m.Entry.Type != TypeApp || m.Source.Name != "local" || len(m.Vars) != 0 {
 		t.Errorf("match = %+v", m)
 	}
 
@@ -89,8 +89,8 @@ func TestVersions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("recipes/cellranger/10.0.0", "#DESCRIPTION:newer\n")
-	write("recipes/ubuntu24/r.def", "#DESCRIPTION:R {version}\n#TARGET:ubuntu24/r/{version}\n#PH:version:4.5.3,4.6.1,4.4.0\n")
+	write("recipes/cellranger/10.0.0", "#DESC:newer\n")
+	write("recipes/ubuntu24/r.def", "#DESC:R {version}\n#TARGET:ubuntu24/r/{version}\n#PH:version:4.5.3,4.6.1,4.4.0\n")
 
 	cat, err := Open(t.Context(), []Spec{{Name: "local", Base: root}}, Cache{})
 	if err != nil {
@@ -174,7 +174,7 @@ func TestReadPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "#DESCRIPTION:cellranger") {
+	if !strings.Contains(string(data), "#DESC:cellranger") {
 		t.Errorf("ReadPath returned %q", data)
 	}
 }
@@ -186,7 +186,7 @@ func TestLookupFirstSourceWins(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(p, []byte("#DESCRIPTION:lab build\n"), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte("#DESC:lab build\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

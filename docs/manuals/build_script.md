@@ -115,11 +115,10 @@ Headers are special comments at the beginning of build scripts that provide meta
 #AUTOUPDATE:bowtie2:bioconda:bowtie2
 #DEP:grch38/genome/ucsc_no_alt
 
-#DESCRIPTION:bowtie2 index for GRCh38 UCSC no alt reference genome
+#DESC:bowtie2 index for GRCh38 UCSC no alt reference genome
 #URL:https://bowtie-bio.sourceforge.net/bowtie2/index.shtml
 
-#ENV:BOWTIE2_PREFIX=$app_root/GRCh38_no_alt_analysis_set
-#ENVNOTE:GRCh38 reference genome
+#ENV:BOWTIE2_PREFIX={prefix}/GRCh38_no_alt_analysis_set   ## GRCh38 reference genome
 
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=12G
@@ -134,12 +133,12 @@ install() {
 
 ### Description and URL
 
-`#DESCRIPTION:` is a one-line description of what the overlay provides; `#URL:` points to its homepage or documentation.
+`#DESC:` is a one-line description of what the overlay provides; `#URL:` points to its homepage or documentation.
 
-**CondaTainer** displays `#DESCRIPTION:` in:
+**CondaTainer** displays `#DESC:` in:
 
 - `condatainer avail --description` — shows the description beside each build script.
-- `condatainer info <overlay>` — shows the description of a built overlay. This is read from the `#DESCRIPTION:` line of the build script embedded inside the overlay (a sidecar `.env`, if present, overrides it).
+- `condatainer info <overlay>` — shows the description of a built overlay. This is read from the `#DESC:` line of the build script embedded inside the overlay (a sidecar `.env`, if present, overrides it).
 - `condatainer create` — shown during interactive template resolution.
 
 The description supplies the generated module's description (Lmod calls this `whatis`), while the
@@ -272,11 +271,10 @@ Every `#PH:` name must appear as a `{name}` token in `#TARGET:`, and every token
 #DEP:grch38/gtf-gencode/{gencode_version}
 #DEP:star/{star_version}
 
-#DESCRIPTION:STAR GRCh38 GENCODE{gencode_version} index for read length {read_length}
+#DESC:STAR GRCh38 GENCODE{gencode_version} index for read length {read_length}
 #URL:https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf
 
-#ENV:STAR_INDEX_DIR=$app_root
-#ENVNOTE:STAR index for GRCh38 GENCODE v{gencode_version} with read length {read_length}
+#ENV:STAR_INDEX_DIR={prefix}   ## STAR index for GRCh38 GENCODE v{gencode_version} with read length {read_length}
 
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=42G
@@ -288,7 +286,7 @@ install() {
 }
 ```
 
-When the user runs `condatainer create grch38/star-gencode`, **CondaTainer** shows the `#DESCRIPTION:` description, the `#TARGET:` pattern (with `{placeholder}` tokens highlighted), then prompts for each placeholder in declaration order:
+When the user runs `condatainer create grch38/star-gencode`, **CondaTainer** shows the `#DESC:` description, the `#TARGET:` pattern (with `{placeholder}` tokens highlighted), then prompts for each placeholder in declaration order:
 
 ```
 [CNT] Placeholder template: grch38/star-gencode
@@ -361,24 +359,27 @@ Place `#AUTOUPDATE:` immediately after the `#PH:` or `#DEP:` line it manages.
 
 ### Environment Variables
 
-- `#ENV:` lines define environment variables to be set when the overlay is loaded.
-- `#ENVNOTE:` lines provide descriptions for the environment variables, which will be included in the modulefile help text.
-  - `#ENVNOTE:` must directly follow its corresponding `#ENV:` line.
-  - Only one `#ENVNOTE:` line is allowed per `#ENV:` variable.
+- `#ENV:` lines define environment variables to be set when the image is loaded.
+- An inline `## ` note after the value describes the variable, and is shown by
+  `condatainer info` and in the modulefile help text.
 
-The build script is embedded inside the overlay (at `/cnt/<name>/<version>/.cnt-build-script`), so it is the self-contained source of these declarations — no sidecar file needs to travel with the overlay. When the overlay is loaded, **CondaTainer** reads `#ENV:`/`#ENVNOTE:` directly from it. A sidecar `<overlay>.env` is optional: if present it **shadows** the embedded values, which is handy for local overrides.
+```
+#ENV:ORA_REF_PATH={prefix}/oradata   ## reference search path
+```
 
-`$app_root` is a special placeholder that is replaced **at load time** with the overlay's mount path (e.g. `/cnt/orad/2.7.0`) whenever the overlay is loaded.
+These declarations are captured into the image's manifest at build time, so the
+image is self-contained and no sidecar file travels with it. A writable `.img`
+is the exception: it has no manifest, and reads a `<overlay>.env` sidecar
+instead, one `KEY=value ## note` per line.
+
+`{prefix}` is a special placeholder that is replaced **at load time** with the image's install prefix (e.g. `/cnt/orad/2.7.0`) whenever the image is loaded.
 
 **Example:**
 
 ```bash
-#ENV:CELLRANGER_REF_DIR=$app_root
-#ENVNOTE:cellranger reference dir
-#ENV:GENOME_FASTA=$app_root/fasta/genome.fa
-#ENVNOTE:genome fasta
-#ENV:ANNOTATION_GTF_GZ=$app_root/genes/genes.gtf.gz
-#ENVNOTE:10X modified gtf
+#ENV:CELLRANGER_REF_DIR={prefix}   ## cellranger reference dir
+#ENV:GENOME_FASTA={prefix}/fasta/genome.fa   ## genome fasta
+#ENV:ANNOTATION_GTF_GZ={prefix}/genes/genes.gtf.gz   ## 10X modified gtf
 ```
 
 #### ENV Naming Guidelines
@@ -411,7 +412,7 @@ For tool-specific references, use the tool name as a prefix.
 
 ```bash
 #!/usr/bin/bash
-#DESCRIPTION:10X Genomics Single Cell Software Suite
+#DESC:10X Genomics Single Cell Software Suite
 #URL:https://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
 #INTERACTIVE:⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.\nhttps://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
 ```
@@ -431,7 +432,7 @@ Template: [build-template-apps](https://github.com/Justype/cnt-scripts/blob/main
 
 You can use `tar_xf_pigz` and `pigz_or_gunzip` functions to speed up decompression of large files if `pigz` is available on your system.
 
-If the app requires specific environment variables to function properly, make sure to add them using `#ENV:` and `#ENVNOTE:` tags. e.g. [orad/2.7.0](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/orad/2.7.0)
+If the app requires specific environment variables to function properly, make sure to add them using `#ENV:` tags with inline `## ` notes. e.g. [orad/2.7.0](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/orad/2.7.0)
 
 ### Examples
 
@@ -444,7 +445,7 @@ If the app requires specific environment variables to function properly, make su
 - Indices may need to be built using specific versions of software.
   - If indices are version dependent, ensure the app version is included in the name. e.g. `grch38/star/2.7.11b/gencode47-101`
   - If indices require building, ensure you have the scheduler parameters (e.g. `#SBATCH`) set appropriately to allocate sufficient resources.
-- Always add environment variables using `#ENV:` and `#ENVNOTE:` to help users locate and understand the reference data.
+- Always add environment variables using `#ENV:` with inline `## ` notes to help users locate and understand the reference data.
 
 Template: [build-template-ref](https://github.com/Justype/cnt-scripts/blob/main/assets/build-template-ref)
 
@@ -477,7 +478,7 @@ OS scripts are Apptainer definition files (`.def`) for distro-level system tools
 #AUTOUPDATE:version:docker:posit/r-base:^(\d+\.\d+\.\d+)-noble(?:-[^-]+)?$>=3.1.3
 
 #TARGET:ubuntu24/r{version}
-#DESCRIPTION: Ubuntu noble R {version}
+#DESC: Ubuntu noble R {version}
 
 Bootstrap: docker
 From: posit/r-base:{version}-noble

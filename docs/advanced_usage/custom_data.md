@@ -42,10 +42,9 @@ Source: [`grch38/genome/gencode`](https://github.com/Justype/cnt-scripts/blob/ma
 #!/usr/bin/bash
 #DEP:samtools/1.23.1>=1.10
 #AUTOUPDATE:samtools:bioconda:samtools
-#DESCRIPTION:GRCh38 reference genome FASTA
+#DESC:GRCh38 reference genome FASTA
 #URL:https://www.gencodegenes.org/human/
-#ENV:GENOME_FASTA=$app_root/GRCh38.primary_assembly.genome.fa
-#ENVNOTE:GRCh38 reference genome
+#ENV:GENOME_FASTA={prefix}/GRCh38.primary_assembly.genome.fa   ## GRCh38 reference genome
 
 install_app() {
     cd "$target_dir"
@@ -89,10 +88,9 @@ Source: [`grch38/star-gencode`](https://github.com/Justype/cnt-scripts/blob/main
 #DEP:grch38/gtf-gencode/{gencode_version}
 #DEP:star/{star_version}
 
-#DESCRIPTION:STAR GRCh38 GENCODE{gencode_version} index for read length {read_length}
+#DESC:STAR GRCh38 GENCODE{gencode_version} index for read length {read_length}
 #URL:https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf
-#ENV:STAR_INDEX_DIR=$app_root
-#ENVNOTE:STAR index for GRCh38 GENCODE v{gencode_version} with read length {read_length}
+#ENV:STAR_INDEX_DIR={prefix}   ## STAR index for GRCh38 GENCODE v{gencode_version} with read length {read_length}
 
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=42G
@@ -153,7 +151,7 @@ Directives are translated across schedulers, so PBS and LSF users get the equiva
 | `<TOOL>_*_DIR` | The artifact is a directory | `STAR_INDEX_DIR` |
 | `<TOOL>_PREFIX` | The artifact is a file prefix | `BOWTIE2_PREFIX` |
 
-Prefix with the tool name whenever the data is only meaningful to that tool. `$app_root` expands to the overlay's mount path at load time. See [ENV Naming Guidelines](../manuals/build_script.md#env-naming-guidelines) for the full list.
+Prefix with the tool name whenever the data is only meaningful to that tool. `{prefix}` expands to the image's install prefix at load time. See [ENV Naming Guidelines](../manuals/build_script.md#env-naming-guidelines) for the full list.
 
 ## Build and Verify
 

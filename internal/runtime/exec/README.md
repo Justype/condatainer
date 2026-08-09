@@ -104,6 +104,12 @@ Missing fields are filled from config:
 - `ApptainerBin` → `config.Global.ApptainerBin`
 - `Fakeroot` → `false` (auto-enabled if needed)
 
+The base image is required: there is no overlay-only execution, so a container
+with no root cannot start, and `Prepare` fails rather than letting Apptainer
+report a missing file. It must exist and pass `meta.CheckBase`. Building a
+missing one is the caller's job — this package runs images, it does not make
+them, and `internal/build` is what knows how.
+
 ## Stdin Forwarding
 
 When `PassThruStdin: true`, forwards stdin to the container for interactive scripts:

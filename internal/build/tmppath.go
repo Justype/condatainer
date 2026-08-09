@@ -10,32 +10,20 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// tmpRootForKind picks where a build does its work: data keeps a stable, shared
-// path because the payload is large and the build is long, everything else uses
-// fast local scratch.
-func tmpRootForKind(kind catalog.Kind) string {
-	if kind == catalog.KindData {
-		return resolveTmpDirForRef()
-	}
-	return resolveTmpDirForConda()
-}
+// A build works in fast local scratch (utils.GetTmpDir) or in the stable
+// writable tmp (config.GetWritableTmpDir). See the README's Workspace Strategy.
 
-// resolveTmpDirForConda returns the tmp directory for conda/app builds.
-// If CNT_TMPDIR is set, it takes precedence over scheduler-assigned scratch and TMPDIR.
-func resolveTmpDirForConda() string {
+// tmpRootForType picks where a build does its work: the stable writable tmp for
+// data, fast local scratch for everything else.
+func tmpRootForType(typ catalog.Type) string {
+	if typ == catalog.TypeData {
+		return config.GetWritableTmpDir()
+	}
 	return utils.GetTmpDir()
 }
 
-// resolveTmpDirForRef returns the writable tmp for ref/data builds.
-// Ref builds involve large datasets that benefit from a persistent, shared filesystem path.
-// If CNT_TMPDIR is set, it overrides the writable tmp path.
-func resolveTmpDirForRef() string {
-	return config.GetWritableTmpDir()
-}
-
-// resolveTmpDirForDef returns the writable tmp for def/base-image builds.
-// Def builds produce a SIF which is also stored here before extraction.
-// If CNT_TMPDIR is set, it overrides the writable tmp path.
+// resolveTmpDirForDef returns the tmp directory for definition builds, which
+// keep their recipe and the SIF apptainer writes in one place.
 func resolveTmpDirForDef() string {
 	return config.GetWritableTmpDir()
 }
@@ -53,34 +41,9 @@ func resolveTmpDirForExternal(targetDir, externalType string) string {
 	return utils.GetTmpDir()
 }
 
-// buildTmpPaths computes tmpOverlayPath and cntDirPath from tmpDir and nameVersion.
-// ext is ".img" for conda/script builds, ".sif" for def builds, "" for dir-mode (tmpOverlay will be "").
-func buildTmpPaths(nameVersion, tmpDir, ext string) (tmpOverlayPath, cntDirPath string) {
-	cntDirPath = getCntDirPath(nameVersion, tmpDir)
-	if ext != "" {
-		filename := strings.ReplaceAll(nameVersion, "/", "--") + ext
-		tmpOverlayPath = filepath.Join(tmpDir, filename)
-	}
-	return
-}
-
 // getCntDirPath returns the container directory path for a name/version.
 // Format: <tmpDir>/build_<nameVersion>/cnt
 func getCntDirPath(nameVersion, tmpDir string) string {
 	buildDirName := "build_" + strings.ReplaceAll(nameVersion, "/", "_")
 	return filepath.Join(tmpDir, buildDirName, "cnt")
-}
-
-// getBuildTmpDir returns the host tmp directory used for TMPDIR/micromamba root in dir-mode builds.
-// Format: <tmpDir>/build_<nameVersion>/tmp
-func getBuildTmpDir(b *BuildObject) string {
-	return filepath.Join(filepath.Dir(b.cntDirPath), "tmp")
-}
-
-// getTmpOverlayPath returns the temporary overlay path for ext3 builds (script/conda).
-// Format: <tmpDir>/<nameVersion>.img (with / replaced by --)
-// Kept for callers that need the .img path explicitly (e.g. NewBaseImageBuildObject).
-func getTmpOverlayPath(nameVersion, tmpDir string) string {
-	filename := strings.ReplaceAll(nameVersion, "/", "--") + ".img"
-	return filepath.Join(tmpDir, filename)
 }

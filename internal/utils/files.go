@@ -20,14 +20,6 @@ const PermDir os.FileMode = 0775
 // Exec: u=rwx, g=rwx, o=rx (Executable files with group write access)
 const PermExec os.FileMode = 0775
 
-// BuildScriptName is the file a script/ref build embeds under its payload dir
-// (/cnt/<name>/<version>/) to record the recipe that produced the image.
-const BuildScriptName = ".cnt-build-script"
-
-// BuildScriptDefName is the file a def or scheme:// (docker://) build embeds at
-// the overlay root to record the definition that produced the image.
-const BuildScriptDefName = ".cnt-build-script.def"
-
 // --- Extension Checks (String-based) ---
 
 // IsImg checks if the path has an ext3 overlay extension (.img, .ext3).

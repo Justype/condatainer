@@ -11,12 +11,9 @@ import (
 	"github.com/Justype/condatainer/internal/logging"
 )
 
-// defaultSource is the collection every resolution ends at.
-//
-// It ships as a default *value*, not as a fallback the resolver reaches for:
-// naming it here means a site replaces it by writing its own `cnt` entry, rather
-// than patching a constant (build-recipes.md §2.5). Nothing else in the code
-// knows this URL, and no code path prefers it over a configured entry.
+// defaultSource is the collection every resolution ends at. It is a default
+// value rather than a fallback the resolver reaches for, so a site replaces it
+// by writing its own `cnt` entry. See the README's Recipe sources.
 var defaultSource = catalog.Spec{
 	Name: "cnt",
 	Base: "https://raw.githubusercontent.com/condatainer/recipes/main",
@@ -24,9 +21,6 @@ var defaultSource = catalog.Spec{
 
 // layerSources reads the `sources` key from every config layer and concatenates
 // them strongest first, so a user entry shadows a site entry of the same name.
-//
-// Each entry is a single-key mapping — `- lab: /shared/lab/recipes` — because
-// both the order and the handle are load-bearing and a plain map gives neither.
 // CNT_SOURCES overrides the lot: "cnt=https://…|lab=/shared/lab".
 func layerSources() []catalog.Spec {
 	if ev := os.Getenv("CNT_SOURCES"); ev != "" {
@@ -49,12 +43,8 @@ func layerSources() []catalog.Spec {
 }
 
 // withDefaultSource appends the default collection when nothing already answers
-// to its handle, so a fresh install resolves recipes unconfigured and a site
-// adding its own collection does not silently lose the public one.
-//
-// Appended, never prepended: every configured entry outranks it. Redefining
-// `cnt` replaces it outright, which is how a site points the handle somewhere
-// else without rewriting the `#DEP:` lines that name it.
+// to its handle, so a fresh install resolves recipes unconfigured. Appended,
+// never prepended: every configured entry outranks it.
 func withDefaultSource(specs []catalog.Spec) []catalog.Spec {
 	for _, s := range specs {
 		if s.Name == defaultSource.Name {
@@ -134,15 +124,8 @@ func OpenCatalog(ctx context.Context) (catalog.Catalog, error) {
 var warnSourcesOnce sync.Once
 
 // WarnUnreachableSources reports sources that could not be read, once per
-// process however many names get resolved.
-//
-// Not fatal: the remaining sources still answer, and a compute node with no
-// route out is ordinary. But silence is not an option either — sources are
-// first-wins, so an unreachable one promotes the next source's recipe, or falls
-// through to conda, and the build would otherwise look normal.
-//
-// Call after the catalog has been consulted: Err is set when a source is first
-// read, not when it is opened.
+// process however many names get resolved. Call it after the catalog has been
+// consulted. See the README's Recipe sources.
 func WarnUnreachableSources(ctx context.Context, cat catalog.Catalog) {
 	warnSourcesOnce.Do(func() {
 		log := logging.FromContext(ctx)
@@ -179,15 +162,8 @@ func BaseRecipeNameFrom(cat catalog.Catalog) string {
 }
 
 // EnsureBase records the base in config the first time one is needed, taking it
-// from the first source declaring a default_base.
-//
-// Once written it is never revised. Changing the base rebuilds the container
-// root and every os overlay stacked on it, so following an upstream bump would
-// invalidate a whole set of images on an ordinary update. A later default is
-// something the user opts into with `config set base`.
-//
-// Returns the resolved base, "" when nothing supplies one. A failed write is not
-// an error: the base still resolves for this run.
+// from the first source declaring a default_base, and never revises it. Returns
+// the resolved base, "" when nothing supplies one; a failed write is not an error.
 func EnsureBase(cat catalog.Catalog) string {
 	if Global.Base != "" {
 		return Global.Base
@@ -207,15 +183,9 @@ func EnsureBase(cat catalog.Catalog) string {
 // differ from the recorded one after an upstream change.
 func SourceDefaultBase(cat catalog.Catalog) string { return cat.DefaultBase() }
 
-// ResolvedBase returns the configured base, e.g. "ubuntu24".
-//
-// Config only — it never opens the catalog. This is the bare-name prefix for
-// installed overlays (`build-essential` -> `ubuntu24/build-essential`), so it is
-// called on offline paths like list and info, where reaching for a source
-// descriptor would mean a network fetch to expand a local name.
-//
-// The default_base fallback belongs where a catalog is already open: base image
-// resolution (internal/build).
+// ResolvedBase returns the configured base, e.g. "ubuntu24" — the bare-name
+// prefix for installed overlays. Config only: it never opens the catalog, so
+// offline paths like list and info stay offline.
 func ResolvedBase() string { return Global.Base }
 
 // CatalogCacheDir is where fetched index and recipe bytes are kept.

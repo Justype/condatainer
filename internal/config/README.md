@@ -8,7 +8,43 @@ Multi-level configuration management and data directory search following XDG Bas
 config.go       Global config singleton, defaults, structure
 datapaths.go    Data directory search paths and resolution
 persist.go      Configuration file loading (Viper)
+sources.go      Recipe collections, the catalog handle, and the base
 ```
+
+## Recipe sources and the base
+
+`sources` is an ordered list of recipe collections, read from every config layer
+and concatenated strongest first, so a user entry shadows a site entry of the
+same name. Each entry is a single-key mapping — `- lab: /shared/lab/recipes` —
+because both the order and the handle are load-bearing and a plain map gives
+neither. `CNT_SOURCES` overrides the lot: `cnt=https://…|lab=/shared/lab`.
+
+The public `cnt` collection ships as a default *value*, not as a fallback the
+resolver reaches for, and is **appended** rather than prepended, so every
+configured entry outranks it. A site redefining `cnt` replaces it outright,
+which is how the handle is pointed elsewhere without rewriting the `#DEP:` lines
+that name it.
+
+**Unreachable sources are reported, not fatal.** The remaining sources still
+answer, and a compute node with no route out is ordinary — but silence is not an
+option either, because sources are first-wins: an unreachable one promotes the
+next source's recipe or falls through to conda, and the build would otherwise
+look normal. `WarnUnreachableSources` warns once per process, and must be called
+*after* the catalog has been consulted, since a source's `Err` is set when it is
+first read rather than when it is opened.
+
+**The base is recorded once and never revised.** `EnsureBase` writes it from the
+first source declaring a `default_base` the first time one is needed. Changing
+it rebuilds the container root and every `os` overlay stacked on it, so following
+an upstream bump would invalidate a whole set of images on an ordinary update; a
+later default is something the user opts into with `config set base`.
+
+`ResolvedBase` reads config alone and never opens the catalog. It is the
+bare-name prefix for installed overlays (`build-essential` →
+`ubuntu24/build-essential`), so it is called on offline paths like `list` and
+`info`, where reaching for a source descriptor would mean a network fetch to
+expand a local name. The `default_base` fallback belongs where a catalog is
+already open — base image resolution, in `internal/build`.
 
 ## Configuration Hierarchy
 
@@ -153,7 +189,7 @@ build:
   ncpus: 4
   mem: 8192   # MB
   time: "2h"
-  compress_args: ""   # auto-detect: zstd-medium (apptainer>=1.4), lz4 (older), gzip (singularity)
+  compress_args: ""   # auto-detect: zstd-medium (apptainer>=1.4), lz4 otherwise (incl. singularity)
 ```
 
 ## Constants

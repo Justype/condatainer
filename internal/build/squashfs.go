@@ -4,21 +4,24 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image/meta"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
-	"github.com/Justype/condatainer/internal/logging"
 )
 
-// createSquashfs runs mksquashfs inside a container to pack sourceDir into targetPath.
-// It handles three modes depending on useTmpOverlay and sourceDir:
-//   - Dir mode (!useTmpOverlay): sourceDir is a host path; no overlay needed.
-//   - Ext3 app mode (useTmpOverlay, sourceDir=="/cnt"): pack from /cnt inside the image.
-//   - Ext3 ref mode (useTmpOverlay, other sourceDir): pack from a host path with no image.
-//
-// The caller is responsible for calling b.Cleanup(true) if an error is returned.
-func createSquashfs(ctx context.Context, b *BuildObject, isData bool, sourceDir, targetPath string) error {
+// metaMountPath is where the staged metadata directory is bound while packing.
+// mksquashfs names an archive root after its source's basename and cannot rename
+// one, so the directory must already be called .cnt when mksquashfs sees it.
+const metaMountPath = "/" + meta.DirName
+
+// createSquashfs runs mksquashfs inside a container to pack sourceDir into
+// targetPath. metaDir is the staged .cnt directory, packed as a second archive
+// root; empty packs no manifest. The caller must Cleanup(true) on an error.
+func createSquashfs(ctx context.Context, b *BuildObject, isData bool, sourceDir, metaDir, targetPath string) error {
 	if absTarget, err := filepath.Abs(targetPath); err == nil {
 		targetPath = absTarget
 	}
@@ -26,23 +29,23 @@ func createSquashfs(ctx context.Context, b *BuildObject, isData bool, sourceDir,
 	done := watchContext(ctx, "SquashFS creation")
 	defer close(done)
 
-	bashScript, packOverlays, packBindDirs := buildSquashfsOpts(b, isData, sourceDir, targetPath)
+	bashScript, packOverlays, packBindDirs := buildSquashfsOpts(b, isData, sourceDir, metaDir, targetPath)
 
 	opts := execpkg.Options{
-		BaseImage:    config.GetBaseImage(),
+		BaseImage:    b.spec.Base,
 		ApptainerBin: config.Global.ApptainerBin,
 		Overlays:     packOverlays,
 		BindPaths:    packBindDirs,
 		Command:      []string{"/bin/bash", "-c", bashScript},
 		HidePrompt:   true,
-		WritableImg:  config.Global.Build.UseTmpOverlay,
+		WritableImg:  b.ws.UsesImage(),
 	}
-	if !config.Global.Build.UseTmpOverlay {
+	if !b.ws.UsesImage() {
 		opts.ApptainerFlags = []string{"--writable-tmpfs"}
 	}
 
 	log := logging.FromContext(ctx)
-	log.Debug("creating SquashFS", "name", b.nameVersion, "overlays", opts.Overlays, "bindPaths", opts.BindPaths)
+	log.Debug("creating SquashFS", "name", b.spec.Image.Name, "overlays", opts.Overlays, "bindPaths", opts.BindPaths)
 	log.Info("packing SquashFS", "source", sourceDir, "target", targetPath)
 
 	if err := execpkg.Run(ctx, opts, execpkg.IOFromContext(ctx)); err != nil {
@@ -55,42 +58,51 @@ func createSquashfs(ctx context.Context, b *BuildObject, isData bool, sourceDir,
 	return nil
 }
 
-// buildSquashfsOpts constructs the bash script, overlay list, and bind dirs for mksquashfs.
-func buildSquashfsOpts(b *BuildObject, isData bool, sourceDir, targetPath string) (bashScript string, overlays, bindDirs []string) {
+// buildSquashfsOpts constructs the bash script, overlay list, and bind dirs for
+// mksquashfs. The two cases are the workspace's two modes and nothing else.
+func buildSquashfsOpts(b *BuildObject, isData bool, sourceDir, metaDir, targetPath string) (bashScript string, overlays, bindDirs []string) {
 	ncpus := b.effectiveNcpus()
 	compressArgs := config.Global.Build.CompressArgs
-
-	if !config.Global.Build.UseTmpOverlay {
-		// Dir mode: sourceDir is a host path; bind it and the output dir.
-		blockSize := config.Global.Build.BlockSize
-		if isData {
-			blockSize = config.Global.Build.DataBlockSize
-		}
-		bashScript = fmt.Sprintf(`
-trap 'exit 130' INT TERM
-echo "Packing overlay to SquashFS..."
-mksquashfs %s %s -processors %d -b %s -keep-as-directory -all-root %s
-`, sourceDir, targetPath, ncpus, blockSize, compressArgs)
-		overlays = []string{}
-		bindDirs = append(container.DeduplicateBindPaths(getAllBaseDirs()), sourceDir, filepath.Dir(targetPath))
-	} else if sourceDir == "/cnt" {
-		// Ext3 mode, app overlays: pack from /cnt inside the image.
-		bashScript = fmt.Sprintf(`
-trap 'exit 130' INT TERM
-echo "Packing overlay to SquashFS..."
-mksquashfs /cnt %s -processors %d -b %s -keep-as-directory -all-root %s
-`, targetPath, ncpus, config.Global.Build.BlockSize, compressArgs)
-		overlays = []string{b.tmpOverlayPath}
-		bindDirs = container.DeduplicateBindPaths(getAllBaseDirs())
-	} else {
-		// Ext3 mode, host payload: pack from the host path (no overlay needed).
-		bashScript = fmt.Sprintf(`
-trap 'exit 130' INT TERM
-echo "Packing overlay to SquashFS..."
-mksquashfs %s %s -processors %d -b %s -keep-as-directory -all-root %s
-`, sourceDir, targetPath, ncpus, config.Global.Build.DataBlockSize, compressArgs)
-		overlays = []string{}
-		bindDirs = container.DeduplicateBindPaths(getAllBaseDirs())
+	blockSize := config.Global.Build.BlockSize
+	if isData {
+		blockSize = config.Global.Build.DataBlockSize
 	}
+
+	// One archive root per source, which is what puts /cnt/... and /.cnt/... at
+	// the same level without copying the manifest into the payload.
+	sources := []string{sourceDir}
+	bindDirs = container.DeduplicateBindPaths(getAllBaseDirs())
+
+	if b.ws.UsesImage() {
+		// sourceDir is a path inside the image, so only the staged manifest has
+		// to come in from the host.
+		overlays = []string{b.ws.Overlay}
+		if metaDir != "" {
+			sources = append(sources, metaMountPath)
+			bindDirs = append(bindDirs, metaDir+":"+metaMountPath)
+		}
+	} else {
+		// Dir mode: sourceDir is a host path; bind it and the output dir.
+		overlays = []string{}
+		bindDirs = append(bindDirs, sourceDir, filepath.Dir(targetPath))
+		if metaDir != "" {
+			// A host path already named .cnt, so it is its own source.
+			sources = append(sources, metaDir)
+			bindDirs = append(bindDirs, metaDir)
+		}
+	}
+
+	bashScript = squashfsScript(sources, targetPath, ncpus, blockSize, compressArgs)
 	return
+}
+
+// squashfsScript renders the mksquashfs invocation. -keep-as-directory only
+// affects a lone source, where it keeps that directory instead of unwrapping it
+// into the archive root; with two sources mksquashfs already does that.
+func squashfsScript(sources []string, targetPath string, ncpus int, blockSize, compressArgs string) string {
+	return fmt.Sprintf(`
+trap 'exit 130' INT TERM
+echo "Packing overlay to SquashFS..."
+mksquashfs %s %s -processors %d -b %s -keep-as-directory -all-root %s
+`, strings.Join(sources, " "), targetPath, ncpus, blockSize, compressArgs)
 }

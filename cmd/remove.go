@@ -10,7 +10,7 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image"
-	"github.com/Justype/condatainer/internal/image/squashfs"
+	"github.com/Justype/condatainer/internal/image/meta"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -46,10 +46,9 @@ func init() {
 		})
 }
 
-// scopedImageDirs applies --layer and --dir to the image search paths.
-// Both are optional and compose: --layer picks a layer, --dir narrows by substring.
-// Exits with an error when a filter matches nothing, so an empty result never reads
-// as "no overlays installed".
+// scopedImageDirs applies --layer and --dir to the image search paths; both are
+// optional and compose. Exits with an error when a filter matches nothing, so an
+// empty result never reads as "no overlays installed".
 func scopedImageDirs(cmd *cobra.Command) []string {
 	dirs := config.GetImageSearchPaths()
 
@@ -284,7 +283,7 @@ func performDelete(cmd *cobra.Command, names []string, showListing ...bool) erro
 			utils.PrintError("Failed to remove overlay %s: %v", utils.StyleName(name), err)
 			continue
 		}
-		squashfs.ForgetOSType(overlayPath)
+		meta.Forget(overlayPath)
 		utils.PrintSuccess("Overlay %s removed.", utils.StyleName(name))
 		envPath := overlayPath + ".env"
 		if utils.FileExists(envPath) {
@@ -349,7 +348,7 @@ func removeExternalOverlays(cmd *cobra.Command, paths []string) error {
 			utils.PrintError("Failed to remove %s: %v", utils.StyleName(filepath.Base(p)), err)
 			continue
 		}
-		squashfs.ForgetOSType(p)
+		meta.Forget(p)
 		utils.PrintSuccess("Overlay %s removed.", utils.StyleName(filepath.Base(p)))
 		envPath := p + ".env"
 		if utils.FileExists(envPath) {
@@ -364,23 +363,9 @@ func removeExternalOverlays(cmd *cobra.Command, paths []string) error {
 // getAllOverlayCopies returns all paths for each overlay name across all image dirs.
 // Unlike getInstalledOverlaysMap, this stores every copy, not just the highest-priority one.
 func getAllOverlayCopies() (map[string][]string, error) {
-	copies := make(map[string][]string)
-	for _, imagesDir := range config.GetImageSearchPaths() {
-		if !utils.DirExists(imagesDir) {
-			continue
-		}
-		entries, err := os.ReadDir(imagesDir)
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			if entry.IsDir() || !utils.IsOverlay(entry.Name()) {
-				continue
-			}
-			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			normalized := strings.ReplaceAll(nameVersion, "--", "/")
-			copies[normalized] = append(copies[normalized], filepath.Join(imagesDir, entry.Name()))
-		}
+	copies, err := image.ScanOverlays(image.ScanOptions{})
+	if err != nil {
+		utils.PrintWarning("%v", err)
 	}
 	return copies, nil
 }
@@ -388,34 +373,17 @@ func getAllOverlayCopies() (map[string][]string, error) {
 // getInstalledOverlaysMap returns a map of overlay name to path from all search paths.
 // Only the highest-priority (first found) copy per name is kept.
 func getInstalledOverlaysMap() (map[string]string, error) {
-	return getInstalledOverlaysMapIn(config.GetImageSearchPaths())
+	return getInstalledOverlaysMapIn(nil)
 }
 
-// getInstalledOverlaysMapIn is getInstalledOverlaysMap scoped to specific directories.
-// Names resolve within dirs only, so a copy shadowed by a higher-priority layer is
-// still reachable when dirs names its own layer — filtering the full map instead would
-// drop the entry entirely, since the map stores only the highest-priority path.
+// getInstalledOverlaysMapIn is getInstalledOverlaysMap scoped to specific
+// directories; nil means every search path. Names resolve within dirs only, so a
+// copy shadowed by a higher-priority layer stays reachable.
 func getInstalledOverlaysMapIn(dirs []string) (map[string]string, error) {
-	overlays := make(map[string]string)
-	for _, imagesDir := range dirs {
-		if !utils.DirExists(imagesDir) {
-			continue
-		}
-		entries, err := os.ReadDir(imagesDir)
-		if err != nil {
-			utils.PrintWarning("Failed to read directory %s: %v", imagesDir, err)
-			continue
-		}
-		for _, entry := range entries {
-			if entry.IsDir() || !utils.IsOverlay(entry.Name()) {
-				continue
-			}
-			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			normalized := strings.ReplaceAll(nameVersion, "--", "/")
-			if _, exists := overlays[normalized]; !exists {
-				overlays[normalized] = filepath.Join(imagesDir, entry.Name())
-			}
-		}
+	scan, err := image.ScanOverlays(image.ScanOptions{Dirs: dirs})
+	if err != nil {
+		// An unreadable directory costs the overlays in it, not the command.
+		utils.PrintWarning("%v", err)
 	}
-	return overlays, nil
+	return image.FirstPaths(scan), nil
 }

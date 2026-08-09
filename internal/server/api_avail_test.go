@@ -44,7 +44,7 @@ func writeScript(t *testing.T, dir, relPath, content string) {
 // marked, and template scripts appear collapsed (variants suppressed).
 func TestHandleAvail(t *testing.T) {
 	scriptsDir := t.TempDir()
-	writeScript(t, scriptsDir, "foo/1.0", "#!/usr/bin/bash\n#DESCRIPTION:Test tool\necho hi\n")
+	writeScript(t, scriptsDir, "foo/1.0", "#!/usr/bin/bash\n#DESC:Test tool\necho hi\n")
 	writeScript(t, scriptsDir, "bar/gen",
 		"#!/usr/bin/bash\n#PH:ver:2.0,1.0\n#TARGET:bar/{ver}\necho hi\n")
 	writeScript(t, scriptsDir, "ubuntu24/build-essential",

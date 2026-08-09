@@ -23,9 +23,9 @@ All three config files are loaded and merged when they exist:
 6. **System config file** (`/etc/condatainer/config.yaml`)
 7. **Defaults** (lowest priority)
 
-**Scalar keys** (`apptainer_bin`, `default_distro`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
+**Scalar keys** (`apptainer_bin`, `base`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
 
-**Directory and source array keys** (`extra_image_dirs`, `extra_helper_dirs`, `extra_scripts_links`): **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, app-root, then system. This lets a sysadmin publish shared directories in an app-root or system config without requiring every user to copy them into their own config. See [How Array Settings Merge](#how-array-settings-merge) for a worked example.
+**Directory and source array keys** (`extra_image_dirs`, `extra_helper_dirs`, `sources`): **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, app-root, then system. This lets a sysadmin publish shared directories in an app-root or system config without requiring every user to copy them into their own config. See [How Array Settings Merge](#how-array-settings-merge) for a worked example.
 
 **`channels`**: overwrite — the highest-priority config file that sets it wins (not merged), since channel order controls conda package resolution priority.
 
@@ -98,13 +98,28 @@ With `-l`, a read-only target is an error instead — an explicit layer is never
 | `apptainer_bin` | Auto-detected | Path to apptainer or singularity binary |
 | `scheduler_bin` | Auto-detected | Path to job scheduler binary (sbatch, qsub, bsub, condor_submit, etc.). |
 
-### Remote Sources
+### Recipe Sources
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `scripts_link` | `https://raw.githubusercontent.com/Justype/cnt-scripts/main` | Base URL for remote build and helper scripts (lowest-priority remote) |
-| `extra_scripts_links` | `[]` | Additional remote URLs prepended before `scripts_link` (first entry = highest priority); array, set via `config append/prepend` or `CNT_EXTRA_SCRIPTS_LINKS` |
-| `prefer_remote` | `false` | Remote build scripts take precedence over local |
+| `sources` | the public `cnt` collection | Ordered recipe collections, first match wins |
+
+Each entry is a single-key mapping of a handle to a local directory or a base
+URL. Order is priority — like `PATH`, the first collection holding a name wins:
+
+```yaml
+sources:
+  - lab: /shared/labA/recipes
+  - cnt: https://raw.githubusercontent.com/condatainer/recipes/main
+```
+
+The public `cnt` collection is appended automatically when nothing else claims
+that handle, so recipes resolve on a fresh install. Give an entry the handle
+`cnt` to replace it outright.
+
+A collection is a directory (or URL prefix) with `recipes/` and a `source.json`
+declaring `schema`, `repository` and `default_base` — the base recipe used when
+`base` is unset.
 
 ### Options
 
@@ -112,12 +127,13 @@ With `-l`, a read-only target is an error instead — an explicit layer is never
 |-----|---------|-------------|
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
 | `parse_module_load` | `false` | Parse `module load` / `ml` lines as dependencies in `check` and `run` |
-| `scheduler_timeout` | `0` | Seconds to wait for a scheduler command (sbatch, qsub, etc.) before returning an error. `0` (default) disables the timeout. |
-| `notification` | `web` | Notification when a helper job starts running. `web` (default) = browser notification via the dashboard; `terminal` = terminal bell ×2 (CLI only); `both` = terminal + web; `none` or empty = silent. |
-| `metadata_cache_ttl` | `7` | Days to keep the cached remote build script metadata (default: 7 days = 1 week). Set to `0` to disable caching and always fetch from the network. |
-| `default_distro` | `ubuntu24` | Base OS distro for the base image and bare-name expansion. Accepted values: `ubuntu20`, `ubuntu22`, `ubuntu24`. Determines the base image filen and the distro prefix added to bare package names (e.g. `build-essential` → `ubuntu24/build-essential`). |
+| `autoload_gpu` | `true` | Pass `--nv` / `--rocm` when the host has the device node. Set `false` if the driver is present but unusable |
+| `base` | first source's `default_base` | Base recipe for the container root, e.g. `ubuntu24` → `ubuntu24/base` |
+| `scheduler_timeout` | `0` | Seconds to wait for a scheduler command before erroring. `0` disables the timeout |
+| `notification` | `web` | Alert when a helper job starts: `web`, `terminal`, `both`, `none` |
+| `metadata_cache_ttl` | `7` | Days to cache remote recipe metadata. `0` always fetches |
 | `proxy_perjob` | `false` | Auto-start a per-job SOCKS5 proxy inside submitted jobs. See [Proxy](condatainer.md#proxy). |
-| `helper_bind_all` | `false` | Bind helper services to `0.0.0.0` so the dashboard server reaches them via direct TCP instead of an SSH tunnel. |
+| `helper_bind_all` | `false` | Bind helper services to `0.0.0.0` for direct TCP instead of an SSH tunnel |
 
 ### Build Configuration
 
@@ -126,12 +142,12 @@ With `-l`, a read-only target is an error instead — an explicit layer is never
 | `build.ncpus` | `4` | CPUs for build jobs |
 | `build.mem` | `8192` | Memory for build jobs (supports units: `8g`, `8192`) |
 | `build.time` | `2h` | Time limit for builds |
-| `build.compress_args` | Auto-detected | mksquashfs compression arguments (gzip for singularity; zstd-medium for apptainer≥1.4; lz4 otherwise) |
+| `build.compress_args` | Auto-detected | mksquashfs compression arguments (zstd-medium for apptainer≥1.4; lz4 otherwise, including Singularity) |
 | `build.block_size` | `128k` | mksquashfs block size for app/env/external overlays (e.g. `128k`, `512k`) |
 | `build.data_block_size` | `512k` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
-| `build.use_tmp_overlay` | `false` | Use a temporary ext3 overlay during builds instead of host directories |
+| `build.use_tmp_overlay` | `false` | Build **app** overlays inside a temporary ext3 image instead of host directories. Ignored for `data`, `os` and `base` |
 | `build.always_submit` | `false` | Always submit builds as scheduler jobs even if the script has no scheduler directives |
-| `build.tmp_overlay_size` | `20480` | Temporary ext3 overlay size (supports units: `20g`, `20480`); only used when `use_tmp_overlay` is `true` |
+| `build.tmp_overlay_size` | `20480` | Temporary ext3 image size (supports units: `20g`, `20480`); only used for app builds when `use_tmp_overlay` is `true` |
 | `channels` | `[conda-forge, bioconda]` | Conda channels passed to micromamba in priority order (first = highest priority) |
 
 > `build.compress_args` also accepts shortcuts: `gzip`, `lz4`, `zstd`, `zstd-fast`, `zstd-medium`, `zstd-high`
@@ -179,16 +195,18 @@ condatainer config set scheduler_timeout 10
 
 ### Manage Array Config Values
 
-Array keys (`extra_image_dirs`, `extra_helper_dirs`, `extra_scripts_links`, `channels`) use dedicated subcommands:
+Array keys (`extra_image_dirs`, `extra_helper_dirs`, `sources`, `channels`) use dedicated subcommands:
 
 ```bash
-# Explicit image/scripts directories
+# Explicit image directories
 condatainer config append extra_image_dirs /shared/lab/images:ro   # search-only
 condatainer config append extra_image_dirs /fast/scratch/images    # writable
 
 # Prepend (higher priority — checked first)
 condatainer config prepend extra_image_dirs /fast/images
-condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+
+# Recipe collections are written as handle=location
+condatainer config prepend sources lab=/shared/labA/recipes
 
 # Remove
 condatainer config remove extra_image_dirs /shared/lab/images:ro
@@ -202,7 +220,7 @@ Shell completion for `remove` offers the current values of the array as candidat
 condatainer config validate
 ```
 
-This command checks that key binaries are accessible, build settings are sane, and the `default_distro` value is one of the supported distro names.
+This command checks that key binaries are accessible and build settings are sane.
 
 ## Environment Variables
 
@@ -233,8 +251,8 @@ mapping is consistent for every key handled by the CLI:
 |-----------------------------------|------------------------|
 | `CNT_APPTAINER_BIN`        | `apptainer_bin`        |
 | `CNT_SUBMIT_JOB`           | `submit_job`           |
-| `CNT_SCRIPTS_LINK`         | `scripts_link`         |
-| `CNT_PREFER_REMOTE`        | `prefer_remote`        |
+| `CNT_AUTOLOAD_GPU`         | `autoload_gpu`         |
+| `CNT_BASE`                 | `base`                 |
 | `CNT_BUILD_MEM`            | `build.mem`            |
 | `CNT_BUILD_ALWAYS_SUBMIT`  | `build.always_submit`  |
 | `CNT_BUILD_BLOCK_SIZE`     | `build.block_size`     |
@@ -243,7 +261,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_EXTRA_ROOT`           | Group/lab root dir — single path, loads `config.yaml` + data dirs |
 | `CNT_EXTRA_IMAGE_DIRS`     | `extra_image_dirs` (pipe-separated; entries support `:ro`/`:rw`) |
 | `CNT_EXTRA_HELPER_DIRS`    | `extra_helper_dirs` (pipe-separated; entries support `:ro`/`:rw`) |
-| `CNT_EXTRA_SCRIPTS_LINKS`  | `extra_scripts_links` (pipe-separated) |
+| `CNT_SOURCES`              | `sources` (pipe-separated `handle=location`; replaces the list) |
 | `CNT_CHANNELS`             | `channels` (pipe or colon-separated) |
 | `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
 | `CNT_NOTIFICATION`         | `notification`         |
@@ -327,33 +345,31 @@ scheduler_bin: /usr/bin/sbatch
 # Submit builds as scheduler jobs
 submit_job: true
 
-# Base URL for remote build scripts and helper scripts (includes branch)
-# Change to use a private or institutional scripts repo
-scripts_link: https://raw.githubusercontent.com/Justype/cnt-scripts/main
-
-# Additional remote sources (higher priority than scripts_link; first entry wins on conflict)
-# extra_scripts_links:
-#   - https://raw.githubusercontent.com/MyOrg/my-scripts/main
-
-# Remote build scripts take precedence over local
-prefer_remote: false
+# Recipe collections, in priority order (first match wins).
+# The public cnt collection is appended automatically unless redefined here.
+sources:
+  - lab: /shared/labA/recipes
+  - cnt: https://raw.githubusercontent.com/condatainer/recipes/main
 
 # Parse "module load" / "ml" lines as dependencies in 'check' and 'run' (default: false)
 parse_module_load: false
 
-# Maximum seconds to wait for scheduler CLI commands (default: 5, 0 = disabled)
-scheduler_timeout: 5
+# Pass --nv / --rocm when the host has the matching device node (default: true)
+# Set false on a node whose driver is installed but unusable
+autoload_gpu: true
 
-# Days to cache remote build script metadata (default: 7 = 1 week, 0 = disabled)
+# Base recipe for the container root (default: the first source's default_base)
+base: ubuntu24
+
+# Maximum seconds to wait for scheduler CLI commands (default: 0 = disabled)
+scheduler_timeout: 0
+
+# Days to cache remote recipe metadata (default: 7 = 1 week, 0 = disabled)
 metadata_cache_ttl: 7
 
-# Notification when a helper job starts running (default: none/empty)
-# Values: bell | email | <ntfy-topic-min-5-chars> | none (or empty)
-# notification: bell
-
-# Base OS distro: ubuntu20, ubuntu22, or ubuntu24 (default: ubuntu24)
-# Sets the base image (e.g. ubuntu24--base_image.sif) and prefix for bare package names
-default_distro: ubuntu24
+# Notification when a helper job starts running (default: web)
+# Values: web | terminal | both | none (or empty)
+# notification: web
 
 # Explicit image directories (direct paths; :ro = search-only, :rw = writable default)
 extra_image_dirs:
@@ -376,7 +392,7 @@ build:
   compress_args: -comp zstd -Xcompression-level 8
   block_size: 128k       # SquashFS block size for app/env/external overlays
   data_block_size: 512k  # SquashFS block size for data overlays
-  use_tmp_overlay: false  # Use ext3 tmp overlay instead of host directories
+  use_tmp_overlay: false  # Build app overlays inside an ext3 image (app only)
   always_submit: false    # Always submit as scheduler jobs even without directives
   tmp_overlay_size: 20g  # Only used when use_tmp_overlay is true
 
@@ -477,7 +493,8 @@ channels:
 ```yaml
 extra_image_dirs:
   - /shared/labA/condatainer/images
-scripts_link: https://raw.githubusercontent.com/LabA/cnt-scripts/main
+sources:
+  - labA: /shared/labA/condatainer/recipes
 ```
 
 **User config** (`~/.config/condatainer/config.yaml`):
@@ -497,7 +514,7 @@ CNT_EXTRA_ROOT=/shared/labA/condatainer condatainer config init -l extra-root
 
 ### How Array Settings Merge
 
-Scalar keys (like `build.ncpus`) are *overridden* — the highest tier that sets one wins. Most array keys instead **merge: their entries are concatenated across every tier, user entries first** (like `extra_image_dirs` or `extra_scripts_links`). A user adds to the merged list; they never replace what an admin published. (`channels` is the exception — an array that *overwrites*, since channel order decides package resolution.)
+Scalar keys (like `build.ncpus`) are *overridden* — the highest tier that sets one wins. Most array keys instead **merge: their entries are concatenated across every tier, user entries first** (like `extra_image_dirs` or `sources`). A user adds to the merged list; they never replace what an admin published. (`channels` is the exception — an array that *overwrites*, since channel order decides package resolution.)
 
 Say each tier contributes one image directory:
 
@@ -530,7 +547,7 @@ The effective `extra_image_dirs` every lookup sees is all three, in **user → g
 3. /cluster/shared/images           (system)
 ```
 
-`condatainer list` and friends read all three merged into one view; `condatainer create` writes to the first entry it can write — the user's own. The user was able to *prepend* their directory but cannot remove the group's or system's, so the shared sources stay in every user's search path. `extra_scripts_links` follows the same rule — a user's prepended URL is consulted before the group's and system's remote sources. Confirm the resolved order any time with `condatainer config paths`.
+`condatainer list` and friends read all three merged into one view; `condatainer create` writes to the first entry it can write — the user's own. The user was able to *prepend* their directory but cannot remove the group's or system's, so the shared sources stay in every user's search path. `sources` follows the same rule — a user's prepended collection is consulted before the group's and system's. Confirm the resolved order any time with `condatainer config paths`.
 
 ---
 
@@ -538,9 +555,15 @@ The effective `extra_image_dirs` every lookup sees is all three, in **user → g
 
 CondaTainer auto-detects the best compression based on your runtime:
 
-- **Singularity**: Uses gzip compression (`-comp gzip`)
 - **Apptainer >= 1.4**: Uses zstd compression (`-comp zstd -Xcompression-level 8`)
 - **Apptainer < 1.4**: Uses lz4 compression (`-comp lz4`)
+- **Singularity**: Uses lz4 compression (`-comp lz4`)
+
+lz4 is the floor. Singularity and Apptainer below 1.4 cannot mount a
+zstd-compressed SquashFS, so only Apptainer 1.4+ is moved up — an image the
+runtime cannot read is worse than one that compresses less.
+
+`gzip` is still available if you ask for it; nothing selects it automatically.
 
 To override:
 
@@ -633,25 +656,26 @@ To extend the cache lifetime (e.g. 2 weeks):
 condatainer config set metadata_cache_ttl 14
 ```
 
-### Using multiple remote script sources
+### Using multiple recipe collections
 
-To add institutional or personal script repositories alongside the default:
+To consult an institutional or personal collection before the public one:
 
 ```bash
-# Add via CLI (takes priority over the default scripts_link)
-condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+# handle=location; prepend puts it ahead of everything already configured
+condatainer config prepend sources myorg=https://raw.githubusercontent.com/MyOrg/recipes/main
 
 # Remove when no longer needed
-condatainer config remove extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+condatainer config remove sources myorg=https://raw.githubusercontent.com/MyOrg/recipes/main
 ```
 
-Or via environment variable (pipe-separated):
+Or via environment variable (pipe-separated), which replaces the whole list:
 
 ```bash
-export CNT_EXTRA_SCRIPTS_LINKS=https://raw.githubusercontent.com/MyOrg/my-scripts/main
+export CNT_SOURCES="myorg=https://raw.githubusercontent.com/MyOrg/recipes/main|cnt=https://raw.githubusercontent.com/condatainer/recipes/main"
 ```
 
-Earlier entries take priority over `scripts_link`. Each remote gets its own cache file (`remote-scripts-<hash>.json`, `helper-scripts-<hash>.json`). Cache files for removed remotes are cleaned up automatically on `condatainer update`.
+Earlier entries win. Each remote collection caches its index separately, and
+`condatainer update` refreshes them.
 
 ### Disable job submission
 

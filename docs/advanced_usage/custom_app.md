@@ -53,14 +53,13 @@ Illumina's ORA decompressor is a vendor tarball behind a download page (never go
 
 ```bash
 #!/usr/bin/bash
-#DESCRIPTION:Illumina ORA Decompressor
+#DESC:Illumina ORA Decompressor
 #URL:https://support.illumina.com/sequencing/sequencing_software/DRAGENORA/software-downloads.html
 
-#ENV:ORA_REF_PATH=$app_root/oradata
-#ENVNOTE:Illumina ORA decompressor reference search path
+#ENV:ORA_REF_PATH={prefix}/oradata   ## Illumina ORA decompressor reference search path
 ```
 
-`#DESCRIPTION:` is what users see in `condatainer avail` and `condatainer info` — always write them.
+`#DESC:` is what users see in `condatainer avail` and `condatainer info` — always write them.
 
 The `#ENV:` pair is app-specific, covered [below](#setting-variables-the-app-needs).
 
@@ -113,12 +112,11 @@ Then fix up whatever the archive got wrong — `orad` ships its binary at the ro
 `orad` is one that does: it looks up its decompression reference through `$ORA_REF_PATH` and errors out if no reference found. Rather than making every user export it by hand, the script declares it:
 
 ```bash
-#ENV:ORA_REF_PATH=$app_root/oradata
-#ENVNOTE:Illumina ORA decompressor reference search path
+#ENV:ORA_REF_PATH={prefix}/oradata   ## Illumina ORA decompressor reference search path
 ```
 
-- `$app_root` is replaced at load time with the overlay's mount path (`/cnt/orad/2.7.0`) whenever the overlay is loaded.
-- `#ENVNOTE:` must directly follow its `#ENV:` line; it becomes the description shown by `condatainer info`.
+- `{prefix}` is replaced at load time with the image's install prefix (`/cnt/orad/2.7.0`) whenever the image is loaded.
+- The `## ` note after the value becomes the description shown by `condatainer info`.
 
 ### Build and Verify
 
@@ -156,7 +154,7 @@ Cytoscape publishes a pre-built Linux tarball for every release at a predictable
 #AUTOUPDATE:cytoscape_version:github:cytoscape/cytoscape>=3.9.0
 
 #TARGET:cytoscape/{cytoscape_version}
-#DESCRIPTION:Cytoscape {cytoscape_version} — network biology visualization platform (needs Java)
+#DESC:Cytoscape {cytoscape_version} — network biology visualization platform (needs Java)
 #URL:https://github.com/cytoscape/cytoscape/releases
 ```
 
@@ -165,7 +163,7 @@ Cytoscape publishes a pre-built Linux tarball for every release at a predictable
 | `#PH:` | Declares the `cytoscape_version` placeholder and its allowed values |
 | `#TARGET:` | Module name pattern — expands to `cytoscape/3.10.4`, `cytoscape/3.9.1`, … |
 | `#AUTOUPDATE:` | Lets CI refresh the `#PH:` list from GitHub releases (`>=3.9.0` is the floor) |
-| `#DESCRIPTION:` | Shown in `condatainer avail` and `condatainer info` |
+| `#DESC:` | Shown in `condatainer avail` and `condatainer info` |
 
 Every `#PH:` name must appear as a `{name}` token in `#TARGET:` and vice versa — otherwise every value would collapse onto the same target, so CondaTainer warns and skips the expansion.
 

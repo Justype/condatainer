@@ -1,13 +1,9 @@
 package container
 
 import (
-	"fmt"
-	"log/slog"
-	"path/filepath"
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/image/squashfs"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -32,37 +28,19 @@ func FormatOverlayMount(path string, writable bool) string {
 	return path
 }
 
-// BuildPathEnv constructs the PATH environment variable based on overlays.
-// When MPI_DIR is set (exported by condatainer when ntasks > 1), its bin/ is
-// prepended so MPI tools are accessible inside the container.
+// BuildPathEnv constructs the PATH environment variable from the overlays: an
+// app contributes <prefix>/bin, every other type nothing. MPI_DIR's bin/ is
+// prepended when set. See the README's Environment Variables.
 func BuildPathEnv(overlays []string) string {
 	// paths := []string{"/usr/sbin", "/usr/bin"}
 	paths := []string{"$PATH"} // $PATH here is the PATH from the base image
 
 	for _, ov := range overlays {
-		// Strip :ro or :rw suffix for path checking
-		cleanOverlay := strings.TrimSuffix(strings.TrimSuffix(ov, ":ro"), ":rw")
-		name := strings.TrimSuffix(filepath.Base(cleanOverlay), filepath.Ext(cleanOverlay))
-		normalized := catalog.Normalize(name)
-		if normalized == "" {
+		contribution, _ := resolveImage(cleanOverlayPath(ov))
+		if contribution.Type != catalog.TypeApp || contribution.Prefix == "" {
 			continue
 		}
-		if strings.Count(normalized, "/") > 1 {
-			continue
-		}
-		var relative string
-		if utils.IsImg(cleanOverlay) {
-			relative = "/cnt_env/bin"
-		} else if utils.IsSqf(cleanOverlay) {
-			if !squashfs.HasCntBin(cleanOverlay, normalized) {
-				continue
-			}
-			relative = fmt.Sprintf("/cnt/%s/bin", normalized)
-		} else {
-			slog.Default().Warn("unknown overlay file extension, skipping PATH addition", "path", ov)
-			continue
-		}
-		paths = append([]string{relative}, paths...)
+		paths = append([]string{contribution.Prefix + "/bin"}, paths...)
 	}
 
 	return strings.Join(paths, ":")

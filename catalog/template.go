@@ -228,16 +228,9 @@ func parsePH(value string) (string, []string, bool) {
 
 var phRange = regexp.MustCompile(`^(\d+)-(\d+)$`)
 
-// ParseValues expands a value list into concrete values, ranges included.
-//
-// The separator sets the order, because values[0] is the default: a comma
-// list sorts newest first, since for versions that is the sensible default,
-// while a pipe list keeps the order written, since for labels "larger" means
-// nothing. A * is always last, being a fallback rather than a value. Where both
-// separators appear the pipe wins; validate_recipes.py rejects the mixture.
-//
-// Exported because the dialect is shared: recipe #PH: and helper #VALUE: lists
-// are written the same way, and a second implementation would let them drift.
+// ParseValues expands a value list into concrete values, ranges included. The
+// separator sets the order — comma sorts newest first, pipe keeps the order
+// written, * is always last. See the README's What may surprise you.
 func ParseValues(raw string) []string {
 	raw = strings.TrimSpace(raw)
 	sep, sorted := ",", true

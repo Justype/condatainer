@@ -62,17 +62,9 @@ type ErrEnvInUse struct {
 }
 
 // ErrMissingPackages is returned by PlanRun when #IMG_PACKAGES: specs are not
-// satisfied in the conda environment inside EnvImg. Specs holds the raw
-// unsatisfied specs suitable for micromamba install; Messages holds matching
-// human-readable descriptions for display.
-// ErrMissingPackages is returned by PlanRun when #IMG_PACKAGES: specs are not
-// satisfied in the conda environment inside EnvImg. Specs holds the raw
-// unsatisfied specs suitable for micromamba install; Messages holds matching
-// human-readable descriptions for display.
-// VersionChoices is non-nil when one or more missing packages had an unresolved
-// version token ({CONDA_PYTHON} etc.) with a known #VALUE: list — the UI should
-// prompt the user to pick a concrete version before installing.
-// Keys are package names (e.g. "python"); values are the selectable versions.
+// satisfied in the conda environment inside EnvImg. VersionChoices is non-nil
+// when a missing package had an unresolved version token with a #VALUE: list,
+// which the UI should prompt for before installing.
 type ErrMissingPackages struct {
 	EnvImg         string
 	Specs          []string            // raw specs for micromamba install, e.g. ["jupyterlab", "python>=3.12"]

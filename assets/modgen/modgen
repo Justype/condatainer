@@ -638,10 +638,10 @@ class Utils:
     @staticmethod
     def get_description_url_from_build_script(script_path: str, normalized_name_version: str) -> Tuple[str, str]:
         """
-        Parse #DESCRIPTION and #URL lines from a build script.
+        Parse #DESC and #URL lines from a build script.
 
         Example lines in script:
-            #DESCRIPTION:Cell Ranger GRCh38 2024-A index
+            #DESC:Cell Ranger GRCh38 2024-A index
             #URL:https://www.10xgenomics.com/support/software/cell-ranger/downloads#reference-downloads
 
         Returns:
@@ -659,8 +659,8 @@ class Utils:
         with open(script_path, "r") as f:
             for line in f:
                 line = line.strip()
-                if line.startswith("#DESCRIPTION:"):
-                    description = line[len("#DESCRIPTION:"):].strip()
+                if line.startswith("#DESC:"):
+                    description = line[len("#DESC:"):].strip()
                 elif line.startswith("#URL:"):
                     url = line[len("#URL:"):].strip()
 
@@ -672,15 +672,14 @@ class Utils:
     @staticmethod
     def get_env_dict_from_build_script(script_path) -> Dict[str, Dict[str, str]]:
         """
-        Parse #ENV:KEY=VALUE and #ENVNOTE:KEY description lines from build script.
+        Parse #ENV:KEY=VALUE lines from a recipe, with their inline notes.
         Returns a dict:
             {
                 "KEY": {"value": "VALUE", "note": "description"},
                 ...
             }
-        Example lines in script:
-            #ENV:STAR_INDEX_DIR=$app_root/star
-            #ENVNOTE:STAR_INDEX_DIR STAR index dir
+        The note follows the value after '##', so nothing depends on line order:
+            #ENV:STAR_INDEX_DIR={prefix}/star   ## STAR index dir
         """
         env_dict: Dict[str, Dict[str, str]] = {}
 
@@ -689,25 +688,19 @@ class Utils:
             return env_dict
 
         with open(script_path, "r") as f:
-            lines = f.readlines()
-            env_indices = [i for i, line in enumerate(lines) if line.strip().startswith("#ENV:")]
-
-            for env_index in env_indices:
-                line = lines[env_index].strip()
-                if line.startswith("#ENV:"):
-                    # Parse KEY=VALUE
-                    content = line[len("#ENV:"):].strip()
-                    if "=" not in content:
-                        continue
-                    key, value = content.split("=", 1)
-                    key = key.strip()
-                    env_dict[key] = {"value": value, "note": ""}
-
-                    if env_index + 1 < len(lines):
-                        next_line = lines[env_index + 1].strip()
-                        if next_line.startswith("#ENVNOTE:"):
-                            note = next_line[len("#ENVNOTE:"):].strip()
-                            env_dict[key]["note"] = note
+            for line in f:
+                line = line.strip()
+                if not line.startswith("#ENV:"):
+                    continue
+                content = line[len("#ENV:"):].strip()
+                if "=" not in content:
+                    continue
+                key, value = content.split("=", 1)
+                value, _, note = value.partition("##")
+                env_dict[key.strip()] = {
+                    "value": value.strip(),
+                    "note": note.strip(),
+                }
 
         return env_dict
 
@@ -1626,7 +1619,7 @@ class ModGen_Create:
 
         try:
             content = open(template_path, "r").read()
-            # The recipe header is #DESCRIPTION; {WHATIS} is retained here because
+            # The recipe header is #DESC; {WHATIS} is retained here because
             # it is the placeholder used by the existing Lmod template itself.
             content = content.replace("{WHATIS}", description_url[0])
             content = content.replace("{HELP}", f"Website: {description_url[1]}")

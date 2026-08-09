@@ -79,10 +79,6 @@ func init() {
 }
 
 func runE(cmd *cobra.Command, args []string) error {
-	if err := ensureBaseImage(cmd.Context()); err != nil {
-		return err
-	}
-
 	// STRICT parsing: everything before -- is overlay/flag, after is command
 	overlays, commands, apptainerFlags, err := parseEArgs(args)
 	if err != nil {
@@ -109,8 +105,10 @@ func runE(cmd *cobra.Command, args []string) error {
 	// Prepare command and determine if prompt should be hidden
 	commands, hidePrompt := PrepareCommandAndHidePrompt(commands)
 
-	// Resolve base image if provided
-	baseImageResolved := ResolveBaseImage(eBaseImage)
+	baseImageResolved, err := resolveBaseImage(cmd.Context(), eBaseImage)
+	if err != nil {
+		return err
+	}
 
 	// Resolve overlays
 	resolvedOverlays, err := container.ResolveOverlayPaths(overlays)

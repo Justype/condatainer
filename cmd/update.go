@@ -92,7 +92,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 			}
 		}
 		utils.PrintMessage("Updating base image...")
-		if err := build.EnsureBaseImage(cmd.Context(), true); err != nil {
+		if err := build.RebuildBase(cmd.Context()); err != nil {
 			return fmt.Errorf("failed to update base image: %w", err)
 		}
 		utils.PrintSuccess("Base image updated successfully.")
@@ -169,7 +169,7 @@ func runSelfUpdate(cmd *cobra.Command, args []string) error {
 	// Handle --base flag: update only the base image, skip binary update
 	if selfUpdateBase {
 		utils.PrintMessage("Updating base image...")
-		if err := build.EnsureBaseImage(cmd.Context(), true); err != nil {
+		if err := build.RebuildBase(cmd.Context()); err != nil {
 			return fmt.Errorf("failed to update base image: %w", err)
 		}
 		utils.PrintSuccess("Base image updated successfully")
@@ -318,7 +318,7 @@ func runSelfUpdate(cmd *cobra.Command, args []string) error {
 			utils.StyleNumber(currentVersion), utils.StyleNumber(latestVersion))
 
 		// Update the base image. Errors are non-fatal — warn and let the user rebuild manually.
-		if err := build.EnsureBaseImage(context.Background(), true); err != nil {
+		if err := build.RebuildBase(context.Background()); err != nil {
 			utils.PrintWarning("Failed to update base image: %v", err)
 			utils.PrintNote("Run %s to update it later.", utils.StyleAction("condatainer self-update --base"))
 		} else {

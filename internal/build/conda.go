@@ -7,23 +7,25 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// buildConda implements the conda package build workflow on BuildObject.
-// Workflow:
-//  1. Check if overlay already exists (skip if yes)
-//  2. Create build workspace (ext3 overlay or host dirs)
-//  3. Run micromamba create inside container
-//  4. Pack to SquashFS and perform atomic install
-//  5. Cleanup
+// buildConda installs an environment with micromamba and packs it. The
+// install -> stage -> pack sequence is the script backend's too, which is why
+// both share packOutput.
 func (b *BuildObject) buildConda(ctx context.Context) error {
-	targetPath, finalPath := buildOverlayPaths(b)
+	targetPath := b.tgt.Path
 	log := logging.FromContext(ctx)
 
 	if skip, err := checkShouldBuild(b); skip || err != nil {
+		return err
+	}
+
+	// After the skip check, so an already-installed overlay never triggers a
+	// base build it has no use for.
+	if err := b.resolveBase(ctx); err != nil {
 		return err
 	}
 
@@ -31,25 +33,36 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 		return err
 	}
 	defer b.removeBuildLock()
+	preparedPath := b.tgt.Prepared
 
 	log.Info("building overlay", "overlay", filepath.Base(targetPath), "mode", buildModeLabel(b))
 
-	if err := prepareBuildWorkspace(ctx, b, config.Global.Build.UseTmpOverlay); err != nil {
+	if err := prepareBuildWorkspace(ctx, b); err != nil {
 		return err
 	}
 
-	if err := b.runCondaBuild(ctx, finalPath); err != nil {
+	if err := b.installConda(ctx); err != nil {
 		b.Cleanup(true)
 		return err
 	}
 
-	utils.ShareWithParentGroup(finalPath)
+	b.describeCondaPackage()
 
-	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
+	metaDir, err := stageMetadata(ctx, b)
+	if err != nil {
+		b.Cleanup(true)
 		return err
 	}
 
-	b.saveCondaEnvFile(targetPath)
+	if err := b.packOutput(ctx, metaDir, preparedPath); err != nil {
+		return err
+	}
+
+	utils.ShareWithParentGroup(preparedPath)
+
+	if err := atomicInstall(preparedPath, targetPath); err != nil {
+		return err
+	}
 
 	log.Info("overlay ready", "kind", "success", "path", targetPath)
 	b.Cleanup(false)
@@ -81,27 +94,28 @@ func (b *BuildObject) buildInstallCmd() (cmd string, extraBindPaths []string, er
 			return "", nil, fmt.Errorf("failed to get absolute path for %s: %w", b.buildSource, err)
 		}
 		extraBindPaths = []string{filepath.Dir(absFilePath)}
-		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp %s -y %s -p /cnt/%s -f %s",
-			channelFlags, quietFlag, b.nameVersion, absFilePath)
+		cmd = fmt.Sprintf("micromamba create -r "+ScratchPath+" %s -y %s -p /cnt/%s -f %s",
+			channelFlags, quietFlag, b.spec.Image.Name, absFilePath)
 	} else if b.buildSource != "" {
 		// Mode 2: Multiple packages (-n name pkg1 pkg2 ...)
 		packages := strings.Split(b.buildSource, ",")
 		for i, pkg := range packages {
 			packages[i] = strings.ReplaceAll(strings.TrimSpace(pkg), "/", "=")
 		}
-		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp %s -y %s -p /cnt/%s %s",
-			channelFlags, quietFlag, b.nameVersion, strings.Join(packages, " "))
+		cmd = fmt.Sprintf("micromamba create -r "+ScratchPath+" %s -y %s -p /cnt/%s %s",
+			channelFlags, quietFlag, b.spec.Image.Name, strings.Join(packages, " "))
 	} else {
 		// Mode 1: Single package (name/version)
-		cmd = fmt.Sprintf("micromamba create -r /ext3/tmp %s -y %s -p /cnt/%s %s=%s",
-			channelFlags, quietFlag, b.nameVersion, b.packageName, b.packageVersion)
+		cmd = fmt.Sprintf("micromamba create -r "+ScratchPath+" %s -y %s -p /cnt/%s %s=%s",
+			channelFlags, quietFlag, b.spec.Image.Name, b.packageName, b.packageVersion)
 	}
 
 	return cmd, extraBindPaths, nil
 }
 
-// buildCondaExecOpts constructs exec.Options for the conda build container run.
-func (b *BuildObject) buildCondaExecOpts(finalPath string) (exec.Options, error) {
+// condaInstallExecOpts constructs exec.Options for the micromamba run. Installs
+// only — the run never sees the output path or binds the images directory.
+func (b *BuildObject) condaInstallExecOpts() (exec.Options, error) {
 	installCmd, extraBindPaths, err := b.buildInstallCmd()
 	if err != nil {
 		return exec.Options{}, err
@@ -126,30 +140,23 @@ if [ -z "$(ls -A /cnt 2>/dev/null)" ]; then
     %[1]s "Conda environment is empty, nothing to pack."
     exit 1
 fi
+`, echoPrefix, installCmd)
 
-%[1]s "Packing overlay to SquashFS..."
-mksquashfs /cnt %[3]s -processors %[4]d -b %[5]s -keep-as-directory -all-root %[6]s
-`,
-		echoPrefix, installCmd,
-		finalPath, b.effectiveNcpus(), config.Global.Build.BlockSize, config.Global.Build.CompressArgs,
-	)
-
-	// Always bind the target overlay directory so mksquashfs can write there.
-	bindPaths := append(extraBindPaths, filepath.Dir(b.targetOverlayPath))
+	bindPaths := extraBindPaths
 
 	var opts exec.Options
-	if !config.Global.Build.UseTmpOverlay {
-		buildTmpDir := getBuildTmpDir(b)
+	if !b.ws.UsesImage() {
+		buildTmpDir := b.ws.TmpDir
 		bindPaths = append(bindPaths,
-			buildTmpDir+":/ext3/tmp",
-			b.cntDirPath+":/cnt",
+			buildTmpDir+":"+ScratchPath,
+			b.ws.CntDir+":/cnt",
 		)
 		opts = exec.Options{
-			BaseImage:      config.GetBaseImage(),
+			BaseImage:      b.spec.Base,
 			ApptainerBin:   config.Global.ApptainerBin,
 			Overlays:       []string{},
 			BindPaths:      bindPaths,
-			EnvSettings:    []string{"TMPDIR=/ext3/tmp"},
+			EnvSettings:    []string{"TMPDIR=" + ScratchPath},
 			Command:        []string{"/bin/bash", "-c", bashScript},
 			HidePrompt:     true,
 			WritableImg:    false,
@@ -158,11 +165,11 @@ mksquashfs /cnt %[3]s -processors %[4]d -b %[5]s -keep-as-directory -all-root %[
 		}
 	} else {
 		opts = exec.Options{
-			BaseImage:     config.GetBaseImage(),
+			BaseImage:     b.spec.Base,
 			ApptainerBin:  config.Global.ApptainerBin,
-			Overlays:      []string{b.tmpOverlayPath},
+			Overlays:      []string{b.ws.Overlay},
 			BindPaths:     bindPaths,
-			EnvSettings:   []string{"TMPDIR=/ext3/tmp"},
+			EnvSettings:   []string{"TMPDIR=" + ScratchPath},
 			Command:       []string{"/bin/bash", "-c", bashScript},
 			HidePrompt:    true,
 			WritableImg:   true,
@@ -173,24 +180,25 @@ mksquashfs /cnt %[3]s -processors %[4]d -b %[5]s -keep-as-directory -all-root %[
 	return opts, nil
 }
 
-// runCondaBuild sets up a context watcher, builds exec opts, and runs the conda build.
-// The caller is responsible for calling Cleanup(true) if an error is returned.
-func (b *BuildObject) runCondaBuild(ctx context.Context, finalPath string) error {
-	opts, err := b.buildCondaExecOpts(finalPath)
+// installConda populates the payload with micromamba. The caller is responsible
+// for calling Cleanup(true) if an error is returned.
+func (b *BuildObject) installConda(ctx context.Context) error {
+	opts, err := b.condaInstallExecOpts()
 	if err != nil {
 		return err
 	}
 
-	logging.FromContext(ctx).Debug("creating overlay", "name", b.nameVersion, "overlays", opts.Overlays, "bindPaths", opts.BindPaths)
+	logging.FromContext(ctx).Debug("installing conda environment",
+		"name", b.spec.Image.Name, "overlays", opts.Overlays, "bindPaths", opts.BindPaths)
 
-	done := watchContext(ctx, "conda build")
+	done := watchContext(ctx, "conda install")
 	defer close(done)
 
 	if err := exec.Run(ctx, opts, exec.IOFromContext(ctx)); err != nil {
 		if isCancelledByUser(err) {
 			return ErrBuildCancelled
 		}
-		return fmt.Errorf("failed to build conda package %s: %w", b.nameVersion, err)
+		return fmt.Errorf("failed to build conda package %s: %w", b.spec.Image.Name, err)
 	}
 
 	return nil

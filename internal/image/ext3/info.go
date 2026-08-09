@@ -7,7 +7,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/Justype/condatainer/internal/image/internal/tool"
+	"github.com/Justype/condatainer/internal/image/tool"
 )
 
 // Stats holds metadata about the overlay filesystem.

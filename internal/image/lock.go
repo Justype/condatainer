@@ -26,10 +26,8 @@ func (l *Lock) Close() error {
 	return err
 }
 
-// AcquireLock attempts to acquire a lock on the overlay file.
-// If write is true, it attempts an exclusive lock (LOCK_EX).
-// If write is false, it attempts a shared lock (LOCK_SH).
-// Both are non-blocking (LOCK_NB).
+// AcquireLock takes a non-blocking flock on the overlay file: exclusive
+// (LOCK_EX) when write is true, shared (LOCK_SH) otherwise.
 func AcquireLock(path string, write bool) (*Lock, error) {
 	if write {
 		f, err := os.OpenFile(path, os.O_RDWR, 0)

@@ -25,11 +25,11 @@ func depSource(t *testing.T) Catalog {
 			t.Fatal(err)
 		}
 	}
-	write("app/1.0", "#DESCRIPTION:app\n#DEP:lib/2.0\n#DEP:samtools/1.23.1>=1.10\n")
-	write("other/1.0", "#DESCRIPTION:other\n#DEP:lib/2.0\n")
-	write("lib/2.0", "#DESCRIPTION:lib\n#DEP:base-tool/1.0\n")
-	write("lib/1.0", "#DESCRIPTION:old lib\n")
-	write("base-tool/1.0", "#DESCRIPTION:base tool\n")
+	write("app/1.0", "#DESC:app\n#DEP:lib/2.0\n#DEP:samtools/1.23.1>=1.10\n")
+	write("other/1.0", "#DESC:other\n#DEP:lib/2.0\n")
+	write("lib/2.0", "#DESC:lib\n#DEP:base-tool/1.0\n")
+	write("lib/1.0", "#DESC:old lib\n")
+	write("base-tool/1.0", "#DESC:base tool\n")
 
 	cat, err := Open(t.Context(), []Spec{{Name: "local", Base: root}}, Cache{})
 	if err != nil {

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/Justype/condatainer/internal/image/internal/tool"
+	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -157,16 +157,9 @@ func createOverlayFile(ctx context.Context, opts *CreateOptions, filePath string
 	return nil
 }
 
-// crossFsCopy copies src to dst using the system cp command, which:
-//   - Is a subprocess → context-cancellable (Ctrl+C works during large copies)
-//   - sparse=true:  cp --sparse=always — detects holes, destination stays sparse
-//   - sparse=false: cp --sparse=never  — writes all zeros, destination is fully allocated
-//
-// Uses cmd.Start + a Wait goroutine instead of CombinedOutput so that cancellation
-// returns immediately. CombinedOutput blocks in cmd.Wait even after SIGKILL because
-// on network filesystems (Lustre/NFS) the cp process can enter D-state
-// (uninterruptible I/O sleep) and not honour SIGKILL until the I/O resolves.
-// The background Wait goroutine will eventually clean up once the process exits.
+// crossFsCopy copies src to dst with the system cp, so a long copy stays
+// cancellable: --sparse=always when sparse, --sparse=never otherwise.
+// See the README's External tools.
 func crossFsCopy(ctx context.Context, src, dst string, sparse bool) error {
 	sparseFlag := "--sparse=never"
 	if sparse {

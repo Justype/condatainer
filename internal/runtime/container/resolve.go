@@ -3,12 +3,12 @@ package container
 import (
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -16,24 +16,20 @@ import (
 // Nil means the cache is cold or has been invalidated.
 var cachedInstalledOverlays map[string]string
 
-// InstalledOverlays scans all image search paths and returns a mapping
-// from normalized overlay names to their absolute file path.
-// Searches user → scratch → legacy → system directories.
-// First match wins (user overlays shadow system ones).
-// Result is cached for the lifetime of the process; call InvalidateInstalledOverlaysCache
-// after installing a new image.
+// InstalledOverlays maps every installed overlay name to its highest-priority
+// copy, plus the bare-name alias of each <base>/<name> image. Cached for the
+// process; call InvalidateInstalledOverlaysCache after installing a new image.
 func InstalledOverlays() (map[string]string, error) {
 	if cachedInstalledOverlays != nil {
 		return cachedInstalledOverlays, nil
 	}
-	overlays := map[string]string{}
-	dirs := config.GetImageSearchPaths()
-	slog.Default().Debug("scanning for installed overlays", "dirs", dirs)
-	for _, dir := range dirs {
-		if err := populateOverlays(dir, overlays); err != nil {
-			return nil, err
-		}
+	scan, err := image.ScanOverlays(image.ScanOptions{Aliases: true})
+	if err != nil {
+		// Resolution feeds container launch, so an unreadable image directory is
+		// reported rather than silently resolving to a shorter list.
+		return nil, err
 	}
+	overlays := image.FirstPaths(scan)
 	slog.Default().Debug("found installed overlays", "count", len(overlays))
 	cachedInstalledOverlays = overlays
 	return overlays, nil
@@ -43,44 +39,6 @@ func InstalledOverlays() (map[string]string, error) {
 // to InstalledOverlays rescans the image directories.
 func InvalidateInstalledOverlaysCache() {
 	cachedInstalledOverlays = nil
-}
-
-func populateOverlays(dir string, store map[string]string) error {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("unable to list overlays in %s: %w", dir, err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !utils.IsOverlay(name) {
-			continue
-		}
-		normalized := strings.TrimSuffix(name, filepath.Ext(name))
-		normalized = strings.ReplaceAll(normalized, "--", "/")
-		path := filepath.Join(dir, name)
-		if _, exists := store[normalized]; !exists {
-			store[normalized] = path
-		}
-
-		// Default distro overlays can also be addressed by their bare name.
-		// Keep first-match-wins semantics and never override a real bare image.
-		if prefix := config.ResolvedBase() + "/"; prefix != "/" && strings.HasPrefix(normalized, prefix) {
-			alias := strings.TrimPrefix(normalized, prefix)
-			if alias != "" {
-				if _, exists := store[alias]; !exists {
-					store[alias] = path
-				}
-			}
-		}
-	}
-	return nil
 }
 
 // ResolveOverlayPaths coerces user input into absolute overlay paths that exist on disk.

@@ -163,17 +163,17 @@ func buildCondatainerCmd(opts RunOptions) (string, error) {
 		return "", fmt.Errorf("could not locate condatainer binary: %w", err)
 	}
 
+	// The generated command runs on a compute node, where nothing can build a
+	// base, so the base has to be pinned here rather than resolved there.
 	baseImage := opts.BaseImage
 	if baseImage == "" {
-		baseImage = config.GetBaseImage()
+		if baseImage, err = config.GetBaseImage(); err != nil {
+			return "", err
+		}
 	}
 
 	var parts []string
-	parts = append(parts, shellQuote(exe), "exec")
-
-	if baseImage != "" {
-		parts = append(parts, "-b", shellQuote(baseImage))
-	}
+	parts = append(parts, shellQuote(exe), "exec", "-b", shellQuote(baseImage))
 
 	// Named read-only overlays (SquashFS) — code-server, igv, etc.
 	for _, ol := range opts.Overlays {

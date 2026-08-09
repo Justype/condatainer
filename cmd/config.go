@@ -37,6 +37,7 @@ var configKeyDefs = map[string]bool{
 	"extra_image_dirs":       true,
 	"extra_helper_dirs":      true,
 	"parse_module_load":      false,
+	"autoload_gpu":           false,
 	"scheduler_timeout":      false,
 	"notification":           false,
 	"metadata_cache_ttl":     false,
@@ -59,7 +60,7 @@ func isArrayKey(key string) bool { return configKeyDefs[key] }
 func isBoolKey(key string) bool {
 	switch key {
 	case "submit_job", "proxy_perjob", "helper_bind_all",
-		"parse_module_load",
+		"parse_module_load", "autoload_gpu",
 		"build.use_tmp_overlay", "build.always_submit":
 		return true
 	}
@@ -215,7 +216,7 @@ func configValueCompletion(key string) []string {
 	switch key {
 	case "submit_job", "proxy_perjob", "helper_bind_all":
 		return []string{"true", "false"}
-	case "parse_module_load":
+	case "parse_module_load", "autoload_gpu":
 		return []string{"true", "false"}
 	case "build.ncpus":
 		return []string{"4", "8", "16", "32"}
@@ -460,7 +461,7 @@ var configShowCmd = &cobra.Command{
 		fmt.Println()
 
 		// Remote sources
-		fmt.Println(utils.StyleTitle("Remote Sources:"))
+		fmt.Println(utils.StyleTitle("Recipe Sources:"))
 		if len(config.Global.Sources) > 0 {
 			fmt.Printf("  sources:\n")
 			for _, src := range config.Global.Sources {
@@ -497,6 +498,8 @@ var configShowCmd = &cobra.Command{
 		printOverridden("                      ", "scheduler_timeout")
 		fmt.Printf("  %-19s %v%s\n", "parse_module_load:", config.Global.ParseModuleLoad, srcTag("parse_module_load"))
 		printOverridden("                      ", "parse_module_load")
+		fmt.Printf("  %-19s %v%s\n", "autoload_gpu:", config.Global.AutoloadGPU, srcTag("autoload_gpu"))
+		printOverridden("                      ", "autoload_gpu")
 		if config.Global.MetadataCacheTTL == 0 {
 			fmt.Printf("  %-19s 0 (disabled)%s\n", "metadata_cache_ttl:", srcTag("metadata_cache_ttl"))
 		} else {

@@ -160,13 +160,11 @@ $ condatainer e
   GOPATH: /ext3/home/go
 ```
 
-You can add note to the `env.img.env` file as well:
+You can add a note to each line in the `env.img.env` file, after `##`:
 
 ```
-GOROOT=/cnt_env/go
-#ENVNOTE:GOROOT=Go Installation Path
-GOPATH=/ext3/home/go
-#ENVNOTE:GOPATH=Go Workspace Path
+GOROOT=/cnt_env/go   ## Go Installation Path
+GOPATH=/ext3/home/go   ## Go Workspace Path
 ```
 
 Then when you run `e` or `exec`, the notes will be displayed:

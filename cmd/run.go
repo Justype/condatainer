@@ -166,11 +166,6 @@ func runScript(cmd *cobra.Command, args []string) error {
 	scriptPath := args[0]
 	scriptArgs := args[1:] // arguments for the script itself
 
-	// Ensure base image exists
-	if err := ensureBaseImage(cmd.Context()); err != nil {
-		return err
-	}
-
 	// Validate script exists
 	if !utils.FileExists(scriptPath) {
 		ExitWithError("Script file %s not found", utils.StylePath(scriptPath))
@@ -253,6 +248,14 @@ func runScript(cmd *cobra.Command, args []string) error {
 	if runDryRun {
 		printDryRunSummary(contentScript, originScriptPath, scriptSpecs, scriptArgs, arraySpec)
 		return nil
+	}
+
+	// After the embedded args, which may name a base, and after the dry run,
+	// which must not build one. The script may be submitted to a node that
+	// cannot build, so the base is pinned here rather than resolved there.
+	runBaseImage, err = resolveBaseImage(cmd.Context(), runBaseImage)
+	if err != nil {
+		return err
 	}
 
 	// Passthrough mode: resource directives could not be parsed; condatainer cannot safely
@@ -503,7 +506,7 @@ export -f module ml
 		EnvSettings:  append(resourceEnvSettings(specs), runEnvSettings...),
 		BindPaths:    bindPaths,
 		Fakeroot:     runFakeroot,
-		BaseImage:    runBaseImage, // Empty string triggers GetBaseImage() in ensureDefaults()
+		BaseImage:    runBaseImage,
 		ApptainerBin: config.Global.ApptainerBin,
 		HidePrompt:   true,
 	}
@@ -524,10 +527,16 @@ export -f module ml
 func printDryRunSummary(contentScript, originScript string, specs *scheduler.ScriptSpecs, scriptArgs []string, arraySpec *scheduler.ArraySpec) {
 	fmt.Printf("%s %s\n", utils.StyleTitle("Dry run:"), specs.ScriptPath)
 
-	// Dependencies
+	// Dependencies. A dry run reports the base rather than building it, so an
+	// uninstalled one shows as the error the real run would hit.
 	baseImg := runBaseImage
 	if baseImg == "" {
-		baseImg = config.GetBaseImage()
+		resolved, err := config.GetBaseImage()
+		if err != nil {
+			baseImg = "(" + err.Error() + ")"
+		} else {
+			baseImg = resolved
+		}
 	}
 
 	deps, err := utils.GetDependenciesFromScript(contentScript, config.Global.ParseModuleLoad || runParseModuleLoad)

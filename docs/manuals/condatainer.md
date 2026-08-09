@@ -74,7 +74,7 @@ Like text editors, IDEs, build-essential tools, etc.
 
 * **Format:** `<distro>/<name>`
 * **Example:** `ubuntu22/rstudio-server`, `ubuntu24/code-server`
-* **Shortcut:** when `<distro>` is the configured `default_distro` (`ubuntu24`), it can be omitted — `code-server` resolves to `ubuntu24/code-server`.
+* **Shortcut:** when `<distro>` is the configured `base` (`ubuntu24`), it can be omitted — `code-server` resolves to `ubuntu24/code-server`.
 
 ### Custom Environments (Bundle/Environment)
 
@@ -349,12 +349,10 @@ condatainer overlay resize -s 20g env.img
 
 ### Overlay Export
 
-Alias for [`condatainer export`](#export). Produces identical output.
+Export the Conda environment in a writable `.img` overlay. See [Export](#export).
 
 ```bash
 condatainer overlay export env.img > environment.yml
-# same as:
-condatainer export env.img > environment.yml
 ```
 
 ## Create
@@ -395,7 +393,9 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
 * `--temp-size [SIZE]`: Size of temporary overlay (default: 20G). Only used when `--use-tmp-overlay` is active.
 * `--block-size [SIZE]`: SquashFS block size for app/env/external overlays (e.g. `128k`, `512k`; default: `128k`). Must be a power of two between `4k` and `1m`.
 * `--data-block-size [SIZE]`: SquashFS block size for data/reference overlays (e.g. `512k`, `1m`; default: `512k`). Must be a power of two between `4k` and `1m`.
-* `--use-tmp-overlay`: Use a temporary ext3 overlay during builds instead of host directories. Equivalent to setting `build.use_tmp_overlay = true` in config. Can be substantially faster when the build tmp directory is on a network filesystem.
+* `--use-tmp-overlay`: Build **app** overlays inside a temporary ext3 image instead of host directories. Equivalent to setting `build.use_tmp_overlay = true` in config. Can be substantially faster when the build tmp directory is on a network filesystem, and keeps a conda environment's many small files off its inode quota.
+
+  Applies to `app` builds only. A `data` build stages its payload on the host either way — it is a few large files, so an image would buy nothing — and `os`/`base` are definition builds where Apptainer writes the image itself.
 * `--always-submit`: Submit all builds as scheduler jobs, even when the build script has no scheduler directives.
 * `--no-submit`: Disable job submission; build locally even if the build script has scheduler directives.
 * `--remote`: Remote build scripts take precedence over local.
@@ -414,8 +414,9 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
 
 * **Default:** Each package gets its own `.sqf` via the build system. Build script lookup is skipped when a package uses channel annotation (`bioconda::star=2.7.11b`).
 * **`--name`:** Create a single `.sqf` with multiple packages bundled together.
+* **`--name` + `--file`:** Create `.sqf` from a source file under that name, in the managed images directory.
 * **`--prefix` + packages:** Create a conda env `.sqf` at a custom path, like `conda create -p`.
-* **`--file` only:** Create `.sqf` from external source file; prefix inferred from file name (e.g. `condatainer create -f r-collect.sh` → `r-collect.sqf`).
+* **`--file` only:** Create `.sqf` from external source file; prefix inferred from file name (e.g. `condatainer create -f r-collect.sh` → `r-collect.sqf`). The name is inferred only when neither `--name` nor `--prefix` is given.
 * **`--prefix` + `--file`:** Create `.sqf` from external source file at a custom path.
 * **`--from`:** Create `.sqf` from an external container image URI.
 
@@ -458,7 +459,7 @@ condatainer create -p rnaseq bioconda::star bioconda::salmon=1.10.0
 # App overlay via build script
 condatainer create cellranger/9.0.1
 
-# Bare package name is expanded using default_distro (e.g. ubuntu24/build-essential)
+# Bare package name is expanded using the configured base (e.g. ubuntu24/build-essential)
 condatainer create build-essential
 
 # Data overlay
@@ -484,7 +485,7 @@ condatainer create grch38/salmon/1.10.2/gencode49
 
 - Automatic Fetching: If a build script is not found locally, **CondaTainer** attempts to fetch it from the remote repository.
 - Conda Fallback: If no build script exists, **CondaTainer** attempts to create the module by installing the package with the requested name and version from conda-forge or bioconda.
-- Metadata Parsing: Parses `#ENV` and `#ENVNOTE` tags from build scripts to inject environment variables and help text into the generated modulefile.
+- Metadata Parsing: Parses `#ENV:` tags (with their inline `## ` notes) from recipes to inject environment variables and help text into the generated modulefile.
 - Template Resolution: If the name matches a template script (`#PH:` / `#TARGET:`), **CondaTainer** prompts for each placeholder interactively, then builds the resolved concrete overlay. You can also bypass prompts by specifying the resolved target name directly.
 
 ### Project level Examples
@@ -564,7 +565,7 @@ condatainer avail [search_terms...] [flags]
 
 * `--remote`: Remote build scripts take precedence over local (on duplicates).
 * `-e`, `--expand`: Expand template groups to show individual concrete entries instead of the collapsed template header.
-* `--description`: Show the description (`#DESCRIPTION:`) for each entry.
+* `--description`: Show the description (`#DESC:`) for each entry.
 
 **Search rules:**
 
@@ -1360,7 +1361,7 @@ condatainer config set parse_module_load true
 
 ## Info
 
-Display detailed metadata about an installed overlay or an external overlay file. Accepts an installed overlay name (`name/version`) or a direct file path (`.sqf` / `.img`).
+Display detailed metadata about an installed overlay, the base image, or an external file. Accepts an installed overlay name (`name/version`), the configured base recipe name, or a direct file path (`.sqf` / `.sif` / `.img`).
 
 **Usage:**
 
@@ -1372,58 +1373,68 @@ condatainer info <overlay>
 
 ```bash
 condatainer info samtools/1.22
+condatainer info ubuntu24/base          # the base image (.sif)
 condatainer info env.img
 condatainer info ./ubuntu--22.04.sqf
 ```
 
-### SquashFS (`.sqf`) output
+A `.sif` reads the same way as a `.sqf`: its payload is a SquashFS partition
+starting partway into the file, so the archive reads take that offset. The
+`Type` line is the recipe type from the embedded manifest — `app`, `base`, `os`
+or `data`. An image built before the manifest existed reports `unknown`.
+
+### Image (`.sqf` / `.sif`) output
 
 | Section | Fields |
 |---------|--------|
-| **File** | Name, Path, file Size, Type (`OS Overlay` / `Module Overlay` / `Bundle Overlay`, Read-Only), Created timestamp, and a `Build Tag` for OS Overlays |
+| **File** | Name, Path, file Size, Type (`app` / `base` / `os` / `data` / `unknown`, Read-Only), Created timestamp, and a `Build Tag` for `os` |
 | **SquashFS** | Compression algorithm (with level if set), Block Size, Inode count, Fragment count, Deduplication flag |
-| **Mount** | `/cnt/<name>/<version>` — shown for Module and Bundle Overlays |
-| **Environment** | Variables from the embedded build script (a sidecar `.env` overrides it), with inline `#ENVNOTE` annotations |
+| **Mount** | `/cnt/<name>/<version>` — shown for `app` and `data` |
+| **Environment** | Variables from the image's manifest, with their notes |
 
-`Build Tag` is the build date (`YYYY.MM.DD`), used as the distribution tag for OS overlays since they carry no version in their name.
+`Build Tag` is the build date (`YYYY.MM.DD`), used as the distribution tag for `os` images since they carry no version in their name.
 
 ### ext3 (`.img`) output
 
 | Section | Fields |
 |---------|--------|
-| **File** | Name, Path, file Size, Type (`Environment Overlay`, Writable; sparse images also show actual on-disk size) |
+| **File** | Name, Path, file Size, Type (always `environment`, Writable; sparse images also show actual on-disk size) |
 | **Filesystem** | Format, State, Block Size, Created, Modified, Last Mounted |
 | **Ownership** | Inner UID/GID of files inside the image (or `root` for fakeroot-compatible images) |
 | **Disk Usage** | Used / Total (%), Reserved blocks, Free |
 | **Inode Usage** | Used / Total (%), Free |
 | **Mount** | `/cnt_env` |
-| **Environment** | Variables from the `.env` sidecar file, with inline `#ENVNOTE` annotations |
+| **Environment** | Variables from the `.env` sidecar file (`KEY=value ## note`) |
 
 ## Export
 
-Export the recipe that produced an overlay, to stdout (or a file with `-p`). Accepts an installed overlay name (`name/version`) or a direct file path (`.sqf` / `.img`).
+Export the Conda environment in a writable `.img` overlay, to stdout (or a file
+with `-p`). Runs `micromamba env export` against `/cnt_env`, so it captures the
+environment as it is now — including anything installed since the overlay was
+created. That is why it is limited to `.img`: an installed `.sqf` or `.sif` is
+immutable, carries its own manifest, and is reproduced by rebuilding from its
+recipe rather than by recovering one from the image.
 
-What gets exported depends on the overlay; the type is reported on **stderr** so stdout stays a clean, redirectable recipe:
+Exporting an installed image reports what to do instead:
 
-| Overlay | Exported |
-|---------|----------|
-| Built from a definition / `docker://` source | the embedded `.cnt-build-script.def` |
-| Built from a build script | the embedded `.cnt-build-script` |
-| Conda environment | `environment.yml` via `micromamba env export` |
+```
+export needs a writable .img overlay; …/samtools--1.22.sqf is an installed image.
+Rebuild it from its recipe instead: condatainer info samtools--1.22.sqf shows what it is
+```
 
-An overlay with none of these (e.g. an app overlay built before recipe embedding) reports that its type cannot be determined.
+Definition-built images keep their definition regardless: Apptainer records it in
+the rootfs at `/.singularity.d/Singularity`, readable with
+`apptainer inspect --deffile` on a `.sif`.
 
 **Usage:**
 
 ```
-condatainer export [OPTIONS] <overlay>
+condatainer overlay export [OPTIONS] <overlay.img>
 ```
 
 **Options:**
 
 * `-p`, `--prefix <path>`: Write to `<path>.<ext>` instead of stdout.
-
-Conda-only (ignored for definition / build-script overlays):
 
 * `-e`, `--explicit`: Explicit (URL-pinned) format — exact, no re-solve. Round-trips via `create -f spec.txt`.
 * `--no-build`, `--no-builds`: Strip build strings from the spec.
@@ -1431,21 +1442,18 @@ Conda-only (ignored for definition / build-script overlays):
 * `--no-md5`: Disable MD5 checksums in explicit output.
 * `--from-history`: Reconstruct spec from install history only.
 
-**Channel order:** `micromamba env export` sorts the `channels:` block alphabetically, which can break re-solve. When a conda overlay carries a `.condarc`, its channel priority is used to reorder the block (matching `conda env export`); channels not listed there are prepended.
+**Channel order:** `micromamba env export` sorts the `channels:` block alphabetically, which can break re-solve. When an overlay carries a `.condarc`, its channel priority is used to reorder the block (matching `conda env export`); channels not listed there are prepended.
 
 **In-use overlays:** exporting an ext3 `.img` while a writable session holds it fails with a clear "currently in use for writing" error. (If you are in an ext3 overlay, use `mm export`)
 
 **Examples:**
 
 ```bash
-# Conda overlay -> environment.yml on stdout
-condatainer export samtools/1.22 > environment.yml
+# Conda environment -> environment.yml on stdout
+condatainer overlay export env.img > environment.yml
 
-# Write to a file; extension chosen by type (here .yml)
-condatainer export samtools/1.22 -p ./env
-
-# Definition / build-script overlay -> its recipe
-condatainer export ubuntu24/base_image > build.def
+# Write to a file; extension chosen by format (here .yml)
+condatainer overlay export env.img -p ./env
 
 # Explicit, fully reproducible (round-trips via create -f)
 condatainer export env.img -e -p ./spec        # writes ./spec.txt
@@ -1581,7 +1589,7 @@ condatainer config append extra_image_dirs /shared/lab/images:ro
 condatainer config append extra_image_dirs /fast/scratch/images
 
 # Add an institutional scripts source (takes priority over the default)
-condatainer config prepend extra_scripts_links https://raw.githubusercontent.com/MyOrg/my-scripts/main
+condatainer config prepend sources myorg=https://raw.githubusercontent.com/MyOrg/recipes/main
 
 # Remove entries
 condatainer config remove extra_image_dirs /shared/lab/images:ro
@@ -1637,7 +1645,6 @@ condatainer config validate
 * Apptainer binary accessibility
 * Scheduler binary accessibility
 * Build configuration (CPUs > 0, Memory > 0)
-* `default_distro` is one of the supported distro names
 
 ### Configuration Priority
 
@@ -1663,15 +1670,13 @@ scheduler_bin: /usr/bin/sbatch
 # Submission settings
 submit_job: true
 
-# Base OS distro: ubuntu20, ubuntu22, or ubuntu24 (default: ubuntu24)
-default_distro: ubuntu24
+# Base recipe for the container root (default: the first source's default_base)
+base: ubuntu24
 
-# Remote build/helper script source (base URL)
-scripts_link: https://raw.githubusercontent.com/Justype/cnt-scripts/main
-
-# Additional remote sources (higher priority than scripts_link; first entry wins on conflict)
-# extra_scripts_links:
-#   - https://raw.githubusercontent.com/MyOrg/my-scripts/main
+# Recipe collections, in priority order (first match wins).
+# The public cnt collection is appended automatically unless redefined here.
+sources:
+  - cnt: https://raw.githubusercontent.com/condatainer/recipes/main
 
 # Days to cache remote metadata (default: 7, set 0 to always fetch live)
 metadata_cache_ttl: 7
@@ -1747,9 +1752,7 @@ condatainer update [FLAGS]
 
 * `--build`: Refresh the build script metadata cache.
 * `--helper`: Refresh the helper script metadata cache.
-* `--base`: Update the base Apptainer image only.
-* `--remote`: Remote build script takes precedence over local (used with `--base`).
-* `--no-prebuilt`: Skip the prebuilt image download and build locally from the `.def` file (used with `--base`).
+* `--base`: Rebuild the base image from its recipe.
 
 By default (no flags), both `--build` and `--helper` are enabled.
 
@@ -1758,7 +1761,7 @@ By default (no flags), both `--build` and `--helper` are enabled.
 * Prints each remote URL as it fetches metadata.
 * Downloads and caches metadata locally per remote URL (default TTL: 7 days).
 * Cached metadata is reused by `avail` and `create` without a network round-trip.
-* Supports multiple remote sources (`extra_scripts_links`); each gets its own cache file.
+* Supports multiple recipe collections (`sources`); each remote gets its own cache file.
 * Removes cache files for remotes no longer configured (orphan cleanup).
 
 **Examples:**
@@ -1773,12 +1776,14 @@ condatainer update --build
 # Helper script metadata only
 condatainer update --helper
 
-# Update the base image only
+# Rebuild the base image only
 condatainer update --base
-
-# Rebuild the base image locally from the remote .def (skip prebuilt download)
-condatainer update --base --remote --no-prebuilt
 ```
+
+The base image is otherwise never updated on its own: it is built the first time
+something needs it, and reused until you ask for a rebuild. Every other command
+treats it as a prerequisite — `create` builds it alongside the images that need
+it, and `exec`/`e`/`run` build it before starting a container.
 
 ## Self-Update
 

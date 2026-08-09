@@ -51,20 +51,9 @@ var loadedLayers []ConfigLayerInfo
 // Used by config show --sources to display per-layer value annotations.
 func GetConfigLayerInfos() []ConfigLayerInfo { return loadedLayers }
 
-// InitViper initializes Viper with proper search paths and defaults.
-// Priority (highest to lowest):
-// 1. Command-line flags (handled by cobra)
-// 2. Environment variables (CNT_*) — always replaces for that key
-// 3. User config file (~/.config/condatainer/config.yaml)
-// 4. Extra root config ($CNT_EXTRA_ROOT/config.yaml, group/lab layer)
-// 5. Root config ($CNT_ROOT/config.yaml or <install>/config.yaml)
-// 6. System config file (/etc/condatainer/config.yaml)
-// 7. Defaults
-//
-// Scalar keys: highest-priority config file that sets the key wins.
-// Array keys (extra_*_dirs, sources): merged across all config layers
-// so that e.g. a sysadmin's extra_image_dirs in system config are visible to users
-// who also have their own config. channels is an exception — overwrite, not merge.
+// InitViper initializes Viper with the search paths and defaults. A scalar key
+// is won by the highest-priority layer that sets it; array keys merge across all
+// layers, channels excepted. See the README's Configuration Hierarchy.
 func InitViper() error {
 	viper.SetConfigName(ConfigFilename)
 	viper.SetConfigType(ConfigType)
@@ -128,7 +117,7 @@ func setDefaults() {
 	viper.SetDefault("apptainer_bin", "apptainer")
 	viper.SetDefault("scheduler_bin", "")
 	viper.SetDefault("submit_job", true)
-	viper.SetDefault("logs_dir", filepath.Join(os.Getenv("HOME"), "logs"))
+	viper.SetDefault("logs_dir", DefaultLogsDir())
 
 	// Explicit extra image directories (direct paths); entries may end with ":ro" (search-only)
 	// or ":rw" (explicit writable, same as no marker).
@@ -137,21 +126,23 @@ func setDefaults() {
 	viper.SetDefault("extra_helper_dirs", []string{})
 
 	// Build config defaults
-	viper.SetDefault("build.ncpus", 4)
-	viper.SetDefault("build.mem", 8192)
-	viper.SetDefault("build.time", "2h")
+	viper.SetDefault("build.ncpus", DefaultNcpus)
+	viper.SetDefault("build.mem", DefaultMemMB)
+	viper.SetDefault("build.time", DefaultBuildTime)
 	viper.SetDefault("build.compress_args", "") // Empty means auto-detect based on apptainer version
-	viper.SetDefault("build.block_size", "128k")
-	viper.SetDefault("build.data_block_size", "512k")
+	viper.SetDefault("build.block_size", DefaultBlockSize)
+	viper.SetDefault("build.data_block_size", DefaultDataBlockSize)
 	viper.SetDefault("build.use_tmp_overlay", false)
 	viper.SetDefault("build.always_submit", false)
-	viper.SetDefault("build.tmp_overlay_size", 20480)
+	viper.SetDefault("build.tmp_overlay_size", DefaultTmpSizeMB)
 
-	viper.SetDefault("channels", []string{"conda-forge", "bioconda"})
+	viper.SetDefault("channels", DefaultChannels())
 	viper.SetDefault("parse_module_load", false)
-	viper.SetDefault("scheduler_timeout", 0)  // seconds; 0 = no timeout
-	viper.SetDefault("notification", "web")   // "web" = browser notification via dashboard; "terminal" = bell; "both" = terminal + web; "" or "none" = silent
-	viper.SetDefault("metadata_cache_ttl", 7) // days (1 week)
+	viper.SetDefault("autoload_gpu", true)
+	viper.SetDefault("scheduler_timeout", 0) // seconds; 0 = no timeout
+	// "web" = browser notification via dashboard; "terminal" = bell; "both" = terminal + web; "" or "none" = silent
+	viper.SetDefault("notification", DefaultNotification)
+	viper.SetDefault("metadata_cache_ttl", DefaultCacheTTLDay) // days
 	viper.SetDefault("proxy_perjob", false)
 	viper.SetDefault("helper_bind_all", false)
 }
@@ -866,6 +857,24 @@ func layerBool(key string) (bool, bool) {
 	return false, false
 }
 
+// layerStringSet returns the value of a scalar string key and whether it was
+// explicitly set. Priority: env var > user > extra-root > root > system.
+//
+// Needed where empty is itself a legal value — notification, where it means
+// silent — since layerString returns "" for unset and for explicitly empty alike.
+func layerStringSet(key string) (string, bool) {
+	envKey := "CNT_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+	if ev := os.Getenv(envKey); ev != "" {
+		return ev, true
+	}
+	for _, v := range configLayers {
+		if v.InConfig(key) {
+			return v.GetString(key), true
+		}
+	}
+	return "", false
+}
+
 // layerInt returns the value of a scalar int key and whether it was explicitly set.
 // Priority: env var > user > extra-root > root > system.
 func layerInt(key string) (int, bool) {
@@ -959,16 +968,16 @@ func LoadFromViper() {
 		if IsValidBlockSize(v) {
 			Global.Build.BlockSize = v
 		} else {
-			slog.Default().Warn("invalid build.block_size, using default 128k", "value", v)
-			Global.Build.BlockSize = "128k"
+			slog.Default().Warn("invalid build.block_size, using default", "value", v, "default", DefaultBlockSize)
+			Global.Build.BlockSize = DefaultBlockSize
 		}
 	}
 	if v := layerString("build.data_block_size"); v != "" {
 		if IsValidBlockSize(v) {
 			Global.Build.DataBlockSize = v
 		} else {
-			slog.Default().Warn("invalid build.data_block_size, using default 512k", "value", v)
-			Global.Build.DataBlockSize = "512k"
+			slog.Default().Warn("invalid build.data_block_size, using default", "value", v, "default", DefaultDataBlockSize)
+			Global.Build.DataBlockSize = DefaultDataBlockSize
 		}
 	}
 
@@ -988,17 +997,24 @@ func LoadFromViper() {
 		Global.ParseModuleLoad = parseModuleLoad
 	}
 
+	if autoloadGPU, ok := layerBool("autoload_gpu"); ok {
+		Global.AutoloadGPU = autoloadGPU
+	}
+
 	if timeout, ok := layerInt("scheduler_timeout"); ok {
 		Global.SchedulerTimeout = time.Duration(timeout) * time.Second
 	}
 
-	Global.Notification = layerString("notification")
-	switch Global.Notification {
-	case "", "none", "terminal", "web", "both":
-		// valid
-	default:
-		fmt.Fprintf(os.Stderr, "[WARN] Unknown notification value %q. Valid values: terminal, web, both, none. Treating as none.\n", Global.Notification)
-		Global.Notification = ""
+	// Only when set: "" means silent, so an unset key must keep DefaultNotification.
+	if v, ok := layerStringSet("notification"); ok {
+		Global.Notification = v
+		switch Global.Notification {
+		case "", "none", "terminal", "web", "both":
+			// valid
+		default:
+			fmt.Fprintf(os.Stderr, "[WARN] Unknown notification value %q. Valid values: terminal, web, both, none. Treating as none.\n", Global.Notification)
+			Global.Notification = ""
+		}
 	}
 
 	if ttl, ok := layerInt("metadata_cache_ttl"); ok {
@@ -1021,26 +1037,27 @@ func NormalizeCompressArgs(val string) string {
 	return ArgsForCompress(val)
 }
 
-// AutoDetectCompression sets compression based on the runtime binary and its version.
-// This should be called after apptainer version is known.
-// supportsZstd: whether the current apptainer version supports zstd (>= 1.4)
-// isSingularity: whether the binary is Singularity (uses gzip by default)
+// AutoDetectCompression picks the build compression for the detected runtime.
+// A configured build.compress_args wins and is left alone.
+//
+// zstd only on Apptainer >= 1.4. Singularity and older Apptainer cannot mount a
+// zstd-compressed SquashFS, so lz4 is the floor — an image they cannot read is
+// worse than one that compresses less.
 func AutoDetectCompression(supportsZstd bool, isSingularity bool) {
-	// Only auto-detect if user hasn't explicitly set compress_args in config
-	// Empty string in config means "auto-detect"
 	if layerString("build.compress_args") != "" {
-		// User explicitly set compress_args, respect it
 		return
 	}
 
-	if isSingularity {
-		Global.Build.CompressArgs = "-comp gzip"
-		slog.Default().Debug("using gzip compression (Singularity detected)")
-	} else if supportsZstd {
-		Global.Build.CompressArgs = "-comp zstd -Xcompression-level 8"
-		slog.Default().Debug("auto-detected zstd support, using zstd compression")
-	} else {
-		Global.Build.CompressArgs = "-comp lz4"
-		slog.Default().Debug("using lz4 compression (zstd not supported)")
+	// Names, not argument strings, so CompressOptions stays the only place the
+	// mksquashfs flags for a codec live.
+	name, reason := "lz4", "zstd not supported"
+	switch {
+	case isSingularity:
+		reason = "Singularity detected"
+	case supportsZstd:
+		name, reason = "zstd-medium", "apptainer supports zstd"
 	}
+
+	Global.Build.CompressArgs = ArgsForCompress(name)
+	slog.Default().Debug("auto-detected build compression", "compression", name, "reason", reason)
 }

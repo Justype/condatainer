@@ -2,49 +2,33 @@ package cmd
 
 import "github.com/spf13/cobra"
 
-// overlayExportHelp is shared by 'export' and 'overlay export', which run the same command.
-const overlayExportHelp = `Export the recipe that produced an overlay:
+// overlayExportHelp is the help body for 'overlay export'.
+const overlayExportHelp = `Export the Conda environment in a writable .img overlay.
 
-  - a def or build-script overlay prints its embedded recipe (Conda flags ignored)
-  - a conda overlay is exported with micromamba env export
+Runs micromamba env export against /cnt_env, so it captures the environment as
+it is now — including anything installed into the overlay since it was created.
 
-Output goes to stdout, or to <prefix>.<ext> with --prefix
-  Apptainer (.def), build script (.sh), Conda (.yml or .txt)`
+Installed .sqf and .sif images are not exportable: they are immutable and carry
+their own metadata, so rebuild them from their recipe instead.
 
-// overlayExportExample is shared by 'export' and 'overlay export'.
-const overlayExportExample = `  condatainer export samtools/1.22                 # Conda overlay -> environment.yml on stdout
-  condatainer export samtools/1.22 --from-history  # Conda: only explicitly-installed specs
-  condatainer export cellranger/9.0.1              # Script overlay -> its build script
-  condatainer export ubuntu24/base_image           # Def overlay -> its definition
-  condatainer export ./env.img -p ./env            # Write ./env.yml (extension by type)`
+Output goes to stdout, or to <prefix>.yml (or .txt with --explicit) with --prefix.`
 
-var exportOverlayCmd = &cobra.Command{
-	Use:               "export [flags] <overlay>",
-	Short:             "Export the recipe that produced an overlay",
-	Long:              overlayExportHelp,
-	Example:           overlayExportExample,
-	Args:              cobra.ExactArgs(1),
-	SilenceUsage:      true,
-	ValidArgsFunction: completeOverlayArg,
-	RunE:              runExportOverlay,
-}
+// overlayExportExample is the example block for 'overlay export'.
+const overlayExportExample = `  condatainer overlay export ./env.img                    # environment.yml on stdout
+  condatainer overlay export ./env.img --from-history     # only explicitly-installed specs
+  condatainer overlay export ./env.img -e                 # explicit spec (.txt)
+  condatainer overlay export ./env.img -p ./env           # write ./env.yml`
 
-// registerExportFlags registers the micromamba env-export flags shared by
-// 'export' and 'overlay export'.
+// registerExportFlags registers the micromamba env-export flags for 'overlay export'.
 func registerExportFlags(cmd *cobra.Command) {
-	// Keep registration order so --prefix (applies to every export type) leads,
-	// ahead of the Conda-only flags, instead of cobra's alphabetical sort.
+	// Keep registration order so --prefix leads, ahead of the Conda-only flags,
+	// instead of cobra's alphabetical sort.
 	cmd.Flags().SortFlags = false
-	cmd.Flags().StringP("prefix", "p", "", "Write to <prefix>.<ext>; extension set by type")
+	cmd.Flags().StringP("prefix", "p", "", "Write to <prefix>.<ext>; extension set by format")
 	cmd.Flags().BoolP("explicit", "e", false, "Conda: use explicit format")
 	cmd.Flags().Bool("no-md5", false, "Conda: disable md5")
 	cmd.Flags().Bool("no-build", false, "Conda: disable the build string in spec")
 	cmd.Flags().Bool("no-builds", false, "Conda: disable the build string in spec (alias)")
 	cmd.Flags().Bool("channel-subdir", false, "Conda: enable channel/subdir in spec")
 	cmd.Flags().Bool("from-history", false, "Conda: build environment spec from history")
-}
-
-func init() {
-	rootCmd.AddCommand(exportOverlayCmd)
-	registerExportFlags(exportOverlayCmd)
 }

@@ -2,9 +2,12 @@ package exec
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image/meta"
+	"github.com/Justype/condatainer/internal/utils"
 )
 
 // Options configures how CondaTainer executes a command inside an Apptainer container.
@@ -53,9 +56,23 @@ func (ioStreams IO) IsZero() bool {
 	return ioStreams.Stdin == nil && ioStreams.Stdout == nil && ioStreams.Stderr == nil
 }
 
-func (o Options) ensureDefaults() Options {
+// ensureDefaults fills in what the caller left blank and requires a base image
+// that exists and is one: there is no overlay-only execution, so a container
+// with no root cannot be started at all. Building a missing managed base is the
+// caller's job — this package runs images, it does not make them.
+func (o Options) ensureDefaults() (Options, error) {
 	if o.BaseImage == "" {
-		o.BaseImage = config.GetBaseImage()
+		base, err := config.GetBaseImage()
+		if err != nil {
+			return o, err
+		}
+		o.BaseImage = base
+	}
+	if !utils.FileExists(o.BaseImage) {
+		return o, fmt.Errorf("base image not found: %s", o.BaseImage)
+	}
+	if err := meta.CheckBase(o.BaseImage); err != nil {
+		return o, err
 	}
 	if o.ApptainerBin == "" {
 		o.ApptainerBin = config.Global.ApptainerBin
@@ -63,5 +80,5 @@ func (o Options) ensureDefaults() Options {
 	if len(o.Command) == 0 {
 		o.Command = []string{"bash"}
 	}
-	return o
+	return o, nil
 }

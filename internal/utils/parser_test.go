@@ -183,7 +183,7 @@ module load alpha/1.0 beta/2.0
 	}
 }
 
-func TestGetExternalBuildTypeFromScript(t *testing.T) {
+func TestGetTypeFromScript(t *testing.T) {
 	tests := []struct {
 		name     string
 		content  string
@@ -201,18 +201,25 @@ func TestGetExternalBuildTypeFromScript(t *testing.T) {
 			wantType: "data",
 		},
 		{
-			name:     "TypeRefAlias",
-			content:  "#!/bin/bash\nTYPE:ref\n",
-			wantType: "data",
-		},
-		{
-			name:     "HashTypeToolAlias",
-			content:  "#!/bin/bash\n#TYPE:tool\n",
+			name:     "BareTypeApp",
+			content:  "#!/bin/bash\nTYPE:app\n",
 			wantType: "app",
 		},
 		{
 			name:    "InvalidType",
 			content: "#!/bin/bash\n#TYPE:unknown\n",
+			wantErr: true,
+		},
+		// Aliases are gone: #TYPE: has to mean the same thing here as it does to
+		// catalog.DeriveType, which only ever accepted app and data.
+		{
+			name:    "RejectsFormerRefAlias",
+			content: "#!/bin/bash\nTYPE:ref\n",
+			wantErr: true,
+		},
+		{
+			name:    "RejectsFormerToolAlias",
+			content: "#!/bin/bash\n#TYPE:tool\n",
 			wantErr: true,
 		},
 	}
@@ -230,7 +237,7 @@ func TestGetExternalBuildTypeFromScript(t *testing.T) {
 			}
 			tmp.Close()
 
-			got, err := GetExternalBuildTypeFromScript(tmp.Name())
+			got, err := GetTypeFromScript(tmp.Name())
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
@@ -241,7 +248,7 @@ func TestGetExternalBuildTypeFromScript(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if got != tt.wantType {
-				t.Fatalf("GetExternalBuildTypeFromScript() = %q, want %q", got, tt.wantType)
+				t.Fatalf("GetTypeFromScript() = %q, want %q", got, tt.wantType)
 			}
 		})
 	}

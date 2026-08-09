@@ -84,7 +84,7 @@ func cachedAvailableHelpers() []helperAvailableEntry {
 			description := ""
 			if data, err := os.ReadFile(scriptPath); err == nil {
 				for _, line := range strings.Split(string(data), "\n") {
-					if value, ok := strings.CutPrefix(line, "#DESCRIPTION:"); ok {
+					if value, ok := strings.CutPrefix(line, "#DESC:"); ok {
 						description = strings.TrimSpace(value)
 						break
 					}

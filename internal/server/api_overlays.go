@@ -13,8 +13,10 @@ import (
 
 	"log/slog"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/ext3"
+	"github.com/Justype/condatainer/internal/image/meta"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/logging/weblog"
 	"github.com/Justype/condatainer/internal/runtime/container"
@@ -179,11 +181,15 @@ func (s *srv) handleOverlaysList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Type is what the payload is, Format is the file's container format. These
+	// were one field holding the extension, which conflated the two.
 	type overlayEntry struct {
-		Name string `json:"name"`
-		Path string `json:"path"`
-		Size int64  `json:"size"`
-		Type string `json:"type"`
+		Name        string `json:"name"`
+		Path        string `json:"path"`
+		Size        int64  `json:"size"`
+		Type        string `json:"type"`
+		Format      string `json:"format"`
+		Description string `json:"description,omitempty"`
 	}
 	var entries []overlayEntry
 	for name, path := range installed {
@@ -194,13 +200,20 @@ func (s *srv) handleOverlaysList(w http.ResponseWriter, r *http.Request) {
 		if info, err := os.Stat(path); err == nil {
 			size = info.Size()
 		}
-		ext := strings.ToLower(filepath.Ext(path))
-		entries = append(entries, overlayEntry{
-			Name: name,
-			Path: path,
-			Size: size,
-			Type: ext[1:],
-		})
+		// An image with no readable metadata still lists, as an app with no
+		// description — it is installed and removable either way.
+		entry := overlayEntry{
+			Name:   name,
+			Path:   path,
+			Size:   size,
+			Type:   string(catalog.TypeApp),
+			Format: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
+		}
+		if manifest, err := meta.Read(path); err == nil {
+			entry.Type = string(manifest.Type)
+			entry.Description = manifest.Description
+		}
+		entries = append(entries, entry)
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 	writeJSON(w, entries)

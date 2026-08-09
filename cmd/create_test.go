@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 )
 
@@ -59,6 +61,56 @@ func TestCompressArgsFromFlags(t *testing.T) {
 		}
 		if _, err := compressArgsFromFlags(m); err == nil {
 			t.Errorf("expected error when multiple compression flags set")
+		}
+	}
+}
+
+// --name picks the target; --file must not quietly replace it with a prefix
+// derived from the filename. The mode dispatch tests --prefix first, so a
+// derived prefix used to make the --name branch unreachable.
+func TestDerivePrefixFromFile(t *testing.T) {
+	cases := []struct {
+		name             string
+		file, prefix, nm string
+		want             string
+	}{
+		{"file alone derives a prefix", "environment.yml", "", "", "environment"},
+		{"name wins over the filename", "environment.yml", "", "myenv", ""},
+		{"explicit prefix is kept", "environment.yml", "/images/x", "", ""},
+		{"no file, nothing to derive", "", "", "", ""},
+		{"path keeps its directory", "/tmp/envs/build.sh", "", "", "/tmp/envs/build"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := derivePrefixFromFile(tc.file, tc.prefix, tc.nm); got != tc.want {
+				t.Errorf("derivePrefixFromFile(%q, %q, %q) = %q, want %q",
+					tc.file, tc.prefix, tc.nm, got, tc.want)
+			}
+		})
+	}
+}
+
+// Restoring a project from a lockfile recreates the names the catalog uses, and
+// a data image is several levels deep. The name has to survive the round trip
+// through the filename, which is what the depth limit used to be guarding.
+func TestNormalizedTargetNameKeepsDepth(t *testing.T) {
+	prev := createName
+	t.Cleanup(func() { createName = prev })
+
+	for _, want := range []string{
+		"myenv",
+		"samtools/1.23.1",
+		"grch38/star/2.7.11b/gencode47-101",
+	} {
+		createName = want
+		got := normalizedTargetName()
+		if got != want {
+			t.Errorf("normalizedTargetName() = %q, want %q", got, want)
+		}
+		// / becomes -- on the way to a filename, and back on the way in.
+		roundTrip := catalog.Normalize(strings.ReplaceAll(got, "/", "--"))
+		if roundTrip != want {
+			t.Errorf("round trip through filename = %q, want %q", roundTrip, want)
 		}
 	}
 }

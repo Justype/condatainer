@@ -46,7 +46,7 @@ type Plan struct {
 // Resolve walks the dependency graph of roots and returns it in build order.
 //
 // It runs over Entry, so a whole tree is computed from the index without
-// fetching a recipe. Nodes carry their Kind, which is how a caller filters what
+// fetching a recipe. Nodes carry their Type, which is how a caller filters what
 // it cannot build, and a node no source provides carries a nil Entry rather
 // than failing the walk — that is the normal path for a conda package.
 func (c Catalog) Resolve(ctx context.Context, roots []string, have Have) (*Plan, error) {

@@ -63,9 +63,9 @@ condatainer config init
 ```
 
 Compression is chosen automatically based on the runtime:
-- **Singularity**: gzip
 - **Apptainer >= 1.4**: zstd level 8
 - **Apptainer < 1.4**: lz4
+- **Singularity**: lz4
 
 ## ⌨️ Shell Completion
 

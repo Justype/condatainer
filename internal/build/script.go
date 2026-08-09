@@ -14,7 +14,6 @@ import (
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
-	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -43,20 +42,20 @@ func getAllBaseDirs() []string {
 	return dirs
 }
 
-// buildScript implements the shell script build workflow on BuildObject.
-// Workflow:
-//  1. Check if overlay already exists (skip if yes)
-//  2. Create temporary ext3 overlay or host dirs
-//  3. Check and build missing dependencies if buildDeps=true
-//  4. Run shell script inside container with overlays
-//  5. Create SquashFS from the output directory
-//  6. Extract and save ENV variables if present
-//  7. Set permissions, atomic install, and cleanup
+// buildScript runs a recipe as a shell script inside the base image, with its
+// dependencies mounted, and packs what it wrote. buildDeps also builds any
+// dependency that is missing.
 func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
-	targetPath, finalPath := buildOverlayPaths(b)
+	targetPath := b.tgt.Path
 	log := logging.FromContext(ctx)
 
 	if skip, err := checkShouldBuild(b); skip || err != nil {
+		return err
+	}
+
+	// After the skip check, so an already-installed overlay never triggers a
+	// base build it has no use for.
+	if err := b.resolveBase(ctx); err != nil {
 		return err
 	}
 
@@ -64,10 +63,11 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 		return err
 	}
 	defer b.removeBuildLock()
+	preparedPath := b.tgt.Prepared
 
 	log.Info("building overlay", "overlay", filepath.Base(targetPath), "mode", buildModeLabel(b))
 
-	if err := prepareBuildWorkspace(ctx, b, config.Global.Build.UseTmpOverlay); err != nil {
+	if err := prepareBuildWorkspace(ctx, b); err != nil {
 		return err
 	}
 
@@ -82,13 +82,19 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 		return err
 	}
 
-	if err := b.packOutput(ctx, finalPath); err != nil {
+	metaDir, err := stageMetadata(ctx, b)
+	if err != nil {
+		b.Cleanup(true)
 		return err
 	}
 
-	utils.ShareWithParentGroup(finalPath)
+	if err := b.packOutput(ctx, metaDir, preparedPath); err != nil {
+		return err
+	}
 
-	if err := atomicInstall(finalPath, targetPath, b.update); err != nil {
+	utils.ShareWithParentGroup(preparedPath)
+
+	if err := atomicInstall(preparedPath, targetPath); err != nil {
 		return err
 	}
 
@@ -110,11 +116,11 @@ func (b *BuildObject) buildDependencies(ctx context.Context, buildDeps bool) err
 	depList := strings.Join(missingDeps, ", ")
 
 	if !buildDeps {
-		logging.FromContext(ctx).Error("missing dependencies", "overlay", filepath.Base(b.targetOverlayPath), "deps", depList)
-		return fmt.Errorf("missing dependencies for %s: %s. Please install them first", b.nameVersion, depList)
+		logging.FromContext(ctx).Error("missing dependencies", "overlay", filepath.Base(b.tgt.Path), "deps", depList)
+		return fmt.Errorf("missing dependencies for %s: %s. Please install them first", b.spec.Image.Name, depList)
 	}
 
-	logging.FromContext(ctx).Info("building missing dependencies", "overlay", filepath.Base(b.targetOverlayPath), "deps", depList)
+	logging.FromContext(ctx).Info("building missing dependencies", "overlay", filepath.Base(b.tgt.Path), "deps", depList)
 
 	writableImagesDir, err := config.GetWritableImagesDir()
 	if err != nil {
@@ -137,57 +143,23 @@ func (b *BuildObject) buildDependencies(ctx context.Context, buildDeps bool) err
 		}
 	}
 
-	logging.FromContext(ctx).Info("all dependencies built", "kind", "success", "overlay", filepath.Base(b.targetOverlayPath))
+	logging.FromContext(ctx).Info("all dependencies built", "kind", "success", "overlay", filepath.Base(b.tgt.Path))
 	return nil
-}
-
-// hostPayload reports whether the payload is written to a host directory bound
-// into the container rather than into the tmp ext3 image. Dir mode always is;
-// with a tmp overlay only data is, since a 20GB ext3 cannot hold a genome index.
-func hostPayload(b *BuildObject) bool {
-	return !config.Global.Build.UseTmpOverlay || b.kind == catalog.KindData
 }
 
 // buildExecOpts constructs the exec.Options for running the build script inside
 // the container, plus the IO carrying any #INPUT: answers on stdin.
 func (b *BuildObject) buildExecOpts() (execpkg.Options, execpkg.IO, error) {
-	// Same splitter the catalog resolves with, so the two cannot disagree on
-	// where the name ends and the version begins (data names carry slashes).
-	dep, err := catalog.ParseDep(b.nameVersion)
-	if err != nil {
-		return execpkg.Options{}, execpkg.IO{}, err
+	// The recipe's whole environment is a projection of Spec and Options — see
+	// BuildEnv. A backend does not assemble it, so every launch path agrees.
+	envSettings := buildEnv(b.spec, Options{Update: b.update, ScriptSpecs: b.scriptSpecs})
+
+	// The payload's install prefix, as the recipe sees it via $CNT_PREFIX.
+	prefix := b.spec.Runtime.Prefix
+	if prefix == "" {
+		prefix = "/cnt/" + b.spec.Image.Name
 	}
 
-	effRS := buildEffectiveResourceSpec(b.scriptSpecs)
-	buildRS := &scheduler.ResourceSpec{
-		Nodes:        1,
-		TasksPerNode: 1,
-		CpusPerTask:  b.effectiveNcpus(),
-		MemPerCpuMB:  effRS.MemPerCpuMB,
-		MemPerNodeMB: effRS.MemPerNodeMB,
-	}
-
-	// Every build writes to /cnt/<name>/<version> — the path the artifact will be
-	// mounted at, so anything the payload bakes in stays valid at run time.
-	prefix := "/cnt/" + b.nameVersion
-
-	kind := b.kind
-	if kind == "" {
-		kind = catalog.KindApp
-	}
-
-	// NCPUS/MEM/... come from the scheduler, already normalized across SLURM,
-	// PBS and LSF, so this contract does not mint CNT_ spellings beside them.
-	envSettings := append(
-		scheduler.ResourceEnvVars(buildRS),
-		"CNT_NAME="+dep.Name,
-		"CNT_VERSION="+dep.Version,
-		"CNT_KIND="+string(kind),
-		"CNT_PREFIX="+prefix,
-		"CNT_TMP=/ext3/tmp",
-		"TMPDIR=/ext3/tmp",
-		"IN_CONDATAINER=1",
-	)
 	bashScript := fmt.Sprintf(`
 trap 'exit 130' INT TERM
 
@@ -197,53 +169,40 @@ if [ $? -ne 0 ]; then
     echo "Build script %s failed."
     exit 1
 fi
-# Embed the build script next to the payload for provenance (skipped if the
-# script populated nothing — packOutput reports that as a build failure).
-if [ -d "$CNT_PREFIX" ]; then
-    cp %s "$CNT_PREFIX/%s" 2>/dev/null || true
-fi
-`, b.buildSource, b.buildSource, b.buildSource, utils.BuildScriptName)
+`, b.buildSource, b.buildSource)
 
-	overlayArgs, err := GetOverlayArgsFromDependencies(b.dependencies)
+	depOverlays, err := dependencyOverlays(b.spec.Dependencies)
 	if err != nil {
-		slog.Default().Warn("failed to get overlay args from dependencies", "err", err)
+		slog.Default().Warn("failed to resolve dependency overlays", "err", err)
 	}
 
 	var overlays []string
-	if config.Global.Build.UseTmpOverlay {
-		overlays = []string{b.tmpOverlayPath}
+	if b.ws.UsesImage() {
+		overlays = []string{b.ws.Overlay}
 	}
-	for i := 0; i < len(overlayArgs); i += 2 {
-		if overlayArgs[i] == "--overlay" && i+1 < len(overlayArgs) {
-			overlays = append(overlays, overlayArgs[i+1])
-		}
-	}
+	overlays = append(overlays, depOverlays...)
 
 	bindDirs := container.DeduplicateBindPaths(getAllBaseDirs())
-	if hostPayload(b) {
+	if b.ws.HostPayload() {
 		// Bind the leaf, not /cnt: covering /cnt would hide every dependency
-		// overlay mounted beside it.
-		payloadDir := filepath.Join(b.cntDirPath, b.nameVersion)
-		if err := utils.MkdirAllShared(payloadDir); err != nil {
-			return execpkg.Options{}, execpkg.IO{}, fmt.Errorf("failed to create payload dir %s: %w", payloadDir, err)
-		}
-		bindDirs = append(bindDirs, payloadDir+":"+prefix)
+		// overlay mounted beside it. prepareBuildWorkspace created it.
+		bindDirs = append(bindDirs, filepath.Join(b.ws.CntDir, b.spec.Image.Name)+":"+prefix)
 	}
-	if !config.Global.Build.UseTmpOverlay {
-		bindDirs = append(bindDirs, getBuildTmpDir(b)+":/ext3/tmp")
+	if !b.ws.UsesImage() {
+		bindDirs = append(bindDirs, b.ws.TmpDir+":"+ScratchPath)
 	}
 
 	opts := execpkg.Options{
-		BaseImage:    config.GetBaseImage(),
+		BaseImage:    b.spec.Base,
 		ApptainerBin: config.Global.ApptainerBin,
 		Overlays:     overlays,
 		BindPaths:    bindDirs,
 		EnvSettings:  envSettings,
 		Command:      []string{"/bin/bash", "-c", bashScript},
 		HidePrompt:   true,
-		WritableImg:  config.Global.Build.UseTmpOverlay,
+		WritableImg:  b.ws.UsesImage(),
 	}
-	if !config.Global.Build.UseTmpOverlay {
+	if !b.ws.UsesImage() {
 		opts.ApptainerFlags = []string{"--writable-tmpfs"}
 	}
 
@@ -252,8 +211,8 @@ fi
 	// in a pasted URL would be mangled or executed.
 	opts.PassThruStdin = true
 	var ioStreams execpkg.IO
-	if len(b.interactiveInputs) > 0 {
-		ioStreams.Stdin = strings.NewReader(strings.Join(b.interactiveInputs, "\n") + "\n")
+	if len(b.inputAnswers) > 0 {
+		ioStreams.Stdin = strings.NewReader(strings.Join(b.inputAnswers, "\n") + "\n")
 	}
 
 	return opts, ioStreams, nil
@@ -267,7 +226,7 @@ func (b *BuildObject) runBuildScript(ctx context.Context) error {
 	}
 
 	logging.FromContext(ctx).Debug("running build script",
-		"name", b.nameVersion, "overlays", opts.Overlays, "bindPaths", opts.BindPaths, "passThruStdin", opts.PassThruStdin)
+		"name", b.spec.Image.Name, "overlays", opts.Overlays, "bindPaths", opts.BindPaths, "passThruStdin", opts.PassThruStdin)
 
 	done := watchContext(ctx, "build script")
 	defer close(done)
@@ -285,45 +244,41 @@ func (b *BuildObject) runBuildScript(ctx context.Context) error {
 	return nil
 }
 
-// packOutput squashes the payload into the target image.
-//
-// A host payload is packed from its build directory, whose basename is cnt, so
-// mksquashfs -keep-as-directory yields exactly cnt/<name>/<version>/... and
-// nothing else — the build's tmp/ is a sibling and never enters the archive.
-func (b *BuildObject) packOutput(ctx context.Context, finalPath string) error {
+// packOutput squashes the payload and the staged metadata into the target image.
+// A host payload is packed from its build directory, whose basename is cnt.
+// metaDir is a second archive root and may be empty.
+func (b *BuildObject) packOutput(ctx context.Context, metaDir, preparedPath string) error {
 	log := logging.FromContext(ctx)
-	isData := b.kind == catalog.KindData
+	isData := b.spec.Image.Type == catalog.TypeData
 
-	if hostPayload(b) {
-		payloadDir := filepath.Join(b.cntDirPath, b.nameVersion)
+	if b.ws.HostPayload() {
+		payloadDir := filepath.Join(b.ws.CntDir, b.spec.Image.Name)
 		if entries, err := os.ReadDir(payloadDir); err != nil || len(entries) == 0 {
 			b.Cleanup(true)
-			return fmt.Errorf("build script did not create any files in %s", payloadDir)
+			return fmt.Errorf("build produced no files in %s", payloadDir)
 		}
-		log.Info("creating SquashFS", "source", b.cntDirPath, "overlay", filepath.Base(b.targetOverlayPath))
-		if err := createSquashfs(ctx, b, isData, b.cntDirPath, finalPath); err != nil {
+		log.Info("creating SquashFS", "source", b.ws.CntDir, "overlay", filepath.Base(b.tgt.Path))
+		if err := createSquashfs(ctx, b, isData, b.ws.CntDir, metaDir, preparedPath); err != nil {
 			b.Cleanup(true)
 			return err
 		}
 		return nil
 	}
 
-	log.Info("preparing SquashFS from /cnt", "overlay", filepath.Base(b.targetOverlayPath))
-	if err := createSquashfs(ctx, b, isData, "/cnt", finalPath); err != nil {
+	log.Info("preparing SquashFS from /cnt", "overlay", filepath.Base(b.tgt.Path))
+	if err := createSquashfs(ctx, b, isData, "/cnt", metaDir, preparedPath); err != nil {
 		b.Cleanup(true)
 		return err
 	}
 	return nil
 }
 
-// saveCondaEnvFile fetches a package description from anaconda.org and writes the .env file.
-// Skipped for multi-package / YAML builds where packageName is a user-chosen env name, not a real package.
-func (b *BuildObject) saveCondaEnvFile(targetPath string) {
-	if b.packageName == "" || b.buildSource != "" {
+// describeCondaPackage fills in the description from anaconda.org, so a Conda
+// image says what it is without a recipe to take a #DESC: from. Skipped for
+// multi-package and YAML builds; a failed lookup leaves the description empty.
+func (b *BuildObject) describeCondaPackage() {
+	if b.packageName == "" || b.buildSource != "" || b.spec.Image.Description != "" {
 		return
 	}
-	description := utils.FetchCondaSummary(b.packageName, config.Global.Build.Channels)
-	if err := SaveEnvFile(targetPath, map[string]EnvEntry{}, b.nameVersion, description); err != nil {
-		slog.Default().Warn("failed to save ENV file", "err", err)
-	}
+	b.spec.Image.Description = utils.FetchCondaSummary(b.packageName, config.Global.Build.Channels)
 }

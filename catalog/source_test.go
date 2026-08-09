@@ -29,8 +29,8 @@ func fakeSource(t *testing.T) string {
 	}
 
 	write("source.json", `{"schema":1,"repository":"https://example.invalid/r","default_base":"ubuntu24"}`)
-	write("recipes/cellranger/9.0.1", "#DESCRIPTION:cellranger\n#URL:https://example.invalid\n")
-	write("recipes/ubuntu24/base.def", "#DESCRIPTION:base\n\nBootstrap: docker\n")
+	write("recipes/cellranger/9.0.1", "#DESC:cellranger\n#URL:https://example.invalid\n")
+	write("recipes/ubuntu24/base.def", "#DESC:base\n\nBootstrap: docker\n")
 	write("recipes/grch38/star-gencode", starRecipe)
 	write("recipes/README.md", "not a recipe")
 
@@ -67,10 +67,10 @@ func TestOpenDirSource(t *testing.T) {
 	if got := slices.Sorted(maps.Keys(entries)); !slices.Equal(got, want) {
 		t.Errorf("entries = %v, want %v (README.md skipped)", got, want)
 	}
-	if e := entries["ubuntu24/base"]; e.Kind != KindBase || e.Path != "recipes/ubuntu24/base.def" {
+	if e := entries["ubuntu24/base"]; e.Type != TypeBase || e.Path != "recipes/ubuntu24/base.def" {
 		t.Errorf("base entry = %+v", e)
 	}
-	if e := entries["grch38/star-gencode"]; !e.IsTemplate || e.Kind != KindData {
+	if e := entries["grch38/star-gencode"]; !e.IsTemplate || e.Type != TypeData {
 		t.Errorf("template entry = %+v", e)
 	}
 }
@@ -106,7 +106,7 @@ func TestBackendsAgree(t *testing.T) {
 			t.Errorf("%s: missing from the index", name)
 			continue
 		}
-		if l.Kind != r.Kind || l.Path != r.Path || l.Description != r.Description || l.URL != r.URL ||
+		if l.Type != r.Type || l.Path != r.Path || l.Description != r.Description || l.URL != r.URL ||
 			l.IsTemplate != r.IsTemplate || l.TargetTemplate != r.TargetTemplate ||
 			!slices.Equal(l.Deps, r.Deps) {
 			t.Errorf("%s:\n walk  %+v\n index %+v", name, l, r)

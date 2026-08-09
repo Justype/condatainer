@@ -134,7 +134,7 @@ Shared binary directories (`$HOME/bin`, `~/.local/bin`, `/usr/bin`, `/usr/local/
 Every layer can carry a `config.yaml`, and all of them are loaded together:
 
 - **Scalar keys** (`apptainer_bin`, `submit_job`, `build.ncpus`) — the highest-priority layer that sets the key wins. A user's own config overrides the site default.
-- **Directory and source keys** (`extra_*_dirs`, `extra_scripts_links`) — **merged** across layers, user entries first, then `extra-root`, `app-root`.
+- **Directory and source keys** (`extra_*_dirs`, `sources`) — **merged** across layers, user entries first, then `extra-root`, `app-root`.
 - **`channels`** — overwrite, not merged: Conda channel order decides which package wins, so merging two lists would silently change resolution.
 
 The split is deliberate: users can override *settings* without being able to remove *sources* an admin published. See [Configuration Priority](../manuals/configuration.md#configuration-priority).

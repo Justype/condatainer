@@ -459,7 +459,7 @@ function openHelperConfigModal() {
             '</div>'
           : '<input class="field-input" id="hcfg-' + escHtml(p.key) + '" value="' + escHtml(saved) +
               '" placeholder="' + escHtml(ph) + '">') +
-        (p.desc ? '<span class="param-desc">' + escHtml(p.desc) + '</span>' : '') +
+        (p.description ? '<span class="param-desc">' + escHtml(p.description) + '</span>' : '') +
       '</div>';
   });
 
@@ -666,7 +666,7 @@ function selectHelper(name, overrides) {
         return '<span class="param-name">' + escHtml(p.key) + '</span>' +
           '<div class="param-cell">' +
             input +
-            (p.desc ? '<span class="param-desc">' + escHtml(p.desc) + '</span>' : '') +
+            (p.description ? '<span class="param-desc">' + escHtml(p.description) + '</span>' : '') +
           '</div>';
       }).join('') +
       '</div>';
@@ -1033,7 +1033,7 @@ function renderOverlayCreateForm() {
   wrap.innerHTML = '<div class="form-grid">' +
     computed.map(({ key, opts, param }) => {
       const defVal = (param && param.default) || (opts[0] || '');
-      const desc   = param ? param.desc : '';
+      const desc   = param ? param.description : '';
       return '<div class="field">' +
         '<label class="field-label">' + escHtml(key) + '</label>' +
         (opts.length

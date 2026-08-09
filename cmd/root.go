@@ -89,7 +89,11 @@ var rootCmd = &cobra.Command{
 			utils.PrintDebug("Debug mode enabled")
 			utils.PrintDebug("CondaTainer Version: %s", utils.StyleInfo(config.VERSION))
 			utils.PrintDebug("Executable: %s", exe)
-			utils.PrintDebug("Base Image: %s", config.GetBaseImage())
+			if base, err := config.GetBaseImage(); err == nil {
+				utils.PrintDebug("Base Image: %s", base)
+			} else {
+				utils.PrintDebug("Base Image: %v", err)
+			}
 			utils.PrintDebug("Apptainer Binary: %s", config.Global.ApptainerBin)
 			if config.Global.SchedulerBin != "" {
 				utils.PrintDebug("Scheduler Binary: %s", config.Global.SchedulerBin)

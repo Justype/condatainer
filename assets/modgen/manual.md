@@ -102,7 +102,7 @@ modgen create [OPTIONS] [NAME_VERSIONS...]
 
 - Automatic Fetching: If a build script is not found locally, **ModGen** attempts to fetch it from the remote repository.
 - Conda Fallback: If no build script exists, **ModGen** attempts to create the module by installing the package named name with version version from conda-forge or bioconda.
-- Metadata Parsing: Parses `#ENV` and `#ENVNOTE` tags from build scripts to inject environment variables and help text into the generated modulefile.
+- Metadata Parsing: Parses `#ENV:` tags (with their inline `## ` notes) from recipes to inject environment variables and help text into the generated modulefile.
 
 ## Module Management (Avail, List, Remove)
 
