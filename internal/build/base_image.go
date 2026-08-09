@@ -95,7 +95,7 @@ func newBaseObject(ctx context.Context, update bool) (*BuildObject, error) {
 		targetOverlayPath = abs
 	}
 
-	tmpDir := resolveTmpDirForDef()
+	tmpDir := tmpRootForDef()
 	if absDir, err := filepath.Abs(tmpDir); err == nil {
 		tmpDir = absDir
 	}

@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -28,31 +28,31 @@ var (
 // configKeyDefs maps every known config key to whether it holds a string slice (array).
 // true = array key (use append/prepend/remove); false = scalar key (use set).
 var configKeyDefs = map[string]bool{
-	"logs_dir":               false,
-	"apptainer_bin":          false,
-	"scheduler_bin":          false,
-	"base":                   false,
-	"submit_job":             false,
-	"sources":                true,
-	"extra_image_dirs":       true,
-	"extra_helper_dirs":      true,
-	"parse_module_load":      false,
-	"autoload_gpu":           false,
-	"scheduler_timeout":      false,
-	"notification":           false,
-	"metadata_cache_ttl":     false,
-	"proxy_perjob":           false,
-	"helper_bind_all":        false,
-	"build.ncpus":            false,
-	"build.mem":              false,
-	"build.time":             false,
-	"build.compress_args":    false,
-	"build.block_size":       false,
-	"build.data_block_size":  false,
-	"build.use_tmp_overlay":  false,
-	"build.always_submit":    false,
-	"build.tmp_overlay_size": false,
-	"channels":               true,
+	"logs_dir":                   false,
+	"apptainer_bin":              false,
+	"scheduler_bin":              false,
+	"base":                       false,
+	"submit_job":                 false,
+	"sources":                    true,
+	"extra_image_dirs":           true,
+	"extra_helper_dirs":          true,
+	"parse_module_load":          false,
+	"autoload_gpu":               false,
+	"scheduler_timeout":          false,
+	"notification":               false,
+	"metadata_cache_ttl":         false,
+	"proxy_perjob":               false,
+	"helper_bind_all":            false,
+	"build.ncpus":                false,
+	"build.mem":                  false,
+	"build.time":                 false,
+	"build.compress_args":        false,
+	"build.block_size":           false,
+	"build.data_block_size":      false,
+	"build.app_tmp_overlay":      false,
+	"build.always_submit":        false,
+	"build.app_tmp_overlay_size": false,
+	"channels":                   true,
 }
 
 func isArrayKey(key string) bool { return configKeyDefs[key] }
@@ -61,7 +61,7 @@ func isBoolKey(key string) bool {
 	switch key {
 	case "submit_job", "proxy_perjob", "helper_bind_all",
 		"parse_module_load", "autoload_gpu",
-		"build.use_tmp_overlay", "build.always_submit":
+		"build.app_tmp_overlay", "build.always_submit":
 		return true
 	}
 	return false
@@ -228,9 +228,9 @@ func configValueCompletion(key string) []string {
 		return config.CompressNames()
 	case "build.block_size", "build.data_block_size":
 		return config.BlockSizeCompletions
-	case "build.use_tmp_overlay", "build.always_submit":
+	case "build.app_tmp_overlay", "build.always_submit":
 		return []string{"true", "false"}
-	case "build.tmp_overlay_size":
+	case "build.app_tmp_overlay_size":
 		return []string{"10g", "20g", "40g"}
 	case "notification":
 		return []string{"none", "terminal", "web", "both"}
@@ -530,33 +530,33 @@ var configShowCmd = &cobra.Command{
 		printOverridden("                       ", "notification")
 		fmt.Println()
 
-		// Build settings (longest key: tmp_overlay_size = 16 chars)
+		// Build settings (longest key: app_tmp_overlay_size = 20 chars)
 		fmt.Printf("%s %s\n", utils.StyleTitle("Build Configuration:"), "build.*")
-		fmt.Printf("  %-17s %v%s\n", "always_submit:", config.Global.Build.AlwaysSubmit, srcTag("build.always_submit"))
-		printOverridden("                    ", "build.always_submit")
-		fmt.Printf("  %-17s %d%s\n", "ncpus:", config.Global.Build.Defaults.CpusPerTask, srcTag("build.ncpus"))
-		printOverridden("                    ", "build.ncpus")
-		fmt.Printf("  %-17s %s%s\n", "mem:", utils.FormatMemoryMB(config.Global.Build.Defaults.MemPerNodeMB), srcTag("build.mem"))
-		printOverridden("                    ", "build.mem")
-		fmt.Printf("  %-17s %s%s\n", "time:", utils.FormatDuration(config.Global.Build.Defaults.Time), srcTag("build.time"))
-		printOverridden("                    ", "build.time")
+		fmt.Printf("  %-21s %v%s\n", "always_submit:", config.Global.Build.AlwaysSubmit, srcTag("build.always_submit"))
+		printOverridden("                        ", "build.always_submit")
+		fmt.Printf("  %-21s %d%s\n", "ncpus:", config.Global.Build.Defaults.CpusPerTask, srcTag("build.ncpus"))
+		printOverridden("                        ", "build.ncpus")
+		fmt.Printf("  %-21s %s%s\n", "mem:", utils.FormatMemoryMB(config.Global.Build.Defaults.MemPerNodeMB), srcTag("build.mem"))
+		printOverridden("                        ", "build.mem")
+		fmt.Printf("  %-21s %s%s\n", "time:", utils.FormatDuration(config.Global.Build.Defaults.Time), srcTag("build.time"))
+		printOverridden("                        ", "build.time")
 		// Show actual compress_args (may be auto-detected based on apptainer version)
 		compressArgs := viper.GetString("build.compress_args")
 		actualCompressArgs := config.Global.Build.CompressArgs
 		if compressArgs != actualCompressArgs {
-			fmt.Printf("  %-17s %s%s\n", "compress_args:", actualCompressArgs, srcTag("build.compress_args"))
+			fmt.Printf("  %-21s %s%s\n", "compress_args:", actualCompressArgs, srcTag("build.compress_args"))
 		} else {
-			fmt.Printf("  %-17s %s%s\n", "compress_args:", compressArgs, srcTag("build.compress_args"))
+			fmt.Printf("  %-21s %s%s\n", "compress_args:", compressArgs, srcTag("build.compress_args"))
 		}
-		printOverridden("                    ", "build.compress_args")
-		fmt.Printf("  %-17s %s%s\n", "block_size:", config.Global.Build.BlockSize, srcTag("build.block_size"))
-		printOverridden("                    ", "build.block_size")
-		fmt.Printf("  %-17s %s%s\n", "data_block_size:", config.Global.Build.DataBlockSize, srcTag("build.data_block_size"))
-		printOverridden("                    ", "build.data_block_size")
-		fmt.Printf("  %-17s %v%s\n", "use_tmp_overlay:", config.Global.Build.UseTmpOverlay, srcTag("build.use_tmp_overlay"))
-		printOverridden("                    ", "build.use_tmp_overlay")
-		fmt.Printf("  %-17s %s%s\n", "tmp_overlay_size:", utils.FormatMemoryMB(int64(config.Global.Build.TmpSizeMB)), srcTag("build.tmp_overlay_size"))
-		printOverridden("                    ", "build.tmp_overlay_size")
+		printOverridden("                        ", "build.compress_args")
+		fmt.Printf("  %-21s %s%s\n", "block_size:", config.Global.Build.BlockSize, srcTag("build.block_size"))
+		printOverridden("                        ", "build.block_size")
+		fmt.Printf("  %-21s %s%s\n", "data_block_size:", config.Global.Build.DataBlockSize, srcTag("build.data_block_size"))
+		printOverridden("                        ", "build.data_block_size")
+		fmt.Printf("  %-21s %v%s\n", "app_tmp_overlay:", config.Global.Build.AppTmpOverlay, srcTag("build.app_tmp_overlay"))
+		printOverridden("                        ", "build.app_tmp_overlay")
+		fmt.Printf("  %-21s %s%s\n", "app_tmp_overlay_size:", utils.FormatMemoryMB(int64(config.Global.Build.AppTmpOverlaySizeMB)), srcTag("build.app_tmp_overlay_size"))
+		printOverridden("                        ", "build.app_tmp_overlay_size")
 		fmt.Println()
 
 		// Show environment variable overrides
@@ -741,7 +741,7 @@ Time duration format (for build.time):
 			}
 		}
 
-		if key == "build.tmp_overlay_size" {
+		if key == "build.app_tmp_overlay_size" {
 			if mb, err := utils.ParseMemoryMB(value); err != nil || mb <= 0 {
 				utils.PrintError("Invalid memory format: %s", value)
 				utils.PrintHint("Use format like: 10g, 20480m, 20480, 1t")

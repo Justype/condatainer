@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/config"
-	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/runtime/apptainer"
+	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"

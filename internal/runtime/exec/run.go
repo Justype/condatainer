@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/runtime/container"
-	"github.com/Justype/condatainer/internal/logging"
-	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/runtime/proxy"
 	"github.com/Justype/condatainer/internal/utils"
 )

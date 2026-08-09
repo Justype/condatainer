@@ -4,8 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -105,43 +108,53 @@ func TestCreateBuildDirs_ForceRemovesStale(t *testing.T) {
 	}
 }
 
-func TestResolveTmpDirForExternal_DataUsesTargetDir(t *testing.T) {
+// An external build routes by type: an app takes fast local scratch, while data
+// and definitions keep their large intermediates beside the target the user chose.
+func TestTmpRootForExternal(t *testing.T) {
 	targetDir := t.TempDir()
-	got := resolveTmpDirForExternal(targetDir, "data")
-	if got != targetDir {
-		t.Fatalf("resolveTmpDirForExternal(data) = %q, want %q", got, targetDir)
+	scratch := utils.GetTmpDir()
+
+	tests := []struct {
+		name  string
+		typ   catalog.Type
+		isDef bool
+		want  string
+	}{
+		{name: "app", typ: catalog.TypeApp, want: scratch},
+		{name: "unknown type defaults to scratch", typ: "", want: scratch},
+		{name: "data", typ: catalog.TypeData, want: targetDir},
+		{name: "definition", typ: catalog.TypeOS, isDef: true, want: targetDir},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tmpRootForExternal(targetDir, tt.typ, tt.isDef); got != tt.want {
+				t.Errorf("tmpRootForExternal(%q, %v) = %q, want %q", tt.typ, tt.isDef, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestResolveTmpDirForExternal_AppUsesScratch(t *testing.T) {
-	targetDir := t.TempDir()
-	got := resolveTmpDirForExternal(targetDir, "app")
-	want := utils.GetTmpDir()
-	if got != want {
-		t.Fatalf("resolveTmpDirForExternal(app) = %q, want %q", got, want)
-	}
-}
-
-func TestResolveTmpDirForExternal_EmptyDefaultsToScratch(t *testing.T) {
-	targetDir := t.TempDir()
-	got := resolveTmpDirForExternal(targetDir, "")
-	want := utils.GetTmpDir()
-	if got != want {
-		t.Fatalf("resolveTmpDirForExternal(empty) = %q, want %q", got, want)
-	}
-}
-
-func TestResolveTmpDirForExternal_CNTTMPDIROverridesData(t *testing.T) {
+// CNT_TMPDIR selects the fast root. It must not pull a build off a root chosen
+// for being large and stable — that is what made a data build land on scratch
+// the job wipes.
+func TestCNTTmpDirMovesOnlyTheFastRoot(t *testing.T) {
 	override := t.TempDir()
-	if err := os.Setenv("CNT_TMPDIR", override); err != nil {
-		t.Fatalf("failed to set CNT_TMPDIR: %v", err)
+	t.Setenv("CNT_TMPDIR", override)
+
+	if got := tmpRootForType(catalog.TypeApp); got != utils.GetTmpDir() {
+		t.Errorf("app root = %q, want the fast root %q", got, utils.GetTmpDir())
 	}
-	defer os.Unsetenv("CNT_TMPDIR")
+	if !strings.HasPrefix(utils.GetTmpDir(), override) {
+		t.Errorf("fast root %q does not sit under CNT_TMPDIR %q", utils.GetTmpDir(), override)
+	}
+
+	stable := config.GetWritableTmpDir()
+	if strings.HasPrefix(stable, override) {
+		t.Errorf("stable root %q followed CNT_TMPDIR", stable)
+	}
 
 	targetDir := t.TempDir()
-	got := resolveTmpDirForExternal(targetDir, "data")
-	want := utils.GetTmpDir()
-	if got != want {
-		t.Fatalf("resolveTmpDirForExternal(data) with CNT_TMPDIR = %q, want %q", got, want)
+	if got := tmpRootForExternal(targetDir, catalog.TypeData, false); got != targetDir {
+		t.Errorf("external data root = %q, want the target dir %q", got, targetDir)
 	}
 }

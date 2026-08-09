@@ -265,7 +265,7 @@ func autoCreateExternalOverlay(ctx context.Context, dep string) bool {
 	utils.PrintMessage("Auto-creating %s from %s...", utils.StyleName(filepath.Base(dep)), utils.StylePath(sibling))
 
 	if utils.IsCondaFile(sibling) {
-		bo, err := build.NewCondaObjectWithSource(baseName, absFile, outputDir, outputDir, false)
+		bo, err := build.NewCondaObjectWithSource(baseName, absFile, outputDir, false)
 		if err != nil {
 			utils.PrintError("Failed to create build object for %s: %v", dep, err)
 			return false
@@ -284,7 +284,7 @@ func autoCreateExternalOverlay(ctx context.Context, dep string) bool {
 		utils.PrintError("Failed to create build object for %s: %v", dep, err)
 		return false
 	}
-	graph, err := build.NewBuildGraph(ctx, []*build.BuildObject{bo}, outputDir, config.GetWritableTmpDir(), config.Global.SubmitJob, false)
+	graph, err := build.NewBuildGraph(ctx, []*build.BuildObject{bo}, outputDir, config.Global.SubmitJob, false)
 	if err != nil {
 		utils.PrintError("Failed to create build graph for %s: %v", dep, err)
 		return false
@@ -306,14 +306,14 @@ func autoInstallPackages(ctx context.Context, packages []string) error {
 	}
 	buildObjects := make([]*build.BuildObject, 0, len(packages))
 	for _, pkg := range packages {
-		bo, err := build.NewBuildObject(ctx, pkg, false, imagesDir, config.GetWritableTmpDir(), false)
+		bo, err := build.NewBuildObject(ctx, pkg, false, imagesDir, false)
 		if err != nil {
 			return fmt.Errorf("failed to create build object for %s: %w", pkg, err)
 		}
 		buildObjects = append(buildObjects, bo)
 	}
 
-	graph, err := build.NewBuildGraph(ctx, buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, false)
+	graph, err := build.NewBuildGraph(ctx, buildObjects, imagesDir, config.Global.SubmitJob, false)
 	if err != nil {
 		return fmt.Errorf("failed to create build graph: %w", err)
 	}

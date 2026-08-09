@@ -29,13 +29,13 @@ func newPackObject(t *testing.T, typ catalog.Type) *BuildObject {
 	return b
 }
 
-// withTmpOverlay flips the global build mode for one test and restores it. The
+// withAppTmpOverlay flips the global build mode for one test and restores it. The
 // pack settings come along because the zero value is not a legal mksquashfs
 // argument, and a test that runs the real command needs them.
-func withTmpOverlay(t *testing.T, on bool) {
+func withAppTmpOverlay(t *testing.T, on bool) {
 	t.Helper()
 	prev := config.Global.Build
-	config.Global.Build.UseTmpOverlay = on
+	config.Global.Build.AppTmpOverlay = on
 	if config.Global.Build.BlockSize == "" {
 		config.Global.Build.BlockSize = config.DefaultBlockSize
 	}
@@ -89,18 +89,18 @@ func TestStageMetadataRejectsInvalidManifest(t *testing.T) {
 func TestSquashfsSourcesCarryMetaDirName(t *testing.T) {
 	tests := []struct {
 		name         string
-		useTmpOvl    bool
+		appTmpOvl    bool
 		sourceDir    string
 		wantMetaArg  string
 		wantBindHost bool
 	}{
-		{name: "dir mode", useTmpOvl: false, sourceDir: "/host/build/cnt", wantMetaArg: "", wantBindHost: true},
-		{name: "ext3 payload in image", useTmpOvl: true, sourceDir: "/cnt", wantMetaArg: metaMountPath},
+		{name: "dir mode", appTmpOvl: false, sourceDir: "/host/build/cnt", wantMetaArg: "", wantBindHost: true},
+		{name: "ext3 payload in image", appTmpOvl: true, sourceDir: "/cnt", wantMetaArg: metaMountPath},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			withTmpOverlay(t, tt.useTmpOvl)
+			withAppTmpOverlay(t, tt.appTmpOvl)
 			b := newPackObject(t, catalog.TypeApp)
 			metaDir := b.ws.MetaDir
 
@@ -131,7 +131,7 @@ func TestSquashfsSourcesCarryMetaDirName(t *testing.T) {
 // An empty metaDir packs the payload alone, which is what keeps the packer
 // usable for anything that has no manifest to add.
 func TestSquashfsWithoutMetaDirPacksPayloadOnly(t *testing.T) {
-	withTmpOverlay(t, false)
+	withAppTmpOverlay(t, false)
 	b := newPackObject(t, catalog.TypeApp)
 
 	script, _, binds := buildSquashfsOpts(b, false, b.ws.CntDir, "", "/images/out.sqf")
@@ -151,7 +151,7 @@ func TestPackedImageManifestIsReadable(t *testing.T) {
 	if _, err := exec.LookPath("mksquashfs"); err != nil {
 		t.Skip("mksquashfs not available")
 	}
-	withTmpOverlay(t, false)
+	withAppTmpOverlay(t, false)
 
 	b := newPackObject(t, catalog.TypeApp)
 	payload := filepath.Join(b.ws.CntDir, b.spec.Image.Name, "bin")
@@ -209,7 +209,7 @@ func TestPackedImageExcludesBuildScratch(t *testing.T) {
 	if _, err := exec.LookPath("mksquashfs"); err != nil {
 		t.Skip("mksquashfs not available")
 	}
-	withTmpOverlay(t, false)
+	withAppTmpOverlay(t, false)
 
 	b := newPackObject(t, catalog.TypeApp)
 	if err := os.MkdirAll(filepath.Join(b.ws.CntDir, b.spec.Image.Name), 0o755); err != nil {
@@ -245,7 +245,7 @@ func TestPackedImageExcludesBuildScratch(t *testing.T) {
 // The conda install phase must not know where the image lands: that is what lets
 // a cancelled install leave nothing next to the installed images.
 func TestCondaInstallDoesNotPackOrTouchTarget(t *testing.T) {
-	withTmpOverlay(t, false)
+	withAppTmpOverlay(t, false)
 	b := newPackObject(t, catalog.TypeApp)
 	b.buildType = BuildTypeConda
 	b.packageName, b.packageVersion = "samtools", "1.21"
@@ -271,9 +271,9 @@ func TestCondaInstallDoesNotPackOrTouchTarget(t *testing.T) {
 // Conda and script must agree on where the payload is, or one writes to the
 // image while the other packs the host directory.
 func TestCondaInstallPayloadMatchesPackSource(t *testing.T) {
-	for _, useTmpOverlay := range []bool{false, true} {
-		t.Run(map[bool]string{false: "dir mode", true: "ext3 mode"}[useTmpOverlay], func(t *testing.T) {
-			withTmpOverlay(t, useTmpOverlay)
+	for _, appTmpOverlay := range []bool{false, true} {
+		t.Run(map[bool]string{false: "dir mode", true: "ext3 mode"}[appTmpOverlay], func(t *testing.T) {
+			withAppTmpOverlay(t, appTmpOverlay)
 			b := newPackObject(t, catalog.TypeApp)
 			b.buildType = BuildTypeConda
 			b.packageName, b.packageVersion = "samtools", "1.21"

@@ -145,9 +145,9 @@ declaring `schema`, `repository` and `default_base` — the base recipe used whe
 | `build.compress_args` | Auto-detected | mksquashfs compression arguments (zstd-medium for apptainer≥1.4; lz4 otherwise, including Singularity) |
 | `build.block_size` | `128k` | mksquashfs block size for app/env/external overlays (e.g. `128k`, `512k`) |
 | `build.data_block_size` | `512k` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
-| `build.use_tmp_overlay` | `false` | Build **app** overlays inside a temporary ext3 image instead of host directories. Ignored for `data`, `os` and `base` |
+| `build.app_tmp_overlay` | `false` | Assemble an **app** build inside a temporary ext3 overlay instead of host directories. Ignored for `data`, `os` and `base` |
 | `build.always_submit` | `false` | Always submit builds as scheduler jobs even if the script has no scheduler directives |
-| `build.tmp_overlay_size` | `20480` | Temporary ext3 image size (supports units: `20g`, `20480`); only used for app builds when `use_tmp_overlay` is `true` |
+| `build.app_tmp_overlay_size` | `20480` | Size of that overlay (supports units: `20g`, `20480`); only used when `app_tmp_overlay` is `true` |
 | `channels` | `[conda-forge, bioconda]` | Conda channels passed to micromamba in priority order (first = highest priority) |
 
 > `build.compress_args` also accepts shortcuts: `gzip`, `lz4`, `zstd`, `zstd-fast`, `zstd-medium`, `zstd-high`
@@ -233,16 +233,26 @@ upper‑casing, replacing `.` with `_`, and prefixing with
 
 * `logs_dir` → `CNT_LOGS_DIR`
 * `build.mem` → `CNT_BUILD_MEM`
-* `build.tmp_overlay_size` → `CNT_BUILD_TMP_OVERLAY_SIZE`
+* `build.app_tmp_overlay_size` → `CNT_BUILD_APP_TMP_OVERLAY_SIZE`
 
 You can list the supported variables with
 `condatainer config show` (it prints any that are currently set).
 
-`$CNT_TMPDIR` is a special override used by the build system to select
-temporary directories across build types. If set, it takes precedence over
-scheduler-provided scratch, writable tmp auto-detection, and
-`TMPDIR`/`TEMP`/`TMP`. CondaTainer will append `cnt-$USER` to the path to avoid
-user collisions, including external `.sh`/`.bash` builds.
+A build works under one of two roots:
+
+| root | where | used by |
+|---|---|---|
+| **fast** | `$CNT_TMPDIR` → scheduler scratch (`SLURM_TMPDIR`, `PBS_TMPDIR`, `LSF_TMPDIR`, `_CONDOR_SCRATCH_DIR`) → `$TMPDIR` → `/tmp`, plus `cnt-$USER` | `app` builds |
+| **stable** | first writable `<data-dir>/tmp` (extra-root → root → scratch → user) | `data` builds, definitions and the base image |
+
+`$CNT_TMPDIR` selects the **fast** root only. It does not redirect the stable
+one: collapsing the two would put a large data payload, or a multi-GB `.sif`, on
+node-local scratch that the job wipes when it ends. To move the stable root, move
+the data directory (`CNT_ROOT` / `CNT_EXTRA_ROOT`).
+
+An external build (`-f`) is the exception: `app` takes the fast root, while
+`data` and `.def` builds keep their intermediates beside the target prefix, whose
+location you chose.
 
 A few common overrides are shown below for clarity, but the
 mapping is consistent for every key handled by the CLI:
@@ -268,7 +278,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
 | `CNT_PROXY_PERJOB`         | `proxy_perjob`         |
 | `CNT_HELPER_BIND_ALL`      | `helper_bind_all`      |
-| `CNT_TMPDIR`               | (special override)     |
+| `CNT_TMPDIR`               | (fast build root; no config key) |
 
 Example:
 
@@ -392,9 +402,9 @@ build:
   compress_args: -comp zstd -Xcompression-level 8
   block_size: 128k       # SquashFS block size for app/env/external overlays
   data_block_size: 512k  # SquashFS block size for data overlays
-  use_tmp_overlay: false  # Build app overlays inside an ext3 image (app only)
+  app_tmp_overlay: false   # Assemble an app build inside an ext3 overlay (app only)
   always_submit: false    # Always submit as scheduler jobs even without directives
-  tmp_overlay_size: 20g  # Only used when use_tmp_overlay is true
+  app_tmp_overlay_size: 20g  # Only used when app_tmp_overlay is true
 
 # proxy_perjob: true   # auto-start per-job proxy inside submitted jobs
 

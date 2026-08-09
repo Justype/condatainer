@@ -49,15 +49,10 @@ var overlayProfiles = []string{"small", "balanced", "large"}
 
 // registerOverlayCreateFlags registers the full flag set for creating an overlay,
 // shared by 'overlay create' and its 'o' shortcut so the two cannot drift apart.
-//
-// --profile matches image/ext3's Profile vocabulary; the old --type spelling
-// was ambiguous with the overlay file type (.img vs .sqf) and is kept, deprecated,
-// on -t so existing invocations keep working.
+// --profile matches image/ext3's Profile vocabulary.
 func registerOverlayCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("size", "s", "10G", "Set overlay size (e.g., 500M, 10g)")
 	cmd.Flags().StringP("profile", "p", "balanced", "Overlay profile: small/balanced/large files")
-	cmd.Flags().StringP("type", "t", "balanced", "Overlay profile (deprecated)")
-	cmd.Flags().MarkDeprecated("type", "use --profile instead") //nolint:errcheck
 	cmd.Flags().Bool("fakeroot", false, "Create a fakeroot-compatible overlay (owned by root)")
 	cmd.Flags().BoolP("sparse", "S", false, "Create a sparse overlay image (no pre-allocation)")
 	cmd.Flags().StringP("file", "f", "", "Initialize with a Conda environment file (.yml/.yaml) or explicit spec (.txt)")
@@ -78,12 +73,8 @@ func registerOverlayCreateFlags(cmd *cobra.Command) {
 	}) //nolint:errcheck
 }
 
-// overlayProfileFlag returns the chosen profile, honouring the deprecated --type alias.
+// overlayProfileFlag returns the chosen overlay profile.
 func overlayProfileFlag(cmd *cobra.Command) string {
-	if cmd.Flags().Changed("type") {
-		v, _ := cmd.Flags().GetString("type")
-		return v
-	}
 	v, _ := cmd.Flags().GetString("profile")
 	return v
 }

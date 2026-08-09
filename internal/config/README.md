@@ -83,7 +83,7 @@ config.Global  // Singleton instance
 - `Notification` - Notification method when a helper job starts (default: `""` = none). Values: `"bell"` (terminal bell), `"email"` (scheduler email directive), ≥5-char string (ntfy.sh topic, fires from compute node), `""` or `"none"` (silent).
 - `ProxyPerJob` - Auto-start a per-job SOCKS5 proxy inside submitted jobs when no active proxy is found (`proxy_perjob` config key, default: `false`)
 - `Scheduler scheduler.ResourceSpec` - Default scheduler specs (`Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`)
-- `Build BuildConfig` - Build settings (`Defaults scheduler.ResourceSpec`, `TmpSizeMB`, `CompressArgs`, `OverlayType`)
+- `Build BuildConfig` - Build settings (`Defaults scheduler.ResourceSpec`, `AppTmpOverlay`, `AppTmpOverlaySizeMB`, `CompressArgs`, `BlockSize`, `DataBlockSize`)
 
 ## Data Directory Search
 

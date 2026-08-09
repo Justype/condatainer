@@ -238,10 +238,6 @@ var proxyStopCmd = &cobra.Command{
 	},
 }
 
-// proxyShowExport is a hidden compatibility alias for 'proxy export', kept so
-// helper scripts published against v1.5.0 keep working. Not shown in help.
-var proxyShowExport bool
-
 var proxyShowCmd = &cobra.Command{
 	Use:   "show",
 	Args:  cobra.NoArgs,
@@ -250,10 +246,6 @@ var proxyShowCmd = &cobra.Command{
 
 To load all proxy env vars into the shell, use 'condatainer proxy export'.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		if proxyShowExport {
-			printProxyExports()
-			return
-		}
 		if httpURL, ok := proxy.FindActiveProxy(); ok {
 			fmt.Println(httpURL)
 		}
@@ -354,7 +346,6 @@ func init() {
 	proxyStartCmd.Flags().StringVar(&proxyStartVia, "via", "", "SSH server to tunnel through (default: current node)")
 	proxyStartCmd.Flags().IntVar(&proxyStartPort, "port", 0, "Local port to listen on (default: OS-assigned free port)")
 
-	proxyShowCmd.Flags().BoolVar(&proxyShowExport, "export", false, "Alias for 'proxy export'")
 	proxyShowCmd.Flags().MarkHidden("export") //nolint:errcheck
 	proxyDaemonCmd.Flags().BoolVar(&proxyDaemonLocalMode, "local", false, "Per-job mode: bind 127.0.0.1 and write node-local PID file")
 	proxyDaemonCmd.Flags().IntVar(&proxyDaemonReportFd, "report-fd", 0, "File descriptor to report startup result to parent")

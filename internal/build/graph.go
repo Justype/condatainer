@@ -26,14 +26,13 @@ type BuildGraph struct {
 	// Config
 	ctx        context.Context
 	imagesDir  string
-	tmpDir     string
 	submitJobs bool // Whether to actually submit scheduler jobs
 	update     bool // If true, rebuild all overlays even if already installed
 }
 
 // NewBuildGraph creates a BuildGraph from a list of BuildObjects
 // All overlays are stored in imagesDir regardless of type
-func NewBuildGraph(ctx context.Context, buildObjects []*BuildObject, imagesDir, tmpDir string, submitJobs bool, update bool) (*BuildGraph, error) {
+func NewBuildGraph(ctx context.Context, buildObjects []*BuildObject, imagesDir string, submitJobs bool, update bool) (*BuildGraph, error) {
 	bg := &BuildGraph{
 		graph:           make(map[string]*BuildObject),
 		localBuilds:     []*BuildObject{},
@@ -41,7 +40,6 @@ func NewBuildGraph(ctx context.Context, buildObjects []*BuildObject, imagesDir, 
 		jobIDs:          make(map[string]string),
 		ctx:             ctx,
 		imagesDir:       imagesDir,
-		tmpDir:          tmpDir,
 		submitJobs:      submitJobs,
 		update:          update,
 	}
@@ -123,7 +121,7 @@ func (bg *BuildGraph) resolvePlan(ctx context.Context, roots []string, hidden ma
 			if node.Installed != "" {
 				continue
 			}
-			obj, err = NewBuildObject(ctx, name, false, bg.imagesDir, bg.tmpDir, false)
+			obj, err = NewBuildObject(ctx, name, false, bg.imagesDir, false)
 			if err != nil {
 				return fmt.Errorf("failed to create BuildObject for dependency '%s': %w", name, err)
 			}

@@ -90,11 +90,10 @@ Any data, including genome reference indexes.
 
 > `tmp_dir` paths:
 >
-> - For OS `.def`: intermediate `.sif` will created to condatainer root tmp, or next to the target dir.
-> - For app module: use  scheduler tmp/`$TMPDIR`/`/tmp`
-> - For data module: use condatainer root tmp
-> - For external script: determined by `#TYPE:` tag, if app(default) use tmp, if data use target dir
-> - if `$CNT_TMPDIR` is set, it overrides all tmp behaviors.
+> - `app` module: fast local scratch — `$CNT_TMPDIR` → scheduler tmp → `$TMPDIR` → `/tmp`
+> - `data` module, `.def` and the base image: the stable condatainer data-dir tmp
+> - External build (`-f`): `app` uses fast scratch; `data` and `.def` build next to the target dir
+> - `$CNT_TMPDIR` selects the fast root only — it never moves a build off the stable root or off the target dir
 
 | Function | Description |
 | -------- | ----------- |
@@ -220,12 +219,11 @@ If a supported scheduler is available, **CondaTainer** will submit the build job
 
 ### Type Tag
 
-`#TYPE:` only controls temporary build path behavior for **external** `.sh`/`.bash` builds.
+`#TYPE:` sets the recipe's `catalog.Type`, which decides the install prefix, the
+SquashFS block size, and where the build works.
 
-- `#TYPE:app` (default): build in scratch tmp (`utils.GetTmpDir()`, affected by `$CNT_TMPDIR`).
-- `#TYPE:data`: build alongside the target prefix directory.
-
-If `$CNT_TMPDIR` is set, it overrides both `#TYPE:app` and `#TYPE:data` behavior and forces scratch tmp resolution under `$CNT_TMPDIR/cnt-$USER`.
+- `#TYPE:app` (default): fast local scratch, honouring `$CNT_TMPDIR`.
+- `#TYPE:data`: the stable data-dir tmp, or — for an external build — alongside the target prefix.
 
 Accepted aliases (case-insensitive):
 

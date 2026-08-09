@@ -187,7 +187,7 @@ func TestResolvedSpecRendersValidManifest(t *testing.T) {
 	}, "\n")))
 
 	imagesDir := t.TempDir()
-	obj, err := NewBuildObject(context.Background(), "samtools/1.23.1", false, imagesDir, "", false)
+	obj, err := NewBuildObject(context.Background(), "samtools/1.23.1", false, imagesDir, false)
 	if err != nil {
 		t.Fatalf("NewBuildObject: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestResolvedSpecRendersValidManifest(t *testing.T) {
 func TestResolvedSpecForCondaFallback(t *testing.T) {
 	setTestSource(t, t.TempDir())
 
-	obj, err := NewBuildObject(context.Background(), "numpy/2.1.0", false, t.TempDir(), "", false)
+	obj, err := NewBuildObject(context.Background(), "numpy/2.1.0", false, t.TempDir(), false)
 	if err != nil {
 		t.Fatalf("NewBuildObject: %v", err)
 	}

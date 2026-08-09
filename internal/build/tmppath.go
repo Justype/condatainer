@@ -1,7 +1,6 @@
 package build
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -10,11 +9,14 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// A build works in fast local scratch (utils.GetTmpDir) or in the stable
-// writable tmp (config.GetWritableTmpDir). See the README's Workspace Strategy.
+// A build works under one of two roots — fast local scratch (utils.GetTmpDir,
+// which CNT_TMPDIR and then TMPDIR select) or the stable writable tmp
+// (config.GetWritableTmpDir). See the README's Workspace Strategy for which
+// build gets which, and why.
 
-// tmpRootForType picks where a build does its work: the stable writable tmp for
-// data, fast local scratch for everything else.
+// tmpRootForType picks the root for a catalog build: the stable writable tmp for
+// data, fast local scratch for everything else. A definition build overrides
+// this once its type is known — see tmpRootForDef.
 func tmpRootForType(typ catalog.Type) string {
 	if typ == catalog.TypeData {
 		return config.GetWritableTmpDir()
@@ -22,20 +24,17 @@ func tmpRootForType(typ catalog.Type) string {
 	return utils.GetTmpDir()
 }
 
-// resolveTmpDirForDef returns the tmp directory for definition builds, which
-// keep their recipe and the SIF apptainer writes in one place.
-func resolveTmpDirForDef() string {
+// tmpRootForDef is the root for a definition build, which keeps its recipe and
+// the multi-GB SIF apptainer writes in one place.
+func tmpRootForDef() string {
 	return config.GetWritableTmpDir()
 }
 
-// resolveTmpDirForExternal resolves tmp directory for external source builds by TYPE.
-// CNT_TMPDIR has highest priority and overrides all external TYPE behaviors.
-// Without CNT_TMPDIR: TYPE=app (default) uses dynamic scratch (utils.GetTmpDir), TYPE=data uses target-adjacent path.
-func resolveTmpDirForExternal(targetDir, externalType string) string {
-	if os.Getenv("CNT_TMPDIR") != "" {
-		return utils.GetTmpDir()
-	}
-	if strings.ToLower(strings.TrimSpace(externalType)) == "data" {
+// tmpRootForExternal picks the root for an external build (-f). An app goes to
+// fast local scratch; data and definitions keep their large intermediates beside
+// the target, whose location the user chose.
+func tmpRootForExternal(targetDir string, typ catalog.Type, isDef bool) string {
+	if isDef || typ == catalog.TypeData {
 		return targetDir
 	}
 	return utils.GetTmpDir()

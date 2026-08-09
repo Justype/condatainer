@@ -71,32 +71,32 @@ func expect(name, root, ext, target string) wantPaths {
 // to name a .img unconditionally, so Overlay was set even in directory mode where
 // nothing ever created it — the reason UsesImage now decides the mode.
 func TestCondaConstructorPaths(t *testing.T) {
-	for _, useTmpOverlay := range []bool{false, true} {
-		name := map[bool]string{false: "dir mode", true: "ext3 mode"}[useTmpOverlay]
+	for _, appTmpOverlay := range []bool{false, true} {
+		name := map[bool]string{false: "dir mode", true: "ext3 mode"}[appTmpOverlay]
 		t.Run(name, func(t *testing.T) {
-			prev := config.Global.Build.UseTmpOverlay
-			config.Global.Build.UseTmpOverlay = useTmpOverlay
-			t.Cleanup(func() { config.Global.Build.UseTmpOverlay = prev })
+			prev := config.Global.Build.AppTmpOverlay
+			config.Global.Build.AppTmpOverlay = appTmpOverlay
+			t.Cleanup(func() { config.Global.Build.AppTmpOverlay = prev })
 
 			dir := t.TempDir()
 			const module = "samtools/1.23.1"
 
-			b, err := NewCondaObjectWithSource(module, "", dir, dir, false)
+			b, err := NewCondaObjectWithSource(module, "", dir, false)
 			if err != nil {
 				t.Fatalf("NewCondaObjectWithSource: %v", err)
 			}
 			ext := ""
-			if useTmpOverlay {
+			if appTmpOverlay {
 				ext = ".img"
 			}
 			checkPaths(t, b, expect(module, b.ws.Root, ext,
 				filepath.Join(dir, "samtools--1.23.1.sqf")))
 
-			if b.ws.UsesImage() != useTmpOverlay {
-				t.Errorf("UsesImage = %v, want %v", b.ws.UsesImage(), useTmpOverlay)
+			if b.ws.UsesImage() != appTmpOverlay {
+				t.Errorf("UsesImage = %v, want %v", b.ws.UsesImage(), appTmpOverlay)
 			}
 			// An app stages inside the image whenever there is one.
-			if want := !useTmpOverlay; b.ws.HostPayload() != want {
+			if want := !appTmpOverlay; b.ws.HostPayload() != want {
 				t.Errorf("HostPayload = %v, want %v", b.ws.HostPayload(), want)
 			}
 			if b.spec.Image.Type != catalog.TypeApp {
@@ -114,7 +114,7 @@ func TestExternalConstructorPaths(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		isDef         bool
-		useTmpOverlay bool
+		appTmpOverlay bool
 		wantExt       string
 		fileName      string
 	}{
@@ -124,9 +124,9 @@ func TestExternalConstructorPaths(t *testing.T) {
 		{"definition, ext3 mode", true, true, ".sif", "demo.def"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			prev := config.Global.Build.UseTmpOverlay
-			config.Global.Build.UseTmpOverlay = tc.useTmpOverlay
-			t.Cleanup(func() { config.Global.Build.UseTmpOverlay = prev })
+			prev := config.Global.Build.AppTmpOverlay
+			config.Global.Build.AppTmpOverlay = tc.appTmpOverlay
+			t.Cleanup(func() { config.Global.Build.AppTmpOverlay = prev })
 
 			dir := t.TempDir()
 			prefix := filepath.Join(dir, "demo")
@@ -148,7 +148,7 @@ func TestExternalConstructorPaths(t *testing.T) {
 // path together, never some. What the mode becomes is TestRetargetDropsExt3's
 // job; this one checks the set stays internally consistent.
 func TestRetargetMovesEveryPath(t *testing.T) {
-	withTmpOverlayMode(t, true)
+	withAppTmpOverlayMode(t, true)
 	dir := t.TempDir()
 	const name = "grch38/genome/gencode"
 
@@ -208,22 +208,22 @@ func TestWorkspaceForLayout(t *testing.T) {
 	}
 }
 
-// withTmpOverlayMode sets use_tmp_overlay for one test.
-func withTmpOverlayMode(t *testing.T, on bool) {
+// withAppTmpOverlayMode sets build.app_tmp_overlay for one test.
+func withAppTmpOverlayMode(t *testing.T, on bool) {
 	t.Helper()
-	prev := config.Global.Build.UseTmpOverlay
-	config.Global.Build.UseTmpOverlay = on
-	t.Cleanup(func() { config.Global.Build.UseTmpOverlay = prev })
+	prev := config.Global.Build.AppTmpOverlay
+	config.Global.Build.AppTmpOverlay = on
+	t.Cleanup(func() { config.Global.Build.AppTmpOverlay = prev })
 }
 
-// use_tmp_overlay is an app-build optimisation: the ext3 image keeps a conda
+// build.app_tmp_overlay is an app-build optimisation: the ext3 overlay keeps a conda
 // environment's thousands of small files off the host's inode budget. No other
 // type may be put inside one — data stages on the host, and os and base are
 // definition builds where apptainer owns the rootfs.
 func TestExt3IsAppOnly(t *testing.T) {
 	for _, on := range []bool{false, true} {
 		t.Run(map[bool]string{false: "use_tmp_overlay off", true: "use_tmp_overlay on"}[on], func(t *testing.T) {
-			withTmpOverlayMode(t, on)
+			withAppTmpOverlayMode(t, on)
 
 			wantApp := ""
 			if on {
@@ -253,7 +253,7 @@ func TestExt3IsAppOnly(t *testing.T) {
 
 // The same rule through a constructor, which is where it actually bites.
 func TestDataBuildNeverGetsExt3(t *testing.T) {
-	withTmpOverlayMode(t, true) // the mode that would otherwise hand it an image
+	withAppTmpOverlayMode(t, true) // the mode that would otherwise hand it an overlay
 
 	dir := t.TempDir()
 	src := filepath.Join(dir, "mydata.sh")
@@ -280,7 +280,7 @@ func TestDataBuildNeverGetsExt3(t *testing.T) {
 // is the product and use_tmp_overlay has nothing to say about it.
 func TestDefinitionIgnoresExt3Mode(t *testing.T) {
 	for _, on := range []bool{false, true} {
-		withTmpOverlayMode(t, on)
+		withAppTmpOverlayMode(t, on)
 		dir := t.TempDir()
 		src := filepath.Join(dir, "demo.def")
 		if err := os.WriteFile(src, []byte("Bootstrap: docker\nFrom: alpine:3.19\n"), 0o644); err != nil {
@@ -302,7 +302,7 @@ func TestDefinitionIgnoresExt3Mode(t *testing.T) {
 // The guess is corrected after the recipe is read. app -> data must drop the
 // image, not merely move it: carrying the old extension across was the bug.
 func TestRetargetDropsExt3WhenTypeBecomesData(t *testing.T) {
-	withTmpOverlayMode(t, true)
+	withAppTmpOverlayMode(t, true)
 
 	dir := t.TempDir()
 	const name = "grch38/genome/gencode"

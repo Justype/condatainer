@@ -150,7 +150,6 @@ func TestParseScriptMetadata_NcpusFromPBS(t *testing.T) {
 
 func TestNewBuildObject_DoesNotParseInteractiveWhenInstalled(t *testing.T) {
 	imagesDir := t.TempDir()
-	tmpDir := t.TempDir()
 
 	// Point the catalog at a collection providing a recipe with an #INPUT:
 	// prompt, so parsing it would block on a prompt if it were attempted.
@@ -169,7 +168,7 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenInstalled(t *testing.T) {
 	config.InitDataPaths()
 
 	// Call NewBuildObject: should return without attempting to parse the recipe inputs
-	bo, err := NewBuildObject(context.Background(), nameVersion, false, imagesDir, tmpDir, false)
+	bo, err := NewBuildObject(context.Background(), nameVersion, false, imagesDir, false)
 	if err != nil {
 		t.Fatalf("NewBuildObject returned error: %v", err)
 	}
@@ -180,7 +179,6 @@ func TestNewBuildObject_DoesNotParseInteractiveWhenInstalled(t *testing.T) {
 
 func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 	imagesDir := t.TempDir()
-	tmpDir := t.TempDir()
 
 	// Point the catalog at a collection providing a recipe with an #INPUT:
 	// prompt, so parsing it would block on a prompt if it were attempted.
@@ -189,9 +187,8 @@ func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 
 	// Simulate a build in progress: create a live JSON lock file next to the target image.
 	// Use the current process PID and hostname so isBuildLockStale() treats it as active.
-	// NewBuildObject overrides tmpDir via resolveTmpDirForConda(), so tmp artifacts
-	// in the caller-supplied tmpDir are invisible to it. The build-in-progress guard
-	// checks base.tgt.Lock = target path + ".lock" (lives in imagesDir).
+	// The build-in-progress guard checks base.tgt.Lock = target path + ".lock",
+	// which lives in imagesDir.
 	nameVersion := "cellranger/8.0.1"
 	sqfName := strings.ReplaceAll(catalog.Normalize(nameVersion), "/", "--") + ".sqf"
 	lockPath := filepath.Join(imagesDir, sqfName+".lock")
@@ -214,7 +211,7 @@ func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 	config.InitDataPaths()
 
 	// Call NewBuildObject: should return an error with lock details.
-	_, err = NewBuildObject(context.Background(), nameVersion, false, imagesDir, tmpDir, false)
+	_, err = NewBuildObject(context.Background(), nameVersion, false, imagesDir, false)
 	if err == nil {
 		t.Fatal("expected error when build lock file exists, got nil")
 	}

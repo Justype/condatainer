@@ -36,7 +36,7 @@ type HelperScriptMeta struct {
 	// RequiredOverlays is a space-separated template of named condatainer overlays
 	// (SquashFS images) to load before the helper runs. {KEY} tokens are substituted
 	// from resolved #PARAM: values (e.g. "rstudio-server build-essential r{POSIT_R}").
-	// Parsed from #REQUIRED_OVERLAYS: (alias: legacy #OVERLAY_PACKAGES:).
+	// Parsed from #REQUIRED_OVERLAYS:.
 	RequiredOverlays string
 	// PostInstallCmd is run inside the container after micromamba installs ImgPackages.
 	PostInstallCmd string
@@ -183,7 +183,7 @@ func stripInlineComment(s string) string {
 
 // ParseHelperScriptMeta extracts metadata from a helper script.
 // Recognised headers: #NCPUS:, #MEM:, #TIME:, #GPU:, #IMG_PACKAGES:, #REQUIRED_OVERLAYS:,
-// #OVERLAY_PACKAGES: (legacy), #POST_INSTALL_CMD:, #SINGLETON:, #BIND:, #VALUE:.
+// #POST_INSTALL_CMD:, #SINGLETON:, #BIND:, #VALUE:.
 func ParseHelperScriptMeta(scriptPath string) (HelperScriptMeta, error) {
 	if !utils.FileExists(scriptPath) {
 		return HelperScriptMeta{}, fmt.Errorf("helper script not found at %s", scriptPath)
@@ -221,10 +221,8 @@ func ParseHelperScriptMeta(scriptPath string) (HelperScriptMeta, error) {
 		case strings.HasPrefix(line, "#IMG_PACKAGES:"):
 			meta.ImgRequired = true
 			meta.ImgPackages = stripInlineComment(strings.TrimSpace(line[len("#IMG_PACKAGES:"):]))
-		case strings.HasPrefix(line, "#REQUIRED_OVERLAYS:"),
-			strings.HasPrefix(line, "#OVERLAY_PACKAGES:"):
-			idx := strings.Index(line, ":") + 1
-			meta.RequiredOverlays = stripInlineComment(strings.TrimSpace(line[idx:]))
+		case strings.HasPrefix(line, "#REQUIRED_OVERLAYS:"):
+			meta.RequiredOverlays = stripInlineComment(strings.TrimSpace(line[len("#REQUIRED_OVERLAYS:"):]))
 		case strings.HasPrefix(line, "#BIND:"):
 			if b := stripInlineComment(strings.TrimSpace(line[len("#BIND:"):])); b != "" {
 				meta.Binds = append(meta.Binds, b)

@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/Justype/condatainer/cmd/internal/ui"
-	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/spf13/cobra"

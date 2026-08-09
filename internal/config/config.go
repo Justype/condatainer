@@ -24,14 +24,14 @@ const GitHubRepo = "Justype/condatainer"
 
 // BuildConfig holds default settings for build operations
 type BuildConfig struct {
-	Defaults      scheduler.ResourceSpec // Default resource spec for build job submissions
-	TmpSizeMB     int                    // Size of temporary overlay in MB
-	CompressArgs  string                 // mksquashfs compression arguments
-	BlockSize     string                 // mksquashfs block size for app/env/external overlays (DefaultBlockSize)
-	DataBlockSize string                 // mksquashfs block size for data/ref overlays (DefaultDataBlockSize)
-	UseTmpOverlay bool                   // Use a temporary overlay instead of a temp directory (default: false)
-	AlwaysSubmit  bool                   // Always submit builds as scheduler jobs even without script directives (default: false)
-	Channels      []string               // conda channels in priority order (default: [conda-forge, bioconda])
+	Defaults            scheduler.ResourceSpec // Default resource spec for build job submissions
+	CompressArgs        string                 // mksquashfs compression arguments
+	BlockSize           string                 // mksquashfs block size for app/env/external overlays (DefaultBlockSize)
+	DataBlockSize       string                 // mksquashfs block size for data/ref overlays (DefaultDataBlockSize)
+	AppTmpOverlay       bool                   // Assemble an app build's payload in a temporary ext3 overlay (default: false)
+	AppTmpOverlaySizeMB int                    // Size of that overlay in MB
+	AlwaysSubmit        bool                   // Always submit builds as scheduler jobs even without script directives (default: false)
+	Channels            []string               // conda channels in priority order (default: [conda-forge, bioconda])
 }
 
 // Config holds global application settings
@@ -135,12 +135,12 @@ const (
 	DefaultBlockSize     = "128k"
 	DefaultDataBlockSize = "512k"
 
-	DefaultNcpus        = 4     // CPUs for a build job
-	DefaultMemMB        = 8192  // memory for a build job
-	DefaultBuildTime    = "2h"  // walltime for a build job
-	DefaultTmpSizeMB    = 20480 // temporary ext3 overlay, 20GB
-	DefaultCacheTTLDay  = 7     // remote recipe metadata cache, 1 week
-	DefaultNotification = "web"
+	DefaultNcpus               = 4     // CPUs for a build job
+	DefaultMemMB               = 8192  // memory for a build job
+	DefaultBuildTime           = "2h"  // walltime for a build job
+	DefaultAppTmpOverlaySizeMB = 20480 // app build's temporary ext3 overlay, 20GB
+	DefaultCacheTTLDay         = 7     // remote recipe metadata cache, 1 week
+	DefaultNotification        = "web"
 )
 
 // DefaultBuildDuration is DefaultBuildTime as a duration, so the two cannot disagree.
@@ -210,11 +210,11 @@ func LoadDefaults(executablePath string) {
 				MemPerNodeMB: DefaultMemMB,
 				Time:         DefaultBuildDuration,
 			},
-			TmpSizeMB:     DefaultTmpSizeMB,
-			CompressArgs:  ArgsForCompress("lz4"), // zstd only compatible with apptainer version > 1.4
-			BlockSize:     DefaultBlockSize,
-			DataBlockSize: DefaultDataBlockSize,
-			Channels:      DefaultChannels(),
+			AppTmpOverlaySizeMB: DefaultAppTmpOverlaySizeMB,
+			CompressArgs:        ArgsForCompress("lz4"), // zstd only compatible with apptainer version > 1.4
+			BlockSize:           DefaultBlockSize,
+			DataBlockSize:       DefaultDataBlockSize,
+			Channels:            DefaultChannels(),
 		},
 	}
 }
@@ -301,16 +301,14 @@ func GetBaseImage() (string, error) {
 		name, strings.Join(GetImageSearchPaths(), ", "))
 }
 
-// GetWritableTmpDir returns the first writable tmp directory.
-// Uses the same SearchDir + firstWritableDir logic as the other writable-dir resolvers:
-// shared dirs (extra-root, root) create tmp only when the parent already exists;
-// personal dirs (scratch, user) always create on first use.
+// GetWritableTmpDir returns the first writable tmp directory under the data
+// dirs — the stable root, for work too large or too long-lived for node-local
+// scratch. Shared dirs (extra-root, root) create tmp only when the parent
+// already exists; personal dirs (scratch, user) always create on first use.
+//
+// CNT_TMPDIR does not redirect this: it selects the fast root, and collapsing
+// the two would put a data build's payload on scratch that a job wipes.
 func GetWritableTmpDir() string {
-	// Global override for all build temp paths
-	if os.Getenv("CNT_TMPDIR") != "" {
-		return utils.GetTmpDir()
-	}
-
 	var dirs []SearchDir
 	if extraRoot := GetExtraRootDir(); extraRoot != "" {
 		dirs = append(dirs, SearchDir{Path: filepath.Join(extraRoot, "tmp")})
@@ -329,6 +327,7 @@ func GetWritableTmpDir() string {
 		return dir
 	}
 
-	// Last resort: current directory
-	return "tmp"
+	// No writable data dir at all: fall back to the fast root rather than a
+	// relative path, which would put the workspace wherever the caller stood.
+	return utils.GetTmpDir()
 }

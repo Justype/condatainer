@@ -181,7 +181,7 @@ condatainer overlay create [OPTIONS] [path]
 **Options:**
 
 * `-s`, `--size [SIZE]`: Size of the overlay image (default: 10G). Supports units like `20G`, `2048M`.
-* `-p`, `--profile [PROFILE]`: Overlay profile: `small`, `balanced`, or `large` (default: balanced). Aliases: `conda`/`python` = `small`; `data`/`genome` = `large`. (`-t`/`--type` is a deprecated alias.)
+* `-p`, `--profile [PROFILE]`: Overlay profile: `small`, `balanced`, or `large` (default: balanced). Aliases: `conda`/`python` = `small`; `data`/`genome` = `large`.
 * `-f`, `--file [FILE]`: Initialize with a Conda environment file (.yml or .yaml).
 * `--fakeroot`: Create image compatible with fakeroot (owned by root, must use with `--fakeroot` later).
 * `-S`, `--sparse`: Create a sparse image file (no pre-allocation).
@@ -390,10 +390,10 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
 
 **Build Flags:**
 
-* `--temp-size [SIZE]`: Size of temporary overlay (default: 20G). Only used when `--use-tmp-overlay` is active.
+* `--app-tmp-overlay-size [SIZE]`: Size of the temporary build overlay (default: 20G). Only used when `--app-tmp-overlay` is active. Given on the command line it overrides `build.app_tmp_overlay_size`; left off, the config value stands.
 * `--block-size [SIZE]`: SquashFS block size for app/env/external overlays (e.g. `128k`, `512k`; default: `128k`). Must be a power of two between `4k` and `1m`.
 * `--data-block-size [SIZE]`: SquashFS block size for data/reference overlays (e.g. `512k`, `1m`; default: `512k`). Must be a power of two between `4k` and `1m`.
-* `--use-tmp-overlay`: Build **app** overlays inside a temporary ext3 image instead of host directories. Equivalent to setting `build.use_tmp_overlay = true` in config. Can be substantially faster when the build tmp directory is on a network filesystem, and keeps a conda environment's many small files off its inode quota.
+* `--app-tmp-overlay`: Assemble an **app** build inside a temporary ext3 overlay instead of host directories. Equivalent to setting `build.app_tmp_overlay = true` in config. Can be substantially faster when the build tmp directory is on a network filesystem, and keeps a conda environment's many small files off its inode quota.
 
   Applies to `app` builds only. A `data` build stages its payload on the host either way — it is a few large files, so an image would buy nothing — and `os`/`base` are definition builds where Apptainer writes the image itself.
 * `--always-submit`: Submit all builds as scheduler jobs, even when the build script has no scheduler directives.

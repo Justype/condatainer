@@ -275,7 +275,7 @@ payload location)`. The tmp root and the mode are both functions of the type:
 
 | type | scratch image | payload |
 |---|---|---|
-| `app` | `.img` under `use_tmp_overlay`, else none | in the image, or host in directory mode |
+| `app` | `.img` under `build.app_tmp_overlay`, else none | in the image, or host in directory mode |
 | `data` | **never** — see below | always host |
 | `os`, `base` | `.sif`, always | apptainer's rootfs |
 
@@ -289,15 +289,26 @@ never `config.Global` a second time.
 
 Each build type also uses a different base directory for build artifacts:
 
-| Build path | `tmpDir` source | Rationale |
+| Build path | root | picked by |
 |---|---|---|
-| Conda (`name/version`) | `utils.GetTmpDir()` | Fast local node storage (scheduler TMPDIR → TMPDIR → `/tmp/cnt-$USER`) |
-| Script, type `app` | `utils.GetTmpDir()` | Fast local node storage |
-| Script, type `data` | `config.GetWritableTmpDir()` | Stable condatainer data path (large datasets) |
-| Def (internal) | `config.GetWritableTmpDir()` | Stable path; set in `createConcreteType` after type is resolved |
-| External sh | `filepath.Dir(targetPrefix)` | Next to output target (user controls location) |
-| External def | `filepath.Dir(targetPrefix)` | Next to output target (user controls location) |
-| Base image | `config.GetWritableTmpDir()` | Stable condatainer data path |
+| Conda (`name/version`) | fast | `tmpRootForType` |
+| Script, type `app` | fast | `tmpRootForType` |
+| Script, type `data` | stable | `tmpRootForType` |
+| Def (internal), base image | stable | `tmpRootForDef`, applied by `asDefinitionBuild` |
+| External `-f`, type `app` | fast | `tmpRootForExternal` |
+| External `-f`, type `data` or `.def` | `filepath.Dir(targetPrefix)` | `tmpRootForExternal` |
+
+The **fast** root is `utils.GetTmpDir()`: `$CNT_TMPDIR` → scheduler scratch →
+`$TMPDIR` → `/tmp`, always plus `cnt-$USER`. The **stable** root is
+`config.GetWritableTmpDir()`: the first writable `<data-dir>/tmp`, falling back
+to the fast root when no data directory is writable at all.
+
+`$CNT_TMPDIR` moves the fast root and nothing else. It used to short-circuit
+`GetWritableTmpDir` as well, which switched off this whole table: exporting it to
+speed up a conda build silently moved the next data build onto node-local scratch
+that the job wipes. An external `data` or `.def` build keeps its intermediates
+beside the target for the same reason — the user picked that location, and a
+multi-GB `.sif` is the artifact least able to survive a scratch quota.
 
 `utils.GetTmpDir()` priority: scheduler-assigned scratch (`SLURM_TMPDIR`, `PBS_TMPDIR`, `LSF_TMPDIR`, `_CONDOR_SCRATCH_DIR`) → `TMPDIR`/`TEMP`/`TMP` → `/tmp/cnt-$USER`.
 

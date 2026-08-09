@@ -28,12 +28,12 @@ var (
 	createPrefix        string
 	createFile          string
 	createFrom          string
-	createTempSize      string
+	createAppTmpOvlSize string
 	createBlockSize     string
 	createDataBlockSize string
 	createChannels      []string
 	createUpdate        bool
-	createUseTmpOverlay bool
+	createAppTmpOverlay bool
 	createAlwaysSubmit  bool
 
 	// compression flags are generated dynamically from config.CompressOptions
@@ -42,8 +42,8 @@ var (
 
 	// buildFlagNames is the set of flags shown under "Build Flags:" in help.
 	buildFlagNames = map[string]bool{
-		"temp-size": true, "block-size": true, "data-block-size": true, "use-tmp-overlay": true,
-		"always-submit": true, "no-submit": true,
+		"app-tmp-overlay": true, "app-tmp-overlay-size": true, "block-size": true,
+		"data-block-size": true, "always-submit": true, "no-submit": true,
 	}
 )
 
@@ -124,13 +124,14 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 			config.Global.Build.Channels = createChannels
 		}
 
-		// 5. Handle temp size
-		if createTempSize != "" {
-			sizeMB, err := utils.ParseSizeToMB(createTempSize)
+		// 5. Handle the app build overlay size. Only when the flag was given:
+		// its default would otherwise outrank build.app_tmp_overlay_size.
+		if cmd.Flags().Changed("app-tmp-overlay-size") {
+			sizeMB, err := utils.ParseSizeToMB(createAppTmpOvlSize)
 			if err != nil {
-				ExitWithError("Invalid temp size: %v", err)
+				ExitWithError("Invalid --app-tmp-overlay-size: %v", err)
 			}
-			config.Global.Build.TmpSizeMB = sizeMB
+			config.Global.Build.AppTmpOverlaySizeMB = sizeMB
 		}
 
 		// 5b. Handle block sizes
@@ -147,9 +148,9 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 			config.Global.Build.DataBlockSize = createDataBlockSize
 		}
 
-		// 5c. Handle use-tmp-overlay
-		if createUseTmpOverlay {
-			config.Global.Build.UseTmpOverlay = true
+		// 5c. Handle the app build overlay mode
+		if createAppTmpOverlay {
+			config.Global.Build.AppTmpOverlay = true
 		}
 
 		// 6. Normalize package names (only for build-script mode, not for conda/prefix/source modes)
@@ -205,12 +206,12 @@ func init() {
 	f.StringVarP(&createPrefix, "prefix", "p", "", "Custom prefix path for the overlay")
 	f.StringVarP(&createFile, "file", "f", "", "Path to definition file (.yaml, .txt, .sh, .def)")
 	f.StringVar(&createFrom, "from", "", "Build from an external image URI (e.g., docker://ubuntu:22.04)")
-	f.StringVar(&createTempSize, "temp-size", "20G", "Size of temporary overlay")
 	f.StringVar(&createBlockSize, "block-size", "", "SquashFS block size of app/external overlays (e.g. 256k)")
 	f.StringVar(&createDataBlockSize, "data-block-size", "", "SquashFS block size of data overlays (e.g. 512k, 1m)")
 	f.StringArrayVarP(&createChannels, "channel", "c", nil, "Conda channel to use (overrides config; repeatable)")
 	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist")
-	f.BoolVar(&createUseTmpOverlay, "use-tmp-overlay", false, "Use a temporary overlay instead of a temp directory")
+	f.BoolVar(&createAppTmpOverlay, "app-tmp-overlay", false, "Assemble an app build in a temporary ext3 overlay instead of host directories")
+	f.StringVar(&createAppTmpOvlSize, "app-tmp-overlay-size", "20G", "Size of that temporary overlay")
 	f.BoolVar(&createAlwaysSubmit, "always-submit", false, "Submit all builds as scheduler jobs, even no directives")
 	f.BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (build locally)")
 
@@ -509,7 +510,7 @@ func runCreatePackages(ctx context.Context, packages []string) {
 			}
 		}
 
-		bo, err := build.NewBuildObject(ctx, pkg, false, imagesDir, config.GetWritableTmpDir(), createUpdate)
+		bo, err := build.NewBuildObject(ctx, pkg, false, imagesDir, createUpdate)
 		if err != nil {
 			ExitWithError("Failed to create build object for %s: %v", pkg, err)
 		}
@@ -517,7 +518,7 @@ func runCreatePackages(ctx context.Context, packages []string) {
 		buildObjects = append(buildObjects, bo)
 	}
 
-	graph, err := build.NewBuildGraph(ctx, buildObjects, imagesDir, config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
+	graph, err := build.NewBuildGraph(ctx, buildObjects, imagesDir, config.Global.SubmitJob, createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build graph: %v", err)
 	}
@@ -568,7 +569,7 @@ func buildExternalSource(ctx context.Context, targetPrefix, source string, isApp
 	}
 
 	graph, err := build.NewBuildGraph(ctx, []*build.BuildObject{bo}, outputDir,
-		config.GetWritableTmpDir(), config.Global.SubmitJob, createUpdate)
+		config.Global.SubmitJob, createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build graph: %v", err)
 	}
@@ -627,7 +628,7 @@ func runCreateWithName(ctx context.Context, packages []string) {
 	}
 
 	// Create CondaBuildObject using the new factory function
-	bo, err := build.NewCondaObjectWithSource(normalizedName, buildSource, imagesDir, config.GetWritableTmpDir(), createUpdate)
+	bo, err := build.NewCondaObjectWithSource(normalizedName, buildSource, imagesDir, createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build object: %v", err)
 	}
@@ -655,7 +656,7 @@ func runCreateWithPrefix(ctx context.Context) {
 	if utils.IsCondaFile(createFile) {
 		// Conda env/spec file - use NewCondaObjectWithSource
 		absFile, _ := filepath.Abs(createFile)
-		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, outputDir, createUpdate)
+		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, createUpdate)
 		if err != nil {
 			ExitWithError("Failed to create build object: %v", err)
 		}
@@ -679,7 +680,7 @@ func runCreateWithPrefixAndPackages(ctx context.Context, packages []string) {
 	baseName := filepath.Base(absPrefix)
 	buildSource := strings.Join(packages, ",")
 
-	bo, err := build.NewCondaObjectWithSource(baseName, buildSource, outputDir, outputDir, createUpdate)
+	bo, err := build.NewCondaObjectWithSource(baseName, buildSource, outputDir, createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build object: %v", err)
 	}

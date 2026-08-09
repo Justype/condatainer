@@ -134,7 +134,7 @@ func (b *BuildObject) buildDependencies(ctx context.Context, buildDeps bool) err
 		if parsed, err := catalog.ParseDep(dep); err == nil {
 			preferredNV = parsed.NameVersion()
 		}
-		depObj, err := NewBuildObject(ctx, preferredNV, false, writableImagesDir, config.GetWritableTmpDir(), false)
+		depObj, err := NewBuildObject(ctx, preferredNV, false, writableImagesDir, false)
 		if err != nil {
 			return fmt.Errorf("failed to create build object for dependency %s: %w", preferredNV, err)
 		}

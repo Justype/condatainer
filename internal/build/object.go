@@ -414,7 +414,7 @@ func (b *BuildObject) CreateTmpOverlay(ctx context.Context, force bool) error {
 
 	// Sparse for speed, quiet because a scratch image's specs are noise.
 	if err := ext3.CreateWithOptions(ctx, &ext3.CreateOptions{
-		Path: b.ws.Overlay, SizeMB: config.Global.Build.TmpSizeMB,
+		Path: b.ws.Overlay, SizeMB: config.Global.Build.AppTmpOverlaySizeMB,
 		UID: os.Getuid(), GID: os.Getgid(),
 		Profile: ext3.ProfileDefault, Sparse: true, FilesystemType: "ext3", Quiet: true,
 	}); err != nil {
@@ -424,7 +424,7 @@ func (b *BuildObject) CreateTmpOverlay(ctx context.Context, force bool) error {
 	return nil
 }
 
-// CreateBuildDirs creates host directories for dir-mode builds (use_tmp_overlay=false).
+// CreateBuildDirs creates host directories for dir-mode builds (app_tmp_overlay=false).
 // Layout: <buildDir>/cnt/ (bound as /cnt) and <buildDir>/tmp/ (bound as ScratchPath).
 // Checks both dir-mode (buildDir) and ext3-mode (.img) artifacts for cross-mode stale detection.
 func (b *BuildObject) CreateBuildDirs(ctx context.Context, force bool) error {
@@ -640,10 +640,10 @@ func (b *BuildObject) resolveResourceSpec() error {
 }
 
 // appExt3ScratchExt returns the ext3 scratch-image extension for a build: ".img"
-// for an app under use_tmp_overlay, "" for every other type whatever the config
+// for an app under build.app_tmp_overlay, "" for every other type whatever the config
 // says. See the README's Workspace Strategy.
 func appExt3ScratchExt(typ catalog.Type) string {
-	if typ != catalog.TypeApp || !config.Global.Build.UseTmpOverlay {
+	if typ != catalog.TypeApp || !config.Global.Build.AppTmpOverlay {
 		return ""
 	}
 	return ".img"
@@ -652,7 +652,7 @@ func appExt3ScratchExt(typ catalog.Type) string {
 // NewBuildObject creates a BuildObject from a name/version string
 // Format: "name/version" for conda/shell, "name" for def, "prefix/name/version" for ref
 // All overlays are stored in imagesDir regardless of type
-func NewBuildObject(ctx context.Context, nameVersion string, external bool, imagesDir string, _ string, update bool) (*BuildObject, error) {
+func NewBuildObject(ctx context.Context, nameVersion string, external bool, imagesDir string, update bool) (*BuildObject, error) {
 	normalized := catalog.Normalize(nameVersion)
 
 	// Handle channel annotation (e.g. "bioconda::star/2.7.11b"):
@@ -675,7 +675,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 	typ := catalog.DeriveType(normalized, "", false, "")
 
 	// Use fast local storage for app builds; keep a stable path for data.
-	// Def builds will override this in createConcreteType via resolveTmpDirForDef.
+	// A definition build re-sites this in asDefinitionBuild once its type is known.
 	tmpDir := tmpRootForType(typ)
 
 	// Make tmpDir absolute
@@ -730,7 +730,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 // NewCondaObjectWithSource creates a Conda BuildObject packing one image from a
 // custom buildSource: a YAML or spec file path, or a comma-separated package
 // list. This is the -n flag.
-func NewCondaObjectWithSource(nameVersion, buildSource string, imagesDir, _ string, update bool) (*BuildObject, error) {
+func NewCondaObjectWithSource(nameVersion, buildSource, imagesDir string, update bool) (*BuildObject, error) {
 	normalized := catalog.Normalize(nameVersion)
 
 	// A conda environment is an app, so it always gets fast local scratch.
@@ -819,13 +819,13 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 		externalType = parsedType
 	}
 
-	// Build artifacts go next to the target (user controls target location)
-	targetDir := resolveTmpDirForExternal(filepath.Dir(targetPrefix), externalType)
+	// A definition produces a SIF; a shell build follows the configured mode.
+	externalTyp := catalog.DeriveType(nameVersion, "", isDef, externalType)
+
+	targetDir := tmpRootForExternal(filepath.Dir(targetPrefix), externalTyp, isDef)
 	if absDir, err := filepath.Abs(targetDir); err == nil {
 		targetDir = absDir
 	}
-	// A definition produces a SIF; a shell build follows the configured mode.
-	externalTyp := catalog.DeriveType(nameVersion, "", isDef, externalType)
 	ext := appExt3ScratchExt(externalTyp)
 	if isDef {
 		ext = ".sif" // apptainer owns the rootfs
@@ -915,7 +915,7 @@ func createConcreteType(ctx context.Context, base *BuildObject, tmpDir string) (
 // writable tmp — and captures the Spec when resolution never opened a recipe.
 // Call it after resolution: it reads the Spec's name.
 func (b *BuildObject) asDefinitionBuild() {
-	dir := resolveTmpDirForDef()
+	dir := tmpRootForDef()
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
@@ -986,7 +986,7 @@ func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (
 	dir := tmpDir
 	if isContainer {
 		// Def builds keep buildSource and the SIF in one directory.
-		dir = resolveTmpDirForDef()
+		dir = tmpRootForDef()
 	}
 	path, err := writeRecipeFile(recipe, dir, isContainer)
 	if err != nil {

@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/runtime/container"
 )
 
 // setTestImagesDir points the installed-overlay scan at dir for the test.

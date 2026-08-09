@@ -132,9 +132,9 @@ func setDefaults() {
 	viper.SetDefault("build.compress_args", "") // Empty means auto-detect based on apptainer version
 	viper.SetDefault("build.block_size", DefaultBlockSize)
 	viper.SetDefault("build.data_block_size", DefaultDataBlockSize)
-	viper.SetDefault("build.use_tmp_overlay", false)
+	viper.SetDefault("build.app_tmp_overlay", false)
 	viper.SetDefault("build.always_submit", false)
-	viper.SetDefault("build.tmp_overlay_size", DefaultTmpSizeMB)
+	viper.SetDefault("build.app_tmp_overlay_size", DefaultAppTmpOverlaySizeMB)
 
 	viper.SetDefault("channels", DefaultChannels())
 	viper.SetDefault("parse_module_load", false)
@@ -952,9 +952,9 @@ func LoadFromViper() {
 		}
 	}
 
-	if tmpStr := layerString("build.tmp_overlay_size"); tmpStr != "" {
+	if tmpStr := layerString("build.app_tmp_overlay_size"); tmpStr != "" {
 		if tmpSizeMB, err := utils.ParseMemoryMB(tmpStr); err == nil && tmpSizeMB > 0 {
-			Global.Build.TmpSizeMB = int(tmpSizeMB)
+			Global.Build.AppTmpOverlaySizeMB = int(tmpSizeMB)
 		}
 	}
 
@@ -981,8 +981,8 @@ func LoadFromViper() {
 		}
 	}
 
-	if useTmp, ok := layerBool("build.use_tmp_overlay"); ok {
-		Global.Build.UseTmpOverlay = useTmp
+	if useTmpOverlay, ok := layerBool("build.app_tmp_overlay"); ok {
+		Global.Build.AppTmpOverlay = useTmpOverlay
 	}
 
 	if alwaysSubmit, ok := layerBool("build.always_submit"); ok {
