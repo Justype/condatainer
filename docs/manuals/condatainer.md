@@ -841,6 +841,7 @@ condatainer exec [flags] [command...]
 * All positional arguments are treated as commands.
 * Read-only by default for `.img` overlays (use `-w` for writable).
 * Defaults to bash if no command specified.
+* Auto-detects NVIDIA (`/dev/nvidiactl`) and ROCm (`/dev/kfd`) GPUs on the host and adds `--nv`/`--rocm` automatically. Disable with `autoload_gpu: false` in config.
 
 **Environment Variables (inside container):**
 

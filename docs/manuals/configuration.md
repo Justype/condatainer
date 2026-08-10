@@ -113,6 +113,7 @@ With `-l`, a read-only target is an error instead — an explicit layer is never
 |-----|---------|-------------|
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
 | `parse_module_load` | `false` | Parse `module load` / `ml` lines as dependencies in `check` and `run` |
+| `autoload_gpu` | `true` | Detect NVIDIA/ROCm GPUs on the host and add `--nv`/`--rocm` automatically. Set to `false` to skip GPU detection entirely. |
 | `scheduler_timeout` | `0` | Seconds to wait for a scheduler command (sbatch, qsub, etc.) before returning an error. `0` (default) disables the timeout. |
 | `notification` | `web` | Notification when a helper job starts running. `web` (default) = browser notification via the dashboard; `terminal` = terminal bell ×2 (CLI only); `both` = terminal + web; `none` or empty = silent. |
 | `metadata_cache_ttl` | `7` | Days to keep the cached remote build script metadata (default: 7 days = 1 week). Set to `0` to disable caching and always fetch from the network. |
@@ -252,6 +253,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_NOTIFICATION`         | `notification`         |
 | `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
 | `CNT_PROXY_PERJOB`         | `proxy_perjob`         |
+| `CNT_AUTOLOAD_GPU`         | `autoload_gpu`         |
 | `CNT_HELPER_BIND_ALL`      | `helper_bind_all`      |
 | `CNT_TMPDIR`               | (special override)     |
 
@@ -343,6 +345,9 @@ prefer_remote: false
 
 # Parse "module load" / "ml" lines as dependencies in 'check' and 'run' (default: false)
 parse_module_load: false
+
+# Auto-detect NVIDIA/ROCm GPUs and add --nv/--rocm (default: true)
+autoload_gpu: true
 
 # Maximum seconds to wait for scheduler CLI commands (default: 5, 0 = disabled)
 scheduler_timeout: 5

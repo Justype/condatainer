@@ -155,6 +155,7 @@ func setDefaults() {
 	viper.SetDefault("default_distro", DEFAULT_DISTRO)
 	viper.SetDefault("extra_scripts_links", []string{})
 	viper.SetDefault("parse_module_load", false)
+	viper.SetDefault("autoload_gpu", true)
 	viper.SetDefault("scheduler_timeout", 0)  // seconds; 0 = no timeout
 	viper.SetDefault("notification", "web")   // "web" = browser notification via dashboard; "terminal" = bell; "both" = terminal + web; "" or "none" = silent
 	viper.SetDefault("metadata_cache_ttl", 7) // days (1 week)
@@ -1018,6 +1019,10 @@ func LoadFromViper() {
 
 	if parseModuleLoad, ok := layerBool("parse_module_load"); ok {
 		Global.ParseModuleLoad = parseModuleLoad
+	}
+
+	if autoloadGPU, ok := layerBool("autoload_gpu"); ok {
+		Global.AutoloadGPU = autoloadGPU
 	}
 
 	if timeout, ok := layerInt("scheduler_timeout"); ok {

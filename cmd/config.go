@@ -39,6 +39,7 @@ var configKeyDefs = map[string]bool{
 	"extra_build_dirs":       true,
 	"extra_helper_dirs":      true,
 	"parse_module_load":      false,
+	"autoload_gpu":           false,
 	"scheduler_timeout":      false,
 	"notification":           false,
 	"metadata_cache_ttl":     false,
@@ -61,7 +62,7 @@ func isArrayKey(key string) bool { return configKeyDefs[key] }
 func isBoolKey(key string) bool {
 	switch key {
 	case "submit_job", "proxy_perjob", "helper_bind_all",
-		"prefer_remote", "parse_module_load",
+		"prefer_remote", "parse_module_load", "autoload_gpu",
 		"build.use_tmp_overlay", "build.always_submit":
 		return true
 	}
@@ -207,7 +208,7 @@ func configValueCompletion(key string) []string {
 	switch key {
 	case "submit_job", "proxy_perjob", "helper_bind_all":
 		return []string{"true", "false"}
-	case "prefer_remote", "parse_module_load":
+	case "prefer_remote", "parse_module_load", "autoload_gpu":
 		return []string{"true", "false"}
 	case "default_distro":
 		return config.GetAvailableDistros()
@@ -502,6 +503,8 @@ var configShowCmd = &cobra.Command{
 		printOverridden("                      ", "scheduler_timeout")
 		fmt.Printf("  %-19s %v%s\n", "parse_module_load:", config.Global.ParseModuleLoad, srcTag("parse_module_load"))
 		printOverridden("                      ", "parse_module_load")
+		fmt.Printf("  %-19s %v%s\n", "autoload_gpu:", config.Global.AutoloadGPU, srcTag("autoload_gpu"))
+		printOverridden("                      ", "autoload_gpu")
 		if config.Global.MetadataCacheTTL == 0 {
 			fmt.Printf("  %-19s 0 (disabled)%s\n", "metadata_cache_ttl:", srcTag("metadata_cache_ttl"))
 		} else {

@@ -78,6 +78,11 @@ type Config struct {
 	// Dependency parsing
 	ParseModuleLoad bool // Parse "module load" / "ml" lines as dependencies (default: false)
 
+	// AutoloadGPU: if true (default), detect NVIDIA/ROCm GPUs on the host and
+	// automatically add --nv/--rocm to the apptainer invocation. When false,
+	// GPU detection is skipped entirely and neither flag is added.
+	AutoloadGPU bool
+
 	// Scheduler command timeout (default: 0 = no timeout).
 	SchedulerTimeout time.Duration
 
@@ -191,6 +196,7 @@ func LoadDefaults(executablePath string) {
 		SchedulerTimeout: 0,                            // no timeout by default
 		Notification:     "web",
 		MetadataCacheTTL: 7 * 24 * time.Hour, // 1 week
+		AutoloadGPU:      true,               // detect and mount GPUs by default
 
 		Build: BuildConfig{
 			Defaults: scheduler.ResourceSpec{

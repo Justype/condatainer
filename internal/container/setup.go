@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/overlay"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -102,8 +103,11 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 	}
 	bindPaths = DeduplicateBindPaths(bindPaths)
 
-	// Detect GPU flags
-	apptainerFlags := append([]string{}, DetectGPUFlags()...)
+	// Detect GPU flags (skipped when autoload_gpu is disabled)
+	var apptainerFlags []string
+	if config.Global.AutoloadGPU {
+		apptainerFlags = append(apptainerFlags, DetectGPUFlags()...)
+	}
 	apptainerFlags = append(apptainerFlags, cfg.ApptainerFlags...)
 
 	return &SetupResult{
