@@ -22,7 +22,7 @@ locals and parameters spell it `typ`.)
 
 Type affects **only** where the build works and how the archive is compressed.
 Every build writes to `$CNT_PREFIX` = `/cnt/<name>` — the install prefix recorded
-in the manifest, so anything baked into the payload stays valid at run time.
+in the image, so anything baked into the payload stays valid at run time.
 
 ## Architecture
 
@@ -32,7 +32,9 @@ spec.go         Build/Spec/Options/Workspace/Target; the build environment
 conda.go        Conda package builds via micromamba
 script.go       Recipe (script) builds, any type
 def.go          Apptainer definition file builds
-pack.go         Manifest staging, shared by every backend that packs
+bootstrap.go    Bootstrap:/From: parsing, upstream resolution, definition pinning
+keys.go         identity/equiv records, dependency keys, capsule composition
+pack.go         Metadata staging, shared by every backend that packs
 squashfs.go     The common packer: payload plus staged metadata → one .sqf
 base_image.go   Resolving the base image every non-def build runs inside
 deps.go         Overlay arguments for a build's dependencies
@@ -44,7 +46,7 @@ tmppath.go      Which tmp root a build works under, by type
 
 **BuildObject** - Interface for all build types:
 - `NameVersion()`, `BuildSource()`, `Dependencies()`, `BuildType()`
-- `Spec()`, `Manifest()` - What is being built, and the metadata it embeds
+- `Spec()`, `Manifest()`, `Runtime()` - What is being built, and the two documents it embeds
 - `IsInstalled()`, `RequiresScheduler()`, `Update()`
 - `ScriptSpecs()` - Parsed scheduler directives
 - `LockPath()` - Path to the build lock file
@@ -52,10 +54,11 @@ tmppath.go      Which tmp root a build works under, by type
 - `CreateTmpOverlay(ctx, force bool)`, `Cleanup(failed bool)`
 
 **Spec** - What the image will be, settled by resolution and never changed after:
-identity (`Name`, `Type`, `Description`, `URL`), the `SourceSpec` whose populated
-field *is* the `BuildType`, the base, dependencies, and the `meta.Runtime` block.
-`Spec.Manifest()` is the embedded metadata, and it is a projection of `Spec` and
-nothing else — no host, job ID, local path, or `#INPUT:` answer can reach it.
+`ImageSpec` (`Name`, `Type`, `Description`, `URL`, plus the runtime `Prefix` and
+`Env`), the `SourceSpec` whose populated field *is* the `BuildType`, the base, and
+dependencies. `Spec.Manifest()` and `Spec.Runtime()` render the two embedded
+documents, and both are projections of `Spec` and nothing else — no host, job ID,
+local path, or `#INPUT:` answer can reach either.
 
 **BuildLockInfo** - JSON metadata stored in `.lock` files:
 - `Runner` - `"local"`, `"slurm"`, `"pbs"`, `"lsf"`, or `"htcondor"`
@@ -186,17 +189,67 @@ directory got filled. Both end in `packOutput`.
 
 ### Staging and packing
 
-`stageMetadata` validates `Spec.Manifest()` and writes it to `<buildDir>/.cnt/`,
-*beside* the payload rather than inside it. That placement is the whole trick:
-`mksquashfs` makes one archive root per source, so handing it the payload dir and
-the `.cnt` dir as two sources yields `/cnt/<name>/…` and `/.cnt/manifest.json` at
-the same level, without the payload ever containing a directory the recipe did
-not create. There is no option to rename a source, so the staged directory must
-already be called `.cnt` when `mksquashfs` sees it — which is why the ext3 mode,
-where the payload is inside the temporary image, binds the host dir to `/.cnt`.
+`stageMetadata` validates `Spec.Runtime()` and `Spec.Manifest()` and writes them,
+plus the recipe itself, to `<buildDir>/.cnt/`, *beside* the payload rather than inside it. That placement
+is the whole trick: `mksquashfs` makes one archive root per source, so handing it
+the payload dir and the `.cnt` dir as two sources yields `/cnt/<name>/…` and
+`/.cnt/*.json` at the same level, without the payload ever containing a directory
+the recipe did not create. There is no option to rename a source, so the staged
+directory must already be called `.cnt` when `mksquashfs` sees it — which is why
+the ext3 mode, where the payload is inside the temporary image, binds the host dir
+to `/.cnt`.
 
-Validation runs at staging because that is the only point where a bad manifest
-can still stop the build: earlier there is nothing to validate, later the image
+The recipe is staged **as it was fetched**. A template keeps its `{placeholder}`
+tokens: the expansion goes to the workspace file the build executes and is never
+embedded, so every variant of one template shares a recipe digest and is told
+apart by `manifest.source.placeholders`, which is their only stored copy.
+
+`recordKeys` runs immediately before staging in every backend — the last point at
+which everything a key depends on is known. A script build calls it after the
+recipe has run, so every dependency it needed is installed and can be read for
+the identity its records pin. A Conda app gets keys naming the exports it already
+embeds, since a record for it would hold a format tag, a type line and one digest.
+
+A base is keyed like any other definition build. It has records and a `keys`
+block because what identifies it is its definition plus the upstream that
+definition bootstrapped from — both known before Apptainer runs, which is what
+lets a SIF carry its own keys. What makes a base special is that nothing may
+*depend* on it, not that nothing may identify it.
+
+## The upstream digest
+
+`bootstrap.go` reads `Bootstrap:`/`From:` out of a definition's header block — a
+`From:` inside `%post` is shell text, not a directive — and `resolveUpstream`
+asks `internal/registry` what that reference points at *now*, before the build.
+The answer does two jobs: it becomes the `from=` line in the identity record, and
+`writeRecordingDef` rewrites `From:` to name the digest in the definition handed
+to Apptainer. Without that pin an upstream retagged mid-build would leave the
+record describing bytes the image does not contain. Only the transient copy is
+rewritten; `/.cnt/recipe` keeps the definition byte for byte.
+
+Resolution never fails a build. A registry that cannot be reached records
+`unrecorded` and warns, because a login node behind a proxy must still be able to
+build; a bootstrap with no upstream at all — `scratch`, `localimage`,
+`debootstrap` — records nothing, and the two cases stay distinguishable.
+
+A `scheme://` build has no recipe on disk, so the synthesized definition becomes
+one: without that a `docker://ubuntu:24.04` image would carry no keys, when it is
+exactly the two-line definition it is equivalent to. The generated header carries
+a build date and drops out of the key, since whole-line comments never reach a
+preimage.
+
+Staged files split two ways. `manifest.source.files` names what the image was
+built *from*; `manifest.keys` names the records derived out of it. Both are
+staged into `/.cnt`, and the manifest names exactly what was staged, so it can
+never claim a file the image does not carry.
+
+A def build has no packing step, so `writeRecordingDef` appends a `%files`
+section listing each staged file by name. It lists them individually rather than
+naming the directory, since `%files` copies with `cp -a` and would nest the whole
+directory inside a `/.cnt` the base already has.
+
+Validation runs at staging because that is the only point where bad metadata can
+still stop the build: earlier there is nothing to validate, later the image
 already exists.
 
 ### Prepared output
@@ -239,8 +292,9 @@ it once before any node runs, and records it on every dependent as `Spec.Base`;
 A definition bootstraps its own root, so it resolves nothing — which is what lets
 the base's own build run when no base exists yet.
 
-An installed base passes `meta.CheckBase`: no manifest is fine (bases predate the
-format), an unreadable one warns, and one that reads has to say `type: base`.
+An installed base passes `meta.CheckBase`: no runtime document is fine (bases
+predate the format), an unreadable one warns, and one that reads has to say
+`type: base`.
 
 ## BuildGraph Execution
 
@@ -264,9 +318,10 @@ Images can export environment variables via `#ENV:` directives:
 #ENV:PATH={prefix}/bin:$PATH
 ```
 
-These are captured into `Spec.Runtime` at resolution and embedded in the image's
-manifest. `{prefix}` survives into the manifest verbatim and is substituted with
-`runtime.prefix` at load time (see `internal/runtime/container` env handling).
+These are captured into `Spec.Image.Env` at resolution and embedded in the
+image's `/.cnt/runtime.json`. `{prefix}` survives into the image verbatim and is
+substituted with the recorded `prefix` at load time (see
+`internal/runtime/container` env handling).
 
 ## Workspace Strategy
 

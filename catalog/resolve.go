@@ -56,7 +56,7 @@ func (c Catalog) Resolve(ctx context.Context, roots []string, have Have) (*Plan,
 		if err != nil {
 			return nil, err
 		}
-		if err := r.visit(ctx, dep, nil); err != nil {
+		if err := r.visit(ctx, dep, nil, ""); err != nil {
 			return nil, err
 		}
 	}
@@ -81,8 +81,9 @@ type resolver struct {
 
 // visit resolves one dep and everything below it, appending in dependency-first
 // order. vars carries the parent's expansion, since a template dep is
-// substituted before it has a name at all.
-func (r *resolver) visit(ctx context.Context, dep Dep, vars map[string]string) error {
+// substituted before it has a name at all. parent is the name that depended on
+// this one, empty for a root.
+func (r *resolver) visit(ctx context.Context, dep Dep, vars map[string]string, parent string) error {
 	name := replaceVars(dep.String(), vars)
 	dep, err := ParseDep(name)
 	if err != nil {
@@ -101,6 +102,11 @@ func (r *resolver) visit(ctx context.Context, dep Dep, vars map[string]string) e
 	if err != nil {
 		return err
 	}
+	// A base is the container root a build runs inside, not an input it is
+	// composed from, so it can be a root of the walk but never an edge in it.
+	if parent != "" && node.Entry != nil && node.Entry.Type == TypeBase {
+		return fmt.Errorf("catalog: %s depends on %s, which is a base: a base is the build environment, not a dependency", parent, key)
+	}
 
 	r.onStack[key], r.stack = true, append(r.stack, key)
 	if node.Entry != nil && node.Installed == "" {
@@ -109,7 +115,7 @@ func (r *resolver) visit(ctx context.Context, dep Dep, vars map[string]string) e
 			if err != nil {
 				return err
 			}
-			if err := r.visit(ctx, child, node.Vars); err != nil {
+			if err := r.visit(ctx, child, node.Vars, key); err != nil {
 				return err
 			}
 		}

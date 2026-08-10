@@ -2,11 +2,21 @@ package build
 
 import (
 	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/image/meta"
+	"github.com/Justype/condatainer/internal/artifact/capsule"
+	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/artifact/record"
+	"github.com/Justype/condatainer/internal/conda"
+	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/runtime/container"
 )
 
 func TestSourceSpecBuildTypeIsDerived(t *testing.T) {
@@ -59,11 +69,9 @@ func TestSpecManifest(t *testing.T) {
 			URL:         "https://www.htslib.org/",
 		},
 		Source: SourceSpec{Script: &ScriptSource{}},
-		Runtime: meta.Runtime{
-			Prefix: "/cnt/samtools/1.23.1",
-			Env:    []meta.EnvVar{{Key: "SAMTOOLS_DIR", Value: "{prefix}", Note: "install root"}},
-		},
 	}
+	spec.Image.Prefix = "/cnt/samtools/1.23.1"
+	spec.Image.Env = []meta.EnvVar{{Key: "SAMTOOLS_DIR", Value: "{prefix}", Note: "install root"}}
 
 	m := spec.Manifest()
 	if m.SchemaVersion != meta.SchemaVersion {
@@ -78,36 +86,60 @@ func TestSpecManifest(t *testing.T) {
 	if m.Description != spec.Image.Description || m.URL != spec.Image.URL {
 		t.Errorf("descriptive metadata lost: %q / %q", m.Description, m.URL)
 	}
-	if err := meta.Validate(m); err != nil {
+	if err := meta.ValidateManifest(m); err != nil {
 		t.Errorf("rendered manifest does not validate: %v", err)
+	}
+	if m.Platform.Arch == "" {
+		t.Error("the manifest records no architecture")
+	}
+
+	// The mount-time contract comes off the same Spec, and it is the only place
+	// the prefix and the environment appear.
+	rt := spec.Runtime()
+	if err := meta.ValidateRuntime(rt); err != nil {
+		t.Errorf("rendered runtime does not validate: %v", err)
+	}
+	if rt.Prefix != spec.Image.Prefix {
+		t.Errorf("runtime prefix = %q, want %q", rt.Prefix, spec.Image.Prefix)
+	}
+	if len(rt.Env) != 1 || rt.Env[0].Value != "{prefix}" {
+		t.Errorf("runtime env = %+v, want {prefix} intact", rt.Env)
+	}
+	if rt.Description != spec.Image.Description {
+		t.Errorf("runtime description = %q", rt.Description)
 	}
 }
 
-// The manifest is a projection of Spec, and Spec has nowhere to put an #INPUT:
+// Both documents are projections of Spec, and Spec has nowhere to put an #INPUT:
 // answer. This pins that: answers are execution input and must never be
 // embedded, because they routinely carry tokens and licence keys.
-func TestSpecManifestCannotCarryAnswers(t *testing.T) {
+func TestSpecMetadataCannotCarryAnswers(t *testing.T) {
 	const secret = "s3cret-license-key"
 
 	spec := Spec{
-		Image:   ImageSpec{Name: "tool/1.0", Type: catalog.TypeApp},
-		Source:  SourceSpec{Script: &ScriptSource{Prompts: []string{"License key:"}}},
-		Runtime: meta.Runtime{Prefix: "/cnt/tool/1.0"},
+		Image:  ImageSpec{Name: "tool/1.0", Type: catalog.TypeApp, Prefix: "/cnt/tool/1.0"},
+		Source: SourceSpec{Script: &ScriptSource{Prompts: []string{"License key:"}}},
 	}
-	data, err := meta.Marshal(spec.Manifest())
+	manifest, err := meta.MarshalManifest(spec.Manifest())
 	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+		t.Fatalf("MarshalManifest: %v", err)
 	}
-	if strings.Contains(string(data), secret) {
-		t.Fatalf("an answer reached the manifest:\n%s", data)
+	runtime, err := meta.MarshalRuntime(spec.Runtime())
+	if err != nil {
+		t.Fatalf("MarshalRuntime: %v", err)
 	}
-	// The prompt itself is a declaration, not an answer, and is also not embedded.
-	if strings.Contains(string(data), "License key:") {
-		t.Errorf("a prompt declaration reached the manifest:\n%s", data)
+	for _, data := range [][]byte{manifest, runtime} {
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("an answer reached embedded metadata:\n%s", data)
+		}
+		// The prompt is a declaration, not an answer, and is also not embedded.
+		if strings.Contains(string(data), "License key:") {
+			t.Errorf("a prompt declaration reached embedded metadata:\n%s", data)
+		}
 	}
 }
 
-func TestRuntimeFromRecipeKeepsPrefixToken(t *testing.T) {
+func TestEnvFromRecipeKeepsPrefixToken(t *testing.T) {
 	recipe, err := catalog.ParseRecipe("samtools/1.23.1", strings.NewReader(
 		"#DESC:SAMtools\n"+
 			"#ENV:SAMTOOLS_DIR={prefix}  ## install root\n"+
@@ -117,34 +149,20 @@ func TestRuntimeFromRecipeKeepsPrefixToken(t *testing.T) {
 		t.Fatalf("ParseRecipe: %v", err)
 	}
 
-	rt := runtimeFromRecipe("samtools/1.23.1", catalog.TypeApp, recipe.Env)
-	if rt.Prefix != "/cnt/samtools/1.23.1" {
-		t.Errorf("prefix = %q", rt.Prefix)
+	env := envFromRecipe(recipe.Env)
+	if len(env) != 2 {
+		t.Fatalf("env = %+v", env)
 	}
-	if len(rt.Env) != 2 {
-		t.Fatalf("env = %+v", rt.Env)
+	// {prefix} must survive into the image: the install prefix is not known when
+	// the image is built, only when it is loaded.
+	if env[0].Value != "{prefix}" {
+		t.Errorf("env[0] = %q, want the token intact", env[0].Value)
 	}
-	// {prefix} must survive to the manifest: the install prefix is not known
-	// when the image is built, only when it is loaded.
-	if rt.Env[0].Value != "{prefix}" {
-		t.Errorf("env[0] = %q, want the token intact", rt.Env[0].Value)
+	if env[0].Note != "install root" {
+		t.Errorf("note = %q", env[0].Note)
 	}
-	if rt.Env[0].Note != "install root" {
-		t.Errorf("note = %q", rt.Env[0].Note)
-	}
-	if got := rt.Env[1].Resolved(rt.Prefix); got != "/cnt/samtools/1.23.1/bin" {
+	if got := env[1].Resolved(meta.Prefix("samtools/1.23.1", catalog.TypeApp)); got != "/cnt/samtools/1.23.1/bin" {
 		t.Errorf("resolved = %q", got)
-	}
-}
-
-// base and os apply at the container root, so they carry no prefix and a
-// {prefix} token in their env has nothing to resolve against.
-func TestRuntimeFromRecipeRootTypes(t *testing.T) {
-	for _, typ := range []catalog.Type{catalog.TypeBase, catalog.TypeOS} {
-		rt := runtimeFromRecipe("ubuntu24/base", typ, nil)
-		if rt.Prefix != "" {
-			t.Errorf("%s prefix = %q, want empty", typ, rt.Prefix)
-		}
 	}
 }
 
@@ -170,16 +188,15 @@ func TestSourceFileName(t *testing.T) {
 	}
 }
 
-// Resolution has to produce a Spec that renders a valid manifest, from a real
+// Resolution has to produce a Spec that renders valid metadata, from a real
 // catalog lookup rather than a hand-built struct. This is what proves the
 // descriptive metadata mapping — #DESC: to Description, #URL: to URL, #ENV: to
-// Runtime.Env — actually runs end to end.
+// the runtime env — actually runs end to end.
 func TestResolvedSpecRendersValidManifest(t *testing.T) {
 	setTestSource(t, writeRecipe(t, "samtools/1.23.1", strings.Join([]string{
 		"#!/usr/bin/env bash",
 		"#DESC:SAMtools alignment toolkit",
 		"#URL:https://www.htslib.org/",
-		"#DEP:zlib/1.3",
 		"#ENV:SAMTOOLS_DIR={prefix}  ## install root",
 		"#ENV:PATH_EXTRA={prefix}/bin",
 		"echo build",
@@ -205,26 +222,65 @@ func TestResolvedSpecRendersValidManifest(t *testing.T) {
 	if spec.Source.BuildType() != BuildTypeScript {
 		t.Errorf("build type = %v", spec.Source.BuildType())
 	}
-	if len(spec.Dependencies) != 1 || spec.Dependencies[0] != "zlib/1.3" {
-		t.Errorf("dependencies = %v", spec.Dependencies)
+	if len(spec.Dependencies) != 0 {
+		t.Errorf("dependencies = %v, want none: an app is self-contained", spec.Dependencies)
 	}
 	if spec.Source.Script == nil || len(spec.Source.Script.File.Data) == 0 {
 		t.Error("the resolved recipe text was not captured")
 	}
 
 	m := obj.Manifest()
-	if err := meta.Validate(m); err != nil {
+	if err := meta.ValidateManifest(m); err != nil {
 		t.Fatalf("resolved manifest does not validate: %v", err)
 	}
 	if m.BuildType != "script" {
 		t.Errorf("build_type = %q", m.BuildType)
 	}
-	if len(m.Runtime.Env) != 2 || m.Runtime.Env[0].Value != "{prefix}" {
-		t.Errorf("env = %+v, want {prefix} intact", m.Runtime.Env)
+
+	rt := obj.Runtime()
+	if err := meta.ValidateRuntime(rt); err != nil {
+		t.Fatalf("resolved runtime does not validate: %v", err)
 	}
-	if m.Runtime.Env[0].Note != "install root" {
-		t.Errorf("note = %q", m.Runtime.Env[0].Note)
+	if len(rt.Env) != 2 || rt.Env[0].Value != "{prefix}" {
+		t.Errorf("env = %+v, want {prefix} intact", rt.Env)
 	}
+	if rt.Env[0].Note != "install root" {
+		t.Errorf("note = %q", rt.Env[0].Note)
+	}
+}
+
+// Only a data recipe may declare #DEP:, so that is where dependency capture is
+// exercised — and an app that declares one stops its own build.
+func TestResolvedSpecDependencies(t *testing.T) {
+	t.Run("data carries its deps", func(t *testing.T) {
+		setTestSource(t, writeRecipe(t, "grch38/gtf/49", strings.Join([]string{
+			"#DESC:GENCODE 49 annotation",
+			"#DEP:samtools/1.23.1",
+			"echo build",
+			"",
+		}, "\n")))
+
+		obj, err := NewBuildObject(context.Background(), "grch38/gtf/49", false, t.TempDir(), false)
+		if err != nil {
+			t.Fatalf("NewBuildObject: %v", err)
+		}
+		spec := obj.Spec()
+		if spec.Image.Type != catalog.TypeData {
+			t.Fatalf("type = %q, want data", spec.Image.Type)
+		}
+		if len(spec.Dependencies) != 1 || spec.Dependencies[0] != "samtools/1.23.1" {
+			t.Errorf("dependencies = %v", spec.Dependencies)
+		}
+	})
+
+	t.Run("an app declaring one is rejected", func(t *testing.T) {
+		setTestSource(t, writeRecipe(t, "samtools/1.23.1", "#DEP:zlib/1.3\necho build\n"))
+
+		_, err := NewBuildObject(context.Background(), "samtools/1.23.1", false, t.TempDir(), false)
+		if !errors.Is(err, catalog.ErrInvalidRecipe) {
+			t.Fatalf("err = %v, want ErrInvalidRecipe", err)
+		}
+	})
 }
 
 // A name no collection provides is conda's. It gets an app spec with no
@@ -251,8 +307,11 @@ func TestResolvedSpecForCondaFallback(t *testing.T) {
 	if spec.Image.Type != catalog.TypeApp {
 		t.Errorf("type = %q, want app", spec.Image.Type)
 	}
-	if err := meta.Validate(obj.Manifest()); err != nil {
+	if err := meta.ValidateManifest(obj.Manifest()); err != nil {
 		t.Errorf("conda manifest does not validate: %v", err)
+	}
+	if err := meta.ValidateRuntime(obj.Runtime()); err != nil {
+		t.Errorf("conda runtime does not validate: %v", err)
 	}
 }
 
@@ -275,9 +334,8 @@ func envMap(t *testing.T, settings []string) map[string]string {
 
 func TestBuildEnvFromSpec(t *testing.T) {
 	spec := Spec{
-		Image:   ImageSpec{Name: "samtools/1.23.1", Type: catalog.TypeApp},
-		Source:  SourceSpec{Script: &ScriptSource{}},
-		Runtime: meta.Runtime{Prefix: "/cnt/samtools/1.23.1"},
+		Image:  ImageSpec{Name: "samtools/1.23.1", Type: catalog.TypeApp, Prefix: "/cnt/samtools/1.23.1"},
+		Source: SourceSpec{Script: &ScriptSource{}},
 	}
 
 	env := envMap(t, buildEnv(spec, Options{}))
@@ -300,18 +358,17 @@ func TestBuildEnvFromSpec(t *testing.T) {
 	}
 }
 
-// CNT_PREFIX has to be the same path the manifest records, or a payload bakes
-// in a location that does not exist when the image is loaded.
-func TestBuildEnvPrefixMatchesManifest(t *testing.T) {
+// CNT_PREFIX has to be the same path the image records, or a payload bakes in a
+// location that does not exist when the image is loaded.
+func TestBuildEnvPrefixMatchesRuntime(t *testing.T) {
 	for _, name := range []string{"samtools/1.23.1", "grch38/star/2.7.11b/gencode47"} {
 		spec := Spec{
-			Image:   ImageSpec{Name: name, Type: catalog.TypeApp},
-			Source:  SourceSpec{Script: &ScriptSource{}},
-			Runtime: runtimeFromRecipe(name, catalog.TypeApp, nil),
+			Image:  ImageSpec{Name: name, Type: catalog.TypeApp, Prefix: meta.Prefix(name, catalog.TypeApp)},
+			Source: SourceSpec{Script: &ScriptSource{}},
 		}
 		env := envMap(t, buildEnv(spec, Options{}))
-		if got, want := env["CNT_PREFIX"], spec.Manifest().Runtime.Prefix; got != want {
-			t.Errorf("%s: CNT_PREFIX = %q, manifest prefix = %q", name, got, want)
+		if got, want := env["CNT_PREFIX"], spec.Runtime().Prefix; got != want {
+			t.Errorf("%s: CNT_PREFIX = %q, recorded prefix = %q", name, got, want)
 		}
 	}
 }
@@ -345,5 +402,470 @@ func TestBuildEnvNameIsCompleteAndUnsplit(t *testing.T) {
 		if v, ok := env["CNT_VERSION"]; ok {
 			t.Errorf("CNT_VERSION = %q; it was removed", v)
 		}
+	}
+}
+
+// The stored recipe is the template, tokens intact: it is what a rebuild starts
+// from and what both keys hash. The expansion exists only in the workspace, and
+// which variant this is survives as manifest.source.placeholders.
+func TestResolvedTemplateEmbedsTheTemplate(t *testing.T) {
+	setTestSource(t, writeRecipe(t, "grch38/star-gencode", strings.Join([]string{
+		"#DESC:STAR {star_version} index for GENCODE {gencode_version}",
+		"#TARGET:grch38/star/{star_version}/gencode{gencode_version}",
+		"#PH:star_version:2.7.11b,2.7.11a",
+		"#PH:gencode_version:47-49",
+		"echo building {star_version} against {gencode_version}",
+		"",
+	}, "\n")))
+
+	obj, err := NewBuildObject(context.Background(),
+		"grch38/star/2.7.11b/gencode49", false, t.TempDir(), false)
+	if err != nil {
+		t.Fatalf("NewBuildObject: %v", err)
+	}
+	spec := obj.Spec()
+
+	embedded, ok := spec.Source.RecipeFile()
+	if !ok {
+		t.Fatal("a script build embeds no recipe")
+	}
+	if !strings.Contains(string(embedded.Data), "echo building {star_version} against {gencode_version}") {
+		t.Errorf("the embedded recipe was expanded:\n%s", embedded.Data)
+	}
+
+	// The workspace copy is the one that runs, and it is expanded.
+	ran, err := os.ReadFile(obj.BuildSource())
+	if err != nil {
+		t.Fatalf("reading the materialized recipe: %v", err)
+	}
+	if !strings.Contains(string(ran), "echo building 2.7.11b against 49") {
+		t.Errorf("the recipe that runs was not expanded:\n%s", ran)
+	}
+
+	// Which variant it is lives in the manifest, since the recipe no longer says.
+	m := obj.Manifest()
+	if got := m.Source.Placeholders; got["star_version"] != "2.7.11b" || got["gencode_version"] != "49" {
+		t.Errorf("placeholders = %v", got)
+	}
+	if m.Source.TargetTemplate == "" {
+		t.Error("the manifest records no target template")
+	}
+	if len(m.Source.Files) != 1 || m.Source.Files[0] != meta.RecipeFileName {
+		t.Errorf("source files = %v, want the embedded recipe named", m.Source.Files)
+	}
+	if m.Source.RequiresInput {
+		t.Error("a recipe with no #INPUT: should not claim it needs one")
+	}
+}
+
+// A plain recipe has no placeholders and no target, so the source block says
+// only what was embedded.
+func TestResolvedNonTemplateSourceBlock(t *testing.T) {
+	setTestSource(t, writeRecipe(t, "samtools/1.23.1", "#DESC:SAMtools\necho build\n"))
+
+	obj, err := NewBuildObject(context.Background(), "samtools/1.23.1", false, t.TempDir(), false)
+	if err != nil {
+		t.Fatalf("NewBuildObject: %v", err)
+	}
+	m := obj.Manifest()
+	if len(m.Source.Placeholders) != 0 || m.Source.TargetTemplate != "" {
+		t.Errorf("source = %+v, want no template fields", m.Source)
+	}
+	if m.Source.RequiresInput {
+		t.Error("a recipe with no #INPUT: should not claim it needs one")
+	}
+}
+
+// requires_input records that a rebuild needs a human, and that is the *only*
+// thing an #INPUT: may leave behind: the prompt is not embedded and neither is
+// the answer.
+func TestSourceBlockRecordsOnlyThatInputIsNeeded(t *testing.T) {
+	spec := Spec{
+		Image: ImageSpec{Name: "vendor/tool/1.0", Type: catalog.TypeApp, Prefix: "/cnt/vendor/tool/1.0"},
+		Source: SourceSpec{
+			Script:        &ScriptSource{Prompts: []string{"paste the licence key"}},
+			RequiresInput: true,
+		},
+	}
+	m := spec.Manifest()
+	if !m.Source.RequiresInput {
+		t.Error("requires_input was not recorded")
+	}
+	data, err := meta.MarshalManifest(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "licence key") {
+		t.Errorf("an #INPUT: prompt reached the manifest:\n%s", data)
+	}
+}
+
+// A Conda build records the channels it was offered, in priority order. They are
+// captured into Spec at resolution rather than read from config when the
+// manifest renders, so the manifest stays a projection of Spec and nothing else.
+func TestCondaSpecCapturesChannels(t *testing.T) {
+	prev := config.Global.Build.Channels
+	config.Global.Build.Channels = []string{"conda-forge", "bioconda"}
+	t.Cleanup(func() { config.Global.Build.Channels = prev })
+
+	setTestSource(t, t.TempDir())
+	obj, err := NewBuildObject(context.Background(), "numpy/2.1.0", false, t.TempDir(), false)
+	if err != nil {
+		t.Fatalf("NewBuildObject: %v", err)
+	}
+	if got := obj.Spec().Source.Conda.Channels; !slices.Equal(got, []string{"conda-forge", "bioconda"}) {
+		t.Fatalf("channels = %v", got)
+	}
+	if got := obj.Manifest().Build.Channels; !slices.Equal(got, []string{"conda-forge", "bioconda"}) {
+		t.Errorf("manifest channels = %v", got)
+	}
+
+	// Changing config afterwards must not change what this build records.
+	config.Global.Build.Channels = []string{"nvidia"}
+	if got := obj.Manifest().Build.Channels; !slices.Equal(got, []string{"conda-forge", "bioconda"}) {
+		t.Errorf("manifest channels followed config after resolution: %v", got)
+	}
+}
+
+// A recipe build has no channels to record, so the block stays out of the JSON
+// entirely rather than appearing empty.
+func TestNonCondaManifestHasNoBuildBlock(t *testing.T) {
+	spec := Spec{
+		Image:  ImageSpec{Name: "samtools/1.23.1", Type: catalog.TypeApp, Prefix: "/cnt/samtools/1.23.1"},
+		Source: SourceSpec{Script: &ScriptSource{}},
+	}
+	data, err := meta.MarshalManifest(spec.Manifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"build":`) {
+		t.Errorf("an empty build block was written:\n%s", data)
+	}
+}
+
+// The manifest names exactly the files that were staged, so a reader never has
+// to probe for what an image carries.
+func TestManifestNamesOnlyStagedSources(t *testing.T) {
+	b := newPackObject(t, catalog.TypeApp)
+	if got := b.Manifest().Source.Files; len(got) != 0 {
+		t.Errorf("files = %v before anything was captured", got)
+	}
+
+	b.embedSource(SourceFile{Name: "explicit.txt", Data: []byte("@EXPLICIT\n")})
+	b.embedSource(SourceFile{Name: "environment.yml", Data: []byte("channels: []\n")})
+	if got := b.Manifest().Source.Files; !slices.Equal(got, []string{"explicit.txt", "environment.yml"}) {
+		t.Errorf("files = %v", got)
+	}
+
+	// Re-capturing replaces rather than duplicating.
+	b.embedSource(SourceFile{Name: "explicit.txt", Data: []byte("@EXPLICIT\nhttps://x\n")})
+	if got := b.Manifest().Source.Files; len(got) != 2 {
+		t.Errorf("files = %v, want the earlier capture replaced", got)
+	}
+
+	// A record is derived from the sources, not one of them: manifest.keys names
+	// it, and source.files must not.
+	b.embedRecord(meta.IdentityFileName, []byte("cnt-identity-v1\ntype=app\n"))
+	if got := b.Manifest().Source.Files; len(got) != 2 {
+		t.Errorf("files = %v, want a record left out of the sources", got)
+	}
+}
+
+// A recipe build writes both records, and manifest.keys names files whose
+// digests reproduce the keys — the property that lets a reader verify without
+// knowing which build type produced the image.
+func TestRecipeBuildRecordsKeys(t *testing.T) {
+	setTestSource(t, writeRecipe(t, "samtools/1.23.1", strings.Join([]string{
+		"#DESC:SAMtools",
+		"#ENV:SAMTOOLS_DIR={prefix}  ## install root",
+		"echo build",
+		"",
+	}, "\n")))
+
+	obj, err := NewBuildObject(context.Background(), "samtools/1.23.1", false, t.TempDir(), false)
+	if err != nil {
+		t.Fatalf("NewBuildObject: %v", err)
+	}
+	if err := obj.recordKeys(context.Background()); err != nil {
+		t.Fatalf("recordKeys: %v", err)
+	}
+
+	m := obj.Manifest()
+	if m.Keys.Identity.File != meta.IdentityFileName || m.Keys.Equiv.File != meta.EquivFileName {
+		t.Fatalf("keys = %+v", m.Keys)
+	}
+
+	staged := map[string][]byte{}
+	for _, f := range obj.embedded {
+		staged[f.Name] = f.Data
+	}
+	for _, ref := range []meta.KeyRef{m.Keys.Identity, m.Keys.Equiv} {
+		data, ok := staged[ref.File]
+		if !ok {
+			t.Fatalf("manifest names %s, which was never staged", ref.File)
+		}
+		if got := record.Sum(data); got != ref.SHA256 {
+			t.Errorf("%s: sha256 = %s, want %s", ref.File, ref.SHA256, got)
+		}
+		if _, err := record.Parse(data); err != nil {
+			t.Errorf("%s does not parse: %v\n%s", ref.File, err, data)
+		}
+	}
+
+	// An app has no dependencies, so the two records differ only by their tag —
+	// which is honest: a self-contained artifact has nothing to be loose about.
+	identity, err := record.Parse(staged[meta.IdentityFileName])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(identity.Env) != 1 || identity.Env[0].Key != "SAMTOOLS_DIR" {
+		t.Errorf("env = %v, want the #ENV: contribution", identity.Env)
+	}
+	if identity.Recipe == "" {
+		t.Error("the record carries no recipe digest")
+	}
+	if len(m.Dependencies) != 0 || m.ProvenanceComplete != nil {
+		t.Errorf("an app recorded dependencies: %v / %v", m.Dependencies, m.ProvenanceComplete)
+	}
+}
+
+// A base is keyed by its definition and the upstream it bootstrapped from,
+// resolved before the build — which is what lets a SIF carry its own keys.
+func TestBaseIsKeyedByItsDefinition(t *testing.T) {
+	upstream := "sha256:" + strings.Repeat("a", 64)
+	b := newPackObject(t, catalog.TypeBase)
+	b.spec.Source = SourceSpec{Definition: &DefinitionSource{
+		File: SourceFile{Name: meta.RecipeFileName, Data: []byte("Bootstrap: docker\nFrom: ubuntu:24.04\n")},
+		From: &meta.From{Bootstrap: "docker", Ref: "ubuntu:24.04", Digest: upstream},
+	}}
+	if err := b.recordKeys(context.Background()); err != nil {
+		t.Fatalf("recordKeys: %v", err)
+	}
+
+	m := b.Manifest()
+	if m.Keys.Identity.File != meta.IdentityFileName || m.Keys.Equiv.File != meta.EquivFileName {
+		t.Fatalf("a base was not keyed: %+v", m.Keys)
+	}
+	if m.Build.From == nil || m.Build.From.URI() != "docker://ubuntu:24.04" || m.Build.From.Digest != upstream {
+		t.Errorf("build.from = %+v", m.Build.From)
+	}
+
+	staged := map[string][]byte{}
+	for _, f := range b.embedded {
+		staged[f.Name] = f.Data
+	}
+	identity, err := record.Parse(staged[meta.IdentityFileName])
+	if err != nil {
+		t.Fatalf("identity.record does not parse: %v\n%s", err, staged[meta.IdentityFileName])
+	}
+	if identity.Type != catalog.TypeBase {
+		t.Errorf("type = %q, want base", identity.Type)
+	}
+	if identity.From != upstream {
+		t.Errorf("from = %q, want the resolved upstream", identity.From)
+	}
+
+	// The upstream identifies the build without deciding substitution.
+	equiv, err := record.Parse(staged[meta.EquivFileName])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if equiv.From != "" {
+		t.Errorf("the upstream digest reached the equivalence record: %q", equiv.From)
+	}
+}
+
+// A Conda app writes no records: everything one could hold is ruled out for it,
+// so the manifest names the exports themselves and hashing them gives the keys.
+func TestCondaKeysNameTheExports(t *testing.T) {
+	b := newPackObject(t, catalog.TypeApp)
+	explicit := []byte("@EXPLICIT\nhttps://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-hda65f42_9.conda\n")
+	environment := []byte("channels:\n  - conda-forge\ndependencies:\n  - bzip2=1.0.8\n")
+	b.embedSource(SourceFile{Name: conda.ExplicitFileName, Data: explicit})
+	b.embedSource(SourceFile{Name: conda.EnvironmentFileName, Data: environment})
+
+	if err := b.recordKeys(context.Background()); err != nil {
+		t.Fatalf("recordKeys: %v", err)
+	}
+	m := b.Manifest()
+	if m.Keys.Identity.File != conda.ExplicitFileName || m.Keys.Identity.SHA256 != record.Sum(explicit) {
+		t.Errorf("identity = %+v", m.Keys.Identity)
+	}
+	if m.Keys.Equiv.File != conda.EnvironmentFileName || m.Keys.Equiv.SHA256 != record.Sum(environment) {
+		t.Errorf("equiv = %+v", m.Keys.Equiv)
+	}
+	for _, f := range b.embedded {
+		if strings.HasSuffix(f.Name, ".record") {
+			t.Errorf("a conda build staged %s", f.Name)
+		}
+	}
+}
+
+// A capture that failed leaves no keys rather than a claim about a file the
+// image does not carry.
+func TestCondaWithoutExportsRecordsNoKeys(t *testing.T) {
+	b := newPackObject(t, catalog.TypeApp)
+	if err := b.recordKeys(context.Background()); err != nil {
+		t.Fatalf("recordKeys: %v", err)
+	}
+	if b.Manifest().Keys != (meta.Keys{}) {
+		t.Errorf("keys were claimed with nothing captured: %+v", b.Manifest().Keys)
+	}
+}
+
+// A data build embeds the closure it was built from, read out of its
+// dependencies' own images rather than re-derived from the catalog.
+func TestDataBuildComposesACapsule(t *testing.T) {
+	if _, err := exec.LookPath("mksquashfs"); err != nil {
+		t.Skip("mksquashfs not available")
+	}
+
+	// A dependency image carrying records and a capsule entry of its own.
+	imagesDir := t.TempDir()
+	depRoot := t.TempDir()
+	depMeta := filepath.Join(depRoot, meta.DirName)
+	complete := true
+	if err := meta.StageManifest(depMeta, meta.Manifest{
+		SchemaVersion: meta.SchemaVersion,
+		Name:          "grch38/gtf/49",
+		Type:          catalog.TypeData,
+		BuildType:     "script",
+		Platform:      meta.NativePlatform(),
+		Keys: meta.Keys{
+			Identity: meta.KeyRef{SHA256: strings.Repeat("a", 64), File: meta.IdentityFileName},
+			Equiv:    meta.KeyRef{SHA256: strings.Repeat("b", 64), File: meta.EquivFileName},
+		},
+		ProvenanceComplete: &complete,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := meta.StageRuntime(depMeta, meta.Runtime{
+		SchemaVersion: meta.SchemaVersion, Name: "grch38/gtf/49", Type: catalog.TypeData,
+		Platform: meta.NativePlatform(), Prefix: "/cnt/grch38/gtf/49",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := meta.StageBytes(depMeta, meta.IdentityFileName, []byte("cnt-identity-v1\ntype=data\n")); err != nil {
+		t.Fatal(err)
+	}
+	inherited := filepath.Join(depMeta, capsule.DirName, "grch38--genome@bbbbccccdddd")
+	if err := os.MkdirAll(inherited, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(inherited, meta.FileName), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	depImage := filepath.Join(imagesDir, "grch38--gtf--49.sqf")
+	if out, err := exec.Command("mksquashfs", depRoot, depImage, "-no-progress", "-noappend", "-quiet", "-no-xattrs").CombinedOutput(); err != nil {
+		t.Fatalf("mksquashfs: %v\n%s", err, out)
+	}
+
+	// GlobalDataPaths caches resolved search paths, so setting the env var only
+	// takes effect on a cold cache — set the resolved list, as the rest of this
+	// package's tests do.
+	prevPaths := config.GlobalDataPaths
+	config.GlobalDataPaths.ImagesDirs = []string{imagesDir}
+	container.InvalidateInstalledOverlaysCache()
+	t.Cleanup(func() {
+		config.GlobalDataPaths = prevPaths
+		container.InvalidateInstalledOverlaysCache()
+	})
+
+	setTestSource(t, writeRecipe(t, "grch38/star/index", strings.Join([]string{
+		"#DESC:index",
+		"#DEP:grch38/gtf/49",
+		"echo build",
+		"",
+	}, "\n")))
+
+	obj, err := NewBuildObject(context.Background(), "grch38/star/index", false, t.TempDir(), false)
+	if err != nil {
+		t.Fatalf("NewBuildObject: %v", err)
+	}
+	if err := obj.recordKeys(context.Background()); err != nil {
+		t.Fatalf("recordKeys: %v", err)
+	}
+
+	m := obj.Manifest()
+	if len(m.Dependencies) != 1 {
+		t.Fatalf("dependencies = %+v", m.Dependencies)
+	}
+	dep := m.Dependencies[0]
+	if dep.Name != "grch38/gtf/49" || dep.Type != catalog.TypeData || dep.Role != meta.RoleData {
+		t.Errorf("dependency = %+v", dep)
+	}
+	if dep.Records == meta.Unrecorded {
+		t.Errorf("a recorded dependency was read as unrecorded: %+v", dep)
+	}
+	if m.ProvenanceComplete == nil || !*m.ProvenanceComplete {
+		t.Errorf("provenance_complete = %v, want true", m.ProvenanceComplete)
+	}
+
+	entries, err := capsule.Entries(filepath.Join(obj.ws.MetaDir, capsule.DirName))
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	var dirs []string
+	for _, e := range entries {
+		dirs = append(dirs, e.Dir)
+	}
+	// The dependency itself, and the entry it carried, unioned into one flat set.
+	if len(dirs) != 2 || !strings.HasPrefix(dirs[1], "grch38--gtf--49@") || dirs[0] != "grch38--genome@bbbbccccdddd" {
+		t.Errorf("capsule entries = %v", dirs)
+	}
+}
+
+// #ARCH:noarch is the only way an artifact claims portability. Nothing infers
+// it: getting it wrong does not crash, it silently returns wrong answers.
+func TestArchReachesTheRecordedPlatform(t *testing.T) {
+	tests := []struct {
+		name   string
+		recipe string
+		want   string
+	}{
+		{"portable", "#DESC:jars\n#ARCH:noarch\necho build\n", meta.ArchNone},
+		{"default is strict", "#DESC:compiled\necho build\n", meta.NativeArch()},
+		{"explicit native", "#DESC:compiled\n#ARCH:native\necho build\n", meta.NativeArch()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setTestSource(t, writeRecipe(t, "picard/3.1", tt.recipe))
+			obj, err := NewBuildObject(context.Background(), "picard/3.1", false, t.TempDir(), false)
+			if err != nil {
+				t.Fatalf("NewBuildObject: %v", err)
+			}
+			if got := obj.Runtime().Platform.Arch; got != tt.want {
+				t.Errorf("runtime arch = %q, want %q", got, tt.want)
+			}
+			if got := obj.Manifest().Platform.Arch; got != tt.want {
+				t.Errorf("manifest arch = %q, want %q", got, tt.want)
+			}
+			// The OS label never varies: everything runs in a Linux container.
+			if got := obj.Runtime().Platform.OS; got != "linux" {
+				t.Errorf("os = %q", got)
+			}
+		})
+	}
+}
+
+// Adding #ARCH: later must not invalidate images already built: it is a
+// compatibility assertion about the artifact, not a statement about its contents.
+func TestArchEntersNoKey(t *testing.T) {
+	keyOf := func(t *testing.T, recipe string) string {
+		t.Helper()
+		setTestSource(t, writeRecipe(t, "picard/3.1", recipe))
+		obj, err := NewBuildObject(context.Background(), "picard/3.1", false, t.TempDir(), false)
+		if err != nil {
+			t.Fatalf("NewBuildObject: %v", err)
+		}
+		if err := obj.recordKeys(context.Background()); err != nil {
+			t.Fatalf("recordKeys: %v", err)
+		}
+		return obj.Manifest().Keys.Identity.SHA256
+	}
+	before := keyOf(t, "#DESC:jars\necho build\n")
+	after := keyOf(t, "#DESC:jars\n#ARCH:noarch\necho build\n")
+	if before != after {
+		t.Error("adding #ARCH: moved the identity, invalidating every image built before it")
 	}
 }

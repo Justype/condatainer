@@ -1380,8 +1380,9 @@ condatainer info ./ubuntu--22.04.sqf
 
 A `.sif` reads the same way as a `.sqf`: its payload is a SquashFS partition
 starting partway into the file, so the archive reads take that offset. The
-`Type` line is the recipe type from the embedded manifest — `app`, `base`, `os`
-or `data`. An image built before the manifest existed reports `unknown`.
+`Type` line is the recipe type from the image's embedded metadata — `app`,
+`base`, `os` or `data`. An image built before that metadata existed reports
+`unknown`.
 
 ### Image (`.sqf` / `.sif`) output
 
@@ -1390,7 +1391,7 @@ or `data`. An image built before the manifest existed reports `unknown`.
 | **File** | Name, Path, file Size, Type (`app` / `base` / `os` / `data` / `unknown`, Read-Only), Created timestamp, and a `Build Tag` for `os` |
 | **SquashFS** | Compression algorithm (with level if set), Block Size, Inode count, Fragment count, Deduplication flag |
 | **Mount** | `/cnt/<name>/<version>` — shown for `app` and `data` |
-| **Environment** | Variables from the image's manifest, with their notes |
+| **Environment** | Variables from the image's embedded metadata, with their notes |
 
 `Build Tag` is the build date (`YYYY.MM.DD`), used as the distribution tag for `os` images since they carry no version in their name.
 
@@ -1412,7 +1413,7 @@ Export the Conda environment in a writable `.img` overlay, to stdout (or a file
 with `-p`). Runs `micromamba env export` against `/cnt_env`, so it captures the
 environment as it is now — including anything installed since the overlay was
 created. That is why it is limited to `.img`: an installed `.sqf` or `.sif` is
-immutable, carries its own manifest, and is reproduced by rebuilding from its
+immutable, carries its own metadata, and is reproduced by rebuilding from its
 recipe rather than by recovering one from the image.
 
 Exporting an installed image reports what to do instead:

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/image/meta"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 )
 
 func TestSynthesizeDefFromURI(t *testing.T) {
@@ -50,9 +50,26 @@ func TestWriteRecordingDef(t *testing.T) {
 		t.Fatalf("write clean def: %v", err)
 	}
 
-	manifestPath := filepath.Join(tmpDir, meta.DirName, meta.FileName)
+	metaDir := filepath.Join(tmpDir, meta.DirName)
+	if err := meta.StageRuntime(metaDir, meta.Runtime{
+		SchemaVersion: meta.SchemaVersion,
+		Name:          "ubuntu24/base",
+		Type:          catalog.TypeBase,
+		Platform:      meta.NativePlatform(),
+	}); err != nil {
+		t.Fatalf("StageRuntime: %v", err)
+	}
+	if err := meta.StageManifest(metaDir, meta.Manifest{
+		SchemaVersion: meta.SchemaVersion,
+		Name:          "ubuntu24/base",
+		Type:          catalog.TypeBase,
+		BuildType:     "def",
+		Platform:      meta.NativePlatform(),
+	}); err != nil {
+		t.Fatalf("StageManifest: %v", err)
+	}
 
-	recPath, err := writeRecordingDef(cleanPath, manifestPath, tmpDir)
+	recPath, err := writeRecordingDef(cleanPath, metaDir, tmpDir, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -66,11 +83,16 @@ func TestWriteRecordingDef(t *testing.T) {
 	if !strings.Contains(content, "Bootstrap: docker") || !strings.Contains(content, "From: alpine:3.19") {
 		t.Errorf("recording def dropped original directives:\n%s", content)
 	}
-	// The manifest rides in on an appended %files section — a def build has no
-	// packing step to add it during.
-	want := "    " + manifestPath + " " + meta.Path
-	if !strings.Contains(content, "%files") || !strings.Contains(content, want) {
-		t.Errorf("recording def missing manifest embed line %q:\n%s", want, content)
+	// Every staged document rides in on an appended %files section — a def build
+	// has no packing step to add them during.
+	if !strings.Contains(content, "%files") {
+		t.Errorf("recording def has no %%files section:\n%s", content)
+	}
+	for src, dst := range map[string]string{meta.FileName: meta.Path, meta.RuntimeFileName: meta.RuntimePath} {
+		want := "    " + filepath.Join(metaDir, src) + " " + dst
+		if !strings.Contains(content, want) {
+			t.Errorf("recording def missing embed line %q:\n%s", want, content)
+		}
 	}
 
 	// The definition is not copied in: Apptainer already writes it to the rootfs
@@ -81,14 +103,14 @@ func TestWriteRecordingDef(t *testing.T) {
 }
 
 // A def build with nothing staged still has to produce a usable definition.
-func TestWriteRecordingDefWithoutManifest(t *testing.T) {
+func TestWriteRecordingDefWithoutMetadata(t *testing.T) {
 	tmpDir := t.TempDir()
 	cleanPath := filepath.Join(tmpDir, "clean.def")
 	if err := os.WriteFile(cleanPath, []byte("Bootstrap: docker\nFrom: alpine:3.19\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	recPath, err := writeRecordingDef(cleanPath, "", tmpDir)
+	recPath, err := writeRecordingDef(cleanPath, "", tmpDir, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

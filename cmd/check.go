@@ -444,7 +444,7 @@ func resolveScriptPath(ctx context.Context, scriptPathOrName string) (string, bo
 		return "", false, nil, fmt.Errorf("failed to read recipe: %w", err)
 	}
 	tmpPath := filepath.Join(config.GetWritableTmpDir(), "check--"+strings.ReplaceAll(recipe.Name, "/", "--"))
-	if err := os.WriteFile(tmpPath, recipe.Text, utils.PermFile); err != nil {
+	if err := os.WriteFile(tmpPath, recipe.Script(), utils.PermFile); err != nil {
 		return "", false, nil, fmt.Errorf("failed to write recipe: %w", err)
 	}
 	utils.PrintDebug("[CHECK] Wrote recipe to %s", utils.StylePath(tmpPath))

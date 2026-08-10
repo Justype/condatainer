@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/image/meta"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -633,8 +633,8 @@ func addDistroAliasChoices(installed map[string]string, choices map[string]struc
 // it stays listed and mountable rather than being misfiled under a category it
 // never claimed.
 func isOSOverlay(overlayPath string) bool {
-	manifest, err := meta.Read(overlayPath)
-	return err == nil && manifest.Type == catalog.TypeOS
+	rt, err := meta.ReadRuntime(overlayPath)
+	return err == nil && rt.Type == catalog.TypeOS
 }
 
 // isAppOverlay checks if an overlay path is considered an "app" overlay

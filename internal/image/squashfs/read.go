@@ -83,7 +83,7 @@ func catExtractFile(sqfPath, filePath string, offset int64) ([]byte, error) {
 	base := offsetArgs(offset)
 	for hop := 0; hop < 4; hop++ {
 		dest := filepath.Join(tmpDir, strconv.Itoa(hop))
-		args := append(append([]string{}, base...), "-q", "-n", "-d", dest, sqfPath, filePath)
+		args := append(append([]string{}, base...), "-q", "-n", "-no-xattrs", "-d", dest, sqfPath, filePath)
 		cmd := exec.Command("unsquashfs", args...)
 		cmd.Env = append(os.Environ(), "LC_ALL=C")
 		var stderr bytes.Buffer
@@ -119,4 +119,43 @@ func catExtractFile(sqfPath, filePath string, offset int64) ([]byte, error) {
 		}
 	}
 	return nil, fmt.Errorf("%w: %s in %s: too many symlink hops", tool.ErrFileNotFound, filePath, sqfPath)
+}
+
+// ExtractDir extracts one directory out of a SquashFS archive into destDir,
+// keeping the archive-relative path: extracting ".cnt" into /tmp/x yields
+// /tmp/x/.cnt/…. A missing directory is ErrFileNotFound.
+//
+// One call, not one per file. Every archive read spawns an unsquashfs process,
+// so a caller that needs several files from one directory extracts the directory
+// and reads the copies.
+func ExtractDir(sqfPath, dirPath, destDir string, offset int64) error {
+	if !unsquashfsAvailable() {
+		return fmt.Errorf("%w: unsquashfs", tool.ErrToolMissing)
+	}
+	if _, err := os.Stat(sqfPath); err != nil {
+		return fmt.Errorf("%w: %s: %w", tool.ErrUnreadable, sqfPath, err)
+	}
+	inner := strings.TrimPrefix(dirPath, "/")
+
+	// -no-xattrs because the destination is scratch: an unprivileged user cannot
+	// restore security.* attributes, and without this unsquashfs exits non-zero
+	// over a file it extracted perfectly well.
+	args := append(offsetArgs(offset), "-q", "-n", "-no-xattrs", "-d", destDir, sqfPath, inner)
+	cmd := exec.Command("unsquashfs", args...)
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	if cause := classifyStderr(stderr.String(), sqfPath); cause != nil {
+		return cause
+	}
+	// The output decides, not the exit code: unsquashfs exits 0 when nothing
+	// matched and non-zero over warnings about things it did extract.
+	if _, err := os.Stat(filepath.Join(destDir, inner)); err != nil {
+		if runErr != nil {
+			return fmt.Errorf("%w: %s: %s", tool.ErrUnreadable, sqfPath, strings.TrimSpace(stderr.String()))
+		}
+		return fmt.Errorf("%w: %s in %s", tool.ErrFileNotFound, dirPath, sqfPath)
+	}
+	return nil
 }

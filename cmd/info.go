@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image/ext3"
-	"github.com/Justype/condatainer/internal/image/meta"
 	"github.com/Justype/condatainer/internal/image/sif"
 	"github.com/Justype/condatainer/internal/image/squashfs"
 	"github.com/Justype/condatainer/internal/runtime/container"
@@ -97,13 +97,14 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 }
 
 // imageType reports the recipe type the image was built as — app, base, os or
-// data — taken from its manifest. An image built before the manifest has none,
-// and its layout cannot tell app from data, so that reports "" for unknown.
+// data — taken from its embedded metadata. An image built before that metadata
+// has none, and its layout cannot tell app from data, so that reports "" for
+// unknown.
 func imageType(imagePath string) catalog.Type {
-	if manifest, err := meta.Read(imagePath); err == nil {
-		switch manifest.Type {
+	if rt, err := meta.ReadRuntime(imagePath); err == nil {
+		switch rt.Type {
 		case catalog.TypeBase, catalog.TypeOS, catalog.TypeApp, catalog.TypeData:
-			return manifest.Type
+			return rt.Type
 		}
 	}
 	return ""
@@ -228,7 +229,7 @@ func displayImgInfo(overlayPath string) error {
 	fmt.Printf("  %-14s %s\n", "Path:", utils.StylePath(overlayPath))
 	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatBytes(stats.FileSizeBytes))
 	// Not a recipe type: an .img is a mutable working overlay, never built from a
-	// recipe, so it carries no manifest to take a type from.
+	// recipe, so it carries no embedded metadata to take a type from.
 	if stats.IsSparse {
 		fmt.Printf("  %-14s %s (Writable; %s on disk)\n", "Type:", utils.StyleInfo("environment"), utils.FormatBytes(stats.FileBlocksUsed))
 	} else {
@@ -292,8 +293,8 @@ func displayImgInfo(overlayPath string) error {
 }
 
 // readEnvFile resolves an image's description, notes, and var lines from its
-// manifest, with {prefix} resolved to the install prefix. A writable .img reads
-// its .env sidecar instead. Var lines are sorted KEY=VALUE.
+// runtime metadata, with {prefix} resolved to the install prefix. A writable
+// .img reads its .env sidecar instead. Var lines are sorted KEY=VALUE.
 func readEnvFile(overlayPath string) (description string, notes map[string]string, varLines []string) {
 	description, configs, notes := container.ResolveOverlayEnv(overlayPath)
 	keys := make([]string, 0, len(configs))

@@ -12,8 +12,8 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/image/meta"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -411,11 +411,11 @@ func printColumns(plain, styled []string, indent, termWidth int) {
 // it has no readable metadata. Listing must not fail on such an image, so the
 // read error is dropped: the row still appears, just without a description.
 func readOverlayDescription(overlayPath string) string {
-	manifest, err := meta.Read(overlayPath)
+	rt, err := meta.ReadRuntime(overlayPath)
 	if err != nil {
 		return ""
 	}
-	return manifest.Description
+	return rt.Description
 }
 
 // filterImageDirs filters dirs according to dirFilter:

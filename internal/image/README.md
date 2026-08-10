@@ -1,19 +1,25 @@
 # image
 
 Image file operations: creation, resizing, ownership changes, integrity
-checking, locking, embedded metadata, and finding what is installed.
+checking, locking, reading bytes back out, and finding what is installed.
+
+This package is **file operations and nothing else**. It opens an archive, reads
+a path out of one, locks, and resolves paths — it does not know what a manifest
+is, what a key is, or that `/.cnt` means anything. Everything that understands
+CondaTainer metadata lives under [`internal/artifact`](../artifact/README.md) and
+reads through here. The dependency is one-way: `artifact` imports `image`, never
+the reverse.
 
 ## Architecture
 
 ```
 lock.go     File locking (shared/exclusive)
 path.go     PathExists inside an image, .sqf or .img
-read.go     ReadFile from inside an image, .sqf or .img
+read.go     ReadFile from inside an image; ExtractDir, one directory in one call
 scan.go     ScanOverlays: what is installed, across the image search paths
 ext3/       Writable .img: create, resize, chown, check, info
 squashfs/   Read-only .sqf: stat, cat, pack
 sif/        .sif headers and partition offsets
-meta/       The embedded manifest: stage, read, validate
 tool/       Shared external-tool invocation and structured errors
 ```
 
@@ -37,44 +43,6 @@ Two things vary by caller, so they are options rather than separate scanners:
   silently drop an overlay; the CLI listings warn and carry on.
 
 A `.sif` is not an overlay and never appears: it is the container root.
-
-## Manifests
-
-`meta` handles `/.cnt/manifest.json`, written at build time and read back from
-the packed image. It is **trusted, not verified**: nothing compares it against
-the payload beside it or the build that produced it, and `Validate` checks
-structure rather than truth — a known schema, a name and install prefix where
-they are load-bearing, and an environment that applies without collisions.
-
-`Runtime.Prefix` is not a mount point. An overlay is applied over the container
-root, so the payload appears at `/cnt/<name>` because that is where it sits in
-the archive, not because anything is mounted there. `Runtime.Env` keeps
-`{prefix}` intact and substitutes it at load time, since the install prefix is
-not known when the image is built.
-
-`Read` distinguishes *no manifest* from *could not look*: only a genuinely
-absent one is `ErrNoManifest`, so a caller never reports a missing `unsquashfs`
-or a corrupt archive as "this image has no metadata" — those keep
-`tool.ErrToolMissing`, `tool.ErrUnreadable` or `tool.ErrCorrupt`. An unknown
-`SchemaVersion` joins them as `ErrUnsupportedSchema`, handled exactly like a
-missing manifest; a reader ignores unknown fields, so a later schema that only
-adds fields stays readable here.
-
-Reads are cached **across processes**, keyed by absolute path and validated
-against size and mtime. Repeated scans — `list`, `avail`, PATH construction, and
-shell completion, which runs one process per keystroke — would otherwise spawn
-one `unsquashfs` per image every time. Negative verdicts are cached too, or an
-image predating the format would be re-probed on every listing, which is the
-cost the cache exists to avoid.
-
-Degradation is deliberate and asymmetric, because most images in the wild predate
-the format. `CheckBase` accepts an image with no manifest, warns and accepts one
-that is present but unreadable — rejecting it would strand every build behind a
-base that is most likely fine — and rejects only a manifest that reads and says
-it is not a base.
-
-A writable `.img` is not handled at all. It is a mutable working overlay rather
-than a built image, and its environment comes from its `.env` sidecar.
 
 ## Key Types
 
@@ -112,6 +80,13 @@ Override the tmp location with `CNT_TMPDIR` (takes priority over `SLURM_TMPDIR`,
 ## External tools
 
 Every archive read shells out, and two of those calls have non-obvious shapes.
+
+`ExtractDir` decides by its **output, not the exit code**: `unsquashfs` exits 0
+when nothing matched, and exits non-zero over warnings about files it extracted
+perfectly well — an unprivileged user cannot restore `security.*` xattrs, which
+is the common case on a shared filesystem. It passes `-no-xattrs` to avoid that
+and then stats the extracted path to decide what happened. The single-file
+extraction fallback passes it for the same reason.
 
 `squashfs.PathExists` lists the archive with `unsquashfs -lc -d ""` and requires
 an *exact* line match on `/entry` or a prefix match on `/entry/`. `-d ""` lists

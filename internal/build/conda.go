@@ -1,10 +1,13 @@
 package build
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/Justype/condatainer/internal/conda"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/logging"
@@ -46,7 +49,13 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 		return err
 	}
 
+	b.captureCondaExports(ctx)
 	b.describeCondaPackage()
+
+	if err := b.recordKeys(ctx); err != nil {
+		b.Cleanup(true)
+		return err
+	}
 
 	metaDir, err := stageMetadata(ctx, b)
 	if err != nil {
@@ -113,6 +122,65 @@ func (b *BuildObject) buildInstallCmd() (cmd string, extraBindPaths []string, er
 	return cmd, extraBindPaths, nil
 }
 
+// captureCondaExports records what was installed, from the environment itself
+// rather than from a second solve: explicit.txt pins exact package URLs, and
+// environment.yml pins names and versions. They are the Conda app's identity and
+// equivalence, so `sha256sum` on either reproduces a key by hand.
+//
+// A failure is a warning, not a build failure. An hour of solving is worth more
+// than the records, and an image without them is the same unrecorded case as
+// every image built before this format.
+func (b *BuildObject) captureCondaExports(ctx context.Context) {
+	log := logging.FromContext(ctx)
+
+	raw, err := b.condaExport(ctx, "--explicit", "--no-md5")
+	if err == nil {
+		var explicit []byte
+		if explicit, err = conda.CanonicalExplicit(raw); err == nil {
+			b.embedSource(SourceFile{Name: conda.ExplicitFileName, Data: explicit})
+		}
+	}
+	if err != nil {
+		log.Warn("could not record the installed package set", "name", b.spec.Image.Name, "err", err)
+	}
+
+	raw, err = b.condaExport(ctx, "--no-builds")
+	if err == nil {
+		var channels []string
+		if b.spec.Source.Conda != nil {
+			channels = b.spec.Source.Conda.Channels
+		}
+		var environment []byte
+		if environment, err = conda.CanonicalEnvironment(raw, channels); err == nil {
+			b.embedSource(SourceFile{Name: conda.EnvironmentFileName, Data: environment})
+		}
+	}
+	if err != nil {
+		log.Warn("could not record the installed environment", "name", b.spec.Image.Name, "err", err)
+	}
+}
+
+// condaExport runs `micromamba env export` against the installed prefix and
+// returns its stdout. It reuses the install's container setup, so the export
+// reads the environment that was just built whichever workspace mode is in use.
+func (b *BuildObject) condaExport(ctx context.Context, args ...string) ([]byte, error) {
+	opts, err := b.condaExecOpts(fmt.Sprintf("micromamba env export -p /cnt/%s %s",
+		b.spec.Image.Name, strings.Join(args, " ")), nil)
+	if err != nil {
+		return nil, err
+	}
+	opts.PassThruStdin = false
+
+	var out bytes.Buffer
+	streams := exec.IOFromContext(ctx)
+	streams.Stdin = nil
+	streams.Stdout = &out
+	if err := exec.Run(ctx, opts, streams); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
 // condaInstallExecOpts constructs exec.Options for the micromamba run. Installs
 // only — the run never sees the output path or binds the images directory.
 func (b *BuildObject) condaInstallExecOpts() (exec.Options, error) {
@@ -142,16 +210,22 @@ if [ -z "$(ls -A /cnt 2>/dev/null)" ]; then
 fi
 `, echoPrefix, installCmd)
 
+	return b.condaExecOpts(bashScript, extraBindPaths)
+}
+
+// condaExecOpts sites a micromamba run against this build's payload, whichever
+// workspace mode is in use: bound host directories, or the scratch image the
+// payload lives inside. Install and export share it so an export always reads
+// the environment the install just wrote.
+func (b *BuildObject) condaExecOpts(bashScript string, extraBindPaths []string) (exec.Options, error) {
 	bindPaths := extraBindPaths
 
-	var opts exec.Options
 	if !b.ws.UsesImage() {
-		buildTmpDir := b.ws.TmpDir
 		bindPaths = append(bindPaths,
-			buildTmpDir+":"+ScratchPath,
+			b.ws.TmpDir+":"+ScratchPath,
 			b.ws.CntDir+":/cnt",
 		)
-		opts = exec.Options{
+		return exec.Options{
 			BaseImage:      b.spec.Base,
 			ApptainerBin:   config.Global.ApptainerBin,
 			Overlays:       []string{},
@@ -162,22 +236,19 @@ fi
 			WritableImg:    false,
 			ApptainerFlags: []string{"--writable-tmpfs"},
 			PassThruStdin:  true,
-		}
-	} else {
-		opts = exec.Options{
-			BaseImage:     b.spec.Base,
-			ApptainerBin:  config.Global.ApptainerBin,
-			Overlays:      []string{b.ws.Overlay},
-			BindPaths:     bindPaths,
-			EnvSettings:   []string{"TMPDIR=" + ScratchPath},
-			Command:       []string{"/bin/bash", "-c", bashScript},
-			HidePrompt:    true,
-			WritableImg:   true,
-			PassThruStdin: true,
-		}
+		}, nil
 	}
-
-	return opts, nil
+	return exec.Options{
+		BaseImage:     b.spec.Base,
+		ApptainerBin:  config.Global.ApptainerBin,
+		Overlays:      []string{b.ws.Overlay},
+		BindPaths:     bindPaths,
+		EnvSettings:   []string{"TMPDIR=" + ScratchPath},
+		Command:       []string{"/bin/bash", "-c", bashScript},
+		HidePrompt:    true,
+		WritableImg:   true,
+		PassThruStdin: true,
+	}, nil
 }
 
 // installConda populates the payload with micromamba. The caller is responsible

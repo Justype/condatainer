@@ -18,8 +18,12 @@ func TestExpand(t *testing.T) {
 	if want := "grch38/star/2.7.11b/gencode47-101"; got.Name != want {
 		t.Errorf("Name = %q, want %q", got.Name, want)
 	}
-	if got.IsTemplate || got.TargetTemplate != "" {
+	if got.IsTemplate {
 		t.Error("expanded recipe is still marked a template")
+	}
+	// The target survives so a manifest can record which template produced this.
+	if got.TargetTemplate != r.TargetTemplate {
+		t.Errorf("TargetTemplate = %q, want it kept", got.TargetTemplate)
 	}
 	if want := "STAR 2.7.11b index for GENCODE 47"; got.Description != want {
 		t.Errorf("Description = %q, want %q", got.Description, want)
@@ -34,14 +38,21 @@ func TestExpand(t *testing.T) {
 		}
 	}
 
-	// The body is substituted, since the recipe hash is taken over the expanded
-	// text — but a shell ${VAR} is not a placeholder and must survive.
-	body := string(got.Text)
-	if strings.Contains(body, "{star_version}") {
-		t.Error("Text still contains an unexpanded placeholder")
+	// Text is the template, tokens intact: it is what the artifact embeds and
+	// what a rebuild starts from. Rendered is the copy the build runs.
+	if !strings.Contains(string(got.Text), "{star_version}") {
+		t.Error("Text was expanded; the template is what gets embedded")
 	}
-	if !strings.Contains(body, `"$CNT_PREFIX/index"`) || !strings.Contains(body, `"$NCPUS"`) {
-		t.Error("Text lost a shell variable")
+	rendered := string(got.Rendered)
+	if strings.Contains(rendered, "{star_version}") {
+		t.Error("Rendered still contains an unexpanded placeholder")
+	}
+	if string(got.Script()) != rendered {
+		t.Error("Script() did not return the rendered copy")
+	}
+	// A shell ${VAR} is not a placeholder and must survive substitution.
+	if !strings.Contains(rendered, `"$CNT_PREFIX/index"`) || !strings.Contains(rendered, `"$NCPUS"`) {
+		t.Error("Rendered lost a shell variable")
 	}
 
 	// {prefix} has no var and survives to the manifest.
@@ -63,5 +74,14 @@ func TestExpandRequiresEveryVar(t *testing.T) {
 	plain := parse(t, "cellranger/9.0.1", "#DESC:cellranger\n")
 	if _, err := Expand(plain, nil); err == nil {
 		t.Error("Expand on a non-template should fail")
+	}
+}
+
+// A recipe that is not a template runs the bytes it was fetched as, so Script()
+// and Text are the same thing and nothing has to know which case it is in.
+func TestScriptFallsBackToText(t *testing.T) {
+	plain := parse(t, "cellranger/9.0.1", "#DESC:cellranger\necho build\n")
+	if string(plain.Script()) != string(plain.Text) {
+		t.Errorf("Script() = %q, want the recipe itself", plain.Script())
 	}
 }

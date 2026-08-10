@@ -251,3 +251,43 @@ func TestResolveTemplateDep(t *testing.T) {
 		t.Errorf("Order = %v, want the dep first", got)
 	}
 }
+
+// A base is the container root a build runs inside, not an input it is composed
+// from: it may be a root of the walk, never an edge in it.
+func TestResolveRejectsABaseDependency(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, body string) {
+		p := filepath.Join(root, "recipes", filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("ubuntu24/base.def", "#DESC:root\nBootstrap: docker\n")
+	write("ubuntu24/r-essential.def", "#DESC:os layer\nBootstrap: docker\n")
+	write("grch38/gtf/49", "#DESC:annotation\n#DEP:ubuntu24/base\n")
+	write("grch38/vcf/49", "#DESC:variants\n#DEP:ubuntu24/r-essential\n")
+
+	cat, err := Open(t.Context(), []Spec{{Name: "local", Base: root}}, Cache{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := cat.Resolve(t.Context(), []string{"grch38/gtf/49"}, nil); err == nil {
+		t.Error("a base was accepted as a dependency")
+	} else if !strings.Contains(err.Error(), "ubuntu24/base") {
+		t.Errorf("err = %v, want it to name the base", err)
+	}
+
+	// Building the base itself is exactly what a root is for.
+	if _, err := cat.Resolve(t.Context(), []string{"ubuntu24/base"}, nil); err != nil {
+		t.Errorf("building a base was rejected: %v", err)
+	}
+
+	// An OS layer is a legal dependency; only base is refused.
+	if _, err := cat.Resolve(t.Context(), []string{"grch38/vcf/49"}, nil); err != nil {
+		t.Errorf("an os dependency was rejected: %v", err)
+	}
+}

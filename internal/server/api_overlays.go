@@ -14,9 +14,9 @@ import (
 	"log/slog"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/ext3"
-	"github.com/Justype/condatainer/internal/image/meta"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/logging/weblog"
 	"github.com/Justype/condatainer/internal/runtime/container"
@@ -209,9 +209,9 @@ func (s *srv) handleOverlaysList(w http.ResponseWriter, r *http.Request) {
 			Type:   string(catalog.TypeApp),
 			Format: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
 		}
-		if manifest, err := meta.Read(path); err == nil {
-			entry.Type = string(manifest.Type)
-			entry.Description = manifest.Description
+		if rt, err := meta.ReadRuntime(path); err == nil {
+			entry.Type = string(rt.Type)
+			entry.Description = rt.Description
 		}
 		entries = append(entries, entry)
 	}

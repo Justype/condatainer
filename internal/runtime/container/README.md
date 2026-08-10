@@ -119,17 +119,29 @@ fakeroot := container.AutoEnableFakeroot(
 
 ## Environment Variables
 
-Each image's environment comes from its embedded manifest (`/.cnt/manifest.json`),
-with `{prefix}` resolved to the image's install prefix at load time. Nothing is
-mounted and no sidecar travels with the image.
+Each image's environment comes from its embedded runtime document
+(`/.cnt/runtime.json`), with `{prefix}` resolved to the image's install prefix at
+load time. Nothing is mounted and no sidecar travels with the image.
 
-An image with no readable manifest still mounts and contributes nothing — no
-variables, no `PATH` entry, no description. `resolveImage` reports that once per
-invocation: informational when the manifest is simply absent (an image built
-before the format, or a plain Apptainer `.sif`), a warning when one is present
-but unreadable, or when the host is missing `unsquashfs`.
+That document is the *only* metadata this path reads. The manifest beside it
+carries provenance and is never opened here, so provenance can grow without
+costing every mount.
 
-A writable `.img` is the exception. It has no manifest, so it reads a
+An image built for another architecture is refused the same way — mounted,
+contributing nothing, with a warning. `compare.MountAllowed` is the one
+comparison rule on this path, and only because `runtime.json` is already in hand:
+it costs a string comparison, and without it a wrong-architecture image mounts
+cleanly and fails somewhere downstream where the cause is unrecognizable. An
+artifact is portable only where its recipe said `#ARCH:noarch`.
+
+An image with no readable runtime document still mounts and contributes nothing —
+no variables, no `PATH` entry, no description. There is no fallback to the
+manifest. `resolveImage` reports that once per invocation: informational when the
+document is simply absent (an image built before the format, or a plain Apptainer
+`.sif`), a warning when one is present but unreadable, or when the host is
+missing `unsquashfs`.
+
+A writable `.img` is the exception. It carries no embedded metadata, so it reads a
 `<overlay>.env` sidecar instead — one `KEY=value` per line, with an optional
 `##` note, and `{prefix}` resolved to `/cnt_env`:
 

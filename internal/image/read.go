@@ -2,10 +2,13 @@ package image
 
 import (
 	"bytes"
+	"fmt"
 	"os/exec"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/image/sif"
 	"github.com/Justype/condatainer/internal/image/squashfs"
+	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -43,4 +46,25 @@ func imgCat(imgPath, innerPath string) []byte {
 		return nil
 	}
 	return out
+}
+
+// ExtractDir extracts a directory out of an image into destDir, keeping the
+// archive-relative path: extracting "/.cnt" yields destDir/.cnt/….
+//
+// It exists so a caller that wants several files from one directory pays for one
+// unsquashfs process instead of one per file. A writable .img is not handled: it
+// carries no embedded metadata.
+func ExtractDir(imagePath, innerPath, destDir string) error {
+	switch {
+	case utils.IsSqf(imagePath):
+		return squashfs.ExtractDir(imagePath, innerPath, destDir, 0)
+	case utils.IsSif(imagePath):
+		part, err := sif.PrimarySystemPartition(imagePath)
+		if err != nil {
+			return err
+		}
+		return squashfs.ExtractDir(imagePath, innerPath, destDir, part.Offset)
+	default:
+		return fmt.Errorf("%w: %s is not a readable image", tool.ErrCorrupt, imagePath)
+	}
 }

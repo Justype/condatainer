@@ -23,6 +23,61 @@ Likewise absent: the scheduler. Recipes read normalized `$NCPUS`/`$MEM`, which t
 scheduler package produces. The edge runs from each tool to both packages, never
 between them.
 
+## The header boundary
+
+`headerBoundary` decides where a recipe's headers end and its body begins.
+Scanning from offset 0, a line is header when its content — after removing the
+line terminator and any leading spaces or tabs — is empty or begins with `#`. The
+body starts at the first line that fails that test.
+
+Its only job is bounding what the recipe parser reads, which is what keeps a
+`#DEP:` in a heredoc — or a `#SBATCH` in a file the recipe writes — inert. It
+feeds no key. Nothing parses shell: a body carries `#` inside strings and
+`${x#y}` expansions, so a comment-aware rule could move the boundary on a body
+that never changed.
+
+Two consequences are worth stating: a leading `#!/bin/bash` is header, and so is a
+blank line before the first command.
+
+`StripComments` is what the keys hash. It removes every whole-line comment from
+the recipe — the header along with the rest — so both keys see what the recipe
+*does*, and editing a comment moves neither.
+
+Whole-line only, and blank lines stay. A trailing comment cannot be removed
+without parsing shell, for the same reason the boundary does not: `echo "a # b"`
+and `${v#pre}` both carry a `#` that is not one. Neither function touches what is
+stored or what runs — `/.cnt/recipe` is the original bytes, and so is the script
+the build executes.
+
+## Validation and lint
+
+`Recipe.Validate` reports headers a recipe of that type may not declare, and
+`Recipe.Lint` reports declarations that are legal but probably wrong. Both are
+returned, never printed — nothing here writes to a terminal — and both run when a
+recipe is fetched for a build rather than while indexing, so one bad recipe stops
+its own build instead of taking a whole collection out of every listing.
+
+| rule | kind |
+|---|---|
+| `#DEP:` on anything but data | error |
+| `#ARCH:` on an OS or a base, or a value other than `native`/`noarch` | error |
+| a dependency mentioned in the name but not as whole components | lint |
+
+Only data has build dependencies: an app is prebuilt and self-contained, an OS is
+self-contained by definition, and a base *is* the build environment. A recipe that
+genuinely needs a compiler is an `os` artifact providing that toolchain, not an
+app depending on one. `Resolve` enforces the other half — a dep that resolves to a
+base is refused, though a base may still be a root of the walk, which is how a
+base gets built.
+
+`HasComponents` is the matching rule the lint is built on: a dependency's
+slash-separated components must occur as a contiguous run of the artifact name's.
+Components compare as exact strings and versions are never compared semantically,
+so `star/2.7.11b` matches `grch38/star/2.7.11b/gencode49` and not
+`grch38/star2.7.11b/gencode49`. The second is the near-miss the lint reports — the
+author meant the version to be load-bearing, and the `#TARGET:` quietly stopped it
+counting.
+
 ## What may surprise you
 
 Everything below is a decision, not an accident. A function read on its own will
@@ -62,10 +117,12 @@ rebuild the moment upstream moves.
 token order, so storing it would be a second copy free to drift. Value order *is*
 stored — it picks the default.
 
-**Expanding a template rewrites the body, and leaves the headers.** The recipe
-hash is taken over expanded text, so an unexpanded template would give every
-variant one key. `#PH:`/`#TARGET:` survive in the output because they are
-comments to `bash` and the recipe is embedded in the artifact for provenance.
+**Expanding a template leaves `Text` alone.** `Expand` sets `Rendered` — the
+substituted copy a build runs, reached through `Script()` — and keeps `Text` as
+the template it was fetched as, tokens and all. The template is what an artifact
+embeds and what a rebuild starts from, so every variant shares one recipe digest
+and is told apart by the placeholder values recorded beside it. `PH` carries
+those: after expansion it holds exactly one value per name.
 
 **A template match is not a wildcard.** Names are matched against the declared
 `#PH:` values; only an explicit `*` is permissive. A half-filled name is not a

@@ -8,13 +8,15 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/image/meta"
+	"github.com/Justype/condatainer/internal/artifact/compare"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
 // EnvPrefix is where a writable .img's payload lives inside the container.
-// An .img is a working image with no manifest, so it has no recorded prefix.
+// An .img is a working image with no embedded metadata, so it has no recorded
+// prefix.
 const EnvPrefix = "/cnt_env"
 
 // Contribution is what one image adds to the container at load time.
@@ -33,46 +35,58 @@ type Contribution struct {
 // resolveImage reads what one image contributes, plus a diagnostic when it
 // contributes nothing.
 //
-// The manifest is the only source for a .sqf or .sif; an adjacent .env sidecar
-// is ignored for those, because an installed image is immutable and its metadata
-// travels inside it. A writable .img is the exception and reads its sidecar.
+// runtime.json is the only source for a .sqf or .sif, and the only metadata this
+// path reads: an adjacent .env sidecar is ignored, because an installed image is
+// immutable and its metadata travels inside it, and the manifest is never opened
+// here so that provenance can grow without costing every mount. A writable .img
+// is the exception and reads its sidecar.
 func resolveImage(cleanPath string) (Contribution, *Diagnostic) {
 	if utils.IsImg(cleanPath) {
 		return imgContribution(cleanPath)
 	}
 
-	manifest, err := meta.Read(cleanPath)
+	rt, err := meta.ReadRuntime(cleanPath)
 	if err != nil {
 		return Contribution{}, degradeDiagnostic(cleanPath, err)
 	}
+	// The one comparison rule on the execution path, and only because
+	// runtime.json is already in hand: a wrong-architecture image mounts cleanly
+	// and fails somewhere further downstream, where the cause is unrecognizable.
+	if err := compare.MountAllowed(rt); err != nil {
+		return Contribution{}, &Diagnostic{
+			Level: "warn",
+			Message: fmt.Sprintf("%s was %v; mounted, but contributes no environment.",
+				utils.StylePath(cleanPath), err),
+		}
+	}
 
 	c := Contribution{
-		Name:        manifest.Name,
-		Type:        manifest.Type,
-		Description: manifest.Description,
-		Prefix:      manifest.Runtime.Prefix,
+		Name:        rt.Name,
+		Type:        rt.Type,
+		Description: rt.Description,
+		Prefix:      rt.Prefix,
 		Configs:     map[string]string{},
 		Notes:       map[string]string{},
 	}
-	for _, env := range manifest.Runtime.Env {
-		c.Configs[env.Key] = env.Resolved(manifest.Runtime.Prefix)
+	for _, env := range rt.Env {
+		c.Configs[env.Key] = env.Resolved(rt.Prefix)
 		if env.Note != "" {
-			c.Notes[env.Key] = strings.ReplaceAll(env.Note, "{prefix}", manifest.Runtime.Prefix)
+			c.Notes[env.Key] = strings.ReplaceAll(env.Note, "{prefix}", rt.Prefix)
 		}
 	}
 	return c, nil
 }
 
-// degradeDiagnostic turns a failed manifest read into the message the user sees.
+// degradeDiagnostic turns a failed runtime read into the message the user sees.
 //
 // The three cases are kept apart so a broken host never reads as a broken image:
-// an absent manifest is expected for anything built before manifests existed and
-// for a plain Apptainer .sif, while a present-but-unreadable one, or a missing
-// tool, is something the user can act on.
+// absent runtime metadata is expected for anything built before the format and
+// for a plain Apptainer .sif, while a present-but-unreadable document, or a
+// missing tool, is something the user can act on.
 func degradeDiagnostic(path string, err error) *Diagnostic {
 	name := utils.StylePath(path)
 	switch {
-	case errors.Is(err, meta.ErrNoManifest):
+	case errors.Is(err, meta.ErrNoRuntime):
 		return &Diagnostic{
 			Level:   "info",
 			Message: fmt.Sprintf("%s has no CondaTainer metadata; mounted, but contributes no environment. Rebuild to add it.", name),

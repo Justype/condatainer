@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/image/meta"
 	"github.com/Justype/condatainer/internal/utils"
 )
 

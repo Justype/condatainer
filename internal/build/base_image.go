@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/image/meta"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -122,6 +122,7 @@ func newBaseObject(ctx context.Context, update bool) (*BuildObject, error) {
 	// After capture, which takes the type from the recipe: a base is the
 	// container root whatever its recipe says, and has no install prefix.
 	base.spec.Image.Type = catalog.TypeBase
-	base.spec.Runtime = meta.Runtime{}
+	base.spec.Image.Prefix = ""
+	base.spec.Image.Env = nil
 	return base, nil
 }

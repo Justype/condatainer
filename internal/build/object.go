@@ -7,15 +7,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"log/slog"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image/ext3"
-	"github.com/Justype/condatainer/internal/image/meta"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
@@ -86,13 +87,69 @@ type BuildObject struct {
 	// Where the image lands. Prepared is filled in once the build lock is held,
 	// since it derives from the lock owner.
 	tgt Target
+
+	// embedded are the files staged into /.cnt verbatim beside the two metadata
+	// documents: a recipe at resolution, a Conda build's exports once the
+	// environment exists, and the key records. The manifest names exactly these,
+	// so it can never claim a file the image does not carry.
+	embedded []embeddedFile
+
+	// What the build learned once its sources and dependencies were known.
+	keys               meta.Keys
+	dependencies       []meta.Dependency
+	provenanceComplete *bool
+}
+
+// embeddedFile is one file staged into /.cnt. isSource separates what the image
+// was built *from* — named by manifest.source.files — from the records derived
+// out of it, which manifest.keys names instead.
+type embeddedFile struct {
+	SourceFile
+	isSource bool
+}
+
+// embedSource records a file the image was built from.
+func (b *BuildObject) embedSource(file SourceFile) {
+	b.embed(embeddedFile{SourceFile: file, isSource: true})
+}
+
+// embedRecord records a derived key record.
+func (b *BuildObject) embedRecord(name string, data []byte) {
+	b.embed(embeddedFile{SourceFile: SourceFile{Name: name, Data: data}})
+}
+
+// embed stages a file into /.cnt, replacing any earlier one of the same name so
+// a re-resolved build does not stage two.
+func (b *BuildObject) embed(file embeddedFile) {
+	for i, have := range b.embedded {
+		if have.Name == file.Name {
+			b.embedded[i] = file
+			return
+		}
+	}
+	b.embedded = append(b.embedded, file)
 }
 
 // Spec returns the resolved description of the image this build produces.
 func (b *BuildObject) Spec() Spec { return b.spec }
 
-// Manifest returns the metadata this build embeds in its image.
-func (b *BuildObject) Manifest() meta.Manifest { return b.spec.Manifest() }
+// Manifest returns what this build's image records about itself, including the
+// sources it embeds — which are known only once they have been captured.
+func (b *BuildObject) Manifest() meta.Manifest {
+	m := b.spec.Manifest()
+	for _, file := range b.embedded {
+		if file.isSource {
+			m.Source.Files = append(m.Source.Files, file.Name)
+		}
+	}
+	m.Keys = b.keys
+	m.Dependencies = b.dependencies
+	m.ProvenanceComplete = b.provenanceComplete
+	return m
+}
+
+// Runtime returns the mount-time contract this build embeds in its image.
+func (b *BuildObject) Runtime() meta.Runtime { return b.spec.Runtime() }
 
 // Common interface implementations for BuildObject
 
@@ -171,9 +228,10 @@ func (b *BuildObject) setupCondaFields() error {
 // no recipe to take #ENV: or a description from.
 func (b *BuildObject) setCondaSpec() {
 	b.spec.Image.Type = catalog.TypeApp
-	b.spec.Runtime = meta.Runtime{Prefix: meta.Prefix(b.spec.Image.Name, catalog.TypeApp)}
+	b.spec.Image.Prefix = meta.Prefix(b.spec.Image.Name, catalog.TypeApp)
+	b.spec.Image.Env = nil
 
-	src := &CondaSource{}
+	src := &CondaSource{Channels: slices.Clone(config.Global.Build.Channels)}
 	switch {
 	case b.buildSource != "" && utils.IsCondaFile(b.buildSource):
 		data, err := os.ReadFile(b.buildSource)
@@ -776,7 +834,8 @@ func (b *BuildObject) captureLocalSourceSpec(isDef bool) {
 	// Drop anything a previous source contributed; the recipe below re-supplies it.
 	b.spec.Image.Description = ""
 	b.spec.Image.URL = ""
-	b.spec.Runtime = meta.Runtime{Prefix: meta.Prefix(b.spec.Image.Name, b.spec.Image.Type)}
+	b.spec.Image.Prefix = meta.Prefix(b.spec.Image.Name, b.spec.Image.Type)
+	b.spec.Image.Env = nil
 
 	data, err := os.ReadFile(b.buildSource)
 	if err != nil {
@@ -789,6 +848,7 @@ func (b *BuildObject) captureLocalSourceSpec(isDef bool) {
 	} else {
 		b.spec.Source = SourceSpec{Script: &ScriptSource{File: file, Prompts: b.inputPrompts}}
 	}
+	b.embedSource(SourceFile{Name: meta.RecipeFileName, Data: data})
 
 	recipe, err := catalog.ParseRecipe(b.buildSource, bytes.NewReader(data))
 	if err != nil {
@@ -797,7 +857,9 @@ func (b *BuildObject) captureLocalSourceSpec(isDef bool) {
 	}
 	b.spec.Image.Description = recipe.Description
 	b.spec.Image.URL = recipe.URL
-	b.spec.Runtime = runtimeFromRecipe(b.spec.Image.Name, b.spec.Image.Type, recipe.Env)
+	b.spec.Image.Prefix = meta.Prefix(b.spec.Image.Name, b.spec.Image.Type)
+	b.spec.Image.Env = envFromRecipe(recipe.Env)
+	b.spec.Image.Arch = recipe.Arch
 }
 
 // FromExternalSource creates a BuildObject from an external build script or def
@@ -982,6 +1044,14 @@ func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (
 	if err != nil {
 		return false, false, fmt.Errorf("failed to read recipe for %s: %w", base.spec.Image.Name, err)
 	}
+	// Validation happens here rather than while indexing, so one bad recipe stops
+	// its own build instead of taking a whole collection out of every listing.
+	if err := recipe.Validate(); err != nil {
+		return false, false, err
+	}
+	for _, warning := range recipe.Lint() {
+		logging.FromContext(ctx).Warn("recipe lint", "detail", warning)
+	}
 
 	dir := tmpDir
 	if isContainer {
@@ -1001,22 +1071,54 @@ func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (
 	base.spec.Image.Description = recipe.Description
 	base.spec.Image.URL = recipe.URL
 	base.spec.Dependencies = recipe.Deps
-	base.spec.Runtime = runtimeFromRecipe(base.spec.Image.Name, recipe.Type, recipe.Env)
-	base.spec.Source = SourceSpec{Script: &ScriptSource{
+	base.spec.Image.Prefix = meta.Prefix(base.spec.Image.Name, recipe.Type)
+	base.spec.Image.Env = envFromRecipe(recipe.Env)
+	base.spec.Image.Arch = recipe.Arch
+	// recipe.Text is the template, tokens intact — what the image embeds and what
+	// a rebuild starts from. The expansion went to the workspace file above and
+	// is never recorded; the variant is recorded as its selected values.
+	source := SourceSpec{Script: &ScriptSource{
 		File:    SourceFile{Name: filepath.Base(path), Data: recipe.Text},
 		Prompts: recipe.Inputs,
 	}}
 	if isContainer {
-		base.spec.Source = SourceSpec{Definition: &DefinitionSource{
+		source = SourceSpec{Definition: &DefinitionSource{
 			File: SourceFile{Name: filepath.Base(path), Data: recipe.Text},
 		}}
 	}
+	source.Placeholders = selectedPlaceholders(recipe)
+	source.TargetTemplate = recipe.TargetTemplate
+	source.RequiresInput = len(recipe.Inputs) > 0
+	base.spec.Source = source
+	base.embedSource(SourceFile{Name: meta.RecipeFileName, Data: recipe.Text})
 	slog.Default().Debug("materialized recipe", "path", path, "source", match.Source.Name)
 
 	return false, isContainer, nil
 }
 
-// writeRecipeFile writes an expanded recipe to a temp file the build can run.
+// selectedPlaceholders reduces an expanded recipe's PH map to the one value each
+// placeholder was resolved to. Expand leaves a single-element list per name, so
+// anything else is a recipe that was never a template.
+func selectedPlaceholders(recipe *catalog.Recipe) map[string]string {
+	// Only an expanded template has selections. A recipe declaring #PH: without a
+	// #TARGET: is not a template at all, and its PH still holds whole menus.
+	if recipe.IsTemplate || recipe.TargetTemplate == "" || len(recipe.PH) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(recipe.PH))
+	for name, values := range recipe.PH {
+		if len(values) == 1 {
+			out[name] = values[0]
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// writeRecipeFile writes the runnable recipe to a temp file the build executes.
+// A template is written expanded; what the image embeds is the template itself.
 func writeRecipeFile(recipe *catalog.Recipe, dir string, isContainer bool) (string, error) {
 	if err := utils.MkdirAllShared(dir); err != nil {
 		return "", fmt.Errorf("failed to create tmp directory: %w", err)
@@ -1034,7 +1136,7 @@ func writeRecipeFile(recipe *catalog.Recipe, dir string, isContainer bool) (stri
 		return "", fmt.Errorf("failed to create %s: %w", path, err)
 	}
 	defer file.Close()
-	if _, err := file.Write(recipe.Text); err != nil {
+	if _, err := file.Write(recipe.Script()); err != nil {
 		return "", fmt.Errorf("failed to write %s: %w", path, err)
 	}
 	utils.ShareWithParentGroup(path)

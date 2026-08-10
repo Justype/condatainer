@@ -156,3 +156,114 @@ func TestParseRecipePH(t *testing.T) {
 		}
 	}
 }
+
+// The boundary decides what ParseRecipe reads, so it is pinned byte-exactly:
+// everything about it that could plausibly drift gets a case.
+func TestHeaderBoundary(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string // the body, verbatim
+	}{
+		{"shebang is header", "#!/bin/bash\necho hi\n", "echo hi\n"},
+		{"a blank line before the first command is header", "#DESC:x\n\n\necho hi\n", "echo hi\n"},
+		{"indented comments are header", "  # note\n\t#DESC:x\necho hi\n", "echo hi\n"},
+		{"a whitespace-only line is header", "#DESC:x\n   \necho hi\n", "echo hi\n"},
+		{"an indented command starts the body", "#DESC:x\n  echo hi\n", "  echo hi\n"},
+		{"a later comment stays in the body", "#DESC:x\necho hi\n# trailing\n", "echo hi\n# trailing\n"},
+		{"a # inside a string does not move it", "#DESC:x\necho \"a # b\"\n", "echo \"a # b\"\n"},
+		{"a ${x#y} expansion does not move it", "#DESC:x\necho \"${v#pre}\"\n", "echo \"${v#pre}\"\n"},
+		{"a heredoc's directives stay in the body", "#DESC:x\ncat <<'EOF'\n#DEP:not/a/dep\nEOF\n", "cat <<'EOF'\n#DEP:not/a/dep\nEOF\n"},
+		{"header only", "#DESC:x\n#URL:y\n", ""},
+		{"empty", "", ""},
+		{"no header", "echo hi\n", "echo hi\n"},
+		{"no trailing newline", "#DESC:x\necho hi", "echo hi"},
+		{"CRLF", "#DESC:x\r\n\r\necho hi\r\n", "echo hi\r\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			text := []byte(tt.text)
+			if got := string(text[headerBoundary(text):]); got != tt.want {
+				t.Errorf("body = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Header edits must not move the boundary, or a heredoc's #DEP: would stop being
+// inert the moment someone reworded a description.
+func TestBoundaryIsStableUnderHeaderEdits(t *testing.T) {
+	body := func(text string) string {
+		b := []byte(text)
+		return string(b[headerBoundary(b):])
+	}
+	grown := strings.Replace(starRecipe,
+		"#PH:star_version:2.7.11b,2.7.11a,2.7.9a",
+		"#PH:star_version:2.7.11b,2.7.11a,2.7.9a,2.7.8a\n#DESC:reworded\n#SBATCH --time=4:00:00", 1)
+	if body(grown) != body(starRecipe) {
+		t.Error("growing a #PH: menu, rewording #DESC:, or adding a directive moved the boundary")
+	}
+}
+
+// Both keys hash the comment-stripped recipe, so this is the one derivation the
+// whole design rests on.
+func TestStripComments(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"the header goes with the rest", "#!/bin/bash\n#DESC:x\necho a\n", "echo a\n"},
+		{"a whole-line comment goes", "echo a\n# note\necho b\n", "echo a\necho b\n"},
+		{"an indented one goes", "echo a\n   \t# note\necho b\n", "echo a\necho b\n"},
+		{"a heredoc's comment goes", "cat <<'EOF'\n#!/bin/bash\nexec x\nEOF\n", "cat <<'EOF'\nexec x\nEOF\n"},
+		{"blank lines stay", "echo a\n\necho b\n", "echo a\n\necho b\n"},
+		{"a trailing comment stays", "make -j2  # parallel\n", "make -j2  # parallel\n"},
+		{"a # inside a string stays", "echo \"a # b\"\n", "echo \"a # b\"\n"},
+		{"a ${x#y} expansion stays", "echo \"${v#pre}\"\n", "echo \"${v#pre}\"\n"},
+		{"no trailing newline", "echo a\n# note", "echo a\n"},
+		{"CRLF", "echo a\r\n# note\r\necho b\r\n", "echo a\r\necho b\r\n"},
+		{"empty", "", ""},
+		{"comments only", "# a\n# b\n", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := string(StripComments([]byte(tt.body))); got != tt.want {
+				t.Errorf("StripComments = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Nothing that only describes a recipe may reach a key. Every header item that
+// should is carried by its own record line instead, so the preimage has to be
+// blind to all of them — including the ones tooling rewrites unprompted.
+func TestRecipePreimageIgnoresDescription(t *testing.T) {
+	preimage := func(text string) string { return string(StripComments([]byte(text))) }
+	base := preimage(starRecipe)
+
+	cosmetic := map[string]string{
+		"a #PH: menu autoupdate grew": strings.Replace(starRecipe,
+			"#PH:star_version:2.7.11b,2.7.11a,2.7.9a",
+			"#PH:star_version:2.7.12,2.7.11b,2.7.11a,2.7.9a", 1),
+		"a reworded #DESC:": strings.Replace(starRecipe,
+			"#DESC:STAR {star_version} index", "#DESC:STAR {star_version} genome index", 1),
+		"a changed directive": strings.Replace(starRecipe,
+			"#SBATCH --mem=64G", "#SBATCH --mem=128G", 1),
+		"a reworded body comment": strings.Replace(starRecipe,
+			"# Build a STAR index. This comment must not end the header block.",
+			"# Builds the index.", 1),
+	}
+	for what, edited := range cosmetic {
+		if edited == starRecipe {
+			t.Fatalf("%s: the fixture did not change", what)
+		}
+		if got := preimage(edited); got != base {
+			t.Errorf("%s moved the preimage:\n%q\nvs\n%q", what, got, base)
+		}
+	}
+
+	if preimage(strings.Replace(starRecipe, "--runThreadN", "--runThreadN 1 --sjdbOverhang", 1)) == base {
+		t.Error("a code change did not move the preimage")
+	}
+}

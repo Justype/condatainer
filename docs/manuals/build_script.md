@@ -149,6 +149,17 @@ URL supplies its help link.
 
 When **CondaTainer** processes the build script, it will ensure that all specified dependencies are available and load them in the same order as listed.
 
+**Only a `#TYPE:data` recipe may declare `#DEP:`.** A build that finds one on an
+app, an OS layer, or a base stops with an error. A `#DEP:` is what must be
+*mounted while the recipe runs*, and only a dataset genuinely needs that —
+producing an index requires the tool that produces it. An app is prebuilt and
+self-contained (a Conda environment, or a package carrying its own libraries), an
+OS layer is self-contained by definition, and a base *is* the build environment.
+A recipe that genuinely needs a compiler should be an OS layer providing that
+toolchain, not an app depending on one.
+
+A `#DEP:` may name an app, a dataset, or an OS layer, but never a base.
+
 **Basic (exact version):**
 
 ```bash
@@ -237,6 +248,33 @@ Examples:
 #TYPE:data
 #TYPE:ref
 ```
+
+### Architecture Tag
+
+`#ARCH:` declares that a payload runs anywhere, rather than only on the
+architecture it was built on. It applies to script recipes of either type; a
+Conda app, an OS layer, and a base may not declare it.
+
+```bash
+#ARCH:noarch     ## jar files; the JRE comes from the runtime
+```
+
+Two values: `native` — the default, so omit the header for anything
+architecture-specific — and `noarch`.
+
+The default is strict on purpose. Every mainstream HPC architecture is 64-bit
+little-endian, so most binary indexes *would* in fact port, which is the trap:
+getting it wrong does not crash, it silently returns wrong answers. Only the
+author knows whether a build produced machine code, a tool-specific binary dump,
+or bytes that mean the same everywhere.
+
+- **Portable**: a Java tool shipped as jars, a pure-Python one, a FASTA, a GTF, a VCF.
+- **Not portable**: anything compiled, a STAR index, a Kraken2 hash table.
+
+The value lands in the image's recorded platform and is checked when the image is
+mounted. Adding `#ARCH:noarch` to a recipe later does not invalidate images
+already built from it — they keep claiming `native`, which is honest, and the new
+claim applies from the next build onward.
 
 ### Template Tags
 
@@ -365,9 +403,9 @@ Place `#AUTOUPDATE:` immediately after the `#PH:` or `#DEP:` line it manages.
 #ENV:ORA_REF_PATH={prefix}/oradata   ## reference search path
 ```
 
-These declarations are captured into the image's manifest at build time, so the
+These declarations are captured into the image's metadata at build time, so the
 image is self-contained and no sidecar file travels with it. A writable `.img`
-is the exception: it has no manifest, and reads a `<overlay>.env` sidecar
+is the exception: it carries no embedded metadata, and reads a `<overlay>.env` sidecar
 instead, one `KEY=value ## note` per line.
 
 `{prefix}` is a special placeholder that is replaced **at load time** with the image's install prefix (e.g. `/cnt/orad/2.7.0`) whenever the image is loaded.

@@ -27,6 +27,7 @@ go test -v ./internal/scheduler/...                       # Package tests
 - `helper/` - Helper service job lifecycle: resolve params, submit to scheduler (or run headless), monitor state, JSONL run history
 - `overlay/` - Overlay image CRUD (ext3/SquashFS), resize, chown, locking
 - `proxy/` - SSH tunnel + dual-protocol proxy management for HPC compute nodes
+- `registry/` - Resolves an OCI reference to a platform-specific digest (oras-go); nothing else
 - `scheduler/` - HPC scheduler abstraction (SLURM, PBS, LSF, HTCondor); auto-detection, directive parsing, cross-scheduler translation
 - `server/` - Dashboard HTTP server (web UI + REST API, SSE log streaming)
 - `utils/` - Console output (`Print*`), file ops, downloads, script parsing
@@ -46,14 +47,23 @@ varies by version uses a `#PH:` placeholder, and one pinned to a version writes 
 
 `#DEP:` is a **build** dependency only — what must be mounted while the recipe runs. It is not
 recorded in the image and never re-expanded at run time; there is no runtime dependency tree.
-So an `app` is self-contained (a conda env or a prebuilt package carrying its own libraries), and
-`data` is the type that normally has deps, since producing an index needs the producing tool.
+**Only a `data` recipe may declare one**, and validation rejects it on any other type: an `app` is
+self-contained (a conda env or a prebuilt package carrying its own libraries), an `os` is
+self-contained by definition, and a `base` *is* the build environment. Producing an index needs the
+producing tool, which is why data is the type with deps. A `#DEP:` may name an app, data, or os, but
+never a base — resolution refuses that edge.
 
 Metadata headers: `#DEP:name/version` or `#DEP:name/version>=min` (build deps; preferred version is
 implicit upper bound, so valid range is `[min, version]`), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params),
 `#ENV:VAR={prefix}/sub  ## note` (env vars; `{prefix}` is filled with the install prefix at load time),
 `#INPUT:prompt` (user input, fed on stdin in order — read with `IFS= read -r VAR`), `#PH:`/`#TARGET:` (templates),
-`#DESC:`, `#URL:`, `#TYPE:`.
+`#ARCH:noarch` (app and data script recipes only; default `native`), `#DESC:`, `#URL:`, `#TYPE:`.
+
+The header block ends at the first line that is neither blank nor a comment. That boundary bounds
+what the recipe parser reads, which is what keeps a `#DEP:` in a heredoc inert; it feeds no key.
+Both keys hash `catalog.StripComments`, which drops every whole-line comment — the header with
+them — so never compute that preimage a second way. Neither affects what is stored or what runs:
+the recipe is embedded and executed byte for byte.
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 

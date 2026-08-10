@@ -11,8 +11,10 @@ import (
 // Every placeholder must have a value. A missing one is an error rather than a
 // token left standing, which would run with {gencode_version} in a URL.
 //
-// The body is substituted too, because the recipe hash is taken over the
-// expanded text — an unexpanded template would give every variant one key.
+// Text keeps its {placeholder} tokens: it is what the artifact embeds, and the
+// template is what an author edits and a rebuild starts from. Rendered carries
+// the substituted copy the build actually runs. Nothing hashes the expansion —
+// the variant is recorded as its selected values, in PH.
 func Expand(r *Recipe, vars map[string]string) (*Recipe, error) {
 	if !r.IsTemplate {
 		return nil, fmt.Errorf("catalog: %s is not a template", r.Name)
@@ -26,9 +28,9 @@ func Expand(r *Recipe, vars map[string]string) (*Recipe, error) {
 	out := *r
 	out.Name = name
 	out.IsTemplate = false
-	out.TargetTemplate = ""
+	out.TargetTemplate = r.TargetTemplate
 	out.Description = replaceVars(r.Description, vars)
-	out.Text = []byte(replaceVars(string(r.Text), vars))
+	out.Rendered = []byte(replaceVars(string(r.Text), vars))
 
 	// PH keeps the chosen value per placeholder: what the artifact records as
 	// the vars it was built with.

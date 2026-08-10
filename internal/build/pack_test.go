@@ -8,12 +8,12 @@ import (
 	"testing"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/image/meta"
 )
 
 // newPackObject builds the minimum BuildObject the packer reads: a workspace
-// layout and a Spec complete enough to render a manifest.
+// layout and a Spec complete enough to render both metadata documents.
 func newPackObject(t *testing.T, typ catalog.Type) *BuildObject {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -21,9 +21,8 @@ func newPackObject(t *testing.T, typ catalog.Type) *BuildObject {
 	b := &BuildObject{
 		ws: workspaceFor(name, tmpDir, appExt3ScratchExt(typ)),
 		spec: Spec{
-			Image:   ImageSpec{Name: name, Type: typ, Description: "SAMtools"},
-			Source:  SourceSpec{Conda: &CondaSource{Package: &CondaPackage{Name: "samtools", Version: "1.21"}}},
-			Runtime: meta.Runtime{Prefix: meta.Prefix(name, typ)},
+			Image:  ImageSpec{Name: name, Type: typ, Description: "SAMtools", Prefix: meta.Prefix(name, typ)},
+			Source: SourceSpec{Conda: &CondaSource{Package: &CondaPackage{Name: "samtools", Version: "1.21"}}},
 		},
 	}
 	return b
@@ -45,7 +44,9 @@ func withAppTmpOverlay(t *testing.T, on bool) {
 	t.Cleanup(func() { config.Global.Build = prev })
 }
 
-func TestStageMetadataWritesManifest(t *testing.T) {
+// Both documents are staged, since an image carrying only one of them is either
+// unmountable or unexplainable.
+func TestStageMetadataWritesBothDocuments(t *testing.T) {
 	b := newPackObject(t, catalog.TypeApp)
 
 	dir, err := stageMetadata(t.Context(), b)
@@ -56,31 +57,36 @@ func TestStageMetadataWritesManifest(t *testing.T) {
 		t.Errorf("staged into %q, want a directory named %q", dir, meta.DirName)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, meta.FileName))
-	if err != nil {
-		t.Fatalf("reading staged manifest: %v", err)
-	}
-	want, err := meta.Marshal(b.Manifest())
+	manifest, err := meta.MarshalManifest(b.Manifest())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != string(want) {
-		t.Errorf("staged manifest = %s, want %s", data, want)
+	runtime, err := meta.MarshalRuntime(b.Runtime())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for file, want := range map[string][]byte{meta.FileName: manifest, meta.RuntimeFileName: runtime} {
+		data, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil {
+			t.Fatalf("reading staged %s: %v", file, err)
+		}
+		if string(data) != string(want) {
+			t.Errorf("staged %s = %s, want %s", file, data, want)
+		}
 	}
 }
 
-// A manifest that would not survive meta.Read must stop the build while there is
+// Metadata that would not survive a read back must stop the build while there is
 // still no image, not after one is installed and read back as broken.
-func TestStageMetadataRejectsInvalidManifest(t *testing.T) {
+func TestStageMetadataRejectsInvalidMetadata(t *testing.T) {
 	b := newPackObject(t, catalog.TypeApp)
-	b.spec.Runtime.Prefix = "" // an app with no prefix cannot be resolved at load time
-	b.spec.Image.Name = ""
+	b.spec.Image.Prefix = "" // an app with no prefix cannot be resolved at load time
 
 	if _, err := stageMetadata(t.Context(), b); err == nil {
-		t.Fatal("staged a manifest that does not validate")
+		t.Fatal("staged metadata that does not validate")
 	}
 	if _, err := os.Stat(b.ws.MetaDir); err == nil {
-		t.Error("invalid manifest left a staged directory behind")
+		t.Error("invalid metadata left a staged directory behind")
 	}
 }
 
@@ -129,7 +135,7 @@ func TestSquashfsSourcesCarryMetaDirName(t *testing.T) {
 }
 
 // An empty metaDir packs the payload alone, which is what keeps the packer
-// usable for anything that has no manifest to add.
+// usable for anything that has no metadata to add.
 func TestSquashfsWithoutMetaDirPacksPayloadOnly(t *testing.T) {
 	withAppTmpOverlay(t, false)
 	b := newPackObject(t, catalog.TypeApp)
@@ -144,10 +150,10 @@ func TestSquashfsWithoutMetaDirPacksPayloadOnly(t *testing.T) {
 	}
 }
 
-// The two-source layout is only correct if mksquashfs actually puts the manifest
-// at meta.Path. Generating the command and asserting on its text cannot show
-// that, so this runs the real thing and reads it back through meta.Read.
-func TestPackedImageManifestIsReadable(t *testing.T) {
+// The two-source layout is only correct if mksquashfs actually puts both
+// documents under /.cnt. Generating the command and asserting on its text cannot
+// show that, so this runs the real thing and reads them back.
+func TestPackedImageMetadataIsReadable(t *testing.T) {
 	if _, err := exec.LookPath("mksquashfs"); err != nil {
 		t.Skip("mksquashfs not available")
 	}
@@ -177,33 +183,42 @@ func TestPackedImageManifestIsReadable(t *testing.T) {
 		t.Fatalf("mksquashfs failed: %v\n%s", err, output)
 	}
 
-	got, err := meta.Read(out)
+	manifest, err := meta.ReadManifest(out)
 	if err != nil {
-		t.Fatalf("meta.Read on the packed image: %v", err)
+		t.Fatalf("meta.ReadManifest on the packed image: %v", err)
 	}
-	if got.Name != b.spec.Image.Name || got.Type != catalog.TypeApp {
-		t.Errorf("manifest = %+v, want name %q type %q", got, b.spec.Image.Name, catalog.TypeApp)
+	if manifest.Name != b.spec.Image.Name || manifest.Type != catalog.TypeApp {
+		t.Errorf("manifest = %+v, want name %q type %q", manifest, b.spec.Image.Name, catalog.TypeApp)
 	}
-	if got.BuildType != BuildTypeConda.String() {
-		t.Errorf("build_type = %q, want %q", got.BuildType, BuildTypeConda)
-	}
-	if got.Runtime.Prefix != meta.Prefix(b.spec.Image.Name, catalog.TypeApp) {
-		t.Errorf("prefix = %q", got.Runtime.Prefix)
+	if manifest.BuildType != BuildTypeConda.String() {
+		t.Errorf("build_type = %q, want %q", manifest.BuildType, BuildTypeConda)
 	}
 
-	// The payload has to survive beside the manifest, not be replaced by it.
+	rt, err := meta.ReadRuntime(out)
+	if err != nil {
+		t.Fatalf("meta.ReadRuntime on the packed image: %v", err)
+	}
+	if rt.Prefix != meta.Prefix(b.spec.Image.Name, catalog.TypeApp) {
+		t.Errorf("prefix = %q", rt.Prefix)
+	}
+
+	// The payload has to survive beside the metadata, not be replaced by it.
 	list, err := exec.CommandContext(t.Context(), "unsquashfs", "-l", out).Output()
 	if err != nil {
 		t.Fatalf("unsquashfs -l: %v", err)
 	}
-	for _, want := range []string{"squashfs-root/cnt/samtools/1.21/bin/samtools", "squashfs-root" + meta.Path} {
+	for _, want := range []string{
+		"squashfs-root/cnt/samtools/1.21/bin/samtools",
+		"squashfs-root" + meta.Path,
+		"squashfs-root" + meta.RuntimePath,
+	} {
 		if !strings.Contains(string(list), want) {
 			t.Errorf("packed image is missing %s:\n%s", want, list)
 		}
 	}
 }
 
-// The build's own scratch directory sits beside the payload and the manifest, so
+// The build's own scratch directory sits beside the payload and the metadata, so
 // the packer must not sweep it into the image.
 func TestPackedImageExcludesBuildScratch(t *testing.T) {
 	if _, err := exec.LookPath("mksquashfs"); err != nil {

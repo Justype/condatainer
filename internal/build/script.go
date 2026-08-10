@@ -82,6 +82,13 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 		return err
 	}
 
+	// After the build, so every dependency it needed is installed and can be
+	// read for the identity its records pin.
+	if err := b.recordKeys(ctx); err != nil {
+		b.Cleanup(true)
+		return err
+	}
+
 	metaDir, err := stageMetadata(ctx, b)
 	if err != nil {
 		b.Cleanup(true)
@@ -155,7 +162,7 @@ func (b *BuildObject) buildExecOpts() (execpkg.Options, execpkg.IO, error) {
 	envSettings := buildEnv(b.spec, Options{Update: b.update, ScriptSpecs: b.scriptSpecs})
 
 	// The payload's install prefix, as the recipe sees it via $CNT_PREFIX.
-	prefix := b.spec.Runtime.Prefix
+	prefix := b.spec.Image.Prefix
 	if prefix == "" {
 		prefix = "/cnt/" + b.spec.Image.Name
 	}

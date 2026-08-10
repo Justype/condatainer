@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/image/meta"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/scheduler"
 )
 
@@ -19,23 +19,44 @@ type Spec struct {
 	Source       SourceSpec
 	Base         string // normalized type=base image this build runs inside; empty when none
 	Dependencies []string
-	Runtime      meta.Runtime
 }
 
-// ImageSpec is the identity the manifest records.
+// ImageSpec is what the image is: the identity both documents record, plus what
+// loading it does to the environment.
 type ImageSpec struct {
 	Name        string
 	Type        catalog.Type
 	Description string
 	URL         string
+	// Prefix is where the payload goes, /cnt/<name> for app and data and empty
+	// for base and os. Env holds the recipe's #ENV: contributions with {prefix}
+	// intact, substituted when the image is loaded.
+	Prefix string
+	Env    []meta.EnvVar
+	// Arch is the recipe's #ARCH: assertion. Empty means the default: the
+	// artifact runs only where it was built.
+	Arch catalog.Arch
 }
 
-// SourceSpec is what the build runs. Exactly one field is set, and which one it
-// is *is* the build type — see BuildType.
+// SourceSpec is what the build runs. Exactly one of the three kinds is set, and
+// which one it is *is* the build type — see BuildType. The remaining fields
+// describe the source whichever kind it turned out to be.
 type SourceSpec struct {
 	Script     *ScriptSource
 	Definition *DefinitionSource
 	Conda      *CondaSource
+
+	// Placeholders are the selected #PH: values. The embedded recipe keeps its
+	// {placeholder} tokens, so this is the only record of which variant of a
+	// template was built.
+	Placeholders map[string]string
+	// TargetTemplate is the #TARGET: the name was rendered from; empty when the
+	// recipe is not a template.
+	TargetTemplate string
+	// RequiresInput reports that the recipe declared #INPUT: prompts. The
+	// answers are execution input and are never recorded — this says only that a
+	// rebuild needs a human.
+	RequiresInput bool
 }
 
 // SourceFile is a build input captured during resolution, already expanded.
@@ -54,13 +75,21 @@ type ScriptSource struct {
 // DefinitionSource is an Apptainer definition.
 type DefinitionSource struct {
 	File SourceFile
+	// From is the upstream image the definition bootstraps from, resolved before
+	// the build runs. Nil when there is no upstream.
+	From *meta.From
 }
 
-// CondaSource is a micromamba environment. Exactly one of the three is set.
+// CondaSource is a micromamba environment. Exactly one of the three inputs is set.
 type CondaSource struct {
 	Package  *CondaPackage // a single name/version
 	Packages []string      // an explicit list
 	File     *SourceFile   // a YAML or explicit-spec input
+
+	// Channels are the configured channels the solve was offered, in priority
+	// order. Captured here rather than read from config when the manifest is
+	// rendered, so the manifest stays a projection of Spec and nothing else.
+	Channels []string
 }
 
 // CondaPackage is one primary package.
@@ -82,6 +111,19 @@ func (s SourceSpec) BuildType() BuildType {
 		return BuildTypeScript
 	}
 	return 0
+}
+
+// RecipeFile returns the recipe this build embeds at /.cnt/recipe, and whether
+// there is one. A Conda build has none: its inputs are the exports captured from
+// the environment it installed, not the request that produced it.
+func (s SourceSpec) RecipeFile() (SourceFile, bool) {
+	switch {
+	case s.Script != nil:
+		return s.Script.File, true
+	case s.Definition != nil:
+		return s.Definition.File, true
+	}
+	return SourceFile{}, false
 }
 
 // File returns the source file this build materializes into the workspace, and
@@ -110,7 +152,7 @@ type Workspace struct {
 	BuildDir string // Root/build_<name>, holding the three below
 	CntDir   string // BuildDir/cnt — payload root, bound as /cnt
 	TmpDir   string // BuildDir/tmp — scratch, bound as /cnt_tmp
-	MetaDir  string // BuildDir/.cnt — manifest, staged before packing
+	MetaDir  string // BuildDir/.cnt — runtime and manifest, staged before packing
 	Source   string // materialized script, definition, or Conda input file
 	Overlay  string // Root/<name-->.img|.sif; "" in directory mode
 }
@@ -157,7 +199,7 @@ func buildEnv(spec Spec, opts Options) []string {
 	if typ == "" {
 		typ = catalog.TypeApp
 	}
-	prefix := spec.Runtime.Prefix
+	prefix := spec.Image.Prefix
 	if prefix == "" {
 		prefix = meta.Prefix(spec.Image.Name, typ)
 	}
@@ -174,9 +216,9 @@ func buildEnv(spec Spec, opts Options) []string {
 	)
 }
 
-// Manifest renders the metadata this build embeds. A projection of Spec and
-// nothing else, so no host, job ID, local path or #INPUT: answer can reach it —
-// none of them is in Spec to begin with.
+// Manifest renders what the image records about itself and where it came from. A
+// projection of Spec and nothing else, so no host, job ID, local path or #INPUT:
+// answer can reach it — none of them is in Spec to begin with.
 func (s Spec) Manifest() meta.Manifest {
 	return meta.Manifest{
 		SchemaVersion: meta.SchemaVersion,
@@ -185,22 +227,82 @@ func (s Spec) Manifest() meta.Manifest {
 		BuildType:     s.Source.BuildType().String(),
 		Description:   s.Image.Description,
 		URL:           s.Image.URL,
-		Runtime:       s.Runtime,
+		Platform:      s.platform(),
+		Source:        s.sourceBlock(),
+		Build:         s.buildBlock(),
 	}
 }
 
-// runtimeFromRecipe builds the runtime block from a recipe's #ENV: declarations.
-// Values keep {prefix} intact, for the manifest to substitute at load time.
-func runtimeFromRecipe(name string, typ catalog.Type, env []catalog.EnvVar) meta.Runtime {
-	rt := meta.Runtime{Prefix: meta.Prefix(name, typ)}
+// platform is where this artifact was built and where it may run. Only a recipe
+// that declared #ARCH:noarch is portable — nothing infers portability, because
+// getting it wrong does not crash, it silently returns wrong answers.
+func (s Spec) platform() meta.Platform {
+	if s.Image.Arch == catalog.ArchNoarch {
+		return meta.Platform{OS: "linux", Arch: meta.ArchNone}
+	}
+	return meta.NativePlatform()
+}
+
+// sourceBlock describes what the image was built from. Files is left to the
+// caller: what is embedded is decided when it is staged, and a manifest that
+// named a file the image does not carry would be worse than one that named none.
+func (s Spec) sourceBlock() meta.Source {
+	return meta.Source{
+		Placeholders:   s.Source.Placeholders,
+		TargetTemplate: s.Source.TargetTemplate,
+		RequiresInput:  s.Source.RequiresInput,
+	}
+}
+
+// buildBlock is what the build knew and the source does not say.
+func (s Spec) buildBlock() meta.Build {
+	switch {
+	case s.Source.Conda != nil:
+		return meta.Build{Channels: s.Source.Conda.Channels}
+	case s.Source.Definition != nil:
+		return meta.Build{From: s.Source.Definition.From}
+	}
+	return meta.Build{}
+}
+
+// UpstreamDigest returns what the definition's bootstrap reference resolved to.
+// Empty means no upstream at all, which the record distinguishes from an
+// unresolved one by omitting the line rather than writing meta.Unrecorded.
+func (s SourceSpec) UpstreamDigest() string {
+	if s.Definition == nil || s.Definition.From == nil {
+		return ""
+	}
+	return s.Definition.From.Digest
+}
+
+// Runtime renders the mount-time contract: what the image is called, where its
+// payload sits, and what it contributes to the environment. Container setup
+// reads this and nothing else, so it repeats the few identity fields it needs
+// rather than sending a reader to the manifest for them.
+func (s Spec) Runtime() meta.Runtime {
+	return meta.Runtime{
+		SchemaVersion: meta.SchemaVersion,
+		Name:          s.Image.Name,
+		Type:          s.Image.Type,
+		Description:   s.Image.Description,
+		Platform:      s.platform(),
+		Prefix:        s.Image.Prefix,
+		Env:           s.Image.Env,
+	}
+}
+
+// envFromRecipe converts a recipe's #ENV: declarations. Values keep {prefix}
+// intact, for the loader to substitute at mount time.
+func envFromRecipe(env []catalog.EnvVar) []meta.EnvVar {
+	var out []meta.EnvVar
 	for _, e := range env {
-		rt.Env = append(rt.Env, meta.EnvVar{
+		out = append(out, meta.EnvVar{
 			Key:   e.Key,
 			Value: e.Value(nil),
 			Note:  e.Note,
 		})
 	}
-	return rt
+	return out
 }
 
 // sourceFileName is the workspace filename for a materialized recipe.

@@ -24,7 +24,50 @@ environment.go  Validate the container, prefix, and writable state
 runner.go       Isolate configuration and invoke Micromamba
 config.go       Read and atomically update .condarc channels
 pinned.go       Read and atomically update conda-meta/pinned
+export.go       Canonical explicit.txt and environment.yml for an image to embed
 ```
+
+## The two exports
+
+A Conda app embeds `explicit.txt` and `environment.yml`, captured from the
+environment that was **actually installed** rather than from a second solve.
+Together they are the artifact's identity and equivalence, so `sha256sum` on
+either reproduces a key by hand.
+
+| file | from | pins |
+|---|---|---|
+| `explicit.txt` | `env export --explicit --no-md5` | exact package URLs — channel, subdir, name, version, build string |
+| `environment.yml` | `env export --no-builds` | channels, package names and versions |
+
+Both are **re-emitted, not stored as the tool printed them**. That is the whole
+point: a Micromamba upgrade that reorders or re-spaces its output would otherwise
+move the key of every artifact built after it, and every comparison across that
+boundary would report *different* with an empty diff. Sorting is safe — Conda
+does not depend on explicit-file order — and the result is still a working
+`micromamba install --file` / `create -f` input.
+
+`name:` and `prefix:` are dropped: they describe a temporary local environment
+rather than its packages. A trailing `#<md5>` is dropped too — it checksums the
+download, not what was installed, and the URL already distinguishes one package
+from another.
+
+**The channel set is the export's; only the order is corrected.** Those are the
+channels that actually provided packages. `OrderChannels` reorders them into the
+configured priority, because Micromamba alphabetizes on export and its sequence is
+not the solve order; a channel used but not configured — a mirror, a
+`bioconda::star` annotation — is appended after the known ones, sorted, rather
+than dropped. So adding an unused channel to a site's config changes no
+artifact's key, and a rebuild still resolves against the channels that mattered.
+
+The split is deliberately asymmetric: changing a build string moves identity and
+not equivalence, changing a version moves both. `numpy=1.26.4` built against MKL
+and against OpenBLAS are equivalent — that is the intended answer, and identity
+catches the difference for anyone who needs it.
+
+A `pip:` sub-list is preserved and sorted as exported, and nothing chases it
+further. `--explicit` omits pip packages entirely, so an environment with them has
+an identity that ignores them; a centrally managed overlay does not carry pip
+installs, which is why that is left alone rather than papered over.
 
 The `condatainer env` commands are wired in `cmd/env.go`; `/usr/bin/mm` is only an in-container
 shortcut to that command group.

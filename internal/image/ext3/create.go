@@ -3,13 +3,11 @@ package ext3
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/logging"
@@ -157,71 +155,14 @@ func createOverlayFile(ctx context.Context, opts *CreateOptions, filePath string
 	return nil
 }
 
-// crossFsCopy copies src to dst with the system cp, so a long copy stays
-// cancellable: --sparse=always when sparse, --sparse=never otherwise.
-// See the README's External tools.
-func crossFsCopy(ctx context.Context, src, dst string, sparse bool) error {
-	sparseFlag := "--sparse=never"
-	if sparse {
-		sparseFlag = "--sparse=always"
-	}
-	var outBuf bytes.Buffer
-	cmd := exec.Command("cp", sparseFlag, src, dst)
-	cmd.Stdout = &outBuf
-	cmd.Stderr = &outBuf
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("cp %s → %s: %w", src, dst, err)
-	}
-
-	waitErr := make(chan error, 1)
-	go func() { waitErr <- cmd.Wait() }()
-
-	select {
-	case err := <-waitErr:
-		if err != nil {
-			os.Remove(dst) //nolint:errcheck
-			return fmt.Errorf("cp %s → %s: %w\n%s", src, dst, err, strings.TrimSpace(outBuf.String()))
-		}
-	case <-ctx.Done():
-		cmd.Process.Kill() //nolint:errcheck
-		os.Remove(dst)     //nolint:errcheck
-		return ctx.Err()
-	}
-
-	utils.ShareWithParentGroup(dst)
-	return nil
-}
-
-// moveFile moves src to dst. It tries os.Rename first (same-filesystem, instant).
-// If that fails due to a cross-device link (e.g. local /tmp → LustreFS), it falls
-// back to crossFsCopy which uses cp and is context-cancellable (Ctrl+C works).
-// Returns (copied=true) when a copy was performed, (copied=false) when renamed.
-func moveFile(ctx context.Context, src, dst string, sparse bool) (copied bool, err error) {
-	dstDir := filepath.Dir(dst)
-	if err := utils.MkdirAllShared(dstDir); err != nil {
-		return false, fmt.Errorf("create destination directory: %w", err)
-	}
-
-	if err := os.Rename(src, dst); err == nil {
-		return false, nil
-	} else if !errors.Is(err, syscall.EXDEV) {
-		return false, fmt.Errorf("rename %s → %s: %w", src, dst, err)
-	}
-
-	if err := crossFsCopy(ctx, src, dst, sparse); err != nil {
-		return false, err
-	}
-	os.Remove(src)
-	return true, nil
-}
-
 // ---------------------------------------------------------
 // 3. Public API
 // ---------------------------------------------------------
 
-// MoveOverlayCopied moves src to dst and reports whether a copy was performed.
+// MoveOverlayCopied moves an overlay to its destination and reports whether a
+// copy was performed — the caller skips AllocateOverlay when one was.
 func MoveOverlayCopied(ctx context.Context, src, dst string, sparse bool) (copied bool, err error) {
-	return moveFile(ctx, src, dst, sparse)
+	return utils.MoveFile(ctx, src, dst, sparse)
 }
 
 // AllocateOverlay pre-allocates disk blocks for a sparse overlay file using fallocate.
@@ -335,7 +276,7 @@ func CreateWithOptions(ctx context.Context, opts *CreateOptions) error {
 		if !opts.Quiet {
 			log.Info(fmt.Sprintf("moving overlay to %s", utils.StylePath(opts.Path)))
 		}
-		copied, err := moveFile(ctx, tmpPath, opts.Path, opts.Sparse)
+		copied, err := utils.MoveFile(ctx, tmpPath, opts.Path, opts.Sparse)
 		if err != nil {
 			return fmt.Errorf("failed to install overlay: %w", err)
 		}
