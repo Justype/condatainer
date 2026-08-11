@@ -22,7 +22,7 @@ const ConfigFilename = "config"
 const ConfigType = "yaml"
 
 // configLayers holds per-file viper instances in priority order (user → extra-root → root → system).
-// Populated by InitViper(). Used by mergeFromLayers() for array key merging.
+// Populated by InitViper(). Used by layerSources() to merge the `sources` key.
 var configLayers []*viper.Viper
 
 // ConfigLayerInfo exposes one loaded config layer for per-layer display.
@@ -118,12 +118,6 @@ func setDefaults() {
 	viper.SetDefault("scheduler_bin", "")
 	viper.SetDefault("submit_job", true)
 	viper.SetDefault("logs_dir", DefaultLogsDir())
-
-	// Explicit extra image directories (direct paths); entries may end with ":ro" (search-only)
-	// or ":rw" (explicit writable, same as no marker).
-	viper.SetDefault("extra_image_dirs", []string{})
-	// Explicit extra helper-scripts directories (direct paths, plain paths only).
-	viper.SetDefault("extra_helper_dirs", []string{})
 
 	// Build config defaults
 	viper.SetDefault("build.ncpus", DefaultNcpus)

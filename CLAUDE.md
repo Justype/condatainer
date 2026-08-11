@@ -69,11 +69,10 @@ Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 
 ## Data Directory Search Order
 
-1. `extra_image_dirs` / `extra_helper_dirs` (config keys)
-2. `CNT_EXTRA_ROOT` (group/lab root, env only)
-3. `CNT_ROOT` / `<install-dir>/` (app-root, auto-detected)
-4. `$SCRATCH/condatainer/`
-5. `~/.local/share/condatainer/`
+1. `CNT_EXTRA_ROOT` (group/lab root, env only)
+2. `CNT_ROOT` / `<install-dir>/` (app-root, auto-detected)
+3. `$SCRATCH/condatainer/`
+4. `~/.local/share/condatainer/`
 
 Each contains `images/` and `helper-scripts/`. Writes go to first writable dir.
 Recipes are not searched here — they come from the ordered `sources` list.

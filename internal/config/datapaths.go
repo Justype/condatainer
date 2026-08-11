@@ -19,7 +19,7 @@ import (
 // =============================================================================
 
 // DataPaths holds the search paths for data directories.
-// Search order: extra → root → scratch → user (first match wins for lookups).
+// Search order: extra-root → root → scratch → user (first match wins for lookups).
 // Write operations go to the first writable path in the same order.
 type DataPaths struct {
 	ImagesDirs        []string // Search paths for images
@@ -32,18 +32,6 @@ var GlobalDataPaths DataPaths
 //=============================================================================
 // Config Getters (env/viper)
 // =============================================================================
-
-// splitPipe splits an env var value on "|".
-// Use when ":" is ambiguous — e.g. values contain "://" (URLs) or ":ro"/":rw" markers.
-func splitPipe(val string) []string {
-	var result []string
-	for _, entry := range strings.Split(val, "|") {
-		if entry = strings.TrimSpace(entry); entry != "" {
-			result = append(result, entry)
-		}
-	}
-	return result
-}
 
 // splitPipeOrColon splits an env var value on "|" or ":" ("|" takes precedence).
 // Use for plain paths or plain strings where ":" is unambiguous (no markers).
@@ -62,61 +50,23 @@ func splitPipeOrColon(val string) []string {
 }
 
 // getEnvSlice reads a string-slice config key, checking the corresponding env var first.
-// The env var name is derived from the key: "extra_image_dirs" → "CNT_EXTRA_IMAGE_DIRS".
-// The split function controls how the env var value is parsed.
-// If merge is true and no env var is set, values are concatenated across all config layers
-// (user ++ extra-root ++ root ++ system). If merge is false, only the primary config layer is used.
-// ENV vars always replace — config layer merging is never consulted when an env var is set.
-func getEnvSlice(key string, split func(string) []string, merge bool) []string {
+// The env var name is derived from the key: "channels" → "CNT_CHANNELS". The split
+// function controls how the env var value is parsed. An env var replaces the config
+// value outright.
+func getEnvSlice(key string, split func(string) []string) []string {
 	envKey := "CNT_" + strings.ToUpper(key)
 	if envVal := os.Getenv(envKey); envVal != "" {
 		if vals := split(envVal); len(vals) > 0 {
 			return vals
 		}
 	}
-	if merge {
-		return mergeFromLayers(key)
-	}
 	return viper.GetStringSlice(key)
-}
-
-// mergeFromLayers returns the concatenation of a string-slice key across all config
-// layers (user ++ extra-root ++ root ++ system), deduplicating while preserving order.
-// Falls back to viper.GetStringSlice if no layers are loaded (e.g. in tests).
-func mergeFromLayers(key string) []string {
-	if len(configLayers) == 0 {
-		return viper.GetStringSlice(key)
-	}
-	seen := make(map[string]bool)
-	var result []string
-	for _, v := range configLayers {
-		for _, entry := range v.GetStringSlice(key) {
-			if !seen[entry] {
-				seen[entry] = true
-				result = append(result, entry)
-			}
-		}
-	}
-	return result
-}
-
-// ParseDirEntry splits a dir entry ("path", "path:ro", or "path:rw") into (path, readOnly).
-// :ro = force search-only (never written). :rw = explicit writable annotation (same as no marker).
-// Default (no marker) is writable if filesystem perms allow — matches all other dir types.
-func ParseDirEntry(entry string) (string, bool) {
-	if after, ok := strings.CutSuffix(entry, ":ro"); ok {
-		return after, true
-	}
-	if after, ok := strings.CutSuffix(entry, ":rw"); ok {
-		return after, false
-	}
-	return entry, false
 }
 
 // GetChannels returns the conda channels from config or environment.
 // CNT_CHANNELS supports "|" and ":" as separators ("|" takes precedence).
 // Overwrite semantics: if set in config, highest-priority layer wins (no merge).
-func GetChannels() []string { return getEnvSlice("channels", splitPipeOrColon, false) }
+func GetChannels() []string { return getEnvSlice("channels", splitPipeOrColon) }
 
 // GetExtraRootDir returns the extra root directory from CNT_EXTRA_ROOT env var.
 // Single value, env only (no config key). Used for group/lab shared installations.
@@ -136,14 +86,6 @@ func GetExtraRootDir() string {
 	})
 	return extraRootCache
 }
-
-// GetExtraImageDirs returns explicit extra image directories from config or environment.
-// CNT_EXTRA_IMAGE_DIRS uses "|" as separator; entries support ":ro"/":rw" markers.
-func GetExtraImageDirs() []string { return getEnvSlice("extra_image_dirs", splitPipe, true) }
-
-// GetExtraHelperDirs returns explicit extra helper-scripts directories from config or environment.
-// CNT_EXTRA_HELPER_DIRS uses "|" as separator; entries support ":ro"/":rw" markers.
-func GetExtraHelperDirs() []string { return getEnvSlice("extra_helper_dirs", splitPipe, true) }
 
 // =============================================================================
 // Dir Getters (single path, no IO)
@@ -297,7 +239,7 @@ func InitDataPaths() {
 // =============================================================================
 
 // buildImageSearchPaths builds the search paths for images.
-// Priority: extra_image_dirs → CNT_EXTRA_ROOT → root → scratch → user
+// Priority: CNT_EXTRA_ROOT → root → scratch → user
 func buildImageSearchPaths() []string {
 	var paths []string
 	seen := make(map[string]bool)
@@ -317,10 +259,6 @@ func buildImageSearchPaths() []string {
 		}
 	}
 
-	for _, entry := range GetExtraImageDirs() {
-		path, _ := ParseDirEntry(entry)
-		addPath(path)
-	}
 	if extraRoot := GetExtraRootDir(); extraRoot != "" {
 		addPath(filepath.Join(extraRoot, "images"))
 	}
@@ -338,7 +276,7 @@ func buildImageSearchPaths() []string {
 }
 
 // helperScriptSearchPaths builds the search paths for helper scripts.
-// Priority: extra_helper_dirs → CNT_EXTRA_ROOT → root → scratch → user
+// Priority: CNT_EXTRA_ROOT → root → scratch → user
 //
 // Recipes have no equivalent: they come from the catalog's `sources`, not from a
 // data directory.
@@ -362,10 +300,6 @@ func helperScriptSearchPaths() []string {
 		}
 	}
 
-	for _, entry := range GetExtraHelperDirs() {
-		path, _ := ParseDirEntry(entry)
-		addPath(path)
-	}
 	if extraRoot := GetExtraRootDir(); extraRoot != "" {
 		addPath(filepath.Join(extraRoot, subdir))
 	}
@@ -392,10 +326,10 @@ func helperScriptSearchPaths() []string {
 type DataLayer string
 
 const (
-	LayerExtra     DataLayer = "extra"      // extra_*_dirs config keys (no short form)
 	LayerExtraRoot DataLayer = "extra-root" // $CNT_EXTRA_ROOT           (e)
 	LayerAppRoot   DataLayer = "app-root"   // $CNT_ROOT or <install-dir> (r)
 	LayerUser      DataLayer = "user"       // $SCRATCH, else XDG data dir (u)
+	LayerUnknown   DataLayer = "unknown"    // not under any tier root
 )
 
 // ParseDataLayer resolves a user-supplied layer name or its short form.
@@ -415,6 +349,7 @@ func ParseDataLayer(s string) (DataLayer, error) {
 // its parent against each tier root. Tiers are checked in search-path order, so a
 // directory shared by two tiers (e.g. CNT_ROOT == $SCRATCH/condatainer) is
 // labelled with the higher-priority one, matching how lookups resolve it.
+// Every search path belongs to a tier; LayerUnknown is for a path from elsewhere.
 func ClassifyDataDir(path string) DataLayer {
 	parent := filepath.Clean(filepath.Dir(filepath.Clean(path)))
 	match := func(root string) bool {
@@ -428,7 +363,7 @@ func ClassifyDataDir(path string) DataLayer {
 	case match(GetScratchDataDir()), match(GetUserDataDir()):
 		return LayerUser
 	}
-	return LayerExtra
+	return LayerUnknown
 }
 
 // FilterDirsByLayer returns the subset of dirs belonging to layer, preserving order.
@@ -525,16 +460,9 @@ func firstWritableDir(dirs []SearchDir) string {
 }
 
 // imageWriteDirs returns the ordered write candidates for image directories.
-// Shared: extra_image_dirs (non-:ro), CNT_EXTRA_ROOT, root.
-// Personal: scratch, user.
+// Shared: CNT_EXTRA_ROOT, root. Personal: scratch, user.
 func imageWriteDirs() []SearchDir {
 	var dirs []SearchDir
-	for _, entry := range GetExtraImageDirs() {
-		path, readOnly := ParseDirEntry(entry)
-		if !readOnly && path != "" {
-			dirs = append(dirs, SearchDir{Path: filepath.Clean(os.ExpandEnv(path))})
-		}
-	}
 	if extraRoot := GetExtraRootDir(); extraRoot != "" {
 		dirs = append(dirs, SearchDir{Path: filepath.Join(extraRoot, "images")})
 	}
@@ -551,16 +479,9 @@ func imageWriteDirs() []SearchDir {
 }
 
 // helperWriteDirs returns the ordered write candidates for helper-scripts directories.
-// Shared: extra_helper_dirs (non-:ro), CNT_EXTRA_ROOT, root.
-// Personal: scratch, user.
+// Shared: CNT_EXTRA_ROOT, root. Personal: scratch, user.
 func helperWriteDirs() []SearchDir {
 	var dirs []SearchDir
-	for _, entry := range GetExtraHelperDirs() {
-		path, readOnly := ParseDirEntry(entry)
-		if !readOnly && path != "" {
-			dirs = append(dirs, SearchDir{Path: filepath.Clean(os.ExpandEnv(path))})
-		}
-	}
 	if extraRoot := GetExtraRootDir(); extraRoot != "" {
 		dirs = append(dirs, SearchDir{Path: filepath.Join(extraRoot, "helper-scripts")})
 	}
@@ -591,8 +512,7 @@ func cacheWriteDirs() []SearchDir {
 // =============================================================================
 
 // GetWritableImagesDir returns the first writable images directory.
-// Explicit extra_image_dirs entries marked :ro are skipped.
-// Shared dirs (extra_image_dirs, CNT_EXTRA_ROOT, root) are probed only.
+// Shared dirs (CNT_EXTRA_ROOT, root) are probed only.
 // Personal dirs (scratch, user) are created on first use.
 func GetWritableImagesDir() (string, error) {
 	dirs := imageWriteDirs()
@@ -607,8 +527,7 @@ func GetWritableImagesDir() (string, error) {
 }
 
 // GetWritableHelperScriptsDir returns the first writable helper scripts directory.
-// Explicit extra_helper_dirs entries marked :ro are skipped.
-// Shared dirs (extra_helper_dirs, CNT_EXTRA_ROOT, root) are probed only.
+// Shared dirs (CNT_EXTRA_ROOT, root) are probed only.
 // Personal dirs (scratch, user) are created on first use.
 func GetWritableHelperScriptsDir() (string, error) {
 	dirs := helperWriteDirs()

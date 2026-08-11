@@ -30,10 +30,6 @@ func getAllBaseDirs() []string {
 		}
 	}
 
-	for _, entry := range config.GetExtraImageDirs() {
-		path, _ := config.ParseDirEntry(entry)
-		addIfExists(path)
-	}
 	addIfExists(config.GetExtraRootDir())
 	addIfExists(config.GetRootDir())
 	addIfExists(config.GetScratchDataDir())

@@ -1568,7 +1568,7 @@ Pass `-l/--layer` to target a layer explicitly (`user`, `app-root`, `extra-root`
 
 ### Config Append / Prepend / Remove
 
-Manage array config keys (`sources`, `extra_image_dirs`, `extra_helper_dirs`, `channels`) from the CLI.
+Manage array config keys (`sources`, `channels`) from the CLI.
 
 ```
 condatainer config append  <key> <value>
@@ -1583,21 +1583,18 @@ condatainer config remove  <key> <value>
 **Examples:**
 
 ```bash
-# Explicit image directory (search-only shared store)
-condatainer config append extra_image_dirs /shared/lab/images:ro
-
-# Explicit image directory (writable personal store)
-condatainer config append extra_image_dirs /fast/scratch/images
-
 # Add an institutional scripts source (takes priority over the default)
 condatainer config prepend sources myorg=https://raw.githubusercontent.com/MyOrg/recipes/main
 
+# Add a lab collection at lower priority
+condatainer config append sources lab=/shared/lab/recipes
+
 # Remove entries
-condatainer config remove extra_image_dirs /shared/lab/images:ro
+condatainer config remove sources lab=/shared/lab/recipes
 
 # Show result
 condatainer config show
-condatainer config get extra_image_dirs
+condatainer config get sources
 ```
 
 ### Config Init
@@ -1689,10 +1686,6 @@ build:
   time: 4h
   # compress_args options (gzip, lz4, zstd, zstd-fast, zstd-medium, zstd-high)
   compress_args: "-comp zstd -Xcompression-level 8"
-# Explicit image directories (:ro = search-only, :rw = writable default)
-extra_image_dirs:
-  - /shared/lab/images:ro
-  - /fast/scratch/images
 # For a group/lab root with standard layout, set in module file:
 # export CNT_EXTRA_ROOT=/project/shared/condatainer
 ```

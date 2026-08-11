@@ -34,8 +34,6 @@ var configKeyDefs = map[string]bool{
 	"base":                       false,
 	"submit_job":                 false,
 	"sources":                    true,
-	"extra_image_dirs":           true,
-	"extra_helper_dirs":          true,
 	"parse_module_load":          false,
 	"autoload_gpu":               false,
 	"scheduler_timeout":          false,
@@ -188,10 +186,6 @@ func configKeysCompletion(cmd *cobra.Command, args []string, toComplete string) 
 	}
 	if len(args) == 1 {
 		// Second arg: complete values based on the key
-		//  extra_image_dirs / extra_helper_dirs should only complete directories
-		if args[0] == "extra_image_dirs" || args[0] == "extra_helper_dirs" {
-			return nil, cobra.ShellCompDirectiveFilterDirs
-		}
 		// sources entries are name=base pairs; allow free-form input
 		if args[0] == "sources" {
 			return nil, cobra.ShellCompDirectiveDefault
@@ -264,11 +258,10 @@ Configuration file priority (highest to lowest):
   7. Defaults
 
 Data directory priority (for read/write operations):
-  1. Extra directories (extra_image_dirs / extra_helper_dirs)
-  2. Extra-root directory ($CNT_EXTRA_ROOT, group layer)
-  3. App-root directory (auto-detected or CNT_ROOT)
-  4. User scratch directory ($SCRATCH/condatainer, HPC systems)
-  5. User XDG directory (~/.local/share/condatainer)`,
+  1. Extra-root directory ($CNT_EXTRA_ROOT, group layer)
+  2. App-root directory (auto-detected or CNT_ROOT)
+  3. User scratch directory ($SCRATCH/condatainer, HPC systems)
+  4. User XDG directory (~/.local/share/condatainer)`,
 }
 
 var configShowCmd = &cobra.Command{
@@ -402,16 +395,6 @@ var configShowCmd = &cobra.Command{
 			pathIndex++
 		}
 
-		// Explicit extra image/helper directories
-		for _, entry := range config.GetExtraImageDirs() {
-			path, ro := config.ParseDirEntry(entry)
-			addBaseDir("extra-images", path, ro)
-		}
-		for _, entry := range config.GetExtraHelperDirs() {
-			path, ro := config.ParseDirEntry(entry)
-			addBaseDir("extra-helper", path, ro)
-		}
-
 		// Tier base directories (extra-root → root → scratch → user)
 		addBaseDir("extra-root", config.GetExtraRootDir(), false)
 		addBaseDir("app-root", config.GetRootDir(), false)
@@ -435,29 +418,6 @@ var configShowCmd = &cobra.Command{
 		printOverridden("                 ", "scheduler_bin")
 		fmt.Printf("  logs_dir:      %s%s\n", config.Global.LogsDir, srcTag("logs_dir"))
 		printOverridden("                 ", "logs_dir")
-		extraImageDirs := config.GetExtraImageDirs()
-		if len(extraImageDirs) > 0 {
-			fmt.Printf("  extra_image_dirs:\n")
-			for _, entry := range extraImageDirs {
-				path, ro := config.ParseDirEntry(entry)
-				roSuffix := ""
-				if ro {
-					roSuffix = " " + utils.StyleWarning("(search-only)")
-				}
-				fmt.Printf("    - %s%s%s\n", path, roSuffix, srcEntryTag("extra_image_dirs", entry))
-			}
-		} else {
-			fmt.Printf("  extra_image_dirs: %s\n", utils.StyleInfo("none"))
-		}
-		extraHelperDirs := config.GetExtraHelperDirs()
-		if len(extraHelperDirs) > 0 {
-			fmt.Printf("  extra_helper_dirs:\n")
-			for _, path := range extraHelperDirs {
-				fmt.Printf("    - %s%s\n", path, srcEntryTag("extra_helper_dirs", path))
-			}
-		} else {
-			fmt.Printf("  extra_helper_dirs: %s\n", utils.StyleInfo("none"))
-		}
 		fmt.Println()
 
 		// Remote sources
@@ -593,8 +553,8 @@ With -l, reads only that config layer file.
 ` + configLayersHelp,
 	Example: `  condatainer config get apptainer_bin
   condatainer config get build.ncpus
-  condatainer config get extra_image_dirs
-  condatainer config get extra_image_dirs -l app-root`,
+  condatainer config get sources
+  condatainer config get sources -l app-root`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: configKeysCompletion,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -927,11 +887,10 @@ var configPathsCmd = &cobra.Command{
 	Long: `Show all search paths for images and helper-scripts.
 
 Search paths are checked in priority order (first match wins for reads):
-  1. Extra directories (extra_image_dirs / extra_helper_dirs)
-  2. Extra-root ($CNT_EXTRA_ROOT, group layer)
-  3. App-root (auto-detected or $CNT_ROOT)
-  4. Scratch (user HPC large storage, $SCRATCH/condatainer)
-  5. User XDG directory (~/.local/share/condatainer)
+  1. Extra-root ($CNT_EXTRA_ROOT, group layer)
+  2. App-root (auto-detected or $CNT_ROOT)
+  3. Scratch (user HPC large storage, $SCRATCH/condatainer)
+  4. User XDG directory (~/.local/share/condatainer)
 
 Write operations use the first writable directory in the same order.
 App-root is preferred for group/shared use, user is the fallback.`,
@@ -1136,8 +1095,7 @@ var configAppendCmd = &cobra.Command{
 	Long: `Append a value to an array config key (lowest search priority).
 
 ` + configLayersHelp,
-	Example: `  condatainer config append extra_image_dirs /shared/lab/images:ro
-  condatainer config append sources lab=/shared/lab/recipes`,
+	Example:           `  condatainer config append sources lab=/shared/lab/recipes`,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: arrayKeyCompletion,
 	SilenceUsage:      true,
@@ -1176,8 +1134,7 @@ var configPrependCmd = &cobra.Command{
 	Long: `Prepend a value to an array config key (highest search priority).
 
 ` + configLayersHelp,
-	Example: `  condatainer config prepend extra_image_dirs /fast/images
-  condatainer config prepend sources lab=/shared/lab/recipes`,
+	Example:           `  condatainer config prepend sources lab=/shared/lab/recipes`,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: arrayKeyCompletion,
 	SilenceUsage:      true,
@@ -1217,7 +1174,7 @@ var configRemoveCmd = &cobra.Command{
 
 ` + configLayersHelp,
 	Example: `  condatainer config remove apptainer_bin
-  condatainer config remove extra_image_dirs /shared/lab/images:ro`,
+  condatainer config remove sources lab=/shared/lab/recipes`,
 	Args:              cobra.RangeArgs(1, 2),
 	ValidArgsFunction: arrayRemoveValueCompletion,
 	SilenceUsage:      true,

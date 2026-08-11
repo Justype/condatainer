@@ -88,11 +88,10 @@ config.Global  // Singleton instance
 ## Data Directory Search
 
 **Search order for images:**
-1. `extra_image_dirs` — explicit image directories (direct paths, support `:ro`/`:rw`)
-2. `CNT_EXTRA_ROOT` → `<extra-root>/images/` (group/lab layer)
-3. Root dir → `$CNT_ROOT/images/` or `<install>/images/`
-4. Scratch dir → `$SCRATCH/condatainer/images/`
-5. User dir → `$XDG_DATA_HOME/condatainer/images/` or `~/.local/share/condatainer/images/`
+1. `CNT_EXTRA_ROOT` → `<extra-root>/images/` (group/lab layer)
+2. Root dir → `$CNT_ROOT/images/` or `<install>/images/`
+3. Scratch dir → `$SCRATCH/condatainer/images/`
+4. User dir → `$XDG_DATA_HOME/condatainer/images/` or `~/.local/share/condatainer/images/`
 
 **Search order for scripts:**
 
@@ -108,17 +107,11 @@ how a site points the handle elsewhere without rewriting the `#DEP:` lines that
 name it.
 
 **Helper scripts:**
-1. `extra_helper_dirs` — explicit helper-scripts directories (direct paths)
-2. `CNT_EXTRA_ROOT`, Root dir, Scratch dir, User dir (same pattern)
+1. `CNT_EXTRA_ROOT`, Root dir, Scratch dir, User dir (same pattern, with `helper-scripts/`)
 
 **Write operations:**
-- **Images / helpers**: first writable directory in search order. `:ro` entries are always skipped. Personal dirs (scratch, user) are always created on first use. Shared dirs (extra-root, root): subdirs (`images/`, `helper-scripts/`) are auto-created if the parent directory already exists — the parent itself is never auto-created.
+- **Images / helpers**: first writable directory in search order. Personal dirs (scratch, user) are always created on first use. Shared dirs (extra-root, root): subdirs (`images/`, `helper-scripts/`) are auto-created if the parent directory already exists — the parent itself is never auto-created.
 - **Cache**: always written to a personal directory (scratch → user cache) to avoid cross-user pollution. Shared dirs are never written to.
-
-**`:ro` / `:rw` markers** (image and helper dirs, config file only):
-- `:ro` — search-only; condatainer never writes here even if filesystem allows it
-- `:rw` — explicit writable annotation (same as no marker; for documentation clarity)
-- Only applies to `extra_image_dirs` and `extra_helper_dirs`
 
 ## Usage
 
@@ -146,8 +139,6 @@ All multi-value env vars use `|` as separator.
 |---|---|---|
 | `CNT_ROOT` | — | Cluster/system root dir (loads `config.yaml` + data dirs; replaces bin/ heuristic) |
 | `CNT_EXTRA_ROOT` | — | Group/lab root dir (single path; loads `config.yaml` + data dirs) |
-| `CNT_EXTRA_IMAGE_DIRS` | `\|` | Extra image directories; entries support `:ro`/`:rw` |
-| `CNT_EXTRA_HELPER_DIRS` | `\|` | Extra helper-scripts directories; entries support `:ro`/`:rw` |
 | `CNT_SOURCES` | `\|` | Recipe collections as `name=base` pairs; overrides the `sources` config key |
 | `CNT_CHANNELS` | `\|` or `:`  | Conda channels |
 | `CNT_NOTIFICATION` | — | Override `notification` for the current session (e.g. `bell`, `email`, ntfy.sh topic) |
@@ -172,14 +163,8 @@ parse_module_load: false
 sources:
   - lab: "/shared/lab/recipes"
 
-# Extra directories — team/lab use via module file or config
-extra_image_dirs:
-  - "/shared/lab/images:ro"   # search-only shared store
-  - "/fast/scratch/images"    # writable personal store
-extra_helper_dirs:
-  - "/shared/lab/helpers"
 # For a group/lab root with standard layout (images/, helper-scripts/),
-# set CNT_EXTRA_ROOT=/proj/condatainer in the module file instead.
+# set CNT_EXTRA_ROOT=/proj/condatainer in the module file.
 
 channels:
   - conda-forge

@@ -25,7 +25,7 @@ All three config files are loaded and merged when they exist:
 
 **Scalar keys** (`apptainer_bin`, `base`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
 
-**Directory and source array keys** (`extra_image_dirs`, `extra_helper_dirs`, `sources`): **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, app-root, then system. This lets a sysadmin publish shared directories in an app-root or system config without requiring every user to copy them into their own config. See [How Array Settings Merge](#how-array-settings-merge) for a worked example.
+**`sources`**: **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, app-root, then system. This lets a sysadmin publish shared recipe collections in an app-root or system config without requiring every user to copy them into their own config. See [How Array Settings Merge](#how-array-settings-merge) for a worked example.
 
 **`channels`**: overwrite — the highest-priority config file that sets it wins (not merged), since channel order controls conda package resolution priority.
 
@@ -87,9 +87,6 @@ With `-l`, a read-only target is an error instead — an explicit layer is never
 | Key | Default | Description |
 |-----|---------|-------------|
 | `logs_dir` | `$HOME/logs` | Directory for build job logs |
-| `extra_image_dirs` | `[]` | Explicit image directories (direct paths). Entries support `:ro` (search-only) or `:rw` (writable, default) markers. |
-| `extra_helper_dirs` | `[]` | Explicit helper-scripts target directories (direct paths). Entries support `:ro` (search-only) or `:rw` (writable, default) markers. |
-| `extra_image_dirs` entries with `:ro` | — | Search-only image dirs (no writes) |
 
 ### Binaries
 
@@ -195,21 +192,17 @@ condatainer config set scheduler_timeout 10
 
 ### Manage Array Config Values
 
-Array keys (`extra_image_dirs`, `extra_helper_dirs`, `sources`, `channels`) use dedicated subcommands:
+Array keys (`sources`, `channels`) use dedicated subcommands:
 
 ```bash
-# Explicit image directories
-condatainer config append extra_image_dirs /shared/lab/images:ro   # search-only
-condatainer config append extra_image_dirs /fast/scratch/images    # writable
+# Recipe collections are written as handle=location
+condatainer config append sources lab=/shared/lab/recipes
 
 # Prepend (higher priority — checked first)
-condatainer config prepend extra_image_dirs /fast/images
-
-# Recipe collections are written as handle=location
-condatainer config prepend sources lab=/shared/labA/recipes
+condatainer config prepend sources labA=/shared/labA/recipes
 
 # Remove
-condatainer config remove extra_image_dirs /shared/lab/images:ro
+condatainer config remove sources labA=/shared/labA/recipes
 ```
 
 Shell completion for `remove` offers the current values of the array as candidates.
@@ -269,8 +262,6 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_BUILD_DATA_BLOCK_SIZE`| `build.data_block_size`|
 | `CNT_ROOT`                 | Cluster/system root dir (loads `config.yaml` + data dirs; replaces bin/ heuristic) |
 | `CNT_EXTRA_ROOT`           | Group/lab root dir — single path, loads `config.yaml` + data dirs |
-| `CNT_EXTRA_IMAGE_DIRS`     | `extra_image_dirs` (pipe-separated; entries support `:ro`/`:rw`) |
-| `CNT_EXTRA_HELPER_DIRS`    | `extra_helper_dirs` (pipe-separated; entries support `:ro`/`:rw`) |
 | `CNT_SOURCES`              | `sources` (pipe-separated `handle=location`; replaces the list) |
 | `CNT_CHANNELS`             | `channels` (pipe or colon-separated) |
 | `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
@@ -286,9 +277,6 @@ Example:
 # Group/lab root (set in module file)
 export CNT_ROOT=/cluster/condatainer      # cluster-level
 export CNT_EXTRA_ROOT=/shared/lab/tools   # group-level
-
-# Explicit image directories (pipe-separated; supports :ro/:rw markers)
-export CNT_EXTRA_IMAGE_DIRS="/shared/lab/images:ro|/fast/scratch/images"
 ```
 
 ## Data Directory Search Paths
@@ -301,17 +289,16 @@ export CNT_EXTRA_IMAGE_DIRS="/shared/lab/images:ro|/fast/scratch/images"
 
 | # | Directory | Layer |
 |---|---|---|
-| 1 | `extra_image_dirs` — explicit directories (`:ro` entries skipped for writes) | `extra` |
-| 2 | `$CNT_EXTRA_ROOT/images/` (group/lab) | `extra-root` |
-| 3 | `$CNT_ROOT/images/` or `<install>/images/` | `app-root` |
-| 4 | `$SCRATCH/condatainer/images/` | `user` |
-| 5 | `~/.local/share/condatainer/images/` | `user` |
+| 1 | `$CNT_EXTRA_ROOT/images/` (group/lab) | `extra-root` |
+| 2 | `$CNT_ROOT/images/` or `<install>/images/` | `app-root` |
+| 3 | `$SCRATCH/condatainer/images/` | `user` |
+| 4 | `~/.local/share/condatainer/images/` | `user` |
 
 Scratch and the XDG data directory are **two directories in one `user` layer** — scratch is preferred when `$SCRATCH` is set, and `-l u` selects both.
 
 Recipes have no directory layer — they come from the `sources` list, which is ordered on its own.
 
-**Helper scripts:** `extra_helper_dirs`, then the same layers with `helper-scripts/`.
+**Helper scripts:** the same layers with `helper-scripts/`.
 
 These layer names are what `condatainer list` tags each directory with, and what `condatainer remove -l` accepts (`u`, `r`, `e`).
 
@@ -381,15 +368,6 @@ metadata_cache_ttl: 7
 # Values: web | terminal | both | none (or empty)
 # notification: web
 
-# Explicit image directories (direct paths; :ro = search-only, :rw = writable default)
-extra_image_dirs:
-  - /shared/lab/images:ro        # shared read-only store
-  - /fast/scratch/images         # writable personal store
-
-# Explicit helper-scripts directories
-# extra_helper_dirs:
-#   - /shared/lab/helpers
-
 # Extra base directories (standard layout: images/, helper-scripts/)
 # For a group/lab root with standard layout, set in module file:
 # export CNT_EXTRA_ROOT=/project/shared/condatainer
@@ -442,7 +420,7 @@ For shared group installations, CondaTainer supports a standalone layout where t
   build-scripts/        # Shared build scripts
 ```
 
-All config files (user, extra-root, app-root, system) are loaded simultaneously. For `extra_image_dirs` and other directory keys, entries from all configs are **merged** — so a group admin can add shared directories to the app-root config and every user automatically searches those directories, even if they also have a personal config.
+All config files (user, extra-root, app-root, system) are loaded simultaneously. For `sources`, entries from all configs are **merged** — so a group admin can publish shared recipe collections in the app-root config and every user automatically searches them, even if they also have a personal config.
 
 For scalar keys like `apptainer_bin`, the user config takes priority; users can override app-root/system defaults in their own config without affecting other users.
 
@@ -483,7 +461,7 @@ Priority: **user > group > system > defaults**
   images/                      ← cluster-wide base images
 
 /shared/labA/condatainer/      ← group tier (CNT_EXTRA_ROOT)
-  config.yaml                  ← extra_image_dirs, sources
+  config.yaml                  ← sources
   images/                      ← lab-specific images
   recipes/                     ← lab-specific recipes (as a `sources` entry)
 
@@ -501,8 +479,6 @@ channels:
 
 **Group config** (`/shared/labA/condatainer/config.yaml`):
 ```yaml
-extra_image_dirs:
-  - /shared/labA/condatainer/images
 sources:
   - labA: /shared/labA/condatainer/recipes
 ```
@@ -524,40 +500,42 @@ CNT_EXTRA_ROOT=/shared/labA/condatainer condatainer config init -l extra-root
 
 ### How Array Settings Merge
 
-Scalar keys (like `build.ncpus`) are *overridden* — the highest tier that sets one wins. Most array keys instead **merge: their entries are concatenated across every tier, user entries first** (like `extra_image_dirs` or `sources`). A user adds to the merged list; they never replace what an admin published. (`channels` is the exception — an array that *overwrites*, since channel order decides package resolution.)
+Scalar keys (like `build.ncpus`) are *overridden* — the highest tier that sets one wins. `sources` instead **merges: its entries are concatenated across every tier, user entries first**. A user adds to the merged list; they never replace what an admin published. (`channels` is the exception — an array that *overwrites*, since channel order decides package resolution.)
 
-Say each tier contributes one image directory:
+Say each tier contributes one recipe collection:
 
 ```yaml
 # System config  (/cluster/condatainer/config.yaml)
-extra_image_dirs:
-  - /cluster/shared/images
+sources:
+  - cluster: /cluster/condatainer/recipes
 
 # Group config   (/shared/labA/condatainer/config.yaml)
-extra_image_dirs:
-  - /shared/labA/condatainer/images
+sources:
+  - labA: /shared/labA/condatainer/recipes
 ```
 
-The user prepends their own fast scratch, so it is checked first:
+The user prepends their own, so it is consulted first:
 
 ```bash
-condatainer config prepend extra_image_dirs /scratch/myuser/images
+condatainer config prepend sources mine=/scratch/myuser/recipes
 ```
 ```yaml
 # User config    (~/.config/condatainer/config.yaml)
-extra_image_dirs:
-  - /scratch/myuser/images
+sources:
+  - mine: /scratch/myuser/recipes
 ```
 
-The effective `extra_image_dirs` every lookup sees is all three, in **user → group → system** order:
+The effective `sources` every lookup sees is all three, in **user → group → system** order:
 
 ```
-1. /scratch/myuser/images           (user)     ← create writes here (first writable)
-2. /shared/labA/condatainer/images  (group)
-3. /cluster/shared/images           (system)
+1. mine    → /scratch/myuser/recipes        (user)
+2. labA    → /shared/labA/condatainer/recipes (group)
+3. cluster → /cluster/condatainer/recipes   (system)
 ```
 
-`condatainer list` and friends read all three merged into one view; `condatainer create` writes to the first entry it can write — the user's own. The user was able to *prepend* their directory but cannot remove the group's or system's, so the shared sources stay in every user's search path. `sources` follows the same rule — a user's prepended collection is consulted before the group's and system's. Confirm the resolved order any time with `condatainer config paths`.
+First match wins, like `PATH`. The user was able to *prepend* their collection but cannot remove the group's or system's, so the shared collections stay in every user's resolution order. Confirm it any time with `condatainer config paths`.
+
+Data directories do not merge this way — they come from the fixed tier list (`CNT_EXTRA_ROOT` → app-root → scratch → user), and `condatainer create` writes to the first one it can write.
 
 ---
 

@@ -160,11 +160,10 @@ Array keys merge across config layers, so this adds your sources without overrid
 
 ## Sharing Built Overlays
 
-A script still costs everyone a build. If you have shared storage, share the `.sqf` too — it's a single file, and CondaTainer finds it in any configured images directory:
+A script still costs everyone a build. If you have shared storage, share the `.sqf` too — it's a single file, and CondaTainer finds it in the shared root's `images/`:
 
-```yaml
-extra_image_dirs:
-  - /shared/labA/condatainer/images
+```bash
+export CNT_EXTRA_ROOT=/shared/labA/condatainer   # contains images/
 ```
 
 `condatainer list` then shows the overlay as installed for everyone, with no rebuild. This is worth doing for anything expensive: large data overlays, indexes, apps with long builds.
