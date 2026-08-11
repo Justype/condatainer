@@ -10,7 +10,6 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
-	"github.com/Justype/condatainer/internal/artifact/record"
 	"github.com/Justype/condatainer/internal/conda"
 )
 
@@ -71,6 +70,7 @@ func pack(t *testing.T, b build) string {
 		BuildType:     format,
 		Platform:      meta.Platform{OS: "linux", Arch: arch},
 	}
+	sources := key.Sources{}
 
 	switch {
 	case b.explicit != "":
@@ -80,42 +80,32 @@ func pack(t *testing.T, b build) string {
 		if err := meta.StageBytes(dir, conda.EnvironmentFileName, []byte(b.environ)); err != nil {
 			t.Fatal(err)
 		}
-		manifest.Keys = meta.Keys{
-			Identity: meta.KeyRef{SHA256: record.Sum([]byte(b.explicit)), File: conda.ExplicitFileName},
-			Equiv:    meta.KeyRef{SHA256: record.Sum([]byte(b.environ)), File: conda.EnvironmentFileName},
-		}
+		manifest.Source.Files = []string{conda.ExplicitFileName, conda.EnvironmentFileName}
+		sources[conda.ExplicitFileName] = []byte(b.explicit)
+		sources[conda.EnvironmentFileName] = []byte(b.environ)
 	case b.recipe != "":
 		artifact := key.Artifact{
 			Name: b.name, Type: b.typ, Env: b.env,
 			Recipe: []byte(b.recipe), Placeholders: b.ph, Deps: b.deps,
 			From: b.from,
 		}
-		identity, equiv, err := key.Records(artifact)
-		if err != nil {
-			t.Fatal(err)
-		}
-		idBytes, err := record.Marshal(identity)
-		if err != nil {
-			t.Fatal(err)
-		}
-		eqBytes, err := record.Marshal(equiv)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := meta.StageBytes(dir, meta.IdentityFileName, idBytes); err != nil {
-			t.Fatal(err)
-		}
-		if err := meta.StageBytes(dir, meta.EquivFileName, eqBytes); err != nil {
-			t.Fatal(err)
-		}
 		if err := meta.StageBytes(dir, meta.RecipeFileName, []byte(b.recipe)); err != nil {
 			t.Fatal(err)
 		}
-		manifest.Keys = meta.Keys{
-			Identity: meta.KeyRef{SHA256: record.Sum(idBytes), File: meta.IdentityFileName},
-			Equiv:    meta.KeyRef{SHA256: record.Sum(eqBytes), File: meta.EquivFileName},
-		}
+		manifest.Source.Files = []string{meta.RecipeFileName}
+		manifest.Source.Placeholders = b.ph
+		sources[meta.RecipeFileName] = []byte(b.recipe)
 		manifest.Dependencies, manifest.ProvenanceComplete = key.Manifest(artifact)
+		if b.from != "" {
+			manifest.Build.From = &meta.From{Bootstrap: "docker", Ref: "example:latest", Digest: b.from}
+		}
+	}
+	if len(sources) > 0 {
+		derived, err := key.Generate(manifest, sources)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest.Keys = derived.Keys()
 	}
 
 	if err := meta.StageManifest(dir, manifest); err != nil {
@@ -150,7 +140,7 @@ func read(t *testing.T, b build) Artifact {
 	return a
 }
 
-const starRecipe = "#DESC:index\nSTAR --runMode genomeGenerate\n"
+const starRecipe = "#TARGET:grch38/star/2.7.11b/gencode{gencode_version}\n#PH:gencode_version:47,49\n#ENV:STAR_INDEX={prefix}/index  ## for --genomeDir\n#DESC:index\nSTAR --runMode genomeGenerate\n"
 
 func starIndex() build {
 	return build{
@@ -161,9 +151,9 @@ func starIndex() build {
 		ph:     map[string]string{"gencode_version": "49"},
 		deps: []key.Dep{
 			{Name: "star/2.7.11b", Type: catalog.TypeApp,
-				Identity: record.Digest([]byte("star id")), Equiv: record.Digest([]byte("star eq"))},
+				Identity: key.Digest([]byte("star id")), Equiv: key.Digest([]byte("star eq"))},
 			{Name: "samtools/1.23.1", Type: catalog.TypeApp,
-				Identity: record.Digest([]byte("sam id")), Equiv: record.Digest([]byte("sam eq"))},
+				Identity: key.Digest([]byte("sam id")), Equiv: key.Digest([]byte("sam eq"))},
 		},
 	}
 }
@@ -180,15 +170,15 @@ func TestVerdicts(t *testing.T) {
 
 	t.Run("a rebuilt history-only dependency is equivalent", func(t *testing.T) {
 		b := starIndex()
-		b.deps[1].Identity = record.Digest([]byte("samtools rebuilt"))
-		b.deps[1].Equiv = record.Digest([]byte("samtools rebuilt eq"))
+		b.deps[1].Identity = key.Digest([]byte("samtools rebuilt"))
+		b.deps[1].Equiv = key.Digest([]byte("samtools rebuilt eq"))
 
 		got := Compare(want, read(t, b))
 		if got.Verdict != Equivalent {
 			t.Fatalf("verdict = %s (%s)", got.Verdict, got.Reason)
 		}
 		// The diff still names which dependency moved, from the manifest's list —
-		// the equivalence record deliberately dropped it.
+		// the equivalence model deliberately dropped it.
 		if !hasField(got.Diffs, "dep:samtools/1.23.1") {
 			t.Errorf("diffs = %v", got.Diffs)
 		}
@@ -196,7 +186,7 @@ func TestVerdicts(t *testing.T) {
 
 	t.Run("a changed recipe is different", func(t *testing.T) {
 		b := starIndex()
-		b.recipe = "#DESC:index\nSTAR --runMode genomeGenerate --sjdbOverhang 100\n"
+		b.recipe = strings.Replace(starRecipe, "genomeGenerate", "genomeGenerate --sjdbOverhang 100", 1)
 
 		got := Compare(want, read(t, b))
 		if got.Verdict != Different {
@@ -222,7 +212,7 @@ func TestVerdicts(t *testing.T) {
 
 	t.Run("a comment moves nothing", func(t *testing.T) {
 		b := starIndex()
-		b.recipe = "#DESC:reworded\n# explain it\nSTAR --runMode genomeGenerate\n"
+		b.recipe = strings.Replace(starRecipe, "#DESC:index", "#DESC:reworded\n# explain it", 1)
 		if got := Compare(want, read(t, b)); got.Verdict != Exact {
 			t.Errorf("verdict = %s, want exact", got.Verdict)
 		}
@@ -274,7 +264,7 @@ func TestGates(t *testing.T) {
 	})
 
 	// The runtime gate is free integrity: runtime.json was never the hashed
-	// preimage, so an edited one cannot agree with the record beside it.
+	// preimage, so an edited one cannot agree with the regenerated model.
 	t.Run("an edited runtime.json is unverifiable", func(t *testing.T) {
 		b := starIndex()
 		b.tamper = func(dir string) {
@@ -302,8 +292,8 @@ func TestTamperedKeysAreUnverifiable(t *testing.T) {
 
 	b := starIndex()
 	b.tamper = func(dir string) {
-		if err := os.WriteFile(filepath.Join(dir, meta.IdentityFileName),
-			[]byte("cnt-identity-v1\ntype=data\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, meta.RecipeFileName),
+			[]byte(strings.Replace(starRecipe, "genomeGenerate", "tampered", 1)), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -311,8 +301,8 @@ func TestTamperedKeysAreUnverifiable(t *testing.T) {
 	if got.Verdict != Unverifiable {
 		t.Errorf("verdict = %s, want unverifiable", got.Verdict)
 	}
-	if !strings.Contains(got.Reason, meta.IdentityFileName) {
-		t.Errorf("reason = %q, want it to name the file", got.Reason)
+	if !strings.Contains(got.Reason, "derives identity") {
+		t.Errorf("reason = %q, want a derived identity mismatch", got.Reason)
 	}
 }
 
@@ -324,7 +314,7 @@ func TestMissingKeyFileIsUnverifiable(t *testing.T) {
 
 	b := starIndex()
 	b.tamper = func(dir string) {
-		if err := os.Remove(filepath.Join(dir, meta.EquivFileName)); err != nil {
+		if err := os.Remove(filepath.Join(dir, meta.RecipeFileName)); err != nil {
 			t.Fatal(err)
 		}
 	}

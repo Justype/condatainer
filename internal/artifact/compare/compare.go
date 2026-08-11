@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
-	"github.com/Justype/condatainer/internal/artifact/record"
 )
 
 // Verdict is how a candidate relates to what was asked for.
@@ -75,6 +75,16 @@ func compareOn(want, got Artifact, hostArch string) Result {
 		return Result{
 			Verdict: Different,
 			Diffs:   []Diff{{Field: "build_type", Want: want.Format, Got: got.Format}},
+		}
+	}
+	if want.IdentityScheme != got.IdentityScheme || want.EquivScheme != got.EquivScheme {
+		return Result{
+			Verdict: Different,
+			Reason:  "keys derived by different schemes are not directly comparable",
+			Diffs: []Diff{
+				{Field: "identity_scheme", Want: want.IdentityScheme, Got: got.IdentityScheme},
+				{Field: "equiv_scheme", Want: want.EquivScheme, Got: got.EquivScheme},
+			},
 		}
 	}
 
@@ -141,15 +151,15 @@ func runsOn(arch, hostArch string) error {
 func MountAllowed(rt meta.Runtime) error { return runsOn(rt.Platform.Arch, meta.NativeArch()) }
 
 // diff reports which inputs moved. It reads whatever the two artifacts can
-// support: parsed records name the exact field, and a Conda app — which has no
-// records — falls back to naming the export that differs.
+// support: canonical models name the exact field, and a Conda app — which has no
+// canonical model — falls back to naming the export that differs.
 func diff(want, got Artifact) []Diff {
 	if want.identity == nil || got.identity == nil {
 		return condaDiff(want, got)
 	}
-	out := recordDiff(*want.identity, *got.identity)
+	out := modelDiff(*want.identity, *got.identity)
 
-	// A dependency's own name is what a human needs, and equivalence records
+	// A dependency's own name is what a human needs, and equivalence models
 	// deliberately drop it — so the manifest's list is what names the mover.
 	if d := dependencyDiff(want.Dependencies, got.Dependencies); len(d) > 0 {
 		out = append(out, d...)
@@ -157,8 +167,8 @@ func diff(want, got Artifact) []Diff {
 	return out
 }
 
-// recordDiff compares two identity records field by field.
-func recordDiff(want, got record.Record) []Diff {
+// modelDiff compares two identity models field by field.
+func modelDiff(want, got key.Model) []Diff {
 	var out []Diff
 	if want.Recipe != got.Recipe {
 		out = append(out, Diff{Field: "recipe", Want: short(want.Recipe), Got: short(got.Recipe)})
@@ -242,14 +252,14 @@ func describe(d meta.Dependency) string {
 
 // short trims a digest to the length a human reads, matching capsule addressing.
 func short(digest string) string {
-	trimmed := strings.TrimPrefix(digest, record.DigestPrefix)
+	trimmed := strings.TrimPrefix(digest, key.DigestPrefix)
 	if len(trimmed) > 12 {
 		return trimmed[:12]
 	}
 	return trimmed
 }
 
-func placeholderNames(r record.Record) []string {
+func placeholderNames(r key.Model) []string {
 	out := make([]string, 0, len(r.Placeholders))
 	for _, p := range r.Placeholders {
 		out = append(out, p.Name)
@@ -257,7 +267,7 @@ func placeholderNames(r record.Record) []string {
 	return out
 }
 
-func placeholder(r record.Record, name string) string {
+func placeholder(r key.Model, name string) string {
 	for _, p := range r.Placeholders {
 		if p.Name == name {
 			return p.Value
@@ -266,7 +276,7 @@ func placeholder(r record.Record, name string) string {
 	return "absent"
 }
 
-func envKeys(r record.Record) []string {
+func envKeys(r key.Model) []string {
 	out := make([]string, 0, len(r.Env))
 	for _, e := range r.Env {
 		out = append(out, e.Key)
@@ -274,7 +284,7 @@ func envKeys(r record.Record) []string {
 	return out
 }
 
-func env(r record.Record, key string) string {
+func env(r key.Model, key string) string {
 	for _, e := range r.Env {
 		if e.Key == key {
 			return e.Value

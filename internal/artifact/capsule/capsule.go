@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/utils"
@@ -29,8 +30,8 @@ const DirName = "provenance"
 const Path = "/" + meta.DirName + "/" + DirName
 
 // IdentityChars is how much of an identity an entry directory carries. It is
-// addressing only: the full digest is inside the entry's own identity.record, and
-// a reader verifies against that rather than trusting twelve characters.
+// addressing only: a reader regenerates the full digest from the entry sources
+// rather than trusting twelve characters.
 const IdentityChars = 12
 
 // ErrInvalid reports a capsule that cannot be trusted as read.
@@ -92,8 +93,8 @@ func Compose(metaDir string, deps []Dep) (complete bool, err error) {
 	return complete, nil
 }
 
-// composeOne copies one dependency's records into the capsule, then its own
-// capsule entries across unchanged.
+// composeOne copies one dependency's manifest and rebuild sources into the
+// capsule, then its own capsule entries across unchanged.
 func composeOne(dest string, dep Dep) (complete bool, err error) {
 	staging, err := os.MkdirTemp("", "cnt-capsule-")
 	if err != nil {
@@ -106,26 +107,25 @@ func composeOne(dest string, dep Dep) (complete bool, err error) {
 		return false, fmt.Errorf("cannot read provenance from %s: %w", dep.Name, err)
 	}
 	source := filepath.Join(staging, meta.DirName)
-
+	manifest, err := readManifestDir(source)
+	if err != nil {
+		return false, fmt.Errorf("cannot read provenance manifest from %s: %w", dep.Name, err)
+	}
+	derived, err := key.VerifyDir(source, manifest)
+	if err != nil {
+		return false, fmt.Errorf("cannot verify provenance from %s: %w", dep.Name, err)
+	}
+	if manifest.Name != dep.Name || derived.Identity.Ref.Digest() != dep.Identity {
+		return false, fmt.Errorf("provenance from %s does not match the selected identity", dep.Name)
+	}
 	entry := filepath.Join(dest, EntryName(dep.Name, dep.Identity))
 	if err := utils.MkdirAllShared(entry); err != nil {
 		return false, err
 	}
 
-	entries, err := os.ReadDir(source)
-	if err != nil {
-		return false, fmt.Errorf("cannot list provenance from %s: %w", dep.Name, err)
-	}
-	for _, file := range entries {
-		switch {
-		case file.IsDir():
-			continue // its own capsule, handled below
-		case file.Name() == meta.RuntimeFileName:
-			// A capsule entry exists to rebuild an artifact, never to mount one,
-			// and a rebuilt dependency derives its runtime from its recipe.
-			continue
-		}
-		if err := copyFile(filepath.Join(source, file.Name()), filepath.Join(entry, file.Name())); err != nil {
+	files := append([]string{meta.FileName}, manifest.Source.Files...)
+	for _, name := range files {
+		if err := copyFile(filepath.Join(source, name), filepath.Join(entry, name)); err != nil {
 			return false, err
 		}
 	}
@@ -143,11 +143,6 @@ func composeOne(dest string, dep Dep) (complete bool, err error) {
 		}
 	}
 
-	// Whether the dependency itself was completely recorded.
-	manifest, err := meta.ReadManifest(dep.ImagePath)
-	if err != nil {
-		return false, nil
-	}
 	return manifest.ProvenanceComplete == nil || *manifest.ProvenanceComplete, nil
 }
 

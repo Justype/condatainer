@@ -9,53 +9,40 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/capsule"
 	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
-	"github.com/Justype/condatainer/internal/artifact/record"
-	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/container"
 )
 
-// recordKeys computes what the image is addressed and compared by, and embeds
-// whatever backs it. Every backend calls this immediately before staging, which
-// is the last point at which everything a key depends on is known.
-//
-// A Conda app gets keys pointing at the exports it already embeds, since a
-// record for it would hold only a format tag, a type line and one digest.
-// Everything else gets identity.record and equiv.record — a base included, which
-// nothing may depend on but anything may identify.
-func (b *BuildObject) recordKeys(ctx context.Context) error {
+// deriveKeys computes the scheme-backed identity and equivalence immediately
+// before staging, when every source and dependency input is known.
+func (b *BuildObject) deriveKeys(ctx context.Context) error {
 	if b.spec.Source.Conda != nil {
-		b.keysFromExports(ctx)
+		b.keysFromSources(ctx)
 		return nil
 	}
-	return b.recordRecipeKeys(ctx)
+	return b.deriveRecipeKeys(ctx)
 }
 
-// keysFromExports names the Conda exports as the keys themselves. A capture that
-// failed leaves no keys rather than a claim about a file that is not there.
-func (b *BuildObject) keysFromExports(ctx context.Context) {
-	var keys meta.Keys
-	for _, file := range b.embedded {
-		switch file.Name {
-		case conda.ExplicitFileName:
-			keys.Identity = meta.KeyRef{SHA256: record.Sum(file.Data), File: file.Name}
-		case conda.EnvironmentFileName:
-			keys.Equiv = meta.KeyRef{SHA256: record.Sum(file.Data), File: file.Name}
-		}
-	}
-	if keys.Identity.File == "" || keys.Equiv.File == "" {
+// keysFromSources derives Conda keys from the two captured canonical exports. A
+// failed capture leaves both keys absent, preserving the existing unrecorded
+// behavior rather than making a half-claim.
+func (b *BuildObject) keysFromSources(ctx context.Context) {
+	b.keys = meta.Keys{}
+	derived, err := key.Generate(b.Manifest(), b.keySources())
+	if err != nil {
 		logging.FromContext(ctx).Warn("conda environment recorded without keys",
-			"name", b.spec.Image.Name, "reason", "an export was not captured")
+			"name", b.spec.Image.Name, "reason", err)
 		return
 	}
-	b.keys = keys
+	b.keys = derived.Keys()
 }
 
-// recordRecipeKeys builds both records for a recipe build and embeds them.
-func (b *BuildObject) recordRecipeKeys(ctx context.Context) error {
+// deriveRecipeKeys freezes dependency adjacency, derives both keys from the
+// manifest and recipe, and composes the rebuild-source capsule.
+func (b *BuildObject) deriveRecipeKeys(ctx context.Context) error {
 	recipe, ok := b.spec.Source.RecipeFile()
 	if !ok {
-		return nil // nothing was resolved from a recipe; nothing to key
+		return nil
 	}
 
 	artifact := key.Artifact{
@@ -68,27 +55,24 @@ func (b *BuildObject) recordRecipeKeys(ctx context.Context) error {
 		From:         b.spec.Source.UpstreamDigest(),
 	}
 
-	identity, equiv, err := key.Records(artifact)
+	b.dependencies, b.provenanceComplete = key.Manifest(artifact)
+	b.keys = meta.Keys{}
+	derived, err := key.Generate(b.Manifest(), b.keySources())
 	if err != nil {
 		return fmt.Errorf("refusing to pack %s: %w", b.spec.Image.Name, err)
 	}
-	identityBytes, err := record.Marshal(identity)
-	if err != nil {
-		return err
-	}
-	equivBytes, err := record.Marshal(equiv)
-	if err != nil {
-		return err
-	}
-
-	b.embedRecord(meta.IdentityFileName, identityBytes)
-	b.embedRecord(meta.EquivFileName, equivBytes)
-	b.keys = meta.Keys{
-		Identity: meta.KeyRef{SHA256: record.Sum(identityBytes), File: meta.IdentityFileName},
-		Equiv:    meta.KeyRef{SHA256: record.Sum(equivBytes), File: meta.EquivFileName},
-	}
-	b.dependencies, b.provenanceComplete = key.Manifest(artifact)
+	b.keys = derived.Keys()
 	return b.composeCapsule(ctx)
+}
+
+func (b *BuildObject) keySources() key.Sources {
+	sources := make(key.Sources)
+	for _, file := range b.embedded {
+		if file.isSource {
+			sources[file.Name] = file.Data
+		}
+	}
+	return sources
 }
 
 // composeCapsule embeds the closure this artifact was built from, by union from
@@ -128,8 +112,8 @@ func (b *BuildObject) composeCapsule(ctx context.Context) error {
 // dependencyKeys reads what each direct dependency's image says about itself.
 //
 // A dependency that cannot be read contributes its name and type alone, marked
-// unrecorded: every image built before this format is that case, and failing a
-// build over it would strand every site that has not rebuilt yet.
+// unrecorded. A manifest from the removed file-backed format has no schemes and
+// follows this same path.
 func (b *BuildObject) dependencyKeys(ctx context.Context) []key.Dep {
 	if len(b.spec.Dependencies) == 0 {
 		return nil
@@ -147,7 +131,7 @@ func (b *BuildObject) dependencyKeys(ctx context.Context) []key.Dep {
 
 		manifest, err := readDependencyManifest(dep.Name)
 		if err != nil {
-			log.Debug("dependency carries no records", "dep", dep.Name, "err", err)
+			log.Debug("dependency carries no scheme-backed keys", "dep", dep.Name, "err", err)
 			out = append(out, dep)
 			continue
 		}

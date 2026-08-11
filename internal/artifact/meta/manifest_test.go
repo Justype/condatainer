@@ -31,6 +31,17 @@ func TestValidateManifestRejects(t *testing.T) {
 		{"empty name", func(m *Manifest) { m.Name = "  " }, ErrInvalid},
 		{"no architecture", func(m *Manifest) { m.Platform.Arch = "" }, ErrInvalid},
 		{"unknown type", func(m *Manifest) { m.Type = "bundle" }, ErrInvalid},
+		{"only identity key", func(m *Manifest) {
+			m.Keys.Identity = KeyRef{Scheme: "conda-explicit-v1", SHA256: strings.Repeat("a", 64)}
+		}, ErrInvalid},
+		{"old keys without schemes", func(m *Manifest) {
+			m.Keys.Identity = KeyRef{SHA256: strings.Repeat("a", 64)}
+			m.Keys.Equiv = KeyRef{SHA256: strings.Repeat("b", 64)}
+		}, ErrInvalid},
+		{"invalid key digest", func(m *Manifest) {
+			m.Keys.Identity = KeyRef{Scheme: "conda-explicit-v1", SHA256: "ABC"}
+			m.Keys.Equiv = KeyRef{Scheme: "conda-environment-v1", SHA256: strings.Repeat("b", 64)}
+		}, ErrInvalid},
 	}
 
 	for _, tt := range tests {

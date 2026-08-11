@@ -6,10 +6,9 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
-	"github.com/Justype/condatainer/internal/artifact/record"
 )
 
-func digestOf(s string) string { return record.Digest([]byte(s)) }
+func digestOf(s string) string { return Digest([]byte(s)) }
 
 // starIndex is the worked example: a STAR index whose name mentions the tool
 // that produced it, built against a GTF dataset and two apps.
@@ -28,9 +27,9 @@ func starIndex() Artifact {
 	}
 }
 
-func lines(t *testing.T, r record.Record) []string {
+func lines(t *testing.T, r Model) []string {
 	t.Helper()
-	data, err := record.Marshal(r)
+	data, err := Marshal(r)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -46,13 +45,34 @@ func has(got []string, want string) bool {
 	return false
 }
 
+// deriveModelsForTest exposes the models selected by the individual scheme
+// implementations so their contribution rules can be tested field by field.
+func deriveModelsForTest(a Artifact) (Model, Model, error) {
+	switch a.Type {
+	case catalog.TypeOS, catalog.TypeBase:
+		_, identity, err := deriveDefinitionIdentityV1(a)
+		if err != nil {
+			return Model{}, Model{}, err
+		}
+		_, equiv, err := deriveDefinitionEquivV1(a)
+		return identity, equiv, err
+	default:
+		_, identity, err := deriveScriptIdentityV1(a)
+		if err != nil {
+			return Model{}, Model{}, err
+		}
+		_, equiv, err := deriveScriptEquivV1(a)
+		return identity, equiv, err
+	}
+}
+
 // Identity pins every direct dependency; equivalence keeps only what decides
-// substitution. That difference is the entire reason there are two records.
-func TestRecordsProjectDependencies(t *testing.T) {
+// substitution. That difference is the reason there are two schemes.
+func TestSchemeRulesProjectDependencies(t *testing.T) {
 	a := starIndex()
-	identity, equiv, err := Records(a)
+	identity, equiv, err := deriveModelsForTest(a)
 	if err != nil {
-		t.Fatalf("Records: %v", err)
+		t.Fatalf("derive schemes: %v", err)
 	}
 
 	id := lines(t, identity)
@@ -89,30 +109,30 @@ func TestRecordsProjectDependencies(t *testing.T) {
 	}
 }
 
-// The two records share every line that describes the recipe. What one asks of a
+// The two models share every field that describes the recipe. What one asks of a
 // dependency differs; what the recipe is does not.
-func TestRecordsShareTheirSourceLines(t *testing.T) {
-	identity, equiv, err := Records(starIndex())
+func TestSchemeRulesShareTheirSourceLines(t *testing.T) {
+	identity, equiv, err := deriveModelsForTest(starIndex())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if identity.Recipe != equiv.Recipe {
-		t.Error("the two records disagree about the recipe")
+		t.Error("the two models disagree about the recipe")
 	}
 	if len(identity.Placeholders) != len(equiv.Placeholders) {
-		t.Error("the two records disagree about the placeholders")
+		t.Error("the two models disagree about the placeholders")
 	}
 	if len(identity.Env) != 1 || identity.Env[0].Key != "STAR_INDEX_DIR" {
 		t.Errorf("env = %v", identity.Env)
 	}
-	// No record may carry the artifact's name or its prefix.
-	for _, r := range []record.Record{identity, equiv} {
+	// No canonical model may carry the artifact's name or its prefix.
+	for _, r := range []Model{identity, equiv} {
 		for _, line := range lines(t, r) {
 			if strings.Contains(line, "gencode49-101") && !strings.HasPrefix(line, "ph=") {
-				t.Errorf("the artifact's name reached a record: %q", line)
+				t.Errorf("the artifact's name reached a model: %q", line)
 			}
 			if strings.HasPrefix(line, "name=") || strings.HasPrefix(line, "prefix=") {
-				t.Errorf("a forbidden field reached a record: %q", line)
+				t.Errorf("a forbidden field reached a model: %q", line)
 			}
 		}
 	}
@@ -127,9 +147,9 @@ func TestUnrecordedDependencies(t *testing.T) {
 		{Name: "samtools/1.23.1", Type: catalog.TypeApp},        // history, no records
 		{Name: "grch38/gtf-gencode/49", Type: catalog.TypeData}, // data, no records
 	}
-	identity, equiv, err := Records(a)
+	identity, equiv, err := deriveModelsForTest(a)
 	if err != nil {
-		t.Fatalf("Records: %v", err)
+		t.Fatalf("derive schemes: %v", err)
 	}
 
 	id := lines(t, identity)
@@ -154,12 +174,12 @@ func TestUnrecordedDependencies(t *testing.T) {
 	}
 
 	// Two builds against the same unrecorded dependency agree.
-	again, _, err := Records(a)
+	again, _, err := deriveModelsForTest(a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, _ := record.Key(identity)
-	second, _ := record.Key(again)
+	first, _ := Key(identity)
+	second, _ := Key(again)
 	if first != second {
 		t.Error("an unrecorded dependency produced unstable records")
 	}
@@ -179,15 +199,15 @@ func TestUnrecordedDependencies(t *testing.T) {
 func TestWhatMovesEachKey(t *testing.T) {
 	keys := func(a Artifact) (string, string) {
 		t.Helper()
-		identity, equiv, err := Records(a)
+		identity, equiv, err := deriveModelsForTest(a)
 		if err != nil {
-			t.Fatalf("Records: %v", err)
+			t.Fatalf("derive schemes: %v", err)
 		}
-		i, err := record.Key(identity)
+		i, err := Key(identity)
 		if err != nil {
 			t.Fatal(err)
 		}
-		e, err := record.Key(equiv)
+		e, err := Key(equiv)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -299,7 +319,7 @@ func TestProjectionFollowsTheName(t *testing.T) {
 				t.Errorf("Role = %q, want %q", got, tt.wantRole)
 			}
 			a := Artifact{Name: tt.artifact, Type: catalog.TypeData, Recipe: []byte("echo\n"), Deps: []Dep{d}}
-			_, equiv, err := Records(a)
+			_, equiv, err := deriveModelsForTest(a)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -322,7 +342,7 @@ func TestOSDependencyProjectsLikeAnApp(t *testing.T) {
 			{Name: "ubuntu24/pytorch/2.9", Type: catalog.TypeOS, Identity: digestOf("os id"), Equiv: digestOf("os eq")},
 		},
 	}
-	identity, equiv, err := Records(a)
+	identity, equiv, err := deriveModelsForTest(a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,12 +354,12 @@ func TestOSDependencyProjectsLikeAnApp(t *testing.T) {
 	}
 }
 
-func TestRecordsRejects(t *testing.T) {
+func TestSchemeRulesRejectInvalidSubject(t *testing.T) {
 	app := Artifact{
 		Name: "samtools/1.23.1", Type: catalog.TypeApp, Recipe: []byte("echo\n"),
 		Deps: []Dep{{Name: "zlib/1.3", Type: catalog.TypeApp, Identity: digestOf("z")}},
 	}
-	if _, _, err := Records(app); err == nil {
+	if _, _, err := deriveModelsForTest(app); err == nil {
 		t.Error("an app was given dependencies")
 	}
 }
@@ -350,9 +370,9 @@ func TestHalfRecordedDependencyIsUnrecorded(t *testing.T) {
 	a := starIndex()
 	a.Deps = []Dep{{Name: "grch38/gtf-gencode/49", Type: catalog.TypeData, Identity: digestOf("only identity")}}
 
-	identity, equiv, err := Records(a)
+	identity, equiv, err := deriveModelsForTest(a)
 	if err != nil {
-		t.Fatalf("Records: %v", err)
+		t.Fatalf("derive schemes: %v", err)
 	}
 	if !has(lines(t, identity), "dep=data grch38/gtf-gencode/49 unrecorded") {
 		t.Errorf("identity:\n%s", strings.Join(lines(t, identity), "\n"))
@@ -384,7 +404,7 @@ func TestBaseIsIdentifiedLikeAnOS(t *testing.T) {
 		Recipe: []byte("Bootstrap: docker\nFrom: ubuntu:24.04\n"),
 		From:   upstream,
 	}
-	identity, equiv, err := Records(a)
+	identity, equiv, err := deriveModelsForTest(a)
 	if err != nil {
 		t.Fatalf("a base was refused records: %v", err)
 	}
@@ -404,20 +424,20 @@ func TestUpstreamMovesIdentityAndNotEquivalence(t *testing.T) {
 	june := january
 	june.From = digestOf("june")
 
-	janID, janEq, err := Records(january)
+	janID, janEq, err := deriveModelsForTest(january)
 	if err != nil {
 		t.Fatal(err)
 	}
-	junID, junEq, err := Records(june)
+	junID, junEq, err := deriveModelsForTest(june)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	idA, err := record.Key(janID)
+	idA, err := Key(janID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	idB, err := record.Key(junID)
+	idB, err := Key(junID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,11 +445,11 @@ func TestUpstreamMovesIdentityAndNotEquivalence(t *testing.T) {
 		t.Error("two upstreams produced one identity")
 	}
 
-	eqA, err := record.Key(janEq)
+	eqA, err := Key(janEq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	eqB, err := record.Key(junEq)
+	eqB, err := Key(junEq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +462,7 @@ func TestUpstreamMovesIdentityAndNotEquivalence(t *testing.T) {
 // from a definition with no upstream at all, which writes no line.
 func TestUnresolvedUpstreamIsRecordedAsUnrecorded(t *testing.T) {
 	recipe := []byte("Bootstrap: docker\nFrom: ubuntu:24.04\n")
-	unresolved, _, err := Records(Artifact{Name: "u/os", Type: catalog.TypeOS, Recipe: recipe, From: meta.Unrecorded})
+	unresolved, _, err := deriveModelsForTest(Artifact{Name: "u/os", Type: catalog.TypeOS, Recipe: recipe, From: meta.Unrecorded})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +470,7 @@ func TestUnresolvedUpstreamIsRecordedAsUnrecorded(t *testing.T) {
 		t.Errorf("identity:\n%s", strings.Join(lines(t, unresolved), "\n"))
 	}
 
-	none, _, err := Records(Artifact{Name: "u/os", Type: catalog.TypeOS, Recipe: recipe})
+	none, _, err := deriveModelsForTest(Artifact{Name: "u/os", Type: catalog.TypeOS, Recipe: recipe})
 	if err != nil {
 		t.Fatal(err)
 	}

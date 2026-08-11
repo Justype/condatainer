@@ -12,8 +12,8 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/capsule"
+	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
-	"github.com/Justype/condatainer/internal/artifact/record"
 	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/runtime/container"
@@ -565,10 +565,6 @@ func TestManifestNamesOnlyStagedSources(t *testing.T) {
 
 	// A record is derived from the sources, not one of them: manifest.keys names
 	// it, and source.files must not.
-	b.embedRecord(meta.IdentityFileName, []byte("cnt-identity-v1\ntype=app\n"))
-	if got := b.Manifest().Source.Files; len(got) != 2 {
-		t.Errorf("files = %v, want a record left out of the sources", got)
-	}
 }
 
 // A recipe build writes both records, and manifest.keys names files whose
@@ -586,37 +582,34 @@ func TestRecipeBuildRecordsKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewBuildObject: %v", err)
 	}
-	if err := obj.recordKeys(context.Background()); err != nil {
-		t.Fatalf("recordKeys: %v", err)
+	if err := obj.deriveKeys(context.Background()); err != nil {
+		t.Fatalf("deriveKeys: %v", err)
 	}
 
 	m := obj.Manifest()
-	if m.Keys.Identity.File != meta.IdentityFileName || m.Keys.Equiv.File != meta.EquivFileName {
+	if m.Keys.Identity.Scheme != string(key.ScriptIdentityV1) ||
+		m.Keys.Equiv.Scheme != string(key.ScriptEquivV1) {
 		t.Fatalf("keys = %+v", m.Keys)
 	}
 
-	staged := map[string][]byte{}
 	for _, f := range obj.embedded {
-		staged[f.Name] = f.Data
-	}
-	for _, ref := range []meta.KeyRef{m.Keys.Identity, m.Keys.Equiv} {
-		data, ok := staged[ref.File]
-		if !ok {
-			t.Fatalf("manifest names %s, which was never staged", ref.File)
-		}
-		if got := record.Sum(data); got != ref.SHA256 {
-			t.Errorf("%s: sha256 = %s, want %s", ref.File, ref.SHA256, got)
-		}
-		if _, err := record.Parse(data); err != nil {
-			t.Errorf("%s does not parse: %v\n%s", ref.File, err, data)
+		if strings.HasSuffix(f.Name, ".record") {
+			t.Errorf("recipe build staged obsolete file %s", f.Name)
 		}
 	}
 
-	// An app has no dependencies, so the two records differ only by their tag —
-	// which is honest: a self-contained artifact has nothing to be loose about.
-	identity, err := record.Parse(staged[meta.IdentityFileName])
+	// An app has no dependencies, so identity and equivalence have the same
+	// canonical bytes and SHA. Their scheme fields keep the two keys distinct.
+	if m.Keys.Identity.SHA256 != m.Keys.Equiv.SHA256 {
+		t.Errorf("untagged app keys have different SHA values: %+v", m.Keys)
+	}
+	derived, err := key.Verify(m, obj.keySources())
 	if err != nil {
 		t.Fatal(err)
+	}
+	identity := derived.IdentityModel
+	if identity == nil {
+		t.Fatal("script scheme produced no semantic identity")
 	}
 	if len(identity.Env) != 1 || identity.Env[0].Key != "SAMTOOLS_DIR" {
 		t.Errorf("env = %v, want the #ENV: contribution", identity.Env)
@@ -638,26 +631,25 @@ func TestBaseIsKeyedByItsDefinition(t *testing.T) {
 		File: SourceFile{Name: meta.RecipeFileName, Data: []byte("Bootstrap: docker\nFrom: ubuntu:24.04\n")},
 		From: &meta.From{Bootstrap: "docker", Ref: "ubuntu:24.04", Digest: upstream},
 	}}
-	if err := b.recordKeys(context.Background()); err != nil {
-		t.Fatalf("recordKeys: %v", err)
+	b.embedSource(b.spec.Source.Definition.File)
+	if err := b.deriveKeys(context.Background()); err != nil {
+		t.Fatalf("deriveKeys: %v", err)
 	}
 
 	m := b.Manifest()
-	if m.Keys.Identity.File != meta.IdentityFileName || m.Keys.Equiv.File != meta.EquivFileName {
+	if m.Keys.Identity.Scheme != string(key.DefinitionIdentityV1) ||
+		m.Keys.Equiv.Scheme != string(key.DefinitionEquivV1) {
 		t.Fatalf("a base was not keyed: %+v", m.Keys)
 	}
 	if m.Build.From == nil || m.Build.From.URI() != "docker://ubuntu:24.04" || m.Build.From.Digest != upstream {
 		t.Errorf("build.from = %+v", m.Build.From)
 	}
 
-	staged := map[string][]byte{}
-	for _, f := range b.embedded {
-		staged[f.Name] = f.Data
-	}
-	identity, err := record.Parse(staged[meta.IdentityFileName])
+	derived, err := key.Verify(m, b.keySources())
 	if err != nil {
-		t.Fatalf("identity.record does not parse: %v\n%s", err, staged[meta.IdentityFileName])
+		t.Fatal(err)
 	}
+	identity := derived.IdentityModel
 	if identity.Type != catalog.TypeBase {
 		t.Errorf("type = %q, want base", identity.Type)
 	}
@@ -666,12 +658,8 @@ func TestBaseIsKeyedByItsDefinition(t *testing.T) {
 	}
 
 	// The upstream identifies the build without deciding substitution.
-	equiv, err := record.Parse(staged[meta.EquivFileName])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if equiv.From != "" {
-		t.Errorf("the upstream digest reached the equivalence record: %q", equiv.From)
+	if strings.Contains(string(derived.Equiv.Preimage), "from=") {
+		t.Errorf("the upstream digest reached the equivalence preimage:\n%s", derived.Equiv.Preimage)
 	}
 }
 
@@ -684,14 +672,16 @@ func TestCondaKeysNameTheExports(t *testing.T) {
 	b.embedSource(SourceFile{Name: conda.ExplicitFileName, Data: explicit})
 	b.embedSource(SourceFile{Name: conda.EnvironmentFileName, Data: environment})
 
-	if err := b.recordKeys(context.Background()); err != nil {
-		t.Fatalf("recordKeys: %v", err)
+	if err := b.deriveKeys(context.Background()); err != nil {
+		t.Fatalf("deriveKeys: %v", err)
 	}
 	m := b.Manifest()
-	if m.Keys.Identity.File != conda.ExplicitFileName || m.Keys.Identity.SHA256 != record.Sum(explicit) {
+	if m.Keys.Identity.Scheme != string(key.CondaExplicitV1) ||
+		m.Keys.Identity.SHA256 != key.Sum(explicit) {
 		t.Errorf("identity = %+v", m.Keys.Identity)
 	}
-	if m.Keys.Equiv.File != conda.EnvironmentFileName || m.Keys.Equiv.SHA256 != record.Sum(environment) {
+	if m.Keys.Equiv.Scheme != string(key.CondaEnvironmentV1) ||
+		m.Keys.Equiv.SHA256 != key.Sum(environment) {
 		t.Errorf("equiv = %+v", m.Keys.Equiv)
 	}
 	for _, f := range b.embedded {
@@ -705,8 +695,8 @@ func TestCondaKeysNameTheExports(t *testing.T) {
 // image does not carry.
 func TestCondaWithoutExportsRecordsNoKeys(t *testing.T) {
 	b := newPackObject(t, catalog.TypeApp)
-	if err := b.recordKeys(context.Background()); err != nil {
-		t.Fatalf("recordKeys: %v", err)
+	if err := b.deriveKeys(context.Background()); err != nil {
+		t.Fatalf("deriveKeys: %v", err)
 	}
 	if b.Manifest().Keys != (meta.Keys{}) {
 		t.Errorf("keys were claimed with nothing captured: %+v", b.Manifest().Keys)
@@ -720,23 +710,27 @@ func TestDataBuildComposesACapsule(t *testing.T) {
 		t.Skip("mksquashfs not available")
 	}
 
-	// A dependency image carrying records and a capsule entry of its own.
+	// A dependency image carrying scheme-backed sources and a capsule entry of its own.
 	imagesDir := t.TempDir()
 	depRoot := t.TempDir()
 	depMeta := filepath.Join(depRoot, meta.DirName)
 	complete := true
-	if err := meta.StageManifest(depMeta, meta.Manifest{
-		SchemaVersion: meta.SchemaVersion,
-		Name:          "grch38/gtf/49",
-		Type:          catalog.TypeData,
-		BuildType:     "script",
-		Platform:      meta.NativePlatform(),
-		Keys: meta.Keys{
-			Identity: meta.KeyRef{SHA256: strings.Repeat("a", 64), File: meta.IdentityFileName},
-			Equiv:    meta.KeyRef{SHA256: strings.Repeat("b", 64), File: meta.EquivFileName},
-		},
+	depRecipe := []byte("echo gtf\n")
+	depManifest := meta.Manifest{
+		SchemaVersion:      meta.SchemaVersion,
+		Name:               "grch38/gtf/49",
+		Type:               catalog.TypeData,
+		BuildType:          "script",
+		Platform:           meta.NativePlatform(),
+		Source:             meta.Source{Files: []string{meta.RecipeFileName}},
 		ProvenanceComplete: &complete,
-	}); err != nil {
+	}
+	derived, err := key.Generate(depManifest, key.Sources{meta.RecipeFileName: depRecipe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	depManifest.Keys = derived.Keys()
+	if err := meta.StageManifest(depMeta, depManifest); err != nil {
 		t.Fatal(err)
 	}
 	if err := meta.StageRuntime(depMeta, meta.Runtime{
@@ -745,14 +739,30 @@ func TestDataBuildComposesACapsule(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := meta.StageBytes(depMeta, meta.IdentityFileName, []byte("cnt-identity-v1\ntype=data\n")); err != nil {
+	if err := meta.StageBytes(depMeta, meta.RecipeFileName, depRecipe); err != nil {
 		t.Fatal(err)
 	}
-	inherited := filepath.Join(depMeta, capsule.DirName, "grch38--genome@bbbbccccdddd")
+	inheritedRecipe := []byte("echo genome\n")
+	inheritedManifest := meta.Manifest{
+		SchemaVersion: meta.SchemaVersion,
+		Name:          "grch38/genome", Type: catalog.TypeData, BuildType: "script",
+		Platform: meta.NativePlatform(),
+		Source:   meta.Source{Files: []string{meta.RecipeFileName}},
+	}
+	inheritedDerived, err := key.Generate(inheritedManifest, key.Sources{meta.RecipeFileName: inheritedRecipe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inheritedManifest.Keys = inheritedDerived.Keys()
+	inherited := filepath.Join(depMeta, capsule.DirName,
+		capsule.EntryName(inheritedManifest.Name, inheritedManifest.Keys.Identity.Digest()))
 	if err := os.MkdirAll(inherited, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(inherited, meta.FileName), []byte("{}\n"), 0o644); err != nil {
+	if err := meta.StageManifest(inherited, inheritedManifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := meta.StageBytes(inherited, meta.RecipeFileName, inheritedRecipe); err != nil {
 		t.Fatal(err)
 	}
 	depImage := filepath.Join(imagesDir, "grch38--gtf--49.sqf")
@@ -782,8 +792,11 @@ func TestDataBuildComposesACapsule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewBuildObject: %v", err)
 	}
-	if err := obj.recordKeys(context.Background()); err != nil {
-		t.Fatalf("recordKeys: %v", err)
+	if err := os.RemoveAll(obj.ws.MetaDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := obj.deriveKeys(context.Background()); err != nil {
+		t.Fatalf("deriveKeys: %v", err)
 	}
 
 	m := obj.Manifest()
@@ -810,7 +823,8 @@ func TestDataBuildComposesACapsule(t *testing.T) {
 		dirs = append(dirs, e.Dir)
 	}
 	// The dependency itself, and the entry it carried, unioned into one flat set.
-	if len(dirs) != 2 || !strings.HasPrefix(dirs[1], "grch38--gtf--49@") || dirs[0] != "grch38--genome@bbbbccccdddd" {
+	if len(dirs) != 2 || !strings.HasPrefix(dirs[1], "grch38--gtf--49@") ||
+		dirs[0] != capsule.EntryName(inheritedManifest.Name, inheritedManifest.Keys.Identity.Digest()) {
 		t.Errorf("capsule entries = %v", dirs)
 	}
 }
@@ -858,8 +872,8 @@ func TestArchEntersNoKey(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewBuildObject: %v", err)
 		}
-		if err := obj.recordKeys(context.Background()); err != nil {
-			t.Fatalf("recordKeys: %v", err)
+		if err := obj.deriveKeys(context.Background()); err != nil {
+			t.Fatalf("deriveKeys: %v", err)
 		}
 		return obj.Manifest().Keys.Identity.SHA256
 	}

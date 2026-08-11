@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 )
 
@@ -24,7 +25,7 @@ func requireSquashfsTools(t *testing.T) {
 
 // depImage packs an image carrying the metadata a dependency would, plus any
 // capsule entries of its own.
-func depImage(t *testing.T, name string, files map[string]string, inherited map[string]string) string {
+func depImage(t *testing.T, name string, files map[string]string, inherited map[string]string, complete bool) (string, string) {
 	t.Helper()
 	root := t.TempDir()
 	cnt := filepath.Join(root, meta.DirName)
@@ -32,15 +33,25 @@ func depImage(t *testing.T, name string, files map[string]string, inherited map[
 		t.Fatal(err)
 	}
 
-	complete := true
-	if err := meta.StageManifest(cnt, meta.Manifest{
+	manifest := meta.Manifest{
 		SchemaVersion:      meta.SchemaVersion,
 		Name:               name,
 		Type:               catalog.TypeData,
 		BuildType:          "script",
 		Platform:           meta.NativePlatform(),
+		Source:             meta.Source{Files: []string{meta.RecipeFileName}},
 		ProvenanceComplete: &complete,
-	}); err != nil {
+	}
+	recipe, ok := files[meta.RecipeFileName]
+	if !ok {
+		t.Fatal("dependency fixture has no recipe")
+	}
+	derived, err := key.Generate(manifest, key.Sources{meta.RecipeFileName: []byte(recipe)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.Keys = derived.Keys()
+	if err := meta.StageManifest(cnt, manifest); err != nil {
 		t.Fatal(err)
 	}
 	if err := meta.StageRuntime(cnt, meta.Runtime{
@@ -81,7 +92,7 @@ func depImage(t *testing.T, name string, files map[string]string, inherited map[
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("mksquashfs: %v\n%s", err, output)
 	}
-	return out
+	return out, manifest.Keys.Identity.Digest()
 }
 
 func TestEntryName(t *testing.T) {
@@ -110,21 +121,19 @@ func TestEntryName(t *testing.T) {
 func TestComposeUnionsRecordsAndInheritedEntries(t *testing.T) {
 	requireSquashfsTools(t)
 
-	dep := depImage(t, "grch38/gtf-gencode/49",
+	dep, identity := depImage(t, "grch38/gtf-gencode/49",
 		map[string]string{
-			meta.IdentityFileName: "cnt-identity-v1\ntype=data\n",
-			meta.EquivFileName:    "cnt-equiv-v1\ntype=data\n",
-			meta.RecipeFileName:   "#DESC:gtf\necho build\n",
+			meta.RecipeFileName: "#DESC:gtf\necho build\n",
 		},
 		map[string]string{
 			"grch38--genome--gencode@aaaabbbbcccc/" + meta.FileName:       "{}\n",
 			"grch38--genome--gencode@aaaabbbbcccc/" + meta.RecipeFileName: "echo genome\n",
-		})
+		}, true)
 
 	metaDir := t.TempDir()
 	complete, err := Compose(metaDir, []Dep{{
 		Name:      "grch38/gtf-gencode/49",
-		Identity:  "sha256:41ab1c2d3e4f5a6b",
+		Identity:  identity,
 		ImagePath: dep,
 	}})
 	if err != nil {
@@ -142,14 +151,14 @@ func TestComposeUnionsRecordsAndInheritedEntries(t *testing.T) {
 	for _, e := range entries {
 		dirs = append(dirs, e.Dir)
 	}
-	want := []string{"grch38--genome--gencode@aaaabbbbcccc", "grch38--gtf-gencode--49@41ab1c2d3e4f"}
+	want := []string{"grch38--genome--gencode@aaaabbbbcccc", EntryName("grch38/gtf-gencode/49", identity)}
 	if !slices.Equal(dirs, want) {
 		t.Fatalf("entries = %v, want %v", dirs, want)
 	}
 
-	// The direct dependency's own records came across...
+	// The direct dependency's manifest and recipe came across.
 	direct := entries[1]
-	for _, file := range []string{meta.FileName, meta.IdentityFileName, meta.EquivFileName, meta.RecipeFileName} {
+	for _, file := range []string{meta.FileName, meta.RecipeFileName} {
 		if !hasFile(direct.Files, file) {
 			t.Errorf("%s is missing %s (has %v)", direct.Dir, file, direct.Files)
 		}
@@ -178,13 +187,13 @@ func TestComposeDeduplicatesADiamond(t *testing.T) {
 	shared := map[string]string{
 		"grch38--genome--gencode@aaaabbbbcccc/" + meta.FileName: "{}\n",
 	}
-	left := depImage(t, "grch38/gtf/49", map[string]string{meta.RecipeFileName: "echo left\n"}, shared)
-	right := depImage(t, "grch38/vcf/49", map[string]string{meta.RecipeFileName: "echo right\n"}, shared)
+	left, leftIdentity := depImage(t, "grch38/gtf/49", map[string]string{meta.RecipeFileName: "echo left\n"}, shared, true)
+	right, rightIdentity := depImage(t, "grch38/vcf/49", map[string]string{meta.RecipeFileName: "echo right\n"}, shared, true)
 
 	metaDir := t.TempDir()
 	if _, err := Compose(metaDir, []Dep{
-		{Name: "grch38/gtf/49", Identity: "sha256:1111222233334444", ImagePath: left},
-		{Name: "grch38/vcf/49", Identity: "sha256:5555666677778888", ImagePath: right},
+		{Name: "grch38/gtf/49", Identity: leftIdentity, ImagePath: left},
+		{Name: "grch38/vcf/49", Identity: rightIdentity, ImagePath: right},
 	}); err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
@@ -224,29 +233,11 @@ func TestComposeWithAnUnrecordedDependency(t *testing.T) {
 func TestComposeInheritsIncompleteness(t *testing.T) {
 	requireSquashfsTools(t)
 
-	root := t.TempDir()
-	cnt := filepath.Join(root, meta.DirName)
-	if err := os.MkdirAll(cnt, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	incomplete := false
-	if err := meta.StageManifest(cnt, meta.Manifest{
-		SchemaVersion:      meta.SchemaVersion,
-		Name:               "grch38/gtf/49",
-		Type:               catalog.TypeData,
-		BuildType:          "script",
-		Platform:           meta.NativePlatform(),
-		ProvenanceComplete: &incomplete,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	out := filepath.Join(t.TempDir(), "dep.sqf")
-	if output, err := exec.Command("mksquashfs", root, out, "-no-progress", "-noappend", "-quiet", "-no-xattrs").CombinedOutput(); err != nil {
-		t.Fatalf("mksquashfs: %v\n%s", err, output)
-	}
+	out, identity := depImage(t, "grch38/gtf/49",
+		map[string]string{meta.RecipeFileName: "echo gtf\n"}, nil, false)
 
 	complete, err := Compose(t.TempDir(), []Dep{{
-		Name: "grch38/gtf/49", Identity: "sha256:1111222233334444", ImagePath: out,
+		Name: "grch38/gtf/49", Identity: identity, ImagePath: out,
 	}})
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
@@ -269,10 +260,33 @@ func TestValidate(t *testing.T) {
 			}
 		}
 	}
+	writeEntry := func(t *testing.T, dir, name string) string {
+		t.Helper()
+		recipe := []byte("echo build\n")
+		manifest := meta.Manifest{
+			SchemaVersion: meta.SchemaVersion,
+			Name:          name, Type: catalog.TypeApp, BuildType: "script",
+			Platform: meta.NativePlatform(),
+			Source:   meta.Source{Files: []string{meta.RecipeFileName}},
+		}
+		derived, err := key.Generate(manifest, key.Sources{meta.RecipeFileName: recipe})
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest.Keys = derived.Keys()
+		entry := filepath.Join(dir, EntryName(name, manifest.Keys.Identity.Digest()))
+		if err := meta.StageManifest(entry, manifest); err != nil {
+			t.Fatal(err)
+		}
+		if err := meta.StageBytes(entry, meta.RecipeFileName, recipe); err != nil {
+			t.Fatal(err)
+		}
+		return manifest.Keys.Identity.Digest()
+	}
 
 	t.Run("a complete capsule passes", func(t *testing.T) {
 		dir := t.TempDir()
-		write(t, dir, map[string]string{"star--2.7.11b@0c19a7f34b02/" + meta.FileName: "{}\n"})
+		writeEntry(t, dir, "star/2.7.11b")
 		if err := Validate(dir, "grch38/star/2.7.11b/gencode49", "sha256:41ab1c2d3e4f"); err != nil {
 			t.Errorf("Validate: %v", err)
 		}
@@ -280,8 +294,8 @@ func TestValidate(t *testing.T) {
 
 	t.Run("a self-reference is rejected", func(t *testing.T) {
 		dir := t.TempDir()
-		write(t, dir, map[string]string{"grch38--star@41ab1c2d3e4f/" + meta.FileName: "{}\n"})
-		err := Validate(dir, "grch38/star", "sha256:41ab1c2d3e4f5a6b")
+		identity := writeEntry(t, dir, "grch38/star")
+		err := Validate(dir, "grch38/star", identity)
 		if !errors.Is(err, ErrInvalid) {
 			t.Errorf("err = %v, want ErrInvalid", err)
 		}

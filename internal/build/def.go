@@ -72,7 +72,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	// A def build stages its metadata *into* the definition, so the records are
 	// written before Apptainer runs — possible only because the upstream digest
 	// was resolved above rather than read off the finished image.
-	if err := b.recordKeys(ctx); err != nil {
+	if err := b.deriveKeys(ctx); err != nil {
 		b.Cleanup(true)
 		return err
 	}
@@ -226,7 +226,7 @@ func writeRecordingDef(cleanDefPath, metaDir, tmpDir, pinDigest string) (string,
 		fmt.Fprintf(&sb, "    %s /%s/%s\n", filepath.Join(absMeta, entry.Name()), meta.DirName, entry.Name())
 	}
 
-	tmpPath := filepath.Join(tmpDir, "cnt-record.def")
+	tmpPath := filepath.Join(tmpDir, "cnt-metadata.def")
 	if err := os.WriteFile(tmpPath, []byte(sb.String()), utils.PermFile); err != nil {
 		return "", fmt.Errorf("failed to write recording def: %w", err)
 	}

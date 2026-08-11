@@ -1,12 +1,14 @@
 package capsule
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 )
 
@@ -17,7 +19,7 @@ type Entry struct {
 	// Name is the artifact's name, with its slashes restored.
 	Name string
 	// Identity is the truncated identity from the directory name. It addresses
-	// the entry; the full digest is inside its identity.record.
+	// the entry; the full digest is in manifest.json and verified from sources.
 	Identity string
 	// Files are the entry's file names, sorted.
 	Files []string
@@ -96,8 +98,39 @@ func Validate(dir, name, identity string) error {
 		if !hasFile(entry.Files, meta.FileName) {
 			return fmt.Errorf("%w: %s carries no %s", ErrInvalid, entry.Dir, meta.FileName)
 		}
+		entryDir := filepath.Join(dir, entry.Dir)
+		manifest, err := readManifestDir(entryDir)
+		if err != nil {
+			return fmt.Errorf("%w: %s: %v", ErrInvalid, entry.Dir, err)
+		}
+		derived, err := key.VerifyDir(entryDir, manifest)
+		if err != nil {
+			return fmt.Errorf("%w: %s: %v", ErrInvalid, entry.Dir, err)
+		}
+		if manifest.Name != entry.Name {
+			return fmt.Errorf("%w: %s manifest names %s", ErrInvalid, entry.Dir, manifest.Name)
+		}
+		if want := EntryName(manifest.Name, derived.Identity.Ref.Digest()); want != entry.Dir {
+			return fmt.Errorf("%w: %s identity does not match its directory", ErrInvalid, entry.Dir)
+		}
 	}
 	return nil
+}
+
+func readManifestDir(dir string) (meta.Manifest, error) {
+	data, err := os.ReadFile(filepath.Join(dir, meta.FileName))
+	if err != nil {
+		return meta.Manifest{}, err
+	}
+	var m meta.Manifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return meta.Manifest{}, err
+	}
+	m.Normalize()
+	if err := meta.ValidateManifest(m); err != nil {
+		return meta.Manifest{}, err
+	}
+	return m, nil
 }
 
 func hasFile(files []string, want string) bool {

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/Justype/condatainer/internal/artifact/meta"
-	"github.com/Justype/condatainer/internal/artifact/record"
 )
 
 const templateRecipe = `#!/usr/bin/env bash
@@ -26,7 +25,7 @@ STAR --runMode genomeGenerate --genomeDir "$CNT_PREFIX/index"
 // parts tooling rewrites without being asked.
 func TestRecipeDigestIgnoresDescription(t *testing.T) {
 	base := RecipeDigest([]byte(templateRecipe))
-	if !record.ValidDigest(base) {
+	if !ValidDigest(base) {
 		t.Fatalf("digest = %q, not a well-formed digest", base)
 	}
 
@@ -65,13 +64,13 @@ func TestRecipeDigestIgnoresDescription(t *testing.T) {
 func TestTemplateVariantsShareADigestAndDifferByPlaceholders(t *testing.T) {
 	key := func(selected map[string]string) (string, string) {
 		t.Helper()
-		r := record.Record{
-			Kind:         record.KindIdentity,
+		r := Model{
+			Kind:         KindIdentity,
 			Type:         "data",
 			Recipe:       RecipeDigest([]byte(templateRecipe)),
 			Placeholders: Placeholders(selected),
 		}
-		k, err := record.Key(r)
+		k, err := Key(r)
 		if err != nil {
 			t.Fatalf("Key: %v", err)
 		}
@@ -130,24 +129,17 @@ func TestEnvLines(t *testing.T) {
 
 // The derivation exists so a build and a later comparison agree. This is that
 // agreement, end to end: the lines go into a record and the record hashes.
-func TestDerivationFeedsARecord(t *testing.T) {
-	r := record.Record{
-		Kind:         record.KindIdentity,
+func TestDerivationFeedsCanonicalPreimage(t *testing.T) {
+	r := Model{
+		Kind:         KindIdentity,
 		Type:         "data",
 		Env:          Env([]meta.EnvVar{{Key: "STAR_INDEX", Value: "{prefix}/index", Note: "n"}}),
 		Recipe:       RecipeDigest([]byte(templateRecipe)),
 		Placeholders: Placeholders(map[string]string{"star_version": "2.7.11b"}),
 	}
-	data, err := record.Marshal(r)
+	data, err := Marshal(r)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
-	}
-	back, err := record.Parse(data)
-	if err != nil {
-		t.Fatalf("Parse: %v\n%s", err, data)
-	}
-	if back.Recipe != r.Recipe {
-		t.Errorf("recipe digest did not survive: %q", back.Recipe)
 	}
 	if !strings.Contains(string(data), "ph=star_version=2.7.11b") {
 		t.Errorf("placeholder line missing:\n%s", data)

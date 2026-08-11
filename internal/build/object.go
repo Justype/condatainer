@@ -88,10 +88,9 @@ type BuildObject struct {
 	// since it derives from the lock owner.
 	tgt Target
 
-	// embedded are the files staged into /.cnt verbatim beside the two metadata
-	// documents: a recipe at resolution, a Conda build's exports once the
-	// environment exists, and the key records. The manifest names exactly these,
-	// so it can never claim a file the image does not carry.
+	// embedded are the rebuild sources staged into /.cnt verbatim beside the two
+	// metadata documents: a recipe at resolution or a Conda build's exports once
+	// the environment exists.
 	embedded []embeddedFile
 
 	// What the build learned once its sources and dependencies were known.
@@ -100,9 +99,8 @@ type BuildObject struct {
 	provenanceComplete *bool
 }
 
-// embeddedFile is one file staged into /.cnt. isSource separates what the image
-// was built *from* — named by manifest.source.files — from the records derived
-// out of it, which manifest.keys names instead.
+// embeddedFile is one rebuild source staged into /.cnt and named by
+// manifest.source.files.
 type embeddedFile struct {
 	SourceFile
 	isSource bool
@@ -111,11 +109,6 @@ type embeddedFile struct {
 // embedSource records a file the image was built from.
 func (b *BuildObject) embedSource(file SourceFile) {
 	b.embed(embeddedFile{SourceFile: file, isSource: true})
-}
-
-// embedRecord records a derived key record.
-func (b *BuildObject) embedRecord(name string, data []byte) {
-	b.embed(embeddedFile{SourceFile: SourceFile{Name: name, Data: data}})
 }
 
 // embed stages a file into /.cnt, replacing any earlier one of the same name so

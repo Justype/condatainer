@@ -52,7 +52,7 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 	b.captureCondaExports(ctx)
 	b.describeCondaPackage()
 
-	if err := b.recordKeys(ctx); err != nil {
+	if err := b.deriveKeys(ctx); err != nil {
 		b.Cleanup(true)
 		return err
 	}

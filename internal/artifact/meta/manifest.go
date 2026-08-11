@@ -1,6 +1,7 @@
 package meta
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,32 +39,28 @@ type Manifest struct {
 	Build              Build `json:"build,omitzero"`
 }
 
-// Keys names the files an artifact's identity and equivalence are the digests
-// of. Every build type with a source has them, a base included; a Conda app
-// names its exports rather than records.
+// Keys holds the versioned derivation scheme and expected digest for both keys.
 type Keys struct {
 	Identity KeyRef `json:"identity,omitzero"`
 	Equiv    KeyRef `json:"equiv,omitzero"`
 }
 
-// KeyRef is one key: the file it hashes, relative to /.cnt, and that hash.
-//
-// Naming the file is what lets a reader verify a key without knowing which build
-// type produced it — a recipe build points at identity.record, a Conda app at
-// explicit.txt, and `sha256sum` on the named file reproduces the value either way.
+// KeyRef is one derived key: its immutable scheme and expected SHA-256.
 type KeyRef struct {
+	Scheme string `json:"scheme"`
 	SHA256 string `json:"sha256"`
-	File   string `json:"file"`
 }
 
-// Digest renders the key the way a record writes one inline, sha256:<hex>, or
-// empty when there is no key.
+// Digest renders sha256:<hex>, or empty when the reference is absent.
 func (k KeyRef) Digest() string {
-	if k.SHA256 == "" {
+	if k.Scheme == "" || k.SHA256 == "" {
 		return ""
 	}
 	return "sha256:" + k.SHA256
 }
+
+// Empty reports whether a key reference is completely absent.
+func (k KeyRef) Empty() bool { return k.Scheme == "" && k.SHA256 == "" }
 
 // Dependency is one direct build dependency, as the artifact recorded it. The
 // list is adjacency only: following each manifest's own through the capsule
@@ -76,10 +73,8 @@ type Dependency struct {
 	// Records is "unrecorded" when the image that satisfied this dependency
 	// carried no keys of its own, which is every image built before this format.
 	Records string `json:"records,omitempty"`
-	// Role explains what the frozen equiv.record already contains — data, app,
-	// or history. It is never an input to recomputing it: a reader whose rules
-	// disagree warns and trusts the record, because recomputing equivalence
-	// under newer rules would silently rewrite the past.
+	// Role freezes how this dependency contributes to equivalence. A reader trusts
+	// it rather than applying current policy and silently rewriting the past.
 	Role string `json:"role"`
 }
 
@@ -90,14 +85,8 @@ const (
 	RoleHistory = "history" // mounted, but decides nothing about substitution
 )
 
-// Unrecorded marks a dependency satisfied by an image carrying no records.
+// Unrecorded marks a dependency satisfied by an image carrying no scheme-backed keys.
 const Unrecorded = "unrecorded"
-
-// The record files a recipe build embeds.
-const (
-	IdentityFileName = "identity.record"
-	EquivFileName    = "equiv.record"
-)
 
 // Build is what the build knew that the source does not say.
 type Build struct {
@@ -114,7 +103,7 @@ type Build struct {
 // From is what a definition bootstrapped from: the Bootstrap and From directives
 // as written, and the digest they named at build time.
 //
-// Only the digest reaches the identity record. The other two are the recipe's own
+// Only the digest reaches the identity scheme. The other two are the recipe's own
 // text rather than the mirror that served the pull, which never enters an image.
 type From struct {
 	// Bootstrap is the Bootstrap: directive. Without it Ref is ambiguous: docker
@@ -181,7 +170,42 @@ func ValidateManifest(m Manifest) error {
 	default:
 		return fmt.Errorf("%w: unknown type %q", ErrInvalid, m.Type)
 	}
+
+	identityEmpty := m.Keys.Identity.Empty()
+	equivEmpty := m.Keys.Equiv.Empty()
+	if identityEmpty != equivEmpty {
+		return fmt.Errorf("%w: identity and equivalence keys must both be present or absent", ErrInvalid)
+	}
+	if !identityEmpty {
+		refs := []struct {
+			kind string
+			ref  KeyRef
+		}{
+			{kind: "identity", ref: m.Keys.Identity},
+			{kind: "equiv", ref: m.Keys.Equiv},
+		}
+		for _, item := range refs {
+			if strings.TrimSpace(item.ref.Scheme) == "" {
+				return fmt.Errorf("%w: %s key has no scheme", ErrInvalid, item.kind)
+			}
+			if !validSHA256(item.ref.SHA256) {
+				return fmt.Errorf("%w: %s key has invalid sha256 %q", ErrInvalid, item.kind, item.ref.SHA256)
+			}
+		}
+	}
 	return nil
+}
+
+func validSHA256(s string) bool {
+	if len(s) != 2*sha256.Size {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // MarshalManifest renders a manifest the way StageManifest writes it.

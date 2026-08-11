@@ -1,13 +1,6 @@
-// Package record is the grammar of the text records CondaTainer embeds beside an
-// image's payload: identity.record and equiv.record. It builds them, parses them
-// back, and hashes them, and it knows nothing about images, recipes, or what
-// belongs in a key — that is the key package's job.
-//
-// A record is UTF-8 text: a format line, then key=value lines, LF-terminated, no
-// trailing whitespace, no blank lines, no comments. Text rather than JSON,
-// deliberately: no canonicalization question, diffable in a terminal, hashable by
-// hand with sha256sum.
-package record
+// Package key derives and verifies immutable artifact identity and equivalence keys.
+// Canonical recipe-key preimages are generated in memory and never stored as files.
+package key
 
 import (
 	"crypto/sha256"
@@ -20,99 +13,84 @@ import (
 	"github.com/Justype/condatainer/catalog"
 )
 
-// Kind is which of the two keys a record computes.
+// Kind identifies a model's semantic role for validation. It is not serialized;
+// the scheme stored with the SHA distinguishes identity from equivalence.
 type Kind string
 
 const (
-	// KindIdentity answers "which recorded build is this?" and moves when
-	// anything about the recorded build changes.
+	// KindIdentity answers "which exact build is this?" and moves when
+	// anything about the build inputs changes.
 	KindIdentity Kind = "identity"
 	// KindEquiv answers "may this substitute for what I asked for?" and moves
 	// only when the artifact would behave differently for the asker.
 	KindEquiv Kind = "equiv"
 )
 
-// Tag is the format line a record of this kind begins with. It versions the
-// whole derivation: the field set, the ordering, and every rule that decides what
-// reaches a line. Nothing may change under a tag without moving every key
-// computed under it.
-func (k Kind) Tag() string {
-	switch k {
-	case KindIdentity:
-		return "cnt-identity-v1"
-	case KindEquiv:
-		return "cnt-equiv-v1"
-	}
-	return ""
-}
+// ErrInvalid reports a key model that does not satisfy the grammar.
+var ErrInvalid = errors.New("invalid key model")
 
-// ErrInvalid reports a record that does not satisfy the grammar.
-var ErrInvalid = errors.New("invalid record")
-
-// DigestPrefix is how a record spells a hash inline.
+// DigestPrefix is how a key preimage spells a hash inline.
 const DigestPrefix = "sha256:"
 
-// Env is one #ENV: contribution, with {prefix} left unsubstituted.
-type Env struct {
+// EnvValue is one #ENV: contribution, with {prefix} left unsubstituted.
+type EnvValue struct {
 	Key   string
 	Value string
 }
 
-// Placeholder is one selected #PH: value.
-type Placeholder struct {
+// PlaceholderValue is one selected #PH: value.
+type PlaceholderValue struct {
 	Name  string
 	Value string
 }
 
-// Dep is one dependency line. What the fields mean is per-kind and decided
+// DependencyValue is one dependency line. What the fields mean is per-kind and decided
 // elsewhere; here they are opaque space-free tokens, which is what lets identity
 // and equivalence use the same line shape for different content.
-type Dep struct {
+type DependencyValue struct {
 	Type   catalog.Type
 	Fields []string
 }
 
 // text renders the dependency as it appears after "dep=".
-func (d Dep) text() string {
+func (d DependencyValue) text() string {
 	return string(d.Type) + " " + strings.Join(d.Fields, " ")
 }
 
-// Record is one identity or equivalence record. Fields are written in this
+// Model is one canonical identity or equivalence model. Fields are written in this
 // order — type, env, source, ph, dep — and repeated keys sort within their own
-// group. No record ever carries a name or a prefix: a key describes what was
+// group. No key preimage carries a name or a prefix: a key describes what was
 // built, and the name is what it was called.
-type Record struct {
+type Model struct {
 	Kind Kind
 	Type catalog.Type
-	Env  []Env
+	Env  []EnvValue
 	// Recipe is the digest of the recipe body, empty for a build with no recipe.
 	Recipe string
 	// From is the digest of the upstream image a definition bootstrapped from,
-	// empty when there is none. Identity records only: the reference as written
+	// empty when there is none. Identity models only: the reference as written
 	// is already inside the recipe, so this adds which bytes it meant that day.
 	From         string
-	Placeholders []Placeholder
-	Deps         []Dep
+	Placeholders []PlaceholderValue
+	Deps         []DependencyValue
 }
 
-// Marshal renders the record in canonical form, sorting each group. The bytes it
-// returns are the key's preimage, so two records with the same content marshal
+// Marshal renders the canonical preimage in canonical form, sorting each group. The bytes it
+// returns are the key's preimage, so two models with the same content marshal
 // identically however their fields were ordered on the way in.
-func Marshal(r Record) ([]byte, error) {
+func Marshal(r Model) ([]byte, error) {
 	if err := validate(r); err != nil {
 		return nil, err
 	}
 
-	env := append([]Env(nil), r.Env...)
+	env := append([]EnvValue(nil), r.Env...)
 	sort.Slice(env, func(i, j int) bool { return env[i].Key < env[j].Key })
-	ph := append([]Placeholder(nil), r.Placeholders...)
+	ph := append([]PlaceholderValue(nil), r.Placeholders...)
 	sort.Slice(ph, func(i, j int) bool { return ph[i].Name < ph[j].Name })
-	deps := append([]Dep(nil), r.Deps...)
+	deps := append([]DependencyValue(nil), r.Deps...)
 	sort.SliceStable(deps, func(i, j int) bool { return deps[i].text() < deps[j].text() })
 
 	var sb strings.Builder
-	sb.WriteString(r.Kind.Tag())
-	sb.WriteByte('\n')
 	fmt.Fprintf(&sb, "type=%s\n", r.Type)
 	for _, e := range env {
 		fmt.Fprintf(&sb, "env=%s=%s\n", e.Key, e.Value)
@@ -132,9 +110,9 @@ func Marshal(r Record) ([]byte, error) {
 	return []byte(sb.String()), nil
 }
 
-// Key renders the record and returns the digest of those bytes — the value the
+// Key renders the canonical preimage and returns the digest of those bytes — the value the
 // image is addressed and compared by.
-func Key(r Record) (string, error) {
+func Key(r Model) (string, error) {
 	data, err := Marshal(r)
 	if err != nil {
 		return "", err
@@ -142,7 +120,17 @@ func Key(r Record) (string, error) {
 	return Digest(data), nil
 }
 
-// Digest returns the SHA-256 of data in the form a record writes it inline.
+// valueFromModel renders a validated canonical model and hashes those bytes
+// under the scheme that selected its fields.
+func valueFromModel(scheme Scheme, model Model) (Value, error) {
+	preimage, err := Marshal(model)
+	if err != nil {
+		return Value{}, err
+	}
+	return value(scheme, preimage), nil
+}
+
+// Digest returns the SHA-256 of data in the form a canonical model writes it inline.
 func Digest(data []byte) string { return DigestPrefix + Sum(data) }
 
 // Sum returns the bare lowercase hex SHA-256, which is what sha256sum prints and
@@ -168,9 +156,11 @@ func ValidDigest(s string) bool {
 }
 
 // validate reports whether r can be rendered: a known kind, a type that can hold
-// records, and field text that survives the round trip.
-func validate(r Record) error {
-	if r.Kind.Tag() == "" {
+// models, and field text that survives the round trip.
+func validate(r Model) error {
+	switch r.Kind {
+	case KindIdentity, KindEquiv:
+	default:
 		return fmt.Errorf("%w: unknown kind %q", ErrInvalid, r.Kind)
 	}
 	if err := validSubjectType(r.Type); err != nil {

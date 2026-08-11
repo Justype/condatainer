@@ -84,7 +84,7 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 
 	// After the build, so every dependency it needed is installed and can be
 	// read for the identity its records pin.
-	if err := b.recordKeys(ctx); err != nil {
+	if err := b.deriveKeys(ctx); err != nil {
 		b.Cleanup(true)
 		return err
 	}

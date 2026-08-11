@@ -10,13 +10,15 @@ imports `image`, never the reverse.
 
 ## Architecture
 
-```
-meta/       The two embedded documents: types, staging, archive reads, validation, cache
-record/     The identity/equivalence record grammar: build, parse, sort, hash
-key/        What reaches a key: source lines, and the dependency projection
-capsule/    /.cnt/provenance: compose by union, read, validate
-compare/    Gates, verdicts, diffs — how one artifact relates to another
-```
+- meta/: embedded runtime and manifest documents, staging, and validation
+- key/: scheme dispatch, one rule file per scheme, and canonical encoding helpers
+- capsule/: provenance closure composition and validation
+- compare/: gates, verdicts, and human-readable differences
+
+The dispatcher in key/scheme.go only selects a supported
+identity/equivalence pair, reconstructs neutral inputs, and invokes the selected
+schemes. It does not define which inputs contribute to a key. That policy lives
+in the six versioned scheme files.
 
 ## Two documents, two read frequencies
 
@@ -89,174 +91,71 @@ Manifest reads are uncached, because nothing asks for one per `exec`.
 A writable `.img` carries no embedded metadata. It is a mutable working overlay
 rather than a built image, and its environment comes from its `.env` sidecar.
 
-## Records
+## Scheme-backed keys
 
-`record` is the grammar of `/.cnt/identity.record` and `/.cnt/equiv.record`. It
-builds them, parses them back, and hashes them. It knows nothing about images,
-recipes, or *what belongs* in a key — that is the key package's job.
+The key package owns six immutable derivation schemes. Each scheme has one file
+that states its question, accepted artifact types, complete preimage contents,
+and exclusions:
 
-A record is UTF-8 text: a format line, then `key=value` lines, LF-terminated, no
-trailing whitespace, no blank lines, no comments.
-
-```text
-cnt-identity-v1
-type=data
-env=STAR_INDEX_DIR={prefix}
-recipe=sha256:1a4f…
-ph=gencode_version=49
-ph=star_version=2.7.11b
-dep=app samtools/1.23.1 unrecorded
-dep=app star/2.7.11b sha256:0c19…
-dep=data grch38/gtf-gencode/49 sha256:41ab…
-```
-
-Text rather than JSON, deliberately: no canonicalization question, diffable in a
-terminal, and `sha256sum identity.record` reproduces the key by hand.
-
-Fields appear in a fixed order — `type`, `env`, source, `ph`, `dep` — and
-repeated keys sort within their own group: `env` by key, `ph` by name, `dep` by
-the full text following `dep=`, which puts `app` before `data` before `os`.
-Repeated `dep` lines are kept rather than collapsed, because a recipe that
-mounted two equivalent inputs did mount two.
-
-`Marshal` sorts, so a caller may build a record in whatever order its inputs
-arrive. `Parse` does **not**: it accepts only the exact bytes `Marshal` produces,
-and rejects an unsorted group, a group out of order, a blank line, trailing
-whitespace, or an unknown key. A record that parsed but did not re-marshal
-identically would hash to something other than the key it carries, and an unknown
-key means a format that should have changed its tag.
-
-`Kind.Tag()` — `cnt-identity-v1`, `cnt-equiv-v1` — versions the whole derivation:
-the field set, the ordering, and every rule about what reaches a line. Nothing may
-change under a tag without moving every key computed under it.
-
-Three things the grammar enforces, because they are not per-kind: a `sha256:`
-token is always a full 64 hex characters; `from=` may appear only under the
-identity tag; and `type=base` is accepted as a record's *subject* but rejected on
-a `dep=` line. A base is built from a definition like any other image, so it
-identifies itself the same way — what it may never be is something another
-artifact depends on, because it is the environment a build runs inside rather
-than an input the build consumed. What a `dep=` line's remaining fields *mean*
-differs between the two kinds, so here they are opaque tokens.
-
-## What reaches a key
-
-`key` is the single definition of every rule about what goes into a record, so a
-build and a later comparison cannot disagree about an artifact's keys.
-
-`RecipeDigest` hashes the recipe **with its whole-line comments removed**. The
-header is all comments and goes with them, which is the point rather than a side
-effect: every header item that belongs in a key already has its own record line,
-and hashing the file too would re-admit the ones left out on purpose.
-
-| header | reaches a key as |
-|---|---|
-| `#TYPE:` | `type=` |
-| `#ENV:` | `env=`, via `Env` |
-| `#DEP:` | `dep=`, carrying the resolved dependency's own identity |
-| selected `#PH:` | `ph=`, via `Placeholders` |
-| `#DESC:`, `#URL:`, `#INPUT:`, `#ARCH:`, scheduler directives, `#PH:` menus | nothing |
-
-That last row is not merely noise — `#AUTOUPDATE:` rewrites `#PH:` menus and
-repins `#DEP:` with no human involved, so a key that moved for them would mint a
-new artifact for a robot's edit and `exact` would be unreachable for any
-template. Nothing is lost: a repinned `#DEP:` still moves identity, through the
-`dep=` line carrying the new dependency's digest.
-
-Both records take the same `recipe=`, `ph=` and `env=` lines. They diverge at
-`dep=` and nowhere else, which is why only data ever has two records that say
-different things — and why an artifact with no dependencies has two records
-differing only by their format line. That is honest rather than degenerate: a
-self-contained artifact built from one recipe has nothing to be loose about.
-
-## The dependency projection
-
-`Records` builds both records; the difference between them is entirely here.
-
-| dependency | identity | equivalence |
+| scheme | implementation | rule |
 |---|---|---|
-| any | `dep=<type> <name> <identity>` | — |
-| data | ↑ | `dep=data <equiv>` — no name |
-| app or os the artifact's name mentions | ↑ | `dep=<type> <name>/<version>` — no digest |
-| app or os the name does not mention | ↑ | nothing |
+| script-identity-v1 | [script_identity_v1.go](key/script_identity_v1.go) | recipe inputs plus every exact dependency identity |
+| script-equiv-v1 | [script_equiv_v1.go](key/script_equiv_v1.go) | recipe inputs plus only substitution-relevant dependencies |
+| definition-identity-v1 | [definition_identity_v1.go](key/definition_identity_v1.go) | definition inputs plus the resolved upstream digest |
+| definition-equiv-v1 | [definition_equiv_v1.go](key/definition_equiv_v1.go) | definition inputs without the resolved upstream digest |
+| conda-explicit-v1 | [conda_explicit_v1.go](key/conda_explicit_v1.go) | stored explicit.txt bytes exactly |
+| conda-environment-v1 | [conda_environment_v1.go](key/conda_environment_v1.go) | stored environment.yml bytes exactly |
 
-Identity pins everything that was mounted, because anything mounted while the
-recipe ran could have shaped the payload. Equivalence keeps only what decides
-substitution, and the two forms are deliberate opposites: for a data dependency
-the *content* is the contract, so it contributes a digest and its name is
-irrelevant; for an app the *name and version* are the contract, so a Conda-built
-and a script-built STAR of one version are interchangeable producers of the same
-index.
+Valid pairs are fixed by build type:
 
-Only direct dependencies are ever processed. Data equivalence composes
-transitively without walking, because a data dependency's own `equiv` already
-covers its important inputs.
+| build type | identity | equivalence |
+|---|---|---|
+| script | script-identity-v1 | script-equiv-v1 |
+| def | definition-identity-v1 | definition-equiv-v1 |
+| conda | conda-explicit-v1 | conda-environment-v1 |
 
-**The name decides which tools count.** `HasComponents` requires the
-dependency's `name/version` to appear as a contiguous run of components in the
-artifact's own name, so `grch38/star/2.7.11b/gencode49` counts `star/2.7.11b` and
-`grch38/star2.7.11b/gencode49` does not. The convention is the contract: a tool
-whose version changes the result belongs in the name, and an author who gets that
-wrong is already wrong about how the artifact should be named. This cannot drift
-for a given artifact, because name is a comparison gate — two differently-named
-artifacts are never compared to each other.
+manifest.keys stores a scheme and SHA-256 for each key. The complete key is the
+(scheme, SHA-256) pair: the scheme is not repeated inside the hashed preimage,
+and equal SHA values under different schemes remain different keys.
 
-## Unrecorded dependencies
+Verification selects the
+named pair, loads the required source files, runs those exact implementations,
+and compares the regenerated digests. An unknown identity scheme, an unknown
+equivalence scheme, a mismatched pair, or an old key without a scheme is an
+error.
 
-Every image built before this format carries no keys, and dependency resolution
-satisfies a dependency from an installed image without reading a recipe. Failing
-the build is not an option; pretending is worse. So a dependency with no records
-gets `dep=<type> <name> unrecorded` in identity, `dep=data unrecorded <name>` in
-equivalence where a digest would have gone, and `provenance_complete: false` in
-the manifest.
+Recipe-backed schemes construct an in-memory canonical Model. model.go provides
+only neutral validation, sorting, line encoding, and hashing; it does not decide
+which artifact inputs enter the model. recipe.go provides neutral conversion
+helpers such as the comment-stripped recipe digest, environment values, and
+sorted placeholders.
 
-Such a record is still stable and comparable — two builds against the same
-unrecorded dependency produce the same records. It simply carries a weaker claim,
-stated out loud. When that dependency is rebuilt with records, the artifact above
-it gets new keys, which is correct: its inputs became knowable.
+For script-identity-v1, every dependency is pinned by name and exact identity.
+For script-equiv-v1, a data dependency contributes its equivalence key, an app
+or OS named by the artifact contributes name/version, and a history-only app or
+OS contributes nothing. The manifest freezes this role, so verification never
+reapplies newer policy.
 
-## What each build type records
+A dependency lacking either key is unrecorded. Script identity includes its name
+plus that marker; script equivalence includes an unrecorded data dependency's
+marker and name; and the manifest sets provenance_complete to false.
 
-| type | identity | equivalence | `manifest.keys` names |
-|---|---|---|---|
-| recipe (script app, data, os, base) | `identity.record` | `equiv.record` | those two files |
-| Conda app | the explicit export | the environment export | `explicit.txt`, `environment.yml` |
+Conda schemes deliberately bypass the canonical model and hash their stored
+exports byte for byte. The explicit export pins package URLs and build strings;
+the environment export pins channels plus package names and versions.
 
-A definition build — an `os` or a `base` — adds one line to its identity record
-and nothing to its equivalence record: `from=`, the digest its `From:` reference
-resolved to before the build ran. The `Bootstrap:` and `From:` directives sit in
-`manifest.build.from` as provenance; only the digest is hashed. The reference as written is already inside the
-recipe and therefore already in both. So an OS rebuilt after an upstream security
-push is a different recorded build that still substitutes, which is what asking
-for `ubuntu:24.04` meant. An image carrying no `keys` block at all was imported
-rather than built, or built before this format, and compares `unverifiable`.
-
-`manifest.keys` names the file each key hashes, which is what lets a reader
-verify one without knowing which build type produced the image: hash the named
-file, compare. A Conda app writes no records because everything one could hold is
-ruled out for it — no name or prefix, no `env` since it has no recipe to take one
-from, no `ph`, no `dep` — leaving a file whose entire content would be a format
-tag, a type line and one digest.
-
-Two consequences, stated rather than left to be rediscovered: a recipe that
-writes comment lines into its payload — a launcher heredoc beginning
-`#!/bin/bash` — can change that payload without moving a key; and a definition
-that bootstraps from a mutable tag hashes text that stays still while what it
-pulls moves. Apptainer records what it actually pulled at
-`/.singularity.d/labels.json` inside the image, so that question is answerable on
-demand; it simply does not enter a key.
+Changing any rule requires a new scheme constant, a new implementation file, and
+a new dispatcher case. Existing scheme files remain immutable.
 
 ## The capsule
 
-`/.cnt/provenance` is the closure an artifact was built from, one flat directory
-per artifact in it:
+`/.cnt/provenance` is the source closure an artifact was built from, one flat
+directory per artifact:
 
 ```text
 /.cnt/provenance/
   grch38--gtf-gencode--49@41ab1c2d3e4f/
     manifest.json
-    identity.record
-    equiv.record
     recipe
   star--2.7.11b@0c19a7f34b02/
     manifest.json
@@ -264,32 +163,24 @@ per artifact in it:
     environment.yml
 ```
 
-The directory name joins the artifact's slashes with `--`, exactly as image
-filenames and store entries already do, so a dependency's own name never becomes
-directory levels. `@` cannot occur in a Conda name or version, so it never
-collides with the separator. The identity is truncated to 12 characters for
-addressing only — the full digest is inside the entry's `identity.record`, and a
-reader verifies against that rather than trusting twelve characters of a
-filename.
+The directory name joins artifact-name slashes with `--` and appends the first
+12 identity characters. The full identity is regenerated from the entry's
+manifest and sources; validation requires the resulting name and identity prefix
+to reproduce the directory name.
 
-Name and identity *together* address a record set; identity alone never does,
-since one solve published under two names has one identity. Deduplication is by
-that pair, so a diamond stores the shared dependency once.
-
-`runtime.json` is never copied. A capsule entry exists to rebuild an artifact,
-never to mount one, and a rebuilt dependency derives its runtime from its recipe.
-Payloads never come along either: a recipe plus its placeholders is the complete
-rebuild input for a recipe dependency, and `explicit.txt` is for a Conda one.
+Name and identity together address an entry. Deduplication is by that pair, so a
+diamond stores a shared dependency once. `runtime.json` and payload bytes are
+never copied: capsule entries exist only to verify and rebuild artifacts.
 
 ### Composition, not traversal
 
 ```text
-capsule(root) = ⋃ over direct deps d of  { records(d) }  ∪  capsule(d)
+capsule(root) = ⋃ over direct deps d of  { sources(d) }  ∪  capsule(d)
 ```
 
 `Compose` reads each dependency's own `/.cnt` — one extraction per dependency,
-not one archive read per file — copies its records in, and copies its capsule
-entries across unchanged. Nothing is re-derived, so there is no recursive
+not one archive read per file — copies its manifest and rebuild sources in, and copies its capsule
+entries across unchanged. Keys are verified from those sources; composition performs there is no recursive
 resolution, no catalog access and no network at build time.
 
 Two properties follow, and they are why this shape was chosen. **Completeness is
@@ -300,7 +191,7 @@ from elsewhere is not trusted to be well-formed.
 
 `provenance_complete` is inherited rather than recomputed: an unrecorded
 dependency anywhere below makes everything above it incomplete. That is the
-honest answer, and when the dependency is rebuilt with records the artifact above
+honest answer, and when the dependency is rebuilt with scheme-backed keys the artifact above
 gets new keys — correct, because its inputs became knowable.
 
 **The closure is shallow.** Only data has dependencies and only data dependencies

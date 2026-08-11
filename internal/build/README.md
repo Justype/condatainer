@@ -33,7 +33,7 @@ conda.go        Conda package builds via micromamba
 script.go       Recipe (script) builds, any type
 def.go          Apptainer definition file builds
 bootstrap.go    Bootstrap:/From: parsing, upstream resolution, definition pinning
-keys.go         identity/equiv records, dependency keys, capsule composition
+keys.go         identity/equiv schemes, dependency keys, capsule composition
 pack.go         Metadata staging, shared by every backend that packs
 squashfs.go     The common packer: payload plus staged metadata → one .sqf
 base_image.go   Resolving the base image every non-def build runs inside
@@ -204,15 +204,14 @@ tokens: the expansion goes to the workspace file the build executes and is never
 embedded, so every variant of one template shares a recipe digest and is told
 apart by `manifest.source.placeholders`, which is their only stored copy.
 
-`recordKeys` runs immediately before staging in every backend — the last point at
+`deriveKeys` runs immediately before staging in every backend — the last point at
 which everything a key depends on is known. A script build calls it after the
-recipe has run, so every dependency it needed is installed and can be read for
-the identity its records pin. A Conda app gets keys naming the exports it already
-embeds, since a record for it would hold a format tag, a type line and one digest.
+recipe has run, so every dependency it needed is installed and its exact identity can enter the
+identity scheme. A Conda app derives its two keys directly from the exports it
+already embeds.
 
-A base is keyed like any other definition build. It has records and a `keys`
-block because what identifies it is its definition plus the upstream that
-definition bootstrapped from — both known before Apptainer runs, which is what
+A base is keyed like any other definition build. Its `keys` block identifies
+the definition plus the upstream image that definition bootstrapped from — both known before Apptainer runs, which is what
 lets a SIF carry its own keys. What makes a base special is that nothing may
 *depend* on it, not that nothing may identify it.
 
@@ -221,10 +220,9 @@ lets a SIF carry its own keys. What makes a base special is that nothing may
 `bootstrap.go` reads `Bootstrap:`/`From:` out of a definition's header block — a
 `From:` inside `%post` is shell text, not a directive — and `resolveUpstream`
 asks `internal/registry` what that reference points at *now*, before the build.
-The answer does two jobs: it becomes the `from=` line in the identity record, and
-`writeRecordingDef` rewrites `From:` to name the digest in the definition handed
-to Apptainer. Without that pin an upstream retagged mid-build would leave the
-record describing bytes the image does not contain. Only the transient copy is
+The answer does two jobs: it becomes the `from=` field in the identity preimage,
+and `writeRecordingDef` rewrites `From:` to name the digest in the definition handed
+to Apptainer. Without that pin an upstream retagged mid-build would leave the identity describing bytes the image does not contain. Only the transient copy is
 rewritten; `/.cnt/recipe` keeps the definition byte for byte.
 
 Resolution never fails a build. A registry that cannot be reached records
@@ -238,10 +236,10 @@ exactly the two-line definition it is equivalent to. The generated header carrie
 a build date and drops out of the key, since whole-line comments never reach a
 preimage.
 
-Staged files split two ways. `manifest.source.files` names what the image was
-built *from*; `manifest.keys` names the records derived out of it. Both are
-staged into `/.cnt`, and the manifest names exactly what was staged, so it can
-never claim a file the image does not carry.
+`manifest.source.files` names the stored files from which the selected schemes
+can regenerate their keys. `manifest.keys` stores the selected scheme names and
+digests; no derived record files are staged. Validation ensures every required
+source file is present in `/.cnt`.
 
 A def build has no packing step, so `writeRecordingDef` appends a `%files`
 section listing each staged file by name. It lists them individually rather than
