@@ -1,6 +1,7 @@
 package meta
 
 import (
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -42,6 +43,22 @@ func TestValidateManifestRejects(t *testing.T) {
 			m.Keys.Identity = KeyRef{Scheme: "conda-explicit-v1", SHA256: "ABC"}
 			m.Keys.Equiv = KeyRef{Scheme: "conda-environment-v1", SHA256: strings.Repeat("b", 64)}
 		}, ErrInvalid},
+		{"tools without Condatainer", func(m *Manifest) {
+			m.Build.Tools = validBuildTools()
+			m.Build.Tools.Condatainer = Tool{}
+		}, ErrInvalid},
+		{"tools without Apptainer implementation", func(m *Manifest) {
+			m.Build.Tools = validBuildTools()
+			m.Build.Tools.Apptainer.Name = ""
+		}, ErrInvalid},
+		{"Conda tools without Micromamba", func(m *Manifest) {
+			m.Build.Tools = validBuildTools()
+			m.Build.Tools.Micromamba = Tool{}
+		}, ErrInvalid},
+		{"script tools with Micromamba", func(m *Manifest) {
+			m.BuildType = "script"
+			m.Build.Tools = validBuildTools()
+		}, ErrInvalid},
 	}
 
 	for _, tt := range tests {
@@ -56,6 +73,40 @@ func TestValidateManifestRejects(t *testing.T) {
 				t.Fatalf("error = %v, want %v", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestManifestBuildToolsRoundTrip(t *testing.T) {
+	m := validManifest()
+	m.Build.Tools = validBuildTools()
+
+	data, err := MarshalManifest(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"tools"`, `"condatainer"`, `"apptainer"`, `"micromamba"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("manifest omits %s:\n%s", want, data)
+		}
+	}
+	if strings.Contains(string(data), `"base"`) {
+		t.Errorf("manifest unexpectedly records build base:\n%s", data)
+	}
+
+	var got Manifest
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Build.Tools, m.Build.Tools) {
+		t.Errorf("tools = %+v, want %+v", got.Build.Tools, m.Build.Tools)
+	}
+}
+
+func validBuildTools() BuildTools {
+	return BuildTools{
+		Condatainer: Tool{Version: "1.4.2"},
+		Apptainer:   Tool{Name: "apptainer", Version: "1.4.2"},
+		Micromamba:  Tool{Version: "2.3.0"},
 	}
 }
 

@@ -64,6 +64,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 
 	// A synthesized definition is the only record of what a scheme:// build was.
 	b.captureSynthesizedRecipe(defSource, defData)
+	b.captureCommonBuildTools(ctx)
 
 	// Before the build: the digest goes into the identity record and into the
 	// definition Apptainer is handed, so asking after the pull would be too late.

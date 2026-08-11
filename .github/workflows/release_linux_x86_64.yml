@@ -26,17 +26,11 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Update version constant in config.go
-        run: |
-          # strip leading 'v' if present
-          version="${{ steps.get_version.outputs.VERSION }}"
-          version="${version#v}"
-          echo "Setting config VERSION to $version"
-          sed -i "s/^const VERSION = .*/const VERSION = \"${version}\"/" internal/config/config.go
-
       - name: Build binary
         run: |
-          make build
+          version="${{ steps.get_version.outputs.VERSION }}"
+          version="${version#v}"
+          make build GO_LDFLAGS="-X github.com/Justype/condatainer/internal/config.VERSION=${version}"
           mv bin/condatainer_go bin/condatainer_linux_x86_64
         env:
           GOOS: linux

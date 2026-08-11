@@ -203,7 +203,38 @@ func displayImageInfo(overlayPath string) error {
 	// Environment variables section
 	displayEnvVars(overlayPath)
 
+	// Diagnostic provenance is off the mount path and optional for images built
+	// before manifests recorded build tools.
+	displayBuildTools(overlayPath)
+
 	return nil
+}
+
+func displayBuildTools(imagePath string) {
+	m, err := meta.ReadManifest(imagePath)
+	if err != nil || m.Build.Tools.Empty() {
+		return
+	}
+
+	fmt.Println(utils.StyleTitle("Build"))
+	tools := m.Build.Tools
+	if !tools.Condatainer.Empty() {
+		fmt.Printf("  %-14s %s\n", "Condatainer:", utils.StyleInfo(tools.Condatainer.Version))
+	}
+	if !tools.Apptainer.Empty() {
+		value := tools.Apptainer.Version
+		if tools.Apptainer.Name != "" && tools.Apptainer.Name != "apptainer" {
+			name := tools.Apptainer.Name
+			if name == "singularity" {
+				name = "Singularity"
+			}
+			value = name + " " + value
+		}
+		fmt.Printf("  %-14s %s\n", "Apptainer:", utils.StyleInfo(value))
+	}
+	if !tools.Micromamba.Empty() {
+		fmt.Printf("  %-14s %s\n", "Micromamba:", utils.StyleInfo(tools.Micromamba.Version))
+	}
 }
 
 // displayImgInfo prints rich info for an ext3 overlay image,

@@ -19,7 +19,10 @@ import (
 // overlay checks) can detect this exit code to show a more helpful message.
 const ExitCodeJobsSubmitted = 3
 
-const VERSION = "1.4.1"
+// VERSION is a variable so tagged release builds can set it with -ldflags -X
+// without modifying tracked source before compilation.
+var VERSION = "1.4.1"
+
 const GitHubRepo = "Justype/condatainer"
 
 // BuildConfig holds default settings for build operations

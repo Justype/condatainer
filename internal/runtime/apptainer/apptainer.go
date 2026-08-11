@@ -71,6 +71,16 @@ func IsSingularity() bool {
 	return strings.Contains(strings.ToLower(filepath.Base(apptainerCmd)), "singularity")
 }
 
+// Implementation returns the configured compatible implementation name. The
+// manifest needs this beside the version because Apptainer and Singularity can
+// use overlapping version numbers.
+func Implementation() string {
+	if IsSingularity() {
+		return "singularity"
+	}
+	return "apptainer"
+}
+
 // GetVersion returns the version of the currently loaded Apptainer binary.
 // Results are cached to avoid repeated calls.
 func GetVersion() (string, error) {

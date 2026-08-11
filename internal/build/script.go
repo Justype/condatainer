@@ -70,6 +70,7 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 	if err := prepareBuildWorkspace(ctx, b); err != nil {
 		return err
 	}
+	b.captureCommonBuildTools(ctx)
 
 	log.Info("populating overlay", "overlay", filepath.Base(targetPath), "source", b.buildSource)
 

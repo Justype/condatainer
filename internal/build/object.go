@@ -97,6 +97,7 @@ type BuildObject struct {
 	keys               meta.Keys
 	dependencies       []meta.Dependency
 	provenanceComplete *bool
+	buildTools         meta.BuildTools
 }
 
 // embeddedFile is one rebuild source staged into /.cnt and named by
@@ -138,6 +139,7 @@ func (b *BuildObject) Manifest() meta.Manifest {
 	m.Keys = b.keys
 	m.Dependencies = b.dependencies
 	m.ProvenanceComplete = b.provenanceComplete
+	m.Build.Tools = b.buildTools
 	return m
 }
 

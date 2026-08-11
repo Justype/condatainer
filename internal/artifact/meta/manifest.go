@@ -90,6 +90,10 @@ const Unrecorded = "unrecorded"
 
 // Build is what the build knew that the source does not say.
 type Build struct {
+	// Tools identify the implementations that performed the build. They are
+	// diagnostic provenance only: key schemes select their own inputs and do not
+	// implicitly hash this block.
+	Tools BuildTools `json:"tools,omitzero"`
 	// Channels are the Conda channels in the priority order the solve used. The
 	// embedded environment.yml carries the channels that actually provided
 	// packages; this is the order they were offered in, which the export cannot
@@ -99,6 +103,31 @@ type Build struct {
 	// is no upstream.
 	From *From `json:"from,omitzero"`
 }
+
+// BuildTools are the tools Condatainer directly used for a build. Apptainer
+// names the compatible tool family; Tool.Name distinguishes an actual
+// Apptainer binary from the supported Singularity fallback.
+type BuildTools struct {
+	Condatainer Tool `json:"condatainer,omitzero"`
+	Apptainer   Tool `json:"apptainer,omitzero"`
+	Micromamba  Tool `json:"micromamba,omitzero"`
+}
+
+// Empty reports whether no build tool was recorded.
+func (t BuildTools) Empty() bool {
+	return t.Condatainer.Empty() && t.Apptainer.Empty() && t.Micromamba.Empty()
+}
+
+// Tool is one directly used build implementation. Name is omitted when the
+// enclosing field already identifies it; it is set for Apptainer because the
+// configured binary may instead be Singularity.
+type Tool struct {
+	Name    string `json:"name,omitempty"`
+	Version string `json:"version"`
+}
+
+// Empty reports whether a tool is completely absent.
+func (t Tool) Empty() bool { return t.Name == "" && t.Version == "" }
 
 // From is what a definition bootstrapped from: the Bootstrap and From directives
 // as written, and the digest they named at build time.
@@ -192,6 +221,35 @@ func ValidateManifest(m Manifest) error {
 				return fmt.Errorf("%w: %s key has invalid sha256 %q", ErrInvalid, item.kind, item.ref.SHA256)
 			}
 		}
+	}
+	if err := validateBuildTools(m.BuildType, m.Build.Tools); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateBuildTools(buildType string, tools BuildTools) error {
+	if tools.Empty() {
+		return nil
+	}
+	if tools.Condatainer.Version == "" {
+		return fmt.Errorf("%w: build tools have no Condatainer version", ErrInvalid)
+	}
+	if tools.Apptainer.Name == "" || tools.Apptainer.Version == "" {
+		return fmt.Errorf("%w: build tools have incomplete Apptainer information", ErrInvalid)
+	}
+
+	switch buildType {
+	case "conda":
+		if tools.Micromamba.Version == "" {
+			return fmt.Errorf("%w: Conda build tools have no Micromamba version", ErrInvalid)
+		}
+	case "def", "script":
+		if !tools.Micromamba.Empty() {
+			return fmt.Errorf("%w: %s build records Micromamba as a direct build tool", ErrInvalid, buildType)
+		}
+	default:
+		return fmt.Errorf("%w: build tools accompany unknown build type %q", ErrInvalid, buildType)
 	}
 	return nil
 }

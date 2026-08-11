@@ -43,11 +43,13 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 	if err := prepareBuildWorkspace(ctx, b); err != nil {
 		return err
 	}
+	b.captureCommonBuildTools(ctx)
 
 	if err := b.installConda(ctx); err != nil {
 		b.Cleanup(true)
 		return err
 	}
+	b.captureMicromambaVersion(ctx)
 
 	b.captureCondaExports(ctx)
 	b.describeCondaPackage()
