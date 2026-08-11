@@ -37,25 +37,25 @@ The same binary and the same commands serve all three. What changes is only wher
 
 ## The Layers
 
-Highest priority first. Not all of them exist in every deployment — each is optional and appears only when something sets it, so a given install usually sees `app-root` and `user`.
+Nearest first. Not all of them exist in every deployment — each is optional and appears only when something sets it, so a given install usually sees `app-root` and `user`.
 
 | Layer | Set by | Typical path |
 |---|---|---|
-| extra-root | `$CNT_EXTRA_ROOT` env var | `/shared/labA/condatainer` |
-| app-root | binary location, or `$CNT_ROOT` | `/anywhere/condatainer` |
 | scratch | `$SCRATCH` | `$SCRATCH/condatainer` |
 | user | XDG variables | `~/.local/share/condatainer` |
+| extra-root | `$CNT_EXTRA_ROOT` env var | `/shared/labA/condatainer` |
+| app-root | binary location, or `$CNT_ROOT` | `/anywhere/condatainer` |
 
 The stack is identical for everyone; only the layer that receives writes moves between the three cases from [What It's Designed For](#what-its-designed-for):
 
 | Layer | single user | group | system-wide |
 |---|---|---|---|
-| extra-root | — | — | writes (group) |
-| app-root | writes | writes (group) | read-only; writes (admin) |
 | scratch | <span style="color:#888">fallback</span> | <span style="color:#888">fallback</span> | writes (solo) |
 | user | <span style="color:#888">fallback</span> | <span style="color:#888">fallback</span> | <span style="color:#888">fallback</span> |
+| extra-root | — | — | writes (group) |
+| app-root | writes | writes (group) | read-only; writes (admin) |
 
-Reads always search every active layer; only the write target differs. *fallback* is used only when the higher writable layers are unset.
+Reads always search every active layer; only the write target differs. *fallback* is used only when no shared layer is writable.
 
 Each one holds the same three subdirectories:
 
@@ -66,16 +66,20 @@ Each one holds the same three subdirectories:
 └── images/
 ```
 
-## Reads Search Everything, Writes Take the First Writable
+## Reads Go Nearest, Writes Go Furthest
 
-This is the rule that makes shared installs work:
+This is the rule that makes shared installs work. The two directions are deliberately opposite:
 
-- **Reading** — `condatainer avail`, `list`, `exec`, `helper` search *every* layer. A user sees the admin's build scripts, their lab's overlays, and their own, merged into one view.
-- **Writing** — `condatainer create` walks the same order and uses the **first layer it can write to**.
+- **Reading** — `condatainer avail`, `list`, `exec`, `helper` search *every* layer, **starting with your own**: scratch, user, then extra-root, then app-root. A user sees the admin's build scripts, their lab's overlays, and their own, merged into one view, and the first match wins.
+- **Writing** — `condatainer create` walks the layers **in the opposite direction** — extra-root, app-root, scratch, user — and uses the **first layer it can write to**.
 
-So a read-only system install is simply skipped when a user builds something, and their overlay lands in their scratch or home instead.
+Writing furthest-out means a build is shared as widely as permissions allow: one copy in the lab directory serves everyone, instead of each member rebuilding the same overlay into their own home.
 
-The corollary: if a shared layer *is* writable by a user, their builds go **there** rather than into their own directory. That is the intended behaviour when you want members contributing shared builds. Permissions are what decide it — see [Shared Group Installation](./group_install.md#1-pick-a-directory).
+Reading nearest-first is what keeps that from being a trap. If you want your own version of something the lab already has, you don't need a flag or a rename — **build it into a directory you own and it wins for you**, while everyone else keeps using the shared one. A read-only system install is likewise skipped on write, so your overlay lands in your scratch or home instead.
+
+The corollary: if a shared layer *is* writable by you, your builds go **there** rather than into your own directory. That is the intended behaviour when you want members contributing shared builds. Permissions are what decide it — see [Shared Group Installation](./group_install.md#1-pick-a-directory).
+
+Order *within* a tier is the same in both directions: scratch before the XDG user directory, and a group's own extra-root before a site-wide app-root.
 
 `create` reports the layer it chose:
 
@@ -86,12 +90,12 @@ The corollary: if a shared layer *is* writable by a user, their builds go **ther
 An admin who expects `(app-root)` and sees `(user)` has just installed for themselves only — usually the wrong account.
 
 ```{tip}
-`condatainer config paths` prints every directory in priority order, tagged with its layer and marked with which one receives writes:
+`condatainer config paths` prints every directory in read order, tagged with its layer and marked with which one receives writes:
 
     Images:
-      1. /shared/labA/condatainer/images (extra-root) (writable, target)
-      2. /opt/condatainer/images (app-root) (read-only)
-      3. /scratch/me/condatainer/images (user) (not found)
+      1. /scratch/me/condatainer/images (user) (not found)
+      2. /shared/labA/condatainer/images (extra-root) (writable, target)
+      3. /opt/condatainer/images (app-root) (read-only)
 
 It is the fastest way to check a deployment from a normal user's account.
 ```
@@ -101,16 +105,16 @@ It is the fastest way to check a deployment from a normal user's account.
 The same overlay name can exist in more than one layer — a user rebuilding something the admin already ships, for example. `condatainer list` groups its output by directory and tags each with its layer, so both copies are visible:
 
 ```
-════ /opt/condatainer/images (app-root) ════
+════ /scratch/me/condatainer/images (user) ════
 Available app overlays:
  samtools/1.22
 
-════ /scratch/me/condatainer/images (user) ════
+════ /opt/condatainer/images (app-root) ════
 Available app overlays:
  samtools/1.22
 ```
 
-Commands that resolve a name use the highest-priority copy. To act on a different one, scope with `-l` — the same `u` / `r` / `e` vocabulary as `condatainer config -l`:
+Commands that resolve a name use the nearest copy — here, yours. That is the supported way to diverge from a shared build: rebuild it into a directory you own, and every command picks it up for you while the rest of the group keeps the shared one. To act on a different copy, scope with `-l` — the same `u` / `r` / `e` vocabulary as `condatainer config -l`:
 
 ```bash
 condatainer remove -l u samtools/1.22   # remove your copy, leave the site's alone
@@ -134,7 +138,7 @@ Shared binary directories (`$HOME/bin`, `~/.local/bin`, `/usr/bin`, `/usr/local/
 Every layer can carry a `config.yaml`, and all of them are loaded together:
 
 - **Scalar keys** (`apptainer_bin`, `submit_job`, `build.ncpus`) — the highest-priority layer that sets the key wins. A user's own config overrides the site default.
-- **Directory and source keys** (`extra_*_dirs`, `sources`) — **merged** across layers, user entries first, then `extra-root`, `app-root`.
+- **`sources`** — **merged** across layers, user entries first, then `extra-root`, `app-root`.
 - **`channels`** — overwrite, not merged: Conda channel order decides which package wins, so merging two lists would silently change resolution.
 
 The split is deliberate: users can override *settings* without being able to remove *sources* an admin published. See [Configuration Priority](../manuals/configuration.md#configuration-priority).

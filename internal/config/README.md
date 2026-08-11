@@ -87,11 +87,15 @@ config.Global  // Singleton instance
 
 ## Data Directory Search
 
-**Search order for images:**
-1. `CNT_EXTRA_ROOT` → `<extra-root>/images/` (group/lab layer)
-2. Root dir → `$CNT_ROOT/images/` or `<install>/images/`
-3. Scratch dir → `$SCRATCH/condatainer/images/`
-4. User dir → `$XDG_DATA_HOME/condatainer/images/` or `~/.local/share/condatainer/images/`
+Reads go nearest-first and writes furthest-first, so a build lands as far out as
+permissions allow (one copy for the whole group) while a personal build shadows a
+shared one for the person who made it. Order within a tier is the same both ways.
+
+**Search order for images** (personal, then shared):
+1. Scratch dir → `$SCRATCH/condatainer/images/`
+2. User dir → `$XDG_DATA_HOME/condatainer/images/` or `~/.local/share/condatainer/images/`
+3. `CNT_EXTRA_ROOT` → `<extra-root>/images/` (group/lab layer)
+4. Root dir → `$CNT_ROOT/images/` or `<install>/images/`
 
 **Search order for scripts:**
 
@@ -110,7 +114,7 @@ name it.
 1. `CNT_EXTRA_ROOT`, Root dir, Scratch dir, User dir (same pattern, with `helper-scripts/`)
 
 **Write operations:**
-- **Images / helpers**: first writable directory in search order. Personal dirs (scratch, user) are always created on first use. Shared dirs (extra-root, root): subdirs (`images/`, `helper-scripts/`) are auto-created if the parent directory already exists — the parent itself is never auto-created.
+- **Images / helpers**: first writable directory in the *reverse* order — extra-root → root → scratch → user. Personal dirs (scratch, user) are always created on first use. Shared dirs (extra-root, root): subdirs (`images/`, `helper-scripts/`) are auto-created if the parent directory already exists — the parent itself is never auto-created.
 - **Cache**: always written to a personal directory (scratch → user cache) to avoid cross-user pollution. Shared dirs are never written to.
 
 ## Usage

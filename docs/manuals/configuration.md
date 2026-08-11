@@ -285,14 +285,18 @@ export CNT_EXTRA_ROOT=/shared/lab/tools   # group-level
 
 ### Search Priority
 
+Reads go **nearest-first** and writes go **furthest-first**. A build lands as far out as permissions allow, so one copy serves the whole group; anyone who wants their own version of a name builds it into their own directory and has it win for them.
+
 **Images:**
 
-| # | Directory | Layer |
+| # | Read — first match wins | Write — first writable |
 |---|---|---|
-| 1 | `$CNT_EXTRA_ROOT/images/` (group/lab) | `extra-root` |
-| 2 | `$CNT_ROOT/images/` or `<install>/images/` | `app-root` |
-| 3 | `$SCRATCH/condatainer/images/` | `user` |
-| 4 | `~/.local/share/condatainer/images/` | `user` |
+| 1 | `$SCRATCH/condatainer/images/` (`user`) | `$CNT_EXTRA_ROOT/images/` (`extra-root`) |
+| 2 | `~/.local/share/condatainer/images/` (`user`) | `$CNT_ROOT/images/` or `<install>/images/` (`app-root`) |
+| 3 | `$CNT_EXTRA_ROOT/images/` (`extra-root`) | `$SCRATCH/condatainer/images/` (`user`) |
+| 4 | `$CNT_ROOT/images/` or `<install>/images/` (`app-root`) | `~/.local/share/condatainer/images/` (`user`) |
+
+Order *within* a tier is the same in both directions: scratch before the XDG directory, and a group's own extra-root before a site-wide app-root.
 
 Scratch and the XDG data directory are **two directories in one `user` layer** — scratch is preferred when `$SCRATCH` is set, and `-l u` selects both.
 
@@ -313,7 +317,7 @@ This shows all search paths for:
 - **Build scripts**: Build recipe files
 - **Helper scripts**: Runtime helper scripts
 
-Each path is tagged with its layer — `(extra)`, `(extra-root)`, `(app-root)`, `(user)` — plus whether it exists, is writable, and is the write target.
+Paths are listed in read order (nearest first), each tagged with its layer — `(user)`, `(extra-root)`, `(app-root)` — plus whether it exists, is writable, and is the write target. The write target is generally *not* the first entry: writes start from the furthest-out layer.
 
 ### Directory Structure
 
@@ -535,7 +539,7 @@ The effective `sources` every lookup sees is all three, in **user → group → 
 
 First match wins, like `PATH`. The user was able to *prepend* their collection but cannot remove the group's or system's, so the shared collections stay in every user's resolution order. Confirm it any time with `condatainer config paths`.
 
-Data directories do not merge this way — they come from the fixed tier list (`CNT_EXTRA_ROOT` → app-root → scratch → user), and `condatainer create` writes to the first one it can write.
+Data directories do not merge this way — they come from a fixed tier list read nearest-first (scratch → user → `CNT_EXTRA_ROOT` → app-root), while `condatainer create` writes to the first one it can write in the opposite order. See [Search Priority](#search-priority).
 
 ---
 

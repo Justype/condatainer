@@ -19,8 +19,9 @@ import (
 // =============================================================================
 
 // DataPaths holds the search paths for data directories.
-// Search order: extra-root → root → scratch → user (first match wins for lookups).
-// Write operations go to the first writable path in the same order.
+// Read order: scratch → user → extra-root → root (first match wins for lookups).
+// Write order is the opposite — extra-root → root → scratch → user, first writable —
+// so reads resolve nearest and writes land furthest out. See searchPaths.
 type DataPaths struct {
 	ImagesDirs        []string // Search paths for images
 	HelperScriptsDirs []string // Search paths for helper scripts
@@ -238,50 +239,15 @@ func InitDataPaths() {
 // Search Path Builders (internal, read)
 // =============================================================================
 
-// buildImageSearchPaths builds the search paths for images.
-// Priority: CNT_EXTRA_ROOT → root → scratch → user
-func buildImageSearchPaths() []string {
-	var paths []string
-	seen := make(map[string]bool)
-
-	addPath := func(dir string) {
-		if dir == "" {
-			return
-		}
-		dir = os.ExpandEnv(dir)
-		absDir, err := filepath.Abs(dir)
-		if err != nil {
-			absDir = dir
-		}
-		if !seen[absDir] {
-			seen[absDir] = true
-			paths = append(paths, absDir)
-		}
-	}
-
-	if extraRoot := GetExtraRootDir(); extraRoot != "" {
-		addPath(filepath.Join(extraRoot, "images"))
-	}
-	if rootDir := GetRootDir(); rootDir != "" {
-		addPath(filepath.Join(rootDir, "images"))
-	}
-	if scratchDir := GetScratchDataDir(); scratchDir != "" {
-		addPath(filepath.Join(scratchDir, "images"))
-	}
-	if userDir := GetUserDataDir(); userDir != "" {
-		addPath(filepath.Join(userDir, "images"))
-	}
-
-	return paths
-}
-
-// helperScriptSearchPaths builds the search paths for helper scripts.
-// Priority: CNT_EXTRA_ROOT → root → scratch → user
+// searchPaths builds the read search order for subdir across every data tier:
+// personal (scratch → user) before shared (CNT_EXTRA_ROOT → root).
 //
-// Recipes have no equivalent: they come from the catalog's `sources`, not from a
-// data directory.
-func helperScriptSearchPaths() []string {
-	const subdir = "helper-scripts"
+// Reads go nearest-first and writes go furthest-first (see imageWriteDirs), so a
+// build lands as far out as permissions allow — one copy serving the whole group —
+// while the person who wants their own version of a name just builds it into their
+// own directory and has it win for them. Order *within* a tier is the same in both
+// directions: scratch before user, and a group's own extra-root before a site root.
+func searchPaths(subdir string) []string {
 	var paths []string
 	seen := make(map[string]bool)
 
@@ -300,21 +266,32 @@ func helperScriptSearchPaths() []string {
 		}
 	}
 
-	if extraRoot := GetExtraRootDir(); extraRoot != "" {
-		addPath(filepath.Join(extraRoot, subdir))
-	}
-	if rootDir := GetRootDir(); rootDir != "" {
-		addPath(filepath.Join(rootDir, subdir))
-	}
 	if scratchDir := GetScratchDataDir(); scratchDir != "" {
 		addPath(filepath.Join(scratchDir, subdir))
 	}
 	if userDir := GetUserDataDir(); userDir != "" {
 		addPath(filepath.Join(userDir, subdir))
 	}
+	if extraRoot := GetExtraRootDir(); extraRoot != "" {
+		addPath(filepath.Join(extraRoot, subdir))
+	}
+	if rootDir := GetRootDir(); rootDir != "" {
+		addPath(filepath.Join(rootDir, subdir))
+	}
 
 	return paths
 }
+
+// buildImageSearchPaths builds the search paths for images.
+// Priority: scratch → user → CNT_EXTRA_ROOT → root
+func buildImageSearchPaths() []string { return searchPaths("images") }
+
+// helperScriptSearchPaths builds the search paths for helper scripts.
+// Priority: scratch → user → CNT_EXTRA_ROOT → root
+//
+// Recipes have no equivalent: they come from the catalog's `sources`, not from a
+// data directory.
+func helperScriptSearchPaths() []string { return searchPaths("helper-scripts") }
 
 // =============================================================================
 // Data Layers
@@ -346,9 +323,9 @@ func ParseDataLayer(s string) (DataLayer, error) {
 }
 
 // ClassifyDataDir reports which layer a data directory belongs to, by comparing
-// its parent against each tier root. Tiers are checked in search-path order, so a
-// directory shared by two tiers (e.g. CNT_ROOT == $SCRATCH/condatainer) is
-// labelled with the higher-priority one, matching how lookups resolve it.
+// its parent against each tier root. A directory shared by two tiers (e.g.
+// CNT_ROOT == $SCRATCH/condatainer) is labelled with the shared one, which is what
+// decides whether writes may land there — not with whichever tier reads it first.
 // Every search path belongs to a tier; LayerUnknown is for a path from elsewhere.
 func ClassifyDataDir(path string) DataLayer {
 	parent := filepath.Clean(filepath.Dir(filepath.Clean(path)))

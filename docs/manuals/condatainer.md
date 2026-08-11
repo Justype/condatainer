@@ -700,7 +700,7 @@ Same as `avail` (single term: substring/wildcard/regex; multiple terms: exact-fi
 
 **Features:**
 
-* Output is grouped by image directory with a full-width header per directory, tagged with its data layer — `(app-root)`, `(extra-root)`, `(user)`, or `(extra)`. The same overlay may appear under several directories; the highest-priority copy is the one commands resolve by name.
+* Output is grouped by image directory with a full-width header per directory, tagged with its data layer — `(user)`, `(extra-root)`, or `(app-root)`. Directories appear in read order, nearest first. The same overlay may appear under several directories; the nearest copy is the one commands resolve by name, so a personal rebuild wins over a shared one.
 * Lists OS overlays, app overlays, and data overlays.
 * Missing directories are skipped; existing but empty directories show a `(no overlays)` line.
 * Exits with code `1` if search terms are given but no overlays match.
@@ -1614,13 +1614,13 @@ condatainer config init [-l|--layer user|app-root|extra-root|system]
 
 ### Config Paths
 
-Show data search paths for images, build scripts, and helper scripts, in priority order.
+Show data search paths for images, build scripts, and helper scripts, in read order (nearest first). Writes go the opposite way, to the first writable directory starting from the furthest-out layer.
 
 ```
 condatainer config paths
 ```
 
-Each entry is tagged with its data layer — `(extra)`, `(extra-root)`, `(app-root)`, `(user)` — and its status, including which directory receives writes:
+Each entry is tagged with its data layer — `(user)`, `(extra-root)`, `(app-root)` — and its status, including which directory receives writes:
 
 ```
 Images:

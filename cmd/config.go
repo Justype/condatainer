@@ -257,11 +257,16 @@ Configuration file priority (highest to lowest):
   6. System config file (/etc/condatainer/config.yaml)
   7. Defaults
 
-Data directory priority (for read/write operations):
-  1. Extra-root directory ($CNT_EXTRA_ROOT, group layer)
-  2. App-root directory (auto-detected or CNT_ROOT)
-  3. User scratch directory ($SCRATCH/condatainer, HPC systems)
-  4. User XDG directory (~/.local/share/condatainer)`,
+Data directory priority — reads go nearest-first, writes furthest-first:
+
+  read (first match wins)          write (first writable)
+  1. Scratch ($SCRATCH)            1. Extra-root ($CNT_EXTRA_ROOT, group layer)
+  2. User XDG (~/.local/share)     2. App-root (auto-detected or CNT_ROOT)
+  3. Extra-root ($CNT_EXTRA_ROOT)  3. Scratch ($SCRATCH/condatainer)
+  4. App-root (auto-detected)      4. User XDG (~/.local/share/condatainer)
+
+A build lands as far out as permissions allow, so one copy serves the group;
+build into your own directory to have your version win for you.`,
 }
 
 var configShowCmd = &cobra.Command{
@@ -886,14 +891,15 @@ var configPathsCmd = &cobra.Command{
 	Short: "Show data search paths",
 	Long: `Show all search paths for images and helper-scripts.
 
-Search paths are checked in priority order (first match wins for reads):
-  1. Extra-root ($CNT_EXTRA_ROOT, group layer)
-  2. App-root (auto-detected or $CNT_ROOT)
-  3. Scratch (user HPC large storage, $SCRATCH/condatainer)
-  4. User XDG directory (~/.local/share/condatainer)
+Search paths are checked nearest-first (first match wins for reads):
+  1. Scratch (user HPC large storage, $SCRATCH/condatainer)
+  2. User XDG directory (~/.local/share/condatainer)
+  3. Extra-root ($CNT_EXTRA_ROOT, group layer)
+  4. App-root (auto-detected or $CNT_ROOT)
 
-Write operations use the first writable directory in the same order.
-App-root is preferred for group/shared use, user is the fallback.`,
+Write operations take the first writable directory in the reverse order —
+extra-root, app-root, scratch, user — so a build lands as far out as
+permissions allow and one copy serves the whole group.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// pathStatus returns inline status tags for a search-path entry.
 		// writeTarget is the resolved writable directory for this section (empty = not applicable).

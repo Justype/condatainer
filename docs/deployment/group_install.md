@@ -93,7 +93,7 @@ The shared root is in everyone's search path, so:
 - **Build scripts** in `build-scripts/` appear in everyone's `condatainer avail`.
 - **Helper scripts** in `helper-scripts/` are launchable by everyone. `condatainer helper`
 
-Writes go to the first *writable* directory in the search order ([Data Layers](./data_layers.md)). If a member's builds land in their own scratch instead of the shared root, check that the shared directory is still group-writable with the setgid bit set ([step 1](#1-pick-a-directory)).
+Writes go to the first *writable* directory in the write order, which starts at the furthest-out shared layer ([Data Layers](./data_layers.md)). If a member's builds land in their own scratch instead of the shared root, check that the shared directory is still group-writable with the setgid bit set ([step 1](#1-pick-a-directory)).
 
 ## Related
 
