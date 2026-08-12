@@ -57,6 +57,10 @@ type SourceSpec struct {
 	// answers are execution input and are never recorded — this says only that a
 	// rebuild needs a human.
 	RequiresInput bool
+	// Repository is the collection's repository, recorded as manifest
+	// build.source. Empty for a Conda build, a local file, or a collection that
+	// declares none.
+	Repository string
 }
 
 // SourceFile is a build input captured during resolution, already expanded.
@@ -254,15 +258,17 @@ func (s Spec) sourceBlock() meta.Source {
 	}
 }
 
-// buildBlock is what the build knew and the source does not say.
+// buildBlock is what the build knew and the recipe does not say. Created is not
+// set here: a timestamp is not in Spec, so stageMetadata stamps it.
 func (s Spec) buildBlock() meta.Build {
+	block := meta.Build{Source: s.Source.Repository}
 	switch {
 	case s.Source.Conda != nil:
-		return meta.Build{Channels: s.Source.Conda.Channels}
+		block.Channels = s.Source.Conda.Channels
 	case s.Source.Definition != nil:
-		return meta.Build{From: s.Source.Definition.From}
+		block.From = s.Source.Definition.From
 	}
-	return meta.Build{}
+	return block
 }
 
 // UpstreamDigest returns what the definition's bootstrap reference resolved to.

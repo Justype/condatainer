@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/image/tool"
@@ -66,10 +67,12 @@ func (k KeyRef) Empty() bool { return k.Scheme == "" && k.SHA256 == "" }
 // list is adjacency only: following each manifest's own through the capsule
 // reconstructs the graph without a second representation of it.
 type Dependency struct {
-	Name     string       `json:"name"`
-	Type     catalog.Type `json:"type"`
-	Identity string       `json:"identity,omitempty"`
-	Equiv    string       `json:"equiv,omitempty"`
+	Name string       `json:"name"`
+	Type catalog.Type `json:"type"`
+	// Identity and Equiv are complete keys, scheme and SHA-256 both, so an edge
+	// is held to the same contract as the artifact it points at.
+	Identity KeyRef `json:"identity,omitzero"`
+	Equiv    KeyRef `json:"equiv,omitzero"`
 	// Records is "unrecorded" when the image that satisfied this dependency
 	// carried no keys of its own, which is every image built before this format.
 	Records string `json:"records,omitempty"`
@@ -88,7 +91,7 @@ const (
 // Unrecorded marks a dependency satisfied by an image carrying no scheme-backed keys.
 const Unrecorded = "unrecorded"
 
-// Build is what the build knew that the source does not say.
+// Build is what the build knew that the recipe does not say.
 type Build struct {
 	// Tools identify the implementations that performed the build. They are
 	// diagnostic provenance only: key schemes select their own inputs and do not
@@ -102,6 +105,13 @@ type Build struct {
 	// From is the upstream image a definition bootstrapped from. Nil when there
 	// is no upstream.
 	From *From `json:"from,omitzero"`
+	// Source is the repository of the collection that supplied the recipe, empty
+	// when it declares none. Never the local handle, which names nothing outside
+	// one installation's config.
+	Source string `json:"source,omitempty"`
+	// Created is when the build finished. The SquashFS superblock time is not
+	// usable instead: a reproducible build pins it, and a SIF has none.
+	Created time.Time `json:"created,omitzero"`
 }
 
 // BuildTools are the tools Condatainer directly used for a build. Apptainer

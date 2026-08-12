@@ -88,7 +88,7 @@ func (b *BuildObject) composeCapsule(ctx context.Context) error {
 	deps := make([]capsule.Dep, 0, len(b.dependencies))
 	for _, dep := range b.dependencies {
 		entry := capsule.Dep{Name: dep.Name, Identity: dep.Identity}
-		if dep.Identity != "" {
+		if !dep.Identity.Empty() {
 			paths, err := container.ResolveOverlayPaths([]string{dep.Name})
 			if err != nil || len(paths) == 0 {
 				logging.FromContext(ctx).Warn("dependency vanished before its provenance was read", "dep", dep.Name)
@@ -136,8 +136,8 @@ func (b *BuildObject) dependencyKeys(ctx context.Context) []key.Dep {
 			continue
 		}
 		dep.Type = manifest.Type
-		dep.Identity = manifest.Keys.Identity.Digest()
-		dep.Equiv = manifest.Keys.Equiv.Digest()
+		dep.Identity = manifest.Keys.Identity
+		dep.Equiv = manifest.Keys.Equiv
 		out = append(out, dep)
 	}
 	return out

@@ -51,7 +51,8 @@ func scriptEquivDependenciesV1(name string, deps []Dep) []DependencyValue {
 		case meta.RoleData:
 			if dep.Recorded() {
 				out = append(out, DependencyValue{
-					Type: catalog.TypeData, Fields: []string{dep.Equiv},
+					Type:   catalog.TypeData,
+					Fields: []string{dep.Equiv.Scheme, dep.Equiv.Digest()},
 				})
 			} else {
 				out = append(out, DependencyValue{

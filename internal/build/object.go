@@ -1084,6 +1084,7 @@ func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (
 	source.Placeholders = selectedPlaceholders(recipe)
 	source.TargetTemplate = recipe.TargetTemplate
 	source.RequiresInput = len(recipe.Inputs) > 0
+	source.Repository = match.Source.Desc.Repository
 	base.spec.Source = source
 	base.embedSource(SourceFile{Name: meta.RecipeFileName, Data: recipe.Text})
 	slog.Default().Debug("materialized recipe", "path", path, "source", match.Source.Name)

@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/logging"
@@ -21,6 +22,9 @@ func metaDirPath(b *BuildObject) string {
 // root. Staging is the last point invalid metadata can still stop the build.
 func stageMetadata(ctx context.Context, b *BuildObject) (string, error) {
 	manifest := b.Manifest()
+	// Stamped here, not in Manifest(), which must stay a projection of Spec.
+	// Staging is when the payload is final, so this is the build's finish time.
+	manifest.Build.Created = time.Now().UTC()
 	if err := meta.ValidateManifest(manifest); err != nil {
 		return "", fmt.Errorf("refusing to pack %s: %w", b.spec.Image.Name, err)
 	}

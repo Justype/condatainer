@@ -44,14 +44,11 @@ func scriptIdentityDependenciesV1(deps []Dep) []DependencyValue {
 	}
 	out := make([]DependencyValue, 0, len(deps))
 	for _, dep := range deps {
-		identity := dep.Identity
-		if !dep.Recorded() {
-			identity = meta.Unrecorded
+		fields := []string{dep.Name, meta.Unrecorded}
+		if dep.Recorded() {
+			fields = []string{dep.Name, dep.Identity.Scheme, dep.Identity.Digest()}
 		}
-		out = append(out, DependencyValue{
-			Type:   dep.Type,
-			Fields: []string{dep.Name, identity},
-		})
+		out = append(out, DependencyValue{Type: dep.Type, Fields: fields})
 	}
 	return out
 }

@@ -1,11 +1,13 @@
 package build
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
@@ -57,22 +59,46 @@ func TestStageMetadataWritesBothDocuments(t *testing.T) {
 		t.Errorf("staged into %q, want a directory named %q", dir, meta.DirName)
 	}
 
-	manifest, err := meta.MarshalManifest(b.Manifest())
-	if err != nil {
-		t.Fatal(err)
-	}
 	runtime, err := meta.MarshalRuntime(b.Runtime())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for file, want := range map[string][]byte{meta.FileName: manifest, meta.RuntimeFileName: runtime} {
-		data, err := os.ReadFile(filepath.Join(dir, file))
-		if err != nil {
-			t.Fatalf("reading staged %s: %v", file, err)
-		}
-		if string(data) != string(want) {
-			t.Errorf("staged %s = %s, want %s", file, data, want)
-		}
+	data, err := os.ReadFile(filepath.Join(dir, meta.RuntimeFileName))
+	if err != nil {
+		t.Fatalf("reading staged %s: %v", meta.RuntimeFileName, err)
+	}
+	if string(data) != string(runtime) {
+		t.Errorf("staged %s = %s, want %s", meta.RuntimeFileName, data, runtime)
+	}
+
+	// The manifest is not compared byte for byte: staging stamps build.created,
+	// which Manifest() deliberately does not carry. Check the stamp, then clear
+	// it and hold the rest to the projection.
+	data, err = os.ReadFile(filepath.Join(dir, meta.FileName))
+	if err != nil {
+		t.Fatalf("reading staged %s: %v", meta.FileName, err)
+	}
+	var staged meta.Manifest
+	if err := json.Unmarshal(data, &staged); err != nil {
+		t.Fatalf("staged manifest is not JSON: %v", err)
+	}
+	if staged.Build.Created.IsZero() {
+		t.Error("staging did not stamp build.created")
+	} else if since := time.Since(staged.Build.Created); since < 0 || since > time.Minute {
+		t.Errorf("build.created = %s, %s away from now", staged.Build.Created, since)
+	}
+	staged.Build.Created = time.Time{}
+
+	want, err := meta.MarshalManifest(b.Manifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := meta.MarshalManifest(staged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("staged %s = %s, want %s", meta.FileName, got, want)
 	}
 }
 

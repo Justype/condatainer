@@ -12,9 +12,9 @@ import (
 
 func TestScriptSchemesHaveCanonicalPreimages(t *testing.T) {
 	recipe := []byte("#TARGET:data/{v}\n#PH:v:1,2\n#ENV:B={prefix}/b\n#ENV:A={v}\necho {v}\n")
-	starID, starEq := Digest([]byte("star-id")), Digest([]byte("star-eq"))
-	samID, samEq := Digest([]byte("sam-id")), Digest([]byte("sam-eq"))
-	genomeID, genomeEq := Digest([]byte("genome-id")), Digest([]byte("genome-eq"))
+	starID, starEq := idKey("star-id"), eqKey("star-eq")
+	samID, samEq := idKey("sam-id"), eqKey("sam-eq")
+	genomeID, genomeEq := idKey("genome-id"), eqKey("genome-eq")
 	m := meta.Manifest{
 		SchemaVersion: meta.SchemaVersion,
 		Name:          "data/1/star/1",
@@ -42,9 +42,9 @@ func TestScriptSchemesHaveCanonicalPreimages(t *testing.T) {
 		"env=B={prefix}/b",
 		"recipe=" + RecipeDigest(recipe),
 		"ph=v=1",
-		"dep=app samtools/1 " + samID,
-		"dep=app star/1 " + starID,
-		"dep=data genome/1 " + genomeID,
+		"dep=app samtools/1 " + keyText(samID),
+		"dep=app star/1 " + keyText(starID),
+		"dep=data genome/1 " + keyText(genomeID),
 		"",
 	}, "\n")
 	wantEquiv := strings.Join([]string{
@@ -54,7 +54,7 @@ func TestScriptSchemesHaveCanonicalPreimages(t *testing.T) {
 		"recipe=" + RecipeDigest(recipe),
 		"ph=v=1",
 		"dep=app star/1",
-		"dep=data " + genomeEq,
+		"dep=data " + keyText(genomeEq),
 		"",
 	}, "\n")
 	if string(got.Identity.Preimage) != wantIdentity {

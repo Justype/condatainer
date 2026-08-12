@@ -25,7 +25,7 @@ func requireSquashfsTools(t *testing.T) {
 
 // depImage packs an image carrying the metadata a dependency would, plus any
 // capsule entries of its own.
-func depImage(t *testing.T, name string, files map[string]string, inherited map[string]string, complete bool) (string, string) {
+func depImage(t *testing.T, name string, files map[string]string, inherited map[string]string, complete bool) (string, meta.KeyRef) {
 	t.Helper()
 	root := t.TempDir()
 	cnt := filepath.Join(root, meta.DirName)
@@ -92,7 +92,7 @@ func depImage(t *testing.T, name string, files map[string]string, inherited map[
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("mksquashfs: %v\n%s", err, output)
 	}
-	return out, manifest.Keys.Identity.Digest()
+	return out, manifest.Keys.Identity
 }
 
 func TestEntryName(t *testing.T) {
@@ -151,7 +151,7 @@ func TestComposeUnionsRecordsAndInheritedEntries(t *testing.T) {
 	for _, e := range entries {
 		dirs = append(dirs, e.Dir)
 	}
-	want := []string{"grch38--genome--gencode@aaaabbbbcccc", EntryName("grch38/gtf-gencode/49", identity)}
+	want := []string{"grch38--genome--gencode@aaaabbbbcccc", EntryName("grch38/gtf-gencode/49", identity.Digest())}
 	if !slices.Equal(dirs, want) {
 		t.Fatalf("entries = %v, want %v", dirs, want)
 	}

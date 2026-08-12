@@ -10,6 +10,20 @@ import (
 
 func digestOf(s string) string { return Digest([]byte(s)) }
 
+// idKey and eqKey build the complete keys a dependency advertises. Both halves
+// reach the preimage, so one digest under two schemes is two different edges.
+func idKey(s string) meta.KeyRef {
+	return meta.KeyRef{Scheme: string(ScriptIdentityV1), SHA256: Sum([]byte(s))}
+}
+
+func eqKey(s string) meta.KeyRef {
+	return meta.KeyRef{Scheme: string(ScriptEquivV1), SHA256: Sum([]byte(s))}
+}
+
+// keyText renders a complete key as it appears inside a dep= line: scheme first,
+// then digest. Written out here so a preimage change has to be made on purpose.
+func keyText(k meta.KeyRef) string { return k.Scheme + " " + k.Digest() }
+
 // starIndex is the worked example: a STAR index whose name mentions the tool
 // that produced it, built against a GTF dataset and two apps.
 func starIndex() Artifact {
@@ -20,9 +34,9 @@ func starIndex() Artifact {
 		Recipe:       []byte("#DESC:x\nSTAR --runMode genomeGenerate\n"),
 		Placeholders: map[string]string{"star_version": "2.7.11b", "read_length": "101"},
 		Deps: []Dep{
-			{Name: "star/2.7.11b", Type: catalog.TypeApp, Identity: digestOf("star id"), Equiv: digestOf("star eq")},
-			{Name: "samtools/1.23.1", Type: catalog.TypeApp, Identity: digestOf("sam id"), Equiv: digestOf("sam eq")},
-			{Name: "grch38/gtf-gencode/49", Type: catalog.TypeData, Identity: digestOf("gtf id"), Equiv: digestOf("gtf eq")},
+			{Name: "star/2.7.11b", Type: catalog.TypeApp, Identity: idKey("star id"), Equiv: eqKey("star eq")},
+			{Name: "samtools/1.23.1", Type: catalog.TypeApp, Identity: idKey("sam id"), Equiv: eqKey("sam eq")},
+			{Name: "grch38/gtf-gencode/49", Type: catalog.TypeData, Identity: idKey("gtf id"), Equiv: eqKey("gtf eq")},
 		},
 	}
 }
@@ -77,9 +91,9 @@ func TestSchemeRulesProjectDependencies(t *testing.T) {
 
 	id := lines(t, identity)
 	for _, want := range []string{
-		"dep=app star/2.7.11b " + digestOf("star id"),
-		"dep=app samtools/1.23.1 " + digestOf("sam id"),
-		"dep=data grch38/gtf-gencode/49 " + digestOf("gtf id"),
+		"dep=app star/2.7.11b " + keyText(idKey("star id")),
+		"dep=app samtools/1.23.1 " + keyText(idKey("sam id")),
+		"dep=data grch38/gtf-gencode/49 " + keyText(idKey("gtf id")),
 	} {
 		if !has(id, want) {
 			t.Errorf("identity missing %q:\n%s", want, strings.Join(id, "\n"))
@@ -99,7 +113,7 @@ func TestSchemeRulesProjectDependencies(t *testing.T) {
 		}
 	}
 	// A data dependency contributes its equivalence and no name.
-	if !has(eq, "dep=data "+digestOf("gtf eq")) {
+	if !has(eq, "dep=data "+keyText(eqKey("gtf eq"))) {
 		t.Errorf("equiv missing the data dependency:\n%s", strings.Join(eq, "\n"))
 	}
 	for _, line := range eq {
@@ -217,8 +231,8 @@ func TestWhatMovesEachKey(t *testing.T) {
 
 	t.Run("a history-only dependency moves identity alone", func(t *testing.T) {
 		a := starIndex()
-		a.Deps[1].Identity = digestOf("samtools rebuilt")
-		a.Deps[1].Equiv = digestOf("samtools rebuilt eq")
+		a.Deps[1].Identity = idKey("samtools rebuilt")
+		a.Deps[1].Equiv = eqKey("samtools rebuilt eq")
 		id, eq := keys(a)
 		if id == baseID {
 			t.Error("identity did not move")
@@ -230,8 +244,8 @@ func TestWhatMovesEachKey(t *testing.T) {
 
 	t.Run("rebuilding a named app at the same version moves identity alone", func(t *testing.T) {
 		a := starIndex()
-		a.Deps[0].Identity = digestOf("star rebuilt")
-		a.Deps[0].Equiv = digestOf("star rebuilt eq")
+		a.Deps[0].Identity = idKey("star rebuilt")
+		a.Deps[0].Equiv = eqKey("star rebuilt eq")
 		id, eq := keys(a)
 		if id == baseID {
 			t.Error("identity did not move")
@@ -243,8 +257,8 @@ func TestWhatMovesEachKey(t *testing.T) {
 
 	t.Run("a data dependency's equivalence moves both", func(t *testing.T) {
 		a := starIndex()
-		a.Deps[2].Identity = digestOf("gtf id 2")
-		a.Deps[2].Equiv = digestOf("gtf eq 2")
+		a.Deps[2].Identity = idKey("gtf id 2")
+		a.Deps[2].Equiv = eqKey("gtf eq 2")
 		id, eq := keys(a)
 		if id == baseID || eq == baseEq {
 			t.Error("a data dependency change did not move both keys")
@@ -314,7 +328,7 @@ func TestProjectionFollowsTheName(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := Dep{Name: tt.dep, Type: catalog.TypeApp, Identity: digestOf("x"), Equiv: digestOf("y")}
+			d := Dep{Name: tt.dep, Type: catalog.TypeApp, Identity: idKey("x"), Equiv: eqKey("y")}
 			if got := Role(tt.artifact, d); got != tt.wantRole {
 				t.Errorf("Role = %q, want %q", got, tt.wantRole)
 			}
@@ -339,14 +353,14 @@ func TestOSDependencyProjectsLikeAnApp(t *testing.T) {
 		Type:   catalog.TypeData,
 		Recipe: []byte("echo\n"),
 		Deps: []Dep{
-			{Name: "ubuntu24/pytorch/2.9", Type: catalog.TypeOS, Identity: digestOf("os id"), Equiv: digestOf("os eq")},
+			{Name: "ubuntu24/pytorch/2.9", Type: catalog.TypeOS, Identity: idKey("os id"), Equiv: eqKey("os eq")},
 		},
 	}
 	identity, equiv, err := deriveModelsForTest(a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !has(lines(t, identity), "dep=os ubuntu24/pytorch/2.9 "+digestOf("os id")) {
+	if !has(lines(t, identity), "dep=os ubuntu24/pytorch/2.9 "+keyText(idKey("os id"))) {
 		t.Errorf("identity:\n%s", strings.Join(lines(t, identity), "\n"))
 	}
 	if !has(lines(t, equiv), "dep=os ubuntu24/pytorch/2.9") {
@@ -357,7 +371,7 @@ func TestOSDependencyProjectsLikeAnApp(t *testing.T) {
 func TestSchemeRulesRejectInvalidSubject(t *testing.T) {
 	app := Artifact{
 		Name: "samtools/1.23.1", Type: catalog.TypeApp, Recipe: []byte("echo\n"),
-		Deps: []Dep{{Name: "zlib/1.3", Type: catalog.TypeApp, Identity: digestOf("z")}},
+		Deps: []Dep{{Name: "zlib/1.3", Type: catalog.TypeApp, Identity: idKey("z")}},
 	}
 	if _, _, err := deriveModelsForTest(app); err == nil {
 		t.Error("an app was given dependencies")
@@ -368,7 +382,7 @@ func TestSchemeRulesRejectInvalidSubject(t *testing.T) {
 // pair is all-or-nothing, so an image offering one key counts as unrecorded.
 func TestHalfRecordedDependencyIsUnrecorded(t *testing.T) {
 	a := starIndex()
-	a.Deps = []Dep{{Name: "grch38/gtf-gencode/49", Type: catalog.TypeData, Identity: digestOf("only identity")}}
+	a.Deps = []Dep{{Name: "grch38/gtf-gencode/49", Type: catalog.TypeData, Identity: idKey("only identity")}}
 
 	identity, equiv, err := deriveModelsForTest(a)
 	if err != nil {
@@ -386,7 +400,7 @@ func TestHalfRecordedDependencyIsUnrecorded(t *testing.T) {
 	if len(deps) != 1 || deps[0].Records != meta.Unrecorded {
 		t.Errorf("dependencies = %+v", deps)
 	}
-	if deps[0].Identity != digestOf("only identity") {
+	if deps[0].Identity != idKey("only identity") {
 		t.Error("the manifest dropped the one key that was known")
 	}
 	if complete == nil || *complete {

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Justype/condatainer/catalog"
 )
@@ -99,6 +100,55 @@ func TestManifestBuildToolsRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Build.Tools, m.Build.Tools) {
 		t.Errorf("tools = %+v, want %+v", got.Build.Tools, m.Build.Tools)
+	}
+}
+
+// build.source and build.created are omitted when unset, so an artifact from a
+// collection that declares no repository publishes no image.source rather than
+// an empty one.
+//
+// Absence is checked structurally, not by searching the JSON text: build.source
+// and the top-level source block are different keys that share a name, and a
+// substring match cannot tell them apart.
+func TestManifestBuildProvenanceRoundTrip(t *testing.T) {
+	bare, err := MarshalManifest(validManifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var empty struct {
+		Build map[string]any `json:"build"`
+	}
+	if err := json.Unmarshal(bare, &empty); err != nil {
+		t.Fatal(err)
+	}
+	for _, absent := range []string{"source", "created"} {
+		if _, ok := empty.Build[absent]; ok {
+			t.Errorf("manifest emitted build.%s while unset:\n%s", absent, bare)
+		}
+	}
+
+	m := validManifest()
+	m.Build.Source = "https://github.com/Justype/cnt-scripts"
+	m.Build.Created = time.Date(2026, 7, 21, 9, 30, 0, 0, time.UTC)
+
+	data, err := MarshalManifest(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// RFC 3339 is what org.opencontainers.image.created requires.
+	if !strings.Contains(string(data), `"created": "2026-07-21T09:30:00Z"`) {
+		t.Errorf("created is not RFC 3339:\n%s", data)
+	}
+
+	var got Manifest
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Build.Source != m.Build.Source {
+		t.Errorf("build.source = %q, want %q", got.Build.Source, m.Build.Source)
+	}
+	if !got.Build.Created.Equal(m.Build.Created) {
+		t.Errorf("created = %s, want %s", got.Build.Created, m.Build.Created)
 	}
 }
 

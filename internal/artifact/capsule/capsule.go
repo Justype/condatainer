@@ -40,8 +40,10 @@ var ErrInvalid = errors.New("invalid provenance capsule")
 // Dep is one direct dependency to compose from: what it is called, what it says
 // its identity is, and the image to read it out of.
 type Dep struct {
-	Name      string
-	Identity  string // sha256:<hex>; empty when the image carries no records
+	Name string
+	// Identity is the complete key, empty when the image carries no records.
+	// Composition compares both halves.
+	Identity  meta.KeyRef
 	ImagePath string
 }
 
@@ -76,7 +78,7 @@ func Compose(metaDir string, deps []Dep) (complete bool, err error) {
 
 	dest := filepath.Join(metaDir, DirName)
 	for _, dep := range deps {
-		if dep.Identity == "" {
+		if dep.Identity.Empty() {
 			// Nothing to copy and nothing to name it: an unrecorded dependency
 			// is recorded in the manifest and the records, not here.
 			complete = false
@@ -115,10 +117,10 @@ func composeOne(dest string, dep Dep) (complete bool, err error) {
 	if err != nil {
 		return false, fmt.Errorf("cannot verify provenance from %s: %w", dep.Name, err)
 	}
-	if manifest.Name != dep.Name || derived.Identity.Ref.Digest() != dep.Identity {
+	if manifest.Name != dep.Name || derived.Identity.Ref != dep.Identity {
 		return false, fmt.Errorf("provenance from %s does not match the selected identity", dep.Name)
 	}
-	entry := filepath.Join(dest, EntryName(dep.Name, dep.Identity))
+	entry := filepath.Join(dest, EntryName(dep.Name, dep.Identity.Digest()))
 	if err := utils.MkdirAllShared(entry); err != nil {
 		return false, err
 	}

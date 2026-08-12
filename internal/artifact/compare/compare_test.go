@@ -142,6 +142,12 @@ func read(t *testing.T, b build) Artifact {
 
 const starRecipe = "#TARGET:grch38/star/2.7.11b/gencode{gencode_version}\n#PH:gencode_version:47,49\n#ENV:STAR_INDEX={prefix}/index  ## for --genomeDir\n#DESC:index\nSTAR --runMode genomeGenerate\n"
 
+// depKey is a dependency's complete key. Comparison holds an edge to both
+// halves, so a fixture that supplied only a digest would not exercise it.
+func depKey(scheme key.Scheme, seed string) meta.KeyRef {
+	return meta.KeyRef{Scheme: string(scheme), SHA256: key.Sum([]byte(seed))}
+}
+
 func starIndex() build {
 	return build{
 		name:   "grch38/star/2.7.11b/gencode49",
@@ -151,9 +157,9 @@ func starIndex() build {
 		ph:     map[string]string{"gencode_version": "49"},
 		deps: []key.Dep{
 			{Name: "star/2.7.11b", Type: catalog.TypeApp,
-				Identity: key.Digest([]byte("star id")), Equiv: key.Digest([]byte("star eq"))},
+				Identity: depKey(key.ScriptIdentityV1, "star id"), Equiv: depKey(key.ScriptEquivV1, "star eq")},
 			{Name: "samtools/1.23.1", Type: catalog.TypeApp,
-				Identity: key.Digest([]byte("sam id")), Equiv: key.Digest([]byte("sam eq"))},
+				Identity: depKey(key.ScriptIdentityV1, "sam id"), Equiv: depKey(key.ScriptEquivV1, "sam eq")},
 		},
 	}
 }
@@ -170,8 +176,8 @@ func TestVerdicts(t *testing.T) {
 
 	t.Run("a rebuilt history-only dependency is equivalent", func(t *testing.T) {
 		b := starIndex()
-		b.deps[1].Identity = key.Digest([]byte("samtools rebuilt"))
-		b.deps[1].Equiv = key.Digest([]byte("samtools rebuilt eq"))
+		b.deps[1].Identity = depKey(key.ScriptIdentityV1, "samtools rebuilt")
+		b.deps[1].Equiv = depKey(key.ScriptEquivV1, "samtools rebuilt eq")
 
 		got := Compare(want, read(t, b))
 		if got.Verdict != Equivalent {

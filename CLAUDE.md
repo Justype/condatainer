@@ -67,14 +67,22 @@ the recipe is embedded and executed byte for byte.
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 
-## Data Directory Search Order
+## Data Directory Order
 
-1. `CNT_EXTRA_ROOT` (group/lab root, env only)
-2. `CNT_ROOT` / `<install-dir>/` (app-root, auto-detected)
-3. `$SCRATCH/condatainer/`
-4. `~/.local/share/condatainer/`
+Reads go nearest-first, writes furthest-first — opposite directions, same four tiers.
 
-Each contains `images/` and `helper-scripts/`. Writes go to first writable dir.
+| | read (first match wins) | write (first writable) |
+|---|---|---|
+| 1 | `$SCRATCH/condatainer/` | `CNT_EXTRA_ROOT` (group/lab root, env only) |
+| 2 | `~/.local/share/condatainer/` | `CNT_ROOT` / `<install-dir>/` (app-root, auto-detected) |
+| 3 | `CNT_EXTRA_ROOT` | `$SCRATCH/condatainer/` |
+| 4 | `CNT_ROOT` / `<install-dir>/` | `~/.local/share/condatainer/` |
+
+A build lands as far out as permissions allow, so one copy serves the whole group;
+anyone who wants their own version of a name builds it into their own directory and
+has it win for them. Order *within* a tier is the same both ways.
+
+Each contains `images/` and `helper-scripts/`.
 Recipes are not searched here — they come from the ordered `sources` list.
 
 ## Helper Scripts

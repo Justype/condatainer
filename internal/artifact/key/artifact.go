@@ -26,14 +26,15 @@ type Artifact struct {
 type Dep struct {
 	Name     string
 	Type     catalog.Type
-	Identity string
-	Equiv    string
+	Identity meta.KeyRef
+	Equiv    meta.KeyRef
 	// Role is empty while a build is deciding policy and frozen in a manifest.
 	Role string
 }
 
-// Recorded reports whether both keys needed to describe a dependency exist.
-func (d Dep) Recorded() bool { return d.Identity != "" && d.Equiv != "" }
+// Recorded reports whether both keys needed to describe a dependency exist,
+// each complete: a scheme without a digest, or the reverse, describes nothing.
+func (d Dep) Recorded() bool { return d.Identity.Digest() != "" && d.Equiv.Digest() != "" }
 
 // Manifest freezes every direct dependency and the role selected by the current
 // script equivalence scheme. This is explanatory provenance; scheme files

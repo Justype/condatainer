@@ -84,6 +84,29 @@ What the image is and where it came from: identity, build type, description, URL
 and platform. It carries **no runtime block at all** — that lives in
 `runtime.json` and nowhere else.
 
+`dependencies[].identity` and `.equiv` are complete keys — scheme and SHA-256
+both, the same `KeyRef` the top-level `keys` uses. An edge held to a bare digest
+would be a weaker contract than the artifact it points at, and the schemes hash
+both halves, so one digest under two schemes is two different edges.
+
+The `build` block is what the build knew and the recipe does not say: tool
+versions, the Conda channel order a solve used, the upstream image a definition
+bootstrapped from, `build.source` (the repository of the collection that supplied
+the recipe — never the local handle), and `build.created` (when the build
+finished, stamped at staging).
+
+`build.source` and the top-level `source` are different keys that share a name:
+`source` is the embedded files and how to use them, `build.source` is where the
+recipe came from. The name is deliberate — it maps one-to-one onto
+`org.opencontainers.image.source`, which is the annotation it exists to derive.
+
+Everything in `build` is diagnostic provenance. **No scheme hashes it**, with one
+deliberate exception: `build.from.digest` reaches `definition-identity-v1`, which
+is what makes an upstream rebuild a new identity. `build.source` and
+`build.created` in particular must never move a key — the same recipe built from
+a mirror, or built twice, is the same artifact, and the store deduplicates on
+exactly that.
+
 Manifest reads are uncached, because nothing asks for one per `exec`.
 
 ### Not handled

@@ -247,7 +247,7 @@ func describe(d meta.Dependency) string {
 	if d.Records == meta.Unrecorded {
 		return meta.Unrecorded
 	}
-	return short(d.Identity)
+	return short(d.Identity.Digest())
 }
 
 // short trims a digest to the length a human reads, matching capsule addressing.
