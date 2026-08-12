@@ -1,9 +1,3 @@
-// Package registry talks to OCI registries: reference normalization, an
-// authenticated client, and the operations built on them. Resolving a tag to a
-// digest is the first; push and pull are the same transport.
-//
-// Transport only. What a CondaTainer artifact looks like as an OCI artifact
-// belongs above this, so the package never gains an opinion about its cargo.
 package registry
 
 import (
@@ -16,9 +10,6 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/registry/remote"
-	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/credentials"
-	"oras.land/oras-go/v2/registry/remote/retry"
 )
 
 // DefaultTimeout bounds a resolution: an unresolved reference is recoverable, a
@@ -45,7 +36,7 @@ func resolveOn(ctx context.Context, ref string, platform *ocispec.Platform) (str
 	if err != nil {
 		return "", fmt.Errorf("%s is not a usable registry reference: %w", ref, err)
 	}
-	repo.Client = client()
+	repo.Client = newAuthClient()
 
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
@@ -55,16 +46,6 @@ func resolveOn(ctx context.Context, ref string, platform *ocispec.Platform) (str
 		return "", fmt.Errorf("cannot resolve %s: %w", ref, err)
 	}
 	return desc.Digest.String(), nil
-}
-
-// client builds a registry client. Anonymous access is the normal case, so a
-// missing Docker credential store is not an error.
-func client() *auth.Client {
-	c := &auth.Client{Client: retry.DefaultClient, Cache: auth.NewCache()}
-	if store, err := credentials.NewStoreFromDocker(credentials.StoreOptions{}); err == nil {
-		c.Credential = credentials.Credential(store)
-	}
-	return c
 }
 
 // Normalize expands a short reference the way a container runtime does, so

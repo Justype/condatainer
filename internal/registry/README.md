@@ -1,51 +1,77 @@
 # internal/registry
 
-Talks to OCI registries: reference normalization, an authenticated client, and
-the operations built on them. Resolving a tag to a digest is the first one.
+`registry` publishes and fetches immutable CondaTainer artifacts through an OCI
+registry. Registry is who the package talks to; OCI is the wire format it speaks.
+The implementation uses oras-go directly, so compute nodes do not need an `oras`
+binary.
 
-**Transport only.** It knows references, auth, and blobs, not what a recipe or a
-record is. Reading `Bootstrap:`/`From:` out of a definition belongs to
-`internal/build`; deciding what a CondaTainer artifact *is* as an OCI artifact —
-media types, which blob is the payload — belongs above this, the same split
-`image` and `artifact` already use.
+The package has two related entry points:
 
-## Why it exists
+- `Resolve(ctx, ref)` normalizes an upstream container image reference and
+  returns the current machine's platform digest for build provenance.
+- `Publish`, `ResolveArtifact`, `Check`, and `Pull` distribute completed `.sqf`
+  overlays and `.sif` base images. Writable `.img` overlays have no immutable
+  identity and are never distributed.
 
-A tag is a moving target, so two `os` images built months apart from one
-byte-identical definition share a recipe digest while their payloads differ by
-every patch upstream shipped. A definition build resolves its bootstrap reference
-*before* Apptainer runs: the digest goes into the identity record and into the
-definition Apptainer is handed, so the record describes what was actually pulled.
+## Artifact contract
 
-## API
+Overlay and base images have distinct manifest and layer media types. Pull checks
+both before downloading. Artifacts larger than 512 MiB are pushed as ordered
+chunks without writing a second local copy; pull verifies every OCI descriptor,
+checks destination free space, reassembles in manifest order, regenerates the
+embedded identity/equivalence keys, and atomically renames into place.
 
-```go
-digest, err := registry.Resolve(ctx, "ubuntu:24.04")
-// -> "sha256:019e8eb29a85e74d64925745884f2ec79aa27e3feab36353d24656f4d6b89467"
+Native artifacts are children of a multi-platform OCI image index. A `noarch`
+artifact is a plain manifest. `ResolveArtifact` always returns the selected image
+manifest descriptor and its annotations, including its artifact type.
+
+## References
+
+- Versioned artifacts map the final name segment to the tag:
+  `grch38/genome/gencode49` becomes repository `grch38/genome`, tag
+  `gencode49`.
+- Version-less base and two-segment OS artifacts use the complete name as the
+  repository and publish a `YYYYMMDD` date tag plus `latest`.
+- A digest selector (`repository@sha256:...`) addresses exact manifest bytes.
+
+The first tag for a versioned artifact is immutable by default. `Publish` only
+allows replacement with `Force`; adding a previously absent architecture is an
+addition rather than replacement.
+
+## Verification and errors
+
+Annotations are derived only from the embedded manifest. `Check` rejects an
+unsupported metadata schema or a requested name/identity mismatch before payload
+transfer. Pull then verifies that the payload regenerates the published keys
+before installation.
+
+Callers classify outcomes with `errors.Is`: `ErrNotFound`,
+`ErrUnsupportedPlatform`, and `ErrUnavailable` may permit a local build fallback;
+`ErrUnauthorized`, `ErrIncompatible`, `ErrInvalidArtifact`, `ErrMismatch`, and
+`ErrNoAnnotations` must be surfaced.
+
+## Authentication
+
+Credential precedence is:
+
+1. `CNT_REGISTRY_TOKEN` and optional `CNT_REGISTRY_USER` for any host;
+2. `GITHUB_TOKEN` for `ghcr.io` only;
+3. Docker/OCI credential store, including configured credential helpers;
+4. anonymous access.
+
+`Login` and `Logout` manage the same store. Tokens are never logged.
+
+## CLI
+
+The publisher/admin surface is under one noun:
+
+```text
+condatainer registry push|pull|tags|resolve|login|logout
 ```
 
-`Normalize` follows the container-runtime rule: a bare name is a Docker Hub
-official image (`ubuntu` → `docker.io/library/ubuntu`), one dotless component is
-a Hub namespace (`myorg/tool` → `docker.io/myorg/tool`), and a component with a
-dot or colon, or `localhost`, is a host and is left alone.
-
-## Two decisions worth knowing
-
-**Platform-specific, not the index digest.** A multi-arch tag resolves by default
-to an index covering every architecture, which would give an x86_64 and an
-aarch64 build one digest for two different payloads. `Resolve` passes the host
-platform to `oras.Resolve`, which selects through the index.
-
-**Failure is a normal outcome.** Nothing here fails a build. A login node that
-cannot reach Docker Hub still produces a usable image, recording `unrecorded`
-instead of a digest.
-
-## Implementation
-
-`oras-go/v2`, for registry auth — credential helpers included — that would
-otherwise be hand-rolled per registry. `Normalize` and the authenticated client
-are the shared foundation push and pull will reuse; `Resolve` is the first caller.
-
-When they land, the registry's manifest digest supplies the third value in the
-identity design — *are these the advertised archive bytes?* — which must come
-from outside the archive.
+The CLI currently takes an explicit `--registry` base such as
+`ghcr.io/example/condatainer`. Normal `create` does not need that flag: it keeps
+the exact recipe source selected by the catalog and tries that source's ordered
+`oci.pull` endpoints before building locally. The candidate must match the
+equivalence key derived from the selected recipe. Explicit `registry pull` and
+build use the same destination producer lock.

@@ -1,12 +1,59 @@
 package cmd
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 )
+
+func TestExpandBareNameExactThenBaseThenConda(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel string) {
+		path := filepath.Join(root, "recipes", filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("#DESC:test\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("hello/1.0") // exact name must outrank ubuntu24/hello/1.0
+	write("ubuntu24/hello/1.0")
+	write("ubuntu24/simple-os.def")        // zero-slash shortcut
+	write("ubuntu24/versioned-os/1.0.def") // one-slash shortcut
+
+	oldSources, oldBase := config.Global.Sources, config.Global.Base
+	config.Global.Sources = []catalog.Spec{{Name: "test", Base: root}}
+	config.Global.Base = "ubuntu24"
+	config.ResetCatalog()
+	t.Cleanup(func() {
+		config.Global.Sources, config.Global.Base = oldSources, oldBase
+		config.ResetCatalog()
+	})
+
+	for _, tc := range []struct {
+		input, want string
+		expanded    bool
+	}{
+		{"hello/1.0", "hello/1.0", false},
+		{"simple-os", "ubuntu24/simple-os", true},
+		{"versioned-os/1.0", "ubuntu24/versioned-os/1.0", true},
+		{"samtools/1.21", "samtools/1.21", false},
+		{"bioconda::samtools/1.21", "bioconda::samtools/1.21", false},
+		{"already/deep/1.0", "already/deep/1.0", false},
+	} {
+		got, expanded := expandBareName(context.Background(), tc.input)
+		if got != tc.want || expanded != tc.expanded {
+			t.Errorf("expandBareName(%q) = (%q, %v), want (%q, %v)",
+				tc.input, got, expanded, tc.want, tc.expanded)
+		}
+	}
+}
 
 // ensure that every compress option declared in config is registered as a
 // flag on the create command.  This guards against drift when new options are

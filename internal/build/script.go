@@ -49,17 +49,27 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 		return err
 	}
 
-	// After the skip check, so an already-installed overlay never triggers a
-	// base build it has no use for.
-	if err := b.resolveBase(ctx); err != nil {
-		return err
-	}
-
 	if err := b.createBuildLock(); err != nil {
 		return err
 	}
 	defer b.removeBuildLock()
 	preparedPath := b.tgt.Prepared
+
+	// Data equivalence includes dependency equivalence, so dependencies must be
+	// present before deciding whether a published artifact can substitute. This
+	// still happens before creating the target's workspace or running its recipe.
+	if err := b.buildDependencies(ctx, buildDeps); err != nil {
+		return err
+	}
+	if pulled, err := b.tryPrebuilt(ctx); err != nil || pulled {
+		return err
+	}
+
+	// A pulled artifact does not need the local build base. Resolve it only once
+	// registry acquisition has declined and recipe execution will actually run.
+	if err := b.resolveBase(ctx); err != nil {
+		return err
+	}
 
 	log.Info("building overlay", "overlay", filepath.Base(targetPath), "mode", buildModeLabel(b))
 
@@ -69,10 +79,6 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 	b.captureCommonBuildTools(ctx)
 
 	log.Info("populating overlay", "overlay", filepath.Base(targetPath), "source", b.buildSource)
-
-	if err := b.buildDependencies(ctx, buildDeps); err != nil {
-		return err
-	}
 
 	if err := b.runBuildScript(ctx); err != nil {
 		b.Cleanup(true)

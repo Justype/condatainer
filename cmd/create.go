@@ -469,19 +469,27 @@ func resolveTemplateInteractively(ctx context.Context, info *catalog.Entry) (str
 	return concrete, nil
 }
 
-// expandBareName turns a bare name into <base>/<name> when that resolves,
-// so "r/4.5.3" finds ubuntu24/r/4.5.3 without the user spelling out the base.
+// expandBareName first preserves an exact catalog name. If no exact entry
+// exists, a name with at most one slash is tried below the configured base, so
+// both "r" and "r/4.5.3" may find ubuntu24/r[/4.5.3]. If neither resolves, the
+// original name is returned for the normal Conda fallback.
 func expandBareName(ctx context.Context, nameVersion string) (string, bool) {
 	normalized := catalog.Normalize(nameVersion)
-	if strings.Contains(normalized, "/") || strings.Contains(normalized, "::") {
-		return normalized, false
-	}
-	base := config.ResolvedBase()
-	if base == "" {
+	if normalized == "" || strings.Contains(normalized, "::") {
 		return normalized, false
 	}
 	cat, err := config.OpenCatalog(ctx)
 	if err != nil {
+		return normalized, false
+	}
+	if _, found, err := cat.Lookup(ctx, normalized); err == nil && found {
+		return normalized, false
+	}
+	if strings.Count(normalized, "/") > 1 {
+		return normalized, false
+	}
+	base := config.ResolvedBase()
+	if base == "" {
 		return normalized, false
 	}
 	candidate := base + "/" + normalized

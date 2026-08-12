@@ -139,12 +139,18 @@ Resolution itself lives in `catalog.Resolve`; see **BuildGraph Execution** below
 
 ## Build Lock
 
-Each build target has a lock file at `Target.Lock` (the image path plus `.lock`) containing `BuildLockInfo` JSON.
+Each image target has a producer lock at the image path plus `.lock`, containing
+`BuildLockInfo` JSON. The implementation lives in `internal/image/producer` so
+build and registry pull serialize on the same pathname. This is distinct from
+the inode flock used while an installed image is mounted: the producer lock
+coordinates creation; the inode flock protects current readers at replacement.
 
 **Lifecycle:**
 - **Scheduler submit** (`submitJob` in `graph.go`): lock created with `runner=<scheduler>`, `job_id=""`, **no node** before calling the scheduler. Updated with the real job ID after `Submit()` returns. Removed if submit fails.
 - **Local / scheduler job start** (`Build()`): `createBuildLock()` writes `runner=local` with current node and PID. If a scheduler lock already exists with a matching job ID (`$SLURM_JOB_ID` / `$PBS_JOBID` / `$LSB_JOBID`), it adopts and updates that lock with the runtime node and PID.
 - **Build end**: `defer removeBuildLock()` removes the lock on success or failure.
+- **Explicit registry pull**: acquires the same producer lock for resolve-through-install.
+- **Automatic prebuilt pull**: runs under the build lock already held, so it does not reacquire it.
 
 **Stale detection** (`clearStaleLock`, run by every constructor):
 
@@ -177,12 +183,17 @@ directory got filled. Both end in `packOutput`.
 **Shell:**
 1. Check if overlay exists (skip if not updating)
 2. If updating existing overlay: probe exclusive lock — fail immediately if in use
-3. Create build lock (local, or adopt scheduler lock); create temporary overlay
-4. Build missing dependencies (if enabled)
-5. Run recipe inside container. The payload directory is bound at
+3. Create build lock (local, or adopt scheduler lock)
+4. Build missing dependencies (if enabled), derive the recipe equivalence key,
+   and try the selected source's ordered pull endpoints. A matching artifact is
+   installed and stops here; absent, unsupported-platform, or unavailable
+   artifacts fall through to the local build. Credential, schema, type, and key
+   failures stop instead.
+5. Resolve the build base and create the temporary overlay
+6. Run recipe inside container. The payload directory is bound at
    `/cnt/<name>` — the leaf, not `/cnt`, so dependency overlays mounted beside
    it stay visible
-6. `stageMetadata`, then pack: verify the payload directory is non-empty, then
+7. `stageMetadata`, then pack: verify the payload directory is non-empty, then
    `mksquashfs` the host build dir (basename `cnt`, so the archive is exactly
    `cnt/<name>/…` — the build's `tmp/` is a sibling and never enters it)
 7. Atomic rename prepared → target; remove lock
@@ -270,8 +281,9 @@ The name is derived from the lock owner rather than recorded, which is how
 1. Check if overlay exists (skip if not updating)
 2. If updating existing overlay: probe exclusive lock — fail immediately if in use
 3. Create build lock
-4. Build SIF with Apptainer; extract SquashFS partition
-5. Atomic rename prepared → target; remove lock
+4. Derive recipe equivalence and try the selected source's ordered pull endpoints
+5. If no acceptable prebuilt exists, build SIF with Apptainer and extract its SquashFS partition
+6. Atomic rename prepared → target; remove lock
 
 **Base image (`.sif`):**
 The definition backend with one branch changed: the SIF is the product, so step 4

@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,7 +30,7 @@ func fakeSource(t *testing.T) string {
 		}
 	}
 
-	write("source.json", `{"schema":1,"repository":"https://example.invalid/r","default_base":"ubuntu24"}`)
+	write("source.json", `{"schema":1,"repository":"https://example.invalid/r","default_base":"ubuntu24","oci":{"push":"oci://ghcr.io/lab/cnt/","pull":["ghcr.io/lab/cnt","registry.lab/cnt"],"visibility":"internal"}}`)
 	write("recipes/cellranger/9.0.1", "#DESC:cellranger\n#URL:https://example.invalid\n")
 	write("recipes/ubuntu24/base.def", "#DESC:base\n\nBootstrap: docker\n")
 	write("recipes/grch38/star-gencode", starRecipe)
@@ -61,6 +63,15 @@ func TestOpenDirSource(t *testing.T) {
 	if cat[0].Desc.Repository != "https://example.invalid/r" {
 		t.Errorf("descriptor not loaded: %+v", cat[0].Desc)
 	}
+	if got := cat[0].Desc.OCI.Push; got != "ghcr.io/lab/cnt" {
+		t.Errorf("OCI push = %q", got)
+	}
+	if got := cat[0].Desc.OCI.Pull; !slices.Equal(got, []string{"ghcr.io/lab/cnt", "registry.lab/cnt"}) {
+		t.Errorf("OCI pull = %v", got)
+	}
+	if got := cat[0].Desc.OCI.Visibility; got != "internal" {
+		t.Errorf("OCI visibility = %q", got)
+	}
 
 	entries := cat.Entries(t.Context())
 	want := []string{"cellranger/9.0.1", "grch38/star-gencode", "ubuntu24/base"}
@@ -72,6 +83,70 @@ func TestOpenDirSource(t *testing.T) {
 	}
 	if e := entries["grch38/star-gencode"]; !e.IsTemplate || e.Type != TypeData {
 		t.Errorf("template entry = %+v", e)
+	}
+}
+
+func TestParseDescriptorOCI(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		json    string
+		want    Descriptor
+		wantErr string
+	}{
+		{
+			name: "absent OCI defaults safely",
+			json: `{"schema":1}`,
+			want: Descriptor{Schema: 1, OCI: OCI{Visibility: "public"}},
+		},
+		{
+			name: "ordered mirrors and scheme normalization",
+			json: `{"schema":1,"oci":{"push":"oci://ghcr.io/lab/cnt/","pull":["oci://local.lab/cnt/","ghcr.io/lab/cnt"],"visibility":"INTERNAL"}}`,
+			want: Descriptor{Schema: 1, OCI: OCI{
+				Push: "ghcr.io/lab/cnt", Pull: []string{"local.lab/cnt", "ghcr.io/lab/cnt"}, Visibility: "internal",
+			}},
+		},
+		{name: "push required", json: `{"schema":1,"oci":{"pull":["ghcr.io/lab/cnt"]}}`, wantErr: "require push"},
+		{name: "pull required", json: `{"schema":1,"oci":{"push":"ghcr.io/lab/cnt"}}`, wantErr: "at least one pull"},
+		{name: "bad visibility", json: `{"schema":1,"oci":{"push":"ghcr.io/lab/cnt","pull":["ghcr.io/lab/cnt"],"visibility":"private"}}`, wantErr: "visibility"},
+		{name: "host alone is not a root", json: `{"schema":1,"oci":{"push":"ghcr.io","pull":["ghcr.io/lab/cnt"]}}`, wantErr: "registry/repository root"},
+		{name: "unsupported scheme", json: `{"schema":1,"oci":{"push":"https://ghcr.io/lab/cnt","pull":["ghcr.io/lab/cnt"]}}`, wantErr: "registry/repository root"},
+		{name: "unsupported schema", json: `{"schema":2}`, wantErr: "unsupported"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseDescriptor([]byte(tc.json))
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("descriptor = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestInvalidDescriptorDoesNotDisableRecipes(t *testing.T) {
+	root := fakeSource(t)
+	if err := os.WriteFile(filepath.Join(root, "source.json"), []byte(`{"schema":1,"oci":{"pull":["ghcr.io/lab/cnt"]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cat, err := Open(t.Context(), []Spec{{Name: "local", Base: root}}, Cache{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cat[0].DescriptorErr == nil {
+		t.Fatal("invalid descriptor was not reported")
+	}
+	if cat[0].Desc.OCI.Push != "" {
+		t.Errorf("invalid descriptor was retained: %+v", cat[0].Desc)
+	}
+	if _, found, err := cat.Lookup(t.Context(), "cellranger/9.0.1"); err != nil || !found {
+		t.Errorf("recipe lookup = (found %v, err %v)", found, err)
 	}
 }
 

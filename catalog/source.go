@@ -28,6 +28,16 @@ type Descriptor struct {
 	Schema      int    `json:"schema"`
 	Repository  string `json:"repository"`
 	DefaultBase string `json:"default_base"`
+	OCI         OCI    `json:"oci,omitzero"`
+}
+
+// OCI is how artifacts belonging to one source are published and fetched.
+// Push is singular because replication is an explicit publishing operation;
+// Pull is ordered so a site-local mirror can precede an external registry.
+type OCI struct {
+	Push       string   `json:"push,omitempty"`
+	Pull       []string `json:"pull,omitempty"`
+	Visibility string   `json:"visibility,omitempty"`
 }
 
 // Source is one collection of recipes and helpers.
@@ -35,6 +45,10 @@ type Source struct {
 	Name string // the local handle from config
 	Base string // HTTP base URL or filesystem path
 	Desc Descriptor
+	// DescriptorErr reports that source.json existed but was not usable. Recipes
+	// remain available: a broken optional descriptor must not erase a collection,
+	// but callers must not trust its registry or provenance defaults.
+	DescriptorErr error
 
 	// Stale is set when an index was served from cache after a fetch failed.
 	// What that means — a note, or a stop — is the caller's.
@@ -107,7 +121,73 @@ func (s *Source) loadDescriptor(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	_ = json.Unmarshal(data, &s.Desc)
+	desc, err := ParseDescriptor(data)
+	if err != nil {
+		s.DescriptorErr = err
+		return
+	}
+	s.Desc = desc
+}
+
+// ParseDescriptor decodes and validates source.json. Schema zero is accepted
+// for backward-compatible local descriptors; a non-zero unsupported schema is
+// rejected. OCI endpoints are normalized to registry/repository roots.
+func ParseDescriptor(data []byte) (Descriptor, error) {
+	var desc Descriptor
+	if err := json.Unmarshal(data, &desc); err != nil {
+		return Descriptor{}, fmt.Errorf("catalog: decode source descriptor: %w", err)
+	}
+	if desc.Schema != 0 && desc.Schema != 1 {
+		return Descriptor{}, fmt.Errorf("catalog: unsupported source descriptor schema %d", desc.Schema)
+	}
+	if err := desc.OCI.normalize(); err != nil {
+		return Descriptor{}, err
+	}
+	return desc, nil
+}
+
+func (o *OCI) normalize() error {
+	o.Visibility = strings.ToLower(strings.TrimSpace(o.Visibility))
+	if o.Visibility == "" {
+		o.Visibility = "public"
+	}
+	if o.Visibility != "public" && o.Visibility != "internal" {
+		return fmt.Errorf("catalog: OCI visibility must be public or internal, got %q", o.Visibility)
+	}
+
+	declared := strings.TrimSpace(o.Push) != "" || len(o.Pull) != 0
+	if !declared {
+		return nil
+	}
+	if strings.TrimSpace(o.Push) == "" {
+		return errors.New("catalog: OCI endpoints require push")
+	}
+	if len(o.Pull) == 0 {
+		return errors.New("catalog: OCI endpoints require at least one pull endpoint")
+	}
+
+	var err error
+	if o.Push, err = normalizeOCIEndpoint(o.Push); err != nil {
+		return fmt.Errorf("catalog: OCI push endpoint: %w", err)
+	}
+	for i := range o.Pull {
+		o.Pull[i], err = normalizeOCIEndpoint(o.Pull[i])
+		if err != nil {
+			return fmt.Errorf("catalog: OCI pull endpoint %d: %w", i+1, err)
+		}
+	}
+	return nil
+}
+
+func normalizeOCIEndpoint(endpoint string) (string, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	endpoint = strings.TrimPrefix(endpoint, "oci://")
+	endpoint = strings.TrimRight(endpoint, "/")
+	if endpoint == "" || strings.Contains(endpoint, "://") ||
+		strings.ContainsAny(endpoint, " \t\r\n") || !strings.Contains(endpoint, "/") {
+		return "", fmt.Errorf("%q must be a registry/repository root", endpoint)
+	}
+	return endpoint, nil
 }
 
 // Entries returns every entry the catalog offers, merged by name with the first

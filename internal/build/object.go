@@ -17,6 +17,7 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image/ext3"
+	"github.com/Justype/condatainer/internal/image/producer"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
@@ -70,6 +71,10 @@ type BuildObject struct {
 	// Placeholder values for a template recipe, e.g. {"star_version": "2.7.11b"}.
 	// Handed to the catalog, which expands the recipe before it is written out.
 	vars map[string]string
+	// catalogSource is the exact collection whose recipe was selected. Its
+	// descriptor supplies automatic prebuilt endpoints; local and Conda builds
+	// leave it nil.
+	catalogSource *catalog.Source
 
 	// Build type and conda-specific fields
 	buildType      BuildType
@@ -253,13 +258,7 @@ func (b *BuildObject) RequiresScheduler() bool {
 }
 
 // BuildLockInfo holds metadata stored inside a build lock file.
-type BuildLockInfo struct {
-	Runner    string `json:"runner"`     // "local", "slurm", "pbs", "lsf", or "htcondor"
-	JobID     string `json:"job_id"`     // scheduler job ID (empty until submit returns)
-	Node      string `json:"node"`       // short hostname where lock was created
-	PID       int    `json:"pid"`        // OS PID for local builds; 0 for scheduler
-	CreatedAt string `json:"created_at"` // RFC3339 timestamp
-}
+type BuildLockInfo = producer.Info
 
 // LockPath returns the lock file path.
 func (b *BuildObject) LockPath() string { return b.tgt.Lock }
@@ -1016,6 +1015,7 @@ func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (
 	}
 	isContainer = strings.HasSuffix(match.Entry.Path, ".def")
 	base.vars = match.Vars
+	base.catalogSource = match.Source
 	base.spec.Image.Type = match.Entry.Type
 
 	// Descriptive metadata comes from the index entry, so it is available even

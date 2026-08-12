@@ -6,6 +6,7 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/image/producer"
 	"github.com/Justype/condatainer/internal/scheduler"
 )
 
@@ -346,5 +347,5 @@ func targetFor(path string) Target {
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
-	return Target{Path: path, Lock: path + ".lock"}
+	return Target{Path: path, Lock: producer.Path(path)}
 }

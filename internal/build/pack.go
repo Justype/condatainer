@@ -10,13 +10,6 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// metaDirPath is the host .cnt directory a build stages its metadata into.
-// It sits beside the payload, not inside it, so the packer can pass both to
-// mksquashfs as separate archive roots.
-func metaDirPath(b *BuildObject) string {
-	return b.ws.MetaDir
-}
-
 // stageMetadata validates this build's metadata, writes both documents into the
 // workspace, and returns the directory the packer should add as a second archive
 // root. Staging is the last point invalid metadata can still stop the build.

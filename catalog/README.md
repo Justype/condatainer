@@ -103,6 +103,13 @@ same reason not-provided is an outcome: empty is a state callers already handle.
 **A stale index beats a failed fetch.** An expired cache entry with no route out
 is served with a flag set. That is a compute node, not an error.
 
+**The selected source owns its artifact endpoints.** `source.json` may declare
+one OCI `push`, ordered `pull` endpoints, and `visibility`. A build retains the
+exact source that won first-match lookup and tries only its endpoints. A stale
+cached descriptor may still be used, but a pulled artifact must match the
+equivalence key derived from that same cached recipe before it is installed.
+An invalid descriptor disables its endpoints without hiding its recipes.
+
 **`>=` is for reuse, not for widening.** `samtools/1.23.1>=1.10` admits
 `[1.10, 1.23.1]` — the preferred version is the implicit upper bound. The lower
 bound exists so an artifact already on disk can satisfy the dep; it never reaches

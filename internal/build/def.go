@@ -34,6 +34,9 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	}
 	defer b.removeBuildLock()
 	preparedPath := b.tgt.Prepared
+	if pulled, err := b.tryPrebuilt(ctx); err != nil || pulled {
+		return err
+	}
 
 	log.Info("building image", "image", filepath.Base(targetPath), "mode", buildModeLabel(b), "source", b.buildSource)
 

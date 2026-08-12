@@ -27,7 +27,8 @@ go test -v ./internal/scheduler/...                       # Package tests
 - `helper/` - Helper service job lifecycle: resolve params, submit to scheduler (or run headless), monitor state, JSONL run history
 - `overlay/` - Overlay image CRUD (ext3/SquashFS), resize, chown, locking
 - `proxy/` - SSH tunnel + dual-protocol proxy management for HPC compute nodes
-- `registry/` - Resolves an OCI reference to a platform-specific digest (oras-go); nothing else
+- `registry/` - Authenticated OCI transport: upstream digest resolution plus artifact publish,
+  platform-aware resolve, verification, pull, tag listing, and credential-store login/logout
 - `scheduler/` - HPC scheduler abstraction (SLURM, PBS, LSF, HTCondor); auto-detection, directive parsing, cross-scheduler translation
 - `server/` - Dashboard HTTP server (web UI + REST API, SSE log streaming)
 - `utils/` - Console output (`Print*`), file ops, downloads, script parsing
@@ -67,6 +68,47 @@ the recipe is embedded and executed byte for byte.
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 
+## Base and Layering
+
+A `base` provides the container root and the tooling a build and a run need — Apptainer and
+Micromamba — and nothing an overlay's payload links against. Overlays mount `--overlay <path>:ro`
+with payloads under their own `/cnt/<name>` prefix, so they are disjoint subtrees, not stacked
+diffs. The only ordering rule is that the single writable `.img` goes last
+(`putImgToLast`, `internal/runtime/container/setup.go`).
+
+**A base is never a compatibility gate.** It carries no identity or equivalence key, and any base
+information an artifact records is build diagnostics only — never compared, never warned on, never
+refused. A base is rebuilt whenever its OS ships patches, so a base digest differing from the one an
+overlay was built against says nothing about whether they work together. Never add a check that
+treats it as if it did.
+
+## Publishing
+
+What may be pushed depends on **who can pull it**, declared per endpoint as `visibility` (`public` by
+default, or `internal`). The type is read from the embedded manifest, never guessed from the
+filename, and `push` refuses rather than warns.
+
+| endpoint | may receive |
+|---|---|
+| `public` (default) | `base`, `os`, `data` |
+| `internal` | any type |
+
+- **A Conda build and an `app` never reach a public endpoint.** An app installs someone else's
+  software, and publishing a copy redistributes their binaries under our name — theirs to permit,
+  not ours to assume. A Conda build adds a second reason: its solve inputs are embedded, so a
+  consumer rebuilds from a few kilobytes instead of downloading gigabytes.
+- `base` and `os` are ours to publish — a container root and apt packages from a public distribution.
+- `data` is public reference data and the indexes built from it, the one case where a push saves real
+  work: hours of index building, not a download.
+
+`.img` is never published to any endpoint. That is structural, not policy — a writable overlay has no
+identity, so there is nothing to publish it *as*.
+
+`visibility` states a fact about a registry and CondaTainer derives the permitted set from it. Never
+let config enumerate types directly: `types: [app]` beside a public endpoint would erase the rule
+with no error, whereas a wrong `visibility` is a claim someone has to write down and defend. It is a
+declaration, not enforcement — nothing verifies the registry is actually private.
+
 ## Data Directory Order
 
 Reads go nearest-first, writes furthest-first — opposite directions, same four tiers.
@@ -93,6 +135,15 @@ Bash scripts in [`cnt-scripts/helpers/`](https://github.com/Justype/cnt-scripts)
 
 `exec`/`run` hold `LOCK_SH` on `.sqf`/`.sif` files during execution (`.img` skipped — Apptainer flocks those itself); `remove` and `build --update` probe `LOCK_EX` before modifying. See `internal/image/lock.go`.
 
+**An unwritable image is protected and is never modified or removed** — not even for its owner, who
+can unlink it through the directory anyway and can restore the bit. Clearing the write bit
+(`chmod a-w`) is how an artifact is pinned. This is why a write lock opens `O_RDWR`: `flock` does not
+need it, so never "simplify" that to `O_RDONLY` — the open mode *is* the protection check.
+
+A failed lock has three distinct causes and they must stay distinct: `ErrProtected` (write bit
+clear), `ErrInUse` (a conflicting flock), and a missing file. Reporting a protected image as "in
+use" sends the reader hunting for a container that is not running.
+
 ## Coding Rules
 
 - When editing a function, update its doc comment to match. Keep comments concise and behavior-first — say what it does; give a reason only when the behavior is surprising.
@@ -101,7 +152,13 @@ Bash scripts in [`cnt-scripts/helpers/`](https://github.com/Justype/cnt-scripts)
 ## Key Patterns
 
 - Global config singleton: `config.Global`
-- Error types: `ApptainerError`, `ValidationError` with structured fields
+- Errors: **sentinels by default** — a package-level `ErrX`, wrapped with `%w`, matched by callers with
+  `errors.Is`. That is what nearly every package does: `image.ErrProtected`/`ErrInUse`,
+  `meta.ErrNoManifest`/`ErrUnsupportedSchema`/`ErrInvalid`, `tool.ErrFileNotFound`,
+  `catalog.ErrNotProvided`, `registry.ErrIncompatible`/`ErrMismatch`, the `scheduler.Err*` set.
+  Wrapping keeps the detail in the message and the category matchable in one value.
+  Reach for a **struct** only when a caller must read a field rather than recognize a case —
+  `apptainer.ApptainerError` (`ExitCode()`), `scheduler.SubmissionError`, `tool.Error`.
 - Console output: `utils.PrintMessage`, `PrintWarning`, `PrintError`, `PrintDebug`
 - Always use absolute paths; `config.Get*Dir()` for standard locations
 - File/dir creation: use the wired helpers — `utils.CreateFileWritable` (files), `utils.MkdirAllShared` (dirs), `utils.MakeExecutable` (make a file executable). They apply `utils.PermFile`/`PermDir` (umask-subject) and call `ShareWithParentGroup` so children inherit group-write inside a shared `2775` install while personal installs stay umask-default. Never force perms with a bare `os.Chmod(path, utils.Perm*)` — see `internal/utils/files.go`.

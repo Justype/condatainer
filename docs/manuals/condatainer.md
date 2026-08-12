@@ -16,6 +16,7 @@
 - [Export](#export)
 - [Helper](#helper)
 - [Config](#config)
+- [Registry](#registry)
 - [Scheduler](#scheduler)
 - [Update](#update)
 - [Proxy](#proxy)
@@ -44,6 +45,7 @@ Available Commands:
   o           Shortcut for 'overlay create'
   overlay     Manage ext3 overlays (create, resize, check, info)
   proxy       Manage proxy tunnels for compute nodes
+  registry    Publish and fetch artifacts through an OCI registry
   remove      Remove installed overlays matching search terms
   run         Run a script and auto-solve the dependencies by #DEP tags
   scheduler   Display scheduler information
@@ -399,7 +401,12 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
 * `--always-submit`: Submit all builds as scheduler jobs, even when the build script has no scheduler directives.
 * `--no-submit`: Disable job submission; build locally even if the build script has scheduler directives.
 * `--remote`: Remote build scripts take precedence over local.
-* `--no-prebuilt`: Skip the prebuilt artifact download for remote `.def` builds and build locally with Apptainer instead.
+
+When a selected recipe source declares `oci.pull` endpoints, `create` tries them
+in order before building locally. A candidate is accepted only when its
+equivalence key matches the selected recipe. Missing artifacts, missing host
+architecture, or an unavailable registry fall back to the local build;
+authentication, compatibility, and integrity failures are reported.
 
 **Compression Options:**
 
@@ -1699,6 +1706,60 @@ build:
 # For a group/lab root with standard layout, set in module file:
 # export CNT_EXTRA_ROOT=/project/shared/condatainer
 ```
+
+## Registry
+
+Publish and fetch completed `.sqf` overlays and `.sif` base images through an
+OCI registry. Writable `.img` overlays are never distributable.
+
+```
+condatainer registry push|pull|tags|resolve|login|logout
+```
+
+Registry bases include the host, owner, and optional prefix, for example
+`ghcr.io/my-lab/condatainer`. Until registry endpoints are part of recipe source
+descriptors, `push`, `pull`, `tags`, and `resolve` require `--registry`.
+
+```bash
+# Store a token in the Docker/OCI credential store
+printf '%s\n' "$TOKEN" | condatainer registry login ghcr.io \
+  --username "$USER" --password-stdin
+
+# Publish by installed name or by explicit path. Public is the safe default;
+# use internal only for a registry whose audience is restricted.
+condatainer registry push grch38/genome/gencode49 \
+  --registry ghcr.io/my-lab/condatainer
+condatainer registry push ./licensed-app.sqf \
+  --registry registry.lab.example/cnt --visibility internal
+
+# Inspect a repository, or resolve one exact platform manifest
+condatainer registry tags grch38/genome \
+  --registry ghcr.io/my-lab/condatainer
+condatainer registry resolve grch38/genome:gencode49 \
+  --registry ghcr.io/my-lab/condatainer
+
+# Install an exact tag/digest into the managed images directory
+condatainer registry pull grch38/genome:gencode49 \
+  --registry ghcr.io/my-lab/condatainer
+condatainer registry pull ubuntu24/base@sha256:<digest> \
+  --registry ghcr.io/my-lab/condatainer
+
+# Override the managed name, or write to an exact external path
+condatainer registry pull grch38/genome:gencode49 --name grch38/genome/gencode49 \
+  --registry ghcr.io/my-lab/condatainer
+condatainer registry pull grch38/genome:gencode49 --prefix /project/images/gencode49 \
+  --registry ghcr.io/my-lab/condatainer
+```
+
+`pull` requires an exact address. A bare name belongs to `create`, which owns
+version selection and may build when no published artifact exists. Pull never
+falls back to a build. Placement precedence is `--prefix`, `--name`, the exact
+address when it contains a complete name, then the published OCI title.
+
+Authentication precedence is `CNT_REGISTRY_TOKEN` plus optional
+`CNT_REGISTRY_USER`, `GITHUB_TOKEN` for `ghcr.io`, the Docker credential store,
+then anonymous access. Versioned tags are immutable unless `push --force` is
+used; version-less base/OS artifacts publish a `YYYYMMDD` tag and `latest`.
 
 ## Scheduler
 
