@@ -274,7 +274,7 @@ func performDelete(cmd *cobra.Command, names []string, showListing ...bool) erro
 			continue
 		}
 		if lock, err := image.AcquireLock(overlayPath, true); err != nil {
-			utils.PrintError("Cannot remove %s: overlay is currently in use", utils.StyleName(name))
+			utils.PrintError("Cannot remove %s: %v", utils.StyleName(name), err)
 			continue
 		} else {
 			lock.Close()
@@ -339,7 +339,7 @@ func removeExternalOverlays(cmd *cobra.Command, paths []string) error {
 			continue
 		}
 		if lock, err := image.AcquireLock(p, true); err != nil {
-			utils.PrintError("Cannot remove %s: overlay is currently in use", utils.StyleName(filepath.Base(p)))
+			utils.PrintError("Cannot remove %s: %v", utils.StyleName(filepath.Base(p)), err)
 			continue
 		} else {
 			lock.Close()

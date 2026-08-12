@@ -117,8 +117,16 @@ if errors.As(err, &overlayErr) {
 Locks use `syscall.Flock` on the image file itself (no separate `.lock` file), non-blocking (`LOCK_NB`):
 
 - **Shared** (`LOCK_SH`): multiple readers can hold concurrently; acquired read-only (`O_RDONLY`)
-- **Exclusive** (`LOCK_EX`): single writer; blocks all other locks; requires write permission (`O_RDWR`)
+- **Exclusive** (`LOCK_EX`): single writer; blocks all other locks; opened `O_RDWR`
 - Released automatically when the file descriptor is closed
+
+**Protection.** The `O_RDWR` above is not what `flock` needs — a lock can be placed on any descriptor.
+It is the rule: **an image with its write bit clear is protected and is never modified or removed**,
+including for its owner, who can unlink it through the directory anyway and can restore the bit.
+`chmod a-w <image>` is how an artifact is pinned, and it stays readable while pinned.
+
+A failed attempt reports which of three things happened, and callers may branch on the first two:
+`ErrProtected` (write bit clear), `ErrInUse` (a conflicting flock), or a missing file.
 
 **Who holds locks:**
 - `exec`/`run`: acquire and hold shared read locks on all `.sqf` overlays and the base `.sif` for the entire duration of `apptainer exec`. `.img` overlays are skipped — Apptainer flocks them itself; acquiring our own lock conflicts with Apptainer's locking.

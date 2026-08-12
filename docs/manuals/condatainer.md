@@ -771,8 +771,18 @@ Removes the specified files directly, bypassing the name-based search. Useful fo
 
 * Overlays to be removed are displayed grouped by directory before confirmation.
 * If the same overlay name exists in multiple directories, `--layer` (or `--dir`) is required to avoid ambiguity.
-* Checks file lock and write permission before each deletion.
+* Checks file lock and write permission before each deletion, and says which one refused: an image
+  in use by a running container, an image that is write-protected, or one that is missing.
 * Also removes the associated `.env` file if present.
+
+**Pinning an image.** Clearing the write bit protects an image from `remove` and from
+`build --update`, including for its owner, and it stays readable and mountable while pinned:
+
+```bash
+$ chmod a-w ~/.local/share/condatainer/images/grch38--genome--gencode.sqf
+$ condatainer rm grch38/genome/gencode
+[CNT!] Cannot remove grch38/genome/gencode: ... is write-protected; chmod +w to allow changes
+```
 
 **Examples:**
 
@@ -1445,7 +1455,7 @@ condatainer overlay export [OPTIONS] <overlay.img>
 
 **Channel order:** `micromamba env export` sorts the `channels:` block alphabetically, which can break re-solve. When an overlay carries a `.condarc`, its channel priority is used to reorder the block (matching `conda env export`); channels not listed there are prepended.
 
-**In-use overlays:** exporting an ext3 `.img` while a writable session holds it fails with a clear "currently in use for writing" error. (If you are in an ext3 overlay, use `mm export`)
+**In-use overlays:** exporting an ext3 `.img` while a writable session holds it fails with a clear "currently being written" error. (If you are in an ext3 overlay, use `mm export`)
 
 **Examples:**
 

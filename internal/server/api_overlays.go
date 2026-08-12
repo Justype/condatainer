@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -156,7 +157,12 @@ func (s *srv) handleRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if lock, err := image.AcquireLock(req.Path, true); err != nil {
-		http.Error(w, "overlay is currently in use", http.StatusConflict)
+		// Protected is the caller's answer to change, in use is not.
+		status := http.StatusConflict
+		if errors.Is(err, image.ErrProtected) {
+			status = http.StatusForbidden
+		}
+		http.Error(w, err.Error(), status)
 		return
 	} else {
 		lock.Close()
