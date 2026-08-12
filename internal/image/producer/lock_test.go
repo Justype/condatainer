@@ -48,3 +48,11 @@ func TestAcquireLocalClearsStaleLockAndPartial(t *testing.T) {
 		t.Fatalf("stale partial remains: %v", err)
 	}
 }
+
+func TestTagDistinguishesLocalAndSchedulerOwners(t *testing.T) {
+	local := Tag(Info{Runner: "local", Node: "node-a", PID: 42})
+	job := Tag(Info{Runner: "slurm", JobID: "42"})
+	if local == job || local != "local-node-a-42" || job != "slurm-42" {
+		t.Fatalf("tags = %q and %q", local, job)
+	}
+}

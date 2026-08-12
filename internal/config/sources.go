@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,6 +97,42 @@ func parseSourceSpecs(pairs []string) []catalog.Spec {
 		out = append(out, catalog.Spec{Name: name, Base: strings.TrimRight(base, "/")})
 	}
 	return out
+}
+
+// SelectSources restricts recipe resolution to the named configured source
+// handles, in the order given. An empty selection leaves the configured source
+// list unchanged. Duplicate handles are ignored after their first occurrence.
+func SelectSources(names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+
+	configured := make(map[string]catalog.Spec, len(Global.Sources))
+	available := make([]string, 0, len(Global.Sources))
+	for _, source := range Global.Sources {
+		configured[source.Name] = source
+		available = append(available, source.Name)
+	}
+
+	selected := make([]catalog.Spec, 0, len(names))
+	seen := make(map[string]bool, len(names))
+	for _, raw := range names {
+		name := strings.TrimSpace(raw)
+		source, ok := configured[name]
+		if !ok || name == "" {
+			return fmt.Errorf("unknown source %q (configured: %s)",
+				name, strings.Join(available, ", "))
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		selected = append(selected, source)
+	}
+
+	Global.Sources = selected
+	ResetCatalog()
+	return nil
 }
 
 var (

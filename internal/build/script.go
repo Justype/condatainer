@@ -46,10 +46,12 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 	log := logging.FromContext(ctx)
 
 	if skip, err := checkShouldBuild(b); skip || err != nil {
+		b.Cleanup(err != nil) //nolint:errcheck
 		return err
 	}
 
 	if err := b.createBuildLock(); err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 	defer b.removeBuildLock()
@@ -59,21 +61,25 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 	// present before deciding whether a published artifact can substitute. This
 	// still happens before creating the target's workspace or running its recipe.
 	if err := b.buildDependencies(ctx, buildDeps); err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 	if pulled, err := b.tryPrebuilt(ctx); err != nil || pulled {
+		b.Cleanup(err != nil) //nolint:errcheck
 		return err
 	}
 
 	// A pulled artifact does not need the local build base. Resolve it only once
 	// registry acquisition has declined and recipe execution will actually run.
 	if err := b.resolveBase(ctx); err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 
-	log.Info("building overlay", "overlay", filepath.Base(targetPath), "mode", buildModeLabel(b))
+	log.Info("building overlay", "kind", "note", "overlay", filepath.Base(targetPath), "mode", buildModeLabel(b))
 
 	if err := prepareBuildWorkspace(ctx, b); err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 	b.captureCommonBuildTools(ctx)
@@ -105,6 +111,7 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 	utils.ShareWithParentGroup(preparedPath)
 
 	if err := atomicInstall(preparedPath, targetPath); err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 
@@ -130,7 +137,8 @@ func (b *BuildObject) buildDependencies(ctx context.Context, buildDeps bool) err
 		return fmt.Errorf("missing dependencies for %s: %s. Please install them first", b.spec.Image.Name, depList)
 	}
 
-	logging.FromContext(ctx).Info("building missing dependencies", "overlay", filepath.Base(b.tgt.Path), "deps", depList)
+	logging.FromContext(ctx).Info("building missing dependencies", "kind", "note",
+		"overlay", filepath.Base(b.tgt.Path), "deps", depList)
 
 	writableImagesDir, err := config.GetWritableImagesDir()
 	if err != nil {

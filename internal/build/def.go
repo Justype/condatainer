@@ -26,26 +26,31 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	isBase := b.spec.Image.Type == catalog.TypeBase
 
 	if skip, err := checkShouldBuild(b); skip || err != nil {
+		b.Cleanup(err != nil) //nolint:errcheck
 		return err
 	}
 
 	if err := b.createBuildLock(); err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 	defer b.removeBuildLock()
 	preparedPath := b.tgt.Prepared
 	if pulled, err := b.tryPrebuilt(ctx); err != nil || pulled {
+		b.Cleanup(err != nil) //nolint:errcheck
 		return err
 	}
 
-	log.Info("building image", "image", filepath.Base(targetPath), "mode", buildModeLabel(b), "source", b.buildSource)
+	log.Info("building image", "kind", "note", "image", filepath.Base(targetPath),
+		"mode", buildModeLabel(b), "source", b.buildSource)
 
 	done := watchContext(ctx, "def build")
 	defer close(done)
 
 	// Ensure the tmp directory exists before apptainer tries to write the SIF there.
-	if err := utils.EnsureTmpSubdir(b.ws.Root); err != nil {
-		return fmt.Errorf("failed to create tmp dir %s: %w", b.ws.Root, err)
+	if err := ensureWorkspaceRoot(b); err != nil {
+		b.Cleanup(true) //nolint:errcheck
+		return err
 	}
 
 	// Resolve the definition source. A scheme:// source (docker://ubuntu:22.04)
@@ -55,6 +60,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	if strings.Contains(b.buildSource, "://") {
 		synthPath, err := synthesizeDefFromURI(b.buildSource, b.ws.Root)
 		if err != nil {
+			b.Cleanup(true) //nolint:errcheck
 			return fmt.Errorf("failed to synthesize def from %s: %w", b.buildSource, err)
 		}
 		defSource = synthPath
@@ -62,6 +68,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 
 	defData, err := os.ReadFile(defSource)
 	if err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return fmt.Errorf("failed to read definition %s: %w", defSource, err)
 	}
 
@@ -90,6 +97,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	// Embed the definition and staged metadata, pinning the bootstrap.
 	buildDefSource, err := writeRecordingDef(defSource, metaDir, b.ws.Root, b.spec.Source.UpstreamDigest())
 	if err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return fmt.Errorf("failed to prepare recording def: %w", err)
 	}
 
@@ -144,6 +152,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	}
 
 	if err := atomicInstall(preparedPath, targetPath); err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 

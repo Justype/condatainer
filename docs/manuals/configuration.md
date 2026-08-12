@@ -688,6 +688,18 @@ export CNT_SOURCES="myorg=https://raw.githubusercontent.com/MyOrg/recipes/main|c
 Earlier entries win. Each remote collection caches its index separately, and
 `condatainer update` refreshes them.
 
+To restrict one listing or build to specific configured handles, repeat
+`--source` in the desired lookup order:
+
+```bash
+condatainer avail -s myorg
+condatainer create -s myorg -s cnt star/2.7.11b
+```
+
+The selected source set also applies to recipe dependencies and base lookup.
+Unknown handles are errors; packages absent from the selected sources retain
+the normal Conda fallback.
+
 ### Disable job submission
 
 For systems without a scheduler or for local builds:

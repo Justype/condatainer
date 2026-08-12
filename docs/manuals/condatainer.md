@@ -1717,18 +1717,22 @@ condatainer registry push|pull|tags|resolve|login|logout
 ```
 
 Registry bases include the host, owner, and optional prefix, for example
-`ghcr.io/my-lab/condatainer`. Until registry endpoints are part of recipe source
-descriptors, `push`, `pull`, `tags`, and `resolve` require `--registry`.
+`ghcr.io/my-lab/condatainer`. Push normally infers both the endpoint and
+visibility from the artifact's recorded recipe source and that configured
+source's descriptor. `--registry` is an explicit override and is required for
+artifacts without uniquely matching configured provenance. Pull, tags, and
+resolve still require it because they do not start from a local artifact.
 
 ```bash
 # Store a token in the Docker/OCI credential store
 printf '%s\n' "$TOKEN" | condatainer registry login ghcr.io \
   --username "$USER" --password-stdin
 
-# Publish by installed name or by explicit path. Public is the safe default;
-# use internal only for a registry whose audience is restricted.
-condatainer registry push grch38/genome/gencode49 \
-  --registry ghcr.io/my-lab/condatainer
+# Publish by installed name, inferring the selected source's oci.push endpoint.
+condatainer registry push grch38/genome/gencode49
+
+# Explicit path and endpoint override. Public is the safe default; use internal
+# only for a registry whose audience is restricted.
 condatainer registry push ./licensed-app.sqf \
   --registry registry.lab.example/cnt --visibility internal
 

@@ -275,6 +275,8 @@ func (bg *BuildGraph) submitJob(obj *BuildObject, depIDs []string) (string, erro
 	lockPath := obj.LockPath()
 	pendingLock := BuildLockInfo{
 		Runner:    string(bg.scheduler.GetType()), // e.g. "slurm", "pbs", "lsf", "htcondor"
+		Node:      shortHostname(),
+		PID:       os.Getpid(),
 		CreatedAt: time.Now().Format(time.RFC3339),
 	}
 	if err := acquireBuildLockFile(lockPath, pendingLock); err != nil {
@@ -283,6 +285,10 @@ func (bg *BuildGraph) submitJob(obj *BuildObject, depIDs []string) (string, erro
 				obj.NameVersion(), lockPath)
 		}
 		return "", fmt.Errorf("failed to create build lock for %s: %w", obj.NameVersion(), err)
+	}
+	if err := obj.adoptWorkspace(pendingLock); err != nil {
+		os.Remove(lockPath) // release the lock whose workspace could not be adopted
+		return "", err
 	}
 
 	// Get script specs; when always_submit forces submission without directives, synthesize empty specs
@@ -333,12 +339,14 @@ func (bg *BuildGraph) submitJob(obj *BuildObject, depIDs []string) (string, erro
 	jobID, err := bg.scheduler.Submit(bg.ctx, scriptPath, deps)
 	if err != nil {
 		os.Remove(lockPath) // release lock on submission failure
+		obj.Cleanup(true)   //nolint:errcheck
 		return "", fmt.Errorf("failed to submit job: %w", err)
 	}
 
 	// Update lock with the actual job ID now that we have it.
 	pendingLock.JobID = jobID
 	_ = overwriteBuildLockFile(lockPath, pendingLock) // best-effort; we already hold the lock
+	obj.Cleanup(false)                                //nolint:errcheck
 
 	log.Info("submitted scheduler job", "type", bg.scheduler.GetType(), "jobID", jobID, "name", obj.NameVersion())
 	return jobID, nil

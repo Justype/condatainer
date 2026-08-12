@@ -325,7 +325,6 @@ predate the format), an unreadable one warns, and one that reads has to say
 Images can export environment variables via `#ENV:` directives:
 ```bash
 #ENV:CELLRANGER_ROOT={prefix}
-#ENV:PATH={prefix}/bin:$PATH
 ```
 
 These are captured into `Spec.Image.Env` at resolution and embedded in the
@@ -336,7 +335,30 @@ substituted with the recorded `prefix` at load time (see
 ## Workspace Strategy
 
 `workspaceFor` derives every path from `(name, tmp root, scratch extension,
-payload location)`. The tmp root and the mode are both functions of the type:
+producer identity)`. Each producer owns one directory:
+
+```text
+<tmp-root>/build_<name>/<local-host-pid|scheduler-jobid>/
+  cnt--<name>.sh|.def
+  rootfs.img|.sif
+  work/
+    cnt/
+    tmp/
+    .cnt/
+```
+
+The recipe is materialized in a process-private directory before the target
+lock because resolution and scheduler planning need to read it. Acquiring or
+adopting the lock re-sites that directory to the lock owner's tag. Generated
+definition helpers (`cnt-synth.def`, `cnt-pinned.def`,
+`cnt-metadata.def`) are written inside the same private directory, so builds
+of different targets cannot overwrite each other.
+
+The final `.part` remains beside the installed target for atomic rename, but it
+uses the same owner tag. Cleanup removes only the current owner's directory;
+stale-lock cleanup reconstructs the stale owner's directory from the lock.
+
+The selected tmp root and the mode are both functions of the type:
 
 | type | scratch image | payload |
 |---|---|---|

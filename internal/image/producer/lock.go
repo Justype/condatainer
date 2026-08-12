@@ -97,6 +97,12 @@ func Path(target string) string { return target + ".lock" }
 // PreparedPath returns a producer-private output path beside target. Because it
 // is derived from Info, stale-lock cleanup can find the abandoned output.
 func PreparedPath(target string, info Info) string {
+	return target + "." + Tag(info) + PreparedSuffix
+}
+
+// Tag renders the filesystem-safe producer identity shared by prepared outputs
+// and private build workspaces.
+func Tag(info Info) string {
 	owner := info.Runner
 	if owner == "" {
 		owner = "local"
@@ -107,7 +113,7 @@ func PreparedPath(target string, info Info) string {
 	} else {
 		tag += "-" + info.Node + "-" + strconv.Itoa(info.PID)
 	}
-	return target + "." + sanitizeTag(tag) + PreparedSuffix
+	return sanitizeTag(tag)
 }
 
 func sanitizeTag(tag string) string {
@@ -119,6 +125,13 @@ func sanitizeTag(tag string) string {
 			return '-'
 		}
 	}, tag)
+}
+
+// LocalInfo identifies the current process for provisional workspace paths.
+// Build lock acquisition produces the same tag unless a scheduler lock is
+// adopted, in which case the workspace is re-sited to the scheduler job tag.
+func LocalInfo() Info {
+	return Info{Runner: "local", Node: ShortHostname(), PID: os.Getpid()}
 }
 
 // ShortHostname returns the unqualified hostname used in local lock metadata.

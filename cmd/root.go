@@ -160,6 +160,24 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+func sourceHandleCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	seen := make(map[string]bool)
+	if flag := cmd.Flags().Lookup("source"); flag != nil {
+		if values, err := cmd.Flags().GetStringArray("source"); err == nil {
+			for _, value := range values {
+				seen[value] = true
+			}
+		}
+	}
+	var out []string
+	for _, source := range config.Global.Sources {
+		if !seen[source.Name] && strings.HasPrefix(source.Name, toComplete) {
+			out = append(out, source.Name)
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
+}
+
 func Execute() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

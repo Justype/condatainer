@@ -1,9 +1,6 @@
 package build
 
 import (
-	"path/filepath"
-	"strings"
-
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
@@ -38,11 +35,4 @@ func tmpRootForExternal(targetDir string, typ catalog.Type, isDef bool) string {
 		return targetDir
 	}
 	return utils.GetTmpDir()
-}
-
-// getCntDirPath returns the container directory path for a name/version.
-// Format: <tmpDir>/build_<nameVersion>/cnt
-func getCntDirPath(nameVersion, tmpDir string) string {
-	buildDirName := "build_" + strings.ReplaceAll(nameVersion, "/", "_")
-	return filepath.Join(tmpDir, buildDirName, "cnt")
 }

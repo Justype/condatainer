@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/spf13/viper"
 )
 
@@ -43,6 +44,51 @@ func TestParseSourceSpecs(t *testing.T) {
 	if got[0].Base != "https://a.invalid" || got[1].Name != "lab" {
 		t.Errorf("specs = %+v", got)
 	}
+}
+
+func TestSelectSources(t *testing.T) {
+	original := Global.Sources
+	t.Cleanup(func() {
+		Global.Sources = original
+		ResetCatalog()
+	})
+
+	configured := []catalog.Spec{
+		{Name: "site", Base: "/site"},
+		{Name: "lab", Base: "/lab"},
+		{Name: "cnt", Base: "https://example.invalid"},
+	}
+
+	t.Run("empty keeps configured order", func(t *testing.T) {
+		Global.Sources = append([]catalog.Spec(nil), configured...)
+		if err := SelectSources(nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := Global.Sources; len(got) != 3 || got[0].Name != "site" || got[2].Name != "cnt" {
+			t.Fatalf("sources = %+v", got)
+		}
+	})
+
+	t.Run("flag order wins and duplicates collapse", func(t *testing.T) {
+		Global.Sources = append([]catalog.Spec(nil), configured...)
+		if err := SelectSources([]string{"cnt", "site", "cnt"}); err != nil {
+			t.Fatal(err)
+		}
+		if got := Global.Sources; len(got) != 2 || got[0].Name != "cnt" || got[1].Name != "site" {
+			t.Fatalf("sources = %+v, want cnt then site", got)
+		}
+	})
+
+	t.Run("unknown is an error and changes nothing", func(t *testing.T) {
+		Global.Sources = append([]catalog.Spec(nil), configured...)
+		err := SelectSources([]string{"lab", "missing"})
+		if err == nil || !strings.Contains(err.Error(), "unknown source") {
+			t.Fatalf("error = %v", err)
+		}
+		if got := Global.Sources; len(got) != 3 || got[0].Name != "site" {
+			t.Fatalf("sources changed after error: %+v", got)
+		}
+	})
 }
 
 func TestLayerSourcesEnvWins(t *testing.T) {

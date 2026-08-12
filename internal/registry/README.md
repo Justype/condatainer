@@ -69,9 +69,13 @@ The publisher/admin surface is under one noun:
 condatainer registry push|pull|tags|resolve|login|logout
 ```
 
-The CLI currently takes an explicit `--registry` base such as
-`ghcr.io/example/condatainer`. Normal `create` does not need that flag: it keeps
-the exact recipe source selected by the catalog and tries that source's ordered
-`oci.pull` endpoints before building locally. The candidate must match the
-equivalence key derived from the selected recipe. Explicit `registry pull` and
-build use the same destination producer lock.
+Push first reads the local artifact's recorded `build.source`, uniquely matches
+it to a configured source descriptor, and uses that descriptor's `oci.push` and
+`visibility`. `--registry` and an explicitly supplied `--visibility` override
+inference. Missing, stale, invalid, or ambiguous provenance stops and asks for
+`--registry`; a pull mirror is never selected for publishing.
+
+Normal `create` keeps the exact recipe source selected by the catalog and tries
+that source's ordered `oci.pull` endpoints before building locally. The
+candidate must match the equivalence key derived from the selected recipe.
+Explicit `registry pull` and build use the same destination producer lock.

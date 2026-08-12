@@ -283,6 +283,16 @@ func TestPackedImageExcludesBuildScratch(t *testing.T) {
 	}
 }
 
+func TestSquashfsShowsProgressWithoutFinalStatistics(t *testing.T) {
+	script := squashfsScript([]string{"/cnt"}, "/images/out.sqf", 2, "128k", "-comp zstd")
+	if !strings.Contains(script, " -quiet ") {
+		t.Fatalf("mksquashfs command does not suppress final statistics:\n%s", script)
+	}
+	if strings.Contains(script, "-no-progress") {
+		t.Fatalf("mksquashfs command suppresses progress:\n%s", script)
+	}
+}
+
 // The conda install phase must not know where the image lands: that is what lets
 // a cancelled install leave nothing next to the installed images.
 func TestCondaInstallDoesNotPackOrTouchTarget(t *testing.T) {

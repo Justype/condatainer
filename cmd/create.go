@@ -32,6 +32,7 @@ var (
 	createBlockSize     string
 	createDataBlockSize string
 	createChannels      []string
+	createSources       []string
 	createUpdate        bool
 	createAppTmpOverlay bool
 	createAlwaysSubmit  bool
@@ -77,7 +78,11 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
   condatainer create -n nvim nvim nodejs          # Create conda env
   condatainer create matplotlib pandas  -p /path  # Create conda env at custom path
   condatainer create -f environment.yml -p myenv  # Create from conda file with prefix
+  condatainer create --source lab star/2.7.11b     # Resolve recipes only from lab
   condatainer create --from docker://ubuntu:22.04 -p ubuntu  # Build from a container image`,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		return config.SelectSources(createSources)
+	},
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
 		// 1. Validation Logic
@@ -209,6 +214,8 @@ func init() {
 	f.StringVar(&createBlockSize, "block-size", "", "SquashFS block size of app/external overlays (e.g. 256k)")
 	f.StringVar(&createDataBlockSize, "data-block-size", "", "SquashFS block size of data overlays (e.g. 512k, 1m)")
 	f.StringArrayVarP(&createChannels, "channel", "c", nil, "Conda channel to use (overrides config; repeatable)")
+	f.StringArrayVarP(&createSources, "source", "s", nil,
+		"Use only this configured recipe source, in flag order (repeatable)")
 	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist")
 	f.BoolVar(&createAppTmpOverlay, "app-tmp-overlay", false, "Assemble an app build in a temporary ext3 overlay instead of host directories")
 	f.StringVar(&createAppTmpOvlSize, "app-tmp-overlay-size", "20G", "Size of that temporary overlay")
@@ -226,6 +233,7 @@ func init() {
 	}
 	createCmd.RegisterFlagCompletionFunc("block-size", blockSizeCompletion)      //nolint:errcheck
 	createCmd.RegisterFlagCompletionFunc("data-block-size", blockSizeCompletion) //nolint:errcheck
+	createCmd.RegisterFlagCompletionFunc("source", sourceHandleCompletion)       //nolint:errcheck
 
 	// Mark compression flags in their own section
 	compFlagNames = make(map[string]bool, len(config.CompressOptions))

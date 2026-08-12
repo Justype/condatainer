@@ -7,7 +7,6 @@ import (
 
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/logging"
-	"github.com/Justype/condatainer/internal/utils"
 )
 
 // stageMetadata validates this build's metadata, writes both documents into the
@@ -28,10 +27,8 @@ func stageMetadata(ctx context.Context, b *BuildObject) (string, error) {
 
 	// In ext3 mode the payload is inside the temporary image, so nothing has
 	// created the host build directory yet.
-	if b.ws.Root != "" {
-		if err := utils.EnsureTmpSubdir(b.ws.Root); err != nil {
-			return "", fmt.Errorf("failed to create tmp dir %s: %w", b.ws.Root, err)
-		}
+	if err := ensureWorkspaceRoot(b); err != nil {
+		return "", err
 	}
 
 	dir := b.ws.MetaDir

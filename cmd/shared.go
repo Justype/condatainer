@@ -31,6 +31,30 @@ const searchSyntaxHint = `Search terms match by substring; multiple terms must a
 Wildcards (*, ?) and regex also work — full rules:
 ` + searchManualURL
 
+// formatDescription wraps prose at word boundaries and indents every line.
+// Long individual words are left intact rather than split.
+func formatDescription(description string, indent, width int) string {
+	words := strings.Fields(description)
+	if len(words) == 0 {
+		return ""
+	}
+
+	prefix := strings.Repeat(" ", indent)
+	available := max(width-indent, 1)
+	lines := make([]string, 0, 1)
+	line := words[0]
+	for _, word := range words[1:] {
+		if len(line)+1+len(word) <= available {
+			line += " " + word
+			continue
+		}
+		lines = append(lines, prefix+line)
+		line = word
+	}
+	lines = append(lines, prefix+line)
+	return strings.Join(lines, "\n")
+}
+
 // SearchMode describes how a SearchQuery matches candidate names.
 type SearchMode int
 

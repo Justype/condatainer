@@ -153,13 +153,15 @@ type Options struct {
 
 // Workspace is where a build does its work. All of it is removed afterwards.
 type Workspace struct {
-	Root     string // scratch root this build works under
-	BuildDir string // Root/build_<name>, holding the three below
+	BaseRoot string // selected fast/stable scratch root
+	Root     string // producer-private BaseRoot/build_<name>/<owner>
+	BuildDir string // Root/work, holding the three below
 	CntDir   string // BuildDir/cnt — payload root, bound as /cnt
 	TmpDir   string // BuildDir/tmp — scratch, bound as /cnt_tmp
 	MetaDir  string // BuildDir/.cnt — runtime and manifest, staged before packing
 	Source   string // materialized script, definition, or Conda input file
-	Overlay  string // Root/<name-->.img|.sif; "" in directory mode
+	Overlay  string // Root/rootfs.img|.sif; "" in directory mode
+	imageExt string // retained so adopting a scheduler lock can re-site the workspace
 }
 
 // UsesImage reports whether the build runs inside a scratch image rather than
@@ -325,17 +327,24 @@ func sourceFileName(name string, isDef bool) string {
 // constructor goes through it. An empty overlayExt means directory mode: no
 // scratch image, so the payload lands on the host.
 func workspaceFor(name, root, overlayExt string) Workspace {
-	cntDir := getCntDirPath(name, root)
-	buildDir := filepath.Dir(cntDir)
+	return workspaceForOwner(name, root, overlayExt, producer.LocalInfo())
+}
+
+func workspaceForOwner(name, root, overlayExt string, owner producer.Info) Workspace {
+	ownerDir := filepath.Join(root, "build_"+strings.ReplaceAll(name, "/", "_"), producer.Tag(owner))
+	buildDir := filepath.Join(ownerDir, "work")
 	ws := Workspace{
-		Root:     root,
+		BaseRoot: root,
+		Root:     ownerDir,
 		BuildDir: buildDir,
-		CntDir:   cntDir,
+		CntDir:   filepath.Join(buildDir, "cnt"),
 		TmpDir:   filepath.Join(buildDir, "tmp"),
 		MetaDir:  filepath.Join(buildDir, meta.DirName),
+		Source:   filepath.Join(ownerDir, sourceFileName(name, overlayExt == ".sif")),
+		imageExt: overlayExt,
 	}
 	if overlayExt != "" {
-		ws.Overlay = filepath.Join(root, strings.ReplaceAll(name, "/", "--")+overlayExt)
+		ws.Overlay = filepath.Join(ownerDir, "rootfs"+overlayExt)
 	}
 	return ws
 }

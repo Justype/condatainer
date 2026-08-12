@@ -23,6 +23,7 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 	log := logging.FromContext(ctx)
 
 	if skip, err := checkShouldBuild(b); skip || err != nil {
+		b.Cleanup(err != nil) //nolint:errcheck
 		return err
 	}
 
@@ -33,14 +34,16 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 	}
 
 	if err := b.createBuildLock(); err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 	defer b.removeBuildLock()
 	preparedPath := b.tgt.Prepared
 
-	log.Info("building overlay", "overlay", filepath.Base(targetPath), "mode", buildModeLabel(b))
+	log.Info("building overlay", "kind", "note", "overlay", filepath.Base(targetPath), "mode", buildModeLabel(b))
 
 	if err := prepareBuildWorkspace(ctx, b); err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 	b.captureCommonBuildTools(ctx)
@@ -72,6 +75,7 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 	utils.ShareWithParentGroup(preparedPath)
 
 	if err := atomicInstall(preparedPath, targetPath); err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 

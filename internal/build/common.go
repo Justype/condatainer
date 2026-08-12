@@ -93,6 +93,18 @@ func preparedPathFor(targetPath string, info BuildLockInfo) string {
 	return producer.PreparedPath(targetPath, info)
 }
 
+// ensureWorkspaceRoot creates the selected scratch root with its configured
+// permissions, then the nested producer-private directory beneath it.
+func ensureWorkspaceRoot(b *BuildObject) error {
+	if err := utils.EnsureTmpSubdir(b.ws.BaseRoot); err != nil {
+		return fmt.Errorf("failed to create tmp dir %s: %w", b.ws.BaseRoot, err)
+	}
+	if err := utils.MkdirAllShared(b.ws.Root); err != nil {
+		return fmt.Errorf("failed to create producer workspace %s: %w", b.ws.Root, err)
+	}
+	return nil
+}
+
 // atomicInstall renames preparedPath over targetPath and invalidates the
 // installed-overlay caches. The installed image is never removed first — see
 // the README's Prepared output.
@@ -111,6 +123,9 @@ func atomicInstall(preparedPath, targetPath string) error {
 // host directories. Script and Conda builds only. A stale workspace is warned
 // about and re-created, leaving a fetched build source intact.
 func prepareBuildWorkspace(ctx context.Context, b *BuildObject) error {
+	if err := ensureWorkspaceRoot(b); err != nil {
+		return err
+	}
 	if !b.ws.UsesImage() {
 		if err := b.CreateBuildDirs(ctx, false); err != nil {
 			if !errors.Is(err, ErrTmpOverlayExists) {

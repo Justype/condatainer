@@ -9,6 +9,7 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/spf13/cobra"
 )
 
 func TestExpandBareNameExactThenBaseThenConda(t *testing.T) {
@@ -63,6 +64,37 @@ func TestCreateFlagsForCompressOptions(t *testing.T) {
 		if createCmd.Flags().Lookup(opt.Name) == nil {
 			t.Errorf("create command missing flag for compression option %q", opt.Name)
 		}
+	}
+}
+
+func TestRecipeCommandsHaveRepeatableSourceFlag(t *testing.T) {
+	for _, cmd := range []*cobra.Command{availCmd, createCmd} {
+		flag := cmd.Flags().Lookup("source")
+		if flag == nil {
+			t.Errorf("%s command has no --source flag", cmd.Name())
+			continue
+		}
+		if flag.Value.Type() != "stringArray" {
+			t.Errorf("%s --source type = %q, want stringArray", cmd.Name(), flag.Value.Type())
+		}
+		if flag.Shorthand != "s" {
+			t.Errorf("%s --source shorthand = %q, want %q", cmd.Name(), flag.Shorthand, "s")
+		}
+	}
+}
+
+func TestSourceHandleCompletion(t *testing.T) {
+	oldSources := config.Global.Sources
+	config.Global.Sources = []catalog.Spec{
+		{Name: "site", Base: "/site"},
+		{Name: "lab", Base: "/lab"},
+		{Name: "cnt", Base: "/cnt"},
+	}
+	t.Cleanup(func() { config.Global.Sources = oldSources })
+
+	got, directive := sourceHandleCompletion(availCmd, nil, "s")
+	if directive != cobra.ShellCompDirectiveNoFileComp || len(got) != 1 || got[0] != "site" {
+		t.Fatalf("completion = %v, %v", got, directive)
 	}
 }
 

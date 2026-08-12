@@ -152,15 +152,10 @@ func runList(cmd *cobra.Command, args []string) error {
 			}
 			if listDescription {
 				for i, name := range names {
-					w := readOverlayDescription(d.Paths[name+"/(system app)"])
-					if w != "" {
-						fmt.Printf(" %s: %s\n", styled[i], w)
-					} else {
-						fmt.Printf(" %s\n", styled[i])
-					}
+					printListDescription(styled[i], readOverlayDescription(d.Paths[name+"/(system app)"]))
 				}
 			} else {
-				printColumns(plain, styled, 1, listTermWidth())
+				printColumns(plain, styled, 0, listTermWidth())
 			}
 		}
 
@@ -183,15 +178,10 @@ func runList(cmd *cobra.Command, args []string) error {
 			}
 			if listDescription {
 				for i := range plain {
-					w := readOverlayDescription(d.Paths[keys[i]])
-					if w != "" {
-						fmt.Printf(" %s: %s\n", styled[i], w)
-					} else {
-						fmt.Printf(" %s\n", styled[i])
-					}
+					printListDescription(styled[i], readOverlayDescription(d.Paths[keys[i]]))
 				}
 			} else {
-				printColumns(plain, styled, 1, listTermWidth())
+				printColumns(plain, styled, 0, listTermWidth())
 			}
 		}
 
@@ -209,15 +199,10 @@ func runList(cmd *cobra.Command, args []string) error {
 			}
 			if listDescription {
 				for i, data := range d.DataList {
-					w := readOverlayDescription(d.Paths[data])
-					if w != "" {
-						fmt.Printf(" %s: %s\n", styled[i], w)
-					} else {
-						fmt.Printf(" %s\n", styled[i])
-					}
+					printListDescription(styled[i], readOverlayDescription(d.Paths[data]))
 				}
 			} else {
-				printColumns(d.DataList, styled, 1, listTermWidth())
+				printColumns(d.DataList, styled, 0, listTermWidth())
 			}
 		}
 	}
@@ -361,6 +346,18 @@ func listTermWidth() int {
 		return 0
 	}
 	return terminalWidth()
+}
+
+func printListDescription(name, description string) {
+	fmt.Println(formatListDescription(name, description, terminalWidth()))
+}
+
+func formatListDescription(name, description string, width int) string {
+	line := name
+	if description != "" {
+		line += "\n" + formatDescription(description, 2, width)
+	}
+	return line
 }
 
 func sortedKeys(m map[string][]string) []string {

@@ -15,6 +15,7 @@ import (
 var (
 	availExpand      bool
 	availDescription bool
+	availSources     []string
 )
 
 var availCmd = &cobra.Command{
@@ -31,10 +32,14 @@ To install something you find here, use 'condatainer install <name>'.
 	Example: `  condatainer avail                   # List all
   condatainer avail cellranger        # Substring match
   condatainer avail cellranger 9      # AND search (multiple terms)
+  condatainer avail --source lab      # Search only the configured lab source
   condatainer avail 'cell*'           # Wildcard
   condatainer install cellranger/9.0.1 # Install one of the results`,
 	SilenceUsage: true, // Runtime errors should not show usage
-	RunE:         runAvail,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		return config.SelectSources(availSources)
+	},
+	RunE: runAvail,
 }
 
 func init() {
@@ -42,6 +47,9 @@ func init() {
 	availCmd.Flags().BoolVarP(&availExpand, "expand", "e", false, "Expand templated script groups into individual entries")
 	availCmd.Flags().BoolVar(&availDescription, "description", false,
 		"Show description for each build script (default true, false with --expand); descriptions are searched when shown")
+	availCmd.Flags().StringArrayVarP(&availSources, "source", "s", nil,
+		"Use only this configured recipe source, in flag order (repeatable)")
+	availCmd.RegisterFlagCompletionFunc("source", sourceHandleCompletion) //nolint:errcheck
 }
 
 // PackageInfo holds information about a build script
@@ -324,7 +332,7 @@ func formatTemplateLine(pkg PackageInfo, showDescription bool) string {
 	line := fmt.Sprintf("%s  %s%s%s", utils.StyleName(pkg.Name),
 		utils.StyleDebug("["), strings.Join(labelParts, utils.StyleDebug(", ")), utils.StyleDebug("]"))
 	if showDescription && pkg.Description != "" {
-		line += "\n  " + pkg.Description
+		line += "\n" + formatDescription(pkg.Description, 2, terminalWidth())
 	}
 	if pkg.TargetTemplate != "" {
 		line += "\n  " + utils.StyleHint("→ "+pkg.TargetTemplate)
@@ -370,7 +378,8 @@ func formatTemplateLine(pkg PackageInfo, showDescription bool) string {
 	return line
 }
 
-// formatPackageLine formats a package for display.
+// formatPackageLine formats a package for display. Descriptions use their own
+// indented line, matching template entries and keeping metadata/aliases compact.
 func formatPackageLine(pkg PackageInfo, showDescription bool) string {
 	line := utils.StyleName(pkg.Name)
 
@@ -403,7 +412,7 @@ func formatPackageLine(pkg PackageInfo, showDescription bool) string {
 	}
 
 	if showDescription && pkg.Description != "" {
-		line += "  " + pkg.Description
+		line += "\n" + formatDescription(pkg.Description, 2, terminalWidth())
 	}
 
 	return line

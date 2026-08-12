@@ -107,10 +107,13 @@ func buildSquashfsOpts(b *BuildObject, isData bool, sourceDir, metaDir, targetPa
 // attributes it cannot restore unprivileged (`security.selinux`), so carrying
 // them buys warnings on both sides of the round trip and nothing else. Whatever
 // an image needs at run time comes from its mode bits and its metadata.
+//
+// -quiet suppresses the final filesystem statistics but leaves the progress bar
+// enabled. Do not pair it with -no-progress: progress is the useful build output.
 func squashfsScript(sources []string, targetPath string, ncpus int, blockSize, compressArgs string) string {
 	return fmt.Sprintf(`
 trap 'exit 130' INT TERM
 echo "Packing overlay to SquashFS..."
-mksquashfs %s %s -processors %d -b %s -keep-as-directory -all-root -no-xattrs %s
+mksquashfs %s %s -processors %d -b %s -keep-as-directory -all-root -no-xattrs -quiet %s
 `, strings.Join(sources, " "), targetPath, ncpus, blockSize, compressArgs)
 }

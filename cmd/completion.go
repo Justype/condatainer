@@ -223,7 +223,7 @@ func postProcessBashCompletion(script string) string {
 
 	script = strings.Replace(script, oldCode, newCode, 1)
 
-	// 2. Hide short flags, then add fzf support if available for 'e/exec'.
+	// 2. Hide short flags, then add fzf support for overlay/artifact selectors.
 	// Both are injected at the same anchor so there is only one replacement to keep
 	// in sync: the line where 'out' holds the candidates with the directive removed.
 	fzfInject := `# Bash lists short and long flags on separate lines, doubling the candidate
@@ -234,23 +234,29 @@ func postProcessBashCompletion(script string) string {
 
     __condatainer_debug "The completions are: ${out}"
 
-    # fzf-pick an overlay for 'e/exec/info/export' (not 'overlay ...'). words[0] is the binary.
+    # fzf-pick an overlay, or an artifact for the nested 'registry push' command.
+    # words[0] is the binary.
     if command -v fzf >/dev/null 2>&1 && [[ -n "$out" ]]; then
         local sub="${words[1]}"
         local is_overlay_cmd=false
+        local fzf_header="Select overlay"
         if [[ "$sub" == "e" || "$sub" == "exec" || "$sub" == "info" || "$sub" == "export" ]]; then
             is_overlay_cmd=true
+        elif [[ "$sub" == "registry" && "${words[2]}" == "push" ]]; then
+            is_overlay_cmd=true
+            fzf_header="Select artifact"
         fi
 
         # Only on an argument, not while the subcommand itself is being typed.
-        if [[ "$cur" == -* ]] || (( COMP_CWORD <= 1 )); then
+        if [[ "$cur" == -* ]] || (( COMP_CWORD <= 1 )) ||
+           [[ "$sub" == "registry" && $COMP_CWORD -le 2 ]]; then
             is_overlay_cmd=false
         fi
 
         if [[ "$is_overlay_cmd" == "true" ]]; then
             if [[ $(echo "$out" | wc -l) -gt 1 ]]; then
                  local selection
-                 selection=$(echo "$out" | fzf --reverse --header="Select overlay" --query="$cur" --select-1 --exit-0)
+                 selection=$(echo "$out" | fzf --reverse --header="$fzf_header" --query="$cur" --select-1 --exit-0)
                  if [[ -n "$selection" ]]; then
                      out="$selection"
                  fi
@@ -266,19 +272,25 @@ func postProcessBashCompletion(script string) string {
 // postProcessZshCompletion modifies the generated zsh completion script
 // EXPERIMENTAL: zsh completion is not tested and may have edge cases. Feedback welcome.
 func postProcessZshCompletion(script string) string {
-	// Add fzf support if available for 'e/exec'
+	// Add fzf support for overlay/artifact selectors.
 	fzfInject := `    __condatainer_debug "completions: ${out}"
 
-    # fzf-pick an overlay for 'e/exec/info/export' (not 'overlay ...'). words[1] is the binary in zsh.
+    # fzf-pick an overlay, or an artifact for the nested 'registry push' command.
+    # words[1] is the binary in zsh.
     if command -v fzf >/dev/null 2>&1 && [[ -n "$out" ]]; then
         local sub="${words[2]}"
         local is_overlay_cmd=false
+        local fzf_header="Select overlay"
         if [[ "$sub" == "e" || "$sub" == "exec" || "$sub" == "info" || "$sub" == "export" ]]; then
             is_overlay_cmd=true
+        elif [[ "$sub" == "registry" && "${words[3]}" == "push" ]]; then
+            is_overlay_cmd=true
+            fzf_header="Select artifact"
         fi
 
         # Only on an argument, not while the subcommand itself is being typed.
-        if [[ "${words[$CURRENT]}" == -* ]] || (( CURRENT <= 2 )); then
+        if [[ "${words[$CURRENT]}" == -* ]] || (( CURRENT <= 2 )) ||
+           [[ "$sub" == "registry" && $CURRENT -le 3 ]]; then
             is_overlay_cmd=false
         fi
 
@@ -288,7 +300,7 @@ func postProcessZshCompletion(script string) string {
              if [[ ${#lines} -gt 1 ]]; then
                  zle -I
                  local selection
-                 selection=$(echo "$out" | fzf --height 40% --reverse --header="Select overlay" --query="$lastParam" --select-1 --exit-0)
+                 selection=$(echo "$out" | fzf --height 40% --reverse --header="$fzf_header" --query="$lastParam" --select-1 --exit-0)
                  if [[ -n "$selection" ]]; then
                      out="$selection"
                  fi
@@ -317,11 +329,16 @@ func postProcessFishCompletion(script string) string {
 
 	fzfInject := target + `
 
-    # fzf-pick an overlay for 'e/exec/info/export' (not 'overlay ...'). args[1] is the binary in fish.
+    # fzf-pick an overlay, or an artifact for the nested 'registry push' command.
+    # args[1] is the binary in fish.
     if type -q fzf
         set -l _is_overlay_cmd false
+        set -l _fzf_header "Select overlay"
         if contains -- "$args[2]" e exec info export
             set _is_overlay_cmd true
+        else if test "$args[2]" = registry; and test "$args[3]" = push
+            set _is_overlay_cmd true
+            set _fzf_header "Select artifact"
         end
         if test $_is_overlay_cmd = true
             if not string match -q -- "-*" (commandline -t)
@@ -329,7 +346,7 @@ func postProcessFishCompletion(script string) string {
                 if not contains -- "--" $args
                     set -l candidates $results[1..-2]
                     if test (count $candidates) -gt 1
-                        set -l selection (string join \n $candidates | fzf --height 40% --reverse --select-1 --exit-0 --query (commandline -t) --header "Select overlay")
+                        set -l selection (string join \n $candidates | fzf --height 40% --reverse --select-1 --exit-0 --query (commandline -t) --header "$_fzf_header")
                         if test -n "$selection"
                             set results $selection $results[-1]
                         end

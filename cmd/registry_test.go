@@ -10,6 +10,7 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/registry"
+	"github.com/spf13/cobra"
 )
 
 func TestInferPushSource(t *testing.T) {
@@ -60,6 +61,41 @@ func TestRegistryCommandHasThePlannedSurface(t *testing.T) {
 		if !found {
 			t.Errorf("registry command is missing %q", name)
 		}
+	}
+}
+
+func TestRegistryPushCompletionStopsAfterArtifact(t *testing.T) {
+	got, directive := registryPushCompletion(nil, []string{"hello/1.0"}, "")
+	if len(got) != 0 || directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("completion = %v, %v", got, directive)
+	}
+}
+
+func TestCompletionScriptsRecognizeRegistryPushFZF(t *testing.T) {
+	tests := []struct {
+		name, input, marker string
+		process             func(string) string
+	}{
+		{
+			name: "bash", input: `__condatainer_debug "The completions are: ${out}"`,
+			marker: `"$sub" == "registry" && "${words[2]}" == "push"`, process: postProcessBashCompletion,
+		},
+		{
+			name: "zsh", input: `__condatainer_debug "completions: ${out}"`,
+			marker: `"$sub" == "registry" && "${words[3]}" == "push"`, process: postProcessZshCompletion,
+		},
+		{
+			name: "fish", input: `set -l results (eval $requestComp 2> /dev/null)`,
+			marker: `test "$args[2]" = registry; and test "$args[3]" = push`, process: postProcessFishCompletion,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.process(tc.input)
+			if !strings.Contains(got, tc.marker) || !strings.Contains(got, "Select artifact") {
+				t.Fatalf("processed completion lacks registry push fzf hook:\n%s", got)
+			}
+		})
 	}
 }
 

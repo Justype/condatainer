@@ -309,6 +309,7 @@ func (b *BuildObject) clearStaleLock(ctx context.Context) error {
 		logging.FromContext(ctx).Warn("stale build lock, removing", "name", name, "detail", detail)
 		b.removeBuildLock()
 		b.removeOrphanedOutput(ctx, info)
+		b.removeOwnerWorkspace(info)
 		return nil
 	}
 
@@ -351,13 +352,51 @@ func (b *BuildObject) createBuildLock() error {
 					return err
 				}
 				b.setPreparedPath(existing)
+				if err := b.adoptWorkspace(existing); err != nil {
+					b.removeBuildLock()
+					return err
+				}
 				return nil
 			}
 		}
 		return fmt.Errorf("build already in progress: lock file exists at %s", b.tgt.Lock)
 	}
 	b.setPreparedPath(info)
+	if err := b.adoptWorkspace(info); err != nil {
+		b.removeBuildLock()
+		return err
+	}
 	return nil
+}
+
+// adoptWorkspace re-sites all temporary build state under the identity in the
+// lock. Local builds normally already use this path; scheduler jobs move their
+// process-private resolved recipe to the adopted scheduler-job workspace.
+func (b *BuildObject) adoptWorkspace(info BuildLockInfo) error {
+	next := workspaceForOwner(b.spec.Image.Name, b.ws.BaseRoot, b.ws.imageExt, info)
+	if next.Root == b.ws.Root {
+		return nil
+	}
+	old := b.ws
+	if utils.DirExists(old.Root) {
+		if err := utils.MkdirAllShared(filepath.Dir(next.Root)); err != nil {
+			return err
+		}
+		if err := os.Rename(old.Root, next.Root); err != nil {
+			return fmt.Errorf("failed to adopt build workspace %s: %w", next.Root, err)
+		}
+	}
+	b.ws = next
+	if b.tempSource && b.buildSource == old.Source {
+		b.buildSource = next.Source
+	}
+	return nil
+}
+
+func (b *BuildObject) removeOwnerWorkspace(info BuildLockInfo) {
+	ws := workspaceForOwner(b.spec.Image.Name, b.ws.BaseRoot, b.ws.imageExt, info)
+	os.RemoveAll(ws.Root) //nolint:errcheck
+	utils.RemoveDirIfEmpty(filepath.Dir(ws.Root))
 }
 
 // setPreparedPath records where this build writes its output, derived from the
@@ -491,13 +530,8 @@ func (b *BuildObject) CreateBuildDirs(ctx context.Context, force bool) error {
 		os.Remove(b.ws.Overlay) //nolint:errcheck — clean ext3-mode artifact (no-op if "")
 	}
 
-	// Create cnt-$USER leaf first with appropriate permissions (0700 under /tmp, 0775 elsewhere).
-	tmpBase := b.ws.Root
-	if tmpBase == "" {
-		tmpBase = filepath.Dir(buildDir)
-	}
-	if err := utils.EnsureTmpSubdir(tmpBase); err != nil {
-		return fmt.Errorf("failed to create tmp dir %s: %w", tmpBase, err)
+	if err := ensureWorkspaceRoot(b); err != nil {
+		return err
 	}
 	if err := utils.MkdirAllShared(b.ws.CntDir); err != nil {
 		return fmt.Errorf("failed to create build cnt dir %s: %w", b.ws.CntDir, err)
@@ -535,34 +569,14 @@ func (b *BuildObject) Cleanup(failed bool) error {
 		log.Info("cleaning up temporary files")
 	}
 
-	// Remove the materialized recipe
-	if b.tempSource && b.buildSource != "" {
-		if err := os.Remove(b.buildSource); err != nil && !os.IsNotExist(err) {
-			log.Warn("failed to remove materialized recipe", "path", b.buildSource, "err", err)
-		} else {
-			log.Debug("removed materialized recipe", "path", b.buildSource)
+	// Every generated input and intermediate belongs to this producer root.
+	if b.ws.Root != "" {
+		log.Debug("cleaning up build workspace", "path", b.ws.Root)
+		if err := os.RemoveAll(b.ws.Root); err != nil && !os.IsNotExist(err) {
+			log.Warn("failed to remove build workspace", "path", b.ws.Root, "err", err)
 		}
-	}
-
-	// Remove tmp overlay
-	if b.ws.Overlay != "" {
-		if err := os.Remove(b.ws.Overlay); err != nil && !os.IsNotExist(err) {
-			log.Warn("failed to remove tmp overlay", "path", b.ws.Overlay, "err", err)
-		}
-	}
-
-	// Remove cnt directory
-	if b.ws.CntDir != "" {
-		cntBaseDir := b.ws.BuildDir
-		log.Debug("cleaning up build directory", "path", cntBaseDir)
-		if err := os.RemoveAll(cntBaseDir); err != nil && !os.IsNotExist(err) {
-			log.Warn("failed to remove cnt dir", "path", cntBaseDir, "err", err)
-		}
-
-		// Remove tmpDir itself if it is now empty (no other builds using it)
-		if b.ws.Root != "" && b.ws.Root != cntBaseDir {
-			utils.RemoveDirIfEmpty(b.ws.Root)
-		}
+		utils.RemoveDirIfEmpty(filepath.Dir(b.ws.Root))
+		utils.RemoveDirIfEmpty(b.ws.BaseRoot)
 	}
 
 	// On failure remove only this build's own output. The installed image is
@@ -1048,12 +1062,12 @@ func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (
 		logging.FromContext(ctx).Warn("recipe lint", "detail", warning)
 	}
 
-	dir := tmpDir
 	if isContainer {
-		// Def builds keep buildSource and the SIF in one directory.
-		dir = tmpRootForDef()
+		base.asDefinitionBuild()
+	} else {
+		base.retargetWorkspace()
 	}
-	path, err := writeRecipeFile(recipe, dir, isContainer)
+	path, err := writeRecipeFile(recipe, base.ws.Source)
 	if err != nil {
 		return false, false, err
 	}
@@ -1115,17 +1129,10 @@ func selectedPlaceholders(recipe *catalog.Recipe) map[string]string {
 
 // writeRecipeFile writes the runnable recipe to a temp file the build executes.
 // A template is written expanded; what the image embeds is the template itself.
-func writeRecipeFile(recipe *catalog.Recipe, dir string, isContainer bool) (string, error) {
-	if err := utils.MkdirAllShared(dir); err != nil {
+func writeRecipeFile(recipe *catalog.Recipe, path string) (string, error) {
+	if err := utils.MkdirAllShared(filepath.Dir(path)); err != nil {
 		return "", fmt.Errorf("failed to create tmp directory: %w", err)
 	}
-	name := "cnt--" + strings.ReplaceAll(recipe.Name, "/", "--")
-	if isContainer {
-		name += ".def"
-	} else {
-		name += ".sh"
-	}
-	path := filepath.Join(dir, name)
 
 	file, err := utils.CreateFileWritable(path)
 	if err != nil {

@@ -33,6 +33,18 @@ look normal. `WarnUnreachableSources` warns once per process, and must be called
 *after* the catalog has been consulted, since a source's `Err` is set when it is
 first read rather than when it is opened.
 
+`avail` and `create` can restrict that configured list with repeatable source
+handles. Flag order becomes lookup precedence; dependencies and the base use the
+same restricted catalog:
+
+```text
+condatainer avail -s lab
+condatainer create -s lab -s cnt star/2.7.11b
+```
+
+With no `--source`, the full configured list is used. An unknown handle is an
+error. A missing recipe still follows the normal Conda fallback.
+
 **The base is recorded once and never revised.** `EnsureBase` writes it from the
 first source declaring a `default_base` the first time one is needed. Changing
 it rebuilds the container root and every `os` overlay stacked on it, so following

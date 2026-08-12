@@ -44,10 +44,11 @@ then the Docker credential store, then anonymous access.`,
 	}
 
 	push := &cobra.Command{
-		Use:          "push <artifact-or-name>",
-		Short:        "Publish a local artifact",
-		Args:         cobra.ExactArgs(1),
-		SilenceUsage: true,
+		Use:               "push <artifact-or-name>",
+		Short:             "Publish a local artifact",
+		Args:              cobra.ExactArgs(1),
+		SilenceUsage:      true,
+		ValidArgsFunction: registryPushCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path, err := findRegistryArtifact(args[0])
 			if err != nil {
@@ -166,6 +167,13 @@ then the Docker credential store, then anonymous access.`,
 
 	cmd.AddCommand(push, pull, tags, resolve, login, logout)
 	return cmd
+}
+
+func registryPushCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return overlaySuggestions(true, false, toComplete)
 }
 
 // registryPushDestination resolves the publishing endpoint and its policy.

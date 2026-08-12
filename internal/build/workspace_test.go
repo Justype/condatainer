@@ -8,6 +8,7 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image/producer"
 )
 
 // Every constructor sites the workspace itself, and they have disagreed before —
@@ -19,15 +20,20 @@ import (
 
 // wantPaths is the full path set for one build.
 type wantPaths struct {
-	root    string // tmpDir
-	cntDir  string
-	tmpImg  string // "" when the mode has no scratch image
-	target  string
-	metaDir string
+	baseRoot string
+	root     string // producer-private root
+	cntDir   string
+	tmpImg   string // "" when the mode has no scratch image
+	target   string
+	metaDir  string
+	source   string
 }
 
 func checkPaths(t *testing.T, b *BuildObject, want wantPaths) {
 	t.Helper()
+	if b.ws.BaseRoot != want.baseRoot {
+		t.Errorf("base root = %q, want %q", b.ws.BaseRoot, want.baseRoot)
+	}
 	if b.ws.Root != want.root {
 		t.Errorf("tmpDir = %q, want %q", b.ws.Root, want.root)
 	}
@@ -43,6 +49,9 @@ func checkPaths(t *testing.T, b *BuildObject, want wantPaths) {
 	if b.ws.MetaDir != want.metaDir {
 		t.Errorf("MetaDir = %q, want %q", b.ws.MetaDir, want.metaDir)
 	}
+	if b.ws.Source != want.source {
+		t.Errorf("Source = %q, want %q", b.ws.Source, want.source)
+	}
 	if wantDir := filepath.Join(filepath.Dir(want.cntDir), "tmp"); b.ws.TmpDir != wantDir {
 		t.Errorf("TmpDir = %q, want %q", b.ws.TmpDir, wantDir)
 	}
@@ -54,17 +63,11 @@ func checkPaths(t *testing.T, b *BuildObject, want wantPaths) {
 // expect builds the path set the helpers derive, which is what §3.1 claims
 // workspaceFor reproduces.
 func expect(name, root, ext, target string) wantPaths {
-	cntDir := getCntDirPath(name, root)
-	w := wantPaths{
-		root:    root,
-		cntDir:  cntDir,
-		target:  target,
-		metaDir: filepath.Join(filepath.Dir(cntDir), ".cnt"),
+	ws := workspaceFor(name, root, ext)
+	return wantPaths{
+		baseRoot: ws.BaseRoot, root: ws.Root, cntDir: ws.CntDir,
+		tmpImg: ws.Overlay, target: target, metaDir: ws.MetaDir, source: ws.Source,
 	}
-	if ext != "" {
-		w.tmpImg = filepath.Join(root, strings.ReplaceAll(name, "/", "--")+ext)
-	}
-	return w
 }
 
 // The scratch image exists exactly when the mode uses one. This constructor used
@@ -89,7 +92,7 @@ func TestCondaConstructorPaths(t *testing.T) {
 			if appTmpOverlay {
 				ext = ".img"
 			}
-			checkPaths(t, b, expect(module, b.ws.Root, ext,
+			checkPaths(t, b, expect(module, b.ws.BaseRoot, ext,
 				filepath.Join(dir, "samtools--1.23.1.sqf")))
 
 			if b.ws.UsesImage() != appTmpOverlay {
@@ -139,7 +142,7 @@ func TestExternalConstructorPaths(t *testing.T) {
 			if err != nil {
 				t.Fatalf("FromExternalSource: %v", err)
 			}
-			checkPaths(t, b, expect("demo", b.ws.Root, tc.wantExt, prefix+".sqf"))
+			checkPaths(t, b, expect("demo", b.ws.BaseRoot, tc.wantExt, prefix+".sqf"))
 		})
 	}
 }
@@ -161,11 +164,11 @@ func TestRetargetMovesEveryPath(t *testing.T) {
 	b.spec.Image.Type = catalog.TypeData
 	b.retargetWorkspace()
 
-	if b.ws.Root == dir {
+	if b.ws.BaseRoot == dir {
 		t.Skip("data and app share a tmp root in this environment; nothing to re-site")
 	}
 	// Data drops the ext3 image, so the whole set is re-derived with no overlay.
-	checkPaths(t, b, expect(name, b.ws.Root, "", ""))
+	checkPaths(t, b, expect(name, b.ws.BaseRoot, "", ""))
 }
 
 // The layout itself, spelled out. Everything else in the package derives from
@@ -174,30 +177,32 @@ func TestRetargetMovesEveryPath(t *testing.T) {
 func TestWorkspaceForLayout(t *testing.T) {
 	for _, tc := range []struct {
 		name, module, ext string
-		wantBuildDir      string // relative to root
-		wantOverlay       string // relative to root; "" for dir mode
+		wantParent        string // relative to base root
 	}{
-		{"conda", "samtools/1.23.1", ".img", "build_samtools_1.23.1", "samtools--1.23.1.img"},
-		{"definition", "ubuntu24/base", ".sif", "build_ubuntu24_base", "ubuntu24--base.sif"},
-		{"dir mode", "demo", "", "build_demo", ""},
+		{"conda", "samtools/1.23.1", ".img", "build_samtools_1.23.1"},
+		{"definition", "ubuntu24/base", ".sif", "build_ubuntu24_base"},
+		{"dir mode", "demo", "", "build_demo"},
 		{"deep data name", "grch38/star/2.7.11b/gencode47-101", ".img",
-			"build_grch38_star_2.7.11b_gencode47-101", "grch38--star--2.7.11b--gencode47-101.img"},
+			"build_grch38_star_2.7.11b_gencode47-101"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			ws := workspaceFor(tc.module, root, tc.ext)
 
-			buildDir := filepath.Join(root, tc.wantBuildDir)
+			ownerRoot := filepath.Join(root, tc.wantParent, producer.Tag(producer.LocalInfo()))
+			buildDir := filepath.Join(ownerRoot, "work")
 			overlay := ""
-			if tc.wantOverlay != "" {
-				overlay = filepath.Join(root, tc.wantOverlay)
+			if tc.ext != "" {
+				overlay = filepath.Join(ownerRoot, "rootfs"+tc.ext)
 			}
 			for _, c := range []struct{ got, want, field string }{
-				{ws.Root, root, "Root"},
+				{ws.BaseRoot, root, "BaseRoot"},
+				{ws.Root, ownerRoot, "Root"},
 				{ws.BuildDir, buildDir, "BuildDir"},
 				{ws.CntDir, filepath.Join(buildDir, "cnt"), "CntDir"},
 				{ws.TmpDir, filepath.Join(buildDir, "tmp"), "TmpDir"},
 				{ws.MetaDir, filepath.Join(buildDir, ".cnt"), "MetaDir"},
+				{ws.Source, filepath.Join(ownerRoot, sourceFileName(tc.module, tc.ext == ".sif")), "Source"},
 				{ws.Overlay, overlay, "Overlay"},
 			} {
 				if c.got != c.want {
@@ -205,6 +210,58 @@ func TestWorkspaceForLayout(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWorkspaceOwnersDoNotShareTemporaryPaths(t *testing.T) {
+	root := t.TempDir()
+	first := workspaceForOwner("hello/1.0", root, ".img",
+		BuildLockInfo{Runner: "local", Node: "node-a", PID: 10})
+	second := workspaceForOwner("hello/1.0", root, ".img",
+		BuildLockInfo{Runner: "local", Node: "node-b", PID: 10})
+	for _, pair := range [][2]string{
+		{first.Root, second.Root},
+		{first.Source, second.Source},
+		{first.BuildDir, second.BuildDir},
+		{first.Overlay, second.Overlay},
+	} {
+		if pair[0] == pair[1] {
+			t.Fatalf("two owners share temporary path %q", pair[0])
+		}
+	}
+}
+
+func TestAdoptWorkspaceMovesMaterializedRecipe(t *testing.T) {
+	root := t.TempDir()
+	b := &BuildObject{
+		spec:       Spec{Image: ImageSpec{Name: "hello/1.0"}},
+		ws:         workspaceFor("hello/1.0", root, ""),
+		tempSource: true,
+	}
+	b.buildSource = b.ws.Source
+	if err := os.MkdirAll(filepath.Dir(b.buildSource), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b.buildSource, []byte("echo hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	owner := BuildLockInfo{Runner: "slurm", JobID: "42"}
+	oldRoot := b.ws.Root
+	if err := b.adoptWorkspace(owner); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.ws.Root, "slurm-42") {
+		t.Fatalf("adopted root = %q", b.ws.Root)
+	}
+	if b.buildSource != b.ws.Source {
+		t.Fatalf("build source = %q, workspace source = %q", b.buildSource, b.ws.Source)
+	}
+	if _, err := os.Stat(b.buildSource); err != nil {
+		t.Fatalf("materialized recipe was not moved: %v", err)
+	}
+	if _, err := os.Stat(oldRoot); !os.IsNotExist(err) {
+		t.Fatalf("old owner workspace remains: %v", err)
 	}
 }
 
