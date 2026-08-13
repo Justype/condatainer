@@ -71,7 +71,7 @@ func pushArtifactLayers(ctx context.Context, blobs blobPusher, path, mediaType s
 	for i := range count {
 		offset := int64(i) * artifactChunkSize
 		desc, err := pushRange(ctx, blobs, f, offset, min(artifactChunkSize, size-offset),
-			name+fmt.Sprintf(chunkSuffix, i), mediaType)
+			name+fmt.Sprintf(chunkSuffix, i), mediaType, i+1, count)
 		if err != nil {
 			return nil, fmt.Errorf("failed to push chunk %d of %d for %s: %w", i+1, count, name, err)
 		}
@@ -85,7 +85,7 @@ func pushArtifactLayers(ctx context.Context, blobs blobPusher, path, mediaType s
 // The range is read twice: once to digest it, once to send it. A registry needs
 // the digest before the upload begins, so the alternative is not one pass but a
 // staged copy — and reading a file twice is cheap next to writing it once more.
-func pushRange(ctx context.Context, blobs blobPusher, f *os.File, offset, size int64, name, mediaType string) (ocispec.Descriptor, error) {
+func pushRange(ctx context.Context, blobs blobPusher, f *os.File, offset, size int64, name, mediaType string, parts ...int) (ocispec.Descriptor, error) {
 	dgst, err := digestRange(f, offset, size)
 	if err != nil {
 		return ocispec.Descriptor{}, err
@@ -107,7 +107,11 @@ func pushRange(ctx context.Context, blobs blobPusher, f *os.File, offset, size i
 	var reader io.Reader = io.NewSectionReader(f, offset, size)
 	var progress *progressReader
 	if size >= progressMinSize {
-		progress = newProgressReader(ctx, reader, size, verbUpload)
+		if len(parts) == 2 {
+			progress = newLayerProgressReader(ctx, reader, size, verbUpload, parts[0], parts[1])
+		} else {
+			progress = newProgressReader(ctx, reader, size, verbUpload)
+		}
 		reader = progress
 	}
 	if err := blobs.Push(ctx, desc, reader); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {

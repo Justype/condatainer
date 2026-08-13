@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"time"
@@ -75,10 +76,18 @@ type progressReader struct {
 	nextReport int64
 	lastReport time.Time
 	finished   bool
+	layer      int
+	layers     int
 }
 
 func newProgressReader(ctx context.Context, r io.Reader, total int64, verb string) *progressReader {
 	return &progressReader{reader: r, log: logging.FromContext(ctx), verb: verb, total: total}
+}
+
+func newLayerProgressReader(ctx context.Context, r io.Reader, total int64, verb string, layer, layers int) *progressReader {
+	reader := newProgressReader(ctx, r, total, verb)
+	reader.layer, reader.layers = layer, layers
+	return reader
 }
 
 func (r *progressReader) Read(p []byte) (int, error) {
@@ -116,10 +125,10 @@ func (r *progressReader) report(final bool) {
 	if r.log == nil {
 		return
 	}
-	if final {
-		r.log.Info(r.verb+" complete", "bytes", utils.FormatBytes(r.done))
-		return
+	attrs := []any{"kind", "progress", "done", utils.FormatBytes(r.done), "total", utils.FormatBytes(r.total)}
+	if r.layers > 0 {
+		attrs = append(attrs, "layer", fmt.Sprintf("%d/%d", r.layer, r.layers))
 	}
-	r.log.Info(r.verb+" progress",
-		"done", utils.FormatBytes(r.done), "total", utils.FormatBytes(r.total))
+	attrs = append(attrs, "final", final, "last", r.layers == 0 || r.layer == r.layers)
+	r.log.Info(r.verb+" progress", attrs...)
 }

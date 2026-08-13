@@ -15,7 +15,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
+	"sync"
+
+	"golang.org/x/term"
 
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -23,10 +27,16 @@ import (
 // Handler is a slog.Handler that dispatches records to utils.Print*.
 type Handler struct {
 	attrs []slog.Attr
+	state *progressState
+}
+
+type progressState struct {
+	sync.Mutex
+	active bool
 }
 
 // New returns a fresh Handler.
-func New() *Handler { return &Handler{} }
+func New() *Handler { return &Handler{state: &progressState{}} }
 
 // Enabled gates Debug records on utils.DebugMode; all other levels pass through
 // (Info/Warn already respect QuietMode inside the Print* functions themselves).
@@ -40,10 +50,19 @@ func (h *Handler) Enabled(_ context.Context, level slog.Level) bool {
 // Handle formats the record and dispatches to the matching utils.Print* call.
 func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 	var kind string
+	var final, last bool
 	var extras []string
 	visit := func(a slog.Attr) {
 		if a.Key == "kind" {
 			kind = a.Value.String()
+			return
+		}
+		if a.Key == "final" {
+			final = a.Value.Bool()
+			return
+		}
+		if a.Key == "last" {
+			last = a.Value.Bool()
 			return
 		}
 		extras = append(extras, fmt.Sprintf("%s=%v", a.Key, a.Value.Any()))
@@ -59,6 +78,22 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 	msg := r.Message
 	if len(extras) > 0 {
 		msg = msg + " " + strings.Join(extras, " ")
+	}
+
+	h.state.Lock()
+	defer h.state.Unlock()
+	if kind == "progress" && term.IsTerminal(int(os.Stderr.Fd())) {
+		fmt.Fprintf(os.Stderr, "\r\x1b[2K[CNT] %s", msg)
+		h.state.active = true
+		if final && last {
+			fmt.Fprintln(os.Stderr)
+			h.state.active = false
+		}
+		return nil
+	}
+	if h.state.active {
+		fmt.Fprintln(os.Stderr)
+		h.state.active = false
 	}
 
 	switch r.Level {

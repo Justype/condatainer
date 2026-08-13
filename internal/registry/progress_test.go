@@ -38,7 +38,7 @@ func TestProgressReaderPassesBytesThroughAndReportsOnce(t *testing.T) {
 	// The caller reports success independently of the reader hitting EOF; only
 	// one of the two is guaranteed to happen, and both must not log.
 	reader.finish()
-	if n := strings.Count(logs.String(), verbUpload+" complete"); n != 1 {
+	if n := strings.Count(logs.String(), verbUpload+" progress"); n != 1 {
 		t.Errorf("logged completion %d times, want 1:\n%s", n, logs)
 	}
 }
@@ -53,7 +53,7 @@ func TestProgressReaderReportsWhatItSaw(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader.finish()
-	if !strings.Contains(logs.String(), verbDownload+" complete") {
+	if !strings.Contains(logs.String(), verbDownload+" progress") {
 		t.Errorf("no completion report:\n%s", logs)
 	}
 }
@@ -90,7 +90,7 @@ func TestWithTransferProgressNarratesLargeBlobs(t *testing.T) {
 	if err := target.Push(ctx, desc, body); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(logs.String(), verbDownload+" complete") {
+	if !strings.Contains(logs.String(), verbDownload+" progress") {
 		t.Errorf("a blob at the threshold was not narrated:\n%s", logs)
 	}
 }
@@ -100,3 +100,19 @@ func TestWithTransferProgressNarratesLargeBlobs(t *testing.T) {
 type zeroes struct{}
 
 func (zeroes) Read(p []byte) (int, error) { return len(p), nil }
+
+func TestLayerProgressReaderReportsOverallLayer(t *testing.T) {
+	ctx, logs := captureLogs(t)
+	reader := newLayerProgressReader(ctx, strings.NewReader("chunk"), 5, verbUpload, 2, 3)
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		t.Fatal(err)
+	}
+
+	got := logs.String()
+	if !strings.Contains(got, "layer=2/3") {
+		t.Errorf("progress does not report the overall layer:\n%s", got)
+	}
+	if !strings.Contains(got, "final=true") || !strings.Contains(got, "last=false") {
+		t.Errorf("intermediate-layer completion is not distinguishable:\n%s", got)
+	}
+}

@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
@@ -47,6 +49,9 @@ func RefreshRemoteMetadata(ctx context.Context, force bool, w io.Writer) (map[st
 	for _, src := range cat {
 		meta, err := readHelperIndex(ctx, cat, src, w)
 		if err != nil {
+			if helperIndexNotFound(err) {
+				continue
+			}
 			if w != nil {
 				fmt.Fprintf(w, "WARN: no helper index in %s: %v\n", src.Name, err)
 			}
@@ -73,6 +78,13 @@ func RefreshRemoteMetadata(ctx context.Context, force bool, w io.Writer) (map[st
 }
 
 // readHelperIndex reads index/helpers.json.gz, falling back to the plain file.
+
+// helperIndexNotFound identifies an optional index that a source does not
+// publish. Catalog HTTP errors include the response status in their stable
+// message; local sources return an os.ErrNotExist wrapper.
+func helperIndexNotFound(err error) bool {
+	return os.IsNotExist(err) || strings.HasSuffix(err.Error(), ": 404 Not Found")
+}
 func readHelperIndex(ctx context.Context, cat catalog.Catalog, src *catalog.Source, w io.Writer) (map[string]RemoteScriptEntry, error) {
 	if data, err := cat.ReadPath(ctx, src, helperIndexPath+".gz"); err == nil {
 		if plain, err := gunzip(data); err == nil {
