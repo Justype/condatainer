@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -111,6 +112,59 @@ func TestRegistryHelpersValidateInputs(t *testing.T) {
 	}
 	if got, err := parseVisibility("INTERNAL"); err != nil || got != registry.Internal {
 		t.Errorf("parseVisibility = (%q, %v)", got, err)
+	}
+}
+
+// An installed name/version is addressed by this system and infers where it
+// publishes; a path the user pointed at does not, so it must say where it goes.
+func TestFindRegistryArtifactSeparatesManagedFromPointedAt(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	images := filepath.Join(config.GetUserDataDir(), "images")
+	if err := os.MkdirAll(images, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installed := filepath.Join(images, "hello--1.0.sqf")
+	if err := os.WriteFile(installed, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "hello.sqf")
+	if err := os.WriteFile(external, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := findRegistryArtifact("hello/1.0")
+	if err != nil || got.path != installed || !got.managed {
+		t.Fatalf("name/version = %+v, error = %v; want %s managed", got, err, installed)
+	}
+	if got, err = findRegistryArtifact(external); err != nil || got.path != external || got.managed {
+		t.Fatalf("path = %+v, error = %v; want %s unmanaged", got, err, external)
+	}
+	if _, err = findRegistryArtifact("absent/9.9"); err == nil {
+		t.Error("a name matching nothing resolved anyway")
+	}
+}
+
+// Inference reads the artifact's recorded build source, so without this a path
+// pointed at would publish to its recipe collection's endpoint — which is the
+// least likely destination for a one-off build, a mirror, or a project's image.
+func TestRegistryPushDestinationRefusesToInferForAPath(t *testing.T) {
+	cmd := newRegistryCommand()
+	opts := &registryOptions{visibility: string(registry.Public)}
+
+	_, _, err := registryPushDestination(cmd, opts, registryArtifact{path: "/tmp/one-off.sqf"})
+	if err == nil || !strings.Contains(err.Error(), "--registry") {
+		t.Fatalf("error = %v, want a request for --registry", err)
+	}
+	if !strings.Contains(err.Error(), "name/version") {
+		t.Errorf("the error does not say what would infer: %v", err)
+	}
+
+	// The same path with an explicit destination publishes, and never reads the
+	// artifact to find one.
+	opts.base = "ghcr.io/lab/cnt"
+	base, visibility, err := registryPushDestination(cmd, opts, registryArtifact{path: "/tmp/one-off.sqf"})
+	if err != nil || base != "ghcr.io/lab/cnt" || visibility != registry.Public {
+		t.Fatalf("explicit destination = (%q, %q, %v)", base, visibility, err)
 	}
 }
 

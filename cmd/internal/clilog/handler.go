@@ -14,10 +14,12 @@ package clilog
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/term"
 
@@ -28,6 +30,13 @@ import (
 type Handler struct {
 	attrs []slog.Attr
 	state *progressState
+	// out is where the in-place progress line is drawn, and tty whether that
+	// destination can render one. Fields rather than os.Stderr and a live
+	// terminal check so the line's lifecycle can be tested: a progress line left
+	// open across a multi-minute rate-limit wait is a real failure mode and one
+	// no test could otherwise reach.
+	out io.Writer
+	tty bool
 }
 
 type progressState struct {
@@ -35,8 +44,50 @@ type progressState struct {
 	active bool
 }
 
-// New returns a fresh Handler.
-func New() *Handler { return &Handler{state: &progressState{}} }
+// current is the handler an interrupt should close the progress line on.
+//
+// A package-level slot because the signal handler runs far from where the
+// handler is built, and there is one of these per process by construction —
+// New is called once per command, and the last one is the one drawing.
+var current atomic.Pointer[Handler]
+
+// New returns a fresh Handler writing to stderr.
+func New() *Handler {
+	h := &Handler{
+		state: &progressState{},
+		out:   os.Stderr,
+		tty:   term.IsTerminal(int(os.Stderr.Fd())),
+	}
+	current.Store(h)
+	return h
+}
+
+// EndProgressLine closes an in-place progress line if one is open, and does
+// nothing otherwise.
+//
+// For an interrupt, which arrives with no log record to close the line the way
+// an ordinary message does. Writing a newline unconditionally instead — as the
+// signal handler used to — leaves a blank line whenever a record follows,
+// because that record closes the line again.
+func EndProgressLine() {
+	if h := current.Load(); h != nil {
+		h.endLine()
+	}
+}
+
+// endLine ends an open progress line. The caller must not hold state's lock.
+func (h *Handler) endLine() {
+	h.state.Lock()
+	defer h.state.Unlock()
+	h.endLineLocked()
+}
+
+func (h *Handler) endLineLocked() {
+	if h.state.active {
+		fmt.Fprintln(h.out)
+		h.state.active = false
+	}
+}
 
 // Enabled gates Debug records on utils.DebugMode; all other levels pass through
 // (Info/Warn already respect QuietMode inside the Print* functions themselves).
@@ -82,19 +133,19 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 
 	h.state.Lock()
 	defer h.state.Unlock()
-	if kind == "progress" && term.IsTerminal(int(os.Stderr.Fd())) {
-		fmt.Fprintf(os.Stderr, "\r\x1b[2K[CNT] %s", msg)
+	if kind == "progress" && h.tty {
+		fmt.Fprintf(h.out, "\r\x1b[2K[CNT] %s", msg)
 		h.state.active = true
 		if final && last {
-			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(h.out)
 			h.state.active = false
 		}
 		return nil
 	}
-	if h.state.active {
-		fmt.Fprintln(os.Stderr)
-		h.state.active = false
-	}
+	// Any other record ends an open progress line first. This is what keeps a
+	// rate-limit pause from leaving a stalled-looking byte count on screen for
+	// the length of the wait.
+	h.endLineLocked()
 
 	switch r.Level {
 	case slog.LevelDebug:

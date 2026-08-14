@@ -4,13 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sys/unix"
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content/file"
+	"oras.land/oras-go/v2/content"
+	"oras.land/oras-go/v2/registry"
+	"oras.land/oras-go/v2/registry/remote"
 
 	"github.com/Justype/condatainer/internal/artifact/compare"
 	"github.com/Justype/condatainer/internal/artifact/meta"
@@ -67,11 +70,6 @@ func pull(ctx context.Context, base, repo string, desc ocispec.Descriptor, annot
 	if err := validatePayloadContract(manifest, wantArtifactType, wantLayerType); err != nil {
 		return err
 	}
-	layerNames, err := layerFilenames(manifest)
-	if err != nil {
-		return err
-	}
-
 	// Protection is a stable fact — the write bit — so it is worth knowing before
 	// a multi-gigabyte download rather than after. A conflicting flock is not:
 	// it may well be gone by the time the transfer finishes, so it is left to the
@@ -98,11 +96,8 @@ func pull(ctx context.Context, base, repo string, desc ocispec.Descriptor, annot
 	}
 	defer os.RemoveAll(stageDir) //nolint:errcheck
 
-	if err := download(ctx, repository, desc, stageDir); err != nil {
-		return err
-	}
-	staged, err := stageArtifact(stageDir, layerNames, filepath.Base(destPath))
-	if err != nil {
+	staged := filepath.Join(stageDir, filepath.Base(destPath))
+	if err := download(ctx, repository, manifest, staged); err != nil {
 		return err
 	}
 	embedded, err := verifyPayload(staged, annotations)
@@ -175,58 +170,111 @@ func validatePayloadContract(manifest ocispec.Manifest, wantArtifactType, wantLa
 	return nil
 }
 
-// layerFilenames returns each layer's filename in manifest order, which is the
-// order the chunks reassemble in.
-func layerFilenames(manifest ocispec.Manifest) ([]string, error) {
-	names := make([]string, 0, len(manifest.Layers))
-	for i, layer := range manifest.Layers {
-		name := filepath.Base(layer.Annotations[ocispec.AnnotationTitle])
-		if name == "." || name == "" || name == string(filepath.Separator) {
-			return nil, fmt.Errorf("%w: payload %d has no filename", ErrInvalidArtifact, i)
-		}
-		names = append(names, name)
-	}
-	return names, nil
-}
-
 // download copies the resolved manifest and its blobs into stageDir. It is
 // addressed by digest on both sides, so no tag is resolved a second time and the
 // artifact verified above is the one that arrives.
-func download(ctx context.Context, repository oras.ReadOnlyTarget, desc ocispec.Descriptor, stageDir string) error {
-	store, err := file.New(stageDir)
-	if err != nil {
-		return fmt.Errorf("cannot open staging store: %w", err)
+func download(ctx context.Context, repository *remote.Repository, manifest ocispec.Manifest, destPath string) error {
+	var total int64
+	offsets := make([]int64, len(manifest.Layers))
+	for i, layer := range manifest.Layers {
+		offsets[i] = total
+		total += positiveSize(layer.Size)
 	}
-	defer store.Close() //nolint:errcheck
 
-	ref := desc.Digest.String()
-	if _, err := oras.Copy(ctx, repository, ref, withTransferProgress(store, verbDownload), ref, oras.DefaultCopyOptions); err != nil {
-		return fmt.Errorf("failed to download %s: %w", ref, classify(err))
+	f, err := os.OpenFile(destPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("cannot create %s: %w", destPath, err)
+	}
+	// A half-written artifact must not survive to be installed. The staging
+	// directory is removed by the caller either way; closing early is what makes
+	// the error path deterministic rather than dependent on the defer order.
+	closed := false
+	defer func() {
+		if !closed {
+			f.Close() //nolint:errcheck
+		}
+	}()
+	// Sized up front so every layer writes into a range that already exists,
+	// which is what lets them be written in any order.
+	if err := f.Truncate(total); err != nil {
+		return fmt.Errorf("cannot size %s: %w", destPath, err)
+	}
+
+	progress := newDownloadProgress(ctx, total)
+	blobs := repository.Blobs()
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(pullConcurrency)
+	for i, layer := range manifest.Layers {
+		i, layer := i, layer
+		group.Go(func() error {
+			if err := fetchLayerAt(groupCtx, blobs, layer, f, offsets[i], progress); err != nil {
+				return fmt.Errorf("failed to download payload %d of %d: %w",
+					i+1, len(manifest.Layers), classify(err))
+			}
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		if errors.Is(err, context.Canceled) {
+			progress.interrupted()
+		}
+		return err
+	}
+	progress.finish()
+
+	closed = true
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("cannot finish writing %s: %w", destPath, err)
 	}
 	return nil
 }
 
-// stageArtifact assembles the downloaded layers and returns the complete
-// artifact under wantName.
+// fetchLayerAt streams one layer straight into its own range of the artifact.
 //
-// The name matters: an image is read according to its extension, so an artifact
-// staged under a publisher's layer title would be unreadable the moment that
-// title carried the wrong one. Taking the name from the destination makes the
-// staged file the destination in every respect except its directory entry.
-func stageArtifact(stageDir string, layerNames []string, wantName string) (string, error) {
-	pulled, err := assemblePulledArtifact(stageDir, layerNames)
-	if err != nil {
-		return "", err
-	}
-	staged := filepath.Join(stageDir, wantName)
-	if pulled == staged {
-		return staged, nil
-	}
-	if err := os.Rename(pulled, staged); err != nil {
-		return "", fmt.Errorf("cannot stage pulled artifact: %w", err)
-	}
-	return staged, nil
+// Writing at an offset removes the second copy: layers are a plain concatenation
+// in manifest order, so each one's place is known before anything is fetched.
+// Staging them separately and joining them afterwards cost a duplicate of the
+// whole artifact — 80 GB of scratch for a 40 GB image — plus a full read-write
+// pass. It also makes a retry cheap: the range is fixed, so a second attempt
+// overwrites what the first one wrote.
+func fetchLayerAt(ctx context.Context, blobs registry.BlobStore, layer ocispec.Descriptor, f *os.File, offset int64, progress *downloadProgress) error {
+	return retryPolicyFrom(ctx).run(ctx, mutation{
+		verb:  verbDownload,
+		attrs: []any{"blob", layer.Digest.String()},
+		do: func(ctx context.Context) error {
+			reader, err := blobs.Fetch(ctx, layer)
+			if err != nil {
+				return err
+			}
+			defer reader.Close() //nolint:errcheck
+
+			// ORAS checks Content-Length and the Docker-Content-Digest header on
+			// a fetch but never hashes the body — oras.Copy wraps the verifier,
+			// and this path does not use it. Without this a registry could serve
+			// anything of the right length.
+			verifier := content.NewVerifyReader(reader, layer)
+			// Rebuilt per attempt: a retried layer rewrites its range from the
+			// start, so an abandoned attempt's bytes must leave the total.
+			counted := progress.attempt(verifier)
+			if _, err := io.Copy(io.NewOffsetWriter(f, offset), counted); err != nil {
+				return err
+			}
+			return verifier.Verify()
+		},
+	})
 }
+
+// pullConcurrency is how many blobs a pull fetches at once.
+//
+// Stated rather than inherited from ORAS's identical default: a pull runs once
+// per node per artifact, so across a cluster it is the larger of the two
+// directions and worth deciding on purpose. Three, because a pull is on the path
+// of every job needing the artifact and a rate limit now pauses it rather than
+// failing it.
+//
+// It costs nothing in scratch: every layer writes to its own range, so the peak
+// is the artifact's size whatever the order.
+const pullConcurrency = 3
 
 // verifyPayload holds the downloaded artifact to what its annotations promised,
 // returning what the payload says about itself.
@@ -277,18 +325,14 @@ func checkRegeneratedKeys(got compare.Artifact, identity, equiv meta.KeyRef, cla
 }
 
 // downloadSize is what must fit on the destination filesystem: the manifest, the
-// config, and every layer — plus the payload a second time when it arrives in
-// chunks, because reassembly holds the parts and the whole at once.
+// config, and every layer once — not twice, because each layer streams into its
+// own range of the finished file rather than being staged and joined.
 func downloadSize(manifestDesc ocispec.Descriptor, manifest ocispec.Manifest) int64 {
 	var payload int64
 	for _, layer := range manifest.Layers {
 		payload += positiveSize(layer.Size)
 	}
-	total := positiveSize(manifestDesc.Size) + positiveSize(manifest.Config.Size) + payload
-	if len(manifest.Layers) > 1 {
-		total += payload
-	}
-	return total
+	return positiveSize(manifestDesc.Size) + positiveSize(manifest.Config.Size) + payload
 }
 
 // positiveSize treats an unset or nonsensical size as zero rather than letting it

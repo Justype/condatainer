@@ -182,14 +182,17 @@ func Execute() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	// Print a newline on interrupt so cleanup output starts on a fresh line
-	// instead of appearing on the same line as the "^C" echo.
+	// End an in-place progress line on interrupt, so what follows starts on a
+	// fresh line instead of on the same one as the "^C" echo. Routed through the
+	// handler rather than writing a newline here: it knows whether a line is
+	// actually open, where an unconditional newline leaves a blank one behind
+	// whenever a log record follows and closes the line itself.
 	interruptCh := make(chan os.Signal, 1)
 	signal.Notify(interruptCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(interruptCh)
 	go func() {
 		if _, ok := <-interruptCh; ok {
-			fmt.Fprintln(os.Stderr)
+			clilog.EndProgressLine()
 		}
 	}()
 

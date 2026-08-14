@@ -191,6 +191,15 @@ func Push(ctx context.Context, artifactPath, base, repo string, tags []string, a
 	if err != nil {
 		return err
 	}
+	// One profile decides both how much is asked for at once and how fast: it
+	// clamps the layer plan, and it spaces the writes that follow.
+	profile := profileFor(registryHost(base))
+	plan, err := preflightUpload(ctx, artifactPath, base, tags, profile)
+	if err != nil {
+		return err
+	}
+	ctx = withPacer(ctx, newPacer(profile.MinMutationGap))
+	ctx = withThroughputGuard(ctx, newThroughputGuard(profile))
 	var plat ocispec.Platform
 	if !archIndependent {
 		var ok bool
@@ -203,29 +212,48 @@ func Push(ctx context.Context, artifactPath, base, repo string, tags []string, a
 	if err != nil {
 		return err
 	}
+	// After the local checks, not before: a missing or empty artifact is free to
+	// detect and should not be gated behind a network round trip. Still before
+	// any hashing, which is the property that matters.
+	if err := probePushAccess(ctx, repository); err != nil {
+		return err
+	}
 
 	// Blobs first: a manifest may not reference what the registry does not yet
 	// hold. Nothing is staged on the way — see pushArtifactLayers.
-	layers, err := pushArtifactLayers(ctx, repository.Blobs(), artifactPath, layerType)
+	layers, err := pushArtifactLayers(ctx, repository.Blobs(), artifactPath, layerType, plan.LayerSize)
 	if err != nil {
 		return classify(err)
 	}
 
 	// Packed straight against the repository. There is no local store to copy
 	// from, because the layers were never written to one.
-	manifestDesc, err := oras.PackManifest(ctx, repository, oras.PackManifestVersion1_1, artifactType, oras.PackManifestOptions{
-		Layers:              layers,
-		ManifestAnnotations: annotations,
-	})
+	//
+	// Retried like the layers, and for a sharper reason: this lands after every
+	// blob, when a provider's request counter is at its hottest, so it is the
+	// most likely single mutation in a large push to be refused.
+	var manifestDesc ocispec.Descriptor
+	err = retryPolicyFrom(ctx).run(ctx, mutation{verb: verbPublish, attrs: []any{"target", "manifest"}, do: func(ctx context.Context) error {
+		var packErr error
+		manifestDesc, packErr = oras.PackManifest(ctx, repository, oras.PackManifestVersion1_1, artifactType, oras.PackManifestOptions{
+			Layers:              layers,
+			ManifestAnnotations: annotations,
+		})
+		return packErr
+	}})
 	if err != nil {
-		return fmt.Errorf("failed to publish manifest: %w", classify(err))
+		return fmt.Errorf("failed to publish manifest: %w", err)
 	}
 	manifestDesc.ArtifactType = artifactType
 
 	if archIndependent {
 		for _, tag := range tags {
-			if err := repository.Tag(ctx, manifestDesc, tag); err != nil {
-				return fmt.Errorf("failed to tag %s: %w", FullRef(base, repo, tag), classify(err))
+			if err := retryPolicyFrom(ctx).run(ctx, mutation{
+				verb:  verbPublish,
+				attrs: []any{"tag", tag},
+				do:    func(ctx context.Context) error { return repository.Tag(ctx, manifestDesc, tag) },
+			}); err != nil {
+				return fmt.Errorf("failed to tag %s: %w", FullRef(base, repo, tag), err)
 			}
 		}
 		return nil

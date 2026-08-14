@@ -3,14 +3,17 @@ package registry
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2/errdef"
 )
 
 // memoryBlobs stands in for a repository's blob store. Its Push verifies the
@@ -46,14 +49,6 @@ func (m *memoryBlobs) Push(_ context.Context, expected ocispec.Descriptor, conte
 	return nil
 }
 
-// withChunkSize runs the body with a chunk size small enough to test cheaply.
-func withChunkSize(t *testing.T, size int64) {
-	t.Helper()
-	original := artifactChunkSize
-	artifactChunkSize = size
-	t.Cleanup(func() { artifactChunkSize = original })
-}
-
 func writeArtifact(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -68,10 +63,9 @@ func titleOf(desc ocispec.Descriptor) string { return desc.Annotations[ocispec.A
 func TestPushArtifactLayersChunks(t *testing.T) {
 	const content = "abcdefghij"
 	path := writeArtifact(t, t.TempDir(), "sample.sqf", content)
-	withChunkSize(t, 4)
 
 	blobs := newMemoryBlobs()
-	layers, err := pushArtifactLayers(context.Background(), blobs, path, MediaTypeOverlayBlob)
+	layers, err := pushArtifactLayers(context.Background(), blobs, path, MediaTypeOverlayBlob, 4)
 	if err != nil {
 		t.Fatalf("pushArtifactLayers: %v", err)
 	}
@@ -103,9 +97,8 @@ func TestPushArtifactLayersChunks(t *testing.T) {
 func TestPushArtifactLayersDigestsTheRange(t *testing.T) {
 	const content = "abcdefghij"
 	path := writeArtifact(t, t.TempDir(), "sample.sqf", content)
-	withChunkSize(t, 4)
 
-	layers, err := pushArtifactLayers(context.Background(), newMemoryBlobs(), path, MediaTypeOverlayBlob)
+	layers, err := pushArtifactLayers(context.Background(), newMemoryBlobs(), path, MediaTypeOverlayBlob, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,9 +117,8 @@ func TestPushArtifactLayersStagesNothing(t *testing.T) {
 	path := writeArtifact(t, t.TempDir(), "sample.sqf", "abcdefghijklmnop")
 	staging := t.TempDir()
 	t.Setenv("TMPDIR", staging)
-	withChunkSize(t, 4)
 
-	if _, err := pushArtifactLayers(context.Background(), newMemoryBlobs(), path, MediaTypeOverlayBlob); err != nil {
+	if _, err := pushArtifactLayers(context.Background(), newMemoryBlobs(), path, MediaTypeOverlayBlob, 4); err != nil {
 		t.Fatal(err)
 	}
 	left, err := os.ReadDir(staging)
@@ -142,9 +134,8 @@ func TestPushArtifactLayersStagesNothing(t *testing.T) {
 // a pull needs no reassembly at all.
 func TestPushArtifactLayersSingleLayer(t *testing.T) {
 	path := writeArtifact(t, t.TempDir(), "sample.sqf", "abcd")
-	withChunkSize(t, 4)
 
-	layers, err := pushArtifactLayers(context.Background(), newMemoryBlobs(), path, MediaTypeOverlayBlob)
+	layers, err := pushArtifactLayers(context.Background(), newMemoryBlobs(), path, MediaTypeOverlayBlob, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,17 +151,16 @@ func TestPushArtifactLayersSingleLayer(t *testing.T) {
 // retried push cheap instead of a second full upload.
 func TestPushArtifactLayersSkipsBlobsAlreadyPresent(t *testing.T) {
 	path := writeArtifact(t, t.TempDir(), "sample.sqf", "abcdefghij")
-	withChunkSize(t, 4)
 	ctx := context.Background()
 
 	blobs := newMemoryBlobs()
-	first, err := pushArtifactLayers(ctx, blobs, path, MediaTypeOverlayBlob)
+	first, err := pushArtifactLayers(ctx, blobs, path, MediaTypeOverlayBlob, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sent := len(blobs.pushed)
 
-	second, err := pushArtifactLayers(ctx, blobs, path, MediaTypeOverlayBlob)
+	second, err := pushArtifactLayers(ctx, blobs, path, MediaTypeOverlayBlob, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,9 +177,8 @@ func TestPushArtifactLayersSkipsBlobsAlreadyPresent(t *testing.T) {
 
 func TestPushArtifactLayersEmptyFile(t *testing.T) {
 	path := writeArtifact(t, t.TempDir(), "empty.sqf", "")
-	withChunkSize(t, 4)
 
-	layers, err := pushArtifactLayers(context.Background(), newMemoryBlobs(), path, MediaTypeOverlayBlob)
+	layers, err := pushArtifactLayers(context.Background(), newMemoryBlobs(), path, MediaTypeOverlayBlob, 4)
 	if err != nil {
 		t.Fatalf("pushArtifactLayers: %v", err)
 	}
@@ -198,104 +187,233 @@ func TestPushArtifactLayersEmptyFile(t *testing.T) {
 	}
 }
 
-func TestAssemblePulledArtifact(t *testing.T) {
-	dir := t.TempDir()
-	for name, data := range map[string]string{
-		"sample.sqf.part000000": "abc",
-		"sample.sqf.part000001": "def",
-		"sample.sqf.part000002": "ghi",
-	} {
-		writeArtifact(t, dir, name, data)
-	}
-
-	path, err := assemblePulledArtifact(dir, []string{
-		"sample.sqf.part000000",
-		"sample.sqf.part000001",
-		"sample.sqf.part000002",
-	})
-	if err != nil {
-		t.Fatalf("assemblePulledArtifact: %v", err)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != "abcdefghi" {
-		t.Fatalf("assembled payload = %q", got)
-	}
+// flakyBlobs refuses the first refusals pushes with a rate limit, then behaves.
+// It wraps memoryBlobs, whose Push verifies the streamed bytes against the
+// descriptor, so a retry that resent the wrong bytes fails there rather than
+// here.
+type flakyBlobs struct {
+	*memoryBlobs
+	refusals int
+	attempts int
+	exists   int
 }
 
-// A single layer is the artifact already; there is nothing to concatenate and no
-// second copy to make.
-func TestAssemblePulledArtifactSingleLayerIsReturnedAsIs(t *testing.T) {
-	dir := t.TempDir()
-	writeArtifact(t, dir, "sample.sqf", "payload")
-
-	path, err := assemblePulledArtifact(dir, []string{"sample.sqf"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if path != filepath.Join(dir, "sample.sqf") {
-		t.Errorf("path = %q, want the downloaded layer itself", path)
-	}
+func (f *flakyBlobs) Exists(ctx context.Context, target ocispec.Descriptor) (bool, error) {
+	f.exists++
+	return f.memoryBlobs.Exists(ctx, target)
 }
 
-// A gap in the sequence would otherwise assemble into a file that looks whole.
-func TestAssemblePulledArtifactRejectsAGapInTheSequence(t *testing.T) {
-	dir := t.TempDir()
-	for _, name := range []string{"sample.part000000", "sample.part000002"} {
-		writeArtifact(t, dir, name, name)
+func (f *flakyBlobs) Push(ctx context.Context, expected ocispec.Descriptor, content io.Reader) error {
+	f.attempts++
+	if f.attempts <= f.refusals {
+		// Read the body first, the way a registry that refuses at finalization
+		// does: the bytes are gone by the time the error arrives, so the next
+		// attempt has to produce them again from somewhere.
+		if _, err := io.Copy(io.Discard, content); err != nil {
+			return err
+		}
+		return codedErr(403, "DENIED", ghcrSecondaryLimitMessage)
 	}
-	if _, err := assemblePulledArtifact(dir, []string{"sample.part000000", "sample.part000002"}); err == nil {
-		t.Fatal("a chunk sequence missing part000001 was assembled anyway")
-	}
+	return f.memoryBlobs.Push(ctx, expected, content)
 }
 
-// The manifest's layer count is the contract: a directory holding more or fewer
-// files than it declares is not the artifact that was published.
-func TestAssemblePulledArtifactRejectsAFileCountMismatch(t *testing.T) {
-	dir := t.TempDir()
-	writeArtifact(t, dir, "sample.sqf.part000000", "abc")
-	writeArtifact(t, dir, "sample.sqf.part000001", "def")
-	writeArtifact(t, dir, "stowaway", "x")
-
-	if _, err := assemblePulledArtifact(dir, []string{"sample.sqf.part000000", "sample.sqf.part000001"}); err == nil {
-		t.Fatal("an extra file in the staging directory was ignored")
-	}
-}
-
-// Push and pull must agree on the naming, or a chunked artifact pushed by this
-// build cannot be reassembled by it.
-func TestChunkNamesRoundTrip(t *testing.T) {
+// The reason retry lives in pushRange rather than in the HTTP client: an
+// io.SectionReader has no GetBody, so every attempt must open a new one. An
+// attempt that reused the reader would stream nothing and the digest check would
+// catch it.
+func TestPushArtifactLayersRetriesWithAFreshReader(t *testing.T) {
 	const content = "abcdefghij"
-	src := t.TempDir()
-	path := writeArtifact(t, src, "sample.sqf", content)
-	withChunkSize(t, 4)
+	path := writeArtifact(t, t.TempDir(), "sample.sqf", content)
+	blobs := &flakyBlobs{memoryBlobs: newMemoryBlobs(), refusals: 2}
 
-	blobs := newMemoryBlobs()
-	layers, err := pushArtifactLayers(context.Background(), blobs, path, MediaTypeOverlayBlob)
+	ctx := withRetryPolicy(context.Background(), newTestPolicy().retryPolicy)
+	layers, err := pushArtifactLayers(ctx, blobs, path, MediaTypeOverlayBlob, 4)
+	if err != nil {
+		t.Fatalf("pushArtifactLayers: %v", err)
+	}
+
+	// Three layers, the first refused twice: 2 wasted attempts plus 3 real ones.
+	if blobs.attempts != 5 {
+		t.Errorf("push attempts = %d, want 5", blobs.attempts)
+	}
+	var assembled bytes.Buffer
+	for i, want := range []string{"abcd", "efgh", "ij"} {
+		if got := digest.FromString(want); layers[i].Digest != got {
+			t.Errorf("layer %d digest = %s, want the digest of %q", i, layers[i].Digest, want)
+		}
+		assembled.Write(blobs.blobs[layers[i].Digest])
+	}
+	if assembled.String() != content {
+		t.Errorf("a retried push assembled to %q, want %q", assembled.String(), content)
+	}
+}
+
+// A pause at chunk 34 resumes at chunk 34: the layers already committed stay in
+// the descriptor slice and are never revisited, which is what makes an
+// in-process retry cost one request rather than one per completed layer.
+func TestRetryDoesNotRescanCommittedLayers(t *testing.T) {
+	path := writeArtifact(t, t.TempDir(), "sample.sqf", "abcdefghij")
+	blobs := &flakyBlobs{memoryBlobs: newMemoryBlobs(), refusals: 1}
+
+	ctx := withRetryPolicy(context.Background(), newTestPolicy().retryPolicy)
+	if _, err := pushArtifactLayers(ctx, blobs, path, MediaTypeOverlayBlob, 4); err != nil {
+		t.Fatal(err)
+	}
+	// One probe on the first layer, plus the one recheck after the refusal.
+	// Anything more means a retry went back over work already done.
+	if want := 1 + 1; blobs.exists != want {
+		t.Errorf("Exists calls = %d, want %d", blobs.exists, want)
+	}
+}
+
+// A fresh push asks once. Layers upload in order from the first, so a first
+// layer the registry does not have means none of this artifact is committed, and
+// every further probe is a request spent to be told 404.
+func TestFreshPushProbesOnce(t *testing.T) {
+	path := writeArtifact(t, t.TempDir(), "sample.sqf", "abcdefghijklmnop")
+	blobs := &flakyBlobs{memoryBlobs: newMemoryBlobs()}
+
+	layers, err := pushArtifactLayers(context.Background(), blobs, path, MediaTypeOverlayBlob, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// Stand in for the pull's file store, which writes each layer under its title.
-	staging := t.TempDir()
-	names := make([]string, 0, len(layers))
-	for _, layer := range layers {
-		name := titleOf(layer)
-		writeArtifact(t, staging, name, string(blobs.blobs[layer.Digest]))
-		names = append(names, name)
+	if len(layers) != 4 {
+		t.Fatalf("layers = %d, want 4", len(layers))
 	}
-
-	assembled, err := assemblePulledArtifact(staging, names)
-	if err != nil {
-		t.Fatalf("assemblePulledArtifact: %v", err)
+	if blobs.exists != 1 {
+		t.Errorf("Exists calls = %d, want exactly one", blobs.exists)
 	}
-	got, err := os.ReadFile(assembled)
-	if err != nil {
+	if blobs.attempts != 4 {
+		t.Errorf("uploads = %d, want every layer sent", blobs.attempts)
+	}
+}
+
+// The case that pays for probing: a push resumed after a failure. The first
+// layer is present, so every layer is checked and nothing is re-uploaded.
+func TestResumedPushProbesEveryLayer(t *testing.T) {
+	path := writeArtifact(t, t.TempDir(), "sample.sqf", "abcdefghijklmnop")
+	blobs := &flakyBlobs{memoryBlobs: newMemoryBlobs()}
+	ctx := context.Background()
+
+	if _, err := pushArtifactLayers(ctx, blobs, path, MediaTypeOverlayBlob, 4); err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != content {
-		t.Errorf("round trip produced %q, want %q", got, content)
+	sent, probed := blobs.attempts, blobs.exists
+
+	if _, err := pushArtifactLayers(ctx, blobs, path, MediaTypeOverlayBlob, 4); err != nil {
+		t.Fatal(err)
 	}
+	if blobs.attempts != sent {
+		t.Errorf("a resumed push re-uploaded %d layers", blobs.attempts-sent)
+	}
+	if got := blobs.exists - probed; got != 4 {
+		t.Errorf("probes on the resumed push = %d, want one per layer", got)
+	}
+}
+
+// Skipping a probe is never a correctness risk: a registry accepts a blob it
+// already holds and deduplicates by digest. The cost of guessing wrong is
+// bandwidth, in a case the heuristic has established is unlikely.
+func TestBlindUploadOfAPresentBlobSucceeds(t *testing.T) {
+	path := writeArtifact(t, t.TempDir(), "sample.sqf", "abcdefghijklmnop")
+	blobs := &alreadyHasEverything{memoryBlobs: newMemoryBlobs()}
+
+	layers, err := pushArtifactLayers(context.Background(), blobs, path, MediaTypeOverlayBlob, 4)
+	if err != nil {
+		t.Fatalf("a blind upload of an existing blob failed: %v", err)
+	}
+	if len(layers) != 4 {
+		t.Errorf("layers = %d, want 4", len(layers))
+	}
+}
+
+// alreadyHasEverything reports nothing present — so probing is elided — and then
+// rejects every upload the way a registry does when it already holds the blob.
+type alreadyHasEverything struct{ *memoryBlobs }
+
+func (a *alreadyHasEverything) Exists(context.Context, ocispec.Descriptor) (bool, error) {
+	return false, nil
+}
+
+func (a *alreadyHasEverything) Push(_ context.Context, _ ocispec.Descriptor, content io.Reader) error {
+	if _, err := io.Copy(io.Discard, content); err != nil {
+		return err
+	}
+	return errdef.ErrAlreadyExists
+}
+
+// A registry can commit the blob and lose the response — GHCR's refusal arrives
+// from an intermediary in front of storage that already accepted it.
+func TestPushArtifactLayersStopsWhenTheBlobLandedAnyway(t *testing.T) {
+	path := writeArtifact(t, t.TempDir(), "sample.sqf", "abcd")
+	blobs := &committingBlobs{memoryBlobs: newMemoryBlobs()}
+
+	ctx := withRetryPolicy(context.Background(), newTestPolicy().retryPolicy)
+	layers, err := pushArtifactLayers(ctx, blobs, path, MediaTypeOverlayBlob, 4)
+	if err != nil {
+		t.Fatalf("pushArtifactLayers: %v", err)
+	}
+	if blobs.attempts != 1 {
+		t.Errorf("push attempts = %d, want the committed blob to end it after one", blobs.attempts)
+	}
+	if len(layers) != 1 || layers[0].Digest != digest.FromString("abcd") {
+		t.Errorf("layers = %+v, want the descriptor produced anyway", layers)
+	}
+}
+
+// committingBlobs stores the blob and then reports a rate limit, which is the
+// lost-response case.
+type committingBlobs struct {
+	*memoryBlobs
+	attempts int
+}
+
+func (c *committingBlobs) Push(ctx context.Context, expected ocispec.Descriptor, content io.Reader) error {
+	c.attempts++
+	if err := c.memoryBlobs.Push(ctx, expected, content); err != nil {
+		return err
+	}
+	return codedErr(403, "DENIED", ghcrSecondaryLimitMessage)
+}
+
+// Push says it too, and for the same reason. It has nothing local to clean up —
+// a chunk is a range of a file that already exists — but the layers the registry
+// already accepted are what make running the command again cheap, so the count
+// is worth stating.
+func TestPushReportsCancellation(t *testing.T) {
+	ctx, logs := captureLogs(t)
+	ctx, cancel := context.WithCancel(ctx)
+	path := writeArtifact(t, t.TempDir(), "sample.sqf", "abcdefghijklmnop")
+
+	blobs := &cancellingBlobs{memoryBlobs: newMemoryBlobs(), cancel: cancel, after: 2}
+	_, err := pushArtifactLayers(ctx, blobs, path, MediaTypeOverlayBlob, 4)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the cancellation", err)
+	}
+
+	out := logs.String()
+	if !strings.Contains(out, verbUpload+" cancelled") {
+		t.Errorf("a cancelled push said nothing:\n%s", out)
+	}
+	if !strings.Contains(out, "accepted=2/4") {
+		t.Errorf("the cancellation does not say what the registry kept:\n%s", out)
+	}
+}
+
+// cancellingBlobs interrupts the command once the registry has accepted after
+// layers, the way Ctrl-C lands partway through a transfer.
+type cancellingBlobs struct {
+	*memoryBlobs
+	cancel context.CancelFunc
+	after  int
+	pushed int
+}
+
+func (c *cancellingBlobs) Push(ctx context.Context, expected ocispec.Descriptor, content io.Reader) error {
+	if c.pushed >= c.after {
+		c.cancel()
+		return context.Canceled
+	}
+	c.pushed++
+	return c.memoryBlobs.Push(ctx, expected, content)
 }

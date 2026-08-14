@@ -1,8 +1,10 @@
 package registry
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,8 +12,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/registry"
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/key"
@@ -125,7 +130,9 @@ func packImage(t *testing.T, s imageSpec) (path string, m meta.Manifest) {
 // through the real chunked path, and returns what a puller resolves.
 func publishImage(t *testing.T, f *fakeRegistry, repo, artifactPath string, ann map[string]string, artifactType, layerType string, tag string) ocispec.Descriptor {
 	t.Helper()
-	layers, err := pushArtifactLayers(context.Background(), fakeBlobs{f}, artifactPath, layerType)
+	// A real derived size would leave these fixtures in one layer; 64 KiB keeps
+	// the multi-layer reassembly path under test without a multi-gigabyte image.
+	layers, err := pushArtifactLayers(context.Background(), fakeBlobs{f}, artifactPath, layerType, 64<<10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +224,6 @@ func TestPullInstallsTheArtifact(t *testing.T) {
 // real push and pull paths on both ends.
 func TestPullReassemblesAChunkedArtifact(t *testing.T) {
 	requireSquashfsTools(t)
-	withChunkSize(t, 64<<10)
 
 	p := newPullFixture(t)
 	if len(p.registry.blobs) < 3 {
@@ -422,20 +428,22 @@ func TestDownloadSize(t *testing.T) {
 		t.Errorf("downloadSize = %d, want %d", got, want)
 	}
 
-	// Reassembly holds the chunks and the whole file at once, so a chunked
-	// artifact needs its payload counted twice.
+	// A chunked artifact costs no more than the same bytes in one layer: each
+	// one streams into its own range of the finished file, so the payload never
+	// exists twice. This used to be doubled, and for 40 GB that was 40 GB of
+	// scratch nobody needed.
 	chunked := ocispec.Manifest{
 		Config: ocispec.Descriptor{Size: 10},
 		Layers: []ocispec.Descriptor{{Size: 600}, {Size: 400}},
 	}
-	if got, want := downloadSize(desc, chunked), int64(2110); got != want {
-		t.Errorf("downloadSize = %d, want %d — the payload counts twice when chunked", got, want)
+	if got, want := downloadSize(desc, chunked), int64(1110); got != want {
+		t.Errorf("downloadSize = %d, want %d — chunking must not cost a second copy", got, want)
 	}
 
 	// A descriptor with no size recorded must not subtract from the total.
 	negative := ocispec.Manifest{Layers: []ocispec.Descriptor{{Size: -1}, {Size: 500}}}
-	if got := downloadSize(ocispec.Descriptor{Size: -1}, negative); got != 1000 {
-		t.Errorf("downloadSize = %d, want 1000", got)
+	if got := downloadSize(ocispec.Descriptor{Size: -1}, negative); got != 500 {
+		t.Errorf("downloadSize = %d, want 500", got)
 	}
 }
 
@@ -460,30 +468,194 @@ func TestRequireFreeSpace(t *testing.T) {
 	}
 }
 
-func TestLayerFilenames(t *testing.T) {
-	titled := func(name string) ocispec.Descriptor {
-		return ocispec.Descriptor{Annotations: map[string]string{ocispec.AnnotationTitle: name}}
+// A pull runs once per node per artifact, so its request rate is the larger of
+// the two directions across a cluster. Whatever the number is, it is chosen.
+func TestPullConcurrencyIsStated(t *testing.T) {
+	// ORAS leaves Concurrency zero and fills in its own default at copy time, so
+	// a positive value here is the difference between choosing the number and
+	// inheriting whichever one the library happens to ship.
+	if oras.DefaultCopyOptions.Concurrency != 0 {
+		t.Fatalf("ORAS now defaults Concurrency to %d; the reasoning below needs rechecking",
+			oras.DefaultCopyOptions.Concurrency)
 	}
-	got, err := layerFilenames(ocispec.Manifest{Layers: []ocispec.Descriptor{
-		titled("a.sqf.part000000"), titled("a.sqf.part000001"),
-	}})
+	if pullConcurrency <= 0 {
+		t.Errorf("pullConcurrency = %d, which leaves the choice to ORAS", pullConcurrency)
+	}
+}
+
+// The whole point of writing at offsets: a 40 GB artifact used to need 80 GB of
+// scratch, because every layer was staged as its own file and then joined into a
+// third. Nothing but the finished artifact may exist while a pull runs.
+func TestPullStagesNoSecondCopy(t *testing.T) {
+	p := newPullFixture(t)
+
+	var peak int
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			if entries, err := os.ReadDir(p.destDir); err == nil {
+				for _, e := range entries {
+					if !e.IsDir() {
+						continue
+					}
+					staged, err := os.ReadDir(filepath.Join(p.destDir, e.Name()))
+					if err == nil && len(staged) > peak {
+						peak = len(staged)
+					}
+				}
+			}
+		}
+	}()
+
+	if err := p.pull(context.Background()); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	close(done)
+	wg.Wait()
+
+	if peak > 1 {
+		t.Errorf("staging held %d files at once; a layer was written somewhere other than "+
+			"its own range of the artifact", peak)
+	}
+}
+
+// Layers arrive concurrently and land at offsets, so the finished file has to be
+// the exact concatenation whatever order they completed in.
+func TestPullReassemblesUnderConcurrency(t *testing.T) {
+	if pullConcurrency < 2 {
+		t.Skip("pull is serial; there is no ordering to disturb")
+	}
+	p := newPullFixture(t)
+	if len(p.registry.blobs) < 3 {
+		t.Fatalf("only %d blobs published; the artifact did not chunk", len(p.registry.blobs))
+	}
+	if err := p.pull(context.Background()); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if !sameBytes(t, p.source, p.destPath) {
+		t.Error("concurrent offset writes did not reproduce the artifact")
+	}
+}
+
+// A layer whose bytes are not what the manifest promised must never reach the
+// installed file. ORAS checks Content-Length and the Docker-Content-Digest
+// header on a fetch but never hashes the body, so this path verifies it itself.
+func TestDownloadRejectsACorruptedLayer(t *testing.T) {
+	p := newPullFixture(t)
+	for dgst, data := range p.registry.blobs {
+		if len(data) > 64 {
+			corrupted := append([]byte(nil), data...)
+			corrupted[len(corrupted)/2] ^= 0xff
+			p.registry.blobs[dgst] = corrupted
+			break
+		}
+	}
+	if err := p.pull(context.Background()); err == nil {
+		t.Fatal("a layer whose bytes contradict its digest was installed")
+	}
+	if _, err := os.Stat(p.destPath); !os.IsNotExist(err) {
+		t.Error("a corrupted download left a file at the destination")
+	}
+}
+
+// flakyBlobStore serves a blob, refusing the first refusals attempts the way a
+// throttled registry does. Only Fetch is implemented; the download path calls
+// nothing else.
+type flakyBlobStore struct {
+	registry.BlobStore
+	content  []byte
+	refusals int
+	fetches  int
+	// truncate cuts the body short on the first attempt, standing in for a
+	// connection lost partway through a layer.
+	truncate bool
+}
+
+func (f *flakyBlobStore) Fetch(_ context.Context, _ ocispec.Descriptor) (io.ReadCloser, error) {
+	f.fetches++
+	if f.fetches <= f.refusals {
+		if !f.truncate {
+			return nil, codedErr(429, "TOOMANYREQUESTS", "slow down")
+		}
+		return io.NopCloser(bytes.NewReader(f.content[:len(f.content)/2])), nil
+	}
+	return io.NopCloser(bytes.NewReader(f.content)), nil
+}
+
+func layerOf(content []byte) ocispec.Descriptor {
+	return ocispec.Descriptor{
+		MediaType: MediaTypeOverlayBlob,
+		Digest:    digest.FromBytes(content),
+		Size:      int64(len(content)),
+	}
+}
+
+// A rate limit on the way down is waited out, not failed. It cannot fall back to
+// a local build either — ErrRateLimited is deliberately not ErrUnavailable — so
+// waiting is the only thing that turns it into a working pull.
+func TestDownloadWaitsOutARateLimit(t *testing.T) {
+	content := []byte(strings.Repeat("payload", 64))
+	blobs := &flakyBlobStore{content: content, refusals: 2}
+
+	path := filepath.Join(t.TempDir(), "hello--1.0.sqf")
+	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(got, ",") != "a.sqf.part000000,a.sqf.part000001" {
-		t.Errorf("layerFilenames = %v", got)
-	}
+	defer f.Close() //nolint:errcheck
 
-	// A path in a title must not escape the staging directory.
-	escaped, err := layerFilenames(ocispec.Manifest{Layers: []ocispec.Descriptor{titled("../../etc/passwd")}})
+	policy := newTestPolicy()
+	ctx := withRetryPolicy(context.Background(), policy.retryPolicy)
+	progress := newDownloadProgress(ctx, int64(len(content)))
+
+	if err := fetchLayerAt(ctx, blobs, layerOf(content), f, 0, progress); err != nil {
+		t.Fatalf("fetchLayerAt: %v", err)
+	}
+	if blobs.fetches != 3 {
+		t.Errorf("fetches = %d, want the two refusals retried", blobs.fetches)
+	}
+	if len(*policy.waits) != 2 {
+		t.Errorf("waits = %v, want one per refusal", *policy.waits)
+	}
+	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if escaped[0] != "passwd" {
-		t.Errorf("layer name = %q, want it reduced to a basename", escaped[0])
+	if string(got) != string(content) {
+		t.Error("the retried layer did not land intact")
 	}
+}
 
-	if _, err := layerFilenames(ocispec.Manifest{Layers: []ocispec.Descriptor{{}}}); !errors.Is(err, ErrInvalidArtifact) {
-		t.Errorf("err = %v, want ErrInvalidArtifact for a layer with no title", err)
+// What writing at a fixed offset buys that a push cannot have: a layer lost
+// partway through is simply written again over the same range, so a partial
+// transfer needs no resume protocol to recover from.
+func TestDownloadRewritesAPartialLayer(t *testing.T) {
+	content := []byte(strings.Repeat("payload", 64))
+	blobs := &flakyBlobStore{content: content, refusals: 1, truncate: true}
+
+	path := filepath.Join(t.TempDir(), "hello--1.0.sqf")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close() //nolint:errcheck
+
+	// A truncated body fails its digest, which is what makes the attempt
+	// retryable rather than silently short.
+	progress := newDownloadProgress(context.Background(), int64(len(content)))
+	err = fetchLayerAt(context.Background(), blobs, layerOf(content), f, 0, progress)
+	if err == nil {
+		t.Fatal("a truncated layer was accepted")
+	}
+	if progress.done != 0 {
+		t.Errorf("done = %d after a failed attempt, want the bytes withdrawn", progress.done)
 	}
 }

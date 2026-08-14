@@ -62,6 +62,12 @@ func (b *BuildObject) tryPrebuilt(ctx context.Context) (prebuiltResult, error) {
 			return false, fmt.Errorf("%w: prebuilt equivalence %s, selected recipe derives %s",
 				registry.ErrInvalidArtifact, describePrebuiltKey(got), describePrebuiltKey(want))
 		}
+		// Said before the download rather than after it: everything above is
+		// metadata, and the gigabytes start here. Without this the operator
+		// watches a long transfer with nothing saying what is being fetched or
+		// that it has already been checked against the local recipe.
+		log.Info("prebuilt found and verified", "artifact", b.spec.Image.Name,
+			"endpoint", endpoint, "equivalence", describePrebuiltKey(want))
 		if err := pullPrebuilt(ctx, endpoint, repo, desc, annotations, b.tgt.Path); err != nil {
 			switch {
 			case errors.Is(err, registry.ErrNotFound), errors.Is(err, registry.ErrUnsupportedPlatform):

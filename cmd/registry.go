@@ -14,6 +14,7 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/registry"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -50,20 +51,20 @@ then the Docker credential store, then anonymous access.`,
 		SilenceUsage:      true,
 		ValidArgsFunction: registryPushCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path, err := findRegistryArtifact(args[0])
+			artifact, err := findRegistryArtifact(args[0])
 			if err != nil {
 				return err
 			}
-			base, visibility, err := registryPushDestination(cmd, opts, path)
+			base, visibility, err := registryPushDestination(cmd, opts, artifact)
 			if err != nil {
 				return err
 			}
 			if err := registry.Publish(cmd.Context(), registry.PublishRequest{
-				Path: path, Base: base, Visibility: visibility, Force: opts.force,
+				Path: artifact.path, Base: base, Visibility: visibility, Force: opts.force,
 			}); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "published %s\n", path)
+			reportDone(cmd, "published", artifact.path)
 			return nil
 		},
 	}
@@ -143,7 +144,7 @@ then the Docker credential store, then anonymous access.`,
 			if err := registry.Login(cmd.Context(), args[0], opts.username, password); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "logged in to %s\n", registry.TrimBaseScheme(args[0]))
+			reportDone(cmd, "logged in to", registry.TrimBaseScheme(args[0]))
 			return nil
 		},
 	}
@@ -160,13 +161,24 @@ then the Docker credential store, then anonymous access.`,
 			if err := registry.Logout(cmd.Context(), args[0]); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "logged out of %s\n", registry.TrimBaseScheme(args[0]))
+			reportDone(cmd, "logged out of", registry.TrimBaseScheme(args[0]))
 			return nil
 		},
 	}
 
 	cmd.AddCommand(push, pull, tags, resolve, login, logout)
 	return cmd
+}
+
+// reportDone announces a finished registry operation through the command's
+// logger rather than straight to stderr.
+//
+// The route matters: a transfer draws its progress in place and leaves the line
+// open, and the log handler is what ends it — on the first record that is not
+// progress. A direct write knows nothing about that line and lands on the end of
+// it, so a finished push read "layer=10/11published /path/to/image.sqf".
+func reportDone(cmd *cobra.Command, verb, subject string) {
+	logging.FromContext(cmd.Context()).Info(verb+" "+subject, "kind", "success")
 }
 
 func registryPushCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -179,7 +191,12 @@ func registryPushCompletion(cmd *cobra.Command, args []string, toComplete string
 // registryPushDestination resolves the publishing endpoint and its policy.
 // Explicit flags win. Otherwise the artifact's recorded build.source must match
 // exactly one configured source descriptor; pull mirrors are never considered.
-func registryPushDestination(cmd *cobra.Command, opts *registryOptions, artifactPath string) (string, registry.Visibility, error) {
+//
+// Only an installed name/version infers. A file the user pointed at is the case
+// where the destination is least likely to be the recipe collection's endpoint —
+// a one-off build, a mirror, an artifact belonging to a project — so inferring
+// there would publish to somewhere nobody named.
+func registryPushDestination(cmd *cobra.Command, opts *registryOptions, artifact registryArtifact) (string, registry.Visibility, error) {
 	if strings.TrimSpace(opts.base) != "" {
 		base, err := requireRegistryBase(opts.base)
 		if err != nil {
@@ -188,10 +205,13 @@ func registryPushDestination(cmd *cobra.Command, opts *registryOptions, artifact
 		visibility, err := parseVisibility(opts.visibility)
 		return base, visibility, err
 	}
+	if !artifact.managed {
+		return "", "", fmt.Errorf("cannot infer registry for %s: only an installed name/version infers its destination; use --registry", artifact.path)
+	}
 
-	manifest, err := meta.ReadManifest(artifactPath)
+	manifest, err := meta.ReadManifest(artifact.path)
 	if err != nil {
-		return "", "", fmt.Errorf("cannot infer registry from %s: cannot read artifact provenance: %w; use --registry", artifactPath, err)
+		return "", "", fmt.Errorf("cannot infer registry from %s: cannot read artifact provenance: %w; use --registry", artifact.path, err)
 	}
 	repository := strings.TrimRight(strings.TrimSpace(manifest.Build.Source), "/")
 	if repository == "" {
@@ -257,20 +277,30 @@ func parseVisibility(raw string) (registry.Visibility, error) {
 	return v, nil
 }
 
-func findRegistryArtifact(arg string) (string, error) {
+// registryArtifact is a local artifact and how the user addressed it.
+type registryArtifact struct {
+	path string
+	// managed reports that the argument was a name/version found in an images
+	// directory, rather than a path pointed at. It decides only whether the
+	// destination may be inferred: what is published is read from the artifact
+	// either way.
+	managed bool
+}
+
+func findRegistryArtifact(arg string) (registryArtifact, error) {
 	if info, err := os.Stat(arg); err == nil && !info.IsDir() {
-		return arg, nil
+		return registryArtifact{path: arg}, nil
 	}
 	filename := strings.ReplaceAll(catalog.Normalize(arg), "/", "--")
 	for _, dir := range config.GetImageSearchPaths() {
 		for _, ext := range []string{".sqf", ".sif"} {
 			candidate := filepath.Join(dir, filename+ext)
 			if utils.FileExists(candidate) {
-				return candidate, nil
+				return registryArtifact{path: candidate, managed: true}, nil
 			}
 		}
 	}
-	return "", fmt.Errorf("no local .sqf or .sif artifact found for %q", arg)
+	return registryArtifact{}, fmt.Errorf("no local .sqf or .sif artifact found for %q", arg)
 }
 
 type resolvedRegistryArtifact struct {
@@ -344,7 +374,7 @@ func runRegistryPull(cmd *cobra.Command, opts *registryOptions, spec string) err
 	if err := registry.Pull(cmd.Context(), base, resolved.repo, resolved.desc, resolved.annotations, dest); err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "pulled %s\n", dest)
+	reportDone(cmd, "pulled", dest)
 	return nil
 }
 

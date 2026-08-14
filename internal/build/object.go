@@ -589,7 +589,7 @@ func (b *BuildObject) Cleanup(failed bool) error {
 	}
 
 	if willClean {
-		log.Info("temporary files cleaned", "kind", "success")
+		log.Info("temporary files cleaned")
 	}
 
 	return nil

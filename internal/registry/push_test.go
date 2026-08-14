@@ -94,35 +94,6 @@ func TestPublishAndPullRoundTrip(t *testing.T) {
 	}
 }
 
-// The same round trip with the payload split across blobs, so reassembly is
-// covered against the protocol rather than against a fake blob store.
-func TestPublishAndPullRoundTripChunked(t *testing.T) {
-	requireSquashfsTools(t)
-	withChunkSize(t, 32<<10)
-
-	source, m := packImage(t, imageSpec{
-		name: "grch38/genome/gencode49", typ: catalog.TypeData, recipe: "#!/bin/bash\nbuild index\n",
-	})
-	f := newFakeRegistry(t)
-	ctx := context.Background()
-
-	if err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	repo, tag, _ := PullReference(m.Type, m.Name)
-	desc, ann, err := ResolveArtifact(ctx, f.base(), repo, tag)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dest := filepath.Join(t.TempDir(), "grch38-genome--gencode49.sqf")
-	if err := Pull(ctx, f.base(), repo, desc, ann, dest); err != nil {
-		t.Fatalf("Pull: %v", err)
-	}
-	if !sameBytes(t, source, dest) {
-		t.Error("the chunked round trip did not reproduce the artifact")
-	}
-}
-
 // Nothing can be pinned to an artifact with no scheme-backed keys, so publishing
 // one would put something in a registry that no lock could ever name.
 func TestPublishRefusesAnArtifactWithNoKeys(t *testing.T) {

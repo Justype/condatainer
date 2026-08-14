@@ -111,7 +111,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	if err := apptainer.Build(ctx, b.ws.Overlay, buildDefSource, buildOpts); err != nil {
 		b.Cleanup(true)
 		if apptainer.IsBuildCancelled(err) {
-			log.Info("build cancelled, image unchanged", "image", filepath.Base(targetPath))
+			log.Warn("build cancelled, image unchanged", "image", filepath.Base(targetPath))
 			return ErrBuildCancelled
 		}
 		return fmt.Errorf("failed to build SIF from %s: %w", b.buildSource, err)
@@ -126,7 +126,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 			os.Remove(preparedPath) //nolint:errcheck
 			b.Cleanup(true)
 			if errors.Is(err, context.Canceled) {
-				log.Info("build cancelled, image unchanged", "image", filepath.Base(targetPath))
+				log.Warn("build cancelled, image unchanged", "image", filepath.Base(targetPath))
 				return ErrBuildCancelled
 			}
 			return fmt.Errorf("failed to move SIF to %s: %w", preparedPath, err)
@@ -143,7 +143,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 			os.Remove(preparedPath) //nolint:errcheck
 			b.Cleanup(true)
 			if errors.Is(err, context.Canceled) || apptainer.IsBuildCancelled(err) {
-				log.Info("build cancelled, image unchanged", "image", filepath.Base(targetPath))
+				log.Warn("build cancelled, image unchanged", "image", filepath.Base(targetPath))
 				return ErrBuildCancelled
 			}
 			return fmt.Errorf("failed to extract SquashFS from SIF: %w", err)

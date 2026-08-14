@@ -1,7 +1,9 @@
 package registry
 
 import (
+	"cmp"
 	"context"
+	"net/http"
 	"os"
 	"strings"
 
@@ -65,10 +67,25 @@ func envCredential(host string) (auth.Credential, bool) {
 
 // newAuthClient is the client every registry operation uses: retrying transport,
 // per-host token cache, and the credential chain above.
+//
+// The retrying transport stays for the small requests — token exchange, HEAD,
+// manifest reads — and is irrelevant to a rate-limited blob: its waits are
+// milliseconds where a secondary limit needs minutes, it does not recognize
+// GitHub's 403, and it cannot replay a body without GetBody. That case belongs
+// to [retryPolicy]. It sets no client-level timeout, which must stay true: one
+// would kill a long upload outright.
+//
+// [inspectTransport] wraps it to keep the response metadata ORAS discards and to
+// ask permission before sending a large body.
 func newAuthClient() *auth.Client {
-	return &auth.Client{
-		Client:     retry.DefaultClient,
+	inner := *retry.DefaultClient
+	inner.Transport = &inspectTransport{next: cmp.Or(inner.Transport, http.DefaultTransport)}
+
+	client := &auth.Client{
+		Client:     &inner,
 		Cache:      auth.NewCache(),
 		Credential: credentialFunc(),
 	}
+	client.SetUserAgent(userAgent())
+	return client
 }

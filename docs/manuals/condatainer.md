@@ -1717,11 +1717,16 @@ condatainer registry push|pull|tags|resolve|login|logout
 ```
 
 Registry bases include the host, owner, and optional prefix, for example
-`ghcr.io/my-lab/condatainer`. Push normally infers both the endpoint and
-visibility from the artifact's recorded recipe source and that configured
-source's descriptor. `--registry` is an explicit override and is required for
-artifacts without uniquely matching configured provenance. Pull, tags, and
-resolve still require it because they do not start from a local artifact.
+`ghcr.io/my-lab/condatainer`. Push takes either an installed `name/version` or a
+path to an artifact.
+
+Only an installed `name/version` infers its destination, from the artifact's
+recorded recipe source and that configured source's descriptor; `--registry` is
+then an explicit override, and is required when the provenance matches no single
+configured source. **A path always requires `--registry`** — a file you point at
+is typically a one-off build, a mirror, or a project's own image, so its
+destination is stated rather than guessed. Pull, tags, and resolve require it
+too, because they do not start from a local artifact.
 
 ```bash
 # Store a token in the Docker/OCI credential store
@@ -1731,8 +1736,8 @@ printf '%s\n' "$TOKEN" | condatainer registry login ghcr.io \
 # Publish by installed name, inferring the selected source's oci.push endpoint.
 condatainer registry push grch38/genome/gencode49
 
-# Explicit path and endpoint override. Public is the safe default; use internal
-# only for a registry whose audience is restricted.
+# A path states its endpoint. Public is the safe default; use internal only for
+# a registry whose audience is restricted.
 condatainer registry push ./licensed-app.sqf \
   --registry registry.lab.example/cnt --visibility internal
 
@@ -1764,6 +1769,35 @@ Authentication precedence is `CNT_REGISTRY_TOKEN` plus optional
 `CNT_REGISTRY_USER`, `GITHUB_TOKEN` for `ghcr.io`, the Docker credential store,
 then anonymous access. Versioned tags are immutable unless `push --force` is
 used; version-less base/OS artifacts publish a `YYYYMMDD` tag and `latest`.
+
+### Large pushes
+
+A large artifact is split into layers, and `push` prints the plan it settled on
+before sending anything:
+
+```
+[CNT] upload plan size=26.00 GB layer-size=2.00 GB (floor) layers=13 requests=~39 registry=ghcr.io
+```
+
+There is no setting for the layer size. It is derived from the artifact, because
+the limit that decides it is a count of requests rather than of bytes: a fixed
+size would make the layer count grow with the artifact and eventually exceed what
+a registry accepts in one run.
+
+Registries refuse a client that writes too often, so `push` **pauses and
+resumes** rather than failing:
+
+```
+[CNT] upload rate limited layer=4/11 retry=1/4 wait=1m0s
+[CNT] upload resumed layer=4/11
+```
+
+That is normal for a multi-hour transfer and needs no action. Four such pauses
+end the push. A genuine permission failure is reported immediately instead, and
+never waited on. Interrupting during a pause exits at once.
+
+`pull` waits out the same limits. A rate-limited pull never silently falls back
+to building locally — it is a wait, not a missing artifact.
 
 ## Scheduler
 

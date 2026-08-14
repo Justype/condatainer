@@ -16,7 +16,7 @@ The package has two related entry points:
 ## Artifact contract
 
 Overlay and base images have distinct manifest and layer media types. Pull checks
-both before downloading. Artifacts larger than 512 MiB are pushed as ordered
+both before downloading. An artifact larger than one layer is pushed as ordered
 chunks without writing a second local copy; pull verifies every OCI descriptor,
 checks destination free space, reassembles in manifest order, regenerates the
 embedded identity/equivalence keys, and atomically renames into place.
@@ -47,8 +47,210 @@ before installation.
 
 Callers classify outcomes with `errors.Is`: `ErrNotFound`,
 `ErrUnsupportedPlatform`, and `ErrUnavailable` may permit a local build fallback;
-`ErrUnauthorized`, `ErrIncompatible`, `ErrInvalidArtifact`, `ErrMismatch`, and
-`ErrNoAnnotations` must be surfaced.
+`ErrUnauthorized`, `ErrRateLimited`, `ErrIncompatible`, `ErrIncompatibleRegistry`,
+`ErrInvalidArtifact`, `ErrMismatch`, and `ErrNoAnnotations` must be surfaced.
+
+`ErrRateLimited` is deliberately not `ErrUnavailable`: a registry asking for a
+pause is not a registry that is down, and treating it as one would turn a
+sixty-second wait into a local rebuild. It is matched on positive evidence — a
+`429`, the OCI `TOOMANYREQUESTS` code, or GitHub's secondary-limit wording, which
+arrives as an ordinary `403 DENIED` and is distinguishable only by its message.
+
+## Retry
+
+Every registry *write* — blob, manifest, tag, index — runs under
+`retryPolicy.run`, which waits out a rate limit rather than failing. Four retries
+at roughly 1, 2, 4, and 8 minutes, jittered, honouring a server-directed delay
+when one survives the transport.
+
+Only `ErrRateLimited` is retried. An ordinary `403` fails immediately, because
+spending fifteen minutes of backoff to arrive at "your token is wrong" would be
+worse than the bug this fixes. A `401` is retried once without waiting: ORAS
+fixes the `Authorization` header when it opens an upload session and reuses it to
+finalize the blob, so a token that ages out mid-layer is only recoverable by
+starting the layer over.
+
+Two details are load-bearing. Each attempt builds a **new** `io.SectionReader`,
+since ORAS streams from a body with no `GetBody` and a reused reader would send
+nothing — that is why retry lives in `pushRange` rather than in the HTTP client.
+And after a wait the blob's presence is **rechecked**, because a registry can
+commit and then lose the response, and without the check the next attempt
+retransmits gigabytes that already landed.
+
+A pause reports itself and its resume, carrying the same attribute the progress
+line does so the three read as one event:
+
+```text
+[CNT] upload progress done=1.25 GB total=2.00 GB layer=4/11
+[CNT] upload rate limited layer=4/11 retry=1/4 wait=1m0s
+[CNT] upload resumed layer=4/11
+```
+
+The pause is logged at `Warn`, which is also what closes the in-place progress
+line: `clilog` ends an open line on the first record that is not progress, so no
+stalled byte count survives the wait. A retried layer's counter restarts at zero
+— the progress reader is rebuilt per attempt — because the display is bytes
+accepted by the current request, not traffic spent across retries.
+
+Tests inject a policy through the context (`withRetryPolicy`) so nothing sleeps.
+
+## Pull
+
+`download` states its concurrency rather than inheriting ORAS's, which leaves the
+field zero and fills in its own number at copy time. A pull runs once per node
+per artifact, so across a cluster its request rate is the larger of the two
+directions and worth deciding on purpose. Three is kept: a pull sits on the path
+of every job that needs the artifact, and `retryingSource` is the real protection
+— a rate limit pauses the pull instead of failing it, so trading throughput away
+to avoid one would be paying twice.
+
+Progress is reported for the **artifact**, not per blob:
+
+```text
+[CNT] download progress done=8.00 GB total=26.00 GB layers=6/13
+```
+
+Layers arrive concurrently, so per-blob lines would put two or three readers on
+one terminal line overwriting each other, and a finished download would print one
+"complete" line per layer, none of them naming the whole. `layers=` counts how
+many have arrived, where push's `layer=` names the one in flight — push reports
+per blob for the opposite reason, since one upload is in flight at a time and a
+retry names it.
+
+Retrying a fetch is safe in a way retrying a push is not: it is addressed by
+digest and ORAS verifies what arrives, so a repeat either produces the same bytes
+or fails. What is covered is *opening* the stream, which is where a `429` or a
+secondary limit is answered. A connection lost midway through a two-gigabyte body
+is not retried — ORAS offers no way to resume one, and restarting would mean
+beginning the whole copy again.
+
+This matters more than it looks: `ErrRateLimited` is deliberately not
+`ErrUnavailable`, so a throttled pull may not fall back to a local build. Waiting
+is the only thing that turns it back into a working pull.
+
+## Provider profiles
+
+`profileFor(host)` returns what a registry is known to enforce — per-layer
+maximum, upload timeout, token lifetime, minimum gap between writes. Guardrails,
+not protocol branching: nothing changes about *how* CondaTainer talks to a
+registry, only how much it asks for at once and how fast.
+
+Every field is zero when nothing is documented, and zero means "make no claim",
+never "no limit applies". The table is deliberately short — GHCR is in it because
+it published its numbers and then enforced an unpublished one on a real push.
+An undocumented guess written down here becomes stale policy that outlives
+whoever could correct it.
+
+Two effects follow. The profile's `MaxLayerSize` clamps the layer plan, rounding
+*down* to whole GiB so the result lands below the limit rather than on it —
+GHCR's 10 GB becomes 9 GiB. And `MinMutationGap` spaces completed writes through
+a `pacer` on the context: the clock runs from when the last write *finished*, so
+a four-minute layer pays nothing, and a presence hit pays nothing because it
+creates no content and never reaches the retry loop where pacing is applied.
+
+## Throughput guard
+
+Where a registry documents a per-upload limit, `throughputGuard` refuses to start
+a layer that measurement says cannot finish inside it. The alternative is not
+success: an upload timeout is not a rate limit, so nothing retries it, and the
+push fails anyway having spent the ten minutes and the bandwidth.
+
+The budget is 80% of the tighter of the profile's `UploadTimeout` and
+`TokenLifetime` — both bound a layer for the same reason, since ORAS fixes the
+credential when it opens the session. The estimate is the **slowest** of the last
+few completed layers: conservative, so a layer is refused on what the link has
+actually done at its worst, and recent, so a recovered link is not held back by
+one bad sample. Only transferred layers are measured; one the registry already
+had returns at once and would read as infinite bandwidth.
+
+The first layer is never refused — the only honest estimate is a measured one —
+and a registry that documents nothing gets no guard at all.
+
+The refusal names the measured rate, the rate needed, and the projection. There
+is no remedy to suggest beyond that: with no layer-size setting, a link too slow
+for the size this artifact requires is a link too slow for this artifact.
+
+## Transport
+
+`inspectTransport` wraps the HTTP round tripper inside `newAuthClient`. It makes
+no policy decisions; it preserves what ORAS discards and sends what ORAS omits.
+
+- **Keeps the response metadata.** `errcode.ErrorResponse` carries method, URL,
+  status, and the parsed error document — and no headers. `Retry-After` and the
+  rate-limit counters live outside the body and would reach no caller otherwise.
+  The captured failure lands in a slot the retry loop puts in the context, one
+  per attempt, and annotates that attempt's error so a server-directed wait beats
+  the local backoff.
+- **Restores every body it reads.** A bounded prefix is read and put back in
+  front of the rest, because ORAS decodes the document itself and a consumed body
+  decodes to nothing — turning a specific registry error into "Forbidden".
+- **Asks permission before a large body** (`Expect: 100-continue` on a `PUT` or
+  `PATCH` past 4 MiB). ORAS streams straight into the request, so without it an
+  auth failure, quota rejection, proxy body limit, or rate limit is discovered
+  only after a whole layer has crossed the wire.
+- **Abandons a dead upload session.** A failed blob finalize leaves a session
+  ORAS will never resume; the retry loop `DELETE`s it before waiting, using the
+  credential from the failed request, which is the last place that has it.
+- **Identifies CondaTainer**, rather than sending ORAS's default `oras-go`.
+
+## Layer planning
+
+The limit that decides how an artifact is cut is a count of *requests*, not of
+bytes: a fresh layer costs three, and a registry may stop accepting them after
+some number it does not publish. `planLayerSize` therefore holds the layer
+*count* near `targetLayers` and derives the size from the artifact, in whole GiB
+steps, with a 2 GiB floor and clamped to any known per-layer maximum. A fixed
+size would make the count grow with the artifact and turn every choice into a
+supported-size cliff.
+
+The size is a per-push decision recorded nowhere. Pull reads each boundary from
+the manifest, so artifacts published at any earlier size stay readable and
+nothing needs migrating.
+
+**There is no setting and no flag.** The size comes from the constants in
+`layerplan.go` and the artifact in hand, and nothing else — a publisher who has
+to work out a layer size by hand has been failed by `planLayerSize`.
+
+A fresh push asks the registry **once** whether a layer is already present.
+Layers upload in order from the first, so a first layer the registry does not
+have means none of this artifact is committed, and every further probe is a
+request spent to be told 404 — a third of the budget, and the cheapest third to
+get back. When the first layer *is* present, every layer is probed: that is a
+resumed push or a second architecture, exactly the case the probe pays for.
+
+Eliding a probe is never a correctness risk. A registry accepts a blob it already
+holds and deduplicates by digest, and `errdef.ErrAlreadyExists` is tolerated, so
+guessing wrong costs bandwidth in a case the heuristic has established is
+unlikely.
+
+`preflightUpload` settles the plan and checks what can be known without touching
+the registry: the source is a non-empty regular file, the manifest fits the 4 MB
+every registry is expected to accept, and no layer title, tag, or reference
+overruns the lengths clients assume. It ends with one summary —
+
+```text
+[CNT] upload plan size=26.00 GB layer-size=2.00 GB (floor) layers=13 requests=~39 registry=ghcr.io
+```
+
+— and, when the estimate exceeds the ceiling a registry was observed to enforce,
+one warning that the push will pause. That is a prediction, not a refusal: the
+push is still correct and retry carries it through.
+
+`probePushAccess` then opens a blob upload session and immediately abandons it.
+Two requests, answering what nothing else does until the first layer has been
+hashed and sent: whether the credential carries **push** scope — `checkTagIsFree`
+only does a pull-scope `Resolve` — whether the repository exists, since ECR does
+not create one on push, and whether its name is a shape this registry accepts.
+
+Only a refusal the registry was clear about stops the push. Unreachable,
+throttled, or an unexpected status is left to the push itself, which has retry
+and better messages; a preflight that invents failure modes is worse than none.
+The whole probe is bounded by `probeTimeout`, because ORAS's transport would
+otherwise retry a 5xx five times and a cheap check would stop being cheap.
+
+The manifest ceiling is also the only lower bound on layer size, and the reason
+no arbitrary one is imposed: it is derived from a spec limit and from the
+artifact being pushed, rather than guessed.
 
 ## Authentication
 
@@ -61,21 +263,15 @@ Credential precedence is:
 
 `Login` and `Logout` manage the same store. Tokens are never logged.
 
-## CLI
+## Callers
 
-The publisher/admin surface is under one noun:
+The publisher/admin surface is `condatainer registry push|pull|tags|resolve|
+login|logout`, in [`cmd/registry.go`](../../cmd/registry.go). Choosing an
+endpoint from flags, config, or an artifact's recorded `build.source` happens
+there and never here: this package is told where to go. See the
+[manual](../../docs/manuals/condatainer.md) for that surface.
 
-```text
-condatainer registry push|pull|tags|resolve|login|logout
-```
-
-Push first reads the local artifact's recorded `build.source`, uniquely matches
-it to a configured source descriptor, and uses that descriptor's `oci.push` and
-`visibility`. `--registry` and an explicitly supplied `--visibility` override
-inference. Missing, stale, invalid, or ambiguous provenance stops and asks for
-`--registry`; a pull mirror is never selected for publishing.
-
-Normal `create` keeps the exact recipe source selected by the catalog and tries
-that source's ordered `oci.pull` endpoints before building locally. The
-candidate must match the equivalence key derived from the selected recipe.
-Explicit `registry pull` and build use the same destination producer lock.
+`build` reaches the same transport without the CLI, trying the selected recipe
+source's ordered `oci.pull` endpoints before building locally, and requiring the
+candidate to match the equivalence key derived from that recipe. It and
+`registry pull` take the same destination producer lock.

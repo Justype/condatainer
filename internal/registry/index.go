@@ -59,11 +59,25 @@ func publishIndex(ctx context.Context, repository *remote.Repository, tags []str
 		Digest:       digest.FromBytes(indexBytes),
 		Size:         int64(len(indexBytes)),
 	}
-	if err := repository.Push(ctx, indexDesc, bytes.NewReader(indexBytes)); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
+	// Retried, so that a rate limit here is waited out rather than surfacing to
+	// reconcileIndex, whose own retry means something else entirely: it would
+	// report a throttled push as a concurrent publisher and send the reader
+	// looking for someone who is not there.
+	if err := retryPolicyFrom(ctx).run(ctx, mutation{verb: verbPublish, attrs: []any{"target", "index"}, do: func(ctx context.Context) error {
+		err := repository.Push(ctx, indexDesc, bytes.NewReader(indexBytes))
+		if err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
+			return err
+		}
+		return nil
+	}}); err != nil {
 		return fmt.Errorf("failed to push index: %w", err)
 	}
 	for _, tag := range tags {
-		if err := repository.Tag(ctx, indexDesc, tag); err != nil {
+		if err := retryPolicyFrom(ctx).run(ctx, mutation{
+			verb:  verbPublish,
+			attrs: []any{"tag", tag},
+			do:    func(ctx context.Context) error { return repository.Tag(ctx, indexDesc, tag) },
+		}); err != nil {
 			return fmt.Errorf("failed to add tag %s: %w", tag, err)
 		}
 	}
