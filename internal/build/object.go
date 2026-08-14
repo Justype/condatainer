@@ -619,7 +619,7 @@ func (b *BuildObject) parseDependencies() error {
 	if b.spec.Dependencies != nil {
 		return nil
 	}
-	deps, err := utils.GetDependenciesFromScript(b.buildSource, config.Global.ParseModuleLoad)
+	deps, err := utils.GetDependenciesFromScript(b.buildSource)
 	if err != nil {
 		return fmt.Errorf("failed to parse dependencies: %w", err)
 	}

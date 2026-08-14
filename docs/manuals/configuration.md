@@ -142,7 +142,6 @@ and may be `public` or `internal`.
 | Key | Default | Description |
 |-----|---------|-------------|
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
-| `parse_module_load` | `false` | Parse `module load` / `ml` lines as dependencies in `check` and `run` |
 | `autoload_gpu` | `true` | Pass `--nv` / `--rocm` when the host has the device node. Set `false` if the driver is present but unusable |
 | `base` | first source's `default_base` | Base recipe for the container root, e.g. `ubuntu24` → `ubuntu24/base` |
 | `scheduler_timeout` | `0` | Seconds to wait for a scheduler command before erroring. `0` disables the timeout |
@@ -370,9 +369,6 @@ submit_job: true
 sources:
   - lab: /shared/labA/recipes
   - cnt: https://raw.githubusercontent.com/condatainer/recipes/main
-
-# Parse "module load" / "ml" lines as dependencies in 'check' and 'run' (default: false)
-parse_module_load: false
 
 # Pass --nv / --rocm when the host has the matching device node (default: true)
 # Set false on a node whose driver is installed but unusable

@@ -34,7 +34,6 @@ var configKeyDefs = map[string]bool{
 	"base":                       false,
 	"submit_job":                 false,
 	"sources":                    true,
-	"parse_module_load":          false,
 	"autoload_gpu":               false,
 	"scheduler_timeout":          false,
 	"notification":               false,
@@ -57,8 +56,7 @@ func isArrayKey(key string) bool { return configKeyDefs[key] }
 
 func isBoolKey(key string) bool {
 	switch key {
-	case "submit_job", "proxy_perjob", "helper_bind_all",
-		"parse_module_load", "autoload_gpu",
+	case "submit_job", "proxy_perjob", "helper_bind_all", "autoload_gpu",
 		"build.app_tmp_overlay", "build.always_submit":
 		return true
 	}
@@ -210,7 +208,7 @@ func configValueCompletion(key string) []string {
 	switch key {
 	case "submit_job", "proxy_perjob", "helper_bind_all":
 		return []string{"true", "false"}
-	case "parse_module_load", "autoload_gpu":
+	case "autoload_gpu":
 		return []string{"true", "false"}
 	case "build.ncpus":
 		return []string{"4", "8", "16", "32"}
@@ -461,8 +459,6 @@ var configShowCmd = &cobra.Command{
 			fmt.Printf("  %-19s %s%s\n", "scheduler_timeout:", utils.FormatDuration(config.Global.SchedulerTimeout), srcTag("scheduler_timeout"))
 		}
 		printOverridden("                      ", "scheduler_timeout")
-		fmt.Printf("  %-19s %v%s\n", "parse_module_load:", config.Global.ParseModuleLoad, srcTag("parse_module_load"))
-		printOverridden("                      ", "parse_module_load")
 		fmt.Printf("  %-19s %v%s\n", "autoload_gpu:", config.Global.AutoloadGPU, srcTag("autoload_gpu"))
 		printOverridden("                      ", "autoload_gpu")
 		if config.Global.MetadataCacheTTL == 0 {

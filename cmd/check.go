@@ -17,8 +17,7 @@ import (
 )
 
 var (
-	checkAutoInstall     bool
-	checkParseModuleLoad bool
+	checkAutoInstall bool
 )
 
 var scriptCheckCmd = &cobra.Command{
@@ -43,7 +42,6 @@ func init() {
 	rootCmd.AddCommand(scriptCheckCmd)
 	scriptCheckCmd.Flags().BoolVarP(&checkAutoInstall, "auto-install", "a", false, "Automatically install missing dependencies")
 	scriptCheckCmd.Flags().BoolP("install", "i", false, "Alias for --auto-install")
-	scriptCheckCmd.Flags().BoolVar(&checkParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
 	scriptCheckCmd.Flags().BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (build locally)")
 }
 
@@ -65,8 +63,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Collect and deduplicate deps across all scripts
-	parseModuleLoad := config.Global.ParseModuleLoad || checkParseModuleLoad
-	deps, err := collectDeps(scriptPaths, metaDeps, parseModuleLoad)
+	deps, err := collectDeps(scriptPaths, metaDeps)
 	if err != nil {
 		return err
 	}
@@ -125,7 +122,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 // preSeededDeps are name/version deps from remote metadata (already normalized); they are
 // merged first so script-parsed deps deduplicate against them.
 // Relative overlay paths are resolved per-script using the scheduler WorkDir (if set) or cwd.
-func collectDeps(scriptPaths []string, preSeededDeps []string, parseModuleLoad bool) ([]string, error) {
+func collectDeps(scriptPaths []string, preSeededDeps []string) ([]string, error) {
 	multiScript := len(scriptPaths) > 1
 	seen := make(map[string]bool)
 	var deps []string
@@ -143,7 +140,7 @@ func collectDeps(scriptPaths []string, preSeededDeps []string, parseModuleLoad b
 		if multiScript {
 			utils.PrintMessage("Checking script: %s", utils.StylePath(scriptPath))
 		}
-		scriptDeps, err := utils.GetDependenciesFromScript(scriptPath, parseModuleLoad)
+		scriptDeps, err := utils.GetDependenciesFromScript(scriptPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse dependencies from %s: %w", scriptPath, err)
 		}
@@ -222,7 +219,7 @@ func checkDeps(deps []string, installedOverlays map[string]string) []string {
 				if sibling != "" {
 					ext := filepath.Ext(sibling)
 					if strings.HasSuffix(sibling, ".sh") {
-						if shDeps, _ := utils.GetDependenciesFromScript(sibling, false); len(shDeps) > 0 {
+						if shDeps, _ := utils.GetDependenciesFromScript(sibling); len(shDeps) > 0 {
 							hint = "  (" + utils.StyleNote(ext) + " found, but has #DEP - create manually)"
 						} else {
 							hint = "  (" + utils.StyleNote(ext) + " found)"
@@ -254,7 +251,7 @@ func autoCreateExternalOverlay(ctx context.Context, dep string) bool {
 	baseName := filepath.Base(absPrefix)
 
 	if strings.HasSuffix(sibling, ".sh") {
-		shDeps, _ := utils.GetDependenciesFromScript(sibling, false)
+		shDeps, _ := utils.GetDependenciesFromScript(sibling)
 		if len(shDeps) > 0 {
 			utils.PrintError("External overlay %s has .sh with #DEP - create manually:\ncondatainer create -f %s",
 				utils.StyleName(filepath.Base(dep)), sibling)

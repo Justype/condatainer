@@ -24,25 +24,24 @@ import (
 )
 
 var (
-	runWritableImg     bool
-	runBaseImage       string
-	runEnvSettings     []string
-	runBindPaths       []string
-	runFakeroot        bool
-	runParseModuleLoad bool
-	runStdout          string
-	runStderr          string
-	runAfterOK         string
-	runAfterNotOK      string
-	runAfterAny        string
-	runCPU             int
-	runMem             string
-	runTime            string
-	runGPU             string
-	runDryRun          bool
-	runArray           string
-	runArrayLimit      int
-	runName            string
+	runWritableImg bool
+	runBaseImage   string
+	runEnvSettings []string
+	runBindPaths   []string
+	runFakeroot    bool
+	runStdout      string
+	runStderr      string
+	runAfterOK     string
+	runAfterNotOK  string
+	runAfterAny    string
+	runCPU         int
+	runMem         string
+	runTime        string
+	runGPU         string
+	runDryRun      bool
+	runArray       string
+	runArrayLimit  int
+	runName        string
 )
 
 // errRunAborted signals a handled stop (message already printed); caller returns nil.
@@ -89,7 +88,6 @@ func init() {
 	runCmd.Flags().BoolVarP(&runWritableImg, "writable", "w", false, "Make .img overlays writable (default: read-only)")
 	runCmd.Flags().Bool("writable-img", false, "Alias for --writable")
 	runCmd.Flags().StringVarP(&runBaseImage, "base-image", "b", "", "Base image to use instead of default")
-	runCmd.Flags().BoolVar(&runParseModuleLoad, "module", false, "Also parse 'module load' / 'ml' lines as dependencies")
 	runCmd.Flags().StringVarP(&runStdout, "output", "o", "", "Override job stdout path (creates parent dir if needed)")
 	runCmd.Flags().StringVarP(&runStderr, "error", "e", "", "Override job stderr path")
 	runCmd.Flags().StringVar(&runAfterOK, "afterok", "", "Run after jobs succeed (colon-separated IDs, e.g. 123:456)")
@@ -362,7 +360,7 @@ func processEmbeddedArgs(scriptPath string) error {
 // resolveDeps parses #DEP dependencies, checks installed overlays, and returns resolved paths.
 // Returns errRunAborted (message already printed) if any dependencies are missing.
 func resolveDeps(contentScript, originScriptPath string) (overlays []string, err error) {
-	deps, err := utils.GetDependenciesFromScript(contentScript, config.Global.ParseModuleLoad || runParseModuleLoad)
+	deps, err := utils.GetDependenciesFromScript(contentScript)
 	if err != nil {
 		utils.PrintError("Failed to parse dependencies: %v", err)
 		return nil, errRunAborted
@@ -539,7 +537,7 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		}
 	}
 
-	deps, err := utils.GetDependenciesFromScript(contentScript, config.Global.ParseModuleLoad || runParseModuleLoad)
+	deps, err := utils.GetDependenciesFromScript(contentScript)
 	if err != nil {
 		fmt.Printf("%s Could not parse dependencies: %v\n", utils.StyleError("[ERR]"), err)
 	} else {

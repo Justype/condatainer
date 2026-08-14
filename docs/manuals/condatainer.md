@@ -980,7 +980,7 @@ Parses scripts for `#DEP:` tags and checks if the required overlays are installe
 **Usage:**
 
 ```
-condatainer check <script|dir|name> [script|dir|name ...] [-a] [--module] [--remote]
+condatainer check <script|dir|name> [script|dir|name ...] [-a] [--remote]
 ```
 
 Each argument can be:
@@ -992,7 +992,6 @@ Each argument can be:
 
 * `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies.
 * `-i`, `--install`: Alias for `--auto-install`.
-* `--module`: Also parse `module load` / `ml` lines as dependencies.
 * `--remote`: Remote build scripts take precedence over local when resolving package names.
 * `--no-submit`: Disable job submission; build missing dependencies locally.
 
@@ -1037,7 +1036,6 @@ All options (`-a`, `-o`, `--afterok`, etc.) must appear **before** `SCRIPT`. Arg
 
 * `-w`, `--writable`, `--writable-img`: Make `.img` overlays writable (default: read-only).
 * `-b`, `--base-image [PATH]`: Use custom base image.
-* `--module`: Also parse `module load` / `ml` lines as dependencies.
 * `-f`, `--fakeroot`: Run with fakeroot privileges.
 * `--bind HOST:CONTAINER`: Bind mount a path into the container (repeatable).
 * `--env KEY=VALUE`: Set an environment variable inside the container (repeatable).
@@ -1348,32 +1346,16 @@ condatainer e mpi.img -- mm install mpi4py openmpi=4.1 -y
 ```
 ````
 
-### CondaTainer is compatible with module commands
+### Module commands are not dependencies
 
-**CondaTainer** can scan your script for `module load` or `ml` commands and mount the corresponding overlays automatically. This is disabled by default; enable it with `--module` or by setting `parse_module_load: true` in your config.
-
-**Example:**
+**CondaTainer** reads `#DEP:` and nothing else. A `module load` or `ml` line names your site's own
+module tree — a separate tool, with its own builds, that only happens to spell names the same way —
+so it is left alone and never mounts an overlay. Declare what the script needs:
 
 ```bash
 #!/bin/bash
-module load bcftools/1.22
+#DEP: bcftools/1.22
 bcftools --version
-```
-
-Use `--module` with `check` or `run` to handle these dependencies:
-
-```bash
-# Install missing dependencies (including module load lines)
-condatainer check my_script.sh --module -a
-
-# Run the script with automatic dependency resolution
-condatainer run my_script.sh --module
-```
-
-To enable it permanently:
-
-```bash
-condatainer config set parse_module_load true
 ```
 
 ## Info

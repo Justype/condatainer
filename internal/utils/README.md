@@ -45,8 +45,8 @@ These read *user* scripts and helper scripts, not recipes — a recipe is parsed
 `catalog.ParseRecipe`.
 
 ```go
-// parseModuleLoad: also extract "module load" / "ml" lines as deps
-deps, err := utils.GetDependenciesFromScript(scriptPath, parseModuleLoad)
+// #DEP: only — a "module load" line names the site's module tree, not an artifact
+deps, err := utils.GetDependenciesFromScript(scriptPath)
 
 description := utils.GetDescriptionFromScript(scriptPath)
 

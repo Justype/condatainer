@@ -59,9 +59,6 @@ type Config struct {
 	// Empty falls back to the first source declaring a default_base.
 	Base string
 
-	// Dependency parsing
-	ParseModuleLoad bool // Parse "module load" / "ml" lines as dependencies (default: false)
-
 	// Pass --nv / --rocm when the host has the matching device nodes (default: true).
 	// Turn off on a node whose driver is present but unusable: the device nodes
 	// still exist, so detection fires and the container then fails to start.

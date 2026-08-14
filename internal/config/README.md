@@ -91,7 +91,6 @@ config.Global  // Singleton instance
 - `ApptainerBin`, `SchedulerBin`
 - `DefaultDistro` - Base OS slug (e.g. `"ubuntu24"`)
 - `Branch`, `PreferRemote` (remote script fetching)
-- `ParseModuleLoad` - Treat `module load` lines as `#DEP` dependencies
 - `Notification` - Notification method when a helper job starts (default: `""` = none). Values: `"bell"` (terminal bell), `"email"` (scheduler email directive), ≥5-char string (ntfy.sh topic, fires from compute node), `""` or `"none"` (silent).
 - `ProxyPerJob` - Auto-start a per-job SOCKS5 proxy inside submitted jobs when no active proxy is found (`proxy_perjob` config key, default: `false`)
 - `Scheduler scheduler.ResourceSpec` - Default scheduler specs (`Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`)
@@ -172,7 +171,6 @@ apptainer_bin: "apptainer"
 scheduler_bin: ""         # auto-detect if empty
 
 base: "ubuntu24"
-parse_module_load: false
 
 # Recipe collections, in order — first match wins, like PATH.
 # `cnt` is appended automatically; list it yourself only to point it elsewhere.

@@ -114,7 +114,9 @@ func TestStripInlineComment(t *testing.T) {
 	}
 }
 
-func TestGetDependenciesFromScript_MLAndModuleLoad(t *testing.T) {
+// Module lines name the site's own module tree, not CondaTainer artifacts, so
+// they contribute nothing however closely they resemble a #DEP: name.
+func TestGetDependenciesFromScriptIgnoresModuleLines(t *testing.T) {
 	tmp, err := os.CreateTemp("", "script-deps-*.sh")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -133,12 +135,12 @@ ml foo/5.0
 	}
 	tmp.Close()
 
-	deps, err := GetDependenciesFromScript(tmp.Name(), true)
+	deps, err := GetDependenciesFromScript(tmp.Name())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := []string{"foo/1.0", "alpha/1.0", "beta/2.0", "gamma/3.0", "delta/4.0", "foo/5.0"}
+	expected := []string{"foo/1.0"}
 	if len(deps) != len(expected) {
 		t.Fatalf("expected %d deps, got %d: %v", len(expected), len(deps), deps)
 	}
@@ -167,12 +169,12 @@ module load alpha/1.0 beta/2.0
 	}
 	tmp.Close()
 
-	deps, err := GetDependenciesFromScript(tmp.Name(), true)
+	deps, err := GetDependenciesFromScript(tmp.Name())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := []string{"foo/1.0", "bar/2.0", "baz/3.0", "alpha/1.0", "beta/2.0"}
+	expected := []string{"foo/1.0", "bar/2.0", "baz/3.0"}
 	if len(deps) != len(expected) {
 		t.Fatalf("expected %d deps, got %d: %v", len(expected), len(deps), deps)
 	}

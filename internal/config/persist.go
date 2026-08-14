@@ -131,7 +131,6 @@ func setDefaults() {
 	viper.SetDefault("build.app_tmp_overlay_size", DefaultAppTmpOverlaySizeMB)
 
 	viper.SetDefault("channels", DefaultChannels())
-	viper.SetDefault("parse_module_load", false)
 	viper.SetDefault("autoload_gpu", true)
 	viper.SetDefault("scheduler_timeout", 0) // seconds; 0 = no timeout
 	// "web" = browser notification via dashboard; "terminal" = bell; "both" = terminal + web; "" or "none" = silent
@@ -985,10 +984,6 @@ func LoadFromViper() {
 
 	if ch := GetChannels(); len(ch) > 0 {
 		Global.Build.Channels = ch
-	}
-
-	if parseModuleLoad, ok := layerBool("parse_module_load"); ok {
-		Global.ParseModuleLoad = parseModuleLoad
 	}
 
 	if autoloadGPU, ok := layerBool("autoload_gpu"); ok {

@@ -78,6 +78,7 @@ ref-modules
 
 # CondaTainer Recipe
 recipe
+cnt-test
 
 # Former submodule, kept locally while its work is migrated to the recipe collection
 cnt-scripts/
