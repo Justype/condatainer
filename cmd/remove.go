@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/artifactcache"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/utils"
@@ -283,7 +283,7 @@ func performDelete(cmd *cobra.Command, names []string, showListing ...bool) erro
 			utils.PrintError("Failed to remove overlay %s: %v", utils.StyleName(name), err)
 			continue
 		}
-		meta.Forget(overlayPath)
+		artifactcache.Forget(overlayPath)
 		utils.PrintSuccess("Overlay %s removed.", utils.StyleName(name))
 		envPath := overlayPath + ".env"
 		if utils.FileExists(envPath) {
@@ -348,7 +348,7 @@ func removeExternalOverlays(cmd *cobra.Command, paths []string) error {
 			utils.PrintError("Failed to remove %s: %v", utils.StyleName(filepath.Base(p)), err)
 			continue
 		}
-		meta.Forget(p)
+		artifactcache.Forget(p)
 		utils.PrintSuccess("Overlay %s removed.", utils.StyleName(filepath.Base(p)))
 		envPath := p + ".env"
 		if utils.FileExists(envPath) {

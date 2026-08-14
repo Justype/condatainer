@@ -60,7 +60,7 @@ func EntryName(name, identity string) string {
 	if len(short) > IdentityChars {
 		short = short[:IdentityChars]
 	}
-	return strings.ReplaceAll(strings.Trim(name, "/"), "/", "--") + "@" + short
+	return image.EncodeArtifactName(name) + "@" + short
 }
 
 // Compose stages the capsule for an artifact into metaDir, and reports whether

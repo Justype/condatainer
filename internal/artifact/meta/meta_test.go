@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/artifactcache"
 )
 
 // validRuntime returns a runtime document that passes ValidateRuntime, for a
@@ -38,9 +39,9 @@ func validManifest() Manifest {
 func withTempCache(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
-	prev := globalCache
-	globalCache = &runtimeCache{pathFn: func() string { return filepath.Join(dir, cacheName) }}
-	t.Cleanup(func() { globalCache = prev })
+	prev := runtimeCache
+	runtimeCache = artifactcache.New(func() string { return filepath.Join(dir, artifactcache.FileName) })
+	t.Cleanup(func() { runtimeCache = prev })
 }
 
 // requireSquashfsTools skips when the host cannot build or read a .sqf.

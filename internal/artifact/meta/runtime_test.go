@@ -377,11 +377,11 @@ func TestCacheRemembersMissingRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	_, has, found := globalCache.lookup(abs, fi)
+	record, found := runtimeCache.Lookup(abs, fi)
 	if !found {
 		t.Fatal("the missing-runtime verdict was not cached")
 	}
-	if has {
+	if !record.RuntimeKnown || len(record.Runtime) != 0 {
 		t.Error("cache claims runtime metadata for an image that has none")
 	}
 
@@ -390,8 +390,8 @@ func TestCacheRemembersMissingRuntime(t *testing.T) {
 		t.Errorf("second ReadRuntime: %v", err)
 	}
 
-	Forget(image)
-	if _, _, found := globalCache.lookup(abs, fi); found {
+	runtimeCache.Forget(image)
+	if _, found := runtimeCache.Lookup(abs, fi); found {
 		t.Error("Forget left the entry behind")
 	}
 }

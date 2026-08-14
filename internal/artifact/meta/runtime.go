@@ -10,8 +10,11 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/artifactcache"
 	"github.com/Justype/condatainer/internal/image/tool"
 )
+
+var runtimeCache = artifactcache.Default()
 
 // RuntimePath is where the runtime document lives inside every image.
 const RuntimePath = "/" + DirName + "/" + RuntimeFileName
@@ -98,29 +101,53 @@ func StageRuntime(dir string, r Runtime) error {
 // Cached by path, size and mtime, negative verdicts included. See the README's
 // Manifests.
 func ReadRuntime(imagePath string) (Runtime, error) {
+	return ReadRuntimeWithCache(imagePath, runtimeCache)
+}
+
+// ReadRuntimeWithCache is ReadRuntime using records. A batch lets callers that
+// inspect many images persist all misses once at the end of their scan.
+func ReadRuntimeWithCache(imagePath string, records artifactcache.Access) (Runtime, error) {
 	abs, err := filepath.Abs(imagePath)
 	if err != nil {
 		abs = imagePath
 	}
-	fi, err := os.Stat(abs)
+	fi, err := os.Lstat(abs)
 	if err != nil {
-		globalCache.forget(abs)
+		records.Forget(abs)
 		return Runtime{}, fmt.Errorf("%w: %s: %w", tool.ErrUnreadable, imagePath, err)
 	}
 
-	if rt, cached, ok := globalCache.lookup(abs, fi); ok {
-		if !cached {
+	if record, ok := records.Lookup(abs, fi); ok && record.RuntimeKnown {
+		if len(record.Runtime) == 0 {
 			return Runtime{}, fmt.Errorf("%w: %s", ErrNoRuntime, imagePath)
 		}
-		return rt, nil
+		var rt Runtime
+		if err := json.Unmarshal(record.Runtime, &rt); err != nil {
+			records.Forget(abs)
+		} else {
+			rt.Normalize()
+			if err := ValidateRuntime(rt); err == nil {
+				return rt, nil
+			}
+			records.Forget(abs)
+		}
 	}
 
 	rt, err := readRuntimeUncached(abs)
 	switch {
 	case err == nil:
-		globalCache.store(abs, fi, &rt)
+		data, marshalErr := json.Marshal(rt)
+		if marshalErr == nil {
+			records.Merge(abs, fi, func(record *artifactcache.Record) {
+				record.RuntimeKnown = true
+				record.Runtime = data
+			})
+		}
 	case errors.Is(err, ErrNoRuntime):
-		globalCache.store(abs, fi, nil)
+		records.Merge(abs, fi, func(record *artifactcache.Record) {
+			record.RuntimeKnown = true
+			record.Runtime = nil
+		})
 	}
 	return rt, err
 }

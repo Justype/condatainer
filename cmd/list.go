@@ -13,6 +13,7 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/artifactcache"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -237,6 +238,8 @@ func runList(cmd *cobra.Command, args []string) error {
 func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 	distroPrefix := strings.ToLower(config.ResolvedBase()) + "/"
 	var result []DirOverlays
+	cacheBatch := artifactcache.Default().NewBatch()
+	defer cacheBatch.Flush()
 
 	for _, imageDir := range dirs {
 		if !utils.DirExists(imageDir) {
@@ -258,15 +261,14 @@ func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 			nameVersion := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 			normalized := strings.ToLower(catalog.Normalize(nameVersion))
 			overlayPath := filepath.Join(imageDir, entry.Name())
-			delimCount := strings.Count(entry.Name(), "--")
-			osOverlay := isOSOverlay(overlayPath)
+			runtime, runtimeErr := meta.ReadRuntimeWithCache(overlayPath, cacheBatch)
+			presentation := presentListOverlay(nameVersion, runtime, runtimeErr == nil)
 
-			if !osOverlay && delimCount > 1 {
+			if presentation.data {
 				// Data overlay
 				if query.Matches(normalized) {
-					displayName := strings.ReplaceAll(nameVersion, "--", "/")
-					d.DataList = append(d.DataList, displayName)
-					d.Paths[displayName] = overlayPath
+					d.DataList = append(d.DataList, presentation.name)
+					d.Paths[presentation.name] = overlayPath
 				}
 				continue
 			}
@@ -279,18 +281,7 @@ func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 				}
 			}
 
-			var name, version string
-			if osOverlay {
-				name = strings.ReplaceAll(nameVersion, "--", "/")
-				version = "(system app)"
-			} else if strings.Contains(nameVersion, "--") {
-				parts := strings.SplitN(nameVersion, "--", 2)
-				name = parts[0]
-				version = parts[1]
-			} else {
-				name = nameVersion
-				version = "(env)"
-			}
+			name, version := presentation.name, presentation.version
 			if name == "" {
 				continue
 			}
@@ -313,6 +304,45 @@ func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 		result = append(result, d)
 	}
 	return result
+}
+
+type listPresentation struct {
+	name    string
+	version string
+	data    bool
+}
+
+// presentListOverlay trusts recorded runtime type and name. The filename-depth
+// rule remains only for legacy images without readable metadata.
+func presentListOverlay(encodedName string, runtime meta.Runtime, recorded bool) listPresentation {
+	decoded := strings.ReplaceAll(encodedName, "--", "/")
+	if recorded {
+		name := runtime.Name
+		if name == "" {
+			name = decoded
+		}
+		switch runtime.Type {
+		case catalog.TypeData:
+			return listPresentation{name: name, data: true}
+		case catalog.TypeOS:
+			return listPresentation{name: name, version: "(system app)"}
+		default:
+			if base, version, ok := strings.Cut(name, "/"); ok {
+				if i := strings.LastIndex(name, "/"); i >= 0 {
+					base, version = name[:i], name[i+1:]
+				}
+				return listPresentation{name: base, version: version}
+			}
+			return listPresentation{name: name, version: "(env)"}
+		}
+	}
+	if strings.Count(encodedName, "--") > 1 {
+		return listPresentation{name: decoded, data: true}
+	}
+	if name, version, ok := strings.Cut(encodedName, "--"); ok {
+		return listPresentation{name: name, version: version}
+	}
+	return listPresentation{name: encodedName, version: "(env)"}
 }
 
 // dirHeader returns a full-width separator line with the directory path and its
