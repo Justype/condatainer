@@ -242,9 +242,17 @@ func runScript(cmd *cobra.Command, args []string) error {
 	if err := processEmbeddedArgs(contentScript); err != nil {
 		return err
 	}
+	// A project's lock governs what this script mounts. Resolved before the dry
+	// run so a preview reports the identities the run would actually mount, not
+	// whatever currently answers to their names.
+	projectRun, err := projectRunContext(contentScript, scriptSpecs)
+	if err != nil {
+		return err
+	}
+
 	// Dry run: print summary and exit without executing
 	if runDryRun {
-		printDryRunSummary(contentScript, originScriptPath, scriptSpecs, scriptArgs, arraySpec)
+		printDryRunSummary(contentScript, originScriptPath, scriptSpecs, scriptArgs, arraySpec, projectRun)
 		return nil
 	}
 
@@ -274,8 +282,14 @@ func runScript(cmd *cobra.Command, args []string) error {
 	if runWritableImg && getNtasks(scriptSpecs) > 1 {
 		ExitWithError("--writable cannot be used with multi-task jobs (ntasks=%d)", getNtasks(scriptSpecs))
 	}
-	overlays, err := resolveDeps(contentScript, originScriptPath)
-	if err != nil {
+	var overlays []string
+	if projectRun != nil {
+		overlays = projectRun.Overlays
+		// A project outside $HOME is otherwise unreachable from the container:
+		// only the script's own directory is bound, and apptainer's automatic
+		// binds cover $HOME and the working directory alone.
+		runBindPaths = append(runBindPaths, projectRun.Root)
+	} else if overlays, err = resolveDeps(contentScript, originScriptPath); err != nil {
 		if errors.Is(err, errRunAborted) {
 			os.Exit(ExitCodeError)
 		}
@@ -522,7 +536,26 @@ export -f module ml
 }
 
 // printDryRunSummary prints what condatainer run would do without executing.
-func printDryRunSummary(contentScript, originScript string, specs *scheduler.ScriptSpecs, scriptArgs []string, arraySpec *scheduler.ArraySpec) {
+// printProjectDependencies lists what a project run will mount.
+//
+// Nothing is checked here: every path came from the lock, and resolution has
+// already failed if any declaration could not be satisfied. The base is absent
+// from a lock by design, so it is still reported the ordinary way.
+func printProjectDependencies(baseImg string, projectRun *projectContext) {
+	check, cross := utils.StyleSuccess("✓"), utils.StyleError("✗")
+	fmt.Printf("%s %s\n", utils.StyleTitle("Project:"), utils.StylePath(projectRun.Root))
+	fmt.Printf("%s (%d locked):\n", utils.StyleTitle("Dependencies:"), len(projectRun.Overlays))
+	if utils.FileExists(baseImg) {
+		fmt.Printf("  Base:       %s %s\n", check, utils.StylePath(baseImg))
+	} else {
+		fmt.Printf("  Base:       %s %s %s\n", cross, utils.StylePath(baseImg), utils.StyleWarning("(not found)"))
+	}
+	for _, overlay := range projectRun.Overlays {
+		fmt.Printf("    %s %s\n", check, utils.StylePath(overlay))
+	}
+}
+
+func printDryRunSummary(contentScript, originScript string, specs *scheduler.ScriptSpecs, scriptArgs []string, arraySpec *scheduler.ArraySpec, projectRun *projectContext) {
 	fmt.Printf("%s %s\n", utils.StyleTitle("Dry run:"), specs.ScriptPath)
 
 	// Dependencies. A dry run reports the base rather than building it, so an
@@ -538,7 +571,9 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 	}
 
 	deps, err := utils.GetDependenciesFromScript(contentScript)
-	if err != nil {
+	if projectRun != nil {
+		printProjectDependencies(baseImg, projectRun)
+	} else if err != nil {
 		fmt.Printf("%s Could not parse dependencies: %v\n", utils.StyleError("[ERR]"), err)
 	} else {
 		installedOverlays, _ := getInstalledOverlaysMap()

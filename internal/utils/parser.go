@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"regexp"
@@ -196,28 +195,20 @@ func ParseWalltime(timeStr string) (time.Duration, error) {
 	return ParseDHMSTime(timeStr)
 }
 
-// GetDescriptionFromScript reads a script and extracts the first #DESC: line.
-// Returns the trimmed description string, or empty string if not found.
+// GetDescriptionFromScript returns a script's first #DESC: value, or "".
 func GetDescriptionFromScript(scriptPath string) string {
-	file, err := os.Open(scriptPath)
+	text, err := os.ReadFile(scriptPath)
 	if err != nil {
 		return ""
 	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "#DESC:") {
-			return strings.TrimSpace(line[len("#DESC:"):])
-		}
-	}
-	_ = scanner.Err()
-	return ""
+	description, _ := catalog.Find(catalog.ScanAnnotations(text), "#DESC")
+	return description
 }
 
 // GetDependenciesFromScript parses a script and extracts the dependencies its
-// #DEP: comments declare, normalized and deduplicated.
+// #DEP: annotations declare, normalized and deduplicated.
+//
+// Position carries no meaning: an annotation counts wherever it is written.
 //
 // Only #DEP: counts. A `module load` line names the site's own module tree —
 // another tool's namespace that merely spells names alike — so it is not a
@@ -226,46 +217,26 @@ func GetDependenciesFromScript(scriptPath string) ([]string, error) {
 	if !FileExists(scriptPath) {
 		return nil, fmt.Errorf("build script not found at %s", scriptPath)
 	}
-
-	file, err := os.Open(scriptPath)
+	text, err := os.ReadFile(scriptPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open script: %w", err)
 	}
-	defer file.Close()
 
 	dependencies := []string{}
 	seen := make(map[string]bool)
-
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		// Check for #DEP: comments
-		if strings.HasPrefix(line, "#DEP:") {
-			depLine := StripInlineComment(line[5:])
-			if depLine != "" {
-				if IsOverlay(depLine) {
-					if !seen[depLine] {
-						dependencies = append(dependencies, depLine)
-						seen[depLine] = true
-					}
-				} else {
-					normalized := catalog.Normalize(depLine)
-					if !seen[normalized] {
-						dependencies = append(dependencies, normalized)
-						seen[normalized] = true
-					}
-				}
-			}
+	for _, annotation := range catalog.Select(catalog.ScanAnnotations(text), "#DEP") {
+		if annotation.Value == "" {
 			continue
 		}
+		key := annotation.Value
+		if !catalog.IsPathDep(key) {
+			key = catalog.Normalize(key)
+		}
+		if !seen[key] {
+			dependencies = append(dependencies, key)
+			seen[key] = true
+		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading script: %w", err)
-	}
-
 	return dependencies, nil
 }
 
@@ -275,38 +246,21 @@ func GetDependenciesFromScript(scriptPath string) ([]string, error) {
 //
 // Only "app" and "data" are accepted, matching catalog.DeriveType exactly, so
 // #TYPE: cannot mean one thing to a recipe and another to an external script.
-// A missing header defaults to "app". A bare "TYPE:" is accepted alongside
-// "#TYPE:" because an external script is not required to be comment-only.
+// A script that declares none is an app.
 func GetTypeFromScript(scriptPath string) (string, error) {
 	if !FileExists(scriptPath) {
 		return "", fmt.Errorf("build script not found at %s", scriptPath)
 	}
-
-	file, err := os.Open(scriptPath)
+	text, err := os.ReadFile(scriptPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open script: %w", err)
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		var raw string
-		switch {
-		case strings.HasPrefix(line, "#TYPE:"):
-			raw = strings.TrimSpace(line[len("#TYPE:"):])
-		case strings.HasPrefix(line, "TYPE:"):
-			raw = strings.TrimSpace(line[len("TYPE:"):])
-		default:
-			continue
-		}
-
-		value := strings.ToLower(StripInlineComment(raw))
+	for _, annotation := range catalog.Select(catalog.ScanAnnotations(text), "#TYPE") {
+		value := strings.ToLower(annotation.Value)
 		if value == "" {
 			continue
 		}
-
 		switch value {
 		case "app", "data":
 			return value, nil
@@ -314,12 +268,56 @@ func GetTypeFromScript(scriptPath string) (string, error) {
 			return "", fmt.Errorf("invalid TYPE value %q: valid values are app or data", value)
 		}
 	}
+	return "app", nil
+}
 
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("error reading script: %w", err)
+// GetTargetFromScript reads the artifact name an external build script declares
+// with #TARGET:, or "" when it declares none.
+//
+// The name is not cosmetic: it becomes the payload's /cnt/<name> prefix, and
+// key.Role reads it to decide which dependencies count toward equivalence — an
+// app or OS dependency contributes only when its components occur in the
+// artifact's own name. Taking it from the script rather than from the `-p` path
+// keeps an identity-relevant input out of the invocation, so the same script
+// built to two different paths cannot classify its dependencies two ways.
+//
+// A {placeholder} is refused. #TARGET: doubles as a template pattern for catalog
+// recipes, where #PH: declarations supply the values and a requested name
+// selects them; an external build is addressed by path and has neither, so a
+// pattern here could never be filled in.
+func GetTargetFromScript(scriptPath string) (string, error) {
+	if !FileExists(scriptPath) {
+		return "", fmt.Errorf("build script not found at %s", scriptPath)
+	}
+	text, err := os.ReadFile(scriptPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open script: %w", err)
 	}
 
-	return "app", nil
+	for _, annotation := range catalog.Select(catalog.ScanAnnotations(text), "#TARGET") {
+		value := strings.TrimSpace(annotation.Value)
+		if value == "" {
+			continue
+		}
+		if strings.ContainsAny(value, "{}") {
+			return "", fmt.Errorf("invalid TARGET value %q: an external build takes a plain name, not a {placeholder}", value)
+		}
+		// Trimmed and checked for empty components, because catalog.Normalize does
+		// neither and key.Role splits the name on "/". A stray slash would leave an
+		// empty component, which quietly stops a dependency matching and downgrades
+		// it to build history — the exact misclassification #TARGET: exists to stop.
+		name := strings.Trim(catalog.Normalize(value), "/")
+		if name == "" {
+			continue
+		}
+		for _, component := range strings.Split(name, "/") {
+			if component == "" {
+				return "", fmt.Errorf("invalid TARGET value %q: it has an empty path component", value)
+			}
+		}
+		return name, nil
+	}
+	return "", nil
 }
 
 // SortVersionsDescending sorts version strings in descending natural order.

@@ -141,6 +141,12 @@ func (b *BuildObject) resolveUpstream(ctx context.Context, def []byte) {
 	if b.spec.Source.Definition == nil {
 		return
 	}
+	// A locked rebuild bootstraps from the digest the lock recorded. Resolving
+	// the reference again would follow a tag that has since moved, which is the
+	// one thing a pinned rebuild exists to prevent.
+	if b.locked && b.spec.Source.Definition.From != nil {
+		return
+	}
 	boot := parseBootstrap(def)
 	if !boot.remote() {
 		return

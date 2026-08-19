@@ -2,6 +2,7 @@ package meta
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -208,20 +209,11 @@ func TestReadRuntimeDoesNotFallBackToManifest(t *testing.T) {
 }
 
 // A runtime document that is present but does not decode stays distinct from one
-// that is absent: something is there and it is wrong.
+// that is absent: something is there and it is wrong. What the bytes mean is
+// DecodeRuntime's decision, so packing an archive to deliver them would only
+// test unsquashfs.
 func TestReadRuntimeMalformed(t *testing.T) {
-	requireSquashfsTools(t)
-	withTempCache(t)
-
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, DirName), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, DirName, RuntimeFileName), []byte("{not json"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	_, err := ReadRuntime(packSqf(t, root))
+	_, err := DecodeRuntime([]byte("{not json"), "image.sqf")
 	if err == nil {
 		t.Fatal("malformed runtime accepted")
 	}
@@ -236,30 +228,24 @@ func TestReadRuntimeMalformed(t *testing.T) {
 // A schema this build does not know is reported as such, so the caller can treat
 // it like a missing document instead of failing the run.
 func TestReadRuntimeUnsupportedSchema(t *testing.T) {
-	requireSquashfsTools(t)
-	withTempCache(t)
-
 	future := validRuntime()
 	future.SchemaVersion = SchemaVersion + 1
 
-	_, err := ReadRuntime(stagedImage(t, future, validManifest()))
+	_, err := DecodeRuntime(marshalRuntime(t, future), "image.sqf")
 	if !errors.Is(err, ErrUnsupportedSchema) {
 		t.Fatalf("err = %v, want ErrUnsupportedSchema", err)
 	}
 }
 
-// An unrecognized type is normalized to app on the way out of the archive, not
+// An unrecognized type is normalized to app on the way out of the document, not
 // rejected.
 func TestReadRuntimeNormalizesType(t *testing.T) {
-	requireSquashfsTools(t)
-	withTempCache(t)
-
 	odd := validRuntime()
 	odd.Type = "bundle"
 
-	got, err := ReadRuntime(stagedImage(t, odd, validManifest()))
+	got, err := DecodeRuntime(marshalRuntime(t, odd), "image.sqf")
 	if err != nil {
-		t.Fatalf("ReadRuntime: %v", err)
+		t.Fatalf("DecodeRuntime: %v", err)
 	}
 	if got.Type != catalog.TypeApp {
 		t.Errorf("type = %q, want app", got.Type)
@@ -399,9 +385,9 @@ func TestCacheRemembersMissingRuntime(t *testing.T) {
 // A base image is the container root. The three verdicts differ in kind: metadata
 // that names another type is a real mismatch, while a missing or unreadable
 // document says nothing about the image and must not block a build.
+// The verdict is a function of what the read produced, so each case is stated as
+// that pair rather than packed into an image and read back out.
 func TestCheckBase(t *testing.T) {
-	requireSquashfsTools(t)
-
 	baseRuntime := Runtime{
 		SchemaVersion: SchemaVersion,
 		Name:          "ubuntu24/base",
@@ -410,15 +396,13 @@ func TestCheckBase(t *testing.T) {
 	}
 
 	t.Run("accepts a base image", func(t *testing.T) {
-		withTempCache(t)
-		if err := CheckBase(stagedImage(t, baseRuntime, validManifest())); err != nil {
+		if err := checkBaseRuntime(baseRuntime, nil, "base.sqf"); err != nil {
 			t.Errorf("base image rejected: %v", err)
 		}
 	})
 
 	t.Run("rejects another type", func(t *testing.T) {
-		withTempCache(t)
-		err := CheckBase(stagedImage(t, validRuntime(), validManifest()))
+		err := checkBaseRuntime(validRuntime(), nil, "app.sqf")
 		if err == nil {
 			t.Fatal("an app image was accepted as a container root")
 		}
@@ -428,26 +412,18 @@ func TestCheckBase(t *testing.T) {
 	})
 
 	t.Run("accepts an image with no metadata", func(t *testing.T) {
-		withTempCache(t)
-		root := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := CheckBase(packSqf(t, root)); err != nil {
+		err := checkBaseRuntime(Runtime{}, fmt.Errorf("%w: bare.sqf", ErrNoRuntime), "bare.sqf")
+		if err != nil {
 			t.Errorf("a base predating the format was rejected: %v", err)
 		}
 	})
 
 	t.Run("accepts unreadable metadata", func(t *testing.T) {
-		withTempCache(t)
-		root := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(root, DirName), 0o755); err != nil {
-			t.Fatal(err)
+		_, decodeErr := DecodeRuntime([]byte("{not json"), "broken.sqf")
+		if decodeErr == nil {
+			t.Fatal("malformed runtime decoded")
 		}
-		if err := os.WriteFile(filepath.Join(root, DirName, RuntimeFileName), []byte("{not json"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := CheckBase(packSqf(t, root)); err != nil {
+		if err := checkBaseRuntime(Runtime{}, decodeErr, "broken.sqf"); err != nil {
 			t.Errorf("an unreadable runtime document stranded the base: %v", err)
 		}
 	})

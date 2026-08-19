@@ -104,22 +104,11 @@ func ParseRecipe(path string, r io.Reader) (*Recipe, error) {
 	rec.Name = strings.TrimPrefix(strings.TrimSuffix(path, ".def"), recipesDir+"/")
 
 	var declared string
-	for _, line := range headerBlock(text) {
-		switch {
-		case strings.HasPrefix(line, "#SBATCH"),
-			strings.HasPrefix(line, "#PBS"),
-			strings.HasPrefix(line, "#BSUB"):
-			rec.Directives = append(rec.Directives, line)
-			continue
-		}
+	rec.Directives = scanDirectives(text)
+	for _, annotation := range ScanAnnotations(text) {
+		value, note := annotation.Value, annotation.Note
 
-		key, rest, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		value, note := splitNote(rest)
-
-		switch key {
+		switch annotation.Key {
 		case "#TYPE":
 			declared = strings.ToLower(value)
 		case "#ARCH":
@@ -163,44 +152,12 @@ func ParseRecipe(path string, r io.Reader) (*Recipe, error) {
 	return rec, nil
 }
 
-// headerBoundary returns the byte offset where a recipe's body begins.
-//
-// Scanning from offset 0, a line is header when its content — after removing the
-// line terminator and any leading spaces or tabs — is empty or begins with '#'.
-// The body starts at the first byte of the first line that fails that test, or at
-// EOF when none does. Two consequences are worth stating: a leading #!/bin/bash
-// is header, and so is a blank line before the first command.
-//
-// It bounds what ParseRecipe reads, which is what keeps a #DEP: in a heredoc — or
-// a #SBATCH in a file the recipe writes — inert. Keys do not use it at all: both
-// hash StripComments, which removes the header along with every other comment.
-//
-// Nothing here parses shell. Shell code carries '#' inside strings and ${x#y}
-// expansions, so a comment-aware rule could move the boundary on a body that
-// never changed.
-func headerBoundary(text []byte) int {
-	off := 0
-	for off < len(text) {
-		next := len(text)
-		line := text[off:]
-		if end := bytes.IndexByte(line, '\n'); end >= 0 {
-			line, next = line[:end], off+end+1
-		}
-		trimmed := bytes.TrimLeft(bytes.TrimSuffix(line, []byte("\r")), " \t")
-		if len(trimmed) > 0 && trimmed[0] != '#' {
-			return off
-		}
-		off = next
-	}
-	return len(text)
-}
-
 // StripComments removes every whole-line comment from a recipe, keeping blank
 // lines and every other byte as it stands. It is the recipe preimage both keys
 // hash: what the recipe *does*, with everything that only describes it gone.
 //
-// The header is all comments, so it disappears with the rest — which is the
-// point. Every header item that reaches a key already has its own record line
+// Annotations are comments, so they disappear with the rest — which is the
+// point. Every annotation that reaches a key already has its own record line
 // (#TYPE: to type=, #ENV: to env=, #DEP: to dep=, a selected #PH: to ph=), and
 // hashing the file too would re-admit the ones deliberately left out: a #PH:
 // menu that autoupdate grows, a reworded #DESC:, a changed scheduler directive.
@@ -211,7 +168,7 @@ func headerBoundary(text []byte) int {
 //
 // Whole-line only. A trailing comment cannot be removed without parsing shell,
 // since `echo "a # b"` and `${v#pre}` both carry a '#' that is not one. Blank
-// lines are kept, so a blank line added to the header does move both keys.
+// lines are kept, so adding one does move both keys.
 func StripComments(text []byte) []byte {
 	out := make([]byte, 0, len(text))
 	for off := 0; off < len(text); {
@@ -229,20 +186,26 @@ func StripComments(text []byte) []byte {
 	return out
 }
 
-// headerBlock returns the header's comment lines, trimmed and without its blank
-// ones. It reads only up to headerBoundary, so a #DEP: in a heredoc — or a
-// #SBATCH in a job wrapper the recipe writes — stays inert.
-func headerBlock(text []byte) []string {
+// scanDirectives returns every scheduler directive line, verbatim.
+//
+// These are not annotations: `#SBATCH --time=01:00:00` has no `#KEY: value`
+// shape, and cutting it on the first colon would split the value. They are
+// matched by prefix and handed to the scheduler packages to parse.
+func scanDirectives(text []byte) []string {
 	var out []string
-	for line := range strings.SplitSeq(string(text[:headerBoundary(text)]), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
+	for line := range strings.SplitSeq(string(text), "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		switch {
+		case strings.HasPrefix(line, "#SBATCH"),
+			strings.HasPrefix(line, "#PBS"),
+			strings.HasPrefix(line, "#BSUB"):
 			out = append(out, line)
 		}
 	}
 	return out
 }
 
-// splitNote separates a header value from its ## note.
+// splitNote separates an annotation value from its ## note.
 func splitNote(s string) (value, note string) {
 	if before, after, ok := strings.Cut(s, "##"); ok {
 		return strings.TrimSpace(before), strings.TrimSpace(after)

@@ -71,6 +71,8 @@ local path, or `#INPUT:` answer can reach either.
 
 **BuildGraph** - Turns a solved `catalog.Plan` into build work: a BuildObject per missing node, run in dependency order — local builds sequentially, then scheduler submissions with job dependencies.
 
+**LockedSpec** - A rebuild described by a project lock rather than the catalog. See **Locked rebuilds** below.
+
 **ScriptSpecs** - Build resource requirements (alias to `scheduler.ScriptSpecs`)
 
 ## Usage
@@ -136,6 +138,40 @@ has deps, because producing an index needs the tool that produces it.
 - Operators: `>=` (inclusive lower bound) and `>` (exclusive lower bound)
 
 Resolution itself lives in `catalog.Resolve`; see **BuildGraph Execution** below.
+
+## Locked rebuilds
+
+`NewLockedObject` (`locked.go`) builds one artifact from a project lock's vendored
+records instead of the catalog. It reuses every build implementation, the
+workspace, base resolution and scheduler parsing, and is defined by what it
+refuses: no catalog lookup, no fuzzy version choice, no prebuilt pull by name, no
+flat install.
+
+- **Dependencies are paths.** `LockedSpec.Deps` supplies one absolute image path
+  per manifest dependency edge, in that order, and those paths land in
+  `Spec.Dependencies` verbatim. Everything downstream already reads a
+  dependency's own manifest for its name and keys, so an edge is recorded the
+  same way whether the dependency was located by name or handed over as a path.
+- **The output belongs to the caller.** Nothing installs and no flat name is
+  claimed. An occupied output is refused: restore builds into a temporary
+  sibling and renames.
+- **A template runs expanded and embeds the template**, the same split the
+  catalog path makes, with the placeholders taken from the manifest — the only
+  record of which variant this is.
+- **A definition keeps its recorded upstream digest.** `resolveUpstream` returns
+  early for a locked build, because re-resolving would follow a tag that has
+  since moved.
+- **A Conda rebuild replays `explicit.txt`**, whose bytes *are* the recorded
+  identity. `environment.yml` would be a fresh solve against whatever the
+  channels serve today.
+
+Nothing here checks the result. The rebuild derives its own keys from what it
+actually mounted and built, and the caller compares them against the lock — so a
+disagreement surfaces as a key mismatch rather than as a plausible artifact under
+the right name. Construction therefore refuses only what would make that
+comparison uninterpretable: absent keys, a missing vendored source, a dependency
+count the recipe does not agree with, or an `#INPUT:` answer set that does not
+match the prompts.
 
 ## Build Lock
 

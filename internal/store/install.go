@@ -13,6 +13,7 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/artifactcache"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/producer"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -32,9 +33,14 @@ type BeginOptions struct {
 
 // Transaction owns one specific target producer lock and its prepared sibling.
 type Transaction struct {
-	Name       string
-	Identity   meta.KeyRef
-	Equiv      meta.KeyRef
+	Name     string
+	Identity meta.KeyRef
+	Equiv    meta.KeyRef
+	// Layout is where the target landed: flat when the bare name was free,
+	// stored when a different identity already held it.
+	Layout Layout
+	// Root is the images directory containing the target, for either layout.
+	Root       string
 	TargetPath string
 	Prepared   string
 	Adopted    *Candidate
@@ -67,10 +73,6 @@ func begin(name string, identity meta.KeyRef, opts BeginOptions, read artifactRe
 	} else if !utils.CanWriteToDir(imagesDir) {
 		return nil, fmt.Errorf("images directory is not writable: %s", imagesDir)
 	}
-	storeDir := filepath.Join(imagesDir, DirName)
-	if err := utils.MkdirAllShared(storeDir); err != nil {
-		return nil, fmt.Errorf("cannot create store directory: %w", err)
-	}
 	dirs := opts.SearchDirs
 	if dirs == nil {
 		dirs = config.GetImageSearchPaths()
@@ -91,6 +93,22 @@ func begin(name string, identity meta.KeyRef, opts BeginOptions, read artifactRe
 		return nil, err
 	}
 
+	// No exact copy anywhere, so this identity has to be written. Take the bare
+	// name when nothing holds it: a flat artifact answers to `exec -o`, to
+	// `list`, and to every other project, so the same identity is not rebuilt
+	// once per checkout. The store is the conflict destination, not the default.
+	reserved, err := reserveFlat(tx, name, identity, opts.Equiv, imagesDir, dirs, read)
+	if err != nil {
+		return nil, err
+	}
+	if reserved {
+		return tx, nil
+	}
+
+	storeDir := filepath.Join(imagesDir, DirName)
+	if err := utils.MkdirAllShared(storeDir); err != nil {
+		return nil, fmt.Errorf("cannot create store directory: %w", err)
+	}
 	for chars := DefaultPrefixChars; chars <= len(identity.SHA256); chars++ {
 		filename, err := Filename(name, identity, chars)
 		if err != nil {
@@ -122,7 +140,7 @@ func begin(name string, identity meta.KeyRef, opts BeginOptions, read artifactRe
 		if err != nil {
 			return nil, err
 		}
-		if candidate, occupied, err := inspectTarget(target, imagesDir, name, identity, opts.Equiv, read); err != nil {
+		if candidate, occupied, err := inspectTarget(target, imagesDir, LayoutStored, name, identity, opts.Equiv, read); err != nil {
 			guard.Release() //nolint:errcheck
 			return nil, err
 		} else if candidate != nil {
@@ -133,6 +151,7 @@ func begin(name string, identity meta.KeyRef, opts BeginOptions, read artifactRe
 			guard.Release() //nolint:errcheck
 			continue
 		}
+		tx.Layout, tx.Root = LayoutStored, imagesDir
 		tx.TargetPath = target
 		tx.Prepared = producer.PreparedPath(target, guard.Info())
 		tx.guard = guard
@@ -141,7 +160,54 @@ func begin(name string, identity meta.KeyRef, opts BeginOptions, read artifactRe
 	return nil, fmt.Errorf("%w: no filename remains for %s", ErrIdentityCollision, name)
 }
 
-func inspectTarget(path, root, name string, identity, equiv meta.KeyRef, read artifactReader) (*Candidate, bool, error) {
+// reserveFlat claims the bare-name target when no readable root holds that name,
+// reporting whether it did. A false return means the name is occupied by another
+// identity and the caller must overflow to the store.
+//
+// Occupancy is judged across every readable root, not just the destination:
+// reads are nearest-first while writes go furthest-first, so a flat copy in a
+// nearer root would shadow a new flat install and leave two identities
+// answering to one name. Any file found here is a different identity by
+// construction, because the exact lookup over the same roots has already missed.
+func reserveFlat(tx *Transaction, name string, identity, equiv meta.KeyRef, imagesDir string, dirs []string, read artifactReader) (bool, error) {
+	flatName := image.EncodeArtifactName(name) + ".sqf"
+	for _, root := range dirs {
+		if _, err := os.Lstat(filepath.Join(root, flatName)); err == nil {
+			return false, nil
+		} else if !os.IsNotExist(err) {
+			return false, nil
+		}
+	}
+
+	target := filepath.Join(imagesDir, flatName)
+	guard, err := producer.AcquireLocal(target)
+	if err != nil {
+		return false, err
+	}
+	// Re-check under the lock: another writer may have taken the name between
+	// the scan above and now, and the loser overflows rather than replacing it.
+	candidate, occupied, err := inspectTarget(target, imagesDir, LayoutFlat, name, identity, equiv, read)
+	if err != nil {
+		guard.Release() //nolint:errcheck
+		return false, err
+	}
+	if candidate != nil {
+		guard.Release() //nolint:errcheck
+		tx.Adopted, tx.closed = candidate, true
+		return true, nil
+	}
+	if occupied {
+		guard.Release() //nolint:errcheck
+		return false, nil
+	}
+	tx.Layout, tx.Root = LayoutFlat, imagesDir
+	tx.TargetPath = target
+	tx.Prepared = producer.PreparedPath(target, guard.Info())
+	tx.guard = guard
+	return true, nil
+}
+
+func inspectTarget(path, root string, layout Layout, name string, identity, equiv meta.KeyRef, read artifactReader) (*Candidate, bool, error) {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return nil, false, nil
@@ -158,7 +224,7 @@ func inspectTarget(path, root, name string, identity, equiv meta.KeyRef, read ar
 	}
 	got := keyRef(artifact.IdentityScheme, artifact.Identity)
 	if artifact.Name == name && got == identity {
-		candidate := candidateFromArtifact(path, root, LayoutStored, info.Size(), artifact)
+		candidate := candidateFromArtifact(path, root, layout, info.Size(), artifact)
 		if _, err := ParseKeyRef(FormatKeyRef(candidate.Equiv)); err != nil {
 			return nil, true, nil
 		}
@@ -209,12 +275,12 @@ func (tx *Transaction) Commit() (Candidate, error) {
 	if _, err := ParseKeyRef(FormatKeyRef(equiv)); err != nil {
 		return Candidate{}, fmt.Errorf("prepared artifact has invalid equivalence key: %w", err)
 	}
-	if candidate, occupied, err := inspectTarget(tx.TargetPath, filepath.Dir(filepath.Dir(tx.TargetPath)), tx.Name, tx.Identity, tx.Equiv, tx.read); err != nil {
+	if candidate, occupied, err := inspectTarget(tx.TargetPath, tx.Root, tx.Layout, tx.Name, tx.Identity, tx.Equiv, tx.read); err != nil {
 		return Candidate{}, err
 	} else if candidate != nil {
 		return *candidate, nil
 	} else if occupied {
-		return Candidate{}, fmt.Errorf("store target appeared during publication: %s", tx.TargetPath)
+		return Candidate{}, fmt.Errorf("target appeared during publication: %s", tx.TargetPath)
 	}
 	if err := os.Rename(tx.Prepared, tx.TargetPath); err != nil {
 		return Candidate{}, fmt.Errorf("failed to publish store artifact: %w", err)
@@ -224,8 +290,8 @@ func (tx *Transaction) Commit() (Candidate, error) {
 	if err != nil {
 		return Candidate{}, err
 	}
-	cacheArtifact(tx.TargetPath, filepath.Dir(filepath.Dir(tx.TargetPath)), artifact, installed)
-	return candidateFromArtifact(tx.TargetPath, filepath.Dir(filepath.Dir(tx.TargetPath)), LayoutStored, installed.Size(), artifact), nil
+	cacheArtifact(tx.TargetPath, tx.Root, tx.Layout, artifact, installed)
+	return candidateFromArtifact(tx.TargetPath, tx.Root, tx.Layout, installed.Size(), artifact), nil
 }
 
 // Abort removes this producer's prepared output and releases its target lock.
@@ -280,11 +346,11 @@ func candidateFromArtifact(path, root string, layout Layout, size int64, artifac
 		Identity: keyRef(artifact.IdentityScheme, artifact.Identity), Equiv: keyRef(artifact.EquivScheme, artifact.Equiv)}
 }
 
-func cacheArtifact(path, root string, artifact compare.Artifact, info os.FileInfo) {
+func cacheArtifact(path, root string, layout Layout, artifact compare.Artifact, info os.FileInfo) {
 	identity, equiv := keyRef(artifact.IdentityScheme, artifact.Identity), keyRef(artifact.EquivScheme, artifact.Equiv)
 	artifactcache.Default().Merge(path, info, func(record *artifactcache.Record) {
 		record.Name, record.Identity, record.Equiv, record.KeysVerified = artifact.Name,
 			artifactcache.Key{Scheme: identity.Scheme, SHA256: identity.SHA256}, artifactcache.Key{Scheme: equiv.Scheme, SHA256: equiv.SHA256}, true
-		record.Layout, record.Root, record.Size = string(LayoutStored), root, info.Size()
+		record.Layout, record.Root, record.Size = string(layout), root, info.Size()
 	})
 }

@@ -62,6 +62,11 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// A locked project answers per script and refuses -a; see check_project.go.
+	if handled, err := projectCheck(scriptPaths, metaDeps); handled {
+		return err
+	}
+
 	// Collect and deduplicate deps across all scripts
 	deps, err := collectDeps(scriptPaths, metaDeps)
 	if err != nil {

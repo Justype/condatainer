@@ -28,7 +28,9 @@ func TestExpand(t *testing.T) {
 	if want := "STAR 2.7.11b index for GENCODE 47"; got.Description != want {
 		t.Errorf("Description = %q, want %q", got.Description, want)
 	}
-	if want := []string{"star/2.7.11b", "samtools/1.23.1>=1.10"}; !slices.Equal(got.Deps, want) {
+	// The fixture's heredoc declares one too; annotations are read wherever they
+	// are written.
+	if want := []string{"star/2.7.11b", "samtools/1.23.1>=1.10", "not/a/dep"}; !slices.Equal(got.Deps, want) {
 		t.Errorf("Deps = %v, want %v", got.Deps, want)
 	}
 	// PH records the values chosen, one per placeholder.

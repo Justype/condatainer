@@ -219,3 +219,111 @@ func TestNewBuildObject_ErrorsWhenBuildLockExists(t *testing.T) {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }
+
+// An external build's name decides its /cnt/<name> prefix and, through
+// key.Role, which dependencies count toward its equivalence. #TARGET: is where
+// that name comes from; -p only says where the file goes.
+func TestExternalSourceTakesItsNameFromTarget(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "build.sh")
+	if err := os.WriteFile(src, []byte(
+		"#!/usr/bin/env bash\n#TYPE: data\n#TARGET: star/2.7.11b/index\necho hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := FromExternalSource(t.Context(), filepath.Join(dir, "idx"), src, false, dir, false)
+	if err != nil {
+		t.Fatalf("FromExternalSource: %v", err)
+	}
+	if got := b.spec.Image.Name; got != "star/2.7.11b/index" {
+		t.Errorf("name = %q, want the declared #TARGET:", got)
+	}
+	if got := b.spec.Image.Prefix; got != "/cnt/star/2.7.11b/index" {
+		t.Errorf("prefix = %q, want it derived from #TARGET:", got)
+	}
+	// The file keeps the -p name: the two namespaces are deliberately unrelated.
+	if want := filepath.Join(dir, "idx.sqf"); b.tgt.Path != want {
+		t.Errorf("target = %q, want %q", b.tgt.Path, want)
+	}
+}
+
+// Without #TARGET: the name is the -p basename, which is the historical
+// behaviour and stays.
+func TestExternalSourceFallsBackToThePrefixBasename(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "build.sh")
+	if err := os.WriteFile(src, []byte("#!/usr/bin/env bash\necho hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := FromExternalSource(t.Context(), filepath.Join(dir, "demo"), src, false, dir, false)
+	if err != nil {
+		t.Fatalf("FromExternalSource: %v", err)
+	}
+	if got := b.spec.Image.Name; got != "demo" {
+		t.Errorf("name = %q, want the -p basename", got)
+	}
+}
+
+// Declaring a dependency without naming yourself leaves the dependency's role —
+// and so the artifact's equivalence — decided by where the file was written.
+func TestExternalSourceRefusesDependenciesWithoutTarget(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "build.sh")
+	if err := os.WriteFile(src, []byte(
+		"#!/usr/bin/env bash\n#TYPE: data\n#DEP: samtools/1.21\necho hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := FromExternalSource(t.Context(), filepath.Join(dir, "idx"), src, false, dir, false)
+	if err == nil {
+		t.Fatal("a #DEP: without #TARGET: was accepted")
+	}
+	if !strings.Contains(err.Error(), "#TARGET:") {
+		t.Errorf("refusal does not name the remedy: %v", err)
+	}
+}
+
+// The data-only rule is not a catalog-recipe rule: an external build reaches it
+// too, whatever it is named and wherever -p puts it.
+func TestExternalSourceRefusesDependenciesOnAnApp(t *testing.T) {
+	for _, tc := range []struct{ name, content string }{
+		{"WithTarget", "#!/usr/bin/env bash\n#TYPE: app\n#TARGET: mytool/1.0\n#DEP: samtools/1.21\n"},
+		{"WithoutTarget", "#!/usr/bin/env bash\n#TYPE: app\n#DEP: samtools/1.21\n"},
+		{"TypeOmittedDefaultsToApp", "#!/usr/bin/env bash\n#TARGET: mytool/1.0\n#DEP: samtools/1.21\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(dir, "build.sh")
+			if err := os.WriteFile(src, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := FromExternalSource(t.Context(), filepath.Join(dir, "idx"), src, false, dir, false)
+			if err == nil {
+				t.Fatal("an app declaring #DEP: was accepted")
+			}
+			if !strings.Contains(err.Error(), "only data has build dependencies") {
+				t.Errorf("refusal does not name the rule: %v", err)
+			}
+		})
+	}
+}
+
+// A path names neither an artifact nor an identity, so nothing could re-resolve
+// it elsewhere or regenerate a key from it.
+func TestExternalSourceRefusesAPathDependency(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "build.sh")
+	if err := os.WriteFile(src, []byte(
+		"#!/usr/bin/env bash\n#TYPE: data\n#TARGET: grch38/index\n#DEP: overlays/tool.sqf\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := FromExternalSource(t.Context(), filepath.Join(dir, "idx"), src, false, dir, false)
+	if err == nil {
+		t.Fatal("a path #DEP: was accepted")
+	}
+	if !strings.Contains(err.Error(), "not an overlay path") {
+		t.Errorf("refusal does not name the rule: %v", err)
+	}
+}

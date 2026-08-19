@@ -56,18 +56,30 @@ func Generate(m meta.Manifest, sources Sources) (Derived, error) {
 	return derive(m, sources, identity, equiv)
 }
 
-// Verify regenerates the scheme-backed keys named by m and checks their stored
-// digests. Manifests from the old file-backed format have no schemes and fail.
-func Verify(m meta.Manifest, sources Sources) (Derived, error) {
+// Regenerate derives both keys using the schemes m names, without checking the
+// digests recorded beside them.
+//
+// This is what a rebuild against an existing record must use. Generate picks the
+// current scheme pair, so after a scheme version ships it would stamp a key that
+// cannot be related to the old one at all: comparison refuses to compare across
+// schemes before it looks at any content, so the result would read as a
+// difference in the scheme rather than as anything about the artifact.
+func Regenerate(m meta.Manifest, sources Sources) (Derived, error) {
 	if err := meta.ValidateManifest(m); err != nil {
 		return Derived{}, err
 	}
 	if m.Keys.Identity.Empty() {
 		return Derived{}, fmt.Errorf("artifact records no keys")
 	}
+	return derive(m, sources, Scheme(m.Keys.Identity.Scheme), Scheme(m.Keys.Equiv.Scheme))
+}
+
+// Verify regenerates the scheme-backed keys named by m and checks their stored
+// digests. Manifests from the old file-backed format have no schemes and fail.
+func Verify(m meta.Manifest, sources Sources) (Derived, error) {
 	identity := Scheme(m.Keys.Identity.Scheme)
 	equiv := Scheme(m.Keys.Equiv.Scheme)
-	d, err := derive(m, sources, identity, equiv)
+	d, err := Regenerate(m, sources)
 	if err != nil {
 		return Derived{}, err
 	}

@@ -118,11 +118,16 @@ func TestRegistryHelpersValidateInputs(t *testing.T) {
 // An installed name/version is addressed by this system and infers where it
 // publishes; a path the user pointed at does not, so it must say where it goes.
 func TestFindRegistryArtifactSeparatesManagedFromPointedAt(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	images := filepath.Join(config.GetUserDataDir(), "images")
+	// GlobalDataPaths caches the resolved search paths, so a test that ran earlier
+	// may already have resolved them from the real environment — setting
+	// XDG_DATA_HOME here would not be read. Pin the paths instead.
+	images := filepath.Join(t.TempDir(), "images")
 	if err := os.MkdirAll(images, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	prevPaths := config.GlobalDataPaths
+	config.GlobalDataPaths.ImagesDirs = []string{images}
+	t.Cleanup(func() { config.GlobalDataPaths = prevPaths })
 	installed := filepath.Join(images, "hello--1.0.sqf")
 	if err := os.WriteFile(installed, []byte("payload"), 0o644); err != nil {
 		t.Fatal(err)
@@ -187,6 +192,13 @@ func TestAddressPlacementName(t *testing.T) {
 }
 
 func TestRegistryPullDestinationPrecedenceAndValidation(t *testing.T) {
+	// GetWritableImagesDir walks extra-root → root → scratch → user and picks
+	// the first writable one, so pointing XDG_DATA_HOME at a temp directory
+	// only selects it when none of the earlier tiers exists. Clearing them is
+	// what makes this test say the same thing on a login node as it does here.
+	t.Setenv("CNT_EXTRA_ROOT", "")
+	t.Setenv("CNT_ROOT", "")
+	t.Setenv("SCRATCH", "")
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	images := filepath.Join(config.GetUserDataDir(), "images")
 

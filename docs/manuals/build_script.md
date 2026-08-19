@@ -160,6 +160,17 @@ toolchain, not an app depending on one.
 
 A `#DEP:` may name an app, a dataset, or an OS layer, but never a base.
 
+**In a build script a `#DEP:` is a `name/version`, never an overlay path.** `#DEP:overlays/tool.sqf`
+and `#DEP:env.img` are rejected. A build's declaration becomes an edge recorded in the finished
+artifact as a name plus a complete identity, and a path is neither — nothing could re-resolve it on
+another machine, and no key could be regenerated from it.
+
+This is the one `#DEP:` rule that does **not** apply to a script you *run*. A running script mounts
+what it names and records nothing, so `#DEP:./overlays/tool.sqf` and `#DEP:env.img  ## unpinned` are
+perfectly valid there. Both rules above are enforced only when something is being built — including
+an external build (`condatainer create -p <path> -f <script>.sh`), which answers to them exactly as a
+catalog recipe does.
+
 **Basic (exact version):**
 
 ```bash
@@ -293,6 +304,21 @@ claim applies from the next build onward.
   This is the name users refer to from then on — what they pass to `condatainer create`/`build`, what `#DEP:` lines point at, and the modulefile path [ModGen](https://github.com/Justype/condatainer/blob/main/assets/modgen/manual.md) generates. It is independent of the script's own file name.
 
 Every `#PH:` name must appear as a `{name}` token in `#TARGET:`, and every token must have a matching `#PH:`. Otherwise **CondaTainer** warns and skips the expansion, because unused placeholders would silently collapse every value onto the same target.
+
+#### `#TARGET:` in an external build
+
+`#TARGET:` also works **without** `#PH:`, and there it is not a template — it simply names the artifact. This matters for an external build (`condatainer create -p <path> -f <script>.sh`), where the two are otherwise decided by different things:
+
+| | comes from | governs |
+|---|---|---|
+| artifact name | `#TARGET:`, else the `-p` basename | the payload's `/cnt/<name>` prefix, and which `#DEP:` lines count toward equivalence |
+| file location | `-p` | where the `.sqf` is written |
+
+They are deliberately unrelated: an external overlay is mounted by its path, so its filename makes no claim about its name. `create -p ./overlays/idx -f build.sh` with `#TARGET:star/2.7.11b/index` writes `./overlays/idx.sqf` whose payload lives at `/cnt/star/2.7.11b/index`.
+
+Declaring the name matters because an app or OS `#DEP:` counts toward the artifact's equivalence only when its components appear in the artifact's own name. `star/2.7.11b/index` contains `star/2.7.11b`, so that dependency's version is binding; a basename like `idx` contains nothing, so every dependency would silently be treated as build history instead. That is why **an external script that declares `#DEP:` must also declare `#TARGET:`** — otherwise the classification would depend on the path someone happened to type, and `create` refuses it.
+
+A `{placeholder}` is rejected here: an external build has no `#PH:` declarations and no requested name to select values from, so the pattern could never be filled in.
 
 **Example** — STAR index template [grch38/star-gencode](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/star-gencode):
 

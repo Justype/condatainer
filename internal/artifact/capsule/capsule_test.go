@@ -3,7 +3,6 @@ package capsule
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,17 +13,14 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/meta"
 )
 
-func requireSquashfsTools(t *testing.T) {
-	t.Helper()
-	for _, bin := range []string{"mksquashfs", "unsquashfs"} {
-		if _, err := exec.LookPath(bin); err != nil {
-			t.Skipf("%s not available", bin)
-		}
-	}
-}
+// staged reads a dependency's /.cnt straight from ImagePath, standing in for
+// the extraction Compose runs first.
+func staged(dep Dep) (string, func(), error) { return dep.ImagePath, func() {}, nil }
 
-// depImage packs an image carrying the metadata a dependency would, plus any
-// capsule entries of its own.
+// depImage stages the metadata a dependency image would carry, plus any capsule
+// entries of its own. It returns the /.cnt directory rather than an archive:
+// Compose extracts one before reading it, and packing here would only add an
+// mksquashfs run and an unsquashfs run around the same files.
 func depImage(t *testing.T, name string, files map[string]string, inherited map[string]string, complete bool) (string, meta.KeyRef) {
 	t.Helper()
 	root := t.TempDir()
@@ -78,21 +74,7 @@ func depImage(t *testing.T, name string, files map[string]string, inherited map[
 		}
 	}
 
-	// A payload, so the image is not metadata alone.
-	payload := filepath.Join(root, "cnt", name)
-	if err := os.MkdirAll(payload, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(payload, "data"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	out := filepath.Join(t.TempDir(), "dep.sqf")
-	cmd := exec.Command("mksquashfs", root, out, "-no-progress", "-noappend", "-quiet", "-no-xattrs")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("mksquashfs: %v\n%s", err, output)
-	}
-	return out, manifest.Keys.Identity
+	return cnt, manifest.Keys.Identity
 }
 
 func TestEntryName(t *testing.T) {
@@ -119,8 +101,6 @@ func TestEntryName(t *testing.T) {
 // The capsule is a dependency's records, plus that dependency's own capsule
 // copied across unchanged. Nothing is re-derived and no payload comes with it.
 func TestComposeUnionsRecordsAndInheritedEntries(t *testing.T) {
-	requireSquashfsTools(t)
-
 	dep, identity := depImage(t, "grch38/gtf-gencode/49",
 		map[string]string{
 			meta.RecipeFileName: "#DESC:gtf\necho build\n",
@@ -131,11 +111,11 @@ func TestComposeUnionsRecordsAndInheritedEntries(t *testing.T) {
 		}, true)
 
 	metaDir := t.TempDir()
-	complete, err := Compose(metaDir, []Dep{{
+	complete, err := compose(metaDir, []Dep{{
 		Name:      "grch38/gtf-gencode/49",
 		Identity:  identity,
 		ImagePath: dep,
-	}})
+	}}, staged)
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
@@ -182,8 +162,6 @@ func TestComposeUnionsRecordsAndInheritedEntries(t *testing.T) {
 // A diamond stores the shared dependency once: deduplication is by directory
 // name, which is (name, identity).
 func TestComposeDeduplicatesADiamond(t *testing.T) {
-	requireSquashfsTools(t)
-
 	shared := map[string]string{
 		"grch38--genome--gencode@aaaabbbbcccc/" + meta.FileName: "{}\n",
 	}
@@ -191,10 +169,10 @@ func TestComposeDeduplicatesADiamond(t *testing.T) {
 	right, rightIdentity := depImage(t, "grch38/vcf/49", map[string]string{meta.RecipeFileName: "echo right\n"}, shared, true)
 
 	metaDir := t.TempDir()
-	if _, err := Compose(metaDir, []Dep{
+	if _, err := compose(metaDir, []Dep{
 		{Name: "grch38/gtf/49", Identity: leftIdentity, ImagePath: left},
 		{Name: "grch38/vcf/49", Identity: rightIdentity, ImagePath: right},
-	}); err != nil {
+	}, staged); err != nil {
 		t.Fatalf("Compose: %v", err)
 	}
 
@@ -231,14 +209,12 @@ func TestComposeWithAnUnrecordedDependency(t *testing.T) {
 // Incompleteness is inherited one level up: if a dependency's own manifest says
 // its closure is incomplete, so is everything built on it.
 func TestComposeInheritsIncompleteness(t *testing.T) {
-	requireSquashfsTools(t)
-
 	out, identity := depImage(t, "grch38/gtf/49",
 		map[string]string{meta.RecipeFileName: "echo gtf\n"}, nil, false)
 
-	complete, err := Compose(t.TempDir(), []Dep{{
+	complete, err := compose(t.TempDir(), []Dep{{
 		Name: "grch38/gtf/49", Identity: identity, ImagePath: out,
-	}})
+	}}, staged)
 	if err != nil {
 		t.Fatalf("Compose: %v", err)
 	}

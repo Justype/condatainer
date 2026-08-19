@@ -22,8 +22,11 @@ func requireSquashfsTools(t *testing.T) {
 	}
 }
 
-// build stages an image the way a build backend does, then packs it — so the
-// whole read path is exercised against a real archive rather than a directory.
+// build stages an image the way a build backend does. Read is extraction
+// followed by fromDir, so a comparison fixture stages the /.cnt that extraction
+// would have produced and hands it straight to fromDir. Packing it first would
+// put an mksquashfs run and an unsquashfs run either side of the same bytes.
+// TestReadsFromARealArchive covers the archive path itself.
 type build struct {
 	name     string
 	typ      catalog.Type
@@ -39,10 +42,11 @@ type build struct {
 	tamper   func(dir string)
 }
 
-func pack(t *testing.T, b build) string {
+// stage lays out a payload root and returns it together with its /.cnt.
+func stage(t *testing.T, b build) (root, dir string) {
 	t.Helper()
-	root := t.TempDir()
-	dir := filepath.Join(root, meta.DirName)
+	root = t.TempDir()
+	dir = filepath.Join(root, meta.DirName)
 
 	arch := b.arch
 	if arch == "" {
@@ -123,6 +127,15 @@ func pack(t *testing.T, b build) string {
 		t.Fatal(err)
 	}
 
+	return root, dir
+}
+
+// pack stages b and packs it into a real .sqf, for the tests that need one.
+func pack(t *testing.T, b build) string {
+	t.Helper()
+	requireSquashfsTools(t)
+	root, _ := stage(t, b)
+
 	out := filepath.Join(t.TempDir(), "image.sqf")
 	cmd := exec.Command("mksquashfs", root, out, "-no-progress", "-noappend", "-quiet", "-no-xattrs")
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -131,11 +144,14 @@ func pack(t *testing.T, b build) string {
 	return out
 }
 
+// read assembles the Artifact from a staged /.cnt, which is what Read hands to
+// fromDir once extraction has run.
 func read(t *testing.T, b build) Artifact {
 	t.Helper()
-	a, err := Read(pack(t, b))
+	_, dir := stage(t, b)
+	a, err := fromDir(dir, b.name+".sqf")
 	if err != nil {
-		t.Fatalf("Read: %v", err)
+		t.Fatalf("fromDir: %v", err)
 	}
 	return a
 }
@@ -165,7 +181,6 @@ func starIndex() build {
 }
 
 func TestVerdicts(t *testing.T) {
-	requireSquashfsTools(t)
 	want := read(t, starIndex())
 
 	t.Run("the same build is exact", func(t *testing.T) {
@@ -228,7 +243,6 @@ func TestVerdicts(t *testing.T) {
 // Gates run before keys, and a gate failure is a verdict with a specific diff
 // rather than a fallthrough to equivalence.
 func TestGates(t *testing.T) {
-	requireSquashfsTools(t)
 	want := read(t, starIndex())
 
 	t.Run("a foreign architecture is refused", func(t *testing.T) {
@@ -293,7 +307,6 @@ func TestGates(t *testing.T) {
 // A key that does not match its own file is exactly what verification exists to
 // catch — the manifest is what the publisher wrote, not proof.
 func TestTamperedKeysAreUnverifiable(t *testing.T) {
-	requireSquashfsTools(t)
 	want := read(t, starIndex())
 
 	b := starIndex()
@@ -315,7 +328,6 @@ func TestTamperedKeysAreUnverifiable(t *testing.T) {
 // An image whose manifest names a file it does not carry makes no claim, rather
 // than being reported as different.
 func TestMissingKeyFileIsUnverifiable(t *testing.T) {
-	requireSquashfsTools(t)
 	want := read(t, starIndex())
 
 	b := starIndex()
@@ -332,7 +344,6 @@ func TestMissingKeyFileIsUnverifiable(t *testing.T) {
 // Conda splits its keys where a recipe cannot: a build string moves identity and
 // not equivalence, a version moves both.
 func TestCondaVerdicts(t *testing.T) {
-	requireSquashfsTools(t)
 
 	condaApp := func(explicit, environ string) build {
 		return build{
@@ -379,9 +390,23 @@ func TestCondaVerdicts(t *testing.T) {
 	})
 }
 
+// The rest of this package reads a staged /.cnt directly, so one test packs a
+// real archive and goes through Read to keep the extraction step honest: that
+// the metadata directory survives a round trip and lands where fromDir expects.
+func TestReadsFromARealArchive(t *testing.T) {
+	b := starIndex()
+
+	got, err := Read(pack(t, b))
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if want := read(t, b); Compare(want, got).Verdict != Exact {
+		t.Errorf("an artifact read through an archive did not match the staged one")
+	}
+}
+
 // An image carrying no keys makes no claim: unverifiable rather than different.
 func TestAnUnkeyedImageIsUnverifiable(t *testing.T) {
-	requireSquashfsTools(t)
 	a := read(t, build{name: "ubuntu24/base", typ: catalog.TypeBase, format: "def"})
 	if got := Compare(a, a); got.Verdict != Unverifiable {
 		t.Errorf("verdict = %s, want unverifiable", got.Verdict)
@@ -391,7 +416,6 @@ func TestAnUnkeyedImageIsUnverifiable(t *testing.T) {
 // A base compares like anything else: rebuilt against a moved upstream it is a
 // different recorded build that still substitutes, and the diff says which.
 func TestBaseComparesByDefinitionAndUpstream(t *testing.T) {
-	requireSquashfsTools(t)
 	def := "Bootstrap: docker\nFrom: ubuntu:24.04\n"
 	january := build{name: "ubuntu24/base", typ: catalog.TypeBase, format: "def",
 		recipe: def, from: "sha256:" + strings.Repeat("a", 64)}

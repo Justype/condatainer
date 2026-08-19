@@ -161,14 +161,21 @@ func readRuntimeUncached(imagePath string) (Runtime, error) {
 		}
 		return Runtime{}, err
 	}
+	return DecodeRuntime(data, imagePath)
+}
 
+// DecodeRuntime turns a runtime document into a validated, normalized Runtime.
+// source names the document's origin in errors. Split from the archive read so
+// what the bytes mean is decided in one place, whether they came from an image,
+// a staging directory, or a registry blob.
+func DecodeRuntime(data []byte, source string) (Runtime, error) {
 	var rt Runtime
 	if err := json.Unmarshal(data, &rt); err != nil {
-		return Runtime{}, fmt.Errorf("%w: %s: %w", ErrInvalid, imagePath, err)
+		return Runtime{}, fmt.Errorf("%w: %s: %w", ErrInvalid, source, err)
 	}
 	rt.Normalize()
 	if err := ValidateRuntime(rt); err != nil {
-		return Runtime{}, fmt.Errorf("%s: %w", imagePath, err)
+		return Runtime{}, fmt.Errorf("%s: %w", source, err)
 	}
 	return rt, nil
 }
@@ -178,6 +185,13 @@ func readRuntimeUncached(imagePath string) (Runtime, error) {
 // unreadable one warns and passes. See the README's Manifests.
 func CheckBase(imagePath string) error {
 	rt, err := ReadRuntime(imagePath)
+	return checkBaseRuntime(rt, err, imagePath)
+}
+
+// checkBaseRuntime is CheckBase's verdict on what the read produced. Only a
+// document that reads and says otherwise refuses the image; everything else
+// passes, so the rule stays legible apart from how the bytes were fetched.
+func checkBaseRuntime(rt Runtime, err error, imagePath string) error {
 	switch {
 	case errors.Is(err, ErrNoRuntime):
 		return nil

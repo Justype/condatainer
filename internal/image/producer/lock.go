@@ -22,6 +22,10 @@ import (
 // PreparedSuffix marks a producer's in-progress output.
 const PreparedSuffix = ".part"
 
+// currentJobID reads the running scheduler job. Injected for tests, which have
+// no scheduler on PATH.
+var currentJobID = scheduler.CurrentJobID
+
 // Info is the JSON metadata stored in a producer lock file.
 type Info struct {
 	Runner    string `json:"runner"`
@@ -58,6 +62,12 @@ func AcquireLocal(target string) (*Guard, error) {
 		existing, err := Read(path)
 		if err != nil {
 			return nil, fmt.Errorf("cannot read producer lock %s: %w", path, err)
+		}
+		// Our own scheduler job's lock, created by whatever submitted us: adopt it
+		// rather than reporting ourselves as another producer. A job ID names one
+		// job, so a lock carrying ours is ours.
+		if job := currentJobID(); job != "" && existing.JobID == job {
+			return &Guard{path: path, info: existing}, nil
 		}
 		stale, _, checkErr := IsStale(existing)
 		if !stale {

@@ -55,10 +55,18 @@ type ScriptSpecs = scheduler.ScriptSpecs
 
 // BuildObject holds all state and implements all build operations.
 type BuildObject struct {
-	buildSource     string
-	submitJob       bool // Whether to submit to scheduler (from config at construction time)
-	tempSource      bool // Whether buildSource is a temp file this object wrote
-	update          bool // If true, rebuild even if overlay already exists (atomic .new swap)
+	buildSource string
+	submitJob   bool // Whether to submit to scheduler (from config at construction time)
+	tempSource  bool // Whether buildSource is a temp file this object wrote
+	update      bool // If true, rebuild even if overlay already exists (atomic .new swap)
+	// locked marks a rebuild described by a project lock rather than the
+	// catalog: dependencies are mounted at supplied paths, the upstream digest
+	// is the recorded one, and the output belongs to the caller. See locked.go.
+	locked bool
+	// lockedKeys are the keys the lock recorded. Only their schemes are used —
+	// a rebuild derives with those rather than with the current pair, so a
+	// scheme that shipped since does not make the result incomparable.
+	lockedKeys      meta.Keys
 	scriptSpecs     *scheduler.ScriptSpecs
 	condaChannelPkg string // channel-annotated package spec, e.g. "bioconda::star"; set when input uses "::" notation
 
@@ -99,8 +107,12 @@ type BuildObject struct {
 	embedded []embeddedFile
 
 	// What the build learned once its sources and dependencies were known.
-	keys               meta.Keys
-	dependencies       []meta.Dependency
+	keys         meta.Keys
+	dependencies []meta.Dependency
+	// depImagePaths is the image each recorded edge's keys were read from, so
+	// the capsule is composed from the same file rather than from a second
+	// name resolution that could land elsewhere.
+	depImagePaths      map[string]string
 	provenanceComplete *bool
 	buildTools         meta.BuildTools
 }
@@ -450,6 +462,15 @@ func (b *BuildObject) GetMissingDependencies() ([]string, error) {
 	installed := getInstalledOverlays()
 	var missing []string
 	for _, dep := range b.spec.Dependencies {
+		// An overlay path is satisfied by the file being there. The installed map
+		// is keyed by name, so a path would never match it and would look
+		// permanently missing.
+		if utils.IsOverlay(dep) {
+			if !utils.FileExists(dep) {
+				missing = append(missing, dep)
+			}
+			continue
+		}
 		parsed, err := catalog.ParseDep(dep)
 		if err != nil {
 			continue
@@ -697,7 +718,7 @@ func (b *BuildObject) resolveResourceSpec() error {
 	// Passthrough mode: scheduler directives found but resource parsing failed (unsupported flags).
 	// Build cannot proceed without a normalized resource spec.
 	if scheduler.IsPassthrough(specs) {
-		return fmt.Errorf("build script %s contains unsupported scheduler directives (passthrough mode); remove or fix the unsupported directives", b.buildSource)
+		return fmt.Errorf("build script %s has unsupported scheduler directives; remove or fix them", b.buildSource)
 	}
 
 	// Resolve using the priority chain: buildDefaults → script → job resources.
@@ -873,6 +894,13 @@ func (b *BuildObject) captureLocalSourceSpec(isDef bool) {
 // FromExternalSource creates a BuildObject from an external build script or def
 // file — the `-f <script>.sh` / `.def` path, which is the only way an external
 // source is built. All overlays are stored in imagesDir regardless of type.
+//
+// The artifact name comes from the script's #TARGET: when it declares one, and
+// only from the `-p` basename otherwise. The two say different things: `-p` is
+// where the file goes, #TARGET: is what the payload is called, which fixes its
+// /cnt/<name> prefix and, through key.Role, which dependencies count toward its
+// equivalence. They are deliberately unrelated — a path artifact is addressed by
+// its path, so its filename carries no naming claim.
 func FromExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, imagesDir string, update bool) (*BuildObject, error) {
 	nameVersion := filepath.Base(targetPrefix)
 	nameVersion = catalog.Normalize(nameVersion)
@@ -881,16 +909,42 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 	isDef := isApptainer || strings.HasSuffix(source, ".def")
 	isShell := strings.HasSuffix(source, ".sh") || strings.HasSuffix(source, ".bash")
 	externalType := "app"
+	var target string
+	var deps []string
 	if isShell {
 		parsedType, err := utils.GetTypeFromScript(source)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse external build type: %w", err)
 		}
 		externalType = parsedType
+
+		if target, err = utils.GetTargetFromScript(source); err != nil {
+			return nil, fmt.Errorf("failed to parse external build target: %w", err)
+		}
+		if deps, err = utils.GetDependenciesFromScript(source); err != nil {
+			return nil, fmt.Errorf("failed to parse external build dependencies: %w", err)
+		}
+	}
+	if target != "" {
+		nameVersion = target
 	}
 
 	// A definition produces a SIF; a shell build follows the configured mode.
 	externalTyp := catalog.DeriveType(nameVersion, "", isDef, externalType)
+
+	// The same rules a catalog recipe answers to: only data may depend on
+	// anything, and an edge is a name/version rather than an overlay path.
+	if err := catalog.ValidateDeps(nameVersion, externalTyp, deps); err != nil {
+		return nil, err
+	}
+	// Checked after the type, so an app declaring #DEP: hears the more
+	// fundamental refusal. Without #TARGET: the name is whatever the caller typed
+	// after -p, which leaves the dependency's role — and so the artifact's
+	// equivalence — decided by where the file was written. Silent history
+	// classification is the trap; naming yourself is how an author opts into it.
+	if target == "" && len(deps) > 0 {
+		return nil, fmt.Errorf("%s declares #DEP: but no #TARGET:; an external build with dependencies must name itself", source)
+	}
 
 	targetDir := tmpRootForExternal(filepath.Dir(targetPrefix), externalTyp, isDef)
 	if absDir, err := filepath.Abs(targetDir); err == nil {

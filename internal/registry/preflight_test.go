@@ -16,6 +16,15 @@ import (
 	"github.com/Justype/condatainer/internal/logging"
 )
 
+// The probe's retryable cases are only observable once the budget cuts them off,
+// so every test that exercises one pays it in wall time. The bound under test
+// holds at any budget, and every server here is a local httptest, so the suite
+// runs against a short one.
+func TestMain(m *testing.M) {
+	probeTimeout = 200 * time.Millisecond
+	os.Exit(m.Run())
+}
+
 func preflightCtx(lines *[]string) context.Context {
 	return logging.WithLogger(context.Background(), slog.New(recordingHandler{lines: lines}))
 }
@@ -210,7 +219,7 @@ func TestProbeDoesNotBlockOnAnInconclusiveAnswer(t *testing.T) {
 	t.Parallel() // both wait out probeTimeout; overlap them
 	// In parallel because the retryable statuses are retried by ORAS's transport
 	// until probeTimeout cuts them off, which is the behaviour under test and
-	// also several seconds each.
+	// also the whole budget each.
 	for _, status := range []int{
 		http.StatusInternalServerError,
 		http.StatusTooManyRequests,

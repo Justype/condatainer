@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -139,5 +140,78 @@ func TestLintNearMissOnComponents(t *testing.T) {
 				t.Errorf("lints = %v, wantLint %v", lints, tt.wantLint)
 			}
 		})
+	}
+}
+
+// Only data may depend on anything, and an edge is a name/version rather than a
+// path. Both rules live in ValidateDeps so a catalog recipe and an external
+// build cannot answer to different ones.
+func TestValidateDeps(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		typ     Type
+		deps    []string
+		wantErr []string
+	}{
+		{name: "DataWithNamedDeps", typ: TypeData, deps: []string{"samtools/1.21"}},
+		{name: "NoDepsIsAlwaysFine", typ: TypeApp},
+		{
+			name: "AppMayNotDependOnAnything", typ: TypeApp, deps: []string{"samtools/1.21"},
+			wantErr: []string{"only data has build dependencies"},
+		},
+		{
+			name: "OSMayNotDependOnAnything", typ: TypeOS, deps: []string{"samtools/1.21"},
+			wantErr: []string{"only data has build dependencies"},
+		},
+		{
+			name: "DataMayNotDependOnAPath", typ: TypeData, deps: []string{"overlays/tool.sqf"},
+			wantErr: []string{"not an overlay path"},
+		},
+		{
+			name: "AWritableOverlayIsAPathToo", typ: TypeData, deps: []string{"env.img"},
+			wantErr: []string{"not an overlay path"},
+		},
+		{
+			// Both rules are reported, so one fix does not reveal the other.
+			name: "AppWithAPathHearsBoth", typ: TypeApp, deps: []string{"env.img"},
+			wantErr: []string{"only data has build dependencies", "not an overlay path"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateDeps("demo/1.0", tc.typ, tc.deps)
+			if len(tc.wantErr) == 0 {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !errors.Is(err, ErrInvalidRecipe) {
+				t.Errorf("error is not ErrInvalidRecipe: %v", err)
+			}
+			for _, want := range tc.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not mention %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// IsPathDep decides which grammar a declaration is read with, so its extension
+// set has to be utils.IsOverlay's — a running script's `#DEP: env.ext3` is a
+// path there and must stay one here.
+func TestIsPathDepCoversEveryOverlayExtension(t *testing.T) {
+	for _, value := range []string{"env.img", "env.ext3", "x.sqf", "x.sqsh", "x.squashfs", "./a/b.SQF"} {
+		if !IsPathDep(value) {
+			t.Errorf("IsPathDep(%q) = false, want true", value)
+		}
+	}
+	for _, value := range []string{"samtools/1.21", "grch38/genome/gencode", "star/2.7.11b>=2.3"} {
+		if IsPathDep(value) {
+			t.Errorf("IsPathDep(%q) = true, want false", value)
+		}
 	}
 }

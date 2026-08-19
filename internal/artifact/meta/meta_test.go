@@ -54,6 +54,27 @@ func requireSquashfsTools(t *testing.T) {
 	}
 }
 
+// marshalRuntime renders a runtime document the way a build stages it, for the
+// tests that only care what DecodeRuntime makes of the bytes.
+func marshalRuntime(t *testing.T, rt Runtime) []byte {
+	t.Helper()
+	data, err := MarshalRuntime(rt)
+	if err != nil {
+		t.Fatalf("MarshalRuntime: %v", err)
+	}
+	return data
+}
+
+// marshalManifest renders a manifest document, as marshalRuntime does.
+func marshalManifest(t *testing.T, m Manifest) []byte {
+	t.Helper()
+	data, err := MarshalManifest(m)
+	if err != nil {
+		t.Fatalf("MarshalManifest: %v", err)
+	}
+	return data
+}
+
 // packSqf builds a .sqf whose root is dir.
 func packSqf(t *testing.T, dir string) string {
 	t.Helper()

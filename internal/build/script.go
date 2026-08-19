@@ -132,6 +132,13 @@ func (b *BuildObject) buildDependencies(ctx context.Context, buildDeps bool) err
 
 	depList := strings.Join(missingDeps, ", ")
 
+	// A locked rebuild is handed exact paths, so a miss is a vanished file, not
+	// something to resolve by name. Building it here would consult the catalog,
+	// which is what a locked rebuild refuses to do.
+	if b.locked {
+		return fmt.Errorf("dependency images for %s are no longer present: %s", b.spec.Image.Name, depList)
+	}
+
 	if !buildDeps {
 		logging.FromContext(ctx).Error("missing dependencies", "overlay", filepath.Base(b.tgt.Path), "deps", depList)
 		return fmt.Errorf("missing dependencies for %s: %s. Please install them first", b.spec.Image.Name, depList)

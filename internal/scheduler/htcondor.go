@@ -566,9 +566,7 @@ func (h *HTCondorScheduler) Submit(ctx context.Context, scriptPath string, deps 
 		for _, dep := range deps {
 			allIDs = append(allIDs, dep.JobIDs...)
 		}
-		return "", fmt.Errorf("HTCondor does not support job dependencies: "+
-			"build job(s) %s were submitted but the run job cannot wait for them; "+
-			"re-run after the build job(s) finish",
+		return "", fmt.Errorf("HTCondor does not support job dependencies: build job(s) %s were submitted; re-run once they finish",
 			strings.Join(allIDs, ", "))
 	}
 

@@ -60,11 +60,13 @@ func TestParseRecipe(t *testing.T) {
 		t.Errorf("URL = %q", r.URL)
 	}
 
-	wantDeps := []string{"star/{star_version}", "samtools/1.23.1>=1.10"}
+	// The heredoc's lines count too: position carries no meaning, so a recipe
+	// that writes a job script also declares whatever that script declares.
+	wantDeps := []string{"star/{star_version}", "samtools/1.23.1>=1.10", "not/a/dep"}
 	if !slices.Equal(r.Deps, wantDeps) {
 		t.Errorf("Deps = %v, want %v", r.Deps, wantDeps)
 	}
-	wantDirectives := []string{"#SBATCH --cpus-per-task=8", "#SBATCH --mem=64G"}
+	wantDirectives := []string{"#SBATCH --cpus-per-task=8", "#SBATCH --mem=64G", "#SBATCH --this-is-not-a-directive"}
 	if !slices.Equal(r.Directives, wantDirectives) {
 		t.Errorf("Directives = %v, want %v", r.Directives, wantDirectives)
 	}
@@ -80,21 +82,22 @@ func TestParseRecipe(t *testing.T) {
 	}
 }
 
-// A plain comment must not end the block, and nothing below the block is a
-// header — including a heredoc that writes a job script.
-func TestParseRecipeHeaderBlock(t *testing.T) {
+// Position never disqualifies an annotation. A recipe that writes a job script
+// therefore adopts that script's declarations as its own — the cost of the rule,
+// recorded here so it is a decision rather than a surprise.
+func TestParseRecipeReadsAnnotationsAnywhere(t *testing.T) {
 	r := parse(t, "grch38/star-gencode", starRecipe)
-	if len(r.Deps) != 2 {
-		t.Errorf("Deps = %v, want the heredoc's #DEP: ignored", r.Deps)
+	if !slices.Contains(r.Deps, "not/a/dep") {
+		t.Errorf("Deps = %v, want the heredoc's #DEP: included", r.Deps)
 	}
-	if len(r.Directives) != 2 {
-		t.Errorf("Directives = %v, want the heredoc's #SBATCH ignored", r.Directives)
+	if !slices.Contains(r.Directives, "#SBATCH --this-is-not-a-directive") {
+		t.Errorf("Directives = %v, want the heredoc's #SBATCH included", r.Directives)
 	}
 
-	// The block ends at the first line that is neither comment nor blank.
-	below := parse(t, "x/y", "#DESC:kept\nBootstrap: docker\n#URL:below the block\n")
-	if below.Description != "kept" || below.URL != "" {
-		t.Errorf("description=%q url=%q, want the header below Bootstrap ignored", below.Description, below.URL)
+	// Nothing ends the annotations, so a key after an executable line is read.
+	below := parse(t, "x/y", "#DESC:kept\nBootstrap: docker\n#URL:below\n")
+	if below.Description != "kept" || below.URL != "below" {
+		t.Errorf("description=%q url=%q, want both read", below.Description, below.URL)
 	}
 
 	// A .def has no shebang and needs no exception.
@@ -104,104 +107,59 @@ func TestParseRecipeHeaderBlock(t *testing.T) {
 	}
 }
 
-func TestParseRecipeDescriptionUsesDescOnly(t *testing.T) {
-	rec := parse(t, "x/y", "#DESCRIPTION:legacy\n#DESC:short\n")
-	if rec.Description != "short" {
-		t.Fatalf("description = %q, want DESC value", rec.Description)
-	}
-
-	legacy := parse(t, "x/y", "#DESCRIPTION:legacy\n")
-	if legacy.Description != "" {
-		t.Fatalf("legacy DESCRIPTION parsed as %q", legacy.Description)
-	}
-}
-
-func TestParseValues(t *testing.T) {
-	tests := []struct {
-		name string
-		raw  string
-		want []string
-	}{
-		{"comma sorts newest first", "3.1.3,4.0.0,3.6.2", []string{"4.0.0", "3.6.2", "3.1.3"}},
-		{"range expands and sorts", "47-49", []string{"49", "48", "47"}},
-		{"pipe keeps written order", "101|151", []string{"101", "151"}},
-		{"star is always last", "101,151,*", []string{"151", "101", "*"}},
-		{"pipe with star", "101|151|*", []string{"101", "151", "*"}},
-		{"duplicates collapse", "1.0,1.0,2.0", []string{"2.0", "1.0"}},
-		{"reversed range", "49-47", []string{"49", "48", "47"}},
-		{"single value", "2026.06.0-242", []string{"2026.06.0-242"}},
-		// A range is digits-only, so a literal carrying a dash survives whole.
-		{"dashed literal is not a range", "2024-A", []string{"2024-A"}},
-		{"range expands in pipe form too", "a | 1-3", []string{"a", "1", "2", "3"}},
-		{"surrounding space trimmed", "kasm | turbo", []string{"kasm", "turbo"}},
-		{"empty yields no values", "  ,  ", nil},
-	}
-	for _, tt := range tests {
-		if got := ParseValues(tt.raw); !slices.Equal(got, tt.want) {
-			t.Errorf("%s: ParseValues(%q) = %v, want %v", tt.name, tt.raw, got, tt.want)
-		}
-	}
-}
-
-func TestParseRecipePH(t *testing.T) {
-	r := parse(t, "grch38/star-gencode", starRecipe)
-	want := map[string][]string{
-		"star_version":    {"2.7.11b", "2.7.11a", "2.7.9a"},
-		"gencode_version": {"49", "48", "47"},
-		"read_length":     {"101", "151", "*"},
-	}
-	for key, vals := range want {
-		if !slices.Equal(r.PH[key], vals) {
-			t.Errorf("PH[%q] = %v, want %v", key, r.PH[key], vals)
-		}
-	}
-}
-
-// The boundary decides what ParseRecipe reads, so it is pinned byte-exactly:
-// everything about it that could plausibly drift gets a case.
-func TestHeaderBoundary(t *testing.T) {
+// Annotations are found wherever they are written, so what qualifies as one is
+// pinned exactly: position never disqualifies a line, and shape always can.
+func TestScanAnnotations(t *testing.T) {
 	tests := []struct {
 		name string
 		text string
-		want string // the body, verbatim
+		want []Annotation
 	}{
-		{"shebang is header", "#!/bin/bash\necho hi\n", "echo hi\n"},
-		{"a blank line before the first command is header", "#DESC:x\n\n\necho hi\n", "echo hi\n"},
-		{"indented comments are header", "  # note\n\t#DESC:x\necho hi\n", "echo hi\n"},
-		{"a whitespace-only line is header", "#DESC:x\n   \necho hi\n", "echo hi\n"},
-		{"an indented command starts the body", "#DESC:x\n  echo hi\n", "  echo hi\n"},
-		{"a later comment stays in the body", "#DESC:x\necho hi\n# trailing\n", "echo hi\n# trailing\n"},
-		{"a # inside a string does not move it", "#DESC:x\necho \"a # b\"\n", "echo \"a # b\"\n"},
-		{"a ${x#y} expansion does not move it", "#DESC:x\necho \"${v#pre}\"\n", "echo \"${v#pre}\"\n"},
-		{"a heredoc's directives stay in the body", "#DESC:x\ncat <<'EOF'\n#DEP:not/a/dep\nEOF\n", "cat <<'EOF'\n#DEP:not/a/dep\nEOF\n"},
-		{"header only", "#DESC:x\n#URL:y\n", ""},
-		{"empty", "", ""},
-		{"no header", "echo hi\n", "echo hi\n"},
-		{"no trailing newline", "#DESC:x\necho hi", "echo hi"},
-		{"CRLF", "#DESC:x\r\n\r\necho hi\r\n", "echo hi\r\n"},
+		{"a leading annotation", "#DESC: hello\n", []Annotation{{Key: "#DESC", Value: "hello", Line: 1}}},
+		{"one below the first command", "echo hi\n#DEP: star/2.7\n",
+			[]Annotation{{Key: "#DEP", Value: "star/2.7", Line: 2}}},
+		{"one inside a heredoc", "cat <<'EOF'\n#DEP: star/2.7\nEOF\n",
+			[]Annotation{{Key: "#DEP", Value: "star/2.7", Line: 2}}},
+		{"indented", "  \t#DEP: star/2.7\n", []Annotation{{Key: "#DEP", Value: "star/2.7", Line: 1}}},
+		{"a note is kept apart from the value", "#ENV: PATH={prefix}/bin  ## on PATH\n",
+			[]Annotation{{Key: "#ENV", Value: "PATH={prefix}/bin", Note: "on PATH", Line: 1}}},
+		{"an inline comment is stripped", "#DEP: star/2.7  # the aligner\n",
+			[]Annotation{{Key: "#DEP", Value: "star/2.7", Line: 1}}},
+		{"a shebang is not an annotation", "#!/bin/bash\n", nil},
+		{"lower-case prose is not an annotation", "# note: rerun weekly\n", nil},
+		{"a bare key without '#' is not an annotation", "TYPE:app\n", nil},
+		{"a comment with no colon is not an annotation", "#DESC no colon\n", nil},
+		{"a directive is not an annotation", "#SBATCH --time=01:00:00\n", nil},
+		{"CRLF", "#DESC: hello\r\n", []Annotation{{Key: "#DESC", Value: "hello", Line: 1}}},
+		{"empty", "", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			text := []byte(tt.text)
-			if got := string(text[headerBoundary(text):]); got != tt.want {
-				t.Errorf("body = %q, want %q", got, tt.want)
+			got := ScanAnnotations([]byte(tt.text))
+			if len(got) != len(tt.want) {
+				t.Fatalf("ScanAnnotations = %#v, want %#v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("[%d] = %#v, want %#v", i, got[i], tt.want[i])
+				}
 			}
 		})
 	}
 }
 
-// Header edits must not move the boundary, or a heredoc's #DEP: would stop being
-// inert the moment someone reworded a description.
-func TestBoundaryIsStableUnderHeaderEdits(t *testing.T) {
-	body := func(text string) string {
-		b := []byte(text)
-		return string(b[headerBoundary(b):])
+// A directive carries colons in its value, so it is matched by prefix rather
+// than cut on the first colon like an annotation.
+func TestDirectivesAreNotAnnotations(t *testing.T) {
+	recipe, err := ParseRecipe("x/1.0", strings.NewReader("#SBATCH --time=01:00:00\n#DEP: star/2.7\n"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	grown := strings.Replace(starRecipe,
-		"#PH:star_version:2.7.11b,2.7.11a,2.7.9a",
-		"#PH:star_version:2.7.11b,2.7.11a,2.7.9a,2.7.8a\n#DESC:reworded\n#SBATCH --time=4:00:00", 1)
-	if body(grown) != body(starRecipe) {
-		t.Error("growing a #PH: menu, rewording #DESC:, or adding a directive moved the boundary")
+	if len(recipe.Directives) != 1 || recipe.Directives[0] != "#SBATCH --time=01:00:00" {
+		t.Errorf("directives = %#v", recipe.Directives)
+	}
+	if len(recipe.Deps) != 1 || recipe.Deps[0] != "star/2.7" {
+		t.Errorf("deps = %#v", recipe.Deps)
 	}
 }
 

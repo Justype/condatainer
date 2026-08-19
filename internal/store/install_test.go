@@ -16,6 +16,15 @@ func transactionArtifact(name, identity string) compare.Artifact {
 		EquivScheme: "equiv-v1", Equiv: "sha256:" + strings.Repeat("e", 64)}
 }
 
+// occupyFlat puts an unreadable file at a flat name, which is enough to make it
+// a conflict: it is not the exact identity being installed either way.
+func occupyFlat(t *testing.T, root, filename string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, filename), []byte("incumbent"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTransactionPublishesPreparedSiblingAndReleasesLock(t *testing.T) {
 	root := t.TempDir()
 	identity := strings.Repeat("a", 64)
@@ -53,6 +62,9 @@ func TestBeginLengthensOccupiedPrefixAndAbortCleans(t *testing.T) {
 	if err := os.Mkdir(storeDir, 0o775); err != nil {
 		t.Fatal(err)
 	}
+	// The flat name must be held by something else, or this identity would take
+	// it and never reach the store.
+	occupyFlat(t, root, "star--2.7.sqf")
 	want := "aaaaaaaaaaaa" + strings.Repeat("b", 52)
 	occupied := filepath.Join(storeDir, "star--2.7@aaaaaaaaaaaa.sqf")
 	if err := os.WriteFile(occupied, []byte("other"), 0o664); err != nil {
@@ -89,6 +101,7 @@ func TestBeginRejectsSameDigestUnderDifferentScheme(t *testing.T) {
 	if err := os.Mkdir(storeDir, 0o775); err != nil {
 		t.Fatal(err)
 	}
+	occupyFlat(t, root, "star--2.7.sqf")
 	identity := strings.Repeat("c", 64)
 	occupied := filepath.Join(storeDir, "star--2.7@cccccccccccc.sqf")
 	if err := os.WriteFile(occupied, []byte("other"), 0o664); err != nil {
@@ -189,5 +202,134 @@ func TestCommitRejectsPreparedSymlink(t *testing.T) {
 	}
 	if _, err := os.Stat(tx.TargetPath + ".lock"); !os.IsNotExist(err) {
 		t.Fatalf("producer lock remains: %v", err)
+	}
+}
+
+// A free bare name is taken, not routed around: a flat artifact answers to
+// `exec -o` and `list`, so the store is reserved for genuine conflicts.
+func TestBeginTakesTheFreeFlatNameAndCreatesNoStore(t *testing.T) {
+	root := t.TempDir()
+	identity := strings.Repeat("a", 64)
+	read := func(path string) (compare.Artifact, error) {
+		if filepath.Ext(path) == ".part" {
+			return transactionArtifact("star/2.7", identity), nil
+		}
+		return compare.Artifact{}, errors.New("not an artifact")
+	}
+	tx, err := begin("star/2.7", meta.KeyRef{Scheme: "identity-v1", SHA256: identity},
+		BeginOptions{ImagesDir: root, SearchDirs: []string{root}}, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tx.Layout != LayoutFlat {
+		t.Errorf("layout = %q, want flat", tx.Layout)
+	}
+	if want := filepath.Join(root, "star--2.7.sqf"); tx.TargetPath != want {
+		t.Errorf("target = %q, want %q", tx.TargetPath, want)
+	}
+	if err := os.WriteFile(tx.Prepared, []byte("complete"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := tx.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.Layout != LayoutFlat || candidate.Root != root {
+		t.Errorf("published %q in %q, want flat in %q", candidate.Layout, candidate.Root, root)
+	}
+	if _, err := os.Stat(filepath.Join(root, DirName)); !os.IsNotExist(err) {
+		t.Errorf("a free name created a store directory: %v", err)
+	}
+}
+
+// The name held by a different identity is the only case that overflows, and
+// the incumbent is never touched.
+func TestBeginOverflowsToStoreOnConflictAndKeepsIncumbent(t *testing.T) {
+	root := t.TempDir()
+	flat := filepath.Join(root, "star--2.7.sqf")
+	occupyFlat(t, root, "star--2.7.sqf")
+	identity := strings.Repeat("b", 64)
+	read := func(path string) (compare.Artifact, error) {
+		if flat == path {
+			return transactionArtifact("star/2.7", strings.Repeat("a", 64)), nil
+		}
+		if filepath.Ext(path) == ".part" {
+			return transactionArtifact("star/2.7", identity), nil
+		}
+		return compare.Artifact{}, errors.New("not an artifact")
+	}
+	tx, err := begin("star/2.7", meta.KeyRef{Scheme: "identity-v1", SHA256: identity},
+		BeginOptions{ImagesDir: root, SearchDirs: []string{root}}, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tx.Layout != LayoutStored {
+		t.Fatalf("layout = %q, want store", tx.Layout)
+	}
+	if filepath.Dir(tx.TargetPath) != filepath.Join(root, DirName) {
+		t.Errorf("target %q is not in the store", tx.TargetPath)
+	}
+	if err := os.WriteFile(tx.Prepared, []byte("complete"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := os.ReadFile(flat)
+	if err != nil || string(kept) != "incumbent" {
+		t.Errorf("incumbent flat artifact was modified: %q %v", kept, err)
+	}
+}
+
+// "Free" spans every readable root. A differing copy in a nearer read-only root
+// would shadow a new flat install, so it forces the store too.
+func TestBeginJudgesFlatOccupancyAcrossAllRoots(t *testing.T) {
+	nearer, dest := t.TempDir(), t.TempDir()
+	occupyFlat(t, nearer, "star--2.7.sqf")
+	identity := strings.Repeat("c", 64)
+	read := func(path string) (compare.Artifact, error) {
+		if filepath.Ext(path) == ".part" {
+			return transactionArtifact("star/2.7", identity), nil
+		}
+		return compare.Artifact{}, errors.New("not an artifact")
+	}
+	tx, err := begin("star/2.7", meta.KeyRef{Scheme: "identity-v1", SHA256: identity},
+		BeginOptions{ImagesDir: dest, SearchDirs: []string{nearer, dest}}, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tx.Layout != LayoutStored {
+		t.Fatalf("layout = %q, want store: a nearer root holds the name", tx.Layout)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "star--2.7.sqf")); !os.IsNotExist(err) {
+		t.Errorf("a shadowed flat install was reserved anyway: %v", err)
+	}
+}
+
+// An exact flat copy is adopted with no write at all.
+func TestBeginAdoptsAnExactFlatCopyWithoutWriting(t *testing.T) {
+	root := t.TempDir()
+	flat := filepath.Join(root, "star--2.7.sqf")
+	occupyFlat(t, root, "star--2.7.sqf")
+	identity := strings.Repeat("d", 64)
+	read := func(path string) (compare.Artifact, error) {
+		if path == flat {
+			return transactionArtifact("star/2.7", identity), nil
+		}
+		return compare.Artifact{}, errors.New("not an artifact")
+	}
+	tx, err := begin("star/2.7", meta.KeyRef{Scheme: "identity-v1", SHA256: identity},
+		BeginOptions{ImagesDir: root, SearchDirs: []string{root}}, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tx.Adopted == nil || tx.Adopted.Path != flat || tx.Adopted.Layout != LayoutFlat {
+		t.Fatalf("did not adopt the exact flat copy: %#v", tx.Adopted)
+	}
+	if tx.Prepared != "" {
+		t.Errorf("adoption reserved a prepared file: %q", tx.Prepared)
+	}
+	if _, err := os.Stat(filepath.Join(root, DirName)); !os.IsNotExist(err) {
+		t.Errorf("adoption created a store directory: %v", err)
 	}
 }

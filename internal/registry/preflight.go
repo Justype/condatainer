@@ -49,8 +49,9 @@ const (
 
 // probeTimeout bounds the whole push preflight, including ORAS's own retries on
 // a 5xx. Short because the probe's answer is optional: anything inconclusive is
-// left to the push.
-const probeTimeout = 5 * time.Second
+// left to the push. A var only so the tests can shrink it: waiting out the real
+// budget would cost seconds per case to observe a bound that holds at any value.
+var probeTimeout = 5 * time.Second
 
 // uploadPlan is what a push intends to do, settled before any bytes move.
 type uploadPlan struct {

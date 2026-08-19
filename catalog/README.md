@@ -25,19 +25,23 @@ between them.
 
 ## The header boundary
 
-`headerBoundary` decides where a recipe's headers end and its body begins.
-Scanning from offset 0, a line is header when its content — after removing the
-line terminator and any leading spaces or tabs — is empty or begins with `#`. The
-body starts at the first line that fails that test.
+`ScanAnnotations` is the one place a `#KEY: value ## note` line is tokenized.
+Recipes, user scripts and project scanning all read through it, so a key means
+the same thing wherever it appears and adding one happens once.
 
-Its only job is bounding what the recipe parser reads, which is what keeps a
-`#DEP:` in a heredoc — or a `#SBATCH` in a file the recipe writes — inert. It
-feeds no key. Nothing parses shell: a body carries `#` inside strings and
-`${x#y}` expansions, so a comment-aware rule could move the boundary on a body
-that never changed.
+A line qualifies when, after leading blanks and tabs, it begins with `#`, a key
+of upper-case letters, digits or underscores, then `:`. Position carries no
+meaning — there is no header block and nothing bounds the scan. Requiring an
+upper-case key is what keeps ordinary prose out: `# note: rerun weekly` is a
+comment, `#DEP: star/2.7.11b` is a declaration.
 
-Two consequences are worth stating: a leading `#!/bin/bash` is header, and so is a
-blank line before the first command.
+The consequence is deliberate and worth stating: a recipe that writes a job
+script in a heredoc also declares whatever that script declares, because nothing
+distinguishes the two without parsing shell.
+
+Scheduler directives are not annotations. `#SBATCH --time=01:00:00` carries
+colons in its value, so cutting on the first one would split it; they are
+matched by prefix and handed to the scheduler packages verbatim.
 
 `StripComments` is what the keys hash. It removes every whole-line comment from
 the recipe — the header along with the rest — so both keys see what the recipe

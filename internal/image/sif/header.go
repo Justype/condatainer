@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/Justype/condatainer/internal/image/tool"
@@ -98,9 +99,16 @@ func PrimarySystemPartition(path string) (Partition, error) {
 	if err != nil {
 		return Partition{}, fmt.Errorf("%w: %s: %w", tool.ErrUnreadable, path, err)
 	}
+	return parsePrimarySystemPartition(f, fi.Size(), path)
+}
 
+// parsePrimarySystemPartition is PrimarySystemPartition over bytes already
+// opened. Everything the format decides is here, so a test can drive it from an
+// in-memory image instead of packing a real archive to read four fields back
+// out. path only names the source in errors.
+func parsePrimarySystemPartition(r io.ReaderAt, size int64, path string) (Partition, error) {
 	header := make([]byte, headerSize)
-	if _, err := f.ReadAt(header, 0); err != nil {
+	if _, err := r.ReadAt(header, 0); err != nil {
 		return Partition{}, fmt.Errorf("%w: %s: short header: %w", tool.ErrCorrupt, path, err)
 	}
 	if string(header[magicOffset:magicOffset+magicLen]) != string(magic) {
@@ -116,14 +124,14 @@ func PrimarySystemPartition(path string) (Partition, error) {
 	// The header is attacker-controllable in the sense that a corrupt file can
 	// claim anything, so the table has to fit in the file before it is walked.
 	if tableOffset < headerSize || tableCount <= 0 ||
-		tableOffset+tableCount*descriptorSize > fi.Size() {
+		tableOffset+tableCount*descriptorSize > size {
 		return Partition{}, fmt.Errorf("%w: %s: descriptor table does not fit (offset %d, count %d, file %d bytes)",
-			tool.ErrCorrupt, path, tableOffset, tableCount, fi.Size())
+			tool.ErrCorrupt, path, tableOffset, tableCount, size)
 	}
 
 	entry := make([]byte, descriptorSize)
 	for i := range tableCount {
-		if _, err := f.ReadAt(entry, tableOffset+i*descriptorSize); err != nil {
+		if _, err := r.ReadAt(entry, tableOffset+i*descriptorSize); err != nil {
 			return Partition{}, fmt.Errorf("%w: %s: truncated descriptor table: %w", tool.ErrCorrupt, path, err)
 		}
 		if entry[dUsed] == 0 {
@@ -143,9 +151,9 @@ func PrimarySystemPartition(path string) (Partition, error) {
 			Offset: int64(binary.LittleEndian.Uint64(entry[dOffset:])),
 			Size:   int64(binary.LittleEndian.Uint64(entry[dSize:])),
 		}
-		if part.Offset < headerSize || part.Size <= 0 || part.Offset+part.Size > fi.Size() {
+		if part.Offset < headerSize || part.Size <= 0 || part.Offset+part.Size > size {
 			return Partition{}, fmt.Errorf("%w: %s: partition %+v does not fit in a %d byte file",
-				tool.ErrCorrupt, path, part, fi.Size())
+				tool.ErrCorrupt, path, part, size)
 		}
 		return part, nil
 	}

@@ -71,6 +71,13 @@ func EntryName(name, identity string) string {
 // complete. One unrecorded image anywhere below makes everything above it
 // incomplete, which is the honest answer.
 func Compose(metaDir string, deps []Dep) (complete bool, err error) {
+	return compose(metaDir, deps, extractDep)
+}
+
+// compose is Compose with the step that produces a dependency's /.cnt left open,
+// so the union and completeness rules can be exercised without packing an
+// archive to unpack again. open returns the directory and how to discard it.
+func compose(metaDir string, deps []Dep, open func(Dep) (string, func(), error)) (complete bool, err error) {
 	complete = true
 	if len(deps) == 0 {
 		return complete, nil
@@ -84,7 +91,7 @@ func Compose(metaDir string, deps []Dep) (complete bool, err error) {
 			complete = false
 			continue
 		}
-		whole, err := composeOne(dest, dep)
+		whole, err := composeOne(dest, dep, open)
 		if err != nil {
 			return false, err
 		}
@@ -95,20 +102,30 @@ func Compose(metaDir string, deps []Dep) (complete bool, err error) {
 	return complete, nil
 }
 
-// composeOne copies one dependency's manifest and rebuild sources into the
-// capsule, then its own capsule entries across unchanged.
-func composeOne(dest string, dep Dep) (complete bool, err error) {
+// extractDep unpacks a dependency image's /.cnt to a scratch directory.
+func extractDep(dep Dep) (string, func(), error) {
 	staging, err := os.MkdirTemp("", "cnt-capsule-")
 	if err != nil {
-		return false, fmt.Errorf("failed to create capsule staging dir: %w", err)
+		return "", nil, fmt.Errorf("failed to create capsule staging dir: %w", err)
 	}
-	defer os.RemoveAll(staging) //nolint:errcheck
-
+	discard := func() { os.RemoveAll(staging) } //nolint:errcheck
 	// One extraction, not one read per file: every archive read spawns a process.
 	if err := image.ExtractDir(dep.ImagePath, "/"+meta.DirName, staging); err != nil {
-		return false, fmt.Errorf("cannot read provenance from %s: %w", dep.Name, err)
+		discard()
+		return "", nil, fmt.Errorf("cannot read provenance from %s: %w", dep.Name, err)
 	}
-	source := filepath.Join(staging, meta.DirName)
+	return filepath.Join(staging, meta.DirName), discard, nil
+}
+
+// composeOne copies one dependency's manifest and rebuild sources into the
+// capsule, then its own capsule entries across unchanged.
+func composeOne(dest string, dep Dep, open func(Dep) (string, func(), error)) (complete bool, err error) {
+	source, discard, err := open(dep)
+	if err != nil {
+		return false, err
+	}
+	defer discard()
+
 	manifest, err := readManifestDir(source)
 	if err != nil {
 		return false, fmt.Errorf("cannot read provenance manifest from %s: %w", dep.Name, err)

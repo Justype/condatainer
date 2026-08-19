@@ -3,6 +3,7 @@ package catalog
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -10,24 +11,83 @@ import (
 // ErrInvalidRecipe reports a recipe that declares something its type may not.
 var ErrInvalidRecipe = errors.New("catalog: invalid recipe")
 
-// Validate reports headers a recipe of this type may not declare. It is called
-// once the recipe is fetched and about to be built, not while indexing: one bad
-// recipe must not take a whole collection out of a listing.
+// IsPathDep reports whether a #DEP: value names an overlay file rather than a
+// catalog name/version.
 //
-// Two rules, each narrow:
+// Exported because it decides which grammar a dependency is read with, and this
+// package owns that grammar: Normalize and ParseDep apply to a name/version and
+// to nothing else. A second answer elsewhere would let one string be a name in
+// one place and a path in another. The extensions are utils.IsOverlay's set,
+// which is what a running script's declaration is already read with.
+func IsPathDep(value string) bool {
+	switch strings.ToLower(filepath.Ext(strings.TrimSpace(value))) {
+	case ".sqf", ".sqsh", ".squashfs", ".img", ".ext3":
+		return true
+	}
+	return false
+}
+
+// ValidateDeps reports why a **build** of this type may not declare these
+// dependencies, or nil.
+//
+// Only builds answer to these rules. A running script may declare an overlay
+// path or an external `.sqf`, because it mounts what it names and records
+// nothing; a build's declaration becomes an edge in an artifact that has to mean
+// the same thing on another machine. Accordingly the only callers are
+// Recipe.Validate and build.FromExternalSource — never `run` or `check`.
+//
+// Separate from Validate because an external build (`create -p -f <script>`)
+// reaches the same rules without ever being a catalog Recipe — its type comes
+// from #TYPE: and its name from #TARGET:, so it has no recipe path to be parsed
+// from. One definition, both callers.
 //
 //   - Only data may declare #DEP:. An app is prebuilt and self-contained, an OS
 //     is self-contained by definition, and a base *is* the build environment. A
 //     recipe that genuinely needs a compiler is an os artifact providing that
 //     toolchain, not an app depending on one.
-//   - Only app and data may declare #ARCH:, and only as native or noarch. An OS
-//     and a base are root filesystems and are always architecture-specific.
+//   - A build dependency is a name/version, never an overlay path. A built
+//     artifact records each edge as a name plus a complete identity, and a path
+//     supplies neither: nothing could re-resolve it on another machine, and no
+//     key could be regenerated from it. Keeping a project's vendored source
+//     closure total depends on it — see internal/project/README.md.
+func ValidateDeps(name string, typ Type, deps []string) error {
+	if len(deps) == 0 {
+		return nil
+	}
+	var errs []error
+
+	if typ != TypeData {
+		errs = append(errs, fmt.Errorf("%w: %s is type %s and may not declare #DEP: (%s); only data has build dependencies",
+			ErrInvalidRecipe, name, typ, strings.Join(deps, ", ")))
+	}
+
+	var paths []string
+	for _, dep := range deps {
+		if IsPathDep(dep) {
+			paths = append(paths, dep)
+		}
+	}
+	if len(paths) > 0 {
+		errs = append(errs, fmt.Errorf("%w: %s declares #DEP: %s; a build dependency must be a name/version, not an overlay path",
+			ErrInvalidRecipe, name, strings.Join(paths, ", ")))
+	}
+
+	return errors.Join(errs...)
+}
+
+// Validate reports headers a recipe of this type may not declare. It is called
+// once the recipe is fetched and about to be built, not while indexing: one bad
+// recipe must not take a whole collection out of a listing.
+//
+// The #DEP: rules live in ValidateDeps, which an external build shares. The one
+// rule that is only a recipe's is #ARCH:, which only app and data may declare,
+// and only as native or noarch: an OS and a base are root filesystems and are
+// always architecture-specific.
 func (r *Recipe) Validate() error {
 	var errs []error
 
-	if len(r.Deps) > 0 && r.Type != TypeData {
-		errs = append(errs, fmt.Errorf("%w: %s is type %s and may not declare #DEP: (%s); "+
-			"only data has build dependencies", ErrInvalidRecipe, r.Name, r.Type, strings.Join(r.Deps, ", ")))
+	if err := ValidateDeps(r.Name, r.Type, r.Deps); err != nil {
+		errs = append(errs, err)
 	}
 
 	if r.Arch != "" {
@@ -38,8 +98,8 @@ func (r *Recipe) Validate() error {
 					ErrInvalidRecipe, r.Name, r.Arch, ArchNative, ArchNoarch))
 			}
 		default:
-			errs = append(errs, fmt.Errorf("%w: %s is type %s and may not declare #ARCH:; "+
-				"a root filesystem is always architecture-specific", ErrInvalidRecipe, r.Name, r.Type))
+			errs = append(errs, fmt.Errorf("%w: %s is type %s and may not declare #ARCH:; a root filesystem is always architecture-specific",
+				ErrInvalidRecipe, r.Name, r.Type))
 		}
 	}
 
@@ -76,9 +136,7 @@ func (r *Recipe) Lint() []string {
 			tool = tool[i+1:]
 		}
 		if strings.Contains(r.Name, tool) && strings.Contains(r.Name, dep.Version) {
-			out = append(out, fmt.Sprintf(
-				"%s: dependency %s is mentioned in the name but not as whole components, "+
-					"so it does not count toward equivalence — fix the #TARGET: or the name",
+			out = append(out, fmt.Sprintf("%s: dependency %s is in the name but not as whole components, so it does not count toward equivalence; fix the #TARGET: or the name",
 				r.Name, nameVersion))
 		}
 	}

@@ -3,6 +3,7 @@ package registry
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -550,14 +551,25 @@ func TestPullReassemblesUnderConcurrency(t *testing.T) {
 // header on a fetch but never hashes the body, so this path verifies it itself.
 func TestDownloadRejectsACorruptedLayer(t *testing.T) {
 	p := newPullFixture(t)
-	for dgst, data := range p.registry.blobs {
-		if len(data) > 64 {
-			corrupted := append([]byte(nil), data...)
-			corrupted[len(corrupted)/2] ^= 0xff
-			p.registry.blobs[dgst] = corrupted
-			break
-		}
+
+	// Specifically one of this manifest's layers. Picking any large blob drew
+	// from map order, and the index blob is never fetched — Pull is handed the
+	// child manifest — so corrupting that one left the pull free to succeed.
+	var manifest ocispec.Manifest
+	if err := json.Unmarshal(p.registry.blobs[p.desc.Digest], &manifest); err != nil {
+		t.Fatalf("read the published manifest: %v", err)
 	}
+	if len(manifest.Layers) == 0 {
+		t.Fatal("the published manifest carries no layers")
+	}
+	target := manifest.Layers[0].Digest
+	corrupted := append([]byte(nil), p.registry.blobs[target]...)
+	if len(corrupted) == 0 {
+		t.Fatalf("layer %s was not published", target)
+	}
+	corrupted[len(corrupted)/2] ^= 0xff
+	p.registry.blobs[target] = corrupted
+
 	if err := p.pull(context.Background()); err == nil {
 		t.Fatal("a layer whose bytes contradict its digest was installed")
 	}

@@ -105,7 +105,7 @@ func (r *resolver) visit(ctx context.Context, dep Dep, vars map[string]string, p
 	// A base is the container root a build runs inside, not an input it is
 	// composed from, so it can be a root of the walk but never an edge in it.
 	if parent != "" && node.Entry != nil && node.Entry.Type == TypeBase {
-		return fmt.Errorf("catalog: %s depends on %s, which is a base: a base is the build environment, not a dependency", parent, key)
+		return fmt.Errorf("catalog: %s depends on base %s; a base is the build environment, not a dependency", parent, key)
 	}
 
 	r.onStack[key], r.stack = true, append(r.stack, key)

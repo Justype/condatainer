@@ -9,6 +9,39 @@ import (
 	"github.com/Justype/condatainer/internal/scheduler"
 )
 
+// tmpDirEnvVars are the temp directory environment variables read by name, in
+// priority order: CNT_TMPDIR is condatainer's own staging root, the rest are what
+// the C++ standard library's temp_directory_path() consults. The scheduler's
+// node-local tmp is not here — its variable depends on the detected scheduler,
+// so TmpDirBinds resolves it through scheduler.ActiveTmpDir.
+var tmpDirEnvVars = []string{"CNT_TMPDIR", "TMPDIR", "TMP", "TEMP", "TEMPDIR"}
+
+// TmpDirBinds returns every host temp directory that exists, so a tool inside the
+// container can follow whichever variable it reads. Apptainer binds only /tmp by
+// default, and an unbound variable names a host path that is not there — which is
+// what micromamba dies on when the site profile exports one of these.
+func TmpDirBinds() []string {
+	dirs := make([]string, 0, len(tmpDirEnvVars)+1)
+	for _, env := range tmpDirEnvVars {
+		dirs = append(dirs, os.Getenv(env))
+	}
+	// Scheduler-assigned node-local tmp (fast SSD scratch): the variable it comes
+	// from is whatever the detected scheduler names.
+	dirs = append(dirs, scheduler.ActiveTmpDir())
+
+	binds := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		if _, err := os.Stat(dir); err != nil {
+			continue
+		}
+		binds = append(binds, dir)
+	}
+	return binds
+}
+
 // DeduplicateBindPaths resolves, deduplicates, and filters child paths from bind directories.
 // It handles formats: "/path", "/path:/container", "/path:/container:ro"
 func DeduplicateBindPaths(paths []string) []string {
@@ -112,17 +145,8 @@ func BindPaths(paths ...string) []string {
 		bindPaths = append(bindPaths, scratch)
 	}
 
-	// Add $TMPDIR if it points outside the paths Apptainer binds by default (/tmp).
-	if tmpDir := os.Getenv("TMPDIR"); tmpDir != "" {
-		if _, err := os.Stat(tmpDir); err == nil {
-			bindPaths = append(bindPaths, tmpDir)
-		}
-	}
-
-	// Add scheduler-assigned node-local tmp (fast SSD scratch, not bound by Apptainer automatically).
-	if tmpDir := scheduler.ActiveTmpDir(); tmpDir != "" {
-		bindPaths = append(bindPaths, tmpDir)
-	}
+	// Add every temp directory the host advertises.
+	bindPaths = append(bindPaths, TmpDirBinds()...)
 
 	// Collect all base directories
 	baseDirs := []string{}

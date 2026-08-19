@@ -300,14 +300,21 @@ func ReadManifest(imagePath string) (Manifest, error) {
 		}
 		return Manifest{}, err
 	}
+	return DecodeManifest(data, imagePath)
+}
 
+// DecodeManifest turns a manifest document into a validated, normalized
+// Manifest. source names the document's origin in errors. Split from the
+// archive read so what the bytes mean is decided in one place, whether they
+// came from an image, a staging directory, or a registry blob.
+func DecodeManifest(data []byte, source string) (Manifest, error) {
 	var m Manifest
 	if err := json.Unmarshal(data, &m); err != nil {
-		return Manifest{}, fmt.Errorf("%w: %s: %w", ErrInvalid, imagePath, err)
+		return Manifest{}, fmt.Errorf("%w: %s: %w", ErrInvalid, source, err)
 	}
 	m.Normalize()
 	if err := ValidateManifest(m); err != nil {
-		return Manifest{}, fmt.Errorf("%s: %w", imagePath, err)
+		return Manifest{}, fmt.Errorf("%s: %w", source, err)
 	}
 	return m, nil
 }
