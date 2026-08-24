@@ -294,7 +294,7 @@ func (bg *BuildGraph) submitJob(obj *BuildObject, depIDs []string) (string, erro
 	// Get script specs; when always_submit forces submission without directives, synthesize empty specs
 	specs := obj.ScriptSpecs()
 	if specs == nil {
-		effRS := buildEffectiveResourceSpec(nil)
+		effRS := EffectiveResourceSpec(nil)
 		specs = &scheduler.ScriptSpecs{Spec: effRS}
 	}
 	if config.Global.ProxyPerJob {

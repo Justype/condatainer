@@ -147,6 +147,7 @@ and may be `public` or `internal`.
 | `scheduler_timeout` | `0` | Seconds to wait for a scheduler command before erroring. `0` disables the timeout |
 | `notification` | `web` | Alert when a helper job starts: `web`, `terminal`, `both`, `none` |
 | `metadata_cache_ttl` | `7` | Days to cache remote recipe metadata. `0` always fetches |
+| `store_gc_grace` | `30` | Days before `store gc` will report an entry collectable. `--grace` overrides it per run |
 | `proxy_perjob` | `false` | Auto-start a per-job SOCKS5 proxy inside submitted jobs. See [Proxy](condatainer.md#proxy). |
 | `helper_bind_all` | `false` | Bind helper services to `0.0.0.0` for direct TCP instead of an SSH tunnel |
 
@@ -285,6 +286,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
 | `CNT_NOTIFICATION`         | `notification`         |
 | `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
+| `CNT_STORE_GC_GRACE`       | `store_gc_grace`       |
 | `CNT_PROXY_PERJOB`         | `proxy_perjob`         |
 | `CNT_HELPER_BIND_ALL`      | `helper_bind_all`      |
 | `CNT_TMPDIR`               | (fast build root; no config key) |

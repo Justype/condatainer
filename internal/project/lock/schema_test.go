@@ -11,9 +11,9 @@ const digestA = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef01234567
 func TestMarshalIsDeterministicAndSorted(t *testing.T) {
 	build := func() *Lock {
 		l := New()
-		l.Selections["star/2.7.11b"] = Selection{Artifact: "artifacts/star--2.7.11b@a31f902c12ab"}
-		l.Selections["cutadapt/5.0"] = Selection{Artifact: "artifacts/cutadapt--5.0@41b5204f99c1"}
-		l.Selections["grch38/genome/gencode49"] = Selection{Artifact: "artifacts/grch38--genome--gencode49@8ce02116f302"}
+		l.Selections["star/2.7.11b"] = Selection{Artifact: "provenance/star--2.7.11b@a31f902c12ab"}
+		l.Selections["cutadapt/5.0"] = Selection{Artifact: "provenance/cutadapt--5.0@41b5204f99c1"}
+		l.Selections["grch38/genome/gencode49"] = Selection{Artifact: "provenance/grch38--genome--gencode49@8ce02116f302"}
 		return l
 	}
 
@@ -44,15 +44,15 @@ func TestMarshalIsDeterministicAndSorted(t *testing.T) {
 		}
 		at = i
 	}
-	if strings.Contains(string(first), "origins") {
-		t.Errorf("an empty origin map was serialized:\n%s", first)
+	if strings.Contains(string(first), "remotes") {
+		t.Errorf("an empty remote map was serialized:\n%s", first)
 	}
 }
 
-func TestRoundTripPreservesOrigins(t *testing.T) {
+func TestRoundTripPreservesRemotes(t *testing.T) {
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: "artifacts/star--2.7.11b@a31f902c12ab"}
-	if err := l.AddOrigin("artifacts/star--2.7.11b@a31f902c12ab", Origin{Repository: "ghcr.io/example/star", ManifestDigest: digestA}); err != nil {
+	l.Selections["star/2.7.11b"] = Selection{Artifact: "provenance/star--2.7.11b@a31f902c12ab"}
+	if err := l.AddRemote("provenance/star--2.7.11b@a31f902c12ab", Remote{Repository: "ghcr.io/example/star", ManifestDigest: digestA}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := l.Marshal()
@@ -63,71 +63,71 @@ func TestRoundTripPreservesOrigins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := back.Origins["artifacts/star--2.7.11b@a31f902c12ab"]
+	got := back.Remotes["provenance/star--2.7.11b@a31f902c12ab"]
 	if len(got) != 1 || got[0].Repository != "ghcr.io/example/star" || got[0].ManifestDigest != digestA {
-		t.Fatalf("origins did not round-trip: %#v", got)
+		t.Fatalf("remotes did not round-trip: %#v", got)
 	}
 }
 
 // Order is retry priority, so a repeat must not reorder and a duplicate must
 // not accumulate.
-func TestAddOriginDedupesAndKeepsOrder(t *testing.T) {
+func TestAddRemoteDedupesAndKeepsOrder(t *testing.T) {
 	l := New()
-	artifact := "artifacts/star--2.7.11b@a31f902c12ab"
-	first := Origin{Repository: "ghcr.io/example/star", ManifestDigest: digestA}
-	second := Origin{Repository: "ghcr.io/mirror/star", ManifestDigest: digestA}
-	for _, origin := range []Origin{first, second, first} {
-		if err := l.AddOrigin(artifact, origin); err != nil {
+	artifact := "provenance/star--2.7.11b@a31f902c12ab"
+	first := Remote{Repository: "ghcr.io/example/star", ManifestDigest: digestA}
+	second := Remote{Repository: "ghcr.io/mirror/star", ManifestDigest: digestA}
+	for _, remote := range []Remote{first, second, first} {
+		if err := l.AddRemote(artifact, remote); err != nil {
 			t.Fatal(err)
 		}
 	}
-	got := l.Origins[artifact]
+	got := l.Remotes[artifact]
 	if len(got) != 2 || got[0] != first || got[1] != second {
-		t.Fatalf("origins = %#v", got)
+		t.Fatalf("remotes = %#v", got)
 	}
 }
 
-func TestAddOriginRejectsBadLocations(t *testing.T) {
-	artifact := "artifacts/star--2.7.11b@a31f902c12ab"
+func TestAddRemoteRejectsBadLocations(t *testing.T) {
+	artifact := "provenance/star--2.7.11b@a31f902c12ab"
 	tests := []struct {
 		why    string
-		origin Origin
+		remote Remote
 	}{
-		{"a scheme is not part of a repository", Origin{Repository: "oci://ghcr.io/example/star", ManifestDigest: digestA}},
-		{"a tag is mutable and is not an origin", Origin{Repository: "ghcr.io/example/star:latest", ManifestDigest: digestA}},
-		{"an empty repository addresses nothing", Origin{Repository: "", ManifestDigest: digestA}},
-		{"a tag is not a digest", Origin{Repository: "ghcr.io/example/star", ManifestDigest: "latest"}},
-		{"a short digest is not sha256", Origin{Repository: "ghcr.io/example/star", ManifestDigest: "sha256:abcd"}},
-		{"a digest is hex", Origin{Repository: "ghcr.io/example/star", ManifestDigest: "sha256:" + strings.Repeat("z", 64)}},
+		{"a scheme is not part of a repository", Remote{Repository: "oci://ghcr.io/example/star", ManifestDigest: digestA}},
+		{"a tag is mutable and is not an remote", Remote{Repository: "ghcr.io/example/star:latest", ManifestDigest: digestA}},
+		{"an empty repository addresses nothing", Remote{Repository: "", ManifestDigest: digestA}},
+		{"a tag is not a digest", Remote{Repository: "ghcr.io/example/star", ManifestDigest: "latest"}},
+		{"a short digest is not sha256", Remote{Repository: "ghcr.io/example/star", ManifestDigest: "sha256:abcd"}},
+		{"a digest is hex", Remote{Repository: "ghcr.io/example/star", ManifestDigest: "sha256:" + strings.Repeat("z", 64)}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.why, func(t *testing.T) {
-			if err := New().AddOrigin(artifact, tt.origin); err == nil {
-				t.Fatalf("accepted %#v", tt.origin)
+			if err := New().AddRemote(artifact, tt.remote); err == nil {
+				t.Fatalf("accepted %#v", tt.remote)
 			}
 		})
 	}
 }
 
 // A registry may carry a port, which is a colon that does not introduce a tag.
-func TestAddOriginAcceptsARegistryPort(t *testing.T) {
-	if err := New().AddOrigin("artifacts/star--2.7.11b@a31f902c12ab",
-		Origin{Repository: "localhost:5000/example/star", ManifestDigest: digestA}); err != nil {
+func TestAddRemoteAcceptsARegistryPort(t *testing.T) {
+	if err := New().AddRemote("provenance/star--2.7.11b@a31f902c12ab",
+		Remote{Repository: "localhost:5000/example/star", ManifestDigest: digestA}); err != nil {
 		t.Fatalf("rejected a ported registry: %v", err)
 	}
 }
 
 // Every lock path is hostile input: it names a directory a later step reads.
-func TestArtifactPathsAreConstrained(t *testing.T) {
+func TestEntryPathsAreConstrained(t *testing.T) {
 	tests := []struct {
 		why  string
 		path string
 	}{
 		{"absolute", "/etc/passwd"},
-		{"traversal", "artifacts/../../etc"},
+		{"traversal", "provenance/../../etc"},
 		{"outside artifacts", "elsewhere/star@abc"},
-		{"unclean", "artifacts/./star@abc"},
-		{"nested", "artifacts/deep/star@abc"},
+		{"unclean", "provenance/./star@abc"},
+		{"nested", "provenance/deep/star@abc"},
 		{"empty", ""},
 		{"backslash", `artifacts\star@abc`},
 	}
@@ -149,10 +149,10 @@ func TestUnmarshalRejectsUnknownFieldsAndSchemas(t *testing.T) {
 		want error
 	}{
 		{"unknown top-level field", `{"schema_version":1,"selections":{},"surprise":true}`, ErrInvalid},
-		{"unknown selection field", `{"schema_version":1,"selections":{"a":{"artifact":"artifacts/a@b","pinned":true}}}`, ErrInvalid},
+		{"unknown selection field", `{"schema_version":1,"selections":{"a":{"artifact":"provenance/a@b","pinned":true}}}`, ErrInvalid},
 		{"future schema", `{"schema_version":99,"selections":{}}`, ErrSchema},
 		{"trailing content", `{"schema_version":1,"selections":{}} {}`, ErrInvalid},
-		{"origin outside artifacts", `{"schema_version":1,"selections":{},"origins":{"/abs":[]}}`, ErrInvalid},
+		{"remote outside artifacts", `{"schema_version":1,"selections":{},"remotes":{"/abs":[]}}`, ErrInvalid},
 	}
 	for _, tt := range tests {
 		t.Run(tt.why, func(t *testing.T) {
@@ -163,10 +163,10 @@ func TestUnmarshalRejectsUnknownFieldsAndSchemas(t *testing.T) {
 	}
 }
 
-// A duplicated origin in a hand-edited lock is a conflict, not something to
+// A duplicated remote in a hand-edited lock is a conflict, not something to
 // silently collapse on the next write.
-func TestUnmarshalRejectsDuplicateOrigins(t *testing.T) {
-	data := `{"schema_version":1,"selections":{},"origins":{"artifacts/a@b":[` +
+func TestUnmarshalRejectsDuplicateRemotes(t *testing.T) {
+	data := `{"schema_version":1,"selections":{},"remotes":{"provenance/a@b":[` +
 		`{"repository":"ghcr.io/x/y","manifest_digest":"` + digestA + `"},` +
 		`{"repository":"ghcr.io/x/y","manifest_digest":"` + digestA + `"}]}}`
 	if _, err := Unmarshal([]byte(data)); !errors.Is(err, ErrInvalid) {
@@ -178,9 +178,9 @@ func TestUnmarshalRejectsDuplicateOrigins(t *testing.T) {
 // is only the root set. Pruning against it alone would delete the closure.
 func TestSelectedArtifactsIsRootsOnly(t *testing.T) {
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: "artifacts/star--2.7.11b@a31f902c12ab"}
-	l.Selections["also/star"] = Selection{Artifact: "artifacts/star--2.7.11b@a31f902c12ab"}
-	if got := l.SelectedArtifacts(); len(got) != 1 || !got["artifacts/star--2.7.11b@a31f902c12ab"] {
+	l.Selections["star/2.7.11b"] = Selection{Artifact: "provenance/star--2.7.11b@a31f902c12ab"}
+	l.Selections["also/star"] = Selection{Artifact: "provenance/star--2.7.11b@a31f902c12ab"}
+	if got := l.SelectedArtifacts(); len(got) != 1 || !got["provenance/star--2.7.11b@a31f902c12ab"] {
 		t.Fatalf("SelectedArtifacts = %#v", got)
 	}
 }

@@ -71,7 +71,7 @@ func TestRunReportsAnEquivalentAdoption(t *testing.T) {
 func TestRunStopsOnAPlanningProblem(t *testing.T) {
 	root := projectRoot(t)
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: "artifacts/missing--1.0@abc123456789"}
+	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: "provenance/missing--1.0@abc123456789"}
 
 	report, err := Run(context.Background(), root, l, Options{lookup: nothingInstalled})
 	if !errors.Is(err, ErrIncomplete) {
@@ -85,7 +85,7 @@ func TestRunStopsOnAPlanningProblem(t *testing.T) {
 	}
 }
 
-// A recorded origin is not silently rebuilt: the fetch is an acquisition this
+// A recorded remote is not silently rebuilt: the fetch is an acquisition this
 // build cannot perform, and --no-prebuilt is how a caller asks to build from source.
 func TestRunFailsAFetchRatherThanRebuildingSilently(t *testing.T) {
 	root := projectRoot(t)
@@ -95,7 +95,7 @@ func TestRunFailsAFetchRatherThanRebuildingSilently(t *testing.T) {
 	l := lock.New()
 	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: appPath}
 	digest := "sha256:" + strings.Repeat("a", 64)
-	if err := l.AddOrigin(appPath, lock.Origin{Repository: "ghcr.io/x/star", ManifestDigest: digest}); err != nil {
+	if err := l.AddRemote(appPath, lock.Remote{Repository: "ghcr.io/x/star", ManifestDigest: digest}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -137,8 +137,8 @@ func TestDependencyPathsFollowManifestOrder(t *testing.T) {
 		Dependencies: []meta.Dependency{edge(second), edge(first)},
 	}}
 	available := map[string]string{
-		lock.ArtifactPath(entryName(second)): "/images/zzz.sqf",
-		lock.ArtifactPath(entryName(first)):  "/images/aaa.sqf",
+		lock.EntryPath(entryName(second)): "/images/zzz.sqf",
+		lock.EntryPath(entryName(first)):  "/images/aaa.sqf",
 	}
 
 	deps, err := dependencyPaths(entry, available)
@@ -392,7 +392,7 @@ func TestRunBlocksADependentRatherThanFailingIt(t *testing.T) {
 	// The dependency is a fetch this build cannot perform, which is the one
 	// acquisition failure reachable without running a real build.
 	digest := "sha256:" + strings.Repeat("a", 64)
-	if err := l.AddOrigin(appPath, lock.Origin{Repository: "ghcr.io/x/star", ManifestDigest: digest}); err != nil {
+	if err := l.AddRemote(appPath, lock.Remote{Repository: "ghcr.io/x/star", ManifestDigest: digest}); err != nil {
 		t.Fatal(err)
 	}
 

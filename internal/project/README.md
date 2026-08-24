@@ -12,7 +12,7 @@ project/
   analysis.sh
   cnt-lock/
     lock.json
-    artifacts/
+    provenance/
       star--2.7.11b@a31f902c12ab/
         manifest.json
         recipe
@@ -33,35 +33,49 @@ them: a lock written by a newer build may mean something this one would discard
 on the next write.
 
 Every path in a lock is hostile input — it names a directory a later step will
-read — so `artifacts/<entry>` is required to be relative, clean, slash-separated
+read — so `provenance/<entry>` is required to be relative, clean, slash-separated
 and non-escaping before anything touches the filesystem.
 
-## Origins
+One entry directory is one artifact's record set: `manifest.json` plus exactly
+the sources that manifest names. It is the same directory an image carries at
+`/.cnt/provenance/`, down to the name `capsule.EntryName` produces, and it is
+read by the same code — `capsule.ReadRecord`, given this package's bounded,
+symlink-refusing reader. Two readers would be free to drift into a lock that
+verifies against an image that does not.
 
-`origins` maps an artifact path to the exact places it can be fetched from:
+## Remotes
+
+`remotes` maps an artifact path to the exact places it can be fetched from:
 a repository coordinate and a **platform manifest digest**, never a mutable tag.
 It is absent until something records a location, and it is keyed by artifact
 rather than nested under a selection because a closure-only dependency can have
-origins too.
+remotes too.
 
-Order is retry priority, so `AddOrigin` deduplicates and appends rather than
-reordering. An origin is a location, never artifact metadata — nothing in it is
+Order is retry priority, so `AddRemote` deduplicates and appends rather than
+reordering. A remote is a location, never artifact metadata — nothing in it is
 compared against a payload, which carries its own keys and is verified on
 arrival.
 
-**Origins are written by machines, never typed.** One is recorded only when
+`remotes` lives at the top of `lock.json`, keyed *by* an entry path, and never
+inside the entry directory. That is the hashing boundary, not a layout
+preference: an entry's bytes are the key preimage, so anything written in there
+changes the identity it is addressed by. A registry coordinate is mutable
+information about where a copy happens to sit — it must be able to change
+without the artifact becoming a different artifact.
+
+**Remotes are written by machines, never typed.** One is recorded only when
 something has confirmed the artifact is there: a pull endpoint the recipe
 collection declares advertises this exact identity, or `project push` has just
 put it there. There is no flag for typing a coordinate by hand — a digest nobody
 verified is a lock entry that fails on someone else's machine.
 
-An origin cannot be recovered from the artifact either. It is
+A remote cannot be recovered from the artifact either. It is
 `repository@sha256:<digest over the pushed content>`, so embedding one would need
 the digest before the bytes it covers exist; and a record written at pull time
 would live in the per-user cache while images roots are shared, so it would exist
 only for whoever ran the pull.
 
-Nothing writes an origin yet, so restore rebuilds. The map is carried now because
+Nothing writes a remote yet, so restore rebuilds. The map is carried now because
 the lock format is tracked in Git and adding it later would be a schema change.
 
 ## Scanning
@@ -158,7 +172,13 @@ asked for it by name, and nothing needs it afterwards: an artifact bakes its
 inputs in, so a dependency image is needed to rebuild it and never to use it.
 One that is *already* installed is adopted in place and never copied, so only a
 genuine miss is transient. `--keep-build-deps` installs newly produced ones
-through the named rule instead.
+through the named rule instead — with one difference: where a selection in the
+same plan carries the same name at a different identity, the selection keeps the
+bare name and the dependency goes to `store/`. The flat name answers `exec -o`,
+`list`, and every other checkout, so it belongs to what someone asked for by name
+rather than to what a rebuild happened to need. `yieldSharedNames` decides it from
+the plan, because leaving it to the store means the first installer wins and
+dependencies are built first — exactly backwards.
 
 The tree is one directory per restore, holding one directory per artifact:
 
@@ -171,7 +191,7 @@ The tree is one directory per restore, holding one directory per artifact:
 The per-restore directory is created on first use and removed whole, so an
 artifact two dependents need is produced once and mounted twice. Each staging
 directory is named for the artifact — the encoded `name/version` and a short
-identity, the same form `cnt-lock/artifacts/` uses — because this tree is what
+identity, the same form `cnt-lock/provenance/` uses — because this tree is what
 someone reads when a build fails, and one entry per identity cannot collide
 within a restore. The writable tmp root is the stable one, deliberately not the
 `CNT_TMPDIR` fast root: several conda environments is more than node-local
@@ -211,6 +231,85 @@ The recipe's `#DEP:` range is never consulted. It governed which version the
 artifact was *first* built against, and the outcome of that decision is the
 manifest edge; restore reproduces recorded outcomes rather than re-running
 authoring decisions.
+
+## Scheduler submission
+
+A rebuild whose vendored recipe carries `#SBATCH`/`#PBS`/`#BSUB` directives is
+handed to the scheduler instead of run in place, and the job re-enters restore as
+`project restore --project <root> --only <artifact>`. Nothing about the build is
+serialized into the job script: the lock is the specification and the node reads
+the same checkout, so the job needs only to be told which artifact it is for.
+
+`partition` decides the split before the first step runs, because it cannot be
+decided step by step — a build dependency comes before its dependent in the order,
+and whether it runs here or inside that dependent's job is only knowable once the
+dependent's fate is known. Three rules produce it:
+
+- **A build dependency is never its own job.** It lives in a restore-scoped
+  directory, and a directory cannot cross a job boundary; the job that needs it
+  produces it inline. `--keep-build-deps` installs it instead, which makes it an
+  ordinary step with its own job and its own directives — the escape hatch when a
+  dependency needs more of a machine than its dependent does.
+- **A step needs the scheduler when its own recipe declares directives, or when a
+  build dependency it produces inline declares them.** Otherwise a heavy
+  dependency would drag its light dependent onto the login node. Directives carry
+  up a whole inline chain, not one level.
+- **A step whose dependency was submitted is submitted too**, waiting on it with
+  an `afterok` edge. Its input does not exist yet, so it cannot run here whatever
+  it declares.
+
+Each declared project path is one output and therefore one job, even when two
+paths select the same artifact.
+
+### Reservation and resume
+
+The submitting process reserves where the job will publish and leaves an ordinary
+producer lock there carrying the job ID — through `store.Transaction.Detach` for a
+store-addressed artifact, and directly on the file for a project path. There is no
+second mechanism and no project-local job-state file.
+
+That one lock answers every question resume has to ask, because
+`producer.AcquireLocal` already knows how to read it:
+
+| lock at the target | meaning | what restore does |
+|---|---|---|
+| absent | never submitted | submit |
+| held, job alive | submitted by an earlier restore | report the job, submit nothing |
+| held, job gone | the job died without publishing | clear it and the orphaned output, resubmit |
+| held, job is *this* one | the worker reached its own reservation | adopt and publish |
+
+Re-running the restore is the resume operation. The command exits with the
+jobs-submitted code, having made nothing available yet; a later run adopts what
+the finished jobs published.
+
+The job's working directory is the project root or the submission is refused
+(`project.WorkDir`) — a project's relative paths resolve against the root, and a
+job that runs anywhere else splits CondaTainer's overlay resolution from the
+script's own paths.
+
+## Acting in a project
+
+`run`, `check` and `exec` act *in* whatever project the caller is standing in.
+There is no flag for it either way: `--project DIR` belongs to the commands that
+act *on* a project, and standing somewhere else is the opt-out.
+
+`exec -o` and `e -o` share one hook, `cmd.projectOverlays`. An argument classifies
+through `lock.ParseDeclaration` — the same grammar a `#DEP:` uses — so a name
+typed on the command line and the same text in a script cannot mean different
+things. That means a version constraint is refused here too, and a project path
+answers to the lock rather than being mounted on sight: inside a project
+`overlays/tool.sqf` is a restore output, and `LookupAt` verifies the file there
+against the locked keys. A writable `.img` and an external `.sqf` stay unpinnable
+and are mounted as written.
+
+The hook sits *above* `container.ResolveOverlayPaths` rather than inside it, even
+though that is the one place a name becomes a path. Five of its callers resolve a
+build's own `#DEP:` or a base image, and none of them may pick up the lock of
+whatever directory the user happened to be standing in.
+
+Like `run`, it resolves and never acquires: an absent artifact is an error naming
+`project restore`, never a fetch, a build, or a fallback to whatever currently
+answers to the name. That fallback is the failure a lock exists to prevent.
 
 ## Verification
 

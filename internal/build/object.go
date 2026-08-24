@@ -439,7 +439,7 @@ func (b *BuildObject) removeOrphanedOutput(ctx context.Context, info BuildLockIn
 
 // effectiveNcpus returns the effective total CPUs (CpusPerTask × TasksPerNode) for this build.
 func (b *BuildObject) effectiveNcpus() int {
-	rs := buildEffectiveResourceSpec(b.scriptSpecs)
+	rs := EffectiveResourceSpec(b.scriptSpecs)
 	cpus := rs.CpusPerTask
 	if rs.TasksPerNode > 1 {
 		cpus *= rs.TasksPerNode
@@ -722,7 +722,7 @@ func (b *BuildObject) resolveResourceSpec() error {
 	}
 
 	// Resolve using the priority chain: buildDefaults → script → job resources.
-	specs.Spec = buildEffectiveResourceSpec(specs)
+	specs.Spec = EffectiveResourceSpec(specs)
 	return nil
 }
 

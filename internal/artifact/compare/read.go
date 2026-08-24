@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/key"
@@ -26,7 +27,9 @@ type Artifact struct {
 	// kinds of file.
 	Format string
 	// Identity and Equiv are recomputed from the files manifest.keys names,
-	// never taken on trust from the manifest.
+	// never taken on trust from the manifest. Both carry the "sha256:" prefix,
+	// which meta.KeyRef does not — cross that boundary with IdentityRef and
+	// EquivRef rather than by hand.
 	Identity       string
 	Equiv          string
 	IdentityScheme string
@@ -41,6 +44,21 @@ type Artifact struct {
 	identity *key.Model
 	// unusable is set when the image cannot be held to a key at all.
 	unusable string
+}
+
+// IdentityRef is the identity as a meta.KeyRef.
+//
+// An Artifact digest is "sha256:<hex>" and a meta.KeyRef holds the bare hex, so
+// assigning one to the other directly yields a key that compares equal to
+// nothing and fails validation. That mistake has been made at four separate
+// call sites; this is the only correct crossing.
+func (a Artifact) IdentityRef() meta.KeyRef {
+	return meta.KeyRef{Scheme: a.IdentityScheme, SHA256: strings.TrimPrefix(a.Identity, "sha256:")}
+}
+
+// EquivRef is the equivalence key as a meta.KeyRef. See IdentityRef.
+func (a Artifact) EquivRef() meta.KeyRef {
+	return meta.KeyRef{Scheme: a.EquivScheme, SHA256: strings.TrimPrefix(a.Equiv, "sha256:")}
 }
 
 // usable reports why this artifact cannot be compared, or "".

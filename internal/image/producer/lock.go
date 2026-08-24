@@ -8,6 +8,7 @@ package producer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -25,6 +26,29 @@ const PreparedSuffix = ".part"
 // currentJobID reads the running scheduler job. Injected for tests, which have
 // no scheduler on PATH.
 var currentJobID = scheduler.CurrentJobID
+
+// ErrProducing reports that a live producer already holds a target's lock.
+var ErrProducing = errors.New("another producer holds the target")
+
+// ProducingError names the live producer. It carries Info because a caller that
+// waits on a scheduler job has to report which job, not merely that one exists.
+type ProducingError struct {
+	Target string
+	Path   string
+	Info   Info
+}
+
+func (e *ProducingError) Error() string {
+	who := e.Info.Runner
+	if e.Info.JobID != "" {
+		who += " job " + e.Info.JobID
+	} else if e.Info.Node != "" {
+		who += " on " + e.Info.Node
+	}
+	return fmt.Sprintf("%s is being produced by %s (lock: %s)", e.Target, who, e.Path)
+}
+
+func (e *ProducingError) Unwrap() error { return ErrProducing }
 
 // Info is the JSON metadata stored in a producer lock file.
 type Info struct {
@@ -74,7 +98,7 @@ func AcquireLocal(target string) (*Guard, error) {
 			if checkErr != nil {
 				return nil, fmt.Errorf("producer lock found at %s: %w", path, checkErr)
 			}
-			return nil, fmt.Errorf("another build or pull is producing %s (lock: %s)", target, path)
+			return nil, &ProducingError{Target: target, Path: path, Info: existing}
 		}
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("cannot remove stale producer lock %s: %w", path, err)

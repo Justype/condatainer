@@ -284,7 +284,7 @@ func scanScript(path, rel string, merged map[string]*Request, result *ScanResult
 		if annotation.Value == "" {
 			continue
 		}
-		request, reason := parseDeclaration(annotation.Value, annotation.Note)
+		request, reason := ParseDeclaration(annotation.Value, annotation.Note)
 		if reason != "" {
 			result.Findings = append(result.Findings, Finding{
 				Script: rel, Line: annotation.Line, Text: annotation.Value, Reason: reason})
@@ -309,9 +309,15 @@ func scanScript(path, rel string, merged map[string]*Request, result *ScanResult
 	return nil
 }
 
-// parseDeclaration turns one #DEP: value into a Request, or returns why it
-// cannot be one.
-func parseDeclaration(value, note string) (Request, string) {
+// ParseDeclaration turns one declaration into a Request, or returns why it
+// cannot be one. The second return is empty exactly when the first is usable.
+//
+// This is the grammar a `#DEP:` uses and the grammar `exec -o` accepts, which is
+// why it is exported: a name typed on the command line inside a project has to
+// classify the same way the scanner classifies the same text in a script, or the
+// two would disagree about what the lock covers. note is the `##` comment, empty
+// for a command-line argument.
+func ParseDeclaration(value, note string) (Request, string) {
 	unpinned, reason := parseNote(note)
 
 	if utils.IsOverlay(value) {

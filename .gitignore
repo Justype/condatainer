@@ -76,9 +76,10 @@ apps-modules
 ref
 ref-modules
 
-# CondaTainer Recipe
+# CondaTainer Recipe and Test
 recipe
 cnt-test
+cnt-project-test
 
 # Former submodule, kept locally while its work is migrated to the recipe collection
 cnt-scripts/

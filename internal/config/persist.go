@@ -136,6 +136,7 @@ func setDefaults() {
 	// "web" = browser notification via dashboard; "terminal" = bell; "both" = terminal + web; "" or "none" = silent
 	viper.SetDefault("notification", DefaultNotification)
 	viper.SetDefault("metadata_cache_ttl", DefaultCacheTTLDay) // days
+	viper.SetDefault("store_gc_grace", DefaultGCGraceDay)      // days
 	viper.SetDefault("proxy_perjob", false)
 	viper.SetDefault("helper_bind_all", false)
 }
@@ -1008,6 +1009,10 @@ func LoadFromViper() {
 
 	if ttl, ok := layerInt("metadata_cache_ttl"); ok {
 		Global.MetadataCacheTTL = time.Duration(ttl) * 24 * time.Hour
+	}
+
+	if grace, ok := layerInt("store_gc_grace"); ok {
+		Global.StoreGCGrace = time.Duration(grace) * 24 * time.Hour
 	}
 
 	if proxyPerJob, ok := layerBool("proxy_perjob"); ok {

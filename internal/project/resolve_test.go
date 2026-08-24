@@ -43,7 +43,7 @@ func vendor(t *testing.T, root, name, recipe string) (string, meta.Manifest) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	relative, err := lock.StageArtifact(root, capsule.EntryName(name, manifest.Keys.Identity.Digest()),
+	relative, err := lock.StageEntry(root, capsule.EntryName(name, manifest.Keys.Identity.Digest()),
 		map[string][]byte{meta.FileName: data, meta.RecipeFileName: []byte(recipe)})
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +212,7 @@ func TestResolveReturnsAbsolutePaths(t *testing.T) {
 func TestResolveReportsAnInvalidLock(t *testing.T) {
 	root := projectRoot(t)
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: "artifacts/star--2.7.11b@000000000000"}
+	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: "provenance/star--2.7.11b@000000000000"}
 	requests := []lock.Request{{Key: "star/2.7.11b", Kind: lock.KindName}}
 
 	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent})

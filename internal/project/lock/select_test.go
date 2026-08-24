@@ -109,7 +109,7 @@ func TestVendorClosureCapturesTheArtifactAndItsCapsule(t *testing.T) {
 	}
 
 	l := New()
-	l.Selections["index/1.0"] = Selection{Artifact: ArtifactPath(capsule.EntryName(data.Name, data.Keys.Identity.Digest()))}
+	l.Selections["index/1.0"] = Selection{Artifact: EntryPath(capsule.EntryName(data.Name, data.Keys.Identity.Digest()))}
 	if _, problems := Verify(root, l); len(problems) != 0 {
 		t.Fatalf("a freshly vendored closure does not verify:\n%s", problemText(problems))
 	}
@@ -179,7 +179,7 @@ func TestVendorClosureDeduplicatesADiamond(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entries, err := os.ReadDir(ArtifactsPath(root))
+	entries, err := os.ReadDir(ProvenancePath(root))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestApplyRestoresTheLockWhenVerificationFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := Apply(root, l, &Selected{Request: "ghost/1.0", Artifact: ArtifactPath("ghost--1.0@aaaaaaaaaaaa")})
+	err := Apply(root, l, &Selected{Request: "ghost/1.0", Artifact: EntryPath("ghost--1.0@aaaaaaaaaaaa")})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}

@@ -207,10 +207,11 @@ var buildDefaults = scheduler.ResourceSpec{
 // SetBuildDefaults sets the resource defaults used for build job submissions.
 func SetBuildDefaults(d scheduler.ResourceSpec) { buildDefaults = d }
 
-// buildEffectiveResourceSpec resolves resources for build using the priority chain:
+// EffectiveResourceSpec resolves the resources a build runs with, in priority
+// order:
 //
 //	buildDefaults → scriptSpecs.Spec (when HasDirectives=true) → scheduler job resources
-func buildEffectiveResourceSpec(specs *scheduler.ScriptSpecs) *scheduler.ResourceSpec {
+func EffectiveResourceSpec(specs *scheduler.ScriptSpecs) *scheduler.ResourceSpec {
 	var jobRes *scheduler.ResourceSpec
 	if sched := scheduler.ActiveScheduler(); sched != nil {
 		jobRes = sched.GetJobResources()

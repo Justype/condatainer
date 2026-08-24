@@ -1,9 +1,9 @@
 package producer
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -23,8 +23,13 @@ func TestAcquireLocalSerializesTarget(t *testing.T) {
 	}
 	defer first.Release() //nolint:errcheck
 
-	if _, err := AcquireLocal(target); err == nil || !strings.Contains(err.Error(), "another build or pull") {
-		t.Fatalf("second AcquireLocal error = %v", err)
+	_, err = AcquireLocal(target)
+	var producing *ProducingError
+	if !errors.As(err, &producing) {
+		t.Fatalf("second AcquireLocal error = %v, want *ProducingError", err)
+	}
+	if producing.Info.PID != os.Getpid() {
+		t.Fatalf("ProducingError names PID %d, want %d", producing.Info.PID, os.Getpid())
 	}
 	if err := first.Release(); err != nil {
 		t.Fatal(err)

@@ -36,6 +36,29 @@ func FormatMemoryMB(mb int64) string {
 	return fmt.Sprintf("%dMB", mb)
 }
 
+// FormatSize renders a byte count for display, in binary units to three
+// significant figures. Artifacts are gigabytes, so a raw byte count is a number
+// nobody reads.
+func FormatSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	value, exp := float64(bytes), 0
+	for value >= unit && exp < 4 {
+		value /= unit
+		exp++
+	}
+	suffix := [...]string{"B", "KiB", "MiB", "GiB", "TiB"}[exp]
+	if value >= 100 {
+		return fmt.Sprintf("%.0f %s", value, suffix)
+	}
+	if value >= 10 {
+		return fmt.Sprintf("%.1f %s", value, suffix)
+	}
+	return fmt.Sprintf("%.2f %s", value, suffix)
+}
+
 // FormatDuration formats a duration dropping zero trailing components.
 // Examples: 2h0m0s → "2h", 48h → "2d", 25h30m → "1d1h30m", 1h30m15s → "1h30m15s".
 func FormatDuration(d time.Duration) string {

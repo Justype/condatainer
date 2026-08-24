@@ -9,6 +9,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/artifact/compare"
 	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/image/producer"
 )
 
 func transactionArtifact(name, identity string) compare.Artifact {
@@ -331,5 +332,126 @@ func TestBeginAdoptsAnExactFlatCopyWithoutWriting(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, DirName)); !os.IsNotExist(err) {
 		t.Errorf("adoption created a store directory: %v", err)
+	}
+}
+
+// A submitted job outlives the process that reserved its target, so the lock
+// has to survive too — carrying the job's identity, not the submitter's.
+func TestDetachLeavesTheLockForTheJobThatWillPublish(t *testing.T) {
+	root := t.TempDir()
+	identity := strings.Repeat("a", 64)
+	read := func(string) (compare.Artifact, error) {
+		return compare.Artifact{}, errors.New("not an artifact")
+	}
+	tx, err := begin("star/2.7", meta.KeyRef{Scheme: "identity-v1", SHA256: identity},
+		BeginOptions{ImagesDir: root, SearchDirs: []string{root}}, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tx.Reserved() {
+		t.Fatal("a fresh name was not reserved")
+	}
+	job := producer.Info{Runner: "slurm", JobID: "4001", Node: "login1"}
+	if err := tx.Detach(job); err != nil {
+		t.Fatal(err)
+	}
+	if tx.Reserved() {
+		t.Error("the transaction still claims the target after detaching")
+	}
+
+	info, err := producer.Read(producer.Path(tx.TargetPath))
+	if err != nil {
+		t.Fatalf("the lock was released instead of handed over: %v", err)
+	}
+	if info.JobID != "4001" || info.Runner != "slurm" {
+		t.Errorf("lock records %+v, want the job that will publish", info)
+	}
+	// The prepared path follows the new owner, since that is what the job
+	// derives from the lock it adopts.
+	if want := producer.PreparedPath(tx.TargetPath, job); tx.Prepared != want {
+		t.Errorf("prepared = %q, want %q", tx.Prepared, want)
+	}
+	// Aborting after a detach must not undo the handover.
+	tx.Abort()
+	if _, err := os.Stat(producer.Path(tx.TargetPath)); err != nil {
+		t.Errorf("Abort removed the detached lock: %v", err)
+	}
+}
+
+func TestDetachRefusesATransactionThatReservedNothing(t *testing.T) {
+	root := t.TempDir()
+	identity := strings.Repeat("a", 64)
+	flat := filepath.Join(root, "star--2.7.sqf")
+	if err := os.WriteFile(flat, []byte("incumbent"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	read := func(string) (compare.Artifact, error) {
+		return transactionArtifact("star/2.7", identity), nil
+	}
+	tx, err := begin("star/2.7", meta.KeyRef{Scheme: "identity-v1", SHA256: identity},
+		BeginOptions{ImagesDir: root, SearchDirs: []string{root}}, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tx.Reserved() {
+		t.Fatal("an adopted exact copy was reported as reserved")
+	}
+	if err := tx.Detach(producer.Info{JobID: "4001"}); !errors.Is(err, ErrTransactionClosed) {
+		t.Fatalf("Detach on an adoption = %v, want ErrTransactionClosed", err)
+	}
+}
+
+// A caller that has yielded the bare name still writes, just into the store.
+func TestBeginStoreOnlyLeavesTheFreeFlatNameAlone(t *testing.T) {
+	root := t.TempDir()
+	identity := strings.Repeat("a", 64)
+	read := func(path string) (compare.Artifact, error) {
+		if filepath.Ext(path) == ".part" {
+			return transactionArtifact("star/2.7", identity), nil
+		}
+		return compare.Artifact{}, errors.New("not an artifact")
+	}
+	tx, err := begin("star/2.7", meta.KeyRef{Scheme: "identity-v1", SHA256: identity},
+		BeginOptions{ImagesDir: root, SearchDirs: []string{root}, StoreOnly: true}, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tx.Layout != LayoutStored {
+		t.Fatalf("layout = %q, want stored despite the free name", tx.Layout)
+	}
+	if err := os.WriteFile(tx.Prepared, []byte("complete"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "star--2.7.sqf")); !os.IsNotExist(err) {
+		t.Errorf("the yielded flat name was taken anyway: %v", err)
+	}
+}
+
+// StoreOnly decides where a new artifact is written, not what answers to the
+// name: an exact copy already flat is still the copy to use.
+func TestBeginStoreOnlyStillAdoptsAnExactFlatCopy(t *testing.T) {
+	root := t.TempDir()
+	identity := strings.Repeat("a", 64)
+	flat := filepath.Join(root, "star--2.7.sqf")
+	if err := os.WriteFile(flat, []byte("incumbent"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	read := func(string) (compare.Artifact, error) {
+		return transactionArtifact("star/2.7", identity), nil
+	}
+	tx, err := begin("star/2.7", meta.KeyRef{Scheme: "identity-v1", SHA256: identity},
+		BeginOptions{ImagesDir: root, SearchDirs: []string{root}, StoreOnly: true}, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := tx.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.Path != flat {
+		t.Errorf("adopted %q, want the exact flat copy %q", candidate.Path, flat)
 	}
 }

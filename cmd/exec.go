@@ -78,6 +78,10 @@ func runExec(cmd *cobra.Command, args []string) error {
 	// Prepare command and determine if prompt should be hidden
 	commandFinal, hidePrompt := PrepareCommandAndHidePrompt(commandFinal)
 
+	overlayFinal, err = projectOverlays(overlayFinal)
+	if err != nil {
+		return err
+	}
 	resolvedOverlays, err := container.ResolveOverlayPaths(overlayFinal)
 	if err != nil {
 		return err

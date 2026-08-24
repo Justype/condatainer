@@ -863,6 +863,27 @@ condatainer exec [flags] [command...]
 * All positional arguments are treated as commands.
 * Read-only by default for `.img` overlays (use `-w` for writable).
 * Defaults to bash if no command specified.
+* Inside a project — a directory holding `cnt-lock/` — every `-o` name resolves
+  through that project's lock instead of by installed name. See below.
+
+**Inside a project:**
+
+When the current directory holds `cnt-lock/`, `-o` resolves against that
+project's lock, so a run mounts the exact artifact the project pinned rather than
+whatever currently answers to the name. `e` behaves the same way.
+
+* A name that the lock does not select is an error naming the remedy, not a
+  fallback to the installed copy.
+* An artifact that is selected but not present here is an error naming
+  `condatainer project restore`. Nothing is fetched or built to satisfy a mount.
+* A version constraint such as `-o star/2.7.11b>=2.7.0` is refused: the lock says
+  which version, so a range is not a request.
+* A project-relative `.sqf` is checked against the lock before it is mounted.
+* A writable `.img` has no identity to pin and is mounted as written, relative to
+  the project root.
+
+There is no flag either way. Running from any other directory is how you opt out;
+`--project DIR` belongs to the `condatainer project` commands.
 
 **Environment Variables (inside container):**
 

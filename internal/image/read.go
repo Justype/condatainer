@@ -3,6 +3,8 @@ package image
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -11,6 +13,13 @@ import (
 	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/utils"
 )
+
+// squashfsMagic marks a SquashFS superblock, little-endian, at offset 0.
+var squashfsMagic = []byte{'h', 's', 'q', 's'}
+
+// sniffLen is enough header to reach the SIF magic, which sits past its launch
+// script.
+const sniffLen = 64
 
 // ReadFile reads a file at innerPath from inside an image.
 // For .sqf images it uses unsquashfs -cat; for .img images it uses debugfs.
@@ -65,6 +74,36 @@ func ExtractDir(imagePath, innerPath, destDir string) error {
 		}
 		return squashfs.ExtractDir(imagePath, innerPath, destDir, part.Offset)
 	default:
+		// The extension is the fast path, not the authority. A producer's
+		// in-progress output is `<name>.sqf.<tag>.part`, so its format survives
+		// only in its bytes — and store.Commit has to read exactly that file to
+		// verify what it is about to publish.
+		return extractBySniff(imagePath, innerPath, destDir)
+	}
+}
+
+// extractBySniff reads the format from the file's own magic, for a path whose
+// extension does not name one.
+func extractBySniff(imagePath, innerPath, destDir string) error {
+	f, err := os.Open(imagePath)
+	if err != nil {
 		return fmt.Errorf("%w: %s is not a readable image", tool.ErrCorrupt, imagePath)
 	}
+	defer f.Close() //nolint:errcheck
+
+	header := make([]byte, sniffLen)
+	if _, err := io.ReadFull(f, header); err != nil {
+		return fmt.Errorf("%w: %s is not a readable image", tool.ErrCorrupt, imagePath)
+	}
+	switch {
+	case bytes.Equal(header[:len(squashfsMagic)], squashfsMagic):
+		return squashfs.ExtractDir(imagePath, innerPath, destDir, 0)
+	case sif.HasMagic(header):
+		part, err := sif.PrimarySystemPartition(imagePath)
+		if err != nil {
+			return err
+		}
+		return squashfs.ExtractDir(imagePath, innerPath, destDir, part.Offset)
+	}
+	return fmt.Errorf("%w: %s is not a readable image", tool.ErrCorrupt, imagePath)
 }

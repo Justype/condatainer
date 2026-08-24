@@ -75,6 +75,14 @@ type Config struct {
 	// Max age of the on-disk remote build script metadata cache (default: 1 week)
 	MetadataCacheTTL time.Duration
 
+	// Age below which `store gc` never reports an entry collectable (default: 30
+	// days), overridden per invocation by --grace.
+	//
+	// Configurable because a store in a group root serves everyone using that
+	// install, and its owner is who knows its turnover. It resolves per
+	// invocation rather than per store, which is what --layer is for.
+	StoreGCGrace time.Duration
+
 	// ProxyPerJob: if true, inject "condatainer proxy start --via <login-node>" at the
 	// top of every generated scheduler script so the compute node starts a per-job proxy.
 	ProxyPerJob bool
@@ -140,6 +148,7 @@ const (
 	DefaultBuildTime           = "2h"  // walltime for a build job
 	DefaultAppTmpOverlaySizeMB = 20480 // app build's temporary ext3 overlay, 20GB
 	DefaultCacheTTLDay         = 7     // remote recipe metadata cache, 1 week
+	DefaultGCGraceDay          = 30    // store gc: age below which an entry is never collectable
 	DefaultNotification        = "web"
 )
 
@@ -203,6 +212,7 @@ func LoadDefaults(executablePath string) {
 		SchedulerTimeout: 0, // no timeout by default
 		Notification:     DefaultNotification,
 		MetadataCacheTTL: DefaultCacheTTLDay * 24 * time.Hour,
+		StoreGCGrace:     DefaultGCGraceDay * 24 * time.Hour,
 
 		Build: BuildConfig{
 			Defaults: scheduler.ResourceSpec{

@@ -37,6 +37,15 @@ const (
 // magic is what marks a file as a SIF. The trailing NUL is part of it.
 var magic = []byte("SIF_MAGIC\x00")
 
+// HasMagic reports whether a header begins a SIF, for a caller identifying a
+// file whose extension does not name its format.
+func HasMagic(header []byte) bool {
+	if len(header) < magicOffset+magicLen {
+		return false
+	}
+	return string(header[magicOffset:magicOffset+magicLen]) == string(magic)
+}
+
 // version is the SIF layout this parser knows. Every offset in this file is
 // specific to it, so a different version is refused rather than misread: a
 // wrong offset would silently produce a plausible number pointing at nothing.

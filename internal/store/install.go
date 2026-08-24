@@ -29,6 +29,11 @@ type BeginOptions struct {
 	ImagesDir  string
 	SearchDirs []string
 	Equiv      meta.KeyRef
+	// StoreOnly installs into store/ even when the bare name is free, because
+	// something else is entitled to that name. An exact copy already at the flat
+	// name is still adopted: this decides where a new artifact is written, not
+	// what answers to the name.
+	StoreOnly bool
 }
 
 // Transaction owns one specific target producer lock and its prepared sibling.
@@ -96,13 +101,16 @@ func begin(name string, identity meta.KeyRef, opts BeginOptions, read artifactRe
 	// No exact copy anywhere, so this identity has to be written. Take the bare
 	// name when nothing holds it: a flat artifact answers to `exec -o`, to
 	// `list`, and to every other project, so the same identity is not rebuilt
-	// once per checkout. The store is the conflict destination, not the default.
-	reserved, err := reserveFlat(tx, name, identity, opts.Equiv, imagesDir, dirs, read)
-	if err != nil {
-		return nil, err
-	}
-	if reserved {
-		return tx, nil
+	// once per checkout. The store is the conflict destination, not the default —
+	// and where a caller that has yielded the name sends this identity instead.
+	if !opts.StoreOnly {
+		reserved, err := reserveFlat(tx, name, identity, opts.Equiv, imagesDir, dirs, read)
+		if err != nil {
+			return nil, err
+		}
+		if reserved {
+			return tx, nil
+		}
 	}
 
 	storeDir := filepath.Join(imagesDir, DirName)
@@ -292,6 +300,31 @@ func (tx *Transaction) Commit() (Candidate, error) {
 	}
 	cacheArtifact(tx.TargetPath, tx.Root, tx.Layout, artifact, installed)
 	return candidateFromArtifact(tx.TargetPath, tx.Root, tx.Layout, installed.Size(), artifact), nil
+}
+
+// Reserved reports that this transaction holds a target nothing has written
+// yet. False means an exact copy was adopted and there is nothing to produce.
+func (tx *Transaction) Reserved() bool {
+	return tx != nil && !tx.closed && tx.guard != nil
+}
+
+// Detach hands the reserved target to a producer that outlives this process —
+// a scheduler job — and closes the transaction without releasing the lock.
+//
+// The lock is what holds the pathname across the queue wait. The job adopts it
+// by job ID, publishes through its own transaction, and releases it there. A job
+// that never runs leaves a lock that goes stale with it, which the next producer
+// clears.
+func (tx *Transaction) Detach(info producer.Info) error {
+	if !tx.Reserved() {
+		return ErrTransactionClosed
+	}
+	if err := producer.Overwrite(producer.Path(tx.TargetPath), info); err != nil {
+		return err
+	}
+	tx.Prepared = producer.PreparedPath(tx.TargetPath, info)
+	tx.guard, tx.closed = nil, true
+	return nil
 }
 
 // Abort removes this producer's prepared output and releases its target lock.

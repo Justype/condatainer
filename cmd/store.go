@@ -17,7 +17,8 @@ var storeCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(storeCmd)
-	storeCmd.AddCommand(newStoreListCmd(), newStorePathCmd(), newStoreValidateCmd())
+	storeCmd.AddCommand(newStoreListCmd(), newStorePathCmd(), newStoreValidateCmd(),
+		newStoreRmCmd(), newStoreGCCmd())
 }
 
 func newStoreListCmd() *cobra.Command {

@@ -72,7 +72,7 @@ func TestPruneLeavesUnreadableEntriesAlone(t *testing.T) {
 	root := projectRoot(t)
 	app, appFiles := recipeArtifact(t, "star/2.7.11b", "echo star\n")
 	appPath := vendor(t, root, app, appFiles)
-	broken := ArtifactPath("broken--1.0@aaaaaaaaaaaa")
+	broken := EntryPath("broken--1.0@aaaaaaaaaaaa")
 	if err := os.MkdirAll(filepath.Join(Dir(root), broken), 0o775); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestPublishRefusesAnInvalidLockAndChangesNothing(t *testing.T) {
 
 // One (name, identity) has one set of records, so re-staging is a no-op rather
 // than a rewrite.
-func TestStageArtifactIsIdempotent(t *testing.T) {
+func TestStageEntryIsIdempotent(t *testing.T) {
 	root := projectRoot(t)
 	app, appFiles := recipeArtifact(t, "star/2.7.11b", "echo star\n")
 	first := vendor(t, root, app, appFiles)
@@ -133,15 +133,15 @@ func TestStageArtifactIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestStageArtifactRejectsUnsafeNames(t *testing.T) {
+func TestStageEntryRejectsUnsafeNames(t *testing.T) {
 	root := projectRoot(t)
 	for _, name := range []string{"../escape", "nested/entry", ".", ".."} {
-		if _, err := StageArtifact(root, name, map[string][]byte{meta.FileName: []byte("{}")}); err == nil {
-			t.Errorf("StageArtifact accepted %q", name)
+		if _, err := StageEntry(root, name, map[string][]byte{meta.FileName: []byte("{}")}); err == nil {
+			t.Errorf("StageEntry accepted %q", name)
 		}
 	}
-	if _, err := StageArtifact(root, "star--2.7@aaaaaaaaaaaa", map[string][]byte{"../escape": []byte("x")}); err == nil {
-		t.Error("StageArtifact accepted a traversing source name")
+	if _, err := StageEntry(root, "star--2.7@aaaaaaaaaaaa", map[string][]byte{"../escape": []byte("x")}); err == nil {
+		t.Error("StageEntry accepted a traversing source name")
 	}
 }
 
@@ -151,7 +151,7 @@ func TestStagingDirectoriesAreInvisibleAndSweepable(t *testing.T) {
 	root := projectRoot(t)
 	app, appFiles := recipeArtifact(t, "star/2.7.11b", "echo star\n")
 	appPath := vendor(t, root, app, appFiles)
-	abandoned := filepath.Join(ArtifactsPath(root), stagingName("staging"))
+	abandoned := filepath.Join(ProvenancePath(root), stagingName("staging"))
 	if err := os.MkdirAll(abandoned, 0o775); err != nil {
 		t.Fatal(err)
 	}

@@ -42,7 +42,7 @@ func recipeArtifact(t *testing.T, name, recipe string, deps ...meta.Dependency) 
 	return manifest, map[string][]byte{meta.RecipeFileName: []byte(recipe)}
 }
 
-// vendor writes an artifact into cnt-lock/artifacts/ and returns its relative path.
+// vendor writes an artifact into cnt-lock/provenance/ and returns its relative path.
 func vendor(t *testing.T, root string, manifest meta.Manifest, files map[string][]byte) string {
 	t.Helper()
 	data, err := json.MarshalIndent(manifest, "", "  ")
@@ -53,7 +53,7 @@ func vendor(t *testing.T, root string, manifest meta.Manifest, files map[string]
 	for name, body := range files {
 		all[name] = body
 	}
-	relative, err := StageArtifact(root, capsule.EntryName(manifest.Name, manifest.Keys.Identity.Digest()), all)
+	relative, err := StageEntry(root, capsule.EntryName(manifest.Name, manifest.Keys.Identity.Digest()), all)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestVerifyRejectsARenamedDirectory(t *testing.T) {
 	root := projectRoot(t)
 	app, appFiles := recipeArtifact(t, "star/2.7.11b", "echo star\n")
 	appPath := vendor(t, root, app, appFiles)
-	moved := ArtifactPath("star--9.9.9@aaaaaaaaaaaa")
+	moved := EntryPath("star--9.9.9@aaaaaaaaaaaa")
 	if err := os.Rename(filepath.Join(Dir(root), appPath), filepath.Join(Dir(root), moved)); err != nil {
 		t.Fatal(err)
 	}
@@ -259,11 +259,11 @@ func TestVerifyRejectsAnOriginForAnAbsentArtifact(t *testing.T) {
 
 	l := New()
 	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
-	if err := l.AddOrigin("artifacts/ghost--1.0@aaaaaaaaaaaa", Origin{Repository: "ghcr.io/x/y", ManifestDigest: digestA}); err != nil {
+	if err := l.AddRemote("provenance/ghost--1.0@aaaaaaaaaaaa", Remote{Repository: "ghcr.io/x/y", ManifestDigest: digestA}); err != nil {
 		t.Fatal(err)
 	}
 	_, problems := Verify(root, l)
-	if !strings.Contains(problemText(problems), "origin refers to an artifact that is not vendored") {
+	if !strings.Contains(problemText(problems), "remote refers to an artifact that is not vendored") {
 		t.Fatalf("problems:\n%s", problemText(problems))
 	}
 }

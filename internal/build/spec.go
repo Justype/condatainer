@@ -189,7 +189,7 @@ const ScratchPath = "/cnt_tmp"
 // the machine from Options. NCPUS, MEM and MEM_GB are appended unprefixed — the
 // exception to CNT_, so a recipe copied from a cluster's docs still works.
 func buildEnv(spec Spec, opts Options) []string {
-	effRS := buildEffectiveResourceSpec(opts.ScriptSpecs)
+	effRS := EffectiveResourceSpec(opts.ScriptSpecs)
 	cpus := effRS.CpusPerTask
 	if effRS.TasksPerNode > 1 {
 		cpus *= effRS.TasksPerNode

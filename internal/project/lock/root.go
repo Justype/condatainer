@@ -55,8 +55,8 @@ func Dir(root string) string { return filepath.Join(root, DirName) }
 // FilePath is the lock document inside a project root.
 func FilePath(root string) string { return filepath.Join(Dir(root), FileName) }
 
-// ArtifactsPath is the vendored artifact directory inside a project root.
-func ArtifactsPath(root string) string { return filepath.Join(Dir(root), ArtifactsDir) }
+// ProvenancePath is the vendored artifact directory inside a project root.
+func ProvenancePath(root string) string { return filepath.Join(Dir(root), ProvenanceDir) }
 
 // Load reads and validates a project's lock. A project with a cnt-lock/ but no
 // lock.json yet is an empty lock, not an error: `project lock` creates the

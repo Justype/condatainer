@@ -111,6 +111,10 @@ func runE(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve overlays
+	overlays, err = projectOverlays(overlays)
+	if err != nil {
+		return err
+	}
 	resolvedOverlays, err := container.ResolveOverlayPaths(overlays)
 	if err != nil {
 		return err

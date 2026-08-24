@@ -190,8 +190,7 @@ func LookupAt(path, name string, keys meta.Keys, match Match) (store.Candidate, 
 	candidate := store.Candidate{
 		Name: artifact.Name, Path: path, Root: filepath.Dir(path),
 		Layout: store.LayoutFlat, Size: info.Size(),
-		Identity: meta.KeyRef{Scheme: artifact.IdentityScheme, SHA256: artifact.Identity},
-		Equiv:    meta.KeyRef{Scheme: artifact.EquivScheme, SHA256: artifact.Equiv},
+		Identity: artifact.IdentityRef(), Equiv: artifact.EquivRef(),
 	}
 	if candidate.Identity == keys.Identity {
 		return candidate, true

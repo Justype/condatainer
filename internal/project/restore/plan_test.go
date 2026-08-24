@@ -55,7 +55,7 @@ func vendor(t *testing.T, root string, manifest meta.Manifest, recipe string) st
 	if err != nil {
 		t.Fatal(err)
 	}
-	relative, err := lock.StageArtifact(root, capsule.EntryName(manifest.Name, manifest.Keys.Identity.Digest()),
+	relative, err := lock.StageEntry(root, capsule.EntryName(manifest.Name, manifest.Keys.Identity.Digest()),
 		map[string][]byte{meta.FileName: data, meta.RecipeFileName: []byte(recipe)})
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +143,7 @@ func TestComputeChoosesFetchOrBuild(t *testing.T) {
 	l := lock.New()
 	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: appPath}
 	digest := "sha256:" + strings.Repeat("a", 64)
-	if err := l.AddOrigin(appPath, lock.Origin{Repository: "ghcr.io/x/star", ManifestDigest: digest}); err != nil {
+	if err := l.AddRemote(appPath, lock.Remote{Repository: "ghcr.io/x/star", ManifestDigest: digest}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -160,7 +160,7 @@ func TestComputeChoosesFetchOrBuild(t *testing.T) {
 	}
 }
 
-// Without an origin there is nowhere to fetch from, so a miss is a rebuild.
+// Without an remote there is nowhere to fetch from, so a miss is a rebuild.
 func TestComputeBuildsWhenNoOriginIsRecorded(t *testing.T) {
 	root := projectRoot(t)
 	app := artifact(t, "star/2.7.11b", "echo star\n")
@@ -312,7 +312,7 @@ func TestComputeReportsInteractiveRebuilds(t *testing.T) {
 func TestComputeStopsOnAnInvalidLock(t *testing.T) {
 	root := projectRoot(t)
 	l := lock.New()
-	l.Selections["ghost/1.0"] = lock.Selection{Artifact: lock.ArtifactPath("ghost--1.0@aaaaaaaaaaaa")}
+	l.Selections["ghost/1.0"] = lock.Selection{Artifact: lock.EntryPath("ghost--1.0@aaaaaaaaaaaa")}
 
 	plan := Compute(root, l, Options{lookup: nothingInstalled})
 	if plan.Complete() || len(plan.Steps) != 0 {
@@ -651,7 +651,7 @@ func TestComputeDoesNotMaterializeInputsForAFetch(t *testing.T) {
 	l := lock.New()
 	l.Selections["index/1.0"] = lock.Selection{Artifact: dataPath}
 	digest := "sha256:" + strings.Repeat("b", 64)
-	if err := l.AddOrigin(dataPath, lock.Origin{Repository: "ghcr.io/x/index", ManifestDigest: digest}); err != nil {
+	if err := l.AddRemote(dataPath, lock.Remote{Repository: "ghcr.io/x/index", ManifestDigest: digest}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -740,14 +740,14 @@ func TestInboundEdgesKeepsTheStrictestRole(t *testing.T) {
 	vendor(t, root, strict, "echo strict\n")
 
 	l := lock.New()
-	l.Selections["grch38/star-gencode49"] = lock.Selection{Artifact: lock.ArtifactPath(entryName(loose))}
-	l.Selections["star/2.7.11b/index"] = lock.Selection{Artifact: lock.ArtifactPath(entryName(strict))}
+	l.Selections["grch38/star-gencode49"] = lock.Selection{Artifact: lock.EntryPath(entryName(loose))}
+	l.Selections["star/2.7.11b/index"] = lock.Selection{Artifact: lock.EntryPath(entryName(strict))}
 
 	verified, problems := lock.Verify(root, l)
 	if len(problems) > 0 {
 		t.Fatalf("problems = %v", problems)
 	}
-	got, ok := inboundEdges(verified)[lock.ArtifactPath(entryName(shared))]
+	got, ok := inboundEdges(verified)[lock.EntryPath(entryName(shared))]
 	if !ok {
 		t.Fatal("the shared dependency has no inbound edge")
 	}
@@ -762,4 +762,175 @@ func history(manifest meta.Manifest) meta.Dependency {
 	dep := edge(manifest)
 	dep.Role = meta.RoleHistory
 	return dep
+}
+
+// --only is what a submitted job carries: the artifact it was sent for, plus
+// what that artifact needs to be built.
+func TestComputeRestrictsToOneArtifactAndItsClosure(t *testing.T) {
+	root := projectRoot(t)
+	dep := artifact(t, "zlib/1.3", "echo zlib\n")
+	depPath := vendor(t, root, dep, "echo zlib\n")
+	wanted := artifact(t, "index/1.0", "echo index\n", edge(dep))
+	wantedPath := vendor(t, root, wanted, "echo index\n")
+	other := artifact(t, "samtools/1.23.1", "echo samtools\n")
+	otherPath := vendor(t, root, other, "echo samtools\n")
+
+	l := lock.New()
+	l.Selections["index/1.0"] = lock.Selection{Artifact: wantedPath}
+	l.Selections["samtools/1.23.1"] = lock.Selection{Artifact: otherPath}
+
+	plan := Compute(root, l, Options{lookup: nothingInstalled, Only: wantedPath})
+	if !plan.Complete() {
+		t.Fatalf("problems: %v", plan.Problems)
+	}
+	byName := steps(plan)
+	if len(plan.Steps) != 2 {
+		t.Fatalf("steps = %v, want only the named artifact and its dependency", byName)
+	}
+	if _, ok := byName["samtools/1.23.1"]; ok {
+		t.Error("an unrelated selection survived --only")
+	}
+	if got := byName["zlib/1.3"]; got.Artifact != depPath {
+		t.Errorf("the dependency was dropped: %#v", got)
+	}
+}
+
+// A selection that is also a dependency stays a selection: narrowing what a
+// restore covers says nothing about what its members are.
+func TestComputeKeepsDirectnessUnderOnly(t *testing.T) {
+	root := projectRoot(t)
+	dep := artifact(t, "zlib/1.3", "echo zlib\n")
+	depPath := vendor(t, root, dep, "echo zlib\n")
+	wanted := artifact(t, "index/1.0", "echo index\n", edge(dep))
+	wantedPath := vendor(t, root, wanted, "echo index\n")
+
+	l := lock.New()
+	l.Selections["index/1.0"] = lock.Selection{Artifact: wantedPath}
+	l.Selections["zlib/1.3"] = lock.Selection{Artifact: depPath}
+
+	plan := Compute(root, l, Options{lookup: nothingInstalled, Only: wantedPath})
+	if got := steps(plan)["zlib/1.3"]; !got.Direct {
+		t.Errorf("a selected dependency became a build dependency under --only: %#v", got)
+	}
+}
+
+func TestComputeRefusesAnOnlyItDoesNotCover(t *testing.T) {
+	root := projectRoot(t)
+	wanted := artifact(t, "index/1.0", "echo index\n")
+	wantedPath := vendor(t, root, wanted, "echo index\n")
+
+	l := lock.New()
+	l.Selections["index/1.0"] = lock.Selection{Artifact: wantedPath}
+
+	plan := Compute(root, l, Options{lookup: nothingInstalled, Only: "provenance/absent"})
+	if plan.Complete() {
+		t.Fatal("--only naming nothing was accepted")
+	}
+	if len(plan.Steps) != 0 {
+		t.Errorf("steps = %v, want none planned", plan.Steps)
+	}
+}
+
+// A problem belonging to an artifact --only excluded is not this restore's.
+func TestComputeDropsProblemsFromOutsideOnly(t *testing.T) {
+	root := projectRoot(t)
+	wanted := artifact(t, "index/1.0", "echo index\n")
+	wantedPath := vendor(t, root, wanted, "echo index\n")
+	interactive := artifact(t, "genome/1.0", "echo genome\n")
+	interactive.Source.RequiresInput = true
+	interactivePath := vendor(t, root, interactive, "echo genome\n")
+
+	l := lock.New()
+	l.Selections["index/1.0"] = lock.Selection{Artifact: wantedPath}
+	l.Selections["genome/1.0"] = lock.Selection{Artifact: interactivePath}
+
+	if plan := Compute(root, l, Options{lookup: nothingInstalled}); plan.Complete() {
+		t.Fatal("the interactive rebuild was expected to be a problem")
+	}
+	plan := Compute(root, l, Options{lookup: nothingInstalled, Only: wantedPath})
+	if !plan.Complete() {
+		t.Errorf("problems from outside --only were reported: %v", plan.Problems)
+	}
+}
+
+// stepsFor returns every step for one artifact path, since a name can be shared
+// by two identities and a path by two destinations.
+func stepsFor(plan *Plan, artifact string) []Step {
+	var out []Step
+	for _, step := range plan.Steps {
+		if step.Artifact == artifact {
+			out = append(out, step)
+		}
+	}
+	return out
+}
+
+// Two identities of one name contend for the bare name. It belongs to the
+// selection, not to whatever a rebuild happened to need — and dependencies are
+// built first, so build order alone would decide it backwards.
+func TestComputeGivesTheFlatNameToTheSelectionNotTheBuildDependency(t *testing.T) {
+	root := projectRoot(t)
+	older := artifact(t, "samtools/1.23.1", "echo older\n")
+	olderPath := vendor(t, root, older, "echo older\n")
+	genome := artifact(t, "grch38/genome", "echo genome\n", edge(older))
+	genomePath := vendor(t, root, genome, "echo genome\n")
+	selected := artifact(t, "samtools/1.23.1", "echo selected\n")
+	selectedPath := vendor(t, root, selected, "echo selected\n")
+
+	l := lock.New()
+	l.Selections["grch38/genome"] = lock.Selection{Artifact: genomePath}
+	l.Selections["samtools/1.23.1"] = lock.Selection{Artifact: selectedPath}
+
+	plan := Compute(root, l, Options{lookup: nothingInstalled, KeepBuildDeps: true})
+	if !plan.Complete() {
+		t.Fatalf("problems: %v", plan.Problems)
+	}
+	dependency := stepsFor(plan, olderPath)
+	if len(dependency) != 1 {
+		t.Fatalf("steps for the build dependency = %v", dependency)
+	}
+	if !dependency[0].StoreOnly {
+		t.Error("the build dependency was left free to take the name its selection answers to")
+	}
+	selection := stepsFor(plan, selectedPath)
+	if len(selection) != 1 || selection[0].StoreOnly {
+		t.Errorf("the selection yielded its own name: %#v", selection)
+	}
+}
+
+// Nothing else claims the name, so the dependency is entitled to it.
+func TestComputeLeavesAnUncontestedBuildDependencyFlat(t *testing.T) {
+	root := projectRoot(t)
+	dep := artifact(t, "zlib/1.3", "echo zlib\n")
+	depPath := vendor(t, root, dep, "echo zlib\n")
+	genome := artifact(t, "grch38/genome", "echo genome\n", edge(dep))
+	genomePath := vendor(t, root, genome, "echo genome\n")
+
+	l := lock.New()
+	l.Selections["grch38/genome"] = lock.Selection{Artifact: genomePath}
+
+	plan := Compute(root, l, Options{lookup: nothingInstalled, KeepBuildDeps: true})
+	if got := stepsFor(plan, depPath); len(got) != 1 || got[0].StoreOnly {
+		t.Errorf("an uncontested build dependency was pushed into the store: %#v", got)
+	}
+}
+
+// A discarded build dependency is never installed, so it has no name to yield.
+func TestComputeLeavesADiscardedBuildDependencyUnmarked(t *testing.T) {
+	root := projectRoot(t)
+	older := artifact(t, "samtools/1.23.1", "echo older\n")
+	olderPath := vendor(t, root, older, "echo older\n")
+	genome := artifact(t, "grch38/genome", "echo genome\n", edge(older))
+	genomePath := vendor(t, root, genome, "echo genome\n")
+	selected := artifact(t, "samtools/1.23.1", "echo selected\n")
+	selectedPath := vendor(t, root, selected, "echo selected\n")
+
+	l := lock.New()
+	l.Selections["grch38/genome"] = lock.Selection{Artifact: genomePath}
+	l.Selections["samtools/1.23.1"] = lock.Selection{Artifact: selectedPath}
+
+	plan := Compute(root, l, Options{lookup: nothingInstalled})
+	if got := stepsFor(plan, olderPath); len(got) != 1 || got[0].StoreOnly {
+		t.Errorf("a transient step was marked store-only: %#v", got)
+	}
 }

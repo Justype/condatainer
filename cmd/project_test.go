@@ -41,7 +41,7 @@ func writeScript(t *testing.T, root, rel, body string) {
 	}
 }
 
-// vendorArtifact puts a verifiable artifact into cnt-lock/artifacts/ and returns
+// vendorArtifact puts a verifiable artifact into cnt-lock/provenance/ and returns
 // its relative path, standing in for a selection that already happened.
 func vendorArtifact(t *testing.T, root, name, recipe string) string {
 	t.Helper()
@@ -64,7 +64,7 @@ func vendorArtifact(t *testing.T, root, name, recipe string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	relative, err := lock.StageArtifact(root, capsule.EntryName(name, manifest.Keys.Identity.Digest()),
+	relative, err := lock.StageEntry(root, capsule.EntryName(name, manifest.Keys.Identity.Digest()),
 		map[string][]byte{meta.FileName: data, meta.RecipeFileName: []byte(recipe)})
 	if err != nil {
 		t.Fatal(err)
@@ -347,7 +347,7 @@ func TestProjectRestoreFailsOnAnInvalidLock(t *testing.T) {
 	root := newProject(t)
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: "artifacts/star--2.7.11b@000000000000"}
+	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: "provenance/star--2.7.11b@000000000000"}
 	if err := lock.Publish(root, l); err != nil {
 		t.Fatal(err)
 	}

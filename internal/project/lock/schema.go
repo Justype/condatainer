@@ -27,8 +27,8 @@ const DirName = "cnt-lock"
 // FileName is the lock document inside DirName.
 const FileName = "lock.json"
 
-// ArtifactsDir holds one directory per vendored artifact, inside DirName.
-const ArtifactsDir = "artifacts"
+// ProvenanceDir holds one directory per vendored artifact, inside DirName.
+const ProvenanceDir = "provenance"
 
 // PathPrefix marks a selection key that addresses an overlay by project path
 // rather than by name. A path request has no catalog.Dep to render, and the
@@ -55,12 +55,12 @@ type Lock struct {
 	// selection-specific policy can be added without copying artifact facts
 	// into the mapping.
 	Selections map[string]Selection `json:"selections"`
-	// Origins records where an artifact can be fetched from, keyed by the same
+	// Remotes records where an artifact can be fetched from, keyed by the same
 	// relative artifact path selections use. It is absent until something
 	// records a location: `project lock select --from`, and later `project
-	// push`, append to it. A closure-only artifact may have origins too, which
+	// push`, append to it. A closure-only artifact may have remotes too, which
 	// is why this is keyed by artifact rather than nested under a selection.
-	Origins map[string][]Origin `json:"origins,omitempty"`
+	Remotes map[string][]Remote `json:"remotes,omitempty"`
 }
 
 // Selection is which artifact satisfies one request.
@@ -70,10 +70,10 @@ type Selection struct {
 	Artifact string `json:"artifact"`
 }
 
-// Origin is one exact place an artifact can be fetched from. It is a location,
+// Remote is one exact place an artifact can be fetched from. It is a location,
 // never artifact metadata: nothing here is compared against the payload, which
 // carries its own keys and is verified on arrival.
-type Origin struct {
+type Remote struct {
 	// Repository is the complete OCI repository coordinate, with no scheme,
 	// tag, or digest.
 	Repository string `json:"repository"`
@@ -87,8 +87,8 @@ func New() *Lock {
 	return &Lock{SchemaVersion: SchemaVersion, Selections: map[string]Selection{}}
 }
 
-// ArtifactPath renders the relative artifact directory for one entry name.
-func ArtifactPath(entry string) string { return ArtifactsDir + "/" + entry }
+// EntryPath renders the relative artifact directory for one entry name.
+func EntryPath(entry string) string { return ProvenanceDir + "/" + entry }
 
 // Unmarshal parses a lock and rejects anything this build does not understand.
 //
@@ -127,8 +127,8 @@ func (l *Lock) Marshal() ([]byte, error) {
 	}
 	out := *l
 	out.SchemaVersion = SchemaVersion
-	if len(out.Origins) == 0 {
-		out.Origins = nil
+	if len(out.Remotes) == 0 {
+		out.Remotes = nil
 	}
 	// encoding/json sorts map keys, and struct fields keep declaration order.
 	data, err := json.MarshalIndent(out, "", "  ")
@@ -139,14 +139,14 @@ func (l *Lock) Marshal() ([]byte, error) {
 }
 
 // Validate checks the lock's internal shape: key spelling, artifact paths, and
-// origin references. It reads nothing from disk — a checkout with no images and
+// remote references. It reads nothing from disk — a checkout with no images and
 // no configuration validates exactly the same.
 func (l *Lock) Validate() error {
 	for request, selection := range l.Selections {
 		if strings.TrimSpace(request) == "" {
 			return fmt.Errorf("%w: a selection key is empty", ErrInvalid)
 		}
-		if err := validArtifactPath(selection.Artifact); err != nil {
+		if err := validEntryPath(selection.Artifact); err != nil {
 			return fmt.Errorf("%w: selection %q: %v", ErrInvalid, request, err)
 		}
 		if destination, ok := strings.CutPrefix(request, PathPrefix); ok {
@@ -155,30 +155,30 @@ func (l *Lock) Validate() error {
 			}
 		}
 	}
-	for artifact, origins := range l.Origins {
-		if err := validArtifactPath(artifact); err != nil {
-			return fmt.Errorf("%w: origin key: %v", ErrInvalid, err)
+	for artifact, remotes := range l.Remotes {
+		if err := validEntryPath(artifact); err != nil {
+			return fmt.Errorf("%w: remote key: %v", ErrInvalid, err)
 		}
-		seen := make(map[Origin]bool, len(origins))
-		for _, origin := range origins {
-			if err := origin.validate(); err != nil {
-				return fmt.Errorf("%w: origin for %q: %v", ErrInvalid, artifact, err)
+		seen := make(map[Remote]bool, len(remotes))
+		for _, remote := range remotes {
+			if err := remote.validate(); err != nil {
+				return fmt.Errorf("%w: remote for %q: %v", ErrInvalid, artifact, err)
 			}
-			if seen[origin] {
-				return fmt.Errorf("%w: origin for %q is listed twice: %s@%s",
-					ErrInvalid, artifact, origin.Repository, origin.ManifestDigest)
+			if seen[remote] {
+				return fmt.Errorf("%w: remote for %q is listed twice: %s@%s",
+					ErrInvalid, artifact, remote.Repository, remote.ManifestDigest)
 			}
-			seen[origin] = true
+			seen[remote] = true
 		}
 	}
 	return nil
 }
 
-// validArtifactPath requires a relative, slash-separated path inside the
-// artifacts directory. Every lock path is hostile input: it names a directory a
-// later step will read, so traversal and absolute paths are refused before
+// validEntryPath requires a relative, slash-separated path inside the
+// provenance directory. Every lock path is hostile input: it names a directory
+// a later step will read, so traversal and absolute paths are refused before
 // anything touches the filesystem.
-func validArtifactPath(p string) error {
+func validEntryPath(p string) error {
 	switch {
 	case p == "":
 		return errors.New("artifact path is empty")
@@ -188,13 +188,13 @@ func validArtifactPath(p string) error {
 		return fmt.Errorf("artifact path %q is absolute", p)
 	case p != path.Clean(p):
 		return fmt.Errorf("artifact path %q is not clean", p)
-	case !strings.HasPrefix(p, ArtifactsDir+"/"):
-		return fmt.Errorf("artifact path %q is outside %s/", p, ArtifactsDir)
+	case !strings.HasPrefix(p, ProvenanceDir+"/"):
+		return fmt.Errorf("artifact path %q is outside %s/", p, ProvenanceDir)
 	case strings.Contains(p, "/../"), strings.HasSuffix(p, "/.."):
 		return fmt.Errorf("artifact path %q escapes the lock directory", p)
 	}
 	if len(strings.Split(p, "/")) != 2 {
-		return fmt.Errorf("artifact path %q is not %s/<entry>", p, ArtifactsDir)
+		return fmt.Errorf("artifact path %q is not %s/<entry>", p, ProvenanceDir)
 	}
 	return nil
 }
@@ -226,7 +226,7 @@ func validProjectPath(p string) error {
 	return nil
 }
 
-func (o Origin) validate() error {
+func (o Remote) validate() error {
 	if strings.TrimSpace(o.Repository) == "" {
 		return errors.New("repository is empty")
 	}
@@ -252,29 +252,29 @@ func isPortColon(repository string, i int) bool {
 	return strings.Contains(repository[i:], "/")
 }
 
-// AddOrigin records one fetch location for an artifact, keeping the list
+// AddRemote records one fetch location for an artifact, keeping the list
 // deduplicated and in insertion order. Order is retry priority, so an existing
 // entry stays where it is rather than moving to the front.
 //
 // This is the seam `project push` writes through: publishing appends the
 // repository and platform digest it produced, for selected and closure-only
 // artifacts alike.
-func (l *Lock) AddOrigin(artifact string, origin Origin) error {
-	if err := validArtifactPath(artifact); err != nil {
+func (l *Lock) AddRemote(artifact string, remote Remote) error {
+	if err := validEntryPath(artifact); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
-	if err := origin.validate(); err != nil {
+	if err := remote.validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
-	for _, have := range l.Origins[artifact] {
-		if have == origin {
+	for _, have := range l.Remotes[artifact] {
+		if have == remote {
 			return nil
 		}
 	}
-	if l.Origins == nil {
-		l.Origins = map[string][]Origin{}
+	if l.Remotes == nil {
+		l.Remotes = map[string][]Remote{}
 	}
-	l.Origins[artifact] = append(l.Origins[artifact], origin)
+	l.Remotes[artifact] = append(l.Remotes[artifact], remote)
 	return nil
 }
 
@@ -295,7 +295,7 @@ func (l *Lock) Requests() []string {
 // artifact directories into the closure, and walking those needs to read the
 // manifests. Pruning against this set alone would delete the closure.
 //
-// Origins are deliberately not roots. An origin says where an artifact can be
+// Remotes are deliberately not roots. An remote says where an artifact can be
 // fetched, which is meaningless once nothing selects it.
 func (l *Lock) SelectedArtifacts() map[string]bool {
 	out := make(map[string]bool, len(l.Selections))

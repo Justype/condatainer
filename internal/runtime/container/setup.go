@@ -67,6 +67,11 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 		return nil, err
 	}
 
+	// Refuse a mount where one payload would disappear under another
+	if err := ensureDistinctPrefixes(overlays); err != nil {
+		return nil, err
+	}
+
 	// Put .img overlay last if present
 	overlays = putImgToLast(overlays)
 
@@ -265,6 +270,51 @@ func ensureSingleImage(overlays []string) error {
 	}
 	if imgCount > 1 {
 		return fmt.Errorf("only one .img overlay is allowed, found %d", imgCount)
+	}
+	return nil
+}
+
+// ensureDistinctPrefixes refuses a mount where two images claim one
+// /cnt/<name> subtree.
+//
+// Overlays are disjoint subtrees, not stacked diffs: each payload lives under
+// its own prefix and nothing merges them. Two images claiming one prefix
+// therefore do not combine — the later mount wins the whole subtree and the
+// earlier one silently contributes nothing, while both still appear on PATH and
+// in the environment. That is a wrong container that looks like a working one,
+// so it is an error rather than a warning.
+//
+// Two builds of one name are the case this catches: a project's restored copy
+// and a flat install of the same name record the same prefix. A base, an OS
+// image and anything without readable metadata record no prefix and are exempt
+// for free. The same file named twice is redundant, not a collision.
+func ensureDistinctPrefixes(overlays []string) error {
+	return distinctPrefixes(overlays, func(path string) string {
+		contribution, _ := resolveImage(path)
+		return contribution.Prefix
+	})
+}
+
+// distinctPrefixes is ensureDistinctPrefixes over a prefix lookup, so the rule
+// can be exercised without a real image to read metadata out of.
+func distinctPrefixes(overlays []string, prefixOf func(string) string) error {
+	claimed := map[string]string{}
+	for _, overlay := range overlays {
+		path := cleanOverlayPath(overlay)
+		prefix := prefixOf(path)
+		if prefix == "" {
+			continue
+		}
+		held, taken := claimed[prefix]
+		if !taken {
+			claimed[prefix] = path
+			continue
+		}
+		if held == path {
+			continue
+		}
+		return fmt.Errorf("%s and %s both install to %s; one would hide the other",
+			held, path, prefix)
 	}
 	return nil
 }

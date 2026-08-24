@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/project/lock"
 	"github.com/Justype/condatainer/internal/project/restore"
 	"github.com/Justype/condatainer/internal/utils"
@@ -315,6 +316,7 @@ func newProjectRestoreCmd() *cobra.Command {
 		noPrebuilt    bool
 		keepBuildDeps bool
 		matchMode     string
+		only          string
 	)
 	cmd := &cobra.Command{
 		Use:   "restore",
@@ -344,6 +346,12 @@ the lock names, which additionally requires a Conda artifact to replay its
 explicit.txt to the byte and a data artifact to be rebuilt in the same
 environment.
 
+A rebuild whose recipe carries scheduler directives is submitted rather than run
+here, and so is anything waiting on it; dependencies become afterok edges. The
+command then exits with the jobs-submitted code, having made nothing available
+yet. Re-running the restore is how it resumes: a job still queued is reported
+rather than submitted twice, and one that finished is adopted.
+
 Restore is atomic per artifact, not across the project: a later failure leaves
 earlier results in place, and re-running adopts them.`,
 		Args:         cobra.NoArgs,
@@ -361,7 +369,10 @@ earlier results in place, and re-running adopts them.`,
 			if err != nil {
 				return err
 			}
-			opts := restore.Options{Match: match, SkipPrebuilt: noPrebuilt, KeepBuildDeps: keepBuildDeps}
+			opts := restore.Options{
+				Match: match, SkipPrebuilt: noPrebuilt, KeepBuildDeps: keepBuildDeps,
+				Only: only, SubmitJobs: config.Global.SubmitJob,
+			}
 
 			if dryRun {
 				return reportPlan(restore.Compute(root, current, opts), jsonOutput)
@@ -369,6 +380,11 @@ earlier results in place, and re-running adopts them.`,
 			report, runErr := restore.Run(cmd.Context(), root, current, opts)
 			if err := reportRestore(report, jsonOutput); err != nil {
 				return err
+			}
+			if errors.Is(runErr, restore.ErrJobsSubmitted) {
+				utils.PrintNote("%d scheduler job(s) submitted. exiting with code %d",
+					len(report.Submitted), ExitCodeJobsSubmitted)
+				os.Exit(ExitCodeJobsSubmitted)
 			}
 			return runErr
 		},
@@ -380,6 +396,10 @@ earlier results in place, and re-running adopts them.`,
 		"install build dependencies instead of discarding them when the restore ends")
 	cmd.Flags().StringVar(&matchMode, "match", string(restore.MatchEquivalent),
 		"key a restored artifact must agree with: equivalent or identity")
+	// Set by the job a submitted rebuild runs, so it produces exactly what it
+	// was sent for. Nothing a person types.
+	cmd.Flags().StringVar(&only, "only", "", "restore one vendored artifact and its closure")
+	_ = cmd.Flags().MarkHidden("only")
 	return cmd
 }
 
@@ -449,6 +469,17 @@ func reportRestore(report *restore.Report, jsonOutput bool) error {
 	// dependency reads as one problem rather than as one per artifact above it.
 	for _, blocked := range report.Blocked {
 		utils.PrintWarning("%s: not attempted, %s failed", utils.StyleName(blocked.Name), blocked.Cause)
+	}
+	for _, submitted := range report.Submitted {
+		verb := "submitted as"
+		if submitted.Queued {
+			verb = "already queued as"
+		}
+		line := fmt.Sprintf("  %-8s %s %s job %s", "pending", utils.StyleName(submitted.Name), verb, submitted.JobID)
+		if len(submitted.DependsOn) > 0 {
+			line += fmt.Sprintf(" (after %s)", strings.Join(submitted.DependsOn, ", "))
+		}
+		utils.PrintMessage("%s", line)
 	}
 	if report.Complete() {
 		utils.PrintSuccess("Project restored: %d artifact(s).", len(report.Results))

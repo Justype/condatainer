@@ -10,10 +10,10 @@ import (
 
 	"github.com/Justype/condatainer/internal/artifact/capsule"
 	"github.com/Justype/condatainer/internal/artifact/compare"
-	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image/producer"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/project/lock"
 	"github.com/Justype/condatainer/internal/store"
@@ -26,6 +26,12 @@ var ErrIncomplete = errors.New("restore is incomplete")
 // ErrNotAcquirable reports an acquisition this build cannot perform.
 var ErrNotAcquirable = errors.New("cannot acquire artifact")
 
+// ErrJobsSubmitted reports that the restore handed work to the scheduler, so
+// the project is not available yet. It is not a failure: re-running the restore
+// after the jobs finish adopts what they published, and is also how a partly
+// finished submission is resumed.
+var ErrJobsSubmitted = errors.New("restore submitted scheduler jobs")
+
 // Outcome is how one artifact was made available.
 type Outcome string
 
@@ -34,7 +40,7 @@ const (
 	OutcomeAdopted Outcome = "adopted"
 	// OutcomeBuilt rebuilt it from the vendored sources.
 	OutcomeBuilt Outcome = "built"
-	// OutcomeFetched downloaded it from a recorded origin.
+	// OutcomeFetched downloaded it from a recorded remote.
 	OutcomeFetched Outcome = "fetched"
 )
 
@@ -88,14 +94,19 @@ type Report struct {
 	Results  []Result  `json:"results,omitempty"`
 	Failures []Failure `json:"failures,omitempty"`
 	Blocked  []Blocked `json:"blocked,omitempty"`
+	// Submitted are the rebuilds the scheduler will run. They are not results:
+	// nothing is available until those jobs finish.
+	Submitted []Submitted `json:"submitted,omitempty"`
 	// Problems are planning failures, which stop a restore before it acquires
 	// anything.
 	Problems []string `json:"problems,omitempty"`
 }
 
-// Complete reports whether every selection is now available.
+// Complete reports whether every selection is now available. A submission is
+// not completion: the artifact exists only once its job has run.
 func (r *Report) Complete() bool {
-	return len(r.Failures) == 0 && len(r.Blocked) == 0 && len(r.Problems) == 0
+	return len(r.Failures) == 0 && len(r.Blocked) == 0 && len(r.Problems) == 0 &&
+		len(r.Submitted) == 0
 }
 
 // Run makes every locked selection available, dependency-first.
@@ -126,6 +137,10 @@ func Run(ctx context.Context, root string, l *lock.Lock, opts Options) (*Report,
 	scratch := &transientRoot{}
 	defer scratch.remove()
 
+	// Which rebuilds the scheduler runs, decided before the first step so a
+	// build dependency knows whether it is produced here or inside a job.
+	queue := planJobs(ctx, root, verified, plan, opts)
+
 	// Where each artifact ended up, so a dependent mounts what was just made
 	// rather than resolving its name again.
 	available := map[string]string{}
@@ -137,10 +152,38 @@ func Run(ctx context.Context, root string, l *lock.Lock, opts Options) (*Report,
 		if err := ctx.Err(); err != nil {
 			return report, err
 		}
+		key := stepKey(step)
+		// Produced inside a submitted job instead of here, together with the
+		// dependent that needs it.
+		if queue.deferred[key] {
+			continue
+		}
 		if cause := blockedBy(step, stopped); cause != "" {
 			report.Blocked = append(report.Blocked, Blocked{
 				Artifact: step.Artifact, Name: step.Name, Cause: cause})
 			stopped[step.Artifact] = cause
+			continue
+		}
+		if queue.submit[key] {
+			entry, ok := verified.Entries[step.Artifact]
+			if !ok {
+				report.Failures = append(report.Failures, Failure{Artifact: step.Artifact,
+					Name: step.Name, Reason: "the artifact is no longer vendored"})
+				stopped[step.Artifact] = step.Artifact
+				continue
+			}
+			submitted, result, failure := queue.submitStep(ctx, root, entry, step, queue.waitFor(step), opts)
+			switch {
+			case failure != nil:
+				report.Failures = append(report.Failures, *failure)
+				stopped[step.Artifact] = step.Artifact
+			case submitted != nil:
+				report.Submitted = append(report.Submitted, *submitted)
+			default:
+				// Installed between planning and submission: adopted, not queued.
+				report.Results = append(report.Results, *result)
+				available[step.Artifact] = result.Path
+			}
 			continue
 		}
 		result, failure := execute(ctx, root, verified, step, plan.Match, available, scratch, opts)
@@ -156,9 +199,12 @@ func Run(ctx context.Context, root string, l *lock.Lock, opts Options) (*Report,
 			available[step.Artifact] = result.Path
 		}
 	}
-	if !report.Complete() {
+	switch {
+	case len(report.Failures) > 0 || len(report.Blocked) > 0:
 		return report, fmt.Errorf("%w: %d artifact(s) unavailable, %d blocked",
 			ErrIncomplete, len(report.Failures), len(report.Blocked))
+	case len(report.Submitted) > 0:
+		return report, fmt.Errorf("%w: %d job(s)", ErrJobsSubmitted, len(report.Submitted))
 	}
 	return report, nil
 }
@@ -232,10 +278,10 @@ func execute(ctx context.Context, root string, verified *lock.Verified, step Ste
 		return result, nil
 	case ActionFetch:
 		// The seam is here; the transport is not wired yet. Failing is right
-		// either way: a recorded origin that cannot be used is an acquisition
+		// either way: a recorded remote that cannot be used is an acquisition
 		// fault, and --no-prebuilt is how a caller asks to build instead.
 		return nil, &Failure{Artifact: step.Artifact, Name: step.Name,
-			Reason: fmt.Sprintf("%v: origins are recorded but fetching is not implemented yet; use --no-prebuilt to build instead",
+			Reason: fmt.Sprintf("%v: remotes are recorded but fetching is not implemented yet; use --no-prebuilt to build instead",
 				ErrNotAcquirable)}
 	}
 	return rebuild(ctx, root, entry, step, match, available, scratch, opts, result)
@@ -258,6 +304,22 @@ func rebuild(ctx context.Context, root string, entry *lock.Entry, step Step, mat
 	deps, err := dependencyPaths(entry, available)
 	if err != nil {
 		return nil, fail("%v", err)
+	}
+
+	// A project path is a target two restores can race for, and the one a
+	// submitted job was sent to produce. The guard serializes them and is what
+	// the job adopts, by the job ID whoever submitted it recorded. A store
+	// artifact is guarded by its own transaction instead.
+	if step.Destination != "" {
+		destination := filepath.Join(root, filepath.FromSlash(step.Destination))
+		if err := utils.MkdirAllShared(filepath.Dir(destination)); err != nil {
+			return nil, fail("%v", err)
+		}
+		guard, err := producer.AcquireLocal(destination)
+		if err != nil {
+			return nil, fail("%v", err)
+		}
+		defer guard.Release() //nolint:errcheck
 	}
 
 	transient := isTransient(step, opts)
@@ -340,7 +402,7 @@ func rebuild(ctx context.Context, root string, entry *lock.Entry, step Step, mat
 		return result, nil
 	}
 
-	candidate, err := install(entry, output)
+	candidate, err := install(entry, step, output)
 	if err != nil {
 		return nil, fail("cannot install: %v", err)
 	}
@@ -385,7 +447,7 @@ func stagingDir(root string, step Step) string {
 func dependencyPaths(entry *lock.Entry, available map[string]string) ([]build.LockedDep, error) {
 	var deps []build.LockedDep
 	for _, dep := range entry.Manifest.Dependencies {
-		artifact := lock.ArtifactPath(capsule.EntryName(dep.Name, dep.Identity.Digest()))
+		artifact := lock.EntryPath(capsule.EntryName(dep.Name, dep.Identity.Digest()))
 		path, ok := available[artifact]
 		if !ok {
 			return nil, fmt.Errorf("dependency %s was not restored before its dependent", dep.Name)
@@ -433,7 +495,9 @@ func verify(entry *lock.Entry, path string, match Match) (compare.Verdict, []str
 	want := compare.Artifact{
 		Name: entry.Manifest.Name, Type: entry.Manifest.Type,
 		Arch: entry.Manifest.Platform.Arch, Format: entry.Manifest.BuildType,
-		Identity: entry.Identity.SHA256, Equiv: entry.Equiv.SHA256,
+		// Digest(), not SHA256: compare.Read reports what it regenerated as
+		// "sha256:<hex>", and a bare hex here compares unequal to every artifact.
+		Identity: entry.Identity.Digest(), Equiv: entry.Equiv.Digest(),
 		IdentityScheme: entry.Identity.Scheme, EquivScheme: entry.Equiv.Scheme,
 		Dependencies: entry.Manifest.Dependencies,
 	}
@@ -475,7 +539,7 @@ func reject(ctx context.Context, step Step, transient bool, output string,
 	if err != nil {
 		return failure
 	}
-	identity := meta.KeyRef{Scheme: produced.IdentityScheme, SHA256: produced.Identity}
+	identity := produced.IdentityRef()
 	candidate, err := store.InstallFile(produced.Name, identity, output, store.BeginOptions{})
 	if err != nil {
 		logging.FromContext(ctx).Debug("could not keep the rejected rebuild", "name", step.Name, "err", err)
@@ -488,10 +552,11 @@ func reject(ctx context.Context, step Step, transient bool, output string,
 }
 
 // install publishes a store-addressed artifact through the destination rule:
-// the flat name when it is free, the store when it is not.
-func install(entry *lock.Entry, output string) (store.Candidate, error) {
+// the flat name when it is free, the store when it is not — or when the plan
+// has already given that name to a selection.
+func install(entry *lock.Entry, step Step, output string) (store.Candidate, error) {
 	return store.InstallFile(entry.Manifest.Name, entry.Identity, output,
-		store.BeginOptions{Equiv: entry.Equiv})
+		store.BeginOptions{Equiv: entry.Equiv, StoreOnly: step.StoreOnly})
 }
 
 // placeAt publishes a project destination by rename, refusing to overwrite

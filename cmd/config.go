@@ -38,6 +38,7 @@ var configKeyDefs = map[string]bool{
 	"scheduler_timeout":          false,
 	"notification":               false,
 	"metadata_cache_ttl":         false,
+	"store_gc_grace":             false,
 	"proxy_perjob":               false,
 	"helper_bind_all":            false,
 	"build.ncpus":                false,
@@ -228,6 +229,8 @@ func configValueCompletion(key string) []string {
 		return []string{"none", "terminal", "web", "both"}
 	case "metadata_cache_ttl":
 		return []string{"1", "3", "7", "14", "0"}
+	case "store_gc_grace":
+		return []string{"7", "30", "90", "180"}
 	default:
 		return nil
 	}
@@ -467,6 +470,8 @@ var configShowCmd = &cobra.Command{
 			fmt.Printf("  %-19s %dd%s\n", "metadata_cache_ttl:", int(config.Global.MetadataCacheTTL.Hours()/24), srcTag("metadata_cache_ttl"))
 		}
 		printOverridden("                      ", "metadata_cache_ttl")
+		fmt.Printf("  %-19s %dd%s\n", "store_gc_grace:", int(config.Global.StoreGCGrace.Hours()/24), srcTag("store_gc_grace"))
+		printOverridden("                      ", "store_gc_grace")
 		fmt.Printf("  %-19s %v%s\n", "proxy_perjob:", config.Global.ProxyPerJob, srcTag("proxy_perjob"))
 		printOverridden("                      ", "proxy_perjob")
 		channels := config.Global.Build.Channels
@@ -680,6 +685,16 @@ Time duration format (for build.time):
 			var n int
 			if _, err := fmt.Sscan(value, &n); err != nil || n < 0 {
 				utils.PrintError("Invalid value for metadata_cache_ttl: %s (must be a non-negative integer in days; 0 disables the cache)", value)
+				os.Exit(ExitCodeError)
+			}
+		}
+
+		// No zero: a grace of nothing would make everything collectable the
+		// moment it is installed, which is not a policy anyone means to set.
+		if key == "store_gc_grace" {
+			var n int
+			if _, err := fmt.Sscan(value, &n); err != nil || n < 1 {
+				utils.PrintError("Invalid value for store_gc_grace: %s (must be a positive integer in days)", value)
 				os.Exit(ExitCodeError)
 			}
 		}

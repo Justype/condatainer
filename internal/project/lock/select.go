@@ -1,7 +1,6 @@
 package lock
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/artifact/capsule"
+	"github.com/Justype/condatainer/internal/artifact/compare"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/store"
@@ -83,7 +83,7 @@ func Select(root, request, target string, opts SelectOptions) (*Selected, error)
 
 	return &Selected{
 		Request:  request,
-		Artifact: ArtifactPath(capsule.EntryName(candidate.Name, candidate.Identity.Digest())),
+		Artifact: EntryPath(capsule.EntryName(candidate.Name, candidate.Identity.Digest())),
 		Path:     candidate.Path,
 		Name:     candidate.Name,
 		Identity: candidate.Identity,
@@ -138,18 +138,33 @@ func candidateFromPath(target string) (store.Candidate, error) {
 	if err != nil {
 		return store.Candidate{}, err
 	}
-	report := store.Scan(store.ScanOptions{Dirs: []string{filepath.Dir(absolute)}, Flat: true, Uncached: true})
-	for _, candidate := range report.Candidates {
-		if candidate.Path == absolute {
-			return candidate, nil
-		}
+	// Read the file, never scan its directory. A scan applies the flat-name
+	// rule — the filename must encode the artifact name — which is right where
+	// the filename *is* the address and wrong here: a path selection exists so a
+	// project can call the file whatever it likes, and overlays/combined.sqf
+	// would be refused for not being testdata--combined--1.0.sqf. This is the
+	// same rule project.LookupAt applies when it later resolves the selection,
+	// and the two have to agree or a lock could be written and never resolved.
+	info, err := os.Lstat(absolute)
+	if err != nil {
+		return store.Candidate{}, fmt.Errorf("%w: %s: %v", ErrInvalid, absolute, err)
 	}
-	for _, issue := range report.Issues {
-		if issue.Path == absolute {
-			return store.Candidate{}, fmt.Errorf("%w: %s: %s", ErrInvalid, absolute, issue.Error)
-		}
+	if !info.Mode().IsRegular() {
+		return store.Candidate{}, fmt.Errorf("%w: %s is not a regular file", ErrInvalid, absolute)
 	}
-	return store.Candidate{}, fmt.Errorf("%w: %s carries no verifiable keys", ErrNoCandidate, absolute)
+	artifact, err := compare.Read(absolute)
+	if err != nil {
+		return store.Candidate{}, fmt.Errorf("%w: %s: %v", ErrInvalid, absolute, err)
+	}
+	identity, equiv := artifact.IdentityRef(), artifact.EquivRef()
+	if identity.Empty() || equiv.Empty() {
+		return store.Candidate{}, fmt.Errorf("%w: %s carries no verifiable keys", ErrNoCandidate, absolute)
+	}
+	return store.Candidate{
+		Name: artifact.Name, Path: absolute, Root: filepath.Dir(absolute),
+		Layout: store.LayoutFlat, Size: info.Size(),
+		Identity: identity, Equiv: equiv,
+	}, nil
 }
 
 // pinnableRequest reports why a selection key cannot be pinned, or "".
@@ -184,12 +199,13 @@ func requestName(request string) (string, error) {
 }
 
 // vendorClosure writes the selected artifact and every entry of its embedded
-// capsule into cnt-lock/artifacts/.
+// capsule into cnt-lock/provenance/.
 //
 // The capsule is copied across, never re-derived: it is already the transitive
 // union its builds composed, so there is no recursive resolution, no catalog
 // access, and no network. Entry directory names are `capsule.EntryName`, which
-// is what artifacts/ uses too, so the closure maps across one-to-one.
+// is what an image's own provenance uses too, so the closure maps across
+// one-to-one.
 func vendorClosure(root, metaDir string, candidate store.Candidate) ([]string, error) {
 	var vendored []string
 
@@ -211,11 +227,11 @@ func vendorClosure(root, metaDir string, candidate store.Candidate) ([]string, e
 			ErrInvalid, candidate.Name)
 	}
 
-	files, err := stagedFiles(metaDir, append([]string{meta.FileName}, manifest.Source.Files...))
+	files, err := stagedFiles(metaDir, capsule.FileNames(manifest))
 	if err != nil {
 		return nil, err
 	}
-	relative, err := StageArtifact(root, capsule.EntryName(manifest.Name, manifest.Keys.Identity.Digest()), files)
+	relative, err := StageEntry(root, capsule.EntryName(manifest.Name, manifest.Keys.Identity.Digest()), files)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +247,7 @@ func vendorClosure(root, metaDir string, candidate store.Candidate) ([]string, e
 		if err != nil {
 			return nil, err
 		}
-		relative, err := StageArtifact(root, entry.Dir, body)
+		relative, err := StageEntry(root, entry.Dir, body)
 		if err != nil {
 			return nil, err
 		}
@@ -241,16 +257,8 @@ func vendorClosure(root, metaDir string, candidate store.Candidate) ([]string, e
 }
 
 func readStagedManifest(metaDir string) (meta.Manifest, error) {
-	data, err := readBounded(filepath.Join(metaDir, meta.FileName))
+	manifest, err := capsule.ReadManifest(metaDir, readBounded)
 	if err != nil {
-		return meta.Manifest{}, fmt.Errorf("%w: cannot read the embedded manifest: %v", ErrInvalid, err)
-	}
-	var manifest meta.Manifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return meta.Manifest{}, fmt.Errorf("%w: cannot parse the embedded manifest: %v", ErrInvalid, err)
-	}
-	manifest.Normalize()
-	if err := meta.ValidateManifest(manifest); err != nil {
 		return meta.Manifest{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	if manifest.Keys.Identity.Empty() || manifest.Keys.Equiv.Empty() {
@@ -261,7 +269,8 @@ func readStagedManifest(metaDir string) (meta.Manifest, error) {
 
 // stagedFiles reads a fixed file set out of an extracted directory. runtime.json
 // is never among them: it is not part of any hashed preimage, so a lock that
-// carried it would be carrying something it cannot verify.
+// carried it would be carrying something it cannot verify. The name set comes
+// from capsule.FileNames, so the lock stages exactly what an image carries.
 func stagedFiles(dir string, names []string) (map[string][]byte, error) {
 	out := make(map[string][]byte, len(names))
 	for _, name := range names {

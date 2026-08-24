@@ -1,15 +1,14 @@
 package lock
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/artifact/capsule"
-	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 )
 
@@ -18,7 +17,7 @@ import (
 // untrusted input that must not be able to exhaust memory.
 const MaxSourceBytes = 8 << 20
 
-// Entry is one verified artifact directory in cnt-lock/artifacts/.
+// Entry is one verified artifact directory in cnt-lock/provenance/.
 type Entry struct {
 	// Path is the artifact directory relative to the lock directory.
 	Path     string
@@ -76,7 +75,7 @@ func Verify(root string, l *Lock) (*Verified, []Problem) {
 	out := &Verified{Entries: map[string]*Entry{}}
 	var problems []Problem
 
-	present, err := listArtifactDirs(root)
+	present, err := listEntryDirs(root)
 	if err != nil {
 		return out, []Problem{{Reason: err.Error()}}
 	}
@@ -136,11 +135,11 @@ func Verify(root string, l *Lock) (*Verified, []Problem) {
 		}
 	}
 
-	// An origin must name an artifact that is actually here.
-	for _, artifact := range sortedKeys(originKeys(l)) {
+	// A remote must name an artifact that is actually here.
+	for _, artifact := range sortedKeys(remoteKeys(l)) {
 		if _, ok := out.Entries[artifact]; !ok {
 			problems = append(problems, Problem{Artifact: artifact,
-				Reason: "origin refers to an artifact that is not vendored"})
+				Reason: "remote refers to an artifact that is not vendored"})
 		}
 	}
 
@@ -155,7 +154,7 @@ func resolveEdge(entries map[string]*Entry, dep meta.Dependency) (string, string
 	if dep.Identity.Empty() || dep.Equiv.Empty() {
 		return "", fmt.Sprintf("dependency %s carries no complete keys, so its provenance cannot be followed", dep.Name)
 	}
-	want := ArtifactPath(capsule.EntryName(dep.Name, dep.Identity.Digest()))
+	want := EntryPath(capsule.EntryName(dep.Name, dep.Identity.Digest()))
 	entry, ok := entries[want]
 	if !ok {
 		return "", fmt.Sprintf("dependency %s@%s is not vendored at %s", dep.Name, short(dep.Identity.SHA256), want)
@@ -175,68 +174,37 @@ func resolveEdge(entries map[string]*Entry, dep meta.Dependency) (string, string
 }
 
 // readEntry loads and fully verifies one vendored artifact directory.
+//
+// The reading is capsule.ReadRecord, the same code that reads an entry out of an
+// image, with readBounded supplied as its reader: a checkout's entry is one of
+// these directories, so a lock that verifies and an image that does not is a
+// drift this seam cannot have. What is lock-specific is the reader and the
+// relative path in every message.
 func readEntry(lockDir, relative string) (*Entry, []Problem) {
 	fail := func(format string, args ...any) []Problem {
 		return []Problem{{Artifact: relative, Reason: fmt.Sprintf(format, args...)}}
 	}
-	dir := filepath.Join(lockDir, relative)
 
-	manifestBytes, err := readBounded(filepath.Join(dir, meta.FileName))
-	if err != nil {
-		return nil, fail("cannot read %s: %v", meta.FileName, err)
-	}
-	var manifest meta.Manifest
-	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		return nil, fail("cannot parse %s: %v", meta.FileName, err)
-	}
-	manifest.Normalize()
-	if err := meta.ValidateManifest(manifest); err != nil {
-		return nil, fail("invalid manifest: %v", err)
-	}
-
-	// The directory name is addressing, never identity: the complete key is
-	// regenerated and the name and prefix are checked against it.
-	if want := ArtifactPath(capsule.EntryName(manifest.Name, manifest.Keys.Identity.Digest())); want != relative {
-		return nil, fail("directory name does not match its manifest; expected %s", want)
-	}
-
-	sources, err := readSources(dir, manifest)
+	record, err := capsule.ReadRecord(filepath.Join(lockDir, relative), readBounded)
 	if err != nil {
 		return nil, fail("%v", err)
 	}
-	derived, err := key.Verify(manifest, sources)
-	if err != nil {
-		return nil, fail("sources do not regenerate the recorded keys: %v", err)
+	// The directory name is addressing, never identity: the complete key is
+	// regenerated and the name is checked against it.
+	if err := capsule.CheckDirName(path.Base(relative), record); err != nil {
+		return nil, fail("%v", err)
 	}
 
-	return &Entry{Path: relative, Manifest: manifest,
-		Identity: derived.Identity.Ref, Equiv: derived.Equiv.Ref}, nil
+	return &Entry{Path: relative, Manifest: record.Manifest,
+		Identity: record.Derived.Identity.Ref, Equiv: record.Derived.Equiv.Ref}, nil
 }
 
 // Sources reads one verified entry's vendored build inputs, keyed as
 // manifest.source.files names them. A rebuild starts from exactly these bytes.
 func Sources(root string, entry *Entry) (map[string][]byte, error) {
-	sources, err := readSources(filepath.Join(Dir(root), entry.Path), entry.Manifest)
+	sources, err := capsule.ReadSources(filepath.Join(Dir(root), entry.Path), entry.Manifest, readBounded)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", entry.Path, err)
-	}
-	return sources, nil
-}
-
-// readSources reads exactly the source set the manifest's build type requires.
-// A recipe build must carry its recipe byte for byte, and a Conda build both of
-// its exports; a URL or a catalog reference is never a substitute.
-func readSources(dir string, manifest meta.Manifest) (key.Sources, error) {
-	sources := key.Sources{}
-	for _, name := range manifest.Source.Files {
-		if name != filepath.Base(name) || name == "." || name == ".." {
-			return nil, fmt.Errorf("source file %q is not a plain name", name)
-		}
-		data, err := readBounded(filepath.Join(dir, name))
-		if err != nil {
-			return nil, fmt.Errorf("cannot read source %s: %w", name, err)
-		}
-		sources[name] = data
 	}
 	return sources, nil
 }
@@ -258,11 +226,11 @@ func readBounded(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-// listArtifactDirs returns every artifact directory present, relative to the
-// lock directory and sorted. A non-directory or symlink is refused rather than
-// skipped: it is in the tracked tree and something put it there.
-func listArtifactDirs(root string) ([]string, error) {
-	entries, err := os.ReadDir(ArtifactsPath(root))
+// listEntryDirs returns every provenance entry directory present, relative to
+// the lock directory and sorted. A non-directory or symlink is refused rather
+// than skipped: it is in the tracked tree and something put it there.
+func listEntryDirs(root string) ([]string, error) {
+	entries, err := os.ReadDir(ProvenancePath(root))
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -272,14 +240,14 @@ func listArtifactDirs(root string) ([]string, error) {
 	var out []string
 	for _, entry := range entries {
 		if entry.Type()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("%s/%s is a symlink", ArtifactsDir, entry.Name())
+			return nil, fmt.Errorf("%s/%s is a symlink", ProvenanceDir, entry.Name())
 		}
-		// A dotted directory is a write in progress, not an artifact: skipping it
+		// A dotted directory is a write in progress, not an entry: skipping it
 		// keeps an interrupted write invisible instead of a spurious problem.
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		out = append(out, ArtifactPath(entry.Name()))
+		out = append(out, EntryPath(entry.Name()))
 	}
 	sort.Strings(out)
 	return out, nil
@@ -304,9 +272,9 @@ func satisfies(request, name string) string {
 	return ""
 }
 
-func originKeys(l *Lock) map[string]bool {
-	out := make(map[string]bool, len(l.Origins))
-	for artifact := range l.Origins {
+func remoteKeys(l *Lock) map[string]bool {
+	out := make(map[string]bool, len(l.Remotes))
+	for artifact := range l.Remotes {
 		out[artifact] = true
 	}
 	return out

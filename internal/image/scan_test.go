@@ -146,3 +146,24 @@ func TestNamesIsTheKeySet(t *testing.T) {
 		t.Errorf("Names = %v, want the two keys", names)
 	}
 }
+
+// A store entry is addressed by identity and reached through the store
+// commands. The overlay scan is the by-name view, so it stays flat: descending
+// store/ would make one name answer to several identities here.
+func TestScanDoesNotDescendTheStore(t *testing.T) {
+	root := t.TempDir()
+	writeImages(t, root, "samtools--1.23.1.sqf")
+	writeImages(t, filepath.Join(root, "store"), "samtools--1.23.1@abcdef012345.sqf")
+
+	scan, err := ScanOverlays(ScanOptions{Dirs: []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scan) != 1 {
+		t.Fatalf("scan = %v, want only the flat image", scan)
+	}
+	copies := scan["samtools/1.23.1"]
+	if len(copies) != 1 || filepath.Dir(copies[0]) != root {
+		t.Fatalf("copies = %v, want only the flat one in %s", copies, root)
+	}
+}

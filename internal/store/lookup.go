@@ -234,7 +234,7 @@ func (r *Report) addIssue(path string, err error) {
 }
 
 func keyRef(scheme, digest string) meta.KeyRef {
-	return meta.KeyRef{Scheme: scheme, SHA256: strings.TrimPrefix(digest, "sha256:")}
+	return compare.Artifact{IdentityScheme: scheme, Identity: digest}.IdentityRef()
 }
 
 // ResolveIdentity returns the nearest verified candidate matching q. Multiple

@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/artifact/capsule"
+	"github.com/Justype/condatainer/internal/artifact/compare"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/project"
 	"github.com/Justype/condatainer/internal/project/lock"
@@ -38,7 +39,7 @@ type Action string
 const (
 	// ActionAdopt reuses a verified artifact that is already here.
 	ActionAdopt Action = "adopt"
-	// ActionFetch downloads a recorded registry origin.
+	// ActionFetch downloads a recorded registry remote.
 	ActionFetch Action = "fetch"
 	// ActionBuild rebuilds from the vendored sources.
 	ActionBuild Action = "build"
@@ -74,14 +75,26 @@ type Step struct {
 	// destination step Path is that destination, already present and verified.
 	Path   string       `json:"path,omitempty"`
 	Layout store.Layout `json:"layout,omitempty"`
-	// Origins are the recorded fetch locations, in retry order.
-	Origins []lock.Origin `json:"origins,omitempty"`
+	// Remotes are the recorded fetch locations, in retry order.
+	Remotes []lock.Remote `json:"remotes,omitempty"`
 	// DependsOn are the artifacts that must exist first, sorted.
 	DependsOn []string `json:"depends_on,omitempty"`
 	// RequiresInput reports that a rebuild would prompt for #INPUT: answers.
 	RequiresInput bool `json:"requires_input,omitempty"`
 	// Arch is the artifact's recorded architecture, or "noarch".
 	Arch string `json:"arch,omitempty"`
+	// StoreOnly keeps this step out of the bare name because a selection in the
+	// same plan answers to it. Set only on a build dependency being installed.
+	StoreOnly bool `json:"store_only,omitempty"`
+}
+
+// verdict is how a step's result relates to the lock, decided by whether an
+// equivalent artifact stood in for the locked identity.
+func (s Step) verdict() compare.Verdict {
+	if s.Found != "" {
+		return compare.Equivalent
+	}
+	return compare.Exact
 }
 
 // Plan is a dependency-first restore, with everything that would prevent it.
@@ -112,7 +125,7 @@ func (p *Plan) Work() int {
 type Options struct {
 	// Match is which key a local copy has to agree with. Empty means equivalent.
 	Match Match
-	// SkipPrebuilt ignores every recorded origin and plans a local build
+	// SkipPrebuilt ignores every recorded remote and plans a local build
 	// instead. It is not a claim that the machine is offline: a build needs the
 	// network too, and generally more of it — a Conda replay downloads every
 	// pinned package URL, a recipe fetches its own sources, and resolving an
@@ -127,6 +140,14 @@ type Options struct {
 	SearchDirs []string
 	// HostArch is the architecture to plan for. Empty means this machine.
 	HostArch string
+	// SubmitJobs allows a rebuild carrying scheduler directives to be handed to
+	// the scheduler instead of run here. Ignored inside a job, which is already
+	// the machine the work was sent to.
+	SubmitJobs bool
+	// Only narrows the restore to one vendored artifact and its closure. A
+	// submitted job carries it so the job produces exactly what it was sent for
+	// and leaves every other artifact to whoever asked for that one.
+	Only string
 	// Answers are #INPUT: answers per artifact path, in declaration order.
 	// Supplied per invocation because they are never recorded, and their
 	// presence is what makes an interactive rebuild plannable at all.
@@ -227,7 +248,7 @@ func Compute(root string, l *lock.Lock, opts Options) *Plan {
 			Artifact: artifact,
 			Name:     entry.Manifest.Name,
 			Identity: entry.Identity.Digest(),
-			Origins:  l.Origins[artifact],
+			Remotes:  l.Remotes[artifact],
 			Arch:     entry.Manifest.Platform.Arch,
 
 			RequiresInput: entry.Manifest.Source.RequiresInput,
@@ -274,9 +295,87 @@ func Compute(root string, l *lock.Lock, opts Options) *Plan {
 	}
 
 	kept, reported := prune(steps, pending)
+	yieldSharedNames(kept, opts)
+	if opts.Only != "" {
+		var problem string
+		if kept, problem = restrict(kept, opts.Only); problem != "" {
+			plan.Problems = append(plan.Problems, problem)
+			return plan
+		}
+		reported = problemsFor(kept, pending)
+	}
 	plan.Steps = kept
 	plan.Problems = append(plan.Problems, reported...)
 	return plan
+}
+
+// restrict drops every step outside one artifact's closure, keeping the order.
+//
+// Directness is not rewritten. An artifact inside the closure that some
+// selection also names by itself stays a selection and is still installed where
+// the destination rule puts it, because that is what it is — narrowing what a
+// restore covers says nothing about what its members are.
+func restrict(steps []Step, only string) ([]Step, string) {
+	keep := map[string]bool{only: true}
+	found := false
+	for i := len(steps) - 1; i >= 0; i-- {
+		step := steps[i]
+		if step.Artifact == only {
+			found = true
+		}
+		if !keep[step.Artifact] {
+			continue
+		}
+		for _, dependency := range step.DependsOn {
+			keep[dependency] = true
+		}
+	}
+	if !found {
+		return nil, fmt.Sprintf("--only %s is not an artifact this restore covers", only)
+	}
+	kept := make([]Step, 0, len(steps))
+	for _, step := range steps {
+		if keep[step.Artifact] {
+			kept = append(kept, step)
+		}
+	}
+	return kept, ""
+}
+
+// yieldSharedNames gives the bare name to the selection whenever a kept build
+// dependency shares it, marking the dependency store-only.
+//
+// The flat name answers `exec -o`, `list`, and every other checkout, so it
+// belongs to what someone asked for by name rather than to what a rebuild
+// happened to need. Left to the store alone the winner is whoever installs
+// first, and dependencies are built first — exactly backwards. Deciding it here
+// makes it a property of the plan, so a dry run shows the same answer the
+// restore will reach.
+//
+// Only two identities of one name ever contend. One identity is one step, and a
+// discarded build dependency is never installed at all.
+func yieldSharedNames(steps []Step, opts Options) {
+	selected := map[string]bool{}
+	for _, step := range steps {
+		if step.Direct && step.Destination == "" {
+			selected[step.Name] = true
+		}
+	}
+	for i, step := range steps {
+		if step.Direct || step.Destination != "" || isTransient(step, opts) {
+			continue
+		}
+		steps[i].StoreOnly = selected[step.Name]
+	}
+}
+
+// problemsFor collects the problems the given steps carry, in step order.
+func problemsFor(steps []Step, problems map[string][]string) []string {
+	var out []string
+	for _, step := range steps {
+		out = append(out, problems[step.Artifact]...)
+	}
+	return out
 }
 
 // split separates selections by where the artifact has to end up: named ones go
@@ -322,7 +421,7 @@ func split(l *lock.Lock) (named map[string][]string, destinations map[string]map
 //
 // found is the only thing that differs between a named artifact and a project
 // path: the first is looked for across the images roots, the second only at its
-// declared path. Everything after — architecture, origins, interactive input —
+// declared path. Everything after — architecture, remotes, interactive input —
 // applies to a miss either way.
 // classify decides how one step is satisfied, reporting the problems that would
 // follow if it is kept.
@@ -347,7 +446,7 @@ func (p *Plan) classify(step Step, keys meta.Keys, hostArch string, opts Options
 		problems = append(problems, fmt.Sprintf("%s: %s", step.Name, reason))
 	}
 	switch {
-	case len(step.Origins) > 0 && !opts.SkipPrebuilt:
+	case len(step.Remotes) > 0 && !opts.SkipPrebuilt:
 		step.Action = ActionFetch
 	default:
 		step.Action = ActionBuild
@@ -437,7 +536,7 @@ func inboundEdges(verified *lock.Verified) map[string]meta.Dependency {
 	out := map[string]meta.Dependency{}
 	for _, entry := range verified.Entries {
 		for _, dep := range entry.Manifest.Dependencies {
-			artifact := lock.ArtifactPath(capsule.EntryName(dep.Name, dep.Identity.Digest()))
+			artifact := lock.EntryPath(capsule.EntryName(dep.Name, dep.Identity.Digest()))
 			if held, ok := out[artifact]; !ok || rank[dep.Role] > rank[held.Role] {
 				out[artifact] = dep
 			}

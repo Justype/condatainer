@@ -11,7 +11,6 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/container"
-	"github.com/Justype/condatainer/internal/utils"
 )
 
 // generateKeys derives both keys for what this build produced.
@@ -149,12 +148,19 @@ func (b *BuildObject) dependencyKeys(ctx context.Context) []key.Dep {
 	b.depImagePaths = make(map[string]string, len(b.spec.Dependencies))
 	out := make([]key.Dep, 0, len(b.spec.Dependencies))
 	for _, raw := range b.spec.Dependencies {
+		// A path is recognized before it is parsed, never after. ParseDep
+		// succeeds on an overlay path and normalizes it into a name — turning
+		// .../hello--1.0.sqf into ".../hello/1.0.sqf", which names nothing, reads
+		// no manifest, and records an edge with no keys at all. A locked rebuild
+		// supplies every dependency as a path, so this is its whole edge set.
 		requested := raw
-		if parsed, err := catalog.ParseDep(raw); err == nil {
+		if !catalog.IsPathDep(raw) {
+			parsed, err := catalog.ParseDep(raw)
+			if err != nil {
+				log.Warn("skipping an unparsable dependency", "dep", raw, "err", err)
+				continue
+			}
 			requested = parsed.NameVersion()
-		} else if !utils.IsOverlay(raw) {
-			log.Warn("skipping an unparsable dependency", "dep", raw, "err", err)
-			continue
 		}
 		dep := key.Dep{Name: requested, Type: catalog.TypeApp}
 

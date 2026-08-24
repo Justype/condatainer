@@ -33,6 +33,22 @@ path.go      Container path utilities
 - `ApptainerFlags` - Flags including GPU detection
 - `LastImg` - Path to .img overlay (if present)
 
+## What Setup refuses
+
+Two checks run before anything is locked or mounted, because both describe a
+container that cannot be what the caller asked for:
+
+- `ensureSingleImage` — at most one writable `.img`. Only one can be the
+  principal image, and only that one takes a write lock.
+- `ensureDistinctPrefixes` — no two images claiming one `/cnt/<name>` subtree.
+  Overlays are disjoint subtrees, not stacked diffs, so two claiming one prefix
+  do not combine: the later mount takes the subtree and the earlier contributes
+  nothing, while both still reach PATH and the environment. Two builds of one
+  name are the case this catches — a project's restored copy and a flat install
+  of the same name record the same prefix. A base, an OS image and anything
+  without readable metadata record no prefix and are exempt for free; the same
+  file named twice is redundant, not a collision.
+
 ## Important Diff from Apptainer Flags
 
 **Writable** in CondaTainer means making the ext3 `.img` overlay writable, not adding `--writable` to Apptainer. The `.img` overlay is writable by default when used as an overlay.

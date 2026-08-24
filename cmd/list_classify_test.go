@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/Justype/condatainer/catalog"
@@ -41,5 +43,36 @@ func TestPresentListOverlayTrustsRecordedType(t *testing.T) {
 				t.Fatalf("presentListOverlay() = %#v, want %#v", got, tc.want)
 			}
 		})
+	}
+}
+
+// `list` is the by-name view of what is installed. Store entries are addressed
+// by identity and reached through the `store` commands, so one name never
+// appears here at several identities.
+func TestScanOverlaysByDirDoesNotDescendTheStore(t *testing.T) {
+	root := t.TempDir()
+	for _, path := range []string{
+		filepath.Join(root, "samtools--1.23.1.sqf"),
+		filepath.Join(root, "store", "samtools--1.23.1@abcdef012345.sqf"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o775); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o664); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dirs := scanOverlaysByDir([]string{root}, &SearchQuery{})
+	if len(dirs) != 1 {
+		t.Fatalf("dirs = %v, want one", dirs)
+	}
+	for name, path := range dirs[0].Paths {
+		if filepath.Dir(path) != root {
+			t.Errorf("%s listed from %s, want only the flat root", name, path)
+		}
+	}
+	if len(dirs[0].Paths) > 1 {
+		t.Errorf("paths = %v, want only the flat image", dirs[0].Paths)
 	}
 }

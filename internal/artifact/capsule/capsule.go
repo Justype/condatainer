@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/utils"
@@ -126,15 +125,11 @@ func composeOne(dest string, dep Dep, open func(Dep) (string, func(), error)) (c
 	}
 	defer discard()
 
-	manifest, err := readManifestDir(source)
+	record, err := ReadRecord(source, PlainReader)
 	if err != nil {
-		return false, fmt.Errorf("cannot read provenance manifest from %s: %w", dep.Name, err)
+		return false, fmt.Errorf("cannot read provenance from %s: %w", dep.Name, err)
 	}
-	derived, err := key.VerifyDir(source, manifest)
-	if err != nil {
-		return false, fmt.Errorf("cannot verify provenance from %s: %w", dep.Name, err)
-	}
-	if manifest.Name != dep.Name || derived.Identity.Ref != dep.Identity {
+	if record.Manifest.Name != dep.Name || record.Derived.Identity.Ref != dep.Identity {
 		return false, fmt.Errorf("provenance from %s does not match the selected identity", dep.Name)
 	}
 	entry := filepath.Join(dest, EntryName(dep.Name, dep.Identity.Digest()))
@@ -142,8 +137,7 @@ func composeOne(dest string, dep Dep, open func(Dep) (string, func(), error)) (c
 		return false, err
 	}
 
-	files := append([]string{meta.FileName}, manifest.Source.Files...)
-	for _, name := range files {
+	for _, name := range FileNames(record.Manifest) {
 		if err := copyFile(filepath.Join(source, name), filepath.Join(entry, name)); err != nil {
 			return false, err
 		}
@@ -162,7 +156,8 @@ func composeOne(dest string, dep Dep, open func(Dep) (string, func(), error)) (c
 		}
 	}
 
-	return manifest.ProvenanceComplete == nil || *manifest.ProvenanceComplete, nil
+	inheritedComplete := record.Manifest.ProvenanceComplete
+	return inheritedComplete == nil || *inheritedComplete, nil
 }
 
 // copyFile writes src to dst, creating dst's parent.

@@ -21,7 +21,7 @@ func stagingName(kind string) string {
 	return fmt.Sprintf("%s%s-%d-%d", stagingPrefix, kind, os.Getpid(), time.Now().UnixNano())
 }
 
-// Publish writes a lock atomically and then removes artifact directories no
+// Publish writes a lock atomically and then removes provenance entries no
 // published selection reaches.
 //
 // The order is the transaction. Marshalling validates, a complete document is
@@ -65,7 +65,7 @@ func Publish(root string, l *Lock) error {
 	return Prune(root, l)
 }
 
-// Prune removes artifact directories the published lock does not reach.
+// Prune removes provenance entries the published lock does not reach.
 //
 // Reachability is recomputed from the published file, and it is the closure
 // rather than the selection set: a dependency directory is reached through its
@@ -74,7 +74,7 @@ func Publish(root string, l *Lock) error {
 // alone — an entry that cannot be read cannot be shown to be unreachable, and
 // deleting on a read error would turn a corrupt file into data loss.
 func Prune(root string, l *Lock) error {
-	present, err := listArtifactDirs(root)
+	present, err := listEntryDirs(root)
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func Prune(root string, l *Lock) error {
 	return nil
 }
 
-// StageArtifact copies a prepared artifact directory into cnt-lock/artifacts/
+// StageEntry copies a prepared artifact directory into cnt-lock/provenance/
 // under its final name, atomically.
 //
 // The staged directory is built as a temporary sibling on the same filesystem
@@ -105,23 +105,23 @@ func Prune(root string, l *Lock) error {
 // entry that already exists is left as it is: one (name, identity) has one set
 // of records, and rewriting them could only replace them with different bytes
 // claiming the same key.
-func StageArtifact(root, entryName string, files map[string][]byte) (string, error) {
+func StageEntry(root, entryName string, files map[string][]byte) (string, error) {
 	if entryName != filepath.Base(entryName) || entryName == "." || entryName == ".." {
 		return "", fmt.Errorf("%w: artifact entry %q is not a plain name", ErrInvalid, entryName)
 	}
-	relative := ArtifactPath(entryName)
-	if err := validArtifactPath(relative); err != nil {
+	relative := EntryPath(entryName)
+	if err := validEntryPath(relative); err != nil {
 		return "", fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	final := filepath.Join(Dir(root), relative)
 	if _, err := os.Stat(final); err == nil {
 		return relative, nil
 	}
-	if err := utils.MkdirAllShared(ArtifactsPath(root)); err != nil {
+	if err := utils.MkdirAllShared(ProvenancePath(root)); err != nil {
 		return "", err
 	}
 
-	staging := filepath.Join(ArtifactsPath(root), stagingName("staging"))
+	staging := filepath.Join(ProvenancePath(root), stagingName("staging"))
 	if err := utils.MkdirAllShared(staging); err != nil {
 		return "", fmt.Errorf("cannot stage %s: %w", entryName, err)
 	}
@@ -161,9 +161,9 @@ func StageArtifact(root, entryName string, files map[string][]byte) (string, err
 
 // SweepStaging removes staging directories abandoned by an interrupted write.
 // They are never readable as artifacts — the name is dotted and Verify only
-// reads what listArtifactDirs returns — so this is housekeeping, not repair.
+// reads what listEntryDirs returns — so this is housekeeping, not repair.
 func SweepStaging(root string) error {
-	entries, err := os.ReadDir(ArtifactsPath(root))
+	entries, err := os.ReadDir(ProvenancePath(root))
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -174,7 +174,7 @@ func SweepStaging(root string) error {
 		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), stagingPrefix) {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(ArtifactsPath(root), entry.Name())); err != nil {
+		if err := os.RemoveAll(filepath.Join(ProvenancePath(root), entry.Name())); err != nil {
 			return err
 		}
 	}
