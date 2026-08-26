@@ -343,13 +343,25 @@ condatainer overlay resize -s SIZE <overlay>
 **Options:**
 
 * `-s`, `--size SIZE`  : New size for the overlay (e.g., `20g`, `2048M`). **Required.** Case insensitive
+* `-S`, `--sparse`     : Leave the image sparse instead of pre-allocating its blocks.
 * `path`               : Path to the ext3 overlay file.
+
+Blocks are pre-allocated by default, as in `overlay create`, so a sparse image
+cannot promise space the host filesystem is unable to supply. Allocation uses
+`fallocate`; where that is unsupported (NFSv3, Lustre before 2.14) it warns and
+leaves the image sparse.
 
 **Examples:**
 
 ```bash
 # Resize env.img to 20GB
 condatainer overlay resize -s 20g env.img
+
+# Grow without reserving blocks
+condatainer overlay resize -s 20g env.img --sparse
+
+# Pre-allocate an existing sparse image, size unchanged
+condatainer overlay resize -s 20g env.img   # env.img is already 20g
 ```
 
 ### Overlay Export
@@ -522,7 +534,7 @@ Create a read-only overlay using a shell script that installs packages. See [Cus
 condatainer create -f install_packages.sh
 ```
 
-### Exit Codes (script and job-submission behavior) ⚠️
+### Exit Codes (script and job-submission behavior)
 
 CondaTainer uses specific exit codes so automation and downstream tooling can detect special states:
 

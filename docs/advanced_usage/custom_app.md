@@ -1,6 +1,6 @@
 # Custom App Build Scripts
 
-Most tools need no build script at all. If the app is on a Conda channel, `condatainer create <name>/<version>` builds a [module overlay](../user_guide/concepts.md#-overlay-types) straight from Conda:
+Most tools need no build script at all. If the app is on a Conda channel, `condatainer create <name>/<version>` builds a [module overlay](../user_guide/concepts.md#overlay-types) straight from Conda:
 
 ```bash
 condatainer create samtools/1.22.1   # resolved from bioconda, no script needed

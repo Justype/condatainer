@@ -1,12 +1,12 @@
 # Creating and Using Module Overlays
 
-📦 **CondaTainer** allows you to create [module overlays](./concepts.md#-overlay-types) for your project.
+📦 **CondaTainer** allows you to create [module overlays](./concepts.md#overlay-types) for your project.
 
 They are stackable, read-only, and highly compressed overlays that contain app or data.
 
 Please read [Concepts](concepts.md) before proceeding.
 
-## 👀 Quick Look
+## Quick Look
 
 ```bash
 condatainer avail # List available recipes
@@ -32,7 +32,7 @@ condatainer exec -o grch38/cellranger/2024-A bash
 #   STAR_INDEX_DIR    : STAR index dir
 ```
 
-## 📥 Installing Module Overlays
+## Installing Module Overlays
 
 Use `condatainer avail` to browse available build scripts, then `condatainer create` to install.
 
@@ -82,7 +82,7 @@ condatainer create grch38/salmon/1.10.2/gencode47
 When entering placeholder values, you can hit <kbd>Tab</kbd> for autocomplete.
 ```
 
-## 🧪 Using Module Overlays via Command
+## Using Module Overlays via Command
 
 Before wiring an overlay into a job script, it's worth loading it directly on the command line to make sure the tool works and to discover the environment variables it exposes. 
 
@@ -141,12 +141,12 @@ Environment
 ```{tip}
 Once a command works interactively with `exec -o`, you can turn it into a
 reproducible job by declaring the same overlays as `#DEP:` tags and running it
-with `condatainer run` — see [Declaring Dependencies in Scripts](#-declaring-dependencies-in-scripts) below.
+with `condatainer run` — see [Declaring Dependencies in Scripts](#declaring-dependencies-in-scripts) below.
 ```
 
-## 🚀 Dependencies Automation
+## Dependencies Automation
 
-### 🧬 Data Overlay Installation
+### Data Overlay Installation
 
 To Install a Salmon Index Overlay. You don't need to:
 
@@ -166,7 +166,7 @@ condatainer create grch38/salmon/1.10.2/gencode47
 # - Submit scheduler jobs to build the Salmon index using these overlays
 ```
 
-### 🏷️ Declaring Dependencies in Scripts
+### Declaring Dependencies in Scripts
 
 Declare dependencies with `#DEP:` tags at the top of your script.
 
@@ -210,7 +210,7 @@ Execute the script with CondaTainer:
 condatainer run analysis.sh
 ```
 
-## 🤖 Scheduler Automation
+## Scheduler Automation
 
 If a script contains scheduler directives (e.g. `#SBATCH`), **CondaTainer will automatically submit scheduler jobs** to handle the heavy lifting for you.
 
@@ -240,9 +240,9 @@ condatainer run salmon_quant.sh
 
 If no scheduler directives are found or job submission is disabled, the script will run immediately in the current shell.
 
-## 🧫 Case Study: Cellranger Count
+## Case Study: Cellranger Count
 
-### 📜 Count Script
+### Count Script
 
 The following is an example scheduler script (SLURM) for running `cellranger count` using the cellranger overlays.
 
@@ -263,7 +263,7 @@ cellranger count --id=sample1 \
   --localmem=$MEM_GB
 ```
 
-### 📥 Install required overlays
+### Install required overlays
 
 You can check the dependencies and automatically install them using:
 
@@ -289,7 +289,7 @@ You need to paste the valid download link and press Enter to continue the build.
 
 Since cellranger references are prebuilt, **CondaTainer** will download and extract the reference files and create overlays on the login node.
 
-### 📤 Load and use overlays
+### Load and use overlays
 
 Then you can submit the script using **CondaTainer**.
 
@@ -297,7 +297,7 @@ Then you can submit the script using **CondaTainer**.
 condatainer run cellranger_quant.sh
 ```
 
-## 🔗 Related Resources
+## Related Resources
 
 - [CondaTainer Manual](../manuals/condatainer.md)
 - [Environement Overlays: Writable Project-Level](./environment_overlays.md)

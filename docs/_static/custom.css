@@ -1,44 +1,44 @@
-/* Custom theme overrides for CondaTainer docs
-   Change --logo-bg to pick a different color. Prefer an accessible contrast. */
-:root{
-  --logo-bg: #f1e4cc;
+/* Custom theme overrides for CondaTainer docs (sphinx-book-theme). */
+
+/* Logo sits flush on the sidebar background, no plate. The mark is
+   full-colour, so it reads in both light and dark mode unchanged. */
+.bd-sidebar-primary .navbar-brand.logo {
+  display: block;
+  padding: 2px 0;
+  margin-bottom: 0.75rem;
 }
 
-/* Hides the version/language switch menus in the sidebar */
-div.switch-menus {
-    display: none !important;
+.bd-sidebar-primary .navbar-brand.logo img,
+.bd-sidebar-primary .navbar-brand.logo .logo__image {
+  max-width: 100%;
+  height: auto;
+  margin: 0;
 }
 
-/* RTD theme: top header and logo background */
-.wy-header,
-.wy-side-nav-search,
-.wy-side-nav .logo {
-  background-color: var(--logo-bg) !important;
-  background-image: none !important;
+/* Sidebar nav: tighten the caption headings the toctrees generate. */
+.bd-sidebar-primary .bd-toc-item .caption-text {
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.85;
 }
 
-/* If logo image has transparent background, ensure padding and contrast */
-.wy-side-nav .logo img,
-.wy-header .logo img {
-  padding: 6px 8px;
+/* Row hover: the theme's default is a saturated violet (#b780ff light,
+   #6432bd dark). Replace it with a neutral wash — the alpha keeps it visible
+   over both zebra shades, and it has to sit past the darker stripe
+   (#f3f4f5 light, #29313d dark) to read as hover on either row.
+   Set to transparent for no hover colour. */
+html[data-theme="light"] {
+  --pst-color-table-row-hover-bg: rgba(0, 0, 0, 0.08);
+}
+html[data-theme="dark"] {
+  --pst-color-table-row-hover-bg: rgba(255, 255, 255, 0.1);
 }
 
-/* Ensure title area text is readable on the new background */
-.wy-side-nav-search .project-name,
-.wy-side-nav-search .project-description,
-.wy-header .project {
-  color: #222222 !important; /* dark text for readable contrast on light background */
+/* Wide tables in the manuals scroll rather than pushing the page sideways. */
+.bd-article table {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
 }
-
-/* GitHub header icon */
-.github-header-link {
-  position: absolute;
-  right: 12px;
-  top: 12px;
-  color: #111;
-  font-size: 20px;
-  text-decoration: none;
-  z-index: 2000;
-}
-.github-header-link:hover { color: #000; }
-.github-header-link .sr-only { position: absolute; left: -9999px; }

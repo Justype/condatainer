@@ -1,14 +1,14 @@
-# Concepts: 🧩 Overlays
+# Concepts: Overlays
 
 **Modular, Reproducible, and Self-Contained Analysis Environments.**
 
 Reproducible analyses require careful management of both software tools and reference data. **CondaTainer** addresses this challenge through its overlay system.
 
-## 💡 The Main Idea
+## The Main Idea
 
 Overlays are stackable, self-contained files that encapsulate executables and data. **CondaTainer** mounts overlays and modifies environment variables (such as `$PATH`) to make software and data accessible.
 
-## 📦 Overlay Types
+## Overlay Types
 
 | Term | Ext | R/W | Content Path | Purpose |
 |------|-----------|-----|--------------|-------------|
@@ -32,18 +32,18 @@ condatainer e rstudio-server build-essential
 
 You can use `condatainer info` to check overlay types and contents.
 
-### 🖥️ OS Overlays
+### OS Overlays
 
 OS overlays are built from Apptainer definition files. They expose system-level paths (`/bin`, `/lib`, etc.) and can run standalone as a base image.
 
-### 🧩 Module Overlays
+### Module Overlays
 
 Module overlays are categorized into different types:
 
 - **Apps**: Software packages, binaries, pipelines. (e.g. cellranger)
 - **Data**: Project data, genome indices, annotations. (e.g. salmon index)
 
-### 📂 Naming Convention
+### Naming Convention
 
 - OS: `<distro>/<name>` (e.g., `ubuntu24/build-essential`)
 - Bundle / Env: `<name>` — no slash (e.g., `env`, `sci_rna`)
@@ -58,7 +58,7 @@ The following delimiters are accepted for version specification: `/`, `--`, `=`,
 
 **Important**: Because `--` serves as a delimiter, it should not be used within names.
 
-## 🧱 Stacking Overlays
+## Stacking Overlays
 
 Overlays can be stacked in a specific order to create a layered environment.
 
@@ -110,7 +110,7 @@ condatainer e cutadapt/5.0 trim-galore/0.6.11 -- bash -c 'echo $PATH'
 # ...:/cnt/trim-galore/0.6.11/bin:/cnt/cutadapt/5.0/bin:/usr/local/...
 ```
 
-## 🐍 Leveraging Conda Resources
+## Leveraging Conda Resources
 
 **CondaTainer** leverages the extensive `conda-forge` and `bioconda` ecosystems, which provide most bioinformatics software as conda packages. **CondaTainer** will automatically create module overlays for these packages.
 
@@ -118,7 +118,7 @@ For software unavailable through conda, custom build scripts can be created to d
 
 **Examples**: 10X [cellranger/9.0.1](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cellranger/9.0.1) and Illumina [orad/2.7.0](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/orad/2.7.0)
 
-## 🔗 Related
+## Related
 
 - [Manage Module Overlays](./module_overlays.md)
 - [Bundle Overlays: Read-only project environment](./bundle_overlays.md)

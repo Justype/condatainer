@@ -38,7 +38,7 @@ ml grch38/cellranger/2024-A
 ```
 
 - 📜 [Read the full ModGen Manual](./manual.md)
-- 📁 [Naming Conventions](../../docs/user_guide/concepts.md#-naming-convention)
+- 📁 [Naming Conventions](../../docs/user_guide/concepts.md#naming-convention)
 
 > [!NOTE]
 > Make sure to initialize shell by running `modgen init` once. Then source your shell configuration file (e.g., `source ~/.bashrc`).

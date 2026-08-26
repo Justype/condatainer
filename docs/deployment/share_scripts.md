@@ -170,7 +170,7 @@ export CNT_EXTRA_ROOT=/shared/labA/condatainer   # contains images/
 
 ## Related
 
-- [Configuration Manual](../manuals/configuration.md#using-multiple-remote-script-sources) — remote sources and config layers
+- [Configuration Manual](../manuals/configuration.md#using-multiple-recipe-collections) — recipe collections and config layers
 - [Build Script Manual](../manuals/build_script.md#naming-conventions) — naming conventions
 - [Custom App Build Scripts](../advanced_usage/custom_app.md) — packaging an app
 - [Custom Data Build Scripts](../advanced_usage/custom_data.md) — packaging datasets

@@ -13,7 +13,7 @@ This page covers installing CondaTainer for personal use. Installing it for othe
 - a cluster or server → [System-Wide Installation](../deployment/system_install.md)
 ```
 
-## 📋 Prerequisites
+## Prerequisites
 
 - **Linux (x86_64 only)**: AArch64 is not supported yet.
 - **Apptainer/Singularity**: Required for all core container operations.
@@ -21,7 +21,7 @@ This page covers installing CondaTainer for personal use. Installing it for othe
 
 Most HPC systems have already met these requirements. If not, please contact your system administrator to install them.
 
-## 🛠️ Quick Installation
+## Quick Installation
 
 To install **CondaTainer**, run the command in your terminal:
 
@@ -33,7 +33,7 @@ The installation script will guide you through the following:
 - **Installation Path**: You will be asked to confirm or set the path (defaults to `$SCRATCH/condatainer/` or `$HOME/condatainer/`).
 - **Shell Configuration**: The script will automatically **edit your shell configuration** (e.g., `.bashrc`) so that the `condatainer` command is ready to use.
 
-## ✅ Verify Installation
+## Verify Installation
 
 Once the installation is complete, restart your terminal or run `source ~/.bashrc`.
 
@@ -47,7 +47,7 @@ Then, you can verify it is working by listing available recipes:
 condatainer avail
 ```
 
-## ⚙️ Initialize Configuration
+## Initialize Configuration
 
 The installation script will also run `condatainer config init` for you. If you want to re-run it or customize the configuration, run:
 
@@ -67,7 +67,7 @@ Compression is chosen automatically based on the runtime:
 - **Apptainer < 1.4**: lz4
 - **Singularity**: lz4
 
-## ⌨️ Shell Completion
+## Shell Completion
 
 CondaTainer supports shell completion for **Bash** and **Zsh**. The installation script will automatically add the necessary lines to your shell configuration file:
 
@@ -75,12 +75,12 @@ CondaTainer supports shell completion for **Bash** and **Zsh**. The installation
 source <(condatainer completion)
 ```
 
-## 🗺️ Next Steps
+## Next Steps
 
 - [Concepts: Overlays](./concepts.md) — Understand the overlay model before proceeding
 - [Helper Scripts](../helpers/helpers.md) — Running Applications (VS Code, RStudio, IGV, etc.) on HPC or headless servers
 
-## 🗑️ Uninstallation
+## Uninstallation
 
 To uninstall **CondaTainer**, follow these steps:
 

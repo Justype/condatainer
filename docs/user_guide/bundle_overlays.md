@@ -1,6 +1,6 @@
 # Creating and Using Bundle Overlays
 
-📦 **CondaTainer** allows you to create read-only, highly-compressed [bundle overlays](./concepts.md#-overlay-types) for your project.
+📦 **CondaTainer** allows you to create read-only, highly-compressed [bundle overlays](./concepts.md#overlay-types) for your project.
 
 They are ideal for sharing pre-configured conda environments with collaborators.
 
@@ -22,7 +22,7 @@ condatainer create -p prefix_name -f environment.yml
 Make sure the conda env YAML file is properly defined.
 
 ```{warning}
-CondaTainer uses the name to locate resources inside the overlay. The bundle overlay should not be renamed after creation. See [Naming Convention](./concepts.md#-naming-convention) for more details.
+CondaTainer uses the name to locate resources inside the overlay. The bundle overlay should not be renamed after creation. See [Naming Convention](./concepts.md#naming-convention) for more details.
 ```
 
 ```{note}

@@ -1,6 +1,6 @@
 # Creating and Using Environment Overlays
 
-📦 **CondaTainer** allows you to create [environment overlays](./concepts.md#-overlay-types) for your project.
+📦 **CondaTainer** allows you to create [environment overlays](./concepts.md#overlay-types) for your project.
 
 The main advantage of **CondaTainer** is that it packs a Conda environment inside a writable ext3 overlay for development, which significantly reduces inode usage.
 
