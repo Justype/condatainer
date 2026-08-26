@@ -77,6 +77,10 @@ There are three creation paths depending on the caller's needs:
 
 Override the tmp location with `CNT_TMPDIR` (takes priority over `SLURM_TMPDIR`, `TMPDIR`, `/tmp`).
 
+`ext3.Resize` takes the same `sparse` decision and defaults to allocating: growing
+extends the file with `os.Truncate`, so the added space is a hole whatever the image
+was built as.
+
 ## External tools
 
 Every archive read shells out, and two of those calls have non-obvious shapes.

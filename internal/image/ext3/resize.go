@@ -14,9 +14,17 @@ import (
 // Resize adjusts the size of an existing ext3 overlay image to newSizeMB.
 //
 // Flow: fsck → grow the file (if growing) → resize2fs to the exact target →
-// shrink the file (if shrinking) → fsck. Sizes are compared against the ext3
-// filesystem, not the container file's byte size, since the two can diverge.
-func Resize(ctx context.Context, imagePath string, newSizeMB int) error {
+// shrink the file (if shrinking) → fsck → allocate. Sizes are compared against
+// the ext3 filesystem, not the container file's byte size, since the two can
+// diverge.
+//
+// sparse leaves the image sparse; otherwise blocks are pre-allocated to the new
+// size, matching Create. Growing always leaves a hole (os.Truncate), so without
+// allocation the added space stays unreserved and a write can hit ENOSPC even
+// though the filesystem reports it free. Allocation runs in both directions and
+// on a no-op resize: fallocate is idempotent, so it costs nothing on an image
+// whose blocks are already allocated and fills the holes of one that is sparse.
+func Resize(ctx context.Context, imagePath string, newSizeMB int, sparse bool) error {
 	if err := tool.CheckDependencies([]string{"resize2fs"}); err != nil {
 		return err
 	}
@@ -48,10 +56,15 @@ func Resize(ctx context.Context, imagePath string, newSizeMB int) error {
 
 	name := filepath.Base(absPath)
 
-	// No-op only when both filesystem and file already match the target.
+	// No-op only when both filesystem and file already match the target. Still
+	// allocate: resizing to the current size is how an existing sparse image is
+	// filled in without changing its size.
 	if fsBytes == newSizeBytes && currentFileBytes == newSizeBytes {
 		log.Info(fmt.Sprintf("size unchanged (%s) for %s",
 			utils.StyleNumber(fmt.Sprintf("%d MiB", newSizeMB)), utils.StylePath(name)))
+		if !sparse {
+			AllocateOverlay(ctx, absPath, newSizeMB)
+		}
 		return nil
 	}
 
@@ -103,6 +116,11 @@ func Resize(ctx context.Context, imagePath string, newSizeMB int) error {
 
 	if err := CheckIntegrity(ctx, absPath, true); err != nil {
 		return err
+	}
+
+	// Reserve the blocks only once the resized filesystem checks out.
+	if !sparse {
+		AllocateOverlay(ctx, absPath, newSizeMB)
 	}
 
 	log.Info(fmt.Sprintf("overlay image resized to %s: %s",

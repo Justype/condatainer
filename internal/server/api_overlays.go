@@ -87,7 +87,7 @@ func (s *srv) handleOverlayEdit(w http.ResponseWriter, r *http.Request) {
 
 		if newSizeMB > 0 {
 			fmt.Fprintf(bw, "Resizing %s to %s...\n", req.Path, req.Size)
-			if err := ext3.Resize(ctx, req.Path, newSizeMB); err != nil {
+			if err := ext3.Resize(ctx, req.Path, newSizeMB, false); err != nil {
 				broadcastResult(broker, ctx, fmt.Errorf("resize: %w", err))
 				return
 			}

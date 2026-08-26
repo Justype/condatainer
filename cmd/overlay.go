@@ -237,7 +237,8 @@ var resizeCmd = &cobra.Command{
 	Use:   "resize [flags] <overlay>",
 	Short: "Expand or shrink an overlay",
 	Example: `  condatainer overlay resize env.img -s 20g
-  condatainer overlay resize data.img --size 512M`,
+  condatainer overlay resize data.img --size 512M
+  condatainer overlay resize env.img -s 20g --sparse`,
 	Args: cobra.ExactArgs(1),
 
 	// Enable Smart Tab Completion for .img files
@@ -260,9 +261,11 @@ var resizeCmd = &cobra.Command{
 			ExitWithError("Invalid size format '%s': %v", sizeStr, err)
 		}
 
+		sparse, _ := cmd.Flags().GetBool("sparse")
+
 		// 3. Execute — Resize detects the lock itself via CheckIntegrity, so
 		// don't hold a separate LOCK_EX here (it would collide with that probe).
-		if err := ext3.Resize(cmd.Context(), path, sizeMB); err != nil {
+		if err := ext3.Resize(cmd.Context(), path, sizeMB, sparse); err != nil {
 			ExitWithError("%v", err)
 		}
 	},
@@ -417,6 +420,7 @@ func init() {
 
 	// --- Resize ---
 	resizeCmd.Flags().StringP("size", "s", "", "New size (e.g., 20g, 2048M)")
+	resizeCmd.Flags().BoolP("sparse", "S", false, "Leave the image sparse (no pre-allocation)")
 	_ = resizeCmd.MarkFlagRequired("size")
 
 	// --- Check ---
