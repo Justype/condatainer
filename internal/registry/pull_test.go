@@ -671,3 +671,56 @@ func TestDownloadRewritesAPartialLayer(t *testing.T) {
 		t.Errorf("done = %d after a failed attempt, want the bytes withdrawn", progress.done)
 	}
 }
+
+func TestSplitCoordinate(t *testing.T) {
+	tests := []struct {
+		coordinate string
+		base, repo string
+		wantErr    bool
+	}{
+		// The catalog scheme nests the name under a prefix; a project flattens it
+		// into one repository. Everything past the host is repository path either
+		// way, which is why the split is at the first slash and nowhere cleverer.
+		{"ghcr.io/org/cnt/grch38/genome", "ghcr.io", "org/cnt/grch38/genome", false},
+		{"ghcr.io/my-lab/rnaseq-2026/cnt", "ghcr.io", "my-lab/rnaseq-2026/cnt", false},
+		{"oci://ghcr.io/org/cnt/", "ghcr.io", "org/cnt", false},
+		{"localhost:5000/lab/p", "localhost:5000", "lab/p", false},
+		{"ghcr.io", "", "", true},
+		{"", "", "", true},
+		{"/lab/p", "", "", true},
+	}
+	for _, tt := range tests {
+		base, repo, err := SplitCoordinate(tt.coordinate)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("SplitCoordinate(%q) err = %v, wantErr %v", tt.coordinate, err, tt.wantErr)
+			continue
+		}
+		if err == nil && (base != tt.base || repo != tt.repo) {
+			t.Errorf("SplitCoordinate(%q) = %q, %q; want %q, %q", tt.coordinate, base, repo, tt.base, tt.repo)
+		}
+	}
+}
+
+// Fetch is told its kind because its destination is a producer's staging name,
+// which ends in .part and so says nothing about the payload. KindOf must still
+// answer for the filenames that do.
+func TestKindOfAndStagingNames(t *testing.T) {
+	for path, want := range map[string]Kind{
+		"/images/star--2.7.11b.sqf":                    KindOverlay,
+		"/images/store/star--2.7.11b@abc123def456.sqf": KindOverlay,
+		"/images/ubuntu24--base.sif":                   KindBase,
+	} {
+		got, err := KindOf(path)
+		if err != nil || got != want {
+			t.Errorf("KindOf(%q) = %q, %v; want %q", path, got, err, want)
+		}
+	}
+	for _, path := range []string{"/images/env.img", "/images/notes.txt", "/images/star--2.7.11b.sqf.local.part"} {
+		if _, err := KindOf(path); err == nil {
+			t.Errorf("KindOf(%q) should refuse a name that does not declare a distributable image", path)
+		}
+	}
+	if _, _, err := Kind("nonsense").types(); err == nil {
+		t.Error("an unknown kind must not resolve to media types")
+	}
+}

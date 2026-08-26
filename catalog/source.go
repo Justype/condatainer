@@ -25,8 +25,15 @@ type Spec struct{ Name, Base string }
 
 // Descriptor is a source's source.json.
 type Descriptor struct {
-	Schema      int    `json:"schema"`
-	Repository  string `json:"repository"`
+	Schema int `json:"schema"`
+	// Source is the collection's own code repository, recorded into every
+	// artifact it builds as manifest build.source and published as
+	// org.opencontainers.image.source.
+	//
+	// Named for what it becomes rather than what it looks like: `repository`
+	// means an OCI repository coordinate everywhere else in the tree
+	// (lock.Remote, oras' Reference), and one word cannot carry both.
+	Source      string `json:"source"`
 	DefaultBase string `json:"default_base"`
 	OCI         OCI    `json:"oci,omitzero"`
 }
@@ -35,9 +42,9 @@ type Descriptor struct {
 // Push is singular because replication is an explicit publishing operation;
 // Pull is ordered so a site-local mirror can precede an external registry.
 type OCI struct {
-	Push       string   `json:"push,omitempty"`
-	Pull       []string `json:"pull,omitempty"`
-	Visibility string   `json:"visibility,omitempty"`
+	Push     string   `json:"push,omitempty"`
+	Pull     []string `json:"pull,omitempty"`
+	Audience string   `json:"audience,omitempty"`
 }
 
 // Source is one collection of recipes and helpers.
@@ -140,19 +147,43 @@ func ParseDescriptor(data []byte) (Descriptor, error) {
 	if desc.Schema != 0 && desc.Schema != 1 {
 		return Descriptor{}, fmt.Errorf("catalog: unsupported source descriptor schema %d", desc.Schema)
 	}
+	if err := ValidSourceURL(desc.Source); err != nil {
+		return Descriptor{}, fmt.Errorf("catalog: source descriptor: %w", err)
+	}
 	if err := desc.OCI.normalize(); err != nil {
 		return Descriptor{}, err
 	}
 	return desc, nil
 }
 
-func (o *OCI) normalize() error {
-	o.Visibility = strings.ToLower(strings.TrimSpace(o.Visibility))
-	if o.Visibility == "" {
-		o.Visibility = "public"
+// ValidSourceURL reports whether raw is usable as
+// org.opencontainers.image.source. Empty is valid and means the annotation is
+// omitted.
+//
+// Shape only: whether the repository exists is not a question anything here can
+// answer offline. The scheme is the part that matters, because a registry links
+// a package to a repository by exact URL match and anything else links nothing.
+func ValidSourceURL(raw string) error {
+	source := strings.TrimSpace(raw)
+	if source == "" {
+		return nil
 	}
-	if o.Visibility != "public" && o.Visibility != "internal" {
-		return fmt.Errorf("catalog: OCI visibility must be public or internal, got %q", o.Visibility)
+	if strings.ContainsAny(source, " \t\r\n") {
+		return fmt.Errorf("source %q contains whitespace", source)
+	}
+	if !strings.HasPrefix(source, "https://") && !strings.HasPrefix(source, "http://") {
+		return fmt.Errorf("source %q is not an http(s) URL", source)
+	}
+	return nil
+}
+
+func (o *OCI) normalize() error {
+	o.Audience = strings.ToLower(strings.TrimSpace(o.Audience))
+	if o.Audience == "" {
+		o.Audience = "public"
+	}
+	if o.Audience != "public" && o.Audience != "restricted" {
+		return fmt.Errorf("catalog: OCI audience must be public or restricted, got %q", o.Audience)
 	}
 
 	declared := strings.TrimSpace(o.Push) != "" || len(o.Pull) != 0

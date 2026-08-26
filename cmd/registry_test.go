@@ -16,8 +16,8 @@ import (
 
 func TestInferPushSource(t *testing.T) {
 	good := &catalog.Source{Name: "lab", Desc: catalog.Descriptor{
-		Repository: "https://example.invalid/recipes/",
-		OCI:        catalog.OCI{Push: "registry.invalid/lab", Visibility: "internal"},
+		Source: "https://example.invalid/recipes/",
+		OCI:    catalog.OCI{Push: "registry.invalid/lab", Audience: "restricted"},
 	}}
 	for _, tc := range []struct {
 		name    string
@@ -30,7 +30,7 @@ func TestInferPushSource(t *testing.T) {
 		{"ambiguous", catalog.Catalog{good, &catalog.Source{Name: "other", Desc: good.Desc}}, nil, "matches 2"},
 		{"invalid descriptor", catalog.Catalog{&catalog.Source{Name: "bad", Desc: good.Desc, DescriptorErr: errors.New("bad json")}}, nil, "invalid source descriptor"},
 		{"stale", catalog.Catalog{&catalog.Source{Name: "old", Desc: good.Desc, Stale: true}}, nil, "unavailable or stale"},
-		{"no push", catalog.Catalog{&catalog.Source{Name: "nopush", Desc: catalog.Descriptor{Repository: good.Desc.Repository}}}, nil, "no OCI push endpoint"},
+		{"no push", catalog.Catalog{&catalog.Source{Name: "nopush", Desc: catalog.Descriptor{Source: good.Desc.Source}}}, nil, "no OCI push endpoint"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := inferPushSource("https://example.invalid/recipes", tc.cat)
@@ -107,11 +107,11 @@ func TestRegistryHelpersValidateInputs(t *testing.T) {
 	if got, err := requireRegistryBase("oci://ghcr.io/lab/cnt/"); err != nil || got != "ghcr.io/lab/cnt" {
 		t.Errorf("requireRegistryBase = (%q, %v)", got, err)
 	}
-	if _, err := parseVisibility("private"); err == nil {
-		t.Error("parseVisibility accepted an unknown value")
+	if _, err := parseAudience("private"); err == nil {
+		t.Error("parseAudience accepted an unknown value")
 	}
-	if got, err := parseVisibility("INTERNAL"); err != nil || got != registry.Internal {
-		t.Errorf("parseVisibility = (%q, %v)", got, err)
+	if got, err := parseAudience("RESTRICTED"); err != nil || got != registry.Restricted {
+		t.Errorf("parseAudience = (%q, %v)", got, err)
 	}
 }
 
@@ -154,7 +154,7 @@ func TestFindRegistryArtifactSeparatesManagedFromPointedAt(t *testing.T) {
 // least likely destination for a one-off build, a mirror, or a project's image.
 func TestRegistryPushDestinationRefusesToInferForAPath(t *testing.T) {
 	cmd := newRegistryCommand()
-	opts := &registryOptions{visibility: string(registry.Public)}
+	opts := &registryOptions{audience: string(registry.Public)}
 
 	_, _, err := registryPushDestination(cmd, opts, registryArtifact{path: "/tmp/one-off.sqf"})
 	if err == nil || !strings.Contains(err.Error(), "--registry") {
@@ -167,9 +167,9 @@ func TestRegistryPushDestinationRefusesToInferForAPath(t *testing.T) {
 	// The same path with an explicit destination publishes, and never reads the
 	// artifact to find one.
 	opts.base = "ghcr.io/lab/cnt"
-	base, visibility, err := registryPushDestination(cmd, opts, registryArtifact{path: "/tmp/one-off.sqf"})
-	if err != nil || base != "ghcr.io/lab/cnt" || visibility != registry.Public {
-		t.Fatalf("explicit destination = (%q, %q, %v)", base, visibility, err)
+	base, audience, err := registryPushDestination(cmd, opts, registryArtifact{path: "/tmp/one-off.sqf"})
+	if err != nil || base != "ghcr.io/lab/cnt" || audience != registry.Public {
+		t.Fatalf("explicit destination = (%q, %q, %v)", base, audience, err)
 	}
 }
 

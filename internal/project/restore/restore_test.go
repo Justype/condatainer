@@ -24,7 +24,7 @@ func TestRunAdoptsWithoutBuilding(t *testing.T) {
 	appPath := vendor(t, root, app, "echo star\n")
 
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: appPath}
 
 	report, err := Run(context.Background(), root, l, Options{lookup: installed("star/2.7.11b")})
 	if err != nil {
@@ -52,7 +52,7 @@ func TestRunReportsAnEquivalentAdoption(t *testing.T) {
 	appPath := vendor(t, root, app, "echo star\n")
 
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: appPath}
 
 	report, err := Run(context.Background(), root, l, Options{lookup: substitute("star/2.7.11b")})
 	if err != nil {
@@ -71,7 +71,7 @@ func TestRunReportsAnEquivalentAdoption(t *testing.T) {
 func TestRunStopsOnAPlanningProblem(t *testing.T) {
 	root := projectRoot(t)
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: "provenance/missing--1.0@abc123456789"}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: "provenance/missing--1.0@abc123456789"}
 
 	report, err := Run(context.Background(), root, l, Options{lookup: nothingInstalled})
 	if !errors.Is(err, ErrIncomplete) {
@@ -93,9 +93,11 @@ func TestRunFailsAFetchRatherThanRebuildingSilently(t *testing.T) {
 	appPath := vendor(t, root, app, "echo star\n")
 
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: appPath}
 	digest := "sha256:" + strings.Repeat("a", 64)
-	if err := l.AddRemote(appPath, lock.Remote{Repository: "ghcr.io/x/star", ManifestDigest: digest}); err != nil {
+	// A loopback host so resolution fails locally: this asserts what a fetch does
+	// when no location serves the artifact, not what any real registry answers.
+	if err := l.AddRemote(appPath, lock.Remote{Repository: "127.0.0.1:1/x/star", ManifestDigest: digest}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -118,7 +120,7 @@ func TestRunHonoursCancellation(t *testing.T) {
 	appPath := vendor(t, root, app, "echo star\n")
 
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: appPath}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -173,7 +175,7 @@ func TestPlaceAtPublishesByRename(t *testing.T) {
 	}
 	destination := filepath.Join(dir, "overlays", "tool.sqf")
 
-	got, err := placeAt(destination, output)
+	got, err := placeAt(context.Background(), destination, output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +207,7 @@ func TestPlaceAtRefusesASymlink(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	if _, err := placeAt(destination, output); err == nil {
+	if _, err := placeAt(context.Background(), destination, output); err == nil {
 		t.Fatal("a symlinked destination was overwritten")
 	}
 	if data, _ := os.ReadFile(outside); string(data) != "someone else's" {
@@ -223,7 +225,7 @@ func TestPlaceAtRefusesANonRegularDestination(t *testing.T) {
 	if err := os.MkdirAll(destination, 0o775); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := placeAt(destination, output); err == nil {
+	if _, err := placeAt(context.Background(), destination, output); err == nil {
 		t.Fatal("a directory was accepted as a destination")
 	}
 }
@@ -238,7 +240,7 @@ func TestAnswersMakeAnInteractiveRebuildPlannable(t *testing.T) {
 	appPath := vendor(t, root, app, recipe)
 
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: appPath}
 
 	if plan := Compute(root, l, Options{lookup: nothingInstalled}); plan.Complete() {
 		t.Fatal("an interactive rebuild was planned with no answers")
@@ -286,7 +288,7 @@ func TestRebuildUsesTheVendoredSources(t *testing.T) {
 
 func mustLock(artifactPath string) *lock.Lock {
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: artifactPath}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: artifactPath}
 	return l
 }
 
@@ -294,7 +296,7 @@ func entryName(manifest meta.Manifest) string {
 	return capsule.EntryName(manifest.Name, manifest.Keys.Identity.Digest())
 }
 
-// A closure node no selection names is scaffolding: it exists so its dependent
+// A closure node no pin names is scaffolding: it exists so its dependent
 // can be built and is discarded with the restore.
 func TestIsTransientFollowsWhatAskedForTheArtifact(t *testing.T) {
 	for _, tc := range []struct {
@@ -388,11 +390,13 @@ func TestRunBlocksADependentRatherThanFailingIt(t *testing.T) {
 	indexPath := vendor(t, root, index, "echo index\n")
 
 	l := lock.New()
-	l.Selections["grch38/star-index"] = lock.Selection{Artifact: indexPath}
+	l.Pins["grch38/star-index"] = lock.PinEntry{Artifact: indexPath}
 	// The dependency is a fetch this build cannot perform, which is the one
 	// acquisition failure reachable without running a real build.
 	digest := "sha256:" + strings.Repeat("a", 64)
-	if err := l.AddRemote(appPath, lock.Remote{Repository: "ghcr.io/x/star", ManifestDigest: digest}); err != nil {
+	// A loopback host so resolution fails locally: this asserts what a fetch does
+	// when no location serves the artifact, not what any real registry answers.
+	if err := l.AddRemote(appPath, lock.Remote{Repository: "127.0.0.1:1/x/star", ManifestDigest: digest}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -473,7 +477,7 @@ func TestTransientStagingIsNamedForTheArtifact(t *testing.T) {
 
 	entry, problems := func() (*lock.Entry, []lock.Problem) {
 		l := lock.New()
-		l.Selections["samtools/1.21"] = lock.Selection{Artifact: depPath}
+		l.Pins["samtools/1.21"] = lock.PinEntry{Artifact: depPath}
 		verified, problems := lock.Verify(root, l)
 		return verified.Entries[depPath], problems
 	}()

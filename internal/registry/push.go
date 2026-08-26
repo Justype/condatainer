@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
@@ -18,22 +19,26 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// Visibility declares who can pull from an endpoint, and so decides what may be
+// Audience declares who can pull from an endpoint, and so decides what may be
 // pushed to it.
 //
 // It states a fact about a registry, and CondaTainer derives the permitted set
 // from it. Config must never enumerate types directly: `types: [app]` beside a
-// public endpoint would erase the rule with no error, whereas a wrong visibility
+// public endpoint would erase the rule with no error, whereas a wrong audience
 // is a claim someone has to write down and defend. Nothing here verifies the
-// registry really is private — it is a declaration, not enforcement.
-type Visibility string
+// registry really is restricted — it is a declaration, not enforcement.
+//
+// It is deliberately not called visibility. A GitHub package's visibility is a
+// separate per-package setting that this neither reads nor changes, and using
+// its word for an unrelated declaration invited exactly that reading.
+type Audience string
 
 const (
 	// Public is the default. Anyone can pull, so only what is ours to
 	// redistribute may go here.
-	Public Visibility = "public"
-	// Internal is a registry only the organization can pull from.
-	Internal Visibility = "internal"
+	Public Audience = "public"
+	// Restricted is a registry only a known set of people can pull from.
+	Restricted Audience = "restricted"
 )
 
 // maxIndexReconcileAttempts bounds the retry when another architecture is
@@ -41,28 +46,71 @@ const (
 // this converges rather than locks; CI should still publish sequentially.
 const maxIndexReconcileAttempts = 3
 
+// buildTypeConda is meta.Manifest.BuildType for a Micromamba build, the string
+// build.BuildTypeConda renders to. Compared here rather than imported: this
+// package must not depend on internal/build.
+const buildTypeConda = "conda"
+
 // Accepts reports why an artifact may not be published to an endpoint of this
-// visibility, or nil.
+// audience, or nil.
 //
-// A public endpoint takes `base`, `os`, and `data` — a container root, packages
-// from a public distribution, and public reference data with the indexes built
-// from it. It does not take an `app`: an app installs someone else's software,
-// and publishing a copy redistributes their binaries under our name, which is
-// theirs to permit and not ours to assume. A Conda build is refused for a second
-// and independent reason — its solve inputs are embedded, so a consumer rebuilds
-// from a few kilobytes instead of downloading gigabytes.
-func (v Visibility) Accepts(m meta.Manifest) error {
-	if v == Internal {
+// A restricted endpoint takes everything. A public one asks the artifact whether
+// it may be republished, and the recipe's #REDISTRIBUTE: is the answer: `no`
+// refuses whatever the type, `yes` publishes whatever the type. Nothing
+// overrides a refusal — no flag, no force — because the person pressing it is
+// rarely the person who agreed to the vendor's terms, and a public push cannot
+// be taken back. A caller wanting the other answer either amends the recipe or
+// publishes to an endpoint it has declared restricted.
+//
+// The type is consulted only when the recipe did not answer, and each default is
+// what the author already asserted by choosing a #TYPE: rather than a guess about
+// licensing. A `base` and an `os` are ours to publish — a container root, and
+// packages from a public distribution. `data` asserts public reference data and
+// the indexes built from it. An `app` asserts an installation of software
+// somebody else wrote, and unknown terms are not permission.
+//
+// A Conda build is exempt from that last default, and the reason is mechanical:
+// it embeds no recipe (build.SourceSpec.RecipeFile), so there is nowhere for
+// #REDISTRIBUTE: to be written that travels with the artifact. Applying the app
+// default to it would be a permanent refusal wearing a default's clothes,
+// satisfiable by nothing. Its packages were also vetted for redistributable
+// licensing as a condition of being in the channel, so the "unknown terms"
+// premise the default rests on is the weakest here of anywhere. What the
+// channels cannot answer — a private or vendor channel — is reported at push
+// time from Build.Channels and adjudicated by a person.
+func (v Audience) Accepts(m meta.Manifest) error {
+	if v == Restricted {
 		return nil
 	}
-	if m.BuildType == "conda" {
-		return fmt.Errorf("a Conda build is not published to a %s registry: its solve inputs travel with it, so %s rebuilds from kilobytes", v, m.Name)
+	if m.Redistribute != nil {
+		if !*m.Redistribute {
+			return fmt.Errorf("%s declares #REDISTRIBUTE: no, so it is not published to a %s registry", m.Name, v)
+		}
+		return nil
+	}
+	if m.BuildType == buildTypeConda {
+		return nil
 	}
 	switch m.Type {
 	case catalog.TypeBase, catalog.TypeOS, catalog.TypeData:
 		return nil
 	}
-	return fmt.Errorf("a %s artifact is not published to a %s registry: %s installs software that is not ours to redistribute", m.Type, v, m.Name)
+	return fmt.Errorf("%s artifacts are not published to a %s registry: %s installs software that is not ours to redistribute; declare #REDISTRIBUTE: yes in its recipe if its licence permits it, or push to an endpoint declared restricted", m.Type, v, m.Name)
+}
+
+// Placement overrides where an artifact is published, for a caller that owns a
+// naming scheme of its own.
+//
+// A project keeps every artifact in one repository with the name in the tag,
+// which PushReference cannot express — it derives both from the name, for the
+// catalog's nested layout. Everything else about publishing is unchanged, which
+// is the point of overriding only this: audience, key regeneration, and the
+// annotations all still come from the artifact's own bytes.
+type Placement struct {
+	// Repo is the repository path beneath the base.
+	Repo string
+	// Tags are the tags to write, canonical first.
+	Tags []string
 }
 
 // PublishRequest is one artifact and where it is going.
@@ -72,57 +120,104 @@ type PublishRequest struct {
 	Path string
 	// Base is the registry base, owner and prefix included.
 	Base string
-	// Visibility is what the endpoint declared.
-	Visibility Visibility
+	// Audience is what the endpoint declared.
+	Audience Audience
 	// Force allows replacing an existing versioned tag, which is otherwise
 	// immutable.
 	Force bool
+	// Placement overrides the catalog repository and tags. Nil derives them from
+	// the artifact's name, which is what an ordinary `registry push` does.
+	Placement *Placement
+	// Source overrides org.opencontainers.image.source, which otherwise names the
+	// recipe collection the artifact recorded at build time. Empty keeps that.
+	//
+	// It is the publisher's fact, not the artifact's: one repository holding a
+	// whole project's artifacts comes from several collections, so the collection
+	// is not what that package's source is. The artifact keeps its own
+	// Build.Source in the embedded manifest either way.
+	Source string
 }
 
-// Publish validates an artifact against its destination, then pushes it.
+// Publish validates an artifact against its destination, then pushes it, and
+// reports the platform manifest descriptor it published.
 //
 // Everything published is derived from the artifact's own bytes: the type that
 // decides whether the endpoint will take it, the keys, the name, and every
-// annotation. Nothing is accepted from the caller except where it is going.
-func Publish(ctx context.Context, req PublishRequest) error {
+// annotation. Nothing is accepted from the caller except where it is going —
+// which is what Placement supplies, and only that.
+//
+// The returned digest is the index child for this architecture, not the index
+// itself. It is the address a lock records: content-addressed, so it survives
+// mirroring, and unmoved by a later push that adds another architecture.
+func Publish(ctx context.Context, req PublishRequest) (ocispec.Descriptor, error) {
 	log := logging.FromContext(ctx)
-	if req.Visibility == "" {
-		req.Visibility = Public
+	if req.Audience == "" {
+		req.Audience = Public
 	}
 	if _, _, err := imageTypes(req.Path); err != nil {
-		return err
+		return ocispec.Descriptor{}, err
 	}
 
 	m, err := meta.ReadManifest(req.Path)
 	if err != nil {
-		return err
+		return ocispec.Descriptor{}, err
 	}
-	if err := req.Visibility.Accepts(m); err != nil {
-		return err
+	if err := req.Audience.Accepts(m); err != nil {
+		return ocispec.Descriptor{}, err
 	}
 	if m.Keys.Identity.Empty() || m.Keys.Equiv.Empty() {
-		return fmt.Errorf("%s records no scheme-backed identity, so nothing could pin what was pulled", m.Name)
+		return ocispec.Descriptor{}, fmt.Errorf("%s records no scheme-backed identity, so nothing could pin what was pulled", m.Name)
 	}
 	// Held to its own claim before anyone else has to trust it: a published
 	// artifact whose files do not reproduce its recorded keys is one that pull
 	// would refuse on arrival, and finding that out here is cheaper for everyone.
 	got, err := compare.Read(req.Path)
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
+		return ocispec.Descriptor{}, fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
 	}
 	if err := checkRegeneratedKeys(got, m.Keys.Identity, m.Keys.Equiv, "recorded"); err != nil {
-		return err
+		return ocispec.Descriptor{}, err
 	}
 
-	repo, tags, err := PushReference(m)
-	if err != nil {
-		return err
-	}
-	if err := checkTagIsFree(ctx, req, m, repo, tags[0]); err != nil {
-		return err
+	repo, tags := "", []string(nil)
+	if req.Placement != nil {
+		repo, tags = req.Placement.Repo, req.Placement.Tags
+		if repo == "" || len(tags) == 0 {
+			return ocispec.Descriptor{}, fmt.Errorf("placement for %s names no repository or tags", m.Name)
+		}
+		// No immutability check: a placement's canonical tag carries the content
+		// key, so it can only ever be re-pushed with the same content, and any
+		// unqualified tag beside it is a moving pointer by design. Whether this
+		// artifact is already there is the caller's question, asked before it
+		// spends the bytes.
+	} else {
+		if repo, tags, err = PushReference(m); err != nil {
+			return ocispec.Descriptor{}, err
+		}
+		if err := checkTagIsFree(ctx, req, m, repo, tags[0]); err != nil {
+			return ocispec.Descriptor{}, err
+		}
 	}
 
 	annotations := Annotations(m, compressionOf(req.Path))
+	// Applied here rather than inside Annotations, which derives everything from
+	// the artifact alone: this is the one value the publisher supplies. A caller
+	// that names a source and gets it wrong is told, rather than publishing under
+	// a URL that links nowhere.
+	if source := strings.TrimSpace(req.Source); source != "" {
+		if err := catalog.ValidSourceURL(source); err != nil {
+			return ocispec.Descriptor{}, err
+		}
+		annotations[AnnSource] = source
+	}
+	// The artifact's own answer was recorded by whatever descriptor built it,
+	// possibly before that field was checked, so it is dropped rather than
+	// refused: a malformed provenance URL links nothing either way, and it is not
+	// a reason to block distribution.
+	if err := catalog.ValidSourceURL(annotations[AnnSource]); err != nil {
+		log.Warn("dropping the source annotation", "artifact", m.Name, "err", err)
+		delete(annotations, AnnSource)
+	}
 	log.Info("publishing", "artifact", m.Name, "reference", FullRef(req.Base, repo, tags[0]))
 	return Push(ctx, req.Path, req.Base, repo, tags, annotations, m.Platform.Arch == meta.ArchNone)
 }
@@ -183,20 +278,20 @@ func checkTagIsFree(ctx context.Context, req PublishRequest, m meta.Manifest, re
 // is already published, so running push on each architecture builds one
 // multi-arch tag. An #ARCH:noarch artifact is tagged directly: the payload is
 // identical everywhere, and an index over one child would only imply otherwise.
-func Push(ctx context.Context, artifactPath, base, repo string, tags []string, annotations map[string]string, archIndependent bool) error {
+func Push(ctx context.Context, artifactPath, base, repo string, tags []string, annotations map[string]string, archIndependent bool) (ocispec.Descriptor, error) {
 	if len(tags) == 0 {
-		return fmt.Errorf("no tags to push %s under", artifactPath)
+		return ocispec.Descriptor{}, fmt.Errorf("no tags to push %s under", artifactPath)
 	}
 	artifactType, layerType, err := imageTypes(artifactPath)
 	if err != nil {
-		return err
+		return ocispec.Descriptor{}, err
 	}
 	// One profile decides both how much is asked for at once and how fast: it
 	// clamps the layer plan, and it spaces the writes that follow.
 	profile := profileFor(registryHost(base))
 	plan, err := preflightUpload(ctx, artifactPath, base, tags, profile)
 	if err != nil {
-		return err
+		return ocispec.Descriptor{}, err
 	}
 	ctx = withPacer(ctx, newPacer(profile.MinMutationGap))
 	ctx = withThroughputGuard(ctx, newThroughputGuard(profile))
@@ -204,26 +299,26 @@ func Push(ctx context.Context, artifactPath, base, repo string, tags []string, a
 	if !archIndependent {
 		var ok bool
 		if plat, ok = platform(); !ok {
-			return fmt.Errorf("%w: this build cannot publish from its own architecture", ErrUnsupportedPlatform)
+			return ocispec.Descriptor{}, fmt.Errorf("%w: this build cannot publish from its own architecture", ErrUnsupportedPlatform)
 		}
 	}
 
 	repository, err := newRepository(base, repo)
 	if err != nil {
-		return err
+		return ocispec.Descriptor{}, err
 	}
 	// After the local checks, not before: a missing or empty artifact is free to
 	// detect and should not be gated behind a network round trip. Still before
 	// any hashing, which is the property that matters.
 	if err := probePushAccess(ctx, repository); err != nil {
-		return err
+		return ocispec.Descriptor{}, err
 	}
 
 	// Blobs first: a manifest may not reference what the registry does not yet
 	// hold. Nothing is staged on the way — see pushArtifactLayers.
 	layers, err := pushArtifactLayers(ctx, repository.Blobs(), artifactPath, layerType, plan.LayerSize)
 	if err != nil {
-		return classify(err)
+		return ocispec.Descriptor{}, classify(err)
 	}
 
 	// Packed straight against the repository. There is no local store to copy
@@ -242,7 +337,7 @@ func Push(ctx context.Context, artifactPath, base, repo string, tags []string, a
 		return packErr
 	}})
 	if err != nil {
-		return fmt.Errorf("failed to publish manifest: %w", err)
+		return ocispec.Descriptor{}, fmt.Errorf("failed to publish manifest: %w", err)
 	}
 	manifestDesc.ArtifactType = artifactType
 
@@ -253,13 +348,16 @@ func Push(ctx context.Context, artifactPath, base, repo string, tags []string, a
 				attrs: []any{"tag", tag},
 				do:    func(ctx context.Context) error { return repository.Tag(ctx, manifestDesc, tag) },
 			}); err != nil {
-				return fmt.Errorf("failed to tag %s: %w", FullRef(base, repo, tag), err)
+				return ocispec.Descriptor{}, fmt.Errorf("failed to tag %s: %w", FullRef(base, repo, tag), err)
 			}
 		}
-		return nil
+		return manifestDesc, nil
 	}
 	manifestDesc.Platform = &plat
-	return reconcileIndex(ctx, repository, tags, manifestDesc, annotations, artifactType, base, repo)
+	if err := reconcileIndex(ctx, repository, tags, manifestDesc, annotations, artifactType, base, repo); err != nil {
+		return ocispec.Descriptor{}, err
+	}
+	return manifestDesc, nil
 }
 
 // reconcileIndex points every tag at an index containing this architecture's

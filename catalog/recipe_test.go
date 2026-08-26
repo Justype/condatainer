@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -225,3 +226,78 @@ func TestRecipePreimageIgnoresDescription(t *testing.T) {
 		t.Error("a code change did not move the preimage")
 	}
 }
+
+func TestParseRecipeRedistribution(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		license string
+		want    *bool
+	}{
+		{"absent", "#!/bin/bash\n", "", nil},
+		{"declared yes", "#!/bin/bash\n#LICENSE: MIT\n#REDISTRIBUTE: yes\n", "MIT", boolp(true)},
+		{"declared no", "#!/bin/bash\n#REDISTRIBUTE: no\n", "", boolp(false)},
+		{"case is not load-bearing", "#!/bin/bash\n#REDISTRIBUTE: Yes\n", "", boolp(true)},
+		// Kept verbatim: a compound expression is documentation, not something
+		// anything parses to derive permission from.
+		{"compound licence", "#!/bin/bash\n#LICENSE: GPL-3.0-or-later AND LicenseRef-Vendor\n",
+			"GPL-3.0-or-later AND LicenseRef-Vendor", nil},
+		// A value that is neither is *not* silently read as unanswered; it is
+		// kept so Validate can name it.
+		{"unrecognized value", "#!/bin/bash\n#REDISTRIBUTE: maybe\n", "", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, err := ParseRecipe("recipes/x/1.0", strings.NewReader(tt.body))
+			if err != nil {
+				t.Fatalf("ParseRecipe: %v", err)
+			}
+			if rec.License != tt.license {
+				t.Errorf("License = %q, want %q", rec.License, tt.license)
+			}
+			got := rec.Redistributable()
+			switch {
+			case tt.want == nil && got != nil:
+				t.Errorf("Redistributable() = %v, want nil", *got)
+			case tt.want != nil && got == nil:
+				t.Errorf("Redistributable() = nil, want %v", *tt.want)
+			case tt.want != nil && *got != *tt.want:
+				t.Errorf("Redistributable() = %v, want %v", *got, *tt.want)
+			}
+		})
+	}
+}
+
+// A typo must not read as "unanswered", which would fall back to the type
+// default and publish the artifact the author was holding back.
+func TestValidateRejectsUnknownRedistribute(t *testing.T) {
+	rec, err := ParseRecipe("recipes/x/1.0", strings.NewReader("#!/bin/bash\n#REDISTRIBUTE: maybe\n"))
+	if err != nil {
+		t.Fatalf("ParseRecipe: %v", err)
+	}
+	err = rec.Validate()
+	if err == nil {
+		t.Fatal("#REDISTRIBUTE: maybe must not validate")
+	}
+	if !errors.Is(err, ErrInvalidRecipe) || !strings.Contains(err.Error(), "maybe") {
+		t.Errorf("error should be ErrInvalidRecipe naming the value: %v", err)
+	}
+	for _, ok := range []string{"yes", "no"} {
+		rec.Redistribute = ok
+		if err := rec.Validate(); err != nil {
+			t.Errorf("#REDISTRIBUTE: %s must validate: %v", ok, err)
+		}
+	}
+}
+
+// Both headers are whole-line comments, and RecipeDigest hashes StripComments —
+// so annotating an existing recipe must not move a single key.
+func TestRedistributionHeadersLeaveTheDigestAlone(t *testing.T) {
+	plain := []byte("#!/bin/bash\nmake install\n")
+	annotated := []byte("#!/bin/bash\n#LICENSE: MIT\n#REDISTRIBUTE: yes\nmake install\n")
+	if a, b := string(StripComments(plain)), string(StripComments(annotated)); a != b {
+		t.Errorf("StripComments differs after annotating:\n%q\n%q", a, b)
+	}
+}
+
+func boolp(b bool) *bool { return &b }

@@ -15,7 +15,7 @@ func TestPublishWritesTheLockAtomically(t *testing.T) {
 	appPath := vendor(t, root, app, appFiles)
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	if err := Publish(root, l); err != nil {
 		t.Fatal(err)
 	}
@@ -24,8 +24,8 @@ func TestPublishWritesTheLockAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Selections["star/2.7.11b"].Artifact != appPath {
-		t.Fatalf("loaded = %#v", loaded.Selections)
+	if loaded.Pins["star/2.7.11b"].Artifact != appPath {
+		t.Fatalf("loaded = %#v", loaded.Pins)
 	}
 	leftovers, err := os.ReadDir(Dir(root))
 	if err != nil {
@@ -39,7 +39,7 @@ func TestPublishWritesTheLockAtomically(t *testing.T) {
 }
 
 // Pruning follows dependency edges, so a closure entry is kept even though no
-// selection names it directly.
+// pin names it directly.
 func TestPruneKeepsTheClosureAndRemovesOrphans(t *testing.T) {
 	root := projectRoot(t)
 	dep, depFiles := recipeArtifact(t, "zlib/1.3", "echo zlib\n")
@@ -50,7 +50,7 @@ func TestPruneKeepsTheClosureAndRemovesOrphans(t *testing.T) {
 	orphanPath := vendor(t, root, orphan, orphanFiles)
 
 	l := New()
-	l.Selections["index/1.0"] = Selection{Artifact: dataPath}
+	l.Pins["index/1.0"] = PinEntry{Artifact: dataPath}
 	if err := Publish(root, l); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestPruneLeavesUnreadableEntriesAlone(t *testing.T) {
 	}
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	if err := Publish(root, l); err != nil {
 		t.Fatal(err)
 	}
@@ -98,13 +98,13 @@ func TestPublishRefusesAnInvalidLockAndChangesNothing(t *testing.T) {
 	appPath := vendor(t, root, app, appFiles)
 
 	good := New()
-	good.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	good.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	if err := Publish(root, good); err != nil {
 		t.Fatal(err)
 	}
 
 	bad := New()
-	bad.Selections["star/2.7.11b"] = Selection{Artifact: "/etc/passwd"}
+	bad.Pins["star/2.7.11b"] = PinEntry{Artifact: "/etc/passwd"}
 	if err := Publish(root, bad); err == nil {
 		t.Fatal("Publish accepted an absolute artifact path")
 	}
@@ -113,8 +113,8 @@ func TestPublishRefusesAnInvalidLockAndChangesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Selections["star/2.7.11b"].Artifact != appPath {
-		t.Fatalf("a failed publish replaced the authoritative lock: %#v", loaded.Selections)
+	if loaded.Pins["star/2.7.11b"].Artifact != appPath {
+		t.Fatalf("a failed publish replaced the authoritative lock: %#v", loaded.Pins)
 	}
 	if _, err := os.Stat(filepath.Join(Dir(root), appPath)); err != nil {
 		t.Errorf("a failed publish pruned artifacts: %v", err)
@@ -157,7 +157,7 @@ func TestStagingDirectoriesAreInvisibleAndSweepable(t *testing.T) {
 	}
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	if _, problems := Verify(root, l); len(problems) != 0 {
 		t.Fatalf("an abandoned staging directory was read as an artifact:\n%s", problemText(problems))
 	}
@@ -169,5 +169,63 @@ func TestStagingDirectoriesAreInvisibleAndSweepable(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(Dir(root), appPath)); err != nil {
 		t.Errorf("sweep removed a real artifact: %v", err)
+	}
+}
+
+// A remote addresses a vendored artifact, so it must go when that artifact does
+// — and it must go from the *published bytes*, not just from the in-memory lock.
+// Verify calls a remote naming an absent artifact a problem, so leaving one
+// behind makes the project fail its own validate after a re-pin.
+func TestPublishDropsRemotesForUnreachableArtifacts(t *testing.T) {
+	root := projectRoot(t)
+	l := New()
+	app, appFiles := recipeArtifact(t, "star/2.7.11b", "echo star\n")
+	kept := vendor(t, root, app, appFiles)
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: kept}
+
+	digest := "sha256:" + strings.Repeat("a", 64)
+	if err := l.AddRemote(kept, Remote{Repository: "ghcr.io/lab/p", ManifestDigest: digest}); err != nil {
+		t.Fatal(err)
+	}
+	orphan := EntryPath("cutadapt--5.0@" + strings.Repeat("b", 12))
+	if err := l.AddRemote(orphan, Remote{Repository: "ghcr.io/lab/p", ManifestDigest: digest}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Publish(root, l); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	data, err := os.ReadFile(FilePath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := Unmarshal(data)
+	if err != nil {
+		t.Fatalf("the published lock does not parse: %v", err)
+	}
+	if _, still := published.Remotes[orphan]; still {
+		t.Errorf("the published lock still records a remote for %s:\n%s", orphan, data)
+	}
+	if len(published.Remotes[kept]) != 1 {
+		t.Errorf("the reachable artifact lost its remote:\n%s", data)
+	}
+	if _, still := l.Remotes[orphan]; still {
+		t.Error("the in-memory lock still records the orphaned remote")
+	}
+}
+
+// Everything is reachable, so nothing is touched — and a lock with no remotes at
+// all must not gain an empty map that would change its bytes.
+func TestPublishKeepsRemotesItStillReaches(t *testing.T) {
+	root := projectRoot(t)
+	l := New()
+	app, appFiles := recipeArtifact(t, "star/2.7.11b", "echo star\n")
+	kept := vendor(t, root, app, appFiles)
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: kept}
+	if err := Publish(root, l); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if l.Remotes != nil {
+		t.Errorf("Publish invented a remotes map: %#v", l.Remotes)
 	}
 }

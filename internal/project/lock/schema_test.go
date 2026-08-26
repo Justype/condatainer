@@ -11,9 +11,9 @@ const digestA = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef01234567
 func TestMarshalIsDeterministicAndSorted(t *testing.T) {
 	build := func() *Lock {
 		l := New()
-		l.Selections["star/2.7.11b"] = Selection{Artifact: "provenance/star--2.7.11b@a31f902c12ab"}
-		l.Selections["cutadapt/5.0"] = Selection{Artifact: "provenance/cutadapt--5.0@41b5204f99c1"}
-		l.Selections["grch38/genome/gencode49"] = Selection{Artifact: "provenance/grch38--genome--gencode49@8ce02116f302"}
+		l.Pins["star/2.7.11b"] = PinEntry{Artifact: "provenance/star--2.7.11b@a31f902c12ab"}
+		l.Pins["cutadapt/5.0"] = PinEntry{Artifact: "provenance/cutadapt--5.0@41b5204f99c1"}
+		l.Pins["grch38/genome/gencode49"] = PinEntry{Artifact: "provenance/grch38--genome--gencode49@8ce02116f302"}
 		return l
 	}
 
@@ -31,7 +31,7 @@ func TestMarshalIsDeterministicAndSorted(t *testing.T) {
 	if !strings.HasSuffix(string(first), "}\n") {
 		t.Errorf("output does not end in exactly one newline: %q", string(first[len(first)-3:]))
 	}
-	if !strings.Contains(string(first), "\n  \"selections\": {") {
+	if !strings.Contains(string(first), "\n  \"pins\": {") {
 		t.Errorf("output is not two-space indented:\n%s", first)
 	}
 
@@ -40,7 +40,7 @@ func TestMarshalIsDeterministicAndSorted(t *testing.T) {
 	for _, key := range keys {
 		i := strings.Index(string(first), key)
 		if i < at {
-			t.Fatalf("selection keys are not sorted:\n%s", first)
+			t.Fatalf("pin keys are not sorted:\n%s", first)
 		}
 		at = i
 	}
@@ -51,7 +51,7 @@ func TestMarshalIsDeterministicAndSorted(t *testing.T) {
 
 func TestRoundTripPreservesRemotes(t *testing.T) {
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: "provenance/star--2.7.11b@a31f902c12ab"}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: "provenance/star--2.7.11b@a31f902c12ab"}
 	if err := l.AddRemote("provenance/star--2.7.11b@a31f902c12ab", Remote{Repository: "ghcr.io/example/star", ManifestDigest: digestA}); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestEntryPathsAreConstrained(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.why, func(t *testing.T) {
 			l := New()
-			l.Selections["star/2.7.11b"] = Selection{Artifact: tt.path}
+			l.Pins["star/2.7.11b"] = PinEntry{Artifact: tt.path}
 			if _, err := l.Marshal(); !errors.Is(err, ErrInvalid) {
 				t.Fatalf("accepted %q: %v", tt.path, err)
 			}
@@ -148,11 +148,11 @@ func TestUnmarshalRejectsUnknownFieldsAndSchemas(t *testing.T) {
 		data string
 		want error
 	}{
-		{"unknown top-level field", `{"schema_version":1,"selections":{},"surprise":true}`, ErrInvalid},
-		{"unknown selection field", `{"schema_version":1,"selections":{"a":{"artifact":"provenance/a@b","pinned":true}}}`, ErrInvalid},
-		{"future schema", `{"schema_version":99,"selections":{}}`, ErrSchema},
-		{"trailing content", `{"schema_version":1,"selections":{}} {}`, ErrInvalid},
-		{"remote outside artifacts", `{"schema_version":1,"selections":{},"remotes":{"/abs":[]}}`, ErrInvalid},
+		{"unknown top-level field", `{"schema_version":1,"pins":{},"surprise":true}`, ErrInvalid},
+		{"unknown pin field", `{"schema_version":1,"pins":{"a":{"artifact":"provenance/a@b","pinned":true}}}`, ErrInvalid},
+		{"future schema", `{"schema_version":99,"pins":{}}`, ErrSchema},
+		{"trailing content", `{"schema_version":1,"pins":{}} {}`, ErrInvalid},
+		{"remote outside artifacts", `{"schema_version":1,"pins":{},"remotes":{"/abs":[]}}`, ErrInvalid},
 	}
 	for _, tt := range tests {
 		t.Run(tt.why, func(t *testing.T) {
@@ -166,7 +166,7 @@ func TestUnmarshalRejectsUnknownFieldsAndSchemas(t *testing.T) {
 // A duplicated remote in a hand-edited lock is a conflict, not something to
 // silently collapse on the next write.
 func TestUnmarshalRejectsDuplicateRemotes(t *testing.T) {
-	data := `{"schema_version":1,"selections":{},"remotes":{"provenance/a@b":[` +
+	data := `{"schema_version":1,"pins":{},"remotes":{"provenance/a@b":[` +
 		`{"repository":"ghcr.io/x/y","manifest_digest":"` + digestA + `"},` +
 		`{"repository":"ghcr.io/x/y","manifest_digest":"` + digestA + `"}]}}`
 	if _, err := Unmarshal([]byte(data)); !errors.Is(err, ErrInvalid) {
@@ -174,13 +174,87 @@ func TestUnmarshalRejectsDuplicateRemotes(t *testing.T) {
 	}
 }
 
-// Closure directories are reached through manifest edges, so the selection set
+// Closure directories are reached through manifest edges, so the pin set
 // is only the root set. Pruning against it alone would delete the closure.
-func TestSelectedArtifactsIsRootsOnly(t *testing.T) {
+func TestPinnedArtifactsIsRootsOnly(t *testing.T) {
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: "provenance/star--2.7.11b@a31f902c12ab"}
-	l.Selections["also/star"] = Selection{Artifact: "provenance/star--2.7.11b@a31f902c12ab"}
-	if got := l.SelectedArtifacts(); len(got) != 1 || !got["provenance/star--2.7.11b@a31f902c12ab"] {
-		t.Fatalf("SelectedArtifacts = %#v", got)
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: "provenance/star--2.7.11b@a31f902c12ab"}
+	l.Pins["also/star"] = PinEntry{Artifact: "provenance/star--2.7.11b@a31f902c12ab"}
+	if got := l.PinnedArtifacts(); len(got) != 1 || !got["provenance/star--2.7.11b@a31f902c12ab"] {
+		t.Fatalf("PinnedArtifacts = %#v", got)
+	}
+}
+
+func TestOCIValidation(t *testing.T) {
+	tests := []struct {
+		why     string
+		oci     OCI
+		source  string
+		wantErr bool
+	}{
+		{"nothing recorded", OCI{}, "", false},
+		{"a plain coordinate", OCI{Push: "ghcr.io/my-lab/rnaseq-2026/cnt"}, "", false},
+		{"a declared audience", OCI{Push: "ghcr.io/lab/p", Audience: "restricted"}, "", false},
+		{"a registry with a port", OCI{Push: "localhost:5000/lab/p"}, "", false},
+		{"a project source", OCI{Push: "ghcr.io/lab/p"}, "https://github.com/lab/p", false},
+
+		{"a host with no repository", OCI{Push: "ghcr.io"}, "", true},
+		{"a scheme", OCI{Push: "oci://ghcr.io/lab/p"}, "", true},
+		{"a tag", OCI{Push: "ghcr.io/lab/p:latest"}, "", true},
+		{"a digest", OCI{Push: "ghcr.io/lab/p@sha256:abc"}, "", true},
+		{"a trailing slash", OCI{Push: "ghcr.io/lab/p/"}, "", true},
+		{"a leading slash", OCI{Push: "/lab/p"}, "", true},
+		// Not down-cased: two names differing only in case would collide into one
+		// repository, and publishing one over the other silently is worse.
+		{"an upper-case segment", OCI{Push: "ghcr.io/Lab/p"}, "", true},
+		{"an unknown audience", OCI{Push: "ghcr.io/lab/p", Audience: "private"}, "", true},
+		{"an audience with no destination", OCI{Audience: "restricted"}, "", true},
+		{"a source that is not a URL", OCI{}, "github.com/lab/p", true},
+		{"a source with whitespace", OCI{}, "https://github.com/lab/ p", true},
+	}
+	for _, tt := range tests {
+		l := New()
+		l.OCI, l.Source = tt.oci, tt.source
+		if err := l.Validate(); (err != nil) != tt.wantErr {
+			t.Errorf("%s: Validate() = %v, wantErr %v", tt.why, err, tt.wantErr)
+		}
+	}
+}
+
+// The block is absent until something records one, so a project that never ran
+// `project registry set` must produce the bytes it always did.
+func TestOCIRoundTripsAndStaysOutOfAnUnsetLock(t *testing.T) {
+	plain, err := New().Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(plain), "oci") || strings.Contains(string(plain), "source") {
+		t.Errorf("an unset lock names a destination:\n%s", plain)
+	}
+
+	l := New()
+	l.Source = "https://github.com/lab/p"
+	l.OCI = OCI{Push: "ghcr.io/lab/p/cnt", Audience: "restricted"}
+	data, err := l.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Field order is the document's contract: a lock only appears in a diff when
+	// it changed.
+	if want := "\"schema_version\""; !strings.HasPrefix(string(data), "{\n  "+want) {
+		t.Errorf("schema_version is not first:\n%s", data)
+	}
+	if i, j := strings.Index(string(data), "\"source\""), strings.Index(string(data), "\"oci\""); i < 0 || j < 0 || i > j {
+		t.Errorf("source must precede oci:\n%s", data)
+	}
+	got, err := Unmarshal(data)
+	if err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got.OCI != l.OCI || got.Source != l.Source {
+		t.Errorf("round trip lost the destination: %#v / %q", got.OCI, got.Source)
+	}
+	if got.OCI.Empty() {
+		t.Error("a recorded destination reports itself empty")
 	}
 }

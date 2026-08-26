@@ -31,7 +31,7 @@ type Entry struct {
 // Verified is a checkout's artifact closure, keyed by relative artifact path.
 type Verified struct {
 	Entries map[string]*Entry
-	// Roots are the artifact paths selections point at, sorted.
+	// Roots are the artifact paths pins point at, sorted.
 	Roots []string
 	// Reachable is every entry the roots reach through dependency edges. An
 	// entry outside it is unreferenced and may be pruned.
@@ -42,7 +42,7 @@ type Verified struct {
 type Problem struct {
 	// Artifact is the relative artifact path, empty for a project-level issue.
 	Artifact string
-	// Request is the selection key, empty when the problem is not about one.
+	// Request is the pin key, empty when the problem is not about one.
 	Request string
 	Reason  string
 }
@@ -63,10 +63,10 @@ func (p Problem) String() string {
 // the checkout.
 //
 // Nothing here reads an installed overlay, a store, the catalog, build
-// configuration, or the network, and no payload is needed. That is the CI
-// contract: a clean checkout on a machine without CondaTainer images either is
-// a complete, internally consistent rebuild specification or is not, and this
-// says which.
+// configuration, or the network, and no payload is needed: a fresh clone that
+// has restored nothing either is a complete, internally consistent rebuild
+// specification or is not, and this says which. Whether an artifact is actually
+// available to run is project.Resolve's question, not this one.
 //
 // Problems are collected rather than returned at the first failure, because a
 // caller fixing a lock wants the whole list.
@@ -87,23 +87,23 @@ func Verify(root string, l *Lock) (*Verified, []Problem) {
 		}
 	}
 
-	// Selections must point at something that verified.
+	// Pins must point at something that verified.
 	for _, request := range l.Requests() {
-		artifact := l.Selections[request].Artifact
+		artifact := l.Pins[request].Artifact
 		entry, ok := out.Entries[artifact]
 		if !ok {
 			problems = append(problems, Problem{Request: request, Artifact: artifact,
-				Reason: "selection points at a missing or invalid artifact directory"})
+				Reason: "pin points at a missing or invalid artifact directory"})
 			continue
 		}
 		if reason := satisfies(request, entry.Manifest.Name); reason != "" {
 			problems = append(problems, Problem{Request: request, Artifact: artifact, Reason: reason})
 		}
 	}
-	out.Roots = sortedKeys(l.SelectedArtifacts())
+	out.Roots = sortedKeys(l.PinnedArtifacts())
 
 	// Walk dependency edges from the roots. Reachability is the closure, not the
-	// selection set: pruning against the roots alone would delete the closure.
+	// pin set: pruning against the roots alone would delete the closure.
 	out.Reachable = map[string]bool{}
 	var walk func(artifact string, trail []string)
 	walk = func(artifact string, trail []string) {
@@ -131,7 +131,7 @@ func Verify(root string, l *Lock) (*Verified, []Problem) {
 	for _, relative := range present {
 		if !out.Reachable[relative] {
 			problems = append(problems, Problem{Artifact: relative,
-				Reason: "artifact directory is not reachable from any selection"})
+				Reason: "artifact directory is not reachable from any pin"})
 		}
 	}
 
@@ -180,6 +180,24 @@ func resolveEdge(entries map[string]*Entry, dep meta.Dependency) (string, string
 // these directories, so a lock that verifies and an image that does not is a
 // drift this seam cannot have. What is lock-specific is the reader and the
 // relative path in every message.
+// ReadEntry reads and verifies one vendored artifact directory, regenerating its
+// keys from the bytes rather than trusting what the manifest claims.
+//
+// Exported for a caller that needs one artifact's recorded identity without a
+// lock to verify against — the upstream-endpoint walk runs between a pin
+// being vendored and the lock being published, so there is no published document
+// to read it out of yet.
+func ReadEntry(root, relative string) (*Entry, error) {
+	entry, problems := readEntry(Dir(root), relative)
+	if entry == nil {
+		if len(problems) > 0 {
+			return nil, fmt.Errorf("%w: %s", ErrInvalid, problems[0].Reason)
+		}
+		return nil, fmt.Errorf("%w: %s is unreadable", ErrInvalid, relative)
+	}
+	return entry, nil
+}
+
 func readEntry(lockDir, relative string) (*Entry, []Problem) {
 	fail := func(format string, args ...any) []Problem {
 		return []Problem{{Artifact: relative, Reason: fmt.Sprintf(format, args...)}}
@@ -261,7 +279,7 @@ func satisfies(request, name string) string {
 	}
 	dep, err := parseRequest(request)
 	if err != nil {
-		return fmt.Sprintf("selection key is not a usable dependency: %v", err)
+		return fmt.Sprintf("pin key is not a usable dependency: %v", err)
 	}
 	if reason := ConstraintReason(dep, request); reason != "" {
 		return reason

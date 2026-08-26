@@ -17,6 +17,7 @@
 - [Helper](#helper)
 - [Config](#config)
 - [Registry](#registry)
+- [Project](#project)
 - [Scheduler](#scheduler)
 - [Update](#update)
 - [Proxy](#proxy)
@@ -31,28 +32,30 @@ Usage:
   condatainer [command]
 
 Available Commands:
-  avail       List available build scripts (local and remote)
-  check       Check if the dependencies of script(s) are installed
-  completion  Generate shell completion script
-  config      Manage condatainer configuration
-  create      Create a new SquashFS overlay
-  e           Shortcut for exec with overlays, writable by default
-  exec        Execute a command with overlays
-  export      Export the recipe that produced an overlay
-  helper      Run web apps like RStudio on HPC
-  info        Show details about an overlay
-  list        List installed overlays
-  o           Shortcut for 'overlay create'
-  overlay     Manage ext3 overlays (create, resize, check, info)
-  proxy       Manage proxy tunnels for compute nodes
-  registry    Publish and fetch artifacts through an OCI registry
-  remove      Remove installed overlays matching search terms
-  run         Run a script and auto-solve the dependencies by #DEP tags
-  scheduler   Display scheduler information
-  search      Search conda packages via anaconda.org
-  self-update Update condatainer to the latest version
-  server      Manage the condatainer dashboard server
-  update      Update script metadata caches or the base image
+  avail             List available build scripts
+  check             Check if the dependencies of script(s) are installed
+  completion        Generate shell completion script
+  config            Manage condatainer configuration
+  create            Create a new SquashFS overlay
+  e                 Shortcut for exec with overlays, writable by default
+  env               Manage the mounted overlay's environment; unavailable outside CondaTainer
+  exec              Execute a command with overlays
+  helper            Run web apps like RStudio on HPC
+  info              Show details about an overlay
+  list              List installed overlays
+  o                 Shortcut for 'overlay create'
+  overlay           Manage ext3 overlays (create, resize, check, info)
+  project           Pin a project's dependencies to exact artifact identities
+  proxy             Manage proxy tunnels for compute nodes
+  registry          Publish and fetch artifacts through an OCI registry
+  remove            Remove installed overlays matching search terms
+  run               Run a script and auto-solve the dependencies by #DEP tags
+  scheduler         Display scheduler information
+  search            Search conda packages via anaconda.org
+  self-update       Update condatainer to the latest version
+  server            Manage the condatainer dashboard server
+  store             Inspect immutable identity-addressed overlays
+  update            Update script metadata caches or the base image
 
 Flags:
       --debug     Enable debug mode with verbose output
@@ -872,9 +875,9 @@ When the current directory holds `cnt-lock/`, `-o` resolves against that
 project's lock, so a run mounts the exact artifact the project pinned rather than
 whatever currently answers to the name. `e` behaves the same way.
 
-* A name that the lock does not select is an error naming the remedy, not a
+* A name the lock does not pin is an error naming the remedy, not a
   fallback to the installed copy.
-* An artifact that is selected but not present here is an error naming
+* An artifact that is pinned but not present here is an error naming
   `condatainer project restore`. Nothing is fetched or built to satisfy a mount.
 * A version constraint such as `-o star/2.7.11b>=2.7.0` is refused: the lock says
   which version, so a range is not a request.
@@ -1015,6 +1018,16 @@ Each argument can be:
 * `-i`, `--install`: Alias for `--auto-install`.
 * `--remote`: Remote build scripts take precedence over local when resolving package names.
 * `--no-submit`: Disable job submission; build missing dependencies locally.
+
+**Inside a project:**
+
+Run from a directory holding `cnt-lock/`, `check <script>` resolves that
+script's declarations through the lock instead of by name, and reports whether
+the script can run right now. It goes through the same code `run` does, so the
+two cannot disagree — including opening a project-relative `.sqf` to confirm it
+still carries the pinned identity. `-a` is refused there: installing by name is
+what a lock exists to prevent, so the answer is
+[`condatainer project restore`](#project-restore).
 
 **Output:**
 
@@ -1739,10 +1752,10 @@ printf '%s\n' "$TOKEN" | condatainer registry login ghcr.io \
 # Publish by installed name, inferring the selected source's oci.push endpoint.
 condatainer registry push grch38/genome/gencode49
 
-# A path states its endpoint. Public is the safe default; use internal only for
-# a registry whose audience is restricted.
+# A path states its endpoint. Public is the safe default; say restricted only
+# when a known set of people are the only ones who can pull.
 condatainer registry push ./licensed-app.sqf \
-  --registry registry.lab.example/cnt --visibility internal
+  --registry registry.lab.example/cnt --audience restricted
 
 # Inspect a repository, or resolve one exact platform manifest
 condatainer registry tags grch38/genome \
@@ -1801,6 +1814,404 @@ never waited on. Interrupting during a pause exits at once.
 
 `pull` waits out the same limits. A rate-limited pull never silently falls back
 to building locally — it is a wait, not a missing artifact.
+
+### Tag schemes
+
+Two different naming schemes publish to a registry, and which one you are looking
+at is decided by the command that pushed, not by the registry:
+
+| | **catalog scheme** (`registry push`) | **project scheme** (`project push`) |
+|---|---|---|
+| repository | the artifact name: `grch38/genome` | one per project: `my-lab/rnaseq-2026/cnt` |
+| tag | the version segment: `gencode49` | the whole name, `/` → `--`: `grch38--genome--gencode49` |
+| version-less | `YYYYMMDD` plus `latest` | no special case — every artifact has an identity |
+| extra tag | none | `<name>__<12 hex>`, the artifact's identity |
+| packages | one per artifact name | one per project |
+| mutability | a versioned tag is immutable without `--force` | the plain tag moves; the identity tag never does |
+
+So `grch38--genome--gencode49__a31f902c12ab` in a project package and
+`grch38/genome:gencode49` in a collection package can be the same bytes; they are
+addressed differently because they are retained differently. See
+[Project Push](#project-push) for why a project needs the identity tag.
+
+## Project
+
+Pin the exact artifacts a project mounts, and carry that pin in Git.
+
+```
+condatainer project lock | pin | validate | restore | registry [set|unset] | push
+```
+
+A project is any directory holding `cnt-lock/`, which `project lock` creates.
+Every subcommand acts on the current directory unless `--project DIR` names
+another. `run`, `check`, `exec -o` and `e -o` instead act *in* whatever project
+you are standing in, with no flag either way.
+
+Commit `cnt-lock/` alongside the code. It holds the pins plus the
+manifest and rebuild sources of every pinned artifact, and no payload, no
+absolute path and nothing machine-local, so a checkout reproduces the same
+artifacts on a machine that has never run CondaTainer:
+
+```text
+project/
+  analysis.sh
+  cnt-lock/
+    lock.json
+    provenance/
+      star--2.7.11b@a31f902c12ab/
+        manifest.json
+        recipe
+```
+
+### Identity and equivalence
+
+Every artifact carries two keys. Both are SHA-256 over a canonical description of
+how the artifact was **built** — never over the payload bytes — so a rebuild from
+the same inputs reproduces them on any machine, whether or not SquashFS happened
+to write identical bytes.
+
+Both hash the same four things: the artifact type, every `#ENV:` value, the
+comment-stripped recipe digest, and every selected `#PH:` placeholder. They
+differ only in how dependencies enter:
+
+| dependency | identity | equivalence |
+|---|---|---|
+| `data` | name + its exact identity | its equivalence key |
+| `app` / `os` whose components appear in this artifact's own name | name + its exact identity | name/version only |
+| `app` / `os` that does not (build history) | name + its exact identity | **omitted** |
+
+So **identity** answers "which exact build is this", and pins record it.
+**Equivalence** answers "can this stand in", and restore accepts it by default.
+
+The third row is the useful one. A `build-essential` mounted only to compile
+something is build history: it changes the identity, so a rebuild against a newer
+one is a different build, but it never changes equivalence, so that rebuild
+remains a legitimate substitute. The second row is why an app contributes its
+name rather than its own key — `star/2.7.11b/index` built against `star/2.7.11b`
+is about that version of STAR, not about which build of it produced the index.
+
+A Conda build has no recipe and no dependencies, so it keys off its two exports
+instead: identity is `explicit.txt` byte for byte (which exact package set), and
+equivalence is `environment.yml` byte for byte (which environment was asked for).
+That is why `--match identity` on a Conda artifact means replaying the same
+pinned package URLs exactly.
+
+### Project Lock
+
+Rescan every script for `#DEP:` declarations, pin what they name, and reconcile
+the result with the lock. Pins nothing declares any more are dropped, and so are
+pins whose artifact no longer verifies.
+
+It creates `cnt-lock/` in the current directory when there is none, so this is
+also how a project starts. The other subcommands act on pins that must
+already exist, and refuse rather than create one.
+
+```bash
+# Start a project, or rescan an existing one
+condatainer project lock
+```
+
+Scan rules:
+
+- `.sh` and `.bash` files only;
+- `cnt-lock/`, `overlays/` and dot directories are skipped;
+- symlinks are not followed.
+
+`overlays/` is where a project keeps its own overlays and the recipes that build
+them. A recipe's `#DEP:` are its overlay's build dependencies — already recorded
+in that overlay's provenance — so reading them would make the project pin what
+it never mounts. The whole directory is skipped whether or not the overlay has
+been built yet, so a scan does not change its answer when `create -f` runs.
+Declaring one from a project script is unaffected: `#DEP: overlays/tool.sqf` is
+pinned as usual, because that declaration lives in the script.
+
+A declaration whose overlay is not installed fails the lock. Other installed
+builds of the same name are listed rather than pinned; `project pin` takes one
+of those instead.
+
+### Project Pin
+
+Resolve one declaration to one exact local artifact and vendor its sources.
+
+```bash
+# Pick one exact artifact by identity prefix, digest, or identity reference
+condatainer project pin star/2.7.11b a31f902c12ab
+
+# A project-relative .sqf takes no identity: it already names the file it means
+condatainer project pin overlays/combined.sqf
+```
+
+The request is written the way the `#DEP:` writes it — a name, or a
+project-relative path, classified by extension exactly as a declaration is.
+
+A **file is never accepted as the identity.** Restore and push both find a
+pinned artifact through the image roots and the store, so pointing at a file
+elsewhere would record an identity only a rebuild could satisfy. To pin a `.sqf`
+sitting outside the project, install it into an images root first and pin it by
+identity.
+
+Every copy in every readable image root is a candidate, not just the nearest one,
+so a pin can name a copy that ordinary name resolution would hide.
+
+A pin also vendors the artifact's source closure into `cnt-lock/provenance/`,
+and — best effort, over the network — records any collection endpoint that
+already publishes that exact identity (see [Two kinds of remote](#two-kinds-of-remote)).
+
+An unpinnable dependency must say so on its own line, or the scan reports a
+finding:
+
+```bash
+#DEP: env.img  ## unpinned — scratch environment, rebuilt per machine
+```
+
+### Project Validate
+
+```bash
+condatainer project validate
+condatainer project validate --json
+```
+
+Checks the lock alone:
+
+- every declaration in the scripts has a pin
+- every pin points at a vendored artifact
+- every vendored artifact regenerates the keys it records
+- every dependency edge resolves to another vendored artifact
+
+Reads `cnt-lock/` and the project's scripts, and nothing else — no overlay, no
+store, no catalog, no configuration, no network — so it answers the same on a
+fresh clone that has restored nothing. Every key is recomputed from the vendored
+sources rather than trusted, and every dependency edge is followed by name *and*
+identity.
+
+It never asks whether an artifact is available to run. That is
+[`condatainer check <script>`](#check), which resolves through the same code
+`run` does and opens the overlay.
+
+### Project Restore
+
+```bash
+condatainer project restore
+condatainer project restore --dry-run
+condatainer project restore --no-prebuilt --match identity
+condatainer project restore --keep-build-deps
+```
+
+Reuses, fetches, or rebuilds each locked artifact until the project can run.
+Nothing is mounted and `cnt-lock/` is never modified.
+
+| flag | effect |
+|---|---|
+| `--dry-run` | report what would happen and acquire nothing |
+| `--no-prebuilt` | build every missing artifact from source instead of downloading a recorded one |
+| `--match equivalent\|identity` | which key a restored artifact must agree with (default `equivalent`) |
+| `--keep-build-deps` | install newly produced build dependencies instead of discarding them |
+| `--replace` | overwrite a project path holding something the lock does not name |
+| `--json` | print JSON |
+
+**A project path is the only file a restore can destroy.** An artifact addressed
+by name goes to a store name no other identity holds, so nothing there is ever
+clobbered. A `path:` pin is materialized at exactly the path it declares, and
+whatever is there is renamed over.
+
+So a path already holding something the lock does not name — a `.sqf` copied in
+from elsewhere, a stale build — is **refused during planning**, before anything
+is fetched or built:
+
+```
+[CNT✗] overlays/combined.sqf already holds sha256:7c4e11ab27f0, which is not
+       what combined pins; pass --replace to overwrite it
+```
+
+`--dry-run` reports the same, and shows what each step would replace. `--replace`
+is the deliberate act that proceeds.
+
+A named pin lands where the store's destination rule puts it — the flat name when
+it is free, `store/` when that name is already held at a different identity. An
+artifact nothing pins is a build dependency: it exists only so its dependent can
+be built, so it is produced in a temporary directory and removed when the restore
+ends.
+
+`--no-prebuilt` is not an offline mode: every build needs the network, which is
+what the [proxy](#proxy) is for on a compute node without egress.
+
+A rebuild whose recipe carries scheduler directives is submitted rather than run
+here, and so is anything waiting on it; dependencies become `afterok` edges. The
+command then exits with the jobs-submitted code, having made nothing available
+yet. Re-running the restore is how it resumes. Restore is atomic per artifact,
+not across the project: a later failure leaves earlier results in place, and
+re-running adopts them.
+
+### Two kinds of remote
+
+The lock's `remotes` map says where each artifact can be **fetched** from, as a
+repository coordinate plus a platform manifest digest — never a mutable tag.
+Restore tries those locations before it builds. Entries get written two ways, and
+a project normally uses both:
+
+| | **upstream remote** | **project remote** |
+|---|---|---|
+| where | the collection's `oci.pull` endpoints, from its `source.json` | the endpoint `project registry set` recorded |
+| written by | `project pin`, best effort | `project push` |
+| naming | the catalog scheme | the project scheme |
+| costs | nothing — the bytes are already there | the upload |
+| covers | artifacts whose pinned identity is *literally* what the collection publishes | everything else |
+| survives | as long as the collection keeps it | as long as the project's own package lives |
+
+An upstream remote is recordable only when the pinned artifact's **complete
+identity** matches what the endpoint advertises, which in practice means the
+artifact was pulled from there in the first place. Order in the list is retry
+priority, and the free location ends up first because a pin records it
+before any push runs.
+
+Remotes are written by machines, never typed: one is recorded only after
+something confirmed the artifact is actually there. There is no flag for entering
+a coordinate by hand.
+
+### Project Registry
+
+Show, set, or forget where this project publishes.
+
+```bash
+# Show what is recorded
+condatainer project registry
+
+# Record the destination — one repository for the whole project
+condatainer project registry set ghcr.io/my-lab/rnaseq-2026/cnt \
+  --audience restricted
+
+# Forget it; already-recorded fetch locations are left alone
+condatainer project registry unset
+```
+
+The endpoint is a complete repository coordinate with no tag or digest. It is
+tracked in `lock.json`, not machine-local: every collaborator publishes to the
+same package, or the recorded fetch locations become a set of places *some* of
+the artifacts are.
+
+`--audience` is a claim about who can pull from the registry, and CondaTainer
+derives from it what may be published there — see
+[Publishing rules](#publishing-rules). It defaults to `public`, which is the
+restrictive answer; say `restricted` only if a known set of people really are the
+only ones who can pull. It is **not** a GitHub package's visibility, which is a
+separate per-package setting CondaTainer never reads or changes.
+
+`--source` records the project's code repository, defaulting to its GitHub
+origin, and becomes the published packages' source link.
+
+Setting a destination writes to the lock and contacts nothing. Changing it does
+not invalidate locations already recorded — those digests still resolve where
+they were published.
+
+### Project Push
+
+```bash
+# See the plan and its cost without uploading
+condatainer project push --dry-run
+
+# Publish the pins a collection does not already serve
+condatainer project push
+
+# Publish everything, build dependencies included
+condatainer project push --all --closure
+```
+
+| flag | effect |
+|---|---|
+| `--all` | publish every pin, including ones a collection already serves |
+| `--closure` | also publish build dependencies |
+| `--registry` | publish to this repository instead of the recorded one |
+| `--dry-run` | report what would be published and upload nothing |
+| `--json` | emit machine-readable output |
+
+Every artifact goes into the one repository `project registry set` recorded, with
+its name carried in the tag, so the whole project is one registry package rather
+than one per artifact. That is the reason for the flat scheme: on GitHub a
+distinct repository path is a distinct package, and each package's visibility is
+its own setting that follows neither the linked code repository nor anything
+CondaTainer records — so one package is one setting to manage by hand instead of
+a dozen. See [Distributing Artifacts](../deployment/distribution.md).
+
+Each artifact also gets an **identity tag**, `<name>__<12 hex>`. Nothing fetches
+by tag — a `remotes` entry records the platform manifest digest — so what a tag
+has to do is keep a manifest *referenced*, because what no tag reaches is the
+registry's to reclaim. A plain name tag can only keep one identity alive, so
+after a re-pin moved it, an older commit's recorded digest would resolve to
+nothing. The plain tag is written only for the current pin, as a human
+handle that says which identity the project uses now.
+
+The default push set is the pins **no collection already serves**: restore
+tries the upstream location first, so a second copy of those buys nothing but the
+bytes. `--all` publishes them anyway, which is worth it when the project must
+outlive the collection's retention — an archived paper, a collection you do not
+control, or a registry your compute nodes can reach when the collection's is not.
+
+Push publishes what is already here and **never builds**. Anything missing at its
+locked identity is reported with the restore that would produce it, and the same
+goes for `--closure`, which will not acquire a build dependency that a
+`restore --keep-build-deps` never installed. The project must also validate
+first: what is published has to be what the checkout already describes.
+
+`--dry-run` reports four dispositions per artifact:
+
+```text
+[CNT] Publishing to ghcr.io/my-lab/rnaseq-2026/cnt (restricted)
+[CNT]   packages link to https://github.com/my-lab/rnaseq-2026
+[CNT]   upload   star/2.7.11b  star--2.7.11b__a31f902c12ab star--2.7.11b
+[CNT]   present  samtools/1.23.1  already published
+[CNT]   upstream grch38/genome/gencode49  ghcr.io/cnt-recipes/cnt/grch38/genome
+[CNT]   refused  cellranger/9.0.1  app artifacts are not published to a public registry…
+[CNT] 3 to upload
+```
+
+`upstream` and `present` are decided by asking the network, and both only ever
+*remove* work — an unreachable registry leaves the plan as computed rather than
+failing a push nobody could complete offline. A `refused` step stops the push
+before anything uploads.
+
+There is no `--force`. An identity tag carries the content key, so it can only be
+re-pushed with the same content, and the plain tag is a moving pointer replaced
+by design. A content-keyed tag holding *different* content is refused outright,
+because that is a corrupted package rather than something to overwrite.
+
+Each successful upload records its location in the lock as its own transaction,
+so an interrupted push leaves every artifact that did land recorded and
+re-running skips them.
+
+### Publishing rules
+
+What may be pushed — by either `registry push` or `project push` — depends on who
+can pull it and on what the artifact says about itself. Everything is read from
+the embedded manifest, never guessed from a filename, and push **refuses** rather
+than warns.
+
+A `restricted` endpoint takes anything. At a `public` one:
+
+| the recipe declared | may publish publicly |
+|---|---|
+| `#REDISTRIBUTE: no` | **never**, whatever the type, and no flag overrides it |
+| `#REDISTRIBUTE: yes` | yes, whatever the type |
+| nothing, and it is `base` or `os` | yes — a container root, and packages from a public distribution |
+| nothing, and it is `data` | yes — the type asserts public reference data and the indexes built from it |
+| nothing, and it is an `app` | **no** — someone else's software with unstated terms |
+| nothing, and it is a Conda build | yes — it embeds no recipe, so it could never carry the declaration |
+
+The declaration lives in the recipe rather than on the command line, so it is
+authored once, reviewed in a commit, and travels with every artifact built from
+it. Nothing verifies it. `#LICENSE:` is published verbatim as
+`org.opencontainers.image.licenses` and never gates anything.
+
+A Conda build's channels are **reported** at push time rather than judged — a
+private or vendor channel is a question for a person, not for an allowlist:
+
+```text
+[CNT]   upload   rnaseq/1.0  rnaseq--1.0__6f21c0b81a4d
+[CNT]            channels: conda-forge, bioconda
+```
+
+Writable `.img` overlays are never published to any endpoint. That is structural
+rather than policy: a writable overlay has no identity, so there is nothing to
+publish it *as*.
 
 ## Scheduler
 

@@ -27,7 +27,7 @@ func (b *BuildObject) tryPrebuilt(ctx context.Context) (prebuiltResult, error) {
 	if b.catalogSource == nil || b.catalogSource.DescriptorErr != nil || len(b.catalogSource.Desc.OCI.Pull) == 0 {
 		return false, nil
 	}
-	if b.catalogSource.Desc.OCI.Visibility == "public" && b.spec.Image.Type == "app" {
+	if b.catalogSource.Desc.OCI.Audience == "public" && b.spec.Image.Type == "app" {
 		return false, nil
 	}
 

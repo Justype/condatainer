@@ -121,7 +121,7 @@ func NewLockedObject(ctx context.Context, spec LockedSpec) (*BuildObject, error)
 	for _, dep := range spec.Deps {
 		b.spec.Dependencies = append(b.spec.Dependencies, dep.Path)
 	}
-	b.spec.Source.Repository = manifest.Build.Source
+	b.spec.Source.Collection = manifest.Build.Source
 
 	switch manifest.BuildType {
 	case BuildTypeScript.String(), BuildTypeDef.String():
@@ -200,13 +200,15 @@ func (b *BuildObject) lockRecipeSource(manifest meta.Manifest, sources map[strin
 	source.Placeholders = manifest.Source.Placeholders
 	source.TargetTemplate = manifest.Source.TargetTemplate
 	source.RequiresInput = manifest.Source.RequiresInput
-	source.Repository = manifest.Build.Source
+	source.Collection = manifest.Build.Source
 	b.spec.Source = source
 	// The recipe is authoritative for everything it declares, as it is on the
 	// catalog path. Anything taken from the manifest instead would be a second
 	// copy that could disagree with the bytes the identity was derived from.
 	b.spec.Image.Description = runnable.Description
 	b.spec.Image.URL = runnable.URL
+	b.spec.Image.License = runnable.License
+	b.spec.Image.Redistribute = runnable.Redistributable()
 	b.spec.Image.Env = envFromRecipe(runnable.Env)
 	b.spec.Image.Arch = runnable.Arch
 	b.embedSource(file)
@@ -287,10 +289,15 @@ func (b *BuildObject) lockCondaSource(manifest meta.Manifest, sources map[string
 	// Channels are diagnostic, but the manifest is a projection of the Spec, so
 	// taking them from live config would rewrite what the lock recorded.
 	b.spec.Source.Conda.Channels = slices.Clone(manifest.Build.Channels)
-	b.spec.Source.Repository = manifest.Build.Source
+	b.spec.Source.Collection = manifest.Build.Source
 	// A Conda build has no recipe to take a description from — the original
-	// fetched one from anaconda.org, and the manifest is where it survives.
+	// fetched one from anaconda.org, and the manifest is where it survives. The
+	// same holds for #LICENSE:/#REDISTRIBUTE:, which is why a Conda build can
+	// never carry a redistribution declaration of its own: there is no file for
+	// one to be written in. See registry.Audience.Accepts.
 	b.spec.Image.Description = manifest.Description
 	b.spec.Image.URL = manifest.URL
+	b.spec.Image.License = manifest.License
+	b.spec.Image.Redistribute = manifest.Redistribute
 	return nil
 }

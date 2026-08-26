@@ -15,44 +15,74 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/meta"
 )
 
-func TestVisibilityAccepts(t *testing.T) {
+func TestAudienceAccepts(t *testing.T) {
+	yes, no := true, false
 	manifest := func(typ catalog.Type, buildType string) meta.Manifest {
 		return meta.Manifest{Name: "x/1.0", Type: typ, BuildType: buildType}
 	}
+	declaring := func(typ catalog.Type, buildType string, answer *bool) meta.Manifest {
+		m := manifest(typ, buildType)
+		m.Redistribute = answer
+		return m
+	}
 	tests := []struct {
-		why        string
-		visibility Visibility
-		m          meta.Manifest
-		wantErr    bool
+		why      string
+		audience Audience
+		m        meta.Manifest
+		wantErr  bool
 	}{
+		// Undeclared: the type default stands in for an unanswered question.
 		{"a base is ours to publish", Public, manifest(catalog.TypeBase, "def"), false},
 		{"apt packages from a public distribution", Public, manifest(catalog.TypeOS, "script"), false},
 		{"public reference data", Public, manifest(catalog.TypeData, "script"), false},
 		{"an app redistributes someone else's binaries", Public, manifest(catalog.TypeApp, "script"), true},
-		{"a Conda build embeds its own solve inputs", Public, manifest(catalog.TypeApp, "conda"), true},
-		// Independent reasons: a Conda build is refused even where the type is fine.
-		{"a Conda build of a permitted type", Public, manifest(catalog.TypeData, "conda"), true},
-		{"an internal endpoint takes an app", Internal, manifest(catalog.TypeApp, "script"), false},
-		{"an internal endpoint takes a Conda build", Internal, manifest(catalog.TypeApp, "conda"), false},
+
+		// A Conda build embeds no recipe, so it can never carry the declaration
+		// the app default would demand. Gating it would refuse it forever.
+		{"a Conda app cannot declare, so it is not asked", Public, manifest(catalog.TypeApp, "conda"), false},
+		{"a Conda build of a permitted type", Public, manifest(catalog.TypeData, "conda"), false},
+
+		// Declared: the recipe answers and the type default does not apply.
+		{"a declared app publishes", Public, declaring(catalog.TypeApp, "script", &yes), false},
+		{"a refusal beats a permissive type", Public, declaring(catalog.TypeData, "script", &no), true},
+		{"a refusal beats the Conda exemption", Public, declaring(catalog.TypeApp, "conda", &no), true},
+
+		{"a restricted endpoint takes an app", Restricted, manifest(catalog.TypeApp, "script"), false},
+		{"a restricted endpoint takes a Conda build", Restricted, manifest(catalog.TypeApp, "conda"), false},
+		{"a restricted endpoint takes a refused artifact", Restricted, declaring(catalog.TypeApp, "script", &no), false},
 	}
 	for _, tt := range tests {
-		if err := tt.visibility.Accepts(tt.m); (err != nil) != tt.wantErr {
+		if err := tt.audience.Accepts(tt.m); (err != nil) != tt.wantErr {
 			t.Errorf("%s: %s.Accepts(%s/%s) = %v, wantErr %v",
-				tt.why, tt.visibility, tt.m.Type, tt.m.BuildType, err, tt.wantErr)
+				tt.why, tt.audience, tt.m.Type, tt.m.BuildType, err, tt.wantErr)
+		}
+	}
+}
+
+// The refusal must name both ways out, or a user reads it as "CondaTainer will
+// not publish apps" and stops.
+func TestAudienceRefusalNamesBothRemedies(t *testing.T) {
+	err := Public.Accepts(meta.Manifest{Name: "star/2.7.11b", Type: catalog.TypeApp, BuildType: "script"})
+	if err == nil {
+		t.Fatal("an undeclared app must be refused at a public endpoint")
+	}
+	for _, want := range []string{"#REDISTRIBUTE: yes", "restricted"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal does not mention %q: %v", want, err)
 		}
 	}
 }
 
 // The default is the restrictive one: an endpoint that never declared its
-// visibility must not be treated as private.
+// audience must not be treated as private.
 func TestPublishDefaultsToPublic(t *testing.T) {
 	requireSquashfsTools(t)
 	source, _ := packImage(t, imageSpec{name: "hello/1.0", typ: catalog.TypeApp, recipe: "#!/bin/bash\n"})
 	f := newFakeRegistry(t)
 
-	err := Publish(context.Background(), PublishRequest{Path: source, Base: f.base()})
+	_, err := Publish(context.Background(), PublishRequest{Path: source, Base: f.base()})
 	if err == nil {
-		t.Fatal("an app was published to an endpoint with no declared visibility")
+		t.Fatal("an app was published to an endpoint with no declared audience")
 	}
 	if !strings.Contains(err.Error(), string(Public)) {
 		t.Errorf("the refusal does not say the endpoint was treated as public: %v", err)
@@ -69,7 +99,7 @@ func TestPublishAndPullRoundTrip(t *testing.T) {
 	f := newFakeRegistry(t)
 	ctx := context.Background()
 
-	if err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
+	if _, err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -103,7 +133,7 @@ func TestPublishRefusesAnArtifactWithNoKeys(t *testing.T) {
 	})
 	f := newFakeRegistry(t)
 
-	err := Publish(context.Background(), PublishRequest{Path: source, Base: f.base()})
+	_, err := Publish(context.Background(), PublishRequest{Path: source, Base: f.base()})
 	if err == nil {
 		t.Fatal("an artifact with no keys was published")
 	}
@@ -121,7 +151,7 @@ func TestPublishRefusesKeysThatDoNotRegenerate(t *testing.T) {
 	})
 	f := newFakeRegistry(t)
 
-	err := Publish(context.Background(), PublishRequest{Path: source, Base: f.base()})
+	_, err := Publish(context.Background(), PublishRequest{Path: source, Base: f.base()})
 	if !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("err = %v, want ErrInvalidArtifact", err)
 	}
@@ -140,17 +170,17 @@ func TestPublishRefusesAnExistingVersionedTag(t *testing.T) {
 	f := newFakeRegistry(t)
 	ctx := context.Background()
 
-	if err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
+	if _, err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
 		t.Fatalf("first publish: %v", err)
 	}
-	err := Publish(ctx, PublishRequest{Path: source, Base: f.base()})
+	_, err := Publish(ctx, PublishRequest{Path: source, Base: f.base()})
 	if err == nil {
 		t.Fatal("a versioned tag was silently replaced")
 	}
 	if !strings.Contains(err.Error(), "--force") {
 		t.Errorf("the refusal does not name the way through: %v", err)
 	}
-	if err := Publish(ctx, PublishRequest{Path: source, Base: f.base(), Force: true}); err != nil {
+	if _, err := Publish(ctx, PublishRequest{Path: source, Base: f.base(), Force: true}); err != nil {
 		t.Errorf("--force did not permit the replacement: %v", err)
 	}
 }
@@ -165,10 +195,10 @@ func TestPublishVersionLessRepublishesUnderBothTags(t *testing.T) {
 	f := newFakeRegistry(t)
 	ctx := context.Background()
 
-	if err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
+	if _, err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	if err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
+	if _, err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
 		t.Errorf("a version-less artifact could not be republished: %v", err)
 	}
 
@@ -194,7 +224,7 @@ func TestPublishWrapsANativeArtifactInAnIndex(t *testing.T) {
 	f := newFakeRegistry(t)
 	ctx := context.Background()
 
-	if err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
+	if _, err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
 		t.Fatal(err)
 	}
 	repo, tag, _ := PullReference(m.Type, m.Name)
@@ -214,7 +244,7 @@ func TestPublishTagsANoarchArtifactDirectly(t *testing.T) {
 	f := newFakeRegistry(t)
 	ctx := context.Background()
 
-	if err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
+	if _, err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
 		t.Fatal(err)
 	}
 	repo, tag, _ := PullReference(m.Type, m.Name)
@@ -249,7 +279,7 @@ func TestPublishPreservesAnotherArchitecture(t *testing.T) {
 	repo, tag, _ := PullReference(m.Type, m.Name)
 	publishArtifact(t, f, repo, foreign, Annotations(m, ""), tag)
 
-	if err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
+	if _, err := Publish(ctx, PublishRequest{Path: source, Base: f.base()}); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -263,7 +293,7 @@ func TestPublishPreservesAnotherArchitecture(t *testing.T) {
 
 func TestPushRefusesAWritableOverlay(t *testing.T) {
 	f := newFakeRegistry(t)
-	err := Push(context.Background(), "/images/dev.img", f.base(), "dev", []string{"1.0"}, nil, false)
+	_, err := Push(context.Background(), "/images/dev.img", f.base(), "dev", []string{"1.0"}, nil, false)
 	if err == nil {
 		t.Fatal("a writable overlay was pushed")
 	}
@@ -274,7 +304,7 @@ func TestPushRefusesAWritableOverlay(t *testing.T) {
 
 func TestPushRefusesNoTags(t *testing.T) {
 	f := newFakeRegistry(t)
-	if err := Push(context.Background(), "/images/x.sqf", f.base(), "x", nil, nil, false); err == nil {
+	if _, err := Push(context.Background(), "/images/x.sqf", f.base(), "x", nil, nil, false); err == nil {
 		t.Fatal("a push with no tags was accepted")
 	}
 }
@@ -305,4 +335,90 @@ func (f *fakeRegistry) indexPlatformsAt(t *testing.T, repo, tag string) []string
 		t.Fatalf("%s:%s is not an index: %v", repo, tag, err)
 	}
 	return indexPlatforms(idx)
+}
+
+// A project keeps artifacts from several collections in one repository, so that
+// package's source is the project rather than whichever collection built each
+// artifact. The publisher supplies it; without one the artifact's own answer
+// stands.
+func TestPublishSourceOverridesTheRecordedCollection(t *testing.T) {
+	requireSquashfsTools(t)
+	source, m := packImage(t, imageSpec{
+		name: "star/2.7.11b", typ: catalog.TypeApp, recipe: "#!/bin/bash\nbuild\n",
+	})
+	ctx := context.Background()
+
+	f := newFakeRegistry(t)
+	project := "https://github.com/my-lab/rnaseq-2026"
+	if _, err := Publish(ctx, PublishRequest{
+		Path: source, Base: f.base(), Audience: Restricted,
+		Placement: &Placement{Repo: "cnt", Tags: []string{"star--2.7.11b"}},
+		Source:    project,
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	_, ann, err := ResolveArtifact(ctx, f.base(), "cnt", "star--2.7.11b")
+	if err != nil {
+		t.Fatalf("ResolveArtifact: %v", err)
+	}
+	if got := ann[AnnSource]; got != project {
+		t.Errorf("%s = %q, want %q", AnnSource, got, project)
+	}
+
+	// No override: whatever the artifact recorded, which for this fixture is
+	// nothing, so the annotation is absent rather than empty.
+	g := newFakeRegistry(t)
+	if _, err := Publish(ctx, PublishRequest{
+		Path: source, Base: g.base(), Audience: Restricted,
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	_, ann, err = ResolveArtifact(ctx, g.base(), "star", "2.7.11b")
+	if err != nil {
+		t.Fatalf("ResolveArtifact: %v", err)
+	}
+	if got, ok := ann[AnnSource]; ok && got != m.Build.Source {
+		t.Errorf("%s = %q, want the artifact's own %q", AnnSource, got, m.Build.Source)
+	}
+}
+
+// The annotation exists so a registry can link a package to a repository, which
+// it does by exact URL match. Anything that is not an http(s) URL links nothing,
+// so it never reaches a manifest.
+func TestPublishKeepsTheSourceAnnotationUsable(t *testing.T) {
+	requireSquashfsTools(t)
+	ctx := context.Background()
+
+	// A caller that names one and gets it wrong is told.
+	clean, _ := packImage(t, imageSpec{
+		name: "star/2.7.11b", typ: catalog.TypeApp, recipe: "#!/bin/bash\nbuild\n",
+	})
+	f := newFakeRegistry(t)
+	_, err := Publish(ctx, PublishRequest{
+		Path: clean, Base: f.base(), Audience: Restricted, Source: "ftp://example.invalid/p",
+	})
+	if err == nil || !strings.Contains(err.Error(), "http(s)") {
+		t.Fatalf("error = %v, want a refusal naming the scheme", err)
+	}
+
+	// An artifact whose own recorded source is unusable still publishes, because
+	// a descriptor that predates the check is not a reason to block distribution.
+	// The annotation is simply absent.
+	dirty, _ := packImage(t, imageSpec{
+		name: "star/2.7.11b", typ: catalog.TypeApp, recipe: "#!/bin/bash\nbuild\n",
+		tamper: func(m *meta.Manifest) { m.Build.Source = "not a url" },
+	})
+	g := newFakeRegistry(t)
+	if _, err := Publish(ctx, PublishRequest{
+		Path: dirty, Base: g.base(), Audience: Restricted,
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	_, ann, err := ResolveArtifact(ctx, g.base(), "star", "2.7.11b")
+	if err != nil {
+		t.Fatalf("ResolveArtifact: %v", err)
+	}
+	if got, ok := ann[AnnSource]; ok {
+		t.Errorf("%s = %q, want it dropped", AnnSource, got)
+	}
 }

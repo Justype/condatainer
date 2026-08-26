@@ -25,7 +25,7 @@ func prebuiltObject(t *testing.T, recipe []byte, endpoints ...string) *BuildObje
 		},
 		tgt: targetFor(filepath.Join(t.TempDir(), "demo--1.sqf")),
 		catalogSource: &catalog.Source{Desc: catalog.Descriptor{OCI: catalog.OCI{
-			Pull: endpoints, Visibility: "internal",
+			Pull: endpoints, Audience: "restricted",
 		}}},
 	}
 	b.embedSource(SourceFile{Name: meta.RecipeFileName, Data: recipe})
@@ -34,7 +34,7 @@ func prebuiltObject(t *testing.T, recipe []byte, endpoints ...string) *BuildObje
 
 func TestTryPrebuiltSkipsPublicApp(t *testing.T) {
 	b := prebuiltObject(t, []byte("echo demo\n"), "registry.invalid/lab")
-	b.catalogSource.Desc.OCI.Visibility = "public"
+	b.catalogSource.Desc.OCI.Audience = "public"
 	oldResolve := resolvePrebuilt
 	t.Cleanup(func() { resolvePrebuilt = oldResolve })
 	resolvePrebuilt = func(context.Context, string, string, string) (ocispec.Descriptor, map[string]string, error) {

@@ -115,18 +115,18 @@ that handle, so recipes resolve on a fresh install. Give an entry the handle
 `cnt` to replace it outright.
 
 A collection is a directory (or URL prefix) with `recipes/` and an optional
-`source.json`. Besides `schema`, `repository`, and `default_base`, it may declare
+`source.json`. Besides `schema`, `source`, and `default_base`, it may declare
 where artifacts are published and fetched:
 
 ```json
 {
   "schema": 1,
-  "repository": "https://github.com/example/recipes",
+  "source": "https://github.com/example/recipes",
   "default_base": "ubuntu24",
   "oci": {
     "push": "ghcr.io/example/condatainer",
     "pull": ["registry.cluster.example/lab", "ghcr.io/example/condatainer"],
-    "visibility": "public"
+    "audience": "public"
   }
 }
 ```
@@ -134,8 +134,17 @@ where artifacts are published and fetched:
 `push` is one publishing destination. `pull` is an ordered list so a local
 mirror can be tried before the origin. Endpoints are registry/repository roots;
 `oci://` is accepted and stripped. If any OCI endpoint is declared, both `push`
-and at least one `pull` endpoint are required. Visibility defaults to `public`
-and may be `public` or `internal`.
+and at least one `pull` endpoint are required.
+
+`audience` is a claim about who can pull from the registry, and CondaTainer
+derives from it what may be published there — a `restricted` endpoint takes
+anything, a `public` one asks each artifact whether it may be republished. It
+defaults to `public`, which is the restrictive answer; nothing verifies the
+claim, so say `restricted` only if a known set of people really are the only
+ones who can pull. It is unrelated to a GitHub package's visibility setting,
+which CondaTainer never reads or changes. See
+[Publishing rules](condatainer.md#publishing-rules) and
+[Distributing Artifacts](../deployment/distribution.md).
 
 ### Options
 

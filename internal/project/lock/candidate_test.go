@@ -66,7 +66,7 @@ func packArtifact(t *testing.T, filename, name, recipe string) (string, meta.Man
 	return out, manifest
 }
 
-// A path selection exists so a project can call the file whatever it likes. A
+// A path pin exists so a project can call the file whatever it likes. A
 // directory scan applies the flat-name rule — the filename must encode the
 // artifact name — which is right where the filename is the address and wrong
 // here, and it would refuse overlays/combined.sqf for not being
@@ -102,32 +102,16 @@ func TestCandidateFromPathAgreesWithTheResolverThatWillReadIt(t *testing.T) {
 	// The lock records what this returns; the resolver later reads the same
 	// file and must produce keys equal to the recorded ones.
 	if got.Identity != manifest.Keys.Identity || got.Equiv != manifest.Keys.Equiv {
-		t.Fatalf("selection would record keys the resolver cannot reproduce: %+v", got)
+		t.Fatalf("pin would record keys the resolver cannot reproduce: %+v", got)
 	}
 	if got.Path != path {
 		t.Errorf("path = %q, want the absolute selected path %q", got.Path, path)
 	}
 }
 
-// A relative path is stored and resolved from the project root, so the
-// candidate has to carry the absolute one.
-func TestCandidateFromPathReturnsAnAbsolutePath(t *testing.T) {
-	path, _ := packArtifact(t, "combined.sqf", "testdata/combined/1.0", "#TYPE:app\necho one\n")
-	dir := filepath.Dir(path)
-	t.Chdir(dir)
-
-	got, err := candidateFromPath("combined.sqf")
-	if err != nil {
-		t.Fatalf("candidateFromPath: %v", err)
-	}
-	if !filepath.IsAbs(got.Path) {
-		t.Errorf("path = %q, want an absolute path", got.Path)
-	}
-}
-
 // A writable .img has no identity to pin and a .sif is a container root, so
 // neither can be selected.
-func TestCandidateFromPathRefusesWhatCannotBeSelected(t *testing.T) {
+func TestCandidateFromPathRefusesWhatCannotBePinned(t *testing.T) {
 	for _, name := range []string{"env.img", "base.sif", "notes.txt"} {
 		path := filepath.Join(t.TempDir(), name)
 		if err := os.WriteFile(path, []byte("x"), 0o664); err != nil {

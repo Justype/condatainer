@@ -4,6 +4,7 @@ bin/
 main
 *.exe
 *.test
+.gocache
 
 # Vendor folder
 vendor/

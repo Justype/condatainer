@@ -30,7 +30,7 @@ func fakeSource(t *testing.T) string {
 		}
 	}
 
-	write("source.json", `{"schema":1,"repository":"https://example.invalid/r","default_base":"ubuntu24","oci":{"push":"oci://ghcr.io/lab/cnt/","pull":["ghcr.io/lab/cnt","registry.lab/cnt"],"visibility":"internal"}}`)
+	write("source.json", `{"schema":1,"source":"https://example.invalid/r","default_base":"ubuntu24","oci":{"push":"oci://ghcr.io/lab/cnt/","pull":["ghcr.io/lab/cnt","registry.lab/cnt"],"audience":"restricted"}}`)
 	write("recipes/cellranger/9.0.1", "#DESC:cellranger\n#URL:https://example.invalid\n")
 	write("recipes/ubuntu24/base.def", "#DESC:base\n\nBootstrap: docker\n")
 	write("recipes/grch38/star-gencode", starRecipe)
@@ -60,7 +60,7 @@ func TestOpenDirSource(t *testing.T) {
 	if got := cat.DefaultBase(); got != "ubuntu24" {
 		t.Errorf("DefaultBase = %q, want ubuntu24", got)
 	}
-	if cat[0].Desc.Repository != "https://example.invalid/r" {
+	if cat[0].Desc.Source != "https://example.invalid/r" {
 		t.Errorf("descriptor not loaded: %+v", cat[0].Desc)
 	}
 	if got := cat[0].Desc.OCI.Push; got != "ghcr.io/lab/cnt" {
@@ -69,8 +69,8 @@ func TestOpenDirSource(t *testing.T) {
 	if got := cat[0].Desc.OCI.Pull; !slices.Equal(got, []string{"ghcr.io/lab/cnt", "registry.lab/cnt"}) {
 		t.Errorf("OCI pull = %v", got)
 	}
-	if got := cat[0].Desc.OCI.Visibility; got != "internal" {
-		t.Errorf("OCI visibility = %q", got)
+	if got := cat[0].Desc.OCI.Audience; got != "restricted" {
+		t.Errorf("OCI audience = %q", got)
 	}
 
 	entries := cat.Entries(t.Context())
@@ -96,18 +96,18 @@ func TestParseDescriptorOCI(t *testing.T) {
 		{
 			name: "absent OCI defaults safely",
 			json: `{"schema":1}`,
-			want: Descriptor{Schema: 1, OCI: OCI{Visibility: "public"}},
+			want: Descriptor{Schema: 1, OCI: OCI{Audience: "public"}},
 		},
 		{
 			name: "ordered mirrors and scheme normalization",
-			json: `{"schema":1,"oci":{"push":"oci://ghcr.io/lab/cnt/","pull":["oci://local.lab/cnt/","ghcr.io/lab/cnt"],"visibility":"INTERNAL"}}`,
+			json: `{"schema":1,"oci":{"push":"oci://ghcr.io/lab/cnt/","pull":["oci://local.lab/cnt/","ghcr.io/lab/cnt"],"audience":"RESTRICTED"}}`,
 			want: Descriptor{Schema: 1, OCI: OCI{
-				Push: "ghcr.io/lab/cnt", Pull: []string{"local.lab/cnt", "ghcr.io/lab/cnt"}, Visibility: "internal",
+				Push: "ghcr.io/lab/cnt", Pull: []string{"local.lab/cnt", "ghcr.io/lab/cnt"}, Audience: "restricted",
 			}},
 		},
 		{name: "push required", json: `{"schema":1,"oci":{"pull":["ghcr.io/lab/cnt"]}}`, wantErr: "require push"},
 		{name: "pull required", json: `{"schema":1,"oci":{"push":"ghcr.io/lab/cnt"}}`, wantErr: "at least one pull"},
-		{name: "bad visibility", json: `{"schema":1,"oci":{"push":"ghcr.io/lab/cnt","pull":["ghcr.io/lab/cnt"],"visibility":"private"}}`, wantErr: "visibility"},
+		{name: "bad audience", json: `{"schema":1,"oci":{"push":"ghcr.io/lab/cnt","pull":["ghcr.io/lab/cnt"],"audience":"private"}}`, wantErr: "audience"},
 		{name: "host alone is not a root", json: `{"schema":1,"oci":{"push":"ghcr.io","pull":["ghcr.io/lab/cnt"]}}`, wantErr: "registry/repository root"},
 		{name: "unsupported scheme", json: `{"schema":1,"oci":{"push":"https://ghcr.io/lab/cnt","pull":["ghcr.io/lab/cnt"]}}`, wantErr: "registry/repository root"},
 		{name: "unsupported schema", json: `{"schema":2}`, wantErr: "unsupported"},
@@ -223,5 +223,32 @@ func TestUnreachableSourceKeepsItsPlace(t *testing.T) {
 	}
 	if _, ok := entries["cellranger/9.0.1"]; !ok {
 		t.Error("the reachable source should still contribute")
+	}
+}
+
+// A descriptor's source is written into every artifact the collection builds and
+// published as org.opencontainers.image.source, so a bad one is caught where it
+// enters rather than in each artifact built from it.
+func TestParseDescriptorChecksTheSourceURL(t *testing.T) {
+	for _, tc := range []struct{ name, json, wantErr string }{
+		{"https", `{"schema":1,"source":"https://github.com/lab/r"}`, ""},
+		{"http", `{"schema":1,"source":"http://git.lab.example/r"}`, ""},
+		{"absent", `{"schema":1}`, ""},
+		{"wrong scheme", `{"schema":1,"source":"ftp://example.invalid/r"}`, "http(s)"},
+		{"not a url", `{"schema":1,"source":"github.com/lab/r"}`, "http(s)"},
+		{"whitespace", `{"schema":1,"source":"https://example.invalid/a b"}`, "whitespace"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseDescriptor([]byte(tc.json))
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ParseDescriptor: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+		})
 	}
 }

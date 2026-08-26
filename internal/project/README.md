@@ -1,7 +1,7 @@
 # Project lock
 
 `cnt-lock/` is the tracked record of which exact artifact identity satisfies
-each dependency a project declares. It holds the selection map plus the vendored
+each dependency a project declares. It holds the pins plus the vendored
 manifests and rebuild sources — everything Git should carry, and nothing
 machine-local: no payload, no absolute path, no hostname, no restore result. A
 checkout is a complete rebuild specification on a machine that has never run
@@ -48,7 +48,7 @@ verifies against an image that does not.
 `remotes` maps an artifact path to the exact places it can be fetched from:
 a repository coordinate and a **platform manifest digest**, never a mutable tag.
 It is absent until something records a location, and it is keyed by artifact
-rather than nested under a selection because a closure-only dependency can have
+rather than nested under a pin because a closure-only dependency can have
 remotes too.
 
 Order is retry priority, so `AddRemote` deduplicates and appends rather than
@@ -75,8 +75,59 @@ the digest before the bytes it covers exist; and a record written at pull time
 would live in the per-user cache while images roots are shared, so it would exist
 only for whoever ran the pull.
 
-Nothing writes a remote yet, so restore rebuilds. The map is carried now because
-the lock format is tracked in Git and adding it later would be a schema change.
+Exactly two writers exist, and a project normally uses both. `project lock` and
+`project pin` record, best effort, any endpoint of the recipe collection that already
+publishes the pinned artifact's **complete** identity — free, because the bytes
+are already there. `project push` uploads the rest. Order is retry priority and
+comes out right without a rule: a pin records its upstream remote before
+any push runs, so the free location is tried first.
+
+`Prune` is not what reconciles the map — `Publish` does, before it marshals, so
+the bytes that get written never name an artifact the closure no longer reaches.
+Pruning is filesystem-only and runs after the rename.
+
+## Where a project publishes
+
+`Lock.OCI` is the project's own destination: one repository coordinate and the
+`audience` claim that decides what may be published there. It is tracked rather
+than machine-local for the same reason a pin is — every collaborator has to
+push to the same package, or the recorded fetch locations describe a set of
+places *some* of the artifacts are.
+
+Its coordinate grammar is duplicated here rather than imported from
+`internal/registry`. That is what keeps this package free of the transport, which
+is what makes `Verify` checkout-local by construction: a lock has to validate on
+a machine with no network, no credentials and no registry, and a package that
+cannot reach one cannot accidentally start.
+
+`Lock.Source` is the project's code repository, derived once from the git origin
+when the destination is set and recorded, never re-derived at push time — two
+collaborators with different remote spellings would otherwise publish two
+different source annotations for one project.
+
+## Publishing the payload
+
+`publish` decides and performs the upload. Planning splits in two so `--dry-run`
+can be honest about cost:
+
+- `Build` works from the checkout alone — the publish set, the tags, and the
+  refusals. It covers every pin, and `--closure` adds the build
+  dependencies reached through the manifest edges.
+- `Refine` asks the network the two questions a checkout cannot answer: whether a
+  collection already serves an artifact at this identity, and whether the
+  destination already holds it. Both only ever *remove* work, so an unreachable
+  registry leaves the plan as computed rather than failing a push nobody could
+  complete offline. `--all` is a flag on this half, not on `Build`: it suppresses
+  the upstream check rather than widening the set.
+
+Push never builds. An artifact missing at its locked identity is a refusal naming
+the restore that would produce it, because publishing something this checkout did
+not already describe would put bytes in a registry that no lock vouches for.
+
+Recording is **one lock transaction per artifact**, not one per push: load,
+`AddRemote`, publish, next. An interrupted push therefore leaves every artifact
+that did land recorded, and re-running skips them. Batching would trade that for
+a single write nobody needs.
 
 ## Scanning
 
@@ -86,12 +137,34 @@ moving a `#DEP:` cannot make the lock and `run` disagree about it. The cost is
 that a heredoc writing another script contributes that script's declarations
 too.
 
-Discovery reads `.sh` and `.bash` files and extensionless files with a shell
-shebang. It never follows a symlinked directory and never reads a symlinked
+Discovery reads `.sh` and `.bash` files and nothing else. `run` executes every
+project script with `/bin/bash`, so no other shell's script could run here, and
+a file with no extension is not read at all: sniffing a shebang to catch one was
+a substring test that fired on any interpreter path containing `sh`, which on an
+HPC filesystem means `/home/shared/…` and every user called `josh`.
+
+`overlays/` is skipped: it is where a project keeps its own overlays and the
+recipes that built them, and a recipe's `#DEP:` are its overlay's build
+dependencies — already recorded in that overlay's provenance — not declarations
+the project mounts. Declaring one from a project script is unaffected, since
+`#DEP: overlays/tool.sqf` lives in the script rather than in `overlays/`.
+
+A directory is the rule because only a stated convention answers the same every
+time. The two alternatives both make a file's meaning depend on something
+outside it: a sibling `.sqf` appears when `create -f` runs, so the scan would
+change on a build, and deriving recipe-ness from which overlays other scripts
+declare means deleting one script silently reclassifies another.
+
+It never follows a symlinked directory and never reads a symlinked
 script: either can point outside the checkout, and a lock describes the checkout.
-`.git/` and `cnt-lock/` are always skipped; anything else must be named in
-`ScanOptions.ExcludeDirs`, because a silent skip is how a declaration goes
-missing.
+`cnt-lock/`, `overlays/` and every dot-directory are always skipped; anything
+else must be named in `ScanOptions.ExcludeDirs`.
+
+The dot rule is the one inherited exclusion, and it is worth the silent skip it
+costs. A dot-directory is tool state rather than project source — `.venv`,
+`.tox`, `.snakemake`, a local conda env — and each ships shell scripts carrying
+declarations that are not this project's. Since `project lock` now pins what it
+finds, reading them turns a stray `#DEP:` into a failed lock rather than a note.
 
 **An analysis script must name an exact version.** `#DEP: star/2.7.11b>=2.7.0`
 is a build-recipe feature and is rejected here as a finding. A recipe declares a
@@ -103,7 +176,7 @@ range" is not a claim worth attaching to a result.
 
 It is also what keeps one module from having two keys. The key is
 `NameVersion() + Op + Min`, so `star/2.7.11b` and `star/2.7.11b>=2.7.0` would be
-separate selections that could point at different artifacts, with nothing in the
+separate pins that could point at different artifacts, with nothing in the
 lock to say which a given script meant.
 
 A declaration is one of four kinds, and `Kind.Pinnable()` is the split that
@@ -116,7 +189,7 @@ matters:
 | **writable** — an `.img` | no | nothing to pin: it has no identity |
 | **external** — a `.sqf` absolute or above the root | no | nowhere to put an answer: restore does not own that path |
 
-The two unpinnable kinds fail for the same underlying reason — a selection
+The two unpinnable kinds fail for the same underlying reason — a pin
 records where an artifact will be, and neither has such a place. An external
 `.sqf` stays perfectly usable at run time; it just cannot be locked, because
 locking it would record a promise restore could not keep without writing to
@@ -152,19 +225,19 @@ marker** below.
 
 What asked for an artifact decides where it goes, and the three are not
 interchangeable. Depth in the dependency graph decides nothing: a directly
-selected artifact is user-owned however deep it sits, and one reached only
+pinned artifact is user-owned however deep it sits, and one reached only
 through edges is scaffolding however shallow.
 
-A **named** selection is addressed by identity. It is satisfied by a copy in any
+A **named** pin is addressed by identity. It is satisfied by a copy in any
 readable images root and a new one lands wherever the store's destination rule
 puts it — flat when the name is free, `store/` on conflict.
 
-A **`path:`** selection is a project output. It must be materialized at exactly
+A **`path:`** pin is a project output. It must be materialized at exactly
 the declared path, and a copy in an images root is *not* a substitute: adopting
 one would report a successful restore while the declared path stays empty and
 the script still fails at mount time. Such an artifact never enters the store.
 
-A **build dependency** — a closure node no selection names, meaning a `#DEP:`
+A **build dependency** — a closure node no pin names, meaning a `#DEP:`
 overlay and nothing to do with `#INPUT:` — is not installed at all.
 It is produced in a restore-scoped directory under the stable writable tmp root
 and removed when the restore ends, on failure and cancellation alike. Nothing
@@ -172,8 +245,8 @@ asked for it by name, and nothing needs it afterwards: an artifact bakes its
 inputs in, so a dependency image is needed to rebuild it and never to use it.
 One that is *already* installed is adopted in place and never copied, so only a
 genuine miss is transient. `--keep-build-deps` installs newly produced ones
-through the named rule instead — with one difference: where a selection in the
-same plan carries the same name at a different identity, the selection keeps the
+through the named rule instead — with one difference: where a pin in the
+same plan carries the same name at a different identity, the pin keeps the
 bare name and the dependency goes to `store/`. The flat name answers `exec -o`,
 `list`, and every other checkout, so it belongs to what someone asked for by name
 rather than to what a rebuild happened to need. `yieldSharedNames` decides it from
@@ -199,8 +272,16 @@ scratch holds, and a job sweep must not remove it mid-restore. Nothing else sees
 any of it — it is not an images root, so no scan finds it and `list` cannot show
 it.
 
-Two paths selecting one artifact are two files to produce, so they plan as two
-steps. An artifact selected *both* by name and at a path has two destinations
+A destination step whose path already holds something that does not answer the
+lock records it as `Step.Replaces`, read from the file itself during planning.
+`placeAt` renames over whatever regular `.sqf` it finds, so without that a plan
+would preview an overwrite as an ordinary build — indistinguishable from an
+empty path. Replacing is right (a restore exists to make the checkout match the
+lock, and refusing would leave a drifted project repairable only by hand), but
+silently replacing is not.
+
+Two paths pinning one artifact are two files to produce, so they plan as two
+steps. An artifact pinned *both* by name and at a path has two destinations
 and no way to choose; that is refused as a lock to fix.
 
 The declared path is validated where the lock is parsed, not where it is used:
@@ -210,7 +291,7 @@ file outside the checkout entirely.
 
 ## What may satisfy a build dependency
 
-A selection answers for its own keys: someone asked for it by name. A build dependency
+A pin answers for its own keys: someone asked for it by name. A build dependency
 only has to leave its dependent's equivalence key unchanged, and the role the
 edge records is the scheme's statement about that.
 
@@ -259,7 +340,7 @@ dependent's fate is known. Three rules produce it:
   it declares.
 
 Each declared project path is one output and therefore one job, even when two
-paths select the same artifact.
+paths pin the same artifact.
 
 ### Reservation and resume
 
@@ -314,9 +395,10 @@ answers to the name. That fallback is the failure a lock exists to prevent.
 ## Verification
 
 `Verify` is strictly checkout-local: no installed overlay, no store, no catalog,
-no build configuration, no network, and no payload. That is the CI contract — a
-clean checkout on a machine that has never run CondaTainer either is a complete,
-internally consistent rebuild specification or is not, and this says which.
+no build configuration, no network, and no payload. A fresh clone that has
+restored nothing either is a complete, internally consistent rebuild
+specification or is not, and this says which. Whether an artifact is actually
+there to run is `Resolve`'s question, not this one.
 
 Every entry is regenerated rather than trusted. The manifest's recorded keys are
 recomputed from the vendored sources, and the directory name is checked against
@@ -324,9 +406,9 @@ the result: the name is addressing, never identity, so renaming a directory
 cannot make a different artifact answer to it. Each dependency edge is followed
 by name *and* complete identity to a child that must agree on both.
 
-Reachability is the closure, not the selection set. A dependency directory is
+Reachability is the closure, not the pin set. A dependency directory is
 reached through its parent's manifest edges, so anything computed from
-selections alone would miss exactly the entries a rebuild needs. Problems are
+pins alone would miss exactly the entries a rebuild needs. Problems are
 collected rather than raised at the first failure, because someone fixing a lock
 wants the whole list.
 

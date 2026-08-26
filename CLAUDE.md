@@ -54,17 +54,55 @@ self-contained by definition, and a `base` *is* the build environment. Producing
 producing tool, which is why data is the type with deps. A `#DEP:` may name an app, data, or os, but
 never a base — resolution refuses that edge.
 
-Metadata headers: `#DEP:name/version` or `#DEP:name/version>=min` (build deps; preferred version is
+**A *build's* `#DEP:` is a `name/version`, never an overlay path** — but a *running* script's may be
+either. The asymmetry is the point: a running script mounts what it names and records nothing, while
+a build's declaration becomes an edge in an artifact that has to mean the same thing on another
+machine, and a path is neither resolvable there nor a key anything can regenerate. So
+`#DEP: ./overlays/x.sqf` and `#DEP: env.img  ## unpinned` stay valid in an analysis script and are
+rejected in a recipe.
+
+Both build rules live in `catalog.ValidateDeps`, whose only callers are `Recipe.Validate` and
+`build.FromExternalSource` — never `run` or `check`. An **external build** (`create -p -f <script>`)
+answers to them exactly as a catalog recipe does, which is why they live there rather than on
+`Recipe`: an external build has no recipe path to be parsed from. `catalog.IsPathDep` is the single
+answer to "is this dep a path", since `catalog` owns the `Normalize`/`ParseDep` grammar that applies
+only to names; its extension set must stay `utils.IsOverlay`'s, `.ext3` included.
+
+A **version constraint is a recipe-only feature.** `#DEP:name/version>=min` lets a build reuse a
+satisfying version that is already installed instead of producing another, and for reference data
+the tool version often does not matter — `samtools faidx` writes the same `.fai` whichever recent
+samtools ran. An **analysis script must name an exact `name/version`**: "any version in this range"
+is not a claim to attach to a result, and a project lock exists to say which one. A constrained
+declaration in a project script is a scan finding, not a request.
+
+Metadata headers: `#DEP:name/version`, or `#DEP:name/version>=min` in a recipe (preferred version is
 implicit upper bound, so valid range is `[min, version]`), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params),
 `#ENV:VAR={prefix}/sub  ## note` (env vars; `{prefix}` is filled with the install prefix at load time),
 `#INPUT:prompt` (user input, fed on stdin in order — read with `IFS= read -r VAR`), `#PH:`/`#TARGET:` (templates),
-`#ARCH:noarch` (app and data script recipes only; default `native`), `#DESC:`, `#URL:`, `#TYPE:`.
+`#ARCH:noarch` (app and data script recipes only; default `native`), `#DESC:`, `#URL:`, `#TYPE:`,
+`#LICENSE:` (an SPDX expression, verbatim), `#REDISTRIBUTE:` (`yes` or `no` — see *Publishing*).
 
-The header block ends at the first line that is neither blank nor a comment. That boundary bounds
-what the recipe parser reads, which is what keeps a `#DEP:` in a heredoc inert; it feeds no key.
-Both keys hash `catalog.StripComments`, which drops every whole-line comment — the header with
-them — so never compute that preimage a second way. Neither affects what is stored or what runs:
-the recipe is embedded and executed byte for byte.
+**`#TARGET:` without `#PH:` is not a template — it names the artifact**, and that is how an *external*
+build (`create -p <path> -f <script>`) gets a name at all. Without it the name is the `-p` basename,
+which is a single component, so `key.Role`'s component match never fires and every `#DEP:` is silently
+downgraded to build history. An external script declaring `#DEP:` must therefore declare `#TARGET:`,
+and `FromExternalSource` refuses it otherwise. The name and the file path are separate namespaces:
+`#TARGET:` fixes `/cnt/<name>` and the role classification, `-p` fixes where the `.sqf` lands. That is
+why a path-addressed artifact's filename carries no naming claim — `project.LookupAt` matches it by
+manifest name alone, while a flat or store scan still requires the filename to encode the name,
+because there the filename *is* the address.
+
+An annotation is read wherever it is written; position carries no meaning, so there is no header
+block and no boundary. `catalog.ScanAnnotations` is the one tokenizer — recipes, user scripts and
+project scanning all go through it, and a key means the same thing everywhere. A line qualifies when
+it starts with `#`, an upper-case key, and `:`, which is what keeps prose like `# note: rerun weekly`
+out. Scheduler directives are matched by prefix instead, because `#SBATCH --time=01:00:00` has no
+`#KEY: value` shape to cut on.
+
+The cost is deliberate: a recipe that writes a job script in a heredoc also declares whatever that
+script declares. Both keys hash `catalog.StripComments`, which drops every whole-line comment —
+annotations with them — so never compute that preimage a second way. Neither affects what is stored
+or what runs: the recipe is embedded and executed byte for byte.
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 
@@ -76,6 +114,12 @@ with payloads under their own `/cnt/<name>` prefix, so they are disjoint subtree
 diffs. The only ordering rule is that the single writable `.img` goes last
 (`putImgToLast`, `internal/runtime/container/setup.go`).
 
+Because they are disjoint rather than stacked, **two images claiming one prefix do not combine** —
+the later mount takes the whole subtree and the earlier contributes nothing, while both still reach
+PATH and the environment. `ensureDistinctPrefixes` refuses that mount rather than warning: it is a
+wrong container that looks like a working one. Two builds of one name are the case it catches. A
+base, an OS image and anything without readable metadata record no prefix and are exempt.
+
 **A base is never a compatibility gate.** It carries no identity or equivalence key, and any base
 information an artifact records is build diagnostics only — never compared, never warned on, never
 refused. A base is rebuilt whenever its OS ships patches, so a base digest differing from the one an
@@ -84,30 +128,46 @@ treats it as if it did.
 
 ## Publishing
 
-What may be pushed depends on **who can pull it**, declared per endpoint as `visibility` (`public` by
-default, or `internal`). The type is read from the embedded manifest, never guessed from the
-filename, and `push` refuses rather than warns.
+What may be pushed depends on **who can pull it**, declared per endpoint as `audience` (`public` by
+default, or `restricted`), and on what the artifact says about itself. Everything is read from the
+embedded manifest, never guessed from the filename, and `push` refuses rather than warns.
 
-| endpoint | may receive |
+A `restricted` endpoint takes anything. At a `public` one:
+
+| the recipe declared | may publish publicly |
 |---|---|
-| `public` (default) | `base`, `os`, `data` |
-| `internal` | any type |
+| `#REDISTRIBUTE: no` | **never**, whatever the type, and no flag overrides it |
+| `#REDISTRIBUTE: yes` | yes, whatever the type |
+| nothing, and it is `base` or `os` | yes — ours to publish: a container root, and packages from a public distribution |
+| nothing, and it is `data` | yes — the type asserts public reference data and the indexes built from it |
+| nothing, and it is an `app` | **no** — someone else's software with unstated terms, and unknown is not permission |
+| nothing, and it is a Conda build | yes — see below |
 
-- **A Conda build and an `app` never reach a public endpoint.** An app installs someone else's
-  software, and publishing a copy redistributes their binaries under our name — theirs to permit,
-  not ours to assume. A Conda build adds a second reason: its solve inputs are embedded, so a
-  consumer rebuilds from a few kilobytes instead of downloading gigabytes.
-- `base` and `os` are ours to publish — a container root and apt packages from a public distribution.
-- `data` is public reference data and the indexes built from it, the one case where a push saves real
-  work: hours of index building, not a download.
+**`#REDISTRIBUTE:` is the answer; the type is only the default for an unanswered question.** The
+declaration lives in the recipe rather than on the command line, so it is authored once, reviewed in a
+commit, and travels with every artifact built from it — the same standard `audience` is held to, and
+the reason a `yes` is trusted here while a `--force` would not be. Nothing verifies it.
+
+**A Conda build is never asked.** It embeds no recipe (`build.SourceSpec.RecipeFile`), so there is
+nowhere for the declaration to be written that travels with the artifact, and gating it would be a
+permanent refusal wearing a default's clothes. Its packages were also vetted for redistributable
+licensing as a condition of being in the channel. What the channels cannot answer — a private or
+vendor channel — is reported from `Build.Channels` at push time and decided by a person; do not add a
+check that adjudicates it, since the only ways to try are a config allowlist or interpreting a few
+hundred licence strings.
+
+`#LICENSE:` is an SPDX expression published verbatim as `org.opencontainers.image.licenses`. It is
+never parsed and never gates anything: deriving redistribution permission from a licence expression is
+a judgement a tool gets wrong in the permissive direction, and that direction cannot be taken back.
 
 `.img` is never published to any endpoint. That is structural, not policy — a writable overlay has no
 identity, so there is nothing to publish it *as*.
 
-`visibility` states a fact about a registry and CondaTainer derives the permitted set from it. Never
+`audience` states a fact about a registry and CondaTainer derives the permitted set from it. Never
 let config enumerate types directly: `types: [app]` beside a public endpoint would erase the rule
-with no error, whereas a wrong `visibility` is a claim someone has to write down and defend. It is a
-declaration, not enforcement — nothing verifies the registry is actually private.
+with no error, whereas a wrong `audience` is a claim someone has to write down and defend. It is a
+declaration, not enforcement — nothing verifies the registry is actually restricted, and it is
+unrelated to a GitHub package's own visibility setting, which CondaTainer never reads or changes.
 
 ## Data Directory Order
 

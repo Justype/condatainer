@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"golang.org/x/sync/errgroup"
@@ -130,6 +131,68 @@ func pull(ctx context.Context, base, repo string, desc ocispec.Descriptor, annot
 	return nil
 }
 
+// Fetch downloads the artifact desc addresses to destPath and verifies it,
+// installing nothing.
+//
+// This is Pull with every step that makes an artifact *answer to a name*
+// removed: no producer lock, no free-name search, no protection check, no
+// rename. The caller already owns destPath and decides what happens to it, which
+// is what lets a locked restore hand a store transaction's staging path straight
+// to the transport and then publish it under the identity the lock pinned.
+//
+// destPath must not exist. kind says what is expected of the payload, because a
+// staging name cannot: it ends in the producer's suffix rather than in .sqf.
+//
+// The two checks that survive are the two that are about the bytes: the manifest
+// must describe the kind of artifact asked for before anything is transferred,
+// and the assembled payload must regenerate the keys its annotations advertised
+// before the caller is told it succeeded.
+func Fetch(ctx context.Context, base, repo string, desc ocispec.Descriptor, annotations map[string]string, destPath string, kind Kind) error {
+	wantArtifactType, wantLayerType, err := kind.types()
+	if err != nil {
+		return err
+	}
+	repository, err := newRepository(base, repo)
+	if err != nil {
+		return err
+	}
+	manifest, err := fetchManifest(ctx, repository, desc)
+	if err != nil {
+		return classify(err)
+	}
+	if err := validatePayloadContract(manifest, wantArtifactType, wantLayerType); err != nil {
+		return err
+	}
+	if err := requireFreeSpace(filepath.Dir(destPath), downloadSize(desc, manifest)); err != nil {
+		return err
+	}
+	if err := download(ctx, repository, manifest, destPath); err != nil {
+		return err
+	}
+	if _, err := verifyPayload(destPath, annotations); err != nil {
+		return err
+	}
+	return nil
+}
+
+// SplitCoordinate separates a complete OCI repository coordinate into the
+// registry base and the repository path beneath it.
+//
+// A lock records one string — "ghcr.io/org/cnt/grch38/genome" — while the
+// transport wants the two halves apart. The split is at the first slash and
+// nowhere cleverer: everything after the host is repository path, whether the
+// publisher nested it by name or flattened it into one repository.
+func SplitCoordinate(coordinate string) (base, repo string, err error) {
+	// Trailing slashes only: TrimBaseScheme drops those. A leading one is not
+	// tidied away, because "/lab/p" names no registry and reading it as host
+	// "lab" would turn a malformed coordinate into a plausible one.
+	host, path, found := strings.Cut(TrimBaseScheme(coordinate), "/")
+	if !found || host == "" || path == "" {
+		return "", "", fmt.Errorf("%q is not a registry/repository coordinate", coordinate)
+	}
+	return host, path, nil
+}
+
 // imageTypes reports the artifact and layer media types an image's extension
 // implies. Push reads it from the file it is publishing, pull from the
 // destination it was asked to write.
@@ -139,16 +202,49 @@ func pull(ctx context.Context, base, repo string, desc ocispec.Descriptor, annot
 // overlay or a base, and nothing should — the caller already decided what it is
 // installing. A `.sif` served where a `.sqf` was wanted then fails at the
 // transport instead of at mount, which is where it would otherwise surface.
-func imageTypes(path string) (artifactType, layerType string, err error) {
+// Kind is the sort of image an operation expects to move.
+//
+// Push and Pull read it off a filename, because there the filename is the
+// artifact. Fetch is told instead: its destination is a producer's staging name,
+// which carries a `.part` suffix rather than the extension that would say what
+// the payload is.
+type Kind string
+
+const (
+	KindOverlay Kind = "overlay" // a read-only .sqf
+	KindBase    Kind = "base"    // a .sif container root
+)
+
+// KindOf reads the kind a filename declares.
+func KindOf(path string) (Kind, error) {
 	switch {
 	case utils.IsSqf(path):
-		return ArtifactTypeOverlay, MediaTypeOverlayBlob, nil
+		return KindOverlay, nil
 	case utils.IsSif(path):
-		return ArtifactTypeBase, MediaTypeBaseBlob, nil
+		return KindBase, nil
 	case utils.IsImg(path):
-		return "", "", fmt.Errorf("%s is a writable overlay, which has no identity and is never distributed", path)
+		return "", fmt.Errorf("%s is a writable overlay, which has no identity and is never distributed", path)
 	}
-	return "", "", fmt.Errorf("%s is not a distributable image (.sqf or .sif)", path)
+	return "", fmt.Errorf("%s is not a distributable image (.sqf or .sif)", path)
+}
+
+// types reports the artifact and layer media types a kind travels as.
+func (k Kind) types() (artifactType, layerType string, err error) {
+	switch k {
+	case KindOverlay:
+		return ArtifactTypeOverlay, MediaTypeOverlayBlob, nil
+	case KindBase:
+		return ArtifactTypeBase, MediaTypeBaseBlob, nil
+	}
+	return "", "", fmt.Errorf("unknown image kind %q", k)
+}
+
+func imageTypes(path string) (artifactType, layerType string, err error) {
+	kind, err := KindOf(path)
+	if err != nil {
+		return "", "", err
+	}
+	return kind.types()
 }
 
 // validatePayloadContract rejects a manifest that does not describe the kind of

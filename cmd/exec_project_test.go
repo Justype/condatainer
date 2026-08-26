@@ -36,7 +36,7 @@ func TestProjectOverlaysRefusesAnUnselectedName(t *testing.T) {
 	if !strings.Contains(err.Error(), "star/2.7.11b") {
 		t.Errorf("error does not name the overlay: %v", err)
 	}
-	if !strings.Contains(err.Error(), "lock select") {
+	if !strings.Contains(err.Error(), "project pin") {
 		t.Errorf("error does not name the remedy: %v", err)
 	}
 }

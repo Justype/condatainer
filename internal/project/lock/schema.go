@@ -1,7 +1,7 @@
 // Package lock reads and writes cnt-lock/, the tracked record of which exact
 // artifact identity satisfies each dependency a project declares.
 //
-// What lives here is what Git should carry: the selection map and, beside it,
+// What lives here is what Git should carry: the pins and, beside them,
 // the vendored manifests and rebuild sources. What does not is anything
 // machine-local — no payload, no absolute path, no hostname, no restore result.
 // A checkout is therefore a complete rebuild specification on a machine that has
@@ -14,8 +14,11 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/Justype/condatainer/catalog"
 )
 
 // SchemaVersion is the lock format this build reads and writes.
@@ -30,10 +33,16 @@ const FileName = "lock.json"
 // ProvenanceDir holds one directory per vendored artifact, inside DirName.
 const ProvenanceDir = "provenance"
 
-// PathPrefix marks a selection key that addresses an overlay by project path
+// PathPrefix marks a pin key that addresses an overlay by project path
 // rather than by name. A path request has no catalog.Dep to render, and the
 // prefix keeps the two kinds of key from ever colliding.
 const PathPrefix = "path:"
+
+// ociRepoSegment is one path segment of an OCI repository, matching the
+// distribution spec's grammar. Duplicated from internal/registry rather than
+// imported: this package must stay free of the transport so that project
+// validation is checkout-local by construction.
+var ociRepoSegment = regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*$`)
 
 var (
 	// ErrSchema reports a lock this build cannot read.
@@ -50,21 +59,51 @@ var (
 // locations are stored.
 type Lock struct {
 	SchemaVersion int `json:"schema_version"`
-	// Selections maps a canonical request to the artifact directory that
+	// Source is the project's own code repository, the same key and the same
+	// meaning a collection's source.json gives it. It becomes
+	// org.opencontainers.image.source on everything the project publishes, which
+	// is what links a GHCR package to the repository.
+	//
+	// Recorded rather than read from `git remote origin` at push time: two
+	// collaborators with different remote spellings would otherwise publish two
+	// different annotations for one project.
+	Source string `json:"source,omitempty"`
+	// OCI is where this project publishes. Absent until `project registry set`
+	// records one.
+	OCI OCI `json:"oci,omitzero"`
+	// Pins maps a canonical request to the artifact directory that
 	// satisfies it. The value is an object rather than a bare path so
-	// selection-specific policy can be added without copying artifact facts
+	// pin-specific policy can be added without copying artifact facts
 	// into the mapping.
-	Selections map[string]Selection `json:"selections"`
+	Pins map[string]PinEntry `json:"pins"`
 	// Remotes records where an artifact can be fetched from, keyed by the same
-	// relative artifact path selections use. It is absent until something
-	// records a location: `project lock select --from`, and later `project
-	// push`, append to it. A closure-only artifact may have remotes too, which
-	// is why this is keyed by artifact rather than nested under a selection.
+	// relative artifact path pins use. It is absent until something
+	// records a location: `project pin`, and later `project push`, append to it. A closure-only artifact may have remotes too, which
+	// is why this is keyed by artifact rather than nested under a pin.
 	Remotes map[string][]Remote `json:"remotes,omitempty"`
 }
 
-// Selection is which artifact satisfies one request.
-type Selection struct {
+// OCI is a project's own publishing destination. The field names mirror
+// catalog.Descriptor's OCI block, because a collection declares these about
+// itself and a project declares the same things about itself.
+//
+// There is no Pull: a project has no name-addressed pull list. Where its
+// artifacts can be fetched from is per-artifact and lives in Remotes.
+type OCI struct {
+	// Push is the complete repository coordinate, registry host included and
+	// with no scheme, tag, or digest.
+	Push string `json:"push,omitempty"`
+	// Audience is who can pull from the endpoint, and CondaTainer derives from
+	// it what may be published there. Empty means public, which is the
+	// restrictive answer — see registry.Audience.
+	Audience string `json:"audience,omitempty"`
+}
+
+// Empty reports that no destination has been recorded.
+func (o OCI) Empty() bool { return strings.TrimSpace(o.Push) == "" }
+
+// PinEntry is which artifact satisfies one request.
+type PinEntry struct {
 	// Artifact is the slash-separated path of the vendored artifact directory,
 	// relative to the lock directory.
 	Artifact string `json:"artifact"`
@@ -77,14 +116,14 @@ type Remote struct {
 	// Repository is the complete OCI repository coordinate, with no scheme,
 	// tag, or digest.
 	Repository string `json:"repository"`
-	// ManifestDigest is the selected platform manifest digest — not a mutable
+	// ManifestDigest is the pinned platform manifest digest — not a mutable
 	// tag, and not merely the multi-platform index digest.
 	ManifestDigest string `json:"manifest_digest"`
 }
 
 // New returns an empty lock at the current schema version.
 func New() *Lock {
-	return &Lock{SchemaVersion: SchemaVersion, Selections: map[string]Selection{}}
+	return &Lock{SchemaVersion: SchemaVersion, Pins: map[string]PinEntry{}}
 }
 
 // EntryPath renders the relative artifact directory for one entry name.
@@ -109,8 +148,8 @@ func Unmarshal(data []byte) (*Lock, error) {
 	if lock.SchemaVersion != SchemaVersion {
 		return nil, fmt.Errorf("%w: lock is %d (this build reads %d)", ErrSchema, lock.SchemaVersion, SchemaVersion)
 	}
-	if lock.Selections == nil {
-		lock.Selections = map[string]Selection{}
+	if lock.Pins == nil {
+		lock.Pins = map[string]PinEntry{}
 	}
 	if err := lock.Validate(); err != nil {
 		return nil, err
@@ -127,6 +166,7 @@ func (l *Lock) Marshal() ([]byte, error) {
 	}
 	out := *l
 	out.SchemaVersion = SchemaVersion
+	out.Source = strings.TrimSpace(out.Source)
 	if len(out.Remotes) == 0 {
 		out.Remotes = nil
 	}
@@ -142,16 +182,22 @@ func (l *Lock) Marshal() ([]byte, error) {
 // remote references. It reads nothing from disk — a checkout with no images and
 // no configuration validates exactly the same.
 func (l *Lock) Validate() error {
-	for request, selection := range l.Selections {
+	if err := validSourceURL(l.Source); err != nil {
+		return fmt.Errorf("%w: source: %v", ErrInvalid, err)
+	}
+	if err := l.OCI.validate(); err != nil {
+		return fmt.Errorf("%w: oci: %v", ErrInvalid, err)
+	}
+	for request, pin := range l.Pins {
 		if strings.TrimSpace(request) == "" {
-			return fmt.Errorf("%w: a selection key is empty", ErrInvalid)
+			return fmt.Errorf("%w: a pin key is empty", ErrInvalid)
 		}
-		if err := validEntryPath(selection.Artifact); err != nil {
-			return fmt.Errorf("%w: selection %q: %v", ErrInvalid, request, err)
+		if err := validEntryPath(pin.Artifact); err != nil {
+			return fmt.Errorf("%w: pin %q: %v", ErrInvalid, request, err)
 		}
 		if destination, ok := strings.CutPrefix(request, PathPrefix); ok {
 			if err := validProjectPath(destination); err != nil {
-				return fmt.Errorf("%w: selection %q: %v", ErrInvalid, request, err)
+				return fmt.Errorf("%w: pin %q: %v", ErrInvalid, request, err)
 			}
 		}
 	}
@@ -200,7 +246,7 @@ func validEntryPath(p string) error {
 }
 
 // validProjectPath requires a relative, slash-separated path inside the project
-// for a `path:` selection.
+// for a `path:` pin.
 //
 // That path is not somewhere to read from — it is where restore *writes* the
 // artifact. An absolute or escaping one would have restore create a file
@@ -224,6 +270,54 @@ func validProjectPath(p string) error {
 		return fmt.Errorf("project path %q is not a .sqf", p)
 	}
 	return nil
+}
+
+// validate checks a recorded publishing destination.
+//
+// The coordinate is held to what a registry will actually accept rather than
+// merely to "not obviously wrong", because it is written into a tracked file and
+// every later push composes tags onto it. Nothing is down-cased: two names
+// differing only in case would collide into one repository, and silently
+// publishing one over the other is worse than refusing both.
+func (o OCI) validate() error {
+	push := strings.TrimSpace(o.Push)
+	switch strings.ToLower(strings.TrimSpace(o.Audience)) {
+	case "", "public", "restricted":
+	default:
+		return fmt.Errorf("audience %q is not public or restricted", o.Audience)
+	}
+	if push == "" {
+		if strings.TrimSpace(o.Audience) != "" {
+			return errors.New("an audience was recorded without a push destination")
+		}
+		return nil
+	}
+	if strings.Contains(push, "://") {
+		return fmt.Errorf("push %q carries a scheme", push)
+	}
+	if strings.HasSuffix(push, "/") || strings.HasPrefix(push, "/") {
+		return fmt.Errorf("push %q is not a bare registry/repository coordinate", push)
+	}
+	host, path, found := strings.Cut(push, "/")
+	if !found || host == "" || path == "" {
+		return fmt.Errorf("push %q is not a registry/repository coordinate", push)
+	}
+	if i := strings.IndexAny(path, "@:"); i >= 0 {
+		return fmt.Errorf("push %q carries a tag or digest", push)
+	}
+	for _, segment := range strings.Split(path, "/") {
+		if !ociRepoSegment.MatchString(segment) {
+			return fmt.Errorf("push repository segment %q must already be lowercase and OCI-safe", segment)
+		}
+	}
+	return nil
+}
+
+// validSourceURL keeps junk out of an annotation every published artifact
+// carries. The rule is catalog's, because a project's source.json and a lock's
+// fill the same annotation and two definitions would drift.
+func validSourceURL(raw string) error {
+	return catalog.ValidSourceURL(raw)
 }
 
 func (o Remote) validate() error {
@@ -257,7 +351,7 @@ func isPortColon(repository string, i int) bool {
 // entry stays where it is rather than moving to the front.
 //
 // This is the seam `project push` writes through: publishing appends the
-// repository and platform digest it produced, for selected and closure-only
+// repository and platform digest it produced, for pinned and closure-only
 // artifacts alike.
 func (l *Lock) AddRemote(artifact string, remote Remote) error {
 	if err := validEntryPath(artifact); err != nil {
@@ -278,29 +372,29 @@ func (l *Lock) AddRemote(artifact string, remote Remote) error {
 	return nil
 }
 
-// Requests returns every selection key, sorted, so callers report in a stable
+// Requests returns every pin key, sorted, so callers report in a stable
 // order without each sorting for themselves.
 func (l *Lock) Requests() []string {
-	out := make([]string, 0, len(l.Selections))
-	for request := range l.Selections {
+	out := make([]string, 0, len(l.Pins))
+	for request := range l.Pins {
 		out = append(out, request)
 	}
 	sort.Strings(out)
 	return out
 }
 
-// SelectedArtifacts is the set of artifact paths the selections point at
+// PinnedArtifacts is the set of artifact paths the pins point at
 // directly. These are the *roots* of reachability, not reachability itself:
 // each one's vendored manifest names dependency edges that pull further
 // artifact directories into the closure, and walking those needs to read the
 // manifests. Pruning against this set alone would delete the closure.
 //
 // Remotes are deliberately not roots. An remote says where an artifact can be
-// fetched, which is meaningless once nothing selects it.
-func (l *Lock) SelectedArtifacts() map[string]bool {
-	out := make(map[string]bool, len(l.Selections))
-	for _, selection := range l.Selections {
-		out[selection.Artifact] = true
+// fetched, which is meaningless once nothing pins it.
+func (l *Lock) PinnedArtifacts() map[string]bool {
+	out := make(map[string]bool, len(l.Pins))
+	for _, pin := range l.Pins {
+		out[pin.Artifact] = true
 	}
 	return out
 }

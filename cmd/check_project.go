@@ -43,7 +43,7 @@ func projectCheck(scriptPaths []string, metaDeps []string) (handled bool, err er
 	if checkAutoInstall {
 		// -a installs by name into a shared images directory, which is one
 		// checkout's dependency silently replacing the artifact every other user
-		// of that directory sees. This holds even when nothing is selected yet:
+		// of that directory sees. This holds even when nothing is pinned yet:
 		// the answer is to lock them, not to install them by name.
 		return true, fmt.Errorf(
 			"-a installs by name and cannot run inside a project, which pins exact identities\n"+
@@ -88,7 +88,7 @@ func projectCheck(scriptPaths []string, metaDeps []string) (handled bool, err er
 //
 // check merges every argument's declarations into one set and answers once,
 // which is right when the answer is "install these by name". In a project the
-// answer is per script — `run a.sh` mounts a.sh's selections and `run b.sh`
+// answer is per script — `run a.sh` mounts a.sh's pins and `run b.sh`
 // mounts b.sh's — so a merged answer would describe a set nobody runs. The
 // merged question is `project restore --dry-run`, which already reports per
 // artifact.
@@ -98,7 +98,7 @@ func oneScript(root string, scriptPaths, metaDeps []string) error {
 			"check the project with `condatainer project restore --project %s --dry-run`", root)
 	}
 	if len(scriptPaths) > 1 {
-		return fmt.Errorf("in a project, check answers for one script at a time, because each script mounts its own selections\n"+
+		return fmt.Errorf("in a project, check answers for one script at a time, because each script mounts its own pins\n"+
 			"for the whole project run `condatainer project restore --project %s --dry-run`", root)
 	}
 	return nil

@@ -247,18 +247,19 @@ SquashFS block size, and where the build works.
 - `#TYPE:app` (default): fast local scratch, honouring `$CNT_TMPDIR`.
 - `#TYPE:data`: the stable data-dir tmp, or — for an external build — alongside the target prefix.
 
-Accepted aliases (case-insensitive):
-
-- App aliases: `app`, `env`, `tool`, `conda`, `small`
-- Data aliases: `data`, `ref`, `large`
-
-Examples:
+Only `app` and `data` are accepted, and only on a script recipe: a `.def` is a
+`base` when its name ends in `/base` and an `os` otherwise, so declaring `#TYPE:`
+on one is an error.
 
 ```bash
 #TYPE:app
 #TYPE:data
-#TYPE:ref
 ```
+
+An unrecognized value is **not** an error — it falls through to the default,
+which is `data` at two or more module-name components and `app` below that. So a
+misspelled type silently builds with the wrong install prefix and block size;
+the recipe collection's validator rejects the value for exactly that reason.
 
 ### Architecture Tag
 
@@ -286,6 +287,54 @@ The value lands in the image's recorded platform and is checked when the image i
 mounted. Adding `#ARCH:noarch` to a recipe later does not invalidate images
 already built from it — they keep claiming `native`, which is honest, and the new
 claim applies from the next build onward.
+
+### Licence and Redistribution
+
+Two headers say what may be done with the artifact a recipe produces. Both are
+recorded in the image's manifest and travel with every copy of it.
+
+```bash
+#LICENSE: MIT
+#REDISTRIBUTE: yes
+```
+
+`#REDISTRIBUTE:` takes `yes` or `no` and is the **answer** to whether the built
+artifact may be published to a registry anyone can pull from. Anything else is a
+validation error; omitting it leaves the question unanswered, and the recipe's
+`#TYPE:` supplies the default:
+
+| the recipe declared | may publish publicly |
+|---|---|
+| `#REDISTRIBUTE: no` | **never**, whatever the type, and no flag overrides it |
+| `#REDISTRIBUTE: yes` | yes, whatever the type |
+| nothing, and it is `base` or `os` | yes — a container root, and packages from a public distribution |
+| nothing, and it is `data` | yes — the type asserts public reference data and the indexes built from it |
+| nothing, and it is an `app` | **no** — someone else's software with unstated terms |
+
+So an `app` recipe that installs a vendor tarball is refused at a public endpoint
+until someone reads the licence and writes the answer down. Declaring it here
+rather than at push time is the point: it is authored once, reviewed in a commit,
+and applies to every artifact ever built from the recipe, including on someone
+else's machine. Nothing verifies it.
+
+A vendor download that requires a login or an accepted EULA is the usual reason
+to write `#REDISTRIBUTE: no`.
+
+`#LICENSE:` is an [SPDX expression](https://spdx.org/licenses/) — `MIT`,
+`GPL-3.0-only`, `Apache-2.0 OR MIT`, `LicenseRef-10x-Genomics-EULA` — published
+verbatim as the image's `org.opencontainers.image.licenses` annotation. It is
+**never parsed** and gates nothing: deriving redistribution permission from a
+licence expression is a judgement a tool gets wrong in the permissive direction,
+and that direction cannot be taken back. It is documentation for whoever has to
+make that call.
+
+Neither header affects the artifact's identity — like every whole-line comment,
+they are stripped before the recipe is hashed — so adding one to a recipe does
+not invalidate images already built from it. Their values are read from each
+image's own manifest at push time.
+
+See [Distributing Artifacts](../deployment/distribution.md) for how this plays
+out across a collection's endpoint and a project's own.
 
 ### Template Tags
 

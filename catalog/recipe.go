@@ -27,12 +27,41 @@ type Recipe struct {
 	Inputs     []string // #INPUT: prompts, in order
 	Directives []string // #SBATCH / #PBS / #BSUB, verbatim
 	Arch       Arch     // #ARCH:; empty means the default, ArchNative
+	// License is #LICENSE: as written — an SPDX expression, kept verbatim and
+	// never parsed. Deriving redistribution permission from a licence
+	// expression is a judgement a tool gets wrong in the permissive direction,
+	// and that direction cannot be taken back, so this documents and decides
+	// nothing. Redistribute is the decision.
+	License string
+	// Redistribute is #REDISTRIBUTE: lower-cased, "" when the recipe did not
+	// answer. Validate rejects anything but yes or no; Redistributable reads it
+	// as the tri-state the answer actually is.
+	Redistribute string
 	// Text is the recipe as fetched, tokens and all. It is what an artifact
 	// embeds and what a rebuild starts from.
 	Text []byte
 	// Rendered is Text with a template's placeholders substituted — what the
 	// build runs. Empty for a recipe that is not a template.
 	Rendered []byte
+}
+
+// Redistributable reports the recipe's #REDISTRIBUTE: answer, or nil when it
+// did not answer.
+//
+// Three states, not two: an absent declaration means the question was never put
+// to the author, which is a different fact from a considered "no" and defaults
+// differently depending on the artifact's type. A caller that flattens nil to
+// false refuses everything nobody has annotated yet.
+func (r *Recipe) Redistributable() *bool {
+	switch r.Redistribute {
+	case "yes":
+		yes := true
+		return &yes
+	case "no":
+		no := false
+		return &no
+	}
+	return nil
 }
 
 // Script returns the bytes to execute: the rendered copy for an expanded
@@ -119,6 +148,10 @@ func ParseRecipe(path string, r io.Reader) (*Recipe, error) {
 			rec.Description = firstOf(rec.Description, value)
 		case "#URL":
 			rec.URL = firstOf(rec.URL, value)
+		case "#LICENSE":
+			rec.License = firstOf(rec.License, value)
+		case "#REDISTRIBUTE":
+			rec.Redistribute = firstOf(rec.Redistribute, strings.ToLower(strings.TrimSpace(value)))
 		case "#TARGET":
 			rec.TargetTemplate = firstOf(rec.TargetTemplate, value)
 		case "#DEP":

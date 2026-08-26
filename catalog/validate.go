@@ -83,6 +83,11 @@ func ValidateDeps(name string, typ Type, deps []string) error {
 // rule that is only a recipe's is #ARCH:, which only app and data may declare,
 // and only as native or noarch: an OS and a base are root filesystems and are
 // always architecture-specific.
+//
+// #REDISTRIBUTE: is rejected rather than ignored when it is neither yes nor no.
+// It decides whether a payload may be published, so a typo that silently read as
+// "unanswered" would fall back to the type default and publish the artifact the
+// author was trying to hold back.
 func (r *Recipe) Validate() error {
 	var errs []error
 
@@ -101,6 +106,11 @@ func (r *Recipe) Validate() error {
 			errs = append(errs, fmt.Errorf("%w: %s is type %s and may not declare #ARCH:; a root filesystem is always architecture-specific",
 				ErrInvalidRecipe, r.Name, r.Type))
 		}
+	}
+
+	if r.Redistribute != "" && r.Redistribute != "yes" && r.Redistribute != "no" {
+		errs = append(errs, fmt.Errorf("%w: %s declares #REDISTRIBUTE:%s; the values are yes and no",
+			ErrInvalidRecipe, r.Name, r.Redistribute))
 	}
 
 	return errors.Join(errs...)

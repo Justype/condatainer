@@ -91,7 +91,7 @@ func TestVerifyAcceptsACompleteClosure(t *testing.T) {
 	appPath := vendor(t, root, app, appFiles)
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 
 	verified, problems := Verify(root, l)
 	if len(problems) != 0 {
@@ -116,14 +116,14 @@ func TestVerifyRejectsAMissingRecipe(t *testing.T) {
 	}
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	if _, problems := Verify(root, l); len(problems) == 0 {
 		t.Fatal("a vendored artifact with no recipe verified")
 	}
 }
 
 // Removing any transitive dependency's directory breaks the closure, even
-// though the selected artifact itself is intact.
+// though the pinned artifact itself is intact.
 func TestVerifyRejectsAnUnvendoredDependency(t *testing.T) {
 	root := projectRoot(t)
 	dep, depFiles := recipeArtifact(t, "zlib/1.3", "echo zlib\n")
@@ -135,7 +135,7 @@ func TestVerifyRejectsAnUnvendoredDependency(t *testing.T) {
 	}
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	_, problems := Verify(root, l)
 	if !strings.Contains(problemText(problems), "is not vendored") {
 		t.Fatalf("problems:\n%s", problemText(problems))
@@ -151,7 +151,7 @@ func TestVerifyRejectsAnUnrecordedEdge(t *testing.T) {
 	appPath := vendor(t, root, app, appFiles)
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	_, problems := Verify(root, l)
 	if !strings.Contains(problemText(problems), "no complete keys") {
 		t.Fatalf("problems:\n%s", problemText(problems))
@@ -170,7 +170,7 @@ func TestVerifyRejectsARenamedDirectory(t *testing.T) {
 	}
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: moved}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: moved}
 	_, problems := Verify(root, l)
 	if !strings.Contains(problemText(problems), "directory name does not match") {
 		t.Fatalf("problems:\n%s", problemText(problems))
@@ -188,26 +188,26 @@ func TestVerifyRejectsAnEditedRecipe(t *testing.T) {
 	}
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	_, problems := Verify(root, l)
 	if !strings.Contains(problemText(problems), "do not regenerate") {
 		t.Fatalf("problems:\n%s", problemText(problems))
 	}
 }
 
-// A constrained selection key cannot come from a scan any more, but a
+// A constrained pin key cannot come from a scan any more, but a
 // hand-edited lock could still carry one, so verification refuses it rather
 // than resolving a range it has no way to disambiguate.
-func TestVerifyRefusesAConstrainedSelectionKey(t *testing.T) {
+func TestVerifyRefusesAConstrainedPinKey(t *testing.T) {
 	root := projectRoot(t)
 	app, appFiles := recipeArtifact(t, "star/2.7.11b", "echo star\n")
 	appPath := vendor(t, root, app, appFiles)
 
 	l := New()
-	l.Selections["star/2.7.11b>=2.7.0"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b>=2.7.0"] = PinEntry{Artifact: appPath}
 	_, problems := Verify(root, l)
 	if len(problems) == 0 {
-		t.Fatal("a constrained selection key was accepted")
+		t.Fatal("a constrained pin key was accepted")
 	}
 	if !strings.Contains(problemText(problems), "build recipe") {
 		t.Errorf("problem does not say where a range belongs:\n%s", problemText(problems))
@@ -222,7 +222,7 @@ func TestVerifyReportsUnreachableEntries(t *testing.T) {
 	vendor(t, root, orphan, orphanFiles)
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	_, problems := Verify(root, l)
 	if !strings.Contains(problemText(problems), "not reachable") {
 		t.Fatalf("problems:\n%s", problemText(problems))
@@ -240,8 +240,8 @@ func TestVerifyHandlesADiamond(t *testing.T) {
 	rightPath := vendor(t, root, right, rightFiles)
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: leftPath}
-	l.Selections["cutadapt/5.0"] = Selection{Artifact: rightPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: leftPath}
+	l.Pins["cutadapt/5.0"] = PinEntry{Artifact: rightPath}
 
 	verified, problems := Verify(root, l)
 	if len(problems) != 0 {
@@ -258,7 +258,7 @@ func TestVerifyRejectsAnOriginForAnAbsentArtifact(t *testing.T) {
 	appPath := vendor(t, root, app, appFiles)
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	if err := l.AddRemote("provenance/ghost--1.0@aaaaaaaaaaaa", Remote{Repository: "ghcr.io/x/y", ManifestDigest: digestA}); err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func TestVerifyNeedsNoPayload(t *testing.T) {
 	appPath := vendor(t, root, app, appFiles)
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	t.Setenv("CNT_ROOT", filepath.Join(root, "nonexistent"))
 	t.Setenv("SCRATCH", filepath.Join(root, "nonexistent"))
 	if _, problems := Verify(root, l); len(problems) != 0 {

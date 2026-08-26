@@ -29,10 +29,20 @@ type Manifest struct {
 	BuildType     string       `json:"build_type"` // conda, script, def
 	Description   string       `json:"description,omitempty"`
 	URL           string       `json:"url,omitempty"`
-	Platform      Platform     `json:"platform"`
-	Source        Source       `json:"source,omitzero"`
-	Keys          Keys         `json:"keys,omitzero"`
-	Dependencies  []Dependency `json:"dependencies,omitempty"`
+	// License is the recipe's #LICENSE:, an SPDX expression kept verbatim and
+	// never parsed. It is published as org.opencontainers.image.licenses.
+	License string `json:"license,omitempty"`
+	// Redistribute is the recipe's #REDISTRIBUTE: answer, and nil when it did
+	// not answer — three states, because "the author said this may not be
+	// republished" and "nobody has been asked" default differently.
+	//
+	// It decides publication and nothing else: it is read at push time, enters
+	// no key preimage, and changing it moves neither identity nor equivalence.
+	Redistribute *bool        `json:"redistribute,omitempty"`
+	Platform     Platform     `json:"platform"`
+	Source       Source       `json:"source,omitzero"`
+	Keys         Keys         `json:"keys,omitzero"`
+	Dependencies []Dependency `json:"dependencies,omitempty"`
 	// ProvenanceComplete reports whether every dependency carried records of its
 	// own. It is nil when the question does not arise — an artifact with no
 	// dependencies is neither complete nor incomplete.

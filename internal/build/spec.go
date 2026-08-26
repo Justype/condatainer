@@ -37,6 +37,11 @@ type ImageSpec struct {
 	// Arch is the recipe's #ARCH: assertion. Empty means the default: the
 	// artifact runs only where it was built.
 	Arch catalog.Arch
+	// License is the recipe's #LICENSE:, verbatim. Redistribute is its
+	// #REDISTRIBUTE: answer, nil when it did not answer. Both are recorded and
+	// read at push time; neither enters a key preimage.
+	License      string
+	Redistribute *bool
 }
 
 // SourceSpec is what the build runs. Exactly one of the three kinds is set, and
@@ -58,10 +63,14 @@ type SourceSpec struct {
 	// answers are execution input and are never recorded — this says only that a
 	// rebuild needs a human.
 	RequiresInput bool
-	// Repository is the collection's repository, recorded as manifest
-	// build.source. Empty for a Conda build, a local file, or a collection that
-	// declares none.
-	Repository string
+	// Collection is the URL of the recipe collection this build came from,
+	// recorded as manifest build.source. Empty for a Conda build, a local file,
+	// or a collection that declares none.
+	//
+	// Not "Source": this struct is already reached as spec.Source, and it holds
+	// the build's own inputs rather than anything about where they were
+	// published from.
+	Collection string
 }
 
 // SourceFile is a build input captured during resolution, already expanded.
@@ -234,6 +243,8 @@ func (s Spec) Manifest() meta.Manifest {
 		BuildType:     s.Source.BuildType().String(),
 		Description:   s.Image.Description,
 		URL:           s.Image.URL,
+		License:       s.Image.License,
+		Redistribute:  s.Image.Redistribute,
 		Platform:      s.platform(),
 		Source:        s.sourceBlock(),
 		Build:         s.buildBlock(),
@@ -264,7 +275,7 @@ func (s Spec) sourceBlock() meta.Source {
 // buildBlock is what the build knew and the recipe does not say. Created is not
 // set here: a timestamp is not in Spec, so stageMetadata stamps it.
 func (s Spec) buildBlock() meta.Build {
-	block := meta.Build{Source: s.Source.Repository}
+	block := meta.Build{Source: s.Source.Collection}
 	switch {
 	case s.Source.Conda != nil:
 		block.Channels = s.Source.Conda.Channels

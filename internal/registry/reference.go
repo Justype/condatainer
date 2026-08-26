@@ -8,7 +8,9 @@ import (
 	"github.com/opencontainers/go-digest"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/artifact/capsule"
 	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/image"
 )
 
 // RollingTag moves with every push of a version-less artifact, so a puller that
@@ -180,4 +182,83 @@ func PullReference(typ catalog.Type, nameVersion string) (repo, tag string, err 
 	}
 	idx := strings.LastIndex(nv, "/")
 	return nv[:idx], nv[idx+1:], nil
+}
+
+// projectTagSeparator joins an encoded artifact name to its identity prefix in a
+// project's flat tag namespace.
+//
+// Doubled for the same reason `--` works as the name separator: catalog's
+// segment grammar allows a single `.`, `_` or `-` between alphanumerics and
+// never two, so a doubled separator cannot occur inside a name. `@`, which the
+// store filename uses, is not legal in an OCI tag at all.
+const projectTagSeparator = "__"
+
+// ProjectTags renders the tags a project publishes one artifact under, canonical
+// first. A project keeps every artifact in one repository, so the name lives in
+// the tag rather than in the repository path.
+//
+// The qualified tag is the retention anchor and every artifact gets one. Nothing
+// fetches by tag — a lock records the platform manifest digest — so what a tag
+// has to do is keep a manifest referenced: what no tag reaches is unreferenced,
+// and unreferenced content is the registry's to reclaim. A plain name tag can
+// only keep one identity alive, so re-selecting would orphan the build an older
+// lock still points at.
+//
+// selected additionally writes the plain name tag. It is a human handle and a
+// moving pointer, like `latest`: it says which identity this project uses now,
+// and dropping it would break no restore.
+func ProjectTags(m meta.Manifest, selected bool) ([]string, error) {
+	encoded := image.EncodeArtifactName(catalog.Normalize(m.Name))
+	if encoded == "" {
+		return nil, fmt.Errorf("artifact has no name to publish under")
+	}
+	sha := strings.TrimPrefix(m.Keys.Identity.SHA256, "sha256:")
+	if len(sha) < capsule.IdentityChars {
+		return nil, fmt.Errorf("%s records no identity to publish under", m.Name)
+	}
+	qualified := encoded + projectTagSeparator + sha[:capsule.IdentityChars]
+
+	tags := []string{qualified}
+	if selected {
+		tags = append(tags, encoded)
+	}
+	for _, tag := range tags {
+		// Refused, never truncated: a truncated tag is a different artifact's
+		// address, and the name is what a puller reads back out of it.
+		if len(tag) > maxTagLength || !ociTagPattern.MatchString(tag) {
+			return nil, fmt.Errorf("%s does not fit an OCI tag as %q", m.Name, tag)
+		}
+	}
+	return tags, nil
+}
+
+// ParseProjectTag decodes a project tag back into the artifact name it carries
+// and the identity prefix qualifying it, if any.
+//
+// A catalog tag is a single version segment and never contains `--`, so the two
+// namespaces cannot be confused: this reports false for one rather than
+// inventing a name from it.
+func ParseProjectTag(tag string) (name, sha string, ok bool) {
+	encoded := tag
+	if base, prefix, found := strings.Cut(tag, projectTagSeparator); found {
+		if base == "" || !isHex(prefix) {
+			return "", "", false
+		}
+		encoded, sha = base, prefix
+	}
+	if !strings.Contains(encoded, "--") {
+		return "", "", false
+	}
+	name = image.DecodeArtifactName(encoded)
+	if catalog.Normalize(name) != name || name == "" {
+		return "", "", false
+	}
+	return name, sha, true
+}
+
+func isHex(s string) bool {
+	if s == "" {
+		return false
+	}
+	return strings.TrimLeft(s, "0123456789abcdef") == ""
 }

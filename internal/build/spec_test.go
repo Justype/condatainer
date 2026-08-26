@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -883,3 +884,58 @@ func TestArchEntersNoKey(t *testing.T) {
 		t.Error("adding #ARCH: moved the identity, invalidating every image built before it")
 	}
 }
+
+// The recipe's redistribution declaration has to survive into the manifest: it
+// is read at push time from the artifact, long after the recipe is gone.
+func TestSpecManifestCarriesRedistribution(t *testing.T) {
+	yes := true
+	spec := Spec{
+		Image: ImageSpec{
+			Name:         "samtools/1.23.1",
+			Type:         catalog.TypeApp,
+			License:      "MIT",
+			Redistribute: &yes,
+		},
+		Source: SourceSpec{Script: &ScriptSource{}},
+	}
+	m := spec.Manifest()
+	if m.License != "MIT" {
+		t.Errorf("license = %q, want MIT", m.License)
+	}
+	if m.Redistribute == nil || !*m.Redistribute {
+		t.Errorf("redistribute = %v, want true", m.Redistribute)
+	}
+
+	// Absent stays absent rather than collapsing to false: a recipe that never
+	// answered is not a recipe that said no.
+	spec.Image.License, spec.Image.Redistribute = "", nil
+	if m := spec.Manifest(); m.License != "" || m.Redistribute != nil {
+		t.Errorf("an unanswered recipe recorded %q / %v", m.License, m.Redistribute)
+	}
+}
+
+// The manifest is JSON, and a tri-state that round-trips as false would silently
+// convert "nobody asked" into "the author refused".
+func TestManifestRedistributionRoundTrips(t *testing.T) {
+	for _, want := range []*bool{nil, boolPtr(true), boolPtr(false)} {
+		m := meta.Manifest{SchemaVersion: meta.SchemaVersion, Name: "x/1.0", Redistribute: want}
+		data, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var got meta.Manifest
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		switch {
+		case want == nil && got.Redistribute != nil:
+			t.Errorf("nil became %v; json was %s", *got.Redistribute, data)
+		case want != nil && got.Redistribute == nil:
+			t.Errorf("%v became nil; json was %s", *want, data)
+		case want != nil && *got.Redistribute != *want:
+			t.Errorf("%v became %v", *want, *got.Redistribute)
+		}
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }

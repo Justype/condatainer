@@ -194,14 +194,28 @@ func TestScanSkipsGeneratedAndExcludedDirectories(t *testing.T) {
 	}
 }
 
-func TestScanReadsExtensionlessShebangScriptsOnly(t *testing.T) {
+// Extension only. `run` executes every project script with /bin/bash, so no
+// other shell's script could run here, and a file with no extension is not read
+// at all — sniffing its shebang cost more than it bought.
+func TestScanReadsShellExtensionsOnly(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "runner", "#!/usr/bin/env bash\n#DEP: star/2.7.11b\nrun\n")
-	write(t, root, "notes", "#DEP: never/1.0\n")
-	write(t, root, "data.txt", "#DEP: never/2.0\n")
+	write(t, root, "a.sh", "#!/usr/bin/env bash\n#DEP: star/2.7.11b\nrun\n")
+	write(t, root, "b.bash", "#DEP: samtools/1.23.1\n")
+	write(t, root, "runner", "#!/usr/bin/env bash\n#DEP: never/1.0\nrun\n")
+	write(t, root, "analyze", "#!/home/josh/venv/bin/python\n#DEP: never/2.0\n")
+	write(t, root, "notes", "#DEP: never/3.0\n")
+	write(t, root, "data.txt", "#DEP: never/4.0\n")
+	write(t, root, "job.zsh", "#DEP: never/5.0\n")
 
-	if got := keys(scan(t, root)); len(got) != 1 || got[0] != "star/2.7.11b" {
-		t.Fatalf("requests = %v", got)
+	got := keys(scan(t, root))
+	want := []string{"samtools/1.23.1", "star/2.7.11b"}
+	if len(got) != len(want) {
+		t.Fatalf("requests = %v, want %v", got, want)
+	}
+	for i, key := range want {
+		if got[i] != key {
+			t.Fatalf("requests = %v, want %v", got, want)
+		}
 	}
 }
 
@@ -293,7 +307,7 @@ func TestLoadTreatsAMissingLockAsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if l.SchemaVersion != SchemaVersion || len(l.Selections) != 0 {
+	if l.SchemaVersion != SchemaVersion || len(l.Pins) != 0 {
 		t.Fatalf("Load = %#v", l)
 	}
 }
@@ -360,5 +374,84 @@ func TestScanDoesNotFlagAnUnpinnableMarkedInAnotherScript(t *testing.T) {
 
 	if findings := scan(t, root).Findings; len(findings) != 0 {
 		t.Fatalf("findings = %#v, want none: b.sh declares it", findings)
+	}
+}
+
+// A dot-directory carries tool state, not project source. A local conda env,
+// .venv, .tox or .snakemake all ship shell scripts of their own, and a #DEP: in
+// one of those would become a declaration this project has to pin.
+func TestScanSkipsDotDirectories(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{".venv/bin", ".snakemake", ".git", "scripts"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o775); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(rel, dep string) {
+		t.Helper()
+		body := "#!/usr/bin/env bash\n#DEP: " + dep + "\n"
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(body), 0o664); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("scripts/a.sh", "real/1.0")
+	write(".venv/bin/activate.sh", "phantom/9.9")
+	write(".snakemake/x.sh", "phantom/9.9")
+	write(".git/hook.sh", "phantom/9.9")
+
+	result, err := Scan(root, ScanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Requests) != 1 || result.Requests[0].Key != "real/1.0" {
+		t.Fatalf("requests = %#v, want only real/1.0", result.Requests)
+	}
+}
+
+// The root is the project, so it is read even when its own name is hidden.
+func TestScanReadsAHiddenProjectRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".hidden-project")
+	if err := os.MkdirAll(root, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("#!/usr/bin/env bash\n#DEP: real/1.0\n")
+	if err := os.WriteFile(filepath.Join(root, "a.sh"), body, 0o664); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Scan(root, ScanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Requests) != 1 {
+		t.Fatalf("requests = %#v, want real/1.0", result.Requests)
+	}
+}
+
+// overlays/ holds a project's own overlays and the recipes that built them. A
+// recipe's #DEP: are its overlay's build dependencies, already recorded in that
+// overlay's provenance, not the project's own — and the whole directory is
+// skipped whether or not the overlay has been built yet, so what a scan finds
+// does not change when `create -f` runs.
+func TestScanSkipsTheOverlaysDirectory(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "overlays/tool.sh", "#!/usr/bin/env bash\n#DEP: build-only/9.9\n")
+	write(t, root, "overlays/tool.sqf", "")
+	// Not built yet, and skipped just the same.
+	write(t, root, "overlays/env.sh", "#!/usr/bin/env bash\n#DEP: build-only/8.8\n")
+	write(t, root, "overlays/nested/deep.sh", "#!/usr/bin/env bash\n#DEP: build-only/7.7\n")
+	// Declaring an overlay in that directory is unaffected: the declaration
+	// lives in the project script, not in overlays/.
+	write(t, root, "scripts/a.sh", "#!/usr/bin/env bash\n#DEP: real/1.0\n#DEP: overlays/tool.sqf\n")
+
+	got := keys(scan(t, root))
+	want := []string{"path:overlays/tool.sqf", "real/1.0"}
+	if len(got) != len(want) {
+		t.Fatalf("requests = %v, want %v", got, want)
+	}
+	for i, key := range want {
+		if got[i] != key {
+			t.Fatalf("requests = %v, want %v", got, want)
+		}
 	}
 }

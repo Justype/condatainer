@@ -109,7 +109,7 @@ func TestVendorClosureCapturesTheArtifactAndItsCapsule(t *testing.T) {
 	}
 
 	l := New()
-	l.Selections["index/1.0"] = Selection{Artifact: EntryPath(capsule.EntryName(data.Name, data.Keys.Identity.Digest()))}
+	l.Pins["index/1.0"] = PinEntry{Artifact: EntryPath(capsule.EntryName(data.Name, data.Keys.Identity.Digest()))}
 	if _, problems := Verify(root, l); len(problems) != 0 {
 		t.Fatalf("a freshly vendored closure does not verify:\n%s", problemText(problems))
 	}
@@ -200,75 +200,75 @@ func TestApplyRestoresTheLockWhenVerificationFails(t *testing.T) {
 	appPath := vendor(t, root, app, appFiles)
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	if err := Publish(root, l); err != nil {
 		t.Fatal(err)
 	}
 
-	err := Apply(root, l, &Selected{Request: "ghost/1.0", Artifact: EntryPath("ghost--1.0@aaaaaaaaaaaa")})
+	err := Apply(root, l, &Pinned{Request: "ghost/1.0", Artifact: EntryPath("ghost--1.0@aaaaaaaaaaaa")})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
-	if _, present := l.Selections["ghost/1.0"]; present {
-		t.Error("a failed Apply left its selection behind")
+	if _, present := l.Pins["ghost/1.0"]; present {
+		t.Error("a failed Apply left its pin behind")
 	}
 	loaded, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Selections) != 1 || loaded.Selections["star/2.7.11b"].Artifact != appPath {
-		t.Fatalf("a failed Apply changed the published lock: %#v", loaded.Selections)
+	if len(loaded.Pins) != 1 || loaded.Pins["star/2.7.11b"].Artifact != appPath {
+		t.Fatalf("a failed Apply changed the published lock: %#v", loaded.Pins)
 	}
 }
 
-func TestApplyPublishesAValidSelection(t *testing.T) {
+func TestApplyPublishesAValidPin(t *testing.T) {
 	root := projectRoot(t)
 	app, appFiles := recipeArtifact(t, "star/2.7.11b", "echo star\n")
 	appPath := vendor(t, root, app, appFiles)
 
 	l := New()
-	if err := Apply(root, l, &Selected{Request: "star/2.7.11b", Artifact: appPath}); err != nil {
+	if err := Apply(root, l, &Pinned{Request: "star/2.7.11b", Artifact: appPath}); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Selections["star/2.7.11b"].Artifact != appPath {
-		t.Fatalf("loaded = %#v", loaded.Selections)
+	if loaded.Pins["star/2.7.11b"].Artifact != appPath {
+		t.Fatalf("loaded = %#v", loaded.Pins)
 	}
 }
 
-// Reconcile drops what nothing requests and reports what has no selection. It
+// Reconcile drops what nothing requests and reports what has no pin. It
 // never invents one: choosing an artifact is an explicit act.
-func TestReconcileDropsStaleAndReportsUnselected(t *testing.T) {
+func TestReconcileDropsStaleAndReportsWhatNeedsPinning(t *testing.T) {
 	root := projectRoot(t)
 	app, appFiles := recipeArtifact(t, "star/2.7.11b", "echo star\n")
 	appPath := vendor(t, root, app, appFiles)
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
-	l.Selections["gone/1.0"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
+	l.Pins["gone/1.0"] = PinEntry{Artifact: appPath}
 
 	write(t, root, "run.sh", "#DEP: star/2.7.11b\n#DEP: cutadapt/5.0\n#DEP: env.img  ## unpinned\nrun\n")
 	result := scan(t, root)
 
-	unselected := Reconcile(root, l, result)
-	if _, stale := l.Selections["gone/1.0"]; stale {
-		t.Error("a selection nothing requests survived")
+	needPin := Reconcile(root, l, result)
+	if _, stale := l.Pins["gone/1.0"]; stale {
+		t.Error("a pin nothing requests survived")
 	}
-	if len(unselected) != 1 || unselected[0].Key != "cutadapt/5.0" {
-		keys := make([]string, 0, len(unselected))
-		for _, request := range unselected {
+	if len(needPin) != 1 || needPin[0].Key != "cutadapt/5.0" {
+		keys := make([]string, 0, len(needPin))
+		for _, request := range needPin {
 			keys = append(keys, request.Key)
 		}
-		t.Fatalf("unselected = %v, want only cutadapt/5.0", keys)
+		t.Fatalf("needPin = %v, want only cutadapt/5.0", keys)
 	}
 }
 
-// A selection whose artifact stopped verifying is dropped and re-reported, so a
+// A pin whose artifact stopped verifying is dropped and re-reported, so a
 // lock never keeps pointing at something broken.
-func TestReconcileDropsAnInvalidSelection(t *testing.T) {
+func TestReconcileDropsAnInvalidPin(t *testing.T) {
 	root := projectRoot(t)
 	app, appFiles := recipeArtifact(t, "star/2.7.11b", "echo star\n")
 	appPath := vendor(t, root, app, appFiles)
@@ -277,51 +277,56 @@ func TestReconcileDropsAnInvalidSelection(t *testing.T) {
 	}
 
 	l := New()
-	l.Selections["star/2.7.11b"] = Selection{Artifact: appPath}
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	write(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 
-	unselected := Reconcile(root, l, scan(t, root))
-	if _, kept := l.Selections["star/2.7.11b"]; kept {
-		t.Error("an invalid selection was kept")
+	needPin := Reconcile(root, l, scan(t, root))
+	if _, kept := l.Pins["star/2.7.11b"]; kept {
+		t.Error("an invalid pin was kept")
 	}
-	if len(unselected) != 1 {
-		t.Fatalf("unselected = %#v", unselected)
+	if len(needPin) != 1 {
+		t.Fatalf("needPin = %#v", needPin)
 	}
 }
 
-func TestSelectRefusesUnselectableTargets(t *testing.T) {
+// A pin names an identity, so a file is refused whatever its extension.
+// Nothing downstream could use one: restore and push both find a selected
+// artifact through the image roots and the store, so a file elsewhere would
+// record an identity only a rebuild could satisfy.
+func TestPinRefusesAFileAsTheIdentity(t *testing.T) {
 	root := projectRoot(t)
-	for _, target := range []string{"/tmp/env.img", "/tmp/base.sif"} {
-		if _, err := Select(root, "star/2.7.11b", target, SelectOptions{}); err == nil {
-			t.Errorf("Select accepted %s", target)
-		} else if !strings.Contains(err.Error(), "only .sqf") {
-			t.Errorf("Select(%s) error = %v", target, err)
+	for _, target := range []string{
+		"/shared/overlays/star.sqf", "./star.sqf", "/tmp/env.img", "/tmp/base.sif",
+	} {
+		_, err := Pin(root, "star/2.7.11b", target, PinOptions{})
+		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "names an identity") {
+			t.Errorf("Pin(%s) error = %v", target, err)
 		}
 	}
 }
 
-func TestSelectRefusesAnEmptyRequest(t *testing.T) {
-	if _, err := Select(projectRoot(t), "  ", "abcdef", SelectOptions{}); !errors.Is(err, ErrInvalid) {
+func TestPinRefusesAnEmptyRequest(t *testing.T) {
+	if _, err := Pin(projectRoot(t), "  ", "abcdef", PinOptions{}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
 }
 
 // Selecting an unpinnable request is refused with the marker as the remedy,
 // rather than failing later inside Validate with a path complaint.
-func TestSelectRefusesUnpinnableRequests(t *testing.T) {
+func TestPinRefusesUnpinnableRequests(t *testing.T) {
 	root := t.TempDir()
 	for _, request := range []string{
 		PathPrefix + "/shared/lab/genome.sqf",
 		PathPrefix + "../outside/tool.sqf",
 		PathPrefix + "env.img",
 	} {
-		_, err := Select(root, request, "sha256:"+strings.Repeat("a", 64), SelectOptions{})
+		_, err := Pin(root, request, "sha256:"+strings.Repeat("a", 64), PinOptions{})
 		if !errors.Is(err, ErrInvalid) {
-			t.Errorf("Select(%q) = %v, want ErrInvalid", request, err)
+			t.Errorf("Pin(%q) = %v, want ErrInvalid", request, err)
 			continue
 		}
 		if !strings.Contains(err.Error(), UnpinnedMarker) {
-			t.Errorf("Select(%q) error does not point at the marker: %v", request, err)
+			t.Errorf("Pin(%q) error does not point at the marker: %v", request, err)
 		}
 	}
 }

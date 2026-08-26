@@ -159,7 +159,7 @@ func TestProjectCheckReportsARunnableScript(t *testing.T) {
 	}
 }
 
-// An unselected declaration fails, and the hint names restore rather than -a.
+// An needPin declaration fails, and the hint names restore rather than -a.
 func TestProjectCheckFailsOnAnUnselectedDeclaration(t *testing.T) {
 	root := newProject(t)
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
@@ -170,6 +170,6 @@ func TestProjectCheckFailsOnAnUnselectedDeclaration(t *testing.T) {
 
 	_, err := projectCheck([]string{"run.sh"}, nil)
 	if err == nil {
-		t.Fatal("an unselected declaration was reported runnable")
+		t.Fatal("an needPin declaration was reported runnable")
 	}
 }

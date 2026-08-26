@@ -34,6 +34,7 @@ func Annotations(m meta.Manifest, compression string) map[string]string {
 	set(AnnVersion, path.Base(m.Name))
 	set(AnnDescription, m.Description)
 	set(AnnURL, m.URL)
+	set(AnnLicenses, m.License)
 	set(AnnSource, m.Build.Source)
 	set(AnnCompression, compression)
 

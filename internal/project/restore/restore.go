@@ -8,19 +8,23 @@ import (
 	"path/filepath"
 	"strings"
 
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+
 	"github.com/Justype/condatainer/internal/artifact/capsule"
 	"github.com/Justype/condatainer/internal/artifact/compare"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image/producer"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/project/lock"
+	"github.com/Justype/condatainer/internal/registry"
 	"github.com/Justype/condatainer/internal/store"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// ErrIncomplete reports that a restore did not make every selection available.
+// ErrIncomplete reports that a restore did not make every pin available.
 var ErrIncomplete = errors.New("restore is incomplete")
 
 // ErrNotAcquirable reports an acquisition this build cannot perform.
@@ -102,14 +106,14 @@ type Report struct {
 	Problems []string `json:"problems,omitempty"`
 }
 
-// Complete reports whether every selection is now available. A submission is
+// Complete reports whether every pin is now available. A submission is
 // not completion: the artifact exists only once its job has run.
 func (r *Report) Complete() bool {
 	return len(r.Failures) == 0 && len(r.Blocked) == 0 && len(r.Problems) == 0 &&
 		len(r.Submitted) == 0
 }
 
-// Run makes every locked selection available, dependency-first.
+// Run makes every locked pin available, dependency-first.
 //
 // Atomicity is per artifact, not across the project. A later failure leaves
 // earlier results in place; they are exact results someone can use, not a
@@ -277,19 +281,14 @@ func execute(ctx context.Context, root string, verified *lock.Verified, step Ste
 		result.Outcome, result.Path, result.Layout = OutcomeAdopted, step.Path, step.Layout
 		return result, nil
 	case ActionFetch:
-		// The seam is here; the transport is not wired yet. Failing is right
-		// either way: a recorded remote that cannot be used is an acquisition
-		// fault, and --no-prebuilt is how a caller asks to build instead.
-		return nil, &Failure{Artifact: step.Artifact, Name: step.Name,
-			Reason: fmt.Sprintf("%v: remotes are recorded but fetching is not implemented yet; use --no-prebuilt to build instead",
-				ErrNotAcquirable)}
+		return fetch(ctx, root, entry, step, match, result)
 	}
 	return rebuild(ctx, root, entry, step, match, available, scratch, opts, result)
 }
 
 // rebuild produces one artifact from its vendored sources and puts it where its
 // role says: a project destination, an images root, or the restore's transient
-// directory when nothing selected it.
+// directory when nothing pinned it.
 func rebuild(ctx context.Context, root string, entry *lock.Entry, step Step, match Match,
 	available map[string]string, scratch *transientRoot, opts Options, result *Result) (*Result, *Failure) {
 
@@ -394,7 +393,7 @@ func rebuild(ctx context.Context, root string, entry *lock.Entry, step Step, mat
 		return result, nil
 	}
 	if step.Destination != "" {
-		path, err := placeAt(filepath.Join(root, filepath.FromSlash(step.Destination)), output)
+		path, err := placeAt(ctx, filepath.Join(root, filepath.FromSlash(step.Destination)), output)
 		if err != nil {
 			return nil, fail("%v", err)
 		}
@@ -413,7 +412,7 @@ func rebuild(ctx context.Context, root string, entry *lock.Entry, step Step, mat
 	return result, nil
 }
 
-// isTransient reports that a rebuild is scaffolding: a closure node no selection
+// isTransient reports that a rebuild is scaffolding: a closure node no pin
 // names, produced only so its dependent can be built.
 //
 // Nothing asked for it by name, and nothing needs it afterwards — an artifact
@@ -524,7 +523,7 @@ func verify(entry *lock.Entry, path string, match Match) (compare.Verdict, []str
 // destination — that substitution is the whole thing a lock prevents. A
 // store-bound one is kept under its own true identity, because the store is
 // addressed by identity and an honest entry there is never wrong: it makes the
-// remedy `project lock select` rather than a manual rebuild. A project
+// remedy `project pin` rather than a manual rebuild. A project
 // destination has no such address, and a build dependency was never something to
 // keep, so both are dropped with the staging directory.
 func reject(ctx context.Context, step Step, transient bool, output string,
@@ -546,14 +545,202 @@ func reject(ctx context.Context, step Step, transient bool, output string,
 		return failure
 	}
 	failure.Rejected = candidate.Path
-	failure.Reason += fmt.Sprintf("; it was kept as %s, which `condatainer project lock select` can pin",
+	failure.Reason += fmt.Sprintf("; it was kept as %s, which `condatainer project pin` can pin",
 		identity.Digest())
 	return failure
 }
 
+// fetch acquires one artifact from the exact locations the lock recorded, in
+// recorded order, and puts the result where the step's role says.
+//
+// It is a fetch and never a search: every repository and platform digest came
+// from the lock, so nothing enumerates tags and nothing asks a registry to find
+// an identity. A location that no longer resolves is skipped and the next one
+// tried; every location failing is an acquisition fault reported with what each
+// one said, not a silent fall back to building — `--no-prebuilt` is how a caller
+// asks for the build instead.
+func fetch(ctx context.Context, root string, entry *lock.Entry, step Step, match Match, result *Result) (*Result, *Failure) {
+	log := logging.FromContext(ctx)
+	fail := func(format string, args ...any) *Failure {
+		return &Failure{Artifact: step.Artifact, Name: step.Name, Reason: fmt.Sprintf(format, args...)}
+	}
+
+	var attempts []string
+	for _, remote := range step.Remotes {
+		where := remote.Repository + "@" + remote.ManifestDigest
+		path, err := fetchFrom(ctx, root, entry, step, match, remote)
+		if err == nil {
+			log.Info("fetched", "kind", "note", "name", step.Name, "from", where)
+			result.Outcome = OutcomeFetched
+			result.Path = path.Path
+			result.Layout = path.Layout
+			if !path.Identity.Empty() && path.Identity != entry.Identity {
+				result.Found = path.Identity.Digest()
+			}
+			return result, nil
+		}
+		if ctx.Err() != nil {
+			return nil, fail("%v", ctx.Err())
+		}
+		log.Debug("remote did not serve the artifact", "name", step.Name, "from", where, "err", err)
+		attempts = append(attempts, fmt.Sprintf("%s: %v", where, err))
+	}
+	// Distinct from "nothing was recorded", which the planner turns into a build
+	// rather than routing here at all — so this reports the acquisition fault and
+	// names the flag that asks for the build, instead of quietly taking it.
+	return nil, fail("%v: no recorded remote served %s (%s); use --no-prebuilt to build from source instead",
+		ErrNotAcquirable, step.Identity, strings.Join(attempts, "; "))
+}
+
+// fetched is where one successful fetch landed.
+type fetched struct {
+	Path     string
+	Layout   store.Layout
+	Identity meta.KeyRef
+}
+
+// fetchFrom resolves one recorded location, checks it before spending the
+// bytes, downloads it, and publishes it.
+//
+// The identity is compared against the lock at the manifest, before any blob
+// moves: a digest that has been re-pointed at different content is refused here
+// having transferred nothing. It is checked again after assembly by the store
+// transaction, from the payload's own regenerated keys — annotations are a fast
+// index over the artifact, never a substitute for it.
+func fetchFrom(ctx context.Context, root string, entry *lock.Entry, step Step, match Match, remote lock.Remote) (fetched, error) {
+	base, repo, err := registry.SplitCoordinate(remote.Repository)
+	if err != nil {
+		return fetched{}, err
+	}
+	desc, annotations, err := registry.ResolveArtifact(ctx, base, repo, remote.ManifestDigest)
+	if err != nil {
+		return fetched{}, err
+	}
+	if err := registry.Check(annotations, registry.Want{Name: entry.Manifest.Name}); err != nil {
+		return fetched{}, err
+	}
+	if err := acceptable(entry, match, registry.Identity(annotations), registry.Equiv(annotations)); err != nil {
+		return fetched{}, err
+	}
+
+	if step.Destination != "" {
+		return fetchToDestination(ctx, root, entry, step, match, base, repo, desc, annotations)
+	}
+	return fetchToStore(ctx, entry, step, base, repo, desc, annotations)
+}
+
+// acceptable reports whether the keys a published manifest advertises satisfy
+// the lock under the active mode, before anything is downloaded.
+//
+// Under identity only the recorded build will do. Under equivalent an artifact
+// carrying the locked equivalence substitutes, which is the whole point of the
+// second key — but the exact identity still wins where a location offers it,
+// because the caller tries the recorded remotes in order and each one either
+// matches exactly or is a substitution reported as such.
+func acceptable(entry *lock.Entry, match Match, identity, equiv meta.KeyRef) error {
+	if identity == entry.Identity {
+		return nil
+	}
+	if match == MatchIdentity {
+		return fmt.Errorf("%w: it publishes %s, the lock pins %s",
+			registry.ErrMismatch, describeKey(identity), entry.Identity.Digest())
+	}
+	if equiv.Empty() || equiv != entry.Equiv {
+		return fmt.Errorf("%w: it publishes equivalence %s, the lock pins %s",
+			registry.ErrMismatch, describeKey(equiv), entry.Equiv.Digest())
+	}
+	return nil
+}
+
+func describeKey(k meta.KeyRef) string {
+	if k.Empty() {
+		return "no key"
+	}
+	return k.Digest()
+}
+
+// fetchToStore downloads into a store transaction's staging path and publishes
+// it through the ordinary destination rule: the flat name when it is free, the
+// store when it is not.
+//
+// Commit is what verifies the payload against the lock, from the bytes rather
+// than from what the registry claimed about them.
+func fetchToStore(ctx context.Context, entry *lock.Entry, step Step, base, repo string,
+	desc ocispec.Descriptor, annotations map[string]string) (fetched, error) {
+
+	tx, err := store.Begin(entry.Manifest.Name, entry.Identity,
+		store.BeginOptions{Equiv: entry.Equiv, StoreOnly: step.StoreOnly})
+	if err != nil {
+		return fetched{}, err
+	}
+	if !tx.Reserved() {
+		// Somebody published the exact identity between planning and here.
+		candidate, err := tx.Commit()
+		if err != nil {
+			return fetched{}, err
+		}
+		return fetched{Path: candidate.Path, Layout: candidate.Layout, Identity: candidate.Identity}, nil
+	}
+	if err := registry.Fetch(ctx, base, repo, desc, annotations, tx.Prepared, registry.KindOverlay); err != nil {
+		tx.Abort()
+		return fetched{}, err
+	}
+	candidate, err := tx.Commit()
+	if err != nil {
+		return fetched{}, err
+	}
+	return fetched{Path: candidate.Path, Layout: candidate.Layout, Identity: candidate.Identity}, nil
+}
+
+// fetchToDestination downloads a project-path artifact beside where it belongs
+// and renames it into place.
+//
+// It never reaches the images roots in either direction. A copy of the same
+// identity sitting in flat or store/ is not a substitute, because the
+// destination is where the project *mounts* it from — adopting one would report
+// a successful restore while the declared path stayed empty.
+func fetchToDestination(ctx context.Context, root string, entry *lock.Entry, step Step, match Match,
+	base, repo string, desc ocispec.Descriptor, annotations map[string]string) (fetched, error) {
+
+	destination := filepath.Join(root, filepath.FromSlash(step.Destination))
+	if err := utils.MkdirAllShared(filepath.Dir(destination)); err != nil {
+		return fetched{}, err
+	}
+	guard, err := producer.AcquireLocal(destination)
+	if err != nil {
+		return fetched{}, err
+	}
+	defer guard.Release() //nolint:errcheck
+
+	staged := producer.PreparedPath(destination, guard.Info())
+	_ = os.Remove(staged)
+	if err := registry.Fetch(ctx, base, repo, desc, annotations, staged, registry.KindOverlay); err != nil {
+		os.Remove(staged) //nolint:errcheck
+		return fetched{}, err
+	}
+	// From the payload, not from the annotations that got us here: a publisher
+	// whose manifest disagrees with its own bytes must fail before the project
+	// mounts them.
+	verdict, diffs, err := verify(entry, staged, match)
+	if err != nil {
+		os.Remove(staged) //nolint:errcheck
+		return fetched{}, fmt.Errorf("cannot verify the fetched artifact: %w", err)
+	}
+	if verdict != compare.Exact && verdict != compare.Equivalent {
+		os.Remove(staged) //nolint:errcheck
+		return fetched{}, fmt.Errorf("the fetched artifact is %s: %s", verdict, strings.Join(diffs, "; "))
+	}
+	path, err := placeAt(ctx, destination, staged)
+	if err != nil {
+		os.Remove(staged) //nolint:errcheck
+		return fetched{}, err
+	}
+	return fetched{Path: path}, nil
+}
+
 // install publishes a store-addressed artifact through the destination rule:
 // the flat name when it is free, the store when it is not — or when the plan
-// has already given that name to a selection.
+// has already given that name to a pin.
 func install(entry *lock.Entry, step Step, output string) (store.Candidate, error) {
 	return store.InstallFile(entry.Manifest.Name, entry.Identity, output,
 		store.BeginOptions{Equiv: entry.Equiv, StoreOnly: step.StoreOnly})
@@ -565,7 +752,7 @@ func install(entry *lock.Entry, step Step, output string) (store.Candidate, erro
 // A symlink is refused rather than followed: it points somewhere the project
 // does not describe, and replacing what it points at would write outside the
 // checkout.
-func placeAt(destination, output string) (string, error) {
+func placeAt(ctx context.Context, destination, output string) (string, error) {
 	if info, err := os.Lstat(destination); err == nil {
 		switch {
 		case info.Mode()&os.ModeSymlink != 0:
@@ -575,6 +762,11 @@ func placeAt(destination, output string) (string, error) {
 		case !strings.HasSuffix(destination, ".sqf"):
 			return "", fmt.Errorf("%s is not a .sqf", destination)
 		}
+		// The file is replaced, not merged: say so rather than losing someone's
+		// hand-placed overlay silently. Not a refusal — a drifted project could
+		// then be repaired only by deleting the file first.
+		logging.FromContext(ctx).Warn("replacing the file already at this project path",
+			"path", destination)
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}

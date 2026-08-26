@@ -84,8 +84,8 @@ func LookupLocal(name string, keys meta.Keys, match Match, dirs []string) (store
 // LookupInput finds a local artifact that may satisfy one dependency edge of a
 // rebuild.
 //
-// This is a different question from LookupLocal, which asks whether a *selected*
-// artifact is here. A build dependency is not selected: what may stand in for it is
+// This is a different question from LookupLocal, which asks whether a *pinned*
+// artifact is here. A build dependency is not pinned: what may stand in for it is
 // whatever leaves the dependent's equivalence key unchanged, and the role the
 // edge records is exactly the scheme's statement about that.
 //
@@ -203,7 +203,7 @@ func LookupAt(path, name string, keys meta.Keys, match Match) (store.Candidate, 
 
 // Mount is one declaration resolved to something the runtime can mount.
 type Mount struct {
-	// Request is the selection key this answers.
+	// Request is the pin key this answers.
 	Request string
 	// Name is the artifact name, empty for an unpinnable declaration.
 	Name string
@@ -216,7 +216,7 @@ type Mount struct {
 	// only when an equivalent artifact stands in.
 	Identity string
 	Found    string
-	// Unpinned marks a declaration that carries no selection by design and is
+	// Unpinned marks a declaration that carries no pin by design and is
 	// mounted as the literal path it names.
 	Unpinned bool
 }
@@ -298,29 +298,29 @@ func Resolve(root string, l *lock.Lock, requests []lock.Request, opts ResolveOpt
 		// An unpinned declaration is mounted as written.
 		//
 		// Both halves matter. A kind that cannot be pinned has nowhere for a
-		// selection to point, and G13 requires it to carry the marker — the
+		// pin to point, and G13 requires it to carry the marker — the
 		// scanner has already reported one that does not. The marker on a
 		// *pinnable* kind is different: it is an author deliberately opting out
 		// of pinning something that could have been pinned, which is how a
 		// per-project scratch overlay stays out of the lock. Honouring it here
 		// is what keeps `project validate` and `run` agreeing, since validate
-		// already stops asking for a selection once the marker is present.
+		// already stops asking for a pin once the marker is present.
 		if request.Unpinned || !request.Kind.Pinnable() {
 			resolution.Mounts = append(resolution.Mounts, Mount{
 				Request: request.Key, Path: literalPath(root, request), Unpinned: true,
 			})
 			continue
 		}
-		selection, ok := l.Selections[request.Key]
+		pin, ok := l.Pins[request.Key]
 		if !ok {
 			resolution.Unresolved = append(resolution.Unresolved, Unresolved{Request: request.Key,
-				Reason: "declared but not selected; run `condatainer project lock select` to pin it"})
+				Reason: "declared but not pinned; run `condatainer project pin` to pin it"})
 			continue
 		}
-		entry, ok := verified.Entries[selection.Artifact]
+		entry, ok := verified.Entries[pin.Artifact]
 		if !ok {
 			resolution.Unresolved = append(resolution.Unresolved, Unresolved{Request: request.Key,
-				Reason: "the selected artifact is not vendored"})
+				Reason: "the pinned artifact is not vendored"})
 			continue
 		}
 		keys := meta.Keys{Identity: entry.Identity, Equiv: entry.Equiv}

@@ -72,7 +72,7 @@ func TestResolveMountsALockedName(t *testing.T) {
 	root := projectRoot(t)
 	relative, _ := vendor(t, root, "star/2.7.11b", "echo star\n")
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: relative}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: relative}
 	requests := []lock.Request{{Key: "star/2.7.11b", Kind: lock.KindName}}
 
 	got, err := Resolve(root, l, requests, ResolveOptions{lookup: present("star/2.7.11b", "/images/star.sqf")})
@@ -96,7 +96,7 @@ func TestResolveRefusesRatherThanFallingBackToTheName(t *testing.T) {
 	root := projectRoot(t)
 	relative, _ := vendor(t, root, "star/2.7.11b", "echo star\n")
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: relative}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: relative}
 	requests := []lock.Request{{Key: "star/2.7.11b", Kind: lock.KindName}}
 
 	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent})
@@ -115,7 +115,7 @@ func TestResolveRefusesRatherThanFallingBackToTheName(t *testing.T) {
 }
 
 // A declaration nothing selected cannot be mounted, and the remedy is to pin it.
-func TestResolveReportsAnUnselectedDeclaration(t *testing.T) {
+func TestResolveReportsAnUnpinnedDeclaration(t *testing.T) {
 	root := projectRoot(t)
 	l := lock.New()
 	requests := []lock.Request{{Key: "star/2.7.11b", Kind: lock.KindName}}
@@ -125,19 +125,19 @@ func TestResolveReportsAnUnselectedDeclaration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Complete() {
-		t.Fatal("an unselected declaration resolved")
+		t.Fatal("an unpinned declaration resolved")
 	}
-	if !strings.Contains(got.Unresolved[0].Reason, "select") {
+	if !strings.Contains(got.Unresolved[0].Reason, "project pin") {
 		t.Errorf("reason does not name the remedy: %q", got.Unresolved[0].Reason)
 	}
 }
 
-// A path selection is verified at its declared project path, not in the store.
+// A path pin is verified at its declared project path, not in the store.
 func TestResolveAnchorsAPathSelectionOnTheProjectRoot(t *testing.T) {
 	root := projectRoot(t)
 	relative, _ := vendor(t, root, "tool/1.0", "echo tool\n")
 	l := lock.New()
-	l.Selections[lock.PathPrefix+"overlays/tool.sqf"] = lock.Selection{Artifact: relative}
+	l.Pins[lock.PathPrefix+"overlays/tool.sqf"] = lock.PinEntry{Artifact: relative}
 	requests := []lock.Request{{
 		Key: lock.PathPrefix + "overlays/tool.sqf", Kind: lock.KindPath, Path: "overlays/tool.sqf",
 	}}
@@ -212,7 +212,7 @@ func TestResolveReturnsAbsolutePaths(t *testing.T) {
 func TestResolveReportsAnInvalidLock(t *testing.T) {
 	root := projectRoot(t)
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: "provenance/star--2.7.11b@000000000000"}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: "provenance/star--2.7.11b@000000000000"}
 	requests := []lock.Request{{Key: "star/2.7.11b", Kind: lock.KindName}}
 
 	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent})
@@ -229,7 +229,7 @@ func TestResolveReportsASubstitution(t *testing.T) {
 	root := projectRoot(t)
 	relative, manifest := vendor(t, root, "star/2.7.11b", "echo star\n")
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: relative}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: relative}
 	requests := []lock.Request{{Key: "star/2.7.11b", Kind: lock.KindName}}
 
 	other := meta.KeyRef{Scheme: manifest.Keys.Identity.Scheme, SHA256: strings.Repeat("e", 64)}
@@ -251,7 +251,7 @@ func TestResolveReportsASubstitution(t *testing.T) {
 
 // The marker on a pinnable kind is an author opting out of pinning something
 // that could have been pinned. `project validate` already stops asking for a
-// selection once it is present, so resolution must too — otherwise a project
+// pin once it is present, so resolution must too — otherwise a project
 // validates and then refuses to run.
 func TestResolveHonoursTheMarkerOnAPinnableKind(t *testing.T) {
 	root := projectRoot(t)
@@ -276,7 +276,7 @@ func TestResolveHonoursTheMarkerOnAPinnableKind(t *testing.T) {
 	}
 }
 
-// Without the marker the same declaration is pinnable and needs a selection.
+// Without the marker the same declaration is pinnable and needs a pin.
 func TestResolveStillRequiresAnUnmarkedPinnablePath(t *testing.T) {
 	root := projectRoot(t)
 	l := lock.New()
@@ -289,7 +289,7 @@ func TestResolveStillRequiresAnUnmarkedPinnablePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Complete() {
-		t.Fatal("an unmarked project path resolved with no selection")
+		t.Fatal("an unmarked project path resolved with no pin")
 	}
 }
 

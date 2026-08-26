@@ -863,6 +863,8 @@ func (b *BuildObject) captureLocalSourceSpec(isDef bool) {
 	// Drop anything a previous source contributed; the recipe below re-supplies it.
 	b.spec.Image.Description = ""
 	b.spec.Image.URL = ""
+	b.spec.Image.License = ""
+	b.spec.Image.Redistribute = nil
 	b.spec.Image.Prefix = meta.Prefix(b.spec.Image.Name, b.spec.Image.Type)
 	b.spec.Image.Env = nil
 
@@ -886,6 +888,8 @@ func (b *BuildObject) captureLocalSourceSpec(isDef bool) {
 	}
 	b.spec.Image.Description = recipe.Description
 	b.spec.Image.URL = recipe.URL
+	b.spec.Image.License = recipe.License
+	b.spec.Image.Redistribute = recipe.Redistributable()
 	b.spec.Image.Prefix = meta.Prefix(b.spec.Image.Name, b.spec.Image.Type)
 	b.spec.Image.Env = envFromRecipe(recipe.Env)
 	b.spec.Image.Arch = recipe.Arch
@@ -1133,6 +1137,8 @@ func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (
 	base.spec.Image.Type = recipe.Type
 	base.spec.Image.Description = recipe.Description
 	base.spec.Image.URL = recipe.URL
+	base.spec.Image.License = recipe.License
+	base.spec.Image.Redistribute = recipe.Redistributable()
 	base.spec.Dependencies = recipe.Deps
 	base.spec.Image.Prefix = meta.Prefix(base.spec.Image.Name, recipe.Type)
 	base.spec.Image.Env = envFromRecipe(recipe.Env)
@@ -1152,7 +1158,7 @@ func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (
 	source.Placeholders = selectedPlaceholders(recipe)
 	source.TargetTemplate = recipe.TargetTemplate
 	source.RequiresInput = len(recipe.Inputs) > 0
-	source.Repository = match.Source.Desc.Repository
+	source.Collection = match.Source.Desc.Source
 	base.spec.Source = source
 	base.embedSource(SourceFile{Name: meta.RecipeFileName, Data: recipe.Text})
 	slog.Default().Debug("materialized recipe", "path", path, "source", match.Source.Name)

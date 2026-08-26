@@ -38,6 +38,24 @@ The first tag for a versioned artifact is immutable by default. `Publish` only
 allows replacement with `Force`; adding a previously absent architecture is an
 addition rather than replacement.
 
+### Project placement
+
+`PublishRequest.Placement` overrides the derivation above with a repository and
+an explicit tag list. It exists for one caller, `project push`, which keeps a
+whole project in one repository and carries the artifact name in the tag —
+`ProjectTags` renders those, `ParseProjectTag` reads one back. The two namespaces
+cannot be confused: a catalog tag is a single version segment and never contains
+`--`, so `ParseProjectTag` reports false for one rather than inventing a name
+from it.
+
+The name is *refused* rather than truncated when it does not fit a tag. A
+truncated tag is a different artifact's address, and the name is what a puller
+reads back out of it.
+
+Why a project needs a second, identity-qualified tag is a retention argument
+rather than an addressing one, and it belongs where the decision was made:
+[`docs/deployment/distribution.md`](../../docs/deployment/distribution.md).
+
 ## Verification and errors
 
 Annotations are derived only from the embedded manifest. `Check` rejects an
@@ -127,6 +145,19 @@ beginning the whole copy again.
 This matters more than it looks: `ErrRateLimited` is deliberately not
 `ErrUnavailable`, so a throttled pull may not fall back to a local build. Waiting
 is the only thing that turns it back into a working pull.
+
+`Fetch` is `Pull` without the install: it verifies and writes the payload to an
+exact path and stops there. `Pull` owns the managed images directory, its
+producer lock and its naming; a caller that has already decided where the bytes
+go — `project restore`, staging into a store transaction's `.part` — must not
+have that decided again underneath it. `Kind` says which media types to accept,
+because a destination path settled by the caller no longer implies the extension
+the type would have been derived from.
+
+`SplitCoordinate` cuts a recorded `remotes` coordinate into the base and
+repository the transport takes separately. It splits at the first slash after the
+scheme, and deliberately does not trim a leading one: `/lab/p` names no registry,
+and accepting it would send a fetch to whatever host happened to be configured.
 
 ## Provider profiles
 
@@ -275,3 +306,10 @@ there and never here: this package is told where to go. See the
 source's ordered `oci.pull` endpoints before building locally, and requiring the
 candidate to match the equivalence key derived from that recipe. It and
 `registry pull` take the same destination producer lock.
+
+`project` is the third caller and the only one that is told a placement rather
+than deriving one. `project pin` resolves against a collection's
+endpoints to record what it already serves, `project push` publishes with a
+`Placement`, and `project restore` fetches recorded digests through `Fetch`. What
+may be published is decided by `Audience.Accepts` here, from the embedded
+manifest alone — never from a filename, a flag, or which command is running.

@@ -22,7 +22,7 @@ func stagingName(kind string) string {
 }
 
 // Publish writes a lock atomically and then removes provenance entries no
-// published selection reaches.
+// published pin reaches.
 //
 // The order is the transaction. Marshalling validates, a complete document is
 // written to a temporary sibling and renamed over the old one, and only then is
@@ -30,6 +30,13 @@ func stagingName(kind string) string {
 // authoritative and at worst leaves harmless unreferenced directories behind;
 // pruning never runs against a lock that was not published.
 func Publish(root string, l *Lock) error {
+	// Before Marshal, not after: a remote addresses an artifact directory, so
+	// dropping one is an edit to the document rather than to the filesystem. Done
+	// in Prune it would tidy the in-memory lock and leave the published bytes
+	// still naming an artifact nothing vendors, which Verify calls a problem.
+	verified, _ := Verify(root, l)
+	pruneRemotes(l, verified)
+
 	data, err := l.Marshal()
 	if err != nil {
 		return err
@@ -65,14 +72,21 @@ func Publish(root string, l *Lock) error {
 	return Prune(root, l)
 }
 
-// Prune removes provenance entries the published lock does not reach.
+// Prune removes provenance entries the published lock does not reach. It edits
+// the filesystem and never the lock — remotes are reconciled by Publish, before
+// the document is written.
 //
 // Reachability is recomputed from the published file, and it is the closure
-// rather than the selection set: a dependency directory is reached through its
-// parent's manifest edges, so pruning against selections alone would delete
+// rather than the pin set: a dependency directory is reached through its
+// parent's manifest edges, so pruning against pins alone would delete
 // exactly the entries a rebuild needs. Anything that fails to verify is left
 // alone — an entry that cannot be read cannot be shown to be unreachable, and
 // deleting on a read error would turn a corrupt file into data loss.
+//
+// Remotes are pruned with the directories they address. A remote says where an
+// artifact can be fetched, so it means nothing once nothing vendors that
+// artifact — and Verify reports a remote naming an absent artifact as a problem,
+// which would leave a project failing its own validate after a re-pin.
 func Prune(root string, l *Lock) error {
 	present, err := listEntryDirs(root)
 	if err != nil {
@@ -95,6 +109,25 @@ func Prune(root string, l *Lock) error {
 		}
 	}
 	return nil
+}
+
+// pruneRemotes drops fetch locations for artifacts the lock no longer reaches.
+//
+// A remote says where an artifact can be fetched, so it means nothing once
+// nothing vendors that artifact — and Verify reports a remote naming an absent
+// artifact as a problem, so keeping one would leave a project failing its own
+// validate after every re-pin. Nothing is preserved for later: a
+// re-pin that comes back to the same identity gets its remote from the
+// same push or upstream walk that recorded it the first time.
+func pruneRemotes(l *Lock, verified *Verified) {
+	for artifact := range l.Remotes {
+		if !verified.Reachable[artifact] {
+			delete(l.Remotes, artifact)
+		}
+	}
+	if len(l.Remotes) == 0 {
+		l.Remotes = nil
+	}
 }
 
 // StageEntry copies a prepared artifact directory into cnt-lock/provenance/

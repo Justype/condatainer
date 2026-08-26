@@ -204,3 +204,37 @@ func TestCheckSchemaNamesTheDirection(t *testing.T) {
 		t.Errorf("err = %v, want ErrNoAnnotations", err)
 	}
 }
+
+// #LICENSE: reaches the standard slot verbatim. Nothing normalizes or parses it:
+// the publication decision is #REDISTRIBUTE:, made before the push.
+func TestAnnotationsCarryLicenseVerbatim(t *testing.T) {
+	m := fullManifest()
+	m.License = "GPL-3.0-or-later AND LicenseRef-Vendor"
+	ann := Annotations(m, "")
+	if got := ann[AnnLicenses]; got != m.License {
+		t.Errorf("%s = %q, want %q", AnnLicenses, got, m.License)
+	}
+	if AnnLicenses != "org.opencontainers.image.licenses" {
+		t.Errorf("licences belong in the standard slot, got %q", AnnLicenses)
+	}
+}
+
+// Redistribution is a decision, not metadata a consumer acts on before fetching
+// a blob, so it must never appear as an annotation — the embedded manifest is
+// where it lives.
+func TestAnnotationsCarryNoRedistributionClaim(t *testing.T) {
+	no := false
+	m := fullManifest()
+	m.Redistribute = &no
+	for key, value := range Annotations(m, "") {
+		if strings.Contains(strings.ToLower(key+value), "redistribut") {
+			t.Errorf("annotation %s=%s leaks a redistribution claim", key, value)
+		}
+	}
+}
+
+func TestAnnotationsOmitAnAbsentLicense(t *testing.T) {
+	if _, ok := Annotations(fullManifest(), "")[AnnLicenses]; ok {
+		t.Error("a recipe that declared no #LICENSE: must publish no licences annotation")
+	}
+}

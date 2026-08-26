@@ -1,7 +1,6 @@
 package lock
 
 import (
-	"bufio"
 	"fmt"
 	"io/fs"
 	"os"
@@ -13,6 +12,21 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/utils"
 )
+
+// OverlaysDirName is the conventional directory a project keeps its own
+// overlays in, and the one directory of project source that scanning skips.
+//
+// The scripts there are the recipes that built those overlays — `create -f
+// overlays/tool.sh` writes overlays/tool.sqf beside it — and a recipe's #DEP:
+// are its overlay's build dependencies, already recorded in that overlay's
+// provenance. Reading them would make the project pin what it never mounts.
+//
+// A directory is the rule rather than anything read out of the tree, because
+// only a stated convention answers the same every time: a sibling .sqf appears
+// when the overlay is built, and a script's own annotations say nothing about
+// whether it is a recipe. Declaring `#DEP: overlays/tool.sqf` from a project
+// script is unaffected — that declaration lives in the script, not here.
+const OverlaysDirName = "overlays"
 
 // UnpinnedMarker is the note that declares a dependency cannot be pinned:
 // `#DEP: env.img  ## unpinned — reason`. The reason is free text this package
@@ -35,7 +49,7 @@ const (
 	KindExternal Kind = "external"
 )
 
-// Pinnable reports whether a selection can name an artifact for this kind.
+// Pinnable reports whether an artifact can be pinned for this kind.
 //
 // A name is pinnable because the store resolves it by identity, and a
 // project-relative .sqf because restore owns that path and writes the artifact
@@ -49,7 +63,7 @@ func (k Kind) Pinnable() bool { return k == KindName || k == KindPath }
 // Request is one declaration a project makes, merged across every script that
 // makes it.
 type Request struct {
-	// Key is the canonical selection key: catalog.Dep.String() for a name, and
+	// Key is the canonical pin key: catalog.Dep.String() for a name, and
 	// PathPrefix plus the cleaned relative path for a path.
 	Key  string
 	Kind Kind
@@ -81,7 +95,7 @@ type Request struct {
 //
 // It is also what keeps one module from having two keys. The key is
 // NameVersion()+Op+Min, so `star/2.7.11b` and `star/2.7.11b>=2.7.0` would be
-// separate selections that may point at different artifacts, with nothing in
+// separate pins that may point at different artifacts, with nothing in
 // the lock saying which a given script meant.
 func ConstraintReason(dep catalog.Dep, declaration string) string {
 	if dep.Op == "" {
@@ -157,12 +171,10 @@ func ScanScript(root, script string) (*ScanResult, error) {
 	return result, nil
 }
 
-// ScanOptions tunes discovery. Exclusions are explicit rather than inherited
-// from some other walker: what a project generates is the project's business,
-// and a silent skip is how a declaration goes missing.
+// ScanOptions tunes discovery.
 type ScanOptions struct {
 	// ExcludeDirs are additional directory names to skip anywhere in the tree.
-	// .git and cnt-lock are always skipped.
+	// cnt-lock, overlays and every dot-directory are always skipped.
 	ExcludeDirs []string
 }
 
@@ -171,7 +183,7 @@ type ScanOptions struct {
 // A declaration counts wherever it is written; position carries no meaning, so
 // the scanner and the runtime read a script the same way.
 func Scan(root string, opts ScanOptions) (*ScanResult, error) {
-	skip := map[string]bool{".git": true, DirName: true}
+	skip := map[string]bool{DirName: true, OverlaysDirName: true}
 	for _, dir := range opts.ExcludeDirs {
 		if dir = strings.TrimSpace(dir); dir != "" {
 			skip[dir] = true
@@ -190,7 +202,12 @@ func Scan(root string, opts ScanOptions) (*ScanResult, error) {
 			return relErr
 		}
 		if entry.IsDir() {
-			if path != root && skip[entry.Name()] {
+			// A dot-directory is tool state, not project source: .git, .venv,
+			// .snakemake, .tox and a local conda env all carry shell scripts of
+			// their own, and a #DEP: in one of those is not this project's
+			// declaration. The root itself is read even when it is hidden.
+			// overlays/ is skipped for a different reason — see OverlaysDirName.
+			if path != root && (skip[entry.Name()] || strings.HasPrefix(entry.Name(), ".")) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -201,7 +218,7 @@ func Scan(root string, opts ScanOptions) (*ScanResult, error) {
 		if entry.Type()&fs.ModeSymlink != 0 || !entry.Type().IsRegular() {
 			return nil
 		}
-		if !isShellScript(path, entry.Name()) {
+		if !isShellScript(entry.Name()) {
 			return nil
 		}
 		relSlash := filepath.ToSlash(rel)
@@ -243,34 +260,19 @@ func finalize(merged map[string]*Request, result *ScanResult) {
 	})
 }
 
-// isShellScript reports whether a file should be read for declarations: a .sh
-// or .bash file, or an extensionless file whose first line is a shell shebang.
-func isShellScript(path, name string) bool {
+// isShellScript reports whether a file should be read for declarations.
+//
+// Extension only. `run` executes every project script with /bin/bash, so no
+// other shell's script could run here anyway, and sniffing a shebang to catch
+// extensionless files cost more than it bought: the test was a substring match
+// that fired on any interpreter path containing "sh", which on an HPC filesystem
+// means /home/shared/... and every user called josh.
+func isShellScript(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case ".sh", ".bash":
 		return true
-	case "":
-		return hasShellShebang(path)
 	}
 	return false
-}
-
-func hasShellShebang(path string) bool {
-	file, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer file.Close()
-	reader := bufio.NewReader(file)
-	first, err := reader.ReadString('\n')
-	if err != nil && first == "" {
-		return false
-	}
-	first = strings.TrimSpace(first)
-	if !strings.HasPrefix(first, "#!") {
-		return false
-	}
-	return strings.Contains(first, "sh") || strings.Contains(first, "bash")
 }
 
 // scanScript reads one script's declarations.
@@ -349,7 +351,7 @@ func ParseDeclaration(value, note string) (Request, string) {
 	}, ""
 }
 
-// parseRequest turns a canonical selection key back into the dependency it
+// parseRequest turns a canonical pin key back into the dependency it
 // renders. It is Request.Key's inverse for a named request, and the one place
 // that knows a key is not simply a name.
 func parseRequest(key string) (catalog.Dep, error) {

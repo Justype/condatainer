@@ -45,7 +45,7 @@ func TestPartitionSubmitsOnlyStepsWithDirectives(t *testing.T) {
 }
 
 func TestPartitionSubmitsWhateverWaitsOnASubmittedStep(t *testing.T) {
-	// tool declares directives; report selects nothing of its own but cannot run
+	// tool declares directives; report pins nothing of its own but cannot run
 	// until tool exists.
 	steps := []Step{buildStep("tool", true), buildStep("report", true, "tool")}
 	submit, _ := partition(steps, declares("tool"), transientSet(steps, Options{}))
@@ -56,7 +56,7 @@ func TestPartitionSubmitsWhateverWaitsOnASubmittedStep(t *testing.T) {
 }
 
 func TestPartitionCarriesABuildDependencysDirectivesUp(t *testing.T) {
-	// index is a build dependency: nothing selects it, so it is produced inside
+	// index is a build dependency: nothing pins it, so it is produced inside
 	// whichever job builds genome. Its directives are what that job must use.
 	steps := []Step{buildStep("index", false), buildStep("genome", true, "index")}
 	submit, deferred := partition(steps, declares("index"), transientSet(steps, Options{}))
@@ -83,7 +83,7 @@ func TestPartitionCarriesDirectivesThroughAChainOfBuildDependencies(t *testing.T
 	submit, deferred := partition(steps, declares("bottom"), transientSet(steps, Options{}))
 
 	if !submit[artifactKey("top")] {
-		t.Error("directives two levels down did not reach the selection")
+		t.Error("directives two levels down did not reach the pin")
 	}
 	for _, inline := range []string{"bottom", "middle"} {
 		if !deferred[artifactKey(inline)] {

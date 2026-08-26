@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,14 +115,14 @@ func run(t *testing.T, args ...string) (string, error) {
 	return out.String(), runErr
 }
 
-// A declared but unselected request leaves a valid partial lock and a nonzero
+// A declared but needPin request leaves a valid partial lock and a nonzero
 // exit: the lock is published, but never reported as complete.
 func TestProjectLockPublishesPartiallyAndFails(t *testing.T) {
 	root := newProject(t)
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 
 	if _, err := run(t, "project", "lock", "--json"); err == nil {
-		t.Fatal("project lock succeeded with an unselected request")
+		t.Fatal("project lock succeeded with an needPin request")
 	}
 	if _, err := os.Stat(lock.FilePath(root)); err != nil {
 		t.Fatalf("no lock was published: %v", err)
@@ -130,8 +131,8 @@ func TestProjectLockPublishesPartiallyAndFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the published lock does not load: %v", err)
 	}
-	if len(loaded.Selections) != 0 {
-		t.Fatalf("selections = %#v, want none invented", loaded.Selections)
+	if len(loaded.Pins) != 0 {
+		t.Fatalf("selections = %#v, want none invented", loaded.Pins)
 	}
 }
 
@@ -141,7 +142,7 @@ func TestProjectValidateSucceedsOnACompleteProject(t *testing.T) {
 	artifact := vendorArtifact(t, root, "star/2.7.11b", "echo star\n")
 
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: artifact}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: artifact}
 	if err := lock.Publish(root, l); err != nil {
 		t.Fatal(err)
 	}
@@ -151,14 +152,14 @@ func TestProjectValidateSucceedsOnACompleteProject(t *testing.T) {
 	}
 }
 
-// An unpinnable declaration carrying the marker is not an unselected request.
+// An unpinnable declaration carrying the marker is not an needPin request.
 func TestProjectValidateAcceptsAnUnpinnedDeclaration(t *testing.T) {
 	root := newProject(t)
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\n#DEP: env.img  ## unpinned — scratch\nrun\n")
 	artifact := vendorArtifact(t, root, "star/2.7.11b", "echo star\n")
 
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: artifact}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: artifact}
 	if err := lock.Publish(root, l); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +176,7 @@ func TestProjectValidateFailsOnAnInertDeclaration(t *testing.T) {
 	artifact := vendorArtifact(t, root, "star/2.7.11b", "echo star\n")
 
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: artifact}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: artifact}
 	if err := lock.Publish(root, l); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +199,7 @@ func TestProjectValidateJSONReportsWhatIsWrong(t *testing.T) {
 		Unselected []struct {
 			Request string   `json:"request"`
 			Scripts []string `json:"scripts"`
-		} `json:"unselected"`
+		} `json:"needPin"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("output is not JSON: %v\n%s", err, out)
@@ -207,7 +208,7 @@ func TestProjectValidateJSONReportsWhatIsWrong(t *testing.T) {
 		t.Error("report claims valid")
 	}
 	if len(report.Unselected) != 1 || report.Unselected[0].Request != "star/2.7.11b" {
-		t.Fatalf("unselected = %#v", report.Unselected)
+		t.Fatalf("needPin = %#v", report.Unselected)
 	}
 	if len(report.Unselected[0].Scripts) != 1 || report.Unselected[0].Scripts[0] != "run.sh" {
 		t.Errorf("scripts = %v, want the declaring script", report.Unselected[0].Scripts)
@@ -219,7 +220,7 @@ func TestProjectLockDropsAStaleSelection(t *testing.T) {
 	root := newProject(t)
 	artifact := vendorArtifact(t, root, "star/2.7.11b", "echo star\n")
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: artifact}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: artifact}
 	if err := lock.Publish(root, l); err != nil {
 		t.Fatal(err)
 	}
@@ -232,8 +233,8 @@ func TestProjectLockDropsAStaleSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Selections) != 0 {
-		t.Fatalf("a selection nothing declares survived: %#v", loaded.Selections)
+	if len(loaded.Pins) != 0 {
+		t.Fatalf("a selection nothing declares survived: %#v", loaded.Pins)
 	}
 	if _, err := os.Stat(filepath.Join(lock.Dir(root), artifact)); !os.IsNotExist(err) {
 		t.Errorf("its artifact was not pruned: %v", err)
@@ -245,7 +246,7 @@ func TestProjectFlagSelectsTheNamedRoot(t *testing.T) {
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	artifact := vendorArtifact(t, root, "star/2.7.11b", "echo star\n")
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: artifact}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: artifact}
 	if err := lock.Publish(root, l); err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +265,7 @@ func TestProjectRestoreDryRunAcquiresNothing(t *testing.T) {
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	relative := vendorArtifact(t, root, "star/2.7.11b", "echo star\n")
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: relative}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: relative}
 	if err := lock.Publish(root, l); err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +316,7 @@ func TestProjectRestoreDryRunJSONCarriesTheMatchMode(t *testing.T) {
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	relative := vendorArtifact(t, root, "star/2.7.11b", "echo star\n")
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: relative}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: relative}
 	if err := lock.Publish(root, l); err != nil {
 		t.Fatal(err)
 	}
@@ -347,12 +348,53 @@ func TestProjectRestoreFailsOnAnInvalidLock(t *testing.T) {
 	root := newProject(t)
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	l := lock.New()
-	l.Selections["star/2.7.11b"] = lock.Selection{Artifact: "provenance/star--2.7.11b@000000000000"}
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: "provenance/star--2.7.11b@000000000000"}
 	if err := lock.Publish(root, l); err != nil {
 		t.Fatal(err)
 	}
 
 	if out, err := run(t, "project", "restore", "--no-prebuilt"); err == nil {
 		t.Fatalf("restore accepted an invalid lock: %s", out)
+	}
+}
+
+// Scanning a directory for declarations is what makes it a project, so lock has
+// nothing to refuse. Every other subcommand acts on selections that must already
+// exist, and must not seed a project from a mistyped path.
+func TestOnlyLockCreatesAProject(t *testing.T) {
+	prev := projectDir
+	t.Cleanup(func() { projectDir = prev })
+	projectDir = ""
+
+	chdir := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		wd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(dir); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chdir(wd) })
+		// macOS hands out a symlinked temp path; Getwd resolves it.
+		resolved, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resolved
+	}
+
+	dir := chdir(t)
+	root, err := projectRootOrInit(false)
+	if err != nil || root != dir {
+		t.Fatalf("projectRootOrInit = (%q, %v), want %q", root, err, dir)
+	}
+
+	if _, err := projectRoot(false); !errors.Is(err, lock.ErrNoProject) {
+		t.Fatalf("projectRoot = %v, want ErrNoProject", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, lock.DirName)); !os.IsNotExist(err) {
+		t.Error("resolving a root created cnt-lock/; only publishing should")
 	}
 }

@@ -33,14 +33,20 @@ const (
 	// version-less date tag derives from, so tag and annotation cannot disagree.
 	// Omitted rather than filled with the push time.
 	AnnCreated = "org.opencontainers.image.created"
-	// AnnSource is the recipe collection's repository. GHCR links a package to a
-	// repository with this, so it is functional rather than decorative. Omitted
-	// when the collection declares none.
+	// AnnSource is the repository a package came from: the recipe collection the
+	// artifact recorded, or PublishRequest.Source when the publisher supplies one.
+	// GHCR links a package to a repository with this, so it is functional rather
+	// than decorative. Omitted when neither is known.
 	AnnSource = "org.opencontainers.image.source"
 	// AnnDescription carries #DESC:. GHCR renders description but not title.
 	AnnDescription = "org.opencontainers.image.description"
 	// AnnURL carries #URL: — the upstream project or vendor page.
 	AnnURL = "org.opencontainers.image.url"
+	// AnnLicenses carries #LICENSE: as an SPDX expression, verbatim. Nothing
+	// reads it back: whether a payload may be republished is decided before a
+	// push by the artifact's own #REDISTRIBUTE:, never derived from a licence
+	// string. This is documentation for whoever pulls it.
+	AnnLicenses = "org.opencontainers.image.licenses"
 )
 
 // CondaTainer annotation keys, for facts the image spec has no slot for.

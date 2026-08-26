@@ -21,7 +21,7 @@ import (
 
 type registryOptions struct {
 	base          string
-	visibility    string
+	audience      string
 	force         bool
 	name          string
 	prefix        string
@@ -55,12 +55,12 @@ then the Docker credential store, then anonymous access.`,
 			if err != nil {
 				return err
 			}
-			base, visibility, err := registryPushDestination(cmd, opts, artifact)
+			base, audience, err := registryPushDestination(cmd, opts, artifact)
 			if err != nil {
 				return err
 			}
-			if err := registry.Publish(cmd.Context(), registry.PublishRequest{
-				Path: artifact.path, Base: base, Visibility: visibility, Force: opts.force,
+			if _, err := registry.Publish(cmd.Context(), registry.PublishRequest{
+				Path: artifact.path, Base: base, Audience: audience, Force: opts.force,
 			}); err != nil {
 				return err
 			}
@@ -69,7 +69,7 @@ then the Docker credential store, then anonymous access.`,
 		},
 	}
 	push.Flags().StringVar(&opts.base, "registry", "", "Registry base, including owner/prefix (inferred from source when omitted)")
-	push.Flags().StringVar(&opts.visibility, "visibility", string(registry.Public), "Endpoint visibility: public or internal")
+	push.Flags().StringVar(&opts.audience, "audience", string(registry.Public), "Endpoint audience: public or restricted")
 	push.Flags().BoolVarP(&opts.force, "force", "f", false, "Replace this platform at an existing versioned tag")
 
 	pull := &cobra.Command{
@@ -196,14 +196,14 @@ func registryPushCompletion(cmd *cobra.Command, args []string, toComplete string
 // where the destination is least likely to be the recipe collection's endpoint —
 // a one-off build, a mirror, an artifact belonging to a project — so inferring
 // there would publish to somewhere nobody named.
-func registryPushDestination(cmd *cobra.Command, opts *registryOptions, artifact registryArtifact) (string, registry.Visibility, error) {
+func registryPushDestination(cmd *cobra.Command, opts *registryOptions, artifact registryArtifact) (string, registry.Audience, error) {
 	if strings.TrimSpace(opts.base) != "" {
 		base, err := requireRegistryBase(opts.base)
 		if err != nil {
 			return "", "", err
 		}
-		visibility, err := parseVisibility(opts.visibility)
-		return base, visibility, err
+		audience, err := parseAudience(opts.audience)
+		return base, audience, err
 	}
 	if !artifact.managed {
 		return "", "", fmt.Errorf("cannot infer registry for %s: only an installed name/version infers its destination; use --registry", artifact.path)
@@ -227,11 +227,11 @@ func registryPushDestination(cmd *cobra.Command, opts *registryOptions, artifact
 		return "", "", err
 	}
 
-	visibility := source.Desc.OCI.Visibility
-	if cmd.Flags().Changed("visibility") {
-		visibility = opts.visibility
+	audience := source.Desc.OCI.Audience
+	if cmd.Flags().Changed("audience") {
+		audience = opts.audience
 	}
-	parsed, err := parseVisibility(visibility)
+	parsed, err := parseAudience(audience)
 	if err != nil {
 		return "", "", err
 	}
@@ -242,7 +242,7 @@ func inferPushSource(repository string, cat catalog.Catalog) (*catalog.Source, e
 	repository = strings.TrimRight(strings.TrimSpace(repository), "/")
 	var matches []*catalog.Source
 	for _, source := range cat {
-		if strings.TrimRight(strings.TrimSpace(source.Desc.Repository), "/") == repository {
+		if strings.TrimRight(strings.TrimSpace(source.Desc.Source), "/") == repository {
 			matches = append(matches, source)
 		}
 	}
@@ -269,10 +269,10 @@ func requireRegistryBase(base string) (string, error) {
 	return base, nil
 }
 
-func parseVisibility(raw string) (registry.Visibility, error) {
-	v := registry.Visibility(strings.ToLower(strings.TrimSpace(raw)))
-	if v != registry.Public && v != registry.Internal {
-		return "", fmt.Errorf("invalid visibility %q: want public or internal", raw)
+func parseAudience(raw string) (registry.Audience, error) {
+	v := registry.Audience(strings.ToLower(strings.TrimSpace(raw)))
+	if v != registry.Public && v != registry.Restricted {
+		return "", fmt.Errorf("invalid audience %q: want public or restricted", raw)
 	}
 	return v, nil
 }
@@ -430,6 +430,15 @@ func addressPlacementName(name, selector, title string) string {
 	title = catalog.Normalize(title)
 	if selector == "" {
 		return name
+	}
+	// A project publishes every artifact into one repository with the name in
+	// the tag, so composing repository and tag the catalog way would install
+	// star/2.7.11b as cnt/star--2.7.11b. Decoding is more specific than that
+	// composition rather than a fallback to the payload, and it cannot be
+	// confused with a catalog tag, which is a single version segment and never
+	// contains `--`.
+	if decoded, _, ok := registry.ParseProjectTag(selector); ok {
+		return decoded
 	}
 	if strings.HasPrefix(selector, "sha256:") {
 		if title == name {

@@ -16,18 +16,18 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// ErrNoCandidate reports that nothing local answers a selection.
+// ErrNoCandidate reports that nothing local answers a pin.
 var ErrNoCandidate = errors.New("no artifact matches")
 
-// SelectOptions tunes candidate discovery.
-type SelectOptions struct {
+// PinOptions tunes candidate discovery.
+type PinOptions struct {
 	// SearchDirs overrides the configured image roots.
 	SearchDirs []string
 }
 
-// Selected is what one selection resolved to.
-type Selected struct {
-	// Request is the canonical selection key.
+// Pinned is what one pin resolved to.
+type Pinned struct {
+	// Request is the canonical pin key.
 	Request string
 	// Artifact is the vendored directory, relative to the lock directory.
 	Artifact string
@@ -36,26 +36,36 @@ type Selected struct {
 	Path     string
 	Name     string
 	Identity meta.KeyRef
-	// Vendored are every artifact directory this selection wrote or confirmed,
-	// the selected artifact plus its transitive closure, sorted.
+	// Vendored are every artifact directory this pin wrote or confirmed,
+	// the pinned artifact plus its transitive closure, sorted.
 	Vendored []string
+	// Others are the installed identities answering the same name that this did
+	// not take, in search order. Empty unless PinAll filled them in.
+	Others []store.Candidate
 }
 
-// Select resolves one request to an exact local artifact, vendors its complete
+// Pin resolves one request to an exact local artifact, vendors its complete
 // source closure, and returns what to record. It does not publish: the caller
 // updates the lock and publishes last, so a failure leaves the old lock intact.
 //
 // target is an identity — `scheme@sha256:<hex>`, a full SHA, or an unambiguous
-// prefix — or a path to an immutable .sqf. A path may point outside the
-// project; what gets recorded is the identity, never the path.
-func Select(root, request, target string, opts SelectOptions) (*Selected, error) {
-	if strings.TrimSpace(request) == "" {
-		return nil, fmt.Errorf("%w: empty request", ErrInvalid)
+// prefix. It is optional for a name request, which otherwise takes what the
+// search order would mount, and refused for a path request, which already says
+// which file it means.
+//
+// A file is never named here. Nothing downstream could use one: restore and push
+// both find a pinned artifact through the image roots and the store, so
+// pointing at a file elsewhere would record an identity only a rebuild could
+// satisfy.
+func Pin(root, request, target string, opts PinOptions) (*Pinned, error) {
+	request, err := canonicalRequest(request)
+	if err != nil {
+		return nil, err
 	}
 	if reason := pinnableRequest(request); reason != "" {
 		return nil, fmt.Errorf("%w: %s", ErrInvalid, reason)
 	}
-	candidate, err := resolveCandidate(request, target, opts)
+	candidate, err := resolveCandidate(root, request, target, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +91,7 @@ func Select(root, request, target string, opts SelectOptions) (*Selected, error)
 	}
 	sort.Strings(vendored)
 
-	return &Selected{
+	return &Pinned{
 		Request:  request,
 		Artifact: EntryPath(capsule.EntryName(candidate.Name, candidate.Identity.Digest())),
 		Path:     candidate.Path,
@@ -91,10 +101,49 @@ func Select(root, request, target string, opts SelectOptions) (*Selected, error)
 	}, nil
 }
 
-// resolveCandidate finds the one artifact a target names, by path or identity.
-func resolveCandidate(request, target string, opts SelectOptions) (store.Candidate, error) {
+// canonicalRequest normalizes what a caller typed into the key a scan produces.
+//
+// It runs the same grammar a #DEP: does, so `overlays/tool.sqf` on the command
+// line and in a script cannot mean different things, and an extension is what
+// separates a path from a name. The lock's own `path:` key is taken as written.
+func canonicalRequest(request string) (string, error) {
+	request = strings.TrimSpace(request)
+	if request == "" {
+		return "", fmt.Errorf("%w: empty request", ErrInvalid)
+	}
+	if strings.HasPrefix(request, PathPrefix) {
+		return request, nil
+	}
+	parsed, reason := ParseDeclaration(request, "")
+	if reason != "" {
+		return "", fmt.Errorf("%w: %s", ErrInvalid, reason)
+	}
+	return parsed.Key, nil
+}
+
+// resolveCandidate finds the one artifact a request pins.
+//
+// A path request with no identity reads the file it names, which is the only way
+// to select one: the project may call that file anything, while identity lookup
+// applies the flat-name rule and would refuse overlays/combined.sqf for not
+// being testdata--combined--1.0.sqf.
+func resolveCandidate(root, request, target string, opts PinOptions) (store.Candidate, error) {
+	target = strings.TrimSpace(target)
+	if destination, isPath := strings.CutPrefix(request, PathPrefix); isPath {
+		if target != "" {
+			return store.Candidate{}, fmt.Errorf(
+				"%w: %s already names the file it means, so it takes no identity", ErrInvalid, request)
+		}
+		return candidateFromPath(filepath.Join(root, filepath.FromSlash(destination)))
+	}
+	if target == "" {
+		candidate, _, err := resolveByName(request, opts)
+		return candidate, err
+	}
 	if looksLikePath(target) {
-		return candidateFromPath(target)
+		return store.Candidate{}, fmt.Errorf(
+			"%w: %s is a file, and a pin names an identity. Install it into an images root to select it by identity, or keep it in the project and declare it as a path",
+			ErrInvalid, target)
 	}
 	query, err := store.ParseIdentityQuery(target)
 	if err != nil {
@@ -105,7 +154,7 @@ func resolveCandidate(request, target string, opts SelectOptions) (store.Candida
 		return store.Candidate{}, err
 	}
 	// Every copy in every readable root is a candidate, not just the nearest
-	// one: a selection names an exact artifact, and nearest-first name
+	// one: a pin names an exact artifact, and nearest-first name
 	// resolution would hide the copy the user meant.
 	candidate, _, err := store.ResolveIdentity(name, query, opts.SearchDirs)
 	if err != nil {
@@ -115,6 +164,42 @@ func resolveCandidate(request, target string, opts SelectOptions) (store.Candida
 		return store.Candidate{}, err
 	}
 	return candidate, nil
+}
+
+// resolveByName finds the artifact a name request means with no identity given,
+// and reports the other installed identities for that name.
+//
+// Search order is the configured one, so a project pins what the same name would
+// mount outside a project. Within one root the flat name--version file wins: the
+// store's destination rule puts exactly one identity there and the rest under
+// store/, which makes "the obvious one" a fact rather than a guess.
+func resolveByName(request string, opts PinOptions) (store.Candidate, []store.Candidate, error) {
+	name, err := requestName(request)
+	if err != nil {
+		return store.Candidate{}, nil, err
+	}
+	report := store.Scan(store.ScanOptions{Dirs: opts.SearchDirs, Name: name})
+	if len(report.Candidates) == 0 {
+		return store.Candidate{}, nil, fmt.Errorf("%w: %s is not installed", ErrNoCandidate, name)
+	}
+
+	chosen := report.Candidates[0]
+	for _, candidate := range report.Candidates {
+		if candidate.Layout == store.LayoutFlat {
+			chosen = candidate
+			break
+		}
+	}
+	var others []store.Candidate
+	seen := map[meta.KeyRef]bool{chosen.Identity: true}
+	for _, candidate := range report.Candidates {
+		if seen[candidate.Identity] {
+			continue
+		}
+		seen[candidate.Identity] = true
+		others = append(others, candidate)
+	}
+	return chosen, others, nil
 }
 
 // looksLikePath reports whether a target addresses a file rather than an
@@ -127,12 +212,11 @@ func looksLikePath(target string) bool {
 		utils.IsOverlay(target) || utils.IsSif(target)
 }
 
-// candidateFromPath verifies an explicit .sqf, which may live outside any images
-// root. A writable .img has no identity to pin and a .sif is a container root,
-// so neither can be selected.
+// candidateFromPath verifies the .sqf a path request names. A writable .img has
+// no identity to pin and a .sif is a container root, so neither can be pinned.
 func candidateFromPath(target string) (store.Candidate, error) {
 	if !strings.HasSuffix(target, ".sqf") {
-		return store.Candidate{}, fmt.Errorf("%w: only .sqf can be selected, not %s", ErrInvalid, filepath.Base(target))
+		return store.Candidate{}, fmt.Errorf("%w: only .sqf can be pinned, not %s", ErrInvalid, filepath.Base(target))
 	}
 	absolute, err := filepath.Abs(target)
 	if err != nil {
@@ -140,10 +224,10 @@ func candidateFromPath(target string) (store.Candidate, error) {
 	}
 	// Read the file, never scan its directory. A scan applies the flat-name
 	// rule — the filename must encode the artifact name — which is right where
-	// the filename *is* the address and wrong here: a path selection exists so a
+	// the filename *is* the address and wrong here: a path pin exists so a
 	// project can call the file whatever it likes, and overlays/combined.sqf
 	// would be refused for not being testdata--combined--1.0.sqf. This is the
-	// same rule project.LookupAt applies when it later resolves the selection,
+	// same rule project.LookupAt applies when it later resolves the pin,
 	// and the two have to agree or a lock could be written and never resolved.
 	info, err := os.Lstat(absolute)
 	if err != nil {
@@ -167,10 +251,10 @@ func candidateFromPath(target string) (store.Candidate, error) {
 	}, nil
 }
 
-// pinnableRequest reports why a selection key cannot be pinned, or "".
+// pinnableRequest reports why a pin key cannot be pinned, or "".
 //
 // It says what to do instead, because the alternative is not obvious: an
-// unpinnable dependency is declared unpinnable rather than left unselected.
+// unpinnable dependency is declared unpinnable rather than left needPin.
 func pinnableRequest(request string) string {
 	destination, isPath := strings.CutPrefix(request, PathPrefix)
 	if !isPath {
@@ -198,7 +282,7 @@ func requestName(request string) (string, error) {
 	return dep.NameVersion(), nil
 }
 
-// vendorClosure writes the selected artifact and every entry of its embedded
+// vendorClosure writes the pinned artifact and every entry of its embedded
 // capsule into cnt-lock/provenance/.
 //
 // The capsule is copied across, never re-derived: it is already the transitive
@@ -219,7 +303,7 @@ func vendorClosure(root, metaDir string, candidate store.Candidate) ([]string, e
 	if manifest.Keys.Identity != candidate.Identity {
 		return nil, fmt.Errorf("%w: %s records an identity its sources do not derive", ErrInvalid, candidate.Path)
 	}
-	// A selection is only as good as its provenance: an artifact built over an
+	// A pin is only as good as its provenance: an artifact built over an
 	// unrecorded dependency cannot be rebuilt from the checkout, whatever its
 	// own sources say.
 	if manifest.ProvenanceComplete != nil && !*manifest.ProvenanceComplete {
@@ -289,21 +373,21 @@ func stagedFiles(dir string, names []string) (map[string][]byte, error) {
 	return out, nil
 }
 
-// Apply records a resolved selection and publishes the lock, verifying the whole
+// Apply records a resolved pin and publishes the lock, verifying the whole
 // closure first. Publication is last, so a lock is never left pointing at
 // something that does not validate.
-func Apply(root string, l *Lock, selected *Selected) error {
-	previous, had := l.Selections[selected.Request]
-	l.Selections[selected.Request] = Selection{Artifact: selected.Artifact}
+func Apply(root string, l *Lock, pinned *Pinned) error {
+	previous, had := l.Pins[pinned.Request]
+	l.Pins[pinned.Request] = PinEntry{Artifact: pinned.Artifact}
 
 	if _, problems := Verify(root, l); len(problems) > 0 {
 		if had {
-			l.Selections[selected.Request] = previous
+			l.Pins[pinned.Request] = previous
 		} else {
-			delete(l.Selections, selected.Request)
+			delete(l.Pins, pinned.Request)
 		}
-		return fmt.Errorf("%w: selecting %s leaves the project invalid:\n  %s",
-			ErrInvalid, selected.Request, joinProblems(problems))
+		return fmt.Errorf("%w: pinning %s leaves the project invalid:\n  %s",
+			ErrInvalid, pinned.Request, joinProblems(problems))
 	}
 	return Publish(root, l)
 }
@@ -316,36 +400,69 @@ func joinProblems(problems []Problem) string {
 	return strings.Join(out, "\n  ")
 }
 
-// Reconcile rescans a project and drops selections nothing requests any more,
-// reporting what remains unselected. It never invents a selection: choosing an
+// Reconcile rescans a project and drops pins nothing requests any more,
+// reporting what remains needPin. It never invents a pin: choosing an
 // artifact is an explicit act.
-func Reconcile(root string, l *Lock, result *ScanResult) (unselected []Request) {
+func Reconcile(root string, l *Lock, result *ScanResult) (needPin []Request) {
 	requested := make(map[string]bool, len(result.Requests))
 	for _, request := range result.Requests {
 		requested[request.Key] = true
 	}
 	for _, key := range l.Requests() {
 		if !requested[key] {
-			delete(l.Selections, key)
+			delete(l.Pins, key)
 		}
 	}
 
 	verified, _ := Verify(root, l)
 	for _, request := range result.Requests {
-		// An unpinnable request is not unselected: there is nowhere for restore
+		// An unpinnable request is not needPin: there is nowhere for restore
 		// to put an answer, and G13's marker is how that is declared.
 		if !request.Kind.Pinnable() {
 			continue
 		}
-		selection, ok := l.Selections[request.Key]
+		pin, ok := l.Pins[request.Key]
 		if !ok {
-			unselected = append(unselected, request)
+			needPin = append(needPin, request)
 			continue
 		}
-		if _, valid := verified.Entries[selection.Artifact]; !valid {
-			delete(l.Selections, request.Key)
-			unselected = append(unselected, request)
+		if _, valid := verified.Entries[pin.Artifact]; !valid {
+			delete(l.Pins, request.Key)
+			needPin = append(needPin, request)
 		}
 	}
-	return unselected
+	return needPin
+}
+
+// PinAll resolves every request in unpinned and records what it found, so a lock
+// says which exact artifact satisfies each declaration rather than only which
+// declarations exist.
+//
+// Each request is applied and published on its own, so an artifact that is not
+// installed costs its own line in the report and nothing else: what was pinned
+// stays pinned, and re-running after `create` finishes the job.
+func PinAll(root string, l *Lock, needPin []Request, opts PinOptions) (pinned []*Pinned, failed []error) {
+	for _, request := range needPin {
+		var others []store.Candidate
+		if !strings.HasPrefix(request.Key, PathPrefix) {
+			// Reported rather than refused: the flat name is what this name
+			// resolves to everywhere else, so pinning it is the answer that
+			// agrees with the rest of the system.
+			if _, rest, err := resolveByName(request.Key, opts); err == nil {
+				others = rest
+			}
+		}
+		entry, err := Pin(root, request.Key, "", opts)
+		if err != nil {
+			failed = append(failed, err)
+			continue
+		}
+		if err := Apply(root, l, entry); err != nil {
+			failed = append(failed, err)
+			continue
+		}
+		entry.Others = others
+		pinned = append(pinned, entry)
+	}
+	return pinned, failed
 }

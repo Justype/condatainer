@@ -8,6 +8,7 @@ package restore
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -57,20 +58,28 @@ type Step struct {
 	// can tell a substitution from a match without comparing two digests.
 	Found  string `json:"found,omitempty"`
 	Action Action `json:"action"`
-	// Direct reports that a selection mounts this artifact. A closure-only step
+	// Direct reports that a pin mounts this artifact. A closure-only step
 	// is a build dependency, materialized only because something above it must be
 	// rebuilt.
 	Direct bool `json:"direct"`
-	// Requests are the selection keys this artifact answers, sorted. Empty for
+	// Requests are the pin keys this artifact answers, sorted. Empty for
 	// a closure-only step.
 	Requests []string `json:"requests,omitempty"`
 	// Destination is the project-relative path this artifact must end up at,
-	// set only for a `path:` selection. Empty means the artifact is addressed
+	// set only for a `path:` pin. Empty means the artifact is addressed
 	// by identity and goes wherever the store's destination rule puts it.
 	//
 	// A project path is an output, not somewhere to look: a step carrying one
 	// is never satisfied by, and never installed into, a shared images root.
 	Destination string `json:"destination,omitempty"`
+	// Replaces describes a different artifact already sitting at Destination
+	// that this step will overwrite — its identity, or "an unreadable file" when
+	// the bytes there are not a readable artifact. Empty when the path is free
+	// or holds something that answers the lock.
+	//
+	// A restore renames over that file, so a plan that did not say this would
+	// preview an overwrite as an ordinary build.
+	Replaces string `json:"replaces,omitempty"`
 	// Path and Layout are set when the artifact was found locally. For a
 	// destination step Path is that destination, already present and verified.
 	Path   string       `json:"path,omitempty"`
@@ -83,7 +92,7 @@ type Step struct {
 	RequiresInput bool `json:"requires_input,omitempty"`
 	// Arch is the artifact's recorded architecture, or "noarch".
 	Arch string `json:"arch,omitempty"`
-	// StoreOnly keeps this step out of the bare name because a selection in the
+	// StoreOnly keeps this step out of the bare name because a pin in the
 	// same plan answers to it. Set only on a build dependency being installed.
 	StoreOnly bool `json:"store_only,omitempty"`
 }
@@ -136,6 +145,14 @@ type Options struct {
 	// destination rule instead of discarding it with the restore. An input that
 	// was already installed is adopted in place either way.
 	KeepBuildDeps bool
+	// Replace allows a project path holding something that does not answer the
+	// lock to be overwritten. Without it that is a planning problem, refused
+	// before anything is acquired.
+	//
+	// A project path is the only place a restore can destroy a file: an artifact
+	// addressed by name goes wherever the store's destination rule puts it, which
+	// never takes a name another identity already holds.
+	Replace bool
 	// SearchDirs overrides the configured image roots.
 	SearchDirs []string
 	// HostArch is the architecture to plan for. Empty means this machine.
@@ -267,6 +284,14 @@ func Compute(root string, l *lock.Lock, opts Options) *Plan {
 				step, reasons := plan.classify(step, keys, hostArch, opts, func() (store.Candidate, bool) {
 					return resolveAt(at, entry.Manifest.Name, keys, match)
 				})
+				if step.Action != ActionAdopt {
+					step.Replaces = occupantAt(at)
+				}
+				if step.Replaces != "" && !opts.Replace {
+					reasons = append(reasons, fmt.Sprintf(
+						"%s already holds %s, which is not what %s pins; pass --replace to overwrite it",
+						destination, step.Replaces, entry.Manifest.Name))
+				}
 				steps = append(steps, step)
 				pending[artifact] = append(pending[artifact], reasons...)
 			}
@@ -276,7 +301,7 @@ func Compute(root string, l *lock.Lock, opts Options) *Plan {
 		step := base
 		step.Direct = len(named[artifact]) > 0
 		step.Requests = sorted(named[artifact])
-		// A selection has to answer for its own keys — someone asked for it by
+		// A pin has to answer for its own keys — someone asked for it by
 		// name. A build dependency only has to leave its dependent's equivalence
 		// unchanged, which is what its edge's role states.
 		find := func() (store.Candidate, bool) {
@@ -312,7 +337,7 @@ func Compute(root string, l *lock.Lock, opts Options) *Plan {
 // restrict drops every step outside one artifact's closure, keeping the order.
 //
 // Directness is not rewritten. An artifact inside the closure that some
-// selection also names by itself stays a selection and is still installed where
+// pin also names by itself stays a pin and is still installed where
 // the destination rule puts it, because that is what it is — narrowing what a
 // restore covers says nothing about what its members are.
 func restrict(steps []Step, only string) ([]Step, string) {
@@ -342,7 +367,7 @@ func restrict(steps []Step, only string) ([]Step, string) {
 	return kept, ""
 }
 
-// yieldSharedNames gives the bare name to the selection whenever a kept build
+// yieldSharedNames gives the bare name to the pin whenever a kept build
 // dependency shares it, marking the dependency store-only.
 //
 // The flat name answers `exec -o`, `list`, and every other checkout, so it
@@ -355,18 +380,37 @@ func restrict(steps []Step, only string) ([]Step, string) {
 // Only two identities of one name ever contend. One identity is one step, and a
 // discarded build dependency is never installed at all.
 func yieldSharedNames(steps []Step, opts Options) {
-	selected := map[string]bool{}
+	pinned := map[string]bool{}
 	for _, step := range steps {
 		if step.Direct && step.Destination == "" {
-			selected[step.Name] = true
+			pinned[step.Name] = true
 		}
 	}
 	for i, step := range steps {
 		if step.Direct || step.Destination != "" || isTransient(step, opts) {
 			continue
 		}
-		steps[i].StoreOnly = selected[step.Name]
+		steps[i].StoreOnly = pinned[step.Name]
 	}
+}
+
+// occupantAt describes the artifact already at a project destination that does
+// not answer the lock, or "" when the path is free.
+//
+// Read only for a step that is going to write there: a restore renames over
+// whatever regular .sqf it finds, so this is the plan's one chance to say what
+// is about to be lost. A file whose metadata cannot be read is still reported —
+// it is still about to be replaced.
+func occupantAt(path string) string {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	artifact, err := compare.Read(path)
+	if err != nil {
+		return "an unreadable file"
+	}
+	return artifact.IdentityRef().Digest()
 }
 
 // problemsFor collects the problems the given steps carry, in step order.
@@ -378,11 +422,11 @@ func problemsFor(steps []Step, problems map[string][]string) []string {
 	return out
 }
 
-// split separates selections by where the artifact has to end up: named ones go
+// split separates pins by where the artifact has to end up: named ones go
 // wherever the store's destination rule puts them, `path:` ones go to a declared
-// place inside the project. It also reports any artifact selected both ways.
+// place inside the project. It also reports any artifact pinned both ways.
 //
-// The two cannot be planned together. A named selection is satisfied by a copy
+// The two cannot be planned together. A named pin is satisfied by a copy
 // in any readable images root; a project path is a file that must exist at one
 // exact location. An artifact asked for both has two destinations and no way to
 // choose, so it is a lock to fix rather than a case to resolve.
@@ -395,7 +439,7 @@ func split(l *lock.Lock) (named map[string][]string, destinations map[string]map
 	named = map[string][]string{}
 	destinations = map[string]map[string][]string{}
 	for _, request := range l.Requests() {
-		artifact := l.Selections[request].Artifact
+		artifact := l.Pins[request].Artifact
 		destination, isPath := strings.CutPrefix(request, lock.PathPrefix)
 		if !isPath {
 			named[artifact] = append(named[artifact], request)
@@ -409,7 +453,7 @@ func split(l *lock.Lock) (named map[string][]string, destinations map[string]map
 	for artifact := range destinations {
 		if len(named[artifact]) > 0 {
 			problems = append(problems, fmt.Sprintf(
-				"%s is selected both by name (%s) and at a project path; it has one payload and cannot have two destinations",
+				"%s is pinned both by name (%s) and at a project path; it has one payload and cannot have two destinations",
 				artifact, strings.Join(sorted(named[artifact]), ", ")))
 		}
 	}

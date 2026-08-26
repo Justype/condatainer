@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,8 +9,11 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/project/lock"
+	"github.com/Justype/condatainer/internal/project/publish"
 	"github.com/Justype/condatainer/internal/project/restore"
+	"github.com/Justype/condatainer/internal/registry"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -19,19 +23,22 @@ var projectDir string
 
 var projectCmd = &cobra.Command{
 	Use:   "project",
-	Short: "Pin a project's dependencies to exact artifact identities",
-	Long: `Record which exact artifact satisfies each #DEP: a project declares.
+	Short: "Pin and restore a project's artifacts",
+	Long: `Pins the exact artifact for every #DEP: in a project (a folder with cnt-lock/)
+It records pins with manifests and recipes, so the artifact can be reproduced.
 
-cnt-lock/ belongs in Git: it holds the selection map plus the manifests and
-rebuild sources each selected artifact was built from. It holds no payload and
-nothing machine-local, so a checkout is a complete rebuild specification even on
-a machine that has never run CondaTainer.`,
+Every artifact carries two keys, derived from its recipe and dependencies:
+- Identity names one exact build;
+- Equivalence key is shared by any build that can substitute for it. 
+
+Restore accepts an equivalent build unless asked for the identity.`,
 }
 
 func init() {
 	rootCmd.AddCommand(projectCmd)
 	projectCmd.PersistentFlags().StringVar(&projectDir, "project", "", "project root (default: the current directory)")
-	projectCmd.AddCommand(newProjectLockCmd(), newProjectValidateCmd(), newProjectRestoreCmd())
+	projectCmd.AddCommand(newProjectLockCmd(), newProjectPinCmd(), newProjectValidateCmd(),
+		newProjectRestoreCmd(), newProjectRegistryCmd(), newProjectPushCmd())
 }
 
 // projectRoot resolves the root a command acts on — the current directory, or
@@ -44,7 +51,7 @@ func projectRoot(announce bool) (string, error) {
 	root, err := lock.RootFor(projectDir, cwd)
 	if errors.Is(err, lock.ErrNoProject) {
 		return "", fmt.Errorf("%w\na project is a directory containing %s; create one with %s, or name it with %s",
-			err, "cnt-lock/", "mkdir cnt-lock", "--project DIR")
+			err, "cnt-lock/", "condatainer project lock", "--project DIR")
 	}
 	if err != nil {
 		return "", err
@@ -55,21 +62,56 @@ func projectRoot(announce bool) (string, error) {
 	return root, nil
 }
 
+// projectRootOrInit resolves the root like projectRoot, but treats a directory
+// with no cnt-lock/ as one to create rather than an error.
+//
+// Only 'project lock' uses it: scanning a directory for declarations is what
+// makes it a project, so there is nothing for it to refuse. Every other
+// subcommand acts on pins that must already exist, and would be creating
+// an empty project as a side effect of a mistyped path.
+func projectRootOrInit(announce bool) (string, error) {
+	root, err := projectRoot(false)
+	if err != nil && !errors.Is(err, lock.ErrNoProject) {
+		return "", err
+	}
+	created := err != nil
+	if created {
+		if root, err = os.Getwd(); err != nil {
+			return "", err
+		}
+	}
+	if announce {
+		if created {
+			utils.PrintMessage("New project: %s", utils.StylePath(root))
+		} else {
+			utils.PrintMessage("Project: %s", utils.StylePath(root))
+		}
+	}
+	return root, nil
+}
+
 func newProjectLockCmd() *cobra.Command {
 	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "lock",
-		Short: "Rescan declarations and reconcile the lock",
-		Long: `Rescan every script for #DEP: declarations and reconcile them with the lock.
+		Short: "Create or update the lock from #DEP: declarations",
+		Long: `Reads .sh and .bash scripts in the project and pins the overlays declared.
 
-Selections nothing declares any more are dropped, and so are selections whose
-artifact no longer verifies. Nothing is selected automatically: choosing an
-artifact is an explicit act, so unselected requests are reported for
-'condatainer project lock select' to resolve.`,
+Scan rules:
+- cnt-lock/, overlays/ and dot directories are skipped;
+- symlinks are not followed.
+
+Behaviors:
+- Creates cnt-lock/ when there is none.
+- Pins every declaration and drops entries nothing declares any more.
+
+A declaration whose overlay is not installed fails the lock. Other installed
+builds of the same name are listed rather than pinned; 'project pin' takes one
+of those instead.`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			root, err := projectRoot(!jsonOutput)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			root, err := projectRootOrInit(!jsonOutput)
 			if err != nil {
 				return err
 			}
@@ -81,36 +123,45 @@ artifact is an explicit act, so unselected requests are reported for
 			if err != nil {
 				return err
 			}
-			unselected := lock.Reconcile(root, current, scanned)
+			unpinned := lock.Reconcile(root, current, scanned)
 			if err := lock.Publish(root, current); err != nil {
 				return err
 			}
-			return reportLockState(root, current, scanned, unselected, jsonOutput)
+			// Pinning is what makes this a lock rather than a scan: a
+			// declaration names what is needed, and the lock has to say which
+			// exact build answers it.
+			pinned, failed := lock.PinAll(root, current, unpinned, lock.PinOptions{})
+			for _, p := range pinned {
+				recordUpstream(cmd.Context(), root, current, p)
+			}
+			if len(pinned) > 0 {
+				if err := lock.Publish(root, current); err != nil {
+					return err
+				}
+			}
+			return reportLockState(root, current, scanned, pinned, failed, jsonOutput)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print JSON")
-	cmd.AddCommand(newProjectSelectCmd())
 	return cmd
 }
 
-func newProjectSelectCmd() *cobra.Command {
+func newProjectPinCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "select <request> <identity|path>",
-		Short: "Select one exact artifact and vendor its source closure",
-		Long: `Resolve a declaration to one exact local artifact and vendor its sources.
+		Use:   "pin <request> [identity]",
+		Short: "Pin one exact artifact and vendor its rebuild sources",
+		Long: `Pin one declaration to an exact artifact and vendor its rebuild sources.
+- name/version   pin it to one installed overlay
+- a project .sqf  re-read the file and record its current identity
 
-The target is an identity — scheme@sha256:<hex>, a full digest, or an
-unambiguous prefix — or a path to an immutable .sqf, which may live outside the
-project. What gets recorded is the identity; the path is only how the artifact
-was found.
-
-Every copy in every readable image root is a candidate, not just the nearest
-one, so a selection can name a copy that ordinary name resolution would hide.`,
-		Example: `  condatainer project lock select star/2.7.11b a31f902c12ab
-  condatainer project lock select star/2.7.11b /shared/overlays/star.sqf`,
-		Args:         cobra.ExactArgs(2),
+An identity is scheme@sha256:<hex>, a full digest, or an unambiguous prefix.
+- Give one to choose between installed copies of a name; 
+- A project path takes none, since it already names the file it means.`,
+		Example: `  condatainer project pin star/2.7.11b a31f902c12ab
+  condatainer project pin overlays/combined.sqf`,
+		Args:         cobra.RangeArgs(1, 2),
 		SilenceUsage: true,
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := projectRoot(true)
 			if err != nil {
 				return err
@@ -119,19 +170,28 @@ one, so a selection can name a copy that ordinary name resolution would hide.`,
 			if err != nil {
 				return err
 			}
-			selected, err := lock.Select(root, args[0], args[1], lock.SelectOptions{})
+			var identity string
+			if len(args) > 1 {
+				identity = args[1]
+			}
+			pinned, err := lock.Pin(root, args[0], identity, lock.PinOptions{})
 			if err != nil {
 				return err
 			}
-			if err := lock.Apply(root, current, selected); err != nil {
+			upstream := recordUpstream(cmd.Context(), root, current, pinned)
+			if err := lock.Apply(root, current, pinned); err != nil {
 				return err
 			}
 
-			utils.PrintSuccess("Selected %s", utils.StyleName(selected.Name))
-			utils.PrintMessage("  identity %s", selected.Identity.Digest())
-			utils.PrintMessage("  read from %s", utils.StylePath(selected.Path))
-			for _, artifact := range selected.Vendored {
-				utils.PrintMessage("  vendored %s", artifact)
+			utils.PrintSuccess("Pinned %s", utils.StyleName(pinned.Name))
+			utils.PrintMessage("  identity %s", pinned.Identity.Digest())
+			utils.PrintMessage("  read from %s", utils.StylePath(pinned.Path))
+			for _, artifact := range pinned.Vendored {
+				line := "  vendored " + artifact
+				if remote, ok := upstream[artifact]; ok {
+					line += " (fetchable from " + remote + ")"
+				}
+				utils.PrintMessage("%s", line)
 			}
 			return nil
 		},
@@ -139,16 +199,311 @@ one, so a selection can name a copy that ordinary name resolution would hide.`,
 	return cmd
 }
 
+// recordUpstream adds a fetch location for every artifact this pin
+// vendored that its own recipe collection already publishes at the exact same
+// identity, and reports which, for display.
+//
+// Free in both senses: the bytes are already there, so restore downloads instead
+// of rebuilding, and nothing was uploaded to make it so.
+//
+// It never fails the pin. No network, no configured source, no declared
+// endpoint and no match all record nothing — locking has to work offline, and an
+// absent remote costs a rebuild rather than an error.
+func recordUpstream(ctx context.Context, root string, l *lock.Lock, pinned *lock.Pinned) map[string]string {
+	cat, err := config.OpenCatalog(ctx)
+	if err != nil {
+		logging.FromContext(ctx).Debug("no catalog, so no upstream locations were recorded", "err", err)
+		return nil
+	}
+	found := publish.Upstream(ctx, root, pinned.Vendored, cat)
+	shown := make(map[string]string, len(found))
+	for artifact, remotes := range found {
+		for _, remote := range remotes {
+			if err := l.AddRemote(artifact, remote); err != nil {
+				logging.FromContext(ctx).Debug("could not record an upstream location", "artifact", artifact, "err", err)
+				continue
+			}
+			shown[artifact] = remote.Repository
+		}
+	}
+	return shown
+}
+
+func newProjectRegistryCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "registry",
+		Short: "Manage where this project publishes its artifacts",
+		Long: `Shows the OCI destination recorded in cnt-lock/lock.json, where
+'project push' publishes.
+
+Record one with 'set', forget it with 'unset'.`,
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			root, err := projectRoot(false)
+			if err != nil {
+				return err
+			}
+			l, err := lock.Load(root)
+			if err != nil {
+				return err
+			}
+			if l.OCI.Empty() {
+				utils.PrintMessage("No registry is recorded. Set one with:")
+				utils.PrintMessage("  condatainer project registry set <registry>/<owner>/<repo>")
+				return nil
+			}
+			utils.PrintMessage("push     %s", utils.StylePath(l.OCI.Push))
+			utils.PrintMessage("audience %s", audienceOrDefault(l.OCI.Audience))
+			if l.Source != "" {
+				utils.PrintMessage("source   %s", l.Source)
+			}
+			return nil
+		},
+	}
+	cmd.AddCommand(newProjectRegistrySetCmd(), newProjectRegistryUnsetCmd())
+	return cmd
+}
+
+func newProjectRegistrySetCmd() *cobra.Command {
+	var audience, source string
+	cmd := &cobra.Command{
+		Use:   "set <registry>/<owner>/<repo>",
+		Short: "Record where this project publishes its artifacts",
+		Long: `Records the OCI repository 'project push' publishes to, in cnt-lock/lock.json.
+
+The endpoint takes no tag or digest. Every artifact goes into that one
+repository with its name carried in the tag, so one registry package covers the
+whole project.
+
+  - Audience sets the default for an app whose recipe declares no
+    #REDISTRIBUTE:. A public endpoint refuses one; a restricted one takes it.
+  - Source becomes the published artifacts' org.opencontainers.image.source.`,
+		Example:      `  condatainer project registry set ghcr.io/my-lab/rnaseq-2026/cnt --audience restricted`,
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root, err := projectRoot(true)
+			if err != nil {
+				return err
+			}
+			l, err := lock.Load(root)
+			if err != nil {
+				return err
+			}
+			previous := l.OCI
+			l.OCI = lock.OCI{
+				Push:     registry.TrimBaseScheme(args[0]),
+				Audience: strings.ToLower(strings.TrimSpace(audience)),
+			}
+			if cmd.Flags().Changed("source") {
+				l.Source = strings.TrimSpace(source)
+			} else if l.Source == "" {
+				// Derived once and recorded, never re-derived at push time: two
+				// collaborators with different remote spellings would otherwise
+				// publish two different annotations for one project.
+				l.Source = publish.OriginURL(cmd.Context(), root)
+			}
+			if err := lock.Publish(root, l); err != nil {
+				l.OCI = previous
+				return err
+			}
+
+			utils.PrintSuccess("Publishing to %s", utils.StylePath(l.OCI.Push))
+			utils.PrintMessage("  audience %s", audienceOrDefault(l.OCI.Audience))
+			if l.Source != "" {
+				utils.PrintMessage("  source   %s", l.Source)
+			} else {
+				utils.PrintMessage("  no repository URL was derived from origin; pass --source to record one")
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&audience, "audience", "public", "who can pull from this registry: public or restricted")
+	cmd.Flags().StringVar(&source, "source", "", "the project's code repository (default: derived from the origin remote)")
+	return cmd
+}
+
+func newProjectRegistryUnsetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "unset",
+		Short: "Forget where this project publishes",
+		Long: `Removes the recorded OCI destination, so 'project push' has nowhere to go
+until one is set again.
+
+Each artifact's recorded fetch location is untouched and stays valid.`,
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			root, err := projectRoot(true)
+			if err != nil {
+				return err
+			}
+			l, err := lock.Load(root)
+			if err != nil {
+				return err
+			}
+			if l.OCI.Empty() {
+				utils.PrintMessage("No registry was recorded.")
+				return nil
+			}
+			was := l.OCI.Push
+			l.OCI = lock.OCI{}
+			if err := lock.Publish(root, l); err != nil {
+				return err
+			}
+			utils.PrintSuccess("No longer publishing to %s", utils.StylePath(was))
+			return nil
+		},
+	}
+}
+
+// audienceOrDefault renders what an unrecorded audience means, rather than
+// printing nothing and leaving the reader to guess which way it falls.
+func audienceOrDefault(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "public (default)"
+	}
+	return v
+}
+
+func newProjectPushCmd() *cobra.Command {
+	var all, closure, dryRun, jsonOutput bool
+	var repository string
+	cmd := &cobra.Command{
+		Use:   "push",
+		Short: "Publish this project's artifacts and record where they landed",
+		Long: `Pushes the locked artifacts to the project's OCI registry and records where
+each landed, so a later 'project restore' downloads them instead of rebuilding.
+
+  - Each artifact is tagged by its name and by its identity.
+  - Skips pins a collection already serves, since restore tries those
+    first; --all uploads them too.
+  - Publishes only what is already built. 'project restore' produces the rest.`,
+		Example: `  condatainer project push --dry-run
+  condatainer project push
+  condatainer project push --all --closure`,
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			root, err := projectRoot(true)
+			if err != nil {
+				return err
+			}
+			l, err := lock.Load(root)
+			if err != nil {
+				return err
+			}
+			verified, problems := lock.Verify(root, l)
+			if len(problems) > 0 {
+				// Publication never fills gaps from the live catalog: what is
+				// published has to be what the checkout already describes.
+				return fmt.Errorf("the project is not valid, so nothing was published:\n  %s",
+					strings.Join(problemStrings(problems), "\n  "))
+			}
+
+			opts := publish.Options{All: all, Closure: closure, Repository: repository}
+			plan, err := publish.Build(cmd.Context(), root, l, verified, opts)
+			if err != nil {
+				return err
+			}
+			cat, err := config.OpenCatalog(cmd.Context())
+			if err != nil {
+				logging.FromContext(cmd.Context()).Debug("no catalog, so upstream copies were not checked", "err", err)
+			}
+			publish.Refine(cmd.Context(), root, plan, cat, opts)
+
+			if dryRun {
+				return reportPushPlan(plan, jsonOutput)
+			}
+			if !plan.Complete() {
+				return fmt.Errorf("nothing was published:\n  %s", strings.Join(plan.Problems, "\n  "))
+			}
+			report, runErr := publish.Run(cmd.Context(), root, plan, opts)
+			if err := reportPush(report, jsonOutput); err != nil {
+				return err
+			}
+			return runErr
+		},
+	}
+	cmd.Flags().BoolVar(&all, "all", false, "publish every pin, including ones a collection already serves")
+	cmd.Flags().BoolVar(&closure, "closure", false, "also publish build dependencies")
+	cmd.Flags().StringVar(&repository, "registry", "", "publish to this repository instead of the recorded one")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report what would be published and upload nothing")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print JSON")
+	return cmd
+}
+
+func reportPushPlan(plan *publish.Plan, jsonOutput bool) error {
+	if jsonOutput {
+		return printJSON(plan)
+	}
+	utils.PrintMessage("Publishing to %s (%s)", utils.StylePath(plan.Repository), audienceOrDefault(plan.Audience))
+	if plan.Source != "" {
+		utils.PrintMessage("  packages link to %s", plan.Source)
+	}
+	for _, step := range plan.Steps {
+		switch step.Disposition {
+		case publish.Upload:
+			utils.PrintMessage("  upload   %s  %s", utils.StyleName(step.Name), strings.Join(step.Tags, " "))
+		case publish.Present:
+			utils.PrintMessage("  present  %s  already published", utils.StyleName(step.Name))
+		case publish.Served:
+			utils.PrintMessage("  upstream %s  %s", utils.StyleName(step.Name), step.Remote.Repository)
+		case publish.Refused:
+			utils.PrintWarning("  refused  %s  %s", utils.StyleName(step.Name), step.Reason)
+		}
+		// Reported, never judged: no allowlist of channels could be maintained
+		// honestly, and interpreting a few hundred licence strings is what
+		// #LICENSE: exists not to do. The operator sees what went into the solve.
+		if len(step.Channels) > 0 {
+			utils.PrintMessage("           channels: %s", strings.Join(step.Channels, ", "))
+		}
+	}
+	utils.PrintMessage("%d to upload", plan.Uploads())
+	if !plan.Complete() {
+		return fmt.Errorf("this project cannot be published as it stands")
+	}
+	return nil
+}
+
+func reportPush(report *publish.Report, jsonOutput bool) error {
+	if jsonOutput {
+		return printJSON(report)
+	}
+	for _, step := range report.Published {
+		utils.PrintMessage("  %-8s %s", step.Disposition, utils.StyleName(step.Name))
+	}
+	for _, failure := range report.Failures {
+		utils.PrintError("  %s", failure)
+	}
+	if len(report.Failures) == 0 {
+		utils.PrintSuccess("Published %d artifact(s) to %s", len(report.Published), utils.StylePath(report.Repository))
+	}
+	return nil
+}
+
+func problemStrings(problems []lock.Problem) []string {
+	out := make([]string, 0, len(problems))
+	for _, problem := range problems {
+		out = append(out, problem.String())
+	}
+	return out
+}
+
 func newProjectValidateCmd() *cobra.Command {
 	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "validate",
-		Short: "Validate the lock and its vendored sources, using only the checkout",
-		Long: `Check that a checkout is a complete, internally consistent rebuild specification.
+		Short: "Check the lock is complete and consistent with the scripts",
+		Long: `Checks the lock alone:
+- every declaration in the scripts has a pin;
+- every pin points at a vendored artifact;
+- every vendored artifact regenerates the keys it records;
+- every dependency edge resolves to another vendored artifact.
 
-Nothing is read outside the checkout — no installed overlay, no store, no
-catalog, no configuration, no network — and no payload is needed, so this
-succeeds or fails identically in CI on a machine with no images at all.`,
+NOTE: It only validate the lock and will not check the overlay equivalence.
+To ask whether a script can actually run here, use condatainer check <script>.`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -165,11 +520,11 @@ succeeds or fails identically in CI on a machine with no images at all.`,
 				return err
 			}
 			_, problems := lock.Verify(root, current)
-			unselected := unselectedRequests(current, scanned)
+			needPin := requestsNeedingPin(current, scanned)
 
-			total := len(problems) + len(scanned.Findings) + len(unselected)
+			total := len(problems) + len(scanned.Findings) + len(needPin)
 			if jsonOutput {
-				if err := printJSON(validateReport(root, problems, unselected, scanned)); err != nil {
+				if err := printJSON(validateReport(root, problems, needPin, scanned)); err != nil {
 					return err
 				}
 				// The exit status is the answer; the format only changes how it
@@ -185,17 +540,17 @@ succeeds or fails identically in CI on a machine with no images at all.`,
 			for _, finding := range scanned.Findings {
 				utils.PrintError("%s:%d: %s", finding.Script, finding.Line, finding.Reason)
 			}
-			for _, request := range unselected {
-				utils.PrintError("%s is declared but not selected (%s)",
+			for _, request := range needPin {
+				utils.PrintError("%s is declared but not pinned (%s)",
 					utils.StyleName(request.Key), strings.Join(request.Scripts, ", "))
 			}
 			if total > 0 {
-				utils.PrintHint("Run %s to choose an artifact for each unselected request.",
-					utils.StyleAction("condatainer project lock select <request> <identity>"))
+				utils.PrintHint("Run %s to choose an artifact for each unpinned request.",
+					utils.StyleAction("condatainer project pin <request> <identity>"))
 				return fmt.Errorf("project is not valid: %d problem(s)", total)
 			}
-			utils.PrintSuccess("Project is valid: %d selection(s), %d script(s)",
-				len(current.Selections), len(scanned.Scripts))
+			utils.PrintSuccess("Project is valid: %d pin(s), %d script(s)",
+				len(current.Pins), len(scanned.Scripts))
 			return nil
 		},
 	}
@@ -203,17 +558,17 @@ succeeds or fails identically in CI on a machine with no images at all.`,
 	return cmd
 }
 
-// unselectedRequests reports declarations with no selection, without mutating
-// the lock the way Reconcile does. An unpinnable request is not unselected:
+// requestsNeedingPin reports declarations with no pin, without mutating
+// the lock the way Reconcile does. An unpinnable request is not needPin:
 // there is nowhere for restore to put an answer, and one left undeclared is
-// already a scan finding rather than a missing selection.
-func unselectedRequests(l *lock.Lock, scanned *lock.ScanResult) []lock.Request {
+// already a scan finding rather than a missing pin.
+func requestsNeedingPin(l *lock.Lock, scanned *lock.ScanResult) []lock.Request {
 	var out []lock.Request
 	for _, request := range scanned.Requests {
 		if !request.Kind.Pinnable() || request.Unpinned {
 			continue
 		}
-		if _, ok := l.Selections[request.Key]; !ok {
+		if _, ok := l.Pins[request.Key]; !ok {
 			out = append(out, request)
 		}
 	}
@@ -229,19 +584,19 @@ type requestReport struct {
 	Reason   string   `json:"reason,omitempty"`
 }
 
-func validateReport(root string, problems []lock.Problem, unselected []lock.Request, scanned *lock.ScanResult) any {
+func validateReport(root string, problems []lock.Problem, needPin []lock.Request, scanned *lock.ScanResult) any {
 	report := struct {
 		Root       string          `json:"root"`
 		Valid      bool            `json:"valid"`
 		Problems   []string        `json:"problems,omitempty"`
 		Findings   []lock.Finding  `json:"findings,omitempty"`
-		Unselected []requestReport `json:"unselected,omitempty"`
+		Unselected []requestReport `json:"needPin,omitempty"`
 		Scripts    []string        `json:"scripts"`
 	}{Root: root, Scripts: scanned.Scripts, Findings: scanned.Findings}
 	for _, problem := range problems {
 		report.Problems = append(report.Problems, problem.String())
 	}
-	for _, request := range unselected {
+	for _, request := range needPin {
 		report.Unselected = append(report.Unselected, requestReport{
 			Request: request.Key, Kind: string(request.Kind), Scripts: request.Scripts})
 	}
@@ -250,57 +605,81 @@ func validateReport(root string, problems []lock.Problem, unselected []lock.Requ
 }
 
 // reportLockState prints what a reconcile left behind and fails while anything
-// is unselected, so a partial lock is published but never reported as complete.
-func reportLockState(root string, l *lock.Lock, scanned *lock.ScanResult, unselected []lock.Request, jsonOutput bool) error {
+// is needPin, so a partial lock is published but never reported as complete.
+func reportLockState(root string, l *lock.Lock, scanned *lock.ScanResult,
+	pinned []*lock.Pinned, failed []error, jsonOutput bool) error {
 	if jsonOutput {
 		report := struct {
-			Root       string          `json:"root"`
-			Selections []requestReport `json:"selections"`
-			Unselected []requestReport `json:"unselected,omitempty"`
-			Findings   []lock.Finding  `json:"findings,omitempty"`
+			Root     string          `json:"root"`
+			Requests []requestReport `json:"requests"`
+			Failed   []string        `json:"failed,omitempty"`
+			Findings []lock.Finding  `json:"findings,omitempty"`
 		}{Root: root, Findings: scanned.Findings}
 		for _, request := range scanned.Requests {
 			entry := requestReport{Request: request.Key, Kind: string(request.Kind),
 				Scripts: request.Scripts, Unpinned: request.Unpinned, Reason: request.Reason}
-			if selection, ok := l.Selections[request.Key]; ok {
-				entry.Artifact = selection.Artifact
+			if pin, ok := l.Pins[request.Key]; ok {
+				entry.Artifact = pin.Artifact
 			}
-			report.Selections = append(report.Selections, entry)
+			report.Requests = append(report.Requests, entry)
 		}
-		for _, request := range unselected {
-			report.Unselected = append(report.Unselected, requestReport{
-				Request: request.Key, Kind: string(request.Kind), Scripts: request.Scripts})
-		}
+		report.Failed = errorStrings(failed)
 		if err := printJSON(report); err != nil {
 			return err
 		}
-		if len(unselected) > 0 {
-			return fmt.Errorf("%d request(s) are not selected", len(unselected))
-		}
-		return nil
+		return pinFailure(failed)
 	}
 
 	for _, request := range scanned.Requests {
-		switch selection, ok := l.Selections[request.Key]; {
+		switch pin, ok := l.Pins[request.Key]; {
 		case ok:
-			utils.PrintMessage("  %s → %s", utils.StyleName(request.Key), selection.Artifact)
+			utils.PrintMessage("  %s → %s", utils.StyleName(request.Key), pin.Artifact)
 		case request.Unpinned:
 			utils.PrintMessage("  %s → %s", utils.StyleName(request.Key), utils.StyleWarning("unpinned"))
 		}
 	}
+	// Reported after the map, because an alternative only makes sense once the
+	// reader can see which one was taken.
+	alternatives := false
+	for _, entry := range pinned {
+		for _, other := range entry.Others {
+			alternatives = true
+			utils.PrintMessage("    also installed: %s %s",
+				utils.StyleWarning(other.Identity.Digest()), utils.StylePath(other.Path))
+		}
+	}
+	if alternatives {
+		utils.PrintHint("Pin one of those instead with %s.",
+			utils.StyleAction("condatainer project pin <request> <identity>"))
+	}
 	for _, finding := range scanned.Findings {
 		utils.PrintWarning("%s:%d: %s", finding.Script, finding.Line, finding.Reason)
 	}
-	if len(unselected) == 0 {
-		utils.PrintSuccess("Every declaration is selected (%d).", len(l.Selections))
+	if len(failed) == 0 {
+		utils.PrintSuccess("Every declaration is pinned (%d).", len(l.Pins))
 		return nil
 	}
-	utils.PrintMessage("Unselected:")
-	for _, request := range unselected {
-		utils.PrintMessage("  - %s (%s)", utils.StyleWarning(request.Key), strings.Join(request.Scripts, ", "))
+	for _, err := range failed {
+		utils.PrintError("%v", err)
 	}
-	utils.PrintHint("Choose one with %s.", utils.StyleAction("condatainer project lock select <request> <identity>"))
-	return fmt.Errorf("%d request(s) are not selected", len(unselected))
+	return pinFailure(failed)
+}
+
+// pinFailure is the exit status: what could be pinned already was and is
+// published, so this says the project is incomplete, never that nothing ran.
+func pinFailure(failed []error) error {
+	if len(failed) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%d declaration(s) could not be pinned", len(failed))
+}
+
+func errorStrings(errs []error) []string {
+	out := make([]string, 0, len(errs))
+	for _, err := range errs {
+		out = append(out, err.Error())
+	}
+	return out
 }
 
 func printJSON(value any) error {
@@ -316,6 +695,7 @@ func newProjectRestoreCmd() *cobra.Command {
 		noPrebuilt    bool
 		keepBuildDeps bool
 		matchMode     string
+		replace       bool
 		only          string
 	)
 	cmd := &cobra.Command{
@@ -323,37 +703,13 @@ func newProjectRestoreCmd() *cobra.Command {
 		Short: "Make every locked artifact available on this machine",
 		Long: `Reuse, fetch, or rebuild each locked artifact until the project can run.
 
-Nothing is mounted and cnt-lock/ is never modified. A selected artifact lands
-where the store's destination rule puts it — the flat name when it is free,
-store/ when that name is already held at a different identity — and a
-project-path selection is materialized at exactly the path it declares.
+- A named pin lands in the store; a path pin at the path it declares;
+- Build dependencies are temporary unless --keep-build-deps;
+- Fetches from a recorded registry when one is available;
+- A rebuild carrying scheduler directives is submitted.
 
-An artifact nothing selected is a build dependency: it exists only so its dependent
-can be built, so it is produced in a temporary directory and removed when the
-restore ends. One already installed is adopted in place and never copied.
---keep-build-deps installs newly produced ones through the ordinary rule instead.
-
---no-prebuilt builds every missing artifact from source rather than downloading
-one the lock records. It is not an offline mode: every build needs the network —
-a Conda replay downloads each pinned package, a recipe fetches its own sources —
-which is what the proxy is for on a compute node without egress. An artifact
-already present is adopted either way.
-
---match decides which key a restored artifact must agree with. The default,
-equivalent, accepts anything that can substitute for what was locked, which is
-what the equivalence key exists to decide; identity accepts only the exact build
-the lock names, which additionally requires a Conda artifact to replay its
-explicit.txt to the byte and a data artifact to be rebuilt in the same
-environment.
-
-A rebuild whose recipe carries scheduler directives is submitted rather than run
-here, and so is anything waiting on it; dependencies become afterok edges. The
-command then exits with the jobs-submitted code, having made nothing available
-yet. Re-running the restore is how it resumes: a job still queued is reported
-rather than submitted twice, and one that finished is adopted.
-
-Restore is atomic per artifact, not across the project: a later failure leaves
-earlier results in place, and re-running adopts them.`,
+A path pin is the only file a restore can destroy, so one already holding
+something the lock does not name is refused rather than overwritten.`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -371,7 +727,7 @@ earlier results in place, and re-running adopts them.`,
 			}
 			opts := restore.Options{
 				Match: match, SkipPrebuilt: noPrebuilt, KeepBuildDeps: keepBuildDeps,
-				Only: only, SubmitJobs: config.Global.SubmitJob,
+				Replace: replace, Only: only, SubmitJobs: config.Global.SubmitJob,
 			}
 
 			if dryRun {
@@ -394,6 +750,8 @@ earlier results in place, and re-running adopts them.`,
 	cmd.Flags().BoolVar(&noPrebuilt, "no-prebuilt", false, "build missing artifacts from source instead of downloading a prebuilt")
 	cmd.Flags().BoolVar(&keepBuildDeps, "keep-build-deps", false,
 		"install build dependencies instead of discarding them when the restore ends")
+	cmd.Flags().BoolVar(&replace, "replace", false,
+		"overwrite a project path holding something the lock does not name")
 	cmd.Flags().StringVar(&matchMode, "match", string(restore.MatchEquivalent),
 		"key a restored artifact must agree with: equivalent or identity")
 	// Set by the job a submitted rebuild runs, so it produces exactly what it
@@ -425,6 +783,9 @@ func reportPlan(plan *restore.Plan, jsonOutput bool) error {
 	} else {
 		for _, step := range plan.Steps {
 			utils.PrintMessage("  %-7s %s → %s", step.Action, utils.StyleName(step.Name), planDestination(step))
+			if step.Replaces != "" {
+				utils.PrintWarning("    replaces %s already there", short(step.Replaces))
+			}
 		}
 		for _, problem := range plan.Problems {
 			utils.PrintError("%s", problem)
