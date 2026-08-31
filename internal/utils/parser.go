@@ -22,7 +22,7 @@ func StripInlineComment(s string) string {
 }
 
 // ParseMemoryMB parses memory strings like "8G", "1024M", "512K", "1T" into MB (int64).
-// Default unit is MB when no suffix is given.
+// Default unit is MB when no suffix is given. MB is MiB, here and everywhere.
 func ParseMemoryMB(memStr string) (int64, error) {
 	return ParseMemoryMBWithDefault(memStr, "MB")
 }

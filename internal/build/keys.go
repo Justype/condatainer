@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/container"
+	"github.com/Justype/condatainer/internal/store"
 )
 
 // generateKeys derives both keys for what this build produced.
@@ -53,15 +55,17 @@ func (b *BuildObject) keysFromSources(ctx context.Context) {
 	b.keys = derived.Keys()
 }
 
-// deriveRecipeKeys freezes dependency adjacency, derives both keys from the
-// manifest and recipe, and composes the rebuild-source capsule.
-func (b *BuildObject) deriveRecipeKeys(ctx context.Context) error {
+// recipeKeyArtifact assembles the key inputs of a recipe-backed build.
+//
+// One spelling, used both to derive the real keys after the build and to predict
+// the identity before it. A second construction of the same inputs is a second
+// preimage, and two preimages that drift produce two identities for one artifact.
+func (b *BuildObject) recipeKeyArtifact(ctx context.Context) (key.Artifact, bool) {
 	recipe, ok := b.spec.Source.RecipeFile()
 	if !ok {
-		return nil
+		return key.Artifact{}, false
 	}
-
-	artifact := key.Artifact{
+	return key.Artifact{
 		Name:         b.spec.Image.Name,
 		Type:         b.spec.Image.Type,
 		Env:          b.spec.Image.Env,
@@ -69,6 +73,15 @@ func (b *BuildObject) deriveRecipeKeys(ctx context.Context) error {
 		Placeholders: b.spec.Source.Placeholders,
 		Deps:         b.dependencyKeys(ctx),
 		From:         b.spec.Source.UpstreamDigest(),
+	}, true
+}
+
+// deriveRecipeKeys freezes dependency adjacency, derives both keys from the
+// manifest and recipe, and composes the rebuild-source capsule.
+func (b *BuildObject) deriveRecipeKeys(ctx context.Context) error {
+	artifact, ok := b.recipeKeyArtifact(ctx)
+	if !ok {
+		return nil
 	}
 
 	b.dependencies, b.provenanceComplete = key.Manifest(artifact)
@@ -197,4 +210,84 @@ func readDependencyManifest(nameVersion string) (string, meta.Manifest, error) {
 	path := strings.TrimSuffix(strings.TrimSuffix(paths[0], ":ro"), ":rw")
 	manifest, err := meta.ReadManifest(path)
 	return path, manifest, err
+}
+
+// ErrNoPrediction reports that this build's identity cannot be known before it
+// runs. It is never a failure: the caller builds, and the identity is derived
+// from what was produced, as it always was.
+var ErrNoPrediction = errors.New("identity cannot be predicted before the build")
+
+// PredictIdentity computes the identity this build will produce, without
+// producing it.
+//
+// It matters because --store files by identity, so "is this already installed"
+// is an identity question, not a name question — and answering it after the
+// build has run costs the whole build. Every input to a recipe-backed key is
+// known beforehand: the recipe text is embedded at resolution, and placeholders,
+// environment and dependency edges are fixed once dependencies are resolved.
+// Call it after buildDependencies, or the dependency edges are still unrecorded
+// and the answer describes a different artifact.
+//
+// A prediction is only ever acted on when it *matches* something installed, so
+// the direction of any error matters: an identity that cannot be predicted, or
+// is predicted wrongly, costs a build that the publication step then adopts.
+func (b *BuildObject) PredictIdentity(ctx context.Context) (meta.KeyRef, error) {
+	if b.spec.Source.Conda != nil {
+		return b.predictCondaIdentity(ctx)
+	}
+	artifact, ok := b.recipeKeyArtifact(ctx)
+	if !ok {
+		return meta.KeyRef{}, ErrNoPrediction
+	}
+
+	// A copy, never b's own fields: prediction must leave the build exactly as it
+	// found it, and deriveRecipeKeys sets these for real once the build is done.
+	manifest := b.Manifest()
+	manifest.Dependencies, manifest.ProvenanceComplete = key.Manifest(artifact)
+	manifest.Keys = meta.Keys{}
+
+	derived, err := key.Generate(manifest, b.keySources())
+	if err != nil {
+		return meta.KeyRef{}, fmt.Errorf("%w: %v", ErrNoPrediction, err)
+	}
+	return derived.Identity.Ref, nil
+}
+
+// InstalledAt reports where an identity of this build's name is already
+// installed, flat or in a store, across every readable images directory.
+func (b *BuildObject) InstalledAt(identity meta.KeyRef) (string, bool) {
+	if identity.Empty() {
+		return "", false
+	}
+	candidate, _, err := store.ResolveIdentity(b.spec.Image.Name,
+		store.IdentityQuery{Scheme: identity.Scheme, SHA256: identity.SHA256}, nil)
+	if err != nil {
+		return "", false
+	}
+	return candidate.Path, true
+}
+
+// skipIfInstalled reports whether this build's product is already installed,
+// deciding by identity rather than by name.
+//
+// Only under storeOverflow. Without it the bare name is the address, and the
+// name check has already answered; with it the name is expected to be taken and
+// says nothing about whether this exact build exists.
+func (b *BuildObject) skipIfInstalled(ctx context.Context) bool {
+	if !b.storeOverflow {
+		return false
+	}
+	identity, err := b.PredictIdentity(ctx)
+	if err != nil {
+		logging.FromContext(ctx).Debug("building without a predicted identity",
+			"name", b.spec.Image.Name, "reason", err)
+		return false
+	}
+	path, found := b.InstalledAt(identity)
+	if !found {
+		return false
+	}
+	logging.FromContext(ctx).Info("this exact build is already installed, skipping",
+		"kind", "note", "name", b.spec.Image.Name, "identity", identity.Digest(), "path", path)
+	return true
 }

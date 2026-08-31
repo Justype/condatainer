@@ -136,7 +136,7 @@ func (d *downloadProgress) interrupted() {
 		return
 	}
 	d.log.Warn(verbDownload+" cancelled",
-		"done", utils.FormatBytes(done), "total", utils.FormatBytes(d.total))
+		"done", utils.FormatSize(done), "total", utils.FormatSize(d.total))
 }
 
 // finish reports completion once, whatever the last layer's size was: the final
@@ -159,7 +159,7 @@ func (d *downloadProgress) report(final bool) {
 	done := d.done
 	d.mu.Unlock()
 	d.log.Info(verbDownload+" progress", "kind", "progress",
-		"done", utils.FormatBytes(done), "total", utils.FormatBytes(d.total),
+		"done", utils.FormatSize(done), "total", utils.FormatSize(d.total),
 		"final", final, "last", final)
 }
 
@@ -246,7 +246,7 @@ func (r *progressReader) report(final bool) {
 	if r.log == nil {
 		return
 	}
-	attrs := []any{"kind", "progress", "done", utils.FormatBytes(r.done), "total", utils.FormatBytes(r.total)}
+	attrs := []any{"kind", "progress", "done", utils.FormatSize(r.done), "total", utils.FormatSize(r.total)}
 	if r.layers > 0 {
 		attrs = append(attrs, "layer", fmt.Sprintf("%d/%d", r.layer, r.layers))
 	}

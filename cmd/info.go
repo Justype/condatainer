@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/artifact/compare"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/Justype/condatainer/internal/image/sif"
 	"github.com/Justype/condatainer/internal/image/squashfs"
 	"github.com/Justype/condatainer/internal/runtime/container"
+	"github.com/Justype/condatainer/internal/store"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -146,7 +148,7 @@ func displayImageInfo(overlayPath string) error {
 	fmt.Printf("  %-14s %s\n", "Name:", utils.StyleName(filepath.Base(overlayPath)))
 	displayDescription(overlayPath)
 	fmt.Printf("  %-14s %s\n", "Path:", utils.StylePath(overlayPath))
-	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatBytes(fileInfo.Size()))
+	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatSize(fileInfo.Size()))
 	typeLabel := string(typ)
 	if typeLabel == "" {
 		typeLabel = "unknown"
@@ -178,7 +180,7 @@ func displayImageInfo(overlayPath string) error {
 			comprStr = fmt.Sprintf("%s (level %d)", sqStats.Compression, sqStats.CompressionLevel)
 		}
 		fmt.Printf("  %-14s %s\n", "Compression:", utils.StyleInfo(comprStr))
-		fmt.Printf("  %-14s %s\n", "Block Size:", utils.FormatBytes(sqStats.BlockSize))
+		fmt.Printf("  %-14s %s\n", "Block Size:", utils.FormatSize(sqStats.BlockSize))
 		fmt.Printf("  %-14s %d\n", "Inodes:", sqStats.NumInodes)
 		fmt.Printf("  %-14s %d\n", "Fragments:", sqStats.NumFragments)
 		if sqStats.DuplicatesRemoved {
@@ -203,11 +205,43 @@ func displayImageInfo(overlayPath string) error {
 	// Environment variables section
 	displayEnvVars(overlayPath)
 
+	// Identity addresses one exact build; equivalence says what may stand in for
+	// it. Both are what `store` and a project lock resolve by.
+	displayKeys(overlayPath)
+
 	// Diagnostic provenance is off the mount path and optional for images built
 	// before manifests recorded build tools.
 	displayBuildTools(overlayPath)
 
 	return nil
+}
+
+// displayKeys prints the artifact's identity and equivalence keys.
+//
+// The keys are regenerated from the image rather than read from the manifest,
+// so what is shown is what `store` and `project` will resolve by. An image
+// without readable metadata prints nothing, like the Build section.
+func displayKeys(imagePath string) {
+	artifact, err := compare.Read(imagePath)
+	if err != nil {
+		return
+	}
+	// FormatKeyRef, not Empty: a half-recorded key renders as "" and is not a key.
+	identity, equiv := store.FormatKeyRef(artifact.IdentityRef()), store.FormatKeyRef(artifact.EquivRef())
+	if identity == "" && equiv == "" {
+		return
+	}
+
+	fmt.Println(utils.StyleTitle("Keys"))
+	if artifact.Name != "" {
+		fmt.Printf("  %-14s %s\n", "Artifact:", utils.StyleName(artifact.Name))
+	}
+	if identity != "" {
+		fmt.Printf("  %-14s %s\n", "Identity:", utils.StyleInfo(identity))
+	}
+	if equiv != "" {
+		fmt.Printf("  %-14s %s\n", "Equivalence:", utils.StyleInfo(equiv))
+	}
 }
 
 func displayBuildTools(imagePath string) {
@@ -258,11 +292,11 @@ func displayImgInfo(overlayPath string) error {
 	fmt.Printf("  %-14s %s\n", "Name:", utils.StyleName(filepath.Base(overlayPath)))
 	displayDescription(overlayPath)
 	fmt.Printf("  %-14s %s\n", "Path:", utils.StylePath(overlayPath))
-	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatBytes(stats.FileSizeBytes))
+	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatSize(stats.FileSizeBytes))
 	// Not a recipe type: an .img is a mutable working overlay, never built from a
 	// recipe, so it carries no embedded metadata to take a type from.
 	if stats.IsSparse {
-		fmt.Printf("  %-14s %s (Writable; %s on disk)\n", "Type:", utils.StyleInfo("environment"), utils.FormatBytes(stats.FileBlocksUsed))
+		fmt.Printf("  %-14s %s (Writable; %s on disk)\n", "Type:", utils.StyleInfo("environment"), utils.FormatSize(stats.FileBlocksUsed))
 	} else {
 		fmt.Printf("  %-14s %s (Writable)\n", "Type:", utils.StyleInfo("environment"))
 	}
@@ -293,14 +327,14 @@ func displayImgInfo(overlayPath string) error {
 	// Disk Usage section
 	fmt.Println(utils.StyleTitle("Disk Usage"))
 	fmt.Printf("  %-14s %s / %s (%.2f%%)\n", "Used:",
-		utils.FormatBytes(usedBytes),
-		utils.FormatBytes(totalBytes),
+		utils.FormatSize(usedBytes),
+		utils.FormatSize(totalBytes),
 		diskPct)
 	if stats.ReservedBlocks > 0 {
 		reservedPct := float64(stats.ReservedBlocks) / float64(stats.TotalBlocks) * 100
-		fmt.Printf("  %-14s %s (%.1f%% for root)\n", "Reserved:", utils.FormatBytes(reservedBytes), reservedPct)
+		fmt.Printf("  %-14s %s (%.1f%% for root)\n", "Reserved:", utils.FormatSize(reservedBytes), reservedPct)
 	}
-	fmt.Printf("  %-14s %s\n", "Free:", utils.FormatBytes(freeBytes))
+	fmt.Printf("  %-14s %s\n", "Free:", utils.FormatSize(freeBytes))
 
 	// Inode Usage section
 	fmt.Println(utils.StyleTitle("Inode Usage"))

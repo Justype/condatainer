@@ -11,12 +11,14 @@ import (
 
 	"log/slog"
 
+	"github.com/Justype/condatainer/internal/artifact/compare"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/producer"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/scheduler"
+	"github.com/Justype/condatainer/internal/store"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -51,11 +53,15 @@ func invalidateInstalledOverlays() {
 
 // checkShouldBuild returns (skip=true, nil) if the overlay already exists and update=false.
 // In update mode, if the overlay is locked by a running container, returns an error.
+//
+// storeOverflow never skips: the point of it is to produce a second identity of
+// a name that is already installed, and whether this build is that second one
+// cannot be known until it has been built and its keys read.
 func checkShouldBuild(b *BuildObject) (skip bool, err error) {
 	// IsInstalled, not a stat of the target: for a base that means every image
 	// search path, so one supplied by a shared install is not rebuilt into the
 	// user's own directory. Identical to a stat for every other type.
-	if !b.update && b.IsInstalled() {
+	if !b.update && !b.storeOverflow && b.IsInstalled() {
 		slog.Default().Info("overlay already exists, skipping",
 			"overlay", filepath.Base(b.tgt.Path), "path", b.tgt.Path)
 		return true, nil
@@ -103,6 +109,69 @@ func ensureWorkspaceRoot(b *BuildObject) error {
 		return fmt.Errorf("failed to create producer workspace %s: %w", b.ws.Root, err)
 	}
 	return nil
+}
+
+// publish installs a finished build and reports where it landed.
+//
+// Ordinarily that is the flat target and one rename. Under storeOverflow the
+// artifact is filed by its identity instead, which is what lets a second build
+// of a name exist beside the first rather than being skipped.
+func (b *BuildObject) publish(preparedPath, targetPath string) (string, error) {
+	if !b.storeOverflow {
+		if err := atomicInstall(preparedPath, targetPath); err != nil {
+			return "", err
+		}
+		return targetPath, nil
+	}
+	return b.publishToStore(preparedPath, targetPath)
+}
+
+// publishToStore files the finished build under its own identity.
+//
+// StoreOnly is not a choice here. The build holds the producer lock on the flat
+// target for its whole duration (Target.Lock is Path + ".lock"), which is the
+// very lock Begin would take to claim the bare name — so letting it consider
+// flat placement would deadlock the build against itself. The store is where a
+// second identity belongs anyway; `store use` is how one becomes the default.
+//
+// Keys are regenerated from the packed output rather than read from what the
+// build believes it produced, so Commit refuses anything that does not match
+// the address it reserved.
+func (b *BuildObject) publishToStore(preparedPath, targetPath string) (string, error) {
+	artifact, err := compare.Read(preparedPath)
+	if err != nil {
+		os.Remove(preparedPath) //nolint:errcheck
+		return "", fmt.Errorf("cannot file %s by identity: %w", filepath.Base(targetPath), err)
+	}
+
+	tx, err := store.Begin(artifact.Name, artifact.IdentityRef(), store.BeginOptions{
+		ImagesDir: filepath.Dir(targetPath),
+		Equiv:     artifact.EquivRef(),
+		StoreOnly: true,
+	})
+	if err != nil {
+		os.Remove(preparedPath) //nolint:errcheck
+		return "", err
+	}
+	// An identical build is already installed. It cost the build but not the
+	// disk, and the caller is told where the artifact actually is.
+	if tx.Adopted != nil {
+		os.Remove(preparedPath) //nolint:errcheck
+		return tx.Adopted.Path, nil
+	}
+	defer tx.Abort()
+
+	// Both paths are in one images root, so this is a rename and not a copy.
+	if err := os.Rename(preparedPath, tx.Prepared); err != nil {
+		os.Remove(preparedPath) //nolint:errcheck
+		return "", fmt.Errorf("failed to stage %s in the store: %w", filepath.Base(targetPath), err)
+	}
+	candidate, err := tx.Commit()
+	if err != nil {
+		return "", err
+	}
+	invalidateInstalledOverlays()
+	return candidate.Path, nil
 }
 
 // atomicInstall renames preparedPath over targetPath and invalidates the

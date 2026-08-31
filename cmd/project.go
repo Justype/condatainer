@@ -24,19 +24,20 @@ var projectDir string
 var projectCmd = &cobra.Command{
 	Use:   "project",
 	Short: "Pin and restore a project's artifacts",
-	Long: `Pins the exact artifact for every #DEP: in a project (a folder with cnt-lock/)
-It records pins with manifests and recipes, so the artifact can be reproduced.
+	Long: `A project is a folder holding a cnt-lock/ directory. Locking pins every #DEP:
+in its scripts to one exact artifact and records how to rebuild it, so the same
+scripts run the same way on another machine.
 
-Every artifact carries two keys, derived from its recipe and dependencies:
-- Identity names one exact build;
-- Equivalence key is shared by any build that can substitute for it. 
+Every artifact carries two keys:
+- identity    names one exact build;
+- equivalence is shared by any build that can stand in for it.
 
-Restore accepts an equivalent build unless asked for the identity.`,
+A restore accepts an equivalent build unless you ask for the identity.`,
 }
 
 func init() {
 	rootCmd.AddCommand(projectCmd)
-	projectCmd.PersistentFlags().StringVar(&projectDir, "project", "", "project root (default: the current directory)")
+	projectCmd.PersistentFlags().StringVar(&projectDir, "project", "", "Project root (default: the current directory)")
 	projectCmd.AddCommand(newProjectLockCmd(), newProjectPinCmd(), newProjectValidateCmd(),
 		newProjectRestoreCmd(), newProjectRegistryCmd(), newProjectPushCmd())
 }
@@ -95,19 +96,15 @@ func newProjectLockCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "lock",
 		Short: "Create or update the lock from #DEP: declarations",
-		Long: `Reads .sh and .bash scripts in the project and pins the overlays declared.
+		Long: `Reads the .sh and .bash scripts in the project and pins the overlay each
+#DEP: names. Creates cnt-lock/ when there is none.
 
-Scan rules:
-- cnt-lock/, overlays/ and dot directories are skipped;
-- symlinks are not followed.
-
-Behaviors:
-- Creates cnt-lock/ when there is none.
-- Pins every declaration and drops entries nothing declares any more.
+- Pins every declaration, and drops entries nothing declares any more.
+- Skips cnt-lock/, overlays/ and dot directories, and never follows symlinks.
 
 A declaration whose overlay is not installed fails the lock. Other installed
-builds of the same name are listed rather than pinned; 'project pin' takes one
-of those instead.`,
+builds of the same name are listed rather than pinned; pick one of those with
+'condatainer project pin'.`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -142,21 +139,23 @@ of those instead.`,
 			return reportLockState(root, current, scanned, pinned, failed, jsonOutput)
 		},
 	}
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print JSON")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
 	return cmd
 }
 
 func newProjectPinCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "pin <request> [identity]",
-		Short: "Pin one exact artifact and vendor its rebuild sources",
-		Long: `Pin one declaration to an exact artifact and vendor its rebuild sources.
-- name/version   pin it to one installed overlay
-- a project .sqf  re-read the file and record its current identity
+		Short: "Pin one declaration to an exact artifact",
+		Long: `Pins one declaration to an exact artifact and copies what is needed to
+rebuild it into cnt-lock/.
 
-An identity is scheme@sha256:<hex>, a full digest, or an unambiguous prefix.
-- Give one to choose between installed copies of a name; 
-- A project path takes none, since it already names the file it means.`,
+- name/version    pin it to one installed overlay
+- a project .sqf  re-read that file and record its current identity
+
+An identity is a full scheme@sha256:<hex> key or any unambiguous prefix of it.
+Give one to choose between installed copies of the same name; a project path
+takes none, since it already names the file it means.`,
 		Example: `  condatainer project pin star/2.7.11b a31f902c12ab
   condatainer project pin overlays/combined.sqf`,
 		Args:         cobra.RangeArgs(1, 2),
@@ -233,8 +232,8 @@ func newProjectRegistryCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "registry",
 		Short: "Manage where this project publishes its artifacts",
-		Long: `Shows the OCI destination recorded in cnt-lock/lock.json, where
-'project push' publishes.
+		Long: `Shows where 'condatainer project push' publishes, as recorded in
+cnt-lock/lock.json.
 
 Record one with 'set', forget it with 'unset'.`,
 		Args:         cobra.NoArgs,
@@ -270,15 +269,16 @@ func newProjectRegistrySetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set <registry>/<owner>/<repo>",
 		Short: "Record where this project publishes its artifacts",
-		Long: `Records the OCI repository 'project push' publishes to, in cnt-lock/lock.json.
+		Long: `Records where 'condatainer project push' publishes, in cnt-lock/lock.json.
 
-The endpoint takes no tag or digest. Every artifact goes into that one
-repository with its name carried in the tag, so one registry package covers the
+Give a repository with no tag or digest. Every artifact goes into that one
+repository, with its name carried in the tag, so a single package covers the
 whole project.
 
-  - Audience sets the default for an app whose recipe declares no
-    #REDISTRIBUTE:. A public endpoint refuses one; a restricted one takes it.
-  - Source becomes the published artifacts' org.opencontainers.image.source.`,
+- --audience says who can pull from the registry. A public one refuses an app
+  whose recipe does not declare that it may be redistributed; a restricted one
+  takes it.
+- --source is the code repository the published packages link back to.`,
 		Example:      `  condatainer project registry set ghcr.io/my-lab/rnaseq-2026/cnt --audience restricted`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
@@ -319,8 +319,8 @@ whole project.
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&audience, "audience", "public", "who can pull from this registry: public or restricted")
-	cmd.Flags().StringVar(&source, "source", "", "the project's code repository (default: derived from the origin remote)")
+	cmd.Flags().StringVar(&audience, "audience", "public", "Who can pull from this registry: public or restricted")
+	cmd.Flags().StringVar(&source, "source", "", "Code repository the packages link back to (default: the origin remote)")
 	return cmd
 }
 
@@ -328,10 +328,11 @@ func newProjectRegistryUnsetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "unset",
 		Short: "Forget where this project publishes",
-		Long: `Removes the recorded OCI destination, so 'project push' has nowhere to go
-until one is set again.
+		Long: `Forgets the recorded destination, so 'condatainer project push' has nowhere
+to publish until one is set again.
 
-Each artifact's recorded fetch location is untouched and stays valid.`,
+Where the artifacts were already published is untouched, so a restore can still
+download them.`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -373,13 +374,13 @@ func newProjectPushCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Publish this project's artifacts and record where they landed",
-		Long: `Pushes the locked artifacts to the project's OCI registry and records where
-each landed, so a later 'project restore' downloads them instead of rebuilding.
+		Long: `Publishes the locked artifacts to the project's registry and records where
+each landed, so a later restore downloads them instead of rebuilding.
 
-  - Each artifact is tagged by its name and by its identity.
-  - Skips pins a collection already serves, since restore tries those
-    first; --all uploads them too.
-  - Publishes only what is already built. 'project restore' produces the rest.`,
+- Each artifact is tagged by its name and by its identity.
+- Publishes only what is already built; 'project restore' produces the rest.
+- Skips pins a recipe source already serves, since a restore tries those first.
+  --all uploads them too.`,
 		Example: `  condatainer project push --dry-run
   condatainer project push
   condatainer project push --all --closure`,
@@ -426,11 +427,11 @@ each landed, so a later 'project restore' downloads them instead of rebuilding.
 			return runErr
 		},
 	}
-	cmd.Flags().BoolVar(&all, "all", false, "publish every pin, including ones a collection already serves")
-	cmd.Flags().BoolVar(&closure, "closure", false, "also publish build dependencies")
-	cmd.Flags().StringVar(&repository, "registry", "", "publish to this repository instead of the recorded one")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report what would be published and upload nothing")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print JSON")
+	cmd.Flags().BoolVar(&all, "all", false, "Publish every pin, including ones a recipe source already serves")
+	cmd.Flags().BoolVar(&closure, "closure", false, "Also publish build dependencies")
+	cmd.Flags().StringVar(&repository, "registry", "", "Publish to this repository instead of the recorded one")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report what would be published and upload nothing")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
 	return cmd
 }
 
@@ -496,14 +497,15 @@ func newProjectValidateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "validate",
 		Short: "Check the lock is complete and consistent with the scripts",
-		Long: `Checks the lock alone:
-- every declaration in the scripts has a pin;
-- every pin points at a vendored artifact;
-- every vendored artifact regenerates the keys it records;
-- every dependency edge resolves to another vendored artifact.
+		Long: `Checks the lock and the files it carries:
 
-NOTE: It only validate the lock and will not check the overlay equivalence.
-To ask whether a script can actually run here, use condatainer check <script>.`,
+- every declaration in the scripts has a pin;
+- every pin points at a recorded artifact;
+- every recorded artifact still regenerates the keys it claims;
+- every dependency resolves to another recorded artifact.
+
+It looks at the lock only, never at what is installed here. To ask whether a
+script can actually run on this machine, use 'condatainer check <script>'.`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -554,7 +556,7 @@ To ask whether a script can actually run here, use condatainer check <script>.`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print JSON")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
 	return cmd
 }
 
@@ -701,15 +703,15 @@ func newProjectRestoreCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "restore",
 		Short: "Make every locked artifact available on this machine",
-		Long: `Reuse, fetch, or rebuild each locked artifact until the project can run.
+		Long: `Reuses, downloads, or rebuilds each locked artifact until the project can run.
 
-- A named pin lands in the store; a path pin at the path it declares;
-- Build dependencies are temporary unless --keep-build-deps;
-- Fetches from a recorded registry when one is available;
-- A rebuild carrying scheduler directives is submitted.
+- A named pin is installed under its name; a path pin at the path it declares.
+- Downloads from a recorded registry whenever one is available.
+- A rebuild that carries scheduler directives is submitted as a job.
+- Build dependencies are discarded at the end unless --keep-build-deps.
 
-A path pin is the only file a restore can destroy, so one already holding
-something the lock does not name is refused rather than overwritten.`,
+A path pin is the only file a restore can overwrite, so one already holding
+something the lock does not name is refused unless you pass --replace.`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -745,18 +747,18 @@ something the lock does not name is refused rather than overwritten.`,
 			return runErr
 		},
 	}
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print JSON")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report what would happen and acquire nothing")
-	cmd.Flags().BoolVar(&noPrebuilt, "no-prebuilt", false, "build missing artifacts from source instead of downloading a prebuilt")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report what would happen and change nothing")
+	cmd.Flags().BoolVar(&noPrebuilt, "no-prebuilt", false, "Build missing artifacts locally instead of downloading a prebuilt")
 	cmd.Flags().BoolVar(&keepBuildDeps, "keep-build-deps", false,
-		"install build dependencies instead of discarding them when the restore ends")
+		"Keep build dependencies instead of discarding them at the end")
 	cmd.Flags().BoolVar(&replace, "replace", false,
-		"overwrite a project path holding something the lock does not name")
+		"Overwrite a project path holding something the lock does not name")
 	cmd.Flags().StringVar(&matchMode, "match", string(restore.MatchEquivalent),
-		"key a restored artifact must agree with: equivalent or identity")
+		"Key a restored artifact must agree with: equivalent or identity")
 	// Set by the job a submitted rebuild runs, so it produces exactly what it
 	// was sent for. Nothing a person types.
-	cmd.Flags().StringVar(&only, "only", "", "restore one vendored artifact and its closure")
+	cmd.Flags().StringVar(&only, "only", "", "Restore one recorded artifact and its dependencies")
 	_ = cmd.Flags().MarkHidden("only")
 	return cmd
 }

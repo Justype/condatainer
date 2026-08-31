@@ -59,6 +59,11 @@ type BuildObject struct {
 	submitJob   bool // Whether to submit to scheduler (from config at construction time)
 	tempSource  bool // Whether buildSource is a temp file this object wrote
 	update      bool // If true, rebuild even if overlay already exists (atomic .new swap)
+	// storeOverflow files the finished build under its identity instead of the
+	// bare name, so a second build of a name is kept beside the first rather
+	// than skipped. Set per object: it is what the user asked to build, never
+	// its dependencies, which stay ordinary and are skipped when installed.
+	storeOverflow bool
 	// locked marks a rebuild described by a project lock rather than the
 	// catalog: dependencies are mounted at supplied paths, the upstream digest
 	// is the recorded one, and the output belongs to the caller. See locked.go.
@@ -174,8 +179,15 @@ func (b *BuildObject) TargetOverlayPath() string { return b.tgt.Path }
 func (b *BuildObject) CntDirPath() string        { return b.ws.CntDir }
 func (b *BuildObject) ScriptSpecs() *ScriptSpecs { return b.scriptSpecs }
 func (b *BuildObject) Update() bool              { return b.update }
-func (b *BuildObject) BuildType() BuildType      { return b.buildType }
-func (b *BuildObject) InputAnswers() []string    { return b.inputAnswers }
+
+// SetStoreOverflow files this build under its identity rather than the bare
+// name. See the storeOverflow field.
+func (b *BuildObject) SetStoreOverflow(v bool) { b.storeOverflow = v }
+
+// StoreOverflow reports whether this build is filed by identity.
+func (b *BuildObject) StoreOverflow() bool    { return b.storeOverflow }
+func (b *BuildObject) BuildType() BuildType   { return b.buildType }
+func (b *BuildObject) InputAnswers() []string { return b.inputAnswers }
 
 func (b *BuildObject) String() string {
 	return fmt.Sprintf(`BuildObject:

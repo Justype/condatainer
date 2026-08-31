@@ -782,3 +782,47 @@ func ListServerPidFiles() []string {
 	}
 	return files
 }
+
+// GetWritableImagesDirIn returns the first writable images directory belonging
+// to one data layer.
+//
+// A layer, not a path, is the only placement control the store offers: a layer
+// name is local (LayerUser is $SCRATCH on one machine and the XDG data dir on
+// another), so it is a choice someone makes here and never something recorded.
+// Since extra_*dirs was removed, only LayerUser can hold two directories, and
+// they resolve in write order — scratch before user — like every other tier.
+func GetWritableImagesDirIn(layer DataLayer) (string, error) {
+	var candidates []SearchDir
+	for _, d := range imageWriteDirs() {
+		if ClassifyDataDir(d.Path) == layer {
+			candidates = append(candidates, d)
+		}
+	}
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("no images directory belongs to the %s layer", layer)
+	}
+	if dir := firstWritableDir(candidates); dir != "" {
+		return dir, nil
+	}
+	paths := make([]string, len(candidates))
+	for i, d := range candidates {
+		paths[i] = d.Path
+	}
+	return "", fmt.Errorf("no writable images directory in the %s layer (searched: %v)", layer, paths)
+}
+
+// IsPersonalImagesDir reports whether an images directory is the caller's alone.
+//
+// Personal, not the layer: a shared install whose CNT_ROOT is $SCRATCH/condatainer
+// classifies as app-root and is still only this user's, which deduplicateWriteDirs
+// already resolves. Callers use it to decide whether an action changes what other
+// people see.
+func IsPersonalImagesDir(path string) bool {
+	path = filepath.Clean(path)
+	for _, d := range imageWriteDirs() {
+		if filepath.Clean(d.Path) == path {
+			return d.Personal
+		}
+	}
+	return false
+}

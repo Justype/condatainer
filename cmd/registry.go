@@ -39,14 +39,27 @@ func newRegistryCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "registry",
 		Short: "Publish and fetch artifacts through an OCI registry",
-		Long: `Publish and fetch immutable .sqf overlays and .sif base images as OCI
-artifacts. Authentication uses CNT_REGISTRY_TOKEN/CNT_REGISTRY_USER first,
-then the Docker credential store, then anonymous access.`,
+		Long: `Publish and fetch read-only .sqf overlays and .sif base images through an OCI
+registry such as ghcr.io.
+
+Credentials are taken from CNT_REGISTRY_TOKEN and CNT_REGISTRY_USER first, then
+from the Docker credential store, and anonymous access last.`,
 	}
 
 	push := &cobra.Command{
-		Use:               "push <artifact-or-name>",
-		Short:             "Publish a local artifact",
+		Use:   "push <artifact-or-name>",
+		Short: "Publish a local artifact",
+		Long: `Publishes one local overlay or base image, named either by path or by an
+installed name/version.
+
+--registry says where it goes. An installed name/version can work it out on its
+own, from the recipe source the artifact was built from.
+
+What may be published depends on the endpoint's audience and on what the recipe
+declared about redistribution; a push that is not allowed is refused, never
+downgraded.`,
+		Example: `  condatainer registry push star/2.7.11b
+  condatainer registry push ./overlays/star.sqf --registry ghcr.io/my-lab/cnt`,
 		Args:              cobra.ExactArgs(1),
 		SilenceUsage:      true,
 		ValidArgsFunction: registryPushCompletion,
@@ -73,8 +86,17 @@ then the Docker credential store, then anonymous access.`,
 	push.Flags().BoolVarP(&opts.force, "force", "f", false, "Replace this platform at an existing versioned tag")
 
 	pull := &cobra.Command{
-		Use:          "pull <name/version|repository:tag|repository@digest>",
-		Short:        "Install an exact published artifact",
+		Use:   "pull <name/version|repository:tag|repository@digest>",
+		Short: "Install an exact published artifact",
+		Long: `Downloads one published artifact and installs it. The address has to be
+exact, and the copy matching this machine's platform is the one taken.
+
+It lands in the images directory under the name it was published as, unless
+--name or --prefix says otherwise.
+
+To pick a version rather than name one, use 'condatainer create'.`,
+		Example: `  condatainer registry pull star/2.7.11b --registry ghcr.io/my-lab/cnt
+  condatainer registry pull star/2.7.11b --registry ghcr.io/my-lab/cnt -p ./overlays/star.sqf`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -86,8 +108,11 @@ then the Docker credential store, then anonymous access.`,
 	pull.Flags().StringVarP(&opts.prefix, "prefix", "p", "", "Install at this path (the image extension is optional)")
 
 	resolve := &cobra.Command{
-		Use:          "resolve <name/version|repository:tag|repository@digest>",
-		Short:        "Print the selected platform manifest digest",
+		Use:   "resolve <name/version|repository:tag|repository@digest>",
+		Short: "Print the digest an address resolves to",
+		Long: `Prints the digest this machine would pull for the given address, and
+downloads nothing.`,
+		Example:      `  condatainer registry resolve star/2.7.11b --registry ghcr.io/my-lab/cnt`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -107,7 +132,9 @@ then the Docker credential store, then anonymous access.`,
 
 	tags := &cobra.Command{
 		Use:          "tags <repository>",
-		Short:        "List published tags for a repository",
+		Short:        "List the tags published for a repository",
+		Long:         `Lists every tag in one repository, which is how to see what versions are published.`,
+		Example:      `  condatainer registry tags star --registry ghcr.io/my-lab/cnt`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -132,8 +159,15 @@ then the Docker credential store, then anonymous access.`,
 	tags.Flags().StringVar(&opts.base, "registry", "", "Registry base, including owner/prefix (required)")
 
 	login := &cobra.Command{
-		Use:          "login <registry-host>",
-		Short:        "Verify and store registry credentials",
+		Use:   "login <registry-host>",
+		Short: "Verify and store registry credentials",
+		Long: `Checks the credentials against the registry and saves them in the Docker
+credential store once they work.
+
+Without --password or --password-stdin, the password is asked for on the
+terminal.`,
+		Example: `  condatainer registry login ghcr.io -u my-user
+  echo "$GITHUB_TOKEN" | condatainer registry login ghcr.io -u my-user --password-stdin`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -153,8 +187,10 @@ then the Docker credential store, then anonymous access.`,
 	login.Flags().BoolVar(&opts.passwordStdin, "password-stdin", false, "Read the password/token from stdin")
 
 	logout := &cobra.Command{
-		Use:          "logout <registry-host>",
-		Short:        "Remove stored registry credentials",
+		Use:   "logout <registry-host>",
+		Short: "Remove stored registry credentials",
+		Long: `Removes the saved credentials for one registry host. Credentials given
+through CNT_REGISTRY_TOKEN and CNT_REGISTRY_USER are unaffected.`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

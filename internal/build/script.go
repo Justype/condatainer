@@ -69,6 +69,14 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 		return err
 	}
 
+	// Dependencies are resolved by now, so the identity this build would produce
+	// is fully determined — and under --store that, not the name, decides whether
+	// there is anything to do.
+	if b.skipIfInstalled(ctx) {
+		b.Cleanup(false) //nolint:errcheck
+		return nil
+	}
+
 	// A pulled artifact does not need the local build base. Resolve it only once
 	// registry acquisition has declined and recipe execution will actually run.
 	if err := b.resolveBase(ctx); err != nil {
@@ -110,12 +118,13 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 
 	utils.ShareWithParentGroup(preparedPath)
 
-	if err := atomicInstall(preparedPath, targetPath); err != nil {
+	installed, err := b.publish(preparedPath, targetPath)
+	if err != nil {
 		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 
-	log.Info("overlay ready", "kind", "success", "path", targetPath)
+	log.Info("overlay ready", "kind", "success", "path", installed)
 	b.Cleanup(false)
 	return nil
 }

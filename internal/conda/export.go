@@ -164,3 +164,110 @@ func OrderChannels(exported, priority []string) []string {
 	slices.Sort(rest)
 	return append(out, rest...)
 }
+
+// Package is one resolved package, as `micromamba create --dry-run --json`
+// reports it. It is the smallest description from which both canonical exports
+// can be written.
+type Package struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	URL     string `json:"url"`
+	Channel string `json:"channel"`
+}
+
+// DryRun is the subset of `micromamba create --dry-run --json` that describes
+// what would be installed.
+type DryRun struct {
+	Actions struct {
+		Fetch []Package `json:"FETCH"`
+		Link  []Package `json:"LINK"`
+	} `json:"actions"`
+}
+
+// Resolved returns the packages a dry run would install, preferring LINK — the
+// set that ends up in the environment — and falling back to FETCH, which is only
+// what has to be downloaded and so omits anything already in the package cache.
+func (d DryRun) Resolved() []Package {
+	if len(d.Actions.Link) > 0 {
+		return d.Actions.Link
+	}
+	return d.Actions.Fetch
+}
+
+// ExplicitFrom writes the canonical explicit.txt for a resolved package set.
+//
+// It produces the same bytes CanonicalExplicit produces for the same packages,
+// and must stay the only other way to write that file: the identity hashes these
+// bytes, so a second spelling that drifts would give one artifact two identities
+// — one predicted before the build, one recorded by it.
+func ExplicitFrom(packages []Package) ([]byte, error) {
+	urls := make([]string, 0, len(packages))
+	for _, pkg := range packages {
+		url := strings.TrimSpace(pkg.URL)
+		if url == "" {
+			return nil, fmt.Errorf("conda: %s has no URL, so no explicit spec can be written", pkg.Name)
+		}
+		urls = append(urls, url)
+	}
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("conda: no packages resolved")
+	}
+	// Rebuilt through the same canonicalizer the export path uses, rather than
+	// formatted here: sorting and framing then have one implementation.
+	return CanonicalExplicit([]byte("@EXPLICIT\n" + strings.Join(urls, "\n") + "\n"))
+}
+
+// EnvironmentFrom writes the canonical environment.yml for a resolved package
+// set, with channels ordered by priority. See ExplicitFrom on why this shares
+// CanonicalEnvironment rather than formatting the file itself.
+func EnvironmentFrom(packages []Package, priority []string) ([]byte, error) {
+	var (
+		channels []string
+		deps     []string
+	)
+	for _, pkg := range packages {
+		if pkg.Name == "" || pkg.Version == "" {
+			return nil, fmt.Errorf("conda: a resolved package is missing its name or version")
+		}
+		deps = append(deps, pkg.Name+"="+pkg.Version)
+		if channel := channelName(pkg.Channel); channel != "" && !slices.Contains(channels, channel) {
+			channels = append(channels, channel)
+		}
+	}
+	if len(deps) == 0 {
+		return nil, fmt.Errorf("conda: no packages resolved")
+	}
+	doc := environmentExport{Channels: channels, Dependencies: make([]any, len(deps))}
+	for i, dep := range deps {
+		doc.Dependencies[i] = dep
+	}
+	raw, err := yaml.Marshal(doc)
+	if err != nil {
+		return nil, fmt.Errorf("conda: cannot assemble environment export: %w", err)
+	}
+	return CanonicalEnvironment(raw, priority)
+}
+
+// channelName reduces a channel as the solver reports it to the name an export
+// carries. A dry run may give a full URL or append the subdirectory; an export
+// names the channel alone, and the two have to agree or the key moves.
+func channelName(channel string) string {
+	channel = strings.TrimSpace(channel)
+	if channel == "" {
+		return ""
+	}
+	if i := strings.Index(channel, "://"); i >= 0 {
+		channel = channel[i+3:]
+		if j := strings.IndexByte(channel, '/'); j >= 0 {
+			channel = channel[j+1:]
+		}
+	}
+	channel = strings.TrimSuffix(channel, "/")
+	// Trailing subdir: conda-forge/linux-64 and conda-forge/noarch are one channel.
+	if i := strings.LastIndexByte(channel, '/'); i >= 0 {
+		if last := channel[i+1:]; last == "noarch" || strings.Contains(last, "-") {
+			channel = channel[:i]
+		}
+	}
+	return channel
+}

@@ -52,6 +52,49 @@ lock. Once an SQF exists, `exec` and `run` hold a shared inode `flock` while
 reading it; operations that replace or remove an existing file require an
 exclusive inode `flock`.
 
+## Placement and promotion
+
+`InstallFile` is the entry point for an artifact that already exists as a file —
+`store add`, and `project restore` for a downloaded prebuilt. It runs the ordinary
+transaction, so an exact copy anywhere is adopted rather than copied again — which
+callers naming a destination narrow with `SearchDirs`, since "it exists somewhere
+else" does not answer a request to have it *here*. It
+copies and never moves or links: the source is usually on another filesystem, a
+hardlink would make `GC` report freeing bytes a second link still holds and would
+share mode bits and `flock` with the user's own file, and a symlink is refused by
+`Commit` outright.
+
+A build reaches the store through `BuildObject.publishToStore`, which reads the
+keys back off the packed output and hands the prepared file to a transaction —
+one rename, since the build's prepared sibling and the store target are in the
+same images root. It always passes `StoreOnly`. That is not a policy choice: the
+build holds the producer lock on the flat target for its whole duration
+(`Target.Lock` is `Path + ".lock"`), which is the lock `reserveFlat` would take,
+so considering flat placement would deadlock the build against its own lock.
+
+`Promote` decides which identity a bare name resolves to. It only renames, and
+only inside the candidate's own root: the incumbent goes to that root's `store/`
+under its own regenerated identity, and the candidate takes the bare name, both
+under the bare name's producer lock so no build can claim it in between. The
+demotion completes before the promotion begins, so an interruption leaves both
+artifacts in `store/` with the name free — a state re-running repairs, and one no
+`.part` sweep can eat.
+
+Confinement to one root is what makes it safe for everyone else. Nothing leaves
+the root, so no identity disappears from any reader's set whatever their layer
+configuration, and a project lock — which pins name and keys, never a path —
+still resolves both. A candidate in a root that a nearer root shadows is refused
+with `ErrShadowed` rather than renamed into place, because reads are
+nearest-first and the promotion would change nothing; a candidate *nearer* than
+the current holder simply wins, and the farther copy is reported as shadowed and
+left alone.
+
+The artifact cache is never updated by either. `Lookup` requires the stored
+fingerprint to equal a fresh `lstat` over device, inode, size, mtime and ctime,
+so a renamed path misses and is recomputed. It could not work anyway: the cache
+is per-user, so a promotion in a shared root cannot reach any other reader's copy.
+The `Forget` calls are housekeeping for the caller's own file.
+
 ## Removal and collection
 
 `Remove` deletes one store entry. Only the store layout — a flat artifact

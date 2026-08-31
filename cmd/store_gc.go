@@ -15,27 +15,25 @@ import (
 func newStoreRmCmd() *cobra.Command {
 	var identity string
 	cmd := &cobra.Command{
-		Use:   "rm <name>",
+		Use:   "rm <name>@<identity>",
 		Short: "Remove one store entry",
-		Long: `Delete a single identity from the store.
+		Long: `Deletes one build from the store, chosen by name and identity.
 
-Only a store entry. A flat artifact answers to a bare name and belongs to
-` + "`condatainer remove`" + `; taking a name out of service through a command
-that reads as identity housekeeping would be a surprise.
+Store entries only. An overlay under a plain name belongs to
+'condatainer remove'.
 
-The entry must be free: an exclusive lock fails while a container is reading it,
-and a cleared write bit means someone pinned that identity deliberately.`,
+The entry has to be free: removal fails while a container is reading it, and an
+overlay whose write bit was cleared to pin it is never touched.`,
+		Example: `  condatainer store rm star/2.7.11b@9f2c1ab
+  condatainer store rm star/2.7.11b --identity 9f2c1ab`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(_ *cobra.Command, args []string) error {
-			if identity == "" {
-				return fmt.Errorf("--identity is required")
-			}
-			query, err := store.ParseIdentityQuery(identity)
+			name, query, err := splitStoreAddress(args[0], identity)
 			if err != nil {
 				return err
 			}
-			removed, err := store.Remove(args[0], query, nil)
+			removed, err := store.Remove(name, query, nil)
 			if err != nil {
 				return err
 			}
@@ -44,7 +42,7 @@ and a cleared write bit means someone pinned that identity deliberately.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&identity, "identity", "", "complete identity or unambiguous digest prefix")
+	cmd.Flags().StringVar(&identity, "identity", "", "Complete identity or unambiguous digest prefix")
 	return cmd
 }
 
@@ -59,22 +57,24 @@ func newStoreGCCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gc",
 		Short: "Report reclaimable store entries, or delete them",
-		Long: `Report which store entries could be deleted, and how much that would free.
+		Long: `Reports which store entries could be deleted, and how much space that would
+free. Nothing is deleted without --apply, which repeats the whole judgement
+before removing anything.
 
-Reporting is the default because no timestamp separates "installed and never
-opened" from "opened last week by a job about to run again", and a store entry
-costs hours to reproduce. --apply repeats the whole judgement and deletes what
-still passes.
+An entry is collectable when it is older than the grace period, nothing is
+reading it, and it still matches its recorded identity. Anything uncertain is
+kept.
 
-Age is the newest of atime, mtime and ctime, and the report names which one
-decided each entry. atime is the signal that tracks use; where a mount disables
-it the other two answer, which is why every row saying "ctime" means the
-filesystem is noatime rather than the artifacts being cold.
+Age is the newest of the file's access, modification and change times, and each
+row names which one decided it. A report where every row says "ctime" means the
+filesystem does not record access times, not that the artifacts are cold.
 
--D/--dir and -l/--layer scope the run, exactly as they do for ` + "`list`" + `.
---apply requires one of them: deleting across every writable tier at once,
-including a group root shared by people who are not at the keyboard, is not
-something to do by omission.`,
+-D/--dir and -l/--layer narrow the run, exactly as they do for 'list'. --apply
+requires one of them, so a group directory shared with people who are not at
+the keyboard is never collected by omission.`,
+		Example: `  condatainer store gc
+  condatainer store gc --layer user --grace 60
+  condatainer store gc --dir scratch --apply`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -93,11 +93,11 @@ something to do by omission.`,
 			return printGCReport(report, jsonOut)
 		},
 	}
-	cmd.Flags().BoolVar(&apply, "apply", false, "delete the entries that still pass; requires --dir or --layer")
-	cmd.Flags().IntVar(&graceDay, "grace", 0, "age in days below which nothing is collectable (default: store_gc_grace)")
-	cmd.Flags().StringVarP(&dir, "dir", "D", "", "limit to image directories matching this substring")
-	cmd.Flags().StringVarP(&layer, "layer", "l", "", "limit to a data layer: u/user, r/app-root, e/extra-root")
-	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON")
+	cmd.Flags().BoolVar(&apply, "apply", false, "Delete the collectable entries; requires --dir or --layer")
+	cmd.Flags().IntVar(&graceDay, "grace", 0, "Age in days below which nothing is collectable (default: store_gc_grace)")
+	cmd.Flags().StringVarP(&dir, "dir", "D", "", "Limit to image directories matching this substring")
+	cmd.Flags().StringVarP(&layer, "layer", "l", "", "Limit to a data layer: u/user, r/app-root, e/extra-root")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Print JSON")
 	cmd.RegisterFlagCompletionFunc("layer", //nolint:errcheck
 		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 			return []string{"user", "app-root", "extra-root"}, cobra.ShellCompDirectiveNoFileComp

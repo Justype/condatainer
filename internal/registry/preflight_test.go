@@ -53,7 +53,7 @@ func TestPreflightReportsThePlan(t *testing.T) {
 		t.Fatalf("logged %v, want one summary", lines)
 	}
 	for _, want := range []string{
-		"upload plan", "layer-size=2.00 GB (floor)", "layers=1", "requests=~15", "registry=ghcr.io",
+		"upload plan", "layer-size=2.00 GiB (floor)", "layers=1", "requests=~15", "registry=ghcr.io",
 	} {
 		if !strings.Contains(lines[0], want) {
 			t.Errorf("summary %q does not mention %q", lines[0], want)

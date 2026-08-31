@@ -80,7 +80,7 @@ func (g *throughputGuard) check(bytes int64) error {
 	needed := float64(bytes) / g.budget.Seconds()
 	return fmt.Errorf(
 		"this link cannot carry a %s layer inside the registry's upload budget: measured %s/s, need %s/s to finish in %s (projected %s)",
-		utils.FormatBytes(bytes), utils.FormatBytes(int64(rate)), utils.FormatBytes(int64(needed)),
+		utils.FormatSize(bytes), utils.FormatSize(int64(rate)), utils.FormatSize(int64(needed)),
 		g.budget.Round(time.Second), projected.Round(time.Second))
 }
 

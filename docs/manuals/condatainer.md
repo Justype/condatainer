@@ -17,6 +17,7 @@
 - [Helper](#helper)
 - [Config](#config)
 - [Registry](#registry)
+- [Store](#store)
 - [Project](#project)
 - [Scheduler](#scheduler)
 - [Update](#update)
@@ -38,14 +39,14 @@ Available Commands:
   config            Manage condatainer configuration
   create            Create a new SquashFS overlay
   e                 Shortcut for exec with overlays, writable by default
-  env               Manage the mounted overlay's environment; unavailable outside CondaTainer
+  env               Manage the Conda environment of the mounted overlay
   exec              Execute a command with overlays
   helper            Run web apps like RStudio on HPC
   info              Show details about an overlay
   list              List installed overlays
   o                 Shortcut for 'overlay create'
   overlay           Manage ext3 overlays (create, resize, check, info)
-  project           Pin a project's dependencies to exact artifact identities
+  project           Pin and restore a project's artifacts
   proxy             Manage proxy tunnels for compute nodes
   registry          Publish and fetch artifacts through an OCI registry
   remove            Remove installed overlays matching search terms
@@ -54,7 +55,7 @@ Available Commands:
   search            Search conda packages via anaconda.org
   self-update       Update condatainer to the latest version
   server            Manage the condatainer dashboard server
-  store             Inspect immutable identity-addressed overlays
+  store             Inspect overlays kept under an exact build identity
   update            Update script metadata caches or the base image
 
 Flags:
@@ -404,6 +405,7 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
 * `--from [URI]`: Build from an external image URI (e.g., `docker://ubuntu:22.04`).
 * `-c`, `--channel [CHANNEL]`: Conda channel to use, overriding config channels. Repeatable: `-c conda-forge -c bioconda`.
 * `-u`, `--update`: Rebuild overlays even if they already exist (atomic `.new` swap). Useful for refreshing a package to the latest version.
+* `-l`, `--layer [LAYER]`: Build into a chosen [data layer](../deployment/data_layers.md) — `u`/`user`, `r`/`app-root`, `e`/`extra-root` — instead of the first writable one. Cannot be combined with `-p`, which already names where the overlay goes.
 
 **Build Flags:**
 
@@ -413,6 +415,13 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
 * `--app-tmp-overlay`: Assemble an **app** build inside a temporary ext3 overlay instead of host directories. Equivalent to setting `build.app_tmp_overlay = true` in config. Can be substantially faster when the build tmp directory is on a network filesystem, and keeps a conda environment's many small files off its inode quota.
 
   Applies to `app` builds only. A `data` build stages its payload on the host either way — it is a few large files, so an image would buy nothing — and `os`/`base` are definition builds where Apptainer writes the image itself.
+* `--store`: Build into the [store](#store), filed under this build's identity instead of taking the plain name.
+
+  It never skips and never replaces. Ordinarily a build of an already-installed name is skipped, and `-u` swaps the installed one out; `--store` is how you get a second build of that name installed alongside the first. It behaves the same when nothing holds the name yet — the build is filed by identity either way, so it stays out of `condatainer list` and out of `exec -o <name>` until you promote it with [`store use`](#store). That is the point of the flag: a build that changes nothing anyone else resolves.
+
+  Before building, it works out the identity the build *would* produce and stops if that exact artifact is already installed — a recipe build knows its identity from the recipe and its dependencies, and a Conda build learns it from a solve (`--dry-run`), without creating the environment. So re-running `--store` after a successful one costs a solve, not a build.
+
+  Works with any build that lands in an images directory — a `name/version` recipe, `-n` with packages, `-n -f environment.yml`, `-n --from docker://…`. The one conflict is `-p`/`--prefix`, which names an exact output file while the store generates its filename from the artifact's keys. A bare `-f environment.yml` with no `-n` derives a prefix from the file name, so it conflicts too; give it a `-n`. A `base` image is also refused: it carries no identity key to be filed under.
 * `--always-submit`: Submit all builds as scheduler jobs, even when the build script has no scheduler directives.
 * `--no-submit`: Disable job submission; build locally even if the build script has scheduler directives.
 * `--remote`: Remote build scripts take precedence over local.
@@ -1845,6 +1854,92 @@ So `grch38--genome--gencode49__a31f902c12ab` in a project package and
 `grch38/genome:gencode49` in a collection package can be the same bytes; they are
 addressed differently because they are retained differently. See
 [Project Push](#project-push) for why a project needs the identity tag.
+
+## Store
+
+Most overlays answer to a plain name: one `star/2.7.11b`, in one file, found by
+every command that takes a name. The **store** is where the extra ones go when
+that is not enough — a second build of a name, filed under its exact identity so
+both can be installed at once.
+
+```
+condatainer store add | list | path | use | validate | rm | gc
+```
+
+An identity names one exact build. Any command taking `--identity` accepts the
+complete `scheme@sha256:…` key or any unambiguous prefix of its digest;
+`condatainer info` prints both keys for an overlay.
+
+### Getting something into the store
+
+Two ways, depending on whether it exists yet:
+
+```bash
+# Build a second one, keeping the installed build of that name
+condatainer create --store star/2.7.11b
+
+# Install an overlay file you already have
+condatainer store add ./star-2.7.11b.sqf
+condatainer store add /scratch/builds/star.sqf --layer user
+```
+
+`store add` copies — never moves, never links — so the source file stays exactly
+where it is. The name and identity come from the file's own metadata, never from
+its filename, and inside the store the filename is generated from the keys. Use
+`-l`/`--layer` to choose *which* store; to put an overlay at a path of your own
+choosing use `create -p` or `registry pull -p` instead.
+
+If the identity is already installed, nothing is copied and the existing path is
+reported instead. With `--layer` that check is limited to the layer you named, so
+asking for a build in a particular directory puts it there even when another
+directory already has one — which is how you lift a shadow before `store use`.
+
+### Choosing which build a name means
+
+A store entry is reachable only by its identity: `condatainer list` and
+`exec -o star/2.7.11b` see the plain-name build. `store use` swaps them.
+
+```bash
+condatainer store list star/2.7.11b            # what else is installed
+condatainer store use star/2.7.11b --identity 9f2c1ab
+```
+
+The chosen build takes the plain name and the one that held it moves into the
+same directory's store. Both stay installed and both stay resolvable by
+identity — **nothing is deleted, and no project lock breaks**, because a lock
+pins an identity rather than a path.
+
+Two rules follow from how overlays are found. Reads resolve nearest-first across
+[data layers](../deployment/data_layers.md), so:
+
+* a build in a directory that a nearer one already shadows is **refused** — promoting it there would change nothing. Copy it into the nearer directory first with `store add --layer`, then run `store use`.
+* a build in a *nearer* directory than the current holder simply wins, and the farther copy is left alone and reported as shadowed.
+
+`store use` only ever renames, and only inside one directory. That is what keeps
+it safe for other people: nothing leaves the directory, so no identity vanishes
+from anyone's view whatever their own layer configuration. In a shared directory
+it does change what the name means for everyone reading it, so it asks first
+unless `-y` is given.
+
+### Inspecting and reclaiming
+
+```bash
+condatainer store list                                 # name, identity, size, path
+condatainer store list star/2.7.11b --equiv 9f2c1ab    # what could stand in for it
+condatainer store path star/2.7.11b --identity 9f2c1ab # one exact path, for scripts
+condatainer store validate                             # re-check every entry's keys
+condatainer store rm star/2.7.11b --identity 9f2c1ab   # delete one entry
+condatainer store gc                                   # what could be reclaimed
+condatainer store gc --layer user --apply              # reclaim it
+```
+
+`store rm` deletes store entries only — an overlay under a plain name belongs to
+`condatainer remove`. Neither touches an overlay whose write bit is clear
+(`chmod a-w` is how an artifact is pinned) or one a running container is reading.
+
+`gc` reports by default and needs `--dir` or `--layer` before `--apply`, so a
+directory shared with people who are not at the keyboard is never collected by
+omission.
 
 ## Project
 

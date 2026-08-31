@@ -9,8 +9,13 @@ import (
 )
 
 var envCmd = &cobra.Command{
-	Use:          "env",
-	Short:        "Manage the mounted overlay's environment; unavailable outside CondaTainer",
+	Use:   "env",
+	Short: "Manage the Conda environment of the mounted overlay",
+	Long: `Install, update and inspect the Conda packages of the environment overlay
+mounted in the current container.
+
+These commands run inside CondaTainer only. Enter a writable container first:
+  condatainer exec -w -o env.img bash`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
@@ -20,34 +25,34 @@ var envCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(envCmd)
 
-	envCmd.AddCommand(newMicromambaCommand("install", "Install packages", runEnvInstall))
+	envCmd.AddCommand(newMicromambaCommand("install", "Install packages into the environment", runEnvInstall))
 	envCmd.AddCommand(newMicromambaCommand("update", "Update installed packages", runEnvMutation("update")))
 	envCmd.AddCommand(newMicromambaCommand("remove", "Remove installed packages", runEnvMutation("remove")))
 	envCmd.AddCommand(newMicromambaCommand("list", "List installed packages", runEnvRead("list")))
-	envCmd.AddCommand(newMicromambaCommand("export", "Export the environment specification", runEnvRead("env", "export")))
-	envCmd.AddCommand(newMicromambaCommand("search", "Search available packages", runEnvMutation("search")))
-	envCmd.AddCommand(newMicromambaCommand("clean", "Clean package caches", runEnvMutation("clean")))
+	envCmd.AddCommand(newMicromambaCommand("export", "Print the environment specification", runEnvRead("env", "export")))
+	envCmd.AddCommand(newMicromambaCommand("search", "Search the channels for a package", runEnvMutation("search")))
+	envCmd.AddCommand(newMicromambaCommand("clean", "Clean the package caches", runEnvMutation("clean")))
 
-	channelsCmd := &cobra.Command{Use: "channels", Short: "Manage project channels"}
+	channelsCmd := &cobra.Command{Use: "channels", Short: "Manage the environment's Conda channels"}
 	channelsCmd.AddCommand(
-		envStructuredCommand("list", cobra.NoArgs, runEnvChannelsList),
-		envStructuredCommand("append <channel>", cobra.ExactArgs(1), runEnvChannelsAppend),
-		envStructuredCommand("prepend <channel>", cobra.ExactArgs(1), runEnvChannelsPrepend),
-		envStructuredCommand("remove <channel>", cobra.ExactArgs(1), runEnvChannelsRemove),
+		envStructuredCommand("list", "List the channels, highest priority first", cobra.NoArgs, runEnvChannelsList),
+		envStructuredCommand("append <channel>", "Add a channel with the lowest priority", cobra.ExactArgs(1), runEnvChannelsAppend),
+		envStructuredCommand("prepend <channel>", "Add a channel with the highest priority", cobra.ExactArgs(1), runEnvChannelsPrepend),
+		envStructuredCommand("remove <channel>", "Remove a channel", cobra.ExactArgs(1), runEnvChannelsRemove),
 	)
 	envCmd.AddCommand(channelsCmd)
 
-	pinCmd := &cobra.Command{Use: "pin", Short: "Manage package version pins"}
+	pinCmd := &cobra.Command{Use: "pin", Short: "Keep packages at a chosen version"}
 	pinCmd.AddCommand(
-		envStructuredCommand("list", cobra.NoArgs, runEnvPinList),
-		envStructuredCommand("add <spec>", cobra.ExactArgs(1), runEnvPinAdd),
-		envStructuredCommand("remove <package>", cobra.ExactArgs(1), runEnvPinRemove),
+		envStructuredCommand("list", "List the pinned packages", cobra.NoArgs, runEnvPinList),
+		envStructuredCommand("add <spec>", "Pin a package; a bare name pins the installed version", cobra.ExactArgs(1), runEnvPinAdd),
+		envStructuredCommand("remove <package>", "Unpin a package", cobra.ExactArgs(1), runEnvPinRemove),
 	)
 	envCmd.AddCommand(pinCmd)
 }
 
-func envStructuredCommand(use string, args cobra.PositionalArgs, run envRunFunc) *cobra.Command {
-	return &cobra.Command{Use: use, Args: args, RunE: run, SilenceUsage: true}
+func envStructuredCommand(use, short string, args cobra.PositionalArgs, run envRunFunc) *cobra.Command {
+	return &cobra.Command{Use: use, Short: short, Args: args, RunE: run, SilenceUsage: true}
 }
 
 type envRunFunc func(*cobra.Command, []string) error

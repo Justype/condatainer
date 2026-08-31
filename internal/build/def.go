@@ -41,6 +41,11 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 		return err
 	}
 
+	if b.skipIfInstalled(ctx) {
+		b.Cleanup(false) //nolint:errcheck
+		return nil
+	}
+
 	log.Info("building image", "kind", "note", "image", filepath.Base(targetPath),
 		"mode", buildModeLabel(b), "source", b.buildSource)
 
@@ -151,12 +156,13 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 		utils.ShareWithParentGroup(preparedPath)
 	}
 
-	if err := atomicInstall(preparedPath, targetPath); err != nil {
+	installed, err := b.publish(preparedPath, targetPath)
+	if err != nil {
 		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 
-	log.Info("image ready", "kind", "success", "path", targetPath)
+	log.Info("image ready", "kind", "success", "path", installed)
 	b.Cleanup(false)
 	return nil
 }

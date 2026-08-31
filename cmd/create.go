@@ -34,6 +34,8 @@ var (
 	createChannels      []string
 	createSources       []string
 	createUpdate        bool
+	createStore         bool
+	createLayer         string
 	createAppTmpOverlay bool
 	createAlwaysSubmit  bool
 
@@ -44,7 +46,7 @@ var (
 	// buildFlagNames is the set of flags shown under "Build Flags:" in help.
 	buildFlagNames = map[string]bool{
 		"app-tmp-overlay": true, "app-tmp-overlay-size": true, "block-size": true,
-		"data-block-size": true, "always-submit": true, "no-submit": true,
+		"data-block-size": true, "always-submit": true, "no-submit": true, "store": true,
 	}
 )
 
@@ -103,6 +105,19 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 		}
 		if derived := derivePrefixFromFile(createFile, createPrefix, createName); derived != "" {
 			createPrefix = derived
+		}
+		// Checked after the derivation above, which turns a bare `-f env.yml` into
+		// a prefix: it is the prefix that conflicts, however it arrived. A prefix
+		// names an exact output path, while the store generates its filename from
+		// the artifact's keys — the filename there is the address. Everything else
+		// builds into an images directory and can be filed by identity.
+		if createPrefix != "" {
+			if createStore {
+				ExitWithError("--store cannot be used with --prefix: a prefix names the file, and in the store the identity does. Use --name instead.")
+			}
+			if createLayer != "" {
+				ExitWithError("Cannot use both --layer and --prefix: --prefix already names where the overlay goes.")
+			}
 		}
 		if createPrefix != "" && createFile == "" && len(args) == 0 && createFrom == "" {
 			ExitWithError("--prefix requires either packages, --file, or --from to be specified.")
@@ -217,7 +232,9 @@ func init() {
 	f.StringArrayVarP(&createSources, "source", "s", nil,
 		"Use only this configured recipe source, in flag order (repeatable)")
 	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist")
-	f.BoolVar(&createAppTmpOverlay, "app-tmp-overlay", false, "Assemble an app build in a temporary ext3 overlay instead of host directories")
+	f.BoolVar(&createStore, "store", false, "Build into the store, filed under its identity")
+	f.StringVarP(&createLayer, "layer", "l", "", "Build into this data layer: u/user, r/app-root, e/extra-root")
+	f.BoolVar(&createAppTmpOverlay, "app-tmp-overlay", false, "Assemble an app build in a temporary ext3 overlay instead of host path")
 	f.StringVar(&createAppTmpOvlSize, "app-tmp-overlay-size", "20G", "Size of that temporary overlay")
 	f.BoolVar(&createAlwaysSubmit, "always-submit", false, "Submit all builds as scheduler jobs, even no directives")
 	f.BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (build locally)")
@@ -282,14 +299,35 @@ func init() {
 // three create paths each resolve the directory independently.
 var imagesDirNoteOnce sync.Once
 
+// writableImagesDirFor resolves where a build installs: the layer named, or the
+// furthest-out writable directory when none is.
+//
+// A layer is the only placement control offered, and it is local — LayerUser is
+// $SCRATCH on one machine and the XDG data dir on another — so it is a choice
+// made per invocation and never recorded anywhere.
+func writableImagesDirFor(layer string) (string, error) {
+	if strings.TrimSpace(layer) == "" {
+		dir, err := config.GetWritableImagesDir()
+		if err != nil {
+			return "", fmt.Errorf("no writable images directory found: %w", err)
+		}
+		return dir, nil
+	}
+	selected, err := config.ParseDataLayer(layer)
+	if err != nil {
+		return "", err
+	}
+	return config.GetWritableImagesDirIn(selected)
+}
+
 // getWritableImagesDir returns the writable images directory or exits with an error.
 // The destination and its data layer are reported once: the target depends on which
 // directories happen to be writable, so "(app-root)" vs "(user)" is the difference
 // between installing for everyone and installing only for yourself.
 func getWritableImagesDir() string {
-	dir, err := config.GetWritableImagesDir()
+	dir, err := writableImagesDirFor(createLayer)
 	if err != nil {
-		ExitWithError("No writable images directory found: %v", err)
+		ExitWithError("%v", err)
 	}
 	imagesDirNoteOnce.Do(func() {
 		utils.PrintNote("Installing to %s (%s)", dir, config.ClassifyDataDir(dir))
@@ -530,6 +568,7 @@ func runCreatePackages(ctx context.Context, packages []string) {
 		if err != nil {
 			ExitWithError("Failed to create build object for %s: %v", pkg, err)
 		}
+		applyStoreOverflow(bo)
 		utils.PrintDebug("[CREATE] BuildObject created:\n%s", bo)
 		buildObjects = append(buildObjects, bo)
 	}
@@ -576,6 +615,22 @@ func isExternalBuildFile(path string) bool {
 		strings.HasSuffix(path, ".def")
 }
 
+// applyStoreOverflow marks a build to be filed under its identity when --store
+// was given, and refuses the one type that has no identity to be filed under.
+//
+// A base carries neither an identity nor an equivalence key — it is never
+// compared, so it was never given one — which the store would otherwise report
+// as an invalid identity long after the build had run.
+func applyStoreOverflow(bo *build.BuildObject) {
+	if !createStore {
+		return
+	}
+	if bo.Spec().Image.Type == catalog.TypeBase {
+		ExitWithError("--store cannot file a base image: a base carries no identity key to file it under.")
+	}
+	bo.SetStoreOverflow(true)
+}
+
 // buildExternalSource builds one script or definition into targetPrefix, exiting
 // on failure. outputDir holds the image and its scratch space.
 func buildExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, outputDir string) {
@@ -583,6 +638,7 @@ func buildExternalSource(ctx context.Context, targetPrefix, source string, isApp
 	if err != nil {
 		ExitWithError("Failed to create build object from %s: %v", source, err)
 	}
+	applyStoreOverflow(bo)
 
 	graph, err := build.NewBuildGraph(ctx, []*build.BuildObject{bo}, outputDir,
 		config.Global.SubmitJob, createUpdate)
@@ -607,8 +663,10 @@ func runCreateWithName(ctx context.Context, packages []string) {
 
 	normalizedName := normalizedTargetName()
 
-	// Check if already exists (search all paths), skip only when not updating
-	if !createUpdate {
+	// Check if already exists (search all paths), skip only when not updating.
+	// --store is asking for a build filed under its own identity, so an installed
+	// artifact of that name is what it expects to find, not a reason to stop.
+	if !createUpdate && !createStore {
 		searchName := strings.ReplaceAll(normalizedName, "/", "--") + ".sqf"
 		if existingPath, err := config.FindImage(searchName); err == nil {
 			utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
@@ -648,6 +706,7 @@ func runCreateWithName(ctx context.Context, packages []string) {
 	if err != nil {
 		ExitWithError("Failed to create build object: %v", err)
 	}
+	applyStoreOverflow(bo)
 
 	if err := bo.Build(ctx, false); err != nil {
 		ExitWithError("Build failed: %v", err)

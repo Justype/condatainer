@@ -101,8 +101,8 @@ func preflightUpload(ctx context.Context, artifactPath, base string, tags []stri
 
 	log := logging.FromContext(ctx)
 	log.Info("upload plan",
-		"size", utils.FormatBytes(plan.Size),
-		"layer-size", fmt.Sprintf("%s (%s)", utils.FormatBytes(plan.LayerSize), plan.Reason),
+		"size", utils.FormatSize(plan.Size),
+		"layer-size", fmt.Sprintf("%s (%s)", utils.FormatSize(plan.LayerSize), plan.Reason),
 		"layers", plan.Layers,
 		"requests", "~"+fmt.Sprint(plan.Requests),
 		"registry", registryHost(base))
@@ -217,7 +217,7 @@ func estimateRequests(layers int) int {
 func checkManifestFits(layers int) error {
 	if estimate := int64(layers) * descriptorBytes; estimate > maxManifestBytes {
 		return fmt.Errorf("%d layers need about %s of manifest, past the %s registries are expected to accept",
-			layers, utils.FormatBytes(estimate), utils.FormatBytes(maxManifestBytes))
+			layers, utils.FormatSize(estimate), utils.FormatSize(maxManifestBytes))
 	}
 	return nil
 }

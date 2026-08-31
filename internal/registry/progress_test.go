@@ -170,7 +170,7 @@ func TestDownloadProgressCountsTheArtifact(t *testing.T) {
 	p.finish()
 
 	out := logs.String()
-	if want := `total="` + utils.FormatBytes(4*progressStep) + `"`; !strings.Contains(out, want) {
+	if want := `total="` + utils.FormatSize(4*progressStep) + `"`; !strings.Contains(out, want) {
 		t.Errorf("no line reports the artifact total (%s):\n%s", want, out)
 	}
 	if strings.Contains(out, "layer") {
@@ -201,7 +201,7 @@ func TestDownloadProgressWithdrawsAnAbandonedAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.finish()
-	if want := `done="` + utils.FormatBytes(2*progressStep) + `"`; !strings.Contains(logs.String(), want) {
+	if want := `done="` + utils.FormatSize(2*progressStep) + `"`; !strings.Contains(logs.String(), want) {
 		t.Errorf("the retried download did not finish at its total (%s):\n%s", want, logs)
 	}
 }
@@ -238,10 +238,10 @@ func TestDownloadProgressReportsCancellation(t *testing.T) {
 	}
 	// How far it got is the useful part: it decides whether running it again is
 	// worth it, and the figure is gone from the screen the moment it scrolls.
-	if want := `done="` + utils.FormatBytes(progressStep) + `"`; !strings.Contains(out, want) {
+	if want := `done="` + utils.FormatSize(progressStep) + `"`; !strings.Contains(out, want) {
 		t.Errorf("the cancellation does not say how far it got (%s):\n%s", want, out)
 	}
-	if !strings.Contains(out, `total="`+utils.FormatBytes(4*progressStep)+`"`) {
+	if !strings.Contains(out, `total="`+utils.FormatSize(4*progressStep)+`"`) {
 		t.Errorf("the cancellation does not say how far there was to go:\n%s", out)
 	}
 }

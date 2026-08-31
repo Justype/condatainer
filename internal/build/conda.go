@@ -3,10 +3,13 @@ package build
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/artifact/key"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/conda"
 
 	"github.com/Justype/condatainer/internal/config"
@@ -31,6 +34,14 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 	// base build it has no use for.
 	if err := b.resolveBase(ctx); err != nil {
 		return err
+	}
+
+	// The solve runs inside the base, so this follows resolveBase. It is the whole
+	// cost of knowing the identity in advance, and it saves creating, packing and
+	// discarding an environment that is already installed.
+	if b.skipIfInstalled(ctx) {
+		b.Cleanup(false) //nolint:errcheck
+		return nil
 	}
 
 	if err := b.createBuildLock(); err != nil {
@@ -74,12 +85,13 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 
 	utils.ShareWithParentGroup(preparedPath)
 
-	if err := atomicInstall(preparedPath, targetPath); err != nil {
+	installed, err := b.publish(preparedPath, targetPath)
+	if err != nil {
 		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 
-	log.Info("overlay ready", "kind", "success", "path", targetPath)
+	log.Info("overlay ready", "kind", "success", "path", installed)
 	b.Cleanup(false)
 	return nil
 }
@@ -96,6 +108,17 @@ func buildChannelFlags() string {
 // buildInstallCmd returns the micromamba install command string and any extra bind paths.
 // Handles three modes: YAML file, comma-separated packages, and single package.
 func (b *BuildObject) buildInstallCmd() (cmd string, extraBindPaths []string, err error) {
+	return b.buildCreateCmd("/cnt/" + b.spec.Image.Name)
+}
+
+// buildCreateCmd returns the micromamba create command for a target prefix, and
+// any extra bind paths it needs. Handles three modes: YAML file,
+// comma-separated packages, and single package.
+//
+// The prefix is a parameter so a dry-run solve can name a throwaway one. It does
+// not change what is resolved — create solves for a prefix that does not exist
+// yet either way — but it does decide what has to be mounted.
+func (b *BuildObject) buildCreateCmd(prefix string) (cmd string, extraBindPaths []string, err error) {
 	var quietFlag string
 	if utils.QuietMode {
 		quietFlag = "-q"
@@ -109,20 +132,20 @@ func (b *BuildObject) buildInstallCmd() (cmd string, extraBindPaths []string, er
 			return "", nil, fmt.Errorf("failed to get absolute path for %s: %w", b.buildSource, err)
 		}
 		extraBindPaths = []string{filepath.Dir(absFilePath)}
-		cmd = fmt.Sprintf("micromamba create -r "+ScratchPath+" %s -y %s -p /cnt/%s -f %s",
-			channelFlags, quietFlag, b.spec.Image.Name, absFilePath)
+		cmd = fmt.Sprintf("micromamba create -r "+ScratchPath+" %s -y %s -p %s -f %s",
+			channelFlags, quietFlag, prefix, absFilePath)
 	} else if b.buildSource != "" {
 		// Mode 2: Multiple packages (-n name pkg1 pkg2 ...)
 		packages := strings.Split(b.buildSource, ",")
 		for i, pkg := range packages {
 			packages[i] = strings.ReplaceAll(strings.TrimSpace(pkg), "/", "=")
 		}
-		cmd = fmt.Sprintf("micromamba create -r "+ScratchPath+" %s -y %s -p /cnt/%s %s",
-			channelFlags, quietFlag, b.spec.Image.Name, strings.Join(packages, " "))
+		cmd = fmt.Sprintf("micromamba create -r "+ScratchPath+" %s -y %s -p %s %s",
+			channelFlags, quietFlag, prefix, strings.Join(packages, " "))
 	} else {
 		// Mode 1: Single package (name/version)
-		cmd = fmt.Sprintf("micromamba create -r "+ScratchPath+" %s -y %s -p /cnt/%s %s=%s",
-			channelFlags, quietFlag, b.spec.Image.Name, b.packageName, b.packageVersion)
+		cmd = fmt.Sprintf("micromamba create -r "+ScratchPath+" %s -y %s -p %s %s=%s",
+			channelFlags, quietFlag, prefix, b.packageName, b.packageVersion)
 	}
 
 	return cmd, extraBindPaths, nil
@@ -279,4 +302,115 @@ func (b *BuildObject) installConda(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// predictCondaIdentity derives the identity this Conda build will produce, by
+// solving without installing.
+//
+// The solve is the only part that decides the answer: identity hashes the
+// canonical explicit.txt, whose whole content is the resolved package URLs, and
+// `micromamba create --dry-run --json` reports exactly those. Creating the
+// environment, packing it and reading it back would give the same key for
+// considerably more work.
+//
+// Both files are written through conda.ExplicitFrom and conda.EnvironmentFrom,
+// which end in the same canonicalizers captureCondaExports uses. That shared
+// ending is what keeps one artifact from having two identities.
+func (b *BuildObject) predictCondaIdentity(ctx context.Context) (meta.KeyRef, error) {
+	packages, err := b.solveConda(ctx)
+	if err != nil {
+		return meta.KeyRef{}, fmt.Errorf("%w: %v", ErrNoPrediction, err)
+	}
+	explicit, err := conda.ExplicitFrom(packages)
+	if err != nil {
+		return meta.KeyRef{}, fmt.Errorf("%w: %v", ErrNoPrediction, err)
+	}
+	var channels []string
+	if b.spec.Source.Conda != nil {
+		channels = b.spec.Source.Conda.Channels
+	}
+	environment, err := conda.EnvironmentFrom(packages, channels)
+	if err != nil {
+		return meta.KeyRef{}, fmt.Errorf("%w: %v", ErrNoPrediction, err)
+	}
+
+	// A manifest copy carrying the sources this build would embed. b is left
+	// untouched: the real capture happens against the installed environment.
+	manifest := b.Manifest()
+	manifest.Keys = meta.Keys{}
+	manifest.Source.Files = append(manifest.Source.Files,
+		conda.ExplicitFileName, conda.EnvironmentFileName)
+	sources := b.keySources()
+	sources[conda.ExplicitFileName] = explicit
+	sources[conda.EnvironmentFileName] = environment
+
+	derived, err := key.Generate(manifest, sources)
+	if err != nil {
+		return meta.KeyRef{}, fmt.Errorf("%w: %v", ErrNoPrediction, err)
+	}
+	return derived.Identity.Ref, nil
+}
+
+// solveConda runs the build's own create command as a dry run and returns what
+// it would install.
+//
+// It mounts none of the build workspace. A dry run writes nothing, so the
+// payload directory it would install into need not exist — which matters,
+// because this runs before the workspace is prepared, and preparing one for a
+// build that is about to be skipped is the cost this whole path avoids. Only the
+// producer's scratch root is bound, as micromamba's root prefix, so the repodata
+// it downloads is reused by the build that follows.
+//
+// Nothing it prints reaches the user. A solve is a question asked on the way to
+// a decision, and Apptainer's mount chatter or Micromamba's progress would read
+// as a build that had started. Output is kept and reported only if it fails.
+func (b *BuildObject) solveConda(ctx context.Context) ([]conda.Package, error) {
+	// mkdir only — never prepareBuildWorkspace, which would create the scratch
+	// image this deliberately does without.
+	if err := ensureWorkspaceRoot(b); err != nil {
+		return nil, err
+	}
+	cmd, extraBindPaths, err := b.buildCreateCmd(ScratchPath + "/solve")
+	if err != nil {
+		return nil, err
+	}
+
+	opts := exec.Options{
+		BaseImage:      b.spec.Base,
+		ApptainerBin:   config.Global.ApptainerBin,
+		Overlays:       []string{},
+		BindPaths:      append(extraBindPaths, b.ws.Root+":"+ScratchPath),
+		EnvSettings:    []string{"TMPDIR=" + ScratchPath},
+		Command:        []string{"/bin/bash", "-c", cmd + " --dry-run --json"},
+		HidePrompt:     true,
+		WritableImg:    false,
+		ApptainerFlags: []string{"--writable-tmpfs"},
+		PassThruStdin:  false,
+	}
+
+	// Every stream is the caller's own buffer, so exec.Run stays silent: it writes
+	// to a terminal only through writers it is handed.
+	var out, errOut bytes.Buffer
+	if err := exec.Run(ctx, opts, exec.IO{Stdout: &out, Stderr: &errOut}); err != nil {
+		if detail := strings.TrimSpace(errOut.String()); detail != "" {
+			return nil, fmt.Errorf("%w: %s", err, detail)
+		}
+		return nil, err
+	}
+
+	// Micromamba prefixes the JSON with progress on some versions, so start at
+	// the document rather than assuming the stream is clean.
+	data := out.Bytes()
+	if i := bytes.IndexByte(data, '{'); i > 0 {
+		data = data[i:]
+	}
+	var report conda.DryRun
+	if err := json.Unmarshal(data, &report); err != nil {
+		return nil, fmt.Errorf("cannot read the solve: %w", err)
+	}
+	packages := report.Resolved()
+	if len(packages) == 0 {
+		return nil, fmt.Errorf("the solve resolved no packages")
+	}
+	return packages, nil
 }
