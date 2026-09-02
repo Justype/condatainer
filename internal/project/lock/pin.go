@@ -42,6 +42,10 @@ type Pinned struct {
 	// Others are the installed identities answering the same name that this did
 	// not take, in search order. Empty unless PinAll filled them in.
 	Others []store.Candidate
+	// Manual records the pin as one the project stated rather than one a #DEP:
+	// produced, so a rescan cannot sweep it. Set by the caller, which is the only
+	// layer that knows whether anything declares the request.
+	Manual bool
 }
 
 // Pin resolves one request to an exact local artifact, vendors its complete
@@ -58,7 +62,7 @@ type Pinned struct {
 // pointing at a file elsewhere would record an identity only a rebuild could
 // satisfy.
 func Pin(root, request, target string, opts PinOptions) (*Pinned, error) {
-	request, err := canonicalRequest(request)
+	request, err := CanonicalRequest(request)
 	if err != nil {
 		return nil, err
 	}
@@ -101,12 +105,14 @@ func Pin(root, request, target string, opts PinOptions) (*Pinned, error) {
 	}, nil
 }
 
-// canonicalRequest normalizes what a caller typed into the key a scan produces.
+// CanonicalRequest normalizes what a caller typed into the key a scan produces.
 //
 // It runs the same grammar a #DEP: does, so `overlays/tool.sqf` on the command
 // line and in a script cannot mean different things, and an extension is what
 // separates a path from a name. The lock's own `path:` key is taken as written.
-func canonicalRequest(request string) (string, error) {
+// Nothing on disk is read, so a request naming a file that is gone still
+// normalizes.
+func CanonicalRequest(request string) (string, error) {
 	request = strings.TrimSpace(request)
 	if request == "" {
 		return "", fmt.Errorf("%w: empty request", ErrInvalid)
@@ -114,7 +120,7 @@ func canonicalRequest(request string) (string, error) {
 	if strings.HasPrefix(request, PathPrefix) {
 		return request, nil
 	}
-	parsed, reason := ParseDeclaration(request, "")
+	parsed, reason := ParseDeclaration(request)
 	if reason != "" {
 		return "", fmt.Errorf("%w: %s", ErrInvalid, reason)
 	}
@@ -251,21 +257,19 @@ func candidateFromPath(target string) (store.Candidate, error) {
 	}, nil
 }
 
-// pinnableRequest reports why a pin key cannot be pinned, or "".
-//
-// It says what to do instead, because the alternative is not obvious: an
-// unpinnable dependency is declared unpinnable rather than left needPin.
+// pinnableRequest reports why a pin key cannot be pinned, or "". It says what
+// closes the gap, since neither alternative is obvious from the refusal.
 func pinnableRequest(request string) string {
 	destination, isPath := strings.CutPrefix(request, PathPrefix)
 	if !isPath {
 		return ""
 	}
 	if utils.IsImg(destination) {
-		return fmt.Sprintf("%s is writable and has no identity to pin; declare it `## %s` instead",
-			destination, UnpinnedMarker)
+		return fmt.Sprintf("%s is writable and has no identity to pin; freeze it with `condatainer overlay freeze %s overlays/<name>.sqf` and pin that",
+			destination, destination)
 	}
 	if err := validProjectPath(destination); err != nil {
-		return fmt.Sprintf("%v; restore cannot own this path, so declare it `## %s` instead", err, UnpinnedMarker)
+		return fmt.Sprintf("%v; restore cannot own this path, so copy it under the project and pin that", err)
 	}
 	return ""
 }
@@ -378,7 +382,13 @@ func stagedFiles(dir string, names []string) (map[string][]byte, error) {
 // something that does not validate.
 func Apply(root string, l *Lock, pinned *Pinned) error {
 	previous, had := l.Pins[pinned.Request]
-	l.Pins[pinned.Request] = PinEntry{Artifact: pinned.Artifact}
+	entry := PinEntry{Artifact: pinned.Artifact, Manual: pinned.Manual}
+	// Re-pinning never turns a manual pin back into a sweepable one: the artifact
+	// changed, not the reason it is in the lock.
+	if had && previous.Manual {
+		entry.Manual = true
+	}
+	l.Pins[pinned.Request] = entry
 
 	if _, problems := Verify(root, l); len(problems) > 0 {
 		if had {
@@ -409,6 +419,11 @@ func Reconcile(root string, l *Lock, result *ScanResult) (needPin []Request) {
 		requested[request.Key] = true
 	}
 	for _, key := range l.Requests() {
+		// A manual pin is recorded by the project, not derived from its scripts,
+		// so a scan cannot speak to whether it belongs.
+		if l.Pins[key].Manual {
+			continue
+		}
 		if !requested[key] {
 			delete(l.Pins, key)
 		}
@@ -417,7 +432,7 @@ func Reconcile(root string, l *Lock, result *ScanResult) (needPin []Request) {
 	verified, _ := Verify(root, l)
 	for _, request := range result.Requests {
 		// An unpinnable request is not needPin: there is nowhere for restore
-		// to put an answer, and G13's marker is how that is declared.
+		// to put an answer, and the scanner has already reported it.
 		if !request.Kind.Pinnable() {
 			continue
 		}

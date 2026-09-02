@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Justype/condatainer/internal/artifact/compare"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/store"
 	"github.com/Justype/condatainer/internal/utils"
@@ -19,11 +20,10 @@ func newStoreAddCmd() *cobra.Command {
 records — the source filename is never a naming claim.
 
 --layer chooses which store, not what the file is called: inside it the name
-comes from the keys, because there the filename is the address. To put an
-overlay at a path of your choosing, use 'create -p' or 'registry pull -p'.
+comes from the keys. To put an overlay at a path of your choosing, use
+'create -p' or 'registry pull -p'.
 
-Copied, never moved or linked: the source stays exactly where it is, so nothing
-disappears from anyone else reading it.`,
+Copied, never moved or linked: the source file stays exactly where it is.`,
 		Example: `  condatainer store add ./star-2.7.11b.sqf
   condatainer store add /scratch/builds/star.sqf --layer user`,
 		Args:         cobra.ExactArgs(1),
@@ -40,6 +40,13 @@ disappears from anyone else reading it.`,
 			artifact, err := compare.Read(source)
 			if err != nil {
 				return fmt.Errorf("cannot read the identity of %s: %w", source, err)
+			}
+			// The store files an artifact under its keys, and a frozen environment
+			// has none — it is a project's own environment, addressed by path.
+			// Filed here it would land under an empty identity, and every project's
+			// would land under the same name.
+			if artifact.Format == meta.BuildTypeSnapshot {
+				return fmt.Errorf("%s is a frozen environment: it belongs to its project and is addressed by path, so it is never filed in the store", source)
 			}
 
 			// A named layer scopes the search for an existing copy to that layer.

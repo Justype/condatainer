@@ -13,27 +13,6 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// OverlaysDirName is the conventional directory a project keeps its own
-// overlays in, and the one directory of project source that scanning skips.
-//
-// The scripts there are the recipes that built those overlays — `create -f
-// overlays/tool.sh` writes overlays/tool.sqf beside it — and a recipe's #DEP:
-// are its overlay's build dependencies, already recorded in that overlay's
-// provenance. Reading them would make the project pin what it never mounts.
-//
-// A directory is the rule rather than anything read out of the tree, because
-// only a stated convention answers the same every time: a sibling .sqf appears
-// when the overlay is built, and a script's own annotations say nothing about
-// whether it is a recipe. Declaring `#DEP: overlays/tool.sqf` from a project
-// script is unaffected — that declaration lives in the script, not here.
-const OverlaysDirName = "overlays"
-
-// UnpinnedMarker is the note that declares a dependency cannot be pinned:
-// `#DEP: env.img  ## unpinned — reason`. The reason is free text this package
-// never interprets; only its presence is checked, and only the marker is
-// required.
-const UnpinnedMarker = "unpinned"
-
 // Kind is what a declaration addresses.
 type Kind string
 
@@ -71,10 +50,6 @@ type Request struct {
 	Dep catalog.Dep
 	// Path is the cleaned project-relative path, set for the path kinds.
 	Path string
-	// Unpinned reports the `## unpinned` marker, and Reason is whatever
-	// followed it, unparsed and possibly empty.
-	Unpinned bool
-	Reason   string
 	// Scripts are the project-relative scripts that declared this, sorted.
 	// Displayed, never serialized: rescanning finds them again.
 	Scripts []string
@@ -105,13 +80,14 @@ func ConstraintReason(dep catalog.Dep, declaration string) string {
 		declaration, dep.NameVersion())
 }
 
-// undeclaredReason explains why an unpinnable declaration needs the marker.
-// Kind-specific, because the two are unpinnable for different reasons and the
-// reader can only act on the one that applies.
-func undeclaredReason(kind Kind, target string) string {
+// unpinnableReason explains why a declaration cannot be pinned and what closes
+// it. Kind-specific, because the two are unpinnable for different reasons and
+// the reader can only act on the one that applies.
+func unpinnableReason(kind Kind, target string) string {
 	switch kind {
 	case KindWritable:
-		return fmt.Sprintf("%s is writable, so it has no identity to pin; declare it `## %s`", target, UnpinnedMarker)
+		return fmt.Sprintf("%s is writable, so it has no identity to pin; freeze it into the project with `condatainer overlay freeze %s overlays/<name>.sqf` and declare that instead",
+			target, target)
 	default:
 		// A `../` declaration is the case worth spelling out: it looks
 		// script-relative, and under one anchor for the whole project it is not.
@@ -119,8 +95,8 @@ func undeclaredReason(kind Kind, target string) string {
 		if !path.IsAbs(target) {
 			anchor = " (a path in a project is relative to the project root, not to the script declaring it)"
 		}
-		return fmt.Sprintf("%s is outside the project%s, so restore cannot own that path; declare it `## %s`",
-			target, anchor, UnpinnedMarker)
+		return fmt.Sprintf("%s is outside the project%s, so restore cannot own that path; copy it under the project and declare that path instead",
+			target, anchor)
 	}
 }
 
@@ -162,10 +138,14 @@ func ScanScript(root, script string) (*ScanResult, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return nil, fmt.Errorf("%s is not inside %s", script, root)
 	}
-	result := &ScanResult{Scripts: []string{filepath.ToSlash(rel)}}
+	result := &ScanResult{}
 	merged := map[string]*Request{}
-	if err := scanScript(script, filepath.ToSlash(rel), merged, result); err != nil {
+	scanned, err := scanScript(script, filepath.ToSlash(rel), merged, result)
+	if err != nil {
 		return nil, err
+	}
+	if scanned {
+		result.Scripts = append(result.Scripts, filepath.ToSlash(rel))
 	}
 	finalize(merged, result)
 	return result, nil
@@ -174,7 +154,7 @@ func ScanScript(root, script string) (*ScanResult, error) {
 // ScanOptions tunes discovery.
 type ScanOptions struct {
 	// ExcludeDirs are additional directory names to skip anywhere in the tree.
-	// cnt-lock, overlays and every dot-directory are always skipped.
+	// cnt-lock and every dot-directory are always skipped.
 	ExcludeDirs []string
 }
 
@@ -183,7 +163,7 @@ type ScanOptions struct {
 // A declaration counts wherever it is written; position carries no meaning, so
 // the scanner and the runtime read a script the same way.
 func Scan(root string, opts ScanOptions) (*ScanResult, error) {
-	skip := map[string]bool{DirName: true, OverlaysDirName: true}
+	skip := map[string]bool{DirName: true}
 	for _, dir := range opts.ExcludeDirs {
 		if dir = strings.TrimSpace(dir); dir != "" {
 			skip[dir] = true
@@ -206,7 +186,6 @@ func Scan(root string, opts ScanOptions) (*ScanResult, error) {
 			// .snakemake, .tox and a local conda env all carry shell scripts of
 			// their own, and a #DEP: in one of those is not this project's
 			// declaration. The root itself is read even when it is hidden.
-			// overlays/ is skipped for a different reason — see OverlaysDirName.
 			if path != root && (skip[entry.Name()] || strings.HasPrefix(entry.Name(), ".")) {
 				return filepath.SkipDir
 			}
@@ -222,8 +201,11 @@ func Scan(root string, opts ScanOptions) (*ScanResult, error) {
 			return nil
 		}
 		relSlash := filepath.ToSlash(rel)
-		result.Scripts = append(result.Scripts, relSlash)
-		return scanScript(path, relSlash, merged, result)
+		scanned, err := scanScript(path, relSlash, merged, result)
+		if scanned {
+			result.Scripts = append(result.Scripts, relSlash)
+		}
+		return err
 	}
 
 	if err := filepath.WalkDir(root, walk); err != nil {
@@ -243,9 +225,9 @@ func Scan(root string, opts ScanOptions) (*ScanResult, error) {
 func finalize(merged map[string]*Request, result *ScanResult) {
 	for _, request := range merged {
 		sort.Strings(request.Scripts)
-		if !request.Kind.Pinnable() && !request.Unpinned {
+		if !request.Kind.Pinnable() {
 			finding := request.first
-			finding.Reason = undeclaredReason(request.Kind, request.Path)
+			finding.Reason = unpinnableReason(request.Kind, request.Path)
 			result.Findings = append(result.Findings, finding)
 		}
 		result.Requests = append(result.Requests, *request)
@@ -275,18 +257,22 @@ func isShellScript(name string) bool {
 	return false
 }
 
-// scanScript reads one script's declarations.
-func scanScript(path, rel string, merged map[string]*Request, result *ScanResult) error {
+// scanScript reads one script's declarations, reporting whether it was read at
+// all: a build recipe is skipped and contributes nothing.
+func scanScript(path, rel string, merged map[string]*Request, result *ScanResult) (bool, error) {
 	text, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return false, err
+	}
+	if isBuildRecipe(text) {
+		return false, nil
 	}
 
 	for _, annotation := range catalog.Select(catalog.ScanAnnotations(text), "#DEP") {
 		if annotation.Value == "" {
 			continue
 		}
-		request, reason := ParseDeclaration(annotation.Value, annotation.Note)
+		request, reason := ParseDeclaration(annotation.Value)
 		if reason != "" {
 			result.Findings = append(result.Findings, Finding{
 				Script: rel, Line: annotation.Line, Text: annotation.Value, Reason: reason})
@@ -302,13 +288,24 @@ func scanScript(path, rel string, merged map[string]*Request, result *ScanResult
 		if have.Scripts[len(have.Scripts)-1] != rel {
 			have.Scripts = append(have.Scripts, rel)
 		}
-		// One script marking a dependency unpinned marks it for the project:
-		// the claim is about the artifact, not about the file.
-		if request.Unpinned && !have.Unpinned {
-			have.Unpinned, have.Reason = true, request.Reason
-		}
 	}
-	return nil
+	return true, nil
+}
+
+// isBuildRecipe reports whether a script builds an artifact rather than
+// analysing with one.
+//
+// $CNT_PREFIX is where a build writes its payload, so only a recipe expands it.
+// The distinction matters because a recipe's #DEP: are its artifact's *build*
+// dependencies, already recorded in that artifact's provenance — reading them
+// would make the project pin what it never mounts.
+//
+// Comments are stripped first, so prose mentioning the variable is not a
+// declaration of intent. Both spellings are checked because both are ordinary
+// shell.
+func isBuildRecipe(text []byte) bool {
+	stripped := string(catalog.StripComments(text))
+	return strings.Contains(stripped, "$CNT_PREFIX") || strings.Contains(stripped, "${CNT_PREFIX}")
 }
 
 // ParseDeclaration turns one declaration into a Request, or returns why it
@@ -317,11 +314,8 @@ func scanScript(path, rel string, merged map[string]*Request, result *ScanResult
 // This is the grammar a `#DEP:` uses and the grammar `exec -o` accepts, which is
 // why it is exported: a name typed on the command line inside a project has to
 // classify the same way the scanner classifies the same text in a script, or the
-// two would disagree about what the lock covers. note is the `##` comment, empty
-// for a command-line argument.
-func ParseDeclaration(value, note string) (Request, string) {
-	unpinned, reason := parseNote(note)
-
+// two would disagree about what the lock covers.
+func ParseDeclaration(value string) (Request, string) {
 	if utils.IsOverlay(value) {
 		clean := filepath.ToSlash(filepath.Clean(value))
 		kind := KindPath
@@ -332,10 +326,7 @@ func ParseDeclaration(value, note string) (Request, string) {
 			// Outside the project, so restore has no path it may write.
 			kind = KindExternal
 		}
-		return Request{
-			Key: PathPrefix + clean, Kind: kind, Path: clean,
-			Unpinned: unpinned, Reason: reason,
-		}, ""
+		return Request{Key: PathPrefix + clean, Kind: kind, Path: clean}, ""
 	}
 
 	dep, err := catalog.ParseDep(value)
@@ -345,10 +336,7 @@ func ParseDeclaration(value, note string) (Request, string) {
 	if why := ConstraintReason(dep, value); why != "" {
 		return Request{}, why
 	}
-	return Request{
-		Key: dep.String(), Kind: KindName, Dep: dep,
-		Unpinned: unpinned, Reason: reason,
-	}, ""
+	return Request{Key: dep.String(), Kind: KindName, Dep: dep}, ""
 }
 
 // parseRequest turns a canonical pin key back into the dependency it
@@ -359,18 +347,4 @@ func parseRequest(key string) (catalog.Dep, error) {
 		return catalog.Dep{}, fmt.Errorf("%q addresses a path, not a name", path)
 	}
 	return catalog.ParseDep(key)
-}
-
-// parseNote reads the `## unpinned` marker. The marker must come first; the
-// rest is a reason nothing interprets. A note that is not the marker is just a
-// comment and says nothing about pinning.
-func parseNote(note string) (unpinned bool, reason string) {
-	if note == "" {
-		return false, ""
-	}
-	first, rest, _ := strings.Cut(note, " ")
-	if !strings.EqualFold(strings.TrimSpace(first), UnpinnedMarker) {
-		return false, ""
-	}
-	return true, strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(rest), "-—:"))
 }

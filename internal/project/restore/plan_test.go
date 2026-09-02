@@ -63,6 +63,64 @@ func vendor(t *testing.T, root string, manifest meta.Manifest, recipe string) st
 	return relative
 }
 
+// A frozen environment records one key under snapshot-env-v1 and vendors no
+// source: it was captured, not built.
+func frozenEnv(t *testing.T, root string) string {
+	t.Helper()
+	ref := meta.KeyRef{Scheme: string(key.SnapshotEnvV1), SHA256: strings.Repeat("c", 64)}
+	manifest := meta.Manifest{
+		SchemaVersion: meta.SchemaVersion,
+		Name:          meta.EnvName,
+		Type:          catalog.TypeEnv,
+		BuildType:     meta.BuildTypeSnapshot,
+		Platform:      meta.Platform{OS: "linux", Arch: meta.NativeArch()},
+		Keys:          meta.Keys{Identity: ref, Equiv: ref},
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative, err := lock.StageEntry(root, capsule.EntryName(manifest.Name, ref.Digest()),
+		map[string][]byte{meta.FileName: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return relative
+}
+
+// A frozen environment is refused while planning rather than planned as a
+// rebuild: nothing it could be rebuilt from exists, so a registry copy is the
+// only thing that produces it.
+func TestComputeRefusesToRebuildAFrozenEnvironment(t *testing.T) {
+	root := projectRoot(t)
+	artifact := frozenEnv(t, root)
+
+	l := lock.New()
+	l.Pins[lock.PathPrefix+"overlays/env.sqf"] = lock.PinEntry{Artifact: artifact}
+
+	plan := Compute(root, l, Options{lookup: nothingInstalled})
+	if plan.Complete() {
+		t.Fatal("a rebuild was planned for an artifact with no sources")
+	}
+	if len(plan.Steps) != 1 || plan.Steps[0].Action != ActionUnavailable {
+		t.Fatalf("steps = %#v, want one unavailable step", plan.Steps)
+	}
+	if !strings.Contains(strings.Join(plan.Problems, " "), "project push") {
+		t.Errorf("the refusal does not name the remedy: %v", plan.Problems)
+	}
+
+	// A recorded remote is the one thing that makes it obtainable — including
+	// under --no-prebuilt, which chooses building over fetching and so has
+	// nothing to say about something that cannot be built.
+	l.Remotes = map[string][]lock.Remote{artifact: {{Repository: "ghcr.io/x/y", ManifestDigest: "sha256:" + strings.Repeat("d", 64)}}}
+	for _, skip := range []bool{false, true} {
+		plan := Compute(root, l, Options{lookup: nothingInstalled, SkipPrebuilt: skip})
+		if !plan.Complete() || plan.Steps[0].Action != ActionFetch {
+			t.Fatalf("SkipPrebuilt=%v: steps = %#v, problems = %v", skip, plan.Steps, plan.Problems)
+		}
+	}
+}
+
 func edge(manifest meta.Manifest) meta.Dependency {
 	return meta.Dependency{Name: manifest.Name, Type: manifest.Type,
 		Identity: manifest.Keys.Identity, Equiv: manifest.Keys.Equiv, Role: meta.RoleApp}

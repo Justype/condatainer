@@ -143,6 +143,11 @@ func TestParseProjectTag(t *testing.T) {
 		"star--2.7.11b__a31f902c12ab":             "star/2.7.11b",
 		"star--2.7.11b":                           "star/2.7.11b",
 		"grch38--genome--gencode49__a31f902c12ab": "grch38/genome/gencode49",
+		// A single-component name has no `--` to be recognised by. The `__` is
+		// the proof for the qualified tag; the plain one is accepted because a
+		// frozen environment is the only artifact named without a version.
+		"env__a31f902c12ab": "env",
+		"env":               "env",
 	} {
 		got, _, ok := ParseProjectTag(tag)
 		if !ok || got != want {
@@ -171,6 +176,30 @@ func TestProjectTagRoundTrip(t *testing.T) {
 			if !ok || got != name {
 				t.Errorf("%s -> %q -> %q, %v", name, tag, got, ok)
 			}
+		}
+	}
+}
+
+// A frozen environment publishes under a name with no version, which is the one
+// shape the plain `--` rule cannot recognise. What a project push writes for it
+// must still read back as `env`, or a pull would install it under a name the
+// project never used.
+func TestProjectTagRoundTripSnapshot(t *testing.T) {
+	m := meta.Manifest{Name: meta.EnvName, Type: catalog.TypeEnv, BuildType: meta.BuildTypeSnapshot}
+	m.Keys.Identity = meta.KeyRef{Scheme: "snapshot-env-v1", SHA256: strings.Repeat("d", 64)}
+	m.Keys.Equiv = m.Keys.Identity
+
+	tags, err := ProjectTags(m, true)
+	if err != nil {
+		t.Fatalf("ProjectTags: %v", err)
+	}
+	if !slices.Equal(tags, []string{"env__dddddddddddd", "env"}) {
+		t.Fatalf("tags = %v", tags)
+	}
+	for _, tag := range tags {
+		got, _, ok := ParseProjectTag(tag)
+		if !ok || got != meta.EnvName {
+			t.Errorf("%q -> %q, %v; want %q", tag, got, ok, meta.EnvName)
 		}
 	}
 }

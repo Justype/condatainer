@@ -1434,20 +1434,19 @@ condatainer info ./ubuntu--22.04.sqf
 
 A `.sif` reads the same way as a `.sqf`: its payload is a SquashFS partition
 starting partway into the file, so the archive reads take that offset. The
-`Type` line is the recipe type from the image's embedded metadata — `app`,
-`base`, `os` or `data`. An image built before that metadata existed reports
-`unknown`.
+`Type` line is the type from the image's embedded metadata — `app`, `base`,
+`os`, `data`, or `environment` for one produced by `overlay freeze`. An image
+built before that metadata existed reports `unknown`.
 
 ### Image (`.sqf` / `.sif`) output
 
 | Section | Fields |
 |---------|--------|
-| **File** | Name, Path, file Size, Type (`app` / `base` / `os` / `data` / `unknown`, Read-Only), Created timestamp, and a `Build Tag` for `os` |
+| **File** | Name, Path, file Size, Type (`app` / `base` / `os` / `data` / `environment` / `unknown`, Read-Only), and Created timestamp |
 | **SquashFS** | Compression algorithm (with level if set), Block Size, Inode count, Fragment count, Deduplication flag |
-| **Mount** | `/cnt/<name>/<version>` — shown for `app` and `data` |
+| **Payload** | `Prefix` (`/cnt/<name>/<version>`, for `app` and `data`); `Deletions` for a frozen environment. Read from the image's metadata, never from its filename |
 | **Environment** | Variables from the image's embedded metadata, with their notes |
 
-`Build Tag` is the build date (`YYYY.MM.DD`), used as the distribution tag for `os` images since they carry no version in their name.
 
 ### ext3 (`.img`) output
 
@@ -1458,7 +1457,7 @@ starting partway into the file, so the archive reads take that offset. The
 | **Ownership** | Inner UID/GID of files inside the image (or `root` for fakeroot-compatible images) |
 | **Disk Usage** | Used / Total (%), Reserved blocks, Free |
 | **Inode Usage** | Used / Total (%), Free |
-| **Mount** | `/cnt_env` |
+| **Payload** | `Prefix` — always `/cnt_env` for a writable overlay |
 | **Environment** | Variables from the `.env` sidecar file (`KEY=value ## note`) |
 
 ## Export
@@ -1946,7 +1945,7 @@ omission.
 Pin the exact artifacts a project mounts, and carry that pin in Git.
 
 ```
-condatainer project lock | pin | validate | restore | registry [set|unset] | push
+condatainer project lock | pin | unpin | list | validate | restore | registry [set|unset] | push
 ```
 
 A project is any directory holding `cnt-lock/`, which `project lock` creates.
@@ -2021,16 +2020,18 @@ condatainer project lock
 Scan rules:
 
 - `.sh` and `.bash` files only;
-- `cnt-lock/`, `overlays/` and dot directories are skipped;
+- `cnt-lock/` and dot directories are skipped;
+- build recipes are skipped;
 - symlinks are not followed.
 
-`overlays/` is where a project keeps its own overlays and the recipes that build
-them. A recipe's `#DEP:` are its overlay's build dependencies — already recorded
-in that overlay's provenance — so reading them would make the project pin what
-it never mounts. The whole directory is skipped whether or not the overlay has
-been built yet, so a scan does not change its answer when `create -f` runs.
-Declaring one from a project script is unaffected: `#DEP: overlays/tool.sqf` is
-pinned as usual, because that declaration lives in the script.
+A script that expands `$CNT_PREFIX` is a build recipe and is not scanned. Its
+`#DEP:` are the build dependencies of the artifact it produces, already recorded
+in that artifact's provenance, so reading them would make the project pin what
+it never mounts. Comments are stripped before the check, so mentioning the
+variable in a comment does not skip a script.
+
+Declaring the built overlay is unaffected: `#DEP: overlays/tool.sqf` in an
+analysis script is pinned as usual.
 
 A declaration whose overlay is not installed fails the lock. Other installed
 builds of the same name are listed rather than pinned; `project pin` takes one
@@ -2064,12 +2065,88 @@ A pin also vendors the artifact's source closure into `cnt-lock/provenance/`,
 and — best effort, over the network — records any collection endpoint that
 already publishes that exact identity (see [Two kinds of remote](#two-kinds-of-remote)).
 
-An unpinnable dependency must say so on its own line, or the scan reports a
-finding:
+A dependency nothing can pin is always a scan finding: `project validate` fails
+on it, and `project lock` warns and publishes what it could. Nothing written in
+a script silences one.
+
+A writable `.img` is the usual case, and the finding names the remedy:
+
+```
+run.sh:2: env.img is writable, so it has no identity to pin; freeze it into the
+project with `condatainer overlay freeze env.img overlays/<name>.sqf` and
+declare that instead
+```
+
+For a `.sqf` outside the project, copy it under the project and declare that
+path — restore only writes to paths the project owns.
+
+#### Manual pins
+
+A pin is **manual** when nothing in the project declares it. Pinning is checked
+against a scan once, when the pin is made, and the answer is recorded in the lock:
+
+```json
+"path:overlays/env.sqf": { "artifact": "provenance/env@0a398f4644c7", "manual": true }
+```
+
+Artifacts reach a project without a `#DEP:` routinely: a helper script names its
+service overlays in `#REQUIRED_OVERLAYS:`, and a frozen environment is named by
+nobody. Pin those by hand:
 
 ```bash
-#DEP: env.img  ## unpinned — scratch environment, rebuilt per machine
+condatainer project pin overlays/env.sqf
+condatainer project pin ubuntu24/build-essential
 ```
+
+`project lock` sweeps every pin its scan no longer produces, and a manual pin is
+exempt from that sweep. That is the whole of what the flag does, so removing one
+takes `project unpin`.
+
+### Project Unpin
+
+```bash
+condatainer project unpin overlays/env.sqf
+condatainer project unpin ubuntu24/build-essential
+```
+
+Removes a manual pin, and with it every vendored artifact directory and remote
+that nothing else reaches once it is gone.
+
+**Only a manual pin.** A pin a declaration produced is refused here: the next
+`project lock` would re-pin the same declaration, possibly at a different
+identity. Delete the `#DEP:` line and run `project lock`, which drops every pin
+nothing asks for any more.
+
+**No image is deleted.** A `path:` pin keeps its file where it is; a named pin
+keeps its overlay in the images root. Only the lock's record of it goes.
+
+### Project List
+
+```bash
+condatainer project list
+condatainer project list --json
+```
+
+Lists every pin and the artifact it holds:
+
+```text
+  star/2.7.11b                 sha256:a31f902c12ab
+  path:overlays/env.sqf (env)  sha256:0a398f4644c7  manual
+[CNT] 2 pin(s), 1 manual
+```
+
+Reads `cnt-lock/` and nothing else — no scan, no network, no image opened — so
+it answers on a fresh clone that has restored nothing.
+
+The first column is the **pin key**, which is what `project pin` and
+`project unpin` take. A path key addresses a file and says nothing about what is
+in it, so the artifact's name follows in parentheses; a name key already is the
+name and is not repeated. Rows go to stdout and the summary to stderr, so
+`project list | grep manual` gets the pins and nothing else.
+
+A pin whose artifact is missing or does not verify is listed as `unreadable`.
+Why it is unreadable is `project validate`'s answer; whether an artifact is
+actually *available* is `project restore --dry-run`'s.
 
 ### Project Validate
 
@@ -2110,7 +2187,7 @@ Nothing is mounted and `cnt-lock/` is never modified.
 | flag | effect |
 |---|---|
 | `--dry-run` | report what would happen and acquire nothing |
-| `--no-prebuilt` | build every missing artifact from source instead of downloading a recorded one |
+| `--no-prebuilt` | build missing artifacts from source where possible instead of downloading a recorded one |
 | `--match equivalent\|identity` | which key a restored artifact must agree with (default `equivalent`) |
 | `--keep-build-deps` | install newly produced build dependencies instead of discarding them |
 | `--replace` | overwrite a project path holding something the lock does not name |
@@ -2141,6 +2218,22 @@ ends.
 
 `--no-prebuilt` is not an offline mode: every build needs the network, which is
 what the [proxy](#proxy) is for on a compute node without egress.
+
+**A frozen environment cannot be rebuilt.** It was captured from a writable
+overlay rather than built from a recipe, so it vendors no sources and a registry
+copy is the only thing that produces it. A restore that cannot find one is
+refused during planning:
+
+```
+[CNT✗] env is a frozen environment and cannot be rebuilt; it is only obtainable
+       from a registry, so publish it with `condatainer project push` from a
+       checkout that has it
+```
+
+`--no-prebuilt` chooses building over downloading, so it does not apply here:
+a published frozen environment is still fetched under it, because there is no
+source to build from instead. A project carrying one must publish it for any
+other checkout to restore.
 
 A rebuild whose recipe carries scheduler directives is submitted rather than run
 here, and so is anything waiting on it; dependencies become `afterok` edges. The
@@ -2231,6 +2324,12 @@ condatainer project push --all --closure
 | `--dry-run` | report what would be published and upload nothing |
 | `--json` | emit machine-readable output |
 
+The project must pass `condatainer project validate` first: a lock inconsistent
+with what it vendors, a declaration nothing can pin, or a declaration with no pin
+each stop the upload, and no flag overrides that. A published project is one
+another checkout can restore, so a gap in the lock is a gap in what was
+published. `--dry-run` reports the same problems and still shows the plan.
+
 Every artifact goes into the one repository `project registry set` recorded, with
 its name carried in the tag, so the whole project is one registry package rather
 than one per artifact. That is the reason for the flat scheme: on GitHub a
@@ -2246,6 +2345,11 @@ registry's to reclaim. A plain name tag can only keep one identity alive, so
 after a re-pin moved it, an older commit's recorded digest would resolve to
 nothing. The plain tag is written only for the current pin, as a human
 handle that says which identity the project uses now.
+
+Two pins can share a manifest name — a `path:` pin of a locally built copy, or
+two frozen environments, since every one of them is named `env`. Neither takes
+the plain tag then; both keep their identity tags, and the push proceeds with a
+warning naming what lost it.
 
 The default push set is the pins **no collection already serves**: restore
 tries the upstream location first, so a second copy of those buys nothing but the
@@ -2302,6 +2406,7 @@ A `restricted` endpoint takes anything. At a `public` one:
 | nothing, and it is `data` | yes — the type asserts public reference data and the indexes built from it |
 | nothing, and it is an `app` | **no** — someone else's software with unstated terms |
 | nothing, and it is a Conda build | yes — it embeds no recipe, so it could never carry the declaration |
+| nothing, and it is a frozen environment | yes — same reason: it has no recipe to declare in |
 
 The declaration lives in the recipe rather than on the command line, so it is
 authored once, reviewed in a commit, and travels with every artifact built from

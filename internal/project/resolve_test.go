@@ -167,8 +167,8 @@ func TestResolveMountsUnpinnableDeclarationsLiterally(t *testing.T) {
 	root := projectRoot(t)
 	l := lock.New()
 	requests := []lock.Request{
-		{Key: lock.PathPrefix + "env.img", Kind: lock.KindWritable, Path: "env.img", Unpinned: true},
-		{Key: lock.PathPrefix + "/shared/genome.sqf", Kind: lock.KindExternal, Path: "/shared/genome.sqf", Unpinned: true},
+		{Key: lock.PathPrefix + "env.img", Kind: lock.KindWritable, Path: "env.img"},
+		{Key: lock.PathPrefix + "/shared/genome.sqf", Kind: lock.KindExternal, Path: "/shared/genome.sqf"},
 	}
 
 	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent, lookupAt: absentAt})
@@ -195,7 +195,7 @@ func TestResolveReturnsAbsolutePaths(t *testing.T) {
 	root := projectRoot(t)
 	l := lock.New()
 	requests := []lock.Request{
-		{Key: lock.PathPrefix + "env.img", Kind: lock.KindWritable, Path: "env.img", Unpinned: true},
+		{Key: lock.PathPrefix + "env.img", Kind: lock.KindWritable, Path: "env.img"},
 	}
 	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent, lookupAt: absentAt})
 	if err != nil {
@@ -249,35 +249,9 @@ func TestResolveReportsASubstitution(t *testing.T) {
 	}
 }
 
-// The marker on a pinnable kind is an author opting out of pinning something
-// that could have been pinned. `project validate` already stops asking for a
-// pin once it is present, so resolution must too — otherwise a project
-// validates and then refuses to run.
-func TestResolveHonoursTheMarkerOnAPinnableKind(t *testing.T) {
-	root := projectRoot(t)
-	l := lock.New()
-	requests := []lock.Request{{
-		Key:      lock.PathPrefix + "overlays/tool.sqf",
-		Kind:     lock.KindPath,
-		Path:     "overlays/tool.sqf",
-		Unpinned: true,
-	}}
-
-	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent, lookupAt: absentAt})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got.Complete() {
-		t.Fatalf("a marked declaration was still demanded: %#v", got.Unresolved)
-	}
-	want := filepath.Join(root, "overlays", "tool.sqf")
-	if len(got.Mounts) != 1 || got.Mounts[0].Path != want || !got.Mounts[0].Unpinned {
-		t.Fatalf("mounts = %#v, want %q mounted literally", got.Mounts, want)
-	}
-}
-
-// Without the marker the same declaration is pinnable and needs a pin.
-func TestResolveStillRequiresAnUnmarkedPinnablePath(t *testing.T) {
+// A pinnable kind always needs a pin. Nothing in a script opts out of one, so a
+// project path with no pin does not resolve.
+func TestResolveRequiresAPinForAPinnablePath(t *testing.T) {
 	root := projectRoot(t)
 	l := lock.New()
 	requests := []lock.Request{{
@@ -289,7 +263,7 @@ func TestResolveStillRequiresAnUnmarkedPinnablePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Complete() {
-		t.Fatal("an unmarked project path resolved with no pin")
+		t.Fatal("a project path resolved with no pin")
 	}
 }
 

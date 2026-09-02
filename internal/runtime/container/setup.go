@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/ext3"
@@ -312,6 +313,13 @@ func distinctPrefixes(overlays []string, prefixOf func(string) string) error {
 		}
 		if held == path {
 			continue
+		}
+		// Only an environment claims EnvPrefix — a frozen one records it, and a
+		// writable .img contributes it — so the collision there is the one the
+		// user already has a word for, and prefixes are not it.
+		if prefix == meta.EnvPrefix {
+			return fmt.Errorf("%s and %s are both environments; mount one environment at a time",
+				held, path)
 		}
 		return fmt.Errorf("%s and %s both install to %s; one would hide the other",
 			held, path, prefix)

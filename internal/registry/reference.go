@@ -235,22 +235,23 @@ func ProjectTags(m meta.Manifest, selected bool) ([]string, error) {
 // ParseProjectTag decodes a project tag back into the artifact name it carries
 // and the identity prefix qualifying it, if any.
 //
-// A catalog tag is a single version segment and never contains `--`, so the two
-// namespaces cannot be confused: this reports false for one rather than
-// inventing a name from it.
+// Accepted: a tag carrying a `__<hex>` identity suffix, whose name may be a
+// single component, or a plain tag that contains `--` or is [meta.EnvName].
+// Anything else reports false, so a catalog tag — a single version segment,
+// which holds neither separator — is never read as a name.
 func ParseProjectTag(tag string) (name, sha string, ok bool) {
-	encoded := tag
+	encoded, qualified := tag, false
 	if base, prefix, found := strings.Cut(tag, projectTagSeparator); found {
 		if base == "" || !isHex(prefix) {
 			return "", "", false
 		}
-		encoded, sha = base, prefix
-	}
-	if !strings.Contains(encoded, "--") {
-		return "", "", false
+		encoded, sha, qualified = base, prefix, true
 	}
 	name = image.DecodeArtifactName(encoded)
 	if catalog.Normalize(name) != name || name == "" {
+		return "", "", false
+	}
+	if !qualified && !strings.Contains(encoded, "--") && name != meta.EnvName {
 		return "", "", false
 	}
 	return name, sha, true

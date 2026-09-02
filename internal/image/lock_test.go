@@ -86,3 +86,29 @@ func TestMissingImageIsNeitherProtectedNorInUse(t *testing.T) {
 		t.Errorf("missing image misreported: %v", err)
 	}
 }
+
+// A freeze holds a shared lock while it packs: it reads, so it needs no write
+// bit, and shared already conflicts with the exclusive lock a writer takes.
+func TestSharedLockHeldWhileReadingExcludesAWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "env.img")
+	if err := os.WriteFile(path, []byte("payload"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+
+	held, err := AcquireLock(path, false)
+	if err != nil {
+		t.Fatalf("a protected overlay must stay readable: %v", err)
+	}
+	defer held.Close()
+
+	// Another reader is fine; a writer is not.
+	if err := CheckAvailable(path, false); err != nil {
+		t.Errorf("a second reader was refused: %v", err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckAvailable(path, true); !errors.Is(err, ErrInUse) {
+		t.Errorf("a writer was allowed in during a read: %v", err)
+	}
+}

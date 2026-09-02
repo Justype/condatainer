@@ -68,6 +68,9 @@ func Regenerate(m meta.Manifest, sources Sources) (Derived, error) {
 	if err := meta.ValidateManifest(m); err != nil {
 		return Derived{}, err
 	}
+	if IsSnapshot(m) {
+		return Derived{}, fmt.Errorf("%w: %s is a frozen environment; its identity is hashed from the packed payload, which only the artifact holds", ErrUnkeyed, m.Name)
+	}
 	if m.Keys.Identity.Empty() {
 		return Derived{}, fmt.Errorf("artifact records no keys")
 	}
@@ -76,7 +79,13 @@ func Regenerate(m meta.Manifest, sources Sources) (Derived, error) {
 
 // Verify regenerates the scheme-backed keys named by m and checks their stored
 // digests. Manifests from the old file-backed format have no schemes and fail.
+//
+// A snapshot's keys are hashed from the packed payload, which sources do not
+// hold, so its recorded keys are returned as they stand.
 func Verify(m meta.Manifest, sources Sources) (Derived, error) {
+	if IsSnapshot(m) {
+		return snapshotDerived(m)
+	}
 	identity := Scheme(m.Keys.Identity.Scheme)
 	equiv := Scheme(m.Keys.Equiv.Scheme)
 	d, err := Regenerate(m, sources)
@@ -96,6 +105,9 @@ func Verify(m meta.Manifest, sources Sources) (Derived, error) {
 
 // VerifyDir reads the source files required by m from dir and verifies its keys.
 func VerifyDir(dir string, m meta.Manifest) (Derived, error) {
+	if IsSnapshot(m) {
+		return Verify(m, nil)
+	}
 	sources, err := ReadSources(dir, m)
 	if err != nil {
 		return Derived{}, err
@@ -103,14 +115,28 @@ func VerifyDir(dir string, m meta.Manifest) (Derived, error) {
 	return Verify(m, sources)
 }
 
+// snapshotDerived returns a snapshot's recorded keys as derived values, with no
+// preimage, nothing having been computed.
+func snapshotDerived(m meta.Manifest) (Derived, error) {
+	if m.Keys.Identity.Empty() {
+		return Derived{}, fmt.Errorf("%w: %s records no identity", ErrUnkeyed, m.Name)
+	}
+	return Derived{
+		Identity: Value{Ref: m.Keys.Identity},
+		Equiv:    Value{Ref: m.Keys.Equiv},
+	}, nil
+}
+
 // ReadSources reads the fixed source set required by a manifest's build type.
 func ReadSources(dir string, m meta.Manifest) (Sources, error) {
 	var names []string
 	switch m.BuildType {
-	case "script", "def":
+	case meta.BuildTypeScript, meta.BuildTypeDef:
 		names = []string{meta.RecipeFileName}
-	case "conda":
+	case meta.BuildTypeConda:
 		names = []string{conda.ExplicitFileName, conda.EnvironmentFileName}
+	case meta.BuildTypeSnapshot:
+		return nil, fmt.Errorf("%w: %s is a frozen environment", ErrUnkeyed, m.Name)
 	default:
 		return nil, fmt.Errorf("unknown build type %q", m.BuildType)
 	}
@@ -126,14 +152,16 @@ func ReadSources(dir string, m meta.Manifest) (Sources, error) {
 	return sources, nil
 }
 
-func latest(buildType string) (Scheme, Scheme, error) {
+func latest(buildType meta.BuildType) (Scheme, Scheme, error) {
 	switch buildType {
-	case "script":
+	case meta.BuildTypeScript:
 		return ScriptIdentityV1, ScriptEquivV1, nil
-	case "def":
+	case meta.BuildTypeDef:
 		return DefinitionIdentityV1, DefinitionEquivV1, nil
-	case "conda":
+	case meta.BuildTypeConda:
 		return CondaExplicitV1, CondaEnvironmentV1, nil
+	case meta.BuildTypeSnapshot:
+		return "", "", ErrUnkeyed
 	default:
 		return "", "", fmt.Errorf("unknown build type %q", buildType)
 	}
@@ -142,7 +170,7 @@ func latest(buildType string) (Scheme, Scheme, error) {
 func derive(m meta.Manifest, sources Sources, identity, equiv Scheme) (Derived, error) {
 	switch identity {
 	case ScriptIdentityV1:
-		if err := requireSchemePair(m, "script", ScriptIdentityV1, ScriptEquivV1, equiv); err != nil {
+		if err := requireSchemePair(m, meta.BuildTypeScript, ScriptIdentityV1, ScriptEquivV1, equiv); err != nil {
 			return Derived{}, err
 		}
 		if err := validateSourceNames(m); err != nil {
@@ -151,7 +179,7 @@ func derive(m meta.Manifest, sources Sources, identity, equiv Scheme) (Derived, 
 		return deriveScriptV1(m, sources)
 
 	case DefinitionIdentityV1:
-		if err := requireSchemePair(m, "def", DefinitionIdentityV1, DefinitionEquivV1, equiv); err != nil {
+		if err := requireSchemePair(m, meta.BuildTypeDef, DefinitionIdentityV1, DefinitionEquivV1, equiv); err != nil {
 			return Derived{}, err
 		}
 		if err := validateSourceNames(m); err != nil {
@@ -160,7 +188,7 @@ func derive(m meta.Manifest, sources Sources, identity, equiv Scheme) (Derived, 
 		return deriveDefinitionV1(m, sources)
 
 	case CondaExplicitV1:
-		if err := requireSchemePair(m, "conda", CondaExplicitV1, CondaEnvironmentV1, equiv); err != nil {
+		if err := requireSchemePair(m, meta.BuildTypeConda, CondaExplicitV1, CondaEnvironmentV1, equiv); err != nil {
 			return Derived{}, err
 		}
 		if err := validateSourceNames(m); err != nil {
@@ -176,9 +204,9 @@ func derive(m meta.Manifest, sources Sources, identity, equiv Scheme) (Derived, 
 func validateSourceNames(m meta.Manifest) error {
 	var required []string
 	switch m.BuildType {
-	case "script", "def":
+	case meta.BuildTypeScript, meta.BuildTypeDef:
 		required = []string{meta.RecipeFileName}
-	case "conda":
+	case meta.BuildTypeConda:
 		required = []string{conda.ExplicitFileName, conda.EnvironmentFileName}
 	default:
 		return fmt.Errorf("unknown build type %q", m.BuildType)
@@ -199,7 +227,7 @@ func validateSourceNames(m meta.Manifest) error {
 	return nil
 }
 
-func requireSchemePair(m meta.Manifest, buildType string, identity, wantEquiv, gotEquiv Scheme) error {
+func requireSchemePair(m meta.Manifest, buildType meta.BuildType, identity, wantEquiv, gotEquiv Scheme) error {
 	if m.BuildType != buildType {
 		return fmt.Errorf("identity scheme %s requires build type %s, got %s", identity, buildType, m.BuildType)
 	}
@@ -304,7 +332,7 @@ func recipeArtifact(m meta.Manifest, sources Sources) (Artifact, error) {
 }
 
 func upstreamDigest(m meta.Manifest) string {
-	if m.BuildType == "def" && m.Build.From != nil {
+	if m.BuildType == meta.BuildTypeDef && m.Build.From != nil {
 		return m.Build.From.Digest
 	}
 	return ""

@@ -102,14 +102,13 @@ func Prefix(name string, typ catalog.Type) string {
 	return "/cnt/" + strings.Trim(name, "/")
 }
 
-// normalizeType maps an absent or unrecognized type to app.
+// normalizeType maps an absent type to app. An unrecognized one is left as it
+// stands, for ValidateManifest and ValidateRuntime to refuse.
 func normalizeType(typ catalog.Type) catalog.Type {
-	switch typ {
-	case catalog.TypeBase, catalog.TypeOS, catalog.TypeApp, catalog.TypeData:
-		return typ
-	default:
+	if typ == "" {
 		return catalog.TypeApp
 	}
+	return typ
 }
 
 // validEnvKey reports whether s can be exported as a shell variable.

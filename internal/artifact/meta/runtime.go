@@ -43,7 +43,7 @@ type Runtime struct {
 }
 
 // Normalize fills in what a runtime document is allowed to leave out: an absent
-// or unrecognized type means app, and an absent OS means linux.
+// type means app, and an absent OS means linux.
 func (r *Runtime) Normalize() {
 	r.Type = normalizeType(r.Type)
 	if r.Platform.OS == "" {
@@ -72,6 +72,15 @@ func ValidateRuntime(r Runtime) error {
 		}
 		if !strings.HasPrefix(r.Prefix, "/") {
 			return fmt.Errorf("%w: prefix %q is not absolute", ErrInvalid, r.Prefix)
+		}
+	case catalog.TypeEnv:
+		// An environment records EnvPrefix and only that: it is where its conda
+		// prefix is, so PATH and {prefix} resolve as they did for the .img it came
+		// from, and two environments collide there. One whose payload has no
+		// cnt_env records nothing.
+		if r.Prefix != "" && r.Prefix != EnvPrefix {
+			return fmt.Errorf("%w: %s is an environment and may record only %s as its prefix, not %q",
+				ErrInvalid, r.Name, EnvPrefix, r.Prefix)
 		}
 	case catalog.TypeBase, catalog.TypeOS:
 		// No prefix: these apply at the container root. A stray one is ignored

@@ -46,38 +46,19 @@ const (
 // this converges rather than locks; CI should still publish sequentially.
 const maxIndexReconcileAttempts = 3
 
-// buildTypeConda is meta.Manifest.BuildType for a Micromamba build, the string
-// build.BuildTypeConda renders to. Compared here rather than imported: this
-// package must not depend on internal/build.
-const buildTypeConda = "conda"
-
 // Accepts reports why an artifact may not be published to an endpoint of this
 // audience, or nil.
 //
-// A restricted endpoint takes everything. A public one asks the artifact whether
-// it may be republished, and the recipe's #REDISTRIBUTE: is the answer: `no`
-// refuses whatever the type, `yes` publishes whatever the type. Nothing
-// overrides a refusal — no flag, no force — because the person pressing it is
-// rarely the person who agreed to the vendor's terms, and a public push cannot
-// be taken back. A caller wanting the other answer either amends the recipe or
-// publishes to an endpoint it has declared restricted.
+// Restricted takes everything. Public answers in order:
 //
-// The type is consulted only when the recipe did not answer, and each default is
-// what the author already asserted by choosing a #TYPE: rather than a guess about
-// licensing. A `base` and an `os` are ours to publish — a container root, and
-// packages from a public distribution. `data` asserts public reference data and
-// the indexes built from it. An `app` asserts an installation of software
-// somebody else wrote, and unknown terms are not permission.
+//   - #REDISTRIBUTE: decides when the recipe declared one, `no` refusing and
+//     `yes` publishing, whatever the type;
+//   - undeclared, a Conda build and a frozen environment publish, since neither
+//     embeds a recipe to declare in;
+//   - undeclared otherwise, base, os and data publish and an app is refused.
 //
-// A Conda build is exempt from that last default, and the reason is mechanical:
-// it embeds no recipe (build.SourceSpec.RecipeFile), so there is nowhere for
-// #REDISTRIBUTE: to be written that travels with the artifact. Applying the app
-// default to it would be a permanent refusal wearing a default's clothes,
-// satisfiable by nothing. Its packages were also vetted for redistributable
-// licensing as a condition of being in the channel, so the "unknown terms"
-// premise the default rests on is the weakest here of anywhere. What the
-// channels cannot answer — a private or vendor channel — is reported at push
-// time from Build.Channels and adjudicated by a person.
+// Nothing overrides a refusal — no flag, no force. Why each default falls the way
+// it does is in docs/manuals/condatainer.md, *Publishing rules*.
 func (v Audience) Accepts(m meta.Manifest) error {
 	if v == Restricted {
 		return nil
@@ -88,7 +69,7 @@ func (v Audience) Accepts(m meta.Manifest) error {
 		}
 		return nil
 	}
-	if m.BuildType == buildTypeConda {
+	if m.BuildType == meta.BuildTypeConda || m.BuildType == meta.BuildTypeSnapshot {
 		return nil
 	}
 	switch m.Type {

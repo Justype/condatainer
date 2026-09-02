@@ -37,6 +37,11 @@ type Recipe struct {
 	// answer. Validate rejects anything but yes or no; Redistributable reads it
 	// as the tri-state the answer actually is.
 	Redistribute string
+	// DeclaredType is #TYPE: lower-cased and verbatim, "" when the recipe did
+	// not declare one. Type holds what DeriveType made of it, which for anything
+	// but app or data is the path-based default — so this is kept for Validate
+	// to reject the declaration rather than let it read as silence.
+	DeclaredType string
 	// Text is the recipe as fetched, tokens and all. It is what an artifact
 	// embeds and what a rebuild starts from.
 	Text []byte
@@ -140,6 +145,7 @@ func ParseRecipe(path string, r io.Reader) (*Recipe, error) {
 		switch annotation.Key {
 		case "#TYPE":
 			declared = strings.ToLower(value)
+			rec.DeclaredType = declared
 		case "#ARCH":
 			if rec.Arch == "" {
 				rec.Arch = Arch(strings.ToLower(value))

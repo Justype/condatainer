@@ -17,10 +17,10 @@ import (
 
 func TestAudienceAccepts(t *testing.T) {
 	yes, no := true, false
-	manifest := func(typ catalog.Type, buildType string) meta.Manifest {
+	manifest := func(typ catalog.Type, buildType meta.BuildType) meta.Manifest {
 		return meta.Manifest{Name: "x/1.0", Type: typ, BuildType: buildType}
 	}
-	declaring := func(typ catalog.Type, buildType string, answer *bool) meta.Manifest {
+	declaring := func(typ catalog.Type, buildType meta.BuildType, answer *bool) meta.Manifest {
 		m := manifest(typ, buildType)
 		m.Redistribute = answer
 		return m
@@ -32,24 +32,28 @@ func TestAudienceAccepts(t *testing.T) {
 		wantErr  bool
 	}{
 		// Undeclared: the type default stands in for an unanswered question.
-		{"a base is ours to publish", Public, manifest(catalog.TypeBase, "def"), false},
-		{"apt packages from a public distribution", Public, manifest(catalog.TypeOS, "script"), false},
-		{"public reference data", Public, manifest(catalog.TypeData, "script"), false},
-		{"an app redistributes someone else's binaries", Public, manifest(catalog.TypeApp, "script"), true},
+		{"a base is ours to publish", Public, manifest(catalog.TypeBase, meta.BuildTypeDef), false},
+		{"apt packages from a public distribution", Public, manifest(catalog.TypeOS, meta.BuildTypeScript), false},
+		{"public reference data", Public, manifest(catalog.TypeData, meta.BuildTypeScript), false},
+		{"an app redistributes someone else's binaries", Public, manifest(catalog.TypeApp, meta.BuildTypeScript), true},
 
 		// A Conda build embeds no recipe, so it can never carry the declaration
 		// the app default would demand. Gating it would refuse it forever.
-		{"a Conda app cannot declare, so it is not asked", Public, manifest(catalog.TypeApp, "conda"), false},
-		{"a Conda build of a permitted type", Public, manifest(catalog.TypeData, "conda"), false},
+		{"a Conda app cannot declare, so it is not asked", Public, manifest(catalog.TypeApp, meta.BuildTypeConda), false},
+		{"a Conda build of a permitted type", Public, manifest(catalog.TypeData, meta.BuildTypeConda), false},
 
 		// Declared: the recipe answers and the type default does not apply.
-		{"a declared app publishes", Public, declaring(catalog.TypeApp, "script", &yes), false},
-		{"a refusal beats a permissive type", Public, declaring(catalog.TypeData, "script", &no), true},
-		{"a refusal beats the Conda exemption", Public, declaring(catalog.TypeApp, "conda", &no), true},
+		{"a declared app publishes", Public, declaring(catalog.TypeApp, meta.BuildTypeScript, &yes), false},
+		{"a refusal beats a permissive type", Public, declaring(catalog.TypeData, meta.BuildTypeScript, &no), true},
+		{"a refusal beats the Conda exemption", Public, declaring(catalog.TypeApp, meta.BuildTypeConda, &no), true},
 
-		{"a restricted endpoint takes an app", Restricted, manifest(catalog.TypeApp, "script"), false},
-		{"a restricted endpoint takes a Conda build", Restricted, manifest(catalog.TypeApp, "conda"), false},
-		{"a restricted endpoint takes a refused artifact", Restricted, declaring(catalog.TypeApp, "script", &no), false},
+		// A snapshot embeds no recipe, so it can carry no declaration — the same
+		// mechanical reason a Conda build is exempt.
+		{"a snapshot publishes with nothing to declare in", Public, manifest(catalog.TypeEnv, meta.BuildTypeSnapshot), false},
+
+		{"a restricted endpoint takes an app", Restricted, manifest(catalog.TypeApp, meta.BuildTypeScript), false},
+		{"a restricted endpoint takes a Conda build", Restricted, manifest(catalog.TypeApp, meta.BuildTypeConda), false},
+		{"a restricted endpoint takes a refused artifact", Restricted, declaring(catalog.TypeApp, meta.BuildTypeScript, &no), false},
 	}
 	for _, tt := range tests {
 		if err := tt.audience.Accepts(tt.m); (err != nil) != tt.wantErr {
@@ -62,7 +66,7 @@ func TestAudienceAccepts(t *testing.T) {
 // The refusal must name both ways out, or a user reads it as "CondaTainer will
 // not publish apps" and stops.
 func TestAudienceRefusalNamesBothRemedies(t *testing.T) {
-	err := Public.Accepts(meta.Manifest{Name: "star/2.7.11b", Type: catalog.TypeApp, BuildType: "script"})
+	err := Public.Accepts(meta.Manifest{Name: "star/2.7.11b", Type: catalog.TypeApp, BuildType: meta.BuildTypeScript})
 	if err == nil {
 		t.Fatal("an undeclared app must be refused at a public endpoint")
 	}

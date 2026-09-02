@@ -250,7 +250,7 @@ func TestReconcileDropsStaleAndReportsWhatNeedsPinning(t *testing.T) {
 	l.Pins["star/2.7.11b"] = PinEntry{Artifact: appPath}
 	l.Pins["gone/1.0"] = PinEntry{Artifact: appPath}
 
-	write(t, root, "run.sh", "#DEP: star/2.7.11b\n#DEP: cutadapt/5.0\n#DEP: env.img  ## unpinned\nrun\n")
+	write(t, root, "run.sh", "#DEP: star/2.7.11b\n#DEP: cutadapt/5.0\n#DEP: env.img\nrun\n")
 	result := scan(t, root)
 
 	needPin := Reconcile(root, l, result)
@@ -325,8 +325,9 @@ func TestPinRefusesUnpinnableRequests(t *testing.T) {
 			t.Errorf("Pin(%q) = %v, want ErrInvalid", request, err)
 			continue
 		}
-		if !strings.Contains(err.Error(), UnpinnedMarker) {
-			t.Errorf("Pin(%q) error does not point at the marker: %v", request, err)
+		// The refusal has to say what closes the gap, not only that it refused.
+		if !strings.Contains(err.Error(), "instead") && !strings.Contains(err.Error(), "pin that") {
+			t.Errorf("Pin(%q) error does not say what to do instead: %v", request, err)
 		}
 	}
 }

@@ -11,11 +11,11 @@ import (
 var envCmd = &cobra.Command{
 	Use:   "env",
 	Short: "Manage the Conda environment of the mounted overlay",
-	Long: `Install, update and inspect the Conda packages of the environment overlay
-mounted in the current container.
+	Long: `Manage Conda packages of the environment overlay mounted in the current container.
 
 These commands run inside CondaTainer only. Enter a writable container first:
-  condatainer exec -w -o env.img bash`,
+  condatainer exec -w -o env.img bash
+  condatainer e env.img`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()

@@ -124,9 +124,9 @@ func NewLockedObject(ctx context.Context, spec LockedSpec) (*BuildObject, error)
 	b.spec.Source.Collection = manifest.Build.Source
 
 	switch manifest.BuildType {
-	case BuildTypeScript.String(), BuildTypeDef.String():
+	case BuildTypeScript, BuildTypeDef:
 		err = b.lockRecipeSource(manifest, spec.Sources)
-	case BuildTypeConda.String():
+	case BuildTypeConda:
 		err = b.lockCondaSource(manifest, spec.Sources, spec.CondaSource)
 	default:
 		err = fmt.Errorf("%w: %s records build type %q", ErrLockedInvalid, manifest.Name, manifest.BuildType)
@@ -188,7 +188,7 @@ func (b *BuildObject) lockRecipeSource(manifest meta.Manifest, sources map[strin
 			ErrLockedInvalid, manifest.Name, len(runnable.Deps), len(b.spec.Dependencies))
 	}
 
-	isDef := manifest.BuildType == BuildTypeDef.String()
+	isDef := manifest.BuildType == BuildTypeDef
 	file := SourceFile{Name: meta.RecipeFileName, Data: recipe.Text}
 	source := SourceSpec{Script: &ScriptSource{File: file, Prompts: runnable.Inputs}}
 	if isDef {

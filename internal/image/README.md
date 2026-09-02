@@ -138,3 +138,14 @@ A failed attempt reports which of three things happened, and callers may branch 
 - `overlay resize/check`: probe-and-release exclusive lock (via `CheckIntegrity` → `CheckAvailable`) — no lock is held across the resize2fs/e2fsck run, so the caller must not pre-acquire one (a held lock collides with the probe).
 - `remove`: probe-and-release exclusive lock before `os.Remove()` — fails if shared lock is held.
 - `build --update`: probe-and-release exclusive lock before starting any build work — fails if shared lock is held.
+- `overlay freeze`: acquires and holds a **shared** lock on the source `.img` for the whole pack. Held rather than probed because the pack takes minutes: a probe would only prove the overlay was idle when the command started. Shared is the entire requirement — it conflicts with the exclusive lock a writer takes — and `O_RDONLY` needs no write bit, so a pinned overlay is still freezable.
+
+**An exclusive lock on an image a container will mount is probed, never held.** Apptainer acquires that
+lock itself, so holding our own would collide with it — which is why `exec`/`run` skip `.img` overlays
+entirely and why `resize`/`check`/`remove`/`build --update` probe and release. The probe exists to put
+the error before the container starts instead of inside it. This is settled: none of these becomes a
+held lock.
+
+**An exec-path probe asks for the lock the mount will take.** `container.Setup` passes its `writeLock`
+and `run` passes `--writable`, so a writable overlay is probed exclusive and a read-only one shared.
+The probe answers the question the mount is about to ask, which it can only do by asking the same one.

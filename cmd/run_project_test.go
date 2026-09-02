@@ -82,7 +82,7 @@ func TestProjectRunContextFailsWithTheRestoreRemedy(t *testing.T) {
 // project carrying only those runs with no selections at all.
 func TestProjectRunContextMountsUnpinnableDeclarations(t *testing.T) {
 	root := newProject(t)
-	writeScript(t, root, "run.sh", "#DEP: env.img  ## unpinned — scratch\nrun\n")
+	writeScript(t, root, "run.sh", "#DEP: env.img\nrun\n")
 	if err := lock.Publish(root, lock.New()); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestProjectRunContextRefusesAForeignWorkingDirectory(t *testing.T) {
 // from the root, `run scripts/align.sh` is an ordinary project run.
 func TestProjectRunContextAnchorsASubdirectoryScriptOnTheRoot(t *testing.T) {
 	root := newProject(t)
-	writeScript(t, root, "scripts/align.sh", "#DEP: overlays/tool.sqf  ## unpinned\nrun\n")
+	writeScript(t, root, "scripts/align.sh", "#DEP: overlays/tool.img\nrun\n")
 	if err := lock.Publish(root, lock.New()); err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestProjectRunContextAnchorsASubdirectoryScriptOnTheRoot(t *testing.T) {
 	if got == nil {
 		t.Fatal("a subdirectory script did not find the project above it")
 	}
-	want := filepath.Join(root, "overlays", "tool.sqf")
+	want := filepath.Join(root, "overlays", "tool.img")
 	if len(got.Overlays) != 1 || got.Overlays[0] != want {
 		t.Fatalf("overlays = %v, want %q — the root, not the script directory", got.Overlays, want)
 	}

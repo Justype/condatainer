@@ -16,8 +16,9 @@ import (
 
 // EnvPrefix is where a writable .img's payload lives inside the container.
 // An .img is a working image with no embedded metadata, so it has no recorded
-// prefix.
-const EnvPrefix = "/cnt_env"
+// prefix; a frozen environment records meta.EnvPrefix and so collides with the
+// .img it came from through the ordinary prefix check.
+const EnvPrefix = meta.EnvPrefix
 
 // Contribution is what one image adds to the container at load time.
 //
@@ -121,40 +122,55 @@ func imgContribution(imgPath string) (Contribution, *Diagnostic) {
 		Notes:   map[string]string{},
 	}
 
-	file, err := os.Open(imgPath + ".env")
+	vars, err := ReadEnvSidecar(imgPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return c, nil // no sidecar is normal; the .img still gets its bin/ on PATH
-		}
 		return c, &Diagnostic{
 			Level:   "warn",
 			Message: fmt.Sprintf("Unable to read overlay env %s.env: %v", imgPath, err),
 		}
 	}
+	for _, v := range vars {
+		c.Configs[v.Key] = strings.ReplaceAll(v.Value, "{prefix}", EnvPrefix)
+		if v.Note != "" {
+			c.Notes[v.Key] = strings.ReplaceAll(v.Note, "{prefix}", EnvPrefix)
+		}
+	}
+	return c, nil
+}
+
+// ReadEnvSidecar reads the .env beside a writable overlay, with {prefix} left
+// intact — substituting it is the caller's job, because a frozen artifact keeps
+// the token and resolves it when the image is loaded.
+//
+// A missing sidecar is not an error: an .img without one still gets its bin/ on
+// PATH. This is exported because freeze has to carry these variables into the
+// artifact: an installed image is immutable and its metadata travels inside it,
+// so an environment that lost them at the freeze would lose them for good.
+func ReadEnvSidecar(imgPath string) ([]meta.EnvVar, error) {
+	file, err := os.Open(imgPath + ".env")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
 	defer file.Close()
 
+	var vars []meta.EnvVar
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		key, value, note, ok := parseEnvLine(scanner.Text())
 		if !ok {
 			continue
 		}
-		c.Configs[key] = strings.ReplaceAll(value, "{prefix}", EnvPrefix)
-		if note != "" {
-			c.Notes[key] = strings.ReplaceAll(note, "{prefix}", EnvPrefix)
-		}
+		vars = append(vars, meta.EnvVar{Key: key, Value: value, Note: note})
 	}
 	if err := scanner.Err(); err != nil {
-		return c, &Diagnostic{
-			Level:   "warn",
-			Message: fmt.Sprintf("Failed to scan %s.env: %v", imgPath, err),
-		}
+		return nil, err
 	}
-	return c, nil
+	return vars, nil
 }
 
-// parseEnvLine parses one `KEY=value ## note` sidecar line. Blank lines and
-// lines starting with # are skipped, as is anything without a valid key.
 func parseEnvLine(line string) (key, value, note string, ok bool) {
 	line = strings.TrimSpace(line)
 	if line == "" || strings.HasPrefix(line, "#") {

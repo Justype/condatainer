@@ -86,6 +86,51 @@ any push runs, so the free location is tried first.
 the bytes that get written never name an artifact the closure no longer reaches.
 Pruning is filesystem-only and runs after the rename.
 
+## Manual pins
+
+`Pins` is otherwise a projection of the scan: `Reconcile` deletes every key the
+current scan does not produce, which is what makes the map safe to rebuild from
+nothing. A **manual** pin opts out of that one rule and changes nothing else.
+
+It exists because a project depends on artifacts no `#DEP:` names:
+
+- a helper declares `#REQUIRED_OVERLAYS: r{POSIT_R} rstudio-server
+  build-essential`, which the project scanner never reads — it reads `#DEP:` in
+  project scripts, and a helper's overlay list is a different declaration
+  entirely;
+- a **frozen environment** is named by nobody. It is what downstream analysis
+  runs *in* rather than something a script consumes, so nothing selects one per
+  script and no `#DEP:` ever mentions it.
+
+Everything else about such a pin is ordinary. It vendors its provenance, records
+remotes in `Lock.Remotes`, restores and publishes through the same steps — a
+frozen environment included, since its identity is hashed from the packed payload
+and lives in its manifest like every other artifact's.
+
+`project pin` sets the flag by asking whether anything declares the request.
+Derived once, at pin time, and then **recorded**: "not currently declared" is
+exactly what the sweep tests, so deriving it on every run would turn the sweep
+into a no-op. A scan that cannot run answers "declared", which leaves the pin
+sweepable rather than silently permanent — the cautious answer is the one a later
+`project lock` can still correct.
+
+Re-pinning never clears the flag. What changed is which artifact answers, not why
+the pin is in the lock.
+
+`project unpin` is how one goes, and the only way: the sweep cannot reach it by
+construction. It deletes the key and republishes, which is the whole
+implementation — `Publish` already prunes the provenance directories nothing
+reaches and the remotes addressing them. A pin the scan produces is refused there
+rather than removed, because the next `Reconcile` re-pins the same declaration,
+possibly at a different identity.
+
+No scan-shaped view can show a manual pin, since no scan produces one. `project
+list` is the lock-shaped view: it reads `Pins` and the records beside them and
+marks which are manual, so the pin key `unpin` takes is discoverable. A pin whose
+artifact does not verify is listed as unreadable rather than dropped from the
+listing — the key is what addresses it, and hiding it would hide the thing to
+fix.
+
 ## Where a project publishes
 
 `Lock.OCI` is the project's own destination: one repository coordinate and the
@@ -107,12 +152,29 @@ different source annotations for one project.
 
 ## Publishing the payload
 
+Push gates on `project validate`, not on `lock.Verify` alone. Verify reads
+`cnt-lock/` and answers whether the lock is internally consistent; only a scan of
+the scripts sees a declaration nothing can pin or a declaration with no pin, and
+neither ever becomes a pin for Verify to object to. A project with a writable
+`.img` in a `#DEP:` therefore had a perfectly valid lock and published clean,
+while failing validate — a published project that no other checkout can restore,
+which is the one thing publishing is for. `cmd.projectProblems` is the single
+definition both commands read, so the two cannot drift apart again.
+
+A dry run reports those problems and still builds the plan: its job is to say
+what would happen, and refusing to answer is less useful than answering with the
+gap named.
+
 `publish` decides and performs the upload. Planning splits in two so `--dry-run`
 can be honest about cost:
 
 - `Build` works from the checkout alone — the publish set, the tags, and the
   refusals. It covers every pin, and `--closure` adds the build
-  dependencies reached through the manifest edges.
+  dependencies reached through the manifest edges. Two pins sharing a manifest
+  name lose the plain tag here rather than in `Refine`, because the collision
+  check runs immediately after: a shared plain tag left in place would refuse
+  the whole push offline, and two frozen environments — both named `env` — make
+  that ordinary rather than exotic.
 - `Refine` asks the network the two questions a checkout cannot answer: whether a
   collection already serves an artifact at this identity, and whether the
   destination already holds it. Both only ever *remove* work, so an unreachable
@@ -123,6 +185,20 @@ can be honest about cost:
 Push never builds. An artifact missing at its locked identity is a refusal naming
 the restore that would produce it, because publishing something this checkout did
 not already describe would put bytes in a registry that no lock vouches for.
+
+**A frozen environment inverts the usual fallback.** Every other artifact can be
+rebuilt from what the lock vendors, so a registry is an optimisation; a snapshot
+vendors nothing and was captured rather than built, so a registry copy is the
+only thing that can produce it. `classify` therefore refuses it at plan time as
+`ActionUnavailable` rather than planning a build that must fail during
+acquisition — the plan is where a restore is allowed to be honest about what it
+cannot do. Push is what closes the gap, which is why the refusal names it.
+
+`SkipPrebuilt` is deliberately not consulted for one: `--no-prebuilt` chooses
+building over fetching, and where building is impossible there is no preference
+left to express. Honouring it would refuse a restore that a recorded remote can
+satisfy, and refuse it with a message naming the `project push` that had already
+been done.
 
 Recording is **one lock transaction per artifact**, not one per push: load,
 `AddRemote`, publish, next. An interrupted push therefore leaves every artifact
@@ -143,22 +219,33 @@ a file with no extension is not read at all: sniffing a shebang to catch one was
 a substring test that fired on any interpreter path containing `sh`, which on an
 HPC filesystem means `/home/shared/…` and every user called `josh`.
 
-`overlays/` is skipped: it is where a project keeps its own overlays and the
-recipes that built them, and a recipe's `#DEP:` are its overlay's build
-dependencies — already recorded in that overlay's provenance — not declarations
-the project mounts. Declaring one from a project script is unaffected, since
-`#DEP: overlays/tool.sqf` lives in the script rather than in `overlays/`.
+**A build recipe is skipped, and what identifies one is `$CNT_PREFIX`.** A
+recipe's `#DEP:` are its artifact's build dependencies — already recorded in that
+artifact's provenance — not declarations the project mounts, so reading them
+would make the project pin what it never mounts. Declaring the built overlay is
+unaffected: `#DEP: overlays/tool.sqf` lives in an analysis script.
 
-A directory is the rule because only a stated convention answers the same every
-time. The two alternatives both make a file's meaning depend on something
+`$CNT_PREFIX` is where a build writes its payload, so only a recipe expands it
+and every recipe must. That makes it a property of the file, which is what the
+rule needs: a directory convention classified `overlays/run-qc.sh` as a recipe
+for sitting in the wrong folder, and left a recipe elsewhere in the tree read as
+an analysis script. Comments are stripped first, so prose naming the variable is
+not a declaration of intent, and both `$CNT_PREFIX` and `${CNT_PREFIX}` count
+because both are ordinary shell.
+
+The two rejected alternatives both make a file's meaning depend on something
 outside it: a sibling `.sqf` appears when `create -f` runs, so the scan would
 change on a build, and deriving recipe-ness from which overlays other scripts
-declare means deleting one script silently reclassifies another.
+declare means deleting one script silently reclassifies another. A skipped
+recipe is not counted among the project's scripts at all.
+
+`ScanScript` applies the same rule, because a run and a lock must not disagree
+about what a script declares.
 
 It never follows a symlinked directory and never reads a symlinked
 script: either can point outside the checkout, and a lock describes the checkout.
-`cnt-lock/`, `overlays/` and every dot-directory are always skipped; anything
-else must be named in `ScanOptions.ExcludeDirs`.
+`cnt-lock/` and every dot-directory are always skipped; anything else must be
+named in `ScanOptions.ExcludeDirs`.
 
 The dot rule is the one inherited exclusion, and it is worth the silent skip it
 costs. A dot-directory is tool state rather than project source — `.venv`,
@@ -218,8 +305,7 @@ against the working directory. A job running elsewhere splits the two anchors.
 A declared `--chdir` was written on purpose, so only its author can resolve the
 conflict.
 
-An unpinnable declaration must say so with `## unpinned` — see **The unpinned
-marker** below.
+An unpinnable declaration is a finding — see **Unpinnable declarations** below.
 
 ## Where a restored artifact lands
 
@@ -437,22 +523,30 @@ listing, so an interrupted write is not a spurious validation problem.
 entries alone — an entry that cannot be read cannot be shown to be unreachable,
 and deleting on a read error would turn a corrupt file into data loss.
 
-## The unpinned marker
+## Unpinnable declarations
 
-An unpinnable dependency must say so:
+A declaration nothing can pin is always a **finding**. `project validate` fails
+on it and `project lock` reports it as a warning and still publishes what it
+could. Nothing written in a script silences one.
 
-```bash
-#DEP: env.img  ## unpinned — scratch environment, rebuilt per machine
-```
+There is no opt-out because an unpinnable dependency is exactly the case the
+lock exists to prevent: a project that mounts something no one else can obtain
+reproduces its results nowhere, and a lock that records the rest looks complete
+while the environment the analysis actually ran in is missing from it. A marker
+that quieted the warning would make the hole a formality rather than a problem,
+and the artifact it hides is usually the environment itself.
 
-The marker is required and the reason is optional. Requiring prose would be
-enforcement theater — nothing can tell a real reason from a placeholder — while
-the step that matters, someone deliberately writing it on that line, has already
-happened and `git blame` attributes it. A note that is not the marker is an
-ordinary comment and claims nothing. The claim is about the artifact, so one
-script marking a dependency settles it for the project.
+Each kind names what closes it, since the two are unpinnable for different
+reasons and only one remedy applies:
 
-Without the marker the scanner emits a **finding**, so `project validate` fails
-rather than passing while the project mounts something unpinned; `project lock`
-reports it as a warning and still publishes. Because the marker merges across
-scripts, the finding is decided only once every script has been read.
+- **A writable `.img`** has no identity to hash — its content changes under any
+  reader. `overlay freeze` packs it into a `.sqf` with a `snapshot-env-v1`
+  identity, and a project-relative `.sqf` is `KindPath`, which pins. This is the
+  case freeze exists for.
+- **An external `.sqf`** is already immutable; the problem is that restore does
+  not own that path and must never write there. Copying it under the project
+  makes it a path restore can own.
+
+Because a declaration merges across the scripts that make it, one finding is
+reported per dependency rather than per line, which is why `finalize` decides
+this after every script has been read rather than as each line is parsed.

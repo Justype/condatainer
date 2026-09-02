@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/project/lock"
@@ -38,8 +40,9 @@ A restore accepts an equivalent build unless you ask for the identity.`,
 func init() {
 	rootCmd.AddCommand(projectCmd)
 	projectCmd.PersistentFlags().StringVar(&projectDir, "project", "", "Project root (default: the current directory)")
-	projectCmd.AddCommand(newProjectLockCmd(), newProjectPinCmd(), newProjectValidateCmd(),
-		newProjectRestoreCmd(), newProjectRegistryCmd(), newProjectPushCmd())
+	projectCmd.AddCommand(newProjectLockCmd(), newProjectPinCmd(), newProjectUnpinCmd(),
+		newProjectListCmd(), newProjectValidateCmd(), newProjectRestoreCmd(),
+		newProjectRegistryCmd(), newProjectPushCmd())
 }
 
 // projectRoot resolves the root a command acts on — the current directory, or
@@ -131,6 +134,7 @@ builds of the same name are listed rather than pinned; pick one of those with
 			for _, p := range pinned {
 				recordUpstream(cmd.Context(), root, current, p)
 			}
+			noteUnpublished(current, pinned)
 			if len(pinned) > 0 {
 				if err := lock.Publish(root, current); err != nil {
 					return err
@@ -177,6 +181,7 @@ takes none, since it already names the file it means.`,
 			if err != nil {
 				return err
 			}
+			pinned.Manual = !declaredByAScript(root, pinned.Request)
 			upstream := recordUpstream(cmd.Context(), root, current, pinned)
 			if err := lock.Apply(root, current, pinned); err != nil {
 				return err
@@ -184,6 +189,9 @@ takes none, since it already names the file it means.`,
 
 			utils.PrintSuccess("Pinned %s", utils.StyleName(pinned.Name))
 			utils.PrintMessage("  identity %s", pinned.Identity.Digest())
+			if pinned.Manual {
+				utils.PrintMessage("  no script declares it, so it is recorded as a manual pin")
+			}
 			utils.PrintMessage("  read from %s", utils.StylePath(pinned.Path))
 			for _, artifact := range pinned.Vendored {
 				line := "  vendored " + artifact
@@ -192,10 +200,228 @@ takes none, since it already names the file it means.`,
 				}
 				utils.PrintMessage("%s", line)
 			}
+			noteUnpublished(current, []*lock.Pinned{pinned})
 			return nil
 		},
 	}
 	return cmd
+}
+
+func newProjectUnpinCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "unpin <request>",
+		Short: "Remove a manual pin",
+		Long: `Removes a pin the project recorded itself, and the provenance nothing else
+reaches once it is gone.
+
+Only a manual pin — one no script declares. A pin a declaration produced is
+removed by removing the declaration and running 'condatainer project lock',
+which drops every pin nothing asks for any more.
+
+The image itself is never deleted. A project path keeps its file; a named pin
+keeps its overlay in the images root.`,
+		Example: `  condatainer project unpin overlays/env.sqf
+  condatainer project unpin ubuntu24/build-essential`,
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root, err := projectRoot(true)
+			if err != nil {
+				return err
+			}
+			l, err := lock.Load(root)
+			if err != nil {
+				return err
+			}
+			request, err := lock.CanonicalRequest(args[0])
+			if err != nil {
+				return err
+			}
+			entry, pinned := l.Pins[request]
+			if !pinned {
+				return fmt.Errorf("nothing pins %s", request)
+			}
+			if !entry.Manual {
+				return fmt.Errorf("%s is pinned from a project declaration; remove the declaration and run `condatainer project lock`", request)
+			}
+
+			// Reachability before and after says what the removal orphans.
+			// Publish prunes exactly that, so this reports rather than decides.
+			before, _ := lock.Verify(root, l)
+			delete(l.Pins, request)
+			after, _ := lock.Verify(root, l)
+			if err := lock.Publish(root, l); err != nil {
+				return err
+			}
+
+			utils.PrintSuccess("Unpinned %s", utils.StyleName(request))
+			for _, artifact := range orphaned(before, after) {
+				utils.PrintMessage("  pruned %s", artifact)
+			}
+			if destination, ok := strings.CutPrefix(request, lock.PathPrefix); ok {
+				utils.PrintMessage("  %s is left where it is", utils.StylePath(destination))
+			}
+			return nil
+		},
+	}
+	return cmd
+}
+
+// orphaned lists the readable artifacts a removal left unreachable, sorted.
+// Unreadable ones are left out because Prune leaves them on disk.
+func orphaned(before, after *lock.Verified) []string {
+	var out []string
+	for artifact := range before.Reachable {
+		if after.Reachable[artifact] {
+			continue
+		}
+		if _, readable := before.Entries[artifact]; readable {
+			out = append(out, artifact)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func newProjectListCmd() *cobra.Command {
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List this project's pins",
+		Long: `Lists every pin in cnt-lock/lock.json and the artifact it names.
+
+Works in a fresh clone that has restored nothing. To ask whether an artifact is
+actually available, use 'condatainer project restore --dry-run'.
+
+A pin marked 'manual' is one the project recorded itself: no script declares it,
+'project lock' will not sweep it, and 'project unpin' removes it.`,
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			root, err := projectRoot(!jsonOutput)
+			if err != nil {
+				return err
+			}
+			l, err := lock.Load(root)
+			if err != nil {
+				return err
+			}
+			// Problems are for `project validate` to report; here an entry that
+			// does not verify is one line that says so, so a broken pin is still
+			// listed with the key that addresses it.
+			verified, _ := lock.Verify(root, l)
+			pins := pinReports(l, verified)
+
+			if jsonOutput {
+				return printJSON(struct {
+					Root string      `json:"root"`
+					Pins []pinReport `json:"pins"`
+				}{Root: root, Pins: pins})
+			}
+			if len(pins) == 0 {
+				utils.PrintMessage("This project pins nothing.")
+				utils.PrintHint("Run %s to pin what its scripts declare.",
+					utils.StyleAction("condatainer project lock"))
+				return nil
+			}
+			// Rows go to stdout so the listing can be piped; the summary and
+			// any warning stay on the console, which is stderr.
+			width := 0
+			for _, pin := range pins {
+				width = max(width, len(pinLabel(pin)))
+			}
+			var manual int
+			for _, pin := range pins {
+				label := pinLabel(pin)
+				// Padded from the unstyled label: styling adds escape bytes that
+				// a width verb would count as columns.
+				row := "  " + utils.StyleName(label) + strings.Repeat(" ", width-len(label))
+				switch {
+				case pin.Problem != "":
+					row += "  " + utils.StyleWarning("unreadable")
+				case pin.Manual:
+					manual++
+					row += "  " + short(pin.Identity) + "  " + utils.StyleWarning("manual")
+				default:
+					row += "  " + short(pin.Identity)
+				}
+				fmt.Println(row)
+				if pin.Problem != "" {
+					utils.PrintWarning("  %s", pin.Problem)
+				}
+			}
+			if manual > 0 {
+				utils.PrintMessage("%d pin(s), %d manual", len(pins), manual)
+				return nil
+			}
+			utils.PrintMessage("%d pin(s)", len(pins))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
+	return cmd
+}
+
+// pinLabel is the pin key, and the artifact name after it when the key does not
+// already carry one — a path addresses a file, which says nothing about what is
+// in it, while a name request is the name.
+func pinLabel(pin pinReport) string {
+	if pin.Name == "" || pin.Name == pin.Request {
+		return pin.Request
+	}
+	return pin.Request + " (" + pin.Name + ")"
+}
+
+// pinReport is one pin as the listing renders it. Name and Identity come from
+// the vendored records rather than from the key, which addresses an artifact
+// without describing it.
+type pinReport struct {
+	Request  string `json:"request"`
+	Artifact string `json:"artifact"`
+	Name     string `json:"name,omitempty"`
+	Identity string `json:"identity,omitempty"`
+	Manual   bool   `json:"manual,omitempty"`
+	// Problem is why the artifact could not be read, empty when it verified.
+	Problem string `json:"problem,omitempty"`
+}
+
+func pinReports(l *lock.Lock, verified *lock.Verified) []pinReport {
+	out := make([]pinReport, 0, len(l.Pins))
+	for _, request := range l.Requests() {
+		pin := l.Pins[request]
+		report := pinReport{Request: request, Artifact: pin.Artifact, Manual: pin.Manual}
+		if entry, ok := verified.Entries[pin.Artifact]; ok {
+			report.Name, report.Identity = entry.Manifest.Name, entry.Identity.Digest()
+		} else {
+			report.Problem = pin.Artifact + " is missing or does not verify"
+		}
+		out = append(out, report)
+	}
+	return out
+}
+
+// declaredByAScript reports whether anything in the project asks for this
+// request, which decides whether the pin is manual.
+//
+// Derived once, at pin time, and then recorded: `project lock` sweeps every pin
+// the scan no longer produces, and a pin nothing ever declared has to survive
+// that. Artifacts reach a project without a #DEP: routinely — a helper names
+// them in #REQUIRED_OVERLAYS:, and a frozen environment is named by nobody.
+//
+// A scan that cannot run answers "declared", which keeps a pin sweepable rather
+// than silently permanent: the cautious answer is the one a later lock can still
+// correct.
+func declaredByAScript(root, request string) bool {
+	scanned, err := lock.Scan(root, lock.ScanOptions{})
+	if err != nil {
+		return true
+	}
+	for _, candidate := range scanned.Requests {
+		if candidate.Key == request {
+			return true
+		}
+	}
+	return false
 }
 
 // recordUpstream adds a fetch location for every artifact this pin
@@ -226,6 +452,23 @@ func recordUpstream(ctx context.Context, root string, l *lock.Lock, pinned *lock
 		}
 	}
 	return shown
+}
+
+// noteUnpublished notes that pins were made which no other checkout can obtain.
+// Only a frozen environment can be: everything else is rebuilt from what the pin
+// vendored, so a registry copy is an optimisation rather than the only route.
+//
+// Once for the run rather than once per artifact, because `project push`
+// publishes the whole project. The note stops once remotes are recorded, so it
+// is present exactly while the gap is.
+func noteUnpublished(l *lock.Lock, pinned []*lock.Pinned) {
+	for _, p := range pinned {
+		if p.Identity.Scheme == string(key.SnapshotEnvV1) && len(l.Remotes[p.Artifact]) == 0 {
+			utils.PrintNote("A frozen environment cannot be rebuilt; run %s so another checkout can restore this project",
+				utils.StyleAction("condatainer project push"))
+			return
+		}
+	}
 }
 
 func newProjectRegistryCmd() *cobra.Command {
@@ -377,6 +620,8 @@ func newProjectPushCmd() *cobra.Command {
 		Long: `Publishes the locked artifacts to the project's registry and records where
 each landed, so a later restore downloads them instead of rebuilding.
 
+- The project must pass 'condatainer project validate'; nothing is uploaded
+  otherwise. --dry-run reports what is wrong and still shows the plan.
 - Each artifact is tagged by its name and by its identity.
 - Publishes only what is already built; 'project restore' produces the rest.
 - Skips pins a recipe source already serves, since a restore tries those first.
@@ -396,11 +641,18 @@ each landed, so a later restore downloads them instead of rebuilding.
 				return err
 			}
 			verified, problems := lock.Verify(root, l)
-			if len(problems) > 0 {
-				// Publication never fills gaps from the live catalog: what is
-				// published has to be what the checkout already describes.
+			scanned, err := lock.Scan(root, lock.ScanOptions{})
+			if err != nil {
+				return err
+			}
+			// Push holds a project to what `project validate` asks, not to the
+			// lock's internal consistency alone: what is published has to be what
+			// the checkout describes, and a declaration the lock cannot reproduce
+			// is missing from it. A dry run reports these and still shows the plan.
+			invalid := projectProblems(l, scanned, problems)
+			if len(invalid) > 0 && !dryRun {
 				return fmt.Errorf("the project is not valid, so nothing was published:\n  %s",
-					strings.Join(problemStrings(problems), "\n  "))
+					strings.Join(invalid, "\n  "))
 			}
 
 			opts := publish.Options{All: all, Closure: closure, Repository: repository}
@@ -415,6 +667,7 @@ each landed, so a later restore downloads them instead of rebuilding.
 			publish.Refine(cmd.Context(), root, plan, cat, opts)
 
 			if dryRun {
+				plan.Problems = append(plan.Problems, invalid...)
 				return reportPushPlan(plan, jsonOutput)
 			}
 			if !plan.Complete() {
@@ -433,6 +686,22 @@ each landed, so a later restore downloads them instead of rebuilding.
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report what would be published and upload nothing")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
 	return cmd
+}
+
+// projectProblems is everything `project validate` reports, as lines: a lock
+// inconsistent with what it vendors, a declaration nothing can pin, and a
+// declaration with no pin. Push and validate share it so a project cannot be
+// publishable and invalid at once.
+func projectProblems(l *lock.Lock, scanned *lock.ScanResult, problems []lock.Problem) []string {
+	out := problemStrings(problems)
+	for _, finding := range scanned.Findings {
+		out = append(out, fmt.Sprintf("%s:%d: %s", finding.Script, finding.Line, finding.Reason))
+	}
+	for _, request := range requestsNeedingPin(l, scanned) {
+		out = append(out, fmt.Sprintf("%s is declared but not pinned (%s)",
+			request.Key, strings.Join(request.Scripts, ", ")))
+	}
+	return out
 }
 
 func reportPushPlan(plan *publish.Plan, jsonOutput bool) error {
@@ -461,7 +730,13 @@ func reportPushPlan(plan *publish.Plan, jsonOutput bool) error {
 			utils.PrintMessage("           channels: %s", strings.Join(step.Channels, ", "))
 		}
 	}
+	for _, name := range plan.Ambiguous {
+		utils.PrintWarning("  two pins are named %s, so neither takes the plain tag", utils.StyleName(name))
+	}
 	utils.PrintMessage("%d to upload", plan.Uploads())
+	for _, problem := range plan.Problems {
+		utils.PrintError("%s", problem)
+	}
 	if !plan.Complete() {
 		return fmt.Errorf("this project cannot be published as it stands")
 	}
@@ -474,6 +749,9 @@ func reportPush(report *publish.Report, jsonOutput bool) error {
 	}
 	for _, step := range report.Published {
 		utils.PrintMessage("  %-8s %s", step.Disposition, utils.StyleName(step.Name))
+	}
+	for _, name := range report.AmbiguousNames {
+		utils.PrintWarning("  two pins are named %s, so neither takes the plain tag", utils.StyleName(name))
 	}
 	for _, failure := range report.Failures {
 		utils.PrintError("  %s", failure)
@@ -536,15 +814,8 @@ script can actually run on this machine, use 'condatainer check <script>'.`,
 				}
 				return nil
 			}
-			for _, problem := range problems {
-				utils.PrintError("%s", problem.String())
-			}
-			for _, finding := range scanned.Findings {
-				utils.PrintError("%s:%d: %s", finding.Script, finding.Line, finding.Reason)
-			}
-			for _, request := range needPin {
-				utils.PrintError("%s is declared but not pinned (%s)",
-					utils.StyleName(request.Key), strings.Join(request.Scripts, ", "))
+			for _, problem := range projectProblems(current, scanned, problems) {
+				utils.PrintError("%s", problem)
 			}
 			if total > 0 {
 				utils.PrintHint("Run %s to choose an artifact for each unpinned request.",
@@ -562,12 +833,12 @@ script can actually run on this machine, use 'condatainer check <script>'.`,
 
 // requestsNeedingPin reports declarations with no pin, without mutating
 // the lock the way Reconcile does. An unpinnable request is not needPin:
-// there is nowhere for restore to put an answer, and one left undeclared is
-// already a scan finding rather than a missing pin.
+// there is nowhere for restore to put an answer, and it is already a scan
+// finding rather than a missing pin.
 func requestsNeedingPin(l *lock.Lock, scanned *lock.ScanResult) []lock.Request {
 	var out []lock.Request
 	for _, request := range scanned.Requests {
-		if !request.Kind.Pinnable() || request.Unpinned {
+		if !request.Kind.Pinnable() {
 			continue
 		}
 		if _, ok := l.Pins[request.Key]; !ok {
@@ -582,8 +853,8 @@ type requestReport struct {
 	Kind     string   `json:"kind"`
 	Scripts  []string `json:"scripts"`
 	Artifact string   `json:"artifact,omitempty"`
-	Unpinned bool     `json:"unpinned,omitempty"`
-	Reason   string   `json:"reason,omitempty"`
+	// Pinnable is false for a declaration nothing can pin, which is a finding.
+	Pinnable bool `json:"pinnable"`
 }
 
 func validateReport(root string, problems []lock.Problem, needPin []lock.Request, scanned *lock.ScanResult) any {
@@ -600,7 +871,8 @@ func validateReport(root string, problems []lock.Problem, needPin []lock.Request
 	}
 	for _, request := range needPin {
 		report.Unselected = append(report.Unselected, requestReport{
-			Request: request.Key, Kind: string(request.Kind), Scripts: request.Scripts})
+			Request: request.Key, Kind: string(request.Kind), Scripts: request.Scripts,
+			Pinnable: true})
 	}
 	report.Valid = len(report.Problems) == 0 && len(report.Findings) == 0 && len(report.Unselected) == 0
 	return report
@@ -619,7 +891,7 @@ func reportLockState(root string, l *lock.Lock, scanned *lock.ScanResult,
 		}{Root: root, Findings: scanned.Findings}
 		for _, request := range scanned.Requests {
 			entry := requestReport{Request: request.Key, Kind: string(request.Kind),
-				Scripts: request.Scripts, Unpinned: request.Unpinned, Reason: request.Reason}
+				Scripts: request.Scripts, Pinnable: request.Kind.Pinnable()}
 			if pin, ok := l.Pins[request.Key]; ok {
 				entry.Artifact = pin.Artifact
 			}
@@ -636,8 +908,8 @@ func reportLockState(root string, l *lock.Lock, scanned *lock.ScanResult,
 		switch pin, ok := l.Pins[request.Key]; {
 		case ok:
 			utils.PrintMessage("  %s → %s", utils.StyleName(request.Key), pin.Artifact)
-		case request.Unpinned:
-			utils.PrintMessage("  %s → %s", utils.StyleName(request.Key), utils.StyleWarning("unpinned"))
+		case !request.Kind.Pinnable():
+			utils.PrintMessage("  %s → %s", utils.StyleName(request.Key), utils.StyleWarning("cannot be pinned"))
 		}
 	}
 	// Reported after the map, because an alternative only makes sense once the
@@ -749,7 +1021,8 @@ something the lock does not name is refused unless you pass --replace.`,
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report what would happen and change nothing")
-	cmd.Flags().BoolVar(&noPrebuilt, "no-prebuilt", false, "Build missing artifacts locally instead of downloading a prebuilt")
+	cmd.Flags().BoolVar(&noPrebuilt, "no-prebuilt", false,
+		"Build missing artifacts locally where possible instead of downloading a prebuilt")
 	cmd.Flags().BoolVar(&keepBuildDeps, "keep-build-deps", false,
 		"Keep build dependencies instead of discarding them at the end")
 	cmd.Flags().BoolVar(&replace, "replace", false,
@@ -784,7 +1057,7 @@ func reportPlan(plan *restore.Plan, jsonOutput bool) error {
 		}
 	} else {
 		for _, step := range plan.Steps {
-			utils.PrintMessage("  %-7s %s → %s", step.Action, utils.StyleName(step.Name), planDestination(step))
+			utils.PrintMessage("  %-11s %s → %s", step.Action, utils.StyleName(step.Name), planDestination(step))
 			if step.Replaces != "" {
 				utils.PrintWarning("    replaces %s already there", short(step.Replaces))
 			}

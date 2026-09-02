@@ -166,7 +166,7 @@ artifact as a name plus a complete identity, and a path is neither — nothing c
 another machine, and no key could be regenerated from it.
 
 This is the one `#DEP:` rule that does **not** apply to a script you *run*. A running script mounts
-what it names and records nothing, so `#DEP:./overlays/tool.sqf` and `#DEP:env.img  ## unpinned` are
+what it names and records nothing, so `#DEP:./overlays/tool.sqf` and `#DEP:env.img` are
 perfectly valid there. Both rules above are enforced only when something is being built — including
 an external build (`condatainer create -p <path> -f <script>.sh`), which answers to them exactly as a
 catalog recipe does.

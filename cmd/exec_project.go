@@ -53,7 +53,7 @@ func projectOverlays(overlays []string) ([]string, error) {
 	suffixes := make([]string, 0, len(overlays))
 	for _, overlay := range overlays {
 		value, suffix := splitOverlayMode(overlay)
-		request, reason := lock.ParseDeclaration(value, "")
+		request, reason := lock.ParseDeclaration(value)
 		if reason != "" {
 			return nil, fmt.Errorf("-o %s: %s", overlay, reason)
 		}

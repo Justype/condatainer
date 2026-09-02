@@ -108,6 +108,26 @@ func (r *Recipe) Validate() error {
 		}
 	}
 
+	// A #TYPE: that disagrees with the derived type is rejected rather than
+	// ignored, for the reason #REDISTRIBUTE: is: silence and a wrong answer must
+	// not look the same. DeriveType accepts only app and data, and a .def takes
+	// its type from its path, so anything else read as silence and built as
+	// whatever the default happened to be. Restating the type a recipe already
+	// has stays legal.
+	//
+	// #TYPE: env is the case this exists for. env is what `overlay freeze`
+	// produces from a writable overlay; no recipe can produce one, and DeriveType
+	// never returns it, so the declaration could only ever have built an app.
+	if r.DeclaredType != "" && Type(r.DeclaredType) != r.Type {
+		if Type(r.DeclaredType) == TypeEnv {
+			errs = append(errs, fmt.Errorf("%w: %s declares #TYPE:env; env is what `overlay freeze` produces from a writable overlay and cannot be declared by a recipe",
+				ErrInvalidRecipe, r.Name))
+		} else {
+			errs = append(errs, fmt.Errorf("%w: %s declares #TYPE:%s but is %s; a recipe may declare %s or %s",
+				ErrInvalidRecipe, r.Name, r.DeclaredType, r.Type, TypeApp, TypeData))
+		}
+	}
+
 	if r.Redistribute != "" && r.Redistribute != "yes" && r.Redistribute != "no" {
 		errs = append(errs, fmt.Errorf("%w: %s declares #REDISTRIBUTE:%s; the values are yes and no",
 			ErrInvalidRecipe, r.Name, r.Redistribute))

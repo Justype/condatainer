@@ -27,28 +27,20 @@ var ErrTmpOverlayExists = errors.New("temporary overlay already exists")
 var ErrBuildCancelled = errors.New("build cancelled by user")
 
 // BuildType is how a target is built — the shape of its source, nothing more.
-// What the payload *is* (base, os, app, data) is its catalog.Type.
-type BuildType int
+// What the payload *is* (base, os, app, data, env) is its catalog.Type.
+//
+// It is meta.BuildType, the type the manifest records. The unset value is "",
+// which SourceSpec.BuildType returns until a source is resolved. There is no
+// constant for meta.BuildTypeSnapshot: a freeze packs an overlay, it does not
+// build one.
+type BuildType = meta.BuildType
 
 // Predefined build types.
 const (
-	BuildTypeConda  BuildType = iota + 1 // micromamba
-	BuildTypeDef                         // apptainer definition file
-	BuildTypeScript                      // recipe run as a shell script
+	BuildTypeConda  = meta.BuildTypeConda  // micromamba
+	BuildTypeDef    = meta.BuildTypeDef    // apptainer definition file
+	BuildTypeScript = meta.BuildTypeScript // recipe run as a shell script
 )
-
-// String implements fmt.Stringer for BuildType.
-func (bt BuildType) String() string {
-	switch bt {
-	case BuildTypeConda:
-		return "conda"
-	case BuildTypeDef:
-		return "def"
-	case BuildTypeScript:
-		return "script"
-	}
-	return "unknown"
-}
 
 // ScriptSpecs mirrors the scheduler module's job spec metadata.
 type ScriptSpecs = scheduler.ScriptSpecs
@@ -1044,7 +1036,7 @@ func createConcreteType(ctx context.Context, base *BuildObject, tmpDir string) (
 		return nil, err
 	}
 	base.buildType = BuildTypeScript
-	if base.spec.Source.BuildType() == 0 {
+	if base.spec.Source.BuildType() == "" {
 		// A script given as a path, so resolution never opened a recipe.
 		base.captureLocalSourceSpec(false)
 	}
@@ -1061,7 +1053,7 @@ func (b *BuildObject) asDefinitionBuild() {
 	}
 	b.ws = workspaceFor(b.spec.Image.Name, dir, ".sif")
 	b.buildType = BuildTypeDef
-	if b.spec.Source.BuildType() == 0 {
+	if b.spec.Source.BuildType() == "" {
 		// A definition given as a path or a scheme:// URI, so resolution never
 		// opened a recipe to take the Spec from.
 		b.captureLocalSourceSpec(true)

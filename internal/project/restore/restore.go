@@ -473,7 +473,7 @@ func dependencyPaths(entry *lock.Entry, available map[string]string) ([]build.Lo
 // change both keys, so it could not answer the lock at all; that is a re-pin,
 // not a restore.
 func condaSources(entry *lock.Entry, sources map[string][]byte, match Match) []string {
-	if entry.Manifest.BuildType != build.BuildTypeConda.String() {
+	if entry.Manifest.BuildType != meta.BuildTypeConda {
 		return []string{""}
 	}
 	ordered := []string{conda.ExplicitFileName}
@@ -588,6 +588,10 @@ func fetch(ctx context.Context, root string, entry *lock.Entry, step Step, match
 	// Distinct from "nothing was recorded", which the planner turns into a build
 	// rather than routing here at all — so this reports the acquisition fault and
 	// names the flag that asks for the build, instead of quietly taking it.
+	if step.Unbuildable {
+		return nil, fail("%v: no recorded remote served %s (%s); it is a frozen environment, so a registry copy is the only thing that can produce it",
+			ErrNotAcquirable, step.Identity, strings.Join(attempts, "; "))
+	}
 	return nil, fail("%v: no recorded remote served %s (%s); use --no-prebuilt to build from source instead",
 		ErrNotAcquirable, step.Identity, strings.Join(attempts, "; "))
 }

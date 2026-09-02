@@ -133,10 +133,14 @@ func TestAmbiguousNamesLoseThePlainTag(t *testing.T) {
 	l.Pins["grch38/genome/gencode49"] = lock.PinEntry{Artifact: one}
 	l.Pins["path:overlays/gencode49.sqf"] = lock.PinEntry{Artifact: two}
 
+	// Build resolves it, not Refine: the collision check runs right after, and
+	// a shared plain tag left in place would refuse the whole push offline.
 	plan := buildPlan(t, root, l, Options{})
-	dropped := dropAmbiguousPlainTags(plan)
-	if len(dropped) != 2 {
-		t.Fatalf("dropped = %v, want both pins", dropped)
+	if !plan.Complete() {
+		t.Fatalf("a shared name refused the push: %v", plan.Problems)
+	}
+	if len(plan.Ambiguous) != 1 || plan.Ambiguous[0] != "grch38/genome/gencode49" {
+		t.Errorf("ambiguous = %v, want the shared name once", plan.Ambiguous)
 	}
 	for _, step := range plan.Steps {
 		for _, tag := range step.Tags {
@@ -160,5 +164,35 @@ func TestTagCollisionRefuses(t *testing.T) {
 	}}
 	if err := checkTagCollisions(plan); err == nil {
 		t.Error("two artifacts composing one tag were not refused")
+	}
+}
+
+// Every frozen environment is named meta.EnvName, so a project pinning two
+// shares a name by construction. That must plan as two qualified tags and no
+// plain one, never as a collision that refuses the whole push.
+func TestTwoFrozenEnvironmentsPublish(t *testing.T) {
+	root := projectRoot(t)
+	one := vendorEnv(t, root, strings.Repeat("1a", 32))
+	two := vendorEnv(t, root, strings.Repeat("2b", 32))
+
+	l := lockWith(t, root, "ghcr.io/lab/p/cnt")
+	l.OCI.Audience = "restricted" // A snapshot never reaches a public endpoint.
+	l.Pins["path:overlays/analysis.sqf"] = lock.PinEntry{Artifact: one, Manual: true}
+	l.Pins["path:overlays/dev.sqf"] = lock.PinEntry{Artifact: two, Manual: true}
+
+	plan := buildPlan(t, root, l, Options{})
+	if !plan.Complete() {
+		t.Fatalf("two environments refused the push: %v", plan.Problems)
+	}
+	if len(plan.Ambiguous) != 1 || plan.Ambiguous[0] != meta.EnvName {
+		t.Errorf("ambiguous = %v, want %q once", plan.Ambiguous, meta.EnvName)
+	}
+	for _, step := range plan.Steps {
+		if step.Disposition != Upload {
+			t.Errorf("%s: disposition %q, %s", step.Artifact, step.Disposition, step.Reason)
+		}
+		if len(step.Tags) != 1 || !strings.HasPrefix(step.Tags[0], meta.EnvName+"__") {
+			t.Errorf("%s tags = %v, want one qualified tag", step.Artifact, step.Tags)
+		}
 	}
 }

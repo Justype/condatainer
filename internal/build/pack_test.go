@@ -216,7 +216,7 @@ func TestPackedImageMetadataIsReadable(t *testing.T) {
 	if manifest.Name != b.spec.Image.Name || manifest.Type != catalog.TypeApp {
 		t.Errorf("manifest = %+v, want name %q type %q", manifest, b.spec.Image.Name, catalog.TypeApp)
 	}
-	if manifest.BuildType != BuildTypeConda.String() {
+	if manifest.BuildType != BuildTypeConda {
 		t.Errorf("build_type = %q, want %q", manifest.BuildType, BuildTypeConda)
 	}
 

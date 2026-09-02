@@ -67,7 +67,7 @@ func projectCheck(scriptPaths []string, metaDeps []string) (handled bool, err er
 	for _, mount := range resolution.Mounts {
 		switch {
 		case mount.Unpinned:
-			utils.PrintMessage("  %s %s", utils.StyleWarning("unpinned"), mount.Request)
+			utils.PrintMessage("  %s %s", utils.StyleWarning("cannot be pinned"), mount.Request)
 		default:
 			utils.PrintMessage("  %s %s → %s", utils.StyleSuccess("✓"), mount.Request, mount.Path)
 		}

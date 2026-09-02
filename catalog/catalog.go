@@ -18,6 +18,12 @@ const (
 	TypeOS   Type = "os"   // adds to a root that already exists
 	TypeApp  Type = "app"  // contributes to PATH
 	TypeData Type = "data" // does not
+	// TypeEnv is what `overlay freeze` captures from a writable overlay. No
+	// recipe may declare it: DeriveType never returns it and Recipe.Validate
+	// rejects it. It stacks at the container root like an os, but is its own
+	// type because type carries publishing defaults and an undeclared os may be
+	// published publicly. Written "environment" in anything a user reads.
+	TypeEnv Type = "env"
 )
 
 // DeriveType reports the type of a recipe from its path and headers. A .def is

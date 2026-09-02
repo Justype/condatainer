@@ -25,8 +25,8 @@ const FileName = "manifest.json"
 type Manifest struct {
 	SchemaVersion int          `json:"schema_version"`
 	Name          string       `json:"name"`
-	Type          catalog.Type `json:"type"`       // base, os, app, data
-	BuildType     string       `json:"build_type"` // conda, script, def
+	Type          catalog.Type `json:"type"`
+	BuildType     BuildType    `json:"build_type"`
 	Description   string       `json:"description,omitempty"`
 	URL           string       `json:"url,omitempty"`
 	// License is the recipe's #LICENSE:, an SPDX expression kept verbatim and
@@ -48,6 +48,31 @@ type Manifest struct {
 	// dependencies is neither complete nor incomplete.
 	ProvenanceComplete *bool `json:"provenance_complete,omitempty"`
 	Build              Build `json:"build,omitzero"`
+	// Snapshot is what a frozen environment captured, and is nil for anything
+	// built from a recipe.
+	Snapshot *Snapshot `json:"snapshot,omitzero"`
+}
+
+// Snapshot describes a frozen writable overlay. Nothing here gates anything:
+// two environments are kept apart by their prefix, which every one of them
+// records as EnvPrefix. The sizes are recorded because unfreeze needs them
+// before it can create the image, and recovering them from the archive means
+// decompressing its metadata entry by entry.
+type Snapshot struct {
+	// Convention is the whiteout convention the source overlay used, before
+	// translation: chardev, whfile, mixed, or none. Diagnostics — a file that
+	// came back from the dead reads differently on each driver.
+	Convention string `json:"convention,omitempty"`
+	// Whiteouts is how many deletions the artifact carries, after translation.
+	// An opaque directory expands to one per hidden base entry, so this counts
+	// nodes rather than user-visible deletions.
+	Whiteouts int `json:"whiteouts,omitempty"`
+	// PayloadMB is the space the payload needs as a filesystem, rounded up to
+	// blocks: a 14-byte file still occupies one, and summing apparent sizes
+	// understates a conda prefix by orders of magnitude.
+	PayloadMB int `json:"payload_mb,omitempty"`
+	// Entries is how many things the payload holds, which sizes the inode table.
+	Entries int `json:"entries,omitempty"`
 }
 
 // Keys holds the versioned derivation scheme and expected digest for both keys.
@@ -191,14 +216,48 @@ type Source struct {
 	RequiresInput bool `json:"requires_input,omitempty"`
 }
 
-// Normalize fills in what a manifest is allowed to leave out: an absent or
-// unrecognized type means app, and an absent OS means linux.
+// Normalize fills in what a manifest is allowed to leave out: an absent type
+// means app, and an absent OS means linux.
 func (m *Manifest) Normalize() {
 	m.Type = normalizeType(m.Type)
 	if m.Platform.OS == "" {
 		m.Platform.OS = "linux"
 	}
 }
+
+// BuildType is how an artifact was produced, beside catalog.Type, which is what
+// the artifact is. internal/build aliases this type and its constants.
+type BuildType string
+
+const (
+	// BuildTypeConda is a Micromamba solve. It embeds no recipe, only its exports.
+	BuildTypeConda BuildType = "conda"
+	// BuildTypeScript is a recipe run as a shell script.
+	BuildTypeScript BuildType = "script"
+	// BuildTypeDef is an Apptainer definition file.
+	BuildTypeDef BuildType = "def"
+	// BuildTypeSnapshot is a writable overlay packed by `overlay freeze`.
+	// ValidateManifest requires it to accompany catalog.TypeEnv and the name
+	// EnvName.
+	BuildTypeSnapshot BuildType = "snapshot"
+)
+
+// String renders the build type, or "unknown" when it is unset.
+func (b BuildType) String() string {
+	if b == "" {
+		return "unknown"
+	}
+	return string(b)
+}
+
+// EnvPrefix is where an environment's conda prefix lives inside the container,
+// for a writable .img and the frozen artifact made from one alike. Every
+// environment records this or nothing, which is what stops two mounting together.
+const EnvPrefix = "/cnt_env"
+
+// EnvName is what every frozen environment is called. It is fixed: an
+// environment is addressed by its path, so a name would distinguish nothing.
+const EnvName = "env"
 
 // ValidateManifest reports whether m describes a usable image: a known schema, a
 // name, a known type, and an architecture. Call Normalize first; the payload is
@@ -215,9 +274,36 @@ func ValidateManifest(m Manifest) error {
 	}
 
 	switch m.Type {
-	case catalog.TypeBase, catalog.TypeOS, catalog.TypeApp, catalog.TypeData:
+	case catalog.TypeBase, catalog.TypeOS, catalog.TypeApp, catalog.TypeData, catalog.TypeEnv:
 	default:
 		return fmt.Errorf("%w: unknown type %q", ErrInvalid, m.Type)
+	}
+	switch m.BuildType {
+	case BuildTypeConda, BuildTypeScript, BuildTypeDef, BuildTypeSnapshot:
+	default:
+		return fmt.Errorf("%w: %s records unknown build type %q", ErrInvalid, m.Name, m.BuildType)
+	}
+
+	// A snapshot and the env type imply each other. Neither is derivable from the
+	// other by a reader, and an artifact carrying one without the other would be
+	// read correctly by whichever rule looked at the field it had — the publishing
+	// rule branches on the build type, the mount rules on the type — so the two
+	// must not be able to disagree.
+	if (m.BuildType == BuildTypeSnapshot) != (m.Type == catalog.TypeEnv) {
+		return fmt.Errorf("%w: %s is type %q with build type %q; a frozen environment is %q and %q, and nothing else is either",
+			ErrInvalid, m.Name, m.Type, m.BuildType, catalog.TypeEnv, BuildTypeSnapshot)
+	}
+	if m.BuildType == BuildTypeSnapshot && m.Name != EnvName {
+		return fmt.Errorf("%w: a frozen environment is always called %q, not %q",
+			ErrInvalid, EnvName, m.Name)
+	}
+	// A snapshot's two keys are one value. It has no inputs to abstract away, so
+	// "is this the same environment" and "can this substitute for it" cannot come
+	// apart, and a manifest claiming otherwise describes a distinction that does
+	// not exist.
+	if m.BuildType == BuildTypeSnapshot && m.Keys.Identity != m.Keys.Equiv {
+		return fmt.Errorf("%w: %s is a frozen environment; its identity and equivalence are the same value",
+			ErrInvalid, m.Name)
 	}
 
 	identityEmpty := m.Keys.Identity.Empty()
@@ -248,7 +334,7 @@ func ValidateManifest(m Manifest) error {
 	return nil
 }
 
-func validateBuildTools(buildType string, tools BuildTools) error {
+func validateBuildTools(buildType BuildType, tools BuildTools) error {
 	if tools.Empty() {
 		return nil
 	}
@@ -260,11 +346,13 @@ func validateBuildTools(buildType string, tools BuildTools) error {
 	}
 
 	switch buildType {
-	case "conda":
+	case BuildTypeConda:
 		if tools.Micromamba.Version == "" {
 			return fmt.Errorf("%w: Conda build tools have no Micromamba version", ErrInvalid)
 		}
-	case "def", "script":
+	case BuildTypeDef, BuildTypeScript, BuildTypeSnapshot:
+		// A freeze packs what is already there and never solves, so Micromamba is
+		// not one of its tools even though the payload is a conda environment.
 		if !tools.Micromamba.Empty() {
 			return fmt.Errorf("%w: %s build records Micromamba as a direct build tool", ErrInvalid, buildType)
 		}

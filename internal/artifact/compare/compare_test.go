@@ -31,7 +31,7 @@ type build struct {
 	name     string
 	typ      catalog.Type
 	arch     string
-	format   string
+	format   meta.BuildType
 	env      []meta.EnvVar
 	recipe   string
 	from     string

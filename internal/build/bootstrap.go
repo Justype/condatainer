@@ -93,7 +93,7 @@ func (b bootstrap) pinned(digest string) string {
 // The generated header carries a build date and still hashes stably, since
 // whole-line comments never reach a preimage.
 func (b *BuildObject) captureSynthesizedRecipe(path string, data []byte) {
-	if b.spec.Source.BuildType() != 0 {
+	if b.spec.Source.BuildType() != "" {
 		return
 	}
 	b.spec.Source.Definition = &DefinitionSource{

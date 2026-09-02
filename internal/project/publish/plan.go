@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/project/lock"
 	"github.com/Justype/condatainer/internal/registry"
 )
@@ -61,6 +62,9 @@ type Plan struct {
 	Source     string   `json:"source,omitempty"`
 	Steps      []Step   `json:"steps"`
 	Problems   []string `json:"problems,omitempty"`
+	// Ambiguous are the manifest names two pins share. Neither keeps the plain
+	// name tag; both keep their qualified one, and the push proceeds.
+	Ambiguous []string `json:"ambiguous_names,omitempty"`
 }
 
 // Complete reports whether the plan can run as computed.
@@ -142,6 +146,10 @@ func Build(ctx context.Context, root string, l *lock.Lock, verified *lock.Verifi
 			plan.Problems = append(plan.Problems, fmt.Sprintf("%s: %s", step.Name, step.Reason))
 		}
 	}
+	plan.Ambiguous = dropAmbiguousPlainTags(plan)
+	for _, name := range plan.Ambiguous {
+		logging.FromContext(ctx).Warn("two pins share a name, so neither takes the plain tag", "name", name)
+	}
 	if err := checkTagCollisions(plan); err != nil {
 		plan.Problems = append(plan.Problems, err.Error())
 	}
@@ -166,6 +174,9 @@ func planStep(step Step, entry *lock.Entry, audience registry.Audience) Step {
 // checkTagCollisions refuses a set in which two artifacts compose one tag with
 // different identities.
 //
+// It runs after dropAmbiguousPlainTags, so a shared plain tag is already gone
+// rather than reported here.
+//
 // It refuses rather than lengthening the identity prefix, which is what the
 // store does for a filename. A 12-hex collision does not happen; a tag whose
 // spelling depended on the rest of the push set would, and it would make the
@@ -185,11 +196,12 @@ func checkTagCollisions(plan *Plan) error {
 }
 
 // dropAmbiguousPlainTags removes the unqualified name tag where two artifacts in
-// one set share a manifest name, and reports what it dropped.
+// one set share a manifest name, and reports each name it dropped it from once.
 //
 // The plain tag is a human handle that says "this is what the project uses", and
 // two artifacts cannot both be that. The qualified tags still identify each, and
-// nothing addresses a published artifact by tag anyway.
+// nothing addresses a published artifact by tag anyway. Every frozen
+// environment is named meta.EnvName, so two pinned ones always share.
 func dropAmbiguousPlainTags(plan *Plan) []string {
 	byName := map[string]int{}
 	for _, step := range plan.Steps {
@@ -198,6 +210,7 @@ func dropAmbiguousPlainTags(plan *Plan) []string {
 		}
 	}
 	var dropped []string
+	seen := map[string]bool{}
 	for i, step := range plan.Steps {
 		if !step.Pinned || byName[step.Name] < 2 {
 			continue
@@ -209,7 +222,10 @@ func dropAmbiguousPlainTags(plan *Plan) []string {
 			}
 		}
 		plan.Steps[i].Tags = kept
-		dropped = append(dropped, step.Name)
+		if !seen[step.Name] {
+			seen[step.Name] = true
+			dropped = append(dropped, step.Name)
+		}
 	}
 	return dropped
 }

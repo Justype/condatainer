@@ -18,7 +18,9 @@ func tmpRootForType(typ catalog.Type) string {
 	if typ == catalog.TypeData {
 		return config.GetWritableTmpDir()
 	}
-	return utils.GetTmpDir()
+	scratch := utils.GetTmpDir()
+	utils.WarnNetworkScratch(scratch, "build")
+	return scratch
 }
 
 // tmpRootForDef is the root for a definition build, which keeps its recipe and
@@ -34,5 +36,7 @@ func tmpRootForExternal(targetDir string, typ catalog.Type, isDef bool) string {
 	if isDef || typ == catalog.TypeData {
 		return targetDir
 	}
-	return utils.GetTmpDir()
+	scratch := utils.GetTmpDir()
+	utils.WarnNetworkScratch(scratch, "build")
+	return scratch
 }

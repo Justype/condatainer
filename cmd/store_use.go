@@ -20,11 +20,11 @@ func newStoreUseCmd() *cobra.Command {
 plain name, and whichever build held it moves into the same directory's store.
 
 Only renames, and only inside the directory the chosen build already lives in.
-Nothing leaves that directory, so every identity stays available to everyone who
-reads it — a build is only ever addressed differently, never removed.
+No file is copied, moved between directories or removed, so every identity stays
+reachable afterwards.
 
-A build in a directory that a nearer one already shadows is refused, because
-promoting it there would change nothing.`,
+A build in a directory that a nearer one already shadows is refused: it would
+still not resolve. Promote it in the nearer directory instead.`,
 		Example: `  condatainer store use star/2.7.11b@9f2c1ab
   condatainer store use star/2.7.11b --identity 9f2c1ab`,
 		Args:         cobra.ExactArgs(1),

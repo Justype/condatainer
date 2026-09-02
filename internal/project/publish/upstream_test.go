@@ -278,3 +278,29 @@ func TestUpstreamSkipsAnAppOnAPublicEndpoint(t *testing.T) {
 		t.Error("the walk contacted a public endpoint for an app")
 	}
 }
+
+// vendorEnv writes a frozen environment, whose entry is a manifest alone: a
+// snapshot names no sources, and its keys are the tree hash of the payload the
+// pack produced rather than anything regenerable from a checkout.
+func vendorEnv(t *testing.T, root, identity string) string {
+	t.Helper()
+	ref := meta.KeyRef{Scheme: string(key.SnapshotEnvV1), SHA256: identity}
+	manifest := meta.Manifest{
+		SchemaVersion: meta.SchemaVersion,
+		Name:          meta.EnvName,
+		Type:          catalog.TypeEnv,
+		BuildType:     meta.BuildTypeSnapshot,
+		Platform:      meta.Platform{OS: "linux", Arch: "amd64"},
+		Keys:          meta.Keys{Identity: ref, Equiv: ref},
+	}
+	body, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative, err := lock.StageEntry(root, capsule.EntryName(meta.EnvName, ref.Digest()),
+		map[string][]byte{meta.FileName: body})
+	if err != nil {
+		t.Fatalf("stage entry: %v", err)
+	}
+	return relative
+}

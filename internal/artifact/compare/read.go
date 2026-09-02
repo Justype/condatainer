@@ -25,7 +25,7 @@ type Artifact struct {
 	// Format is the build type. Two artifacts of different formats are never
 	// the same build, whatever their digests: the digests are over different
 	// kinds of file.
-	Format string
+	Format meta.BuildType
 	// Identity and Equiv are recomputed from the files manifest.keys names,
 	// never taken on trust from the manifest. Both carry the "sha256:" prefix,
 	// which meta.KeyRef does not — cross that boundary with IdentityRef and

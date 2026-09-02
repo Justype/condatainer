@@ -55,7 +55,10 @@ exclusive inode `flock`.
 ## Placement and promotion
 
 `InstallFile` is the entry point for an artifact that already exists as a file —
-`store add`, and `project restore` for a downloaded prebuilt. It runs the ordinary
+`store add`, and `project restore` for a downloaded prebuilt. The source filename
+is read as nothing: the destination name comes from the keys in the file, because
+inside the store the filename *is* the address and a name taken from whatever the
+sender happened to call it would address a different artifact. It runs the ordinary
 transaction, so an exact copy anywhere is adopted rather than copied again — which
 callers naming a destination narrow with `SearchDirs`, since "it exists somewhere
 else" does not answer a request to have it *here*. It

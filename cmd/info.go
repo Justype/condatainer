@@ -105,11 +105,63 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 func imageType(imagePath string) catalog.Type {
 	if rt, err := meta.ReadRuntime(imagePath); err == nil {
 		switch rt.Type {
-		case catalog.TypeBase, catalog.TypeOS, catalog.TypeApp, catalog.TypeData:
+		case catalog.TypeBase, catalog.TypeOS, catalog.TypeApp, catalog.TypeData, catalog.TypeEnv:
 			return rt.Type
 		}
 	}
 	return ""
+}
+
+// typeLabel is how a type is written for a reader. Only env differs from its
+// stored value: it is spelled out so it cannot be read as the environment
+// variables the rest of the tool calls env, and so a .sqf and the .img it came
+// from say the same word.
+func typeLabel(typ catalog.Type) string {
+	switch typ {
+	case catalog.TypeEnv:
+		return "environment"
+	case "":
+		return "unknown"
+	}
+	return string(typ)
+}
+
+// displayPayload prints where the image's payload sits inside the container and
+// what it deletes from the layers below.
+//
+// An environment shows no prefix of its own: every one of them records the same
+// EnvPrefix, so printing it says nothing that the type has not already said.
+func displayPayload(overlayPath string, typ catalog.Type, prefix string) {
+	whiteouts, convention := 0, ""
+	if typ == catalog.TypeEnv {
+		if m, err := meta.ReadManifest(overlayPath); err == nil && m.Snapshot != nil {
+			whiteouts, convention = m.Snapshot.Whiteouts, m.Snapshot.Convention
+		}
+	}
+	showPrefix := prefix != "" && (typ == catalog.TypeApp || typ == catalog.TypeData)
+	if !showPrefix && whiteouts == 0 {
+		return
+	}
+
+	fmt.Println(utils.StyleTitle("Payload"))
+	if showPrefix {
+		fmt.Printf("  %-14s %s\n", "Prefix:", prefix)
+	}
+	if whiteouts > 0 {
+		fmt.Printf("  %-14s %d (from %s markers)\n", "Deletions:", whiteouts, convention)
+	}
+}
+
+// imagePrefix reports where the payload sits inside the container, or "" when the
+// artifact does not say. Only the artifact is asked: a filename is an address,
+// never a naming claim, and decoding one changes the answer when a file is
+// renamed.
+func imagePrefix(imagePath string) string {
+	rt, err := meta.ReadRuntime(imagePath)
+	if err != nil {
+		return ""
+	}
+	return rt.Prefix
 }
 
 // normalizeTime parses ctime()-style timestamps produced by tune2fs and unsquashfs
@@ -149,11 +201,7 @@ func displayImageInfo(overlayPath string) error {
 	displayDescription(overlayPath)
 	fmt.Printf("  %-14s %s\n", "Path:", utils.StylePath(overlayPath))
 	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatSize(fileInfo.Size()))
-	typeLabel := string(typ)
-	if typeLabel == "" {
-		typeLabel = "unknown"
-	}
-	fmt.Printf("  %-14s %s (Read-Only)\n", "Type:", utils.StyleInfo(typeLabel))
+	fmt.Printf("  %-14s %s (Read-Only)\n", "Type:", utils.StyleInfo(typeLabel(typ)))
 	if typ == catalog.TypeOS || typ == catalog.TypeBase {
 		if osInfo := squashfs.GetOSInfoAt(overlayPath, offset); osInfo != nil {
 			fmt.Printf("  %-14s %s\n", "Distro:", osInfo.String())
@@ -163,13 +211,6 @@ func displayImageInfo(overlayPath string) error {
 		fmt.Printf("  %-14s %s\n", "Created:", normalizeTime(sqStats.CreatedTime))
 	} else {
 		fmt.Printf("  %-14s %s\n", "Modified:", fileInfo.ModTime().Format("2006-01-02 15:04:05"))
-	}
-	// OS overlays carry no version in their name, so their distribution tag is the
-	// build date (mksquashfs creation time).
-	if typ == catalog.TypeOS && sqStats != nil && sqStats.CreatedTime != "" {
-		if t, ok := squashfs.ParseStatTime(sqStats.CreatedTime); ok {
-			fmt.Printf("  %-14s %s\n", "Build Tag:", t.Format("2006.01.02"))
-		}
 	}
 
 	// SquashFS section
@@ -190,17 +231,17 @@ func displayImageInfo(overlayPath string) error {
 		fmt.Printf("  %-14s unsquashfs not available\n", "Details:")
 	}
 
-	// Mount path section
-	name := strings.TrimSuffix(filepath.Base(overlayPath), filepath.Ext(overlayPath))
-	name = strings.ReplaceAll(name, "--", "/")
-	name = strings.ReplaceAll(name, "=", "/")
-	if typ == catalog.TypeApp || typ == catalog.TypeData {
-		fmt.Println(utils.StyleTitle("Mount"))
-		fmt.Printf("  %-14s /cnt/%s\n", "Path:", name)
-	}
+	// Where the payload sits inside the container. Nothing is mounted there: the
+	// whole image is mounted as one overlay layer, and this is the prefix its
+	// contents appear under.
+	prefix := imagePrefix(overlayPath)
+	displayPayload(overlayPath, typ, prefix)
 
-	// Conda environment section (sqf overlays use /cnt/<name/version>)
-	displayCondaEnv(overlayPath, "/cnt/"+name)
+	// Conda environment section, read from under that same prefix. Without one
+	// there is nowhere to look, and guessing would report another image's layout.
+	if prefix != "" {
+		displayCondaEnv(overlayPath, prefix)
+	}
 
 	// Environment variables section
 	displayEnvVars(overlayPath)
@@ -344,12 +385,14 @@ func displayImgInfo(overlayPath string) error {
 		inodePct)
 	fmt.Printf("  %-14s %d\n", "Free:", stats.FreeInodes)
 
-	// Mount path section
-	fmt.Println(utils.StyleTitle("Mount"))
-	fmt.Printf("  %-14s %s\n", "Path:", "/cnt_env")
+	// Where a writable overlay's conda prefix sits. Nothing is mounted there —
+	// the image is attached as one overlay layer — and the value is fixed rather
+	// than read, because an .img carries no manifest to read it from.
+	fmt.Println(utils.StyleTitle("Payload"))
+	fmt.Printf("  %-14s %s\n", "Prefix:", meta.EnvPrefix)
 
-	// Conda environment section (img overlays always use /cnt_env)
-	displayCondaEnv(overlayPath, "/cnt_env")
+	// Conda environment section, under that same prefix
+	displayCondaEnv(overlayPath, meta.EnvPrefix)
 
 	// Environment variables section
 	displayEnvVars(overlayPath)

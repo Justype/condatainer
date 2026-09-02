@@ -35,7 +35,7 @@ func ResolveInstallEnvironment() (*Environment, error) {
 
 func resolveEnvironment(requireWritable, allowInitialize bool) (*Environment, error) {
 	if os.Getenv("IN_CONDATAINER") == "" {
-		return nil, fmt.Errorf("env commands run inside CondaTainer; enter with: condatainer exec -w -o env.img bash")
+		return nil, fmt.Errorf("env commands must run inside CondaTainer")
 	}
 
 	root := filepath.Clean(os.Getenv("CNT_CONDA_ROOT"))
@@ -44,7 +44,7 @@ func resolveEnvironment(requireWritable, allowInitialize bool) (*Environment, er
 	}
 	writable := os.Getenv("CNT_CONDA_WRITABLE") == "1"
 	if requireWritable && !writable {
-		return nil, fmt.Errorf("the conda environment is read-only; enter with: condatainer exec -w -o env.img bash")
+		return nil, fmt.Errorf("the conda environment is read-only")
 	}
 
 	info, err := os.Stat(root)

@@ -124,7 +124,7 @@ func (s SourceSpec) BuildType() BuildType {
 	case s.Script != nil:
 		return BuildTypeScript
 	}
-	return 0
+	return ""
 }
 
 // RecipeFile returns the recipe this build embeds at /.cnt/recipe, and whether
@@ -240,7 +240,7 @@ func (s Spec) Manifest() meta.Manifest {
 		SchemaVersion: meta.SchemaVersion,
 		Name:          s.Image.Name,
 		Type:          s.Image.Type,
-		BuildType:     s.Source.BuildType().String(),
+		BuildType:     s.Source.BuildType(),
 		Description:   s.Image.Description,
 		URL:           s.Image.URL,
 		License:       s.Image.License,

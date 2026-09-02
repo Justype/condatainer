@@ -1,8 +1,8 @@
 # artifact
 
 Everything that understands what CondaTainer embeds in an image: what the image
-says it is, what loading it does to the environment, and — as the identity work
-lands — how two images are compared.
+says it is, what loading it does to the environment, and how two images are
+compared.
 
 It reads through [`internal/image`](../image/README.md), which handles archives
 and files and knows nothing about metadata. The dependency is one-way: `artifact`
@@ -18,7 +18,7 @@ imports `image`, never the reverse.
 The dispatcher in key/scheme.go only selects a supported
 identity/equivalence pair, reconstructs neutral inputs, and invokes the selected
 schemes. It does not define which inputs contribute to a key. That policy lives
-in the six versioned scheme files.
+in the seven versioned scheme files.
 
 ## Two documents, two read frequencies
 
@@ -84,6 +84,36 @@ What the image is and where it came from: identity, build type, description, URL
 and platform. It carries **no runtime block at all** — that lives in
 `runtime.json` and nowhere else.
 
+`type` and `build_type` are both enumerations validated here, and neither derives
+from the other: `catalog.Type` says what the payload *is* (`base`, `os`, `app`,
+`data`, `env`) and `meta.BuildType` says how it was produced (`conda`, `script`,
+`def`, `snapshot`). One recipe language produces both an app and a data image.
+`internal/build` aliases `meta.BuildType` rather than keeping a second list of
+its own — the value the build chooses is the value written here — and has no
+member for `snapshot`, which a freeze produces without building anything.
+
+Both enumerations are closed, and a value outside either is refused rather than
+mapped to something safe. `Normalize` fills in an absent `type` as `app` and an
+absent `os` as `linux`, and does nothing else — a lenient default for a field a
+document left out, never a rewrite of one it filled in wrong. The type decides
+the install prefix, whether a runtime document must carry one, the tag shape, and
+whether a public endpoint accepts the artifact; reading an unknown one as `app`
+would answer all four questions confidently and wrongly. `APP` is the case that
+settles it: a difference in case is not a spelling to correct, and two names that
+collapse into one are how an artifact gets published under a rule that was never
+written for it.
+
+The cost is that a type introduced later cannot be read by a build that predates
+it. That is the same trade `schema_version` already makes with a strict
+inequality two checks earlier, and it is the trade this package makes everywhere:
+silence and a wrong answer must not look the same.
+
+The one place the two coincide is a frozen environment: `snapshot` and `env`
+imply each other, along with the name `env`, and `ValidateManifest` refuses a
+manifest where they disagree. So a rule branches on whichever field it is really
+about — the build type for publishing and key derivation, the type for what the
+runtime does with the payload.
+
 `dependencies[].identity` and `.equiv` are complete keys — scheme and SHA-256
 both, the same `KeyRef` the top-level `keys` uses. An edge held to a bare digest
 would be a weaker contract than the artifact it points at, and the schemes hash
@@ -111,12 +141,16 @@ Manifest reads are uncached, because nothing asks for one per `exec`.
 
 ### Not handled
 
-A writable `.img` carries no embedded metadata. It is a mutable working overlay
-rather than a built image, and its environment comes from its `.env` sidecar.
+A writable `.img` carries no embedded metadata: it is a working overlay rather
+than a built image, and its environment comes from its `.env` sidecar.
+
+The boundary is the freeze, not the payload. `overlay freeze` packs one into a
+`.sqf` carrying a manifest, a runtime document and a `snapshot-env-v1` key, and
+from that point everything here applies to it as to any other artifact.
 
 ## Scheme-backed keys
 
-The key package owns six immutable derivation schemes. Each scheme has one file
+The key package owns seven immutable derivation schemes. Each scheme has one file
 that states its question, accepted artifact types, complete preimage contents,
 and exclusions:
 
@@ -128,6 +162,7 @@ and exclusions:
 | definition-equiv-v1 | [definition_equiv_v1.go](key/definition_equiv_v1.go) | definition inputs without the resolved upstream digest |
 | conda-explicit-v1 | [conda_explicit_v1.go](key/conda_explicit_v1.go) | stored explicit.txt bytes exactly |
 | conda-environment-v1 | [conda_environment_v1.go](key/conda_environment_v1.go) | stored environment.yml bytes exactly |
+| snapshot-env-v1 | [snapshot.go](key/snapshot.go) | one record per packed archive entry, sorted by path |
 
 Valid pairs are fixed by build type:
 
@@ -136,6 +171,13 @@ Valid pairs are fixed by build type:
 | script | script-identity-v1 | script-equiv-v1 |
 | def | definition-identity-v1 | definition-equiv-v1 |
 | conda | conda-explicit-v1 | conda-environment-v1 |
+| snapshot | snapshot-env-v1 | snapshot-env-v1 |
+
+A snapshot is the one row whose two keys are a single value: it has no inputs to
+abstract away, so "is this the same environment" and "can this substitute for it"
+cannot come apart. It is also the one that regenerates from nothing a checkout
+holds — the preimage is the packed payload — so verification takes its recorded
+keys as they stand rather than re-deriving them.
 
 manifest.keys stores a scheme and SHA-256 for each key. The complete key is the
 (scheme, SHA-256) pair: the scheme is not repeated inside the hashed preimage,

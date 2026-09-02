@@ -79,9 +79,9 @@ func packImage(t *testing.T, s imageSpec) (path string, m meta.Manifest) {
 	// The build type is not free to choose: an os or base is produced from an
 	// Apptainer definition, an app or data from a script recipe, and the key
 	// schemes refuse the other pairing outright.
-	buildType := "script"
+	buildType := meta.BuildTypeScript
 	if s.typ == catalog.TypeOS || s.typ == catalog.TypeBase {
-		buildType = "def"
+		buildType = meta.BuildTypeDef
 	}
 	m = meta.Manifest{
 		SchemaVersion: meta.SchemaVersion,

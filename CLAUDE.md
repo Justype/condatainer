@@ -38,7 +38,10 @@ go test -v ./internal/scheduler/...                       # Package tests
 Recipes live in collections listed in the ordered `sources` config (first match wins, like `PATH`);
 `catalog/` resolves a name to a recipe and walks its dependency graph. A recipe is `<name>/<version>`,
 where the name may carry slashes (`grch38/genome/gencode` is name `grch38/genome`, version `gencode`).
-Four types: `base` (produces the container root), `os`, `app` (contributes to `PATH`), `data`.
+Four declarable types: `base` (produces the container root), `os`, `app` (contributes to `PATH`),
+`data`. A fifth, `env`, is what `overlay freeze` captures from a writable overlay; no recipe may
+declare it and `DeriveType` never returns it. It is written "environment" in anything a user reads,
+since `env` elsewhere in the tool means environment variables.
 
 A recipe runs top to bottom as `bash -euo pipefail <recipe>` — no `install()` wrapper.
 Available vars: `$CNT_NAME` (the complete name, e.g. `samtools/1.23.1`), `$CNT_TYPE`,
@@ -48,32 +51,14 @@ varies by version uses a `#PH:` placeholder, and one pinned to a version writes 
 
 `#DEP:` is a **build** dependency only — what must be mounted while the recipe runs. It is not
 recorded in the image and never re-expanded at run time; there is no runtime dependency tree.
-**Only a `data` recipe may declare one**, and validation rejects it on any other type: an `app` is
-self-contained (a conda env or a prebuilt package carrying its own libraries), an `os` is
-self-contained by definition, and a `base` *is* the build environment. Producing an index needs the
-producing tool, which is why data is the type with deps. A `#DEP:` may name an app, data, or os, but
-never a base — resolution refuses that edge.
+**Only a `data` recipe may declare one**, and **a build's `#DEP:` is a `name/version`, never a
+path** — where a running script's may be either. Both rules live in `catalog.ValidateDeps`, and the
+reasoning is in [`catalog/README.md`](catalog/README.md) with the `#TARGET:` naming rule an external
+build depends on.
 
-**A *build's* `#DEP:` is a `name/version`, never an overlay path** — but a *running* script's may be
-either. The asymmetry is the point: a running script mounts what it names and records nothing, while
-a build's declaration becomes an edge in an artifact that has to mean the same thing on another
-machine, and a path is neither resolvable there nor a key anything can regenerate. So
-`#DEP: ./overlays/x.sqf` and `#DEP: env.img  ## unpinned` stay valid in an analysis script and are
-rejected in a recipe.
-
-Both build rules live in `catalog.ValidateDeps`, whose only callers are `Recipe.Validate` and
-`build.FromExternalSource` — never `run` or `check`. An **external build** (`create -p -f <script>`)
-answers to them exactly as a catalog recipe does, which is why they live there rather than on
-`Recipe`: an external build has no recipe path to be parsed from. `catalog.IsPathDep` is the single
-answer to "is this dep a path", since `catalog` owns the `Normalize`/`ParseDep` grammar that applies
-only to names; its extension set must stay `utils.IsOverlay`'s, `.ext3` included.
-
-A **version constraint is a recipe-only feature.** `#DEP:name/version>=min` lets a build reuse a
-satisfying version that is already installed instead of producing another, and for reference data
-the tool version often does not matter — `samtools faidx` writes the same `.fai` whichever recent
-samtools ran. An **analysis script must name an exact `name/version`**: "any version in this range"
-is not a claim to attach to a result, and a project lock exists to say which one. A constrained
-declaration in a project script is a scan finding, not a request.
+A **version constraint is a recipe-only feature**: it lets a build reuse a satisfying version already
+installed. An **analysis script must name an exact `name/version`**, and a constrained declaration in
+a project script is a scan finding, not a request.
 
 Metadata headers: `#DEP:name/version`, or `#DEP:name/version>=min` in a recipe (preferred version is
 implicit upper bound, so valid range is `[min, version]`), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params),
@@ -82,27 +67,13 @@ implicit upper bound, so valid range is `[min, version]`), `#SBATCH`/`#PBS`/`#BS
 `#ARCH:noarch` (app and data script recipes only; default `native`), `#DESC:`, `#URL:`, `#TYPE:`,
 `#LICENSE:` (an SPDX expression, verbatim), `#REDISTRIBUTE:` (`yes` or `no` — see *Publishing*).
 
-**`#TARGET:` without `#PH:` is not a template — it names the artifact**, and that is how an *external*
-build (`create -p <path> -f <script>`) gets a name at all. Without it the name is the `-p` basename,
-which is a single component, so `key.Role`'s component match never fires and every `#DEP:` is silently
-downgraded to build history. An external script declaring `#DEP:` must therefore declare `#TARGET:`,
-and `FromExternalSource` refuses it otherwise. The name and the file path are separate namespaces:
-`#TARGET:` fixes `/cnt/<name>` and the role classification, `-p` fixes where the `.sqf` lands. That is
-why a path-addressed artifact's filename carries no naming claim — `project.LookupAt` matches it by
-manifest name alone, while a flat or store scan still requires the filename to encode the name,
-because there the filename *is* the address.
+**`#TARGET:` without `#PH:` is not a template — it names the artifact**, which is how an external
+build (`create -p <path> -f <script>`) gets a name at all; one declaring `#DEP:` must declare it.
 
-An annotation is read wherever it is written; position carries no meaning, so there is no header
-block and no boundary. `catalog.ScanAnnotations` is the one tokenizer — recipes, user scripts and
-project scanning all go through it, and a key means the same thing everywhere. A line qualifies when
-it starts with `#`, an upper-case key, and `:`, which is what keeps prose like `# note: rerun weekly`
-out. Scheduler directives are matched by prefix instead, because `#SBATCH --time=01:00:00` has no
-`#KEY: value` shape to cut on.
-
-The cost is deliberate: a recipe that writes a job script in a heredoc also declares whatever that
-script declares. Both keys hash `catalog.StripComments`, which drops every whole-line comment —
-annotations with them — so never compute that preimage a second way. Neither affects what is stored
-or what runs: the recipe is embedded and executed byte for byte.
+`catalog.ScanAnnotations` is the one tokenizer for every `#KEY: value` line, in recipes, user scripts
+and project scanning alike; position carries no meaning, so there is no header block. Both keys hash
+`catalog.StripComments`, so never compute that preimage a second way. See
+[`catalog/README.md`](catalog/README.md), *The header boundary*.
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 
@@ -128,46 +99,14 @@ treats it as if it did.
 
 ## Publishing
 
-What may be pushed depends on **who can pull it**, declared per endpoint as `audience` (`public` by
-default, or `restricted`), and on what the artifact says about itself. Everything is read from the
-embedded manifest, never guessed from the filename, and `push` refuses rather than warns.
+What may be pushed depends on **who can pull it** — declared per endpoint as `audience` (`public` by
+default, or `restricted`) — and on what the artifact says about itself. Everything is read from the
+embedded manifest, never guessed from the filename; `push` refuses rather than warns, and no flag
+overrides a refusal.
 
-A `restricted` endpoint takes anything. At a `public` one:
-
-| the recipe declared | may publish publicly |
-|---|---|
-| `#REDISTRIBUTE: no` | **never**, whatever the type, and no flag overrides it |
-| `#REDISTRIBUTE: yes` | yes, whatever the type |
-| nothing, and it is `base` or `os` | yes — ours to publish: a container root, and packages from a public distribution |
-| nothing, and it is `data` | yes — the type asserts public reference data and the indexes built from it |
-| nothing, and it is an `app` | **no** — someone else's software with unstated terms, and unknown is not permission |
-| nothing, and it is a Conda build | yes — see below |
-
-**`#REDISTRIBUTE:` is the answer; the type is only the default for an unanswered question.** The
-declaration lives in the recipe rather than on the command line, so it is authored once, reviewed in a
-commit, and travels with every artifact built from it — the same standard `audience` is held to, and
-the reason a `yes` is trusted here while a `--force` would not be. Nothing verifies it.
-
-**A Conda build is never asked.** It embeds no recipe (`build.SourceSpec.RecipeFile`), so there is
-nowhere for the declaration to be written that travels with the artifact, and gating it would be a
-permanent refusal wearing a default's clothes. Its packages were also vetted for redistributable
-licensing as a condition of being in the channel. What the channels cannot answer — a private or
-vendor channel — is reported from `Build.Channels` at push time and decided by a person; do not add a
-check that adjudicates it, since the only ways to try are a config allowlist or interpreting a few
-hundred licence strings.
-
-`#LICENSE:` is an SPDX expression published verbatim as `org.opencontainers.image.licenses`. It is
-never parsed and never gates anything: deriving redistribution permission from a licence expression is
-a judgement a tool gets wrong in the permissive direction, and that direction cannot be taken back.
-
-`.img` is never published to any endpoint. That is structural, not policy — a writable overlay has no
-identity, so there is nothing to publish it *as*.
-
-`audience` states a fact about a registry and CondaTainer derives the permitted set from it. Never
-let config enumerate types directly: `types: [app]` beside a public endpoint would erase the rule
-with no error, whereas a wrong `audience` is a claim someone has to write down and defend. It is a
-declaration, not enforcement — nothing verifies the registry is actually restricted, and it is
-unrelated to a GitHub package's own visibility setting, which CondaTainer never reads or changes.
+What a public endpoint takes is the table in [`docs/manuals/condatainer.md`](docs/manuals/condatainer.md),
+*Publishing rules*. Why each row falls that way, and the three checks that must never be added, are in
+[`internal/registry/README.md`](internal/registry/README.md).
 
 ## Data Directory Order
 
@@ -193,21 +132,66 @@ Bash scripts in [`cnt-scripts/helpers/`](https://github.com/Justype/cnt-scripts)
 
 ## File Locking
 
-`exec`/`run` hold `LOCK_SH` on `.sqf`/`.sif` files during execution (`.img` skipped — Apptainer flocks those itself); `remove` and `build --update` probe `LOCK_EX` before modifying. See `internal/image/lock.go`.
+`exec`/`run` hold `LOCK_SH` on `.sqf`/`.sif` files during execution (`.img` skipped — Apptainer flocks
+those itself); `remove` and `build --update` probe `LOCK_EX` before modifying.
 
-**An unwritable image is protected and is never modified or removed** — not even for its owner, who
-can unlink it through the directory anyway and can restore the bit. Clearing the write bit
-(`chmod a-w`) is how an artifact is pinned. This is why a write lock opens `O_RDWR`: `flock` does not
-need it, so never "simplify" that to `O_RDONLY` — the open mode *is* the protection check.
-
-A failed lock has three distinct causes and they must stay distinct: `ErrProtected` (write bit
-clear), `ErrInUse` (a conflicting flock), and a missing file. Reporting a protected image as "in
-use" sends the reader hunting for a container that is not running.
+**An unwritable image is protected and is never modified or removed.** Clearing the write bit
+(`chmod a-w`) is how an artifact is pinned, a write lock opens `O_RDWR` because that open mode *is*
+the check — never "simplify" it to `O_RDONLY` — and a failed lock's three causes stay distinct:
+`ErrProtected`, `ErrInUse`, and a missing file. See
+[`internal/image/README.md`](internal/image/README.md).
 
 ## Coding Rules
 
-- When editing a function, update its doc comment to match. Keep comments concise and behavior-first — say what it does; give a reason only when the behavior is surprising.
+- When editing a function, update its doc comment to match.
+- **Before changing behavior, read the package's `README.md`.** It records the decisions the code
+  cannot show and the orderings that are load bearing. A change that contradicts one is either wrong,
+  or right and the README is updated in the same change — never left to disagree with the code.
 - When editing code, check whether the change is reflected in docs and README files, and update them when needed: `docs/manuals/condatainer.md` and relevant `docs/` pages for UX changes (flags, output format, command behaviour), and the nearest `README.md` (e.g. `internal/helper/README.md`) for package-level changes.
+
+### Where writing goes
+
+Three places, three jobs. Writing put in the wrong one is not a style problem: a
+design argument in the manual is noise to the person reading it, and a paragraph
+defending a decision beside the code is read as documentation of behavior.
+
+- **Comments — what the code does.** Concise and behavior-first. Give a reason
+  only where the behavior would look wrong without it, and then in a clause, not
+  a paragraph. **A function comment over 5 lines is a mistake** unless the
+  function branches and each branch decides something; the rest belongs in a
+  README. Never argue with an objection nobody made at the call site.
+- **`docs/` and CLI help — what a user does and sees.** End-user facing:
+  commands, flags, output, what is refused and how to proceed. This covers every
+  `Short`, `Long` and `Example` string as much as it covers `docs/`. **Never a
+  design argument, never why a decision went one way, and never how it works
+  inside** — no "reads the lock rather than scanning", no "one extraction rather
+  than one read per file". State the rule and the consequence the user can act
+  on, not its defence.
+- **A package `README.md` — the design.** The decisions, the constraints they
+  answer, the orderings that are load bearing, and anything true of the package
+  that no single file states. **Not a retelling of what the code already says.**
+  Reasoning cut from a comment or from the manual lands here.
+
+**Every document describes the present, in all three places.** When behavior
+changes, **edit the part that is now wrong** — never add a paragraph beside it
+saying what it used to do or why that was wrong. No "previously", no "note that
+this no longer", no correction layered on a correction. The reader has not seen
+the old version and git holds it anyway. A section that has grown by accretion is
+rewritten, not appended to: **documents must not grow like a tumor.**
+
+### Tests describe the present too
+
+The same rule, applied to test code. A test names behavior that exists now, so
+when behavior changes **delete the tests for what it used to do** rather than
+adapting them or adding new ones beside them.
+
+**A removed special case takes its tests with it.** Do not keep a test alive to
+prove the old rule no longer applies — nothing is left to apply it. When a
+special case is replaced by a general rule, the replacement gets **one** test,
+not one per case the old rule enumerated.
+
+**Test code must not grow like a tumor either.** A change that removes behavior
+should leave fewer test lines than it found.
 
 ## Key Patterns
 

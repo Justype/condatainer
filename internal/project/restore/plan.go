@@ -16,6 +16,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/artifact/capsule"
 	"github.com/Justype/condatainer/internal/artifact/compare"
+	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/project"
 	"github.com/Justype/condatainer/internal/project/lock"
@@ -44,6 +45,9 @@ const (
 	ActionFetch Action = "fetch"
 	// ActionBuild rebuilds from the vendored sources.
 	ActionBuild Action = "build"
+	// ActionUnavailable is an artifact that is neither here nor obtainable. A
+	// plan carrying one is never complete, so nothing runs on it.
+	ActionUnavailable Action = "unavailable"
 )
 
 // Step is one artifact's place in a restore.
@@ -95,6 +99,9 @@ type Step struct {
 	// StoreOnly keeps this step out of the bare name because a pin in the
 	// same plan answers to it. Set only on a build dependency being installed.
 	StoreOnly bool `json:"store_only,omitempty"`
+	// Unbuildable reports an artifact with no sources to rebuild from, so a
+	// registry copy is the only thing that can produce it.
+	Unbuildable bool `json:"unbuildable,omitempty"`
 }
 
 // verdict is how a step's result relates to the lock, decided by whether an
@@ -269,6 +276,7 @@ func Compute(root string, l *lock.Lock, opts Options) *Plan {
 			Arch:     entry.Manifest.Platform.Arch,
 
 			RequiresInput: entry.Manifest.Source.RequiresInput,
+			Unbuildable:   key.IsSnapshot(entry.Manifest),
 			DependsOn:     dependsOn(verified, entry),
 		}
 		keys := meta.Keys{Identity: entry.Identity, Equiv: entry.Equiv}
@@ -490,8 +498,19 @@ func (p *Plan) classify(step Step, keys meta.Keys, hostArch string, opts Options
 		problems = append(problems, fmt.Sprintf("%s: %s", step.Name, reason))
 	}
 	switch {
-	case len(step.Remotes) > 0 && !opts.SkipPrebuilt:
+	// --no-prebuilt chooses building over fetching, so it has nothing to say
+	// about an artifact that cannot be built: skipping the fetch there would
+	// refuse the restore rather than take the other route.
+	case len(step.Remotes) > 0 && (!opts.SkipPrebuilt || step.Unbuildable):
 		step.Action = ActionFetch
+	case step.Unbuildable:
+		// Refused while planning rather than attempted: a frozen environment was
+		// captured, not built, so no source it could be rebuilt from exists
+		// anywhere.
+		step.Action = ActionUnavailable
+		problems = append(problems, fmt.Sprintf(
+			"%s is a frozen environment and cannot be rebuilt; it is only obtainable from a registry, so publish it with `condatainer project push` from a checkout that has it",
+			step.Name))
 	default:
 		step.Action = ActionBuild
 		if step.RequiresInput && len(opts.Answers[step.Artifact]) == 0 {

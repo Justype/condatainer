@@ -144,7 +144,7 @@ func TestProjectCheckIgnoresANameArgumentInsideAProject(t *testing.T) {
 // A single script whose declarations all resolve reports that it can run.
 func TestProjectCheckReportsARunnableScript(t *testing.T) {
 	root := newProject(t)
-	writeScript(t, root, "run.sh", "#DEP: env.img  ## unpinned — scratch\nrun\n")
+	writeScript(t, root, "run.sh", "#DEP: env.img\nrun\n")
 	if err := lock.Publish(root, lock.New()); err != nil {
 		t.Fatal(err)
 	}

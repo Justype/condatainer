@@ -126,55 +126,38 @@ func TestScanReadsHeredocDeclarations(t *testing.T) {
 
 func TestScanClassifiesPathDeclarations(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "run.sh", "#DEP: ./overlays/tool.sqf\n#DEP: env.img  ## unpinned — scratch, rebuilt per machine\nrun\n")
+	write(t, root, "run.sh", "#DEP: ./overlays/tool.sqf\n#DEP: env.img\nrun\n")
 
 	result := scan(t, root)
 	sqf := find(t, result, PathPrefix+"overlays/tool.sqf")
 	if sqf.Kind != KindPath || sqf.Path != "overlays/tool.sqf" {
 		t.Errorf("sqf request = %#v", sqf)
 	}
-	if sqf.Unpinned {
-		t.Errorf("a .sqf is lockable and must not be marked unpinned by default")
+	if !sqf.Kind.Pinnable() {
+		t.Errorf("a project .sqf must be pinnable")
 	}
 	img := find(t, result, PathPrefix+"env.img")
-	if img.Kind != KindWritable {
-		t.Errorf("img kind = %q, want writable", img.Kind)
-	}
-	if !img.Unpinned || img.Reason != "scratch, rebuilt per machine" {
-		t.Errorf("unpinned marker = %v, reason = %q", img.Unpinned, img.Reason)
+	if img.Kind != KindWritable || img.Kind.Pinnable() {
+		t.Errorf("img request = %#v, want an unpinnable writable", img)
 	}
 }
 
-// The marker is required; the reason is not.
-func TestScanAcceptsABareUnpinnedMarker(t *testing.T) {
-	root := t.TempDir()
-	write(t, root, "run.sh", "#DEP: env.img  ## unpinned\nrun\n")
-
-	img := find(t, scan(t, root), PathPrefix+"env.img")
-	if !img.Unpinned || img.Reason != "" {
-		t.Fatalf("bare marker = %#v", img)
-	}
-}
-
-// A note that is not the marker is just a comment and claims nothing.
-func TestScanDoesNotTreatAnyNoteAsTheMarker(t *testing.T) {
+// A `##` note is a comment and never changes what a declaration means. Nothing
+// in a script can silence an unpinnable dependency: freezing it is the only way
+// to close one.
+func TestScanTreatsANoteAsAComment(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "run.sh", "#DEP: env.img  ## the scratch environment\nrun\n")
 
-	if img := find(t, scan(t, root), PathPrefix+"env.img"); img.Unpinned {
-		t.Fatalf("an ordinary note was read as the unpinned marker: %#v", img)
+	result := scan(t, root)
+	if img := find(t, result, PathPrefix+"env.img"); img.Kind != KindWritable {
+		t.Fatalf("img request = %#v", img)
 	}
-}
-
-// The claim is about the artifact, so one script marking it settles it.
-func TestScanMergesTheMarkerAcrossScripts(t *testing.T) {
-	root := t.TempDir()
-	write(t, root, "a.sh", "#DEP: env.img\nrun\n")
-	write(t, root, "b.sh", "#DEP: env.img  ## unpinned — shared scratch\nrun\n")
-
-	img := find(t, scan(t, root), PathPrefix+"env.img")
-	if !img.Unpinned || img.Reason != "shared scratch" {
-		t.Fatalf("marker did not merge: %#v", img)
+	if len(result.Findings) != 1 {
+		t.Fatalf("findings = %#v, want the writable declaration reported", result.Findings)
+	}
+	if !strings.Contains(result.Findings[0].Reason, "overlay freeze") {
+		t.Errorf("the finding does not point at freeze: %q", result.Findings[0].Reason)
 	}
 }
 
@@ -325,8 +308,8 @@ func mustEval(t *testing.T, path string) string {
 // path — so it is unpinnable like a writable .img rather than lockable.
 func TestScanClassifiesExternalPathsAsUnpinnable(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "run.sh", "#DEP: /shared/lab/genome.sqf  ## unpinned\n"+
-		"#DEP: ../outside/tool.sqf  ## unpinned\n"+
+	write(t, root, "run.sh", "#DEP: /shared/lab/genome.sqf\n"+
+		"#DEP: ../outside/tool.sqf\n"+
 		"#DEP: overlays/inside.sqf\nrun\n")
 
 	result := scan(t, root)
@@ -344,36 +327,39 @@ func TestScanClassifiesExternalPathsAsUnpinnable(t *testing.T) {
 	}
 }
 
-// G13: an unpinnable declaration must say so. Without the marker it is a
-// finding, which is what makes `project validate` fail rather than pass while
-// the project mounts something unpinned.
-func TestScanFlagsAnUndeclaredUnpinnableDeclaration(t *testing.T) {
+// An unpinnable declaration is always a finding, which is what makes `project
+// validate` fail rather than pass while the project mounts something the lock
+// cannot reproduce. Each names what closes it.
+func TestScanFlagsEveryUnpinnableDeclaration(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "run.sh", "#DEP: env.img\n#DEP: /shared/genome.sqf\nrun\n")
 
 	result := scan(t, root)
 	if len(result.Findings) != 2 {
-		t.Fatalf("findings = %#v, want one per undeclared unpinnable", result.Findings)
+		t.Fatalf("findings = %#v, want one per unpinnable declaration", result.Findings)
 	}
 	for _, finding := range result.Findings {
 		if finding.Line == 0 {
 			t.Errorf("finding has no line: %#v", finding)
 		}
-		if !strings.Contains(finding.Reason, UnpinnedMarker) {
-			t.Errorf("finding does not name the marker: %q", finding.Reason)
-		}
+	}
+	if !strings.Contains(result.Findings[0].Reason, "overlay freeze") {
+		t.Errorf("the writable finding does not point at freeze: %q", result.Findings[0].Reason)
+	}
+	if !strings.Contains(result.Findings[1].Reason, "copy it under the project") {
+		t.Errorf("the external finding does not say what to do: %q", result.Findings[1].Reason)
 	}
 }
 
-// The marker merges across scripts, so the finding is only decided once every
-// script has been read — one script declaring it settles it for the project.
-func TestScanDoesNotFlagAnUnpinnableMarkedInAnotherScript(t *testing.T) {
+// Repeating a declaration reports it once: the finding is about the dependency,
+// not about each line that names it.
+func TestScanReportsOneFindingPerUnpinnableDependency(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "a.sh", "#DEP: env.img\nrun\n")
-	write(t, root, "b.sh", "#DEP: env.img  ## unpinned — scratch\nrun\n")
+	write(t, root, "b.sh", "#DEP: env.img\nrun\n")
 
-	if findings := scan(t, root).Findings; len(findings) != 0 {
-		t.Fatalf("findings = %#v, want none: b.sh declares it", findings)
+	if findings := scan(t, root).Findings; len(findings) != 1 {
+		t.Fatalf("findings = %#v, want one", findings)
 	}
 }
 
@@ -428,30 +414,20 @@ func TestScanReadsAHiddenProjectRoot(t *testing.T) {
 	}
 }
 
-// overlays/ holds a project's own overlays and the recipes that built them. A
-// recipe's #DEP: are its overlay's build dependencies, already recorded in that
-// overlay's provenance, not the project's own — and the whole directory is
-// skipped whether or not the overlay has been built yet, so what a scan finds
-// does not change when `create -f` runs.
-func TestScanSkipsTheOverlaysDirectory(t *testing.T) {
+// A recipe's #DEP: are its artifact's build dependencies, already recorded in
+// that artifact's provenance, not declarations the project mounts. $CNT_PREFIX
+// is what identifies one, and comments are stripped before the check.
+func TestScanSkipsBuildRecipes(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "overlays/tool.sh", "#!/usr/bin/env bash\n#DEP: build-only/9.9\n")
-	write(t, root, "overlays/tool.sqf", "")
-	// Not built yet, and skipped just the same.
-	write(t, root, "overlays/env.sh", "#!/usr/bin/env bash\n#DEP: build-only/8.8\n")
-	write(t, root, "overlays/nested/deep.sh", "#!/usr/bin/env bash\n#DEP: build-only/7.7\n")
-	// Declaring an overlay in that directory is unaffected: the declaration
-	// lives in the project script, not in overlays/.
-	write(t, root, "scripts/a.sh", "#!/usr/bin/env bash\n#DEP: real/1.0\n#DEP: overlays/tool.sqf\n")
+	write(t, root, "tool.sh", "#DEP: build-only/9.9\ninstall -d \"$CNT_PREFIX/bin\"\n")
+	write(t, root, "env.sh", "#DEP: build-only/8.8\ncp x \"${CNT_PREFIX}\"/lib\n")
+	write(t, root, "run.sh", "# built into $CNT_PREFIX\n#DEP: real/1.0\n")
 
-	got := keys(scan(t, root))
-	want := []string{"path:overlays/tool.sqf", "real/1.0"}
-	if len(got) != len(want) {
-		t.Fatalf("requests = %v, want %v", got, want)
+	result := scan(t, root)
+	if got := keys(result); len(got) != 1 || got[0] != "real/1.0" {
+		t.Fatalf("requests = %v, want real/1.0", got)
 	}
-	for i, key := range want {
-		if got[i] != key {
-			t.Fatalf("requests = %v, want %v", got, want)
-		}
+	if len(result.Scripts) != 1 || result.Scripts[0] != "run.sh" {
+		t.Errorf("scripts = %v, want run.sh alone", result.Scripts)
 	}
 }

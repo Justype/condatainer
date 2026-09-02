@@ -67,19 +67,21 @@ func TestValidateRuntimeRejects(t *testing.T) {
 	}
 }
 
-// An absent or unrecognized type means app, which is what the old "Bundle
-// Overlay" classification became.
-func TestNormalizeDefaultsToApp(t *testing.T) {
-	for _, raw := range []catalog.Type{"", "bundle", "module", "APP"} {
-		r := validRuntime()
-		r.Type = raw
-		r.Normalize()
-		if r.Type != catalog.TypeApp {
-			t.Errorf("type %q normalized to %q, want app", raw, r.Type)
-		}
+// Only an absent type is filled in. Anything else reaches ValidateRuntime as it
+// stands, so a type this build does not know is refused rather than mounted as
+// something it is not.
+func TestNormalizeOnlyFillsInAnAbsentType(t *testing.T) {
+	r := validRuntime()
+	r.Type = ""
+	r.Normalize()
+	if r.Type != catalog.TypeApp {
+		t.Errorf("an absent type normalized to %q, want app", r.Type)
 	}
-	// A recognized type is left alone.
-	for _, raw := range []catalog.Type{catalog.TypeBase, catalog.TypeOS, catalog.TypeApp, catalog.TypeData} {
+
+	for _, raw := range []catalog.Type{
+		catalog.TypeBase, catalog.TypeOS, catalog.TypeApp, catalog.TypeData, catalog.TypeEnv,
+		"bundle", "module", "APP",
+	} {
 		r := validRuntime()
 		r.Type = raw
 		r.Normalize()
@@ -237,18 +239,19 @@ func TestReadRuntimeUnsupportedSchema(t *testing.T) {
 	}
 }
 
-// An unrecognized type is normalized to app on the way out of the document, not
-// rejected.
-func TestReadRuntimeNormalizesType(t *testing.T) {
-	odd := validRuntime()
-	odd.Type = "bundle"
+// A type this build does not know is refused at the document boundary. It
+// decides the install prefix and whether the artifact may be published, so
+// reading it as app would mount and gate it as something it is not. "APP" is the
+// case that makes the point: a case difference is not a spelling to correct.
+func TestReadRuntimeRejectsUnknownType(t *testing.T) {
+	for _, raw := range []catalog.Type{"bundle", "APP"} {
+		odd := validRuntime()
+		odd.Type = raw
 
-	got, err := DecodeRuntime(marshalRuntime(t, odd), "image.sqf")
-	if err != nil {
-		t.Fatalf("DecodeRuntime: %v", err)
-	}
-	if got.Type != catalog.TypeApp {
-		t.Errorf("type = %q, want app", got.Type)
+		_, err := DecodeRuntime(marshalRuntime(t, odd), "image.sqf")
+		if !errors.Is(err, ErrInvalid) {
+			t.Errorf("type %q: err = %v, want ErrInvalid", raw, err)
+		}
 	}
 }
 

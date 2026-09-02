@@ -91,9 +91,17 @@ func runE(cmd *cobra.Command, args []string) error {
 		if !hasImgOverlay {
 			if pwd, err := os.Getwd(); err == nil {
 				if candidate := utils.FindEnvOverlay("", pwd); candidate != "" {
-					if err := image.CheckAvailable(candidate, false); err != nil {
+					// The probe asks for the lock the mount will take, so a
+					// writable session is not told an overlay is free that it
+					// then cannot have.
+					err := image.CheckAvailable(candidate, !eReadOnly)
+					switch {
+					case errors.Is(err, image.ErrProtected):
+						utils.PrintWarning("%s is write-protected, running without it; -r mounts it read-only",
+							filepath.Base(candidate))
+					case err != nil:
 						utils.PrintWarning("%s is in use, running without it", filepath.Base(candidate))
-					} else {
+					default:
 						utils.PrintNote("Autoload environment overlay at %s", utils.StylePath(candidate))
 						overlays = append(overlays, candidate)
 					}

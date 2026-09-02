@@ -74,7 +74,7 @@ func compareOn(want, got Artifact, hostArch string) Result {
 	if want.Format != got.Format {
 		return Result{
 			Verdict: Different,
-			Diffs:   []Diff{{Field: "build_type", Want: want.Format, Got: got.Format}},
+			Diffs:   []Diff{{Field: "build_type", Want: want.Format.String(), Got: got.Format.String()}},
 		}
 	}
 	if want.IdentityScheme != got.IdentityScheme || want.EquivScheme != got.EquivScheme {

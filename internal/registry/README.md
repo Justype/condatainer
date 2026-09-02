@@ -44,9 +44,12 @@ addition rather than replacement.
 an explicit tag list. It exists for one caller, `project push`, which keeps a
 whole project in one repository and carries the artifact name in the tag —
 `ProjectTags` renders those, `ParseProjectTag` reads one back. The two namespaces
-cannot be confused: a catalog tag is a single version segment and never contains
-`--`, so `ParseProjectTag` reports false for one rather than inventing a name
-from it.
+cannot be confused, and each form ParseProjectTag accepts carries its own proof
+of that: an identity-qualified tag carries `__`, which the segment grammar cannot
+produce, so the name it qualifies may be a single component; a plain tag has only
+its shape, so it must hold the `--` a name/version encodes to, or be the one name
+with no version to encode — `env`, which every frozen environment is called.
+Anything else reports false rather than inventing a name from a version segment.
 
 The name is *refused* rather than truncated when it does not fit a tag. A
 truncated tag is a different artifact's address, and the name is what a puller
@@ -55,6 +58,55 @@ reads back out of it.
 Why a project needs a second, identity-qualified tag is a retention argument
 rather than an addressing one, and it belongs where the decision was made:
 [`docs/deployment/distribution.md`](../../docs/deployment/distribution.md).
+
+## What a public endpoint takes
+
+`Audience.Accepts` is the whole rule, and `docs/manuals/condatainer.md`'s
+*Publishing rules* is the table it implements. One ordering in it is load
+bearing.
+
+**`#REDISTRIBUTE:` outranks every type default**, and the defaults are only what
+the author already asserted by choosing a `#TYPE:` — never a guess about
+licensing. Nothing overrides a refusal, no flag and no force, because the person
+pressing it is rarely the person who agreed to the vendor's terms and a public
+push cannot be taken back.
+
+**A Conda build and a frozen environment are exempt from the app default** for
+one mechanical reason: neither embeds a recipe, so there is nowhere for
+`#REDISTRIBUTE:` to be written that travels with the artifact, and applying the
+default would be a permanent refusal wearing a default's clothes. What the
+channels cannot answer — a private or vendor channel — is reported from
+`Build.Channels` at push time and decided by a person.
+
+The argument for singling a frozen environment out was that nobody vetted what a
+person installed by hand. It does not survive the sentence above it. The reason a
+refusal cannot be overridden is that *the pusher is rarely the party who agreed
+to the terms* — and for a snapshot that inverts: whoever freezes an environment
+is exactly the person who installed everything in it, and the only party who can
+answer the question at all. Refusing there withheld the decision from the one
+person qualified to make it, while a Conda build assembled from the same channels
+published freely. An environment is a conda environment — that is what
+`meta.EnvPrefix` is — so treating the two differently was a distinction the
+artifacts do not carry.
+
+Three checks must never be added here, each for the same reason: a tool that
+guesses in the permissive direction cannot take it back.
+
+- **Adjudicating a Conda build's channels.** The only ways to try are a config
+  allowlist nobody can maintain honestly, or interpreting a few hundred licence
+  strings. Report them and let a person decide.
+- **Deriving permission from `#LICENSE:`.** It is an SPDX expression published
+  verbatim as `org.opencontainers.image.licenses`, never parsed. Reading
+  redistribution rights out of one is a judgement a tool gets wrong.
+- **Letting config enumerate types.** `types: [app]` beside a public endpoint
+  would erase the rule with no error, where a wrong `audience` is a claim someone
+  had to write down and defend. `audience` states a fact about the registry and
+  the permitted set is derived from it — a declaration, not enforcement: nothing
+  verifies the registry is actually restricted, and it is unrelated to a GitHub
+  package's own visibility setting, which CondaTainer never reads or changes.
+
+A writable `.img` is refused everywhere, which is structural rather than policy:
+it has no identity, so there is nothing to publish it *as*.
 
 ## Verification and errors
 

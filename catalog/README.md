@@ -140,6 +140,46 @@ those: after expansion it holds exactly one value per name.
 resolvable form — it does not determine its remaining values, so there is no
 partial fill.
 
+## Build dependencies
+
+`ValidateDeps` holds both rules a *build's* `#DEP:` answers to, and its only
+callers are `Recipe.Validate` and `build.FromExternalSource` — never `run` or
+`check`. It lives here rather than on `Recipe` because an external build
+(`create -p -f <script>`) answers to the same rules and has no recipe path to be
+parsed from.
+
+**Only a `data` recipe may declare one.** An `app` is self-contained — a conda
+env, or a prebuilt package carrying its own libraries — an `os` is
+self-contained by definition, and a `base` *is* the build environment. Producing
+an index needs the producing tool, which is why data is the type with deps. The
+dep may name an app, data or os, never a base.
+
+**A build's `#DEP:` is a `name/version`, never a path; a running script's may be
+either.** The asymmetry is the point: a running script mounts what it names and
+records nothing, while a build's declaration becomes an edge in an artifact that
+must mean the same thing on another machine — and a path is neither resolvable
+there nor a key anything can regenerate. So `#DEP: ./overlays/x.sqf` stays valid
+in an analysis script and is rejected in a recipe.
+
+`IsPathDep` is the single answer to "is this dep a path", because this package
+owns the `Normalize`/`ParseDep` grammar that applies only to names. Its extension
+set must stay `utils.IsOverlay`'s, `.ext3` included.
+
+## `#TARGET:` names the artifact
+
+Without a `#PH:` beside it, `#TARGET:` is not a template — it is how an external
+build gets a name at all. Absent it, the name is the `-p` basename, a single
+component, so `key.Role`'s component match never fires and every `#DEP:` is
+silently downgraded to build history. `FromExternalSource` therefore refuses an
+external script that declares a dep without one.
+
+The name and the file path are separate namespaces: `#TARGET:` fixes
+`/cnt/<name>` and the role classification, `-p` fixes where the `.sqf` lands.
+That is why a path-addressed artifact's filename carries no naming claim —
+`project.LookupAt` matches it by manifest name alone — while a flat or store scan
+still requires the filename to encode the name, because there the filename *is*
+the address.
+
 ## Invariants worth not breaking
 
 - One spelling of a name. `Normalize` decides what a name *is*; index keys use

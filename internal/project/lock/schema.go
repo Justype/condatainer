@@ -107,6 +107,17 @@ type PinEntry struct {
 	// Artifact is the slash-separated path of the vendored artifact directory,
 	// relative to the lock directory.
 	Artifact string `json:"artifact"`
+	// Manual marks a pin the project recorded rather than one derived from a
+	// #DEP:. Pins are otherwise a projection of the scan, and Reconcile deletes
+	// every key the scan no longer produces; a manual one is removed only when
+	// someone says so.
+	//
+	// It exists because a project depends on artifacts no script declares: a
+	// helper's #REQUIRED_OVERLAYS: (build-essential, an RStudio image), and a
+	// frozen environment. Recorded rather than derived, since "not currently
+	// declared" is what the sweep tests and deriving it would make the sweep a
+	// no-op.
+	Manual bool `json:"manual,omitempty"`
 }
 
 // Remote is one exact place an artifact can be fetched from. It is a location,
@@ -192,30 +203,44 @@ func (l *Lock) Validate() error {
 		if strings.TrimSpace(request) == "" {
 			return fmt.Errorf("%w: a pin key is empty", ErrInvalid)
 		}
-		if err := validEntryPath(pin.Artifact); err != nil {
+		if err := validatePin(request, pin); err != nil {
 			return fmt.Errorf("%w: pin %q: %v", ErrInvalid, request, err)
-		}
-		if destination, ok := strings.CutPrefix(request, PathPrefix); ok {
-			if err := validProjectPath(destination); err != nil {
-				return fmt.Errorf("%w: pin %q: %v", ErrInvalid, request, err)
-			}
 		}
 	}
 	for artifact, remotes := range l.Remotes {
 		if err := validEntryPath(artifact); err != nil {
 			return fmt.Errorf("%w: remote key: %v", ErrInvalid, err)
 		}
-		seen := make(map[Remote]bool, len(remotes))
-		for _, remote := range remotes {
-			if err := remote.validate(); err != nil {
-				return fmt.Errorf("%w: remote for %q: %v", ErrInvalid, artifact, err)
-			}
-			if seen[remote] {
-				return fmt.Errorf("%w: remote for %q is listed twice: %s@%s",
-					ErrInvalid, artifact, remote.Repository, remote.ManifestDigest)
-			}
-			seen[remote] = true
+		if err := validateRemotes(artifact, remotes); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalid, err)
 		}
+	}
+	return nil
+}
+
+// validatePin checks one entry: a vendored artifact directory, and a project
+// path when the key names one.
+func validatePin(request string, pin PinEntry) error {
+	if destination, ok := strings.CutPrefix(request, PathPrefix); ok {
+		if err := validProjectPath(destination); err != nil {
+			return err
+		}
+	}
+	return validEntryPath(pin.Artifact)
+}
+
+// validateRemotes checks one artifact's fetch locations.
+func validateRemotes(artifact string, remotes []Remote) error {
+	seen := make(map[Remote]bool, len(remotes))
+	for _, remote := range remotes {
+		if err := remote.validate(); err != nil {
+			return fmt.Errorf("remote for %q: %v", artifact, err)
+		}
+		if seen[remote] {
+			return fmt.Errorf("remote for %q is listed twice: %s@%s",
+				artifact, remote.Repository, remote.ManifestDigest)
+		}
+		seen[remote] = true
 	}
 	return nil
 }

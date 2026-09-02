@@ -29,7 +29,7 @@ func TestSourceSpecBuildTypeIsDerived(t *testing.T) {
 		{"script", SourceSpec{Script: &ScriptSource{}}, BuildTypeScript},
 		{"definition", SourceSpec{Definition: &DefinitionSource{}}, BuildTypeDef},
 		{"conda", SourceSpec{Conda: &CondaSource{}}, BuildTypeConda},
-		{"unset", SourceSpec{}, 0},
+		{"unset", SourceSpec{}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

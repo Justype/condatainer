@@ -41,10 +41,6 @@ func Refine(ctx context.Context, root string, plan *Plan, cat catalog.Catalog, o
 		markUpstreamServed(ctx, root, plan, cat)
 	}
 	markAlreadyPublished(ctx, plan)
-	for _, name := range dropAmbiguousPlainTags(plan) {
-		logging.FromContext(ctx).Warn("two pins share a name, so neither takes the plain tag",
-			"name", name)
-	}
 }
 
 // markUpstreamServed drops artifacts a collection already publishes at this
@@ -123,7 +119,7 @@ func markAlreadyPublished(ctx context.Context, plan *Plan) {
 // did publish stays true whatever happens afterwards.
 func Run(ctx context.Context, root string, plan *Plan, opts Options) (*Report, error) {
 	log := logging.FromContext(ctx)
-	report := &Report{Repository: plan.Repository}
+	report := &Report{Repository: plan.Repository, AmbiguousNames: plan.Ambiguous}
 	base, repo, err := registry.SplitCoordinate(plan.Repository)
 	if err != nil {
 		return report, err

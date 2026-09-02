@@ -216,8 +216,8 @@ type Mount struct {
 	// only when an equivalent artifact stands in.
 	Identity string
 	Found    string
-	// Unpinned marks a declaration that carries no pin by design and is
-	// mounted as the literal path it names.
+	// Unpinned marks a declaration no pin can answer, mounted as the literal
+	// path it names.
 	Unpinned bool
 }
 
@@ -295,17 +295,9 @@ func Resolve(root string, l *lock.Lock, requests []lock.Request, opts ResolveOpt
 	resolution := &Resolution{Root: root}
 
 	for _, request := range requests {
-		// An unpinned declaration is mounted as written.
-		//
-		// Both halves matter. A kind that cannot be pinned has nowhere for a
-		// pin to point, and G13 requires it to carry the marker — the
-		// scanner has already reported one that does not. The marker on a
-		// *pinnable* kind is different: it is an author deliberately opting out
-		// of pinning something that could have been pinned, which is how a
-		// per-project scratch overlay stays out of the lock. Honouring it here
-		// is what keeps `project validate` and `run` agreeing, since validate
-		// already stops asking for a pin once the marker is present.
-		if request.Unpinned || !request.Kind.Pinnable() {
+		// An unpinnable declaration is mounted as written: there is nowhere for
+		// a pin to point, and the scanner has already reported it as a finding.
+		if !request.Kind.Pinnable() {
 			resolution.Mounts = append(resolution.Mounts, Mount{
 				Request: request.Key, Path: literalPath(root, request), Unpinned: true,
 			})
