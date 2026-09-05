@@ -10,7 +10,6 @@ import (
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/freeze"
-	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -47,15 +46,12 @@ var overlayFreezeCmd = &cobra.Command{
 		if len(args) > 1 {
 			dest = args[1]
 		}
-		if err := apptainer.EnsureApptainer(); err != nil {
-			ExitWithError("%v", err)
-		}
-		// The pack runs mksquashfs and fuse2fs inside the base, so a freeze uses
-		// the same tool versions a build does. config.Base names it; this is the
-		// installed file.
+		// The base is only used to translate a directory-level deletion into
+		// individual whiteouts against what that directory held; without one,
+		// freeze still runs, just without that translation.
 		base, err := config.GetBaseImage()
 		if err != nil {
-			ExitWithError("%v", err)
+			utils.PrintWarning("no base image found (%v); a directory deleted wholesale (not file by file) will not be recorded as deleted, and its original contents will come back when this artifact is used", err)
 		}
 		// Held across the whole freeze rather than probed: a payload being written
 		// to has no defined content to pack, and the pack takes minutes, so a
@@ -99,7 +95,6 @@ var overlayFreezeCmd = &cobra.Command{
 			Target:       target,
 			Description:  freezeDescription,
 			Base:         base,
-			ApptainerBin: config.Global.ApptainerBin,
 			CompressArgs: compressArgs,
 			BlockSize:    blockSize,
 			UseTmp:       freezeUseTmp,

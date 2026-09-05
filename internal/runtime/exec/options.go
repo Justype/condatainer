@@ -68,7 +68,9 @@ func (o Options) ensureDefaults() (Options, error) {
 		}
 		o.BaseImage = base
 	}
-	if !utils.FileExists(o.BaseImage) {
+	// An image file, or a sandbox: apptainer runs either as a root, and a
+	// definition build packs its own sandbox by running it.
+	if !utils.FileExists(o.BaseImage) && !utils.IsSandboxDir(o.BaseImage) {
 		return o, fmt.Errorf("base image not found: %s", o.BaseImage)
 	}
 	if err := meta.CheckBase(o.BaseImage); err != nil {

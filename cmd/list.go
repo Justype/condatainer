@@ -15,6 +15,7 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/artifactcache"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -60,6 +61,16 @@ type DirOverlays struct {
 	AppGroups map[string][]string // name → sorted []version
 	DataList  []string
 	Paths     map[string]string // normalized name/version → full overlay path
+	// Misnamed holds images whose recorded name is not the one their filename
+	// addresses. They are listed under the recorded name, which is the one that
+	// describes the content — and the one -o cannot resolve them by.
+	Misnamed []NameMismatch
+}
+
+// NameMismatch is one image listed under a name its filename does not address.
+type NameMismatch struct {
+	File     string // basename as installed
+	Recorded string // the name inside the image
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -206,6 +217,11 @@ func runList(cmd *cobra.Command, args []string) error {
 				printColumns(d.DataList, styled, 0, listTermWidth())
 			}
 		}
+
+		for _, m := range d.Misnamed {
+			utils.PrintWarning("%s records the name %s; it is listed under that name but only %s resolves it.",
+				m.File, m.Recorded, image.DecodeArtifactName(strings.TrimSuffix(m.File, filepath.Ext(m.File))))
+		}
 	}
 
 	if !hasAnyMatch && filterActive {
@@ -263,12 +279,20 @@ func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 			overlayPath := filepath.Join(imageDir, entry.Name())
 			runtime, runtimeErr := meta.ReadRuntimeWithCache(overlayPath, cacheBatch)
 			presentation := presentListOverlay(nameVersion, runtime, runtimeErr == nil)
+			// Recorded only where it was read; the mismatch is noted for the
+			// images that are actually listed, not for every file in the dir.
+			misnamed := runtimeErr == nil && runtime.Name != "" &&
+				runtime.Name != image.DecodeArtifactName(nameVersion)
+			mismatch := NameMismatch{File: entry.Name(), Recorded: runtime.Name}
 
 			if presentation.data {
 				// Data overlay
 				if query.Matches(normalized) {
 					d.DataList = append(d.DataList, presentation.name)
 					d.Paths[presentation.name] = overlayPath
+					if misnamed {
+						d.Misnamed = append(d.Misnamed, mismatch)
+					}
 				}
 				continue
 			}
@@ -290,6 +314,9 @@ func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 			}
 			appGrouped[name][version] = struct{}{}
 			d.Paths[name+"/"+version] = overlayPath
+			if misnamed {
+				d.Misnamed = append(d.Misnamed, mismatch)
+			}
 		}
 
 		for name, versions := range appGrouped {

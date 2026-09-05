@@ -39,7 +39,7 @@ func newRegistryCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "registry",
 		Short: "Publish and fetch artifacts through an OCI registry",
-		Long: `Publish and fetch read-only .sqf overlays and .sif base images through an OCI
+		Long: `Publish and fetch read-only .sqf artifacts, overlays and bases alike, through an OCI
 registry such as ghcr.io.
 
 Credentials are taken from CNT_REGISTRY_TOKEN and CNT_REGISTRY_USER first, then
@@ -329,14 +329,14 @@ func findRegistryArtifact(arg string) (registryArtifact, error) {
 	}
 	filename := strings.ReplaceAll(catalog.Normalize(arg), "/", "--")
 	for _, dir := range config.GetImageSearchPaths() {
-		for _, ext := range []string{".sqf", ".sif"} {
+		for _, ext := range []string{".sqf"} {
 			candidate := filepath.Join(dir, filename+ext)
 			if utils.FileExists(candidate) {
 				return registryArtifact{path: candidate, managed: true}, nil
 			}
 		}
 	}
-	return registryArtifact{}, fmt.Errorf("no local .sqf or .sif artifact found for %q", arg)
+	return registryArtifact{}, fmt.Errorf("no local .sqf artifact found for %q", arg)
 }
 
 type resolvedRegistryArtifact struct {
@@ -398,49 +398,56 @@ func runRegistryPull(cmd *cobra.Command, opts *registryOptions, spec string) err
 	if err := registry.Check(resolved.annotations, registry.Want{}); err != nil {
 		return fmt.Errorf("cannot pull %s: %w", registry.FullRef(base, resolved.repo, resolved.reference), err)
 	}
-	ext, err := extensionForArtifactType(resolved.desc.ArtifactType)
+	kind, err := kindForArtifactType(resolved.desc.ArtifactType)
 	if err != nil {
 		return err
 	}
 	name, selector, _ := registry.SplitPullSpec(spec)
-	dest, err := registryPullDestination(opts.name, opts.prefix, name, selector, resolved.annotations[registry.AnnTitle], ext)
+	dest, err := registryPullDestination(opts.name, opts.prefix, name, selector, resolved.annotations[registry.AnnTitle])
 	if err != nil {
 		return err
 	}
-	if err := registry.Pull(cmd.Context(), base, resolved.repo, resolved.desc, resolved.annotations, dest); err != nil {
+	if err := registry.Pull(cmd.Context(), base, resolved.repo, resolved.desc, resolved.annotations, dest, kind); err != nil {
 		return err
 	}
 	reportDone(cmd, "pulled", dest)
 	return nil
 }
 
-func extensionForArtifactType(artifactType string) (string, error) {
+// kindForArtifactType reads what the registry says it is serving, so a pull can
+// state what it expects rather than infer it from a destination every artifact
+// now spells the same way.
+func kindForArtifactType(artifactType string) (registry.Kind, error) {
 	switch artifactType {
 	case registry.ArtifactTypeOverlay:
-		return ".sqf", nil
+		return registry.KindOverlay, nil
 	case registry.ArtifactTypeBase:
-		return ".sif", nil
+		return registry.KindBase, nil
 	default:
 		return "", fmt.Errorf("published artifact has unsupported type %q", artifactType)
 	}
 }
 
-func registryPullDestination(flagName, prefix, addressName, selector, title, ext string) (string, error) {
+// pullExt is what every pull lands as: a base and an overlay are both SquashFS,
+// so the destination never varies by what was published.
+const pullExt = ".sqf"
+
+// registryPullDestination picks where a pull installs. --prefix names the path
+// and gains the extension when it has none; otherwise the name goes into the
+// writable images directory.
+func registryPullDestination(flagName, prefix, addressName, selector, title string) (string, error) {
 	if prefix != "" {
 		base := filepath.Base(prefix)
 		knownExt := filepath.Ext(base)
-		if knownExt != "" && !utils.IsSqf(base) && !utils.IsSif(base) {
+		if !utils.IsSqf(base) {
 			knownExt = ""
 		}
 		stem := strings.TrimSuffix(base, knownExt)
 		if strings.Contains(stem, "--") {
 			return "", fmt.Errorf("--prefix name cannot contain '--' (reserved name/version separator)")
 		}
-		if knownExt != "" && knownExt != ext {
-			return "", fmt.Errorf("--prefix extension %q does not match published artifact type %s", knownExt, ext)
-		}
 		if knownExt == "" {
-			prefix += ext
+			prefix += pullExt
 		}
 		return prefix, nil
 	}
@@ -458,7 +465,7 @@ func registryPullDestination(flagName, prefix, addressName, selector, title, ext
 	if err != nil {
 		return "", fmt.Errorf("no writable images directory: %w", err)
 	}
-	return filepath.Join(dir, strings.ReplaceAll(name, "/", "--")+ext), nil
+	return filepath.Join(dir, strings.ReplaceAll(name, "/", "--")+pullExt), nil
 }
 
 func addressPlacementName(name, selector, title string) string {

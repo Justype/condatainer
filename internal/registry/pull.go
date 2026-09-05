@@ -16,6 +16,7 @@ import (
 	"oras.land/oras-go/v2/registry"
 	"oras.land/oras-go/v2/registry/remote"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/compare"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/image"
@@ -37,26 +38,29 @@ import (
 // directory, the same permissions, the same locking and protection rules. It
 // creates no store entry — that is acquisition by identity, a different
 // operation.
-func Pull(ctx context.Context, base, repo string, desc ocispec.Descriptor, annotations map[string]string, destPath string) error {
+func Pull(ctx context.Context, base, repo string, desc ocispec.Descriptor, annotations map[string]string, destPath string, kind Kind) error {
 	guard, err := producer.AcquireLocal(destPath)
 	if err != nil {
 		return err
 	}
 	defer guard.Release() //nolint:errcheck
-	return pull(ctx, base, repo, desc, annotations, destPath)
+	return pull(ctx, base, repo, desc, annotations, destPath, kind)
 }
 
 // PullLocked performs Pull while the caller already holds destPath's producer
 // lock. Build uses this after deriving the expected equivalence under its lock;
 // callers without a lock use Pull.
-func PullLocked(ctx context.Context, base, repo string, desc ocispec.Descriptor, annotations map[string]string, destPath string) error {
-	return pull(ctx, base, repo, desc, annotations, destPath)
+func PullLocked(ctx context.Context, base, repo string, desc ocispec.Descriptor, annotations map[string]string, destPath string, kind Kind) error {
+	return pull(ctx, base, repo, desc, annotations, destPath, kind)
 }
 
-func pull(ctx context.Context, base, repo string, desc ocispec.Descriptor, annotations map[string]string, destPath string) error {
+func pull(ctx context.Context, base, repo string, desc ocispec.Descriptor, annotations map[string]string, destPath string, kind Kind) error {
 	log := logging.FromContext(ctx)
 
-	wantArtifactType, wantLayerType, err := imageTypes(destPath)
+	if err := checkDistributable(destPath); err != nil {
+		return err
+	}
+	wantArtifactType, wantLayerType, err := kind.types()
 	if err != nil {
 		return err
 	}
@@ -193,39 +197,40 @@ func SplitCoordinate(coordinate string) (base, repo string, err error) {
 	return host, path, nil
 }
 
-// imageTypes reports the artifact and layer media types an image's extension
-// implies. Push reads it from the file it is publishing, pull from the
-// destination it was asked to write.
+// Kind is the sort of image an operation expects to move: a container root, or
+// something mounted onto one. Every artifact is a `.sqf`, so a filename cannot
+// say which, and the manifest type is what does.
 //
-// On pull that makes the destination the statement of what is expected, which is
-// the only place it exists: nothing published says whether an artifact is an
-// overlay or a base, and nothing should — the caller already decided what it is
-// installing. A `.sif` served where a `.sqf` was wanted then fails at the
-// transport instead of at mount, which is where it would otherwise surface.
-// Kind is the sort of image an operation expects to move.
-//
-// Push and Pull read it off a filename, because there the filename is the
-// artifact. Fetch is told instead: its destination is a producer's staging name,
-// which carries a `.part` suffix rather than the extension that would say what
-// the payload is.
+// Push reads it from the artifact it is publishing. Pull and Fetch are told,
+// because neither can read a manifest it has not fetched yet — and being told is
+// what gives the check its teeth: a caller that knows an overlay was locked here
+// learns at the transport, rather than at mount, that a root was served.
 type Kind string
 
 const (
-	KindOverlay Kind = "overlay" // a read-only .sqf
-	KindBase    Kind = "base"    // a .sif container root
+	KindOverlay Kind = "overlay" // mounted onto a root
+	KindBase    Kind = "base"    // is the root
 )
 
-// KindOf reads the kind a filename declares.
-func KindOf(path string) (Kind, error) {
+// KindFor reports the kind an artifact of this type travels as.
+func KindFor(typ catalog.Type) Kind {
+	if typ == catalog.TypeBase {
+		return KindBase
+	}
+	return KindOverlay
+}
+
+// checkDistributable rejects a path that names something no registry moves. It
+// says what a manifest cannot: a writable overlay has no identity at all, and a
+// file that is not an image was never a candidate.
+func checkDistributable(path string) error {
 	switch {
 	case utils.IsSqf(path):
-		return KindOverlay, nil
-	case utils.IsSif(path):
-		return KindBase, nil
+		return nil
 	case utils.IsImg(path):
-		return "", fmt.Errorf("%s is a writable overlay, which has no identity and is never distributed", path)
+		return fmt.Errorf("%s is a writable overlay, which has no identity and is never distributed", path)
 	}
-	return "", fmt.Errorf("%s is not a distributable image (.sqf or .sif)", path)
+	return fmt.Errorf("%s is not a distributable image (.sqf)", path)
 }
 
 // types reports the artifact and layer media types a kind travels as.
@@ -239,12 +244,17 @@ func (k Kind) types() (artifactType, layerType string, err error) {
 	return "", "", fmt.Errorf("unknown image kind %q", k)
 }
 
+// imageTypes reports the media types a local artifact travels as, from its own
+// embedded manifest.
 func imageTypes(path string) (artifactType, layerType string, err error) {
-	kind, err := KindOf(path)
-	if err != nil {
+	if err := checkDistributable(path); err != nil {
 		return "", "", err
 	}
-	return kind.types()
+	m, err := meta.ReadManifest(path)
+	if err != nil {
+		return "", "", fmt.Errorf("%s: %w", path, err)
+	}
+	return KindFor(m.Type).types()
 }
 
 // validatePayloadContract rejects a manifest that does not describe the kind of

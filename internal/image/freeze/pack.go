@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -12,19 +13,11 @@ import (
 
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/logging"
-	"github.com/Justype/condatainer/internal/runtime/container"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/utils"
 )
-
-// mountPoint is where the overlay image is mounted inside the pack container.
-const mountPoint = "/cnt_freeze"
-
-// metaMountPath is where the staged metadata is bound. mksquashfs names an
-// archive root after its source's basename and cannot rename one, so the
-// directory must already be called .cnt when mksquashfs sees it.
-const metaMountPath = "/" + meta.DirName
 
 // PackOptions is one freeze pack.
 type PackOptions struct {
@@ -32,15 +25,10 @@ type PackOptions struct {
 	Image string
 	// Target is the .sqf to write.
 	Target string
-	// Base is the container the pack runs in — mksquashfs and fuse2fs come from
-	// there, so a freeze uses the same tool versions a build does.
-	Base string
 	// MetaDir is the staged .cnt directory. AppendMeta adds it to a finished
 	// archive; Pack itself never carries it, because the manifest cannot be
 	// written until the payload it identifies has been packed.
 	MetaDir string
-	// ApptainerBin is the apptainer to run; empty finds it on PATH.
-	ApptainerBin string
 	// CompressArgs and BlockSize are mksquashfs tuning, as the build spells them.
 	CompressArgs string
 	BlockSize    string
@@ -54,14 +42,19 @@ type PackOptions struct {
 // Pack writes the overlay's upper/ layer to a SquashFS artifact, translating
 // whiteouts on the way (§2.4a).
 //
-// By default the payload is read through a fuse2fs mount Apptainer performs in its
-// own user namespace, so nothing is copied. The image is made read-only meanwhile:
-// fuse2fs decides whether it may write by the permission bits, not by -o ro.
+// By default the payload is read through a fuse2fs mount, made inside a
+// private, unprivileged mount+user namespace (see mountedRun) so nothing is
+// copied. The image is made read-only meanwhile: fuse2fs decides whether it
+// may write by the permission bits, not by -o ro.
 //
 // With StageDir it reads a copy made earlier — faster, and costs the payload twice
 // on disk. Both routes produce the same archive, given Translation.ForCopy.
 func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation) error {
 	log := logging.FromContext(ctx)
+
+	if err := tool.CheckDependencies([]string{"mksquashfs"}); err != nil {
+		return err
+	}
 
 	img, err := filepath.Abs(opts.Image)
 	if err != nil {
@@ -92,13 +85,11 @@ func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation
 	}
 	defer os.RemoveAll(stage)
 
-	// Where the payload's upper/ is readable from inside the pack container, and
-	// what it takes to get it there.
-	upper := path.Join(mountPoint, UpperDir)
-	binds := []string{filepath.Dir(target), stage}
-	var apptainerFlags []string
+	upper := opts.StageDir
+	route := "staged copy"
+	var mount func(work string) error
 	if opts.StageDir == "" {
-		fuse2fs, err := findFuse2fs(ctx, opts.ApptainerBin)
+		fuse2fs, err := findFuse2fs()
 		if err != nil {
 			return err
 		}
@@ -107,14 +98,18 @@ func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation
 			return err
 		}
 		defer restore()
-		apptainerFlags = []string{
-			"--fusemount",
-			fmt.Sprintf("container:%s -o ro %s %s", fuse2fs, img, mountPoint),
+
+		mnt := filepath.Join(stage, "mnt")
+		if err := os.MkdirAll(mnt, 0o755); err != nil {
+			return fmt.Errorf("stage mountpoint: %w", err)
 		}
-	} else {
-		upper = filepath.Join(opts.StageDir, UpperDir)
-		binds = append(binds, opts.StageDir)
+		upper = mnt
+		route = "mount"
+		mount = func(work string) error {
+			return mountedRun(ctx, fuse2fs, []string{"-o", "ro", img}, mnt, work, execpkg.IOFromContext(ctx))
+		}
 	}
+	upper = filepath.Join(upper, UpperDir)
 
 	args, err := stageTranslation(stage, upper, tr)
 	if err != nil {
@@ -127,23 +122,19 @@ func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation
 	}
 
 	script := packScript(packSources, target, args, opts)
-	route := "mount"
-	if opts.StageDir != "" {
-		route = "staged copy"
-	}
 	log.Info("packing frozen environment",
 		"source", opts.Image, "target", opts.Target, "route", route,
 		"roots", strings.Join(sources, " "), "deletions", tr.Deletions())
 
-	runOpts := execpkg.Options{
-		BaseImage:      opts.Base,
-		ApptainerBin:   opts.ApptainerBin,
-		BindPaths:      container.DeduplicateBindPaths(binds),
-		ApptainerFlags: apptainerFlags,
-		Command:        []string{"/bin/bash", "-c", script},
-		HidePrompt:     true,
+	if mount != nil {
+		err = mount(script)
+	} else {
+		cmd := exec.CommandContext(ctx, "/bin/bash", "-c", script)
+		io := execpkg.IOFromContext(ctx)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = io.Stdin, io.Stdout, io.Stderr
+		err = cmd.Run()
 	}
-	if err := execpkg.Run(ctx, runOpts, execpkg.IOFromContext(ctx)); err != nil {
+	if err != nil {
 		os.Remove(target)
 		return fmt.Errorf("pack %s: %w", opts.Target, err)
 	}
@@ -153,7 +144,8 @@ func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation
 	return nil
 }
 
-// AppendMeta adds the staged .cnt directory to a finished archive.
+// AppendMeta adds the staged .cnt directory to a finished archive. An archive
+// that already carries one is refused.
 //
 // It is a second mksquashfs run because the manifest records the identity of the
 // payload, and that is only knowable once the payload is packed — the manifest
@@ -163,7 +155,14 @@ func AppendMeta(ctx context.Context, opts PackOptions) error {
 	if opts.MetaDir == "" {
 		return fmt.Errorf("no metadata staged to append to %s", opts.Target)
 	}
+	if err := tool.CheckDependencies([]string{"mksquashfs"}); err != nil {
+		return err
+	}
 	target, err := filepath.Abs(opts.Target)
+	if err != nil {
+		return err
+	}
+	metaDir, err := filepath.Abs(opts.MetaDir)
 	if err != nil {
 		return err
 	}
@@ -175,8 +174,12 @@ func AppendMeta(ctx context.Context, opts PackOptions) error {
 	// process working directory and says so on stdout. It buys nothing here: a
 	// failed append deletes the artifact and the freeze is rerun from the
 	// overlay, which is still there.
+	//
+	// metaDir is passed as-is, not bound to a fixed path: mksquashfs names an
+	// archive root after its source's basename, and the staged directory is
+	// already called .cnt on disk (see freeze.go), so no remapping is needed.
 	args := []string{
-		metaMountPath, target,
+		metaDir, target,
 		"-keep-as-directory", "-all-root", "-no-xattrs", "-quiet", "-no-progress", "-no-recovery",
 		"-processors", fmt.Sprint(processors(opts.Processors)),
 	}
@@ -187,26 +190,31 @@ func AppendMeta(ctx context.Context, opts PackOptions) error {
 		args = append(args, opts.CompressArgs)
 	}
 
-	runOpts := execpkg.Options{
-		BaseImage:    opts.Base,
-		ApptainerBin: opts.ApptainerBin,
-		BindPaths: container.DeduplicateBindPaths([]string{
-			filepath.Dir(target), opts.MetaDir + ":" + metaMountPath,
-		}),
-		Command:    []string{"/bin/bash", "-c", fmt.Sprintf("trap 'exit 130' INT TERM\nmksquashfs %s\n", strings.Join(args, " "))},
-		HidePrompt: true,
-	}
-	// Silent unless it fails. The append writes two small files after the pack
-	// has already reported, so Apptainer's greeting and a 2-entry progress bar
-	// are the only things it would say; a failure needs all of both.
+	cmd := exec.CommandContext(ctx, "/bin/bash", "-c",
+		fmt.Sprintf("trap 'exit 130' INT TERM\nmksquashfs %s\n", strings.Join(args, " ")))
+	// Silent unless it fails.
 	var output bytes.Buffer
-	if err := execpkg.Run(ctx, runOpts, execpkg.IO{Stdout: &output, Stderr: &output}); err != nil {
+	cmd.Stdout, cmd.Stderr = &output, &output
+	if err := cmd.Run(); err != nil {
 		if said := strings.TrimSpace(output.String()); said != "" {
 			return fmt.Errorf("append metadata to %s: %w: %s", opts.Target, err, said)
 		}
 		return fmt.Errorf("append metadata to %s: %w", opts.Target, err)
 	}
+	if collided(output.String()) {
+		return fmt.Errorf("append metadata to %s: it already carries /%s", opts.Target, meta.DirName)
+	}
 	return nil
+}
+
+// collided reports whether mksquashfs renamed the source rather than adding it.
+//
+// mksquashfs adds; it cannot replace a path. Against a target that already holds
+// /.cnt it keeps the old one and lands the new beside it as .cnt_1, announcing
+// that on stdout and exiting 0 — so the run reads as a success while every
+// reader would take the stale copy. The announcement is the only signal.
+func collided(said string) bool {
+	return strings.Contains(said, "already used")
 }
 
 // archiveSources are the top-level entries of upper/, which become the archive's

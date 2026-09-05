@@ -100,7 +100,9 @@ func preparedPathFor(targetPath string, info BuildLockInfo) string {
 }
 
 // ensureWorkspaceRoot creates the selected scratch root with its configured
-// permissions, then the nested producer-private directory beneath it.
+// permissions, then the nested producer-private directory beneath it. The scratch
+// root is also what a definition build hands apptainer as APPTAINER_TMPDIR, so
+// creating it here is what makes that directory exist.
 func ensureWorkspaceRoot(b *BuildObject) error {
 	if err := utils.EnsureTmpSubdir(b.ws.BaseRoot); err != nil {
 		return fmt.Errorf("failed to create tmp dir %s: %w", b.ws.BaseRoot, err)

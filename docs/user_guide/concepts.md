@@ -62,7 +62,7 @@ The following delimiters are accepted for version specification: `/`, `--`, `=`,
 
 Overlays can be stacked in a specific order to create a layered environment.
 
-- **Base Image**: Apptainer image (e.g. `ubuntu24--base_image.sif`) or OS overlay
+- **Base Image**: the container root (e.g. `ubuntu24--base.sqf`, or a `.sif` from elsewhere) or OS overlay
 - **OS Overlay**: Provides system-level libraries and tools (should have the same distro version as the base image)
 - **Module Overlays**: Individual software or data (e.g. `cellranger/9.0.1`, `grch38/cellranger/2024-A`)
 - **Bundle Overlay**: Frozen conda environment (e.g. `env.sqf`)

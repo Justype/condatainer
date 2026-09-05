@@ -33,10 +33,6 @@ var (
 // unfrozen is an environment about to be installed into.
 const headroomMB = 5 * 1024
 
-// unfreezeStage is where the skeleton is assembled inside the pack container,
-// with the artifact mounted at its upper/.
-const unfreezeStage = "/cnt_unfreeze"
-
 // UnfreezeOptions is one unfreeze.
 type UnfreezeOptions struct {
 	// Artifact is the frozen .sqf to open.
@@ -45,16 +41,10 @@ type UnfreezeOptions struct {
 	Target string
 	// SizeMB is the image size; zero derives it from the payload plus headroom.
 	SizeMB int
-	// UID and GID own the result. They are applied by the mount, so the payload
-	// arrives already owned rather than being walked afterwards.
+	// UID and GID own the result, fixed up after the build — see buildImage.
 	UID, GID int
 	// Sparse allocates on write rather than up front.
 	Sparse bool
-	// Base is the container the build runs in; squashfuse and mke2fs come from
-	// there, so an unfreeze uses the same tool versions a build does.
-	Base string
-	// ApptainerBin is the apptainer to run; empty finds it on PATH.
-	ApptainerBin string
 	// StageDir is where the skeleton is assembled. It holds work/ and an empty
 	// mountpoint — a few directories, never the payload.
 	StageDir string
@@ -79,8 +69,9 @@ type UnfreezeResult struct {
 // The image is built straight from the mounted artifact — mke2fs -d takes a
 // directory tree, and a mounted SquashFS is one — so the payload is never staged.
 // That also keeps it correct: mke2fs records whiteout device nodes an unprivileged
-// unsquashfs cannot create, and squashfuse presents the payload as the invoking
-// user, so no chown pass is needed.
+// unsquashfs cannot create. The artifact is packed -all-root and the mount cannot
+// be told to report a different owner (see buildImage), so ownership is fixed
+// afterward with a plain chown pass instead.
 func Unfreeze(ctx context.Context, opts UnfreezeOptions) (UnfreezeResult, error) {
 	log := logging.FromContext(ctx)
 
@@ -212,26 +203,26 @@ func archiveSize(ctx context.Context, sqf string) (sizeMB, entries int, err erro
 	return int(bytesUsed/(1024*1024)) + 1, entries, nil
 }
 
-// buildImage creates the ext3 image with the artifact mounted as its payload.
+// buildImage creates the ext3 image with the artifact mounted as its payload,
+// then fixes its ownership.
 //
-// The inode count comes from the payload rather than mke2fs's one-per-16KB ratio,
-// which a conda prefix exhausts while plenty of space remains. -o uid/gid is what
-// makes the payload arrive owned by the user, sparing a full walk afterwards.
+// The inode count comes from the payload rather than mke2fs's one-per-16KB
+// ratio, which a conda prefix exhausts while plenty of space remains. The
+// artifact is packed -all-root, and mountedRun's namespace maps exactly one
+// uid (0) correctly — any -o uid override besides that comes back as the
+// overflow uid instead of the one asked for — so the payload lands owned by
+// root, and ChownRecursively repairs it afterward on the plain host, where no
+// such mapping limit applies.
 func buildImage(ctx context.Context, opts UnfreezeOptions, artifact, target, stage string, sizeMB, entries int) error {
-	squashfuse, err := findSquashfuse(ctx, opts.ApptainerBin)
+	squashfuse, err := findSquashfuse()
 	if err != nil {
 		return err
 	}
-
-	// -o uid/gid is what makes the payload arrive owned by the user. Without it
-	// an -all-root archive lands as nobody and the image needs a full inode walk
-	// afterwards to repair, which is minutes on a real environment.
-	mount := fmt.Sprintf("container:%s -o uid=%d -o gid=%d %s %s",
-		squashfuse, opts.UID, opts.GID, artifact, filepath.Join(unfreezeStage, "upper"))
+	upper := filepath.Join(stage, "upper")
 
 	// -m matches what overlay create makes: the mke2fs default reserves blocks
 	// for root, which nothing in an unprivileged overlay can use.
-	args := []string{"-q", "-t", "ext3", "-d", unfreezeStage,
+	args := []string{"-q", "-t", "ext3", "-d", stage,
 		"-m", strconv.Itoa(ext3.ProfileSmall.ReservedPerc), "-F", target}
 	if entries > 0 {
 		args = append(args, "-N", strconv.Itoa(max(entries*2, 1024)))
@@ -244,17 +235,13 @@ func buildImage(ctx context.Context, opts UnfreezeOptions, artifact, target, sta
 	}
 	script += "mke2fs " + strings.Join(args, " ") + "\n"
 
-	runOpts := execpkg.Options{
-		BaseImage:      opts.Base,
-		ApptainerBin:   opts.ApptainerBin,
-		BindPaths:      []string{filepath.Dir(target), filepath.Dir(artifact), stage + ":" + unfreezeStage},
-		ApptainerFlags: []string{"--fusemount", mount},
-		Command:        []string{"/bin/bash", "-c", script},
-		HidePrompt:     true,
-	}
-	if err := execpkg.Run(ctx, runOpts, execpkg.IOFromContext(ctx)); err != nil {
+	if err := mountedRun(ctx, squashfuse, []string{artifact}, upper, script, execpkg.IOFromContext(ctx)); err != nil {
 		os.Remove(target)
 		return fmt.Errorf("build %s: %w", target, err)
+	}
+	if err := ext3.ChownRecursively(ctx, target, opts.UID, opts.GID, "/"); err != nil {
+		os.Remove(target)
+		return fmt.Errorf("fix ownership on %s: %w", target, err)
 	}
 	return nil
 }

@@ -263,17 +263,21 @@ A build works under one of two roots:
 
 | root | where | used by |
 |---|---|---|
-| **fast** | `$CNT_TMPDIR` → scheduler scratch (`SLURM_TMPDIR`, `PBS_TMPDIR`, `LSF_TMPDIR`, `_CONDOR_SCRATCH_DIR`) → `$TMPDIR` → `/tmp`, plus `cnt-$USER` | `app` builds |
-| **stable** | first writable `<data-dir>/tmp` (extra-root → root → scratch → user) | `data` builds, definitions and the base image |
+| **fast** | `$CNT_TMPDIR` → scheduler scratch (`SLURM_TMPDIR`, `PBS_TMPDIR`, `LSF_TMPDIR`, `_CONDOR_SCRATCH_DIR`) → `$TMPDIR` → `/tmp`, plus `cnt-$USER` | `app` builds, definitions and the base image |
+| **stable** | first writable `<data-dir>/tmp` (extra-root → root → scratch → user) | `data` builds |
+
+A definition build is always on the fast root: it needs `--fakeroot`, which NFS,
+Lustre, GPFS and PanFS do not support. If `$CNT_TMPDIR` points at one of those,
+CondaTainer warns that the build will fail — set it to a local path.
 
 `$CNT_TMPDIR` selects the **fast** root only. It does not redirect the stable
-one: collapsing the two would put a large data payload, or a multi-GB `.sif`, on
-node-local scratch that the job wipes when it ends. To move the stable root, move
-the data directory (`CNT_ROOT` / `CNT_EXTRA_ROOT`).
+one: collapsing the two would put a large data payload on node-local scratch that
+the job wipes when it ends. To move the stable root, move the data directory
+(`CNT_ROOT` / `CNT_EXTRA_ROOT`).
 
-An external build (`-f`) is the exception: `app` takes the fast root, while
-`data` and `.def` builds keep their intermediates beside the target prefix, whose
-location you chose.
+An external build (`-f`) is the exception: `app` and `.def` take the fast root,
+while `data` keeps its intermediates beside the target prefix, whose location you
+chose.
 
 A few common overrides are shown below for clarity, but the
 mapping is consistent for every key handled by the CLI:
@@ -342,7 +346,7 @@ condatainer config paths
 ```
 
 This shows all search paths for:
-- **Images**: `.sif` and `.sqf` files
+- **Images**: `.sqf` and `.img` files
 - **Build scripts**: Build recipe files
 - **Helper scripts**: Runtime helper scripts
 

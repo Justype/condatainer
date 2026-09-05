@@ -108,7 +108,7 @@ func NewLockedObject(ctx context.Context, spec LockedSpec) (*BuildObject, error)
 			Type:   manifest.Type,
 			Prefix: meta.Prefix(manifest.Name, manifest.Type),
 		}},
-		ws:           workspaceFor(manifest.Name, tmpRoot, appExt3ScratchExt(manifest.Type)),
+		ws:           workspaceFor(manifest.Name, tmpRoot, appExt3ScratchExt(manifest.Type), false),
 		tgt:          targetFor(output),
 		submitJob:    config.Global.SubmitJob,
 		locked:       true,
@@ -226,7 +226,7 @@ func (b *BuildObject) lockRecipeSource(manifest meta.Manifest, sources map[strin
 	b.buildSource = path
 	b.tempSource = true
 	if isDef {
-		// Re-sites the workspace as a .sif build. The Spec is already set, so
+		// Re-sites the workspace as a sandbox build. The Spec is already set, so
 		// this does not go looking for a local source to capture one from.
 		b.asDefinitionBuild()
 		// Re-siting moved ws.Source, so the recipe has to follow it.

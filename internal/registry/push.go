@@ -13,10 +13,8 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/compare"
 	"github.com/Justype/condatainer/internal/artifact/meta"
-	"github.com/Justype/condatainer/internal/image/sif"
 	"github.com/Justype/condatainer/internal/image/squashfs"
 	"github.com/Justype/condatainer/internal/logging"
-	"github.com/Justype/condatainer/internal/utils"
 )
 
 // Audience declares who can pull from an endpoint, and so decides what may be
@@ -373,15 +371,7 @@ func reconcileIndex(ctx context.Context, repository *remote.Repository, tags []s
 // its kernel can mount the payload, and not knowing is a reason to omit the
 // claim rather than to refuse the push.
 func compressionOf(path string) string {
-	var offset int64
-	if utils.IsSif(path) {
-		part, err := sif.PrimarySystemPartition(path)
-		if err != nil {
-			return ""
-		}
-		offset = part.Offset
-	}
-	stats, err := squashfs.GetSquashFSStatsAt(path, offset)
+	stats, err := squashfs.GetSquashFSStats(path)
 	if err != nil || stats == nil {
 		return ""
 	}

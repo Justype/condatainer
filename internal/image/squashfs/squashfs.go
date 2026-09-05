@@ -234,17 +234,6 @@ func ParseStatTime(s string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// BuildTime returns the SquashFS creation time, which mksquashfs sets at build
-// time, so for CondaTainer overlays it is the build timestamp. Returns false when
-// the archive has no readable creation time (e.g. unsquashfs unavailable).
-func BuildTime(path string) (time.Time, bool) {
-	stats, err := GetSquashFSStats(path)
-	if err != nil || stats == nil || stats.CreatedTime == "" {
-		return time.Time{}, false
-	}
-	return ParseStatTime(stats.CreatedTime)
-}
-
 // ============================================================================
 // OS release info
 // ============================================================================
@@ -258,13 +247,8 @@ type OSInfo struct {
 	Name      string   // e.g. "Ubuntu", "Debian", "Rocky Linux"
 }
 
-// GetOSInfo reads /etc/os-release from a SquashFS archive and returns an OSInfo.
-// Returns nil if the file cannot be read or parsed.
-func GetOSInfo(sqfPath string) *OSInfo {
-	return GetOSInfoAt(sqfPath, 0)
-}
-
-// GetOSInfoAt is GetOSInfo for an archive at an offset, as inside a SIF.
+// GetOSInfoAt reads /etc/os-release from a SquashFS archive at an offset, as
+// inside a SIF. Returns nil if the file cannot be read or parsed.
 func GetOSInfoAt(sqfPath string, offset int64) *OSInfo {
 	data, err := CatFile(sqfPath, "etc/os-release", offset)
 	if err != nil {

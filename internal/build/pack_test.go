@@ -21,7 +21,7 @@ func newPackObject(t *testing.T, typ catalog.Type) *BuildObject {
 	tmpDir := t.TempDir()
 	name := "samtools/1.21"
 	b := &BuildObject{
-		ws: workspaceFor(name, tmpDir, appExt3ScratchExt(typ)),
+		ws: workspaceFor(name, tmpDir, appExt3ScratchExt(typ), false),
 		spec: Spec{
 			Image:  ImageSpec{Name: name, Type: typ, Description: "SAMtools", Prefix: meta.Prefix(name, typ)},
 			Source: SourceSpec{Conda: &CondaSource{Package: &CondaPackage{Name: "samtools", Version: "1.21"}}},
@@ -284,7 +284,7 @@ func TestPackedImageExcludesBuildScratch(t *testing.T) {
 }
 
 func TestSquashfsShowsProgressWithoutFinalStatistics(t *testing.T) {
-	script := squashfsScript([]string{"/cnt"}, "/images/out.sqf", 2, "128k", "-comp zstd")
+	script := squashfsScript([]string{"/cnt"}, "/images/out.sqf", 2, "128k", "-comp zstd", true)
 	if !strings.Contains(script, " -quiet ") {
 		t.Fatalf("mksquashfs command does not suppress final statistics:\n%s", script)
 	}

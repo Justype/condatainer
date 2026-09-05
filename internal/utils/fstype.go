@@ -55,7 +55,7 @@ func FSKind(path string) (name string, network bool) {
 	return name, networkFS[t]
 }
 
-var scratchWarned sync.Once
+var scratchWarned, fakerootWarned sync.Once
 
 // WarnNetworkScratch says once that the scratch a job is about to fill is on a
 // network filesystem. It only reports: where temporary files belong is answered
@@ -69,5 +69,24 @@ func WarnNetworkScratch(dir, what string) {
 	scratchWarned.Do(func() {
 		PrintWarning("%s is staging to %s, which is %s; many small files are slower over a network.", what, dir, name)
 		PrintWarning("Set CNT_TMPDIR to a local path if this machine has one.")
+	})
+}
+
+// WarnUnfakerootableScratch says once that work needing --fakeroot is staged on a
+// filesystem that does not support it. Apptainer names NFS, Lustre, GPFS and
+// PanFS; FSKind's network set covers those and more, and every member of it is
+// remote enough that fakeroot is not available.
+//
+// It reports rather than refuses: the operation fails on its own, and naming the
+// cause before Apptainer does is worth more than a second verdict on which
+// filesystems work.
+func WarnUnfakerootableScratch(dir, what string) {
+	name, network := FSKind(dir)
+	if !network {
+		return
+	}
+	fakerootWarned.Do(func() {
+		PrintWarning("%s stages to %s, which is %s; --fakeroot is not supported there and the operation will fail.", what, dir, name)
+		PrintWarning("Set CNT_TMPDIR to a local path.")
 	})
 }

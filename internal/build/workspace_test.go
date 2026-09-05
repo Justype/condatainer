@@ -62,8 +62,8 @@ func checkPaths(t *testing.T, b *BuildObject, want wantPaths) {
 
 // expect builds the path set the helpers derive, which is what §3.1 claims
 // workspaceFor reproduces.
-func expect(name, root, ext, target string) wantPaths {
-	ws := workspaceFor(name, root, ext)
+func expect(name, root, ext, target string, isDef bool) wantPaths {
+	ws := workspaceFor(name, root, ext, isDef)
 	return wantPaths{
 		baseRoot: ws.BaseRoot, root: ws.Root, cntDir: ws.CntDir,
 		tmpImg: ws.Overlay, target: target, metaDir: ws.MetaDir, source: ws.Source,
@@ -93,7 +93,7 @@ func TestCondaConstructorPaths(t *testing.T) {
 				ext = ".img"
 			}
 			checkPaths(t, b, expect(module, b.ws.BaseRoot, ext,
-				filepath.Join(dir, "samtools--1.23.1.sqf")))
+				filepath.Join(dir, "samtools--1.23.1.sqf"), false))
 
 			if b.ws.UsesImage() != appTmpOverlay {
 				t.Errorf("UsesImage = %v, want %v", b.ws.UsesImage(), appTmpOverlay)
@@ -109,10 +109,9 @@ func TestCondaConstructorPaths(t *testing.T) {
 	}
 }
 
-// The scratch extension is two decisions, not one: a definition always gets a
-// SIF, a shell build gets .img only under use_tmp_overlay and otherwise runs in
-// dir mode with no scratch image at all. Empty means "dir mode" — the string
-// encodes it, which is what plan/build-object.md §3.2 replaces.
+// The scratch extension is a shell build's decision alone: .img under
+// use_tmp_overlay, otherwise dir mode with no scratch image. A definition takes
+// neither — apptainer writes it a sandbox — so its rows want no extension.
 func TestExternalConstructorPaths(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -123,8 +122,8 @@ func TestExternalConstructorPaths(t *testing.T) {
 	}{
 		{"shell script, dir mode", false, false, "", "demo.sh"},
 		{"shell script, ext3 mode", false, true, ".img", "demo.sh"},
-		{"definition, dir mode", true, false, ".sif", "demo.def"},
-		{"definition, ext3 mode", true, true, ".sif", "demo.def"},
+		{"definition, dir mode", true, false, "", "demo.def"},
+		{"definition, ext3 mode", true, true, "", "demo.def"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prev := config.Global.Build.AppTmpOverlay
@@ -142,7 +141,7 @@ func TestExternalConstructorPaths(t *testing.T) {
 			if err != nil {
 				t.Fatalf("FromExternalSource: %v", err)
 			}
-			checkPaths(t, b, expect("demo", b.ws.BaseRoot, tc.wantExt, prefix+".sqf"))
+			checkPaths(t, b, expect("demo", b.ws.BaseRoot, tc.wantExt, prefix+".sqf", tc.isDef))
 		})
 	}
 }
@@ -157,7 +156,7 @@ func TestRetargetMovesEveryPath(t *testing.T) {
 
 	b := &BuildObject{
 		spec: Spec{Image: ImageSpec{Name: name, Type: catalog.TypeApp}},
-		ws:   workspaceFor(name, dir, appExt3ScratchExt(catalog.TypeApp)),
+		ws:   workspaceFor(name, dir, appExt3ScratchExt(catalog.TypeApp), false),
 	}
 
 	// data re-sites to the stable shared root rather than fast local scratch.
@@ -168,7 +167,7 @@ func TestRetargetMovesEveryPath(t *testing.T) {
 		t.Skip("data and app share a tmp root in this environment; nothing to re-site")
 	}
 	// Data drops the ext3 image, so the whole set is re-derived with no overlay.
-	checkPaths(t, b, expect(name, b.ws.BaseRoot, "", ""))
+	checkPaths(t, b, expect(name, b.ws.BaseRoot, "", "", false))
 }
 
 // The layout itself, spelled out. Everything else in the package derives from
@@ -177,23 +176,28 @@ func TestRetargetMovesEveryPath(t *testing.T) {
 func TestWorkspaceForLayout(t *testing.T) {
 	for _, tc := range []struct {
 		name, module, ext string
+		isDef             bool
 		wantParent        string // relative to base root
 	}{
-		{"conda", "samtools/1.23.1", ".img", "build_samtools_1.23.1"},
-		{"definition", "ubuntu24/base", ".sif", "build_ubuntu24_base"},
-		{"dir mode", "demo", "", "build_demo"},
-		{"deep data name", "grch38/star/2.7.11b/gencode47-101", ".img",
+		{"conda", "samtools/1.23.1", ".img", false, "build_samtools_1.23.1"},
+		{"definition", "ubuntu24/base", "", true, "build_ubuntu24_base"},
+		{"dir mode", "demo", "", false, "build_demo"},
+		{"deep data name", "grch38/star/2.7.11b/gencode47-101", ".img", false,
 			"build_grch38_star_2.7.11b_gencode47-101"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			ws := workspaceFor(tc.module, root, tc.ext)
+			ws := workspaceFor(tc.module, root, tc.ext, tc.isDef)
 
 			ownerRoot := filepath.Join(root, tc.wantParent, producer.Tag(producer.LocalInfo()))
 			buildDir := filepath.Join(ownerRoot, "work")
 			overlay := ""
 			if tc.ext != "" {
 				overlay = filepath.Join(ownerRoot, "rootfs"+tc.ext)
+			}
+			sandbox := ""
+			if tc.isDef {
+				sandbox = filepath.Join(ownerRoot, "rootfs")
 			}
 			for _, c := range []struct{ got, want, field string }{
 				{ws.BaseRoot, root, "BaseRoot"},
@@ -202,8 +206,9 @@ func TestWorkspaceForLayout(t *testing.T) {
 				{ws.CntDir, filepath.Join(buildDir, "cnt"), "CntDir"},
 				{ws.TmpDir, filepath.Join(buildDir, "tmp"), "TmpDir"},
 				{ws.MetaDir, filepath.Join(buildDir, ".cnt"), "MetaDir"},
-				{ws.Source, filepath.Join(ownerRoot, sourceFileName(tc.module, tc.ext == ".sif")), "Source"},
+				{ws.Source, filepath.Join(ownerRoot, sourceFileName(tc.module, tc.isDef)), "Source"},
 				{ws.Overlay, overlay, "Overlay"},
+				{ws.Sandbox, sandbox, "Sandbox"},
 			} {
 				if c.got != c.want {
 					t.Errorf("%s = %q, want %q", c.field, c.got, c.want)
@@ -215,9 +220,9 @@ func TestWorkspaceForLayout(t *testing.T) {
 
 func TestWorkspaceOwnersDoNotShareTemporaryPaths(t *testing.T) {
 	root := t.TempDir()
-	first := workspaceForOwner("hello/1.0", root, ".img",
+	first := workspaceForOwner("hello/1.0", root, ".img", false,
 		BuildLockInfo{Runner: "local", Node: "node-a", PID: 10})
-	second := workspaceForOwner("hello/1.0", root, ".img",
+	second := workspaceForOwner("hello/1.0", root, ".img", false,
 		BuildLockInfo{Runner: "local", Node: "node-b", PID: 10})
 	for _, pair := range [][2]string{
 		{first.Root, second.Root},
@@ -235,7 +240,7 @@ func TestAdoptWorkspaceMovesMaterializedRecipe(t *testing.T) {
 	root := t.TempDir()
 	b := &BuildObject{
 		spec:       Spec{Image: ImageSpec{Name: "hello/1.0"}},
-		ws:         workspaceFor("hello/1.0", root, ""),
+		ws:         workspaceFor("hello/1.0", root, "", false),
 		tempSource: true,
 	}
 	b.buildSource = b.ws.Source
@@ -299,7 +304,7 @@ func TestExt3IsAppOnly(t *testing.T) {
 					t.Errorf("appExt3ScratchExt(%s) = %q, want %q", tc.typ, got, tc.want)
 				}
 				// The payload lands on the host exactly when there is no image.
-				ws := workspaceFor("demo/1.0", t.TempDir(), tc.want)
+				ws := workspaceFor("demo/1.0", t.TempDir(), tc.want, false)
 				if got, want := ws.HostPayload(), tc.want == ""; got != want {
 					t.Errorf("HostPayload for %s = %v, want %v", tc.typ, got, want)
 				}
@@ -333,8 +338,8 @@ func TestDataBuildNeverGetsExt3(t *testing.T) {
 	}
 }
 
-// A definition is unaffected either way: apptainer owns the rootfs, so the .sif
-// is the product and use_tmp_overlay has nothing to say about it.
+// A definition is unaffected either way: apptainer writes it a sandbox, and
+// use_tmp_overlay has nothing to say about it.
 func TestDefinitionIgnoresExt3Mode(t *testing.T) {
 	for _, on := range []bool{false, true} {
 		withAppTmpOverlayMode(t, on)
@@ -347,11 +352,11 @@ func TestDefinitionIgnoresExt3Mode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FromExternalSource: %v", err)
 		}
-		if filepath.Ext(b.ws.Overlay) != ".sif" {
-			t.Errorf("use_tmp_overlay=%v gave a definition %q, want a .sif", on, b.ws.Overlay)
+		if !b.ws.UsesSandbox() {
+			t.Errorf("use_tmp_overlay=%v: definition got no sandbox", on)
 		}
-		if b.ws.HostPayload() {
-			t.Errorf("use_tmp_overlay=%v: definition staged on host; apptainer owns the rootfs", on)
+		if b.ws.UsesImage() {
+			t.Errorf("use_tmp_overlay=%v: definition got a scratch image at %q", on, b.ws.Overlay)
 		}
 	}
 }
@@ -365,7 +370,7 @@ func TestRetargetDropsExt3WhenTypeBecomesData(t *testing.T) {
 	const name = "grch38/genome/gencode"
 	b := &BuildObject{
 		spec: Spec{Image: ImageSpec{Name: name, Type: catalog.TypeApp}},
-		ws:   workspaceFor(name, dir, appExt3ScratchExt(catalog.TypeApp)),
+		ws:   workspaceFor(name, dir, appExt3ScratchExt(catalog.TypeApp), false),
 	}
 	if !b.ws.UsesImage() {
 		t.Fatal("fixture should start with an ext3 image")

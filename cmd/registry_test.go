@@ -202,28 +202,25 @@ func TestRegistryPullDestinationPrecedenceAndValidation(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	images := filepath.Join(config.GetUserDataDir(), "images")
 
-	dest, err := registryPullDestination("renamed/2.0", "", "hello", "1.0", "hello/1.0", ".sqf")
+	dest, err := registryPullDestination("renamed/2.0", "", "hello", "1.0", "hello/1.0")
 	if err != nil || dest != filepath.Join(images, "renamed--2.0.sqf") {
 		t.Fatalf("--name destination = (%q, %v)", dest, err)
 	}
-	dest, err = registryPullDestination("", filepath.Join(t.TempDir(), "custom"), "hello", "1.0", "hello/1.0", ".sqf")
+	dest, err = registryPullDestination("", filepath.Join(t.TempDir(), "custom"), "hello", "1.0", "hello/1.0")
 	if err != nil || filepath.Base(dest) != "custom.sqf" {
 		t.Fatalf("--prefix destination = (%q, %v)", dest, err)
 	}
-	if _, err := registryPullDestination("", "bad--name", "hello", "1.0", "hello/1.0", ".sqf"); err == nil {
+	if _, err := registryPullDestination("", "bad--name", "hello", "1.0", "hello/1.0"); err == nil {
 		t.Error("--prefix accepted the reserved name separator")
 	}
-	if _, err := registryPullDestination("", "base.sqf", "ubuntu24/base", "latest", "ubuntu24/base", ".sif"); err == nil {
-		t.Error("--prefix accepted the wrong image extension")
-	}
-	dest, err = registryPullDestination("", filepath.Join(t.TempDir(), "custom.v1"), "hello", "1.0", "hello/1.0", ".sqf")
+	dest, err = registryPullDestination("", filepath.Join(t.TempDir(), "custom.v1"), "hello", "1.0", "hello/1.0")
 	if err != nil || filepath.Base(dest) != "custom.v1.sqf" {
 		t.Errorf("extensionless dotted prefix = (%q, %v)", dest, err)
 	}
-	if _, err := registryPullDestination("bad--name", "", "hello", "1.0", "hello/1.0", ".sqf"); err == nil {
+	if _, err := registryPullDestination("bad--name", "", "hello", "1.0", "hello/1.0"); err == nil {
 		t.Error("--name accepted the reserved name separator")
 	}
-	if _, err := registryPullDestination("", "", "hello", "sha256:"+strings.Repeat("b", 64), "", ".sqf"); err == nil {
+	if _, err := registryPullDestination("", "", "hello", "sha256:"+strings.Repeat("b", 64), ""); err == nil {
 		t.Error("versioned digest without a title guessed an install name")
 	}
 }

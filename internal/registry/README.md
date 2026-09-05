@@ -10,8 +10,8 @@ The package has two related entry points:
 - `Resolve(ctx, ref)` normalizes an upstream container image reference and
   returns the current machine's platform digest for build provenance.
 - `Publish`, `ResolveArtifact`, `Check`, and `Pull` distribute completed `.sqf`
-  overlays and `.sif` base images. Writable `.img` overlays have no immutable
-  identity and are never distributed.
+  overlays and base images. Writable `.img` overlays have no immutable identity
+  and are never distributed.
 
 ## Artifact contract
 

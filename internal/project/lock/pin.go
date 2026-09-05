@@ -211,15 +211,14 @@ func resolveByName(request string, opts PinOptions) (store.Candidate, []store.Ca
 // looksLikePath reports whether a target addresses a file rather than an
 // identity. An identity never contains a separator — `scheme@sha256:<hex>` and a
 // bare digest are both flat — so anything that does is a path, as is anything
-// carrying an image extension. Routing those here means a .sif is refused for
-// being a .sif rather than for failing to parse as a digest.
+// carrying an image extension. Routing those here means a .img is refused for
+// being a .img rather than for failing to parse as a digest.
 func looksLikePath(target string) bool {
-	return strings.ContainsRune(target, filepath.Separator) ||
-		utils.IsOverlay(target) || utils.IsSif(target)
+	return strings.ContainsRune(target, filepath.Separator) || utils.IsOverlay(target)
 }
 
 // candidateFromPath verifies the .sqf a path request names. A writable .img has
-// no identity to pin and a .sif is a container root, so neither can be pinned.
+// no identity to pin, so it cannot be one.
 func candidateFromPath(target string) (store.Candidate, error) {
 	if !strings.HasSuffix(target, ".sqf") {
 		return store.Candidate{}, fmt.Errorf("%w: only .sqf can be pinned, not %s", ErrInvalid, filepath.Base(target))

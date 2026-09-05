@@ -41,15 +41,18 @@ func (b *BuildObject) tryPrebuilt(ctx context.Context) (prebuiltResult, error) {
 	}
 
 	log := logging.FromContext(ctx)
-	var lastUnavailable error
+	var lastFallback error
 	for _, endpoint := range b.catalogSource.Desc.OCI.Pull {
 		desc, annotations, err := resolvePrebuilt(ctx, endpoint, repo, tag)
 		if err != nil {
 			switch {
 			case errors.Is(err, registry.ErrNotFound), errors.Is(err, registry.ErrUnsupportedPlatform):
 				continue
+			case closedDoor(ctx, err, endpoint):
+				lastFallback = err
+				continue
 			case errors.Is(err, registry.ErrUnavailable):
-				lastUnavailable = err
+				lastFallback = err
 				continue
 			default:
 				return false, fmt.Errorf("cannot use prebuilt %s from %s: %w", b.spec.Image.Name, endpoint, err)
@@ -68,12 +71,16 @@ func (b *BuildObject) tryPrebuilt(ctx context.Context) (prebuiltResult, error) {
 		// that it has already been checked against the local recipe.
 		log.Info("prebuilt found and verified", "artifact", b.spec.Image.Name,
 			"endpoint", endpoint, "equivalence", describePrebuiltKey(want))
-		if err := pullPrebuilt(ctx, endpoint, repo, desc, annotations, b.tgt.Path); err != nil {
+		if err := pullPrebuilt(ctx, endpoint, repo, desc, annotations, b.tgt.Path,
+			registry.KindFor(b.spec.Image.Type)); err != nil {
 			switch {
 			case errors.Is(err, registry.ErrNotFound), errors.Is(err, registry.ErrUnsupportedPlatform):
 				continue
+			case closedDoor(ctx, err, endpoint):
+				lastFallback = err
+				continue
 			case errors.Is(err, registry.ErrUnavailable):
-				lastUnavailable = err
+				lastFallback = err
 				continue
 			default:
 				return false, fmt.Errorf("cannot pull prebuilt %s from %s: %w", b.spec.Image.Name, endpoint, err)
@@ -83,11 +90,24 @@ func (b *BuildObject) tryPrebuilt(ctx context.Context) (prebuiltResult, error) {
 		log.Info("prebuilt image ready", "kind", "success", "path", b.tgt.Path, "endpoint", endpoint)
 		return true, nil
 	}
-	if lastUnavailable != nil {
-		log.Warn("registry endpoints unavailable; building selected recipe locally",
-			"name", b.spec.Image.Name, "err", lastUnavailable)
+	if lastFallback != nil {
+		log.Warn("no endpoint could serve this artifact; building the selected recipe locally",
+			"name", b.spec.Image.Name, "err", lastFallback)
 	}
 	return false, nil
+}
+
+// closedDoor reports a refusal that leaves nothing to report and nothing to fix:
+// the endpoint turned away a request carrying no credential at all.
+//
+// ErrUnauthorized is otherwise fatal on purpose — an expired token must not
+// silently become a long rebuild. That reasoning needs a credential to have
+// expired. With none in hand the same status means only that this endpoint is
+// not one this user can pull from, which is the outcome ErrNotFound already
+// falls back on, and a collection may legitimately list an endpoint that only
+// some of its readers can reach.
+func closedDoor(ctx context.Context, err error, endpoint string) bool {
+	return errors.Is(err, registry.ErrUnauthorized) && !registry.HasCredential(ctx, endpoint)
 }
 
 // prebuiltEquivalence derives the key from the selected local recipe and the

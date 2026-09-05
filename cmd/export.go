@@ -8,7 +8,7 @@ const overlayExportHelp = `Export the Conda environment in a writable .img overl
 Runs micromamba env export against /cnt_env, so it captures the environment as
 it is now — including anything installed into the overlay since it was created.
 
-Installed .sqf and .sif images are not exportable: they are immutable and carry
+Installed images are not exportable: they are immutable and carry
 their own metadata, so rebuild them from their recipe instead.
 
 Output goes to stdout, or to <prefix>.yml (or .txt with --explicit) with --prefix.`

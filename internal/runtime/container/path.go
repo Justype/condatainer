@@ -43,5 +43,8 @@ func BuildPathEnv(overlays []string) string {
 		paths = append([]string{contribution.Prefix + "/bin"}, paths...)
 	}
 
+	// Last, so nothing in an image is shadowed by the bound executable.
+	paths = append(paths, BoundExecDir)
+
 	return strings.Join(paths, ":")
 }

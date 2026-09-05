@@ -117,7 +117,7 @@ It is Ubuntu 22.04, which differs from the default base image (Ubuntu 24.04 when
 
 You can either:
 - Use the PyTorch image as the base image
-- Use the `ubuntu22--base_image.sif` as the base image alongside the PyTorch overlay
+- Use `ubuntu22--base.sqf` as the base image alongside the PyTorch overlay
 
 Use the first approach:
 

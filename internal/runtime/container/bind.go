@@ -9,6 +9,23 @@ import (
 	"github.com/Justype/condatainer/internal/scheduler"
 )
 
+// BoundExecDir and BoundExecPath are where the running executable is bound
+// inside a container, so a nested call has a stable path to reach it by.
+//
+// Not /usr/bin. A bind there puts a mount boundary inside the directory dpkg
+// unpacks into most, and dpkg then reads the copied-up /usr as something other
+// than a directory and refuses every package — "trying to overwrite '/usr',
+// which is also in package login".
+//
+// Not under the metadata directory either. A pack runs mksquashfs in a container
+// with the staged metadata bound at /.cnt and passed as an archive root, so a
+// bind below it is walked and the executable lands in the artifact. Its own
+// directory is CondaTainer's, no package writes there, and nothing packs it.
+const (
+	BoundExecDir  = "/.cnt_bin"
+	BoundExecPath = BoundExecDir + "/condatainer"
+)
+
 // tmpDirEnvVars are the temp directory environment variables read by name, in
 // priority order: CNT_TMPDIR is condatainer's own staging root, the rest are what
 // the C++ standard library's temp_directory_path() consults. The scheduler's
@@ -181,7 +198,7 @@ func BindPaths(paths ...string) []string {
 	// Bind condatainer executable for nested calls.
 	// Always bind the actual exe regardless of install location.
 	if execPath, err := os.Executable(); err == nil && execPath != "" {
-		bindPaths = append(bindPaths, execPath+":/usr/bin/condatainer:ro")
+		bindPaths = append(bindPaths, execPath+":"+BoundExecPath+":ro")
 	}
 
 	return bindPaths

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -189,13 +190,30 @@ func stageFile(dir, name string, data []byte) error {
 
 // readRaw pulls one metadata file's bytes out of whichever image format this is.
 // A writable .img is not handled: its environment comes from its .env sidecar.
+//
+// A sandbox is an unpacked image, so its documents are ordinary files: a
+// definition build reads its own sandbox before packing it.
 func readRaw(imagePath, inImagePath string) ([]byte, error) {
 	switch {
 	case utils.IsSqf(imagePath):
 		return squashfs.CatFile(imagePath, inImagePath, 0)
 	case utils.IsSif(imagePath):
 		return sif.ReadFile(imagePath, inImagePath)
+	case utils.IsSandboxDir(imagePath):
+		return readSandboxFile(imagePath, inImagePath)
 	default:
 		return nil, fmt.Errorf("%w: %s is not a CondaTainer image", tool.ErrCorrupt, imagePath)
 	}
+}
+
+// readSandboxFile reads one document out of an unpacked root. An absent file is
+// tool.ErrFileNotFound, the same as the archive readers report, so a sandbox
+// carrying no metadata reads as "declares nothing" rather than as a host failure.
+func readSandboxFile(sandboxPath, inImagePath string) ([]byte, error) {
+	full := filepath.Join(sandboxPath, inImagePath)
+	data, err := os.ReadFile(full)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("%w: %s in %s", tool.ErrFileNotFound, inImagePath, sandboxPath)
+	}
+	return data, err
 }

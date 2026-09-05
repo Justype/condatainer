@@ -27,9 +27,6 @@ func unfreezeInto(t *testing.T, sqf string, opts UnfreezeOptions) UnfreezeResult
 		opts.UID, opts.GID = os.Getuid(), os.Getgid()
 	}
 	opts.Sparse = true
-	if opts.Base == "" {
-		opts.Base = repoBase(t)
-	}
 	res, err := Unfreeze(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unfreeze: %v", err)
@@ -147,7 +144,7 @@ func TestUnfreezeRefusesAnUndersizedImage(t *testing.T) {
 	target := filepath.Join(artifactDir(t), "env.img")
 	_, err := Unfreeze(context.Background(), UnfreezeOptions{
 		Artifact: sqf, Target: target, SizeMB: 1, UID: os.Getuid(), GID: os.Getgid(),
-		Sparse: true, Base: repoBase(t),
+		Sparse: true,
 	})
 	if !errors.Is(err, ErrTooSmall) {
 		t.Fatalf("error = %v, want ErrTooSmall", err)
@@ -162,7 +159,7 @@ func TestUnfreezeRefusesANonSnapshot(t *testing.T) {
 	t.Parallel()
 	_, err := Unfreeze(context.Background(), UnfreezeOptions{
 		Artifact: repoAppArtifact(t), Target: filepath.Join(artifactDir(t), "env.img"),
-		UID: os.Getuid(), GID: os.Getgid(), Sparse: true, Base: repoBase(t),
+		UID: os.Getuid(), GID: os.Getgid(), Sparse: true,
 	})
 	if !errors.Is(err, ErrNotFrozen) {
 		t.Fatalf("error = %v, want ErrNotFrozen", err)

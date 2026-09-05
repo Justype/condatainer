@@ -13,18 +13,16 @@ import (
 	"github.com/Justype/condatainer/internal/config"
 )
 
-// repoBase is the base image the repository ships for its own tests. A pack runs
-// mksquashfs inside a container, so there is no way to exercise it without one.
+// repoBase is the base image the repository ships for its own tests, used
+// only where a test exercises opaque-directory translation against a real
+// base's contents (see BaseDirLister) — Pack and Unfreeze need no base at all.
 func repoBase(t *testing.T) string {
 	t.Helper()
-	if _, err := exec.LookPath("apptainer"); err != nil {
-		t.Skip("apptainer not available")
-	}
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := filepath.Join(wd, "..", "..", "..", "images", "ubuntu24--base.sif")
+	base := filepath.Join(wd, "..", "..", "..", "images", "ubuntu24--base.sqf")
 	if _, err := os.Stat(base); err != nil {
 		t.Skipf("base image not built: %v", err)
 	}
@@ -58,7 +56,6 @@ func artifactDir(t *testing.T) string {
 // packImage freezes img and returns the artifact path.
 func packImage(t *testing.T, img string) string {
 	t.Helper()
-	base := repoBase(t)
 	ctx := context.Background()
 
 	entries, err := Walk(ctx, img)
@@ -71,7 +68,7 @@ func packImage(t *testing.T, img string) string {
 	}
 	target := filepath.Join(artifactDir(t), "frozen.sqf")
 	if err := Pack(ctx, PackOptions{
-		Image: img, Target: target, Base: base, CompressArgs: "-comp zstd",
+		Image: img, Target: target, CompressArgs: "-comp zstd",
 	}, entries, tr); err != nil {
 		t.Fatalf("pack: %v", err)
 	}
@@ -100,7 +97,7 @@ func listArchive(t *testing.T, sqf string) []string {
 // The archive holds the payload with the upper/ wrapper stripped, and holds no
 // base content — the regression being a pack from the merged view rather than
 // from the image's own upper layer.
-func TestPackStripsUpperAndPacksNoBase(t *testing.T) {
+func TestPackStripsUpperNotTheMergedView(t *testing.T) {
 	t.Parallel()
 	img := newImage(t, `cd upper
 mkdir cnt_env
@@ -213,14 +210,13 @@ func TestPackKeepsAProtectedImageProtected(t *testing.T) {
 func TestPackRefusesAnEmptyOverlay(t *testing.T) {
 	t.Parallel()
 	img := newImage(t, "")
-	base := repoBase(t)
 	ctx := context.Background()
 	entries, err := Walk(ctx, img)
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = Pack(ctx, PackOptions{
-		Image: img, Target: filepath.Join(artifactDir(t), "x.sqf"), Base: base,
+		Image: img, Target: filepath.Join(artifactDir(t), "x.sqf"),
 	}, entries, Translation{})
 	if err == nil {
 		t.Fatal("an empty overlay was packed")
@@ -249,5 +245,17 @@ func TestPackScriptAlwaysBudgetsCpus(t *testing.T) {
 				t.Errorf("packScript(Processors=%d) = %q, want it to contain %q", tc.given, script, tc.want)
 			}
 		})
+	}
+}
+
+// mksquashfs announces a collision and still exits 0, so the announcement is
+// what AppendMeta has to fail on.
+func TestCollidedReadsMksquashfsAnnouncement(t *testing.T) {
+	const said = "Source directory entry .cnt already used! - trying .cnt_1"
+	if !collided(said) {
+		t.Errorf("collided(%q) = false, want true", said)
+	}
+	if collided("Number of directories 4\nNumber of hard-links 0") {
+		t.Error("ordinary mksquashfs output read as a collision")
 	}
 }

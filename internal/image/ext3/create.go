@@ -94,6 +94,9 @@ func typeLabel(opts *CreateOptions) string {
 // createOverlayFile runs dd + mke2fs + debugfs to build a raw overlay at filePath.
 // sparse controls whether dd creates a sparse file (fast, saves local space) or a fully-allocated one.
 func createOverlayFile(ctx context.Context, opts *CreateOptions, filePath string, sparse bool) error {
+	if err := tool.CheckDependencies([]string{"dd", "mke2fs", "debugfs"}); err != nil {
+		return err
+	}
 	cleanup := func() { os.Remove(filePath) }
 
 	// 1. Create raw file (dd)
@@ -192,10 +195,6 @@ func createAtTmp(ctx context.Context, opts *CreateOptions) (tmpPath string, err 
 		return "", err
 	}
 
-	if err := tool.CheckDependencies([]string{"dd", "mke2fs", "debugfs"}); err != nil {
-		return "", err
-	}
-
 	label := typeLabel(opts)
 	log := logging.FromContext(ctx)
 
@@ -224,10 +223,6 @@ func createAtTmp(ctx context.Context, opts *CreateOptions) (tmpPath string, err 
 // CreateDirectly builds the overlay at opts.Path without using a local tmp directory.
 func CreateDirectly(ctx context.Context, opts *CreateOptions) error {
 	if err := validateOpts(opts); err != nil {
-		return err
-	}
-
-	if err := tool.CheckDependencies([]string{"dd", "mke2fs", "debugfs"}); err != nil {
 		return err
 	}
 

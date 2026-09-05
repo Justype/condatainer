@@ -16,8 +16,8 @@ func withInstalledBase(t *testing.T) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	base := filepath.Join(dir, "ubuntu24--base.sif")
-	if err := os.WriteFile(base, []byte("SIF"), 0o644); err != nil {
+	base := filepath.Join(dir, "ubuntu24--base.sqf")
+	if err := os.WriteFile(base, []byte("SQF"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

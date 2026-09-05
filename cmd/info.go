@@ -174,7 +174,7 @@ func normalizeTime(s string) string {
 	return s
 }
 
-// displayImageInfo prints rich info for an immutable image, .sqf or .sif. A
+// displayImageInfo prints rich info for an immutable image. A foreign
 // SIF's payload starts partway into the file, so its archive reads take that
 // offset; a .sqf is the same reads at 0.
 func displayImageInfo(overlayPath string) error {

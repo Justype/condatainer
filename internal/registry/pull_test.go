@@ -187,7 +187,7 @@ func newPullFixture(t *testing.T) *pullFixture {
 }
 
 func (p *pullFixture) pull(ctx context.Context) error {
-	return Pull(ctx, p.registry.base(), "hello", p.desc, p.ann, p.destPath)
+	return Pull(ctx, p.registry.base(), "hello", p.desc, p.ann, p.destPath, KindOverlay)
 }
 
 func sameBytes(t *testing.T, a, b string) bool {
@@ -353,7 +353,7 @@ func TestPullRefusesTheWrongArtifactType(t *testing.T) {
 	desc := publishImage(t, f, "hello", source, ann, ArtifactTypeBase, MediaTypeBaseBlob, "1.0")
 
 	dest := filepath.Join(t.TempDir(), "hello--1.0.sqf")
-	err := Pull(context.Background(), f.base(), "hello", desc, ann, dest)
+	err := Pull(context.Background(), f.base(), "hello", desc, ann, dest, KindOverlay)
 	if !errors.Is(err, ErrInvalidArtifact) {
 		t.Fatalf("err = %v, want ErrInvalidArtifact", err)
 	}
@@ -394,28 +394,6 @@ func TestPullInstallsGroupWritableIntoASharedDirectory(t *testing.T) {
 	}
 	if info.Mode().Perm()&0o060 != 0o060 {
 		t.Errorf("installed mode is %v, want group read-write in a shared directory", info.Mode().Perm())
-	}
-}
-
-func TestImageTypes(t *testing.T) {
-	tests := []struct {
-		path         string
-		artifactType string
-		wantErr      bool
-	}{
-		{"/images/hello--1.0.sqf", ArtifactTypeOverlay, false},
-		{"/images/ubuntu24.sif", ArtifactTypeBase, false},
-		{"/images/dev.img", "", true},
-		{"/images/hello", "", true},
-	}
-	for _, tt := range tests {
-		got, _, err := imageTypes(tt.path)
-		if (err != nil) != tt.wantErr {
-			t.Errorf("imageTypes(%q) err = %v, wantErr %v", tt.path, err, tt.wantErr)
-		}
-		if got != tt.artifactType {
-			t.Errorf("imageTypes(%q) = %q, want %q", tt.path, got, tt.artifactType)
-		}
 	}
 }
 
@@ -701,24 +679,27 @@ func TestSplitCoordinate(t *testing.T) {
 	}
 }
 
-// Fetch is told its kind because its destination is a producer's staging name,
-// which ends in .part and so says nothing about the payload. KindOf must still
-// answer for the filenames that do.
-func TestKindOfAndStagingNames(t *testing.T) {
-	for path, want := range map[string]Kind{
-		"/images/star--2.7.11b.sqf":                    KindOverlay,
-		"/images/store/star--2.7.11b@abc123def456.sqf": KindOverlay,
-		"/images/ubuntu24--base.sif":                   KindBase,
+// Every artifact is a .sqf, so the type says what the filename cannot, and the
+// path is only asked whether it is distributable at all.
+func TestKindComesFromTypeNotFilename(t *testing.T) {
+	for typ, want := range map[catalog.Type]Kind{
+		catalog.TypeBase: KindBase,
+		catalog.TypeOS:   KindOverlay,
+		catalog.TypeApp:  KindOverlay,
+		catalog.TypeData: KindOverlay,
+		catalog.TypeEnv:  KindOverlay,
 	} {
-		got, err := KindOf(path)
-		if err != nil || got != want {
-			t.Errorf("KindOf(%q) = %q, %v; want %q", path, got, err, want)
+		if got := KindFor(typ); got != want {
+			t.Errorf("KindFor(%s) = %q, want %q", typ, got, want)
 		}
 	}
 	for _, path := range []string{"/images/env.img", "/images/notes.txt", "/images/star--2.7.11b.sqf.local.part"} {
-		if _, err := KindOf(path); err == nil {
-			t.Errorf("KindOf(%q) should refuse a name that does not declare a distributable image", path)
+		if err := checkDistributable(path); err == nil {
+			t.Errorf("checkDistributable(%q) should refuse a path that is not a distributable image", path)
 		}
+	}
+	if err := checkDistributable("/images/star--2.7.11b.sqf"); err != nil {
+		t.Errorf("checkDistributable refused a .sqf: %v", err)
 	}
 	if _, _, err := Kind("nonsense").types(); err == nil {
 		t.Error("an unknown kind must not resolve to media types")

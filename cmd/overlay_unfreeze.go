@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image/freeze"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -60,23 +59,14 @@ var overlayUnfreezeCmd = &cobra.Command{
 			sizeMB = parsed
 		}
 
-		// The image is built inside the base, so squashfuse and mke2fs are the
-		// same versions a build uses.
-		base, err := config.GetBaseImage()
-		if err != nil {
-			ExitWithError("%v", err)
-		}
-
 		res, err := freeze.Unfreeze(ctx, freeze.UnfreezeOptions{
-			Artifact:     artifact,
-			Target:       target,
-			SizeMB:       sizeMB,
-			UID:          os.Getuid(),
-			GID:          os.Getgid(),
-			Sparse:       unfreezeSparse,
-			Base:         base,
-			ApptainerBin: config.Global.ApptainerBin,
-			StageDir:     utils.GetTmpDir(),
+			Artifact: artifact,
+			Target:   target,
+			SizeMB:   sizeMB,
+			UID:      os.Getuid(),
+			GID:      os.Getgid(),
+			Sparse:   unfreezeSparse,
+			StageDir: utils.GetTmpDir(),
 		})
 		if err != nil {
 			if errors.Is(err, freeze.ErrNotFrozen) {

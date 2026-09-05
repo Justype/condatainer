@@ -23,17 +23,25 @@ func tmpRootForType(typ catalog.Type) string {
 	return scratch
 }
 
-// tmpRootForDef is the root for a definition build, which keeps its recipe and
-// the multi-GB SIF apptainer writes in one place.
+// tmpRootForDef is the root for a definition build. Apptainer writes its root as
+// a sandbox of many small files and builds it under --fakeroot, which NFS,
+// Lustre, GPFS and PanFS do not support, so this is fast local scratch and the
+// warning says the build will fail rather than merely run slowly.
 func tmpRootForDef() string {
-	return config.GetWritableTmpDir()
+	scratch := utils.GetTmpDir()
+	utils.WarnUnfakerootableScratch(scratch, "building a container")
+	return scratch
 }
 
-// tmpRootForExternal picks the root for an external build (-f). An app goes to
-// fast local scratch; data and definitions keep their large intermediates beside
-// the target, whose location the user chose.
+// tmpRootForExternal picks the root for an external build (-f). Data keeps its
+// large intermediates beside the target, whose location the user chose; an app
+// and a definition go to fast local scratch, a definition because it must —
+// see tmpRootForDef.
 func tmpRootForExternal(targetDir string, typ catalog.Type, isDef bool) string {
-	if isDef || typ == catalog.TypeData {
+	if isDef {
+		return tmpRootForDef()
+	}
+	if typ == catalog.TypeData {
 		return targetDir
 	}
 	scratch := utils.GetTmpDir()

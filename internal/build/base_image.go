@@ -38,7 +38,7 @@ func RebuildBase(ctx context.Context) error {
 }
 
 // buildBase runs the base through the same BuildObject every other image goes
-// through; only its type differs, which is what keeps the SIF.
+// through; only its type differs.
 func buildBase(ctx context.Context, update bool) error {
 	obj, err := newBaseObject(ctx, update)
 	if err != nil {
@@ -115,8 +115,7 @@ func newBaseObject(ctx context.Context, update bool) (*BuildObject, error) {
 		return nil, fmt.Errorf("base recipe %s was not found, or is not a definition", nameVersion)
 	}
 
-	// The same siting every other definition build gets; a base differs only in
-	// keeping the .sif instead of extracting it.
+	// The same siting every other definition build gets.
 	base.asDefinitionBuild()
 
 	// After capture, which takes the type from the recipe: a base is the

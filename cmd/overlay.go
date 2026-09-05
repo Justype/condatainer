@@ -538,7 +538,7 @@ func reorderChannelBlock(yaml []byte, priority []string) []byte {
 // runExportOverlay exports the live Conda environment in a writable .img.
 //
 // Only an .img: it is mutable working state, so exporting its current packages
-// is the only way to capture what it has become. An installed .sqf or .sif is
+// is the only way to capture what it has become. An installed image is
 // immutable and carries its own metadata, and is reproduced by rebuilding from its
 // recipe rather than by recovering one from the image.
 func runExportOverlay(cmd *cobra.Command, args []string) error {

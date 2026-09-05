@@ -8,6 +8,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -71,7 +72,7 @@ func InitCondaEnv(ctx context.Context, imgPath string, pkgs []string, fakeroot b
 	if len(pkgs) == 0 {
 		return nil
 	}
-	cmd := append([]string{"/usr/bin/condatainer", "env", "install", "-y"}, pkgs...)
+	cmd := append([]string{container.BoundExecPath, "env", "install", "-y"}, pkgs...)
 	if err := Run(ctx, Options{
 		Overlays:    []string{imgPath},
 		WritableImg: true,
@@ -86,7 +87,7 @@ func InitCondaEnv(ctx context.Context, imgPath string, pkgs []string, fakeroot b
 		Overlays:    []string{imgPath},
 		WritableImg: true,
 		Fakeroot:    fakeroot,
-		Command:     []string{"/usr/bin/condatainer", "env", "clean", "-a", "-y", "-q"},
+		Command:     []string{container.BoundExecPath, "env", "clean", "-a", "-y", "-q"},
 		HidePrompt:  true,
 	}, IO{})
 	return nil
@@ -99,7 +100,7 @@ func InstallPackages(ctx context.Context, imgPath string, pkgs []string, fakeroo
 		Overlays:    []string{imgPath},
 		WritableImg: true,
 		Fakeroot:    fakeroot,
-		Command:     append([]string{"/usr/bin/condatainer", "env", "install", "-y"}, pkgs...),
+		Command:     append([]string{container.BoundExecPath, "env", "install", "-y"}, pkgs...),
 		HidePrompt:  true,
 	}, io)
 }
@@ -110,7 +111,7 @@ func RemovePackages(ctx context.Context, imgPath string, pkgs []string, fakeroot
 		Overlays:    []string{imgPath},
 		WritableImg: true,
 		Fakeroot:    fakeroot,
-		Command:     append([]string{"/usr/bin/condatainer", "env", "remove", "-y"}, pkgs...),
+		Command:     append([]string{container.BoundExecPath, "env", "remove", "-y"}, pkgs...),
 		HidePrompt:  true,
 	}, io)
 }

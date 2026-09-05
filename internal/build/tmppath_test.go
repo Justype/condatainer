@@ -49,7 +49,7 @@ func TestCreateBuildDirs_CreatesDirs(t *testing.T) {
 	tmpDir := t.TempDir()
 	base := &BuildObject{
 		spec: Spec{Image: ImageSpec{Name: "foo/bar"}},
-		ws:   workspaceFor("foo/bar", tmpDir, ""),
+		ws:   workspaceFor("foo/bar", tmpDir, "", false),
 	}
 
 	if err := base.CreateBuildDirs(context.Background(), false); err != nil {
@@ -73,7 +73,7 @@ func TestCreateBuildDirs_StaleDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	base := &BuildObject{
 		spec: Spec{Image: ImageSpec{Name: "foo/bar"}},
-		ws:   workspaceFor("foo/bar", tmpDir, ""),
+		ws:   workspaceFor("foo/bar", tmpDir, "", false),
 	}
 
 	// Pre-create the build dir to simulate a stale build
@@ -90,7 +90,7 @@ func TestCreateBuildDirs_ForceRemovesStale(t *testing.T) {
 	tmpDir := t.TempDir()
 	base := &BuildObject{
 		spec: Spec{Image: ImageSpec{Name: "foo/bar"}},
-		ws:   workspaceFor("foo/bar", tmpDir, ""),
+		ws:   workspaceFor("foo/bar", tmpDir, "", false),
 	}
 
 	// Pre-create the build dir with a marker file to simulate stale state
@@ -108,8 +108,9 @@ func TestCreateBuildDirs_ForceRemovesStale(t *testing.T) {
 	}
 }
 
-// An external build routes by type: an app takes fast local scratch, while data
-// and definitions keep their large intermediates beside the target the user chose.
+// An external build routes by type: data keeps its large intermediates beside the
+// target the user chose, while an app and a definition take fast local scratch —
+// a definition because --fakeroot has to work where its sandbox is written.
 func TestTmpRootForExternal(t *testing.T) {
 	targetDir := t.TempDir()
 	scratch := utils.GetTmpDir()
@@ -123,7 +124,7 @@ func TestTmpRootForExternal(t *testing.T) {
 		{name: "app", typ: catalog.TypeApp, want: scratch},
 		{name: "unknown type defaults to scratch", typ: "", want: scratch},
 		{name: "data", typ: catalog.TypeData, want: targetDir},
-		{name: "definition", typ: catalog.TypeOS, isDef: true, want: targetDir},
+		{name: "definition", typ: catalog.TypeOS, isDef: true, want: scratch},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

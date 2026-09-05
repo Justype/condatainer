@@ -373,6 +373,97 @@ Export the Conda environment in a writable `.img` overlay. See [Export](#export)
 condatainer overlay export env.img > environment.yml
 ```
 
+### Overlay Freeze
+
+Pack a writable `.img` overlay into an immutable `.sqf` artifact. The environment is kept exactly as it is, not rebuilt: packages installed by hand and files deleted from the base are all preserved.
+
+A frozen environment can be pinned, pushed and restored; a writable overlay cannot. It has no recipe behind it, so the `.sqf` is the only copy — back it up, or publish it with [`project push`](#project-push).
+
+**Usage:**
+
+```
+condatainer overlay freeze [OPTIONS] <overlay.img> [artifact.sqf]
+```
+
+**Options:**
+
+* `-d`, `--description TEXT` : Description recorded in the artifact.
+* `--block-size SIZE`        : SquashFS block size (default: `build.block_size`).
+* `--use-tmp`                : Copy the payload to the temp directory and pack from there. Faster; needs payload-sized free space.
+* `--<compression>`          : Any `create` compression flag, e.g. `--zstd-high` (default: `build.compress_args`).
+* `overlay.img`              : The writable overlay to pack.
+* `artifact.sqf`             : Where to write it. A directory puts `<overlay>.sqf` inside it. Omitted, the artifact lands beside the source with the extension changed.
+
+The artifact's type is `environment`; `condatainer info` reads back what it holds. Deletions are carried into the artifact and stay deleted when it is mounted, and freeze reports how many it translated.
+
+**Refused:**
+
+* a target that already exists;
+* a target inside an images directory — a frozen environment is addressed by path, not filed by name;
+* an overlay with nothing written into it;
+* an overlay a writable session is using. A read-only (`chmod a-w`) overlay still freezes.
+
+**Examples:**
+
+```bash
+# Pack env.img into env.sqf beside it
+condatainer overlay freeze env.img
+
+# Into a project's overlay directory, with a description
+condatainer overlay freeze env.img ./overlays/ -d "paper revision 2"
+
+# Pack harder than the build default
+condatainer overlay freeze env.img --zstd-high
+```
+
+To install with `apt` before freezing, give the overlay to root, install under `--fakeroot`, then take it back:
+
+```bash
+condatainer overlay chown env.img --root
+condatainer exec --fakeroot -o env.img -- apt install <package>
+condatainer overlay freeze env.img
+condatainer overlay chown env.img
+```
+
+Freeze itself does not need `--fakeroot`.
+
+### Overlay Unfreeze
+
+Rebuild a writable `.img` overlay from a frozen environment, to keep developing in it. The payload comes back at the paths it had, deletions included.
+
+The result has no identity: it cannot be pinned, locked or published until `overlay freeze` packs it again. The `.sqf` is left as it is, and a project whose lock names it still resolves that artifact.
+
+**Usage:**
+
+```
+condatainer overlay unfreeze [OPTIONS] <frozen.sqf> [overlay.img]
+```
+
+**Options:**
+
+* `-s`, `--size SIZE` : Size of the resulting overlay (e.g. `40g`). Default: the payload plus 5 GB.
+* `-S`, `--sparse`    : Leave the image sparse instead of pre-allocating its blocks.
+* `frozen.sqf`        : The artifact `overlay freeze` produced.
+* `overlay.img`       : Where to write the overlay. A directory puts `<artifact>.img` inside it. Omitted, it lands beside the artifact with the extension changed.
+
+An `<overlay>.img.env` sidecar records which artifact the overlay came from.
+
+**Refused:**
+
+* a target that already exists;
+* a `.sqf` that is not a frozen environment;
+* a `--size` smaller than the payload, before any work is done.
+
+**Examples:**
+
+```bash
+# Rebuild env.img beside the artifact
+condatainer overlay unfreeze env.sqf
+
+# To a separate path, with room to install more
+condatainer overlay unfreeze env.sqf dev.img -s 40G
+```
+
 ## Create
 
 Initialize and build a new **CondaTainer** SquashFS overlay. You can build from existing recipes (local/remote), a Conda environment file, or a remote container source.
@@ -733,6 +824,7 @@ Same as `avail` (single term: substring/wildcard/regex; multiple terms: exact-fi
 
 * Output is grouped by image directory with a full-width header per directory, tagged with its data layer — `(user)`, `(extra-root)`, or `(app-root)`. Directories appear in read order, nearest first. The same overlay may appear under several directories; the nearest copy is the one commands resolve by name, so a personal rebuild wins over a shared one.
 * Lists OS overlays, app overlays, and data overlays.
+* An overlay is listed under the name recorded inside it. If that is not the name its filename spells, the listing says so: the recorded name is what the image is, and the filename is what `exec -o` resolves it by. Rename the file or reinstall to make them agree.
 * Missing directories are skipped; existing but empty directories show a `(no overlays)` line.
 * Exits with code `1` if search terms are given but no overlays match.
 
@@ -1415,7 +1507,7 @@ bcftools --version
 
 ## Info
 
-Display detailed metadata about an installed overlay, the base image, or an external file. Accepts an installed overlay name (`name/version`), the configured base recipe name, or a direct file path (`.sqf` / `.sif` / `.img`).
+Display detailed metadata about an installed overlay, the base image, or an external file. Accepts an installed overlay name (`name/version`), the configured base recipe name, or a direct file path (`.sqf` / `.img`, or a `.sif` from elsewhere).
 
 **Usage:**
 
@@ -1427,18 +1519,19 @@ condatainer info <overlay>
 
 ```bash
 condatainer info samtools/1.22
-condatainer info ubuntu24/base          # the base image (.sif)
+condatainer info ubuntu24/base          # the base image
 condatainer info env.img
 condatainer info ./ubuntu--22.04.sqf
 ```
 
-A `.sif` reads the same way as a `.sqf`: its payload is a SquashFS partition
-starting partway into the file, so the archive reads take that offset. The
-`Type` line is the type from the image's embedded metadata — `app`, `base`,
-`os`, `data`, or `environment` for one produced by `overlay freeze`. An image
-built before that metadata existed reports `unknown`.
+CondaTainer builds every image as a `.sqf`, the base included. A `.sif` from
+elsewhere reads the same way: its payload is a SquashFS partition starting
+partway into the file, so the archive reads take that offset. The `Type` line is
+the type from the image's embedded metadata — `app`, `base`, `os`, `data`, or
+`environment` for one produced by `overlay freeze`. An image built before that
+metadata existed reports `unknown`.
 
-### Image (`.sqf` / `.sif`) output
+### Image output
 
 | Section | Fields |
 |---------|--------|
@@ -1465,9 +1558,9 @@ built before that metadata existed reports `unknown`.
 Export the Conda environment in a writable `.img` overlay, to stdout (or a file
 with `-p`). Runs `micromamba env export` against `/cnt_env`, so it captures the
 environment as it is now — including anything installed since the overlay was
-created. That is why it is limited to `.img`: an installed `.sqf` or `.sif` is
-immutable, carries its own metadata, and is reproduced by rebuilding from its
-recipe rather than by recovering one from the image.
+created. That is why it is limited to `.img`: an installed image is immutable,
+carries its own metadata, and is reproduced by rebuilding from its recipe rather
+than by recovering one from the image.
 
 Exporting an installed image reports what to do instead:
 
@@ -1476,9 +1569,9 @@ export needs a writable .img overlay; …/samtools--1.22.sqf is an installed ima
 Rebuild it from its recipe instead: condatainer info samtools--1.22.sqf shows what it is
 ```
 
-Definition-built images keep their definition regardless: Apptainer records it in
-the rootfs at `/.singularity.d/Singularity`, readable with
-`apptainer inspect --deffile` on a `.sif`.
+Definition-built images keep their definition regardless: it is recorded at
+`/.cnt/recipe`, and Apptainer's own copy travels in the payload at
+`/.singularity.d/Singularity`.
 
 **Usage:**
 
@@ -1745,7 +1838,7 @@ build:
 
 ## Registry
 
-Publish and fetch completed `.sqf` overlays and `.sif` base images through an
+Publish and fetch completed `.sqf` images — overlays and bases alike — through an
 OCI registry. Writable `.img` overlays are never distributable.
 
 ```

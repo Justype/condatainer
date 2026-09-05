@@ -530,15 +530,15 @@ func GetWritableCacheDir() (string, error) {
 
 // GetBaseImageWritePath returns the path where a new base image should be written.
 func GetBaseImageWritePath() (string, error) {
-	sifName := BaseImageSifName()
-	if sifName == "" {
+	fileName := BaseImageFileName()
+	if fileName == "" {
 		return "", fmt.Errorf("no base configured: set `base` in config")
 	}
 	dir, err := GetWritableImagesDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, sifName), nil
+	return filepath.Join(dir, fileName), nil
 }
 
 // =============================================================================
@@ -548,14 +548,10 @@ func GetBaseImageWritePath() (string, error) {
 // FindImage searches all image paths for an image by name.
 // Returns the full path to the image if found.
 func FindImage(name string) (string, error) {
-	baseName := strings.TrimSuffix(strings.TrimSuffix(name, ".sif"), ".sqf")
+	baseName := strings.TrimSuffix(name, ".sqf")
 
 	for _, dir := range GetImageSearchPaths() {
 		candidate := filepath.Join(dir, name)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-		candidate = filepath.Join(dir, baseName+".sif")
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, nil
 		}
@@ -583,12 +579,12 @@ func FindHelperScript(name string) (string, error) {
 // FindBaseImage searches all image paths for the base image.
 // Returns the full path if found, empty string otherwise.
 func FindBaseImage() string {
-	sifName := BaseImageSifName()
-	if sifName == "" {
+	fileName := BaseImageFileName()
+	if fileName == "" {
 		return ""
 	}
 	for _, dir := range GetImageSearchPaths() {
-		if candidate := filepath.Join(dir, sifName); fileExists(candidate) {
+		if candidate := filepath.Join(dir, fileName); fileExists(candidate) {
 			return candidate
 		}
 	}

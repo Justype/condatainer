@@ -283,22 +283,23 @@ func detectApptainerBin() string {
 	return ""
 }
 
-// BaseImageSifName returns the expected .sif filename for the configured base,
-// e.g. "ubuntu24" → "ubuntu24--base.sif". Empty when no base is configured, so
-// callers do not go looking for a file called ".sif".
-func BaseImageSifName() string {
+// BaseImageFileName returns the expected filename for the configured base, e.g.
+// "ubuntu24" → "ubuntu24--base.sqf" — the flat name any artifact of that name
+// gets. Empty when no base is configured, so callers do not go looking for a
+// file called ".sqf".
+func BaseImageFileName() string {
 	name := BaseRecipeName()
 	if name == "" {
 		return ""
 	}
-	return strings.ReplaceAll(name, "/", "--") + ".sif"
+	return strings.ReplaceAll(name, "/", "--") + ".sqf"
 }
 
 // GetBaseImage returns the installed base image, searching every image directory.
 //
 // It only ever returns a file that exists. Somewhere a base could be written is
 // a different question, answered by GetBaseImageWritePath — conflating the two
-// used to hand callers a path to a nonexistent SIF and let Apptainer report it.
+// used to hand callers a path to a nonexistent image and let Apptainer report it.
 func GetBaseImage() (string, error) {
 	if found := FindBaseImage(); found != "" {
 		return found, nil

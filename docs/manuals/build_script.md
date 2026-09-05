@@ -90,9 +90,10 @@ Any data, including genome reference indexes.
 
 > `tmp_dir` paths:
 >
-> - `app` module: fast local scratch — `$CNT_TMPDIR` → scheduler tmp → `$TMPDIR` → `/tmp`
-> - `data` module, `.def` and the base image: the stable condatainer data-dir tmp
-> - External build (`-f`): `app` uses fast scratch; `data` and `.def` build next to the target dir
+> - `app` module, `.def` and the base image: fast local scratch — `$CNT_TMPDIR` → scheduler tmp → `$TMPDIR` → `/tmp`
+> - `data` module: the stable condatainer data-dir tmp
+> - A `.def` is always on the fast root: it needs `--fakeroot`, which NFS, Lustre, GPFS and PanFS do not support
+> - External build (`-f`): `app` and `.def` use fast scratch; `data` builds next to the target dir
 > - `$CNT_TMPDIR` selects the fast root only — it never moves a build off the stable root or off the target dir
 
 | Function | Description |
@@ -573,10 +574,27 @@ You can use `tar_xf_pigz` and `pigz_or_gunzip` functions to speed up decompressi
 
 ## OS
 
-OS scripts are Apptainer definition files (`.def`) for distro-level system tools, built into a `.sif` image. The `.def` suffix is not part of the overlay name — `ubuntu24/build-essential.def` is referred to as `ubuntu24/build-essential`.
+OS scripts are Apptainer definition files (`.def`) for distro-level system tools, built into a `.sqf` image. The `.def` suffix is not part of the overlay name — `ubuntu24/build-essential.def` is referred to as `ubuntu24/build-essential`.
 
 - Use these for tools that are not available as conda packages and need a full distro environment.
 - Prefer an existing upstream container image (via `Bootstrap: docker`) over building from source.
+
+### The base
+
+A definition named `<distro>/base` builds the container root itself, and every
+other build runs inside it. Before packing, CondaTainer checks that the finished
+root can serve those builds and refuses one that cannot:
+
+| Tool | From | |
+| --- | --- | --- |
+| `/bin/bash` | bash | required, **at that exact path** — every script CondaTainer runs inside a base is launched as `/bin/bash`, a recipe included |
+| `mksquashfs` | squashfs-tools | required — every artifact is packed with it |
+| `micromamba` | — | required — every conda environment is built with it |
+| `apptainer` | — | optional — needed only to mount an image inside the container; a base without it warns |
+
+Apart from `/bin/bash`, they must be on the `PATH` the container sets, since
+that is how the scripts running inside it invoke them. Tools CondaTainer runs on the host instead —
+`unsquashfs`, `debugfs`, `e2fsck`, `resize2fs`, `mke2fs` — are not the base's concern.
 
 ### OS Templates
 

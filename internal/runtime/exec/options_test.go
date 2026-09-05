@@ -33,8 +33,8 @@ func TestEnsureDefaultsRequiresAnInstalledBase(t *testing.T) {
 		t.Fatal("execution was configured with no base image")
 	}
 
-	base := filepath.Join(dir, "ubuntu24--base.sif")
-	if err := os.WriteFile(base, []byte("SIF"), 0o644); err != nil {
+	base := filepath.Join(dir, "ubuntu24--base.sqf")
+	if err := os.WriteFile(base, []byte("SQF"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	opts, err := (Options{}).ensureDefaults()
@@ -53,11 +53,11 @@ func TestEnsureDefaultsRequiresAnInstalledBase(t *testing.T) {
 // rather than falling back to the configured base.
 func TestEnsureDefaultsRejectsMissingExplicitBase(t *testing.T) {
 	dir := withImageDir(t)
-	if err := os.WriteFile(filepath.Join(dir, "ubuntu24--base.sif"), []byte("SIF"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "ubuntu24--base.sqf"), []byte("SQF"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	missing := filepath.Join(dir, "nope.sif")
+	missing := filepath.Join(dir, "nope.sqf")
 	_, err := Options{BaseImage: missing}.ensureDefaults()
 	if err == nil {
 		t.Fatal("a base image that does not exist was accepted")

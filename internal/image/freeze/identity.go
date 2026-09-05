@@ -4,34 +4,34 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
+	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
+	"github.com/Justype/condatainer/internal/utils"
 )
 
-// identityMount is where the finished artifact is mounted to be read back.
-const identityMount = "/cnt_ident"
-
-// treeScript walks the mounted artifact and prints one NUL-terminated field per
-// value: type, mode, path and link target for every entry, a sha256 for every
-// regular file, and major:minor for every device — which find cannot print, so
-// stat supplies it.
+// treeScript walks the mounted artifact at mnt and prints one NUL-terminated
+// field per value: type, mode, path and link target for every entry, a sha256
+// for every regular file, and major:minor for every device — which find
+// cannot print, so stat supplies it.
 //
 // NUL rather than newlines because a path may contain one, and the paths come
 // from whatever the user installed. `xargs` batches the hashing into a handful of
 // processes; one sha256sum per file is 190x slower and is the single mistake that
 // makes this look unaffordable *(measured)*.
-const treeScript = `set -o pipefail
-cd ` + identityMount + ` || exit 1
-find . -mindepth 1 -printf 'E\0%y\0%m\0%p\0%l\0'
+func treeScript(mnt string) string {
+	return fmt.Sprintf(`cd %s || exit 1
+find . -mindepth 1 -printf 'E\0%%y\0%%m\0%%p\0%%l\0'
 find . -mindepth 1 -type f -print0 | xargs -0 -r sha256sum -z |
-	while IFS= read -r -d '' line; do printf 'H\0%s\0' "$line"; done
+	while IFS= read -r -d '' line; do printf 'H\0%%s\0' "$line"; done
 find . -mindepth 1 \( -type c -o -type b \) -print0 |
-	xargs -0 -r stat --printf='D\0%n\0%t\0%T\0'
-`
+	xargs -0 -r stat --printf='D\0%%n\0%%t\0%%T\0'
+`, shellQuote(mnt))
+}
 
 // TreeIdentity hashes the payload of a packed artifact into its identity.
 //
@@ -40,26 +40,26 @@ find . -mindepth 1 \( -type c -o -type b \) -print0 |
 // pack that dropped or renamed something is reflected rather than papered over;
 // and reading a .sqf through squashfuse costs a fraction of reading the .img
 // through fuse2fs — 2.4x the cost of a local read against 45x *(measured)*.
-//
-// Apptainer performs the mount for the same reason it performs the pack's:
-// mounting it ourselves fails inside a nested container.
-func TreeIdentity(ctx context.Context, artifact, base, apptainerBin string) (meta.KeyRef, error) {
-	squashfuse, err := findSquashfuse(ctx, apptainerBin)
+func TreeIdentity(ctx context.Context, artifact string) (meta.KeyRef, error) {
+	squashfuse, err := findSquashfuse()
 	if err != nil {
 		return meta.KeyRef{}, err
 	}
-	bin := apptainerBin
-	if bin == "" {
-		bin = "apptainer"
-	}
 
-	cmd := exec.CommandContext(ctx, bin, "exec",
-		"--fusemount", fmt.Sprintf("container:%s %s %s", squashfuse, artifact, identityMount),
-		base, "/bin/bash", "-c", treeScript)
+	scratch := utils.GetTmpDir()
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		return meta.KeyRef{}, fmt.Errorf("stage identity mount: %w", err)
+	}
+	mnt, err := os.MkdirTemp(scratch, "cnt-ident-")
+	if err != nil {
+		return meta.KeyRef{}, fmt.Errorf("stage identity mount: %w", err)
+	}
+	defer os.RemoveAll(mnt)
+
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	err = mountedRun(ctx, squashfuse, []string{artifact}, mnt, treeScript(mnt),
+		execpkg.IO{Stdout: &stdout, Stderr: &stderr})
+	if err != nil {
 		return meta.KeyRef{}, fmt.Errorf("read %s to identify it: %w: %s", artifact, err, stderr.String())
 	}
 

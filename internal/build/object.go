@@ -389,7 +389,7 @@ func (b *BuildObject) createBuildLock() error {
 // lock. Local builds normally already use this path; scheduler jobs move their
 // process-private resolved recipe to the adopted scheduler-job workspace.
 func (b *BuildObject) adoptWorkspace(info BuildLockInfo) error {
-	next := workspaceForOwner(b.spec.Image.Name, b.ws.BaseRoot, b.ws.imageExt, info)
+	next := workspaceForOwner(b.spec.Image.Name, b.ws.BaseRoot, b.ws.imageExt, b.ws.isDef, info)
 	if next.Root == b.ws.Root {
 		return nil
 	}
@@ -410,7 +410,7 @@ func (b *BuildObject) adoptWorkspace(info BuildLockInfo) error {
 }
 
 func (b *BuildObject) removeOwnerWorkspace(info BuildLockInfo) {
-	ws := workspaceForOwner(b.spec.Image.Name, b.ws.BaseRoot, b.ws.imageExt, info)
+	ws := workspaceForOwner(b.spec.Image.Name, b.ws.BaseRoot, b.ws.imageExt, b.ws.isDef, info)
 	os.RemoveAll(ws.Root) //nolint:errcheck
 	utils.RemoveDirIfEmpty(filepath.Dir(ws.Root))
 }
@@ -580,7 +580,7 @@ func (b *BuildObject) retargetWorkspace() {
 	}
 	// Re-derived from the type, not carried over: a guess of app corrected to
 	// data must lose its ext3 image, not just move it to another root.
-	b.ws = workspaceFor(b.spec.Image.Name, root, appExt3ScratchExt(typ))
+	b.ws = workspaceFor(b.spec.Image.Name, root, appExt3ScratchExt(typ), false)
 }
 
 // Cleanup removes the build workspace (materialized recipe, tmp overlay, build dir), plus
@@ -783,7 +783,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 		targetOverlay = filepath.Join(real, filepath.Base(targetOverlay))
 	}
 
-	ws := workspaceFor(normalized, tmpDir, appExt3ScratchExt(typ))
+	ws := workspaceFor(normalized, tmpDir, appExt3ScratchExt(typ), false)
 
 	logging.FromContext(ctx).Debug("creating build object",
 		"input", nameVersion, "nameVersion", normalized,
@@ -837,7 +837,7 @@ func NewCondaObjectWithSource(nameVersion, buildSource, imagesDir string, update
 		targetOverlay = abs
 	}
 
-	ws := workspaceFor(normalized, tmpDir, appExt3ScratchExt(catalog.TypeApp))
+	ws := workspaceFor(normalized, tmpDir, appExt3ScratchExt(catalog.TypeApp), false)
 
 	slog.Default().Debug("creating conda build object",
 		"nameVersion", nameVersion, "buildSource", buildSource,
@@ -937,7 +937,8 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 		nameVersion = target
 	}
 
-	// A definition produces a SIF; a shell build follows the configured mode.
+	// A definition is a container root — base when it is named <>/base, os
+	// otherwise; a shell build follows the declared or derived type.
 	externalTyp := catalog.DeriveType(nameVersion, "", isDef, externalType)
 
 	// The same rules a catalog recipe answers to: only data may depend on
@@ -958,11 +959,13 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 	if absDir, err := filepath.Abs(targetDir); err == nil {
 		targetDir = absDir
 	}
+	// A definition gets no scratch image: apptainer writes its root as a sandbox
+	// directory, which workspaceFor sites from isDef.
 	ext := appExt3ScratchExt(externalTyp)
 	if isDef {
-		ext = ".sif" // apptainer owns the rootfs
+		ext = ""
 	}
-	ws := workspaceFor(nameVersion, targetDir, ext)
+	ws := workspaceFor(nameVersion, targetDir, ext, isDef)
 
 	logging.FromContext(ctx).Debug("creating external build object",
 		"nameVersion", nameVersion, "source", source,
@@ -1043,15 +1046,15 @@ func createConcreteType(ctx context.Context, base *BuildObject, tmpDir string) (
 	return base, nil
 }
 
-// asDefinitionBuild sites the build as a definition — a .sif in the stable
-// writable tmp — and captures the Spec when resolution never opened a recipe.
-// Call it after resolution: it reads the Spec's name.
+// asDefinitionBuild sites the build as a definition — a sandbox directory on
+// fast local scratch — and captures the Spec when resolution never opened a
+// recipe. Call it after resolution: it reads the Spec's name.
 func (b *BuildObject) asDefinitionBuild() {
 	dir := tmpRootForDef()
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
-	b.ws = workspaceFor(b.spec.Image.Name, dir, ".sif")
+	b.ws = workspaceFor(b.spec.Image.Name, dir, "", true)
 	b.buildType = BuildTypeDef
 	if b.spec.Source.BuildType() == "" {
 		// A definition given as a path or a scheme:// URI, so resolution never

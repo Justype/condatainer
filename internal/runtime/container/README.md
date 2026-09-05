@@ -150,6 +150,14 @@ it costs a string comparison, and without it a wrong-architecture image mounts
 cleanly and fails somewhere downstream where the cause is unrecognizable. An
 artifact is portable only where its recipe said `#ARCH:noarch`.
 
+A second comparison rides along for the same reason, and warns rather than
+degrades: inside an image directory the filename *is* the address `-o` resolves,
+so an image whose recorded name is not the one its filename encodes is listed and
+mounted under a name nothing can look it up by. It still contributes normally —
+the prefix and environment come from `runtime.json`, so only the address is
+wrong. The check stops at the image directories: a path handed in directly
+addresses no name, and a `store/` entry is verified by `store.Scan` instead.
+
 An image with no readable runtime document still mounts and contributes nothing —
 no variables, no `PATH` entry, no description. There is no fallback to the
 manifest. `resolveImage` reports that once per invocation: informational when the

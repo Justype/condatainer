@@ -11,6 +11,8 @@ import (
 type BuildOptions struct {
 	Force      bool     // Force overwrite of existing image
 	NoCleanup  bool     // Do not clean up bundle after failed build
+	Sandbox    bool     // Write a sandbox directory instead of a SIF
+	TmpDir     string   // APPTAINER_TMPDIR for this build; "" leaves the environment alone
 	Additional []string // Additional flags to pass to apptainer build
 }
 
@@ -24,6 +26,10 @@ func Build(ctx context.Context, imagePath, defFile string, opts *BuildOptions) e
 	args := []string{"build"}
 
 	args = append(args, "--fakeroot")
+
+	if opts.Sandbox {
+		args = append(args, "--sandbox")
+	}
 
 	// Add optional flags
 	if opts.Force {
@@ -42,5 +48,14 @@ func Build(ctx context.Context, imagePath, defFile string, opts *BuildOptions) e
 
 	logging.FromContext(ctx).Debug("building container", "image", imagePath, "definition", defFile)
 
-	return runApptainerWithOutput(ctx, "build", imagePath, false, os.Stdin, os.Stdout, os.Stderr, nil, args...)
+	// Left unset, APPTAINER_TMPDIR inherits TMPDIR, which on a scheduler is
+	// routinely network scratch. A sandbox assembles beside its destination
+	// rather than here, so this is the smaller scratch, and it must exist.
+	// procEnv is appended to the inherited environment, so a later entry wins.
+	var procEnv []string
+	if opts.TmpDir != "" {
+		procEnv = append(procEnv, "APPTAINER_TMPDIR="+opts.TmpDir)
+	}
+
+	return runApptainerWithOutput(ctx, "build", imagePath, false, os.Stdin, os.Stdout, os.Stderr, procEnv, args...)
 }

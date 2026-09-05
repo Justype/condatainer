@@ -5,20 +5,20 @@
 // Registry is who you talk to; OCI is what you speak. Everything here opens a
 // connection or speaks the wire format, and nothing above it needs to know which.
 //
-// The cargo is a completed immutable artifact — a SquashFS `.sqf` overlay or an
-// Apptainer `.sif` base — published as generic OCI blobs through oras-go, so
-// CondaTainer stays a static binary with no `oras` CLI on a compute node. A
-// writable `.img` has no identity and is never distributed.
+// The cargo is a completed immutable artifact — a SquashFS `.sqf`, whether it is
+// an overlay or a container root — published as generic OCI blobs through
+// oras-go, so CondaTainer stays a static binary with no `oras` CLI on a compute
+// node. A writable `.img` has no identity and is never distributed.
 package registry
 
 // Artifact and blob media types. The artifact type is manifest-level; the blob
-// type is per-layer. Both are checked on pull, because a `.sif` served where a
-// `.sqf` is expected must fail at the transport rather than at mount.
+// type is per-layer. Both are checked on pull, because a base served where an
+// overlay is expected must fail at the transport rather than at mount.
 const (
 	ArtifactTypeOverlay  = "application/vnd.condatainer.overlay.v1"
 	MediaTypeOverlayBlob = "application/vnd.condatainer.overlay.squashfs.v1"
 	ArtifactTypeBase     = "application/vnd.condatainer.base.v1"
-	MediaTypeBaseBlob    = "application/vnd.condatainer.base.sif.v1"
+	MediaTypeBaseBlob    = "application/vnd.condatainer.base.squashfs.v1"
 )
 
 // Standard OCI annotation keys. Registries and generic tooling read these, so a

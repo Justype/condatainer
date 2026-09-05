@@ -407,7 +407,7 @@ func resolveBaseImage(ctx context.Context, explicit string) (string, error) {
 		return build.ResolveBase(ctx)
 	}
 	path := ResolveBaseImage(explicit)
-	if !utils.FileExists(path) {
+	if !utils.FileExists(path) && !utils.IsSandboxDir(path) {
 		return "", fmt.Errorf("base image not found: %s", explicit)
 	}
 	return path, nil
@@ -485,14 +485,16 @@ func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirec
 
 	addDistroAliasChoices(installed, choices, toComplete)
 
-	// Add local .sif files and local .sqf files that are OS overlays - for -b flag
+	// -b takes a container root, which a base and an os both are: an os recipe
+	// bootstraps its own root and merely merges at / as well. A foreign .sif is
+	// still runnable as one and carries no metadata to ask.
 	for _, candidate := range localImageSuggestions(toComplete) {
 		if utils.IsSif(candidate) {
 			choices[candidate] = struct{}{}
 			continue
 		}
 		absPath, err := filepath.Abs(candidate)
-		if err == nil && isOSOverlay(absPath) {
+		if err == nil && isContainerRoot(absPath) {
 			choices[candidate] = struct{}{}
 		}
 	}
@@ -600,7 +602,7 @@ func findLocalFilesWithFilter(toComplete string, maxDepth int, fileFilter func(n
 	return suggestions
 }
 
-// localImageSuggestions returns local .sqf and .sif files (for -b flag)
+// localImageSuggestions returns local image files (for -b flag)
 // Includes directories for navigation and recursively finds files up to 1 level deep
 func localImageSuggestions(toComplete string) []string {
 	return findLocalFilesWithFilter(toComplete, 1, func(name string) bool {
@@ -618,14 +620,14 @@ func localOverlaySuggestions(toComplete string, includeImg bool) []string {
 			return false
 		}
 
-		// Filter .sif and .img based on includeImg parameter
-		if utils.IsSif(name) && includeImg {
-			// Skip .sif files when includeImg is true (for -o flag)
-			return false
-		}
 		if utils.IsImg(name) && !includeImg {
 			// Skip .img files when includeImg is false (for -b flag)
 			return false
+		}
+		if includeImg {
+			if abs, err := filepath.Abs(name); err == nil && isBaseImage(abs) {
+				return false
+			}
 		}
 
 		return true
@@ -659,6 +661,21 @@ func addDistroAliasChoices(installed map[string]string, choices map[string]struc
 func isOSOverlay(overlayPath string) bool {
 	rt, err := meta.ReadRuntime(overlayPath)
 	return err == nil && rt.Type == catalog.TypeOS
+}
+
+// isContainerRoot reports whether an image can be run as a container root. Both
+// a base and an os can: an os bootstraps its own root and merges at / as well.
+func isContainerRoot(imagePath string) bool {
+	rt, err := meta.ReadRuntime(imagePath)
+	return err == nil && (rt.Type == catalog.TypeOS || rt.Type == catalog.TypeBase)
+}
+
+// isBaseImage reports whether an image records type base. An image with no
+// readable metadata is not one, matching isOSOverlay's rule that an unreadable
+// image degrades to app.
+func isBaseImage(imagePath string) bool {
+	rt, err := meta.ReadRuntime(imagePath)
+	return err == nil && rt.Type == catalog.TypeBase
 }
 
 // isAppOverlay checks if an overlay path is considered an "app" overlay

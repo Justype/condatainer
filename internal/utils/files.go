@@ -43,6 +43,18 @@ func IsSif(path string) bool {
 	return ext == ".sif"
 }
 
+// SingularityDir is the metadata directory apptainer writes into a container
+// root. Its presence is what makes an unpacked directory runnable as one.
+const SingularityDir = ".singularity.d"
+
+// IsSandboxDir reports whether path is an unpacked container root: a directory
+// carrying apptainer's own metadata directory. A bare directory is not one —
+// apptainer would take it and fail on a root with no runscript.
+func IsSandboxDir(path string) bool {
+	info, err := os.Stat(filepath.Join(path, SingularityDir))
+	return err == nil && info.IsDir()
+}
+
 // IsOverlay checks if the path is an overlay file (.img, .sqf, .sqsh, .squashfs).
 // This is used for CondaTainer overlay detection.
 func IsOverlay(path string) bool {

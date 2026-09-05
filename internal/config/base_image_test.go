@@ -29,7 +29,7 @@ func withBase(t *testing.T, base string) {
 }
 
 // GetBaseImage answers "which base is installed", not "where might one go".
-// It used to fall back to the write path, handing every caller a .sif that did
+// It used to fall back to the write path, handing every caller a path that did
 // not exist and leaving Apptainer to report it.
 func TestGetBaseImageRequiresAnInstalledFile(t *testing.T) {
 	dir := withImageDir(t)
@@ -41,8 +41,8 @@ func TestGetBaseImageRequiresAnInstalledFile(t *testing.T) {
 		t.Errorf("err = %v, want it to name the base it looked for", err)
 	}
 
-	installed := filepath.Join(dir, "ubuntu24--base.sif")
-	if err := os.WriteFile(installed, []byte("SIF"), 0o644); err != nil {
+	installed := filepath.Join(dir, "ubuntu24--base.sqf")
+	if err := os.WriteFile(installed, []byte("SQF"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	got, err := GetBaseImage()
@@ -78,7 +78,7 @@ func TestBaseWritePathMatchesFindPath(t *testing.T) {
 	if err != nil {
 		t.Skipf("no writable images dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, filepath.Base(write)), []byte("SIF"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, filepath.Base(write)), []byte("SQF"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if found := FindBaseImage(); found == "" {

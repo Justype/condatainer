@@ -2,13 +2,13 @@
 
 ## OverlayFS
 
-Apptainer uses OverlayFS to stack multiple filesystems on top of the base `.sif` image. Each additional layer is passed via `--overlay <path>[:ro|:rw]`.
+Apptainer uses OverlayFS to stack multiple filesystems on top of the base image. Each additional layer is passed via `--overlay <path>[:ro|:rw]`.
 
 OverlayFS has three components:
 
 | Component | Where | Role |
 |-----------|-------|------|
-| `lower` | the `.sif` itself  | Read-only base — never modified |
+| `lower` | the base image itself | Read-only base — never modified |
 | `upper` | directory inside `.img` | Writable layer — all modifications land here (copy-on-write) |
 | `work` | directory inside `.img` | Kernel-internal scratch directory |
 

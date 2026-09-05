@@ -169,8 +169,10 @@ type Workspace struct {
 	TmpDir   string // BuildDir/tmp — scratch, bound as /cnt_tmp
 	MetaDir  string // BuildDir/.cnt — runtime and manifest, staged before packing
 	Source   string // materialized script, definition, or Conda input file
-	Overlay  string // Root/rootfs.img|.sif; "" in directory mode
+	Overlay  string // Root/rootfs.img; "" unless an app build gets a scratch image
+	Sandbox  string // Root/rootfs — the root apptainer builds; "" unless a definition
 	imageExt string // retained so adopting a scheduler lock can re-site the workspace
+	isDef    bool   // same, and it decides the recipe's extension
 }
 
 // UsesImage reports whether the build runs inside a scratch image rather than
@@ -182,6 +184,10 @@ func (w Workspace) UsesImage() bool { return w.Overlay != "" }
 // inside the scratch image — which is exactly "there is no image", since only an
 // app build gets one and an app build fills it. See appExt3ScratchExt.
 func (w Workspace) HostPayload() bool { return !w.UsesImage() }
+
+// UsesSandbox reports whether the build's product is a directory apptainer
+// writes rather than a payload assembled under CntDir. Only a definition is.
+func (w Workspace) UsesSandbox() bool { return w.Sandbox != "" }
 
 // Target is where the finished image lands.
 type Target struct {
@@ -336,12 +342,13 @@ func sourceFileName(name string, isDef bool) string {
 
 // workspaceFor derives the whole path set for a build under root; every
 // constructor goes through it. An empty overlayExt means directory mode: no
-// scratch image, so the payload lands on the host.
-func workspaceFor(name, root, overlayExt string) Workspace {
-	return workspaceForOwner(name, root, overlayExt, producer.LocalInfo())
+// scratch image, so the payload lands on the host. isDef selects the recipe's
+// extension and gives the build a sandbox to write its root into.
+func workspaceFor(name, root, overlayExt string, isDef bool) Workspace {
+	return workspaceForOwner(name, root, overlayExt, isDef, producer.LocalInfo())
 }
 
-func workspaceForOwner(name, root, overlayExt string, owner producer.Info) Workspace {
+func workspaceForOwner(name, root, overlayExt string, isDef bool, owner producer.Info) Workspace {
 	ownerDir := filepath.Join(root, "build_"+strings.ReplaceAll(name, "/", "_"), producer.Tag(owner))
 	buildDir := filepath.Join(ownerDir, "work")
 	ws := Workspace{
@@ -351,11 +358,15 @@ func workspaceForOwner(name, root, overlayExt string, owner producer.Info) Works
 		CntDir:   filepath.Join(buildDir, "cnt"),
 		TmpDir:   filepath.Join(buildDir, "tmp"),
 		MetaDir:  filepath.Join(buildDir, meta.DirName),
-		Source:   filepath.Join(ownerDir, sourceFileName(name, overlayExt == ".sif")),
+		Source:   filepath.Join(ownerDir, sourceFileName(name, isDef)),
 		imageExt: overlayExt,
+		isDef:    isDef,
 	}
 	if overlayExt != "" {
 		ws.Overlay = filepath.Join(ownerDir, "rootfs"+overlayExt)
+	}
+	if isDef {
+		ws.Sandbox = filepath.Join(ownerDir, "rootfs")
 	}
 	return ws
 }

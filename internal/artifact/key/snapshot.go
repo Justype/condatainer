@@ -59,17 +59,8 @@ func SnapshotIdentity(records []TreeRecord) (meta.KeyRef, error) {
 	if len(records) == 0 {
 		return meta.KeyRef{}, errors.New("snapshot identity: no entries to hash")
 	}
-	sorted := make([]TreeRecord, len(records))
-	copy(sorted, records)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
-
-	sum := sha256.New()
-	for _, r := range sorted {
-		if _, err := io.WriteString(sum, r.preimage()); err != nil {
-			return meta.KeyRef{}, err
-		}
-	}
-	return meta.KeyRef{Scheme: string(SnapshotEnvV1), SHA256: hex.EncodeToString(sum.Sum(nil))}, nil
+	sum := sha256.Sum256([]byte(SnapshotPreimage(records)))
+	return meta.KeyRef{Scheme: string(SnapshotEnvV1), SHA256: hex.EncodeToString(sum[:])}, nil
 }
 
 // preimage renders one record. The NUL before the content id is what keeps a
@@ -79,9 +70,10 @@ func (r TreeRecord) preimage() string {
 	return fmt.Sprintf("%c %04o %s\x00%s\n", r.Type, r.Mode&0o7777, r.Path, r.ID)
 }
 
-// SnapshotPreimage renders the records the way SnapshotIdentity hashes them.
-// Exported so a mismatch can be diffed: two artifacts that disagree are read by
-// comparing these, not by staring at two digests.
+// SnapshotPreimage renders the records SnapshotIdentity hashes — the one place
+// the ordering and the framing are decided, so a diff of two of these is exactly
+// what the two digests were taken over. Exported because that is how a mismatch
+// is read: by comparing these, not by staring at two digests.
 func SnapshotPreimage(records []TreeRecord) string {
 	sorted := make([]TreeRecord, len(records))
 	copy(sorted, records)

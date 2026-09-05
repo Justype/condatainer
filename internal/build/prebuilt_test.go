@@ -69,7 +69,7 @@ func TestTryPrebuiltUsesOrderedEndpointAndEquivalence(t *testing.T) {
 		}, nil
 	}
 	pulled := false
-	pullPrebuilt = func(_ context.Context, base, repo string, _ ocispec.Descriptor, _ map[string]string, dest string) error {
+	pullPrebuilt = func(_ context.Context, base, repo string, _ ocispec.Descriptor, _ map[string]string, dest string, _ registry.Kind) error {
 		pulled = base == "origin.invalid/lab" && repo == "demo" && dest == b.tgt.Path
 		return nil
 	}
@@ -95,7 +95,7 @@ func TestTryPrebuiltRejectsEquivalenceMismatch(t *testing.T) {
 			registry.AnnEquivSHA:    "different",
 		}, nil
 	}
-	pullPrebuilt = func(context.Context, string, string, ocispec.Descriptor, map[string]string, string) error {
+	pullPrebuilt = func(context.Context, string, string, ocispec.Descriptor, map[string]string, string, registry.Kind) error {
 		t.Fatal("pull called for mismatched candidate")
 		return nil
 	}

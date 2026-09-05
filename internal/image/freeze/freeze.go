@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -33,11 +34,10 @@ type Options struct {
 	Target string
 	// Description is optional prose for `info`.
 	Description string
-	// Base is the container the pack runs in, and the base whose directories an
-	// opaque translation is resolved against.
+	// Base is the base .sqf an opaque translation resolves its directories
+	// against. Empty skips that translation.
 	Base string
-	// ApptainerBin, CompressArgs, BlockSize and Processors tune the pack.
-	ApptainerBin string
+	// CompressArgs, BlockSize and Processors tune the pack.
 	CompressArgs string
 	BlockSize    string
 	Processors   int
@@ -83,7 +83,7 @@ func Freeze(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %s", ErrEmptyOverlay, opts.Image)
 	}
 
-	tr, err := Translate(ctx, opts.Image, entries, BaseDirLister(opts.Base, opts.ApptainerBin))
+	tr, err := Translate(ctx, opts.Image, entries, BaseDirLister(opts.Base))
 	if err != nil {
 		return Result{}, err
 	}
@@ -128,9 +128,9 @@ func Freeze(ctx context.Context, opts Options) (Result, error) {
 	defer os.RemoveAll(metaDir)
 
 	packOpts := PackOptions{
-		Image: opts.Image, Target: opts.Target, Base: opts.Base,
-		ApptainerBin: opts.ApptainerBin, CompressArgs: opts.CompressArgs,
-		BlockSize: opts.BlockSize, Processors: opts.Processors,
+		Image: opts.Image, Target: opts.Target,
+		CompressArgs: opts.CompressArgs,
+		BlockSize:    opts.BlockSize, Processors: opts.Processors,
 	}
 	packTr := tr
 	if opts.UseTmp {
@@ -151,7 +151,7 @@ func Freeze(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	log.Info("identifying the packed payload", "target", opts.Target)
-	m.Keys.Identity, err = TreeIdentity(ctx, opts.Target, opts.Base, opts.ApptainerBin)
+	m.Keys.Identity, err = TreeIdentity(ctx, opts.Target)
 	if err != nil {
 		os.Remove(opts.Target)
 		return Result{}, err
@@ -271,36 +271,19 @@ func payloadSizeMB(entries []Entry) int {
 // BaseDirLister lists directories inside the base image, all in one pass.
 //
 // "Hide everything the base has here" has no pseudo-file form, so an opaque
-// directory becomes one whiteout per base entry — exact against this base and no
-// other. One launch answers every directory, because fuse-overlayfs marks every
-// directory it creates as opaque.
-func BaseDirLister(base, apptainerBin string) BaseLister {
+// directory becomes one whiteout per base entry — exact against this base and
+// no other. base is a plain .sqf, read directly with unsquashfs — the same
+// tool internal/image/squashfs already uses raw and unwrapped for every other
+// .sqf read in this codebase — rather than mounted or run inside.
+func BaseDirLister(base string) BaseLister {
 	return func(ctx context.Context, dirs []string) (map[string][]string, error) {
 		out := map[string][]string{}
 		if base == "" || len(dirs) == 0 {
 			return out, nil
 		}
-		bin := apptainerBin
-		if bin == "" {
-			bin = "apptainer"
-		}
 
-		// A marker line per directory, so one stream of output can be split back
-		// up. The directories come from an image's own path table, so they cannot
-		// contain a newline, which is the only thing that would break this.
-		var script bytes.Buffer
-		for _, dir := range dirs {
-			fmt.Fprintf(&script, "printf '%%s\\n' '%s%s'\n", baseDirMarker, dir)
-			fmt.Fprintf(&script, "ls -A %s 2>/dev/null\n", shellQuote(dir))
-		}
-
-		// A directory the base does not have is a normal answer — it hides
-		// nothing — but `ls` fails on it, and the last command's status would
-		// otherwise become the script's.
-		script.WriteString("exit 0\n")
-
-		cmd := exec.CommandContext(ctx, bin, "exec", base, "/bin/sh", "-s")
-		cmd.Stdin = &script
+		args := append([]string{"-l", "-d", "", "-no-progress", base}, dirs...)
+		cmd := exec.CommandContext(ctx, "unsquashfs", args...)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -308,17 +291,23 @@ func BaseDirLister(base, apptainerBin string) BaseLister {
 			return nil, fmt.Errorf("list base directories: %w: %s", err, stderr.String())
 		}
 
-		current := ""
+		// unsquashfs -l lists every entry under a requested directory
+		// recursively; grouping each line by its immediate parent recovers "the
+		// direct children of X" for every directory the output mentions at all,
+		// including ones nobody asked for — harmless extra data. A directory the
+		// base does not have produces nothing, the same answer as one that
+		// exists and is empty: neither hides anything.
 		for _, line := range strings.Split(stdout.String(), "\n") {
-			if dir, ok := strings.CutPrefix(line, baseDirMarker); ok {
-				current = dir
-				out[current] = nil
+			if !strings.HasPrefix(line, "/") {
 				continue
 			}
-			if current == "" || strings.TrimSpace(line) == "" {
-				continue
+			parent := path.Dir(line)
+			out[parent] = append(out[parent], path.Base(line))
+		}
+		for _, dir := range dirs {
+			if _, ok := out[dir]; !ok {
+				out[dir] = nil
 			}
-			out[current] = append(out[current], line)
 		}
 		for dir := range out {
 			sort.Strings(out[dir])
@@ -326,13 +315,6 @@ func BaseDirLister(base, apptainerBin string) BaseLister {
 		return out, nil
 	}
 }
-
-// baseDirMarker separates one directory's listing from the next.
-//
-// It contains a slash, which is the one character a filename cannot, so no entry
-// `ls -A` prints can be mistaken for it. A NUL would be the obvious choice and
-// does not work: it cannot survive a shell command line.
-const baseDirMarker = "//cnt-dir:"
 
 // shellQuote renders a path as a single-quoted shell word.
 func shellQuote(s string) string {

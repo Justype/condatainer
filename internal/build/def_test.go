@@ -14,7 +14,11 @@ import (
 func TestSynthesizeDefFromURI(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	t.Run("docker URI maps scheme and image", func(t *testing.T) {
+	// Apptainer stores exactly these bytes at /.singularity.d/Singularity when
+	// it builds the same URI, so an image imported from such a build derives the
+	// same recipe digest. Hashing is over the comment-stripped def, which is why
+	// the headers are absent here and the trailing blank line is not.
+	t.Run("docker URI matches what Apptainer synthesizes", func(t *testing.T) {
 		path, err := synthesizeDefFromURI("docker://ubuntu:22.04", tmpDir)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -23,15 +27,12 @@ func TestSynthesizeDefFromURI(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read def: %v", err)
 		}
-		content := string(data)
-		if !strings.Contains(content, "Bootstrap: docker") {
-			t.Errorf("missing Bootstrap: docker, got:\n%s", content)
+		const want = "bootstrap: docker\nfrom: ubuntu:22.04\n\n"
+		if got := string(catalog.StripComments(data)); got != want {
+			t.Errorf("stripped def = %q, want %q", got, want)
 		}
-		if !strings.Contains(content, "From: ubuntu:22.04") {
-			t.Errorf("missing From: ubuntu:22.04, got:\n%s", content)
-		}
-		if !strings.Contains(content, "docker://ubuntu:22.04") {
-			t.Errorf("header should record the source URI, got:\n%s", content)
+		if !strings.Contains(string(data), "docker://ubuntu:22.04") {
+			t.Errorf("header should record the source URI, got:\n%s", data)
 		}
 	})
 
@@ -42,22 +43,17 @@ func TestSynthesizeDefFromURI(t *testing.T) {
 	})
 }
 
-func TestWriteRecordingDef(t *testing.T) {
-	tmpDir := t.TempDir()
-	cleanPath := filepath.Join(tmpDir, "clean.def")
-	// No trailing newline, to exercise the newline-normalizing branch.
-	if err := os.WriteFile(cleanPath, []byte("Bootstrap: docker\nFrom: alpine:3.19"), 0o644); err != nil {
-		t.Fatalf("write clean def: %v", err)
+// The staged metadata reaches the image by being written into the sandbox, so
+// what the pack sees at <sandbox>/.cnt is what ends up at /.cnt.
+func TestCopyMetaIntoSandbox(t *testing.T) {
+	dir := t.TempDir()
+	metaDir := filepath.Join(dir, "staged")
+	sandbox := filepath.Join(dir, "rootfs")
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-
-	metaDir := filepath.Join(tmpDir, meta.DirName)
-	if err := meta.StageRuntime(metaDir, meta.Runtime{
-		SchemaVersion: meta.SchemaVersion,
-		Name:          "ubuntu24/base",
-		Type:          catalog.TypeBase,
-		Platform:      meta.NativePlatform(),
-	}); err != nil {
-		t.Fatalf("StageRuntime: %v", err)
+	if err := os.MkdirAll(sandbox, 0o755); err != nil {
+		t.Fatal(err)
 	}
 	if err := meta.StageManifest(metaDir, meta.Manifest{
 		SchemaVersion: meta.SchemaVersion,
@@ -69,62 +65,24 @@ func TestWriteRecordingDef(t *testing.T) {
 		t.Fatalf("StageManifest: %v", err)
 	}
 
-	recPath, err := writeRecordingDef(cleanPath, metaDir, tmpDir, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := copyMetaIntoSandbox(metaDir, sandbox); err != nil {
+		t.Fatalf("copyMetaIntoSandbox: %v", err)
 	}
-	data, err := os.ReadFile(recPath)
-	if err != nil {
-		t.Fatalf("read recording def: %v", err)
-	}
-	content := string(data)
-
-	// Original directives preserved.
-	if !strings.Contains(content, "Bootstrap: docker") || !strings.Contains(content, "From: alpine:3.19") {
-		t.Errorf("recording def dropped original directives:\n%s", content)
-	}
-	// Every staged document rides in on an appended %files section — a def build
-	// has no packing step to add them during.
-	if !strings.Contains(content, "%files") {
-		t.Errorf("recording def has no %%files section:\n%s", content)
-	}
-	for src, dst := range map[string]string{meta.FileName: meta.Path, meta.RuntimeFileName: meta.RuntimePath} {
-		want := "    " + filepath.Join(metaDir, src) + " " + dst
-		if !strings.Contains(content, want) {
-			t.Errorf("recording def missing embed line %q:\n%s", want, content)
-		}
-	}
-
-	// The definition is not copied in: Apptainer already writes it to the rootfs
-	// at /.singularity.d/Singularity, which survives extraction to .sqf.
-	if strings.Contains(content, ".cnt-build-script") {
-		t.Errorf("recording def embeds a redundant copy of the definition:\n%s", content)
+	if _, err := os.Stat(filepath.Join(sandbox, meta.DirName, meta.FileName)); err != nil {
+		t.Errorf("manifest did not land in the sandbox: %v", err)
 	}
 }
 
-// A def build with nothing staged still has to produce a usable definition.
-func TestWriteRecordingDefWithoutMetadata(t *testing.T) {
-	tmpDir := t.TempDir()
-	cleanPath := filepath.Join(tmpDir, "clean.def")
-	if err := os.WriteFile(cleanPath, []byte("Bootstrap: docker\nFrom: alpine:3.19\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	recPath, err := writeRecordingDef(cleanPath, "", tmpDir, "")
-	if err != nil {
+// A definition with nothing staged still builds.
+func TestCopyMetaIntoSandboxWithoutMetadata(t *testing.T) {
+	sandbox := t.TempDir()
+	if err := copyMetaIntoSandbox("", sandbox); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	data, err := os.ReadFile(recPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), meta.Path) {
-		t.Errorf("embedded a manifest that was never staged:\n%s", data)
+	if _, err := os.Stat(filepath.Join(sandbox, meta.DirName)); err == nil {
+		t.Error("created a .cnt directory for metadata that was never staged")
 	}
 }
-
-// A URI build has no recipe, so the synthesized def is its only chance to carry
-// metadata: the headers have to survive the same parser a real recipe goes through.
 func TestSynthesizedDefCarriesMetadata(t *testing.T) {
 	tmpDir := t.TempDir()
 	const uri = "docker://ubuntu:22.04"
@@ -152,8 +110,46 @@ func TestSynthesizedDefCarriesMetadata(t *testing.T) {
 		t.Errorf("type = %q, want %q — a bare image is a root layer, not an app", recipe.Type, catalog.TypeOS)
 	}
 
-	// Apptainer still has to be able to build it.
-	if !strings.Contains(string(data), "Bootstrap: docker") || !strings.Contains(string(data), "From: ubuntu:22.04") {
-		t.Errorf("synthesized def lost its directives:\n%s", data)
+	// The directives still have to be readable — Apptainer parses a def header
+	// case-insensitively, and so does parseBootstrap, which resolves the digest.
+	if boot := parseBootstrap(data); boot.Agent != "docker" || boot.From != "ubuntu:22.04" {
+		t.Errorf("parseBootstrap = %+v, want {docker ubuntu:22.04}:\n%s", boot, data)
+	}
+}
+
+// The script's markers are read per line: Apptainer writes its own greetings and
+// warnings onto the same streams, so a marker never arrives alone.
+func TestReadBaseTools(t *testing.T) {
+	noisy := "INFO:    Converting SIF file to temporary sandbox...\n" +
+		"WARNING: group: unknown groupid 10295\n" +
+		"MISSING: mksquashfs micromamba\n"
+	report := readBaseTools(noisy)
+	if got := strings.Join(report.missing, ","); got != "mksquashfs,micromamba" {
+		t.Errorf("missing = %q, want mksquashfs,micromamba", got)
+	}
+	if report.noApptainer {
+		t.Error("apptainer reported absent when the script never said so")
+	}
+
+	report = readBaseTools("NOAPPTAINER\n")
+	if len(report.missing) > 0 {
+		t.Errorf("missing = %v, want none", report.missing)
+	}
+	if !report.noApptainer {
+		t.Error("the optional-tool marker was not read")
+	}
+
+	if report := readBaseTools("WARNING: nothing to say\n"); len(report.missing) > 0 || report.noApptainer {
+		t.Errorf("a complete base was read as incomplete: %+v", report)
+	}
+}
+
+// Every requirement has to reach the script, or the check silently stops
+// covering one.
+func TestBaseToolsScriptNamesEveryTool(t *testing.T) {
+	for _, name := range append(append([]string{}, baseTools...), baseToolPaths...) {
+		if !strings.Contains(baseToolsScript, name) {
+			t.Errorf("the check never asks for %s", name)
+		}
 	}
 }

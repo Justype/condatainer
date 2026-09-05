@@ -1,7 +1,7 @@
 # Distributing Artifacts
 
 An overlay that took four hours to build is worth uploading once. CondaTainer
-publishes finished `.sqf` overlays and `.sif` base images to any OCI registry —
+publishes finished `.sqf` overlays and base images to any OCI registry —
 GHCR, Harbor, Quay, an institutional Artifactory — so the next machine downloads
 instead of rebuilding.
 

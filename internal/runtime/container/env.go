@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/compare"
 	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -34,7 +37,7 @@ type Contribution struct {
 }
 
 // resolveImage reads what one image contributes, plus a diagnostic when it
-// contributes nothing.
+// contributes nothing or contributes under a name its filename disagrees with.
 //
 // runtime.json is the only source for a .sqf or .sif, and the only metadata this
 // path reads: an adjacent .env sidecar is ignored, because an installed image is
@@ -75,7 +78,42 @@ func resolveImage(cleanPath string) (Contribution, *Diagnostic) {
 			c.Notes[env.Key] = strings.ReplaceAll(env.Note, "{prefix}", rt.Prefix)
 		}
 	}
-	return c, nil
+	return c, nameDiagnostic(cleanPath, rt.Name)
+}
+
+// nameDiagnostic warns when an installed image's recorded name is not the one
+// its filename addresses. It contributes normally either way: the prefix and
+// environment come from runtime.json, so the mount is correct and only the
+// address is wrong.
+//
+// The check is confined to the image directories because that is where a
+// filename is an address — a path given directly names nothing to disagree with.
+func nameDiagnostic(cleanPath, recorded string) *Diagnostic {
+	if recorded == "" || !inImageDir(cleanPath) {
+		return nil
+	}
+	base := filepath.Base(cleanPath)
+	addressed := image.DecodeArtifactName(strings.TrimSuffix(base, filepath.Ext(base)))
+	if addressed == recorded {
+		return nil
+	}
+	return &Diagnostic{
+		Level: "warn",
+		Message: fmt.Sprintf("%s records the name %s but is installed as %s; mounted as given. Rename the file or reinstall so the two agree.",
+			utils.StylePath(cleanPath), recorded, addressed),
+	}
+}
+
+// inImageDir reports whether path sits directly in a configured image directory,
+// which is the set ScanOverlays indexes by filename.
+func inImageDir(path string) bool {
+	dir := filepath.Clean(filepath.Dir(path))
+	for _, d := range config.GetImageSearchPaths() {
+		if filepath.Clean(d) == dir {
+			return true
+		}
+	}
+	return false
 }
 
 // degradeDiagnostic turns a failed runtime read into the message the user sees.
@@ -239,11 +277,4 @@ func ResolveOverlayEnv(overlayPath string) (description string, configs, notes m
 		contribution.Notes = map[string]string{}
 	}
 	return contribution.Description, contribution.Configs, contribution.Notes
-}
-
-// ResolveOverlayInfo returns an image's recorded identity for display, and
-// whether it had usable metadata.
-func ResolveOverlayInfo(overlayPath string) (Contribution, bool) {
-	contribution, diag := resolveImage(cleanOverlayPath(overlayPath))
-	return contribution, diag == nil
 }

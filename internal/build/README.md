@@ -259,7 +259,7 @@ already embeds.
 
 A base is keyed like any other definition build. Its `keys` block identifies
 the definition plus the upstream image that definition bootstrapped from — both known before Apptainer runs, which is what
-lets a SIF carry its own keys. What makes a base special is that nothing may
+lets a definition build stage its own keys into the sandbox it packs. What makes a base special is that nothing may
 *depend* on it, not that nothing may identify it.
 
 ## The upstream digest
@@ -268,7 +268,7 @@ lets a SIF carry its own keys. What makes a base special is that nothing may
 `From:` inside `%post` is shell text, not a directive — and `resolveUpstream`
 asks `internal/registry` what that reference points at *now*, before the build.
 The answer does two jobs: it becomes the `from=` field in the identity preimage,
-and `writeRecordingDef` rewrites `From:` to name the digest in the definition handed
+and `writePinnedDef` rewrites `From:` to name the digest in the definition handed
 to Apptainer. Without that pin an upstream retagged mid-build would leave the identity describing bytes the image does not contain. Only the transient copy is
 rewritten; `/.cnt/recipe` keeps the definition byte for byte.
 
@@ -282,6 +282,15 @@ one: without that a `docker://ubuntu:24.04` image would carry no keys, when it i
 exactly the two-line definition it is equivalent to. The generated header carries
 a build date and drops out of the key, since whole-line comments never reach a
 preimage.
+
+**Its directives are byte for byte what Apptainer writes.** Apptainer synthesizes
+the same definition for a bare `scheme://` build and stores it in the root at
+`/.singularity.d/Singularity` — lowercase keys, trailing blank line. Matching it
+means an image built here and a foreign one built from the same URI strip to one
+recipe digest, so they share an equivalence key, and share identity too whenever
+both resolved the same upstream digest. Capitalizing the keys or dropping the
+blank line would split them for no reason a reader could see; every reader of a
+def header is case-insensitive, so nothing else depends on the spelling.
 
 `manifest.source.files` names the stored files from which the selected schemes
 can regenerate their keys. `manifest.keys` stores the selected scheme names and
@@ -318,14 +327,14 @@ The name is derived from the lock owner rather than recorded, which is how
 2. If updating existing overlay: probe exclusive lock — fail immediately if in use
 3. Create build lock
 4. Derive recipe equivalence and try the selected source's ordered pull endpoints
-5. If no acceptable prebuilt exists, build SIF with Apptainer and extract its SquashFS partition
+5. If no acceptable prebuilt exists, build a sandbox with Apptainer, copy the staged metadata into it, and pack it to `.sqf`
 6. Atomic rename prepared → target; remove lock
 
-**Base image (`.sif`):**
-The definition backend with one branch changed: the SIF is the product, so step 4
-keeps it instead of extracting a partition. `IsInstalled` searches every image
-path rather than one target, so a base supplied by a shared install is not
-rebuilt into the user's own directory.
+**Base image:**
+The definition backend unaltered — a base is a `.sqf` produced the same way, and
+packs itself because no other base is available to pack it. `IsInstalled`
+searches every image path rather than one target, so a base supplied by a shared
+install is not rebuilt into the user's own directory.
 
 ## The base image
 
@@ -341,6 +350,26 @@ the base's own build run when no base exists yet.
 An installed base passes `meta.CheckBase`: no runtime document is fine (bases
 predate the format), an unreadable one warns, and one that reads has to say
 `type: base`.
+
+A base build checks its sandbox before packing it, because a base that cannot
+run the builds that will run inside it is worth catching where the definition is
+still in front of the author, not on some later build that fails for a reason
+naming neither. The list is what actually runs *in* the base: `mksquashfs`
+packs and `micromamba` builds conda environments, and `/bin/bash` runs both —
+every `execpkg.Run` from this tool launches that exact path, so it is checked
+as a path and not on PATH. Apptainer is only needed for nested mounting, so it
+warns rather than refuses. Everything else CondaTainer shells out to —
+`unsquashfs`, `debugfs`, `e2fsck`, `resize2fs`, `mke2fs` — runs on the host and
+is not checked here; freeze and unfreeze in particular never enter the base at
+all, mounting through an unprivileged namespace of their own instead (see
+[`internal/image/freeze`](../image/freeze)).
+
+**The question is put to the container, not to the sandbox directory.**
+`command -v` inside it answers with the PATH those tools will actually be found
+on. Testing for files under the sandbox's `bin` directories asks something else
+and gets it wrong in both directions: Apptainer ships its own `mksquashfs` under
+`/usr/libexec`, which exists and is not on PATH, and a base is free to put its
+tools somewhere the list never guessed.
 
 ## BuildGraph Execution
 
@@ -371,24 +400,30 @@ substituted with the recorded `prefix` at load time (see
 ## Workspace Strategy
 
 `workspaceFor` derives every path from `(name, tmp root, scratch extension,
-producer identity)`. Each producer owns one directory:
+is-definition, producer identity)`. Each producer owns one directory:
 
 ```text
 <tmp-root>/build_<name>/<local-host-pid|scheduler-jobid>/
   cnt--<name>.sh|.def
-  rootfs.img|.sif
+  rootfs.img          ext3 scratch, an app build only
+  rootfs/             sandbox, a definition only
   work/
     cnt/
     tmp/
     .cnt/
 ```
 
+**`isDef` is passed, not inferred.** The recipe's extension and the sandbox both
+follow it, and nothing in the workspace's own paths distinguishes a definition:
+every build produces a `.sqf`, so an inference from the output would name a
+definition's recipe `.sh`.
+
 The recipe is materialized in a process-private directory before the target
 lock because resolution and scheduler planning need to read it. Acquiring or
 adopting the lock re-sites that directory to the lock owner's tag. Generated
-definition helpers (`cnt-synth.def`, `cnt-pinned.def`,
-`cnt-metadata.def`) are written inside the same private directory, so builds
-of different targets cannot overwrite each other.
+definition helpers (`cnt-synth.def`, `cnt-pinned.def`) are written inside the
+same private directory, so builds of different targets cannot overwrite each
+other.
 
 The final `.part` remains beside the installed target for atomic rename, but it
 uses the same owner tag. Cleanup removes only the current owner's directory;
@@ -400,15 +435,22 @@ The selected tmp root and the mode are both functions of the type:
 |---|---|---|
 | `app` | `.img` under `build.app_tmp_overlay`, else none | in the image, or host in directory mode |
 | `data` | **never** — see below | always host |
-| `os`, `base` | `.sif`, always | apptainer's rootfs |
+| `os`, `base` | **never** | the sandbox apptainer writes |
 
 The ext3 image is an app-build optimisation: it keeps a conda environment's
 thousands of small files off the host's inode budget. A data payload is a few
 large files staged on the host, so an image would be created, mounted and
-discarded holding nothing; a definition build has apptainer's own rootfs. So
-`appExt3ScratchExt` returns `""` for every type but `app`, whatever the config
-says, and `Workspace.UsesImage()` is the mode everything downstream reads —
-never `config.Global` a second time.
+discarded holding nothing. So `appExt3ScratchExt` returns `""` for every type but
+`app`, whatever the config says, and `Workspace.UsesImage()` is the mode
+everything downstream reads — never `config.Global` a second time.
+
+A definition's sandbox is thousands of small files too, and gets no image
+regardless — it cannot. Creating one needs `dd`, `mke2fs` and `debugfs` on the
+host, and writing into one needs it mounted, which needs a container root. The
+first base build has neither. `Workspace.UsesSandbox()` is that mode, and the
+pack reads it to bind the sandbox a second time and pack *that*: the sandbox is
+its own container root, so its contents sit at `/` beside apptainer's runtime
+binds, and mksquashfs would otherwise descend into the host.
 
 Each build type also uses a different base directory for build artifacts:
 
@@ -417,21 +459,45 @@ Each build type also uses a different base directory for build artifacts:
 | Conda (`name/version`) | fast | `tmpRootForType` |
 | Script, type `app` | fast | `tmpRootForType` |
 | Script, type `data` | stable | `tmpRootForType` |
-| Def (internal), base image | stable | `tmpRootForDef`, applied by `asDefinitionBuild` |
+| Def (internal), base image | fast | `tmpRootForDef`, applied by `asDefinitionBuild` |
 | External `-f`, type `app` | fast | `tmpRootForExternal` |
-| External `-f`, type `data` or `.def` | `filepath.Dir(targetPrefix)` | `tmpRootForExternal` |
+| External `-f`, type `data` | `filepath.Dir(targetPrefix)` | `tmpRootForExternal` |
+| External `-f`, `.def` | fast | `tmpRootForExternal`, via `tmpRootForDef` |
 
 The **fast** root is `utils.GetTmpDir()`: `$CNT_TMPDIR` → scheduler scratch →
 `$TMPDIR` → `/tmp`, always plus `cnt-$USER`. The **stable** root is
 `config.GetWritableTmpDir()`: the first writable `<data-dir>/tmp`, falling back
 to the fast root when no data directory is writable at all.
 
+A definition build takes the fast root because it must. Apptainer builds under
+`--fakeroot`, which NFS, Lustre, GPFS and PanFS do not support, and a data
+directory on an HPC system is routinely one of those. `tmpRootForDef` warns
+through `utils.WarnUnfakerootableScratch` — the build will fail, not merely run
+slowly.
+
+**The constraint lands on the workspace, not on `APPTAINER_TMPDIR`.** Apptainer
+assembles a sandbox next to where it is going — `filepath.Dir(dest)/build-temp-*`,
+renamed into place — and consults `TmpDir` only when the format is *not* sandbox.
+So `ws.Root` is what has to hold the tree and support the ownership changes
+`--fakeroot` performs. Apptainer has a fallback if it cannot: it warns, builds in
+the temporary directory instead, and copies. That path is the degraded one, and
+choosing the workspace root well is what avoids it.
+
+`APPTAINER_TMPDIR` is still set, to `ws.BaseRoot` — the fast root itself, which
+`$CNT_TMPDIR` selects. Left unset it inherits `TMPDIR`, which on a scheduler is
+routinely the network scratch this whole section is avoiding, so one knob has to
+answer for both or the two halves of a build disagree. It is the root
+`ensureWorkspaceRoot` already creates, so nothing is made for Apptainer's sake and
+Apptainer cleans up the children it puts there.
+
 `$CNT_TMPDIR` moves the fast root and nothing else. It used to short-circuit
 `GetWritableTmpDir` as well, which switched off this whole table: exporting it to
 speed up a conda build silently moved the next data build onto node-local scratch
-that the job wipes. An external `data` or `.def` build keeps its intermediates
-beside the target for the same reason — the user picked that location, and a
-multi-GB `.sif` is the artifact least able to survive a scratch quota.
+that the job wipes. An external `data` build keeps its intermediates beside the
+target for the same reason — the user picked that location, and a multi-GB
+payload is the thing least able to survive a scratch quota. An external `.def`
+cannot follow it there: the sandbox has to be somewhere `--fakeroot` works, and
+where the user put the target says nothing about that.
 
 `utils.GetTmpDir()` priority: scheduler-assigned scratch (`SLURM_TMPDIR`, `PBS_TMPDIR`, `LSF_TMPDIR`, `_CONDOR_SCRATCH_DIR`) → `TMPDIR`/`TEMP`/`TMP` → `/tmp/cnt-$USER`.
 

@@ -47,6 +47,26 @@ func credentialFunc() auth.CredentialFunc {
 	}
 }
 
+// HasCredential reports whether any credential is available for the registry
+// named by ref, which may be a bare host or a host/prefix coordinate.
+//
+// It separates the two refusals that arrive as one status: a credential that
+// does not open an artifact is the expired-token case ErrUnauthorized exists to
+// report, while a refusal with nothing in hand is a closed door — an endpoint
+// this user cannot pull from at all, which for a caller is the same outcome as
+// the artifact not being published.
+func HasCredential(ctx context.Context, ref string) bool {
+	host, _, _ := strings.Cut(TrimBaseScheme(ref), "/")
+	if host == "" {
+		return false
+	}
+	cred, err := credentialFunc()(ctx, host)
+	if err != nil {
+		return false
+	}
+	return cred != auth.EmptyCredential
+}
+
 // envCredential builds a credential from the environment for host, reporting
 // false when nothing applies. EnvToken wins for any host; EnvGitHubToken is
 // consulted only for ghcr.io, so a job's GitHub token is never sent elsewhere.

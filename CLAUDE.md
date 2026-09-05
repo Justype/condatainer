@@ -157,7 +157,7 @@ defending a decision beside the code is read as documentation of behavior.
 
 - **Comments — what the code does.** Concise and behavior-first. Give a reason
   only where the behavior would look wrong without it, and then in a clause, not
-  a paragraph. **A function comment over 5 lines is a mistake** unless the
+  a paragraph. **A function comment over 6 lines is a mistake** unless the
   function branches and each branch decides something; the rest belongs in a
   README. Never argue with an objection nobody made at the call site.
 - **`docs/` and CLI help — what a user does and sees.** End-user facing:

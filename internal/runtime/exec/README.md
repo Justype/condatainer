@@ -34,7 +34,7 @@ import "github.com/Justype/condatainer/internal/runtime/exec"
 
 ctx := context.Background()
 opts := exec.Options{
-    BaseImage: "/path/to/base.sif",
+    BaseImage: "/path/to/base.sqf",
     Overlays:  []string{"cellranger/9.0.1"},
     Command:   []string{"cellranger", "--version"},
 }
@@ -81,7 +81,7 @@ exec.Run(ctx, opts)
 4. **Auto-enable fakeroot** - If writable .img overlay
 5. **Debug output** - Print configuration if debug mode
 6. **Print environment** - Show overlay environments (if interactive and not hidden)
-7. **Acquire file locks** - Hold shared locks on all `.sqf` overlays and the base `.sif` for the duration of execution. `.img` overlays are skipped — Apptainer flocks them itself and our lock would conflict. Prevents concurrent `remove` or `build --update` from deleting `.sqf`/`.sif` files in use.
+7. **Acquire file locks** - Hold shared locks on all `.sqf` overlays and the base image for the duration of execution. `.img` overlays are skipped — Apptainer flocks them itself and our lock would conflict. Prevents concurrent `remove` or `build --update` from deleting files in use.
 8. **Inject proxy env** - If an active SOCKS5 proxy is found via `proxy.FindActiveProxy()`, prepend `http_proxy`/`https_proxy`/`all_proxy` (and uppercase variants) to the container environment so tools inside the container use the tunnel.
 9. **Execute** - Call `apptainer.Exec()` with processed configuration
 10. **Release locks** - All file locks released after `apptainer.Exec()` returns

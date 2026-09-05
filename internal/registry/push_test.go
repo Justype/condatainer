@@ -120,7 +120,7 @@ func TestPublishAndPullRoundTrip(t *testing.T) {
 	}
 
 	dest := filepath.Join(t.TempDir(), "grch38-genome--gencode49.sqf")
-	if err := Pull(ctx, f.base(), repo, desc, ann, dest); err != nil {
+	if err := Pull(ctx, f.base(), repo, desc, ann, dest, KindOverlay); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 	if !sameBytes(t, source, dest) {
