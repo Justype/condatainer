@@ -99,7 +99,9 @@ overlays, err := container.ResolveOverlayPaths([]string{
 
 ```go
 // Auto-detect GPUs and generate flags
-gpuFlags := container.DetectGPUFlags()
+gpuFlags := container.DetectGPUFlags(requested)
+// requested=false: skipped when autoload_gpu is disabled
+// requested=true: detected regardless of autoload_gpu (script declared a GPU need)
 // Returns: ["--nv"] for NVIDIA, ["--rocm"] for AMD, [] otherwise
 ```
 
@@ -124,7 +126,7 @@ fakeroot := container.AutoEnableFakeroot(
 5. **Build overlay args** - Add `:ro/:rw` suffixes
 6. **Collect environment** - Resolve `#ENV:` for each overlay (embedded build script, sidecar `.env` overrides)
 7. **Deduplicate binds** - Remove conflicting bind paths
-8. **Detect GPU** - Add `--nv` or `--rocm` if available
+8. **Detect GPU** - Add `--nv` or `--rocm` if available; forced past `autoload_gpu:false` when the caller requested one
 9. **Return result** - Ready-to-use configuration
 
 ## Overlay Ordering
@@ -228,6 +230,13 @@ enumerates every visible GPU through NVML before the container exists, and one
 bad handle aborts the whole thing. `autoload_gpu: false` skips detection
 entirely for that case. `--rocm` has no equivalent helper: it binds libraries
 and devices, so a sick AMD GPU surfaces inside the program instead.
+
+`SetupConfig.GpuRequested` overrides that toggle: a script that declared a GPU
+requirement (`condatainer run`'s resolved `-g`/scheduler GPU allocation, or a
+helper's `#GPU:` header) still gets `--nv`/`--rocm` when the host has the
+device node, regardless of `autoload_gpu`. The toggle only ever suppresses
+detection nobody asked for — it was never meant to silently drop GPU access
+from a workload that explicitly needs one.
 
 ## Error Handling
 

@@ -20,6 +20,9 @@ type Options struct {
 	Fakeroot       bool
 	WritableImg    bool
 	HidePrompt     bool
+	// GpuRequested forces GPU flag detection even when autoload_gpu is disabled,
+	// for a command that explicitly declared a GPU requirement.
+	GpuRequested bool
 
 	BaseImage    string
 	ApptainerBin string

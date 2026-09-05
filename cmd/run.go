@@ -511,6 +511,9 @@ export -f module ml
 	scriptDir := filepath.Dir(contentScript)
 	bindPaths := append([]string{scriptDir}, runBindPaths...)
 
+	rs := effectiveResourceSpec(specs)
+	gpuRequested := rs.Gpu != nil && rs.Gpu.Count > 0
+
 	options := execpkg.Options{
 		Overlays:     overlays,
 		Command:      append([]string{"/bin/bash", "-c", executionScript, contentScript}, scriptArgs...),
@@ -521,6 +524,7 @@ export -f module ml
 		BaseImage:    runBaseImage,
 		ApptainerBin: config.Global.ApptainerBin,
 		HidePrompt:   true,
+		GpuRequested: gpuRequested,
 	}
 
 	if err := execpkg.Run(ctx, options, execpkg.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}); err != nil {

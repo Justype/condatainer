@@ -59,6 +59,7 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 		BindPaths:      options.BindPaths,
 		Fakeroot:       options.Fakeroot,
 		ApptainerFlags: options.ApptainerFlags,
+		GpuRequested:   options.GpuRequested,
 	})
 	if err != nil {
 		return nil, err

@@ -972,6 +972,7 @@ condatainer exec [flags] [command...]
 * `-f`, `--fakeroot`: Run container with fakeroot privileges.
 * `--env [KEY=VALUE]`: Set environment variable inside the container (repeatable).
 * `--bind [HOST:CONTAINER]`: Bind mount path into the container (repeatable).
+* `--gpu`: Force GPU flags (`--nv`/`--rocm`) even if `autoload_gpu` is disabled.
 
 **Features:**
 
@@ -1194,7 +1195,7 @@ These override the script's scheduler directives (`#SBATCH`, `#PBS`, `#BSUB`) fo
 * `-c`, `--cpu INT`: Override CPUs per task (e.g. `4`).
 * `-m`, `--mem STRING`: Override memory per task (e.g. `4G`, `8192M`).
 * `-t`, `--time STRING`: Override walltime (e.g. `4d12h`, `2h30m`, `01:30:00`).
-* `-g`, `--gpu SPEC`: Override GPUs per node. Formats: `N` (any type), `TYPE:N`, or `TYPE` (count=1). E.g. `1`, `a100:2`, `a100`.
+* `-g`, `--gpu SPEC`: Override GPUs per node. Formats: `N` (any type), `TYPE:N`, or `TYPE` (count=1). E.g. `1`, `a100:2`, `a100`. When running (whether submitted or local), a GPU request here also forces `--nv`/`--rocm` on the container even if `autoload_gpu` is disabled.
 
 **Job Flags:**
 

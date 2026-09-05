@@ -39,8 +39,7 @@ func Build(ctx context.Context, imagePath, defFile string, opts *BuildOptions) e
 		args = append(args, "--no-cleanup")
 	}
 
-	// Add user-provided extras.
-	// args = append(args, DetectGPUFlags()...) // Do not detect the gpu when building
+	// Add user-provided extras. GPU is never detected for a build, requested or not.
 	args = append(args, opts.Additional...)
 
 	// Add image path and definition file

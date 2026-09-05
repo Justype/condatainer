@@ -14,19 +14,39 @@ func TestDetectGPUFlagsRespectsAutoload(t *testing.T) {
 	t.Cleanup(func() { config.Global.AutoloadGPU = prev })
 
 	config.Global.AutoloadGPU = false
-	if flags := DetectGPUFlags(); len(flags) != 0 {
-		t.Errorf("DetectGPUFlags() = %v with autoload off, want none", flags)
+	if flags := DetectGPUFlags(false); len(flags) != 0 {
+		t.Errorf("DetectGPUFlags(false) = %v with autoload off, want none", flags)
 	}
 
 	// With it on, the result is whatever this host has — the only invariant is
 	// that it stops suppressing.
 	config.Global.AutoloadGPU = true
-	onFlags := DetectGPUFlags()
+	onFlags := DetectGPUFlags(false)
 	if hasNvidiaGPU() && !contains(onFlags, "--nv") {
-		t.Errorf("DetectGPUFlags() = %v, want --nv on a host with /dev/nvidiactl", onFlags)
+		t.Errorf("DetectGPUFlags(false) = %v, want --nv on a host with /dev/nvidiactl", onFlags)
 	}
 	if !hasNvidiaGPU() && !hasRocmGPU() && len(onFlags) != 0 {
-		t.Errorf("DetectGPUFlags() = %v on a host with no GPU device nodes", onFlags)
+		t.Errorf("DetectGPUFlags(false) = %v on a host with no GPU device nodes", onFlags)
+	}
+}
+
+// A script that declares a GPU requirement must get GPU flags even with
+// autoload_gpu:false, as long as the host actually has the device node —
+// requested only overrides the config toggle, not host detection.
+func TestDetectGPUFlagsRequestedOverridesAutoload(t *testing.T) {
+	prev := config.Global.AutoloadGPU
+	t.Cleanup(func() { config.Global.AutoloadGPU = prev })
+	config.Global.AutoloadGPU = false
+
+	flags := DetectGPUFlags(true)
+	if hasNvidiaGPU() && !contains(flags, "--nv") {
+		t.Errorf("DetectGPUFlags(true) = %v, want --nv on a host with /dev/nvidiactl even with autoload off", flags)
+	}
+	if hasRocmGPU() && !contains(flags, "--rocm") {
+		t.Errorf("DetectGPUFlags(true) = %v, want --rocm on a host with /dev/kfd even with autoload off", flags)
+	}
+	if !hasNvidiaGPU() && !hasRocmGPU() && len(flags) != 0 {
+		t.Errorf("DetectGPUFlags(true) = %v on a host with no GPU device nodes", flags)
 	}
 }
 

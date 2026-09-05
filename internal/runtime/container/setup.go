@@ -34,6 +34,7 @@ type SetupConfig struct {
 	BindPaths      []string // User-specified bind paths
 	Fakeroot       bool     // Whether to use fakeroot
 	ApptainerFlags []string // Additional apptainer flags to pass through
+	GpuRequested   bool     // A script explicitly requires a GPU; forces detection past autoload_gpu:false
 }
 
 // SetupResult contains all the processed configuration ready for container execution
@@ -111,7 +112,7 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 	bindPaths = DeduplicateBindPaths(bindPaths)
 
 	// Detect GPU flags
-	apptainerFlags := append([]string{}, DetectGPUFlags()...)
+	apptainerFlags := append([]string{}, DetectGPUFlags(cfg.GpuRequested)...)
 	apptainerFlags = append(apptainerFlags, cfg.ApptainerFlags...)
 
 	return &SetupResult{

@@ -9,13 +9,9 @@ import (
 )
 
 // DetectGPUFlags inspects the host for GPU support and returns the necessary apptainer flags.
-//
-// Detection is a stat of the device node, so it reports that a driver is
-// installed, not that it works. On a node where the driver is loaded but
-// unusable, the node is still there and the container then fails to start —
-// which is what `autoload_gpu: false` is for.
-func DetectGPUFlags() []string {
-	if !config.Global.AutoloadGPU {
+// requested bypasses a disabled autoload_gpu.
+func DetectGPUFlags(requested bool) []string {
+	if !config.Global.AutoloadGPU && !requested {
 		slog.Default().Debug("GPU autoload disabled, passing no GPU flags")
 		return nil
 	}

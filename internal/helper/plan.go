@@ -194,7 +194,7 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 		return nil, fmt.Errorf("walltime is required for helpers — set #TIME: in the script or pass walltime explicitly")
 	}
 
-	containerCmd, err := buildCondatainerCmd(opts)
+	containerCmd, err := buildCondatainerCmd(opts, spec)
 	if err != nil {
 		return nil, err
 	}

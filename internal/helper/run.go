@@ -154,10 +154,14 @@ func resolveSpec(scriptPath string, overrides *scheduler.ResourceSpec) *schedule
 //
 // Generated form:
 //
-//	/abs/condatainer exec [-b base] [-o overlay…] [-w] \
+//	/abs/condatainer exec [-b base] [-o overlay…] [-w] [--gpu] \
 //	    --bind /abs/condatainer:/usr/local/bin/condatainer \
 //	    [--pwd=/cwd] /abs/helper-script
-func buildCondatainerCmd(opts RunOptions) (string, error) {
+//
+// spec is the resolved ResourceSpec (script #GPU: header merged with any
+// override); a GPU request there forces --gpu on the exec invocation so a
+// helper still gets --nv/--rocm on a node with autoload_gpu disabled.
+func buildCondatainerCmd(opts RunOptions, spec *scheduler.ResourceSpec) (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("could not locate condatainer binary: %w", err)
@@ -183,6 +187,11 @@ func buildCondatainerCmd(opts RunOptions) (string, error) {
 	// Writable conda-env overlay (.img); -w makes .img overlays writable in exec.
 	if opts.EnvImg != "" {
 		parts = append(parts, "-o", shellQuote(opts.EnvImg), "-w")
+	}
+
+	// Script declared a GPU requirement: force detection past autoload_gpu:false.
+	if spec != nil && spec.Gpu != nil && spec.Gpu.Count > 0 {
+		parts = append(parts, "--gpu")
 	}
 
 	// Bind condatainer binary so helpers can call _server_ready/_server_message inside.

@@ -30,6 +30,11 @@ Parsed by `scheduler.ReadScriptSpecs()`. Standard scheduler directives also work
 #GPU:   a100:1     # optional GPU spec (type:count)
 ```
 
+`#GPU:` drives two independent things: it becomes a scheduler resource request
+(`--gpus-per-node=...`) so the job lands on a GPU node, and `buildCondatainerCmd`
+appends `--gpu` to the generated `condatainer exec` line so that node's
+container still gets `--nv`/`--rocm` even if it has `autoload_gpu` disabled.
+
 ### `#DESC:` — short description
 
 Shown in `condatainer helper --list` and the server dashboard.
