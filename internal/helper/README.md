@@ -106,8 +106,34 @@ Presence signals that a writable conda-env overlay is required. Value is the def
 #IMG_PACKAGES:                                     # overlay required, no package check
 ```
 
-- **With overlay (`-e` given)**: if packages are listed, Go runs a pre-submission install check (fatal if packages not found). If the value is empty, the overlay is still required but no check is performed.
-- **Without overlay**: Go prompts to create one (guided overlay creation flow).
+`#IMG_PACKAGES:` is really two requirements: the packages must be installed, and there
+must be a *writable* form to install into if they aren't. `ResolveEnvOverlayInDir`
+resolves `.img` and `.sqf` as two forms of one environment overlay, `.img` first, falling
+back to the read-only `.sqf` when that's all that exists — so the first requirement can
+be satisfied by a bare snapshot, but the second cannot: `PlanRun` still refuses a resolved
+`.sqf` (`!utils.IsImg(opts.EnvImg)`) and names it in the message, and the CLI still runs
+the guided-creation wizard in that case, because there is nowhere to write to yet.
+
+- **With a writable `.img` resolved**: if packages are listed, Go runs a pre-submission
+  install check (fatal if packages not found). If the value is empty, the overlay is
+  still required but no check is performed.
+- **Without one** (nothing found, or only a read-only `.sqf`): Go prompts to create a
+  writable overlay (guided overlay creation flow). This is not wasteful even when a
+  snapshot already exists: `exec.CreateCondaOverlay` looks up the paired snapshot against
+  the *final* destination path and mounts it during the scratch install, so packages the
+  snapshot already provides are not reinstalled — only the incremental diff lands in the
+  new `.img`'s own layer.
+
+The install check itself (`checkPackages` → `container.PairedPackages`) reads the
+overlay's paired snapshot as well as the `.img` itself, unioning both package sets before
+checking — or, when `EnvImg` resolved to a bare `.sqf`, checks that directly. A thin
+`.img` sitting on a frozen snapshot holds only the newest delta in its own `conda-meta` —
+checking the `.img` alone would report everything the snapshot carries as "not installed"
+and fatally block every `#IMG_PACKAGES:` helper against a perfectly good, just-frozen
+environment. `CheckEnv`'s `SizeMB` and `Snapshot` fields (consumed by the dashboard) go
+through `container.PairedSize`, the sibling function for size instead of packages, for
+the same reason: a thin `.img`'s own size says nothing about the environment it actually
+provides.
 
 ### `#POST_INSTALL_CMD:` — post-install hook
 

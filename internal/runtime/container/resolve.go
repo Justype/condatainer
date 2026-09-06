@@ -81,7 +81,7 @@ func ResolveOverlayPaths(inputs []string) ([]string, error) {
 				return nil, fmt.Errorf("failed to normalize overlay path %s: %w", pathToResolve, err)
 			}
 			if !utils.FileExists(absPath) {
-				return nil, fmt.Errorf("overlay file %s not found", absPath)
+				return nil, missingOverlayError(absPath)
 			}
 			resolved = append(resolved, absPath+suffix)
 			continue
@@ -134,6 +134,25 @@ func ResolveOverlayPaths(inputs []string) ([]string, error) {
 	}
 
 	return resolved, nil
+}
+
+// missingOverlayError reports an overlay path that does not exist. Naming a
+// specific .img by path is a request for a writable mount by that exact name —
+// guessing that a read-only .sqf beside it was meant instead would be exactly
+// the silent substitution CLAUDE.md's refusal-over-guessing stance rules out.
+// When the .img would have paired with a snapshot (LookupSnapshot), the
+// message names it and the two ways to proceed, so the fix is obvious instead
+// of requiring the reader to already know overlay snapshots exist.
+func missingOverlayError(absPath string) error {
+	if !utils.IsImg(absPath) {
+		return fmt.Errorf("overlay file %s not found", absPath)
+	}
+	lookup := LookupSnapshot(absPath)
+	if lookup.Path == "" {
+		return fmt.Errorf("overlay file %s not found", absPath)
+	}
+	return fmt.Errorf("overlay file %s not found; a snapshot %s exists here — `overlay create %s` to continue from it, or `exec -o %s` to run against it read-only",
+		absPath, lookup.Path, filepath.Base(absPath), lookup.Path)
 }
 
 func buildOverlayPathFromSpec(normalized string) (string, error) {

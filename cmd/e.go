@@ -10,6 +10,7 @@ import (
 
 	"github.com/Justype/condatainer/cmd/internal/ui"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/helper"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/runtime/container"
@@ -35,8 +36,8 @@ var eCmd = &cobra.Command{
 
 Overlays and flags go before --, commands go after --.
 - Writable by default
-- Auto-loads the first env.img found (unless a .img is provided or -n):
-    env.img → overlay/env.img → src/overlay/env.img
+- Auto-loads env.img from the current directory (unless a .img is provided or -n).
+  If only its frozen snapshot (env.sqf) exists, that is loaded instead, read-only.
 
 Note: Additional Apptainer flags must use --flag=value format (no space)`,
 	Example: `  condatainer e                # Auto-load env.img if present, run bash
@@ -90,7 +91,8 @@ func runE(cmd *cobra.Command, args []string) error {
 		hasImgOverlay := slices.ContainsFunc(overlays, utils.IsImg)
 		if !hasImgOverlay {
 			if pwd, err := os.Getwd(); err == nil {
-				if candidate := utils.FindEnvOverlay("", pwd); candidate != "" {
+				switch candidate := utils.FindEnvOverlay("", pwd); {
+				case candidate != "":
 					// The probe asks for the lock the mount will take, so a
 					// writable session is not told an overlay is free that it
 					// then cannot have.
@@ -104,6 +106,13 @@ func runE(cmd *cobra.Command, args []string) error {
 					default:
 						utils.PrintNote("Autoload environment overlay at %s", utils.StylePath(candidate))
 						overlays = append(overlays, candidate)
+					}
+				default:
+					// No .img: fall back to its read-only snapshot, if any.
+					if snapshot := helper.FindEnvSnapshot(pwd); snapshot != "" {
+						utils.PrintNote("No env.img here; auto-loading its snapshot %s, read-only. `overlay create env.img` for a writable copy.",
+							utils.StylePath(snapshot))
+						overlays = append(overlays, snapshot)
 					}
 				}
 			}

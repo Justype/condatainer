@@ -15,7 +15,6 @@ import (
 
 	"log/slog"
 
-	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/helper"
 	"github.com/Justype/condatainer/internal/image/ext3"
@@ -205,6 +204,12 @@ func (s *srv) handleHelpersSub(w http.ResponseWriter, r *http.Request) {
 
 // handleEnvInfo serves GET /api/env/info?path=... — returns size and explicitly-installed
 // conda specs for an existing .img overlay (read from conda-meta/history).
+//
+// container.PairedSize and container.PairedInfo read a .img paired with an
+// autoloaded snapshot as the merged pair, not in isolation: size is the
+// pair's combined size, and the specs come from both histories read as one
+// continuous log — otherwise a thin .img would show a nearly-empty history
+// for an environment that is actually full.
 func (s *srv) handleEnvInfo(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -215,12 +220,14 @@ func (s *srv) handleEnvInfo(w http.ResponseWriter, r *http.Request) {
 		SizeMB   int64    `json:"size_mb"`
 		Channels []string `json:"channels"`
 		Specs    []string `json:"specs"`
+		Snapshot string   `json:"snapshot,omitempty"`
 	}
 	var resp envInfoResp
-	if info, err := os.Stat(path); err == nil {
-		resp.SizeMB = info.Size() / (1024 * 1024)
-	}
-	if ci := conda.ReadCondaInfo(path, "/cnt_env"); ci != nil {
+	sizeBytes, snapshot := container.PairedSize(path)
+	resp.SizeMB = sizeBytes / (1024 * 1024)
+	resp.Snapshot = snapshot
+
+	if ci := container.PairedInfo(path, "/cnt_env"); ci != nil {
 		resp.Channels = ci.Channels
 		resp.Specs = ci.Specs
 	}
@@ -559,7 +566,7 @@ func (s *srv) handleOverlayCreate(w http.ResponseWriter, r *http.Request) {
 
 	sizeStr := req.Size
 	if sizeStr == "" {
-		sizeStr = "20G"
+		sizeStr = helper.DefaultOverlaySize
 	}
 	sizeMB, err := utils.ParseSizeToMB(sizeStr)
 	if err != nil {

@@ -10,7 +10,6 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/compare"
 	"github.com/Justype/condatainer/internal/artifact/meta"
-	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/image/sif"
@@ -194,11 +193,13 @@ func displayImageInfo(overlayPath string) error {
 
 	sqStats, unsquashfsErr := squashfs.GetSquashFSStatsAt(overlayPath, offset)
 	typ := imageType(overlayPath)
+	description, notes, varLines, diagnostics := readEnvFile(overlayPath)
+	printDiagnostics(diagnostics)
 
 	// File section
 	fmt.Println(utils.StyleTitle("File"))
 	fmt.Printf("  %-14s %s\n", "Name:", utils.StyleName(filepath.Base(overlayPath)))
-	displayDescription(overlayPath)
+	displayDescription(description)
 	fmt.Printf("  %-14s %s\n", "Path:", utils.StylePath(overlayPath))
 	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatSize(fileInfo.Size()))
 	fmt.Printf("  %-14s %s (Read-Only)\n", "Type:", utils.StyleInfo(typeLabel(typ)))
@@ -244,7 +245,7 @@ func displayImageInfo(overlayPath string) error {
 	}
 
 	// Environment variables section
-	displayEnvVars(overlayPath)
+	displayEnvVars(notes, varLines)
 
 	// Identity addresses one exact build; equivalence says what may stand in for
 	// it. Both are what `store` and a project lock resolve by.
@@ -327,11 +328,13 @@ func displayImgInfo(overlayPath string) error {
 	usedInodes := stats.TotalInodes - stats.FreeInodes
 	inodePct := stats.InodeUsage()
 	fileInfo, statErr := os.Stat(overlayPath)
+	description, notes, varLines, diagnostics := readEnvFile(overlayPath)
+	printDiagnostics(diagnostics)
 
 	// File section
 	fmt.Println(utils.StyleTitle("File"))
 	fmt.Printf("  %-14s %s\n", "Name:", utils.StyleName(filepath.Base(overlayPath)))
-	displayDescription(overlayPath)
+	displayDescription(description)
 	fmt.Printf("  %-14s %s\n", "Path:", utils.StylePath(overlayPath))
 	fmt.Printf("  %-14s %s\n", "Size:", utils.FormatSize(stats.FileSizeBytes))
 	// Not a recipe type: an .img is a mutable working overlay, never built from a
@@ -395,16 +398,19 @@ func displayImgInfo(overlayPath string) error {
 	displayCondaEnv(overlayPath, meta.EnvPrefix)
 
 	// Environment variables section
-	displayEnvVars(overlayPath)
+	displayEnvVars(notes, varLines)
 
 	return nil
 }
 
-// readEnvFile resolves an image's description, notes, and var lines from its
-// runtime metadata, with {prefix} resolved to the install prefix. A writable
-// .img reads its .env sidecar instead. Var lines are sorted KEY=VALUE.
-func readEnvFile(overlayPath string) (description string, notes map[string]string, varLines []string) {
-	description, configs, notes := container.ResolveOverlayEnv(overlayPath)
+// readEnvFile resolves an image's description, notes, var lines, and non-fatal
+// diagnostics from its runtime metadata, with {prefix} resolved to the install
+// prefix. A writable .img reads its .env sidecar instead, merged with a paired
+// snapshot's own variables when one is autoloaded. Var lines are sorted
+// KEY=VALUE. Called once per `info` invocation — its caller prints the
+// diagnostics once, rather than once per section that wants a piece of this.
+func readEnvFile(overlayPath string) (description string, notes map[string]string, varLines []string, diagnostics []container.Diagnostic) {
+	description, configs, notes, diagnostics := container.ResolveOverlayEnv(overlayPath)
 	keys := make([]string, 0, len(configs))
 	for k := range configs {
 		keys = append(keys, k)
@@ -413,12 +419,28 @@ func readEnvFile(overlayPath string) (description string, notes map[string]strin
 	for _, k := range keys {
 		varLines = append(varLines, k+"="+configs[k])
 	}
-	return description, notes, varLines
+	return description, notes, varLines, diagnostics
+}
+
+// printDiagnostics prints non-fatal container-setup messages the way
+// cmd/internal/ui.RenderExecPlan does for exec/run.
+func printDiagnostics(diagnostics []container.Diagnostic) {
+	for _, d := range diagnostics {
+		switch d.Level {
+		case "warn", "warning":
+			utils.PrintWarning("%s", d.Message)
+		case "note":
+			utils.PrintNote("%s", d.Message)
+		case "error":
+			utils.PrintError("%s", d.Message)
+		default:
+			utils.PrintMessage("%s", d.Message)
+		}
+	}
 }
 
 // displayDescription prints the Description line in the File section.
-func displayDescription(overlayPath string) {
-	description, _, _ := readEnvFile(overlayPath)
+func displayDescription(description string) {
 	if description != "" {
 		fmt.Printf("  %-14s %s\n", "Description:", description)
 	}
@@ -427,8 +449,13 @@ func displayDescription(overlayPath string) {
 // displayCondaEnv reads conda-meta/history from inside the overlay and prints
 // a "Conda Env" section with the channels and explicitly-installed packages.
 // Silently does nothing if the history file is absent or unreadable.
+//
+// container.PairedInfo reads both histories as one continuous log when
+// overlayPath is a .img paired with an autoloaded snapshot, rather than the
+// .img alone, which would show a nearly-empty history for an environment
+// that is actually full.
 func displayCondaEnv(overlayPath, envPrefix string) {
-	info := conda.ReadCondaInfo(overlayPath, envPrefix)
+	info := container.PairedInfo(overlayPath, envPrefix)
 	if info == nil {
 		return
 	}
@@ -523,8 +550,7 @@ func printWrapped(label, content string, maxLines int) {
 }
 
 // displayEnvVars prints the Environment section (env vars only) from the .env sidecar.
-func displayEnvVars(overlayPath string) {
-	_, notes, varLines := readEnvFile(overlayPath)
+func displayEnvVars(notes map[string]string, varLines []string) {
 	if len(varLines) == 0 {
 		return
 	}

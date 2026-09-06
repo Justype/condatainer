@@ -48,6 +48,29 @@ func ReadCondaInfo(overlayPath, envPrefix string) *CondaInfo {
 	return parseCondaHistory(string(data))
 }
 
+// ReadCondaInfoMerged reads conda-meta/history from a snapshot and the
+// writable .img stacked on top of it, and parses them as one continuous
+// log — snapshotPath first, imgPath's own entries after. This is not an
+// arbitrary merge of two independent histories: the .img's history is
+// genuinely the continuation of the snapshot's, since both are appends to
+// what was, at freeze time, the same file. Returns nil if neither side has a
+// history to read.
+func ReadCondaInfoMerged(snapshotPath, imgPath, envPrefix string) *CondaInfo {
+	histPath := strings.TrimSuffix(envPrefix, "/") + "/conda-meta/history"
+	var combined strings.Builder
+	if data := image.ReadFile(snapshotPath, histPath); data != nil {
+		combined.Write(data)
+		combined.WriteByte('\n')
+	}
+	if data := image.ReadFile(imgPath, histPath); data != nil {
+		combined.Write(data)
+	}
+	if combined.Len() == 0 {
+		return nil
+	}
+	return parseCondaHistory(combined.String())
+}
+
 // parseCondaHistory parses the text of a conda-meta/history file.
 // Channels are extracted from installed package URLs (+https://conda.anaconda.org/<channel>/...).
 // Explicitly-requested specs come from "# update specs:" JSON arrays, deduplicating

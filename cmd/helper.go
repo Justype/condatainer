@@ -585,9 +585,8 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	// Ensure server is running.
 	helper.EnsureServer()
 
-	// When -e is unset, search cwd → overlay/ → src/overlay/ (preferring
-	// env-$USER.img) and use the first overlay found. An explicit -e value is
-	// used literally; -e - opts out.
+	// When -e is unset, look in cwd (preferring env-$USER.img over env.img).
+	// An explicit -e value is used literally; -e - opts out.
 	if !noEnv && !postFlags.envSet && (opts.EnvImg == "" || opts.EnvImg == "env.img") {
 		resolvedCwd := cwd
 		if resolvedCwd == "" {
@@ -617,7 +616,10 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	opts.Params = filled
 
 	// Guided overlay creation for helpers that require a writable conda env.
-	if meta.ImgPackages != "" && opts.EnvImg == "" {
+	// A resolved env.sqf (no .img yet) does not count as writable, so this
+	// still runs the wizard — CreateCondaOverlay itself is snapshot-aware, so
+	// installing here does not duplicate what the snapshot already has.
+	if meta.ImgPackages != "" && !utils.IsImg(opts.EnvImg) {
 		created, err := ui.GuidedOverlayCreate(ctx, opts.ScriptName, meta, opts.Params, versions, opts.CWD)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {

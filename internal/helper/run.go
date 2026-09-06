@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/logging"
@@ -184,9 +183,12 @@ func buildCondatainerCmd(opts RunOptions, spec *scheduler.ResourceSpec) (string,
 		parts = append(parts, "-o", shellQuote(ol))
 	}
 
-	// Writable conda-env overlay (.img); -w makes .img overlays writable in exec.
+	// Env overlay: -w only for a writable .img, not a read-only snapshot .sqf.
 	if opts.EnvImg != "" {
-		parts = append(parts, "-o", shellQuote(opts.EnvImg), "-w")
+		parts = append(parts, "-o", shellQuote(opts.EnvImg))
+		if utils.IsImg(opts.EnvImg) {
+			parts = append(parts, "-w")
+		}
 	}
 
 	// Script declared a GPU requirement: force detection past autoload_gpu:false.
@@ -213,10 +215,26 @@ func buildCondatainerCmd(opts RunOptions, spec *scheduler.ResourceSpec) (string,
 	return strings.Join(parts, " "), nil
 }
 
-// ResolveEnvOverlayInDir resolves the writable overlay path for a helper in a
-// specific directory (delegates to utils.FindEnvOverlay).
+// ResolveEnvOverlayInDir resolves the project's environment overlay in cwd:
+// the writable .img if one exists, else the read-only env-typed .sqf beside
+// where it would go. Never creates anything. Callers check utils.IsImg on
+// the result to tell which form was found.
 func ResolveEnvOverlayInDir(envImg, cwd string) string {
-	return utils.FindEnvOverlay(envImg, cwd)
+	if p := utils.FindEnvOverlay(envImg, cwd); p != "" {
+		return p
+	}
+	if envImg != "" && envImg != "env.img" {
+		return ""
+	}
+	return FindEnvSnapshot(cwd)
+}
+
+// FindEnvSnapshot looks in cwd for an env-typed .sqf: a personal
+// env-$USER.sqf line checked before the shared env.sqf line. Returns "" if
+// neither exists.
+func FindEnvSnapshot(cwd string) string {
+	wd := utils.ResolveWD(cwd)
+	return container.LookupSnapshot(filepath.Join(wd, "env.img")).Path
 }
 
 // checkOverlayIntegrity calls ext3.CheckIntegrity on the given image file.
@@ -302,8 +320,9 @@ func checkAndInstallNamedOverlays(ctx context.Context, names []string) ([]string
 // are first substituted from params.
 //
 // Skipped (returns nil) when ImgPackages is empty or envImg is empty.
-// Uses conda.ListCondaPackages (debugfs) — no container launch required.
-// Supports conda-style version constraints: =, ==, >=, <=, >, <, !=.
+// Uses container.PairedPackages (debugfs on envImg, unsquashfs -l on a
+// paired snapshot) — no container launch required. Supports conda-style
+// version constraints: =, ==, >=, <=, >, <, !=.
 func checkPackages(meta HelperScriptMeta, envImg string, params map[string]string) error {
 	if meta.ImgPackages == "" || envImg == "" {
 		return nil
@@ -315,7 +334,7 @@ func checkPackages(meta HelperScriptMeta, envImg string, params map[string]strin
 		resolved = strings.ReplaceAll(resolved, "{"+k+"}", v)
 	}
 
-	installed, err := conda.ListCondaPackages(envImg)
+	installed, err := container.PairedPackages(envImg)
 	if err != nil {
 		return fmt.Errorf("reading conda packages from %s: %w", envImg, err)
 	}

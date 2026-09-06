@@ -25,7 +25,32 @@ runner.go       Isolate configuration and invoke Micromamba
 config.go       Read and atomically update .condarc channels
 pinned.go       Read and atomically update conda-meta/pinned
 export.go       Canonical explicit.txt and environment.yml for an image to embed
+packages.go     List installed packages, from a writable .img or a read-only .sqf
+image.go        Read conda-meta/history for channels and explicitly-installed specs
 ```
+
+`packages.go` and `image.go` are host-side reads (used by `info`, the dashboard, and
+helper `#IMG_PACKAGES:` checks), unlike the rest of this package's in-container
+contract above. `ListCondaPackages` reads a `.img`'s own `conda-meta` via `debugfs`;
+`ListCondaPackagesSqf` is its read-only counterpart for a `.sqf`, via `unsquashfs -l`.
+`ReadCondaInfo` reads one `conda-meta/history`; `ReadCondaInfoMerged` concatenates a
+snapshot's history with a `.img`'s own and parses them as one continuous log, since a
+`.img`'s history is genuinely the continuation of the snapshot's history it was frozen
+from.
+
+**This package itself never decides whether a pairing applies** — every function above
+takes exactly the path(s) it is given and reads only those. A writable `.img` paired with
+a frozen snapshot (`container.LookupSnapshot`) holds only the newest delta in its own
+`conda-meta` and `conda-meta/history`, so reading it alone would report almost everything
+the snapshot already provides as missing, or a nearly-empty install history — but knowing
+*whether* a given path has a pair requires `container.LookupSnapshot`, which this package
+cannot import (`container` depends on `internal/artifact/key`, which depends on `conda`).
+`container.PairedPackages` and `container.PairedInfo` are where that decision is made:
+they take a bare path, find its pair if one exists, and call the right function(s) here.
+A caller that wants "packages installed at this path" or "history for this path" should
+call those, not `ListCondaPackages`/`ReadCondaInfo` directly — see
+[`internal/runtime/container/README.md`](../runtime/container/README.md), *Environment
+Snapshots*.
 
 ## The two exports
 

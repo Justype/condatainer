@@ -2,9 +2,45 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/artifact/meta"
 )
+
+func requireSquashfsToolsForFreeze(t *testing.T) {
+	t.Helper()
+	for _, bin := range []string{"mksquashfs", "unsquashfs"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not available", bin)
+		}
+	}
+}
+
+// packEnvSnapshot builds a real .sqf at path recording Type: env, the way
+// `overlay freeze` produces one — LookupSnapshot reads this back to decide
+// whether a candidate is a real snapshot rather than an unrelated file.
+func packEnvSnapshot(t *testing.T, path string) {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, meta.DirName)
+	rt := meta.Runtime{
+		SchemaVersion: meta.SchemaVersion,
+		Name:          meta.EnvName,
+		Type:          catalog.TypeEnv,
+		Platform:      meta.NativePlatform(),
+		Prefix:        meta.EnvPrefix,
+	}
+	if err := meta.StageRuntime(dir, rt); err != nil {
+		t.Fatalf("StageRuntime: %v", err)
+	}
+	cmd := exec.Command("mksquashfs", root, path, "-no-progress", "-noappend", "-quiet", "-no-xattrs")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("mksquashfs: %v\n%s", err, output)
+	}
+}
 
 // A frozen environment is always called env, so position is the only question
 // left: where the artifact lands. These are the forms a user can type.
@@ -40,6 +76,54 @@ func TestResolveFreezeTarget(t *testing.T) {
 				t.Errorf("target = %q, want %q", target, tc.wantFile)
 			}
 		})
+	}
+}
+
+// A bare freeze replaces whichever snapshot the .img actually autoloaded
+// against, not a fixed same-basename guess.
+func TestResolveFreezeTargetReplacesAutoloadedSnapshot(t *testing.T) {
+	requireSquashfsToolsForFreeze(t)
+	t.Setenv("USER", "alice")
+	dir := t.TempDir()
+	source := filepath.Join(dir, "env-alice.img")
+
+	// Neither line exists yet: first-ever freeze uses the plain same-basename
+	// rule, which for an already-personal source coincides with the personal
+	// line.
+	got, err := resolveFreezeTarget(source, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := filepath.Join(dir, "env-alice.sqf"); got != want {
+		t.Fatalf("target = %q, want %q", got, want)
+	}
+
+	// A shared line exists (autoloaded, no personal line yet): the bare form
+	// replaces it automatically.
+	shared := filepath.Join(dir, "env.sqf")
+	packEnvSnapshot(t, shared)
+	got, err = resolveFreezeTarget(source, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != shared {
+		t.Fatalf("target = %q, want the shared line %q", got, shared)
+	}
+}
+
+// Something occupying the derived path that isn't a snapshot blocks a bare
+// freeze outright rather than silently replacing it.
+func TestResolveFreezeTargetRefusesNonSnapshotOccupant(t *testing.T) {
+	t.Setenv("USER", "alice")
+	dir := t.TempDir()
+	source := filepath.Join(dir, "env-alice.img")
+	occupied := filepath.Join(dir, "env-alice.sqf")
+	if err := os.WriteFile(occupied, []byte("not a snapshot"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := resolveFreezeTarget(source, ""); err == nil {
+		t.Fatal("a non-snapshot occupant was silently accepted as a bare freeze target")
 	}
 }
 

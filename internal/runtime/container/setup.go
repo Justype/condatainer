@@ -69,13 +69,18 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 		return nil, err
 	}
 
+	// A writable .img looks beside itself for a paired frozen snapshot before
+	// anything else runs, so the snapshot participates in the collision check
+	// and the ordering below like any overlay the caller listed explicitly.
+	overlays, snapshotDiagnostics := autoloadSnapshot(overlays)
+
 	// Refuse a mount where one payload would disappear under another
 	if err := ensureDistinctPrefixes(overlays); err != nil {
 		return nil, err
 	}
 
-	// Put .img overlay last if present
-	overlays = putImgToLast(overlays)
+	// Put .img overlay last, with a paired env snapshot immediately beneath it
+	overlays = orderOverlays(overlays)
 
 	// Process overlays and check availability
 	overlayArgs := make([]string, 0, len(overlays))
@@ -88,7 +93,7 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 			// Only lock .img files as requested
 			if utils.FileExists(ol) && !utils.DirExists(ol) {
 				// If it's the principal image and writableImg is true, we need an exclusive lock.
-				// In putImgToLast, the principal image is always the last one.
+				// In orderOverlays, the principal image is always the last one.
 				isPrincipalImg := (ol == overlays[len(overlays)-1])
 				writeLock := isPrincipalImg && cfg.WritableImg
 
@@ -103,6 +108,7 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 
 	// Build environment variables
 	envList, envNotes, diagnostics := buildEnvironment(overlays, lastImg, cfg)
+	diagnostics = append(snapshotDiagnostics, diagnostics...)
 
 	// Build bind paths
 	bindPaths := BindPaths()
@@ -289,7 +295,12 @@ func ensureSingleImage(overlays []string) error {
 // Two builds of one name are the case this catches: a project's restored copy
 // and a flat install of the same name record the same prefix. A base, an OS
 // image and anything without readable metadata record no prefix and are exempt
-// for free. The same file named twice is redundant, not a collision.
+// for free. The same file named twice is redundant, not a collision. A writable
+// .img is exempt too: it has no identity of its own, ensureSingleImage already
+// guarantees at most one, and it is expected to sit on top of whatever
+// env-typed .sqf is present — env.sqf + env.img is not a collision. Two
+// env-typed .sqfs together still is: that is still two snapshots with no way to
+// tell which one is meant.
 func ensureDistinctPrefixes(overlays []string) error {
 	return distinctPrefixes(overlays, func(path string) string {
 		contribution, _ := resolveImage(path)
@@ -303,6 +314,9 @@ func distinctPrefixes(overlays []string, prefixOf func(string) string) error {
 	claimed := map[string]string{}
 	for _, overlay := range overlays {
 		path := cleanOverlayPath(overlay)
+		if utils.IsImg(path) {
+			continue
+		}
 		prefix := prefixOf(path)
 		if prefix == "" {
 			continue
@@ -315,11 +329,11 @@ func distinctPrefixes(overlays []string, prefixOf func(string) string) error {
 		if held == path {
 			continue
 		}
-		// Only an environment claims EnvPrefix — a frozen one records it, and a
-		// writable .img contributes it — so the collision there is the one the
-		// user already has a word for, and prefixes are not it.
+		// Only an environment claims EnvPrefix — a frozen one records it — so
+		// the collision there is the one the user already has a word for, and
+		// prefixes are not it.
 		if prefix == meta.EnvPrefix {
-			return fmt.Errorf("%s and %s are both environments; mount one environment at a time",
+			return fmt.Errorf("%s and %s are both environment snapshots; mount one at a time",
 				held, path)
 		}
 		return fmt.Errorf("%s and %s both install to %s; one would hide the other",
@@ -328,21 +342,75 @@ func distinctPrefixes(overlays []string, prefixOf func(string) string) error {
 	return nil
 }
 
-// putImgToLast moves any .img overlay to the end of the overlay list
-func putImgToLast(overlays []string) []string {
-	var imgOverlay string
-	var others []string
-
+// autoloadSnapshot appends a writable .img's paired env-typed .sqf
+// (LookupSnapshot) to overlays, unless one is already present in the list or
+// the paired slot is Blocked by something that isn't a snapshot — autoload
+// never guesses, it just leaves the .img to mount alone in that case.
+func autoloadSnapshot(overlays []string) ([]string, []Diagnostic) {
+	var imgPath string
 	for _, overlay := range overlays {
-		if utils.IsImg(overlay) {
-			imgOverlay = overlay
-		} else {
-			others = append(others, overlay)
+		if path := cleanOverlayPath(overlay); utils.IsImg(path) {
+			imgPath = path
+			break
+		}
+	}
+	if imgPath == "" {
+		return overlays, nil
+	}
+
+	lookup := LookupSnapshot(imgPath)
+	if lookup.Path == "" {
+		return overlays, nil
+	}
+	for _, overlay := range overlays {
+		if cleanOverlayPath(overlay) == lookup.Path {
+			return overlays, nil // already given explicitly
 		}
 	}
 
-	if imgOverlay != "" {
-		return append(others, imgOverlay)
+	// lookup.Path is always in the same directory as imgPath (LookupSnapshot's
+	// own invariant), so only its filename is shown — the full path would just
+	// repeat imgPath's directory back. imgPath stays full: unlike a filename,
+	// callers here (CLI, dashboard, job logs) have no shared notion of "cwd"
+	// to shorten it against.
+	diagnostic := Diagnostic{
+		Level: "note",
+		Message: fmt.Sprintf("autoloaded snapshot %s beside %s",
+			utils.StylePath(filepath.Base(lookup.Path)), utils.StylePath(imgPath)),
 	}
-	return overlays
+	return append(overlays, lookup.Path), []Diagnostic{diagnostic}
+}
+
+// orderOverlays puts a writable .img last and, immediately beneath it, the one
+// env-typed .sqf present (autoloaded or explicit) — the newest delta on top of
+// the snapshot it continues from. Every other overlay's relative order is
+// untouched; this is one positioning rule for one specific artifact, not a
+// general reordering of os/app/data.
+func orderOverlays(overlays []string) []string {
+	var img string
+	var rest []string
+	for _, overlay := range overlays {
+		if utils.IsImg(cleanOverlayPath(overlay)) {
+			img = overlay
+		} else {
+			rest = append(rest, overlay)
+		}
+	}
+	if img == "" {
+		return rest
+	}
+
+	var envSqf string
+	var others []string
+	for _, overlay := range rest {
+		if envSqf == "" && isEnvSnapshotSqf(cleanOverlayPath(overlay)) {
+			envSqf = overlay
+			continue
+		}
+		others = append(others, overlay)
+	}
+	if envSqf != "" {
+		others = append(others, envSqf)
+	}
+	return append(others, img)
 }

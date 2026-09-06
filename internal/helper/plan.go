@@ -180,7 +180,13 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 		opts.Overlays = append(append([]string(nil), namedOverlays...), opts.Overlays...)
 	}
 
-	if meta.ImgRequired && opts.EnvImg == "" {
+	// #IMG_PACKAGES: needs a writable form, not just installed packages — a
+	// resolved env.sqf alone (ResolveEnvOverlayInDir's read-only fallback)
+	// does not satisfy it.
+	if meta.ImgRequired && !utils.IsImg(opts.EnvImg) {
+		if utils.IsSqf(opts.EnvImg) {
+			return nil, fmt.Errorf("helper requires a writable overlay; %s is a read-only snapshot — run `overlay create` to continue from it, or pass --env explicitly", opts.EnvImg)
+		}
 		return nil, fmt.Errorf("helper requires a writable overlay (#IMG_PACKAGES set) — create one and pass --env or set EnvImg")
 	}
 

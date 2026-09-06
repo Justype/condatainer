@@ -72,35 +72,36 @@ func IsCondaFile(path string) bool {
 
 // --- Filesystem Checks (OS-based) ---
 
-// FindEnvOverlay returns the first env.img found under wd using the standard
-// search order. At each location the user-specific variant (env-$USER.img) is
-// checked before the generic one:
+// ResolveWD returns wd, or the process cwd when wd is "". The one place every
+// env-overlay lookup resolves its working directory — FindEnvOverlay for a
+// `.img`, helper.FindEnvSnapshot for a paired `.sqf` with no `.img` yet — so
+// the two can never disagree about where "here" is.
+func ResolveWD(wd string) string {
+	if wd == "" {
+		wd, _ = os.Getwd()
+	}
+	return wd
+}
+
+// FindEnvOverlay returns the env.img in wd (see ResolveWD), checking the
+// user-specific variant (env-$USER.img) before the generic one:
 //
 //	{wd}/env-$USER.img → {wd}/env.img
-//	{wd}/overlay/env-$USER.img → {wd}/overlay/env.img
-//	{wd}/src/overlay/env-$USER.img → {wd}/src/overlay/env.img
 //
-// envImg may be an explicit path (returned as-is) or "" / "env.img" (triggers search).
-// Returns "" if nothing is found.
+// envImg may be an explicit path (returned as-is) or "" / "env.img" (triggers
+// the check). Returns "" if nothing is found.
 func FindEnvOverlay(envImg, wd string) string {
 	if envImg != "" && envImg != "env.img" {
 		return envImg
 	}
-	base := wd
-	if base == "" {
-		base, _ = os.Getwd()
-	}
-	userSuffix := os.Getenv("USER")
-	dirs := []string{base, filepath.Join(base, "overlay"), filepath.Join(base, "src", "overlay")}
-	for _, dir := range dirs {
-		if userSuffix != "" {
-			if p := filepath.Join(dir, "env-"+userSuffix+".img"); FileExists(p) {
-				return p
-			}
-		}
-		if p := filepath.Join(dir, "env.img"); FileExists(p) {
+	wd = ResolveWD(wd)
+	if userSuffix := os.Getenv("USER"); userSuffix != "" {
+		if p := filepath.Join(wd, "env-"+userSuffix+".img"); FileExists(p) {
 			return p
 		}
+	}
+	if p := filepath.Join(wd, "env.img"); FileExists(p) {
+		return p
 	}
 	return ""
 }

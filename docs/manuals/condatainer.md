@@ -375,9 +375,13 @@ condatainer overlay export env.img > environment.yml
 
 ### Overlay Freeze
 
-Pack a writable `.img` overlay into an immutable `.sqf` artifact. The environment is kept exactly as it is, not rebuilt: packages installed by hand and files deleted from the base are all preserved.
+Pack a writable `.img` overlay into an immutable `.sqf` artifact — a snapshot. The environment is kept exactly as it is, not rebuilt: packages installed by hand and files deleted from the base are all preserved.
 
 A frozen environment can be pinned, pushed and restored; a writable overlay cannot. It has no recipe behind it, so the `.sqf` is the only copy — back it up, or publish it with [`project push`](#project-push).
+
+Loading a writable `.img` looks beside it for a matching frozen snapshot and mounts it automatically underneath — a personal `<name>-<user>.sqf` line is checked before a shared `<name>.sqf` line, and whichever is found becomes the read-only base the `.img` builds on.
+
+With no destination, `overlay freeze` is the routine snapshot loop: the target is whichever of those two lines the `.img` was actually loaded against, and freezing replaces it — the source `.img` is then removed, so the next `overlay create` of the same name starts fresh and thin, autoloading the new snapshot again. `--keep`, or giving an explicit destination, keeps the `.img` instead — that's for a deliberate artifact meant to be found and used elsewhere, not the routine loop.
 
 **Usage:**
 
@@ -390,26 +394,31 @@ condatainer overlay freeze [OPTIONS] <overlay.img> [artifact.sqf]
 * `-d`, `--description TEXT` : Description recorded in the artifact.
 * `--block-size SIZE`        : SquashFS block size (default: `build.block_size`).
 * `--use-tmp`                : Copy the payload to the temp directory and pack from there. Faster; needs payload-sized free space.
+* `--keep`                   : Keep the source `.img` after a bare freeze (default: remove it).
 * `--<compression>`          : Any `create` compression flag, e.g. `--zstd-high` (default: `build.compress_args`).
 * `overlay.img`              : The writable overlay to pack.
-* `artifact.sqf`             : Where to write it. A directory puts `<overlay>.sqf` inside it. Omitted, the artifact lands beside the source with the extension changed.
+* `artifact.sqf`             : Where to write it. A directory puts `<overlay>.sqf` inside it. Omitted, the target is resolved as described above.
 
 The artifact's type is `environment`; `condatainer info` reads back what it holds. Deletions are carried into the artifact and stay deleted when it is mounted, and freeze reports how many it translated.
 
 **Refused:**
 
-* a target that already exists;
+* an explicit destination that already exists (a bare freeze may replace its resolved target instead — see above);
+* a bare freeze whose resolved target is occupied by something that isn't a snapshot — move it aside or give an explicit destination;
 * a target inside an images directory — a frozen environment is addressed by path, not filed by name;
 * an overlay with nothing written into it;
-* an overlay a writable session is using. A read-only (`chmod a-w`) overlay still freezes.
+* an overlay a writable session is using, or a target another session is actively reading. A read-only (`chmod a-w`) overlay, or a `.sqf` protected the same way, still freezes and is never replaced.
 
 **Examples:**
 
 ```bash
-# Pack env.img into env.sqf beside it
+# Pack env.img into env.sqf beside it, then remove env.img
 condatainer overlay freeze env.img
 
-# Into a project's overlay directory, with a description
+# Same pack, but keep env.img
+condatainer overlay freeze env.img --keep
+
+# Into a project's overlay directory, with a description (source kept)
 condatainer overlay freeze env.img ./overlays/ -d "paper revision 2"
 
 # Pack harder than the build default
@@ -1061,8 +1070,8 @@ condatainer e [flags] [overlays...] [--] [command...]
 * Commands go after `--`.
 * Writable by default (use `-r` for read-only).
 * Auto-loads `env.img` unless `-n` is specified.
-  * search path `./` > `./overlay/` > `./src/overlay/`
-  * `env-$USER.img` > `env.img`
+  * looks in the current directory only; `env-$USER.img` takes priority over `env.img`
+  * if neither `.img` exists but its frozen snapshot does (`env-$USER.sqf` or `env.sqf`), that is loaded instead, read-only
 * Defaults to bash if no command specified.
 
 **Environment Variables (inside container):**
@@ -1552,7 +1561,13 @@ metadata existed reports `unknown`.
 | **Disk Usage** | Used / Total (%), Reserved blocks, Free |
 | **Inode Usage** | Used / Total (%), Free |
 | **Payload** | `Prefix` — always `/cnt_env` for a writable overlay |
+| **Conda Env** | Channels and explicitly-installed packages, from `conda-meta/history` |
 | **Environment** | Variables from the `.env` sidecar file (`KEY=value ## note`) |
+
+When the `.img` autoloads a paired snapshot (a personal `<name>-<user>.sqf` line, else a shared
+`<name>.sqf` line — see [Overlay Freeze](#overlay-freeze)), both the **Conda Env** and **Environment**
+sections show the merged view — the snapshot's own channels, packages, and variables, with the `.img`'s
+own edits on top — not the thin `.img` alone.
 
 ## Export
 

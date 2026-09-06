@@ -5,18 +5,32 @@ import (
 	"os"
 
 	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
+// DefaultOverlaySize is the size offered for a new writable conda overlay
+// when nothing else is specified — the CLI's guided-creation prompt default,
+// the dashboard's create-form default, and the size used for the no-prompt
+// overlay created on top of a found snapshot (the third overlay state) all
+// read this one value rather than each hardcoding "20G" separately.
+const DefaultOverlaySize = "20G"
+
 // EnvStatus describes the state of an env overlay path for UI display.
 // Returned by CheckEnv. Both CLI and server consume this directly.
+//
+// SizeMB and Snapshot describe the pair, not the .img alone: a thin .img on
+// top of a multi-gigabyte snapshot would otherwise report a misleadingly
+// small size, and there would be no way to tell which snapshot it continues
+// from at all.
 type EnvStatus struct {
 	Path     string `json:"path"`
 	Exists   bool   `json:"exists"`
 	InUse    bool   `json:"in_use"`
 	Writable bool   `json:"writable"`
 	SizeMB   int64  `json:"size_mb,omitempty"`
+	Snapshot string `json:"snapshot,omitempty"`
 }
 
 // ResolveEnv returns the env overlay path that the folder-based convention
@@ -31,25 +45,31 @@ func ResolveEnv(cwd string) string {
 // unresolved path without a special case. The lock probe uses the same kind
 // (exclusive vs. shared) that an actual mount would request: exclusive for
 // writable .img, shared for read-only .sqf.
+//
+// SizeMB and Snapshot come from container.PairedSize, which is looked up
+// whether or not path exists on disk — this is what lets a caller tell the
+// third overlay state apart from "nothing here at all": no .img, but a
+// fully-populated snapshot right beside where one would go.
 func CheckEnv(ctx context.Context, path string) (EnvStatus, error) {
 	if path == "" {
 		return EnvStatus{}, nil
 	}
 	st := EnvStatus{Path: path}
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return st, nil
+	isImg := utils.IsImg(path)
+
+	if _, err := os.Stat(path); err == nil {
+		st.Exists = true
+		st.Writable = isImg
+		if err := image.CheckAvailable(path, st.Writable); err != nil {
+			st.InUse = true
 		}
+	} else if !os.IsNotExist(err) {
 		return st, err
 	}
-	st.Exists = true
-	st.SizeMB = info.Size() / (1024 * 1024)
-	st.Writable = utils.IsImg(path)
 
-	if err := image.CheckAvailable(path, st.Writable); err != nil {
-		st.InUse = true
-	}
+	sizeBytes, snapshot := container.PairedSize(path)
+	st.SizeMB = sizeBytes / (1024 * 1024)
+	st.Snapshot = snapshot
 	return st, nil
 }
 

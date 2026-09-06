@@ -225,11 +225,7 @@ These apply in all modes (HPC and headless).
 | `-w, --cwd <path>` | Set working directory (e.g. `-w .` for current directory) |
 | `--new` | Skip reuse prompt, force new session |
 
-When `-e` is unset, the helper searches these directories in order and uses the first overlay found, preferring a per-user `env-$USER.img` over a shared `env.img` in each:
-
-1. current directory
-2. `overlay/`
-3. `src/overlay/`
+When `-e` is unset, the helper looks in the current directory, preferring a per-user `env-$USER.img` over a shared `env.img`. If neither `.img` exists but its frozen snapshot (`env-$USER.sqf` or `env.sqf`) does, that is used instead, read-only — a helper declaring `#IMG_PACKAGES:` still needs an actual writable `.img` and runs guided overlay creation in that case.
 
 Use `-e -` or `-e ''` to disable auto search.
 

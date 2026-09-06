@@ -40,13 +40,20 @@ func CreateCondaOverlay(ctx context.Context, opts *ext3.CreateOptions, pkgs []st
 		utils.RemoveDirIfEmpty(tmpPath)
 	}
 
-	if err := InitCondaEnv(ctx, tmpPath, pkgs, fakeroot, io); err != nil {
+	// tmpPath is a scratch path, disconnected from opts.Path — container.Setup's
+	// own autoload looks beside the .img it's given, so it can never find a
+	// snapshot that lives beside the *final* destination instead. Looked up
+	// here and passed through explicitly, so install sees it and writes only
+	// the incremental diff rather than reinstalling what the snapshot already has.
+	snapshot := container.LookupSnapshot(opts.Path).Path
+
+	if err := InitCondaEnv(ctx, tmpPath, snapshot, pkgs, fakeroot, io); err != nil {
 		cleanup()
 		return err
 	}
 
 	if postInstallCmd != "" {
-		if err := RunPostInstall(ctx, tmpPath, postInstallCmd, fakeroot, io); err != nil {
+		if err := RunPostInstall(ctx, tmpPath, snapshot, postInstallCmd, fakeroot, io); err != nil {
 			cleanup()
 			return fmt.Errorf("post-install failed: %w", err)
 		}
@@ -68,13 +75,18 @@ func CreateCondaOverlay(ctx context.Context, opts *ext3.CreateOptions, pkgs []st
 // then cleans the micromamba package cache to reduce overlay size.
 // Use for initial environment creation on a fresh image.
 // For adding packages to an existing environment, use InstallPackages.
-func InitCondaEnv(ctx context.Context, imgPath string, pkgs []string, fakeroot bool, io IO) error {
+//
+// snapshot, if non-empty, is mounted read-only beneath imgPath — pass the
+// result of container.LookupSnapshot when imgPath is a scratch path that
+// won't autoload one on its own (see CreateCondaOverlay); "" elsewhere.
+func InitCondaEnv(ctx context.Context, imgPath, snapshot string, pkgs []string, fakeroot bool, io IO) error {
 	if len(pkgs) == 0 {
 		return nil
 	}
+	overlays := condaScratchOverlays(imgPath, snapshot)
 	cmd := append([]string{container.BoundExecPath, "env", "install", "-y"}, pkgs...)
 	if err := Run(ctx, Options{
-		Overlays:    []string{imgPath},
+		Overlays:    overlays,
 		WritableImg: true,
 		Fakeroot:    fakeroot,
 		Command:     cmd,
@@ -84,13 +96,22 @@ func InitCondaEnv(ctx context.Context, imgPath string, pkgs []string, fakeroot b
 	}
 	// Non-fatal cache clean to reduce overlay size.
 	_ = Run(ctx, Options{
-		Overlays:    []string{imgPath},
+		Overlays:    overlays,
 		WritableImg: true,
 		Fakeroot:    fakeroot,
 		Command:     []string{container.BoundExecPath, "env", "clean", "-a", "-y", "-q"},
 		HidePrompt:  true,
 	}, IO{})
 	return nil
+}
+
+// condaScratchOverlays is the overlay list for a conda operation on imgPath,
+// with snapshot appended when given.
+func condaScratchOverlays(imgPath, snapshot string) []string {
+	if snapshot == "" {
+		return []string{imgPath}
+	}
+	return []string{imgPath, snapshot}
 }
 
 // InstallPackages installs additional conda packages into an existing base
@@ -116,10 +137,11 @@ func RemovePackages(ctx context.Context, imgPath string, pkgs []string, fakeroot
 	}, io)
 }
 
-// RunPostInstall runs an arbitrary command inside imgPath after package installation.
-func RunPostInstall(ctx context.Context, imgPath, postCmd string, fakeroot bool, io IO) error {
+// RunPostInstall runs an arbitrary command inside imgPath after package
+// installation. snapshot is as in InitCondaEnv.
+func RunPostInstall(ctx context.Context, imgPath, snapshot, postCmd string, fakeroot bool, io IO) error {
 	return Run(ctx, Options{
-		Overlays:    []string{imgPath},
+		Overlays:    condaScratchOverlays(imgPath, snapshot),
 		WritableImg: true,
 		Fakeroot:    fakeroot,
 		Command:     []string{"bash", "-c", postCmd},

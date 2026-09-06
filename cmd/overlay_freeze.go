@@ -10,6 +10,8 @@ import (
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/freeze"
+	"github.com/Justype/condatainer/internal/image/producer"
+	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -18,22 +20,30 @@ var (
 	freezeDescription string
 	freezeBlockSize   string
 	freezeUseTmp      bool
+	freezeKeep        bool
 	freezeCompFlags   map[string]*bool
 )
 
-const overlayFreezeHelp = `Pack a writable overlay into an immutable .sqf artifact.
+const overlayFreezeHelp = `Pack a writable overlay into an immutable .sqf artifact — a snapshot.
 
   - The environment is kept exactly as it is, not rebuilt.
   - It has no recipe behind it, so the .sqf is the only copy: back it up, or push it.
-  - 'overlay unfreeze' turns one back into a writable .img.`
+  - 'overlay unfreeze' turns one back into a writable .img.
+
+With no destination, this is the routine snapshot loop: the .img is replaced
+by the snapshot it continues from (autoloaded or not), then removed — the next
+'overlay create' of the same name starts fresh, thin, and autoloads the new
+snapshot again. --keep, or an explicit destination, keeps the .img instead:
+that's for a deliberate artifact meant to be found and used elsewhere.`
 
 var overlayFreezeCmd = &cobra.Command{
 	Use:   "freeze <overlay.img> [artifact.sqf]",
 	Short: "Pack a writable overlay into an immutable artifact",
 	Long:  overlayFreezeHelp,
 	Args:  cobra.RangeArgs(1, 2),
-	Example: `  condatainer overlay freeze env.img                     # → env.sqf beside it
-  condatainer overlay freeze env.img ./overlays/env.sqf  # → that path
+	Example: `  condatainer overlay freeze env.img                     # → env.sqf beside it, env.img removed
+  condatainer overlay freeze env.img --keep              # → env.sqf beside it, env.img kept
+  condatainer overlay freeze env.img ./overlays/env.sqf  # → that path, env.img kept
   condatainer overlay freeze env.img --zstd-high         # → pack harder than the default`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := cmd.Context()
@@ -58,7 +68,8 @@ var overlayFreezeCmd = &cobra.Command{
 		// check that released would only prove the overlay was idle when the
 		// command started. Shared is the whole requirement — it conflicts with
 		// the exclusive lock a writer takes — and it opens read-only, so a
-		// pinned overlay stays freezable.
+		// pinned overlay stays freezable. It also gates the removal at the end,
+		// not only the pack.
 		held, err := image.AcquireLock(source, false)
 		if err != nil {
 			ExitWithError("%v", err)
@@ -86,13 +97,29 @@ var overlayFreezeCmd = &cobra.Command{
 		if err != nil {
 			ExitWithError("%v", err)
 		}
+
+		// A bare freeze replaces the target it autoloaded against: refuse only if
+		// someone is actively reading it (a shared lock probe, the same one an
+		// artifact only ever needs for ordinary reading) or it is write-protected.
+		// An explicit destination is a flat refusal — that path is a deliberate
+		// artifact, and a collision there is more likely a real mistake.
 		if utils.FileExists(target) {
-			ExitWithError("%s already exists.", target)
+			if dest != "" {
+				ExitWithError("%s already exists.", target)
+			}
+			if err := image.CheckAvailable(target, true); err != nil {
+				ExitWithError("cannot replace %s: %v", target, err)
+			}
 		}
 
+		// Packed to a producer-private path first: a rename over an existing
+		// file is atomic, so a reader sees the old snapshot or the new one and
+		// never a gap, and a crash mid-pack leaves only an orphaned .part rather
+		// than a truncated snapshot at the real path.
+		prepared := target + producer.PreparedSuffix
 		res, freezeErr := freeze.Freeze(ctx, freeze.Options{
 			Image:        source,
-			Target:       target,
+			Target:       prepared,
 			Description:  freezeDescription,
 			Base:         base,
 			CompressArgs: compressArgs,
@@ -106,33 +133,70 @@ var overlayFreezeCmd = &cobra.Command{
 			}
 			ExitWithError("%v", freezeErr)
 		}
-		reportFreeze(res, source)
+		if err := os.Rename(prepared, target); err != nil {
+			os.Remove(prepared) //nolint:errcheck
+			ExitWithError("failed to install %s: %v", target, err)
+		}
+		res.Path = target
+
+		// The .env sidecar's vars are already folded into the artifact's
+		// runtime.json by the pack, so its purpose is served once frozen: it
+		// follows the .img's own fate, one rule rather than a separate decision.
+		removed := dest == "" && !freezeKeep
+		if removed {
+			os.Remove(source)          //nolint:errcheck
+			os.Remove(source + ".env") //nolint:errcheck
+		}
+		reportFreeze(res, source, removed)
 	},
 }
 
-// resolveFreezeTarget decides where the artifact is written — only where, since
-// every frozen environment is called meta.EnvName. With no destination it lands
-// beside the source with the extension changed.
+// resolveFreezeTarget decides where the artifact is written — only where,
+// since every frozen environment is called meta.EnvName.
+//
+// With no destination, the target is whichever candidate this .img actually
+// autoloaded against (container.LookupSnapshot, run in the direction freeze
+// needs — "which snapshot did this .img continue from"), so a bare freeze
+// replaces that one automatically, for both a personal and a shared snapshot
+// line. Only when neither candidate exists yet (first-ever freeze of this
+// .img) does it fall back to the plain same-basename rule.
 func resolveFreezeTarget(source, dest string) (string, error) {
-	named := strings.TrimSuffix(filepath.Base(source), filepath.Ext(source)) + ".sqf"
-	switch {
-	case dest == "":
-		dest = filepath.Join(filepath.Dir(source), named)
-	case strings.HasSuffix(dest, string(filepath.Separator)):
-		// A trailing separator says directory whether or not one is there yet.
-		// Without this a missing one falls through to the extension branch and
-		// becomes a file named ".sqf".
-		dest = filepath.Join(dest, named)
-	default:
-		if info, err := os.Stat(dest); err == nil && info.IsDir() {
-			// A directory is a place to put it, not the artifact itself.
-			dest = filepath.Join(dest, named)
-		} else if !strings.HasSuffix(dest, ".sqf") {
-			dest += ".sqf"
+	var target string
+	if dest == "" {
+		lookup := container.LookupSnapshot(source)
+		switch {
+		case lookup.Blocked != "":
+			return "", fmt.Errorf("%s exists but is not a snapshot; a bare freeze will not replace it — move it aside or give an explicit destination", lookup.Blocked)
+		case lookup.Path != "":
+			target = lookup.Path
+		default:
+			// First-ever freeze of this .img: same basename as the source, .sqf
+			// extension. A source already carrying "-<user>" (the routine loop's
+			// naming) keeps that suffix in the target too.
+			named := strings.TrimSuffix(filepath.Base(source), filepath.Ext(source)) + ".sqf"
+			target = filepath.Join(filepath.Dir(source), named)
+		}
+	} else {
+		named := strings.TrimSuffix(filepath.Base(source), filepath.Ext(source)) + ".sqf"
+		switch {
+		case strings.HasSuffix(dest, string(filepath.Separator)):
+			// A trailing separator says directory whether or not one is there yet.
+			// Without this a missing one falls through to the extension branch and
+			// becomes a file named ".sqf".
+			target = filepath.Join(dest, named)
+		default:
+			if info, err := os.Stat(dest); err == nil && info.IsDir() {
+				// A directory is a place to put it, not the artifact itself.
+				target = filepath.Join(dest, named)
+			} else if !strings.HasSuffix(dest, ".sqf") {
+				target = dest + ".sqf"
+			} else {
+				target = dest
+			}
 		}
 	}
 
-	abs, err := filepath.Abs(dest)
+	abs, err := filepath.Abs(target)
 	if err != nil {
 		return "", err
 	}
@@ -167,8 +231,11 @@ func imagesDirContaining(path string) string {
 
 // reportFreeze prints what was produced. What the artifact contains is what
 // `info` is for, read back from the file itself.
-func reportFreeze(res freeze.Result, source string) {
+func reportFreeze(res freeze.Result, source string, removed bool) {
 	utils.PrintSuccess("frozen %s → %s", utils.StylePath(source), utils.StylePath(res.Path))
+	if removed {
+		utils.PrintMessage("  %s removed; the next overlay create starts fresh on top of the snapshot", utils.StylePath(source))
+	}
 	if n := res.Translation.Deletions(); n > 0 {
 		utils.PrintMessage("  carries %d deletion(s), translated from %s markers",
 			n, string(res.Translation.Convention))
@@ -181,6 +248,7 @@ func init() {
 	f.StringVarP(&freezeDescription, "description", "d", "", "Description recorded in the artifact")
 	f.StringVar(&freezeBlockSize, "block-size", "", "SquashFS block size (default: build.block_size)")
 	f.BoolVar(&freezeUseTmp, "use-tmp", false, "Copy to temp dir and pack (faster; needs payload-sized space)")
+	f.BoolVar(&freezeKeep, "keep", false, "Keep the source .img after a bare freeze (default: remove it)")
 	freezeCompFlags = make(map[string]*bool, len(config.CompressOptions))
 	for _, opt := range config.CompressOptions {
 		freezeCompFlags[opt.Name] = f.Bool(opt.Name, false, opt.Description)

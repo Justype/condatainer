@@ -122,6 +122,25 @@ opts := exec.Options{
 
 Used by build system for interactive build scripts.
 
+## Conda Overlay Creation (conda.go)
+
+`CreateCondaOverlay` builds a new writable overlay by installing packages into
+a scratch ext3 image (`ext3.CreateInTmp`) and only moving it to its final
+destination once installation succeeds. That scratch path is disconnected
+from wherever the final destination's paired snapshot lives, so
+`container.Setup`'s own autoload (which looks beside the path it is given)
+can never find it there. `CreateCondaOverlay` looks it up itself
+(`container.LookupSnapshot(opts.Path)` — against the *final* path, not the
+scratch one) and passes it through to `InitCondaEnv`/`RunPostInstall`, which
+mount it alongside the scratch image. Without this, installing into a `.img`
+that will end up paired with an existing snapshot would reinstall everything
+the snapshot already has instead of writing only the incremental diff.
+
+`InstallPackages`/`RemovePackages` (adding or removing packages in an
+already-placed `.img`) need no such lookup: they run against the real final
+path directly, so `container.Setup`'s ordinary autoload already finds the
+pairing on its own.
+
 ## Integration
 
 Used by:

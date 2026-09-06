@@ -1,10 +1,13 @@
 package container
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
 )
 
@@ -102,5 +105,120 @@ func TestDistinctPrefixesAllowsOneFileNamedTwice(t *testing.T) {
 	}))
 	if err != nil {
 		t.Fatalf("one file named twice was refused: %v", err)
+	}
+}
+
+// An .img has no identity of its own and is expected to sit on top of an
+// env-typed .sqf, so it never participates in the collision check even though
+// it contributes the same EnvPrefix for environment-variable purposes.
+func TestDistinctPrefixesIgnoresImg(t *testing.T) {
+	overlays := []string{"/proj/env.sqf", "/proj/env.img"}
+	err := distinctPrefixes(overlays, prefixes(map[string]string{
+		"/proj/env.sqf": meta.EnvPrefix,
+		"/proj/env.img": meta.EnvPrefix,
+	}))
+	if err != nil {
+		t.Fatalf("env.sqf + env.img was refused: %v", err)
+	}
+}
+
+// Two environment snapshots together is still refused: there is no way to
+// tell which one is meant.
+func TestDistinctPrefixesRefusesTwoEnvSnapshots(t *testing.T) {
+	overlays := []string{"/proj/env.sqf", "/proj/env-alice.sqf"}
+	err := distinctPrefixes(overlays, prefixes(map[string]string{
+		"/proj/env.sqf":       meta.EnvPrefix,
+		"/proj/env-alice.sqf": meta.EnvPrefix,
+	}))
+	if err == nil {
+		t.Fatal("two environment snapshots were accepted")
+	}
+}
+
+// orderOverlays puts a writable .img last and, immediately beneath it, the one
+// env-typed .sqf present — regardless of where either appeared originally.
+func TestOrderOverlaysPlacesEnvSqfBeneathImg(t *testing.T) {
+	requireSquashfsTools(t)
+	dir := t.TempDir()
+	envSqf := filepath.Join(dir, "env.sqf")
+	packRuntimeSqf(t, envSqf, envRuntime())
+	other := filepath.Join(dir, "samtools.sqf")
+	if err := os.WriteFile(other, []byte("not read as metadata in this test"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	img := filepath.Join(dir, "env.img")
+
+	got := orderOverlays([]string{envSqf, other, img})
+	want := []string{other, envSqf, img}
+	if !slices.Equal(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
+// With no .img, orderOverlays leaves the list exactly as given.
+func TestOrderOverlaysNoImg(t *testing.T) {
+	overlays := []string{"/images/a.sqf", "/images/b.sqf"}
+	got := orderOverlays(overlays)
+	if !slices.Equal(got, overlays) {
+		t.Fatalf("order = %v, want unchanged %v", got, overlays)
+	}
+}
+
+// autoloadSnapshot finds a personal snapshot beside a writable .img and adds
+// it to the overlay list, with a diagnostic naming what was autoloaded.
+func TestAutoloadSnapshotFindsPersonalLine(t *testing.T) {
+	requireSquashfsTools(t)
+	t.Setenv("USER", "alice")
+	dir := t.TempDir()
+	envSqf := filepath.Join(dir, "env-alice.sqf")
+	packRuntimeSqf(t, envSqf, envRuntime())
+	img := filepath.Join(dir, "env-alice.img")
+
+	overlays, diagnostics := autoloadSnapshot([]string{img})
+	if !slices.Contains(overlays, envSqf) {
+		t.Fatalf("overlays = %v, want %s autoloaded", overlays, envSqf)
+	}
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics = %v, want exactly one", diagnostics)
+	}
+}
+
+// An overlay the caller already listed explicitly is not autoloaded a second
+// time.
+func TestAutoloadSnapshotSkipsWhenAlreadyListed(t *testing.T) {
+	requireSquashfsTools(t)
+	t.Setenv("USER", "alice")
+	dir := t.TempDir()
+	envSqf := filepath.Join(dir, "env-alice.sqf")
+	packRuntimeSqf(t, envSqf, envRuntime())
+	img := filepath.Join(dir, "env-alice.img")
+
+	overlays, diagnostics := autoloadSnapshot([]string{envSqf, img})
+	if len(overlays) != 2 {
+		t.Fatalf("overlays = %v, want no duplicate append", overlays)
+	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics = %v, want none for an already-listed overlay", diagnostics)
+	}
+}
+
+// A blocked slot (something occupying the derived path that isn't a
+// snapshot) is treated as nothing found: the .img mounts alone rather than
+// autoload guessing.
+func TestAutoloadSnapshotSkipsWhenBlocked(t *testing.T) {
+	requireSquashfsTools(t)
+	t.Setenv("USER", "alice")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "env-alice.sqf"), []byte("junk"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	img := filepath.Join(dir, "env-alice.img")
+
+	overlays, diagnostics := autoloadSnapshot([]string{img})
+	if !slices.Equal(overlays, []string{img}) {
+		t.Fatalf("overlays = %v, want unchanged", overlays)
+	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics = %v, want none when blocked", diagnostics)
 	}
 }

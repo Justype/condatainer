@@ -587,7 +587,7 @@ func GuidedOverlayCreate(ctx context.Context, helperName string, meta helper.Hel
 	if err != nil {
 		return "", err
 	}
-	sizeStr, err := promptDefault(ctx, "[?] Overlay size", "20G")
+	sizeStr, err := promptDefault(ctx, "[?] Overlay size", helper.DefaultOverlaySize)
 	if err != nil {
 		return "", err
 	}

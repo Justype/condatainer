@@ -118,6 +118,25 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 		ExitWithError("Path %s already exists.", utils.StylePath(path))
 	}
 
+	// Shown relative to cwd when possible, so a message about a plain
+	// "env.img" typed on the command line doesn't balloon into a long
+	// absolute path — matches the display convention in checkDeps.
+	displayPath := func(p string) string {
+		if cwd, err := os.Getwd(); err == nil {
+			if rel, err := filepath.Rel(cwd, p); err == nil && !strings.HasPrefix(rel, "..") {
+				return rel
+			}
+		}
+		return p
+	}
+
+	// lookup.Path is always beside path (LookupSnapshot's own invariant), so
+	// only its filename is shown — path's directory already covers it.
+	if lookup := container.LookupSnapshot(path); lookup.Path != "" {
+		utils.PrintMessage("Found paired snapshot %s — %s will autoload it",
+			utils.StylePath(filepath.Base(lookup.Path)), utils.StylePath(displayPath(path)))
+	}
+
 	// 2. Parse Flags
 	sizeStr, _ := cmd.Flags().GetString("size")
 	fakeroot, _ := cmd.Flags().GetBool("fakeroot")
@@ -167,7 +186,7 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 			}
 			ExitWithError("%v", err)
 		}
-		if err := initCondaInOverlay(cmd.Context(), path, envFile, packages, fakeroot, condaIO); err != nil {
+		if err := initCondaInOverlay(cmd.Context(), path, path, envFile, packages, fakeroot, condaIO); err != nil {
 			os.Remove(path)
 			if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 				utils.PrintWarning("Overlay initialization cancelled.")
@@ -186,7 +205,7 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 			ExitWithError("%v", err)
 		}
 
-		if err := initCondaInOverlay(cmd.Context(), tmpPath, envFile, packages, fakeroot, condaIO); err != nil {
+		if err := initCondaInOverlay(cmd.Context(), tmpPath, path, envFile, packages, fakeroot, condaIO); err != nil {
 			os.Remove(tmpPath)
 			utils.RemoveDirIfEmpty(filepath.Dir(tmpPath))
 			if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
@@ -196,7 +215,7 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 			ExitWithError("Failed to initialize overlay with conda environment: %v", err)
 		}
 
-		utils.PrintMessage("Moving overlay to %s", utils.StylePath(path))
+		utils.PrintMessage("Moving overlay to %s", utils.StylePath(displayPath(path)))
 		copied, err := ext3.MoveOverlayCopied(cmd.Context(), tmpPath, path, sparse)
 		if err != nil {
 			os.Remove(tmpPath)
@@ -211,7 +230,7 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	utils.PrintSuccess("Created overlay %s", utils.StylePath(path))
+	utils.PrintSuccess("Created overlay %s", utils.StylePath(displayPath(path)))
 }
 
 var overlayCreateCmd = &cobra.Command{
@@ -655,7 +674,12 @@ func runExportOverlay(cmd *cobra.Command, args []string) error {
 // when an environment file or package specs were requested. A blank overlay is
 // initialized lazily by the first `condatainer env install`/`mm install`.
 // envFile and packages are mutually exclusive and validated before this call.
-func initCondaInOverlay(ctx context.Context, overlayPath, envFile string, packages []string, fakeroot bool, io exec.IO) error {
+//
+// overlayPath is where the build actually happens (a scratch tmp path or the
+// final destination); finalPath is always the final destination, used only to
+// look up a paired snapshot beside it — the two differ when runOverlayCreate
+// builds at a tmp path and moves it into place afterward.
+func initCondaInOverlay(ctx context.Context, overlayPath, finalPath, envFile string, packages []string, fakeroot bool, io exec.IO) error {
 	if envFile == "" && len(packages) == 0 {
 		return nil
 	}
@@ -685,17 +709,31 @@ func initCondaInOverlay(ctx context.Context, overlayPath, envFile string, packag
 		return fmt.Errorf("failed to get absolute path of overlay: %w", err)
 	}
 
+	// overlayPath may be a scratch tmp path (see runOverlayCreate) — the
+	// paired snapshot lives beside finalPath, not the scratch one, so it's
+	// looked up against finalPath and passed through explicitly rather than
+	// relying on container.Setup's own autoload to find it on its own.
+	snapshot := container.LookupSnapshot(finalPath).Path
+
 	if envFile != "" {
-		utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(envFile))
+		if snapshot != "" {
+			utils.PrintMessage("Installing %s on top of the paired snapshot...", utils.StylePath(envFile))
+		} else {
+			utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(envFile))
+		}
 	} else if len(packages) > 0 {
-		utils.PrintMessage("Initializing conda environment with: %s...", strings.Join(packages, " "))
+		if snapshot != "" {
+			utils.PrintMessage("Installing %s on top of the paired snapshot...", strings.Join(packages, " "))
+		} else {
+			utils.PrintMessage("Initializing conda environment with: %s...", strings.Join(packages, " "))
+		}
 	}
 
 	pkgs := packages
 	if envFile != "" {
 		pkgs = []string{"-f", envFile}
 	}
-	if err := exec.InitCondaEnv(ctx, absOverlayPath, pkgs, fakeroot, io); err != nil {
+	if err := exec.InitCondaEnv(ctx, absOverlayPath, snapshot, pkgs, fakeroot, io); err != nil {
 		return fmt.Errorf("failed to initialize conda environment: %w", err)
 	}
 

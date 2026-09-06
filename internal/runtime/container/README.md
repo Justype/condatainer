@@ -183,6 +183,14 @@ diagnostic is recorded. `CollectOverlayEnv` is the one place degradation is
 reported, so an image with no readable metadata is announced once per invocation
 rather than once per consumer.
 
+A writable `.img` paired with an env-typed snapshot (`LookupSnapshot`, see
+Environment Snapshots below) is not read in isolation by `ResolveOverlayEnv`:
+the snapshot's variables are merged in first, the `.img`'s own sidecar on top,
+with the same "defined in multiple overlays" diagnostic `CollectOverlayEnv`
+already produces for the ordinary multi-overlay case. Without this, `info` on a
+`.img` would show none of the variables its paired snapshot silently
+contributes at real mount time.
+
 `BuildPathEnv` is silent for the same reason. Only an `app` contributes, and it
 contributes `<prefix>/bin` unconditionally — `data`, `os` and `base` put nothing
 on `PATH`, and an image with no readable metadata contributes nothing at all.
@@ -237,6 +245,89 @@ helper's `#GPU:` header) still gets `--nv`/`--rocm` when the host has the
 device node, regardless of `autoload_gpu`. The toggle only ever suppresses
 detection nobody asked for — it was never meant to silently drop GPU access
 from a workload that explicitly needs one.
+
+## Environment Snapshots
+
+`overlay freeze` produces an `env`-typed `.sqf` beside the writable `.img` it
+came from — a "snapshot." `LookupSnapshot` (`snapshot.go`) is the one place
+that pairs one back up with an `.img`, reused in both directions: `Setup`
+autoloads a snapshot at mount time, and a bare `overlay freeze` asks the same
+question in reverse to find what it is replacing.
+
+Naming is derived from the `.img`'s own basename, not hardcoded to `env`:
+strip a trailing `-<user>` suffix (if present) to get a stem, then look for
+`<stem>-<user>.sqf` before `<stem>.sqf`. The first candidate that exists on
+disk decides the outcome — if it is `env`-typed it is the pair, and if it
+isn't, the lookup reports `Blocked` rather than falling through to the next
+candidate. Falling through would be guessing which of two files, if either,
+was meant; `Setup` treats `Blocked` as nothing found (the `.img` mounts
+alone), while `overlay freeze` treats it as a hard refusal, because a bare
+freeze silently replacing an unrelated file at the derived path is the "wrong
+container that looks like a working one" class of mistake, not a warning.
+
+`Setup` wires this in before `ensureDistinctPrefixes` and the final ordering
+run, so an autoloaded snapshot participates in both exactly as an
+explicitly-listed one would:
+
+- **Collision check.** An `.img` never claims a prefix for collision purposes
+  — it has no identity of its own, `ensureSingleImage` already guarantees
+  there is at most one, and it is now expected to sit on top of whatever
+  `env`-typed `.sqf` is present. `env.sqf` + `env.img` is the expected shape.
+  Two `env`-typed `.sqf`s together is still refused: that is still two
+  snapshots with no way to tell which one is meant, detected the same way as
+  any other prefix collision.
+- **Ordering.** `orderOverlays` places the writable `.img` last and,
+  immediately beneath it, the one `env`-typed `.sqf` present
+  — regardless of where either appeared in the original list. Every other
+  overlay's relative order is untouched; this is one positioning rule for one
+  specific artifact, not a general reordering of `os`/`app`/`data`. The reason
+  it matters at all: a directory created with no lower counterpart is
+  opaque-marked by `fuse-overlayfs` regardless of intent, so the snapshot has
+  to already be mounted underneath by the very first write a fresh `.img`
+  makes (e.g. `overlay create`'s conda init) — wiring autoload in only for
+  `exec`/`run` would let that first write happen with nothing beneath it, and
+  the opaque flag does not get retroactively cleared once the snapshot shows
+  up afterward.
+
+**A missing `.img` named directly is refused, never silently substituted.**
+`ResolveOverlayPaths` (`resolve.go`) refuses a path that does not exist on
+disk the same way it always has — naming a specific `.img` is a request for a
+writable mount by that exact name, and guessing that a read-only `.sqf` beside
+it was meant instead is exactly the silent substitution this codebase's
+refusal-over-guessing stance rules out. `missingOverlayError` only changes
+what the refusal says: when the named `.img` would have paired with a real
+snapshot (`LookupSnapshot`), the message names it and the two ways to
+proceed — `overlay create` to continue from it, or mounting the `.sqf`
+directly, read-only.
+
+This is also the third overlay state every naive two-state consumer has to
+tell apart from "nothing has ever been created here": no `.img`, but a
+fully-populated snapshot right beside where one would go. `LookupSnapshot`
+answers it without the `.img` existing at all — it only needs the name to
+derive the sibling `.sqf` candidates. `helper.FindEnvSnapshot` builds on this
+directly; `helper.ResolveEnvOverlayInDir` treats `.img` and `.sqf` as two
+forms of one environment overlay and resolves to whichever exists, `.img`
+first — never creating either. Nothing is ever fabricated on the strength of
+a snapshot alone: a helper or `condatainer e` that resolves to a bare `.sqf`
+mounts it read-only, and `helper.CheckEnv`'s `Snapshot` field (from
+`PairedSize`, below) is what lets the dashboard tell this state apart from
+either of the other two.
+
+**`PairedSize`, `PairedPackages` and `PairedInfo` (`conda_pairing.go`) are the
+three places that read *through* a pair rather than just locating it.** Every
+caller that needs a `.img`'s size, its installed conda packages, or its
+`conda-meta/history` — `helper.CheckEnv`, `#IMG_PACKAGES:` checks,
+`condatainer info`, the dashboard's env-info endpoint — goes through one of
+these rather than calling `LookupSnapshot` and re-deriving the merge itself.
+All three take a bare path and handle every shape internally: a `.img` with a
+pair reads both and combines them (size adds, packages union with the
+`.img`'s own winning on conflict, history concatenates as one continuous
+log); a `.img` with no pair, or a bare `.sqf`, is read alone. `PairedPackages`
+and `PairedInfo` live here rather than in `internal/conda` because `conda`
+cannot import this package — `container` already depends on
+`internal/artifact/compare`, which depends on `internal/artifact/key`, which
+depends on `conda`, so the pairing logic has to sit on the `container` side
+of that edge even though it is conda-specific.
 
 ## Error Handling
 

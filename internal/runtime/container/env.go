@@ -268,13 +268,36 @@ func cleanOverlayPath(overlay string) string {
 
 // ResolveOverlayEnv resolves a single image's description, env vars, and notes
 // for display. A :ro/:rw suffix on the path is ignored.
-func ResolveOverlayEnv(overlayPath string) (description string, configs, notes map[string]string) {
-	contribution, _ := resolveImage(cleanOverlayPath(overlayPath))
-	if contribution.Configs == nil {
-		contribution.Configs = map[string]string{}
+//
+// A writable .img paired with an env-typed snapshot (LookupSnapshot) is the
+// one case this reads more than the path it was given: every variable the
+// snapshot embeds is silently in effect whenever the .img mounts, so showing
+// the .img alone would lie by omission. The merge is the same precedence
+// CollectOverlayEnv already uses everywhere else — snapshot first, the .img's
+// own sidecar on top — and the same "overridden by" diagnostic rides along, so
+// a value shown as coming from the snapshot but actually shadowed by the .img
+// does not read as authoritative when it isn't.
+func ResolveOverlayEnv(overlayPath string) (description string, configs, notes map[string]string, diagnostics []Diagnostic) {
+	path := cleanOverlayPath(overlayPath)
+	paths := []string{path}
+	if utils.IsImg(path) {
+		if lookup := LookupSnapshot(path); lookup.Path != "" {
+			paths = []string{lookup.Path, path}
+			if rt, err := meta.ReadRuntime(lookup.Path); err == nil {
+				description = rt.Description
+			}
+		}
+	} else {
+		contribution, _ := resolveImage(path)
+		description = contribution.Description
 	}
-	if contribution.Notes == nil {
-		contribution.Notes = map[string]string{}
+
+	configs, notes, diagnostics = CollectOverlayEnv(paths)
+	if configs == nil {
+		configs = map[string]string{}
 	}
-	return contribution.Description, contribution.Configs, contribution.Notes
+	if notes == nil {
+		notes = map[string]string{}
+	}
+	return description, configs, notes, diagnostics
 }
