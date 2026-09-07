@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	osexec "os/exec"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
-	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
 )
 
 const maxRecordedToolVersion = 256
@@ -48,20 +48,19 @@ func (b *BuildObject) captureCommonBuildTools(ctx context.Context) {
 	b.buildTools.Apptainer = meta.Tool{Name: implementation, Version: version}
 }
 
-// captureMicromambaVersion asks the Micromamba inside the resolved build base,
-// through the same container execution path used for install and export. A host
-// Micromamba binary therefore cannot leak into the manifest.
+// captureMicromambaVersion runs the self-provisioned Micromamba's own
+// --version directly on host.
 func (b *BuildObject) captureMicromambaVersion(ctx context.Context) {
 	log := logging.FromContext(ctx)
 	version := meta.Unrecorded
 
-	opts, err := b.condaExecOpts("micromamba --version", nil)
+	mmCmd, err := micromambaCmd()
 	if err == nil {
-		opts.PassThruStdin = false
-		var stdout bytes.Buffer
-		err = execpkg.Run(ctx, opts, execpkg.IO{Stdout: &stdout})
-		if err == nil {
-			if captured, ok := normalizedToolVersion(stdout.String()); ok {
+		var out bytes.Buffer
+		cmd := osexec.CommandContext(ctx, mmCmd, "--version")
+		cmd.Stdout = &out
+		if err = cmd.Run(); err == nil {
+			if captured, ok := normalizedToolVersion(out.String()); ok {
 				version = captured
 			} else {
 				err = errEmptyToolVersion

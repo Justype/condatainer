@@ -168,6 +168,19 @@ func ShareWithParentGroup(path string) {
 	_ = os.Chmod(path, mode)
 }
 
+// ShareTreeWithParentGroup applies ShareWithParentGroup to root and every entry beneath
+// it, top-down so each level is shared before the next depends on it — for a tree an
+// external tool wrote directly, bypassing this package's own creation helpers.
+func ShareTreeWithParentGroup(root string) error {
+	return filepath.WalkDir(root, func(path string, _ os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		ShareWithParentGroup(path)
+		return nil
+	})
+}
+
 // MakeExecutable adds an execute bit wherever the matching read bit is set (x where r),
 // then shares with the parent group. Mirroring the read bits keeps it umask-respecting,
 // unlike os.Chmod(path, PermExec) which forces 0775 and leaks group/other-write into

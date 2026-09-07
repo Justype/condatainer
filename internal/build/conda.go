@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 
@@ -13,11 +15,18 @@ import (
 	"github.com/Justype/condatainer/internal/conda"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image/freeze"
 	"github.com/Justype/condatainer/internal/libexec"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/exec"
+	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
+
+// shellQuote renders a value as a single-quoted shell word.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
 
 // buildConda installs an environment with micromamba and packs it. The
 // install -> stage -> pack sequence is the script backend's too, which is why
@@ -215,28 +224,46 @@ func (b *BuildObject) captureCondaExports(ctx context.Context) {
 }
 
 // condaExport runs `micromamba env export` against the installed prefix and
-// returns its stdout. It reuses the install's container setup, so the export
-// reads the environment that was just built whichever workspace mode is in use.
+// returns its stdout, directly on host — a plain host path in dir mode, or
+// the same fuse2fs mount packFromScratchImage uses to read a scratch .img in
+// ext3 mode (squashfs.go).
 func (b *BuildObject) condaExport(ctx context.Context, args ...string) ([]byte, error) {
 	mmCmd, err := micromambaCmd()
 	if err != nil {
 		return nil, err
 	}
-	opts, err := b.condaExecOpts(fmt.Sprintf(mmCmd+" env export -p /cnt/%s %s",
-		b.spec.Image.Name, strings.Join(args, " ")), nil)
+
+	if !b.ws.UsesImage() {
+		prefix := filepath.Join(b.ws.CntDir, b.spec.Image.Name)
+		cmdArgs := append([]string{"env", "export", "-p", prefix}, args...)
+		var out bytes.Buffer
+		cmd := osexec.CommandContext(ctx, mmCmd, cmdArgs...)
+		cmd.Stdout = &out
+		if err := cmd.Run(); err != nil {
+			return nil, err
+		}
+		return out.Bytes(), nil
+	}
+
+	fuse2fsBin, err := toolpath.Resolve("fuse2fs")
 	if err != nil {
 		return nil, err
 	}
-	opts.PassThruStdin = false
+	mnt := filepath.Join(b.ws.TmpDir, "export-mnt")
+	if err := os.MkdirAll(mnt, 0o755); err != nil {
+		return nil, fmt.Errorf("create export mountpoint: %w", err)
+	}
+	defer os.RemoveAll(mnt)
 
-	var out bytes.Buffer
-	streams := exec.IOFromContext(ctx)
-	streams.Stdin = nil
-	streams.Stdout = &out
-	if err := exec.Run(ctx, opts, streams); err != nil {
+	prefix := filepath.Join(mnt, freeze.UpperDir, "cnt", b.spec.Image.Name)
+	outFile := filepath.Join(b.ws.TmpDir, "export-out")
+	defer os.Remove(outFile)
+	script := fmt.Sprintf("%s env export -p %s %s > %s",
+		shellQuote(mmCmd), shellQuote(prefix), strings.Join(args, " "), shellQuote(outFile))
+	if err := freeze.MountedRun(ctx, fuse2fsBin, []string{"-o", "ro", b.ws.Overlay}, mnt, script, exec.IO{}); err != nil {
 		return nil, err
 	}
-	return out.Bytes(), nil
+	return os.ReadFile(outFile)
 }
 
 // condaInstallExecOpts constructs exec.Options for the micromamba run. Installs
@@ -273,8 +300,8 @@ fi
 
 // condaExecOpts sites a micromamba run against this build's payload, whichever
 // workspace mode is in use: bound host directories, or the scratch image the
-// payload lives inside. Install and export share it so an export always reads
-// the environment the install just wrote.
+// payload lives inside. installConda is its only caller; solveConda builds
+// its own Options, since a dry-run solve mounts no payload at all.
 //
 // Unlike script.go/squashfs.go, this call binds neither getAllBaseDirs() nor
 // container.BindPaths(), so the toolchain's tier needs an explicit bind here.

@@ -88,6 +88,11 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to update the toolchain: %w", err)
 		}
 		utils.PrintSuccess("Toolchain updated successfully.")
+		if versions, err := libexec.Versions(cmd.Context()); err == nil {
+			for _, v := range versions {
+				utils.PrintMessage("  %-10s %s", v.Name, v.Version)
+			}
+		}
 	}
 
 	return nil

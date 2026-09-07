@@ -239,6 +239,48 @@ harmless, while the check would cost one archive read per image per invocation.
 - `LC_ALL=C.UTF-8`, `LANG=C.UTF-8`
 - `CURL_CA_BUNDLE=`, `SSL_CERT_FILE=` (unset to avoid host interference)
 
+## Activation
+
+`#ENV:` (an `app`'s `runtime.json`) and `.env` sidecars (a writable `.img`)
+are recipe-declared and static — they cover the two things `container.Setup`
+itself computes ahead of time. A conda-forge package's own
+`etc/conda/activate.d/*.sh` is neither: it's shell script the package ships,
+and real `conda activate` sources it, not condatainer. `ActivationScript`
+replays that one piece — nothing else `conda activate` does, see below.
+
+`ActivationScript(overlays, lastImg)` builds a bash preamble, one block per
+overlay that contributes a prefix (every `app`, plus `/cnt_env` when a
+conda env/`.img` is mounted), each scoping `CONDA_PREFIX` to that overlay's
+own prefix before sourcing its `activate.d/*.sh` — a script commonly reads
+`CONDA_PREFIX` to build its own export (conda-forge's own `libxml2` hook
+computes `XML_CATALOG_FILES` from it), so sourcing it under some other
+overlay's `CONDA_PREFIX` would compute the wrong value. Blocks run in overlay
+order, the same order `BuildPathEnv` iterates before its own prepend reverses
+it, so the last-listed overlay's hook still runs last and still wins a name
+collision — one ordering rule, not two.
+
+`exec.Prepare` rewraps `Options.Command` into one `bash -c` invocation running
+the activation script then `exec "$@"` into the original command, since this
+is shell script sourced into the running shell — apptainer's own `--env` is a
+static list and cannot express it. Skipped when `ActivationScript` returns
+`""`, which it does whenever nothing mounted could contribute an
+`activate.d` directory — the common case for an `os`/`base`-only container.
+
+**Only the first-activation branch, once, no restore.** Real `conda
+activate`/`deactivate` (`activate.py`'s `build_activate`/`build_deactivate`)
+also reads two more env-var sources (`conda-meta/state.json`'s `env_vars`,
+`etc/conda/envvars/*.json`) and maintains a `CONDA_SHLVL` stack —
+`CONDA_PREFIX_<n>`, `CONDA_STACKED_<n>`, and every clobbered variable backed
+up as `__CONDA_SHLVL_<n>_<name>` — so a later `deactivate` can undo exactly
+what an `activate` changed. A condatainer run mounts, executes once, and
+exits: there is no nested activate/deactivate within one invocation, so none
+of that stack has anything to undo. The two extra env-var sources are left
+unread deliberately, not by oversight — the mechanism is rare in practice
+(this project's own `libexec` toolchain has exactly one `activate.d` script
+across four packages and zero `conda-meta/state.json`) and reading them would
+need a JSON parser with no guaranteed one in the base image, for a source
+`activate.d` already covers for everything that matters today.
+
 ## Automatic Bind Paths
 
 `BindPaths()` in `bind.go` collects bind mounts automatically before the user-specified paths are appended:

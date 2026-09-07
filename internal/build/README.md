@@ -377,7 +377,10 @@ artifact will be mounted at later; the container root is what supplies that
 path. Conda installs (`micromamba`) run through `internal/libexec`'s
 self-provisioned toolchain, not whatever the root happens to carry, so a
 `.def` build no longer scans its sandbox for it. Packing needs no such thing
-— an archive's content does not depend on what process read it off disk.
+— an archive's content does not depend on what process read it off disk, and
+neither do `captureMicromambaVersion`/`condaExport`'s post-install
+diagnostics, which read the same host path or `fuse2fs` mount packing itself
+uses (`squashfs.go`) rather than running through Apptainer.
 
 Every `.def` build — any of them may end up chosen as someone's root, since
 root selection is a per-invocation runtime choice, not a declared type —

@@ -53,11 +53,11 @@ logs/
 *.env
 
 # cache folder
-cache/
+/cache
 
 # Ignore content in image directories but keep the folder structure
 images
-libexec
+/libexec*
 
 # Ignore the configuration files
 config.yaml

@@ -2603,6 +2603,8 @@ By default (no flags), both `--build` and `--helper` are enabled.
 * Removes cache files for remotes no longer configured (orphan cleanup).
 * `--libexec` refuses rather than waits if any condatainer session is currently using the
   toolchain — stop those sessions first, then retry.
+* `--libexec` prints each tool's version (`apptainer`, `mksquashfs`, `squashfuse`, `micromamba`)
+  after a successful update.
 
 **Examples:**
 

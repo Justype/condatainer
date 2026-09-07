@@ -213,6 +213,51 @@ func TestMkdirAllShared_InheritsGroupWriteFromParent(t *testing.T) {
 	}
 }
 
+// TestShareTreeWithParentGroup_FixesEveryLevel models a tree an external
+// tool wrote directly (micromamba's own `create`, not this package's own
+// MkdirAllShared/CreateFileWritable) — every file and directory under root
+// left at umask 022's default, not group-writable, the way a real
+// provisioned libexec toolchain was found to be (only its own top level had
+// been shared).
+func TestShareTreeWithParentGroup_FixesEveryLevel(t *testing.T) {
+	withUmask(t, 0022)
+
+	shared := t.TempDir()
+	if err := os.Chmod(shared, 0775); err != nil {
+		t.Fatalf("chmod parent: %v", err)
+	}
+
+	root := filepath.Join(shared, "root")
+	if err := os.Mkdir(root, PermDir); err != nil {
+		t.Fatal(err)
+	}
+	subdir := filepath.Join(root, "bin")
+	if err := os.Mkdir(subdir, PermDir); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(subdir, "tool")
+	if err := os.WriteFile(file, []byte("x"), PermExec); err != nil {
+		t.Fatal(err)
+	}
+	if mode := statMode(t, subdir); mode != 0755 {
+		t.Fatalf("precondition: expected subdir mode 0755, got %o", mode)
+	}
+
+	if err := ShareTreeWithParentGroup(root); err != nil {
+		t.Fatalf("ShareTreeWithParentGroup: %v", err)
+	}
+
+	if mode := statMode(t, root); mode != 0775 {
+		t.Errorf("root mode = %o, want 0775", mode)
+	}
+	if mode := statMode(t, subdir); mode != 0775 {
+		t.Errorf("subdir mode = %o, want 0775 (children of an unshared level must be fixed too)", mode)
+	}
+	if mode := statMode(t, file); mode != 0775 {
+		t.Errorf("file mode = %o, want 0775 (executable keeps g+x)", mode)
+	}
+}
+
 func statMode(t *testing.T, path string) os.FileMode {
 	t.Helper()
 	info, err := os.Stat(path)

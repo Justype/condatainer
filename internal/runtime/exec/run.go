@@ -147,6 +147,14 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 		envList = append(proxy.ProxyEnvList(proxyURL), envList...)
 	}
 
+	// A mounted overlay's own etc/conda/activate.d is shell script, not a
+	// static list, so apptainer's own --env can't express it — the command
+	// itself is rewrapped to source it first. Skipped entirely when nothing
+	// could contribute one.
+	if activation := container.ActivationScript(setupResult.Overlays, setupResult.LastImg); activation != "" {
+		options.Command = wrapWithActivation(activation, options.Command)
+	}
+
 	opts := &apptainer.ExecOptions{
 		Bind:       setupResult.BindPaths,
 		Overlay:    setupResult.OverlayArgs,
@@ -164,6 +172,16 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 		ExecOptions:  opts,
 		OverlayLocks: execLocks,
 	}, nil
+}
+
+// wrapWithActivation rewraps command into one bash -c invocation that runs
+// activation first, then execs the original command/argv in its place —
+// activation is shell script sourced into the running shell, so it must run
+// ahead of the real command inside the same process rather than as a
+// separate step.
+func wrapWithActivation(activation string, command []string) []string {
+	script := activation + "exec \"$@\"\n"
+	return append([]string{"bash", "-c", script, "cnt-activate"}, command...)
 }
 
 // RunPrepared executes a prepared plan with caller-owned IO streams.

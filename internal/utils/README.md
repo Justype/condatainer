@@ -53,6 +53,16 @@ utils.ReadLineContext(ctx context.Context)    // read line with cancellation
 **Operations:** `EnsureDir`
 **Permissions:** `PermFile` (0664), `PermDir` (0775), `PermExec` (0775)
 
+`ShareWithParentGroup` only ever fixes the one path it's given — every wired creation helper
+(`CreateFileWritable`, `MkdirAllShared`, `MakeExecutable`) calls it on exactly what that helper
+itself just created, nothing more. A tree written by something else entirely — an external tool's
+own installer, not this package's own creation helpers — needs `ShareTreeWithParentGroup(root)`
+instead: it walks top-down and applies the single-path fix at every level, since
+`ShareWithParentGroup` only acts once a path's own parent is already shared. `internal/libexec`'s
+`provisionAt` is the one caller — `micromamba create` writes every file under its own prefix
+directly, bypassing every helper in this package, so nothing below the top level comes out
+group-writable on its own.
+
 ## Downloads
 
 ```go
