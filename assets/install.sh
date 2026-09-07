@@ -354,6 +354,16 @@ if [ $_exit_code -ne 0 ]; then
     exit 1
 fi
 
+# Provision the self-provisioned toolchain (mksquashfs, squashfuse, apptainer)
+# now, while installing already needs network access. Best-effort: a system
+# with no install-time network (e.g. an air-gapped compute node) still gets a
+# working install, just one that names the fix ("run `condatainer update
+# --libexec`") the first time something needs the toolchain.
+if ! "$INSTALL_BIN/condatainer" update --libexec; then
+    echo -e "${YELLOW}[WARN]${NC} Could not provision the self-provisioned toolchain now."
+    echo "Run 'condatainer update --libexec' once you have network access."
+fi
+
 echo -e "----------------------------------------"
 echo -e "${GREEN}Success!${NC}"
 echo "Run this to apply changes:"

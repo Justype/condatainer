@@ -17,114 +17,83 @@ go test -v ./internal/scheduler/...                       # Package tests
 
 - **CLI**: spf13/cobra + spf13/viper. Entry: `main.go` → `cmd.Execute()`
 - **cmd/**: One file per subcommand, delegates to internal packages
+- **catalog/**: Resolves a module name to a recipe, and a set of names to a build order; owns the `#KEY:` header tokenizer
 
 **internal/** packages:
-- `apptainer/` - Apptainer binary wrapper (exec, build, version detection)
+- `artifact/` - What CondaTainer embeds in an image: identity, manifests, equivalence comparison
 - `build/` - Build system: resolves name/version → Conda, Script, or Def build type; dependency graphs; remote script fetching
+- `conda/` - In-container management of the Conda environment mounted at `/cnt_env`
 - `config/` - Multi-level config (flags > env > user > extra-root > app-root > system > defaults), data directory search
-- `container/` - Container setup pipeline: overlay resolution, bind dedup, env collection, GPU detection
-- `exec/` - Ephemeral container execution
 - `helper/` - Helper service job lifecycle: resolve params, submit to scheduler (or run headless), monitor state, JSONL run history
-- `overlay/` - Overlay image CRUD (ext3/SquashFS), resize, chown, locking
-- `proxy/` - SSH tunnel + dual-protocol proxy management for HPC compute nodes
+- `image/` - Overlay image CRUD (ext3/SquashFS/sif), resize, chown, locking
+- `libexec/` - Self-provisioned toolchain (`mksquashfs`, `squashfuse`, `apptainer`), provisioned via micromamba
+- `logging/` - Context-carried logger and raw-output writer, for CLI/web log streaming
+- `project/` - `cnt-lock/`: a project's pinned dependency identities, plus vendored recipes
 - `registry/` - Authenticated OCI transport: upstream digest resolution plus artifact publish,
   platform-aware resolve, verification, pull, tag listing, and credential-store login/logout
+- `runtime/apptainer/` - Apptainer binary wrapper (exec, build, version detection)
+- `runtime/container/` - Container setup pipeline: overlay resolution, bind dedup, env collection, GPU detection
+- `runtime/exec/` - Ephemeral container execution
+- `runtime/proxy/` - SSH tunnel + dual-protocol proxy management for HPC compute nodes
 - `scheduler/` - HPC scheduler abstraction (SLURM, PBS, LSF, HTCondor); auto-detection, directive parsing, cross-scheduler translation
 - `server/` - Dashboard HTTP server (web UI + REST API, SSE log streaming)
+- `store/` - Immutable overflow below each images root, addressed by name plus key
+- `toolpath/` - Finds a runnable path for an external host tool by name
 - `utils/` - Console output (`Print*`), file ops, downloads, script parsing
 
 ## Recipes
 
-Recipes live in collections listed in the ordered `sources` config (first match wins, like `PATH`);
-`catalog/` resolves a name to a recipe and walks its dependency graph. A recipe is `<name>/<version>`,
-where the name may carry slashes (`grch38/genome/gencode` is name `grch38/genome`, version `gencode`).
-Four declarable types: `base` (produces the container root), `os`, `app` (contributes to `PATH`),
-`data`. A fifth, `env`, is what `overlay freeze` captures from a writable overlay; no recipe may
-declare it and `DeriveType` never returns it. It is written "environment" in anything a user reads,
-since `env` elsewhere in the tool means environment variables.
+A recipe is `<name>/<version>`, where the name may carry slashes (`grch38/genome/gencode` is name
+`grch38/genome`, version `gencode`). Recipes live in collections listed in the ordered `sources`
+config (first match wins, like `PATH`); `catalog/` resolves a name to one and walks its dependency
+graph — see [`catalog/README.md`](catalog/README.md) for the header grammar, `#DEP:` rules, and
+`#TARGET:` naming, and [`docs/manuals/build_script.md`](docs/manuals/build_script.md) for the full
+header/variable reference.
 
-A recipe runs top to bottom as `bash -euo pipefail <recipe>` — no `install()` wrapper.
-Available vars: `$CNT_NAME` (the complete name, e.g. `samtools/1.23.1`), `$CNT_TYPE`,
-`$CNT_PREFIX` (where the payload goes), `$CNT_TMP` (also `$TMPDIR`, both `/cnt_tmp`), plus the
-scheduler's normalized `$NCPUS`, `$MEM`, `$MEM_GB`. There is no `$CNT_VERSION`: a recipe that
-varies by version uses a `#PH:` placeholder, and one pinned to a version writes it literally.
+Three declarable types: `os`, `app` (contributes to `PATH`), `data`. A fourth, `env`, is what
+`overlay freeze` captures from a writable overlay; no recipe may declare it, and it is written
+"environment" in anything a user reads, since `env` elsewhere in the tool means environment
+variables. See *Base and Layering* for how the container root is chosen.
 
-`#DEP:` is a **build** dependency only — what must be mounted while the recipe runs. It is not
-recorded in the image and never re-expanded at run time; there is no runtime dependency tree.
-**Only a `data` recipe may declare one**, and **a build's `#DEP:` is a `name/version`, never a
-path** — where a running script's may be either. Both rules live in `catalog.ValidateDeps`, and the
-reasoning is in [`catalog/README.md`](catalog/README.md) with the `#TARGET:` naming rule an external
-build depends on.
+A recipe runs top to bottom as `bash -euo pipefail <recipe>` — no `install()` wrapper. Available
+vars: `$CNT_NAME` (the complete name, e.g. `samtools/1.23.1`), `$CNT_TYPE`, `$CNT_PREFIX` (where
+the payload goes), `$CNT_TMP` (also `$TMPDIR`, both `/cnt_tmp`), plus the scheduler's normalized
+`$NCPUS`, `$MEM`, `$MEM_GB`. There is no `$CNT_VERSION`: a recipe that varies by version uses a
+`#PH:` placeholder, and one pinned to a version writes it literally.
 
-A **version constraint is a recipe-only feature**: it lets a build reuse a satisfying version already
-installed. An **analysis script must name an exact `name/version`**, and a constrained declaration in
-a project script is a scan finding, not a request.
-
-Metadata headers: `#DEP:name/version`, or `#DEP:name/version>=min` in a recipe (preferred version is
-implicit upper bound, so valid range is `[min, version]`), `#SBATCH`/`#PBS`/`#BSUB` (scheduler job params),
-`#ENV:VAR={prefix}/sub  ## note` (env vars; `{prefix}` is filled with the install prefix at load time),
-`#INPUT:prompt` (user input, fed on stdin in order — read with `IFS= read -r VAR`), `#PH:`/`#TARGET:` (templates),
-`#ARCH:noarch` (app and data script recipes only; default `native`), `#DESC:`, `#URL:`, `#TYPE:`,
-`#LICENSE:` (an SPDX expression, verbatim), `#REDISTRIBUTE:` (`yes` or `no` — see *Publishing*).
-
-**`#TARGET:` without `#PH:` is not a template — it names the artifact**, which is how an external
-build (`create -p <path> -f <script>`) gets a name at all; one declaring `#DEP:` must declare it.
-
-`catalog.ScanAnnotations` is the one tokenizer for every `#KEY: value` line, in recipes, user scripts
-and project scanning alike; position carries no meaning, so there is no header block. Both keys hash
-`catalog.StripComments`, so never compute that preimage a second way. See
-[`catalog/README.md`](catalog/README.md), *The header boundary*.
+A **version constraint is a recipe-only feature**, letting a build reuse a satisfying version
+already installed. An **analysis script must name an exact `name/version`**; a constrained
+declaration in a project script is a scan finding, not a request.
 
 Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 
 ## Base and Layering
 
-A `base` provides the container root and the tooling a build and a run need — Apptainer and
-Micromamba — and nothing an overlay's payload links against. Overlays mount `--overlay <path>:ro`
-with payloads under their own `/cnt/<name>` prefix, so they are disjoint subtrees, not stacked
-diffs. The only ordering rule is that the single writable `.img` goes last
-(`putImgToLast`, `internal/runtime/container/setup.go`).
-
-Because they are disjoint rather than stacked, **two images claiming one prefix do not combine** —
-the later mount takes the whole subtree and the earlier contributes nothing, while both still reach
-PATH and the environment. `ensureDistinctPrefixes` refuses that mount rather than warning: it is a
-wrong container that looks like a working one. Two builds of one name are the case it catches. A
-base, an OS image and anything without readable metadata record no prefix and are exempt.
-
-**A base is never a compatibility gate.** It carries no identity or equivalence key, and any base
-information an artifact records is build diagnostics only — never compared, never warned on, never
-refused. A base is rebuilt whenever its OS ships patches, so a base digest differing from the one an
-overlay was built against says nothing about whether they work together. Never add a check that
-treats it as if it did.
+Any `os` overlay can be chosen as the container root at runtime — a per-invocation choice, not a
+declared type. `config base` names an ordinary `os` artifact by convention — the tooling a build
+and a run need (Apptainer, Micromamba) comes from `internal/libexec`'s self-provisioned toolchain,
+not from whatever plays root. See
+[`internal/runtime/container/README.md`](internal/runtime/container/README.md), *Root selection*
+and *What Setup refuses*, for how root is chosen and why two overlays claiming one `/cnt/<name>`
+prefix is refused rather than silently merged.
 
 ## Publishing
 
-What may be pushed depends on **who can pull it** — declared per endpoint as `audience` (`public` by
-default, or `restricted`) — and on what the artifact says about itself. Everything is read from the
-embedded manifest, never guessed from the filename; `push` refuses rather than warns, and no flag
-overrides a refusal.
-
-What a public endpoint takes is the table in [`docs/manuals/condatainer.md`](docs/manuals/condatainer.md),
-*Publishing rules*. Why each row falls that way, and the three checks that must never be added, are in
-[`internal/registry/README.md`](internal/registry/README.md).
+What may be pushed depends on **who can pull it** — declared per endpoint as `audience` (`public`
+by default, or `restricted`) — and on what the artifact says about itself, read from the embedded
+manifest, never guessed from the filename. `push` refuses rather than warns, and no flag overrides
+a refusal. The table of what a public endpoint takes is in
+[`docs/manuals/condatainer.md`](docs/manuals/condatainer.md), *Publishing rules*; why each row
+falls that way is in [`internal/registry/README.md`](internal/registry/README.md).
 
 ## Data Directory Order
 
-Reads go nearest-first, writes furthest-first — opposite directions, same four tiers.
-
-| | read (first match wins) | write (first writable) |
-|---|---|---|
-| 1 | `$SCRATCH/condatainer/` | `CNT_EXTRA_ROOT` (group/lab root, env only) |
-| 2 | `~/.local/share/condatainer/` | `CNT_ROOT` / `<install-dir>/` (app-root, auto-detected) |
-| 3 | `CNT_EXTRA_ROOT` | `$SCRATCH/condatainer/` |
-| 4 | `CNT_ROOT` / `<install-dir>/` | `~/.local/share/condatainer/` |
-
-A build lands as far out as permissions allow, so one copy serves the whole group;
-anyone who wants their own version of a name builds it into their own directory and
-has it win for them. Order *within* a tier is the same both ways.
-
-Each contains `images/` and `helper-scripts/`.
-Recipes are not searched here — they come from the ordered `sources` list.
+Reads go nearest-first, writes furthest-first, across the same four tiers (scratch, user,
+extra-root, app-root) — a build lands as far out as permissions allow, so one copy serves the
+whole group, while anyone who wants their own version builds into their own directory and has it
+win for them. See [`internal/config/README.md`](internal/config/README.md), *Data Directory
+Search*, for the full tier table. Recipes are not searched here — they come from the ordered
+`sources` list.
 
 ## Helper Scripts
 
@@ -132,14 +101,13 @@ Bash scripts in [`cnt-scripts/helpers/`](https://github.com/Justype/cnt-scripts)
 
 ## File Locking
 
-`exec`/`run` hold `LOCK_SH` on `.sqf`/`.sif` files during execution (`.img` skipped — Apptainer flocks
-those itself); `remove` and `build --update` probe `LOCK_EX` before modifying.
-
-**An unwritable image is protected and is never modified or removed.** Clearing the write bit
-(`chmod a-w`) is how an artifact is pinned, a write lock opens `O_RDWR` because that open mode *is*
-the check — never "simplify" it to `O_RDONLY` — and a failed lock's three causes stay distinct:
-`ErrProtected`, `ErrInUse`, and a missing file. See
-[`internal/image/README.md`](internal/image/README.md).
+`exec`/`run` hold `LOCK_SH` on `.sqf`/`.sif` files during execution (`.img` skipped — Apptainer
+flocks those itself); `remove` and `build --update` probe `LOCK_EX` before modifying. **An
+unwritable image is protected and is never modified or removed** — clearing the write bit
+(`chmod a-w`) is how an artifact is pinned. See
+[`internal/image/README.md`](internal/image/README.md) for the three distinct lock-failure causes
+(`ErrProtected`, `ErrInUse`, missing file) and why a write lock must open `O_RDWR` rather than
+`O_RDONLY`.
 
 ## Coding Rules
 

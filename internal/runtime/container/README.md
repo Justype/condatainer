@@ -36,11 +36,13 @@ path.go      Container path utilities
 
 ## What Setup refuses
 
-Two checks run before anything is locked or mounted, because both describe a
+Checks run before anything is locked or mounted, because each describes a
 container that cannot be what the caller asked for:
 
 - `ensureSingleImage` — at most one writable `.img`. Only one can be the
   principal image, and only that one takes a write lock.
+- `ensureAtMostOneSif` — at most one `.sif`. A `.sif`'s only valid use is the
+  exec root (see Root selection), and two of them cannot both be it.
 - `ensureDistinctPrefixes` — no two images claiming one `/cnt/<name>` subtree.
   Overlays are disjoint subtrees, not stacked diffs, so two claiming one prefix
   do not combine: the later mount takes the subtree and the earlier contributes
@@ -53,23 +55,25 @@ container that cannot be what the caller asked for:
 ## Root selection
 
 There is no `-b`/`--base-image` flag: every image a command wants is named the
-same way, through `Overlays`. `Setup` scans the resolved, ordered list once
-for the first root-eligible entry — an `os`, or a plain Apptainer `.sif`
-(Apptainer's own native root format, eligible whether or not it carries
-condatainer metadata — the only way left to run a foreign one directly). A
-manifest still recording the retired `catalog.TypeBase` (`catalog.DeriveType`
-no longer produces it) is not eligible — rebuild it to pick up type `os`.
-`TypeEnv` is excluded even though it merges at root the same way, since an
-environment's identity presupposes a chosen root and so can never supply one.
-Found, that entry is
-pulled out of the list into `SetupResult.Root` and run as the exec root
-instead of getting its own `--overlay` mount; every other entry, root-eligible
-or not, keeps its declared order. Environment and PATH collection still runs
-over the *full* requested list (`Root` included): becoming the exec root
-changes which Apptainer flag carries an overlay, not what it contributes —
-`os` never puts anything on PATH regardless (see Environment Variables
-below), so in practice this only matters for a root that declares its own
-`#ENV:`.
+same way, through `Overlays`. `Setup` pulls the root out of the plain
+requested order, before `orderOverlays`' os/app/data layering runs on
+whatever is left (see Overlay ordering below). A `.sif` wins unconditionally
+when present — `ensureAtMostOneSif` already guarantees there is at most one,
+and root is its only valid use, so it wins regardless of where it falls among
+the requested overlays. Otherwise the first `os`-typed entry, in the order
+requested, wins. A manifest still recording the retired `catalog.TypeBase`
+(`catalog.DeriveType` no longer produces it) is not eligible — rebuild it to
+pick up type `os`. `TypeEnv` is excluded even though it merges at root the
+same way, since an environment's identity presupposes a chosen root and so
+can never supply one.
+
+Found, that entry is pulled out of the list into `SetupResult.Root` and run
+as the exec root instead of getting its own `--overlay` mount. Environment
+and PATH collection still runs over the *full* requested list (`Root`
+included): becoming the exec root changes which Apptainer flag carries an
+overlay, not what it contributes — `os` never puts anything on PATH
+regardless (see Environment Variables below), so in practice this only
+matters for a root that declares its own `#ENV:`.
 
 Not found, `SetupResult.Root` is `""` and the caller supplies the fallback:
 `Setup` cannot build a missing configured default itself (`internal/build`
@@ -157,9 +161,9 @@ fakeroot := container.AutoEnableFakeroot(
 ## Setup Workflow
 
 1. **Resolve overlays** - Name/path → absolute paths
-2. **Validate** - Ensure at most one .img overlay
-3. **Order** - Place .img last (required for writable overlay layer)
-4. **Select root** - Pull the first root-eligible overlay out into `Root` (see Root selection)
+2. **Validate** - At most one `.img`, at most one `.sif`, no two overlays claiming one prefix
+3. **Select root** - Pull it out of the plain requested order into `Root` (see Root selection)
+4. **Order** - Layer what's left: os, then app/data, then a paired env snapshot, then `.img` last (see Overlay Ordering)
 5. **Lock check** - Verify .img availability (exclusive lock if writable)
 6. **Build overlay args** - Add `:ro/:rw` suffixes
 7. **Collect environment** - Resolve `#ENV:` for each overlay (embedded build script, sidecar `.env` overrides), `Root` included
@@ -169,9 +173,14 @@ fakeroot := container.AutoEnableFakeroot(
 
 ## Overlay Ordering
 
-- SquashFS (`.sqf`) overlays are read-only, order matters for file precedence
-- ext3 (`.img`) overlay must be last (writable layer)
-- Automatic reordering ensures correct layering
+`orderOverlays` runs on what's left after root selection has already pulled
+`Root` out (step 3 above), so it never decides which overlay becomes root —
+only how the rest stack once mounted:
+
+1. `os` overlays, in the order requested
+2. `app`/`data` overlays, in the order requested
+3. the one `env`-typed `.sqf` present (autoloaded or explicit)
+4. a writable `.img`, always last — required for it to work as the writable layer
 
 ## Environment Variables
 
@@ -364,11 +373,9 @@ explicitly-listed one would:
   Two `env`-typed `.sqf`s together is still refused: that is still two
   snapshots with no way to tell which one is meant, detected the same way as
   any other prefix collision.
-- **Ordering.** `orderOverlays` places the writable `.img` last and,
-  immediately beneath it, the one `env`-typed `.sqf` present
-  — regardless of where either appeared in the original list. Every other
-  overlay's relative order is untouched; this is one positioning rule for one
-  specific artifact, not a general reordering of `os`/`app`/`data`. The reason
+- **Ordering.** `orderOverlays` (see Overlay Ordering) places the writable
+  `.img` last and, immediately beneath it, the one `env`-typed `.sqf` present
+  — regardless of where either appeared in the original list. The reason
   it matters at all: a directory created with no lower counterpart is
   opaque-marked by `fuse-overlayfs` regardless of intent, so the snapshot has
   to already be mounted underneath by the very first write a fresh `.img`

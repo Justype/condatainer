@@ -92,7 +92,7 @@ With `-l`, a read-only target is an error instead — an explicit layer is never
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `apptainer_bin` | Auto-detected | Path to apptainer or singularity binary — used only where fakeroot is needed (a fakeroot `exec`, and an `os`/`base` `.def` build's own `apptainer build`). Ordinary `exec`/`run` and conda/script builds always use condatainer's own self-provisioned apptainer instead (`condatainer update --libexec`). |
+| `apptainer_bin` | Auto-detected | Path to apptainer or singularity binary — used only where fakeroot is needed (a fakeroot `exec`, and an `os` `.def` build's own `apptainer build`). Ordinary `exec`/`run` and conda/script builds always use condatainer's own self-provisioned apptainer instead (`condatainer update --libexec`). |
 | `scheduler_bin` | Auto-detected | Path to job scheduler binary (sbatch, qsub, bsub, condor_submit, etc.). |
 
 ### Recipe Sources
@@ -170,7 +170,7 @@ which CondaTainer never reads or changes. See
 | `build.compress_args` | `zstd-medium` | mksquashfs compression arguments |
 | `build.block_size` | `128k` | mksquashfs block size for app/env/external overlays (e.g. `128k`, `512k`) |
 | `build.data_block_size` | `512k` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
-| `build.app_tmp_overlay` | `false` | Assemble an **app** build inside a temporary ext3 overlay instead of host directories. Ignored for `data`, `os` and `base` |
+| `build.app_tmp_overlay` | `false` | Assemble an **app** build inside a temporary ext3 overlay instead of host directories. Ignored for `data` and `os` |
 | `build.always_submit` | `false` | Always submit builds as scheduler jobs even if the script has no scheduler directives |
 | `build.app_tmp_overlay_size` | `20480` | Size of that overlay (supports units: `20g`, `20480`); only used when `app_tmp_overlay` is `true` |
 | `channels` | `[conda-forge, bioconda]` | Conda channels passed to micromamba in priority order (first = highest priority) |
@@ -580,7 +580,7 @@ CondaTainer packs every artifact with zstd compression
 no detection, no per-runtime fallback. Every reader condatainer itself
 controls is guaranteed to support it: an ordinary (non-fakeroot) `exec`/`run`
 always mounts through its own self-provisioned apptainer, verified `>= 1.4`
-when it's installed; a fakeroot `exec`, and an `os`/`base` `.def` build's own
+when it's installed; a fakeroot `exec`, and an `os` `.def` build's own
 `apptainer build --fakeroot`, use the system or module apptainer, which a
 fakeroot `exec` version-checks before proceeding.
 

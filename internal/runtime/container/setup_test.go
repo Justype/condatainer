@@ -165,6 +165,41 @@ func TestOrderOverlaysNoImg(t *testing.T) {
 	}
 }
 
+// os overlays sort ahead of everything else, each group keeping its own
+// relative order regardless of how they were interleaved in the request.
+func TestOrderOverlaysOsFirst(t *testing.T) {
+	requireSquashfsTools(t)
+	dir := t.TempDir()
+
+	osA := filepath.Join(dir, "os-a.sqf")
+	packRuntimeSqf(t, osA, meta.Runtime{
+		SchemaVersion: meta.SchemaVersion, Name: "ubuntu24", Type: catalog.TypeOS, Platform: meta.NativePlatform(),
+	})
+	osB := filepath.Join(dir, "os-b.sqf")
+	packRuntimeSqf(t, osB, meta.Runtime{
+		SchemaVersion: meta.SchemaVersion, Name: "cuda-libs", Type: catalog.TypeOS, Platform: meta.NativePlatform(),
+	})
+	appA := filepath.Join(dir, "samtools--1.22.sqf")
+	packRuntimeSqf(t, appA, meta.Runtime{
+		SchemaVersion: meta.SchemaVersion, Name: "samtools/1.22", Type: catalog.TypeApp,
+		Platform: meta.NativePlatform(), Prefix: "/cnt/samtools/1.22",
+	})
+	appB := filepath.Join(dir, "bcftools--1.20.sqf")
+	packRuntimeSqf(t, appB, meta.Runtime{
+		SchemaVersion: meta.SchemaVersion, Name: "bcftools/1.20", Type: catalog.TypeApp,
+		Platform: meta.NativePlatform(), Prefix: "/cnt/bcftools/1.20",
+	})
+	envSqf := filepath.Join(dir, "env.sqf")
+	packRuntimeSqf(t, envSqf, envRuntime())
+	img := filepath.Join(dir, "env.img")
+
+	got := orderOverlays([]string{appA, osA, envSqf, img, appB, osB})
+	want := []string{osA, osB, appA, appB, envSqf, img}
+	if !slices.Equal(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
 // autoloadSnapshot finds a personal snapshot beside a writable .img and adds
 // it to the overlay list, with a diagnostic naming what was autoloaded.
 func TestAutoloadSnapshotFindsPersonalLine(t *testing.T) {
@@ -270,6 +305,57 @@ func TestSelectRootStripsMountSuffix(t *testing.T) {
 	}
 	if len(rest) != 0 {
 		t.Errorf("rest = %v, want empty", rest)
+	}
+}
+
+// A .sif wins root unconditionally when present, regardless of where it
+// falls among the requested overlays — its only valid use is root, unlike an
+// os-typed overlay, which has a legitimate non-root use too.
+func TestSelectRootSifWinsRegardlessOfPosition(t *testing.T) {
+	requireSquashfsTools(t)
+	dir := t.TempDir()
+
+	osSqf := filepath.Join(dir, "cuda-libs.sqf")
+	packRuntimeSqf(t, osSqf, meta.Runtime{
+		SchemaVersion: meta.SchemaVersion, Name: "cuda-libs", Type: catalog.TypeOS, Platform: meta.NativePlatform(),
+	})
+	sif := filepath.Join(dir, "foreign.sif")
+	if err := os.WriteFile(sif, []byte("not a real sif, just needs the extension"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, overlays := range [][]string{{sif, osSqf}, {osSqf, sif}} {
+		root, rest := selectRoot(overlays)
+		if root != sif {
+			t.Errorf("selectRoot(%v) root = %q, want the sif %q", overlays, root, sif)
+		}
+		if !slices.Equal(rest, []string{osSqf}) {
+			t.Errorf("selectRoot(%v) rest = %v, want %v", overlays, rest, []string{osSqf})
+		}
+	}
+}
+
+// Two .sif overlays cannot both be the root, so the request is refused
+// outright rather than silently mounting the loser as a no-op --overlay.
+func TestEnsureAtMostOneSifRefusesTwo(t *testing.T) {
+	err := ensureAtMostOneSif([]string{"/images/a.sif", "/images/b.sif:ro"})
+	if err == nil {
+		t.Fatal("two .sif overlays were accepted")
+	}
+	for _, want := range []string{"/images/a.sif", "/images/b.sif"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+}
+
+// One .sif, or none at all, is the ordinary case.
+func TestEnsureAtMostOneSifAllowsOne(t *testing.T) {
+	if err := ensureAtMostOneSif([]string{"/images/samtools--1.22.sqf", "/images/a.sif"}); err != nil {
+		t.Fatalf("one .sif was refused: %v", err)
+	}
+	if err := ensureAtMostOneSif([]string{"/images/samtools--1.22.sqf"}); err != nil {
+		t.Fatalf("a list with no .sif was refused: %v", err)
 	}
 }
 

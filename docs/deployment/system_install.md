@@ -104,10 +104,11 @@ curl -fsSL -o /opt/condatainer/bin/condatainer \
 chmod 755 /opt/condatainer/bin/condatainer
 
 /opt/condatainer/bin/condatainer config init -l app-root
+/opt/condatainer/bin/condatainer update --libexec
 chmod -R go-w /opt/condatainer
 ```
 
-`config init` detects Apptainer and the scheduler and records them in the shared `config.yaml`, so no user has to. Put it on everyone's `$PATH` with a profile snippet in `/etc/profile.d/condatainer.sh`, or a symlink — symlinks are resolved first, so app-root detection still points back to the real install:
+`config init` detects Apptainer and the scheduler and records them in the shared `config.yaml`, so no user has to. `update --libexec` provisions the self-provisioned toolchain (`mksquashfs`, `squashfuse`, `apptainer`) into the same tier, before the lock-down below makes it read-only. Put it on everyone's `$PATH` with a profile snippet in `/etc/profile.d/condatainer.sh`, or a symlink — symlinks are resolved first, so app-root detection still points back to the real install:
 
 ```bash
 ln -s /opt/condatainer/bin/condatainer /usr/local/bin/condatainer

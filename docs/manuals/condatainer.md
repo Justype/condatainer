@@ -514,14 +514,14 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
 * `--data-block-size [SIZE]`: SquashFS block size for data/reference overlays (e.g. `512k`, `1m`; default: `512k`). Must be a power of two between `4k` and `1m`.
 * `--app-tmp-overlay`: Assemble an **app** build inside a temporary ext3 overlay instead of host directories. Equivalent to setting `build.app_tmp_overlay = true` in config. Can be substantially faster when the build tmp directory is on a network filesystem, and keeps a conda environment's many small files off its inode quota.
 
-  Applies to `app` builds only. A `data` build stages its payload on the host either way — it is a few large files, so an image would buy nothing — and `os`/`base` are definition builds where Apptainer writes the image itself.
+  Applies to `app` builds only. A `data` build stages its payload on the host either way — it is a few large files, so an image would buy nothing — and `os` is a definition build where Apptainer writes the image itself.
 * `--store`: Build into the [store](#store), filed under this build's identity instead of taking the plain name.
 
   It never skips and never replaces. Ordinarily a build of an already-installed name is skipped, and `-u` swaps the installed one out; `--store` is how you get a second build of that name installed alongside the first. It behaves the same when nothing holds the name yet — the build is filed by identity either way, so it stays out of `condatainer list` and out of `exec -o <name>` until you promote it with [`store use`](#store). That is the point of the flag: a build that changes nothing anyone else resolves.
 
   Before building, it works out the identity the build *would* produce and stops if that exact artifact is already installed — a recipe build knows its identity from the recipe and its dependencies, and a Conda build learns it from a solve (`--dry-run`), without creating the environment. So re-running `--store` after a successful one costs a solve, not a build.
 
-  Works with any build that lands in an images directory — a `name/version` recipe, `-n` with packages, `-n -f environment.yml`, `-n --from docker://…`. The one conflict is `-p`/`--prefix`, which names an exact output file while the store generates its filename from the artifact's keys. A bare `-f environment.yml` with no `-n` derives a prefix from the file name, so it conflicts too; give it a `-n`. A `base` image is also refused: it carries no identity key to be filed under.
+  Works with any build that lands in an images directory — a `name/version` recipe, `-n` with packages, `-n -f environment.yml`, `-n --from docker://…`. The one conflict is `-p`/`--prefix`, which names an exact output file while the store generates its filename from the artifact's keys. A bare `-f environment.yml` with no `-n` derives a prefix from the file name, so it conflicts too; give it a `-n`.
 * `--always-submit`: Submit all builds as scheduler jobs, even when the build script has no scheduler directives.
 * `--no-submit`: Disable job submission; build locally even if the build script has scheduler directives.
 * `--remote`: Remote build scripts take precedence over local.
@@ -988,9 +988,10 @@ condatainer exec [flags] [command...]
 * All positional arguments are treated as commands.
 * Read-only by default for `.img` overlays (use `-w` for writable).
 * Defaults to bash if no command specified.
-* There is no separate base-image flag: the container root is the first `-o`
-  overlay that is itself an OS layer, if any; otherwise it's the configured
-  default (built automatically if missing).
+* There is no separate base-image flag: the container root is a `-o` overlay
+  that is a `.sif` if one is given (only one `.sif` is allowed per command),
+  otherwise the first `-o` overlay that is itself an OS layer, if any;
+  otherwise it's the configured default (built automatically if missing).
 * Inside a project — a directory holding `cnt-lock/` — every `-o` name resolves
   through that project's lock instead of by installed name. See below.
 
@@ -1912,7 +1913,7 @@ address when it contains a complete name, then the published OCI title.
 Authentication precedence is `CNT_REGISTRY_TOKEN` plus optional
 `CNT_REGISTRY_USER`, `GITHUB_TOKEN` for `ghcr.io`, the Docker credential store,
 then anonymous access. Versioned tags are immutable unless `push --force` is
-used; version-less base/OS artifacts publish a `YYYYMMDD` tag and `latest`.
+used; version-less OS artifacts publish a `YYYYMMDD` tag and `latest`.
 
 ### Large pushes
 
@@ -2622,7 +2623,8 @@ condatainer update --helper
 condatainer update --libexec
 ```
 
-The default root image (`base` in config, or a source's `default_base`) is otherwise never
+The default root image — `<base>/base` (e.g. `ubuntu24/base`), where `<base>` is `base` in config
+or a source's `default_base` — is otherwise never
 updated on its own: it is built the first time something needs it, the same as any other
 named artifact, and reused until you rebuild it with `condatainer create --update <name>/<version>`.
 Every other command treats it as a prerequisite — `create` builds it alongside the images

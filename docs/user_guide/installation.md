@@ -16,8 +16,12 @@ This page covers installing CondaTainer for personal use. Installing it for othe
 ## Prerequisites
 
 - **Linux (x86_64 only)**: AArch64 is not supported yet.
-- **Apptainer/Singularity**: Required for all core container operations.
-- **squashfs-tools**, **e2fsprogs**: For overlay creation and management.
+- **Apptainer/Singularity**: Required for fakeroot operations — building an OS overlay, or
+  developing against a writable `.img` with root-owned files. Everyday `exec`/`run` use
+  CondaTainer's own self-provisioned copy instead.
+- **e2fsprogs** (`fuse2fs` reachable via `$PATH` or the standard FHS directories): For writable
+  `.img` overlay creation and management. `squashfs-tools` is not required — CondaTainer
+  self-provisions its own.
 
 Most HPC systems have already met these requirements. If not, please contact your system administrator to install them.
 

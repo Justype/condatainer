@@ -72,6 +72,11 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 		return nil, err
 	}
 
+	// Ensure at most one .sif overlay — its only valid use is the root
+	if err := ensureAtMostOneSif(overlays); err != nil {
+		return nil, err
+	}
+
 	// A writable .img looks beside itself for a paired frozen snapshot before
 	// anything else runs, so the snapshot participates in the collision check
 	// and the ordering below like any overlay the caller listed explicitly.
@@ -82,14 +87,14 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 		return nil, err
 	}
 
-	// Put .img overlay last, with a paired env snapshot immediately beneath it
-	overlays = orderOverlays(overlays)
-
-	// Pull the exec root, if requested, out of the mount list — see Root
-	// selection below. Environment/PATH collection still runs over the full
-	// requested list further down: becoming the exec root changes which
-	// Apptainer flag carries an overlay, not what it contributes.
+	// Pull the exec root, if requested, out of the requested order first —
+	// see Root selection below. Environment/PATH collection still runs over
+	// the full requested list further down: becoming the exec root changes
+	// which Apptainer flag carries an overlay, not what it contributes.
 	root, mountOverlays := selectRoot(overlays)
+
+	// Layer what's left for mounting — see orderOverlays.
+	mountOverlays = orderOverlays(mountOverlays)
 
 	// Process overlays and check availability
 	overlayArgs := make([]string, 0, len(mountOverlays))
@@ -301,12 +306,18 @@ func ensureSingleImage(overlays []string) error {
 	return nil
 }
 
-// selectRoot pulls the first root-eligible overlay out of overlays to be run
-// as the exec root instead of mounted with --overlay. TypeEnv is excluded
-// even though it merges at root the same way: an environment's identity
-// presupposes a chosen root, so it can never supply one. See the README,
-// Root selection.
+// selectRoot pulls the exec root out of overlays, to be run instead of
+// mounted with --overlay. A .sif wins unconditionally when present —
+// ensureAtMostOneSif already guarantees there is at most one, and root is
+// its only valid use — regardless of where it falls among the overlays
+// requested. Otherwise the first os-typed entry, in the order requested,
+// wins; TypeEnv is excluded even though it merges at root the same way,
+// since an environment's identity presupposes a chosen root and so can never
+// supply one. See the README, Root selection.
 func selectRoot(overlays []string) (root string, rest []string) {
+	if root, rest := selectRootWith(overlays, func(p string) bool { return utils.IsSif(p) }); root != "" {
+		return root, rest
+	}
 	return selectRootWith(overlays, isRootEligible)
 }
 
@@ -343,6 +354,21 @@ func isRootEligible(path string) bool {
 	}
 	rt, err := meta.ReadRuntime(path)
 	return err == nil && rt.Type == catalog.TypeOS
+}
+
+// ensureAtMostOneSif checks that at most one .sif overlay is requested — a
+// .sif's only valid use is the exec root, and two of them cannot both be it.
+func ensureAtMostOneSif(overlays []string) error {
+	var sifs []string
+	for _, overlay := range overlays {
+		if path := cleanOverlayPath(overlay); utils.IsSif(path) {
+			sifs = append(sifs, path)
+		}
+	}
+	if len(sifs) > 1 {
+		return fmt.Errorf("only one .sif overlay is allowed, found %d: %s", len(sifs), strings.Join(sifs, ", "))
+	}
+	return nil
 }
 
 // HasRequestedRoot reports whether overlays (as given to SetupConfig.Overlays)
@@ -463,36 +489,43 @@ func autoloadSnapshot(overlays []string) ([]string, []Diagnostic) {
 	return append(overlays, lookup.Path), []Diagnostic{diagnostic}
 }
 
-// orderOverlays puts a writable .img last and, immediately beneath it, the one
-// env-typed .sqf present (autoloaded or explicit) — the newest delta on top of
-// the snapshot it continues from. Every other overlay's relative order is
-// untouched; this is one positioning rule for one specific artifact, not a
-// general reordering of os/app/data.
+// orderOverlays layers overlays for mounting: os overlays first (their own
+// relative order preserved), then app/data (again in its own relative
+// order), then the one env-typed .sqf present (autoloaded or explicit), then
+// a writable .img last. Called on what's left after selectRoot has already
+// pulled the exec root out, so this never decides which overlay becomes root
+// — only how the rest stack once mounted.
 func orderOverlays(overlays []string) []string {
-	var img string
-	var rest []string
+	var img, envSqf string
+	var osOverlays, others []string
 	for _, overlay := range overlays {
-		if utils.IsImg(cleanOverlayPath(overlay)) {
+		path := cleanOverlayPath(overlay)
+		switch {
+		case utils.IsImg(path):
 			img = overlay
-		} else {
-			rest = append(rest, overlay)
+		case envSqf == "" && isEnvSnapshotSqf(path):
+			envSqf = overlay
+		case isOsOverlay(path):
+			osOverlays = append(osOverlays, overlay)
+		default:
+			others = append(others, overlay)
 		}
-	}
-	if img == "" {
-		return rest
 	}
 
-	var envSqf string
-	var others []string
-	for _, overlay := range rest {
-		if envSqf == "" && isEnvSnapshotSqf(cleanOverlayPath(overlay)) {
-			envSqf = overlay
-			continue
-		}
-		others = append(others, overlay)
-	}
+	ordered := make([]string, 0, len(overlays))
+	ordered = append(ordered, osOverlays...)
+	ordered = append(ordered, others...)
 	if envSqf != "" {
-		others = append(others, envSqf)
+		ordered = append(ordered, envSqf)
 	}
-	return append(others, img)
+	if img != "" {
+		ordered = append(ordered, img)
+	}
+	return ordered
+}
+
+// isOsOverlay reports whether path's metadata records Type == catalog.TypeOS.
+func isOsOverlay(path string) bool {
+	rt, err := meta.ReadRuntime(path)
+	return err == nil && rt.Type == catalog.TypeOS
 }

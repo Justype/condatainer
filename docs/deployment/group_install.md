@@ -47,6 +47,12 @@ Write the config at the app-root layer so it applies to everyone using this inst
 
 This detects Apptainer and the scheduler once, for everyone.
 
+Provision the self-provisioned toolchain (`mksquashfs`, `squashfuse`, `apptainer`) once too, so it lands in the same app-root tier and serves the whole group:
+
+```bash
+./bin/condatainer update --libexec
+```
+
 The directory is group-writable, so a member running `condatainer config set` would change this file for the whole group without meaning to. Drop the group write bit:
 
 ```bash

@@ -73,10 +73,10 @@ This often happens when:
 
 ### Use ENV variable (temporary)
 
-Use `CNT_DEFAULT_DISTRO` to temporarily override the default distro for a single command without changing your global config:
+Use `CNT_BASE` to temporarily override the default distro for a single command without changing your global config:
 
 ```bash
-CNT_DEFAULT_DISTRO=ubuntu22 condatainer exec -o myoverlay.sqf bash
+CNT_BASE=ubuntu22 condatainer exec -o myoverlay.sqf bash
 ```
 
 ## What is Included in a Base Image?
@@ -129,7 +129,7 @@ condatainer exec -o pytorch.sqf bash
 Second approach use Ubuntu 22 base image:
 
 ```bash
-CNT_DEFAULT_DISTRO=ubuntu22 condatainer exec -o pytorch.sqf bash
+CNT_BASE=ubuntu22 condatainer exec -o pytorch.sqf bash
 ```
 
 ## Example: R Package Dependencies
