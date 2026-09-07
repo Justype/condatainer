@@ -1,6 +1,6 @@
-// Package artifactcache provides the disposable, fingerprint-validated cache shared by
+// Package cache provides the disposable, fingerprint-validated cache shared by
 // runtime metadata and flat/store image indexing.
-package artifactcache
+package cache
 
 import (
 	"encoding/json"

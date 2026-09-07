@@ -18,6 +18,7 @@ import (
 	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/logging"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
+	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -172,7 +173,11 @@ func Unfreeze(ctx context.Context, opts UnfreezeOptions) (UnfreezeResult, error)
 // Sizes round up to a block, since a conda prefix is mostly small files and
 // summing apparent bytes understates it by orders of magnitude.
 func archiveSize(ctx context.Context, sqf string) (sizeMB, entries int, err error) {
-	out, err := exec.CommandContext(ctx, "unsquashfs", "-ll", sqf).Output()
+	bin, err := toolpath.Resolve("unsquashfs")
+	if err != nil {
+		return 0, 0, err
+	}
+	out, err := exec.CommandContext(ctx, bin, "-ll", sqf).Output()
 	if err != nil {
 		return 0, 0, &tool.Error{Op: "list", Path: sqf, Tool: "unsquashfs", BaseErr: err}
 	}
@@ -235,7 +240,7 @@ func buildImage(ctx context.Context, opts UnfreezeOptions, artifact, target, sta
 	}
 	script += "mke2fs " + strings.Join(args, " ") + "\n"
 
-	if err := mountedRun(ctx, squashfuse, []string{artifact}, upper, script, execpkg.IOFromContext(ctx)); err != nil {
+	if err := MountedRun(ctx, squashfuse, []string{artifact}, upper, script, execpkg.IOFromContext(ctx)); err != nil {
 		os.Remove(target)
 		return fmt.Errorf("build %s: %w", target, err)
 	}
@@ -268,7 +273,11 @@ func dropMetadata(ctx context.Context, img string) error {
 
 // metadataNames lists what the embedded metadata directory holds.
 func metadataNames(ctx context.Context, img, dir string) ([]string, error) {
-	out, err := exec.CommandContext(ctx, "debugfs", "-R", "ls -p "+dir, img).Output()
+	debugfsPath, err := toolpath.Resolve("debugfs")
+	if err != nil {
+		return nil, nil // no metadata directory is not a problem
+	}
+	out, err := exec.CommandContext(ctx, debugfsPath, "-R", "ls -p "+dir, img).Output()
 	if err != nil {
 		return nil, nil // no metadata directory is not a problem
 	}
@@ -284,7 +293,11 @@ func metadataNames(ctx context.Context, img, dir string) ([]string, error) {
 }
 
 func runDebugfs(ctx context.Context, img, script, op string) error {
-	cmd := exec.CommandContext(ctx, "debugfs", "-w", img)
+	debugfsPath, err := toolpath.Resolve("debugfs")
+	if err != nil {
+		return &tool.Error{Op: op, Path: img, Tool: "debugfs", BaseErr: err}
+	}
+	cmd := exec.CommandContext(ctx, debugfsPath, "-w", img)
 	cmd.Stdin = strings.NewReader(script)
 	var out bytes.Buffer
 	cmd.Stdout = &out

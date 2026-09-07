@@ -3,30 +3,25 @@ package build
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
-	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image/freeze"
 	"github.com/Justype/condatainer/internal/logging"
-	"github.com/Justype/condatainer/internal/runtime/container"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
+	"github.com/Justype/condatainer/internal/toolpath"
 )
 
-// metaMountPath is where the staged metadata directory is bound while packing.
-// mksquashfs names an archive root after its source's basename and cannot rename
-// one, so the directory must already be called .cnt when mksquashfs sees it.
-const metaMountPath = "/" + meta.DirName
-
-// sandboxMountPath is where a definition's sandbox is bound while packing. It is
-// an empty directory in every base, so binding over it hides nothing.
-const sandboxMountPath = "/mnt"
-
-// createSquashfs runs mksquashfs inside a container to pack sourceDir into
-// targetPath. metaDir is the staged .cnt directory, packed as a second archive
-// root; empty packs no metadata. A sandbox build passes no metaDir: its .cnt is
-// already inside the tree. The caller must Cleanup(true) on an error.
+// createSquashfs packs sourceDir (and metaDir, if any) into targetPath with
+// mksquashfs, run directly on the host — no container, no Apptainer. Every
+// source is already a plain host path (sandbox, dir mode) or is made one by
+// mounting the scratch .img with fuse2fs (ext3 mode), the same
+// apptainer-free mechanism internal/image/freeze uses to read a .img.
+// isData picks the data block size over the general one. The caller must
+// Cleanup(true) on an error.
 func createSquashfs(ctx context.Context, b *BuildObject, isData bool, sourceDir, metaDir, targetPath string) error {
 	if absTarget, err := filepath.Abs(targetPath); err == nil {
 		targetPath = absTarget
@@ -35,53 +30,11 @@ func createSquashfs(ctx context.Context, b *BuildObject, isData bool, sourceDir,
 	done := watchContext(ctx, "SquashFS creation")
 	defer close(done)
 
-	bashScript, packOverlays, packBindDirs := buildSquashfsOpts(b, isData, sourceDir, metaDir, targetPath)
-
-	// A base packs itself; everything else is packed by a base.
-	baseImage := b.spec.Base
-	if baseImage == "" && b.spec.Image.Type == catalog.TypeBase {
-		baseImage = b.ws.Sandbox
+	mksquashfsBin, err := toolpath.Resolve("mksquashfs")
+	if err != nil {
+		return err
 	}
 
-	opts := execpkg.Options{
-		BaseImage:    baseImage,
-		ApptainerBin: config.Global.ApptainerBin,
-		Overlays:     packOverlays,
-		BindPaths:    packBindDirs,
-		Command:      []string{"/bin/bash", "-c", bashScript},
-		HidePrompt:   true,
-		WritableImg:  b.ws.UsesImage(),
-	}
-	if !b.ws.UsesImage() {
-		opts.ApptainerFlags = []string{"--writable-tmpfs"}
-	}
-
-	// The sandbox is reported by its host path: sourceDir is where it is bound
-	// inside the packing container, which names nothing the user has.
-	source := sourceDir
-	if b.ws.UsesSandbox() {
-		source = b.ws.Sandbox
-	}
-
-	log := logging.FromContext(ctx)
-	log.Debug("creating SquashFS", "name", b.spec.Image.Name, "overlays", opts.Overlays, "bindPaths", opts.BindPaths)
-	log.Info("packing SquashFS", "source", source, "target", targetPath)
-
-	if err := execpkg.Run(ctx, opts, execpkg.IOFromContext(ctx)); err != nil {
-		if isCancelledByUser(err) {
-			return ErrBuildCancelled
-		}
-		return fmt.Errorf("failed to create SquashFS: %w", err)
-	}
-
-	return nil
-}
-
-// buildSquashfsOpts constructs the bash script, overlay list, and bind dirs for
-// mksquashfs. The three cases are the workspace's three modes and nothing else:
-// a sandbox packs itself, an ext3 scratch image is mounted, dir mode binds a
-// host path.
-func buildSquashfsOpts(b *BuildObject, isData bool, sourceDir, metaDir, targetPath string) (bashScript string, overlays, bindDirs []string) {
 	ncpus := b.effectiveNcpus()
 	compressArgs := config.Global.Build.CompressArgs
 	blockSize := config.Global.Build.BlockSize
@@ -89,45 +42,92 @@ func buildSquashfsOpts(b *BuildObject, isData bool, sourceDir, metaDir, targetPa
 		blockSize = config.Global.Build.DataBlockSize
 	}
 
-	// One archive root per source, which is what puts /cnt/... and /.cnt/... at
-	// the same level without copying the metadata into the payload.
-	sources := []string{sourceDir}
-	bindDirs = container.DeduplicateBindPaths(getAllBaseDirs())
+	log := logging.FromContext(ctx)
+	io := execpkg.IOFromContext(ctx)
 
-	if b.ws.UsesSandbox() {
-		// The sandbox is the container root, so its own contents are at / along
-		// with apptainer's runtime binds. Bind it a second time and pack that,
-		// or mksquashfs would descend into the host.
-		overlays = []string{}
-		bindDirs = append(bindDirs, b.ws.Sandbox+":"+sandboxMountPath, filepath.Dir(targetPath))
-		bashScript = squashfsScript([]string{sandboxMountPath}, targetPath, ncpus, blockSize, compressArgs, false)
-		return bashScript, overlays, bindDirs
-	}
-
+	var runErr error
 	if b.ws.UsesImage() {
-		// sourceDir is a path inside the image, so only the staged metadata has
-		// to come in from the host.
-		overlays = []string{b.ws.Overlay}
-		if metaDir != "" {
-			sources = append(sources, metaMountPath)
-			bindDirs = append(bindDirs, metaDir+":"+metaMountPath)
-		}
+		log.Info("packing SquashFS", "source", "/cnt", "target", targetPath)
+		runErr = packFromScratchImage(ctx, b, metaDir, targetPath, mksquashfsBin, ncpus, blockSize, compressArgs, io)
 	} else {
-		// Dir mode: sourceDir is a host path; bind it and the output dir.
-		overlays = []string{}
-		bindDirs = append(bindDirs, sourceDir, filepath.Dir(targetPath))
-		if metaDir != "" {
-			// A host path already named .cnt, so it is its own source.
-			sources = append(sources, metaDir)
-			bindDirs = append(bindDirs, metaDir)
+		source := sourceDir
+		if b.ws.UsesSandbox() {
+			source = b.ws.Sandbox
 		}
+		sources, keepAsDirectory := packSources(b, sourceDir, metaDir, "")
+		log.Debug("creating SquashFS", "name", b.spec.Image.Name, "sources", sources)
+		log.Info("packing SquashFS", "source", source, "target", targetPath)
+		script := squashfsScript(mksquashfsBin, sources, targetPath, ncpus, blockSize, compressArgs, keepAsDirectory)
+		runErr = runHostScript(ctx, script, io)
 	}
 
-	bashScript = squashfsScript(sources, targetPath, ncpus, blockSize, compressArgs, true)
-	return
+	if runErr != nil {
+		if isCancelledByUser(runErr) {
+			return ErrBuildCancelled
+		}
+		return fmt.Errorf("failed to create SquashFS: %w", runErr)
+	}
+
+	return nil
 }
 
-// squashfsScript renders the mksquashfs invocation.
+// packSources decides mksquashfs's source list, and whether a lone source
+// keeps its own directory name in the archive, for the workspace's mode.
+// ext3Base is the fuse2fs mount's upper/ directory and is only consulted for
+// ext3 mode; the other two modes' paths are already host paths.
+func packSources(b *BuildObject, sourceDir, metaDir, ext3Base string) (sources []string, keepAsDirectory bool) {
+	if b.ws.UsesSandbox() {
+		// The sandbox is the container root apptainer wrote: its own contents
+		// belong at the archive root, dotfiles and all, not nested under the
+		// directory's name.
+		return []string{b.ws.Sandbox}, false
+	}
+	if b.ws.UsesImage() {
+		sources = []string{filepath.Join(ext3Base, "cnt")}
+	} else {
+		sources = []string{sourceDir}
+	}
+	if metaDir != "" {
+		// A host path already named .cnt (staged by stageMetadata), so it is
+		// its own source — mksquashfs names an archive root after a source's
+		// basename and cannot rename one.
+		sources = append(sources, metaDir)
+	}
+	return sources, true
+}
+
+// packFromScratchImage mounts the build's scratch .img read-only with
+// fuse2fs, inside freeze.MountedRun's unprivileged namespace, and packs from
+// there. Read-only because packing only reads; the mount is torn down (and
+// its mountpoint removed) the moment mksquashfs finishes.
+func packFromScratchImage(ctx context.Context, b *BuildObject, metaDir, targetPath, mksquashfsBin string, ncpus int, blockSize, compressArgs string, io execpkg.IO) error {
+	fuse2fsBin, err := toolpath.Resolve("fuse2fs")
+	if err != nil {
+		return err
+	}
+	mnt := filepath.Join(b.ws.TmpDir, "pack-mnt")
+	if err := os.MkdirAll(mnt, 0o755); err != nil {
+		return fmt.Errorf("create pack mountpoint: %w", err)
+	}
+	defer os.RemoveAll(mnt)
+
+	sources, keepAsDirectory := packSources(b, "", metaDir, filepath.Join(mnt, freeze.UpperDir))
+	script := squashfsScript(mksquashfsBin, sources, targetPath, ncpus, blockSize, compressArgs, keepAsDirectory)
+	return freeze.MountedRun(ctx, fuse2fsBin, []string{"-o", "ro", b.ws.Overlay}, mnt, script, io)
+}
+
+// runHostScript runs script with /bin/bash directly on the host, wiring the
+// caller's own IO — no container involved.
+func runHostScript(ctx context.Context, script string, io execpkg.IO) error {
+	cmd := exec.CommandContext(ctx, "/bin/bash", "-c", script)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = io.Stdin, io.Stdout, io.Stderr
+	return cmd.Run()
+}
+
+// squashfsScript renders the mksquashfs invocation. mksquashfsBin is already
+// resolved (toolpath.Resolve, in createSquashfs) — packing must not trigger a
+// first-time libexec download, and by the time this runs resolution has
+// already succeeded or createSquashfs has already returned its error.
 //
 // keepAsDirectory only affects a lone source, where it keeps that directory
 // instead of unwrapping it into the archive root; with two sources mksquashfs
@@ -142,7 +142,7 @@ func buildSquashfsOpts(b *BuildObject, isData bool, sourceDir, metaDir, targetPa
 //
 // -quiet suppresses the final filesystem statistics but leaves the progress bar
 // enabled. Do not pair it with -no-progress: progress is the useful build output.
-func squashfsScript(sources []string, targetPath string, ncpus int, blockSize, compressArgs string, keepAsDirectory bool) string {
+func squashfsScript(mksquashfsBin string, sources []string, targetPath string, ncpus int, blockSize, compressArgs string, keepAsDirectory bool) string {
 	keep := ""
 	if keepAsDirectory {
 		keep = "-keep-as-directory "
@@ -150,6 +150,6 @@ func squashfsScript(sources []string, targetPath string, ncpus int, blockSize, c
 	return fmt.Sprintf(`
 trap 'exit 130' INT TERM
 echo "Packing overlay to SquashFS..."
-mksquashfs %s %s -processors %d -b %s %s-all-root -no-xattrs -quiet %s
-`, strings.Join(sources, " "), targetPath, ncpus, blockSize, keep, compressArgs)
+%s %s %s -processors %d -b %s %s-all-root -no-xattrs -quiet %s
+`, mksquashfsBin, strings.Join(sources, " "), targetPath, ncpus, blockSize, keep, compressArgs)
 }

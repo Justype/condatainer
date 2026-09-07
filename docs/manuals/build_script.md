@@ -151,15 +151,15 @@ URL supplies its help link.
 When **CondaTainer** processes the build script, it will ensure that all specified dependencies are available and load them in the same order as listed.
 
 **Only a `#TYPE:data` recipe may declare `#DEP:`.** A build that finds one on an
-app, an OS layer, or a base stops with an error. A `#DEP:` is what must be
+app or an OS layer stops with an error. A `#DEP:` is what must be
 *mounted while the recipe runs*, and only a dataset genuinely needs that —
 producing an index requires the tool that produces it. An app is prebuilt and
-self-contained (a Conda environment, or a package carrying its own libraries), an
-OS layer is self-contained by definition, and a base *is* the build environment.
-A recipe that genuinely needs a compiler should be an OS layer providing that
-toolchain, not an app depending on one.
+self-contained (a Conda environment, or a package carrying its own libraries), and an
+OS layer is self-contained by definition. A recipe that genuinely needs a
+compiler should be an OS layer providing that toolchain, not an app depending
+on one.
 
-A `#DEP:` may name an app, a dataset, or an OS layer, but never a base.
+A `#DEP:` may name an app, a dataset, or an OS layer.
 
 **In a build script a `#DEP:` is a `name/version`, never an overlay path.** `#DEP:overlays/tool.sqf`
 and `#DEP:env.img` are rejected. A build's declaration becomes an edge recorded in the finished
@@ -248,9 +248,8 @@ SquashFS block size, and where the build works.
 - `#TYPE:app` (default): fast local scratch, honouring `$CNT_TMPDIR`.
 - `#TYPE:data`: the stable data-dir tmp, or — for an external build — alongside the target prefix.
 
-Only `app` and `data` are accepted, and only on a script recipe: a `.def` is a
-`base` when its name ends in `/base` and an `os` otherwise, so declaring `#TYPE:`
-on one is an error.
+Only `app` and `data` are accepted, and only on a script recipe: a `.def` is
+always `os`, so declaring `#TYPE:` on one is an error.
 
 ```bash
 #TYPE:app
@@ -266,7 +265,7 @@ the recipe collection's validator rejects the value for exactly that reason.
 
 `#ARCH:` declares that a payload runs anywhere, rather than only on the
 architecture it was built on. It applies to script recipes of either type; a
-Conda app, an OS layer, and a base may not declare it.
+Conda app and an OS layer may not declare it.
 
 ```bash
 #ARCH:noarch     ## jar files; the JRE comes from the runtime
@@ -308,7 +307,7 @@ validation error; omitting it leaves the question unanswered, and the recipe's
 |---|---|
 | `#REDISTRIBUTE: no` | **never**, whatever the type, and no flag overrides it |
 | `#REDISTRIBUTE: yes` | yes, whatever the type |
-| nothing, and it is `base` or `os` | yes — a container root, and packages from a public distribution |
+| nothing, and it is `os` | yes — a container root, and packages from a public distribution |
 | nothing, and it is `data` | yes — the type asserts public reference data and the indexes built from it |
 | nothing, and it is an `app` | **no** — someone else's software with unstated terms |
 
@@ -579,22 +578,28 @@ OS scripts are Apptainer definition files (`.def`) for distro-level system tools
 - Use these for tools that are not available as conda packages and need a full distro environment.
 - Prefer an existing upstream container image (via `Bootstrap: docker`) over building from source.
 
-### The base
+### Choosing a container root
 
-A definition named `<distro>/base` builds the container root itself, and every
-other build runs inside it. Before packing, CondaTainer checks that the finished
-root can serve those builds and refuses one that cannot:
+Any `os` overlay can serve as the container root — root selection happens per
+invocation, at run time, not by declaring a special type. `config base` names
+the one CondaTainer builds by default and falls back to when nothing else in
+the requested overlays is root-eligible; a project's own recipe collection may
+still name it `<distro>/base` for readability, but that name carries no
+special meaning to the type system.
+
+Before packing any `.def` build, CondaTainer checks that its finished sandbox
+can serve a build that might later run inside it, and refuses one that cannot:
 
 | Tool | From | |
 | --- | --- | --- |
-| `/bin/bash` | bash | required, **at that exact path** — every script CondaTainer runs inside a base is launched as `/bin/bash`, a recipe included |
-| `mksquashfs` | squashfs-tools | required — every artifact is packed with it |
-| `micromamba` | — | required — every conda environment is built with it |
-| `apptainer` | — | optional — needed only to mount an image inside the container; a base without it warns |
+| `/bin/bash` | bash | required, **at that exact path** — every script CondaTainer runs inside a chosen root is launched as `/bin/bash`, a recipe included |
+| `apptainer` | — | optional — needed only to mount an image inside the container; a sandbox without it warns |
 
-Apart from `/bin/bash`, they must be on the `PATH` the container sets, since
-that is how the scripts running inside it invoke them. Tools CondaTainer runs on the host instead —
-`unsquashfs`, `debugfs`, `e2fsck`, `resize2fs`, `mke2fs` — are not the base's concern.
+Packing (`mksquashfs`) and conda installs (`micromamba`) run through
+CondaTainer's own self-provisioned toolchain, not whatever the root happens to
+carry, so neither is checked here. Tools CondaTainer runs on the host instead —
+`unsquashfs`, `debugfs`, `e2fsck`, `resize2fs`, `mke2fs` — are host
+prerequisites, not a root's concern either.
 
 ### OS Templates
 

@@ -103,7 +103,7 @@ func TestParseRecipeReadsAnnotationsAnywhere(t *testing.T) {
 
 	// A .def has no shebang and needs no exception.
 	def := parse(t, "ubuntu24/base.def", "#DESC:base\n\nBootstrap: docker\n")
-	if def.Name != "ubuntu24/base" || def.Type != TypeBase || def.Description != "base" {
+	if def.Name != "ubuntu24/base" || def.Type != TypeOS || def.Description != "base" {
 		t.Errorf("def = %q/%q/%q", def.Name, def.Type, def.Description)
 	}
 }

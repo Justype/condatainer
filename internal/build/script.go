@@ -227,14 +227,13 @@ fi
 	}
 
 	opts := execpkg.Options{
-		BaseImage:    b.spec.Base,
-		ApptainerBin: config.Global.ApptainerBin,
-		Overlays:     overlays,
-		BindPaths:    bindDirs,
-		EnvSettings:  envSettings,
-		Command:      []string{"/bin/bash", "-c", bashScript},
-		HidePrompt:   true,
-		WritableImg:  b.ws.UsesImage(),
+		BaseImage:   b.spec.Base,
+		Overlays:    overlays,
+		BindPaths:   bindDirs,
+		EnvSettings: envSettings,
+		Command:     []string{"/bin/bash", "-c", bashScript},
+		HidePrompt:  true,
+		WritableImg: b.ws.UsesImage(),
 	}
 	if !b.ws.UsesImage() {
 		opts.ApptainerFlags = []string{"--writable-tmpfs"}

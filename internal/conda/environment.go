@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-)
 
-const micromambaPath = "/usr/bin/micromamba"
+	"github.com/Justype/condatainer/internal/toolpath"
+)
 
 // Environment is the mounted conda prefix managed by an in-container command.
 type Environment struct {
@@ -64,11 +64,16 @@ func resolveEnvironment(requireWritable, allowInitialize bool) (*Environment, er
 		return nil, fmt.Errorf("conda environment path is not a directory: %s", root)
 	}
 
+	mmPath, err := toolpath.Resolve("micromamba")
+	if err != nil {
+		return nil, err
+	}
+
 	env := &Environment{
 		Root:            root,
 		CondarcPath:     filepath.Join(root, ".condarc"),
 		PinnedPath:      filepath.Join(root, "conda-meta", "pinned"),
-		Micromamba:      micromambaPath,
+		Micromamba:      mmPath,
 		DefaultChannels: splitRuntimeChannels(os.Getenv("CNT_CONDA_CHANNELS")),
 		Writable:        writable,
 	}

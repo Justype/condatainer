@@ -13,9 +13,9 @@ import (
 
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/logging"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
+	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -52,7 +52,8 @@ type PackOptions struct {
 func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation) error {
 	log := logging.FromContext(ctx)
 
-	if err := tool.CheckDependencies([]string{"mksquashfs"}); err != nil {
+	mksquashfsBin, err := toolpath.Resolve("mksquashfs")
+	if err != nil {
 		return err
 	}
 
@@ -106,7 +107,7 @@ func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation
 		upper = mnt
 		route = "mount"
 		mount = func(work string) error {
-			return mountedRun(ctx, fuse2fs, []string{"-o", "ro", img}, mnt, work, execpkg.IOFromContext(ctx))
+			return MountedRun(ctx, fuse2fs, []string{"-o", "ro", img}, mnt, work, execpkg.IOFromContext(ctx))
 		}
 	}
 	upper = filepath.Join(upper, UpperDir)
@@ -121,7 +122,7 @@ func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation
 		packSources = append(packSources, path.Join(upper, s))
 	}
 
-	script := packScript(packSources, target, args, opts)
+	script := packScript(packSources, target, args, opts, mksquashfsBin)
 	log.Info("packing frozen environment",
 		"source", opts.Image, "target", opts.Target, "route", route,
 		"roots", strings.Join(sources, " "), "deletions", tr.Deletions())
@@ -155,7 +156,8 @@ func AppendMeta(ctx context.Context, opts PackOptions) error {
 	if opts.MetaDir == "" {
 		return fmt.Errorf("no metadata staged to append to %s", opts.Target)
 	}
-	if err := tool.CheckDependencies([]string{"mksquashfs"}); err != nil {
+	mksquashfsBin, err := toolpath.Resolve("mksquashfs")
+	if err != nil {
 		return err
 	}
 	target, err := filepath.Abs(opts.Target)
@@ -191,7 +193,7 @@ func AppendMeta(ctx context.Context, opts PackOptions) error {
 	}
 
 	cmd := exec.CommandContext(ctx, "/bin/bash", "-c",
-		fmt.Sprintf("trap 'exit 130' INT TERM\nmksquashfs %s\n", strings.Join(args, " ")))
+		fmt.Sprintf("trap 'exit 130' INT TERM\n%s %s\n", mksquashfsBin, strings.Join(args, " ")))
 	// Silent unless it fails.
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
@@ -293,7 +295,7 @@ func processors(n int) int {
 // packScript renders the mksquashfs invocation. -no-xattrs for the reason
 // build/squashfs.go gives; nothing here needs them, since an opaque directory's
 // xattr is re-expressed as whiteouts precisely because it could not be carried.
-func packScript(sources []string, target string, translation []string, opts PackOptions) string {
+func packScript(sources []string, target string, translation []string, opts PackOptions, mksquashfsBin string) string {
 	args := []string{
 		strings.Join(sources, " "), target,
 		"-noappend", "-keep-as-directory", "-all-root", "-no-xattrs", "-quiet",
@@ -306,5 +308,5 @@ func packScript(sources []string, target string, translation []string, opts Pack
 	if opts.CompressArgs != "" {
 		args = append(args, opts.CompressArgs)
 	}
-	return fmt.Sprintf("trap 'exit 130' INT TERM\nmksquashfs %s\n", strings.Join(args, " "))
+	return fmt.Sprintf("trap 'exit 130' INT TERM\n%s %s\n", mksquashfsBin, strings.Join(args, " "))
 }

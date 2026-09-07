@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"syscall"
 
 	"github.com/Justype/condatainer/internal/image/tool"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
 )
 
-// mountedRun mounts fuseBin at mnt inside a fresh, unprivileged mount+user
+// MountedRun mounts fuseBin at mnt inside a fresh, unprivileged mount+user
 // namespace, waits for the mount to appear, runs work (a bash script fragment
 // that sees mnt as an ordinary directory), then ends the mount by killing the
 // FUSE process. fuseArgs holds every flag the tool needs; mnt is appended.
+// Exported so internal/build's own SquashFS packing can read a scratch .img
+// the same apptainer-free way, not just this package's own freeze/unfreeze.
 //
 // `unshare --mount --user --map-root-user` is what lets an ordinary user call
 // mount() at all: it maps namespace-uid 0 to the real caller, which is enough
@@ -25,7 +28,7 @@ import (
 // tears down its own session instead, and the whole namespace — mount
 // included — disappears the moment nothing is left running in it, so a killed
 // or crashed run leaks nothing.
-func mountedRun(ctx context.Context, fuseBin string, fuseArgs []string, mnt string, work string, io execpkg.IO) error {
+func MountedRun(ctx context.Context, fuseBin string, fuseArgs []string, mnt string, work string, io execpkg.IO) error {
 	if err := tool.CheckDependencies([]string{"unshare"}); err != nil {
 		return err
 	}
@@ -44,7 +47,7 @@ func mountedRun(ctx context.Context, fuseBin string, fuseArgs []string, mnt stri
 %s -f %s &
 fpid=$!
 for i in $(seq 1 50); do grep -qF ' %s ' /proc/mounts && break; sleep 0.1; done
-grep -qF ' %s ' /proc/mounts || { echo "mount never appeared" >&2; exit 1; }
+grep -qF ' %s ' /proc/mounts || { echo "mount never appeared" >&2; kill $fpid 2>/dev/null; wait $fpid 2>/dev/null; exit 1; }
 ( %s )
 rc=$?
 kill $fpid 2>/dev/null
@@ -56,5 +59,20 @@ exit $rc
 	cmd.Stdin = io.Stdin
 	cmd.Stdout = io.Stdout
 	cmd.Stderr = io.Stderr
+
+	// unshare execve's directly into bash (no --fork, no --pid here), so
+	// cmd.Process.Pid is bash's own pid, and the backgrounded FUSE process is
+	// bash's child in the same process group by default (a non-interactive
+	// `bash -c` never enables job control, so it never gives that background
+	// job a group of its own). Go's default ctx-cancellation kills only the
+	// single tracked pid, which would orphan the FUSE process — the last
+	// thing still holding the mount and the namespace open, so it would keep
+	// both alive indefinitely. Setpgid puts the whole tree in its own group
+	// so Cancel can kill all of it at once instead.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+
 	return cmd.Run()
 }

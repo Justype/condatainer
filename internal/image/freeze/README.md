@@ -13,7 +13,7 @@ identity.go   TreeIdentity: hash the packed payload
 unfreeze.go   Unfreeze: rebuild a writable image from an artifact
 walk.go       Walk: list an overlay's upper/ via debugfs, no mount
 dump.go       dumpUpper: copy upper/ out via debugfs rdump, no mount
-mount.go      mountedRun: the one FUSE-mount primitive every mount site uses
+mount.go      MountedRun: the one FUSE-mount primitive every mount site uses
 fuse2fs.go    Resolve fuse2fs/squashfuse on PATH
 tools.go      Build-tool provenance recorded in the manifest
 whiteout.go   §2.4a whiteout translation
@@ -33,9 +33,13 @@ SquashFS is 2.4x cheaper to read than a mounted `.img`'s `fuse2fs`, and
 `mke2fs -d` needs a live mount specifically because it can discover whiteout
 device nodes via `stat()` that an unprivileged extraction (`unsquashfs -d`)
 cannot create at all (see `Unfreeze`'s doc comment). That mount is `mount.go`'s
-`mountedRun`, and it needs no container either.
+`MountedRun`, and it needs no container either. Exported — `internal/build`'s
+own SquashFS packer (`squashfs.go`'s `packFromScratchImage`) reuses it
+directly to read a build's scratch `.img`, the same apptainer-free way, so
+mksquashfs's package-time reads never need a container any more than this
+package's own do.
 
-## `mountedRun`: the mount, without Apptainer
+## `MountedRun`: the mount, without Apptainer
 
 A bare, unprivileged FUSE mount can be refused outright (`Operation not
 permitted`) depending on the host: `fusermount3`'s usual escalation path is a

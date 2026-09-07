@@ -2,7 +2,6 @@ package meta
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/image/tool"
+	"github.com/Justype/condatainer/internal/toolpath"
 )
 
 func TestValidateRuntimeAcceptsEachType(t *testing.T) {
@@ -188,7 +188,7 @@ func TestReadRuntimeWithoutDocument(t *testing.T) {
 	if !errors.Is(err, ErrNoRuntime) {
 		t.Fatalf("err = %v, want ErrNoRuntime", err)
 	}
-	if errors.Is(err, tool.ErrToolMissing) || errors.Is(err, tool.ErrCorrupt) {
+	if errors.Is(err, toolpath.ErrToolMissing) || errors.Is(err, tool.ErrCorrupt) {
 		t.Errorf("missing runtime metadata was reported as a host or archive fault: %v", err)
 	}
 }
@@ -383,51 +383,4 @@ func TestCacheRemembersMissingRuntime(t *testing.T) {
 	if _, found := runtimeCache.Lookup(abs, fi); found {
 		t.Error("Forget left the entry behind")
 	}
-}
-
-// A base image is the container root. The three verdicts differ in kind: metadata
-// that names another type is a real mismatch, while a missing or unreadable
-// document says nothing about the image and must not block a build.
-// The verdict is a function of what the read produced, so each case is stated as
-// that pair rather than packed into an image and read back out.
-func TestCheckBase(t *testing.T) {
-	baseRuntime := Runtime{
-		SchemaVersion: SchemaVersion,
-		Name:          "ubuntu24/base",
-		Type:          catalog.TypeBase,
-		Platform:      NativePlatform(),
-	}
-
-	t.Run("accepts a base image", func(t *testing.T) {
-		if err := checkBaseRuntime(baseRuntime, nil, "base.sqf"); err != nil {
-			t.Errorf("base image rejected: %v", err)
-		}
-	})
-
-	t.Run("rejects another type", func(t *testing.T) {
-		err := checkBaseRuntime(validRuntime(), nil, "app.sqf")
-		if err == nil {
-			t.Fatal("an app image was accepted as a container root")
-		}
-		if !strings.Contains(err.Error(), string(catalog.TypeApp)) {
-			t.Errorf("err = %v, want it to name the type it found", err)
-		}
-	})
-
-	t.Run("accepts an image with no metadata", func(t *testing.T) {
-		err := checkBaseRuntime(Runtime{}, fmt.Errorf("%w: bare.sqf", ErrNoRuntime), "bare.sqf")
-		if err != nil {
-			t.Errorf("a base predating the format was rejected: %v", err)
-		}
-	})
-
-	t.Run("accepts unreadable metadata", func(t *testing.T) {
-		_, decodeErr := DecodeRuntime([]byte("{not json"), "broken.sqf")
-		if decodeErr == nil {
-			t.Fatal("malformed runtime decoded")
-		}
-		if err := checkBaseRuntime(Runtime{}, decodeErr, "broken.sqf"); err != nil {
-			t.Errorf("an unreadable runtime document stranded the base: %v", err)
-		}
-	})
 }

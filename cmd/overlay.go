@@ -698,9 +698,11 @@ func initCondaInOverlay(ctx context.Context, overlayPath, finalPath, envFile str
 		}
 	}
 
-	// The conda install runs inside the base image. exec finds it on its own but
-	// cannot build one, so a missing base is resolved here.
-	if _, err := resolveBaseImage(ctx, ""); err != nil {
+	// The conda install runs inside the default root. exec finds it on its own
+	// but cannot build one, so a missing one is resolved here — this mounts
+	// only the writable overlay itself, never a root, so there is nothing for
+	// the request to already supply.
+	if _, err := ensureRootBaseImage(ctx, nil); err != nil {
 		return err
 	}
 

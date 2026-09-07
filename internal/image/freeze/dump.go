@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/Justype/condatainer/internal/image/tool"
+	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -24,7 +25,11 @@ const stageMarginMB = 256
 // cannot create a device node, which is why the copy route needs
 // Translation.ForCopy.
 func dumpUpper(ctx context.Context, img, stage string) error {
-	cmd := exec.CommandContext(ctx, "debugfs", "-R", "rdump "+UpperDir+" "+stage, img)
+	debugfsPath, err := toolpath.Resolve("debugfs")
+	if err != nil {
+		return &tool.Error{Op: "dump", Path: img, Tool: "debugfs", BaseErr: err}
+	}
+	cmd := exec.CommandContext(ctx, debugfsPath, "-R", "rdump "+UpperDir+" "+stage, img)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return &tool.Error{Op: "dump", Path: img, Tool: "debugfs", Output: string(out), BaseErr: err}

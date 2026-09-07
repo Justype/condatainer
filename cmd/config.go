@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -506,7 +505,8 @@ var configShowCmd = &cobra.Command{
 		printOverridden("                        ", "build.mem")
 		fmt.Printf("  %-21s %s%s\n", "time:", utils.FormatDuration(config.Global.Build.Defaults.Time), srcTag("build.time"))
 		printOverridden("                        ", "build.time")
-		// Show actual compress_args (may be auto-detected based on apptainer version)
+		// Show the expanded args when a shorthand name (e.g. "zstd-medium")
+		// was configured, since the raw value alone would not be mksquashfs-ready.
 		compressArgs := viper.GetString("build.compress_args")
 		actualCompressArgs := config.Global.Build.CompressArgs
 		if compressArgs != actualCompressArgs {
@@ -847,7 +847,10 @@ Without -l, the layer is chosen from the install layout:
 			return result
 		}
 
-		// Detect the three minimal keys: apptainer_bin, scheduler_bin, build.compress_args
+		// Detect the two host-specific keys: apptainer_bin, scheduler_bin.
+		// build.compress_args is not detected — every artifact is always
+		// zstd-medium, unconditionally (config.LoadDefaults) — but is still
+		// written explicitly so it shows plainly in the generated file.
 		detectedApptainerBin := config.DetectApptainerBin()
 		if detectedApptainerBin == "" {
 			ExitWithError("Neither 'apptainer' nor 'singularity' binary found (checked PATH and 'module avail').")
@@ -859,13 +862,7 @@ Without -l, the layer is chosen from the install layout:
 			viper.Set("scheduler_bin", detectedSchedulerBin)
 		}
 
-		detectedCompression := config.Global.Build.CompressArgs // fallback to runtime default
-		if err := apptainer.SetBin(detectedApptainerBin); err == nil {
-			if version, err := apptainer.GetVersion(); err == nil {
-				config.AutoDetectCompression(apptainer.CheckZstdSupport(version), apptainer.IsSingularity())
-				detectedCompression = config.Global.Build.CompressArgs
-			}
-		}
+		detectedCompression := config.Global.Build.CompressArgs
 		viper.Set("build.compress_args", detectedCompression)
 
 		if err := config.SaveMinimalConfigTo(configPath, detectedApptainerBin, detectedSchedulerBin, detectedCompression, lowerLayersFor(layerType)); err != nil {

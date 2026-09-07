@@ -17,6 +17,7 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/container"
+	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -282,8 +283,12 @@ func BaseDirLister(base string) BaseLister {
 			return out, nil
 		}
 
+		bin, err := toolpath.Resolve("unsquashfs")
+		if err != nil {
+			return nil, err
+		}
 		args := append([]string{"-l", "-d", "", "-no-progress", base}, dirs...)
-		cmd := exec.CommandContext(ctx, "unsquashfs", args...)
+		cmd := exec.CommandContext(ctx, bin, args...)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr

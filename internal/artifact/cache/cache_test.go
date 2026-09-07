@@ -1,4 +1,4 @@
-package artifactcache
+package cache
 
 import (
 	"encoding/json"

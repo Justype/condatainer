@@ -839,6 +839,7 @@ function _collectParams() {
 let _ovTokenKeys = [];
 let _ovExists    = false; // true when cfg-overlay points to an existing .img
 let _ovWritable  = false; // true when that .img is writable
+let _ovSnapshot  = '';    // paired env-typed .sqf (autoloaded, or found with no .img yet)
 
 /* ── Overlay state check (New vs Edit button) ── */
 let _ovCheckTimer = null;
@@ -850,7 +851,7 @@ function _scheduleOvCheck(path) {
 async function _checkOverlayState(path) {
   const btn = gid('ov-new-btn');
   if (!path) {
-    _ovExists = false; _ovWritable = false;
+    _ovExists = false; _ovWritable = false; _ovSnapshot = '';
     btn.textContent = 'New';
     btn.onclick = toggleOverlayCreate;
     gid('ov-edit-form').classList.remove('visible');
@@ -866,11 +867,26 @@ async function _checkOverlayState(path) {
     const st = await r.json();
     _ovExists   = !!st.exists;
     _ovWritable = !!st.writable;
+    _ovSnapshot = st.snapshot || '';
     if (_ovExists && _ovWritable) {
       btn.textContent = 'Edit';
       btn.onclick = toggleOverlayEdit;
       if (gid('ov-edit-form').classList.contains('visible')) {
         _loadOverlayInfo();
+      }
+      if (gid('ov-create-form').classList.contains('visible')) {
+        gid('ov-create-form').classList.remove('visible');
+        _setFormOpen(false);
+      }
+    } else if (_ovSnapshot) {
+      // Third state: no .img yet, but a snapshot sits right where one would
+      // go. Neither "start from scratch" nor "edit what's there" — bootstrap
+      // an empty overlay on top of it, no prompts, no package install.
+      btn.textContent = 'Use Snapshot';
+      btn.onclick = () => useSnapshotOverlay(path);
+      if (gid('ov-edit-form').classList.contains('visible')) {
+        gid('ov-edit-form').classList.remove('visible');
+        _setFormOpen(false);
       }
       if (gid('ov-create-form').classList.contains('visible')) {
         gid('ov-create-form').classList.remove('visible');
@@ -885,6 +901,52 @@ async function _checkOverlayState(path) {
       }
     }
   } catch (_) {}
+}
+
+// Bootstraps an empty overlay on top of the snapshot _checkOverlayState found
+// at path — no create form, no packages: the snapshot already decided what's
+// installed, so the overlay only needs to exist for it to autoload beneath it.
+async function useSnapshotOverlay(path) {
+  if (_startBusy || _opRunning) return;
+  const snapshotName = _ovSnapshot.split('/').pop();
+  const title = 'Creating overlay on ' + snapshotName;
+  const body = {
+    name:             path,
+    cwd:              gid('cfg-cwd').value.trim(),
+    base_packages:    '',
+    extra_packages:   '',
+    post_install_cmd: '',
+  }; // size omitted — the server applies its own default
+  _opRunning = true;
+  _applyStartLock();
+  try {
+    const r = await fetch('/api/overlay/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      showProgressError(title, e.detail || e.error || String(r.status));
+      _opRunning = false;
+      _applyStartLock();
+      return;
+    }
+    const { id } = await r.json();
+    openLogProgress(title, id, async msg => {
+      _opRunning = false;
+      _applyStartLock();
+      if (msg.ok && msg.path) {
+        _setVal('cfg-overlay', msg.path);
+        gid('cfg-overlay').dispatchEvent(new Event('input'));
+        await loadOverlays();
+      }
+    });
+  } catch (e) {
+    _opRunning = false;
+    _applyStartLock();
+    showProgressError(title, String(e));
+  }
 }
 
 /* ── Overlay edit form ───────────────────── */
@@ -1203,7 +1265,7 @@ function _applyStartLock() {
 async function createOverlay() {
   if (_startBusy || _opRunning) return;
   const name = gid('ov-name').value || 'my-env.img';
-  const size  = gid('ov-size').value || '20G';
+  const size  = gid('ov-size').value; // "" defers to the server's own default
 
   // Validate closed comboboxes — non-empty values must be from the list.
   for (const key of _ovTokenKeys) {

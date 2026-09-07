@@ -137,7 +137,8 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 		} else if args != "" {
 			config.Global.Build.CompressArgs = args
 		}
-		// If no compression flag provided, use config default (auto-detected in root.go)
+		// If no compression flag provided, the config default (zstd-medium
+		// unless the user overrode build.compress_args) stands.
 
 		// 4. Override channels if -c was provided
 		if len(createChannels) > 0 {
@@ -616,17 +617,10 @@ func isExternalBuildFile(path string) bool {
 }
 
 // applyStoreOverflow marks a build to be filed under its identity when --store
-// was given, and refuses the one type that has no identity to be filed under.
-//
-// A base carries neither an identity nor an equivalence key — it is never
-// compared, so it was never given one — which the store would otherwise report
-// as an invalid identity long after the build had run.
+// was given.
 func applyStoreOverflow(bo *build.BuildObject) {
 	if !createStore {
 		return
-	}
-	if bo.Spec().Image.Type == catalog.TypeBase {
-		ExitWithError("--store cannot file a base image: a base carries no identity key to file it under.")
 	}
 	bo.SetStoreOverflow(true)
 }

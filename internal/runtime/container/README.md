@@ -24,7 +24,8 @@ path.go      Container path utilities
 - `ApptainerFlags` - Additional flags
 
 **SetupResult** - Processed output ready for execution:
-- `Overlays` - Resolved ordered overlay paths
+- `Root` - The exec root pulled out of `Overlays`, `""` if none requested (see Root selection)
+- `Overlays` - Resolved ordered overlay paths, `Root` excluded
 - `OverlayArgs` - Paths with `:ro/:rw` suffixes
 - `EnvList` - Complete environment variable list
 - `EnvNotes` - Environment descriptions for display
@@ -45,9 +46,45 @@ container that cannot be what the caller asked for:
   do not combine: the later mount takes the subtree and the earlier contributes
   nothing, while both still reach PATH and the environment. Two builds of one
   name are the case this catches — a project's restored copy and a flat install
-  of the same name record the same prefix. A base, an OS image and anything
-  without readable metadata record no prefix and are exempt for free; the same
-  file named twice is redundant, not a collision.
+  of the same name record the same prefix. An OS image and anything without
+  readable metadata record no prefix and are exempt for free; the same file
+  named twice is redundant, not a collision.
+
+## Root selection
+
+There is no `-b`/`--base-image` flag: every image a command wants is named the
+same way, through `Overlays`. `Setup` scans the resolved, ordered list once
+for the first root-eligible entry — an `os`, or a plain Apptainer `.sif`
+(Apptainer's own native root format, eligible whether or not it carries
+condatainer metadata — the only way left to run a foreign one directly). A
+manifest still recording the retired `catalog.TypeBase` (`catalog.DeriveType`
+no longer produces it) is not eligible — rebuild it to pick up type `os`.
+`TypeEnv` is excluded even though it merges at root the same way, since an
+environment's identity presupposes a chosen root and so can never supply one.
+Found, that entry is
+pulled out of the list into `SetupResult.Root` and run as the exec root
+instead of getting its own `--overlay` mount; every other entry, root-eligible
+or not, keeps its declared order. Environment and PATH collection still runs
+over the *full* requested list (`Root` included): becoming the exec root
+changes which Apptainer flag carries an overlay, not what it contributes —
+`os` never puts anything on PATH regardless (see Environment Variables
+below), so in practice this only matters for a root that declares its own
+`#ENV:`.
+
+Not found, `SetupResult.Root` is `""` and the caller supplies the fallback:
+`Setup` cannot build a missing configured default itself (`internal/build`
+would have to import this package's caller to do that, an import cycle), so a
+caller that wants one built calls `HasRequestedRoot(overlays)` *before*
+`Setup` runs, and only resolves/builds the configured default
+(`internal/build.ResolveBase`) when it answers false — building it
+unconditionally would be wasted work, and a needless failure, whenever the
+request already names its own root. `exec.Options.resolveBaseImage` is where
+`Root` and a caller-supplied `BaseImage` are reconciled: `Root` wins when
+present, otherwise the caller's `BaseImage` is kept, falling back to
+`config.GetBaseImage()` (found, never built) as a last resort for callers that
+never call `HasRequestedRoot` at all (`internal/build`'s own container
+invocations, which always set `BaseImage` explicitly and are unaffected by
+this scan either way).
 
 ## Important Diff from Apptainer Flags
 
@@ -122,12 +159,13 @@ fakeroot := container.AutoEnableFakeroot(
 1. **Resolve overlays** - Name/path → absolute paths
 2. **Validate** - Ensure at most one .img overlay
 3. **Order** - Place .img last (required for writable overlay layer)
-4. **Lock check** - Verify .img availability (exclusive lock if writable)
-5. **Build overlay args** - Add `:ro/:rw` suffixes
-6. **Collect environment** - Resolve `#ENV:` for each overlay (embedded build script, sidecar `.env` overrides)
-7. **Deduplicate binds** - Remove conflicting bind paths
-8. **Detect GPU** - Add `--nv` or `--rocm` if available; forced past `autoload_gpu:false` when the caller requested one
-9. **Return result** - Ready-to-use configuration
+4. **Select root** - Pull the first root-eligible overlay out into `Root` (see Root selection)
+5. **Lock check** - Verify .img availability (exclusive lock if writable)
+6. **Build overlay args** - Add `:ro/:rw` suffixes
+7. **Collect environment** - Resolve `#ENV:` for each overlay (embedded build script, sidecar `.env` overrides), `Root` included
+8. **Deduplicate binds** - Remove conflicting bind paths
+9. **Detect GPU** - Add `--nv` or `--rocm` if available; forced past `autoload_gpu:false` when the caller requested one
+10. **Return result** - Ready-to-use configuration
 
 ## Overlay Ordering
 
@@ -192,7 +230,7 @@ already produces for the ordinary multi-overlay case. Without this, `info` on a
 contributes at real mount time.
 
 `BuildPathEnv` is silent for the same reason. Only an `app` contributes, and it
-contributes `<prefix>/bin` unconditionally — `data`, `os` and `base` put nothing
+contributes `<prefix>/bin` unconditionally — `data` and `os` put nothing
 on `PATH`, and an image with no readable metadata contributes nothing at all.
 There is no check that the directory exists: a nonexistent `PATH` entry is
 harmless, while the check would cost one archive read per image per invocation.
@@ -218,6 +256,14 @@ After collection, `DeduplicateBindPaths()` removes conflicting bind paths:
 - Keeps longest/most specific paths
 - Removes parent paths when child is bound
 - Example: `/home/user/data` removes `/home/user`
+
+**One more bind, added by `Setup` itself rather than `BindPaths()`:** when a `.img` conda environment
+is actually mounted (`lastImg != ""`), `Setup` also binds `libexec.Dir()` — the resolved
+self-provisioned toolchain directory, same host-path-equals-container-path convention as everywhere
+else `libexec` is bound. This is what lets `internal/conda`'s in-container `mm`/`env` commands
+resolve `micromamba` via `toolpath.Resolve` once running (see `internal/conda/README.md`) instead of
+assuming the base image carries one. Gated on `lastImg`, not unconditional, because nothing else in
+an ordinary exec/run needs it.
 
 ## GPU Detection
 

@@ -25,6 +25,10 @@ import (
 
 var (
 	runWritableImg bool
+	// runBaseImage holds the resolved default root once ensureRootBaseImage has
+	// run; "" until then, and always "" if the run's own overlays supply a root
+	// (see the container README, Root selection). Not a flag — there is no
+	// -b/--base-image.
 	runBaseImage   string
 	runEnvSettings []string
 	runBindPaths   []string
@@ -87,7 +91,6 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	runCmd.Flags().BoolVarP(&runWritableImg, "writable", "w", false, "Make .img overlays writable (default: read-only)")
 	runCmd.Flags().Bool("writable-img", false, "Alias for --writable")
-	runCmd.Flags().StringVarP(&runBaseImage, "base-image", "b", "", "Base image to use instead of default")
 	runCmd.Flags().StringVarP(&runStdout, "output", "o", "", "Override job stdout path (creates parent dir if needed)")
 	runCmd.Flags().StringVarP(&runStderr, "error", "e", "", "Override job stderr path")
 	runCmd.Flags().StringVar(&runAfterOK, "afterok", "", "Run after jobs succeed (colon-separated IDs, e.g. 123:456)")
@@ -256,14 +259,6 @@ func runScript(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// After the embedded args, which may name a base, and after the dry run,
-	// which must not build one. The script may be submitted to a node that
-	// cannot build, so the base is pinned here rather than resolved there.
-	runBaseImage, err = resolveBaseImage(cmd.Context(), runBaseImage)
-	if err != nil {
-		return err
-	}
-
 	// Passthrough mode: resource directives could not be parsed; condatainer cannot safely
 	// regenerate the scheduler script. Reject submission and direct the user to submit manually.
 	if scheduler.IsPassthrough(scriptSpecs) {
@@ -293,6 +288,15 @@ func runScript(cmd *cobra.Command, args []string) error {
 		if errors.Is(err, errRunAborted) {
 			os.Exit(ExitCodeError)
 		}
+		return err
+	}
+
+	// After the dependencies, which may already supply a root, and after the
+	// dry run, which must not build one. The script may be submitted to a node
+	// that cannot build, so the default root is pinned here rather than
+	// resolved there — unless the script's own overlays already name one.
+	runBaseImage, err = ensureRootBaseImage(cmd.Context(), overlays)
+	if err != nil {
 		return err
 	}
 
@@ -522,7 +526,6 @@ export -f module ml
 		BindPaths:    bindPaths,
 		Fakeroot:     runFakeroot,
 		BaseImage:    runBaseImage,
-		ApptainerBin: config.Global.ApptainerBin,
 		HidePrompt:   true,
 		GpuRequested: gpuRequested,
 	}
@@ -896,11 +899,6 @@ func applyScriptArgs(scriptArgs []string) {
 				runWritableImg = true
 			case "-f", "--fakeroot":
 				runFakeroot = true
-			case "-b", "--base-image":
-				if i+1 < len(parts) {
-					i++
-					runBaseImage = parts[i]
-				}
 			case "--env":
 				if i+1 < len(parts) {
 					i++
@@ -917,10 +915,6 @@ func applyScriptArgs(scriptArgs []string) {
 					runEnvSettings = append(runEnvSettings, v)
 				} else if v, ok := strings.CutPrefix(arg, "--bind="); ok {
 					runBindPaths = append(runBindPaths, v)
-				} else if v, ok := strings.CutPrefix(arg, "-b="); ok {
-					runBaseImage = v
-				} else if v, ok := strings.CutPrefix(arg, "--base-image="); ok {
-					runBaseImage = v
 				}
 			}
 		}

@@ -10,6 +10,7 @@ import (
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -21,7 +22,8 @@ func CheckIntegrity(ctx context.Context, path string, force bool) error {
 		return fmt.Errorf("%s is currently in use — stop any running jobs using it first", utils.StylePath(path))
 	}
 
-	if err := tool.CheckDependencies([]string{"e2fsck"}); err != nil {
+	e2fsckPath, err := toolpath.Resolve("e2fsck")
+	if err != nil {
 		return err
 	}
 
@@ -35,7 +37,7 @@ func CheckIntegrity(ctx context.Context, path string, force bool) error {
 	log.Info(fmt.Sprintf("checking integrity of %s", utils.StylePath(filepath.Base(path))))
 	log.Debug("e2fsck " + strings.Join(args, " "))
 
-	cmd := exec.CommandContext(ctx, "e2fsck", args...)
+	cmd := exec.CommandContext(ctx, e2fsckPath, args...)
 	out, err := cmd.CombinedOutput()
 
 	// e2fsck exit codes: 0 = clean, 1 = errors corrected, 2+ = critical failure.

@@ -23,7 +23,6 @@ run.go       Main Run() execution function
 - `HidePrompt` - Hide environment notes
 - `PassThruStdin` - Forward stdin to container
 - `Command` - Command to execute
-- `ApptainerBin` - Path to apptainer binary
 
 ## Usage
 
@@ -71,20 +70,24 @@ exec.Run(ctx, opts)
 
 ## Execution Flow
 
-1. **Apply defaults** - Fill in missing configuration
-2. **Initialize Apptainer** - Set binary path
-3. **Container setup** - Call `container.Setup()` for:
-   - Overlay resolution and ordering
+1. **Apply defaults** - Fill in missing configuration (command; not the base
+   image or the apptainer binary — both need overlay setup first, see below)
+2. **Container setup** - Call `container.Setup()` for:
+   - Overlay resolution and ordering, and pulling out an exec root if requested
    - Environment collection
    - Bind path deduplication
    - GPU detection
+3. **Resolve base image** - `Root` from step 2 wins if present, else the
+   caller's `BaseImage`, else `config.GetBaseImage()`
 4. **Auto-enable fakeroot** - If writable .img overlay
-5. **Debug output** - Print configuration if debug mode
-6. **Print environment** - Show overlay environments (if interactive and not hidden)
-7. **Acquire file locks** - Hold shared locks on all `.sqf` overlays and the base image for the duration of execution. `.img` overlays are skipped — Apptainer flocks them itself and our lock would conflict. Prevents concurrent `remove` or `build --update` from deleting files in use.
-8. **Inject proxy env** - If an active SOCKS5 proxy is found via `proxy.FindActiveProxy()`, prepend `http_proxy`/`https_proxy`/`all_proxy` (and uppercase variants) to the container environment so tools inside the container use the tunnel.
-9. **Execute** - Call `apptainer.Exec()` with processed configuration
-10. **Release locks** - All file locks released after `apptainer.Exec()` returns
+5. **Resolve the apptainer binary** - `apptainer.ResolveBin(fakeroot)`, now
+   that fakeroot is final — see that package's README for which binary and why
+6. **Debug output** - Print configuration if debug mode
+7. **Print environment** - Show overlay environments (if interactive and not hidden)
+8. **Acquire file locks** - Hold shared locks on all `.sqf` overlays and the base image for the duration of execution. `.img` overlays are skipped — Apptainer flocks them itself and our lock would conflict. Prevents concurrent `remove` or `build --update` from deleting files in use.
+9. **Inject proxy env** - If an active SOCKS5 proxy is found via `proxy.FindActiveProxy()`, prepend `http_proxy`/`https_proxy`/`all_proxy` (and uppercase variants) to the container environment so tools inside the container use the tunnel.
+10. **Execute** - Call `apptainer.Exec()` with processed configuration
+11. **Release locks** - All file locks released after `apptainer.Exec()` returns
 
 ## Environment Display
 
@@ -100,15 +103,20 @@ Can be hidden with `HidePrompt: true`.
 ## Defaults
 
 Missing fields are filled from config:
-- `BaseImage` → `config.GetBaseImage()`
-- `ApptainerBin` → `config.Global.ApptainerBin`
+- `BaseImage` → `Setup`'s `Root` if the requested overlays name one, else
+  `config.GetBaseImage()`
 - `Fakeroot` → `false` (auto-enabled if needed)
+
+There is no `ApptainerBin` field at all: which binary runs is never
+caller-configurable, only decided from the final `Fakeroot` value, by
+`apptainer.ResolveBin` — see that package's README.
 
 The base image is required: there is no overlay-only execution, so a container
 with no root cannot start, and `Prepare` fails rather than letting Apptainer
-report a missing file. It must exist and pass `meta.CheckBase`. Building a
-missing one is the caller's job — this package runs images, it does not make
-them, and `internal/build` is what knows how.
+report a missing file. It must exist — that is the only check; nothing here or
+in `internal/build` reads a manifest's type before accepting something as
+root. Building a missing default root is the caller's job — this package runs
+images, it does not make them, and `internal/build` is what knows how.
 
 ## Stdin Forwarding
 

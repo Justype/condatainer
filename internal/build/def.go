@@ -10,9 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
-	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
@@ -125,11 +123,13 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 		return fmt.Errorf("failed to build sandbox from %s: %w", b.buildSource, err)
 	}
 
-	if b.spec.Image.Type == catalog.TypeBase {
-		if err := checkBaseTools(ctx, b.ws.Sandbox); err != nil {
-			b.Cleanup(true) //nolint:errcheck
-			return err
-		}
+	// Every .def build gets this check, not only the configured default root:
+	// any os build can end up chosen as the exec root at runtime (root
+	// selection is per-invocation, not a declared type), so any of them may
+	// need to run a script/conda build inside it later.
+	if err := checkBaseTools(ctx, b.ws.Sandbox); err != nil {
+		b.Cleanup(true) //nolint:errcheck
+		return err
 	}
 
 	// The metadata goes in after the build rather than through a %files section:
@@ -139,7 +139,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 		return err
 	}
 
-	if err := createSquashfs(ctx, b, false, sandboxMountPath, "", preparedPath); err != nil {
+	if err := createSquashfs(ctx, b, false, b.ws.Sandbox, "", preparedPath); err != nil {
 		os.Remove(preparedPath) //nolint:errcheck
 		b.Cleanup(true)
 		if errors.Is(err, context.Canceled) || apptainer.IsBuildCancelled(err) {
@@ -243,22 +243,24 @@ func copyMetaIntoSandbox(metaDir, sandbox string) error {
 	return nil
 }
 
-// baseTools are the executables a base must provide on PATH, because these are
-// the ones that run inside it: mksquashfs packs every artifact and micromamba
-// builds every conda environment. The rest of what CondaTainer shells out to —
-// unsquashfs, debugfs, e2fsck, resize2fs, mke2fs — runs on the host and is no
-// concern of the base's.
-var baseTools = []string{"mksquashfs", "micromamba"}
+// baseTools are executables a .def build's sandbox must provide on PATH beyond
+// baseToolPaths. Empty: packing (mksquashfs) and conda builds (micromamba)
+// both run through internal/libexec's self-provisioned toolchain now, not
+// whatever the sandbox happens to carry, so nothing about those needs
+// checking here.
+var baseTools = []string{}
 
 // baseToolPaths are wanted at an exact path rather than on PATH. Everything
-// CondaTainer runs inside a base it launches as /bin/bash — a recipe as
-// `bash -euo pipefail`, every pack and unfreeze script the same way — so a base
-// carrying bash only at /usr/bin/bash runs none of them.
+// CondaTainer runs inside a chosen root launches as /bin/bash — a recipe as
+// `bash -euo pipefail`, every pack and unfreeze script the same way — so a
+// sandbox carrying bash only at /usr/bin/bash cannot run any of them.
 var baseToolPaths = []string{"/bin/bash"}
 
-// checkBaseTools refuses a base that cannot serve the builds that will run in
-// it. Apptainer is only needed for nested mounting, so its absence is reported
-// rather than refused.
+// checkBaseTools refuses a sandbox that cannot serve the builds that may run
+// inside it later — any .def build is a candidate root, chosen per invocation
+// rather than by a declared type, so this runs for every one of them, not
+// only the configured default. Apptainer is only needed for nested mounting,
+// so its absence is reported rather than refused.
 //
 // The question is put to the container, with the PATH the container sets,
 // because that is the PATH the scripts using these tools will have. Looking for
@@ -267,10 +269,9 @@ var baseToolPaths = []string{"/bin/bash"}
 func checkBaseTools(ctx context.Context, sandbox string) error {
 	var out bytes.Buffer
 	runErr := execpkg.Run(ctx, execpkg.Options{
-		BaseImage:    sandbox,
-		ApptainerBin: config.Global.ApptainerBin,
-		Command:      []string{"/bin/sh", "-c", baseToolsScript},
-		HidePrompt:   true,
+		BaseImage:  sandbox,
+		Command:    []string{"/bin/sh", "-c", baseToolsScript},
+		HidePrompt: true,
 	}, execpkg.IO{Stdout: &out, Stderr: &out})
 
 	said := out.String()

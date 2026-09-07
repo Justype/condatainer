@@ -240,7 +240,7 @@ func TestPackScriptAlwaysBudgetsCpus(t *testing.T) {
 		{"a budget is honoured", 8, "-processors 8"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			script := packScript([]string{"/src"}, "/out.sqf", nil, PackOptions{Processors: tc.given})
+			script := packScript([]string{"/src"}, "/out.sqf", nil, PackOptions{Processors: tc.given}, "mksquashfs")
 			if !strings.Contains(script, tc.want) {
 				t.Errorf("packScript(Processors=%d) = %q, want it to contain %q", tc.given, script, tc.want)
 			}

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Justype/condatainer/internal/artifactcache"
+	artifactcache "github.com/Justype/condatainer/internal/artifact/cache"
 	"github.com/Justype/condatainer/internal/image"
 )
 

@@ -16,7 +16,7 @@ locals and parameters spell it `typ`.)
 
 | Type | Comes from | Decides |
 |---|---|---|
-| `base` / `os` | a `.def` recipe | — |
+| `os` | a `.def` recipe | — |
 | `app` | `#TYPE:app`, else a one-component name | fast scratch tmp root, `BlockSize` |
 | `data` | `#TYPE:data`, else 2+ components | stable tmp root, `DataBlockSize` |
 
@@ -257,10 +257,11 @@ recipe has run, so every dependency it needed is installed and its exact identit
 identity scheme. A Conda app derives its two keys directly from the exports it
 already embeds.
 
-A base is keyed like any other definition build. Its `keys` block identifies
-the definition plus the upstream image that definition bootstrapped from — both known before Apptainer runs, which is what
-lets a definition build stage its own keys into the sandbox it packs. What makes a base special is that nothing may
-*depend* on it, not that nothing may identify it.
+Every `.def` build is keyed the same way, `os` included — nothing distinguishes
+the configured default root from any other. Its `keys` block identifies the
+definition plus the upstream image that definition bootstrapped from — both
+known before Apptainer runs, which is what lets a definition build stage its
+own keys into the sandbox it packs.
 
 ## The upstream digest
 
@@ -300,7 +301,7 @@ source file is present in `/.cnt`.
 A def build has no packing step, so `writeRecordingDef` appends a `%files`
 section listing each staged file by name. It lists them individually rather than
 naming the directory, since `%files` copies with `cp -a` and would nest the whole
-directory inside a `/.cnt` the base already has.
+directory inside a `/.cnt` the sandbox already has.
 
 Validation runs at staging because that is the only point where bad metadata can
 still stop the build: earlier there is nothing to validate, later the image
@@ -330,46 +331,73 @@ The name is derived from the lock owner rather than recorded, which is how
 5. If no acceptable prebuilt exists, build a sandbox with Apptainer, copy the staged metadata into it, and pack it to `.sqf`
 6. Atomic rename prepared → target; remove lock
 
-**Base image:**
-The definition backend unaltered — a base is a `.sqf` produced the same way, and
-packs itself because no other base is available to pack it. `IsInstalled`
-searches every image path rather than one target, so a base supplied by a shared
-install is not rebuilt into the user's own directory.
+**The configured default root:**
+Built the same way as any other `.def` — a `.sqf` that packs itself, since a
+`.def` build never has `Spec.Base` set (`BuildGraph.resolveBase` skips every
+`BuildTypeDef` node). `IsInstalled` searches every image path rather than one
+target specifically for the build whose name matches `config.BaseRecipeName`,
+so a default root supplied by a shared install is not rebuilt into the user's
+own directory. Every other `.def` build's `IsInstalled` checks its own target
+path only.
 
-## The base image
+## The container root
 
-Script and Conda builds run their install *and* their packing step inside a
-container, so each has an implicit edge to the base image — a build prerequisite,
-separate from anything a recipe declares with `#DEP:`. `BuildGraph.Run` resolves
-it once before any node runs, and records it on every dependent as `Spec.Base`;
-`ResolveBase` builds the configured base first if none is installed.
+Script and Conda builds run their *install* step inside a container, so each
+has an implicit edge to the container root — a build prerequisite, separate
+from anything a recipe declares with `#DEP:`. `BuildGraph.Run` resolves it
+once before any node runs, and records it on every dependent as `Spec.Base`;
+`ResolveBase` builds the configured default root first if none is installed,
+resolving it through the exact same catalog/build path — `NewBuildObject` +
+`NewBuildGraph` + `Run` — every other name takes. There is no dedicated build
+path for it: it is an ordinary `.def` recipe, `catalog.TypeOS` like any other
+— `catalog.DeriveType` no longer derives a distinct type from a `.../base`
+name (`catalog.TypeBase` is retired). A project may still name its default
+root `.../base` for readability; that name carries no special meaning to the
+type system, only to `config.BaseRecipeName`.
 
-A definition bootstraps its own root, so it resolves nothing — which is what lets
-the base's own build run when no base exists yet.
+A `.def` build has no `Spec.Base` of its own: `BuildGraph.resolveBase` skips
+every node whose `BuildType` is `BuildTypeDef`, since a definition bootstraps
+its own root and resolves nothing.
 
-An installed base passes `meta.CheckBase`: no runtime document is fine (bases
-predate the format), an unreadable one warns, and one that reads has to say
-`type: base`.
+**Packing (`createSquashfs`, `squashfs.go`) never runs in a container at
+all, for any workspace mode.** A sandbox and a dir-mode payload are already
+plain host directories — `mksquashfs`, resolved via `toolpath.Resolve` and
+run directly on the host, reads them exactly as it would through a bind
+mount, since a bind mount contributes nothing a direct read doesn't already
+see. An ext3-mode scratch `.img` is read the same apptainer-free way
+`internal/image/freeze` reads one: mounted read-only with `fuse2fs` inside
+`freeze.MountedRun`'s unprivileged namespace (`packFromScratchImage`), never
+through Apptainer's own `--overlay`.
 
-A base build checks its sandbox before packing it, because a base that cannot
-run the builds that will run inside it is worth catching where the definition is
-still in front of the author, not on some later build that fails for a reason
-naming neither. The list is what actually runs *in* the base: `mksquashfs`
-packs and `micromamba` builds conda environments, and `/bin/bash` runs both —
-every `execpkg.Run` from this tool launches that exact path, so it is checked
-as a path and not on PATH. Apptainer is only needed for nested mounting, so it
-warns rather than refuses. Everything else CondaTainer shells out to —
-`unsquashfs`, `debugfs`, `e2fsck`, `resize2fs`, `mke2fs` — runs on the host and
-is not checked here; freeze and unfreeze in particular never enter the base at
-all, mounting through an unprivileged namespace of their own instead (see
-[`internal/image/freeze`](../image/freeze)).
+**The reason a Script/Conda build's *install* step still runs inside a
+container is not tool availability — it's that `$CNT_PREFIX` is baked into
+what gets installed.** Shebangs, activation scripts, and some RPATHs are not
+relocatable, so the install has to happen at the exact absolute path the
+artifact will be mounted at later; the container root is what supplies that
+path. Conda installs (`micromamba`) run through `internal/libexec`'s
+self-provisioned toolchain, not whatever the root happens to carry, so a
+`.def` build no longer scans its sandbox for it. Packing needs no such thing
+— an archive's content does not depend on what process read it off disk.
+
+Every `.def` build — any of them may end up chosen as someone's root, since
+root selection is a per-invocation runtime choice, not a declared type —
+still checks its sandbox for `/bin/bash` before it can be used as one: every
+`execpkg.Run` a later script or Conda install issues launches that exact
+path, so a sandbox carrying bash only elsewhere runs nothing a build inside
+it asks of it. This check has nothing to do with packing the `.def` build's
+own sandbox, which needs no container and so needs no `/bin/bash` of its
+own. It warns (does not refuse) when the sandbox has no `apptainer`, which is
+only needed for nested mounting. Everything else CondaTainer shells out to —
+`unsquashfs`, `debugfs`, `e2fsck`, `resize2fs`, `mke2fs` — runs on the host
+and is not checked here; freeze and unfreeze in particular never enter a
+container at all, mounting through an unprivileged namespace of their own
+instead (see [`internal/image/freeze`](../image/freeze)).
 
 **The question is put to the container, not to the sandbox directory.**
-`command -v` inside it answers with the PATH those tools will actually be found
-on. Testing for files under the sandbox's `bin` directories asks something else
-and gets it wrong in both directions: Apptainer ships its own `mksquashfs` under
-`/usr/libexec`, which exists and is not on PATH, and a base is free to put its
-tools somewhere the list never guessed.
+`command -v` inside it answers with the PATH `/bin/bash` will actually run
+under. Testing for a file under the sandbox's own directories would ask
+something else and could get it wrong: a sandbox is free to put its tools
+somewhere a file-existence check never guessed.
 
 ## BuildGraph Execution
 
@@ -435,7 +463,7 @@ The selected tmp root and the mode are both functions of the type:
 |---|---|---|
 | `app` | `.img` under `build.app_tmp_overlay`, else none | in the image, or host in directory mode |
 | `data` | **never** — see below | always host |
-| `os`, `base` | **never** | the sandbox apptainer writes |
+| `os` | **never** | the sandbox apptainer writes |
 
 The ext3 image is an app-build optimisation: it keeps a conda environment's
 thousands of small files off the host's inode budget. A data payload is a few
@@ -447,10 +475,11 @@ everything downstream reads — never `config.Global` a second time.
 A definition's sandbox is thousands of small files too, and gets no image
 regardless — it cannot. Creating one needs `dd`, `mke2fs` and `debugfs` on the
 host, and writing into one needs it mounted, which needs a container root. The
-first base build has neither. `Workspace.UsesSandbox()` is that mode, and the
-pack reads it to bind the sandbox a second time and pack *that*: the sandbox is
-its own container root, so its contents sit at `/` beside apptainer's runtime
-binds, and mksquashfs would otherwise descend into the host.
+very first `.def` build a fresh install ever runs has neither.
+`Workspace.UsesSandbox()` is that mode, and the pack reads the sandbox
+directly on the host — no container, no bind — unwrapping its contents
+straight into the archive root (`packSources`'s `keepAsDirectory=false`)
+rather than nesting them under the sandbox directory's own name.
 
 Each build type also uses a different base directory for build artifacts:
 
@@ -520,3 +549,11 @@ Build defaults are configured via `build.*` keys in `config.yaml`. See [Config R
 - `"build lock found for <name> ..."` - Lock exists and is active (job pending/running or local build in progress)
 - `"build already queued or running for <name>"` - Duplicate scheduler submission blocked by submit-time lock
 - `"cannot update <name>: ..."` - Target overlay is locked (currently used by a running `exec`/`run`)
+
+**A missing self-provisioned tool fails in Go, before any work starts.**
+`micromambaCmd` and `condaExecOpts` (`conda.go`) return `libexec.ErrNotProvisioned` before the
+install container starts: micromamba has no other legitimate source, so there is nothing to fall
+back to and no reason to spend a container launch finding that out. `createSquashfs`
+(`squashfs.go`) resolves `mksquashfs` the same way, via `toolpath.Resolve`, before rendering any
+script — packing runs on the host now, never in a container, so there is no "the container root
+might already carry it" case left to fall back to either.

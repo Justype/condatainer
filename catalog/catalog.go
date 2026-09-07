@@ -14,8 +14,15 @@ import "strings"
 type Type string
 
 const (
-	TypeBase Type = "base" // produces the container root
-	TypeOS   Type = "os"   // adds to a root that already exists
+	// TypeBase is retired: no recipe derives it any more (DeriveType always
+	// returns TypeOS for a .def, regardless of name), and nothing selects a
+	// container root by type-equals-base. It stays defined only so that an
+	// artifact manifest written before this retirement, which may still
+	// literally record "type": "base", remains a syntactically known type
+	// wherever validation reads one back — it is never produced, and never
+	// specially selected, again.
+	TypeBase Type = "base"
+	TypeOS   Type = "os"   // adds to a root that already exists; any os can be the container root, chosen per invocation
 	TypeApp  Type = "app"  // contributes to PATH
 	TypeData Type = "data" // does not
 	// TypeEnv is what `overlay freeze` captures from a writable overlay. No
@@ -27,14 +34,11 @@ const (
 )
 
 // DeriveType reports the type of a recipe from its path and headers. A .def is
-// base when its name ends in /base, os otherwise; everything else takes #TYPE:
-// when declared, else data at two or more name components. A template counts the
-// components of target, its module path. Only "app" and "data" are accepted.
+// always os; everything else takes #TYPE: when declared, else data at two or
+// more name components. A template counts the components of target, its
+// module path. Only "app" and "data" are accepted.
 func DeriveType(name, target string, isDef bool, declared string) Type {
 	if isDef {
-		if strings.HasSuffix(name, "/base") {
-			return TypeBase
-		}
 		return TypeOS
 	}
 	switch Type(declared) {

@@ -85,7 +85,6 @@ func TestDeriveType(t *testing.T) {
 		declared     string
 		want         Type
 	}{
-		{name: "ubuntu24/base", isDef: true, want: TypeBase},
 		{name: "ubuntu24/build-essential", isDef: true, want: TypeOS},
 		{name: "ubuntu24/r", target: "ubuntu24/r/{version}", isDef: true, want: TypeOS},
 		{name: "cellranger/9.0.1", want: TypeApp},
@@ -97,7 +96,8 @@ func TestDeriveType(t *testing.T) {
 		// #TYPE: overrides app/data only.
 		{name: "cellranger/9.0.1", declared: "data", want: TypeData},
 		{name: "grch38/genome/gencode", declared: "app", want: TypeApp},
-		{name: "ubuntu24/base", isDef: true, declared: "app", want: TypeBase},
+		// #TYPE: has no effect on a .def: every one is os regardless.
+		{name: "ubuntu24/build-essential", isDef: true, declared: "app", want: TypeOS},
 		{name: "cellranger/9.0.1", declared: "nonsense", want: TypeApp},
 	}
 	for _, tt := range tests {

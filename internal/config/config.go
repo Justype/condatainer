@@ -221,10 +221,15 @@ func LoadDefaults(executablePath string) {
 				Time:         DefaultBuildDuration,
 			},
 			AppTmpOverlaySizeMB: DefaultAppTmpOverlaySizeMB,
-			CompressArgs:        ArgsForCompress("lz4"), // zstd only compatible with apptainer version > 1.4
-			BlockSize:           DefaultBlockSize,
-			DataBlockSize:       DefaultDataBlockSize,
-			Channels:            DefaultChannels(),
+			// Every reader is the same binary: libexec's own, always >= 1.4
+			// (verified at provision time) for ordinary exec/run, and a
+			// version-checked system apptainer for fakeroot (apptainer.ResolveBin).
+			// A registry consumer outside condatainer's own exec/run is
+			// responsible for having a compatible apptainer themselves.
+			CompressArgs:  ArgsForCompress("zstd-medium"),
+			BlockSize:     DefaultBlockSize,
+			DataBlockSize: DefaultDataBlockSize,
+			Channels:      DefaultChannels(),
 		},
 	}
 }
@@ -297,9 +302,9 @@ func BaseImageFileName() string {
 
 // GetBaseImage returns the installed base image, searching every image directory.
 //
-// It only ever returns a file that exists. Somewhere a base could be written is
-// a different question, answered by GetBaseImageWritePath — conflating the two
-// used to hand callers a path to a nonexistent image and let Apptainer report it.
+// It only ever returns a file that exists — conflating this with where a base
+// could be written used to hand callers a path to a nonexistent image and let
+// Apptainer report it.
 func GetBaseImage() (string, error) {
 	if found := FindBaseImage(); found != "" {
 		return found, nil

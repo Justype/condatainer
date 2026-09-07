@@ -224,7 +224,6 @@ function openDetail(id) {
   // Location
   meta += '<span class="d-key">Working Dir</span>' + pathTailHtml(job.cwd, null, 'd-val');
   // Container
-  if (job.base_image) meta += '<span class="d-key">Base Image</span>' + pathTailHtml(job.base_image, null, 'd-val');
   meta += '<span class="d-key">Env Overlay</span>' + pathTailHtml(job.env_overlay, null, 'd-val');
   if (job.overlays && job.overlays.length) {
     meta += '<span class="d-key">Modules</span><span class="d-val-col">' +

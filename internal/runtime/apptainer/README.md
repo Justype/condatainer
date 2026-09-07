@@ -26,7 +26,7 @@ build.go        Sandbox and image building
 // Binary setup
 apptainer.SetBin("")        // detect from PATH (tries apptainer, then singularity)
 apptainer.EnsureApptainer() // error if not found
-apptainer.IsSingularity()   // true when binary is singularity (use gzip compression)
+apptainer.IsSingularity()   // true when the configured binary is singularity
 
 // Ephemeral execution
 apptainer.Exec(ctx, "base.sqf", []string{"cmd"}, &apptainer.ExecOptions{
@@ -40,6 +40,49 @@ apptainer.Build(ctx, "work/rootfs", "def.def", &apptainer.BuildOptions{
     TmpDir:  "/tmp/cnt-user/build",
 })
 ```
+
+## Which binary: `ResolveBin`
+
+There is no single "the" apptainer binary — which one runs is decided per
+invocation, by `internal/runtime/exec.Prepare`, once fakeroot is final (an
+explicit `--fakeroot`, or `container.AutoEnableFakeroot`'s auto-enable for a
+writable `.img` with root-owned files):
+
+- **Fakeroot** — `ResolveBin(true)` — always the system/module binary
+  (`config.Global.ApptainerBin`). Only its setuid starter (or a module's) can
+  escalate privilege; libexec's own apptainer is deliberately non-setuid. It
+  is also version-checked: condatainer packs every artifact as zstd
+  unconditionally (`config.LoadDefaults`'s `CompressArgs`), so a system
+  apptainer below the zstd floor (`>= 1.4`, `CheckZstdSupport`) or Singularity
+  (assumed zstd-incapable regardless of version) is refused outright, with a
+  message naming the requirement — rather than failing later, unrecognizably,
+  inside Apptainer's own mount step.
+- **Everything else** — `ResolveBin(false)` — always
+  `internal/libexec.ApptainerPath()`, condatainer's self-provisioned,
+  managed, always-current apptainer. No system fallback: if the toolchain
+  isn't installed, `ResolveBin` refuses and names the fix
+  (`condatainer update --libexec`), rather than silently reaching for
+  whatever `apptainer` happens to be on `PATH`.
+
+A `.def` (`os`/`base`) build's own `apptainer build --fakeroot` does not go
+through `ResolveBin` at all — it resolves the system binary directly
+(`EnsureApptainer`, called from `internal/build`'s `captureCommonBuildTools`)
+with no zstd check, because its output is a sandbox: an `os`/`base` build
+never mounts a zstd-compressed artifact during the build itself (`#DEP:` is
+data-only). Packing that sandbox afterward never runs in a container at all
+any more — `internal/build/squashfs.go`'s `createSquashfs` runs `mksquashfs`
+directly on the host (`toolpath.Resolve`), so it does not go through
+`ResolveBin` either.
+
+### Apptainer needs squashfs-tools in PATH
+
+Apptainer needs `unsquashfs`/`mksquashfs` in `PATH` for some of its own operations (e.g. extracting
+a `.sqf` to build a sandbox) — this is Apptainer's own subprocess lookup, unrelated to the `--env`/
+`EnvSettings` a launched container's PATH is set from (`internal/libexec/README.md`'s "not a `PATH`
+prepend" rule is about that, different environment). `runApptainerWithOutput` adds
+`internal/libexec`'s `bin/` to `PATH` whenever the resolved binary is libexec's own copy, so
+Apptainer finds the squashfs-tools libexec provisioned right next to it. Without it: `exec:
+"unsquashfs": executable file not found in $PATH`.
 
 ## Error Handling
 

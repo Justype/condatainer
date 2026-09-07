@@ -11,6 +11,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -131,7 +132,12 @@ func createOverlayFile(ctx context.Context, opts *CreateOptions, filePath string
 	fmt.Fprintf(&script, "set_inode_field work gid %d\n", opts.GID)
 	script.WriteString("quit\n")
 
-	cmd := exec.CommandContext(ctx, "debugfs", "-w", filePath)
+	debugfsPath, err := toolpath.Resolve("debugfs")
+	if err != nil {
+		cleanup()
+		return err
+	}
+	cmd := exec.CommandContext(ctx, debugfsPath, "-w", filePath)
 	cmd.Stdin = strings.NewReader(script.String())
 	var debugBuf bytes.Buffer
 	if w := logging.WriterFromCtx(ctx); w != nil {

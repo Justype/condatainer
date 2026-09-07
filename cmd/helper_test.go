@@ -8,7 +8,6 @@ func TestParsePostScriptHelperFlags(t *testing.T) {
 		"--cpus=6",
 		"-t12h",
 		"--gpu", "a100:1",
-		"-b", "base.sif",
 		"-eenv.img",
 		"-o", "one.sqfs",
 		"--overlay=two.sqfs",
@@ -30,9 +29,6 @@ func TestParsePostScriptHelperFlags(t *testing.T) {
 	}
 	if !flags.gpuSet || flags.gpu != "a100:1" {
 		t.Fatalf("gpu flag = (%v, %q), want (true, a100:1)", flags.gpuSet, flags.gpu)
-	}
-	if !flags.baseSet || flags.base != "base.sif" {
-		t.Fatalf("base flag = (%v, %q), want (true, base.sif)", flags.baseSet, flags.base)
 	}
 	if !flags.envSet || flags.env != "env.img" {
 		t.Fatalf("env flag = (%v, %q), want (true, env.img)", flags.envSet, flags.env)

@@ -28,7 +28,6 @@ type HelperRun struct {
 	CPUs        int               `json:"cpus,omitempty"`
 	Mem         string            `json:"mem,omitempty"`         // e.g. "32GB", "1536MB" — via utils.FormatMemoryMB
 	GPU         string            `json:"gpu,omitempty"`         // e.g. "a100:1"
-	BaseImage   string            `json:"base_image,omitempty"`  // overridden with -b
 	EnvOverlay  string            `json:"env_overlay,omitempty"` // writable .img (-e)
 	Overlays    []string          `json:"overlays,omitempty"`    // read-only .sqf (-o)
 	Params      map[string]string `json:"params,omitempty"`      // resolved #PARAM: values

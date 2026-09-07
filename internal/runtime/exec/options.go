@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -24,8 +23,7 @@ type Options struct {
 	// for a command that explicitly declared a GPU requirement.
 	GpuRequested bool
 
-	BaseImage    string
-	ApptainerBin string
+	BaseImage string
 
 	// PassThruStdin is retained for callers that track whether stdin is expected.
 	// Actual stdin is owned by IO.Stdin so internal execution never assumes a terminal.
@@ -59,12 +57,32 @@ func (ioStreams IO) IsZero() bool {
 	return ioStreams.Stdin == nil && ioStreams.Stdout == nil && ioStreams.Stderr == nil
 }
 
-// ensureDefaults fills in what the caller left blank and requires a base image
-// that exists and is one: there is no overlay-only execution, so a container
-// with no root cannot be started at all. Building a missing managed base is the
-// caller's job — this package runs images, it does not make them.
+// ensureDefaults fills in what the caller left blank: a command to run.
+// BaseImage is resolved separately, after overlay setup — see Prepare —
+// since the exec root may come from the requested overlays. The apptainer
+// binary is not caller-configurable at all: apptainer.ResolveBin decides it
+// from whether this invocation ends up needing fakeroot.
 func (o Options) ensureDefaults() (Options, error) {
-	if o.BaseImage == "" {
+	if len(o.Command) == 0 {
+		o.Command = []string{"bash"}
+	}
+	return o, nil
+}
+
+// resolveBaseImage finalizes BaseImage now that Setup has run: root, an exec
+// root pulled out of the requested overlays, wins when present. Otherwise the
+// caller's own BaseImage is kept, falling back to the configured default —
+// found, never built: this package runs images, it does not make them, so a
+// missing default is the caller's job (internal/build.ResolveBase).
+//
+// There is no overlay-only execution, so a container with no root cannot be
+// started at all — this is checked here rather than letting Apptainer report
+// a missing file.
+func (o Options) resolveBaseImage(root string) (Options, error) {
+	switch {
+	case root != "":
+		o.BaseImage = root
+	case o.BaseImage == "":
 		base, err := config.GetBaseImage()
 		if err != nil {
 			return o, err
@@ -75,15 +93,6 @@ func (o Options) ensureDefaults() (Options, error) {
 	// definition build packs its own sandbox by running it.
 	if !utils.FileExists(o.BaseImage) && !utils.IsSandboxDir(o.BaseImage) {
 		return o, fmt.Errorf("base image not found: %s", o.BaseImage)
-	}
-	if err := meta.CheckBase(o.BaseImage); err != nil {
-		return o, err
-	}
-	if o.ApptainerBin == "" {
-		o.ApptainerBin = config.Global.ApptainerBin
-	}
-	if len(o.Command) == 0 {
-		o.Command = []string{"bash"}
 	}
 	return o, nil
 }

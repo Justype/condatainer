@@ -116,13 +116,14 @@ cat /etc/os-release
 It is Ubuntu 22.04, which differs from the default base image (Ubuntu 24.04 when `base: ubuntu24`).
 
 You can either:
-- Use the PyTorch image as the base image
-- Use `ubuntu22--base.sqf` as the base image alongside the PyTorch overlay
+- Use the PyTorch image as the container root
+- Use `ubuntu22--base.sqf` as the container root alongside the PyTorch overlay
 
-Use the first approach:
+Use the first approach — there is no separate base-image flag: an `os`
+overlay named with `-o` becomes the container root on its own:
 
 ```bash
-condatainer exec -b pytorch.sqf bash
+condatainer exec -o pytorch.sqf bash
 ```
 
 Second approach use Ubuntu 22 base image:
@@ -237,8 +238,9 @@ apptainer exec sc-run-standalone.sif \
 ```
 
 ```bash
-# Or you can let condatainer set --nv --bind --env for you
-condatainer exec -b sc-run-standalone.sif \
+# Or you can let condatainer set --nv --bind --env for you: a plain .sif
+# named with -o is root-eligible even with no condatainer metadata
+condatainer exec -o sc-run-standalone.sif \
     Rscript --vanilla -e "library(DoubletFinder); library(copykat); sessionInfo()"
 ```
 

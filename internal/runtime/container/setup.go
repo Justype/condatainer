@@ -8,10 +8,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/ext3"
+	"github.com/Justype/condatainer/internal/libexec"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -39,7 +41,8 @@ type SetupConfig struct {
 
 // SetupResult contains all the processed configuration ready for container execution
 type SetupResult struct {
-	Overlays       []string          // Resolved and ordered overlay paths
+	Root           string            // Exec root pulled out of Overlays, "" if none requested (see Root selection)
+	Overlays       []string          // Resolved and ordered overlay paths, Root excluded
 	OverlayArgs    []string          // Overlay paths with :ro/:rw suffixes
 	EnvList        []string          // Complete environment variable list
 	EnvNotes       map[string]string // Environment variable notes for display
@@ -82,10 +85,16 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 	// Put .img overlay last, with a paired env snapshot immediately beneath it
 	overlays = orderOverlays(overlays)
 
+	// Pull the exec root, if requested, out of the mount list — see Root
+	// selection below. Environment/PATH collection still runs over the full
+	// requested list further down: becoming the exec root changes which
+	// Apptainer flag carries an overlay, not what it contributes.
+	root, mountOverlays := selectRoot(overlays)
+
 	// Process overlays and check availability
-	overlayArgs := make([]string, 0, len(overlays))
+	overlayArgs := make([]string, 0, len(mountOverlays))
 	var lastImg string
-	for _, ol := range overlays {
+	for _, ol := range mountOverlays {
 		isImg := utils.IsImg(ol)
 		if isImg {
 			lastImg = ol
@@ -94,7 +103,7 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 			if utils.FileExists(ol) && !utils.DirExists(ol) {
 				// If it's the principal image and writableImg is true, we need an exclusive lock.
 				// In orderOverlays, the principal image is always the last one.
-				isPrincipalImg := (ol == overlays[len(overlays)-1])
+				isPrincipalImg := (ol == mountOverlays[len(mountOverlays)-1])
 				writeLock := isPrincipalImg && cfg.WritableImg
 
 				if err := image.CheckAvailable(ol, writeLock); err != nil {
@@ -115,6 +124,15 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 	if len(cfg.BindPaths) > 0 {
 		bindPaths = append(bindPaths, cfg.BindPaths...)
 	}
+	// A mounted conda env needs micromamba reachable in-container (mm/env
+	// commands resolve it via toolpath.Resolve, internal/conda/environment.go)
+	// — bound only when one is actually mounted, matching buildEnvironment's
+	// own lastImg-gated CNT_CONDA_ROOT block below.
+	if lastImg != "" {
+		if dir, ok := libexec.Dir(); ok {
+			bindPaths = append(bindPaths, dir)
+		}
+	}
 	bindPaths = DeduplicateBindPaths(bindPaths)
 
 	// Detect GPU flags
@@ -122,7 +140,8 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 	apptainerFlags = append(apptainerFlags, cfg.ApptainerFlags...)
 
 	return &SetupResult{
-		Overlays:       overlays,
+		Root:           root,
+		Overlays:       mountOverlays,
 		OverlayArgs:    overlayArgs,
 		EnvList:        envList,
 		EnvNotes:       envNotes,
@@ -280,6 +299,69 @@ func ensureSingleImage(overlays []string) error {
 		return fmt.Errorf("only one .img overlay is allowed, found %d", imgCount)
 	}
 	return nil
+}
+
+// selectRoot pulls the first root-eligible overlay out of overlays to be run
+// as the exec root instead of mounted with --overlay. TypeEnv is excluded
+// even though it merges at root the same way: an environment's identity
+// presupposes a chosen root, so it can never supply one. See the README,
+// Root selection.
+func selectRoot(overlays []string) (root string, rest []string) {
+	return selectRootWith(overlays, isRootEligible)
+}
+
+// selectRootWith is selectRoot over an eligibility lookup, so the rule can be
+// exercised without a real image to read metadata out of.
+func selectRootWith(overlays []string, eligible func(string) bool) (root string, rest []string) {
+	rest = make([]string, 0, len(overlays))
+	for _, overlay := range overlays {
+		if root == "" && eligible(cleanOverlayPath(overlay)) {
+			root = overlay
+			continue
+		}
+		rest = append(rest, overlay)
+	}
+	return root, rest
+}
+
+// isRootEligible reports whether an image can be run as a container root. An
+// os can. A plain Apptainer .sif is eligible too, whether or not it carries
+// condatainer metadata: it is Apptainer's own native, self-sufficient root
+// format, with no #DEP:-mounted payload of its own to check against — a
+// foreign image nothing built and nothing here needs to have read. An image
+// with no readable metadata otherwise is not eligible: it degrades to app, so
+// it stays an ordinary overlay rather than being mistaken for a root. An
+// image whose manifest still says the retired "base" type (catalog.DeriveType
+// no longer produces it) is not eligible either — rebuild it to pick up
+// type os.
+func isRootEligible(path string) bool {
+	if utils.IsImg(path) {
+		return false
+	}
+	if utils.IsSif(path) {
+		return true
+	}
+	rt, err := meta.ReadRuntime(path)
+	return err == nil && rt.Type == catalog.TypeOS
+}
+
+// HasRequestedRoot reports whether overlays (as given to SetupConfig.Overlays)
+// already names a root-eligible image. Callers that must decide whether to
+// build the configured default root before Setup runs — because Setup itself
+// cannot: building one is internal/build's job, and this package cannot
+// import that without a cycle — call this first and skip the build when it
+// answers true.
+func HasRequestedRoot(overlays []string) bool {
+	resolved, err := ResolveOverlayPaths(overlays)
+	if err != nil {
+		return false
+	}
+	for _, overlay := range resolved {
+		if isRootEligible(cleanOverlayPath(overlay)) {
+			return true
+		}
+	}
+	return false
 }
 
 // ensureDistinctPrefixes refuses a mount where two images claim one

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/libexec"
 )
 
 // apptainerCmd holds the resolved, absolute path to the binary.
@@ -63,6 +64,43 @@ func SetBin(path string) error {
 // Returns an error if apptainer cannot be found.
 func EnsureApptainer() error {
 	return SetBin(config.Global.ApptainerBin)
+}
+
+// ResolveBin configures the Apptainer binary for one exec invocation.
+// Fakeroot — whether an explicit or auto-enabled --fakeroot — always uses the
+// system/module apptainer: only its setuid starter (or a module's) can
+// escalate privilege, and it must support zstd, since every overlay
+// condatainer mounts is unconditionally zstd-compressed. Everything else
+// uses the self-provisioned libexec toolchain exclusively, with no system
+// fallback.
+//
+// A .def build's own `apptainer build --fakeroot` does not go through this —
+// it resolves the system binary directly (EnsureApptainer) with no zstd
+// check, because its output is a sandbox: it never mounts a zstd-compressed
+// artifact during the build itself (CLAUDE.md, Recipes: #DEP: is data-only).
+func ResolveBin(fakeroot bool) error {
+	if !fakeroot {
+		path, ok := libexec.ApptainerPath()
+		if !ok {
+			return libexec.ErrNotProvisioned
+		}
+		return SetBin(path)
+	}
+
+	if err := SetBin(config.Global.ApptainerBin); err != nil {
+		return err
+	}
+	if IsSingularity() {
+		return fmt.Errorf("fakeroot exec requires apptainer (found singularity), which cannot mount condatainer's zstd-compressed overlays")
+	}
+	version, err := GetVersion()
+	if err != nil {
+		return fmt.Errorf("could not determine the system apptainer's version: %w", err)
+	}
+	if !CheckZstdSupport(version) {
+		return fmt.Errorf("system apptainer %s does not support zstd (>= 1.4 required); a fakeroot exec must mount condatainer's zstd-compressed overlays with this binary — upgrade apptainer or the loaded module", version)
+	}
+	return nil
 }
 
 // IsSingularity returns true if the configured binary is Singularity (not Apptainer).
@@ -168,6 +206,13 @@ func runApptainerWithOutput(ctx context.Context, op string, imagePath string, ca
 			}
 		}
 		env = filteredEnv
+	}
+
+	// Apptainer needs unsquashfs/mksquashfs in PATH (e.g. to extract a .sqf
+	// into a sandbox). When apptainerCmd is the self-provisioned libexec copy,
+	// add its bin/ to PATH so it finds them there.
+	if libPath, ok := libexec.ApptainerPath(); ok && apptainerCmd == libPath {
+		env = append(env, "PATH="+filepath.Dir(apptainerCmd)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 
 	cmd.Env = append(env, procEnv...)

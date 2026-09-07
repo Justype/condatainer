@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/image/tool"
+	"github.com/Justype/condatainer/internal/toolpath"
 )
 
 // CatFile reads a file out of a SquashFS archive, distinguishing a missing file
@@ -19,8 +20,9 @@ import (
 // offset skips that many bytes, which is how a SquashFS partition inside a SIF
 // is read in place; pass 0 for a plain .sqf.
 func CatFile(sqfPath, filePath string, offset int64) ([]byte, error) {
-	if !unsquashfsAvailable() {
-		return nil, fmt.Errorf("%w: unsquashfs", tool.ErrToolMissing)
+	bin := unsquashfsBin()
+	if bin == "" {
+		return nil, fmt.Errorf("%w: %s", toolpath.ErrToolMissing, toolpath.NotFoundMessage("unsquashfs"))
 	}
 	if _, err := os.Stat(sqfPath); err != nil {
 		return nil, fmt.Errorf("%w: %s: %w", tool.ErrUnreadable, sqfPath, err)
@@ -28,7 +30,7 @@ func CatFile(sqfPath, filePath string, offset int64) ([]byte, error) {
 	inner := strings.TrimPrefix(filePath, "/")
 
 	args := offsetArgs(offset)
-	cmd := exec.Command("unsquashfs", append(append(args, "-cat", sqfPath), inner)...)
+	cmd := exec.Command(bin, append(append(args, "-cat", sqfPath), inner)...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -42,7 +44,7 @@ func CatFile(sqfPath, filePath string, offset int64) ([]byte, error) {
 
 	// Either the file is absent, or this unsquashfs predates -cat (4.5). Only
 	// extraction tells the two apart, and it is the fallback either way.
-	return catExtractFile(sqfPath, inner, offset)
+	return catExtractFile(bin, sqfPath, inner, offset)
 }
 
 // offsetArgs returns the unsquashfs flags that skip a leading byte offset.
@@ -65,7 +67,7 @@ func classifyStderr(stderr, sqfPath string) error {
 	case strings.Contains(low, "permission denied"):
 		return fmt.Errorf("%w: %s: %s", tool.ErrUnreadable, sqfPath, strings.TrimSpace(stderr))
 	case strings.Contains(low, "-offset") && strings.Contains(low, "invalid"):
-		return fmt.Errorf("%w: unsquashfs has no -offset support (needs squashfs-tools 4.4+)", tool.ErrToolMissing)
+		return fmt.Errorf("%w: unsquashfs has no -offset support (needs squashfs-tools 4.4+)", toolpath.ErrToolMissing)
 	}
 	return nil
 }
@@ -73,7 +75,7 @@ func classifyStderr(stderr, sqfPath string) error {
 // catExtractFile is catExtract with the cause preserved. In-archive symlinks are
 // resolved manually, since single-file extraction yields a dangling link while
 // -cat follows links itself.
-func catExtractFile(sqfPath, filePath string, offset int64) ([]byte, error) {
+func catExtractFile(bin, sqfPath, filePath string, offset int64) ([]byte, error) {
 	tmpDir, err := os.MkdirTemp("", "cnt-sqf-cat-")
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", tool.ErrUnreadable, err)
@@ -84,7 +86,7 @@ func catExtractFile(sqfPath, filePath string, offset int64) ([]byte, error) {
 	for hop := 0; hop < 4; hop++ {
 		dest := filepath.Join(tmpDir, strconv.Itoa(hop))
 		args := append(append([]string{}, base...), "-q", "-n", "-no-xattrs", "-d", dest, sqfPath, filePath)
-		cmd := exec.Command("unsquashfs", args...)
+		cmd := exec.Command(bin, args...)
 		cmd.Env = append(os.Environ(), "LC_ALL=C")
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
@@ -129,8 +131,9 @@ func catExtractFile(sqfPath, filePath string, offset int64) ([]byte, error) {
 // so a caller that needs several files from one directory extracts the directory
 // and reads the copies.
 func ExtractDir(sqfPath, dirPath, destDir string, offset int64) error {
-	if !unsquashfsAvailable() {
-		return fmt.Errorf("%w: unsquashfs", tool.ErrToolMissing)
+	bin := unsquashfsBin()
+	if bin == "" {
+		return fmt.Errorf("%w: %s", toolpath.ErrToolMissing, toolpath.NotFoundMessage("unsquashfs"))
 	}
 	if _, err := os.Stat(sqfPath); err != nil {
 		return fmt.Errorf("%w: %s: %w", tool.ErrUnreadable, sqfPath, err)
@@ -141,7 +144,7 @@ func ExtractDir(sqfPath, dirPath, destDir string, offset int64) error {
 	// restore security.* attributes, and without this unsquashfs exits non-zero
 	// over a file it extracted perfectly well.
 	args := append(offsetArgs(offset), "-q", "-n", "-no-xattrs", "-d", destDir, sqfPath, inner)
-	cmd := exec.Command("unsquashfs", args...)
+	cmd := exec.Command(bin, args...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

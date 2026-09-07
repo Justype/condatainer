@@ -219,7 +219,6 @@ These apply in all modes (HPC and headless).
 
 | Flag | Description |
 |------|-------------|
-| `-b, --base` | Override base image |
 | `-e, --env` | Writable overlay (default: `env.img`) |
 | `-o, --overlay` | Additional read-only overlay (repeatable) |
 | `-w, --cwd <path>` | Set working directory (e.g. `-w .` for current directory) |

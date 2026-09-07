@@ -107,6 +107,44 @@ func TestHelperScriptsShareTheImageOrder(t *testing.T) {
 	}
 }
 
+// The self-provisioned toolchain uses the same tier order as images: reads
+// nearest-first, writes furthest-first, so one copy serves the whole group.
+func TestLibexecSharesTheImageOrder(t *testing.T) {
+	scratch, user, extraRoot, root := withAllTiers(t)
+
+	wantRead := []string{
+		filepath.Join(scratch, "libexec"),
+		filepath.Join(user, "libexec"),
+		filepath.Join(extraRoot, "libexec"),
+		filepath.Join(root, "libexec"),
+	}
+	got := libexecSearchPaths()
+	if len(got) != len(wantRead) {
+		t.Fatalf("libexecSearchPaths = %v, want %v", got, wantRead)
+	}
+	for i := range wantRead {
+		if got[i] != wantRead[i] {
+			t.Errorf("read order [%d] = %s, want %s", i, got[i], wantRead[i])
+		}
+	}
+
+	wantWrite := []string{
+		filepath.Join(extraRoot, "libexec"),
+		filepath.Join(root, "libexec"),
+		filepath.Join(scratch, "libexec"),
+		filepath.Join(user, "libexec"),
+	}
+	dirs := libexecWriteDirs()
+	if len(dirs) != len(wantWrite) {
+		t.Fatalf("libexecWriteDirs = %v, want %v", dirs, wantWrite)
+	}
+	for i := range wantWrite {
+		if dirs[i].Path != wantWrite[i] {
+			t.Errorf("write order [%d] = %s, want %s", i, dirs[i].Path, wantWrite[i])
+		}
+	}
+}
+
 // A directory serving two tiers (CNT_ROOT == $SCRATCH/condatainer) appears once.
 // It is read at the nearer position, and still classified as the shared tier,
 // which is what decides whether a write may land there.

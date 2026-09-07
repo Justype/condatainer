@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
-	"syscall"
 
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -18,23 +16,17 @@ var (
 	ErrInUse = errors.New("image is in use")
 )
 
-// Lock represents a file lock on an overlay image.
-// It must be closed to release the lock.
-type Lock struct {
-	file  *os.File
-	path  string
-	write bool
-}
-
-// Close releases the lock by closing the file.
-func (l *Lock) Close() error {
-	if l.file == nil {
-		return nil
-	}
-	err := l.file.Close()
-	l.file = nil
-	return err
-}
+// Lock represents a file lock on an overlay image. It must be closed to
+// release the lock.
+//
+// An alias, not a new type: internal/libexec needs the exact same
+// non-blocking-flock mechanics for its own toolchain-generation sentinel,
+// and — to stay importable by internal/image/squashfs without cycling back
+// through this package — returns *utils.FlockHandle directly rather than
+// importing internal/image for it. The alias means both are the same type,
+// interchangeable at any call site (internal/runtime/exec.Prepare holds a
+// single slice of overlay and toolchain locks together) with no conversion.
+type Lock = utils.FlockHandle
 
 // AcquireLock takes a non-blocking flock on the overlay image: exclusive
 // (LOCK_EX) when write is true, shared (LOCK_SH) otherwise.
@@ -45,22 +37,17 @@ func (l *Lock) Close() error {
 // the directory and can restore the bit. Clearing it is how an artifact is
 // pinned.
 func AcquireLock(path string, write bool) (*Lock, error) {
-	flag, op := os.O_RDONLY, syscall.LOCK_SH
-	if write {
-		flag, op = os.O_RDWR, syscall.LOCK_EX
-	}
-	f, err := os.OpenFile(path, flag, 0)
+	lock, err := utils.AcquireFlock(path, write)
 	if err != nil {
+		if errors.Is(err, utils.ErrFlockConflict) {
+			if write {
+				return nil, fmt.Errorf("%s is currently in use: %w", utils.StylePath(path), ErrInUse)
+			}
+			return nil, fmt.Errorf("%s is currently being written: %w", utils.StylePath(path), ErrInUse)
+		}
 		return nil, openFailure(path, err, write)
 	}
-	if err := syscall.Flock(int(f.Fd()), op|syscall.LOCK_NB); err != nil {
-		f.Close()
-		if write {
-			return nil, fmt.Errorf("%s is currently in use: %w", utils.StylePath(path), ErrInUse)
-		}
-		return nil, fmt.Errorf("%s is currently being written: %w", utils.StylePath(path), ErrInUse)
-	}
-	return &Lock{file: f, path: path, write: write}, nil
+	return lock, nil
 }
 
 // openFailure names the actual reason the image could not be opened. Only a

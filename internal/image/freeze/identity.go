@@ -57,7 +57,7 @@ func TreeIdentity(ctx context.Context, artifact string) (meta.KeyRef, error) {
 	defer os.RemoveAll(mnt)
 
 	var stdout, stderr bytes.Buffer
-	err = mountedRun(ctx, squashfuse, []string{artifact}, mnt, treeScript(mnt),
+	err = MountedRun(ctx, squashfuse, []string{artifact}, mnt, treeScript(mnt),
 		execpkg.IO{Stdout: &stdout, Stderr: &stderr})
 	if err != nil {
 		return meta.KeyRef{}, fmt.Errorf("read %s to identify it: %w: %s", artifact, err, stderr.String())

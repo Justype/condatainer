@@ -78,11 +78,11 @@ Usage:
   condatainer e [flags] [overlays...] [-- command...]
 
 Flags:
-  -b, --base-image string   Base image to use instead of default
-      --bind strings        Bind path 'HOST:CONTAINER' (repeatable)
-  -f, --fakeroot            Run container with fakeroot privileges
-  -n, --no-autoload         Disable auto-loading env.img from current directory
-  -r, --read-only           Mount .img overlays as read-only (default: writable)
+      --bind strings   Bind path 'HOST:CONTAINER' (repeatable)
+      --env strings    Set environment variable 'KEY=VALUE' (repeatable)
+  -f, --fakeroot       Run container with fakeroot privileges
+  -n, --no-autoload    Disable auto-loading env.img from current directory
+  -r, --read-only      Mount .img overlays as read-only (default: writable)
 ```
 
 This command will mount the overlay and set the `$PATH` and `$CONDA_PREFIX` variables accordingly.

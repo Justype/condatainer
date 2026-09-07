@@ -977,7 +977,6 @@ condatainer exec [flags] [command...]
 
 * `-o`, `--overlay [OVERLAY]`: Overlay file to mount (repeatable).
 * `-w`, `--writable`: Mount `.img` overlays as writable (default: read-only).
-* `-b`, `--base-image [PATH]`: Base image to use instead of default.
 * `-f`, `--fakeroot`: Run container with fakeroot privileges.
 * `--env [KEY=VALUE]`: Set environment variable inside the container (repeatable).
 * `--bind [HOST:CONTAINER]`: Bind mount path into the container (repeatable).
@@ -989,6 +988,9 @@ condatainer exec [flags] [command...]
 * All positional arguments are treated as commands.
 * Read-only by default for `.img` overlays (use `-w` for writable).
 * Defaults to bash if no command specified.
+* There is no separate base-image flag: the container root is the first `-o`
+  overlay that is itself an OS layer, if any; otherwise it's the configured
+  default (built automatically if missing).
 * Inside a project — a directory holding `cnt-lock/` — every `-o` name resolves
   through that project's lock instead of by installed name. See below.
 
@@ -1059,7 +1061,6 @@ condatainer e [flags] [overlays...] [--] [command...]
 
 * `-r`, `--read-only`: Mount `.img` overlays as read-only (default: writable).
 * `-n`, `--no-autoload`: Disable autoloading `env.img` from current directory.
-* `-b`, `--base-image [PATH]`: Base image to use instead of default.
 * `-f`, `--fakeroot`: Run container with fakeroot privileges.
 * `--env [KEY=VALUE]`: Set environment variable inside the container (repeatable).
 * `--bind [HOST:CONTAINER]`: Bind mount path into the container (repeatable).
@@ -1192,7 +1193,6 @@ All options (`-a`, `-o`, `--afterok`, etc.) must appear **before** `SCRIPT`. Arg
 **Container Flags:**
 
 * `-w`, `--writable`, `--writable-img`: Make `.img` overlays writable (default: read-only).
-* `-b`, `--base-image [PATH]`: Use custom base image.
 * `-f`, `--fakeroot`: Run with fakeroot privileges.
 * `--bind HOST:CONTAINER`: Bind mount a path into the container (repeatable).
 * `--env KEY=VALUE`: Set an environment variable inside the container (repeatable).
@@ -1235,7 +1235,6 @@ Scripts can use special comment tags to declare dependencies and configure the c
 **Available `#CNT` arguments:**
 
 * `-w`, `--writable`: Make `.img` overlays writable.
-* `-b`, `--base-image PATH`: Use custom base image.
 * `--env KEY=VALUE`: Set environment variable.
 * `--bind HOST:CONTAINER`: Bind mount path.
 * `-f`, `--fakeroot`: Run with fakeroot privileges.
@@ -2578,7 +2577,8 @@ condatainer scheduler -p --cpu
 
 ## Update
 
-Refreshes the remote build script and helper script metadata caches, or updates the base image.
+Refreshes the remote build script and helper script metadata caches, or refreshes the
+self-provisioned toolchain (mksquashfs, squashfuse, apptainer).
 
 **Usage:**
 
@@ -2590,7 +2590,7 @@ condatainer update [FLAGS]
 
 * `--build`: Refresh the build script metadata cache.
 * `--helper`: Refresh the helper script metadata cache.
-* `--base`: Rebuild the base image from its recipe.
+* `--libexec`: Refresh the self-provisioned toolchain.
 
 By default (no flags), both `--build` and `--helper` are enabled.
 
@@ -2601,6 +2601,8 @@ By default (no flags), both `--build` and `--helper` are enabled.
 * Cached metadata is reused by `avail` and `create` without a network round-trip.
 * Supports multiple recipe collections (`sources`); each remote gets its own cache file.
 * Removes cache files for remotes no longer configured (orphan cleanup).
+* `--libexec` refuses rather than waits if any condatainer session is currently using the
+  toolchain — stop those sessions first, then retry.
 
 **Examples:**
 
@@ -2614,14 +2616,15 @@ condatainer update --build
 # Helper script metadata only
 condatainer update --helper
 
-# Rebuild the base image only
-condatainer update --base
+# Refresh the self-provisioned toolchain
+condatainer update --libexec
 ```
 
-The base image is otherwise never updated on its own: it is built the first time
-something needs it, and reused until you ask for a rebuild. Every other command
-treats it as a prerequisite — `create` builds it alongside the images that need
-it, and `exec`/`e`/`run` build it before starting a container.
+The default root image (`base` in config, or a source's `default_base`) is otherwise never
+updated on its own: it is built the first time something needs it, the same as any other
+named artifact, and reused until you rebuild it with `condatainer create --update <name>/<version>`.
+Every other command treats it as a prerequisite — `create` builds it alongside the images
+that need it, and `exec`/`e`/`run` build it before starting a container.
 
 ## Self-Update
 
@@ -2638,15 +2641,12 @@ condatainer self-update [FLAGS]
 * `-y`, `--yes`: Skip confirmation prompt and auto-update.
 * `-f`, `--force`: Force update even if already on the latest version.
 * `--dev`: Include pre-release versions.
-* `--base`: Update the base image only, without updating the condatainer binary.
 
 **Features:**
 
 * Downloads latest binary from GitHub releases.
 * Detects current OS and architecture.
 * Compares versions before updating.
-* Automatically updates the base image when the minor or major version changes.
-* If the base image update fails, prints a warning and suggests running `condatainer self-update --base` to retry later.
 * Supports symlink resolution.
 
 **Examples:**
@@ -2663,9 +2663,6 @@ condatainer self-update -f
 
 # Include pre-release versions
 condatainer self-update --dev
-
-# Update the base image only (without updating the binary)
-condatainer self-update --base
 ```
 
 ## Proxy

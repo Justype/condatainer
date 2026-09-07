@@ -12,8 +12,8 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Justype/condatainer/catalog"
+	artifactcache "github.com/Justype/condatainer/internal/artifact/cache"
 	"github.com/Justype/condatainer/internal/artifact/meta"
-	"github.com/Justype/condatainer/internal/artifactcache"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/utils"

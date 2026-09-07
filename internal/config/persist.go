@@ -123,7 +123,7 @@ func setDefaults() {
 	viper.SetDefault("build.ncpus", DefaultNcpus)
 	viper.SetDefault("build.mem", DefaultMemMB)
 	viper.SetDefault("build.time", DefaultBuildTime)
-	viper.SetDefault("build.compress_args", "") // Empty means auto-detect based on apptainer version
+	viper.SetDefault("build.compress_args", ArgsForCompress("zstd-medium"))
 	viper.SetDefault("build.block_size", DefaultBlockSize)
 	viper.SetDefault("build.data_block_size", DefaultDataBlockSize)
 	viper.SetDefault("build.app_tmp_overlay", false)
@@ -952,8 +952,8 @@ func LoadFromViper() {
 		}
 	}
 
-	// Only override compress_args if explicitly set in config (non-empty)
-	// Empty means auto-detect based on apptainer version (handled by AutoDetectCompression)
+	// Only override compress_args if explicitly set in config; otherwise
+	// LoadDefaults' unconditional zstd-medium stands.
 	if compressArgs := layerString("build.compress_args"); compressArgs != "" {
 		Global.Build.CompressArgs = NormalizeCompressArgs(compressArgs)
 	}
@@ -1029,29 +1029,4 @@ func LoadFromViper() {
 // for historical compatibility with earlier versions of the code.
 func NormalizeCompressArgs(val string) string {
 	return ArgsForCompress(val)
-}
-
-// AutoDetectCompression picks the build compression for the detected runtime.
-// A configured build.compress_args wins and is left alone.
-//
-// zstd only on Apptainer >= 1.4. Singularity and older Apptainer cannot mount a
-// zstd-compressed SquashFS, so lz4 is the floor — an image they cannot read is
-// worse than one that compresses less.
-func AutoDetectCompression(supportsZstd bool, isSingularity bool) {
-	if layerString("build.compress_args") != "" {
-		return
-	}
-
-	// Names, not argument strings, so CompressOptions stays the only place the
-	// mksquashfs flags for a codec live.
-	name, reason := "lz4", "zstd not supported"
-	switch {
-	case isSingularity:
-		reason = "Singularity detected"
-	case supportsZstd:
-		name, reason = "zstd-medium", "apptainer supports zstd"
-	}
-
-	Global.Build.CompressArgs = ArgsForCompress(name)
-	slog.Default().Debug("auto-detected build compression", "compression", name, "reason", reason)
 }

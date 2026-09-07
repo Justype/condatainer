@@ -30,10 +30,9 @@ type RunOptions struct {
 	// Resources holds user-specified resource values (nil = use script/config defaults).
 	Resources *scheduler.ResourceSpec
 	// Container options
-	BaseImage string
-	EnvImg    string   // writable overlay (.img)
-	Overlays  []string // additional read-only overlays
-	CWD       string   // working directory inside job
+	EnvImg   string   // writable overlay (.img)
+	Overlays []string // additional read-only overlays
+	CWD      string   // working directory inside job
 	// Behaviour
 	ForceNew bool
 	// ExtraBinds is the resolved list of extra bind-mount specs ("src:dest") from
@@ -153,7 +152,7 @@ func resolveSpec(scriptPath string, overrides *scheduler.ResourceSpec) *schedule
 //
 // Generated form:
 //
-//	/abs/condatainer exec [-b base] [-o overlay…] [-w] [--gpu] \
+//	/abs/condatainer exec [-o overlay…] [-w] [--gpu] \
 //	    --bind /abs/condatainer:/usr/local/bin/condatainer \
 //	    [--pwd=/cwd] /abs/helper-script
 //
@@ -166,17 +165,16 @@ func buildCondatainerCmd(opts RunOptions, spec *scheduler.ResourceSpec) (string,
 		return "", fmt.Errorf("could not locate condatainer binary: %w", err)
 	}
 
-	// The generated command runs on a compute node, where nothing can build a
-	// base, so the base has to be pinned here rather than resolved there.
-	baseImage := opts.BaseImage
-	if baseImage == "" {
-		if baseImage, err = config.GetBaseImage(); err != nil {
-			return "", err
-		}
+	// The generated command runs on a compute node: a missing default root is
+	// caught here rather than deep in a job's log. There is no -b/--base-image
+	// to pin it with — the node's own exec resolves the same default itself
+	// (see the container README, Root selection).
+	if _, err := config.GetBaseImage(); err != nil {
+		return "", err
 	}
 
 	var parts []string
-	parts = append(parts, shellQuote(exe), "exec", "-b", shellQuote(baseImage))
+	parts = append(parts, shellQuote(exe), "exec")
 
 	// Named read-only overlays (SquashFS) — code-server, igv, etc.
 	for _, ol := range opts.Overlays {
@@ -727,7 +725,6 @@ func newHelperRun(id, name, jobID, cwd string, walltime time.Duration,
 		CWD:        cwd,
 		Walltime:   walltime,
 		GPU:        FormatGpuSpec(spec),
-		BaseImage:  opts.BaseImage,
 		EnvOverlay: normalizeOverlayForHistory(opts.EnvImg, cwd),
 		Overlays:   normalizedOverlays,
 		Params:     params,

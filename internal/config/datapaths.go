@@ -25,6 +25,7 @@ import (
 type DataPaths struct {
 	ImagesDirs        []string // Search paths for images
 	HelperScriptsDirs []string // Search paths for helper scripts
+	LibexecDirs       []string // Search paths for the self-provisioned toolchain
 }
 
 // GlobalDataPaths holds the computed data paths.
@@ -232,6 +233,7 @@ func InitDataPaths() {
 	GlobalDataPaths = DataPaths{
 		ImagesDirs:        buildImageSearchPaths(),
 		HelperScriptsDirs: helperScriptSearchPaths(),
+		LibexecDirs:       libexecSearchPaths(),
 	}
 }
 
@@ -292,6 +294,11 @@ func buildImageSearchPaths() []string { return searchPaths("images") }
 // Recipes have no equivalent: they come from the catalog's `sources`, not from a
 // data directory.
 func helperScriptSearchPaths() []string { return searchPaths("helper-scripts") }
+
+// libexecSearchPaths builds the search paths for the self-provisioned toolchain
+// (mksquashfs, squashfuse, apptainer, micromamba). Priority: scratch → user →
+// CNT_EXTRA_ROOT → root, same as every other data directory.
+func libexecSearchPaths() []string { return searchPaths("libexec") }
 
 // =============================================================================
 // Data Layers
@@ -372,6 +379,15 @@ func GetHelperScriptSearchPaths() []string {
 		InitDataPaths()
 	}
 	return GlobalDataPaths.HelperScriptsDirs
+}
+
+// GetLibexecSearchPaths returns all paths to search for the self-provisioned
+// toolchain, nearest first.
+func GetLibexecSearchPaths() []string {
+	if len(GlobalDataPaths.LibexecDirs) == 0 {
+		InitDataPaths()
+	}
+	return GlobalDataPaths.LibexecDirs
 }
 
 // GetCacheSearchPaths returns all personal cache directories to search.
@@ -474,6 +490,27 @@ func helperWriteDirs() []SearchDir {
 	return deduplicateWriteDirs(dirs)
 }
 
+// libexecWriteDirs returns the ordered write candidates for the self-provisioned
+// toolchain. Shared: CNT_EXTRA_ROOT, root. Personal: scratch, user. Same order
+// as imageWriteDirs — "one copy serves the whole group" applies at least as much
+// to a toolchain this size as it does to an image.
+func libexecWriteDirs() []SearchDir {
+	var dirs []SearchDir
+	if extraRoot := GetExtraRootDir(); extraRoot != "" {
+		dirs = append(dirs, SearchDir{Path: filepath.Join(extraRoot, "libexec")})
+	}
+	if p := GetRootDir(); p != "" {
+		dirs = append(dirs, SearchDir{Path: filepath.Join(p, "libexec")})
+	}
+	if s := GetScratchDataDir(); s != "" {
+		dirs = append(dirs, SearchDir{Path: filepath.Join(s, "libexec"), Personal: true})
+	}
+	if u := GetUserDataDir(); u != "" {
+		dirs = append(dirs, SearchDir{Path: filepath.Join(u, "libexec"), Personal: true})
+	}
+	return deduplicateWriteDirs(dirs)
+}
+
 // cacheWriteDirs returns the write candidates for cache directories.
 // Cache always lives in the personal XDG cache dir ($XDG_CACHE_HOME/condatainer
 // or ~/.cache/condatainer) — never in data directories or shared roots.
@@ -518,6 +555,20 @@ func GetWritableHelperScriptsDir() (string, error) {
 	return "", fmt.Errorf("no writable helper scripts directory found (searched: %v)", paths)
 }
 
+// GetWritableLibexecDir returns the first writable directory for the
+// self-provisioned toolchain, following the same write order as images.
+func GetWritableLibexecDir() (string, error) {
+	dirs := libexecWriteDirs()
+	if dir := firstWritableDir(dirs); dir != "" {
+		return dir, nil
+	}
+	paths := make([]string, len(dirs))
+	for i, d := range dirs {
+		paths[i] = d.Path
+	}
+	return "", fmt.Errorf("no writable libexec directory found (searched: %v)", paths)
+}
+
 // GetWritableCacheDir returns the writable personal cache directory
 // ($XDG_CACHE_HOME/condatainer or ~/.cache/condatainer) — never a shared dir.
 func GetWritableCacheDir() (string, error) {
@@ -526,19 +577,6 @@ func GetWritableCacheDir() (string, error) {
 		return dir, nil
 	}
 	return "", fmt.Errorf("no writable cache directory found")
-}
-
-// GetBaseImageWritePath returns the path where a new base image should be written.
-func GetBaseImageWritePath() (string, error) {
-	fileName := BaseImageFileName()
-	if fileName == "" {
-		return "", fmt.Errorf("no base configured: set `base` in config")
-	}
-	dir, err := GetWritableImagesDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, fileName), nil
 }
 
 // =============================================================================

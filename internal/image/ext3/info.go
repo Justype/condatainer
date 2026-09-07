@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/Justype/condatainer/internal/image/tool"
+	"github.com/Justype/condatainer/internal/toolpath"
 )
 
 // Stats holds metadata about the overlay filesystem.
@@ -44,7 +45,11 @@ func GetStats(path string) (*Stats, error) {
 	}
 
 	// tune2fs -l lists the superblock info
-	cmd := exec.Command("tune2fs", "-l", path)
+	tune2fsPath, err := toolpath.Resolve("tune2fs")
+	if err != nil {
+		return nil, &tool.Error{Op: "read stats", Path: path, Tool: "tune2fs", BaseErr: err}
+	}
+	cmd := exec.Command(tune2fsPath, "-l", path)
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LC_TIME=C")
 	out, err := cmd.Output()
 	if err != nil {
@@ -131,7 +136,7 @@ func GetStats(path string) (*Stats, error) {
 func getUpperOwnership(path string) (uid, gid int) {
 	uid, gid = -1, -1
 
-	debugfsPath, err := exec.LookPath("debugfs")
+	debugfsPath, err := toolpath.Resolve("debugfs")
 	if err != nil {
 		return
 	}
@@ -199,7 +204,7 @@ const (
 // This is used to determine if --fakeroot should be automatically enabled.
 func InspectImageUIDStatus(imgPath string) UIDStatus {
 	// Check if debugfs is available
-	debugfsPath, err := exec.LookPath("debugfs")
+	debugfsPath, err := toolpath.Resolve("debugfs")
 	if err != nil {
 		return UIDStatusUnknown // debugfs not found
 	}

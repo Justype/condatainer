@@ -92,7 +92,7 @@ With `-l`, a read-only target is an error instead — an explicit layer is never
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `apptainer_bin` | Auto-detected | Path to apptainer or singularity binary |
+| `apptainer_bin` | Auto-detected | Path to apptainer or singularity binary — used only where fakeroot is needed (a fakeroot `exec`, and an `os`/`base` `.def` build's own `apptainer build`). Ordinary `exec`/`run` and conda/script builds always use condatainer's own self-provisioned apptainer instead (`condatainer update --libexec`). |
 | `scheduler_bin` | Auto-detected | Path to job scheduler binary (sbatch, qsub, bsub, condor_submit, etc.). |
 
 ### Recipe Sources
@@ -167,7 +167,7 @@ which CondaTainer never reads or changes. See
 | `build.ncpus` | `4` | CPUs for build jobs |
 | `build.mem` | `8192` | Memory for build jobs (supports units: `8g`, `8192`) |
 | `build.time` | `2h` | Time limit for builds |
-| `build.compress_args` | Auto-detected | mksquashfs compression arguments (zstd-medium for apptainer≥1.4; lz4 otherwise, including Singularity) |
+| `build.compress_args` | `zstd-medium` | mksquashfs compression arguments |
 | `build.block_size` | `128k` | mksquashfs block size for app/env/external overlays (e.g. `128k`, `512k`) |
 | `build.data_block_size` | `512k` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
 | `build.app_tmp_overlay` | `false` | Assemble an **app** build inside a temporary ext3 overlay instead of host directories. Ignored for `data`, `os` and `base` |
@@ -575,17 +575,22 @@ Data directories do not merge this way — they come from a fixed tier list read
 
 ## Compression Settings
 
-CondaTainer auto-detects the best compression based on your runtime:
+CondaTainer packs every artifact with zstd compression
+(`-comp zstd -Xcompression-level 8`, i.e. `zstd-medium`), unconditionally —
+no detection, no per-runtime fallback. Every reader condatainer itself
+controls is guaranteed to support it: an ordinary (non-fakeroot) `exec`/`run`
+always mounts through its own self-provisioned apptainer, verified `>= 1.4`
+when it's installed; a fakeroot `exec`, and an `os`/`base` `.def` build's own
+`apptainer build --fakeroot`, use the system or module apptainer, which a
+fakeroot `exec` version-checks before proceeding.
 
-- **Apptainer >= 1.4**: Uses zstd compression (`-comp zstd -Xcompression-level 8`)
-- **Apptainer < 1.4**: Uses lz4 compression (`-comp lz4`)
-- **Singularity**: Uses lz4 compression (`-comp lz4`)
+A registry consumer pulling an artifact outside condatainer's own `exec`/`run`
+— a different host, a different team, an older install — is responsible for
+having a compatible (`>= 1.4`) apptainer themselves, the same as any other
+version requirement of software they've chosen to use.
 
-lz4 is the floor. Singularity and Apptainer below 1.4 cannot mount a
-zstd-compressed SquashFS, so only Apptainer 1.4+ is moved up — an image the
-runtime cannot read is worse than one that compresses less.
-
-`gzip` is still available if you ask for it; nothing selects it automatically.
+`gzip`/`lz4` are still available if you ask for them; nothing selects them
+automatically.
 
 To override:
 

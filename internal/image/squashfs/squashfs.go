@@ -2,6 +2,7 @@ package squashfs
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Justype/condatainer/internal/image/tool"
+	"github.com/Justype/condatainer/internal/toolpath"
 )
 
 // ============================================================================
@@ -21,11 +23,15 @@ import (
 // with `unsquashfs -lc -d ""` and matching "/entry" or "/entry/" exactly.
 // See the README's External tools.
 func PathExists(sqfPath, entry string) bool {
+	bin := unsquashfsBin()
+	if bin == "" {
+		return false
+	}
 	// Normalize entry (strip leading slash)
 	entry = strings.TrimPrefix(entry, "/")
 	want := "/" + entry
 
-	cmd := exec.Command("unsquashfs", "-lc", "-d", "", sqfPath, entry)
+	cmd := exec.Command(bin, "-lc", "-d", "", sqfPath, entry)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -59,21 +65,25 @@ func PathExists(sqfPath, entry string) bool {
 // failure fall back to extracting the file into a temp dir.
 // Returns nil if the file cannot be read.
 func Cat(sqfPath, filePath string) []byte {
+	bin := unsquashfsBin()
+	if bin == "" {
+		return nil
+	}
 	filePath = strings.TrimPrefix(filePath, "/")
 
-	cmd := exec.Command("unsquashfs", "-cat", sqfPath, filePath)
+	cmd := exec.Command(bin, "-cat", sqfPath, filePath)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	out, err := cmd.Output()
 	if err == nil {
 		return out
 	}
-	return catExtract(sqfPath, filePath)
+	return catExtract(bin, sqfPath, filePath)
 }
 
 // catExtract reads a file from a SquashFS archive by extracting it into a
 // temp dir. In-archive symlinks are resolved manually (single-file extraction
 // yields a dangling link, while -cat follows links itself).
-func catExtract(sqfPath, filePath string) []byte {
+func catExtract(bin, sqfPath, filePath string) []byte {
 	tmpDir, err := os.MkdirTemp("", "cnt-sqf-cat-")
 	if err != nil {
 		return nil
@@ -82,7 +92,7 @@ func catExtract(sqfPath, filePath string) []byte {
 
 	for hop := 0; hop < 4; hop++ {
 		dest := filepath.Join(tmpDir, strconv.Itoa(hop))
-		cmd := exec.Command("unsquashfs", "-q", "-n", "-d", dest, sqfPath, filePath)
+		cmd := exec.Command(bin, "-q", "-n", "-d", dest, sqfPath, filePath)
 		cmd.Env = append(os.Environ(), "LC_ALL=C")
 		if err := cmd.Run(); err != nil {
 			return nil
@@ -112,10 +122,19 @@ func catExtract(sqfPath, filePath string) []byte {
 	return nil
 }
 
-// unsquashfsAvailable reports whether unsquashfs is on PATH, checked once per process.
-var unsquashfsAvailable = sync.OnceValue(func() bool {
-	_, err := exec.LookPath("unsquashfs")
-	return err == nil
+// unsquashfsBin resolves the unsquashfs binary once per process via
+// toolpath.Resolve: the self-provisioned squashfs-tools copy first
+// (internal/libexec), then PATH, then the FHS fallback directories. Empty
+// when none exists — sync.OnceValue caches only the string, not the error, so
+// each caller that needs a message on the empty case rebuilds one via
+// toolpath.NotFoundMessage("unsquashfs") rather than toolpath.Resolve's own
+// (which would need a second, uncached call to get back).
+var unsquashfsBin = sync.OnceValue(func() string {
+	path, err := toolpath.Resolve("unsquashfs")
+	if err != nil {
+		return ""
+	}
+	return path
 })
 
 // ============================================================================
@@ -144,11 +163,15 @@ func GetSquashFSStats(path string) (*SquashFSStats, error) {
 // GetSquashFSStatsAt is GetSquashFSStats for an archive that starts partway into
 // the file, as a SIF's system partition does.
 func GetSquashFSStatsAt(path string, offset int64) (*SquashFSStats, error) {
+	bin := unsquashfsBin()
+	if bin == "" {
+		return nil, fmt.Errorf("%w: %s", toolpath.ErrToolMissing, toolpath.NotFoundMessage("unsquashfs"))
+	}
 	args := []string{"-stat"}
 	if offset > 0 {
 		args = append(args, "-offset", strconv.FormatInt(offset, 10))
 	}
-	cmd := exec.Command("unsquashfs", append(args, path)...)
+	cmd := exec.Command(bin, append(args, path)...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LC_TIME=C")
 	out, err := cmd.Output()
 	if err != nil {

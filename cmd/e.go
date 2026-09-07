@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/cmd/internal/ui"
-	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/helper"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
@@ -22,7 +21,6 @@ import (
 var (
 	eReadOnly    bool
 	eNoAutoload  bool
-	eBaseImage   string
 	eFakeroot    bool
 	eEnvSettings []string
 	eBindPaths   []string
@@ -54,7 +52,6 @@ func init() {
 
 	eCmd.Flags().BoolVarP(&eReadOnly, "read-only", "r", false, "Mount .img overlays as read-only (default: writable)")
 	eCmd.Flags().BoolVarP(&eNoAutoload, "no-autoload", "n", false, "Disable auto-loading env.img from current directory")
-	eCmd.Flags().StringVarP(&eBaseImage, "base-image", "b", "", "Base image to use instead of default")
 	eCmd.Flags().BoolVarP(&eFakeroot, "fakeroot", "f", false, "Run container with fakeroot privileges")
 	eCmd.Flags().StringSliceVar(&eEnvSettings, "env", nil, "Set environment variable 'KEY=VALUE' (repeatable)")
 	eCmd.Flags().StringSliceVar(&eBindPaths, "bind", nil, "Bind path 'HOST:CONTAINER' (repeatable)")
@@ -66,7 +63,6 @@ func init() {
 	eCmd.FParseErrWhitelist.UnknownFlags = true
 
 	// Completion
-	eCmd.RegisterFlagCompletionFunc("base-image", baseImageFlagCompletion())
 	eCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		// During completion, check if -- appears in os.Args
 		// This is more reliable than checking the processed args array
@@ -122,17 +118,17 @@ func runE(cmd *cobra.Command, args []string) error {
 	// Prepare command and determine if prompt should be hidden
 	commands, hidePrompt := PrepareCommandAndHidePrompt(commands)
 
-	baseImageResolved, err := resolveBaseImage(cmd.Context(), eBaseImage)
-	if err != nil {
-		return err
-	}
-
 	// Resolve overlays
 	overlays, err = projectOverlays(overlays)
 	if err != nil {
 		return err
 	}
 	resolvedOverlays, err := container.ResolveOverlayPaths(overlays)
+	if err != nil {
+		return err
+	}
+
+	baseImageResolved, err := ensureRootBaseImage(cmd.Context(), resolvedOverlays)
 	if err != nil {
 		return err
 	}
@@ -147,7 +143,6 @@ func runE(cmd *cobra.Command, args []string) error {
 		ApptainerFlags: apptainerFlags,
 		Fakeroot:       eFakeroot,
 		BaseImage:      baseImageResolved,
-		ApptainerBin:   config.Global.ApptainerBin,
 		HidePrompt:     hidePrompt,
 	}
 
@@ -184,9 +179,8 @@ func parseEArgs(args []string) (overlays, commands, apptainerFlags []string, err
 	knownFlags := map[string]bool{
 		"--read-only": true, "-r": true,
 		"--no-autoload": true, "-n": true,
-		"--env":        true,
-		"--bind":       true,
-		"--base-image": true, "-b": true,
+		"--env":      true,
+		"--bind":     true,
 		"--fakeroot": true, "-f": true,
 		"--debug": true,
 		"--quiet": true, "-q": true,
@@ -230,7 +224,7 @@ func parseEArgs(args []string) (overlays, commands, apptainerFlags []string, err
 		// Skip known flags (already handled by cobra)
 		if knownFlags[arg] || isKnownFlagWithEquals(knownFlags, arg) {
 			// Check if flag needs value
-			if (arg == "-b" || arg == "--base-image" || arg == "--env" || arg == "--bind") && i+1 < len(os.Args) {
+			if (arg == "--env" || arg == "--bind") && i+1 < len(os.Args) {
 				i++ // Skip value
 			}
 			continue

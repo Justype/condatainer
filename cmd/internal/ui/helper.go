@@ -138,9 +138,6 @@ func ApplyHistoryRun(opts *helper.RunOptions, r *helper.HelperRun) {
 			opts.Resources.Gpu = helper.ParseGPUSpec(r.GPU)
 		}
 	}
-	if r.BaseImage != "" {
-		opts.BaseImage = r.BaseImage
-	}
 	if r.EnvOverlay != "" {
 		opts.EnvImg = r.EnvOverlay
 	}
@@ -528,14 +525,9 @@ func PrintLaunchSpec(plan *helper.RunPlan) {
 	}
 	// A summary, so a base that is not installed yet is reported rather than
 	// resolved: the launch that follows is what has to succeed or fail.
-	base := opts.BaseImage
-	if base == "" {
-		resolved, err := config.GetBaseImage()
-		if err != nil {
-			base = "(" + err.Error() + ")"
-		} else {
-			base = resolved
-		}
+	base, err := config.GetBaseImage()
+	if err != nil {
+		base = "(" + err.Error() + ")"
 	}
 	utils.PrintMessage("  Base:     %s", base)
 	if opts.EnvImg != "" {

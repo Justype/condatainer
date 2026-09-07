@@ -41,10 +41,10 @@ func IsPathDep(value string) bool {
 // from #TYPE: and its name from #TARGET:, so it has no recipe path to be parsed
 // from. One definition, both callers.
 //
-//   - Only data may declare #DEP:. An app is prebuilt and self-contained, an OS
-//     is self-contained by definition, and a base *is* the build environment. A
-//     recipe that genuinely needs a compiler is an os artifact providing that
-//     toolchain, not an app depending on one.
+//   - Only data may declare #DEP:. An app is prebuilt and self-contained, and an
+//     OS is self-contained by definition. A recipe that genuinely needs a
+//     compiler is an os artifact providing that toolchain, not an app
+//     depending on one.
 //   - A build dependency is a name/version, never an overlay path. A built
 //     artifact records each edge as a name plus a complete identity, and a path
 //     supplies neither: nothing could re-resolve it on another machine, and no
@@ -81,8 +81,8 @@ func ValidateDeps(name string, typ Type, deps []string) error {
 //
 // The #DEP: rules live in ValidateDeps, which an external build shares. The one
 // rule that is only a recipe's is #ARCH:, which only app and data may declare,
-// and only as native or noarch: an OS and a base are root filesystems and are
-// always architecture-specific.
+// and only as native or noarch: an OS is a root filesystem and is always
+// architecture-specific.
 //
 // #REDISTRIBUTE: is rejected rather than ignored when it is neither yes nor no.
 // It decides whether a payload may be published, so a typo that silently read as

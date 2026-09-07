@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/image/squashfs"
+	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -12,7 +13,7 @@ import (
 // It uses debugfs to stat the upper/<entry> path in the image.
 func imgPathExists(imgPath, entry string) bool {
 	entry = strings.TrimPrefix(entry, "/")
-	dbg, err := exec.LookPath("debugfs")
+	dbg, err := toolpath.Resolve("debugfs")
 	if err != nil {
 		return false
 	}

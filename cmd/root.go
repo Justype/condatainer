@@ -127,21 +127,6 @@ var rootCmd = &cobra.Command{
 			Stderr: os.Stderr,
 		}))
 
-		// Step 6: Auto-detect compression based on apptainer/singularity version.
-		// Skip the version subprocess when compression is already explicitly configured.
-		if err := apptainer.SetBin(config.Global.ApptainerBin); err == nil {
-			if config.Global.Build.CompressArgs == "" {
-				if version, err := apptainer.GetVersion(); err == nil {
-					supportsZstd := apptainer.CheckZstdSupport(version)
-					config.AutoDetectCompression(supportsZstd, apptainer.IsSingularity())
-					// Cache detected value to skip this subprocess on future startups.
-					if writableCfg, _, err := config.ResolveWritableConfigPath(""); err == nil && config.Global.Build.CompressArgs != "" {
-						_ = config.SetConfigKey(writableCfg, "build.compress_args", config.Global.Build.CompressArgs)
-					}
-				}
-			}
-		}
-
 		// Step 7: Apply debug mode and resource defaults from config
 		scheduler.SetDebugMode(config.Global.Debug)
 		build.SetBuildDefaults(config.Global.Build.Defaults)

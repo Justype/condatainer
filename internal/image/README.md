@@ -83,6 +83,43 @@ was built as.
 
 ## External tools
 
+Finding a runnable path for a bare tool name is `internal/toolpath`'s job,
+not this package's — see that package's README for why it's split out
+(short version: `internal/conda` needs the same lookup and isn't under
+`internal/image`, and `internal/image/squashfs` resolving back through
+anything that reaches `internal/libexec`'s consumers would cycle). Every
+call site here and in `ext3/`, `freeze/`, and `internal/conda` that shells
+out to `debugfs`, `e2fsck`, `tune2fs`, `mke2fs`, `resize2fs`, `fuse2fs`,
+`mksquashfs`, `unsquashfs`, or `squashfuse`/`squashfuse_ll` goes through
+`toolpath.Resolve`/`toolpath.Command` (directly, or via `tool.
+CheckDependencies`/`tool.RunCommand`, which call them internally) rather
+than handing a bare name to `exec.Command`/`exec.CommandContext`, which is
+`PATH`-only with no fallback. `dd`, `fallocate`, and `unshare` (coreutils/
+util-linux, not e2fsprogs) are deliberately excluded — core-OS tools even
+more universal than e2fsprogs, never expected to need the fallback.
+
+`toolpath.Resolve` checks `internal/libexec`'s self-provisioned copy first —
+required over whatever the host has, when it has one at all — then `PATH`,
+then the FHS fallback directories. `mksquashfs`/`unsquashfs`/`squashfuse` are
+provisioned into `libexec` alongside `apptainer`; `debugfs`/`e2fsck`/
+`tune2fs`/`mke2fs`/`resize2fs`/`fuse2fs` (e2fsprogs) are not, so a name
+`libexec` never provisions simply isn't found there and falls through to
+`PATH`/FHS unaffected.
+
+e2fsprogs (everything but `fuse2fs`) is host-only, never self-provisioned
+into `internal/libexec`: it is practically guaranteed present on any Linux
+host already, so bundling it would only duplicate what is already there.
+`fuse2fs` itself has no independent source condatainer can bundle either — it
+stays a documented prerequisite.
+
+What stays in *this* package's own `tool` subpackage: `Error`/`analyze()`
+(ext3/squashfs-specific failure→hint text) and the archive sentinels
+`ErrFileNotFound`/`ErrUnreadable`/`ErrCorrupt` — genuinely specific to
+interpreting an image-archive read, unlike lookup itself.
+`toolpath.ErrToolMissing` is what a caller checks for "couldn't find the
+binary at all," not an `internal/image/tool` sentinel — finding a tool in
+the first place isn't an image-archive concern.
+
 Every archive read shells out, and two of those calls have non-obvious shapes.
 
 `ExtractDir` decides by its **output, not the exit code**: `unsquashfs` exits 0
@@ -118,7 +155,12 @@ if errors.As(err, &overlayErr) {
 
 ## Locking Strategy
 
-Locks use `syscall.Flock` on the image file itself (no separate `.lock` file), non-blocking (`LOCK_NB`):
+Locks use `syscall.Flock` on the image file itself (no separate `.lock` file), non-blocking (`LOCK_NB`).
+The bare open+flock mechanics live in `internal/utils.AcquireFlock` — shared with
+`internal/libexec`'s own toolchain-generation lock, which has no write-protection concept and so
+calls it directly rather than through this package (see `internal/utils/README.md`, *Locking*).
+`Lock` here is a type alias for `*utils.FlockHandle`; what this package adds on top is the
+protection semantics below:
 
 - **Shared** (`LOCK_SH`): multiple readers can hold concurrently; acquired read-only (`O_RDONLY`)
 - **Exclusive** (`LOCK_EX`): single writer; blocks all other locks; opened `O_RDWR`

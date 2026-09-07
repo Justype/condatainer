@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	artifactcache "github.com/Justype/condatainer/internal/artifact/cache"
 	"github.com/Justype/condatainer/internal/artifact/compare"
-	"github.com/Justype/condatainer/internal/artifactcache"
 )
 
 func TestScanVerifiesAddressAndResolveDetectsAmbiguity(t *testing.T) {

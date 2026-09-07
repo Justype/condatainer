@@ -11,6 +11,7 @@ import (
 	"github.com/Justype/condatainer/internal/image/sif"
 	"github.com/Justype/condatainer/internal/image/squashfs"
 	"github.com/Justype/condatainer/internal/image/tool"
+	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -38,7 +39,7 @@ func ReadFile(imagePath, innerPath string) []byte {
 // Writable content lives under upper/, so /cnt_env/conda-meta/history is read
 // as upper/cnt_env/conda-meta/history. It returns nil if the file is absent.
 func imgCat(imgPath, innerPath string) []byte {
-	dbg, err := exec.LookPath("debugfs")
+	dbg, err := toolpath.Resolve("debugfs")
 	if err != nil {
 		return nil
 	}

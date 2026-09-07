@@ -28,8 +28,6 @@ type postScriptHelperFlags struct {
 	time       string
 	gpuSet     bool
 	gpu        string
-	baseSet    bool
-	base       string
 	envSet     bool
 	env        string
 	overlaySet bool
@@ -170,13 +168,6 @@ func parsePostScriptHelperFlags(args []string) (postScriptHelperFlags, []string,
 				}
 				flags.gpuSet = true
 				flags.gpu = v
-			case "--base":
-				v, err := valueFor(name, &i, val, hasVal)
-				if err != nil {
-					return flags, nil, err
-				}
-				flags.baseSet = true
-				flags.base = v
 			case "--env":
 				v, err := valueFor(name, &i, val, hasVal)
 				if err != nil {
@@ -246,13 +237,6 @@ func parsePostScriptHelperFlags(args []string) (postScriptHelperFlags, []string,
 				}
 				flags.gpuSet = true
 				flags.gpu = v
-			case "-b":
-				v, err := valueFor(name, &i, attached, hasAttached)
-				if err != nil {
-					return flags, nil, err
-				}
-				flags.baseSet = true
-				flags.base = v
 			case "-e":
 				v, err := valueFor(name, &i, attached, hasAttached)
 				if err != nil {
@@ -455,7 +439,7 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	// startedWithArgs is true when the user supplied explicit resource/path/param flags,
 	// meaning we skip the history-reuse menu and go straight to settings.
 	startedWithArgs := postFlags.cpusSet || postFlags.memSet ||
-		postFlags.timeSet || postFlags.gpuSet || postFlags.baseSet ||
+		postFlags.timeSet || postFlags.gpuSet ||
 		postFlags.envSet || postFlags.overlaySet || postFlags.cwdSet ||
 		postFlags.newSet || len(scriptArgs) > 0
 
@@ -528,7 +512,6 @@ func runHelper(cmd *cobra.Command, args []string) error {
 		ScriptPath: scriptPath,
 		ScriptName: scriptName,
 		Resources:  overrides,
-		BaseImage:  postFlags.base,
 		EnvImg:     envImg,
 		Overlays:   postFlags.overlays,
 		CWD:        cwd,

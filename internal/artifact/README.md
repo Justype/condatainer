@@ -53,7 +53,7 @@ special case, because its files really are at the root, so `{prefix}/bin` is
 `ReadRuntime` distinguishes *no runtime document* from *could not look*: only a
 genuinely absent one is `ErrNoRuntime`, so a caller never reports a missing
 `unsquashfs` or a corrupt archive as "this image has no metadata" — those keep
-`tool.ErrToolMissing`, `tool.ErrUnreadable` or `tool.ErrCorrupt`. An unknown
+`toolpath.ErrToolMissing`, `tool.ErrUnreadable` or `tool.ErrCorrupt`. An unknown
 `SchemaVersion` joins them as `ErrUnsupportedSchema`, handled exactly like a
 missing document; a reader ignores unknown fields, so a later schema that only
 adds fields stays readable here.
@@ -72,11 +72,10 @@ otherwise spawn one `unsquashfs` per image every time. Negative verdicts are
 cached too, or an image predating the format would be re-probed on every listing,
 which is the cost the cache exists to avoid.
 
-Degradation is deliberate and asymmetric, because most images in the wild predate
-the format. `CheckBase` accepts an image with no runtime document, warns and
-accepts one that is present but unreadable — rejecting it would strand every
-build behind a base that is most likely fine — and rejects only metadata that
-reads and says it is not a base.
+Degradation is deliberate, because most images in the wild predate the format:
+a missing or unreadable runtime document never blocks a mount, it only means
+this image contributes no PATH/env entries — a manifest's `type` is never
+consulted before accepting something as a container root either, base or not.
 
 ### manifest.json
 

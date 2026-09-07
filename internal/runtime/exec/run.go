@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/libexec"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/runtime/container"
@@ -47,10 +48,6 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 		return nil, err
 	}
 
-	if err := apptainer.SetBin(options.ApptainerBin); err != nil {
-		return nil, err
-	}
-
 	// Use shared container setup logic
 	setupResult, err := container.Setup(container.SetupConfig{
 		Overlays:       options.Overlays,
@@ -65,8 +62,21 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 		return nil, err
 	}
 
+	options, err = options.resolveBaseImage(setupResult.Root)
+	if err != nil {
+		return nil, err
+	}
+
 	// Auto-enable fakeroot if needed for writable .img
 	fakeroot, fakerootDiagnostics := container.AutoEnableFakeroot(setupResult.LastImg, options.WritableImg, setupResult.Fakeroot)
+
+	// Resolved last, once fakeroot is final: fakeroot (explicit or
+	// auto-enabled) always needs the system apptainer, everything else uses
+	// the self-provisioned libexec toolchain exclusively (see
+	// apptainer.ResolveBin).
+	if err := apptainer.ResolveBin(fakeroot); err != nil {
+		return nil, err
+	}
 
 	logger := logging.FromContext(ctx)
 	logger.Debug("prepared exec setup",
@@ -117,6 +127,15 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 			releaseLocks()
 			return nil, err
 		}
+		execLocks = append(execLocks, lock)
+	}
+
+	// Same reason and duration as the overlay locks above; AcquireUse returns
+	// (nil, nil) when nothing is provisioned, so this is a no-op until then.
+	if lock, err := libexec.AcquireUse(); err != nil {
+		releaseLocks()
+		return nil, err
+	} else if lock != nil {
 		execLocks = append(execLocks, lock)
 	}
 

@@ -68,20 +68,21 @@ func TestGetBaseImageWithoutConfiguredBase(t *testing.T) {
 	}
 }
 
-// The finder and the builder have to agree on the filename, or a rebuilt base
-// is written where nothing will look for it.
+// The name a build writes under (NewBuildObject's own "/" → "--" + ".sqf"
+// transform of the resolved recipe name) and the name FindBaseImage looks for
+// have to agree, or a rebuilt base is written where nothing will look for it.
 func TestBaseWritePathMatchesFindPath(t *testing.T) {
 	dir := withImageDir(t)
 	withBase(t, "ubuntu24")
 
-	write, err := GetBaseImageWritePath()
-	if err != nil {
-		t.Skipf("no writable images dir: %v", err)
+	fileName := BaseImageFileName()
+	if fileName == "" {
+		t.Fatal("BaseImageFileName is empty with a base configured")
 	}
-	if err := os.WriteFile(filepath.Join(dir, filepath.Base(write)), []byte("SQF"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, fileName), []byte("SQF"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if found := FindBaseImage(); found == "" {
-		t.Errorf("a base written as %s is not found by FindBaseImage", filepath.Base(write))
+		t.Errorf("a base written as %s is not found by FindBaseImage", fileName)
 	}
 }

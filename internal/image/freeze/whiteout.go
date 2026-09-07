@@ -12,6 +12,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/toolpath"
 )
 
 // Whiteout conventions. Which one an overlay carries is decided by the driver
@@ -198,13 +199,18 @@ func opaqueByXattr(ctx context.Context, imgPath string, entries []Entry) ([]stri
 		return nil, nil
 	}
 
+	debugfsPath, err := toolpath.Resolve("debugfs")
+	if err != nil {
+		return nil, err
+	}
+
 	var script bytes.Buffer
 	for _, d := range dirs {
 		fmt.Fprintf(&script, "ea_list %s\n", path.Join(UpperDir, d))
 	}
 	script.WriteString("quit\n")
 
-	cmd := exec.CommandContext(ctx, "debugfs", imgPath)
+	cmd := exec.CommandContext(ctx, debugfsPath, imgPath)
 	cmd.Stdin = &script
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

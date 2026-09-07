@@ -188,7 +188,7 @@ build:
   ncpus: 4
   mem: 8192   # MB
   time: "2h"
-  compress_args: ""   # auto-detect: zstd-medium (apptainer>=1.4), lz4 otherwise (incl. singularity)
+  compress_args: "-comp zstd -Xcompression-level 8"   # zstd-medium, always — every reader is a version-checked apptainer
 ```
 
 ## Constants

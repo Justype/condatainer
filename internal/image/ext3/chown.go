@@ -13,13 +13,15 @@ import (
 
 	"github.com/Justype/condatainer/internal/image/tool"
 	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
 // ChownRecursively changes the UID/GID of files inside an unmounted overlay image.
 // It maps the provided internalPath (e.g., "/") to the overlay's "/upper" structure.
 func ChownRecursively(ctx context.Context, imagePath string, uid, gid int, internalPath string) error {
-	if err := tool.CheckDependencies([]string{"debugfs"}); err != nil {
+	debugfsPath, err := toolpath.Resolve("debugfs")
+	if err != nil {
 		return err
 	}
 
@@ -35,7 +37,7 @@ func ChownRecursively(ctx context.Context, imagePath string, uid, gid int, inter
 	log.Info(fmt.Sprintf("scanning %s inside %s (uid=%s gid=%s)",
 		targetPath, utils.StylePath(name), utils.StyleNumber(uid), utils.StyleNumber(gid)))
 
-	inodes, err := scanInodes(ctx, absPath, targetPath)
+	inodes, err := scanInodes(ctx, debugfsPath, absPath, targetPath)
 	if err != nil {
 		return &tool.Error{
 			Op:      "scan inodes",
@@ -74,7 +76,7 @@ func ChownRecursively(ctx context.Context, imagePath string, uid, gid int, inter
 	cmds = append(cmds, "quit")
 
 	script := strings.Join(cmds, "\n")
-	cmd := exec.CommandContext(ctx, "debugfs", "-w", absPath)
+	cmd := exec.CommandContext(ctx, debugfsPath, "-w", absPath)
 	cmd.Stdin = strings.NewReader(script)
 
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -92,10 +94,10 @@ func ChownRecursively(ctx context.Context, imagePath string, uid, gid int, inter
 }
 
 // scanInodes implements a BFS walker to find all inodes under startPath.
-func scanInodes(ctx context.Context, imgPath, startPath string) ([]string, error) {
+func scanInodes(ctx context.Context, debugfsPath, imgPath, startPath string) ([]string, error) {
 	log := logging.FromContext(ctx)
 
-	cmd := exec.CommandContext(ctx, "debugfs", "-R", fmt.Sprintf("stat %s", startPath), imgPath)
+	cmd := exec.CommandContext(ctx, debugfsPath, "-R", fmt.Sprintf("stat %s", startPath), imgPath)
 	log.Debug(fmt.Sprintf("debugfs -R stat %s %s", startPath, imgPath))
 	out, err := cmd.Output()
 	if err != nil {
@@ -131,7 +133,7 @@ func scanInodes(ctx context.Context, imgPath, startPath string) ([]string, error
 		}
 		visited[current] = true
 
-		cmdLs := exec.CommandContext(ctx, "debugfs", "-R", fmt.Sprintf("ls -l <%s>", current), imgPath)
+		cmdLs := exec.CommandContext(ctx, debugfsPath, "-R", fmt.Sprintf("ls -l <%s>", current), imgPath)
 		outLs, _ := cmdLs.Output()
 
 		scanner := bufio.NewScanner(bytes.NewReader(outLs))

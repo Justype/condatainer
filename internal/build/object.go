@@ -27,7 +27,7 @@ var ErrTmpOverlayExists = errors.New("temporary overlay already exists")
 var ErrBuildCancelled = errors.New("build cancelled by user")
 
 // BuildType is how a target is built — the shape of its source, nothing more.
-// What the payload *is* (base, os, app, data, env) is its catalog.Type.
+// What the payload *is* (os, app, data, env) is its catalog.Type.
 //
 // It is meta.BuildType, the type the manifest records. The unset value is "",
 // which SourceSpec.BuildType returns until a source is resolved. There is no
@@ -451,11 +451,12 @@ func (b *BuildObject) effectiveNcpus() int {
 	return cpus
 }
 
-// IsInstalled reports whether this image is already built. A base is searched
-// across every image path, not just its target, so one from a shared install is
-// not rebuilt into the user's own directory.
+// IsInstalled reports whether this image is already built. The configured
+// default root (config.BaseRecipeName, still conventionally named ".../base")
+// is searched across every image path, not just its target, so one from a
+// shared install is not rebuilt into the user's own directory.
 func (b *BuildObject) IsInstalled() bool {
-	if b.spec.Image.Type == catalog.TypeBase {
+	if b.spec.Image.Name == config.BaseRecipeName() {
 		return config.FindBaseImage() != ""
 	}
 	_, err := os.Stat(b.tgt.Path)

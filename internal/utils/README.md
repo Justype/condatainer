@@ -8,8 +8,29 @@ Shared utilities for console output, file operations, downloads, and script pars
 console.go   Styled console output, logging, user prompts
 download.go  HTTP downloads with progress bars
 files.go     File and directory utilities
+flock.go     Bare non-blocking file locking primitive
 parser.go    Build script metadata parsing
 ```
+
+## Locking
+
+`AcquireFlock(path, write)` is the one non-blocking `flock` primitive in the
+codebase — `open` with a mode picked by `write` (`O_RDWR`/exclusive vs.
+`O_RDONLY`/shared, since some callers use the open mode itself as a
+permission check ahead of and independent from the lock), then a non-blocking
+`flock(2)`. It carries no domain meaning of its own: `internal/image.Lock`/
+`AcquireLock` wraps it to add `ErrProtected`/`ErrInUse` classification for
+overlay images (a lock sentinel that opens `O_RDWR` and fails as
+"write-protected" specifically means an artifact was `chmod a-w`'d to pin
+it); `internal/libexec` calls it directly for its own toolchain-generation
+sentinel, which has no such "protected" concept. It lives here, not in
+`internal/image`, because `internal/libexec` needs the identical mechanism
+and must not depend on `internal/image` (or anything that depends on it) —
+see `internal/libexec/README.md` and `internal/image/lock.go`'s own comment
+for why. `internal/image.Lock` is a type alias for `*utils.FlockHandle`
+rather than a wrapping struct, so both packages' locks are the exact same
+type wherever a caller holds them together (`internal/runtime/
+exec.Prepare`'s combined overlay + toolchain lock slice).
 
 ## Console Output
 

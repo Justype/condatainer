@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
 )
@@ -220,5 +221,100 @@ func TestAutoloadSnapshotSkipsWhenBlocked(t *testing.T) {
 	}
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics = %v, want none when blocked", diagnostics)
+	}
+}
+
+// eligibility is selectRootWith's lookup over a fixed set, so root selection
+// can be exercised without a real image to read metadata out of.
+func eligibility(rootPaths ...string) func(string) bool {
+	set := map[string]bool{}
+	for _, p := range rootPaths {
+		set[p] = true
+	}
+	return func(path string) bool { return set[path] }
+}
+
+// The first root-eligible overlay is pulled out; every other entry, root-
+// eligible or not, keeps its place in declaration order.
+func TestSelectRootPullsFirstEligibleOverlay(t *testing.T) {
+	overlays := []string{"/images/samtools--1.22.sqf", "/images/ubuntu24--base.sqf", "/images/other-os.sqf"}
+	root, rest := selectRootWith(overlays, eligibility("/images/ubuntu24--base.sqf", "/images/other-os.sqf"))
+	if root != "/images/ubuntu24--base.sqf" {
+		t.Errorf("root = %q, want the first eligible entry", root)
+	}
+	want := []string{"/images/samtools--1.22.sqf", "/images/other-os.sqf"}
+	if !slices.Equal(rest, want) {
+		t.Errorf("rest = %v, want %v", rest, want)
+	}
+}
+
+// With no root-eligible entry, selectRoot reports none and leaves the list
+// untouched — the caller falls back to the configured default.
+func TestSelectRootNoneEligible(t *testing.T) {
+	overlays := []string{"/images/samtools--1.22.sqf", "/images/bcftools--1.20.sqf"}
+	root, rest := selectRootWith(overlays, eligibility())
+	if root != "" {
+		t.Errorf("root = %q, want none", root)
+	}
+	if !slices.Equal(rest, overlays) {
+		t.Errorf("rest = %v, want unchanged %v", rest, overlays)
+	}
+}
+
+// A :ro/:rw suffix on the overlay path must not defeat the eligibility
+// lookup, which is keyed by the clean path.
+func TestSelectRootStripsMountSuffix(t *testing.T) {
+	root, rest := selectRootWith([]string{"/images/ubuntu24--base.sqf:ro"}, eligibility("/images/ubuntu24--base.sqf"))
+	if root != "/images/ubuntu24--base.sqf:ro" {
+		t.Errorf("root = %q, want the suffixed entry returned as given", root)
+	}
+	if len(rest) != 0 {
+		t.Errorf("rest = %v, want empty", rest)
+	}
+}
+
+// isRootEligible reads real metadata: an os and a base overlay are both
+// eligible, an app is not, and HasRequestedRoot answers the same question
+// over a raw (unresolved) overlay list the way callers actually have it.
+func TestIsRootEligibleReadsRealMetadata(t *testing.T) {
+	requireSquashfsTools(t)
+	dir := t.TempDir()
+
+	osSqf := filepath.Join(dir, "os.sqf")
+	packRuntimeSqf(t, osSqf, meta.Runtime{
+		SchemaVersion: meta.SchemaVersion, Name: "ubuntu24", Type: catalog.TypeOS, Platform: meta.NativePlatform(),
+	})
+	appSqf := filepath.Join(dir, "samtools--1.22.sqf")
+	packRuntimeSqf(t, appSqf, meta.Runtime{
+		SchemaVersion: meta.SchemaVersion, Name: "samtools/1.22", Type: catalog.TypeApp,
+		Platform: meta.NativePlatform(), Prefix: "/cnt/samtools/1.22",
+	})
+
+	if !isRootEligible(osSqf) {
+		t.Error("an os-typed image is not root-eligible")
+	}
+	if isRootEligible(appSqf) {
+		t.Error("an app-typed image is root-eligible")
+	}
+
+	if !HasRequestedRoot([]string{appSqf, osSqf}) {
+		t.Error("HasRequestedRoot missed the os overlay in the list")
+	}
+	if HasRequestedRoot([]string{appSqf}) {
+		t.Error("HasRequestedRoot found a root among app-only overlays")
+	}
+}
+
+// A plain .sif carries no condatainer metadata at all, but it is still
+// Apptainer's own native root format and must be root-eligible on that basis
+// alone — this is the only way left to run one directly, now that -b/
+// --base-image is gone.
+func TestIsRootEligibleAcceptsAForeignSif(t *testing.T) {
+	sif := filepath.Join(t.TempDir(), "foreign.sif")
+	if err := os.WriteFile(sif, []byte("not a real sif, just needs the extension"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !isRootEligible(sif) {
+		t.Error("a .sif with no condatainer metadata is not root-eligible")
 	}
 }

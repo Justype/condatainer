@@ -64,15 +64,12 @@ its own build instead of taking a whole collection out of every listing.
 | rule | kind |
 |---|---|
 | `#DEP:` on anything but data | error |
-| `#ARCH:` on an OS or a base, or a value other than `native`/`noarch` | error |
+| `#ARCH:` on an OS, or a value other than `native`/`noarch` | error |
 | a dependency mentioned in the name but not as whole components | lint |
 
-Only data has build dependencies: an app is prebuilt and self-contained, an OS is
-self-contained by definition, and a base *is* the build environment. A recipe that
-genuinely needs a compiler is an `os` artifact providing that toolchain, not an
-app depending on one. `Resolve` enforces the other half — a dep that resolves to a
-base is refused, though a base may still be a root of the walk, which is how a
-base gets built.
+Only data has build dependencies: an app is prebuilt and self-contained, and an
+OS is self-contained by definition. A recipe that genuinely needs a compiler is
+an `os` artifact providing that toolchain, not an app depending on one.
 
 `HasComponents` is the matching rule the lint is built on: a dependency's
 slash-separated components must occur as a contiguous run of the artifact name's.
@@ -149,10 +146,9 @@ callers are `Recipe.Validate` and `build.FromExternalSource` — never `run` or
 parsed from.
 
 **Only a `data` recipe may declare one.** An `app` is self-contained — a conda
-env, or a prebuilt package carrying its own libraries — an `os` is
-self-contained by definition, and a `base` *is* the build environment. Producing
-an index needs the producing tool, which is why data is the type with deps. The
-dep may name an app, data or os, never a base.
+env, or a prebuilt package carrying its own libraries — and an `os` is
+self-contained by definition. Producing an index needs the producing tool,
+which is why data is the type with deps. The dep may name an app, data or os.
 
 **A build's `#DEP:` is a `name/version`, never a path; a running script's may be
 either.** The asymmetry is the point: a running script mounts what it names and

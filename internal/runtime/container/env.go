@@ -13,7 +13,7 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image"
-	"github.com/Justype/condatainer/internal/image/tool"
+	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -135,7 +135,7 @@ func degradeDiagnostic(path string, err error) *Diagnostic {
 			Level:   "warn",
 			Message: fmt.Sprintf("%s has unreadable CondaTainer metadata: %v. Mounted, but contributes no environment.", name, err),
 		}
-	case errors.Is(err, tool.ErrToolMissing):
+	case errors.Is(err, toolpath.ErrToolMissing):
 		return &Diagnostic{
 			Level:   "warn",
 			Message: fmt.Sprintf("cannot read metadata from %s: %v. Install squashfs-tools to restore environment setup.", name, err),

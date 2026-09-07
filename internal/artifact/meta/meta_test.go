@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/artifactcache"
+	artifactcache "github.com/Justype/condatainer/internal/artifact/cache"
 )
 
 // validRuntime returns a runtime document that passes ValidateRuntime, for a

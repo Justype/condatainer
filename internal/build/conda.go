@@ -13,6 +13,7 @@ import (
 	"github.com/Justype/condatainer/internal/conda"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/libexec"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/utils"
@@ -111,6 +112,20 @@ func (b *BuildObject) buildInstallCmd() (cmd string, extraBindPaths []string, er
 	return b.buildCreateCmd("/cnt/" + b.spec.Image.Name)
 }
 
+// micromambaCmd names the micromamba binary a generated build script should
+// invoke: the self-provisioned one's absolute path, so this never depends on
+// PATH order or a same-named tool elsewhere on PATH silently shadowing it.
+// Errors when libexec has not been provisioned, rather than falling back to a
+// bare "micromamba" that would only fail later as an unattributed in-container
+// shell error.
+func micromambaCmd() (string, error) {
+	path, ok := libexec.MicromambaPath()
+	if !ok {
+		return "", libexec.ErrNotProvisioned
+	}
+	return path, nil
+}
+
 // buildCreateCmd returns the micromamba create command for a target prefix, and
 // any extra bind paths it needs. Handles three modes: YAML file,
 // comma-separated packages, and single package.
@@ -118,12 +133,22 @@ func (b *BuildObject) buildInstallCmd() (cmd string, extraBindPaths []string, er
 // The prefix is a parameter so a dry-run solve can name a throwaway one. It does
 // not change what is resolved — create solves for a prefix that does not exist
 // yet either way — but it does decide what has to be mounted.
+//
+// --no-rc keeps the solve reproducible regardless of who runs the build: without
+// it, the invoking user's own ~/.condarc (channels, channel_priority, ...) is
+// visible inside the container — Apptainer binds $HOME by default — and would
+// silently influence a build two different users expect to produce the same
+// artifact.
 func (b *BuildObject) buildCreateCmd(prefix string) (cmd string, extraBindPaths []string, err error) {
 	var quietFlag string
 	if utils.QuietMode {
 		quietFlag = "-q"
 	}
 	channelFlags := buildChannelFlags()
+	mmCmd, err := micromambaCmd()
+	if err != nil {
+		return "", nil, err
+	}
 
 	if utils.IsCondaFile(b.buildSource) {
 		// Mode 3: env/spec file (-p prefix -f environment.yml or explicit .txt)
@@ -132,7 +157,7 @@ func (b *BuildObject) buildCreateCmd(prefix string) (cmd string, extraBindPaths 
 			return "", nil, fmt.Errorf("failed to get absolute path for %s: %w", b.buildSource, err)
 		}
 		extraBindPaths = []string{filepath.Dir(absFilePath)}
-		cmd = fmt.Sprintf("micromamba create -r "+ScratchPath+" %s -y %s -p %s -f %s",
+		cmd = fmt.Sprintf(mmCmd+" create -r "+ScratchPath+" --no-rc %s -y %s -p %s -f %s",
 			channelFlags, quietFlag, prefix, absFilePath)
 	} else if b.buildSource != "" {
 		// Mode 2: Multiple packages (-n name pkg1 pkg2 ...)
@@ -140,11 +165,11 @@ func (b *BuildObject) buildCreateCmd(prefix string) (cmd string, extraBindPaths 
 		for i, pkg := range packages {
 			packages[i] = strings.ReplaceAll(strings.TrimSpace(pkg), "/", "=")
 		}
-		cmd = fmt.Sprintf("micromamba create -r "+ScratchPath+" %s -y %s -p %s %s",
+		cmd = fmt.Sprintf(mmCmd+" create -r "+ScratchPath+" --no-rc %s -y %s -p %s %s",
 			channelFlags, quietFlag, prefix, strings.Join(packages, " "))
 	} else {
 		// Mode 1: Single package (name/version)
-		cmd = fmt.Sprintf("micromamba create -r "+ScratchPath+" %s -y %s -p %s %s=%s",
+		cmd = fmt.Sprintf(mmCmd+" create -r "+ScratchPath+" --no-rc %s -y %s -p %s %s=%s",
 			channelFlags, quietFlag, prefix, b.packageName, b.packageVersion)
 	}
 
@@ -193,7 +218,11 @@ func (b *BuildObject) captureCondaExports(ctx context.Context) {
 // returns its stdout. It reuses the install's container setup, so the export
 // reads the environment that was just built whichever workspace mode is in use.
 func (b *BuildObject) condaExport(ctx context.Context, args ...string) ([]byte, error) {
-	opts, err := b.condaExecOpts(fmt.Sprintf("micromamba env export -p /cnt/%s %s",
+	mmCmd, err := micromambaCmd()
+	if err != nil {
+		return nil, err
+	}
+	opts, err := b.condaExecOpts(fmt.Sprintf(mmCmd+" env export -p /cnt/%s %s",
 		b.spec.Image.Name, strings.Join(args, " ")), nil)
 	if err != nil {
 		return nil, err
@@ -246,8 +275,21 @@ fi
 // workspace mode is in use: bound host directories, or the scratch image the
 // payload lives inside. Install and export share it so an export always reads
 // the environment the install just wrote.
+//
+// Unlike script.go/squashfs.go, this call binds neither getAllBaseDirs() nor
+// container.BindPaths(), so the toolchain's tier needs an explicit bind here.
+// Checks libexec.Dir(), not Ensure — a build must never trigger a first-time
+// download — and errors rather than silently omitting the bind when nothing
+// is provisioned, since micromambaCmd's absolute path would not resolve
+// in-container without it.
 func (b *BuildObject) condaExecOpts(bashScript string, extraBindPaths []string) (exec.Options, error) {
 	bindPaths := extraBindPaths
+
+	dir, ok := libexec.Dir()
+	if !ok {
+		return exec.Options{}, libexec.ErrNotProvisioned
+	}
+	bindPaths = append(bindPaths, dir)
 
 	if !b.ws.UsesImage() {
 		bindPaths = append(bindPaths,
@@ -256,7 +298,6 @@ func (b *BuildObject) condaExecOpts(bashScript string, extraBindPaths []string) 
 		)
 		return exec.Options{
 			BaseImage:      b.spec.Base,
-			ApptainerBin:   config.Global.ApptainerBin,
 			Overlays:       []string{},
 			BindPaths:      bindPaths,
 			EnvSettings:    []string{"TMPDIR=" + ScratchPath},
@@ -269,7 +310,6 @@ func (b *BuildObject) condaExecOpts(bashScript string, extraBindPaths []string) 
 	}
 	return exec.Options{
 		BaseImage:     b.spec.Base,
-		ApptainerBin:  config.Global.ApptainerBin,
 		Overlays:      []string{b.ws.Overlay},
 		BindPaths:     bindPaths,
 		EnvSettings:   []string{"TMPDIR=" + ScratchPath},
@@ -377,7 +417,6 @@ func (b *BuildObject) solveConda(ctx context.Context) ([]conda.Package, error) {
 
 	opts := exec.Options{
 		BaseImage:      b.spec.Base,
-		ApptainerBin:   config.Global.ApptainerBin,
 		Overlays:       []string{},
 		BindPaths:      append(extraBindPaths, b.ws.Root+":"+ScratchPath),
 		EnvSettings:    []string{"TMPDIR=" + ScratchPath},

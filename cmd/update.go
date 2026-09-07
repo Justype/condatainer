@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,10 +12,9 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/helper"
-	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/libexec"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -25,22 +23,20 @@ import (
 
 var (
 	updateBuild       bool
-	updateBase        bool
 	updateHelpScripts bool
+	updateLibexec     bool
 )
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update script metadata caches or the base image",
-	Long: `Update build script metadata or the base image.
+	Short: "Update script metadata caches or the toolchain",
+	Long: `Update build script metadata, helper script metadata, or the self-provisioned toolchain.
 
 With no flags, refreshes both the build and helper script metadata caches.`,
 	Example: `  condatainer update                 # Refresh build + helper metadata (default)
   condatainer update --build         # Build script metadata only
   condatainer update --helper        # Helper script metadata only
-  condatainer update --base          # Update the base image only
-  condatainer update --base --remote # Update the base image using remote script
-  condatainer update --base --remote # Rebuild the base image from the remote .def`,
+  condatainer update --libexec       # Refresh the self-provisioned toolchain`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE:         runUpdate,
@@ -50,12 +46,12 @@ func init() {
 	rootCmd.AddCommand(updateCmd)
 	updateCmd.Flags().BoolVar(&updateBuild, "build", false, "Refresh build script metadata cache")
 	updateCmd.Flags().BoolVar(&updateHelpScripts, "helper", false, "Refresh helper script metadata cache")
-	updateCmd.Flags().BoolVar(&updateBase, "base", false, "Update the base image")
+	updateCmd.Flags().BoolVar(&updateLibexec, "libexec", false, "Refresh the self-provisioned toolchain (mksquashfs, squashfuse, apptainer)")
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
 	// Default: both --build and --help-scripts when no content flags given
-	if !updateBase && !updateBuild && !updateHelpScripts {
+	if !updateBuild && !updateHelpScripts && !updateLibexec {
 		updateBuild = true
 		updateHelpScripts = true
 	}
@@ -84,18 +80,14 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if updateBase {
-		// Bail out early if the base image is currently in use
-		if baseImagePath := config.FindBaseImage(); baseImagePath != "" {
-			if err := image.CheckAvailable(baseImagePath, true); err != nil {
-				return fmt.Errorf("condatainer is currently running (base image is locked); stop all running condatainer sessions before updating")
-			}
+	if updateLibexec {
+		// libexec.Update holds its own lock and refuses internally if the
+		// toolchain is in use; no separate check needed here.
+		utils.PrintMessage("Updating the self-provisioned toolchain...")
+		if err := libexec.Update(cmd.Context()); err != nil {
+			return fmt.Errorf("failed to update the toolchain: %w", err)
 		}
-		utils.PrintMessage("Updating base image...")
-		if err := build.RebuildBase(cmd.Context()); err != nil {
-			return fmt.Errorf("failed to update base image: %w", err)
-		}
-		utils.PrintSuccess("Base image updated successfully.")
+		utils.PrintSuccess("Toolchain updated successfully.")
 	}
 
 	return nil
@@ -106,7 +98,6 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 var (
 	selfUpdateForce bool
 	selfUpdateDev   bool
-	selfUpdateBase  bool
 )
 
 var selfUpdateCmd = &cobra.Command{
@@ -118,8 +109,7 @@ Note: No backup of the current version is kept.`,
 	Example: `  condatainer self-update        # Update to latest stable version
   condatainer self-update --yes  # Update without confirmation
   condatainer self-update -f     # Force update even if already on latest version
-  condatainer self-update --dev  # Include pre-release versions
-  condatainer self-update --base # Update the base image only`,
+  condatainer self-update --dev  # Include pre-release versions`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE:         runSelfUpdate,
@@ -129,7 +119,6 @@ func init() {
 	rootCmd.AddCommand(selfUpdateCmd)
 	selfUpdateCmd.Flags().BoolVarP(&selfUpdateForce, "force", "f", false, "Force update even if already on latest version")
 	selfUpdateCmd.Flags().BoolVar(&selfUpdateDev, "dev", false, "Include pre-release versions")
-	selfUpdateCmd.Flags().BoolVar(&selfUpdateBase, "base", false, "Update the base image without updating the condatainer binary")
 }
 
 func runSelfUpdate(cmd *cobra.Command, args []string) error {
@@ -157,23 +146,6 @@ func runSelfUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if mappedArch, ok := archMap[arch]; ok {
 		arch = mappedArch
-	}
-
-	// Bail out early if the base image is currently in use (condatainer is running).
-	if baseImagePath := config.FindBaseImage(); baseImagePath != "" {
-		if err := image.CheckAvailable(baseImagePath, true); err != nil {
-			return fmt.Errorf("condatainer is currently running (base image is locked); stop all running condatainer sessions before updating")
-		}
-	}
-
-	// Handle --base flag: update only the base image, skip binary update
-	if selfUpdateBase {
-		utils.PrintMessage("Updating base image...")
-		if err := build.RebuildBase(cmd.Context()); err != nil {
-			return fmt.Errorf("failed to update base image: %w", err)
-		}
-		utils.PrintSuccess("Base image updated successfully")
-		return nil
 	}
 
 	if selfUpdateDev {
@@ -311,35 +283,7 @@ func runSelfUpdate(cmd *cobra.Command, args []string) error {
 
 	utils.PrintSuccess("condatainer updated to %s!", utils.StyleNumber(release.TagName))
 
-	// Update base image only if minor or major version changed
-	if getMajorMinor(currentVersion) != getMajorMinor(latestVersion) {
-		fmt.Println()
-		utils.PrintMessage("Minor version change detected (%s → %s). Updating base image...",
-			utils.StyleNumber(currentVersion), utils.StyleNumber(latestVersion))
-
-		// Update the base image. Errors are non-fatal — warn and let the user rebuild manually.
-		if err := build.RebuildBase(context.Background()); err != nil {
-			utils.PrintWarning("Failed to update base image: %v", err)
-			utils.PrintNote("Run %s to update it later.", utils.StyleAction("condatainer self-update --base"))
-		} else {
-			utils.PrintSuccess("Base image updated.")
-		}
-	}
-
 	return nil
-}
-
-// getMajorMinor returns the "vMAJOR.MINOR" string for a version, ignoring
-// patch and any suffixes. Returns empty string on failure.
-func getMajorMinor(version string) string {
-	if !strings.HasPrefix(version, "v") {
-		version = "v" + version
-	}
-	c := semver.Canonical(version)
-	if c == "" {
-		return ""
-	}
-	return semver.MajorMinor(c)
 }
 
 // compareVersions compares two semantic versions. It returns:

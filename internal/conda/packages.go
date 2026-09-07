@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -15,7 +16,7 @@ func ListCondaPackages(imgPath string) (map[string]string, error) {
 	if !utils.IsImg(imgPath) {
 		return nil, nil
 	}
-	dbg, err := exec.LookPath("debugfs")
+	dbg, err := toolpath.Resolve("debugfs")
 	if err != nil {
 		return nil, fmt.Errorf("debugfs not found: %w", err)
 	}
@@ -53,7 +54,11 @@ func ListCondaPackagesSqf(sqfPath string) (map[string]string, error) {
 	if !utils.IsSqf(sqfPath) {
 		return nil, nil
 	}
-	cmd := exec.Command("unsquashfs", "-l", "-d", "", "-no-progress", sqfPath, "cnt_env/conda-meta")
+	bin, err := toolpath.Resolve("unsquashfs")
+	if err != nil {
+		return nil, nil
+	}
+	cmd := exec.Command(bin, "-l", "-d", "", "-no-progress", sqfPath, "cnt_env/conda-meta")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, nil

@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/Justype/condatainer/cmd/internal/ui"
-	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/runtime/exec"
@@ -66,11 +65,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	ResolveFlagAlias(cmd, "writable", "writable-img")
 
-	baseImageResolved, err := resolveBaseImage(cmd.Context(), execFlags.BaseImage)
-	if err != nil {
-		return err
-	}
-
 	// Parse arguments - treat all positional args as commands
 	commandFinal, apptainerFlags := ParseCommandArgs("exec")
 
@@ -80,11 +74,16 @@ func runExec(cmd *cobra.Command, args []string) error {
 	// Prepare command and determine if prompt should be hidden
 	commandFinal, hidePrompt := PrepareCommandAndHidePrompt(commandFinal)
 
-	overlayFinal, err = projectOverlays(overlayFinal)
+	overlayFinal, err := projectOverlays(overlayFinal)
 	if err != nil {
 		return err
 	}
 	resolvedOverlays, err := container.ResolveOverlayPaths(overlayFinal)
+	if err != nil {
+		return err
+	}
+
+	baseImageResolved, err := ensureRootBaseImage(cmd.Context(), resolvedOverlays)
 	if err != nil {
 		return err
 	}
@@ -98,7 +97,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 		ApptainerFlags: apptainerFlags, // Pass through unknown flags
 		Fakeroot:       execFlags.Fakeroot,
 		BaseImage:      baseImageResolved,
-		ApptainerBin:   config.Global.ApptainerBin,
 		HidePrompt:     hidePrompt,
 		GpuRequested:   execGpuRequested,
 	}

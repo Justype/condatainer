@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -242,7 +241,6 @@ type CommonFlags struct {
 	Overlays    []string
 	WritableImg bool
 	EnvSettings []string
-	BaseImage   string
 	BindPaths   []string
 	Fakeroot    bool
 }
@@ -267,13 +265,11 @@ func RegisterCommonFlags(cmd *cobra.Command, flags *CommonFlags) {
 	cmd.Flags().BoolVarP(&flags.WritableImg, "writable", "w", false, "Mount .img overlays as writable (default: read-only)")
 	cmd.Flags().Bool("writable-img", false, "Alias for --writable")
 	cmd.Flags().StringSliceVar(&flags.EnvSettings, "env", nil, "Set environment variable 'KEY=VALUE' (repeatable)")
-	cmd.Flags().StringVarP(&flags.BaseImage, "base-image", "b", "", "Base image to use instead of default")
 	cmd.Flags().StringSliceVar(&flags.BindPaths, "bind", nil, "Bind path 'HOST:CONTAINER' (repeatable)")
 	cmd.Flags().BoolVarP(&flags.Fakeroot, "fakeroot", "f", false, "Run container with fakeroot privileges")
 
 	// Register completions
 	cmd.RegisterFlagCompletionFunc("overlay", overlayFlagCompletion(true, true))
-	cmd.RegisterFlagCompletionFunc("base-image", baseImageFlagCompletion())
 
 	// Stop flag parsing after the first positional argument
 	cmd.Flags().SetInterspersed(false)
@@ -287,9 +283,8 @@ func KnownFlags() map[string]bool {
 	return map[string]bool{
 		"--overlay": true, "-o": true,
 		"--writable": true, "--writable-img": true, "-w": true,
-		"--env":        true,
-		"--bind":       true,
-		"--base-image": true, "-b": true,
+		"--env":      true,
+		"--bind":     true,
 		"--fakeroot": true, "-f": true,
 		"--debug":     true,
 		"--no-submit": true,
@@ -390,46 +385,26 @@ func needsValue(flag string) bool {
 	valueFlags := map[string]bool{
 		"-o": true, "--overlay": true,
 		"--env": true, "--bind": true,
-		"-b": true, "--base-image": true,
 	}
 	return valueFlags[flag]
 }
 
-// resolveBaseImage returns the container root to execute in: the explicit -b
-// choice, or the configured base, built first when none is installed.
+// ensureRootBaseImage resolves the configured default root, built first when
+// none is installed — but only when overlays does not already name one.
 //
-// Every execution needs one — there is no overlay-only container — so this
-// resolves before the command runs rather than letting Apptainer report a
-// missing file. An explicit choice is never built: it names a file the user
-// already has.
-func resolveBaseImage(ctx context.Context, explicit string) (string, error) {
-	if explicit == "" {
-		return build.ResolveBase(ctx)
+// There is no `-b`/`--base-image` flag: every root a command wants is named
+// through the requested overlays, and container.Setup pulls the first
+// root-eligible one out to use as the exec root on its own. Building the
+// configured default here would be wasted work, and a needless failure,
+// whenever the request already supplies its own root — so this is checked
+// first via container.HasRequestedRoot, the same predicate Setup itself
+// scans with. Returns "" in that case; exec.Options.resolveBaseImage lets
+// the root Setup finds win over an empty BaseImage.
+func ensureRootBaseImage(ctx context.Context, overlays []string) (string, error) {
+	if container.HasRequestedRoot(overlays) {
+		return "", nil
 	}
-	path := ResolveBaseImage(explicit)
-	if !utils.FileExists(path) && !utils.IsSandboxDir(path) {
-		return "", fmt.Errorf("base image not found: %s", explicit)
-	}
-	return path, nil
-}
-
-// ResolveBaseImage resolves a base image path to an absolute path
-// Returns empty string if baseImage is empty
-func ResolveBaseImage(baseImage string) string {
-	if baseImage == "" {
-		return ""
-	}
-
-	if utils.FileExists(baseImage) {
-		return baseImage
-	}
-
-	resolvedBase, err := container.ResolveOverlayPaths([]string{baseImage})
-	if err == nil && len(resolvedBase) > 0 {
-		return resolvedBase[0]
-	}
-
-	return baseImage
+	return build.ResolveBase(ctx)
 }
 
 // PrepareCommandAndHidePrompt prepares the command array and determines if prompt should be hidden
@@ -456,56 +431,6 @@ func overlayFlagCompletion(includeData bool, includeImg bool) func(*cobra.Comman
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return overlaySuggestions(includeData, includeImg, toComplete)
 	}
-}
-
-// baseImageFlagCompletion returns completion function for -b/--base-image flag
-func baseImageFlagCompletion() func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return systemOverlaySuggestions(toComplete)
-	}
-}
-
-// systemOverlaySuggestions returns only OS overlays and local OS overlay files
-func systemOverlaySuggestions(toComplete string) ([]string, cobra.ShellCompDirective) {
-	installed, err := container.InstalledOverlays()
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveError
-	}
-
-	choices := map[string]struct{}{}
-
-	// Only include installed overlays that are OS overlays (contain .singularity.d)
-	for name, path := range installed {
-		if isOSOverlay(path) {
-			if toComplete == "" || strings.HasPrefix(name, toComplete) {
-				choices[name] = struct{}{}
-			}
-		}
-	}
-
-	addDistroAliasChoices(installed, choices, toComplete)
-
-	// -b takes a container root, which a base and an os both are: an os recipe
-	// bootstraps its own root and merely merges at / as well. A foreign .sif is
-	// still runnable as one and carries no metadata to ask.
-	for _, candidate := range localImageSuggestions(toComplete) {
-		if utils.IsSif(candidate) {
-			choices[candidate] = struct{}{}
-			continue
-		}
-		absPath, err := filepath.Abs(candidate)
-		if err == nil && isContainerRoot(absPath) {
-			choices[candidate] = struct{}{}
-		}
-	}
-
-	suggestions := make([]string, 0, len(choices))
-	for choice := range choices {
-		suggestions = append(suggestions, choice)
-	}
-	sort.Strings(suggestions)
-
-	return suggestions, cobra.ShellCompDirectiveNoFileComp
 }
 
 // completeOverlayArg completes the overlay argument of top-level info/export
@@ -602,15 +527,6 @@ func findLocalFilesWithFilter(toComplete string, maxDepth int, fileFilter func(n
 	return suggestions
 }
 
-// localImageSuggestions returns local image files (for -b flag)
-// Includes directories for navigation and recursively finds files up to 1 level deep
-func localImageSuggestions(toComplete string) []string {
-	return findLocalFilesWithFilter(toComplete, 1, func(name string) bool {
-		// Include .sqf and .sif files only (not .img)
-		return utils.IsSqf(name) || utils.IsSif(name)
-	})
-}
-
 // localOverlaySuggestions returns local overlay files (for -o flag)
 // Includes directories for navigation and recursively finds files up to 1 level deep
 func localOverlaySuggestions(toComplete string, includeImg bool) []string {
@@ -621,7 +537,7 @@ func localOverlaySuggestions(toComplete string, includeImg bool) []string {
 		}
 
 		if utils.IsImg(name) && !includeImg {
-			// Skip .img files when includeImg is false (for -b flag)
+			// Skip .img files when includeImg is false
 			return false
 		}
 		if includeImg {
@@ -661,13 +577,6 @@ func addDistroAliasChoices(installed map[string]string, choices map[string]struc
 func isOSOverlay(overlayPath string) bool {
 	rt, err := meta.ReadRuntime(overlayPath)
 	return err == nil && rt.Type == catalog.TypeOS
-}
-
-// isContainerRoot reports whether an image can be run as a container root. Both
-// a base and an os can: an os bootstraps its own root and merges at / as well.
-func isContainerRoot(imagePath string) bool {
-	rt, err := meta.ReadRuntime(imagePath)
-	return err == nil && (rt.Type == catalog.TypeOS || rt.Type == catalog.TypeBase)
 }
 
 // isBaseImage reports whether an image records type base. An image with no

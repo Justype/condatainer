@@ -57,7 +57,7 @@ cache/
 
 # Ignore content in image directories but keep the folder structure
 images
-ref-images
+libexec
 
 # Ignore the configuration files
 config.yaml

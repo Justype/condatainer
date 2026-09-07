@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/image/tool"
+	"github.com/Justype/condatainer/internal/toolpath"
 )
 
 // UpperDir is the OverlayFS upper layer inside an ext3 overlay image. Everything
@@ -61,7 +62,8 @@ func (e Entry) Dir() string {
 // session per level. Reading never writes, which is what lets enumeration run
 // against an image whose write bit has not been cleared.
 func Walk(ctx context.Context, imgPath string) ([]Entry, error) {
-	if err := tool.CheckDependencies([]string{"debugfs"}); err != nil {
+	debugfsPath, err := toolpath.Resolve("debugfs")
+	if err != nil {
 		return nil, err
 	}
 
@@ -72,7 +74,7 @@ func Walk(ctx context.Context, imgPath string) ([]Entry, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		entries, err := listDirs(ctx, imgPath, level)
+		entries, err := listDirs(ctx, debugfsPath, imgPath, level)
 		if err != nil {
 			return nil, err
 		}
@@ -89,14 +91,14 @@ func Walk(ctx context.Context, imgPath string) ([]Entry, error) {
 }
 
 // listDirs runs one debugfs session listing every directory in dirs.
-func listDirs(ctx context.Context, imgPath string, dirs []string) ([]Entry, error) {
+func listDirs(ctx context.Context, debugfsPath, imgPath string, dirs []string) ([]Entry, error) {
 	var script bytes.Buffer
 	for _, d := range dirs {
 		fmt.Fprintf(&script, "ls -p %s\n", path.Join(UpperDir, d))
 	}
 	script.WriteString("quit\n")
 
-	cmd := exec.CommandContext(ctx, "debugfs", imgPath)
+	cmd := exec.CommandContext(ctx, debugfsPath, imgPath)
 	cmd.Stdin = &script
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

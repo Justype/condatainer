@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/artifactcache"
+	artifactcache "github.com/Justype/condatainer/internal/artifact/cache"
 	"github.com/Justype/condatainer/internal/image/tool"
 )
 
@@ -187,28 +186,4 @@ func DecodeRuntime(data []byte, source string) (Runtime, error) {
 		return Runtime{}, fmt.Errorf("%s: %w", source, err)
 	}
 	return rt, nil
-}
-
-// CheckBase reports whether an image may serve as a container root. Runtime
-// metadata that reads has to declare type base; a missing document passes, an
-// unreadable one warns and passes. See the README's Manifests.
-func CheckBase(imagePath string) error {
-	rt, err := ReadRuntime(imagePath)
-	return checkBaseRuntime(rt, err, imagePath)
-}
-
-// checkBaseRuntime is CheckBase's verdict on what the read produced. Only a
-// document that reads and says otherwise refuses the image; everything else
-// passes, so the rule stays legible apart from how the bytes were fetched.
-func checkBaseRuntime(rt Runtime, err error, imagePath string) error {
-	switch {
-	case errors.Is(err, ErrNoRuntime):
-		return nil
-	case err != nil:
-		slog.Default().Warn("could not read base image metadata", "path", imagePath, "err", err)
-		return nil
-	case rt.Type != catalog.TypeBase:
-		return fmt.Errorf("%s is not a base image: its metadata says type %s", imagePath, rt.Type)
-	}
-	return nil
 }
