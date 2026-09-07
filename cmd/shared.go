@@ -553,7 +553,7 @@ func localOverlaySuggestions(toComplete string, includeImg bool) []string {
 // addDistroAliasChoices adds shorthand aliases for OS overlays matching the default distro.
 // For each installed OS overlay named "<distro>/<name>", also suggests "<name>".
 func addDistroAliasChoices(installed map[string]string, choices map[string]struct{}, toComplete string) {
-	distro := config.ResolvedBase()
+	distro := config.ResolvedDefaultDistro()
 	if distro == "" {
 		return
 	}

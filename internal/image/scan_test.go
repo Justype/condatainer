@@ -24,9 +24,9 @@ func writeImages(t *testing.T, dir string, names ...string) string {
 
 func withBase(t *testing.T, base string) {
 	t.Helper()
-	prev := config.Global.Base
-	config.Global.Base = base
-	t.Cleanup(func() { config.Global.Base = prev })
+	prev := config.Global.DefaultDistro
+	config.Global.DefaultDistro = base
+	t.Cleanup(func() { config.Global.DefaultDistro = prev })
 }
 
 // A filename is the name with -- for /, and only .sqf/.img count. A .sif is the

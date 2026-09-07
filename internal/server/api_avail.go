@@ -38,7 +38,7 @@ func (s *srv) handleAvail(w http.ResponseWriter, r *http.Request) {
 	// Scripts under the default distro can be addressed by their bare name
 	// (e.g. ubuntu24/build-essential → build-essential), matching `condatainer avail`.
 	distroPrefix := ""
-	if d := config.ResolvedBase(); d != "" {
+	if d := config.ResolvedDefaultDistro(); d != "" {
 		distroPrefix = d + "/"
 	}
 

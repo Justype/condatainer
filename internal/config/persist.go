@@ -927,7 +927,7 @@ func LoadFromViper() {
 
 	// Recipe collections, in order; earlier entries shadow later ones.
 	Global.Sources = layerSources()
-	Global.Base = layerString("base")
+	Global.DefaultDistro = layerString("default_distro")
 
 	// Load build config from Viper
 	if ncpus, ok := layerInt("build.ncpus"); ok && ncpus > 0 {

@@ -33,9 +33,9 @@ type Descriptor struct {
 	// Named for what it becomes rather than what it looks like: `repository`
 	// means an OCI repository coordinate everywhere else in the tree
 	// (lock.Remote, oras' Reference), and one word cannot carry both.
-	Source      string `json:"source"`
-	DefaultBase string `json:"default_base"`
-	OCI         OCI    `json:"oci,omitzero"`
+	Source        string `json:"source"`
+	DefaultDistro string `json:"default_distro"`
+	OCI           OCI    `json:"oci,omitzero"`
 }
 
 // OCI is how artifacts belonging to one source are published and fetched.
@@ -245,11 +245,11 @@ func (c Catalog) Entries(ctx context.Context) map[string]*Entry {
 	return out
 }
 
-// DefaultBase is the base recipe named by the first source declaring one.
-func (c Catalog) DefaultBase() string {
+// DefaultDistro is the default distro named by the first source declaring one.
+func (c Catalog) DefaultDistro() string {
 	for _, s := range c {
-		if s.Desc.DefaultBase != "" {
-			return s.Desc.DefaultBase
+		if s.Desc.DefaultDistro != "" {
+			return s.Desc.DefaultDistro
 		}
 	}
 	return ""

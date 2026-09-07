@@ -468,8 +468,8 @@ func resolveOverlayArg(arg string) (string, error) {
 	if path, ok := installed[normalized]; ok {
 		return path, nil
 	}
-	if !strings.Contains(normalized, "/") && config.ResolvedBase() != "" {
-		if path, ok := installed[config.ResolvedBase()+"/"+normalized]; ok {
+	if !strings.Contains(normalized, "/") && config.ResolvedDefaultDistro() != "" {
+		if path, ok := installed[config.ResolvedDefaultDistro()+"/"+normalized]; ok {
 			return path, nil
 		}
 	}

@@ -23,7 +23,7 @@ All three config files are loaded and merged when they exist:
 6. **System config file** (`/etc/condatainer/config.yaml`)
 7. **Defaults** (lowest priority)
 
-**Scalar keys** (`apptainer_bin`, `base`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
+**Scalar keys** (`apptainer_bin`, `default_distro`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
 
 **`sources`**: **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, app-root, then system. This lets a sysadmin publish shared recipe collections in an app-root or system config without requiring every user to copy them into their own config. See [How Array Settings Merge](#how-array-settings-merge) for a worked example.
 
@@ -115,14 +115,14 @@ that handle, so recipes resolve on a fresh install. Give an entry the handle
 `cnt` to replace it outright.
 
 A collection is a directory (or URL prefix) with `recipes/` and an optional
-`source.json`. Besides `schema`, `source`, and `default_base`, it may declare
+`source.json`. Besides `schema`, `source`, and `default_distro`, it may declare
 where artifacts are published and fetched:
 
 ```json
 {
   "schema": 1,
   "source": "https://github.com/example/recipes",
-  "default_base": "ubuntu24",
+  "default_distro": "ubuntu24",
   "oci": {
     "push": "ghcr.io/example/condatainer",
     "pull": ["registry.cluster.example/lab", "ghcr.io/example/condatainer"],
@@ -152,7 +152,7 @@ which CondaTainer never reads or changes. See
 |-----|---------|-------------|
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
 | `autoload_gpu` | `true` | Pass `--nv` / `--rocm` when the host has the device node. Set `false` if the driver is present but unusable |
-| `base` | first source's `default_base` | Base recipe for the container root, e.g. `ubuntu24` → `ubuntu24/base` |
+| `default_distro` | first source's `default_distro` | Default distro for the container root, e.g. `ubuntu24` → `ubuntu24/base` |
 | `scheduler_timeout` | `0` | Seconds to wait for a scheduler command before erroring. `0` disables the timeout |
 | `notification` | `web` | Alert when a helper job starts: `web`, `terminal`, `both`, `none` |
 | `metadata_cache_ttl` | `7` | Days to cache remote recipe metadata. `0` always fetches |
@@ -287,7 +287,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_APPTAINER_BIN`        | `apptainer_bin`        |
 | `CNT_SUBMIT_JOB`           | `submit_job`           |
 | `CNT_AUTOLOAD_GPU`         | `autoload_gpu`         |
-| `CNT_BASE`                 | `base`                 |
+| `CNT_DEFAULT_DISTRO`       | `default_distro`       |
 | `CNT_BUILD_MEM`            | `build.mem`            |
 | `CNT_BUILD_ALWAYS_SUBMIT`  | `build.always_submit`  |
 | `CNT_BUILD_BLOCK_SIZE`     | `build.block_size`     |
@@ -389,8 +389,8 @@ sources:
 # Set false on a node whose driver is installed but unusable
 autoload_gpu: true
 
-# Base recipe for the container root (default: the first source's default_base)
-base: ubuntu24
+# Default distro for the container root (default: the first source's default_distro)
+default_distro: ubuntu24
 
 # Maximum seconds to wait for scheduler CLI commands (default: 0 = disabled)
 scheduler_timeout: 0

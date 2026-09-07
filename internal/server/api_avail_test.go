@@ -17,13 +17,13 @@ import (
 func setTestSource(t *testing.T, root string) {
 	t.Helper()
 	oldSources := config.Global.Sources
-	oldBase := config.Global.Base
+	oldBase := config.Global.DefaultDistro
 	config.Global.Sources = []catalog.Spec{{Name: "test", Base: root}}
-	config.Global.Base = "ubuntu24"
+	config.Global.DefaultDistro = "ubuntu24"
 	config.ResetCatalog()
 	t.Cleanup(func() {
 		config.Global.Sources = oldSources
-		config.Global.Base = oldBase
+		config.Global.DefaultDistro = oldBase
 		config.ResetCatalog()
 	})
 }

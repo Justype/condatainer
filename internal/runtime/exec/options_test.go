@@ -17,10 +17,10 @@ func withImageDir(t *testing.T) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	prevPaths, prevBase := config.GlobalDataPaths, config.Global.Base
+	prevPaths, prevBase := config.GlobalDataPaths, config.Global.DefaultDistro
 	config.GlobalDataPaths.ImagesDirs = []string{dir}
-	config.Global.Base = "ubuntu24"
-	t.Cleanup(func() { config.GlobalDataPaths, config.Global.Base = prevPaths, prevBase })
+	config.Global.DefaultDistro = "ubuntu24"
+	t.Cleanup(func() { config.GlobalDataPaths, config.Global.DefaultDistro = prevPaths, prevBase })
 	return dir
 }
 

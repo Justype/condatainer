@@ -30,7 +30,7 @@ var configKeyDefs = map[string]bool{
 	"logs_dir":                   false,
 	"apptainer_bin":              false,
 	"scheduler_bin":              false,
-	"base":                       false,
+	"default_distro":             false,
 	"submit_job":                 false,
 	"sources":                    true,
 	"autoload_gpu":               false,
@@ -439,12 +439,12 @@ var configShowCmd = &cobra.Command{
 
 		// Options (longest key: metadata_cache_ttl = 18 chars)
 		fmt.Println(utils.StyleTitle("Options:"))
-		fmt.Printf("  %-19s %s%s\n", "base:", config.ResolvedBase(), srcTag("base"))
-		printOverridden("                      ", "base")
+		fmt.Printf("  %-19s %s%s\n", "default_distro:", config.ResolvedDefaultDistro(), srcTag("default_distro"))
+		printOverridden("                      ", "default_distro")
 		if cat, err := config.OpenCatalog(cmd.Context()); err == nil {
-			if def := config.SourceDefaultBase(cat); def != "" && def != config.ResolvedBase() {
+			if def := config.SourceDefaultDistro(cat); def != "" && def != config.ResolvedDefaultDistro() {
 				fmt.Printf("                      %s\n",
-					utils.StyleHint(fmt.Sprintf("sources now recommend %s — `config set base %s` to switch", def, def)))
+					utils.StyleHint(fmt.Sprintf("sources now recommend %s — `config set default_distro %s` to switch", def, def)))
 			}
 		}
 		submitJobConfig := viper.GetBool("submit_job")
@@ -645,8 +645,8 @@ Time duration format (for build.time):
 		// configKeyDefs is the single source of truth for known keys
 		knownKeys := configKeyDefs
 
-		// A base must name a recipe that some source actually provides.
-		if key == "base" {
+		// A default distro must name a recipe that some source actually provides.
+		if key == "default_distro" {
 			if !recipeExists(cmd.Context(), value+"/base") {
 				utils.PrintError("No recipe %s/base in any configured source", value)
 				os.Exit(ExitCodeError)
@@ -872,11 +872,11 @@ Without -l, the layer is chosen from the install layout:
 		utils.PrintSuccess("Config file created")
 		fmt.Printf("  Location: %s (%s)\n", utils.StylePath(configPath), layerType)
 
-		// Record the base now, from whichever source recommends one. It is
-		// written once and never revised, so the container root stays put.
+		// Record the default distro now, from whichever source recommends one.
+		// It is written once and never revised, so the container root stays put.
 		if cat, err := config.OpenCatalog(cmd.Context()); err == nil {
-			if base := config.EnsureBase(cat); base != "" {
-				fmt.Printf("  Base:     %s (from %s)\n", utils.StyleInfo(base), utils.StyleInfo("default_base"))
+			if distro := config.EnsureDefaultDistro(cat); distro != "" {
+				fmt.Printf("  Distro:   %s (from %s)\n", utils.StyleInfo(distro), utils.StyleInfo("default_distro"))
 			}
 		}
 
@@ -1067,7 +1067,7 @@ var configValidateCmd = &cobra.Command{
 		}
 
 		// Check that a base recipe resolves. Unlike the name-expansion paths,
-		// validate may open the catalog, so a source's default_base counts.
+		// validate may open the catalog, so a source's default_distro counts.
 		cat, catErr := config.OpenCatalog(cmd.Context())
 		baseRecipe := ""
 		if catErr == nil {
@@ -1075,7 +1075,7 @@ var configValidateCmd = &cobra.Command{
 		}
 		switch {
 		case baseRecipe == "":
-			fmt.Printf("%s No base configured and no source declares default_base\n", utils.StyleError("✗"))
+			fmt.Printf("%s No default distro configured and no source declares default_distro\n", utils.StyleError("✗"))
 			valid = false
 		case !recipeExists(cmd.Context(), baseRecipe):
 			fmt.Printf("%s No %s recipe in any configured source\n", utils.StyleError("✗"), baseRecipe)
@@ -1083,9 +1083,9 @@ var configValidateCmd = &cobra.Command{
 		default:
 			if !utils.QuietMode {
 				fmt.Printf("%s Base recipe: %s\n", utils.StyleSuccess("✓"), baseRecipe)
-				if def := config.SourceDefaultBase(cat); def != "" && def+"/base" != baseRecipe {
+				if def := config.SourceDefaultDistro(cat); def != "" && def+"/base" != baseRecipe {
 					fmt.Printf("  %s\n", utils.StyleHint(
-						fmt.Sprintf("sources now recommend %s; run `condatainer config set base %s` to switch", def, def)))
+						fmt.Sprintf("sources now recommend %s; run `condatainer config set default_distro %s` to switch", def, def)))
 				}
 			}
 		}

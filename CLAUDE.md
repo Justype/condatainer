@@ -70,9 +70,9 @@ Overlays are stored as `.sqf` (SquashFS, read-only) or `.img` (ext3, writable).
 ## Base and Layering
 
 Any `os` overlay can be chosen as the container root at runtime — a per-invocation choice, not a
-declared type. `config base` names an ordinary `os` artifact by convention — the tooling a build
-and a run need (Apptainer, Micromamba) comes from `internal/libexec`'s self-provisioned toolchain,
-not from whatever plays root. See
+declared type. `config default_distro` names an ordinary `os` artifact by convention — the tooling
+a build and a run need (Apptainer, Micromamba) comes from `internal/libexec`'s self-provisioned
+toolchain, not from whatever plays root. See
 [`internal/runtime/container/README.md`](internal/runtime/container/README.md), *Root selection*
 and *What Setup refuses*, for how root is chosen and why two overlays claiming one `/cnt/<name>`
 prefix is refused rather than silently merged.

@@ -28,12 +28,12 @@ func TestExpandBareNameExactThenBaseThenConda(t *testing.T) {
 	write("ubuntu24/simple-os.def")        // zero-slash shortcut
 	write("ubuntu24/versioned-os/1.0.def") // one-slash shortcut
 
-	oldSources, oldBase := config.Global.Sources, config.Global.Base
+	oldSources, oldBase := config.Global.Sources, config.Global.DefaultDistro
 	config.Global.Sources = []catalog.Spec{{Name: "test", Base: root}}
-	config.Global.Base = "ubuntu24"
+	config.Global.DefaultDistro = "ubuntu24"
 	config.ResetCatalog()
 	t.Cleanup(func() {
-		config.Global.Sources, config.Global.Base = oldSources, oldBase
+		config.Global.Sources, config.Global.DefaultDistro = oldSources, oldBase
 		config.ResetCatalog()
 	})
 

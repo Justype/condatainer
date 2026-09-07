@@ -30,7 +30,7 @@ func ScanOverlays(opts ScanOptions) (map[string][]string, error) {
 
 	var alias string
 	if opts.Aliases {
-		if base := config.ResolvedBase(); base != "" {
+		if base := config.ResolvedDefaultDistro(); base != "" {
 			alias = base + "/"
 		}
 	}

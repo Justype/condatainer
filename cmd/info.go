@@ -66,9 +66,9 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 	var overlayPath string
 	if path, ok := installedOverlays[normalized]; ok {
 		overlayPath = path
-	} else if !strings.Contains(normalized, "/") && config.ResolvedBase() != "" {
+	} else if !strings.Contains(normalized, "/") && config.ResolvedDefaultDistro() != "" {
 		// Bare name not found: try <base>/<name> (e.g. "build-essential" → "ubuntu24/build-essential", "base_image" → "ubuntu24/base_image")
-		if path, ok := installedOverlays[config.ResolvedBase()+"/"+normalized]; ok {
+		if path, ok := installedOverlays[config.ResolvedDefaultDistro()+"/"+normalized]; ok {
 			overlayPath = path
 		}
 	}

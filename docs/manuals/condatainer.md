@@ -80,7 +80,7 @@ Like text editors, IDEs, build-essential tools, etc.
 
 * **Format:** `<distro>/<name>`
 * **Example:** `ubuntu22/rstudio-server`, `ubuntu24/code-server`
-* **Shortcut:** when `<distro>` is the configured `base` (`ubuntu24`), it can be omitted — `code-server` resolves to `ubuntu24/code-server`.
+* **Shortcut:** when `<distro>` is the configured `default_distro` (`ubuntu24`), it can be omitted — `code-server` resolves to `ubuntu24/code-server`.
 
 ### Custom Environments (Bundle/Environment)
 
@@ -1830,8 +1830,8 @@ scheduler_bin: /usr/bin/sbatch
 # Submission settings
 submit_job: true
 
-# Base recipe for the container root (default: the first source's default_base)
-base: ubuntu24
+# Default distro for the container root (default: the first source's default_distro)
+default_distro: ubuntu24
 
 # Recipe collections, in priority order (first match wins).
 # The public cnt collection is appended automatically unless redefined here.
@@ -2623,8 +2623,8 @@ condatainer update --helper
 condatainer update --libexec
 ```
 
-The default root image — `<base>/base` (e.g. `ubuntu24/base`), where `<base>` is `base` in config
-or a source's `default_base` — is otherwise never
+The default root image — `<distro>/base` (e.g. `ubuntu24/base`), where `<distro>` is `default_distro`
+in config or a source's `default_distro` — is otherwise never
 updated on its own: it is built the first time something needs it, the same as any other
 named artifact, and reused until you rebuild it with `condatainer create --update <name>/<version>`.
 Every other command treats it as a prerequisite — `create` builds it alongside the images

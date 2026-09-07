@@ -40,23 +40,25 @@ func (b *BuildObject) resolveBase(ctx context.Context) error {
 	return nil
 }
 
-// buildConfiguredRoot builds the configured default root — config `base`, or a
-// source's default_base — through the exact same catalog/build path every
-// other name takes: it is an ordinary os recipe, not a special build type.
+// buildConfiguredRoot builds the configured default root — config
+// `default_distro`, or a source's default_distro — through the exact same
+// catalog/build path every other name takes: it is an ordinary os recipe,
+// not a special build type.
 func buildConfiguredRoot(ctx context.Context) error {
 	if err := apptainer.EnsureApptainer(); err != nil {
 		return err
 	}
 
-	// Config `base` wins; a source's default_base fills in when it is unset.
+	// Config `default_distro` wins; a source's default_distro fills in when
+	// it is unset.
 	cat, err := config.OpenCatalog(ctx)
 	if err != nil {
 		return err
 	}
-	config.EnsureBase(cat)
+	config.EnsureDefaultDistro(cat)
 	nameVersion := config.BaseRecipeNameFrom(cat)
 	if nameVersion == "" {
-		return fmt.Errorf("no base configured: set `base`, or configure a source declaring default_base")
+		return fmt.Errorf("no default distro configured: set `default_distro`, or configure a source declaring default_distro")
 	}
 
 	imagesDir, err := config.GetWritableImagesDir()

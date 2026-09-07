@@ -23,9 +23,9 @@ func withImageDir(t *testing.T) string {
 // withBase records a configured base for the duration of the test.
 func withBase(t *testing.T, base string) {
 	t.Helper()
-	prev := Global.Base
-	Global.Base = base
-	t.Cleanup(func() { Global.Base = prev })
+	prev := Global.DefaultDistro
+	Global.DefaultDistro = base
+	t.Cleanup(func() { Global.DefaultDistro = prev })
 }
 
 // GetBaseImage answers "which base is installed", not "where might one go".
@@ -54,17 +54,17 @@ func TestGetBaseImageRequiresAnInstalledFile(t *testing.T) {
 	}
 }
 
-// With no base configured the failure is about configuration, not a lookup.
+// With no default distro configured the failure is about configuration, not a lookup.
 func TestGetBaseImageWithoutConfiguredBase(t *testing.T) {
 	withImageDir(t)
 	withBase(t, "")
 
 	_, err := GetBaseImage()
 	if err == nil {
-		t.Fatal("an unconfigured base resolved to something")
+		t.Fatal("an unconfigured default distro resolved to something")
 	}
-	if !strings.Contains(err.Error(), "no base configured") {
-		t.Errorf("err = %v, want it to say no base is configured", err)
+	if !strings.Contains(err.Error(), "no default distro configured") {
+		t.Errorf("err = %v, want it to say no default distro is configured", err)
 	}
 }
 

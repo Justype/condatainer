@@ -178,52 +178,53 @@ func WarnUnreachableSources(ctx context.Context, cat catalog.Catalog) {
 }
 
 // BaseRecipeName returns the module name of the base recipe, e.g. "ubuntu24/base"
-// for recipes/ubuntu24/base.def. Empty when no base is configured.
+// for recipes/ubuntu24/base.def. Empty when no default distro is configured.
 func BaseRecipeName() string {
-	if base := ResolvedBase(); base != "" {
-		return base + "/base"
+	if distro := ResolvedDefaultDistro(); distro != "" {
+		return distro + "/base"
 	}
 	return ""
 }
 
-// BaseRecipeNameFrom is BaseRecipeName with the default_base fallback, for
-// callers that already hold an open catalog. Config `base` still wins.
+// BaseRecipeNameFrom is BaseRecipeName with the default_distro fallback, for
+// callers that already hold an open catalog. Config `default_distro` still wins.
 func BaseRecipeNameFrom(cat catalog.Catalog) string {
 	if name := BaseRecipeName(); name != "" {
 		return name
 	}
-	if def := cat.DefaultBase(); def != "" {
+	if def := cat.DefaultDistro(); def != "" {
 		return def + "/base"
 	}
 	return ""
 }
 
-// EnsureBase records the base in config the first time one is needed, taking it
-// from the first source declaring a default_base, and never revises it. Returns
-// the resolved base, "" when nothing supplies one; a failed write is not an error.
-func EnsureBase(cat catalog.Catalog) string {
-	if Global.Base != "" {
-		return Global.Base
+// EnsureDefaultDistro records the default distro in config the first time one
+// is needed, taking it from the first source declaring a default_distro, and
+// never revises it. Returns the resolved distro, "" when nothing supplies
+// one; a failed write is not an error.
+func EnsureDefaultDistro(cat catalog.Catalog) string {
+	if Global.DefaultDistro != "" {
+		return Global.DefaultDistro
 	}
-	def := cat.DefaultBase()
+	def := cat.DefaultDistro()
 	if def == "" {
 		return ""
 	}
-	Global.Base = def
+	Global.DefaultDistro = def
 	if path, _, err := ResolveWritableConfigPath(""); err == nil {
-		_ = SetConfigKey(path, "base", def)
+		_ = SetConfigKey(path, "default_distro", def)
 	}
 	return def
 }
 
-// SourceDefaultBase returns the base the first source recommends, which may
-// differ from the recorded one after an upstream change.
-func SourceDefaultBase(cat catalog.Catalog) string { return cat.DefaultBase() }
+// SourceDefaultDistro returns the default distro the first source recommends,
+// which may differ from the recorded one after an upstream change.
+func SourceDefaultDistro(cat catalog.Catalog) string { return cat.DefaultDistro() }
 
-// ResolvedBase returns the configured base, e.g. "ubuntu24" — the bare-name
-// prefix for installed overlays. Config only: it never opens the catalog, so
-// offline paths like list and info stay offline.
-func ResolvedBase() string { return Global.Base }
+// ResolvedDefaultDistro returns the configured default distro, e.g. "ubuntu24"
+// — the bare-name prefix for installed overlays. Config only: it never opens
+// the catalog, so offline paths like list and info stay offline.
+func ResolvedDefaultDistro() string { return Global.DefaultDistro }
 
 // CatalogCacheDir is where fetched index and recipe bytes are kept.
 func CatalogCacheDir() string {

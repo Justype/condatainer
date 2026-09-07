@@ -51,7 +51,7 @@ File
 To get the base image distro version:
 
 ```bash
-condatainer config get base   # e.g. ubuntu24  → Ubuntu 24.04
+condatainer config get default_distro   # e.g. ubuntu24  → Ubuntu 24.04
 ```
 
 The output is `ubuntu24`, which is different from the overlay's distro version `ubuntu22`. This means you cannot load this overlay together with other overlays built on `ubuntu24` base image.
@@ -63,7 +63,7 @@ The output is `ubuntu24`, which is different from the overlay's distro version `
 If you want to permanently switch the default distro (e.g. to Ubuntu 22), run:
 
 ```bash
-condatainer config set base ubuntu22
+condatainer config set default_distro ubuntu22
 ```
 
 This often happens when:
@@ -73,10 +73,10 @@ This often happens when:
 
 ### Use ENV variable (temporary)
 
-Use `CNT_BASE` to temporarily override the default distro for a single command without changing your global config:
+Use `CNT_DEFAULT_DISTRO` to temporarily override the default distro for a single command without changing your global config:
 
 ```bash
-CNT_BASE=ubuntu22 condatainer exec -o myoverlay.sqf bash
+CNT_DEFAULT_DISTRO=ubuntu22 condatainer exec -o myoverlay.sqf bash
 ```
 
 ## What is Included in a Base Image?
@@ -113,7 +113,7 @@ In the inner shell, you can see the OS version with:
 cat /etc/os-release
 ```
 
-It is Ubuntu 22.04, which differs from the default base image (Ubuntu 24.04 when `base: ubuntu24`).
+It is Ubuntu 22.04, which differs from the default base image (Ubuntu 24.04 when `default_distro: ubuntu24`).
 
 You can either:
 - Use the PyTorch image as the container root
@@ -129,7 +129,7 @@ condatainer exec -o pytorch.sqf bash
 Second approach use Ubuntu 22 base image:
 
 ```bash
-CNT_BASE=ubuntu22 condatainer exec -o pytorch.sqf bash
+CNT_DEFAULT_DISTRO=ubuntu22 condatainer exec -o pytorch.sqf bash
 ```
 
 ## Example: R Package Dependencies
@@ -163,7 +163,7 @@ From: ubuntu:24.04
 ```
 
 ```{note}
-For the `From` line, make sure to specify the same distro version as your base image (e.g., `ubuntu:24.04` if your `base` is `ubuntu24`). Otherwise, you may encounter compatibility issues when loading the overlay.
+For the `From` line, make sure to specify the same distro version as your base image (e.g., `ubuntu:24.04` if your `default_distro` is `ubuntu24`). Otherwise, you may encounter compatibility issues when loading the overlay.
 ```
 
 ### 2. Build the Overlay

@@ -55,9 +55,9 @@ type Config struct {
 	// Recipe collections, in order. Earlier entries shadow later ones.
 	Sources []catalog.Spec
 
-	// Base recipe for the container root, e.g. "ubuntu24" -> recipes/ubuntu24/base.def.
-	// Empty falls back to the first source declaring a default_base.
-	Base string
+	// Default distro for the container root, e.g. "ubuntu24" -> recipes/ubuntu24/base.def.
+	// Empty falls back to the first source declaring a default_distro.
+	DefaultDistro string
 
 	// Pass --nv / --rocm when the host has the matching device nodes (default: true).
 	// Turn off on a node whose driver is present but unusable: the device nodes
@@ -311,7 +311,7 @@ func GetBaseImage() (string, error) {
 	}
 	name := BaseRecipeName()
 	if name == "" {
-		return "", fmt.Errorf("no base configured: set `base`, or configure a source declaring default_base")
+		return "", fmt.Errorf("no default distro configured: set `default_distro`, or configure a source declaring default_distro")
 	}
 	return "", fmt.Errorf("base image %s is not installed (searched %s)",
 		name, strings.Join(GetImageSearchPaths(), ", "))

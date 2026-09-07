@@ -30,7 +30,7 @@ func fakeSource(t *testing.T) string {
 		}
 	}
 
-	write("source.json", `{"schema":1,"source":"https://example.invalid/r","default_base":"ubuntu24","oci":{"push":"oci://ghcr.io/lab/cnt/","pull":["ghcr.io/lab/cnt","registry.lab/cnt"],"audience":"restricted"}}`)
+	write("source.json", `{"schema":1,"source":"https://example.invalid/r","default_distro":"ubuntu24","oci":{"push":"oci://ghcr.io/lab/cnt/","pull":["ghcr.io/lab/cnt","registry.lab/cnt"],"audience":"restricted"}}`)
 	write("recipes/cellranger/9.0.1", "#DESC:cellranger\n#URL:https://example.invalid\n")
 	write("recipes/ubuntu24/base.def", "#DESC:base\n\nBootstrap: docker\n")
 	write("recipes/grch38/star-gencode", starRecipe)
@@ -57,8 +57,8 @@ func TestOpenDirSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := cat.DefaultBase(); got != "ubuntu24" {
-		t.Errorf("DefaultBase = %q, want ubuntu24", got)
+	if got := cat.DefaultDistro(); got != "ubuntu24" {
+		t.Errorf("DefaultDistro = %q, want ubuntu24", got)
 	}
 	if cat[0].Desc.Source != "https://example.invalid/r" {
 		t.Errorf("descriptor not loaded: %+v", cat[0].Desc)
@@ -166,7 +166,7 @@ func TestBackendsAgree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if remote[0].Desc.DefaultBase != "ubuntu24" {
+	if remote[0].Desc.DefaultDistro != "ubuntu24" {
 		t.Errorf("descriptor not fetched over HTTP: %+v", remote[0].Desc)
 	}
 

@@ -167,8 +167,8 @@ func buildOverlayPathFromSpec(normalized string) (string, error) {
 	}
 
 	// Fallback: bare name (no "/") → try <base>--<name>.sqf
-	if !strings.Contains(normalized, "/") && config.ResolvedBase() != "" {
-		prefixed := config.ResolvedBase() + "--" + normalized + ".sqf"
+	if !strings.Contains(normalized, "/") && config.ResolvedDefaultDistro() != "" {
+		prefixed := config.ResolvedDefaultDistro() + "--" + normalized + ".sqf"
 		for _, dir := range config.GetImageSearchPaths() {
 			path := filepath.Join(dir, prefixed)
 			if utils.FileExists(path) {

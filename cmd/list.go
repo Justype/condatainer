@@ -84,7 +84,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	distroLower := strings.ToLower(config.ResolvedBase())
+	distroLower := strings.ToLower(config.ResolvedDefaultDistro())
 	installedLower := make(map[string]bool, len(installedMap))
 	for name := range installedMap {
 		lower := strings.ToLower(name)
@@ -252,7 +252,7 @@ func runList(cmd *cobra.Command, args []string) error {
 // scanOverlaysByDir scans each image directory independently and returns per-dir results.
 // Missing directories are skipped; empty directories are included with empty groups.
 func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
-	distroPrefix := strings.ToLower(config.ResolvedBase()) + "/"
+	distroPrefix := strings.ToLower(config.ResolvedDefaultDistro()) + "/"
 	var result []DirOverlays
 	cacheBatch := artifactcache.Default().NewBatch()
 	defer cacheBatch.Flush()

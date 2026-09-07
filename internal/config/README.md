@@ -8,10 +8,10 @@ Multi-level configuration management and data directory search following XDG Bas
 config.go       Global config singleton, defaults, structure
 datapaths.go    Data directory search paths and resolution
 persist.go      Configuration file loading (Viper)
-sources.go      Recipe collections, the catalog handle, and the base
+sources.go      Recipe collections, the catalog handle, and the default distro
 ```
 
-## Recipe sources and the base
+## Recipe sources and the default distro
 
 `sources` is an ordered list of recipe collections, read from every config layer
 and concatenated strongest first, so a user entry shadows a site entry of the
@@ -34,8 +34,8 @@ look normal. `WarnUnreachableSources` warns once per process, and must be called
 first read rather than when it is opened.
 
 `avail` and `create` can restrict that configured list with repeatable source
-handles. Flag order becomes lookup precedence; dependencies and the base use the
-same restricted catalog:
+handles. Flag order becomes lookup precedence; dependencies and the default
+distro use the same restricted catalog:
 
 ```text
 condatainer avail -s lab
@@ -45,17 +45,18 @@ condatainer create -s lab -s cnt star/2.7.11b
 With no `--source`, the full configured list is used. An unknown handle is an
 error. A missing recipe still follows the normal Conda fallback.
 
-**The base is recorded once and never revised.** `EnsureBase` writes it from the
-first source declaring a `default_base` the first time one is needed. Changing
-it rebuilds the container root and every `os` overlay stacked on it, so following
-an upstream bump would invalidate a whole set of images on an ordinary update; a
-later default is something the user opts into with `config set base`.
+**The default distro is recorded once and never revised.** `EnsureDefaultDistro`
+writes it from the first source declaring a `default_distro` the first time one
+is needed. Changing it rebuilds the container root and every `os` overlay
+stacked on it, so following an upstream bump would invalidate a whole set of
+images on an ordinary update; a later default is something the user opts into
+with `config set default_distro`.
 
-`ResolvedBase` reads config alone and never opens the catalog. It is the
-bare-name prefix for installed overlays (`build-essential` →
+`ResolvedDefaultDistro` reads config alone and never opens the catalog. It is
+the bare-name prefix for installed overlays (`build-essential` →
 `ubuntu24/build-essential`), so it is called on offline paths like `list` and
 `info`, where reaching for a source descriptor would mean a network fetch to
-expand a local name. The `default_base` fallback belongs where a catalog is
+expand a local name. The `default_distro` fallback belongs where a catalog is
 already open — base image resolution, in `internal/build`.
 
 ## Configuration Hierarchy
@@ -170,7 +171,7 @@ Location: `~/.config/condatainer/config.yaml`
 apptainer_bin: "apptainer"
 scheduler_bin: ""         # auto-detect if empty
 
-base: "ubuntu24"
+default_distro: "ubuntu24"
 
 # Recipe collections, in order — first match wins, like PATH.
 # `cnt` is appended automatically; list it yourself only to point it elsewhere.

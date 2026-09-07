@@ -75,7 +75,7 @@ The later overlays will overwrite the previous ones if there are conflicts. For 
 ```
 
 ```{tip}
-There is no separate "base" overlay type — any OS overlay can be the container root. If a command's requested overlays don't already include a root, CondaTainer falls back to your configured default: `<distro>/base` (e.g. `ubuntu24/base`, set via `condatainer config set base ubuntu24`), building it the first time it's needed like any other named overlay.
+There is no separate "base" overlay type — any OS overlay can be the container root. If a command's requested overlays don't already include a root, CondaTainer falls back to your configured default: `<distro>/base` (e.g. `ubuntu24/base`, set via `condatainer config set default_distro ubuntu24`), building it the first time it's needed like any other named overlay.
 ```
 
 ```{note}

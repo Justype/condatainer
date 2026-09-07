@@ -21,10 +21,10 @@ func withInstalledBase(t *testing.T) string {
 		t.Fatal(err)
 	}
 
-	prevPaths, prevBase := config.GlobalDataPaths, config.Global.Base
+	prevPaths, prevBase := config.GlobalDataPaths, config.Global.DefaultDistro
 	config.GlobalDataPaths.ImagesDirs = []string{dir}
-	config.Global.Base = "ubuntu24"
-	t.Cleanup(func() { config.GlobalDataPaths, config.Global.Base = prevPaths, prevBase })
+	config.Global.DefaultDistro = "ubuntu24"
+	t.Cleanup(func() { config.GlobalDataPaths, config.Global.DefaultDistro = prevPaths, prevBase })
 	return base
 }
 
@@ -33,9 +33,9 @@ func withInstalledBase(t *testing.T) string {
 // is what lets the base be built when none exists yet.
 func TestGraphSkipsBaseForDefinitionOnlyPlans(t *testing.T) {
 	// No base configured and none installed, so any resolution attempt fails.
-	prevBase := config.Global.Base
-	config.Global.Base = ""
-	t.Cleanup(func() { config.Global.Base = prevBase })
+	prevBase := config.Global.DefaultDistro
+	config.Global.DefaultDistro = ""
+	t.Cleanup(func() { config.Global.DefaultDistro = prevBase })
 
 	def := &BuildObject{spec: Spec{Image: ImageSpec{Name: "ubuntu24/base"}}, buildType: BuildTypeDef}
 	bg := &BuildGraph{graph: map[string]*BuildObject{def.NameVersion(): def}}
