@@ -13,9 +13,24 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image/freeze"
 	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
+
+// buildMountHarness compiles internal/image/freeze/testdata/mountharness, a
+// stand-in condatainer binary. createSquashfs's ext3 route reads the scratch
+// .img through freeze.MountedRun, which re-execs os.Executable() into the
+// hidden _mount_sentinel command; the `go test` binary can't play that role.
+func buildMountHarness(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "mountharness")
+	out, err := exec.Command("go", "build", "-o", bin, "github.com/Justype/condatainer/internal/image/freeze/testdata/mountharness").CombinedOutput()
+	if err != nil {
+		t.Fatalf("building test harness: %v\n%s", err, out)
+	}
+	return bin
+}
 
 // withProvisionedLibexec points the scratch tier at a fresh temp directory and
 // drops stub bin/apptainer and bin/micromamba there, satisfying libexec.Dir's
@@ -309,6 +324,8 @@ func TestPackedImageFromScratchOverlayReadsThroughFuse2fs(t *testing.T) {
 			t.Skipf("%s not available", name)
 		}
 	}
+	defer freeze.SetExecutablePathForTest(buildMountHarness(t))()
+
 	withAppTmpOverlay(t, true)
 	config.Global.Build.AppTmpOverlaySizeMB = 64
 

@@ -145,6 +145,11 @@ func tryEstablishTunnel(sshDest, sockPath string) (DialFunc, func(), <-chan stru
 	slog.Default().Debug("proxy tunnel: trying ssh/unix-sock", "dest", sshDest, "sock", sockPath)
 	os.Remove(sockPath) //nolint:errcheck
 	if cmd := exec.Command("ssh", append([]string{"-D", sockPath}, sshArgs...)...); func() bool {
+		// Pdeathsig: if the daemon itself dies (crash, OOM-kill) before stop()
+		// runs, the kernel kills this ssh process directly instead of leaving
+		// it holding the tunnel open. ssh never escalates privilege, so
+		// unlike freeze.MountedRun's namespaced mount this needs no sentinel.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 		if err := cmd.Start(); err != nil {
 			slog.Default().Debug("proxy tunnel: ssh/unix-sock start failed", "err", err)
 			errs = append(errs, "ssh/unix-sock start: "+err.Error())
@@ -179,6 +184,7 @@ func tryEstablishTunnel(sshDest, sockPath string) (DialFunc, func(), <-chan stru
 	}
 	innerAddr := fmt.Sprintf("127.0.0.1:%d", innerPort)
 	cmd := exec.Command("ssh", append([]string{"-D", innerAddr}, sshArgs...)...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL} // see the unix-sock tunnel above
 	if err := cmd.Start(); err != nil {
 		slog.Default().Debug("proxy tunnel: ssh/tcp start failed", "err", err)
 		errs = append(errs, "ssh/tcp start: "+err.Error())

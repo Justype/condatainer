@@ -3,13 +3,30 @@ package freeze
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
-	"strings"
 	"syscall"
 
 	"github.com/Justype/condatainer/internal/image/tool"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
 )
+
+// executablePath resolves condatainer's own binary path, for MountedRun to
+// re-exec into the sentinel. Overridden in tests: os.Executable() inside `go
+// test` returns the test binary, which has no _mount_sentinel command.
+var executablePath = os.Executable
+
+// SetExecutablePathForTest points MountedRun's self re-exec at path instead
+// of the real condatainer binary, and returns a func that restores the
+// previous value. For tests outside this package (e.g. internal/build's,
+// whose packFromScratchImage calls MountedRun too) that build
+// testdata/mountharness as a stand-in condatainer binary; tests inside this
+// package can set the unexported executablePath directly instead.
+func SetExecutablePathForTest(path string) (restore func()) {
+	old := executablePath
+	executablePath = func() (string, error) { return path, nil }
+	return func() { executablePath = old }
+}
 
 // MountedRun mounts fuseBin at mnt inside a fresh, unprivileged mount+user
 // namespace, waits for the mount to appear, runs work (a bash script fragment
@@ -28,48 +45,41 @@ import (
 // tears down its own session instead, and the whole namespace — mount
 // included — disappears the moment nothing is left running in it, so a killed
 // or crashed run leaks nothing.
+//
+// MountedRun doesn't call unshare directly: it re-execs itself into the
+// hidden `_mount_sentinel` command (RunSentinel) instead, so that something
+// outside the namespace stays reachable if condatainer itself dies mid-mount.
+// See RunSentinel's doc comment and this package's README for why.
 func MountedRun(ctx context.Context, fuseBin string, fuseArgs []string, mnt string, work string, io execpkg.IO) error {
 	if err := tool.CheckDependencies([]string{"unshare"}); err != nil {
 		return err
 	}
 
-	var quoted []string
-	for _, a := range append(append([]string{}, fuseArgs...), mnt) {
-		quoted = append(quoted, shellQuote(a))
+	self, err := executablePath()
+	if err != nil {
+		return fmt.Errorf("locating condatainer binary: %w", err)
 	}
-	// work runs in a subshell: it commonly sets its own `set -e` (every pack and
-	// mke2fs script does), and without the subshell that setting would outlive
-	// the substitution point and apply to the kill/wait cleanup below — where
-	// wait's exit status (the just-killed FUSE daemon's own, often non-zero for
-	// SIGTERM) would then abort the script silently, before it ever reaches the
-	// exit $rc that was supposed to report the real result.
-	script := fmt.Sprintf(`set -o pipefail
-%s -f %s &
-fpid=$!
-for i in $(seq 1 50); do grep -qF ' %s ' /proc/mounts && break; sleep 0.1; done
-grep -qF ' %s ' /proc/mounts || { echo "mount never appeared" >&2; kill $fpid 2>/dev/null; wait $fpid 2>/dev/null; exit 1; }
-( %s )
-rc=$?
-kill $fpid 2>/dev/null
-wait $fpid 2>/dev/null
-exit $rc
-`, shellQuote(fuseBin), strings.Join(quoted, " "), mnt, mnt, work)
 
-	cmd := exec.CommandContext(ctx, "unshare", "--mount", "--user", "--map-root-user", "--", "/bin/bash", "-c", script)
+	sentinelArgs := append([]string{"_mount_sentinel", fuseBin, mnt}, fuseArgs...)
+	cmd := exec.CommandContext(ctx, self, sentinelArgs...)
+	cmd.Env = append(os.Environ(), EnvSentinelWork+"="+work)
 	cmd.Stdin = io.Stdin
 	cmd.Stdout = io.Stdout
 	cmd.Stderr = io.Stderr
 
-	// unshare execve's directly into bash (no --fork, no --pid here), so
-	// cmd.Process.Pid is bash's own pid, and the backgrounded FUSE process is
-	// bash's child in the same process group by default (a non-interactive
-	// `bash -c` never enables job control, so it never gives that background
-	// job a group of its own). Go's default ctx-cancellation kills only the
-	// single tracked pid, which would orphan the FUSE process — the last
-	// thing still holding the mount and the namespace open, so it would keep
-	// both alive indefinitely. Setpgid puts the whole tree in its own group
-	// so Cancel can kill all of it at once instead.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Setpgid: true (no Pgid) makes the sentinel its own group leader, and
+	// RunSentinel joins bash to that same group — so a single group kill,
+	// from either direction below, reaches the sentinel, bash, and the
+	// backgrounded FUSE process together.
+	//
+	// Cancel covers a still-running condatainer choosing to cancel: it kills
+	// the group directly, same as before. Pdeathsig covers the other
+	// failure mode — condatainer dying with no chance to run any Go code at
+	// all (SIGKILL, OOM-kill, crash): the kernel delivers SIGTERM to the
+	// sentinel directly (Pdeathsig survives here because the sentinel never
+	// enters the user namespace itself), and RunSentinel's own trap does the
+	// group kill from the inside instead.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
 	cmd.Cancel = func() error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}

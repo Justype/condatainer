@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"log/slog"
@@ -258,6 +259,9 @@ func DialSystemSSH(node string) (DialFunc, func(), <-chan struct{}, error) {
 			"-o", "StrictHostKeyChecking=no",
 			"-W", addr,
 			node)
+		// If the daemon dies before cmdConn.Close() runs, the kernel kills
+		// this ssh process directly rather than leaving it orphaned.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 		return newCmdConn(cmd)
 	}
 	return dial, stop, done, nil

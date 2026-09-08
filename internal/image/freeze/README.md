@@ -14,6 +14,7 @@ unfreeze.go   Unfreeze: rebuild a writable image from an artifact
 walk.go       Walk: list an overlay's upper/ via debugfs, no mount
 dump.go       dumpUpper: copy upper/ out via debugfs rdump, no mount
 mount.go      MountedRun: the one FUSE-mount primitive every mount site uses
+sentinel.go   RunSentinel: the process MountedRun re-execs into to survive its own death
 fuse2fs.go    Resolve fuse2fs/squashfuse on PATH
 tools.go      Build-tool provenance recorded in the manifest
 whiteout.go   §2.4a whiteout translation
@@ -72,7 +73,44 @@ this namespace, so some kernels refuse to even exec it rather than silently
 ignoring the bit. Running the FUSE tool with `-f` (foreground) and killing it
 tears down its own session directly; the whole namespace, mount included,
 disappears the moment nothing is left running in it, so a killed or crashed
-run leaks nothing to clean up.
+run leaks nothing to clean up — as long as something is still alive to do the
+killing. That's what the sentinel below is for.
+
+## The sentinel: surviving condatainer itself dying mid-mount
+
+`MountedRun` doesn't call `unshare` directly. It re-execs itself into the
+hidden `_mount_sentinel` command (`sentinel.go`'s `RunSentinel`), which then
+runs the `unshare`/bash/FUSE tree as its own child, joined into its own
+process group.
+
+The reason is `Pdeathsig` (`prctl(PR_SET_PDEATHSIG)`): a process can ask the
+kernel to send it a signal the instant its parent dies, for any reason —
+SIGKILL, an OOM-kill, a crash — with no polling needed. That would be the
+obvious fix for condatainer dying with a mount still open: set it on the
+`unshare` process, catch it, kill the group. It doesn't work. Entering the
+user namespace clears `Pdeathsig` on whatever process does it — the same
+kernel rule that clears it across a setuid exec, since becoming
+root-in-namespace is exactly that kind of privilege-elevating credential
+change. Confirmed directly against this project's target kernels, not just
+read off the man page: a process with `Pdeathsig` set that then runs `unshare
+--user` never receives the signal when its parent dies.
+
+So the one process that can reliably be told "your supervisor just died" has
+to stay outside the namespace. That's the sentinel: it never escalates
+privilege itself, so its own `Pdeathsig` (`SIGTERM`, set by `MountedRun`)
+keeps working normally. `unshare`/bash/FUSE are joined into the sentinel's
+process group rather than starting one of their own, so when the sentinel's
+trap fires, one `kill(-pgid, SIGKILL)` takes the whole tree down with it —
+the same call `MountedRun`'s own `cmd.Cancel` already made for the
+still-alive-and-choosing-to-cancel case, just triggered from the inside
+instead of the outside.
+
+This narrows the leak window, it doesn't close it: if the sentinel itself is
+killed directly (not condatainer — the sentinel, by its own pid), it can't
+run its trap either, and `unshare`/bash/FUSE orphan exactly as they did
+before this existed. What changes is *what* has to die to cause that — a
+specific, tiny, short-lived process, rather than condatainer itself for the
+entire span of a mount.
 
 ## Unfreeze can't get correct ownership from the mount — only after it
 

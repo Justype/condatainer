@@ -88,7 +88,12 @@ func (s *srv) handleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		// Run in its own process group so cancellation also kills build
 		// children (apptainer, mksquashfs); the CLI cleans up on SIGTERM.
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		// Pdeathsig covers the server dying with no chance to run cmd.Cancel
+		// at all (crash, OOM-kill): condatainer never escalates its own
+		// privilege here (only build.MountedRun's sentinel does, and that's
+		// already isolated), so the kernel delivering SIGTERM directly is
+		// enough to reach the CLI's own graceful-shutdown path.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
 		cmd.Cancel = func() error {
 			return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 		}
