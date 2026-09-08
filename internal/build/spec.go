@@ -18,7 +18,7 @@ import (
 type Spec struct {
 	Image        ImageSpec
 	Source       SourceSpec
-	Base         string // normalized type=base image this build runs inside; empty when none
+	Base         string // absolute path to the root this build runs inside; empty when none
 	Dependencies []string
 }
 

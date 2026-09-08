@@ -80,7 +80,7 @@ Like text editors, IDEs, build-essential tools, etc.
 
 * **Format:** `<distro>/<name>`
 * **Example:** `ubuntu22/rstudio-server`, `ubuntu24/code-server`
-* **Shortcut:** when `<distro>` is the configured `default_distro` (`ubuntu24`), it can be omitted — `code-server` resolves to `ubuntu24/code-server`.
+* **Shortcut:** when `<distro>` is the configured `default_distro` (`ubuntu24`), it can be omitted — `code-server` resolves to `ubuntu24/code-server`. Standing in a project, its own pinned root takes over instead — see [Project Select-Distro](#project-select-distro).
 
 ### Custom Environments (Bundle/Environment)
 
@@ -590,7 +590,8 @@ condatainer create -p rnaseq bioconda::star bioconda::salmon=1.10.0
 # App overlay via build script
 condatainer create cellranger/9.0.1
 
-# Bare package name is expanded using the configured base (e.g. ubuntu24/build-essential)
+# Bare package name is expanded using the configured default_distro (e.g.
+# ubuntu24/build-essential), or a standing project's pinned root instead
 condatainer create build-essential
 
 # Data overlay
@@ -981,6 +982,10 @@ condatainer exec [flags] [command...]
 * `--env [KEY=VALUE]`: Set environment variable inside the container (repeatable).
 * `--bind [HOST:CONTAINER]`: Bind mount path into the container (repeatable).
 * `--gpu`: Force GPU flags (`--nv`/`--rocm`) even if `autoload_gpu` is disabled.
+* `--project [DIR]`: Act as if standing in `DIR` instead of the current directory —
+  every relative argument, and project lookup, resolves against it.
+* `--no-project`: Ignore any project found above the current directory, even one
+  standing inside it would otherwise resolve. Cannot be combined with `--project`.
 
 **Features:**
 
@@ -991,15 +996,22 @@ condatainer exec [flags] [command...]
 * There is no separate base-image flag: the container root is a `-o` overlay
   that is a `.sif` if one is given (only one `.sif` is allowed per command),
   otherwise the first `-o` overlay that is itself an OS layer, if any;
-  otherwise it's the configured default (built automatically if missing).
-* Inside a project — a directory holding `cnt-lock/` — every `-o` name resolves
-  through that project's lock instead of by installed name. See below.
+  otherwise, inside a project, the root that project has pinned; otherwise
+  the configured default (built automatically if missing).
+* Inside a project — a directory holding `cnt-lock/`, or any directory below
+  one — every `-o` name resolves through that project's lock instead of by
+  installed name, and so does the root when nothing else supplied one. See
+  below.
 
 **Inside a project:**
 
-When the current directory holds `cnt-lock/`, `-o` resolves against that
-project's lock, so a run mounts the exact artifact the project pinned rather than
-whatever currently answers to the name. `e` behaves the same way.
+When the current directory holds `cnt-lock/`, or sits anywhere below a
+directory that does, `-o` resolves against that project's lock, so a run
+mounts the exact artifact the project pinned rather than whatever currently
+answers to the name. `e`, `run` and `check` behave the same way, and all four
+print `Project: <root>` once, the first time anything in the run actually
+resolves through it — including when nothing was passed with `-o` at all and
+only the container root came from the project.
 
 * A name the lock does not pin is an error naming the remedy, not a
   fallback to the installed copy.
@@ -1010,9 +1022,20 @@ whatever currently answers to the name. `e` behaves the same way.
 * A project-relative `.sqf` is checked against the lock before it is mounted.
 * A writable `.img` has no identity to pin and is mounted as written, relative to
   the project root.
+* **The root is no different.** When nothing you passed is itself an OS layer,
+  the project's pinned root is used — not the configured default_distro — so
+  `exec`, `e` and `run` all put you in the same container regardless of how
+  your own machine is configured. If that root is not installed here, it is
+  the same error naming `condatainer project restore`, not a silent fall back
+  to your own configuration.
 
-There is no flag either way. Running from any other directory is how you opt out;
-`--project DIR` belongs to the `condatainer project` commands.
+Standing anywhere outside a project's tree is the ordinary opt-out — no flag
+required. `--project DIR` runs the command as if you had `cd`'d to `DIR`
+first, and `--no-project` disables project lookup outright even when standing
+inside one, for the rare case where you need the ambient, by-installed-name
+behavior anyway. These are distinct from `condatainer project`'s own
+`--project DIR`, which names a project to administer (lock, pin, restore,
+push) rather than a directory to relocate into.
 
 **Environment Variables (inside container):**
 
@@ -1065,6 +1088,7 @@ condatainer e [flags] [overlays...] [--] [command...]
 * `-f`, `--fakeroot`: Run container with fakeroot privileges.
 * `--env [KEY=VALUE]`: Set environment variable inside the container (repeatable).
 * `--bind [HOST:CONTAINER]`: Bind mount path into the container (repeatable).
+* `--project [DIR]`, `--no-project`: same as [`exec`](#exec).
 
 **Key Differences from `exec`:**
 
@@ -1143,16 +1167,17 @@ Each argument can be:
 * `-i`, `--install`: Alias for `--auto-install`.
 * `--remote`: Remote build scripts take precedence over local when resolving package names.
 * `--no-submit`: Disable job submission; build missing dependencies locally.
+* `--project [DIR]`, `--no-project`: same as [`exec`](#exec).
 
 **Inside a project:**
 
-Run from a directory holding `cnt-lock/`, `check <script>` resolves that
-script's declarations through the lock instead of by name, and reports whether
-the script can run right now. It goes through the same code `run` does, so the
-two cannot disagree — including opening a project-relative `.sqf` to confirm it
-still carries the pinned identity. `-a` is refused there: installing by name is
-what a lock exists to prevent, so the answer is
-[`condatainer project restore`](#project-restore).
+Run from a directory holding `cnt-lock/`, or anywhere below one, `check
+<script>` resolves that script's declarations through the lock instead of by
+name, and reports whether the script can run right now. It goes through the
+same code `run` does, so the two cannot disagree — including opening a
+project-relative `.sqf` to confirm it still carries the pinned identity. `-a`
+is refused there: installing by name is what a lock exists to prevent, so the
+answer is [`condatainer project restore`](#project-restore).
 
 **Output:**
 
@@ -1191,10 +1216,16 @@ condatainer run [OPTIONS] SCRIPT [SCRIPT_ARGS...]
 All options (`-a`, `-o`, `--afterok`, etc.) must appear **before** `SCRIPT`. Arguments after the script name are forwarded to the script.
 ```
 
+**Inside a project:** run from a directory holding `cnt-lock/`, or anywhere below
+one, `run` resolves the script's `#DEP:` and its container root through that
+project's lock, the same way `exec`/`e` do — see [Exec, Inside a project](#exec)
+for the full rule and what an unresolved pin does.
+
 **Container Flags:**
 
 * `-w`, `--writable`, `--writable-img`: Make `.img` overlays writable (default: read-only).
 * `-f`, `--fakeroot`: Run with fakeroot privileges.
+* `--project [DIR]`, `--no-project`: same as [`exec`](#exec).
 * `--bind HOST:CONTAINER`: Bind mount a path into the container (repeatable).
 * `--env KEY=VALUE`: Set an environment variable inside the container (repeatable).
 
@@ -2054,7 +2085,7 @@ omission.
 Pin the exact artifacts a project mounts, and carry that pin in Git.
 
 ```
-condatainer project lock | pin | unpin | list | validate | restore | registry [set|unset] | push
+condatainer project lock | pin | unpin | select-distro | list | validate | restore | registry [set|unset] | push
 ```
 
 A project is any directory holding `cnt-lock/`, which `project lock` creates.
@@ -2146,6 +2177,11 @@ A declaration whose overlay is not installed fails the lock. Other installed
 builds of the same name are listed rather than pinned; `project pin` takes one
 of those instead.
 
+Every run also pins the project's **root** — which distro's `.../base` a
+restore builds inside — from the configured `default_distro`, whether or not
+anything in the project actually needs one. See
+[Project Select-Distro](#project-select-distro).
+
 ### Project Pin
 
 Resolve one declaration to one exact local artifact and vendor its sources.
@@ -2229,6 +2265,31 @@ nothing asks for any more.
 **No image is deleted.** A `path:` pin keeps its file where it is; a named pin
 keeps its overlay in the images root. Only the lock's record of it goes.
 
+### Project Select-Distro
+
+```bash
+condatainer project select-distro rocky9
+condatainer project select-distro --auto
+```
+
+Overrides which distro's `.../base` `project restore` builds inside, instead
+of the one `project lock` derives from the configured `default_distro`. There
+is one root per project, so re-running **replaces** the choice rather than
+adding to it. `--auto` clears the override and re-derives immediately, rather
+than waiting for the next `project lock`.
+
+Every collaborator restoring the project gets this root regardless of their
+own `default_distro` — that is the whole point. An artifact reaching outside
+`/cnt_env` (a frozen environment, or an `os` overlay layered above the root)
+still couples to whichever release it actually ran against; recording a root
+does not check that, it only removes "my machine is configured differently"
+as a way two checkouts of the same project can disagree.
+
+Standing in a project, this is also what every bare `<distro>/<name>` shortcut
+expands against — `avail`, `list`, `remove`, `info`, `overlay`, shell
+completion, and `create`'s own bare-name expansion all follow the selected
+root instead of the configured `default_distro`.
+
 ### Project List
 
 ```bash
@@ -2239,10 +2300,15 @@ condatainer project list --json
 Lists every pin and the artifact it holds:
 
 ```text
+  base (ubuntu24/base)         sha256:8f1c02de41ab
   star/2.7.11b                 sha256:a31f902c12ab
   path:overlays/env.sqf (env)  sha256:0a398f4644c7  manual
-[CNT] 2 pin(s), 1 manual
+[CNT] 3 pin(s), 1 manual
 ```
+
+`base` is the reserved root pin every project carries — see
+[Project Select-Distro](#project-select-distro) — labelled by its role rather
+than by its raw lock key.
 
 Reads `cnt-lock/` and nothing else — no scan, no network, no image opened — so
 it answers on a fresh clone that has restored nothing.
@@ -2267,6 +2333,7 @@ condatainer project validate --json
 Checks the lock alone:
 
 - every declaration in the scripts has a pin
+- the project's root is pinned
 - every pin points at a vendored artifact
 - every vendored artifact regenerates the keys it records
 - every dependency edge resolves to another vendored artifact

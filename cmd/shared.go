@@ -389,8 +389,10 @@ func needsValue(flag string) bool {
 	return valueFlags[flag]
 }
 
-// ensureRootBaseImage resolves the configured default root, built first when
-// none is installed — but only when overlays does not already name one.
+// ensureRootBaseImage resolves the root a caller did not name explicitly:
+// the standing project's locked one, else the configured default, built
+// first when none is installed — but only when overlays does not already
+// name a root of its own.
 //
 // There is no `-b`/`--base-image` flag: every root a command wants is named
 // through the requested overlays, and container.Setup pulls the first
@@ -400,11 +402,32 @@ func needsValue(flag string) bool {
 // first via container.HasRequestedRoot, the same predicate Setup itself
 // scans with. Returns "" in that case; exec.Options.resolveBaseImage lets
 // the root Setup finds win over an empty BaseImage.
+//
+// projectBaseImage is tried before the configured default so `exec`, `e` and
+// `run` all resolve the same root standing in the same project — see its own
+// comment for why an unresolved project root refuses rather than falling
+// back silently.
 func ensureRootBaseImage(ctx context.Context, overlays []string) (string, error) {
 	if container.HasRequestedRoot(overlays) {
 		return "", nil
 	}
+	if path, err := projectBaseImage(); path != "" || err != nil {
+		return path, err
+	}
 	return build.ResolveBase(ctx)
+}
+
+// previewRootBaseImage is ensureRootBaseImage's read-only counterpart, for a
+// dry run that must report the root a real run would use without building
+// anything missing: config.GetBaseImage() only ever finds, never builds.
+func previewRootBaseImage(overlays []string) (string, error) {
+	if container.HasRequestedRoot(overlays) {
+		return "", nil
+	}
+	if path, err := projectBaseImage(); path != "" || err != nil {
+		return path, err
+	}
+	return config.GetBaseImage()
 }
 
 // PrepareCommandAndHidePrompt prepares the command array and determines if prompt should be hidden
@@ -553,7 +576,7 @@ func localOverlaySuggestions(toComplete string, includeImg bool) []string {
 // addDistroAliasChoices adds shorthand aliases for OS overlays matching the default distro.
 // For each installed OS overlay named "<distro>/<name>", also suggests "<name>".
 func addDistroAliasChoices(installed map[string]string, choices map[string]struct{}, toComplete string) {
-	distro := config.ResolvedDefaultDistro()
+	distro := projectDefaultDistro()
 	if distro == "" {
 		return
 	}

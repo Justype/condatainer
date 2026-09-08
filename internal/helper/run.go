@@ -33,6 +33,10 @@ type RunOptions struct {
 	EnvImg   string   // writable overlay (.img)
 	Overlays []string // additional read-only overlays
 	CWD      string   // working directory inside job
+	// NoProject skips resolving CWD's required overlays through a project's
+	// lock even when CWD stands inside one, falling back to the ordinary
+	// on-disk check and auto-install unconditionally.
+	NoProject bool
 	// Behaviour
 	ForceNew bool
 	// ExtraBinds is the resolved list of extra bind-mount specs ("src:dest") from

@@ -40,19 +40,23 @@ func TestProjectCheckIgnoresAProjectScriptNamedFromOutside(t *testing.T) {
 	}
 }
 
-// Standing in a subdirectory is not standing in the project: only the directory
-// holding cnt-lock/ is the root.
-func TestProjectCheckIgnoresASubdirectoryOfAProject(t *testing.T) {
+// Standing in a subdirectory of a project is standing in the project: the
+// search for cnt-lock/ walks upward, so only the top of the tree marks a
+// boundary, not the directory a script happens to sit in.
+func TestProjectCheckFindsAProjectFromASubdirectory(t *testing.T) {
 	root := newProject(t)
-	writeScript(t, root, "scripts/run.sh", "#DEP: star/2.7.11b\nrun\n")
+	writeScript(t, root, "scripts/run.sh", "#DEP: env.img\nrun\n")
+	if err := lock.Publish(root, lock.New()); err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(filepath.Join(root, "scripts"))
 
 	handled, err := projectCheck([]string{"run.sh"}, nil)
-	if err != nil {
-		t.Fatal(err)
+	if !handled {
+		t.Fatal("a subdirectory of a project was not recognized as standing in it")
 	}
-	if handled {
-		t.Fatal("a subdirectory was treated as a project root")
+	if err != nil {
+		t.Fatalf("a resolvable script was reported unrunnable: %v", err)
 	}
 }
 

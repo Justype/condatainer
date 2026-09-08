@@ -12,7 +12,6 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/conda"
-	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
@@ -468,8 +467,8 @@ func resolveOverlayArg(arg string) (string, error) {
 	if path, ok := installed[normalized]; ok {
 		return path, nil
 	}
-	if !strings.Contains(normalized, "/") && config.ResolvedDefaultDistro() != "" {
-		if path, ok := installed[config.ResolvedDefaultDistro()+"/"+normalized]; ok {
+	if !strings.Contains(normalized, "/") && projectDefaultDistro() != "" {
+		if path, ok := installed[projectDefaultDistro()+"/"+normalized]; ok {
 			return path, nil
 		}
 	}

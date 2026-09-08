@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,20 +21,22 @@ import (
 func projectCheck(scriptPaths []string, metaDeps []string) (handled bool, err error) {
 	// A `<name>` addresses a recipe and belongs to no project, so checking one
 	// stays ordinary wherever it is typed.
-	if len(scriptPaths) == 0 {
+	if len(scriptPaths) == 0 || noProjectRequested {
 		return false, nil
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return false, err
 	}
-	root, err := lock.RootAt(cwd)
-	if errors.Is(err, lock.ErrNoProject) {
-		return false, nil
-	}
+	standing, err := project.StandingAt(cwd)
 	if err != nil {
 		return true, err
 	}
+	if standing == nil {
+		return false, nil
+	}
+	root := standing.Root
+	announceProject(root)
 	if err := oneScript(root, scriptPaths, metaDeps); err != nil {
 		return true, err
 	}
@@ -50,20 +51,15 @@ func projectCheck(scriptPaths []string, metaDeps []string) (handled bool, err er
 				"run `condatainer project restore --project %s` instead", root)
 	}
 
-	current, err := lock.Load(root)
-	if err != nil {
-		return true, err
-	}
 	scanned, err := lock.ScanScript(root, script)
 	if err != nil {
 		return true, err
 	}
-	resolution, err := project.Resolve(root, current, scanned.Requests, project.ResolveOptions{})
+	resolution, err := project.Resolve(root, standing.Lock, scanned.Requests, project.ResolveOptions{})
 	if err != nil {
 		return true, err
 	}
 
-	utils.PrintMessage("Project: %s", utils.StylePath(root))
 	for _, mount := range resolution.Mounts {
 		switch {
 		case mount.Unpinned:

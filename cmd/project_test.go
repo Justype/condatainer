@@ -140,9 +140,11 @@ func TestProjectValidateSucceedsOnACompleteProject(t *testing.T) {
 	root := newProject(t)
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	artifact := vendorArtifact(t, root, "star/2.7.11b", "echo star\n")
+	base := vendorArtifact(t, root, "ubuntu24/base", "echo base\n")
 
 	l := lock.New()
 	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: artifact}
+	l.Pins[lock.BaseKey] = lock.PinEntry{Artifact: base}
 	if err := lock.Publish(root, l); err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +246,9 @@ func TestProjectValidateJSONReportsWhatIsWrong(t *testing.T) {
 	}
 }
 
-// Reconcile drops a selection nothing declares any more.
+// Reconcile drops a selection nothing declares any more. The lock is
+// published right after Reconcile, before the base pin is even attempted, so
+// this holds independent of whether a root can be derived.
 func TestProjectLockDropsAStaleSelection(t *testing.T) {
 	root := newProject(t)
 	artifact := vendorArtifact(t, root, "star/2.7.11b", "echo star\n")
@@ -255,8 +259,11 @@ func TestProjectLockDropsAStaleSelection(t *testing.T) {
 	}
 	writeScript(t, root, "run.sh", "echo no declarations\n")
 
-	if _, err := run(t, "project", "lock"); err != nil {
-		t.Fatalf("lock failed: %v", err)
+	// No default_distro is configured, so the run still fails deriving the
+	// base pin — but that failure is reported alongside whatever Reconcile
+	// already published, not instead of it.
+	if _, err := run(t, "project", "lock"); err == nil {
+		t.Fatal("project lock succeeded with no default_distro configured")
 	}
 	loaded, err := lock.Load(root)
 	if err != nil {
@@ -274,8 +281,10 @@ func TestProjectFlagSelectsTheNamedRoot(t *testing.T) {
 	root := newProject(t)
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	artifact := vendorArtifact(t, root, "star/2.7.11b", "echo star\n")
+	base := vendorArtifact(t, root, "ubuntu24/base", "echo base\n")
 	l := lock.New()
 	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: artifact}
+	l.Pins[lock.BaseKey] = lock.PinEntry{Artifact: base}
 	if err := lock.Publish(root, l); err != nil {
 		t.Fatal(err)
 	}

@@ -169,10 +169,14 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 	}
 
 	userOverlays := opts.Overlays
-	if meta.RequiredOverlays != "" {
-		logger.Info("Checking required overlays")
+	// CheckRequiredOverlays logs whether this resolved through a project's
+	// lock or by installed name. cwd matches what ExecutePlan anchors the
+	// launch at: opts.CWD, else wherever this process itself is running.
+	cwd := opts.CWD
+	if cwd == "" {
+		cwd, _ = os.Getwd()
 	}
-	namedOverlays, err := CheckRequiredOverlays(ctx, meta.RequiredOverlays, params)
+	namedOverlays, err := CheckRequiredOverlays(ctx, cwd, meta.RequiredOverlays, params, opts.NoProject)
 	if err != nil {
 		return nil, err
 	}

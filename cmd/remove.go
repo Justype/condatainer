@@ -115,7 +115,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build search query (exact match for single term; exact-first for multiple)
-	distroLower := strings.ToLower(config.ResolvedDefaultDistro())
+	distroLower := strings.ToLower(projectDefaultDistro())
 	distroPrefix := distroLower + "/"
 	installedLower := make(map[string]bool, len(installedOverlays))
 	for name := range installedOverlays {

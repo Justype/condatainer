@@ -113,7 +113,7 @@ func runAvail(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	distroLower := strings.ToLower(config.ResolvedDefaultDistro())
+	distroLower := strings.ToLower(projectDefaultDistro())
 	distroPrefix := distroLower + "/"
 	aliasOf := func(name string) string {
 		if distroLower == "" {
@@ -385,7 +385,7 @@ func formatPackageLine(pkg PackageInfo, showDescription bool) string {
 
 	// Compute alias before highlighting (e.g. "ubuntu24/build-essential" → "[build-essential]")
 	var alias string
-	if distro := config.ResolvedDefaultDistro(); distro != "" {
+	if distro := projectDefaultDistro(); distro != "" {
 		if a, ok := strings.CutPrefix(pkg.Name, distro+"/"); ok {
 			alias = a
 		}

@@ -58,6 +58,34 @@ type Request struct {
 	first Finding
 }
 
+// PathCandidates lists, in preference order, the pin keys a KindPath request
+// might mean: the literal key as scanned (root-relative) first, then — for
+// each script that declared it — the same suffix taken relative to that
+// script's own directory instead. A script can therefore name a file beside
+// it without spelling out its own containing folder, while anything that
+// already resolves under the literal key keeps meaning exactly that.
+//
+// Every other kind has no ambiguity to offer and returns its own key alone.
+func (r Request) PathCandidates() []string {
+	if r.Kind != KindPath {
+		return []string{r.Key}
+	}
+	candidates := []string{r.Key}
+	seen := map[string]bool{r.Key: true}
+	for _, script := range r.Scripts {
+		dir := path.Dir(script)
+		if dir == "." {
+			continue
+		}
+		key := PathPrefix + path.Clean(path.Join(dir, r.Path))
+		if !seen[key] {
+			seen[key] = true
+			candidates = append(candidates, key)
+		}
+	}
+	return candidates
+}
+
 // ConstraintReason reports why a version constraint cannot appear in a project
 // declaration, or "".
 //
@@ -89,11 +117,11 @@ func unpinnableReason(kind Kind, target string) string {
 		return fmt.Sprintf("%s is writable, so it has no identity to pin; freeze it into the project with `condatainer overlay freeze %s overlays/<name>.sqf` and declare that instead",
 			target, target)
 	default:
-		// A `../` declaration is the case worth spelling out: it looks
-		// script-relative, and under one anchor for the whole project it is not.
+		// A `../` declaration is the case worth spelling out: both readings
+		// were tried and both escape.
 		anchor := ""
 		if !path.IsAbs(target) {
-			anchor = " (a path in a project is relative to the project root, not to the script declaring it)"
+			anchor = " (tried relative to the project root and relative to each script declaring it)"
 		}
 		return fmt.Sprintf("%s is outside the project%s, so restore cannot own that path; copy it under the project and declare that path instead",
 			target, anchor)
@@ -223,8 +251,15 @@ func Scan(root string, opts ScanOptions) (*ScanResult, error) {
 // once every script in scope has been read — which is why this runs here rather
 // than as each declaration is parsed.
 func finalize(merged map[string]*Request, result *ScanResult) {
+	taken := make(map[string]bool, len(merged))
+	for key := range merged {
+		taken[key] = true
+	}
 	for _, request := range merged {
 		sort.Strings(request.Scripts)
+		reclassifyEscaped(request, taken)
+	}
+	for _, request := range merged {
 		if !request.Kind.Pinnable() {
 			finding := request.first
 			finding.Reason = unpinnableReason(request.Kind, request.Path)
@@ -240,6 +275,43 @@ func finalize(merged map[string]*Request, result *ScanResult) {
 		}
 		return result.Findings[i].Line < result.Findings[j].Line
 	})
+}
+
+// reclassifyEscaped promotes a KindExternal request to KindPath when the same
+// declared suffix, taken relative to one of its declaring scripts instead of
+// the project root, stays inside the project. A `../` declaration escapes
+// only under the root anchor; the same text beside the script that wrote it
+// can name a file well inside the project. An absolute declaration is left
+// alone: it already names a location on disk, not something a different
+// anchor could reinterpret.
+//
+// taken holds every key already in use before reclassification runs, so two
+// declarations that would otherwise land on the same resolved key never
+// collide — the second candidate is skipped and the next script (if any) is
+// tried instead, leaving the request KindExternal rather than silently
+// dropping one declaration's identity onto another's.
+func reclassifyEscaped(request *Request, taken map[string]bool) {
+	if request.Kind != KindExternal || path.IsAbs(request.Path) {
+		return
+	}
+	for _, script := range request.Scripts {
+		dir := path.Dir(script)
+		if dir == "." {
+			continue
+		}
+		joined := path.Clean(path.Join(dir, request.Path))
+		if joined == ".." || strings.HasPrefix(joined, "../") {
+			continue
+		}
+		key := PathPrefix + joined
+		if taken[key] {
+			continue
+		}
+		request.Kind = KindPath
+		request.Path = joined
+		request.Key = key
+		return
+	}
 }
 
 // isShellScript reports whether a file should be read for declarations.

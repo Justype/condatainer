@@ -56,6 +56,12 @@ type LockedSpec struct {
 	// default, or environment.yml when the caller has accepted an equivalent
 	// result. Ignored by every other build type.
 	CondaSource string
+	// Base is the container root a conda or script build runs inside — an
+	// absolute path, or empty to let resolveBase fall back to the configured
+	// default_distro. A project restore supplies its locked root here so the
+	// rebuild does not depend on this machine's configuration. Ignored by a
+	// def build, which bootstraps its own root and never reads Spec.Base.
+	Base string
 }
 
 // NewLockedObject builds one artifact from a lock rather than from the catalog.
@@ -103,11 +109,13 @@ func NewLockedObject(ctx context.Context, spec LockedSpec) (*BuildObject, error)
 	}
 
 	b := &BuildObject{
+		// A def build bootstraps its own root and never reads Base, so setting
+		// it unconditionally needs no switch on manifest.BuildType here.
 		spec: Spec{Image: ImageSpec{
 			Name:   manifest.Name,
 			Type:   manifest.Type,
 			Prefix: meta.Prefix(manifest.Name, manifest.Type),
-		}},
+		}, Base: spec.Base},
 		ws:           workspaceFor(manifest.Name, tmpRoot, appExt3ScratchExt(manifest.Type), false),
 		tgt:          targetFor(output),
 		submitJob:    config.Global.SubmitJob,

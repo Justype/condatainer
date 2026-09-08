@@ -38,6 +38,18 @@ const ProvenanceDir = "provenance"
 // prefix keeps the two kinds of key from ever colliding.
 const PathPrefix = "path:"
 
+// BaseKey is the reserved Pins key holding the project's root — the artifact
+// `restore` hands every collaborator by default instead of falling back to
+// their own configured default_distro. It is an ordinary PinEntry like any
+// other; the trailing colon only keeps it from ever colliding with a rendered
+// request, the same trick PathPrefix uses: a catalog request is a
+// slash-separated name and never contains one.
+//
+// There is no dispatch on an artifact's type to find this pin — TypeOS covers
+// both an ordinary os overlay and whatever plays root — so callers address it
+// by this key rather than by recognizing a name.
+const BaseKey = "base:"
+
 // ociRepoSegment is one path segment of an OCI repository, matching the
 // distribution spec's grammar. Duplicated from internal/registry rather than
 // imported: this package must stay free of the transport so that project

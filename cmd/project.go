@@ -41,8 +41,8 @@ func init() {
 	rootCmd.AddCommand(projectCmd)
 	projectCmd.PersistentFlags().StringVar(&projectDir, "project", "", "Project root (default: the current directory)")
 	projectCmd.AddCommand(newProjectLockCmd(), newProjectPinCmd(), newProjectUnpinCmd(),
-		newProjectListCmd(), newProjectValidateCmd(), newProjectRestoreCmd(),
-		newProjectRegistryCmd(), newProjectPushCmd())
+		newProjectSelectDistroCmd(), newProjectListCmd(), newProjectValidateCmd(),
+		newProjectRestoreCmd(), newProjectRegistryCmd(), newProjectPushCmd())
 }
 
 // projectRoot resolves the root a command acts on — the current directory, or
@@ -134,6 +134,15 @@ builds of the same name are listed rather than pinned; pick one of those with
 			for _, p := range pinned {
 				recordUpstream(cmd.Context(), root, current, p)
 			}
+			// Every project's root is pinned, unconditionally — there is no
+			// closure to walk deciding whether one is needed. A manual
+			// `project select-distro` override is left alone.
+			if basePinned, err := lock.DeriveBase(root, current, config.ResolvedDefaultDistro(), lock.PinOptions{}); err != nil {
+				failed = append(failed, err)
+			} else if basePinned != nil {
+				recordUpstream(cmd.Context(), root, current, basePinned)
+				pinned = append(pinned, basePinned)
+			}
 			noteUnpublished(current, pinned)
 			if len(pinned) > 0 {
 				if err := lock.Publish(root, current); err != nil {
@@ -204,6 +213,68 @@ takes none, since it already names the file it means.`,
 			return nil
 		},
 	}
+	return cmd
+}
+
+func newProjectSelectDistroCmd() *cobra.Command {
+	var auto bool
+	cmd := &cobra.Command{
+		Use:   "select-distro [distro]",
+		Short: "Choose which distro's base this project restores to",
+		Long: `Pins <distro>/base as this project's root, overriding what
+'condatainer project lock' would otherwise derive from the configured
+default_distro.
+
+--auto clears the override and re-derives from the configured default_distro
+immediately, rather than waiting for the next 'condatainer project lock'.`,
+		Example: `  condatainer project select-distro rocky9
+  condatainer project select-distro --auto`,
+		Args:         cobra.MaximumNArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if auto == (len(args) == 1) {
+				return fmt.Errorf("give exactly one of a distro or --auto")
+			}
+			root, err := projectRoot(true)
+			if err != nil {
+				return err
+			}
+			current, err := lock.Load(root)
+			if err != nil {
+				return err
+			}
+			var pinned *lock.Pinned
+			if auto {
+				pinned, err = lock.AutoDistro(root, current, config.ResolvedDefaultDistro(), lock.PinOptions{})
+			} else {
+				pinned, err = lock.SelectDistro(root, current, args[0], lock.PinOptions{})
+			}
+			if err != nil {
+				return err
+			}
+			upstream := recordUpstream(cmd.Context(), root, current, pinned)
+			if err := lock.Publish(root, current); err != nil {
+				return err
+			}
+
+			if auto {
+				utils.PrintSuccess("Root reset to the configured default: %s", utils.StyleName(pinned.Name))
+			} else {
+				utils.PrintSuccess("Root pinned to %s", utils.StyleName(pinned.Name))
+			}
+			utils.PrintMessage("  identity %s", pinned.Identity.Digest())
+			utils.PrintMessage("  read from %s", utils.StylePath(pinned.Path))
+			for _, artifact := range pinned.Vendored {
+				line := "  vendored " + artifact
+				if remote, ok := upstream[artifact]; ok {
+					line += " (fetchable from " + remote + ")"
+				}
+				utils.PrintMessage("%s", line)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&auto, "auto", false, "Clear a manual override and re-derive from the configured default_distro")
 	return cmd
 }
 
@@ -366,6 +437,12 @@ A pin marked 'manual' is one the project recorded itself: no script declares it,
 // already carry one — a path addresses a file, which says nothing about what is
 // in it, while a name request is the name.
 func pinLabel(pin pinReport) string {
+	if pin.Request == lock.BaseKey {
+		if pin.Name == "" {
+			return "base"
+		}
+		return "base (" + pin.Name + ")"
+	}
 	if pin.Name == "" || pin.Name == pin.Request {
 		return pin.Request
 	}
@@ -694,6 +771,9 @@ each landed, so a later restore downloads them instead of rebuilding.
 // publishable and invalid at once.
 func projectProblems(l *lock.Lock, scanned *lock.ScanResult, problems []lock.Problem) []string {
 	out := problemStrings(problems)
+	if reason := missingBaseProblem(l); reason != "" {
+		out = append(out, reason)
+	}
 	for _, finding := range scanned.Findings {
 		out = append(out, fmt.Sprintf("%s:%d: %s", finding.Script, finding.Line, finding.Reason))
 	}
@@ -702,6 +782,17 @@ func projectProblems(l *lock.Lock, scanned *lock.ScanResult, problems []lock.Pro
 			request.Key, strings.Join(request.Scripts, ", ")))
 	}
 	return out
+}
+
+// missingBaseProblem is the one line `project validate`/`push` add when no
+// root is pinned, or "" when one is. `project lock` pins one unconditionally,
+// so the only way to reach this is a lock written before this feature
+// existed, or hand-edited.
+func missingBaseProblem(l *lock.Lock) string {
+	if _, ok := l.Pins[lock.BaseKey]; ok {
+		return ""
+	}
+	return "no root is pinned; run `condatainer project lock`"
 }
 
 func reportPushPlan(plan *publish.Plan, jsonOutput bool) error {
@@ -803,8 +894,11 @@ script can actually run on this machine, use 'condatainer check <script>'.`,
 			needPin := requestsNeedingPin(current, scanned)
 
 			total := len(problems) + len(scanned.Findings) + len(needPin)
+			if missingBaseProblem(current) != "" {
+				total++
+			}
 			if jsonOutput {
-				if err := printJSON(validateReport(root, problems, needPin, scanned)); err != nil {
+				if err := printJSON(validateReport(root, current, problems, needPin, scanned)); err != nil {
 					return err
 				}
 				// The exit status is the answer; the format only changes how it
@@ -857,7 +951,7 @@ type requestReport struct {
 	Pinnable bool `json:"pinnable"`
 }
 
-func validateReport(root string, problems []lock.Problem, needPin []lock.Request, scanned *lock.ScanResult) any {
+func validateReport(root string, l *lock.Lock, problems []lock.Problem, needPin []lock.Request, scanned *lock.ScanResult) any {
 	report := struct {
 		Root       string          `json:"root"`
 		Valid      bool            `json:"valid"`
@@ -868,6 +962,9 @@ func validateReport(root string, problems []lock.Problem, needPin []lock.Request
 	}{Root: root, Scripts: scanned.Scripts, Findings: scanned.Findings}
 	for _, problem := range problems {
 		report.Problems = append(report.Problems, problem.String())
+	}
+	if reason := missingBaseProblem(l); reason != "" {
+		report.Problems = append(report.Problems, reason)
 	}
 	for _, request := range needPin {
 		report.Unselected = append(report.Unselected, requestReport{
@@ -885,10 +982,14 @@ func reportLockState(root string, l *lock.Lock, scanned *lock.ScanResult,
 	if jsonOutput {
 		report := struct {
 			Root     string          `json:"root"`
+			Base     string          `json:"base,omitempty"`
 			Requests []requestReport `json:"requests"`
 			Failed   []string        `json:"failed,omitempty"`
 			Findings []lock.Finding  `json:"findings,omitempty"`
 		}{Root: root, Findings: scanned.Findings}
+		if pin, ok := l.Pins[lock.BaseKey]; ok {
+			report.Base = pin.Artifact
+		}
 		for _, request := range scanned.Requests {
 			entry := requestReport{Request: request.Key, Kind: string(request.Kind),
 				Scripts: request.Scripts, Pinnable: request.Kind.Pinnable()}
@@ -904,6 +1005,9 @@ func reportLockState(root string, l *lock.Lock, scanned *lock.ScanResult,
 		return pinFailure(failed)
 	}
 
+	if pin, ok := l.Pins[lock.BaseKey]; ok {
+		utils.PrintMessage("  %s → %s", utils.StyleName("base"), pin.Artifact)
+	}
 	for _, request := range scanned.Requests {
 		switch pin, ok := l.Pins[request.Key]; {
 		case ok:

@@ -97,7 +97,11 @@ It exists because a project depends on artifacts no `#DEP:` names:
 - a helper declares `#REQUIRED_OVERLAYS: r{POSIT_R} rstudio-server
   build-essential`, which the project scanner never reads — it reads `#DEP:` in
   project scripts, and a helper's overlay list is a different declaration
-  entirely;
+  entirely. `Standing.ResolveNames` (`standing.go`) is how those names still
+  reach the pins once launched with a project as their working directory:
+  `internal/helper.CheckRequiredOverlays` calls `project.StandingAt` first,
+  falling back to its ordinary on-disk check and auto-install only when there
+  is no project to resolve against;
 - a **frozen environment** is named by nobody. It is what downstream analysis
   runs *in* rather than something a script consumes, so nothing selects one per
   script and no `#DEP:` ever mentions it.
@@ -130,6 +134,72 @@ marks which are manual, so the pin key `unpin` takes is discoverable. A pin whos
 artifact does not verify is listed as unreadable rather than dropped from the
 listing — the key is what addresses it, and hiding it would hide the thing to
 fix.
+
+## The project's root
+
+`lock.BaseKey` (`"base:"`) is a reserved `Pins` key holding the artifact
+`restore` treats as the container root, instead of falling back to whatever
+`config default_distro` says on the machine running it. It is an ordinary
+`PinEntry` — same shape, same `Manual` meaning as every other pin — addressed
+by a fixed key rather than by name, because there is no manifest type left
+that would say "this one is a root": `catalog.TypeOS` covers both an ordinary
+`os` overlay and whatever plays root. The key's trailing colon is what a
+rendered `#DEP:` request can never produce, the same guarantee `PathPrefix`
+gives a path pin.
+
+Unlike every other pin, it is written unconditionally: `project lock` always
+derives it, whether or not anything in the project actually reaches outside
+`/cnt_env`. There is no closure to walk deciding whether one is needed, and no
+cost recording one when nothing does — see `plan/base-provenance.md` for why
+that changed once Apptainer and Micromamba stopped being something a root
+provided. Derivation has exactly one source, `config.ResolvedDefaultDistro()`;
+`project select-distro <distro>` overrides it with `Manual` set, and
+`--auto` clears the override back to derived. `Reconcile`'s sweep leaves the
+key alone unconditionally — it is never something the `#DEP:` scan produces,
+so treating an absent scan hit as staleness would delete it every run.
+
+Restore gives it two guarantees an ordinary pin does not need:
+
+- **It runs first.** `reorderBaseFirst` (`restore/plan.go`) moves its step to
+  the front of the plan. Nothing in the manifest graph points at it — an `os`
+  artifact may not carry `#DEP:` — so topological order alone would leave it
+  wherever it falls; every conda or script rebuild needs its resolved path
+  before it can build.
+- **`--only` cannot drop it.** A submitted job re-enters `Compute` restricted
+  to one artifact and its dependency closure, and the base is in nobody's
+  closure. `restrict` keeps it anyway, so a job rebuilding one artifact on a
+  compute node resolves its root from the lock the same way an unrestricted
+  restore does, rather than falling back to that node's own configuration.
+
+Once its step has run, `Run` reads its resolved path out of the same
+`available` map every other dependency edge uses, and hands it to
+`build.LockedSpec.Base` for whichever conda or script rebuild follows —
+`internal/build`'s `resolveBase` early-returns when `Spec.Base` is already
+set, so a locked rebuild never reaches `config.GetBaseImage()`. A `.def`
+rebuild ignores it: it bootstraps its own root and never reads `Spec.Base`.
+
+`cmd.ensureRootBaseImage` gives `exec`, `e` and `run` the same guarantee for an
+ordinary session, not just a restore: standing in a project, if nothing the
+caller requested is itself root-eligible, `cmd.projectBaseImage` calls
+`Standing.Base`, which resolves the reserved base pin the same way
+`Standing.ResolveComplete` resolves any other pin — strictly, so an unresolved
+root is a refusal naming `project restore`, never a silent fall back to this
+machine's `default_distro`. All three commands reach this through the one
+function, so none of them can disagree about which root a project means.
+
+`cmd.projectDefaultDistro` extends the same substitution to every bare-name
+shortcut: `avail`, `list`, `remove`, `info`, `overlay`, shell completion, and
+`create`'s own bare-name expansion all called `config.ResolvedDefaultDistro()`
+directly, which meant `build-essential` could mean a different artifact
+depending on whose machine typed it — this plan's failure arriving through the
+name table rather than through the mount. Standing in a project,
+`cmd.projectSelectedDistro` calls `Standing.SelectedDistro`, which reads the
+distro straight out of the base pin's vendored manifest name —
+`select-distro`/`DeriveBase` only ever compose `<distro>/base`, so splitting on
+the first `/` is exact — without resolving a local copy, so it answers the
+same in a fresh clone that has restored nothing. Unlike `Base` this never
+refuses: a lookup that fails for any reason falls back to the configured
+`default_distro`, which is the right default for a completion or display path.
 
 ## Where a project publishes
 
@@ -285,11 +355,9 @@ someone else's file.
 ## One anchor: the project root
 
 Inside a project a relative path is relative to the **project root** — never to
-the declaring script, never to the process working directory. The scanner keys a
-`path:` request on the cleaned declaration text, restore materializes it at
-`<root>/<key>`, and `run` resolves it the same way. So `../overlays/tool.sqf` in
-a subdirectory script points outside the project and is external, which the
-finding says outright, because that path looks script-relative and is not.
+the process working directory. The scanner keys a `path:` request on the
+cleaned declaration text, restore materializes it at `<root>/<key>`, and `run`
+resolves it the same way.
 
 `project.WorkDir` is the other half. `container.ResolveOverlayPaths` resolves a
 relative overlay against the *process* working directory, and a scheduler
@@ -306,6 +374,51 @@ A declared `--chdir` was written on purpose, so only its author can resolve the
 conflict.
 
 An unpinnable declaration is a finding — see **Unpinnable declarations** below.
+
+### A declaring script's own directory is a fallback address, never the anchor
+
+The rule above governs one thing: what a declared path *is* — pinnable,
+external, or in bounds. What it might *mean when a real file has to be found
+for it* is a separate question, and `Request.PathCandidates()`
+(`lock/scan.go`) is where that lives. For a `path:` request, candidate 0 is
+always the literal, root-relative key — a script written in the recommended
+layout (an analysis script at the root, `overlays/` beside it) never sees
+anything else. Candidates 1+ are the same declared suffix taken relative to
+each script that declared it instead, read off `Request.Scripts`. A script
+paired one-for-one with its own overlay — `steps1/run.sh` declaring
+`#DEP: xxx.sqf` for a file that lives at `steps1/xxx.sqf` — resolves without
+its author having to spell out `steps1/` themselves.
+
+The two places this list gets consumed check two different things, and
+neither may check the other's:
+
+- **`PinAll` checks the filesystem**, trying each candidate until one answers
+  to a real `.sqf` it can hash — sound only here, because a file has to exist
+  already to be pinned at all.
+- **`Reconcile` and `Resolve` check `l.Pins` membership only**, via
+  `lock.MatchPin`, never the filesystem — a fresh checkout has to resolve
+  correctly before anything has been restored, and neither may invent an
+  answer from files that are not there yet.
+
+Whichever candidate a real file answered to becomes the **stored** key —
+`path:steps1/xxx.sqf`, never the literal text as declared if that is not the
+one that matched. A `path:` pin is always root-relative once recorded; the
+ambiguity exists only in how a bare declaration gets interpreted once, at the
+moment something real answers for it.
+
+One more piece follows from this: a `../`-leading declaration is not
+classified purely from its own text any more, for a *scanned* (script-owned)
+declaration. `../overlays/tool.sqf` written in `steps1/run.sh` escapes when
+read as root-relative, but relative to `steps1/` it means
+`overlays/tool.sqf` — safely inside the project. `finalize`'s
+`reclassifyEscaped` (`lock/scan.go`) tries each declaring script's directory
+before giving up and reporting the declaration unpinnable, and only promotes
+it to `KindPath` when the resolved key is not already claimed by a different
+declaration — two different declaration texts must never end up sharing one
+identity by accident. `exec -o` and manual `project pin` are untouched by any
+of this: with no declaring script there is exactly one candidate, root-relative,
+forever — the same grammar `ParseDeclaration` has always given a name typed on
+the command line.
 
 ## Where a restored artifact lands
 
@@ -456,27 +569,68 @@ script's own paths.
 
 ## Acting in a project
 
-`run`, `check` and `exec` act *in* whatever project the caller is standing in.
-There is no flag for it either way: `--project DIR` belongs to the commands that
-act *on* a project, and standing somewhere else is the opt-out.
+`run`, `check`, `exec` and a helper's `#REQUIRED_OVERLAYS:` all act *in*
+whatever project the caller is standing in. There is no flag required either
+way, by default: standing somewhere else is the ordinary opt-out.
 
-`exec -o` and `e -o` share one hook, `cmd.projectOverlays`. An argument classifies
-through `lock.ParseDeclaration` — the same grammar a `#DEP:` uses — so a name
-typed on the command line and the same text in a script cannot mean different
-things. That means a version constraint is refused here too, and a project path
+`Standing` (`standing.go`) is what each of them stands on: `StandingAt(cwd)`
+finds the project rooted at or *above* `cwd` — walking up through ancestors —
+or answers `(nil, nil)` when no ancestor has one, so a caller's own ordinary
+resolution takes over unchanged. Every project-aware entry point in the tree
+is a method on it — `ResolveComplete`/`ResolveNames` for overlays,
+`Base`/`SelectedDistro` for the root — so `cmd`'s exec/run hooks and
+`internal/helper.CheckRequiredOverlays` share one implementation of "find the
+root, load the lock, resolve, refuse with the same message" instead of three
+packages repeating it.
+
+`StandingAt` walking upward means one directory deeper than the root is still
+standing in the project, not an ambient fallback — `exec scripts/align.sh`
+behaves the same whether it's typed from the root or from `scripts/`. Only
+`Standing` does this: `lock.RootFor`'s cwd-fallback branch, used by the
+`project` subcommand family when `--project` is omitted, keeps calling the
+strict, non-walking `lock.RootAt` — a write command reaching an ancestor
+project from a subdirectory that looks empty is a hazard an ambient read
+never is, and `project lock`'s own "no lock here yet, so make one" behavior
+depends on "no lock here" meaning literally the named directory.
+
+`exec`, `e`, `run` and `check` each carry two more flags on top of the ambient
+default, registered together by `RegisterProjectFlags`
+(`cmd/project_flags.go`): `--project DIR` relocates the whole invocation —
+`os.Chdir(DIR)` once, before anything else runs, so `StandingAt` and every
+other relative argument (a script path, an `-o` local file, a `--bind` path)
+resolve against `DIR` exactly as if the caller had `cd`'d there themselves,
+never as a second anchor kept alongside the real one. `--no-project` instead
+disables lookup outright, behaving as if `StandingAt` had found nothing,
+regardless of what standing there would otherwise resolve — the deliberate
+opt-out that walking upward would otherwise remove. The two are refused
+together. `internal/helper.RunOptions.NoProject` gives helper launches (CLI
+and dashboard alike, since both share `PlanRun`) the same opt-out; helper
+already had the relocation flag's equivalent, since a launch's `cwd` is
+always given explicitly rather than inherited from an ambient process
+directory.
+
+`exec -o` and `e -o` share one hook, `cmd.projectOverlays`, and `run`'s script
+scan uses `cmd.projectRunContext` — both call `Standing.ResolveComplete` after
+building their own `[]lock.Request`. A request classifies through
+`lock.ParseDeclaration` — the same grammar a `#DEP:` uses — so a name typed on
+the command line and the same text in a script cannot mean different things.
+That means a version constraint is refused here too, and a project path
 answers to the lock rather than being mounted on sight: inside a project
 `overlays/tool.sqf` is a restore output, and `LookupAt` verifies the file there
 against the locked keys. A writable `.img` and an external `.sqf` stay unpinnable
 and are mounted as written.
 
-The hook sits *above* `container.ResolveOverlayPaths` rather than inside it, even
-though that is the one place a name becomes a path. Five of its callers resolve a
-build's own `#DEP:` or a base image, and none of them may pick up the lock of
-whatever directory the user happened to be standing in.
+`Standing` sits *above* `container.ResolveOverlayPaths` rather than inside it,
+even though that is the one place a name becomes a path. Five of its callers
+resolve a build's own `#DEP:` or a base image, and none of them may pick up the
+lock of whatever directory the user happened to be standing in.
 
-Like `run`, it resolves and never acquires: an absent artifact is an error naming
-`project restore`, never a fetch, a build, or a fallback to whatever currently
-answers to the name. That fallback is the failure a lock exists to prevent.
+Like `run`, every method resolves and never acquires: an absent artifact is an
+error naming `project restore`, never a fetch, a build, or a fallback to
+whatever currently answers to the name. That fallback is the failure a lock
+exists to prevent — `Standing.ResolveComplete`'s refusal is the one message
+every caller shares, so a `-o` typo, an unpinned helper overlay and an
+unresolved root all fail the same recognizable way.
 
 ## Verification
 

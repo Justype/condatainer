@@ -20,21 +20,22 @@ import (
 )
 
 type postScriptHelperFlags struct {
-	cpusSet    bool
-	cpus       int
-	memSet     bool
-	mem        string
-	timeSet    bool
-	time       string
-	gpuSet     bool
-	gpu        string
-	envSet     bool
-	env        string
-	overlaySet bool
-	overlays   []string
-	cwdSet     bool
-	cwd        string
-	newSet     bool
+	cpusSet      bool
+	cpus         int
+	memSet       bool
+	mem          string
+	timeSet      bool
+	time         string
+	gpuSet       bool
+	gpu          string
+	envSet       bool
+	env          string
+	overlaySet   bool
+	overlays     []string
+	cwdSet       bool
+	cwd          string
+	newSet       bool
+	noProjectSet bool
 }
 
 var (
@@ -194,6 +195,11 @@ func parsePostScriptHelperFlags(args []string) (postScriptHelperFlags, []string,
 					return flags, nil, fmt.Errorf("flag %s does not take a value", name)
 				}
 				flags.newSet = true
+			case "--no-project":
+				if hasVal {
+					return flags, nil, fmt.Errorf("flag %s does not take a value", name)
+				}
+				flags.noProjectSet = true
 			default:
 				passthrough = append(passthrough, arg)
 			}
@@ -441,7 +447,7 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	startedWithArgs := postFlags.cpusSet || postFlags.memSet ||
 		postFlags.timeSet || postFlags.gpuSet ||
 		postFlags.envSet || postFlags.overlaySet || postFlags.cwdSet ||
-		postFlags.newSet || len(scriptArgs) > 0
+		postFlags.newSet || postFlags.noProjectSet || len(scriptArgs) > 0
 
 	// Find script in all search paths.
 	scriptPath, err := config.FindHelperScript(scriptName)
@@ -516,6 +522,7 @@ func runHelper(cmd *cobra.Command, args []string) error {
 		Overlays:   postFlags.overlays,
 		CWD:        cwd,
 		ForceNew:   postFlags.newSet,
+		NoProject:  postFlags.noProjectSet,
 		FlagArgs:   scriptArgs,
 	}
 

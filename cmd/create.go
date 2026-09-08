@@ -535,7 +535,7 @@ func expandBareName(ctx context.Context, nameVersion string) (string, bool) {
 	if strings.Count(normalized, "/") > 1 {
 		return normalized, false
 	}
-	base := config.ResolvedDefaultDistro()
+	base := projectDefaultDistro()
 	if base == "" {
 		return normalized, false
 	}

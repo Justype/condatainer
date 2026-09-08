@@ -18,6 +18,7 @@ import (
 
 var (
 	checkAutoInstall bool
+	checkProjectDir  string
 )
 
 var scriptCheckCmd = &cobra.Command{
@@ -43,9 +44,13 @@ func init() {
 	scriptCheckCmd.Flags().BoolVarP(&checkAutoInstall, "auto-install", "a", false, "Automatically install missing dependencies")
 	scriptCheckCmd.Flags().BoolP("install", "i", false, "Alias for --auto-install")
 	scriptCheckCmd.Flags().BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (build locally)")
+	RegisterProjectFlags(scriptCheckCmd, &checkProjectDir)
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
+	if err := applyProjectRelocation(checkProjectDir); err != nil {
+		return err
+	}
 	ResolveFlagAlias(cmd, "auto-install", "install")
 
 	// Resolve all args to concrete script paths and metadata deps

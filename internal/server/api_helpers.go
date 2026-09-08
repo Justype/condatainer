@@ -410,14 +410,15 @@ func (s *srv) handleHelperStart(w http.ResponseWriter, r *http.Request, name str
 	}
 
 	type startReq struct {
-		CPUs     int               `json:"cpus"`
-		Mem      string            `json:"mem"`
-		Time     string            `json:"time"`
-		GPU      string            `json:"gpu"`
-		CWD      string            `json:"cwd"`
-		Overlay  string            `json:"overlay"`
-		Overlays []string          `json:"overlays"`
-		Params   map[string]string `json:"params"`
+		CPUs      int               `json:"cpus"`
+		Mem       string            `json:"mem"`
+		Time      string            `json:"time"`
+		GPU       string            `json:"gpu"`
+		CWD       string            `json:"cwd"`
+		Overlay   string            `json:"overlay"`
+		Overlays  []string          `json:"overlays"`
+		Params    map[string]string `json:"params"`
+		NoProject bool              `json:"no_project"`
 	}
 	var req startReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -478,6 +479,7 @@ func (s *srv) handleHelperStart(w http.ResponseWriter, r *http.Request, name str
 		Overlays:   req.Overlays,
 		Params:     params,
 		ForceNew:   true,
+		NoProject:  req.NoProject,
 	}
 	if req.Overlay != "" {
 		opts.EnvImg = req.Overlay

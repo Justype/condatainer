@@ -327,6 +327,54 @@ func TestScanClassifiesExternalPathsAsUnpinnable(t *testing.T) {
 	}
 }
 
+// A `../` declaration escapes under the root anchor but can still name a file
+// well inside the project when read relative to the script that wrote it.
+func TestScanReclassifiesAnEscapeThatStaysInsideViaItsScript(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "steps1/run.sh", "#DEP: ../overlays/tool.sqf\nrun\n")
+
+	result := scan(t, root)
+	tool := find(t, result, PathPrefix+"overlays/tool.sqf")
+	if tool.Kind != KindPath {
+		t.Fatalf("tool.Kind = %q, want path", tool.Kind)
+	}
+	if tool.Path != "overlays/tool.sqf" {
+		t.Errorf("tool.Path = %q, want overlays/tool.sqf", tool.Path)
+	}
+}
+
+// A script two directories deep still escapes the project even relative to
+// its own directory, so it stays external.
+func TestScanKeepsAnEscapeExternalWhenItsScriptCannotRescueIt(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "steps1/run.sh", "#DEP: ../../outside/tool.sqf\nrun\n")
+
+	result := scan(t, root)
+	tool := find(t, result, PathPrefix+"../../outside/tool.sqf")
+	if tool.Kind != KindExternal {
+		t.Errorf("tool.Kind = %q, want external", tool.Kind)
+	}
+}
+
+// A reclassified escape that would land on a key another declaration already
+// owns is refused rather than silently merged into it: two different
+// declaration texts must not end up sharing one identity by accident.
+func TestScanNeverLetsAReclassifiedEscapeCollideWithAnExistingKey(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "run.sh", "#DEP: overlays/tool.sqf\nrun\n")
+	write(t, root, "steps1/run.sh", "#DEP: ../overlays/tool.sqf\nrun\n")
+
+	result := scan(t, root)
+	direct := find(t, result, PathPrefix+"overlays/tool.sqf")
+	if direct.Kind != KindPath || len(direct.Scripts) != 1 {
+		t.Errorf("direct = %#v, want an untouched path pin from run.sh alone", direct)
+	}
+	climbing := find(t, result, PathPrefix+"../overlays/tool.sqf")
+	if climbing.Kind != KindExternal {
+		t.Errorf("climbing.Kind = %q, want external: reclassifying it would have collided with the existing key", climbing.Kind)
+	}
+}
+
 // An unpinnable declaration is always a finding, which is what makes `project
 // validate` fail rather than pass while the project mounts something the lock
 // cannot reproduce. Each names what closes it.

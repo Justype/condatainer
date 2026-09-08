@@ -24,6 +24,7 @@ var (
 	eFakeroot    bool
 	eEnvSettings []string
 	eBindPaths   []string
+	eProjectDir  string
 )
 
 // eCmd is a quick shortcut for executing commands with overlays
@@ -55,6 +56,7 @@ func init() {
 	eCmd.Flags().BoolVarP(&eFakeroot, "fakeroot", "f", false, "Run container with fakeroot privileges")
 	eCmd.Flags().StringSliceVar(&eEnvSettings, "env", nil, "Set environment variable 'KEY=VALUE' (repeatable)")
 	eCmd.Flags().StringSliceVar(&eBindPaths, "bind", nil, "Bind path 'HOST:CONTAINER' (repeatable)")
+	RegisterProjectFlags(eCmd, &eProjectDir)
 
 	// Allow flags to be interspersed with overlays
 	eCmd.Flags().SetInterspersed(true)
@@ -76,6 +78,10 @@ func init() {
 }
 
 func runE(cmd *cobra.Command, args []string) error {
+	if err := applyProjectRelocation(eProjectDir); err != nil {
+		return err
+	}
+
 	// STRICT parsing: everything before -- is overlay/flag, after is command
 	overlays, commands, apptainerFlags, err := parseEArgs(args)
 	if err != nil {

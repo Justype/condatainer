@@ -161,6 +161,38 @@ func TestResolveAnchorsAPathSelectionOnTheProjectRoot(t *testing.T) {
 	}
 }
 
+// A path pinned under a declaring script's own directory — because the
+// root-relative file did not exist when it was locked — is still verified at
+// the resolved location, not at the literal text as scanned.
+func TestResolveMountsAPathPinnedUnderAFallbackKey(t *testing.T) {
+	root := projectRoot(t)
+	relative, _ := vendor(t, root, "tool/1.0", "echo tool\n")
+	l := lock.New()
+	l.Pins[lock.PathPrefix+"steps1/xxx.sqf"] = lock.PinEntry{Artifact: relative}
+	requests := []lock.Request{{
+		Key: lock.PathPrefix + "xxx.sqf", Kind: lock.KindPath, Path: "xxx.sqf",
+		Scripts: []string{"steps1/run.sh"},
+	}}
+
+	want := filepath.Join(root, "steps1", "xxx.sqf")
+	var asked string
+	lookupAt := func(path, name string, keys meta.Keys, _ Match) (store.Candidate, bool) {
+		asked = path
+		return store.Candidate{Name: name, Path: path, Identity: keys.Identity, Equiv: keys.Equiv}, true
+	}
+
+	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent, lookupAt: lookupAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asked != want {
+		t.Fatalf("looked at %q, want the fallback location %q", asked, want)
+	}
+	if !got.Complete() || got.Mounts[0].Path != want {
+		t.Fatalf("mounts = %#v", got.Mounts)
+	}
+}
+
 // An unpinnable declaration is mounted as the literal path it names, and a
 // project-relative one is still anchored on the root.
 func TestResolveMountsUnpinnableDeclarationsLiterally(t *testing.T) {

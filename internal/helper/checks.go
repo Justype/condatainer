@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/project"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
@@ -114,16 +116,34 @@ func SingletonBlocked(meta HelperScriptMeta, running []*HelperRun) bool {
 }
 
 // CheckRequiredOverlays expands {tokens} in meta.RequiredOverlays using
-// params, ensures each overlay exists on disk (building any missing ones via
-// `condatainer create`), and returns the resolved absolute paths.
+// params and returns the resolved absolute paths.
+//
+// cwd standing in a project resolves every name through that project's lock
+// instead of by installed name, building nothing — a helper's required
+// overlays reach the lock only as manual pins, so an unresolved one names
+// `project restore`. Outside a project, when cwd is not one, or when
+// noProject is set, each name is ensured on disk the ordinary way, building
+// any missing one via `condatainer create`.
 //
 // Returns (nil, nil) when the template is empty. Public wrapper around the
 // previously unexported checkAndInstallNamedOverlays.
-func CheckRequiredOverlays(ctx context.Context, requiredTemplate string, params map[string]string) ([]string, error) {
+func CheckRequiredOverlays(ctx context.Context, cwd, requiredTemplate string, params map[string]string, noProject bool) ([]string, error) {
 	if requiredTemplate == "" {
 		return nil, nil
 	}
+	logger := logging.FromContext(ctx)
 	names := resolveOverlayTemplate(requiredTemplate, params)
+	if !noProject {
+		standing, err := project.StandingAt(cwd)
+		if err != nil {
+			return nil, err
+		}
+		if standing != nil {
+			logger.Info("Checking required overlays", "project", standing.Root)
+			return standing.ResolveNames(names)
+		}
+	}
+	logger.Info("Checking required overlays")
 	return checkAndInstallNamedOverlays(ctx, names)
 }
 

@@ -387,18 +387,76 @@ func Apply(root string, l *Lock, pinned *Pinned) error {
 	if had && previous.Manual {
 		entry.Manual = true
 	}
-	l.Pins[pinned.Request] = entry
+	return applyEntry(root, l, pinned.Request, entry)
+}
+
+// applyEntry writes one entry at key, verifying the whole closure before
+// publishing and rolling back to what was there on failure. Apply and the
+// reserved-key base pin (DeriveBase, SelectDistro, AutoDistro) both funnel
+// through this so neither can publish a lock that does not verify.
+func applyEntry(root string, l *Lock, key string, entry PinEntry) error {
+	previous, had := l.Pins[key]
+	l.Pins[key] = entry
 
 	if _, problems := Verify(root, l); len(problems) > 0 {
 		if had {
-			l.Pins[pinned.Request] = previous
+			l.Pins[key] = previous
 		} else {
-			delete(l.Pins, pinned.Request)
+			delete(l.Pins, key)
 		}
 		return fmt.Errorf("%w: pinning %s leaves the project invalid:\n  %s",
-			ErrInvalid, pinned.Request, joinProblems(problems))
+			ErrInvalid, key, joinProblems(problems))
 	}
 	return Publish(root, l)
+}
+
+// pinBase resolves distro's conventional "<distro>/base" recipe and writes it
+// to the reserved BaseKey, replacing whatever was there — there is one root
+// per project.
+func pinBase(root string, l *Lock, distro string, manual bool, opts PinOptions) (*Pinned, error) {
+	distro = strings.TrimSpace(distro)
+	if distro == "" {
+		return nil, fmt.Errorf("%w: no distro to pin as this project's root", ErrInvalid)
+	}
+	pinned, err := Pin(root, distro+"/base", "", opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := applyEntry(root, l, BaseKey, PinEntry{Artifact: pinned.Artifact, Manual: manual}); err != nil {
+		return nil, err
+	}
+	pinned.Request, pinned.Manual = BaseKey, manual
+	return pinned, nil
+}
+
+// DeriveBase writes the reserved base pin from distro — the caller's
+// configured default_distro — unless a manual override already occupies the
+// key. Called unconditionally by `project lock`, every run: there is no
+// closure to walk deciding whether a project needs one.
+//
+// distro is a parameter rather than a config read so this package stays free
+// of machine configuration, the way PinOptions.SearchDirs already is; the
+// caller resolves config.ResolvedDefaultDistro() (or a project-scoped answer)
+// itself.
+func DeriveBase(root string, l *Lock, distro string, opts PinOptions) (*Pinned, error) {
+	if existing, ok := l.Pins[BaseKey]; ok && existing.Manual {
+		return nil, nil
+	}
+	return pinBase(root, l, distro, false, opts)
+}
+
+// SelectDistro overrides the derivation, pinning distro's "<distro>/base" at
+// the reserved key as a manual choice that DeriveBase will not revert.
+// `project select-distro <distro>`.
+func SelectDistro(root string, l *Lock, distro string, opts PinOptions) (*Pinned, error) {
+	return pinBase(root, l, distro, true, opts)
+}
+
+// AutoDistro clears a manual override and re-derives from distro immediately,
+// rather than leaving the reserved key stale until the next `project lock`.
+// `project select-distro --auto`.
+func AutoDistro(root string, l *Lock, distro string, opts PinOptions) (*Pinned, error) {
+	return pinBase(root, l, distro, false, opts)
 }
 
 func joinProblems(problems []Problem) string {
@@ -409,15 +467,36 @@ func joinProblems(problems []Problem) string {
 	return strings.Join(out, "\n  ")
 }
 
+// MatchPin finds the pin, if any, that already answers request — trying each
+// of its PathCandidates in order against l.Pins. Never touches the
+// filesystem, so this stays correct before anything has been restored.
+// Reconcile and project.Resolve both use this, so neither can disagree about
+// which pin a declaration means.
+func MatchPin(l *Lock, request Request) (key string, entry PinEntry, ok bool) {
+	for _, candidate := range request.PathCandidates() {
+		if entry, ok := l.Pins[candidate]; ok {
+			return candidate, entry, true
+		}
+	}
+	return "", PinEntry{}, false
+}
+
 // Reconcile rescans a project and drops pins nothing requests any more,
 // reporting what remains needPin. It never invents a pin: choosing an
 // artifact is an explicit act.
 func Reconcile(root string, l *Lock, result *ScanResult) (needPin []Request) {
 	requested := make(map[string]bool, len(result.Requests))
 	for _, request := range result.Requests {
-		requested[request.Key] = true
+		for _, key := range request.PathCandidates() {
+			requested[key] = true
+		}
 	}
 	for _, key := range l.Requests() {
+		// The reserved base pin is never a #DEP: scan result — DeriveBase writes
+		// it on every `project lock`, unconditionally — so it is never swept here.
+		if key == BaseKey {
+			continue
+		}
 		// A manual pin is recorded by the project, not derived from its scripts,
 		// so a scan cannot speak to whether it belongs.
 		if l.Pins[key].Manual {
@@ -435,13 +514,13 @@ func Reconcile(root string, l *Lock, result *ScanResult) (needPin []Request) {
 		if !request.Kind.Pinnable() {
 			continue
 		}
-		pin, ok := l.Pins[request.Key]
+		key, pin, ok := MatchPin(l, request)
 		if !ok {
 			needPin = append(needPin, request)
 			continue
 		}
 		if _, valid := verified.Entries[pin.Artifact]; !valid {
-			delete(l.Pins, request.Key)
+			delete(l.Pins, key)
 			needPin = append(needPin, request)
 		}
 	}
@@ -466,7 +545,7 @@ func PinAll(root string, l *Lock, needPin []Request, opts PinOptions) (pinned []
 				others = rest
 			}
 		}
-		entry, err := Pin(root, request.Key, "", opts)
+		entry, err := pinFirstCandidate(root, request, opts)
 		if err != nil {
 			failed = append(failed, err)
 			continue
@@ -479,4 +558,26 @@ func PinAll(root string, l *Lock, needPin []Request, opts PinOptions) (pinned []
 		pinned = append(pinned, entry)
 	}
 	return pinned, failed
+}
+
+// pinFirstCandidate tries each of request's PathCandidates against the
+// filesystem in order and pins the first one that answers to a real
+// artifact — the one place this whole mechanism ever touches the filesystem
+// to disambiguate. A file has to already exist to be hashed and pinned at
+// all, so an existence check here is sound in a way it would not be anywhere
+// resolution runs before a checkout has restored anything.
+//
+// Every non-KindPath request has exactly one candidate, so this is Pin
+// unchanged for those. The error returned when every candidate fails is the
+// first (root-relative) candidate's, so an ordinary declaration with no
+// script-relative meaning at all reports exactly what it always has.
+func pinFirstCandidate(root string, request Request, opts PinOptions) (*Pinned, error) {
+	var err error
+	for _, key := range request.PathCandidates() {
+		var pinned *Pinned
+		if pinned, err = Pin(root, key, "", opts); err == nil {
+			return pinned, nil
+		}
+	}
+	return nil, err
 }

@@ -164,6 +164,13 @@ flat install.
 - **A Conda rebuild replays `explicit.txt`**, whose bytes *are* the recorded
   identity. `environment.yml` would be a fresh solve against whatever the
   channels serve today.
+- **The root is supplied, not resolved.** `LockedSpec.Base` sets `Spec.Base`
+  directly, so `resolveBase`'s early return (below) skips `ResolveBase`
+  entirely — a project restore hands over the artifact its lock's reserved
+  base pin names, rather than letting this package fall back to
+  `config.GetBaseImage()`. Empty behaves exactly like the catalog path: the
+  configured default is resolved and, if missing, built. A `.def` rebuild
+  never reads `Spec.Base` either way.
 
 Nothing here checks the result. The rebuild derives its own keys from what it
 actually mounted and built, and the caller compares them against the lock — so a
@@ -354,6 +361,13 @@ path for it: it is an ordinary `.def` recipe, `catalog.TypeOS` like any other
 name (`catalog.TypeBase` is retired). A project may still name its default
 root `.../base` for readability; that name carries no special meaning to the
 type system, only to `config.BaseRecipeName`.
+
+A locked rebuild (below) is the second caller of the same convention, and the
+one that actually matters inside a project: `internal/project/restore` sets
+`LockedSpec.Base` from the lock's reserved base pin, once that pin's own step
+has produced a local path, so a conda or script rebuild is never silently
+resolved against whichever `default_distro` happens to be configured on the
+machine running the restore. See `plan/base-provenance.md`.
 
 A `.def` build has no `Spec.Base` of its own: `BuildGraph.resolveBase` skips
 every node whose `BuildType` is `BuildTypeDef`, since a definition bootstraps

@@ -146,8 +146,11 @@ func Run(ctx context.Context, root string, l *lock.Lock, opts Options) (*Report,
 	queue := planJobs(ctx, root, verified, plan, opts)
 
 	// Where each artifact ended up, so a dependent mounts what was just made
-	// rather than resolving its name again.
+	// rather than resolving its name again. The base pin is looked up by the
+	// same map once its own step has run — reorderBaseFirst (plan.go) is what
+	// guarantees that has already happened by the time anything else needs it.
 	available := map[string]string{}
+	baseArtifact := l.Pins[lock.BaseKey].Artifact
 	// Which artifacts cannot be attempted, mapped to the artifact that failed
 	// beneath them. Blockage propagates, so a chain reports one cause.
 	stopped := map[string]string{}
@@ -190,7 +193,7 @@ func Run(ctx context.Context, root string, l *lock.Lock, opts Options) (*Report,
 			}
 			continue
 		}
-		result, failure := execute(ctx, root, verified, step, plan.Match, available, scratch, opts)
+		result, failure := execute(ctx, root, verified, step, plan.Match, available, baseArtifact, scratch, opts)
 		if failure != nil {
 			report.Failures = append(report.Failures, *failure)
 			stopped[step.Artifact] = step.Artifact
@@ -261,7 +264,7 @@ func (t *transientRoot) remove() {
 }
 
 func execute(ctx context.Context, root string, verified *lock.Verified, step Step, match Match,
-	available map[string]string, scratch *transientRoot, opts Options) (*Result, *Failure) {
+	available map[string]string, baseArtifact string, scratch *transientRoot, opts Options) (*Result, *Failure) {
 
 	entry, ok := verified.Entries[step.Artifact]
 	if !ok {
@@ -283,14 +286,14 @@ func execute(ctx context.Context, root string, verified *lock.Verified, step Ste
 	case ActionFetch:
 		return fetch(ctx, root, entry, step, match, result)
 	}
-	return rebuild(ctx, root, entry, step, match, available, scratch, opts, result)
+	return rebuild(ctx, root, entry, step, match, available, baseArtifact, scratch, opts, result)
 }
 
 // rebuild produces one artifact from its vendored sources and puts it where its
 // role says: a project destination, an images root, or the restore's transient
 // directory when nothing pinned it.
 func rebuild(ctx context.Context, root string, entry *lock.Entry, step Step, match Match,
-	available map[string]string, scratch *transientRoot, opts Options, result *Result) (*Result, *Failure) {
+	available map[string]string, baseArtifact string, scratch *transientRoot, opts Options, result *Result) (*Result, *Failure) {
 
 	fail := func(format string, args ...any) *Failure {
 		return &Failure{Artifact: step.Artifact, Name: step.Name, Reason: fmt.Sprintf(format, args...)}
@@ -361,6 +364,11 @@ func rebuild(ctx context.Context, root string, entry *lock.Entry, step Step, mat
 			Output:      output,
 			Answers:     opts.Answers[step.Artifact],
 			CondaSource: condaSource,
+			// Empty for an os/def rebuild (never read) and for the base pin's
+			// own step (nothing is available for it yet); a conda or script
+			// build takes the project's locked root over the configured
+			// default_distro.
+			Base: available[baseArtifact],
 		})
 		if err != nil {
 			return nil, fail("%v", err)

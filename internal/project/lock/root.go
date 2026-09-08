@@ -28,6 +28,32 @@ func RootAt(dir string) (string, error) {
 	return "", fmt.Errorf("%w at %s", ErrNoProject, absolute)
 }
 
+// RootAbove walks upward from dir to the nearest ancestor (or dir itself)
+// that directly contains cnt-lock/, and ErrNoProject if none does before the
+// filesystem root.
+//
+// This is the ambient family's entry point (Standing.StandingAt), so standing
+// anywhere inside a project's tree is recognized, not only at its root.
+// RootFor's cwd-fallback keeps calling RootAt instead of this: a write
+// command silently reaching an ancestor project from an empty-looking
+// subdirectory is a hazard an ambient read never is.
+func RootAbove(dir string) (string, error) {
+	absolute, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	for {
+		if info, err := os.Stat(filepath.Join(absolute, DirName)); err == nil && info.IsDir() {
+			return absolute, nil
+		}
+		parent := filepath.Dir(absolute)
+		if parent == absolute {
+			return "", fmt.Errorf("%w at or above %s", ErrNoProject, dir)
+		}
+		absolute = parent
+	}
+}
+
 // RootFor resolves the project root a command should act on: the explicit
 // --project directory when given, otherwise the current one. An explicit
 // directory is taken as named, never re-derived.

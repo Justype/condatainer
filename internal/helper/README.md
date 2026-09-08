@@ -156,7 +156,9 @@ Multiple lines accumulate independently (one path checked per line).
 
 ### `#REQUIRED_OVERLAYS:` — named SquashFS overlays
 
-Space-separated overlay names. `{KEY}` tokens are substituted from resolved params. Go checks each overlay exists on disk and installs any that are missing before submitting the job. **Declaration order is preserved** in the Apptainer overlay stack — the last name is the topmost layer (wins on file conflicts such as `/var/lib/dpkg/status`).
+Space-separated overlay names. `{KEY}` tokens are substituted from resolved params. **Declaration order is preserved** in the Apptainer overlay stack — the last name is the topmost layer (wins on file conflicts such as `/var/lib/dpkg/status`).
+
+Standing in a project (the launch's working directory holds `cnt-lock/`), each name resolves through that project's lock instead of by installed name — the same substitution `exec -o` makes — and a name the project has not pinned refuses rather than falling back to whatever currently answers to it. Outside a project, each name is checked on disk and installed if missing before submitting the job, exactly as before.
 
 ```bash
 #REQUIRED_OVERLAYS: r{POSIT_R} rstudio-server build-essential

@@ -18,6 +18,7 @@ type execCommand struct {
 
 var execFlags CommonFlags
 var execGpuRequested bool
+var execProjectDir string
 
 var execCmd = &execCommand{
 	Command: cobra.Command{
@@ -51,6 +52,7 @@ func init() {
 	// Register common flags
 	RegisterCommonFlags(&execCmd.Command, &execFlags)
 	execCmd.Flags().BoolVar(&execGpuRequested, "gpu", false, "Force GPU flags (--nv/--rocm) even if autoload_gpu is disabled")
+	RegisterProjectFlags(&execCmd.Command, &execProjectDir)
 
 	// For 'exec': use default file completion for positional args
 	execCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -61,6 +63,9 @@ func init() {
 func runExec(cmd *cobra.Command, args []string) error {
 	if execHelpRequested(args) {
 		return cmd.Help()
+	}
+	if err := applyProjectRelocation(execProjectDir); err != nil {
+		return err
 	}
 
 	ResolveFlagAlias(cmd, "writable", "writable-img")

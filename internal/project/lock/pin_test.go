@@ -331,3 +331,119 @@ func TestPinRefusesUnpinnableRequests(t *testing.T) {
 		}
 	}
 }
+
+// MatchPin tries the literal key first, so a pin already recorded there keeps
+// meaning exactly that.
+func TestMatchPinPrefersTheLiteralKeyWhenBothArePinned(t *testing.T) {
+	l := New()
+	l.Pins[PathPrefix+"xxx.sqf"] = PinEntry{Artifact: "provenance/root--1@abc"}
+	l.Pins[PathPrefix+"steps1/xxx.sqf"] = PinEntry{Artifact: "provenance/nested--1@def"}
+	request := Request{Key: PathPrefix + "xxx.sqf", Kind: KindPath, Path: "xxx.sqf", Scripts: []string{"steps1/run.sh"}}
+
+	key, entry, ok := MatchPin(l, request)
+	if !ok || key != PathPrefix+"xxx.sqf" || entry.Artifact != "provenance/root--1@abc" {
+		t.Errorf("MatchPin = (%q, %#v, %v), want the literal key preferred", key, entry, ok)
+	}
+}
+
+// A pin recorded only under a declaring script's own directory still answers
+// the literal, root-relative declaration — the fallback MatchPin and
+// pinFirstCandidate share.
+func TestMatchPinFallsBackToADeclaringScriptsDirectory(t *testing.T) {
+	l := New()
+	l.Pins[PathPrefix+"steps1/xxx.sqf"] = PinEntry{Artifact: "provenance/tool--1@abc"}
+	request := Request{Key: PathPrefix + "xxx.sqf", Kind: KindPath, Path: "xxx.sqf", Scripts: []string{"steps1/run.sh"}}
+
+	key, entry, ok := MatchPin(l, request)
+	if !ok || key != PathPrefix+"steps1/xxx.sqf" || entry.Artifact != "provenance/tool--1@abc" {
+		t.Errorf("MatchPin = (%q, %#v, %v), want the fallback candidate", key, entry, ok)
+	}
+}
+
+// Nothing pinned under any candidate is an ordinary miss, not a crash.
+func TestMatchPinFalseWhenNothingAnswers(t *testing.T) {
+	l := New()
+	request := Request{Key: PathPrefix + "xxx.sqf", Kind: KindPath, Path: "xxx.sqf", Scripts: []string{"steps1/run.sh"}}
+
+	if _, _, ok := MatchPin(l, request); ok {
+		t.Fatal("MatchPin found a pin that was never set")
+	}
+}
+
+// A KindName request has no ambiguity to offer: MatchPin degenerates to an
+// ordinary single-key lookup.
+func TestMatchPinHasOneCandidateForAName(t *testing.T) {
+	l := New()
+	l.Pins["star/2.7.11b"] = PinEntry{Artifact: "provenance/star--2.7.11b@abc"}
+	request := Request{Key: "star/2.7.11b", Kind: KindName}
+
+	key, _, ok := MatchPin(l, request)
+	if !ok || key != "star/2.7.11b" {
+		t.Errorf("MatchPin = (%q, ok=%v), want the name's own key", key, ok)
+	}
+}
+
+// pinFirstCandidate resolves a script-relative file when the root-relative
+// one does not exist, and records the resolved key, not the one as scanned.
+func TestPinFirstCandidateFallsBackToADeclaringScriptsDirectory(t *testing.T) {
+	root := t.TempDir()
+	built, manifest := packArtifact(t, "xxx.sqf", "testdata/tool", "recipe")
+	dest := filepath.Join(root, "steps1", "xxx.sqf")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o775); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(built)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, data, 0o664); err != nil {
+		t.Fatal(err)
+	}
+
+	request := Request{Key: PathPrefix + "xxx.sqf", Kind: KindPath, Path: "xxx.sqf", Scripts: []string{"steps1/run.sh"}}
+	pinned, err := pinFirstCandidate(root, request, PinOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pinned.Request != PathPrefix+"steps1/xxx.sqf" {
+		t.Errorf("Request = %q, want the resolved script-relative key", pinned.Request)
+	}
+	if pinned.Name != manifest.Name {
+		t.Errorf("Name = %q, want %q", pinned.Name, manifest.Name)
+	}
+}
+
+// The root-relative candidate wins when a real file answers there too.
+func TestPinFirstCandidatePrefersTheRootRelativeFile(t *testing.T) {
+	root := t.TempDir()
+	rootBuilt, rootManifest := packArtifact(t, "xxx.sqf", "testdata/root-tool", "root-recipe")
+	nestedBuilt, _ := packArtifact(t, "xxx.sqf", "testdata/nested-tool", "nested-recipe")
+
+	for _, pair := range []struct{ built, dest string }{
+		{rootBuilt, filepath.Join(root, "xxx.sqf")},
+		{nestedBuilt, filepath.Join(root, "steps1", "xxx.sqf")},
+	} {
+		if err := os.MkdirAll(filepath.Dir(pair.dest), 0o775); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(pair.built)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(pair.dest, data, 0o664); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	request := Request{Key: PathPrefix + "xxx.sqf", Kind: KindPath, Path: "xxx.sqf", Scripts: []string{"steps1/run.sh"}}
+	pinned, err := pinFirstCandidate(root, request, PinOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pinned.Request != PathPrefix+"xxx.sqf" {
+		t.Errorf("Request = %q, want the literal root-relative key preferred", pinned.Request)
+	}
+	if pinned.Name != rootManifest.Name {
+		t.Errorf("Name = %q, want the root file's %q", pinned.Name, rootManifest.Name)
+	}
+}

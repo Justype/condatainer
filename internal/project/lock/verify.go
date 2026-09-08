@@ -277,6 +277,11 @@ func satisfies(request, name string) string {
 	if strings.HasPrefix(request, PathPrefix) {
 		return ""
 	}
+	// The reserved base key addresses the project's root by slot, not by name,
+	// so it never has to satisfy the name a #DEP: would render.
+	if request == BaseKey {
+		return ""
+	}
 	dep, err := parseRequest(request)
 	if err != nil {
 		return fmt.Sprintf("pin key is not a usable dependency: %v", err)

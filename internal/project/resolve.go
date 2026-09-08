@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/compare"
@@ -303,7 +304,7 @@ func Resolve(root string, l *lock.Lock, requests []lock.Request, opts ResolveOpt
 			})
 			continue
 		}
-		pin, ok := l.Pins[request.Key]
+		matchedKey, pin, ok := lock.MatchPin(l, request)
 		if !ok {
 			resolution.Unresolved = append(resolution.Unresolved, Unresolved{Request: request.Key,
 				Reason: "declared but not pinned; run `condatainer project pin` to pin it"})
@@ -320,7 +321,11 @@ func Resolve(root string, l *lock.Lock, requests []lock.Request, opts ResolveOpt
 
 		var candidate store.Candidate
 		if request.Kind == lock.KindPath {
-			at := filepath.Join(root, filepath.FromSlash(request.Path))
+			// matchedKey, not request.Path: a fallback candidate answers under
+			// a different suffix than the one as scanned, and that is where
+			// restore actually placed the file.
+			suffix := strings.TrimPrefix(matchedKey, lock.PathPrefix)
+			at := filepath.Join(root, filepath.FromSlash(suffix))
 			candidate, ok = resolveAt(at, entry.Manifest.Name, keys, match)
 		} else {
 			candidate, ok = resolve(entry.Manifest.Name, keys, match, opts.SearchDirs)

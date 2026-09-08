@@ -327,19 +327,49 @@ func Compute(root string, l *lock.Lock, opts Options) *Plan {
 		pending[artifact] = append(pending[artifact], reasons...)
 	}
 
+	baseArtifact := l.Pins[lock.BaseKey].Artifact
 	kept, reported := prune(steps, pending)
 	yieldSharedNames(kept, opts)
 	if opts.Only != "" {
 		var problem string
-		if kept, problem = restrict(kept, opts.Only); problem != "" {
+		if kept, problem = restrict(kept, opts.Only, baseArtifact); problem != "" {
 			plan.Problems = append(plan.Problems, problem)
 			return plan
 		}
 		reported = problemsFor(kept, pending)
 	}
-	plan.Steps = kept
+	plan.Steps = reorderBaseFirst(kept, baseArtifact)
 	plan.Problems = append(plan.Problems, reported...)
 	return plan
+}
+
+// reorderBaseFirst moves the project's root to the front of an otherwise
+// dependency-ordered plan.
+//
+// Nothing in the manifest graph points at it — no #DEP: may name an os
+// artifact — so topological order leaves it wherever it falls alphabetically.
+// Every conda or script build that resolves its own root from the lock
+// (build.LockedSpec.Base, set from Run's `available` map) needs it to have
+// already run, and an os build never has dependencies of its own to violate
+// by moving first.
+func reorderBaseFirst(steps []Step, baseArtifact string) []Step {
+	if baseArtifact == "" {
+		return steps
+	}
+	for i, step := range steps {
+		if step.Artifact != baseArtifact {
+			continue
+		}
+		if i == 0 {
+			return steps
+		}
+		out := make([]Step, 0, len(steps))
+		out = append(out, step)
+		out = append(out, steps[:i]...)
+		out = append(out, steps[i+1:]...)
+		return out
+	}
+	return steps
 }
 
 // restrict drops every step outside one artifact's closure, keeping the order.
@@ -348,8 +378,18 @@ func Compute(root string, l *lock.Lock, opts Options) *Plan {
 // pin also names by itself stays a pin and is still installed where
 // the destination rule puts it, because that is what it is — narrowing what a
 // restore covers says nothing about what its members are.
-func restrict(steps []Step, only string) ([]Step, string) {
+//
+// The base artifact is always kept, whether or not only's closure reaches it:
+// nothing in the manifest graph ever depends on it (#DEP: cannot name an os
+// artifact), yet a submitted job re-enters Compute with --only set and still
+// has to resolve its own root the same way an unrestricted restore does — see
+// reorderBaseFirst and internal/project/restore/restore.go's use of Run's
+// `available` map.
+func restrict(steps []Step, only, baseArtifact string) ([]Step, string) {
 	keep := map[string]bool{only: true}
+	if baseArtifact != "" {
+		keep[baseArtifact] = true
+	}
 	found := false
 	for i := len(steps) - 1; i >= 0; i-- {
 		step := steps[i]

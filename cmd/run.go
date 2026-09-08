@@ -46,6 +46,7 @@ var (
 	runArray       string
 	runArrayLimit  int
 	runName        string
+	runProjectDir  string
 )
 
 // errRunAborted signals a handled stop (message already printed); caller returns nil.
@@ -108,6 +109,7 @@ func init() {
 	runCmd.Flags().StringVarP(&runName, "name", "n", "", "Override job name")
 	runCmd.Flags().StringVar(&runArray, "array", "", "Input file for array job (one entry per line)")
 	runCmd.Flags().IntVar(&runArrayLimit, "array-limit", 0, "Max concurrent array subjobs (0 = unlimited)")
+	RegisterProjectFlags(runCmd, &runProjectDir)
 	runCmd.Flags().SetInterspersed(false) // Stop flag parsing after script name; remaining args are passed to the script
 
 	// Custom usage: two labeled sections — "Container Flags:" and "Job Flags:"
@@ -139,6 +141,9 @@ func init() {
 }
 
 func runScript(cmd *cobra.Command, args []string) error {
+	if err := applyProjectRelocation(runProjectDir); err != nil {
+		return err
+	}
 	ResolveFlagAlias(cmd, "writable", "writable-img")
 
 	for _, flagInfo := range []struct{ name, val string }{
@@ -546,8 +551,8 @@ export -f module ml
 // printProjectDependencies lists what a project run will mount.
 //
 // Nothing is checked here: every path came from the lock, and resolution has
-// already failed if any declaration could not be satisfied. The base is absent
-// from a lock by design, so it is still reported the ordinary way.
+// already failed if any declaration could not be satisfied. baseImg is the
+// caller's own resolution (see printDryRunSummary), not derived again here.
 func printProjectDependencies(baseImg string, projectRun *projectContext) {
 	check, cross := utils.StyleSuccess("✓"), utils.StyleError("✗")
 	fmt.Printf("%s %s\n", utils.StyleTitle("Project:"), utils.StylePath(projectRun.Root))
@@ -566,13 +571,21 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 	fmt.Printf("%s %s\n", utils.StyleTitle("Dry run:"), specs.ScriptPath)
 
 	// Dependencies. A dry run reports the base rather than building it, so an
-	// uninstalled one shows as the error the real run would hit.
+	// uninstalled one shows as the error the real run would hit. Standing in a
+	// project this is its pinned root, not the configured default_distro —
+	// previewRootBaseImage is ensureRootBaseImage's read-only counterpart.
 	baseImg := runBaseImage
 	if baseImg == "" {
-		resolved, err := config.GetBaseImage()
-		if err != nil {
+		var overlays []string
+		if projectRun != nil {
+			overlays = projectRun.Overlays
+		}
+		switch resolved, err := previewRootBaseImage(overlays); {
+		case err != nil:
 			baseImg = "(" + err.Error() + ")"
-		} else {
+		case resolved == "":
+			baseImg = "(supplied by one of the mounted overlays)"
+		default:
 			baseImg = resolved
 		}
 	}

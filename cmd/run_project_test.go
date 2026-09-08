@@ -45,17 +45,23 @@ func TestProjectRunContextIgnoresAScriptNamedFromOutside(t *testing.T) {
 }
 
 // Only the directory holding cnt-lock/ is the root; a subdirectory is not.
-func TestProjectRunContextIgnoresASubdirectory(t *testing.T) {
+func TestProjectRunContextFindsAProjectFromASubdirectory(t *testing.T) {
 	root := newProject(t)
-	writeScript(t, root, "scripts/run.sh", "#DEP: star/2.7.11b\nrun\n")
+	writeScript(t, root, "scripts/run.sh", "#DEP: env.img\nrun\n")
+	if err := lock.Publish(root, lock.New()); err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(filepath.Join(root, "scripts"))
 
 	got, err := projectRunContext("run.sh", specs())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != nil {
-		t.Fatalf("context = %#v, want none from a subdirectory", got)
+	if got == nil {
+		t.Fatal("a subdirectory of a project was not recognized as standing in it")
+	}
+	if got.Root != root {
+		t.Fatalf("context.Root = %q, want %q", got.Root, root)
 	}
 }
 

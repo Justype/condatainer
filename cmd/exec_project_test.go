@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/project/lock"
 )
 
@@ -118,6 +119,109 @@ func TestProjectOverlaysIgnoresAnEmptyList(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("overlays = %v, want none", got)
+	}
+}
+
+// Outside a project, there is no root to override with.
+func TestProjectBaseImagePassesThroughOutsideAProject(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	path, err := projectBaseImage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "" {
+		t.Fatalf("path = %q, want none outside a project", path)
+	}
+}
+
+// A lock with no base pin — written before this feature, or hand-edited —
+// has nothing to override with either; ensureRootBaseImage's ordinary
+// fallback takes over.
+func TestProjectBaseImageEmptyWithNoBasePin(t *testing.T) {
+	root := newProject(t)
+	if err := lock.Publish(root, lock.New()); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := projectBaseImage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "" {
+		t.Fatalf("path = %q, want none with no base pin", path)
+	}
+}
+
+// A pinned root that is not installed here refuses rather than falling back
+// to this machine's configured default — the same rule projectOverlays
+// already applies to an ordinary declaration.
+func TestProjectBaseImageRefusesAnUnresolvedBase(t *testing.T) {
+	root := newProject(t)
+	base := vendorArtifact(t, root, "ubuntu24/base", "echo base\n")
+	l := lock.New()
+	l.Pins[lock.BaseKey] = lock.PinEntry{Artifact: base}
+	if err := lock.Publish(root, l); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := projectBaseImage()
+	if err == nil {
+		t.Fatal("an uninstalled root was accepted")
+	}
+	if !strings.Contains(err.Error(), "project restore") {
+		t.Errorf("error does not name the remedy: %v", err)
+	}
+}
+
+// Outside a project, there is no base pin to read a distro out of.
+func TestProjectSelectedDistroEmptyOutsideAProject(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	if got := projectSelectedDistro(); got != "" {
+		t.Fatalf("distro = %q, want none outside a project", got)
+	}
+}
+
+// A lock with no base pin has nothing to read either.
+func TestProjectSelectedDistroEmptyWithNoBasePin(t *testing.T) {
+	root := newProject(t)
+	if err := lock.Publish(root, lock.New()); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := projectSelectedDistro(); got != "" {
+		t.Fatalf("distro = %q, want none with no base pin", got)
+	}
+}
+
+// select-distro and DeriveBase only ever compose "<distro>/base", so the
+// distro is the base pin's manifest name up to the slash — read from the
+// vendored manifest, not from a local install.
+func TestProjectSelectedDistroReadsTheBasePinsName(t *testing.T) {
+	root := newProject(t)
+	base := vendorArtifact(t, root, "rocky9/base", "echo base\n")
+	l := lock.New()
+	l.Pins[lock.BaseKey] = lock.PinEntry{Artifact: base}
+	if err := lock.Publish(root, l); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := projectSelectedDistro(); got != "rocky9" {
+		t.Fatalf("distro = %q, want rocky9", got)
+	}
+}
+
+// Outside a project, or with no base pin, projectDefaultDistro falls back to
+// the configured default_distro rather than the project-scoped answer.
+func TestProjectDefaultDistroFallsBackToConfig(t *testing.T) {
+	prev := config.Global.DefaultDistro
+	config.Global.DefaultDistro = "ubuntu24"
+	t.Cleanup(func() { config.Global.DefaultDistro = prev })
+
+	t.Chdir(t.TempDir())
+	if got := projectDefaultDistro(); got != "ubuntu24" {
+		t.Fatalf("distro = %q, want the configured default", got)
 	}
 }
 

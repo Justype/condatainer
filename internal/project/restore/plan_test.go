@@ -880,6 +880,53 @@ func history(manifest meta.Manifest) meta.Dependency {
 	return dep
 }
 
+// The base pin has no dependency edge — no #DEP: may name an os artifact — so
+// topological order alone leaves it wherever it falls; a conda or script
+// build's own root resolution (build.LockedSpec.Base) needs it to have
+// already run.
+func TestComputePutsTheBaseStepFirst(t *testing.T) {
+	root := projectRoot(t)
+	app := artifact(t, "aaa/1.0", "echo aaa\n")
+	appPath := vendor(t, root, app, "echo aaa\n")
+	base := artifact(t, "ubuntu24/base", "echo base\n")
+	basePath := vendor(t, root, base, "echo base\n")
+
+	l := lock.New()
+	l.Pins["aaa/1.0"] = lock.PinEntry{Artifact: appPath}
+	l.Pins[lock.BaseKey] = lock.PinEntry{Artifact: basePath}
+
+	plan := Compute(root, l, Options{lookup: nothingInstalled})
+	if !plan.Complete() {
+		t.Fatalf("problems: %v", plan.Problems)
+	}
+	if len(plan.Steps) != 2 || plan.Steps[0].Artifact != basePath {
+		t.Fatalf("steps = %#v, want the base step first", plan.Steps)
+	}
+}
+
+// A submitted job re-enters Compute with --only set for one artifact. The
+// base is never in anyone's dependency closure, yet the job still has to
+// resolve its own root the way an unrestricted restore does.
+func TestComputeKeepsTheBaseUnderOnly(t *testing.T) {
+	root := projectRoot(t)
+	app := artifact(t, "aaa/1.0", "echo aaa\n")
+	appPath := vendor(t, root, app, "echo aaa\n")
+	base := artifact(t, "ubuntu24/base", "echo base\n")
+	basePath := vendor(t, root, base, "echo base\n")
+
+	l := lock.New()
+	l.Pins["aaa/1.0"] = lock.PinEntry{Artifact: appPath}
+	l.Pins[lock.BaseKey] = lock.PinEntry{Artifact: basePath}
+
+	plan := Compute(root, l, Options{lookup: nothingInstalled, Only: appPath})
+	if !plan.Complete() {
+		t.Fatalf("problems: %v", plan.Problems)
+	}
+	if len(plan.Steps) != 2 || plan.Steps[0].Artifact != basePath || plan.Steps[1].Artifact != appPath {
+		t.Fatalf("steps = %#v, want the base kept and ordered first even under --only", plan.Steps)
+	}
+}
+
 // --only is what a submitted job carries: the artifact it was sent for, plus
 // what that artifact needs to be built.
 func TestComputeRestrictsToOneArtifactAndItsClosure(t *testing.T) {
