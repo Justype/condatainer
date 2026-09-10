@@ -329,11 +329,13 @@ func (s *srv) handleHelperResources(w http.ResponseWriter, r *http.Request, name
 	}
 	spec := helper.ResolveResources(r.Context(), scriptPath, overrides)
 	type resp struct {
-		CPUs     int    `json:"cpus"`
-		MemMB    int64  `json:"mem_mb"`
-		Mem      string `json:"mem"`
-		Walltime string `json:"walltime"`
-		GPU      string `json:"gpu,omitempty"`
+		CPUs      int    `json:"cpus"`
+		MemMB     int64  `json:"mem_mb"`
+		Mem       string `json:"mem"`
+		Walltime  string `json:"walltime"`
+		GPU       string `json:"gpu,omitempty"`
+		Account   string `json:"account,omitempty"`
+		Partition string `json:"partition,omitempty"`
 	}
 	out := resp{}
 	if spec != nil {
@@ -347,6 +349,10 @@ func (s *srv) handleHelperResources(w http.ResponseWriter, r *http.Request, name
 		}
 		out.GPU = helper.FormatGpuSpec(spec)
 	}
+	// No script-header tier for account/partition (unlike cpus/mem/time/gpu) —
+	// the placeholder is always the scheduler config default.
+	out.Account = config.Global.Scheduler.Account
+	out.Partition = config.Global.Scheduler.Partition
 	writeJSON(w, out)
 }
 
@@ -414,11 +420,14 @@ func (s *srv) handleHelperStart(w http.ResponseWriter, r *http.Request, name str
 		Mem       string            `json:"mem"`
 		Time      string            `json:"time"`
 		GPU       string            `json:"gpu"`
+		Account   string            `json:"account"`
+		Partition string            `json:"partition"`
 		CWD       string            `json:"cwd"`
 		Overlay   string            `json:"overlay"`
 		Overlays  []string          `json:"overlays"`
 		Params    map[string]string `json:"params"`
 		NoProject bool              `json:"no_project"`
+		NoSubmit  bool              `json:"no_submit"`
 	}
 	var req startReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -475,11 +484,14 @@ func (s *srv) handleHelperStart(w http.ResponseWriter, r *http.Request, name str
 		ScriptPath: scriptPath,
 		ScriptName: name,
 		Resources:  startOverrides,
+		Account:    req.Account,
+		Partition:  req.Partition,
 		CWD:        req.CWD,
 		Overlays:   req.Overlays,
 		Params:     params,
 		ForceNew:   true,
 		NoProject:  req.NoProject,
+		NoSubmit:   req.NoSubmit,
 	}
 	if req.Overlay != "" {
 		opts.EnvImg = req.Overlay

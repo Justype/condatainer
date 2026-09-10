@@ -113,6 +113,14 @@
                 <div class="combo-list" id="combo-list-cfg-gpu"></div>
               </div>
             </div>
+            <div class="field">
+              <label class="field-label">Account (optional)</label>
+              <input class="field-input" id="cfg-account">
+            </div>
+            <div class="field">
+              <label class="field-label">Partition (optional)</label>
+              <input class="field-input" id="cfg-partition">
+            </div>
           </div>
           <div class="field">
             <label class="field-label">Working Directory</label>
@@ -191,7 +199,12 @@
           <div id="helper-params-wrap"></div>
           <div class="form-actions">
             <div id="helper-config-wrap"></div>
-            <button class="btn btn-success" id="start-btn" onclick="startHelper()"><svg class="icon"><use href="#i-play_arrow"></use></svg>Start</button>
+            <div style="display:flex;align-items:center;gap:12px;">
+              <label class="toggle-lbl" id="no-submit-row" hidden>
+                <input type="checkbox" id="cfg-no-submit"> Run headless
+              </label>
+              <button class="btn btn-success" id="start-btn" onclick="startHelper()"><svg class="icon"><use href="#i-play_arrow"></use></svg>Start</button>
+            </div>
           </div>
           <div class="term-box" id="start-term"></div>
         </div>

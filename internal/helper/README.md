@@ -2,6 +2,10 @@
 
 Orchestrates the full lifecycle of a helper service job: resolve params, check/create overlays, submit to scheduler (or run headless), monitor NFS state files, and clean up.
 
+Scheduler-vs-headless is normally automatic (`config.Global.SubmitJob`, scheduler binary detection, `sched.IsInsideJob()`), but `RunOptions.NoSubmit` (CLI: `condatainer helper --no-submit`; dashboard: the "Run headless" checkbox, shown only when a scheduler is actually available) forces headless for one run without touching global config — the server needs this since it is one long-lived process serving concurrent requests. A failed `Submit` never falls back to headless automatically; the error names the override instead, since silently running a compute-node job on the login node without consent is bad etiquette on a shared system.
+
+Every `HelperRun` records `Runner` — `"local"` for headless, or the scheduler type (`"slurm"`, `"pbs"`, `"lsf"`, `"htcondor"`) for a submitted job — set once at creation, the same convention `internal/image/producer.Info.Runner` uses for build locks. It exists because `JobID` emptiness and the initial `"pending"`/`"starting"` status both leak the same fact only until a run reaches `"running"`, after which nothing else says which path it took.
+
 ## Files
 
 | File | Purpose |

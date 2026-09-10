@@ -114,6 +114,7 @@ let currentPath = '';
 let srvHome    = '';
 let srvScratch = '';
 let srvNotification = '';
+let srvWillSubmit = false; // true when a scheduler is active and submit_job isn't disabled
 
 // file picker modal
 let fpTargetId = '', fpMode = 'dir', fpPath = '', fpSuffix = '';
@@ -290,6 +291,9 @@ function _setStatus(alive, d) {
     _setText('ssh-hint', 'LocalForward ' + d.port + ' localhost:' + d.port);
     if (d.home)    srvHome    = d.home;
     if (d.scratch) srvScratch = d.scratch;
+    srvWillSubmit = !!d.will_submit;
+    const noSubmitRow = gid('no-submit-row');
+    if (noSubmitRow) noSubmitRow.hidden = !srvWillSubmit;
     const cwdEl = gid('cfg-cwd');
     if (cwdEl) {
       const def = srvScratch || srvHome || '';

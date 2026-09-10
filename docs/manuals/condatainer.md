@@ -1676,6 +1676,7 @@ Options:
 * `-u`, `--update`: Update helper scripts from remote metadata.
 * `--path`: Show all helper script search paths and the writable directory. If a `SCRIPT_NAME` is given, print the absolute path of that specific helper script and exit.
 * `-l`, `--list`: List available helper scripts with their descriptions (from `#DESCRIPTION` tags).
+* `--no-submit`: Disable job submission for this run — run headless on this node instead.
 * `SCRIPT_NAME`: Name of the helper script to run (optional).
 * `SCRIPT_ARGS...`: Remaining arguments are passed directly to the helper script when running it.
 
@@ -1698,9 +1699,12 @@ condatainer helper --update
 condatainer helper code-server -c 4
 ```
 
-To run a helper without submitting a job, set `submit_job: false` in the config
-(`condatainer config set submit_job false`). There is no per-run flag — helper jobs
-follow the global setting.
+To run a single helper without submitting a job, pass `--no-submit`
+(`condatainer helper --no-submit code-server`) — useful for a quick inspection or debug session,
+or to keep working when the scheduler itself is unavailable. To disable submission for every run,
+set `submit_job: false` in the config (`condatainer config set submit_job false`) instead. The
+dashboard offers the same override as a "Run headless" checkbox next to Start, shown only when a
+scheduler is actually available to opt out of.
 
 ## Config
 

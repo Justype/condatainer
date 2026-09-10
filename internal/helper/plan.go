@@ -198,7 +198,7 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 		return nil, err
 	}
 
-	sched, _ := detectScheduler()
+	sched, _ := detectScheduler(opts.NoSubmit)
 	spec := resolveSpec(opts.ScriptPath, opts.Resources)
 	if spec.Time == 0 {
 		return nil, fmt.Errorf("walltime is required for helpers — set #TIME: in the script or pass walltime explicitly")
@@ -259,6 +259,7 @@ func ExecutePlan(ctx context.Context, plan *RunPlan) (string, error) {
 
 	wrapperPath, err := generateWrapper(
 		helperID, plan.Options.ScriptName, cwd, filepath.Dir(plan.Options.ScriptPath), stateDir,
+		plan.Options.Account, plan.Options.Partition,
 		plan.Spec.Time, plan.Params, plan.Spec, plan.Scheduler, plan.ContainerCmd,
 	)
 	if err != nil {
@@ -271,10 +272,10 @@ func ExecutePlan(ctx context.Context, plan *RunPlan) (string, error) {
 		jobID, err := plan.Scheduler.Submit(ctx, wrapperPath, nil)
 		if err != nil {
 			os.RemoveAll(stateDir)
-			return "", fmt.Errorf("job submission failed: %w", err)
+			return "", fmt.Errorf("job submission failed: %w — retry without scheduler submission (CLI: --no-submit; dashboard: run headless) to run it directly on this node", err)
 		}
 		_ = AppendHistory(newHelperRun(helperID, plan.Options.ScriptName, jobID, cwd, plan.Spec.Time,
-			plan.Options, plan.UserOverlays, plan.Spec, plan.Params, "pending"))
+			plan.Options, plan.UserOverlays, plan.Spec, plan.Params, "pending", string(plan.Scheduler.GetType())))
 		logger.Info("Helper submitted", "id", helperID)
 		return helperID, nil
 	}
@@ -301,7 +302,7 @@ func ExecutePlan(ctx context.Context, plan *RunPlan) (string, error) {
 		logger.Debug("helper: failed to write pid file", "id", helperID, "err", err)
 	}
 	_ = AppendHistory(newHelperRun(helperID, plan.Options.ScriptName, "", cwd, plan.Spec.Time,
-		plan.Options, plan.UserOverlays, plan.Spec, plan.Params, "starting"))
+		plan.Options, plan.UserOverlays, plan.Spec, plan.Params, "starting", "local"))
 	// Reap the child while the caller lives; init reaps it afterwards.
 	go func() { _ = cmd.Wait() }()
 	return helperID, nil

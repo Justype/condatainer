@@ -74,6 +74,7 @@ func init() {
 	helperCmd.Flags().BoolVarP(&helperUpdate, "update", "u", false, "Update helper scripts from remote")
 	helperCmd.Flags().BoolVar(&helperStatus, "status", false, "Show status of running helpers")
 	helperCmd.Flags().MarkHidden("status") //nolint:errcheck
+	helperCmd.Flags().BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (run headless on this node)")
 
 	// Stop flag parsing after the first positional argument so helper-specific flags
 	// (e.g. -c/--cpus) are passed through to parsePostScriptHelperFlags rather than cobra.
@@ -707,7 +708,11 @@ func showHelperStatus(name string) error {
 			cwd = "(no cwd)"
 		}
 		tag, verb := ui.RunStatusTag(r)
-		fmt.Printf("  %-14s  %-14s  %-40s  %s %s %s ago\n", r.Name, res, cwd, tag, verb, age)
+		runnerTag := ""
+		if r.Runner != "" {
+			runnerTag = " [" + r.Runner + "]"
+		}
+		fmt.Printf("  %-14s  %-14s  %-40s  %s %s %s ago%s\n", r.Name, res, cwd, tag, verb, age, runnerTag)
 		if url != "" {
 			fmt.Printf("    %s\n", utils.StyleDebug("→ "+url))
 		}

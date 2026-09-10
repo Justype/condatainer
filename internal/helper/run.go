@@ -37,6 +37,15 @@ type RunOptions struct {
 	// lock even when CWD stands inside one, falling back to the ordinary
 	// on-disk check and auto-install unconditionally.
 	NoProject bool
+	// NoSubmit forces the run headless on this node even when a scheduler is
+	// available. The CLI also honors config.Global.SubmitJob (set globally by
+	// --no-submit); this field is what lets the server apply the override to
+	// one request without touching the process-wide config.
+	NoSubmit bool
+	// Partition to submit under (empty falls back to config.Global.Scheduler.Partition; ignored when headless)
+	Partition string
+	// Account to submit under (empty falls back to config.Global.Scheduler.Account; ignored when headless)
+	Account string
 	// Behaviour
 	ForceNew bool
 	// ExtraBinds is the resolved list of extra bind-mount specs ("src:dest") from
@@ -48,8 +57,8 @@ type RunOptions struct {
 	Params   map[string]string
 }
 
-func detectScheduler() (scheduler.Scheduler, error) {
-	if !config.Global.SubmitJob {
+func detectScheduler(noSubmit bool) (scheduler.Scheduler, error) {
+	if noSubmit || !config.Global.SubmitJob {
 		return nil, scheduler.ErrSchedulerNotFound
 	}
 	if sched := scheduler.ActiveScheduler(); sched != nil {
@@ -592,14 +601,25 @@ func newHelperID(name string) string {
 // buildHelperScriptSpecs constructs a ScriptSpecs for use with CreateScriptWithSpec.
 // Stdout and Stderr are /dev/null because the command body uses `exec >>` to
 // redirect output to the per-ID state dir; the scheduler-level log is unused.
-func buildHelperScriptSpecs(name, cwd string, spec *scheduler.ResourceSpec) *scheduler.ScriptSpecs {
+// account/partition fall back to config.Global.Scheduler.Account/.Partition when empty —
+// there is no script-header tier for either (unlike ncpus/mem/time/gpu), since a script
+// author has no way to know a user's cluster account.
+func buildHelperScriptSpecs(name, cwd, account, partition string, spec *scheduler.ResourceSpec) *scheduler.ScriptSpecs {
+	if account == "" {
+		account = config.Global.Scheduler.Account
+	}
+	if partition == "" {
+		partition = config.Global.Scheduler.Partition
+	}
 	ss := &scheduler.ScriptSpecs{
 		Spec: spec,
 		Control: scheduler.RuntimeConfig{
-			JobName: "cnt-" + name,
-			WorkDir: cwd,
-			Stdout:  "/dev/null",
-			Stderr:  "/dev/null",
+			JobName:   "cnt-" + name,
+			WorkDir:   cwd,
+			Stdout:    "/dev/null",
+			Stderr:    "/dev/null",
+			Account:   account,
+			Partition: partition,
 		},
 		HasDirectives: spec != nil,
 	}
@@ -618,7 +638,7 @@ func buildHelperScriptSpecs(name, cwd string, spec *scheduler.ResourceSpec) *sch
 //
 // For headless (sched == nil): writes job.sh directly into stateDir.
 // For schedulers: delegates to sched.CreateScriptWithSpec using stateDir as outputDir.
-func generateWrapper(id, name, cwd, scriptDir, stateDir string, walltime time.Duration,
+func generateWrapper(id, name, cwd, scriptDir, stateDir, account, partition string, walltime time.Duration,
 	params map[string]string, spec *scheduler.ResourceSpec, sched scheduler.Scheduler,
 	containerCmd string) (string, error) {
 
@@ -647,7 +667,7 @@ func generateWrapper(id, name, cwd, scriptDir, stateDir string, walltime time.Du
 	jobSpec := &scheduler.JobSpec{
 		Name:       "cnt-" + name,
 		Command:    body,
-		Specs:      buildHelperScriptSpecs(name, cwd, spec),
+		Specs:      buildHelperScriptSpecs(name, cwd, account, partition, spec),
 		KeepScript: true,
 	}
 
@@ -717,7 +737,7 @@ func normalizeOverlayForHistory(path, cwd string) string {
 // Overlay paths are normalized to logical names (internal) or CWD-relative paths (external)
 // before storage so history entries are portable across installs.
 func newHelperRun(id, name, jobID, cwd string, walltime time.Duration,
-	opts RunOptions, userOverlays []string, spec *scheduler.ResourceSpec, params map[string]string, status string) *HelperRun {
+	opts RunOptions, userOverlays []string, spec *scheduler.ResourceSpec, params map[string]string, status, runner string) *HelperRun {
 	normalizedOverlays := make([]string, len(userOverlays))
 	for i, ol := range userOverlays {
 		normalizedOverlays[i] = normalizeOverlayForHistory(ol, cwd)
@@ -726,6 +746,7 @@ func newHelperRun(id, name, jobID, cwd string, walltime time.Duration,
 		ID:         id,
 		Name:       name,
 		JobID:      jobID,
+		Runner:     runner,
 		CWD:        cwd,
 		Walltime:   walltime,
 		GPU:        FormatGpuSpec(spec),

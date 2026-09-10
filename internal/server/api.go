@@ -9,6 +9,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/helper"
+	"github.com/Justype/condatainer/internal/scheduler"
 )
 
 // helperListEntry wraps HelperRun with server-computed fields for the API response.
@@ -69,6 +70,10 @@ func (s *srv) handleStatus(w http.ResponseWriter, r *http.Request) {
 	home, _ := os.UserHomeDir()
 	scratch := os.Getenv("SCRATCH")
 	hostname, _ := os.Hostname()
+	var schedType string
+	if sched := scheduler.ActiveScheduler(); sched != nil {
+		schedType = string(sched.GetType())
+	}
 	writeJSON(w, map[string]interface{}{
 		"port":         s.port,
 		"hostname":     hostname,
@@ -79,6 +84,8 @@ func (s *srv) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"home":         home,
 		"scratch":      scratch,
 		"notification": config.Global.Notification,
+		"scheduler":    schedType,
+		"will_submit":  schedType != "" && config.Global.SubmitJob,
 	})
 }
 

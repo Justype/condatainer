@@ -363,10 +363,12 @@ function _computeParams(params, pv) {
 
 function _rdPh(rd) {
   return {
-    cpus: rd.cpus ? String(rd.cpus) : '',
-    mem:  rd.mem      || '',
-    time: rd.walltime || '',
-    gpu:  rd.gpu      || '',
+    cpus:      rd.cpus      ? String(rd.cpus) : '',
+    mem:       rd.mem       || '',
+    time:      rd.walltime  || '',
+    gpu:       rd.gpu       || '',
+    account:   rd.account   || '',
+    partition: rd.partition || '',
   };
 }
 
@@ -380,10 +382,12 @@ function _paramPlaceholder(param, opts) {
 function _applyConfigPlaceholders() {
   const cfg = _helperSavedConfig;
   const ph  = _rdPh((selectedHelper && selectedHelper.resource_defaults) || {});
-  gid('cfg-cpus').placeholder = cfg.cpus || ph.cpus;
-  gid('cfg-mem').placeholder  = cfg.mem  || ph.mem;
-  gid('cfg-wall').placeholder = cfg.time || ph.time;
-  gid('cfg-gpu').placeholder  = cfg.gpu  || ph.gpu;
+  gid('cfg-cpus').placeholder      = cfg.cpus      || ph.cpus;
+  gid('cfg-mem').placeholder       = cfg.mem       || ph.mem;
+  gid('cfg-wall').placeholder      = cfg.time      || ph.time;
+  gid('cfg-gpu').placeholder       = cfg.gpu       || ph.gpu;
+  gid('cfg-account').placeholder   = cfg.account   || ph.account;
+  gid('cfg-partition').placeholder = cfg.partition || ph.partition;
   _helperParamKeys.forEach(key => {
     const el = gid('hparam-' + key);
     if (!el) return;
@@ -507,14 +511,17 @@ function resetStartForm(helper) {
   renderModuleChips();
 
   // Clear typed values; placeholders already reflect the defaults.
-  gid('cfg-cpus').value = '';
-  gid('cfg-mem').value  = '';
-  gid('cfg-wall').value = '';
-  gid('cfg-gpu').value  = '';
+  gid('cfg-cpus').value      = '';
+  gid('cfg-mem').value       = '';
+  gid('cfg-wall').value      = '';
+  gid('cfg-gpu').value       = '';
+  gid('cfg-account').value   = '';
+  gid('cfg-partition').value = '';
   _setCwd('');
   gid('cfg-cwd').dispatchEvent(new Event('input'));
   _setVal('cfg-overlay', '');
   gid('cfg-overlay').dispatchEvent(new Event('input'));
+  gid('cfg-no-submit').checked = false;
 
   _helperParamKeys.forEach(key => {
     const input = gid('hparam-' + key);
@@ -636,7 +643,7 @@ function selectHelper(name, overrides) {
   gid('start-term').innerHTML = '';
   if (_startBusy) _setStartBusy(true, iconSvg('play_arrow') + ' Starting…');
   if (!overrides) {
-    ['cfg-cpus', 'cfg-mem', 'cfg-wall', 'cfg-gpu'].forEach(id => {
+    ['cfg-cpus', 'cfg-mem', 'cfg-wall', 'cfg-gpu', 'cfg-account', 'cfg-partition'].forEach(id => {
       const el = gid(id);
       if (!el) return;
       el.value = '';
@@ -1369,10 +1376,13 @@ async function startHelper() {
     mem:     _mem(_rv('cfg-mem'))  || '',
     time:    _wall(_rv('cfg-wall')) || '',
     gpu:     gid('cfg-gpu').value.trim() || gid('cfg-gpu').placeholder || '',
+    account: _rv('cfg-account'),
+    partition: _rv('cfg-partition'),
     cwd:     gid('cfg-cwd').value || '',
     overlay: gid('cfg-overlay').value || '',
     overlays: [...selectedModules.map(m => m.path), ...selectedExternalOverlays],
     params:  _collectParams(),
+    no_submit: gid('cfg-no-submit').checked,
   };
 
   const term = openStreamLogProgress('Starting ' + selectedHelper.name);

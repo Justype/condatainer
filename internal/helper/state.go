@@ -21,6 +21,7 @@ type HelperRun struct {
 	ID          string            `json:"id"`            // "{name}-YYYYMMDD-HHMMSS"
 	Name        string            `json:"name"`          // helper script name
 	JobID       string            `json:"job_id"`        // scheduler job ID or ""
+	Runner      string            `json:"runner"`        // "local", or the scheduler type ("slurm", "pbs", "lsf", "htcondor")
 	Node        string            `json:"node"`          // compute node hostname
 	Port        int               `json:"port"`          // 0 = URL-only service (vscode-tunnel)
 	CWD         string            `json:"cwd"`           // working directory

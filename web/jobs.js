@@ -235,6 +235,7 @@ function openDetail(id) {
       }).join('') + '</span>';
   }
   // Job
+  if (job.runner) meta += '<span class="d-key">Runner</span><span class="d-val">' + escHtml(job.runner) + '</span>';
   if (job.job_id) meta += '<span class="d-key">Job ID</span><span class="d-val">' + escHtml(job.job_id) + '</span>';
   meta += '<span class="d-key">Started</span><span class="d-val">' + (job.started_at ? fmtDate(job.started_at) : '—') + '</span>';
   if (job.node) meta += '<span class="d-key">Node</span><span class="d-val">' + escHtml(job.node) + '</span>';
