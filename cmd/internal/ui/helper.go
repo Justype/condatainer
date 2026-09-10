@@ -296,6 +296,33 @@ func PromptSettings(ctx context.Context,
 		gpuDisp = "(none)"
 	}
 
+	// ── resolve account/partition display values ──────────────────────────────
+	// Priority: CLI flag (opts.Account/.Partition) > saved config >
+	// config.Global.Scheduler default. No script-header tier — account/partition
+	// describe the user's cluster access, not something a script author can know.
+	account := opts.Account
+	if account == "" {
+		account = saved["account"]
+	}
+	if account == "" {
+		account = config.Global.Scheduler.Account
+	}
+	partition := opts.Partition
+	if partition == "" {
+		partition = saved["partition"]
+	}
+	if partition == "" {
+		partition = config.Global.Scheduler.Partition
+	}
+	accountDisp := account
+	if accountDisp == "" {
+		accountDisp = "(scheduler default)"
+	}
+	partitionDisp := partition
+	if partitionDisp == "" {
+		partitionDisp = "(scheduler default)"
+	}
+
 	// ── compute column width for path/env/overlay/param rows ─────────────────
 	maxDK := 1
 	for _, e := range paramEntries {
@@ -324,6 +351,9 @@ func PromptSettings(ctx context.Context,
 			timeDisp, utils.StyleDebug("Walltime"),
 			gpuDisp, utils.StyleDebug("GPU"))
 	}
+	fmt.Printf("  a: %s  %s   p: %s  %s\n",
+		accountDisp, utils.StyleDebug("Account"),
+		partitionDisp, utils.StyleDebug("Partition"))
 
 	// Path and env img (always shown).
 	effectiveCwd := opts.CWD
@@ -462,6 +492,26 @@ func PromptSettings(ctx context.Context,
 			}
 			fmt.Print("[Enter to continue, or key value to update]: ")
 			continue
+		case "a", "account":
+			if v == "-" {
+				opts.Account = ""
+				fmt.Println("  a cleared")
+			} else {
+				opts.Account = v
+				fmt.Printf("  a updated to %s\n", v)
+			}
+			fmt.Print("[Enter to continue, or key value to update]: ")
+			continue
+		case "p", "partition":
+			if v == "-" {
+				opts.Partition = ""
+				fmt.Println("  p cleared")
+			} else {
+				opts.Partition = v
+				fmt.Printf("  p updated to %s\n", v)
+			}
+			fmt.Print("[Enter to continue, or key value to update]: ")
+			continue
 		}
 
 		// Param keys.
@@ -471,7 +521,7 @@ func PromptSettings(ctx context.Context,
 			if showResources {
 				validKeys = append(validKeys, "c", "m", "t", "g")
 			}
-			validKeys = append(validKeys, "w", "e", "o")
+			validKeys = append(validKeys, "w", "e", "o", "a", "p")
 			for _, e := range paramEntries {
 				validKeys = append(validKeys, e.displayKey)
 			}
@@ -522,6 +572,12 @@ func PrintLaunchSpec(plan *helper.RunPlan) {
 	}
 	if gpu := helper.FormatGpuSpec(plan.Spec); gpu != "" {
 		utils.PrintMessage("  GPU:      %s", gpu)
+	}
+	if opts.Account != "" {
+		utils.PrintMessage("  Account:  %s", opts.Account)
+	}
+	if opts.Partition != "" {
+		utils.PrintMessage("  Partition: %s", opts.Partition)
 	}
 	// A summary, so a base that is not installed yet is reported rather than
 	// resolved: the launch that follows is what has to succeed or fail.

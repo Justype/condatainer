@@ -78,6 +78,7 @@ Three rules this illustrates:
 ```
 
 These are defaults only — users override them with `-c/-m/-t/-g` or in the settings prompt.
+`-A`/`--account` and `-p`/`--partition` are also reserved.
 
 ### `#DESC:` — description
 
@@ -102,6 +103,11 @@ Defines a configurable variable resolved from: CLI flag → saved config → def
 | `KEY=` | Required — prompts interactively if not supplied |
 
 The resolved value is exported as `$KEY` inside the script, and `{KEY}` tokens in other headers are substituted with it.
+
+```{note}
+Cannot reuse a short flag already claimed: `-c`, `-m`, `-t`, `-g`, `-b`, `-e`, `-o`,
+`-w`, `-A`, `-p`. A `#PARAM:` that does is refused before the helper runs, naming the conflict.
+```
 
 ### `#VALUE:` — allowed values list
 

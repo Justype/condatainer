@@ -6,6 +6,8 @@ Scheduler-vs-headless is normally automatic (`config.Global.SubmitJob`, schedule
 
 Every `HelperRun` records `Runner` — `"local"` for headless, or the scheduler type (`"slurm"`, `"pbs"`, `"lsf"`, `"htcondor"`) for a submitted job — set once at creation, the same convention `internal/image/producer.Info.Runner` uses for build locks. It exists because `JobID` emptiness and the initial `"pending"`/`"starting"` status both leak the same fact only until a run reaches `"running"`, after which nothing else says which path it took.
 
+`RunOptions.Account`/`.Partition` resolve the same way on every entry point — CLI flag (`-A`/`--account`, `-p`/`--partition` on `cmd/helper.go`; the terminal `PromptSettings` table also lets either be edited interactively before launch) or the dashboard's `cfg-account`/`cfg-partition` fields, falling back to `config.Global.Scheduler.Account`/`.Partition` when left unset — applied once, in `buildHelperScriptSpecs` (`run.go`), never earlier. There is no script-header tier (no `#ACCOUNT:`/`#PARTITION:`): unlike `#NCPUS:`/`#MEM:`/`#TIME:`/`#GPU:`, which describe what the workload needs, account/partition describe the user's own cluster access, which a script has no way to know.
+
 ## Files
 
 | File | Purpose |

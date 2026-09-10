@@ -34,6 +34,10 @@ type postScriptHelperFlags struct {
 	overlays     []string
 	cwdSet       bool
 	cwd          string
+	accountSet   bool
+	account      string
+	partitionSet bool
+	partition    string
 	newSet       bool
 	noProjectSet bool
 }
@@ -191,6 +195,20 @@ func parsePostScriptHelperFlags(args []string) (postScriptHelperFlags, []string,
 				}
 				flags.cwdSet = true
 				flags.cwd = v
+			case "--account":
+				v, err := valueFor(name, &i, val, hasVal)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.accountSet = true
+				flags.account = v
+			case "--partition":
+				v, err := valueFor(name, &i, val, hasVal)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.partitionSet = true
+				flags.partition = v
 			case "--new":
 				if hasVal {
 					return flags, nil, fmt.Errorf("flag %s does not take a value", name)
@@ -265,6 +283,20 @@ func parsePostScriptHelperFlags(args []string) (postScriptHelperFlags, []string,
 				}
 				flags.cwdSet = true
 				flags.cwd = v
+			case "-A":
+				v, err := valueFor(name, &i, attached, hasAttached)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.accountSet = true
+				flags.account = v
+			case "-p":
+				v, err := valueFor(name, &i, attached, hasAttached)
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.partitionSet = true
+				flags.partition = v
 			default:
 				passthrough = append(passthrough, arg)
 			}
@@ -448,6 +480,7 @@ func runHelper(cmd *cobra.Command, args []string) error {
 	startedWithArgs := postFlags.cpusSet || postFlags.memSet ||
 		postFlags.timeSet || postFlags.gpuSet ||
 		postFlags.envSet || postFlags.overlaySet || postFlags.cwdSet ||
+		postFlags.accountSet || postFlags.partitionSet ||
 		postFlags.newSet || postFlags.noProjectSet || len(scriptArgs) > 0
 
 	// Find script in all search paths.
@@ -522,6 +555,8 @@ func runHelper(cmd *cobra.Command, args []string) error {
 		EnvImg:     envImg,
 		Overlays:   postFlags.overlays,
 		CWD:        cwd,
+		Account:    postFlags.account,
+		Partition:  postFlags.partition,
 		ForceNew:   postFlags.newSet,
 		NoProject:  postFlags.noProjectSet,
 		FlagArgs:   scriptArgs,

@@ -73,6 +73,7 @@ func ApplyParamFlags(params []HelperParam, args []string) (map[string]string, []
 var ReservedShortFlags = map[string]string{
 	"-c": "--cpus", "-m": "--mem", "-t": "--time", "-g": "--gpu",
 	"-b": "--base", "-e": "--env", "-o": "--overlay", "-w": "--cwd",
+	"-A": "--account", "-p": "--partition",
 }
 
 // ValidateHelperParamConflicts returns an error if any #PARAM: short flag clashes
@@ -116,6 +117,8 @@ func PrintHelperUsage(scriptName string, params []HelperParam, spec *scheduler.R
 	fmt.Println("  -e, --env         Writable overlay (.img)")
 	fmt.Println("  -o, --overlay     Additional read-only overlay (repeatable)")
 	fmt.Println("  -w, --cwd <path>  Change working directory (e.g. -w .)")
+	fmt.Println("  -A, --account     Billing/allocation account")
+	fmt.Println("  -p, --partition   Partition/queue")
 	fmt.Println("      --new         Skip reuse prompt, force new instance")
 	if len(params) > 0 {
 		fmt.Println("\nHelper-specific flags:")

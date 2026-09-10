@@ -1194,8 +1194,8 @@ Each argument can be:
 
 **Inside a project:**
 
-Run from a directory holding `cnt-lock/`, or anywhere below one, `check
-<script>` resolves that script's declarations through the lock instead of by
+Run from a directory holding `cnt-lock/`, or anywhere below one, `check <script>` 
+resolves that script's declarations through the lock instead of by
 name, and reports whether the script can run right now. It goes through the
 same code `run` does, so the two cannot disagree — including opening a
 project-relative `.sqf` to confirm it still carries the pinned identity. `-a`
@@ -1728,6 +1728,12 @@ or to keep working when the scheduler itself is unavailable. To disable submissi
 set `submit_job: false` in the config (`condatainer config set submit_job false`) instead. The
 dashboard offers the same override as a "Run headless" checkbox next to Start, shown only when a
 scheduler is actually available to opt out of.
+
+Pass `-A`/`--account` and `-p`/`--partition` to submit under a billing account or a specific
+partition/queue for one run (`condatainer helper code-server -A myproj -p gpu`), or set
+`scheduler.account`/`scheduler.partition` in the config for every run — see
+[Configuration](configuration.md). Both can also be typed at the interactive settings prompt
+(`a`/`p`), and the dashboard exposes matching Account/Partition fields next to Start.
 
 ## Config
 
