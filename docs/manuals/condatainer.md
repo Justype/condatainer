@@ -1727,7 +1727,7 @@ condatainer config get <key>
 **Examples:**
 
 ```bash
-condatainer config get apptainer_bin
+condatainer config get build.system_apptainer
 condatainer config get build.ncpus
 condatainer config get submit_job
 ```
@@ -1743,7 +1743,7 @@ condatainer config set <key> <value>
 **Examples:**
 
 ```bash
-condatainer config set apptainer_bin /usr/bin/apptainer
+condatainer config set build.system_apptainer /usr/bin/apptainer
 condatainer config set submit_job false
 condatainer config set build.ncpus 8
 condatainer config set build.time 4h
@@ -1854,9 +1854,10 @@ Configuration is loaded in the following order (highest to lowest priority):
 See the [Configuration manual](configuration.md) for a full reference of all available keys.
 
 ```yaml
-# Binary paths (scheduler type is auto-detected from binary)
-apptainer_bin: /usr/bin/apptainer
-scheduler_bin: /usr/bin/sbatch
+build:
+  system_apptainer: /usr/bin/apptainer  # scheduler type is auto-detected from scheduler.bin
+scheduler:
+  bin: /usr/bin/sbatch
 
 # Submission settings
 submit_job: true

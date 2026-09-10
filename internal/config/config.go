@@ -35,6 +35,19 @@ type BuildConfig struct {
 	AppTmpOverlaySizeMB int                    // Size of that overlay in MB (MiB)
 	AlwaysSubmit        bool                   // Always submit builds as scheduler jobs even without script directives (default: false)
 	Channels            []string               // conda channels in priority order (default: [conda-forge, bioconda])
+	SystemApptainer     string                 // Path to the system/module apptainer or singularity binary (auto-detected if empty)
+}
+
+// SchedulerConfig holds scheduler binary/submission settings shared by every
+// caller that submits a job without parsing an existing script's own
+// directives (e.g. helper) — Account/Partition/Defaults are that caller's
+// fallback, not a build-specific one.
+type SchedulerConfig struct {
+	Bin       string                 // Path to sbatch/scheduler binary (auto-detected if empty)
+	Timeout   time.Duration          // Scheduler command timeout (default: 0 = no timeout)
+	Account   string                 // Default billing/allocation account (empty = scheduler's own default)
+	Partition string                 // Default partition/queue (empty = scheduler's own default)
+	Defaults  scheduler.ResourceSpec // Default resource spec for jobs with no script directives
 }
 
 // Config holds global application settings
@@ -48,10 +61,6 @@ type Config struct {
 	ProgramDir string
 	LogsDir    string
 
-	// Binary paths
-	ApptainerBin string
-	SchedulerBin string // Optional: path to sbatch/scheduler binary (auto-detected if empty)
-
 	// Recipe collections, in order. Earlier entries shadow later ones.
 	Sources []catalog.Spec
 
@@ -63,9 +72,6 @@ type Config struct {
 	// Turn off on a node whose driver is present but unusable: the device nodes
 	// still exist, so detection fires and the container then fails to start.
 	AutoloadGPU bool
-
-	// Scheduler command timeout (default: 0 = no timeout).
-	SchedulerTimeout time.Duration
 
 	// Notification method when a helper job starts running (default: "web").
 	// Values: "web" (browser notification via dashboard), "terminal" (bell ×2, 1.1 s apart),
@@ -93,6 +99,9 @@ type Config struct {
 
 	// Build configuration
 	Build BuildConfig
+
+	// Scheduler configuration
+	Scheduler SchedulerConfig
 }
 
 // CompressOption defines name, mksquashfs arguments, and description
@@ -150,10 +159,17 @@ const (
 	DefaultCacheTTLDay         = 7     // remote recipe metadata cache, 1 week
 	DefaultGCGraceDay          = 30    // store gc: age below which an entry is never collectable
 	DefaultNotification        = "web"
+
+	DefaultSchedulerNcpus = 1    // CPUs for a job with no script directives
+	DefaultSchedulerMemMB = 2048 // memory for a job with no script directives
+	DefaultSchedulerTime  = "2h" // walltime for a job with no script directives
 )
 
 // DefaultBuildDuration is DefaultBuildTime as a duration, so the two cannot disagree.
 var DefaultBuildDuration = 2 * time.Hour
+
+// DefaultSchedulerDuration is DefaultSchedulerTime as a duration, so the two cannot disagree.
+var DefaultSchedulerDuration = 2 * time.Hour
 
 // DefaultChannels are the conda channels micromamba gets, highest priority first.
 func DefaultChannels() []string { return []string{"conda-forge", "bioconda"} }
@@ -206,10 +222,6 @@ func LoadDefaults(executablePath string) {
 		ProgramDir: programDir,
 		LogsDir:    DefaultLogsDir(),
 
-		ApptainerBin: detectApptainerBin(),
-		SchedulerBin: "", // Auto-detect scheduler binary (empty = search PATH)
-
-		SchedulerTimeout: 0, // no timeout by default
 		Notification:     DefaultNotification,
 		MetadataCacheTTL: DefaultCacheTTLDay * 24 * time.Hour,
 		StoreGCGrace:     DefaultGCGraceDay * 24 * time.Hour,
@@ -226,10 +238,21 @@ func LoadDefaults(executablePath string) {
 			// version-checked system apptainer for fakeroot (apptainer.ResolveBin).
 			// A registry consumer outside condatainer's own exec/run is
 			// responsible for having a compatible apptainer themselves.
-			CompressArgs:  ArgsForCompress("zstd-medium"),
-			BlockSize:     DefaultBlockSize,
-			DataBlockSize: DefaultDataBlockSize,
-			Channels:      DefaultChannels(),
+			CompressArgs:    ArgsForCompress("zstd-medium"),
+			BlockSize:       DefaultBlockSize,
+			DataBlockSize:   DefaultDataBlockSize,
+			Channels:        DefaultChannels(),
+			SystemApptainer: detectApptainerBin(),
+		},
+
+		Scheduler: SchedulerConfig{
+			Bin:     "", // Auto-detect scheduler binary (empty = search PATH)
+			Timeout: 0,  // no timeout by default
+			Defaults: scheduler.ResourceSpec{
+				CpusPerTask:  DefaultSchedulerNcpus,
+				MemPerNodeMB: DefaultSchedulerMemMB,
+				Time:         DefaultSchedulerDuration,
+			},
 		},
 	}
 }

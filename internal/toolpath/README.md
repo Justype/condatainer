@@ -81,7 +81,7 @@ policy decision between exactly two named candidates — system/module for
 fakeroot, `libexec`'s own otherwise — gated by fakeroot and a zstd version
 floor, not a `PATH` walk; `Resolve` has nothing to offer it. Scheduler
 (`sbatch`/`qsub`/`bsub`/`condor_submit`) and proxy (`ssh`/`loginctl`) tools
-stay on their own resolution (`config.Global.SchedulerBin`, module detection)
+stay on their own resolution (`config.Global.Scheduler.Bin`, module detection)
 for a real reason, not just narrower scope: `libexec` will never provision
 them, so routing them through here would only ever hit the `PATH`/FHS
 fallback — no behavioral difference, just an import for nothing.

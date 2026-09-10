@@ -114,12 +114,11 @@ func InitViper() error {
 
 // setDefaults sets default values for all config keys
 func setDefaults() {
-	viper.SetDefault("apptainer_bin", "apptainer")
-	viper.SetDefault("scheduler_bin", "")
 	viper.SetDefault("submit_job", true)
 	viper.SetDefault("logs_dir", DefaultLogsDir())
 
 	// Build config defaults
+	viper.SetDefault("build.system_apptainer", "apptainer")
 	viper.SetDefault("build.ncpus", DefaultNcpus)
 	viper.SetDefault("build.mem", DefaultMemMB)
 	viper.SetDefault("build.time", DefaultBuildTime)
@@ -130,9 +129,17 @@ func setDefaults() {
 	viper.SetDefault("build.always_submit", false)
 	viper.SetDefault("build.app_tmp_overlay_size", DefaultAppTmpOverlaySizeMB)
 
+	// Scheduler config defaults
+	viper.SetDefault("scheduler.bin", "")
+	viper.SetDefault("scheduler.timeout", 0) // seconds; 0 = no timeout
+	viper.SetDefault("scheduler.account", "")
+	viper.SetDefault("scheduler.partition", "")
+	viper.SetDefault("scheduler.ncpus", DefaultSchedulerNcpus)
+	viper.SetDefault("scheduler.mem", DefaultSchedulerMemMB)
+	viper.SetDefault("scheduler.time", DefaultSchedulerTime)
+
 	viper.SetDefault("channels", DefaultChannels())
 	viper.SetDefault("autoload_gpu", true)
-	viper.SetDefault("scheduler_timeout", 0) // seconds; 0 = no timeout
 	// "web" = browser notification via dashboard; "terminal" = bell; "both" = terminal + web; "" or "none" = silent
 	viper.SetDefault("notification", DefaultNotification)
 	viper.SetDefault("metadata_cache_ttl", DefaultCacheTTLDay) // days
@@ -457,11 +464,11 @@ func SaveMinimalConfigTo(path, apptainerBin, schedulerBin, compressArgs string, 
 	}
 	v := viper.New()
 	v.SetConfigType(ConfigType)
-	if apptainerBin != "" && !alreadySet("apptainer_bin") {
-		v.Set("apptainer_bin", apptainerBin)
+	if apptainerBin != "" && !alreadySet("build.system_apptainer") {
+		v.Set("build.system_apptainer", apptainerBin)
 	}
-	if schedulerBin != "" && !alreadySet("scheduler_bin") {
-		v.Set("scheduler_bin", schedulerBin)
+	if schedulerBin != "" && !alreadySet("scheduler.bin") {
+		v.Set("scheduler.bin", schedulerBin)
 	}
 	if compressArgs != "" && !alreadySet("build.compress_args") {
 		v.Set("build.compress_args", compressArgs)
@@ -889,18 +896,18 @@ func layerInt(key string) (int, bool) {
 // LoadFromViper loads config from Viper into Global struct
 func LoadFromViper() {
 	// Update binary paths from Viper, with fallback to detection
-	if bin := layerString("apptainer_bin"); bin != "" && ValidateBinary(bin) {
-		Global.ApptainerBin = bin
+	if bin := layerString("build.system_apptainer"); bin != "" && ValidateBinary(bin) {
+		Global.Build.SystemApptainer = bin
 	} else if bin == "" || !ValidateBinary(bin) {
 		// Fallback to detection if config value is empty or invalid
 		detected := detectApptainerBin()
 		if detected != "" {
-			Global.ApptainerBin = detected
+			Global.Build.SystemApptainer = detected
 		}
 	}
 
-	if bin := layerString("scheduler_bin"); bin != "" {
-		Global.SchedulerBin = bin
+	if bin := layerString("scheduler.bin"); bin != "" {
+		Global.Scheduler.Bin = bin
 	}
 
 	// Handle submit_job: disable if scheduler is not accessible
@@ -908,11 +915,39 @@ func LoadFromViper() {
 		Global.SubmitJob = false
 	} else {
 		// Auto-disable if no scheduler binary is available
-		if Global.SchedulerBin == "" {
-			Global.SchedulerBin = DetectSchedulerBin()
+		if Global.Scheduler.Bin == "" {
+			Global.Scheduler.Bin = DetectSchedulerBin()
 		}
-		if Global.SchedulerBin == "" || !ValidateBinary(Global.SchedulerBin) {
+		if Global.Scheduler.Bin == "" || !ValidateBinary(Global.Scheduler.Bin) {
 			Global.SubmitJob = false
+		}
+	}
+
+	if timeout, ok := layerInt("scheduler.timeout"); ok {
+		Global.Scheduler.Timeout = time.Duration(timeout) * time.Second
+	}
+
+	if account := layerString("scheduler.account"); account != "" {
+		Global.Scheduler.Account = account
+	}
+
+	if partition := layerString("scheduler.partition"); partition != "" {
+		Global.Scheduler.Partition = partition
+	}
+
+	if ncpus, ok := layerInt("scheduler.ncpus"); ok && ncpus > 0 {
+		Global.Scheduler.Defaults.CpusPerTask = ncpus
+	}
+
+	if memStr := layerString("scheduler.mem"); memStr != "" {
+		if memMB, err := utils.ParseMemoryMB(memStr); err == nil && memMB > 0 {
+			Global.Scheduler.Defaults.MemPerNodeMB = memMB
+		}
+	}
+
+	if schedTime := layerString("scheduler.time"); schedTime != "" {
+		if dur, err := utils.ParseWalltime(schedTime); err == nil {
+			Global.Scheduler.Defaults.Time = dur
 		}
 	}
 
@@ -989,10 +1024,6 @@ func LoadFromViper() {
 
 	if autoloadGPU, ok := layerBool("autoload_gpu"); ok {
 		Global.AutoloadGPU = autoloadGPU
-	}
-
-	if timeout, ok := layerInt("scheduler_timeout"); ok {
-		Global.SchedulerTimeout = time.Duration(timeout) * time.Second
 	}
 
 	// Only when set: "" means silent, so an unset key must keep DefaultNotification.

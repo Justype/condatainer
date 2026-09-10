@@ -41,7 +41,7 @@ chmod 755 /opt/condatainer/1.4.0/bin/condatainer
 chmod -R go-w /opt/condatainer/data
 ```
 
-**Write the module file.** It puts the binary on `$PATH`, points `$CNT_ROOT` at the data dir, and — because **CondaTainer needs Apptainer** — makes Apptainer available. Either pin an exact binary with `$CNT_APPTAINER_BIN`, or have the module load Apptainer's own module.
+**Write the module file.** It puts the binary on `$PATH`, points `$CNT_ROOT` at the data dir, and — because **CondaTainer needs Apptainer** — makes Apptainer available. Either pin an exact binary with `$CNT_BUILD_SYSTEM_APPTAINER`, or have the module load Apptainer's own module.
 
 `/opt/modulefiles/condatainer/1.4.0.lua` (Lmod):
 
@@ -52,7 +52,7 @@ prepend_path("PATH", "/opt/condatainer/1.4.0/bin")
 setenv("CNT_ROOT", "/opt/condatainer/data")
 
 -- Apptainer: pin an exact binary...
-setenv("CNT_APPTAINER_BIN", "/opt/apptainer/1.3.0/bin/apptainer")
+setenv("CNT_BUILD_SYSTEM_APPTAINER", "/opt/apptainer/1.3.0/bin/apptainer")
 -- ...or load its module instead (drop the setenv above):
 -- depends_on("apptainer/1.3.0")
 ```
@@ -65,7 +65,7 @@ prepend-path PATH /opt/condatainer/1.4.0/bin
 setenv CNT_ROOT /opt/condatainer/data
 
 # Apptainer: pin an exact binary...
-setenv CNT_APPTAINER_BIN /opt/apptainer/1.3.0/bin/apptainer
+setenv CNT_BUILD_SYSTEM_APPTAINER /opt/apptainer/1.3.0/bin/apptainer
 # ...or load its module instead (drop the setenv above):
 # depends-on apptainer/1.3.0     ;# environment-modules ≥ 4.4
 # module load apptainer/1.3.0    ;# older environment-modules
@@ -121,7 +121,7 @@ Anything you want every user to have without rebuilding:
 
 ```
 <cnt_root>/           # beside the binary, or wherever CNT_ROOT points
-├── config.yaml       # site defaults: apptainer path, scheduler, build limits
+├── config.yaml       # site defaults: apptainer path (build.system_apptainer), scheduler, build limits
 ├── build-scripts/    # curated or site-specific recipes
 ├── helper-scripts/   # site-specific services
 └── images/           # pre-built overlays: common tools, reference data
@@ -140,8 +140,8 @@ For scripts, you can also point at a remote source instead of copying files in �
 Settings here apply to everyone and can still be overridden per user:
 
 ```yaml
-apptainer_bin: /usr/bin/apptainer
 build:
+  system_apptainer: /usr/bin/apptainer
   ncpus: 8
   mem: 32g
 ```

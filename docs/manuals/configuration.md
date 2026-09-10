@@ -23,7 +23,7 @@ All three config files are loaded and merged when they exist:
 6. **System config file** (`/etc/condatainer/config.yaml`)
 7. **Defaults** (lowest priority)
 
-**Scalar keys** (`apptainer_bin`, `default_distro`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
+**Scalar keys** (`build.system_apptainer`, `default_distro`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
 
 **`sources`**: **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, app-root, then system. This lets a sysadmin publish shared recipe collections in an app-root or system config without requiring every user to copy them into their own config. See [How Array Settings Merge](#how-array-settings-merge) for a worked example.
 
@@ -88,13 +88,6 @@ With `-l`, a read-only target is an error instead — an explicit layer is never
 |-----|---------|-------------|
 | `logs_dir` | `$HOME/logs` | Directory for build job logs |
 
-### Binaries
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `apptainer_bin` | Auto-detected | Path to apptainer or singularity binary — used only where fakeroot is needed (a fakeroot `exec`, and an `os` `.def` build's own `apptainer build`). Ordinary `exec`/`run` and conda/script builds always use condatainer's own self-provisioned apptainer instead (`condatainer update --libexec`). |
-| `scheduler_bin` | Auto-detected | Path to job scheduler binary (sbatch, qsub, bsub, condor_submit, etc.). |
-
 ### Recipe Sources
 
 | Key | Default | Description |
@@ -153,7 +146,6 @@ which CondaTainer never reads or changes. See
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
 | `autoload_gpu` | `true` | Pass `--nv` / `--rocm` when the host has the device node. Set `false` if the driver is present but unusable |
 | `default_distro` | first source's `default_distro` | Default distro for the container root, e.g. `ubuntu24` → `ubuntu24/base` |
-| `scheduler_timeout` | `0` | Seconds to wait for a scheduler command before erroring. `0` disables the timeout |
 | `notification` | `web` | Alert when a helper job starts: `web`, `terminal`, `both`, `none` |
 | `metadata_cache_ttl` | `7` | Days to cache remote recipe metadata. `0` always fetches |
 | `store_gc_grace` | `30` | Days before `store gc` will report an entry collectable. `--grace` overrides it per run |
@@ -164,6 +156,7 @@ which CondaTainer never reads or changes. See
 
 | Key | Default | Description |
 |-----|---------|-------------|
+| `build.system_apptainer` | Auto-detected | Path to apptainer or singularity binary — used only where fakeroot is needed (a fakeroot `exec`, and an `os` `.def` build's own `apptainer build`). Ordinary `exec`/`run` and conda/script builds always use condatainer's own self-provisioned apptainer instead (`condatainer update --libexec`). |
 | `build.ncpus` | `4` | CPUs for build jobs |
 | `build.mem` | `8192` | Memory for build jobs (supports units: `8g`, `8192`) |
 | `build.time` | `2h` | Time limit for builds |
@@ -179,6 +172,22 @@ which CondaTainer never reads or changes. See
 >
 > `build.block_size` and `build.data_block_size` must be a power of two between `4k` and `1m` (mksquashfs `-b` limit). Larger blocks improve compression ratio but increase random-read latency.
 
+### Scheduler Configuration
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `scheduler.bin` | Auto-detected | Path to job scheduler binary (sbatch, qsub, bsub, condor_submit, etc.) |
+| `scheduler.timeout` | `0` | Seconds to wait for a scheduler command before erroring. `0` disables the timeout |
+| `scheduler.account` | none | Default billing/allocation account for submitted jobs (e.g. helper). Empty uses the scheduler's own default |
+| `scheduler.partition` | none | Default partition/queue for submitted jobs (e.g. helper). Empty uses the scheduler's own default |
+| `scheduler.ncpus` | `1` | CPUs for a job with no script directives (e.g. helper) |
+| `scheduler.mem` | `2048` | Memory for a job with no script directives (supports units: `2g`, `2048`) |
+| `scheduler.time` | `2h` | Time limit for a job with no script directives |
+
+`scheduler.ncpus`/`.mem`/`.time` apply whether or not the job actually ends up submitted to a
+scheduler — the same as `build.ncpus`/`.mem`/`.time` apply to a build regardless of `submit_job`.
+`scheduler.account`/`.partition` only matter when a scheduler is present.
+
 ## Managing Configuration
 
 ### View Configuration
@@ -191,7 +200,7 @@ condatainer config show
 condatainer config show --path
 
 # Get a specific value
-condatainer config get apptainer_bin
+condatainer config get build.system_apptainer
 condatainer config get build.ncpus
 ```
 
@@ -201,7 +210,7 @@ Shell completion is available for config keys - press Tab to see available optio
 
 ```bash
 # Set apptainer binary path
-condatainer config set apptainer_bin /usr/bin/apptainer
+condatainer config set build.system_apptainer /usr/bin/apptainer
 
 # Set build resources
 condatainer config set build.ncpus 8
@@ -215,7 +224,11 @@ condatainer config set build.time 02:00:00
 condatainer config set submit_job false
 
 # Set scheduler command timeout (seconds)
-condatainer config set scheduler_timeout 10
+condatainer config set scheduler.timeout 10
+
+# Set a default account/partition for submitted jobs (e.g. helper)
+condatainer config set scheduler.account myproject
+condatainer config set scheduler.partition gpu
 ```
 
 ### Manage Array Config Values
@@ -284,7 +297,7 @@ mapping is consistent for every key handled by the CLI:
 
 | Environment Variable               | Config Key             |
 |-----------------------------------|------------------------|
-| `CNT_APPTAINER_BIN`        | `apptainer_bin`        |
+| `CNT_BUILD_SYSTEM_APPTAINER`| `build.system_apptainer` |
 | `CNT_SUBMIT_JOB`           | `submit_job`           |
 | `CNT_AUTOLOAD_GPU`         | `autoload_gpu`         |
 | `CNT_DEFAULT_DISTRO`       | `default_distro`       |
@@ -296,7 +309,9 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_EXTRA_ROOT`           | Group/lab root dir — single path, loads `config.yaml` + data dirs |
 | `CNT_SOURCES`              | `sources` (pipe-separated `handle=location`; replaces the list) |
 | `CNT_CHANNELS`             | `channels` (pipe or colon-separated) |
-| `CNT_SCHEDULER_TIMEOUT`    | `scheduler_timeout`    |
+| `CNT_SCHEDULER_TIMEOUT`    | `scheduler.timeout`    |
+| `CNT_SCHEDULER_ACCOUNT`    | `scheduler.account`    |
+| `CNT_SCHEDULER_PARTITION`  | `scheduler.partition`  |
 | `CNT_NOTIFICATION`         | `notification`         |
 | `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
 | `CNT_STORE_GC_GRACE`       | `store_gc_grace`       |
@@ -372,10 +387,6 @@ Each base directory follows this structure:
 # Log directory for build jobs
 logs_dir: /home/user/logs
 
-# Binary paths (scheduler type is auto-detected from binary)
-apptainer_bin: /usr/bin/apptainer
-scheduler_bin: /usr/bin/sbatch
-
 # Submit builds as scheduler jobs
 submit_job: true
 
@@ -392,9 +403,6 @@ autoload_gpu: true
 # Default distro for the container root (default: the first source's default_distro)
 default_distro: ubuntu24
 
-# Maximum seconds to wait for scheduler CLI commands (default: 0 = disabled)
-scheduler_timeout: 0
-
 # Days to cache remote recipe metadata (default: 7 = 1 week, 0 = disabled)
 metadata_cache_ttl: 7
 
@@ -408,6 +416,7 @@ metadata_cache_ttl: 7
 
 # Build configuration
 build:
+  system_apptainer: /usr/bin/apptainer  # scheduler type is auto-detected from scheduler.bin
   ncpus: 4
   mem: 8g
   time: 2h
@@ -417,6 +426,16 @@ build:
   app_tmp_overlay: false   # Assemble an app build inside an ext3 overlay (app only)
   always_submit: false    # Always submit as scheduler jobs even without directives
   app_tmp_overlay_size: 20g  # Only used when app_tmp_overlay is true
+
+# Scheduler configuration
+scheduler:
+  bin: /usr/bin/sbatch  # auto-detected if empty
+  timeout: 0            # maximum seconds to wait for scheduler CLI commands (0 = disabled)
+  account: ""           # default billing/allocation account for submitted jobs (e.g. helper)
+  partition: ""         # default partition/queue for submitted jobs (e.g. helper)
+  ncpus: 1              # CPUs for a job with no script directives
+  mem: 2g               # memory for a job with no script directives
+  time: 2h              # time limit for a job with no script directives
 
 # proxy_perjob: true   # auto-start per-job proxy inside submitted jobs
 
@@ -456,7 +475,7 @@ For shared group installations, CondaTainer supports a standalone layout where t
 
 All config files (user, extra-root, app-root, system) are loaded simultaneously. For `sources`, entries from all configs are **merged** — so a group admin can publish shared recipe collections in the app-root config and every user automatically searches them, even if they also have a personal config.
 
-For scalar keys like `apptainer_bin`, the user config takes priority; users can override app-root/system defaults in their own config without affecting other users.
+For scalar keys like `build.system_apptainer`, the user config takes priority; users can override app-root/system defaults in their own config without affecting other users.
 
 **Explicit root via `$CNT_ROOT`:** Instead of relying on the `bin/` layout detection, set `$CNT_ROOT` to point directly to the installation directory. This is useful when the binary is installed to a standard location (e.g. `/usr/local/bin`) but the data lives elsewhere:
 
@@ -479,7 +498,7 @@ On HPC systems, configuration is typically layered across three scopes. CondaTai
 
 | Tier | Data layer | Scope | Sets |
 |---|---|---|---|
-| System / cluster | `app-root` | Sysadmin | `apptainer_bin`, `scheduler_bin`, shared images, `channels` |
+| System / cluster | `app-root` | Sysadmin | `build.system_apptainer`, `scheduler.bin`, shared images, `channels` |
 | Group / lab | `extra-root` | Lab admin | Lab-specific images, build scripts, helper scripts |
 | User | `user` | Individual | Personal overrides, personal scratch dirs |
 
@@ -491,7 +510,7 @@ Priority: **user > group > system > defaults**
 ```
 /cluster/condatainer/          ← system tier (CNT_ROOT or bin/ detection)
   bin/condatainer
-  config.yaml                  ← apptainer_bin, scheduler_bin, channels
+  config.yaml                  ← build.system_apptainer, scheduler.bin, channels
   images/                      ← cluster-wide base images
 
 /shared/labA/condatainer/      ← group tier (CNT_EXTRA_ROOT)
@@ -504,8 +523,10 @@ Priority: **user > group > system > defaults**
 
 **System config** (`/cluster/condatainer/config.yaml`):
 ```yaml
-apptainer_bin: /usr/local/bin/apptainer
-scheduler_bin: /usr/bin/sbatch
+build:
+  system_apptainer: /usr/local/bin/apptainer
+scheduler:
+  bin: /usr/bin/sbatch
 channels:
   - conda-forge
   - bioconda
@@ -641,7 +662,7 @@ Run `condatainer config init` to create a config file with auto-detected setting
 Run `condatainer config init` — it will automatically search environment modules via `module avail` if no binary is found in `$PATH`. If detection still fails, verify the module name with `module avail apptainer` and set the path manually:
 
 ```bash
-condatainer config set apptainer_bin /path/to/apptainer
+condatainer config set build.system_apptainer /path/to/apptainer
 ```
 
 ### Scheduler not detected
@@ -649,7 +670,7 @@ condatainer config set apptainer_bin /path/to/apptainer
 If your HPC uses a non-standard scheduler path, set the binary and the type will be auto-detected:
 
 ```bash
-condatainer config set scheduler_bin /custom/path/sbatch  # or qsub, bsub, condor_submit
+condatainer config set scheduler.bin /custom/path/sbatch  # or qsub, bsub, condor_submit
 ```
 
 ### Scheduler commands timing out
@@ -657,8 +678,8 @@ condatainer config set scheduler_bin /custom/path/sbatch  # or qsub, bsub, condo
 If CondaTainer reports a scheduler timeout error, the scheduler daemon may be slow to respond. Increase the timeout or disable it entirely:
 
 ```bash
-condatainer config set scheduler_timeout 30  # increase to 30 seconds
-condatainer config set scheduler_timeout 0   # disable timeout entirely
+condatainer config set scheduler.timeout 30  # increase to 30 seconds
+condatainer config set scheduler.timeout 0   # disable timeout entirely
 ```
 
 ### Remote metadata unavailable or stale

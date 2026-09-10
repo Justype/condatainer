@@ -63,7 +63,7 @@ func SetBin(path string) error {
 // EnsureApptainer checks if apptainer binary is available and configured.
 // Returns an error if apptainer cannot be found.
 func EnsureApptainer() error {
-	return SetBin(config.Global.ApptainerBin)
+	return SetBin(config.Global.Build.SystemApptainer)
 }
 
 // ResolveBin configures the Apptainer binary for one exec invocation.
@@ -87,7 +87,7 @@ func ResolveBin(fakeroot bool) error {
 		return SetBin(path)
 	}
 
-	if err := SetBin(config.Global.ApptainerBin); err != nil {
+	if err := SetBin(config.Global.Build.SystemApptainer); err != nil {
 		return err
 	}
 	if IsSingularity() {

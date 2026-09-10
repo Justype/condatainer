@@ -70,9 +70,9 @@ func TestResolveBinNonFakerootUsesLibexec(t *testing.T) {
 	resetApptainerState(t)
 	binPath := writeFakeBin(t, dir, "apptainer", "apptainer version 1.5.3")
 
-	prevBin := config.Global.ApptainerBin
-	config.Global.ApptainerBin = "/should/not/be/used"
-	t.Cleanup(func() { config.Global.ApptainerBin = prevBin })
+	prevBin := config.Global.Build.SystemApptainer
+	config.Global.Build.SystemApptainer = "/should/not/be/used"
+	t.Cleanup(func() { config.Global.Build.SystemApptainer = prevBin })
 
 	if err := ResolveBin(false); err != nil {
 		t.Fatalf("ResolveBin(false): %v", err)
@@ -90,9 +90,9 @@ func TestResolveBinFakerootUsesSystemBinary(t *testing.T) {
 	sysDir := t.TempDir()
 	sysBin := writeFakeBin(t, sysDir, "apptainer", "apptainer version 1.5.3")
 
-	prevBin := config.Global.ApptainerBin
-	config.Global.ApptainerBin = sysBin
-	t.Cleanup(func() { config.Global.ApptainerBin = prevBin })
+	prevBin := config.Global.Build.SystemApptainer
+	config.Global.Build.SystemApptainer = sysBin
+	t.Cleanup(func() { config.Global.Build.SystemApptainer = prevBin })
 
 	if err := ResolveBin(true); err != nil {
 		t.Fatalf("ResolveBin(true): %v", err)
@@ -110,9 +110,9 @@ func TestResolveBinFakerootRefusesOldApptainer(t *testing.T) {
 	sysDir := t.TempDir()
 	sysBin := writeFakeBin(t, sysDir, "apptainer", "apptainer version 1.3.9")
 
-	prevBin := config.Global.ApptainerBin
-	config.Global.ApptainerBin = sysBin
-	t.Cleanup(func() { config.Global.ApptainerBin = prevBin })
+	prevBin := config.Global.Build.SystemApptainer
+	config.Global.Build.SystemApptainer = sysBin
+	t.Cleanup(func() { config.Global.Build.SystemApptainer = prevBin })
 
 	err := ResolveBin(true)
 	if err == nil {
@@ -130,9 +130,9 @@ func TestResolveBinFakerootRefusesSingularity(t *testing.T) {
 	sysDir := t.TempDir()
 	sysBin := writeFakeBin(t, sysDir, "singularity", "singularity-ce version 4.1.1")
 
-	prevBin := config.Global.ApptainerBin
-	config.Global.ApptainerBin = sysBin
-	t.Cleanup(func() { config.Global.ApptainerBin = prevBin })
+	prevBin := config.Global.Build.SystemApptainer
+	config.Global.Build.SystemApptainer = sysBin
+	t.Cleanup(func() { config.Global.Build.SystemApptainer = prevBin })
 
 	err := ResolveBin(true)
 	if err == nil {

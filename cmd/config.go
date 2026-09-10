@@ -28,18 +28,16 @@ var (
 // true = array key (use append/prepend/remove); false = scalar key (use set).
 var configKeyDefs = map[string]bool{
 	"logs_dir":                   false,
-	"apptainer_bin":              false,
-	"scheduler_bin":              false,
 	"default_distro":             false,
 	"submit_job":                 false,
 	"sources":                    true,
 	"autoload_gpu":               false,
-	"scheduler_timeout":          false,
 	"notification":               false,
 	"metadata_cache_ttl":         false,
 	"store_gc_grace":             false,
 	"proxy_perjob":               false,
 	"helper_bind_all":            false,
+	"build.system_apptainer":     false,
 	"build.ncpus":                false,
 	"build.mem":                  false,
 	"build.time":                 false,
@@ -49,6 +47,13 @@ var configKeyDefs = map[string]bool{
 	"build.app_tmp_overlay":      false,
 	"build.always_submit":        false,
 	"build.app_tmp_overlay_size": false,
+	"scheduler.bin":              false,
+	"scheduler.timeout":          false,
+	"scheduler.account":          false,
+	"scheduler.partition":        false,
+	"scheduler.ncpus":            false,
+	"scheduler.mem":              false,
+	"scheduler.time":             false,
 	"channels":                   true,
 }
 
@@ -224,6 +229,12 @@ func configValueCompletion(key string) []string {
 		return []string{"true", "false"}
 	case "build.app_tmp_overlay_size":
 		return []string{"10g", "20g", "40g"}
+	case "scheduler.ncpus":
+		return []string{"1", "2", "4", "8"}
+	case "scheduler.mem":
+		return []string{"2g", "4g", "8g", "16g"}
+	case "scheduler.time":
+		return []string{"1h", "2h", "4h", "8h"}
 	case "notification":
 		return []string{"none", "terminal", "web", "both"}
 	case "metadata_cache_ttl":
@@ -409,20 +420,9 @@ var configShowCmd = &cobra.Command{
 		fmt.Println()
 
 		// Show all settings
-		// Paths: binaries then directories
 		fmt.Println(utils.StyleTitle("Paths:"))
-		fmt.Printf("  apptainer_bin: %s%s\n", config.Global.ApptainerBin, srcTag("apptainer_bin"))
-		printOverridden("                 ", "apptainer_bin")
-		schedulerBin := config.Global.SchedulerBin
-		schedulerType := config.GetSchedulerTypeFromBin(schedulerBin)
-		if schedulerBin != "" {
-			fmt.Printf("  scheduler_bin: %s (%s)%s\n", schedulerBin, schedulerType, srcTag("scheduler_bin"))
-		} else {
-			fmt.Printf("  scheduler_bin: %s%s\n", schedulerBin, srcTag("scheduler_bin"))
-		}
-		printOverridden("                 ", "scheduler_bin")
-		fmt.Printf("  logs_dir:      %s%s\n", config.Global.LogsDir, srcTag("logs_dir"))
-		printOverridden("                 ", "logs_dir")
+		fmt.Printf("  logs_dir: %s%s\n", config.Global.LogsDir, srcTag("logs_dir"))
+		printOverridden("            ", "logs_dir")
 		fmt.Println()
 
 		// Remote sources
@@ -455,12 +455,6 @@ var configShowCmd = &cobra.Command{
 			fmt.Printf("  %-19s %v%s\n", "submit_job:", submitJobActual, srcTag("submit_job"))
 		}
 		printOverridden("                      ", "submit_job")
-		if config.Global.SchedulerTimeout == 0 {
-			fmt.Printf("  %-19s 0 (disabled)%s\n", "scheduler_timeout:", srcTag("scheduler_timeout"))
-		} else {
-			fmt.Printf("  %-19s %s%s\n", "scheduler_timeout:", utils.FormatDuration(config.Global.SchedulerTimeout), srcTag("scheduler_timeout"))
-		}
-		printOverridden("                      ", "scheduler_timeout")
 		fmt.Printf("  %-19s %v%s\n", "autoload_gpu:", config.Global.AutoloadGPU, srcTag("autoload_gpu"))
 		printOverridden("                      ", "autoload_gpu")
 		if config.Global.MetadataCacheTTL == 0 {
@@ -497,6 +491,8 @@ var configShowCmd = &cobra.Command{
 
 		// Build settings (longest key: app_tmp_overlay_size = 20 chars)
 		fmt.Printf("%s %s\n", utils.StyleTitle("Build Configuration:"), "build.*")
+		fmt.Printf("  %-21s %s%s\n", "system_apptainer:", config.Global.Build.SystemApptainer, srcTag("build.system_apptainer"))
+		printOverridden("                        ", "build.system_apptainer")
 		fmt.Printf("  %-21s %v%s\n", "always_submit:", config.Global.Build.AlwaysSubmit, srcTag("build.always_submit"))
 		printOverridden("                        ", "build.always_submit")
 		fmt.Printf("  %-21s %d%s\n", "ncpus:", config.Global.Build.Defaults.CpusPerTask, srcTag("build.ncpus"))
@@ -523,6 +519,42 @@ var configShowCmd = &cobra.Command{
 		printOverridden("                        ", "build.app_tmp_overlay")
 		fmt.Printf("  %-21s %s%s\n", "app_tmp_overlay_size:", utils.FormatMemoryMB(int64(config.Global.Build.AppTmpOverlaySizeMB)), srcTag("build.app_tmp_overlay_size"))
 		printOverridden("                        ", "build.app_tmp_overlay_size")
+		fmt.Println()
+
+		// Scheduler settings (longest key: partition = 10 chars)
+		fmt.Printf("%s %s\n", utils.StyleTitle("Scheduler Configuration:"), "scheduler.*")
+		schedulerBin := config.Global.Scheduler.Bin
+		schedulerType := config.GetSchedulerTypeFromBin(schedulerBin)
+		if schedulerBin != "" {
+			fmt.Printf("  %-12s %s (%s)%s\n", "bin:", schedulerBin, schedulerType, srcTag("scheduler.bin"))
+		} else {
+			fmt.Printf("  %-12s %s%s\n", "bin:", schedulerBin, srcTag("scheduler.bin"))
+		}
+		printOverridden("             ", "scheduler.bin")
+		if config.Global.Scheduler.Timeout == 0 {
+			fmt.Printf("  %-12s 0 (disabled)%s\n", "timeout:", srcTag("scheduler.timeout"))
+		} else {
+			fmt.Printf("  %-12s %s%s\n", "timeout:", utils.FormatDuration(config.Global.Scheduler.Timeout), srcTag("scheduler.timeout"))
+		}
+		printOverridden("             ", "scheduler.timeout")
+		account := config.Global.Scheduler.Account
+		if account == "" {
+			account = utils.StyleInfo("(scheduler default)")
+		}
+		fmt.Printf("  %-12s %s%s\n", "account:", account, srcTag("scheduler.account"))
+		printOverridden("             ", "scheduler.account")
+		partition := config.Global.Scheduler.Partition
+		if partition == "" {
+			partition = utils.StyleInfo("(scheduler default)")
+		}
+		fmt.Printf("  %-12s %s%s\n", "partition:", partition, srcTag("scheduler.partition"))
+		printOverridden("             ", "scheduler.partition")
+		fmt.Printf("  %-12s %d%s\n", "ncpus:", config.Global.Scheduler.Defaults.CpusPerTask, srcTag("scheduler.ncpus"))
+		printOverridden("             ", "scheduler.ncpus")
+		fmt.Printf("  %-12s %s%s\n", "mem:", utils.FormatMemoryMB(config.Global.Scheduler.Defaults.MemPerNodeMB), srcTag("scheduler.mem"))
+		printOverridden("             ", "scheduler.mem")
+		fmt.Printf("  %-12s %s%s\n", "time:", utils.FormatDuration(config.Global.Scheduler.Defaults.Time), srcTag("scheduler.time"))
+		printOverridden("             ", "scheduler.time")
 		fmt.Println()
 
 		// Show environment variable overrides
@@ -557,7 +589,7 @@ Without -l, returns the effective merged value (env + all config layers).
 With -l, reads only that config layer file.
 
 ` + configLayersHelp,
-	Example: `  condatainer config get apptainer_bin
+	Example: `  condatainer config get build.system_apptainer
   condatainer config get build.ncpus
   condatainer config get sources
   condatainer config get sources -l app-root`,
@@ -629,7 +661,7 @@ Time duration format (for build.time):
   HPC style: 02:00:00, 2:30:00, 1:30 (HH:MM:SS or HH:MM)
 
 ` + configLayersHelp,
-	Example: `  condatainer config set apptainer_bin /usr/bin/apptainer
+	Example: `  condatainer config set build.system_apptainer /usr/bin/apptainer
   condatainer config set build.ncpus 8
   condatainer config set build.time 02:00:00
   condatainer config set submit_job false`,
@@ -665,10 +697,10 @@ Time duration format (for build.time):
 		}
 
 		// Validate value based on key type
-		if key == "scheduler_timeout" {
+		if key == "scheduler.timeout" {
 			var n int
 			if _, err := fmt.Sscan(value, &n); err != nil || n < 0 {
-				utils.PrintError("Invalid value for scheduler_timeout: %s (must be a non-negative integer; 0 disables the timeout)", value)
+				utils.PrintError("Invalid value for scheduler.timeout: %s (must be a non-negative integer; 0 disables the timeout)", value)
 				os.Exit(ExitCodeError)
 			}
 		}
@@ -708,6 +740,24 @@ Time duration format (for build.time):
 		}
 
 		if key == "build.mem" {
+			if mb, err := utils.ParseMemoryMB(value); err != nil || mb <= 0 {
+				utils.PrintError("Invalid memory format: %s", value)
+				utils.PrintHint("Use format like: 8GB, 16384MB, 8192")
+				os.Exit(ExitCodeError)
+			} else {
+				value = fmt.Sprintf("%d", mb)
+			}
+		}
+
+		if key == "scheduler.time" {
+			if _, err := utils.ParseWalltime(value); err != nil {
+				utils.PrintError("Invalid duration format: %s", value)
+				utils.PrintHint("Use format like: 4d12h, 2h30m, 1:30, or 01:30:00")
+				os.Exit(ExitCodeError)
+			}
+		}
+
+		if key == "scheduler.mem" {
 			if mb, err := utils.ParseMemoryMB(value); err != nil || mb <= 0 {
 				utils.PrintError("Invalid memory format: %s", value)
 				utils.PrintHint("Use format like: 8GB, 16384MB, 8192")
@@ -847,7 +897,7 @@ Without -l, the layer is chosen from the install layout:
 			return result
 		}
 
-		// Detect the two host-specific keys: apptainer_bin, scheduler_bin.
+		// Detect the two host-specific keys: build.system_apptainer, scheduler.bin.
 		// build.compress_args is not detected — every artifact is always
 		// zstd-medium, unconditionally (config.LoadDefaults) — but is still
 		// written explicitly so it shows plainly in the generated file.
@@ -855,11 +905,11 @@ Without -l, the layer is chosen from the install layout:
 		if detectedApptainerBin == "" {
 			ExitWithError("Neither 'apptainer' nor 'singularity' binary found (checked PATH and 'module avail').")
 		}
-		viper.Set("apptainer_bin", detectedApptainerBin)
+		viper.Set("build.system_apptainer", detectedApptainerBin)
 
 		detectedSchedulerBin := config.DetectSchedulerBin()
 		if detectedSchedulerBin != "" {
-			viper.Set("scheduler_bin", detectedSchedulerBin)
+			viper.Set("scheduler.bin", detectedSchedulerBin)
 		}
 
 		detectedCompression := config.Global.Build.CompressArgs
@@ -1018,7 +1068,7 @@ var configValidateCmd = &cobra.Command{
 		}
 
 		// Check apptainer binary
-		apptainerBin := viper.GetString("apptainer_bin")
+		apptainerBin := viper.GetString("build.system_apptainer")
 		if config.ValidateBinary(apptainerBin) {
 			if !utils.QuietMode {
 				fmt.Printf("%s Apptainer binary: %s\n", utils.StyleSuccess("✓"), apptainerBin)
@@ -1029,7 +1079,7 @@ var configValidateCmd = &cobra.Command{
 		}
 
 		// Check scheduler binary
-		schedulerBin := viper.GetString("scheduler_bin")
+		schedulerBin := viper.GetString("scheduler.bin")
 		if schedulerBin != "" {
 			if config.ValidateBinary(schedulerBin) {
 				if !utils.QuietMode {
@@ -1187,7 +1237,7 @@ var configRemoveCmd = &cobra.Command{
 	Long: `Remove a config key entirely, or one value from an array config key.
 
 ` + configLayersHelp,
-	Example: `  condatainer config remove apptainer_bin
+	Example: `  condatainer config remove build.system_apptainer
   condatainer config remove sources lab=/shared/lab/recipes`,
 	Args:              cobra.RangeArgs(1, 2),
 	ValidArgsFunction: arrayRemoveValueCompletion,

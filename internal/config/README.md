@@ -67,7 +67,7 @@ Two independent mechanisms with different semantics:
 Always **replaces** the config file value for that key entirely.
 
 **2. Config files** — layered user/group/system config. All existing files are loaded:
-- Scalar keys (`apptainer_bin`, `default_distro`, etc.): highest-priority file that sets the key wins.
+- Scalar keys (`build.system_apptainer`, `default_distro`, etc.): highest-priority file that sets the key wins.
 - Array keys (`extra_*_dirs`, `extra_scripts_links`): **merged** across all layers (user ++ extra-root ++ root ++ system), deduplicated, user entries first.
 - `channels`: **overwrite** — highest-priority config file that sets it wins (not merged).
 
@@ -89,13 +89,12 @@ config.Global  // Singleton instance
 **Fields:**
 - `Debug`, `SubmitJob`, `Version`
 - `ProgramDir`, `LogsDir`
-- `ApptainerBin`, `SchedulerBin`
 - `DefaultDistro` - Base OS slug (e.g. `"ubuntu24"`)
 - `Branch`, `PreferRemote` (remote script fetching)
 - `Notification` - Notification method when a helper job starts (default: `""` = none). Values: `"bell"` (terminal bell), `"email"` (scheduler email directive), ≥5-char string (ntfy.sh topic, fires from compute node), `""` or `"none"` (silent).
 - `ProxyPerJob` - Auto-start a per-job SOCKS5 proxy inside submitted jobs when no active proxy is found (`proxy_perjob` config key, default: `false`)
-- `Scheduler scheduler.ResourceSpec` - Default scheduler specs (`Nodes`, `TasksPerNode`, `CpusPerTask`, `MemPerNodeMB`, `Time`)
-- `Build BuildConfig` - Build settings (`Defaults scheduler.ResourceSpec`, `AppTmpOverlay`, `AppTmpOverlaySizeMB`, `CompressArgs`, `BlockSize`, `DataBlockSize`)
+- `Build BuildConfig` - Build settings (`Defaults scheduler.ResourceSpec`, `AppTmpOverlay`, `AppTmpOverlaySizeMB`, `CompressArgs`, `BlockSize`, `DataBlockSize`, `SystemApptainer`)
+- `Scheduler SchedulerConfig` - Scheduler binary/submission settings: `Bin`, `Timeout`, `Account`, `Partition`, and `Defaults scheduler.ResourceSpec` (ncpus/mem/time baseline for a job with no script directives — used whether or not the job actually ends up submitted to a scheduler, same as `Build.Defaults`)
 
 ## Data Directory Search
 
@@ -168,9 +167,6 @@ All multi-value env vars use `|` as separator.
 Location: `~/.config/condatainer/config.yaml`
 
 ```yaml
-apptainer_bin: "apptainer"
-scheduler_bin: ""         # auto-detect if empty
-
 default_distro: "ubuntu24"
 
 # Recipe collections, in order — first match wins, like PATH.
@@ -186,10 +182,20 @@ channels:
   - bioconda
 
 build:
+  system_apptainer: "apptainer"
   ncpus: 4
   mem: 8192   # MB
   time: "2h"
   compress_args: "-comp zstd -Xcompression-level 8"   # zstd-medium, always — every reader is a version-checked apptainer
+
+scheduler:
+  bin: ""         # auto-detect if empty
+  timeout: 0      # seconds; 0 disables the timeout
+  account: ""     # billing/allocation account (empty = scheduler's own default)
+  partition: ""   # partition/queue (empty = scheduler's own default)
+  ncpus: 1
+  mem: 2048   # MB
+  time: "2h"
 ```
 
 ## Constants

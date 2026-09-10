@@ -102,7 +102,7 @@ func runScheduler(cmd *cobra.Command, args []string) {
 	sched := scheduler.ActiveScheduler()
 	if sched == nil {
 		var err error
-		sched, err = scheduler.DetectSchedulerWithBinary(config.Global.SchedulerBin)
+		sched, err = scheduler.DetectSchedulerWithBinary(config.Global.Scheduler.Bin)
 		if err != nil {
 			utils.PrintMessage("Scheduler Status: %s", utils.StyleError("Not Found"))
 			utils.PrintMessage("")

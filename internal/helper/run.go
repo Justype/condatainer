@@ -58,7 +58,7 @@ func detectScheduler() (scheduler.Scheduler, error) {
 		}
 		return sched, nil
 	}
-	sched, err := scheduler.DetectSchedulerWithBinary(config.Global.SchedulerBin)
+	sched, err := scheduler.DetectSchedulerWithBinary(config.Global.Scheduler.Bin)
 	if err != nil {
 		return nil, scheduler.ErrSchedulerNotFound
 	}

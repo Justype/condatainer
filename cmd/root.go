@@ -77,7 +77,7 @@ var rootCmd = &cobra.Command{
 		// Skip for all `config` commands so users can inspect/repair config
 		// without seeing contradictory warnings before re-detection runs.
 		isConfigCommand := strings.HasPrefix(cmd.CommandPath(), "condatainer config")
-		if !isCompleteRequest && !isConfigCommand && !config.ValidateBinary(config.Global.ApptainerBin) {
+		if !isCompleteRequest && !isConfigCommand && !config.ValidateBinary(config.Global.Build.SystemApptainer) {
 			utils.PrintWarning("Apptainer not accessible. The module may have been unloaded or removed.")
 			utils.PrintHint("Run: %s", utils.StyleAction("condatainer config init"))
 		}
@@ -94,9 +94,9 @@ var rootCmd = &cobra.Command{
 			} else {
 				utils.PrintDebug("Base Image: %v", err)
 			}
-			utils.PrintDebug("Apptainer Binary: %s", config.Global.ApptainerBin)
-			if config.Global.SchedulerBin != "" {
-				utils.PrintDebug("Scheduler Binary: %s", config.Global.SchedulerBin)
+			utils.PrintDebug("Apptainer Binary: %s", config.Global.Build.SystemApptainer)
+			if config.Global.Scheduler.Bin != "" {
+				utils.PrintDebug("Scheduler Binary: %s", config.Global.Scheduler.Bin)
 			}
 		}
 
@@ -130,11 +130,11 @@ var rootCmd = &cobra.Command{
 		// Step 7: Apply debug mode and resource defaults from config
 		scheduler.SetDebugMode(config.Global.Debug)
 		build.SetBuildDefaults(config.Global.Build.Defaults)
-		scheduler.DefaultCommandTimeout = config.Global.SchedulerTimeout
+		scheduler.DefaultCommandTimeout = config.Global.Scheduler.Timeout
 
 		// Step 8: Initialize scheduler if job submission is enabled
 		if config.Global.SubmitJob {
-			schedType, err := scheduler.Init(config.Global.SchedulerBin)
+			schedType, err := scheduler.Init(config.Global.Scheduler.Bin)
 			if err == nil && schedType != scheduler.SchedulerUnknown {
 				utils.PrintDebug("Scheduler initialized: %s", schedType)
 			} else if err != nil {
